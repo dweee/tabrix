@@ -209,6 +209,14 @@
           <span>{{ isClearingData ? '清空中...' : '清空所有数据' }}</span>
         </button>
       </div>
+
+      <!-- Model Cache Management Section -->
+      <ModelCacheManagement
+        :cache-stats="cacheStats"
+        :is-managing-cache="isManagingCache"
+        @cleanup-cache="cleanupCache"
+        @clear-all-cache="clearAllCache"
+      />
     </div>
 
     <div class="footer">
@@ -238,11 +246,15 @@ import {
   PREDEFINED_MODELS,
   type ModelPreset,
   getModelInfo,
+  getCacheStats,
+  clearModelCache,
+  cleanupModelCache,
 } from '@/utils/semantic-similarity-engine';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import ProgressIndicator from './components/ProgressIndicator.vue';
+import ModelCacheManagement from './components/ModelCacheManagement.vue';
 import {
   DocumentIcon,
   DatabaseIcon,
@@ -315,6 +327,22 @@ const semanticEngineStatus = ref<'idle' | 'initializing' | 'ready' | 'error'>('i
 const isSemanticEngineInitializing = ref(false);
 const semanticEngineInitProgress = ref('');
 const semanticEngineLastUpdated = ref<number | null>(null);
+
+// Cache management
+const isManagingCache = ref(false);
+const cacheStats = ref<{
+  totalSize: number;
+  totalSizeMB: number;
+  entryCount: number;
+  entries: Array<{
+    url: string;
+    size: number;
+    sizeMB: number;
+    timestamp: number;
+    age: string;
+    expired: boolean;
+  }>;
+} | null>(null);
 
 const availableModels = computed(() => {
   return Object.entries(PREDEFINED_MODELS).map(([key, value]) => ({
@@ -445,6 +473,45 @@ const getSemanticEngineButtonText = () => {
     case 'idle':
     default:
       return '初始化语义引擎';
+  }
+};
+
+const loadCacheStats = async () => {
+  try {
+    cacheStats.value = await getCacheStats();
+  } catch (error) {
+    console.error('Failed to get cache stats:', error);
+    cacheStats.value = null;
+  }
+};
+
+const cleanupCache = async () => {
+  if (isManagingCache.value) return;
+
+  isManagingCache.value = true;
+  try {
+    await cleanupModelCache();
+    // Refresh cache stats
+    await loadCacheStats();
+  } catch (error) {
+    console.error('Failed to cleanup cache:', error);
+  } finally {
+    isManagingCache.value = false;
+  }
+};
+
+const clearAllCache = async () => {
+  if (isManagingCache.value) return;
+
+  isManagingCache.value = true;
+  try {
+    await clearModelCache();
+    // Refresh cache stats
+    await loadCacheStats();
+  } catch (error) {
+    console.error('Failed to clear cache:', error);
+  } finally {
+    isManagingCache.value = false;
   }
 };
 
@@ -1107,6 +1174,7 @@ onMounted(async () => {
   await checkNativeConnection();
   await checkServerStatus();
   await refreshStorageStats();
+  await loadCacheStats();
 
   await checkSemanticEngineStatus();
   setupServerStatusListener();
@@ -1293,6 +1361,47 @@ onUnmounted(() => {
 
 .section {
   margin-bottom: 24px;
+}
+
+.secondary-button {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.secondary-button:hover:not(:disabled) {
+  background: #e2e8f0;
+  border-color: #94a3b8;
+}
+
+.secondary-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.primary-button {
+  background: #3b82f6;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.primary-button:hover {
+  background: #2563eb;
 }
 
 .section-title {

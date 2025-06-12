@@ -5,6 +5,142 @@ import { SIMDMathEngine } from './simd-math-engine';
 import { OffscreenManager } from './offscreen-manager';
 import { OFFSCREEN_MESSAGE_TYPES } from '@/common/message-types';
 
+import { ModelCacheManager } from './model-cache-manager';
+
+/**
+ * Get cached model data, prioritizing cache reads and handling redirected URLs.
+ * @param {string} modelUrl Stable, permanent URL of the model
+ * @returns {Promise<ArrayBuffer>} Model data as ArrayBuffer
+ */
+async function getCachedModelData(modelUrl: string): Promise<ArrayBuffer> {
+  const cacheManager = ModelCacheManager.getInstance();
+
+  // 1. 尝试从缓存获取数据
+  const cachedData = await cacheManager.getCachedModelData(modelUrl);
+  if (cachedData) {
+    return cachedData;
+  }
+
+  console.log('Model not found in cache or expired. Fetching from network...');
+
+  try {
+    // 2. 从网络获取数据
+    const response = await fetch(modelUrl);
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch model: ${response.status} ${response.statusText}`);
+    }
+
+    // 3. 获取数据并存储到缓存
+    const arrayBuffer = await response.arrayBuffer();
+    await cacheManager.storeModelData(modelUrl, arrayBuffer);
+
+    console.log(
+      `Model fetched from network and successfully cached (${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)}MB).`,
+    );
+
+    return arrayBuffer;
+  } catch (error) {
+    console.error(`Error fetching or caching model:`, error);
+    // 如果获取失败，清理可能不完整的缓存条目
+    await cacheManager.deleteCacheEntry(modelUrl);
+    throw error;
+  }
+}
+
+/**
+ * Clear all model cache entries
+ */
+export async function clearModelCache(): Promise<void> {
+  try {
+    const cacheManager = ModelCacheManager.getInstance();
+    await cacheManager.clearAllCache();
+  } catch (error) {
+    console.error('Failed to clear model cache:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get cache statistics
+ */
+export async function getCacheStats(): Promise<{
+  totalSize: number;
+  totalSizeMB: number;
+  entryCount: number;
+  entries: Array<{
+    url: string;
+    size: number;
+    sizeMB: number;
+    timestamp: number;
+    age: string;
+    expired: boolean;
+  }>;
+}> {
+  try {
+    const cacheManager = ModelCacheManager.getInstance();
+    return await cacheManager.getCacheStats();
+  } catch (error) {
+    console.error('Failed to get cache stats:', error);
+    throw error;
+  }
+}
+
+/**
+ * Manually trigger cache cleanup
+ */
+export async function cleanupModelCache(): Promise<void> {
+  try {
+    const cacheManager = ModelCacheManager.getInstance();
+    await cacheManager.manualCleanup();
+  } catch (error) {
+    console.error('Failed to cleanup cache:', error);
+    throw error;
+  }
+}
+
+/**
+ * Check if the default model is cached and available
+ * @returns Promise<boolean> True if default model is cached and valid
+ */
+export async function isDefaultModelCached(): Promise<boolean> {
+  try {
+    // Get the default model configuration
+    const result = await chrome.storage.local.get(['semanticModel']);
+    const defaultModel = (result.semanticModel as ModelPreset) || 'multilingual-e5-small';
+
+    // Build the model URL
+    const modelInfo = PREDEFINED_MODELS[defaultModel];
+    const modelIdentifier = modelInfo.modelIdentifier;
+    const onnxModelFile = 'model.onnx'; // Default ONNX file name
+
+    const modelIdParts = modelIdentifier.split('/');
+    const modelNameForUrl = modelIdParts.length > 1 ? modelIdentifier : `Xenova/${modelIdentifier}`;
+    const onnxModelUrl = `https://huggingface.co/${modelNameForUrl}/resolve/main/onnx/${onnxModelFile}`;
+
+    // Check if this model is cached
+    const cacheManager = ModelCacheManager.getInstance();
+    return await cacheManager.isModelCached(onnxModelUrl);
+  } catch (error) {
+    console.error('Error checking if default model is cached:', error);
+    return false;
+  }
+}
+
+/**
+ * Check if any model cache exists (for conditional initialization)
+ * @returns Promise<boolean> True if any valid model cache exists
+ */
+export async function hasAnyModelCache(): Promise<boolean> {
+  try {
+    const cacheManager = ModelCacheManager.getInstance();
+    return await cacheManager.hasAnyValidCache();
+  } catch (error) {
+    console.error('Error checking for any model cache:', error);
+    return false;
+  }
+}
+
 // Predefined model configurations - 2025 curated recommended models, using quantized versions to reduce file size
 export const PREDEFINED_MODELS = {
   // Multilingual model - default recommendation
@@ -232,6 +368,7 @@ interface ModelConfig {
 
 interface WorkerMessagePayload {
   modelPath?: string;
+  modelData?: ArrayBuffer;
   numThreads?: number;
   executionProviders?: string[];
   input_ids?: number[];
@@ -321,6 +458,7 @@ export class SemanticSimilarityEngineProxy {
   private _isInitialized = false;
   private config: Partial<ModelConfig>;
   private offscreenManager: OffscreenManager;
+  private _isEnsuring = false; // Flag to prevent concurrent ensureOffscreenEngineInitialized calls
 
   constructor(config: Partial<ModelConfig> = {}) {
     this.config = config;
@@ -384,28 +522,41 @@ export class SemanticSimilarityEngineProxy {
   }
 
   /**
-   * Ensure engine in offscreen is initialized
+   * Ensure engine in offscreen is initialized (with concurrency protection)
    */
   private async ensureOffscreenEngineInitialized(): Promise<void> {
-    const status = await this.checkOffscreenEngineStatus();
+    // Prevent concurrent initialization attempts
+    if (this._isEnsuring) {
+      console.log('SemanticSimilarityEngineProxy: Already ensuring initialization, waiting...');
+      // Wait a bit and check again
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      return;
+    }
 
-    if (!status.isInitialized) {
-      console.log(
-        'SemanticSimilarityEngineProxy: Engine not initialized in offscreen, initializing...',
-      );
+    try {
+      this._isEnsuring = true;
+      const status = await this.checkOffscreenEngineStatus();
 
-      // Reinitialize engine
-      const response = await chrome.runtime.sendMessage({
-        target: 'offscreen',
-        type: OFFSCREEN_MESSAGE_TYPES.SIMILARITY_ENGINE_INIT,
-        config: this.config,
-      });
+      if (!status.isInitialized) {
+        console.log(
+          'SemanticSimilarityEngineProxy: Engine not initialized in offscreen, initializing...',
+        );
 
-      if (!response || !response.success) {
-        throw new Error(response?.error || 'Failed to initialize engine in offscreen document');
+        // Reinitialize engine
+        const response = await chrome.runtime.sendMessage({
+          target: 'offscreen',
+          type: OFFSCREEN_MESSAGE_TYPES.SIMILARITY_ENGINE_INIT,
+          config: this.config,
+        });
+
+        if (!response || !response.success) {
+          throw new Error(response?.error || 'Failed to initialize engine in offscreen document');
+        }
+
+        console.log('SemanticSimilarityEngineProxy: Engine reinitialized successfully');
       }
-
-      console.log('SemanticSimilarityEngineProxy: Engine reinitialized successfully');
+    } finally {
+      this._isEnsuring = false;
     }
   }
 
@@ -812,6 +963,7 @@ export class SemanticSimilarityEngine {
   private _sendMessageToWorker(
     type: string,
     payload?: WorkerMessagePayload,
+    transferList?: Transferable[],
   ): Promise<WorkerResponsePayload> {
     return new Promise((resolve, reject) => {
       if (!this.worker) {
@@ -820,7 +972,13 @@ export class SemanticSimilarityEngine {
       }
       const id = this.nextTokenId++;
       this.pendingMessages.set(id, { resolve, reject, type });
-      this.worker.postMessage({ id, type, payload });
+
+      // Use transferable objects if provided for zero-copy transfer
+      if (transferList && transferList.length > 0) {
+        this.worker.postMessage({ id, type, payload }, transferList);
+      } else {
+        this.worker.postMessage({ id, type, payload });
+      }
     });
   }
 
@@ -1184,34 +1342,54 @@ export class SemanticSimilarityEngine {
         this.tokenizer = await AutoTokenizer.from_pretrained(tokenizerIdentifier, tokenizerConfig);
         console.log('SemanticSimilarityEngine: Tokenizer loaded.');
 
-        let onnxModelPathForWorker: string;
         if (this.config.useLocalFiles) {
-          // Worker 需要一个绝对可访问的 URL
-          onnxModelPathForWorker = chrome.runtime.getURL(
+          // Local files mode - use URL path as before
+          const onnxModelPathForWorker = chrome.runtime.getURL(
             `models/${this.config.modelIdentifier}/${this.config.onnxModelFile}`,
           );
+          console.log(
+            `SemanticSimilarityEngine: Instructing worker to load local ONNX model from ${onnxModelPathForWorker}`,
+          );
+          await this._sendMessageToWorker('init', {
+            modelPath: onnxModelPathForWorker,
+            numThreads: this.config.numThreads,
+            executionProviders: this.config.executionProviders,
+          });
         } else {
+          // Remote files mode - use cached model data
           const modelIdParts = this.config.modelIdentifier.split('/');
           const modelNameForUrl =
             modelIdParts.length > 1
               ? this.config.modelIdentifier
               : `Xenova/${this.config.modelIdentifier}`;
-          onnxModelPathForWorker = `https://huggingface.co/${modelNameForUrl}/resolve/main/onnx/${this.config.onnxModelFile}`;
+          const onnxModelUrl = `https://huggingface.co/${modelNameForUrl}/resolve/main/onnx/${this.config.onnxModelFile}`;
+
           if (!this.config.modelIdentifier.includes('/')) {
             console.warn(
               `Warning: modelIdentifier "${this.config.modelIdentifier}" might not be a full HuggingFace path. Assuming Xenova prefix for remote URL.`,
             );
           }
-        }
 
-        console.log(
-          `SemanticSimilarityEngine: Instructing worker to load ONNX model from ${onnxModelPathForWorker}`,
-        );
-        await this._sendMessageToWorker('init', {
-          modelPath: onnxModelPathForWorker,
-          numThreads: this.config.numThreads,
-          executionProviders: this.config.executionProviders,
-        });
+          console.log(`SemanticSimilarityEngine: Getting cached model data from ${onnxModelUrl}`);
+
+          // Get model data from cache (may download if not cached)
+          const modelData = await getCachedModelData(onnxModelUrl);
+
+          console.log(
+            `SemanticSimilarityEngine: Sending cached model data to worker (${modelData.byteLength} bytes)`,
+          );
+
+          // Send ArrayBuffer to worker with transferable objects for zero-copy
+          await this._sendMessageToWorker(
+            'init',
+            {
+              modelData: modelData,
+              numThreads: this.config.numThreads,
+              executionProviders: this.config.executionProviders,
+            },
+            [modelData],
+          );
+        }
         console.log('SemanticSimilarityEngine: Worker reported model initialized.');
 
         // 尝试初始化 SIMD 加速
@@ -1335,34 +1513,56 @@ export class SemanticSimilarityEngine {
     reportProgress('downloading', 70, 'Tokenizer loaded, setting up ONNX model...');
     console.log('SemanticSimilarityEngine: Tokenizer loaded.');
 
-    let onnxModelPathForWorker: string;
     if (this.config.useLocalFiles) {
-      onnxModelPathForWorker = chrome.runtime.getURL(
+      // Local files mode - use URL path as before
+      const onnxModelPathForWorker = chrome.runtime.getURL(
         `models/${this.config.modelIdentifier}/${this.config.onnxModelFile}`,
       );
+      reportProgress('downloading', 80, 'Loading local ONNX model...');
+      console.log(
+        `SemanticSimilarityEngine: Instructing worker to load local ONNX model from ${onnxModelPathForWorker}`,
+      );
+      await this._sendMessageToWorker('init', {
+        modelPath: onnxModelPathForWorker,
+        numThreads: this.config.numThreads,
+        executionProviders: this.config.executionProviders,
+      });
     } else {
+      // Remote files mode - use cached model data
       const modelIdParts = this.config.modelIdentifier.split('/');
       const modelNameForUrl =
         modelIdParts.length > 1
           ? this.config.modelIdentifier
           : `Xenova/${this.config.modelIdentifier}`;
-      onnxModelPathForWorker = `https://huggingface.co/${modelNameForUrl}/resolve/main/onnx/${this.config.onnxModelFile}`;
+      const onnxModelUrl = `https://huggingface.co/${modelNameForUrl}/resolve/main/onnx/${this.config.onnxModelFile}`;
+
       if (!this.config.modelIdentifier.includes('/')) {
         console.warn(
           `Warning: modelIdentifier "${this.config.modelIdentifier}" might not be a full HuggingFace path. Assuming Xenova prefix for remote URL.`,
         );
       }
-    }
 
-    reportProgress('downloading', 80, 'Loading ONNX model...');
-    console.log(
-      `SemanticSimilarityEngine: Instructing worker to load ONNX model from ${onnxModelPathForWorker}`,
-    );
-    await this._sendMessageToWorker('init', {
-      modelPath: onnxModelPathForWorker,
-      numThreads: this.config.numThreads,
-      executionProviders: this.config.executionProviders,
-    });
+      reportProgress('downloading', 80, 'Loading cached ONNX model...');
+      console.log(`SemanticSimilarityEngine: Getting cached model data from ${onnxModelUrl}`);
+
+      // Get model data from cache (may download if not cached)
+      const modelData = await getCachedModelData(onnxModelUrl);
+
+      console.log(
+        `SemanticSimilarityEngine: Sending cached model data to worker (${modelData.byteLength} bytes)`,
+      );
+
+      // Send ArrayBuffer to worker with transferable objects for zero-copy
+      await this._sendMessageToWorker(
+        'init',
+        {
+          modelData: modelData,
+          numThreads: this.config.numThreads,
+          executionProviders: this.config.executionProviders,
+        },
+        [modelData],
+      );
+    }
     console.log('SemanticSimilarityEngine: Worker reported model initialized.');
 
     reportProgress('initializing', 90, 'Setting up SIMD acceleration...');

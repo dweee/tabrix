@@ -1,8 +1,10 @@
 import { initNativeHostListener } from './native-host';
-import { initSemanticSimilarityListener } from './semantic-similarity';
+import {
+  initSemanticSimilarityListener,
+  initializeSemanticEngineIfCached,
+} from './semantic-similarity';
 import { initStorageManagerListener } from './storage-manager';
-import { vectorSearchTabsContentTool } from './tools/browser/vector-search';
-import { ERROR_MESSAGES } from '@/common/constants';
+import { cleanupModelCache } from '@/utils/semantic-similarity-engine';
 
 /**
  * Background script entry point
@@ -14,14 +16,23 @@ export default defineBackground(() => {
   initSemanticSimilarityListener();
   initStorageManagerListener();
 
-  // Initialize vector search tool and handle potential errors
-  vectorSearchTabsContentTool.getIndexStats().catch((error) => {
-    console.error(
-      `${ERROR_MESSAGES.TOOL_EXECUTION_FAILED}: VectorSearchTabsContentTool initialization`,
-      error,
-    );
-  });
+  // Conditionally initialize semantic similarity engine if model cache exists
+  initializeSemanticEngineIfCached()
+    .then((initialized) => {
+      if (initialized) {
+        console.log('Background: Semantic similarity engine initialized from cache');
+      } else {
+        console.log(
+          'Background: Semantic similarity engine initialization skipped (no cache found)',
+        );
+      }
+    })
+    .catch((error) => {
+      console.warn('Background: Failed to conditionally initialize semantic engine:', error);
+    });
 
-  // Note: Semantic similarity engine initialization is now user-controlled via popup
-  console.log('Background: Semantic similarity engine initialization is now user-controlled');
+  // Initial cleanup on startup
+  cleanupModelCache().catch((error) => {
+    console.warn('Background: Initial cache cleanup failed:', error);
+  });
 });

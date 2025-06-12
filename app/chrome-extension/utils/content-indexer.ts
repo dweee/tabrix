@@ -436,28 +436,26 @@ export class ContentIndexer {
 
   /**
    * Manually trigger semantic engine initialization (async, don't wait for completion)
-   * Note: This should only be called after the semantic engine is already initialized by user action
+   * Note: This should only be called after the semantic engine is already initialized
    */
   public startSemanticEngineInitialization(): void {
     if (!this.isInitialized && !this.isInitializing) {
+      console.log('ContentIndexer: Checking if semantic engine is ready...');
+
       // Check if global semantic engine is ready before initializing ContentIndexer
       this.isGlobalSemanticEngineReady()
         .then((isReady) => {
           if (isReady) {
-            console.log(
-              'ContentIndexer: Starting ContentIndexer initialization (global semantic engine ready)...',
-            );
+            console.log('ContentIndexer: Starting initialization (semantic engine ready)...');
             this.initialize().catch((error) => {
               console.error('ContentIndexer: Background initialization failed:', error);
             });
           } else {
-            console.log(
-              'ContentIndexer: Skipping initialization - global semantic engine not ready yet',
-            );
+            console.log('ContentIndexer: Semantic engine not ready, skipping initialization');
           }
         })
         .catch((error) => {
-          console.error('ContentIndexer: Failed to check global semantic engine status:', error);
+          console.error('ContentIndexer: Failed to check semantic engine status:', error);
         });
     }
   }
