@@ -35,19 +35,6 @@ class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
       maxChunksPerPage: LIMITS.MAX_SEARCH_RESULTS,
       skipDuplicates: true,
     });
-    // Start background initialization without waiting for completion
-    this.startBackgroundInitialization();
-  }
-
-  /**
-   * Start background initialization (non-blocking)
-   * Note: Semantic engine initialization is now user-controlled
-   */
-  private startBackgroundInitialization(): void {
-    console.log(
-      'VectorSearchTabsContentTool: Background initialization skipped - semantic engine initialization is now user-controlled',
-    );
-    // this.contentIndexer.startSemanticEngineInitialization(); // Removed automatic initialization
   }
 
   private async initializeIndexer(): Promise<void> {

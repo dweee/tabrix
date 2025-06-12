@@ -1,7 +1,8 @@
 import type { ModelPreset } from '@/utils/semantic-similarity-engine';
 import { OffscreenManager } from '@/utils/offscreen-manager';
 import { BACKGROUND_MESSAGE_TYPES, OFFSCREEN_MESSAGE_TYPES } from '@/common/message-types';
-import { SEMANTIC_CONFIG, STORAGE_KEYS, ERROR_MESSAGES } from '@/common/constants';
+import { STORAGE_KEYS, ERROR_MESSAGES } from '@/common/constants';
+import { hasAnyModelCache } from '@/utils/semantic-similarity-engine';
 
 /**
  * Model configuration state management interface
@@ -13,6 +14,29 @@ interface ModelConfig {
 }
 
 let currentBackgroundModelConfig: ModelConfig | null = null;
+
+/**
+ * Initialize semantic engine only if model cache exists
+ * This is called during plugin startup to avoid downloading models unnecessarily
+ */
+export async function initializeSemanticEngineIfCached(): Promise<boolean> {
+  try {
+    console.log('Background: Checking if semantic engine should be initialized from cache...');
+
+    const hasCachedModel = await hasAnyModelCache();
+    if (!hasCachedModel) {
+      console.log('Background: No cached models found, skipping semantic engine initialization');
+      return false;
+    }
+
+    console.log('Background: Found cached models, initializing semantic engine...');
+    await initializeDefaultSemanticEngine();
+    return true;
+  } catch (error) {
+    console.error('Background: Error during conditional semantic engine initialization:', error);
+    return false;
+  }
+}
 
 /**
  * Initialize default semantic engine model

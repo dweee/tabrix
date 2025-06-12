@@ -3,7 +3,7 @@
  */
 
 const CACHE_NAME = 'onnx-model-cache-v1';
-const CACHE_EXPIRY_DAYS = 14;
+const CACHE_EXPIRY_DAYS = 30;
 const MAX_CACHE_SIZE_MB = 500;
 
 export interface CacheMetadata {
@@ -299,5 +299,71 @@ export class ModelCacheManager {
   public async manualCleanup(): Promise<void> {
     await this.cleanupCacheOnDemand(0);
     console.log('Manual cache cleanup completed');
+  }
+
+  /**
+   * Check if a specific model is cached and not expired
+   * @param modelUrl The model URL to check
+   * @returns Promise<boolean> True if model is cached and valid
+   */
+  public async isModelCached(modelUrl: string): Promise<boolean> {
+    try {
+      const cache = await caches.open(CACHE_NAME);
+      const cachedResponse = await cache.match(modelUrl);
+
+      if (!cachedResponse) {
+        return false;
+      }
+
+      const metadataResponse = await cache.match(this.getCacheMetadataKey(modelUrl));
+      if (metadataResponse) {
+        try {
+          const metadata: CacheMetadata = await metadataResponse.json();
+          return !this.isCacheExpired(metadata);
+        } catch (error) {
+          console.warn('Failed to parse cache metadata for cache check:', error);
+          return false;
+        }
+      } else {
+        // No metadata means expired
+        return false;
+      }
+    } catch (error) {
+      console.error('Error checking model cache:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Check if any valid (non-expired) model cache exists
+   * @returns Promise<boolean> True if at least one valid model cache exists
+   */
+  public async hasAnyValidCache(): Promise<boolean> {
+    try {
+      const cache = await caches.open(CACHE_NAME);
+      const keys = await cache.keys();
+
+      for (const request of keys) {
+        if (this.isMetadataUrl(request.url)) continue;
+
+        const metadataResponse = await cache.match(this.getCacheMetadataKey(request.url));
+        if (metadataResponse) {
+          try {
+            const metadata: CacheMetadata = await metadataResponse.json();
+            if (!this.isCacheExpired(metadata)) {
+              return true; // Found at least one valid cache
+            }
+          } catch (error) {
+            // Skip invalid metadata
+            continue;
+          }
+        }
+      }
+
+      return false;
+    } catch (error) {
+      console.error('Error checking for valid cache:', error);
+      return false;
+    }
   }
 }

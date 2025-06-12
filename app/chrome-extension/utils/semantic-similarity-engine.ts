@@ -99,6 +99,48 @@ export async function cleanupModelCache(): Promise<void> {
   }
 }
 
+/**
+ * Check if the default model is cached and available
+ * @returns Promise<boolean> True if default model is cached and valid
+ */
+export async function isDefaultModelCached(): Promise<boolean> {
+  try {
+    // Get the default model configuration
+    const result = await chrome.storage.local.get(['semanticModel']);
+    const defaultModel = (result.semanticModel as ModelPreset) || 'multilingual-e5-small';
+
+    // Build the model URL
+    const modelInfo = PREDEFINED_MODELS[defaultModel];
+    const modelIdentifier = modelInfo.modelIdentifier;
+    const onnxModelFile = 'model.onnx'; // Default ONNX file name
+
+    const modelIdParts = modelIdentifier.split('/');
+    const modelNameForUrl = modelIdParts.length > 1 ? modelIdentifier : `Xenova/${modelIdentifier}`;
+    const onnxModelUrl = `https://huggingface.co/${modelNameForUrl}/resolve/main/onnx/${onnxModelFile}`;
+
+    // Check if this model is cached
+    const cacheManager = ModelCacheManager.getInstance();
+    return await cacheManager.isModelCached(onnxModelUrl);
+  } catch (error) {
+    console.error('Error checking if default model is cached:', error);
+    return false;
+  }
+}
+
+/**
+ * Check if any model cache exists (for conditional initialization)
+ * @returns Promise<boolean> True if any valid model cache exists
+ */
+export async function hasAnyModelCache(): Promise<boolean> {
+  try {
+    const cacheManager = ModelCacheManager.getInstance();
+    return await cacheManager.hasAnyValidCache();
+  } catch (error) {
+    console.error('Error checking for any model cache:', error);
+    return false;
+  }
+}
+
 // Predefined model configurations - 2025 curated recommended models, using quantized versions to reduce file size
 export const PREDEFINED_MODELS = {
   // Multilingual model - default recommendation
@@ -416,6 +458,7 @@ export class SemanticSimilarityEngineProxy {
   private _isInitialized = false;
   private config: Partial<ModelConfig>;
   private offscreenManager: OffscreenManager;
+  private _isEnsuring = false; // Flag to prevent concurrent ensureOffscreenEngineInitialized calls
 
   constructor(config: Partial<ModelConfig> = {}) {
     this.config = config;
@@ -479,28 +522,41 @@ export class SemanticSimilarityEngineProxy {
   }
 
   /**
-   * Ensure engine in offscreen is initialized
+   * Ensure engine in offscreen is initialized (with concurrency protection)
    */
   private async ensureOffscreenEngineInitialized(): Promise<void> {
-    const status = await this.checkOffscreenEngineStatus();
+    // Prevent concurrent initialization attempts
+    if (this._isEnsuring) {
+      console.log('SemanticSimilarityEngineProxy: Already ensuring initialization, waiting...');
+      // Wait a bit and check again
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      return;
+    }
 
-    if (!status.isInitialized) {
-      console.log(
-        'SemanticSimilarityEngineProxy: Engine not initialized in offscreen, initializing...',
-      );
+    try {
+      this._isEnsuring = true;
+      const status = await this.checkOffscreenEngineStatus();
 
-      // Reinitialize engine
-      const response = await chrome.runtime.sendMessage({
-        target: 'offscreen',
-        type: OFFSCREEN_MESSAGE_TYPES.SIMILARITY_ENGINE_INIT,
-        config: this.config,
-      });
+      if (!status.isInitialized) {
+        console.log(
+          'SemanticSimilarityEngineProxy: Engine not initialized in offscreen, initializing...',
+        );
 
-      if (!response || !response.success) {
-        throw new Error(response?.error || 'Failed to initialize engine in offscreen document');
+        // Reinitialize engine
+        const response = await chrome.runtime.sendMessage({
+          target: 'offscreen',
+          type: OFFSCREEN_MESSAGE_TYPES.SIMILARITY_ENGINE_INIT,
+          config: this.config,
+        });
+
+        if (!response || !response.success) {
+          throw new Error(response?.error || 'Failed to initialize engine in offscreen document');
+        }
+
+        console.log('SemanticSimilarityEngineProxy: Engine reinitialized successfully');
       }
-
-      console.log('SemanticSimilarityEngineProxy: Engine reinitialized successfully');
+    } finally {
+      this._isEnsuring = false;
     }
   }
 
