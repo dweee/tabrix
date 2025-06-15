@@ -25,7 +25,8 @@ export default tseslint.config(
       'pnpm-lock.yaml',
       '**/workers/**',
       'app/**/workers/**',
-      'packages/**/workers/**'
+      'packages/**/workers/**',
+      'test-inject-script.js',
     ],
   },
 

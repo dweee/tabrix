@@ -22,6 +22,8 @@ export const TOOL_NAMES = {
     BOOKMARK_SEARCH: 'chrome_bookmark_search',
     BOOKMARK_ADD: 'chrome_bookmark_add',
     BOOKMARK_DELETE: 'chrome_bookmark_delete',
+    INJECT_SCRIPT: 'chrome_inject_script',
+    SEND_COMMAND_TO_INJECT_SCRIPT: 'chrome_send_command_to_inject_script',
   },
 };
 
@@ -59,7 +61,8 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.SCREENSHOT,
-    description: 'Take a screenshot of the current page or a specific element(if you want to see the page, recommend to use chrome_get_web_content first)',
+    description:
+      'Take a screenshot of the current page or a specific element(if you want to see the page, recommend to use chrome_get_web_content first)',
     inputSchema: {
       type: 'object',
       properties: {
@@ -455,6 +458,55 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
+    description:
+      'inject the user-specified content script into the webpage. By default, inject into the currently active tab',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          description:
+            'If a URL is specified, inject the script into the webpage corresponding to the URL.',
+        },
+        type: {
+          type: 'string',
+          description:
+            'the javaScript world for a script to execute within. must be ISOLATED or MAIN',
+        },
+        jsScript: {
+          type: 'string',
+          description: 'the content script to inject',
+        },
+      },
+      required: ['type', 'jsScript'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.SEND_COMMAND_TO_INJECT_SCRIPT,
+    description:
+      'if the script injected using chrome_inject_script listens for user-defined events, this tool can be used to trigger those events',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: {
+          type: 'number',
+          description:
+            'the tab where you previously injected the script(if not provided,  use the currently active tab)',
+        },
+        eventName: {
+          type: 'string',
+          description: 'the eventName your injected content script listen for',
+        },
+        payload: {
+          type: 'string',
+          description: 'the payload passed to event, must be a json string',
+        },
+      },
+      required: ['eventName'],
     },
   },
 ];

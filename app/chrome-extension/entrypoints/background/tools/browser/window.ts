@@ -1,8 +1,6 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'chrome-mcp-shared';
-import { offscreenManager } from '@/utils/offscreen-manager';
-import { SendMessageType, TOOL_MESSAGE_TYPES } from '@/common/message-types';
 
 class WindowTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS;
