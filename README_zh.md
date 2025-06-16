@@ -145,10 +145,14 @@ pnpm install -g mcp-chrome-bridge
 prompt: [excalidraw-prompt](prompt/excalidraw-prompt.md)
 指令：帮我总结当前页面内容，然后画个图帮我理解
 
+https://github.com/user-attachments/assets/f14f79a6-9390-4821-8296-06d020bcfc07
+
 ### ai自动帮你注入脚本并修改网页的样式
 
 prompt: [modify-web-prompt](prompt/modify-web.md)
 指令：帮我修改当前页面的样式，去掉广告
+
+https://github.com/user-attachments/assets/aedbe98d-e90c-4a58-a4a5-d888f7293d8e
 
 ### ai自动帮你捕获网络请求
 
