@@ -57,7 +57,7 @@ class InjectScriptTool extends BaseBrowserToolExecutor {
         }
       } else {
         // Use active tab
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        const tabs = await chrome.tabs.query({ active: true });
         if (!tabs[0]) {
           return createErrorResponse('No active tab found');
         }
@@ -112,7 +112,7 @@ class SendCommandToInjectScriptTool extends BaseBrowserToolExecutor {
 
       if (finalTabId === undefined) {
         // Use active tab
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        const tabs = await chrome.tabs.query({ active: true });
         if (!tabs[0]) {
           return createErrorResponse('No active tab found');
         }
