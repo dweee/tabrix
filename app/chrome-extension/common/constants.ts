@@ -109,3 +109,8 @@ export const NOTIFICATIONS = {
   PRIORITY: 2,
   TYPE: 'basic' as const,
 } as const;
+
+export enum ExecutionWorld {
+  ISOLATED = 'ISOLATED',
+  MAIN = 'MAIN',
+}

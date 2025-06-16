@@ -111,6 +111,16 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         // Include base64 data in response (without prefix)
         const base64Data = finalImageDataUrl.replace(/^data:image\/png;base64,/, '');
         results.base64 = base64Data;
+        return {
+          content: [
+            {
+              type: 'image',
+              data: base64Data,
+              mimeType: 'image/png',
+            },
+          ],
+          isError: false,
+        };
       }
 
       if (savePng === true) {

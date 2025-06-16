@@ -10,3 +10,4 @@ export { networkCaptureStartTool, networkCaptureStopTool } from './network-captu
 export { keyboardTool } from './keyboard';
 export { historyTool } from './history';
 export { bookmarkSearchTool, bookmarkAddTool, bookmarkDeleteTool } from './bookmark';
+export { injectScriptTool, sendCommandToInjectScriptTool } from './inject-script';

@@ -140,6 +140,16 @@ Complete tool list: [Complete Tool List](docs/TOOLS.md)
 
 ## 🧪 Usage Examples
 
+### AI helps you summarize webpage content and automatically control Excalidraw for drawing
+
+prompt: [excalidraw-prompt](prompt/excalidraw-prompt.md)
+Instruction: Help me summarize the current page content, then draw a diagram to aid my understanding.
+
+### AI automatically injects scripts and modifies webpage styles
+
+prompt: [modify-web-prompt](prompt/modify-web.md)
+Instruction: Help me modify the current page's style and remove advertisements.
+
 ### AI automatically captures network requests for you
 
 query: I want to know what the search API for Xiaohongshu is and what the response structure looks like

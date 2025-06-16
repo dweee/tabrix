@@ -140,6 +140,16 @@ pnpm install -g mcp-chrome-bridge
 
 ## 🧪 使用示例
 
+### ai帮你总结网页内容然后自动控制excalidraw画图
+
+prompt: [excalidraw-prompt](prompt/excalidraw-prompt.md)
+指令：帮我总结当前页面内容，然后画个图帮我理解
+
+### ai自动帮你注入脚本并修改网页的样式
+
+prompt: [modify-web-prompt](prompt/modify-web.md)
+指令：帮我修改当前页面的样式，去掉广告
+
 ### ai自动帮你捕获网络请求
 
 指令：我想知道小红书的搜索接口是哪个，响应体结构是什么样的
