@@ -244,25 +244,31 @@
     updateElement: (param) => {
       try {
         const existingElements = window.excalidrawAPI.getSceneElements();
-        const newElements = [...existingElements];
-        const idx = newElements.findIndex((e) => e.id === param.id);
-        if (idx >= 0) {
-          newElements[idx] = { ...newElements[idx], ...param };
-          const appState = window.excalidrawAPI.getAppState();
-          window.excalidrawAPI.updateScene({
-            elements: newElements,
-            appState: appState,
-            commitToHistory: true,
-          });
-          return {
-            success: true,
-          };
-        } else {
-          return {
-            error: true,
-            msg: 'element not found',
-          };
+        const resIds = [];
+        for (let i = 0; i < param.length; i++) {
+          const idx = existingElements.findIndex((e) => e.id === param[i].id);
+          if (idx >= 0) {
+            resIds.push[idx];
+            window.excalidrawAPI.mutateElement(existingElements[idx], { ...param[i] });
+          }
         }
+        return {
+          success: true,
+          msg: `已更新元素：${resIds.join(',')}`,
+        };
+      } catch (error) {
+        return {
+          error: true,
+          msg: JSON.stringify(error),
+        };
+      }
+    },
+    cleanup: () => {
+      try {
+        window.excalidrawAPI.resetScene();
+        return {
+          success: true,
+        };
       } catch (error) {
         return {
           error: true,

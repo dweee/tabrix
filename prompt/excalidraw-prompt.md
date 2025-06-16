@@ -12,13 +12,15 @@
 2.  **脚本事件监听**: 该脚本会监听以下事件：
     - `getSceneElements`: 获取画布上所有元素的完整数据
     - `addElement`: 向画布添加一个或多个新元素
-    - `updateElement`: 修改画布的某个元素
+    - `updateElement`: 修改画布的一个或多个元素
     - `deleteElement`: 根据元素ID删除元素
+    - `cleanup`: 清空重置画布
 3.  **发送指令**: 通过 `chrome_send_command_to_inject_script` 工具与注入的脚本通信，触发上述事件。指令格式如下：
     - 获取元素: `{ "eventName": "getSceneElements" }`
     - 添加元素: `{ "eventName": "addElement", "payload": { "eles": [elementSkeleton1, elementSkeleton2] } }`
-    - 更新元素: `{ "eventName": "updateElement", "payload": { "id": "xxx", ...其他要更新的属性 } }`
+    - 更新元素: `{ "eventName": "updateElement", "payload": [{ "id": "id1", ...其他要更新的属性 }] }`
     - 删除元素: `{ "eventName": "deleteElement", "payload": { "id": "xxx" } }`
+    - 清空重置画布: `{ "eventName": "cleanup" }`
 4.  **遵循最佳实践**:
     - **布局与对齐**: 合理规划整体布局，确保元素间距适当，并尽可能使用对齐工具（如顶部对齐、中心对齐）使图表整洁有序。
     - **尺寸与层级**: 核心元素的尺寸应更大，次要元素稍小，以建立清晰的视觉层级。避免所有元素大小一致。
@@ -59,18 +61,18 @@
 2.  **文本 (`text`)**
 
     - `text`: **必须**. 显示的文本内容, 支持`\n`换行。
+    - `originText`: **必须**. 用于后续编辑。
     - `fontSize`: 字体大小 (数字), 默认为20。如 `16`, `20`, `28`。
     - `fontFamily`: 字体类型: `1` (手写/Virgil), `2` (正常/Helvetica), `3` (代码/Cascadia)，默认为1。
     - `textAlign`: 水平对齐: `"left"`, `"center"`, `"right"`，默认为"left"。
     - `verticalAlign`: 垂直对齐: `"top"`, `"middle"`, `"bottom"`，默认为"top"。
     - `containerId`: **(核心关系)** 此属性是文本放入形状的关键。将其值设置为目标容器元素的`id`。
-    - **其他必须属性**: `originText` `autoResize: true`, `lineHeight: 1.25`。
+    - **其他必须属性**: `autoResize: true`, `lineHeight: 1.25`。
 
 3.  **线性/箭头 (`line`, `arrow`)**
     - `points`: **必须**. 定义路径的点坐标数组，**相对于元素自身的(x, y)点**。最简单的直线是 `[[0, 0], [width, height]]`。
     - `startArrowhead`: 起始箭头样式，可为 `"arrow"`, `"dot"`, `"triangle"`, `"bar"` 或 `null`，默认为`null`。
     - `endArrowhead`: 结束箭头样式，同上，`arrow`类型默认为`"arrow"`。
-    - `start`, `end`: **(核心关系)** **必须**使用这两个属性来定义与其它元素的绑定。值为一个包含目标元素`id`的对象。
 
 ### C. 元素关系创建规则（必须）
 
@@ -79,9 +81,10 @@
     - **场景**: 当一个元素里面包含一个描述文本的时候，比如矩形a里面有一个text，则必须要把text和a关联起来
     - **原理**: 必须建立双向链接。容器元素通过boundElements指向文本，文本通过containerId指回容器
     - **流程**:
-      1. 为形状和文本元素分别创建唯一的id。
-      2. 在形状元素中，添加boundElements属性，其值为一个数组，包含指向文本元素的引用，在文本元素中，添加containerId属性，其值为形状的id。
-      3. 为保证居中对齐，建议将文本元素的 `textAlign` 设置为 `"center"`，`verticalAlign` 设置为 `"middle"`。
+      1. 为形状和文本元素分别创建唯一的id
+      2. 在文本元素中，添加containerId属性，其值为形状的id
+      3. 必须）调用updateElement，更新形状元素，添加boundElements属性，其值为一个数组，包含指向文本元素的引用
+      4. 为保证居中对齐，建议将文本元素的 `textAlign` 设置为 `"center"`，`verticalAlign` 设置为 `"middle"`
     - **示例**:
       ```json
       [
@@ -127,8 +130,8 @@
     - **原理**: 必须建立双向链接。箭头通过start和end指向源/目标元素，同时源/目标元素也必须通过boundElements指回箭头。
     - **流程**:
       1. 为所有参与的元素（源、目标、箭头）创建唯一的id
-      2. 在箭头元素中，设置 start: { "id": "源元素id" } 和 end: { "id": "目标元素id" }
-      3. （必须）在源元素和目标元素的boundElements数组中，分别添加指向箭头ID的引用
+      2. （必须）调用updateElement，更新箭头元素设置 startBinding: { "elementId": "源元素id", focus: 0.0, gap: 5 } 和 endBinding(类似startBinding)
+      3. （必须）调用updateElement，在源元素和目标元素的boundElements数组中，分别添加指向箭头ID的引用
     - **示例**:
       ```json
       [
@@ -158,8 +161,16 @@
           "width": 150,
           "height": 1,
           "endArrowhead": "arrow",
-          "start": { "id": "element-A" },
-          "end": { "id": "element-B" }
+          "startBinding": {
+            "elementId": "element-A", // 绑定的元素ID
+            "focus": 0.0, // 连接点在元素边缘的位置（-1到1之间）
+            "gap": 5 // 箭头末端与元素边缘的间隙
+          },
+          "endBinding": {
+            "elementId": "element-B",
+            "focus": 0.0,
+            "gap": 5
+          }
         }
       ]
       ```
@@ -213,10 +224,13 @@
 1.  **ID是关键**: 在构建任何有关系的图表时，养成给核心元素预先设定、并始终使用唯一`id`的习惯。
 2.  **先建对象，后建关系**: 确保在创建箭头或将文本放入容器之前，目标对象（带有`id`）已经存在于你将要发送的元素列表中，连线/箭头绑定之后，要更新对应元素的boundElements属性
 3.  **箭头/连线必须绑定元素** 箭头或连线必须双向链接到对应的元素上，比如eleA arrow eleB,必须俩俩双向链接
-4.  **分层组织**: 复杂图表使用Frame进行逻辑分区，每个Frame专注一个功能域。
-5.  **坐标规划**: 预先规划布局，避免元素重叠。通常间距设置为80-150像素。
-6.  **尺寸一致性**: 同类型元素保持相似尺寸，建立视觉节奏。
+4.  **统一更新绑定关系** 推荐用updateElement统一更新（文本/元素）（箭头/元素）（连线/元素）间的双向绑定关系
+5.  **分层组织**: 复杂图表使用Frame进行逻辑分区，每个Frame专注一个功能域。
+6.  **坐标规划**: 预先规划布局，避免元素重叠。通常间距设置为80-150像素。
+7.  **尺寸一致性**: 同类型元素保持相似尺寸，建立视觉节奏。
+8.  **画图前先清空当前画布，画完图后刷新当前页面**
+9.  **禁止使用截图工具**
 
 ## 需要注入的脚本
 
-(()=>{const SCRIPT_ID='excalidraw-control-script';if(window[SCRIPT_ID]){return}function getExcalidrawAPIFromDOM(domElement){if(!domElement){return null}const reactFiberKey=Object.keys(domElement).find((key)=>key.startsWith('**reactFiber$')||key.startsWith('**reactInternalInstance$'),);if(!reactFiberKey){return null}let fiberNode=domElement[reactFiberKey];if(!fiberNode){return null}function isExcalidrawAPI(obj){return(typeof obj==='object'&&obj!==null&&typeof obj.updateScene==='function'&&typeof obj.getSceneElements==='function'&&typeof obj.getAppState==='function')}function findApiInObject(objToSearch){if(isExcalidrawAPI(objToSearch)){return objToSearch}if(typeof objToSearch==='object'&&objToSearch!==null){for(const key in objToSearch){if(Object.prototype.hasOwnProperty.call(objToSearch,key)){const found=findApiInObject(objToSearch[key]);if(found){return found}}}}return null}let excalidrawApiInstance=null;let attempts=0;const MAX_TRAVERSAL_ATTEMPTS=25;while(fiberNode&&attempts<MAX_TRAVERSAL_ATTEMPTS){if(fiberNode.stateNode&&fiberNode.stateNode.props){const api=findApiInObject(fiberNode.stateNode.props);if(api){excalidrawApiInstance=api;break}if(isExcalidrawAPI(fiberNode.stateNode.props.excalidrawAPI)){excalidrawApiInstance=fiberNode.stateNode.props.excalidrawAPI;break}}if(fiberNode.memoizedProps){const api=findApiInObject(fiberNode.memoizedProps);if(api){excalidrawApiInstance=api;break}if(isExcalidrawAPI(fiberNode.memoizedProps.excalidrawAPI)){excalidrawApiInstance=fiberNode.memoizedProps.excalidrawAPI;break}}if(fiberNode.tag===1&&fiberNode.stateNode&&fiberNode.stateNode.state){const api=findApiInObject(fiberNode.stateNode.state);if(api){excalidrawApiInstance=api;break}}if(fiberNode.tag===0||fiberNode.tag===2||fiberNode.tag===14||fiberNode.tag===15||fiberNode.tag===11){if(fiberNode.memoizedState){let currentHook=fiberNode.memoizedState;let hookAttempts=0;const MAX_HOOK_ATTEMPTS=15;while(currentHook&&hookAttempts<MAX_HOOK_ATTEMPTS){const api=findApiInObject(currentHook.memoizedState);if(api){excalidrawApiInstance=api;break}currentHook=currentHook.next;hookAttempts++}if(excalidrawApiInstance)break}}if(fiberNode.stateNode){const api=findApiInObject(fiberNode.stateNode);if(api&&api!==fiberNode.stateNode.props&&api!==fiberNode.stateNode.state){excalidrawApiInstance=api;break}}if(fiberNode.tag===9&&fiberNode.memoizedProps&&typeof fiberNode.memoizedProps.value!=='undefined'){const api=findApiInObject(fiberNode.memoizedProps.value);if(api){excalidrawApiInstance=api;break}}if(fiberNode.return){fiberNode=fiberNode.return}else{break}attempts++}if(excalidrawApiInstance){window.excalidrawAPI=excalidrawApiInstance;console.log('现在您可以通过 `window.foundExcalidrawAPI` 在控制台访问它。')}else{console.error('在检查组件树后未能找到 excalidrawAPI。')}return excalidrawApiInstance}function createFullExcalidrawElement(skeleton){const id=Math.random().toString(36).substring(2,9);const seed=Math.floor(Math.random()*2**31);const versionNonce=Math.floor(Math.random()*2**31);const defaults={isDeleted:false,fillStyle:'hachure',strokeWidth:1,strokeStyle:'solid',roughness:1,opacity:100,angle:0,groupIds:[],strokeColor:'#000000',backgroundColor:'transparent',version:1,locked:false,};const fullElement={id:id,seed:seed,versionNonce:versionNonce,updated:Date.now(),...defaults,...skeleton,};return fullElement}let targetElementForAPI=document.querySelector('.excalidraw-app');if(targetElementForAPI){getExcalidrawAPIFromDOM(targetElementForAPI)}const eventHandler={getSceneElements:()=>{try{return window.excalidrawAPI.getSceneElements()}catch(error){return{error:true,msg:JSON.stringify(error),}}},addElement:(param)=>{try{const existingElements=window.excalidrawAPI.getSceneElements();const newElements=[...existingElements];param.eles.forEach((ele,idx)=>{const newEle=createFullExcalidrawElement(ele);newEle.index=`a${existingElements.length+idx+1}`;newElements.push(newEle)});console.log('newElements ==>',newElements);const appState=window.excalidrawAPI.getAppState();window.excalidrawAPI.updateScene({elements:newElements,appState:appState,commitToHistory:true});return{success:true,}}catch(error){return{error:true,msg:JSON.stringify(error),}}},deleteElement:(param)=>{try{const existingElements=window.excalidrawAPI.getSceneElements();const newElements=[...existingElements];const idx=newElements.findIndex(e=>e.id===param.id);if(idx>=0){newElements.splice(idx,1);const appState=window.excalidrawAPI.getAppState();window.excalidrawAPI.updateScene({elements:newElements,appState:appState,commitToHistory:true});return{success:true,}}else{return{error:true,msg:'element not found'}}}catch(error){return{error:true,msg:JSON.stringify(error),}}},updateElement:(param)=>{try{const existingElements=window.excalidrawAPI.getSceneElements();const newElements=[...existingElements];const idx=newElements.findIndex(e=>e.id===param.id);if(idx>=0){newElements[idx]={...newElements[idx],...param};const appState=window.excalidrawAPI.getAppState();window.excalidrawAPI.updateScene({elements:newElements,appState:appState,commitToHistory:true});return{success:true,}}else{return{error:true,msg:'element not found'}}}catch(error){return{error:true,msg:JSON.stringify(error),}}},};const handleExecution=(event)=>{const{action,payload,requestId}=event.detail;const param=JSON.parse(payload||'{}');let data,error;try{const handler=eventHandler[action];if(!handler){error='event name not found'}data=handler(param)}catch(e){error=e.message}window.dispatchEvent(new CustomEvent('chrome-mcp:response',{detail:{requestId,data,error}}),)};const initialize=()=>{window.addEventListener('chrome-mcp:execute',handleExecution);window.addEventListener('chrome-mcp:cleanup',cleanup);window[SCRIPT_ID]=true};const cleanup=()=>{window.removeEventListener('chrome-mcp:execute',handleExecution);window.removeEventListener('chrome-mcp:cleanup',cleanup);delete window[SCRIPT_ID];delete window.excalidrawAPI};initialize()})();
+(()=>{const SCRIPT_ID='excalidraw-control-script';if(window[SCRIPT_ID]){return}function getExcalidrawAPIFromDOM(domElement){if(!domElement){return null}const reactFiberKey=Object.keys(domElement).find((key)=>key.startsWith('**reactFiber$')||key.startsWith('**reactInternalInstance$'),);if(!reactFiberKey){return null}let fiberNode=domElement[reactFiberKey];if(!fiberNode){return null}function isExcalidrawAPI(obj){return(typeof obj==='object'&&obj!==null&&typeof obj.updateScene==='function'&&typeof obj.getSceneElements==='function'&&typeof obj.getAppState==='function')}function findApiInObject(objToSearch){if(isExcalidrawAPI(objToSearch)){return objToSearch}if(typeof objToSearch==='object'&&objToSearch!==null){for(const key in objToSearch){if(Object.prototype.hasOwnProperty.call(objToSearch,key)){const found=findApiInObject(objToSearch[key]);if(found){return found}}}}return null}let excalidrawApiInstance=null;let attempts=0;const MAX_TRAVERSAL_ATTEMPTS=25;while(fiberNode&&attempts<MAX_TRAVERSAL_ATTEMPTS){if(fiberNode.stateNode&&fiberNode.stateNode.props){const api=findApiInObject(fiberNode.stateNode.props);if(api){excalidrawApiInstance=api;break}if(isExcalidrawAPI(fiberNode.stateNode.props.excalidrawAPI)){excalidrawApiInstance=fiberNode.stateNode.props.excalidrawAPI;break}}if(fiberNode.memoizedProps){const api=findApiInObject(fiberNode.memoizedProps);if(api){excalidrawApiInstance=api;break}if(isExcalidrawAPI(fiberNode.memoizedProps.excalidrawAPI)){excalidrawApiInstance=fiberNode.memoizedProps.excalidrawAPI;break}}if(fiberNode.tag===1&&fiberNode.stateNode&&fiberNode.stateNode.state){const api=findApiInObject(fiberNode.stateNode.state);if(api){excalidrawApiInstance=api;break}}if(fiberNode.tag===0||fiberNode.tag===2||fiberNode.tag===14||fiberNode.tag===15||fiberNode.tag===11){if(fiberNode.memoizedState){let currentHook=fiberNode.memoizedState;let hookAttempts=0;const MAX_HOOK_ATTEMPTS=15;while(currentHook&&hookAttempts<MAX_HOOK_ATTEMPTS){const api=findApiInObject(currentHook.memoizedState);if(api){excalidrawApiInstance=api;break}currentHook=currentHook.next;hookAttempts++}if(excalidrawApiInstance)break}}if(fiberNode.stateNode){const api=findApiInObject(fiberNode.stateNode);if(api&&api!==fiberNode.stateNode.props&&api!==fiberNode.stateNode.state){excalidrawApiInstance=api;break}}if(fiberNode.tag===9&&fiberNode.memoizedProps&&typeof fiberNode.memoizedProps.value!=='undefined'){const api=findApiInObject(fiberNode.memoizedProps.value);if(api){excalidrawApiInstance=api;break}}if(fiberNode.return){fiberNode=fiberNode.return}else{break}attempts++}if(excalidrawApiInstance){window.excalidrawAPI=excalidrawApiInstance;console.log('现在您可以通过 `window.foundExcalidrawAPI` 在控制台访问它。')}else{console.error('在检查组件树后未能找到 excalidrawAPI。')}return excalidrawApiInstance}function createFullExcalidrawElement(skeleton){const id=Math.random().toString(36).substring(2,9);const seed=Math.floor(Math.random()*2**31);const versionNonce=Math.floor(Math.random()*2**31);const defaults={isDeleted:false,fillStyle:'hachure',strokeWidth:1,strokeStyle:'solid',roughness:1,opacity:100,angle:0,groupIds:[],strokeColor:'#000000',backgroundColor:'transparent',version:1,locked:false,};const fullElement={id:id,seed:seed,versionNonce:versionNonce,updated:Date.now(),...defaults,...skeleton,};return fullElement}let targetElementForAPI=document.querySelector('.excalidraw-app');if(targetElementForAPI){getExcalidrawAPIFromDOM(targetElementForAPI)}const eventHandler={getSceneElements:()=>{try{return window.excalidrawAPI.getSceneElements()}catch(error){return{error:true,msg:JSON.stringify(error),}}},addElement:(param)=>{try{const existingElements=window.excalidrawAPI.getSceneElements();const newElements=[...existingElements];param.eles.forEach((ele,idx)=>{const newEle=createFullExcalidrawElement(ele);newEle.index=`a${existingElements.length+idx+1}`;newElements.push(newEle)});console.log('newElements ==>',newElements);const appState=window.excalidrawAPI.getAppState();window.excalidrawAPI.updateScene({elements:newElements,appState:appState,commitToHistory:true,});return{success:true,}}catch(error){return{error:true,msg:JSON.stringify(error),}}},deleteElement:(param)=>{try{const existingElements=window.excalidrawAPI.getSceneElements();const newElements=[...existingElements];const idx=newElements.findIndex((e)=>e.id===param.id);if(idx>=0){newElements.splice(idx,1);const appState=window.excalidrawAPI.getAppState();window.excalidrawAPI.updateScene({elements:newElements,appState:appState,commitToHistory:true,});return{success:true,}}else{return{error:true,msg:'element not found',}}}catch(error){return{error:true,msg:JSON.stringify(error),}}},updateElement:(param)=>{try{const existingElements=window.excalidrawAPI.getSceneElements();const resIds=[];for(let i=0;i<param.length;i++){const idx=existingElements.findIndex((e)=>e.id===param[i].id);if(idx>=0){resIds.push[idx];window.excalidrawAPI.mutateElement(existingElements[idx],{...param[i]})}}return{success:true,msg:`已更新元素：${resIds.join(',')}`,}}catch(error){return{error:true,msg:JSON.stringify(error),}}},cleanup:()=>{try{window.excalidrawAPI.resetScene();return{success:true,}}catch(error){return{error:true,msg:JSON.stringify(error),}}},};const handleExecution=(event)=>{const{action,payload,requestId}=event.detail;const param=JSON.parse(payload||'{}');let data,error;try{const handler=eventHandler[action];if(!handler){error='event name not found'}data=handler(param)}catch(e){error=e.message}window.dispatchEvent(new CustomEvent('chrome-mcp:response',{detail:{requestId,data,error}}),)};const initialize=()=>{window.addEventListener('chrome-mcp:execute',handleExecution);window.addEventListener('chrome-mcp:cleanup',cleanup);window[SCRIPT_ID]=true};const cleanup=()=>{window.removeEventListener('chrome-mcp:execute',handleExecution);window.removeEventListener('chrome-mcp:cleanup',cleanup);delete window[SCRIPT_ID];delete window.excalidrawAPI};initialize()})();

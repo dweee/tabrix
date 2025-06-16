@@ -16,7 +16,8 @@
     if (request.type === EVENT_NAME.CLEANUP) {
       window.dispatchEvent(new CustomEvent(EVENT_NAME.CLEANUP));
       // Acknowledge cleanup signal received, but don't hold the connection.
-      return false;
+      sendResponse({ success: true });
+      return true;
     }
 
     // --- Execution Command for MAIN world ---
