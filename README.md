@@ -147,6 +147,12 @@ Instruction: Help me summarize the current page content, then draw a diagram to 
 
 https://github.com/user-attachments/assets/fd17209b-303d-48db-9e5e-3717141df183
 
+### After analyzing the content of the image, the LLM automatically controls Excalidraw to replicate the image
+prompt: [excalidraw-prompt](prompt/excalidraw-prompt.md)|[content-analize](prompt/content-analize.md)
+Instruction: First, analyze the content of the image, and then replicate the image by combining the analysis with the content of the image.
+
+https://github.com/user-attachments/assets/60d12b1a-9b74-40f4-994c-95e8fa1fc8d3
+
 ### AI automatically injects scripts and modifies webpage styles
 
 prompt: [modify-web-prompt](prompt/modify-web.md)
