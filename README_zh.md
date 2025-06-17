@@ -69,7 +69,7 @@ pnpm install -g mcp-chrome-bridge
    - 启用"开发者模式"
    - 点击"加载已解压的扩展程序"，选择 `your/dowloaded/extension/folder`
    - 点击插件图标打开插件，点击连接即可看到mcp的配置
-     <img width="475" alt="截屏2025-06-09 15 52 06" src="https://github.com/user-attachments/assets/241e57b8-c55f-41a4-9188-0367293dc5bc" />
+   <img width="475" alt="截屏2025-06-09 15 52 06" src="https://github.com/user-attachments/assets/241e57b8-c55f-41a4-9188-0367293dc5bc" />
 
 ### 在 Claude Desktop 中使用
 
@@ -97,6 +97,8 @@ pnpm install -g mcp-chrome-bridge
 - `chrome_navigate` - 导航到 URL 并控制视口
 - `chrome_close_tabs` - 关闭特定标签页或窗口
 - `chrome_go_back_or_forward` - 浏览器导航控制
+- `chrome_inject_script` - 向网页注入内容脚本
+- `chrome_send_command_to_inject_script` - 向已注入的内容脚本发送指令
 </details>
 
 <details>
@@ -146,6 +148,12 @@ prompt: [excalidraw-prompt](prompt/excalidraw-prompt.md)
 指令：帮我总结当前页面内容，然后画个图帮我理解
 
 https://github.com/user-attachments/assets/f14f79a6-9390-4821-8296-06d020bcfc07
+
+### ai先分析图片的内容元素，然后再自动控制excalidraw把图片模仿出来
+prompt: [excalidraw-prompt](prompt/excalidraw-prompt.md)|[content-analize](prompt/content-analize.md)
+指令：先看下图片是否能用excalidraw画出来，如果则列出所需的步骤和元素，然后画出来
+
+https://github.com/user-attachments/assets/4f0600c1-bb1e-4b57-85ab-36c8bdf71c68
 
 ### ai自动帮你注入脚本并修改网页的样式
 
