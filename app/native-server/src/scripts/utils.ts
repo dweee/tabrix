@@ -284,16 +284,6 @@ export async function tryRegisterUserLevelHost(): Promise<boolean> {
   }
 }
 
-// 使用sudo-prompt提权
-let sudoPrompt: any;
-try {
-  sudoPrompt = require('sudo-prompt');
-} catch (error) {
-  console.error('缺少sudo-prompt依赖，请先安装：npm install sudo-prompt');
-  console.error(error);
-  process.exit(1);
-}
-
 // 导入is-admin包（仅在Windows平台使用）
 let isAdmin: () => boolean = () => false;
 if (process.platform === 'win32') {
@@ -360,20 +350,31 @@ export async function registerWithElevatedPermissions(): Promise<void> {
         throw error;
       }
     } else {
-      // 没有管理员权限，使用sudo-prompt提权
-      await new Promise((resolve, reject) => {
-        sudoPrompt.exec(command, { name: `${COMMAND_NAME} Installer` }, (error: Error) => {
-          if (error) {
-            console.error(
-              colorText(`Elevated permission installation failed: ${error.message}`, 'red'),
-            );
-            reject(error);
-          } else {
-            console.log(colorText('System-level manifest registration successful!', 'green'));
-            resolve(true);
-          }
-        });
-      });
+      // 没有管理员权限，打印手动操作提示
+      console.log(
+        colorText('⚠️ Administrator privileges required for system-level installation', 'yellow'),
+      );
+      console.log(
+        colorText(
+          'Please run one of the following commands with administrator privileges:',
+          'blue',
+        ),
+      );
+
+      if (os.platform() === 'win32') {
+        console.log(colorText('  1. Open Command Prompt as Administrator and run:', 'blue'));
+        console.log(colorText(`     ${command}`, 'cyan'));
+      } else {
+        console.log(colorText('  1. Run with sudo:', 'blue'));
+        console.log(colorText(`     sudo ${command}`, 'cyan'));
+      }
+
+      console.log(
+        colorText('  2. Or run the registration command with elevated privileges:', 'blue'),
+      );
+      console.log(colorText(`     sudo ${COMMAND_NAME} register --system`, 'cyan'));
+
+      throw new Error('Administrator privileges required for system-level installation');
     }
 
     // 6. Windows特殊处理 - 设置系统级注册表
@@ -405,21 +406,24 @@ export async function registerWithElevatedPermissions(): Promise<void> {
           throw error;
         }
       } else {
-        // 没有管理员权限，使用sudo-prompt提权
-        await new Promise<void>((resolve, reject) => {
-          sudoPrompt.exec(regCommand, { name: `${COMMAND_NAME} Installer` }, (error: Error) => {
-            if (error) {
-              console.error(
-                colorText(`Windows registry entry creation failed: ${error.message}`, 'red'),
-              );
-              console.error(colorText(`Command: ${regCommand}`, 'red'));
-              reject(error);
-            } else {
-              console.log(colorText('Windows registry entry created successfully!', 'green'));
-              resolve();
-            }
-          });
-        });
+        // 没有管理员权限，打印手动操作提示
+        console.log(
+          colorText(
+            '⚠️ Administrator privileges required for Windows registry modification',
+            'yellow',
+          ),
+        );
+        console.log(colorText('Please run the following command as Administrator:', 'blue'));
+        console.log(colorText(`  ${regCommand}`, 'cyan'));
+        console.log(colorText('Or run the registration command with elevated privileges:', 'blue'));
+        console.log(
+          colorText(
+            `  Run Command Prompt as Administrator and execute: ${COMMAND_NAME} register --system`,
+            'cyan',
+          ),
+        );
+
+        throw new Error('Administrator privileges required for Windows registry modification');
       }
     }
   } catch (error: any) {
