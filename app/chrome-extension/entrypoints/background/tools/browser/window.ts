@@ -51,15 +51,4 @@ class WindowTool extends BaseBrowserToolExecutor {
   }
 }
 
-interface TabContentResult {
-  tabId: number;
-  url: string;
-  title: string;
-  textContent?: string;
-  error?: string;
-  matchScore?: number;
-  semanticScore?: number;
-  matchedSnippets?: string[];
-}
-
 export const windowTool = new WindowTool();

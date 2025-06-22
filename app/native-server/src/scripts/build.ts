@@ -21,25 +21,28 @@ console.log('dist 和 dist/logs 目录已创建/确认存在');
 console.log('编译TypeScript...');
 execSync('tsc', { stdio: 'inherit' });
 
+// 复制配置文件
+console.log('复制配置文件...');
+const configSourcePath = path.join(__dirname, '..', 'mcp', 'stdio-config.json');
+const configDestPath = path.join(distDir, 'mcp', 'stdio-config.json');
+
+try {
+  // 确保目标目录存在
+  fs.mkdirSync(path.dirname(configDestPath), { recursive: true });
+
+  if (fs.existsSync(configSourcePath)) {
+    fs.copyFileSync(configSourcePath, configDestPath);
+    console.log(`已将 stdio-config.json 复制到 ${configDestPath}`);
+  } else {
+    console.error(`错误: 配置文件未找到: ${configSourcePath}`);
+  }
+} catch (error) {
+  console.error('复制配置文件时出错:', error);
+}
+
 // 复制package.json并更新其内容
 console.log('准备package.json...');
 const packageJson = require('../../package.json');
-
-// 删除开发依赖和脚本
-const distPackageJson = {
-  name: packageJson.name,
-  version: packageJson.version,
-  description: packageJson.description,
-  author: packageJson.author,
-  license: packageJson.license,
-  main: 'index.js',
-  dependencies: packageJson.dependencies,
-  scripts: {
-    start: 'node index.js',
-  },
-};
-
-fs.writeFileSync(path.join(distDir, 'package.json'), JSON.stringify(distPackageJson, null, 2));
 
 // 创建安装说明
 const readmeContent = `# ${packageJson.name}

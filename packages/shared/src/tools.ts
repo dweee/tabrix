@@ -24,6 +24,7 @@ export const TOOL_NAMES = {
     BOOKMARK_DELETE: 'chrome_bookmark_delete',
     INJECT_SCRIPT: 'chrome_inject_script',
     SEND_COMMAND_TO_INJECT_SCRIPT: 'chrome_send_command_to_inject_script',
+    CONSOLE: 'chrome_console',
   },
 };
 
@@ -507,6 +508,30 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
       },
       required: ['eventName'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.CONSOLE,
+    description:
+      'Capture and retrieve all console output from the current active browser tab/page. This captures console messages that existed before the tool was called.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          description:
+            'URL to navigate to and capture console from. If not provided, uses the current active tab',
+        },
+        includeExceptions: {
+          type: 'boolean',
+          description: 'Include uncaught exceptions in the output (default: true)',
+        },
+        maxMessages: {
+          type: 'number',
+          description: 'Maximum number of console messages to capture (default: 100)',
+        },
+      },
+      required: [],
     },
   },
 ];

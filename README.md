@@ -61,8 +61,10 @@ npm install -g mcp-chrome-bridge
 pnpm
 
 ```bash
-pnpm install -g mcp-chrome-bridge
+pnpm install -g mcp-chrome-bridge --unsafe-perm
 ```
+
+> Note: When using pnpm, the `--unsafe-perm` flag is required to ensure post-installation scripts run properly, which is necessary for registering the Native Messaging host.
 
 3. **Load Chrome Extension**
    - Open Chrome and go to `chrome://extensions/`
@@ -91,12 +93,14 @@ Add the following configuration to Claude Desktop's MCP configuration:
 Complete tool list: [Complete Tool List](docs/TOOLS.md)
 
 <details>
-<summary><strong>📊 Browser Management (4 tools)</strong></summary>
+<summary><strong>📊 Browser Management (6 tools)</strong></summary>
 
 - `get_windows_and_tabs` - List all browser windows and tabs
 - `chrome_navigate` - Navigate to URLs and control viewport
 - `chrome_close_tabs` - Close specific tabs or windows
 - `chrome_go_back_or_forward` - Browser navigation control
+- `chrome_inject_script` - Inject content scripts into web pages
+- `chrome_send_command_to_inject_script` - Send commands to injected content scripts
 </details>
 
 <details>
@@ -114,11 +118,12 @@ Complete tool list: [Complete Tool List](docs/TOOLS.md)
 </details>
 
 <details>
-<summary><strong>🔍 Content Analysis (3 tools)</strong></summary>
+<summary><strong>🔍 Content Analysis (4 tools)</strong></summary>
 
 - `search_tabs_content` - AI-powered semantic search across browser tabs
 - `chrome_get_web_content` - Extract HTML/text content from pages
 - `chrome_get_interactive_elements` - Find clickable elements
+- `chrome_console` - Capture and retrieve console output from browser tabs
 </details>
 
 <details>
@@ -148,6 +153,7 @@ Instruction: Help me summarize the current page content, then draw a diagram to 
 https://github.com/user-attachments/assets/fd17209b-303d-48db-9e5e-3717141df183
 
 ### After analyzing the content of the image, the LLM automatically controls Excalidraw to replicate the image
+
 prompt: [excalidraw-prompt](prompt/excalidraw-prompt.md)|[content-analize](prompt/content-analize.md)
 Instruction: First, analyze the content of the image, and then replicate the image by combining the analysis with the content of the image.
 

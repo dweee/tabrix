@@ -61,15 +61,17 @@ npm install -g mcp-chrome-bridge
 pnpm
 
 ```bash
-pnpm install -g mcp-chrome-bridge
+pnpm install -g mcp-chrome-bridge --unsafe-perm
 ```
+
+> 注意：使用 pnpm 安装时需要添加 `--unsafe-perm` 参数以确保安装后脚本能正常执行，这对于注册 Native Messaging 主机是必要的。
 
 3. **加载 Chrome 扩展**
    - 打开 Chrome 并访问 `chrome://extensions/`
    - 启用"开发者模式"
    - 点击"加载已解压的扩展程序"，选择 `your/dowloaded/extension/folder`
    - 点击插件图标打开插件，点击连接即可看到mcp的配置
-   <img width="475" alt="截屏2025-06-09 15 52 06" src="https://github.com/user-attachments/assets/241e57b8-c55f-41a4-9188-0367293dc5bc" />
+     <img width="475" alt="截屏2025-06-09 15 52 06" src="https://github.com/user-attachments/assets/241e57b8-c55f-41a4-9188-0367293dc5bc" />
 
 ### 在 Claude Desktop 中使用
 
@@ -91,7 +93,7 @@ pnpm install -g mcp-chrome-bridge
 完整工具列表：[完整工具列表](docs/TOOLS_zh.md)
 
 <details>
-<summary><strong>📊 浏览器管理 (4个工具)</strong></summary>
+<summary><strong>📊 浏览器管理 (6个工具)</strong></summary>
 
 - `get_windows_and_tabs` - 列出所有浏览器窗口和标签页
 - `chrome_navigate` - 导航到 URL 并控制视口
@@ -116,11 +118,12 @@ pnpm install -g mcp-chrome-bridge
 </details>
 
 <details>
-<summary><strong>🔍 内容分析 (3个工具)</strong></summary>
+<summary><strong>🔍 内容分析 (4个工具)</strong></summary>
 
 - `search_tabs_content` - AI 驱动的浏览器标签页语义搜索
 - `chrome_get_web_content` - 从页面提取 HTML/文本内容
 - `chrome_get_interactive_elements` - 查找可点击元素
+- `chrome_console` - 捕获和获取浏览器标签页的控制台输出
 </details>
 
 <details>
@@ -150,6 +153,7 @@ prompt: [excalidraw-prompt](prompt/excalidraw-prompt.md)
 https://github.com/user-attachments/assets/f14f79a6-9390-4821-8296-06d020bcfc07
 
 ### ai先分析图片的内容元素，然后再自动控制excalidraw把图片模仿出来
+
 prompt: [excalidraw-prompt](prompt/excalidraw-prompt.md)|[content-analize](prompt/content-analize.md)
 指令：先看下图片是否能用excalidraw画出来，如果则列出所需的步骤和元素，然后画出来
 
