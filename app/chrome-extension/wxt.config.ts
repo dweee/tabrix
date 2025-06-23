@@ -11,6 +11,20 @@ const CHROME_EXTENSION_KEY = process.env.CHROME_EXTENSION_KEY;
 // See https://wxt.dev/api/config.html
 export default defineConfig({
   modules: ['@wxt-dev/module-vue'],
+  runner: {
+    // 方案1: 禁用自动启动（推荐）
+    disabled: true,
+
+    // 方案2: 如果要启用自动启动并使用现有配置，取消注释下面的配置
+    // chromiumArgs: [
+    //   '--user-data-dir=' + homedir() + (process.platform === 'darwin'
+    //     ? '/Library/Application Support/Google/Chrome'
+    //     : process.platform === 'win32'
+    //     ? '/AppData/Local/Google/Chrome/User Data'
+    //     : '/.config/google-chrome'),
+    //   '--remote-debugging-port=9222',
+    // ],
+  },
   manifest: {
     // Use environment variable for the key, fallback to undefined if not set
     key: CHROME_EXTENSION_KEY,

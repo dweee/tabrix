@@ -1,210 +1,195 @@
 /* eslint-disable */
 // interactive-elements-helper.js
-// This script is injected into the page to find interactive elements
+// This script is injected into the page to find interactive elements.
+// Final version by Calvin, featuring a multi-layered fallback strategy
+// and comprehensive element support, built on a performant and reliable core.
 
-if (window.__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__) {
-  console.log(`interactive-elements-helper.js already initialized.`);
-} else {
+(function () {
+  // Prevent re-initialization
+  if (window.__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__) {
+    return;
+  }
   window.__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__ = true;
+
   /**
-   * Find all interactive elements on the page
-   * @param {Object} options - Options for finding elements
-   * @param {string} [options.textQuery] - Text to search for within elements (fuzzy search)
-   * @param {string} [options.selector] - CSS selector to filter elements
-   * @param {boolean} [options.includeCoordinates=true] - Whether to include element coordinates
-   * @param {Array<string>} [options.types] - Types of elements to include
-   * @returns {Array} - Array of interactive elements with their details
+   * @typedef {Object} ElementInfo
+   * @property {string} type - The type of the element (e.g., 'button', 'link').
+   * @property {string} selector - A CSS selector to uniquely identify the element.
+   * @property {string} text - The visible text or accessible name of the element.
+   * @property {boolean} isInteractive - Whether the element is currently interactive.
+   * @property {Object} [coordinates] - The coordinates of the element if requested.
+   * @property {boolean} [disabled] - For elements that can be disabled.
+   * @property {string} [href] - For links.
+   * @property {boolean} [checked] - for checkboxes and radio buttons.
    */
-  function findInteractiveElements(options = {}) {
-    const {
-      textQuery,
-      selector,
-      includeCoordinates = true,
-      types = ['button', 'link', 'input', 'select', 'textarea', 'checkbox', 'radio', 'form'],
-    } = options;
 
-    // If selector is provided, directly return that element
-    if (selector) {
-      try {
-        const selectedElement = document.querySelector(selector);
-        if (selectedElement) {
-          // Determine the element type
-          let elementType = 'unknown';
-          if (
-            selectedElement.tagName === 'BUTTON' ||
-            selectedElement.getAttribute('role') === 'button' ||
-            (selectedElement.tagName === 'INPUT' &&
-              ['button', 'submit'].includes(selectedElement.getAttribute('type') || ''))
-          ) {
-            elementType = 'button';
-          } else if (
-            selectedElement.tagName === 'A' ||
-            selectedElement.getAttribute('role') === 'link'
-          ) {
-            elementType = 'link';
-          } else if (selectedElement.tagName === 'INPUT') {
-            const inputType = selectedElement.getAttribute('type') || 'text';
-            if (inputType === 'checkbox') elementType = 'checkbox';
-            else if (inputType === 'radio') elementType = 'radio';
-            else elementType = 'input';
-          } else if (selectedElement.tagName === 'SELECT') {
-            elementType = 'select';
-          } else if (selectedElement.tagName === 'TEXTAREA') {
-            elementType = 'textarea';
-          } else if (selectedElement.tagName === 'FORM') {
-            elementType = 'form';
-          }
+  /**
+   * Configuration for element types and their corresponding selectors.
+   * Now more comprehensive with common ARIA roles.
+   */
+  const ELEMENT_CONFIG = {
+    button: 'button, input[type="button"], input[type="submit"], [role="button"]',
+    link: 'a[href], [role="link"]',
+    input:
+      'input:not([type="button"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])',
+    checkbox: 'input[type="checkbox"], [role="checkbox"]',
+    radio: 'input[type="radio"], [role="radio"]',
+    textarea: 'textarea',
+    select: 'select',
+    tab: '[role="tab"]',
+    // Generic interactive elements: combines tabindex, common roles, and explicit handlers.
+    // This is the key to finding custom-built interactive components.
+    interactive: `[onclick], [tabindex]:not([tabindex^="-"]), [role="menuitem"], [role="slider"], [role="option"], [role="treeitem"]`,
+  };
 
-          // Return just this element's info
-          return [createElementInfo(selectedElement, elementType, includeCoordinates)];
-        } else {
-          return { error: `No element found matching selector: ${selector}` };
-        }
-      } catch (error) {
-        return { error: `Invalid selector: ${error.message}` };
-      }
+  // A combined selector for ANY interactive element, used in the fallback logic.
+  const ANY_INTERACTIVE_SELECTOR = Object.values(ELEMENT_CONFIG).join(', ');
+
+  // --- Core Helper Functions ---
+
+  /**
+   * Checks if an element is genuinely visible on the page.
+   * "Visible" means it's not styled with display:none, visibility:hidden, etc.
+   * This check intentionally IGNORES whether the element is within the current viewport.
+   * @param {Element} el The element to check.
+   * @returns {boolean} True if the element is visible.
+   */
+  function isElementVisible(el) {
+    if (!el || !el.isConnected) return false;
+
+    const style = window.getComputedStyle(el);
+    if (
+      style.display === 'none' ||
+      style.visibility === 'hidden' ||
+      parseFloat(style.opacity) === 0
+    ) {
+      return false;
     }
 
-    // If no selector provided, search the entire document
-    let container = document;
-
-    // Find all interactive elements
-    const elements = [];
-
-    // Find buttons if included in types
-    if (types.includes('button')) {
-      const buttons = container.querySelectorAll(
-        'button, input[type="button"], input[type="submit"], [role="button"]',
-      );
-      buttons.forEach((button) => {
-        if (isElementVisible(button) && isElementInteractive(button)) {
-          const text = button.textContent?.trim() || button.getAttribute('value') || '';
-          if (!textQuery || fuzzyMatch(text, textQuery)) {
-            elements.push(createElementInfo(button, 'button', includeCoordinates));
-          }
-        }
-      });
-    }
-
-    // Find links if included in types
-    if (types.includes('link')) {
-      const links = container.querySelectorAll('a, [role="link"]');
-      links.forEach((link) => {
-        if (isElementVisible(link) && isElementInteractive(link)) {
-          const text = link.textContent?.trim() || '';
-          if (!textQuery || fuzzyMatch(text, textQuery)) {
-            elements.push(createElementInfo(link, 'link', includeCoordinates));
-          }
-        }
-      });
-    }
-
-    // Find inputs if included in types
-    const inputTypes = types.filter((t) =>
-      ['input', 'checkbox', 'radio', 'textarea', 'select'].includes(t),
-    );
-    if (inputTypes.length > 0) {
-      // Create selector for all requested input types
-      let inputSelector = [];
-
-      if (inputTypes.includes('input')) {
-        inputSelector.push(
-          'input:not([type="button"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])',
-        );
-      }
-      if (inputTypes.includes('checkbox')) {
-        inputSelector.push('input[type="checkbox"]');
-      }
-      if (inputTypes.includes('radio')) {
-        inputSelector.push('input[type="radio"]');
-      }
-      if (inputTypes.includes('textarea')) {
-        inputSelector.push('textarea');
-      }
-      if (inputTypes.includes('select')) {
-        inputSelector.push('select');
-      }
-
-      const inputs = container.querySelectorAll(inputSelector.join(', '));
-      inputs.forEach((input) => {
-        if (isElementVisible(input) && isElementInteractive(input)) {
-          const inputType = input.getAttribute('type') || input.tagName.toLowerCase();
-          const placeholder = input.getAttribute('placeholder') || '';
-          const label = findLabelForInput(input) || '';
-          const text = label || placeholder;
-
-          if (!textQuery || fuzzyMatch(text, textQuery)) {
-            elements.push(createElementInfo(input, inputType, includeCoordinates));
-          }
-        }
-      });
-    }
-
-    // Find forms if included in types
-    if (types.includes('form')) {
-      const forms = container.querySelectorAll('form');
-      forms.forEach((form) => {
-        if (isElementVisible(form)) {
-          // For forms, we don't check text content for matching
-          if (!textQuery) {
-            elements.push(createElementInfo(form, 'form', includeCoordinates));
-          }
-        }
-      });
-    }
-
-    return elements;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 || rect.height > 0 || el.tagName === 'A'; // Allow zero-size anchors as they can still be navigated
   }
 
   /**
-   * Create element info object
-   * @param {Element} element - The element
-   * @param {string} type - Element type
-   * @param {boolean} includeCoordinates - Whether to include coordinates
-   * @returns {Object} - Element info
+   * Checks if an element is considered interactive (not disabled or hidden from accessibility).
+   * @param {Element} el The element to check.
+   * @returns {boolean} True if the element is interactive.
    */
-  function createElementInfo(element, type, includeCoordinates) {
-    const info = {
-      type: type,
-      selector: generateSelector(element),
-      text:
-        element.textContent?.trim() ||
-        element.getAttribute('value') ||
-        element.getAttribute('placeholder') ||
-        '',
-      isInteractive: isElementInteractive(element),
-    };
+  function isElementInteractive(el) {
+    if (el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true') {
+      return false;
+    }
+    if (el.closest('[aria-hidden="true"]')) {
+      return false;
+    }
+    return true;
+  }
 
-    // Add type-specific properties
-    switch (type) {
-      case 'button':
-        info.disabled =
-          element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true';
-        break;
-      case 'link':
-        info.href = element.getAttribute('href') || '';
-        break;
-      case 'checkbox':
-      case 'radio':
-        info.checked = element.checked;
-        info.label = findLabelForInput(element) || '';
-        break;
-      case 'input':
-      case 'textarea':
-      case 'select':
-        info.placeholder = element.getAttribute('placeholder') || '';
-        info.label = findLabelForInput(element) || '';
-        info.disabled = element.hasAttribute('disabled');
-        break;
-      case 'form':
-        info.action = element.getAttribute('action') || '';
-        info.method = element.getAttribute('method') || 'get';
-        break;
+  /**
+   * Generates a reasonably stable CSS selector for a given element.
+   * @param {Element} el The element.
+   * @returns {string} A CSS selector.
+   */
+  function generateSelector(el) {
+    if (!(el instanceof Element)) return '';
+
+    if (el.id) {
+      const idSelector = `#${CSS.escape(el.id)}`;
+      if (document.querySelectorAll(idSelector).length === 1) return idSelector;
     }
 
-    // Add coordinates if requested
+    for (const attr of ['data-testid', 'data-cy', 'name']) {
+      const attrValue = el.getAttribute(attr);
+      if (attrValue) {
+        const attrSelector = `[${attr}="${CSS.escape(attrValue)}"]`;
+        if (document.querySelectorAll(attrSelector).length === 1) return attrSelector;
+      }
+    }
+
+    let path = '';
+    let current = el;
+    while (current && current.nodeType === Node.ELEMENT_NODE && current.tagName !== 'BODY') {
+      let selector = current.tagName.toLowerCase();
+      const parent = current.parentElement;
+      if (parent) {
+        const siblings = Array.from(parent.children).filter(
+          (child) => child.tagName === current.tagName,
+        );
+        if (siblings.length > 1) {
+          const index = siblings.indexOf(current) + 1;
+          selector += `:nth-of-type(${index})`;
+        }
+      }
+      path = path ? `${selector} > ${path}` : selector;
+      current = parent;
+    }
+    return path ? `body > ${path}` : 'body';
+  }
+
+  /**
+   * Finds the accessible name for an element (label, aria-label, etc.).
+   * @param {Element} el The element.
+   * @returns {string} The accessible name.
+   */
+  function getAccessibleName(el) {
+    const labelledby = el.getAttribute('aria-labelledby');
+    if (labelledby) {
+      const labelElement = document.getElementById(labelledby);
+      if (labelElement) return labelElement.textContent?.trim() || '';
+    }
+    const ariaLabel = el.getAttribute('aria-label');
+    if (ariaLabel) return ariaLabel.trim();
+    if (el.id) {
+      const label = document.querySelector(`label[for="${el.id}"]`);
+      if (label) return label.textContent?.trim() || '';
+    }
+    const parentLabel = el.closest('label');
+    if (parentLabel) return parentLabel.textContent?.trim() || '';
+    return (
+      el.getAttribute('placeholder') ||
+      el.getAttribute('value') ||
+      el.textContent?.trim() ||
+      el.getAttribute('title') ||
+      ''
+    );
+  }
+
+  /**
+   * Simple subsequence matching for fuzzy search.
+   * @param {string} text The text to search within.
+   * @param {string} query The query subsequence.
+   * @returns {boolean}
+   */
+  function fuzzyMatch(text, query) {
+    if (!text || !query) return false;
+    const lowerText = text.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    let textIndex = 0;
+    let queryIndex = 0;
+    while (textIndex < lowerText.length && queryIndex < lowerQuery.length) {
+      if (lowerText[textIndex] === lowerQuery[queryIndex]) {
+        queryIndex++;
+      }
+      textIndex++;
+    }
+    return queryIndex === lowerQuery.length;
+  }
+
+  /**
+   * Creates the standardized info object for an element.
+   * Modified to handle the new 'text' type from the final fallback.
+   */
+  function createElementInfo(el, type, includeCoordinates, isInteractiveOverride = null) {
+    const isActuallyInteractive = isElementInteractive(el);
+    const info = {
+      type,
+      selector: generateSelector(el),
+      text: getAccessibleName(el) || el.textContent?.trim(),
+      isInteractive: isInteractiveOverride !== null ? isInteractiveOverride : isActuallyInteractive,
+      disabled: el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true',
+    };
     if (includeCoordinates) {
-      const rect = element.getBoundingClientRect();
+      const rect = el.getBoundingClientRect();
       info.coordinates = {
         x: rect.left + rect.width / 2,
         y: rect.top + rect.height / 2,
@@ -220,211 +205,145 @@ if (window.__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__) {
         },
       };
     }
-
     return info;
   }
 
   /**
-   * Check if an element is visible
-   * @param {Element} element - The element to check
-   * @returns {boolean} - Whether the element is visible
+   * [CORE UTILITY] Finds interactive elements based on a set of types.
+   * This is our high-performance Layer 1 search function.
    */
-  function isElementVisible(element) {
-    const style = window.getComputedStyle(element);
-    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
-      return false;
+  function findInteractiveElements(options = {}) {
+    const { textQuery, includeCoordinates = true, types = Object.keys(ELEMENT_CONFIG) } = options;
+
+    const selectorsToFind = types
+      .map((type) => ELEMENT_CONFIG[type])
+      .filter(Boolean)
+      .join(', ');
+    if (!selectorsToFind) return [];
+
+    const targetElements = Array.from(document.querySelectorAll(selectorsToFind));
+    const uniqueElements = new Set(targetElements);
+    const results = [];
+
+    for (const el of uniqueElements) {
+      if (!isElementVisible(el) || !isElementInteractive(el)) continue;
+
+      const accessibleName = getAccessibleName(el);
+      if (textQuery && !fuzzyMatch(accessibleName, textQuery)) continue;
+
+      let elementType = 'unknown';
+      for (const [type, typeSelector] of Object.entries(ELEMENT_CONFIG)) {
+        if (el.matches(typeSelector)) {
+          elementType = type;
+          break;
+        }
+      }
+      results.push(createElementInfo(el, elementType, includeCoordinates));
+    }
+    return results;
+  }
+
+  /**
+   * [ORCHESTRATOR] The main entry point that implements the 3-layer fallback logic.
+   * @param {object} options - The main search options.
+   * @returns {ElementInfo[]}
+   */
+  function findElementsByTextWithFallback(options = {}) {
+    const { textQuery, includeCoordinates = true } = options;
+
+    if (!textQuery) {
+      return findInteractiveElements({ ...options, types: Object.keys(ELEMENT_CONFIG) });
     }
 
-    const rect = element.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) {
-      return false;
+    // --- Layer 1: High-reliability search for interactive elements matching text ---
+    let results = findInteractiveElements({ ...options, types: Object.keys(ELEMENT_CONFIG) });
+    if (results.length > 0) {
+      return results;
     }
 
-    // Check if element is in viewport
-    if (
-      rect.bottom < 0 ||
-      rect.top > window.innerHeight ||
-      rect.right < 0 ||
-      rect.left > window.innerWidth
-    ) {
-      return false;
-    }
-
-    // Check if element is covered by another element
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-
-    const elementAtPoint = document.elementFromPoint(centerX, centerY);
-    if (!elementAtPoint) return false;
-
-    return (
-      element === elementAtPoint ||
-      element.contains(elementAtPoint) ||
-      elementAtPoint.contains(element)
+    // --- Layer 2: Find text, then find its interactive ancestor ---
+    const lowerCaseText = textQuery.toLowerCase();
+    const xPath = `//text()[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '${lowerCaseText}')]`;
+    const textNodes = document.evaluate(
+      xPath,
+      document,
+      null,
+      XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+      null,
     );
-  }
 
-  /**
-   * Check if an element is interactive
-   * @param {Element} element - The element to check
-   * @returns {boolean} - Whether the element is interactive
-   */
-  function isElementInteractive(element) {
-    // Check if element is disabled
-    if (element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true') {
-      return false;
-    }
-
-    // Check if element is hidden from assistive technology
-    if (element.getAttribute('aria-hidden') === 'true') {
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Find the label text for an input element
-   * @param {Element} input - The input element
-   * @returns {string} - The label text
-   */
-  function findLabelForInput(input) {
-    // Check for label with 'for' attribute
-    const id = input.getAttribute('id');
-    if (id) {
-      const label = document.querySelector(`label[for="${id}"]`);
-      if (label) {
-        return label.textContent?.trim() || '';
-      }
-    }
-
-    // Check for parent label
-    let parent = input.parentElement;
-    while (parent) {
-      if (parent.tagName === 'LABEL') {
-        return parent.textContent?.trim() || '';
-      }
-      parent = parent.parentElement;
-    }
-
-    // Check for aria-label
-    const ariaLabel = input.getAttribute('aria-label');
-    if (ariaLabel) {
-      return ariaLabel;
-    }
-
-    return '';
-  }
-
-  /**
-   * Generate a CSS selector for an element
-   * @param {Element} element - The element to generate a selector for
-   * @returns {string} - The CSS selector
-   */
-  function generateSelector(element) {
-    // Try to use ID if available
-    if (element.id) {
-      return `#${element.id}`;
-    }
-
-    // Try to use unique classes if available
-    if (element.className && typeof element.className === 'string') {
-      const classes = element.className.trim().split(/\s+/);
-      if (classes.length > 0) {
-        const selector = '.' + classes.join('.');
-        // Check if this selector is unique
-        if (document.querySelectorAll(selector).length === 1) {
-          return selector;
-        }
-      }
-    }
-
-    // Use tag name with nth-child as fallback
-    let path = '';
-    let current = element;
-
-    while (current && current !== document.documentElement) {
-      let selector = current.tagName.toLowerCase();
-      const parent = current.parentElement;
-
-      if (parent) {
-        const siblings = Array.from(parent.children).filter(
-          (child) => child.tagName === current.tagName,
-        );
-
-        if (siblings.length > 1) {
-          const index = siblings.indexOf(current) + 1;
-          selector += `:nth-child(${index})`;
+    const interactiveElements = new Set();
+    if (textNodes.snapshotLength > 0) {
+      for (let i = 0; i < textNodes.snapshotLength; i++) {
+        const parentElement = textNodes.snapshotItem(i).parentElement;
+        if (parentElement) {
+          const interactiveAncestor = parentElement.closest(ANY_INTERACTIVE_SELECTOR);
+          if (
+            interactiveAncestor &&
+            isElementVisible(interactiveAncestor) &&
+            isElementInteractive(interactiveAncestor)
+          ) {
+            interactiveElements.add(interactiveAncestor);
+          }
         }
       }
 
-      path = selector + (path ? ' > ' + path : '');
-      current = parent;
-    }
-
-    return path;
-  }
-
-  /**
-   * Perform fuzzy text matching
-   * @param {string} text - The text to search in
-   * @param {string} query - The query to search for
-   * @returns {boolean} - Whether the text matches the query
-   */
-  function fuzzyMatch(text, query) {
-    if (!text || !query) return false;
-
-    text = text.toLowerCase();
-    query = query.toLowerCase();
-    console.log('text', text, 'query', query);
-    // Simple contains check
-    if (text.includes(query)) return true;
-
-    // More advanced fuzzy matching
-    let textIndex = 0;
-    let queryIndex = 0;
-
-    while (textIndex < text.length && queryIndex < query.length) {
-      if (text[textIndex] === query[queryIndex]) {
-        queryIndex++;
+      if (interactiveElements.size > 0) {
+        return Array.from(interactiveElements).map((el) => {
+          let elementType = 'interactive';
+          for (const [type, typeSelector] of Object.entries(ELEMENT_CONFIG)) {
+            if (el.matches(typeSelector)) {
+              elementType = type;
+              break;
+            }
+          }
+          return createElementInfo(el, elementType, includeCoordinates);
+        });
       }
-      textIndex++;
     }
 
-    return queryIndex === query.length;
+    // --- Layer 3: Final fallback, return any element containing the text ---
+    const leafElements = new Set();
+    for (let i = 0; i < textNodes.snapshotLength; i++) {
+      const parentElement = textNodes.snapshotItem(i).parentElement;
+      if (parentElement && isElementVisible(parentElement)) {
+        leafElements.add(parentElement);
+      }
+    }
+
+    const finalElements = Array.from(leafElements).filter((el) => {
+      return ![...leafElements].some((otherEl) => el !== otherEl && el.contains(otherEl));
+    });
+
+    return finalElements.map((el) => createElementInfo(el, 'text', includeCoordinates, true));
   }
 
-  // Listen for messages from the extension
+  // --- Chrome Message Listener ---
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (request.action === 'getInteractiveElements') {
       try {
-        const elements = findInteractiveElements({
-          textQuery: request.textQuery,
-          selector: request.selector,
-          includeCoordinates: request.includeCoordinates !== false,
-          types: request.types || [
-            'button',
-            'link',
-            'input',
-            'select',
-            'textarea',
-            'checkbox',
-            'radio',
-            'form',
-          ],
-        });
-
-        sendResponse({
-          success: true,
-          elements: elements,
-        });
+        let elements;
+        if (request.selector) {
+          // If a selector is provided, bypass the text-based logic and use a direct query.
+          const foundEls = Array.from(document.querySelectorAll(request.selector));
+          elements = foundEls.map((el) =>
+            createElementInfo(
+              el,
+              'selected',
+              request.includeCoordinates !== false,
+              isElementInteractive(el),
+            ),
+          );
+        } else {
+          // Otherwise, use our powerful multi-layered text search
+          elements = findElementsByTextWithFallback(request);
+        }
+        sendResponse({ success: true, elements });
       } catch (error) {
-        sendResponse({
-          success: false,
-          error: `Failed to get interactive elements: ${error.message}`,
-        });
+        console.error('Error in getInteractiveElements:', error);
+        sendResponse({ success: false, error: error.message });
       }
-      return true; // Indicates async response
+      return true; // Async response
     } else if (request.action === 'chrome_get_interactive_elements_ping') {
       sendResponse({ status: 'pong' });
       return false;
@@ -432,4 +351,4 @@ if (window.__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__) {
   });
 
   console.log('Interactive elements helper script loaded');
-}
+})();
