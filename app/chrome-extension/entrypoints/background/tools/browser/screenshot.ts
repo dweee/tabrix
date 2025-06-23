@@ -8,6 +8,7 @@ import {
   createImageBitmapFromUrl,
   cropAndResizeImage,
   stitchImages,
+  compressImage,
 } from '../../../../utils/image-utils';
 
 // Screenshot-specific constants
@@ -108,15 +109,22 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
 
       // 2. Process output
       if (storeBase64 === true) {
+        // Compress image for base64 output to reduce size
+        const compressed = await compressImage(finalImageDataUrl, {
+          scale: 0.7, // Reduce dimensions by 30%
+          quality: 0.8, // 80% quality for good balance
+          format: 'image/jpeg', // JPEG for better compression
+        });
+
         // Include base64 data in response (without prefix)
-        const base64Data = finalImageDataUrl.replace(/^data:image\/png;base64,/, '');
+        const base64Data = compressed.dataUrl.replace(/^data:image\/[^;]+;base64,/, '');
         results.base64 = base64Data;
         return {
           content: [
             {
               type: 'image',
               data: base64Data,
-              mimeType: 'image/png',
+              mimeType: compressed.mimeType,
             },
           ],
           isError: false,

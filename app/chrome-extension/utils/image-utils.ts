@@ -98,7 +98,9 @@ export async function cropAndResizeImage(
   }
 
   if (sWidth <= 0 || sHeight <= 0) {
-    throw new Error('Invalid calculated crop size (<=0). Element may not be visible or fully captured.');
+    throw new Error(
+      'Invalid calculated crop size (<=0). Element may not be visible or fully captured.',
+    );
   }
 
   const finalCanvasWidthPx = targetWidthOpt ? targetWidthOpt * dpr : sWidth;
@@ -111,17 +113,7 @@ export async function cropAndResizeImage(
     throw new Error('Unable to get canvas context');
   }
 
-  ctx.drawImage(
-    img,
-    sx,
-    sy,
-    sWidth,
-    sHeight,
-    0,
-    0,
-    finalCanvasWidthPx,
-    finalCanvasHeightPx,
-  );
+  ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, finalCanvasWidthPx, finalCanvasHeightPx);
 
   return canvas;
 }
@@ -149,4 +141,54 @@ export async function canvasToDataURL(
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+}
+
+/**
+ * Compresses an image by scaling it and converting it to a target format with a specific quality.
+ * This is the most effective way to reduce image data size for transport or storage.
+ *
+ * @param {string} imageDataUrl - The original image data URL (e.g., from captureVisibleTab).
+ * @param {object} options - Compression options.
+ * @param {number} [options.scale=1.0] - The scaling factor for dimensions (e.g., 0.7 for 70%).
+ * @param {number} [options.quality=0.8] - The quality for lossy formats like JPEG (0.0 to 1.0).
+ * @param {string} [options.format='image/jpeg'] - The target image format.
+ * @returns {Promise<{dataUrl: string, mimeType: string}>} A promise that resolves to the compressed image data URL and its MIME type.
+ */
+export async function compressImage(
+  imageDataUrl: string,
+  options: { scale?: number; quality?: number; format?: 'image/jpeg' | 'image/webp' },
+): Promise<{ dataUrl: string; mimeType: string }> {
+  const { scale = 1.0, quality = 0.8, format = 'image/jpeg' } = options;
+
+  // 1. Create an ImageBitmap from the original data URL for efficient drawing.
+  const imageBitmap = await createImageBitmapFromUrl(imageDataUrl);
+
+  // 2. Calculate the new dimensions based on the scale factor.
+  const newWidth = Math.round(imageBitmap.width * scale);
+  const newHeight = Math.round(imageBitmap.height * scale);
+
+  // 3. Use OffscreenCanvas for performance, as it doesn't need to be in the DOM.
+  const canvas = new OffscreenCanvas(newWidth, newHeight);
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) {
+    throw new Error('Failed to get 2D context from OffscreenCanvas');
+  }
+
+  // 4. Draw the original image onto the smaller canvas, effectively resizing it.
+  ctx.drawImage(imageBitmap, 0, 0, newWidth, newHeight);
+
+  // 5. Export the canvas content to the target format with the specified quality.
+  // This is the step that performs the data compression.
+  const compressedDataUrl = await canvas.convertToBlob({ type: format, quality: quality });
+
+  // A helper to convert blob to data URL since OffscreenCanvas.toDataURL is not standard yet
+  // on all execution contexts (like service workers).
+  const dataUrl = await new Promise<string>((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.readAsDataURL(compressedDataUrl);
+  });
+
+  return { dataUrl, mimeType: format };
 }
