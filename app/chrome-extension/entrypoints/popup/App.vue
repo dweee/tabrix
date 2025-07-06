@@ -7,15 +7,15 @@
     </div>
     <div class="content">
       <div class="section">
-        <h2 class="section-title">{{ getMessage('nativeServerConfig') }}</h2>
+        <h2 class="section-title">{{ getMessage('nativeServerConfigLabel') }}</h2>
         <div class="config-card">
           <div class="status-section">
             <div class="status-header">
-              <p class="status-label">{{ getMessage('runningStatus') }}</p>
+              <p class="status-label">{{ getMessage('runningStatusLabel') }}</p>
               <button
                 class="refresh-status-button"
                 @click="refreshServerStatus"
-                :title="getMessage('refreshStatus')"
+                :title="getMessage('refreshStatusButton')"
               >
                 🔄
               </button>
@@ -25,14 +25,14 @@
               <span class="status-text">{{ getStatusText() }}</span>
             </div>
             <div v-if="serverStatus.lastUpdated" class="status-timestamp">
-              {{ getMessage('lastUpdated') }}
+              {{ getMessage('lastUpdatedLabel') }}
               {{ new Date(serverStatus.lastUpdated).toLocaleTimeString() }}
             </div>
           </div>
 
           <div v-if="showMcpConfig" class="mcp-config-section">
             <div class="mcp-config-header">
-              <p class="mcp-config-label">{{ getMessage('mcpServerConfig') }}</p>
+              <p class="mcp-config-label">{{ getMessage('mcpServerConfigLabel') }}</p>
               <button class="copy-config-button" @click="copyMcpConfig">
                 {{ copyButtonText }}
               </button>
@@ -42,7 +42,7 @@
             </div>
           </div>
           <div class="port-section">
-            <label for="port" class="port-label">{{ getMessage('connectionPort') }}</label>
+            <label for="port" class="port-label">{{ getMessage('connectionPortLabel') }}</label>
             <input
               type="text"
               id="port"
@@ -56,17 +56,17 @@
             <BoltIcon />
             <span>{{
               isConnecting
-                ? getMessage('connecting')
+                ? getMessage('connectingStatus')
                 : nativeConnectionStatus === 'connected'
-                  ? getMessage('disconnect')
-                  : getMessage('connect')
+                  ? getMessage('disconnectButton')
+                  : getMessage('connectButton')
             }}</span>
           </button>
         </div>
       </div>
 
       <div class="section">
-        <h2 class="section-title">{{ getMessage('semanticEngine') }}</h2>
+        <h2 class="section-title">{{ getMessage('semanticEngineLabel') }}</h2>
         <div class="semantic-engine-card">
           <div class="semantic-engine-status">
             <div class="status-info">
@@ -74,7 +74,7 @@
               <span class="status-text">{{ getSemanticEngineStatusText() }}</span>
             </div>
             <div v-if="semanticEngineLastUpdated" class="status-timestamp">
-              {{ getMessage('lastUpdated') }}
+              {{ getMessage('lastUpdatedLabel') }}
               {{ new Date(semanticEngineLastUpdated).toLocaleTimeString() }}
             </div>
           </div>
@@ -98,7 +98,7 @@
       </div>
 
       <div class="section">
-        <h2 class="section-title">{{ getMessage('embeddingModel') }}</h2>
+        <h2 class="section-title">{{ getMessage('embeddingModelLabel') }}</h2>
 
         <ProgressIndicator
           v-if="isModelSwitching || isModelDownloading"
@@ -110,9 +110,9 @@
           <div class="error-content">
             <div class="error-icon">⚠️</div>
             <div class="error-details">
-              <p class="error-title">{{ getMessage('semanticEngineInitFailed') }}</p>
+              <p class="error-title">{{ getMessage('semanticEngineInitFailedStatus') }}</p>
               <p class="error-message">{{
-                modelErrorMessage || getMessage('semanticEngineInitFailed')
+                modelErrorMessage || getMessage('semanticEngineInitFailedStatus')
               }}</p>
               <p class="error-suggestion">{{ getErrorTypeText() }}</p>
             </div>
@@ -123,7 +123,7 @@
             :disabled="isModelSwitching || isModelDownloading"
           >
             <span>🔄</span>
-            <span>{{ getMessage('retry') }}</span>
+            <span>{{ getMessage('retryButton') }}</span>
           </button>
         </div>
 
@@ -163,11 +163,11 @@
       </div>
 
       <div class="section">
-        <h2 class="section-title">{{ getMessage('indexDataManagement') }}</h2>
+        <h2 class="section-title">{{ getMessage('indexDataManagementLabel') }}</h2>
         <div class="stats-grid">
           <div class="stats-card">
             <div class="stats-header">
-              <p class="stats-label">{{ getMessage('indexedPages') }}</p>
+              <p class="stats-label">{{ getMessage('indexedPagesLabel') }}</p>
               <span class="stats-icon violet">
                 <DocumentIcon />
               </span>
@@ -177,7 +177,7 @@
 
           <div class="stats-card">
             <div class="stats-header">
-              <p class="stats-label">{{ getMessage('indexSize') }}</p>
+              <p class="stats-label">{{ getMessage('indexSizeLabel') }}</p>
               <span class="stats-icon teal">
                 <DatabaseIcon />
               </span>
@@ -187,7 +187,7 @@
 
           <div class="stats-card">
             <div class="stats-header">
-              <p class="stats-label">{{ getMessage('activeTabs') }}</p>
+              <p class="stats-label">{{ getMessage('activeTabsLabel') }}</p>
               <span class="stats-icon blue">
                 <TabIcon />
               </span>
@@ -197,7 +197,7 @@
 
           <div class="stats-card">
             <div class="stats-header">
-              <p class="stats-label">{{ getMessage('vectorDocuments') }}</p>
+              <p class="stats-label">{{ getMessage('vectorDocumentsLabel') }}</p>
               <span class="stats-icon green">
                 <VectorIcon />
               </span>
@@ -218,7 +218,7 @@
           @click="showClearConfirmation = true"
         >
           <TrashIcon />
-          <span>{{ isClearingData ? getMessage('clearing') : getMessage('clearAllData') }}</span>
+          <span>{{ isClearingData ? getMessage('clearingStatus') : getMessage('clearAllDataButton') }}</span>
         </button>
       </div>
 
@@ -237,18 +237,18 @@
 
     <ConfirmDialog
       :visible="showClearConfirmation"
-      :title="getMessage('confirmClearData')"
-      :message="getMessage('clearDataWarning')"
+      :title="getMessage('confirmClearDataTitle')"
+      :message="getMessage('clearDataWarningMessage')"
       :items="[
         getMessage('clearDataList1'),
         getMessage('clearDataList2'),
         getMessage('clearDataList3'),
       ]"
-      :warning="getMessage('clearDataIrreversible')"
+      :warning="getMessage('clearDataIrreversibleWarning')"
       icon="⚠️"
-      :confirm-text="getMessage('confirmClear')"
-      :cancel-text="getMessage('cancel')"
-      :confirming-text="getMessage('clearing')"
+      :confirm-text="getMessage('confirmClearButton')"
+      :cancel-text="getMessage('cancelButton')"
+      :confirming-text="getMessage('clearingStatus')"
       :is-confirming="isClearingData"
       @confirm="confirmClearAllData"
       @cancel="hideClearDataConfirmation"
@@ -299,7 +299,7 @@ const showMcpConfig = computed(() => {
   return nativeConnectionStatus.value === 'connected' && serverStatus.value.isRunning;
 });
 
-const copyButtonText = ref(getMessage('copyConfig'));
+const copyButtonText = ref(getMessage('copyConfigButton'));
 
 const mcpConfigJson = computed(() => {
   const port = serverStatus.value.port || nativeServerPort.value;
@@ -385,14 +385,14 @@ const getStatusClass = () => {
 const getStatusText = () => {
   if (nativeConnectionStatus.value === 'connected') {
     if (serverStatus.value.isRunning) {
-      return getMessage('serviceRunning', [(serverStatus.value.port || 'Unknown').toString()]);
+      return getMessage('serviceRunningStatus', [(serverStatus.value.port || 'Unknown').toString()]);
     } else {
-      return getMessage('connectedServiceNotStarted');
+      return getMessage('connectedServiceNotStartedStatus');
     }
   } else if (nativeConnectionStatus.value === 'disconnected') {
-    return getMessage('serviceNotConnected');
+    return getMessage('serviceNotConnectedStatus');
   } else {
-    return getMessage('detecting');
+    return getMessage('detectingStatus');
   }
 };
 
@@ -405,22 +405,22 @@ const formatIndexSize = () => {
 const getModelDescription = (model: any) => {
   switch (model.preset) {
     case 'multilingual-e5-small':
-      return getMessage('lightweightModel');
+      return getMessage('lightweightModelDescription');
     case 'multilingual-e5-base':
-      return getMessage('betterThanSmall');
+      return getMessage('betterThanSmallDescription');
     default:
-      return getMessage('multilingualModel');
+      return getMessage('multilingualModelDescription');
   }
 };
 
 const getPerformanceText = (performance: string) => {
   switch (performance) {
     case 'fast':
-      return getMessage('fast');
+      return getMessage('fastPerformance');
     case 'balanced':
-      return getMessage('balanced');
+      return getMessage('balancedPerformance');
     case 'accurate':
-      return getMessage('accurate');
+      return getMessage('accuratePerformance');
     default:
       return performance;
   }
@@ -429,14 +429,14 @@ const getPerformanceText = (performance: string) => {
 const getSemanticEngineStatusText = () => {
   switch (semanticEngineStatus.value) {
     case 'ready':
-      return getMessage('semanticEngineReady');
+      return getMessage('semanticEngineReadyStatus');
     case 'initializing':
-      return getMessage('semanticEngineInitializing');
+      return getMessage('semanticEngineInitializingStatus');
     case 'error':
-      return getMessage('semanticEngineInitFailed');
+      return getMessage('semanticEngineInitFailedStatus');
     case 'idle':
     default:
-      return getMessage('semanticEngineNotInit');
+      return getMessage('semanticEngineNotInitStatus');
   }
 };
 
@@ -460,9 +460,9 @@ const getActiveTabsCount = () => {
 
 const getProgressText = () => {
   if (isModelDownloading.value) {
-    return getMessage('downloadingModel', [modelDownloadProgress.value.toString()]);
+    return getMessage('downloadingModelStatus', [modelDownloadProgress.value.toString()]);
   } else if (isModelSwitching.value) {
-    return modelSwitchProgress.value || getMessage('switchingModel');
+    return modelSwitchProgress.value || getMessage('switchingModelStatus');
   }
   return '';
 };
@@ -470,26 +470,26 @@ const getProgressText = () => {
 const getErrorTypeText = () => {
   switch (modelErrorType.value) {
     case 'network':
-      return getMessage('networkError');
+      return getMessage('networkErrorMessage');
     case 'file':
-      return getMessage('modelCorrupted');
+      return getMessage('modelCorruptedErrorMessage');
     case 'unknown':
     default:
-      return getMessage('unknownError');
+      return getMessage('unknownErrorMessage');
   }
 };
 
 const getSemanticEngineButtonText = () => {
   switch (semanticEngineStatus.value) {
     case 'ready':
-      return getMessage('reinitialize');
+      return getMessage('reinitializeButton');
     case 'initializing':
-      return getMessage('initializing');
+      return getMessage('initializingStatus');
     case 'error':
-      return getMessage('reinitialize');
+      return getMessage('reinitializeButton');
     case 'idle':
     default:
-      return getMessage('initSemanticEngine');
+      return getMessage('initSemanticEngineButton');
   }
 };
 
@@ -556,8 +556,8 @@ const initializeSemanticEngine = async () => {
   isSemanticEngineInitializing.value = true;
   semanticEngineStatus.value = 'initializing';
   semanticEngineInitProgress.value = isReinitialization
-    ? '正在重新初始化语义引擎...'
-    : '正在初始化语义引擎...';
+    ? getMessage('semanticEngineInitializingStatus')
+    : getMessage('semanticEngineInitializingStatus');
   semanticEngineLastUpdated.value = Date.now();
 
   await saveSemanticEngineState();
@@ -575,12 +575,12 @@ const initializeSemanticEngine = async () => {
     startSemanticEngineStatusPolling();
 
     semanticEngineInitProgress.value = isReinitialization
-      ? '重新初始化请求已发送，正在后台处理...'
-      : '初始化请求已发送，正在后台处理...';
+      ? getMessage('processingStatus')
+      : getMessage('processingStatus');
   } catch (error: any) {
     console.error('❌ Failed to send initialization request:', error);
     semanticEngineStatus.value = 'error';
-    semanticEngineInitProgress.value = `发送初始化请求失败: ${error?.message || '未知错误'}`;
+    semanticEngineInitProgress.value = `Failed to send initialization request: ${error?.message || 'Unknown error'}`;
 
     await saveSemanticEngineState();
 
@@ -608,7 +608,7 @@ const checkSemanticEngineStatus = async () => {
         semanticEngineStatus.value = 'ready';
         semanticEngineLastUpdated.value = Date.now();
         isSemanticEngineInitializing.value = false;
-        semanticEngineInitProgress.value = '语义引擎初始化成功！';
+        semanticEngineInitProgress.value = getMessage('semanticEngineReadyStatus');
         await saveSemanticEngineState();
         stopSemanticEngineStatusPolling();
         setTimeout(() => {
@@ -620,14 +620,14 @@ const checkSemanticEngineStatus = async () => {
       ) {
         semanticEngineStatus.value = 'initializing';
         isSemanticEngineInitializing.value = true;
-        semanticEngineInitProgress.value = '正在初始化语义引擎...';
+        semanticEngineInitProgress.value = getMessage('semanticEngineInitializingStatus');
         semanticEngineLastUpdated.value = Date.now();
         await saveSemanticEngineState();
       } else if (status.initializationStatus === 'error') {
         semanticEngineStatus.value = 'error';
         semanticEngineLastUpdated.value = Date.now();
         isSemanticEngineInitializing.value = false;
-        semanticEngineInitProgress.value = '语义引擎初始化失败';
+        semanticEngineInitProgress.value = getMessage('semanticEngineInitFailedStatus');
         await saveSemanticEngineState();
         stopSemanticEngineStatusPolling();
         setTimeout(() => {
@@ -722,17 +722,17 @@ const refreshServerStatus = async () => {
 const copyMcpConfig = async () => {
   try {
     await navigator.clipboard.writeText(mcpConfigJson.value);
-    copyButtonText.value = '✅已复制';
+    copyButtonText.value = '✅' + getMessage('configCopiedNotification');
 
     setTimeout(() => {
-      copyButtonText.value = '复制配置';
+      copyButtonText.value = getMessage('copyConfigButton');
     }, 2000);
   } catch (error) {
     console.error('复制配置失败:', error);
-    copyButtonText.value = '❌复制失败';
+    copyButtonText.value = '❌' + getMessage('networkErrorMessage');
 
     setTimeout(() => {
-      copyButtonText.value = '复制配置';
+      copyButtonText.value = getMessage('copyConfigButton');
     }, 2000);
   }
 };
@@ -921,7 +921,7 @@ const startModelStatusMonitoring = () => {
         isModelDownloading.value = status.isDownloading || false;
 
         if (status.initializationStatus === 'error') {
-          modelErrorMessage.value = status.errorMessage || '模型加载失败';
+          modelErrorMessage.value = status.errorMessage || getMessage('modelFailedStatus');
           modelErrorType.value = status.errorType || 'unknown';
         } else {
           modelErrorMessage.value = '';
@@ -1021,7 +1021,7 @@ const confirmClearAllData = async () => {
   if (isClearingData.value) return;
 
   isClearingData.value = true;
-  clearDataProgress.value = '正在清空所有数据...';
+  clearDataProgress.value = getMessage('clearingStatus');
 
   try {
     console.log('🗑️ Starting to clear all data...');
@@ -1032,7 +1032,7 @@ const confirmClearAllData = async () => {
     });
 
     if (response && response.success) {
-      clearDataProgress.value = '数据清空成功！';
+      clearDataProgress.value = getMessage('dataClearedNotification');
       console.log('✅ All data cleared successfully');
 
       await refreshStorageStats();
@@ -1042,11 +1042,11 @@ const confirmClearAllData = async () => {
         hideClearDataConfirmation();
       }, 2000);
     } else {
-      throw new Error(response?.error || '清空数据失败');
+      throw new Error(response?.error || 'Failed to clear data');
     }
   } catch (error: any) {
     console.error('❌ Failed to clear all data:', error);
-    clearDataProgress.value = `清空数据失败: ${error?.message || '未知错误'}`;
+    clearDataProgress.value = `Failed to clear data: ${error?.message || 'Unknown error'}`;
 
     setTimeout(() => {
       clearDataProgress.value = '';
@@ -1093,7 +1093,7 @@ const switchModel = async (newModel: ModelPreset) => {
   );
 
   isModelSwitching.value = true;
-  modelSwitchProgress.value = '正在切换模型...';
+  modelSwitchProgress.value = getMessage('switchingModelStatus');
 
   modelInitializationStatus.value = 'downloading';
   modelDownloadProgress.value = 0;
@@ -1104,7 +1104,7 @@ const switchModel = async (newModel: ModelPreset) => {
     await saveVersionPreference('quantized');
     await saveModelState();
 
-    modelSwitchProgress.value = '正在重新初始化语义引擎...';
+    modelSwitchProgress.value = getMessage('semanticEngineInitializingStatus');
 
     startModelStatusMonitoring();
 
@@ -1119,7 +1119,7 @@ const switchModel = async (newModel: ModelPreset) => {
 
     if (response && response.success) {
       currentModel.value = newModel;
-      modelSwitchProgress.value = '模型切换成功！';
+      modelSwitchProgress.value = getMessage('successNotification');
       console.log(
         '模型切换成功:',
         newModel,
@@ -1136,11 +1136,11 @@ const switchModel = async (newModel: ModelPreset) => {
         modelSwitchProgress.value = '';
       }, 2000);
     } else {
-      throw new Error(response?.error || '模型切换失败');
+      throw new Error(response?.error || 'Model switch failed');
     }
   } catch (error: any) {
     console.error('模型切换失败:', error);
-    modelSwitchProgress.value = `模型切换失败: ${error?.message || '未知错误'}`;
+    modelSwitchProgress.value = `Model switch failed: ${error?.message || 'Unknown error'}`;
 
     modelInitializationStatus.value = 'error';
     isModelDownloading.value = false;
@@ -1152,14 +1152,14 @@ const switchModel = async (newModel: ModelPreset) => {
       errorMessage.includes('timeout')
     ) {
       modelErrorType.value = 'network';
-      modelErrorMessage.value = '网络连接失败，无法下载模型文件';
+      modelErrorMessage.value = getMessage('networkErrorMessage');
     } else if (
       errorMessage.includes('corrupt') ||
       errorMessage.includes('invalid') ||
       errorMessage.includes('format')
     ) {
       modelErrorType.value = 'file';
-      modelErrorMessage.value = '模型文件损坏或格式错误';
+      modelErrorMessage.value = getMessage('modelCorruptedErrorMessage');
     } else {
       modelErrorType.value = 'unknown';
       modelErrorMessage.value = errorMessage;

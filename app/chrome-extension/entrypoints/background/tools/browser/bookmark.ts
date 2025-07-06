@@ -153,7 +153,7 @@ async function createFolderPath(
     const bookmarkBarFolder = rootChildren.find(
       (node) =>
         !node.url &&
-        (node.title === getMessage('bookmarksBar') ||
+        (node.title === getMessage('bookmarksBarLabel') ||
           node.title === 'Bookmarks bar' ||
           node.title === 'Bookmarks Bar'),
     );
@@ -435,7 +435,7 @@ class BookmarkAddTool extends BaseBrowserToolExecutor {
         const bookmarkBarFolder = rootChildren.find(
           (node) =>
             !node.url &&
-            (node.title === getMessage('bookmarksBar') ||
+            (node.title === getMessage('bookmarksBarLabel') ||
               node.title === 'Bookmarks bar' ||
               node.title === 'Bookmarks Bar'),
         );

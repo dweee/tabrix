@@ -56,9 +56,9 @@ interface Emits {
 
 withDefaults(defineProps<Props>(), {
   icon: '⚠️',
-  confirmText: getMessage('confirm'),
-  cancelText: getMessage('cancel'),
-  confirmingText: getMessage('processing'),
+  confirmText: getMessage('confirmButton'),
+  cancelText: getMessage('cancelButton'),
+  confirmingText: getMessage('processingStatus'),
   isConfirming: false,
 });
 
