@@ -8,6 +8,7 @@
 
 **📖 Documentation**: [English](README.md) | [中文](README_zh.md)
 
+> The project is still in its early stages and is under intensive development. More features, stability improvements, and other enhancements will follow.
 ---
 
 ## 🎯 What is Chrome MCP Server?
