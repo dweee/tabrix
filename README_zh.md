@@ -287,4 +287,8 @@ https://github.com/user-attachments/assets/ff160f48-58e0-4c76-a6b0-c4e1f91370c8
 
 ## 微信交流群
 
-![IMG_6248](https://github.com/user-attachments/assets/84de0cd1-6a30-4f10-93c4-c219a9522cbb)
+拉群的目的是让踩过坑的大佬们互相帮忙解答问题，因本人平时要忙着搬砖，不一定能及时解答
+
+![IMG_6277](https://github.com/user-attachments/assets/844a5215-6663-48eb-b44b-5dd8ebf2d825)
+
+
