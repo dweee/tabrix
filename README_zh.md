@@ -198,6 +198,8 @@ pnpm list -g mcp-chrome-bridge
 
 prompt: [excalidraw-prompt](prompt/excalidraw-prompt.md)
 指令：帮我总结当前页面内容，然后画个图帮我理解
+https://www.youtube.com/watch?v=3fBPdUBWVz0
+
 
 https://github.com/user-attachments/assets/f14f79a6-9390-4821-8296-06d020bcfc07
 
@@ -205,6 +207,7 @@ https://github.com/user-attachments/assets/f14f79a6-9390-4821-8296-06d020bcfc07
 
 prompt: [excalidraw-prompt](prompt/excalidraw-prompt.md)|[content-analize](prompt/content-analize.md)
 指令：先看下图片是否能用excalidraw画出来，如果则列出所需的步骤和元素，然后画出来
+https://www.youtube.com/watch?v=tEPdHZBzbZk
 
 https://github.com/user-attachments/assets/4f0600c1-bb1e-4b57-85ab-36c8bdf71c68
 
@@ -212,48 +215,62 @@ https://github.com/user-attachments/assets/4f0600c1-bb1e-4b57-85ab-36c8bdf71c68
 
 prompt: [modify-web-prompt](prompt/modify-web.md)
 指令：帮我修改当前页面的样式，去掉广告
+https://youtu.be/twI6apRKHsk
+
 
 https://github.com/user-attachments/assets/aedbe98d-e90c-4a58-a4a5-d888f7293d8e
 
 ### ai自动帮你捕获网络请求
 
 指令：我想知道小红书的搜索接口是哪个，响应体结构是什么样的
+https://youtu.be/1hHKr7XKqnQ
+
 
 https://github.com/user-attachments/assets/063f44ae-1754-46b6-b141-5988c86e4d96
 
 ### ai帮你分析你的浏览记录
 
 指令：分析一下我近一个月的浏览记录
+https://youtu.be/jf2UZfrR2Vk
+
 
 https://github.com/user-attachments/assets/e7a35118-e50e-4b1c-a790-0878aa2505ab
 
 ### 网页对话
 
 指令：翻译并总结当前网页
+https://youtu.be/FlJKS9UQyC8
+
 
 https://github.com/user-attachments/assets/08aa86aa-7706-4df2-b400-576e2c7fcc7f
 
 ### ai帮你自动截图（网页截图）
 
 指令：把huggingface的首页截个图
+https://youtu.be/7ycK6iksWi4
 
 https://github.com/user-attachments/assets/b081e41b-6309-40d6-885b-0da01691b12e
 
 ### ai帮你自动截图（元素截图）
 
 指令：把huggingface首页的图标截取下来
+https://youtu.be/ev8VivANIrk
 
 https://github.com/user-attachments/assets/25657076-b84b-4459-a72f-90f896f06364
 
 ### ai帮你管理书签
 
 指令：将当前页面添加到书签中，放到合适的文件夹
+https://youtu.be/R_83arKmFTo
+
 
 https://github.com/user-attachments/assets/73c1ea26-65fb-4b5e-b537-e32fa9bcfa52
 
 ### 自动关闭网页
 
 指令：关闭所有shadcn相关的网页
+https://youtu.be/2wzUT6eNVg4
+
 
 https://github.com/user-attachments/assets/ff160f48-58e0-4c76-a6b0-c4e1f91370c8
 
@@ -291,6 +308,7 @@ https://github.com/user-attachments/assets/ff160f48-58e0-4c76-a6b0-c4e1f91370c8
 
 拉群的目的是让踩过坑的大佬们互相帮忙解答问题，因本人平时要忙着搬砖，不一定能及时解答
 
-![IMG_6277](https://github.com/user-attachments/assets/844a5215-6663-48eb-b44b-5dd8ebf2d825)
+![IMG_6296](https://github.com/user-attachments/assets/ecd2e084-24d2-4038-b75f-3ab020b55594)
+
 
 
