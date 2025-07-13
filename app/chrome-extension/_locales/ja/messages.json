@@ -53,8 +53,9 @@
   "serviceRunningStatus": {
     "message": "サービス実行中 (ポート: $1)",
     "placeholders": {
-      "1": {
-        "content": "$1"
+      "port": {
+        "content": "$1",
+        "example": "12306"
       }
     }
   },
@@ -133,8 +134,9 @@
   "downloadingModelStatus": {
     "message": "モデルをダウンロード中... $1%",
     "placeholders": {
-      "1": {
-        "content": "$1"
+      "progress": {
+        "content": "$1",
+        "example": "50"
       }
     }
   },
