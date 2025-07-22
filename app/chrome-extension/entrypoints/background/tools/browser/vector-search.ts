@@ -78,31 +78,6 @@ class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
         }
       }
 
-      // Get all current tabs
-      const windows = await chrome.windows.getAll({ populate: true });
-      const allTabs: chrome.tabs.Tab[] = [];
-
-      for (const window of windows) {
-        if (window.tabs) {
-          allTabs.push(...window.tabs);
-        }
-      }
-
-      console.log(`VectorSearchTabsContentTool: Found ${allTabs.length} tabs to search`);
-
-      // Filter valid tabs
-      const validTabs = allTabs.filter(
-        (tab) =>
-          tab.id &&
-          tab.url &&
-          !tab.url.startsWith('chrome://') &&
-          !tab.url.startsWith('chrome-extension://') &&
-          !tab.url.startsWith('edge://') &&
-          !tab.url.startsWith('about:'),
-      );
-
-      console.log(`VectorSearchTabsContentTool: ${validTabs.length} valid tabs to process`);
-
       // Execute vector search, get more results for deduplication
       const searchResults = await this.contentIndexer.searchContent(query, 50);
 
@@ -122,7 +97,7 @@ class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
 
       const result = {
         success: true,
-        totalTabsSearched: validTabs.length,
+        totalTabsSearched: stats.totalTabs,
         matchedTabsCount: topResults.length,
         vectorSearchEnabled: true,
         indexStats: {
