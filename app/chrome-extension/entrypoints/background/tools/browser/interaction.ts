@@ -11,6 +11,7 @@ interface Coordinates {
 
 interface ClickToolParams {
   selector?: string; // CSS selector for the element to click
+  ref?: string; // Element ref from accessibility tree (window.__claudeElementMap)
   coordinates?: Coordinates; // Coordinates to click at (x, y relative to viewport)
   waitForNavigation?: boolean; // Whether to wait for navigation to complete after click
   timeout?: number; // Timeout in milliseconds for waiting for the element or navigation
@@ -35,9 +36,9 @@ class ClickTool extends BaseBrowserToolExecutor {
 
     console.log(`Starting click operation with options:`, args);
 
-    if (!selector && !coordinates) {
+    if (!selector && !coordinates && !args.ref) {
       return createErrorResponse(
-        ERROR_MESSAGES.INVALID_PARAMETERS + ': Either selector or coordinates must be provided',
+        ERROR_MESSAGES.INVALID_PARAMETERS + ': Provide ref or selector or coordinates',
       );
     }
 
@@ -60,6 +61,7 @@ class ClickTool extends BaseBrowserToolExecutor {
         action: TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
         selector,
         coordinates,
+        ref: args.ref,
         waitForNavigation,
         timeout,
       });
@@ -91,8 +93,10 @@ class ClickTool extends BaseBrowserToolExecutor {
 export const clickTool = new ClickTool();
 
 interface FillToolParams {
-  selector: string;
-  value: string;
+  selector?: string;
+  ref?: string; // Element ref from accessibility tree
+  // Accept string | number | boolean for broader form input coverage
+  value: string | number | boolean;
 }
 
 /**
@@ -105,12 +109,12 @@ class FillTool extends BaseBrowserToolExecutor {
    * Execute fill operation
    */
   async execute(args: FillToolParams): Promise<ToolResult> {
-    const { selector, value } = args;
+    const { selector, ref, value } = args;
 
     console.log(`Starting fill operation with options:`, args);
 
-    if (!selector) {
-      return createErrorResponse(ERROR_MESSAGES.INVALID_PARAMETERS + ': Selector must be provided');
+    if (!selector && !ref) {
+      return createErrorResponse(ERROR_MESSAGES.INVALID_PARAMETERS + ': Provide ref or selector');
     }
 
     if (value === undefined || value === null) {
@@ -135,10 +139,11 @@ class FillTool extends BaseBrowserToolExecutor {
       const result = await this.sendMessageToTab(tab.id, {
         action: TOOL_MESSAGE_TYPES.FILL_ELEMENT,
         selector,
+        ref,
         value,
       });
 
-      if (result.error) {
+      if (result && result.error) {
         return createErrorResponse(result.error);
       }
 

@@ -247,6 +247,24 @@ Send custom HTTP requests.
 
 ## 🔍 Content Analysis
 
+### `chrome_read_page`
+
+Build an accessibility-like tree of the current page (visible viewport by default) with stable `ref_*` identifiers and viewport info. Useful for semantic element discovery or agent planning.
+
+Parameters:
+
+- `filter` (string, optional): `interactive` to only include interactive elements; default includes structural and labeled nodes.
+
+Example:
+
+```json
+{
+  "filter": "interactive"
+}
+```
+
+Response contains `pageContent` (text tree), `viewport`, and a `refMapCount` summary. Use `chrome_get_interactive_elements` or your own logic to act on returned refs.
+
 ### `search_tabs_content`
 
 AI-powered semantic search across browser tabs.
@@ -308,46 +326,70 @@ Extract HTML or text content from web pages.
 }
 ```
 
-### `chrome_get_interactive_elements`
+### `chrome_get_interactive_elements` (deprecated)
 
-Find clickable and interactive elements on the page.
-
-**Parameters**:
-
-- `tabId` (number, optional): Specific tab ID (default: active tab)
-
-**Response**:
-
-```json
-{
-  "elements": [
-    {
-      "selector": "#submit-button",
-      "type": "button",
-      "text": "Submit",
-      "visible": true,
-      "clickable": true
-    }
-  ]
-}
-```
+Replaced by `chrome_read_page` as the primary discovery tool. The `read_page` implementation will automatically fallback to the interactive-elements logic when the accessibility tree is unavailable or too sparse. This tool is no longer listed via ListTools and is kept only for backward compatibility.
 
 ## 🎯 Interaction
 
+### `chrome_computer`
+
+Unified advanced interaction tool that prioritizes high-level DOM actions with CDP fallback. Supports hover, click, drag, scroll, typing, key chords, fill, wait and screenshot. If a recent screenshot was taken via `chrome_screenshot`, coordinates are auto-scaled from screenshot space to viewport space.
+
+Parameters:
+
+- `action` (string, required): `left_click` | `right_click` | `double_click` | `triple_click` | `left_click_drag` | `scroll` | `type` | `key` | `fill` | `hover` | `wait` | `screenshot`
+- `ref` (string, optional): element ref from `chrome_read_page` (preferred). Used for click/scroll/type/key and as drag end when provided
+- `coordinates` (object, optional): `{ "x": 100, "y": 200 }` for click/scroll or drag end
+- `startRef` (string, optional): element ref for drag start
+- `startCoordinates` (object, optional): for `left_click_drag` when no `startRef`
+- `scrollDirection` (string, optional): `up` | `down` | `left` | `right`
+- `scrollAmount` (number, optional): ticks 1–10 (default 3)
+- `text` (string, optional): for `type` (raw text) or `key` (space-separated chords/keys like `"cmd+a Enter"`)
+- `duration` (number, optional): seconds for `wait` (max 30)
+- `selector` (string, optional): for `fill` when no `ref`
+- `value` (string, optional): for `fill` value
+
+Examples:
+
+```json
+{ "action": "left_click", "coordinates": { "x": 420, "y": 260 } }
+```
+
+```json
+{ "action": "key", "text": "cmd+a Backspace" }
+```
+
+````json
+{ "action": "fill", "ref": "ref_7", "value": "user@example.com" }
+
+```json
+{ "action": "hover", "ref": "ref_12", "duration": 0.6 }
+````
+
+````
+
+```json
+{ "action": "left_click_drag", "startRef": "ref_10", "ref": "ref_15" }
+````
+
 ### `chrome_click_element`
 
-Click elements using CSS selectors.
+Click elements using a ref, selector, or coordinates.
 
 **Parameters**:
 
-- `selector` (string, required): CSS selector for target element
-- `tabId` (number, optional): Specific tab ID (default: active tab)
+- `ref` (string, optional): Element ref from `chrome_read_page` (preferred when available)
+- `selector` (string, optional): CSS selector for target element
+- `coordinates` (object, optional): `{ "x": 120, "y": 240 }` viewport coordinates
+
+At least one of `ref`, `selector`, or `coordinates` must be provided.
 
 **Example**:
 
 ```json
 {
-  "selector": "#submit-button"
+  "ref": "ref_42"
 }
 ```
 
@@ -357,15 +399,17 @@ Fill form fields or select options.
 
 **Parameters**:
 
-- `selector` (string, required): CSS selector for target element
+- `ref` (string, optional): Element ref from `chrome_read_page`
+- `selector` (string, optional): CSS selector for target element
 - `value` (string, required): Value to fill or select
-- `tabId` (number, optional): Specific tab ID (default: active tab)
+
+Provide `ref` or `selector` to identify the element.
 
 **Example**:
 
 ```json
 {
-  "selector": "#email-input",
+  "ref": "ref_7",
   "value": "user@example.com"
 }
 ```

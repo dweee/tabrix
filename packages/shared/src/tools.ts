@@ -27,6 +27,8 @@ export const TOOL_NAMES = {
     SEND_COMMAND_TO_INJECT_SCRIPT: 'chrome_send_command_to_inject_script',
     CONSOLE: 'chrome_console',
     FILE_UPLOAD: 'chrome_upload_file',
+    READ_PAGE: 'chrome_read_page',
+    COMPUTER: 'chrome_computer',
   },
 };
 
@@ -38,6 +40,90 @@ export const TOOL_SCHEMAS: Tool[] = [
       type: 'object',
       properties: {},
       required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.READ_PAGE,
+    description:
+      'Get an accessibility tree representation of visible elements on the page. Only returns elements that are visible in the viewport. Optionally filter for only interactive elements.\nTip: If the returned elements do not include the specific element you need, use the computer tool\'s screenshot (action="screenshot") to capture the element\'s on-screen coordinates, then operate by coordinates.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        filter: {
+          type: 'string',
+          description:
+            'Filter elements: "interactive" for such as  buttons/links/inputs only (default: all visible elements)',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.COMPUTER,
+    description:
+      "Use a mouse and keyboard to interact with a web browser, and take screenshots.\n* Whenever you intend to click on an element like an icon, you should consult a read_page to determine the ref of the element before moving the cursor.\n* If you tried clicking on a program or link but it failed to load, even after waiting, try screenshot and then adjusting your click location so that the tip of the cursor visually falls on the element that you want to click.\n* Make sure to click any buttons, links, icons, etc with the cursor tip in the center of the element. Don't click boxes on their edges unless asked.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          description:
+            'Action to perform: left_click | right_click | double_click | triple_click | left_click_drag | scroll | type | key | fill | hover | wait | screenshot',
+        },
+        ref: {
+          type: 'string',
+          description:
+            'Element ref from chrome_read_page. For click/scroll/key/type and drag end when provided; takes precedence over coordinates.',
+        },
+        coordinates: {
+          type: 'object',
+          properties: {
+            x: { type: 'number', description: 'X coordinate' },
+            y: { type: 'number', description: 'Y coordinate' },
+          },
+          description:
+            'Coordinates for actions (in screenshot space if a recent screenshot was taken, otherwise viewport). Required for click/scroll and as end point for drag.',
+        },
+        startCoordinates: {
+          type: 'object',
+          properties: {
+            x: { type: 'number' },
+            y: { type: 'number' },
+          },
+          description: 'Starting coordinates for drag action',
+        },
+        startRef: {
+          type: 'string',
+          description: 'Drag start ref from chrome_read_page (alternative to startCoordinates).',
+        },
+        scrollDirection: {
+          type: 'string',
+          description: 'Scroll direction: up | down | left | right',
+        },
+        scrollAmount: {
+          type: 'number',
+          description: 'Scroll ticks (1-10), default 3',
+        },
+        text: {
+          type: 'string',
+          description:
+            'Text to type (for action=type) or keys/chords separated by space (for action=key, e.g. "Backspace Enter" or "cmd+a")',
+        },
+        // For action=fill
+        selector: {
+          type: 'string',
+          description: 'CSS selector for fill (alternative to ref).',
+        },
+        value: {
+          oneOf: [{ type: 'string' }, { type: 'boolean' }, { type: 'number' }],
+          description: 'Value to set for action=fill (string | boolean | number)',
+        },
+        duration: {
+          type: 'number',
+          description: 'Seconds to wait for action=wait (max 30s)',
+        },
+      },
+      required: ['action'],
     },
   },
   {
@@ -65,7 +151,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.SCREENSHOT,
     description:
-      'Take a screenshot of the current page or a specific element(if you want to see the page, recommend to use chrome_get_web_content first)',
+      '[Prefer read_page over taking a screenshot and Prefer chrome_computer] Take a screenshot of the current page or a specific element. For new usage, use chrome_computer with action="screenshot". Use this tool if you need advanced options.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -173,87 +259,6 @@ export const TOOL_SCHEMAS: Tool[] = [
     },
   },
   {
-    name: TOOL_NAMES.BROWSER.CLICK,
-    description: 'Click on an element in the current page or at specific coordinates',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        selector: {
-          type: 'string',
-          description:
-            'CSS selector for the element to click. Either selector or coordinates must be provided. if coordinates are not provided, the selector must be provided.',
-        },
-        coordinates: {
-          type: 'object',
-          description:
-            'Coordinates to click at (relative to viewport). If provided, takes precedence over selector.',
-          properties: {
-            x: {
-              type: 'number',
-              description: 'X coordinate relative to the viewport',
-            },
-            y: {
-              type: 'number',
-              description: 'Y coordinate relative to the viewport',
-            },
-          },
-          required: ['x', 'y'],
-        },
-        waitForNavigation: {
-          type: 'boolean',
-          description: 'Wait for page navigation to complete after click (default: false)',
-        },
-        timeout: {
-          type: 'number',
-          description:
-            'Timeout in milliseconds for waiting for the element or navigation (default: 5000)',
-        },
-      },
-      required: [],
-    },
-  },
-  {
-    name: TOOL_NAMES.BROWSER.FILL,
-    description: 'Fill a form element or select an option with the specified value',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        selector: {
-          type: 'string',
-          description: 'CSS selector for the input element to fill or select',
-        },
-        value: {
-          type: 'string',
-          description: 'Value to fill or select into the element',
-        },
-      },
-      required: ['selector', 'value'],
-    },
-  },
-  {
-    name: TOOL_NAMES.BROWSER.GET_INTERACTIVE_ELEMENTS,
-    description: 'Get interactive elements from the current page',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        textQuery: {
-          type: 'string',
-          description: 'Text to search for within interactive elements (fuzzy search)',
-        },
-        selector: {
-          type: 'string',
-          description:
-            'CSS selector to filter interactive elements. Takes precedence over textQuery if both are provided.',
-        },
-        includeCoordinates: {
-          type: 'boolean',
-          description: 'Include element coordinates in the response (default: true)',
-        },
-      },
-      required: [],
-    },
-  },
-  {
     name: TOOL_NAMES.BROWSER.NETWORK_REQUEST,
     description: 'Send a network request from the browser with cookies and other browser context',
     inputSchema: {
@@ -333,29 +338,6 @@ export const TOOL_SCHEMAS: Tool[] = [
       type: 'object',
       properties: {},
       required: [],
-    },
-  },
-  {
-    name: TOOL_NAMES.BROWSER.KEYBOARD,
-    description: 'Simulate keyboard events in the browser',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        keys: {
-          type: 'string',
-          description: 'Keys to simulate (e.g., "Enter", "Ctrl+C", "A,B,C" for sequence)',
-        },
-        selector: {
-          type: 'string',
-          description:
-            'CSS selector for the element to send keyboard events to (optional, defaults to active element)',
-        },
-        delay: {
-          type: 'number',
-          description: 'Delay between key sequences in milliseconds (optional, default: 0)',
-        },
-      },
-      required: ['keys'],
     },
   },
   {
@@ -556,7 +538,8 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.FILE_UPLOAD,
-    description: 'Upload files to web forms with file input elements using Chrome DevTools Protocol',
+    description:
+      'Upload files to web forms with file input elements using Chrome DevTools Protocol',
     inputSchema: {
       type: 'object',
       properties: {

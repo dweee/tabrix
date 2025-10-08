@@ -41,6 +41,7 @@ export const CONTENT_MESSAGE_TYPES = {
   KEYBOARD_HELPER_PING: 'keyboard_helper_ping',
   SCREENSHOT_HELPER_PING: 'screenshot_helper_ping',
   INTERACTIVE_ELEMENTS_HELPER_PING: 'interactive_elements_helper_ping',
+  ACCESSIBILITY_TREE_HELPER_PING: 'chrome_read_page_ping',
 } as const;
 
 // Tool action message types (for chrome.runtime.sendMessage)
@@ -63,6 +64,11 @@ export const TOOL_MESSAGE_TYPES = {
 
   // Interactive elements
   GET_INTERACTIVE_ELEMENTS: 'getInteractiveElements',
+
+  // Accessibility tree
+  GENERATE_ACCESSIBILITY_TREE: 'generateAccessibilityTree',
+  RESOLVE_REF: 'resolveRef',
+  ENSURE_REF_FOR_SELECTOR: 'ensureRefForSelector',
 
   // Network requests
   NETWORK_SEND_REQUEST: 'sendPureNetworkRequest',

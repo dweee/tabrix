@@ -21,13 +21,63 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
     waitForNavigation = false,
     timeout = 5000,
     coordinates = null,
+    ref = null,
   ) {
     try {
       let element = null;
       let elementInfo = null;
       let clickX, clickY;
 
-      if (coordinates && typeof coordinates.x === 'number' && typeof coordinates.y === 'number') {
+      if (ref && typeof ref === 'string') {
+        // Resolve element from weak map
+        let target = null;
+        try {
+          const map = window.__claudeElementMap;
+          const weak = map && map[ref];
+          target = weak && typeof weak.deref === 'function' ? weak.deref() : null;
+        } catch (e) {
+          // ignore
+        }
+
+        if (!target || !(target instanceof Element)) {
+          return {
+            error: `Element ref "${ref}" not found. Please call chrome_read_page first and ensure the ref is still valid.`,
+          };
+        }
+
+        element = target;
+        element.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        const rect = element.getBoundingClientRect();
+        clickX = rect.left + rect.width / 2;
+        clickY = rect.top + rect.height / 2;
+        elementInfo = {
+          tagName: element.tagName,
+          id: element.id,
+          className: element.className,
+          text: element.textContent?.trim().substring(0, 100) || '',
+          href: element.href || null,
+          type: element.type || null,
+          isVisible: true,
+          rect: {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+            left: rect.left,
+          },
+          clickMethod: 'ref',
+          ref,
+        };
+      } else if (
+        coordinates &&
+        typeof coordinates.x === 'number' &&
+        typeof coordinates.y === 'number'
+      ) {
         clickX = coordinates.x;
         clickY = coordinates.y;
 
@@ -125,7 +175,10 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
         });
       }
 
-      if (element && elementInfo.clickMethod === 'selector') {
+      if (
+        element &&
+        (elementInfo.clickMethod === 'selector' || elementInfo.clickMethod === 'ref')
+      ) {
         element.click();
       } else {
         simulateClick(clickX, clickY);
@@ -217,6 +270,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
         request.waitForNavigation,
         request.timeout,
         request.coordinates,
+        request.ref,
       )
         .then(sendResponse)
         .catch((error) => {

@@ -10,6 +10,7 @@ import {
   stitchImages,
   compressImage,
 } from '../../../../utils/image-utils';
+import { screenshotContextManager } from '@/utils/screenshot-context';
 
 // Screenshot-specific constants
 const SCREENSHOT_CONSTANTS = {
@@ -28,7 +29,20 @@ const SCREENSHOT_CONSTANTS = {
   readonly SCRIPT_INIT_DELAY: number;
 };
 
-SCREENSHOT_CONSTANTS["CAPTURE_STITCH_DELAY_MS"] = Math.max(1000 / chrome.tabs.MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND - SCREENSHOT_CONSTANTS.SCROLL_DELAY_MS, SCREENSHOT_CONSTANTS.CAPTURE_STITCH_DELAY_MS)
+// Adjust CAPTURE_STITCH_DELAY_MS to respect Chrome's capture rate if available in runtime
+// Some TS typings don't expose MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND; use a safe cast with a sane fallback.
+const __MAX_CAP_RATE: number | undefined = (chrome.tabs as any)
+  ?.MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND;
+if (typeof __MAX_CAP_RATE === 'number' && __MAX_CAP_RATE > 0) {
+  // Minimum interval between consecutive captureVisibleTab calls (ms)
+  const minIntervalMs = Math.ceil(1000 / __MAX_CAP_RATE);
+  // Our capture loop already waits SCROLL_DELAY_MS between scroll and capture; add any extra delay needed
+  const requiredExtraDelay = Math.max(0, minIntervalMs - SCREENSHOT_CONSTANTS.SCROLL_DELAY_MS);
+  SCREENSHOT_CONSTANTS.CAPTURE_STITCH_DELAY_MS = Math.max(
+    requiredExtraDelay,
+    SCREENSHOT_CONSTANTS.CAPTURE_STITCH_DELAY_MS,
+  );
+}
 
 interface ScreenshotToolParams {
   name: string;
@@ -81,6 +95,8 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     }
 
     let finalImageDataUrl: string | undefined;
+    let finalImageWidthCss: number | undefined;
+    let finalImageHeightCss: number | undefined;
     const results: any = { base64: null, fileSaved: false };
     let originalScroll = { x: 0, y: 0 };
 
@@ -102,14 +118,45 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
 
       if (fullPage) {
         this.logInfo('Capturing full page...');
-        finalImageDataUrl = await this._captureFullPage(tab.id!, args, pageDetails);
+        const dataUrl = await this._captureFullPage(tab.id!, args, pageDetails);
+        finalImageDataUrl = dataUrl;
+        // For full page, compute final CSS size from provided width/height fallback to pageDetails
+        if (args.width && args.height) {
+          finalImageWidthCss = args.width;
+          finalImageHeightCss = args.height;
+        } else if (args.width && !args.height) {
+          finalImageWidthCss = args.width;
+          // height will be scaled by aspect ratio; approximate with page ratio
+          const ratio = pageDetails.totalHeight / pageDetails.totalWidth;
+          finalImageHeightCss = Math.round(args.width * ratio);
+        } else if (!args.width && args.height) {
+          finalImageHeightCss = args.height;
+          const ratio = pageDetails.totalWidth / pageDetails.totalHeight;
+          finalImageWidthCss = Math.round(args.height * ratio);
+        } else {
+          finalImageWidthCss = pageDetails.totalWidth;
+          finalImageHeightCss = pageDetails.totalHeight;
+        }
       } else if (selector) {
         this.logInfo(`Capturing element: ${selector}`);
-        finalImageDataUrl = await this._captureElement(tab.id!, args, pageDetails.devicePixelRatio);
+        const cropped = await this._captureElement(tab.id!, args, pageDetails.devicePixelRatio);
+        finalImageDataUrl = cropped;
+        // For element capture, if target width/height provided, respect them; otherwise use element rect size
+        if (args.width && args.height) {
+          finalImageWidthCss = args.width;
+          finalImageHeightCss = args.height;
+        } else {
+          // Fallback to visible element rect (already used for crop)
+          // We do not have easy access to rect here; use viewport as conservative default
+          finalImageWidthCss = pageDetails.viewportWidth;
+          finalImageHeightCss = pageDetails.viewportHeight;
+        }
       } else {
         // Visible area only
         this.logInfo('Capturing visible area...');
         finalImageDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+        finalImageWidthCss = pageDetails.viewportWidth;
+        finalImageHeightCss = pageDetails.viewportHeight;
       }
 
       if (!finalImageDataUrl) {
@@ -117,6 +164,27 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       }
 
       // 2. Process output
+      // Update screenshot context for coordinate scaling by tools like chrome_computer
+      try {
+        if (typeof finalImageWidthCss === 'number' && typeof finalImageHeightCss === 'number') {
+          let hostname = '';
+          try {
+            hostname = tab.url ? new URL(tab.url).hostname : '';
+          } catch {
+            // ignore
+          }
+          screenshotContextManager.setContext(tab.id!, {
+            screenshotWidth: finalImageWidthCss,
+            screenshotHeight: finalImageHeightCss,
+            viewportWidth: pageDetails.viewportWidth,
+            viewportHeight: pageDetails.viewportHeight,
+            devicePixelRatio: pageDetails.devicePixelRatio,
+            hostname,
+          });
+        }
+      } catch (e) {
+        console.warn('Failed to set screenshot context:', e);
+      }
       if (storeBase64 === true) {
         // Compress image for base64 output to reduce size
         const compressed = await compressImage(finalImageDataUrl, {

@@ -66,6 +66,8 @@ export default defineConfig({
   },
   vite: (env) => ({
     plugins: [
+      // Ensure static assets are available as early as possible to avoid race conditions in dev
+      // Copy workers/_locales/inject-scripts into the build output before other steps
       viteStaticCopy({
         targets: [
           {
@@ -81,6 +83,13 @@ export default defineConfig({
             dest: '_locales',
           },
         ],
+        // Copy at buildStart to avoid ENOENT when extension first boots in dev
+        hook: 'buildStart',
+        // Enable watch so changes to these files are reflected during dev
+        watch: {
+          // Use default patterns inferred from targets; explicit true enables watching
+          // Vite plugin will watch src patterns and re-copy on change
+        } as any,
       }) as any,
     ],
     build: {
