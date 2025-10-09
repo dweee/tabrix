@@ -1,6 +1,7 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'chrome-mcp-shared';
+import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
 interface NetworkDebuggerStartToolParams {
   url?: string; // URL to navigate to or focus. If not provided, uses active tab.
@@ -218,35 +219,15 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
       // Get tab information
       const tab = await chrome.tabs.get(tabId);
 
-      // Check if debugger is already attached
-      const targets = await chrome.debugger.getTargets();
-      const existingTarget = targets.find(
-        (t) => t.tabId === tabId && t.attached && t.type === 'page',
-      );
-      if (existingTarget && !existingTarget.extensionId) {
-        throw new Error(
-          `Debugger is already attached to tab ${tabId} by another tool (e.g., DevTools).`,
-        );
-      }
-
-      // Attach debugger
-      try {
-        await chrome.debugger.attach({ tabId }, DEBUGGER_PROTOCOL_VERSION);
-      } catch (error: any) {
-        if (error.message?.includes('Cannot attach to the target with an attached client')) {
-          throw new Error(
-            `Debugger is already attached to tab ${tabId}. This might be DevTools or another extension.`,
-          );
-        }
-        throw error;
-      }
+      // Attach via shared manager (handles conflicts and refcount)
+      await cdpSessionManager.attach(tabId, 'network-capture');
 
       // Enable network tracking
       try {
-        await chrome.debugger.sendCommand({ tabId }, 'Network.enable');
+        await cdpSessionManager.sendCommand(tabId, 'Network.enable');
       } catch (error: any) {
-        await chrome.debugger
-          .detach({ tabId })
+        await cdpSessionManager
+          .detach(tabId, 'network-capture')
           .catch((e) => console.warn('Error detaching after failed enable:', e));
         throw error;
       }
@@ -290,8 +271,8 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
 
       // Clean up resources
       if (this.captureData.has(tabId)) {
-        await chrome.debugger
-          .detach({ tabId })
+        await cdpSessionManager
+          .detach(tabId, 'network-capture')
           .catch((e) => console.warn('Cleanup detach error:', e));
         this.cleanupCapture(tabId);
       }
@@ -673,14 +654,8 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
 
     const responseBodyPromise = (async () => {
       try {
-        // Check if debugger is still attached to this tabId
-        const attachedTabs = await chrome.debugger.getTargets();
-        if (!attachedTabs.some((target) => target.tabId === tabId && target.attached)) {
-          // console.warn(`NetworkDebuggerStartTool: Debugger not attached to tab ${tabId} when trying to get response body for ${requestId}.`);
-          throw new Error(`Debugger not attached to tab ${tabId}`);
-        }
-
-        const result = (await chrome.debugger.sendCommand({ tabId }, 'Network.getResponseBody', {
+        // Will attach temporarily if needed
+        const result = (await cdpSessionManager.sendCommand(tabId, 'Network.getResponseBody', {
           requestId,
         })) as { body: string; base64Encoded: boolean };
         return result;
@@ -734,33 +709,21 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     );
 
     try {
-      // Detach debugger first to prevent further events.
-      // Check if debugger is attached before trying to send commands or detach
-      const attachedTargets = await chrome.debugger.getTargets();
-      const isAttached = attachedTargets.some(
-        (target) => target.tabId === tabId && target.attached,
-      );
-
-      if (isAttached) {
-        try {
-          await chrome.debugger.sendCommand({ tabId }, 'Network.disable');
-        } catch (e) {
-          console.warn(
-            `NetworkDebuggerStartTool: Error disabling network for tab ${tabId} (possibly already detached):`,
-            e,
-          );
-        }
-        try {
-          await chrome.debugger.detach({ tabId });
-        } catch (e) {
-          console.warn(
-            `NetworkDebuggerStartTool: Error detaching debugger for tab ${tabId} (possibly already detached):`,
-            e,
-          );
-        }
-      } else {
-        console.log(
-          `NetworkDebuggerStartTool: Debugger was not attached to tab ${tabId} at stopCapture.`,
+      // Attempt to disable network and detach via manager; it will no-op if others own the session
+      try {
+        await cdpSessionManager.sendCommand(tabId, 'Network.disable');
+      } catch (e) {
+        console.warn(
+          `NetworkDebuggerStartTool: Error disabling network for tab ${tabId} (possibly already detached):`,
+          e,
+        );
+      }
+      try {
+        await cdpSessionManager.detach(tabId, 'network-capture');
+      } catch (e) {
+        console.warn(
+          `NetworkDebuggerStartTool: Error detaching debugger for tab ${tabId} (possibly already detached):`,
+          e,
         );
       }
     } catch (error: any) {
@@ -1003,8 +966,8 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
       // If a tabId was involved and debugger might be attached, try to clean up.
       const tabIdToClean = tabToOperateOn?.id;
       if (tabIdToClean && this.captureData.has(tabIdToClean)) {
-        await chrome.debugger
-          .detach({ tabId: tabIdToClean })
+        await cdpSessionManager
+          .detach(tabIdToClean, 'network-capture')
           .catch((e) => console.warn('Cleanup detach error:', e));
         this.cleanupCapture(tabIdToClean);
       }

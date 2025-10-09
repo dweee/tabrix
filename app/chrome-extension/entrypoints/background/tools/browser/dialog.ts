@@ -1,6 +1,7 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'chrome-mcp-shared';
+import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
 interface HandleDialogParams {
   action: 'accept' | 'dismiss';
@@ -22,40 +23,16 @@ class HandleDialogTool extends BaseBrowserToolExecutor {
     try {
       const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!activeTab?.id) return createErrorResponse('No active tab found');
+      const tabId = activeTab.id!;
 
-      // Attach debugger and try handling the dialog
-      try {
-        await chrome.debugger.attach({ tabId: activeTab.id }, '1.3');
-      } catch (e: any) {
-        if (String(e?.message || '').includes('attached')) {
-          // If already attached by us, proceed; otherwise fail with clear message
-          const targets = await chrome.debugger.getTargets();
-          const existing = targets.find((t) => t.tabId === activeTab.id && t.attached);
-          if (!existing || existing.extensionId !== chrome.runtime.id) {
-            return createErrorResponse(
-              `Debugger already attached to tab ${activeTab.id} by another client (e.g., DevTools). Close it and retry.`,
-            );
-          }
-        } else {
-          throw e;
-        }
-      }
-
-      try {
-        // Enable Page domain to be safe
-        await chrome.debugger.sendCommand({ tabId: activeTab.id }, 'Page.enable');
-        await chrome.debugger.sendCommand({ tabId: activeTab.id }, 'Page.handleJavaScriptDialog', {
+      // Use shared CDP session manager for safe attach/detach with refcount
+      await cdpSessionManager.withSession(tabId, 'dialog', async () => {
+        await cdpSessionManager.sendCommand(tabId, 'Page.enable');
+        await cdpSessionManager.sendCommand(tabId, 'Page.handleJavaScriptDialog', {
           accept: action === 'accept',
           promptText: action === 'accept' ? promptText : undefined,
         });
-      } finally {
-        // Best-effort detach if we were the owners
-        try {
-          await chrome.debugger.detach({ tabId: activeTab.id });
-        } catch {
-          // ignore
-        }
-      }
+      });
 
       return {
         content: [

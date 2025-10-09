@@ -7,6 +7,7 @@ import { clickTool, fillTool } from './interaction';
 import { keyboardTool } from './keyboard';
 import { screenshotTool } from './screenshot';
 import { screenshotContextManager, scaleCoordinates } from '@/utils/screenshot-context';
+import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
 type MouseButton = 'left' | 'right' | 'middle';
 
@@ -48,49 +49,16 @@ interface ComputerParams {
 
 // Minimal CDP helper encapsulated here to avoid scattering CDP code
 class CDPHelper {
-  private static active = new Set<number>();
-
   static async attach(tabId: number): Promise<void> {
-    // If already attached by us, skip
-    const targets = await chrome.debugger.getTargets();
-    const existing = targets.find((t) => t.tabId === tabId && t.attached);
-    if (existing) {
-      if (existing.extensionId === chrome.runtime.id) {
-        this.active.add(tabId);
-        return;
-      }
-      throw new Error(
-        `Debugger is already attached to tab ${tabId} by another tool (e.g., DevTools/extension)`,
-      );
-    }
-    await chrome.debugger.attach({ tabId }, '1.3');
-    this.active.add(tabId);
+    await cdpSessionManager.attach(tabId, 'computer');
   }
 
   static async detach(tabId: number): Promise<void> {
-    if (!this.active.has(tabId)) return;
-    try {
-      await chrome.debugger.detach({ tabId });
-    } finally {
-      this.active.delete(tabId);
-    }
+    await cdpSessionManager.detach(tabId, 'computer');
   }
 
   static async send(tabId: number, method: string, params?: object): Promise<any> {
-    try {
-      return await chrome.debugger.sendCommand({ tabId }, method, params);
-    } catch (e: any) {
-      // Try reattach once if lost
-      if (
-        String(e?.message || e)
-          .toLowerCase()
-          .includes('not attached')
-      ) {
-        await this.attach(tabId);
-        return await chrome.debugger.sendCommand({ tabId }, method, params);
-      }
-      throw e;
-    }
+    return await cdpSessionManager.sendCommand(tabId, method, params);
   }
 
   static async dispatchMouseEvent(tabId: number, opts: any) {
@@ -259,18 +227,14 @@ class ComputerTool extends BaseBrowserToolExecutor {
             // Prefer precise CDP emulation
             await CDPHelper.attach(tab.id);
             try {
-              await chrome.debugger.sendCommand(
-                { tabId: tab.id },
-                'Emulation.setDeviceMetricsOverride',
-                {
-                  width: Math.round(w),
-                  height: Math.round(h),
-                  deviceScaleFactor: 0,
-                  mobile: false,
-                  screenWidth: Math.round(w),
-                  screenHeight: Math.round(h),
-                },
-              );
+              await CDPHelper.send(tab.id, 'Emulation.setDeviceMetricsOverride', {
+                width: Math.round(w),
+                height: Math.round(h),
+                deviceScaleFactor: 0,
+                mobile: false,
+                screenWidth: Math.round(w),
+                screenHeight: Math.round(h),
+              });
             } finally {
               await CDPHelper.detach(tab.id);
             }
