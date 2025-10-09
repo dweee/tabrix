@@ -180,6 +180,16 @@ export const initNativeHostListener = () => {
   chrome.runtime.onStartup.addListener(connectNativeHost);
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    // Allow UI to call tools directly
+    if (message && message.type === 'call_tool' && message.name) {
+      handleCallTool({ name: message.name, args: message.args })
+        .then((res) => sendResponse({ success: true, result: res }))
+        .catch((err) =>
+          sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }),
+        );
+      return true;
+    }
+
     if (
       message === NativeMessageType.CONNECT_NATIVE ||
       message.type === NativeMessageType.CONNECT_NATIVE
