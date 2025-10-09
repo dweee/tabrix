@@ -29,6 +29,7 @@ export const TOOL_NAMES = {
     FILE_UPLOAD: 'chrome_upload_file',
     READ_PAGE: 'chrome_read_page',
     COMPUTER: 'chrome_computer',
+    HANDLE_DIALOG: 'chrome_handle_dialog',
   },
 };
 
@@ -117,6 +118,30 @@ export const TOOL_SCHEMAS: Tool[] = [
         value: {
           oneOf: [{ type: 'string' }, { type: 'boolean' }, { type: 'number' }],
           description: 'Value to set for action=fill (string | boolean | number)',
+        },
+        elements: {
+          type: 'array',
+          description: 'For action=fill_form: list of elements to fill (ref + value)',
+          items: {
+            type: 'object',
+            properties: {
+              ref: { type: 'string', description: 'Element ref from chrome_read_page' },
+              value: { type: 'string', description: 'Value to set (stringified if non-string)' },
+            },
+            required: ['ref', 'value'],
+          },
+        },
+        width: { type: 'number', description: 'For action=resize_page: viewport width' },
+        height: { type: 'number', description: 'For action=resize_page: viewport height' },
+        appear: {
+          type: 'boolean',
+          description:
+            'For action=wait with text: whether to wait for the text to appear (true, default) or disappear (false)',
+        },
+        timeout: {
+          type: 'number',
+          description:
+            'For action=wait with text: timeout in milliseconds (default 10000, max 120000)',
         },
         duration: {
           type: 'number',
@@ -569,6 +594,21 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
       },
       required: ['selector'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.HANDLE_DIALOG,
+    description: 'Handle JavaScript dialogs (alert/confirm/prompt) via CDP',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', description: 'accept | dismiss' },
+        promptText: {
+          type: 'string',
+          description: 'Optional prompt text when accepting a prompt',
+        },
+      },
+      required: ['action'],
     },
   },
 ];

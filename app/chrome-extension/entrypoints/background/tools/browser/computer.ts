@@ -28,6 +28,8 @@ interface ComputerParams {
     | 'hover'
     | 'wait'
     | 'fill'
+    | 'fill_form'
+    | 'resize_page'
     | 'screenshot';
   // click/scroll coordinates in screenshot space (if screenshot context exists) or viewport space
   coordinates?: Coordinates; // for click/scroll; for drag, this is endCoordinates
@@ -243,6 +245,58 @@ class ComputerTool extends BaseBrowserToolExecutor {
       };
 
       switch (params.action) {
+        case 'resize_page': {
+          const width = Number((params as any).coordinates?.x || (params as any).text);
+          const height = Number((params as any).coordinates?.y || (params as any).value);
+          const w = Number((params as any).width ?? width);
+          const h = Number((params as any).height ?? height);
+          if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+            return createErrorResponse(
+              'Provide width and height for resize_page (positive numbers)',
+            );
+          }
+          try {
+            // Prefer precise CDP emulation
+            await CDPHelper.attach(tab.id);
+            try {
+              await chrome.debugger.sendCommand(
+                { tabId: tab.id },
+                'Emulation.setDeviceMetricsOverride',
+                {
+                  width: Math.round(w),
+                  height: Math.round(h),
+                  deviceScaleFactor: 0,
+                  mobile: false,
+                  screenWidth: Math.round(w),
+                  screenHeight: Math.round(h),
+                },
+              );
+            } finally {
+              await CDPHelper.detach(tab.id);
+            }
+          } catch (e) {
+            // Fallback: window resize
+            if (tab.windowId !== undefined) {
+              await chrome.windows.update(tab.windowId, {
+                width: Math.round(w),
+                height: Math.round(h),
+              });
+            } else {
+              return createErrorResponse(
+                `Failed to resize via CDP and cannot determine windowId: ${e instanceof Error ? e.message : String(e)}`,
+              );
+            }
+          }
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({ success: true, action: 'resize_page', width: w, height: h }),
+              },
+            ],
+            isError: false,
+          };
+        }
         case 'hover': {
           // Resolve target point from ref | selector | coordinates
           let coord: Coordinates | undefined = undefined;
@@ -782,6 +836,52 @@ class ComputerTool extends BaseBrowserToolExecutor {
           } as any);
           return res;
         }
+        case 'fill_form': {
+          const elements = (params as any).elements as Array<{
+            ref: string;
+            value: string | number | boolean;
+          }>;
+          if (!Array.isArray(elements) || elements.length === 0) {
+            return createErrorResponse('elements must be a non-empty array for fill_form');
+          }
+          const results: Array<{ ref: string; ok: boolean; error?: string }> = [];
+          for (const item of elements) {
+            if (!item || !item.ref) {
+              results.push({ ref: String(item?.ref || ''), ok: false, error: 'missing ref' });
+              continue;
+            }
+            try {
+              const r = await fillTool.execute({
+                ref: item.ref as any,
+                value: item.value as any,
+              } as any);
+              const ok = !r.isError;
+              results.push({ ref: item.ref, ok, error: ok ? undefined : 'failed' });
+            } catch (e) {
+              results.push({
+                ref: item.ref,
+                ok: false,
+                error: String(e instanceof Error ? e.message : e),
+              });
+            }
+          }
+          const successCount = results.filter((r) => r.ok).length;
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  action: 'fill_form',
+                  filled: successCount,
+                  total: results.length,
+                  results,
+                }),
+              },
+            ],
+            isError: false,
+          };
+        }
         case 'key': {
           if (!params.text)
             return createErrorResponse(
@@ -821,19 +921,72 @@ class ComputerTool extends BaseBrowserToolExecutor {
           }
         }
         case 'wait': {
-          const seconds = Math.max(0, Math.min(params.duration || 0, 30));
-          if (!seconds)
-            return createErrorResponse('Duration parameter is required and must be > 0');
-          await new Promise((r) => setTimeout(r, seconds * 1000));
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({ success: true, action: 'wait', duration: seconds }),
-              },
-            ],
-            isError: false,
-          };
+          const hasTextCondition =
+            typeof (params as any).text === 'string' && (params as any).text.trim().length > 0;
+          if (hasTextCondition) {
+            try {
+              // Conditional wait for text appearance/disappearance using content script
+              await this.injectContentScript(
+                tab.id,
+                ['inject-scripts/wait-helper.js'],
+                false,
+                'ISOLATED',
+                true,
+              );
+              const appear = (params as any).appear !== false; // default to true
+              const timeoutMs = Math.max(
+                0,
+                Math.min(((params as any).timeout as number) || 10000, 120000),
+              );
+              const resp = await this.sendMessageToTab(tab.id, {
+                action: TOOL_MESSAGE_TYPES.WAIT_FOR_TEXT,
+                text: (params as any).text,
+                appear,
+                timeout: timeoutMs,
+              });
+              if (!resp || resp.success !== true) {
+                return createErrorResponse(
+                  resp && resp.reason === 'timeout'
+                    ? `wait_for timed out after ${timeoutMs}ms for text: ${(params as any).text}`
+                    : `wait_for failed: ${resp && resp.error ? resp.error : 'unknown error'}`,
+                );
+              }
+              return {
+                content: [
+                  {
+                    type: 'text',
+                    text: JSON.stringify({
+                      success: true,
+                      action: 'wait_for',
+                      appear,
+                      text: (params as any).text,
+                      matched: resp.matched || null,
+                      tookMs: resp.tookMs,
+                    }),
+                  },
+                ],
+                isError: false,
+              };
+            } catch (e) {
+              return createErrorResponse(
+                `wait_for failed: ${e instanceof Error ? e.message : String(e)}`,
+              );
+            }
+          } else {
+            const seconds = Math.max(0, Math.min((params as any).duration || 0, 30));
+            if (!seconds)
+              return createErrorResponse('Duration parameter is required and must be > 0');
+            await new Promise((r) => setTimeout(r, seconds * 1000));
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({ success: true, action: 'wait', duration: seconds }),
+                },
+              ],
+              isError: false,
+            };
+          }
         }
         case 'screenshot': {
           // Reuse existing screenshot tool; it already supports base64 save option

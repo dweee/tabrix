@@ -42,6 +42,7 @@ export const CONTENT_MESSAGE_TYPES = {
   SCREENSHOT_HELPER_PING: 'screenshot_helper_ping',
   INTERACTIVE_ELEMENTS_HELPER_PING: 'interactive_elements_helper_ping',
   ACCESSIBILITY_TREE_HELPER_PING: 'chrome_read_page_ping',
+  WAIT_HELPER_PING: 'wait_helper_ping',
 } as const;
 
 // Tool action message types (for chrome.runtime.sendMessage)
@@ -72,6 +73,9 @@ export const TOOL_MESSAGE_TYPES = {
 
   // Network requests
   NETWORK_SEND_REQUEST: 'sendPureNetworkRequest',
+
+  // Wait helper
+  WAIT_FOR_TEXT: 'waitForText',
 
   // Semantic similarity engine
   SIMILARITY_ENGINE_INIT: 'similarityEngineInit',

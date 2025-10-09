@@ -19,6 +19,7 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
     files: string[],
     injectImmediately = false,
     world: 'MAIN' | 'ISOLATED' = 'ISOLATED',
+    allFrames: boolean = false,
   ): Promise<void> {
     console.log(`Injecting ${files.join(', ')} into tab ${tabId}`);
 
@@ -50,7 +51,7 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
 
     try {
       await chrome.scripting.executeScript({
-        target: { tabId },
+        target: { tabId, allFrames },
         files,
         injectImmediately,
         world,
