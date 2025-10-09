@@ -102,6 +102,7 @@ export const STORAGE_KEYS = {
   SEMANTIC_MODEL: 'selectedModel',
   USER_PREFERENCES: 'userPreferences',
   VECTOR_INDEX: 'vectorIndex',
+  USERSCRIPTS: 'userscripts',
 } as const;
 
 // Notification Configuration

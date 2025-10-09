@@ -30,6 +30,7 @@ export const TOOL_NAMES = {
     READ_PAGE: 'chrome_read_page',
     COMPUTER: 'chrome_computer',
     HANDLE_DIALOG: 'chrome_handle_dialog',
+    USERSCRIPT: 'chrome_userscript',
   },
 };
 
@@ -146,6 +147,27 @@ export const TOOL_SCHEMAS: Tool[] = [
         duration: {
           type: 'number',
           description: 'Seconds to wait for action=wait (max 30s)',
+        },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.USERSCRIPT,
+    description:
+      'Unified userscript tool (create/list/get/enable/disable/update/remove/send_command/export). Paste JS/CSS/Tampermonkey script and the system will auto-select the best strategy (insertCSS / persistent script in ISOLATED or MAIN world / once by CDP) with CSP-aware fallbacks.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          description:
+            'Operation to perform: create | list | get | enable | disable | update | remove | send_command | export',
+        },
+        args: {
+          type: 'object',
+          description:
+            'Arguments for the specified action. For create: { script, name?, description?, matches?, excludes?, persist?, runAt?, world?, allFrames?, mode?, dnrFallback?, tags? }',
         },
       },
       required: ['action'],
