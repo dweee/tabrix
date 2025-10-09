@@ -38,11 +38,13 @@ export default defineConfig({
       'scripting',
       'downloads',
       'webRequest',
+      'webNavigation',
       'debugger',
       'history',
       'bookmarks',
       'offscreen',
       'storage',
+      'declarativeNetRequest',
     ],
     host_permissions: ['<all_urls>'],
     web_accessible_resources: [

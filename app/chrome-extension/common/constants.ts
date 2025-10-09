@@ -103,6 +103,7 @@ export const STORAGE_KEYS = {
   USER_PREFERENCES: 'userPreferences',
   VECTOR_INDEX: 'vectorIndex',
   USERSCRIPTS: 'userscripts',
+  USERSCRIPTS_DISABLED: 'userscripts_disabled',
 } as const;
 
 // Notification Configuration
