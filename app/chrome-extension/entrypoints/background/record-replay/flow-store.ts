@@ -102,8 +102,8 @@ export async function importFlowFromJson(json: string): Promise<Flow[]> {
   if (!flowsToImport.length) throw new Error('invalid flow json');
   const nowIso = new Date().toISOString();
   for (const f of flowsToImport) {
-    if (!f.meta) f.meta = { createdAt: nowIso, updatedAt: nowIso } as any;
-    f.meta.updatedAt = nowIso;
+    const meta = f.meta ?? (f.meta = { createdAt: nowIso, updatedAt: nowIso } as any);
+    meta.updatedAt = nowIso;
     await saveFlow(f);
   }
   return flowsToImport;
