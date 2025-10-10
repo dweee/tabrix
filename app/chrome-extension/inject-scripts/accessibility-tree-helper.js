@@ -474,6 +474,56 @@
         sendResponse({ status: 'pong' });
         return false;
       }
+      if (request && request.action === 'rr_overlay') {
+        try {
+          const cmd = request.cmd || 'init';
+          let root = document.getElementById('__rr_overlay_root');
+          if (!root) {
+            root = document.createElement('div');
+            root.id = '__rr_overlay_root';
+            Object.assign(root.style, {
+              position: 'fixed',
+              right: '8px',
+              bottom: '8px',
+              zIndex: 2_147_483_647,
+              maxWidth: '40vw',
+              maxHeight: '40vh',
+              overflow: 'auto',
+              background: 'rgba(0,0,0,0.6)',
+              color: '#fff',
+              fontFamily:
+                'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+              fontSize: '12px',
+              padding: '8px',
+              borderRadius: '6px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+            });
+            const title = document.createElement('div');
+            title.textContent = 'Record-Replay 运行日志';
+            Object.assign(title.style, { fontWeight: 'bold', marginBottom: '6px' });
+            const body = document.createElement('div');
+            body.id = '__rr_overlay_body';
+            root.appendChild(title);
+            root.appendChild(body);
+            document.documentElement.appendChild(root);
+          }
+          const body = document.getElementById('__rr_overlay_body');
+          if (cmd === 'append' && body) {
+            const line = document.createElement('div');
+            line.textContent = String(request.text || '');
+            body.appendChild(line);
+            body.scrollTop = body.scrollHeight;
+          }
+          if (cmd === 'done' && root) {
+            root.style.opacity = '0.5';
+          }
+          sendResponse({ success: true });
+          return true;
+        } catch (e) {
+          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+          return true;
+        }
+      }
       if (request && request.action === 'generateAccessibilityTree') {
         const result = __generateAccessibilityTree(request.filter || null);
         sendResponse({ success: true, ...result });
@@ -567,6 +617,28 @@
             value = el.getAttribute(name);
           }
           sendResponse({ success: true, value });
+          return true;
+        } catch (e) {
+          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+          return true;
+        }
+      }
+      if (request && request.action === 'collectVariables') {
+        try {
+          const vars = Array.isArray(request.variables) ? request.variables : [];
+          const values = {};
+          for (const v of vars) {
+            const key = String(v && v.key ? v.key : '');
+            if (!key) continue;
+            const label = v.label || key;
+            const def = v.default || '';
+            const promptText = `请输入参数 ${label} (${key})`;
+            // Note: prompt in page context; in some sites may be blocked by CSP
+            let val = window.prompt(promptText, def);
+            if (typeof val !== 'string') val = def;
+            values[key] = val;
+          }
+          sendResponse({ success: true, values });
           return true;
         } catch (e) {
           sendResponse({ success: false, error: String(e && e.message ? e.message : e) });

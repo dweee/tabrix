@@ -157,6 +157,28 @@
     pushStep({ type: 'key', keys, screenshotOnFail: false });
   }
 
+  // Composition IME events (record markers for analysis; playback is no-op via script step)
+  function onCompositionStart() {
+    if (!isRecording) return;
+    pushStep({
+      type: 'script',
+      world: 'ISOLATED',
+      when: 'before',
+      code: '/* compositionstart */',
+      screenshotOnFail: false,
+    });
+  }
+  function onCompositionEnd() {
+    if (!isRecording) return;
+    pushStep({
+      type: 'script',
+      world: 'ISOLATED',
+      when: 'before',
+      code: '/* compositionend */',
+      screenshotOnFail: false,
+    });
+  }
+
   let lastScrollAt = 0;
   function onScroll(e) {
     if (!isRecording) return;
@@ -206,6 +228,8 @@
     document.addEventListener('input', onInput, true);
     document.addEventListener('keydown', onKeydown, true);
     document.addEventListener('keyup', onKeyup, true);
+    document.addEventListener('compositionstart', onCompositionStart, true);
+    document.addEventListener('compositionend', onCompositionEnd, true);
     window.addEventListener('scroll', onScroll, { passive: true });
     document.addEventListener('mousedown', onMouseDown, true);
     document.addEventListener('mousemove', onMouseMove, true);
@@ -218,6 +242,8 @@
     document.removeEventListener('input', onInput, true);
     document.removeEventListener('keydown', onKeydown, true);
     document.removeEventListener('keyup', onKeyup, true);
+    document.removeEventListener('compositionstart', onCompositionStart, true);
+    document.removeEventListener('compositionend', onCompositionEnd, true);
     window.removeEventListener('scroll', onScroll, { passive: true });
     document.removeEventListener('mousedown', onMouseDown, true);
     document.removeEventListener('mousemove', onMouseMove, true);
@@ -266,6 +292,12 @@
         const cmd = request.cmd;
         if (cmd === 'start') {
           start(request.meta || {});
+          sendResponse({ success: true });
+          return true;
+        } else if (cmd === 'resume') {
+          // Attach without resetting flow or sending start event
+          isRecording = true;
+          attach();
           sendResponse({ success: true });
           return true;
         } else if (cmd === 'stop') {

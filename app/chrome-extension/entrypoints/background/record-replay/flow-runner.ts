@@ -47,6 +47,63 @@ export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<Run
     await handleCallTool({ name: TOOL_NAMES.BROWSER.NAVIGATE, args: { refresh: true } });
   }
 
+  // Ensure helper scripts are present for overlay/collectVariables
+  try {
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
+  } catch {
+    /* ignore */
+  }
+
+  // Collect missing variables via lightweight prompt overlay
+  try {
+    const needed = (flow.variables || []).filter(
+      (v) =>
+        (options.args?.[v.key] == null || options.args?.[v.key] === '') &&
+        (v.rules?.required || (v.default ?? '') === ''),
+    );
+    if (needed.length > 0) {
+      const res = await handleCallTool({
+        name: TOOL_NAMES.BROWSER.SEND_COMMAND_TO_INJECT_SCRIPT,
+        args: { eventName: 'collectVariables', payload: undefined },
+      });
+      // Fallback: if direct collectVariables without payload not supported, call with explicit variables
+      let values: Record<string, any> | null = null;
+      try {
+        const t = (res?.content || []).find((c: any) => c.type === 'text')?.text;
+        const j = t ? JSON.parse(t) : null;
+        if (j && j.success && j.values) values = j.values;
+      } catch {
+        /* ignore */
+      }
+      if (!values) {
+        const res2 = await chrome.tabs
+          .query({ active: true, currentWindow: true })
+          .then(async (tabs) => {
+            const tabId = tabs?.[0]?.id;
+            if (typeof tabId !== 'number') return null;
+            return await chrome.tabs.sendMessage(tabId, {
+              action: 'collectVariables',
+              variables: needed,
+            } as any);
+          });
+        if (res2 && res2.success && res2.values) values = res2.values;
+      }
+      if (values) Object.assign(vars, values);
+    }
+  } catch {
+    // ignore prompt failures
+  }
+
+  // Init simple overlay for real-time logs
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tabs[0]?.id) {
+      await chrome.tabs.sendMessage(tabs[0].id, { action: 'rr_overlay', cmd: 'init' } as any);
+    }
+  } catch {
+    /* ignore */
+  }
+
   // Binding enforcement: if bindings exist and no startUrl, verify current tab URL matches
   try {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -302,6 +359,25 @@ export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<Run
               const resolvedBy = located?.resolvedBy || (located?.ref ? 'ref' : '');
               const fallbackUsed =
                 resolvedBy && first && resolvedBy !== 'ref' && resolvedBy !== first;
+              // auto scroll into view if possible (unified)
+              try {
+                const sel = !located?.ref
+                  ? (step as any).target?.candidates?.find(
+                      (c: any) => c.type === 'css' || c.type === 'attr',
+                    )?.value
+                  : undefined;
+                if (sel) {
+                  await handleCallTool({
+                    name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
+                    args: {
+                      type: 'MAIN',
+                      jsScript: `try{var el=document.querySelector(${JSON.stringify(sel)});if(el){el.scrollIntoView({behavior:'instant',block:'center',inline:'nearest'});} }catch(e){}`,
+                    },
+                  });
+                }
+              } catch {
+                /* ignore */
+              }
               const res = await handleCallTool({
                 name: TOOL_NAMES.BROWSER.CLICK,
                 args: {
@@ -343,6 +419,23 @@ export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<Run
               const fallbackUsed =
                 resolvedBy && first && resolvedBy !== 'ref' && resolvedBy !== first;
               const value = resolveTemplate(s.value) ?? '';
+              // auto scroll into view if possible before fill
+              try {
+                const sel = !located?.ref
+                  ? s.target.candidates?.find((c) => c.type === 'css' || c.type === 'attr')?.value
+                  : undefined;
+                if (sel) {
+                  await handleCallTool({
+                    name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
+                    args: {
+                      type: 'MAIN',
+                      jsScript: `try{var el=document.querySelector(${JSON.stringify(sel)});if(el){el.scrollIntoView({behavior:'instant',block:'center',inline:'nearest'});} }catch(e){}`,
+                    },
+                  });
+                }
+              } catch {
+                /* ignore */
+              }
               const res = await handleCallTool({
                 name: TOOL_NAMES.BROWSER.FILL,
                 args: {
@@ -508,6 +601,18 @@ export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<Run
             }
           }
           logs.push({ stepId: step.id, status: 'success', tookMs: Date.now() - t0 });
+          try {
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (tabs[0]?.id) {
+              await chrome.tabs.sendMessage(tabs[0].id, {
+                action: 'rr_overlay',
+                cmd: 'append',
+                text: `✔ ${step.type} (${step.id})`,
+              } as any);
+            }
+          } catch {
+            /* ignore */
+          }
           // Run any deferred after-scripts now that a non-script step completed
           if (pendingAfterScripts.length > 0) {
             while (pendingAfterScripts.length) {
@@ -541,6 +646,18 @@ export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<Run
             message: e?.message || String(e),
             tookMs: Date.now() - t0,
           });
+          try {
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (tabs[0]?.id) {
+              await chrome.tabs.sendMessage(tabs[0].id, {
+                action: 'rr_overlay',
+                cmd: 'append',
+                text: `✘ ${step.type} (${step.id}) -> ${e?.message || String(e)}`,
+              } as any);
+            }
+          } catch {
+            /* ignore */
+          }
           if (step.screenshotOnFail !== false) {
             try {
               const shot = await handleCallTool({
@@ -584,6 +701,14 @@ export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<Run
   }
 
   const tookMs = Date.now() - startAt;
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tabs[0]?.id) {
+      await chrome.tabs.sendMessage(tabs[0].id, { action: 'rr_overlay', cmd: 'done' } as any);
+    }
+  } catch {
+    /* ignore */
+  }
   const record: RunRecord = {
     id: runId,
     flowId: flow.id,

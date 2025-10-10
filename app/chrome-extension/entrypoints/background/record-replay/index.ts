@@ -63,11 +63,29 @@ async function stopRecording(): Promise<{ success: boolean; flow?: Flow; error?:
       action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL,
       cmd: 'stop',
     });
-    const flow = (flowRes && flowRes.flow) as Flow;
-    if (flow) {
-      await saveFlow(flow);
+    const flowFromTab = (flowRes && flowRes.flow) as Flow | undefined;
+    // 合并后台聚合的步骤（跨标签页）与内容脚本返回的步骤
+    const aggregated = currentRecording.flow;
+    const merged: Flow | undefined = (function merge() {
+      if (aggregated && !flowFromTab) return aggregated;
+      if (!aggregated && flowFromTab) return flowFromTab;
+      if (!aggregated && !flowFromTab) return undefined;
+      // both present: prefer元数据以 flowFromTab 为基，步骤采用 aggregated（包含跨标签页）
+      return {
+        ...(flowFromTab as Flow),
+        steps: (aggregated as Flow).steps || [],
+        variables: (aggregated as Flow).variables || (flowFromTab as Flow).variables,
+        meta: {
+          ...((flowFromTab as Flow).meta || {}),
+          ...((aggregated as Flow).meta || {}),
+          updatedAt: new Date().toISOString(),
+        } as any,
+      } as Flow;
+    })();
+    if (merged) {
+      await saveFlow(merged);
     }
-    const resp = { success: true, flow };
+    const resp = { success: true, flow: merged };
     currentRecording = null;
     return resp;
   } catch (e: any) {
@@ -95,6 +113,29 @@ export function initRecordReplayListeners() {
               } catch {
                 // ignore
               }
+            }
+            // 统一在后台累积步骤，便于跨标签页聚合
+            try {
+              if (!currentRecording.flow) {
+                currentRecording.flow = {
+                  id: `flow_${Date.now()}`,
+                  name: '未命名录制',
+                  version: 1,
+                  steps: [],
+                  variables: [],
+                  meta: {
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                  },
+                } as Flow;
+              }
+              currentRecording.flow.steps.push(step);
+              currentRecording.flow.meta = {
+                ...(currentRecording.flow.meta || ({} as any)),
+                updatedAt: new Date().toISOString(),
+              } as any;
+            } catch {
+              // ignore
             }
           } else if (message.payload?.kind === 'stop') {
             currentRecording.flow = message.payload.flow || currentRecording.flow;
@@ -215,6 +256,109 @@ export function initRecordReplayListeners() {
       if (!st.after.waitForNavigation) {
         st.after.waitForNavigation = true;
         lastNavTaggedAt = now;
+      }
+    } catch {
+      // ignore
+    }
+  });
+
+  // 全局录制：监听激活的标签页变化，追加“导航/切换”步骤，并确保在新标签页继续录制
+  chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    try {
+      if (!currentRecording) return;
+      const tab = await chrome.tabs.get(activeInfo.tabId);
+      if (!tab) return;
+      // 确保该标签页注入并继续录制（不重置流）
+      try {
+        await ensureRecorderInjected(activeInfo.tabId);
+        await chrome.tabs.sendMessage(activeInfo.tabId, {
+          action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL,
+          cmd: 'resume',
+        } as any);
+      } catch {
+        /* ignore */
+      }
+      if (!currentRecording.flow) return;
+      const url = typeof tab.url === 'string' ? tab.url : '';
+      if (url) {
+        currentRecording.flow.steps.push({
+          id: `step_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          type: 'navigate',
+          url,
+        } as any);
+        currentRecording.flow.meta = {
+          ...(currentRecording.flow.meta || ({} as any)),
+          updatedAt: new Date().toISOString(),
+        } as any;
+      }
+    } catch {
+      // ignore
+    }
+  });
+
+  // 全局录制：监听顶级导航提交（含显式地址栏输入/刷新），在非链接点击触发时追加“导航”步骤
+  chrome.webNavigation.onCommitted.addListener(async (details) => {
+    try {
+      if (!currentRecording) return;
+      if (details.frameId !== 0) return; // 仅记录顶级 frame
+      const tabId = details.tabId;
+      // 对于点击触发的 link 导航，不追加 navigate（已有点击+waitForNavigation 富化）
+      const t = details.transitionType as string | undefined;
+      const isLink = t === 'link';
+      if (isLink) {
+        // 同时确保继续录制
+        try {
+          await ensureRecorderInjected(tabId);
+          await chrome.tabs.sendMessage(tabId, {
+            action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL,
+            cmd: 'resume',
+          } as any);
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      // 显式导航/刷新/地址栏输入等
+      const shouldRecord =
+        t === 'reload' ||
+        t === 'typed' ||
+        t === 'generated' ||
+        t === 'auto_bookmark' ||
+        t === 'keyword';
+      if (!shouldRecord) {
+        // 仍确保脚本在该页活跃，用于持续录制
+        try {
+          await ensureRecorderInjected(tabId);
+          await chrome.tabs.sendMessage(tabId, {
+            action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL,
+            cmd: 'resume',
+          } as any);
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      const tab = await chrome.tabs.get(tabId);
+      const url = typeof tab.url === 'string' ? tab.url : details.url;
+      if (!url || !currentRecording.flow) return;
+      currentRecording.flow.steps.push({
+        id: `step_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        type: 'navigate',
+        url,
+      } as any);
+      currentRecording.flow.meta = {
+        ...(currentRecording.flow.meta || ({} as any)),
+        updatedAt: new Date().toISOString(),
+      } as any;
+      // 确保继续录制
+      try {
+        await ensureRecorderInjected(tabId);
+        await chrome.tabs.sendMessage(tabId, {
+          action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL,
+          cmd: 'resume',
+        } as any);
+      } catch {
+        /* ignore */
       }
     } catch {
       // ignore
