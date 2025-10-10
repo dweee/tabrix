@@ -272,6 +272,14 @@
                 <option value="attribute">attribute</option>
               </select>
             </label>
+            <label>
+              失败策略
+              <select v-model="activeStep.failStrategy">
+                <option value="stop">stop</option>
+                <option value="warn">warn</option>
+                <option value="retry">retry</option>
+              </select>
+            </label>
             <template v-if="assertType === 'exists'">
               <label>选择器<input v-model="activeStep.assert.exists" /></label>
             </template>

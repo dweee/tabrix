@@ -265,6 +265,7 @@ export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<Run
             break;
           }
 
+          let stepLogged = false;
           switch (step.type) {
             case 'scroll': {
               const s = step as StepScroll;
@@ -458,6 +459,30 @@ export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<Run
               } catch {
                 /* ignore */
               }
+              // ensure focus before typing
+              try {
+                if (located?.ref) {
+                  await chrome.tabs.sendMessage(tabId, {
+                    action: 'focusByRef',
+                    ref: located.ref,
+                  } as any);
+                } else {
+                  const sel = s.target.candidates?.find(
+                    (c) => c.type === 'css' || c.type === 'attr',
+                  )?.value;
+                  if (sel) {
+                    await handleCallTool({
+                      name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
+                      args: {
+                        type: 'MAIN',
+                        jsScript: `try{var el=document.querySelector(${JSON.stringify(sel)});if(el&&el.focus){el.focus();}}catch(e){}`,
+                      },
+                    });
+                  }
+                }
+              } catch {
+                /* ignore */
+              }
               const res = await handleCallTool({
                 name: TOOL_NAMES.BROWSER.FILL,
                 args: {
@@ -479,7 +504,8 @@ export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<Run
                   fallbackTo: String(resolvedBy),
                   tookMs: Date.now() - t0,
                 } as any);
-                continue;
+                stepLogged = true;
+                break;
               }
               break;
             }
@@ -537,7 +563,19 @@ export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<Run
                   name: TOOL_NAMES.BROWSER.COMPUTER,
                   args: { action: 'wait', text, appear: true, timeout: step.timeoutMs || 5000 },
                 });
-                if ((res as any).isError) throw new Error('assert text failed');
+                if ((res as any).isError) {
+                  if (s.failStrategy === 'warn') {
+                    logs.push({
+                      stepId: step.id,
+                      status: 'warning',
+                      message: 'assert text failed',
+                      tookMs: Date.now() - t0,
+                    });
+                    stepLogged = true;
+                    break;
+                  }
+                  throw new Error('assert text failed');
+                }
               } else if ('exists' in s.assert || 'visible' in s.assert) {
                 const selector = (s.assert as any).exists || (s.assert as any).visible;
                 const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -549,11 +587,35 @@ export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<Run
                   action: 'ensureRefForSelector',
                   selector,
                 } as any);
-                if (!ensured || !ensured.success) throw new Error('assert selector not found');
+                if (!ensured || !ensured.success) {
+                  if (s.failStrategy === 'warn') {
+                    logs.push({
+                      stepId: step.id,
+                      status: 'warning',
+                      message: 'assert selector not found',
+                      tookMs: Date.now() - t0,
+                    });
+                    stepLogged = true;
+                    break;
+                  }
+                  throw new Error('assert selector not found');
+                }
                 if ('visible' in s.assert) {
                   const rect = ensured && ensured.center ? ensured.center : null;
                   // Minimal visibility check based on existence and center
-                  if (!rect) throw new Error('assert visible failed');
+                  if (!rect) {
+                    if (s.failStrategy === 'warn') {
+                      logs.push({
+                        stepId: step.id,
+                        status: 'warning',
+                        message: 'assert visible failed',
+                        tookMs: Date.now() - t0,
+                      });
+                      stepLogged = true;
+                      break;
+                    }
+                    throw new Error('assert visible failed');
+                  }
                 }
               } else if ('attribute' in s.assert) {
                 const { selector, name, equals, matches } = (s.assert as any).attribute || {};
@@ -567,31 +629,81 @@ export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<Run
                   selector,
                   name,
                 } as any);
-                if (!resp || !resp.success) throw new Error('assert attribute: element not found');
+                if (!resp || !resp.success) {
+                  if (s.failStrategy === 'warn') {
+                    logs.push({
+                      stepId: step.id,
+                      status: 'warning',
+                      message: 'assert attribute: element not found',
+                      tookMs: Date.now() - t0,
+                    });
+                    stepLogged = true;
+                    break;
+                  }
+                  throw new Error('assert attribute: element not found');
+                }
                 const actual: string | null = resp.value ?? null;
                 if (equals !== undefined && equals !== null) {
                   const expected = resolveTemplate(String(equals)) ?? '';
-                  if (String(actual) !== String(expected))
+                  if (String(actual) !== String(expected)) {
+                    if (s.failStrategy === 'warn') {
+                      logs.push({
+                        stepId: step.id,
+                        status: 'warning',
+                        message: `assert attribute equals failed: ${name} actual=${String(actual)} expected=${String(
+                          expected,
+                        )}`,
+                        tookMs: Date.now() - t0,
+                      });
+                      stepLogged = true;
+                      break;
+                    }
                     throw new Error(
                       `assert attribute equals failed: ${name} actual=${String(actual)} expected=${String(
                         expected,
                       )}`,
                     );
+                  }
                 } else if (matches !== undefined && matches !== null) {
                   try {
                     const re = new RegExp(String(matches));
-                    if (!re.test(String(actual)))
+                    if (!re.test(String(actual))) {
+                      if (s.failStrategy === 'warn') {
+                        logs.push({
+                          stepId: step.id,
+                          status: 'warning',
+                          message: `assert attribute matches failed: ${name} actual=${String(actual)} regex=${String(
+                            matches,
+                          )}`,
+                          tookMs: Date.now() - t0,
+                        });
+                        stepLogged = true;
+                        break;
+                      }
                       throw new Error(
                         `assert attribute matches failed: ${name} actual=${String(actual)} regex=${String(
                           matches,
                         )}`,
                       );
+                    }
                   } catch (e) {
                     throw new Error(`invalid regex for attribute matches: ${String(matches)}`);
                   }
                 } else {
                   // Only check existence if no comparator provided
-                  if (actual == null) throw new Error(`assert attribute failed: ${name} missing`);
+                  if (actual == null) {
+                    if (s.failStrategy === 'warn') {
+                      logs.push({
+                        stepId: step.id,
+                        status: 'warning',
+                        message: `assert attribute failed: ${name} missing`,
+                        tookMs: Date.now() - t0,
+                      });
+                      stepLogged = true;
+                      break;
+                    }
+                    throw new Error(`assert attribute failed: ${name} missing`);
+                  }
                 }
               }
               break;
@@ -622,14 +734,16 @@ export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<Run
               await new Promise((r) => setTimeout(r, 0));
             }
           }
-          logs.push({ stepId: step.id, status: 'success', tookMs: Date.now() - t0 });
+          if (!stepLogged) {
+            logs.push({ stepId: step.id, status: 'success', tookMs: Date.now() - t0 });
+          }
           try {
             const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
             if (tabs[0]?.id) {
               await chrome.tabs.sendMessage(tabs[0].id, {
                 action: 'rr_overlay',
                 cmd: 'append',
-                text: `✔ ${step.type} (${step.id})`,
+                text: stepLogged ? `! ${step.type} (${step.id})` : `✔ ${step.type} (${step.id})`,
               } as any);
             }
           } catch {
