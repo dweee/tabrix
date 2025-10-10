@@ -12,6 +12,7 @@ import {
   StepScroll,
   StepDrag,
   StepWait,
+  StepScript,
 } from './types';
 import { appendRun } from './flow-store';
 import { locateElement } from './selector-engine';
@@ -177,6 +178,7 @@ export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<Run
   }
 
   try {
+    const pendingAfterScripts: StepScript[] = [];
     for (const step of flow.steps) {
       const t0 = Date.now();
       const maxRetries = Math.max(0, step.retry?.count ?? 0);
@@ -197,6 +199,14 @@ export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<Run
           // resolve string templates {var}
           const resolveTemplate = (val?: string): string | undefined =>
             (val || '').replace(/\{([^}]+)\}/g, (_m, k) => (vars[k] ?? '').toString());
+
+          // Defer 'script' steps marked as after to run after next non-script step
+          if (step.type === 'script' && (step as any).when === 'after') {
+            pendingAfterScripts.push(step as any);
+            // Do not execute now; will run after the next non-script step (or at the end)
+            logs.push({ stepId: step.id, status: 'success', tookMs: Date.now() - t0 });
+            break;
+          }
 
           switch (step.type) {
             case 'scroll': {
@@ -431,9 +441,43 @@ export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<Run
                   if (!rect) throw new Error('assert visible failed');
                 }
               } else if ('attribute' in s.assert) {
-                // minimal attribute check: rely on inject script via ENSURE_REF_FOR_SELECTOR
-                // skipped in M1 for complexity; treat as pass-through wait
-                await new Promise((r) => setTimeout(r, 10));
+                const { selector, name, equals, matches } = (s.assert as any).attribute || {};
+                const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+                const firstTab = tabs && tabs[0];
+                const tabId = firstTab && typeof firstTab.id === 'number' ? firstTab.id : undefined;
+                if (!tabId) throw new Error('Active tab not found');
+                await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
+                const resp = await chrome.tabs.sendMessage(tabId, {
+                  action: 'getAttributeForSelector',
+                  selector,
+                  name,
+                } as any);
+                if (!resp || !resp.success) throw new Error('assert attribute: element not found');
+                const actual: string | null = resp.value ?? null;
+                if (equals !== undefined && equals !== null) {
+                  const expected = resolveTemplate(String(equals)) ?? '';
+                  if (String(actual) !== String(expected))
+                    throw new Error(
+                      `assert attribute equals failed: ${name} actual=${String(actual)} expected=${String(
+                        expected,
+                      )}`,
+                    );
+                } else if (matches !== undefined && matches !== null) {
+                  try {
+                    const re = new RegExp(String(matches));
+                    if (!re.test(String(actual)))
+                      throw new Error(
+                        `assert attribute matches failed: ${name} actual=${String(actual)} regex=${String(
+                          matches,
+                        )}`,
+                      );
+                  } catch (e) {
+                    throw new Error(`invalid regex for attribute matches: ${String(matches)}`);
+                  }
+                } else {
+                  // Only check existence if no comparator provided
+                  if (actual == null) throw new Error(`assert attribute failed: ${name} missing`);
+                }
               }
               break;
             }
@@ -464,6 +508,24 @@ export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<Run
             }
           }
           logs.push({ stepId: step.id, status: 'success', tookMs: Date.now() - t0 });
+          // Run any deferred after-scripts now that a non-script step completed
+          if (pendingAfterScripts.length > 0) {
+            while (pendingAfterScripts.length) {
+              const s = pendingAfterScripts.shift()!;
+              const tScript = Date.now();
+              const world = (s as any).world || 'ISOLATED';
+              const code = String((s as any).code || '');
+              if (code.trim()) {
+                const wrapped = `(() => { try { ${code} } catch (e) { console.error('flow script error:', e); } })();`;
+                const res = await handleCallTool({
+                  name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
+                  args: { type: world, jsScript: wrapped },
+                });
+                if ((res as any).isError) throw new Error('script(after) execution failed');
+              }
+              logs.push({ stepId: s.id, status: 'success', tookMs: Date.now() - tScript });
+            }
+          }
           break; // success, exit retry loop
         } catch (e: any) {
           if (attempt < maxRetries) {
@@ -495,6 +557,24 @@ export async function runFlow(flow: Flow, options: RunOptions = {}): Promise<Run
           // stop on first failure after retries
           throw e;
         }
+      }
+    }
+    // Flush any trailing after-scripts if present
+    if (pendingAfterScripts.length > 0) {
+      while (pendingAfterScripts.length) {
+        const s = pendingAfterScripts.shift()!;
+        const tScript = Date.now();
+        const world = (s as any).world || 'ISOLATED';
+        const code = String((s as any).code || '');
+        if (code.trim()) {
+          const wrapped = `(() => { try { ${code} } catch (e) { console.error('flow script error:', e); } })();`;
+          const res = await handleCallTool({
+            name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
+            args: { type: world, jsScript: wrapped },
+          });
+          if ((res as any).isError) throw new Error('script(after) execution failed');
+        }
+        logs.push({ stepId: s.id, status: 'success', tookMs: Date.now() - tScript });
       }
     }
   } finally {

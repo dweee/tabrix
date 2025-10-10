@@ -144,6 +144,19 @@
     pushStep({ type: 'key', keys, screenshotOnFail: false });
   }
 
+  function onKeyup(e) {
+    if (!isRecording) return;
+    const mods = [];
+    if (e.ctrlKey) mods.push('ctrl');
+    if (e.metaKey) mods.push('cmd');
+    if (e.altKey) mods.push('alt');
+    if (e.shiftKey) mods.push('shift');
+    let keyToken = e.key || '';
+    keyToken = keyToken.length === 1 ? keyToken.toLowerCase() : keyToken.toLowerCase();
+    const keys = mods.length ? `${mods.join('+')}+${keyToken}` : keyToken;
+    pushStep({ type: 'key', keys, screenshotOnFail: false });
+  }
+
   let lastScrollAt = 0;
   function onScroll(e) {
     if (!isRecording) return;
@@ -192,6 +205,7 @@
     document.addEventListener('change', onInput, true);
     document.addEventListener('input', onInput, true);
     document.addEventListener('keydown', onKeydown, true);
+    document.addEventListener('keyup', onKeyup, true);
     window.addEventListener('scroll', onScroll, { passive: true });
     document.addEventListener('mousedown', onMouseDown, true);
     document.addEventListener('mousemove', onMouseMove, true);
@@ -203,6 +217,7 @@
     document.removeEventListener('change', onInput, true);
     document.removeEventListener('input', onInput, true);
     document.removeEventListener('keydown', onKeydown, true);
+    document.removeEventListener('keyup', onKeyup, true);
     window.removeEventListener('scroll', onScroll, { passive: true });
     document.removeEventListener('mousedown', onMouseDown, true);
     document.removeEventListener('mousemove', onMouseMove, true);

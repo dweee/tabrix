@@ -541,6 +541,38 @@
           return true;
         }
       }
+      if (request && request.action === 'getAttributeForSelector') {
+        try {
+          const sel = String(request.selector || '').trim();
+          const name = String(request.name || '').trim();
+          if (!sel || !name) {
+            sendResponse({ success: false, error: 'selector and name are required' });
+            return true;
+          }
+          const el = document.querySelector(sel);
+          if (!el) {
+            sendResponse({ success: false, error: `selector not found: ${sel}` });
+            return true;
+          }
+          let value = null;
+          if (name === 'text' || name === 'textContent') {
+            value = (el.textContent || '').trim();
+          } else if (name === 'value') {
+            try {
+              value = /** @type {HTMLInputElement} */ (el).value ?? null;
+            } catch (_) {
+              value = el.getAttribute('value');
+            }
+          } else {
+            value = el.getAttribute(name);
+          }
+          sendResponse({ success: true, value });
+          return true;
+        } catch (e) {
+          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+          return true;
+        }
+      }
       if (request && request.action === 'resolveRef') {
         const ref = request.ref;
         try {
