@@ -17,18 +17,28 @@ export type StepType =
   | 'click'
   | 'dblclick'
   | 'fill'
+  | 'triggerEvent'
+  | 'setAttribute'
+  | 'screenshot'
+  | 'switchFrame'
+  | 'loopElements'
   | 'key'
   | 'scroll'
   | 'drag'
   | 'wait'
   | 'assert'
   | 'script'
+  | 'if'
+  | 'foreach'
+  | 'while'
   | 'navigate'
   | 'http'
   | 'extract'
   | 'openTab'
   | 'switchTab'
-  | 'closeTab';
+  | 'closeTab'
+  | 'handleDownload'
+  | 'executeFlow';
 
 export interface StepBase {
   id: string;
@@ -49,6 +59,42 @@ export interface StepFill extends StepBase {
   type: 'fill';
   target: TargetLocator;
   value: string; // may contain {var}
+}
+
+export interface StepTriggerEvent extends StepBase {
+  type: 'triggerEvent';
+  target: TargetLocator;
+  event: string; // e.g. 'input', 'change', 'mouseover'
+  bubbles?: boolean;
+  cancelable?: boolean;
+}
+
+export interface StepSetAttribute extends StepBase {
+  type: 'setAttribute';
+  target: TargetLocator;
+  name: string;
+  value?: string; // when omitted and remove=true, remove attribute
+  remove?: boolean;
+}
+
+export interface StepScreenshot extends StepBase {
+  type: 'screenshot';
+  selector?: string;
+  fullPage?: boolean;
+  saveAs?: string; // variable name to store base64
+}
+
+export interface StepSwitchFrame extends StepBase {
+  type: 'switchFrame';
+  frame?: { index?: number; urlContains?: string };
+}
+
+export interface StepLoopElements extends StepBase {
+  type: 'loopElements';
+  selector: string;
+  saveAs?: string; // list var name
+  itemVar?: string; // default 'item'
+  subflowId: string;
 }
 
 export interface StepKey extends StepBase {
@@ -77,7 +123,8 @@ export interface StepWait extends StepBase {
     | { selector: string; visible?: boolean }
     | { text: string; appear?: boolean }
     | { navigation: true }
-    | { networkIdle: true };
+    | { networkIdle: true }
+    | { sleep: number };
 }
 
 export interface StepAssert extends StepBase {
@@ -98,21 +145,61 @@ export interface StepScript extends StepBase {
   when?: 'before' | 'after';
 }
 
+export interface StepIf extends StepBase {
+  type: 'if';
+  // condition supports: { var: string; equals?: any } | { expression: string }
+  condition: any;
+}
+
+export interface StepForeach extends StepBase {
+  type: 'foreach';
+  listVar: string;
+  itemVar?: string;
+  subflowId: string;
+}
+
+export interface StepWhile extends StepBase {
+  type: 'while';
+  condition: any;
+  subflowId: string;
+  maxIterations?: number;
+}
+
 export type Step =
   | StepClick
   | StepFill
+  | StepTriggerEvent
+  | StepSetAttribute
+  | StepScreenshot
+  | StepSwitchFrame
+  | StepLoopElements
   | StepKey
   | StepScroll
   | StepDrag
   | StepWait
   | StepAssert
   | StepScript
+  | StepIf
+  | StepForeach
+  | StepWhile
   | (StepBase & { type: 'navigate'; url: string })
   | StepHttp
   | StepExtract
   | StepOpenTab
   | StepSwitchTab
-  | StepCloseTab;
+  | StepCloseTab
+  | (StepBase & {
+      type: 'handleDownload';
+      filenameContains?: string;
+      saveAs?: string;
+      waitForComplete?: boolean;
+    })
+  | (StepBase & {
+      type: 'executeFlow';
+      flowId: string;
+      inline?: boolean;
+      args?: Record<string, any>;
+    });
 
 export interface StepHttp extends StepBase {
   type: 'http';
@@ -120,6 +207,7 @@ export interface StepHttp extends StepBase {
   url: string;
   headers?: Record<string, string>;
   body?: any;
+  formData?: any;
   saveAs?: string;
   assign?: Record<string, string>;
 }
@@ -151,26 +239,40 @@ export interface StepCloseTab extends StepBase {
   url?: string;
 }
 
+export type VariableType = 'string' | 'number' | 'boolean' | 'enum' | 'array';
+
 export interface VariableDef {
   key: string;
   label?: string;
   sensitive?: boolean;
-  default?: string;
-  rules?: { required?: boolean; pattern?: string };
+  // default value can be string/number/boolean/array depending on type
+  default?: any; // keep broad for backward compatibility
+  type?: VariableType; // default to 'string' when omitted
+  rules?: { required?: boolean; pattern?: string; enum?: string[] };
 }
 
 export type NodeType =
   | 'click'
   | 'dblclick'
   | 'fill'
+  | 'triggerEvent'
+  | 'setAttribute'
+  | 'screenshot'
+  | 'switchFrame'
+  | 'loopElements'
   | 'key'
   | 'wait'
   | 'assert'
   | 'script'
+  | 'if'
+  | 'foreach'
+  | 'while'
   | 'navigate'
   | 'openTab'
   | 'switchTab'
   | 'closeTab'
+  | 'handleDownload'
+  | 'executeFlow'
   | 'http'
   | 'extract'
   | 'delay';
@@ -188,7 +290,9 @@ export interface Edge {
   id: string;
   from: string;
   to: string;
-  label?: 'default' | 'true' | 'false' | 'onError';
+  // label identifies the logical branch. Keep 'default' for linear/main path.
+  // For conditionals, use arbitrary strings like 'case:<id>' or 'else'.
+  label?: string;
 }
 
 export interface Flow {

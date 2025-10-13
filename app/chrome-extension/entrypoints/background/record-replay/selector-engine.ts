@@ -15,14 +15,19 @@ export interface LocatedElement {
 export async function locateElement(
   tabId: number,
   target: TargetLocator,
+  frameId?: number,
 ): Promise<LocatedElement | null> {
   // Try ref first
   if (target.ref) {
     try {
-      const res = await chrome.tabs.sendMessage(tabId, {
-        action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
-        ref: target.ref,
-      });
+      const res = await chrome.tabs.sendMessage(
+        tabId,
+        {
+          action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
+          ref: target.ref,
+        } as any,
+        { frameId } as any,
+      );
       if (res && res.success && res.center) {
         return { ref: target.ref, center: res.center, resolvedBy: 'ref' };
       }
@@ -34,20 +39,28 @@ export async function locateElement(
   for (const c of target.candidates || []) {
     try {
       if (c.type === 'css' || c.type === 'attr') {
-        const ensured = await chrome.tabs.sendMessage(tabId, {
-          action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
-          selector: c.value,
-        });
+        const ensured = await chrome.tabs.sendMessage(
+          tabId,
+          {
+            action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+            selector: c.value,
+          } as any,
+          { frameId } as any,
+        );
         if (ensured && ensured.success && ensured.ref && ensured.center) {
           return { ref: ensured.ref, center: ensured.center, resolvedBy: c.type };
         }
       } else if (c.type === 'text') {
         // Search by visible innerText contains value
-        const ensured = await chrome.tabs.sendMessage(tabId, {
-          action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
-          useText: true,
-          text: c.value,
-        } as any);
+        const ensured = await chrome.tabs.sendMessage(
+          tabId,
+          {
+            action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+            useText: true,
+            text: c.value,
+          } as any,
+          { frameId } as any,
+        );
         if (ensured && ensured.success && ensured.ref && ensured.center) {
           return { ref: ensured.ref, center: ensured.center, resolvedBy: c.type };
         }
@@ -82,21 +95,29 @@ export async function locateElement(
           );
         }
         for (const sel of ariaSelectors) {
-          const ensured = await chrome.tabs.sendMessage(tabId, {
-            action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
-            selector: sel,
-          });
+          const ensured = await chrome.tabs.sendMessage(
+            tabId,
+            {
+              action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+              selector: sel,
+            } as any,
+            { frameId } as any,
+          );
           if (ensured && ensured.success && ensured.ref && ensured.center) {
             return { ref: ensured.ref, center: ensured.center, resolvedBy: c.type };
           }
         }
       } else if (c.type === 'xpath') {
         // Minimal xpath support via document.evaluate through injected helper
-        const ensured = await chrome.tabs.sendMessage(tabId, {
-          action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
-          selector: c.value,
-          isXPath: true,
-        } as any);
+        const ensured = await chrome.tabs.sendMessage(
+          tabId,
+          {
+            action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+            selector: c.value,
+            isXPath: true,
+          } as any,
+          { frameId } as any,
+        );
         if (ensured && ensured.success && ensured.ref && ensured.center) {
           return { ref: ensured.ref, center: ensured.center, resolvedBy: c.type };
         }

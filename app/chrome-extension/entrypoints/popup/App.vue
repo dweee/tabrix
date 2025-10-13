@@ -227,7 +227,7 @@
       <div class="section">
         <h2 class="section-title">录制与回放</h2>
         <div class="rr-grid">
-          <div class="rr-controls">
+          <div class="rr-controls" style="width: 100%">
             <button class="connect-button" @click="startRecording" :disabled="rrRecording">
               <BoltIcon />
               <span>{{ rrRecording ? '录制中...' : '开始录制' }}</span>
@@ -236,29 +236,13 @@
               <TrashIcon />
               <span>停止并保存</span>
             </button>
-            <button class="semantic-engine-button" @click="loadFlows">刷新列表</button>
-          </div>
-          <div class="rr-list">
-            <div class="row" style="gap: 8px; margin-bottom: 6px">
-              <label class="chk"
-                ><input type="checkbox" v-model="rrOnlyBound" />仅显示当前页绑定</label
-              >
-            </div>
-            <div v-if="filteredRrFlows.length === 0" class="empty">暂无录制流</div>
-            <div v-for="f in filteredRrFlows" :key="f.id" class="rr-item">
-              <div class="rr-meta">
-                <div class="rr-name">{{ f.name }}</div>
-                <div class="rr-desc">{{ f.description || '' }}</div>
-              </div>
-              <div class="rr-actions">
-                <button class="semantic-engine-button" @click="runFlow(f.id)">回放</button>
-                <button class="semantic-engine-button" @click="editFlow(f)">表单编辑</button>
-                <button class="semantic-engine-button" @click="openBuilder(f)">画布编辑</button>
-                <button class="semantic-engine-button" @click="publishFlow(f.id)">发布</button>
-                <button class="semantic-engine-button" @click="openSchedule(f.id)">定时</button>
-                <button class="danger-button" @click="deleteFlow(f.id)">删除</button>
-              </div>
-            </div>
+            <button
+              class="semantic-engine-button"
+              @click="openWorkflowSidepanel"
+              title="打开侧边栏管理工作流"
+            >
+              工作流管理
+            </button>
           </div>
         </div>
       </div>
@@ -295,26 +279,7 @@
       @cancel="hideClearDataConfirmation"
     />
 
-    <FlowEditor
-      :visible="showFlowEditor"
-      :flow="editingFlow"
-      @close="showFlowEditor = false"
-      @save="saveEditedFlow"
-    />
-    <BuilderEditor
-      :visible="showBuilderEditor"
-      :flow="editingFlowBuilder"
-      @close="showBuilderEditor = false"
-      @save="saveEditedFlowFromBuilder"
-    />
-    <ScheduleDialog
-      :visible="showSchedule"
-      :flow-id="schedulingFlowId"
-      :schedules="schedules.filter((s) => s.flowId === schedulingFlowId)"
-      @close="showSchedule = false"
-      @save="saveSchedule"
-      @remove="removeSchedule"
-    />
+    <!-- 侧边栏承担工作流管理；编辑器在独立窗口中打开 -->
   </div>
 </template>
 
@@ -334,9 +299,6 @@ import { getMessage } from '@/utils/i18n';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import ProgressIndicator from './components/ProgressIndicator.vue';
 import ModelCacheManagement from './components/ModelCacheManagement.vue';
-import FlowEditor from './components/FlowEditor.vue';
-import BuilderEditor from './components/BuilderEditor.vue';
-import ScheduleDialog from './components/ScheduleDialog.vue';
 import {
   DocumentIcon,
   DatabaseIcon,
@@ -349,28 +311,32 @@ import {
 
 // Record & Replay state
 const rrRecording = ref(false);
-const rrFlows = ref<Array<{ id: string; name: string; description?: string; meta?: any }>>([]);
+const rrFlows = ref<
+  Array<{ id: string; name: string; description?: string; meta?: any; variables?: any[] }>
+>([]);
 const rrOnlyBound = ref(false);
+const rrSearch = ref('');
 const currentTabUrl = ref<string>('');
-const filteredRrFlows = computed(() =>
-  rrOnlyBound.value ? rrFlows.value.filter(isFlowBoundToCurrent) : rrFlows.value,
-);
+const filteredRrFlows = computed(() => {
+  const base = rrOnlyBound.value ? rrFlows.value.filter(isFlowBoundToCurrent) : rrFlows.value;
+  const q = rrSearch.value.trim().toLowerCase();
+  if (!q) return base;
+  return base.filter((f: any) => {
+    const name = String(f.name || '').toLowerCase();
+    const domain = String(f?.meta?.domain || '').toLowerCase();
+    const tags = ((f?.meta?.tags || []) as any[]).join(',').toLowerCase();
+    return name.includes(q) || domain.includes(q) || tags.includes(q);
+  });
+});
 
-// Flow editor state
-const showFlowEditor = ref(false);
-const editingFlow = ref<any | null>(null);
-const showBuilderEditor = ref(false);
-const editingFlowBuilder = ref<any | null>(null);
-const showSchedule = ref(false);
-const schedulingFlowId = ref<string | null>(null);
-const schedules = ref<any[]>([]);
+// Flow editor在独立窗口中打开；在popup不再展示繁杂列表
 
 const loadFlows = async () => {
   try {
     const res = await chrome.runtime.sendMessage({ type: BACKGROUND_MESSAGE_TYPES.RR_LIST_FLOWS });
     if (res && res.success) rrFlows.value = res.flows || [];
   } catch (e) {
-    console.error('加载录制流失败:', e);
+    /* ignore */
   }
 };
 
@@ -390,6 +356,8 @@ function isFlowBoundToCurrent(flow: any) {
     return false;
   }
 }
+
+// 运行记录与覆盖项在侧边栏页面查看
 
 const startRecording = async () => {
   if (rrRecording.value) return;
@@ -421,127 +389,50 @@ const stopRecording = async () => {
 
 const runFlow = async (flowId: string) => {
   try {
+    // load flow to get runOptions
+    let flow: any = null;
+    try {
+      const getRes = await chrome.runtime.sendMessage({
+        type: BACKGROUND_MESSAGE_TYPES.RR_GET_FLOW,
+        flowId,
+      });
+      if (getRes && getRes.success) flow = getRes.flow;
+    } catch {}
+    const runOptions = (flow && flow.meta && flow.meta.runOptions) || {};
+    // No per-run overrides in popup; sidepanel/editor manage advanced options
+    const ov: any = {};
     const res = await chrome.runtime.sendMessage({
       type: BACKGROUND_MESSAGE_TYPES.RR_RUN_FLOW,
       flowId,
-      options: { returnLogs: true },
+      options: { ...runOptions, ...ov, returnLogs: true },
     });
-    if (!(res && res.success)) console.warn('回放失败');
+    if (!(res && res.success)) {
+      console.warn('回放失败');
+      return;
+    }
+    // If failed, open builder and focus the failed node
+    try {
+      const result = res.result;
+      if (result && result.success === false) {
+        const logs = result.logs || [];
+        const failed = logs.find((l: any) => l.status === 'failed');
+        if (failed && failed.stepId) {
+          // 打开独立编辑窗口并定位失败节点
+          if (flow) openBuilderWindow(flow.id, String(failed.stepId));
+        }
+      } else if (result && result.success === true) {
+        // If run succeeded but selector fallback was used, suggest updating priorities
+        const logs = result.logs || [];
+        const fb = logs.find((l: any) => l.fallbackUsed && l.fallbackTo);
+        if (fb && flow) openBuilderWindow(flow.id, String(fb.stepId || ''));
+      }
+    } catch {}
   } catch (e) {
     console.error('回放失败:', e);
   }
 };
 
-const publishFlow = async (flowId: string) => {
-  try {
-    const res = await chrome.runtime.sendMessage({
-      type: BACKGROUND_MESSAGE_TYPES.RR_PUBLISH_FLOW,
-      flowId,
-    });
-    if (!(res && res.success)) console.warn('发布失败');
-  } catch (e) {
-    console.error('发布失败:', e);
-  }
-};
-
-const deleteFlow = async (flowId: string) => {
-  try {
-    const res = await chrome.runtime.sendMessage({
-      type: BACKGROUND_MESSAGE_TYPES.RR_DELETE_FLOW,
-      flowId,
-    });
-    if (res && res.success) await loadFlows();
-  } catch (e) {
-    console.error('删除失败:', e);
-  }
-};
-
-function editFlow(flow: any) {
-  editingFlow.value = flow;
-  showFlowEditor.value = true;
-}
-
-function openBuilder(flow: any) {
-  editingFlowBuilder.value = flow;
-  showBuilderEditor.value = true;
-}
-
-async function saveEditedFlow(f: any) {
-  try {
-    const res = await chrome.runtime.sendMessage({
-      type: BACKGROUND_MESSAGE_TYPES.RR_SAVE_FLOW,
-      flow: f,
-    });
-    if (res && res.success) {
-      showFlowEditor.value = false;
-      editingFlow.value = null;
-      await loadFlows();
-    }
-  } catch (e) {
-    console.error('保存失败:', e);
-  }
-}
-
-async function saveEditedFlowFromBuilder(f: any) {
-  try {
-    const res = await chrome.runtime.sendMessage({
-      type: BACKGROUND_MESSAGE_TYPES.RR_SAVE_FLOW,
-      flow: f,
-    });
-    if (res && res.success) {
-      showBuilderEditor.value = false;
-      editingFlowBuilder.value = null;
-      await loadFlows();
-    }
-  } catch (e) {
-    console.error('保存失败:', e);
-  }
-}
-
-async function openSchedule(flowId: string) {
-  schedulingFlowId.value = flowId;
-  await loadSchedules();
-  showSchedule.value = true;
-}
-
-async function loadSchedules() {
-  try {
-    const res = await chrome.runtime.sendMessage({
-      type: BACKGROUND_MESSAGE_TYPES.RR_LIST_SCHEDULES,
-    });
-    if (res && res.success) schedules.value = res.schedules || [];
-  } catch (e) {
-    console.error('加载定时失败:', e);
-  }
-}
-
-async function saveSchedule(schedule: any) {
-  try {
-    const res = await chrome.runtime.sendMessage({
-      type: BACKGROUND_MESSAGE_TYPES.RR_SCHEDULE_FLOW,
-      schedule,
-    });
-    if (res && res.success) {
-      await loadSchedules();
-      showSchedule.value = false;
-      schedulingFlowId.value = null;
-    }
-  } catch (e) {
-    console.error('保存定时失败:', e);
-  }
-}
-
-async function removeSchedule(id: string) {
-  try {
-    const res = await chrome.runtime.sendMessage({
-      type: BACKGROUND_MESSAGE_TYPES.RR_UNSCHEDULE_FLOW,
-      scheduleId: id,
-    });
-    if (res && res.success) await loadSchedules();
-  } catch (e) {
-    console.error('删除计划失败:', e);
-  }
-}
+// 旧的“克隆/发布/定时/覆盖项”在侧边栏或编辑器中处理
 
 const nativeConnectionStatus = ref<'unknown' | 'connected' | 'disconnected'>('unknown');
 const isConnecting = ref(false);
@@ -642,6 +533,29 @@ const getStatusClass = () => {
     return 'bg-gray-500';
   }
 };
+
+// Open sidepanel from popup for workflow management
+async function openWorkflowSidepanel() {
+  try {
+    const current = await chrome.windows.getCurrent();
+    // Ensure the side panel uses our page
+    if ((chrome.sidePanel as any)?.setOptions) {
+      await (chrome.sidePanel as any).setOptions({ path: 'sidepanel.html', enabled: true });
+    }
+    if (chrome.sidePanel && (chrome.sidePanel as any).open) {
+      await (chrome.sidePanel as any).open({ windowId: current.id! });
+    }
+  } catch (e) {
+    console.warn('打开侧边栏失败:', e);
+  }
+}
+
+function openBuilderWindow(flowId?: string, focusNodeId?: string) {
+  const url = new URL(chrome.runtime.getURL('builder.html'));
+  if (flowId) url.searchParams.set('flowId', flowId);
+  if (focusNodeId) url.searchParams.set('focus', focusNodeId);
+  chrome.windows.create({ url: url.toString(), type: 'popup', width: 1280, height: 800 });
+}
 
 const getStatusText = () => {
   if (nativeConnectionStatus.value === 'connected') {
@@ -2175,6 +2089,13 @@ onUnmounted(() => {
     padding: 8px;
     border: 1px solid #eee;
     border-radius: 6px;
+  }
+  .rr-runoverrides {
+    margin-top: 6px;
+    border: 1px dashed #e5e7eb;
+    border-radius: 8px;
+    padding: 8px;
+    background: #f9fafb;
   }
   .rr-meta {
     display: flex;

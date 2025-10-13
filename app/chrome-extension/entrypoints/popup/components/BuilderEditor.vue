@@ -1,55 +1,210 @@
 <template>
   <div v-if="visible" class="builder-modal">
-    <div class="builder">
+    <div class="builder rr-theme" data-theme="dark">
       <div class="topbar">
-        <div class="left">
-          <strong>编排画布</strong>
-          <span class="tip">基于 VueFlow（M1：串行 DAG）</span>
+        <div class="topbar-left">
+          <button class="btn-back" @click="$emit('close')" title="返回">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <path
+                d="m12 15-5-5 5-5"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+          <input class="workflow-title" v-model="store.flowLocal.name" placeholder="New workflow" />
+          <span class="draft-badge">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path
+                d="M7 1v12M1 7h12"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+            </svg>
+            Draft
+          </span>
         </div>
-        <div class="right">
-          <input
-            class="search"
-            v-model="search"
-            placeholder="搜索节点名或选择器... 回车定位"
-            @keyup.enter="focusSearch"
-          />
-          <button class="btn" @click="store.undo" title="撤销 (⌘/Ctrl+Z)">撤销</button>
-          <button class="btn" @click="store.redo" title="重做 (⌘/Ctrl+Shift+Z)">重做</button>
-          <span class="status" :data-state="saveState">{{ saveLabel }}</span>
-          <span class="status" v-if="errorsCount > 0" title="存在校验错误">{{
-            `错误: ${errorsCount}`
-          }}</span>
-          <button class="btn" @click="importFromSteps" title="从线性步骤生成图">步骤→图</button>
-          <button class="btn" @click="exportToSteps" title="用当前图覆盖步骤">图→步骤</button>
-          <button class="btn" @click="store.layoutAuto" title="自动排版（简单拓扑布局）"
-            >自动排版</button
-          >
-          <button class="btn" @click="fitAll" title="自适应视图">自适应</button>
-          <button class="btn" @click="exportFlow" title="导出 JSON">导出</button>
-          <label class="btn import">
-            导入
-            <input type="file" accept="application/json" @change="onImport" />
-          </label>
+        <div class="topbar-right">
+          <div class="toolbar-group">
+            <button class="toolbar-btn" @click="store.undo" title="撤销">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <path
+                  d="M3.5 9h8a2 2 0 0 0 0-4h-2"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                />
+                <path
+                  d="m6 6.5-2.5 2.5L6 11.5"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+            <button class="toolbar-btn" @click="store.redo" title="重做">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <path
+                  d="M14.5 9h-8a2 2 0 0 1 0-4h2"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                />
+                <path
+                  d="m12 6.5 2.5 2.5-2.5 2.5"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
+
+          <button class="toolbar-btn" @click="store.layoutAuto" title="自动排版">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <rect
+                x="2"
+                y="2"
+                width="5"
+                height="5"
+                rx="1"
+                stroke="currentColor"
+                stroke-width="1.5"
+              />
+              <rect
+                x="11"
+                y="2"
+                width="5"
+                height="5"
+                rx="1"
+                stroke="currentColor"
+                stroke-width="1.5"
+              />
+              <rect
+                x="2"
+                y="11"
+                width="5"
+                height="5"
+                rx="1"
+                stroke="currentColor"
+                stroke-width="1.5"
+              />
+              <rect
+                x="11"
+                y="11"
+                width="5"
+                height="5"
+                rx="1"
+                stroke="currentColor"
+                stroke-width="1.5"
+              />
+            </svg>
+          </button>
+
+          <button class="toolbar-btn" @click="fitAll" title="适应画布">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <path
+                d="M2 6V2h4M16 6V2h-4M2 12v4h4M16 12v4h-4"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+
+          <div class="toolbar-divider"></div>
+
           <button
-            class="btn"
+            class="toolbar-btn"
             :disabled="!selectedId"
             @click="runFromSelected"
-            title="从选中节点回放"
-            >从选中回放</button
+            title="从选中节点运行"
           >
-          <button v-if="errorsCount > 0" class="btn" @click="toggleErrors">错误列表</button>
-          <button class="btn primary" @click="save">保存</button>
-          <button class="btn" @click="$emit('close')">关闭</button>
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <path d="M5 3l10 6-10 6V3z" fill="currentColor" />
+            </svg>
+          </button>
+
+          <button class="btn-primary" @click="runAll" title="预览工作流">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" />
+              <path
+                d="M8 4.5v7M4.5 8h7"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+            </svg>
+            Preview
+          </button>
+
+          <button class="btn-publish" @click="save">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M8 12V4m0 0L5 7m3-3 3 3"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            Publish
+          </button>
+
+          <button
+            class="toolbar-btn-icon"
+            @click="toggleErrors"
+            v-if="errorsCount > 0"
+            title="查看错误"
+          >
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.5" />
+              <path
+                d="M9 5v5M9 12v1"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+            </svg>
+            <span class="error-badge-count">{{ errorsCount }}</span>
+          </button>
+
+          <button class="toolbar-btn-icon" title="更多选项">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <circle cx="9" cy="4.5" r="1.5" fill="currentColor" />
+              <circle cx="9" cy="9" r="1.5" fill="currentColor" />
+              <circle cx="9" cy="13.5" r="1.5" fill="currentColor" />
+            </svg>
+          </button>
         </div>
+      </div>
+
+      <!-- Top notice bar for fallback suggestion with undo -->
+      <div v-if="fallbackNotice" class="notice-top">
+        <span>已应用回退建议：提升 {{ fallbackNotice.type }} 优先级</span>
+        <button class="mini" @click="undoFallbackPromotion">撤销</button>
       </div>
 
       <div class="main">
         <Sidebar
           :flow="store.flowLocal"
           :palette-types="store.paletteTypes"
+          :subflow-ids="store.listSubflowIds()"
+          :current-subflow-id="store.currentSubflowId"
           @add-node="store.addNode"
+          @switch-main="store.switchToMain"
+          @switch-subflow="store.switchToSubflow"
+          @add-subflow="store.addSubflow"
+          @remove-subflow="store.removeSubflow"
         />
         <Canvas
+          ref="canvasRef"
           :nodes="store.nodes"
           :edges="store.edges"
           :focus-node-id="focusNodeId"
@@ -60,8 +215,17 @@
           @connect-from="store.connectFrom"
           @connect="store.onConnect"
           @node-dragged="store.setNodePosition"
+          @add-node-at="onAddNodeAt"
         />
-        <PropertyPanel :node="activeNode" :highlight-field="highlightField" />
+        <PropertyPanel
+          :node="activeNode"
+          :variables="store.flowLocal.variables || []"
+          :highlight-field="highlightField"
+          :subflow-ids="store.listSubflowIds()"
+          @create-subflow="store.addSubflow"
+          @switch-to-subflow="store.switchToSubflow"
+          @remove-node="store.removeNode"
+        />
         <div v-if="showErrors && errorsCount > 0" class="error-panel">
           <div class="err-title">校验错误（点击定位）</div>
           <div class="err-list">
@@ -79,6 +243,16 @@
           </div>
         </div>
       </div>
+
+      <!-- Bottom toolbar: zoom controls moved here -->
+      <div class="bottombar">
+        <div class="status">{{ saveLabel }}</div>
+        <div class="zoom-group">
+          <button class="zoom-btn" @click="zoomOut" title="缩小">−</button>
+          <button class="zoom-btn" @click="fitAll" title="适应画布">适配</button>
+          <button class="zoom-btn" @click="zoomIn" title="放大">＋</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -94,7 +268,12 @@ import Canvas from './builder/components/Canvas.vue';
 import Sidebar from './builder/components/Sidebar.vue';
 import PropertyPanel from './builder/components/PropertyPanel.vue';
 
-const props = defineProps<{ visible: boolean; flow: FlowV2 | null }>();
+const props = defineProps<{
+  visible: boolean;
+  flow: FlowV2 | null;
+  initialFocusNodeId?: string | null;
+  fallbackHint?: { nodeId: string; toType: string } | null;
+}>();
 const emit = defineEmits(['close', 'save']);
 
 const store = useBuilderStore();
@@ -125,11 +304,27 @@ const fitSeq = ref(0);
 function focusSearch() {
   const q = search.value.trim().toLowerCase();
   if (!q) return;
-  const hit = store.nodes.find(
-    (n) =>
-      (n.name || '').toLowerCase().includes(q) ||
-      (n.config?.target?.candidates?.[0]?.value || '').toLowerCase().includes(q),
-  );
+  const matches = (n: any): boolean => {
+    if ((n.name || '').toLowerCase().includes(q)) return true;
+    if ((n.type || '').toLowerCase().includes(q)) return true;
+    try {
+      // search first selector
+      if ((n.config?.target?.candidates?.[0]?.value || '').toLowerCase().includes(q)) return true;
+      // deep search string fields including variable placeholders {var}
+      const walk = (v: any): boolean => {
+        if (v == null) return false;
+        if (typeof v === 'string')
+          return v.toLowerCase().includes(q) || v.toLowerCase().includes(`{${q}}`);
+        if (Array.isArray(v)) return v.some(walk);
+        if (typeof v === 'object') return Object.values(v).some(walk);
+        return false;
+      };
+      return walk(n.config);
+    } catch {
+      return false;
+    }
+  };
+  const hit = store.nodes.find((n) => matches(n));
   if (hit) {
     store.selectNode(hit.id);
     focusNodeId.value = hit.id;
@@ -144,11 +339,50 @@ function exportToSteps() {
   store.flowLocal.steps = nodesToSteps(store.nodes, store.edges);
 }
 function save() {
-  store.flowLocal.steps = nodesToSteps(store.nodes, store.edges);
+  // Only map steps when editing main graph
+  if (store.isEditingMain()) store.flowLocal.steps = nodesToSteps(store.nodes, store.edges);
   const result = JSON.parse(
     JSON.stringify({ ...store.flowLocal, nodes: store.nodes, edges: store.edges }),
   );
   emit('save', result);
+}
+
+// Fallback suggestion notice + apply/undo helpers
+const fallbackNotice = ref<{ nodeId: string; type: string; prevIndex: number } | null>(null);
+function applyFallbackPromotion(nodeId: string, toType: string) {
+  const node = store.nodes.find((n) => n.id === nodeId);
+  if (!node || (node.type !== 'click' && node.type !== 'fill')) return;
+  const cands = (node as any).config?.target?.candidates as Array<{ type: string; value: string }>;
+  if (!Array.isArray(cands) || !cands.length) return;
+  const idx = cands.findIndex((c) => c.type === String(toType));
+  if (idx > 0) {
+    const cand = cands.splice(idx, 1)[0];
+    cands.unshift(cand);
+    fallbackNotice.value = { nodeId, type: String(toType), prevIndex: idx };
+    focusNode(nodeId);
+    highlightField.value = 'target.candidates';
+    setTimeout(() => (highlightField.value = null), 1500);
+  }
+}
+function undoFallbackPromotion() {
+  const n = fallbackNotice.value;
+  if (!n) return;
+  const node = store.nodes.find((x) => x.id === n.nodeId);
+  if (!node || (node.type !== 'click' && node.type !== 'fill')) {
+    fallbackNotice.value = null;
+    return;
+  }
+  const cands = (node as any).config?.target?.candidates as Array<{ type: string; value: string }>;
+  if (!Array.isArray(cands) || cands.length === 0) {
+    fallbackNotice.value = null;
+    return;
+  }
+  const currentIdx = cands.findIndex((c) => c.type === n.type);
+  if (currentIdx >= 0 && n.prevIndex >= 0 && n.prevIndex < cands.length) {
+    const cand = cands.splice(currentIdx, 1)[0];
+    cands.splice(n.prevIndex, 0, cand);
+  }
+  fallbackNotice.value = null;
 }
 
 async function runFromSelected() {
@@ -158,12 +392,60 @@ async function runFromSelected() {
     const res = await chrome.runtime.sendMessage({
       type: BACKGROUND_MESSAGE_TYPES.RR_RUN_FLOW,
       flowId: store.flowLocal.id,
-      options: { returnLogs: true, startNodeId: selectedId.value },
+      options: {
+        ...(((store.flowLocal as any).meta && (store.flowLocal as any).meta.runOptions) || {}),
+        returnLogs: true,
+        startNodeId: selectedId.value,
+      },
     });
-    if (!(res && res.success)) console.warn('从选中节点回放失败');
+    if (!(res && res.success)) {
+      console.warn('从选中节点回放失败');
+      return;
+    }
+    // Focus first failed step/node if any
+    try {
+      const logs = res.result?.logs || [];
+      const failed = logs.find((l: any) => l.status === 'failed');
+      if (failed && failed.stepId) {
+        focusNode(String(failed.stepId));
+      }
+      // If selector fallback was used for this step, promote the matched type
+      const thisStepLogs = logs.filter((l: any) => l.stepId === selectedId.value);
+      const fb = thisStepLogs.find((l: any) => l.fallbackUsed && l.fallbackTo);
+      if (fb && fb.fallbackTo) applyFallbackPromotion(selectedId.value, String(fb.fallbackTo));
+    } catch {}
   } catch (e) {
     console.error('从选中节点回放失败:', e);
   }
+}
+
+async function runAll() {
+  if (!store.flowLocal?.id) return;
+  try {
+    await save();
+    const res = await chrome.runtime.sendMessage({
+      type: BACKGROUND_MESSAGE_TYPES.RR_RUN_FLOW,
+      flowId: store.flowLocal.id,
+      options: {
+        ...(((store.flowLocal as any).meta && (store.flowLocal as any).meta.runOptions) || {}),
+        returnLogs: true,
+      },
+    });
+    if (!(res && res.success)) return;
+    try {
+      const logs = res.result?.logs || [];
+      const failed = logs.find((l: any) => l.status === 'failed');
+      if (failed && failed.stepId) focusNode(String(failed.stepId));
+    } catch {}
+  } catch (e) {
+    console.error('整流回放失败:', e);
+  }
+}
+
+function onAddNodeAt(type: string, x: number, y: number) {
+  try {
+    store.addNodeAt(type as any, x, y);
+  } catch {}
 }
 
 function focusNode(id: string) {
@@ -171,6 +453,25 @@ function focusNode(id: string) {
   focusNodeId.value = id;
   setTimeout(() => (focusNodeId.value = null), 300);
 }
+
+// Auto focus when parent passes a node id (e.g., failed step)
+watch(
+  () => props.initialFocusNodeId,
+  (nid) => {
+    if (nid) focusNode(nid);
+  },
+  { immediate: true },
+);
+
+// Apply fallback hint from parent (promote matched candidate type)
+watch(
+  () => props.fallbackHint,
+  (hint) => {
+    if (!hint) return;
+    applyFallbackPromotion(hint.nodeId, String(hint.toType));
+  },
+  { immediate: true },
+);
 
 function focusError(nid: string, msg: string) {
   const node = store.nodes.find((n) => n.id === nid);
@@ -193,6 +494,19 @@ function focusError(nid: string, msg: string) {
 
 function fitAll() {
   fitSeq.value++;
+}
+
+// Canvas controls via template ref
+const canvasRef = ref<any | null>(null);
+function zoomIn() {
+  try {
+    canvasRef.value?.zoomIn?.();
+  } catch {}
+}
+function zoomOut() {
+  try {
+    canvasRef.value?.zoomOut?.();
+  } catch {}
 }
 
 async function exportFlow() {
@@ -251,6 +565,15 @@ function onKey(e: KeyboardEvent) {
       e.preventDefault();
       store.duplicateNode(id);
     }
+  } else if (isMeta && e.key.toLowerCase?.() === 'c') {
+    // copy (single selection)
+    e.preventDefault();
+    if (id) (window as any).__builder_clipboard = id;
+  } else if (isMeta && e.key.toLowerCase?.() === 'v') {
+    // paste (duplicate selected or copied id)
+    e.preventDefault();
+    const srcId = id || (window as any).__builder_clipboard;
+    if (srcId) store.duplicateNode(srcId);
   } else if (isMeta && e.key.toLowerCase?.() === 'z') {
     e.preventDefault();
     if (e.shiftKey) store.redo();
@@ -296,121 +619,367 @@ watch(
 .builder-modal {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.4);
   z-index: 2147483646;
   display: flex;
   align-items: center;
   justify-content: center;
+  backdrop-filter: blur(4px);
 }
 .builder {
   width: 96vw;
-  height: 90vh;
-  background: #fff;
-  border-radius: 10px;
+  height: 92vh;
+  background: var(--rr-bg);
+  border-radius: 16px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
 }
+.builder.rr-theme {
+  --rr-bg: #0a0a0a;
+  --rr-topbar: #1a1a1a;
+  --rr-card: #1a1a1a;
+  --rr-elevated: #262626;
+  --rr-border: #2a2a2a;
+  --rr-border-light: #333333;
+  --rr-subtle: #1f1f1f;
+  --rr-text: #e5e5e5;
+  --rr-text-secondary: #a3a3a3;
+  --rr-text-weak: #737373;
+  --rr-muted: #525252;
+  --rr-brand: #f59e0b;
+  --rr-brand-strong: #d97706;
+  --rr-accent: #3b82f6;
+  --rr-success: #22c55e;
+  --rr-warn: #f59e0b;
+  --rr-danger: #ef4444;
+  --rr-hover: #262626;
+}
+
+/* 顶部工具栏 */
 .topbar {
-  height: 48px;
+  height: 64px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 12px;
-  border-bottom: 1px solid #e5e7eb;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--rr-border);
+  background: #ededed;
+  gap: 20px;
 }
-.topbar .left {
+
+.topbar-left {
   display: flex;
-  gap: 8px;
   align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
 }
-.topbar .tip {
-  color: #6b7280;
-  font-size: 12px;
-}
-.topbar .right {
+
+.btn-back {
+  width: 36px;
+  height: 36px;
   display: flex;
-  gap: 8px;
   align-items: center;
-}
-.btn {
-  border: 1px solid #d1d5db;
-  background: #fff;
-  border-radius: 6px;
-  padding: 6px 10px;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
   cursor: pointer;
+  color: var(--rr-text-secondary);
+  transition: all 0.15s;
 }
-.btn.primary {
-  background: #111;
+
+.btn-back:hover {
+  background: var(--rr-hover);
+  color: var(--rr-text);
+}
+
+.workflow-title {
+  border: none;
+  background: transparent;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--rr-text);
+  padding: 8px 12px;
+  border-radius: 6px;
+  outline: none;
+  max-width: 400px;
+}
+
+.workflow-title:hover {
+  background: var(--rr-hover);
+}
+
+.workflow-title:focus {
+  background: var(--rr-hover);
+}
+
+.draft-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--rr-subtle);
+  color: var(--rr-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 工具栏按钮组 */
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: var(--rr-subtle);
+  border-radius: 8px;
+}
+
+.toolbar-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--rr-text-secondary);
+  transition: all 0.15s;
+}
+
+.toolbar-btn:hover:not(:disabled) {
+  background: var(--rr-card);
+  color: var(--rr-text);
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--rr-border);
+  margin: 0 4px;
+}
+
+/* 主按钮 */
+.btn-primary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  background: var(--rr-text);
+  color: var(--rr-card);
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-primary:hover {
+  background: var(--rr-text-secondary);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.btn-publish {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  background: var(--rr-brand);
   color: #fff;
-  border-color: #111;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-publish:hover {
+  background: var(--rr-brand-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+}
+
+/* 图标按钮 */
+.toolbar-btn-icon {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--rr-border);
+  background: var(--rr-card);
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--rr-text-secondary);
+  transition: all 0.15s;
+}
+
+.toolbar-btn-icon:hover {
+  background: var(--rr-hover);
+  border-color: var(--rr-text-weak);
+  color: var(--rr-text);
+}
+
+.error-badge-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  background: var(--rr-danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 9px;
+  border: 2px solid var(--rr-topbar);
 }
 
 .main {
   flex: 1;
   display: grid;
-  grid-template-columns: 280px 1fr 360px;
+  grid-template-columns: 180px 1fr 420px;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--rr-bg);
 }
-.topbar .search {
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  padding: 6px 10px;
-  margin-right: 8px;
-  min-width: 240px;
+
+/* 底部工具栏 */
+.bottombar {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-top: 1px solid var(--rr-border);
+  background: #f0f0f0;
 }
-.topbar .status {
-  color: #6b7280;
+.bottombar .status {
+  color: var(--rr-muted);
   font-size: 12px;
-  margin-right: 8px;
-  min-width: 48px;
-  display: inline-block;
 }
+.zoom-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.zoom-btn {
+  min-width: 40px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--rr-border);
+  background: var(--rr-card);
+  color: var(--rr-text);
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.zoom-btn:hover {
+  background: var(--rr-hover);
+}
+
+/* 错误面板 */
 .error-panel {
   position: absolute;
-  right: 12px;
-  top: 56px;
-  width: 420px;
-  max-height: 50vh;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-  padding: 10px;
+  right: 360px;
+  top: 80px;
+  width: 380px;
+  max-height: 60vh;
+  background: var(--rr-card);
+  border: 1px solid var(--rr-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  padding: 16px;
   overflow: auto;
+  z-index: 50;
 }
 .err-title {
   font-weight: 600;
-  margin-bottom: 6px;
+  font-size: 14px;
+  margin-bottom: 12px;
+  color: var(--rr-text);
+}
+.err-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .err-item {
   display: grid;
-  grid-template-columns: 120px 1fr;
-  gap: 6px;
-  padding: 6px;
-  border: 1px solid #f3f4f6;
-  border-radius: 6px;
+  grid-template-columns: 100px 1fr;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--rr-border-light);
+  border-radius: 8px;
   cursor: pointer;
-  margin-bottom: 6px;
+  transition: all 0.15s;
 }
 .err-item:hover {
-  background: #f9fafb;
+  background: var(--rr-subtle);
+  border-color: var(--rr-border);
 }
 .err-item .nid {
   font-size: 12px;
-  color: #374151;
+  font-weight: 600;
+  color: var(--rr-text-secondary);
+}
+.err-item .elist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .err-item .e {
   font-size: 12px;
-  color: #ef4444;
+  color: var(--rr-danger);
+  line-height: 1.4;
 }
-.btn.import {
-  position: relative;
-  overflow: hidden;
+
+/* 通知栏 */
+.notice-top {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: #fff;
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
-.btn.import input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
+.notice-top .mini {
+  padding: 4px 12px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #fff;
+  border-radius: 6px;
+  font-size: 13px;
   cursor: pointer;
+  transition: all 0.15s;
+}
+.notice-top .mini:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 </style>

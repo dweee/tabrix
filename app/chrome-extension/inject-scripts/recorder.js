@@ -39,6 +39,29 @@
     return id;
   }
 
+  // Try to produce a short unique class-based selector
+  function uniqueClassSelector(el) {
+    try {
+      const classes = Array.from(el.classList || []).filter((c) => c && /^[a-zA-Z0-9_-]+$/.test(c));
+      for (const cls of classes) {
+        const sel = `.${CSS.escape(cls)}`;
+        if (document.querySelectorAll(sel).length === 1) return sel;
+      }
+      const tag = el.tagName ? el.tagName.toLowerCase() : '';
+      for (const cls of classes) {
+        const sel = `${tag}.${CSS.escape(cls)}`;
+        if (document.querySelectorAll(sel).length === 1) return sel;
+      }
+      for (let i = 0; i < Math.min(classes.length, 3); i++) {
+        for (let j = i + 1; j < Math.min(classes.length, 3); j++) {
+          const sel = `.${CSS.escape(classes[i])}.${CSS.escape(classes[j])}`;
+          if (document.querySelectorAll(sel).length === 1) return sel;
+        }
+      }
+    } catch {}
+    return '';
+  }
+
   function generateSelector(el) {
     if (!(el instanceof Element)) return '';
     if (/** @type {HTMLElement} */ (el).id) {
@@ -75,6 +98,9 @@
   function buildTarget(el) {
     const ref = toRef(el);
     const candidates = [];
+    // Prefer id or unique class selector
+    const classSel = uniqueClassSelector(el);
+    if (classSel) candidates.push({ type: 'css', value: classSel });
     const css = generateSelector(el);
     if (css) candidates.push({ type: 'css', value: css });
     const name = el.getAttribute && el.getAttribute('name');
@@ -110,6 +136,28 @@
     if (!isRecording || isPaused) return;
     const el = e.target instanceof Element ? e.target : null;
     if (!el) return;
+    try {
+      // Special-case: clicking on <a target="_blank"> should record as openTab + switchTab
+      const a = el.closest && el.closest('a[href]');
+      const href = a && a.getAttribute && a.getAttribute('href');
+      const tgt = a && a.getAttribute && a.getAttribute('target');
+      if (a && href && tgt && tgt.toLowerCase() === '_blank') {
+        // Prevent duplicate click step for this case; record open/switch sequence instead
+        try {
+          const abs = new URL(href, location.href).href;
+          pushStep({ type: 'openTab', url: abs });
+          pushStep({ type: 'switchTab', urlContains: abs });
+          return;
+        } catch (_) {
+          // Fallback to raw href substring match
+          pushStep({ type: 'openTab', url: href });
+          pushStep({ type: 'switchTab', urlContains: href });
+          return;
+        }
+      }
+    } catch (_e) {
+      /* ignore */
+    }
     const target = buildTarget(el);
     pushStep({ type: e.detail >= 2 ? 'dblclick' : 'click', target, screenshotOnFail: true });
   }

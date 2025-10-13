@@ -26,9 +26,24 @@ async function listDynamicFlowTools(): Promise<Tool[]> {
         const properties: Record<string, any> = {};
         const required: string[] = [];
         for (const v of item.variables || []) {
-          properties[v.key] = { type: 'string', description: v.label || v.key };
-          if (v.default !== undefined) properties[v.key].default = v.default;
+          const desc = v.label || v.key;
+          const typ = (v.type || 'string').toLowerCase();
+          const prop: any = { description: desc };
+          if (typ === 'boolean') prop.type = 'boolean';
+          else if (typ === 'number') prop.type = 'number';
+          else if (typ === 'enum') {
+            prop.type = 'string';
+            if (v.rules && Array.isArray(v.rules.enum)) prop.enum = v.rules.enum;
+          } else if (typ === 'array') {
+            // default array of strings; can extend with itemType later
+            prop.type = 'array';
+            prop.items = { type: 'string' };
+          } else {
+            prop.type = 'string';
+          }
+          if (v.default !== undefined) prop.default = v.default;
           if (v.rules && v.rules.required) required.push(v.key);
+          properties[v.key] = prop;
         }
         // Run options
         properties['tabTarget'] = { type: 'string', enum: ['current', 'new'], default: 'current' };

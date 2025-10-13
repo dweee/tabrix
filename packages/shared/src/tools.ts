@@ -30,6 +30,7 @@ export const TOOL_NAMES = {
     READ_PAGE: 'chrome_read_page',
     COMPUTER: 'chrome_computer',
     HANDLE_DIALOG: 'chrome_handle_dialog',
+    HANDLE_DOWNLOAD: 'chrome_handle_download',
     USERSCRIPT: 'chrome_userscript',
     PERFORMANCE_START_TRACE: 'performance_start_trace',
     PERFORMANCE_STOP_TRACE: 'performance_stop_trace',
@@ -439,6 +440,11 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'number',
           description: 'Timeout in milliseconds (default: 30000)',
         },
+        formData: {
+          type: 'object',
+          description:
+            'Multipart/form-data descriptor. If provided, overrides body and builds FormData with optional file attachments. Shape: { fields?: Record<string,string|number|boolean>, files?: Array<{ name: string, fileUrl?: string, filePath?: string, base64Data?: string, filename?: string, contentType?: string }> }. Also supports a compact array form: [ [name, fileSpec, filename?], ... ] where fileSpec may be url:, file:, or base64:.',
+        },
       },
       required: ['url'],
     },
@@ -466,6 +472,19 @@ export const TOOL_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {},
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.HANDLE_DOWNLOAD,
+    description: 'Wait for a browser download and return details (id, filename, url, state, size)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        filenameContains: { type: 'string', description: 'Filter by substring in filename or URL' },
+        timeoutMs: { type: 'number', description: 'Timeout in ms (default 60000, max 300000)' },
+        waitForComplete: { type: 'boolean', description: 'Wait until completed (default true)' },
+      },
       required: [],
     },
   },

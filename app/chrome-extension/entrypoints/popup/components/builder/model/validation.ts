@@ -37,6 +37,10 @@ export function validateNode(n: NodeBase): string[] {
       }
       break;
     }
+    case 'handleDownload': {
+      // filenameContains 可选
+      break;
+    }
     case 'extract': {
       if (!c?.saveAs) errs.push('Extract: 需填写保存变量名');
       if (!c?.selector && !c?.js) errs.push('Extract: 需提供 selector 或 js');
@@ -45,6 +49,43 @@ export function validateNode(n: NodeBase): string[] {
     case 'switchTab': {
       if (!c?.tabId && !c?.urlContains && !c?.titleContains)
         errs.push('SwitchTab: 需提供 tabId 或 URL/标题包含');
+      break;
+    }
+    case 'screenshot': {
+      // selector 可空（全页/可视区），不强制
+      break;
+    }
+    case 'triggerEvent': {
+      const hasCandidate = !!c?.target?.candidates?.length;
+      if (!hasCandidate) errs.push('缺少目标选择器候选');
+      if (!String(c?.event || '').trim()) errs.push('需提供事件类型');
+      break;
+    }
+    case 'if': {
+      const arr = Array.isArray(c?.branches) ? c.branches : [];
+      if (arr.length === 0) errs.push('需添加至少一个条件分支');
+      for (let i = 0; i < arr.length; i++) {
+        if (!String(arr[i]?.expr || '').trim()) errs.push(`分支${i + 1}: 需填写条件表达式`);
+      }
+      break;
+    }
+    case 'setAttribute': {
+      const hasCandidate = !!c?.target?.candidates?.length;
+      if (!hasCandidate) errs.push('缺少目标选择器候选');
+      if (!String(c?.name || '').trim()) errs.push('需提供属性名');
+      break;
+    }
+    case 'loopElements': {
+      if (!String(c?.selector || '').trim()) errs.push('需提供元素选择器');
+      if (!String(c?.subflowId || '').trim()) errs.push('需提供子流 ID');
+      break;
+    }
+    case 'switchFrame': {
+      // Both index/urlContains optional; empty means switch back to top frame
+      break;
+    }
+    case 'executeFlow': {
+      if (!String(c?.flowId || '').trim()) errs.push('需选择要执行的工作流');
       break;
     }
     case 'closeTab': {

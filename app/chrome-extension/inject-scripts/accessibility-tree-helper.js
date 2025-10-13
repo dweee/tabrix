@@ -524,6 +524,221 @@
           return true;
         }
       }
+      // Element picker: start a temporary overlay to let user pick an element
+      if (request && request.action === 'rr_picker_start') {
+        try {
+          // state
+          const state = { active: true };
+          const hostId = '__rr_picker_host__';
+          let host = document.getElementById(hostId);
+          if (host) host.remove();
+          host = document.createElement('div');
+          host.id = hostId;
+          Object.assign(host.style, {
+            position: 'fixed',
+            inset: '0',
+            zIndex: 2147483646,
+            cursor: 'crosshair',
+            background: 'rgba(0,0,0,0.0)',
+          });
+          const box = document.createElement('div');
+          Object.assign(box.style, {
+            position: 'fixed',
+            border: '2px solid #3b82f6',
+            background: 'rgba(59,130,246,0.15)',
+            pointerEvents: 'none',
+          });
+          const tip = document.createElement('div');
+          tip.textContent = '点击选取元素（Esc 取消）';
+          Object.assign(tip.style, {
+            position: 'fixed',
+            top: '10px',
+            left: '10px',
+            background: 'rgba(0,0,0,0.7)',
+            color: '#fff',
+            padding: '6px 10px',
+            borderRadius: '6px',
+            fontSize: '12px',
+            fontFamily: 'system-ui,-apple-system,Segoe UI,Roboto,Arial',
+          });
+          host.appendChild(box);
+          host.appendChild(tip);
+          document.documentElement.appendChild(host);
+
+          const cleanup = () => {
+            try {
+              host.remove();
+            } catch {}
+            try {
+              document.removeEventListener('mousemove', onMove, true);
+            } catch {}
+            try {
+              document.removeEventListener('click', onClick, true);
+            } catch {}
+            try {
+              document.removeEventListener('keydown', onKey, true);
+            } catch {}
+            state.active = false;
+          };
+
+          const onMove = (e) => {
+            if (!state.active) return;
+            const el = e.target instanceof Element ? e.target : null;
+            if (!el) return;
+            try {
+              const r = el.getBoundingClientRect();
+              Object.assign(box.style, {
+                left: `${Math.round(r.left)}px`,
+                top: `${Math.round(r.top)}px`,
+                width: `${Math.round(Math.max(0, r.width))}px`,
+                height: `${Math.round(Math.max(0, r.height))}px`,
+                display: r.width > 0 && r.height > 0 ? 'block' : 'none',
+              });
+            } catch {}
+          };
+          const uniqueClassSelector = (node) => {
+            try {
+              const classes = Array.from(node.classList || []).filter(
+                (c) => c && /^[a-zA-Z0-9_-]+$/.test(c),
+              );
+              for (const cls of classes) {
+                const sel = `.${CSS.escape(cls)}`;
+                if (document.querySelectorAll(sel).length === 1) return sel;
+              }
+              const tag = node.tagName ? node.tagName.toLowerCase() : '';
+              for (const cls of classes) {
+                const sel = `${tag}.${CSS.escape(cls)}`;
+                if (document.querySelectorAll(sel).length === 1) return sel;
+              }
+              for (let i = 0; i < Math.min(classes.length, 3); i++) {
+                for (let j = i + 1; j < Math.min(classes.length, 3); j++) {
+                  const sel = `.${CSS.escape(classes[i])}.${CSS.escape(classes[j])}`;
+                  if (document.querySelectorAll(sel).length === 1) return sel;
+                }
+              }
+            } catch {}
+            return '';
+          };
+          const computeCandidates = (el) => {
+            const cands = [];
+            // css by id / class / short path
+            if (el.id) {
+              const idSel = `#${CSS.escape(el.id)}`;
+              if (document.querySelectorAll(idSel).length === 1)
+                cands.push({ type: 'css', value: idSel });
+            }
+            const classSel = uniqueClassSelector(el);
+            if (classSel) cands.push({ type: 'css', value: classSel });
+            // data-* and name
+            for (const attr of ['data-testid', 'data-cy', 'name']) {
+              const val = el.getAttribute(attr);
+              if (val) {
+                const s = `[${attr}="${CSS.escape(val)}"]`;
+                if (document.querySelectorAll(s).length === 1)
+                  cands.push({ type: 'attr', value: s });
+              }
+            }
+            // aria
+            const aria = el.getAttribute && el.getAttribute('aria-label');
+            if (aria) cands.push({ type: 'aria', value: `textbox[name=${aria}]` });
+            // text for clickable
+            const tag = (el.tagName || '').toLowerCase();
+            if (['button', 'a', 'summary'].includes(tag)) {
+              const text = (el.textContent || '').trim();
+              if (text) cands.push({ type: 'text', value: text.substring(0, 64) });
+            }
+            // fallback path selector
+            const gen = (node) => {
+              if (!(node instanceof Element)) return '';
+              let path = '';
+              let current = node;
+              while (
+                current &&
+                current.nodeType === Node.ELEMENT_NODE &&
+                current.tagName !== 'BODY'
+              ) {
+                let sel = current.tagName.toLowerCase();
+                const parent = current.parentElement;
+                if (parent) {
+                  const siblings = Array.from(parent.children).filter(
+                    (child) => child.tagName === current.tagName,
+                  );
+                  if (siblings.length > 1) {
+                    const index = siblings.indexOf(current) + 1;
+                    sel += `:nth-of-type(${index})`;
+                  }
+                }
+                path = path ? `${sel} > ${path}` : sel;
+                current = parent;
+              }
+              return path ? `body > ${path}` : 'body';
+            };
+            const pathSel = gen(el);
+            if (pathSel) cands.push({ type: 'css', value: pathSel });
+            return cands;
+          };
+          const onClick = (e) => {
+            if (!state.active) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const el = e.target instanceof Element ? e.target : null;
+            if (!el) {
+              cleanup();
+              sendResponse({ success: false, error: 'no element' });
+              return true;
+            }
+            // create ref
+            try {
+              if (!window.__claudeElementMap) window.__claudeElementMap = {};
+              if (!window.__claudeRefCounter) window.__claudeRefCounter = 0;
+            } catch {}
+            let refId = null;
+            try {
+              for (const k in window.__claudeElementMap) {
+                if (
+                  window.__claudeElementMap[k].deref &&
+                  window.__claudeElementMap[k].deref() === el
+                ) {
+                  refId = k;
+                  break;
+                }
+              }
+              if (!refId) {
+                refId = `ref_${++window.__claudeRefCounter}`;
+                window.__claudeElementMap[refId] = new WeakRef(el);
+              }
+            } catch {}
+            const cands = computeCandidates(el);
+            cleanup();
+            sendResponse({ success: true, ref: refId, candidates: cands });
+            return true;
+          };
+          const onKey = (e) => {
+            if (e.key === 'Escape') {
+              cleanup();
+              sendResponse({ success: false, cancelled: true });
+            }
+          };
+          document.addEventListener('mousemove', onMove, true);
+          document.addEventListener('click', onClick, true);
+          document.addEventListener('keydown', onKey, true);
+          return true; // async
+        } catch (e) {
+          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+          return true;
+        }
+      }
+      if (request && request.action === 'rr_picker_stop') {
+        try {
+          const host = document.getElementById('__rr_picker_host__');
+          if (host) host.remove();
+          sendResponse({ success: true });
+          return true;
+        } catch (e) {
+          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+          return true;
+        }
+      }
       if (request && request.action === 'generateAccessibilityTree') {
         const result = __generateAccessibilityTree(request.filter || null);
         sendResponse({ success: true, ...result });
@@ -824,6 +1039,27 @@
                   const idSel = `#${CSS.escape(node.id)}`;
                   if (document.querySelectorAll(idSel).length === 1) return idSel;
                 }
+                // prefer unique class selectors if available
+                try {
+                  const classes = Array.from(node.classList || []).filter(
+                    (c) => c && /^[a-zA-Z0-9_-]+$/.test(c),
+                  );
+                  for (const cls of classes) {
+                    const sel = `.${CSS.escape(cls)}`;
+                    if (document.querySelectorAll(sel).length === 1) return sel;
+                  }
+                  const tag = node.tagName ? node.tagName.toLowerCase() : '';
+                  for (const cls of classes) {
+                    const sel = `${tag}.${CSS.escape(cls)}`;
+                    if (document.querySelectorAll(sel).length === 1) return sel;
+                  }
+                  for (let i = 0; i < Math.min(classes.length, 3); i++) {
+                    for (let j = i + 1; j < Math.min(classes.length, 3); j++) {
+                      const sel = `.${CSS.escape(classes[i])}.${CSS.escape(classes[j])}`;
+                      if (document.querySelectorAll(sel).length === 1) return sel;
+                    }
+                  }
+                } catch {}
                 for (const attr of ['data-testid', 'data-cy', 'name']) {
                   const val = node.getAttribute(attr);
                   if (val) {
@@ -857,6 +1093,33 @@
               return generateSelector(el);
             })(),
           });
+          return true;
+        } catch (e) {
+          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+          return true;
+        }
+      }
+      if (request && request.action === 'focusByRef') {
+        try {
+          const ref = String(request.ref || '');
+          const map = window.__claudeElementMap || {};
+          const weak = map[ref];
+          const el = weak && typeof weak.deref === 'function' ? weak.deref() : null;
+          if (!el || !(el instanceof Element)) {
+            sendResponse({ success: false, error: `ref "${ref}" not found or expired` });
+            return true;
+          }
+          try {
+            /** @type {HTMLElement} */ (el).scrollIntoView({
+              behavior: 'instant',
+              block: 'center',
+              inline: 'nearest',
+            });
+          } catch {}
+          try {
+            /** @type {HTMLElement} */ (el).focus && /** @type {HTMLElement} */ (el).focus();
+          } catch {}
+          sendResponse({ success: true });
           return true;
         } catch (e) {
           sendResponse({ success: false, error: String(e && e.message ? e.message : e) });

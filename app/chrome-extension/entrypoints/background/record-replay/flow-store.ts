@@ -43,7 +43,25 @@ export async function listRuns(): Promise<RunRecord[]> {
 export async function appendRun(record: RunRecord): Promise<void> {
   const runs = await listRuns();
   runs.push(record);
-  await chrome.storage.local.set({ [STORAGE_KEYS.RR_RUNS]: runs });
+  // Trim to keep last 10 runs per flowId to avoid unbounded growth
+  try {
+    const byFlow = new Map<string, RunRecord[]>();
+    for (const r of runs) {
+      const list = byFlow.get(r.flowId) || [];
+      list.push(r);
+      byFlow.set(r.flowId, list);
+    }
+    const merged: RunRecord[] = [];
+    for (const [fid, arr] of byFlow.entries()) {
+      // keep last 10 by startedAt chronological order
+      arr.sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
+      const last = arr.slice(Math.max(0, arr.length - 10));
+      merged.push(...last);
+    }
+    await chrome.storage.local.set({ [STORAGE_KEYS.RR_RUNS]: merged });
+  } catch {
+    await chrome.storage.local.set({ [STORAGE_KEYS.RR_RUNS]: runs });
+  }
 }
 
 export async function listPublished(): Promise<PublishedFlowInfo[]> {

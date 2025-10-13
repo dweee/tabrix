@@ -137,8 +137,7 @@
       </table>
     </section>
 
-    <!-- Flow Editor Section -->
-    <FlowEditor />
+    <!-- Flow Editor removed: unified to Builder in Popup -->
   </div>
 </template>
 
@@ -146,7 +145,6 @@
 import { ref, onMounted } from 'vue';
 import { TOOL_NAMES } from 'chrome-mcp-shared';
 import { STORAGE_KEYS } from '@/common/constants';
-import FlowEditor from './components/FlowEditor.vue';
 
 type ListItem = {
   id: string;

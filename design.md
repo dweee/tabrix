@@ -282,8 +282,7 @@ export interface NodeResult {
   2. `id`/`data-testid`/`name` 类唯一选择器。
   3. 唯一 CSS（短路径优先）。
   4. ARIA role + name（`aria/*`）。
-  5. 文本相似（阈值 0.85，可引入已有相似度引擎做兜底）。
-  6. XPath（最后兜底，成本高）。
+  5. XPath（最后兜底，成本高）。
 - 自动回退：若首选失败，依次尝试；成功后记录“回退路径”（用于提示“建议更新”）。
 - 可见性与可交互校验：找到元素后，`scrollIntoView` + `isVisible` 校验；失败即认为本候选不可用。
 
@@ -421,7 +420,7 @@ export interface NodeResult {
   - 选择器多策略与回退；流编辑器（时间线 + 属性面板）；断言/脚本节点；绑定页面入口；导入导出。
 - M3（高级能力）：
 
-  - drag/scroll/全局录制/标签页切换；抓包与网络片段；定时回放；失败点重试；相似度兜底。
+  - drag/scroll/全局录制/标签页切换；抓包与网络片段；定时回放；失败点重试。
 
 - M4（可视化与节点化）：
   - DAG 画布（Cytoscape/Elk）、节点注册表、线性到 DAG 自动转换；If/Foreach/While、Open/Switch/CloseTab；HTTP/Extract/Dataset/Clipboard/Delay；OnError 边与节点级错误策略；表达式/变量映射与上游输出选择器；并发与全局限流；触发器中心（manual/onPage/cron/hotkey）。
@@ -477,9 +476,7 @@ export interface NodeResult {
 ### 16.5 热更新与版本
 
 - Flow 保存为“已发布” → 扩展发送 `flow_publish(flow)` 给原生宿主 → 注册工具；
-- Flow 更新：
-  - 新版本：注册 `flow.<slug>@v2`，同时更新 `@latest` 指向；
-  - 覆盖当前：替换 `flow.<slug>` 的 `inputSchema/description` 并刷新。
+- Flow 更新：覆盖当前，替换 `flow.<slug>` 的 `inputSchema/description` 并刷新；
 - 取消发布：原生宿主移除对应工具。
 
 ### 16.6 安全与边界
@@ -545,7 +542,7 @@ async function runFlow(
 
 ## 14. 风险与对策
 
-- 选择器脆弱：通过 `ref` + 多候选 + 相似度兜底 + 用户提示更新，降低回放失败概率。
+- 选择器脆弱：通过 `ref` + 多候选 + 用户提示更新，降低回放失败概率。
 - 页面异步/动画：默认增加短暂 wait 与 `wait-helper`，并允许编辑器细化等待条件。
 - 录制脚本与站点脚本冲突：ISOLATED world + 最小化事件写入，避免污染页面。
 

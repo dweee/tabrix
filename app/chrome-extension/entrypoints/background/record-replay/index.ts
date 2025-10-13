@@ -15,6 +15,9 @@ import {
   removeSchedule,
   type FlowSchedule,
 } from './flow-store';
+import { listRuns } from './flow-store';
+import { STORAGE_KEYS } from '@/common/constants';
+import { listTriggers, saveTrigger, deleteTrigger, type FlowTrigger } from './trigger-store';
 import { runFlow } from './flow-runner';
 
 // design note: background listener for record & replay; manages start/stop and storage
@@ -59,14 +62,14 @@ async function rescheduleAlarms() {
 }
 
 async function ensureRecorderInjected(tabId: number): Promise<void> {
-  // Inject helper and recorder scripts
+  // Inject helper and recorder scripts into all frames to aggregate same-origin iframes
   await chrome.scripting.executeScript({
-    target: { tabId },
+    target: { tabId, allFrames: true },
     files: ['inject-scripts/accessibility-tree-helper.js'],
     world: 'ISOLATED',
   } as any);
   await chrome.scripting.executeScript({
-    target: { tabId },
+    target: { tabId, allFrames: true },
     files: ['inject-scripts/recorder.js'],
     world: 'ISOLATED',
   } as any);
@@ -78,15 +81,22 @@ async function startRecording(meta?: Partial<Flow>): Promise<{ success: boolean;
   try {
     await ensureRecorderInjected(tab.id);
     currentRecording = { tabId: tab.id };
-    await chrome.tabs.sendMessage(tab.id, {
-      action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL,
-      cmd: 'start',
-      meta: {
-        id: meta?.id,
-        name: meta?.name,
-        description: meta?.description,
-      },
-    });
+    // Broadcast to all frames
+    const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id });
+    const targets = Array.isArray(frames) && frames.length ? frames : [{ frameId: 0 } as any];
+    await Promise.all(
+      targets.map((f) =>
+        chrome.tabs.sendMessage(
+          tab.id!,
+          {
+            action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL,
+            cmd: 'start',
+            meta: { id: meta?.id, name: meta?.name, description: meta?.description },
+          } as any,
+          { frameId: f.frameId } as any,
+        ),
+      ),
+    );
     return { success: true };
   } catch (e: any) {
     return { success: false, error: e?.message || String(e) };
@@ -96,10 +106,12 @@ async function startRecording(meta?: Partial<Flow>): Promise<{ success: boolean;
 async function stopRecording(): Promise<{ success: boolean; flow?: Flow; error?: string }> {
   if (!currentRecording) return { success: false, error: 'No active recording' };
   try {
-    const flowRes: any = await chrome.tabs.sendMessage(currentRecording.tabId, {
-      action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL,
-      cmd: 'stop',
-    });
+    // Ask top frame to stop and return flow (child frames carry step batches too)
+    const flowRes: any = await chrome.tabs.sendMessage(
+      currentRecording.tabId,
+      { action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL, cmd: 'stop' } as any,
+      { frameId: 0 } as any,
+    );
     const flowFromTab = (flowRes && flowRes.flow) as Flow | undefined;
     // 合并后台聚合的步骤（跨标签页）与内容脚本返回的步骤
     const aggregated = currentRecording.flow;
@@ -135,6 +147,8 @@ async function stopRecording(): Promise<{ success: boolean; flow?: Flow; error?:
 export function initRecordReplayListeners() {
   // On startup, re-schedule alarms
   rescheduleAlarms().catch(() => {});
+  // Initialize trigger engine (contextMenus/commands/url/dom)
+  initTriggerEngine().catch(() => {});
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
@@ -267,7 +281,53 @@ export function initRecordReplayListeners() {
         }
         case BACKGROUND_MESSAGE_TYPES.RR_IMPORT_FLOW: {
           importFlowFromJson(message.json)
-            .then((flows) => sendResponse({ success: true, imported: flows.length }))
+            .then((flows) => sendResponse({ success: true, imported: flows.length, flows }))
+            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+          return true;
+        }
+        case BACKGROUND_MESSAGE_TYPES.RR_LIST_RUNS: {
+          listRuns()
+            .then((runs) => sendResponse({ success: true, runs }))
+            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+          return true;
+        }
+        case BACKGROUND_MESSAGE_TYPES.RR_LIST_TRIGGERS: {
+          listTriggers()
+            .then((triggers) => sendResponse({ success: true, triggers }))
+            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+          return true;
+        }
+        case BACKGROUND_MESSAGE_TYPES.RR_SAVE_TRIGGER: {
+          const t = message.trigger as FlowTrigger;
+          if (!t || !t.id || !t.type || !t.flowId) {
+            sendResponse({ success: false, error: 'invalid trigger' });
+            return true;
+          }
+          saveTrigger(t)
+            .then(async () => {
+              await refreshTriggers();
+              sendResponse({ success: true });
+            })
+            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+          return true;
+        }
+        case BACKGROUND_MESSAGE_TYPES.RR_DELETE_TRIGGER: {
+          const id = String(message.id || '');
+          if (!id) {
+            sendResponse({ success: false, error: 'invalid id' });
+            return true;
+          }
+          deleteTrigger(id)
+            .then(async () => {
+              await refreshTriggers();
+              sendResponse({ success: true });
+            })
+            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+          return true;
+        }
+        case BACKGROUND_MESSAGE_TYPES.RR_REFRESH_TRIGGERS: {
+          refreshTriggers()
+            .then(() => sendResponse({ success: true }))
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
         }
@@ -345,10 +405,17 @@ export function initRecordReplayListeners() {
       // 确保该标签页注入并继续录制（不重置流）
       try {
         await ensureRecorderInjected(activeInfo.tabId);
-        await chrome.tabs.sendMessage(activeInfo.tabId, {
-          action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL,
-          cmd: 'resume',
-        } as any);
+        const frames = await chrome.webNavigation.getAllFrames({ tabId: activeInfo.tabId });
+        const targets = Array.isArray(frames) && frames.length ? frames : [{ frameId: 0 } as any];
+        await Promise.all(
+          targets.map((f) =>
+            chrome.tabs.sendMessage(
+              activeInfo.tabId!,
+              { action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL, cmd: 'resume' } as any,
+              { frameId: f.frameId } as any,
+            ),
+          ),
+        );
       } catch {
         /* ignore */
       }
@@ -383,10 +450,17 @@ export function initRecordReplayListeners() {
         // 同时确保继续录制
         try {
           await ensureRecorderInjected(tabId);
-          await chrome.tabs.sendMessage(tabId, {
-            action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL,
-            cmd: 'resume',
-          } as any);
+          const frames = await chrome.webNavigation.getAllFrames({ tabId });
+          const targets = Array.isArray(frames) && frames.length ? frames : [{ frameId: 0 } as any];
+          await Promise.all(
+            targets.map((f) =>
+              chrome.tabs.sendMessage(
+                tabId!,
+                { action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL, cmd: 'resume' } as any,
+                { frameId: f.frameId } as any,
+              ),
+            ),
+          );
         } catch {
           /* ignore */
         }
@@ -403,10 +477,17 @@ export function initRecordReplayListeners() {
         // 仍确保脚本在该页活跃，用于持续录制
         try {
           await ensureRecorderInjected(tabId);
-          await chrome.tabs.sendMessage(tabId, {
-            action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL,
-            cmd: 'resume',
-          } as any);
+          const frames = await chrome.webNavigation.getAllFrames({ tabId });
+          const targets = Array.isArray(frames) && frames.length ? frames : [{ frameId: 0 } as any];
+          await Promise.all(
+            targets.map((f) =>
+              chrome.tabs.sendMessage(
+                tabId!,
+                { action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL, cmd: 'resume' } as any,
+                { frameId: f.frameId } as any,
+              ),
+            ),
+          );
         } catch {
           /* ignore */
         }
@@ -438,6 +519,133 @@ export function initRecordReplayListeners() {
       // ignore
     }
   });
+
+  // Trigger engine: contextMenus/commands/url/dom
+  if ((chrome as any).contextMenus?.onClicked?.addListener) {
+    chrome.contextMenus.onClicked.addListener(async (info) => {
+      try {
+        const triggers = await listTriggers();
+        const t = triggers.find(
+          (x) => x.type === 'contextMenu' && (x as any).menuId === info.menuItemId,
+        );
+        if (!t || t.enabled === false) return;
+        const flow = await getFlow(t.flowId);
+        if (!flow) return;
+        await runFlow(flow, { args: t.args || {}, returnLogs: false });
+      } catch {}
+    });
+  }
+  chrome.commands.onCommand.addListener(async (command) => {
+    try {
+      const triggers = await listTriggers();
+      const t = triggers.find((x) => x.type === 'command' && (x as any).commandKey === command);
+      if (!t || t.enabled === false) return;
+      const flow = await getFlow(t.flowId);
+      if (!flow) return;
+      await runFlow(flow, { args: t.args || {}, returnLogs: false });
+    } catch {}
+  });
+  chrome.webNavigation.onCommitted.addListener(async (details) => {
+    try {
+      if (details.frameId !== 0) return;
+      const url = details.url || '';
+      const triggers = await listTriggers();
+      const list = triggers.filter((x) => x.type === 'url' && x.enabled !== false) as any[];
+      for (const t of list) {
+        if (matchUrl(url, (t as any).match || [])) {
+          const flow = await getFlow(t.flowId);
+          if (!flow) continue;
+          await runFlow(flow, { args: t.args || {}, returnLogs: false });
+        }
+      }
+    } catch {}
+  });
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    try {
+      if (message && message.action === 'dom_trigger_fired') {
+        const id = message.triggerId;
+        listTriggers().then(async (arr) => {
+          const t = arr.find((x) => x.id === id && x.type === 'dom');
+          if (!t || t.enabled === false) return;
+          const flow = await getFlow(t.flowId);
+          if (!flow) return;
+          await runFlow(flow, { args: t.args || {}, returnLogs: false });
+        });
+        sendResponse({ ok: true });
+        return true;
+      }
+    } catch {}
+    return false;
+  });
+}
+
+function matchUrl(
+  u: string,
+  rules: Array<{ kind: 'url' | 'domain' | 'path'; value: string }>,
+): boolean {
+  try {
+    const url = new URL(u);
+    for (const r of rules || []) {
+      const v = String(r.value || '');
+      if (r.kind === 'url' && u.startsWith(v)) return true;
+      if (r.kind === 'domain' && url.hostname.includes(v)) return true;
+      if (r.kind === 'path' && url.pathname.startsWith(v)) return true;
+    }
+  } catch {}
+  return false;
+}
+
+async function refreshTriggers() {
+  try {
+    const triggers = await listTriggers();
+    // Guard: contextMenus permission may be missing in some builds
+    if ((chrome as any).contextMenus?.removeAll && (chrome as any).contextMenus?.create) {
+      try {
+        await chrome.contextMenus.removeAll();
+      } catch {}
+      for (const t of triggers) {
+        if (t.type === 'contextMenu' && t.enabled !== false) {
+          const id = `rr_menu_${t.id}`;
+          (t as any).menuId = id;
+          await chrome.contextMenus.create({
+            id,
+            title: (t as any).title || '运行工作流',
+            contexts: (t as any).contexts || ['all'],
+          });
+        }
+      }
+    }
+    await chrome.storage.local.set({ [STORAGE_KEYS.RR_TRIGGERS]: triggers });
+    const domTriggers = triggers
+      .filter((x) => x.type === 'dom' && x.enabled !== false)
+      .map((x: any) => ({
+        id: x.id,
+        selector: x.selector,
+        appear: x.appear !== false,
+        once: x.once !== false,
+        debounceMs: x.debounceMs ?? 800,
+      }));
+    const tabs = await chrome.tabs.query({});
+    for (const t of tabs) {
+      if (!t.id) continue;
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: t.id, allFrames: true },
+          files: ['inject-scripts/dom-observer.js'],
+          world: 'ISOLATED',
+        } as any);
+        await chrome.tabs.sendMessage(t.id, {
+          action: 'set_dom_triggers',
+          triggers: domTriggers,
+        } as any);
+      } catch {}
+    }
+  } catch {}
+}
+
+// Backward-compatible init function; initialize all trigger-related hooks/state
+async function initTriggerEngine() {
+  await refreshTriggers();
 }
 
 // Alarm listener executes scheduled flows

@@ -21,9 +21,13 @@ export function useBuilderStore(initial?: FlowV2 | null) {
   const edges = reactive<EdgeV2[]>([]);
   const activeNodeId = ref<string | null>(null);
   const pendingFrom = ref<string | null>(null);
+  const pendingLabel = ref<string>('default');
   const paletteTypes = [
     'click',
     'fill',
+    'if',
+    'foreach',
+    'while',
     'key',
     'wait',
     'assert',
@@ -32,6 +36,13 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     'delay',
     'http',
     'extract',
+    'screenshot',
+    'triggerEvent',
+    'setAttribute',
+    'loopElements',
+    'switchFrame',
+    'handleDownload',
+    'executeFlow',
     'openTab',
     'switchTab',
     'closeTab',
@@ -112,12 +123,13 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     past.push(takeSnapshot());
   }
 
-  function selectNode(id: string) {
-    if (pendingFrom.value && pendingFrom.value !== id) {
-      onConnect(pendingFrom.value, id);
+  function selectNode(id: string | null) {
+    // When click on empty canvas, id can be null => deselect
+    if (id && pendingFrom.value && pendingFrom.value !== id) {
+      onConnect(pendingFrom.value, id, pendingLabel.value);
       pendingFrom.value = null;
     }
-    activeNodeId.value = id;
+    activeNodeId.value = id || null;
   }
 
   function addNode(t: NodeBase['type']) {
@@ -135,6 +147,21 @@ export function useBuilderStore(initial?: FlowV2 | null) {
       const prev = nodes[nodes.length - 2];
       edges.push({ id: newId('e'), from: prev.id, to: id, label: 'default' });
     }
+    activeNodeId.value = id;
+    recordChange();
+  }
+
+  function addNodeAt(t: NodeBase['type'], x: number, y: number) {
+    const id = newId(t);
+    const n: NodeBase = {
+      id,
+      type: t,
+      name: '',
+      disabled: false,
+      config: defaultConfigFor(t),
+      ui: { x: Math.round(x), y: Math.round(y) },
+    };
+    nodes.push(n);
     activeNodeId.value = id;
     recordChange();
   }
@@ -161,7 +188,8 @@ export function useBuilderStore(initial?: FlowV2 | null) {
       const e = edges[i];
       if (e.from === id || e.to === id) edges.splice(i, 1);
     }
-    activeNodeId.value = nodes[Math.min(idx, nodes.length - 1)]?.id || null;
+    // After removal, do not auto-select another node to avoid accidental batch deletes
+    activeNodeId.value = null;
     recordChange();
   }
 
@@ -172,17 +200,28 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     // 不计入历史栈，避免频繁记录；由用户触发操作（连接/新增/删除等）记录。
   }
 
-  function connectFrom(id: string) {
+  function connectFrom(id: string, label: string = 'default') {
     pendingFrom.value = id;
+    pendingLabel.value = label;
   }
 
-  function onConnect(sourceId: string, targetId: string) {
-    // 单一默认出边：删除同源 default 出边
+  function onConnect(sourceId: string, targetId: string, label: string = 'default') {
+    // prevent self-loop
+    if (sourceId === targetId) return;
+    // 单一同标签出边：删除同源 + 同标签的已有边
     for (let i = edges.length - 1; i >= 0; i--) {
       const e = edges[i];
-      if (e.from === sourceId && (!e.label || e.label === 'default')) edges.splice(i, 1);
+      const lab = e.label || 'default';
+      if (e.from === sourceId && lab === label) edges.splice(i, 1);
     }
-    edges.push({ id: newId('e'), from: sourceId, to: targetId, label: 'default' });
+    // avoid duplicate for same pair+label
+    if (
+      edges.some(
+        (e) => e.from === sourceId && e.to === targetId && (e.label || 'default') === label,
+      )
+    )
+      return;
+    edges.push({ id: newId('e'), from: sourceId, to: targetId, label });
     recordChange();
   }
 
@@ -193,6 +232,61 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     layoutIfNeeded();
     recordChange();
   }
+
+  // --- subflow management ---
+  const currentSubflowId = ref<string | null>(null);
+  function ensureSubflows() {
+    if (!flowLocal.subflows) (flowLocal as any).subflows = {} as any;
+  }
+  function listSubflowIds(): string[] {
+    ensureSubflows();
+    return Object.keys((flowLocal as any).subflows || {});
+  }
+  function addSubflow(id: string) {
+    ensureSubflows();
+    const sf = (flowLocal as any).subflows as any;
+    if (!id || sf[id]) return;
+    sf[id] = { nodes: [], edges: [] };
+    recordChange();
+  }
+  function removeSubflow(id: string) {
+    ensureSubflows();
+    const sf = (flowLocal as any).subflows as any;
+    if (!sf[id]) return;
+    delete sf[id];
+    if (currentSubflowId.value === id) switchToMain();
+    recordChange();
+  }
+  function flushCurrent() {
+    if (!currentSubflowId.value) {
+      // write back main
+      (flowLocal as any).nodes = JSON.parse(JSON.stringify(nodes));
+      (flowLocal as any).edges = JSON.parse(JSON.stringify(edges));
+      return;
+    }
+    ensureSubflows();
+    (flowLocal as any).subflows[currentSubflowId.value] = {
+      nodes: JSON.parse(JSON.stringify(nodes)),
+      edges: JSON.parse(JSON.stringify(edges)),
+    };
+  }
+  function switchToMain() {
+    flushCurrent();
+    currentSubflowId.value = null;
+    nodes.splice(0, nodes.length, ...JSON.parse(JSON.stringify((flowLocal.nodes || []) as any)));
+    edges.splice(0, edges.length, ...JSON.parse(JSON.stringify((flowLocal.edges || []) as any)));
+    layoutIfNeeded();
+  }
+  function switchToSubflow(id: string) {
+    flushCurrent();
+    currentSubflowId.value = id;
+    ensureSubflows();
+    const sf = (flowLocal as any).subflows[id] || { nodes: [], edges: [] };
+    nodes.splice(0, nodes.length, ...JSON.parse(JSON.stringify(sf.nodes || [])));
+    edges.splice(0, edges.length, ...JSON.parse(JSON.stringify(sf.edges || [])));
+    layoutIfNeeded();
+  }
+  const isEditingMain = () => currentSubflowId.value == null;
 
   function exportSteps() {
     return nodesToSteps(nodes, edges);
@@ -232,6 +326,8 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     edges,
     activeNodeId,
     pendingFrom,
+    pendingLabel,
+    currentSubflowId,
     paletteTypes,
     undo,
     redo,
@@ -241,8 +337,15 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     duplicateNode,
     removeNode,
     setNodePosition,
+    addNodeAt,
     connectFrom,
     onConnect,
+    listSubflowIds,
+    addSubflow,
+    removeSubflow,
+    switchToMain,
+    switchToSubflow,
+    isEditingMain,
     importFromSteps,
     exportSteps,
     summarize,

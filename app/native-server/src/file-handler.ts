@@ -36,6 +36,11 @@ export class FileHandler {
           }
           break;
 
+        case 'readBase64File': {
+          if (!filePath) return { success: false, error: 'filePath is required' };
+          return await this.readBase64File(filePath);
+        }
+
         case 'cleanupFile':
           return await this.cleanupFile(filePath);
 
@@ -157,6 +162,35 @@ export class FileHandler {
       };
     } catch (error) {
       throw new Error(`Failed to verify file: ${error}`);
+    }
+  }
+
+  /**
+   * Read file content and return as base64 string
+   */
+  private async readBase64File(filePath: string): Promise<any> {
+    try {
+      if (!fs.existsSync(filePath)) {
+        throw new Error(`File does not exist: ${filePath}`);
+      }
+      const stats = fs.statSync(filePath);
+      if (!stats.isFile()) {
+        throw new Error(`Path is not a file: ${filePath}`);
+      }
+      const buf = fs.readFileSync(filePath);
+      const base64 = buf.toString('base64');
+      return {
+        success: true,
+        filePath,
+        fileName: path.basename(filePath),
+        size: stats.size,
+        base64Data: base64,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: `Failed to read file: ${error instanceof Error ? error.message : String(error)}`,
+      };
     }
   }
 

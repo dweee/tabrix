@@ -34,6 +34,12 @@ export const BACKGROUND_MESSAGE_TYPES = {
   RR_EXPORT_FLOW: 'rr_export_flow',
   RR_EXPORT_ALL: 'rr_export_all',
   RR_IMPORT_FLOW: 'rr_import_flow',
+  RR_LIST_RUNS: 'rr_list_runs',
+  // Triggers
+  RR_LIST_TRIGGERS: 'rr_list_triggers',
+  RR_SAVE_TRIGGER: 'rr_save_trigger',
+  RR_DELETE_TRIGGER: 'rr_delete_trigger',
+  RR_REFRESH_TRIGGERS: 'rr_refresh_triggers',
   // Scheduling
   RR_SCHEDULE_FLOW: 'rr_schedule_flow',
   RR_UNSCHEDULE_FLOW: 'rr_unschedule_flow',
@@ -60,6 +66,7 @@ export const CONTENT_MESSAGE_TYPES = {
   INTERACTIVE_ELEMENTS_HELPER_PING: 'interactive_elements_helper_ping',
   ACCESSIBILITY_TREE_HELPER_PING: 'chrome_read_page_ping',
   WAIT_HELPER_PING: 'wait_helper_ping',
+  DOM_OBSERVER_PING: 'dom_observer_ping',
 } as const;
 
 // Tool action message types (for chrome.runtime.sendMessage)
@@ -100,6 +107,9 @@ export const TOOL_MESSAGE_TYPES = {
   // Record & Replay content script bridge
   RR_RECORDER_CONTROL: 'rr_recorder_control',
   RR_RECORDER_EVENT: 'rr_recorder_event',
+  // DOM observer trigger bridge
+  SET_DOM_TRIGGERS: 'set_dom_triggers',
+  DOM_TRIGGER_FIRED: 'dom_trigger_fired',
 } as const;
 
 // Type unions for type safety
