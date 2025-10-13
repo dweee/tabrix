@@ -28,364 +28,17 @@
 
       <div class="divider"></div>
 
-      <!-- 类型特定配置 -->
-      <template v-if="node.type === 'if'">
-        <div class="form-section">
-          <div class="section-header">
-            <span class="section-title">If / else</span>
-            <button class="btn-sm" @click="addIfCase">+ Add</button>
-          </div>
-          <div class="text-xs text-slate-500" style="padding: 0 20px"
-            >使用表达式定义分支，支持变量与常见比较运算符。</div
-          >
-          <div class="if-case-list" data-field="if.branches">
-            <div class="if-case-item" v-for="(c, i) in ifBranches" :key="c.id">
-              <div class="if-case-header">
-                <input
-                  class="form-input-sm flex-1"
-                  v-model="c.name"
-                  placeholder="分支名称（可选）"
-                />
-                <button class="btn-icon-sm danger" @click="removeIfCase(i)" title="删除">×</button>
-              </div>
-              <div class="if-case-expr">
-                <input
-                  class="form-input"
-                  v-model="c.expr"
-                  :placeholder="'workflow.' + (variables[0]?.key || 'var') + ' == 5'"
-                />
-                <div class="if-toolbar">
-                  <select
-                    class="form-select-sm"
-                    @change="(e) => insertVar((e.target as HTMLSelectElement).value, i)"
-                    :value="''"
-                  >
-                    <option value="" disabled>插入变量</option>
-                    <option v-for="v in variables" :key="v.key" :value="v.key">{{ v.key }}</option>
-                  </select>
-                  <select
-                    class="form-select-sm"
-                    @change="(e) => insertOp((e.target as HTMLSelectElement).value, i)"
-                    :value="''"
-                  >
-                    <option value="" disabled>运算符</option>
-                    <option v-for="op in ops" :key="op" :value="op">{{ op }}</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-            <div class="if-case-else" v-if="elseEnabled">
-              <div class="text-xs text-slate-500"
-                >Else 分支（无需表达式，将匹配以上条件都不成立时）</div
-              >
-            </div>
-          </div>
-        </div>
-        <div class="divider"></div>
-      </template>
-      <template
-        v-if="
-          node.type === 'click' ||
-          node.type === 'fill' ||
-          node.type === 'triggerEvent' ||
-          node.type === 'setAttribute'
-        "
-      >
-        <div class="form-section">
-          <div class="section-header">
-            <span class="section-title">选择器</span>
-            <button class="btn-sm btn-primary" @click="pickFromPage">从页面选择</button>
-          </div>
-          <div class="selector-list" data-field="target.candidates">
-            <div class="selector-item" v-for="(c, i) in node.config.target.candidates" :key="i">
-              <select class="form-select-sm" v-model="c.type">
-                <option value="css">CSS</option>
-                <option value="attr">Attr</option>
-                <option value="aria">ARIA</option>
-                <option value="text">Text</option>
-                <option value="xpath">XPath</option>
-              </select>
-              <input class="form-input-sm flex-1" v-model="c.value" placeholder="选择器值" />
-              <button
-                class="btn-icon-sm"
-                @click="swapCand(node.config.target.candidates, i, i - 1)"
-                :disabled="i === 0"
-                >↑</button
-              >
-              <button
-                class="btn-icon-sm"
-                @click="swapCand(node.config.target.candidates, i, i + 1)"
-                :disabled="i === node.config.target.candidates.length - 1"
-                >↓</button
-              >
-              <button class="btn-icon-sm danger" @click="node.config.target.candidates.splice(i, 1)"
-                >×</button
-              >
-            </div>
-            <button
-              class="btn-sm"
-              @click="node.config.target.candidates.push({ type: 'css', value: '' })"
-              >+ 添加选择器</button
-            >
-          </div>
-        </div>
-        <div class="divider"></div>
-      </template>
-
-      <template v-if="node.type === 'fill'">
-        <div class="form-section">
-          <div class="form-group" data-field="fill.value">
-            <label class="form-label">输入值</label>
-            <input
-              class="form-input"
-              v-model="node.config.value"
-              placeholder="支持 {变量名} 格式"
-            />
-          </div>
-        </div>
-        <div class="divider"></div>
-      </template>
-
-      <template v-if="node.type === 'navigate'">
-        <div class="form-section">
-          <div class="form-group" data-field="navigate.url">
-            <label class="form-label">URL 地址</label>
-            <input class="form-input" v-model="node.config.url" placeholder="https://example.com" />
-          </div>
-        </div>
-        <div class="divider"></div>
-      </template>
-
-      <template v-if="node.type === 'executeFlow'">
-        <div class="form-section">
-          <div class="form-group">
-            <label class="form-label">目标工作流</label>
-            <select class="form-select" v-model="node.config.flowId">
-              <option value="">请选择</option>
-              <option v-for="f in flows" :key="f.id" :value="f.id">{{ f.name || f.id }}</option>
-            </select>
-          </div>
-          <div class="form-group checkbox-group">
-            <label class="checkbox-label"
-              ><input type="checkbox" v-model="node.config.inline" />
-              内联执行（共享上下文变量）</label
-            >
-          </div>
-          <div class="form-group">
-            <label class="form-label">传参 (JSON)</label>
-            <textarea
-              class="form-textarea"
-              v-model="execArgsJson"
-              rows="3"
-              placeholder='{"k": "v"}'
-            ></textarea>
-          </div>
-        </div>
-        <div class="divider"></div>
-      </template>
-
-      <template v-if="node.type === 'handleDownload'">
-        <div class="form-section">
-          <div class="form-group">
-            <label class="form-label">文件名包含（可选）</label>
-            <input
-              class="form-input"
-              v-model="node.config.filenameContains"
-              placeholder="子串匹配文件名或URL"
-            />
-          </div>
-          <div class="form-group">
-            <label class="form-label">超时(ms)</label>
-            <input class="form-input" v-model="node.config.timeoutMs" placeholder="默认 60000" />
-          </div>
-          <div class="form-group checkbox-group">
-            <label class="checkbox-label">
-              <input type="checkbox" v-model="node.config.waitForComplete" /> 等待下载完成
-            </label>
-          </div>
-          <div class="form-group">
-            <label class="form-label">保存到变量</label>
-            <input class="form-input" v-model="node.config.saveAs" placeholder="默认 download" />
-          </div>
-        </div>
-        <div class="divider"></div>
-      </template>
-
-      <template v-if="node.type === 'screenshot'">
-        <div class="form-section">
-          <div class="form-group">
-            <label class="form-label">元素选择器（可选）</label>
-            <input
-              class="form-input"
-              v-model="node.config.selector"
-              placeholder="为空则截取可视区或全页"
-            />
-          </div>
-          <div class="form-group checkbox-group">
-            <label class="checkbox-label">
-              <input type="checkbox" v-model="node.config.fullPage" /> 全页截图
-            </label>
-          </div>
-          <div class="form-group">
-            <label class="form-label">保存为变量</label>
-            <input
-              class="form-input"
-              v-model="node.config.saveAs"
-              placeholder="变量名，例如 shot"
-            />
-          </div>
-        </div>
-        <div class="divider"></div>
-      </template>
-
-      <template v-if="node.type === 'triggerEvent'">
-        <div class="form-section">
-          <div class="form-group">
-            <label class="form-label">事件类型</label>
-            <input
-              class="form-input"
-              v-model="node.config.event"
-              placeholder="如 input/change/mouseover"
-            />
-          </div>
-          <div class="form-group checkbox-group">
-            <label class="checkbox-label"
-              ><input type="checkbox" v-model="node.config.bubbles" /> 冒泡</label
-            >
-            <label class="checkbox-label"
-              ><input type="checkbox" v-model="node.config.cancelable" /> 可取消</label
-            >
-          </div>
-        </div>
-        <div class="divider"></div>
-      </template>
-
-      <template v-if="node.type === 'setAttribute'">
-        <div class="form-section">
-          <div class="form-group">
-            <label class="form-label">属性名</label>
-            <input
-              class="form-input"
-              v-model="node.config.name"
-              placeholder="如 value/src/disabled 等"
-            />
-          </div>
-          <div class="form-group">
-            <label class="form-label">属性值（留空并勾选删除则移除）</label>
-            <input class="form-input" v-model="node.config.value" placeholder="属性值" />
-          </div>
-          <div class="form-group checkbox-group">
-            <label class="checkbox-label"
-              ><input type="checkbox" v-model="node.config.remove" /> 删除属性</label
-            >
-          </div>
-        </div>
-        <div class="divider"></div>
-      </template>
-
-      <template v-if="node.type === 'loopElements'">
-        <div class="form-section">
-          <div class="form-group">
-            <label class="form-label">元素选择器</label>
-            <input class="form-input" v-model="node.config.selector" placeholder="CSS 选择器" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">列表变量名</label>
-            <input class="form-input" v-model="node.config.saveAs" placeholder="默认 elements" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">循环项变量名</label>
-            <input class="form-input" v-model="node.config.itemVar" placeholder="默认 item" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">子流 ID</label>
-            <input
-              class="form-input"
-              v-model="node.config.subflowId"
-              placeholder="选择或新建子流"
-            />
-            <button class="btn-sm" style="margin-top: 8px" @click="onCreateSubflow"
-              >新建子流</button
-            >
-          </div>
-        </div>
-        <div class="divider"></div>
-      </template>
-
-      <template v-if="node.type === 'switchFrame'">
-        <div class="form-section">
-          <div class="form-group">
-            <label class="form-label">按 URL 包含匹配（优先）</label>
-            <input
-              class="form-input"
-              v-model="node.config.frame.urlContains"
-              placeholder="frame URL 包含的字符串"
-            />
-          </div>
-          <div class="form-group">
-            <label class="form-label">按索引匹配（从 0 起，仅子 frame）</label>
-            <input class="form-input" v-model="node.config.frame.index" placeholder="索引数字" />
-          </div>
-          <div class="text-xs text-slate-500" style="padding: 0 20px"
-            >同源/可注入 frame 可用；留空则回到顶级页面</div
-          >
-        </div>
-        <div class="divider"></div>
-      </template>
-
-      <template v-if="node.type === 'http'">
-        <div class="form-section">
-          <div class="form-group">
-            <label class="form-label">请求方法</label>
-            <select class="form-select" v-model="node.config.method">
-              <option>GET</option>
-              <option>POST</option>
-              <option>PUT</option>
-              <option>PATCH</option>
-              <option>DELETE</option>
-            </select>
-          </div>
-          <div class="form-group" :class="{ invalid: !node.config.url }" data-field="http.url">
-            <label class="form-label">URL 地址</label>
-            <input
-              class="form-input"
-              v-model="node.config.url"
-              placeholder="https://api.example.com/data"
-            />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Headers (JSON)</label>
-            <textarea
-              class="form-textarea"
-              v-model="headersJson"
-              rows="3"
-              placeholder='{"Content-Type": "application/json"}'
-            ></textarea>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Body (JSON)</label>
-            <textarea
-              class="form-textarea"
-              v-model="bodyJson"
-              rows="3"
-              placeholder='{"key": "value"}'
-            ></textarea>
-          </div>
-          <div class="form-group">
-            <label class="form-label">FormData (JSON，可选，提供时覆盖 Body)</label>
-            <textarea
-              class="form-textarea"
-              v-model="formDataJson"
-              rows="3"
-              placeholder='{"fields": {"k":"v"}, "files":[{"name":"file","fileUrl":"https://...","filename":"a.png"}]}'
-            ></textarea>
-            <div class="text-xs text-slate-500" style="margin-top: 6px"
-              >支持简洁数组形式：[["file","url:https://...","a.png"],["metadata","value"]]</div
-            >
-          </div>
-        </div>
-        <div class="divider"></div>
-      </template>
+      <!-- 动态：基于注册表的节点属性面板渲染 -->
+      <component
+        v-if="node && PropComp"
+        :is="PropComp"
+        :node="node"
+        :variables="variables"
+        :subflow-ids="subflowIds"
+        @create-subflow="(id: string) => emit('create-subflow', id)"
+        @switch-to-subflow="(id: string) => emit('switch-to-subflow', id)"
+      />
+      <div class="divider"></div>
 
       <!-- 通用设置 -->
       <div class="form-section">
@@ -443,8 +96,8 @@
 import { computed, watch, onMounted, ref } from 'vue';
 import type { NodeBase } from '@/entrypoints/background/record-replay/types';
 import { validateNode } from '../model/validation';
-import KeyValueEditor from './KeyValueEditor.vue';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import { NODE_UI_REGISTRY } from '@/entrypoints/popup/components/builder/model/ui-nodes';
 
 const props = defineProps<{
   node: NodeBase | null;
@@ -914,13 +567,13 @@ watch(
   flex-direction: column;
 }
 
-.if-case-list {
+.panel-content :deep(.if-case-list) {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 8px 12px;
 }
-.if-case-item {
+.panel-content :deep(.if-case-item) {
   border: 1px solid var(--rr-border);
   background: var(--rr-card);
   border-radius: 8px;
@@ -929,27 +582,27 @@ watch(
   flex-direction: column;
   gap: 6px;
 }
-.if-case-header {
+.panel-content :deep(.if-case-header) {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.if-case-expr {
+.panel-content :deep(.if-case-expr) {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-.if-toolbar {
+.panel-content :deep(.if-toolbar) {
   display: flex;
   gap: 8px;
 }
-.if-case-else {
+.panel-content :deep(.if-case-else) {
   padding: 6px 12px;
   color: var(--rr-text-secondary);
 }
 
 /* 表单区域 */
-.form-section {
+.panel-content :deep(.form-section) {
   padding: 16px 20px;
   display: flex;
   flex-direction: column;
@@ -957,34 +610,34 @@ watch(
 }
 
 /* 区域头部 */
-.section-header {
+.panel-content :deep(.section-header) {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
 }
-.section-title {
+.panel-content :deep(.section-title) {
   font-size: 13px;
   font-weight: 600;
   color: var(--rr-text);
 }
 
 /* 表单组 */
-.form-group {
+.panel-content :deep(.form-group) {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-.form-label {
+.panel-content :deep(.form-label) {
   font-size: 13px;
   font-weight: 500;
   color: var(--rr-text-secondary);
 }
 
 /* 表单输入 */
-.form-input,
-.form-select,
-.form-textarea {
+.panel-content :deep(.form-input),
+.panel-content :deep(.form-select),
+.panel-content :deep(.form-textarea) {
   width: 100%;
   padding: 8px 12px;
   border: 1px solid var(--rr-border);
@@ -995,33 +648,33 @@ watch(
   outline: none;
   transition: all 0.15s;
 }
-.form-input:focus,
-.form-select:focus,
-.form-textarea:focus {
+.panel-content :deep(.form-input:focus),
+.panel-content :deep(.form-select:focus),
+.panel-content :deep(.form-textarea:focus) {
   border-color: var(--rr-accent);
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.08);
 }
-.form-input::placeholder,
-.form-textarea::placeholder {
+.panel-content :deep(.form-input::placeholder),
+.panel-content :deep(.form-textarea::placeholder) {
   color: var(--rr-text-weak);
 }
-.form-textarea {
+.panel-content :deep(.form-textarea) {
   resize: vertical;
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
   font-size: 13px;
   line-height: 1.5;
 }
-.form-group.invalid .form-input,
-.form-group.invalid .form-select {
+.panel-content :deep(.form-group.invalid .form-input),
+.panel-content :deep(.form-group.invalid .form-select) {
   border-color: var(--rr-danger);
   background: rgba(239, 68, 68, 0.04);
 }
 
 /* Checkbox */
-.checkbox-group {
+.panel-content :deep(.checkbox-group) {
   padding: 4px 0;
 }
-.checkbox-label {
+.panel-content :deep(.checkbox-label) {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1029,26 +682,26 @@ watch(
   font-size: 14px;
   color: var(--rr-text);
 }
-.checkbox-label input[type='checkbox'] {
+.panel-content :deep(.checkbox-label input[type='checkbox']) {
   width: 16px;
   height: 16px;
   cursor: pointer;
 }
 
 /* 选择器列表 */
-.selector-list {
+.panel-content :deep(.selector-list) {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-.selector-item {
+.panel-content :deep(.selector-item) {
   display: grid;
   grid-template-columns: 100px 1fr auto auto auto;
   gap: 6px;
   align-items: center;
 }
-.form-input-sm,
-.form-select-sm {
+.panel-content :deep(.form-input-sm),
+.panel-content :deep(.form-select-sm) {
   padding: 6px 10px;
   border: 1px solid var(--rr-border);
   border-radius: 6px;
@@ -1057,8 +710,8 @@ watch(
   outline: none;
   transition: all 0.15s;
 }
-.form-input-sm:focus,
-.form-select-sm:focus {
+.panel-content :deep(.form-input-sm:focus),
+.panel-content :deep(.form-select-sm:focus) {
   border-color: var(--rr-accent);
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.08);
 }
@@ -1067,7 +720,7 @@ watch(
 }
 
 /* 按钮 */
-.btn-sm {
+.panel-content :deep(.btn-sm) {
   padding: 6px 12px;
   border: 1px solid var(--rr-border);
   background: var(--rr-card);
@@ -1078,20 +731,20 @@ watch(
   cursor: pointer;
   transition: all 0.15s;
 }
-.btn-sm:hover {
+.panel-content :deep(.btn-sm:hover) {
   background: var(--rr-hover);
   border-color: var(--rr-text-weak);
 }
-.btn-sm.btn-primary {
+.panel-content :deep(.btn-sm.btn-primary) {
   background: var(--rr-accent);
   color: #fff;
   border-color: var(--rr-accent);
 }
-.btn-sm.btn-primary:hover {
+.panel-content :deep(.btn-sm.btn-primary:hover) {
   background: #2563eb;
   box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
 }
-.btn-icon-sm {
+.panel-content :deep(.btn-icon-sm) {
   width: 28px;
   height: 28px;
   display: flex;
@@ -1105,16 +758,16 @@ watch(
   cursor: pointer;
   transition: all 0.15s;
 }
-.btn-icon-sm:hover:not(:disabled) {
+.panel-content :deep(.btn-icon-sm:hover:not(:disabled)) {
   background: var(--rr-hover);
   border-color: var(--rr-text-weak);
   color: var(--rr-text);
 }
-.btn-icon-sm:disabled {
+.panel-content :deep(.btn-icon-sm:disabled) {
   opacity: 0.4;
   cursor: not-allowed;
 }
-.btn-icon-sm.danger:hover:not(:disabled) {
+.panel-content :deep(.btn-icon-sm.danger:hover:not(:disabled)) {
   background: rgba(239, 68, 68, 0.08);
   border-color: rgba(239, 68, 68, 0.3);
   color: var(--rr-danger);
@@ -1188,3 +841,4 @@ watch(
   background: transparent !important;
 }
 </style>
+const PropComp = computed(() => (props.node ? NODE_UI_REGISTRY[props.node.type]?.property : null));

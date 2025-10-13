@@ -39,6 +39,7 @@ import '@vue-flow/core/dist/theme-default.css';
 import type { NodeBase, Edge as EdgeV2 } from '@/entrypoints/background/record-replay/types';
 import NodeCard from './nodes/NodeCard.vue';
 import NodeIf from './nodes/NodeIf.vue';
+import { NODE_UI_LIST, canvasTypeKey } from '@/entrypoints/popup/components/builder/model/ui-nodes';
 
 const props = defineProps<{
   nodes: NodeBase[];
@@ -64,8 +65,16 @@ defineOptions({ name: 'BuilderCanvas' });
 const api = useVueFlow();
 const { fitView, getNodes, project } = api;
 
-// Map our custom types to components for VueFlow
-const nodeTypes = { 'rr-card': NodeCard as any, 'rr-if': NodeIf as any } as const;
+// Map our custom types to components for VueFlow via registry
+const nodeTypes = (() => {
+  const base: Record<string, any> = {};
+  for (const n of NODE_UI_LIST) {
+    const key = canvasTypeKey(n.type);
+    // fallback: if a type doesn't specify a special canvas component, use NodeCard/NodeIf
+    base[key] = n.canvas || (n.type === 'if' ? (NodeIf as any) : (NodeCard as any));
+  }
+  return base;
+})();
 
 watchEffect(() => {
   // Build VueFlow nodes; attach node + edges to data for custom components
@@ -74,7 +83,7 @@ watchEffect(() => {
   vfNodes.value = list.map((n) => ({
     id: n.id,
     position: { x: n.ui?.x || 0, y: n.ui?.y || 0 },
-    type: n.type === 'if' ? 'rr-if' : 'rr-card',
+    type: canvasTypeKey(n.type as any),
     data: {
       node: n,
       edges: edgesRef,
