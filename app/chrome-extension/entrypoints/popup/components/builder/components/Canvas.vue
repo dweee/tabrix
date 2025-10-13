@@ -42,6 +42,7 @@ import NodeIf from './nodes/NodeIf.vue';
 const props = defineProps<{
   nodes: NodeBase[];
   edges: EdgeV2[];
+  nodeErrors?: Record<string, string[]>;
   focusNodeId?: string | null;
   fitSeq?: number;
 }>();
@@ -72,7 +73,12 @@ watchEffect(() => {
     id: n.id,
     position: { x: n.ui?.x || 0, y: n.ui?.y || 0 },
     type: n.type === 'if' ? 'rr-if' : 'rr-card',
-    data: { node: n, edges: edgesRef, onSelect: (id: string) => emit('selectNode', id) },
+    data: {
+      node: n,
+      edges: edgesRef,
+      onSelect: (id: string) => emit('selectNode', id),
+      errors: (props.nodeErrors || ({} as any))[n.id] || [],
+    },
     class: 'rr-node-plain',
   }));
 });
@@ -248,6 +254,45 @@ defineExpose({ zoomIn, zoomOut, fitAll });
     background-color 1s var(--cubic-enter, cubic-bezier(0.4, 0, 0.2, 1));
   cursor: pointer;
   position: relative;
+}
+
+/* Per-node error indicator (shield-x) */
+:deep(.node-error) {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--rr-danger, #ef4444);
+  cursor: help;
+  z-index: 5;
+}
+
+/* Tooltip for error details */
+:deep(.node-error .tooltip) {
+  display: none;
+  position: absolute;
+  top: 22px;
+  right: 0;
+  max-width: 280px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--rr-border, #e5e7eb);
+  background: var(--rr-card, #fff);
+  color: var(--rr-text, #111827);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: normal;
+}
+:deep(.node-error:hover .tooltip) {
+  display: block;
+}
+:deep(.node-error .tooltip .item) {
+  color: var(--rr-danger, #ef4444);
 }
 
 :deep(.workflow-node:hover) {

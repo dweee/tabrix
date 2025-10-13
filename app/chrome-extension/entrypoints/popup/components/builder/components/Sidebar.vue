@@ -488,7 +488,6 @@
 </template>
 
 <script lang="ts" setup>
-import { ref } from 'vue';
 import type { Flow as FlowV2, NodeBase } from '@/entrypoints/background/record-replay/types';
 
 const props = defineProps<{
@@ -518,6 +517,8 @@ function onDragStart(t: NodeBase['type'], e: DragEvent) {
     dt.effectAllowed = 'copy';
   } catch {}
 }
+
+// Scrollbars remain hidden but content is scrollable; no runtime handling needed.
 </script>
 
 <style scoped>
@@ -536,6 +537,9 @@ function onDragStart(t: NodeBase['type'], e: DragEvent) {
   max-height: calc(100vh - 72px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   flex-shrink: 0;
+  /* Always hide scrollbars (Firefox), keep scrolling */
+  scrollbar-width: none;
+  scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
 }
 
 /* 搜索框 */
@@ -677,17 +681,17 @@ function onDragStart(t: NodeBase['type'], e: DragEvent) {
   color: #111;
 }
 
-/* Thinner, light scrollbars inside the sidebar */
+/* Always hide scrollbar (WebKit/Blink); still scrollable */
 .sidebar :deep(::-webkit-scrollbar) {
-  width: 6px;
-  height: 6px;
+  width: 0;
+  height: 0;
 }
 .sidebar :deep(::-webkit-scrollbar-thumb) {
   background-color: rgba(0, 0, 0, 0.25);
   border-radius: 6px;
 }
 .sidebar :deep(::-webkit-scrollbar-track) {
-  background: transparent;
+  background: transparent !important;
 }
 
 /* 节点标签 */

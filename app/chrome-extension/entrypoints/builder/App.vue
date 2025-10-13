@@ -10,6 +10,7 @@
       <Canvas
         :nodes="store.nodes"
         :edges="store.edges"
+        :node-errors="validation.nodeErrors"
         :focus-node-id="focusNodeId"
         :fit-seq="fitSeq"
         @select-node="store.selectNode"
@@ -88,26 +89,7 @@
           </button>
           <span class="divider-vert" />
           <span class="status" :data-state="saveState">{{ saveLabel }}</span>
-          <button
-            v-if="errorsCount > 0"
-            class="top-btn danger"
-            @click="toggleErrors"
-            title="校验错误"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="8" x2="12" y2="12" />
-              <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
-            错误 ({{ errorsCount }})
-          </button>
+
           <button class="top-btn success" @click="save">
             <svg
               width="14"
@@ -206,22 +188,6 @@
           </svg>
         </button>
       </div>
-      <div v-if="showErrors && errorsCount > 0" class="error-panel">
-        <div class="err-title">校验错误（点击定位）</div>
-        <div class="err-list">
-          <div
-            v-for="(errs, nid) in validation.nodeErrors"
-            :key="nid"
-            class="err-item"
-            @click="focusError(String(nid), errs[0])"
-          >
-            <div class="nid">{{ String(nid) }}</div>
-            <div class="elist">
-              <div v-for="e in errs" :key="e" class="e">• {{ e }}</div>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 </template>
@@ -305,11 +271,6 @@ async function bootstrap() {
 const selectedId = computed<string | null>(() => (store.activeNodeId as any)?.value ?? null);
 const activeNode = computed(() => store.nodes.find((n) => n.id === selectedId.value) || null);
 const validation = computed(() => validateFlow(store.nodes));
-const errorsCount = computed(() => validation.value.totalErrors);
-const showErrors = ref(false);
-function toggleErrors() {
-  showErrors.value = !showErrors.value;
-}
 
 const search = ref('');
 const focusNodeId = ref<string | null>(null);
@@ -540,24 +501,7 @@ function focusNode(id: string) {
   focusNodeId.value = id;
   setTimeout(() => (focusNodeId.value = null), 300);
 }
-function focusError(nid: string, msg: string) {
-  const node = store.nodes.find((n) => n.id === nid);
-  if (!node) return focusNode(nid);
-  focusNode(nid);
-  const t = node.type;
-  let field: string | null = null;
-  if (t === 'http') field = 'http.url';
-  else if (t === 'extract')
-    field = msg.includes('保存变量名') ? 'extract.saveAs' : 'extract.selector';
-  else if (t === 'switchTab') field = 'switchTab.match';
-  else if (t === 'navigate') field = 'navigate.url';
-  else if (t === 'fill') field = msg.includes('输入值') ? 'fill.value' : 'target.candidates';
-  else if (t === 'click' || t === 'dblclick') field = 'target.candidates';
-  else if (t === 'script') field = msg.includes('缺少代码') ? 'script.code' : 'script.assign';
-  else field = null;
-  highlightField.value = field;
-  setTimeout(() => (highlightField.value = null), 1500);
-}
+// per-node error indicators replace global error panel
 </script>
 
 <style scoped>
@@ -751,44 +695,6 @@ function focusError(nid: string, msg: string) {
   min-width: 48px;
   display: inline-block;
 }
-.error-panel {
-  position: absolute;
-  right: 12px;
-  top: 56px;
-  width: 420px;
-  max-height: 50vh;
-  background: var(--rr-elevated);
-  border: 1px solid var(--rr-border);
-  border-radius: 12px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
-  padding: 10px;
-  overflow: auto;
-}
-.err-title {
-  font-weight: 600;
-  margin-bottom: 6px;
-}
-.err-item {
-  display: grid;
-  grid-template-columns: 120px 1fr;
-  gap: 6px;
-  padding: 6px;
-  border: 1px solid var(--rr-border);
-  border-radius: 8px;
-  cursor: pointer;
-  margin-bottom: 6px;
-}
-.err-item:hover {
-  background: var(--rr-subtle);
-}
-.err-item .nid {
-  font-size: 12px;
-  color: var(--rr-text);
-}
-.err-item .e {
-  font-size: 12px;
-  color: var(--rr-danger);
-}
 .btn.import {
   position: relative;
   overflow: hidden;
@@ -812,16 +718,5 @@ function focusError(nid: string, msg: string) {
   border: 1px solid var(--rr-border);
   color: var(--rr-text);
 }
-/* Thin scrollbar for error list & panels */
-.error-panel::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-.error-panel::-webkit-scrollbar-thumb {
-  background-color: rgba(0, 0, 0, 0.25);
-  border-radius: 6px;
-}
-.error-panel::-webkit-scrollbar-track {
-  background: transparent;
-}
+/* removed legacy error-panel styles */
 </style>

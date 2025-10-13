@@ -138,7 +138,6 @@ export function useBuilderStore(initial?: FlowV2 | null) {
       id,
       type: t,
       name: '',
-      disabled: false,
       config: defaultConfigFor(t),
       ui: { x: 200 + nodes.length * 24, y: 120 + nodes.length * 96 },
     };
@@ -157,7 +156,6 @@ export function useBuilderStore(initial?: FlowV2 | null) {
       id,
       type: t,
       name: '',
-      disabled: false,
       config: defaultConfigFor(t),
       ui: { x: Math.round(x), y: Math.round(y) },
     };

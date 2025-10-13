@@ -1,6 +1,6 @@
 <template>
   <div v-if="visible" class="builder-modal">
-    <div class="builder rr-theme" data-theme="dark">
+    <div class="builder rr-theme" data-theme="light">
       <div class="topbar">
         <div class="topbar-left">
           <button class="btn-back" @click="$emit('close')" title="返回">
@@ -157,24 +157,6 @@
             Publish
           </button>
 
-          <button
-            class="toolbar-btn-icon"
-            @click="toggleErrors"
-            v-if="errorsCount > 0"
-            title="查看错误"
-          >
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-              <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.5" />
-              <path
-                d="M9 5v5M9 12v1"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-              />
-            </svg>
-            <span class="error-badge-count">{{ errorsCount }}</span>
-          </button>
-
           <button class="toolbar-btn-icon" title="更多选项">
             <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
               <circle cx="9" cy="4.5" r="1.5" fill="currentColor" />
@@ -207,6 +189,7 @@
           ref="canvasRef"
           :nodes="store.nodes"
           :edges="store.edges"
+          :node-errors="validation.nodeErrors"
           :focus-node-id="focusNodeId"
           :fit-seq="fitSeq"
           @select-node="store.selectNode"
@@ -226,22 +209,6 @@
           @switch-to-subflow="store.switchToSubflow"
           @remove-node="store.removeNode"
         />
-        <div v-if="showErrors && errorsCount > 0" class="error-panel">
-          <div class="err-title">校验错误（点击定位）</div>
-          <div class="err-list">
-            <div
-              v-for="(errs, nid) in validation.nodeErrors"
-              :key="nid"
-              class="err-item"
-              @click="focusError(String(nid), errs[0])"
-            >
-              <div class="nid">{{ String(nid) }}</div>
-              <div class="elist">
-                <div v-for="e in errs" :key="e" class="e">• {{ e }}</div>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
       <!-- Bottom toolbar: zoom controls moved here -->
@@ -290,11 +257,6 @@ watch(
 const selectedId = computed<string | null>(() => (store.activeNodeId as any)?.value ?? null);
 const activeNode = computed(() => store.nodes.find((n) => n.id === selectedId.value) || null);
 const validation = computed(() => validateFlow(store.nodes));
-const errorsCount = computed(() => validation.value.totalErrors);
-const showErrors = ref(false);
-function toggleErrors() {
-  showErrors.value = !showErrors.value;
-}
 
 // 搜索与聚焦
 const search = ref('');
@@ -473,24 +435,7 @@ watch(
   { immediate: true },
 );
 
-function focusError(nid: string, msg: string) {
-  const node = store.nodes.find((n) => n.id === nid);
-  if (!node) return focusNode(nid);
-  focusNode(nid);
-  const t = node.type;
-  let field: string | null = null;
-  if (t === 'http') field = 'http.url';
-  else if (t === 'extract')
-    field = msg.includes('保存变量名') ? 'extract.saveAs' : 'extract.selector';
-  else if (t === 'switchTab') field = 'switchTab.match';
-  else if (t === 'navigate') field = 'navigate.url';
-  else if (t === 'fill') field = msg.includes('输入值') ? 'fill.value' : 'target.candidates';
-  else if (t === 'click' || t === 'dblclick') field = 'target.candidates';
-  else if (t === 'script') field = msg.includes('缺少代码') ? 'script.code' : 'script.assign';
-  else field = null;
-  highlightField.value = field;
-  setTimeout(() => (highlightField.value = null), 1500);
-}
+// per-node error indicator replaces global error list
 
 function fitAll() {
   fitSeq.value++;

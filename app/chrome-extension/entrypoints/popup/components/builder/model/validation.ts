@@ -2,7 +2,6 @@ import type { NodeBase } from '@/entrypoints/background/record-replay/types';
 
 export function validateNode(n: NodeBase): string[] {
   const errs: string[] = [];
-  if (n.disabled) return errs; // 忽略禁用节点
   const c: any = n.config || {};
 
   switch (n.type) {

@@ -7,7 +7,7 @@
           <div class="header-title">节点属性</div>
           <div class="header-id">{{ node.id }}</div>
         </div>
-        <button class="btn-delete" title="删除节点" @click="onRemove">
+        <button class="btn-delete" type="button" title="删除节点" @click.stop="onRemove">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path
               d="m4 4 8 8M12 4 4 12"
@@ -23,12 +23,6 @@
         <div class="form-group">
           <label class="form-label">节点名称</label>
           <input class="form-input" v-model="node.name" placeholder="输入节点名称" />
-        </div>
-        <div class="form-group checkbox-group">
-          <label class="checkbox-label">
-            <input type="checkbox" v-model="node.disabled" />
-            <span>禁用此节点</span>
-          </label>
         </div>
       </div>
 
@@ -847,6 +841,8 @@ watch(
     } catch {}
   },
 );
+
+// Scrollbars remain hidden but content is scrollable; no runtime handling needed.
 </script>
 
 <style scoped>
@@ -864,6 +860,9 @@ watch(
   overflow-y: auto;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   flex-shrink: 0;
+  /* Always hide scrollbars (Firefox), keep scrolling */
+  scrollbar-width: none;
+  scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
 }
 
 /* 头部 */
@@ -1173,16 +1172,16 @@ watch(
   transition: all 0.3s ease;
 }
 
-/* Thinner, lighter scrollbars for better aesthetics */
+/* Always hide scrollbar (WebKit/Blink); still scrollable */
 .property-panel :deep(::-webkit-scrollbar) {
-  width: 6px;
-  height: 6px;
+  width: 0;
+  height: 0;
 }
 .property-panel :deep(::-webkit-scrollbar-thumb) {
   background-color: rgba(0, 0, 0, 0.25);
   border-radius: 6px;
 }
 .property-panel :deep(::-webkit-scrollbar-track) {
-  background: transparent;
+  background: transparent !important;
 }
 </style>
