@@ -19,7 +19,9 @@
       </div>
     </div>
 
+    <!-- Hide left target handle for trigger (no inputs allowed) -->
     <Handle
+      v-if="data.node.type !== 'trigger'"
       type="target"
       :position="Position.Left"
       :class="['node-handle', hasIncoming ? 'connected' : 'unconnected']"

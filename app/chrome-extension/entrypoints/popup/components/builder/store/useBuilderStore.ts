@@ -346,25 +346,162 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     return summarizeNode(n || null);
   }
 
-  // 自动排版：根据拓扑顺序纵向排列，列宽 300、行高 120；若存在分叉，简单按顺序换行
-  function layoutAuto() {
-    const order = topoOrder(nodes, edges);
-    const startX = 120,
-      startY = 80,
-      stepY = 120,
-      stepX = 300,
-      maxPerCol = Math.max(6, Math.ceil(order.length / 3));
-    let col = 0,
-      row = 0;
-    for (const n of order) {
-      n.ui = { x: startX + col * stepX, y: startY + row * stepY } as any;
-      row++;
-      if (row >= maxPerCol) {
-        row = 0;
-        col++;
+  // 备用布局：分层 + 重心排序（不依赖外部库）
+  function layoutFallback() {
+    const idMap = new Map<string, NodeBase>();
+    nodes.forEach((n) => idMap.set(n.id, n));
+
+    // Build graph using all edges (include branches like case:/else/onError)
+    const inEdges = new Map<string, EdgeV2[]>();
+    const outEdges = new Map<string, EdgeV2[]>();
+    for (const n of nodes) {
+      inEdges.set(n.id, []);
+      outEdges.set(n.id, []);
+    }
+    for (const e of edges) {
+      if (!idMap.has(e.from) || !idMap.has(e.to)) continue;
+      inEdges.get(e.to)!.push(e);
+      outEdges.get(e.from)!.push(e);
+    }
+
+    // Kahn topo with all edges; fall back to original order on cycles
+    const indeg = new Map<string, number>();
+    nodes.forEach((n) => indeg.set(n.id, inEdges.get(n.id)!.length));
+    const q: string[] = [];
+    // Prefer trigger and existing left-most nodes first for stability
+    const roots = nodes
+      .filter((n) => (indeg.get(n.id) || 0) === 0)
+      .sort(
+        (a, b) =>
+          (a.type === ('trigger' as any) ? -1 : 0) - (b.type === ('trigger' as any) ? -1 : 0),
+      );
+    roots.forEach((r) => q.push(r.id));
+    const topo: string[] = [];
+    const indegMut = new Map(indeg);
+    while (q.length) {
+      const v = q.shift()!;
+      topo.push(v);
+      for (const e of outEdges.get(v) || []) {
+        const d = (indegMut.get(e.to) || 0) - 1;
+        indegMut.set(e.to, d);
+        if (d === 0) q.push(e.to);
+      }
+    }
+    if (topo.length < nodes.length) {
+      // Graph may contain cycles; append remaining nodes in original order
+      for (const n of nodes) if (!topo.includes(n.id)) topo.push(n.id);
+    }
+
+    // Level assignment: level = max(parent.level + 1)
+    const level = new Map<string, number>();
+    for (const id of topo) {
+      const parents = inEdges.get(id) || [];
+      let lv = 0;
+      for (const e of parents) lv = Math.max(lv, (level.get(e.from) || 0) + 1);
+      // Ensure trigger stays at level 0
+      const node = idMap.get(id)!;
+      if ((node.type as any) === 'trigger') lv = 0;
+      level.set(id, lv);
+    }
+
+    // Group nodes by level
+    const maxLevel = Math.max(0, ...Array.from(level.values()));
+    const layers: string[][] = Array.from({ length: maxLevel + 1 }, () => []);
+    for (const id of topo) layers[level.get(id) || 0].push(id);
+
+    // Barycenter/median ordering per layer based on parent y-index
+    const yIndex = new Map<string, number>();
+    // initialize first layer stable order
+    layers[0].forEach((id, i) => yIndex.set(id, i));
+    for (let lv = 1; lv < layers.length; lv++) {
+      const arr = layers[lv];
+      const scored = arr.map((id) => {
+        const ps = inEdges.get(id) || [];
+        const parentIdx = ps
+          .map((e) => yIndex.get(e.from))
+          .filter((v): v is number => typeof v === 'number');
+        const score = parentIdx.length
+          ? parentIdx.reduce((a, b) => a + b, 0) / parentIdx.length
+          : 1e9;
+        return { id, score };
+      });
+      scored.sort((a, b) => a.score - b.score);
+      scored.forEach((s, i) => yIndex.set(s.id, i));
+      layers[lv] = scored.map((s) => s.id);
+    }
+
+    // Place nodes
+    const startX = 120;
+    const startY = 80;
+    const stepX = 280; // tighter than 300 to reduce wide gaps
+    const stepY = 110;
+    for (let lv = 0; lv < layers.length; lv++) {
+      const arr = layers[lv];
+      for (let i = 0; i < arr.length; i++) {
+        const id = arr[i];
+        const n = idMap.get(id)!;
+        n.ui = { x: startX + lv * stepX, y: startY + i * stepY } as any;
       }
     }
     recordChange();
+  }
+
+  // 自动排版（ELK 优先）：
+  // - 动态引入 elkjs，避免常驻体积
+  // - 失败则回退到 layoutFallback()
+  async function layoutAuto() {
+    try {
+      // Dynamic import of bundled build to avoid 'web-worker' resolution issues
+      const mod: any = await import('elkjs/lib/elk.bundled.js');
+      const ELK = mod.default || mod.ELK || mod;
+      const elk = new ELK();
+
+      // Estimate node sizes (px). Keep close to actual NodeCard dimensions.
+      const estimateSize = (n: NodeBase) => {
+        const baseW = 280;
+        let baseH = 72;
+        if ((n.type as any) === 'if') baseH = 110;
+        return { width: baseW, height: baseH };
+      };
+
+      const children = nodes.map((n) => ({ id: n.id, ...estimateSize(n) }));
+      const elkEdges = edges
+        .filter((e) => nodes.some((n) => n.id === e.from) && nodes.some((n) => n.id === e.to))
+        .map((e) => ({ id: e.id, sources: [e.from], targets: [e.to] }));
+
+      const graph = {
+        id: 'root',
+        layoutOptions: {
+          'elk.algorithm': 'layered',
+          'elk.direction': 'RIGHT',
+          'elk.layered.spacing.nodeNodeBetweenLayers': '80',
+          'elk.spacing.nodeNode': '40',
+          'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+        },
+        children,
+        edges: elkEdges,
+      } as any;
+
+      const res = await elk.layout(graph);
+      const pos = new Map<string, { x: number; y: number }>();
+      for (const c of res.children || []) {
+        pos.set(String(c.id), { x: Math.round(c.x || 0), y: Math.round(c.y || 0) });
+      }
+      // anchor
+      const startX = 120;
+      const startY = 80;
+      for (const n of nodes) {
+        const p = pos.get(n.id);
+        if (p) n.ui = { x: startX + p.x, y: startY + p.y } as any;
+      }
+      recordChange();
+    } catch (e) {
+      // Fallback without dependency
+      try {
+        layoutFallback();
+        toast('ELK 自动布局不可用，已使用备用布局', 'warn');
+      } catch {}
+    }
   }
 
   if (initial) initFromFlow(initial);

@@ -375,6 +375,18 @@ function createFlow() {
   openBuilder({ newFlow: true });
 }
 
+async function remove(id: string) {
+  try {
+    const ok = confirm('确认删除该工作流？此操作不可恢复');
+    if (!ok) return;
+    await chrome.runtime.sendMessage({
+      type: BACKGROUND_MESSAGE_TYPES.RR_DELETE_FLOW,
+      flowId: id,
+    });
+    await refresh();
+  } catch {}
+}
+
 function openBuilder(opts: { flowId?: string; newFlow?: boolean }) {
   // Open dedicated builder window for better UX
   const url = new URL(chrome.runtime.getURL('builder.html'));
