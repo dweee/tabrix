@@ -8,6 +8,24 @@
       <input class="search-input" placeholder="Insert node..." v-model="q" />
     </div>
 
+    <!-- Flow -->
+    <div class="nodes-section">
+      <button
+        v-for="n in filtered.Flow"
+        :key="n.type"
+        class="node-btn"
+        draggable="true"
+        @dragstart="onDragStart(n.type, $event)"
+        @click="$emit('addNode', n.type)"
+        :title="n.label"
+      >
+        <div class="btn-icon" :class="n.iconClass">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"></svg>
+        </div>
+        <span class="btn-label">{{ n.label }}</span>
+      </button>
+    </div>
+
     <!-- Actions -->
     <div class="nodes-section">
       <button

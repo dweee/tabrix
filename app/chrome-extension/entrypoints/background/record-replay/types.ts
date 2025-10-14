@@ -275,6 +275,7 @@ export type NodeType =
   | 'executeFlow'
   | 'http'
   | 'extract'
+  | 'trigger'
   | 'delay';
 
 export interface NodeBase {

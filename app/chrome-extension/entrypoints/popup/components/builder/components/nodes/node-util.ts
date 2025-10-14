@@ -61,6 +61,7 @@ export function iconComp(t?: string) {
 
 export function getTypeLabel(type?: string) {
   const labels: Record<string, string> = {
+    trigger: '触发器',
     click: '点击',
     fill: '填充',
     navigate: '导航',

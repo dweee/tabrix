@@ -16,6 +16,7 @@ export function newId(prefix: string) {
 export type NodeType = NodeBase['type'];
 
 export function defaultConfigFor(t: NodeType): any {
+  if ((t as any) === 'trigger') return { type: 'manual', description: '' };
   if (t === 'click' || t === 'fill')
     return { target: { candidates: [] }, value: t === 'fill' ? '' : undefined };
   if (t === 'if') return { branches: [{ id: newId('case'), name: '', expr: '' }], else: true };
@@ -58,8 +59,12 @@ export function topoOrder(nodes: NodeBase[], edges: EdgeV2[]): NodeBase[] {
 }
 
 export function nodesToSteps(nodes: NodeBase[], edges: EdgeV2[]): any[] {
-  const filtered = (edges || []).filter((e) => !e.label || e.label === 'default');
-  return sharedNodesToSteps(nodes as any, filtered as any);
+  // Exclude non-executable nodes like 'trigger' and cut edges from them
+  const execNodes = (nodes || []).filter((n) => n.type !== ('trigger' as any));
+  const filtered = (edges || []).filter(
+    (e) => (!e.label || e.label === 'default') && !execNodes.every((n) => n.id !== e.from),
+  );
+  return sharedNodesToSteps(execNodes as any, filtered as any);
 }
 
 export function autoChainEdges(nodes: NodeBase[]): EdgeV2[] {

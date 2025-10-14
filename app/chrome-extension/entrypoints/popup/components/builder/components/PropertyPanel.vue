@@ -95,7 +95,7 @@
 /* eslint-disable vue/no-mutating-props */
 import { computed, watch, onMounted, ref } from 'vue';
 import type { NodeBase } from '@/entrypoints/background/record-replay/types';
-import { validateNode } from '../model/validation';
+import { validateNodeWithRegistry } from '@/entrypoints/popup/components/builder/model/ui-nodes';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import { NODE_UI_REGISTRY } from '@/entrypoints/popup/components/builder/model/ui-nodes';
 
@@ -271,7 +271,7 @@ function onCreateSubflow() {
   if (n && n.config) n.config.subflowId = id;
 }
 
-const nodeErrors = computed(() => (props.node ? validateNode(props.node) : []));
+const nodeErrors = computed(() => (props.node ? validateNodeWithRegistry(props.node) : []));
 const extractErrors = computed(() => {
   const n = props.node;
   if (!n || n.type !== 'extract') return [] as string[];

@@ -2,7 +2,9 @@
 // Comments in English to explain intent.
 
 import type { Component } from 'vue';
-import type { NodeType } from '@/entrypoints/background/record-replay/types';
+import type { NodeBase, NodeType } from '@/entrypoints/background/record-replay/types';
+import { defaultConfigFor as fallbackDefaultConfig } from '@/entrypoints/popup/components/builder/model/transforms';
+import { validateNode as fallbackValidateNode } from '@/entrypoints/popup/components/builder/model/validation';
 
 // Canvas renderer components
 import NodeCard from '@/entrypoints/popup/components/builder/components/nodes/NodeCard.vue';
@@ -32,8 +34,9 @@ import PropIf from '@/entrypoints/popup/components/builder/components/properties
 import PropForeach from '@/entrypoints/popup/components/builder/components/properties/PropertyForeach.vue';
 import PropWhile from '@/entrypoints/popup/components/builder/components/properties/PropertyWhile.vue';
 import PropScript from '@/entrypoints/popup/components/builder/components/properties/PropertyScript.vue';
+import PropTrigger from '@/entrypoints/popup/components/builder/components/properties/PropertyTrigger.vue';
 
-export type NodeCategory = 'Actions' | 'Logic' | 'Tools' | 'Tabs' | 'Page';
+export type NodeCategory = 'Flow' | 'Actions' | 'Logic' | 'Tools' | 'Tabs' | 'Page';
 
 export interface NodeUIConfig {
   type: NodeType;
@@ -42,12 +45,26 @@ export interface NodeUIConfig {
   iconClass: string; // reuse existing Sidebar.css color classes
   canvas: Component; // canvas renderer
   property: Component; // property renderer
+  docUrl?: string;
+  io?: { inputs?: number | 'any'; outputs?: number | 'any' };
+  defaultConfig?: () => any;
+  validate?: (node: NodeBase) => string[];
 }
 
 // Registry contents; use existing color/icon CSS classes from Sidebar.vue
 const baseCard = NodeCard as Component;
 
 export const NODE_UI_LIST: NodeUIConfig[] = [
+  {
+    type: 'trigger' as any,
+    label: '触发器',
+    category: 'Flow',
+    iconClass: 'icon-exec',
+    canvas: baseCard,
+    property: PropTrigger,
+    io: { inputs: 0, outputs: 1 },
+    defaultConfig: () => ({ type: 'manual', description: '' }),
+  },
   {
     type: 'navigate',
     label: '导航',
@@ -237,14 +254,23 @@ export const NODE_UI_LIST: NodeUIConfig[] = [
   },
 ];
 
-export const NODE_UI_REGISTRY: Record<NodeType, NodeUIConfig> = Object.fromEntries(
+const REGISTRY_MAP: Record<string, NodeUIConfig> = Object.fromEntries(
   NODE_UI_LIST.map((n) => [n.type, n]),
-) as any;
+);
+export const NODE_UI_REGISTRY = REGISTRY_MAP as Record<NodeType, NodeUIConfig>;
 
-export const NODE_CATEGORIES: NodeCategory[] = ['Actions', 'Logic', 'Tools', 'Tabs', 'Page'];
+export const NODE_CATEGORIES: NodeCategory[] = [
+  'Flow',
+  'Actions',
+  'Logic',
+  'Tools',
+  'Tabs',
+  'Page',
+];
 
 export function listByCategory(): Record<NodeCategory, NodeUIConfig[]> {
   const out: Record<NodeCategory, NodeUIConfig[]> = {
+    Flow: [],
     Actions: [],
     Logic: [],
     Tools: [],
@@ -258,4 +284,32 @@ export function listByCategory(): Record<NodeCategory, NodeUIConfig[]> {
 export function canvasTypeKey(t: NodeType): string {
   // Map to VueFlow node-types key, unique per node type
   return `rr-${t}`;
+}
+
+// Default config resolver with registry override
+export function defaultConfigOf(t: NodeType): any {
+  const item = (NODE_UI_REGISTRY as any)[t] as NodeUIConfig | undefined;
+  if (item?.defaultConfig) return item.defaultConfig();
+  return fallbackDefaultConfig(t as any);
+}
+
+// Validation via registry where present
+export function validateNodeWithRegistry(n: NodeBase): string[] {
+  const item = (NODE_UI_REGISTRY as any)[n.type] as NodeUIConfig | undefined;
+  if (item?.validate) {
+    try {
+      return item.validate(n) || [];
+    } catch {
+      return [];
+    }
+  }
+  return fallbackValidateNode(n);
+}
+
+// Allow external modules to register extra UI nodes
+export function registerExtraUiNodes(list: NodeUIConfig[]) {
+  for (const n of list) {
+    (NODE_UI_LIST as any).push(n);
+    (REGISTRY_MAP as any)[n.type] = n;
+  }
 }

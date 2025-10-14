@@ -7,13 +7,13 @@ import type {
 import {
   autoChainEdges,
   cloneFlow,
-  defaultConfigFor,
   newId,
   nodesToSteps,
   stepsToNodes,
   summarizeNode,
   topoOrder,
 } from '../model/transforms';
+import { defaultConfigOf } from '../model/ui-nodes';
 
 export function useBuilderStore(initial?: FlowV2 | null) {
   const flowLocal = reactive<FlowV2>({ id: '', name: '', version: 1, steps: [], variables: [] });
@@ -24,6 +24,7 @@ export function useBuilderStore(initial?: FlowV2 | null) {
   const pendingFrom = ref<string | null>(null);
   const pendingLabel = ref<string>('default');
   const paletteTypes = [
+    'trigger',
     'click',
     'fill',
     'if',
@@ -147,7 +148,7 @@ export function useBuilderStore(initial?: FlowV2 | null) {
       id,
       type: t,
       name: '',
-      config: defaultConfigFor(t),
+      config: defaultConfigOf(t),
       ui: { x: 200 + nodes.length * 24, y: 120 + nodes.length * 96 },
     };
     nodes.push(n);
@@ -165,7 +166,7 @@ export function useBuilderStore(initial?: FlowV2 | null) {
       id,
       type: t,
       name: '',
-      config: defaultConfigFor(t),
+      config: defaultConfigOf(t),
       ui: { x: Math.round(x), y: Math.round(y) },
     };
     nodes.push(n);
@@ -224,6 +225,11 @@ export function useBuilderStore(initial?: FlowV2 | null) {
   function onConnect(sourceId: string, targetId: string, label: string = 'default') {
     // prevent self-loop
     if (sourceId === targetId) return;
+    // Disallow inbound connections to trigger node
+    try {
+      const target = nodes.find((n) => n.id === targetId);
+      if (target && (target.type as any) === 'trigger') return;
+    } catch {}
     // 单一同标签出边：删除同源 + 同标签的已有边
     for (let i = edges.length - 1; i >= 0; i--) {
       const e = edges[i];
