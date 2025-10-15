@@ -23,6 +23,41 @@ import { runFlow } from './flow-runner';
 // design note: background listener for record & replay; manages start/stop and storage
 
 let currentRecording: { tabId: number; flow?: Flow } | null = null;
+// persistent guard to avoid unintended resume after stop/refresh
+let recordingActive = false;
+
+async function setRecordingActive(active: boolean) {
+  recordingActive = active;
+  try {
+    await chrome.storage.local.set({
+      [STORAGE_KEYS.RR_RECORDING_STATE]: { active, ts: Date.now() },
+    });
+  } catch {
+    // ignore storage errors
+  }
+  // Best-effort sync to content scripts to avoid stray overlays
+  if (!active) {
+    try {
+      await broadcastRecorderCommandToAllTabs('stop');
+    } catch {}
+  }
+}
+
+async function initRecordingActiveFromStorage() {
+  try {
+    const res = await chrome.storage.local.get([STORAGE_KEYS.RR_RECORDING_STATE]);
+    const st = res?.[STORAGE_KEYS.RR_RECORDING_STATE];
+    recordingActive = !!(st && st.active);
+  } catch {
+    recordingActive = false;
+  }
+  // If not recording per persisted state, ensure any stale overlays are removed
+  if (!recordingActive) {
+    try {
+      await broadcastRecorderCommandToAllTabs('stop');
+    } catch {}
+  }
+}
 // 最近一次点击信息（用于导航富化）
 let lastClickIdx: number | null = null;
 let lastClickTime = 0;
@@ -75,12 +110,39 @@ async function ensureRecorderInjected(tabId: number): Promise<void> {
   } as any);
 }
 
+async function broadcastRecorderCommandToAllTabs(cmd: 'start' | 'stop' | 'resume' | 'pause') {
+  try {
+    const tabs = await chrome.tabs.query({});
+    for (const t of tabs) {
+      if (!t.id) continue;
+      try {
+        const frames = await chrome.webNavigation.getAllFrames({ tabId: t.id });
+        const targets = Array.isArray(frames) && frames.length ? frames : [{ frameId: 0 } as any];
+        await Promise.all(
+          targets.map((f) =>
+            chrome.tabs
+              .sendMessage(
+                t.id!,
+                { action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL, cmd } as any,
+                { frameId: (f as any).frameId } as any,
+              )
+              .catch(() => null),
+          ),
+        );
+      } catch {
+        // ignore per-tab failures
+      }
+    }
+  } catch {}
+}
+
 async function startRecording(meta?: Partial<Flow>): Promise<{ success: boolean; error?: string }> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.id) return { success: false, error: 'Active tab not found' };
   try {
     await ensureRecorderInjected(tab.id);
     currentRecording = { tabId: tab.id };
+    await setRecordingActive(true);
     // Broadcast to all frames
     const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id });
     const targets = Array.isArray(frames) && frames.length ? frames : [{ frameId: 0 } as any];
@@ -105,46 +167,99 @@ async function startRecording(meta?: Partial<Flow>): Promise<{ success: boolean;
 
 async function stopRecording(): Promise<{ success: boolean; flow?: Flow; error?: string }> {
   if (!currentRecording) return { success: false, error: 'No active recording' };
+  // Copy reference and clear state early to avoid race with navigation listeners resuming recording
+  const rec = currentRecording;
+  currentRecording = null;
+  await setRecordingActive(false);
   try {
-    // Ask top frame to stop and return flow (child frames carry step batches too)
-    const flowRes: any = await chrome.tabs.sendMessage(
-      currentRecording.tabId,
-      { action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL, cmd: 'stop' } as any,
-      { frameId: 0 } as any,
-    );
-    const flowFromTab = (flowRes && flowRes.flow) as Flow | undefined;
-    // 合并后台聚合的步骤（跨标签页）与内容脚本返回的步骤
-    const aggregated = currentRecording.flow;
+    // Stop all frames; prefer top-frame returned flow as base meta
+    let flowFromTab: Flow | undefined = undefined;
+    try {
+      const frames = await chrome.webNavigation.getAllFrames({ tabId: rec.tabId });
+      const targets = Array.isArray(frames) && frames.length ? frames : [{ frameId: 0 } as any];
+      const results = await Promise.all(
+        targets.map((f) =>
+          chrome.tabs
+            .sendMessage(
+              rec.tabId,
+              { action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL, cmd: 'stop' } as any,
+              { frameId: (f as any).frameId } as any,
+            )
+            .catch(() => null),
+        ),
+      );
+      const topRes = results.find((r: any, idx) => (frames?.[idx]?.frameId ?? 0) === 0);
+      flowFromTab = (topRes && (topRes as any).flow) as any;
+      // fallback: if top not found, pick first with flow
+      if (!flowFromTab) {
+        const anyRes = results.find((r: any) => r && (r as any).flow);
+        flowFromTab = (anyRes && (anyRes as any).flow) as any;
+      }
+    } catch {
+      // fallback to top frame only
+      const flowRes: any = await chrome.tabs.sendMessage(
+        rec.tabId,
+        { action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL, cmd: 'stop' } as any,
+        { frameId: 0 } as any,
+      );
+      flowFromTab = (flowRes && flowRes.flow) as any;
+    }
+    // Merge aggregated steps with meta from content script
+    const aggregated = rec.flow;
     const merged: Flow | undefined = (function merge() {
       if (aggregated && !flowFromTab) return aggregated;
       if (!aggregated && flowFromTab) return flowFromTab;
       if (!aggregated && !flowFromTab) return undefined;
-      // both present: prefer元数据以 flowFromTab 为基，步骤采用 aggregated（包含跨标签页）
+      // both present: prefer meta/name from flowFromTab, keep steps/variables from aggregated (cross-tab)
+      const id = (aggregated as Flow).id || (flowFromTab as Flow).id || `flow_${Date.now()}`;
+      const name = (flowFromTab as Flow).name || (aggregated as Flow).name || '未命名录制';
+      const version = (flowFromTab as Flow).version || (aggregated as Flow).version || 1;
+      const metaMerged: any = {
+        ...((aggregated as Flow).meta || {}),
+        ...((flowFromTab as Flow).meta || {}),
+      };
+      if (!metaMerged.createdAt)
+        metaMerged.createdAt =
+          ((aggregated as Flow).meta as any)?.createdAt || new Date().toISOString();
+      metaMerged.updatedAt = new Date().toISOString();
       return {
-        ...(flowFromTab as Flow),
-        steps: (aggregated as Flow).steps || [],
-        variables: (aggregated as Flow).variables || (flowFromTab as Flow).variables,
-        meta: {
-          ...((flowFromTab as Flow).meta || {}),
-          ...((aggregated as Flow).meta || {}),
-          updatedAt: new Date().toISOString(),
-        } as any,
+        id,
+        name,
+        version,
+        // Prefer aggregated steps only when they exist; otherwise take content-provided steps
+        steps:
+          Array.isArray((aggregated as Flow).steps) && (aggregated as Flow).steps.length > 0
+            ? (aggregated as Flow).steps
+            : (flowFromTab as Flow).steps || [],
+        variables:
+          Array.isArray((aggregated as Flow).variables) && (aggregated as Flow).variables.length > 0
+            ? (aggregated as Flow).variables
+            : (flowFromTab as Flow).variables || [],
+        meta: metaMerged,
       } as Flow;
     })();
-    if (merged) {
-      await saveFlow(merged);
-    }
-    const resp = { success: true, flow: merged };
-    currentRecording = null;
-    return resp;
+    if (merged) await saveFlow(merged);
+    return { success: true, flow: merged };
   } catch (e: any) {
-    const err = { success: false, error: e?.message || String(e) };
-    currentRecording = null;
-    return err;
+    return { success: false, error: e?.message || String(e) };
   }
 }
 
 export function initRecordReplayListeners() {
+  // Initialize recordingActive from storage; default to false
+  initRecordingActiveFromStorage().catch(() => {});
+  // Keep in sync when storage changes
+  chrome.storage.onChanged.addListener((changes, area) => {
+    try {
+      if (area !== 'local') return;
+      if (Object.prototype.hasOwnProperty.call(changes || {}, STORAGE_KEYS.RR_RECORDING_STATE)) {
+        const nv = changes[STORAGE_KEYS.RR_RECORDING_STATE]?.newValue;
+        recordingActive = !!(nv && nv.active);
+      }
+    } catch {
+      // ignore
+    }
+  });
   // On startup, re-schedule alarms
   rescheduleAlarms().catch(() => {});
   // Initialize trigger engine (contextMenus/commands/url/dom)
@@ -153,10 +268,27 @@ export function initRecordReplayListeners() {
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       if (message && message.type === 'rr_recorder_event') {
-        if (currentRecording) {
-          if (message.payload?.kind === 'start') {
+        if (message.payload?.kind === 'start') {
+          // Start event from content: initialize aggregated flow container when allowed
+          if (recordingActive && currentRecording) {
             currentRecording.flow = message.payload.flow;
-          } else if (message.payload?.kind === 'step') {
+          } else {
+            // Stray start from content (e.g., service-worker restart or stale script): force stop that frame
+            try {
+              if (sender?.tab?.id != null) {
+                chrome.tabs
+                  .sendMessage(
+                    sender.tab.id,
+                    { action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL, cmd: 'stop' } as any,
+                    sender?.frameId != null ? ({ frameId: sender.frameId } as any) : ({} as any),
+                  )
+                  .catch(() => null);
+              }
+            } catch {}
+          }
+        } else if (message.payload?.kind === 'step') {
+          // Guard: only aggregate when an active recording session is ongoing
+          if (currentRecording && recordingActive) {
             // 记录最近一次 click/dblclick 的索引和时间，用于后续 tabs.onUpdated 导航富化
             const step = message.payload.step as any;
             if (step && (step.type === 'click' || step.type === 'dblclick')) {
@@ -191,9 +323,62 @@ export function initRecordReplayListeners() {
             } catch {
               // ignore
             }
-          } else if (message.payload?.kind === 'stop') {
-            currentRecording.flow = message.payload.flow || currentRecording.flow;
           }
+        } else if (message.payload?.kind === 'stop') {
+          // User clicked stop inside page overlay: finalize and persist
+          (async () => {
+            try {
+              const flowFromTab = message.payload?.flow as Flow | undefined;
+              // Snapshot then clear state; also clear persistent flag to block resume
+              const rec = currentRecording;
+              currentRecording = null;
+              await setRecordingActive(false);
+              if (!rec && !flowFromTab) {
+                sendResponse({ ok: true });
+                return;
+              }
+              const aggregated = rec?.flow;
+              const merged: Flow | undefined = (function merge() {
+                if (aggregated && !flowFromTab) return aggregated;
+                if (!aggregated && flowFromTab) return flowFromTab;
+                if (!aggregated && !flowFromTab) return undefined;
+                const id =
+                  (aggregated as Flow).id || (flowFromTab as Flow).id || `flow_${Date.now()}`;
+                const name =
+                  (flowFromTab as Flow).name || (aggregated as Flow).name || '未命名录制';
+                const version = (flowFromTab as Flow).version || (aggregated as Flow).version || 1;
+                const metaMerged: any = {
+                  ...((aggregated as Flow).meta || {}),
+                  ...((flowFromTab as Flow).meta || {}),
+                };
+                if (!metaMerged.createdAt)
+                  metaMerged.createdAt =
+                    ((aggregated as Flow).meta as any)?.createdAt || new Date().toISOString();
+                metaMerged.updatedAt = new Date().toISOString();
+                return {
+                  id,
+                  name,
+                  version,
+                  steps:
+                    Array.isArray((aggregated as Flow).steps) &&
+                    (aggregated as Flow).steps.length > 0
+                      ? (aggregated as Flow).steps
+                      : (flowFromTab as Flow).steps || [],
+                  variables:
+                    Array.isArray((aggregated as Flow).variables) &&
+                    (aggregated as Flow).variables.length > 0
+                      ? (aggregated as Flow).variables
+                      : (flowFromTab as Flow).variables || [],
+                  meta: metaMerged,
+                } as Flow;
+              })();
+              if (merged) await saveFlow(merged);
+              sendResponse({ ok: true });
+            } catch {
+              sendResponse({ ok: false });
+            }
+          })();
+          return true;
         }
         sendResponse({ ok: true });
         return true;
@@ -207,6 +392,19 @@ export function initRecordReplayListeners() {
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.RR_STOP_RECORDING: {
+          // Be tolerant: even if currentRecording is lost (service worker restart),
+          // make a best-effort to stop any active recorder overlays and clear flag.
+          if (!currentRecording) {
+            setRecordingActive(false)
+              .then(async () => {
+                try {
+                  await broadcastRecorderCommandToAllTabs('stop');
+                } catch {}
+                sendResponse({ success: true });
+              })
+              .catch(() => sendResponse({ success: true }));
+            return true;
+          }
           stopRecording()
             .then(sendResponse)
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
@@ -374,7 +572,7 @@ export function initRecordReplayListeners() {
   // 监听 tab 更新，若点击后短时间发生导航则为该点击自动加上 after.waitForNavigation
   chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     try {
-      if (!currentRecording || tabId !== currentRecording.tabId) return;
+      if (!currentRecording || !recordingActive || tabId !== currentRecording.tabId) return;
       if (!currentRecording.flow) return;
       const urlChanged = typeof changeInfo.url === 'string';
       const isLoading = changeInfo.status === 'loading';
@@ -399,7 +597,7 @@ export function initRecordReplayListeners() {
   // 全局录制：监听激活的标签页变化，追加“导航/切换”步骤，并确保在新标签页继续录制
   chrome.tabs.onActivated.addListener(async (activeInfo) => {
     try {
-      if (!currentRecording) return;
+      if (!currentRecording || !recordingActive) return;
       const tab = await chrome.tabs.get(activeInfo.tabId);
       if (!tab) return;
       // 确保该标签页注入并继续录制（不重置流）
@@ -440,7 +638,7 @@ export function initRecordReplayListeners() {
   // 全局录制：监听顶级导航提交（含显式地址栏输入/刷新），在非链接点击触发时追加“导航”步骤
   chrome.webNavigation.onCommitted.addListener(async (details) => {
     try {
-      if (!currentRecording) return;
+      if (!currentRecording || !recordingActive) return;
       if (details.frameId !== 0) return; // 仅记录顶级 frame
       const tabId = details.tabId;
       // 对于点击触发的 link 导航，不追加 navigate（已有点击+waitForNavigation 富化）

@@ -403,6 +403,24 @@ onMounted(async () => {
   await refresh();
   await refreshRuns();
   await refreshTriggers();
+  // Auto-refresh flows list when storage rr_flows changes
+  const onChanged = (changes: any, area: string) => {
+    try {
+      if (area !== 'local') return;
+      if (Object.prototype.hasOwnProperty.call(changes || {}, 'rr_flows')) refresh();
+    } catch {}
+  };
+  chrome.storage.onChanged.addListener(onChanged);
+  // Keep a reference for potential cleanup
+  (window as any).__rr_sidepanel_onChanged = onChanged;
+});
+onUnmounted(() => {
+  const fn = (window as any).__rr_sidepanel_onChanged;
+  if (fn && chrome?.storage?.onChanged?.removeListener) {
+    try {
+      chrome.storage.onChanged.removeListener(fn);
+    } catch {}
+  }
 });
 </script>
 
