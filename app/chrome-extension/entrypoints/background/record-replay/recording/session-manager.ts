@@ -1,4 +1,6 @@
 import type { Flow, Step } from '../types';
+import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
+import { appendSteps as appendFlowSteps } from './flow-builder';
 
 export type RecordingStatus = 'idle' | 'recording' | 'paused';
 
@@ -81,12 +83,23 @@ export class RecordingSessionManager {
   appendSteps(steps: Step[]): void {
     const f = this.state.flow;
     if (!f || !Array.isArray(steps) || steps.length === 0) return;
-    for (const st of steps) {
-      // id should be ensured by builder; push directly
-      f.steps.push(st);
-    }
+    // Reuse builder implementation (ids + meta update) for consistency
+    appendFlowSteps(f, steps);
+    this.broadcastTimelineUpdate(steps);
+  }
+
+  // Broadcast timeline update to origin tab top-frame
+  broadcastTimelineUpdate(steps: Step[]): void {
     try {
-      (f.meta as any).updatedAt = new Date().toISOString();
+      if (!steps || steps.length === 0) return;
+      const origin = this.state.originTabId;
+      if (origin != null) {
+        chrome.tabs.sendMessage(
+          origin,
+          { action: TOOL_MESSAGE_TYPES.RR_TIMELINE_UPDATE, steps },
+          { frameId: 0 },
+        );
+      }
     } catch {}
   }
 }

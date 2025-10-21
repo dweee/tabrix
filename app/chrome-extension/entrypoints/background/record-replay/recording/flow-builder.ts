@@ -1,5 +1,6 @@
 import type { Flow, Step } from '../types';
 import { STEP_TYPES } from '@/common/step-types';
+import { recordingSession } from './session-manager';
 
 const WORKFLOW_VERSION = 1;
 
@@ -47,6 +48,14 @@ export function appendSteps(flow: Flow, steps: Step[]): void {
 }
 
 export function addNavigationStep(flow: Flow, url: string): void {
-  const step = { id: generateStepId(), type: STEP_TYPES.NAVIGATE, url };
+  const step: Step = { id: generateStepId(), type: STEP_TYPES.NAVIGATE, url } as Step;
+  try {
+    // Prefer centralized session append (single broadcast path) when active and matching flow
+    const sessFlow = recordingSession.getFlow?.();
+    if (recordingSession.getStatus?.() === 'recording' && sessFlow === flow) {
+      recordingSession.appendSteps([step]);
+      return;
+    }
+  } catch {}
   appendSteps(flow, [step]);
 }

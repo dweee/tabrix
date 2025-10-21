@@ -1,4 +1,4 @@
-import { appendSteps, addNavigationStep } from './flow-builder';
+import { addNavigationStep } from './flow-builder';
 import { STEP_TYPES } from '@/common/step-types';
 import { ensureRecorderInjected, broadcastControlToTab, REC_CMD } from './content-injection';
 import type { RecordingSessionManager } from './session-manager';
@@ -23,7 +23,7 @@ export function initBrowserEventListeners(session: RecordingSessionManager): voi
         type: STEP_TYPES.SWITCH_TAB,
         ...(url ? { urlContains: url } : {}),
       };
-      appendSteps(flow, [step]);
+      session.appendSteps([step]);
     } catch (e) {
       console.warn('onActivated handler failed', e);
     }

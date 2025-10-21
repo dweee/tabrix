@@ -107,6 +107,8 @@ export const TOOL_MESSAGE_TYPES = {
   // Record & Replay content script bridge
   RR_RECORDER_CONTROL: 'rr_recorder_control',
   RR_RECORDER_EVENT: 'rr_recorder_event',
+  // Record & Replay timeline feed (background -> content overlay)
+  RR_TIMELINE_UPDATE: 'rr_timeline_update',
   // DOM observer trigger bridge
   SET_DOM_TRIGGERS: 'set_dom_triggers',
   DOM_TRIGGER_FIRED: 'dom_trigger_fired',

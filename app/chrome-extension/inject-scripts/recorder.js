@@ -13,6 +13,7 @@
     BATCH_SEND_MS: 80,
     SCROLL_DEBOUNCE_MS: 350,
     SENSITIVE_INPUT_TYPES: new Set(['password']),
+    UI_MAX_STEPS: 30,
   };
 
   // Memoization caches for selector computations during recording
@@ -151,6 +152,11 @@
     constructor(recorder) {
       this.recorder = recorder;
       this._box = null;
+      // Timeline elements state
+      this._timeline = null;
+      this._count = 0;
+      this._timelineBox = null;
+      this._collapsed = false;
     }
     ensure() {
       const rec = this.recorder;
@@ -175,14 +181,52 @@
           <label style="display:inline-flex; align-items:center; gap:4px; font-size:12px;">
             <input id="__rr_enable_highlight" type="checkbox" style="vertical-align:middle;" />高亮
           </label>
+          <button id="__rr_toggle_timeline" style="background:transparent; color:#fff; border:1px solid rgba(255,255,255,0.5); border-radius:6px; padding:2px 6px; cursor:pointer; font-size:12px;">折叠</button>
           <button id="__rr_pause" style="background:#fff; color:#111; border:none; border-radius:6px; padding:4px 8px; cursor:pointer;">暂停</button>
           <button id="__rr_stop" style="background:#111; color:#fff; border:none; border-radius:6px; padding:4px 8px; cursor:pointer;">停止</button>
         </div>`;
       document.documentElement.appendChild(root);
+      // Build timeline container just below the panel
+      try {
+        const timeline = document.createElement('div');
+        timeline.id = '__rr_rec_timeline';
+        Object.assign(timeline.style, {
+          marginTop: '8px',
+          width: '360px',
+          maxHeight: '220px',
+          overflow: 'auto',
+          background: 'rgba(17,24,39,0.85)',
+          color: '#F9FAFB',
+          border: '1px solid rgba(255,255,255,0.2)',
+          borderRadius: '8px',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+          padding: '8px 10px',
+          fontSize: '12px',
+          lineHeight: '1.4',
+        });
+        const header = document.createElement('div');
+        header.textContent = '已录制步骤';
+        header.style.opacity = '0.8';
+        header.style.marginBottom = '4px';
+        const list = document.createElement('ol');
+        list.id = '__rr_rec_timeline_list';
+        list.style.listStyle = 'none';
+        list.style.margin = '0';
+        list.style.padding = '0';
+        list.style.display = 'flex';
+        list.style.flexDirection = 'column';
+        list.style.gap = '4px';
+        timeline.appendChild(header);
+        timeline.appendChild(list);
+        root.appendChild(timeline);
+        this._timeline = list;
+        this._timelineBox = timeline;
+      } catch {}
       const btnPause = root.querySelector('#__rr_pause');
       const btnStop = root.querySelector('#__rr_stop');
       const hideChk = root.querySelector('#__rr_hide_values');
       const highlightChk = root.querySelector('#__rr_enable_highlight');
+      const btnToggle = root.querySelector('#__rr_toggle_timeline');
       hideChk.checked = !!rec.hideInputValues;
       hideChk.addEventListener('change', () => (rec.hideInputValues = hideChk.checked));
       highlightChk.checked = !!rec.highlightEnabled;
@@ -190,11 +234,22 @@
         rec.highlightEnabled = !!highlightChk.checked;
         rec._updateHoverListener();
       });
+      if (btnToggle) {
+        btnToggle.addEventListener('click', () => {
+          this._collapsed = !this._collapsed;
+          if (this._timelineBox)
+            this._timelineBox.style.display = this._collapsed ? 'none' : 'block';
+          btnToggle.textContent = this._collapsed ? '展开' : '折叠';
+        });
+      }
       btnPause.addEventListener('click', () => {
         if (!rec.isPaused) rec.pause();
         else rec.resume();
       });
       btnStop.addEventListener('click', () => {
+        try {
+          chrome.runtime.sendMessage({ type: 'rr_stop_recording' });
+        } catch {}
         rec.stop();
       });
       this._box = document.createElement('div');
@@ -216,6 +271,8 @@
           const root = document.getElementById('__rr_rec_overlay');
           if (root) root.remove();
           if (this._box) this._box.remove();
+          this._timeline = null;
+          this._timelineBox = null;
         }
       } catch {}
     }
@@ -224,6 +281,77 @@
       const pauseBtn = document.getElementById('__rr_pause');
       if (badge) badge.textContent = this.recorder.isPaused ? '已暂停' : '录制中';
       if (pauseBtn) pauseBtn.textContent = this.recorder.isPaused ? '继续' : '暂停';
+    }
+
+    // Reset the timeline list content
+    resetTimeline() {
+      this._count = 0;
+      const list = this._timeline || document.getElementById('__rr_rec_timeline_list') || null;
+      if (list) list.innerHTML = '';
+    }
+
+    // Append a new recorded step into the timeline UI
+    appendStep(step) {
+      const list = this._timeline || document.getElementById('__rr_rec_timeline_list') || null;
+      if (!list) return;
+      this._count += 1;
+      const item = document.createElement('li');
+      const text = this._formatStepText(step, this._count);
+      item.setAttribute('data-step-id', step.id || '');
+      item.style.display = 'flex';
+      item.style.alignItems = 'flex-start';
+      item.style.gap = '6px';
+      item.innerHTML = `
+        <span style="min-width:20px; text-align:right; opacity:0.8;">${this._count}.</span>
+        <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:310px;">${text}</span>
+      `;
+      list.appendChild(item);
+      while (list.children.length > CONFIG.UI_MAX_STEPS) {
+        list.removeChild(list.firstChild);
+      }
+      const container = list.parentElement;
+      if (container) container.scrollTop = container.scrollHeight;
+    }
+
+    // Update the last timeline entry when a step is coalesced/modified
+    updateLastStep(step) {
+      const list = this._timeline || document.getElementById('__rr_rec_timeline_list') || null;
+      if (!list) return;
+      const last = list.lastElementChild;
+      if (!last) return;
+      const text = this._formatStepText(step, this._count);
+      const spans = last.querySelectorAll('span');
+      if (spans && spans[1]) spans[1].textContent = text;
+    }
+
+    // Create a short, human-readable text for a recorded step
+    _formatStepText(step, _idx) {
+      try {
+        if (!step || typeof step !== 'object') return '未知步骤';
+        const t = step.type;
+        const sel = step.target && step.target.selector ? step.target.selector : '';
+        if (t === 'click' || t === 'dblclick') {
+          return `${t === 'dblclick' ? '双击' : '点击'}: ${sel || '(document)'}`;
+        }
+        if (t === 'fill') {
+          const val = step.value;
+          const shown = typeof val === 'string' && val.length > 0 ? val : String(val);
+          return `输入: ${sel} = ${shown}`;
+        }
+        if (t === 'scroll') {
+          const mode = step.mode === 'container' ? '容器' : '页面';
+          const off = step.offset || {};
+          return `滚动(${mode}): y=${off.y ?? 0}, x=${off.x ?? 0}`;
+        }
+        if (t === 'openTab') return `打开标签页: ${step.url || ''}`;
+        if (t === 'switchTab') return `切换标签页: 包含 ${step.urlContains || ''}`;
+        if (t === 'switchFrame')
+          return `切换Frame: 包含 ${step.frame && step.frame.urlContains ? step.frame.urlContains : ''}`;
+        if (t === 'waitFor') return `等待: ${sel || step.until || ''}`;
+        return `${t}`;
+      } catch (_) {
+        return '步骤';
+      }
     }
   }
 
@@ -266,6 +394,7 @@
       this.isPaused = false;
       this._attach();
       this.ui.ensure();
+      this.ui.resetTimeline();
       this._send({ kind: 'start', flow: this.pendingFlow });
     }
 
@@ -363,7 +492,8 @@
       try {
         if (window !== window.top && !this.frameSwitchPushed) {
           const href = String(location && location.href ? location.href : '');
-          this.pendingFlow.steps.push({ type: 'switchFrame', frame: { urlContains: href } });
+          const frameStep = { type: 'switchFrame', frame: { urlContains: href } };
+          this.pendingFlow.steps.push(frameStep);
           this.frameSwitchPushed = true;
         }
       } catch {}
@@ -661,6 +791,17 @@
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     try {
       if (!request || !request.action) return false;
+      if (request.action === 'rr_timeline_update') {
+        const rec = getRecorder();
+        rec.ui.ensure();
+        if (rec.isRecording && rec.pendingFlow && (!rec.ui._timeline || rec.ui._count === 0)) {
+          // no-op; rely purely on updates per design
+        }
+        const steps = Array.isArray(request.steps) ? request.steps : [];
+        for (const st of steps) rec.ui.appendStep(st);
+        sendResponse({ ok: true });
+        return true;
+      }
       if (request.action === 'rr_recorder_control') {
         const rec = getRecorder();
         const cmd = request.cmd;

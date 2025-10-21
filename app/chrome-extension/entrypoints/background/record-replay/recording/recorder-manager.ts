@@ -54,12 +54,14 @@ class RecorderManagerImpl {
   async stop(): Promise<{ success: boolean; error?: string; flow?: Flow }> {
     if (session.getStatus() === 'idle' || !session.getFlow())
       return { success: false, error: 'No active recording' };
-    // Best-effort STOP for all tabs that participated in this session
+    // Capture tabs first, then synchronously mark session as stopped
+    const tabs = session.getActiveTabs();
+    const flow = await session.stopSession();
+    // After state becomes idle, no further START should be triggered by listeners
+    // Best-effort STOP broadcast to remove overlays in all participating tabs
     try {
-      const tabs = session.getActiveTabs();
       await Promise.all(tabs.map(async (id) => broadcastControlToTab(id, REC_CMD.STOP)));
     } catch {}
-    const flow = await session.stopSession();
     if (flow) await saveFlow(flow);
     return flow ? { success: true, flow } : { success: true };
   }
