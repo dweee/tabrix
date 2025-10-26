@@ -31,31 +31,27 @@ export function appendSteps(flow: Flow, steps: Step[]): void {
     if (!step.id) step.id = generateStepId();
     flow.steps.push(step);
   }
-  try {
-    const timeStamp = new Date().toISOString();
-    if (flow.meta) {
-      flow.meta.updatedAt = timeStamp;
-    } else {
-      flow = {
-        ...flow,
-        meta: {
-          createdAt: timeStamp,
-          updatedAt: timeStamp,
-        },
-      };
-    }
-  } catch {}
+  const timeStamp = new Date().toISOString();
+  if (flow.meta) {
+    flow.meta.updatedAt = timeStamp;
+  } else {
+    flow = {
+      ...flow,
+      meta: {
+        createdAt: timeStamp,
+        updatedAt: timeStamp,
+      },
+    };
+  }
 }
 
 export function addNavigationStep(flow: Flow, url: string): void {
   const step: Step = { id: generateStepId(), type: STEP_TYPES.NAVIGATE, url } as Step;
-  try {
-    // Prefer centralized session append (single broadcast path) when active and matching flow
-    const sessFlow = recordingSession.getFlow?.();
-    if (recordingSession.getStatus?.() === 'recording' && sessFlow === flow) {
-      recordingSession.appendSteps([step]);
-      return;
-    }
-  } catch {}
+  // Prefer centralized session append (single broadcast path) when active and matching flow
+  const sessFlow = recordingSession.getFlow?.();
+  if (recordingSession.getStatus?.() === 'recording' && sessFlow === flow) {
+    recordingSession.appendSteps([step]);
+    return;
+  }
   appendSteps(flow, [step]);
 }
