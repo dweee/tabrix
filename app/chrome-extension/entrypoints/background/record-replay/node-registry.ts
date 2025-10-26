@@ -262,15 +262,17 @@ const registry: Partial<Record<Step['type'], NodeRuntime<any>>> = {
       await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
       const s: any = expandTemplatesDeep(step as any, ctx.vars);
       const located = await locateElement(tabId, s.target, ctx.frameId);
+      const frameId = (located as any)?.frameId ?? ctx.frameId;
+      const frameId = (located as any)?.frameId ?? ctx.frameId;
       const first = s.target?.candidates?.[0]?.type;
       const resolvedBy = (located as any)?.resolvedBy || ((located as any)?.ref ? 'ref' : '');
       const fallbackUsed = resolvedBy && first && resolvedBy !== 'ref' && resolvedBy !== first;
       if ((located as any)?.ref) {
-        const resolved = await chrome.tabs.sendMessage(
+        const resolved: any = (await chrome.tabs.sendMessage(
           tabId,
           { action: 'resolveRef', ref: (located as any).ref } as any,
-          { frameId: ctx.frameId } as any,
-        );
+          { frameId } as any,
+        )) as any;
         const rect = resolved?.rect;
         if (!rect || rect.width <= 0 || rect.height <= 0) throw new Error('element not visible');
       }
@@ -283,6 +285,7 @@ const registry: Partial<Record<Step['type'], NodeRuntime<any>>> = {
             : undefined,
           waitForNavigation: false,
           timeout: Math.max(1000, Math.min(s.timeoutMs || 10000, 30000)),
+          frameId,
         },
       });
       if ((res as any).isError) throw new Error('click failed');
@@ -310,15 +313,16 @@ const registry: Partial<Record<Step['type'], NodeRuntime<any>>> = {
       await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
       const s: any = expandTemplatesDeep(step as any, ctx.vars);
       const located = await locateElement(tabId, s.target, ctx.frameId);
+      const frameId = (located as any)?.frameId ?? ctx.frameId;
       const first = s.target?.candidates?.[0]?.type;
       const resolvedBy = (located as any)?.resolvedBy || ((located as any)?.ref ? 'ref' : '');
       const fallbackUsed = resolvedBy && first && resolvedBy !== 'ref' && resolvedBy !== first;
       if ((located as any)?.ref) {
-        const resolved = await chrome.tabs.sendMessage(
+        const resolved: any = (await chrome.tabs.sendMessage(
           tabId,
           { action: 'resolveRef', ref: (located as any).ref } as any,
-          { frameId: ctx.frameId } as any,
-        );
+          { frameId } as any,
+        )) as any;
         const rect = resolved?.rect;
         if (!rect || rect.width <= 0 || rect.height <= 0) throw new Error('element not visible');
       }
@@ -351,6 +355,7 @@ const registry: Partial<Record<Step['type'], NodeRuntime<any>>> = {
       if (!tabId) throw new Error('Active tab not found');
       await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
       const located = await locateElement(tabId, s.target, ctx.frameId);
+      const frameId = (located as any)?.frameId ?? ctx.frameId;
       const first = s.target?.candidates?.[0]?.type;
       const resolvedBy = (located as any)?.resolvedBy || ((located as any)?.ref ? 'ref' : '');
       const fallbackUsed = resolvedBy && first && resolvedBy !== 'ref' && resolvedBy !== first;
@@ -361,11 +366,11 @@ const registry: Partial<Record<Step['type'], NodeRuntime<any>>> = {
           : v;
       const value = interpolate(s.value);
       if ((located as any)?.ref) {
-        const resolved = await chrome.tabs.sendMessage(
+        const resolved: any = (await chrome.tabs.sendMessage(
           tabId,
           { action: 'resolveRef', ref: (located as any).ref } as any,
-          { frameId: ctx.frameId } as any,
-        );
+          { frameId } as any,
+        )) as any;
         const rect = resolved?.rect;
         if (!rect || rect.width <= 0 || rect.height <= 0) throw new Error('element not visible');
       }
@@ -376,15 +381,15 @@ const registry: Partial<Record<Step['type'], NodeRuntime<any>>> = {
         : undefined;
       if (cssSelector) {
         try {
-          const attr = await chrome.tabs.sendMessage(
+          const attr: any = (await chrome.tabs.sendMessage(
             tabId,
             {
               action: 'getAttributeForSelector',
               selector: cssSelector,
               name: 'type',
             } as any,
-            { frameId: ctx.frameId } as any,
-          );
+            { frameId } as any,
+          )) as any;
           const typeName = (attr && attr.value ? String(attr.value) : '').toLowerCase();
           if (typeName === 'file') {
             const uploadRes = await handleCallTool({
@@ -423,7 +428,7 @@ const registry: Partial<Record<Step['type'], NodeRuntime<any>>> = {
           await chrome.tabs.sendMessage(
             tabId,
             { action: 'focusByRef', ref: (located as any).ref } as any,
-            { frameId: ctx.frameId } as any,
+            { frameId } as any,
           );
         else if (cssSelector)
           await handleCallTool({
@@ -440,6 +445,7 @@ const registry: Partial<Record<Step['type'], NodeRuntime<any>>> = {
           ref: (located as any)?.ref || s.target?.ref,
           selector: cssSelector,
           value,
+          frameId,
         },
       });
       if ((res as any).isError) throw new Error('fill failed');
@@ -486,7 +492,7 @@ const registry: Partial<Record<Step['type'], NodeRuntime<any>>> = {
           files: ['inject-scripts/wait-helper.js'],
           world: 'ISOLATED',
         } as any);
-        const resp = await chrome.tabs.sendMessage(
+        const resp: any = (await chrome.tabs.sendMessage(
           tabId,
           {
             action: 'waitForText',
@@ -495,7 +501,7 @@ const registry: Partial<Record<Step['type'], NodeRuntime<any>>> = {
             timeout: Math.max(0, Math.min((s as any).timeoutMs || 10000, 120000)),
           } as any,
           { frameId: ctx.frameId } as any,
-        );
+        )) as any;
         if (!resp || resp.success !== true) throw new Error('wait text failed');
       } else if ('networkIdle' in cond) {
         const total = Math.min(Math.max(1000, (s as any).timeoutMs || 5000), 120000);
@@ -515,12 +521,12 @@ const registry: Partial<Record<Step['type'], NodeRuntime<any>>> = {
           files: ['inject-scripts/wait-helper.js'],
           world: 'ISOLATED',
         } as any);
-        const resp = await chrome.tabs.sendMessage(tabId, {
+        const resp: any = (await chrome.tabs.sendMessage(tabId, {
           action: 'waitForSelector',
           selector: cond.selector,
           visible: cond.visible !== false,
           timeout: Math.max(0, Math.min((s as any).timeoutMs || 10000, 120000)),
-        } as any);
+        } as any)) as any;
         if (!resp || resp.success !== true) throw new Error('wait selector failed');
       }
     },
@@ -562,10 +568,10 @@ const registry: Partial<Record<Step['type'], NodeRuntime<any>>> = {
         const tabId = firstTab && typeof firstTab.id === 'number' ? firstTab.id : undefined;
         if (!tabId) return fail('Active tab not found');
         await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
-        const ensured = await chrome.tabs.sendMessage(tabId, {
+        const ensured: any = (await chrome.tabs.sendMessage(tabId, {
           action: 'ensureRefForSelector',
           selector,
-        } as any);
+        } as any)) as any;
         if (!ensured || !ensured.success) return fail('assert selector not found');
         if ('visible' in s.assert) {
           const rect = ensured && ensured.center ? ensured.center : null;
@@ -578,11 +584,11 @@ const registry: Partial<Record<Step['type'], NodeRuntime<any>>> = {
         const tabId = firstTab && typeof firstTab.id === 'number' ? firstTab.id : undefined;
         if (!tabId) return fail('Active tab not found');
         await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
-        const resp = await chrome.tabs.sendMessage(
+        const resp: any = (await chrome.tabs.sendMessage(
           tabId,
           { action: 'getAttributeForSelector', selector, name } as any,
           { frameId: ctx.frameId } as any,
-        );
+        )) as any;
         if (!resp || !resp.success) return fail('assert attribute: element not found');
         const actual: string | null = resp.value ?? null;
         if (equals !== undefined && equals !== null) {
@@ -859,11 +865,11 @@ const registry: Partial<Record<Step['type'], NodeRuntime<any>>> = {
       let sel = cssSelector as string | undefined;
       if (!sel && (located as any)?.ref) {
         try {
-          const resolved = await chrome.tabs.sendMessage(
+          const resolved: any = (await chrome.tabs.sendMessage(
             tabId,
             { action: 'resolveRef', ref: (located as any).ref } as any,
-            { frameId: ctx.frameId } as any,
-          );
+            { frameId } as any,
+          )) as any;
           sel = resolved?.selector;
         } catch {}
       }
@@ -873,10 +879,7 @@ const registry: Partial<Record<Step['type'], NodeRuntime<any>>> = {
       const bubbles = s.bubbles !== false;
       const cancelable = s.cancelable === true;
       await chrome.scripting.executeScript({
-        target: {
-          tabId,
-          frameIds: typeof ctx.frameId === 'number' ? [ctx.frameId] : undefined,
-        } as any,
+        target: { tabId, frameIds: typeof frameId === 'number' ? [frameId] : undefined } as any,
         world,
         func: (selector: string, type: string, bubbles: boolean, cancelable: boolean) => {
           try {
@@ -907,17 +910,18 @@ const registry: Partial<Record<Step['type'], NodeRuntime<any>>> = {
       if (typeof tabId !== 'number') throw new Error('Active tab not found');
       await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
       const located = await locateElement(tabId, s.target, ctx.frameId);
+      const frameId = (located as any)?.frameId ?? ctx.frameId;
       const cssSelector = !(located as any)?.ref
         ? s.target.candidates?.find((c: any) => c.type === 'css' || c.type === 'attr')?.value
         : undefined;
       let sel = cssSelector as string | undefined;
       if (!sel && (located as any)?.ref) {
         try {
-          const resolved = await chrome.tabs.sendMessage(
+          const resolved: any = (await chrome.tabs.sendMessage(
             tabId,
             { action: 'resolveRef', ref: (located as any).ref } as any,
-            { frameId: ctx.frameId } as any,
-          );
+            { frameId } as any,
+          )) as any;
           sel = resolved?.selector;
         } catch {}
       }
@@ -927,10 +931,7 @@ const registry: Partial<Record<Step['type'], NodeRuntime<any>>> = {
       const value = s.value != null ? String(s.value) : null;
       const remove = s.remove === true || value == null;
       await chrome.scripting.executeScript({
-        target: {
-          tabId,
-          frameIds: typeof ctx.frameId === 'number' ? [ctx.frameId] : undefined,
-        } as any,
+        target: { tabId, frameIds: typeof frameId === 'number' ? [frameId] : undefined } as any,
         world,
         func: (selector: string, name: string, value: string | null, remove: boolean) => {
           try {

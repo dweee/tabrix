@@ -7,6 +7,57 @@ export interface LocatedElement {
   ref?: string;
   center?: { x: number; y: number };
   resolvedBy?: 'ref' | SelectorCandidate['type'];
+  frameId?: number;
+}
+
+// Helper: decide whether selector is a composite cross-frame selector
+function isCompositeSelector(sel: string): boolean {
+  return typeof sel === 'string' && sel.includes('|>');
+}
+
+// Helper: typed wrapper for chrome.tabs.sendMessage with optional frameId
+async function sendToTab(tabId: number, message: any, frameId?: number): Promise<any> {
+  if (typeof frameId === 'number') {
+    return await chrome.tabs.sendMessage(tabId, message, { frameId });
+  }
+  return await chrome.tabs.sendMessage(tabId, message);
+}
+
+// Helper: ensure ref for a selector, handling composite selectors and mapping frameId
+async function ensureRefForSelector(
+  tabId: number,
+  selector: string,
+  frameId?: number,
+): Promise<{ ref: string; center: { x: number; y: number }; frameId?: number } | null> {
+  try {
+    let ensured: any = null;
+    if (isCompositeSelector(selector)) {
+      // Always query top for composite; helper will bridge to child and return href
+      ensured = await sendToTab(tabId, {
+        action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+        selector,
+      });
+    } else {
+      ensured = await sendToTab(
+        tabId,
+        { action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR, selector },
+        frameId,
+      );
+    }
+    if (!ensured || !ensured.success || !ensured.ref || !ensured.center) return null;
+    // Map frameId when composite via returned href
+    let locFrameId: number | undefined = undefined;
+    if (isCompositeSelector(selector) && ensured.href) {
+      try {
+        const frames = (await chrome.webNavigation.getAllFrames({ tabId })) as any[];
+        const match = frames?.find((f) => typeof f.url === 'string' && f.url === ensured.href);
+        if (match) locFrameId = match.frameId;
+      } catch {}
+    }
+    return { ref: ensured.ref, center: ensured.center, frameId: locFrameId };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -20,15 +71,8 @@ export async function locateElement(
   // 0) Fast path: try primary selector if provided
   const primarySel = (target as any)?.selector ? String((target as any).selector).trim() : '';
   if (primarySel) {
-    try {
-      const ensured = await chrome.tabs.sendMessage(
-        tabId,
-        { action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR, selector: primarySel } as any,
-        { frameId } as any,
-      );
-      if (ensured && ensured.success && ensured.ref && ensured.center)
-        return { ref: ensured.ref, center: ensured.center, resolvedBy: 'css' };
-    } catch {}
+    const ensured = await ensureRefForSelector(tabId, primarySel, frameId);
+    if (ensured) return { ...ensured, resolvedBy: 'css' };
   }
 
   // 1) Non-text candidates first for stability (css/attr/aria/xpath)
@@ -36,17 +80,8 @@ export async function locateElement(
   for (const c of nonText) {
     try {
       if (c.type === 'css' || c.type === 'attr') {
-        const ensured = await chrome.tabs.sendMessage(
-          tabId,
-          {
-            action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
-            selector: c.value,
-          } as any,
-          { frameId } as any,
-        );
-        if (ensured && ensured.success && ensured.ref && ensured.center) {
-          return { ref: ensured.ref, center: ensured.center, resolvedBy: c.type };
-        }
+        const ensured = await ensureRefForSelector(tabId, String(c.value || ''), frameId);
+        if (ensured) return { ...ensured, resolvedBy: c.type };
       } else if (c.type === 'aria') {
         // Minimal ARIA role+name parser like: "button[name=提交]" or "textbox[name=用户名]"
         const v = String(c.value || '').trim();
@@ -78,31 +113,28 @@ export async function locateElement(
           );
         }
         for (const sel of ariaSelectors) {
-          const ensured = await chrome.tabs.sendMessage(
+          const ensured = await sendToTab(
             tabId,
-            {
-              action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
-              selector: sel,
-            } as any,
-            { frameId } as any,
+            { action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR, selector: sel } as any,
+            frameId,
           );
           if (ensured && ensured.success && ensured.ref && ensured.center) {
-            return { ref: ensured.ref, center: ensured.center, resolvedBy: c.type };
+            return { ref: ensured.ref, center: ensured.center, resolvedBy: c.type, frameId };
           }
         }
       } else if (c.type === 'xpath') {
         // Minimal xpath support via document.evaluate through injected helper
-        const ensured = await chrome.tabs.sendMessage(
+        const ensured = await sendToTab(
           tabId,
           {
             action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
             selector: c.value,
             isXPath: true,
           } as any,
-          { frameId } as any,
+          frameId,
         );
         if (ensured && ensured.success && ensured.ref && ensured.center) {
-          return { ref: ensured.ref, center: ensured.center, resolvedBy: c.type };
+          return { ref: ensured.ref, center: ensured.center, resolvedBy: c.type, frameId };
         }
       }
     } catch (e) {
@@ -114,7 +146,7 @@ export async function locateElement(
   const tagName = ((target as any)?.tag || '').toString();
   for (const c of textCands) {
     try {
-      const ensured = await chrome.tabs.sendMessage(
+      const ensured = await sendToTab(
         tabId,
         {
           action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
@@ -122,7 +154,7 @@ export async function locateElement(
           text: c.value,
           tagName,
         } as any,
-        { frameId } as any,
+        frameId,
       );
       if (ensured && ensured.success && ensured.ref && ensured.center) {
         return { ref: ensured.ref, center: ensured.center, resolvedBy: c.type };
@@ -132,13 +164,10 @@ export async function locateElement(
   // Fallback: try ref (works when ref was produced in the same page lifecycle)
   if (target.ref) {
     try {
-      const res = await chrome.tabs.sendMessage(
+      const res = await sendToTab(
         tabId,
-        {
-          action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
-          ref: target.ref,
-        } as any,
-        { frameId } as any,
+        { action: TOOL_MESSAGE_TYPES.RESOLVE_REF, ref: target.ref } as any,
+        frameId,
       );
       if (res && res.success && res.center) {
         return { ref: target.ref, center: res.center, resolvedBy: 'ref' };

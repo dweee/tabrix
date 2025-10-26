@@ -15,6 +15,8 @@
     SENSITIVE_INPUT_TYPES: new Set(['password']),
     UI_MAX_STEPS: 30,
   };
+  // Cross-frame event channel
+  const FRAME_EVENT = 'rr_iframe_event';
 
   // Memoization caches for selector computations during recording
   const __cacheUnique = new WeakMap();
@@ -365,8 +367,21 @@
       this._onChange = this._onChange.bind(this);
       this._onMouseMove = this._onMouseMove.bind(this);
       this._onScroll = this._onScroll.bind(this);
+      this._onFocusIn = this._onFocusIn.bind(this);
+      this._onFocusOut = this._onFocusOut.bind(this);
+      this._onKeyDown = this._onKeyDown.bind(this);
+      this._onKeyUp = this._onKeyUp.bind(this);
+      this._onWindowMessage = this._onWindowMessage.bind(this);
       this.ui = new UI(this);
       this._scrollPending = null;
+
+      // Focus tracking for per-element input listening
+      this._focusedEl = null;
+      // Keyboard state for combo recording
+      this._pressed = new Set();
+      this._lastKeyTs = 0;
+      // Map to avoid duplicate switchFrame per iframe source (keyed by frame selector)
+      this._frameSwitchMap = new Set();
     }
 
     // Lifecycle
@@ -394,8 +409,12 @@
       this.isRecording = false;
       this._detach();
       this.ui.remove();
+      if (this.batchTimer) clearTimeout(this.batchTimer);
+      this.batchTimer = null;
       if (this.scrollTimer) clearTimeout(this.scrollTimer);
       this.scrollTimer = null;
+      if (this.hoverRAF) cancelAnimationFrame(this.hoverRAF);
+      this.hoverRAF = 0;
       this.lastFill = { step: null, ts: 0 };
       const ret = this.sessionBuffer;
       this.sessionBuffer.steps = [];
@@ -419,19 +438,40 @@
     // DOM listeners
     _attach() {
       document.addEventListener('click', this._onClick, true);
-      document.addEventListener('input', this._onInput, true);
+      // Use focusin/out to attach input listener only to focused element
+      document.addEventListener('focusin', this._onFocusIn, true);
+      document.addEventListener('focusout', this._onFocusOut, true);
       document.addEventListener('change', this._onChange, true);
       // capture-phase scroll to catch non-bubbling events on any container
       document.addEventListener('scroll', this._onScroll, true);
+      // Keyboard: record Enter and modifier combos
+      document.addEventListener('keydown', this._onKeyDown, true);
+      document.addEventListener('keyup', this._onKeyUp, true);
+      // Cross-frame: top window aggregates iframe-recorded steps
+      if (window === window.top) window.addEventListener('message', this._onWindowMessage, true);
       this._updateHoverListener();
     }
 
     _detach() {
       document.removeEventListener('click', this._onClick, true);
-      document.removeEventListener('input', this._onInput, true);
+      document.removeEventListener('focusin', this._onFocusIn, true);
+      document.removeEventListener('focusout', this._onFocusOut, true);
       document.removeEventListener('change', this._onChange, true);
       document.removeEventListener('scroll', this._onScroll, true);
+      document.removeEventListener('keydown', this._onKeyDown, true);
+      document.removeEventListener('keyup', this._onKeyUp, true);
       document.removeEventListener('mousemove', this._onMouseMove, true);
+      if (window === window.top) window.removeEventListener('message', this._onWindowMessage, true);
+      // Detach per-element input listener if any
+      if (this._focusedEl) this._focusedEl.removeEventListener('input', this._onInput, true);
+      this._focusedEl = null;
+      // Best-effort cleanup for timers/raf when detaching
+      if (this.batchTimer) clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+      if (this.scrollTimer) clearTimeout(this.scrollTimer);
+      this.scrollTimer = null;
+      if (this.hoverRAF) cancelAnimationFrame(this.hoverRAF);
+      this.hoverRAF = 0;
     }
 
     _updateHoverListener() {
@@ -470,12 +510,19 @@
 
     _pushStep(step) {
       step.id = step.id || `step_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      if (window !== window.top && !this.frameSwitchPushed) {
-        const href = String(location && location.href ? location.href : '');
-        const frameStep = { type: 'switchFrame', frame: { urlContains: href } };
-        this.sessionBuffer.steps.push(frameStep);
-        this.frameSwitchPushed = true;
+      // In iframes, forward to top for aggregation (compute frame selector there)
+      if (window !== window.top) {
+        try {
+          const payload = {
+            kind: 'iframeStep',
+            href: String(location && location.href ? location.href : ''),
+            step,
+          };
+          window.top.postMessage({ type: FRAME_EVENT, payload }, '*');
+          return; // Do not push locally in subframe
+        } catch {}
       }
+      // Top window: optionally insert a switchFrame if this step originated from an iframe message
       this.sessionBuffer.steps.push(step);
       this.sessionBuffer.meta.updatedAt = new Date().toISOString();
       this.batch.push(step);
@@ -648,6 +695,29 @@
 
     // UI handled by injected UI class
 
+    _onFocusIn(e) {
+      if (!this.isRecording || this.isPaused) return;
+      const el = e.target;
+      const isEditable =
+        el instanceof HTMLInputElement ||
+        el instanceof HTMLTextAreaElement ||
+        (el && el.nodeType === 1 && /** @type {HTMLElement} */ (el).isContentEditable === true);
+      if (!isEditable) return;
+      if (this._focusedEl && this._focusedEl !== el)
+        this._focusedEl.removeEventListener('input', this._onInput, true);
+      el.addEventListener('input', this._onInput, true);
+      this._focusedEl = el;
+    }
+
+    _onFocusOut(e) {
+      const el = e.target;
+      if (!el) return;
+      if (this._focusedEl === el) {
+        el.removeEventListener('input', this._onInput, true);
+        this._focusedEl = null;
+      }
+    }
+
     _onMouseMove(e) {
       if (!this.highlightEnabled || !this.ui._box || !this.isRecording || this.isPaused) return;
       if (this.hoverRAF) return;
@@ -739,6 +809,108 @@
           });
         }
       }, CONFIG.SCROLL_DEBOUNCE_MS);
+    }
+
+    // Minimal key recorder: record Enter and modifier combos; avoid plain typing
+    _onKeyDown(e) {
+      if (!this.isRecording || this.isPaused) return;
+      try {
+        // Ignore autorepeat to prevent spam
+        if (e.repeat) return;
+        const key = String(e.key || '').toLowerCase();
+        const isModifier = key === 'shift' || key === 'control' || key === 'meta' || key === 'alt';
+        const isEditable =
+          e.target instanceof HTMLInputElement ||
+          e.target instanceof HTMLTextAreaElement ||
+          (e.target &&
+            e.target.nodeType === 1 &&
+            /** @type {HTMLElement} */ (e.target).isContentEditable === true);
+        const enterKey = key === 'enter';
+
+        // Track pressed modifiers
+        if (isModifier) this._pressed.add(key);
+
+        // Handle Enter in editable contexts (including contenteditable)
+        if (isEditable && enterKey) {
+          // prevent duplicate with input handler; record explicit key action with target
+          const target = SelectorEngine.buildTarget(/** @type {Element} */ (e.target));
+          const combo = this._formatKeysCombo(e, 'Enter');
+          this._pushStep({ type: 'key', keys: combo, target, screenshotOnFail: false });
+          this._lastKeyTs = Date.now();
+          return;
+        }
+
+        // For non-text fields: record modifier combos and special keys
+        const special = enterKey || key === 'escape' || key === 'tab';
+        if (special || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) {
+          const comboName = this._formatKeysCombo(e, e.key);
+          this._pushStep({ type: 'key', keys: comboName, screenshotOnFail: false });
+          this._lastKeyTs = Date.now();
+        }
+      } catch {}
+    }
+
+    _onKeyUp(e) {
+      const key = String(e.key || '').toLowerCase();
+      if (key === 'shift' || key === 'control' || key === 'meta' || key === 'alt')
+        this._pressed.delete(key);
+    }
+
+    _formatKeysCombo(e, mainKey) {
+      const parts = [];
+      if (e.ctrlKey) parts.push('Ctrl');
+      if (e.altKey) parts.push('Alt');
+      if (e.shiftKey) parts.push('Shift');
+      if (e.metaKey) parts.push('Meta');
+      const mk = String(mainKey || '').trim();
+      // Normalize common names to match keyboard-helper parsing
+      const norm = (s) => {
+        const k = s.toLowerCase();
+        if (k === 'escape') return 'Esc';
+        if (k === ' ') return 'Space';
+        if (k.length === 1) return k.toUpperCase();
+        return s;
+      };
+      parts.push(norm(mk));
+      return parts.join('+');
+    }
+
+    // Top-level aggregator: receives iframe events and merges into session
+    _onWindowMessage(ev) {
+      try {
+        const d = ev && ev.data;
+        if (!d || d.type !== FRAME_EVENT || !d.payload) return;
+        const { step, href } = d.payload || {};
+        if (!step || typeof step !== 'object') return;
+
+        // Identify iframe element by event.source
+        let frameEl = null;
+        try {
+          const frames = document.querySelectorAll('iframe,frame');
+          for (let i = 0; i < frames.length; i++) {
+            const f = frames[i];
+            if (f && f.contentWindow === ev.source) {
+              frameEl = f;
+              break;
+            }
+          }
+        } catch {}
+
+        // Stateless: compose composite selector and push single step
+        if (frameEl && step && step.target) {
+          const frameTarget = SelectorEngine.buildTarget(frameEl);
+          const frameSel = frameTarget?.selector || '';
+          const inner = String(step.target.selector || '').trim();
+          if (frameSel && inner) {
+            const composite = `${frameSel} |> ${inner}`;
+            step.target.selector = composite;
+            if (Array.isArray(step.target.candidates)) {
+              step.target.candidates.unshift({ type: 'css', value: composite });
+            }
+          }
+          this._pushStep(step);
+        }
+      } catch {}
     }
   }
 

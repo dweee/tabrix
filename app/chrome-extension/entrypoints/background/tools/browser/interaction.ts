@@ -15,6 +15,7 @@ interface ClickToolParams {
   coordinates?: Coordinates; // Coordinates to click at (x, y relative to viewport)
   waitForNavigation?: boolean; // Whether to wait for navigation to complete after click
   timeout?: number; // Timeout in milliseconds for waiting for the element or navigation
+  frameId?: number; // Target frame for ref/selector resolution
 }
 
 /**
@@ -32,6 +33,7 @@ class ClickTool extends BaseBrowserToolExecutor {
       coordinates,
       waitForNavigation = false,
       timeout = TIMEOUTS.DEFAULT_WAIT * 5,
+      frameId,
     } = args;
 
     console.log(`Starting click operation with options:`, args);
@@ -57,14 +59,18 @@ class ClickTool extends BaseBrowserToolExecutor {
       await this.injectContentScript(tab.id, ['inject-scripts/click-helper.js']);
 
       // Send click message to content script
-      const result = await this.sendMessageToTab(tab.id, {
-        action: TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
-        selector,
-        coordinates,
-        ref: args.ref,
-        waitForNavigation,
-        timeout,
-      });
+      const result = await this.sendMessageToTab(
+        tab.id,
+        {
+          action: TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+          selector,
+          coordinates,
+          ref: args.ref,
+          waitForNavigation,
+          timeout,
+        },
+        frameId,
+      );
 
       return {
         content: [
@@ -97,6 +103,7 @@ interface FillToolParams {
   ref?: string; // Element ref from accessibility tree
   // Accept string | number | boolean for broader form input coverage
   value: string | number | boolean;
+  frameId?: number;
 }
 
 /**
@@ -109,7 +116,7 @@ class FillTool extends BaseBrowserToolExecutor {
    * Execute fill operation
    */
   async execute(args: FillToolParams): Promise<ToolResult> {
-    const { selector, ref, value } = args;
+    const { selector, ref, value, frameId } = args;
 
     console.log(`Starting fill operation with options:`, args);
 
@@ -136,12 +143,16 @@ class FillTool extends BaseBrowserToolExecutor {
       await this.injectContentScript(tab.id, ['inject-scripts/fill-helper.js']);
 
       // Send fill message to content script
-      const result = await this.sendMessageToTab(tab.id, {
-        action: TOOL_MESSAGE_TYPES.FILL_ELEMENT,
-        selector,
-        ref,
-        value,
-      });
+      const result = await this.sendMessageToTab(
+        tab.id,
+        {
+          action: TOOL_MESSAGE_TYPES.FILL_ELEMENT,
+          selector,
+          ref,
+          value,
+        },
+        frameId,
+      );
 
       if (result && result.error) {
         return createErrorResponse(result.error);

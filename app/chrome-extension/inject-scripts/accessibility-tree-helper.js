@@ -781,6 +781,86 @@
       }
       if (request && request.action === 'ensureRefForSelector') {
         try {
+          // Composite selector support: "frameSelector |> innerSelector"
+          const maybeSel = String(request.selector || '').trim();
+          if (maybeSel.includes('|>')) {
+            try {
+              const parts = maybeSel
+                .split('|>')
+                .map((s) => s.trim())
+                .filter(Boolean);
+              if (parts.length >= 2) {
+                const frameSel = parts[0];
+                const innerSel = parts.slice(1).join(' |> ');
+                // Find target frame element in current document
+                let frameEl = null;
+                try {
+                  frameEl = querySelectorDeepFirst(frameSel) || document.querySelector(frameSel);
+                } catch {}
+                if (
+                  !frameEl ||
+                  !(frameEl instanceof HTMLIFrameElement || frameEl instanceof HTMLFrameElement)
+                ) {
+                  sendResponse({
+                    success: false,
+                    error: `Composite frame selector not found: ${frameSel}`,
+                  });
+                  return true;
+                }
+                const cw = frameEl.contentWindow;
+                if (!cw) {
+                  sendResponse({
+                    success: false,
+                    error: 'Unable to obtain contentWindow of target frame',
+                  });
+                  return true;
+                }
+                // Bridge to child frame via postMessage
+                const reqId = `rrc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                const listener = (ev) => {
+                  try {
+                    const data = ev && ev.data;
+                    if (
+                      !data ||
+                      data.type !== 'rr-bridge-ensure-ref-result' ||
+                      data.reqId !== reqId
+                    )
+                      return;
+                    window.removeEventListener('message', listener, true);
+                    if (data.success) {
+                      sendResponse({
+                        success: true,
+                        ref: data.ref,
+                        center: data.center,
+                        href: data.href,
+                      });
+                    } else {
+                      sendResponse({ success: false, error: data.error || 'child failed' });
+                    }
+                  } catch (e) {
+                    window.removeEventListener('message', listener, true);
+                    sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+                  }
+                };
+                window.addEventListener('message', listener, true);
+                cw.postMessage(
+                  {
+                    type: 'rr-bridge-ensure-ref',
+                    reqId,
+                    selector: innerSel,
+                    useText: !!request.useText,
+                    isXPath: !!request.isXPath,
+                    tagName: String(request.tagName || ''),
+                  },
+                  '*',
+                );
+                return true; // async response via message bridge
+              }
+            } catch (e) {
+              sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+              return true;
+            }
+          }
           // Support CSS selector, XPath, or visible text search
           const useText = !!request.useText;
           const textQuery = String(request.text || '').trim();
@@ -1210,4 +1290,147 @@
   });
 
   console.log('Accessibility tree helper script loaded');
+  // Cross-frame bridge: child listens for ensure-ref requests from parent (composite selector)
+  try {
+    window.addEventListener(
+      'message',
+      (ev) => {
+        try {
+          const data = ev && ev.data;
+          if (!data || data.type !== 'rr-bridge-ensure-ref') return;
+          const { reqId, selector, useText, isXPath, tagName } = data || {};
+          const respond = (payload) => {
+            try {
+              ev.source &&
+                ev.source.postMessage(
+                  { type: 'rr-bridge-ensure-ref-result', reqId, ...payload },
+                  '*',
+                );
+            } catch {}
+          };
+          try {
+            const sel = String(selector || '').trim();
+            const limitTag = String(tagName || '')
+              .trim()
+              .toUpperCase();
+            let el = null;
+            if (useText && sel) {
+              const normalize = (s) =>
+                String(s || '')
+                  .replace(/\s+/g, ' ')
+                  .trim()
+                  .toLowerCase();
+              const query = normalize(sel);
+              const bigrams = (s) => {
+                const arr = [];
+                for (let i = 0; i < s.length - 1; i++) arr.push(s.slice(i, i + 2));
+                return arr;
+              };
+              const dice = (a, b) => {
+                if (!a || !b) return 0;
+                const A = bigrams(a),
+                  B = bigrams(b);
+                if (!A.length || !B.length) return 0;
+                let inter = 0;
+                const m = new Map();
+                for (const t of A) m.set(t, (m.get(t) || 0) + 1);
+                for (const t of B) {
+                  const c = m.get(t) || 0;
+                  if (c > 0) {
+                    inter++;
+                    m.set(t, c - 1);
+                  }
+                }
+                return (2 * inter) / (A.length + B.length);
+              };
+              let best = { el: null, score: 0 };
+              const stack = [document.documentElement];
+              while (stack.length) {
+                const node = stack.pop();
+                if (!node || !(node instanceof Element)) continue;
+                try {
+                  if (limitTag && String(node.tagName || '').toUpperCase() !== limitTag) {
+                  } else {
+                    const cs = window.getComputedStyle(node);
+                    if (cs.display !== 'none' && cs.visibility !== 'hidden' && cs.opacity !== '0') {
+                      const rect = node.getBoundingClientRect();
+                      if (rect.width > 0 && rect.height > 0) {
+                        const txt = normalize(node.textContent || '');
+                        if (txt) {
+                          if (txt.includes(query)) {
+                            el = node;
+                            break;
+                          }
+                          const sc = dice(txt, query);
+                          if (sc > best.score) best = { el: node, score: sc };
+                        }
+                      }
+                    }
+                  }
+                } catch {}
+                try {
+                  const children = node.children || [];
+                  for (let i = 0; i < children.length; i++) stack.push(children[i]);
+                  const sr = node.shadowRoot;
+                  if (sr && sr.children)
+                    for (let i = 0; i < sr.children.length; i++) stack.push(sr.children[i]);
+                } catch {}
+              }
+              if (!el && best.el) el = best.el;
+            } else if (isXPath) {
+              try {
+                const it = document.evaluate(
+                  sel,
+                  document,
+                  null,
+                  XPathResult.FIRST_ORDERED_NODE_TYPE,
+                  null,
+                );
+                el = it.singleNodeValue instanceof Element ? it.singleNodeValue : null;
+              } catch {}
+            } else {
+              try {
+                el =
+                  document.querySelector(sel) ||
+                  (typeof querySelectorDeepFirst === 'function'
+                    ? querySelectorDeepFirst(sel)
+                    : null);
+              } catch {}
+            }
+            if (!el || !(el instanceof Element)) {
+              respond({ success: false, error: 'Element not found in child frame' });
+              return;
+            }
+            if (!window.__claudeElementMap) window.__claudeElementMap = {};
+            if (!window.__claudeRefCounter) window.__claudeRefCounter = 0;
+            let refId = null;
+            for (const k in window.__claudeElementMap) {
+              const w = window.__claudeElementMap[k];
+              if (w && typeof w.deref === 'function' && w.deref && w.deref() === el) {
+                refId = k;
+                break;
+              }
+            }
+            if (!refId) {
+              refId = `ref_${++window.__claudeRefCounter}`;
+              window.__claudeElementMap[refId] = new WeakRef(el);
+            }
+            const rect = el.getBoundingClientRect();
+            respond({
+              success: true,
+              ref: refId,
+              center: {
+                x: Math.round(rect.left + rect.width / 2),
+                y: Math.round(rect.top + rect.height / 2),
+              },
+              href: String(location && location.href ? location.href : ''),
+            });
+          } catch (e) {
+            respond({ success: false, error: String(e && e.message ? e.message : e) });
+          }
+        } catch {}
+      },
+      true,
+    );
+  } catch {}
 })();
