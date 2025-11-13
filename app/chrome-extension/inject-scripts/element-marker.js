@@ -6,6 +6,14 @@
   const IS_MAIN = window === window.top;
 
   // ============================================================================
+  // Utility Functions
+  // ============================================================================
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // ============================================================================
   // Constants & Configuration
   // ============================================================================
 
@@ -629,7 +637,7 @@
               <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
             </svg>
           </button>
-          <button class="em-square-btn" id="__em_toggle_tab" title="Toggle settings">
+          <button class="em-square-btn" id="__em_toggle_tab" title="Toggle Execute tab">
             <svg viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
               <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
@@ -660,8 +668,7 @@
         <!-- Tabs -->
         <div class="em-tabs">
           <button class="em-tab active" data-tab="attributes">Attributes</button>
-          <button class="em-tab" data-tab="validation">Validation</button>
-          <button class="em-tab" data-tab="settings">Options</button>
+          <button class="em-tab" data-tab="execute">Execute</button>
         </div>
 
         <!-- Status -->
@@ -690,14 +697,36 @@
             </div>
           </div>
 
+          <h3 class="em-section-title">Selector Preferences</h3>
+          <div class="em-settings">
+            <div class="em-checkbox-group">
+              <label class="em-checkbox-label">
+                <input type="checkbox" id="__em_pref_id" checked />
+                <span>Prefer ID</span>
+              </label>
+              <label class="em-checkbox-label">
+                <input type="checkbox" id="__em_pref_attr" checked />
+                <span>Prefer stable attributes</span>
+              </label>
+              <label class="em-checkbox-label">
+                <input type="checkbox" id="__em_pref_class" checked />
+                <span>Prefer class names</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="em-actions">
+            <button class="em-btn em-btn-primary" id="__em_verify">Verify (Highlight Only)</button>
+          </div>
+
           <div class="em-actions">
             <button class="em-btn em-btn-success" id="__em_save">Save</button>
             <button class="em-btn em-btn-ghost" id="__em_cancel">Cancel</button>
           </div>
         </div>
 
-        <!-- Content: Validation Tab -->
-        <div class="em-content" id="__em_tab_validation" style="display: none;">
+        <!-- Content: Execute Tab -->
+        <div class="em-content" id="__em_tab_execute" style="display: none;">
           <div class="em-settings">
             <div class="em-settings-group">
               <div class="em-settings-label">Action</div>
@@ -783,36 +812,13 @@
             </div>
 
             <div class="em-actions" style="margin-top: 16px;">
-              <button class="em-btn em-btn-primary" id="__em_validate">Validate</button>
+              <button class="em-btn em-btn-primary" id="__em_execute">Execute</button>
             </div>
 
-            <!-- Validation History -->
-            <div id="__em_validation_history" style="margin-top: 16px; display: none;">
-              <div class="em-settings-label">Recent Validations</div>
+            <!-- Execution History -->
+            <div id="__em_execution_history" style="margin-top: 16px; display: none;">
+              <div class="em-settings-label">Recent Executions</div>
               <div id="__em_history_list" style="font-size: 12px; color: #737373; margin-top: 8px;"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Content: Settings Tab -->
-        <div class="em-content" id="__em_tab_settings" style="display: none;">
-          <div class="em-settings">
-            <div class="em-settings-group">
-              <div class="em-settings-label">Selector Preferences</div>
-              <div class="em-checkbox-group">
-                <label class="em-checkbox-label">
-                  <input type="checkbox" id="__em_pref_id" checked />
-                  <span>Prefer ID</span>
-                </label>
-                <label class="em-checkbox-label">
-                  <input type="checkbox" id="__em_pref_attr" checked />
-                  <span>Prefer stable attributes</span>
-                </label>
-                <label class="em-checkbox-label">
-                  <input type="checkbox" id="__em_pref_class" checked />
-                  <span>Prefer class names</span>
-                </label>
-              </div>
             </div>
           </div>
         </div>
@@ -983,22 +989,22 @@
       });
 
       const attrContent = shadow.getElementById('__em_tab_attributes');
-      const validationContent = shadow.getElementById('__em_tab_validation');
-      const settingsContent = shadow.getElementById('__em_tab_settings');
+      const executeContent = shadow.getElementById('__em_tab_execute');
 
       if (attrContent)
         attrContent.style.display = state.activeTab === 'attributes' ? 'block' : 'none';
-      if (validationContent)
-        validationContent.style.display = state.activeTab === 'validation' ? 'block' : 'none';
-      if (settingsContent)
-        settingsContent.style.display = state.activeTab === 'settings' ? 'block' : 'none';
+      if (executeContent)
+        executeContent.style.display = state.activeTab === 'execute' ? 'block' : 'none';
+
+      // Sync interaction mode when tab changes
+      syncInteractionMode();
     }
 
     function updateValidationHistoryUI() {
       const shadow = PanelHost.getShadow();
       if (!shadow) return;
 
-      const historyContainer = shadow.getElementById('__em_validation_history');
+      const historyContainer = shadow.getElementById('__em_execution_history');
       const historyList = shadow.getElementById('__em_history_list');
       if (!historyContainer || !historyList) return;
 
@@ -1450,6 +1456,11 @@
       const node = stack.pop();
       if (!node || ++count > MAX) continue;
 
+      // Skip overlay elements to prevent panel self-highlighting
+      if (isOverlayElement(node)) {
+        continue;
+      }
+
       yield node;
 
       try {
@@ -1494,7 +1505,10 @@
 
       for (let i = 0; i < res.snapshotLength; i++) {
         const n = res.snapshotItem(i);
-        if (n?.nodeType === 1) arr.push(n);
+        // Filter out overlay elements to prevent panel self-highlighting
+        if (n?.nodeType === 1 && !isOverlayElement(n)) {
+          arr.push(n);
+        }
       }
       return arr;
     } catch {
@@ -1512,8 +1526,10 @@
     selectedEl: null,
     box: null,
     highlighter: null,
+    listenersAttached: false,
     rectsHost: null,
     hoveredList: [],
+    verifyRectsActive: false, // Track if verify rects are showing
   };
 
   function ensureHighlighter() {
@@ -1564,16 +1580,25 @@
   }
 
   function clearHighlighter() {
+    console.log('[clearHighlighter] called, verifyRectsActive:', STATE.verifyRectsActive);
     if (STATE.highlighter) STATE.highlighter.style.display = 'none';
-    clearRects();
+    // Only clear hover rects, not verify rects
+    if (!STATE.verifyRectsActive) {
+      console.log('[clearHighlighter] clearing rects because verifyRectsActive is false');
+      clearRects();
+    } else {
+      console.log('[clearHighlighter] NOT clearing rects because verifyRectsActive is true');
+    }
   }
 
   function clearRects() {
     if (STATE.rectsHost) STATE.rectsHost.innerHTML = '';
+    STATE.verifyRectsActive = false;
   }
 
   function drawRects(elements, color = CONFIG.COLORS.HOVER, dashed = true) {
     const host = ensureRectsHost();
+    // Clear previous rects
     clearRects();
 
     for (const el of elements) {
@@ -1598,6 +1623,44 @@
   // Interaction Logic
   // ============================================================================
 
+  function isInsidePanel(target) {
+    const shadow = PanelHost.getShadow();
+    return !!shadow && target instanceof Node && shadow.contains(target);
+  }
+
+  /**
+   * Check if a node belongs to the element marker overlay (panel host or its shadow DOM)
+   * This is used to filter out overlay elements from query results to prevent self-highlighting
+   *
+   * @param {Node} node - The node to check
+   * @returns {boolean} True if the node is part of the overlay
+   */
+  function isOverlayElement(node) {
+    if (!(node instanceof Node)) return false;
+
+    const host = PanelHost.getHost();
+    if (!host) return false;
+
+    // Check if node is the panel host itself
+    if (node === host) return true;
+
+    // Check if node is within the shadow DOM of the panel host
+    const root = typeof node.getRootNode === 'function' ? node.getRootNode() : null;
+    return root instanceof ShadowRoot && root.host === host;
+  }
+
+  /**
+   * Filter out overlay elements from an array of elements
+   * This ensures that panel components are never included in highlight/verification results
+   *
+   * @param {Array} elements - Array of elements to filter
+   * @returns {Array} Filtered array without overlay elements
+   */
+  function filterOverlayElements(elements) {
+    if (!Array.isArray(elements)) return [];
+    return elements.filter((node) => !isOverlayElement(node));
+  }
+
   function onMouseMove(ev) {
     if (!STATE.active) return;
 
@@ -1608,7 +1671,9 @@
     }
 
     const host = PanelHost.getHost();
-    if (host && (target === host || target.closest?.('#__element_marker_overlay'))) {
+    // Check if target is the panel host itself or inside the shadow DOM
+    if ((host && target === host) || isInsidePanel(target)) {
+      STATE.hoverEl = null; // Reset to prevent keyboard shortcuts from reselecting the last element
       clearHighlighter();
       return;
     }
@@ -1645,13 +1710,59 @@
     }
   }
 
+  // ============================================================================
+  // Event Listeners Management
+  // ============================================================================
+
+  function attachPointerListeners() {
+    if (STATE.listenersAttached) return;
+    window.addEventListener('mousemove', onMouseMove, true);
+    window.addEventListener('click', onClick, true);
+    STATE.listenersAttached = true;
+  }
+
+  function detachPointerListeners() {
+    if (!STATE.listenersAttached) return;
+    window.removeEventListener('mousemove', onMouseMove, true);
+    window.removeEventListener('click', onClick, true);
+    STATE.listenersAttached = false;
+  }
+
+  function attachKeyboardListener() {
+    window.addEventListener('keydown', onKeyDown, true);
+  }
+
+  function detachKeyboardListener() {
+    window.removeEventListener('keydown', onKeyDown, true);
+  }
+
+  function syncInteractionMode() {
+    if (!STATE.active) return;
+    const activeTab = StateStore.get('activeTab');
+    if (activeTab === 'execute') {
+      // In execute mode, detach pointer listeners to allow real interactions
+      // but keep keyboard listener for Esc key
+      detachPointerListeners();
+      // Only clear the hover highlighter, not the verification rects
+      if (STATE.highlighter) STATE.highlighter.style.display = 'none';
+    } else {
+      // In attributes mode, attach all listeners for element selection
+      attachPointerListeners();
+    }
+  }
+
+  // ============================================================================
+  // Event Handlers
+  // ============================================================================
+
   function onClick(ev) {
     if (!STATE.active) return;
 
     const target = ev.target;
     const host = PanelHost.getHost();
 
-    if (host && (target === host || target.closest?.('#__element_marker_overlay'))) {
+    // Check if click is on the panel host itself or inside the shadow DOM
+    if ((host && target === host) || isInsidePanel(target)) {
       return;
     }
 
@@ -1682,6 +1793,12 @@
 
   function onKeyDown(e) {
     if (!STATE.active) return;
+
+    // Check if the focused element is inside the panel - if so, don't handle selection keys
+    if (isInsidePanel(e.target)) {
+      // Key event is from panel, don't interfere
+      if (e.key !== 'Escape') return; // Still allow Escape to close
+    }
 
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -1733,13 +1850,97 @@
   // Validation Logic
   // ============================================================================
 
+  /**
+   * Verify selector by highlighting only (non-destructive)
+   */
+  async function verifyHighlightOnly() {
+    try {
+      const selector = STATE.box?.querySelector('#__em_selector')?.textContent?.trim();
+      console.log('[verifyHighlightOnly] selector:', selector);
+      if (!selector) return;
+
+      StateStore.set({
+        validation: { status: 'running', message: 'Verifying selector...' },
+      });
+
+      const selectorType = StateStore.get('selectorType');
+      const listMode = StateStore.get('listMode');
+      const effectiveType = listMode ? 'css' : selectorType;
+
+      // Query for matches
+      const matches =
+        effectiveType === 'xpath' ? evaluateXPathAll(selector) : queryAllDeep(selector);
+
+      // Additional defense: filter out any overlay elements that might have slipped through
+      const filteredMatches = filterOverlayElements(matches);
+
+      console.log('[verifyHighlightOnly] matches:', filteredMatches.length);
+
+      if (!filteredMatches || filteredMatches.length === 0) {
+        StateStore.set({
+          validation: { status: 'error', message: 'No elements found' },
+        });
+        return;
+      }
+
+      // Scroll first match into view
+      const primaryMatch = filteredMatches[0];
+      if (primaryMatch) {
+        primaryMatch.scrollIntoView({
+          block: 'center',
+          inline: 'center',
+          behavior: 'smooth',
+        });
+      }
+
+      await sleep(200);
+
+      // Highlight matches
+      console.log(
+        '[verifyHighlightOnly] calling drawRects with',
+        filteredMatches.length,
+        'elements',
+      );
+      drawRects(filteredMatches, CONFIG.COLORS.VERIFY, false);
+      STATE.verifyRectsActive = true; // Mark as verify rects to prevent clearing
+      console.log('[verifyHighlightOnly] STATE.verifyRectsActive set to true');
+      console.log(
+        '[verifyHighlightOnly] STATE.rectsHost children:',
+        STATE.rectsHost?.children.length,
+      );
+
+      StateStore.set({
+        validation: {
+          status: 'success',
+          message: `Found ${filteredMatches.length} element${filteredMatches.length > 1 ? 's' : ''}`,
+        },
+      });
+
+      // Auto-clear highlight after 2 seconds
+      setTimeout(() => {
+        clearRects();
+        StateStore.set({
+          validation: { status: 'idle', message: '' },
+        });
+      }, 2000);
+    } catch (error) {
+      console.error('[verifyHighlightOnly] error:', error);
+      StateStore.set({
+        validation: { status: 'error', message: error.message || 'Verification failed' },
+      });
+    }
+  }
+
+  /**
+   * Execute action on selector (destructive)
+   */
   async function verifySelectorNow() {
     try {
       const selector = STATE.box?.querySelector('#__em_selector')?.textContent?.trim();
       if (!selector) return;
 
       StateStore.set({
-        validation: { status: 'running', message: '正在验证...' },
+        validation: { status: 'running', message: 'Executing action...' },
       });
 
       const selectorType = StateStore.get('selectorType');
@@ -1750,7 +1951,17 @@
       const matches =
         effectiveType === 'xpath' ? evaluateXPathAll(selector) : queryAllDeep(selector);
 
-      drawRects(matches, CONFIG.COLORS.VERIFY, false);
+      // Additional defense: filter out any overlay elements that might have slipped through
+      const filteredMatches = filterOverlayElements(matches);
+
+      if (!filteredMatches || filteredMatches.length === 0) {
+        StateStore.set({
+          validation: { status: 'error', message: 'No elements found' },
+        });
+        return;
+      }
+
+      drawRects(filteredMatches, CONFIG.COLORS.VERIFY, false);
 
       const action = STATE.box?.querySelector('#__em_action')?.value || 'hover';
 
@@ -1759,6 +1970,7 @@
         selector,
         selectorType: effectiveType,
         action,
+        listMode,
       };
 
       // Action-specific parameters
@@ -1798,7 +2010,7 @@
         action,
         success,
         timestamp: Date.now(),
-        matchCount: matches.length,
+        matchCount: filteredMatches.length,
       };
       const history = [...(StateStore.get('validationHistory') || []), newEntry].slice(-5);
 
@@ -1806,7 +2018,7 @@
         StateStore.set({
           validation: {
             status: 'success',
-            message: `✓ 验证成功 (匹配 ${matches.length} 个元素)`,
+            message: `✓ 验证成功 (匹配 ${filteredMatches.length} 个元素)`,
           },
           validationHistory: history,
         });
@@ -1835,6 +2047,116 @@
         },
         validationHistory: history,
       });
+    }
+  }
+
+  /**
+   * Highlight selector from external request (popup/background)
+   * Supports composite iframe selectors: "frameSelector |> innerSelector"
+   */
+  async function highlightSelectorExternal({ selector, selectorType = 'css', listMode = false }) {
+    const normalized = String(selector || '').trim();
+    if (!normalized) {
+      return { success: false, error: 'selector is required' };
+    }
+
+    try {
+      // Handle composite iframe selector
+      if (normalized.includes('|>')) {
+        const parts = normalized
+          .split('|>')
+          .map((s) => s.trim())
+          .filter(Boolean);
+
+        if (parts.length >= 2) {
+          const frameSel = parts[0];
+          const innerSel = parts.slice(1).join(' |> ');
+
+          // Find frame element
+          let frameEl = null;
+          try {
+            frameEl = querySelectorDeepFirst(frameSel) || document.querySelector(frameSel);
+          } catch {}
+
+          if (
+            !frameEl ||
+            !(frameEl instanceof HTMLIFrameElement || frameEl instanceof HTMLFrameElement)
+          ) {
+            return { success: false, error: `Frame element not found: ${frameSel}` };
+          }
+
+          const cw = frameEl.contentWindow;
+          if (!cw) {
+            return { success: false, error: 'Unable to access frame contentWindow' };
+          }
+
+          // Forward highlight request to iframe
+          return new Promise((resolve) => {
+            const reqId = `em_highlight_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            const listener = (ev) => {
+              try {
+                const data = ev?.data;
+                if (!data || data.type !== 'em-highlight-result' || data.reqId !== reqId) return;
+                window.removeEventListener('message', listener, true);
+                resolve(data.result);
+              } catch {}
+            };
+
+            window.addEventListener('message', listener, true);
+            setTimeout(() => {
+              window.removeEventListener('message', listener, true);
+              resolve({ success: false, error: 'Frame highlight timeout' });
+            }, 3000);
+
+            cw.postMessage(
+              {
+                type: 'em-highlight-request',
+                reqId,
+                selector: innerSel,
+                selectorType,
+                listMode,
+              },
+              '*',
+            );
+          });
+        }
+      }
+
+      // Handle normal selector (non-iframe)
+      const effectiveType = listMode ? 'css' : selectorType;
+      const matches =
+        effectiveType === 'xpath' ? evaluateXPathAll(normalized) : queryAllDeep(normalized);
+
+      // Additional defense: filter out any overlay elements that might have slipped through
+      const filteredMatches = filterOverlayElements(matches);
+
+      if (!filteredMatches || filteredMatches.length === 0) {
+        return { success: false, error: 'No elements found for selector' };
+      }
+
+      // Scroll first match into view
+      const primaryMatch = filteredMatches[0];
+      if (primaryMatch) {
+        primaryMatch.scrollIntoView({
+          block: 'center',
+          inline: 'center',
+          behavior: 'smooth',
+        });
+      }
+
+      await sleep(150);
+
+      // Draw highlight rectangles
+      drawRects(filteredMatches, CONFIG.COLORS.VERIFY, false);
+
+      // Auto-clear after 2 seconds
+      setTimeout(() => {
+        clearRects();
+      }, 2000);
+
+      return { success: true, count: filteredMatches.length };
+    } catch (error) {
+      return { success: false, error: error.message || String(error) };
     }
   }
 
@@ -1876,6 +2198,7 @@
           name: name || selector,
           selector,
           selectorType,
+          listMode,
         },
       });
     } catch {}
@@ -1901,17 +2224,16 @@
     ensureHighlighter();
     ensureRectsHost();
 
-    window.addEventListener('mousemove', onMouseMove, true);
-    window.addEventListener('click', onClick, true);
-    window.addEventListener('keydown', onKeyDown, true);
+    attachPointerListeners();
+    attachKeyboardListener();
+    syncInteractionMode();
   }
 
   function stop() {
     STATE.active = false;
 
-    window.removeEventListener('mousemove', onMouseMove, true);
-    window.removeEventListener('click', onClick, true);
-    window.removeEventListener('keydown', onKeyDown, true);
+    detachPointerListeners();
+    detachKeyboardListener();
 
     try {
       STATE.highlighter?.remove();
@@ -1943,8 +2265,11 @@
     // Save
     host.querySelector('#__em_save')?.addEventListener('click', save);
 
-    // Validate & Copy
-    host.querySelector('#__em_validate')?.addEventListener('click', verifySelectorNow);
+    // Verify (highlight only) & Execute (real action)
+    host.querySelector('#__em_verify')?.addEventListener('click', verifyHighlightOnly);
+    host.querySelector('#__em_execute')?.addEventListener('click', verifySelectorNow);
+
+    // Copy
     host.querySelector('#__em_copy')?.addEventListener('click', copySelectorNow);
     host.querySelector('#__em_copy_selector')?.addEventListener('click', copySelectorNow);
 
@@ -2005,10 +2330,10 @@
       clearHighlighter();
     });
 
-    // Tab toggle
+    // Tab toggle (switch between Attributes and Execute)
     host.querySelector('#__em_toggle_tab')?.addEventListener('click', () => {
       const currentTab = StateStore.get('activeTab');
-      StateStore.set({ activeTab: currentTab === 'attributes' ? 'settings' : 'attributes' });
+      StateStore.set({ activeTab: currentTab === 'attributes' ? 'execute' : 'attributes' });
     });
 
     // Tab switching
@@ -2125,58 +2450,94 @@
   // Cross-Frame Bridge
   // ============================================================================
 
-  if (IS_MAIN) {
-    window.addEventListener(
-      'message',
-      (ev) => {
-        try {
-          const data = ev?.data;
-          if (!data || !STATE.active) return;
+  // Register window message listener in all frames (not just main)
+  // to support cross-frame highlighting from popup validation
+  window.addEventListener(
+    'message',
+    (ev) => {
+      try {
+        const data = ev?.data;
+        if (!data) return;
 
-          const iframes = Array.from(document.querySelectorAll('iframe'));
-          const host = iframes.find((f) => {
-            try {
-              return f.contentWindow === ev.source;
-            } catch {
-              return false;
-            }
-          });
+        // Handle iframe highlight request (works even when overlay is inactive)
+        if (data.type === 'em-highlight-request') {
+          highlightSelectorExternal({
+            selector: data.selector,
+            selectorType: data.selectorType || 'css',
+            listMode: !!data.listMode,
+          })
+            .then((result) => {
+              window.parent.postMessage(
+                {
+                  type: 'em-highlight-result',
+                  reqId: data.reqId,
+                  result,
+                },
+                '*',
+              );
+            })
+            .catch((error) => {
+              window.parent.postMessage(
+                {
+                  type: 'em-highlight-result',
+                  reqId: data.reqId,
+                  result: { success: false, error: error?.message || String(error) },
+                },
+                '*',
+              );
+            });
+          return;
+        }
 
-          if (!host) return;
+        // Following messages only relevant when overlay is active
+        if (!STATE.active) return;
 
-          const base = host.getBoundingClientRect();
+        // Only main frame handles these overlay-related messages
+        if (!IS_MAIN) return;
 
-          if (data.type === 'em_hover' && Array.isArray(data.rects)) {
-            const overlay = ensureRectsHost();
-            clearRects();
-
-            for (const r of data.rects) {
-              const box = document.createElement('div');
-              Object.assign(box.style, {
-                position: 'fixed',
-                left: `${base.left + r.x}px`,
-                top: `${base.top + r.y}px`,
-                width: `${r.width}px`,
-                height: `${r.height}px`,
-                border: `2px dashed ${CONFIG.COLORS.HOVER}`,
-                borderRadius: '4px',
-                boxShadow: `0 0 0 2px ${CONFIG.COLORS.HOVER}22`,
-              });
-              overlay.appendChild(box);
-            }
-          } else if (data.type === 'em_click' && data.innerSel) {
-            const frameSel = generateSelector(host);
-            const composite = frameSel ? `${frameSel} |> ${data.innerSel}` : data.innerSel;
-            const selectorText = STATE.box?.querySelector('#__em_selector');
-            const selectorDisplay = STATE.box?.querySelector('#__em_selector_text');
-            if (selectorText) selectorText.textContent = composite;
-            if (selectorDisplay) selectorDisplay.textContent = composite;
+        const iframes = Array.from(document.querySelectorAll('iframe'));
+        const host = iframes.find((f) => {
+          try {
+            return f.contentWindow === ev.source;
+          } catch {
+            return false;
           }
-        } catch {}
-      },
-      true,
-    );
-  }
+        });
+
+        if (!host) return;
+
+        const base = host.getBoundingClientRect();
+
+        if (data.type === 'em_hover' && Array.isArray(data.rects)) {
+          const overlay = ensureRectsHost();
+          clearRects();
+
+          for (const r of data.rects) {
+            const box = document.createElement('div');
+            Object.assign(box.style, {
+              position: 'fixed',
+              left: `${base.left + r.x}px`,
+              top: `${base.top + r.y}px`,
+              width: `${r.width}px`,
+              height: `${r.height}px`,
+              border: `2px dashed ${CONFIG.COLORS.HOVER}`,
+              borderRadius: '4px',
+              boxShadow: `0 0 0 2px ${CONFIG.COLORS.HOVER}22`,
+            });
+            overlay.appendChild(box);
+          }
+        } else if (data.type === 'em_click' && data.innerSel) {
+          const frameSel = generateSelector(host);
+          const composite = frameSel ? `${frameSel} |> ${data.innerSel}` : data.innerSel;
+          const selectorText = STATE.box?.querySelector('#__em_selector');
+          const selectorDisplay = STATE.box?.querySelector('#__em_selector_text');
+          if (selectorText) selectorText.textContent = composite;
+          if (selectorDisplay) selectorDisplay.textContent = composite;
+        }
+      } catch {}
+    },
+    true,
+  );
 
   // ============================================================================
   // Message Handlers
@@ -2190,6 +2551,15 @@
     } else if (request?.action === 'element_marker_ping') {
       sendResponse({ status: 'pong' });
       return false;
+    } else if (request?.action === 'element_marker_highlight') {
+      highlightSelectorExternal({
+        selector: request.selector,
+        selectorType: request.selectorType,
+        listMode: !!request.listMode,
+      })
+        .then((result) => sendResponse(result))
+        .catch((error) => sendResponse({ success: false, error: error?.message || String(error) }));
+      return true;
     }
     return false;
   });

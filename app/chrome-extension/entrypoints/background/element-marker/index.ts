@@ -18,6 +18,32 @@ import { keyboardTool } from '@/entrypoints/background/tools/browser/keyboard';
 
 const CONTEXT_MENU_ID = 'element_marker_mark';
 
+/**
+ * Extract error message from MCP tool result
+ */
+function extractToolError(result: any): string | undefined {
+  if (!result) return undefined;
+
+  // Check for error in result content array
+  if (Array.isArray(result.content)) {
+    for (const item of result.content) {
+      if (item?.text) {
+        try {
+          const parsed = JSON.parse(item.text);
+          if (parsed?.error) return parsed.error;
+          if (parsed?.message) return parsed.message;
+        } catch {
+          // Not JSON, use as-is
+          return item.text;
+        }
+      }
+    }
+  }
+
+  // Fallback to direct error field
+  return result.error || (result.isError ? 'unknown tool error' : undefined);
+}
+
 async function ensureContextMenu() {
   try {
     // Guard: contextMenus permission may be missing
@@ -106,6 +132,7 @@ export function initElementMarkerListeners() {
               selector: string;
               selectorType?: 'css' | 'xpath';
               action: MarkerValidationAction;
+              listMode?: boolean;
               text?: string;
               keys?: string;
               button?: 'left' | 'right' | 'middle';
@@ -146,6 +173,7 @@ export function initElementMarkerListeners() {
                 action: 'ensureRefForSelector',
                 selector,
                 isXPath: selectorType === 'xpath',
+                allowMultiple: !!req.listMode,
               } as any);
             } catch (e) {
               return sendResponse({
@@ -194,7 +222,8 @@ export function initElementMarkerListeners() {
                       ? { action: 'hover', coordinates: coords }
                       : ({ action: 'hover', ref: ensured.ref } as any),
                   );
-                  base.tool = { name: 'computer.hover', ok: !r.isError };
+                  const error = r.isError ? extractToolError(r) : undefined;
+                  base.tool = { name: 'computer.hover', ok: !r.isError, error };
                   break;
                 }
                 case 'left_click': {
@@ -207,7 +236,8 @@ export function initElementMarkerListeners() {
                     button: (req.button || 'left') as any,
                     modifiers: req.modifiers || {},
                   } as any);
-                  base.tool = { name: 'interaction.click', ok: !r.isError };
+                  const error = r.isError ? extractToolError(r) : undefined;
+                  base.tool = { name: 'interaction.click', ok: !r.isError, error };
                   break;
                 }
                 case 'double_click': {
@@ -221,7 +251,8 @@ export function initElementMarkerListeners() {
                     button: (req.button || 'left') as any,
                     modifiers: req.modifiers || {},
                   } as any);
-                  base.tool = { name: 'interaction.click(double)', ok: !r.isError };
+                  const error = r.isError ? extractToolError(r) : undefined;
+                  base.tool = { name: 'interaction.click(double)', ok: !r.isError, error };
                   break;
                 }
                 case 'right_click': {
@@ -234,7 +265,8 @@ export function initElementMarkerListeners() {
                     button: 'right',
                     modifiers: req.modifiers || {},
                   } as any);
-                  base.tool = { name: 'interaction.click(right)', ok: !r.isError };
+                  const error = r.isError ? extractToolError(r) : undefined;
+                  base.tool = { name: 'interaction.click(right)', ok: !r.isError, error };
                   break;
                 }
                 case 'scroll': {
@@ -256,13 +288,15 @@ export function initElementMarkerListeners() {
                         ref: ensured.ref,
                       } as any);
                   const r = await computerTool.execute(payload as any);
-                  base.tool = { name: 'computer.scroll', ok: !r.isError };
+                  const error = r.isError ? extractToolError(r) : undefined;
+                  base.tool = { name: 'computer.scroll', ok: !r.isError, error };
                   break;
                 }
                 case 'type_text': {
                   const text = String(req.text || '');
                   const r = await computerTool.execute({ action: 'type', ref: ensured.ref, text });
-                  base.tool = { name: 'computer.type', ok: !r.isError };
+                  const error = r.isError ? extractToolError(r) : undefined;
+                  base.tool = { name: 'computer.type', ok: !r.isError, error };
                   break;
                 }
                 case 'press_keys': {
@@ -276,7 +310,8 @@ export function initElementMarkerListeners() {
                     });
                   } catch {}
                   const r = await keyboardTool.execute({ keys, delay: 0 } as any);
-                  base.tool = { name: 'keyboard.simulate', ok: !r.isError };
+                  const error = r.isError ? extractToolError(r) : undefined;
+                  base.tool = { name: 'keyboard.simulate', ok: !r.isError, error };
                   break;
                 }
                 default: {
@@ -284,12 +319,25 @@ export function initElementMarkerListeners() {
                 }
               }
             } catch (e) {
+              console.warn('[ElementMarker] Validation failed before tool execution', e);
               base.tool = {
                 name: 'unknown',
                 ok: false,
                 error: String(e instanceof Error ? e.message : e),
               };
             }
+
+            // Log tool failures for debugging
+            if (base.tool && base.tool.ok === false) {
+              console.warn('[ElementMarker] Tool validation failure', {
+                action,
+                toolName: base.tool.name,
+                error: base.tool.error,
+                selector,
+                selectorType,
+              });
+            }
+
             return sendResponse(base);
           })();
           return true;

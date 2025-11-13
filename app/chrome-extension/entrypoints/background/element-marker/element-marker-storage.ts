@@ -68,6 +68,7 @@ export async function saveMarker(req: UpsertMarkerRequest): Promise<ElementMarke
     name: req.name || selector,
     selector,
     selectorType: req.selectorType || 'css',
+    listMode: req.listMode || false,
     action: req.action || 'custom',
     createdAt: ts,
     updatedAt: ts,

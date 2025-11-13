@@ -100,7 +100,16 @@ async function load() {
 }
 
 function prefill(m: ElementMarker) {
-  form.value = { url: m.url, name: m.name, selector: m.selector, matchType: m.matchType, id: m.id };
+  form.value = {
+    url: m.url,
+    name: m.name,
+    selector: m.selector,
+    selectorType: m.selectorType,
+    listMode: m.listMode,
+    matchType: m.matchType,
+    action: m.action,
+    id: m.id,
+  };
 }
 
 async function onAdd() {
@@ -134,14 +143,49 @@ async function remove(m: ElementMarker) {
 
 async function validate(m: ElementMarker) {
   try {
-    await chrome.runtime.sendMessage({
+    const res: any = await chrome.runtime.sendMessage({
       type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_VALIDATE,
       selector: m.selector,
       selectorType: m.selectorType || 'css',
       action: 'hover',
+      listMode: !!m.listMode,
     } as any);
+
+    // Trigger highlight in the page only if tool validation succeeded
+    if (res?.tool?.ok !== false) {
+      await highlightInTab(m);
+    }
   } catch (e) {
     /* ignore */
+  }
+}
+
+async function highlightInTab(m: ElementMarker) {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tabId = tabs[0]?.id;
+    if (!tabId) return;
+
+    // Ensure element-marker.js is injected
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        files: ['inject-scripts/element-marker.js'],
+        world: 'ISOLATED',
+      });
+    } catch {
+      // Already injected, ignore
+    }
+
+    // Send highlight message to content script
+    await chrome.tabs.sendMessage(tabId, {
+      action: 'element_marker_highlight',
+      selector: m.selector,
+      selectorType: m.selectorType || 'css',
+      listMode: !!m.listMode,
+    });
+  } catch (e) {
+    // Ignore errors (tab might not support content scripts)
   }
 }
 

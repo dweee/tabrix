@@ -332,15 +332,18 @@ class ComputerTool extends BaseBrowserToolExecutor {
 
           try {
             await CDPHelper.attach(tab.id);
-            // Move pointer to target. We can dispatch a single mouseMoved; browsers will generate mouseover/mouseenter as needed.
-            await CDPHelper.dispatchMouseEvent(tab.id, {
-              type: 'mouseMoved',
-              x: coord.x,
-              y: coord.y,
-              button: 'none',
-              buttons: 0,
-            });
-            await CDPHelper.detach(tab.id);
+            try {
+              // Move pointer to target. We can dispatch a single mouseMoved; browsers will generate mouseover/mouseenter as needed.
+              await CDPHelper.dispatchMouseEvent(tab.id, {
+                type: 'mouseMoved',
+                x: coord.x,
+                y: coord.y,
+                button: 'none',
+                buttons: 0,
+              });
+            } finally {
+              await CDPHelper.detach(tab.id);
+            }
 
             // Optional hold to allow UI (menus/tooltips) to appear
             const holdMs = Math.max(
@@ -358,16 +361,15 @@ class ComputerTool extends BaseBrowserToolExecutor {
                     action: 'hover',
                     coordinates: coord,
                     resolvedBy,
+                    transport: 'cdp',
                   }),
                 },
               ],
               isError: false,
             };
-          } catch (e) {
-            await CDPHelper.detach(tab.id);
-            return createErrorResponse(
-              `Hover failed: ${e instanceof Error ? e.message : String(e)}`,
-            );
+          } catch (error) {
+            console.warn('[ComputerTool] CDP hover failed, attempting DOM fallback', error);
+            return await this.domHoverFallback(tab.id, coord, resolvedBy, params.ref);
           }
         }
         case 'left_click':
@@ -1010,6 +1012,114 @@ class ComputerTool extends BaseBrowserToolExecutor {
       console.error('Error in computer tool:', error);
       return createErrorResponse(
         `Failed to execute action: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * DOM-based hover fallback when CDP is unavailable
+   * Tries ref-based approach first (works with iframes), falls back to coordinates
+   */
+  private async domHoverFallback(
+    tabId: number,
+    coord?: Coordinates,
+    resolvedBy?: 'ref' | 'selector' | 'coordinates',
+    ref?: string,
+  ): Promise<ToolResult> {
+    // Try ref-based approach first (handles iframes correctly)
+    if (ref) {
+      try {
+        const resp = await this.sendMessageToTab(tabId, {
+          action: TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF,
+          ref,
+        });
+        if (resp?.success) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  action: 'hover',
+                  resolvedBy: 'ref',
+                  transport: 'dom-ref',
+                  target: resp.target,
+                }),
+              },
+            ],
+            isError: false,
+          };
+        }
+      } catch (error) {
+        console.warn('[ComputerTool] DOM ref hover failed, falling back to coordinates', error);
+      }
+    }
+
+    // Fallback to coordinate-based approach
+    if (!coord) {
+      return createErrorResponse('Hover fallback requires coordinates or ref');
+    }
+
+    try {
+      const [injection] = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        func: (point) => {
+          const target = document.elementFromPoint(point.x, point.y);
+          if (!target) {
+            return { success: false, error: 'No element found at coordinates' };
+          }
+
+          // Dispatch hover-related events
+          for (const type of ['mousemove', 'mouseover', 'mouseenter']) {
+            target.dispatchEvent(
+              new MouseEvent(type, {
+                bubbles: true,
+                cancelable: true,
+                clientX: point.x,
+                clientY: point.y,
+                view: window,
+              }),
+            );
+          }
+
+          return {
+            success: true,
+            target: {
+              tagName: target.tagName,
+              id: target.id,
+              className: target.className,
+              text: target.textContent?.trim()?.slice(0, 100) || '',
+            },
+          };
+        },
+        args: [coord],
+      });
+
+      const payload = injection?.result;
+      if (!payload?.success) {
+        return createErrorResponse(payload?.error || 'DOM hover fallback failed');
+      }
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              action: 'hover',
+              coordinates: coord,
+              resolvedBy,
+              transport: 'dom',
+              target: payload.target,
+            }),
+          },
+        ],
+        isError: false,
+      };
+    } catch (error) {
+      return createErrorResponse(
+        `DOM hover fallback failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }

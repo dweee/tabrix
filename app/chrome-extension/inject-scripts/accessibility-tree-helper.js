@@ -301,6 +301,162 @@
   }
 
   /**
+   * Query CSS selector and return match info including uniqueness check.
+   * @param {string} selector - CSS selector to query
+   * @param {boolean} allowMultiple - If true, skip uniqueness check and return first match
+   * @returns {{element: Element | null, matchCount: number, error?: string}}
+   * Note: matchCount is capped at 2 (where 2 means "2 or more") for performance
+   */
+  function querySelectorWithUniquenessCheck(selector, allowMultiple = false) {
+    const seen = new Set();
+    let firstMatch = null;
+    let matchCount = 0;
+
+    const recordMatch = (el) => {
+      if (!(el instanceof Element) || seen.has(el)) return false;
+      seen.add(el);
+      matchCount++;
+      if (!firstMatch) firstMatch = el;
+      // Short-circuit if:
+      // - allowMultiple is true and we found first match (no need to continue)
+      // - allowMultiple is false and we found multiple matches
+      if (allowMultiple && firstMatch) return true;
+      if (!allowMultiple && matchCount >= 2) return true;
+      return false;
+    };
+
+    // Query in main document
+    let selectorError = null;
+    try {
+      const directMatches = document.querySelectorAll(selector);
+      for (let i = 0; i < directMatches.length; i++) {
+        if (recordMatch(directMatches[i])) {
+          // Early exit: either found first match (allowMultiple) or found multiple (not allowed)
+          return { element: firstMatch, matchCount: allowMultiple ? 1 : 2 };
+        }
+      }
+    } catch (e) {
+      selectorError = e;
+    }
+
+    if (selectorError) {
+      return {
+        element: null,
+        matchCount: 0,
+        error: `Invalid CSS selector "${selector}": ${selectorError.message || selectorError}`,
+      };
+    }
+
+    // If allowMultiple and we already have a match, return immediately
+    if (allowMultiple && firstMatch) {
+      return { element: firstMatch, matchCount: 1 };
+    }
+
+    // Query in shadow DOMs
+    const visited = new Set();
+    const stack = [document.documentElement];
+    while (stack.length) {
+      const node = stack.pop();
+      if (!node || visited.has(node)) continue;
+      visited.add(node);
+
+      try {
+        const shadowRoot = /** @type {any} */ (node).shadowRoot;
+        if (shadowRoot) {
+          try {
+            const shadowMatches = shadowRoot.querySelectorAll(selector);
+            for (let i = 0; i < shadowMatches.length; i++) {
+              if (recordMatch(shadowMatches[i])) {
+                // Early exit: either found first match (allowMultiple) or found multiple (not allowed)
+                return { element: firstMatch, matchCount: allowMultiple ? 1 : 2 };
+              }
+            }
+          } catch (e) {
+            return {
+              element: null,
+              matchCount: 0,
+              error: `Invalid CSS selector "${selector}": ${e.message || e}`,
+            };
+          }
+
+          // Add shadow root children to stack
+          try {
+            const shadowChildren = shadowRoot.children || [];
+            for (let i = 0; i < shadowChildren.length; i++) {
+              stack.push(shadowChildren[i]);
+            }
+          } catch (_) {}
+        }
+      } catch (_) {}
+
+      // Add regular children to stack
+      try {
+        const children = /** @type {Element} */ (node).children || [];
+        for (let i = 0; i < children.length; i++) {
+          stack.push(children[i]);
+        }
+      } catch (_) {}
+    }
+
+    return { element: firstMatch, matchCount: Math.min(matchCount, 2) };
+  }
+
+  /**
+   * Query XPath selector and return match info including uniqueness check.
+   * @param {string} selector - XPath selector to query
+   * @param {boolean} allowMultiple - If true, skip uniqueness check and return first match
+   * @returns {{element: Element | null, matchCount: number, error?: string}}
+   * Note: matchCount is capped at 2 (where 2 means "2 or more") for performance
+   */
+  function queryXPathWithUniquenessCheck(selector, allowMultiple = false) {
+    if (!selector) {
+      return { element: null, matchCount: 0 };
+    }
+
+    try {
+      if (allowMultiple) {
+        // When multiple matches are allowed, use ANY_UNORDERED_NODE_TYPE for performance
+        // This returns just the first match without evaluating the entire result set
+        const result = document.evaluate(
+          selector,
+          document,
+          null,
+          XPathResult.ANY_UNORDERED_NODE_TYPE,
+          null,
+        );
+        const firstMatch =
+          result.singleNodeValue instanceof Element
+            ? /** @type {Element} */ (result.singleNodeValue)
+            : null;
+        return { element: firstMatch, matchCount: firstMatch ? 1 : 0 };
+      } else {
+        // When uniqueness is required, use ORDERED_NODE_SNAPSHOT_TYPE to count matches
+        const snapshot = document.evaluate(
+          selector,
+          document,
+          null,
+          XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+          null,
+        );
+        const totalMatches = snapshot.snapshotLength;
+        // Cap at 2 for performance (2 means "2 or more")
+        const matchCount = Math.min(totalMatches, 2);
+        const firstMatch =
+          totalMatches > 0 && snapshot.snapshotItem(0) instanceof Element
+            ? /** @type {Element} */ (snapshot.snapshotItem(0))
+            : null;
+        return { element: firstMatch, matchCount };
+      }
+    } catch (e) {
+      return {
+        element: null,
+        matchCount: 0,
+        error: `Invalid XPath "${selector}": ${e.message || e}`,
+      };
+    }
+  }
+
+  /**
    * Whether to include element in tree under config
    * @param {Element} el
    * @param {{filter?: 'all'|'interactive'}} cfg
@@ -501,6 +657,81 @@
 
   // Expose API on window
   window.__generateAccessibilityTree = __generateAccessibilityTree;
+
+  // ============================================================================
+  // Hover for Ref (DOM Fallback Support)
+  // ============================================================================
+
+  async function handleHoverForRef(ref) {
+    if (!ref) return { success: false, error: 'ref is required' };
+    const el = resolveRef(ref);
+    if (el) {
+      dispatchHoverEvents(el);
+      return { success: true, target: summarizeElement(el) };
+    }
+    return await forwardHoverRefToChildren(ref);
+  }
+
+  function resolveRef(ref) {
+    const map = window.__claudeElementMap || {};
+    const weak = map[ref];
+    return weak && typeof weak.deref === 'function' ? weak.deref() : null;
+  }
+
+  function dispatchHoverEvents(el) {
+    const rect = el.getBoundingClientRect();
+    const center = {
+      x: Math.round(rect.left + rect.width / 2),
+      y: Math.round(rect.top + rect.height / 2),
+    };
+    ['mousemove', 'mouseover', 'mouseenter'].forEach((type) => {
+      el.dispatchEvent(
+        new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          clientX: center.x,
+          clientY: center.y,
+          view: window,
+        }),
+      );
+    });
+  }
+
+  function summarizeElement(el) {
+    return {
+      tagName: el.tagName,
+      id: el.id || '',
+      className: el.className || '',
+      text: (el.textContent || '').trim().slice(0, 100),
+    };
+  }
+
+  function forwardHoverRefToChildren(ref) {
+    return new Promise((resolve) => {
+      const frames = Array.from(document.querySelectorAll('iframe, frame'));
+      if (!frames.length) {
+        resolve({ success: false, error: `ref "${ref}" not found` });
+        return;
+      }
+      const reqId = `hover_ref_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const listener = (ev) => {
+        const data = ev?.data;
+        if (!data || data.type !== 'rr-bridge-hover-ref-result' || data.reqId !== reqId) return;
+        window.removeEventListener('message', listener, true);
+        resolve(data.result);
+      };
+      window.addEventListener('message', listener, true);
+      setTimeout(() => {
+        window.removeEventListener('message', listener, true);
+        resolve({ success: false, error: `ref "${ref}" not found in child frames` });
+      }, 1500);
+      for (const frame of frames) {
+        try {
+          frame.contentWindow?.postMessage({ type: 'rr-bridge-hover-ref', reqId, ref }, '*');
+        } catch {}
+      }
+    });
+  }
 
   // Chrome message bridge for ping and tree generation
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
@@ -783,6 +1014,7 @@
         try {
           // Composite selector support: "frameSelector |> innerSelector"
           const maybeSel = String(request.selector || '').trim();
+          const allowMultiple = !!request.allowMultiple;
           if (maybeSel.includes('|>')) {
             try {
               const parts = maybeSel
@@ -851,6 +1083,7 @@
                     useText: !!request.useText,
                     isXPath: !!request.isXPath,
                     tagName: String(request.tagName || ''),
+                    allowMultiple: !!request.allowMultiple,
                   },
                   '*',
                 );
@@ -949,26 +1182,45 @@
               sendResponse({ success: false, error: 'selector is required' });
               return true;
             }
-            try {
-              const doc = document;
-              const xpathResult = doc.evaluate(
-                sel,
-                doc,
-                null,
-                XPathResult.FIRST_ORDERED_NODE_TYPE,
-                null,
-              );
-              el = /** @type {Element|null} */ (xpathResult.singleNodeValue);
-            } catch (e) {
-              // fall back to null
-              el = null;
+            const result = queryXPathWithUniquenessCheck(sel, allowMultiple);
+            if (result.error) {
+              sendResponse({ success: false, error: result.error });
+              return true;
             }
+            if (result.matchCount === 0) {
+              sendResponse({ success: false, error: `selector not found: ${sel}` });
+              return true;
+            }
+            if (!allowMultiple && result.matchCount > 1) {
+              sendResponse({
+                success: false,
+                error: `Selector "${sel}" matched multiple elements. Please refine the selector to match only one element.`,
+              });
+              return true;
+            }
+            el = result.element;
           } else {
             if (!sel) {
               sendResponse({ success: false, error: 'selector is required' });
               return true;
             }
-            el = document.querySelector(sel) || querySelectorDeepFirst(sel);
+            const result = querySelectorWithUniquenessCheck(sel, allowMultiple);
+            if (result.error) {
+              sendResponse({ success: false, error: result.error });
+              return true;
+            }
+            if (result.matchCount === 0) {
+              sendResponse({ success: false, error: `selector not found: ${sel}` });
+              return true;
+            }
+            if (!allowMultiple && result.matchCount > 1) {
+              sendResponse({
+                success: false,
+                error: `Selector "${sel}" matched multiple elements. Please refine the selector to match only one element.`,
+              });
+              return true;
+            }
+            el = result.element;
           }
           if (!el) {
             sendResponse({ success: false, error: `selector not found: ${sel}` });
@@ -999,6 +1251,14 @@
           sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
           return true;
         }
+      }
+      if (request && request.action === 'dispatchHoverForRef') {
+        handleHoverForRef(String(request.ref || '').trim())
+          .then((result) => sendResponse(result))
+          .catch((error) =>
+            sendResponse({ success: false, error: error?.message || String(error) }),
+          );
+        return true;
       }
       if (request && request.action === 'getAttributeForSelector') {
         try {
@@ -1297,6 +1557,27 @@
       (ev) => {
         try {
           const data = ev && ev.data;
+          // Handle hover-ref bridge requests from parent frame
+          if (data && data.type === 'rr-bridge-hover-ref') {
+            handleHoverForRef(data.ref)
+              .then((result) => {
+                ev.source?.postMessage(
+                  { type: 'rr-bridge-hover-ref-result', reqId: data.reqId, result },
+                  '*',
+                );
+              })
+              .catch((error) => {
+                ev.source?.postMessage(
+                  {
+                    type: 'rr-bridge-hover-ref-result',
+                    reqId: data.reqId,
+                    result: { success: false, error: error?.message || String(error) },
+                  },
+                  '*',
+                );
+              });
+            return;
+          }
           if (!data || data.type !== 'rr-bridge-ensure-ref') return;
           const { reqId, selector, useText, isXPath, tagName } = data || {};
           const respond = (payload) => {
@@ -1378,24 +1659,51 @@
               }
               if (!el && best.el) el = best.el;
             } else if (isXPath) {
-              try {
-                const it = document.evaluate(
-                  sel,
-                  document,
-                  null,
-                  XPathResult.FIRST_ORDERED_NODE_TYPE,
-                  null,
-                );
-                el = it.singleNodeValue instanceof Element ? it.singleNodeValue : null;
-              } catch {}
+              if (!sel) {
+                respond({ success: false, error: 'selector is required' });
+                return;
+              }
+              const allowMultiple = !!data.allowMultiple;
+              const result = queryXPathWithUniquenessCheck(sel, allowMultiple);
+              if (result.error) {
+                respond({ success: false, error: result.error });
+                return;
+              }
+              if (result.matchCount === 0) {
+                respond({ success: false, error: `Selector "${sel}" not found in child frame` });
+                return;
+              }
+              if (!allowMultiple && result.matchCount > 1) {
+                respond({
+                  success: false,
+                  error: `Selector "${sel}" matched multiple elements inside frame. Please refine the selector to match only one element.`,
+                });
+                return;
+              }
+              el = result.element;
             } else {
-              try {
-                el =
-                  document.querySelector(sel) ||
-                  (typeof querySelectorDeepFirst === 'function'
-                    ? querySelectorDeepFirst(sel)
-                    : null);
-              } catch {}
+              if (!sel) {
+                respond({ success: false, error: 'selector is required' });
+                return;
+              }
+              const allowMultiple = !!data.allowMultiple;
+              const result = querySelectorWithUniquenessCheck(sel, allowMultiple);
+              if (result.error) {
+                respond({ success: false, error: result.error });
+                return;
+              }
+              if (result.matchCount === 0) {
+                respond({ success: false, error: `Selector "${sel}" not found in child frame` });
+                return;
+              }
+              if (!allowMultiple && result.matchCount > 1) {
+                respond({
+                  success: false,
+                  error: `Selector "${sel}" matched multiple elements inside frame. Please refine the selector to match only one element.`,
+                });
+                return;
+              }
+              el = result.element;
             }
             if (!el || !(el instanceof Element)) {
               respond({ success: false, error: 'Element not found in child frame' });

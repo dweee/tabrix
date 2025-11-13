@@ -15,6 +15,7 @@ export interface ElementMarker {
   name: string; // Human-friendly name, e.g., "Login Button"
   selector: string; // Selector string
   selectorType?: 'css' | 'xpath'; // Default: css
+  listMode?: boolean; // Whether this marker was created in list mode (allows multiple matches)
   action?: 'click' | 'fill' | 'custom'; // Intended action hint (optional)
 
   createdAt: number;
@@ -27,6 +28,7 @@ export interface UpsertMarkerRequest {
   name: string;
   selector: string;
   selectorType?: 'css' | 'xpath';
+  listMode?: boolean;
   matchType?: UrlMatchType;
   action?: 'click' | 'fill' | 'custom';
 }
