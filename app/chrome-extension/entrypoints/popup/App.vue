@@ -256,7 +256,20 @@
       />
 
       <!-- Element Marker Management Section -->
-      <ElementMarkerManagement />
+      <div class="section">
+        <h2 class="section-title">元素标注管理</h2>
+        <div class="rr-grid">
+          <div class="rr-controls" style="width: 100%">
+            <button
+              class="semantic-engine-button"
+              @click="openElementMarkerSidepanel"
+              title="打开侧边栏管理元素标注"
+            >
+              元素标注管理
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="footer">
@@ -302,7 +315,6 @@ import { getMessage } from '@/utils/i18n';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import ProgressIndicator from './components/ProgressIndicator.vue';
 import ModelCacheManagement from './components/ModelCacheManagement.vue';
-import ElementMarkerManagement from './components/ElementMarkerManagement.vue';
 import {
   DocumentIcon,
   DatabaseIcon,
@@ -550,6 +562,25 @@ async function openWorkflowSidepanel() {
     }
   } catch (e) {
     console.warn('打开侧边栏失败:', e);
+  }
+}
+
+// Open sidepanel for element marker management
+async function openElementMarkerSidepanel() {
+  try {
+    const current = await chrome.windows.getCurrent();
+    // Navigate sidepanel to element marker management page
+    if ((chrome.sidePanel as any)?.setOptions) {
+      await (chrome.sidePanel as any).setOptions({
+        path: 'sidepanel.html?tab=element-markers',
+        enabled: true,
+      });
+    }
+    if (chrome.sidePanel && (chrome.sidePanel as any).open) {
+      await (chrome.sidePanel as any).open({ windowId: current.id! });
+    }
+  } catch (e) {
+    console.warn('打开元素标注管理失败:', e);
   }
 }
 
