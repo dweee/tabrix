@@ -257,21 +257,6 @@
     <!-- Element Markers Tab -->
     <div v-show="activeTab === 'element-markers'" class="element-markers-content">
       <div class="px-4 py-4">
-        <div class="mb-4">
-          <div class="em-card">
-            <div class="em-header-section">
-              <div class="em-info-row">
-                <span class="em-label">当前页面</span>
-                <span class="em-value">{{ currentPageUrl }}</span>
-              </div>
-              <div class="em-info-row">
-                <span class="em-label">已标注元素</span>
-                <span class="em-badge">{{ markers.length }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <!-- Add/Edit Marker Form -->
         <div class="em-card mb-4">
           <h3 class="em-section-title">{{ editingMarkerId ? '编辑标注' : '新增标注' }}</h3>
@@ -343,61 +328,103 @@
 
         <!-- Markers List -->
         <div v-if="markers.length > 0" class="em-list">
-          <div v-for="marker in markers" :key="marker.id" class="em-marker-card">
-            <div class="em-marker-header">
-              <div class="em-marker-info">
-                <h4 class="em-marker-name">{{ marker.name }}</h4>
-                <code class="em-marker-selector" :title="marker.selector">{{
-                  marker.selector
-                }}</code>
-                <div class="em-marker-tags">
-                  <span class="em-tag">{{ marker.selectorType || 'css' }}</span>
-                  <span class="em-tag">{{ marker.matchType }}</span>
-                  <span class="em-tag em-tag-url" :title="marker.url">{{
-                    getUrlDisplay(marker.url)
-                  }}</span>
-                </div>
+          <!-- Statistics -->
+          <div class="em-stats-card">
+            <div class="em-stat-item">
+              <span class="em-stat-label">总标注数</span>
+              <span class="em-stat-value">{{ totalMarkersCount }}</span>
+            </div>
+            <div class="em-stat-item">
+              <span class="em-stat-label">域名数</span>
+              <span class="em-stat-value">{{ groupedMarkers.length }}</span>
+            </div>
+          </div>
+
+          <!-- Grouped Markers by Domain -->
+          <div
+            v-for="domainGroup in groupedMarkers"
+            :key="domainGroup.domain"
+            class="em-domain-group"
+          >
+            <!-- Domain Header -->
+            <div class="em-domain-header" @click="toggleDomain(domainGroup.domain)">
+              <div class="em-domain-info">
+                <svg
+                  class="em-domain-icon"
+                  :class="{ 'em-domain-icon-expanded': expandedDomains.has(domainGroup.domain) }"
+                  viewBox="0 0 20 20"
+                  width="16"
+                  height="16"
+                >
+                  <path fill="currentColor" d="M6 8l4 4 4-4" />
+                </svg>
+                <h3 class="em-domain-name">{{ domainGroup.domain }}</h3>
+                <span class="em-domain-count">{{ domainGroup.count }} 个标注</span>
               </div>
-              <div class="em-marker-actions">
-                <button
-                  class="em-action-btn em-action-verify"
-                  @click="validateMarker(marker)"
-                  title="验证"
-                >
-                  <svg viewBox="0 0 24 24" width="18" height="18">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                </button>
-                <button
-                  class="em-action-btn em-action-edit"
-                  @click="editMarker(marker)"
-                  title="编辑"
-                >
-                  <svg viewBox="0 0 24 24" width="18" height="18">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                    />
-                  </svg>
-                </button>
-                <button
-                  class="em-action-btn em-action-delete"
-                  @click="deleteMarker(marker)"
-                  title="删除"
-                >
-                  <svg viewBox="0 0 24 24" width="18" height="18">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                </button>
+            </div>
+
+            <!-- URLs and Markers -->
+            <div v-if="expandedDomains.has(domainGroup.domain)" class="em-domain-content">
+              <div v-for="urlGroup in domainGroup.urls" :key="urlGroup.url" class="em-url-group">
+                <div class="em-url-header">
+                  <span class="em-url-path">{{ urlGroup.url }}</span>
+                </div>
+
+                <div v-for="marker in urlGroup.markers" :key="marker.id" class="em-marker-card">
+                  <div class="em-marker-header">
+                    <div class="em-marker-info">
+                      <h4 class="em-marker-name">{{ marker.name }}</h4>
+                      <code class="em-marker-selector" :title="marker.selector">{{
+                        marker.selector
+                      }}</code>
+                      <div class="em-marker-tags">
+                        <span class="em-tag">{{ marker.selectorType || 'css' }}</span>
+                        <span class="em-tag">{{ marker.matchType }}</span>
+                      </div>
+                    </div>
+                    <div class="em-marker-actions">
+                      <button
+                        class="em-action-btn em-action-verify"
+                        @click="validateMarker(marker)"
+                        title="验证"
+                      >
+                        <svg viewBox="0 0 24 24" width="18" height="18">
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                          />
+                        </svg>
+                      </button>
+                      <button
+                        class="em-action-btn em-action-edit"
+                        @click="editMarker(marker)"
+                        title="编辑"
+                      >
+                        <svg viewBox="0 0 24 24" width="18" height="18">
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                          />
+                        </svg>
+                      </button>
+                      <button
+                        class="em-action-btn em-action-delete"
+                        @click="deleteMarker(marker)"
+                        title="删除"
+                      >
+                        <svg viewBox="0 0 24 24" width="18" height="18">
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                          />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -412,7 +439,7 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, onMounted, ref, onUnmounted } from 'vue';
+import { computed, onMounted, ref, onUnmounted, watch } from 'vue';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import type { ElementMarker, UpsertMarkerRequest } from '@/common/element-marker-types';
 
@@ -451,6 +478,42 @@ const markerForm = ref<UpsertMarkerRequest>({
   selectorType: 'css',
   matchType: 'prefix',
 });
+const expandedDomains = ref<Set<string>>(new Set());
+
+// Group markers by domain and URL
+const groupedMarkers = computed(() => {
+  const groups = new Map<string, Map<string, ElementMarker[]>>();
+
+  for (const marker of markers.value) {
+    // Use pre-normalized fields from storage instead of reparsing URLs
+    const domain = marker.host || '(本地文件)';
+    const fullUrl = marker.url || '(未知URL)';
+
+    if (!groups.has(domain)) {
+      groups.set(domain, new Map());
+    }
+
+    const domainGroup = groups.get(domain)!;
+    if (!domainGroup.has(fullUrl)) {
+      domainGroup.set(fullUrl, []);
+    }
+
+    domainGroup.get(fullUrl)!.push(marker);
+  }
+
+  // Convert to array and sort
+  return Array.from(groups.entries())
+    .map(([domain, urlMap]) => ({
+      domain,
+      count: Array.from(urlMap.values()).reduce((sum, arr) => sum + arr.length, 0),
+      urls: Array.from(urlMap.entries())
+        .map(([url, markers]) => ({ url, markers }))
+        .sort((a, b) => a.url.localeCompare(b.url)),
+    }))
+    .sort((a, b) => a.domain.localeCompare(b.domain));
+});
+
+const totalMarkersCount = computed(() => markers.value.length);
 
 const filtered = computed(() => {
   const list = onlyBound.value ? flows.value.filter(isBoundToCurrent) : flows.value;
@@ -621,10 +684,9 @@ async function loadMarkers() {
     currentPageUrl.value = String(tab?.url || '');
     markerForm.value.url = currentPageUrl.value;
 
-    // Load all markers instead of just current page
+    // Load all markers from all pages
     const res: any = await chrome.runtime.sendMessage({
-      type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_LIST_FOR_URL,
-      url: '', // Empty URL to get all markers
+      type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_LIST_ALL,
     });
 
     if (res?.success) {
@@ -639,7 +701,10 @@ async function saveMarker() {
   try {
     if (!markerForm.value.selector) return;
 
-    markerForm.value.url = currentPageUrl.value;
+    // Only set URL for new markers, not when editing existing ones
+    if (!editingMarkerId.value) {
+      markerForm.value.url = currentPageUrl.value;
+    }
 
     const payload: any = { ...markerForm.value };
     if (editingMarkerId.value) {
@@ -752,6 +817,24 @@ function getUrlDisplay(url: string) {
     return url;
   }
 }
+
+function toggleDomain(domain: string) {
+  if (expandedDomains.value.has(domain)) {
+    expandedDomains.value.delete(domain);
+  } else {
+    expandedDomains.value.add(domain);
+  }
+  // Trigger reactivity
+  expandedDomains.value = new Set(expandedDomains.value);
+}
+
+// Watch tab changes to load data
+watch(activeTab, async (newTab, oldTab) => {
+  // Only load if tab actually changed (avoid double-loading on mount)
+  if (newTab === 'element-markers' && oldTab !== undefined) {
+    await loadMarkers();
+  }
+});
 
 onMounted(async () => {
   try {
@@ -1047,11 +1130,14 @@ onUnmounted(() => {
   background: #f5f5f5;
   padding: 6px 10px;
   border-radius: 6px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   max-width: 100%;
   cursor: help;
+  display: block;
+  word-break: break-all;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
 }
 
 .em-marker-tags {
@@ -1136,5 +1222,138 @@ onUnmounted(() => {
   padding: 48px 20px;
   color: #a3a3a3;
   font-size: 14px;
+}
+
+/* Statistics Card */
+.em-stats-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: space-around;
+  gap: 20px;
+}
+
+.em-stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.em-stat-label {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 500;
+}
+
+.em-stat-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1;
+}
+
+/* Domain Group */
+.em-domain-group {
+  margin-bottom: 16px;
+}
+
+.em-domain-header {
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  border-radius: 12px;
+  padding: 16px 20px;
+  cursor: pointer;
+  transition: all 150ms ease;
+  user-select: none;
+}
+
+.em-domain-header:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.em-domain-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.em-domain-icon {
+  flex-shrink: 0;
+  color: #525252;
+  transition: transform 150ms ease;
+}
+
+.em-domain-icon-expanded {
+  transform: rotate(0deg);
+}
+
+.em-domain-icon:not(.em-domain-icon-expanded) {
+  transform: rotate(-90deg);
+}
+
+.em-domain-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #262626;
+  margin: 0;
+  flex: 1;
+}
+
+.em-domain-count {
+  font-size: 13px;
+  color: #737373;
+  background: rgba(255, 255, 255, 0.6);
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
+/* Domain Content */
+.em-domain-content {
+  padding: 12px 0 0 0;
+  animation: slideDown 200ms ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* URL Group */
+.em-url-group {
+  margin-bottom: 12px;
+}
+
+.em-url-header {
+  padding: 8px 16px;
+  background: #f9fafb;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.em-url-path {
+  font-size: 13px;
+  color: #525252;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  word-break: break-all;
+}
+
+/* Adjust marker card in group context */
+.em-url-group .em-marker-card {
+  margin-left: 16px;
+  margin-bottom: 8px;
+}
+
+.em-url-group .em-marker-card:last-child {
+  margin-bottom: 0;
 }
 </style>

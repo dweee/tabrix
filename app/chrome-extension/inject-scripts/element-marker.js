@@ -1120,9 +1120,7 @@
 
     if (prefs.preferId && el.id) {
       const idSel = `#${CSS.escape(el.id)}`;
-      try {
-        if (document.querySelectorAll(idSel).length === 1) return idSel;
-      } catch {}
+      if (isDeepSelectorUnique(idSel, el)) return idSel;
     }
 
     if (prefs.preferStableAttr) {
@@ -1144,9 +1142,7 @@
         if (!v) continue;
         const attrSel = `[${attr}="${CSS.escape(v)}"]`;
         const testSel = /^(input|textarea|select)$/i.test(tag) ? `${tag}${attrSel}` : attrSel;
-        try {
-          if (document.querySelectorAll(testSel).length === 1) return testSel;
-        } catch {}
+        if (isDeepSelectorUnique(testSel, el)) return testSel;
       }
     }
 
@@ -1159,18 +1155,18 @@
 
         for (const cls of classes) {
           const sel = `.${CSS.escape(cls)}`;
-          if (document.querySelectorAll(sel).length === 1) return sel;
+          if (isDeepSelectorUnique(sel, el)) return sel;
         }
 
         for (const cls of classes) {
           const sel = `${tag}.${CSS.escape(cls)}`;
-          if (document.querySelectorAll(sel).length === 1) return sel;
+          if (isDeepSelectorUnique(sel, el)) return sel;
         }
 
         for (let i = 0; i < Math.min(classes.length, 3); i++) {
           for (let j = i + 1; j < Math.min(classes.length, 3); j++) {
             const sel = `.${CSS.escape(classes[i])}.${CSS.escape(classes[j])}`;
-            if (document.querySelectorAll(sel).length === 1) return sel;
+            if (isDeepSelectorUnique(sel, el)) return sel;
           }
         }
       } catch {}
@@ -1189,13 +1185,18 @@
           'name',
         ];
 
-        while (cur && cur !== document.body) {
+        // Detect shadow DOM boundary
+        const root = el.getRootNode();
+        const isShadowElement = root instanceof ShadowRoot;
+        const boundary = isShadowElement ? root.host : document.body;
+
+        while (cur && cur !== boundary) {
           if (cur.id) {
             const anchor = `#${CSS.escape(cur.id)}`;
-            if (document.querySelectorAll(anchor).length === 1) {
+            if (isDeepSelectorUnique(anchor, cur)) {
               const rel = buildPathFromAncestor(cur, el);
               const composed = rel ? `${anchor} ${rel}` : anchor;
-              if (document.querySelector(composed) === el) return composed;
+              if (isDeepSelectorUnique(composed, el)) return composed;
             }
           }
 
@@ -1203,10 +1204,10 @@
             const val = cur.getAttribute(attr);
             if (!val) continue;
             const aSel = `[${attr}="${CSS.escape(val)}"]`;
-            if (document.querySelectorAll(aSel).length === 1) {
+            if (isDeepSelectorUnique(aSel, cur)) {
               const rel = buildPathFromAncestor(cur, el);
               const composed = rel ? `${aSel} ${rel}` : aSel;
-              if (document.querySelector(composed) === el) return composed;
+              if (isDeepSelectorUnique(composed, el)) return composed;
             }
           }
           cur = cur.parentElement;
@@ -1221,7 +1222,12 @@
     const segs = [];
     let cur = target;
 
-    while (cur && cur !== ancestor && cur !== document.body) {
+    // Detect if we're inside shadow DOM
+    const root = target.getRootNode();
+    const isShadowElement = root instanceof ShadowRoot;
+    const boundary = isShadowElement ? root.host : document.body;
+
+    while (cur && cur !== ancestor && cur !== boundary) {
       let seg = cur.tagName.toLowerCase();
       const parent = cur.parentElement;
 
@@ -1234,6 +1240,11 @@
 
       segs.unshift(seg);
       cur = parent;
+
+      // Stop if we've reached the shadow root host
+      if (isShadowElement && cur === boundary) {
+        break;
+      }
     }
 
     return segs.join(' > ');
@@ -1243,7 +1254,14 @@
     let path = '';
     let current = el;
 
-    while (current && current.nodeType === Node.ELEMENT_NODE && current.tagName !== 'BODY') {
+    // Detect if the element is inside a shadow DOM
+    const root = el.getRootNode();
+    const isShadowElement = root instanceof ShadowRoot;
+
+    // Determine the boundary where we should stop traversing
+    const boundary = isShadowElement ? root.host : document.body;
+
+    while (current && current.nodeType === Node.ELEMENT_NODE && current !== boundary) {
       let sel = current.tagName.toLowerCase();
       const parent = current.parentElement;
 
@@ -1256,8 +1274,20 @@
 
       path = path ? `${sel} > ${path}` : sel;
       current = parent;
+
+      // Stop if we've reached the shadow root host
+      if (isShadowElement && current === boundary) {
+        break;
+      }
     }
 
+    // For shadow DOM elements, don't prepend "body >"
+    // The selector should be relative within the shadow tree
+    if (isShadowElement) {
+      return path || el.tagName.toLowerCase();
+    }
+
+    // For light DOM elements, keep the original behavior
     return path ? `body > ${path}` : 'body';
   }
 
@@ -1307,11 +1337,10 @@
 
     const tag = el.tagName.toLowerCase();
 
+    // Use isDeepSelectorUnique for ID to support shadow DOM elements
     if (el.id) {
       const idSel = `#${CSS.escape(el.id)}`;
-      try {
-        if (document.querySelectorAll(idSel).length === 1) return idSel;
-      } catch {}
+      if (isDeepSelectorUnique(idSel, el)) return idSel;
     }
 
     const attrNames = [
@@ -1326,27 +1355,27 @@
       'aria-label',
     ];
 
+    // Use isDeepSelectorUnique for attributes to support shadow DOM elements
     for (const attr of attrNames) {
       const v = el.getAttribute(attr);
       if (!v) continue;
       const aSel = `[${attr}="${CSS.escape(v)}"]`;
       const testSel = /^(input|textarea|select)$/i.test(tag) ? `${tag}${aSel}` : aSel;
-      try {
-        if (root.querySelectorAll(testSel).length === 1) return testSel;
-      } catch {}
+      if (isDeepSelectorUnique(testSel, el)) return testSel;
     }
 
     try {
       const classes = Array.from(el.classList || []).filter((c) => c && /^[a-zA-Z0-9_-]+$/.test(c));
 
+      // Use isDeepSelectorUnique for classes to support shadow DOM elements
       for (const cls of classes) {
         const sel = `.${CSS.escape(cls)}`;
-        if (root.querySelectorAll(sel).length === 1) return sel;
+        if (isDeepSelectorUnique(sel, el)) return sel;
       }
 
       for (const cls of classes) {
         const sel = `${tag}.${CSS.escape(cls)}`;
-        if (root.querySelectorAll(sel).length === 1) return sel;
+        if (isDeepSelectorUnique(sel, el)) return sel;
       }
     } catch {}
 
@@ -1490,6 +1519,27 @@
       } catch {}
     }
     return results;
+  }
+
+  /**
+   * Check if a selector uniquely identifies the target element across the entire DOM tree,
+   * including shadow DOM boundaries.
+   *
+   * This function uses queryAllDeep to traverse both light DOM and shadow DOM,
+   * ensuring that selectors work correctly for elements inside shadow roots.
+   *
+   * @param {string} selector - The CSS selector to test
+   * @param {Element} target - The target element that should be uniquely identified
+   * @returns {boolean} True if the selector matches exactly one element and it's the target
+   */
+  function isDeepSelectorUnique(selector, target) {
+    if (!selector || !(target instanceof Element)) return false;
+    try {
+      const matches = queryAllDeep(selector);
+      return matches.length === 1 && matches[0] === target;
+    } catch (error) {
+      return false;
+    }
   }
 
   function evaluateXPathAll(xpath) {
@@ -1661,23 +1711,74 @@
     return elements.filter((node) => !isOverlayElement(node));
   }
 
+  /**
+   * Get the effective event target for page element selection, considering shadow DOM boundaries.
+   *
+   * This function resolves the real target element from a pointer event by walking the
+   * composed path (if available) to find the innermost page element, skipping overlay elements.
+   *
+   * Background:
+   * - When events bubble up from inside shadow DOM, they get "retargeted" at shadow boundaries
+   * - By the time a window-level listener receives the event, ev.target points to the shadow host
+   * - composedPath() exposes the original event path before retargeting
+   * - This allows us to select elements inside shadow DOM (e.g., <td-header> internals)
+   *
+   * IMPORTANT: This function should only be called AFTER verifying the event is not from
+   * overlay UI (panel buttons, etc). Otherwise it will filter out overlay elements and break
+   * panel interactions.
+   *
+   * @param {Event} ev - The pointer event (mousemove, click, etc.)
+   * @returns {Element|null} The innermost non-overlay page element, or null if none found
+   */
+  function getDeepPageTarget(ev) {
+    if (!ev) return null;
+
+    // Try to walk the composed path to find the innermost non-overlay element
+    try {
+      const path = typeof ev.composedPath === 'function' ? ev.composedPath() : null;
+      if (Array.isArray(path) && path.length > 0) {
+        // Walk from innermost to outermost, find the first real page element
+        for (const node of path) {
+          if (node instanceof Element && !isOverlayElement(node)) {
+            return node;
+          }
+        }
+      }
+    } catch (error) {
+      // composedPath() may throw in some edge cases (e.g., detached nodes)
+      // Fall through to use ev.target
+    }
+
+    // Fallback: use ev.target if composedPath is unavailable or all nodes were filtered
+    const fallback = ev.target instanceof Element ? ev.target : null;
+    // If fallback is overlay, return null (caller should handle this case)
+    if (fallback && !isOverlayElement(fallback)) {
+      return fallback;
+    }
+    return null;
+  }
+
   function onMouseMove(ev) {
     if (!STATE.active) return;
 
-    const target = ev.target;
-    if (!(target instanceof Element)) {
+    // First, use the raw ev.target to check for overlay UI
+    // This ensures panel buttons and other UI elements remain interactive
+    const rawTarget = ev.target;
+    if (!(rawTarget instanceof Element)) {
       clearHighlighter();
       return;
     }
 
     const host = PanelHost.getHost();
-    // Check if target is the panel host itself or inside the shadow DOM
-    if ((host && target === host) || isInsidePanel(target)) {
+    // Check if raw target is the panel host itself or inside the shadow DOM
+    if ((host && rawTarget === host) || isInsidePanel(rawTarget)) {
       STATE.hoverEl = null; // Reset to prevent keyboard shortcuts from reselecting the last element
       clearHighlighter();
       return;
     }
 
+    // Now that we know it's a page element, get the deep target (considering shadow DOM)
+    const target = getDeepPageTarget(ev) || rawTarget;
     STATE.hoverEl = target;
 
     if (!IS_MAIN) {
@@ -1758,18 +1859,25 @@
   function onClick(ev) {
     if (!STATE.active) return;
 
-    const target = ev.target;
+    // First, use the raw ev.target to check for overlay UI
+    // This ensures panel buttons and other UI elements remain interactive
+    const rawTarget = ev.target;
     const host = PanelHost.getHost();
 
-    // Check if click is on the panel host itself or inside the shadow DOM
-    if ((host && target === host) || isInsidePanel(target)) {
+    // Check if raw target is the panel host itself or inside the shadow DOM
+    // IMPORTANT: Return early WITHOUT preventDefault to allow overlay button clicks
+    if ((host && rawTarget === host) || isInsidePanel(rawTarget)) {
       return;
     }
 
+    // Now we know it's a page element, prevent default and get deep target
     ev.preventDefault();
     ev.stopPropagation();
 
-    if (!(target instanceof Element)) return;
+    if (!(rawTarget instanceof Element)) return;
+
+    // Get the deep target (considering shadow DOM) after confirming it's not overlay
+    const target = getDeepPageTarget(ev) || rawTarget;
 
     if (!IS_MAIN) {
       try {
