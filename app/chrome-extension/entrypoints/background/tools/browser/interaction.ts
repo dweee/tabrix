@@ -22,6 +22,8 @@ interface ClickToolParams {
   bubbles?: boolean;
   cancelable?: boolean;
   modifiers?: { altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean };
+  tabId?: number; // target existing tab id
+  windowId?: number; // when no tabId, pick active tab from this window
 }
 
 /**
@@ -56,13 +58,9 @@ class ClickTool extends BaseBrowserToolExecutor {
     }
 
     try {
-      // Get current tab
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tabs[0]) {
-        return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND);
-      }
-
-      const tab = tabs[0];
+      // Resolve tab
+      const explicit = await this.tryGetTab(args.tabId);
+      const tab = explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
       if (!tab.id) {
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
       }
@@ -164,6 +162,8 @@ interface FillToolParams {
   // Accept string | number | boolean for broader form input coverage
   value: string | number | boolean;
   frameId?: number;
+  tabId?: number; // target existing tab id
+  windowId?: number; // when no tabId, pick active tab from this window
 }
 
 /**
@@ -189,13 +189,8 @@ class FillTool extends BaseBrowserToolExecutor {
     }
 
     try {
-      // Get current tab
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tabs[0]) {
-        return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND);
-      }
-
-      const tab = tabs[0];
+      const explicit = await this.tryGetTab(args.tabId);
+      const tab = explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
       if (!tab.id) {
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
       }

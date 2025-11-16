@@ -47,6 +47,9 @@ if (typeof __MAX_CAP_RATE === 'number' && __MAX_CAP_RATE > 0) {
 interface ScreenshotToolParams {
   name: string;
   selector?: string;
+  tabId?: number;
+  background?: boolean;
+  windowId?: number;
   width?: number;
   height?: number;
   storeBase64?: boolean;
@@ -75,12 +78,9 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
 
     console.log(`Starting screenshot with options:`, args);
 
-    // Get current tab
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tabs[0]) {
-      return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND);
-    }
-    const tab = tabs[0];
+    // Resolve target tab (explicit or active)
+    const explicit = await this.tryGetTab(args.tabId);
+    const tab = explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
 
     // Check URL restrictions
     if (
@@ -101,7 +101,43 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     let originalScroll = { x: 0, y: 0 };
 
     try {
-      await this.injectContentScript(tab.id!, ['inject-scripts/screenshot-helper.js']);
+      const background = args.background === true;
+      // If we need content-script assisted capture (element/fullPage), we may need the tab active in its window.
+      // For simple viewport-only capture without selector/fullPage and background=true, prefer CDP capture.
+      const needInjection = fullPage || !!selector;
+      if (!needInjection && background) {
+        try {
+          // CDP capture of current viewport without focusing/activating
+          const tabId = tab.id!;
+          const { cdpSessionManager } = await import('@/utils/cdp-session-manager');
+          await cdpSessionManager.withSession(tabId, 'screenshot', async () => {
+            const metrics: any = await cdpSessionManager.sendCommand(
+              tabId,
+              'Page.getLayoutMetrics',
+              {},
+            );
+            const viewport = metrics?.layoutViewport ||
+              metrics?.visualViewport || {
+                clientWidth: 800,
+                clientHeight: 600,
+                pageX: 0,
+                pageY: 0,
+              };
+            const shot: any = await cdpSessionManager.sendCommand(tabId, 'Page.captureScreenshot', {
+              format: 'png',
+            });
+            finalImageDataUrl = `data:image/png;base64,${shot?.data || ''}`;
+            finalImageWidthCss = Math.round(viewport.clientWidth || 800);
+            finalImageHeightCss = Math.round(viewport.clientHeight || 600);
+          });
+        } catch (e) {
+          console.warn('CDP viewport capture failed, falling back to captureVisibleTab path:', e);
+        }
+      }
+
+      if (!finalImageDataUrl && needInjection) {
+        await this.injectContentScript(tab.id!, ['inject-scripts/screenshot-helper.js']);
+      }
       // Wait for script initialization
       await new Promise((resolve) => setTimeout(resolve, SCREENSHOT_CONSTANTS.SCRIPT_INIT_DELAY));
       // 1. Prepare page (hide scrollbars, potentially fixed elements)
@@ -151,7 +187,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
           finalImageWidthCss = pageDetails.viewportWidth;
           finalImageHeightCss = pageDetails.viewportHeight;
         }
-      } else {
+      } else if (!finalImageDataUrl) {
         // Visible area only
         this.logInfo('Capturing visible area...');
         finalImageDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });

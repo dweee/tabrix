@@ -47,6 +47,9 @@ interface ComputerParams {
   selectorType?: 'css' | 'xpath'; // Type of selector (default: 'css')
   value?: string;
   frameId?: number; // Target frame for selector/ref resolution
+  tabId?: number; // target existing tab id
+  windowId?: number;
+  background?: boolean; // avoid focusing/activating
 }
 
 // Minimal CDP helper encapsulated here to avoid scattering CDP code
@@ -199,9 +202,8 @@ class ComputerTool extends BaseBrowserToolExecutor {
     if (!params.action) return createErrorResponse('Action parameter is required');
 
     try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tabs[0]) return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND);
-      const tab = tabs[0];
+      const explicit = await this.tryGetTab(args.tabId);
+      const tab = explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
       if (!tab.id)
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
 

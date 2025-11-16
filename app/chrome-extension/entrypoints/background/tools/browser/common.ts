@@ -12,6 +12,9 @@ interface NavigateToolParams {
   width?: number;
   height?: number;
   refresh?: boolean;
+  tabId?: number;
+  windowId?: number;
+  background?: boolean; // when true, do not activate tab or focus window
 }
 
 /**
@@ -21,7 +24,16 @@ class NavigateTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.NAVIGATE;
 
   async execute(args: NavigateToolParams): Promise<ToolResult> {
-    const { newWindow = false, width, height, url, refresh = false } = args;
+    const {
+      newWindow = false,
+      width,
+      height,
+      url,
+      refresh = false,
+      tabId,
+      background,
+      windowId,
+    } = args;
 
     console.log(
       `Attempting to ${refresh ? 'refresh current tab' : `open URL: ${url}`} with options:`,
@@ -32,21 +44,16 @@ class NavigateTool extends BaseBrowserToolExecutor {
       // Handle refresh option first
       if (refresh) {
         console.log('Refreshing current active tab');
+        const explicit = await this.tryGetTab(tabId);
+        // Get target tab (explicit or active in provided window)
+        const targetTab = explicit || (await this.getActiveTabOrThrowInWindow(windowId));
+        if (!targetTab.id) return createErrorResponse('No target tab found to refresh');
+        await chrome.tabs.reload(targetTab.id);
 
-        // Get current active tab
-        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-        if (!activeTab || !activeTab.id) {
-          return createErrorResponse('No active tab found to refresh');
-        }
-
-        // Reload the tab
-        await chrome.tabs.reload(activeTab.id);
-
-        console.log(`Refreshed tab ID: ${activeTab.id}`);
+        console.log(`Refreshed tab ID: ${targetTab.id}`);
 
         // Get updated tab information
-        const updatedTab = await chrome.tabs.get(activeTab.id);
+        const updatedTab = await chrome.tabs.get(targetTab.id);
 
         return {
           content: [
@@ -181,19 +188,21 @@ class NavigateTool extends BaseBrowserToolExecutor {
         return best.tab;
       };
 
-      const existingTab = pickBestMatch(url, candidateTabs);
+      const explicitTab = await this.tryGetTab(tabId);
+      const existingTab = explicitTab || pickBestMatch(url, candidateTabs);
       if (existingTab?.id !== undefined) {
         console.log(
           `URL already open in Tab ID: ${existingTab.id}, Window ID: ${existingTab.windowId}`,
         );
-
-        // Activate the tab
-        await chrome.tabs.update(existingTab.id, { active: true });
-
-        if (existingTab.windowId !== undefined) {
-          // Bring the window containing this tab to the foreground and focus it
-          await chrome.windows.update(existingTab.windowId, { focused: true });
+        // Update URL only when explicit tab specified and url differs
+        if (explicitTab && typeof explicitTab.id === 'number') {
+          await chrome.tabs.update(explicitTab.id, { url });
         }
+        // Optionally bring to foreground based on background flag
+        await this.ensureFocus(existingTab, {
+          activate: background !== true,
+          focusWindow: background !== true,
+        });
 
         console.log(`Activated existing Tab ID: ${existingTab.id}`);
         // Get updated tab information and return it
@@ -227,7 +236,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
           url: url,
           width: typeof width === 'number' ? width : DEFAULT_WINDOW_WIDTH,
           height: typeof height === 'number' ? height : DEFAULT_WINDOW_HEIGHT,
-          focused: true,
+          focused: background === true ? false : true,
         });
 
         if (newWindow && newWindow.id !== undefined) {
@@ -255,23 +264,29 @@ class NavigateTool extends BaseBrowserToolExecutor {
         }
       } else {
         console.log('Opening URL in the last active window.');
-        // Try to open a new tab in the most recently active window
-        const lastFocusedWindow = await chrome.windows.getLastFocused({ populate: false });
+        // Try to open a new tab in the specified window, otherwise the most recently active window
+        let targetWindow: chrome.windows.Window | null = null;
+        if (typeof windowId === 'number') {
+          targetWindow = await chrome.windows.get(windowId, { populate: false });
+        }
+        if (!targetWindow) {
+          targetWindow = await chrome.windows.getLastFocused({ populate: false });
+        }
 
-        if (lastFocusedWindow && lastFocusedWindow.id !== undefined) {
-          console.log(`Found last focused Window ID: ${lastFocusedWindow.id}`);
+        if (targetWindow && targetWindow.id !== undefined) {
+          console.log(`Found target Window ID: ${targetWindow.id}`);
 
           const newTab = await chrome.tabs.create({
             url: url,
-            windowId: lastFocusedWindow.id,
-            active: true,
+            windowId: targetWindow.id,
+            active: background === true ? false : true,
           });
-
-          // Ensure the window also gets focus
-          await chrome.windows.update(lastFocusedWindow.id, { focused: true });
+          if (background !== true) {
+            await chrome.windows.update(targetWindow.id, { focused: true });
+          }
 
           console.log(
-            `URL opened in new Tab ID: ${newTab.id} in existing Window ID: ${lastFocusedWindow.id}`,
+            `URL opened in new Tab ID: ${newTab.id} in existing Window ID: ${targetWindow.id}`,
           );
 
           return {
@@ -282,7 +297,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                   success: true,
                   message: 'Opened URL in new tab in existing window',
                   tabId: newTab.id,
-                  windowId: lastFocusedWindow.id,
+                  windowId: targetWindow.id,
                   url: newTab.url,
                 }),
               },

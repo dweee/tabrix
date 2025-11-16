@@ -52,44 +52,44 @@ export const TOOL_SCHEMAS: Tool[] = [
       required: [],
     },
   },
-  {
-    name: TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
-    description:
-      'Run a recorded flow by ID with optional variables and run options. Returns a standardized run result.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        flowId: { type: 'string', description: 'ID of the flow to run' },
-        args: {
-          type: 'object',
-          description: 'Variable values for the flow (flat object of key/value)',
-        },
-        tabTarget: {
-          type: 'string',
-          description: "Target tab: 'current' or 'new' (default: current)",
-          enum: ['current', 'new'],
-        },
-        refresh: { type: 'boolean', description: 'Refresh before running (default false)' },
-        captureNetwork: {
-          type: 'boolean',
-          description: 'Capture network snippets for debugging (default false)',
-        },
-        returnLogs: { type: 'boolean', description: 'Return run logs (default false)' },
-        timeoutMs: { type: 'number', description: 'Global timeout in ms (optional)' },
-        startUrl: { type: 'string', description: 'Optional start URL to open before running' },
-      },
-      required: ['flowId'],
-    },
-  },
-  {
-    name: TOOL_NAMES.RECORD_REPLAY.LIST_PUBLISHED,
-    description: 'List published flows available as dynamic tools (for discovery).',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-      required: [],
-    },
-  },
+  // {
+  //   name: TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
+  //   description:
+  //     'Run a recorded flow by ID with optional variables and run options. Returns a standardized run result.',
+  //   inputSchema: {
+  //     type: 'object',
+  //     properties: {
+  //       flowId: { type: 'string', description: 'ID of the flow to run' },
+  //       args: {
+  //         type: 'object',
+  //         description: 'Variable values for the flow (flat object of key/value)',
+  //       },
+  //       tabTarget: {
+  //         type: 'string',
+  //         description: "Target tab: 'current' or 'new' (default: current)",
+  //         enum: ['current', 'new'],
+  //       },
+  //       refresh: { type: 'boolean', description: 'Refresh before running (default false)' },
+  //       captureNetwork: {
+  //         type: 'boolean',
+  //         description: 'Capture network snippets for debugging (default false)',
+  //       },
+  //       returnLogs: { type: 'boolean', description: 'Return run logs (default false)' },
+  //       timeoutMs: { type: 'number', description: 'Global timeout in ms (optional)' },
+  //       startUrl: { type: 'string', description: 'Optional start URL to open before running' },
+  //     },
+  //     required: ['flowId'],
+  //   },
+  // },
+  // {
+  //   name: TOOL_NAMES.RECORD_REPLAY.LIST_PUBLISHED,
+  //   description: 'List published flows available as dynamic tools (for discovery).',
+  //   inputSchema: {
+  //     type: 'object',
+  //     properties: {},
+  //     required: [],
+  //   },
+  // },
   {
     name: TOOL_NAMES.BROWSER.PERFORMANCE_START_TRACE,
     description:
@@ -165,6 +165,14 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             'Filter elements: "interactive" for such as  buttons/links/inputs only (default: all visible elements)',
         },
+        tabId: {
+          type: 'number',
+          description: 'Target an existing tab by ID (default: active tab).',
+        },
+        windowId: {
+          type: 'number',
+          description: 'Target window ID to pick active tab when tabId is omitted.',
+        },
       },
       required: [],
     },
@@ -176,6 +184,12 @@ export const TOOL_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        tabId: { type: 'number', description: 'Target tab ID (default: active tab)' },
+        background: {
+          type: 'boolean',
+          description:
+            'Avoid focusing/activating tab/window for certain operations (best-effort). Default: false',
+        },
         action: {
           type: 'string',
           description:
@@ -261,27 +275,27 @@ export const TOOL_SCHEMAS: Tool[] = [
       required: ['action'],
     },
   },
-  {
-    name: TOOL_NAMES.BROWSER.USERSCRIPT,
-    description:
-      'Unified userscript tool (create/list/get/enable/disable/update/remove/send_command/export). Paste JS/CSS/Tampermonkey script and the system will auto-select the best strategy (insertCSS / persistent script in ISOLATED or MAIN world / once by CDP) with CSP-aware fallbacks.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          description:
-            'Operation to perform: create | list | get | enable | disable | update | remove | send_command | export',
-        },
-        args: {
-          type: 'object',
-          description:
-            'Arguments for the specified action. For create: { script, name?, description?, matches?, excludes?, persist?, runAt?, world?, allFrames?, mode?, dnrFallback?, tags? }',
-        },
-      },
-      required: ['action'],
-    },
-  },
+  // {
+  //   name: TOOL_NAMES.BROWSER.USERSCRIPT,
+  //   description:
+  //     'Unified userscript tool (create/list/get/enable/disable/update/remove/send_command/export). Paste JS/CSS/Tampermonkey script and the system will auto-select the best strategy (insertCSS / persistent script in ISOLATED or MAIN world / once by CDP) with CSP-aware fallbacks.',
+  //   inputSchema: {
+  //     type: 'object',
+  //     properties: {
+  //       action: {
+  //         type: 'string',
+  //         description:
+  //           'Operation to perform: create | list | get | enable | disable | update | remove | send_command | export',
+  //       },
+  //       args: {
+  //         type: 'object',
+  //         description:
+  //           'Arguments for the specified action. For create: { script, name?, description?, matches?, excludes?, persist?, runAt?, world?, allFrames?, mode?, dnrFallback?, tags? }',
+  //       },
+  //     },
+  //     required: ['action'],
+  //   },
+  // },
   {
     name: TOOL_NAMES.BROWSER.NAVIGATE,
     description: 'Navigate to a URL or refresh the current tab',
@@ -293,8 +307,31 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'boolean',
           description: 'Create a new window to navigate to the URL or not. Defaults to false',
         },
-        width: { type: 'number', description: 'Viewport width in pixels (default: 1280)' },
-        height: { type: 'number', description: 'Viewport height in pixels (default: 720)' },
+        tabId: {
+          type: 'number',
+          description:
+            'Target an existing tab by ID (if provided, navigate/refresh that tab instead of the active tab).',
+        },
+        windowId: {
+          type: 'number',
+          description:
+            'Target an existing window by ID (when creating a new tab in existing window, or picking active tab if tabId is not provided).',
+        },
+        background: {
+          type: 'boolean',
+          description:
+            'Perform the operation without stealing focus (do not activate the tab or focus the window). Default: false',
+        },
+        // width: {
+        //   type: 'number',
+        //   description:
+        //     'Viewport width in pixels (default: 1280). Note: when both width and height are provided, a new window will be created regardless of newWindow=false.',
+        // },
+        // height: {
+        //   type: 'number',
+        //   description:
+        //     'Viewport height in pixels (default: 720). Note: when both width and height are provided, a new window will be created regardless of newWindow=false.',
+        // },
         refresh: {
           type: 'boolean',
           description:
@@ -313,6 +350,19 @@ export const TOOL_SCHEMAS: Tool[] = [
       properties: {
         name: { type: 'string', description: 'Name for the screenshot, if saving as PNG' },
         selector: { type: 'string', description: 'CSS selector for element to screenshot' },
+        tabId: {
+          type: 'number',
+          description: 'Target tab ID to capture from (default: active tab).',
+        },
+        windowId: {
+          type: 'number',
+          description: 'Target window ID to pick active tab from when tabId is not provided.',
+        },
+        background: {
+          type: 'boolean',
+          description:
+            'Attempt capture without bringing tab/window to foreground. CDP-based capture is used for simple viewport captures. For element/full-page capture, the tab may still be made active in its window without focusing the window. Default: false',
+        },
         width: { type: 'number', description: 'Width in pixels (default: 800)' },
         height: { type: 'number', description: 'Height in pixels (default: 600)' },
         storeBase64: {
@@ -393,6 +443,14 @@ export const TOOL_SCHEMAS: Tool[] = [
         url: {
           type: 'string',
           description: 'URL to fetch content from. If not provided, uses the current active tab',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Target an existing tab by ID (default: active tab).',
+        },
+        background: {
+          type: 'boolean',
+          description: 'Do not activate tab/focus window while fetching (default: false)',
         },
         htmlContent: {
           type: 'boolean',
@@ -622,21 +680,21 @@ export const TOOL_SCHEMAS: Tool[] = [
       required: [],
     },
   },
-  {
-    name: TOOL_NAMES.BROWSER.SEARCH_TABS_CONTENT,
-    description:
-      'search for related content from the currently open tab and return the corresponding web pages.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        query: {
-          type: 'string',
-          description: 'the query to search for related content.',
-        },
-      },
-      required: ['query'],
-    },
-  },
+  // {
+  //   name: TOOL_NAMES.BROWSER.SEARCH_TABS_CONTENT,
+  //   description:
+  //     'search for related content from the currently open tab and return the corresponding web pages.',
+  //   inputSchema: {
+  //     type: 'object',
+  //     properties: {
+  //       query: {
+  //         type: 'string',
+  //         description: 'the query to search for related content.',
+  //       },
+  //     },
+  //     required: ['query'],
+  //   },
+  // },
   {
     name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
     description:
@@ -648,6 +706,21 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'string',
           description:
             'If a URL is specified, inject the script into the webpage corresponding to the URL.',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Target an existing tab by ID to inject into. Overrides url/active tab selection when provided.',
+        },
+        windowId: {
+          type: 'number',
+          description:
+            'Target window ID for selecting active tab or creating new tab when url is provided and tabId is omitted.',
+        },
+        background: {
+          type: 'boolean',
+          description:
+            'Do not activate tab/focus window during injection when true (default: false).',
         },
         type: {
           type: 'string',
@@ -698,6 +771,18 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             'URL to navigate to and capture console from. If not provided, uses the current active tab',
         },
+        tabId: {
+          type: 'number',
+          description: 'Target an existing tab by ID (default: active tab).',
+        },
+        windowId: {
+          type: 'number',
+          description: 'Target window ID to pick active tab when tabId is omitted.',
+        },
+        background: {
+          type: 'boolean',
+          description: 'Do not activate tab/focus window when capturing via CDP. Default: false',
+        },
         includeExceptions: {
           type: 'boolean',
           description: 'Include uncaught exceptions in the output (default: true)',
@@ -717,6 +802,11 @@ export const TOOL_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        tabId: { type: 'number', description: 'Target tab ID (default: active tab)' },
+        windowId: {
+          type: 'number',
+          description: 'Target window ID to pick active tab when tabId is omitted',
+        },
         selector: {
           type: 'string',
           description: 'CSS selector for the file input element (input[type="file"])',

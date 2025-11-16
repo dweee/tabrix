@@ -9,6 +9,8 @@ interface KeyboardToolParams {
   selector?: string; // Optional: CSS selector or XPath for target element to send keyboard events to
   selectorType?: 'css' | 'xpath'; // Type of selector (default: 'css')
   delay?: number; // Optional: delay between keystrokes in milliseconds
+  tabId?: number; // target existing tab id
+  windowId?: number; // when no tabId, pick active tab from this window
 }
 
 /**
@@ -32,13 +34,8 @@ class KeyboardTool extends BaseBrowserToolExecutor {
     }
 
     try {
-      // Get current tab
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tabs[0]) {
-        return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND);
-      }
-
-      const tab = tabs[0];
+      const explicit = await this.tryGetTab(args.tabId);
+      const tab = explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
       if (!tab.id) {
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
       }

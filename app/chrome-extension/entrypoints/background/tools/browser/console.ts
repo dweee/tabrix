@@ -8,6 +8,9 @@ const DEFAULT_MAX_MESSAGES = 100;
 
 interface ConsoleToolParams {
   url?: string;
+  tabId?: number;
+  background?: boolean;
+  windowId?: number;
   includeExceptions?: boolean;
   maxMessages?: number;
 }
@@ -56,17 +59,32 @@ class ConsoleTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.CONSOLE;
 
   async execute(args: ConsoleToolParams): Promise<ToolResult> {
-    const { url, includeExceptions = true, maxMessages = DEFAULT_MAX_MESSAGES } = args;
+    const {
+      url,
+      tabId,
+      windowId,
+      background = false,
+      includeExceptions = true,
+      maxMessages = DEFAULT_MAX_MESSAGES,
+    } = args;
 
     let targetTab: chrome.tabs.Tab;
 
     try {
-      if (url) {
+      if (typeof tabId === 'number') {
+        // Use explicit tab
+        const t = await chrome.tabs.get(tabId);
+        if (!t?.id) return createErrorResponse('Failed to identify target tab.');
+        targetTab = t;
+      } else if (url) {
         // Navigate to the specified URL
-        targetTab = await this.navigateToUrl(url);
+        targetTab = await this.navigateToUrl(url, background === true, windowId);
       } else {
         // Use current active tab
-        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const [activeTab] =
+          typeof windowId === 'number'
+            ? await chrome.tabs.query({ active: true, windowId })
+            : await chrome.tabs.query({ active: true, currentWindow: true });
         if (!activeTab?.id) {
           return createErrorResponse('No active tab found and no URL provided.');
         }
@@ -77,10 +95,10 @@ class ConsoleTool extends BaseBrowserToolExecutor {
         return createErrorResponse('Failed to identify target tab.');
       }
 
-      const tabId = targetTab.id;
+      const targetTabId = targetTab.id;
 
       // Capture console messages (one-time capture)
-      const result = await this.captureConsoleMessages(tabId, {
+      const result = await this.captureConsoleMessages(targetTabId, {
         includeExceptions,
         maxMessages,
       });
@@ -100,19 +118,27 @@ class ConsoleTool extends BaseBrowserToolExecutor {
     }
   }
 
-  private async navigateToUrl(url: string): Promise<chrome.tabs.Tab> {
+  private async navigateToUrl(
+    url: string,
+    background = false,
+    windowId?: number,
+  ): Promise<chrome.tabs.Tab> {
     // Check if URL is already open
     const existingTabs = await chrome.tabs.query({ url });
 
     if (existingTabs.length > 0 && existingTabs[0]?.id) {
       const tab = existingTabs[0];
-      // Activate the existing tab
-      await chrome.tabs.update(tab.id!, { active: true });
-      await chrome.windows.update(tab.windowId, { focused: true });
+      if (!background) {
+        // Activate the existing tab
+        await chrome.tabs.update(tab.id!, { active: true });
+        await chrome.windows.update(tab.windowId, { focused: true });
+      }
       return tab;
     } else {
       // Create new tab with the URL
-      const newTab = await chrome.tabs.create({ url, active: true });
+      const createInfo: chrome.tabs.CreateProperties = { url, active: background ? false : true };
+      if (typeof windowId === 'number') createInfo.windowId = windowId;
+      const newTab = await chrome.tabs.create(createInfo);
       // Wait for tab to be ready
       await this.waitForTabReady(newTab.id!);
       return newTab;
@@ -237,7 +263,7 @@ class ConsoleTool extends BaseBrowserToolExecutor {
               return arg.value;
             }
             if (arg.objectId) {
-              const resp = (await cdpSessionManager.sendCommand(tabId, 'Runtime.callFunctionOn', {
+              const resp = await cdpSessionManager.sendCommand(tabId, 'Runtime.callFunctionOn', {
                 objectId: arg.objectId,
                 functionDeclaration:
                   'function(maxDepth, maxProps){\n' +
@@ -292,7 +318,7 @@ class ConsoleTool extends BaseBrowserToolExecutor {
                 arguments: [{ value: 3 }, { value: 100 }],
                 silent: true,
                 returnByValue: true,
-              })) as any;
+              });
               return resp?.result?.value ?? '[Unavailable]';
             }
             return '[Unknown]';

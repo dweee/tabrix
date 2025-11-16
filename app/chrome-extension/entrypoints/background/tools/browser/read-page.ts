@@ -7,6 +7,8 @@ import { listMarkersForUrl } from '@/entrypoints/background/element-marker/eleme
 
 interface ReadPageParams {
   filter?: 'interactive'; // when omitted, return all visible elements
+  tabId?: number; // target existing tab id
+  windowId?: number; // when no tabId, pick active tab from this window
 }
 
 class ReadPageTool extends BaseBrowserToolExecutor {
@@ -19,11 +21,10 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     try {
       // Tip text returned to callers to guide next action
       const standardTips =
-        "If the specific element you need is missing from the returned data, use the 'screenshot' tool to capture the current viewport and confirm the element's on-screen coordinates.";
+        "If the specific element you need is missing from the returned data, use the 'screenshot' tool to capture the current viewport and confirm the element's on-screen coordinates. Also note: 'markedElements' are user-marked elements and have the highest priority when choosing targets.";
 
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tabs[0]) return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND);
-      const tab = tabs[0];
+      const explicit = await this.tryGetTab(args?.tabId);
+      const tab = explicit || (await this.getActiveTabOrThrowInWindow(args?.windowId));
       if (!tab.id)
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
 
@@ -74,6 +75,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             selectorType: m.selectorType || 'css',
             urlMatch: { type: m.matchType, origin: m.origin, path: m.path },
             source: 'marker',
+            priority: 'highest',
           })),
         };
 
@@ -101,6 +103,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             selectorType: m.selectorType || 'css',
             isInteractive: true,
             source: 'marker',
+            priority: 'highest',
           }));
           const seen = new Set(markerElements.map((e) => e.selector));
           const merged = [...markerElements, ...limited.filter((e: any) => !seen.has(e.selector))];

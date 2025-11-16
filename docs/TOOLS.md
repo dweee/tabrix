@@ -48,8 +48,10 @@ Navigate to a URL with optional viewport control.
 
 **Parameters**:
 
-- `url` (string, required): URL to navigate to
+- `url` (string, optional): URL to navigate to (omit when `refresh=true`)
 - `newWindow` (boolean, optional): Create new window (default: false)
+- `tabId` (number, optional): Target an existing tab by ID (navigate/refresh that tab)
+- `background` (boolean, optional): Do not activate the tab or focus the window (default: false)
 - `width` (number, optional): Viewport width in pixels (default: 1280)
 - `height` (number, optional): Viewport height in pixels (default: 720)
 
@@ -128,6 +130,8 @@ Take advanced screenshots with various options.
 
 - `name` (string, optional): Screenshot filename
 - `selector` (string, optional): CSS selector for element screenshot
+- `tabId` (number, optional): Target tab to capture (default: active tab)
+- `background` (boolean, optional): Attempt capture without bringing tab/window to foreground (viewport-only uses CDP)
 - `width` (number, optional): Width in pixels (default: 800)
 - `height` (number, optional): Height in pixels (default: 600)
 - `storeBase64` (boolean, optional): Return base64 data (default: false)
@@ -254,6 +258,7 @@ Build an accessibility-like tree of the current page (visible viewport by defaul
 Parameters:
 
 - `filter` (string, optional): `interactive` to only include interactive elements; default includes structural and labeled nodes.
+- `tabId` (number, optional): Target an existing tab by ID (default: active tab).
 
 Example:
 
@@ -316,6 +321,7 @@ Extract HTML or text content from web pages.
 - `format` (string, optional): "html" or "text" (default: "text")
 - `selector` (string, optional): CSS selector for specific elements
 - `tabId` (number, optional): Specific tab ID (default: active tab)
+- `background` (boolean, optional): Do not activate tab/focus window while fetching (default: false)
 
 **Example**:
 
@@ -339,6 +345,8 @@ Unified advanced interaction tool that prioritizes high-level DOM actions with C
 Parameters:
 
 - `action` (string, required): `left_click` | `right_click` | `double_click` | `triple_click` | `left_click_drag` | `scroll` | `type` | `key` | `fill` | `hover` | `wait` | `screenshot`
+- `tabId` (number, optional): Target an existing tab by ID (default: active tab)
+- `background` (boolean, optional): Avoid focusing/activating tab/window for certain operations (best-effort)
 - `ref` (string, optional): element ref from `chrome_read_page` (preferred). Used for click/scroll/type/key and as drag end when provided
 - `coordinates` (object, optional): `{ "x": 100, "y": 200 }` for click/scroll or drag end
 - `startRef` (string, optional): element ref for drag start
