@@ -20,13 +20,18 @@ export const TIMEOUTS = {
 // Server configuration
 export const SERVER_CONFIG = {
   HOST: '127.0.0.1',
-  CORS_ORIGIN: true,
+  /**
+   * CORS origin whitelist - only allow Chrome/Firefox extensions and local debugging.
+   * Use RegExp patterns for extension origins, string for exact match.
+   */
+  CORS_ORIGIN: [/^chrome-extension:\/\//, /^moz-extension:\/\//, 'http://127.0.0.1'] as const,
   LOGGER_ENABLED: false,
 } as const;
 
 // HTTP Status codes
 export const HTTP_STATUS = {
   OK: 200,
+  CREATED: 201,
   NO_CONTENT: 204,
   BAD_REQUEST: 400,
   INTERNAL_SERVER_ERROR: 500,

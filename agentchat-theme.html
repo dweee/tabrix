@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Sidepanel Variations</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'system-ui', 'sans-serif'],
+              serif: ['Newsreader', 'Merriweather', 'serif'],
+              mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+              grotesk: ['Space Grotesk', 'sans-serif'],
+            },
+            colors: {
+              stone: {
+                50: '#fafaf9',
+                100: '#f5f5f4',
+                200: '#e7e5e4',
+                800: '#292524',
+                900: '#1c1917',
+              },
+              slate: { 850: '#1e293b' }, // Custom dark
+            },
+          },
+        },
+      };
+    </script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&family=Space+Grotesk:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* Hide scrollbar for Chrome/Safari/Opera */
+      .no-scrollbar::-webkit-scrollbar {
+        display: none;
+      }
+      .no-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+      }
+
+      /* Custom thin scrollbar */
+      .thin-scroll::-webkit-scrollbar {
+        width: 4px;
+      }
+      .thin-scroll::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .thin-scroll::-webkit-scrollbar-thumb {
+        background-color: rgba(0, 0, 0, 0.1);
+        border-radius: 4px;
+      }
+      .dark-scroll::-webkit-scrollbar-thumb {
+        background-color: rgba(255, 255, 255, 0.1);
+      }
+    </style>
+  </head>
+  <body class="bg-gray-100 h-screen w-full flex flex-col overflow-hidden">
+    <div class="flex-none p-6 pb-2">
+      <h1 class="text-xl font-bold text-gray-800">Agent UI Design Variations</h1>
+      <p class="text-sm text-gray-500"
+        >Horizontal scroll to compare styles. All layouts are 360px wide (SidePanel standard).</p
+      >
+    </div>
+
+    <!-- Scrollable Container -->
+    <div class="flex-1 overflow-x-auto overflow-y-hidden flex items-center px-8 gap-10 pb-8">
+      <!-- VARIATION 1: The Classic Editorial (Warm) -->
+      <div class="flex flex-col gap-3 flex-shrink-0">
+        <span class="text-xs font-bold text-gray-400 uppercase tracking-widest text-center"
+          >01. Classic Editorial</span
+        >
+        <div
+          class="w-[360px] h-[680px] bg-[#FDFCF8] rounded-xl shadow-xl border border-stone-200 flex flex-col overflow-hidden relative font-sans text-stone-900"
+        >
+          <!-- Header -->
+          <header
+            class="px-5 py-4 border-b border-stone-100 flex justify-between items-center bg-[#FDFCF8]/90 backdrop-blur z-10"
+          >
+            <div class="flex items-center gap-2">
+              <div
+                class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.4)]"
+              ></div>
+              <span class="font-serif font-medium text-lg tracking-tight">Claude</span>
+            </div>
+            <button
+              class="text-stone-400 hover:text-stone-700 text-xs font-mono bg-stone-100 px-2 py-1 rounded"
+              >acme/tea-sales</button
+            >
+          </header>
+          <!-- Content -->
+          <main class="flex-1 overflow-y-auto p-5 thin-scroll">
+            <div class="mb-6">
+              <h2 class="font-serif text-xl leading-snug text-stone-900 mb-4"
+                >Round subscription discounts down to nearest dollar</h2
+              >
+
+              <div class="pl-4 border-l border-stone-200 ml-1 space-y-4">
+                <div class="text-sm text-stone-600 font-serif italic"
+                  >I found the logic. Let me fix that.</div
+                >
+
+                <div class="flex items-start gap-3">
+                  <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-stone-300 flex-shrink-0"></span>
+                  <div class="space-y-1">
+                    <div class="text-xs font-bold text-stone-400 uppercase">Read</div>
+                    <div
+                      class="font-mono text-xs bg-stone-100 px-1.5 py-0.5 rounded text-stone-700 w-fit"
+                      >pricing_utils.ts</div
+                    >
+                  </div>
+                </div>
+
+                <div class="flex items-start gap-3">
+                  <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-orange-400 flex-shrink-0"></span>
+                  <div class="space-y-1 w-full">
+                    <div class="text-xs font-bold text-orange-600 uppercase">Edit</div>
+                    <div
+                      class="bg-white border border-stone-200 rounded p-2 text-[10px] font-mono leading-relaxed w-full"
+                    >
+                      <div class="text-red-500 line-through decoration-red-300/50 opacity-60"
+                        >discount = amount * 0.1</div
+                      >
+                      <div class="text-green-600">discount = Math.floor(amount * 0.1)</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </main>
+          <!-- Footer -->
+          <footer class="p-4 bg-gradient-to-t from-[#FDFCF8] via-[#FDFCF8] to-transparent">
+            <div
+              class="bg-white border border-stone-200 rounded-lg shadow-sm p-1 flex items-center gap-2"
+            >
+              <button class="p-2 text-stone-400 hover:text-stone-600"
+                ><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
+                  /></svg
+              ></button>
+              <input
+                class="flex-1 bg-transparent text-sm p-1 outline-none font-serif placeholder:text-stone-300 placeholder:italic"
+                placeholder="Ask a follow up..."
+              />
+              <button class="p-2 bg-stone-900 text-stone-50 rounded hover:bg-black"
+                ><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M14 5l7 7m0 0l-7 7m7-7H3"
+                  /></svg
+              ></button>
+            </div>
+          </footer>
+        </div>
+      </div>
+
+      <!-- VARIATION 2: The Clean SaaS (Cool/Minimal) -->
+      <div class="flex flex-col gap-3 flex-shrink-0">
+        <span class="text-xs font-bold text-gray-400 uppercase tracking-widest text-center"
+          >02. Clean SaaS</span
+        >
+        <div
+          class="w-[360px] h-[680px] bg-white rounded-xl shadow-xl border border-slate-100 flex flex-col overflow-hidden font-sans text-slate-800"
+        >
+          <!-- Header -->
+          <header class="px-4 py-3 border-b border-slate-100 flex justify-between items-center">
+            <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <span
+                class="w-5 h-5 bg-indigo-600 text-white rounded flex items-center justify-center text-[10px]"
+                >Ag</span
+              >
+              Agent
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+              <span class="text-[10px] text-slate-400 uppercase font-medium">Ready</span>
+            </div>
+          </header>
+          <!-- Content -->
+          <main class="flex-1 overflow-y-auto p-4 thin-scroll">
+            <div class="flex flex-col gap-6">
+              <!-- User -->
+              <div class="flex gap-3">
+                <div
+                  class="mt-1 w-6 h-6 rounded bg-slate-100 flex items-center justify-center text-[10px] text-slate-500 font-medium"
+                  >Y</div
+                >
+                <div class="text-sm font-medium text-slate-900">Round subscription amounts</div>
+              </div>
+
+              <!-- Agent -->
+              <div class="flex gap-3">
+                <div
+                  class="mt-1 w-6 h-6 rounded bg-indigo-50 flex items-center justify-center text-[10px] text-indigo-600 font-medium"
+                  >AI</div
+                >
+                <div class="flex-1 space-y-3">
+                  <p class="text-sm text-slate-600">On it. Checking pricing logic.</p>
+
+                  <!-- Step Card -->
+                  <div class="border border-slate-200 rounded-lg overflow-hidden">
+                    <div
+                      class="bg-slate-50 px-3 py-2 border-b border-slate-100 flex items-center gap-2"
+                    >
+                      <svg
+                        class="w-3 h-3 text-slate-400"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
+                        />
+                      </svg>
+                      <span class="text-xs font-medium text-slate-700">pricing_utils.ts</span>
+                    </div>
+                    <div class="p-3 bg-white">
+                      <div class="font-mono text-[10px] text-slate-500 leading-5">
+                        <span class="bg-red-50 text-red-600 px-1 rounded">- discount = 0.1</span
+                        ><br />
+                        <span class="bg-green-50 text-green-600 px-1 rounded"
+                          >+ discount = floor(0.1)</span
+                        >
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="flex items-center gap-2 text-xs text-slate-400">
+                    <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+                      <circle
+                        class="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        stroke-width="4"
+                      ></circle>
+                      <path
+                        class="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                    Running tests...
+                  </div>
+                </div>
+              </div>
+            </div>
+          </main>
+          <!-- Footer -->
+          <footer class="p-4 border-t border-slate-100 bg-white">
+            <div class="relative">
+              <textarea
+                class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
+                rows="2"
+                placeholder="Type a message..."
+              ></textarea>
+              <button
+                class="absolute bottom-2 right-2 p-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors"
+              >
+                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M5 12h14M12 5l7 7-7 7"
+                  />
+                </svg>
+              </button>
+            </div>
+          </footer>
+        </div>
+      </div>
+
+      <!-- VARIATION 3: The Dark Console (Dev Focused) -->
+      <div class="flex flex-col gap-3 flex-shrink-0">
+        <span class="text-xs font-bold text-gray-400 uppercase tracking-widest text-center"
+          >03. Dark Console</span
+        >
+        <div
+          class="w-[360px] h-[680px] bg-[#0F1117] rounded-xl shadow-2xl border border-gray-800 flex flex-col overflow-hidden font-sans antialiased"
+        >
+          <!-- Header -->
+          <header
+            class="px-4 py-3 border-b border-gray-800 flex justify-between items-center bg-[#0F1117]"
+          >
+            <span class="text-xs font-mono font-bold text-gray-400 uppercase tracking-wider"
+              >Terminal-1</span
+            >
+            <div class="flex gap-1.5">
+              <div class="w-2.5 h-2.5 rounded-full bg-red-500/20 border border-red-500/50"></div>
+              <div
+                class="w-2.5 h-2.5 rounded-full bg-yellow-500/20 border border-yellow-500/50"
+              ></div>
+              <div
+                class="w-2.5 h-2.5 rounded-full bg-green-500/20 border border-green-500/50"
+              ></div>
+            </div>
+          </header>
+          <!-- Content -->
+          <main class="flex-1 overflow-y-auto p-4 thin-scroll dark-scroll">
+            <div class="space-y-6">
+              <!-- User Input -->
+              <div class="group">
+                <div class="flex items-center gap-2 mb-1 opacity-50">
+                  <span class="text-blue-400 font-mono text-xs">➜</span>
+                  <span class="text-xs font-mono text-blue-400">user</span>
+                </div>
+                <div class="text-gray-200 text-sm font-medium">
+                  Update the subscription logic to round down
+                </div>
+              </div>
+
+              <!-- Agent Response -->
+              <div class="pl-3 border-l-2 border-gray-800 space-y-4">
+                <div class="text-xs text-gray-500 font-mono italic"
+                  >// Analyzing project structure...</div
+                >
+
+                <!-- Command Execution -->
+                <div class="font-mono text-xs">
+                  <div class="flex gap-2 items-center text-purple-400 mb-1">
+                    <span>$</span>
+                    <span>grep -r "discount" .</span>
+                  </div>
+                  <div class="text-gray-500 pl-4">Found 3 matches in src/utils/</div>
+                </div>
+
+                <!-- Code Diff Dark -->
+                <div class="bg-[#0A0C10] border border-gray-800 rounded p-3 text-[11px] font-mono">
+                  <div
+                    class="flex items-center justify-between text-gray-500 mb-2 pb-2 border-b border-gray-800"
+                  >
+                    <span>pricing.ts</span>
+                    <span class="text-[9px] border border-gray-700 px-1 rounded">MODIFIED</span>
+                  </div>
+                  <div class="space-y-1">
+                    <div class="text-red-400 opacity-70">- const val = base * rate;</div>
+                    <div class="text-green-400">+ const val = Math.floor(base * rate);</div>
+                  </div>
+                </div>
+
+                <div class="text-xs text-gray-300">
+                  <span class="text-green-500">✔</span> Done.
+                </div>
+              </div>
+            </div>
+          </main>
+          <!-- Footer -->
+          <footer class="p-3 bg-[#0F1117] border-t border-gray-800">
+            <div
+              class="bg-[#1A1D26] rounded-md flex items-center px-3 py-2 border border-gray-700 focus-within:border-gray-500 transition-colors"
+            >
+              <span class="text-purple-400 mr-2">❯</span>
+              <input
+                class="bg-transparent text-gray-200 text-sm w-full outline-none placeholder:text-gray-600 font-mono"
+                placeholder="Enter command..."
+              />
+            </div>
+          </footer>
+        </div>
+      </div>
+
+      <!-- VARIATION 4: The Structured Note (Notion-like) -->
+      <div class="flex flex-col gap-3 flex-shrink-0">
+        <span class="text-xs font-bold text-gray-400 uppercase tracking-widest text-center"
+          >04. Structured Note</span
+        >
+        <div
+          class="w-[360px] h-[680px] bg-[#F7F6F3] rounded-xl shadow-xl border border-gray-200 flex flex-col overflow-hidden font-sans text-[#37352F]"
+        >
+          <!-- Header -->
+          <header class="h-12 flex items-center px-4 bg-white border-b border-gray-200">
+            <div class="flex items-center gap-2">
+              <span class="text-lg">🍵</span>
+              <span class="text-sm font-medium">Tea Sales Project</span>
+            </div>
+          </header>
+          <!-- Content -->
+          <main class="flex-1 overflow-y-auto p-4 thin-scroll">
+            <div class="space-y-4">
+              <!-- Block: User -->
+              <div
+                class="bg-white p-3 rounded-lg shadow-sm border border-gray-200/60 group hover:border-gray-300 transition-colors"
+              >
+                <div class="text-[10px] text-gray-400 font-medium mb-1 uppercase tracking-wider"
+                  >Request</div
+                >
+                <div class="text-sm text-gray-800">Round subscription amounts to dollar</div>
+              </div>
+
+              <!-- Block: Agent -->
+              <div class="relative">
+                <div class="absolute top-4 left-[-10px] w-0.5 h-full bg-gray-200"></div>
+
+                <div class="space-y-3 pl-3">
+                  <div class="flex items-center gap-2 text-xs text-gray-500">
+                    <img src="https://www.anthropic.com/favicon.ico" class="w-3 h-3 opacity-50" />
+                    <span>AI Assistant</span>
+                  </div>
+
+                  <!-- Action Item -->
+                  <div
+                    class="bg-white p-2 rounded shadow-sm border border-gray-200 flex items-center gap-3"
+                  >
+                    <div
+                      class="bg-yellow-100 text-yellow-700 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase"
+                      >Task</div
+                    >
+                    <span class="text-xs text-gray-700"
+                      >Check
+                      <code class="bg-gray-100 px-1 rounded text-red-500">pricing.ts</code></span
+                    >
+                  </div>
+
+                  <!-- Code Block -->
+                  <div class="bg-white rounded shadow-sm border border-gray-200 overflow-hidden">
+                    <div
+                      class="bg-gray-50 px-2 py-1 text-[10px] text-gray-500 font-mono border-b border-gray-200"
+                      >Diff View</div
+                    >
+                    <div class="p-2 text-xs font-mono bg-white">
+                      <div class="bg-red-50 text-red-800 px-1">- amount * 0.1</div>
+                      <div class="bg-green-50 text-green-800 px-1">+ Math.floor(amount * 0.1)</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </main>
+          <!-- Footer -->
+          <footer class="p-4 bg-[#F7F6F3]">
+            <div class="bg-white shadow-sm border border-gray-200 rounded-lg flex flex-col">
+              <textarea
+                class="p-3 text-sm resize-none outline-none rounded-t-lg"
+                rows="1"
+                placeholder="Type instructions..."
+              ></textarea>
+              <div
+                class="px-2 py-1 border-t border-gray-100 flex justify-between items-center bg-gray-50/50 rounded-b-lg"
+              >
+                <button class="text-xs text-gray-500 hover:text-gray-800 px-2 py-1">Attach</button>
+                <button
+                  class="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 font-medium"
+                  >Send</button
+                >
+              </div>
+            </div>
+          </footer>
+        </div>
+      </div>
+
+      <!-- VARIATION 5: The Swiss Grid (Brutalist/Technical) -->
+      <div class="flex flex-col gap-3 flex-shrink-0">
+        <span class="text-xs font-bold text-gray-400 uppercase tracking-widest text-center"
+          >05. Swiss Grid</span
+        >
+        <div
+          class="w-[360px] h-[680px] bg-white rounded-xl shadow-xl border-2 border-black flex flex-col overflow-hidden font-grotesk text-black"
+        >
+          <!-- Header -->
+          <header
+            class="px-4 py-4 border-b-2 border-black bg-white flex justify-between items-center"
+          >
+            <h1 class="text-lg font-bold uppercase tracking-tight">Agent_CLI</h1>
+            <div class="w-3 h-3 bg-black rounded-full"></div>
+          </header>
+          <!-- Content -->
+          <main
+            class="flex-1 overflow-y-auto thin-scroll bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px]"
+          >
+            <div class="p-4 space-y-6">
+              <!-- Section -->
+              <div
+                class="bg-white border-2 border-black p-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
+              >
+                <h3 class="text-xs font-bold uppercase border-b-2 border-black pb-2 mb-2"
+                  >Input_Query</h3
+                >
+                <p class="text-sm font-medium leading-tight"
+                  >Round subscription amounts to dollar.</p
+                >
+              </div>
+
+              <!-- Connector -->
+              <div class="flex justify-center">
+                <div class="w-0.5 h-6 bg-black"></div>
+              </div>
+
+              <!-- Response -->
+              <div
+                class="bg-white border-2 border-black p-0 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
+              >
+                <div
+                  class="bg-black text-white px-3 py-1 text-xs font-bold uppercase flex justify-between"
+                >
+                  <span>Process</span>
+                  <span>Running</span>
+                </div>
+                <div class="p-3 space-y-3">
+                  <div
+                    class="flex items-center gap-2 text-xs font-mono border-b border-gray-200 pb-2"
+                  >
+                    <span class="font-bold">></span> READ pricing.ts
+                  </div>
+                  <div class="text-xs font-mono">
+                    <div class="bg-gray-100 p-1 mb-1 line-through text-gray-500"
+                      >const d = a * 0.1</div
+                    >
+                    <div class="bg-black text-white p-1">const d = Math.floor(a * 0.1)</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </main>
+          <!-- Footer -->
+          <footer class="p-4 bg-white border-t-2 border-black">
+            <div class="flex gap-2">
+              <input
+                class="flex-1 border-2 border-black px-3 py-2 text-sm font-bold placeholder:text-gray-400 focus:outline-none focus:bg-gray-50"
+                placeholder="ENTER COMMAND..."
+              />
+              <button class="bg-black text-white px-4 py-2 font-bold hover:bg-gray-800">></button>
+            </div>
+          </footer>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

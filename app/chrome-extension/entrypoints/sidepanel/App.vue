@@ -25,6 +25,17 @@
         >
           元素标注管理
         </button>
+        <button
+          :class="[
+            'px-4 py-2 rounded-lg font-medium transition-all',
+            activeTab === 'agent-chat'
+              ? 'bg-white text-slate-800 shadow'
+              : 'text-slate-600 hover:bg-slate-100',
+          ]"
+          @click="activeTab = 'agent-chat'"
+        >
+          智能助手
+        </button>
       </div>
     </div>
 
@@ -254,6 +265,11 @@
       </div>
     </div>
 
+    <!-- Agent Chat Tab -->
+    <div v-show="activeTab === 'agent-chat'" class="h-[calc(100%-56px)]">
+      <AgentChat />
+    </div>
+
     <!-- Element Markers Tab -->
     <div v-show="activeTab === 'element-markers'" class="element-markers-content">
       <div class="px-4 py-4">
@@ -442,6 +458,7 @@
 import { computed, onMounted, ref, onUnmounted, watch } from 'vue';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import type { ElementMarker, UpsertMarkerRequest } from '@/common/element-marker-types';
+import AgentChat from './components/AgentChat.vue';
 
 type FlowLite = { id: string; name: string; description?: string; meta?: any };
 type RunLite = {
@@ -454,7 +471,7 @@ type RunLite = {
 };
 
 // Tab state
-const activeTab = ref<'workflows' | 'element-markers'>('workflows');
+const activeTab = ref<'workflows' | 'element-markers' | 'agent-chat'>('workflows');
 
 // Workflows state
 const flows = ref<FlowLite[]>([]);

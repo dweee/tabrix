@@ -1,0 +1,169 @@
+<template>
+  <div
+    ref="shellRef"
+    class="h-full flex flex-col overflow-hidden relative"
+    :style="{ backgroundColor: 'var(--ac-bg)' }"
+  >
+    <!-- Header -->
+    <header
+      class="flex-none px-5 py-3 flex items-center justify-between z-20"
+      :style="{
+        backgroundColor: 'var(--ac-header-bg)',
+        borderBottom: 'var(--ac-border-width) solid var(--ac-header-border)',
+        backdropFilter: 'blur(8px)',
+      }"
+    >
+      <slot name="header" />
+    </header>
+
+    <!-- Content Area -->
+    <main
+      ref="contentRef"
+      class="flex-1 overflow-y-auto ac-scroll"
+      :style="{
+        paddingBottom: composerHeight + 'px',
+      }"
+      @scroll="handleScroll"
+    >
+      <!-- Stable wrapper for ResizeObserver -->
+      <div ref="contentSlotRef">
+        <slot name="content" />
+      </div>
+    </main>
+
+    <!-- Footer / Composer -->
+    <footer
+      ref="composerRef"
+      class="flex-none px-5 pb-5 pt-2"
+      :style="{
+        background: `linear-gradient(to top, var(--ac-bg), var(--ac-bg), transparent)`,
+      }"
+    >
+      <!-- Error Banner (above input) -->
+      <div
+        v-if="errorMessage"
+        class="mb-2 px-4 py-2 text-xs rounded-lg"
+        :style="{
+          backgroundColor: 'var(--ac-diff-del-bg)',
+          color: 'var(--ac-danger)',
+          border: 'var(--ac-border-width) solid var(--ac-diff-del-border)',
+          borderRadius: 'var(--ac-radius-inner)',
+        }"
+      >
+        {{ errorMessage }}
+      </div>
+
+      <slot name="composer" />
+
+      <!-- Version label -->
+      <div
+        class="text-[10px] text-center mt-2 font-medium tracking-wide"
+        :style="{ color: 'var(--ac-text-subtle)' }"
+      >
+        Claude Code Preview
+      </div>
+    </footer>
+  </div>
+</template>
+
+<script lang="ts" setup>
+import { ref, onMounted, onUnmounted, nextTick } from 'vue';
+
+defineProps<{
+  errorMessage?: string | null;
+}>();
+
+const shellRef = ref<HTMLElement | null>(null);
+const contentRef = ref<HTMLElement | null>(null);
+const contentSlotRef = ref<HTMLElement | null>(null);
+const composerRef = ref<HTMLElement | null>(null);
+const composerHeight = ref(120); // Default height
+
+// Auto-scroll state
+const isUserScrolledUp = ref(false);
+// Threshold should account for padding and some tolerance
+const SCROLL_THRESHOLD = 150;
+
+/**
+ * Check if scroll position is near bottom
+ */
+function isNearBottom(el: HTMLElement): boolean {
+  const { scrollTop, scrollHeight, clientHeight } = el;
+  return scrollHeight - scrollTop - clientHeight < SCROLL_THRESHOLD;
+}
+
+/**
+ * Handle user scroll to track if they've scrolled up
+ */
+function handleScroll(): void {
+  if (!contentRef.value) return;
+  isUserScrolledUp.value = !isNearBottom(contentRef.value);
+}
+
+/**
+ * Scroll to bottom of content area
+ */
+function scrollToBottom(behavior: ScrollBehavior = 'smooth'): void {
+  if (!contentRef.value) return;
+  contentRef.value.scrollTo({
+    top: contentRef.value.scrollHeight,
+    behavior,
+  });
+}
+
+// Observers
+let composerResizeObserver: ResizeObserver | null = null;
+let contentResizeObserver: ResizeObserver | null = null;
+
+// Scroll scheduling to prevent excessive calls during streaming
+let scrollScheduled = false;
+
+/**
+ * Auto-scroll when content or composer changes (if user is at bottom)
+ * Uses requestAnimationFrame to debounce rapid updates during streaming
+ */
+function maybeAutoScroll(): void {
+  if (scrollScheduled || isUserScrolledUp.value || !contentRef.value) {
+    return;
+  }
+  scrollScheduled = true;
+  requestAnimationFrame(() => {
+    scrollScheduled = false;
+    if (!isUserScrolledUp.value) {
+      scrollToBottom('auto');
+    }
+  });
+}
+
+onMounted(() => {
+  // Observe composer height changes
+  if (composerRef.value) {
+    composerResizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        composerHeight.value = entry.contentRect.height + 24; // Add padding
+      }
+      // Also auto-scroll when composer height changes (e.g., error banner appears)
+      maybeAutoScroll();
+    });
+    composerResizeObserver.observe(composerRef.value);
+  }
+
+  // Observe content height changes for auto-scroll using stable wrapper
+  if (contentSlotRef.value) {
+    contentResizeObserver = new ResizeObserver(() => {
+      maybeAutoScroll();
+    });
+    contentResizeObserver.observe(contentSlotRef.value);
+  }
+});
+
+onUnmounted(() => {
+  composerResizeObserver?.disconnect();
+  contentResizeObserver?.disconnect();
+});
+
+// Expose scrollToBottom for parent component to call
+defineExpose({
+  scrollToBottom,
+});
+</script>

@@ -138,4 +138,19 @@ fi
     echo "Executing: ${NODE_EXEC} ${NODE_SCRIPT}"
 } >> "${WRAPPER_LOG}"
 
+# Add Node.js bin directory to PATH so child processes can find node and related tools
+NODE_BIN_DIR="$(dirname "${NODE_EXEC}")"
+# Use ${PATH:+:${PATH}} to avoid trailing colon when PATH is empty (security concern)
+export PATH="${NODE_BIN_DIR}${PATH:+:${PATH}}"
+echo "Added ${NODE_BIN_DIR} to PATH" >> "${WRAPPER_LOG}"
+
+# Log Claude Code Router (CCR) related env vars for debugging
+# These are set by `eval "$(ccr activate)"` or in shell profile
+if [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
+    echo "ANTHROPIC_BASE_URL is set: ${ANTHROPIC_BASE_URL}" >> "${WRAPPER_LOG}"
+fi
+if [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
+    echo "ANTHROPIC_AUTH_TOKEN is set (value hidden)" >> "${WRAPPER_LOG}"
+fi
+
 exec "${NODE_EXEC}" "${NODE_SCRIPT}" 2>> "${STDERR_LOG}"

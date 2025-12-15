@@ -3,5 +3,22 @@ import App from './App.vue';
 
 // Tailwind first, then custom tokens
 import '../styles/tailwind.css';
+// AgentChat theme tokens
+import './styles/agent-chat.css';
 
-createApp(App).mount('#app');
+import { preloadAgentTheme } from './composables';
+
+/**
+ * Initialize and mount the Vue app.
+ * Preloads theme before mounting to prevent flash.
+ */
+async function init(): Promise<void> {
+  // Preload theme from storage and apply to document
+  // This happens before Vue mounts, preventing theme flash
+  await preloadAgentTheme();
+
+  // Mount Vue app
+  createApp(App).mount('#app');
+}
+
+init();

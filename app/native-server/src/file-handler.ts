@@ -262,7 +262,8 @@ export class FileHandler {
         const stats = fs.statSync(filePath);
         if (now - stats.mtimeMs > oneHour) {
           fs.unlinkSync(filePath);
-          console.log(`Cleaned up old temp file: ${file}`);
+          // Use stderr to avoid polluting stdout (Native Messaging protocol)
+          console.error(`Cleaned up old temp file: ${file}`);
         }
       }
     } catch (error) {

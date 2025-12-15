@@ -1,0 +1,260 @@
+/**
+ * Composable for managing Agent Server connection state.
+ * Handles native host connection, server status, and SSE stream.
+ */
+import { ref, computed, onUnmounted } from 'vue';
+import { NativeMessageType } from 'chrome-mcp-shared';
+import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import type { AgentEngineInfo, RealtimeEvent } from 'chrome-mcp-shared';
+
+interface ServerStatus {
+  isRunning: boolean;
+  port?: number;
+  lastUpdated: number;
+}
+
+export interface UseAgentServerOptions {
+  onMessage?: (event: RealtimeEvent) => void;
+  onError?: (error: string) => void;
+}
+
+export function useAgentServer(options: UseAgentServerOptions = {}) {
+  // State
+  const serverPort = ref<number | null>(null);
+  const nativeConnected = ref(false);
+  const serverStatus = ref<ServerStatus | null>(null);
+  const connecting = ref(false);
+  const sessionId = ref<string>('');
+  const engines = ref<AgentEngineInfo[]>([]);
+  const eventSource = ref<EventSource | null>(null);
+
+  // Reconnection state
+  let reconnectAttempts = 0;
+  const MAX_RECONNECT_ATTEMPTS = 5;
+  const BASE_RECONNECT_DELAY = 1000;
+
+  // Computed
+  const isServerReady = computed(() => {
+    return nativeConnected.value && serverStatus.value?.isRunning && serverPort.value !== null;
+  });
+
+  // Generate session ID
+  function generateSessionId(): string {
+    return `session-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  }
+
+  // Check native host connection using existing message type
+  async function checkNativeHost(): Promise<boolean> {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: NativeMessageType.PING_NATIVE,
+      });
+      nativeConnected.value = response?.connected ?? false;
+      return nativeConnected.value;
+    } catch (error) {
+      console.error('Failed to check native host:', error);
+      nativeConnected.value = false;
+      return false;
+    }
+  }
+
+  // Start native host connection using existing message type
+  async function startNativeHost(): Promise<boolean> {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: NativeMessageType.CONNECT_NATIVE,
+      });
+      nativeConnected.value = response?.success ?? false;
+      return nativeConnected.value;
+    } catch (error) {
+      console.error('Failed to start native host:', error);
+      nativeConnected.value = false;
+      return false;
+    }
+  }
+
+  // Get server status using existing message type
+  async function getServerStatus(): Promise<ServerStatus | null> {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: BACKGROUND_MESSAGE_TYPES.GET_SERVER_STATUS,
+      });
+      if (response?.serverStatus) {
+        serverStatus.value = response.serverStatus;
+        if (response.serverStatus.port) {
+          serverPort.value = response.serverStatus.port;
+        }
+        // Also update native connected status from response
+        if (typeof response.connected === 'boolean') {
+          nativeConnected.value = response.connected;
+        }
+        return response.serverStatus;
+      }
+      return null;
+    } catch (error) {
+      console.error('Failed to get server status:', error);
+      return null;
+    }
+  }
+
+  // Ensure native server is ready
+  async function ensureNativeServer(): Promise<boolean> {
+    connecting.value = true;
+    try {
+      // Step 1: Check native host connection
+      let connected = await checkNativeHost();
+      if (!connected) {
+        // Try to start native host
+        connected = await startNativeHost();
+        if (!connected) {
+          console.error('Failed to connect to native host');
+          return false;
+        }
+        // Wait for connection to stabilize
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+
+      // Step 2: Get server status
+      const status = await getServerStatus();
+      if (!status?.isRunning || !status.port) {
+        console.error('Server not running or port not available', status);
+        return false;
+      }
+
+      // Step 3: Fetch engines
+      await fetchEngines();
+
+      return true;
+    } finally {
+      connecting.value = false;
+    }
+  }
+
+  // Fetch available engines
+  async function fetchEngines(): Promise<void> {
+    if (!serverPort.value) return;
+    try {
+      const url = `http://127.0.0.1:${serverPort.value}/agent/engines`;
+      const response = await fetch(url);
+      if (response.ok) {
+        const data = await response.json();
+        engines.value = data.engines || [];
+      }
+    } catch (error) {
+      console.error('Failed to fetch engines:', error);
+    }
+  }
+
+  // Check if SSE is connected
+  function isEventSourceConnected(): boolean {
+    return eventSource.value !== null && eventSource.value.readyState === EventSource.OPEN;
+  }
+
+  // Open SSE connection (skip if already connected)
+  function openEventSource(): void {
+    if (!serverPort.value || !sessionId.value) return;
+
+    // Skip if already connected to avoid message loss during reconnection
+    if (isEventSourceConnected()) {
+      console.log('[AgentServer] SSE already connected, skipping reconnect');
+      return;
+    }
+
+    // Close existing connection only if in CONNECTING or CLOSED state
+    closeEventSource();
+
+    const url = `http://127.0.0.1:${serverPort.value}/agent/chat/${encodeURIComponent(sessionId.value)}/stream`;
+    const es = new EventSource(url);
+
+    es.onopen = () => {
+      console.log('[AgentServer] SSE connection opened');
+      reconnectAttempts = 0;
+    };
+
+    es.onmessage = (event) => {
+      try {
+        const parsed = JSON.parse(event.data) as RealtimeEvent;
+        options.onMessage?.(parsed);
+      } catch (err) {
+        console.error('[AgentServer] Failed to parse SSE message:', err);
+      }
+    };
+
+    es.onerror = (error) => {
+      console.error('[AgentServer] SSE error:', error);
+      es.close();
+      eventSource.value = null;
+
+      // Attempt reconnection with exponential backoff
+      if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts);
+        reconnectAttempts++;
+        console.log(`[AgentServer] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
+        setTimeout(() => {
+          if (isServerReady.value) {
+            openEventSource();
+          }
+        }, delay);
+      } else {
+        options.onError?.('SSE connection failed after multiple attempts');
+      }
+    };
+
+    eventSource.value = es;
+  }
+
+  // Close SSE connection
+  function closeEventSource(): void {
+    if (eventSource.value) {
+      eventSource.value.close();
+      eventSource.value = null;
+    }
+  }
+
+  // Reconnect to server
+  async function reconnect(): Promise<void> {
+    closeEventSource();
+    reconnectAttempts = 0;
+    await ensureNativeServer();
+    if (isServerReady.value) {
+      openEventSource();
+    }
+  }
+
+  // Initialize
+  async function initialize(): Promise<void> {
+    sessionId.value = generateSessionId();
+    await ensureNativeServer();
+    if (isServerReady.value) {
+      openEventSource();
+    }
+  }
+
+  // Cleanup on unmount
+  onUnmounted(() => {
+    closeEventSource();
+  });
+
+  return {
+    // State
+    serverPort,
+    nativeConnected,
+    serverStatus,
+    connecting,
+    sessionId,
+    engines,
+    eventSource,
+
+    // Computed
+    isServerReady,
+
+    // Methods
+    ensureNativeServer,
+    fetchEngines,
+    openEventSource,
+    closeEventSource,
+    isEventSourceConnected,
+    reconnect,
+    initialize,
+  };
+}

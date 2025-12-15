@@ -86,6 +86,20 @@ if not exist "%NODE_SCRIPT%" (
     exit /B 1
 )
 
+REM Add Node.js bin directory to PATH for child processes
+for %%I in ("%NODE_EXEC%") do set "NODE_BIN_DIR=%%~dpI"
+if defined PATH (set "PATH=%NODE_BIN_DIR%;%PATH%") else (set "PATH=%NODE_BIN_DIR%")
+echo Added %NODE_BIN_DIR% to PATH >> "%WRAPPER_LOG%"
+
+REM Log Claude Code Router (CCR) related env vars for debugging
+REM These are set via System Properties or PowerShell profile
+if defined ANTHROPIC_BASE_URL (
+    echo ANTHROPIC_BASE_URL is set: %ANTHROPIC_BASE_URL% >> "%WRAPPER_LOG%"
+)
+if defined ANTHROPIC_AUTH_TOKEN (
+    echo ANTHROPIC_AUTH_TOKEN is set (value hidden) >> "%WRAPPER_LOG%"
+)
+
 echo Executing: "%NODE_EXEC%" "%NODE_SCRIPT%" >> "%WRAPPER_LOG%"
 call "%NODE_EXEC%" "%NODE_SCRIPT%" 2>> "%STDERR_LOG%"
 set "EXIT_CODE=%ERRORLEVEL%"
