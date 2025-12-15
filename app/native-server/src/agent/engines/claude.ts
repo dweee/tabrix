@@ -105,14 +105,34 @@ export class ClaudeEngine implements AgentEngine {
     let assistantBuffer = '';
     let assistantMessageId: string | null = null;
     let assistantCreatedAt: string | null = null;
+    let lastAssistantEmitted: { content: string; isFinal: boolean } | null = null;
     const streamedToolHashes = new Set<string>();
+
+    // Tool input accumulation for streaming tool_use blocks
+    // Key: content block index, Value: { toolName, toolId, inputJson }
+    const pendingToolInputs = new Map<
+      number,
+      { toolName: string; toolId: string; inputJsonParts: string[] }
+    >();
+    let currentContentBlockIndex = -1;
 
     /**
      * Emit assistant message to the stream.
+     * Includes deduplication to prevent multiple identical final emissions.
      */
     const emitAssistant = (isFinal: boolean): void => {
       const content = assistantBuffer.trim();
       if (!content) return;
+
+      // Deduplicate: skip if same content and isFinal state was already emitted
+      if (
+        lastAssistantEmitted &&
+        lastAssistantEmitted.content === content &&
+        lastAssistantEmitted.isFinal === isFinal
+      ) {
+        return;
+      }
+      lastAssistantEmitted = { content, isFinal };
 
       if (!assistantMessageId) {
         assistantMessageId = randomUUID();
@@ -230,7 +250,7 @@ export class ClaudeEngine implements AgentEngine {
     };
 
     /**
-     * Build tool metadata from content block.
+     * Build tool metadata from content block with detailed tool-specific information.
      */
     const buildToolMetadata = (contentBlock: Record<string, unknown>): Record<string, unknown> => {
       const toolName = this.pickFirstString(contentBlock.name) || 'unknown';
@@ -238,13 +258,97 @@ export class ClaudeEngine implements AgentEngine {
       const input = contentBlock.input as Record<string, unknown> | undefined;
       const action = inferActionFromToolName(toolName);
 
-      return {
+      const metadata: Record<string, unknown> = {
         toolName,
         tool_name: toolName,
         toolId,
         action,
-        input: input ? JSON.stringify(input).slice(0, 500) : undefined,
       };
+
+      if (!input) {
+        return metadata;
+      }
+
+      // Extract tool-specific details
+      const normalizedName = toolName.toLowerCase();
+
+      // File operations (read, write, edit)
+      if (typeof input.file_path === 'string') {
+        metadata.filePath = input.file_path;
+      }
+
+      // Edit tool - extract diff information
+      if (
+        normalizedName.includes('edit') ||
+        normalizedName === 'apply_patch' ||
+        normalizedName === 'patch_file'
+      ) {
+        if (typeof input.old_string === 'string') {
+          metadata.oldString = input.old_string;
+          metadata.deletedLines = input.old_string.split('\n').length;
+        }
+        if (typeof input.new_string === 'string') {
+          metadata.newString = input.new_string;
+          metadata.addedLines = input.new_string.split('\n').length;
+        }
+        if (typeof input.replace_all === 'boolean') {
+          metadata.replaceAll = input.replace_all;
+        }
+      }
+
+      // Write tool - content preview
+      if (normalizedName.includes('write') || normalizedName === 'create_file') {
+        if (typeof input.content === 'string') {
+          metadata.contentPreview = input.content.slice(0, 200);
+          metadata.totalLines = input.content.split('\n').length;
+        }
+      }
+
+      // Read tool - offset/limit
+      if (normalizedName.includes('read')) {
+        if (typeof input.offset === 'number') metadata.offset = input.offset;
+        if (typeof input.limit === 'number') metadata.limit = input.limit;
+      }
+
+      // Bash/shell - command
+      if (
+        normalizedName === 'bash' ||
+        normalizedName.includes('shell') ||
+        normalizedName === 'run'
+      ) {
+        if (typeof input.command === 'string') {
+          metadata.command = input.command;
+        }
+        if (typeof input.description === 'string') {
+          metadata.commandDescription = input.description;
+        }
+      }
+
+      // Search tools (grep, glob)
+      if (normalizedName === 'grep' || normalizedName.includes('search')) {
+        if (typeof input.pattern === 'string') metadata.pattern = input.pattern;
+        if (typeof input.path === 'string') metadata.searchPath = input.path;
+        if (typeof input.glob === 'string') metadata.glob = input.glob;
+        if (typeof input.output_mode === 'string') metadata.outputMode = input.output_mode;
+      }
+
+      if (normalizedName === 'glob' || normalizedName === 'glob_files') {
+        if (typeof input.pattern === 'string') metadata.pattern = input.pattern;
+        if (typeof input.path === 'string') metadata.searchPath = input.path;
+      }
+
+      // TodoWrite
+      if (normalizedName === 'todo_write' || normalizedName === 'todowrite') {
+        if (Array.isArray(input.todos)) {
+          metadata.todoCount = input.todos.length;
+          metadata.todos = input.todos;
+        }
+      }
+
+      // Store raw input for debugging (truncated)
+      metadata.rawInput = JSON.stringify(input).slice(0, 1000);
+
+      return metadata;
     };
 
     try {
@@ -290,6 +394,9 @@ export class ClaudeEngine implements AgentEngine {
         // Both permissionMode and allowDangerouslySkipPermissions are required for auto-approval
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
+        // Enable streaming: emit stream_event with content_block_delta for real-time UI updates
+        // Without this, SDK only outputs aggregated assistant/result messages
+        includePartialMessages: true,
         images: imageFiles.length > 0 ? imageFiles : undefined,
         executable: process.execPath,
         // Pass merged env to support Claude Code Router (CCR)
@@ -339,25 +446,27 @@ export class ClaudeEngine implements AgentEngine {
               assistantBuffer = '';
               assistantMessageId = randomUUID();
               assistantCreatedAt = new Date().toISOString();
+              lastAssistantEmitted = null;
               break;
             }
 
             case 'content_block_start': {
               const contentBlock = event.content_block as Record<string, unknown> | undefined;
+              const blockIndex =
+                typeof event.index === 'number' ? event.index : ++currentContentBlockIndex;
+              currentContentBlockIndex = blockIndex;
+
               if (contentBlock && contentBlock.type === 'tool_use') {
-                const metadata = buildToolMetadata(contentBlock);
                 const toolName = this.pickFirstString(contentBlock.name) || 'tool';
-                const input = contentBlock.input as Record<string, unknown> | undefined;
+                const toolId = this.pickFirstString(contentBlock.id) || '';
 
-                // Build more informative content based on tool input
-                let content = `Using tool: ${toolName}`;
-                if (input) {
-                  if (input.command) content = `Running: ${input.command}`;
-                  else if (input.file_path) content = `Operating on: ${input.file_path}`;
-                  else if (input.query) content = `Searching: ${input.query}`;
-                }
-
-                dispatchToolMessage(content, metadata, 'tool_use', true);
+                // Store pending tool input for accumulation
+                // Don't emit message here - wait for content_block_stop with complete input
+                pendingToolInputs.set(blockIndex, {
+                  toolName,
+                  toolId,
+                  inputJsonParts: [],
+                });
               } else if (contentBlock && contentBlock.type === 'tool_result') {
                 // Handle tool_result in content_block_start
                 const metadata = this.buildToolResultMetadata(contentBlock);
@@ -377,6 +486,47 @@ export class ClaudeEngine implements AgentEngine {
             }
 
             case 'content_block_stop': {
+              const blockIndex =
+                typeof event.index === 'number' ? event.index : currentContentBlockIndex;
+
+              // Check if we have accumulated tool input for this block
+              if (pendingToolInputs.has(blockIndex)) {
+                const pending = pendingToolInputs.get(blockIndex)!;
+                pendingToolInputs.delete(blockIndex);
+
+                // Parse the accumulated JSON
+                const fullJsonStr = pending.inputJsonParts.join('');
+                let input: Record<string, unknown> = {};
+                try {
+                  if (fullJsonStr) {
+                    input = JSON.parse(fullJsonStr);
+                  }
+                } catch (e) {
+                  console.error(`[ClaudeEngine] Failed to parse tool input JSON: ${e}`);
+                }
+
+                console.error(
+                  `[ClaudeEngine] content_block_stop - toolName: ${pending.toolName}, input: ${JSON.stringify(input).slice(0, 500)}`,
+                );
+
+                // Build metadata with full input
+                const metadata = buildToolMetadata({
+                  name: pending.toolName,
+                  id: pending.toolId,
+                  input,
+                });
+
+                // Build informative content
+                let content = `Using tool: ${pending.toolName}`;
+                if (input.command) content = `Running: ${input.command}`;
+                else if (input.file_path) content = `Operating on: ${input.file_path}`;
+                else if (input.pattern) content = `Searching: ${input.pattern}`;
+                else if (input.query) content = `Searching: ${input.query}`;
+
+                // Emit final tool_use message with complete metadata
+                dispatchToolMessage(content, metadata, 'tool_use', false);
+              }
+
               // Check if this block was a tool_result
               const contentBlock = event.content_block as Record<string, unknown> | undefined;
               if (contentBlock && contentBlock.type === 'tool_result') {
@@ -398,6 +548,19 @@ export class ClaudeEngine implements AgentEngine {
 
             case 'content_block_delta': {
               const delta = event.delta as Record<string, unknown> | string | undefined;
+              const blockIndex =
+                typeof event.index === 'number' ? event.index : currentContentBlockIndex;
+
+              // Check if this is a tool_use input_json_delta
+              if (delta && typeof delta === 'object' && delta.type === 'input_json_delta') {
+                const partialJson = delta.partial_json as string | undefined;
+                if (partialJson && pendingToolInputs.has(blockIndex)) {
+                  pendingToolInputs.get(blockIndex)!.inputJsonParts.push(partialJson);
+                }
+                break;
+              }
+
+              // Handle text delta for assistant messages
               let textChunk = '';
 
               if (typeof delta === 'string') {
@@ -419,12 +582,15 @@ export class ClaudeEngine implements AgentEngine {
               break;
             }
 
-            case 'message_stop':
             case 'message_delta': {
-              // Emit final assistant message
-              if (assistantBuffer.trim()) {
-                emitAssistant(true);
-              }
+              // message_delta usually contains metadata only (stop_reason, usage)
+              // Don't emit final here to avoid duplicate finals
+              break;
+            }
+
+            case 'message_stop': {
+              // Emit final assistant message only on message_stop
+              emitAssistant(true);
               break;
             }
 
@@ -445,6 +611,37 @@ export class ClaudeEngine implements AgentEngine {
 
           // Log full result for debugging
           console.error(`[ClaudeEngine] Result message: ${JSON.stringify(resultRecord, null, 2)}`);
+
+          // Extract and emit usage statistics
+          const usage = resultRecord.usage as Record<string, unknown> | undefined;
+          const totalCostUsd =
+            typeof resultRecord.total_cost_usd === 'number' ? resultRecord.total_cost_usd : 0;
+          const durationMs =
+            typeof resultRecord.duration_ms === 'number' ? resultRecord.duration_ms : 0;
+          const numTurns = typeof resultRecord.num_turns === 'number' ? resultRecord.num_turns : 0;
+
+          if (usage || totalCostUsd > 0) {
+            ctx.emit({
+              type: 'usage',
+              data: {
+                sessionId,
+                requestId,
+                inputTokens: typeof usage?.input_tokens === 'number' ? usage.input_tokens : 0,
+                outputTokens: typeof usage?.output_tokens === 'number' ? usage.output_tokens : 0,
+                cacheReadInputTokens:
+                  typeof usage?.cache_read_input_tokens === 'number'
+                    ? usage.cache_read_input_tokens
+                    : undefined,
+                cacheCreationInputTokens:
+                  typeof usage?.cache_creation_input_tokens === 'number'
+                    ? usage.cache_creation_input_tokens
+                    : undefined,
+                totalCostUsd,
+                durationMs,
+                numTurns,
+              },
+            });
+          }
 
           // Check if result contains errors (SDK puts error details here)
           // Note: is_error can be true even with empty errors array
@@ -640,10 +837,30 @@ export class ClaudeEngine implements AgentEngine {
 
   /**
    * Extract content from SDK message.
+   * Handles various message structures from Claude Agent SDK:
+   * - result.result (final result text)
+   * - assistant.message (nested message content)
+   * - content/text (direct content fields)
+   * - content[] (array of content blocks)
+   *
+   * @param message - The message object to extract content from
+   * @param depth - Current recursion depth (max 3 to prevent infinite loops)
    */
-  private extractMessageContent(message: unknown): string | undefined {
-    if (!message || typeof message !== 'object') return undefined;
+  private extractMessageContent(message: unknown, depth = 0): string | undefined {
+    // Prevent infinite recursion
+    if (depth > 3 || !message || typeof message !== 'object') return undefined;
     const record = message as Record<string, unknown>;
+
+    // Handle result message: result field contains final text
+    if (typeof record.result === 'string') {
+      return record.result.trim();
+    }
+
+    // Handle assistant message: message field may contain nested content
+    if (record.message && typeof record.message === 'object') {
+      const nested = this.extractMessageContent(record.message, depth + 1);
+      if (nested) return nested;
+    }
 
     // Try common content fields
     if (typeof record.content === 'string') {

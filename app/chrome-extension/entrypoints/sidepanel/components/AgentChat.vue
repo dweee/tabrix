@@ -1,6 +1,6 @@
 <template>
   <div class="agent-theme relative h-full" :data-agent-theme="themeState.theme.value">
-    <AgentChatShell :error-message="chat.errorMessage.value">
+    <AgentChatShell :error-message="chat.errorMessage.value" :usage="chat.lastUsage.value">
       <!-- Header -->
       <template #header>
         <AgentTopBar
@@ -50,6 +50,7 @@
       :selected-project-id="projects.selectedProjectId.value"
       :selected-cli="selectedCli"
       :model="model"
+      :use-ccr="useCcr"
       :project-root-override="projects.projectRootOverride.value"
       :engines="server.engines.value"
       :is-picking="isPickingDirectory"
@@ -59,6 +60,7 @@
       @project:new="handleNewProject"
       @cli:update="selectedCli = $event"
       @model:update="model = $event"
+      @ccr:update="useCcr = $event"
       @root:update="projects.projectRootOverride.value = $event"
       @save="handleSaveSettings"
     />
@@ -97,10 +99,31 @@ import {
   AgentSettingsMenu,
 } from './agent-chat';
 
+// Model utilities
+import { getModelsForCli } from '@/common/agent-models';
+
 // Local UI state
 const selectedCli = ref('');
 const model = ref('');
+const useCcr = ref(false);
 const isSavingPreference = ref(false);
+
+/**
+ * Get normalized model value that is valid for the current CLI.
+ * Returns empty string if:
+ * - No CLI selected (use server default)
+ * - Model is invalid for selected CLI
+ */
+function getNormalizedModel(): string {
+  const trimmedModel = model.value.trim();
+  if (!trimmedModel) return '';
+  // No CLI selected = don't override model, let server use default
+  if (!selectedCli.value) return '';
+  const models = getModelsForCli(selectedCli.value);
+  if (models.length === 0) return ''; // Unknown CLI
+  const isValid = models.some((m) => m.id === trimmedModel);
+  return isValid ? trimmedModel : '';
+}
 const isPickingDirectory = ref(false);
 const projectMenuOpen = ref(false);
 const settingsMenuOpen = ref(false);
@@ -202,6 +225,7 @@ async function handleProjectSelect(projectId: string): Promise<void> {
   if (project) {
     selectedCli.value = project.preferredCli ?? '';
     model.value = project.selectedModel ?? '';
+    useCcr.value = project.useCcr ?? false;
   }
   closeMenus();
 }
@@ -211,11 +235,14 @@ async function handleNewProject(): Promise<void> {
   try {
     const path = await projects.pickDirectory();
     if (path) {
-      const dirName = path.split(/[/\\]/).pop() || 'New Project';
+      // Extract directory name from path, handling trailing slashes
+      const segments = path.split(/[/\\]/).filter((s) => s.length > 0);
+      const dirName = segments.pop() || 'New Project';
       const project = await projects.createProjectFromPath(path, dirName);
       if (project) {
         selectedCli.value = project.preferredCli ?? '';
         model.value = project.selectedModel ?? '';
+        useCcr.value = project.useCcr ?? false;
       }
     }
   } finally {
@@ -229,8 +256,15 @@ async function handleSaveSettings(): Promise<void> {
 
   isSavingPreference.value = true;
   try {
-    await projects.saveProjectPreference(selectedCli.value, model.value);
+    // Use normalized model to ensure valid value is saved
+    const normalizedModel = getNormalizedModel();
+    // Only save CCR if Claude CLI is selected
+    const normalizedCcr = selectedCli.value === 'claude' ? useCcr.value : false;
+    await projects.saveProjectPreference(selectedCli.value, normalizedModel, normalizedCcr);
     await projects.saveProjectRootOverride();
+    // Sync local state with normalized values
+    model.value = normalizedModel;
+    useCcr.value = normalizedCcr;
   } finally {
     isSavingPreference.value = false;
     closeMenus();
@@ -252,9 +286,12 @@ function handleAttachmentAdd(): void {
 async function handleSend(): Promise<void> {
   chat.attachments.value = attachments.attachments.value;
 
+  // Use normalized model to ensure valid value is sent
+  const normalizedModel = getNormalizedModel();
+
   await chat.send({
     cliPreference: selectedCli.value || undefined,
-    model: model.value || undefined,
+    model: normalizedModel || undefined,
     projectId: projects.selectedProjectId.value || undefined,
     projectRoot: projects.projectRootOverride.value || undefined,
   });
@@ -296,6 +333,7 @@ onMounted(async () => {
       if (project) {
         selectedCli.value = project.preferredCli ?? '';
         model.value = project.selectedModel ?? '';
+        useCcr.value = project.useCcr ?? false;
       }
     }
   }

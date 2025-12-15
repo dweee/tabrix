@@ -20,6 +20,13 @@ export type ToolKind = 'grep' | 'read' | 'edit' | 'run' | 'plan' | 'generic';
 /** Tool severity for styling */
 export type ToolSeverity = 'info' | 'success' | 'warning' | 'error';
 
+/** Diff statistics for edit operations */
+export interface DiffStats {
+  addedLines?: number;
+  deletedLines?: number;
+  totalLines?: number;
+}
+
 /** Structured tool presentation */
 export interface ToolPresentation {
   kind: ToolKind;
@@ -28,8 +35,18 @@ export interface ToolPresentation {
   subtitle?: string;
   details?: string;
   files?: string[];
+  /** File path for single-file operations */
+  filePath?: string;
+  /** Diff statistics for edit/write operations */
+  diffStats?: DiffStats;
   command?: string;
+  /** Command description from bash tool */
+  commandDescription?: string;
   query?: string;
+  /** Search pattern for grep/glob */
+  pattern?: string;
+  /** Search path */
+  searchPath?: string;
   engine?: string;
   severity: ToolSeverity;
   phase: 'use' | 'result';
@@ -135,6 +152,27 @@ function titleCase(s: string): string {
 }
 
 /**
+ * Extract file name from path
+ */
+function getFileName(filePath: string): string {
+  return filePath.split('/').pop() || filePath;
+}
+
+/**
+ * Build diff stats from metadata
+ */
+function buildDiffStats(meta: Record<string, unknown>): DiffStats | undefined {
+  const addedLines = typeof meta.addedLines === 'number' ? meta.addedLines : undefined;
+  const deletedLines = typeof meta.deletedLines === 'number' ? meta.deletedLines : undefined;
+  const totalLines = typeof meta.totalLines === 'number' ? meta.totalLines : undefined;
+
+  if (addedLines !== undefined || deletedLines !== undefined || totalLines !== undefined) {
+    return { addedLines, deletedLines, totalLines };
+  }
+  return undefined;
+}
+
+/**
  * Present a tool message as ToolPresentation
  */
 function presentTool(msg: AgentMessage): ToolPresentation {
@@ -152,12 +190,26 @@ function presentTool(msg: AgentMessage): ToolPresentation {
     meta.isError === true ||
     (typeof msg.content === 'string' && msg.content.trimStart().startsWith('Error:'));
 
-  // Rule 1: Plan (Codex todo_list)
-  if (meta.planPhase || normalize(toolName) === 'plan') {
+  // Extract common metadata fields
+  const filePath = firstString(meta.filePath as string);
+  const command = firstString(meta.command as string);
+  const commandDescription = firstString(meta.commandDescription as string);
+  const pattern = firstString(meta.pattern as string);
+  const searchPath = firstString(meta.searchPath as string);
+  const diffStats = buildDiffStats(meta);
+
+  // Rule 1: Plan / TodoWrite
+  if (
+    meta.planPhase ||
+    normalize(toolName) === 'plan' ||
+    normalize(toolName) === 'todo_write' ||
+    normalize(toolName) === 'todowrite'
+  ) {
+    const todoCount = typeof meta.todoCount === 'number' ? meta.todoCount : undefined;
     return {
       kind: 'plan',
       label: 'Plan',
-      title: summarizeOneLine(msg.content) || 'Plan update',
+      title: todoCount ? `${todoCount} tasks` : summarizeOneLine(msg.content) || 'Plan update',
       details: phase === 'result' ? msg.content : undefined,
       engine,
       severity: isError ? 'error' : 'info',
@@ -166,18 +218,19 @@ function presentTool(msg: AgentMessage): ToolPresentation {
     };
   }
 
-  // Rule 2: File summary (Codex file_change -> metadata.files)
-  const files = Array.isArray(meta.files)
-    ? (meta.files as string[]).filter((x) => typeof x === 'string')
-    : [];
-  if (files.length > 0) {
-    const title = files.length === 1 ? files[0] : `${files.length} files`;
+  // Rule 2: Edit tool with file path and diff stats
+  if (
+    normalize(toolName).includes('edit') ||
+    normalize(toolName) === 'apply_patch' ||
+    normalize(toolName) === 'patch_file'
+  ) {
+    const fileName = filePath ? getFileName(filePath) : undefined;
     return {
       kind: 'edit',
       label: 'Edit',
-      title,
-      subtitle: files.length > 1 ? files.slice(0, 3).join(', ') : undefined,
-      files,
+      title: fileName || filePath || 'File',
+      filePath,
+      diffStats,
       details: phase === 'result' ? msg.content : undefined,
       engine,
       severity: isError ? 'error' : 'success',
@@ -186,8 +239,46 @@ function presentTool(msg: AgentMessage): ToolPresentation {
     };
   }
 
-  // Rule 3: Command (Codex bash, or Claude "Running:")
-  const command = firstString(meta.command as string);
+  // Rule 3: Write/Create tool
+  if (normalize(toolName).includes('write') || normalize(toolName) === 'create_file') {
+    const fileName = filePath ? getFileName(filePath) : undefined;
+    return {
+      kind: 'edit',
+      label: 'Write',
+      title: fileName || filePath || 'File',
+      filePath,
+      diffStats,
+      details: phase === 'result' ? msg.content : undefined,
+      engine,
+      severity: isError ? 'error' : 'success',
+      phase,
+      raw: { content: msg.content, metadata: meta },
+    };
+  }
+
+  // Rule 4: File summary (Codex file_change -> metadata.files)
+  const files = Array.isArray(meta.files)
+    ? (meta.files as string[]).filter((x) => typeof x === 'string')
+    : [];
+  if (files.length > 0) {
+    const title = files.length === 1 ? getFileName(files[0]) : `${files.length} files`;
+    return {
+      kind: 'edit',
+      label: 'Edit',
+      title,
+      subtitle: files.length > 1 ? files.slice(0, 3).map(getFileName).join(', ') : undefined,
+      files,
+      filePath: files.length === 1 ? files[0] : undefined,
+      diffStats,
+      details: phase === 'result' ? msg.content : undefined,
+      engine,
+      severity: isError ? 'error' : 'success',
+      phase,
+      raw: { content: msg.content, metadata: meta },
+    };
+  }
+
+  // Rule 5: Command (Bash/shell)
   if (
     normalize(toolName) === 'bash' ||
     normalize(toolName).includes('shell') ||
@@ -207,8 +298,10 @@ function presentTool(msg: AgentMessage): ToolPresentation {
     return {
       kind: 'run',
       label: 'Run',
-      title: extractedCommand?.trim() || 'Command',
+      title: commandDescription || extractedCommand?.trim() || 'Command',
+      subtitle: commandDescription && extractedCommand ? extractedCommand.trim() : undefined,
       command: extractedCommand?.trim(),
+      commandDescription,
       details,
       engine,
       severity: isError ? 'error' : phase === 'result' ? 'success' : 'info',
@@ -217,14 +310,18 @@ function presentTool(msg: AgentMessage): ToolPresentation {
     };
   }
 
-  // Rule 4: Search / Grep (Claude "Searching:")
-  const queryFromContent = extractAfterPrefix(msg.content, 'Searching:');
-  if (queryFromContent) {
+  // Rule 6: Grep/Search with pattern
+  if (normalize(toolName) === 'grep' || normalize(toolName).includes('search') || pattern) {
+    const queryFromContent = extractAfterPrefix(msg.content, 'Searching:');
+    const displayPattern = pattern || queryFromContent?.trim();
     return {
       kind: 'grep',
       label: 'Grep',
-      title: queryFromContent.trim(),
-      query: queryFromContent.trim(),
+      title: displayPattern || 'Search',
+      pattern: displayPattern,
+      searchPath,
+      query: displayPattern,
+      details: phase === 'result' ? msg.content : undefined,
       engine,
       severity: isError ? 'error' : 'info',
       phase,
@@ -232,7 +329,38 @@ function presentTool(msg: AgentMessage): ToolPresentation {
     };
   }
 
-  // Rule 5: Read / Edit by action
+  // Rule 7: Glob with pattern
+  if (normalize(toolName) === 'glob' || normalize(toolName) === 'glob_files') {
+    return {
+      kind: 'grep',
+      label: 'Glob',
+      title: pattern || 'Pattern search',
+      pattern,
+      searchPath,
+      details: phase === 'result' ? msg.content : undefined,
+      engine,
+      severity: isError ? 'error' : 'info',
+      phase,
+      raw: { content: msg.content, metadata: meta },
+    };
+  }
+
+  // Rule 8: Read tool
+  if (normalize(toolName).includes('read') || filePath) {
+    const fileName = filePath ? getFileName(filePath) : undefined;
+    return {
+      kind: 'read',
+      label: 'Read',
+      title: fileName || filePath || 'File',
+      filePath,
+      engine,
+      severity: isError ? 'error' : phase === 'result' ? 'success' : 'info',
+      phase,
+      raw: { content: msg.content, metadata: meta },
+    };
+  }
+
+  // Rule 9: Read / Edit by action (fallback for content-based detection)
   const action = firstString(meta.action as string);
   const fileFromContent = extractAfterPrefix(msg.content, 'Operating on:')?.trim();
   const inferredKind =
@@ -247,7 +375,9 @@ function presentTool(msg: AgentMessage): ToolPresentation {
     return {
       kind,
       label: kind === 'read' ? 'Read' : 'Edit',
-      title: fileFromContent || toolName,
+      title: fileFromContent ? getFileName(fileFromContent) : toolName,
+      filePath: fileFromContent,
+      diffStats: kind === 'edit' ? diffStats : undefined,
       engine,
       severity: isError ? 'error' : phase === 'result' ? 'success' : 'info',
       phase,

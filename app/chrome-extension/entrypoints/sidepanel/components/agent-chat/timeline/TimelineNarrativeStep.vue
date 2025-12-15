@@ -1,14 +1,19 @@
 <template>
   <div class="py-1">
-    <p
-      class="text-sm leading-relaxed"
+    <div
+      class="text-sm leading-relaxed markdown-content"
       :style="{
         color: 'var(--ac-text)',
         fontFamily: 'var(--ac-font-body)',
       }"
     >
-      {{ item.text }}
-    </p>
+      <MarkdownRender
+        :content="item.text ?? ''"
+        :max-live-nodes="0"
+        :render-batch-size="16"
+        :render-batch-delay="8"
+      />
+    </div>
     <span
       v-if="item.isStreaming"
       class="inline-block w-1.5 h-4 ml-0.5 ac-pulse"
@@ -19,8 +24,97 @@
 
 <script lang="ts" setup>
 import type { TimelineItem } from '../../../composables/useAgentThreads';
+import MarkdownRender from 'markstream-vue';
+import 'markstream-vue/index.css';
 
 defineProps<{
   item: Extract<TimelineItem, { kind: 'assistant_text' }>;
 }>();
 </script>
+
+<style scoped>
+.markdown-content :deep(pre) {
+  background-color: var(--ac-code-bg);
+  border: 1px solid var(--ac-code-border);
+  border-radius: 6px;
+  padding: 12px;
+  overflow-x: auto;
+}
+
+.markdown-content :deep(code) {
+  font-family: var(--ac-font-mono);
+  font-size: 0.875em;
+  color: var(--ac-code-text);
+}
+
+.markdown-content :deep(p) {
+  margin: 0.5em 0;
+}
+
+.markdown-content :deep(p:first-child) {
+  margin-top: 0;
+}
+
+.markdown-content :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.markdown-content :deep(ul),
+.markdown-content :deep(ol) {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+.markdown-content :deep(h1),
+.markdown-content :deep(h2),
+.markdown-content :deep(h3),
+.markdown-content :deep(h4) {
+  margin: 0.75em 0 0.5em;
+  font-weight: 600;
+}
+
+.markdown-content :deep(blockquote) {
+  border-left: 3px solid var(--ac-border);
+  padding-left: 1em;
+  margin: 0.5em 0;
+  color: var(--ac-text-muted);
+}
+
+.markdown-content :deep(a) {
+  color: var(--ac-link);
+  text-decoration: underline;
+}
+
+.markdown-content :deep(a:hover) {
+  color: var(--ac-link-hover);
+}
+
+.markdown-content :deep(table) {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  width: 100%;
+}
+
+.markdown-content :deep(th),
+.markdown-content :deep(td) {
+  border: 1px solid var(--ac-border);
+  padding: 0.5em;
+  text-align: left;
+}
+
+.markdown-content :deep(th) {
+  background-color: var(--ac-surface-muted);
+}
+
+.markdown-content :deep(hr) {
+  border: none;
+  border-top: 1px solid var(--ac-border);
+  margin: 1em 0;
+}
+
+.markdown-content :deep(img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+</style>

@@ -55,23 +55,52 @@
 
       <slot name="composer" />
 
-      <!-- Version label -->
+      <!-- Usage & Version label -->
       <div
-        class="text-[10px] text-center mt-2 font-medium tracking-wide"
+        class="text-[10px] text-center mt-2 font-medium tracking-wide flex items-center justify-center gap-2"
         :style="{ color: 'var(--ac-text-subtle)' }"
       >
-        Claude Code Preview
+        <template v-if="usage">
+          <span
+            :title="`Input: ${usage.inputTokens.toLocaleString()}, Output: ${usage.outputTokens.toLocaleString()}`"
+          >
+            {{ formatTokens(usage.inputTokens + usage.outputTokens) }} tokens
+          </span>
+          <span class="opacity-50">·</span>
+          <span
+            :title="`Duration: ${(usage.durationMs / 1000).toFixed(1)}s, Turns: ${usage.numTurns}`"
+          >
+            ${{ usage.totalCostUsd.toFixed(4) }}
+          </span>
+          <span class="opacity-50">·</span>
+        </template>
+        <span>Claude Code Preview</span>
       </div>
     </footer>
   </div>
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
+import type { AgentUsageStats } from 'chrome-mcp-shared';
 
 defineProps<{
   errorMessage?: string | null;
+  usage?: AgentUsageStats | null;
 }>();
+
+/**
+ * Format token count for display (e.g., 1.2k, 3.5M)
+ */
+function formatTokens(count: number): string {
+  if (count >= 1_000_000) {
+    return (count / 1_000_000).toFixed(1) + 'M';
+  }
+  if (count >= 1_000) {
+    return (count / 1_000).toFixed(1) + 'k';
+  }
+  return count.toString();
+}
 
 const shellRef = ref<HTMLElement | null>(null);
 const contentRef = ref<HTMLElement | null>(null);

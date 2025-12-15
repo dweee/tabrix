@@ -48,12 +48,26 @@ export interface AgentHeartbeatEvent {
   timestamp: string;
 }
 
+/** Usage statistics for a request */
+export interface AgentUsageStats {
+  sessionId: string;
+  requestId?: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  totalCostUsd: number;
+  durationMs: number;
+  numTurns: number;
+}
+
 export type RealtimeEvent =
   | { type: 'message'; data: AgentMessage }
   | { type: 'status'; data: AgentStatusEvent }
   | { type: 'error'; error: string; data?: { sessionId?: string; requestId?: string } }
   | { type: 'connected'; data: AgentConnectedEvent }
-  | { type: 'heartbeat'; data: AgentHeartbeatEvent };
+  | { type: 'heartbeat'; data: AgentHeartbeatEvent }
+  | { type: 'usage'; data: AgentUsageStats };
 
 // ============================================================
 // HTTP API Contracts

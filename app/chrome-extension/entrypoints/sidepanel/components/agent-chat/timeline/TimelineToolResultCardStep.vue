@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-2">
-    <!-- Label + Title -->
-    <div class="flex items-baseline gap-2">
+    <!-- Label + Title + Diff Stats -->
+    <div class="flex items-baseline gap-2 flex-wrap">
       <span
         class="text-[11px] font-bold uppercase tracking-wider w-8 flex-shrink-0"
         :style="{ color: labelColor }"
@@ -14,9 +14,47 @@
           fontFamily: 'var(--ac-font-mono)',
           color: 'var(--ac-text)',
         }"
+        :title="item.tool.filePath"
       >
         {{ item.tool.title }}
       </code>
+      <!-- Diff Stats Badge -->
+      <span
+        v-if="hasDiffStats"
+        class="text-[10px] px-1.5 py-0.5 rounded"
+        :style="{
+          backgroundColor: 'var(--ac-chip-bg)',
+          color: 'var(--ac-text-muted)',
+          fontFamily: 'var(--ac-font-mono)',
+        }"
+      >
+        <span v-if="item.tool.diffStats?.addedLines" class="text-green-600 dark:text-green-400">
+          +{{ item.tool.diffStats.addedLines }}
+        </span>
+        <span v-if="item.tool.diffStats?.addedLines && item.tool.diffStats?.deletedLines">/</span>
+        <span v-if="item.tool.diffStats?.deletedLines" class="text-red-600 dark:text-red-400">
+          -{{ item.tool.diffStats.deletedLines }}
+        </span>
+        <span
+          v-if="
+            !item.tool.diffStats?.addedLines &&
+            !item.tool.diffStats?.deletedLines &&
+            item.tool.diffStats?.totalLines
+          "
+        >
+          {{ item.tool.diffStats.totalLines }} lines
+        </span>
+      </span>
+    </div>
+
+    <!-- File Path (if different from title) -->
+    <div
+      v-if="showFilePath"
+      class="text-[10px] pl-10 truncate"
+      :style="{ color: 'var(--ac-text-subtle)' }"
+      :title="item.tool.filePath"
+    >
+      {{ item.tool.filePath }}
     </div>
 
     <!-- Result Card -->
@@ -132,6 +170,23 @@ const labelColor = computed(() => {
     return 'var(--ac-accent)';
   }
   return 'var(--ac-success)';
+});
+
+const hasDiffStats = computed(() => {
+  const stats = props.item.tool.diffStats;
+  if (!stats) return false;
+  return (
+    stats.addedLines !== undefined ||
+    stats.deletedLines !== undefined ||
+    stats.totalLines !== undefined
+  );
+});
+
+const showFilePath = computed(() => {
+  const tool = props.item.tool;
+  // Show full path if title is just the filename
+  if (!tool.filePath) return false;
+  return tool.filePath !== tool.title && !tool.title.includes('/');
 });
 
 const showCard = computed(() => {

@@ -100,6 +100,8 @@ export class AgentStreamManager {
         return event.data?.sessionId;
       case 'error':
         return event.data?.sessionId;
+      case 'usage':
+        return event.data?.sessionId;
       case 'heartbeat':
         return undefined;
       default:

@@ -10,6 +10,7 @@ import type {
   RealtimeEvent,
   AgentStatusEvent,
   AgentCliPreference,
+  AgentUsageStats,
 } from 'chrome-mcp-shared';
 
 export interface UseAgentChatOptions {
@@ -29,6 +30,7 @@ export function useAgentChat(options: UseAgentChatOptions) {
   const currentRequestId = ref<string | null>(null);
   const cancelling = ref(false);
   const attachments = ref<AgentAttachment[]>([]);
+  const lastUsage = ref<AgentUsageStats | null>(null);
 
   // Computed
   const canSend = computed(() => {
@@ -53,6 +55,9 @@ export function useAgentChat(options: UseAgentChatOptions) {
         break;
       case 'heartbeat':
         // Heartbeat received, connection is alive
+        break;
+      case 'usage':
+        lastUsage.value = event.data;
         break;
     }
   }
@@ -234,6 +239,7 @@ export function useAgentChat(options: UseAgentChatOptions) {
     currentRequestId,
     cancelling,
     attachments,
+    lastUsage,
 
     // Computed
     canSend,

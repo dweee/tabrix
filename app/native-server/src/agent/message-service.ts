@@ -122,7 +122,22 @@ export async function createMessage(
     createdAt: input.createdAt || now,
   };
 
-  await db.insert(messages).values(messageData);
+  await db
+    .insert(messages)
+    .values(messageData)
+    .onConflictDoUpdate({
+      target: messages.id,
+      set: {
+        role: messageData.role,
+        messageType: messageData.messageType,
+        content: messageData.content,
+        metadata: messageData.metadata,
+        sessionId: messageData.sessionId,
+        conversationId: messageData.conversationId,
+        cliSource: messageData.cliSource,
+        requestId: messageData.requestId,
+      },
+    });
 
   return rowToMessage(messageData);
 }
