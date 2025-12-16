@@ -450,4 +450,79 @@
       animation: none;
     }
   }
+
+  /* ============================================================
+     Loading Animation - Shimmer Text & Scribble Icon
+     ============================================================ */
+
+  /* 文案 shimmer 渐变动画 */
+  .agent-theme .text-shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--ac-accent, #d97757) 0%,
+      var(--ac-accent-hover, #ffcab0) 50%,
+      var(--ac-accent, #d97757) 100%
+    );
+    background-size: 200% auto;
+    color: transparent;
+    -webkit-background-clip: text;
+    background-clip: text;
+    animation: ac-shimmer 3s linear infinite;
+  }
+
+  @keyframes ac-shimmer {
+    to {
+      background-position: 200% center;
+    }
+  }
+
+  /* 螺旋图标 - 笔迹重绘动画 */
+  .agent-theme .loading-scribble path {
+    stroke-dasharray: 300;
+    stroke-dashoffset: 300;
+    animation: ac-scribble-draw 2s ease-in-out infinite;
+  }
+
+  .agent-theme .loading-scribble {
+    animation: ac-slight-rotate 8s linear infinite;
+  }
+
+  @keyframes ac-scribble-draw {
+    0% {
+      stroke-dashoffset: 300;
+    }
+    50% {
+      stroke-dashoffset: 0;
+    }
+    100% {
+      stroke-dashoffset: -300;
+    }
+  }
+
+  @keyframes ac-slight-rotate {
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* Respect reduced motion preference for loading animations */
+  @media (prefers-reduced-motion: reduce) {
+    .agent-theme .text-shimmer {
+      animation: none;
+      background: none;
+      color: var(--ac-accent);
+    }
+
+    .agent-theme .loading-scribble,
+    .agent-theme .loading-scribble path {
+      animation: none;
+    }
+
+    .agent-theme .loading-scribble path {
+      stroke-dashoffset: 0;
+    }
+  }
 }

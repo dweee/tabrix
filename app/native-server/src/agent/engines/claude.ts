@@ -61,6 +61,10 @@ export class ClaudeEngine implements AgentEngine {
       signal,
       attachments,
       projectId,
+      permissionMode,
+      allowDangerouslySkipPermissions,
+      systemPromptConfig,
+      optionsConfig,
       resumeClaudeSessionId,
       useCcr,
     } = options;
@@ -356,23 +360,16 @@ export class ClaudeEngine implements AgentEngine {
       console.error(`[ClaudeEngine] Starting query with model: ${resolvedModel}`);
       console.error(`[ClaudeEngine] Working directory: ${repoPath}`);
 
-      // Process image attachments
-      const imageFiles: string[] = [];
+      // SDK 0.1.69 does not support `images` option. Image inputs must be implemented via
+      // SDKUserMessage image blocks (AsyncIterable prompt mode). For now, attachments are logged and skipped.
       if (attachments && attachments.length > 0) {
-        for (const attachment of attachments) {
-          if (attachment.type === 'image') {
-            try {
-              const tempFile = await this.writeAttachmentToTemp(attachment);
-              imageFiles.push(tempFile);
-            } catch (err) {
-              console.error('[ClaudeEngine] Failed to write attachment to temp file:', err);
-            }
-          }
-        }
+        console.error(
+          `[ClaudeEngine] Warning: ${attachments.length} attachment(s) provided but SDK 0.1.69 images option is not supported`,
+        );
       }
 
       // Start Claude Agent SDK query
-      // Session resumption: if resumeClaudeSessionId is provided (from project's activeClaudeSessionId),
+      // Session resumption: if resumeClaudeSessionId is provided (from sessions.engineSessionId or legacy project),
       // pass it as 'resume' to continue a previous Claude conversation.
       // If not provided, SDK will create a new session.
 
@@ -387,18 +384,156 @@ export class ClaudeEngine implements AgentEngine {
         await this.validateAndWarnCcrConfig(sessionId, requestId, ctx);
       }
 
+      // Resolve permission mode from session config or use default
+      // SDK default is 'default', but AgentChat defaults to 'bypassPermissions' for headless operation
+      const allowedPermissionModes = new Set([
+        'default',
+        'acceptEdits',
+        'bypassPermissions',
+        'plan',
+        'dontAsk',
+      ]);
+      const normalizedPermissionMode =
+        typeof permissionMode === 'string' ? permissionMode.trim() : '';
+
+      let resolvedPermissionMode: string;
+      if (normalizedPermissionMode === '') {
+        // No permission mode specified - use AgentChat default for headless operation
+        resolvedPermissionMode = 'bypassPermissions';
+      } else if (allowedPermissionModes.has(normalizedPermissionMode)) {
+        // Valid permission mode - use as specified
+        resolvedPermissionMode = normalizedPermissionMode;
+      } else {
+        // Invalid permission mode - fall back to SDK default and warn
+        console.error(
+          `[ClaudeEngine] Invalid permissionMode "${normalizedPermissionMode}", falling back to SDK default "default"`,
+        );
+        resolvedPermissionMode = 'default';
+      }
+
+      // allowDangerouslySkipPermissions must be true when using bypassPermissions mode
+      // SDK requirement: bypass mode requires explicit acknowledgment via allowDangerouslySkipPermissions=true
+      const resolvedAllowDangerouslySkipPermissions = (() => {
+        const explicitValue =
+          typeof allowDangerouslySkipPermissions === 'boolean'
+            ? allowDangerouslySkipPermissions
+            : undefined;
+
+        if (resolvedPermissionMode === 'bypassPermissions') {
+          // Force true for bypassPermissions mode - SDK requirement
+          if (explicitValue === false) {
+            console.error(
+              '[ClaudeEngine] Warning: allowDangerouslySkipPermissions=false is incompatible with bypassPermissions mode, forcing to true',
+            );
+          }
+          return true;
+        }
+
+        // For non-bypass modes, use explicit value or default to false
+        return explicitValue ?? false;
+      })();
+
+      // Parse optionsConfig for additional SDK options
+      const optionsRecord =
+        optionsConfig && typeof optionsConfig === 'object' && !Array.isArray(optionsConfig)
+          ? (optionsConfig as Record<string, unknown>)
+          : undefined;
+
+      // Resolve setting sources
+      // SDK isolation mode: settingSources=[] prevents loading any filesystem settings
+      // Default behavior: include 'project' to load CLAUDE.md
+      const resolvedSettingSources = (() => {
+        const allowedSettingSources = new Set(['user', 'project', 'local']);
+        const raw = optionsRecord?.settingSources;
+
+        // Check for explicit isolation mode (empty array)
+        if (Array.isArray(raw) && raw.length === 0) {
+          console.error('[ClaudeEngine] Isolation mode enabled: settingSources=[]');
+          return [];
+        }
+
+        // Parse provided sources
+        if (Array.isArray(raw)) {
+          const sources: string[] = [];
+          for (const entry of raw) {
+            if (typeof entry === 'string' && allowedSettingSources.has(entry)) {
+              sources.push(entry);
+            }
+          }
+          // If valid sources were provided, use them as-is (trust user config)
+          if (sources.length > 0) {
+            return sources;
+          }
+        }
+
+        // Default: include 'project' to load CLAUDE.md
+        return ['project'];
+      })();
+
+      // Resolve system prompt from session config
+      const resolvedSystemPrompt = (() => {
+        if (typeof systemPromptConfig === 'string') {
+          const trimmed = systemPromptConfig.trim();
+          return trimmed.length > 0 ? trimmed : undefined;
+        }
+        if (
+          !systemPromptConfig ||
+          typeof systemPromptConfig !== 'object' ||
+          Array.isArray(systemPromptConfig)
+        ) {
+          return undefined;
+        }
+        const record = systemPromptConfig as Record<string, unknown>;
+        const type = record.type;
+        if (type === 'custom' && typeof record.text === 'string') {
+          const trimmed = record.text.trim();
+          return trimmed.length > 0 ? trimmed : undefined;
+        }
+        if (type === 'preset' && record.preset === 'claude_code') {
+          // Trim append and ignore empty strings to avoid "append is empty but object is passed" edge case
+          const rawAppend = typeof record.append === 'string' ? record.append.trim() : '';
+          const append = rawAppend.length > 0 ? rawAppend : undefined;
+          return append
+            ? { type: 'preset' as const, preset: 'claude_code' as const, append }
+            : { type: 'preset' as const, preset: 'claude_code' as const };
+        }
+        return undefined;
+      })();
+
+      // Create internal AbortController that mirrors the external signal
+      // SDK expects abortController option, not raw AbortSignal
+      const internalAbortController = new AbortController();
+      if (signal) {
+        // Propagate external abort to internal controller
+        if (signal.aborted) {
+          internalAbortController.abort();
+        } else {
+          signal.addEventListener(
+            'abort',
+            () => {
+              internalAbortController.abort();
+            },
+            { once: true },
+          );
+        }
+      }
+
       const queryOptions: Record<string, unknown> = {
         cwd: repoPath,
         additionalDirectories: [repoPath],
         model: resolvedModel,
-        // Both permissionMode and allowDangerouslySkipPermissions are required for auto-approval
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
+        // Permission settings are session-configurable (defaults preserve previous behavior)
+        permissionMode: resolvedPermissionMode,
+        allowDangerouslySkipPermissions: resolvedAllowDangerouslySkipPermissions,
         // Enable streaming: emit stream_event with content_block_delta for real-time UI updates
         // Without this, SDK only outputs aggregated assistant/result messages
         includePartialMessages: true,
-        images: imageFiles.length > 0 ? imageFiles : undefined,
-        executable: process.execPath,
+        // Load CLAUDE.md / .claude/settings.json from the project root
+        settingSources: resolvedSettingSources,
+        // Custom system prompt if provided
+        systemPrompt: resolvedSystemPrompt,
+        // AbortController for cancellation support - SDK uses this to terminate underlying processes
+        abortController: internalAbortController,
         // Pass merged env to support Claude Code Router (CCR)
         // This allows users to set ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN via:
         // 1. eval "$(ccr activate)" before launching Chrome
@@ -414,6 +549,98 @@ export class ClaudeEngine implements AgentEngine {
           console.error(`[ClaudeEngine][stderr] ${line}`);
         },
       };
+
+      // Apply additional SDK options from optionsConfig
+      if (optionsRecord) {
+        const isStringArray = (value: unknown): value is string[] =>
+          Array.isArray(value) && value.every((v) => typeof v === 'string');
+
+        if (isStringArray(optionsRecord.allowedTools)) {
+          queryOptions.allowedTools = optionsRecord.allowedTools;
+        }
+        if (isStringArray(optionsRecord.disallowedTools)) {
+          queryOptions.disallowedTools = optionsRecord.disallowedTools;
+        }
+
+        const tools = optionsRecord.tools;
+        if (isStringArray(tools)) {
+          queryOptions.tools = tools;
+        } else if (tools && typeof tools === 'object' && !Array.isArray(tools)) {
+          const toolsRecord = tools as Record<string, unknown>;
+          if (toolsRecord.type === 'preset' && toolsRecord.preset === 'claude_code') {
+            queryOptions.tools = { type: 'preset', preset: 'claude_code' };
+          }
+        }
+
+        if (isStringArray(optionsRecord.betas)) {
+          queryOptions.betas = optionsRecord.betas;
+        }
+
+        if (
+          typeof optionsRecord.maxThinkingTokens === 'number' &&
+          Number.isFinite(optionsRecord.maxThinkingTokens)
+        ) {
+          queryOptions.maxThinkingTokens = optionsRecord.maxThinkingTokens;
+        }
+        if (typeof optionsRecord.maxTurns === 'number' && Number.isFinite(optionsRecord.maxTurns)) {
+          queryOptions.maxTurns = optionsRecord.maxTurns;
+        }
+        if (
+          typeof optionsRecord.maxBudgetUsd === 'number' &&
+          Number.isFinite(optionsRecord.maxBudgetUsd)
+        ) {
+          queryOptions.maxBudgetUsd = optionsRecord.maxBudgetUsd;
+        }
+
+        if (
+          optionsRecord.mcpServers &&
+          typeof optionsRecord.mcpServers === 'object' &&
+          !Array.isArray(optionsRecord.mcpServers)
+        ) {
+          queryOptions.mcpServers = optionsRecord.mcpServers;
+        }
+        if (
+          optionsRecord.outputFormat &&
+          typeof optionsRecord.outputFormat === 'object' &&
+          !Array.isArray(optionsRecord.outputFormat)
+        ) {
+          queryOptions.outputFormat = optionsRecord.outputFormat;
+        }
+        if (typeof optionsRecord.enableFileCheckpointing === 'boolean') {
+          queryOptions.enableFileCheckpointing = optionsRecord.enableFileCheckpointing;
+        }
+        if (
+          optionsRecord.sandbox &&
+          typeof optionsRecord.sandbox === 'object' &&
+          !Array.isArray(optionsRecord.sandbox)
+        ) {
+          queryOptions.sandbox = optionsRecord.sandbox;
+        }
+
+        // Merge session-level env overrides with base claudeEnv
+        // Session env takes precedence over process env (useful for per-session API keys, etc.)
+        if (
+          optionsRecord.env &&
+          typeof optionsRecord.env === 'object' &&
+          !Array.isArray(optionsRecord.env)
+        ) {
+          const sessionEnv = optionsRecord.env as Record<string, unknown>;
+          const mergedEnv = { ...claudeEnv };
+          for (const [key, value] of Object.entries(sessionEnv)) {
+            if (typeof value === 'string') {
+              mergedEnv[key] = value;
+            }
+          }
+          // Ensure Node.js bin directory is still in PATH after merge
+          // Session may have overwritten PATH, which would break child processes
+          const nodeBinDir = path.dirname(process.execPath);
+          const mergedPath = mergedEnv.PATH || mergedEnv.Path || '';
+          if (!mergedPath.includes(nodeBinDir)) {
+            mergedEnv.PATH = [nodeBinDir, mergedPath].filter(Boolean).join(path.delimiter);
+          }
+          queryOptions.env = mergedEnv;
+        }
+      }
 
       // Add resume option if we have a valid Claude session ID
       if (resumeClaudeSessionId) {
@@ -685,22 +912,175 @@ export class ClaudeEngine implements AgentEngine {
             emitAssistant(true);
           }
         } else if (message.type === 'system') {
-          // Handle system messages - capture session_id from init message
+          // Handle system messages
           const record = message as unknown as Record<string, unknown>;
-          if (record.subtype === 'init' && record.session_id) {
-            const claudeSessionId = String(record.session_id);
-            console.error(`[ClaudeEngine] Session initialized: ${claudeSessionId}`);
+          const subtype = this.pickFirstString(record.subtype);
 
-            // Persist the session ID if callback is provided and projectId exists
-            if (ctx.persistClaudeSessionId && projectId) {
-              try {
-                await ctx.persistClaudeSessionId(claudeSessionId);
-                console.error(`[ClaudeEngine] Session ID persisted for project: ${projectId}`);
-              } catch (persistError) {
-                // Log but don't fail the request - session persistence is best-effort
-                console.error('[ClaudeEngine] Failed to persist session ID:', persistError);
+          if (subtype === 'init') {
+            // system:init - contains session_id and management information
+            const claudeSessionId = record.session_id ? String(record.session_id) : undefined;
+
+            if (claudeSessionId) {
+              console.error(`[ClaudeEngine] Session initialized: ${claudeSessionId}`);
+
+              // Persist the session ID if callback is provided and projectId exists
+              if (ctx.persistClaudeSessionId && projectId) {
+                try {
+                  await ctx.persistClaudeSessionId(claudeSessionId);
+                  console.error(`[ClaudeEngine] Session ID persisted for project: ${projectId}`);
+                } catch (persistError) {
+                  console.error('[ClaudeEngine] Failed to persist session ID:', persistError);
+                }
               }
             }
+
+            // Extract and persist management information
+            if (ctx.persistManagementInfo) {
+              try {
+                const managementInfo = {
+                  tools: Array.isArray(record.tools)
+                    ? record.tools.filter((t): t is string => typeof t === 'string')
+                    : undefined,
+                  agents: Array.isArray(record.agents)
+                    ? record.agents.filter((a): a is string => typeof a === 'string')
+                    : undefined,
+                  // SDK returns plugins as { name, path }[] objects
+                  plugins: Array.isArray(record.plugins)
+                    ? (record.plugins as Array<{ name?: string; path?: string }>)
+                        .filter((p) => p && typeof p.name === 'string')
+                        .map((p) => ({
+                          name: String(p.name),
+                          path: p.path ? String(p.path) : undefined,
+                        }))
+                    : undefined,
+                  skills: Array.isArray(record.skills)
+                    ? record.skills.filter((s): s is string => typeof s === 'string')
+                    : undefined,
+                  mcpServers: Array.isArray(record.mcp_servers)
+                    ? (record.mcp_servers as Array<{ name?: string; status?: string }>)
+                        .filter((s) => s && typeof s.name === 'string')
+                        .map((s) => ({
+                          name: String(s.name),
+                          status: String(s.status || 'unknown'),
+                        }))
+                    : undefined,
+                  slashCommands: Array.isArray(record.slash_commands)
+                    ? record.slash_commands.filter((c): c is string => typeof c === 'string')
+                    : undefined,
+                  model: this.pickFirstString(record.model),
+                  permissionMode: this.pickFirstString(record.permissionMode),
+                  cwd: this.pickFirstString(record.cwd),
+                  outputStyle: this.pickFirstString(record.output_style),
+                  betas: Array.isArray(record.betas)
+                    ? record.betas.filter((b): b is string => typeof b === 'string')
+                    : undefined,
+                  claudeCodeVersion: this.pickFirstString(record.claude_code_version),
+                  apiKeySource: this.pickFirstString(record.apiKeySource),
+                };
+
+                await ctx.persistManagementInfo(managementInfo);
+                console.error('[ClaudeEngine] Management info persisted');
+              } catch (persistError) {
+                console.error('[ClaudeEngine] Failed to persist management info:', persistError);
+              }
+            }
+          } else if (subtype === 'status') {
+            // system:status - log for debugging (e.g., compacting)
+            const statusText = this.pickFirstString(record.status);
+            console.error(`[ClaudeEngine] System status: ${statusText || 'unknown'}`);
+          }
+        } else if (message.type === 'auth_status') {
+          // Handle authentication status - SDK fields: isAuthenticating, output, error
+          const record = message as unknown as Record<string, unknown>;
+          const isAuthenticating = record.isAuthenticating === true;
+          const output = Array.isArray(record.output)
+            ? record.output.filter((o): o is string => typeof o === 'string')
+            : [];
+          const authError = this.pickFirstString(record.error);
+
+          console.error(
+            `[ClaudeEngine] Auth status: isAuthenticating=${isAuthenticating}, hasError=${!!authError}`,
+          );
+
+          // Build content from output or error
+          const content = authError || output.join('\n') || 'Authentication in progress...';
+
+          // Determine if login is required:
+          // - Not currently authenticating AND (has error OR output contains login keywords)
+          const outputText = output.join(' ').toLowerCase();
+          const requiresLogin =
+            !isAuthenticating &&
+            (!!authError ||
+              outputText.includes('login') ||
+              outputText.includes('authenticate') ||
+              outputText.includes('sign in'));
+
+          // Emit auth status as a system message so UI can display login prompts
+          const authSystemMessage: AgentMessage = {
+            id: randomUUID(),
+            sessionId,
+            role: 'system',
+            content,
+            messageType: 'status',
+            cliSource: this.name,
+            requestId,
+            isStreaming: false,
+            isFinal: !isAuthenticating,
+            createdAt: new Date().toISOString(),
+            metadata: {
+              cli_type: 'claude',
+              event_type: 'auth_status',
+              isAuthenticating,
+              output,
+              error: authError,
+              requires_login: requiresLogin,
+            },
+          };
+
+          ctx.emit({ type: 'message', data: authSystemMessage });
+        } else if (message.type === 'tool_progress') {
+          // Handle tool progress - SDK fields: tool_use_id, tool_name, parent_tool_use_id, elapsed_time_seconds
+          const record = message as unknown as Record<string, unknown>;
+          const toolUseId = this.pickFirstString(record.tool_use_id);
+          const toolName = this.pickFirstString(record.tool_name);
+          const parentToolUseId = this.pickFirstString(record.parent_tool_use_id);
+          const elapsedTimeSeconds =
+            typeof record.elapsed_time_seconds === 'number'
+              ? record.elapsed_time_seconds
+              : undefined;
+
+          if (toolName || toolUseId) {
+            const displayName = toolName || toolUseId || 'tool';
+            const elapsedStr =
+              elapsedTimeSeconds !== undefined ? ` (${elapsedTimeSeconds.toFixed(1)}s)` : '';
+            console.error(`[ClaudeEngine] Tool progress: ${displayName}${elapsedStr}`);
+
+            // Use tool_use_id as message id if available, so UI can update the same progress entry
+            const messageId = toolUseId ? `progress-${toolUseId}` : randomUUID();
+
+            // Emit tool progress as a tool message
+            const progressMessage: AgentMessage = {
+              id: messageId,
+              sessionId,
+              role: 'tool',
+              content: `${displayName} in progress${elapsedStr}`,
+              messageType: 'tool_use',
+              cliSource: this.name,
+              requestId,
+              isStreaming: true,
+              isFinal: false,
+              createdAt: new Date().toISOString(),
+              metadata: {
+                cli_type: 'claude',
+                event_type: 'tool_progress',
+                toolUseId,
+                toolName,
+                parentToolUseId,
+                elapsedTimeSeconds,
+              },
+            };
+
+            ctx.emit({ type: 'message', data: progressMessage });
           }
         }
       }

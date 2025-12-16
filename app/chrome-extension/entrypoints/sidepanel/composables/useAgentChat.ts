@@ -103,6 +103,7 @@ export function useAgentChat(options: UseAgentChatOptions) {
       model?: string;
       projectId?: string;
       projectRoot?: string;
+      dbSessionId?: string;
     } = {},
   ): Promise<void> {
     const trimmed = input.value.trim();
@@ -142,6 +143,7 @@ export function useAgentChat(options: UseAgentChatOptions) {
       model: chatOptions.model?.trim() || undefined,
       projectId: chatOptions.projectId || undefined,
       projectRoot: chatOptions.projectRoot?.trim() || undefined,
+      dbSessionId: chatOptions.dbSessionId || undefined,
       attachments: attachments.value.length > 0 ? attachments.value : undefined,
     };
 

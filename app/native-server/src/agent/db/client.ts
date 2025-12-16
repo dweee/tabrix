@@ -65,6 +65,26 @@ CREATE TABLE IF NOT EXISTS projects (
 
 CREATE INDEX IF NOT EXISTS projects_last_active_idx ON projects(last_active_at);
 
+-- Sessions table
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  engine_name TEXT NOT NULL,
+  engine_session_id TEXT,
+  name TEXT,
+  model TEXT,
+  permission_mode TEXT NOT NULL DEFAULT 'bypassPermissions',
+  allow_dangerously_skip_permissions TEXT,
+  system_prompt_config TEXT,
+  options_config TEXT,
+  management_info TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS sessions_project_id_idx ON sessions(project_id);
+CREATE INDEX IF NOT EXISTS sessions_engine_name_idx ON sessions(engine_name);
+
 -- Messages table
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,

@@ -94,6 +94,12 @@ export interface AgentActRequest {
    */
   projectId?: string;
   /**
+   * Optional database session ID (sessions.id). When provided, the backend
+   * will load session-level configuration (engine, model, permission mode,
+   * resume ids, etc.) from the sessions table.
+   */
+  dbSessionId?: string;
+  /**
    * Optional project root / workspace directory on the local filesystem
    * that the engine should use as its working directory.
    */
@@ -142,6 +148,107 @@ export interface AgentProject {
 export interface AgentEngineInfo {
   name: string;
   supportsMcp?: boolean;
+}
+
+// ============================================================
+// Session Types
+// ============================================================
+
+/**
+ * System prompt configuration for a session.
+ */
+export type AgentSystemPromptConfig =
+  | { type: 'custom'; text: string }
+  | { type: 'preset'; preset: 'claude_code'; append?: string };
+
+/**
+ * Tools configuration - can be a list of tool names or a preset.
+ */
+export type AgentToolsConfig = string[] | { type: 'preset'; preset: 'claude_code' };
+
+/**
+ * Session options configuration.
+ */
+export interface AgentSessionOptionsConfig {
+  settingSources?: string[];
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  tools?: AgentToolsConfig;
+  betas?: string[];
+  maxThinkingTokens?: number;
+  maxTurns?: number;
+  maxBudgetUsd?: number;
+  mcpServers?: Record<string, unknown>;
+  outputFormat?: Record<string, unknown>;
+  enableFileCheckpointing?: boolean;
+  sandbox?: Record<string, unknown>;
+  env?: Record<string, string>;
+}
+
+/**
+ * Cached management information from Claude SDK.
+ */
+export interface AgentManagementInfo {
+  tools?: string[];
+  agents?: string[];
+  plugins?: Array<{ name: string; path?: string }>;
+  skills?: string[];
+  mcpServers?: Array<{ name: string; status: string }>;
+  slashCommands?: string[];
+  model?: string;
+  permissionMode?: string;
+  cwd?: string;
+  outputStyle?: string;
+  betas?: string[];
+  claudeCodeVersion?: string;
+  apiKeySource?: string;
+  lastUpdated?: string;
+}
+
+/**
+ * Agent session - represents an independent conversation within a project.
+ */
+export interface AgentSession {
+  id: string;
+  projectId: string;
+  engineName: AgentCliPreference;
+  engineSessionId?: string;
+  name?: string;
+  /** Preview text from first user message, for display in session list */
+  preview?: string;
+  model?: string;
+  permissionMode: string;
+  allowDangerouslySkipPermissions: boolean;
+  systemPromptConfig?: AgentSystemPromptConfig;
+  optionsConfig?: AgentSessionOptionsConfig;
+  managementInfo?: AgentManagementInfo;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Options for creating a new session.
+ */
+export interface CreateAgentSessionInput {
+  engineName: AgentCliPreference;
+  name?: string;
+  model?: string;
+  permissionMode?: string;
+  allowDangerouslySkipPermissions?: boolean;
+  systemPromptConfig?: AgentSystemPromptConfig;
+  optionsConfig?: AgentSessionOptionsConfig;
+}
+
+/**
+ * Options for updating a session.
+ */
+export interface UpdateAgentSessionInput {
+  name?: string | null;
+  model?: string | null;
+  permissionMode?: string | null;
+  allowDangerouslySkipPermissions?: boolean | null;
+  systemPromptConfig?: AgentSystemPromptConfig | null;
+  optionsConfig?: AgentSessionOptionsConfig | null;
 }
 
 // ============================================================

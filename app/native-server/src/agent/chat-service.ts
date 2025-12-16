@@ -11,6 +11,12 @@ import type { AgentMessage, RealtimeEvent } from './types';
 import { AgentStreamManager } from './stream-manager';
 import { getProject, touchProjectActivity, updateProjectClaudeSessionId } from './project-service';
 import { createMessage as persistAgentMessage } from './message-service';
+import {
+  getSession,
+  updateEngineSessionId,
+  updateManagementInfo,
+  type AgentSession,
+} from './session-service';
 
 export interface AgentChatServiceOptions {
   engines: AgentEngine[];
@@ -60,13 +66,34 @@ export class AgentChatService {
     }
 
     const requestId = payload.requestId || randomUUID();
-    const projectId = payload.projectId;
+    let projectId = payload.projectId;
+    // Normalize empty string to undefined
+    const rawDbSessionId =
+      typeof payload.dbSessionId === 'string' ? payload.dbSessionId.trim() : '';
+    const dbSessionId = rawDbSessionId || undefined;
+
+    // Load session from database if dbSessionId is provided
+    let dbSession: AgentSession | undefined;
+    if (dbSessionId) {
+      dbSession = await getSession(dbSessionId);
+      if (!dbSession) {
+        throw new Error(`Session not found for id: ${dbSessionId}`);
+      }
+      // Validate project association
+      if (projectId && dbSession.projectId !== projectId) {
+        throw new Error(`Session ${dbSessionId} does not belong to project: ${projectId}`);
+      }
+      // Use session's project if not explicitly provided
+      if (!projectId) {
+        projectId = dbSession.projectId;
+      }
+    }
 
     let projectRoot = payload.projectRoot;
     let projectPreferredCli: EngineName | undefined;
     let projectSelectedModel: string | undefined;
-    let activeClaudeSessionId: string | undefined;
     let projectUseCcr: boolean | undefined;
+    let resumeClaudeSessionId: string | undefined;
 
     if (!projectRoot && projectId) {
       const project = await getProject(projectId);
@@ -76,20 +103,43 @@ export class AgentChatService {
       projectRoot = project.rootPath;
       projectPreferredCli = project.preferredCli as EngineName | undefined;
       projectSelectedModel = project.selectedModel;
-      activeClaudeSessionId = project.activeClaudeSessionId;
       projectUseCcr = project.useCcr;
+
+      // Legacy fallback: if caller does not use sessions table, use project-level resume id
+      if (!dbSessionId) {
+        resumeClaudeSessionId = project.activeClaudeSessionId;
+      }
     }
 
-    const engineName = this.resolveEngineName(
-      payload.cliPreference as EngineName | undefined,
-      projectPreferredCli,
-    );
+    // Resolve engine name - session binding takes precedence
+    let engineName: EngineName;
+    if (dbSession) {
+      engineName = dbSession.engineName as EngineName;
+      // Validate cliPreference matches session engine
+      if (payload.cliPreference && payload.cliPreference !== engineName) {
+        throw new Error(
+          `cliPreference (${payload.cliPreference}) does not match session.engineName (${engineName})`,
+        );
+      }
+    } else {
+      engineName = this.resolveEngineName(
+        payload.cliPreference as EngineName | undefined,
+        projectPreferredCli,
+      );
+    }
+
     const engine = this.engines.get(engineName);
     if (!engine) {
       throw new Error(`No agent engine registered for ${engineName}`);
     }
 
-    const effectiveModel = payload.model?.trim() || projectSelectedModel;
+    // Model priority: request > session > project
+    const effectiveModel = payload.model?.trim() || dbSession?.model || projectSelectedModel;
+
+    // For Claude engine with session, use session's engineSessionId for resume
+    if (dbSession && engineName === 'claude') {
+      resumeClaudeSessionId = dbSession.engineSessionId;
+    }
 
     const now = new Date().toISOString();
 
@@ -184,9 +234,21 @@ export class AgentChatService {
         }
       },
       // Callback to persist Claude session ID when SDK returns system/init message
-      persistClaudeSessionId: projectId
+      // Prefer session-level persistence over project-level
+      persistClaudeSessionId: dbSessionId
         ? async (claudeSessionId: string) => {
-            await updateProjectClaudeSessionId(projectId, claudeSessionId);
+            await updateEngineSessionId(dbSessionId, claudeSessionId);
+          }
+        : projectId
+          ? async (claudeSessionId: string) => {
+              await updateProjectClaudeSessionId(projectId, claudeSessionId);
+            }
+          : undefined,
+      // Callback to persist management info from system:init message
+      // Only available when using session-level persistence
+      persistManagementInfo: dbSessionId
+        ? async (info) => {
+            await updateManagementInfo(dbSessionId, info);
           }
         : undefined,
     };
@@ -199,10 +261,16 @@ export class AgentChatService {
       requestId,
       attachments: payload.attachments,
       projectId,
-      // Pass active Claude session ID for session resumption (ClaudeEngine only)
-      resumeClaudeSessionId: activeClaudeSessionId,
+      dbSessionId,
+      // Session-level configuration for ClaudeEngine
+      permissionMode: dbSession?.permissionMode,
+      allowDangerouslySkipPermissions: dbSession?.allowDangerouslySkipPermissions,
+      systemPromptConfig: dbSession?.systemPromptConfig,
+      optionsConfig: dbSession?.optionsConfig,
+      // Pass Claude session ID for session resumption (ClaudeEngine only)
+      resumeClaudeSessionId: engineName === 'claude' ? resumeClaudeSessionId : undefined,
       // Pass useCcr flag for Claude Code Router support (ClaudeEngine only)
-      useCcr: projectUseCcr,
+      useCcr: engineName === 'claude' ? projectUseCcr : undefined,
     };
 
     // Create abort controller for cancellation support

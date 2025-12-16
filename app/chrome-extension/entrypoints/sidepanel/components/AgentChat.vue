@@ -5,8 +5,10 @@
       <template #header>
         <AgentTopBar
           :project-label="projectLabel"
+          :session-label="sessionLabel"
           :connection-state="connectionState"
           @toggle:project-menu="toggleProjectMenu"
+          @toggle:session-menu="toggleSessionMenu"
           @toggle:settings-menu="toggleSettingsMenu"
         />
       </template>
@@ -38,7 +40,7 @@
 
     <!-- Click-outside handler for menus (z-40) -->
     <div
-      v-if="projectMenuOpen || settingsMenuOpen"
+      v-if="projectMenuOpen || sessionMenuOpen || settingsMenuOpen"
       class="fixed inset-0 z-40"
       @click="closeMenus"
     />
@@ -65,11 +67,37 @@
       @save="handleSaveSettings"
     />
 
+    <AgentSessionMenu
+      :open="sessionMenuOpen"
+      :sessions="sessions.sessions.value"
+      :selected-session-id="sessions.selectedSessionId.value"
+      :is-loading="sessions.isLoadingSessions.value"
+      :is-creating="sessions.isCreatingSession.value"
+      :error="sessions.sessionError.value"
+      @session:select="handleSessionSelect"
+      @session:new="handleNewSession"
+      @session:delete="handleDeleteSession"
+      @session:rename="handleRenameSession"
+      @session:settings="handleOpenSessionSettings"
+      @session:reset="handleResetSession"
+    />
+
     <AgentSettingsMenu
       :open="settingsMenuOpen"
       :theme="themeState.theme.value"
       @theme:set="handleThemeChange"
       @reconnect="handleReconnect"
+    />
+
+    <!-- Session Settings Panel -->
+    <AgentSessionSettingsPanel
+      :open="sessionSettingsOpen"
+      :session="sessions.selectedSession.value"
+      :management-info="currentManagementInfo"
+      :is-loading="sessionSettingsLoading"
+      :is-saving="sessionSettingsSaving"
+      @close="handleCloseSessionSettings"
+      @save="handleSaveSessionSettings"
     />
   </div>
 </template>
@@ -83,6 +111,7 @@ import {
   useAgentServer,
   useAgentChat,
   useAgentProjects,
+  useAgentSessions,
   useAttachments,
   useAgentTheme,
   useAgentThreads,
@@ -96,8 +125,11 @@ import {
   AgentComposer,
   AgentConversation,
   AgentProjectMenu,
+  AgentSessionMenu,
   AgentSettingsMenu,
+  AgentSessionSettingsPanel,
 } from './agent-chat';
+import type { SessionSettings } from './agent-chat/AgentSessionSettingsPanel.vue';
 
 // Model utilities
 import { getModelsForCli } from '@/common/agent-models';
@@ -126,10 +158,30 @@ function getNormalizedModel(): string {
 }
 const isPickingDirectory = ref(false);
 const projectMenuOpen = ref(false);
+const sessionMenuOpen = ref(false);
 const settingsMenuOpen = ref(false);
 
-// Initialize composables
+// Session settings panel state
+const sessionSettingsOpen = ref(false);
+const sessionSettingsLoading = ref(false);
+const sessionSettingsSaving = ref(false);
+const currentManagementInfo = ref<import('chrome-mcp-shared').AgentManagementInfo | null>(null);
+
+// Initialize composables - sessions must be declared first for sessionId access
+const sessions = useAgentSessions({
+  getServerPort: () => server.serverPort.value,
+  ensureServer: () => server.ensureNativeServer(),
+  onSessionChanged: (sessionId: string) => {
+    // Reconnect SSE and reload history when session changes
+    if (projects.selectedProjectId.value) {
+      server.openEventSource();
+      loadSessionHistory(sessionId);
+    }
+  },
+});
+
 const server = useAgentServer({
+  getSessionId: () => sessions.selectedSessionId.value,
   onMessage: (event) => chat.handleRealtimeEvent(event),
   onError: (error) => {
     chat.errorMessage.value = error;
@@ -138,7 +190,7 @@ const server = useAgentServer({
 
 const chat = useAgentChat({
   getServerPort: () => server.serverPort.value,
-  getSessionId: () => server.sessionId.value,
+  getSessionId: () => sessions.selectedSessionId.value,
   ensureServer: () => server.ensureNativeServer(),
   openEventSource: () => server.openEventSource(),
 });
@@ -168,11 +220,39 @@ const projectLabel = computed(() => {
   return project?.name ?? 'No project';
 });
 
+const sessionLabel = computed(() => {
+  const session = sessions.selectedSession.value;
+  // Priority: preview (first user message) > name > 'New Session'
+  return session?.preview || session?.name || 'New Session';
+});
+
 const connectionState = computed(() => {
   if (server.isServerReady.value) return 'ready';
   if (server.nativeConnected.value) return 'connecting';
   return 'disconnected';
 });
+
+// Load chat history for a specific session
+async function loadSessionHistory(sessionId: string): Promise<void> {
+  const serverPort = server.serverPort.value;
+  if (!serverPort || !sessionId) return;
+
+  try {
+    const url = `http://127.0.0.1:${serverPort}/agent/sessions/${encodeURIComponent(sessionId)}/history`;
+    const response = await fetch(url);
+    if (response.ok) {
+      const data = await response.json();
+      const messages = data.messages || [];
+      const converted = convertStoredMessages(messages);
+      chat.setMessages(converted);
+    } else {
+      chat.setMessages([]);
+    }
+  } catch (error) {
+    console.error('Failed to load session history:', error);
+    chat.setMessages([]);
+  }
+}
 
 // Convert stored messages to AgentMessage format
 function convertStoredMessages(stored: AgentStoredMessage[]): AgentMessage[] {
@@ -192,16 +272,31 @@ function convertStoredMessages(stored: AgentStoredMessage[]): AgentMessage[] {
 // Menu handlers
 function toggleProjectMenu(): void {
   projectMenuOpen.value = !projectMenuOpen.value;
-  if (projectMenuOpen.value) settingsMenuOpen.value = false;
+  if (projectMenuOpen.value) {
+    sessionMenuOpen.value = false;
+    settingsMenuOpen.value = false;
+  }
+}
+
+function toggleSessionMenu(): void {
+  sessionMenuOpen.value = !sessionMenuOpen.value;
+  if (sessionMenuOpen.value) {
+    projectMenuOpen.value = false;
+    settingsMenuOpen.value = false;
+  }
 }
 
 function toggleSettingsMenu(): void {
   settingsMenuOpen.value = !settingsMenuOpen.value;
-  if (settingsMenuOpen.value) projectMenuOpen.value = false;
+  if (settingsMenuOpen.value) {
+    projectMenuOpen.value = false;
+    sessionMenuOpen.value = false;
+  }
 }
 
 function closeMenus(): void {
   projectMenuOpen.value = false;
+  sessionMenuOpen.value = false;
   settingsMenuOpen.value = false;
 }
 
@@ -217,6 +312,86 @@ async function handleReconnect(): Promise<void> {
   await server.reconnect();
 }
 
+// Session handlers
+async function handleSessionSelect(sessionId: string): Promise<void> {
+  await sessions.selectSession(sessionId);
+  closeMenus();
+}
+
+async function handleNewSession(): Promise<void> {
+  const projectId = projects.selectedProjectId.value;
+  if (!projectId) return;
+
+  const session = await sessions.createSession(projectId, {
+    engineName: (selectedCli.value as 'claude' | 'codex' | 'cursor' | 'qwen' | 'glm') || 'claude',
+    name: `Session ${sessions.sessions.value.length + 1}`,
+  });
+
+  if (session) {
+    chat.setMessages([]);
+  }
+  closeMenus();
+}
+
+async function handleDeleteSession(sessionId: string): Promise<void> {
+  await sessions.deleteSession(sessionId);
+}
+
+async function handleRenameSession(sessionId: string, name: string): Promise<void> {
+  await sessions.renameSession(sessionId, name);
+}
+
+async function handleOpenSessionSettings(sessionId: string): Promise<void> {
+  closeMenus();
+  sessionSettingsOpen.value = true;
+  sessionSettingsLoading.value = true;
+  currentManagementInfo.value = null;
+
+  try {
+    // Fetch Claude SDK management info if this is a Claude session
+    const session = sessions.sessions.value.find((s) => s.id === sessionId);
+    if (session?.engineName === 'claude') {
+      const info = await sessions.fetchClaudeInfo(sessionId);
+      if (info) {
+        currentManagementInfo.value = info.managementInfo;
+      }
+    }
+  } finally {
+    sessionSettingsLoading.value = false;
+  }
+}
+
+async function handleResetSession(sessionId: string): Promise<void> {
+  closeMenus();
+  const result = await sessions.resetConversation(sessionId);
+  if (result) {
+    chat.setMessages([]);
+  }
+}
+
+function handleCloseSessionSettings(): void {
+  sessionSettingsOpen.value = false;
+  currentManagementInfo.value = null;
+}
+
+async function handleSaveSessionSettings(settings: SessionSettings): Promise<void> {
+  const sessionId = sessions.selectedSessionId.value;
+  if (!sessionId) return;
+
+  sessionSettingsSaving.value = true;
+  try {
+    await sessions.updateSession(sessionId, {
+      model: settings.model || null,
+      permissionMode: settings.permissionMode || null,
+      systemPromptConfig: settings.systemPromptConfig,
+    });
+    sessionSettingsOpen.value = false;
+    currentManagementInfo.value = null;
+  } finally {
+    sessionSettingsSaving.value = false;
+  }
+}
+
 // Project handlers
 async function handleProjectSelect(projectId: string): Promise<void> {
   projects.selectedProjectId.value = projectId;
@@ -227,6 +402,11 @@ async function handleProjectSelect(projectId: string): Promise<void> {
     model.value = project.selectedModel ?? '';
     useCcr.value = project.useCcr ?? false;
   }
+  // Load sessions for the new project
+  await sessions.ensureDefaultSession(
+    projectId,
+    (selectedCli.value as 'claude' | 'codex' | 'cursor' | 'qwen' | 'glm') || 'claude',
+  );
   closeMenus();
 }
 
@@ -284,17 +464,26 @@ function handleAttachmentAdd(): void {
 
 // Send handler
 async function handleSend(): Promise<void> {
+  const dbSessionId = sessions.selectedSessionId.value;
+  if (!dbSessionId) {
+    chat.errorMessage.value = 'No session selected.';
+    return;
+  }
+
+  // Capture input before clearing for preview update
+  const messageText = chat.input.value;
+
   chat.attachments.value = attachments.attachments.value;
 
-  // Use normalized model to ensure valid value is sent
-  const normalizedModel = getNormalizedModel();
-
+  // Session-level config is now used by backend; no need to pass cliPreference/model
   await chat.send({
-    cliPreference: selectedCli.value || undefined,
-    model: normalizedModel || undefined,
     projectId: projects.selectedProjectId.value || undefined,
     projectRoot: projects.projectRootOverride.value || undefined,
+    dbSessionId,
   });
+
+  // Update session preview with first user message (if not already set)
+  sessions.updateSessionPreview(dbSessionId, messageText);
 
   attachments.clearAttachments();
 }
@@ -326,14 +515,26 @@ onMounted(async () => {
       await projects.saveSelectedProjectId();
     }
 
-    // Load chat history and settings
+    // Load settings and sessions
     if (projects.selectedProjectId.value) {
-      await projects.loadChatHistory(projects.selectedProjectId.value);
       const project = projects.selectedProject.value;
       if (project) {
         selectedCli.value = project.preferredCli ?? '';
         model.value = project.selectedModel ?? '';
         useCcr.value = project.useCcr ?? false;
+      }
+
+      // Load sessions for the project and ensure a default session exists
+      await sessions.loadSelectedSessionId();
+      await sessions.ensureDefaultSession(
+        projects.selectedProjectId.value,
+        (selectedCli.value as 'claude' | 'codex' | 'cursor' | 'qwen' | 'glm') || 'claude',
+      );
+
+      // Open SSE connection and load history for the selected session
+      if (sessions.selectedSessionId.value) {
+        server.openEventSource();
+        await loadSessionHistory(sessions.selectedSessionId.value);
       }
     }
   }

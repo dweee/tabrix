@@ -170,16 +170,61 @@ export async function deleteMessagesByProjectId(
 }
 
 /**
- * Get messages by session ID.
+ * Get messages by session ID with optional pagination.
+ * Returns messages sorted by creation time (oldest first).
+ *
+ * @param sessionId - The session ID to filter by
+ * @param limit - Maximum number of messages to return (0 = no limit)
+ * @param offset - Number of messages to skip
  */
-export async function getMessagesBySessionId(sessionId: string): Promise<AgentStoredMessage[]> {
+export async function getMessagesBySessionId(
+  sessionId: string,
+  limit = 0,
+  offset = 0,
+): Promise<AgentStoredMessage[]> {
   const db = getDb();
-  const rows = await db
+
+  const query = db
     .select()
     .from(messages)
     .where(eq(messages.sessionId, sessionId))
     .orderBy(asc(messages.createdAt));
+
+  if (limit > 0) {
+    query.limit(limit);
+  }
+  if (offset > 0) {
+    query.offset(offset);
+  }
+
+  const rows = await query;
   return rows.map(rowToMessage);
+}
+
+/**
+ * Get count of messages by session ID.
+ */
+export async function getMessagesCountBySessionId(sessionId: string): Promise<number> {
+  const db = getDb();
+  const result = await db
+    .select({ count: count() })
+    .from(messages)
+    .where(eq(messages.sessionId, sessionId));
+  return result[0]?.count ?? 0;
+}
+
+/**
+ * Delete all messages for a session.
+ * Returns the number of deleted messages.
+ */
+export async function deleteMessagesBySessionId(sessionId: string): Promise<number> {
+  const db = getDb();
+
+  const beforeCount = await getMessagesCountBySessionId(sessionId);
+  await db.delete(messages).where(eq(messages.sessionId, sessionId));
+  const afterCount = await getMessagesCountBySessionId(sessionId);
+
+  return beforeCount - afterCount;
 }
 
 /**

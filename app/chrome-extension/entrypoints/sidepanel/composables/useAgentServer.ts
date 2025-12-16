@@ -14,6 +14,11 @@ interface ServerStatus {
 }
 
 export interface UseAgentServerOptions {
+  /**
+   * Get the session ID for SSE routing.
+   * Must be provided by caller (typically DB session ID).
+   */
+  getSessionId?: () => string;
   onMessage?: (event: RealtimeEvent) => void;
   onError?: (error: string) => void;
 }
@@ -24,7 +29,6 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
   const nativeConnected = ref(false);
   const serverStatus = ref<ServerStatus | null>(null);
   const connecting = ref(false);
-  const sessionId = ref<string>('');
   const engines = ref<AgentEngineInfo[]>([]);
   const eventSource = ref<EventSource | null>(null);
 
@@ -33,15 +37,13 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
   const MAX_RECONNECT_ATTEMPTS = 5;
   const BASE_RECONNECT_DELAY = 1000;
 
+  // Track which sessionId the current SSE connection is subscribed to
+  let currentStreamSessionId: string | null = null;
+
   // Computed
   const isServerReady = computed(() => {
     return nativeConnected.value && serverStatus.value?.isRunning && serverPort.value !== null;
   });
-
-  // Generate session ID
-  function generateSessionId(): string {
-    return `session-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-  }
 
   // Check native host connection using existing message type
   async function checkNativeHost(): Promise<boolean> {
@@ -150,20 +152,22 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
     return eventSource.value !== null && eventSource.value.readyState === EventSource.OPEN;
   }
 
-  // Open SSE connection (skip if already connected)
+  // Open SSE connection (skip if already connected to same session)
   function openEventSource(): void {
-    if (!serverPort.value || !sessionId.value) return;
+    const targetSessionId = options.getSessionId?.()?.trim() ?? '';
+    if (!serverPort.value || !targetSessionId) return;
 
-    // Skip if already connected to avoid message loss during reconnection
-    if (isEventSourceConnected()) {
-      console.log('[AgentServer] SSE already connected, skipping reconnect');
+    // Skip if already connected to the same session
+    if (isEventSourceConnected() && currentStreamSessionId === targetSessionId) {
+      console.log('[AgentServer] SSE already connected to session, skipping reconnect');
       return;
     }
 
-    // Close existing connection only if in CONNECTING or CLOSED state
+    // Close existing connection before subscribing to a new session
     closeEventSource();
 
-    const url = `http://127.0.0.1:${serverPort.value}/agent/chat/${encodeURIComponent(sessionId.value)}/stream`;
+    currentStreamSessionId = targetSessionId;
+    const url = `http://127.0.0.1:${serverPort.value}/agent/chat/${encodeURIComponent(targetSessionId)}/stream`;
     const es = new EventSource(url);
 
     es.onopen = () => {
@@ -209,6 +213,7 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
       eventSource.value.close();
       eventSource.value = null;
     }
+    currentStreamSessionId = null;
   }
 
   // Reconnect to server
@@ -223,11 +228,8 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
 
   // Initialize
   async function initialize(): Promise<void> {
-    sessionId.value = generateSessionId();
     await ensureNativeServer();
-    if (isServerReady.value) {
-      openEventSource();
-    }
+    // Note: SSE connection is now opened explicitly when session is ready
   }
 
   // Cleanup on unmount
@@ -241,7 +243,6 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
     nativeConnected,
     serverStatus,
     connecting,
-    sessionId,
     engines,
     eventSource,
 

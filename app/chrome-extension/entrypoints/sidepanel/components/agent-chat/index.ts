@@ -11,6 +11,8 @@ export { default as AgentTimeline } from './AgentTimeline.vue';
 export { default as AgentTimelineItem } from './AgentTimelineItem.vue';
 export { default as AgentSettingsMenu } from './AgentSettingsMenu.vue';
 export { default as AgentProjectMenu } from './AgentProjectMenu.vue';
+export { default as AgentSessionMenu } from './AgentSessionMenu.vue';
+export { default as AgentSessionSettingsPanel } from './AgentSessionSettingsPanel.vue';
 
 // Timeline step components
 export { default as TimelineNarrativeStep } from './timeline/TimelineNarrativeStep.vue';

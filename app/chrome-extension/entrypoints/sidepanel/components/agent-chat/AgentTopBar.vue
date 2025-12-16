@@ -43,6 +43,32 @@
           />
         </svg>
       </button>
+
+      <!-- Session Breadcrumb -->
+      <div class="h-3 w-[1px] flex-shrink-0" :style="{ backgroundColor: 'var(--ac-border)' }" />
+      <button
+        class="flex items-center gap-1.5 text-xs px-2 py-1 rounded truncate group ac-btn"
+        :style="{
+          fontFamily: 'var(--ac-font-mono)',
+          color: 'var(--ac-text-subtle)',
+        }"
+        @click="$emit('toggle:sessionMenu')"
+      >
+        <span class="truncate">{{ sessionLabel }}</span>
+        <svg
+          class="w-3 h-3 opacity-50 group-hover:opacity-100 transition-opacity"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M19 9l-7 7-7-7"
+          />
+        </svg>
+      </button>
     </div>
 
     <!-- Connection / Status / Settings -->
@@ -88,11 +114,13 @@ export type ConnectionState = 'ready' | 'connecting' | 'disconnected';
 
 const props = defineProps<{
   projectLabel: string;
+  sessionLabel: string;
   connectionState: ConnectionState;
 }>();
 
 defineEmits<{
   'toggle:projectMenu': [];
+  'toggle:sessionMenu': [];
   'toggle:settingsMenu': [];
 }>();
 

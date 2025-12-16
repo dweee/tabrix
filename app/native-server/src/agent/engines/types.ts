@@ -20,8 +20,29 @@ export interface EngineInitOptions {
    */
   projectId?: string;
   /**
+   * Optional database session ID (sessions.id) for session-scoped configuration and persistence.
+   */
+  dbSessionId?: string;
+  /**
+   * Optional session-scoped permission mode override (Claude SDK option).
+   */
+  permissionMode?: string;
+  /**
+   * Optional session-scoped permission bypass override (Claude SDK option).
+   */
+  allowDangerouslySkipPermissions?: boolean;
+  /**
+   * Optional session-scoped system prompt configuration.
+   */
+  systemPromptConfig?: unknown;
+  /**
+   * Optional session-scoped engine option overrides.
+   */
+  optionsConfig?: unknown;
+  /**
    * Optional Claude session ID (UUID) for resuming a previous session.
-   * Only applicable to ClaudeEngine; retrieved from project's activeClaudeSessionId.
+   * Only applicable to ClaudeEngine; retrieved from sessions.engineSessionId (preferred)
+   * or project's activeClaudeSessionId (legacy fallback).
    */
   resumeClaudeSessionId?: string;
   /**
@@ -36,6 +57,31 @@ export interface EngineInitOptions {
  */
 export type ClaudeSessionPersistCallback = (sessionId: string) => Promise<void>;
 
+/**
+ * Management information extracted from Claude SDK system:init message.
+ */
+export interface ClaudeManagementInfo {
+  tools?: string[];
+  agents?: string[];
+  /** Plugins with name and path (SDK returns { name, path }[]) */
+  plugins?: Array<{ name: string; path?: string }>;
+  skills?: string[];
+  mcpServers?: Array<{ name: string; status: string }>;
+  slashCommands?: string[];
+  model?: string;
+  permissionMode?: string;
+  cwd?: string;
+  outputStyle?: string;
+  betas?: string[];
+  claudeCodeVersion?: string;
+  apiKeySource?: string;
+}
+
+/**
+ * Callback to persist management information after SDK initialization.
+ */
+export type ManagementInfoPersistCallback = (info: ClaudeManagementInfo) => Promise<void>;
+
 export type EngineName = 'claude' | 'codex' | 'cursor' | 'qwen' | 'glm';
 
 export interface EngineExecutionContext {
@@ -48,6 +94,11 @@ export interface EngineExecutionContext {
    * Only called by ClaudeEngine when projectId is provided.
    */
   persistClaudeSessionId?: ClaudeSessionPersistCallback;
+  /**
+   * Optional callback to persist management information after SDK initialization.
+   * Only called by ClaudeEngine when dbSessionId is provided.
+   */
+  persistManagementInfo?: ManagementInfoPersistCallback;
 }
 
 export interface AgentEngine {
