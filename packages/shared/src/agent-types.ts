@@ -183,6 +183,11 @@ export interface AgentSessionOptionsConfig {
   enableFileCheckpointing?: boolean;
   sandbox?: Record<string, unknown>;
   env?: Record<string, string>;
+  /**
+   * Optional Codex-specific configuration overrides.
+   * Only applicable when using CodexEngine.
+   */
+  codexConfig?: Partial<CodexEngineConfig>;
 }
 
 /**
@@ -268,3 +273,64 @@ export interface AgentStoredMessage {
   createdAt?: string;
   requestId?: string;
 }
+
+// ============================================================
+// Codex Engine Configuration
+// ============================================================
+
+/**
+ * Sandbox mode for Codex CLI execution.
+ */
+export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
+
+/**
+ * Configuration options for Codex Engine.
+ * These can be overridden per-session via session settings.
+ */
+export interface CodexEngineConfig {
+  /** Enable apply_patch tool for file modifications. Default: true */
+  includeApplyPatchTool: boolean;
+  /** Enable plan tool for task planning. Default: true */
+  includePlanTool: boolean;
+  /** Enable web search capability. Default: true */
+  enableWebSearch: boolean;
+  /** Use experimental streamable shell tool. Default: true */
+  useStreamableShell: boolean;
+  /** Sandbox mode for command execution. Default: 'danger-full-access' */
+  sandboxMode: CodexSandboxMode;
+  /** Maximum number of turns. Default: 20 */
+  maxTurns: number;
+  /** Maximum thinking tokens. Default: 4096 */
+  maxThinkingTokens: number;
+  /** Auto instructions for autonomous behavior. Default: AUTO_INSTRUCTIONS */
+  autoInstructions: string;
+  /** Append project context (file listing) to prompt. Default: true */
+  appendProjectContext: boolean;
+}
+
+/**
+ * Default auto instructions for Codex to act autonomously.
+ * Aligned with other/cweb implementation.
+ */
+export const CODEX_AUTO_INSTRUCTIONS = `Act autonomously without asking for confirmations.
+Use apply_patch to create and modify files directly in the current working directory (do not create subdirectories unless the user explicitly requests it).
+Use exec_command to run, build, and test as needed.
+You have full permissions. Keep taking concrete actions until the task is complete.
+Respect the existing project structure when creating or modifying files.
+Prefer concise status updates over questions.`;
+
+/**
+ * Default configuration for Codex Engine.
+ * Aligned with other/cweb implementation for feature parity.
+ */
+export const DEFAULT_CODEX_CONFIG: CodexEngineConfig = {
+  includeApplyPatchTool: true,
+  includePlanTool: true,
+  enableWebSearch: true,
+  useStreamableShell: true,
+  sandboxMode: 'danger-full-access',
+  maxTurns: 20,
+  maxThinkingTokens: 4096,
+  autoInstructions: CODEX_AUTO_INSTRUCTIONS,
+  appendProjectContext: true,
+};

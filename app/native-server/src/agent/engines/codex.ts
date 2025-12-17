@@ -2,6 +2,11 @@ import { spawn } from 'node:child_process';
 import readline from 'node:readline';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import {
+  CODEX_AUTO_INSTRUCTIONS,
+  DEFAULT_CODEX_CONFIG,
+  type CodexEngineConfig,
+} from 'chrome-mcp-shared';
 import type { AgentEngine, EngineExecutionContext, EngineInitOptions } from './types';
 import type { AgentMessage, RealtimeEvent } from '../types';
 import { AgentToolBridge } from '../tool-bridge';
@@ -41,7 +46,16 @@ export class CodexEngine implements AgentEngine {
   private static readonly MAX_STDERR_LINES = 200;
 
   async initializeAndRun(options: EngineInitOptions, ctx: EngineExecutionContext): Promise<void> {
-    const { sessionId, instruction, model, projectRoot, requestId, signal, attachments } = options;
+    const {
+      sessionId,
+      instruction,
+      model,
+      projectRoot,
+      requestId,
+      signal,
+      attachments,
+      codexConfig,
+    } = options;
     const repoPath = this.resolveRepoPath(projectRoot);
 
     // Check if already aborted
@@ -54,6 +68,22 @@ export class CodexEngine implements AgentEngine {
       throw new Error('CodexEngine: instruction must not be empty');
     }
 
+    // Merge user config with defaults
+    const resolvedConfig: CodexEngineConfig = {
+      ...DEFAULT_CODEX_CONFIG,
+      ...(codexConfig ?? {}),
+    };
+
+    // Ensure autoInstructions has a value
+    if (!resolvedConfig.autoInstructions?.trim()) {
+      resolvedConfig.autoInstructions = CODEX_AUTO_INSTRUCTIONS;
+    }
+
+    // Optionally append project context to the prompt
+    const prompt = resolvedConfig.appendProjectContext
+      ? await this.appendProjectContext(normalizedInstruction, repoPath)
+      : normalizedInstruction;
+
     const executable = process.platform === 'win32' ? 'codex.cmd' : 'codex';
     const args: string[] = [
       'exec',
@@ -65,6 +95,9 @@ export class CodexEngine implements AgentEngine {
       '--cd',
       repoPath,
     ];
+
+    // Add Codex configuration arguments
+    args.push(...this.buildCodexConfigArgs(resolvedConfig));
 
     if (model && model.trim()) {
       args.push('--model', model.trim());
@@ -86,7 +119,7 @@ export class CodexEngine implements AgentEngine {
       }
     }
 
-    args.push(normalizedInstruction);
+    args.push(prompt);
 
     // Use explicit Promise wrapping to ensure child process errors are properly rejected.
     return new Promise<void>((resolve, reject) => {
@@ -111,6 +144,8 @@ export class CodexEngine implements AgentEngine {
       let assistantMessageId: string | null = null;
       let assistantCreatedAt: string | null = null;
       const streamedToolHashes = new Set<string>();
+      const activeCommands = new Map<string, { command?: string }>();
+      const thinkingSegments: string[] = [];
 
       /**
        * Cleanup and settle the promise (resolve or reject).
@@ -188,9 +223,40 @@ export class CodexEngine implements AgentEngine {
 
       rl = readline.createInterface({ input: child.stdout });
 
+      /**
+       * Build the assistant message payload, combining thinking and agent content.
+       */
+      const buildAssistantPayload = (): string => {
+        const trimmedAssistant = assistantBuffer.trim();
+        const thinkingContent = thinkingSegments
+          .map((segment) => segment.trim())
+          .filter((segment) => segment.length > 0)
+          .map((segment) => `<thinking>${segment}</thinking>`)
+          .join('\n\n');
+
+        const parts: string[] = [];
+        if (thinkingContent) {
+          parts.push(thinkingContent);
+        }
+        if (trimmedAssistant) {
+          parts.push(trimmedAssistant);
+        }
+        return parts.join('\n\n').trim();
+      };
+
+      /**
+       * Reset assistant buffers after emitting a final message.
+       */
+      const resetAssistantBuffers = (): void => {
+        assistantBuffer = '';
+        thinkingSegments.length = 0;
+        assistantMessageId = null;
+        assistantCreatedAt = null;
+      };
+
       // Helper: emit assistant message
       const emitAssistant = (isFinal: boolean): void => {
-        const content = assistantBuffer.trim();
+        const content = buildAssistantPayload();
         if (!content) return;
 
         if (!assistantMessageId) {
@@ -251,7 +317,9 @@ export class CodexEngine implements AgentEngine {
 
       // Event handlers for specific item types
       const emitCommandStart = (item: Record<string, unknown>): void => {
+        const id = this.pickFirstString(item.id) ?? randomUUID();
         const command = this.pickFirstString(item.command);
+        activeCommands.set(id, { command });
         dispatchToolMessage(
           command ? `Running: ${command}` : 'Running command',
           {
@@ -266,7 +334,12 @@ export class CodexEngine implements AgentEngine {
       };
 
       const emitCommandResult = (item: Record<string, unknown>): void => {
-        const command = this.pickFirstString(item.command);
+        const id = this.pickFirstString(item.id);
+        const tracked = id ? activeCommands.get(id) : undefined;
+        if (id) {
+          activeCommands.delete(id);
+        }
+        const command = this.pickFirstString(item.command) ?? tracked?.command;
         const output = this.pickFirstString(item.aggregated_output) ?? '';
         const exitCode = typeof item.exit_code === 'number' ? item.exit_code : undefined;
         const status = this.pickFirstString(item.status);
@@ -347,10 +420,16 @@ export class CodexEngine implements AgentEngine {
         const record = delta as Record<string, unknown>;
         const type = this.pickFirstString(record.type);
 
-        if (type === 'agent_message' || type === 'reasoning') {
+        if (type === 'agent_message') {
           const text = this.pickFirstString(record.text);
           if (text) {
             assistantBuffer += text;
+            emitAssistant(false);
+          }
+        } else if (type === 'reasoning') {
+          const text = this.pickFirstString(record.text);
+          if (text) {
+            thinkingSegments.push(text);
             emitAssistant(false);
           }
         } else if (type === 'todo_list') {
@@ -377,12 +456,21 @@ export class CodexEngine implements AgentEngine {
             const text = this.pickFirstString(record.text);
             if (text) assistantBuffer = text;
             emitAssistant(true);
+            resetAssistantBuffers();
+            break;
+          }
+          case 'reasoning': {
+            const text = this.pickFirstString(record.text);
+            if (text) {
+              thinkingSegments.push(text);
+              emitAssistant(false);
+            }
             break;
           }
           default: {
             const text = this.pickFirstString(record.text);
             if (text) {
-              assistantBuffer += text;
+              thinkingSegments.push(text);
               emitAssistant(false);
             }
             break;
@@ -411,12 +499,33 @@ export class CodexEngine implements AgentEngine {
       }, timeoutMs);
       timeoutHandle.unref?.();
 
-      // Cleanup timeout when child closes
-      child.on('close', () => {
+      // Cleanup timeout and handle abnormal exit
+      child.on('close', (code: number | null, closeSignal: NodeJS.Signals | null) => {
         if (timeoutHandle) {
           clearTimeout(timeoutHandle);
           timeoutHandle = null;
         }
+
+        // If already timed out, settled, or completed normally, do nothing
+        if (timedOut || settled || hasCompleted) {
+          return;
+        }
+
+        // Build error detail from exit code and signal
+        const detailParts: string[] = [];
+        if (typeof code === 'number') {
+          detailParts.push(`exit code ${code}`);
+        }
+        if (closeSignal) {
+          detailParts.push(`signal ${closeSignal}`);
+        }
+        const detail = detailParts.length > 0 ? detailParts.join(', ') : 'unexpected shutdown';
+
+        // Emit final assistant message and mark as failed
+        emitAssistant(true);
+        resetAssistantBuffers();
+        hasCompleted = true;
+        finish(new Error(`CodexEngine: process terminated (${detail})`));
       });
 
       // Main event processing loop (wrapped in IIFE to handle async properly)
@@ -448,6 +557,9 @@ export class CodexEngine implements AgentEngine {
               case 'item.failed': {
                 const item = (event as { item?: unknown }).item ?? null;
                 handleItemCompleted(item);
+                // Flush assistant message before throwing (aligned with other/cweb)
+                emitAssistant(true);
+                resetAssistantBuffers();
                 const msg =
                   (item &&
                     typeof item === 'object' &&
@@ -457,6 +569,9 @@ export class CodexEngine implements AgentEngine {
                 throw new Error(msg);
               }
               case 'error': {
+                // Flush assistant message before throwing (aligned with other/cweb)
+                emitAssistant(true);
+                resetAssistantBuffers();
                 const msg =
                   this.pickFirstString((event as { error?: unknown }).error) ||
                   this.pickFirstString((event as { message?: unknown }).message) ||
@@ -466,6 +581,8 @@ export class CodexEngine implements AgentEngine {
                 throw new Error(msg);
               }
               case 'turn.completed':
+                emitAssistant(true);
+                resetAssistantBuffers();
                 hasCompleted = true;
                 break;
               default:
@@ -482,6 +599,7 @@ export class CodexEngine implements AgentEngine {
           // Emit final assistant message if not already completed
           if (!hasCompleted) {
             emitAssistant(true);
+            resetAssistantBuffers();
             hasCompleted = true;
           }
 
@@ -497,6 +615,61 @@ export class CodexEngine implements AgentEngine {
     const base =
       (projectRoot && projectRoot.trim()) || process.env.MCP_AGENT_PROJECT_ROOT || process.cwd();
     return path.resolve(base);
+  }
+
+  /**
+   * Append project context (file listing) to the prompt.
+   * Aligned with other/cweb implementation.
+   */
+  private async appendProjectContext(baseInstruction: string, repoPath: string): Promise<string> {
+    try {
+      const fs = await import('node:fs/promises');
+      const entries = await fs.readdir(repoPath, { withFileTypes: true });
+      const visible = entries
+        .filter((entry) => !entry.name.startsWith('.git') && entry.name !== 'AGENTS.md')
+        .map((entry) => entry.name);
+
+      if (visible.length === 0) {
+        return `${baseInstruction}
+
+<current_project_context>
+This is an empty project directory. Work directly in the current folder without creating extra subdirectories.
+</current_project_context>`;
+      }
+
+      return `${baseInstruction}
+
+<current_project_context>
+Current files in project directory: ${visible.sort().join(', ')}
+Work directly in the current directory. Do not create subdirectories unless specifically requested.
+</current_project_context>`;
+    } catch (error) {
+      console.warn('[CodexEngine] Failed to append project context:', error);
+      return baseInstruction;
+    }
+  }
+
+  /**
+   * Build Codex CLI configuration arguments from the resolved config.
+   * Aligned with other/cweb implementation for feature parity.
+   */
+  private buildCodexConfigArgs(config: CodexEngineConfig): string[] {
+    const args: string[] = [];
+
+    const pushConfig = (key: string, value: string | number | boolean): void => {
+      args.push('-c', `${key}=${String(value)}`);
+    };
+
+    pushConfig('include_apply_patch_tool', config.includeApplyPatchTool);
+    pushConfig('include_plan_tool', config.includePlanTool);
+    pushConfig('tools.web_search_request', config.enableWebSearch);
+    pushConfig('use_experimental_streamable_shell_tool', config.useStreamableShell);
+    pushConfig('sandbox_mode', config.sandboxMode);
+    pushConfig('max_turns', config.maxTurns);
+    pushConfig('max_thinking_tokens', config.maxThinkingTokens);
+    args.push('-c', `instructions=${JSON.stringify(config.autoInstructions)}`);
+
+    return args;
   }
 
   /**
@@ -529,6 +702,17 @@ export class CodexEngine implements AgentEngine {
     const globalPath = process.env.NPM_GLOBAL_PATH;
     if (globalPath) {
       extraPaths.push(globalPath);
+    }
+    // Enhanced Windows PATH handling (aligned with other/cweb)
+    if (process.platform === 'win32') {
+      const appData = process.env.APPDATA;
+      const localApp = process.env.LOCALAPPDATA;
+      if (appData) {
+        extraPaths.push(path.join(appData, 'npm'));
+      }
+      if (localApp) {
+        extraPaths.push(path.join(localApp, 'Programs', 'nodejs'));
+      }
     }
     if (extraPaths.length > 0) {
       const currentPath = env.PATH || env.Path || '';

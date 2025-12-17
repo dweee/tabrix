@@ -46,34 +46,98 @@ export const CLAUDE_MODELS: ModelDefinition[] = [
 export const CLAUDE_DEFAULT_MODEL = 'claude-sonnet-4-5-20250929';
 
 // ============================================================
-// Codex Models
+// Codex Models (aligned with other/cweb)
 // ============================================================
 
 export const CODEX_MODELS: ModelDefinition[] = [
   {
-    id: 'o3',
-    name: 'o3',
+    id: 'gpt-5',
+    name: 'GPT-5',
     description: 'OpenAI flagship reasoning model',
   },
   {
-    id: 'gpt-4.1',
-    name: 'GPT-4.1',
-    description: 'OpenAI GPT-4.1 model',
-  },
-  {
-    id: 'o4-mini',
-    name: 'o4 Mini',
-    description: 'Fast and efficient model',
-  },
-  {
-    id: 'claude-sonnet-4-5-20250929',
-    name: 'Claude Sonnet 4.5 (via Codex)',
-    description: 'Anthropic model via Codex',
+    id: 'gpt-4o',
+    name: 'GPT-4o',
+    description: 'General-purpose model with multimodal support',
     supportsImages: true,
+  },
+  {
+    id: 'gpt-4o-mini',
+    name: 'GPT-4o Mini',
+    description: 'Cost-efficient GPT-4o variant',
+    supportsImages: true,
+  },
+  {
+    id: 'o1-preview',
+    name: 'o1 Preview',
+    description: 'OpenAI o1 preview model focused on agent use-cases',
+  },
+  {
+    id: 'o1-mini',
+    name: 'o1 Mini',
+    description: 'Lightweight o1 model for faster iterations',
+  },
+  {
+    id: 'o3',
+    name: 'o3',
+    description: 'OpenAI o3 reasoning model',
+  },
+  {
+    id: 'claude-3.5-sonnet',
+    name: 'Claude 3.5 Sonnet (via Codex)',
+    description: 'Anthropic Claude via Codex router',
+  },
+  {
+    id: 'claude-3-haiku',
+    name: 'Claude 3 Haiku (via Codex)',
+    description: 'Anthropic Haiku model routed through Codex',
   },
 ];
 
-export const CODEX_DEFAULT_MODEL = 'o3';
+export const CODEX_DEFAULT_MODEL = 'gpt-5';
+
+// Codex model alias normalization (aligned with other/cweb)
+const CODEX_ALIAS_MAP: Record<string, string> = {
+  gpt5: 'gpt-5',
+  gpt_5: 'gpt-5',
+  'gpt-5.0': 'gpt-5',
+  'gpt-4o-mini-high': 'gpt-4o-mini',
+  'gpt-4o-mini-low': 'gpt-4o-mini',
+  'claude-sonnet-3.5': 'claude-3.5-sonnet',
+  'claude35-sonnet': 'claude-3.5-sonnet',
+};
+
+const CODEX_KNOWN_IDS = new Set(CODEX_MODELS.map((model) => model.id));
+
+/**
+ * Normalize a Codex model ID, handling aliases and falling back to default.
+ */
+export function normalizeCodexModelId(model?: string | null): string {
+  if (!model || typeof model !== 'string') {
+    return CODEX_DEFAULT_MODEL;
+  }
+
+  const trimmed = model.trim();
+  if (!trimmed) {
+    return CODEX_DEFAULT_MODEL;
+  }
+
+  const lower = trimmed.toLowerCase();
+  if (CODEX_ALIAS_MAP[lower]) {
+    return CODEX_ALIAS_MAP[lower];
+  }
+
+  if (CODEX_KNOWN_IDS.has(lower)) {
+    return lower;
+  }
+
+  // If the exact casing exists, allow it
+  if (CODEX_KNOWN_IDS.has(trimmed)) {
+    return trimmed;
+  }
+
+  return CODEX_DEFAULT_MODEL;
+}
 
 // ============================================================
 // Cursor Models

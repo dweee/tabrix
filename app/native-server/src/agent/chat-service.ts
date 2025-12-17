@@ -271,6 +271,8 @@ export class AgentChatService {
       resumeClaudeSessionId: engineName === 'claude' ? resumeClaudeSessionId : undefined,
       // Pass useCcr flag for Claude Code Router support (ClaudeEngine only)
       useCcr: engineName === 'claude' ? projectUseCcr : undefined,
+      // Pass Codex-specific configuration (CodexEngine only)
+      codexConfig: engineName === 'codex' ? dbSession?.optionsConfig?.codexConfig : undefined,
     };
 
     // Create abort controller for cancellation support
