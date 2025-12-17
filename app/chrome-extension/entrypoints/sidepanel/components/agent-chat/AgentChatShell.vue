@@ -1,9 +1,5 @@
 <template>
-  <div
-    ref="shellRef"
-    class="h-full flex flex-col overflow-hidden relative"
-    :style="{ backgroundColor: 'var(--ac-bg)' }"
-  >
+  <div ref="shellRef" class="h-full flex flex-col overflow-hidden relative">
     <!-- Header -->
     <header
       class="flex-none px-5 py-3 flex items-center justify-between z-20"

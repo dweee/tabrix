@@ -72,6 +72,9 @@ defineEmits<{
 
 const themes: { id: AgentThemeId; label: string }[] = [
   { id: 'warm-editorial', label: THEME_LABELS['warm-editorial'] },
+  { id: 'blueprint-architect', label: THEME_LABELS['blueprint-architect'] },
+  { id: 'zen-journal', label: THEME_LABELS['zen-journal'] },
+  { id: 'neo-pop', label: THEME_LABELS['neo-pop'] },
   { id: 'dark-console', label: THEME_LABELS['dark-console'] },
   { id: 'swiss-grid', label: THEME_LABELS['swiss-grid'] },
 ];

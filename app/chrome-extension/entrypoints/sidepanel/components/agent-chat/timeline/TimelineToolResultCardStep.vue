@@ -21,11 +21,12 @@
       <!-- Diff Stats Badge -->
       <span
         v-if="hasDiffStats"
-        class="text-[10px] px-1.5 py-0.5 rounded"
+        class="text-[10px] px-1.5 py-0.5"
         :style="{
           backgroundColor: 'var(--ac-chip-bg)',
           color: 'var(--ac-text-muted)',
           fontFamily: 'var(--ac-font-mono)',
+          borderRadius: 'var(--ac-radius-button)',
         }"
       >
         <span v-if="item.tool.diffStats?.addedLines" class="text-green-600 dark:text-green-400">
@@ -60,7 +61,7 @@
     <!-- Result Card -->
     <div
       v-if="showCard"
-      class="rounded-lg overflow-hidden text-xs leading-5"
+      class="overflow-hidden text-xs leading-5"
       :style="{
         fontFamily: 'var(--ac-font-mono)',
         border: 'var(--ac-border-width) solid var(--ac-code-border)',
@@ -71,12 +72,15 @@
       <!-- File list for edit -->
       <template v-if="item.tool.kind === 'edit' && item.tool.files?.length">
         <div
-          v-for="file in item.tool.files.slice(0, 5)"
+          v-for="(file, idx) in item.tool.files.slice(0, 5)"
           :key="file"
-          class="px-3 py-1 border-b last:border-b-0"
+          class="px-3 py-1"
           :style="{
             backgroundColor: 'var(--ac-surface)',
-            borderColor: 'var(--ac-border)',
+            borderBottom:
+              idx === Math.min(item.tool.files.length, 5) - 1
+                ? 'none'
+                : 'var(--ac-border-width) solid var(--ac-border)',
             color: 'var(--ac-text-muted)',
           }"
         >

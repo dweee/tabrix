@@ -13,21 +13,24 @@
       :style="{
         backgroundColor: 'var(--ac-surface, #ffffff)',
         border: 'var(--ac-border-width, 1px) solid var(--ac-border, #e5e5e5)',
-        borderRadius: 'var(--ac-radius-outer, 12px)',
+        borderRadius: 'var(--ac-radius-card, 12px)',
         boxShadow: 'var(--ac-shadow-float, 0 4px 20px -2px rgba(0,0,0,0.2))',
       }"
     >
       <!-- Header -->
       <div
-        class="flex items-center justify-between px-4 py-3 border-b"
-        :style="{ borderColor: 'var(--ac-border, #e5e5e5)' }"
+        class="flex items-center justify-between px-4 py-3"
+        :style="{ borderBottom: 'var(--ac-border-width, 1px) solid var(--ac-border, #e5e5e5)' }"
       >
         <h2 class="text-sm font-semibold" :style="{ color: 'var(--ac-text, #1a1a1a)' }">
           Session Settings
         </h2>
         <button
-          class="p-1 rounded ac-btn"
-          :style="{ color: 'var(--ac-text-muted, #6e6e6e)' }"
+          class="p-1 ac-btn"
+          :style="{
+            color: 'var(--ac-text-muted, #6e6e6e)',
+            borderRadius: 'var(--ac-radius-button)',
+          }"
           @click="handleClose"
         >
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -63,10 +66,11 @@
               <div class="flex justify-between">
                 <span :style="{ color: 'var(--ac-text-muted, #6e6e6e)' }">Engine</span>
                 <span
-                  class="px-1.5 py-0.5 rounded text-[10px]"
+                  class="px-1.5 py-0.5 text-[10px]"
                   :style="{
                     backgroundColor: getEngineColor(session?.engineName || ''),
                     color: '#ffffff',
+                    borderRadius: 'var(--ac-radius-button, 8px)',
                   }"
                 >
                   {{ session?.engineName || 'Unknown' }}
@@ -95,10 +99,11 @@
             </label>
             <select
               v-model="localModel"
-              class="w-full px-2 py-1.5 text-xs rounded border"
+              class="w-full px-2 py-1.5 text-xs"
               :style="{
                 backgroundColor: 'var(--ac-surface, #ffffff)',
-                borderColor: 'var(--ac-border, #e5e5e5)',
+                border: 'var(--ac-border-width, 1px) solid var(--ac-border, #e5e5e5)',
+                borderRadius: 'var(--ac-radius-button, 8px)',
                 color: 'var(--ac-text, #1a1a1a)',
               }"
             >
@@ -107,6 +112,36 @@
                 {{ m.name }}
               </option>
             </select>
+          </div>
+
+          <!-- Reasoning Effort (Codex only) -->
+          <div v-if="isCodexEngine" class="space-y-2">
+            <label
+              class="text-[10px] font-bold uppercase tracking-wider"
+              :style="{ color: 'var(--ac-text-subtle, #a8a29e)' }"
+            >
+              Reasoning Effort
+            </label>
+            <select
+              v-model="localReasoningEffort"
+              class="w-full px-2 py-1.5 text-xs"
+              :style="{
+                backgroundColor: 'var(--ac-surface, #ffffff)',
+                border: 'var(--ac-border-width, 1px) solid var(--ac-border, #e5e5e5)',
+                borderRadius: 'var(--ac-radius-button, 8px)',
+                color: 'var(--ac-text, #1a1a1a)',
+              }"
+            >
+              <option v-for="effort in availableReasoningEfforts" :key="effort" :value="effort">
+                {{ effort }}
+              </option>
+            </select>
+            <p class="text-[10px]" :style="{ color: 'var(--ac-text-subtle, #a8a29e)' }">
+              Controls the reasoning depth. Higher effort = better quality but slower.
+              <span v-if="!availableReasoningEfforts.includes('xhigh')" class="block mt-1">
+                Note: xhigh is only available for gpt-5.2 and gpt-5.1-codex-max models.
+              </span>
+            </p>
           </div>
 
           <!-- Permission Mode (Claude only) -->
@@ -119,10 +154,11 @@
             </label>
             <select
               v-model="localPermissionMode"
-              class="w-full px-2 py-1.5 text-xs rounded border"
+              class="w-full px-2 py-1.5 text-xs"
               :style="{
                 backgroundColor: 'var(--ac-surface, #ffffff)',
-                borderColor: 'var(--ac-border, #e5e5e5)',
+                border: 'var(--ac-border-width, 1px) solid var(--ac-border, #e5e5e5)',
+                borderRadius: 'var(--ac-radius-button, 8px)',
                 color: 'var(--ac-text, #1a1a1a)',
               }"
             >
@@ -165,10 +201,11 @@
                 <textarea
                   v-if="localAppendToPrompt"
                   v-model="localPromptAppend"
-                  class="mt-1 w-full px-2 py-1.5 text-xs rounded border resize-none"
+                  class="mt-1 w-full px-2 py-1.5 text-xs resize-none"
                   :style="{
                     backgroundColor: 'var(--ac-surface, #ffffff)',
-                    borderColor: 'var(--ac-border, #e5e5e5)',
+                    border: 'var(--ac-border-width, 1px) solid var(--ac-border, #e5e5e5)',
+                    borderRadius: 'var(--ac-radius-button, 8px)',
                     color: 'var(--ac-text, #1a1a1a)',
                     fontFamily: 'var(--ac-font-mono, monospace)',
                   }"
@@ -187,10 +224,11 @@
               <textarea
                 v-if="localUseCustomPrompt"
                 v-model="localCustomPrompt"
-                class="w-full px-2 py-1.5 text-xs rounded border resize-none"
+                class="w-full px-2 py-1.5 text-xs resize-none"
                 :style="{
                   backgroundColor: 'var(--ac-surface, #ffffff)',
-                  borderColor: 'var(--ac-border, #e5e5e5)',
+                  border: 'var(--ac-border-width, 1px) solid var(--ac-border, #e5e5e5)',
+                  borderRadius: 'var(--ac-radius-button, 8px)',
                   color: 'var(--ac-text, #1a1a1a)',
                   fontFamily: 'var(--ac-font-mono, monospace)',
                 }"
@@ -209,8 +247,11 @@
               SDK Info
             </label>
             <div
-              class="text-[10px] space-y-1 p-2 rounded"
-              :style="{ backgroundColor: 'var(--ac-surface-inset, #f5f5f5)' }"
+              class="text-[10px] space-y-1 p-2"
+              :style="{
+                backgroundColor: 'var(--ac-surface-inset, #f5f5f5)',
+                borderRadius: 'var(--ac-radius-inner, 8px)',
+              }"
             >
               <div v-if="managementInfo.model" class="flex justify-between">
                 <span :style="{ color: 'var(--ac-text-muted, #6e6e6e)' }">Active Model</span>
@@ -243,8 +284,11 @@
                 View tools ({{ managementInfo.tools.length }})
               </summary>
               <div
-                class="mt-1 p-2 rounded max-h-32 overflow-y-auto ac-scroll"
-                :style="{ backgroundColor: 'var(--ac-surface-inset, #f5f5f5)' }"
+                class="mt-1 p-2 max-h-32 overflow-y-auto ac-scroll"
+                :style="{
+                  backgroundColor: 'var(--ac-surface-inset, #f5f5f5)',
+                  borderRadius: 'var(--ac-radius-inner, 8px)',
+                }"
               >
                 <div
                   v-for="tool in managementInfo.tools"
@@ -262,8 +306,11 @@
                 View MCP servers ({{ managementInfo.mcpServers.length }})
               </summary>
               <div
-                class="mt-1 p-2 rounded max-h-32 overflow-y-auto ac-scroll"
-                :style="{ backgroundColor: 'var(--ac-surface-inset, #f5f5f5)' }"
+                class="mt-1 p-2 max-h-32 overflow-y-auto ac-scroll"
+                :style="{
+                  backgroundColor: 'var(--ac-surface-inset, #f5f5f5)',
+                  borderRadius: 'var(--ac-radius-inner, 8px)',
+                }"
               >
                 <div
                   v-for="server in managementInfo.mcpServers"
@@ -273,10 +320,11 @@
                 >
                   <span>{{ server.name }}</span>
                   <span
-                    class="text-[9px] px-1 rounded"
+                    class="text-[9px] px-1"
                     :style="{
                       backgroundColor: server.status === 'connected' ? '#10b981' : '#6b7280',
                       color: '#fff',
+                      borderRadius: 'var(--ac-radius-button, 8px)',
                     }"
                     >{{ server.status }}</span
                   >
@@ -289,24 +337,26 @@
 
       <!-- Footer -->
       <div
-        class="flex items-center justify-end gap-2 px-4 py-3 border-t"
-        :style="{ borderColor: 'var(--ac-border, #e5e5e5)' }"
+        class="flex items-center justify-end gap-2 px-4 py-3"
+        :style="{ borderTop: 'var(--ac-border-width, 1px) solid var(--ac-border, #e5e5e5)' }"
       >
         <button
-          class="px-3 py-1.5 text-xs rounded ac-btn"
+          class="px-3 py-1.5 text-xs ac-btn"
           :style="{
             color: 'var(--ac-text-muted, #6e6e6e)',
             border: 'var(--ac-border-width, 1px) solid var(--ac-border, #e5e5e5)',
+            borderRadius: 'var(--ac-radius-button, 8px)',
           }"
           @click="handleClose"
         >
           Cancel
         </button>
         <button
-          class="px-3 py-1.5 text-xs rounded ac-btn"
+          class="px-3 py-1.5 text-xs ac-btn"
           :style="{
             backgroundColor: 'var(--ac-accent, #c87941)',
-            color: '#ffffff',
+            color: 'var(--ac-accent-contrast, #ffffff)',
+            borderRadius: 'var(--ac-radius-button, 8px)',
           }"
           :disabled="isSaving"
           @click="handleSave"
@@ -320,8 +370,18 @@
 
 <script lang="ts" setup>
 import { ref, computed, watch } from 'vue';
-import type { AgentSession, AgentManagementInfo, AgentSystemPromptConfig } from 'chrome-mcp-shared';
-import { getModelsForCli } from '@/common/agent-models';
+import type {
+  AgentSession,
+  AgentManagementInfo,
+  AgentSystemPromptConfig,
+  CodexReasoningEffort,
+  AgentSessionOptionsConfig,
+} from 'chrome-mcp-shared';
+import {
+  getModelsForCli,
+  getCodexReasoningEfforts,
+  getDefaultModelForCli,
+} from '@/common/agent-models';
 
 const props = defineProps<{
   open: boolean;
@@ -340,11 +400,13 @@ export interface SessionSettings {
   model: string;
   permissionMode: string;
   systemPromptConfig: AgentSystemPromptConfig | null;
+  optionsConfig?: AgentSessionOptionsConfig;
 }
 
 // Local state
 const localModel = ref('');
 const localPermissionMode = ref('');
+const localReasoningEffort = ref<CodexReasoningEffort>('medium');
 const localUseCustomPrompt = ref(false);
 const localCustomPrompt = ref('');
 const localAppendToPrompt = ref(false);
@@ -352,6 +414,22 @@ const localPromptAppend = ref('');
 
 // Computed
 const isClaudeEngine = computed(() => props.session?.engineName === 'claude');
+const isCodexEngine = computed(() => props.session?.engineName === 'codex');
+
+// Get available reasoning efforts based on selected model
+const availableReasoningEfforts = computed<readonly CodexReasoningEffort[]>(() => {
+  if (!isCodexEngine.value) return [];
+  const effectiveModel = localModel.value || getDefaultModelForCli('codex');
+  return getCodexReasoningEfforts(effectiveModel);
+});
+
+// Normalize reasoning effort when model changes
+const normalizedReasoningEffort = computed(() => {
+  const supported = availableReasoningEfforts.value;
+  if (supported.length === 0) return localReasoningEffort.value;
+  if (supported.includes(localReasoningEffort.value)) return localReasoningEffort.value;
+  return supported[supported.length - 1]; // fallback to highest supported
+});
 
 const availableModels = computed(() => {
   if (!props.session?.engineName) return [];
@@ -365,6 +443,14 @@ watch(
     if (session) {
       localModel.value = session.model || '';
       localPermissionMode.value = session.permissionMode || '';
+
+      // Initialize reasoning effort from session's codex config
+      const codexConfig = session.optionsConfig?.codexConfig;
+      if (codexConfig?.reasoningEffort) {
+        localReasoningEffort.value = codexConfig.reasoningEffort;
+      } else {
+        localReasoningEffort.value = 'medium';
+      }
 
       // Parse system prompt config based on type
       const config = session.systemPromptConfig;
@@ -390,6 +476,13 @@ watch(
   },
   { immediate: true },
 );
+
+// Auto-adjust reasoning effort when model changes
+watch(localModel, () => {
+  if (isCodexEngine.value) {
+    localReasoningEffort.value = normalizedReasoningEffort.value;
+  }
+});
 
 function getEngineColor(engineName: string): string {
   const colors: Record<string, string> = {
@@ -429,10 +522,25 @@ function handleSave(): void {
     };
   }
 
+  // Build optionsConfig for Codex engine
+  let optionsConfig: AgentSessionOptionsConfig | undefined;
+  if (isCodexEngine.value) {
+    const existingOptions = props.session?.optionsConfig ?? {};
+    const existingCodexConfig = existingOptions.codexConfig ?? {};
+    optionsConfig = {
+      ...existingOptions,
+      codexConfig: {
+        ...existingCodexConfig,
+        reasoningEffort: normalizedReasoningEffort.value,
+      },
+    };
+  }
+
   const settings: SessionSettings = {
     model: localModel.value.trim(),
     permissionMode: localPermissionMode.value,
     systemPromptConfig,
+    optionsConfig,
   };
   emit('save', settings);
 }

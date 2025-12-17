@@ -284,6 +284,13 @@ export interface AgentStoredMessage {
 export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 
 /**
+ * Reasoning effort for Codex models.
+ * - low/medium/high: supported by all models
+ * - xhigh: only supported by gpt-5.2 and gpt-5.1-codex-max
+ */
+export type CodexReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+
+/**
  * Configuration options for Codex Engine.
  * These can be overridden per-session via session settings.
  */
@@ -302,6 +309,8 @@ export interface CodexEngineConfig {
   maxTurns: number;
   /** Maximum thinking tokens. Default: 4096 */
   maxThinkingTokens: number;
+  /** Reasoning effort for supported models. Default: 'medium' */
+  reasoningEffort: CodexReasoningEffort;
   /** Auto instructions for autonomous behavior. Default: AUTO_INSTRUCTIONS */
   autoInstructions: string;
   /** Append project context (file listing) to prompt. Default: true */
@@ -331,6 +340,7 @@ export const DEFAULT_CODEX_CONFIG: CodexEngineConfig = {
   sandboxMode: 'danger-full-access',
   maxTurns: 20,
   maxThinkingTokens: 4096,
+  reasoningEffort: 'medium',
   autoInstructions: CODEX_AUTO_INSTRUCTIONS,
   appendProjectContext: true,
 };

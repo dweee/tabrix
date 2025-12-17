@@ -14,11 +14,12 @@
       <!-- Content based on tool kind -->
       <code
         v-if="item.tool.kind === 'grep' || item.tool.kind === 'read'"
-        class="text-xs px-1.5 py-0.5 rounded cursor-pointer ac-chip-hover"
+        class="text-xs px-1.5 py-0.5 cursor-pointer ac-chip-hover"
         :style="{
           fontFamily: 'var(--ac-font-mono)',
           backgroundColor: 'var(--ac-chip-bg)',
           color: 'var(--ac-chip-text)',
+          borderRadius: 'var(--ac-radius-button)',
         }"
         :title="item.tool.filePath || item.tool.pattern"
       >
@@ -40,11 +41,12 @@
       <!-- Diff Stats Preview (for edit) -->
       <span
         v-if="hasDiffStats"
-        class="text-[10px] px-1.5 py-0.5 rounded"
+        class="text-[10px] px-1.5 py-0.5"
         :style="{
           backgroundColor: 'var(--ac-chip-bg)',
           color: 'var(--ac-text-muted)',
           fontFamily: 'var(--ac-font-mono)',
+          borderRadius: 'var(--ac-radius-button)',
         }"
       >
         <span v-if="item.tool.diffStats?.addedLines" class="text-green-600 dark:text-green-400">

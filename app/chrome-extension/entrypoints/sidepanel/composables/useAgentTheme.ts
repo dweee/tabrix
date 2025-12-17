@@ -5,7 +5,13 @@
 import { ref, type Ref } from 'vue';
 
 /** Available theme identifiers */
-export type AgentThemeId = 'warm-editorial' | 'dark-console' | 'swiss-grid';
+export type AgentThemeId =
+  | 'warm-editorial'
+  | 'blueprint-architect'
+  | 'zen-journal'
+  | 'neo-pop'
+  | 'dark-console'
+  | 'swiss-grid';
 
 /** Storage key for persisting theme preference */
 const STORAGE_KEY_THEME = 'agentTheme';
@@ -14,11 +20,21 @@ const STORAGE_KEY_THEME = 'agentTheme';
 const DEFAULT_THEME: AgentThemeId = 'warm-editorial';
 
 /** Valid theme IDs for validation */
-const VALID_THEMES: AgentThemeId[] = ['warm-editorial', 'dark-console', 'swiss-grid'];
+const VALID_THEMES: AgentThemeId[] = [
+  'warm-editorial',
+  'blueprint-architect',
+  'zen-journal',
+  'neo-pop',
+  'dark-console',
+  'swiss-grid',
+];
 
 /** Theme display names for UI */
 export const THEME_LABELS: Record<AgentThemeId, string> = {
   'warm-editorial': 'Editorial',
+  'blueprint-architect': 'Blueprint',
+  'zen-journal': 'Zen',
+  'neo-pop': 'Neo-Pop',
   'dark-console': 'Console',
   'swiss-grid': 'Swiss',
 };

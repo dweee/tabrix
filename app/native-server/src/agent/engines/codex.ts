@@ -667,6 +667,7 @@ Work directly in the current directory. Do not create subdirectories unless spec
     pushConfig('sandbox_mode', config.sandboxMode);
     pushConfig('max_turns', config.maxTurns);
     pushConfig('max_thinking_tokens', config.maxThinkingTokens);
+    pushConfig('reasoning_effort', config.reasoningEffort);
     args.push('-c', `instructions=${JSON.stringify(config.autoInstructions)}`);
 
     return args;

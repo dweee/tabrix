@@ -6,6 +6,9 @@
  *
  * Themes:
  * - warm-editorial (default): Warm, editorial style from agent-ux.html
+ * - blueprint-architect: Blueprint grid with technical aesthetic
+ * - zen-journal: Calm journal / graphite accent (Muji style)
+ * - neo-pop: Thick borders + hard shadow (Brutalist)
  * - dark-console: Dark terminal/console style
  * - swiss-grid: High-contrast brutalist/swiss style
  */
@@ -166,6 +169,236 @@
     --ac-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
     --ac-radius-card: 12px;
     --ac-border-width: 1px;
+  }
+
+  /* ========================================
+     BLUEPRINT ARCHITECT
+     ======================================== */
+  .agent-theme[data-agent-theme='blueprint-architect'] {
+    --ac-font-body: var(--ac-font-grotesk);
+    --ac-font-heading: var(--ac-font-grotesk);
+    --ac-font-code: var(--ac-font-mono);
+
+    --ac-bg: #f7fbff;
+    --ac-bg-pattern:
+      linear-gradient(to right, rgba(37, 99, 235, 0.14) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(37, 99, 235, 0.14) 1px, transparent 1px);
+    --ac-bg-pattern-size: 24px 24px;
+
+    --ac-header-bg: rgba(247, 251, 255, 0.86);
+    --ac-header-border: rgba(37, 99, 235, 0.25);
+
+    --ac-surface: rgba(255, 255, 255, 0.92);
+    --ac-surface-muted: rgba(239, 246, 255, 0.9);
+    --ac-surface-inset: rgba(239, 246, 255, 0.9);
+
+    --ac-text: #0b1220;
+    --ac-text-muted: #1f2a44;
+    --ac-text-subtle: #475569;
+    --ac-text-inverse: #ffffff;
+    --ac-text-placeholder: #64748b;
+
+    --ac-border: rgba(37, 99, 235, 0.25);
+    --ac-border-strong: rgba(37, 99, 235, 0.45);
+
+    --ac-hover-bg: rgba(37, 99, 235, 0.08);
+    --ac-hover-bg-subtle: rgba(37, 99, 235, 0.05);
+
+    --ac-accent: #2563eb;
+    --ac-accent-hover: #1d4ed8;
+    --ac-accent-subtle: rgba(37, 99, 235, 0.12);
+    --ac-accent-contrast: #ffffff;
+
+    --ac-accent-2: #0ea5e9;
+    --ac-link: var(--ac-accent);
+    --ac-link-hover: var(--ac-accent-hover);
+
+    --ac-selection-bg: rgba(37, 99, 235, 0.16);
+    --ac-selection-text: #0b1220;
+
+    --ac-shadow-card: 0 1px 3px rgba(2, 6, 23, 0.12);
+    --ac-shadow-float: 0 10px 28px -10px rgba(2, 6, 23, 0.22);
+    --ac-focus-ring: rgba(37, 99, 235, 0.4);
+
+    --ac-timeline-line: rgba(37, 99, 235, 0.35);
+    --ac-timeline-node: rgba(37, 99, 235, 0.35);
+    --ac-timeline-node-hover: rgba(37, 99, 235, 0.55);
+    --ac-timeline-node-active: var(--ac-accent);
+    --ac-timeline-node-active-border: var(--ac-accent);
+    --ac-timeline-node-pulse-shadow:
+      0 0 0 2px rgba(37, 99, 235, 0.25), 0 0 12px rgba(37, 99, 235, 0.2);
+
+    --ac-chip-bg: rgba(239, 246, 255, 0.9);
+    --ac-chip-text: #0b1220;
+    --ac-chip-border: rgba(37, 99, 235, 0.25);
+
+    --ac-code-bg: rgba(255, 255, 255, 0.92);
+    --ac-code-text: #0b1220;
+    --ac-code-border: rgba(37, 99, 235, 0.25);
+
+    --ac-diff-add-bg: rgba(34, 197, 94, 0.12);
+    --ac-diff-add-text: #15803d;
+    --ac-diff-add-border: rgba(34, 197, 94, 0.4);
+    --ac-diff-del-bg: rgba(239, 68, 68, 0.12);
+    --ac-diff-del-text: #b91c1c;
+    --ac-diff-del-border: rgba(239, 68, 68, 0.4);
+
+    --ac-scrollbar-thumb: rgba(37, 99, 235, 0.2);
+    --ac-scrollbar-thumb-hover: rgba(37, 99, 235, 0.35);
+  }
+
+  /* ========================================
+     ZEN JOURNAL
+     ======================================== */
+  .agent-theme[data-agent-theme='zen-journal'] {
+    --ac-font-body: var(--ac-font-serif);
+    --ac-font-heading: var(--ac-font-serif);
+    --ac-font-code: var(--ac-font-mono);
+
+    --ac-bg: #fafaf9;
+    --ac-bg-pattern: linear-gradient(to bottom, rgba(120, 113, 108, 0.07) 1px, transparent 1px);
+    --ac-bg-pattern-size: 100% 28px;
+
+    --ac-header-bg: rgba(250, 250, 249, 0.92);
+    --ac-header-border: rgba(231, 229, 228, 0.9);
+
+    --ac-surface: rgba(255, 255, 255, 0.92);
+    --ac-surface-muted: rgba(245, 245, 244, 0.92);
+    --ac-surface-inset: rgba(245, 245, 244, 0.92);
+
+    --ac-text: #1c1917;
+    --ac-text-muted: #44403c;
+    --ac-text-subtle: #78716c;
+    --ac-text-inverse: #ffffff;
+    --ac-text-placeholder: #a8a29e;
+
+    --ac-border: #e7e5e4;
+    --ac-border-strong: #d6d3d1;
+
+    --ac-hover-bg: rgba(120, 113, 108, 0.08);
+    --ac-hover-bg-subtle: rgba(120, 113, 108, 0.05);
+
+    --ac-accent: #57534e;
+    --ac-accent-hover: #44403c;
+    --ac-accent-subtle: rgba(87, 83, 78, 0.12);
+    --ac-accent-contrast: #ffffff;
+    --ac-accent-2: var(--ac-accent);
+
+    --ac-link: var(--ac-accent);
+    --ac-link-hover: var(--ac-accent-hover);
+
+    --ac-selection-bg: rgba(87, 83, 78, 0.18);
+    --ac-selection-text: #1c1917;
+
+    --ac-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06);
+    --ac-shadow-float: 0 14px 34px -18px rgba(0, 0, 0, 0.18);
+    --ac-focus-ring: rgba(87, 83, 78, 0.35);
+
+    --ac-timeline-line: #e7e5e4;
+    --ac-timeline-node: #d6d3d1;
+    --ac-timeline-node-hover: #a8a29e;
+    --ac-timeline-node-active: var(--ac-accent);
+    --ac-timeline-node-active-border: var(--ac-accent);
+    --ac-timeline-node-pulse-shadow:
+      0 0 0 2px rgba(87, 83, 78, 0.25), 0 0 12px rgba(87, 83, 78, 0.2);
+
+    --ac-chip-bg: rgba(245, 245, 244, 0.92);
+    --ac-chip-text: #1c1917;
+    --ac-chip-border: #e7e5e4;
+
+    --ac-code-bg: rgba(255, 255, 255, 0.92);
+    --ac-code-text: #1c1917;
+    --ac-code-border: #e7e5e4;
+
+    --ac-diff-add-bg: rgba(34, 197, 94, 0.1);
+    --ac-diff-add-text: #15803d;
+    --ac-diff-add-border: rgba(34, 197, 94, 0.35);
+    --ac-diff-del-bg: rgba(239, 68, 68, 0.1);
+    --ac-diff-del-text: #b91c1c;
+    --ac-diff-del-border: rgba(239, 68, 68, 0.35);
+
+    --ac-scrollbar-thumb: rgba(120, 113, 108, 0.15);
+    --ac-scrollbar-thumb-hover: rgba(120, 113, 108, 0.25);
+  }
+
+  /* ========================================
+     NEO POP
+     ======================================== */
+  .agent-theme[data-agent-theme='neo-pop'] {
+    --ac-font-body: var(--ac-font-sans);
+    --ac-font-heading: var(--ac-font-grotesk);
+    --ac-font-code: var(--ac-font-mono);
+
+    --ac-border-width: 4px;
+    --ac-border-width-strong: 4px;
+    --ac-radius-card: 0px;
+    --ac-radius-inner: 0px;
+    --ac-radius-button: 0px;
+
+    --ac-bg: #fff7ed;
+    --ac-bg-pattern: radial-gradient(rgba(17, 24, 39, 0.12) 1px, transparent 1px);
+    --ac-bg-pattern-size: 18px 18px;
+
+    --ac-header-bg: rgba(255, 247, 237, 0.92);
+    --ac-header-border: #111827;
+
+    --ac-surface: #ffffff;
+    --ac-surface-muted: #ffedd5;
+    --ac-surface-inset: #ffffff;
+
+    --ac-text: #111827;
+    --ac-text-muted: #374151;
+    --ac-text-subtle: #6b7280;
+    --ac-text-inverse: #ffffff;
+    --ac-text-placeholder: #9ca3af;
+
+    --ac-border: #111827;
+    --ac-border-strong: #111827;
+
+    --ac-hover-bg: rgba(17, 24, 39, 0.06);
+    --ac-hover-bg-subtle: rgba(17, 24, 39, 0.04);
+
+    --ac-accent: #ff3d7f;
+    --ac-accent-hover: #ff1f6a;
+    --ac-accent-subtle: rgba(255, 61, 127, 0.14);
+    --ac-accent-contrast: #ffffff;
+
+    --ac-accent-2: #22d3ee;
+    --ac-link: var(--ac-accent-2);
+    --ac-link-hover: #06b6d4;
+
+    --ac-selection-bg: rgba(255, 61, 127, 0.25);
+    --ac-selection-text: #111827;
+
+    --ac-shadow-card: 6px 6px 0 0 var(--ac-border);
+    --ac-shadow-float: 8px 8px 0 0 var(--ac-border);
+    --ac-focus-ring: rgba(17, 24, 39, 0.35);
+
+    --ac-timeline-line-width: 4px;
+    --ac-timeline-line: #111827;
+    --ac-timeline-node: #111827;
+    --ac-timeline-node-hover: #374151;
+    --ac-timeline-node-active: var(--ac-accent);
+    --ac-timeline-node-active-border: #111827;
+    --ac-timeline-node-pulse-shadow: 0 0 0 2px rgba(17, 24, 39, 1);
+
+    --ac-chip-bg: #ffffff;
+    --ac-chip-text: #111827;
+    --ac-chip-border: #111827;
+
+    --ac-code-bg: #ffffff;
+    --ac-code-text: #111827;
+    --ac-code-border: #111827;
+
+    --ac-diff-add-bg: rgba(34, 197, 94, 0.18);
+    --ac-diff-add-text: #15803d;
+    --ac-diff-add-border: #111827;
+    --ac-diff-del-bg: rgba(239, 68, 68, 0.18);
+    --ac-diff-del-text: #b91c1c;
+    --ac-diff-del-border: #111827;
+
+    --ac-scrollbar-thumb: rgba(17, 24, 39, 0.25);
+    --ac-scrollbar-thumb-hover: rgba(17, 24, 39, 0.4);
   }
 
   /* ========================================
@@ -524,5 +757,64 @@
     .agent-theme .loading-scribble path {
       stroke-dashoffset: 0;
     }
+  }
+
+  /* ============================================================
+     Tooltip System - CSS-only tooltips using data-tooltip attribute
+     ============================================================ */
+  .agent-theme [data-tooltip] {
+    position: relative;
+  }
+
+  .agent-theme [data-tooltip]::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 4px 8px;
+    font-size: 11px;
+    font-family: var(--ac-font-sans);
+    font-weight: 400;
+    line-height: 1.3;
+    white-space: nowrap;
+    color: var(--ac-text-inverse);
+    background-color: var(--ac-text);
+    border-radius: var(--ac-radius-button);
+    opacity: 0;
+    visibility: hidden;
+    transition:
+      opacity 150ms ease,
+      visibility 150ms ease;
+    pointer-events: none;
+    z-index: 99999;
+  }
+
+  .agent-theme [data-tooltip]:hover::after {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  /* Tooltip arrow */
+  .agent-theme [data-tooltip]::before {
+    content: '';
+    position: absolute;
+    bottom: calc(100% + 2px);
+    left: 50%;
+    transform: translateX(-50%);
+    border: 4px solid transparent;
+    border-top-color: var(--ac-text);
+    opacity: 0;
+    visibility: hidden;
+    transition:
+      opacity 150ms ease,
+      visibility 150ms ease;
+    pointer-events: none;
+    z-index: 99999;
+  }
+
+  .agent-theme [data-tooltip]:hover::before {
+    opacity: 1;
+    visibility: visible;
   }
 }

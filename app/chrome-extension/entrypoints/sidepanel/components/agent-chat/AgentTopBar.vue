@@ -21,10 +21,11 @@
 
       <!-- Project Breadcrumb -->
       <button
-        class="flex items-center gap-1.5 text-xs px-2 py-1 rounded truncate group ac-btn"
+        class="flex items-center gap-1.5 text-xs px-2 py-1 truncate group ac-btn"
         :style="{
           fontFamily: 'var(--ac-font-mono)',
           color: 'var(--ac-text-muted)',
+          borderRadius: 'var(--ac-radius-button)',
         }"
         @click="$emit('toggle:projectMenu')"
       >
@@ -47,10 +48,11 @@
       <!-- Session Breadcrumb -->
       <div class="h-3 w-[1px] flex-shrink-0" :style="{ backgroundColor: 'var(--ac-border)' }" />
       <button
-        class="flex items-center gap-1.5 text-xs px-2 py-1 rounded truncate group ac-btn"
+        class="flex items-center gap-1.5 text-xs px-2 py-1 truncate group ac-btn"
         :style="{
           fontFamily: 'var(--ac-font-mono)',
           color: 'var(--ac-text-subtle)',
+          borderRadius: 'var(--ac-radius-button)',
         }"
         @click="$emit('toggle:sessionMenu')"
       >
@@ -84,10 +86,10 @@
         />
       </div>
 
-      <!-- Settings Icon -->
+      <!-- Theme & Settings Icon (Color Palette) -->
       <button
-        class="p-1 rounded ac-btn ac-hover-text"
-        :style="{ color: 'var(--ac-text-subtle)' }"
+        class="p-1 ac-btn ac-hover-text"
+        :style="{ color: 'var(--ac-text-subtle)', borderRadius: 'var(--ac-radius-button)' }"
         @click="$emit('toggle:settingsMenu')"
       >
         <svg
@@ -95,11 +97,16 @@
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          stroke-width="1.5"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
         >
-          <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" />
+          <circle cx="13.5" cy="6.5" r=".5" fill="currentColor" />
+          <circle cx="17.5" cy="10.5" r=".5" fill="currentColor" />
+          <circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />
+          <circle cx="6.5" cy="12.5" r=".5" fill="currentColor" />
           <path
-            d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"
+            d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"
           />
         </svg>
       </button>

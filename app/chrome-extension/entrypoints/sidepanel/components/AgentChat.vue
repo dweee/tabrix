@@ -29,11 +29,20 @@
           :can-cancel="!!chat.currentRequestId.value"
           :can-send="chat.canSend.value"
           placeholder="Ask Claude to write code..."
+          :engine-name="currentEngineName"
+          :selected-model="currentSessionModel"
+          :available-models="currentAvailableModels"
+          :reasoning-effort="currentReasoningEffort"
+          :available-reasoning-efforts="currentAvailableReasoningEfforts"
           @update:model-value="chat.input.value = $event"
           @submit="handleSend"
           @cancel="chat.cancelCurrentRequest()"
           @attachment:add="handleAttachmentAdd"
           @attachment:remove="attachments.removeAttachment"
+          @model:change="handleComposerModelChange"
+          @reasoning-effort:change="handleComposerReasoningEffortChange"
+          @session:settings="handleComposerOpenSettings"
+          @session:reset="handleComposerReset"
         />
       </template>
     </AgentChatShell>
@@ -52,6 +61,7 @@
       :selected-project-id="projects.selectedProjectId.value"
       :selected-cli="selectedCli"
       :model="model"
+      :reasoning-effort="reasoningEffort"
       :use-ccr="useCcr"
       :project-root-override="projects.projectRootOverride.value"
       :engines="server.engines.value"
@@ -62,6 +72,7 @@
       @project:new="handleNewProject"
       @cli:update="selectedCli = $event"
       @model:update="model = $event"
+      @reasoning-effort:update="reasoningEffort = $event"
       @ccr:update="useCcr = $event"
       @root:update="projects.projectRootOverride.value = $event"
       @save="handleSaveSettings"
@@ -78,8 +89,6 @@
       @session:new="handleNewSession"
       @session:delete="handleDeleteSession"
       @session:rename="handleRenameSession"
-      @session:settings="handleOpenSessionSettings"
-      @session:reset="handleResetSession"
     />
 
     <AgentSettingsMenu
@@ -104,7 +113,7 @@
 
 <script lang="ts" setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import type { AgentStoredMessage, AgentMessage } from 'chrome-mcp-shared';
+import type { AgentStoredMessage, AgentMessage, CodexReasoningEffort } from 'chrome-mcp-shared';
 
 // Composables
 import {
@@ -132,11 +141,16 @@ import {
 import type { SessionSettings } from './agent-chat/AgentSessionSettingsPanel.vue';
 
 // Model utilities
-import { getModelsForCli } from '@/common/agent-models';
+import {
+  getModelsForCli,
+  getCodexReasoningEfforts,
+  getDefaultModelForCli,
+} from '@/common/agent-models';
 
 // Local UI state
 const selectedCli = ref('');
 const model = ref('');
+const reasoningEffort = ref<CodexReasoningEffort>('medium');
 const useCcr = ref(false);
 const isSavingPreference = ref(false);
 
@@ -156,6 +170,20 @@ function getNormalizedModel(): string {
   const isValid = models.some((m) => m.id === trimmedModel);
   return isValid ? trimmedModel : '';
 }
+
+/**
+ * Get normalized reasoning effort that is valid for the current model.
+ * Used when creating/updating codex sessions.
+ */
+function getNormalizedReasoningEffort(): CodexReasoningEffort {
+  if (selectedCli.value !== 'codex') return 'medium';
+  const effectiveModel = getNormalizedModel() || getDefaultModelForCli('codex');
+  const supported = getCodexReasoningEfforts(effectiveModel);
+  return supported.includes(reasoningEffort.value)
+    ? reasoningEffort.value
+    : (supported[supported.length - 1] as CodexReasoningEffort);
+}
+
 const isPickingDirectory = ref(false);
 const projectMenuOpen = ref(false);
 const sessionMenuOpen = ref(false);
@@ -230,6 +258,35 @@ const connectionState = computed(() => {
   if (server.isServerReady.value) return 'ready';
   if (server.nativeConnected.value) return 'connecting';
   return 'disconnected';
+});
+
+// Computed values for AgentComposer
+const currentEngineName = computed(() => sessions.selectedSession.value?.engineName ?? '');
+
+const currentSessionModel = computed(() => {
+  const session = sessions.selectedSession.value;
+  if (!session) return '';
+  // Use session model if set, otherwise use default for the engine
+  return session.model || getDefaultModelForCli(session.engineName);
+});
+
+const currentAvailableModels = computed(() => {
+  const session = sessions.selectedSession.value;
+  if (!session) return [];
+  return getModelsForCli(session.engineName);
+});
+
+const currentReasoningEffort = computed(() => {
+  const session = sessions.selectedSession.value;
+  if (!session || session.engineName !== 'codex') return 'medium' as CodexReasoningEffort;
+  return session.optionsConfig?.codexConfig?.reasoningEffort ?? 'medium';
+});
+
+const currentAvailableReasoningEfforts = computed(() => {
+  const session = sessions.selectedSession.value;
+  if (!session || session.engineName !== 'codex') return [] as readonly CodexReasoningEffort[];
+  const effectiveModel = currentSessionModel.value || getDefaultModelForCli('codex');
+  return getCodexReasoningEfforts(effectiveModel);
 });
 
 // Load chat history for a specific session
@@ -322,9 +379,23 @@ async function handleNewSession(): Promise<void> {
   const projectId = projects.selectedProjectId.value;
   if (!projectId) return;
 
+  const engineName =
+    (selectedCli.value as 'claude' | 'codex' | 'cursor' | 'qwen' | 'glm') || 'claude';
+
+  // Include codex config if using codex engine
+  const optionsConfig =
+    engineName === 'codex'
+      ? {
+          codexConfig: {
+            reasoningEffort: getNormalizedReasoningEffort(),
+          },
+        }
+      : undefined;
+
   const session = await sessions.createSession(projectId, {
-    engineName: (selectedCli.value as 'claude' | 'codex' | 'cursor' | 'qwen' | 'glm') || 'claude',
+    engineName,
     name: `Session ${sessions.sessions.value.length + 1}`,
+    optionsConfig,
   });
 
   if (session) {
@@ -369,6 +440,47 @@ async function handleResetSession(sessionId: string): Promise<void> {
   }
 }
 
+// Composer direct model/reasoning effort change handlers
+async function handleComposerModelChange(modelId: string): Promise<void> {
+  const sessionId = sessions.selectedSessionId.value;
+  if (!sessionId) return;
+
+  await sessions.updateSession(sessionId, { model: modelId || null });
+}
+
+async function handleComposerReasoningEffortChange(effort: CodexReasoningEffort): Promise<void> {
+  const sessionId = sessions.selectedSessionId.value;
+  const session = sessions.selectedSession.value;
+  if (!sessionId || !session) return;
+
+  const existingOptions = session.optionsConfig ?? {};
+  const existingCodexConfig = existingOptions.codexConfig ?? {};
+  await sessions.updateSession(sessionId, {
+    optionsConfig: {
+      ...existingOptions,
+      codexConfig: {
+        ...existingCodexConfig,
+        reasoningEffort: effort,
+      },
+    },
+  });
+}
+
+// Composer session settings/reset handlers (without sessionId parameter)
+function handleComposerOpenSettings(): void {
+  const sessionId = sessions.selectedSessionId.value;
+  if (sessionId) {
+    handleOpenSessionSettings(sessionId);
+  }
+}
+
+async function handleComposerReset(): Promise<void> {
+  const sessionId = sessions.selectedSessionId.value;
+  if (sessionId) {
+    await handleResetSession(sessionId);
+  }
+}
+
 function handleCloseSessionSettings(): void {
   sessionSettingsOpen.value = false;
   currentManagementInfo.value = null;
@@ -384,6 +496,7 @@ async function handleSaveSessionSettings(settings: SessionSettings): Promise<voi
       model: settings.model || null,
       permissionMode: settings.permissionMode || null,
       systemPromptConfig: settings.systemPromptConfig,
+      optionsConfig: settings.optionsConfig,
     });
     sessionSettingsOpen.value = false;
     currentManagementInfo.value = null;
@@ -423,6 +536,17 @@ async function handleNewProject(): Promise<void> {
         selectedCli.value = project.preferredCli ?? '';
         model.value = project.selectedModel ?? '';
         useCcr.value = project.useCcr ?? false;
+
+        // Ensure a default session exists for the new project
+        const engineName =
+          (selectedCli.value as 'claude' | 'codex' | 'cursor' | 'qwen' | 'glm') || 'claude';
+        await sessions.ensureDefaultSession(project.id, engineName);
+
+        // Reconnect SSE and load session history
+        if (sessions.selectedSessionId.value) {
+          server.openEventSource();
+          await loadSessionHistory(sessions.selectedSessionId.value);
+        }
       }
     }
   } finally {
@@ -432,7 +556,11 @@ async function handleNewProject(): Promise<void> {
 }
 
 async function handleSaveSettings(): Promise<void> {
-  if (!projects.selectedProject.value) return;
+  const project = projects.selectedProject.value;
+  if (!project) return;
+
+  // Capture previous CLI to detect changes
+  const previousCli = project.preferredCli ?? '';
 
   isSavingPreference.value = true;
   try {
@@ -445,6 +573,32 @@ async function handleSaveSettings(): Promise<void> {
     // Sync local state with normalized values
     model.value = normalizedModel;
     useCcr.value = normalizedCcr;
+
+    // If CLI changed, create a new empty session with the new CLI
+    const cliChanged = previousCli !== selectedCli.value;
+    if (cliChanged && selectedCli.value) {
+      const engineName = selectedCli.value as 'claude' | 'codex' | 'cursor' | 'qwen' | 'glm';
+
+      // Include codex config if using codex engine
+      const optionsConfig =
+        engineName === 'codex'
+          ? {
+              codexConfig: {
+                reasoningEffort: getNormalizedReasoningEffort(),
+              },
+            }
+          : undefined;
+
+      const session = await sessions.createSession(project.id, {
+        engineName,
+        name: `Session ${sessions.sessions.value.length + 1}`,
+        optionsConfig,
+      });
+
+      if (session) {
+        chat.setMessages([]);
+      }
+    }
   } finally {
     isSavingPreference.value = false;
     closeMenus();

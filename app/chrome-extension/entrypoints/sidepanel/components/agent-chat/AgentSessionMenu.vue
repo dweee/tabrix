@@ -9,55 +9,6 @@
       boxShadow: 'var(--ac-shadow-float, 0 4px 20px -2px rgba(0,0,0,0.1))',
     }"
   >
-    <!-- Current Session Actions (only when a session is selected) -->
-    <template v-if="selectedSession">
-      <div
-        class="px-3 py-1 text-[10px] font-bold uppercase tracking-wider"
-        :style="{ color: 'var(--ac-text-subtle, #a8a29e)' }"
-      >
-        Current Session
-      </div>
-      <div class="px-3 py-2 flex flex-col gap-1">
-        <button
-          class="w-full px-2 py-1.5 text-left text-xs rounded ac-menu-item flex items-center gap-2"
-          :style="{ color: 'var(--ac-text, #1a1a1a)' }"
-          @click="handleOpenSettings"
-        >
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-            />
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-            />
-          </svg>
-          Session settings...
-        </button>
-        <button
-          class="w-full px-2 py-1.5 text-left text-xs rounded ac-menu-item flex items-center gap-2"
-          :style="{ color: 'var(--ac-danger, #dc2626)' }"
-          @click="handleResetConversation"
-        >
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-            />
-          </svg>
-          Reset conversation...
-        </button>
-      </div>
-      <div class="mx-3 my-1 border-t" :style="{ borderColor: 'var(--ac-border, #e5e5e5)' }" />
-    </template>
-
     <!-- Sessions Section -->
     <div
       class="px-3 py-1 text-[10px] font-bold uppercase tracking-wider"
@@ -105,10 +56,11 @@
                   ref="renameInputRef"
                   v-model="editingName"
                   type="text"
-                  class="w-full px-1 py-0.5 text-sm rounded border"
+                  class="w-full px-1 py-0.5 text-sm"
                   :style="{
                     backgroundColor: 'var(--ac-surface, #ffffff)',
-                    borderColor: 'var(--ac-accent, #c87941)',
+                    border: 'var(--ac-border-width, 1px) solid var(--ac-accent, #c87941)',
+                    borderRadius: 'var(--ac-radius-button, 8px)',
                     color: 'var(--ac-text, #1a1a1a)',
                     outline: 'none',
                   }"
@@ -121,10 +73,11 @@
               <template v-else>
                 <span>{{ getSessionDisplayName(session) }}</span>
                 <span
-                  class="text-[10px] px-1.5 py-0.5 rounded"
+                  class="text-[10px] px-1.5 py-0.5"
                   :style="{
                     backgroundColor: getEngineColor(session.engineName),
                     color: '#ffffff',
+                    borderRadius: 'var(--ac-radius-button, 8px)',
                   }"
                 >
                   {{ session.engineName }}
@@ -151,8 +104,11 @@
             <!-- Rename Button -->
             <button
               v-if="editingSessionId !== session.id"
-              class="p-1 rounded ac-btn"
-              :style="{ color: 'var(--ac-text-muted, #6e6e6e)' }"
+              class="p-1 ac-btn"
+              :style="{
+                color: 'var(--ac-text-muted, #6e6e6e)',
+                borderRadius: 'var(--ac-radius-button)',
+              }"
               title="Rename session"
               @click.stop="startRename(session)"
             >
@@ -167,8 +123,11 @@
             </button>
             <!-- Delete Button -->
             <button
-              class="p-1 rounded ac-btn"
-              :style="{ color: 'var(--ac-danger, #dc2626)' }"
+              class="p-1 ac-btn"
+              :style="{
+                color: 'var(--ac-danger, #dc2626)',
+                borderRadius: 'var(--ac-radius-button)',
+              }"
               title="Delete session"
               @click.stop="handleDeleteSession(session.id)"
             >
@@ -220,7 +179,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, computed, nextTick } from 'vue';
+import { ref, nextTick } from 'vue';
 import type { AgentSession } from 'chrome-mcp-shared';
 
 const props = defineProps<{
@@ -237,19 +196,12 @@ const emit = defineEmits<{
   'session:new': [];
   'session:delete': [sessionId: string];
   'session:rename': [sessionId: string, name: string];
-  'session:settings': [sessionId: string];
-  'session:reset': [sessionId: string];
 }>();
 
 // Inline rename state
 const editingSessionId = ref<string | null>(null);
 const editingName = ref('');
 const renameInputRef = ref<HTMLInputElement | null>(null);
-
-// Computed
-const selectedSession = computed(() => {
-  return props.sessions.find((s) => s.id === props.selectedSessionId) || null;
-});
 
 function getEngineColor(engineName: string): string {
   const colors: Record<string, string> = {
@@ -330,23 +282,5 @@ function confirmRename(sessionId: string): void {
 function cancelRename(): void {
   editingSessionId.value = null;
   editingName.value = '';
-}
-
-// Current session actions
-function handleOpenSettings(): void {
-  if (props.selectedSessionId) {
-    emit('session:settings', props.selectedSessionId);
-  }
-}
-
-function handleResetConversation(): void {
-  if (
-    props.selectedSessionId &&
-    confirm(
-      'Reset this conversation? All messages will be deleted and the session will start fresh.',
-    )
-  ) {
-    emit('session:reset', props.selectedSessionId);
-  }
 }
 </script>

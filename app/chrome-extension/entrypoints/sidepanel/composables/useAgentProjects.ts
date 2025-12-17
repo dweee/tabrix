@@ -16,6 +16,18 @@ interface PathValidationResult {
   error?: string;
 }
 
+/**
+ * Normalize path for comparison (handle trailing slashes and separators).
+ */
+function normalizePathForComparison(path: string): string {
+  // Remove trailing slashes and normalize separators
+  return path
+    .trim()
+    .replace(/[/\\]+$/, '')
+    .replace(/\\/g, '/')
+    .toLowerCase();
+}
+
 export interface UseAgentProjectsOptions {
   getServerPort: () => number | null;
   ensureServer: () => Promise<boolean>;
@@ -407,6 +419,30 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
 
       if (!validation.valid) {
         projectError.value = validation.error || 'Invalid path';
+        return null;
+      }
+
+      // Check if project with same path already exists
+      const normalizedPath = normalizePathForComparison(validation.absolute);
+      const existingProject = projects.value.find(
+        (p) => normalizePathForComparison(p.rootPath) === normalizedPath,
+      );
+
+      if (existingProject) {
+        // Project already exists - select it instead of creating a new one
+        const shouldSwitch = confirm(
+          `目录 "${validation.absolute}" 已存在对应的项目：${existingProject.name}\n\n` +
+            `是否切换到该项目？\n\n` +
+            `A project already exists for "${validation.absolute}": ${existingProject.name}\n` +
+            `Switch to that project?`,
+        );
+        if (shouldSwitch) {
+          selectedProjectId.value = existingProject.id;
+          await saveSelectedProjectId();
+          await loadChatHistory(existingProject.id);
+          return existingProject;
+        }
+        // User declined to switch, return null to indicate no action taken
         return null;
       }
 

@@ -538,10 +538,11 @@ function buildThreads(
     const items = [...g.items].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
     // Add streaming status item if running
+    // Use stable ID without Date.now() to prevent component remount on each render
     if (state === 'running') {
       items.push({
         kind: 'status',
-        id: `status:streaming:${requestId ?? 'current'}:${Date.now()}`,
+        id: `status:streaming:${requestId ?? 'current'}`,
         requestId,
         createdAt: new Date().toISOString(),
         status: 'running',

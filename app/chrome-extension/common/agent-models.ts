@@ -5,6 +5,8 @@
  * Based on the pattern from Claudable (other/cweb).
  */
 
+import type { CodexReasoningEffort } from 'chrome-mcp-shared';
+
 // ============================================================
 // Types
 // ============================================================
@@ -14,6 +16,8 @@ export interface ModelDefinition {
   name: string;
   description?: string;
   supportsImages?: boolean;
+  /** Supported reasoning effort levels for Codex models */
+  supportedReasoningEfforts?: readonly CodexReasoningEffort[];
 }
 
 export type AgentCliType = 'claude' | 'codex' | 'cursor' | 'qwen' | 'glm';
@@ -46,65 +50,55 @@ export const CLAUDE_MODELS: ModelDefinition[] = [
 export const CLAUDE_DEFAULT_MODEL = 'claude-sonnet-4-5-20250929';
 
 // ============================================================
-// Codex Models (aligned with other/cweb)
+// Codex Models
 // ============================================================
+
+/** Standard reasoning efforts supported by all models */
+const CODEX_STANDARD_EFFORTS: readonly CodexReasoningEffort[] = ['low', 'medium', 'high'];
+/** Extended reasoning efforts (includes xhigh) - only for gpt-5.2 and gpt-5.1-codex-max */
+const CODEX_EXTENDED_EFFORTS: readonly CodexReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
 
 export const CODEX_MODELS: ModelDefinition[] = [
   {
-    id: 'gpt-5',
-    name: 'GPT-5',
-    description: 'OpenAI flagship reasoning model',
+    id: 'gpt-5.1',
+    name: 'GPT-5.1',
+    description: 'OpenAI high-quality reasoning model',
+    supportedReasoningEfforts: CODEX_STANDARD_EFFORTS,
   },
   {
-    id: 'gpt-4o',
-    name: 'GPT-4o',
-    description: 'General-purpose model with multimodal support',
-    supportsImages: true,
+    id: 'gpt-5.2',
+    name: 'GPT-5.2',
+    description: 'OpenAI flagship reasoning model with extended effort support',
+    supportedReasoningEfforts: CODEX_EXTENDED_EFFORTS,
   },
   {
-    id: 'gpt-4o-mini',
-    name: 'GPT-4o Mini',
-    description: 'Cost-efficient GPT-4o variant',
-    supportsImages: true,
+    id: 'gpt-5.1-codex',
+    name: 'GPT-5.1 Codex',
+    description: 'Coding-optimized model for agent workflows',
+    supportedReasoningEfforts: CODEX_STANDARD_EFFORTS,
   },
   {
-    id: 'o1-preview',
-    name: 'o1 Preview',
-    description: 'OpenAI o1 preview model focused on agent use-cases',
+    id: 'gpt-5.1-codex-max',
+    name: 'GPT-5.1 Codex Max',
+    description: 'Highest quality coding model with extended effort support',
+    supportedReasoningEfforts: CODEX_EXTENDED_EFFORTS,
   },
   {
-    id: 'o1-mini',
-    name: 'o1 Mini',
-    description: 'Lightweight o1 model for faster iterations',
-  },
-  {
-    id: 'o3',
-    name: 'o3',
-    description: 'OpenAI o3 reasoning model',
-  },
-  {
-    id: 'claude-3.5-sonnet',
-    name: 'Claude 3.5 Sonnet (via Codex)',
-    description: 'Anthropic Claude via Codex router',
-  },
-  {
-    id: 'claude-3-haiku',
-    name: 'Claude 3 Haiku (via Codex)',
-    description: 'Anthropic Haiku model routed through Codex',
+    id: 'gpt-5.1-codex-mini',
+    name: 'GPT-5.1 Codex Mini',
+    description: 'Fast, cost-efficient coding model',
+    supportedReasoningEfforts: CODEX_STANDARD_EFFORTS,
   },
 ];
 
-export const CODEX_DEFAULT_MODEL = 'gpt-5';
+export const CODEX_DEFAULT_MODEL = 'gpt-5.1';
 
-// Codex model alias normalization (aligned with other/cweb)
+// Codex model alias normalization
 const CODEX_ALIAS_MAP: Record<string, string> = {
-  gpt5: 'gpt-5',
-  gpt_5: 'gpt-5',
-  'gpt-5.0': 'gpt-5',
-  'gpt-4o-mini-high': 'gpt-4o-mini',
-  'gpt-4o-mini-low': 'gpt-4o-mini',
-  'claude-sonnet-3.5': 'claude-3.5-sonnet',
-  'claude35-sonnet': 'claude-3.5-sonnet',
+  gpt5: 'gpt-5.1',
+  gpt_5: 'gpt-5.1',
+  'gpt-5': 'gpt-5.1',
+  'gpt-5.0': 'gpt-5.1',
 };
 
 const CODEX_KNOWN_IDS = new Set(CODEX_MODELS.map((model) => model.id));
@@ -137,6 +131,24 @@ export function normalizeCodexModelId(model?: string | null): string {
   }
 
   return CODEX_DEFAULT_MODEL;
+}
+
+/**
+ * Get supported reasoning efforts for a Codex model.
+ * Returns standard efforts (low/medium/high) for unknown models.
+ */
+export function getCodexReasoningEfforts(modelId?: string | null): readonly CodexReasoningEffort[] {
+  const normalized = normalizeCodexModelId(modelId);
+  const model = CODEX_MODELS.find((m) => m.id === normalized);
+  return model?.supportedReasoningEfforts ?? CODEX_STANDARD_EFFORTS;
+}
+
+/**
+ * Check if a model supports xhigh reasoning effort.
+ */
+export function supportsXhighEffort(modelId?: string | null): boolean {
+  const efforts = getCodexReasoningEfforts(modelId);
+  return efforts.includes('xhigh');
 }
 
 // ============================================================

@@ -35,8 +35,8 @@ defineProps<{
 <style scoped>
 .markdown-content :deep(pre) {
   background-color: var(--ac-code-bg);
-  border: 1px solid var(--ac-code-border);
-  border-radius: 6px;
+  border: var(--ac-border-width) solid var(--ac-code-border);
+  border-radius: var(--ac-radius-inner);
   padding: 12px;
   overflow-x: auto;
 }
@@ -74,7 +74,7 @@ defineProps<{
 }
 
 .markdown-content :deep(blockquote) {
-  border-left: 3px solid var(--ac-border);
+  border-left: var(--ac-border-width-strong) solid var(--ac-border);
   padding-left: 1em;
   margin: 0.5em 0;
   color: var(--ac-text-muted);
@@ -97,7 +97,7 @@ defineProps<{
 
 .markdown-content :deep(th),
 .markdown-content :deep(td) {
-  border: 1px solid var(--ac-border);
+  border: var(--ac-border-width) solid var(--ac-border);
   padding: 0.5em;
   text-align: left;
 }
@@ -108,13 +108,13 @@ defineProps<{
 
 .markdown-content :deep(hr) {
   border: none;
-  border-top: 1px solid var(--ac-border);
+  border-top: var(--ac-border-width) solid var(--ac-border);
   margin: 1em 0;
 }
 
 .markdown-content :deep(img) {
   max-width: 100%;
   height: auto;
-  border-radius: 4px;
+  border-radius: var(--ac-radius-inner);
 }
 </style>
