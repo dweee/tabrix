@@ -247,6 +247,21 @@
         </div>
       </div>
 
+      <div class="section">
+        <h2 class="section-title">网页编辑器</h2>
+        <div class="rr-grid">
+          <div class="rr-controls" style="width: 100%">
+            <button
+              class="semantic-engine-button"
+              @click="toggleWebEditor"
+              title="在当前页面切换编辑模式（可用快捷键 Ctrl/Command + Shift + E）"
+            >
+              切换编辑模式
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Model Cache Management Section -->
       <ModelCacheManagement
         :cache-stats="cacheStats"
@@ -581,6 +596,14 @@ async function openElementMarkerSidepanel() {
     }
   } catch (e) {
     console.warn('打开元素标注管理失败:', e);
+  }
+}
+
+async function toggleWebEditor() {
+  try {
+    await chrome.runtime.sendMessage({ type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TOGGLE });
+  } catch (error) {
+    console.warn('切换网页编辑模式失败:', error);
   }
 }
 

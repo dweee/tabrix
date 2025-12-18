@@ -51,6 +51,9 @@ export const BACKGROUND_MESSAGE_TYPES = {
   ELEMENT_MARKER_UPDATE: 'element_marker_update',
   ELEMENT_MARKER_DELETE: 'element_marker_delete',
   ELEMENT_MARKER_VALIDATE: 'element_marker_validate',
+  // Web editor (in-page visual editing)
+  WEB_EDITOR_TOGGLE: 'web_editor_toggle',
+  WEB_EDITOR_APPLY: 'web_editor_apply',
 } as const;
 
 // Offscreen message types

@@ -7,6 +7,7 @@ import { initStorageManagerListener } from './storage-manager';
 import { cleanupModelCache } from '@/utils/semantic-similarity-engine';
 import { initRecordReplayListeners } from './record-replay';
 import { initElementMarkerListeners } from './element-marker';
+import { initWebEditorListeners } from './web-editor';
 
 /**
  * Background script entry point
@@ -21,6 +22,8 @@ export default defineBackground(() => {
   initRecordReplayListeners();
   // Element marker: context menu + CRUD listeners
   initElementMarkerListeners();
+  // Web editor: toggle edit-mode overlay
+  initWebEditorListeners();
 
   // Conditionally initialize semantic similarity engine if model cache exists
   initializeSemanticEngineIfCached()

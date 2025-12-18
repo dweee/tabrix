@@ -88,6 +88,10 @@ export default defineConfig({
         suggested_key: { default: 'Ctrl+Shift+O' },
         description: 'Open workflow sidepanel',
       },
+      toggle_web_editor: {
+        suggested_key: { default: 'Ctrl+Shift+E', mac: 'Command+Shift+E' },
+        description: 'Toggle Web Editor mode',
+      },
     },
     web_accessible_resources: [
       {
