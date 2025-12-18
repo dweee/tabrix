@@ -1,8 +1,25 @@
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import { WEB_EDITOR_V2_ACTIONS, WEB_EDITOR_V1_ACTIONS } from '@/common/web-editor-types';
 
 const CONTEXT_MENU_ID = 'web_editor_toggle';
 const COMMAND_KEY = 'toggle_web_editor';
 const DEFAULT_NATIVE_SERVER_PORT = 12306;
+
+/**
+ * Web Editor version configuration
+ * - v1: Legacy inject-scripts/web-editor.js (IIFE, ~850 lines)
+ * - v2: New TypeScript-based web-editor-v2.js (WXT unlisted script)
+ *
+ * Set USE_WEB_EDITOR_V2 to true to enable v2.
+ * This flag allows gradual rollout and easy rollback.
+ */
+const USE_WEB_EDITOR_V2 = true;
+
+/** Script path for v1 (legacy) */
+const V1_SCRIPT_PATH = 'inject-scripts/web-editor.js';
+
+/** Script path for v2 (WXT unlisted script output) */
+const V2_SCRIPT_PATH = 'web-editor-v2.js';
 
 type WebEditorInstructionType = 'update_text' | 'update_style';
 
@@ -179,40 +196,69 @@ async function ensureContextMenu(): Promise<void> {
   }
 }
 
+/**
+ * Get the appropriate action constants based on version
+ */
+function getActions() {
+  return USE_WEB_EDITOR_V2 ? WEB_EDITOR_V2_ACTIONS : WEB_EDITOR_V1_ACTIONS;
+}
+
+/**
+ * Ensure the web editor script is injected into the tab
+ * Supports both v1 (legacy) and v2 (new) versions
+ *
+ * V1 and V2 use different action names to avoid conflicts:
+ * - V1: web_editor_ping, web_editor_toggle, etc.
+ * - V2: web_editor_ping_v2, web_editor_toggle_v2, etc.
+ */
 async function ensureEditorInjected(tabId: number): Promise<void> {
+  const scriptPath = USE_WEB_EDITOR_V2 ? V2_SCRIPT_PATH : V1_SCRIPT_PATH;
+  const logPrefix = USE_WEB_EDITOR_V2 ? '[WebEditorV2]' : '[WebEditor]';
+  const actions = getActions();
+
+  // Try to ping existing instance using version-specific action
   try {
-    const pong: any = await chrome.tabs.sendMessage(
+    const pong: { status?: string; version?: number } = await chrome.tabs.sendMessage(
       tabId,
-      { action: 'web_editor_ping' } as any,
-      { frameId: 0 } as any,
+      { action: actions.PING },
+      { frameId: 0 },
     );
-    if (pong?.status === 'pong') return;
+
+    if (pong?.status === 'pong') {
+      // Already injected with correct version
+      return;
+    }
   } catch {
-    // Fallthrough to executeScript
+    // No existing instance, fallthrough to inject
   }
 
+  // Inject the script
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ['inject-scripts/web-editor.js'],
+      files: [scriptPath],
       world: 'ISOLATED',
-    } as any);
+    });
+    console.log(`${logPrefix} Script injected successfully`);
   } catch (error) {
-    console.warn('[WebEditor] Failed to inject editor script:', error);
+    console.warn(`${logPrefix} Failed to inject editor script:`, error);
   }
 }
 
 async function toggleEditorInTab(tabId: number): Promise<{ active?: boolean }> {
   await ensureEditorInjected(tabId);
+  const logPrefix = USE_WEB_EDITOR_V2 ? '[WebEditorV2]' : '[WebEditor]';
+  const actions = getActions();
+
   try {
-    const resp: any = await chrome.tabs.sendMessage(
+    const resp: { active?: boolean } = await chrome.tabs.sendMessage(
       tabId,
-      { action: 'web_editor_toggle' } as any,
-      { frameId: 0 } as any,
+      { action: actions.TOGGLE },
+      { frameId: 0 },
     );
     return { active: typeof resp?.active === 'boolean' ? resp.active : undefined };
   } catch (error) {
-    console.warn('[WebEditor] Failed to toggle editor in tab:', error);
+    console.warn(`${logPrefix} Failed to toggle editor in tab:`, error);
     return {};
   }
 }
