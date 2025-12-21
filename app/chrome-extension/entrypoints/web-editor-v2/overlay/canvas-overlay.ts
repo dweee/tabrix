@@ -16,7 +16,19 @@
  * - Pixel-aligned strokes for crisp lines
  */
 
-import { WEB_EDITOR_V2_COLORS, WEB_EDITOR_V2_LOG_PREFIX } from '../constants';
+import {
+  WEB_EDITOR_V2_COLORS,
+  WEB_EDITOR_V2_DISTANCE_LABEL_FONT,
+  WEB_EDITOR_V2_DISTANCE_LABEL_OFFSET,
+  WEB_EDITOR_V2_DISTANCE_LABEL_PADDING_X,
+  WEB_EDITOR_V2_DISTANCE_LABEL_PADDING_Y,
+  WEB_EDITOR_V2_DISTANCE_LABEL_RADIUS,
+  WEB_EDITOR_V2_DISTANCE_LINE_WIDTH,
+  WEB_EDITOR_V2_DISTANCE_TICK_SIZE,
+  WEB_EDITOR_V2_GUIDE_LINE_WIDTH,
+  WEB_EDITOR_V2_INSERTION_LINE_WIDTH,
+  WEB_EDITOR_V2_LOG_PREFIX,
+} from '../constants';
 import { Disposer } from '../utils/disposables';
 
 // =============================================================================
@@ -25,6 +37,34 @@ import { Disposer } from '../utils/disposables';
 
 /** Rectangle in viewport coordinates */
 export type ViewportRect = Pick<DOMRectReadOnly, 'left' | 'top' | 'width' | 'height'>;
+
+/** Line segment in viewport coordinates */
+export interface ViewportLine {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+/** Distance label kind (Phase 4.3) */
+export type DistanceLabelKind = 'sibling' | 'viewport';
+
+/** Axis of the measured distance (Phase 4.3) */
+export type DistanceLabelAxis = 'x' | 'y';
+
+/** Distance label rendered on overlay (Phase 4.3) */
+export interface DistanceLabel {
+  /** Source of this measurement */
+  readonly kind: DistanceLabelKind;
+  /** 'x' => horizontal distance, 'y' => vertical distance */
+  readonly axis: DistanceLabelAxis;
+  /** Rounded px value */
+  readonly value: number;
+  /** Display text (e.g. "12px") */
+  readonly text: string;
+  /** Measurement line segment */
+  readonly line: ViewportLine;
+}
 
 /** Box style configuration */
 export interface BoxStyle {
@@ -52,6 +92,14 @@ export interface CanvasOverlay {
   setHoverRect(rect: ViewportRect | null): void;
   /** Update selection highlight */
   setSelectionRect(rect: ViewportRect | null): void;
+  /** Update drag ghost highlight (Phase 2.4) */
+  setDragGhostRect(rect: ViewportRect | null): void;
+  /** Update insertion indicator line (Phase 2.4) */
+  setInsertionLine(line: ViewportLine | null): void;
+  /** Update alignment guide lines (Phase 4.2) */
+  setGuideLines(lines: readonly ViewportLine[] | null): void;
+  /** Update distance labels (Phase 4.3) */
+  setDistanceLabels(labels: readonly DistanceLabel[] | null): void;
   /** Dispose and cleanup */
   dispose(): void;
 }
@@ -83,6 +131,12 @@ const BOX_STYLES = {
     lineWidth: 2,
     dashPattern: [],
   },
+  dragGhost: {
+    strokeColor: WEB_EDITOR_V2_COLORS.selectionBorder,
+    fillColor: WEB_EDITOR_V2_COLORS.dragGhost,
+    lineWidth: 2,
+    dashPattern: [8, 6],
+  },
 } satisfies Record<string, BoxStyle>;
 
 // =============================================================================
@@ -101,6 +155,41 @@ function isValidRect(rect: ViewportRect | null): rect is ViewportRect {
     isFinitePositive(rect.width) &&
     isFinitePositive(rect.height)
   );
+}
+
+function isValidLine(line: ViewportLine | null): line is ViewportLine {
+  if (!line) return false;
+  return (
+    Number.isFinite(line.x1) &&
+    Number.isFinite(line.y1) &&
+    Number.isFinite(line.x2) &&
+    Number.isFinite(line.y2)
+  );
+}
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * Build a rounded rectangle path (without beginning a new path)
+ */
+function buildRoundedRectPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): void {
+  const radius = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + w, y, x + w, y + h, radius);
+  ctx.arcTo(x + w, y + h, x, y + h, radius);
+  ctx.arcTo(x, y + h, x, y, radius);
+  ctx.arcTo(x, y, x + w, y, radius);
+  ctx.closePath();
 }
 
 // =============================================================================
@@ -141,15 +230,18 @@ export function createCanvasOverlay(options: CanvasOverlayOptions): CanvasOverla
   disposer.add(() => canvas.remove());
 
   // Get 2D context with performance options
-  const ctx = canvas.getContext('2d', {
+  const ctxOrNull = canvas.getContext('2d', {
     alpha: true,
     desynchronized: true, // Lower latency on supported browsers
   });
 
-  if (!ctx) {
+  if (!ctxOrNull) {
     disposer.dispose();
     throw new Error(`${WEB_EDITOR_V2_LOG_PREFIX} Failed to get canvas 2D context`);
   }
+
+  // Capture as non-null after guard (TypeScript needs explicit assignment)
+  const ctx: CanvasRenderingContext2D = ctxOrNull;
 
   // ==========================================================================
   // State
@@ -157,6 +249,10 @@ export function createCanvasOverlay(options: CanvasOverlayOptions): CanvasOverla
 
   let hoverRect: ViewportRect | null = null;
   let selectionRect: ViewportRect | null = null;
+  let dragGhostRect: ViewportRect | null = null;
+  let insertionLine: ViewportLine | null = null;
+  let guideLines: readonly ViewportLine[] | null = null;
+  let distanceLabels: readonly DistanceLabel[] | null = null;
 
   let viewportWidth = 1;
   let viewportHeight = 1;
@@ -253,6 +349,202 @@ export function createCanvasOverlay(options: CanvasOverlayOptions): CanvasOverla
     ctx.restore();
   }
 
+  /**
+   * Draw an insertion indicator line (horizontal)
+   */
+  function drawInsertionLine(line: ViewportLine | null): void {
+    if (!isValidLine(line)) return;
+
+    ctx.save();
+
+    ctx.lineWidth = WEB_EDITOR_V2_INSERTION_LINE_WIDTH;
+    ctx.strokeStyle = WEB_EDITOR_V2_COLORS.insertionLine;
+    ctx.setLineDash([]);
+    ctx.lineCap = 'round';
+
+    // Pixel-align for crisp strokes
+    const x1 = Math.round(line.x1) + 0.5;
+    const y1 = Math.round(line.y1) + 0.5;
+    const x2 = Math.round(line.x2) + 0.5;
+    const y2 = Math.round(line.y2) + 0.5;
+
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  /**
+   * Draw alignment guide lines (Phase 4.2)
+   *
+   * Guide lines indicate snap alignments during resize operations.
+   * Multiple lines may be drawn simultaneously (one per axis).
+   */
+  function drawGuideLines(lines: readonly ViewportLine[] | null): void {
+    if (!lines || lines.length === 0) return;
+
+    ctx.save();
+
+    ctx.lineWidth = WEB_EDITOR_V2_GUIDE_LINE_WIDTH;
+    ctx.strokeStyle = WEB_EDITOR_V2_COLORS.guideLine;
+    ctx.setLineDash([]);
+    ctx.lineCap = 'round';
+
+    // Batch all lines into single path for performance
+    ctx.beginPath();
+    for (const line of lines) {
+      if (!isValidLine(line)) continue;
+
+      // Pixel-align for crisp strokes
+      const x1 = Math.round(line.x1) + 0.5;
+      const y1 = Math.round(line.y1) + 0.5;
+      const x2 = Math.round(line.x2) + 0.5;
+      const y2 = Math.round(line.y2) + 0.5;
+
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+    }
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  /**
+   * Draw distance labels (Phase 4.3)
+   *
+   * Renders:
+   * - Measurement line (pink, matches guide line color)
+   * - End ticks (perpendicular marks at each end)
+   * - Text pill (dark translucent background with white text)
+   */
+  function drawDistanceLabels(labels: readonly DistanceLabel[] | null): void {
+    if (!labels || labels.length === 0) return;
+
+    ctx.save();
+
+    // Draw measurement lines and ticks first (batched for performance)
+    ctx.lineWidth = WEB_EDITOR_V2_DISTANCE_LINE_WIDTH;
+    ctx.strokeStyle = WEB_EDITOR_V2_COLORS.guideLine;
+    ctx.setLineDash([]);
+    ctx.lineCap = 'round';
+
+    const tick = WEB_EDITOR_V2_DISTANCE_TICK_SIZE;
+
+    ctx.beginPath();
+    for (const label of labels) {
+      const line = label.line;
+      if (!isValidLine(line)) continue;
+
+      // Pixel-align for crisp 1px strokes
+      const x1 = Math.round(line.x1) + 0.5;
+      const y1 = Math.round(line.y1) + 0.5;
+      const x2 = Math.round(line.x2) + 0.5;
+      const y2 = Math.round(line.y2) + 0.5;
+
+      // Draw measurement line
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+
+      // Draw end ticks (perpendicular to measurement direction)
+      if (label.axis === 'x') {
+        // Horizontal distance: vertical ticks at each end
+        ctx.moveTo(x1, y1 - tick);
+        ctx.lineTo(x1, y1 + tick);
+        ctx.moveTo(x2, y2 - tick);
+        ctx.lineTo(x2, y2 + tick);
+      } else {
+        // Vertical distance: horizontal ticks at each end
+        ctx.moveTo(x1 - tick, y1);
+        ctx.lineTo(x1 + tick, y1);
+        ctx.moveTo(x2 - tick, y2);
+        ctx.lineTo(x2 + tick, y2);
+      }
+    }
+    ctx.stroke();
+
+    // Draw text pills (each label gets its own pill)
+    ctx.font = WEB_EDITOR_V2_DISTANCE_LABEL_FONT;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    for (const label of labels) {
+      const line = label.line;
+      if (!isValidLine(line)) continue;
+
+      // Measure text dimensions
+      const metrics = ctx.measureText(label.text);
+      const textWidth = metrics.width;
+      // Use actualBoundingBox if available, fallback to estimated values
+      const ascent = Number.isFinite(metrics.actualBoundingBoxAscent)
+        ? metrics.actualBoundingBoxAscent
+        : 8;
+      const descent = Number.isFinite(metrics.actualBoundingBoxDescent)
+        ? metrics.actualBoundingBoxDescent
+        : 3;
+      const textHeight = ascent + descent;
+
+      // Calculate pill dimensions
+      const pillWidth = Math.ceil(textWidth + WEB_EDITOR_V2_DISTANCE_LABEL_PADDING_X * 2);
+      const pillHeight = Math.ceil(textHeight + WEB_EDITOR_V2_DISTANCE_LABEL_PADDING_Y * 2);
+
+      // Position pill at midpoint of measurement line with offset
+      const midX = (line.x1 + line.x2) / 2;
+      const midY = (line.y1 + line.y2) / 2;
+      const offset = WEB_EDITOR_V2_DISTANCE_LABEL_OFFSET;
+
+      let pillX = midX - pillWidth / 2;
+      let pillY = midY - pillHeight / 2;
+
+      // Position based on axis with auto-flip if out of viewport
+      if (label.axis === 'x') {
+        // Horizontal distance: prefer above the line
+        pillY = midY - pillHeight / 2 - offset;
+        if (pillY < 0) {
+          pillY = midY + offset - pillHeight / 2;
+        }
+      } else {
+        // Vertical distance: prefer right of the line
+        pillX = midX + offset - pillWidth / 2;
+        if (pillX + pillWidth > viewportWidth) {
+          pillX = midX - offset - pillWidth / 2;
+        }
+      }
+
+      // Clamp within viewport bounds (handle edge case where pill > viewport)
+      const maxPillX = Math.max(2, viewportWidth - pillWidth - 2);
+      const maxPillY = Math.max(2, viewportHeight - pillHeight - 2);
+      pillX = clamp(pillX, 2, maxPillX);
+      pillY = clamp(pillY, 2, maxPillY);
+
+      // Draw pill background
+      ctx.save();
+      ctx.fillStyle = WEB_EDITOR_V2_COLORS.distanceLabelBg;
+      ctx.strokeStyle = WEB_EDITOR_V2_COLORS.distanceLabelBorder;
+      ctx.lineWidth = 1;
+
+      ctx.beginPath();
+      buildRoundedRectPath(
+        ctx,
+        pillX,
+        pillY,
+        pillWidth,
+        pillHeight,
+        WEB_EDITOR_V2_DISTANCE_LABEL_RADIUS,
+      );
+      ctx.fill();
+      ctx.stroke();
+
+      // Draw text
+      ctx.fillStyle = WEB_EDITOR_V2_COLORS.distanceLabelText;
+      ctx.fillText(label.text, pillX + pillWidth / 2, pillY + pillHeight / 2);
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
   // ==========================================================================
   // Public API
   // ==========================================================================
@@ -276,6 +568,10 @@ export function createCanvasOverlay(options: CanvasOverlayOptions): CanvasOverla
     clearCanvas();
     drawBox(hoverRect, BOX_STYLES.hover);
     drawBox(selectionRect, BOX_STYLES.selection);
+    drawBox(dragGhostRect, BOX_STYLES.dragGhost);
+    drawInsertionLine(insertionLine);
+    drawGuideLines(guideLines);
+    drawDistanceLabels(distanceLabels);
 
     // If something marked dirty during render, schedule another frame
     if (dirty) {
@@ -293,9 +589,33 @@ export function createCanvasOverlay(options: CanvasOverlayOptions): CanvasOverla
     markDirty();
   }
 
+  function setDragGhostRect(rect: ViewportRect | null): void {
+    dragGhostRect = rect;
+    markDirty();
+  }
+
+  function setInsertionLine(line: ViewportLine | null): void {
+    insertionLine = line;
+    markDirty();
+  }
+
+  function setGuideLines(lines: readonly ViewportLine[] | null): void {
+    guideLines = lines && lines.length > 0 ? lines : null;
+    markDirty();
+  }
+
+  function setDistanceLabels(labels: readonly DistanceLabel[] | null): void {
+    distanceLabels = labels && labels.length > 0 ? labels : null;
+    markDirty();
+  }
+
   function clear(): void {
     hoverRect = null;
     selectionRect = null;
+    dragGhostRect = null;
+    insertionLine = null;
+    guideLines = null;
+    distanceLabels = null;
     markDirty();
   }
 
@@ -341,6 +661,10 @@ export function createCanvasOverlay(options: CanvasOverlayOptions): CanvasOverla
     clear,
     setHoverRect,
     setSelectionRect,
+    setDragGhostRect,
+    setInsertionLine,
+    setGuideLines,
+    setDistanceLabels,
     dispose: () => disposer.dispose(),
   };
 }

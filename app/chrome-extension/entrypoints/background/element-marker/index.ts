@@ -62,16 +62,42 @@ async function ensureContextMenu() {
   }
 }
 
-async function injectMarkerHelper(tabId: number) {
+/**
+ * Check if element-marker.js is already injected in the tab
+ * Uses a short timeout to avoid hanging on unresponsive tabs
+ */
+async function isMarkerInjected(tabId: number): Promise<boolean> {
   try {
-    await chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
-      files: ['inject-scripts/element-marker.js'],
-      world: 'ISOLATED',
-    } as any);
-  } catch (e) {
-    // If already injected, continue
+    const response = await Promise.race([
+      chrome.tabs.sendMessage(tabId, { action: 'element_marker_ping' }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 300)),
+    ]);
+    return response?.status === 'pong';
+  } catch {
+    return false;
   }
+}
+
+/**
+ * Inject element-marker.js into the tab if not already injected
+ */
+async function injectMarkerHelper(tabId: number) {
+  // Check if already injected via ping
+  const alreadyInjected = await isMarkerInjected(tabId);
+
+  if (!alreadyInjected) {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        files: ['inject-scripts/element-marker.js'],
+        world: 'ISOLATED',
+      } as any);
+    } catch (e) {
+      // Script injection may fail on some pages (e.g., chrome:// URLs)
+      console.warn('ElementMarker: script injection failed:', e);
+    }
+  }
+
   try {
     await chrome.tabs.sendMessage(tabId, { action: 'element_marker_start' } as any);
   } catch (e) {

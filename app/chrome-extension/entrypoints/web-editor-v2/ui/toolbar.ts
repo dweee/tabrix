@@ -1,15 +1,19 @@
 /**
- * Toolbar UI (Phase 1.10)
+ * Toolbar UI (Phase 1.10, extended in Phase 5.5)
  *
- * Shadow DOM toolbar with Apply / Undo / Redo / Close buttons.
+ * Shadow DOM toolbar with Apply / Structure / Undo / Redo / Close buttons.
  * Displays transaction counts and operation status.
  *
  * Design:
  * - Fixed position at top of viewport
  * - Uses CSS classes defined in shadow-host.ts
  * - Disposer pattern for cleanup
+ *
+ * Phase 5.5 additions:
+ * - Structure dropdown menu (Group/Stack/Ungroup/Delete/Duplicate)
  */
 
+import type { StructureOperationData } from '@/common/web-editor-types';
 import { Disposer } from '../utils/disposables';
 
 // =============================================================================
@@ -20,11 +24,29 @@ import { Disposer } from '../utils/disposables';
 export type ToolbarDock = 'top' | 'bottom';
 
 /** Operation status */
-export type ToolbarStatus = 'idle' | 'applying' | 'success' | 'error';
+export type ToolbarStatus =
+  | 'idle'
+  | 'applying'
+  | 'success'
+  | 'error'
+  | 'running'
+  | 'starting'
+  | 'locating'
+  | 'completed'
+  | 'failed'
+  | 'timeout'
+  | 'cancelled'
+  // Phase 4.8: HMR consistency verification statuses
+  | 'verifying'
+  | 'verified'
+  | 'mismatch'
+  | 'lost'
+  | 'uncertain';
 
 /** Result from apply operation */
 export interface ApplyResult {
   requestId?: string;
+  sessionId?: string;
 }
 
 /** Toolbar creation options */
@@ -35,6 +57,21 @@ export interface ToolbarOptions {
   dock?: ToolbarDock;
   /** Called when Apply button is clicked */
   onApply?: () => void | ApplyResult | Promise<void | ApplyResult>;
+  /**
+   * Pre-flight check to block Apply.
+   * Return a non-empty string to disable the Apply button and show as tooltip.
+   * Called during render to update button state.
+   */
+  getApplyBlockReason?: () => string | undefined;
+  /**
+   * Get the currently selected element (Phase 5.5).
+   * Used to enable/disable Structure actions.
+   */
+  getSelectedElement?: () => Element | null;
+  /**
+   * Called when a Structure action is requested (Phase 5.5).
+   */
+  onStructure?: (data: StructureOperationData) => void;
   /** Called when Undo button is clicked */
   onUndo?: () => void;
   /** Called when Redo button is clicked */
@@ -85,11 +122,66 @@ function formatStatusMessage(base: string, result?: ApplyResult): string {
   return req ? `${base} (${req})` : base;
 }
 
+/**
+ * Create wand (spark) SVG icon for toolbar minimize/expand button
+ */
+function createWandIcon(): SVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 20 20');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+
+  // Wand diagonal line
+  const wand = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  wand.setAttribute('d', 'M4 16l8-8M6 18l-2-2M12 8l2 2');
+  wand.setAttribute('stroke', 'currentColor');
+  wand.setAttribute('stroke-width', '2');
+  wand.setAttribute('stroke-linecap', 'round');
+  wand.setAttribute('stroke-linejoin', 'round');
+
+  // Spark effect at tip
+  const spark = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  spark.setAttribute('d', 'M14 3v3M12.5 4.5h3');
+  spark.setAttribute('stroke', 'currentColor');
+  spark.setAttribute('stroke-width', '2');
+  spark.setAttribute('stroke-linecap', 'round');
+  spark.setAttribute('stroke-linejoin', 'round');
+
+  svg.append(wand, spark);
+  return svg;
+}
+
 // =============================================================================
 // Status Reset Timer
 // =============================================================================
 
 const STATUS_RESET_DELAY_MS = 2400;
+
+// Status categories for UI styling
+const SUCCESS_STATUSES: ToolbarStatus[] = ['success', 'completed', 'verified'];
+const ERROR_STATUSES: ToolbarStatus[] = [
+  'error',
+  'failed',
+  'timeout',
+  'cancelled',
+  'mismatch',
+  'lost',
+  'uncertain',
+];
+const PROGRESS_STATUSES: ToolbarStatus[] = [
+  'applying',
+  'running',
+  'starting',
+  'locating',
+  'verifying',
+];
+
+function getStatusCategory(status: ToolbarStatus): 'idle' | 'progress' | 'success' | 'error' {
+  if (SUCCESS_STATUSES.includes(status)) return 'success';
+  if (ERROR_STATUSES.includes(status)) return 'error';
+  if (PROGRESS_STATUSES.includes(status)) return 'progress';
+  return 'idle';
+}
 
 // =============================================================================
 // Implementation
@@ -109,6 +201,7 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
   let statusMessage = '';
   let applying = false;
   let resetTimer: number | null = null;
+  let minimized = false;
 
   // ==========================================================================
   // DOM Structure
@@ -119,6 +212,7 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
   root.className = 'we-toolbar';
   root.dataset.position = dock;
   root.dataset.status = status;
+  root.dataset.minimized = 'false';
   root.setAttribute('role', 'toolbar');
   root.setAttribute('aria-label', 'Web Editor Toolbar');
 
@@ -181,7 +275,203 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
   closeBtn.textContent = 'Close';
   closeBtn.setAttribute('aria-label', 'Close Web Editor');
 
-  right.append(applyBtn, undoBtn, redoBtn, closeBtn);
+  // Minimize/expand button
+  const minimizeBtn = document.createElement('button');
+  minimizeBtn.type = 'button';
+  minimizeBtn.className = 'we-icon-btn';
+  minimizeBtn.setAttribute('aria-label', 'Minimize toolbar');
+  minimizeBtn.title = 'Minimize';
+  minimizeBtn.append(createWandIcon());
+
+  // ==========================================================================
+  // Structure Dropdown (Phase 5.5)
+  // ==========================================================================
+
+  type StructureMenuAction = 'group' | 'stack' | 'ungroup' | 'duplicate' | 'delete';
+
+  // Tags that cannot be structure operation targets
+  const DISALLOWED_TARGET_TAGS = new Set(['HTML', 'BODY', 'HEAD']);
+  // Tags that cannot be parent containers for structure operations (BODY is allowed)
+  const DISALLOWED_CONTAINER_TAGS = new Set(['HTML', 'HEAD']);
+  const DEFAULT_STACK_GAP = '10px';
+
+  // Structure dropdown wrapper
+  const structureWrap = document.createElement('div');
+  structureWrap.className = 'we-structure-wrap';
+  structureWrap.style.position = 'relative';
+  structureWrap.style.display = 'inline-flex';
+
+  // Structure trigger button
+  const structureBtn = document.createElement('button');
+  structureBtn.type = 'button';
+  structureBtn.className = 'we-btn';
+  structureBtn.textContent = 'Structure';
+  structureBtn.setAttribute('aria-label', 'Structure operations');
+  structureBtn.setAttribute('aria-haspopup', 'menu');
+  structureBtn.setAttribute('aria-expanded', 'false');
+
+  // Structure dropdown menu
+  const structureMenu = document.createElement('div');
+  structureMenu.className = 'we-structure-menu';
+  structureMenu.setAttribute('role', 'menu');
+  structureMenu.setAttribute('aria-label', 'Structure actions');
+  Object.assign(structureMenu.style, {
+    position: 'absolute',
+    top: 'calc(100% + 8px)',
+    right: '0',
+    minWidth: '160px',
+    padding: '6px',
+    background: 'rgba(255, 255, 255, 0.98)',
+    border: '1px solid rgba(148, 163, 184, 0.45)',
+    borderRadius: '10px',
+    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 10px 20px -5px rgba(0, 0, 0, 0.12)',
+    backdropFilter: 'blur(8px)',
+    display: 'none',
+    flexDirection: 'column',
+    gap: '4px',
+    zIndex: '10001',
+  });
+
+  structureWrap.append(structureBtn, structureMenu);
+
+  // Build StructureOperationData from menu action
+  function buildStructureData(action: StructureMenuAction): StructureOperationData {
+    switch (action) {
+      case 'group':
+        return { action: 'wrap', wrapperTag: 'div' };
+      case 'stack':
+        return {
+          action: 'wrap',
+          wrapperTag: 'div',
+          wrapperStyles: {
+            display: 'flex',
+            'flex-direction': 'column',
+            gap: DEFAULT_STACK_GAP,
+          },
+        };
+      case 'ungroup':
+        return { action: 'unwrap' };
+      case 'duplicate':
+        return { action: 'duplicate' };
+      case 'delete':
+        return { action: 'delete' };
+    }
+  }
+
+  // Create menu item button
+  function createStructureMenuItem(action: StructureMenuAction, label: string): HTMLButtonElement {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = action === 'delete' ? 'we-btn we-btn--danger' : 'we-btn';
+    btn.textContent = label;
+    btn.setAttribute('role', 'menuitem');
+    btn.dataset.action = action;
+    Object.assign(btn.style, {
+      width: '100%',
+      justifyContent: 'flex-start',
+      padding: '6px 10px',
+    });
+    return btn;
+  }
+
+  // Menu items
+  const structureItems: Array<{
+    action: StructureMenuAction;
+    label: string;
+    el: HTMLButtonElement;
+  }> = [
+    { action: 'group', label: 'Group', el: createStructureMenuItem('group', 'Group') },
+    { action: 'stack', label: 'Stack', el: createStructureMenuItem('stack', 'Stack') },
+    { action: 'ungroup', label: 'Ungroup', el: createStructureMenuItem('ungroup', 'Ungroup') },
+    {
+      action: 'duplicate',
+      label: 'Duplicate',
+      el: createStructureMenuItem('duplicate', 'Duplicate'),
+    },
+    { action: 'delete', label: 'Delete', el: createStructureMenuItem('delete', 'Delete') },
+  ];
+
+  for (const item of structureItems) {
+    structureMenu.append(item.el);
+  }
+
+  // Structure menu state
+  let structureOpen = false;
+
+  function setStructureOpen(open: boolean): void {
+    structureOpen = open;
+    structureMenu.style.display = open ? 'flex' : 'none';
+    structureBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  function getSelectedElement(): Element | null {
+    const el = options.getSelectedElement?.() ?? null;
+    return el?.isConnected ? el : null;
+  }
+
+  function isDisallowedTarget(el: Element): boolean {
+    const tag = el.tagName?.toUpperCase();
+    return DISALLOWED_TARGET_TAGS.has(tag);
+  }
+
+  function isDisallowedContainer(el: Element): boolean {
+    const tag = el.tagName?.toUpperCase();
+    return DISALLOWED_CONTAINER_TAGS.has(tag);
+  }
+
+  function getStructureActionBlockReason(
+    action: StructureMenuAction,
+    target: Element | null,
+  ): string | null {
+    if (applying) return 'Operation in progress';
+    if (!options.onStructure) return 'Not configured';
+    if (!target) return 'Select an element first';
+    if (isDisallowedTarget(target)) return 'Cannot edit <html>, <body>, or <head>';
+
+    const parent = target.parentElement;
+
+    switch (action) {
+      case 'group':
+      case 'stack':
+        if (!parent) return 'Element has no parent';
+        if (isDisallowedContainer(parent)) return 'Cannot wrap under <html> or <head>';
+        return null;
+      case 'ungroup':
+        if (!parent) return 'Element has no parent';
+        if (isDisallowedContainer(parent)) return 'Cannot unwrap under <html> or <head>';
+        if (target.childElementCount !== 1) return 'Ungroup requires exactly one child';
+        return null;
+      case 'duplicate':
+      case 'delete':
+        if (!parent) return 'Element has no parent';
+        if (isDisallowedContainer(parent)) return 'Cannot modify under <html> or <head>';
+        return null;
+    }
+  }
+
+  function renderStructureControls(): void {
+    const target = getSelectedElement();
+
+    let anyEnabled = false;
+    for (const item of structureItems) {
+      const reason = getStructureActionBlockReason(item.action, target);
+      const disabled = !!reason;
+      item.el.disabled = disabled;
+      item.el.title = reason ?? '';
+      anyEnabled = anyEnabled || !disabled;
+    }
+
+    structureBtn.disabled = !anyEnabled;
+    structureBtn.title = !anyEnabled
+      ? (getStructureActionBlockReason('group', target) ?? 'Unavailable')
+      : '';
+
+    if (structureBtn.disabled && structureOpen) {
+      setStructureOpen(false);
+    }
+  }
+
+  right.append(applyBtn, structureWrap, undoBtn, redoBtn, minimizeBtn, closeBtn);
 
   // Assemble
   root.append(left, center, right);
@@ -201,6 +491,39 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
   disposer.add(clearResetTimer);
 
   // ==========================================================================
+  // Minimize State
+  // ==========================================================================
+
+  /**
+   * Toggle minimized state of toolbar
+   */
+  function setMinimized(value: boolean): void {
+    minimized = value;
+    root.dataset.minimized = minimized ? 'true' : 'false';
+
+    // Update minimize button label and tooltip
+    minimizeBtn.setAttribute('aria-label', minimized ? 'Expand toolbar' : 'Minimize toolbar');
+    minimizeBtn.title = minimized ? 'Expand' : 'Minimize';
+
+    if (minimized) {
+      // Close dropdown before minimizing
+      setStructureOpen(false);
+
+      // Move minimize button to root, hide sections
+      root.append(minimizeBtn);
+      left.hidden = true;
+      center.hidden = true;
+      right.hidden = true;
+    } else {
+      // Restore sections and button position
+      left.hidden = false;
+      center.hidden = false;
+      right.hidden = false;
+      right.insertBefore(minimizeBtn, closeBtn);
+    }
+  }
+
+  // ==========================================================================
   // Render Functions
   // ==========================================================================
 
@@ -211,12 +534,23 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
   function renderButtons(): void {
     undoBtn.disabled = applying || undoCount <= 0;
     redoBtn.disabled = applying || redoCount <= 0;
-    applyBtn.disabled = applying || undoCount <= 0 || !options.onApply;
+
+    // Check for apply block reason (e.g., move transaction not supported)
+    const blockReason = options.getApplyBlockReason?.();
+    const isBlocked = !!blockReason;
+
+    applyBtn.disabled = applying || undoCount <= 0 || !options.onApply || isBlocked;
     applyBtn.textContent = applying ? 'Applying…' : 'Apply';
+    applyBtn.title = isBlocked ? blockReason : '';
+
+    // Update structure menu controls
+    renderStructureControls();
   }
 
   function renderStatus(): void {
-    root.dataset.status = status;
+    const category = getStatusCategory(status);
+    root.dataset.status = category;
+    root.dataset.statusDetail = status;
     statusEl.textContent = status === 'idle' ? '' : statusMessage;
   }
 
@@ -241,7 +575,8 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
     statusMessage = (message ?? '').trim();
     renderStatus();
 
-    if (status === 'success' || status === 'error') {
+    const category = getStatusCategory(status);
+    if (category === 'success' || category === 'error') {
       scheduleStatusReset();
     } else {
       clearResetTimer();
@@ -280,6 +615,70 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
     void handleApply();
   });
 
+  // Minimize button
+  disposer.listen(minimizeBtn, 'click', (event) => {
+    event.preventDefault();
+    setMinimized(!minimized);
+  });
+
+  // Structure button - toggle dropdown
+  disposer.listen(structureBtn, 'click', (event) => {
+    event.preventDefault();
+    if (structureBtn.disabled) return;
+    setStructureOpen(!structureOpen);
+  });
+
+  // Structure menu items
+  for (const item of structureItems) {
+    disposer.listen(item.el, 'click', (event) => {
+      event.preventDefault();
+      if (item.el.disabled) return;
+      if (!options.onStructure) return;
+
+      options.onStructure(buildStructureData(item.action));
+      setStructureOpen(false);
+    });
+  }
+
+  // Close structure menu on outside click
+  disposer.listen(
+    window,
+    'pointerdown',
+    (event: PointerEvent) => {
+      if (!structureOpen) return;
+
+      // Check if click is inside the structure wrapper
+      try {
+        if (typeof event.composedPath === 'function') {
+          const inside = event.composedPath().some((n) => n === structureWrap);
+          if (inside) return;
+        }
+      } catch {
+        // fallback
+      }
+
+      const target = event.target;
+      if (target instanceof Node && structureWrap.contains(target)) return;
+
+      setStructureOpen(false);
+    },
+    { capture: true },
+  );
+
+  // Close structure menu on Escape
+  disposer.listen(
+    window,
+    'keydown',
+    (event: KeyboardEvent) => {
+      if (!structureOpen) return;
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      setStructureOpen(false);
+    },
+    { capture: true },
+  );
+
   // Undo button
   disposer.listen(undoBtn, 'click', (event) => {
     event.preventDefault();
@@ -299,6 +698,42 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
     event.preventDefault();
     options.onRequestClose?.();
   });
+
+  // ==========================================================================
+  // Selection Polling (Phase 5.5)
+  // ==========================================================================
+  // Poll selection changes to keep Structure enable/disable state in sync.
+  // Selection is owned by the editor core; polling avoids expanding the
+  // toolbar public API while keeping UI state accurate.
+
+  const SELECTION_POLL_INTERVAL_MS = 140;
+  let lastSelection: Element | null = null;
+  let selectionPollTimer: number | null = null;
+
+  function scheduleSelectionPoll(): void {
+    if (disposer.isDisposed) return;
+    selectionPollTimer = window.setTimeout(() => {
+      selectionPollTimer = null;
+      const current = getSelectedElement();
+      if (current !== lastSelection) {
+        lastSelection = current;
+        setStructureOpen(false);
+        renderButtons();
+      }
+      scheduleSelectionPoll();
+    }, SELECTION_POLL_INTERVAL_MS);
+  }
+
+  if (options.getSelectedElement) {
+    lastSelection = getSelectedElement();
+    scheduleSelectionPoll();
+    disposer.add(() => {
+      if (selectionPollTimer !== null) {
+        window.clearTimeout(selectionPollTimer);
+        selectionPollTimer = null;
+      }
+    });
+  }
 
   // Initial render
   renderCounts();

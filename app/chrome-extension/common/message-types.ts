@@ -54,6 +54,9 @@ export const BACKGROUND_MESSAGE_TYPES = {
   // Web editor (in-page visual editing)
   WEB_EDITOR_TOGGLE: 'web_editor_toggle',
   WEB_EDITOR_APPLY: 'web_editor_apply',
+  WEB_EDITOR_STATUS_QUERY: 'web_editor_status_query',
+  // Web editor props (Phase 7.1.6 early injection)
+  WEB_EDITOR_PROPS_REGISTER_EARLY_INJECTION: 'web_editor_props_register_early_injection',
 } as const;
 
 // Offscreen message types

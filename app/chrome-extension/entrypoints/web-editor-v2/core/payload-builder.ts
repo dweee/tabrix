@@ -440,26 +440,42 @@ function buildStyleDescription(
   return `Update element styles (${selPart}). ${changes.join('; ')}`;
 }
 
+/**
+ * Build human-readable text update description (Phase 2.7)
+ */
+function buildTextDescription(
+  locator: ElementLocator,
+  beforeText: string,
+  afterText: string,
+  maxSelectors: number,
+): string {
+  const selectors = (locator.selectors ?? []).filter(Boolean);
+  const selectorPreview = selectors.slice(0, maxSelectors).join(' | ');
+  const selPart = selectorPreview ? `selectors: ${selectorPreview}` : 'selectors: (unavailable)';
+
+  // Truncate text for preview
+  const beforePreview = beforeText.length > 96 ? beforeText.slice(0, 93) + '...' : beforeText;
+  const afterPreview = afterText.length > 96 ? afterText.slice(0, 93) + '...' : afterText;
+
+  return `Update element text (${selPart}). "${beforePreview}" -> "${afterPreview}"`;
+}
+
 // =============================================================================
 // Public API
 // =============================================================================
 
 /**
  * Build Apply payload from a Transaction
+ * Supports style and text transactions (Phase 2.7)
  */
 export function buildApplyPayload(
   tx: Transaction,
   options: BuildPayloadOptions = {},
 ): ApplyPayload | null {
-  // Only support style transactions for now
-  if (tx.type !== 'style') return null;
-
   const pageUrl = readString(options.pageUrl ?? globalThis.location?.href) ?? '';
   if (!pageUrl) return null;
 
   const locator = tx.targetLocator;
-  const diff = computeStyleDiff(tx);
-  if (!diff) return null;
 
   // Resolve element
   const element =
@@ -473,35 +489,70 @@ export function buildApplyPayload(
   // Resolve component hints
   const hints = element ? resolveComponentHints(element) : {};
 
-  // Build description
   const maxSelectors = Math.max(0, options.maxSelectorsInDescription ?? 3);
-  const description = buildStyleDescription(locator, diff, maxSelectors);
 
-  // Build payload
-  const payload: ApplyPayload = {
-    pageUrl,
-    targetFile: hints.targetFile,
-    fingerprint,
-    techStackHint: hints.techStackHint,
-    instruction: {
-      type: 'update_style',
-      description,
-      style: Object.keys(diff.set).length > 0 ? diff.set : undefined,
-    },
+  // Handle style transactions
+  if (tx.type === 'style') {
+    const diff = computeStyleDiff(tx);
+    if (!diff) return null;
 
-    // V2 extended fields
-    locator: hints.debugSource ? { ...locator, debugSource: hints.debugSource } : locator,
-    selectorCandidates: locator.selectors?.slice(0, 8),
-    debugSource: hints.debugSource,
-    operation: {
-      type: 'update_style',
-      before: diff.before,
-      after: diff.after,
-      removed: diff.removed,
-    },
-  };
+    const description = buildStyleDescription(locator, diff, maxSelectors);
 
-  return payload;
+    const payload: ApplyPayload = {
+      pageUrl,
+      targetFile: hints.targetFile,
+      fingerprint,
+      techStackHint: hints.techStackHint,
+      instruction: {
+        type: 'update_style',
+        description,
+        style: Object.keys(diff.set).length > 0 ? diff.set : undefined,
+      },
+
+      // V2 extended fields
+      locator: hints.debugSource ? { ...locator, debugSource: hints.debugSource } : locator,
+      selectorCandidates: locator.selectors?.slice(0, 8),
+      debugSource: hints.debugSource,
+      operation: {
+        type: 'update_style',
+        before: diff.before,
+        after: diff.after,
+        removed: diff.removed,
+      },
+    };
+
+    return payload;
+  }
+
+  // Handle text transactions (Phase 2.7)
+  if (tx.type === 'text') {
+    const beforeText = String(tx.before.text ?? '');
+    const afterText = String(tx.after.text ?? '');
+    if (beforeText === afterText) return null;
+
+    const description = buildTextDescription(locator, beforeText, afterText, maxSelectors);
+
+    const payload: ApplyPayload = {
+      pageUrl,
+      targetFile: hints.targetFile,
+      fingerprint,
+      techStackHint: hints.techStackHint,
+      instruction: {
+        type: 'update_text',
+        description,
+        text: afterText,
+      },
+
+      // V2 extended fields
+      locator: hints.debugSource ? { ...locator, debugSource: hints.debugSource } : locator,
+      selectorCandidates: locator.selectors?.slice(0, 8),
+      debugSource: hints.debugSource,
+    };
+
+    return payload;
+  }
+
+  return null;
 }
 
 /**

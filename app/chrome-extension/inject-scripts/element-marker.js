@@ -1580,6 +1580,12 @@
     rectsHost: null,
     hoveredList: [],
     verifyRectsActive: false, // Track if verify rects are showing
+    // Performance optimization: rAF throttling for hover
+    hoverRafId: null,
+    lastHoverTarget: null,
+    // DOM pooling for rect elements
+    rectPool: [],
+    rectPoolUsed: 0,
   };
 
   function ensureHighlighter() {
@@ -1630,43 +1636,110 @@
   }
 
   function clearHighlighter() {
-    console.log('[clearHighlighter] called, verifyRectsActive:', STATE.verifyRectsActive);
     if (STATE.highlighter) STATE.highlighter.style.display = 'none';
     // Only clear hover rects, not verify rects
     if (!STATE.verifyRectsActive) {
-      console.log('[clearHighlighter] clearing rects because verifyRectsActive is false');
       clearRects();
-    } else {
-      console.log('[clearHighlighter] NOT clearing rects because verifyRectsActive is true');
     }
   }
 
   function clearRects() {
-    if (STATE.rectsHost) STATE.rectsHost.innerHTML = '';
+    // Hide all pooled rect boxes instead of destroying them
+    const used = STATE.rectPoolUsed || 0;
+    for (let i = 0; i < used; i++) {
+      const box = STATE.rectPool[i];
+      if (box) box.style.display = 'none';
+    }
+    STATE.rectPoolUsed = 0;
     STATE.verifyRectsActive = false;
+    // Invalidate lastHoverTarget so next hover will redraw even on same element
+    STATE.lastHoverTarget = null;
   }
 
-  function drawRects(elements, color = CONFIG.COLORS.HOVER, dashed = true) {
-    const host = ensureRectsHost();
-    // Clear previous rects
-    clearRects();
-
-    for (const el of elements) {
-      const r = el.getBoundingClientRect();
-      const box = document.createElement('div');
+  /**
+   * Get or create a rect box from the pool
+   * @param {HTMLElement} host - The container element
+   * @param {number} index - The pool index
+   * @returns {HTMLDivElement} The rect box element
+   */
+  function getOrCreateRectBox(host, index) {
+    let box = STATE.rectPool[index];
+    if (!box) {
+      box = document.createElement('div');
       Object.assign(box.style, {
         position: 'fixed',
-        left: `${r.left}px`,
-        top: `${r.top}px`,
-        width: `${r.width}px`,
-        height: `${r.height}px`,
-        border: `2px ${dashed ? 'dashed' : 'solid'} ${color}`,
+        pointerEvents: 'none',
         borderRadius: '4px',
-        boxShadow: `0 0 0 2px ${color}22`,
         transition: 'all 100ms ease-out',
+        display: 'none',
       });
+      STATE.rectPool[index] = box;
+    }
+    // Ensure the box is attached to the host
+    if (!box.isConnected) {
       host.appendChild(box);
     }
+    return box;
+  }
+
+  // Maximum rect pool size to prevent memory bloat
+  const MAX_RECT_POOL_SIZE = 100;
+
+  /**
+   * Draw rect boxes with pooling optimization
+   * @param {Array<{x: number, y: number, width: number, height: number}>} rects - Rect data
+   * @param {Object} options - Drawing options
+   * @param {boolean} options.isVerify - Whether this is a verify highlight (affects verifyRectsActive)
+   */
+  function drawRectBoxes(
+    rects,
+    { color = CONFIG.COLORS.HOVER, dashed = true, offsetX = 0, offsetY = 0, isVerify = false } = {},
+  ) {
+    const host = ensureRectsHost();
+    const prevUsed = STATE.rectPoolUsed || 0;
+    // Limit rect count to prevent memory bloat
+    const count = Math.min(Array.isArray(rects) ? rects.length : 0, MAX_RECT_POOL_SIZE);
+
+    // Update or show rect boxes
+    for (let i = 0; i < count; i++) {
+      const r = rects[i];
+      if (!r) continue;
+
+      const x = Number.isFinite(r.left) ? r.left : Number.isFinite(r.x) ? r.x : 0;
+      const y = Number.isFinite(r.top) ? r.top : Number.isFinite(r.y) ? r.y : 0;
+      const w = Number.isFinite(r.width) ? r.width : 0;
+      const h = Number.isFinite(r.height) ? r.height : 0;
+
+      const box = getOrCreateRectBox(host, i);
+      Object.assign(box.style, {
+        left: `${offsetX + x}px`,
+        top: `${offsetY + y}px`,
+        width: `${w}px`,
+        height: `${h}px`,
+        border: `2px ${dashed ? 'dashed' : 'solid'} ${color}`,
+        boxShadow: `0 0 0 2px ${color}22`,
+        display: 'block',
+      });
+    }
+
+    // Hide excess boxes from previous render
+    for (let i = count; i < prevUsed; i++) {
+      const box = STATE.rectPool[i];
+      if (box) box.style.display = 'none';
+    }
+
+    STATE.rectPoolUsed = count;
+    // Reset verifyRectsActive for hover operations (so clearHighlighter works correctly)
+    // Only set to true when isVerify is explicitly true
+    STATE.verifyRectsActive = isVerify;
+  }
+
+  function drawRects(elements, color = CONFIG.COLORS.HOVER, dashed = true, isVerify = false) {
+    const rects = elements.map((el) => {
+      const r = el.getBoundingClientRect();
+      return { x: r.left, y: r.top, width: r.width, height: r.height };
+    });
+    drawRectBoxes(rects, { color, dashed, isVerify });
   }
 
   // ============================================================================
@@ -1758,57 +1831,91 @@
     return null;
   }
 
-  function onMouseMove(ev) {
+  // Store pending hover event for rAF processing
+  let pendingHoverEvent = null;
+
+  /**
+   * Process mouse move event - the actual hover update logic
+   * Separated from onMouseMove for rAF throttling
+   */
+  function processMouseMove(ev) {
     if (!STATE.active) return;
 
-    // First, use the raw ev.target to check for overlay UI
-    // This ensures panel buttons and other UI elements remain interactive
-    const rawTarget = ev.target;
+    const rawTarget = ev?.target;
     if (!(rawTarget instanceof Element)) {
+      STATE.hoverEl = null;
+      STATE.lastHoverTarget = null;
       clearHighlighter();
       return;
     }
 
     const host = PanelHost.getHost();
-    // Check if raw target is the panel host itself or inside the shadow DOM
     if ((host && rawTarget === host) || isInsidePanel(rawTarget)) {
-      STATE.hoverEl = null; // Reset to prevent keyboard shortcuts from reselecting the last element
+      STATE.hoverEl = null;
+      STATE.lastHoverTarget = null;
       clearHighlighter();
       return;
     }
 
-    // Now that we know it's a page element, get the deep target (considering shadow DOM)
     const target = getDeepPageTarget(ev) || rawTarget;
     STATE.hoverEl = target;
 
+    // Get current listMode
+    let listMode = false;
+    try {
+      listMode = !!StateStore.get('listMode');
+    } catch {}
+
+    // Skip update if target and mode haven't changed
+    const last = STATE.lastHoverTarget;
+    if (last && last.element === target && last.listMode === listMode) {
+      return;
+    }
+    STATE.lastHoverTarget = { element: target, listMode };
+
     if (!IS_MAIN) {
       try {
-        const listMode = StateStore.get('listMode');
         const list = listMode ? computeElementList(target) || [target] : [target];
         const rects = list.map((el) => {
           const r = el.getBoundingClientRect();
           return { x: r.left, y: r.top, width: r.width, height: r.height };
         });
 
-        window.top.postMessage(
-          {
-            type: 'em_hover',
-            rects,
-            innerSel: generateSelector(target),
-          },
-          '*',
-        );
+        // Performance: Don't generate selector on hover (defer to click)
+        window.top.postMessage({ type: 'em_hover', rects }, '*');
       } catch {}
       return;
     }
 
-    const listMode = StateStore.get('listMode');
     if (listMode) {
       STATE.hoveredList = computeElementList(target) || [target];
       drawRects(STATE.hoveredList);
     } else {
       moveHighlighterTo(target);
     }
+  }
+
+  /**
+   * Mouse move handler with rAF throttling
+   * Ensures hover updates are batched to animation frame rate
+   */
+  function onMouseMove(ev) {
+    if (!STATE.active) return;
+
+    // Store the latest event
+    pendingHoverEvent = ev;
+
+    // Skip if already scheduled
+    if (STATE.hoverRafId != null) return;
+
+    // Schedule processing on next animation frame
+    STATE.hoverRafId = requestAnimationFrame(() => {
+      STATE.hoverRafId = null;
+      const latest = pendingHoverEvent;
+      pendingHoverEvent = null;
+      if (!latest) return;
+      processMouseMove(latest);
+    });
   }
 
   // ============================================================================
@@ -1964,7 +2071,6 @@
   async function verifyHighlightOnly() {
     try {
       const selector = STATE.box?.querySelector('#__em_selector')?.textContent?.trim();
-      console.log('[verifyHighlightOnly] selector:', selector);
       if (!selector) return;
 
       StateStore.set({
@@ -1981,8 +2087,6 @@
 
       // Additional defense: filter out any overlay elements that might have slipped through
       const filteredMatches = filterOverlayElements(matches);
-
-      console.log('[verifyHighlightOnly] matches:', filteredMatches.length);
 
       if (!filteredMatches || filteredMatches.length === 0) {
         StateStore.set({
@@ -2003,19 +2107,8 @@
 
       await sleep(200);
 
-      // Highlight matches
-      console.log(
-        '[verifyHighlightOnly] calling drawRects with',
-        filteredMatches.length,
-        'elements',
-      );
-      drawRects(filteredMatches, CONFIG.COLORS.VERIFY, false);
-      STATE.verifyRectsActive = true; // Mark as verify rects to prevent clearing
-      console.log('[verifyHighlightOnly] STATE.verifyRectsActive set to true');
-      console.log(
-        '[verifyHighlightOnly] STATE.rectsHost children:',
-        STATE.rectsHost?.children.length,
-      );
+      // Highlight matches with isVerify=true to prevent clearing on hover
+      drawRects(filteredMatches, CONFIG.COLORS.VERIFY, false, true);
 
       StateStore.set({
         validation: {
@@ -2343,6 +2436,13 @@
     detachPointerListeners();
     detachKeyboardListener();
 
+    // Cancel pending rAF
+    if (STATE.hoverRafId != null) {
+      cancelAnimationFrame(STATE.hoverRafId);
+      STATE.hoverRafId = null;
+    }
+    pendingHoverEvent = null;
+
     try {
       STATE.highlighter?.remove();
       STATE.rectsHost?.remove();
@@ -2356,6 +2456,12 @@
     STATE.hoveredList = [];
     STATE.hoverEl = null;
     STATE.selectedEl = null;
+    STATE.lastHoverTarget = null;
+    STATE.verifyRectsActive = false;
+
+    // Clear rect pool to release DOM references
+    STATE.rectPool.length = 0;
+    STATE.rectPoolUsed = 0;
   }
 
   // ============================================================================
@@ -2617,23 +2723,13 @@
         const base = host.getBoundingClientRect();
 
         if (data.type === 'em_hover' && Array.isArray(data.rects)) {
-          const overlay = ensureRectsHost();
-          clearRects();
-
-          for (const r of data.rects) {
-            const box = document.createElement('div');
-            Object.assign(box.style, {
-              position: 'fixed',
-              left: `${base.left + r.x}px`,
-              top: `${base.top + r.y}px`,
-              width: `${r.width}px`,
-              height: `${r.height}px`,
-              border: `2px dashed ${CONFIG.COLORS.HOVER}`,
-              borderRadius: '4px',
-              boxShadow: `0 0 0 2px ${CONFIG.COLORS.HOVER}22`,
-            });
-            overlay.appendChild(box);
-          }
+          // Use pooled rect boxes for better performance
+          drawRectBoxes(data.rects, {
+            offsetX: base.left,
+            offsetY: base.top,
+            color: CONFIG.COLORS.HOVER,
+            dashed: true,
+          });
         } else if (data.type === 'em_click' && data.innerSel) {
           const frameSel = generateSelector(host);
           const composite = frameSel ? `${frameSel} |> ${data.innerSel}` : data.innerSel;

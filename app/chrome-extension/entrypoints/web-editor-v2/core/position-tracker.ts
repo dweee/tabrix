@@ -58,6 +58,16 @@ const PASSIVE_LISTENER: AddEventListenerOptions = { passive: true };
 /** Sub-pixel threshold for rect comparison (avoids jitter-induced redraws) */
 const RECT_EPSILON = 0.5;
 
+/**
+ * MutationObserver options for selection sync.
+ * Keep lightweight: only observe childList changes in subtree.
+ * Attribute changes are not observed as they rarely affect element position/removal.
+ */
+const SELECTION_MUTATION_OPTIONS: MutationObserverInit = {
+  childList: true,
+  subtree: true,
+};
+
 // =============================================================================
 // Helpers
 // =============================================================================
@@ -165,6 +175,67 @@ export function createPositionTracker(options: PositionTrackerOptions): Position
   }
 
   // ==========================================================================
+  // Selection Observers (Phase 2.8)
+  // ==========================================================================
+  //
+  // Observers are only active while an element is selected.
+  // - ResizeObserver: watches selected element size changes
+  // - MutationObserver: watches DOM structure changes to keep selection rect in sync
+  //
+  // Design decisions:
+  // - Only observe selection (not hover) because hover changes too frequently
+  // - MutationObserver on document.body with childList+subtree catches most DOM changes
+  // - rAF coalescing in scheduleUpdate() prevents observer storms from causing issues
+
+  /** Disposer for selection-specific observers (recreated when selection changes) */
+  let selectionObservers = new Disposer();
+  disposer.add(() => selectionObservers.dispose());
+
+  /**
+   * Reset selection observers when selection changes.
+   * Disconnects old observers and sets up new ones for the current selection.
+   */
+  function resetSelectionObservers(): void {
+    // Disconnect previous observers
+    selectionObservers.dispose();
+    selectionObservers = new Disposer();
+
+    const target = selectionElement;
+    if (!target) return;
+
+    // ResizeObserver: watch selected element size changes
+    // This catches CSS transitions, flex/grid reflow, content changes, etc.
+    selectionObservers.observeResize(target, () => {
+      if (disposer.isDisposed) return;
+      // Guard against stale observer callbacks
+      if (selectionElement !== target) return;
+      scheduleUpdate();
+    });
+
+    // MutationObserver: watch for structural DOM changes
+    // This catches element removal, reparenting, reordering, etc.
+    const mutationCallback = () => {
+      if (disposer.isDisposed) return;
+      // Guard against stale observer callbacks
+      if (selectionElement !== target) return;
+      scheduleUpdate();
+    };
+
+    // If the element is inside a Shadow DOM, observe that shadow root
+    // (MutationObserver doesn't cross shadow boundaries)
+    const rootNode = target.getRootNode?.();
+    if (rootNode instanceof ShadowRoot) {
+      selectionObservers.observeMutation(rootNode, mutationCallback, SELECTION_MUTATION_OPTIONS);
+    }
+
+    // Always observe document.body to catch cross-tree changes and removals
+    const body = document.body ?? document.documentElement;
+    if (body) {
+      selectionObservers.observeMutation(body, mutationCallback, SELECTION_MUTATION_OPTIONS);
+    }
+  }
+
+  // ==========================================================================
   // Position Computation
   // ==========================================================================
 
@@ -202,6 +273,8 @@ export function createPositionTracker(options: PositionTrackerOptions): Position
     }
     if (selectionElement && !resolvedSelection) {
       selectionElement = null;
+      // Clean up observers when selection element is disconnected
+      resetSelectionObservers();
     }
 
     // Optimization: if both point to same element, read rect once
@@ -270,6 +343,8 @@ export function createPositionTracker(options: PositionTrackerOptions): Position
     if (disposer.isDisposed) return;
     if (selectionElement === element) return;
     selectionElement = element;
+    // Reset observers for new selection (or clear if null)
+    resetSelectionObservers();
     scheduleUpdate();
   }
 

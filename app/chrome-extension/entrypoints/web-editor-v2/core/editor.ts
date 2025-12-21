@@ -9,7 +9,15 @@ import type { WebEditorState, WebEditorV2Api } from '@/common/web-editor-types';
 import { WEB_EDITOR_V2_VERSION, WEB_EDITOR_V2_LOG_PREFIX } from '../constants';
 import { mountShadowHost, type ShadowHostManager } from '../ui/shadow-host';
 import { createToolbar, type Toolbar } from '../ui/toolbar';
+import { createBreadcrumbs, type Breadcrumbs } from '../ui/breadcrumbs';
+import { createPropertyPanel, type PropertyPanel } from '../ui/property-panel';
+import { createPropsBridge, type PropsBridge } from './props-bridge';
 import { createCanvasOverlay, type CanvasOverlay } from '../overlay/canvas-overlay';
+import { createHandlesController, type HandlesController } from '../overlay/handles-controller';
+import {
+  createDragReorderController,
+  type DragReorderController,
+} from '../drag/drag-reorder-controller';
 import {
   createEventController,
   type EventController,
@@ -22,26 +30,54 @@ import {
   type TransactionManager,
   type TransactionChangeEvent,
 } from './transaction-manager';
+import { locateElement } from './locator';
 import { sendTransactionToAgent } from './payload-builder';
+import {
+  createExecutionTracker,
+  type ExecutionTracker,
+  type ExecutionState,
+} from './execution-tracker';
+import { createHmrConsistencyVerifier, type HmrConsistencyVerifier } from './hmr-consistency';
+import { createPerfMonitor, type PerfMonitor } from './perf-monitor';
 
 // =============================================================================
 // Types
 // =============================================================================
+
+/** Apply operation snapshot for rollback tracking */
+interface ApplySnapshot {
+  txId: string;
+  txTimestamp: number;
+}
 
 /** Internal editor state */
 interface EditorInternalState {
   active: boolean;
   shadowHost: ShadowHostManager | null;
   canvasOverlay: CanvasOverlay | null;
+  handlesController: HandlesController | null;
   eventController: EventController | null;
   positionTracker: PositionTracker | null;
   selectionEngine: SelectionEngine | null;
+  dragReorderController: DragReorderController | null;
   transactionManager: TransactionManager | null;
+  executionTracker: ExecutionTracker | null;
+  hmrConsistencyVerifier: HmrConsistencyVerifier | null;
   toolbar: Toolbar | null;
+  breadcrumbs: Breadcrumbs | null;
+  propertyPanel: PropertyPanel | null;
+  /** Runtime props bridge (Phase 7) */
+  propsBridge: PropsBridge | null;
+  /** Performance monitor (Phase 5.3) - disabled by default */
+  perfMonitor: PerfMonitor | null;
+  /** Cleanup function for perf monitor hotkey */
+  perfHotkeyCleanup: (() => void) | null;
   /** Currently hovered element (for hover highlight) */
   hoveredElement: Element | null;
   /** Currently selected element (for selection highlight) */
   selectedElement: Element | null;
+  /** Snapshot of transaction being applied (for rollback on failure) */
+  applyingSnapshot: ApplySnapshot | null;
 }
 
 // =============================================================================
@@ -59,14 +95,179 @@ export function createWebEditorV2(): WebEditorV2Api {
     active: false,
     shadowHost: null,
     canvasOverlay: null,
+    handlesController: null,
     eventController: null,
     positionTracker: null,
     selectionEngine: null,
+    dragReorderController: null,
     transactionManager: null,
+    executionTracker: null,
+    hmrConsistencyVerifier: null,
     toolbar: null,
+    breadcrumbs: null,
+    propertyPanel: null,
+    propsBridge: null,
+    perfMonitor: null,
+    perfHotkeyCleanup: null,
     hoveredElement: null,
     selectedElement: null,
+    applyingSnapshot: null,
   };
+
+  /** Default modifiers for programmatic selection (e.g., from breadcrumbs) */
+  const DEFAULT_MODIFIERS: EventModifiers = {
+    alt: false,
+    shift: false,
+    ctrl: false,
+    meta: false,
+  };
+
+  // ===========================================================================
+  // Text Editing Session (Phase 2.7)
+  // ===========================================================================
+
+  interface EditSession {
+    element: HTMLElement;
+    beforeText: string;
+    beforeContentEditable: string | null;
+    beforeSpellcheck: boolean;
+    keydownHandler: (ev: KeyboardEvent) => void;
+    blurHandler: () => void;
+  }
+
+  let editSession: EditSession | null = null;
+
+  /** Check if element is a valid text edit target */
+  function isTextEditTarget(element: Element): element is HTMLElement {
+    if (!(element instanceof HTMLElement)) return false;
+    // Not for form controls
+    if (element instanceof HTMLInputElement) return false;
+    if (element instanceof HTMLTextAreaElement) return false;
+    // Only for text-only targets (no element children)
+    if (element.childElementCount > 0) return false;
+    return true;
+  }
+
+  /** Restore element to pre-edit state */
+  function restoreEditTarget(session: EditSession): void {
+    const { element, beforeContentEditable, beforeSpellcheck } = session;
+
+    if (beforeContentEditable === null) {
+      element.removeAttribute('contenteditable');
+    } else {
+      element.setAttribute('contenteditable', beforeContentEditable);
+    }
+
+    element.spellcheck = beforeSpellcheck;
+
+    // Remove event listeners
+    element.removeEventListener('keydown', session.keydownHandler, true);
+    element.removeEventListener('blur', session.blurHandler, true);
+  }
+
+  /** Commit the current edit session */
+  function commitEdit(): void {
+    const session = editSession;
+    if (!session) return;
+
+    editSession = null;
+
+    const element = session.element;
+    const afterText = element.textContent ?? '';
+
+    // Normalize to text-only to avoid structure drift from contentEditable
+    element.textContent = afterText;
+
+    restoreEditTarget(session);
+
+    // Record transaction if text changed
+    if (session.beforeText !== afterText) {
+      state.transactionManager?.recordText(element, session.beforeText, afterText);
+    }
+
+    console.log(`${WEB_EDITOR_V2_LOG_PREFIX} Text edit committed`);
+  }
+
+  /** Cancel the current edit session */
+  function cancelEdit(): void {
+    const session = editSession;
+    if (!session) return;
+
+    editSession = null;
+
+    // Restore original text
+    session.element.textContent = session.beforeText;
+
+    restoreEditTarget(session);
+    console.log(`${WEB_EDITOR_V2_LOG_PREFIX} Text edit cancelled`);
+  }
+
+  /** Start editing an element */
+  function startEdit(element: Element, modifiers: EventModifiers): boolean {
+    if (!isTextEditTarget(element)) return false;
+    if (!element.isConnected) return false;
+
+    // Ensure element is selected
+    if (state.selectedElement !== element) {
+      handleSelect(element, modifiers);
+    }
+
+    // If already editing this element, keep editing
+    if (editSession?.element === element) return true;
+
+    // Commit previous edit if any
+    if (editSession) {
+      commitEdit();
+    }
+
+    const beforeText = element.textContent ?? '';
+    const beforeContentEditable = element.getAttribute('contenteditable');
+    const beforeSpellcheck = element.spellcheck;
+
+    // ESC cancels editing
+    const keydownHandler = (ev: KeyboardEvent) => {
+      if (ev.key !== 'Escape') return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      ev.stopImmediatePropagation();
+      cancelEdit();
+      state.eventController?.setMode('selecting');
+    };
+
+    // Blur commits editing
+    const blurHandler = () => {
+      commitEdit();
+      state.eventController?.setMode('selecting');
+    };
+
+    element.addEventListener('keydown', keydownHandler, true);
+    element.addEventListener('blur', blurHandler, true);
+
+    element.setAttribute('contenteditable', 'true');
+    element.spellcheck = false;
+
+    try {
+      element.focus({ preventScroll: true });
+    } catch {
+      try {
+        element.focus();
+      } catch {
+        // Best-effort only
+      }
+    }
+
+    editSession = {
+      element,
+      beforeText,
+      beforeContentEditable,
+      beforeSpellcheck,
+      keydownHandler,
+      blurHandler,
+    };
+
+    console.log(`${WEB_EDITOR_V2_LOG_PREFIX} Text edit started`);
+    return true;
+  }
 
   // ===========================================================================
   // Event Handlers (wired to EventController callbacks)
@@ -90,6 +291,11 @@ export function createWebEditorV2(): WebEditorV2Api {
    * Handle element selection from EventController
    */
   function handleSelect(element: Element, modifiers: EventModifiers): void {
+    // Commit any in-progress edit when selecting a different element
+    if (editSession && editSession.element !== element) {
+      commitEdit();
+    }
+
     state.selectedElement = element;
     state.hoveredElement = null;
 
@@ -100,6 +306,18 @@ export function createWebEditorV2(): WebEditorV2Api {
       state.positionTracker.setSelectionElement(element);
       state.positionTracker.forceUpdate();
     }
+
+    // Update breadcrumbs to show element ancestry
+    state.breadcrumbs?.setTarget(element);
+
+    // Update property panel with selected element
+    state.propertyPanel?.setTarget(element);
+
+    // Update resize handles target (Phase 4.9)
+    state.handlesController?.setTarget(element);
+
+    // Notify HMR consistency verifier of selection change (Phase 4.8)
+    state.hmrConsistencyVerifier?.onSelectionChange(element);
 
     // Log selection with modifier info for debugging
     const modInfo = modifiers.alt ? ' (Alt: drill-up)' : '';
@@ -118,6 +336,19 @@ export function createWebEditorV2(): WebEditorV2Api {
       state.positionTracker.forceUpdate();
     }
 
+    // Clear breadcrumbs
+    state.breadcrumbs?.setTarget(null);
+
+    // Clear property panel
+    state.propertyPanel?.setTarget(null);
+
+    // Hide resize handles (Phase 4.9)
+    state.handlesController?.setTarget(null);
+
+    // Notify HMR consistency verifier of deselection (Phase 4.8)
+    // Deselection should cancel any ongoing verification
+    state.hmrConsistencyVerifier?.onSelectionChange(null);
+
     console.log(`${WEB_EDITOR_V2_LOG_PREFIX} Deselected`);
   }
 
@@ -125,11 +356,17 @@ export function createWebEditorV2(): WebEditorV2Api {
    * Handle position updates from PositionTracker (scroll/resize sync)
    */
   function handlePositionUpdate(rects: TrackedRects): void {
+    // Anchor breadcrumbs to the selection rect (viewport coordinates)
+    state.breadcrumbs?.setAnchorRect(rects.selection);
+
     if (!state.canvasOverlay) return;
 
     // Update canvas overlay with new positions
     state.canvasOverlay.setHoverRect(rects.hover);
     state.canvasOverlay.setSelectionRect(rects.selection);
+
+    // Sync resize handles with latest selection rect (Phase 4.9)
+    state.handlesController?.setSelectionRect(rects.selection);
 
     // Force immediate render to avoid extra rAF delay
     // This collapses the render to the same frame as position calculation
@@ -148,15 +385,108 @@ export function createWebEditorV2(): WebEditorV2Api {
 
     // Update toolbar UI with undo/redo counts
     state.toolbar?.setHistory(undoCount, redoCount);
+
+    // Refresh property panel after undo/redo to reflect current styles
+    if (action === 'undo' || action === 'redo') {
+      state.propertyPanel?.refresh();
+    }
+
+    // Notify HMR consistency verifier of transaction change (Phase 4.8)
+    state.hmrConsistencyVerifier?.onTransactionChange(event);
+  }
+
+  /**
+   * Check if the transaction being applied is still the latest in undo stack.
+   * Used to determine if we should auto-rollback on failure.
+   *
+   * Returns a detailed status to distinguish between:
+   * - 'ok': Transaction is still latest, safe to rollback
+   * - 'no_snapshot': No apply in progress
+   * - 'tm_unavailable': TransactionManager not available
+   * - 'stack_empty': Undo stack is empty (tx was already undone)
+   * - 'tx_changed': User made new edits or tx was merged
+   */
+  type ApplyTxStatus = 'ok' | 'no_snapshot' | 'tm_unavailable' | 'stack_empty' | 'tx_changed';
+
+  function checkApplyingTxStatus(): ApplyTxStatus {
+    const snapshot = state.applyingSnapshot;
+    if (!snapshot) return 'no_snapshot';
+
+    const tm = state.transactionManager;
+    if (!tm) return 'tm_unavailable';
+
+    const undoStack = tm.getUndoStack();
+    if (undoStack.length === 0) return 'stack_empty';
+
+    const latest = undoStack[undoStack.length - 1]!;
+
+    // Check both id and timestamp to handle merged transactions
+    if (latest.id !== snapshot.txId || latest.timestamp !== snapshot.txTimestamp) {
+      return 'tx_changed';
+    }
+
+    return 'ok';
+  }
+
+  /**
+   * Attempt to rollback the applying transaction on failure.
+   * Returns a descriptive error message based on rollback result.
+   *
+   * Rollback is only attempted when:
+   * - The transaction is still the latest in undo stack
+   * - No new edits were made during the apply operation
+   */
+  function attemptRollbackOnFailure(originalError: string): string {
+    const status = checkApplyingTxStatus();
+
+    // Cannot rollback: TM not available or no snapshot
+    if (status === 'no_snapshot' || status === 'tm_unavailable') {
+      console.error(`${WEB_EDITOR_V2_LOG_PREFIX} Apply failed, unable to revert (${status})`);
+      return `${originalError} (unable to revert)`;
+    }
+
+    // Stack is empty - tx was already undone (race condition or user action)
+    if (status === 'stack_empty') {
+      console.warn(`${WEB_EDITOR_V2_LOG_PREFIX} Apply failed, stack empty (already reverted?)`);
+      return `${originalError} (already reverted)`;
+    }
+
+    // User made new edits during apply - don't rollback their work
+    if (status === 'tx_changed') {
+      console.warn(
+        `${WEB_EDITOR_V2_LOG_PREFIX} Apply failed but new edits detected, skipping auto-rollback`,
+      );
+      return `${originalError} (new edits detected, not reverted)`;
+    }
+
+    // Status is 'ok' - safe to attempt rollback
+    const tm = state.transactionManager!;
+    const undone = tm.undo();
+    if (undone) {
+      console.log(`${WEB_EDITOR_V2_LOG_PREFIX} Apply failed, changes auto-reverted`);
+      return `${originalError} (changes reverted)`;
+    }
+
+    // undo() returned null - likely locateElement() failed
+    console.error(`${WEB_EDITOR_V2_LOG_PREFIX} Apply failed and auto-revert also failed`);
+    return `${originalError} (revert failed)`;
   }
 
   /**
    * Apply the latest transaction to Agent (Apply to Code)
+   *
+   * Phase 2.10: On failure, automatically attempts to undo the transaction
+   * to revert DOM changes. The transaction moves to redo stack so user can retry.
    */
-  async function applyLatestTransaction(): Promise<{ requestId?: string }> {
+  async function applyLatestTransaction(): Promise<{ requestId?: string; sessionId?: string }> {
     const tm = state.transactionManager;
     if (!tm) {
       throw new Error('Transaction manager not ready');
+    }
+
+    // Prevent concurrent apply operations
+    if (state.applyingSnapshot) {
+      throw new Error('Apply already in progress');
     }
 
     const undoStack = tm.getUndoStack();
@@ -165,15 +495,74 @@ export function createWebEditorV2(): WebEditorV2Api {
       throw new Error('No changes to apply');
     }
 
-    const resp = await sendTransactionToAgent(tx);
-    const r = resp as { success?: unknown; requestId?: unknown; error?: unknown } | null;
-
-    if (r && r.success === true) {
-      return { requestId: typeof r.requestId === 'string' ? r.requestId : undefined };
+    // Apply-to-Code currently supports only style/text transactions
+    if (tx.type !== 'style' && tx.type !== 'text') {
+      throw new Error(`Apply does not support "${tx.type}" transactions yet`);
     }
 
-    const err = typeof r?.error === 'string' ? r.error : 'Agent request failed';
-    throw new Error(err);
+    // Snapshot the transaction for rollback tracking
+    state.applyingSnapshot = {
+      txId: tx.id,
+      txTimestamp: tx.timestamp,
+    };
+
+    // Markers indicating error was already processed by attemptRollbackOnFailure
+    const ROLLBACK_MARKERS = [
+      '(changes reverted)',
+      '(new edits detected',
+      '(revert failed)',
+      '(unable to revert)',
+      '(already reverted)',
+    ];
+
+    const isAlreadyProcessed = (err: unknown): boolean =>
+      err instanceof Error && ROLLBACK_MARKERS.some((m) => err.message.includes(m));
+
+    try {
+      const resp = await sendTransactionToAgent(tx);
+      const r = resp as {
+        success?: unknown;
+        requestId?: unknown;
+        sessionId?: unknown;
+        error?: unknown;
+      } | null;
+
+      if (r && r.success === true) {
+        const requestId = typeof r.requestId === 'string' ? r.requestId : undefined;
+        const sessionId = typeof r.sessionId === 'string' ? r.sessionId : undefined;
+
+        // Start tracking execution status if we have a requestId
+        if (requestId && sessionId && state.executionTracker) {
+          state.executionTracker.track(requestId, sessionId);
+        }
+
+        // Start HMR consistency verification (Phase 4.8)
+        state.hmrConsistencyVerifier?.start({
+          tx,
+          requestId,
+          sessionId,
+          element: state.selectedElement,
+        });
+
+        return { requestId, sessionId };
+      }
+
+      // Agent returned failure response - attempt rollback
+      const errorMsg = typeof r?.error === 'string' ? r.error : 'Agent request failed';
+      throw new Error(attemptRollbackOnFailure(errorMsg));
+    } catch (error) {
+      // Re-throw if already processed by attemptRollbackOnFailure
+      if (isAlreadyProcessed(error)) {
+        throw error;
+      }
+
+      // Network error or other unprocessed exception - attempt rollback
+      const originalMsg = error instanceof Error ? error.message : String(error);
+      throw new Error(attemptRollbackOnFailure(originalMsg));
+    } finally {
+      // Clear snapshot regardless of outcome
+      state.applyingSnapshot = null;
+    }
   }
 
   /**
@@ -194,9 +583,7 @@ export function createWebEditorV2(): WebEditorV2Api {
 
     try {
       // Mount Shadow DOM host
-      state.shadowHost = mountShadowHost({
-        onRequestClose: () => stop(),
-      });
+      state.shadowHost = mountShadowHost({});
 
       // Initialize Canvas Overlay
       const elements = state.shadowHost.getElements();
@@ -207,21 +594,46 @@ export function createWebEditorV2(): WebEditorV2Api {
         container: elements.overlayRoot,
       });
 
+      // Initialize Performance Monitor (Phase 5.3) - disabled by default
+      state.perfMonitor = createPerfMonitor({
+        container: elements.overlayRoot,
+        fpsUiIntervalMs: 500,
+        memorySampleIntervalMs: 1000,
+      });
+
+      // Register hotkey: Ctrl/Cmd + Shift + P toggles perf monitor
+      const perfHotkeyHandler = (event: KeyboardEvent): void => {
+        // Ignore key repeats to avoid rapid toggles when holding the shortcut
+        if (event.repeat) return;
+
+        const isMod = event.metaKey || event.ctrlKey;
+        if (!isMod) return;
+        if (!event.shiftKey) return;
+        if (event.altKey) return;
+
+        const key = (event.key || '').toLowerCase();
+        if (key !== 'p') return;
+
+        const monitor = state.perfMonitor;
+        if (!monitor) return;
+
+        monitor.toggle();
+
+        // Prevent browser shortcuts (e.g., print dialog)
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+      };
+
+      const hotkeyOptions: AddEventListenerOptions = { capture: true, passive: false };
+      window.addEventListener('keydown', perfHotkeyHandler, hotkeyOptions);
+      state.perfHotkeyCleanup = () => {
+        window.removeEventListener('keydown', perfHotkeyHandler, hotkeyOptions);
+      };
+
       // Initialize Selection Engine for intelligent element picking
       state.selectionEngine = createSelectionEngine({
         isOverlayElement: state.shadowHost.isOverlayElement,
-      });
-
-      // Initialize Event Controller for interaction handling
-      // Wire up SelectionEngine's findBestTarget for intelligent selection (click only)
-      // Hover uses fast elementFromPoint for 60FPS performance
-      state.eventController = createEventController({
-        isOverlayElement: state.shadowHost.isOverlayElement,
-        onHover: handleHover,
-        onSelect: handleSelect,
-        onDeselect: handleDeselect,
-        findTargetForSelect: (x, y, modifiers) =>
-          state.selectionEngine?.findBestTarget(x, y, modifiers) ?? null,
       });
 
       // Initialize Position Tracker for scroll/resize synchronization
@@ -233,18 +645,161 @@ export function createWebEditorV2(): WebEditorV2Api {
       // Use isEventFromUi (not isOverlayElement) to properly check event source
       state.transactionManager = createTransactionManager({
         enableKeyBindings: true,
-        isEventFromEditorUi: state.shadowHost.isEventFromUi,
+        // Include both Shadow UI events and events from editing element
+        // This prevents Ctrl/Cmd+Z from triggering global undo while editing text
+        isEventFromEditorUi: (event) => {
+          if (state.shadowHost?.isEventFromUi(event)) return true;
+          // Also ignore events from the editing element (allow native contentEditable undo)
+          const session = editSession;
+          if (session?.element) {
+            try {
+              const path = typeof event.composedPath === 'function' ? event.composedPath() : null;
+              if (path?.some((node) => node === session.element)) return true;
+            } catch {
+              // Fallback
+              const target = event.target;
+              if (target instanceof Node && session.element.contains(target)) return true;
+            }
+          }
+          return false;
+        },
         onChange: handleTransactionChange,
         onApplyError: handleTransactionError,
       });
 
-      // Initialize Toolbar UI (must have uiRoot from shadow host)
-      if (!elements.uiRoot) {
-        throw new Error('Shadow host uiRoot not available');
-      }
+      // Initialize Resize Handles Controller (Phase 4.9)
+      state.handlesController = createHandlesController({
+        container: elements.overlayRoot,
+        canvasOverlay: state.canvasOverlay,
+        transactionManager: state.transactionManager,
+        positionTracker: state.positionTracker,
+      });
+
+      // Initialize Drag Reorder Controller (Phase 2.4-2.6)
+      state.dragReorderController = createDragReorderController({
+        isOverlayElement: state.shadowHost.isOverlayElement,
+        uiRoot: elements.uiRoot,
+        canvasOverlay: state.canvasOverlay,
+        positionTracker: state.positionTracker,
+        transactionManager: state.transactionManager,
+      });
+
+      // Initialize Event Controller for interaction handling
+      // Wire up SelectionEngine's findBestTargetFromEvent for Shadow DOM-aware selection (click only)
+      // Hover uses fast elementFromPoint for 60FPS performance
+      state.eventController = createEventController({
+        isOverlayElement: state.shadowHost.isOverlayElement,
+        onHover: handleHover,
+        onSelect: handleSelect,
+        onDeselect: handleDeselect,
+        onStartEdit: startEdit,
+        findTargetForSelect: (_x, _y, modifiers, event) =>
+          state.selectionEngine?.findBestTargetFromEvent(event, modifiers) ?? null,
+        getSelectedElement: () => state.selectedElement,
+        onStartDrag: (ev) => state.dragReorderController?.onDragStart(ev) ?? false,
+        onDragMove: (ev) => state.dragReorderController?.onDragMove(ev),
+        onDragEnd: (ev) => state.dragReorderController?.onDragEnd(ev),
+        onDragCancel: (ev) => state.dragReorderController?.onDragCancel(ev),
+      });
+
+      // Initialize ExecutionTracker for tracking Agent execution status (Phase 3.10)
+      state.executionTracker = createExecutionTracker({
+        onStatusChange: (execState: ExecutionState) => {
+          // Map execution status to toolbar status (only used when HMR verifier is not active)
+          // When verifier is active, it controls toolbar status after execution completes
+          const verifierPhase = state.hmrConsistencyVerifier?.getSnapshot().phase ?? 'idle';
+          const verifierActive = verifierPhase !== 'idle';
+
+          // Only update toolbar directly if verifier is not handling it
+          if (!verifierActive || execState.status !== 'completed') {
+            const statusMap: Record<string, string> = {
+              pending: 'applying',
+              starting: 'starting',
+              running: 'running',
+              locating: 'locating',
+              applying: 'applying',
+              completed: 'completed',
+              failed: 'failed',
+              timeout: 'timeout',
+              cancelled: 'cancelled',
+            };
+            type ToolbarStatusType = Parameters<NonNullable<typeof state.toolbar>['setStatus']>[0];
+            const toolbarStatus = (statusMap[execState.status] ?? 'running') as ToolbarStatusType;
+            state.toolbar?.setStatus(toolbarStatus, execState.message);
+          }
+
+          // Forward to HMR consistency verifier (Phase 4.8)
+          state.hmrConsistencyVerifier?.onExecutionStatus(execState);
+        },
+      });
+
+      // Initialize HMR Consistency Verifier (Phase 4.8)
+      state.hmrConsistencyVerifier = createHmrConsistencyVerifier({
+        transactionManager: state.transactionManager,
+        getSelectedElement: () => state.selectedElement,
+        onReselect: (element) => handleSelect(element, DEFAULT_MODIFIERS),
+        onDeselect: handleDeselect,
+        setToolbarStatus: (status, message) => state.toolbar?.setStatus(status, message),
+        isOverlayElement: state.shadowHost?.isOverlayElement,
+        selectionEngine: state.selectionEngine ?? undefined,
+      });
+
+      // Initialize Toolbar UI
       state.toolbar = createToolbar({
         container: elements.uiRoot,
         dock: 'top',
+        getApplyBlockReason: () => {
+          const tm = state.transactionManager;
+          if (!tm) return undefined;
+
+          const undoStack = tm.getUndoStack();
+          if (undoStack.length === 0) return undefined;
+
+          const latestTx = undoStack[undoStack.length - 1];
+          if (!latestTx) return undefined;
+
+          // Apply only supports style and text transactions
+          if (latestTx.type === 'move') {
+            return 'Apply does not support reorder operations yet';
+          }
+          if (latestTx.type === 'structure') {
+            return 'Apply does not support structure operations yet';
+          }
+          if (latestTx.type !== 'style' && latestTx.type !== 'text') {
+            return `Apply does not support "${latestTx.type}" transactions`;
+          }
+
+          return undefined;
+        },
+        getSelectedElement: () => state.selectedElement,
+        onStructure: (data) => {
+          const target = state.selectedElement;
+          if (!target) return;
+
+          const tm = state.transactionManager;
+          if (!tm) return;
+
+          const tx = tm.applyStructure(target, data);
+          if (!tx) return;
+
+          // Update selection based on action type
+          // For wrap/stack: select the new wrapper
+          // For unwrap: select the unwrapped child
+          // For duplicate: select the clone
+          // For delete: deselect
+          if (data.action === 'delete') {
+            handleDeselect();
+          } else {
+            // The transaction's targetLocator points to the new selection target
+            // For wrap/stack: wrapper
+            // For unwrap: child
+            // For duplicate: clone
+            const newTarget = locateElement(tx.targetLocator);
+            if (newTarget && newTarget.isConnected) {
+              handleSelect(newTarget, DEFAULT_MODIFIERS);
+            }
+          }
+        },
         onApply: applyLatestTransaction,
         onUndo: () => state.transactionManager?.undo(),
         onRedo: () => state.transactionManager?.redo(),
@@ -257,26 +812,71 @@ export function createWebEditorV2(): WebEditorV2Api {
         state.transactionManager.getRedoStack().length,
       );
 
+      // Initialize Breadcrumbs UI (shows selected element ancestry)
+      state.breadcrumbs = createBreadcrumbs({
+        container: elements.uiRoot,
+        dock: 'top',
+        onSelect: (element) => {
+          // When a breadcrumb is clicked, select that ancestor element
+          if (element.isConnected) {
+            handleSelect(element, DEFAULT_MODIFIERS);
+          }
+        },
+      });
+
+      // Initialize Props Bridge (Phase 7)
+      state.propsBridge = createPropsBridge({});
+
+      // Initialize Property Panel (Phase 3)
+      state.propertyPanel = createPropertyPanel({
+        container: elements.uiRoot,
+        transactionManager: state.transactionManager,
+        propsBridge: state.propsBridge,
+        defaultTab: 'design',
+        onSelectElement: (element) => {
+          // When an element is selected from Components tree
+          if (element.isConnected) {
+            handleSelect(element, DEFAULT_MODIFIERS);
+          }
+        },
+        onRequestClose: () => stop(),
+      });
+
       state.active = true;
       console.log(`${WEB_EDITOR_V2_LOG_PREFIX} Started`);
     } catch (error) {
       // Cleanup on failure (reverse order)
+      state.propertyPanel?.dispose();
+      state.propertyPanel = null;
+      state.propsBridge?.dispose();
+      state.propsBridge = null;
+      state.breadcrumbs?.dispose();
+      state.breadcrumbs = null;
       state.toolbar?.dispose();
       state.toolbar = null;
+      state.eventController?.dispose();
+      state.eventController = null;
+      state.dragReorderController?.dispose();
+      state.dragReorderController = null;
+      state.handlesController?.dispose();
+      state.handlesController = null;
       state.transactionManager?.dispose();
       state.transactionManager = null;
       state.positionTracker?.dispose();
       state.positionTracker = null;
-      state.eventController?.dispose();
-      state.eventController = null;
       state.selectionEngine?.dispose();
       state.selectionEngine = null;
+      state.perfHotkeyCleanup?.();
+      state.perfHotkeyCleanup = null;
+      state.perfMonitor?.dispose();
+      state.perfMonitor = null;
       state.canvasOverlay?.dispose();
       state.canvasOverlay = null;
       state.shadowHost?.dispose();
       state.shadowHost = null;
       state.hoveredElement = null;
       state.selectedElement = null;
+      state.applyingSnapshot = null;
       state.active = false;
 
       console.error(`${WEB_EDITOR_V2_LOG_PREFIX} Failed to start:`, error);
@@ -296,9 +896,46 @@ export function createWebEditorV2(): WebEditorV2Api {
     try {
       // Cleanup in reverse order of initialization
 
+      // Commit any in-progress text edit before cleanup
+      if (editSession) {
+        commitEdit();
+      }
+
+      // Cleanup Property Panel (Phase 3)
+      state.propertyPanel?.dispose();
+      state.propertyPanel = null;
+
+      // Cleanup Props Bridge (Phase 7) - best effort cleanup
+      void state.propsBridge?.cleanup();
+      state.propsBridge = null;
+
+      // Cleanup Breadcrumbs UI
+      state.breadcrumbs?.dispose();
+      state.breadcrumbs = null;
+
       // Cleanup Toolbar UI
       state.toolbar?.dispose();
       state.toolbar = null;
+
+      // Cleanup Event Controller (stops event interception)
+      state.eventController?.dispose();
+      state.eventController = null;
+
+      // Cleanup Drag Reorder Controller
+      state.dragReorderController?.dispose();
+      state.dragReorderController = null;
+
+      // Cleanup Resize Handles Controller (Phase 4.9)
+      state.handlesController?.dispose();
+      state.handlesController = null;
+
+      // Cleanup Execution Tracker (Phase 3.10)
+      state.executionTracker?.dispose();
+      state.executionTracker = null;
+
+      // Cleanup HMR Consistency Verifier (Phase 4.8)
+      state.hmrConsistencyVerifier?.dispose();
+      state.hmrConsistencyVerifier = null;
 
       // Cleanup Transaction Manager (clears history)
       state.transactionManager?.dispose();
@@ -308,13 +945,15 @@ export function createWebEditorV2(): WebEditorV2Api {
       state.positionTracker?.dispose();
       state.positionTracker = null;
 
-      // Cleanup Event Controller (stops event interception)
-      state.eventController?.dispose();
-      state.eventController = null;
-
       // Cleanup Selection Engine
       state.selectionEngine?.dispose();
       state.selectionEngine = null;
+
+      // Cleanup Performance Monitor (Phase 5.3)
+      state.perfHotkeyCleanup?.();
+      state.perfHotkeyCleanup = null;
+      state.perfMonitor?.dispose();
+      state.perfMonitor = null;
 
       // Cleanup Canvas Overlay
       state.canvasOverlay?.dispose();
@@ -324,24 +963,33 @@ export function createWebEditorV2(): WebEditorV2Api {
       state.shadowHost?.dispose();
       state.shadowHost = null;
 
-      // Clear element references
+      // Clear element references and apply state
       state.hoveredElement = null;
       state.selectedElement = null;
+      state.applyingSnapshot = null;
 
       console.log(`${WEB_EDITOR_V2_LOG_PREFIX} Stopped`);
     } catch (error) {
       console.error(`${WEB_EDITOR_V2_LOG_PREFIX} Error during cleanup:`, error);
 
       // Force cleanup
+      state.propertyPanel = null;
+      state.propsBridge = null;
+      state.breadcrumbs = null;
       state.toolbar = null;
+      state.eventController = null;
+      state.dragReorderController = null;
+      state.handlesController = null;
       state.transactionManager = null;
       state.positionTracker = null;
-      state.eventController = null;
       state.selectionEngine = null;
+      state.perfHotkeyCleanup = null;
+      state.perfMonitor = null;
       state.canvasOverlay = null;
       state.shadowHost = null;
       state.hoveredElement = null;
       state.selectedElement = null;
+      state.applyingSnapshot = null;
     }
   }
 

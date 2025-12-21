@@ -10,7 +10,14 @@
  * - Emits change events for UI synchronization
  */
 
-import type { ElementLocator, Transaction, TransactionSnapshot } from '@/common/web-editor-types';
+import type {
+  ElementLocator,
+  MoveOperationData,
+  MoveTransactionData,
+  StructureOperationData,
+  Transaction,
+  TransactionSnapshot,
+} from '@/common/web-editor-types';
 import { Disposer } from '../utils/disposables';
 import { createElementLocator, locateElement, locatorKey } from './locator';
 
@@ -63,10 +70,57 @@ export interface StyleTransactionHandle {
   rollback(): void;
 }
 
+/**
+ * Handle for an in-progress multi-style transaction (Phase 4.9)
+ *
+ * Used for operations that modify multiple CSS properties atomically,
+ * such as resize handles (width + height) or position handles (top + left).
+ */
+export interface MultiStyleTransactionHandle {
+  /** Unique handle ID */
+  readonly id: string;
+  /** CSS properties being edited (normalized, unique) */
+  readonly properties: readonly string[];
+  /** Target element locator */
+  readonly targetLocator: ElementLocator;
+  /**
+   * Update one or more style values (live preview).
+   * Keys outside the declared `properties` are ignored.
+   */
+  set(values: Record<string, string>): void;
+  /** Commit the transaction and record to history */
+  commit(options?: { merge?: boolean }): Transaction | null;
+  /** Rollback all tracked properties to original values without recording */
+  rollback(): void;
+}
+
+/** Handle for an in-progress move transaction (Phase 2.4-2.6) */
+export interface MoveTransactionHandle {
+  /** Unique handle ID */
+  readonly id: string;
+  /** Locator for the dragged element at drag start */
+  readonly beforeLocator: ElementLocator;
+  /** Original location */
+  readonly from: MoveOperationData;
+  /** Commit the move and record to history (call after DOM move) */
+  commit(targetAfterMove: Element): Transaction | null;
+  /** Cancel the move session without recording */
+  cancel(): void;
+}
+
 /** Transaction Manager public interface */
 export interface TransactionManager {
   /** Begin an interactive style edit (returns handle for batching) */
   beginStyle(target: Element, property: string): StyleTransactionHandle | null;
+  /**
+   * Begin an interactive multi-style edit (Phase 4.9)
+   *
+   * For operations that modify multiple CSS properties atomically.
+   * Returns null if element doesn't support inline styles or properties list is empty.
+   */
+  beginMultiStyle(target: Element, properties: string[]): MultiStyleTransactionHandle | null;
+  /** Begin a drag move transaction (records before state at drag start) */
+  beginMove(target: Element): MoveTransactionHandle | null;
   /** Apply a style change immediately and record transaction */
   applyStyle(
     target: Element,
@@ -82,6 +136,12 @@ export interface TransactionManager {
     afterValue: string,
     options?: { merge?: boolean },
   ): Transaction | null;
+  /** Record a text transaction for contentEditable edit (Phase 2.7) */
+  recordText(target: Element, beforeText: string, afterText: string): Transaction | null;
+  /** Record a class list change and create transaction (Phase 4.7) */
+  recordClass(target: Element, beforeClasses: string[], afterClasses: string[]): Transaction | null;
+  /** Apply a structure operation and record transaction (Phase 5.5) */
+  applyStructure(target: Element, data: StructureOperationData): Transaction | null;
   /** Undo the last transaction */
   undo(): Transaction | null;
   /** Redo the last undone transaction */
@@ -188,6 +248,253 @@ function applyStylesSnapshot(element: Element, styles: Record<string, string> | 
 }
 
 // =============================================================================
+// Class Helpers (Phase 4.7)
+// =============================================================================
+
+/**
+ * Normalize class list: deduplicate, trim, remove empty tokens
+ */
+function normalizeClassList(input: readonly string[] | null | undefined): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (const raw of input ?? []) {
+    const token = String(raw ?? '').trim();
+    if (!token) continue;
+    if (seen.has(token)) continue;
+    seen.add(token);
+    out.push(token);
+  }
+
+  return out;
+}
+
+/**
+ * Check if two string arrays are equal (order-sensitive)
+ */
+function isSameStringList(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * Read class list from element (compatible with SVG elements)
+ */
+function readClassList(element: Element): string[] {
+  try {
+    // HTMLElement has classList, but SVG's className is SVGAnimatedString
+    const list = (element as HTMLElement).classList;
+    if (list && typeof list[Symbol.iterator] === 'function') {
+      return Array.from(list).filter(Boolean);
+    }
+  } catch {
+    // Fall back to attribute parsing
+  }
+
+  try {
+    const raw = element.getAttribute('class') ?? '';
+    return raw
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Apply class list to element (compatible with SVG elements)
+ * Uses setAttribute for cross-browser SVG compatibility
+ */
+function applyClassListToElement(element: Element, classes: readonly string[]): void {
+  const normalized = normalizeClassList(classes);
+  const value = normalized.join(' ').trim();
+
+  try {
+    if (value) {
+      element.setAttribute('class', value);
+    } else {
+      element.removeAttribute('class');
+    }
+  } catch {
+    // Best-effort: element may be in an invalid state or disconnected
+  }
+}
+
+// =============================================================================
+// Structure Helpers (Phase 5.5)
+// =============================================================================
+
+/**
+ * Read element's inline styles as a plain object.
+ * Only includes explicitly set inline properties (not computed styles).
+ */
+function readInlineStyleMap(element: Element): Record<string, string> | undefined {
+  const style = getInlineStyle(element);
+  if (!style) return undefined;
+
+  const result: Record<string, string> = {};
+  for (let i = 0; i < style.length; i++) {
+    const prop = style.item(i);
+    if (!prop) continue;
+    const value = style.getPropertyValue(prop).trim();
+    if (value) {
+      result[prop] = value;
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+/**
+ * Parse HTML string into a single root element.
+ * Returns null if parsing fails or yields multiple root elements.
+ */
+function parseSingleRootElement(html: string): Element | null {
+  const trimmed = String(html ?? '').trim();
+  if (!trimmed) return null;
+
+  try {
+    const template = document.createElement('template');
+    template.innerHTML = trimmed;
+
+    const firstChild = template.content.firstElementChild;
+    if (!firstChild || template.content.childElementCount !== 1) {
+      return null;
+    }
+    return firstChild;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Remove id attributes from an element and all its descendants.
+ * Used by duplicate to avoid creating duplicate IDs on the page.
+ */
+function stripIdsFromSubtree(root: Element): void {
+  try {
+    root.removeAttribute('id');
+    const descendantsWithId = root.querySelectorAll('[id]');
+    for (const el of Array.from(descendantsWithId)) {
+      el.removeAttribute('id');
+    }
+  } catch {
+    // Best-effort: ignore errors
+  }
+}
+
+/**
+ * Insert an element into a parent at a specific position.
+ * Used for deterministic undo/redo of delete/duplicate operations.
+ */
+function insertElementAtPosition(
+  parent: Element,
+  element: Element,
+  position: MoveOperationData,
+): boolean {
+  if (!parent.isConnected) return false;
+
+  let reference: ChildNode | null = null;
+
+  // Anchor-first resolution for stability
+  if (position.anchorLocator) {
+    const anchor = locateElement(position.anchorLocator);
+    if (anchor && anchor.parentElement === parent) {
+      reference = position.anchorPosition === 'before' ? anchor : anchor.nextSibling;
+    }
+  }
+
+  // Fallback to index-based insertion
+  if (!reference) {
+    const children = Array.from(parent.children);
+    const index = Math.max(0, Math.min(position.insertIndex, children.length));
+    reference = children[index] ?? null;
+  }
+
+  try {
+    parent.insertBefore(element, reference);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Wrap an element with a new container at the same DOM position.
+ * Returns the wrapper element on success, null on failure.
+ */
+function wrapElementWithContainer(
+  target: Element,
+  wrapperTag: string,
+  wrapperStyles?: Record<string, string>,
+): Element | null {
+  const parent = target.parentElement;
+  if (!parent) return null;
+
+  const tag = String(wrapperTag || 'div').toLowerCase();
+  const wrapper = document.createElement(tag);
+
+  // Apply wrapper styles
+  if (wrapperStyles) {
+    applyStylesSnapshot(wrapper, wrapperStyles);
+  }
+
+  try {
+    parent.insertBefore(wrapper, target);
+    wrapper.appendChild(target);
+    return wrapper;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Unwrap a container that has exactly one element child.
+ * Moves the child to the container's position and removes the container.
+ * Returns the unwrapped child on success, null on failure.
+ */
+function unwrapSingleChildContainer(wrapper: Element): Element | null {
+  const parent = wrapper.parentElement;
+  if (!parent) return null;
+  if (wrapper.childElementCount !== 1) return null;
+
+  const child = wrapper.firstElementChild;
+  if (!child) return null;
+
+  try {
+    parent.insertBefore(child, wrapper);
+    wrapper.remove();
+    return child;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build insertion position data for inserting after a target element.
+ * Used by duplicate to record where the clone was inserted.
+ */
+function buildInsertAfterPosition(target: Element): MoveOperationData | null {
+  const parent = target.parentElement;
+  if (!parent) return null;
+
+  const siblings = Array.from(parent.children);
+  const index = siblings.indexOf(target);
+  if (index < 0) return null;
+
+  return {
+    parentLocator: createElementLocator(parent),
+    insertIndex: index + 1,
+    anchorLocator: createElementLocator(target),
+    anchorPosition: 'after',
+  };
+}
+
+// =============================================================================
 // Transaction Helpers
 // =============================================================================
 
@@ -202,26 +509,24 @@ function generateTransactionId(timestamp: number): string {
 }
 
 /**
- * Create a style transaction record
+ * Create a style transaction record from style maps.
+ * This is the core factory used by both single-style and multi-style APIs.
  */
-function createStyleTransaction(
+function createStyleTransactionFromStyles(
   id: string,
   locator: ElementLocator,
-  property: string,
-  beforeValue: string,
-  afterValue: string,
+  beforeStyles: Record<string, string>,
+  afterStyles: Record<string, string>,
   timestamp: number,
 ): Transaction {
-  const prop = normalizePropertyName(property);
-
   const beforeSnapshot: TransactionSnapshot = {
     locator,
-    styles: { [prop]: beforeValue },
+    styles: beforeStyles,
   };
 
   const afterSnapshot: TransactionSnapshot = {
     locator,
-    styles: { [prop]: afterValue },
+    styles: afterStyles,
   };
 
   return {
@@ -233,6 +538,275 @@ function createStyleTransaction(
     timestamp,
     merged: false,
   };
+}
+
+/**
+ * Create a style transaction record for a single property.
+ * Convenience wrapper around createStyleTransactionFromStyles.
+ */
+function createStyleTransaction(
+  id: string,
+  locator: ElementLocator,
+  property: string,
+  beforeValue: string,
+  afterValue: string,
+  timestamp: number,
+): Transaction {
+  const prop = normalizePropertyName(property);
+  return createStyleTransactionFromStyles(
+    id,
+    locator,
+    { [prop]: beforeValue },
+    { [prop]: afterValue },
+    timestamp,
+  );
+}
+
+/**
+ * Create a text transaction record (Phase 2.7)
+ */
+function createTextTransaction(
+  id: string,
+  locator: ElementLocator,
+  beforeText: string,
+  afterText: string,
+  timestamp: number,
+): Transaction {
+  const beforeSnapshot: TransactionSnapshot = {
+    locator,
+    text: beforeText,
+  };
+
+  const afterSnapshot: TransactionSnapshot = {
+    locator,
+    text: afterText,
+  };
+
+  return {
+    id,
+    type: 'text',
+    targetLocator: locator,
+    before: beforeSnapshot,
+    after: afterSnapshot,
+    timestamp,
+    merged: false,
+  };
+}
+
+/**
+ * Create a class transaction record (Phase 4.7)
+ *
+ * Uses separate before/after locators to improve undo/redo recovery
+ * when CSS selectors include class-based matching.
+ */
+function createClassTransaction(
+  id: string,
+  beforeLocator: ElementLocator,
+  afterLocator: ElementLocator,
+  beforeClasses: string[],
+  afterClasses: string[],
+  timestamp: number,
+): Transaction {
+  const beforeSnapshot: TransactionSnapshot = {
+    locator: beforeLocator,
+    classes: beforeClasses,
+  };
+
+  const afterSnapshot: TransactionSnapshot = {
+    locator: afterLocator,
+    classes: afterClasses,
+  };
+
+  return {
+    id,
+    type: 'class',
+    targetLocator: afterLocator,
+    before: beforeSnapshot,
+    after: afterSnapshot,
+    timestamp,
+    merged: false,
+  };
+}
+
+/**
+ * Create a move transaction record (Phase 2.4-2.6)
+ */
+function createMoveTransaction(
+  id: string,
+  beforeLocator: ElementLocator,
+  afterLocator: ElementLocator,
+  moveData: MoveTransactionData,
+  timestamp: number,
+): Transaction {
+  const beforeSnapshot: TransactionSnapshot = {
+    locator: beforeLocator,
+  };
+
+  const afterSnapshot: TransactionSnapshot = {
+    locator: afterLocator,
+  };
+
+  return {
+    id,
+    type: 'move',
+    targetLocator: afterLocator,
+    before: beforeSnapshot,
+    after: afterSnapshot,
+    moveData,
+    timestamp,
+    merged: false,
+  };
+}
+
+/**
+ * Create a structure transaction record (Phase 5.5)
+ *
+ * Used for wrap/unwrap/delete/duplicate operations.
+ * delete/duplicate store position + html for deterministic undo/redo.
+ */
+function createStructureTransaction(
+  id: string,
+  targetLocator: ElementLocator,
+  beforeLocator: ElementLocator,
+  afterLocator: ElementLocator,
+  structureData: StructureOperationData,
+  timestamp: number,
+): Transaction {
+  const beforeSnapshot: TransactionSnapshot = { locator: beforeLocator };
+  const afterSnapshot: TransactionSnapshot = { locator: afterLocator };
+
+  return {
+    id,
+    type: 'structure',
+    targetLocator,
+    before: beforeSnapshot,
+    after: afterSnapshot,
+    structureData,
+    timestamp,
+    merged: false,
+  };
+}
+
+/**
+ * Check if element is a disallowed target for structure operations (HTML/BODY/HEAD)
+ * These elements should not be wrapped, deleted, duplicated, or unwrapped.
+ */
+function isDisallowedStructureTarget(element: Element): boolean {
+  const tag = element.tagName?.toUpperCase();
+  return tag === 'HTML' || tag === 'BODY' || tag === 'HEAD';
+}
+
+/**
+ * Check if element is a disallowed parent container for structure operations (HTML/HEAD only)
+ * BODY is allowed as a parent container (unlike as a target).
+ */
+function isDisallowedStructureContainer(element: Element): boolean {
+  const tag = element.tagName?.toUpperCase();
+  return tag === 'HTML' || tag === 'HEAD';
+}
+
+/**
+ * Check if element is a disallowed move target (HTML/BODY/HEAD)
+ */
+function isDisallowedMoveElement(element: Element): boolean {
+  const tag = element.tagName?.toUpperCase();
+  return tag === 'HTML' || tag === 'BODY' || tag === 'HEAD';
+}
+
+/**
+ * Build MoveOperationData from element's current DOM position
+ */
+function buildMoveOperationData(element: Element): MoveOperationData | null {
+  const parent = element.parentElement;
+  if (!parent) return null;
+
+  const siblings = Array.from(parent.children);
+  const insertIndex = siblings.indexOf(element);
+  if (insertIndex < 0) return null;
+
+  const parentLocator = createElementLocator(parent);
+
+  // Prefer anchoring to next sibling (insertBefore semantics)
+  const next = element.nextElementSibling;
+  if (next) {
+    return {
+      parentLocator,
+      insertIndex,
+      anchorLocator: createElementLocator(next),
+      anchorPosition: 'before',
+    };
+  }
+
+  // Fallback to previous sibling
+  const prev = element.previousElementSibling;
+  if (prev) {
+    return {
+      parentLocator,
+      insertIndex,
+      anchorLocator: createElementLocator(prev),
+      anchorPosition: 'after',
+    };
+  }
+
+  // No siblings - index only
+  return {
+    parentLocator,
+    insertIndex,
+    anchorPosition: 'before',
+  };
+}
+
+/**
+ * Apply a move operation (for undo/redo)
+ */
+function applyMoveOperation(target: Element, op: MoveOperationData): boolean {
+  if (!target.isConnected) return false;
+  if (isDisallowedMoveElement(target)) return false;
+
+  const parent = locateElement(op.parentLocator);
+  if (!parent) return false;
+  if (!parent.isConnected) return false;
+
+  // Disallow cross-root moves
+  const targetRoot = target.getRootNode?.();
+  const parentRoot = parent.getRootNode?.();
+  if (targetRoot && parentRoot && targetRoot !== parentRoot) return false;
+
+  // Prevent cycles (moving into own descendant)
+  if (target === parent || target.contains(parent)) return false;
+
+  let reference: ChildNode | null = null;
+
+  // Anchor-first resolution
+  if (op.anchorLocator) {
+    const anchor = locateElement(op.anchorLocator);
+    if (anchor && anchor !== target && anchor.parentElement === parent) {
+      reference = op.anchorPosition === 'before' ? anchor : anchor.nextSibling;
+      // Skip if reference is the target itself
+      if (reference === target) {
+        reference = target.nextSibling;
+      }
+    }
+  }
+
+  // Fallback: index-based
+  if (!reference) {
+    const children = Array.from(parent.children);
+    // Remove target from consideration if it's already in parent
+    const existingIndex = children.indexOf(target);
+    if (existingIndex !== -1) {
+      children.splice(existingIndex, 1);
+    }
+    const index = Math.max(0, Math.min(op.insertIndex, children.length));
+    reference = children[index] ?? null;
+  }
+
+  try {
+    parent.insertBefore(target, reference);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -292,11 +866,210 @@ function mergeInto(prev: Transaction, next: Transaction): boolean {
 }
 
 /**
+ * Apply a structure transaction (undo or redo) - Phase 5.5
+ *
+ * Structure operations may create/remove nodes, so delete/duplicate
+ * store position + html to make redo/undo deterministic.
+ */
+function applyStructureTransaction(tx: Transaction, direction: 'undo' | 'redo'): boolean {
+  const data = tx.structureData;
+  if (!data) return false;
+
+  const isRedo = direction === 'redo';
+
+  switch (data.action) {
+    case 'wrap': {
+      if (isRedo) {
+        // Redo wrap: find the target and wrap it
+        const target =
+          locateElement(tx.before.locator) ??
+          locateElement(tx.targetLocator) ??
+          locateElement(tx.after.locator);
+        if (!target || !target.isConnected) return false;
+        if (isDisallowedStructureTarget(target)) return false;
+
+        const parent = target.parentElement;
+        if (!parent || !parent.isConnected || isDisallowedStructureContainer(parent)) return false;
+
+        const wrapper = wrapElementWithContainer(
+          target,
+          data.wrapperTag ?? 'div',
+          data.wrapperStyles,
+        );
+        if (!wrapper || !wrapper.isConnected) return false;
+
+        // Update locators for subsequent undo
+        const wrapperLocator = createElementLocator(wrapper);
+        tx.after.locator = wrapperLocator;
+        tx.targetLocator = wrapperLocator;
+        return true;
+      }
+
+      // Undo wrap: unwrap the wrapper
+      const wrapper = locateElement(tx.after.locator) ?? locateElement(tx.targetLocator);
+      if (!wrapper || !wrapper.isConnected) return false;
+      if (isDisallowedStructureTarget(wrapper)) return false;
+
+      const child = unwrapSingleChildContainer(wrapper);
+      if (!child || !child.isConnected) return false;
+
+      // Update before locator for subsequent redo
+      tx.before.locator = createElementLocator(child);
+      return true;
+    }
+
+    case 'unwrap': {
+      if (isRedo) {
+        // Redo unwrap: find the wrapper and unwrap it
+        const wrapper =
+          locateElement(tx.before.locator) ??
+          locateElement(tx.after.locator)?.parentElement ??
+          locateElement(tx.targetLocator)?.parentElement;
+        if (!wrapper || !wrapper.isConnected) return false;
+        if (isDisallowedStructureTarget(wrapper)) return false;
+
+        const child = unwrapSingleChildContainer(wrapper);
+        if (!child || !child.isConnected) return false;
+
+        // Update locators for subsequent undo
+        const childLocator = createElementLocator(child);
+        tx.after.locator = childLocator;
+        tx.targetLocator = childLocator;
+        return true;
+      }
+
+      // Undo unwrap: rewrap the child
+      const child = locateElement(tx.after.locator) ?? locateElement(tx.targetLocator);
+      if (!child || !child.isConnected) return false;
+      if (isDisallowedStructureTarget(child)) return false;
+
+      const parent = child.parentElement;
+      if (!parent || !parent.isConnected || isDisallowedStructureContainer(parent)) return false;
+
+      const wrapper = wrapElementWithContainer(child, data.wrapperTag ?? 'div', data.wrapperStyles);
+      if (!wrapper || !wrapper.isConnected) return false;
+
+      // Update before locator for subsequent redo
+      tx.before.locator = createElementLocator(wrapper);
+      return true;
+    }
+
+    case 'delete': {
+      if (isRedo) {
+        // Redo delete: remove the element
+        const target = locateElement(tx.before.locator) ?? locateElement(tx.targetLocator);
+        if (!target || !target.isConnected) return false;
+        if (isDisallowedStructureTarget(target)) return false;
+
+        target.remove();
+        return true;
+      }
+
+      // Undo delete: restore the element from html + position
+      if (!data.position || !data.html) return false;
+
+      const parent = locateElement(data.position.parentLocator);
+      if (!parent || !parent.isConnected || isDisallowedStructureContainer(parent)) return false;
+
+      const element = parseSingleRootElement(data.html);
+      if (!element) return false;
+
+      if (!insertElementAtPosition(parent, element, data.position)) return false;
+
+      // Update locators for subsequent redo
+      const locator = createElementLocator(element);
+      tx.before.locator = locator;
+      tx.targetLocator = locator;
+      return true;
+    }
+
+    case 'duplicate': {
+      if (isRedo) {
+        // Redo duplicate: recreate the clone from html + position
+        if (!data.position || !data.html) return false;
+
+        const parent = locateElement(data.position.parentLocator);
+        if (!parent || !parent.isConnected || isDisallowedStructureContainer(parent)) return false;
+
+        const element = parseSingleRootElement(data.html);
+        if (!element) return false;
+
+        if (!insertElementAtPosition(parent, element, data.position)) return false;
+
+        // Update locators for subsequent undo
+        const locator = createElementLocator(element);
+        tx.after.locator = locator;
+        tx.targetLocator = locator;
+        return true;
+      }
+
+      // Undo duplicate: remove the clone
+      const clone = locateElement(tx.after.locator) ?? locateElement(tx.targetLocator);
+      if (!clone || !clone.isConnected) return false;
+      if (isDisallowedStructureTarget(clone)) return false;
+
+      clone.remove();
+      return true;
+    }
+
+    default:
+      return false;
+  }
+}
+
+/**
  * Apply a transaction (undo or redo)
  * Returns true on success, false on failure
  */
 function applyTransaction(tx: Transaction, direction: 'undo' | 'redo'): boolean {
-  if (tx.type !== 'style') return true;
+  // Phase 2.4-2.6: Apply move transactions
+  if (tx.type === 'move') {
+    const moveData = tx.moveData;
+    if (!moveData) return false;
+
+    // For undo: element is currently at after position, use after.locator to find it
+    // For redo: element is currently at before position, use before.locator to find it
+    const primaryLocator = direction === 'undo' ? tx.after.locator : tx.before.locator;
+    const fallbackLocator = direction === 'undo' ? tx.before.locator : tx.after.locator;
+
+    const target =
+      locateElement(primaryLocator) ??
+      locateElement(fallbackLocator) ??
+      locateElement(tx.targetLocator);
+
+    if (!target) return false;
+
+    const op = direction === 'undo' ? moveData.from : moveData.to;
+    return applyMoveOperation(target, op);
+  }
+
+  // Phase 4.7: Apply class transactions
+  if (tx.type === 'class') {
+    // For undo: element is currently at after state, use after.locator to find it
+    // For redo: element is currently at before state, use before.locator to find it
+    const primaryLocator = direction === 'undo' ? tx.after.locator : tx.before.locator;
+    const fallbackLocator = direction === 'undo' ? tx.before.locator : tx.after.locator;
+
+    const target =
+      locateElement(primaryLocator) ??
+      locateElement(fallbackLocator) ??
+      locateElement(tx.targetLocator);
+
+    if (!target) return false;
+
+    const snapshot = direction === 'undo' ? tx.before : tx.after;
+    const classes = Array.isArray(snapshot.classes) ? snapshot.classes : [];
+    applyClassListToElement(target, classes);
+    return true;
+  }
+
+  // Phase 5.5: Apply structure transactions
+  if (tx.type === 'structure') {
+    return applyStructureTransaction(tx, direction);
+  }
+
+  // Only handle style and text transactions (other types are no-op here)
+  if (tx.type !== 'style' && tx.type !== 'text') return true;
 
   const target = locateElement(tx.targetLocator);
   if (!target) {
@@ -304,7 +1077,18 @@ function applyTransaction(tx: Transaction, direction: 'undo' | 'redo'): boolean 
   }
 
   const snapshot = direction === 'undo' ? tx.before : tx.after;
-  applyStylesSnapshot(target, snapshot.styles);
+
+  if (tx.type === 'style') {
+    applyStylesSnapshot(target, snapshot.styles);
+    return true;
+  }
+
+  // Phase 2.7: Apply text content change
+  if (tx.type === 'text') {
+    target.textContent = snapshot.text ?? '';
+    return true;
+  }
+
   return true;
 }
 
@@ -401,11 +1185,323 @@ export function createTransactionManager(
     return tx;
   }
 
+  /**
+   * Record a text transaction (Phase 2.7)
+   */
+  function recordText(target: Element, beforeText: string, afterText: string): Transaction | null {
+    if (disposer.isDisposed) return null;
+
+    const before = String(beforeText ?? '');
+    const after = String(afterText ?? '');
+    if (before === after) return null;
+
+    const locator = createElementLocator(target);
+    const timestamp = now();
+    const id = generateTransactionId(timestamp);
+    const tx = createTextTransaction(id, locator, before, after, timestamp);
+
+    // No merge for text transactions in Phase 2
+    pushTransaction(tx, false);
+    return tx;
+  }
+
+  /**
+   * Record a class list change and create transaction (Phase 4.7)
+   *
+   * Notes:
+   * - Uses setAttribute/removeAttribute for SVG compatibility
+   * - Captures before/after locators to improve redo/undo recovery
+   *   when CSS selectors include class-based matching
+   * - No merge support (class edits should be discrete undo steps)
+   */
+  function recordClass(
+    target: Element,
+    beforeClasses: string[],
+    afterClasses: string[],
+  ): Transaction | null {
+    if (disposer.isDisposed) return null;
+    if (!target.isConnected) return null;
+
+    // Read current DOM state as ground truth
+    const domClasses = normalizeClassList(readClassList(target));
+    const beforeInput = normalizeClassList(beforeClasses);
+    const after = normalizeClassList(afterClasses);
+
+    // Prefer DOM as source of truth if caller-provided classes are stale
+    const before = isSameStringList(beforeInput, domClasses) ? beforeInput : domClasses;
+    if (isSameStringList(before, after)) return null;
+
+    const timestamp = now();
+    const id = generateTransactionId(timestamp);
+
+    // Capture locator before applying change (class may affect selector matching)
+    const beforeLocator = createElementLocator(target);
+
+    // Apply the change
+    applyClassListToElement(target, after);
+
+    // Capture locator after applying change
+    const afterLocator = createElementLocator(target);
+
+    const tx = createClassTransaction(id, beforeLocator, afterLocator, before, after, timestamp);
+
+    // No merge for class transactions (each add/remove is a discrete undo step)
+    pushTransaction(tx, false);
+    return tx;
+  }
+
+  /**
+   * Apply a structure operation and record a transaction (Phase 5.5)
+   *
+   * Performs the DOM mutation immediately and records the transaction.
+   * delete/duplicate store position + html for deterministic undo/redo.
+   * unwrap is limited to single-child containers to keep the schema minimal.
+   */
+  function applyStructure(target: Element, input: StructureOperationData): Transaction | null {
+    if (disposer.isDisposed) return null;
+    if (!target.isConnected) return null;
+    if (isDisallowedStructureTarget(target)) return null;
+
+    const action = input?.action;
+    const timestamp = now();
+    const id = generateTransactionId(timestamp);
+
+    // =========================================================================
+    // Wrap: create a container around the target element
+    // =========================================================================
+    if (action === 'wrap') {
+      const parent = target.parentElement;
+      if (!parent || !parent.isConnected || isDisallowedStructureContainer(parent)) return null;
+
+      const beforeLocator = createElementLocator(target);
+      const wrapper = wrapElementWithContainer(
+        target,
+        input.wrapperTag ?? 'div',
+        input.wrapperStyles,
+      );
+      if (!wrapper || !wrapper.isConnected) return null;
+
+      const wrapperLocator = createElementLocator(wrapper);
+      const structureData: StructureOperationData = {
+        action: 'wrap',
+        wrapperTag: input.wrapperTag ?? 'div',
+        wrapperStyles: input.wrapperStyles,
+      };
+
+      const tx = createStructureTransaction(
+        id,
+        wrapperLocator,
+        beforeLocator,
+        wrapperLocator,
+        structureData,
+        timestamp,
+      );
+
+      pushTransaction(tx, false);
+      return tx;
+    }
+
+    // =========================================================================
+    // Unwrap: remove the container and keep its single child
+    // =========================================================================
+    if (action === 'unwrap') {
+      const wrapper = target;
+      const parent = wrapper.parentElement;
+      if (!parent || !parent.isConnected || isDisallowedStructureContainer(parent)) return null;
+
+      // Only support unwrapping containers with exactly one element child
+      if (wrapper.childElementCount !== 1) return null;
+
+      const beforeLocator = createElementLocator(wrapper);
+      const wrapperTag = wrapper.tagName.toLowerCase();
+      const wrapperStyles = readInlineStyleMap(wrapper);
+
+      const child = unwrapSingleChildContainer(wrapper);
+      if (!child || !child.isConnected) return null;
+
+      const childLocator = createElementLocator(child);
+      const structureData: StructureOperationData = {
+        action: 'unwrap',
+        wrapperTag,
+        wrapperStyles,
+      };
+
+      const tx = createStructureTransaction(
+        id,
+        childLocator,
+        beforeLocator,
+        childLocator,
+        structureData,
+        timestamp,
+      );
+
+      pushTransaction(tx, false);
+      return tx;
+    }
+
+    // =========================================================================
+    // Delete: remove the element and store info for restoration
+    // =========================================================================
+    if (action === 'delete') {
+      const position = buildMoveOperationData(target);
+      if (!position) return null;
+
+      // Store outerHTML for undo restoration
+      const html = String((target as unknown as { outerHTML?: unknown }).outerHTML ?? '').trim();
+      if (!html) return null;
+
+      const beforeLocator = createElementLocator(target);
+      const afterLocator = position.parentLocator;
+
+      try {
+        target.remove();
+      } catch {
+        return null;
+      }
+
+      const structureData: StructureOperationData = {
+        action: 'delete',
+        position,
+        html,
+      };
+
+      const tx = createStructureTransaction(
+        id,
+        beforeLocator,
+        beforeLocator,
+        afterLocator,
+        structureData,
+        timestamp,
+      );
+
+      pushTransaction(tx, false);
+      return tx;
+    }
+
+    // =========================================================================
+    // Duplicate: clone the element and insert after it
+    // =========================================================================
+    if (action === 'duplicate') {
+      const parent = target.parentElement;
+      if (!parent || !parent.isConnected || isDisallowedStructureContainer(parent)) return null;
+
+      const position = buildInsertAfterPosition(target);
+      if (!position) return null;
+
+      const beforeLocator = createElementLocator(target);
+
+      // Clone the element and strip IDs to avoid duplicates
+      const clone = target.cloneNode(true) as Element;
+      stripIdsFromSubtree(clone);
+
+      try {
+        // Insert immediately after target
+        parent.insertBefore(clone, target.nextSibling);
+      } catch {
+        return null;
+      }
+
+      // Store clone's outerHTML for redo restoration
+      const html = String((clone as unknown as { outerHTML?: unknown }).outerHTML ?? '').trim();
+      if (!html) return null;
+
+      const cloneLocator = createElementLocator(clone);
+      const structureData: StructureOperationData = {
+        action: 'duplicate',
+        position,
+        html,
+      };
+
+      const tx = createStructureTransaction(
+        id,
+        cloneLocator,
+        beforeLocator,
+        cloneLocator,
+        structureData,
+        timestamp,
+      );
+
+      pushTransaction(tx, false);
+      return tx;
+    }
+
+    return null;
+  }
+
+  /**
+   * Begin a move transaction for drag-reorder (Phase 2.4-2.6)
+   *
+   * Records the element's location at drag start. Call commit() after DOM move
+   * to record the final location and create the transaction.
+   */
+  function beginMove(target: Element): MoveTransactionHandle | null {
+    if (disposer.isDisposed) return null;
+    if (!target.isConnected) return null;
+    if (isDisallowedMoveElement(target)) return null;
+
+    const from = buildMoveOperationData(target);
+    if (!from) return null;
+
+    const startedAt = now();
+    const id = generateTransactionId(startedAt);
+    const beforeLocator = createElementLocator(target);
+    let completed = false;
+
+    function commit(targetAfterMove: Element): Transaction | null {
+      if (completed || disposer.isDisposed) return null;
+      completed = true;
+
+      if (!targetAfterMove.isConnected) return null;
+      if (isDisallowedMoveElement(targetAfterMove)) return null;
+
+      const to = buildMoveOperationData(targetAfterMove);
+      if (!to) return null;
+
+      // Skip no-op moves (same parent and same effective position)
+      const sameParent = locatorKey(from!.parentLocator) === locatorKey(to.parentLocator);
+      const sameIndex = from!.insertIndex === to.insertIndex;
+      const sameAnchorPos = from!.anchorPosition === to.anchorPosition;
+      const sameAnchor =
+        (!from!.anchorLocator && !to.anchorLocator) ||
+        (from!.anchorLocator &&
+          to.anchorLocator &&
+          locatorKey(from!.anchorLocator) === locatorKey(to.anchorLocator));
+
+      if (sameParent && sameIndex && sameAnchor && sameAnchorPos) {
+        return null;
+      }
+
+      const afterLocator = createElementLocator(targetAfterMove);
+      const moveData: MoveTransactionData = { from: from!, to };
+      const tx = createMoveTransaction(id, beforeLocator, afterLocator, moveData, now());
+
+      // No merge for move transactions
+      pushTransaction(tx, false);
+      return tx;
+    }
+
+    function cancel(): void {
+      if (completed || disposer.isDisposed) return;
+      completed = true;
+    }
+
+    return {
+      id,
+      beforeLocator,
+      from,
+      commit,
+      cancel,
+    };
+  }
+
   function beginStyle(target: Element, property: string): StyleTransactionHandle | null {
     if (disposer.isDisposed) return null;
 
-    const inlineStyle = getInlineStyle(target);
-    if (!inlineStyle) return null;
+    const inlineStyleOrNull = getInlineStyle(target);
+    if (!inlineStyleOrNull) return null;
+
+    // Capture as non-null after guard (TypeScript can't narrow across closures)
+    const inlineStyle: CSSStyleDeclaration = inlineStyleOrNull;
 
     const prop = normalizePropertyName(property);
     if (!prop) return null;
@@ -444,6 +1540,116 @@ export function createTransactionManager(
     return {
       id,
       property: prop,
+      targetLocator: locator,
+      set,
+      commit,
+      rollback,
+    };
+  }
+
+  /**
+   * Begin an interactive multi-style edit (Phase 4.9)
+   *
+   * For operations that modify multiple CSS properties atomically,
+   * such as resize handles (width + height) or position handles (top + left).
+   *
+   * Key differences from beginStyle:
+   * - Tracks multiple properties at once
+   * - Only records properties that actually changed
+   * - Default merge is disabled to preserve gesture undo granularity
+   */
+  function beginMultiStyle(
+    target: Element,
+    properties: string[],
+  ): MultiStyleTransactionHandle | null {
+    if (disposer.isDisposed) return null;
+
+    const inlineStyleOrNull = getInlineStyle(target);
+    if (!inlineStyleOrNull) return null;
+    const inlineStyle: CSSStyleDeclaration = inlineStyleOrNull;
+
+    // Normalize and deduplicate properties
+    const normalizedProps = Array.from(
+      new Set(
+        properties.map((p) => normalizePropertyName(String(p))).filter((p): p is string => !!p),
+      ),
+    );
+    if (normalizedProps.length === 0) return null;
+
+    const trackedProps = new Set(normalizedProps);
+    const locator = createElementLocator(target);
+    const startedAt = now();
+    const id = generateTransactionId(startedAt);
+
+    // Capture original values for all tracked properties
+    const beforeValues: Record<string, string> = {};
+    for (const prop of normalizedProps) {
+      beforeValues[prop] = readStyleValue(inlineStyle, prop);
+    }
+
+    let completed = false;
+
+    /**
+     * Update one or more style values (live preview).
+     * Only properties declared in the initial list are applied.
+     */
+    function set(values: Record<string, string>): void {
+      if (completed || disposer.isDisposed) return;
+
+      for (const [rawKey, rawVal] of Object.entries(values)) {
+        const prop = normalizePropertyName(rawKey);
+        if (!prop || !trackedProps.has(prop)) continue;
+        writeStyleValue(inlineStyle, prop, String(rawVal ?? ''));
+      }
+    }
+
+    /**
+     * Commit the transaction and record to history.
+     * Only properties that actually changed are included in the transaction.
+     */
+    function commit(commitOptions?: { merge?: boolean }): Transaction | null {
+      if (completed || disposer.isDisposed) return null;
+      completed = true;
+
+      const beforeStyles: Record<string, string> = {};
+      const afterStyles: Record<string, string> = {};
+
+      // Only include properties that actually changed
+      for (const prop of normalizedProps) {
+        const beforeVal = beforeValues[prop] ?? '';
+        const afterVal = readStyleValue(inlineStyle, prop);
+        if (afterVal === beforeVal) continue;
+        beforeStyles[prop] = beforeVal;
+        afterStyles[prop] = afterVal;
+      }
+
+      // No changes - don't create a transaction
+      if (Object.keys(beforeStyles).length === 0) return null;
+
+      const tx = createStyleTransactionFromStyles(id, locator, beforeStyles, afterStyles, now());
+
+      // Default to no-merge to preserve gesture undo granularity.
+      // Multi-style edits (e.g., drag resize) should be single undo steps.
+      pushTransaction(tx, commitOptions?.merge === true);
+      return tx;
+    }
+
+    /**
+     * Rollback all tracked properties to original values without recording.
+     */
+    function rollback(): void {
+      if (completed || disposer.isDisposed) return;
+      completed = true;
+
+      for (const prop of normalizedProps) {
+        writeStyleValue(inlineStyle, prop, beforeValues[prop] ?? '');
+      }
+      emit('rollback', null);
+    }
+
+    return {
+      id,
+      properties: normalizedProps,
       targetLocator: locator,
       set,
       commit,
@@ -578,8 +1784,13 @@ export function createTransactionManager(
 
   return {
     beginStyle,
+    beginMultiStyle,
+    beginMove,
     applyStyle,
     recordStyle,
+    recordText,
+    recordClass,
+    applyStructure,
     undo,
     redo,
     canUndo,

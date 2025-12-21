@@ -718,20 +718,43 @@ async function saveMarker() {
   try {
     if (!markerForm.value.selector) return;
 
+    const isEditing = !!editingMarkerId.value;
+
     // Only set URL for new markers, not when editing existing ones
-    if (!editingMarkerId.value) {
+    if (!isEditing) {
       markerForm.value.url = currentPageUrl.value;
     }
 
-    const payload: any = { ...markerForm.value };
-    if (editingMarkerId.value) {
-      payload.id = editingMarkerId.value;
-    }
+    let res: any;
 
-    const res: any = await chrome.runtime.sendMessage({
-      type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_SAVE,
-      marker: payload,
-    });
+    if (isEditing) {
+      // Use UPDATE for editing to preserve createdAt
+      const existingMarker = markers.value.find((m) => m.id === editingMarkerId.value);
+      if (existingMarker) {
+        const updatedMarker: ElementMarker = {
+          ...existingMarker,
+          ...markerForm.value,
+          id: editingMarkerId.value!,
+        };
+        res = await chrome.runtime.sendMessage({
+          type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_UPDATE,
+          marker: updatedMarker,
+        });
+      } else {
+        // Fallback to SAVE if existing marker not found in local state
+        console.warn('Editing marker not found in local state, falling back to SAVE');
+        res = await chrome.runtime.sendMessage({
+          type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_SAVE,
+          marker: { ...markerForm.value, id: editingMarkerId.value },
+        });
+      }
+    } else {
+      // Use SAVE for new markers
+      res = await chrome.runtime.sendMessage({
+        type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_SAVE,
+        marker: { ...markerForm.value },
+      });
+    }
 
     if (res?.success) {
       resetForm();
@@ -796,21 +819,41 @@ async function validateMarker(marker: ElementMarker) {
   }
 }
 
+/**
+ * Check if element-marker.js is already injected in the tab
+ * Uses a short timeout to avoid hanging on unresponsive tabs
+ */
+async function isMarkerInjected(tabId: number): Promise<boolean> {
+  try {
+    const response = await Promise.race([
+      chrome.tabs.sendMessage(tabId, { action: 'element_marker_ping' }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 300)),
+    ]);
+    return response?.status === 'pong';
+  } catch {
+    return false;
+  }
+}
+
 async function highlightInTab(marker: ElementMarker) {
   try {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     const tabId = tabs[0]?.id;
     if (!tabId) return;
 
-    // Ensure element-marker.js is injected
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId, allFrames: true },
-        files: ['inject-scripts/element-marker.js'],
-        world: 'ISOLATED',
-      });
-    } catch {
-      // Already injected, ignore
+    // Check if already injected via ping to avoid duplicate injection
+    const alreadyInjected = await isMarkerInjected(tabId);
+
+    if (!alreadyInjected) {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId, allFrames: true },
+          files: ['inject-scripts/element-marker.js'],
+          world: 'ISOLATED',
+        });
+      } catch {
+        // Script injection may fail on some pages
+      }
     }
 
     // Send highlight message to content script

@@ -164,7 +164,7 @@ export interface ElementLocator {
 // =============================================================================
 
 /** Transaction operation types */
-export type TransactionType = 'style' | 'text' | 'move' | 'structure';
+export type TransactionType = 'style' | 'text' | 'class' | 'move' | 'structure';
 
 /**
  * Transaction snapshot for undo/redo
@@ -177,35 +177,60 @@ export interface TransactionSnapshot {
   html?: string;
   /** Changed style properties */
   styles?: Record<string, string>;
+  /** Class list tokens (from `class` attribute) */
+  classes?: string[];
   /** Text content */
   text?: string;
 }
 
 /**
- * Move operation data
- * Captures parent/position for element moves
+ * Move position data
+ * Captures a concrete insertion point under a parent element
  */
 export interface MoveOperationData {
   /** Target parent element locator */
   parentLocator: ElementLocator;
-  /** Insert position index */
+  /** Insert position index (among element children) */
   insertIndex: number;
-  /** Anchor sibling element locator */
+  /** Anchor sibling element locator (for stable positioning) */
   anchorLocator?: ElementLocator;
   /** Position relative to anchor */
   anchorPosition: 'before' | 'after';
 }
 
 /**
+ * Move transaction data
+ * Captures both source and destination for undo/redo
+ */
+export interface MoveTransactionData {
+  /** Original location before move */
+  from: MoveOperationData;
+  /** Target location after move */
+  to: MoveOperationData;
+}
+
+/**
  * Structure operation data
- * For wrap/unwrap/delete/duplicate operations
+ * For wrap/unwrap/delete/duplicate operations (Phase 5.5)
  */
 export interface StructureOperationData {
+  /** Structure action type */
   action: 'wrap' | 'unwrap' | 'delete' | 'duplicate';
-  /** Wrapper tag for wrap action */
+  /** Wrapper tag for wrap/unwrap actions */
   wrapperTag?: string;
-  /** Wrapper styles for wrap action */
+  /** Wrapper inline styles for wrap/unwrap actions */
   wrapperStyles?: Record<string, string>;
+  /**
+   * Deterministic insertion position for undo/redo.
+   * Required for delete (restore) and duplicate (re-create).
+   */
+  position?: MoveOperationData;
+  /**
+   * Serialized element HTML for undo/redo.
+   * Must be a single-root element outerHTML string.
+   * Used by delete (restore original) and duplicate (re-create clone).
+   */
+  html?: string;
 }
 
 /**
@@ -223,7 +248,7 @@ export interface Transaction {
   /** State after change */
   after: TransactionSnapshot;
   /** Move-specific data */
-  moveData?: MoveOperationData;
+  moveData?: MoveTransactionData;
   /** Structure-specific data */
   structureData?: StructureOperationData;
   /** Timestamp */

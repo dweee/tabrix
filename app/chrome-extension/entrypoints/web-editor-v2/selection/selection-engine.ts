@@ -36,6 +36,8 @@ export interface SelectionCandidate {
   score: number;
   /** Debug reasons explaining the score */
   reasons: string[];
+  /** Whether this element is a wrapper-only container (no visual meaning) */
+  wrapperOnly?: boolean;
 }
 
 /** Keyboard modifiers for selection behavior */
@@ -50,6 +52,15 @@ export interface Modifiers {
 export interface SelectionEngine {
   /** Find the best target at a viewport point with modifier support */
   findBestTarget(x: number, y: number, modifiers: Modifiers): Element | null;
+  /**
+   * Find the best target from an Event (Shadow DOM aware via composedPath).
+   * Intended for click/selection only; hover should stay coordinate-based for performance.
+   *
+   * - Uses composedPath() to access elements inside Shadow DOM
+   * - Ctrl/Cmd + Click: selects innermost visible element (drill-in)
+   * - Alt + Click: selects parent element (drill-up)
+   */
+  findBestTargetFromEvent(event: Event, modifiers: Modifiers): Element | null;
   /** Get scored candidates at a point (for debugging or drill-up UI) */
   getCandidatesAtPoint(x: number, y: number): SelectionCandidate[];
   /** Get a meaningful parent candidate (for Alt drill-up) */
@@ -238,8 +249,8 @@ function isEffectivelyInvisible(style: CSSStyleDeclaration, rect: DOMRectReadOnl
   if (style.visibility === 'hidden' || style.visibility === 'collapse') return true;
   if (parseNumber(style.opacity) <= 0.01) return true;
 
-  // Check contentVisibility
-  const contentVisibility = (style as Record<string, unknown>).contentVisibility;
+  // Check contentVisibility (non-standard property)
+  const contentVisibility = (style as unknown as Record<string, unknown>).contentVisibility;
   if (contentVisibility === 'hidden') return true;
 
   // Zero-dimension elements
@@ -521,8 +532,9 @@ export function createSelectionEngine(options: SelectionEngineOptions): Selectio
     score += size.points;
     reasons.push(...size.reasons);
 
-    // Penalize wrapper-only containers
-    if (isWrapperOnly(element, style, visual.points, interactivity.points)) {
+    // Check wrapper-only status and penalize
+    const wrapperOnly = isWrapperOnly(element, style, visual.points, interactivity.points);
+    if (wrapperOnly) {
       score -= 8;
       reasons.push('wrapperOnly:-8');
     }
@@ -541,7 +553,7 @@ export function createSelectionEngine(options: SelectionEngineOptions): Selectio
       reasons.push('position:fixed-large:-2');
     }
 
-    return { element, score, reasons };
+    return { element, score, reasons, wrapperOnly };
   }
 
   /**
@@ -663,8 +675,216 @@ export function createSelectionEngine(options: SelectionEngineOptions): Selectio
     return best;
   }
 
+  // ===========================================================================
+  // Shadow DOM (composedPath) Support - Phase 2.1
+  // ===========================================================================
+
+  /**
+   * Extract Element nodes from an event's composedPath(), filtering overlay elements.
+   * Returns elements ordered from innermost to outermost.
+   *
+   * Why composedPath?
+   * - When events bubble from inside Shadow DOM, they get "retargeted" at shadow boundaries
+   * - By the time a document-level listener receives the event, event.target points to the shadow host
+   * - composedPath() exposes the original event path before retargeting
+   */
+  function getComposedPathElements(event: Event): Element[] {
+    try {
+      const path = typeof event.composedPath === 'function' ? event.composedPath() : null;
+      if (!Array.isArray(path) || path.length === 0) return [];
+
+      const elements: Element[] = [];
+      for (const node of path) {
+        // Skip non-Element nodes (Text, Document, Window, etc.)
+        if (!(node instanceof Element)) continue;
+        // Skip overlay UI elements
+        if (isOverlayElement(node)) continue;
+        // Skip HTML and BODY
+        const tag = node.tagName.toUpperCase();
+        if (tag === 'HTML' || tag === 'BODY') continue;
+
+        elements.push(node);
+      }
+      return elements;
+    } catch {
+      // composedPath() may throw in edge cases (e.g., detached nodes)
+      return [];
+    }
+  }
+
+  /**
+   * Extract viewport coordinates from a MouseEvent/PointerEvent.
+   */
+  function extractClientPoint(event: Event): { x: number; y: number } | null {
+    const e = event as unknown as { clientX?: unknown; clientY?: unknown };
+    const x = typeof e.clientX === 'number' ? e.clientX : Number.NaN;
+    const y = typeof e.clientY === 'number' ? e.clientY : Number.NaN;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return { x, y };
+  }
+
+  /** Max elements to scan for innermost visible (performance guard) */
+  const MAX_INNERMOST_SCAN = 32;
+
+  /**
+   * Find innermost visible element from composedPath (for Ctrl/Cmd + Click drill-in).
+   * Returns the first element that passes visibility checks.
+   * Limited to MAX_INNERMOST_SCAN elements to prevent performance issues in deep DOMs.
+   */
+  function findInnermostVisible(pathElements: Element[]): Element | null {
+    const viewportArea = getViewportArea();
+    const styleCache = new Map<Element, CSSStyleDeclaration>();
+    const limit = Math.min(pathElements.length, MAX_INNERMOST_SCAN);
+
+    for (let i = 0; i < limit; i++) {
+      const element = pathElements[i];
+      // scoreElement returns null for invisible/invalid elements
+      const candidate = scoreElement(element, styleCache, viewportArea);
+      if (candidate) return candidate.element;
+    }
+    return null;
+  }
+
+  /**
+   * Get candidates from composedPath elements using the same scoring logic.
+   * Merges with point-based candidates for comprehensive selection.
+   */
+  function getCandidatesFromPath(
+    pathElements: Element[],
+    point: { x: number; y: number } | null,
+  ): SelectionCandidate[] {
+    if (pathElements.length === 0 && !point) return [];
+
+    const map = new Map<Element, CandidateMeta>();
+
+    function addCandidate(element: Element, meta: CandidateMeta): void {
+      if (isOverlayElement(element)) return;
+      if (map.size >= MAX_CANDIDATES && !map.has(element)) return;
+
+      const prev = map.get(element);
+      if (!prev || compareMeta(meta, prev) < 0) {
+        map.set(element, meta);
+      }
+    }
+
+    // Add composedPath elements with high priority (hitOrder = 0)
+    // These are the "seeds" from the actual event path
+    for (let i = 0; i < pathElements.length && i < MAX_HIT_ELEMENTS; i++) {
+      const el = pathElements[i];
+      addCandidate(el, { hitOrder: 0, depthFromHit: i });
+
+      // Also traverse ancestors (cross Shadow DOM boundaries)
+      let current: Element | null = el;
+      for (let depth = 1; depth <= MAX_ANCESTOR_DEPTH; depth++) {
+        current = current ? getParentElementOrHost(current) : null;
+        if (!current) break;
+        addCandidate(current, { hitOrder: 0, depthFromHit: i + depth });
+      }
+    }
+
+    // Merge with point-based candidates if available (for better coverage)
+    if (point) {
+      const hitElements = getHitElementsAtPoint(point.x, point.y);
+      const limit = Math.min(hitElements.length, MAX_HIT_ELEMENTS);
+      for (let i = 0; i < limit; i++) {
+        const el = hitElements[i];
+        // hitOrder = 1 to give composedPath elements priority in tie-breaking
+        addCandidate(el, { hitOrder: 1, depthFromHit: 0 });
+
+        let current: Element | null = el;
+        for (let depth = 1; depth <= MAX_ANCESTOR_DEPTH; depth++) {
+          current = current ? getParentElementOrHost(current) : null;
+          if (!current) break;
+          addCandidate(current, { hitOrder: 1, depthFromHit: depth });
+        }
+      }
+    }
+
+    // Score all candidates
+    const viewportArea = getViewportArea();
+    const styleCache = new Map<Element, CSSStyleDeclaration>();
+
+    const scored: Array<SelectionCandidate & CandidateMeta> = [];
+    for (const [element, meta] of map) {
+      const candidate = scoreElement(element, styleCache, viewportArea);
+      if (!candidate) continue;
+      scored.push({ ...candidate, ...meta });
+    }
+
+    // Sort by score (descending), then by DOM order
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return compareMeta(a, b);
+    });
+
+    return scored.map(({ hitOrder: _, depthFromHit: __, ...c }) => c);
+  }
+
+  /**
+   * Event-aware selection entry point (Shadow DOM support).
+   *
+   * Uses composedPath() to access elements inside Shadow DOM that would
+   * otherwise be inaccessible due to event retargeting.
+   *
+   * Strategy: "Hit-first, climb-if-meaningless"
+   * - Default: Select the direct hit element (what user clicked)
+   * - If direct hit is wrapper-only (no visual meaning), climb to first meaningful parent
+   * - This ensures clicking on boxC selects boxC, not boxA
+   *
+   * Modifier behavior:
+   * - Ctrl/Cmd + Click: Select innermost visible element (drill-in)
+   * - Alt + Click: Select parent of best target (drill-up)
+   */
+  function findBestTargetFromEvent(event: Event, modifiers: Modifiers): Element | null {
+    const pathElements = getComposedPathElements(event);
+    const point = extractClientPoint(event);
+
+    // Ctrl/Cmd + Click: drill-in to innermost visible element
+    // Takes precedence over Alt (if both pressed, drill-in wins)
+    if (modifiers.ctrl || modifiers.meta) {
+      const innermost = findInnermostVisible(pathElements);
+      if (innermost) return innermost;
+      // Fallback to point-based selection
+      return point ? findBestTarget(point.x, point.y, modifiers) : null;
+    }
+
+    // Get the direct hit element (what user actually clicked)
+    // Priority: composedPath[0] > elementsFromPoint[0]
+    const directHit =
+      pathElements[0] ?? (point ? getHitElementsAtPoint(point.x, point.y)[0] : null);
+
+    if (!directHit) {
+      // No hit at all, fallback to old scoring-based approach
+      return point ? findBestTarget(point.x, point.y, modifiers) : null;
+    }
+
+    // Score the direct hit to check if it's meaningful
+    const viewportArea = getViewportArea();
+    const styleCache = new Map<Element, CSSStyleDeclaration>();
+    const directCandidate = scoreElement(directHit, styleCache, viewportArea);
+
+    // Determine the base target:
+    // - If direct hit is valid and not a wrapper-only, use it
+    // - Otherwise, climb to the first meaningful parent
+    let base: Element;
+    if (directCandidate && !directCandidate.wrapperOnly) {
+      base = directHit;
+    } else {
+      // Direct hit is invalid or wrapper-only, climb to meaningful parent
+      base = getParentCandidate(directHit) ?? directHit;
+    }
+
+    // Alt + Click: drill-up to parent
+    if (modifiers.alt) {
+      return getParentCandidate(base) ?? base;
+    }
+
+    return base;
+  }
+
   return {
     findBestTarget,
+    findBestTargetFromEvent,
     getCandidatesAtPoint,
     getParentCandidate,
     dispose: () => disposer.dispose(),

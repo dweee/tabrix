@@ -47,10 +47,26 @@ const UNIQUE_DATA_ATTRS = [
   'name',
   'title',
   'alt',
+  'aria-label', // Phase 2.9: added for better accessibility-based matching
 ] as const;
 
 /** Maximum class combinations to try for uniqueness */
 const MAX_CLASS_COMBO_DEPTH = 3;
+
+/** Data attributes eligible for ancestor anchors (Phase 2.9) */
+const ANCHOR_DATA_ATTRS = [
+  'data-testid',
+  'data-test-id',
+  'data-test',
+  'data-qa',
+  'data-cy',
+] as const;
+
+/** Maximum number of class names to consider for selector generation */
+const MAX_SELECTOR_CLASS_COUNT = 24;
+
+/** Maximum ancestor depth to search for an anchor selector */
+const MAX_ANCHOR_DEPTH = 20;
 
 // =============================================================================
 // CSS Escape Utility
@@ -167,60 +183,114 @@ function tryIdSelector(element: Element, root: ParentNode): string | null {
 }
 
 /**
- * Try to build a unique data-attribute selector
+ * Collect unique data-attribute selector candidates (ordered by priority).
+ * Phase 2.9: Returns multiple candidates instead of just the first.
  */
-function tryDataAttrSelector(element: Element, root: ParentNode): string | null {
+function collectDataAttrSelectors(element: Element, root: ParentNode, max: number): string[] {
+  const out: string[] = [];
+  if (max <= 0) return out;
+
   const tag = element.tagName.toLowerCase();
 
   for (const attr of UNIQUE_DATA_ATTRS) {
+    if (out.length >= max) break;
     const value = element.getAttribute(attr)?.trim();
     if (!value) continue;
 
     // Try attribute alone
     const attrOnly = `[${attr}="${cssEscape(value)}"]`;
-    if (isUnique(root, attrOnly)) return attrOnly;
+    if (isUnique(root, attrOnly)) {
+      out.push(attrOnly);
+      continue;
+    }
 
     // Try with tag prefix
     const withTag = `${tag}${attrOnly}`;
-    if (isUnique(root, withTag)) return withTag;
-  }
-
-  return null;
-}
-
-/**
- * Try to build a unique class-based selector
- */
-function tryClassSelector(element: Element, root: ParentNode): string | null {
-  const tag = element.tagName.toLowerCase();
-  const classes = Array.from(element.classList).filter(
-    (c) => c && /^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(c),
-  );
-
-  if (classes.length === 0) return null;
-
-  // Try single class
-  for (const cls of classes) {
-    const sel = `.${cssEscape(cls)}`;
-    if (isUnique(root, sel)) return sel;
-  }
-
-  // Try tag + single class
-  for (const cls of classes) {
-    const sel = `${tag}.${cssEscape(cls)}`;
-    if (isUnique(root, sel)) return sel;
-  }
-
-  // Try class combinations (up to 3)
-  const limit = Math.min(classes.length, MAX_CLASS_COMBO_DEPTH);
-  for (let i = 0; i < limit; i++) {
-    for (let j = i + 1; j < limit; j++) {
-      const sel = `.${cssEscape(classes[i])}.${cssEscape(classes[j])}`;
-      if (isUnique(root, sel)) return sel;
+    if (isUnique(root, withTag)) {
+      out.push(withTag);
     }
   }
 
-  return null;
+  return out;
+}
+
+/**
+ * Try to build a unique data-attribute selector (single best)
+ */
+function tryDataAttrSelector(element: Element, root: ParentNode): string | null {
+  return collectDataAttrSelectors(element, root, 1)[0] ?? null;
+}
+
+/**
+ * Collect unique class-based selector candidates.
+ * Phase 2.9: Produces multiple variants (single class, tag+class, combinations) with early stop.
+ */
+function collectClassSelectors(element: Element, root: ParentNode, max: number): string[] {
+  const out: string[] = [];
+  if (max <= 0) return out;
+
+  const tag = element.tagName.toLowerCase();
+  const classes = Array.from(element.classList)
+    .filter((c) => c && /^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(c))
+    .slice(0, MAX_SELECTOR_CLASS_COUNT);
+
+  if (classes.length === 0) return out;
+
+  const uniqueSingle = new Map<string, boolean>();
+
+  // Try single class
+  for (const cls of classes) {
+    if (out.length >= max) return out;
+    const sel = `.${cssEscape(cls)}`;
+    const unique = isUnique(root, sel);
+    uniqueSingle.set(cls, unique);
+    if (unique) out.push(sel);
+  }
+
+  // Try tag + single class (only when the class alone isn't unique)
+  for (const cls of classes) {
+    if (out.length >= max) return out;
+    if (uniqueSingle.get(cls) === true) continue;
+    const sel = `${tag}.${cssEscape(cls)}`;
+    if (isUnique(root, sel)) out.push(sel);
+  }
+
+  // Try class combinations (pairs and triple) among the first few classes
+  const limit = Math.min(classes.length, MAX_CLASS_COMBO_DEPTH);
+  for (let i = 0; i < limit; i++) {
+    for (let j = i + 1; j < limit; j++) {
+      if (out.length >= max) return out;
+      const a = classes[i];
+      const b = classes[j];
+      const pair = `.${cssEscape(a)}.${cssEscape(b)}`;
+      if (isUnique(root, pair)) {
+        out.push(pair);
+        continue;
+      }
+      const withTag = `${tag}${pair}`;
+      if (isUnique(root, withTag)) out.push(withTag);
+    }
+  }
+
+  // Try triple combination if we have enough classes and room
+  if (limit >= 3 && out.length < max) {
+    const triple = `.${cssEscape(classes[0])}.${cssEscape(classes[1])}.${cssEscape(classes[2])}`;
+    if (isUnique(root, triple)) {
+      out.push(triple);
+    } else {
+      const withTag = `${tag}${triple}`;
+      if (out.length < max && isUnique(root, withTag)) out.push(withTag);
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Try to build a unique class-based selector (single best)
+ */
+function tryClassSelector(element: Element, root: ParentNode): string | null {
+  return collectClassSelectors(element, root, 1)[0] ?? null;
 }
 
 /**
@@ -242,7 +312,7 @@ function buildPathSelector(element: Element, root: Document | ShadowRoot): strin
     let selector = tag;
 
     // Find parent context
-    const parent = current.parentElement;
+    const parent: Element | null = current.parentElement;
     const parentNode = current.parentNode;
 
     // Get siblings from appropriate parent
@@ -271,6 +341,118 @@ function buildPathSelector(element: Element, root: Document | ShadowRoot): strin
 
   const path = segments.join(' > ');
   return isDocument ? `body > ${path}` : path || '*';
+}
+
+// =============================================================================
+// Anchor + Relative Path (Phase 2.9)
+// =============================================================================
+
+/**
+ * Build a relative path selector from an ancestor to a target within the same root.
+ */
+function buildRelativePathSelector(
+  ancestor: Element,
+  target: Element,
+  root: Document | ShadowRoot,
+): string | null {
+  const segments: string[] = [];
+  let current: Element | null = target;
+
+  for (let depth = 0; current && current !== ancestor && depth < MAX_ANCHOR_DEPTH; depth++) {
+    const tag = current.tagName.toLowerCase();
+    let selector = tag;
+
+    const parent: Element | null = current.parentElement;
+    const parentNode = current.parentNode;
+
+    let siblings: Element[];
+    if (parent) {
+      siblings = Array.from(parent.children);
+    } else if (parentNode instanceof ShadowRoot || parentNode instanceof Document) {
+      siblings = Array.from(parentNode.children);
+    } else {
+      siblings = [];
+    }
+
+    const sameTagSiblings = siblings.filter((s) => s.tagName === current!.tagName);
+    if (sameTagSiblings.length > 1) {
+      const index = sameTagSiblings.indexOf(current) + 1;
+      selector += `:nth-of-type(${index})`;
+    }
+
+    segments.unshift(selector);
+
+    if (!parent) {
+      // Reached the root boundary without finding the ancestor
+      if (parentNode === root) break;
+      break;
+    }
+
+    current = parent;
+  }
+
+  if (current !== ancestor) return null;
+  return segments.join(' > ') || null;
+}
+
+/**
+ * Try to build a unique anchor selector for an ancestor (id or stable data-* only).
+ */
+function tryAnchorSelector(element: Element, root: ParentNode): string | null {
+  const idSel = tryIdSelector(element, root);
+  if (idSel) return idSel;
+
+  const tag = element.tagName.toLowerCase();
+
+  for (const attr of ANCHOR_DATA_ATTRS) {
+    const value = element.getAttribute(attr)?.trim();
+    if (!value) continue;
+
+    const attrOnly = `[${attr}="${cssEscape(value)}"]`;
+    if (isUnique(root, attrOnly)) return attrOnly;
+
+    const withTag = `${tag}${attrOnly}`;
+    if (isUnique(root, withTag)) return withTag;
+  }
+
+  return null;
+}
+
+/**
+ * Build an "anchor + relative path" selector candidate.
+ * Finds a unique ancestor (id or stable data-*) and appends a relative path from there.
+ * This improves matching when the target itself doesn't have unique attributes.
+ */
+function buildAnchorRelPathSelector(element: Element, root: Document | ShadowRoot): string | null {
+  let current: Element | null = element.parentElement;
+
+  for (let depth = 0; current && depth < MAX_ANCHOR_DEPTH; depth++) {
+    const tag = current.tagName.toUpperCase();
+    if (tag === 'HTML' || tag === 'BODY') break;
+
+    const anchor = tryAnchorSelector(current, root);
+    if (anchor) {
+      const rel = buildRelativePathSelector(current, element, root);
+      if (!rel) {
+        current = current.parentElement;
+        continue;
+      }
+
+      const composed = `${anchor} ${rel}`;
+      if (!isUnique(root, composed)) {
+        current = current.parentElement;
+        continue;
+      }
+
+      // Final verification: ensure the composed selector finds the exact element
+      const found = safeQuerySelector(root, composed);
+      if (found === element) return composed;
+    }
+
+    current = current.parentElement;
+  }
+
+  return null;
 }
 
 // =============================================================================
@@ -356,7 +538,7 @@ export function computeDomPath(element: Element): number[] {
   let current: Element | null = element;
 
   while (current) {
-    const parent = current.parentElement;
+    const parent: Element | null = current.parentElement;
 
     if (parent) {
       const siblings = Array.from(parent.children);
@@ -386,7 +568,9 @@ export function computeDomPath(element: Element): number[] {
 
 /**
  * Generate multiple CSS selector candidates for an element.
- * Candidates are ordered by preference: ID > data-attr > class > path
+ * Phase 2.9 enhanced: Collects multiple candidates from each strategy.
+ *
+ * Candidates are ordered by preference: ID > data-attrs > classes > path > anchor+relPath
  */
 export function generateSelectorCandidates(
   element: Element,
@@ -397,18 +581,42 @@ export function generateSelectorCandidates(
 
   const candidates: string[] = [];
 
-  const push = (selector: string | null): void => {
+  const push = (selector: string | null, limit = maxCandidates): void => {
     if (!selector) return;
+    if (candidates.length >= limit) return;
     const s = selector.trim();
     if (!s || candidates.includes(s)) return;
     candidates.push(s);
   };
 
-  // Try strategies in order of preference
-  push(tryIdSelector(element, root));
-  push(tryDataAttrSelector(element, root));
-  push(tryClassSelector(element, root));
+  // Pre-compute anchor+relPath candidate (intended as last fallback)
+  // Only compute if we have room for it (maxCandidates >= 5)
+  const anchorCandidate =
+    maxCandidates >= DEFAULT_MAX_CANDIDATES ? buildAnchorRelPathSelector(element, root) : null;
+
+  // Reserve space for path selector + optional anchor candidate
+  // But ensure headLimit is at least 1 to allow ID/attr/class to compete with path
+  const tailReserved = 1 + (anchorCandidate ? 1 : 0);
+  const headLimit = Math.max(1, maxCandidates - tailReserved);
+
+  // 1) ID selector (unique, highest priority)
+  push(tryIdSelector(element, root), headLimit);
+
+  // 2) Data attribute selectors (multiple candidates in priority order)
+  for (const sel of collectDataAttrSelectors(element, root, headLimit - candidates.length)) {
+    push(sel, headLimit);
+  }
+
+  // 3) Class selectors (multiple candidates with combinations)
+  for (const sel of collectClassSelectors(element, root, headLimit - candidates.length)) {
+    push(sel, headLimit);
+  }
+
+  // 4) Structural path selector (always included as fallback)
   push(buildPathSelector(element, root));
+
+  // 5) Anchor + relative path selector (when available, last candidate)
+  push(anchorCandidate);
 
   return candidates.slice(0, maxCandidates);
 }

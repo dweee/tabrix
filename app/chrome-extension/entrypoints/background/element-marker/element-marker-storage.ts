@@ -80,8 +80,14 @@ export async function saveMarker(req: UpsertMarkerRequest): Promise<ElementMarke
 export async function updateMarker(marker: ElementMarker): Promise<void> {
   const existing = await idb.get<ElementMarker>(STORE, marker.id);
   if (!existing) throw new Error('marker not found');
-  marker.updatedAt = now();
-  await idb.put<ElementMarker>(STORE, marker);
+
+  // Preserve createdAt from existing record, only update updatedAt
+  const updated: ElementMarker = {
+    ...marker,
+    createdAt: existing.createdAt, // Never overwrite createdAt
+    updatedAt: now(),
+  };
+  await idb.put<ElementMarker>(STORE, updated);
 }
 
 export async function deleteMarker(id: string): Promise<void> {
