@@ -10,6 +10,7 @@
 import { Disposer } from '../../../utils/disposables';
 import type { StyleTransactionHandle, TransactionManager } from '../../../core/transaction-manager';
 import type { DesignControl } from '../types';
+import { wireNumberStepping } from './number-stepping';
 
 // =============================================================================
 // Types
@@ -167,6 +168,13 @@ export function createPositionControl(options: PositionControlOptions): DesignCo
 
   zRow.append(zLabel, zInput);
 
+  // Wire up keyboard stepping for arrow up/down
+  wireNumberStepping(disposer, topInput, { mode: 'css-length' });
+  wireNumberStepping(disposer, rightInput, { mode: 'css-length' });
+  wireNumberStepping(disposer, bottomInput, { mode: 'css-length' });
+  wireNumberStepping(disposer, leftInput, { mode: 'css-length' });
+  wireNumberStepping(disposer, zInput, { mode: 'number', integer: true });
+
   root.append(positionRow, rowTR, rowBL, zRow);
   container.append(root);
   disposer.add(() => root.remove());
@@ -262,9 +270,16 @@ export function createPositionControl(options: PositionControlOptions): DesignCo
     const isEditing = field.handle !== null || isFieldFocused(el);
 
     if (el instanceof HTMLInputElement) {
-      el.placeholder = readComputedValue(target, property);
       if (isEditing && !force) return;
-      el.value = readInlineValue(target, property);
+      // Display real value: prefer inline style, fallback to computed style
+      const inlineValue = readInlineValue(target, property);
+      if (inlineValue) {
+        el.value = inlineValue;
+        el.placeholder = '';
+      } else {
+        el.value = readComputedValue(target, property);
+        el.placeholder = '';
+      }
     } else {
       // Select
       const inline = readInlineValue(target, property);

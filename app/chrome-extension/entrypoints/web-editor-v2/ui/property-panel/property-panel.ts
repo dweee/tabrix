@@ -5,7 +5,7 @@
  *
  * Features:
  * - Tab switching between Design, CSS, Props, and DOM views
- * - Collapsible control groups (Position, Layout, Size, Spacing, Typography, Appearance)
+ * - Collapsible control groups (Position, Layout, Size, Spacing, Typography, Appearance, Effects, Gradient)
  * - CSS panel showing matched rules and inheritance (Phase 4.6)
  * - Props panel for React/Vue component props editing (Phase 7.3)
  * - Empty state when no element is selected
@@ -27,6 +27,8 @@ import { createPositionControl } from './controls/position-control';
 import { createLayoutControl } from './controls/layout-control';
 import { createTypographyControl } from './controls/typography-control';
 import { createAppearanceControl } from './controls/appearance-control';
+import { createEffectsControl } from './controls/effects-control';
+import { createGradientControl } from './controls/gradient-control';
 import { createComponentsTree, type ComponentsTree } from './components-tree';
 import { createCssPanel, type CssPanel } from './css-panel';
 import { createPropsPanel, type PropsPanel } from './props-panel';
@@ -43,6 +45,8 @@ const CONTROL_GROUPS = [
   { id: 'spacing', label: 'Spacing' },
   { id: 'typography', label: 'Typography' },
   { id: 'appearance', label: 'Appearance' },
+  { id: 'effects', label: 'Effects' },
+  { id: 'gradient', label: 'Gradient' },
 ] as const;
 
 type ControlGroupId = (typeof CONTROL_GROUPS)[number]['id'];
@@ -455,6 +459,26 @@ export function createPropertyPanel(options: PropertyPanelOptions): PropertyPane
         transactionManager: options.transactionManager,
       });
       controls.push(appearanceControl);
+    }
+
+    // Effects control (box-shadow, filter blur, backdrop-filter blur)
+    const effectsGroup = controlGroups.get('effects');
+    if (effectsGroup) {
+      const effectsControl = createEffectsControl({
+        container: effectsGroup.body,
+        transactionManager: options.transactionManager,
+      });
+      controls.push(effectsControl);
+    }
+
+    // Gradient control (linear-gradient, radial-gradient)
+    const gradientGroup = controlGroups.get('gradient');
+    if (gradientGroup) {
+      const gradientControl = createGradientControl({
+        container: gradientGroup.body,
+        transactionManager: options.transactionManager,
+      });
+      controls.push(gradientControl);
     }
   }
 

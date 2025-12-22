@@ -1,0 +1,841 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Properties Panel Replica</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+      body {
+        font-family: 'Inter', sans-serif;
+        background-color: #e5e5e5;
+        display: flex;
+        justify-content: center;
+        padding: 40px;
+      }
+
+      /* Custom Scrollbar for the panel */
+      .panel-scroll::-webkit-scrollbar {
+        width: 8px;
+      }
+      .panel-scroll::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .panel-scroll::-webkit-scrollbar-thumb {
+        background-color: transparent;
+      }
+
+      /* Hide number input spinners */
+      input[type='number']::-webkit-inner-spin-button,
+      input[type='number']::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+
+      /* Tiny details */
+      .input-bg {
+        background-color: #f3f3f3;
+      }
+      .input-bg:hover {
+        box-shadow: inset 0 0 0 1px #e0e0e0;
+      }
+      .input-bg:focus-within {
+        background-color: #fff;
+        box-shadow: inset 0 0 0 2px #3b82f6;
+      }
+
+      .section-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .icon-btn {
+        @apply p-1 rounded hover:bg-gray-200 text-gray-500 transition-colors;
+      }
+
+      .checkerboard {
+        background-image:
+          linear-gradient(45deg, #ccc 25%, transparent 25%),
+          linear-gradient(-45deg, #ccc 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, #ccc 75%),
+          linear-gradient(-45deg, transparent 75%, #ccc 75%);
+        background-size: 8px 8px;
+        background-position:
+          0 0,
+          0 4px,
+          4px -4px,
+          -4px 0px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Main Panel Container -->
+    <div
+      class="w-[280px] bg-white rounded-lg shadow-xl overflow-hidden text-[#333] text-[11px] relative"
+    >
+      <!-- Header / Tabs -->
+      <div class="flex items-center px-2 py-2 border-b border-gray-100">
+        <div class="bg-[#F3F3F3] rounded p-0.5 flex">
+          <button class="px-3 py-1 bg-white shadow-sm rounded text-xs font-medium text-black"
+            >Design</button
+          >
+          <button class="px-3 py-1 text-gray-500 text-xs font-medium hover:text-black">CSS</button>
+        </div>
+      </div>
+
+      <!-- Scrollable Content -->
+      <div class="h-[800px] overflow-y-auto panel-scroll px-3 py-2 space-y-4 pb-20">
+        <!-- ================= SECTION: POSITION (Screenshot 3 Top) ================= -->
+        <div>
+          <div class="section-label">
+            <span>Position</span>
+            <svg
+              class="w-3.5 h-3.5 text-gray-400"
+              viewBox="0 0 15 15"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <rect x="2" y="2" width="11" height="11" rx="1" stroke="currentColor"></rect>
+              <circle cx="7.5" cy="7.5" r="2.5" stroke="currentColor"></circle>
+            </svg>
+          </div>
+
+          <!-- XYZ Grid -->
+          <div class="grid grid-cols-3 gap-2 mb-2">
+            <div class="input-bg rounded h-[26px] flex items-center px-2 group cursor-text">
+              <span class="text-gray-400 mr-2 w-2">X</span>
+              <input
+                type="text"
+                value="228"
+                class="bg-transparent w-full outline-none text-right"
+              />
+              <span class="text-gray-400 ml-1 text-[10px] hidden group-hover:block">px</span>
+            </div>
+            <div class="input-bg rounded h-[26px] flex items-center px-2 group cursor-text">
+              <span class="text-gray-400 mr-2 w-2">Y</span>
+              <input
+                type="text"
+                value="297"
+                class="bg-transparent w-full outline-none text-right"
+              />
+              <span class="text-gray-400 ml-1 text-[10px] hidden group-hover:block">px</span>
+            </div>
+            <div class="input-bg rounded h-[26px] flex items-center px-2 group cursor-text">
+              <span class="text-gray-400 mr-2 w-2">Z</span>
+              <input type="text" value="0" class="bg-transparent w-full outline-none text-right" />
+            </div>
+          </div>
+
+          <!-- Rotation & Constraints -->
+          <div class="flex items-center justify-between">
+            <div
+              class="input-bg rounded h-[26px] flex items-center px-2 w-[160px] group cursor-text"
+            >
+              <svg
+                class="text-gray-400 mr-2 w-3.5 h-3.5"
+                viewBox="0 0 15 15"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M2.5 7.5C2.5 10.2614 4.73858 12.5 7.5 12.5V13.5C4.18629 13.5 1.5 10.8137 1.5 7.5H2.5ZM7.5 2.5C4.73858 2.5 2.5 4.73858 2.5 7.5H1.5C1.5 4.18629 4.18629 1.5 7.5 1.5V2.5ZM12.5 7.5H13.5C13.5 4.18629 10.8137 1.5 7.5 1.5V2.5C10.2614 2.5 12.5 4.73858 12.5 7.5ZM10.5 7.5L13 4.5L15.5 7.5H10.5Z"
+                  fill="currentColor"
+                />
+              </svg>
+              <input type="text" value="0" class="bg-transparent w-full outline-none text-right" />
+              <div
+                class="w-2 h-2 rounded-full border border-gray-400 ml-1 absolute right-2 top-1"
+              ></div>
+            </div>
+            <div class="flex space-x-1 text-gray-400">
+              <button class="icon-btn"
+                ><svg width="14" height="14" viewBox="0 0 15 15" fill="none">
+                  <rect x="3" y="3" width="9" height="9" rx="1" stroke="currentColor" />
+                  <path d="M7.5 3V6M7.5 12V9" stroke="currentColor" /></svg
+              ></button>
+              <button class="icon-btn"
+                ><svg width="14" height="14" viewBox="0 0 15 15" fill="none">
+                  <path d="M2 7.5H13M7.5 2V13" stroke="currentColor" /></svg
+              ></button>
+              <button class="icon-btn"
+                ><svg width="14" height="14" viewBox="0 0 15 15" fill="none">
+                  <path d="M2 2L13 13M13 2L2 13" stroke="currentColor" /></svg
+              ></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= SECTION: LAYOUT (Screenshot 3 Middle) ================= -->
+        <div class="pt-2 border-t border-gray-100">
+          <div class="section-label">Layout</div>
+
+          <!-- Flow -->
+          <div class="mb-2">
+            <div class="text-[10px] text-gray-500 mb-1">Flow</div>
+            <div class="grid grid-cols-4 gap-1">
+              <button
+                class="bg-[#F3F3F3] hover:bg-gray-200 rounded p-1 flex justify-center items-center"
+                ><svg width="14" height="14" viewBox="0 0 15 15" fill="none">
+                  <rect x="2" y="2" width="5" height="5" rx="1" stroke="#333" />
+                  <rect x="8" y="2" width="5" height="5" rx="1" stroke="#333" opacity="0.5" />
+                  <rect x="2" y="8" width="5" height="5" rx="1" stroke="#333" opacity="0.5" />
+                  <rect x="8" y="8" width="5" height="5" rx="1" stroke="#333" opacity="0.5" /></svg
+              ></button>
+              <button
+                class="bg-[#F3F3F3] hover:bg-gray-200 rounded p-1 flex justify-center items-center"
+                ><svg width="14" height="14" viewBox="0 0 15 15" fill="none">
+                  <path d="M7.5 2V13M4.5 5L7.5 2L10.5 5M4.5 10L7.5 13L10.5 10" stroke="#888" /></svg
+              ></button>
+              <button
+                class="bg-[#F3F3F3] hover:bg-gray-200 rounded p-1 flex justify-center items-center"
+                ><svg width="14" height="14" viewBox="0 0 15 15" fill="none">
+                  <path d="M2 7.5H13M5 4.5L2 7.5L5 10.5M10 4.5L13 7.5L10 10.5" stroke="#888" /></svg
+              ></button>
+              <button
+                class="bg-[#F3F3F3] hover:bg-gray-200 rounded p-1 flex justify-center items-center"
+                ><svg width="14" height="14" viewBox="0 0 15 15" fill="none">
+                  <rect x="2.5" y="2.5" width="4" height="4" stroke="#888" />
+                  <rect x="8.5" y="2.5" width="4" height="4" stroke="#888" />
+                  <rect x="2.5" y="8.5" width="4" height="4" stroke="#888" />
+                  <rect x="8.5" y="8.5" width="4" height="4" stroke="#888" /></svg
+              ></button>
+            </div>
+          </div>
+
+          <!-- Dimensions -->
+          <div class="mb-2">
+            <div class="text-[10px] text-gray-500 mb-1">Dimensions</div>
+            <div class="grid grid-cols-2 gap-2">
+              <div class="input-bg rounded h-[28px] flex items-center px-2 cursor-pointer group">
+                <span class="text-gray-400 mr-2">W</span>
+                <span class="text-[#333] flex-1">546</span>
+                <span class="text-gray-400 text-[10px] mr-1">px</span>
+                <svg
+                  class="w-3 h-3 text-gray-400"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              </div>
+              <div class="input-bg rounded h-[28px] flex items-center px-2 cursor-pointer group">
+                <span class="text-gray-400 mr-2">H</span>
+                <span class="text-[#333] flex-1">23</span>
+                <span class="text-gray-400 text-[10px] mr-1">px</span>
+                <svg
+                  class="w-3 h-3 text-gray-400"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- Alignment & Gap -->
+          <div class="flex gap-2 mb-3">
+            <!-- 9-dot grid -->
+            <div
+              class="w-1/2 p-2 bg-[#F9F9F9] border border-gray-100 rounded grid grid-cols-3 gap-3 place-items-center h-[90px]"
+            >
+              <div class="w-0.5 h-0.5 bg-gray-400 rounded-full"></div>
+              <div class="w-3 h-3 flex flex-col justify-between items-center"
+                ><div class="w-2 h-0.5 bg-blue-500"></div><div class="w-3 h-0.5 bg-blue-500"></div
+                ><div class="w-1 h-0.5 bg-blue-500"></div
+              ></div>
+              <div class="w-0.5 h-0.5 bg-gray-400 rounded-full"></div>
+              <div class="w-0.5 h-0.5 bg-gray-400 rounded-full"></div>
+              <div class="w-0.5 h-0.5 bg-gray-400 rounded-full"></div>
+              <div class="w-0.5 h-0.5 bg-gray-400 rounded-full"></div>
+              <div class="w-0.5 h-0.5 bg-gray-400 rounded-full"></div>
+              <div class="w-0.5 h-0.5 bg-gray-400 rounded-full"></div>
+              <div class="w-0.5 h-0.5 bg-gray-400 rounded-full"></div>
+            </div>
+
+            <div class="w-1/2 flex flex-col gap-2">
+              <div class="text-[10px] text-gray-500">Gap</div>
+              <div class="input-bg rounded h-[28px] flex items-center px-2">
+                <svg
+                  class="text-gray-400 mr-2 w-3.5 h-3.5"
+                  viewBox="0 0 15 15"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path d="M1.5 4.5H13.5M1.5 10.5H13.5" stroke="currentColor" />
+                </svg>
+                <input type="text" value="0" class="bg-transparent w-full outline-none" />
+                <span class="text-gray-400 text-[10px]">px</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Padding / Margin -->
+          <div class="space-y-3">
+            <div>
+              <div class="flex justify-between items-center mb-1">
+                <span class="text-[10px] text-gray-500">Padding</span>
+                <svg
+                  class="w-3 h-3 text-gray-400"
+                  viewBox="0 0 15 15"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <rect x="2.5" y="2.5" width="10" height="10" stroke="currentColor" />
+                </svg>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div class="input-bg rounded h-[28px] flex items-center px-2">
+                  <svg class="text-gray-500 mr-2 w-3 h-3" viewBox="0 0 15 15" fill="none">
+                    <path d="M2 4h11M7.5 4v3.5" stroke="currentColor" />
+                  </svg>
+                  <input type="text" value="0" class="bg-transparent w-full outline-none" />
+                  <span class="text-gray-400 text-[10px]">px</span>
+                </div>
+                <div class="input-bg rounded h-[28px] flex items-center px-2">
+                  <svg class="text-gray-500 mr-2 w-3 h-3" viewBox="0 0 15 15" fill="none">
+                    <path d="M4 2v11M4 7.5h3.5" stroke="currentColor" />
+                  </svg>
+                  <input type="text" value="0" class="bg-transparent w-full outline-none" />
+                  <span class="text-gray-400 text-[10px]">px</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2 py-1">
+              <input
+                type="checkbox"
+                class="w-3.5 h-3.5 rounded border-gray-300 text-blue-500 focus:ring-0"
+              />
+              <span class="text-gray-600">Clip content</span>
+            </div>
+
+            <div>
+              <div class="flex justify-between items-center mb-1">
+                <span class="text-[10px] text-gray-500">Margin</span>
+                <svg
+                  class="w-3 h-3 text-blue-500"
+                  viewBox="0 0 15 15"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <rect x="2.5" y="2.5" width="10" height="10" stroke="currentColor" />
+                </svg>
+              </div>
+              <div class="grid grid-cols-2 gap-2 mb-2">
+                <div class="input-bg rounded h-[28px] flex items-center px-2">
+                  <svg class="text-gray-500 mr-2 w-3 h-3" viewBox="0 0 15 15" fill="none">
+                    <path d="M2 4h11M7.5 4v-3" stroke="currentColor" />
+                  </svg>
+                  <input type="text" value="21" class="bg-transparent w-full outline-none" />
+                  <span class="text-gray-400 text-[10px]">px</span>
+                </div>
+                <div class="input-bg rounded h-[28px] flex items-center px-2">
+                  <svg class="text-gray-500 mr-2 w-3 h-3" viewBox="0 0 15 15" fill="none">
+                    <path d="M11 2v11M11 7.5h3" stroke="currentColor" />
+                  </svg>
+                  <input type="text" value="0" class="bg-transparent w-full outline-none" />
+                  <span class="text-gray-400 text-[10px]">px</span>
+                </div>
+                <div class="input-bg rounded h-[28px] flex items-center px-2">
+                  <svg class="text-gray-500 mr-2 w-3 h-3" viewBox="0 0 15 15" fill="none">
+                    <path d="M2 11h11M7.5 11v3" stroke="currentColor" />
+                  </svg>
+                  <input type="text" value="0" class="bg-transparent w-full outline-none" />
+                  <span class="text-gray-400 text-[10px]">px</span>
+                </div>
+                <div class="input-bg rounded h-[28px] flex items-center px-2">
+                  <svg class="text-gray-500 mr-2 w-3 h-3" viewBox="0 0 15 15" fill="none">
+                    <path d="M4 2v11M4 7.5h-3" stroke="currentColor" />
+                  </svg>
+                  <input type="text" value="0" class="bg-transparent w-full outline-none" />
+                  <span class="text-gray-400 text-[10px]">px</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-3.5 h-3.5 bg-blue-600 rounded-[3px] flex items-center justify-center">
+                  <svg
+                    class="w-2.5 h-2.5 text-white"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="4"
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                </div>
+                <span class="text-gray-600">Border box</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= SECTION: TYPOGRAPHY (Screenshot 1) ================= -->
+        <div class="pt-2 border-t border-gray-100">
+          <div class="input-bg rounded h-[28px] flex items-center justify-between px-2 mb-2">
+            <span class="text-[#333]">berkeleyMono</span>
+            <svg
+              class="w-3 h-3 text-gray-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M19 9l-7 7-7-7"
+              />
+            </svg>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2 mb-2">
+            <div class="input-bg rounded h-[28px] flex items-center justify-between px-2">
+              <span>400</span>
+              <svg
+                class="w-3 h-3 text-gray-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
+            </div>
+            <div class="input-bg rounded h-[28px] flex items-center px-2">
+              <input
+                type="text"
+                value="33.8"
+                class="bg-transparent w-full outline-none text-right"
+              />
+              <span class="text-gray-400 text-[10px] ml-1">px</span>
+            </div>
+          </div>
+
+          <!-- Linear Gradient Section -->
+          <div class="mb-1">
+            <div class="text-[10px] text-gray-500 mb-1">Color</div>
+            <div
+              class="input-bg rounded h-[28px] flex items-center justify-between px-2 mb-2 border border-blue-200"
+            >
+              <span>Linear</span>
+              <svg
+                class="w-3 h-3 text-gray-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
+            </div>
+
+            <!-- Gradient Slider Visual -->
+            <div
+              class="h-8 rounded bg-gradient-to-r from-[#26251E] to-[#BD4C4C] relative mb-2 flex items-center border border-white shadow-sm ring-1 ring-black/5"
+            >
+              <!-- Left Handle -->
+              <div
+                class="w-5 h-5 absolute -left-1 top-1.5 border-2 border-white bg-[#26251E] rounded shadow-md cursor-pointer"
+              ></div>
+              <!-- Right Handle -->
+              <div
+                class="w-5 h-5 absolute -right-1 top-1.5 border-2 border-white bg-[#BD4C4C] rounded shadow-md ring-2 ring-blue-400 cursor-pointer z-10"
+              ></div>
+            </div>
+
+            <!-- Angle & Flip -->
+            <div class="flex items-center justify-between mb-2">
+              <div class="input-bg rounded h-[26px] w-[80px] flex items-center px-2">
+                <input type="text" value="90" class="bg-transparent w-full outline-none" />
+                <div class="w-1 h-1 rounded-full border border-gray-500 mb-2"></div>
+              </div>
+              <svg
+                class="w-4 h-4 text-gray-500 rotate-90"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
+                />
+              </svg>
+            </div>
+
+            <!-- Stops -->
+            <div class="mb-2">
+              <div class="flex justify-between items-center text-[10px] text-gray-500 mb-1">
+                <span>Stops</span>
+                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 4v16m8-8H4"
+                  />
+                </svg>
+              </div>
+
+              <!-- Stop 1 -->
+              <div class="flex gap-2 items-center mb-1.5">
+                <div
+                  class="input-bg w-[40px] h-[26px] flex items-center justify-center rounded text-xs"
+                  >0<span class="text-gray-400 text-[9px] ml-0.5">%</span></div
+                >
+                <div
+                  class="flex-1 input-bg h-[26px] rounded flex items-center px-1 border border-transparent"
+                >
+                  <div class="w-3.5 h-3.5 bg-[#26251E] rounded-sm mr-2"></div>
+                  <span class="text-xs">26251E</span>
+                  <div class="h-3 w-[1px] bg-gray-300 mx-2"></div>
+                  <span class="text-xs">100</span><span class="text-gray-400 text-[9px]">%</span>
+                </div>
+                <span class="text-gray-300 text-lg font-light">-</span>
+              </div>
+
+              <!-- Stop 2 (Active) -->
+              <div class="flex gap-2 items-center p-0.5 rounded ring-1 ring-blue-300">
+                <div
+                  class="input-bg w-[40px] h-[26px] flex items-center justify-center rounded text-xs"
+                  >100<span class="text-gray-400 text-[9px] ml-0.5">%</span></div
+                >
+                <div class="flex-1 input-bg h-[26px] rounded flex items-center px-1">
+                  <div class="w-3.5 h-3.5 bg-[#BD4C4C] rounded-sm mr-2"></div>
+                  <span class="text-xs">BD4C4C</span>
+                  <div class="h-3 w-[1px] bg-gray-300 mx-2"></div>
+                  <span class="text-xs">100</span><span class="text-gray-400 text-[9px]">%</span>
+                </div>
+                <span class="text-gray-300 text-lg font-light">-</span>
+              </div>
+            </div>
+
+            <!-- Line Height / Spacing -->
+            <div class="grid grid-cols-2 gap-2 mb-2">
+              <div>
+                <div class="text-[10px] text-gray-500 mb-1">Line Height</div>
+                <div class="input-bg rounded h-[28px] flex items-center px-2">
+                  <span class="text-gray-400 mr-2 text-[10px]"
+                    >A<span class="text-[12px] align-middle ml-[-2px]">I</span></span
+                  >
+                  <input type="text" value="40.5px" class="bg-transparent w-full outline-none" />
+                </div>
+              </div>
+              <div>
+                <div class="text-[10px] text-gray-500 mb-1">Letter Spacing</div>
+                <div class="input-bg rounded h-[28px] flex items-center px-2">
+                  <svg
+                    class="text-gray-400 mr-2 w-3 h-3"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                  >
+                    <path d="M4 12h16m-16 0l2-2m-2 2l2 2m12-2l-2-2m2 2l-2 2" stroke-width="2" />
+                  </svg>
+                  <input type="text" value="-0.675px" class="bg-transparent w-full outline-none" />
+                </div>
+              </div>
+            </div>
+
+            <!-- Alignment Control -->
+            <div>
+              <div class="text-[10px] text-gray-500 mb-1">Alignment</div>
+              <div class="flex gap-1">
+                <div
+                  class="input-bg flex-1 h-[28px] flex items-center justify-center rounded hover:bg-gray-200"
+                  ><svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#555"
+                    stroke-width="2"
+                  >
+                    <line x1="2" y1="6" x2="22" y2="6" />
+                    <line x1="2" y1="12" x2="14" y2="12" />
+                    <line x1="2" y1="18" x2="18" y2="18" /></svg
+                ></div>
+                <div
+                  class="input-bg flex-1 h-[28px] flex items-center justify-center rounded hover:bg-gray-200"
+                  ><svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#555"
+                    stroke-width="2"
+                  >
+                    <line x1="4" y1="6" x2="20" y2="6" />
+                    <line x1="8" y1="12" x2="16" y2="12" />
+                    <line x1="6" y1="18" x2="18" y2="18" /></svg
+                ></div>
+                <div
+                  class="input-bg flex-1 h-[28px] flex items-center justify-center rounded hover:bg-gray-200"
+                  ><svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#555"
+                    stroke-width="2"
+                  >
+                    <line x1="2" y1="6" x2="22" y2="6" />
+                    <line x1="10" y1="12" x2="22" y2="12" />
+                    <line x1="6" y1="18" x2="22" y2="18" /></svg
+                ></div>
+                <div
+                  class="input-bg flex-1 h-[28px] flex items-center justify-center rounded hover:bg-gray-200"
+                  ><svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#555"
+                    stroke-width="2"
+                  >
+                    <line x1="12" y1="4" x2="12" y2="20" />
+                    <polyline points="8 8 12 4 16 8" /></svg
+                ></div>
+                <div
+                  class="input-bg flex-1 h-[28px] flex items-center justify-center rounded hover:bg-gray-200"
+                  ><svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#555"
+                    stroke-width="2"
+                  >
+                    <line x1="12" y1="4" x2="12" y2="20" />
+                    <line x1="4" y1="12" x2="20" y2="12" /></svg
+                ></div>
+                <div
+                  class="input-bg flex-1 h-[28px] flex items-center justify-center rounded hover:bg-gray-200"
+                  ><svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#555"
+                    stroke-width="2"
+                  >
+                    <line x1="12" y1="4" x2="12" y2="20" />
+                    <polyline points="8 16 12 20 16 16" /></svg
+                ></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= SECTION: BACKGROUND (Screenshot 2) ================= -->
+        <div class="pt-2 border-t border-gray-100">
+          <div class="flex justify-between items-center mb-2">
+            <span class="section-label mb-0">Background</span>
+            <div class="flex gap-2 text-gray-400">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke-width="1.5" />
+              </svg>
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 4v16m8-8H4"
+                />
+              </svg>
+            </div>
+          </div>
+
+          <div class="input-bg rounded h-[28px] flex items-center justify-between px-2 mb-2">
+            <span>Solid</span>
+            <svg
+              class="w-3 h-3 text-gray-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M19 9l-7 7-7-7"
+              />
+            </svg>
+          </div>
+
+          <!-- Variable Pill -->
+          <div class="flex items-center gap-2 mb-2">
+            <div
+              class="flex-1 rounded border border-gray-200 p-1 flex items-center justify-between group hover:border-gray-300"
+            >
+              <div class="flex items-center overflow-hidden">
+                <div
+                  class="w-4 h-4 bg-[#E0E0E0] rounded border border-black/10 mr-2 flex-shrink-0"
+                ></div>
+                <span class="text-xs whitespace-nowrap overflow-hidden text-ellipsis"
+                  >--color-theme-card-hover-</span
+                >
+              </div>
+              <svg
+                class="w-3.5 h-3.5 text-gray-400 rotate-45"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101"
+                />
+              </svg>
+            </div>
+            <span class="text-gray-400">—</span>
+          </div>
+        </div>
+
+        <!-- ================= SECTION: BORDER (Stub) ================= -->
+        <div class="pt-2 border-t border-gray-100 flex justify-between items-center">
+          <span class="section-label text-gray-500 mb-0">Border</span>
+          <div class="flex gap-2 text-gray-400">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke-width="1.5" />
+            </svg>
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 4v16m8-8H4"
+              />
+            </svg>
+          </div>
+        </div>
+
+        <!-- ================= SECTION: SHADOW & BLUR (Screenshot 1 Bottom) ================= -->
+        <div class="pt-2 border-t border-gray-100 relative">
+          <div class="flex justify-between items-center mb-2">
+            <span class="section-label mb-0">Shadow & Blur</span>
+            <svg
+              class="w-4 h-4 text-gray-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 4v16m8-8H4"
+              />
+            </svg>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <input type="checkbox" class="w-4 h-4 rounded border-gray-300" />
+
+            <div
+              class="flex-1 bg-blue-500 text-white rounded h-[28px] flex items-center justify-between px-2 text-xs relative cursor-pointer"
+            >
+              <div class="flex items-center">
+                <svg class="w-3 h-3 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="3"
+                    d="M5 13l4 4L19 7"
+                  />
+                </svg>
+                <span>Drop shadow</span>
+              </div>
+            </div>
+
+            <svg
+              class="w-4 h-4 text-gray-700"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+              />
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+              />
+            </svg>
+            <span class="text-gray-400">—</span>
+          </div>
+
+          <!-- Floating Menu Simulation (Absolute) -->
+          <div
+            class="absolute left-8 top-10 w-[180px] bg-[#ECECEC] rounded-lg shadow-xl border border-gray-200 z-50 py-1 flex flex-col backdrop-blur-sm bg-opacity-95"
+          >
+            <div class="px-3 py-1.5 bg-[#529CFF] text-white text-xs flex items-center">
+              <svg class="w-3 h-3 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="3"
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+              Drop shadow
+            </div>
+            <div class="px-8 py-1.5 text-[#333] hover:bg-gray-200 text-xs">Inner shadow</div>
+            <div class="px-8 py-1.5 text-[#333] hover:bg-gray-200 text-xs">Layer Blur</div>
+            <div class="px-8 py-1.5 text-[#333] hover:bg-gray-200 text-xs">Backdrop Blur</div>
+          </div>
+
+          <!-- Cursor Pointer Simulation -->
+          <svg
+            class="absolute left-[80px] top-[14px] w-4 h-4 z-[60] drop-shadow-md text-black fill-current"
+            viewBox="0 0 320 512"
+          >
+            <path
+              d="M302.189 329.126H196.105l55.831 135.993c3.889 9.428-.555 19.999-9.444 23.999l-49.165 21.427c-9.165 4-19.443-.571-23.332-9.714l-53.053-129.136-86.664 89.138C18.729 472.71 0 463.554 0 447.977V18.299C0 1.899 19.921-6.096 30.277 5.443l284.412 292.542c11.472 11.179 6.407 31.141-12.5 31.141z"
+            />
+          </svg>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

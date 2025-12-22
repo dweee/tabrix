@@ -57,23 +57,43 @@ const SHADOW_HOST_STYLES = /* css */ `
   :host {
     all: initial;
 
-    /* Design tokens: flat, ultra-light UI (panel.png style) */
-    --we-surface-bg: #f8f8f8;
-    --we-control-bg: #f0f0f0;
+    /* Design tokens aligned with attr-ui.html design spec */
+    /* Surface colors */
+    --we-surface-bg: #ffffff;
+    --we-surface-secondary: #fafafa;
+
+    /* Control colors - input containers use gray bg */
+    --we-control-bg: #f3f3f3;
     --we-control-bg-hover: #e8e8e8;
-    --we-border-subtle: #e8e8e8;
-    --we-border-strong: #d8d8d8;
-    --we-text-primary: #202020;
-    --we-text-secondary: #7c7c7c;
-    --we-text-muted: #a0a0a0;
-    --we-shadow-subtle: 0 1px 2px rgba(0, 0, 0, 0.08);
+    --we-control-border-hover: #e0e0e0;
+    --we-control-bg-focus: #ffffff;
+    --we-control-border-focus: #3b82f6;
 
+    /* Border colors */
+    --we-border-subtle: #e5e5e5;
+    --we-border-strong: #d4d4d4;
+    --we-border-section: #f3f3f3;
+
+    /* Text colors */
+    --we-text-primary: #171717;
+    --we-text-secondary: #737373;
+    --we-text-muted: #a3a3a3;
+
+    /* Shadows - Tailwind-like shadow-xl */
+    --we-shadow-subtle: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --we-shadow-panel: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    --we-shadow-tab: 0 1px 2px rgba(0, 0, 0, 0.05);
+
+    /* Radii */
     --we-radius-panel: 8px;
-    --we-radius-control: 6px;
-    --we-icon-btn-size: 28px;
+    --we-radius-control: 4px;
+    --we-radius-tab: 4px;
 
-    /* Light blue focus ring used across inputs and icon buttons */
-    --we-focus-ring: rgba(152, 189, 218, 0.9);
+    /* Sizes */
+    --we-icon-btn-size: 24px;
+
+    /* Focus ring - blue inset border style */
+    --we-focus-ring: #3b82f6;
   }
 
   *,
@@ -208,22 +228,23 @@ const SHADOW_HOST_STYLES = /* css */ `
     top: 16px;
     right: 16px;
     pointer-events: auto;
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    font-size: 13px;
+    /* Inter font with system fallbacks (aligned with design spec) */
+    font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 11px;
     line-height: 1.4;
-    color: #0f172a;
+    color: var(--we-text-primary);
     -webkit-font-smoothing: antialiased;
   }
 
   /* Panel styles */
   .we-panel {
-    width: 320px;
+    width: 280px;
     max-width: calc(100vw - 32px);
     max-height: calc(100vh - 32px);
     background: var(--we-surface-bg);
     border: 1px solid var(--we-border-subtle);
     border-radius: var(--we-radius-panel);
-    box-shadow: var(--we-shadow-subtle);
+    box-shadow: var(--we-shadow-panel);
     overflow: hidden;
     contain: layout style paint;
   }
@@ -232,8 +253,8 @@ const SHADOW_HOST_STYLES = /* css */ `
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    padding: 10px 14px;
+    gap: 8px;
+    padding: 8px 12px;
     background: var(--we-surface-bg);
     border-bottom: 1px solid var(--we-border-subtle);
     user-select: none;
@@ -242,10 +263,10 @@ const SHADOW_HOST_STYLES = /* css */ `
   .we-title {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 13px;
+    gap: 6px;
+    font-size: 11px;
     font-weight: 600;
-    color: #1e293b;
+    color: var(--we-text-primary);
   }
 
   .we-badge {
@@ -406,6 +427,13 @@ const SHADOW_HOST_STYLES = /* css */ `
     display: flex;
     justify-content: center;
     min-width: 0;
+  }
+
+  /* Force hidden state for toolbar sections during minimization */
+  .we-toolbar-left[hidden],
+  .we-toolbar-center[hidden],
+  .we-toolbar-right[hidden] {
+    display: none;
   }
 
   .we-toolbar-meta {
@@ -614,9 +642,9 @@ const SHADOW_HOST_STYLES = /* css */ `
   }
 
   .we-prop-target {
-    font-size: 11px;
-    color: #64748b;
-    max-width: 180px;
+    font-size: 10px;
+    color: var(--we-text-secondary);
+    max-width: 160px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -625,44 +653,45 @@ const SHADOW_HOST_STYLES = /* css */ `
   .we-prop-header-right {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
   }
 
+  /* Tab container with pill/segmented style (aligned with design spec) */
   .we-prop-tabs {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 3px;
+    gap: 2px;
+    padding: 2px;
     background: var(--we-control-bg);
-    border-radius: var(--we-radius-panel);
+    border-radius: var(--we-radius-tab);
   }
 
   .we-tab {
     border: 0;
     background: transparent;
     color: var(--we-text-secondary);
-    padding: 5px 10px;
-    border-radius: var(--we-radius-control);
+    padding: 4px 10px;
+    border-radius: var(--we-radius-tab);
     cursor: pointer;
     font-size: 12px;
-    font-weight: 600;
-    transition: all 0.15s ease;
+    font-weight: 500;
+    transition: all 0.1s ease;
   }
 
   .we-tab:hover {
-    background: var(--we-control-bg-hover);
     color: var(--we-text-primary);
   }
 
   .we-tab:focus-visible {
     outline: none;
-    box-shadow: 0 0 0 2px var(--we-focus-ring);
+    box-shadow: inset 0 0 0 2px var(--we-focus-ring);
   }
 
+  /* Active tab: white background with subtle shadow */
   .we-tab[aria-selected="true"] {
     background: var(--we-surface-bg);
     color: var(--we-text-primary);
-    box-shadow: var(--we-shadow-subtle);
+    box-shadow: var(--we-shadow-tab);
   }
 
   .we-prop-body {
@@ -672,7 +701,14 @@ const SHADOW_HOST_STYLES = /* css */ `
     padding: 12px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
+  }
+
+  /* Force hidden state for property panel sections during minimization */
+  .we-prop-body[hidden],
+  .we-prop-header-left[hidden],
+  .we-prop-tabs[hidden] {
+    display: none;
   }
 
   .we-prop-tab-content {
@@ -791,14 +827,23 @@ const SHADOW_HOST_STYLES = /* css */ `
   }
 
   /* ==========================================================================
-     Control Groups
+     Control Groups (Section style - aligned with design spec)
+     Uses separator lines instead of card borders
      ========================================================================== */
 
   .we-group {
-    border: 1px solid var(--we-border-subtle);
-    border-radius: var(--we-radius-panel);
-    overflow: hidden;
+    /* No card-style border, use separator lines between sections */
+    border: 0;
+    border-radius: 0;
+    overflow: visible;
     background: transparent;
+  }
+
+  /* Section separator - top border for non-first groups */
+  .we-group + .we-group {
+    border-top: 1px solid var(--we-border-section);
+    padding-top: 12px;
+    margin-top: 4px;
   }
 
   .we-group-header {
@@ -806,31 +851,33 @@ const SHADOW_HOST_STYLES = /* css */ `
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
-    padding: 10px 12px;
+    gap: 6px;
+    padding: 0 0 8px 0;
     background: transparent;
     border: 0;
     cursor: pointer;
-    color: var(--we-text-primary);
-    font-size: 12px;
-    font-weight: 700;
+    color: #333333;
+    font-size: 11px;
+    font-weight: 600;
     text-align: left;
-    transition: background 0.15s ease, box-shadow 0.15s ease;
+    /* Normal case, matching design spec */
+    transition: color 0.1s ease;
   }
 
   .we-group-header:hover {
-    background: var(--we-control-bg);
+    color: var(--we-text-primary);
   }
 
   .we-group-header:focus-visible {
     outline: none;
     box-shadow: inset 0 0 0 2px var(--we-focus-ring);
+    border-radius: 2px;
   }
 
   .we-group-body {
-    padding: 10px 12px;
+    padding: 0;
     background: transparent;
-    border-top: 1px solid var(--we-border-subtle);
+    border-top: 0;
   }
 
   .we-group[data-collapsed="true"] .we-group-body {
@@ -838,11 +885,11 @@ const SHADOW_HOST_STYLES = /* css */ `
   }
 
   .we-chevron {
-    width: 16px;
-    height: 16px;
+    width: 12px;
+    height: 12px;
     flex: 0 0 auto;
-    color: rgba(100, 116, 139, 0.9);
-    transition: transform 0.15s ease;
+    color: var(--we-text-muted);
+    transition: transform 0.1s ease;
   }
 
   .we-group[data-collapsed="true"] .we-chevron {
@@ -862,71 +909,292 @@ const SHADOW_HOST_STYLES = /* css */ `
 
   .we-field-label {
     flex: 0 0 auto;
-    width: 56px;
-    font-size: 11px;
+    width: 48px;
+    font-size: 10px;
     font-weight: 500;
-    color: #64748b;
-    text-transform: uppercase;
-    letter-spacing: 0.02em;
+    color: var(--we-text-secondary);
+    /* Removed uppercase transform for cleaner look */
   }
 
   .we-field-label--short {
-    width: 24px;
+    width: 20px;
   }
 
+  /* Input styling aligned with design spec:
+   * - Gray background by default
+   * - Inset border on hover
+   * - White background + blue inset border on focus
+   */
   .we-input {
     flex: 1;
     min-width: 0;
-    padding: 5px 8px;
-    font-size: 12px;
+    height: 26px;
+    padding: 0 8px;
+    font-size: 11px;
     font-family: inherit;
     color: var(--we-text-primary);
     background: var(--we-control-bg);
-    border: 0;
+    border: 1px solid transparent;
     border-radius: var(--we-radius-control);
     outline: none;
-    transition: background 0.15s ease, box-shadow 0.15s ease;
+    transition: background 0.1s ease, border-color 0.1s ease, box-shadow 0.1s ease;
   }
 
   .we-input::placeholder {
     color: var(--we-text-muted);
   }
 
-  .we-input:hover {
-    background: var(--we-control-bg-hover);
+  .we-input:hover:not(:focus) {
+    border-color: var(--we-control-border-hover);
   }
 
   .we-input:focus {
-    box-shadow: 0 0 0 2px var(--we-focus-ring);
+    background: var(--we-control-bg-focus);
+    border-color: var(--we-control-border-focus);
+    box-shadow: inset 0 0 0 1px var(--we-control-border-focus);
   }
 
-  .we-input--short {
-    width: 64px;
+  /* ==========================================================================
+   * Input Container (Phase 2.1)
+   *
+   * A wrapper for inputs with prefix/suffix support.
+   * Container handles hover/focus-within styling instead of input itself.
+   * ========================================================================== */
+  .we-input-container {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    height: 26px;
+    padding: 0 8px;
+    gap: 4px;
+    background: var(--we-control-bg);
+    border: 1px solid transparent;
+    border-radius: var(--we-radius-control);
+    transition: background 0.1s ease, border-color 0.1s ease, box-shadow 0.1s ease;
+  }
+
+  .we-input-container:hover:not(:focus-within) {
+    border-color: var(--we-control-border-hover);
+  }
+
+  .we-input-container:focus-within {
+    background: var(--we-control-bg-focus);
+    border-color: var(--we-control-border-focus);
+    box-shadow: inset 0 0 0 1px var(--we-control-border-focus);
+  }
+
+  .we-input-container__input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    padding: 0;
+    font-size: 11px;
+    font-family: inherit;
+    color: var(--we-text-primary);
+    background: transparent;
+    border: none;
+    outline: none;
+  }
+
+  .we-input-container__input::placeholder {
+    color: var(--we-text-muted);
+  }
+
+  /* Number inputs: right-aligned text in containers */
+  .we-input-container__input[inputmode="decimal"],
+  .we-input-container__input[inputmode="numeric"] {
+    text-align: right;
+  }
+
+  /* Prefix and suffix elements */
+  .we-input-container__prefix,
+  .we-input-container__suffix {
     flex: 0 0 auto;
+    font-size: 10px;
+    color: var(--we-text-muted);
+    user-select: none;
+    pointer-events: none;
+  }
+
+  .we-input-container__prefix {
+    margin-right: 2px;
+  }
+
+  .we-input-container__suffix {
+    margin-left: 2px;
+  }
+
+  /* Icon in prefix/suffix */
+  .we-input-container__prefix svg,
+  .we-input-container__suffix svg {
+    width: 12px;
+    height: 12px;
+    display: block;
+  }
+
+  /* ==========================================================================
+   * Icon Button Group (Phase 4.1)
+   *
+   * A single-select grid of icon buttons (e.g. flex-direction control).
+   * ========================================================================== */
+  .we-icon-button-group {
+    display: grid;
+    gap: 4px;
+  }
+
+  .we-icon-button-group__btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 26px;
+    padding: 4px;
+    background: var(--we-control-bg);
+    border: 1px solid transparent;
+    border-radius: var(--we-radius-control);
+    cursor: pointer;
+    transition: background-color 0.1s ease, border-color 0.1s ease;
+  }
+
+  .we-icon-button-group__btn:hover:not(:disabled) {
+    background: var(--we-control-bg-hover);
+  }
+
+  .we-icon-button-group__btn:focus-visible {
+    outline: none;
+    border-color: var(--we-control-border-focus);
+    box-shadow: inset 0 0 0 1px var(--we-control-border-focus);
+  }
+
+  .we-icon-button-group__btn[data-selected="true"] {
+    background: var(--we-control-bg-focus);
+    border-color: var(--we-control-border-focus);
+  }
+
+  .we-icon-button-group__btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .we-icon-button-group__btn svg {
+    width: 14px;
+    height: 14px;
+    color: var(--we-text-secondary);
+  }
+
+  .we-icon-button-group__btn[data-selected="true"] svg {
+    color: var(--we-control-border-focus);
+  }
+
+  /* ==========================================================================
+   * Alignment Grid (Phase 4.2)
+   *
+   * 3×3 single-select grid for justify-content + align-items.
+   * ========================================================================== */
+  .we-alignment-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    padding: 8px;
+    min-height: 90px;
+    background: #f9f9f9;
+    border: 1px solid #f0f0f0;
+    border-radius: var(--we-radius-control);
+    place-items: center;
+  }
+
+  .we-alignment-grid__cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 2px;
+    cursor: pointer;
+    transition: background-color 0.1s ease;
+  }
+
+  .we-alignment-grid__cell:hover:not(:disabled) {
+    background: rgba(0, 0, 0, 0.05);
+  }
+
+  .we-alignment-grid__cell:focus-visible {
+    outline: 2px solid var(--we-control-border-focus);
+    outline-offset: 1px;
+  }
+
+  .we-alignment-grid__cell:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Inactive dot */
+  .we-alignment-grid__dot {
+    width: 2px;
+    height: 2px;
+    background: var(--we-text-muted);
+    border-radius: 50%;
+  }
+
+  /* Active marker (3 bars showing alignment) */
+  .we-alignment-grid__marker {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    width: 12px;
+    height: 12px;
+  }
+
+  .we-alignment-grid__bar {
+    height: 2px;
+    background: var(--we-control-border-focus);
+    border-radius: 1px;
+  }
+
+  .we-alignment-grid__bar--1 { width: 8px; }
+  .we-alignment-grid__bar--2 { width: 12px; }
+  .we-alignment-grid__bar--3 { width: 4px; }
+
+  .we-input--short {
+    width: 56px;
+    flex: 0 0 auto;
+  }
+
+  /* Number inputs: right-aligned text */
+  .we-input[type="text"][inputmode="decimal"],
+  .we-input[type="number"] {
+    text-align: right;
   }
 
   .we-select {
     flex: 1;
     min-width: 0;
-    padding: 5px 24px 5px 8px;
-    font-size: 12px;
+    height: 26px;
+    padding: 0 24px 0 8px;
+    font-size: 11px;
     font-family: inherit;
     color: var(--we-text-primary);
-    background: var(--we-control-bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%237c7c7c' d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E") no-repeat right 8px center;
-    border: 0;
+    background: var(--we-control-bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%23737373' d='M2.5 3.5l2.5 3 2.5-3'/%3E%3C/svg%3E") no-repeat right 8px center;
+    border: 1px solid transparent;
     border-radius: var(--we-radius-control);
     outline: none;
     appearance: none;
     cursor: pointer;
-    transition: background-color 0.15s ease, box-shadow 0.15s ease;
+    transition: background-color 0.1s ease, border-color 0.1s ease, box-shadow 0.1s ease;
   }
 
-  .we-select:hover {
-    background-color: var(--we-control-bg-hover);
+  .we-select:hover:not(:focus) {
+    border-color: var(--we-control-border-hover);
   }
 
   .we-select:focus {
-    box-shadow: 0 0 0 2px var(--we-focus-ring);
+    background-color: var(--we-control-bg-focus);
+    border-color: var(--we-control-border-focus);
+    box-shadow: inset 0 0 0 1px var(--we-control-border-focus);
   }
 
   /* Field row for multiple inputs side by side */
@@ -1600,6 +1868,25 @@ const SHADOW_HOST_STYLES = /* css */ `
     display: none;
   }
 
+  .we-props-group {
+    padding: 6px 10px;
+    background: rgba(241, 245, 249, 0.9);
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-top: 1px solid rgba(226, 232, 240, 0.7);
+  }
+
+  .we-props-group:first-child {
+    border-top: 0;
+  }
+
+  .we-props-group + .we-props-row {
+    border-top: 0;
+  }
+
   .we-props-rows {
     display: flex;
     flex-direction: column;
@@ -1694,18 +1981,21 @@ const SHADOW_HOST_STYLES = /* css */ `
     width: 24px;
     height: 24px;
     padding: 0;
+    position: relative;
     border: 1px solid var(--we-border-subtle);
     border-radius: var(--we-radius-control);
     background: var(--we-control-bg);
     cursor: pointer;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    overflow: hidden;
   }
 
   .we-color-swatch:hover {
     border-color: var(--we-border-strong);
   }
 
-  .we-color-swatch:focus-visible {
+  .we-color-swatch:focus-visible,
+  .we-color-swatch:focus-within {
     outline: none;
     box-shadow: 0 0 0 2px var(--we-focus-ring);
   }
@@ -1715,18 +2005,31 @@ const SHADOW_HOST_STYLES = /* css */ `
     cursor: not-allowed;
   }
 
-  /* Hidden native color input positioned over the swatch */
+  /* Native color input overlays the swatch for direct click interaction */
   .we-color-native-input {
     position: absolute;
-    width: 1px;
-    height: 1px;
+    inset: 0;
+    width: 100%;
+    height: 100%;
     opacity: 0;
-    pointer-events: none;
+    cursor: pointer;
+    border: none;
+    padding: 0;
+    margin: 0;
   }
 
   .we-color-text {
     flex: 1;
     min-width: 0;
+  }
+
+  /* ==========================================================================
+   * Global Hidden Rule
+   * Ensures [hidden] attribute always hides elements, even when they have
+   * explicit display values (flex, inline-flex, etc.)
+   * ========================================================================== */
+  [hidden] {
+    display: none !important;
   }
 `;
 

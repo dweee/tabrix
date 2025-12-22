@@ -573,6 +573,7 @@
 
     /**
      * Get writable props container (vnode.props or instance.props)
+     * @deprecated Use getWriteContainers for better targeting
      */
     getPropsContainer(instance) {
       try {
@@ -593,7 +594,160 @@
     },
 
     /**
-     * Trigger Vue re-render
+     * Check if a key is a declared prop (vs fallthrough attr).
+     * Uses component type definition and runtime props object.
+     */
+    isDeclaredProp(instance, key) {
+      // Check type.props definition first
+      try {
+        const opts = instance?.type?.props;
+        if (Array.isArray(opts)) return opts.includes(key);
+        if (isObject(opts)) return Object.prototype.hasOwnProperty.call(opts, key);
+      } catch {
+        // ignore
+      }
+
+      // Fallback: if key exists in instance.props, treat as declared
+      try {
+        const props = instance?.props;
+        if (isObject(props)) {
+          return Object.prototype.hasOwnProperty.call(props, key);
+        }
+      } catch {
+        // ignore
+      }
+
+      return false;
+    },
+
+    /**
+     * Get write container candidates for a prop kind ('props' | 'attrs').
+     * Returns array of containers to try in order.
+     */
+    getWriteContainers(instance, kind) {
+      const containers = [];
+      const seen = typeof Set === 'function' ? new Set() : null;
+
+      const addContainer = (obj) => {
+        if (!obj || typeof obj !== 'object') return;
+        if (seen) {
+          if (seen.has(obj)) return;
+          seen.add(obj);
+        }
+        containers.push(obj);
+      };
+
+      if (!instance || typeof instance !== 'object') return containers;
+
+      // Primary container based on kind
+      if (kind === 'attrs') {
+        try {
+          addContainer(instance.attrs);
+        } catch {
+          // ignore
+        }
+      } else {
+        try {
+          addContainer(instance.props);
+        } catch {
+          // ignore
+        }
+      }
+
+      // Fallback: vnode.props (often more writable)
+      try {
+        addContainer(instance?.vnode?.props);
+      } catch {
+        // ignore
+      }
+
+      return containers;
+    },
+
+    /**
+     * Get logical root for reading a prop kind.
+     */
+    getReadRoot(instance, kind) {
+      if (kind === 'attrs') {
+        try {
+          if (isObject(instance?.attrs)) return instance.attrs;
+        } catch {
+          // ignore
+        }
+      } else {
+        try {
+          if (isObject(instance?.props)) return instance.props;
+        } catch {
+          // ignore
+        }
+      }
+
+      // Fallback
+      try {
+        if (isObject(instance?.vnode?.props)) return instance.vnode.props;
+      } catch {
+        // ignore
+      }
+
+      return null;
+    },
+
+    /**
+     * Get raw vnode props object
+     */
+    getVNodeProps(instance) {
+      try {
+        const p = instance?.vnode?.props;
+        return isObject(p) ? p : null;
+      } catch {
+        return null;
+      }
+    },
+
+    /**
+     * Apply new raw props via instance.next + instance.update() so Vue runs its internal
+     * updateProps/updateSlots pipeline (closest to a parent-driven props update).
+     * This is the correct way to trigger Vue3 props update.
+     */
+    applyNextProps(instance, nextRawProps) {
+      try {
+        const vnode = instance?.vnode;
+        if (!vnode || typeof vnode !== 'object') return false;
+
+        // Vue3 PatchFlags.FULL_PROPS = 16
+        const FULL_PROPS = 16;
+        const prevFlag = typeof vnode.patchFlag === 'number' ? vnode.patchFlag : 0;
+        const patchFlag = prevFlag >= 0 ? prevFlag | FULL_PROPS : FULL_PROPS;
+
+        // Create next vnode with updated props
+        const nextVNode = Object.assign({}, vnode, {
+          props: nextRawProps,
+          patchFlag,
+          dynamicProps: null,
+          component: instance,
+        });
+
+        instance.next = nextVNode;
+
+        // Trigger update
+        if (instance && typeof instance.update === 'function') {
+          instance.update();
+          return true;
+        }
+
+        const proxy = instance?.proxy;
+        if (proxy && typeof proxy.$forceUpdate === 'function') {
+          proxy.$forceUpdate();
+          return true;
+        }
+      } catch {
+        // ignore
+      }
+      return false;
+    },
+
+    /**
+     * Trigger Vue re-render (fallback, may not work for props changes)
      */
     forceUpdate(instance) {
       try {
@@ -644,8 +798,13 @@
 
     /**
      * Record original value for reset
+     * @param {object} instance - Vue component instance
+     * @param {Array} path - Prop path
+     * @param {boolean} existed - Whether the prop existed before
+     * @param {*} value - Original value
+     * @param {'props'|'attrs'} [targetKind] - Target container kind (for accurate reset)
      */
-    recordOriginal(instance, path, existed, value) {
+    recordOriginal(instance, path, existed, value, targetKind) {
       if (!this.overrideStore || !instance) return;
 
       try {
@@ -658,7 +817,7 @@
         }
 
         if (!store.has(key)) {
-          store.set(key, { path, existed, value });
+          store.set(key, { path, existed, value, targetKind });
         }
       } catch {
         // Best-effort
@@ -1387,15 +1546,47 @@
         }
 
         const componentName = VueAdapter.getComponentName(instance);
-        let props;
+
+        // Read both props and attrs
+        let rootProps = null;
+        let rootAttrs = null;
         try {
-          props = instance.props;
+          rootProps = instance.props;
         } catch {
-          props = null;
+          rootProps = null;
+        }
+        try {
+          rootAttrs = instance.attrs;
+        } catch {
+          rootAttrs = null;
         }
 
+        // Serialize props with enum introspection
         const enumValuesByKey = EnumIntrospection.getVueEnumValues(instance);
-        const serialized = Serializer.serializeProps(props, enumValuesByKey);
+        const serializedProps = Serializer.serializeProps(rootProps, enumValuesByKey);
+        const serializedAttrs = Serializer.serializeProps(rootAttrs, null);
+
+        // Merge entries with source annotation
+        const mergedEntries = [];
+        if (Array.isArray(serializedProps.entries)) {
+          for (const entry of serializedProps.entries) {
+            mergedEntries.push({ ...entry, source: 'props' });
+          }
+        }
+        if (Array.isArray(serializedAttrs.entries)) {
+          for (const entry of serializedAttrs.entries) {
+            mergedEntries.push({ ...entry, source: 'attrs' });
+          }
+        }
+
+        const serialized = {
+          kind: 'props',
+          entries: mergedEntries,
+        };
+        if (serializedProps.truncated || serializedAttrs.truncated) {
+          serialized.truncated = true;
+        }
+
         const canWrite = VueAdapter.isDevBuild(instance);
 
         const data = buildResponseData({
@@ -1588,16 +1779,6 @@
           );
         }
 
-        const container = VueAdapter.getPropsContainer(instance);
-        if (!container) {
-          return Transport.createResponse(
-            req.requestId,
-            false,
-            base,
-            'Vue props container not found',
-          );
-        }
-
         // Vue props keys must be strings at top level
         if (typeof path[0] !== 'string') {
           return Transport.createResponse(
@@ -1608,15 +1789,15 @@
           );
         }
 
-        // Check current value
-        let currentRootProps;
-        try {
-          currentRootProps = instance.props;
-        } catch {
-          currentRootProps = null;
-        }
+        const propName = path[0];
+        const subPath = path.slice(1);
 
-        const read = getValueAtPath(currentRootProps || {}, path);
+        // Infer target kind based on whether key is declared prop
+        const targetKind = VueAdapter.isDeclaredProp(instance, propName) ? 'props' : 'attrs';
+
+        // Check current value from logical root
+        const readRoot = VueAdapter.getReadRoot(instance, targetKind) || {};
+        const read = getValueAtPath(readRoot, path);
         if (read.ok && read.existed && !Serializer.isEditablePrimitive(read.value)) {
           return Transport.createResponse(
             req.requestId,
@@ -1626,26 +1807,34 @@
           );
         }
 
-        // Record original for reset
-        VueAdapter.recordOriginal(instance, path, read.existed, read.value);
-
-        const propName = path[0];
-        const subPath = path.slice(1);
+        // Build next vnode props (the correct way to update Vue3 props)
+        const currentRawProps = VueAdapter.getVNodeProps(instance) || {};
+        const nextRawProps = { ...currentRawProps };
 
         try {
           if (subPath.length === 0) {
-            container[propName] = value;
+            nextRawProps[propName] = value;
           } else {
-            const prev = container[propName];
-            container[propName] = VueAdapter.copyWithSet(prev, subPath, value);
+            const prev = nextRawProps[propName];
+            nextRawProps[propName] = VueAdapter.copyWithSet(prev, subPath, value);
           }
         } catch (err) {
-          base.meta = { write: { method: 'vueSet', error: safeString(err) } };
-          return Transport.createResponse(req.requestId, false, base, 'Failed to write Vue props');
+          base.meta = {
+            write: { method: 'vueNextVNode', target: targetKind, error: safeString(err) },
+          };
+          return Transport.createResponse(
+            req.requestId,
+            false,
+            base,
+            'Failed to build Vue props patch',
+          );
         }
 
-        if (!VueAdapter.forceUpdate(instance)) {
-          base.meta = { write: { method: 'vueForceUpdate', error: 'No update method' } };
+        // Apply via instance.next + update() to trigger Vue's internal updateProps pipeline
+        if (!VueAdapter.applyNextProps(instance, nextRawProps)) {
+          base.meta = {
+            write: { method: 'vueNextVNode', target: targetKind, error: 'No update method' },
+          };
           return Transport.createResponse(
             req.requestId,
             false,
@@ -1654,7 +1843,10 @@
           );
         }
 
-        base.meta = { write: { method: 'vueForceUpdate' } };
+        // Record original for reset only after successful write (include targetKind for accurate reset)
+        VueAdapter.recordOriginal(instance, path, read.existed, read.value, targetKind);
+
+        base.meta = { write: { method: 'vueNextVNode', target: targetKind } };
         return Transport.createResponse(req.requestId, true, base);
       }
 
@@ -1784,12 +1976,9 @@
           return Transport.createResponse(req.requestId, true, base);
         }
 
-        const container = VueAdapter.getPropsContainer(instance);
-        if (!container) {
-          base.meta = { reset: { method: 'refresh', reason: 'noContainer' } };
-          base.needsRefresh = true;
-          return Transport.createResponse(req.requestId, true, base);
-        }
+        // Build next vnode props with all originals restored
+        const currentRawProps = VueAdapter.getVNodeProps(instance) || {};
+        const nextRawProps = { ...currentRawProps };
 
         let reverted = 0;
         for (const entry of store.values()) {
@@ -1801,20 +1990,30 @@
 
           try {
             if (subPath.length === 0) {
-              container[propName] = entry.value;
+              if (entry.existed) {
+                nextRawProps[propName] = entry.value;
+              } else {
+                delete nextRawProps[propName];
+              }
             } else {
-              const prev = container[propName];
-              container[propName] = VueAdapter.copyWithSet(prev, subPath, entry.value);
+              const prev = nextRawProps[propName];
+              nextRawProps[propName] = VueAdapter.copyWithSet(prev, subPath, entry.value);
             }
             reverted++;
           } catch {
-            // Continue
+            // Continue with other entries
           }
         }
 
+        // Apply via instance.next + update() to trigger Vue's internal updateProps pipeline
+        if (!VueAdapter.applyNextProps(instance, nextRawProps)) {
+          base.meta = { reset: { method: 'refresh', reason: 'noUpdate' } };
+          base.needsRefresh = true;
+          return Transport.createResponse(req.requestId, true, base);
+        }
+
         VueAdapter.clearOriginals(instance);
-        VueAdapter.forceUpdate(instance);
-        base.meta = { reset: { method: 'vueForceUpdate', reverted } };
+        base.meta = { reset: { method: 'vueNextVNode', reverted } };
 
         return Transport.createResponse(req.requestId, true, base);
       }

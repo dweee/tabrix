@@ -156,13 +156,12 @@ export function createColorField(options: ColorFieldOptions): ColorField {
   swatchBtn.title = 'Pick color';
   swatchBtn.setAttribute('aria-label', `Pick ${ariaLabel}`);
 
-  // Hidden native color input
+  // Native color input (overlays swatch for direct click interaction)
   const nativeInput = document.createElement('input');
   nativeInput.type = 'color';
   nativeInput.className = 'we-color-native-input';
   nativeInput.value = lastResolvedHex;
-  nativeInput.tabIndex = -1;
-  nativeInput.setAttribute('aria-hidden', 'true');
+  nativeInput.tabIndex = -1; // Skip in tab order; keyboard handled by swatch button
 
   // Text input for manual entry
   const textInput = document.createElement('input');
@@ -179,7 +178,10 @@ export function createColorField(options: ColorFieldOptions): ColorField {
     'position:fixed;left:-9999px;top:0;width:1px;height:1px;pointer-events:none;opacity:0';
   probe.setAttribute('aria-hidden', 'true');
 
-  root.append(swatchBtn, nativeInput, textInput, probe);
+  // Place native input inside swatch for direct click interaction
+  // This ensures the color picker opens reliably across all browsers
+  swatchBtn.append(nativeInput);
+  root.append(swatchBtn, textInput, probe);
   container.append(root);
   disposer.add(() => root.remove());
 
@@ -188,10 +190,21 @@ export function createColorField(options: ColorFieldOptions): ColorField {
   // ==========================================================================
 
   /**
-   * Get the display value (current value or placeholder)
+   * Get the display value for color resolution.
+   * When the current value contains var(), use placeholder (computed value) for resolution
+   * since Shadow DOM cannot access page-side CSS variables.
    */
   function getDisplayValue(): string {
-    return currentValue.trim() || currentPlaceholder.trim();
+    const value = currentValue.trim();
+    const placeholder = currentPlaceholder.trim();
+
+    // If value contains CSS variable, use placeholder for color resolution
+    // because probe element in Shadow DOM cannot resolve page-side variables
+    if (value && /\bvar\s*\(/i.test(value) && placeholder) {
+      return placeholder;
+    }
+
+    return value || placeholder;
   }
 
   /**
@@ -252,9 +265,19 @@ export function createColorField(options: ColorFieldOptions): ColorField {
     // Try modern showPicker API first, fallback to click
     const showPicker = (nativeInput as HTMLInputElement & { showPicker?: () => void }).showPicker;
     if (typeof showPicker === 'function') {
-      showPicker.call(nativeInput);
-    } else {
+      try {
+        showPicker.call(nativeInput);
+        return;
+      } catch {
+        // showPicker may throw if not triggered by user gesture or unsupported
+      }
+    }
+
+    // Fallback to programmatic click
+    try {
       nativeInput.click();
+    } catch {
+      // Best-effort fallback
     }
   }
 
@@ -262,10 +285,13 @@ export function createColorField(options: ColorFieldOptions): ColorField {
   // Event Handlers
   // ==========================================================================
 
-  // Swatch button click -> open picker
-  disposer.listen(swatchBtn, 'click', (e: MouseEvent) => {
-    e.preventDefault();
-    openPicker();
+  // Swatch button keyboard activation -> open picker
+  // Note: Click is handled by the native input overlay; this handles keyboard (Enter/Space)
+  disposer.listen(swatchBtn, 'keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openPicker();
+    }
   });
 
   // Text input change

@@ -11,6 +11,7 @@
 import { Disposer } from '../../../utils/disposables';
 import type { StyleTransactionHandle, TransactionManager } from '../../../core/transaction-manager';
 import type { DesignControl } from '../types';
+import { wireNumberStepping } from './number-stepping';
 
 // =============================================================================
 // Constants
@@ -134,6 +135,9 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
   gapInput.setAttribute('aria-label', 'Gap');
   gapRow.append(gapLabel, gapInput);
 
+  // Wire up keyboard stepping for arrow up/down
+  wireNumberStepping(disposer, gapInput, { mode: 'css-length' });
+
   root.append(displayRow, directionRow, wrapRow, justifyRow, alignRow, gapRow);
   container.append(root);
   disposer.add(() => root.remove());
@@ -248,9 +252,16 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
     const isEditing = field.handle !== null || isFieldFocused(el);
 
     if (el instanceof HTMLInputElement) {
-      el.placeholder = readComputedValue(target, property);
       if (isEditing && !force) return;
-      el.value = readInlineValue(target, property);
+      // Display real value: prefer inline style, fallback to computed style
+      const inlineValue = readInlineValue(target, property);
+      if (inlineValue) {
+        el.value = inlineValue;
+        el.placeholder = '';
+      } else {
+        el.value = readComputedValue(target, property);
+        el.placeholder = '';
+      }
     } else {
       const inline = readInlineValue(target, property);
       const computed = readComputedValue(target, property);

@@ -5,8 +5,8 @@
  *
  * Features:
  * - Live preview via TransactionManager.beginStyle().set()
- * - Inline style values (not computed) shown in inputs
- * - Computed style values shown as placeholders
+ * - Shows real values (inline if set, otherwise computed)
+ * - ArrowUp/ArrowDown keyboard stepping for numeric values
  * - Blur commits, Enter commits + blurs, ESC rollbacks
  * - Pure numbers default to px
  * - Empty value clears inline style
@@ -15,6 +15,7 @@
 import { Disposer } from '../../../utils/disposables';
 import type { StyleTransactionHandle, TransactionManager } from '../../../core/transaction-manager';
 import type { DesignControl } from '../types';
+import { wireNumberStepping } from './number-stepping';
 
 // =============================================================================
 // Types
@@ -147,6 +148,10 @@ export function createSizeControl(options: SizeControlOptions): DesignControl {
 
   heightRow.append(heightLabel, heightInput);
 
+  // Wire up keyboard stepping for arrow up/down
+  wireNumberStepping(disposer, widthInput, { mode: 'css-length' });
+  wireNumberStepping(disposer, heightInput, { mode: 'css-length' });
+
   root.append(widthRow, heightRow);
   container.append(root);
   disposer.add(() => root.remove());
@@ -256,17 +261,22 @@ export function createSizeControl(options: SizeControlOptions): DesignControl {
 
     field.input.disabled = false;
 
-    // Always update placeholder from computed style
-    field.input.placeholder = readComputedValue(target, property);
-
     // Don't overwrite user input during active editing (unless forced)
     if (!force) {
       const isEditing = field.handle !== null || isInputFocused(field.input);
       if (isEditing) return;
     }
 
-    // Display inline style value
-    field.input.value = readInlineValue(target, property);
+    // Display real value: prefer inline style, fallback to computed style
+    const inlineValue = readInlineValue(target, property);
+    if (inlineValue) {
+      field.input.value = inlineValue;
+      field.input.placeholder = '';
+    } else {
+      // No inline style: show computed value directly in value field
+      field.input.value = readComputedValue(target, property);
+      field.input.placeholder = '';
+    }
   }
 
   /**

@@ -6,8 +6,8 @@
  * Features:
  * - Visual box model representation (like Chrome DevTools)
  * - 8 input fields: margin-top/right/bottom/left, padding-top/right/bottom/left
- * - Inline style values shown in inputs
- * - Computed style values as placeholders
+ * - Shows real values (inline if set, otherwise computed)
+ * - ArrowUp/ArrowDown keyboard stepping + drag-to-scrub for numeric values
  * - Live preview via TransactionManager.beginStyle().set()
  * - Blur commits, Enter commits + blurs, ESC rollbacks
  * - Pure numbers default to px
@@ -17,6 +17,7 @@
 import { Disposer } from '../../../utils/disposables';
 import type { StyleTransactionHandle, TransactionManager } from '../../../core/transaction-manager';
 import type { DesignControl } from '../types';
+import { wireNumberStepping } from './number-stepping';
 
 // =============================================================================
 // Types
@@ -253,6 +254,11 @@ export function createSpacingControl(options: SpacingControlOptions): DesignCont
     'padding-left': { property: 'padding-left', input: paddingLeftInput, handle: null },
   };
 
+  // Wire up keyboard stepping for arrow up/down
+  for (const prop of SPACING_PROPERTIES) {
+    wireNumberStepping(disposer, fields[prop].input, { mode: 'css-length' });
+  }
+
   // ==========================================================================
   // Transaction Management
   // ==========================================================================
@@ -330,17 +336,21 @@ export function createSpacingControl(options: SpacingControlOptions): DesignCont
 
     field.input.disabled = false;
 
-    // Always update placeholder from computed style
-    field.input.placeholder = readComputedValue(target, property);
-
     // Don't overwrite user input during active editing (unless forced)
     if (!force) {
       const isEditing = field.handle !== null || isInputFocused(field.input);
       if (isEditing) return;
     }
 
-    // Display inline style value
-    field.input.value = readInlineValue(target, property);
+    // Display real value: prefer inline style, fallback to computed style
+    const inlineValue = readInlineValue(target, property);
+    if (inlineValue) {
+      field.input.value = inlineValue;
+      field.input.placeholder = '';
+    } else {
+      field.input.value = readComputedValue(target, property);
+      field.input.placeholder = '';
+    }
   }
 
   /**

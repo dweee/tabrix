@@ -14,6 +14,7 @@
 import { Disposer } from '../../../utils/disposables';
 import type { StyleTransactionHandle, TransactionManager } from '../../../core/transaction-manager';
 import { createColorField, type ColorField } from './color-field';
+import { wireNumberStepping } from './number-stepping';
 import type { DesignControl } from '../types';
 
 // =============================================================================
@@ -220,6 +221,18 @@ export function createAppearanceControl(options: AppearanceControlOptions): Desi
     'Background Color',
   );
 
+  // Wire up keyboard stepping for arrow up/down
+  wireNumberStepping(disposer, opacityInput, {
+    mode: 'number',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    shiftStep: 0.1,
+    altStep: 0.001,
+  });
+  wireNumberStepping(disposer, radiusInput, { mode: 'css-length' });
+  wireNumberStepping(disposer, borderWidthInput, { mode: 'css-length' });
+
   root.append(
     overflowRow,
     boxSizingRow,
@@ -363,12 +376,19 @@ export function createAppearanceControl(options: AppearanceControlOptions): Desi
       }
 
       input.disabled = false;
-      input.placeholder = readComputedValue(target, property);
 
       const isEditing = field.handle !== null || isFieldFocused(input);
       if (isEditing && !force) return;
 
-      input.value = readInlineValue(target, property);
+      // Display real value: prefer inline style, fallback to computed style
+      const inlineValue = readInlineValue(target, property);
+      if (inlineValue) {
+        input.value = inlineValue;
+        input.placeholder = '';
+      } else {
+        input.value = readComputedValue(target, property);
+        input.placeholder = '';
+      }
     } else if (field.kind === 'select') {
       // Select field
       const select = field.element;
@@ -400,12 +420,22 @@ export function createAppearanceControl(options: AppearanceControlOptions): Desi
       }
 
       colorField.setDisabled(false);
-      colorField.setPlaceholder(readComputedValue(target, property));
 
       const isEditing = field.handle !== null || colorField.isFocused();
       if (isEditing && !force) return;
 
-      colorField.setValue(readInlineValue(target, property));
+      // Display real value: prefer inline style, fallback to computed style
+      const inlineValue = readInlineValue(target, property);
+      const computedValue = readComputedValue(target, property);
+      if (inlineValue) {
+        colorField.setValue(inlineValue);
+        // Pass computed value as placeholder when using CSS variables
+        // so color-field can resolve the actual color for swatch display
+        colorField.setPlaceholder(/\bvar\s*\(/i.test(inlineValue) ? computedValue : '');
+      } else {
+        colorField.setValue(computedValue);
+        colorField.setPlaceholder('');
+      }
     }
   }
 

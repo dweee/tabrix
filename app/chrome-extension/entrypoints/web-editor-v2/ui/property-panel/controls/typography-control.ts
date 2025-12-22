@@ -16,6 +16,7 @@ import type { StyleTransactionHandle, TransactionManager } from '../../../core/t
 import type { DesignTokensService, CssVarName } from '../../../core/design-tokens';
 import { createTokenPicker, type TokenPicker } from './token-picker';
 import { createColorField, type ColorField } from './color-field';
+import { wireNumberStepping } from './number-stepping';
 import type { DesignControl } from '../types';
 
 // =============================================================================
@@ -158,6 +159,15 @@ export function createTypographyControl(options: TypographyControlOptions): Desi
   lineHeightInput.autocomplete = 'off';
   lineHeightInput.setAttribute('aria-label', 'Line Height');
   lineHeightRow.append(lineHeightLabel, lineHeightInput);
+
+  // Wire up keyboard stepping for arrow up/down
+  wireNumberStepping(disposer, fontSizeInput, { mode: 'css-length' });
+  wireNumberStepping(disposer, lineHeightInput, {
+    mode: 'css-length',
+    step: 0.1,
+    shiftStep: 1,
+    altStep: 0.01,
+  });
 
   // Text Align
   const textAlignRow = document.createElement('div');
@@ -348,12 +358,22 @@ export function createTypographyControl(options: TypographyControlOptions): Desi
       }
 
       colorField.setDisabled(false);
-      colorField.setPlaceholder(readComputedValue(target, property));
 
       const isEditing = field.handle !== null || colorField.isFocused();
       if (isEditing && !force) return;
 
-      colorField.setValue(readInlineValue(target, property));
+      // Display real value: prefer inline style, fallback to computed style
+      const inlineValue = readInlineValue(target, property);
+      const computedValue = readComputedValue(target, property);
+      if (inlineValue) {
+        colorField.setValue(inlineValue);
+        // Pass computed value as placeholder when using CSS variables
+        // so color-field can resolve the actual color for swatch display
+        colorField.setPlaceholder(/\bvar\s*\(/i.test(inlineValue) ? computedValue : '');
+      } else {
+        colorField.setValue(computedValue);
+        colorField.setPlaceholder('');
+      }
     } else {
       // Handle standard input/select
       const el = field.element;
@@ -371,9 +391,16 @@ export function createTypographyControl(options: TypographyControlOptions): Desi
       const isEditing = field.handle !== null || isFieldFocused(el);
 
       if (el instanceof HTMLInputElement) {
-        el.placeholder = readComputedValue(target, property);
         if (isEditing && !force) return;
-        el.value = readInlineValue(target, property);
+        // Display real value: prefer inline style, fallback to computed style
+        const inlineValue = readInlineValue(target, property);
+        if (inlineValue) {
+          el.value = inlineValue;
+          el.placeholder = '';
+        } else {
+          el.value = readComputedValue(target, property);
+          el.placeholder = '';
+        }
       } else {
         const inline = readInlineValue(target, property);
         const computed = readComputedValue(target, property);

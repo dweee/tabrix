@@ -133,12 +133,23 @@ export type SerializedValue =
 export type SerializedEnumValue = string | number | boolean;
 
 /**
+ * Vue-only: source of a prop entry (declared props vs fallthrough attrs)
+ */
+export type PropEntrySource = 'props' | 'attrs';
+
+/**
  * Single prop entry with editability info
  */
 export interface SerializedPropEntry {
   key: string;
   editable: boolean;
   value: SerializedValue;
+  /**
+   * Vue-only: where this entry comes from.
+   * - 'props': declared props (instance.props)
+   * - 'attrs': fallthrough attrs (instance.attrs)
+   */
+  source?: PropEntrySource;
   /** Available enum values (if this prop is an enum type) */
   enumValues?: SerializedEnumValue[];
 }

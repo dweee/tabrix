@@ -495,7 +495,8 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
     const props = data?.props;
     if (!props || !Array.isArray(props.entries) || props.entries.length === 0) {
       emptyState.hidden = false;
-      emptyState.textContent = 'No props found.';
+      emptyState.textContent =
+        data?.framework === 'vue' ? 'No props or attrs found.' : 'No props found.';
       return;
     }
 
@@ -504,125 +505,152 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
     const canWrite = getCanWrite(data);
     const disableEdits = !canWrite || loading;
 
-    for (const entry of props.entries) {
-      const row = document.createElement('div');
-      row.className = 'we-props-row';
+    // Group entries by source for Vue (Props vs Attrs)
+    const isVue = data?.framework === 'vue';
+    const entries = props.entries;
+    const hasAttrs = isVue && entries.some((e) => e.source === 'attrs');
 
-      const keyEl = document.createElement('div');
-      keyEl.className = 'we-props-key';
-      keyEl.textContent = entry.key;
+    interface EntryGroup {
+      title: string;
+      entries: typeof entries;
+    }
 
-      const valueEl = document.createElement('div');
-      valueEl.className = 'we-props-value';
+    const groups: EntryGroup[] = hasAttrs
+      ? [
+          { title: 'Props', entries: entries.filter((e) => e.source !== 'attrs') },
+          { title: 'Attrs', entries: entries.filter((e) => e.source === 'attrs') },
+        ].filter((g) => g.entries.length > 0)
+      : [{ title: '', entries }];
 
-      const keyIsDangerous = isDangerousPropKey(entry.key);
-      const entryEditable = Boolean(entry.editable) && !keyIsDangerous;
-
-      // Check if this entry has enum values (for select rendering)
-      // Filter to valid string enum values first, then check if non-empty
-      const rawEnumValues = Array.isArray(entry.enumValues) ? entry.enumValues : [];
-      const filteredEnumValues = rawEnumValues.filter(
-        (v): v is string => typeof v === 'string' && v.trim().length > 0,
-      );
-      const hasEnumValues =
-        entryEditable && entry.value.kind === 'string' && filteredEnumValues.length > 0;
-
-      // Render editable controls for primitives
-      if (hasEnumValues) {
-        // Render Select for enum props
-        const select = document.createElement('select');
-        select.className = 'we-select we-props-input';
-        select.disabled = disableEdits;
-        select.dataset.propKey = entry.key;
-        select.dataset.propKind = 'enum';
-        select.setAttribute('aria-label', `Select prop ${entry.key}`);
-
-        const currentValue = entry.value.value ?? '';
-        const seen = new Set<string>();
-
-        // Add current value first if not in enum list
-        if (currentValue && !filteredEnumValues.includes(currentValue)) {
-          const opt = document.createElement('option');
-          opt.value = currentValue;
-          opt.textContent = `${currentValue} (current)`;
-          select.append(opt);
-          seen.add(currentValue);
-        }
-
-        // Add enum values
-        for (const v of filteredEnumValues) {
-          if (seen.has(v)) continue;
-          seen.add(v);
-          const opt = document.createElement('option');
-          opt.value = v;
-          opt.textContent = v;
-          select.append(opt);
-        }
-
-        // Set current value
-        if (currentValue && seen.has(currentValue)) {
-          select.value = currentValue;
-        }
-
-        valueEl.append(select);
-      } else if (entryEditable && entry.value.kind === 'boolean') {
-        const label = document.createElement('label');
-        label.className = 'we-props-bool';
-
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.className = 'we-props-checkbox';
-        checkbox.checked = Boolean(entry.value.value);
-        checkbox.disabled = disableEdits;
-        checkbox.dataset.propKey = entry.key;
-        checkbox.dataset.propKind = 'boolean';
-        checkbox.setAttribute('aria-label', `Toggle prop ${entry.key}`);
-
-        const text = document.createElement('span');
-        text.textContent = checkbox.checked ? 'true' : 'false';
-        text.dataset.weBoolText = '1';
-
-        label.append(checkbox, text);
-        valueEl.append(label);
-      } else if (entryEditable && entry.value.kind === 'string') {
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'we-input we-props-input';
-        input.autocomplete = 'off';
-        input.spellcheck = false;
-        input.value = entry.value.value ?? '';
-        input.disabled = disableEdits;
-        input.dataset.propKey = entry.key;
-        input.dataset.propKind = 'string';
-        input.setAttribute('aria-label', `Edit prop ${entry.key}`);
-        valueEl.append(input);
-      } else if (
-        entryEditable &&
-        entry.value.kind === 'number' &&
-        canRenderEditableNumber(entry.value)
-      ) {
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.inputMode = 'decimal';
-        input.className = 'we-input we-props-input';
-        input.autocomplete = 'off';
-        input.spellcheck = false;
-        input.value = String(entry.value.value);
-        input.disabled = disableEdits;
-        input.dataset.propKey = entry.key;
-        input.dataset.propKind = 'number';
-        input.setAttribute('aria-label', `Edit prop ${entry.key}`);
-        valueEl.append(input);
-      } else {
-        // Read-only display
-        valueEl.classList.add('we-props-value--readonly');
-        valueEl.textContent = keyIsDangerous
-          ? `${formatSerializedValue(entry.value)} (blocked)`
-          : formatSerializedValue(entry.value);
+    for (const group of groups) {
+      // Render group header for Vue
+      if (group.title) {
+        const groupHeader = document.createElement('div');
+        groupHeader.className = 'we-props-group';
+        groupHeader.textContent = group.title;
+        rows.append(groupHeader);
       }
 
-      row.append(keyEl, valueEl);
-      rows.append(row);
+      for (const entry of group.entries) {
+        const row = document.createElement('div');
+        row.className = 'we-props-row';
+
+        const keyEl = document.createElement('div');
+        keyEl.className = 'we-props-key';
+        keyEl.textContent = entry.key;
+
+        const valueEl = document.createElement('div');
+        valueEl.className = 'we-props-value';
+
+        const keyIsDangerous = isDangerousPropKey(entry.key);
+        const entryEditable = Boolean(entry.editable) && !keyIsDangerous;
+
+        // Check if this entry has enum values (for select rendering)
+        // Filter to valid string enum values first, then check if non-empty
+        const rawEnumValues = Array.isArray(entry.enumValues) ? entry.enumValues : [];
+        const filteredEnumValues = rawEnumValues.filter(
+          (v): v is string => typeof v === 'string' && v.trim().length > 0,
+        );
+        const hasEnumValues =
+          entryEditable && entry.value.kind === 'string' && filteredEnumValues.length > 0;
+
+        // Render editable controls for primitives
+        if (hasEnumValues) {
+          // Render Select for enum props
+          const select = document.createElement('select');
+          select.className = 'we-select we-props-input';
+          select.disabled = disableEdits;
+          select.dataset.propKey = entry.key;
+          select.dataset.propKind = 'enum';
+          select.setAttribute('aria-label', `Select prop ${entry.key}`);
+
+          const currentValue = entry.value.value ?? '';
+          const seen = new Set<string>();
+
+          // Add current value first if not in enum list
+          if (currentValue && !filteredEnumValues.includes(currentValue)) {
+            const opt = document.createElement('option');
+            opt.value = currentValue;
+            opt.textContent = `${currentValue} (current)`;
+            select.append(opt);
+            seen.add(currentValue);
+          }
+
+          // Add enum values
+          for (const v of filteredEnumValues) {
+            if (seen.has(v)) continue;
+            seen.add(v);
+            const opt = document.createElement('option');
+            opt.value = v;
+            opt.textContent = v;
+            select.append(opt);
+          }
+
+          // Set current value
+          if (currentValue && seen.has(currentValue)) {
+            select.value = currentValue;
+          }
+
+          valueEl.append(select);
+        } else if (entryEditable && entry.value.kind === 'boolean') {
+          const label = document.createElement('label');
+          label.className = 'we-props-bool';
+
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.className = 'we-props-checkbox';
+          checkbox.checked = Boolean(entry.value.value);
+          checkbox.disabled = disableEdits;
+          checkbox.dataset.propKey = entry.key;
+          checkbox.dataset.propKind = 'boolean';
+          checkbox.setAttribute('aria-label', `Toggle prop ${entry.key}`);
+
+          const text = document.createElement('span');
+          text.textContent = checkbox.checked ? 'true' : 'false';
+          text.dataset.weBoolText = '1';
+
+          label.append(checkbox, text);
+          valueEl.append(label);
+        } else if (entryEditable && entry.value.kind === 'string') {
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'we-input we-props-input';
+          input.autocomplete = 'off';
+          input.spellcheck = false;
+          input.value = entry.value.value ?? '';
+          input.disabled = disableEdits;
+          input.dataset.propKey = entry.key;
+          input.dataset.propKind = 'string';
+          input.setAttribute('aria-label', `Edit prop ${entry.key}`);
+          valueEl.append(input);
+        } else if (
+          entryEditable &&
+          entry.value.kind === 'number' &&
+          canRenderEditableNumber(entry.value)
+        ) {
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.inputMode = 'decimal';
+          input.className = 'we-input we-props-input';
+          input.autocomplete = 'off';
+          input.spellcheck = false;
+          input.value = String(entry.value.value);
+          input.disabled = disableEdits;
+          input.dataset.propKey = entry.key;
+          input.dataset.propKind = 'number';
+          input.setAttribute('aria-label', `Edit prop ${entry.key}`);
+          valueEl.append(input);
+        } else {
+          // Read-only display
+          valueEl.classList.add('we-props-value--readonly');
+          valueEl.textContent = keyIsDangerous
+            ? `${formatSerializedValue(entry.value)} (blocked)`
+            : formatSerializedValue(entry.value);
+        }
+
+        row.append(keyEl, valueEl);
+        rows.append(row);
+      }
     }
   }
 
