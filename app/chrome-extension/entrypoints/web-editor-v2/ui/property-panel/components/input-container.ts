@@ -59,6 +59,8 @@ export interface InputContainer {
   setPrefix(content: InputAffix | null): void;
   /** Update suffix content */
   setSuffix(content: InputAffix | null): void;
+  /** Get current suffix text (null if no suffix or if suffix is a Node) */
+  getSuffixText(): string | null;
 }
 
 // =============================================================================
@@ -188,6 +190,13 @@ export function createInputContainer(options: InputContainerOptions): InputConta
         root.append(newEl);
       }
       suffixEl = newEl;
+    },
+
+    getSuffixText(): string | null {
+      if (!suffixEl) return null;
+      // Only return text content, not Node content
+      const text = suffixEl.textContent?.trim();
+      return text || null;
     },
   };
 }

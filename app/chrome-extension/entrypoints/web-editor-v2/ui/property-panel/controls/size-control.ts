@@ -1,9 +1,10 @@
 /**
- * Size Control (Phase 3.5)
+ * Size Control (Phase 3.5 + Mode Selection)
  *
- * Design control for editing inline width and height styles.
+ * Design control for editing inline width and height styles with mode selection.
  *
  * Features:
+ * - Mode selection: Fixed (custom value), Fit (fit-content/auto), Fill (100%)
  * - Live preview via TransactionManager.beginStyle().set()
  * - Shows real values (inline if set, otherwise computed)
  * - ArrowUp/ArrowDown keyboard stepping for numeric values
@@ -16,7 +17,7 @@ import { Disposer } from '../../../utils/disposables';
 import type { StyleTransactionHandle, TransactionManager } from '../../../core/transaction-manager';
 import type { DesignControl } from '../types';
 import { createInputContainer, type InputContainer } from '../components/input-container';
-import { extractUnitSuffix, normalizeLength } from './css-helpers';
+import { combineLengthValue, formatLengthForDisplay } from './css-helpers';
 import { wireNumberStepping } from './number-stepping';
 
 // =============================================================================
@@ -25,16 +26,54 @@ import { wireNumberStepping } from './number-stepping';
 
 type SizeProperty = 'width' | 'height';
 
+/** Size mode determines how dimension value is calculated */
+type SizeMode = 'fixed' | 'fit' | 'fill';
+
+interface SizeModeOption {
+  value: SizeMode;
+  label: string;
+}
+
 interface FieldState {
   property: SizeProperty;
+  column: HTMLElement;
+  modeSelect: HTMLSelectElement;
   input: HTMLInputElement;
   container: InputContainer;
+  /** Cached fixed value for mode switching (per-target, cleared on target change) */
+  lastFixedValue: string;
   handle: StyleTransactionHandle | null;
 }
 
 // =============================================================================
+// Constants
+// =============================================================================
+
+const SIZE_MODE_OPTIONS: readonly SizeModeOption[] = [
+  { value: 'fixed', label: 'Fixed' },
+  { value: 'fit', label: 'Fit' },
+  { value: 'fill', label: 'Fill' },
+] as const;
+
+/** Keywords that indicate fit mode */
+const FIT_KEYWORDS = ['auto', 'fit-content', 'max-content', 'min-content'] as const;
+
+// =============================================================================
 // Helpers
 // =============================================================================
+
+/**
+ * Check if element is focused in Shadow DOM context
+ */
+function isElementFocused(el: HTMLElement): boolean {
+  try {
+    const rootNode = el.getRootNode();
+    if (rootNode instanceof ShadowRoot) return rootNode.activeElement === el;
+    return document.activeElement === el;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Read inline style property value from element
@@ -61,6 +100,93 @@ function readComputedValue(element: Element, property: SizeProperty): string {
   }
 }
 
+/**
+ * Get bounding rect dimension as px string
+ * Preserves 2 decimal places for sub-pixel accuracy
+ */
+function getBoundingRectPx(element: Element, property: SizeProperty): string {
+  try {
+    const rect = element.getBoundingClientRect();
+    const value = property === 'width' ? rect.width : rect.height;
+    if (!Number.isFinite(value)) return '0px';
+    // Round to 2 decimal places for sub-pixel layouts
+    const rounded = Math.round(value * 100) / 100;
+    return `${rounded}px`;
+  } catch {
+    return '0px';
+  }
+}
+
+/**
+ * Infer size mode from CSS value
+ *
+ * Priority:
+ * - '100%' -> fill
+ * - fit keywords (auto, fit-content, etc.) -> fit
+ * - Everything else (px, %, calc, var, etc.) -> fixed
+ */
+function inferSizeMode(value: string): SizeMode {
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) return 'fixed';
+
+  // Fill: exactly 100%
+  if (trimmed === '100%') return 'fill';
+
+  // Fit: various content-sizing keywords
+  for (const keyword of FIT_KEYWORDS) {
+    if (trimmed === keyword || trimmed.startsWith(`${keyword}(`)) {
+      return 'fit';
+    }
+  }
+
+  // Everything else is fixed (including other percentages, calc, var, etc.)
+  return 'fixed';
+}
+
+/**
+ * Get the CSS value for fit mode
+ * If the current value is already a fit keyword, preserve it.
+ * Otherwise uses fit-content if supported, or falls back to auto.
+ */
+function getFitValue(property: SizeProperty, currentValue: string): string {
+  const trimmed = currentValue.trim().toLowerCase();
+
+  // If already a fit keyword, preserve it
+  for (const keyword of FIT_KEYWORDS) {
+    if (trimmed === keyword || trimmed.startsWith(`${keyword}(`)) {
+      return currentValue.trim(); // Preserve original casing
+    }
+  }
+
+  // Default fit value
+  try {
+    if (typeof CSS !== 'undefined' && CSS.supports?.(property, 'fit-content')) {
+      return 'fit-content';
+    }
+  } catch {
+    // Ignore
+  }
+  return 'auto';
+}
+
+/**
+ * Create mode select element
+ */
+function createModeSelect(ariaLabel: string): HTMLSelectElement {
+  const select = document.createElement('select');
+  select.className = 'we-select we-size-mode-select';
+  select.setAttribute('aria-label', ariaLabel);
+
+  for (const { value, label } of SIZE_MODE_OPTIONS) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    select.appendChild(option);
+  }
+
+  return select;
+}
+
 // =============================================================================
 // Factory
 // =============================================================================
@@ -73,7 +199,7 @@ export interface SizeControlOptions {
 }
 
 /**
- * Create a Size control for editing width/height
+ * Create a Size control for editing width/height with mode selection
  */
 export function createSizeControl(options: SizeControlOptions): DesignControl {
   const { container, transactionManager } = options;
@@ -89,109 +215,105 @@ export function createSizeControl(options: SizeControlOptions): DesignControl {
   const root = document.createElement('div');
   root.className = 'we-field-group';
 
-  // ---------------------------------------------------------------------------
-  // Width/Height row (2-column layout)
-  // Design ref: attr-ui.html:214-230
-  // ---------------------------------------------------------------------------
-  const rowWH = document.createElement('div');
-  rowWH.className = 'we-field-row';
+  /**
+   * Create a size field column with mode select and input
+   */
+  function createSizeField(property: SizeProperty, prefix: string): FieldState {
+    const column = document.createElement('div');
+    column.className = 'we-size-field';
 
-  const widthContainer = createInputContainer({
-    ariaLabel: 'Width',
-    inputMode: 'decimal',
-    prefix: 'W',
-    suffix: 'px',
-  });
+    // Mode select
+    const modeSelect = createModeSelect(`${property} mode`);
 
-  const heightContainer = createInputContainer({
-    ariaLabel: 'Height',
-    inputMode: 'decimal',
-    prefix: 'H',
-    suffix: 'px',
-  });
+    // Input container
+    const inputContainer = createInputContainer({
+      ariaLabel: property.charAt(0).toUpperCase() + property.slice(1),
+      inputMode: 'decimal',
+      prefix,
+      suffix: 'px',
+    });
 
-  rowWH.append(widthContainer.root, heightContainer.root);
+    // Wire keyboard stepping
+    wireNumberStepping(disposer, inputContainer.input, { mode: 'css-length' });
 
-  // Wire up keyboard stepping for arrow up/down
-  wireNumberStepping(disposer, widthContainer.input, { mode: 'css-length' });
-  wireNumberStepping(disposer, heightContainer.input, { mode: 'css-length' });
+    column.append(modeSelect, inputContainer.root);
 
-  root.append(rowWH);
+    return {
+      property,
+      column,
+      modeSelect,
+      input: inputContainer.input,
+      container: inputContainer,
+      lastFixedValue: '',
+      handle: null,
+    };
+  }
+
+  // Create width and height fields
+  const widthField = createSizeField('width', 'W');
+  const heightField = createSizeField('height', 'H');
+
+  // Row layout
+  const row = document.createElement('div');
+  row.className = 'we-field-row';
+  row.append(widthField.column, heightField.column);
+
+  root.append(row);
   container.append(root);
   disposer.add(() => root.remove());
 
-  // Field state
+  // Field map for iteration
   const fields: Record<SizeProperty, FieldState> = {
-    width: {
-      property: 'width',
-      input: widthContainer.input,
-      container: widthContainer,
-      handle: null,
-    },
-    height: {
-      property: 'height',
-      input: heightContainer.input,
-      container: heightContainer,
-      handle: null,
-    },
+    width: widthField,
+    height: heightField,
   };
 
   // ==========================================================================
   // Transaction Management
   // ==========================================================================
 
-  /**
-   * Begin a style transaction for a property (lazy initialization)
-   */
   function beginTransaction(property: SizeProperty): StyleTransactionHandle | null {
     if (disposer.isDisposed) return null;
-
     const target = currentTarget;
     if (!target || !target.isConnected) return null;
 
     const field = fields[property];
-
-    // Return existing handle if already editing
     if (field.handle) return field.handle;
 
-    // Start new transaction
     const handle = transactionManager.beginStyle(target, property);
     field.handle = handle;
     return handle;
   }
 
-  /**
-   * Commit the current transaction for a property
-   */
   function commitTransaction(property: SizeProperty): void {
     const field = fields[property];
     const handle = field.handle;
     field.handle = null;
-
-    if (handle) {
-      handle.commit({ merge: true });
-    }
+    if (handle) handle.commit({ merge: true });
   }
 
-  /**
-   * Rollback the current transaction for a property
-   */
   function rollbackTransaction(property: SizeProperty): void {
     const field = fields[property];
     const handle = field.handle;
     field.handle = null;
-
-    if (handle) {
-      handle.rollback();
-    }
+    if (handle) handle.rollback();
   }
 
-  /**
-   * Commit all active transactions
-   */
   function commitAllTransactions(): void {
     commitTransaction('width');
     commitTransaction('height');
+  }
+
+  // ==========================================================================
+  // Visibility Control
+  // ==========================================================================
+
+  /**
+   * Update input visibility based on mode
+   * Input is only visible in fixed mode
+   */
+  function updateInputVisibility(field: FieldState, mode: SizeMode): void {
+    field.container.root.hidden = mode !== 'fixed';
   }
 
   // ==========================================================================
@@ -199,27 +321,28 @@ export function createSizeControl(options: SizeControlOptions): DesignControl {
   // ==========================================================================
 
   /**
-   * Check if an input element is currently focused.
-   * Uses getRootNode() for Shadow DOM compatibility.
+   * Get fixed value for mode switching
+   * Prioritizes: lastFixedValue > computed > bounding rect
    */
-  function isInputFocused(input: HTMLInputElement): boolean {
-    try {
-      // In Shadow DOM, document.activeElement is the shadow host.
-      // We need to check the activeElement of the ShadowRoot instead.
-      const rootNode = input.getRootNode();
-      if (rootNode instanceof ShadowRoot) {
-        return rootNode.activeElement === input;
-      }
-      return document.activeElement === input;
-    } catch {
-      return false;
+  function getFixedValueCandidate(field: FieldState, target: Element): string {
+    // Try cached fixed value
+    const cached = field.lastFixedValue.trim();
+    if (cached && inferSizeMode(cached) === 'fixed') {
+      return cached;
     }
+
+    // Try computed value
+    const computed = readComputedValue(target, field.property);
+    if (computed && inferSizeMode(computed) === 'fixed') {
+      return computed;
+    }
+
+    // Fallback to bounding rect
+    return getBoundingRectPx(target, field.property);
   }
 
   /**
    * Sync a single field's display with element styles
-   * @param property - The property to sync
-   * @param force - If true, ignore focus state and always update value
    */
   function syncField(property: SizeProperty, force = false): void {
     const field = fields[property];
@@ -227,6 +350,9 @@ export function createSizeControl(options: SizeControlOptions): DesignControl {
 
     // Disabled state when no target
     if (!target || !target.isConnected) {
+      field.modeSelect.value = 'fixed';
+      field.modeSelect.disabled = true;
+      updateInputVisibility(field, 'fixed');
       field.input.value = '';
       field.input.placeholder = '';
       field.input.disabled = true;
@@ -234,25 +360,44 @@ export function createSizeControl(options: SizeControlOptions): DesignControl {
       return;
     }
 
+    field.modeSelect.disabled = false;
     field.input.disabled = false;
 
-    // Don't overwrite user input during active editing (unless forced)
+    // Don't overwrite during active editing (unless forced)
     if (!force) {
-      const isEditing = field.handle !== null || isInputFocused(field.input);
+      const isEditing =
+        field.handle !== null ||
+        isElementFocused(field.input) ||
+        isElementFocused(field.modeSelect);
       if (isEditing) return;
     }
 
-    // Display real value: prefer inline style, fallback to computed style
+    // Get current value and infer mode
     const inlineValue = readInlineValue(target, property);
     const displayValue = inlineValue || readComputedValue(target, property);
-    field.input.value = displayValue;
-    field.input.placeholder = '';
-    field.container.setSuffix(extractUnitSuffix(displayValue));
+    const mode = inferSizeMode(inlineValue || displayValue);
+
+    // Update mode select and visibility
+    field.modeSelect.value = mode;
+    updateInputVisibility(field, mode);
+
+    // Track fixed value for mode switching
+    if (mode === 'fixed') {
+      const candidate = inlineValue || displayValue;
+      if (candidate && inferSizeMode(candidate) === 'fixed') {
+        field.lastFixedValue = candidate;
+      }
+    }
+
+    // Update input value (only relevant for fixed mode)
+    if (mode === 'fixed') {
+      const formatted = formatLengthForDisplay(displayValue);
+      field.input.value = formatted.value;
+      field.input.placeholder = '';
+      field.container.setSuffix(formatted.suffix);
+    }
   }
 
-  /**
-   * Sync all fields
-   */
   function syncAllFields(): void {
     syncField('width');
     syncField('height');
@@ -263,48 +408,120 @@ export function createSizeControl(options: SizeControlOptions): DesignControl {
   // ==========================================================================
 
   /**
-   * Wire up event handlers for a field
+   * Wire mode select event handlers
    */
-  function wireField(property: SizeProperty): void {
+  function wireModeSelect(property: SizeProperty): void {
     const field = fields[property];
-    const input = field.input;
+    const select = field.modeSelect;
 
-    // Input: begin transaction and preview value
-    disposer.listen(input, 'input', () => {
+    const handleModeChange = () => {
+      const target = currentTarget;
+      if (!target || !target.isConnected) return;
+
+      const mode = select.value as SizeMode;
+      const previousMode = inferSizeMode(
+        readInlineValue(target, property) || readComputedValue(target, property),
+      );
+
+      // Save current fixed value before switching away
+      if (previousMode === 'fixed' && mode !== 'fixed') {
+        const suffix = field.container.getSuffixText();
+        const combined = combineLengthValue(field.input.value, suffix);
+        if (combined) field.lastFixedValue = combined;
+      }
+
+      updateInputVisibility(field, mode);
+
       const handle = beginTransaction(property);
       if (!handle) return;
 
-      const normalized = normalizeLength(input.value);
-      handle.set(normalized);
-    });
+      switch (mode) {
+        case 'fit': {
+          const currentValue =
+            readInlineValue(target, property) || readComputedValue(target, property);
+          handle.set(getFitValue(property, currentValue));
+          break;
+        }
+        case 'fill':
+          handle.set('100%');
+          break;
+        case 'fixed': {
+          // Restore fixed value
+          const fixedValue = getFixedValueCandidate(field, target);
+          field.lastFixedValue = fixedValue;
+          handle.set(fixedValue);
 
-    // Blur: commit transaction
-    disposer.listen(input, 'blur', () => {
+          // Update input to show restored value
+          const formatted = formatLengthForDisplay(fixedValue);
+          field.input.value = formatted.value;
+          field.container.setSuffix(formatted.suffix);
+          break;
+        }
+      }
+    };
+
+    disposer.listen(select, 'input', handleModeChange);
+    disposer.listen(select, 'change', handleModeChange);
+
+    disposer.listen(select, 'blur', () => {
       commitTransaction(property);
       syncAllFields();
     });
 
-    // Keydown: Enter commits, ESC rollbacks
-    disposer.listen(input, 'keydown', (event: KeyboardEvent) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
+    disposer.listen(select, 'keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
         commitTransaction(property);
         syncAllFields();
-        input.blur();
-        return;
-      }
-
-      if (event.key === 'Escape') {
-        event.preventDefault();
+        select.blur();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
         rollbackTransaction(property);
-        // Force sync to update input with rollback value (ignore focus state)
         syncField(property, true);
       }
     });
   }
 
-  wireField('width');
-  wireField('height');
+  /**
+   * Wire input field event handlers
+   */
+  function wireInput(property: SizeProperty): void {
+    const field = fields[property];
+    const input = field.input;
+
+    disposer.listen(input, 'input', () => {
+      const handle = beginTransaction(property);
+      if (!handle) return;
+
+      const suffix = field.container.getSuffixText();
+      const combined = combineLengthValue(input.value, suffix);
+      handle.set(combined);
+    });
+
+    disposer.listen(input, 'blur', () => {
+      commitTransaction(property);
+      syncAllFields();
+    });
+
+    disposer.listen(input, 'keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commitTransaction(property);
+        syncAllFields();
+        input.blur();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        rollbackTransaction(property);
+        syncField(property, true);
+      }
+    });
+  }
+
+  // Wire all event handlers
+  wireModeSelect('width');
+  wireModeSelect('height');
+  wireInput('width');
+  wireInput('height');
 
   // ==========================================================================
   // Public API (DesignControl interface)
@@ -312,13 +529,12 @@ export function createSizeControl(options: SizeControlOptions): DesignControl {
 
   function setTarget(element: Element | null): void {
     if (disposer.isDisposed) return;
-
-    // Only commit if target actually changed
     if (element !== currentTarget) {
-      // Commit any in-progress edits when selection changes
       commitAllTransactions();
+      // Clear cached fixed values when target changes to avoid cross-element pollution
+      fields.width.lastFixedValue = '';
+      fields.height.lastFixedValue = '';
     }
-
     currentTarget = element;
     syncAllFields();
   }
@@ -329,7 +545,6 @@ export function createSizeControl(options: SizeControlOptions): DesignControl {
   }
 
   function dispose(): void {
-    // Commit any in-progress edits before cleanup
     commitAllTransactions();
     currentTarget = null;
     disposer.dispose();

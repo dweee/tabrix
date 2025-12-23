@@ -107,6 +107,7 @@ export const TOOL_MESSAGE_TYPES = {
   GENERATE_ACCESSIBILITY_TREE: 'generateAccessibilityTree',
   RESOLVE_REF: 'resolveRef',
   ENSURE_REF_FOR_SELECTOR: 'ensureRefForSelector',
+  VERIFY_FINGERPRINT: 'verifyFingerprint',
   DISPATCH_HOVER_FOR_REF: 'dispatchHoverForRef',
 
   // Network requests

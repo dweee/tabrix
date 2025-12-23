@@ -48,6 +48,16 @@ type ResolveRefResponse =
     }
   | { success: false; error?: string };
 
+interface VerifyFingerprintRequest {
+  action: typeof TOOL_MESSAGE_TYPES.VERIFY_FINGERPRINT;
+  ref: string;
+  fingerprint: string;
+}
+
+type VerifyFingerprintResponse =
+  | { success: true; match: boolean }
+  | { success: false; error?: string };
+
 // ================================
 // 传输层接口
 // ================================
@@ -115,6 +125,18 @@ function parseResolveRefResponse(value: unknown): ResolveRefResponse | null {
 
     const selector = typeof value.selector === 'string' ? value.selector : undefined;
     return { success: true, center: value.center, rect, selector };
+  }
+
+  const error = typeof value.error === 'string' ? value.error : undefined;
+  return { success: false, error };
+}
+
+function parseVerifyFingerprintResponse(value: unknown): VerifyFingerprintResponse | null {
+  if (!isRecord(value) || typeof value.success !== 'boolean') return null;
+
+  if (value.success) {
+    if (typeof value.match !== 'boolean') return null;
+    return { success: true, match: value.match };
   }
 
   const error = typeof value.error === 'string' ? value.error : undefined;
@@ -240,6 +262,31 @@ export class SelectorLocator {
   }
 
   /**
+   * 验证元素是否匹配给定的指纹
+   */
+  private async verifyElementFingerprint(
+    tabId: number,
+    ref: string,
+    fingerprint: string,
+    frameId: number | undefined,
+  ): Promise<boolean> {
+    const msg = {
+      action: TOOL_MESSAGE_TYPES.VERIFY_FINGERPRINT,
+      ref,
+      fingerprint,
+    } satisfies VerifyFingerprintRequest;
+
+    try {
+      const responseRaw = await this.transport.sendMessage(tabId, msg, { frameId });
+      const parsed = parseVerifyFingerprintResponse(responseRaw);
+      if (!parsed || !parsed.success) return false;
+      return parsed.match;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * 定位元素
    */
   async locate(
@@ -249,6 +296,12 @@ export class SelectorLocator {
   ): Promise<LocatedElement | null> {
     const frameSelector = deriveFrameSelector(target);
     const allowMultiple = options.allowMultiple ?? false;
+
+    // 提取指纹验证配置
+    const fingerprintToVerify =
+      options.verifyFingerprint === true && typeof target.fingerprint === 'string'
+        ? target.fingerprint.trim()
+        : undefined;
 
     // 优先尝试 ref
     if (options.preferRef && target.ref) {
@@ -266,13 +319,28 @@ export class SelectorLocator {
       );
       if (ensured) {
         const mappedFrameId = await this.mapHrefToFrameId(tabId, ensured.href);
-        return {
-          ref: ensured.ref,
-          center: ensured.center,
-          frameId: mappedFrameId ?? options.frameId,
-          resolvedBy: 'css',
-          selectorUsed: sel,
-        };
+        const resolvedFrameId = mappedFrameId ?? options.frameId;
+
+        // 指纹验证：不匹配则跳过，继续尝试其他候选
+        const fingerprintOk =
+          !fingerprintToVerify ||
+          (await this.verifyElementFingerprint(
+            tabId,
+            ensured.ref,
+            fingerprintToVerify,
+            resolvedFrameId,
+          ));
+
+        if (fingerprintOk) {
+          return {
+            ref: ensured.ref,
+            center: ensured.center,
+            frameId: resolvedFrameId,
+            resolvedBy: 'css',
+            selectorUsed: sel,
+          };
+        }
+        // 指纹不匹配，继续尝试候选选择器
       }
     }
 
@@ -288,7 +356,20 @@ export class SelectorLocator {
         options.frameId,
         allowMultiple,
       );
-      if (resolved) return resolved;
+      if (!resolved) continue;
+
+      // 指纹验证
+      if (fingerprintToVerify) {
+        const isMatch = await this.verifyElementFingerprint(
+          tabId,
+          resolved.ref,
+          fingerprintToVerify,
+          resolved.frameId ?? options.frameId,
+        );
+        if (!isMatch) continue;
+      }
+
+      return resolved;
     }
 
     // 3) Ref fallback

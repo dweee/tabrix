@@ -21,7 +21,7 @@ import { Disposer } from '../../../utils/disposables';
 import type { StyleTransactionHandle, TransactionManager } from '../../../core/transaction-manager';
 import type { DesignControl } from '../types';
 import { createInputContainer, type InputContainer } from '../components/input-container';
-import { extractUnitSuffix, normalizeLength } from './css-helpers';
+import { combineLengthValue, formatLengthForDisplay } from './css-helpers';
 import { wireNumberStepping } from './number-stepping';
 
 // =============================================================================
@@ -276,9 +276,10 @@ export function createSpacingControl(options: SpacingControlOptions): DesignCont
 
     const inlineValue = readInlineValue(target, property);
     const displayValue = inlineValue || readComputedValue(target, property);
-    field.input.value = displayValue;
+    const formatted = formatLengthForDisplay(displayValue);
+    field.input.value = formatted.value;
     field.input.placeholder = '';
-    field.container.setSuffix(extractUnitSuffix(displayValue));
+    field.container.setSuffix(formatted.suffix);
   }
 
   function syncAllFields(): void {
@@ -297,7 +298,10 @@ export function createSpacingControl(options: SpacingControlOptions): DesignCont
 
     disposer.listen(input, 'input', () => {
       const handle = beginTransaction(property);
-      if (handle) handle.set(normalizeLength(input.value));
+      if (!handle) return;
+      // Combine input value with current suffix to preserve unit
+      const suffix = field.container.getSuffixText();
+      handle.set(combineLengthValue(input.value, suffix));
     });
 
     disposer.listen(input, 'blur', () => {

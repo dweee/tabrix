@@ -18,17 +18,18 @@
 
 #### Phase 1.1: Action 系统 ✅
 
-- [x] `actions/types.ts` - 完整的 Action 类型定义（28 种 Action 类型）
-- [x] `actions/registry.ts` - Action 执行器注册表（支持中间件/钩子）
+- [x] `actions/types.ts` - 完整的 Action 类型定义（27 种 Action 类型）
+  - trigger/delay/click/dblclick/fill/key/scroll/drag/wait/assert/extract/script/http/screenshot/triggerEvent/setAttribute/switchFrame/loopElements/if/foreach/while/executeFlow/navigate/openTab/switchTab/closeTab/handleDownload
+- [x] `actions/registry.ts` - Action 执行器注册表（支持 before/after 钩子、重试/超时、解析器）
 - [x] `actions/index.ts` - 模块导出
 
 #### Phase 1.2: 选择器引擎 - 基础框架 ✅
 
-- [x] `shared/selector/types.ts` - 选择器类型定义
+- [x] `shared/selector/types.ts` - 选择器类型定义（含 ExtendedSelectorTarget）
 - [x] `shared/selector/stability.ts` - 稳定性评分计算
-- [x] `shared/selector/strategies/` - 5 种基础选择器策略
-- [x] `shared/selector/generator.ts` - 统一选择器生成
-- [x] `shared/selector/locator.ts` - 统一元素定位
+- [x] `shared/selector/strategies/` - 6 种选择器策略（testid/aria/css-unique/css-path/anchor-relpath/text）
+- [x] `shared/selector/generator.ts` - 统一选择器生成（含 generateExtendedSelectorTarget）
+- [x] `shared/selector/locator.ts` - 统一元素定位（支持多候选尝试与排序）
 
 #### Phase 1.2: 选择器引擎 - 补齐商业级功能 ✅
 
@@ -43,19 +44,95 @@
 | **name/title/alt 属性** | ✅ 完成 | `testid.ts` + `generator.ts` - 带标签前缀规则                                     |
 | **类型扩展**            | ✅ 完成 | `types.ts` - `ExtendedSelectorTarget`、`fingerprint/domPath/shadowHostChain` 字段 |
 
-**Phase 2 待完成**（需要消息协议/注入脚本修改）：
-
-- [ ] 更新 `locator.ts` - 添加指纹验证逻辑（需要 DOM 侧协议支持）
-- [ ] 抽取共用工具到 `shared/selector-core/` 供 web-editor-v2 复用（可选优化）
-
 > **注意**: aria-label 属性已由 `ariaStrategy` 处理，不重复加入 testid 策略
 
-### 待开始
+### 进行中
 
-#### Phase 1.3: 数据模型统一
+#### Phase 1.3: 数据模型统一 🔄
 
-- [ ] 更新 Flow 类型定义
-- [ ] 移除旧的 Step 类型引用
+**当前状态**：新 Action/Flow 类型已在 `actions/types.ts` 中定义，但旧类型仍在使用中
+
+**核心问题**：录制与回放数据格式不一致
+
+- 录制产物：`Flow.steps: Step[]`（`recording/flow-builder.ts`）
+- 回放输入：`Flow.nodes/edges`（`engine/scheduler.ts:279` 要求 DAG）
+- 导致录制后无法直接回放，需要通过 Builder 转换
+
+**类型定义位置**：
+| 类型 | 旧定义 | 新定义 |
+|------|--------|--------|
+| Step/Action | `record-replay/types.ts:145` | `actions/types.ts:706` (AnyAction) |
+| Flow | `record-replay/types.ts:251` (含 steps) | `actions/types.ts:831` (仅 nodes/edges) |
+| Variable | `record-replay/types.ts:221` (key/default) | `actions/types.ts:145` (name/...) |
+
+**受影响文件清单**：
+
+使用旧 `Step` 的文件（15个）：
+
+- `engine/plugins/types.ts`、`engine/runners/step-runner.ts`、`engine/runners/subflow-runner.ts`
+- `engine/scheduler.ts`、`rr-utils.ts`
+- `recording/session-manager.ts`、`recording/content-message-handler.ts`
+- `recording/flow-builder.ts`、`recording/browser-event-listener.ts`
+- `nodes/index.ts`、`nodes/types.ts`、`nodes/click.ts`、`nodes/navigate.ts`
+- `nodes/conditional.ts`、`nodes/download-screenshot-attr-event-frame-loop.ts`
+
+使用旧 `Flow` 的文件（12个）：
+
+- Background: `index.ts`、`flow-store.ts`、`storage/indexeddb-manager.ts`
+- Recording: `flow-builder.ts`、`recorder-manager.ts`、`session-manager.ts`
+- Engine: `scheduler.ts`、`runners/step-runner.ts`、`plugins/types.ts`、`logging/run-logger.ts`
+- UI: `builder/App.vue`、`builder/components/Sidebar.vue`
+
+**迁移策略（推荐分阶段）**：
+
+**P0: 先让录制产物可运行（最小改动）**
+
+- [ ] 在 `recording/flow-builder.ts` 保存时，把 `steps` 转换为 DAG（复用 `packages/shared/src/rr-graph.ts:stepsToNodes`）
+- [ ] 确保保存的 flow 同时有 `steps` 和 `nodes/edges`（向后兼容）
+- 涉及文件：`recording/flow-builder.ts`、`recording/session-manager.ts`
+
+**P1: 存储层统一（单一真源）**
+
+- [ ] `flow-store.ts` 读写逻辑适配新 Flow
+- [ ] `importFlowFromJson` 支持新旧格式自动识别
+- [ ] 考虑 IndexedDB schema 升级策略
+- 涉及文件：`flow-store.ts`、`storage/indexeddb-manager.ts`
+
+**P2: 录制链路迁移**
+
+- [ ] `flow-builder.ts` 改为写 `nodes: AnyAction[]`
+- [ ] `content-message-handler.ts` 接收 Step 后转换为 Action
+- [ ] 可选：修改 `recorder.js` 直接发送 Action
+- 涉及文件：`flow-builder.ts`、`content-message-handler.ts`、`session-manager.ts`
+
+**P3: 回放引擎适配**
+
+- [ ] 短期：Action→Step 适配层，复用现有 StepRunner
+- [ ] 长期：scheduler 直接使用 ActionRegistry.execute()
+- 涉及文件：`scheduler.ts`、`rr-utils.ts`、`step-runner.ts`
+
+**P4: 清理旧类型**
+
+- [ ] 删除 `types.ts` 中的 `Step` 联合类型
+- [ ] 删除 `Flow.steps` 字段
+- [ ] 将旧类型移至 `legacy-types.ts`（如 UI 仍需要）
+
+**风险点**：
+
+- 类型同名冲突：两个 `Flow` 类型容易 import 错
+- 变量结构不同：旧 `v.key/v.default` vs 新 `v.name/...`
+- 子流程执行：`execute-flow.ts` 有 `flow.steps` fallback
+- UI Builder 保存格式需同步适配
+
+#### Phase 2: locator 指纹验证 ✅
+
+- [x] 更新 `shared/selector/locator.ts` - 添加指纹验证逻辑
+  - 新增 `VERIFY_FINGERPRINT` 消息类型（`message-types.ts`）
+  - 新增 `verifyElementFingerprint` 方法通过消息协议验证
+  - 在 `locate()` 的 fast path 和 candidate 循环中添加指纹验证
+  - 读取 `options.verifyFingerprint` 配置和 `target.fingerprint` 字段
+- [x] 更新 `accessibility-tree-helper.js` - 添加 `verifyFingerprint` action 处理
+- [ ] 抽取共用工具到 `shared/selector-core/` 供 web-editor-v2 复用（可选优化）
 
 #### Phase 2-7: 后续阶段
 

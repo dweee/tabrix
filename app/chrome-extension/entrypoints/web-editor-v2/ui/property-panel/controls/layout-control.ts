@@ -1,12 +1,13 @@
 /**
- * Layout Control (Phase 3.4 + 4.1/4.2)
+ * Layout Control (Phase 3.4 + 4.1/4.2 - Refactored)
  *
  * Edits inline layout styles:
- * - display (select): block/inline/inline-block/flex/grid/none
+ * - display (icon button group): block/inline/inline-block/flex/grid/none
  * - flex-direction (icon button group, shown when display=flex)
- * - justify-content + align-items (alignment grid, shown when display=flex/grid)
+ * - justify-content + align-items (content bars, shown when display=flex)
+ * - grid-template-columns/rows (dimensions picker, shown when display=grid)
  * - flex-wrap (select, shown when display=flex)
- * - gap (input)
+ * - gap (input, shown when display=flex/grid)
  */
 
 import { Disposer } from '../../../utils/disposables';
@@ -16,37 +17,56 @@ import type {
   TransactionManager,
 } from '../../../core/transaction-manager';
 import type { DesignControl } from '../types';
-import { createAlignmentGrid, type AlignmentGrid } from '../components/alignment-grid';
 import { createIconButtonGroup, type IconButtonGroup } from '../components/icon-button-group';
-import { createInputContainer } from '../components/input-container';
-import { extractUnitSuffix, normalizeLength } from './css-helpers';
+import { createInputContainer, type InputContainer } from '../components/input-container';
+import { combineLengthValue, formatLengthForDisplay } from './css-helpers';
 import { wireNumberStepping } from './number-stepping';
 
 // =============================================================================
 // Constants
 // =============================================================================
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
 const DISPLAY_VALUES = ['block', 'inline', 'inline-block', 'flex', 'grid', 'none'] as const;
 const FLEX_DIRECTION_VALUES = ['row', 'column', 'row-reverse', 'column-reverse'] as const;
 const FLEX_WRAP_VALUES = ['nowrap', 'wrap', 'wrap-reverse'] as const;
 const ALIGNMENT_AXIS_VALUES = ['flex-start', 'center', 'flex-end'] as const;
+const GRID_DIMENSION_MAX = 12;
 
+type DisplayValue = (typeof DISPLAY_VALUES)[number];
 type FlexDirectionValue = (typeof FLEX_DIRECTION_VALUES)[number];
 type AlignmentAxisValue = (typeof ALIGNMENT_AXIS_VALUES)[number];
 
 /** Single-property field keys */
-type LayoutProperty = 'display' | 'flex-direction' | 'flex-wrap' | 'gap';
+type LayoutProperty = 'display' | 'flex-direction' | 'flex-wrap' | 'row-gap' | 'column-gap';
 
-/** All field keys including the composite alignment field */
-type FieldKey = LayoutProperty | 'alignment';
+/** All field keys including composite fields */
+type FieldKey = LayoutProperty | 'alignment' | 'grid-dimensions';
 
-// -----------------------------------------------------------------------------
-// Field State Types (discriminated union for type-safe field handling)
-// -----------------------------------------------------------------------------
+// =============================================================================
+// Field State Types
+// =============================================================================
+
+interface DisplayFieldState {
+  kind: 'display-group';
+  property: 'display';
+  group: IconButtonGroup<DisplayValue>;
+  handle: StyleTransactionHandle | null;
+  row: HTMLElement;
+}
+
+interface FlexDirectionFieldState {
+  kind: 'flex-direction-group';
+  property: 'flex-direction';
+  group: IconButtonGroup<FlexDirectionValue>;
+  handle: StyleTransactionHandle | null;
+  row: HTMLElement;
+}
 
 interface SelectFieldState {
   kind: 'select';
-  property: Extract<LayoutProperty, 'display' | 'flex-wrap'>;
+  property: 'flex-wrap';
   element: HTMLSelectElement;
   handle: StyleTransactionHandle | null;
   row: HTMLElement;
@@ -54,39 +74,47 @@ interface SelectFieldState {
 
 interface InputFieldState {
   kind: 'input';
-  property: 'gap';
+  property: 'row-gap' | 'column-gap';
   element: HTMLInputElement;
+  container: InputContainer;
   handle: StyleTransactionHandle | null;
   row: HTMLElement;
 }
 
-interface IconButtonGroupFieldState {
-  kind: 'icon-button-group';
-  property: 'flex-direction';
-  group: IconButtonGroup<FlexDirectionValue>;
-  handle: StyleTransactionHandle | null;
-  row: HTMLElement;
-}
-
-interface AlignmentGridFieldState {
-  kind: 'alignment-grid';
+interface FlexAlignmentFieldState {
+  kind: 'flex-alignment';
   properties: readonly ['justify-content', 'align-items'];
-  grid: AlignmentGrid;
+  justifyGroup: IconButtonGroup<AlignmentAxisValue>;
+  alignGroup: IconButtonGroup<AlignmentAxisValue>;
+  handle: MultiStyleTransactionHandle | null;
+  row: HTMLElement;
+}
+
+interface GridDimensionsFieldState {
+  kind: 'grid-dimensions';
+  properties: readonly ['grid-template-columns', 'grid-template-rows'];
+  previewButton: HTMLButtonElement;
+  popover: HTMLDivElement;
+  colsContainer: InputContainer;
+  rowsContainer: InputContainer;
+  matrix: HTMLDivElement;
+  tooltip: HTMLDivElement;
+  cells: HTMLButtonElement[];
   handle: MultiStyleTransactionHandle | null;
   row: HTMLElement;
 }
 
 type FieldState =
+  | DisplayFieldState
+  | FlexDirectionFieldState
   | SelectFieldState
   | InputFieldState
-  | IconButtonGroupFieldState
-  | AlignmentGridFieldState;
+  | FlexAlignmentFieldState
+  | GridDimensionsFieldState;
 
 // =============================================================================
 // Helpers
 // =============================================================================
-
-const SVG_NS = 'http://www.w3.org/2000/svg';
 
 function isFieldFocused(el: HTMLElement): boolean {
   try {
@@ -115,6 +143,10 @@ function readComputedValue(element: Element, property: string): string {
   }
 }
 
+function isDisplayValue(value: string): value is DisplayValue {
+  return (DISPLAY_VALUES as readonly string[]).includes(value);
+}
+
 function isFlexDirectionValue(value: string): value is FlexDirectionValue {
   return (FLEX_DIRECTION_VALUES as readonly string[]).includes(value);
 }
@@ -125,7 +157,6 @@ function isAlignmentAxisValue(value: string): value is AlignmentAxisValue {
 
 /**
  * Map computed display values to the closest option value.
- * e.g., inline-flex -> flex, inline-grid -> grid
  */
 function normalizeDisplayValue(computed: string): string {
   const trimmed = computed.trim();
@@ -134,25 +165,147 @@ function normalizeDisplayValue(computed: string): string {
   return trimmed;
 }
 
-// -----------------------------------------------------------------------------
-// SVG Icons for flex-direction
-// Design ref: attr-ui.html:183-208
-// -----------------------------------------------------------------------------
+function clampInt(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, Math.trunc(value)));
+}
 
-function createFlowIcon(direction: FlexDirectionValue): SVGElement {
+/**
+ * Split CSS value into top-level tokens (respects parentheses depth).
+ */
+function splitTopLevelTokens(value: string): string[] {
+  const tokens: string[] = [];
+  let depth = 0;
+  let current = '';
+
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i]!;
+    if (ch === '(') depth++;
+    if (ch === ')' && depth > 0) depth--;
+
+    if (depth === 0 && /\s/.test(ch)) {
+      const t = current.trim();
+      if (t) tokens.push(t);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+
+  const tail = current.trim();
+  if (tail) tokens.push(tail);
+  return tokens;
+}
+
+function parseRepeatCount(token: string): number | null {
+  const match = token.match(/^repeat\(\s*(\d+)\s*,/i);
+  if (!match) return null;
+  const n = parseInt(match[1]!, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Count grid tracks from grid-template-columns/rows value.
+ */
+function countGridTracks(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === 'none') return null;
+
+  const tokens = splitTopLevelTokens(trimmed);
+  let count = 0;
+
+  for (const t of tokens) {
+    // Ignore line-name tokens like [col-start]
+    if (/^\[.*\]$/.test(t)) continue;
+    count += parseRepeatCount(t) ?? 1;
+  }
+
+  return count > 0 ? count : null;
+}
+
+function formatGridTemplate(count: number): string {
+  const n = clampInt(count, 1, GRID_DIMENSION_MAX);
+  return n === 1 ? '1fr' : `repeat(${n}, 1fr)`;
+}
+
+// =============================================================================
+// SVG Icon Helpers
+// =============================================================================
+
+function createBaseIconSvg(): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 15 15');
   svg.setAttribute('fill', 'none');
   svg.setAttribute('aria-hidden', 'true');
   svg.setAttribute('focusable', 'false');
+  return svg;
+}
 
+function applyStroke(el: SVGElement, strokeWidth = '1.2'): void {
+  el.setAttribute('stroke', 'currentColor');
+  el.setAttribute('stroke-width', strokeWidth);
+  el.setAttribute('stroke-linecap', 'round');
+  el.setAttribute('stroke-linejoin', 'round');
+}
+
+function createDisplayIcon(value: DisplayValue): SVGElement {
+  const svg = createBaseIconSvg();
+
+  const addPath = (d: string, strokeWidth = '1.2') => {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    applyStroke(path, strokeWidth);
+    svg.append(path);
+  };
+
+  const addRect = (x: number, y: number, w: number, h: number) => {
+    const rect = document.createElementNS(SVG_NS, 'rect');
+    rect.setAttribute('x', String(x));
+    rect.setAttribute('y', String(y));
+    rect.setAttribute('width', String(w));
+    rect.setAttribute('height', String(h));
+    rect.setAttribute('rx', '1');
+    applyStroke(rect);
+    svg.append(rect);
+  };
+
+  switch (value) {
+    case 'block':
+      addRect(2.5, 3, 10, 3);
+      addRect(2.5, 9, 10, 3);
+      break;
+    case 'inline':
+      addPath('M2.5 4.5H12.5M2.5 7.5H8.5M2.5 10.5H10.5');
+      break;
+    case 'inline-block':
+      addRect(2.5, 4, 4, 7);
+      addPath('M8 6H12.5M8 9H11.5');
+      break;
+    case 'flex':
+      addRect(2.5, 5, 3, 5);
+      addRect(6, 5, 3, 5);
+      addRect(9.5, 5, 3, 5);
+      break;
+    case 'grid':
+      addRect(2.5, 2.5, 4, 4);
+      addRect(8.5, 2.5, 4, 4);
+      addRect(2.5, 8.5, 4, 4);
+      addRect(8.5, 8.5, 4, 4);
+      break;
+    case 'none':
+      addRect(3, 3, 9, 9);
+      addPath('M3.5 11.5L11.5 3.5');
+      break;
+  }
+
+  return svg;
+}
+
+function createFlowIcon(direction: FlexDirectionValue): SVGElement {
+  const svg = createBaseIconSvg();
   const path = document.createElementNS(SVG_NS, 'path');
-  path.setAttribute('stroke', 'currentColor');
-  path.setAttribute('stroke-width', '1.5');
-  path.setAttribute('stroke-linecap', 'round');
-  path.setAttribute('stroke-linejoin', 'round');
+  applyStroke(path, '1.5');
 
-  // Arrow paths for each direction
   const DIRECTION_PATHS: Record<FlexDirectionValue, string> = {
     row: 'M2 7.5H13M10 4.5L13 7.5L10 10.5',
     'row-reverse': 'M13 7.5H2M5 4.5L2 7.5L5 10.5',
@@ -165,22 +318,90 @@ function createFlowIcon(direction: FlexDirectionValue): SVGElement {
   return svg;
 }
 
-// -----------------------------------------------------------------------------
-// SVG Icon for gap (prefix)
-// Design ref: attr-ui.html:278-285
-// -----------------------------------------------------------------------------
+function createHorizontalAlignIcon(value: AlignmentAxisValue): SVGElement {
+  const svg = createBaseIconSvg();
+  const path = document.createElementNS(SVG_NS, 'path');
+  applyStroke(path, '1.4');
+
+  const D: Record<AlignmentAxisValue, string> = {
+    'flex-start': 'M2.5 4.5H12.5M2.5 7.5H8.5M2.5 10.5H10.5',
+    center: 'M3.5 4.5H11.5M5.5 7.5H9.5M4.5 10.5H10.5',
+    'flex-end': 'M2.5 4.5H12.5M6.5 7.5H12.5M4.5 10.5H12.5',
+  };
+
+  path.setAttribute('d', D[value]);
+  svg.append(path);
+  return svg;
+}
+
+function createVerticalAlignIcon(value: AlignmentAxisValue): SVGElement {
+  const svg = createBaseIconSvg();
+  const path = document.createElementNS(SVG_NS, 'path');
+  applyStroke(path, '1.4');
+
+  const D: Record<AlignmentAxisValue, string> = {
+    'flex-start': 'M4 4.5H11M5 6.8H10M4.5 9.1H10.5',
+    center: 'M4 5.8H11M5 8H10M4.5 10.2H10.5',
+    'flex-end': 'M4 6.9H11M5 9.2H10M4.5 11.5H10.5',
+  };
+
+  path.setAttribute('d', D[value]);
+  svg.append(path);
+  return svg;
+}
 
 function createGapIcon(): SVGElement {
-  const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('viewBox', '0 0 15 15');
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('aria-hidden', 'true');
-  svg.setAttribute('focusable', 'false');
-
+  const svg = createBaseIconSvg();
   const path = document.createElementNS(SVG_NS, 'path');
   path.setAttribute('stroke', 'currentColor');
   path.setAttribute('d', 'M1.5 4.5H13.5M1.5 10.5H13.5');
   svg.append(path);
+  return svg;
+}
+
+function createGridColumnsIcon(): SVGElement {
+  const svg = createBaseIconSvg();
+
+  const r1 = document.createElementNS(SVG_NS, 'rect');
+  r1.setAttribute('x', '3');
+  r1.setAttribute('y', '4');
+  r1.setAttribute('width', '3.5');
+  r1.setAttribute('height', '7');
+  r1.setAttribute('rx', '1');
+  applyStroke(r1);
+
+  const r2 = document.createElementNS(SVG_NS, 'rect');
+  r2.setAttribute('x', '8.5');
+  r2.setAttribute('y', '4');
+  r2.setAttribute('width', '3.5');
+  r2.setAttribute('height', '7');
+  r2.setAttribute('rx', '1');
+  applyStroke(r2);
+
+  svg.append(r1, r2);
+  return svg;
+}
+
+function createGridRowsIcon(): SVGElement {
+  const svg = createBaseIconSvg();
+
+  const r1 = document.createElementNS(SVG_NS, 'rect');
+  r1.setAttribute('x', '4');
+  r1.setAttribute('y', '3');
+  r1.setAttribute('width', '7');
+  r1.setAttribute('height', '3.5');
+  r1.setAttribute('rx', '1');
+  applyStroke(r1);
+
+  const r2 = document.createElementNS(SVG_NS, 'rect');
+  r2.setAttribute('x', '4');
+  r2.setAttribute('y', '8.5');
+  r2.setAttribute('width', '7');
+  r2.setAttribute('height', '3.5');
+  r2.setAttribute('rx', '1');
+  applyStroke(r2);
+
+  svg.append(r1, r2);
   return svg;
 }
 
@@ -203,40 +424,41 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
   root.className = 'we-field-group';
 
   // ---------------------------------------------------------------------------
-  // Helper: Create a standard select row
+  // Display row (icon button group)
   // ---------------------------------------------------------------------------
-  function createSelectRow(
-    labelText: string,
-    ariaLabel: string,
-    values: readonly string[],
-  ): HTMLDivElement {
-    const row = document.createElement('div');
-    row.className = 'we-field';
-    const label = document.createElement('span');
-    label.className = 'we-field-label';
-    label.textContent = labelText;
-    const select = document.createElement('select');
-    select.className = 'we-select';
-    select.setAttribute('aria-label', ariaLabel);
-    for (const v of values) {
-      const opt = document.createElement('option');
-      opt.value = v;
-      opt.textContent = v;
-      select.append(opt);
-    }
-    row.append(label, select);
-    return row;
-  }
+  const displayRow = document.createElement('div');
+  displayRow.className = 'we-field';
 
-  // ---------------------------------------------------------------------------
-  // Display row (select)
-  // ---------------------------------------------------------------------------
-  const displayRow = createSelectRow('Display', 'display', DISPLAY_VALUES);
-  const displaySelect = displayRow.querySelector('select') as HTMLSelectElement;
+  const displayLabel = document.createElement('span');
+  displayLabel.className = 'we-field-label';
+  displayLabel.textContent = 'Display';
+
+  const displayMount = document.createElement('div');
+  displayMount.className = 'we-field-content';
+
+  displayRow.append(displayLabel, displayMount);
+
+  const displayGroup = createIconButtonGroup<DisplayValue>({
+    container: displayMount,
+    ariaLabel: 'Display',
+    columns: 6,
+    items: DISPLAY_VALUES.map((v) => ({
+      value: v,
+      ariaLabel: v,
+      title: v,
+      icon: createDisplayIcon(v),
+    })),
+    onChange: (value) => {
+      const handle = beginTransaction('display');
+      if (handle) handle.set(value);
+      commitTransaction('display');
+      syncAllFields();
+    },
+  });
+  disposer.add(() => displayGroup.dispose());
 
   // ---------------------------------------------------------------------------
   // Flex direction row (icon button group)
-  // Design ref: attr-ui.html:179-209
   // ---------------------------------------------------------------------------
   const directionRow = document.createElement('div');
   directionRow.className = 'we-field';
@@ -261,7 +483,6 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
       icon: createFlowIcon(dir),
     })),
     onChange: (value) => {
-      // Icon button group uses "click-to-apply" interaction pattern
       const handle = beginTransaction('flex-direction');
       if (handle) handle.set(value);
       commitTransaction('flex-direction');
@@ -269,18 +490,29 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
     },
   });
   disposer.add(() => directionGroup.dispose());
-  // Clear initial selection until first sync
   directionGroup.setValue(null);
 
   // ---------------------------------------------------------------------------
   // Flex wrap row (select)
   // ---------------------------------------------------------------------------
-  const wrapRow = createSelectRow('Wrap', 'flex-wrap', FLEX_WRAP_VALUES);
-  const wrapSelect = wrapRow.querySelector('select') as HTMLSelectElement;
+  const wrapRow = document.createElement('div');
+  wrapRow.className = 'we-field';
+  const wrapLabel = document.createElement('span');
+  wrapLabel.className = 'we-field-label';
+  wrapLabel.textContent = 'Wrap';
+  const wrapSelect = document.createElement('select');
+  wrapSelect.className = 'we-select';
+  wrapSelect.setAttribute('aria-label', 'flex-wrap');
+  for (const v of FLEX_WRAP_VALUES) {
+    const opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = v;
+    wrapSelect.append(opt);
+  }
+  wrapRow.append(wrapLabel, wrapSelect);
 
   // ---------------------------------------------------------------------------
-  // Alignment row (3×3 grid for justify-content + align-items)
-  // Design ref: attr-ui.html:256-273
+  // Alignment row (content bars for justify-content + align-items)
   // ---------------------------------------------------------------------------
   const alignmentRow = document.createElement('div');
   alignmentRow.className = 'we-field';
@@ -291,28 +523,186 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
 
   const alignmentMount = document.createElement('div');
   alignmentMount.className = 'we-field-content';
+  alignmentMount.style.display = 'flex';
+  alignmentMount.style.gap = '4px';
 
   alignmentRow.append(alignmentLabel, alignmentMount);
 
-  const alignmentGrid = createAlignmentGrid({
-    container: alignmentMount,
-    ariaLabel: 'Alignment',
-    justifyValues: ALIGNMENT_AXIS_VALUES,
-    alignValues: ALIGNMENT_AXIS_VALUES,
-    onChange: ({ justifyContent, alignItems }) => {
-      // Apply both properties atomically
+  // Justify group with H label
+  const justifyWrapper = document.createElement('div');
+  justifyWrapper.style.flex = '1';
+  justifyWrapper.style.minWidth = '0';
+  justifyWrapper.style.display = 'flex';
+  justifyWrapper.style.flexDirection = 'column';
+  justifyWrapper.style.gap = '2px';
+
+  const justifyHint = document.createElement('span');
+  justifyHint.className = 'we-field-hint';
+  justifyHint.textContent = 'H';
+
+  const justifyMount = document.createElement('div');
+
+  justifyWrapper.append(justifyHint, justifyMount);
+
+  // Align group with V label
+  const alignWrapper = document.createElement('div');
+  alignWrapper.style.flex = '1';
+  alignWrapper.style.minWidth = '0';
+  alignWrapper.style.display = 'flex';
+  alignWrapper.style.flexDirection = 'column';
+  alignWrapper.style.gap = '2px';
+
+  const alignHint = document.createElement('span');
+  alignHint.className = 'we-field-hint';
+  alignHint.textContent = 'V';
+
+  const alignMount = document.createElement('div');
+
+  alignWrapper.append(alignHint, alignMount);
+
+  alignmentMount.append(justifyWrapper, alignWrapper);
+
+  const justifyGroup = createIconButtonGroup<AlignmentAxisValue>({
+    container: justifyMount,
+    ariaLabel: 'Justify content',
+    columns: 3,
+    items: ALIGNMENT_AXIS_VALUES.map((v) => ({
+      value: v,
+      ariaLabel: `justify-content: ${v}`,
+      title: v,
+      icon: createHorizontalAlignIcon(v),
+    })),
+    onChange: (justifyContent) => {
       const handle = beginAlignmentTransaction();
       if (!handle) return;
+      const alignItems = alignGroup.getValue() ?? 'center';
       handle.set({ 'justify-content': justifyContent, 'align-items': alignItems });
       commitAlignmentTransaction();
       syncAllFields();
     },
   });
-  disposer.add(() => alignmentGrid.dispose());
+
+  const alignGroup = createIconButtonGroup<AlignmentAxisValue>({
+    container: alignMount,
+    ariaLabel: 'Align items',
+    columns: 3,
+    items: ALIGNMENT_AXIS_VALUES.map((v) => ({
+      value: v,
+      ariaLabel: `align-items: ${v}`,
+      title: v,
+      icon: createVerticalAlignIcon(v),
+    })),
+    onChange: (alignItems) => {
+      const handle = beginAlignmentTransaction();
+      if (!handle) return;
+      const justifyContent = justifyGroup.getValue() ?? 'center';
+      handle.set({ 'justify-content': justifyContent, 'align-items': alignItems });
+      commitAlignmentTransaction();
+      syncAllFields();
+    },
+  });
+
+  disposer.add(() => justifyGroup.dispose());
+  disposer.add(() => alignGroup.dispose());
+  justifyGroup.setValue(null);
+  alignGroup.setValue(null);
 
   // ---------------------------------------------------------------------------
-  // Gap row (input with icon prefix and unit suffix)
-  // Design ref: attr-ui.html:275-289
+  // Grid dimensions row (grid-template-columns/rows)
+  // ---------------------------------------------------------------------------
+  const gridRow = document.createElement('div');
+  gridRow.className = 'we-field';
+
+  const gridLabel = document.createElement('span');
+  gridLabel.className = 'we-field-label';
+  gridLabel.textContent = 'Grid';
+
+  const gridMount = document.createElement('div');
+  gridMount.className = 'we-field-content';
+  gridMount.style.position = 'relative';
+
+  gridRow.append(gridLabel, gridMount);
+
+  const gridPreviewButton = document.createElement('button');
+  gridPreviewButton.type = 'button';
+  gridPreviewButton.className = 'we-grid-dimensions-preview';
+  gridPreviewButton.textContent = '1 × 1';
+  gridPreviewButton.setAttribute('aria-label', 'Grid dimensions');
+  gridPreviewButton.setAttribute('aria-expanded', 'false');
+  gridPreviewButton.setAttribute('aria-haspopup', 'dialog');
+
+  const gridPopover = document.createElement('div');
+  gridPopover.className = 'we-grid-dimensions-popover';
+  gridPopover.hidden = true;
+
+  const gridInputs = document.createElement('div');
+  gridInputs.className = 'we-grid-dimensions-inputs';
+
+  const colsContainer = createInputContainer({
+    ariaLabel: 'Grid columns',
+    inputMode: 'numeric',
+    prefix: createGridColumnsIcon(),
+    suffix: null,
+  });
+  colsContainer.root.style.width = '72px';
+  colsContainer.root.style.flex = '0 0 auto';
+
+  const times = document.createElement('span');
+  times.className = 'we-grid-dimensions-times';
+  times.textContent = '×';
+
+  const rowsContainer = createInputContainer({
+    ariaLabel: 'Grid rows',
+    inputMode: 'numeric',
+    prefix: createGridRowsIcon(),
+    suffix: null,
+  });
+  rowsContainer.root.style.width = '72px';
+  rowsContainer.root.style.flex = '0 0 auto';
+
+  gridInputs.append(colsContainer.root, times, rowsContainer.root);
+
+  const matrix = document.createElement('div');
+  matrix.className = 'we-grid-dimensions-matrix';
+  matrix.setAttribute('role', 'grid');
+
+  const cells: HTMLButtonElement[] = [];
+  for (let r = 1; r <= GRID_DIMENSION_MAX; r++) {
+    for (let c = 1; c <= GRID_DIMENSION_MAX; c++) {
+      const cell = document.createElement('button');
+      cell.type = 'button';
+      cell.className = 'we-grid-dimensions-cell';
+      cell.dataset.row = String(r);
+      cell.dataset.col = String(c);
+      cell.setAttribute('role', 'gridcell');
+      cell.setAttribute('aria-label', `${c} × ${r}`);
+      cells.push(cell);
+      matrix.append(cell);
+    }
+  }
+
+  const tooltip = document.createElement('div');
+  tooltip.className = 'we-grid-dimensions-tooltip';
+  tooltip.hidden = true;
+
+  gridPopover.append(gridInputs, matrix, tooltip);
+  gridMount.append(gridPreviewButton, gridPopover);
+
+  wireNumberStepping(disposer, colsContainer.input, {
+    mode: 'number',
+    integer: true,
+    min: 1,
+    max: GRID_DIMENSION_MAX,
+  });
+  wireNumberStepping(disposer, rowsContainer.input, {
+    mode: 'number',
+    integer: true,
+    min: 1,
+    max: GRID_DIMENSION_MAX,
+  });
+
+  // ---------------------------------------------------------------------------
+  // Gap row (row-gap and column-gap inputs)
   // ---------------------------------------------------------------------------
   const gapRow = document.createElement('div');
   gapRow.className = 'we-field';
@@ -320,20 +710,33 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
   gapLabel.className = 'we-field-label';
   gapLabel.textContent = 'Gap';
 
-  const gapContainer = createInputContainer({
-    ariaLabel: 'Gap',
+  const gapInputsRow = document.createElement('div');
+  gapInputsRow.className = 'we-field-row';
+
+  const rowGapContainer = createInputContainer({
+    ariaLabel: 'Row gap',
     inputMode: 'decimal',
-    prefix: createGapIcon(),
+    prefix: 'R',
     suffix: 'px',
   });
-  gapRow.append(gapLabel, gapContainer.root);
 
-  wireNumberStepping(disposer, gapContainer.input, { mode: 'css-length' });
+  const columnGapContainer = createInputContainer({
+    ariaLabel: 'Column gap',
+    inputMode: 'decimal',
+    prefix: 'C',
+    suffix: 'px',
+  });
+
+  gapInputsRow.append(rowGapContainer.root, columnGapContainer.root);
+  gapRow.append(gapLabel, gapInputsRow);
+
+  wireNumberStepping(disposer, rowGapContainer.input, { mode: 'css-length' });
+  wireNumberStepping(disposer, columnGapContainer.input, { mode: 'css-length' });
 
   // ---------------------------------------------------------------------------
   // Assemble DOM
   // ---------------------------------------------------------------------------
-  root.append(displayRow, directionRow, wrapRow, alignmentRow, gapRow);
+  root.append(displayRow, directionRow, wrapRow, alignmentRow, gridRow, gapRow);
   container.append(root);
   disposer.add(() => root.remove());
 
@@ -342,14 +745,14 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
   // ---------------------------------------------------------------------------
   const fields: Record<FieldKey, FieldState> = {
     display: {
-      kind: 'select',
+      kind: 'display-group',
       property: 'display',
-      element: displaySelect,
+      group: displayGroup,
       handle: null,
       row: displayRow,
     },
     'flex-direction': {
-      kind: 'icon-button-group',
+      kind: 'flex-direction-group',
       property: 'flex-direction',
       group: directionGroup,
       handle: null,
@@ -363,30 +766,61 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
       row: wrapRow,
     },
     alignment: {
-      kind: 'alignment-grid',
+      kind: 'flex-alignment',
       properties: ['justify-content', 'align-items'] as const,
-      grid: alignmentGrid,
+      justifyGroup,
+      alignGroup,
       handle: null,
       row: alignmentRow,
     },
-    gap: {
+    'grid-dimensions': {
+      kind: 'grid-dimensions',
+      properties: ['grid-template-columns', 'grid-template-rows'] as const,
+      previewButton: gridPreviewButton,
+      popover: gridPopover,
+      colsContainer,
+      rowsContainer,
+      matrix,
+      tooltip,
+      cells,
+      handle: null,
+      row: gridRow,
+    },
+    'row-gap': {
       kind: 'input',
-      property: 'gap',
-      element: gapContainer.input,
+      property: 'row-gap',
+      element: rowGapContainer.input,
+      container: rowGapContainer,
+      handle: null,
+      row: gapRow,
+    },
+    'column-gap': {
+      kind: 'input',
+      property: 'column-gap',
+      element: columnGapContainer.input,
+      container: columnGapContainer,
       handle: null,
       row: gapRow,
     },
   };
 
   /** Single-property fields for iteration */
-  const STYLE_PROPS: readonly LayoutProperty[] = ['display', 'flex-direction', 'flex-wrap', 'gap'];
+  const STYLE_PROPS: readonly LayoutProperty[] = [
+    'display',
+    'flex-direction',
+    'flex-wrap',
+    'row-gap',
+    'column-gap',
+  ];
   /** All field keys for iteration */
   const FIELD_KEYS: readonly FieldKey[] = [
     'display',
     'flex-direction',
     'flex-wrap',
     'alignment',
-    'gap',
+    'grid-dimensions',
+    'row-gap',
+    'column-gap',
   ];
 
   // ---------------------------------------------------------------------------
@@ -399,7 +833,7 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
     if (!target || !target.isConnected) return null;
 
     const field = fields[property];
-    if (field.kind === 'alignment-grid') return null;
+    if (field.kind === 'flex-alignment' || field.kind === 'grid-dimensions') return null;
     if (field.handle) return field.handle;
 
     const handle = transactionManager.beginStyle(target, property);
@@ -409,7 +843,7 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
 
   function commitTransaction(property: LayoutProperty): void {
     const field = fields[property];
-    if (field.kind === 'alignment-grid') return;
+    if (field.kind === 'flex-alignment' || field.kind === 'grid-dimensions') return;
     const handle = field.handle;
     field.handle = null;
     if (handle) handle.commit({ merge: true });
@@ -417,7 +851,7 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
 
   function rollbackTransaction(property: LayoutProperty): void {
     const field = fields[property];
-    if (field.kind === 'alignment-grid') return;
+    if (field.kind === 'flex-alignment' || field.kind === 'grid-dimensions') return;
     const handle = field.handle;
     field.handle = null;
     if (handle) handle.rollback();
@@ -429,25 +863,56 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
     if (!target || !target.isConnected) return null;
 
     const field = fields.alignment;
-    if (field.kind !== 'alignment-grid') return null;
+    if (field.kind !== 'flex-alignment') return null;
     if (field.handle) return field.handle;
 
-    const handle = transactionManager.beginMultiStyle(target, ['justify-content', 'align-items']);
+    const handle = transactionManager.beginMultiStyle(target, [...field.properties]);
     field.handle = handle;
     return handle;
   }
 
   function commitAlignmentTransaction(): void {
     const field = fields.alignment;
-    if (field.kind !== 'alignment-grid') return;
+    if (field.kind !== 'flex-alignment') return;
     const handle = field.handle;
     field.handle = null;
     handle?.commit({ merge: true });
   }
 
+  function beginGridTransaction(): MultiStyleTransactionHandle | null {
+    if (disposer.isDisposed) return null;
+    const target = currentTarget;
+    if (!target || !target.isConnected) return null;
+
+    const field = fields['grid-dimensions'];
+    if (field.kind !== 'grid-dimensions') return null;
+    if (field.handle) return field.handle;
+
+    const handle = transactionManager.beginMultiStyle(target, [...field.properties]);
+    field.handle = handle;
+    return handle;
+  }
+
+  function commitGridTransaction(): void {
+    const field = fields['grid-dimensions'];
+    if (field.kind !== 'grid-dimensions') return;
+    const handle = field.handle;
+    field.handle = null;
+    handle?.commit({ merge: true });
+  }
+
+  function rollbackGridTransaction(): void {
+    const field = fields['grid-dimensions'];
+    if (field.kind !== 'grid-dimensions') return;
+    const handle = field.handle;
+    field.handle = null;
+    handle?.rollback();
+  }
+
   function commitAllTransactions(): void {
     for (const p of STYLE_PROPS) commitTransaction(p);
     commitAlignmentTransaction();
+    commitGridTransaction();
   }
 
   // ---------------------------------------------------------------------------
@@ -456,9 +921,10 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
 
   function updateVisibility(): void {
     const target = currentTarget;
-    const displayValue = target
+    const rawDisplay = target
       ? readInlineValue(target, 'display') || readComputedValue(target, 'display')
-      : displaySelect.value;
+      : (displayGroup.getValue() ?? 'block');
+    const displayValue = normalizeDisplayValue(rawDisplay);
 
     const trimmed = displayValue.trim();
     const isFlex = trimmed === 'flex' || trimmed === 'inline-flex';
@@ -467,7 +933,8 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
 
     directionRow.hidden = !isFlex;
     wrapRow.hidden = !isFlex;
-    alignmentRow.hidden = !isFlexOrGrid;
+    alignmentRow.hidden = !isFlex;
+    gridRow.hidden = !isGrid;
     gapRow.hidden = !isFlexOrGrid;
   }
 
@@ -479,8 +946,8 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
     const field = fields[key];
     const target = currentTarget;
 
-    // Handle icon button group (flex-direction)
-    if (field.kind === 'icon-button-group') {
+    // Handle display icon button group
+    if (field.kind === 'display-group') {
       const group = field.group;
 
       if (!target || !target.isConnected) {
@@ -493,24 +960,47 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
       const isEditing = field.handle !== null;
       if (isEditing && !force) return;
 
-      const inline = readInlineValue(target, field.property);
-      const computed = readComputedValue(target, field.property);
+      const inline = readInlineValue(target, 'display');
+      const computed = readComputedValue(target, 'display');
+      let raw = (inline || computed).trim();
+      raw = normalizeDisplayValue(raw);
+      group.setValue(isDisplayValue(raw) ? raw : 'block');
+      return;
+    }
+
+    // Handle flex-direction icon button group
+    if (field.kind === 'flex-direction-group') {
+      const group = field.group;
+
+      if (!target || !target.isConnected) {
+        group.setDisabled(true);
+        group.setValue(null);
+        return;
+      }
+
+      group.setDisabled(false);
+      const isEditing = field.handle !== null;
+      if (isEditing && !force) return;
+
+      const inline = readInlineValue(target, 'flex-direction');
+      const computed = readComputedValue(target, 'flex-direction');
       const raw = (inline || computed).trim();
       group.setValue(isFlexDirectionValue(raw) ? raw : null);
       return;
     }
 
-    // Handle alignment grid (justify-content + align-items)
-    if (field.kind === 'alignment-grid') {
-      const grid = field.grid;
-
+    // Handle flex alignment (content bars)
+    if (field.kind === 'flex-alignment') {
       if (!target || !target.isConnected) {
-        grid.setDisabled(true);
-        grid.setValue(null);
+        field.justifyGroup.setDisabled(true);
+        field.alignGroup.setDisabled(true);
+        field.justifyGroup.setValue(null);
+        field.alignGroup.setValue(null);
         return;
       }
 
-      grid.setDisabled(false);
+      field.justifyGroup.setDisabled(false);
+      field.alignGroup.setDisabled(false);
       const isEditing = field.handle !== null;
       if (isEditing && !force) return;
 
@@ -522,16 +1012,79 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
       const justifyRaw = (justifyInline || justifyComputed).trim();
       const alignRaw = (alignInline || alignComputed).trim();
 
-      // Graceful handling: if values aren't representable in 3×3 grid, show no selection
       if (isAlignmentAxisValue(justifyRaw) && isAlignmentAxisValue(alignRaw)) {
-        grid.setValue({ justifyContent: justifyRaw, alignItems: alignRaw });
+        field.justifyGroup.setValue(justifyRaw);
+        field.alignGroup.setValue(alignRaw);
       } else {
-        grid.setValue(null);
+        field.justifyGroup.setValue(null);
+        field.alignGroup.setValue(null);
       }
       return;
     }
 
-    // Handle input field (gap)
+    // Handle grid dimensions (grid-template-columns/rows)
+    if (field.kind === 'grid-dimensions') {
+      const {
+        previewButton,
+        popover,
+        colsContainer,
+        rowsContainer,
+        tooltip,
+        cells: gridCells,
+      } = field;
+
+      if (!target || !target.isConnected) {
+        previewButton.disabled = true;
+        previewButton.textContent = '—';
+        previewButton.setAttribute('aria-expanded', 'false');
+        popover.hidden = true;
+        colsContainer.input.disabled = true;
+        rowsContainer.input.disabled = true;
+        tooltip.hidden = true;
+        for (const cell of gridCells) {
+          cell.dataset.active = 'false';
+          cell.dataset.selected = 'false';
+        }
+        return;
+      }
+
+      previewButton.disabled = false;
+      colsContainer.input.disabled = false;
+      rowsContainer.input.disabled = false;
+
+      const isEditing =
+        field.handle !== null ||
+        isFieldFocused(colsContainer.input) ||
+        isFieldFocused(rowsContainer.input);
+      if (isEditing && !force) return;
+
+      const colsRaw =
+        readInlineValue(target, 'grid-template-columns') ||
+        readComputedValue(target, 'grid-template-columns');
+      const rowsRaw =
+        readInlineValue(target, 'grid-template-rows') ||
+        readComputedValue(target, 'grid-template-rows');
+
+      const cols = clampInt(countGridTracks(colsRaw) ?? 1, 1, GRID_DIMENSION_MAX);
+      const rows = clampInt(countGridTracks(rowsRaw) ?? 1, 1, GRID_DIMENSION_MAX);
+
+      colsContainer.input.value = String(cols);
+      rowsContainer.input.value = String(rows);
+      previewButton.textContent = `${cols} × ${rows}`;
+
+      // Default rendering uses current values
+      tooltip.hidden = true;
+      for (const cell of gridCells) {
+        const c = parseInt(cell.dataset.col ?? '0', 10);
+        const r = parseInt(cell.dataset.row ?? '0', 10);
+        const selected = c > 0 && r > 0 && c <= cols && r <= rows;
+        cell.dataset.selected = selected ? 'true' : 'false';
+        cell.dataset.active = selected ? 'true' : 'false';
+      }
+      return;
+    }
+
+    // Handle input field (row-gap / column-gap)
     if (field.kind === 'input') {
       const input = field.element;
 
@@ -539,10 +1092,7 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
         input.disabled = true;
         input.value = '';
         input.placeholder = '';
-        // Reset suffix to default for gap
-        if (field.property === 'gap') {
-          gapContainer.setSuffix('px');
-        }
+        field.container.setSuffix('px');
         return;
       }
 
@@ -552,17 +1102,14 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
 
       const inlineValue = readInlineValue(target, field.property);
       const displayValue = inlineValue || readComputedValue(target, field.property);
-      input.value = displayValue;
+      const formatted = formatLengthForDisplay(displayValue);
+      input.value = formatted.value;
+      field.container.setSuffix(formatted.suffix);
       input.placeholder = '';
-
-      // Update suffix to match current unit for gap field
-      if (field.property === 'gap') {
-        gapContainer.setSuffix(extractUnitSuffix(displayValue));
-      }
       return;
     }
 
-    // Handle select field (display, flex-wrap)
+    // Handle select field (flex-wrap)
     if (field.kind === 'select') {
       const select = field.element;
 
@@ -577,12 +1124,7 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
 
       const inline = readInlineValue(target, field.property);
       const computed = readComputedValue(target, field.property);
-      let val = inline || computed;
-
-      // For display property, map inline-flex/inline-grid to flex/grid
-      if (field.property === 'display') {
-        val = normalizeDisplayValue(val);
-      }
+      const val = inline || computed;
 
       const hasOption = Array.from(select.options).some((o) => o.value === val);
       select.value = hasOption ? val : (select.options[0]?.value ?? '');
@@ -598,7 +1140,7 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
   // Event Wiring
   // ---------------------------------------------------------------------------
 
-  function wireSelect(property: Extract<LayoutProperty, 'display' | 'flex-wrap'>): void {
+  function wireSelect(property: 'flex-wrap'): void {
     const field = fields[property];
     if (field.kind !== 'select') return;
     const select = field.element;
@@ -606,7 +1148,6 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
     const preview = () => {
       const handle = beginTransaction(property);
       if (handle) handle.set(select.value);
-      if (property === 'display') updateVisibility();
     };
 
     disposer.listen(select, 'input', preview);
@@ -630,14 +1171,16 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
     });
   }
 
-  function wireInput(property: 'gap'): void {
+  function wireInput(property: 'row-gap' | 'column-gap'): void {
     const field = fields[property];
     if (field.kind !== 'input') return;
     const input = field.element;
 
     disposer.listen(input, 'input', () => {
       const handle = beginTransaction(property);
-      if (handle) handle.set(normalizeLength(input.value));
+      if (!handle) return;
+      const suffix = field.container.getSuffixText();
+      handle.set(combineLengthValue(input.value, suffix));
     });
 
     disposer.listen(input, 'blur', () => {
@@ -659,9 +1202,179 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
     });
   }
 
-  wireSelect('display');
   wireSelect('flex-wrap');
-  wireInput('gap');
+  wireInput('row-gap');
+  wireInput('column-gap');
+
+  // ---------------------------------------------------------------------------
+  // Grid Dimensions Picker Wiring
+  // ---------------------------------------------------------------------------
+
+  let gridHoverCols: number | null = null;
+  let gridHoverRows: number | null = null;
+
+  function renderGridSelection(field: GridDimensionsFieldState, cols: number, rows: number): void {
+    const activeCols = gridHoverCols ?? cols;
+    const activeRows = gridHoverRows ?? rows;
+
+    for (const cell of field.cells) {
+      const c = parseInt(cell.dataset.col ?? '0', 10);
+      const r = parseInt(cell.dataset.row ?? '0', 10);
+      const selected = c > 0 && r > 0 && c <= cols && r <= rows;
+      const active = c > 0 && r > 0 && c <= activeCols && r <= activeRows;
+      cell.dataset.selected = selected ? 'true' : 'false';
+      cell.dataset.active = active ? 'true' : 'false';
+    }
+
+    if (gridHoverCols !== null && gridHoverRows !== null) {
+      field.tooltip.textContent = `${gridHoverCols} × ${gridHoverRows}`;
+      field.tooltip.hidden = false;
+    } else {
+      field.tooltip.hidden = true;
+    }
+  }
+
+  function setGridPopoverOpen(field: GridDimensionsFieldState, open: boolean): void {
+    field.popover.hidden = !open;
+    field.previewButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+
+    // Reset hover when opening/closing
+    gridHoverCols = null;
+    gridHoverRows = null;
+
+    const cols = clampInt(
+      parseInt(field.colsContainer.input.value || '1', 10) || 1,
+      1,
+      GRID_DIMENSION_MAX,
+    );
+    const rows = clampInt(
+      parseInt(field.rowsContainer.input.value || '1', 10) || 1,
+      1,
+      GRID_DIMENSION_MAX,
+    );
+    renderGridSelection(field, cols, rows);
+  }
+
+  function previewGridDimensions(cols: number, rows: number): void {
+    const handle = beginGridTransaction();
+    if (!handle) return;
+    handle.set({
+      'grid-template-columns': formatGridTemplate(cols),
+      'grid-template-rows': formatGridTemplate(rows),
+    });
+  }
+
+  const gridField = fields['grid-dimensions'];
+  if (gridField.kind === 'grid-dimensions') {
+    disposer.listen(gridField.previewButton, 'click', (e: MouseEvent) => {
+      e.preventDefault();
+      setGridPopoverOpen(gridField, gridField.popover.hidden);
+      if (!gridField.popover.hidden) {
+        gridField.colsContainer.input.focus();
+        gridField.colsContainer.input.select();
+      }
+    });
+
+    // Close popover when clicking outside
+    disposer.listen(document, 'click', (e: MouseEvent) => {
+      if (gridField.popover.hidden) return;
+      const target = e.target as Node;
+      if (!gridRow.contains(target)) {
+        setGridPopoverOpen(gridField, false);
+      }
+    });
+
+    // Inputs: live preview, blur commit, ESC rollback
+    const wireGridInput = (input: HTMLInputElement) => {
+      disposer.listen(input, 'input', () => {
+        const cols = clampInt(
+          parseInt(gridField.colsContainer.input.value || '1', 10) || 1,
+          1,
+          GRID_DIMENSION_MAX,
+        );
+        const rows = clampInt(
+          parseInt(gridField.rowsContainer.input.value || '1', 10) || 1,
+          1,
+          GRID_DIMENSION_MAX,
+        );
+        renderGridSelection(gridField, cols, rows);
+        previewGridDimensions(cols, rows);
+      });
+
+      disposer.listen(input, 'blur', () => {
+        commitGridTransaction();
+        syncAllFields();
+      });
+
+      disposer.listen(input, 'keydown', (ev: KeyboardEvent) => {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          commitGridTransaction();
+          syncAllFields();
+          return;
+        }
+        if (ev.key === 'Escape') {
+          ev.preventDefault();
+          rollbackGridTransaction();
+          setGridPopoverOpen(gridField, false);
+          syncField('grid-dimensions', true);
+        }
+      });
+    };
+
+    wireGridInput(gridField.colsContainer.input);
+    wireGridInput(gridField.rowsContainer.input);
+
+    // Matrix hover + click select
+    disposer.listen(gridField.matrix, 'mouseover', (e: MouseEvent) => {
+      const el = e.target as HTMLElement;
+      const cell = el.closest('.we-grid-dimensions-cell') as HTMLButtonElement | null;
+      if (!cell) return;
+      gridHoverCols = clampInt(parseInt(cell.dataset.col ?? '1', 10) || 1, 1, GRID_DIMENSION_MAX);
+      gridHoverRows = clampInt(parseInt(cell.dataset.row ?? '1', 10) || 1, 1, GRID_DIMENSION_MAX);
+      const cols = clampInt(
+        parseInt(gridField.colsContainer.input.value || '1', 10) || 1,
+        1,
+        GRID_DIMENSION_MAX,
+      );
+      const rows = clampInt(
+        parseInt(gridField.rowsContainer.input.value || '1', 10) || 1,
+        1,
+        GRID_DIMENSION_MAX,
+      );
+      renderGridSelection(gridField, cols, rows);
+    });
+
+    disposer.listen(gridField.matrix, 'mouseleave', () => {
+      gridHoverCols = null;
+      gridHoverRows = null;
+      const cols = clampInt(
+        parseInt(gridField.colsContainer.input.value || '1', 10) || 1,
+        1,
+        GRID_DIMENSION_MAX,
+      );
+      const rows = clampInt(
+        parseInt(gridField.rowsContainer.input.value || '1', 10) || 1,
+        1,
+        GRID_DIMENSION_MAX,
+      );
+      renderGridSelection(gridField, cols, rows);
+    });
+
+    disposer.listen(gridField.matrix, 'click', (e: MouseEvent) => {
+      const el = e.target as HTMLElement;
+      const cell = el.closest('.we-grid-dimensions-cell') as HTMLButtonElement | null;
+      if (!cell) return;
+      const cols = clampInt(parseInt(cell.dataset.col ?? '1', 10) || 1, 1, GRID_DIMENSION_MAX);
+      const rows = clampInt(parseInt(cell.dataset.row ?? '1', 10) || 1, 1, GRID_DIMENSION_MAX);
+      gridField.colsContainer.input.value = String(cols);
+      gridField.rowsContainer.input.value = String(rows);
+      previewGridDimensions(cols, rows);
+      commitGridTransaction();
+      setGridPopoverOpen(gridField, false);
+      syncAllFields();
+    });
+  }
 
   function setTarget(element: Element | null): void {
     if (disposer.isDisposed) return;

@@ -86,7 +86,7 @@ const SHADOW_HOST_STYLES = /* css */ `
 
     /* Radii */
     --we-radius-panel: 8px;
-    --we-radius-control: 4px;
+    --we-radius-control: 6px;
     --we-radius-tab: 4px;
 
     /* Sizes */
@@ -969,29 +969,49 @@ const SHADOW_HOST_STYLES = /* css */ `
      Form Controls (for Design controls)
      ========================================================================== */
 
+  /* Field row: vertical stack (label on top, control below) */
   .we-field {
     display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  /* Horizontal field variant (label left, control right) */
+  .we-field--horizontal {
+    flex-direction: row;
     align-items: center;
     gap: 8px;
-    min-height: 28px;
   }
 
   .we-field-label {
     flex: 0 0 auto;
-    width: 48px;
+    width: auto;
     font-size: 10px;
     font-weight: 500;
     color: var(--we-text-secondary);
-    /* Removed uppercase transform for cleaner look */
+  }
+
+  /* Fixed width label for horizontal layout */
+  .we-field--horizontal .we-field-label {
+    width: 48px;
   }
 
   .we-field-label--short {
     width: 20px;
   }
 
+  /* Hint text (small label above icon groups for H/V distinction) */
+  .we-field-hint {
+    font-size: 9px;
+    color: var(--we-text-muted);
+    text-align: center;
+    line-height: 1;
+  }
+
   /* Content container for complex controls (icon groups, grids, etc.) */
   .we-field-content {
-    flex: 1;
+    width: 100%;
     min-width: 0;
   }
 
@@ -1026,7 +1046,6 @@ const SHADOW_HOST_STYLES = /* css */ `
   .we-input:focus {
     background: var(--we-control-bg-focus);
     border-color: var(--we-control-border-focus);
-    box-shadow: inset 0 0 0 2px var(--we-control-border-focus); /* Design spec: 2px inset */
   }
 
   /* ==========================================================================
@@ -1056,7 +1075,6 @@ const SHADOW_HOST_STYLES = /* css */ `
   .we-input-container:focus-within {
     background: var(--we-control-bg-focus);
     border-color: var(--we-control-border-focus);
-    box-shadow: inset 0 0 0 2px var(--we-control-border-focus); /* Design spec: 2px inset */
   }
 
   .we-input-container__input {
@@ -1162,6 +1180,49 @@ const SHADOW_HOST_STYLES = /* css */ `
   }
 
   /* ==========================================================================
+   * Toggle Button
+   *
+   * A pressable toggle button (e.g. flip X/Y controls).
+   * ========================================================================== */
+  .we-toggle-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 4px;
+    background: var(--we-control-bg);
+    border: 1px solid transparent;
+    border-radius: var(--we-radius-control);
+    cursor: pointer;
+    transition: background-color 0.1s ease, border-color 0.1s ease;
+  }
+
+  .we-toggle-btn:hover:not(:disabled) {
+    background: var(--we-control-bg-hover);
+  }
+
+  .we-toggle-btn[aria-pressed="true"] {
+    background: var(--we-control-bg-focus);
+    border-color: var(--we-control-border-focus);
+  }
+
+  .we-toggle-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .we-toggle-btn svg {
+    width: 14px;
+    height: 14px;
+    color: var(--we-text-secondary);
+  }
+
+  .we-toggle-btn[aria-pressed="true"] svg {
+    color: var(--we-control-border-focus);
+  }
+
+  /* ==========================================================================
    * Alignment Grid (Phase 4.2)
    *
    * 3×3 single-select grid for justify-content + align-items.
@@ -1234,6 +1295,109 @@ const SHADOW_HOST_STYLES = /* css */ `
   .we-alignment-grid__bar--2 { width: 12px; }
   .we-alignment-grid__bar--3 { width: 4px; }
 
+  /* ==========================================================================
+   * Grid Dimensions Picker (Layout Control)
+   * ========================================================================== */
+
+  .we-grid-dimensions-preview {
+    width: 100%;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-size: 11px;
+    font-family: inherit;
+    color: var(--we-text-primary);
+    background: var(--we-control-bg);
+    border: 1px solid transparent;
+    border-radius: var(--we-radius-control);
+    cursor: pointer;
+    transition: background-color 0.1s ease, border-color 0.1s ease;
+  }
+
+  .we-grid-dimensions-preview:hover:not(:disabled) {
+    background: var(--we-control-bg-hover);
+  }
+
+  .we-grid-dimensions-preview:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .we-grid-dimensions-popover {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    padding: 10px;
+    background: var(--we-surface-bg);
+    border: 1px solid rgba(226, 232, 240, 0.95);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+    z-index: 30;
+  }
+
+  .we-grid-dimensions-popover[hidden] {
+    display: none;
+  }
+
+  .we-grid-dimensions-inputs {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .we-grid-dimensions-times {
+    font-size: 12px;
+    color: var(--we-text-muted);
+    user-select: none;
+  }
+
+  .we-grid-dimensions-matrix {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 3px;
+    padding: 6px;
+    background: var(--we-surface-secondary);
+    border: 1px solid var(--we-border-subtle);
+    border-radius: var(--we-radius-control);
+  }
+
+  .we-grid-dimensions-cell {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    background: transparent;
+    border: 1px solid rgba(0, 0, 0, 0.10);
+    border-radius: 2px;
+    padding: 0;
+    cursor: pointer;
+    transition: background-color 0.08s ease, border-color 0.08s ease;
+  }
+
+  .we-grid-dimensions-cell[data-active="true"] {
+    border-color: rgba(59, 130, 246, 0.65);
+    background: rgba(59, 130, 246, 0.10);
+  }
+
+  .we-grid-dimensions-cell[data-selected="true"] {
+    border-color: rgba(59, 130, 246, 0.9);
+    background: rgba(59, 130, 246, 0.16);
+  }
+
+  .we-grid-dimensions-tooltip {
+    margin-top: 8px;
+    text-align: center;
+    font-size: 11px;
+    color: var(--we-text-secondary);
+  }
+
+  .we-grid-dimensions-tooltip[hidden] {
+    display: none;
+  }
+
   .we-input--short {
     width: 56px;
     flex: 0 0 auto;
@@ -1257,6 +1421,8 @@ const SHADOW_HOST_STYLES = /* css */ `
     border: 1px solid transparent;
     border-radius: var(--we-radius-control);
     outline: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
     appearance: none;
     cursor: pointer;
     transition: background-color 0.1s ease, border-color 0.1s ease, box-shadow 0.1s ease;
@@ -1269,14 +1435,26 @@ const SHADOW_HOST_STYLES = /* css */ `
   .we-select:focus {
     background-color: var(--we-control-bg-focus);
     border-color: var(--we-control-border-focus);
-    box-shadow: inset 0 0 0 2px var(--we-control-border-focus); /* Design spec: 2px inset */
   }
 
   /* Field row for multiple inputs side by side */
   .we-field-row {
     display: flex;
-    align-items: center;
+    align-items: stretch;
     gap: 8px;
+  }
+
+  /* Size field with mode select + input stacked vertically */
+  .we-size-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .we-size-mode-select {
+    width: 100%;
   }
 
   .we-field-group {

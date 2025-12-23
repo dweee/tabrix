@@ -17,7 +17,7 @@ import type { DesignTokensService, CssVarName } from '../../../core/design-token
 import { createTokenPicker, type TokenPicker } from './token-picker';
 import { createColorField, type ColorField } from './color-field';
 import { createInputContainer, type InputContainer } from '../components/input-container';
-import { extractUnitSuffix, hasExplicitUnit, normalizeLength } from './css-helpers';
+import { combineLengthValue, formatLengthForDisplay, hasExplicitUnit } from './css-helpers';
 import { wireNumberStepping } from './number-stepping';
 import type { DesignControl } from '../types';
 
@@ -408,20 +408,30 @@ export function createTypographyControl(options: TypographyControlOptions): Desi
 
         const inlineValue = readInlineValue(target, property);
         const displayValue = inlineValue || readComputedValue(target, property);
-        el.value = displayValue;
-        el.placeholder = '';
 
-        // Update suffix dynamically
+        // Update value and suffix dynamically
         if (field.container) {
           if (property === 'font-size') {
-            field.container.setSuffix(extractUnitSuffix(displayValue));
+            const formatted = formatLengthForDisplay(displayValue);
+            el.value = formatted.value;
+            field.container.setSuffix(formatted.suffix);
           } else if (property === 'line-height') {
             // Line-height: only show suffix if value has explicit unit
-            field.container.setSuffix(
-              hasExplicitUnit(displayValue) ? extractUnitSuffix(displayValue) : null,
-            );
+            if (hasExplicitUnit(displayValue)) {
+              const formatted = formatLengthForDisplay(displayValue);
+              el.value = formatted.value;
+              field.container.setSuffix(formatted.suffix);
+            } else {
+              el.value = displayValue;
+              field.container.setSuffix(null);
+            }
+          } else {
+            el.value = displayValue;
           }
+        } else {
+          el.value = displayValue;
         }
+        el.placeholder = '';
       } else {
         const inline = readInlineValue(target, property);
         const computed = readComputedValue(target, property);
@@ -471,7 +481,7 @@ export function createTypographyControl(options: TypographyControlOptions): Desi
 
   function wireInput(
     property: TypographyProperty,
-    normalize: (v: string) => string = (v) => v.trim(),
+    normalize: (v: string, suffix: string | null) => string = (v) => v.trim(),
   ): void {
     const field = fields[property];
     if (field.kind !== 'standard') return;
@@ -480,7 +490,10 @@ export function createTypographyControl(options: TypographyControlOptions): Desi
 
     disposer.listen(input, 'input', () => {
       const handle = beginTransaction(property);
-      if (handle) handle.set(normalize(input.value));
+      if (!handle) return;
+      // Get current suffix from container to preserve unit
+      const suffix = field.container?.getSuffixText() ?? null;
+      handle.set(normalize(input.value, suffix));
     });
 
     disposer.listen(input, 'blur', () => {
@@ -503,9 +516,17 @@ export function createTypographyControl(options: TypographyControlOptions): Desi
   }
 
   // Wire standard inputs/selects (color field is wired via its own callbacks)
-  wireInput('font-size', normalizeLength);
+  wireInput('font-size', combineLengthValue);
   wireSelect('font-weight');
-  wireInput('line-height', normalizeLineHeight);
+  // line-height is special: can be unitless (like 1.5) or with unit (like 24px)
+  wireInput('line-height', (v, suffix) => {
+    const trimmed = v.trim();
+    if (!trimmed) return '';
+    // If user typed a unit explicitly (like "24px"), use as-is
+    if (/[a-zA-Z%]/.test(trimmed)) return trimmed;
+    // For pure numbers, append suffix if exists, otherwise keep unitless
+    return suffix ? `${trimmed}${suffix}` : trimmed;
+  });
   wireSelect('text-align');
 
   function setTarget(element: Element | null): void {
