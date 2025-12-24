@@ -68,6 +68,10 @@ export const OFFSCREEN_MESSAGE_TYPES = {
   SIMILARITY_ENGINE_COMPUTE: 'similarityEngineCompute',
   SIMILARITY_ENGINE_BATCH_COMPUTE: 'similarityEngineBatchCompute',
   SIMILARITY_ENGINE_STATUS: 'similarityEngineStatus',
+  // GIF encoding
+  GIF_ADD_FRAME: 'gifAddFrame',
+  GIF_FINISH: 'gifFinish',
+  GIF_RESET: 'gifReset',
 } as const;
 
 // Content script message types

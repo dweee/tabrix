@@ -2,9 +2,11 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'chrome-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
+import { consoleBuffer, BufferedConsoleMessage, BufferedConsoleException } from './console-buffer';
 
-const DEBUGGER_PROTOCOL_VERSION = '1.3';
 const DEFAULT_MAX_MESSAGES = 100;
+
+type ConsoleMode = 'snapshot' | 'buffer';
 
 interface ConsoleToolParams {
   url?: string;
@@ -13,6 +15,14 @@ interface ConsoleToolParams {
   windowId?: number;
   includeExceptions?: boolean;
   maxMessages?: number;
+  // 新增参数
+  mode?: ConsoleMode;
+  buffer?: boolean; // mode="buffer" 的别名
+  clear?: boolean; // 读取前清空
+  clearAfterRead?: boolean; // 读取后清空（mcp-tools.js 风格）
+  pattern?: string;
+  onlyErrors?: boolean;
+  limit?: number;
 }
 
 interface ConsoleMessage {
@@ -52,6 +62,78 @@ interface ConsoleResult {
   messageLimitReached: boolean;
 }
 
+// 辅助函数
+
+function normalizeLimit(value: unknown, fallback: number): number {
+  const n = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback;
+  return Math.max(0, n);
+}
+
+function parseRegexPattern(pattern?: string): RegExp | undefined {
+  if (typeof pattern !== 'string') return undefined;
+  const trimmed = pattern.trim();
+  if (!trimmed) return undefined;
+  // 支持 /pattern/flags 语法
+  const match = trimmed.match(/^\/(.+)\/([gimsuy]*)$/);
+  try {
+    return match ? new RegExp(match[1], match[2]) : new RegExp(trimmed);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`Invalid regex pattern: ${msg}`);
+  }
+}
+
+function matchesPattern(pattern: RegExp, text: string): boolean {
+  pattern.lastIndex = 0;
+  return pattern.test(text);
+}
+
+function isErrorLevel(level?: string): boolean {
+  const normalized = (level || '').toLowerCase();
+  return normalized === 'error' || normalized === 'assert';
+}
+
+function applyResultFilters(
+  result: ConsoleResult,
+  options: { pattern?: RegExp; onlyErrors?: boolean; includeExceptions: boolean },
+): ConsoleResult {
+  const { pattern, onlyErrors = false, includeExceptions } = options;
+
+  let messages = result.messages;
+  if (onlyErrors) {
+    messages = messages.filter((m) => isErrorLevel(m.level));
+  }
+  if (pattern) {
+    messages = messages.filter((m) => matchesPattern(pattern, m.text || ''));
+  }
+
+  let exceptions = includeExceptions ? result.exceptions : [];
+  if (includeExceptions && pattern) {
+    exceptions = exceptions.filter((e) => matchesPattern(pattern, e.text || ''));
+  }
+
+  return {
+    ...result,
+    messages,
+    exceptions,
+    messageCount: messages.length,
+    exceptionCount: exceptions.length,
+  };
+}
+
+function isDebuggerConflictError(error: unknown): boolean {
+  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return msg.includes('debugger is already attached') || msg.includes('another client');
+}
+
+function formatDebuggerConflictMessage(tabId: number, originalMessage: string): string {
+  return (
+    `Failed to attach Chrome Debugger to tab ${tabId}: another debugger client is already attached ` +
+    `(likely DevTools or another extension). Close DevTools for this tab or disable the conflicting extension, ` +
+    `then retry. Original error: ${originalMessage}`
+  );
+}
+
 /**
  * Tool for capturing console output from browser tabs
  */
@@ -66,9 +148,26 @@ class ConsoleTool extends BaseBrowserToolExecutor {
       background = false,
       includeExceptions = true,
       maxMessages = DEFAULT_MAX_MESSAGES,
+      mode = 'snapshot',
+      buffer,
+      clear = false,
+      clearAfterRead = false,
+      pattern,
+      onlyErrors = false,
+      limit,
     } = args;
 
     let targetTab: chrome.tabs.Tab;
+    let targetTabId: number | undefined;
+
+    // 解析正则表达式
+    let compiledPattern: RegExp | undefined;
+    try {
+      compiledPattern = parseRegexPattern(pattern);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return createErrorResponse(msg);
+    }
 
     try {
       if (typeof tabId === 'number') {
@@ -95,26 +194,113 @@ class ConsoleTool extends BaseBrowserToolExecutor {
         return createErrorResponse('Failed to identify target tab.');
       }
 
-      const targetTabId = targetTab.id;
+      targetTabId = targetTab.id;
 
-      // Capture console messages (one-time capture)
+      // 确定模式：buffer 参数是 mode="buffer" 的别名
+      const resolvedMode: ConsoleMode =
+        mode === 'buffer' || buffer === true ? 'buffer' : 'snapshot';
+
+      // 计算有效的消息限制
+      const normalizedMaxMessages = normalizeLimit(maxMessages, DEFAULT_MAX_MESSAGES);
+      const effectiveLimit =
+        typeof limit === 'number'
+          ? normalizeLimit(limit, normalizedMaxMessages)
+          : normalizedMaxMessages;
+
+      // Buffer 模式
+      if (resolvedMode === 'buffer') {
+        try {
+          await consoleBuffer.ensureStarted(targetTabId);
+        } catch (error: unknown) {
+          const msg = error instanceof Error ? error.message : String(error);
+          if (isDebuggerConflictError(error)) {
+            return createErrorResponse(formatDebuggerConflictMessage(targetTabId, msg));
+          }
+          throw error;
+        }
+
+        // 处理读取前清空请求
+        let clearedBefore: { clearedMessages: number; clearedExceptions: number } | null = null;
+        if (clear === true) {
+          clearedBefore = consoleBuffer.clear(targetTabId, 'manual');
+        }
+
+        // 读取缓冲区
+        const read = consoleBuffer.read(targetTabId, {
+          pattern: compiledPattern,
+          onlyErrors,
+          limit: effectiveLimit,
+          includeExceptions,
+        });
+
+        if (!read) {
+          return createErrorResponse('Console buffer is not available for this tab.');
+        }
+
+        // 处理读取后清空请求（mcp-tools.js 风格，避免重复读取）
+        let clearedAfter: { clearedMessages: number; clearedExceptions: number } | null = null;
+        if (clearAfterRead === true) {
+          clearedAfter = consoleBuffer.clear(targetTabId, 'manual');
+        }
+
+        // 构建清空摘要
+        let clearedSummary = '';
+        if (clearedBefore) {
+          clearedSummary += ` Cleared ${clearedBefore.clearedMessages} messages and ${clearedBefore.clearedExceptions} exceptions before reading.`;
+        }
+        if (clearedAfter) {
+          clearedSummary += ` Cleared ${clearedAfter.clearedMessages} messages and ${clearedAfter.clearedExceptions} exceptions after reading.`;
+        }
+
+        const result: ConsoleResult = {
+          success: true,
+          message:
+            `Console buffer read for tab ${targetTabId}.` +
+            clearedSummary +
+            ` Returned ${read.messageCount} messages and ${read.exceptionCount} exceptions.`,
+          tabId: targetTabId,
+          tabUrl: read.tabUrl || '',
+          tabTitle: read.tabTitle || '',
+          captureStartTime: read.captureStartTime,
+          captureEndTime: read.captureEndTime,
+          totalDurationMs: read.totalDurationMs,
+          messages: read.messages as ConsoleMessage[],
+          exceptions: read.exceptions as ConsoleException[],
+          messageCount: read.messageCount,
+          exceptionCount: read.exceptionCount,
+          messageLimitReached: read.messageLimitReached,
+        };
+
+        return {
+          content: [{ type: 'text', text: JSON.stringify(result) }],
+          isError: false,
+        };
+      }
+
+      // Snapshot 模式（一次性捕获）
       const result = await this.captureConsoleMessages(targetTabId, {
         includeExceptions,
-        maxMessages,
+        maxMessages: effectiveLimit,
+      });
+
+      // 应用过滤器
+      const filtered = applyResultFilters(result, {
+        pattern: compiledPattern,
+        onlyErrors,
+        includeExceptions,
       });
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result),
-          },
-        ],
+        content: [{ type: 'text', text: JSON.stringify(filtered) }],
         isError: false,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('ConsoleTool: Critical error during execute:', error);
-      return createErrorResponse(`Error in ConsoleTool: ${error.message || String(error)}`);
+      const msg = error instanceof Error ? error.message : String(error);
+      if (typeof targetTabId === 'number' && isDebuggerConflictError(error)) {
+        return createErrorResponse(formatDebuggerConflictMessage(targetTabId, msg));
+      }
+      return createErrorResponse(`Error in ConsoleTool: ${msg}`);
     }
   }
 
@@ -382,16 +568,20 @@ class ConsoleTool extends BaseBrowserToolExecutor {
         // Clean up
         chrome.debugger.onEvent.removeListener(eventListener);
 
-        try {
-          await cdpSessionManager.sendCommand(tabId, 'Runtime.disable');
-        } catch (e) {
-          console.warn(`ConsoleTool: Error disabling Runtime for tab ${tabId}:`, e);
-        }
+        // 如果 buffer 模式正在使用这个 tab，不要关闭 Runtime/Log 域
+        const keepDomainsEnabled = consoleBuffer.isCapturing(tabId);
+        if (!keepDomainsEnabled) {
+          try {
+            await cdpSessionManager.sendCommand(tabId, 'Runtime.disable');
+          } catch (e) {
+            console.warn(`ConsoleTool: Error disabling Runtime for tab ${tabId}:`, e);
+          }
 
-        try {
-          await cdpSessionManager.sendCommand(tabId, 'Log.disable');
-        } catch (e) {
-          console.warn(`ConsoleTool: Error disabling Log for tab ${tabId}:`, e);
+          try {
+            await cdpSessionManager.sendCommand(tabId, 'Log.disable');
+          } catch (e) {
+            console.warn(`ConsoleTool: Error disabling Log for tab ${tabId}:`, e);
+          }
         }
 
         try {

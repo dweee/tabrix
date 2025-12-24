@@ -1021,11 +1021,13 @@ const SHADOW_HOST_STYLES = /* css */ `
    * - White background + blue inset border on focus
    */
   .we-input {
-    flex: 1;
+    flex: 1 1 auto;
+    flex-shrink: 0; /* Prevent height shrinking in column flex containers */
     min-width: 0;
     height: 28px; /* Design spec: h-[28px] */
     padding: 0 8px;
     font-size: 11px;
+    line-height: 26px; /* Ensure vertical centering: 28px - 2px border */
     font-family: inherit;
     color: var(--we-text-primary);
     background: var(--we-control-bg);
@@ -1089,6 +1091,7 @@ const SHADOW_HOST_STYLES = /* css */ `
     height: 100%;
     padding: 0;
     font-size: 11px;
+    line-height: 26px; /* Ensure vertical centering within 28px container */
     font-family: inherit;
     color: var(--we-text-primary);
     background: transparent;
@@ -1440,11 +1443,13 @@ const SHADOW_HOST_STYLES = /* css */ `
   }
 
   .we-select {
-    flex: 1;
+    flex: 1 1 auto;
+    flex-shrink: 0; /* Prevent height shrinking in column flex containers */
     min-width: 0;
     height: 28px; /* Design spec: h-[28px] */
     padding: 0 24px 0 8px;
     font-size: 11px;
+    line-height: 26px; /* Ensure vertical centering: 28px - 2px border */
     font-family: inherit;
     color: var(--we-text-primary);
     background: var(--we-control-bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%23737373' d='M2.5 3.5l2.5 3 2.5-3'/%3E%3C/svg%3E") no-repeat right 8px center;
@@ -1491,6 +1496,246 @@ const SHADOW_HOST_STYLES = /* css */ `
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+
+  /* ==========================================================================
+     Gradient Preview Bar (Phase 4B)
+     ========================================================================== */
+
+  .we-gradient-bar-row {
+    width: 100%;
+    padding: 4px 0 8px;
+  }
+
+  .we-gradient-bar {
+    position: relative;
+    width: 100%;
+    height: 60px;
+    border-radius: 14px;
+    border: 1px solid var(--we-border-subtle);
+    background-color: var(--we-control-bg);
+    background-image: none; /* set inline by GradientControl */
+    box-shadow:
+      inset 0 1px 2px rgba(0, 0, 0, 0.08),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+    overflow: hidden;
+  }
+
+  /* Gradient thumbs container */
+  .we-gradient-bar-thumbs {
+    position: absolute;
+    inset: 0;
+    pointer-events: none; /* thumbs enable pointer events individually */
+  }
+
+  /* Gradient thumb (color stop marker) */
+  .we-gradient-thumb {
+    pointer-events: auto;
+    position: absolute;
+    top: 50%;
+    left: 0;
+    transform: translate(-50%, -50%);
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border: 2px solid rgba(255, 255, 255, 0.98);
+    background-color: transparent; /* set inline */
+    cursor: pointer;
+    padding: 0;
+    box-sizing: border-box;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    touch-action: none;
+    user-select: none;
+    transition: box-shadow 0.15s ease;
+  }
+
+  .we-gradient-thumb:hover {
+    box-shadow:
+      0 0 0 2px rgba(59, 130, 246, 0.25),
+      0 1px 3px rgba(0, 0, 0, 0.2);
+  }
+
+  .we-gradient-thumb:focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 3px rgba(59, 130, 246, 0.4),
+      0 1px 3px rgba(0, 0, 0, 0.2);
+  }
+
+  /* Selected thumb state */
+  .we-gradient-thumb--active {
+    box-shadow:
+      0 0 0 3px rgba(59, 130, 246, 0.4),
+      0 1px 3px rgba(0, 0, 0, 0.2);
+  }
+
+  /* Dragging thumb state - cursor feedback on entire bar */
+  .we-gradient-bar--dragging {
+    cursor: grabbing;
+  }
+
+  .we-gradient-bar--dragging .we-gradient-thumb {
+    cursor: grabbing;
+  }
+
+  /* ==========================================================================
+     Gradient Stops List (Phase 4D)
+     ========================================================================== */
+
+  .we-gradient-stops-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0 4px;
+  }
+
+  .we-gradient-stops-title {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--we-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .we-gradient-stops-add,
+  .we-gradient-stop-remove {
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
+  }
+
+  .we-gradient-stops-add:disabled,
+  .we-gradient-stop-remove:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .we-gradient-stops-list {
+    border: 1px solid var(--we-border-subtle);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.6);
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 180px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .we-gradient-stop-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 6px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: rgba(255, 255, 255, 0.85);
+    cursor: pointer;
+    user-select: none;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+
+  .we-gradient-stop-row:hover {
+    background: rgba(59, 130, 246, 0.06);
+  }
+
+  .we-gradient-stop-row:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35);
+  }
+
+  .we-gradient-stop-row--active {
+    border-color: rgba(59, 130, 246, 0.6);
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2);
+  }
+
+  .we-gradient-stop-pos {
+    flex: 0 0 auto;
+    min-width: 44px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: var(--we-text-secondary);
+    padding: 3px 6px;
+    border-radius: 6px;
+    background: var(--we-control-bg);
+  }
+
+  .we-gradient-stop-color {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: var(--we-control-bg);
+  }
+
+  /* Static color display (visible when row is not selected) */
+  .we-gradient-stop-color-static {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+  }
+
+  .we-gradient-stop-color-static:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+    border-radius: 4px;
+  }
+
+  /* Color editor slot (visible when row is selected) */
+  .we-gradient-stop-color-editor {
+    flex: 1;
+    min-width: 0;
+    display: none;
+  }
+
+  /* When row is active: hide static, show editor */
+  .we-gradient-stop-row--active .we-gradient-stop-color {
+    padding: 0;
+    background: transparent;
+  }
+
+  .we-gradient-stop-row--active .we-gradient-stop-color-static {
+    display: none;
+  }
+
+  .we-gradient-stop-row--active .we-gradient-stop-color-editor {
+    display: block;
+  }
+
+  .we-gradient-stop-swatch {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+    background: transparent;
+  }
+
+  .we-gradient-stop-color-text {
+    flex: 1;
+    min-width: 0;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: var(--we-text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   /* Spacing section (Padding / Margin) */

@@ -15,6 +15,8 @@
     SCROLL_DEBOUNCE_MS: 350,
     SENSITIVE_INPUT_TYPES: new Set(['password']),
     UI_MAX_STEPS: 30,
+    // Maximum time to hold flush while user is typing (prevents unbounded batch accumulation)
+    MAX_TYPING_HOLD_MS: 1500,
   };
   // Cross-frame event channel
   const FRAME_EVENT = 'rr_iframe_event';
@@ -333,7 +335,11 @@
       if (container) container.scrollTop = container.scrollHeight;
     }
 
-    // Efficiently apply a full timeline update by only appending the delta
+    /**
+     * Apply a full timeline update from background.
+     * Steps can be upserted in place (same id, updated fields) during fill debouncing.
+     * Uses smart diffing to minimize DOM operations while ensuring fill values are accurate.
+     */
     applyTimelineUpdate(steps) {
       try {
         if (window !== window.top) return;
@@ -346,15 +352,70 @@
           this.resetTimeline();
           return;
         }
-        // If timeline shrank (e.g., new session), rebuild from tail window
-        if (total < this._count) {
+
+        // Calculate the window of steps to display (last N steps)
+        const windowStart = Math.max(0, total - CONFIG.UI_MAX_STEPS);
+        const windowSteps = list.slice(windowStart);
+
+        // Get current displayed step IDs
+        const currentItems = this._timeline.children;
+        const currentIds = [];
+        for (let i = 0; i < currentItems.length; i++) {
+          currentIds.push(currentItems[i].getAttribute('data-step-id') || '');
+        }
+
+        // Check if we need a full rebuild or can do incremental update
+        const newIds = windowSteps.map((s) => s.id || '');
+        const needsRebuild =
+          currentIds.length !== newIds.length || currentIds.some((id, i) => id !== newIds[i]);
+
+        if (needsRebuild) {
+          // Full rebuild: either structure changed or it's simpler to rebuild
           this.resetTimeline();
+          for (let i = 0; i < windowSteps.length; i++) {
+            this._appendStepWithIndex(windowSteps[i], windowStart + i + 1);
+          }
+        } else {
+          // Incremental update: same steps, just update values
+          for (let i = 0; i < windowSteps.length; i++) {
+            const step = windowSteps[i];
+            const item = currentItems[i];
+            if (item) {
+              // Update the text content for this step
+              const textSpan = item.querySelector('span:last-child');
+              if (textSpan) {
+                const newText = this._formatStepText(step, windowStart + i + 1);
+                if (textSpan.textContent !== newText) {
+                  textSpan.textContent = newText;
+                }
+              }
+            }
+          }
         }
-        const startIdx = Math.max(this._count, total - CONFIG.UI_MAX_STEPS);
-        for (let i = startIdx; i < total; i++) {
-          this.appendStep(list[i]);
-        }
+        this._count = total;
       } catch {}
+    }
+
+    /**
+     * Internal method to append a step with a specific display index.
+     * Used by applyTimelineUpdate for proper numbering.
+     */
+    _appendStepWithIndex(step, displayIndex) {
+      const list = this._timeline || document.getElementById('__rr_rec_timeline_list') || null;
+      if (!list) return;
+      const item = document.createElement('li');
+      const text = this._formatStepText(step, displayIndex);
+      item.setAttribute('data-step-id', step.id || '');
+      item.style.display = 'flex';
+      item.style.alignItems = 'flex-start';
+      item.style.gap = '6px';
+      item.innerHTML = `
+        <span style="min-width:20px; text-align:right; opacity:0.8;">${displayIndex}.</span>
+        <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:310px;">${text}</span>
+      `;
+      list.appendChild(item);
+      const container = list.parentElement;
+      if (container) container.scrollTop = container.scrollHeight;
     }
 
     // Create a short, human-readable text for a recorded step
@@ -407,7 +468,17 @@
       // Local, content-side buffer for batching/merging steps during recording.
       // Not the authoritative Flow (background holds the real one).
       this.sessionBuffer = this._createSessionBuffer();
-      this.lastFill = { step: null, ts: 0 };
+      // lastFill tracks the most recent fill step for debounce/merge
+      // el: DOM element reference for reading final value on finalize
+      this.lastFill = { step: null, ts: 0, el: null };
+      // Input activity tracking for flush gate (separate from merge state)
+      // Updated by both local input and iframe upsert messages
+      this._lastInputActivityTs = 0;
+      // Flush gate: tracks when a typing burst started to enforce MAX_TYPING_HOLD_MS
+      this._typingBurstStartTs = 0;
+      // Force flush timer: ensures MAX_TYPING_HOLD_MS is a hard upper bound
+      // This timer is NOT reset on each input, only cleared on actual flush
+      this._forceFlushTimer = null;
       // Recording-time element identity map (not persisted)
       this.el2ref = new WeakMap();
       this.refCounter = 0;
@@ -424,6 +495,9 @@
       this._onKeyDown = this._onKeyDown.bind(this);
       this._onKeyUp = this._onKeyUp.bind(this);
       this._onWindowMessage = this._onWindowMessage.bind(this);
+      // Page lifecycle handlers for best-effort flush on navigation/close
+      this._onPageHide = this._onPageHide.bind(this);
+      this._onVisibilityChange = this._onVisibilityChange.bind(this);
       this.ui = new UI(this);
       this._scrollPending = null;
 
@@ -469,14 +543,26 @@
       }
 
       this.isRecording = false;
+      // Stop should clear paused state so detach fully cleans up (and barrier works consistently)
+      this.isPaused = false;
 
-      // Step 1: Finalize any pending input (draft mode)
+      // Step 1: Finalize pending click (dblclick detector)
+      this._finalizePendingClick();
+
+      // Step 2: Finalize any pending input (draft mode)
       this._finalizePendingInput();
 
-      // Step 2: Finalize any pending scroll
+      // Step 3: Finalize any pending scroll
       this._finalizePendingScroll();
 
-      // Step 3: Clear timers BEFORE flush (prevent race conditions)
+      // Step 4: In iframes, ensure the top-frame aggregator has processed our final postMessages
+      // before we ACK the background stop (prevents missing iframe steps)
+      let topSyncOk = true;
+      if (window !== window.top) {
+        topSyncOk = await this._syncStopBarrierToTop();
+      }
+
+      // Step 5: Clear timers BEFORE flush (prevent race conditions)
       if (this.batchTimer) clearTimeout(this.batchTimer);
       this.batchTimer = null;
       if (this.scrollTimer) clearTimeout(this.scrollTimer);
@@ -484,61 +570,142 @@
       if (this.hoverRAF) cancelAnimationFrame(this.hoverRAF);
       this.hoverRAF = 0;
 
-      // Step 4: Flush any remaining batched steps and WAIT for ack
+      // Step 6: Flush any remaining batched steps and WAIT for ack
       const stepsCount = this.batch.length;
       let stepsAck = true;
       if (stepsCount > 0) {
         stepsAck = await this._flush();
       }
 
-      // Step 5: Send all collected variables and WAIT for ack
+      // Step 7: Send all collected variables and WAIT for ack
       const variablesCount = this.sessionBuffer.variables?.length || 0;
       let variablesAck = true;
       if (variablesCount > 0) {
         variablesAck = await this._sendVariables();
       }
 
-      // Step 6: Detach listeners and clean up UI
+      // Step 8: Detach listeners and clean up UI
       this._detach();
       this.ui.remove();
 
-      // Step 7: Reset state
-      this.lastFill = { step: null, ts: 0 };
-      const ret = this.sessionBuffer;
+      // Step 9: Reset state
+      this.lastFill = { step: null, ts: 0, el: null };
+      this._lastInputActivityTs = 0;
+      this._typingBurstStartTs = 0;
+      if (this._forceFlushTimer) {
+        clearTimeout(this._forceFlushTimer);
+        this._forceFlushTimer = null;
+      }
       this.sessionBuffer.steps = [];
 
       // Return acknowledgment with stats
       // ack is true only if all sends were acknowledged
       return {
-        ack: stepsAck && variablesAck,
+        ack: stepsAck && variablesAck && topSyncOk,
         steps: stepsCount,
         variables: variablesCount,
       };
     }
 
     /**
+     * Finalize a pending click that hasn't been emitted yet.
+     * The dblclick detector holds single clicks temporarily to detect double-clicks.
+     * This ensures stop/pause flush includes the last single click.
+     */
+    _finalizePendingClick() {
+      try {
+        if (this._pendingClickTimer) clearTimeout(this._pendingClickTimer);
+      } catch {}
+      this._pendingClickTimer = null;
+
+      try {
+        if (this._pendingClick) this._pushStep(this._pendingClick);
+      } catch {}
+      this._pendingClick = null;
+    }
+
+    /**
      * Finalize any pending input that hasn't been flushed yet.
-     * This ensures the last input value is captured before stop.
+     * This ensures the last input value is captured before stop/pause/navigation.
+     * Uses lastFill.el (DOM reference) to read the current value.
      */
     _finalizePendingInput() {
-      // If there's a recent fill step that might still be debouncing, force it through
-      if (this.lastFill.step && this.lastFill.ts > 0) {
-        const timeSinceLastFill = Date.now() - this.lastFill.ts;
-        // If the fill was very recent, it might not have been pushed yet
-        if (timeSinceLastFill < CONFIG.INPUT_DEBOUNCE_MS) {
-          // The step should already be in batch, just ensure it's the latest value
-          // by checking if the element still exists and getting current value
-          try {
-            const el = this.lastFill.step._recordingRef;
-            if (el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
-              this.lastFill.step.value = el.value || '';
-            }
-          } catch (e) {
-            // Element may no longer exist, that's OK
+      const last = this.lastFill;
+      if (!last || !last.step) return;
+
+      // Commit the latest value from the DOM element
+      try {
+        const el = last.el;
+        if (el) {
+          const freshValue = this._getElementValue(el, last.step.value);
+          if (freshValue !== last.step.value) {
+            last.step.value = freshValue;
+            this.sessionBuffer.meta.updatedAt = new Date().toISOString();
           }
         }
-        this.lastFill = { step: null, ts: 0 };
+      } catch {
+        // Element may no longer exist, that's OK - we keep the last known value
       }
+
+      // Enqueue for upsert to ensure background gets the final value
+      try {
+        this._enqueueForUpsert(last.step);
+      } catch {}
+
+      // Reset state
+      this.lastFill = { step: null, ts: 0, el: null };
+      this._typingBurstStartTs = 0;
+    }
+
+    /**
+     * Get the current value from an element, handling sensitive fields and contenteditable.
+     * @param {Element} el - The element to read from
+     * @param {string} existingValue - The existing recorded value (may be a variable placeholder)
+     * @returns {string} The value to record
+     */
+    _getElementValue(el, existingValue) {
+      if (!el) return existingValue || '';
+
+      const isContentEditable =
+        el.nodeType === 1 && /** @type {HTMLElement} */ (el).isContentEditable === true;
+
+      // If existing value is already a variable placeholder, preserve it
+      // Use strict pattern to avoid false positives for user input like "{abc}"
+      const existing = typeof existingValue === 'string' ? existingValue : '';
+      const varPlaceholderPattern =
+        /^\{(?:var_[a-z0-9]{4}|file_[a-z0-9]{4}|[a-zA-Z_][a-zA-Z0-9_]*)\}$/;
+      if (varPlaceholderPattern.test(existing)) {
+        return existing;
+      }
+
+      // Check if this is a sensitive field
+      const isSensitive =
+        this.hideInputValues ||
+        (!isContentEditable &&
+          CONFIG.SENSITIVE_INPUT_TYPES.has(
+            ((el.getAttribute && el.getAttribute('type')) || '').toLowerCase(),
+          ));
+
+      if (isSensitive) {
+        // Return existing variable or create new one (should already exist from initial capture)
+        return existing;
+      }
+
+      // Read fresh value from DOM
+      try {
+        if (isContentEditable) {
+          return /** @type {HTMLElement} */ (el).innerText || '';
+        }
+        if (
+          el instanceof HTMLInputElement ||
+          el instanceof HTMLTextAreaElement ||
+          el instanceof HTMLSelectElement
+        ) {
+          return el.value || '';
+        }
+      } catch {}
+
+      return existing || '';
     }
 
     /**
@@ -609,6 +776,7 @@
       if (!this.isRecording || this.isPaused) return;
 
       // Finalize pending data before pausing
+      this._finalizePendingClick();
       this._finalizePendingInput();
       this._finalizePendingScroll();
 
@@ -656,6 +824,9 @@
       // Keyboard: record Enter and modifier combos
       document.addEventListener('keydown', this._onKeyDown, true);
       document.addEventListener('keyup', this._onKeyUp, true);
+      // Page lifecycle: best-effort flush on navigation/close
+      window.addEventListener('pagehide', this._onPageHide, true);
+      document.addEventListener('visibilitychange', this._onVisibilityChange, true);
       // Cross-frame: top window aggregates iframe-recorded steps
       if (window === window.top) window.addEventListener('message', this._onWindowMessage, true);
       this._updateHoverListener();
@@ -670,8 +841,12 @@
       document.removeEventListener('scroll', this._onScroll, { capture: true });
       document.removeEventListener('keydown', this._onKeyDown, true);
       document.removeEventListener('keyup', this._onKeyUp, true);
+      window.removeEventListener('pagehide', this._onPageHide, true);
+      document.removeEventListener('visibilitychange', this._onVisibilityChange, true);
       document.removeEventListener('mousemove', this._onMouseMove, { capture: true });
-      if (window === window.top) window.removeEventListener('message', this._onWindowMessage, true);
+      // Keep top-frame aggregator alive during pause; stop() clears isPaused and will remove it
+      if (window === window.top && !this.isPaused)
+        window.removeEventListener('message', this._onWindowMessage, true);
       // Detach per-element input listener if any
       if (this._focusedEl) this._focusedEl.removeEventListener('input', this._onInput, true);
       this._focusedEl = null;
@@ -682,12 +857,9 @@
       this.scrollTimer = null;
       if (this.hoverRAF) cancelAnimationFrame(this.hoverRAF);
       this.hoverRAF = 0;
-      // Flush pending click if any before detaching
+      // Clear pending click state (stop/pause flush it before detach)
       if (this._pendingClickTimer) {
         clearTimeout(this._pendingClickTimer);
-        if (this._pendingClick) {
-          this._pushStep(this._pendingClick);
-        }
       }
       this._pendingClickTimer = null;
       this._pendingClick = null;
@@ -723,8 +895,90 @@
           if (meta.description) this.sessionBuffer.description = String(meta.description);
         }
       } catch {}
-      this.lastFill = { step: null, ts: 0 };
+      this.lastFill = { step: null, ts: 0, el: null };
+      this._lastInputActivityTs = 0;
+      this._typingBurstStartTs = 0;
+      if (this._forceFlushTimer) {
+        clearTimeout(this._forceFlushTimer);
+        this._forceFlushTimer = null;
+      }
       this.frameSwitchPushed = false;
+    }
+
+    /**
+     * Update input activity timestamp (used for flush gate).
+     * Called on local input and iframe upsert messages.
+     */
+    _updateInputActivity() {
+      const now = Date.now();
+      const prevActivityTs = this._lastInputActivityTs || 0;
+      this._lastInputActivityTs = now;
+      // Start a new burst if previous one expired (or this is first input)
+      if (!this._typingBurstStartTs || now - prevActivityTs > CONFIG.INPUT_DEBOUNCE_MS) {
+        this._typingBurstStartTs = now;
+        // Start force flush timer (hard upper bound for MAX_TYPING_HOLD_MS)
+        this._startForceFlushTimer();
+      }
+    }
+
+    /**
+     * Start the force flush timer.
+     * This timer ensures MAX_TYPING_HOLD_MS is a hard upper bound.
+     * Unlike batchTimer, this timer is NOT reset on each input.
+     */
+    _startForceFlushTimer() {
+      // Don't restart if already running
+      if (this._forceFlushTimer) return;
+      this._forceFlushTimer = setTimeout(() => {
+        this._forceFlushTimer = null;
+        // Force flush regardless of current input state
+        if (this.batch.length > 0) {
+          this._flush();
+        }
+      }, CONFIG.MAX_TYPING_HOLD_MS);
+    }
+
+    /**
+     * Clear the force flush timer (called on actual flush).
+     */
+    _clearForceFlushTimer() {
+      if (this._forceFlushTimer) {
+        clearTimeout(this._forceFlushTimer);
+        this._forceFlushTimer = null;
+      }
+      this._typingBurstStartTs = 0;
+    }
+
+    /**
+     * Unified commit and flush logic.
+     * Called at commit points: focusout, Enter key, pagehide, visibilitychange.
+     * @param {Object} options
+     * @param {boolean} [options.bestEffort=false] - If true, don't await (for unload events)
+     */
+    _commitAndFlush(options = {}) {
+      if (!this.isRecording || this.isPaused) return;
+
+      try {
+        this._finalizePendingInput();
+        this._finalizePendingScroll();
+      } catch {}
+
+      // Reset flush gate to allow immediate flush
+      this._lastInputActivityTs = 0;
+      this._typingBurstStartTs = 0;
+      this._clearForceFlushTimer();
+
+      // Flush (best-effort for unload events)
+      try {
+        if (this.batch.length > 0) this._flush();
+      } catch {}
+      try {
+        const variablesCount = this.sessionBuffer.variables?.length || 0;
+        if (variablesCount > 0) this._sendVariables();
+      } catch {}
+
+      // If in iframe, ask top to flush too
+      this._requestTopFlush();
     }
 
     _pushStep(step) {
@@ -745,13 +999,158 @@
       this.sessionBuffer.steps.push(step);
       this.sessionBuffer.meta.updatedAt = new Date().toISOString();
       this.batch.push(step);
+
+      // Track input activity for fill steps (to enforce flush gate)
+      if (step && step.type === 'fill') {
+        this._updateInputActivity();
+      }
+
+      this._scheduleFlush();
+    }
+
+    /**
+     * Calculate the appropriate flush delay based on typing activity.
+     * During active typing, delay flush to avoid sending incomplete values.
+     * Note: MAX_TYPING_HOLD_MS is enforced by _forceFlushTimer, not here.
+     * @returns {number} Delay in milliseconds before next flush
+     */
+    _getFlushDelayMs() {
+      const now = Date.now();
+      const lastInputTs = this._lastInputActivityTs || 0;
+
+      // If no recent input activity, use default batch delay
+      if (!lastInputTs || now - lastInputTs >= CONFIG.INPUT_DEBOUNCE_MS) {
+        return CONFIG.BATCH_SEND_MS;
+      }
+
+      // Wait for input debounce to complete
+      const notBefore = lastInputTs + CONFIG.INPUT_DEBOUNCE_MS;
+      const delay = Math.max(CONFIG.BATCH_SEND_MS, notBefore - now);
+
+      return delay;
+    }
+
+    /**
+     * Schedule a batch flush with appropriate delay.
+     * Respects typing gate to avoid flushing incomplete fill values.
+     */
+    _scheduleFlush() {
       if (this.batchTimer) {
         clearTimeout(this.batchTimer);
       }
+      const delay = this._getFlushDelayMs();
       this.batchTimer = setTimeout(() => {
         this.batchTimer = null;
         this._flush();
-      }, CONFIG.BATCH_SEND_MS);
+      }, delay);
+    }
+
+    /**
+     * Request top frame to immediately flush its aggregated buffer.
+     * Used by iframes on commit points (focusout, navigation) to ensure
+     * their updates are sent to background promptly.
+     */
+    _requestTopFlush() {
+      if (window === window.top) return;
+      try {
+        const payload = {
+          kind: 'iframeFlush',
+          href: String(location && location.href ? location.href : ''),
+        };
+        window.top.postMessage({ type: FRAME_EVENT, payload }, '*');
+      } catch {}
+    }
+
+    /**
+     * Iframe -> top stop barrier sync.
+     * Ensures the top frame has processed all prior iframe postMessages (steps/upserts)
+     * before this iframe responds to background STOP.
+     * @returns {Promise<boolean>}
+     */
+    _syncStopBarrierToTop() {
+      if (window === window.top) return Promise.resolve(true);
+      const id = `sb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const href = String(location && location.href ? location.href : '');
+      const timeoutMs = 400;
+
+      return new Promise((resolve) => {
+        let done = false;
+        const cleanup = (ok) => {
+          if (done) return;
+          done = true;
+          try {
+            window.removeEventListener('message', onMessage, true);
+          } catch {}
+          try {
+            clearTimeout(t);
+          } catch {}
+          resolve(!!ok);
+        };
+
+        const onMessage = (ev) => {
+          try {
+            if (ev.source !== window.top) return;
+            const d = ev && ev.data;
+            if (!d || d.type !== FRAME_EVENT || !d.payload) return;
+            const p = d.payload || {};
+            if (p.kind !== 'iframeStopBarrierAck' || p.id !== id) return;
+            cleanup(true);
+          } catch {}
+        };
+
+        const t = setTimeout(() => cleanup(false), timeoutMs);
+        try {
+          window.addEventListener('message', onMessage, true);
+          window.top.postMessage(
+            { type: FRAME_EVENT, payload: { kind: 'iframeStopBarrier', id, href } },
+            '*',
+          );
+        } catch {
+          cleanup(false);
+        }
+      });
+    }
+
+    /**
+     * Best-effort drain and flush on page navigation/close.
+     * Called by pagehide/visibilitychange handlers.
+     * Does not await - unload events are time-constrained.
+     */
+    _bestEffortDrainAndFlush() {
+      if (!this.isRecording || this.isPaused) return;
+
+      // Flush pending single click (dblclick detector) before we may be unloaded
+      this._finalizePendingClick();
+
+      // Cancel timers (unload may not wait for them)
+      try {
+        if (this.batchTimer) clearTimeout(this.batchTimer);
+        this.batchTimer = null;
+        if (this.scrollTimer) clearTimeout(this.scrollTimer);
+        this.scrollTimer = null;
+      } catch {}
+
+      // Use unified commit and flush
+      this._commitAndFlush({ bestEffort: true });
+    }
+
+    /**
+     * Handle pagehide event - best-effort flush before navigation/close.
+     */
+    _onPageHide() {
+      this._bestEffortDrainAndFlush();
+    }
+
+    /**
+     * Handle visibilitychange event - flush when page becomes hidden.
+     * This catches some cases that pagehide misses (e.g., tab switch before navigation).
+     */
+    _onVisibilityChange() {
+      try {
+        if (document.visibilityState === 'hidden') {
+          this._bestEffortDrainAndFlush();
+        }
+      } catch {}
     }
 
     /**
@@ -760,6 +1159,10 @@
      */
     async _flush() {
       if (!this.batch.length) return true;
+
+      // Clear force flush timer since we're flushing now
+      this._clearForceFlushTimer();
+
       const steps = this.batch.map((s) => {
         // sanitize internal fields before sending to background
         const { _recordingRef, ...rest } = s || {};
@@ -1005,6 +1408,9 @@
         this.lastFill.step.value = value;
         this.sessionBuffer.meta.updatedAt = new Date().toISOString();
         this.lastFill.ts = nowTs;
+        this.lastFill.el = el; // Keep DOM reference updated for finalize
+        // Keep flush gate aligned to the latest keystroke
+        this._updateInputActivity();
         // Re-enqueue the updated step for upsert (ensures background gets final value)
         this._enqueueForUpsert(this.lastFill.step);
         return;
@@ -1012,15 +1418,32 @@
       const newStep = { type: 'fill', target, value, screenshotOnFail: true };
       newStep._recordingRef = elRef;
       this._pushStep(newStep);
-      this.lastFill = { step: newStep, ts: nowTs };
+      this.lastFill = { step: newStep, ts: nowTs, el: el };
     }
 
     /**
      * Enqueue a step for upsert - if step with same id exists in batch, update it.
      * This ensures the background receives the final value for fill steps.
+     * In iframes, forwards to top window to maintain selector composition consistency.
      */
     _enqueueForUpsert(step) {
       if (!step || !step.id) return;
+
+      // In iframes, forward upsert updates to top so we don't lose composed selectors.
+      // The top window aggregates iframe steps and computes "frame |> inner" selectors.
+      // If iframe sends directly to background, it would overwrite the composed selector.
+      if (window !== window.top) {
+        try {
+          const payload = {
+            kind: 'iframeStepUpsert',
+            href: String(location && location.href ? location.href : ''),
+            step,
+          };
+          window.top.postMessage({ type: FRAME_EVENT, payload }, '*');
+        } catch {}
+        return;
+      }
+
       // Check if step already in batch
       const existingIdx = this.batch.findIndex((s) => s.id === step.id);
       if (existingIdx >= 0) {
@@ -1030,14 +1453,9 @@
         // Add to batch (step was already flushed, so we need to send update)
         this.batch.push(step);
       }
-      // Reset batch timer to send update
-      if (this.batchTimer) {
-        clearTimeout(this.batchTimer);
-      }
-      this.batchTimer = setTimeout(() => {
-        this.batchTimer = null;
-        this._flush();
-      }, CONFIG.BATCH_SEND_MS);
+
+      // Schedule flush with appropriate delay (respects typing gate)
+      this._scheduleFlush();
     }
 
     _onChange(e) {
@@ -1053,6 +1471,7 @@
           this.lastFill.step.value = val;
           this.sessionBuffer.meta.updatedAt = new Date().toISOString();
           this.lastFill.ts = nowTs;
+          this.lastFill.el = el; // Keep DOM reference updated
           // Re-enqueue for upsert
           this._enqueueForUpsert(this.lastFill.step);
           return;
@@ -1065,7 +1484,7 @@
         const st = { type: 'fill', target, value: val, screenshotOnFail: true };
         st._recordingRef = elRef;
         this._pushStep(st);
-        this.lastFill = { step: st, ts: nowTs };
+        this.lastFill = { step: st, ts: nowTs, el: el };
         return;
       }
       if (el instanceof HTMLInputElement) {
@@ -1131,6 +1550,9 @@
       const el = e.target;
       if (!el) return;
       if (this._focusedEl === el) {
+        // Commit point: leaving an input field - finalize and flush pending input
+        // This ensures we don't lose values when user tabs away or clicks elsewhere
+        this._commitAndFlush();
         el.removeEventListener('input', this._onInput, true);
         this._focusedEl = null;
       }
@@ -1265,10 +1687,15 @@
 
         // Handle Enter in editable contexts (including contenteditable)
         if (isEditable && enterKey) {
-          // prevent duplicate with input handler; record explicit key action with target
+          // Commit point: Enter may trigger form submission/navigation
+          // Record explicit key action with target first
           const target = SelectorEngine.buildTarget(/** @type {Element} */ (e.target));
           const combo = this._formatKeysCombo(e, 'Enter');
           this._pushStep({ type: 'key', keys: combo, target, screenshotOnFail: false });
+
+          // Then commit and flush (form submit may navigate away)
+          this._commitAndFlush();
+
           this._lastKeyTs = Date.now();
           return;
         }
@@ -1358,13 +1785,71 @@
           }
         } catch {}
 
-        const { step, href } = d.payload || {};
+        const payload = d.payload || {};
+        const kind = payload.kind;
+
+        // Stop barrier sync: ACK back to the iframe so it can finish stop only after
+        // its final postMessages have been processed by the top aggregator
+        if (kind === 'iframeStopBarrier') {
+          try {
+            const id = payload.id;
+            if (id && ev.source && typeof ev.source.postMessage === 'function') {
+              ev.source.postMessage(
+                { type: FRAME_EVENT, payload: { kind: 'iframeStopBarrierAck', id } },
+                '*',
+              );
+            }
+          } catch {}
+          return;
+        }
+
+        // Handle iframe flush request: immediately flush top's aggregated buffer
+        if (kind === 'iframeFlush') {
+          this._lastInputActivityTs = 0;
+          this._typingBurstStartTs = 0;
+          this._clearForceFlushTimer();
+          if (this.batchTimer) clearTimeout(this.batchTimer);
+          this.batchTimer = null;
+          if (this.batch.length > 0) this._flush();
+          return;
+        }
+
+        const { step, href } = payload;
         if (!step || typeof step !== 'object') return;
 
-        // Stateless: compose composite selector and push single step
+        // Compose frame selector for iframe steps
+        const frameTarget = SelectorEngine.buildTarget(frameEl);
+        const frameSel = frameTarget?.selector || '';
+
+        // For upsert: find existing step in session and update it
+        if (kind === 'iframeStepUpsert') {
+          // Update input activity for iframe fills (enables flush gate for iframe input)
+          if (step.type === 'fill') {
+            this._updateInputActivity();
+          }
+
+          // Find step by id in session buffer and update its value
+          const existingIdx = this.sessionBuffer.steps.findIndex((s) => s.id === step.id);
+          if (existingIdx >= 0) {
+            // Update value but preserve the composed selector
+            this.sessionBuffer.steps[existingIdx].value = step.value;
+            this.sessionBuffer.meta.updatedAt = new Date().toISOString();
+            // Also update in batch if present
+            const batchIdx = this.batch.findIndex((s) => s.id === step.id);
+            if (batchIdx >= 0) {
+              this.batch[batchIdx].value = step.value;
+            } else {
+              // Step was already flushed, add updated version to batch
+              const updatedStep = { ...this.sessionBuffer.steps[existingIdx] };
+              this.batch.push(updatedStep);
+            }
+            this._scheduleFlush();
+          }
+          return;
+        }
+
+        // Regular iframe step: compose composite selector and push
         if (step.target) {
-          const frameTarget = SelectorEngine.buildTarget(frameEl);
-          const frameSel = frameTarget?.selector || '';
           const inner = String(step.target.selector || '').trim();
           if (frameSel && inner) {
             const composite = `${frameSel} |> ${inner}`;

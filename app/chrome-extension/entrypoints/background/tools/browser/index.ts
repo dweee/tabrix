@@ -11,6 +11,7 @@ export { keyboardTool } from './keyboard';
 export { historyTool } from './history';
 export { bookmarkSearchTool, bookmarkAddTool, bookmarkDeleteTool } from './bookmark';
 export { injectScriptTool, sendCommandToInjectScriptTool } from './inject-script';
+export { javascriptTool } from './javascript';
 export { consoleTool } from './console';
 export { fileUploadTool } from './file-upload';
 export { readPageTool } from './read-page';
@@ -23,3 +24,4 @@ export {
   performanceStopTraceTool,
   performanceAnalyzeInsightTool,
 } from './performance';
+export { gifRecorderTool } from './gif-recorder';

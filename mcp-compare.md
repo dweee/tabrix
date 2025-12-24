@@ -32,7 +32,7 @@
 | `tabs_context/tabs_create`         | `get_windows_and_tabs` + `chrome_switch_tab`             | 各有优势       |
 | `find`                             | **无**                                                   | 项目缺失       |
 | `upload_image`                     | `chrome_upload_file`(部分)                               | mcp-tools 更强 |
-| `gif_creator`                      | **无**                                                   | 项目缺失       |
+| `gif_creator`                      | `chrome_gif_recorder`                                    | 完全覆盖       |
 | `shortcuts_list/execute`           | **无**                                                   | 项目缺失       |
 | `tabs_context_mcp/tabs_create_mcp` | **无**                                                   | 项目缺失       |
 | `update_plan`                      | **无**                                                   | Claude 专用    |
@@ -461,14 +461,21 @@
 ## 六、集成任务计划
 
 > 根据用户决策调整后的任务列表
+>
+> **状态说明**: ✅ 已完成 | 🔄 部分完成 | ⏳ 未开始
 
 ### 高优先级 (P0)
 
-#### 任务 1: 整合 `chrome_navigate` 和 `chrome_go_back_or_forward`
+#### 任务 1: 整合 `chrome_navigate` 和 `chrome_go_back_or_forward` ✅ 已完成
 
 **目标**: 简化工具数量，统一导航能力
 
 **决策**: 采用 `url="back"|"forward"` 方案
+
+**完成证据**:
+
+- Schema 已声明 `url` 支持 `"back"|"forward"` (`packages/shared/src/tools.ts:392`)
+- 实现已处理 back/forward 分支并调用 `chrome.tabs.goForward/goBack` (`common.ts:80-95`)
 
 **涉及文件**:
 
@@ -487,16 +494,25 @@
 
 ---
 
-#### 任务 2: `chrome_computer` 增强 - 集成 mcp-tools 独有能力
+#### 任务 2: `chrome_computer` 增强 - 集成 mcp-tools 独有能力 ✅ 已完成
 
 **目标**: 增强交互能力
+
+**完成情况**:
+
+| 子任务       | 状态      | 说明                                                        |
+| ------------ | --------- | ----------------------------------------------------------- |
+| `scroll_to`  | ✅ 已完成 | Schema 已包含，实现走 `focusByRef` (`computer.ts:1060`)     |
+| `modifiers`  | ✅ 已完成 | Schema 已暴露 (`tools.ts:246`)                              |
+| key `repeat` | ✅ 已完成 | 已实现 (`computer.ts:950, 966`)                             |
+| `zoom`       | ✅ 已完成 | 已实现，使用 `{x0,y0,x1,y1}` 格式（两角点表示矩形，更直观） |
 
 **涉及文件**:
 
 - `app/chrome-extension/entrypoints/background/tools/browser/computer.ts`
 - `packages/shared/src/tools.ts`
 
-**实现步骤**:
+**原计划实现步骤**:
 
 **2.1 `scroll_to` (低复杂度)**
 
@@ -521,11 +537,17 @@
 
 ---
 
-#### 任务 3: `chrome_read_page` 提升到商业级
+#### 任务 3: `chrome_read_page` 提升到商业级 ✅ 已完成
 
 **目标**: 支持 depth/ref_id、stats 透出、输出结构统一
 
 **决策**: 先不支持 iframe
+
+**完成证据**:
+
+- Schema 已有 `depth/refId` 参数 (`tools.ts:167, 172`)
+- 工具侧透传参数并抽取 stats、统一返回结构 (`read-page.ts:73, 85, 135`)
+- Helper 支持 `maxDepth/refId` 并返回 `stats` (`accessibility-tree-helper.js:622, 669`)
 
 **涉及文件**:
 
@@ -533,7 +555,7 @@
 - `app/chrome-extension/inject-scripts/accessibility-tree-helper.js`
 - `packages/shared/src/tools.ts`
 
-**实现步骤**:
+**原计划实现步骤**:
 
 **3.1 新增参数**
 
@@ -566,9 +588,19 @@ refId?: string;     // 聚焦到特定节点的子树
 
 ---
 
-#### 任务 4: `chrome_console` 增强
+#### 任务 4: `chrome_console` 增强 ✅ 已完成
 
 **目标**: 支持持续缓冲、正则过滤、清空
+
+**完成证据**:
+
+- 新增 `console-buffer.ts` 实现 ConsoleBuffer 单例，支持持续缓冲
+- Schema 已添加 `mode/buffer/clear/pattern/onlyErrors/limit` 参数
+- 支持 snapshot（默认）和 buffer 两种模式
+- buffer 模式：即时读取内存，无需等待；支持正则过滤、清空、错误过滤、条数限制
+- snapshot 模式：保持兼容，支持过滤功能
+- 添加了 debugger 冲突的明确错误提示
+- tab 关闭/域名变化时自动清理缓冲
 
 **涉及文件**:
 
@@ -595,11 +627,23 @@ refId?: string;     // 聚焦到特定节点的子树
 
 ---
 
-#### 任务 5: 整合 Network Capture 工具
+#### 任务 5: 整合 Network Capture 工具 ✅ 已完成
 
 **目标**: 统一接口，通过参数控制是否需要 responseBody
 
-**决策**: 整合进同一个方法，通过 `needResponseBody` 参数控制
+**完成情况**:
+
+| 子任务            | 状态      | 说明                                                                    |
+| ----------------- | --------- | ----------------------------------------------------------------------- |
+| webRequest 版抓包 | ✅ 已完成 | Schema 已增强，添加 maxCaptureTime/inactivityTimeout/includeStatic 参数 |
+| Debugger 版抓包   | ✅ 已完成 | Schema 已增强，添加 maxCaptureTime/inactivityTimeout/includeStatic 参数 |
+| 统一过滤配置      | ✅ 已完成 | 过滤配置已统一到 `constants.ts` 的 `NETWORK_FILTERS`                    |
+| Schema 描述增强   | ✅ 已完成 | 明确说明两个工具的区别和使用场景                                        |
+
+**决策调整**: 保留两套工具（webRequest 和 Debugger），通过增强描述引导用户选择：
+
+- `chrome_network_capture_start/stop`: 轻量级，不占用 debugger，无 responseBody
+- `chrome_network_debugger_start/stop`: 支持 responseBody，但会占用 debugger
 
 **涉及文件**:
 
@@ -622,116 +666,106 @@ refId?: string;     // 聚焦到特定节点的子树
 
 ---
 
-#### 任务 6: 改造 `chrome_inject_script` 为 `javascript_tool`
+#### 任务 6: 新增 `chrome_javascript` 工具 ✅ 已完成
 
 **目标**: 实现执行并返回值 + 输出脱敏
 
+**完成证据**:
+
+- 新建 `javascript.ts` 实现 `chrome_javascript` 工具
+- 新建 `output-sanitizer.ts` 实现输出脱敏和限长
+- 使用 CDP `Runtime.evaluate` + `awaitPromise` + `returnByValue` 执行
+- Debugger 冲突时自动 fallback 到 `chrome.scripting.executeScript`（ISOLATED world）
+- 输出脱敏：cookie/token/password/JWT/Bearer token 等敏感信息
+- 输出限长：默认 50KB，支持 `maxOutputBytes` 参数
+- 超时处理：默认 15s，支持 `timeoutMs` 参数
+- 详细的错误分类：syntax_error/runtime_error/timeout/debugger_conflict/cdp_error/scripting_error
+- Schema 已添加到 TOOL_SCHEMAS
+
 **涉及文件**:
 
-- `app/chrome-extension/entrypoints/background/tools/browser/inject-script.ts`
-- `packages/shared/src/tools.ts`
+- 新建 `app/chrome-extension/entrypoints/background/tools/browser/javascript.ts`
 - 新建 `app/chrome-extension/utils/output-sanitizer.ts`
+- `app/chrome-extension/entrypoints/background/tools/browser/index.ts`
+- `packages/shared/src/tools.ts`
 
-**实现步骤**:
-
-1. 使用 CDP `Runtime.evaluate` 直接执行
-2. 实现输出脱敏（过滤 cookie/token/password 等）
-3. 实现输出限长（如 50KB）
-4. 处理异常（语法错误/运行时错误/超时）
-5. debugger 冲突时提供 fallback（`chrome.scripting.executeScript`）
-
-**实现参考**：
-
-```typescript
-async function executeJavaScript(tabId: number, code: string) {
-  const result = await cdpSessionManager.sendCommand(tabId, 'Runtime.evaluate', {
-    expression: `(async () => { ${code} })()`,
-    awaitPromise: true,
-    returnByValue: false,
-    objectGroup: 'js-tool',
-  });
-
-  if (result.exceptionDetails) {
-    return { error: formatException(result.exceptionDetails) };
-  }
-
-  const serialized = await serializeWithLimit(result.result, { maxDepth: 5, maxLength: 50000 });
-  return { result: sanitize(serialized) };
-}
-```
-
-**预计改动**: ~250 行
+**注意**: 保留了原有的 `chrome_inject_script` 工具用于复杂脚本注入场景
 
 ---
 
 ### 中优先级 (P1)
 
-#### 任务 7: 实现 `gif_creator` GIF 录制
+#### 任务 7: 实现 `gif_creator` GIF 录制 ✅ 已完成
 
 **目标**: 可审计的自动化回放
+
+**完成证据**:
+
+- 新建 `app/chrome-extension/entrypoints/background/tools/browser/gif-recorder.ts` 实现 `chrome_gif_recorder` 工具
+- 新建 `app/chrome-extension/entrypoints/offscreen/gif-encoder.ts` 实现 offscreen GIF 编码
+- 新建 `app/chrome-extension/types/gifenc.d.ts` 类型声明
+- 更新 `message-types.ts` 添加 GIF_ADD_FRAME/GIF_FINISH/GIF_RESET 消息类型
+- 使用 `gifenc` 库进行 GIF 编码（rgb444 颜色量化）
+- 使用 CDP `Page.captureScreenshot` 进行帧捕获
+- 支持 `action: 'start' | 'stop' | 'status'` 操作
+- 可配置 fps（1-30）、durationMs（最长60s）、maxFrames（最多300帧）
+- 可配置输出尺寸（width/height）和颜色数（maxColors）
+- 自动保存 GIF 文件到下载目录
+- URL 安全限制（禁止录制 chrome://、webstore 等特殊页面）
+- 使用 setTimeout 递归调度避免帧捕获积压
+- 复用 offscreenManager 和 createImageBitmapFromUrl 等现有工具
+- CDP 会话管理：启动时 attach，停止时 detach
 
 **涉及文件**:
 
 - 新建 `app/chrome-extension/entrypoints/background/tools/browser/gif-recorder.ts`
 - 新建 `app/chrome-extension/entrypoints/offscreen/gif-encoder.ts`
+- 新建 `app/chrome-extension/types/gifenc.d.ts`
+- `app/chrome-extension/common/message-types.ts`
+- `app/chrome-extension/entrypoints/offscreen/main.ts`
+- `app/chrome-extension/entrypoints/background/tools/browser/index.ts`
 - `packages/shared/src/tools.ts`
-
-**实现步骤**:
-
-1. 创建 `GifRecorder` 类管理录制状态
-   - 按 tabId 存储 frames（最多 50 帧）
-   - 自动截帧钩子（在工具调度器中）
-2. 实现 offscreen GIF 编码
-   - 使用 `gif.js` 或 `gifenc`
-   - 处理 worker CSP
-3. 实现工具接口
-   - `action: 'start' | 'stop' | 'export' | 'clear'`
-   - 导出支持下载或返回 base64
-
-**预计改动**: ~400 行
 
 ---
 
-#### 任务 8: 实现 `find` 自然语言找元素
+#### 任务 8: 实现 `find` 自然语言找元素 ❌ 暂不实现
 
 **目标**: 降低选择器门槛，提升易用性
 
-**涉及文件**:
+**决策**: 暂不实现，因为需要额外的 LLM 调用架构支持，且当前 `chrome_read_page` 已提供足够的元素信息
 
-- 新建 `app/chrome-extension/entrypoints/background/tools/browser/find-element.ts`
-- `packages/shared/src/tools.ts`
-- `app/native-server/` - 需要 LLM 调用能力
+**原因**:
 
-**实现步骤**:
-
-1. 复用 `chrome_read_page` 获取可访问性树
-2. 设计 prompt 模板
-3. 集成 LLM 调用（需要考虑调用方式：native-server 侧 or 扩展侧）
-4. 解析返回结果
-5. 添加到 TOOL_SCHEMAS
-
-**预计改动**: ~300 行
-
-**依赖**: 需要确定 LLM 调用架构
+- 需要确定 LLM 调用架构（native-server 侧 or 扩展侧）
+- 额外的模型调用成本
+- 当前工具集已能满足基本需求
 
 ---
 
 ### 低优先级 (P2)
 
-#### 任务 9: 暴露细粒度交互工具
+#### 任务 9: 暴露细粒度交互工具 ✅ 已完成
 
 **目标**: 减少 `chrome_computer` 的复杂度
+
+**完成证据**:
+
+| 子任务                   | 状态      | 说明                                                                |
+| ------------------------ | --------- | ------------------------------------------------------------------- |
+| click/fill/keyboard 实现 | ✅ 已存在 | `interaction.ts:33, 173`, `keyboard.ts:21`，已在 browser tools 导出 |
+| Schema 暴露给 MCP 客户端 | ✅ 已完成 | 已在 `TOOL_SCHEMAS` 中添加完整的 Schema 定义                        |
 
 **涉及文件**:
 
 - `packages/shared/src/tools.ts`
 
-**实现步骤**:
+**新增 Schema**:
 
-1. 为 `chrome_click_element` 添加 Schema
-2. 为 `chrome_fill_or_select` 添加 Schema
-3. 为 `chrome_keyboard` 添加 Schema
-4. 更新工具描述，引导优先使用这些细粒度工具
+- `chrome_click_element`: 支持 selector/xpath/ref/coordinates/modifiers/double click/button 等
+- `chrome_fill_or_select`: 支持 selector/xpath/ref/value (string/number/boolean)
+- `chrome_keyboard`: 支持 keys/selector/delay 等
+
+**使用建议**: 对于简单的点击、填表、键盘操作，优先使用这些细粒度工具而非 `chrome_computer`
 
 ---
 
@@ -754,19 +788,103 @@ async function executeJavaScript(tabId: number, code: string) {
 
 ### 集成优先级总结
 
-| 优先级 | 任务                                                   | 预计收益 | 预计改动 |
-| ------ | ------------------------------------------------------ | -------- | -------- |
-| P0     | 整合 navigate + go_back_or_forward                     | 简化工具 | ~50 行   |
-| P0     | chrome_computer 增强 (scroll_to/modifiers/repeat/zoom) | 交互能力 | ~150 行  |
-| P0     | chrome_read_page 商业级 (depth/ref_id/stats)           | 可控性   | ~200 行  |
-| P0     | chrome_console 增强 (buffer/pattern/clear)             | 调试能力 | ~200 行  |
-| P0     | 整合 network capture (needResponseBody)                | 统一接口 | ~300 行  |
-| P0     | javascript_tool 改造                                   | 调试能力 | ~250 行  |
-| P1     | gif_creator                                            | 可观测性 | ~400 行  |
-| P1     | find 自然语言找元素                                    | 易用性   | ~300 行  |
-| P2     | 暴露细粒度工具                                         | 易用性   | ~50 行   |
+| 优先级 | 任务                                                   | 状态        | 预计收益 | 预计改动 |
+| ------ | ------------------------------------------------------ | ----------- | -------- | -------- |
+| P0     | 整合 navigate + go_back_or_forward                     | ✅ 已完成   | 简化工具 | ~50 行   |
+| P0     | chrome_computer 增强 (scroll_to/modifiers/repeat/zoom) | ✅ 已完成   | 交互能力 | ~150 行  |
+| P0     | chrome_read_page 商业级 (depth/ref_id/stats)           | ✅ 已完成   | 可控性   | ~200 行  |
+| P0     | chrome_console 增强 (buffer/pattern/clear)             | ✅ 已完成   | 调试能力 | ~200 行  |
+| P0     | 整合 network capture (needResponseBody)                | ✅ 已完成   | 统一接口 | ~300 行  |
+| P0     | chrome_javascript 工具                                 | ✅ 已完成   | 调试能力 | ~250 行  |
+| P1     | gif_creator                                            | ✅ 已完成   | 可观测性 | ~400 行  |
+| P1     | find 自然语言找元素                                    | ❌ 暂不实现 | 易用性   | ~300 行  |
+| P2     | 暴露细粒度工具                                         | ✅ 已完成   | 易用性   | ~50 行   |
+
+**完成统计**:
+
+- ✅ 已完成: 8/9 (89%)
+- ❌ 暂不实现: 1/9 (11%) - find
 
 **已决策不采用**：
 
 - imageId 机制（增加复杂度但收益有限）
 - 权限模型（先不集成）
+
+---
+
+## 八、与 mcp-tools.js 的差异点
+
+> 以下为核验后发现的具体差异，供后续优化参考
+
+### 1. `chrome_javascript` 差异
+
+| 维度     | mcp-tools.js                  | 项目实现                         | 影响          |
+| -------- | ----------------------------- | -------------------------------- | ------------- |
+| CDP 执行 | `Runtime.evaluate`            | `Runtime.evaluate`               | ✅ 一致       |
+| 输出脱敏 | cookie/token/JWT/Base64/Hex   | 同等覆盖                         | ✅ 一致       |
+| 输出限长 | 50KB 固定                     | 50KB 默认，可配 `maxOutputBytes` | ✅ 项目更灵活 |
+| 超时     | 10s 固定                      | 15s 默认，可配 `timeoutMs`       | ⚠️ 默认值不同 |
+| 返回结构 | 含 `tabContext.availableTabs` | 无 tab 列表                      | ❌ 缺失       |
+| 参数契约 | `action/text`                 | `code`                           | ⚠️ 接口不兼容 |
+
+### 2. `chrome_gif_recorder` 差异
+
+| 维度         | mcp-tools.js                                                                       | 项目实现                                                | 影响                          |
+| ------------ | ---------------------------------------------------------------------------------- | ------------------------------------------------------- | ----------------------------- |
+| actions      | `start_recording/stop_recording/export/clear`                                      | `start/stop/status/auto_start/capture/clear/export`     | ⚠️ 命名不同，项目功能更多     |
+| 坐标参数     | `coordinate: [x, y]` 数组                                                          | `coordinates: {x, y}` 对象                              | ⚠️ 接口不兼容                 |
+| 拖拽上传     | 支持                                                                               | 支持，额外支持 `ref/selector`                           | ✅ 项目更强                   |
+| overlays     | `showClickIndicators/showDragPaths/showActionLabels/showProgressBar/showWatermark` | `enhancedRendering` 含 clickIndicators/dragPaths/labels | ⚠️ 缺少 progressBar/watermark |
+| quality 参数 | 支持 (1-30)                                                                        | 不支持                                                  | ❌ 缺失                       |
+| stop 补末帧  | 明确补最后一帧                                                                     | 不补                                                    | ❌ 行为差异                   |
+| 作用域       | 按 tab group 隔离                                                                  | 单例缓存                                                | ⚠️ 架构差异                   |
+
+### 3. `chrome_console` 差异
+
+| 维度         | mcp-tools.js    | 项目实现                             | 影响        |
+| ------------ | --------------- | ------------------------------------ | ----------- |
+| 持续缓冲     | 支持            | 支持                                 | ✅ 一致     |
+| pattern 过滤 | 支持            | 支持                                 | ✅ 一致     |
+| clear        | 读后清空        | 读前 `clear` + 读后 `clearAfterRead` | ✅ 项目更细 |
+| onlyErrors   | 支持            | 支持                                 | ✅ 一致     |
+| limit        | 支持            | 支持                                 | ✅ 一致     |
+| buffer 容量  | 10000 msgs/tab  | 2000 msgs + 500 exceptions/tab       | ⚠️ 容量较小 |
+| 返回结构     | 含 `tabContext` | 无                                   | ❌ 缺失     |
+
+### 4. `chrome_computer` 差异
+
+| 子功能        | mcp-tools.js                          | 项目实现                                 | 影响                    |
+| ------------- | ------------------------------------- | ---------------------------------------- | ----------------------- |
+| **zoom**      | `region: [x0,y0,x1,y1]` 数组          | `region: {x0,y0,x1,y1}` 对象             | ⚠️ 接口不兼容           |
+| zoom 返回     | `base64Image` + `imageFormat: "png"`  | `base64Data` + `mimeType: "image/png"`   | ⚠️ 字段命名不同         |
+| zoom 坐标     | 直接用 viewport 坐标                  | 用 `pageX/pageY` 做滚动偏移修正          | ⚠️ 行为差异，项目更准确 |
+| **scroll_to** | 通过 `getElementCoordinates` 返回坐标 | 直接 `focusByRef` 不返回坐标             | ⚠️ 返回值差异           |
+| **modifiers** | `modifiers: "ctrl+shift"` 字符串      | `modifiers: {ctrlKey, shiftKey...}` 对象 | ⚠️ 接口不兼容           |
+| **repeat**    | 仅 key action                         | 仅 key action                            | ✅ 一致                 |
+| **hover**     | ref 会先 scrollIntoView               | ref 仅 getBoundingClientRect             | ⚠️ 行为差异             |
+
+### 5. Network Capture 差异
+
+| 维度     | mcp-tools.js | 项目实现                                 | 影响            |
+| -------- | ------------ | ---------------------------------------- | --------------- |
+| 统一开关 | 无           | 未实现 `needResponseBody` 统一开关       | ⚠️ 保持两套工具 |
+| 过滤配置 | 统一         | Debugger 版未复用 `NETWORK_FILTERS` 常量 | ⚠️ 代码不一致   |
+
+---
+
+## 九、后续优化建议
+
+### 高优先级
+
+1. **GIF stop 补末帧**：与 mcp-tools 行为一致，确保录制完整性
+2. **Network 过滤配置统一**：Debugger 版复用 `NETWORK_FILTERS` 常量
+
+### 中优先级
+
+3. **Console buffer 容量扩大**：考虑从 2000 提升到 5000
+4. **GIF 增加 quality 参数**：控制输出质量和文件大小
+
+### 低优先级（接口兼容性）
+
+5. **tabContext 返回**：javascript/console 等工具增加 availableTabs 返回
+6. **zoom/modifiers 接口**：当前对象形式更 TS 友好，暂不调整

@@ -249,7 +249,10 @@ export function tryResolveString(
         );
         continue;
       }
-      return { ok: false, error: `Unknown template part kind: ${String(p.kind)}` };
+      return {
+        ok: false,
+        error: `Unknown template part kind: ${String((p as { kind: string }).kind)}`,
+      };
     }
     return { ok: true, value: out };
   }
@@ -287,6 +290,12 @@ export function tryResolveNumber(
   }
   return { ok: false, error: 'Unsupported resolvable number value' };
 }
+
+/**
+ * Resolve a generic JSON value (alias for tryResolveJson)
+ * Useful for script/http handlers that work with arbitrary JSON
+ */
+export const tryResolveValue = tryResolveJson;
 
 // ================================
 // 重试和超时逻辑
@@ -368,7 +377,9 @@ export class ActionRegistry {
     if (existing && !override) {
       throw new Error(`Handler already registered for type: ${handler.type}`);
     }
-    this.handlers[handler.type] = handler;
+    // Type assertion needed due to TypeScript mapped type limitation
+
+    (this.handlers as Record<ExecutableActionType, ActionHandler<any>>)[handler.type] = handler;
   }
 
   /**

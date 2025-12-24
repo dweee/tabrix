@@ -24,6 +24,7 @@ export const TOOL_NAMES = {
     BOOKMARK_DELETE: 'chrome_bookmark_delete',
     INJECT_SCRIPT: 'chrome_inject_script',
     SEND_COMMAND_TO_INJECT_SCRIPT: 'chrome_send_command_to_inject_script',
+    JAVASCRIPT: 'chrome_javascript',
     CONSOLE: 'chrome_console',
     FILE_UPLOAD: 'chrome_upload_file',
     READ_PAGE: 'chrome_read_page',
@@ -34,6 +35,7 @@ export const TOOL_NAMES = {
     PERFORMANCE_START_TRACE: 'performance_start_trace',
     PERFORMANCE_STOP_TRACE: 'performance_stop_trace',
     PERFORMANCE_ANALYZE_INSIGHT: 'performance_analyze_insight',
+    GIF_RECORDER: 'chrome_gif_recorder',
   },
   RECORD_REPLAY: {
     FLOW_RUN: 'record_replay_flow_run',
@@ -594,7 +596,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.NETWORK_DEBUGGER_START,
     description:
-      'Start capturing network requests from a web page using Chrome Debugger API（with responseBody）',
+      'Start capturing network requests using Chrome Debugger API. Use this when you need responseBody content. Note: occupies debugger, may conflict with DevTools.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -603,6 +605,18 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             'URL to capture network requests from. If not provided, uses the current active tab',
         },
+        maxCaptureTime: {
+          type: 'number',
+          description: 'Maximum capture time in milliseconds (default: 180000)',
+        },
+        inactivityTimeout: {
+          type: 'number',
+          description: 'Stop after inactivity in milliseconds (default: 60000). Set 0 to disable.',
+        },
+        includeStatic: {
+          type: 'boolean',
+          description: 'Include static resources like images/scripts/styles (default: false)',
+        },
       },
       required: [],
     },
@@ -610,7 +624,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.NETWORK_DEBUGGER_STOP,
     description:
-      'Stop capturing network requests using Chrome Debugger API and return the captured data',
+      'Stop capturing network requests using Chrome Debugger API and return the captured data with responseBody',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -633,7 +647,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.NETWORK_CAPTURE_START,
     description:
-      'Start capturing network requests from a web page using Chrome webRequest API(without responseBody)',
+      'Start capturing network requests using Chrome webRequest API. Lightweight, does not occupy debugger. Use chrome_network_debugger_start if you need responseBody.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -642,6 +656,18 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             'URL to capture network requests from. If not provided, uses the current active tab',
         },
+        maxCaptureTime: {
+          type: 'number',
+          description: 'Maximum capture time in milliseconds (default: 180000)',
+        },
+        inactivityTimeout: {
+          type: 'number',
+          description: 'Stop after inactivity in milliseconds (default: 60000). Set 0 to disable.',
+        },
+        includeStatic: {
+          type: 'boolean',
+          description: 'Include static resources like images/scripts/styles (default: false)',
+        },
       },
       required: [],
     },
@@ -649,7 +675,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.NETWORK_CAPTURE_STOP,
     description:
-      'Stop capturing network requests using webRequest API and return the captured data',
+      'Stop capturing network requests using webRequest API and return the captured data (without responseBody)',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -844,9 +870,192 @@ export const TOOL_SCHEMAS: Tool[] = [
     },
   },
   {
+    name: TOOL_NAMES.BROWSER.JAVASCRIPT,
+    description:
+      'Execute JavaScript code in a browser tab and return the result. Uses CDP Runtime.evaluate with awaitPromise and returnByValue; automatically falls back to chrome.scripting.executeScript if the debugger is busy. Output is sanitized (sensitive data redacted) and truncated by default.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        code: {
+          type: 'string',
+          description:
+            'JavaScript code to execute. Runs inside an async function body, so top-level await and "return ..." are supported.',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Target tab ID. If omitted, uses the current active tab.',
+        },
+        timeoutMs: {
+          type: 'number',
+          description: 'Execution timeout in milliseconds (default: 15000).',
+        },
+        maxOutputBytes: {
+          type: 'number',
+          description:
+            'Maximum output size in bytes after sanitization (default: 51200). Output exceeding this limit will be truncated.',
+        },
+      },
+      required: ['code'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.CLICK,
+    description:
+      'Click on an element in a web page. Supports multiple targeting methods: CSS selector, XPath, element ref (from chrome_read_page), or viewport coordinates. More focused than chrome_computer for simple click operations.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: {
+          type: 'string',
+          description: 'CSS selector or XPath for the element to click.',
+        },
+        selectorType: {
+          type: 'string',
+          enum: ['css', 'xpath'],
+          description: 'Type of selector (default: "css").',
+        },
+        ref: {
+          type: 'string',
+          description: 'Element ref from chrome_read_page (takes precedence over selector).',
+        },
+        coordinates: {
+          type: 'object',
+          description: 'Viewport coordinates to click at.',
+          properties: {
+            x: { type: 'number' },
+            y: { type: 'number' },
+          },
+          required: ['x', 'y'],
+        },
+        double: {
+          type: 'boolean',
+          description: 'Perform double click when true (default: false).',
+        },
+        button: {
+          type: 'string',
+          enum: ['left', 'right', 'middle'],
+          description: 'Mouse button to click (default: "left").',
+        },
+        modifiers: {
+          type: 'object',
+          description: 'Modifier keys to hold during click.',
+          properties: {
+            altKey: { type: 'boolean' },
+            ctrlKey: { type: 'boolean' },
+            metaKey: { type: 'boolean' },
+            shiftKey: { type: 'boolean' },
+          },
+        },
+        waitForNavigation: {
+          type: 'boolean',
+          description: 'Wait for navigation to complete after click (default: false).',
+        },
+        timeout: {
+          type: 'number',
+          description: 'Timeout in milliseconds for waiting (default: 5000).',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Target tab ID. If omitted, uses the current active tab.',
+        },
+        windowId: {
+          type: 'number',
+          description: 'Window ID to select active tab from (when tabId is omitted).',
+        },
+        frameId: {
+          type: 'number',
+          description: 'Target frame ID for iframe support.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.FILL,
+    description:
+      'Fill or select a form element on a web page. Supports input, textarea, select, checkbox, and radio elements. Use CSS selector, XPath, or element ref to target the element.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: {
+          type: 'string',
+          description: 'CSS selector or XPath for the form element.',
+        },
+        selectorType: {
+          type: 'string',
+          enum: ['css', 'xpath'],
+          description: 'Type of selector (default: "css").',
+        },
+        ref: {
+          type: 'string',
+          description: 'Element ref from chrome_read_page (takes precedence over selector).',
+        },
+        value: {
+          type: ['string', 'number', 'boolean'],
+          description:
+            'Value to fill. For text inputs: string. For checkboxes/radios: boolean. For selects: option value or text.',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Target tab ID. If omitted, uses the current active tab.',
+        },
+        windowId: {
+          type: 'number',
+          description: 'Window ID to select active tab from (when tabId is omitted).',
+        },
+        frameId: {
+          type: 'number',
+          description: 'Target frame ID for iframe support.',
+        },
+      },
+      required: ['value'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.KEYBOARD,
+    description:
+      'Simulate keyboard input on a web page. Supports single keys (Enter, Tab, Escape), key combinations (Ctrl+C, Ctrl+V), and text input. Can target a specific element or send to the focused element.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        keys: {
+          type: 'string',
+          description:
+            'Keys or key combinations to simulate. Examples: "Enter", "Tab", "Ctrl+C", "Shift+Tab", "Hello World".',
+        },
+        selector: {
+          type: 'string',
+          description: 'CSS selector or XPath for target element to receive keyboard events.',
+        },
+        selectorType: {
+          type: 'string',
+          enum: ['css', 'xpath'],
+          description: 'Type of selector (default: "css").',
+        },
+        delay: {
+          type: 'number',
+          description: 'Delay between keystrokes in milliseconds (default: 50).',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Target tab ID. If omitted, uses the current active tab.',
+        },
+        windowId: {
+          type: 'number',
+          description: 'Window ID to select active tab from (when tabId is omitted).',
+        },
+        frameId: {
+          type: 'number',
+          description: 'Target frame ID for iframe support.',
+        },
+      },
+      required: ['keys'],
+    },
+  },
+  {
     name: TOOL_NAMES.BROWSER.CONSOLE,
     description:
-      'Capture and retrieve all console output from the current active browser tab/page. This captures console messages that existed before the tool was called.',
+      'Capture console output from a browser tab. Supports snapshot mode (default; one-time capture with ~2s wait) and buffer mode (persistent per-tab buffer you can read/clear instantly without waiting).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -873,7 +1082,43 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         maxMessages: {
           type: 'number',
-          description: 'Maximum number of console messages to capture (default: 100)',
+          description:
+            'Maximum number of console messages to capture in snapshot mode (default: 100). If limit is provided, it takes precedence.',
+        },
+        mode: {
+          type: 'string',
+          enum: ['snapshot', 'buffer'],
+          description:
+            'Console capture mode: snapshot (default; waits ~2s for messages) or buffer (persistent per-tab buffer; reads from memory instantly).',
+        },
+        buffer: {
+          type: 'boolean',
+          description: 'Alias for mode="buffer" (default: false).',
+        },
+        clear: {
+          type: 'boolean',
+          description:
+            'Buffer mode only: clear the buffered logs for this tab before reading (default: false). Use clearAfterRead instead to clear after reading (mcp-tools.js style).',
+        },
+        clearAfterRead: {
+          type: 'boolean',
+          description:
+            'Buffer mode only: clear the buffered logs for this tab AFTER reading, to avoid duplicate messages on subsequent calls (default: false). This matches mcp-tools.js behavior.',
+        },
+        pattern: {
+          type: 'string',
+          description:
+            'Optional regex filter applied to message/exception text. Supports /pattern/flags syntax.',
+        },
+        onlyErrors: {
+          type: 'boolean',
+          description:
+            'Only return error-level console messages (and exceptions when includeExceptions=true). Default: false.',
+        },
+        limit: {
+          type: 'number',
+          description:
+            'Limit returned console messages. In snapshot mode this is an alias for maxMessages; in buffer mode it limits returned messages from the buffer.',
         },
       },
       required: [],
@@ -929,6 +1174,208 @@ export const TOOL_SCHEMAS: Tool[] = [
         promptText: {
           type: 'string',
           description: 'Optional prompt text when accepting a prompt',
+        },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.GIF_RECORDER,
+    description:
+      'Record browser tab activity as an animated GIF.\n\nModes:\n- Fixed FPS mode (action="start"): Captures frames at regular intervals. Good for animations/videos.\n- Auto-capture mode (action="auto_start"): Captures frames automatically when chrome_computer or chrome_navigate actions succeed. Better for interaction recordings with natural pacing.\n\nUse "stop" to end recording and save the GIF.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['start', 'stop', 'status', 'auto_start', 'capture', 'clear', 'export'],
+          description:
+            'Action to perform:\n- "start": Begin fixed-FPS recording (captures frames at regular intervals)\n- "auto_start": Begin auto-capture mode (frames captured on tool actions)\n- "stop": End recording and save GIF\n- "status": Get current recording state\n- "capture": Manually trigger a frame capture in auto mode\n- "clear": Clear all recording state and cached GIF without saving\n- "export": Export the last recorded GIF (download or drag&drop upload)',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Target tab ID (default: active tab). Used with "start"/"auto_start" for recording, and with "export" (download=false) for drag&drop upload target.',
+        },
+        fps: {
+          type: 'number',
+          description:
+            'Frames per second for fixed-FPS mode (1-30, default: 5). Higher values = smoother but larger file.',
+        },
+        durationMs: {
+          type: 'number',
+          description:
+            'Maximum recording duration in milliseconds (default: 5000, max: 60000). Only for fixed-FPS mode.',
+        },
+        maxFrames: {
+          type: 'number',
+          description:
+            'Maximum number of frames to capture (default: 50 for fixed-FPS, 100 for auto mode, max: 300).',
+        },
+        width: {
+          type: 'number',
+          description: 'Output GIF width in pixels (default: 800, max: 1920).',
+        },
+        height: {
+          type: 'number',
+          description: 'Output GIF height in pixels (default: 600, max: 1080).',
+        },
+        maxColors: {
+          type: 'number',
+          description:
+            'Maximum colors in palette (default: 256). Lower values = smaller file size.',
+        },
+        filename: {
+          type: 'string',
+          description: 'Output filename (without extension). Defaults to timestamped name.',
+        },
+        captureDelayMs: {
+          type: 'number',
+          description:
+            'Auto-capture mode only: Delay in ms after action before capturing frame (default: 150). Allows UI to stabilize.',
+        },
+        frameDelayCs: {
+          type: 'number',
+          description:
+            'Auto-capture mode only: Display duration per frame in centiseconds (default: 20 = 200ms per frame).',
+        },
+        annotation: {
+          type: 'string',
+          description:
+            'Auto-capture mode only (action="capture"): Optional text label to render on the captured frame.',
+        },
+        download: {
+          type: 'boolean',
+          description:
+            'Export action only: Set to true (default) to download the GIF, or false to upload via drag&drop.',
+        },
+        coordinates: {
+          type: 'object',
+          description:
+            'Export action only (when download=false): Target coordinates for drag&drop upload.',
+          properties: {
+            x: { type: 'number' },
+            y: { type: 'number' },
+          },
+          required: ['x', 'y'],
+        },
+        ref: {
+          type: 'string',
+          description:
+            'Export action only (when download=false): Element ref from chrome_read_page for drag&drop target.',
+        },
+        selector: {
+          type: 'string',
+          description:
+            'Export action only (when download=false): CSS selector for drag&drop target element.',
+        },
+        enhancedRendering: {
+          type: 'object',
+          description:
+            'Auto-capture mode only: Configure visual overlays for recorded actions (click indicators, drag paths, labels). Pass `true` to enable all defaults.',
+          properties: {
+            clickIndicators: {
+              oneOf: [
+                { type: 'boolean' },
+                {
+                  type: 'object',
+                  properties: {
+                    enabled: {
+                      type: 'boolean',
+                      description: 'Enable click indicators (default: true)',
+                    },
+                    color: {
+                      type: 'string',
+                      description:
+                        'CSS color for click indicator (default: "rgba(255, 87, 34, 0.8)")',
+                    },
+                    radius: { type: 'number', description: 'Initial radius in px (default: 20)' },
+                    animationDurationMs: {
+                      type: 'number',
+                      description: 'Animation duration in ms (default: 400)',
+                    },
+                    animationFrames: {
+                      type: 'number',
+                      description: 'Number of animation frames (default: 3)',
+                    },
+                    animationIntervalMs: {
+                      type: 'number',
+                      description: 'Interval between animation frames in ms (default: 80)',
+                    },
+                  },
+                },
+              ],
+              description:
+                'Click indicator overlay config (true for defaults, or object for custom).',
+            },
+            dragPaths: {
+              oneOf: [
+                { type: 'boolean' },
+                {
+                  type: 'object',
+                  properties: {
+                    enabled: {
+                      type: 'boolean',
+                      description: 'Enable drag path rendering (default: true)',
+                    },
+                    color: {
+                      type: 'string',
+                      description: 'CSS color for drag path (default: "rgba(33, 150, 243, 0.7)")',
+                    },
+                    lineWidth: { type: 'number', description: 'Line width in px (default: 3)' },
+                    lineDash: {
+                      type: 'array',
+                      items: { type: 'number' },
+                      description: 'Dash pattern (default: [6, 4])',
+                    },
+                    arrowSize: {
+                      type: 'number',
+                      description: 'Arrow head size in px (default: 10)',
+                    },
+                  },
+                },
+              ],
+              description: 'Drag path overlay config (true for defaults, or object for custom).',
+            },
+            labels: {
+              oneOf: [
+                { type: 'boolean' },
+                {
+                  type: 'object',
+                  properties: {
+                    enabled: {
+                      type: 'boolean',
+                      description: 'Enable action labels (default: true)',
+                    },
+                    font: {
+                      type: 'string',
+                      description: 'Font for labels (default: "bold 12px sans-serif")',
+                    },
+                    textColor: { type: 'string', description: 'Text color (default: "#fff")' },
+                    bgColor: {
+                      type: 'string',
+                      description: 'Background color (default: "rgba(0,0,0,0.7)")',
+                    },
+                    padding: { type: 'number', description: 'Padding in px (default: 4)' },
+                    borderRadius: {
+                      type: 'number',
+                      description: 'Border radius in px (default: 4)',
+                    },
+                    offset: {
+                      type: 'object',
+                      properties: { x: { type: 'number' }, y: { type: 'number' } },
+                      description: 'Offset from action position (default: {x: 10, y: -20})',
+                    },
+                  },
+                },
+              ],
+              description: 'Action label overlay config (true for defaults, or object for custom).',
+            },
+            durationMs: {
+              type: 'number',
+              description: 'How long overlays remain visible in ms (default: 1500).',
+            },
+          },
         },
       },
       required: ['action'],

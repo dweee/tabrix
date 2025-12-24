@@ -584,8 +584,8 @@ export function createEffectsControl(options: EffectsControlOptions): DesignCont
   );
 
   // Shadow-specific fields
-  const { row: offsetXRow, input: offsetXInput } = createInputRow('X', 'Shadow Offset X');
-  const { row: offsetYRow, input: offsetYInput } = createInputRow('Y', 'Shadow Offset Y');
+  const { row: offsetXRow, input: offsetXInput } = createInputRow('Offset X', 'Shadow Offset X');
+  const { row: offsetYRow, input: offsetYInput } = createInputRow('Offset Y', 'Shadow Offset Y');
   const { row: shadowBlurRow, input: shadowBlurInput } = createInputRow(
     'Blur',
     'Shadow Blur Radius',

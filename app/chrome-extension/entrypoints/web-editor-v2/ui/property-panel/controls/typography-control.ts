@@ -7,8 +7,8 @@
  * - font-weight (select)
  * - line-height (input)
  * - letter-spacing (input)
- * - text-align (select)
- * - vertical-align (select)
+ * - text-align (icon button group)
+ * - vertical-align (icon button group)
  * - color (input with optional token picker)
  *
  * Phase 5.4: Added optional DesignTokensService integration for color field.
@@ -19,6 +19,7 @@ import type { StyleTransactionHandle, TransactionManager } from '../../../core/t
 import type { DesignTokensService } from '../../../core/design-tokens';
 import { createColorField, type ColorField } from './color-field';
 import { createInputContainer, type InputContainer } from '../components/input-container';
+import { createIconButtonGroup, type IconButtonGroup } from '../components/icon-button-group';
 import { combineLengthValue, formatLengthForDisplay, hasExplicitUnit } from './css-helpers';
 import { wireNumberStepping } from './number-stepping';
 import type { DesignControl } from '../types';
@@ -27,8 +28,14 @@ import type { DesignControl } from '../types';
 // Constants
 // =============================================================================
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
 const FONT_WEIGHT_VALUES = ['100', '200', '300', '400', '500', '600', '700', '800', '900'] as const;
 const TEXT_ALIGN_VALUES = ['left', 'center', 'right', 'justify'] as const;
+const VERTICAL_ALIGN_VALUES = ['baseline', 'middle', 'top', 'bottom'] as const;
+
+type TextAlignValue = (typeof TEXT_ALIGN_VALUES)[number];
+type VerticalAlignValue = (typeof VERTICAL_ALIGN_VALUES)[number];
 const FONT_FAMILY_PRESET_VALUES = [
   'inherit',
   'system-ui',
@@ -37,16 +44,6 @@ const FONT_FAMILY_PRESET_VALUES = [
   'monospace',
 ] as const;
 const FONT_FAMILY_CUSTOM_VALUE = 'custom';
-const VERTICAL_ALIGN_VALUES = [
-  'baseline',
-  'middle',
-  'top',
-  'bottom',
-  'text-top',
-  'text-bottom',
-  'sub',
-  'super',
-] as const;
 
 type TypographyProperty =
   | 'font-family'
@@ -78,6 +75,22 @@ interface FontFamilyFieldState {
   handle: StyleTransactionHandle | null;
 }
 
+/** Text-align field state (icon button group) */
+interface TextAlignFieldState {
+  kind: 'text-align';
+  property: 'text-align';
+  group: IconButtonGroup<TextAlignValue>;
+  handle: StyleTransactionHandle | null;
+}
+
+/** Vertical-align field state (icon button group) */
+interface VerticalAlignFieldState {
+  kind: 'vertical-align';
+  property: 'vertical-align';
+  group: IconButtonGroup<VerticalAlignValue>;
+  handle: StyleTransactionHandle | null;
+}
+
 /** Color field state */
 interface ColorFieldState {
   kind: 'color';
@@ -86,7 +99,121 @@ interface ColorFieldState {
   handle: StyleTransactionHandle | null;
 }
 
-type FieldState = StandardFieldState | FontFamilyFieldState | ColorFieldState;
+type FieldState =
+  | StandardFieldState
+  | FontFamilyFieldState
+  | TextAlignFieldState
+  | VerticalAlignFieldState
+  | ColorFieldState;
+
+// =============================================================================
+// SVG Icon Helpers
+// =============================================================================
+
+function createBaseIconSvg(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 15 15');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  return svg;
+}
+
+function applyStroke(el: SVGElement, strokeWidth = '1.4'): void {
+  el.setAttribute('stroke', 'currentColor');
+  el.setAttribute('stroke-width', strokeWidth);
+  el.setAttribute('stroke-linecap', 'round');
+  el.setAttribute('stroke-linejoin', 'round');
+}
+
+function createTextAlignIcon(value: TextAlignValue): SVGElement {
+  const svg = createBaseIconSvg();
+  const path = document.createElementNS(SVG_NS, 'path');
+  applyStroke(path, '1.4');
+
+  const iconPaths: Record<TextAlignValue, string> = {
+    left: 'M2.5 4.5H12.5M2.5 7.5H8.5M2.5 10.5H10.5',
+    center: 'M3.5 4.5H11.5M5.5 7.5H9.5M4.5 10.5H10.5',
+    right: 'M2.5 4.5H12.5M6.5 7.5H12.5M4.5 10.5H12.5',
+    justify: 'M2.5 4.5H12.5M2.5 7.5H12.5M2.5 10.5H12.5',
+  };
+
+  path.setAttribute('d', iconPaths[value]);
+  svg.append(path);
+  return svg;
+}
+
+function createVerticalAlignIcon(value: VerticalAlignValue): SVGElement {
+  const svg = createBaseIconSvg();
+
+  // Baseline/guide line
+  const guide = document.createElementNS(SVG_NS, 'path');
+  applyStroke(guide, '1.2');
+
+  // Content box representation
+  const rect = document.createElementNS(SVG_NS, 'rect');
+  rect.setAttribute('x', '4.5');
+  rect.setAttribute('width', '6');
+  rect.setAttribute('rx', '1');
+  rect.setAttribute('fill', 'none');
+  applyStroke(rect, '1.2');
+
+  let lineY = 10.5;
+  let rectY = 4;
+  let rectH = 6.5;
+
+  switch (value) {
+    case 'top':
+      lineY = 2.5;
+      rectY = 2.5;
+      rectH = 6.5;
+      break;
+    case 'middle':
+      lineY = 7.5;
+      rectY = 4.5;
+      rectH = 6;
+      break;
+    case 'bottom':
+      lineY = 12.5;
+      rectY = 6;
+      rectH = 6.5;
+      break;
+    case 'baseline':
+      lineY = 10.5;
+      rectY = 4;
+      rectH = 6.5;
+      break;
+  }
+
+  guide.setAttribute('d', `M2.5 ${lineY}H12.5`);
+  rect.setAttribute('y', String(rectY));
+  rect.setAttribute('height', String(rectH));
+
+  svg.append(guide, rect);
+
+  // For baseline, add descender indicator
+  if (value === 'baseline') {
+    const desc = document.createElementNS(SVG_NS, 'rect');
+    desc.setAttribute('x', '8.5');
+    desc.setAttribute('y', String(lineY));
+    desc.setAttribute('width', '2.5');
+    desc.setAttribute('height', '2.5');
+    desc.setAttribute('rx', '0.8');
+    desc.setAttribute('fill', 'none');
+    applyStroke(desc, '1.2');
+    svg.append(desc);
+  }
+
+  return svg;
+}
+
+function isTextAlignValue(value: string): value is TextAlignValue {
+  return (TEXT_ALIGN_VALUES as readonly string[]).includes(value);
+}
+
+function isVerticalAlignValue(value: string): value is VerticalAlignValue {
+  return (VERTICAL_ALIGN_VALUES as readonly string[]).includes(value);
+}
 
 // =============================================================================
 // Helpers
@@ -230,7 +357,7 @@ export function createTypographyControl(options: TypographyControlOptions): Desi
   lineHeightRow.className = 'we-field';
   const lineHeightLabel = document.createElement('span');
   lineHeightLabel.className = 'we-field-label';
-  lineHeightLabel.textContent = 'Line H';
+  lineHeightLabel.textContent = 'Line Height';
   const lineHeightContainer = createInputContainer({
     ariaLabel: 'Line Height',
     inputMode: 'decimal',
@@ -271,42 +398,28 @@ export function createTypographyControl(options: TypographyControlOptions): Desi
   });
 
   // ---------------------------------------------------------------------------
-  // Text Align
+  // Text Align (icon button group)
   // ---------------------------------------------------------------------------
   const textAlignRow = document.createElement('div');
   textAlignRow.className = 'we-field';
   const textAlignLabel = document.createElement('span');
   textAlignLabel.className = 'we-field-label';
-  textAlignLabel.textContent = 'Align';
-  const textAlignSelect = document.createElement('select');
-  textAlignSelect.className = 'we-select';
-  textAlignSelect.setAttribute('aria-label', 'Text Align');
-  for (const v of TEXT_ALIGN_VALUES) {
-    const opt = document.createElement('option');
-    opt.value = v;
-    opt.textContent = v;
-    textAlignSelect.append(opt);
-  }
-  textAlignRow.append(textAlignLabel, textAlignSelect);
+  textAlignLabel.textContent = 'Text Align';
+  const textAlignMount = document.createElement('div');
+  textAlignMount.className = 'we-field-content';
+  textAlignRow.append(textAlignLabel, textAlignMount);
 
   // ---------------------------------------------------------------------------
-  // Vertical Align
+  // Vertical Align (icon button group)
   // ---------------------------------------------------------------------------
   const verticalAlignRow = document.createElement('div');
   verticalAlignRow.className = 'we-field';
   const verticalAlignLabel = document.createElement('span');
   verticalAlignLabel.className = 'we-field-label';
-  verticalAlignLabel.textContent = 'V Align';
-  const verticalAlignSelect = document.createElement('select');
-  verticalAlignSelect.className = 'we-select';
-  verticalAlignSelect.setAttribute('aria-label', 'Vertical Align');
-  for (const v of VERTICAL_ALIGN_VALUES) {
-    const opt = document.createElement('option');
-    opt.value = v;
-    opt.textContent = v;
-    verticalAlignSelect.append(opt);
-  }
-  verticalAlignRow.append(verticalAlignLabel, verticalAlignSelect);
+  verticalAlignLabel.textContent = 'Vertical Align';
+  const verticalAlignMount = document.createElement('div');
+  verticalAlignMount.className = 'we-field-content';
+  verticalAlignRow.append(verticalAlignLabel, verticalAlignMount);
 
   // ---------------------------------------------------------------------------
   // Color (with ColorField - TokenPill and TokenPicker are now built into ColorField)
@@ -335,6 +448,47 @@ export function createTypographyControl(options: TypographyControlOptions): Desi
   );
   container.append(root);
   disposer.add(() => root.remove());
+
+  // -------------------------------------------------------------------------
+  // Create IconButtonGroup instances for text-align and vertical-align
+  // -------------------------------------------------------------------------
+  const textAlignGroup = createIconButtonGroup<TextAlignValue>({
+    container: textAlignMount,
+    ariaLabel: 'Text Align',
+    columns: 4,
+    items: TEXT_ALIGN_VALUES.map((v) => ({
+      value: v,
+      ariaLabel: `text-align: ${v}`,
+      title: v.charAt(0).toUpperCase() + v.slice(1),
+      icon: createTextAlignIcon(v),
+    })),
+    onChange: (value) => {
+      const handle = beginTransaction('text-align');
+      if (handle) handle.set(value);
+      commitTransaction('text-align');
+      syncAllFields();
+    },
+  });
+  disposer.add(() => textAlignGroup.dispose());
+
+  const verticalAlignGroup = createIconButtonGroup<VerticalAlignValue>({
+    container: verticalAlignMount,
+    ariaLabel: 'Vertical Align',
+    columns: 4,
+    items: VERTICAL_ALIGN_VALUES.map((v) => ({
+      value: v,
+      ariaLabel: `vertical-align: ${v}`,
+      title: v.charAt(0).toUpperCase() + v.slice(1),
+      icon: createVerticalAlignIcon(v),
+    })),
+    onChange: (value) => {
+      const handle = beginTransaction('vertical-align');
+      if (handle) handle.set(value);
+      commitTransaction('vertical-align');
+      syncAllFields();
+    },
+  });
+  disposer.add(() => verticalAlignGroup.dispose());
 
   // -------------------------------------------------------------------------
   // Create ColorField instance for text color
@@ -400,15 +554,15 @@ export function createTypographyControl(options: TypographyControlOptions): Desi
       handle: null,
     },
     'text-align': {
-      kind: 'standard',
+      kind: 'text-align',
       property: 'text-align',
-      element: textAlignSelect,
+      group: textAlignGroup,
       handle: null,
     },
     'vertical-align': {
-      kind: 'standard',
+      kind: 'vertical-align',
       property: 'vertical-align',
-      element: verticalAlignSelect,
+      group: verticalAlignGroup,
       handle: null,
     },
     color: { kind: 'color', property: 'color', field: textColorField, handle: null },
@@ -494,6 +648,49 @@ export function createTypographyControl(options: TypographyControlOptions): Desi
       return;
     }
 
+    // Handle text-align (icon button group)
+    if (field.kind === 'text-align') {
+      const group = field.group;
+
+      if (!target || !target.isConnected) {
+        group.setDisabled(true);
+        group.setValue(null);
+        return;
+      }
+
+      group.setDisabled(false);
+      const isEditing = field.handle !== null;
+      if (isEditing && !force) return;
+
+      const inlineValue = readInlineValue(target, property);
+      const computedValue = readComputedValue(target, property);
+      const raw = (inlineValue || computedValue).trim();
+      group.setValue(isTextAlignValue(raw) ? raw : 'left');
+      return;
+    }
+
+    // Handle vertical-align (icon button group)
+    if (field.kind === 'vertical-align') {
+      const group = field.group;
+
+      if (!target || !target.isConnected) {
+        group.setDisabled(true);
+        group.setValue(null);
+        return;
+      }
+
+      group.setDisabled(false);
+      const isEditing = field.handle !== null;
+      if (isEditing && !force) return;
+
+      const inlineValue = readInlineValue(target, property);
+      const computedValue = readComputedValue(target, property);
+      const raw = (inlineValue || computedValue).trim();
+      // Default to baseline if value is not in our common values
+      group.setValue(isVerticalAlignValue(raw) ? raw : 'baseline');
+      return;
+    }
+
     if (field.kind === 'color') {
       // Handle ColorField
       const colorField = field.field;
@@ -522,67 +719,68 @@ export function createTypographyControl(options: TypographyControlOptions): Desi
         colorField.setValue(computedValue);
         colorField.setPlaceholder('');
       }
-    } else {
-      // Handle standard input/select
-      const el = field.element;
+      return;
+    }
 
-      if (!target || !target.isConnected) {
-        el.disabled = true;
-        if (el instanceof HTMLInputElement) {
-          el.value = '';
-          el.placeholder = '';
-          // Reset suffix to defaults
-          if (field.container) {
-            if (property === 'font-size' || property === 'letter-spacing') {
-              field.container.setSuffix('px');
-            } else if (property === 'line-height') {
-              field.container.setSuffix(null);
-            }
-          }
-        }
-        return;
-      }
+    // Handle standard input/select (remaining fields)
+    const el = field.element;
 
-      el.disabled = false;
-      const isEditing = field.handle !== null || isFieldFocused(el);
-
+    if (!target || !target.isConnected) {
+      el.disabled = true;
       if (el instanceof HTMLInputElement) {
-        if (isEditing && !force) return;
-
-        const inlineValue = readInlineValue(target, property);
-        const displayValue = inlineValue || readComputedValue(target, property);
-
-        // Update value and suffix dynamically
+        el.value = '';
+        el.placeholder = '';
+        // Reset suffix to defaults
         if (field.container) {
           if (property === 'font-size' || property === 'letter-spacing') {
+            field.container.setSuffix('px');
+          } else if (property === 'line-height') {
+            field.container.setSuffix(null);
+          }
+        }
+      }
+      return;
+    }
+
+    el.disabled = false;
+    const isEditing = field.handle !== null || isFieldFocused(el);
+
+    if (el instanceof HTMLInputElement) {
+      if (isEditing && !force) return;
+
+      const inlineValue = readInlineValue(target, property);
+      const displayValue = inlineValue || readComputedValue(target, property);
+
+      // Update value and suffix dynamically
+      if (field.container) {
+        if (property === 'font-size' || property === 'letter-spacing') {
+          const formatted = formatLengthForDisplay(displayValue);
+          el.value = formatted.value;
+          field.container.setSuffix(formatted.suffix);
+        } else if (property === 'line-height') {
+          // Line-height: only show suffix if value has explicit unit
+          if (hasExplicitUnit(displayValue)) {
             const formatted = formatLengthForDisplay(displayValue);
             el.value = formatted.value;
             field.container.setSuffix(formatted.suffix);
-          } else if (property === 'line-height') {
-            // Line-height: only show suffix if value has explicit unit
-            if (hasExplicitUnit(displayValue)) {
-              const formatted = formatLengthForDisplay(displayValue);
-              el.value = formatted.value;
-              field.container.setSuffix(formatted.suffix);
-            } else {
-              el.value = displayValue;
-              field.container.setSuffix(null);
-            }
           } else {
             el.value = displayValue;
+            field.container.setSuffix(null);
           }
         } else {
           el.value = displayValue;
         }
-        el.placeholder = '';
       } else {
-        const inline = readInlineValue(target, property);
-        const computed = readComputedValue(target, property);
-        if (isEditing && !force) return;
-        const val = inline || computed;
-        const hasOption = Array.from(el.options).some((o) => o.value === val);
-        el.value = hasOption ? val : (el.options[0]?.value ?? '');
+        el.value = displayValue;
       }
+      el.placeholder = '';
+    } else {
+      const inline = readInlineValue(target, property);
+      const computed = readComputedValue(target, property);
+      if (isEditing && !force) return;
+      const val = inline || computed;
+      const hasOption = Array.from(el.options).some((o) => o.value === val);
+      el.value = hasOption ? val : (el.options[0]?.value ?? '');
     }
   }
 
@@ -725,6 +923,7 @@ export function createTypographyControl(options: TypographyControlOptions): Desi
   }
 
   // Wire standard inputs/selects (color field is wired via its own callbacks)
+  // Note: text-align and vertical-align are now handled by IconButtonGroup with onChange callbacks
   wireFontFamily();
   wireInput('font-size', combineLengthValue);
   wireSelect('font-weight');
@@ -738,8 +937,6 @@ export function createTypographyControl(options: TypographyControlOptions): Desi
     return suffix ? `${trimmed}${suffix}` : trimmed;
   });
   wireInput('letter-spacing', combineLengthValue);
-  wireSelect('text-align');
-  wireSelect('vertical-align');
 
   function setTarget(element: Element | null): void {
     if (disposer.isDisposed) return;

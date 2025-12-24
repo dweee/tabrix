@@ -50,7 +50,13 @@
 
 #### Phase 1.3: 数据模型统一 🔄
 
-**当前状态**：P0 已完成，录制产物现在可以直接回放。P1-P4 待后续迭代。
+**当前状态**：P0、P3 已完成。P1、P2、P4 待后续迭代。
+
+- P0 ✅：录制产物转换为 DAG，可直接回放
+- P3 ✅：22 个 Action Handlers 完整实现 + Scheduler 集成架构设计完成
+- P1 ⏳：存储层统一（IndexedDB schema、lazy normalize）
+- P2 ⏳：录制链路迁移到 Action
+- P4 ⏳：清理旧 Step 类型
 
 **核心问题**：录制与回放数据格式不一致
 
@@ -97,7 +103,7 @@
 
 - [x] `flow-store.ts` 读写逻辑适配新 Flow（P0 已完成）
 - [ ] `importFlowFromJson` 支持新旧格式自动识别（P0 已间接支持：导入后保存会触发 normalize）
-- [ ] 考虑 IndexedDB schema 升级策略
+- [ ] 考虑 IndexedDB schema 升级策略，这里不用考虑，因为还没有任何人使用，没有任何数据产生，直接升级即可
 - [ ] 迁移场景：`ensureMigratedFromLocal()` 需要做 lazy normalize（当前迁移不走 saveFlow）
 - 涉及文件：`flow-store.ts`、`storage/indexeddb-manager.ts`
 
@@ -108,11 +114,192 @@
 - [ ] 可选：修改 `recorder.js` 直接发送 Action
 - 涉及文件：`flow-builder.ts`、`content-message-handler.ts`、`session-manager.ts`
 
-**P3: 回放引擎适配**
+**P3: 回放引擎适配** ✅
 
-- [ ] 短期：Action→Step 适配层，复用现有 StepRunner
-- [ ] 长期：scheduler 直接使用 ActionRegistry.execute()
-- 涉及文件：`scheduler.ts`、`rr-utils.ts`、`step-runner.ts`
+- [x] 实现核心 Action Handlers（navigate, click, dblclick, fill, wait）
+  - `actions/handlers/common.ts` - 共享工具（selector转换、消息发送、元素验证）
+  - `actions/handlers/navigate.ts` - 导航处理器
+  - `actions/handlers/click.ts` - 点击/双击处理器
+  - `actions/handlers/fill.ts` - 表单填充处理器
+  - `actions/handlers/wait.ts` - 等待条件处理器
+  - `actions/handlers/index.ts` - 注册入口（createReplayActionRegistry）
+- [x] 类型安全改进
+  - 使用泛型 `ActionHandler<T>` 确保类型一致
+  - 添加 `sendMessageToTab` 封装避免 undefined frameId 错误
+  - 使用 `SelectorCandidateSource`/`SelectorStability` 正确类型
+- [x] Tool 调用统一传递 `tabId`，避免默认 active tab 歧义
+- [x] 错误信息保留：解析 tool 返回的 error content
+- [x] 扩展 Handlers：key, scroll, delay, screenshot
+  - `actions/handlers/key.ts` - 键盘输入（支持目标聚焦）
+  - `actions/handlers/scroll.ts` - 滚动（offset/element/container 三种模式）
+  - `actions/handlers/delay.ts` - 延迟等待
+  - `actions/handlers/screenshot.ts` - 截图（全页/元素/区域）
+- [x] 完整 Handlers 实现（22个处理器）
+  - `actions/handlers/assert.ts` - 断言（exists/visible/textPresent/attribute，支持轮询）
+  - `actions/handlers/extract.ts` - 数据提取（selector/js 模式）
+  - `actions/handlers/script.ts` - 自定义脚本（MAIN/ISOLATED world）
+  - `actions/handlers/http.ts` - HTTP 请求（GET/POST/PUT/DELETE/PATCH）
+  - `actions/handlers/tabs.ts` - 标签页（openTab/switchTab/closeTab/handleDownload）
+  - `actions/handlers/control-flow.ts` - 控制流（if/foreach/while/switchFrame）
+  - `actions/handlers/drag.ts` - 拖拽（start/end 目标，支持 path 坐标）
+- [x] Scheduler 集成架构（详见下方）
+- 涉及文件：`scheduler.ts`、`rr-utils.ts`、`step-runner.ts`、`actions/handlers/*`、`actions/adapter.ts`、`engine/execution-mode.ts`、`engine/runners/step-executor.ts`
+
+##### Scheduler 集成 ActionRegistry 详细设计
+
+**1. 适配层 (`actions/adapter.ts`)**
+
+核心功能：Step ↔ Action 双向转换
+
+```typescript
+// 主要导出
+export function stepToAction(step: Step): ExecutableAction | null;
+export function execCtxToActionCtx(
+  ctx: ExecCtx,
+  tabId: number,
+  options?: { stepId?: string; runId?: string; pushLog?: (entry: unknown) => void },
+): ActionExecutionContext;
+export function actionResultToExecResult(result: ActionExecutionResult): ExecResult;
+export function createStepExecutor(
+  registry: ActionRegistry,
+): (ctx, step, tabId, options) => Promise<StepExecutionAttempt>;
+export function isActionSupported(stepType: string): boolean;
+export type StepExecutionAttempt =
+  | { supported: true; result: ExecResult }
+  | { supported: false; reason: string };
+```
+
+关键实现：
+
+- **日志归因修复**：`execCtxToActionCtx` 接受 `stepId` 参数，确保日志正确归因到具体步骤
+- **Selector Candidate 转换**：Legacy `{ type, value }` → Action `{ type, selector/xpath/text }`
+  - css/attr → `{ type, selector }`
+  - xpath → `{ type, xpath }`
+  - text → `{ type, text }`
+  - aria → 解析 `"role[name=...]"` 格式为 `{ type, role?, name }`
+- **TargetLocator 转换**：保留 `ref`、`selector`（fast-path）、`tag`（hint）字段
+- **二次转换保护**：`isLegacyTargetLocator` 精确检测，通过检查 candidate 是否有 `value` 字段来判断
+
+**2. 执行模式 (`engine/execution-mode.ts`)**
+
+```typescript
+export type ExecutionMode = 'legacy' | 'actions' | 'hybrid';
+
+export interface ExecutionModeConfig {
+  mode: ExecutionMode;
+  legacyOnlyTypes?: Set<string>; // 强制使用 legacy 的类型
+  actionsAllowlist?: Set<string>; // 允许使用 actions 的类型
+  logFallbacks?: boolean; // 是否记录回退日志
+  skipActionsRetry?: boolean; // 跳过 ActionRegistry 重试
+  skipActionsNavWait?: boolean; // 跳过 ActionRegistry 导航等待
+}
+
+// 已验证安全的类型（保守列表）
+export const MIGRATED_ACTION_TYPES = new Set([
+  'navigate',
+  'click',
+  'dblclick',
+  'fill',
+  'key',
+  'scroll',
+  'drag',
+  'wait',
+  'delay',
+  'screenshot',
+  'assert',
+]);
+
+// 需要更多验证的类型
+export const NEEDS_VALIDATION_TYPES = new Set([
+  'extract',
+  'http',
+  'script',
+  'openTab',
+  'switchTab',
+  'closeTab',
+  'handleDownload',
+  'if',
+  'foreach',
+  'while',
+  'switchFrame',
+]);
+
+// 必须使用 legacy 的类型
+export const LEGACY_ONLY_TYPES = new Set([
+  'triggerEvent',
+  'setAttribute',
+  'loopElements',
+  'executeFlow',
+]);
+```
+
+**3. 执行器抽象 (`engine/runners/step-executor.ts`)**
+
+```typescript
+export interface StepExecutorInterface {
+  execute(ctx: ExecCtx, step: Step, options: StepExecutionOptions): Promise<StepExecutionResult>;
+  supports(stepType: string): boolean;
+}
+
+export class LegacyStepExecutor implements StepExecutorInterface {
+  /* 使用 nodes/executeStep */
+}
+export class ActionsStepExecutor implements StepExecutorInterface {
+  /* 使用 ActionRegistry，strict 模式 */
+}
+export class HybridStepExecutor implements StepExecutorInterface {
+  /* 先尝试 actions，失败回退 legacy */
+}
+
+export function createExecutor(
+  config: ExecutionModeConfig,
+  registry?: ActionRegistry,
+): StepExecutorInterface;
+```
+
+**4. 导出更新 (`actions/index.ts`)**
+
+```typescript
+// 适配器导出
+export {
+  execCtxToActionCtx,
+  stepToAction,
+  actionResultToExecResult,
+  createStepExecutor,
+  isActionSupported,
+  getActionType,
+  type StepExecutionAttempt,
+} from './adapter';
+
+// Handler 工厂导出
+export {
+  createReplayActionRegistry,
+  registerReplayHandlers,
+  getSupportedActionTypes,
+  isActionTypeSupported,
+} from './handlers';
+```
+
+##### 后续接入步骤（未完成）
+
+1. **修改 StepRunner 依赖注入 StepExecutorInterface**
+   - 当前 `StepRunner` 直接调用 `executeStep`（`step-runner.ts:84`）
+   - 需要改为通过 `StepExecutorInterface.execute()` 调用
+   - 由 `Scheduler` 创建 `ActionRegistry` + `createExecutor` 并注入
+
+2. **解决双重策略问题**
+   - StepRunner 有 retry/timeout/nav-wait 策略（`step-runner.ts:82,106`）
+   - ActionRegistry 也有 retry/timeout 策略（`registry.ts:462,527`）
+   - 需明确唯一权威：使用 `skipActionsRetry/skipActionsNavWait` 配置控制
+
+3. **tabId 管理**
+   - 当前 ExecCtx 不携带 tabId
+   - openTab/switchTab 后需要更新 tabId
+   - 建议在 ExecCtx 中添加 `tabId` 字段并在 tab 切换时同步
+
+4. **集成测试**
+   - 在 hybrid 模式下验证各类型行为一致性
+   - 特别关注：aria selector、script when:'after' defer、control-flow 条件求值
 
 **P4: 清理旧类型**
 
@@ -126,6 +313,37 @@
 - 变量结构不同：旧 `v.key/v.default` vs 新 `v.name/...`
 - 子流程执行：`execute-flow.ts` 有 `flow.steps` fallback
 - UI Builder 保存格式需同步适配
+
+#### P0 Bug 修复详情 ✅
+
+**fill 值不完整 (debounce/flush 时序冲突)**
+
+问题：`INPUT_DEBOUNCE_MS=800` vs `BATCH_SEND_MS=100`，导致用户正在输入时 flush 发送不完整的值。
+
+修复方案（`recorder.js`）：
+
+- 添加 flush gate 机制：基于 `_lastInputActivityTs` 判断是否在输入中
+- 添加 force flush timer：最多延迟 1500ms 强制 flush
+- 添加 commit points：focusout、Enter 键、pagehide/visibilitychange 时立即 flush
+- 修复 `_finalizePendingInput()`：使用 DOM 引用 `lastFill.el` 读取最新值
+- 添加 `_getElementValue()` 严格模式：保护变量占位符不被覆盖
+- iframe upsert 一致性：通过 postMessage 到 top frame 统一处理
+
+**stop barrier 丢步骤 (iframe 最后步骤丢失)**
+
+问题：stop 时 subframe ACK 可能在 top 处理完 postMessage 之前返回，导致 iframe 最后步骤丢失。
+
+修复方案：
+
+- `recorder-manager.ts`：
+  - 先停 subframes（并发，1.5s 超时），再停 main frame（5s 超时）
+  - 记录 barrier 元数据到 `flow.meta.stopBarrier`
+- `recorder.js`：
+  - 添加 `_finalizePendingClick()` 方法，在 flush 之前处理 pending click
+  - 添加 `_syncStopBarrierToTop()` 方法：iframe 等待 top 处理完 postMessage 后再 ACK
+  - `_detach()` 在 paused 状态保持 top 的 message listener
+  - `_onWindowMessage` 处理 `iframeStopBarrier` 消息并回复 ACK
+  - stop 时清除 isPaused 状态确保 barrier 一致性
 
 #### Phase 2: locator 指纹验证 ✅
 
@@ -157,15 +375,16 @@
 
 ### 1.2 高严重度 Bug
 
-| Bug                    | 位置                                                | 描述                                   | 状态        |
-| ---------------------- | --------------------------------------------------- | -------------------------------------- | ----------- |
-| 数据格式不兼容         | `flow-builder.ts` / `scheduler.ts`                  | 录制产生 steps，回放需要 nodes/edges   | ✅ 已修复   |
-| 变量丢失               | `recorder.js:609` / `content-message-handler.ts:18` | 变量只存本地，不传给 background        | ✅ 已修复   |
-| 步骤丢失               | `recorder.js:584-594`                               | pause/stop/导航时未 flush 缓冲区       | ✅ 已修复   |
-| fill 值不完整          | `recorder.js:13-14`                                 | debounce 800ms vs flush 100ms 时序冲突 | 🔄 部分修复 |
-| trigger 无 handler     | `nodes/index.ts:58`                                 | UI 可用但运行时无执行器                | ✅ 已修复   |
-| 选择器桥死锁           | `accessibility-tree-helper.js:1051`                 | iframe 通信无超时                      | ✅ 已修复   |
-| Builder 保存丢失子流程 | `useBuilderStore.ts:392`                            | 编辑子流程时保存不会 flush             | ✅ 已修复   |
+| Bug                    | 位置                                                | 描述                                   | 状态      |
+| ---------------------- | --------------------------------------------------- | -------------------------------------- | --------- |
+| 数据格式不兼容         | `flow-builder.ts` / `scheduler.ts`                  | 录制产生 steps，回放需要 nodes/edges   | ✅ 已修复 |
+| 变量丢失               | `recorder.js:609` / `content-message-handler.ts:18` | 变量只存本地，不传给 background        | ✅ 已修复 |
+| 步骤丢失               | `recorder.js:584-594`                               | pause/stop/导航时未 flush 缓冲区       | ✅ 已修复 |
+| fill 值不完整          | `recorder.js`                                       | debounce 800ms vs flush 100ms 时序冲突 | ✅ 已修复 |
+| stop barrier 丢步骤    | `recorder-manager.ts` / `recorder.js`               | stop 时 iframe 最后步骤可能丢失        | ✅ 已修复 |
+| trigger 无 handler     | `nodes/index.ts:58`                                 | UI 可用但运行时无执行器                | ✅ 已修复 |
+| 选择器桥死锁           | `accessibility-tree-helper.js:1051`                 | iframe 通信无超时                      | ✅ 已修复 |
+| Builder 保存丢失子流程 | `useBuilderStore.ts:392`                            | 编辑子流程时保存不会 flush             | ✅ 已修复 |
 
 ### 1.3 中严重度 Bug
 
@@ -620,3 +839,91 @@ app/chrome-extension/
 - `other/automa/src/workflowEngine/WorkflowWorker.js` - Block 执行器
 - `other/automa/src/content/services/recordWorkflow/recordEvents.js` - 录制事件
 - `other/automa/src/utils/shared.js` - Block 类型定义
+
+---
+
+## 七、Phase 1.3 P3 新增/修改文件清单
+
+> 本次实现的 22 个 Action Handlers + Scheduler 集成架构
+
+### 新增文件
+
+#### Action Handlers (`actions/handlers/`)
+
+| 文件              | 功能                                                          | 行数 |
+| ----------------- | ------------------------------------------------------------- | ---- |
+| `common.ts`       | 共享工具（selector转换、消息发送、元素验证、SelectorLocator） | ~250 |
+| `navigate.ts`     | 页面导航                                                      | ~80  |
+| `click.ts`        | 点击/双击（click, dblclick）                                  | ~180 |
+| `fill.ts`         | 表单填充                                                      | ~120 |
+| `wait.ts`         | 等待条件（selector/text/navigation/networkIdle/sleep）        | ~180 |
+| `key.ts`          | 键盘输入（支持目标聚焦）                                      | ~100 |
+| `scroll.ts`       | 滚动（offset/element/container 三种模式）                     | ~150 |
+| `delay.ts`        | 延迟等待                                                      | ~40  |
+| `screenshot.ts`   | 截图（全页/元素/区域）                                        | ~100 |
+| `assert.ts`       | 断言（exists/visible/textPresent/attribute，支持轮询）        | ~200 |
+| `extract.ts`      | 数据提取（selector/js 模式）                                  | ~180 |
+| `script.ts`       | 自定义脚本（MAIN/ISOLATED world）                             | ~240 |
+| `http.ts`         | HTTP 请求（GET/POST/PUT/DELETE/PATCH）                        | ~220 |
+| `tabs.ts`         | 标签页（openTab/switchTab/closeTab/handleDownload）           | ~300 |
+| `control-flow.ts` | 控制流（if/foreach/while/switchFrame）                        | ~380 |
+| `drag.ts`         | 拖拽（start/end 目标，支持 path 坐标）                        | ~260 |
+| `index.ts`        | Handler 注册入口（createReplayActionRegistry）                | ~160 |
+
+#### Scheduler 集成
+
+| 文件                              | 功能                                           | 行数 |
+| --------------------------------- | ---------------------------------------------- | ---- |
+| `actions/adapter.ts`              | Step ↔ Action 适配层（类型转换、Selector转换） | ~350 |
+| `engine/execution-mode.ts`        | 执行模式配置（legacy/actions/hybrid）          | ~160 |
+| `engine/runners/step-executor.ts` | 执行器抽象（Legacy/Actions/Hybrid）            | ~200 |
+
+### 修改文件
+
+| 文件                  | 修改内容                         |
+| --------------------- | -------------------------------- |
+| `actions/registry.ts` | 添加 `tryResolveValue` 别名      |
+| `actions/index.ts`    | 导出 adapter 和 handler 工厂函数 |
+
+### 文件依赖关系
+
+```
+Scheduler (scheduler.ts)
+    ↓
+StepRunner (step-runner.ts)
+    ↓ 当前直接调用 executeStep，后续改为注入 StepExecutorInterface
+StepExecutorInterface (step-executor.ts)
+    ├── LegacyStepExecutor → nodes/executeStep
+    ├── ActionsStepExecutor → ActionRegistry.execute()
+    └── HybridStepExecutor → 先 Actions，失败回退 Legacy
+                ↓
+        adapter.ts (stepToAction, execCtxToActionCtx)
+                ↓
+        ActionRegistry (registry.ts)
+                ↓
+        ActionHandlers (handlers/*.ts)
+```
+
+### 类型关系
+
+```
+Legacy Step (types.ts:145)
+    ↓ stepToAction() + extractParams() + convertTargetLocator()
+ExecutableAction (actions/types.ts:706)
+    ↓ ActionRegistry.execute()
+ActionExecutionResult (actions/types.ts)
+    ↓ actionResultToExecResult()
+ExecResult (nodes/types.ts)
+```
+
+### Selector 转换
+
+```
+Legacy SelectorCandidate { type, value, weight? }
+    ↓ convertSelectorCandidate()
+Action SelectorCandidate { type, selector/xpath/text/role+name, weight? }
+    ↓ toSelectorTarget() (common.ts)
+SharedSelectorTarget (shared/selector/types.ts)
+    ↓ selectorLocator.locate()
+Located Element { ref, frameId, resolvedBy }
+```

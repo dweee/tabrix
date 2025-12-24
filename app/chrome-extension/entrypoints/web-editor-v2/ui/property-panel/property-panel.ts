@@ -5,7 +5,7 @@
  *
  * Features:
  * - Tab switching between Design, CSS, Props, and DOM views
- * - Collapsible control groups (Position, Layout, Size, Spacing, Typography, Appearance, Effects, Gradient)
+ * - Collapsible control groups (Position, Layout, Size, Spacing, Typography, Appearance, Border, Background, Effects)
  * - CSS panel showing matched rules and inheritance (Phase 4.6)
  * - Props panel for React/Vue component props editing (Phase 7.3)
  * - Empty state when no element is selected
@@ -28,8 +28,9 @@ import { createPositionControl } from './controls/position-control';
 import { createLayoutControl } from './controls/layout-control';
 import { createTypographyControl } from './controls/typography-control';
 import { createAppearanceControl } from './controls/appearance-control';
+import { createBorderControl } from './controls/border-control';
+import { createBackgroundControl } from './controls/background-control';
 import { createEffectsControl } from './controls/effects-control';
-import { createGradientControl } from './controls/gradient-control';
 import { createComponentsTree, type ComponentsTree } from './components-tree';
 import { createCssPanel, type CssPanel } from './css-panel';
 import { createPropsPanel, type PropsPanel } from './props-panel';
@@ -46,8 +47,9 @@ const CONTROL_GROUPS = [
   { id: 'spacing', label: 'Spacing' },
   { id: 'typography', label: 'Typography' },
   { id: 'appearance', label: 'Appearance' },
+  { id: 'border', label: 'Border' },
+  { id: 'background', label: 'Background' },
   { id: 'effects', label: 'Effects' },
-  { id: 'gradient', label: 'Gradient' },
 ] as const;
 
 type ControlGroupId = (typeof CONTROL_GROUPS)[number]['id'];
@@ -563,15 +565,36 @@ export function createPropertyPanel(options: PropertyPanelOptions): PropertyPane
       controls.push(typographyControl);
     }
 
-    // Appearance control (opacity, border-radius, border, background-color)
+    // Appearance control (overflow, box-sizing, opacity)
     const appearanceGroup = controlGroups.get('appearance');
     if (appearanceGroup) {
       const appearanceControl = createAppearanceControl({
         container: appearanceGroup.body,
         transactionManager: options.transactionManager,
-        tokensService: options.tokensService,
       });
       controls.push(appearanceControl);
+    }
+
+    // Border control (border-width, border-style, border-color, border-radius)
+    const borderGroup = controlGroups.get('border');
+    if (borderGroup) {
+      const borderControl = createBorderControl({
+        container: borderGroup.body,
+        transactionManager: options.transactionManager,
+        tokensService: options.tokensService,
+      });
+      controls.push(borderControl);
+    }
+
+    // Background control (background-color, gradient, background-image)
+    const backgroundGroup = controlGroups.get('background');
+    if (backgroundGroup) {
+      const backgroundControl = createBackgroundControl({
+        container: backgroundGroup.body,
+        transactionManager: options.transactionManager,
+        tokensService: options.tokensService,
+      });
+      controls.push(backgroundControl);
     }
 
     // Effects control (box-shadow, filter blur, backdrop-filter blur)
@@ -583,17 +606,6 @@ export function createPropertyPanel(options: PropertyPanelOptions): PropertyPane
         tokensService: options.tokensService,
       });
       controls.push(effectsControl);
-    }
-
-    // Gradient control (linear-gradient, radial-gradient)
-    const gradientGroup = controlGroups.get('gradient');
-    if (gradientGroup) {
-      const gradientControl = createGradientControl({
-        container: gradientGroup.body,
-        transactionManager: options.transactionManager,
-        tokensService: options.tokensService,
-      });
-      controls.push(gradientControl);
     }
   }
 

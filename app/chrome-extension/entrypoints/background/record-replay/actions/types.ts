@@ -760,6 +760,11 @@ export interface ActionExecutionContext {
   log: (message: string, level?: 'info' | 'warn' | 'error') => void;
   /** 截图函数 */
   captureScreenshot?: () => Promise<string>;
+  /**
+   * Optional structured log sink for replay UIs (legacy RunLogger integration).
+   * Action handlers may emit richer entries (e.g. selector fallback) via this hook.
+   */
+  pushLog?: (entry: unknown) => void;
 }
 
 export type ControlDirective =
