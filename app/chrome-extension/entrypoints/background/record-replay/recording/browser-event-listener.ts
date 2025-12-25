@@ -56,9 +56,8 @@ export function initBrowserEventListeners(session: RecordingSessionManager): voi
       await broadcastControlToTab(tabId, REC_CMD.START);
       // Track active tab for targeted STOP later
       session.addActiveTab(tabId);
-      const f = session.getFlow();
-      if (f) {
-        session.broadcastTimelineUpdate(f.steps || []);
+      if (session.getFlow()) {
+        session.broadcastTimelineUpdate();
       }
     } catch (e) {
       console.warn('onCommitted handler failed', e);

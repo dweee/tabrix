@@ -8,7 +8,6 @@ import {
   autoChainEdges,
   cloneFlow,
   newId,
-  nodesToSteps,
   stepsToNodes,
   summarizeNode,
   topoOrder,
@@ -108,13 +107,9 @@ export function useBuilderStore(initial?: FlowV2 | null) {
   function initFromFlow(flow: FlowV2) {
     const deep = cloneFlow(flow);
     Object.assign(flowLocal, deep);
-    nodes.splice(
-      0,
-      nodes.length,
-      ...(Array.isArray(deep.nodes) && deep.nodes.length
-        ? deep.nodes
-        : stepsToNodes(deep.steps || [])),
-    );
+    // DAG is required - flow-store guarantees nodes/edges via normalization
+    // steps fallback removed (deprecated field no longer returned)
+    nodes.splice(0, nodes.length, ...(Array.isArray(deep.nodes) ? deep.nodes : []));
     edges.splice(
       0,
       edges.length,
@@ -399,29 +394,22 @@ export function useBuilderStore(initial?: FlowV2 | null) {
   }
   const isEditingMain = () => currentSubflowId.value == null;
 
-  function exportSteps() {
-    return nodesToSteps(nodes, edges);
-  }
-
   /**
    * Export flow for saving. This properly handles subflow editing:
    * 1. Flushes current canvas state back to flowLocal
-   * 2. Generates steps from main flow nodes/edges
-   * 3. Returns a deep copy to avoid reference issues
+   * 2. Returns a deep copy to avoid reference issues
    *
    * IMPORTANT: Always use this method for saving instead of directly
    * accessing store.nodes/edges, which may contain subflow data.
+   *
+   * NOTE: flow.steps is no longer written here. The storage layer (flow-store.ts)
+   * will strip steps on save. Only nodes/edges are the source of truth.
    */
   function exportFlowForSave(): FlowV2 {
     // Step 1: Flush current canvas state to flowLocal
     flushCurrent();
 
-    // Step 2: Generate steps from main flow (not current canvas which may be subflow)
-    const mainNodes = flowLocal.nodes || [];
-    const mainEdges = flowLocal.edges || [];
-    flowLocal.steps = nodesToSteps(mainNodes as any, mainEdges as any);
-
-    // Step 3: Return deep copy to prevent mutation
+    // Step 2: Return deep copy to prevent mutation
     return JSON.parse(JSON.stringify(flowLocal));
   }
 
@@ -621,7 +609,6 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     switchToSubflow,
     isEditingMain,
     importFromSteps,
-    exportSteps,
     exportFlowForSave,
     summarize,
     layoutAuto,

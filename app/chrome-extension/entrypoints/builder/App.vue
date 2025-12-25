@@ -601,15 +601,6 @@ async function runAll() {
   } catch {}
 }
 
-function importFromSteps() {
-  store.importFromSteps();
-}
-function exportToSteps() {
-  // Use exportFlowForSave to properly handle subflow editing
-  const flow = store.exportFlowForSave();
-  store.flowLocal.steps = flow.steps;
-}
-
 // Hotkeys
 function onKey(e: KeyboardEvent) {
   const id = selectedId.value;

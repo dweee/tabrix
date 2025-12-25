@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wide Status Bar - Light Mode</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+      body {
+        font-family: 'Inter', sans-serif;
+      }
+      * {
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      /* 回弹缓动曲线 */
+      .ease-bounce {
+        transition-timing-function: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+      }
+
+      /* toolbar 过渡动画 */
+      .toolbar {
+        transition:
+          width 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55),
+          height 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+      }
+
+      /* 内容区过渡 */
+      .toolbar-content {
+        transition:
+          opacity 0.35s ease,
+          transform 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+      }
+
+      /* 图标旋转 - 车轮滚动效果 */
+      .icon-rotate {
+        transition: transform 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+        transform: rotate(90deg); /* 收缩时：顺时针转90度 */
+      }
+
+      .icon-rotate.expanded {
+        transform: rotate(0deg); /* 展开时：回正 */
+      }
+
+      /* 收缩状态 */
+      .toolbar.collapsed {
+        width: 44px !important;
+        height: 44px !important;
+      }
+
+      .toolbar.collapsed .toolbar-content {
+        opacity: 0;
+        transform: translateX(-16px) scale(0.95);
+        pointer-events: none;
+      }
+
+      /* 展开状态 */
+      .toolbar.expanded {
+        width: 580px !important;
+        height: 44px !important;
+      }
+
+      .toolbar.expanded .toolbar-content {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+        pointer-events: auto;
+      }
+    </style>
+  </head>
+  <body class="bg-slate-100 min-h-screen p-10 flex flex-col items-center gap-12">
+    <div class="text-center">
+      <h1 class="text-2xl font-bold text-slate-800">Wide Status Bar - Light Mode</h1>
+      <p class="text-slate-500 mt-2">点击图标展开/收缩（车轮滚动效果）</p>
+    </div>
+
+    <!-- 浅色背景 -->
+    <div class="w-full max-w-4xl">
+      <span
+        class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-4 block text-center"
+        >Light Background</span
+      >
+      <div class="bg-slate-50 rounded-3xl p-12 flex justify-center items-center min-h-[120px]">
+        <div
+          id="toolbar1"
+          class="toolbar collapsed flex items-center bg-white text-slate-600 rounded-full shadow-lg shadow-slate-300/50 overflow-hidden select-none"
+        >
+          <button
+            onclick="toggleToolbar('toolbar1')"
+            class="w-[44px] h-[44px] flex justify-center items-center flex-shrink-0 cursor-pointer hover:bg-slate-50 rounded-full focus:outline-none active:scale-90 transition-transform"
+          >
+            <svg
+              id="icon1"
+              class="icon-rotate w-4 h-4 text-slate-400"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path
+                d="M7 2a2 2 0 10.001 4.001A2 2 0 007 2zm0 6a2 2 0 10.001 4.001A2 2 0 007 8zm0 6a2 2 0 10.001 4.001A2 2 0 007 14zm6-8a2 2 0 10-.001-4.001A2 2 0 0013 6zm0 2a2 2 0 10.001 4.001A2 2 0 0013 8zm0 6a2 2 0 10.001 4.001A2 2 0 0013 14z"
+              ></path>
+            </svg>
+          </button>
+
+          <div class="toolbar-content flex items-center gap-2.5 whitespace-nowrap pr-2">
+            <div class="flex items-center gap-1.5 bg-slate-100 rounded-full px-2.5 py-1">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              <span class="text-[11px] font-bold text-slate-700 tracking-wide">Editor</span>
+            </div>
+            <div class="flex gap-2.5 text-[10px] font-medium text-slate-400">
+              <span>Undo: <b class="text-slate-600">2</b></span>
+              <span>Redo: <b class="text-slate-600">0</b></span>
+            </div>
+            <div class="w-px h-4 bg-slate-200"></div>
+            <div class="flex items-center bg-slate-100 rounded-full p-0.5">
+              <button
+                class="px-2.5 py-1 text-[11px] font-medium text-slate-500 hover:text-slate-800 hover:bg-white rounded-full transition-colors flex items-center gap-1"
+              >
+                Structure
+                <svg
+                  class="w-2.5 h-2.5 opacity-50"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M19 9l-7 7-7-7"
+                  ></path>
+                </svg>
+              </button>
+              <div class="w-px h-3 bg-slate-200"></div>
+              <button
+                class="p-1 text-slate-400 hover:text-slate-700 hover:bg-white rounded-full transition-colors"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                  ></path>
+                </svg>
+              </button>
+              <button
+                class="p-1 text-slate-400 hover:text-slate-700 hover:bg-white rounded-full transition-colors"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6"
+                  ></path>
+                </svg>
+              </button>
+            </div>
+            <button
+              class="bg-indigo-500 hover:bg-indigo-600 text-white text-[11px] font-bold px-4 py-1.5 rounded-full transition-colors shadow-md shadow-indigo-500/25 active:scale-95"
+            >
+              Apply
+            </button>
+            <button
+              class="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                ></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 深色背景 -->
+    <div class="w-full max-w-4xl">
+      <span
+        class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-4 block text-center"
+        >Dark Background</span
+      >
+      <div class="bg-slate-800 rounded-3xl p-12 flex justify-center items-center min-h-[120px]">
+        <div
+          id="toolbar2"
+          class="toolbar collapsed flex items-center bg-white text-slate-600 rounded-full shadow-2xl shadow-black/30 overflow-hidden select-none"
+        >
+          <button
+            onclick="toggleToolbar('toolbar2')"
+            class="w-[44px] h-[44px] flex justify-center items-center flex-shrink-0 cursor-pointer hover:bg-slate-50 rounded-full focus:outline-none active:scale-90 transition-transform"
+          >
+            <svg
+              id="icon2"
+              class="icon-rotate w-4 h-4 text-slate-400"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path
+                d="M7 2a2 2 0 10.001 4.001A2 2 0 007 2zm0 6a2 2 0 10.001 4.001A2 2 0 007 8zm0 6a2 2 0 10.001 4.001A2 2 0 007 14zm6-8a2 2 0 10-.001-4.001A2 2 0 0013 6zm0 2a2 2 0 10.001 4.001A2 2 0 0013 8zm0 6a2 2 0 10.001 4.001A2 2 0 0013 14z"
+              ></path>
+            </svg>
+          </button>
+
+          <div class="toolbar-content flex items-center gap-2.5 whitespace-nowrap pr-2">
+            <div class="flex items-center gap-1.5 bg-slate-100 rounded-full px-2.5 py-1">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              <span class="text-[11px] font-bold text-slate-700 tracking-wide">Editor</span>
+            </div>
+            <div class="flex gap-2.5 text-[10px] font-medium text-slate-400">
+              <span>Undo: <b class="text-slate-600">2</b></span>
+              <span>Redo: <b class="text-slate-600">0</b></span>
+            </div>
+            <div class="w-px h-4 bg-slate-200"></div>
+            <div class="flex items-center bg-slate-100 rounded-full p-0.5">
+              <button
+                class="px-2.5 py-1 text-[11px] font-medium text-slate-500 hover:text-slate-800 hover:bg-white rounded-full transition-colors flex items-center gap-1"
+              >
+                Structure
+                <svg
+                  class="w-2.5 h-2.5 opacity-50"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M19 9l-7 7-7-7"
+                  ></path>
+                </svg>
+              </button>
+              <div class="w-px h-3 bg-slate-200"></div>
+              <button
+                class="p-1 text-slate-400 hover:text-slate-700 hover:bg-white rounded-full transition-colors"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                  ></path>
+                </svg>
+              </button>
+              <button
+                class="p-1 text-slate-400 hover:text-slate-700 hover:bg-white rounded-full transition-colors"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6"
+                  ></path>
+                </svg>
+              </button>
+            </div>
+            <button
+              class="bg-indigo-500 hover:bg-indigo-600 text-white text-[11px] font-bold px-4 py-1.5 rounded-full transition-colors shadow-md shadow-indigo-500/25 active:scale-95"
+            >
+              Apply
+            </button>
+            <button
+              class="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                ></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 渐变背景 -->
+    <div class="w-full max-w-4xl">
+      <span
+        class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-4 block text-center"
+        >Gradient Background</span
+      >
+      <div
+        class="bg-gradient-to-br from-violet-500 via-purple-500 to-indigo-600 rounded-3xl p-12 flex justify-center items-center min-h-[120px]"
+      >
+        <div
+          id="toolbar3"
+          class="toolbar collapsed flex items-center bg-white/95 backdrop-blur text-slate-600 rounded-full shadow-2xl shadow-black/20 overflow-hidden select-none"
+        >
+          <button
+            onclick="toggleToolbar('toolbar3')"
+            class="w-[44px] h-[44px] flex justify-center items-center flex-shrink-0 cursor-pointer hover:bg-slate-100/50 rounded-full focus:outline-none active:scale-90 transition-transform"
+          >
+            <svg
+              id="icon3"
+              class="icon-rotate w-4 h-4 text-slate-400"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path
+                d="M7 2a2 2 0 10.001 4.001A2 2 0 007 2zm0 6a2 2 0 10.001 4.001A2 2 0 007 8zm0 6a2 2 0 10.001 4.001A2 2 0 007 14zm6-8a2 2 0 10-.001-4.001A2 2 0 0013 6zm0 2a2 2 0 10.001 4.001A2 2 0 0013 8zm0 6a2 2 0 10.001 4.001A2 2 0 0013 14z"
+              ></path>
+            </svg>
+          </button>
+
+          <div class="toolbar-content flex items-center gap-2.5 whitespace-nowrap pr-2">
+            <div class="flex items-center gap-1.5 bg-slate-100 rounded-full px-2.5 py-1">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              <span class="text-[11px] font-bold text-slate-700 tracking-wide">Editor</span>
+            </div>
+            <div class="flex gap-2.5 text-[10px] font-medium text-slate-400">
+              <span>Undo: <b class="text-slate-600">2</b></span>
+              <span>Redo: <b class="text-slate-600">0</b></span>
+            </div>
+            <div class="w-px h-4 bg-slate-200"></div>
+            <div class="flex items-center bg-slate-100 rounded-full p-0.5">
+              <button
+                class="px-2.5 py-1 text-[11px] font-medium text-slate-500 hover:text-slate-800 hover:bg-white rounded-full transition-colors flex items-center gap-1"
+              >
+                Structure
+                <svg
+                  class="w-2.5 h-2.5 opacity-50"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M19 9l-7 7-7-7"
+                  ></path>
+                </svg>
+              </button>
+              <div class="w-px h-3 bg-slate-200"></div>
+              <button
+                class="p-1 text-slate-400 hover:text-slate-700 hover:bg-white rounded-full transition-colors"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                  ></path>
+                </svg>
+              </button>
+              <button
+                class="p-1 text-slate-400 hover:text-slate-700 hover:bg-white rounded-full transition-colors"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6"
+                  ></path>
+                </svg>
+              </button>
+            </div>
+            <button
+              class="bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-bold px-4 py-1.5 rounded-full transition-colors shadow-md active:scale-95"
+            >
+              Apply
+            </button>
+            <button
+              class="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                ></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 始终展开预览 -->
+    <div class="w-full max-w-4xl mt-4">
+      <span
+        class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-4 block text-center"
+        >Always Expanded</span
+      >
+      <div class="bg-white rounded-3xl p-8 flex justify-center items-center shadow-sm">
+        <div
+          class="flex items-center h-[44px] bg-white text-slate-600 rounded-full shadow-lg shadow-slate-300/50 px-1 gap-2.5"
+        >
+          <div
+            class="w-9 h-9 flex justify-center items-center cursor-grab hover:bg-slate-50 rounded-full transition-colors"
+          >
+            <svg class="w-4 h-4 text-slate-400" fill="currentColor" viewBox="0 0 20 20">
+              <path
+                d="M7 2a2 2 0 10.001 4.001A2 2 0 007 2zm0 6a2 2 0 10.001 4.001A2 2 0 007 8zm0 6a2 2 0 10.001 4.001A2 2 0 007 14zm6-8a2 2 0 10-.001-4.001A2 2 0 0013 6zm0 2a2 2 0 10.001 4.001A2 2 0 0013 8zm0 6a2 2 0 10.001 4.001A2 2 0 0013 14z"
+              ></path>
+            </svg>
+          </div>
+
+          <div class="flex items-center gap-1.5 bg-slate-100 rounded-full px-2.5 py-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span class="text-[11px] font-bold text-slate-700 tracking-wide">Editor</span>
+          </div>
+
+          <div class="flex gap-2.5 text-[10px] font-medium text-slate-400">
+            <span>Undo: <b class="text-slate-600">2</b></span>
+            <span>Redo: <b class="text-slate-600">0</b></span>
+          </div>
+
+          <div class="w-px h-4 bg-slate-200"></div>
+
+          <div class="flex items-center bg-slate-100 rounded-full p-0.5">
+            <button
+              class="px-2.5 py-1 text-[11px] font-medium text-slate-500 hover:text-slate-800 hover:bg-white rounded-full transition-colors flex items-center gap-1"
+            >
+              Structure
+              <svg
+                class="w-2.5 h-2.5 opacity-50"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M19 9l-7 7-7-7"
+                ></path>
+              </svg>
+            </button>
+            <div class="w-px h-3 bg-slate-200"></div>
+            <button
+              class="p-1 text-slate-400 hover:text-slate-700 hover:bg-white rounded-full transition-colors"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                ></path>
+              </svg>
+            </button>
+            <button
+              class="p-1 text-slate-400 hover:text-slate-700 hover:bg-white rounded-full transition-colors"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6"
+                ></path>
+              </svg>
+            </button>
+          </div>
+
+          <button
+            class="bg-indigo-500 hover:bg-indigo-600 text-white text-[11px] font-bold px-4 py-1.5 rounded-full transition-colors shadow-md shadow-indigo-500/25 active:scale-95"
+          >
+            Apply
+          </button>
+
+          <button
+            class="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M6 18L18 6M6 6l12 12"
+              ></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      function toggleToolbar(id) {
+        const toolbar = document.getElementById(id);
+        const iconId = id.replace('toolbar', 'icon');
+        const icon = document.getElementById(iconId);
+
+        const isCollapsed = toolbar.classList.contains('collapsed');
+
+        if (isCollapsed) {
+          toolbar.classList.remove('collapsed');
+          toolbar.classList.add('expanded');
+          icon.classList.add('expanded');
+        } else {
+          toolbar.classList.remove('expanded');
+          toolbar.classList.add('collapsed');
+          icon.classList.remove('expanded');
+        }
+      }
+
+      window.addEventListener('load', function () {
+        setTimeout(function () {
+          toggleToolbar('toolbar1');
+        }, 600);
+      });
+    </script>
+  </body>
+</html>

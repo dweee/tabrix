@@ -21,14 +21,18 @@ export const executeFlowNode: NodeRuntime<any> = {
       await import('../rr-utils');
     const vars = ctx.vars;
     if (s.args && typeof s.args === 'object') Object.assign(vars, s.args);
-    const hasDag = Array.isArray((flow as any).nodes) && (flow as any).nodes.length > 0;
-    const nodes = hasDag ? (((flow as any).nodes || []) as any[]) : [];
-    const edges = hasDag ? (((flow as any).edges || []) as any[]) : [];
-    const defaultEdges = hasDag ? defaultEdgesOnly(edges as any) : [];
-    const order = hasDag ? topoOrder(nodes as any, defaultEdges as any) : [];
-    const stepsToRun: any[] = hasDag
-      ? order.map((n) => mapDagNodeToStep(n as any))
-      : (((flow as any).steps || []) as any[]);
+
+    // DAG is required - flow-store guarantees nodes/edges via normalization
+    const nodes = ((flow as any).nodes || []) as any[];
+    const edges = ((flow as any).edges || []) as any[];
+    if (nodes.length === 0) {
+      throw new Error(
+        'Flow has no DAG nodes. Linear steps are no longer supported. Please migrate this flow to nodes/edges.',
+      );
+    }
+    const defaultEdges = defaultEdgesOnly(edges as any);
+    const order = topoOrder(nodes as any, defaultEdges as any);
+    const stepsToRun: any[] = order.map((n) => mapDagNodeToStep(n as any));
     for (const st of stepsToRun) {
       const t0 = Date.now();
       const maxRetries = Math.max(0, (st as any).retry?.count ?? 0);

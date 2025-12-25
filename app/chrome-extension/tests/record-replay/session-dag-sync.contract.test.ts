@@ -2,15 +2,17 @@
  * Session DAG Sync Contract Tests
  *
  * Verifies that RecordingSessionManager correctly maintains flow.nodes/edges
- * in lockstep with flow.steps during recording:
+ * during recording:
  * - New step → create node + edge from previous node
  * - Upsert step → update node.config and node.type
- * - Invariant violation → fallback to full stepsToDAG rebuild
+ * - Invariant violation → fallback to linear DAG rebuild
+ *
+ * Note: flow.steps is no longer written. Nodes are the source of truth.
  */
 
 import { describe, expect, it, beforeEach } from 'vitest';
 import { RecordingSessionManager } from '@/entrypoints/background/record-replay/recording/session-manager';
-import type { Flow } from '@/entrypoints/background/record-replay/types';
+import type { Flow, Step } from '@/entrypoints/background/record-replay/types';
 
 function createTestFlow(overrides: Partial<Flow> = {}): Flow {
   return {
@@ -26,12 +28,12 @@ function createTestFlow(overrides: Partial<Flow> = {}): Flow {
   };
 }
 
-function createTestStep(type: string, id?: string, overrides: Record<string, unknown> = {}) {
+function createTestStep(type: string, id?: string, overrides: Record<string, unknown> = {}): Step {
   return {
     id: id || `step_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     type,
     ...overrides,
-  };
+  } as Step;
 }
 
 describe('RecordingSessionManager DAG sync', () => {
@@ -83,7 +85,7 @@ describe('RecordingSessionManager DAG sync', () => {
       ]);
 
       const f = manager.getFlow()!;
-      expect(f.steps).toHaveLength(3);
+      // Note: flow.steps is no longer written, nodes are the source of truth
       expect(f.nodes).toHaveLength(3);
       expect(f.edges).toHaveLength(2);
 
@@ -107,7 +109,7 @@ describe('RecordingSessionManager DAG sync', () => {
       manager.appendSteps([createTestStep('fill', 'step1', { value: 'updated' })]);
 
       const f = manager.getFlow()!;
-      expect(f.steps).toHaveLength(1);
+      // Note: flow.steps is no longer written, nodes are the source of truth
       expect(f.nodes).toHaveLength(1);
       expect(f.nodes![0].config?.value).toBe('updated');
     });
@@ -132,7 +134,7 @@ describe('RecordingSessionManager DAG sync', () => {
   });
 
   describe('invariant handling', () => {
-    it('rebuilds DAG when nodes count mismatches steps', async () => {
+    it('rebuilds DAG from legacy steps when nodes missing', async () => {
       // Create flow with steps but no nodes (legacy scenario)
       const flow = createTestFlow({
         steps: [
@@ -144,12 +146,11 @@ describe('RecordingSessionManager DAG sync', () => {
       });
       await manager.startSession(flow, 1);
 
-      // Append new step - should trigger rebuild first
+      // Append new step - should trigger rebuild from legacy steps first
       manager.appendSteps([createTestStep('navigate', 'step3', { url: 'https://test.com' })]);
 
       const f = manager.getFlow()!;
-      // Should have rebuilt: 2 existing + 1 new = 3
-      expect(f.steps).toHaveLength(3);
+      // Should have rebuilt: 2 existing (from legacy steps) + 1 new = 3
       expect(f.nodes).toHaveLength(3);
       expect(f.edges).toHaveLength(2);
     });
@@ -162,7 +163,6 @@ describe('RecordingSessionManager DAG sync', () => {
       manager.appendSteps([]);
 
       const f = manager.getFlow()!;
-      expect(f.steps).toHaveLength(0);
       // nodes/edges may be undefined when no steps added, that's valid
       expect(f.nodes?.length ?? 0).toBe(0);
       expect(f.edges?.length ?? 0).toBe(0);
@@ -199,8 +199,7 @@ describe('RecordingSessionManager DAG sync', () => {
 
       const f = manager.getFlow()!;
       expect(f.id).toBe('flow2');
-      expect(f.steps).toHaveLength(1);
-      expect(f.steps[0].id).toBe('step2');
+      // Note: flow.steps is no longer written, nodes are the source of truth
       expect(f.nodes).toHaveLength(1);
       expect(f.nodes![0].id).toBe('step2');
     });
@@ -272,10 +271,9 @@ describe('RecordingSessionManager DAG sync', () => {
   });
 
   describe('edge invariant handling', () => {
-    it('rebuilds DAG when edges are missing', async () => {
-      // Create flow with steps and nodes but missing edges
+    it('rechains edges when edges are missing', async () => {
+      // Create flow with nodes but missing edges
       const flow = createTestFlow({
-        steps: [{ id: 's1', type: 'click' } as any, { id: 's2', type: 'fill' } as any],
         nodes: [
           { id: 's1', type: 'click', config: {} },
           { id: 's2', type: 'fill', config: {} },
@@ -284,20 +282,18 @@ describe('RecordingSessionManager DAG sync', () => {
       });
       await manager.startSession(flow, 1);
 
-      // Append should trigger rebuild due to edge invariant violation
+      // Append should trigger rechain due to edge invariant violation
       manager.appendSteps([createTestStep('navigate', 's3')]);
 
       const f = manager.getFlow()!;
-      expect(f.steps).toHaveLength(3);
       expect(f.nodes).toHaveLength(3);
-      // Should have rebuilt edges: s1→s2→s3
+      // Should have rechained edges: s1→s2→s3
       expect(f.edges).toHaveLength(2);
     });
 
-    it('rebuilds DAG when last edge points to wrong step', async () => {
+    it('rechains edges when last edge points to wrong node', async () => {
       // Create flow with corrupted edge pointing to wrong target
       const flow = createTestFlow({
-        steps: [{ id: 's1', type: 'click' } as any, { id: 's2', type: 'fill' } as any],
         nodes: [
           { id: 's1', type: 'click', config: {} },
           { id: 's2', type: 'fill', config: {} },
@@ -306,12 +302,12 @@ describe('RecordingSessionManager DAG sync', () => {
       });
       await manager.startSession(flow, 1);
 
-      // Append should trigger rebuild due to edge invariant violation
+      // Append should trigger rechain due to edge invariant violation
       manager.appendSteps([createTestStep('navigate', 's3')]);
 
       const f = manager.getFlow()!;
       expect(f.edges).toHaveLength(2);
-      // Last edge should point to last step
+      // Last edge should point to last node
       expect(f.edges![1].to).toBe('s3');
     });
   });

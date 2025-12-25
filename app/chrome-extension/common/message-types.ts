@@ -28,6 +28,7 @@ export const BACKGROUND_MESSAGE_TYPES = {
   RR_RESUME_RECORDING: 'rr_resume_recording',
   RR_GET_RECORDING_STATUS: 'rr_get_recording_status',
   RR_LIST_FLOWS: 'rr_list_flows',
+  RR_FLOWS_CHANGED: 'rr_flows_changed',
   RR_GET_FLOW: 'rr_get_flow',
   RR_DELETE_FLOW: 'rr_delete_flow',
   RR_PUBLISH_FLOW: 'rr_publish_flow',

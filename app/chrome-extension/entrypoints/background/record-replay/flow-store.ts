@@ -1,6 +1,7 @@
 import type { Flow, RunRecord, NodeBase, Edge } from './types';
 import { stepsToDAG, type RRNode, type RREdge } from 'chrome-mcp-shared';
 import { NODE_TYPES } from '@/common/node-types';
+import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import { IndexedDbStorage, ensureMigratedFromLocal } from './storage/indexeddb-manager';
 
 // Design note: IndexedDB-backed store for flows and run records.
@@ -37,6 +38,58 @@ function toEdge(edge: RREdge): Edge {
  */
 function filterValidEdges(edges: Edge[], nodeIds: Set<string>): Edge[] {
   return edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
+}
+
+// =============================================================================
+// UI Notification
+// =============================================================================
+
+/**
+ * Timer handle for coalescing flow change notifications.
+ * Prevents multiple rapid changes (e.g., during import) from flooding UI.
+ */
+let flowsChangedTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * Notify UI that flows have changed.
+ * Uses a short debounce (50ms) to coalesce rapid changes.
+ */
+function notifyFlowsChanged(): void {
+  // If timer is already scheduled, skip (will be handled by pending timer)
+  if (flowsChangedTimer !== undefined) return;
+
+  flowsChangedTimer = setTimeout(() => {
+    flowsChangedTimer = undefined;
+    try {
+      // Send message to all extension contexts (popup, sidepanel, etc.)
+      // Use void cast to avoid unhandled promise rejection
+      void chrome.runtime
+        .sendMessage({
+          type: BACKGROUND_MESSAGE_TYPES.RR_FLOWS_CHANGED,
+        })
+        .catch(() => {
+          // Ignore errors - no listeners is expected when UI is closed
+        });
+    } catch {
+      // Ignore errors (e.g., if chrome.runtime is not available)
+    }
+  }, 50);
+}
+
+/**
+ * Strip deprecated steps field before persisting to IndexedDB.
+ * This ensures new saves only contain the DAG model (nodes/edges).
+ *
+ * @param flow - Flow with or without steps
+ * @returns Flow without steps field (omit entirely, not set to empty array)
+ */
+function stripStepsForSave(flow: Flow): Flow {
+  if (!('steps' in flow)) {
+    return flow;
+  }
+
+  const { steps: _steps, ...rest } = flow;
+  return rest as Flow;
 }
 
 /**
@@ -112,19 +165,22 @@ function needsNormalization(flow: Flow): boolean {
 /**
  * Lazy normalize a flow if needed, and persist the normalized version.
  * This handles legacy flows that only have steps but no nodes.
+ * After normalization, steps field is stripped before persist AND return.
  */
 async function lazyNormalize(flow: Flow): Promise<Flow> {
   if (!needsNormalization(flow)) {
-    return flow;
+    return stripStepsForSave(flow);
   }
-  // Normalize and save back to storage
+  // Normalize and save back to storage (strip steps before persist)
   const normalized = normalizeFlowForSave(flow);
+  const cleanFlow = stripStepsForSave(normalized);
   try {
-    await IndexedDbStorage.flows.save(normalized);
+    await IndexedDbStorage.flows.save(cleanFlow);
   } catch (e) {
     console.warn('lazyNormalize: failed to save normalized flow', e);
   }
-  return normalized;
+  // Return DAG-only flow (do not leak deprecated steps to callers)
+  return cleanFlow;
 }
 
 export async function listFlows(): Promise<Flow[]> {
@@ -133,15 +189,17 @@ export async function listFlows(): Promise<Flow[]> {
   // Check if any flows need normalization
   const needsNorm = flows.some(needsNormalization);
   if (!needsNorm) {
-    return flows;
+    // Strip steps from all flows before returning
+    return flows.map(stripStepsForSave);
   }
   // Normalize flows that need it (in parallel)
+  // lazyNormalize already returns DAG-only flow
   const normalized = await Promise.all(
     flows.map(async (flow) => {
       if (needsNormalization(flow)) {
         return lazyNormalize(flow);
       }
-      return flow;
+      return stripStepsForSave(flow);
     }),
   );
   return normalized;
@@ -151,22 +209,31 @@ export async function getFlow(flowId: string): Promise<Flow | undefined> {
   await ensureMigratedFromLocal();
   const flow = await IndexedDbStorage.flows.get(flowId);
   if (!flow) return undefined;
-  // Lazy normalize if needed
+  // Lazy normalize if needed (lazyNormalize returns DAG-only)
   if (needsNormalization(flow)) {
     return lazyNormalize(flow);
   }
-  return flow;
+  // Strip steps before returning
+  return stripStepsForSave(flow);
 }
 
-export async function saveFlow(flow: Flow): Promise<void> {
+export async function saveFlow(flow: Flow, options?: { notify?: boolean }): Promise<void> {
   await ensureMigratedFromLocal();
+  // 1. Normalize: generate nodes/edges from steps if missing
+  // 2. Strip: remove deprecated steps field before persist
   const normalizedFlow = normalizeFlowForSave(flow);
-  await IndexedDbStorage.flows.save(normalizedFlow);
+  const cleanFlow = stripStepsForSave(normalizedFlow);
+  await IndexedDbStorage.flows.save(cleanFlow);
+  // Notify UI by default, can be disabled for batch operations
+  if (options?.notify !== false) {
+    notifyFlowsChanged();
+  }
 }
 
 export async function deleteFlow(flowId: string): Promise<void> {
   await ensureMigratedFromLocal();
   await IndexedDbStorage.flows.delete(flowId);
+  notifyFlowsChanged();
 }
 
 export async function listRuns(): Promise<RunRecord[]> {
@@ -286,19 +353,19 @@ export async function importFlowFromJson(json: string): Promise<Flow[]> {
     // Normalize fields with sensible defaults
     const name = typeof f.name === 'string' && f.name.trim() ? f.name : id;
     const version = Number.isFinite(Number(f.version)) ? Number(f.version) : 1;
-    const steps = Array.isArray(f.steps) ? f.steps : [];
 
     // Handle meta with proper timestamps
     const existingMeta =
       f.meta && typeof f.meta === 'object' ? (f.meta as Record<string, unknown>) : {};
     const createdAt = typeof existingMeta.createdAt === 'string' ? existingMeta.createdAt : nowIso;
 
+    // Build flow object - preserve steps only if present (for normalize)
+    // saveFlow() will normalize (steps→nodes) then strip steps before persist
     const flow: Flow = {
       ...(f as object),
       id,
       name,
       version,
-      steps,
       meta: {
         ...existingMeta,
         createdAt,
@@ -306,13 +373,22 @@ export async function importFlowFromJson(json: string): Promise<Flow[]> {
       },
     } as Flow;
 
+    // Preserve steps for normalization if present in import data
+    if (Array.isArray(f.steps) && f.steps.length > 0) {
+      flow.steps = f.steps as Flow['steps'];
+    }
+
     flowsToImport.push(flow);
   }
 
   // Save all flows (normalize on save)
+  // Disable individual notifications to avoid flooding UI during batch import
   for (const f of flowsToImport) {
-    await saveFlow(f);
+    await saveFlow(f, { notify: false });
   }
+
+  // Send single notification after all flows are imported
+  notifyFlowsChanged();
 
   return flowsToImport;
 }

@@ -78,7 +78,8 @@ export const openTabHandler: ActionHandler<'openTab'> = {
         await waitForTabComplete(tabId, DEFAULT_TAB_TIMEOUT_MS);
       }
 
-      return { status: 'success' };
+      // Return newTabId for ctx.tabId sync
+      return { status: 'success', newTabId: tabId };
     } catch (e) {
       return failed('UNKNOWN', `Failed to open tab: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -181,7 +182,8 @@ export const switchTabHandler: ActionHandler<'switchTab'> = {
         await chrome.windows.update(tab.windowId, { focused: true });
       }
 
-      return { status: 'success' };
+      // Return newTabId for ctx.tabId sync
+      return { status: 'success', newTabId: targetTabId };
     } catch (e) {
       return failed(
         'UNKNOWN',

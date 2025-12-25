@@ -17,10 +17,9 @@ import type { StructureOperationData } from '@/common/web-editor-types';
 import { Disposer } from '../utils/disposables';
 import { installFloatingDrag, type FloatingPosition } from './floating-drag';
 import {
+  createChevronDownSmallIcon,
   createCloseIcon,
   createGripIcon,
-  createMinusIcon,
-  createPlusIcon,
   createRedoIcon,
   createUndoIcon,
 } from './icons';
@@ -209,89 +208,104 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
   root.dataset.status = status;
   root.dataset.minimized = 'false';
   root.dataset.dragged = floatingPosition ? 'true' : 'false';
+  root.dataset.structureOpen = 'false';
   root.setAttribute('role', 'toolbar');
   root.setAttribute('aria-label', 'Web Editor Toolbar');
 
-  // Left section: drag handle + title
-  const left = document.createElement('div');
-  left.className = 'we-toolbar-left';
+  // ==========================================================================
+  // Grip Toggle Button (unified toggle + drag handle)
+  // ==========================================================================
 
-  // Drag handle (grip)
   const dragHandle = document.createElement('button');
   dragHandle.type = 'button';
   dragHandle.className = 'we-drag-handle';
-  dragHandle.setAttribute('aria-label', 'Drag toolbar');
-  dragHandle.dataset.tooltip = 'Drag';
+  dragHandle.setAttribute('aria-label', 'Collapse toolbar');
+  dragHandle.dataset.tooltip = 'Collapse';
   dragHandle.append(createGripIcon());
 
-  const title = document.createElement('div');
-  title.className = 'we-title';
-  const titleText = document.createElement('span');
-  titleText.textContent = 'Web Editor';
-  const badge = document.createElement('span');
-  badge.className = 'we-badge';
-  badge.textContent = 'V2';
-  title.append(titleText, badge);
-  left.append(dragHandle, title);
+  // ==========================================================================
+  // Content Row (collapses with toolbar)
+  // ==========================================================================
 
-  // Center section: counts and status
-  const center = document.createElement('div');
-  center.className = 'we-toolbar-center';
+  const content = document.createElement('div');
+  content.className = 'we-toolbar-content';
 
-  const meta = document.createElement('div');
-  meta.className = 'we-toolbar-meta';
+  // Status indicator: green dot + "Editor" label
+  const indicator = document.createElement('div');
+  indicator.className = 'we-toolbar-indicator';
 
-  const countsEl = document.createElement('span');
-  countsEl.className = 'we-toolbar-counts';
+  const indicatorDot = document.createElement('span');
+  indicatorDot.className = 'we-toolbar-indicator-dot';
 
-  const statusEl = document.createElement('span');
-  statusEl.className = 'we-toolbar-status';
-  statusEl.setAttribute('aria-live', 'polite');
+  const indicatorLabel = document.createElement('span');
+  indicatorLabel.className = 'we-toolbar-indicator-label';
+  indicatorLabel.textContent = 'Editor';
 
-  meta.append(countsEl, statusEl);
-  center.append(meta);
+  indicator.append(indicatorDot, indicatorLabel);
 
-  // Right section: buttons
-  const right = document.createElement('div');
-  right.className = 'we-toolbar-right';
+  // Undo/Redo counts
+  const historyEl = document.createElement('div');
+  historyEl.className = 'we-toolbar-history';
 
+  const undoCountLabel = document.createElement('span');
+  const undoCountValue = document.createElement('b');
+  undoCountValue.className = 'we-toolbar-history-value';
+  undoCountLabel.append('Undo: ', undoCountValue);
+
+  const redoCountLabel = document.createElement('span');
+  const redoCountValue = document.createElement('b');
+  redoCountValue.className = 'we-toolbar-history-value';
+  redoCountLabel.append('Redo: ', redoCountValue);
+
+  historyEl.append(undoCountLabel, redoCountLabel);
+
+  // Divider
+  const divider = document.createElement('div');
+  divider.className = 'we-toolbar-divider';
+
+  // Structure group container
+  const structureGroup = document.createElement('div');
+  structureGroup.className = 'we-toolbar-structure-group';
+
+  // Group separator (between Structure button and Undo/Redo icons)
+  const structureGroupSeparator = document.createElement('div');
+  structureGroupSeparator.className = 'we-toolbar-structure-separator';
+
+  // Apply button
   const applyBtn = document.createElement('button');
   applyBtn.type = 'button';
-  applyBtn.className = 'we-btn we-btn--primary';
+  applyBtn.className = 'we-toolbar-apply-btn';
   applyBtn.textContent = 'Apply';
   applyBtn.setAttribute('aria-label', 'Apply changes to code');
 
-  // Undo button (icon style)
+  // Undo button (inside structure group)
   const undoBtn = document.createElement('button');
   undoBtn.type = 'button';
-  undoBtn.className = 'we-icon-btn';
+  undoBtn.className = 'we-toolbar-group-icon-btn';
   undoBtn.setAttribute('aria-label', 'Undo last change');
   undoBtn.dataset.tooltip = 'Undo';
   undoBtn.append(createUndoIcon());
 
-  // Redo button (icon style)
+  // Redo button (inside structure group)
   const redoBtn = document.createElement('button');
   redoBtn.type = 'button';
-  redoBtn.className = 'we-icon-btn';
+  redoBtn.className = 'we-toolbar-group-icon-btn';
   redoBtn.setAttribute('aria-label', 'Redo last undone change');
   redoBtn.dataset.tooltip = 'Redo';
   redoBtn.append(createRedoIcon());
 
-  // Close button (icon style)
+  // Close button
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
-  closeBtn.className = 'we-icon-btn';
+  closeBtn.className = 'we-toolbar-close-btn';
   closeBtn.setAttribute('aria-label', 'Close Web Editor');
   closeBtn.dataset.tooltip = 'Close';
   closeBtn.append(createCloseIcon());
 
-  // Minimize/restore button
-  const minimizeBtn = document.createElement('button');
-  minimizeBtn.type = 'button';
-  minimizeBtn.className = 'we-icon-btn';
-  minimizeBtn.setAttribute('aria-label', 'Minimize toolbar');
-  minimizeBtn.dataset.tooltip = 'Minimize';
-  minimizeBtn.append(createMinusIcon());
+  // Hidden status live region (for screen readers)
+  const statusEl = document.createElement('span');
+  statusEl.className = 'we-sr-only';
+  statusEl.setAttribute('aria-live', 'polite');
 
   // ==========================================================================
   // Structure Dropdown (Phase 5.5)
@@ -314,11 +328,11 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
   // Structure trigger button
   const structureBtn = document.createElement('button');
   structureBtn.type = 'button';
-  structureBtn.className = 'we-btn';
-  structureBtn.textContent = 'Structure';
+  structureBtn.className = 'we-toolbar-structure-btn';
   structureBtn.setAttribute('aria-label', 'Structure operations');
   structureBtn.setAttribute('aria-haspopup', 'menu');
   structureBtn.setAttribute('aria-expanded', 'false');
+  structureBtn.append(document.createTextNode('Structure'), createChevronDownSmallIcon());
 
   // Structure dropdown menu
   const structureMenu = document.createElement('div');
@@ -412,6 +426,8 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
     structureOpen = open;
     structureMenu.style.display = open ? 'flex' : 'none';
     structureBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    // Toggle overflow on toolbar (CSS: overflow: visible when open + expanded)
+    root.dataset.structureOpen = open ? 'true' : 'false';
   }
 
   function getSelectedElement(): Element | null {
@@ -481,10 +497,14 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
     }
   }
 
-  right.append(applyBtn, structureWrap, undoBtn, redoBtn, minimizeBtn, closeBtn);
+  // Assemble structure group: Structure dropdown + separator + Undo/Redo icons
+  structureGroup.append(structureWrap, structureGroupSeparator, undoBtn, redoBtn);
 
-  // Assemble
-  root.append(left, center, right);
+  // Assemble content row
+  content.append(indicator, historyEl, divider, structureGroup, applyBtn, closeBtn);
+
+  // Assemble root: grip + content + hidden status
+  root.append(dragHandle, content, statusEl);
   options.container.append(root);
   disposer.add(() => root.remove());
 
@@ -515,7 +535,7 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
   function syncFloatingPositionStyles(): void {
     root.dataset.dragged = floatingPosition ? 'true' : 'false';
 
-    // No floating position: use CSS-defined positioning
+    // No floating position: use CSS-defined positioning (centered)
     if (!floatingPosition) {
       root.style.left = '';
       root.style.top = '';
@@ -525,14 +545,12 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
       return;
     }
 
-    // Apply floating position (works for both minimized and expanded states)
+    // Apply floating position (works for both collapsed and expanded states)
     root.style.left = `${floatingPosition.left}px`;
     root.style.top = `${floatingPosition.top}px`;
     root.style.right = 'auto';
     root.style.bottom = 'auto';
-    // Don't override transform when minimized (preserves scale animation)
-    // Only clear transform when expanded to remove translateX(-50%)
-    root.style.transform = minimized ? '' : 'none';
+    root.style.transform = 'none';
   }
 
   function setPosition(position: FloatingPosition | null): void {
@@ -545,22 +563,18 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
     return floatingPosition;
   }
 
-  // Install drag behavior for normal state (via drag handle)
+  // Install drag behavior with delayed activation (supports short click + long press drag)
   disposer.add(
     installFloatingDrag({
       handleEl: dragHandle,
       targetEl: root,
       clampMargin: CLAMP_MARGIN_PX,
       onPositionChange: (pos) => setPosition(pos),
+      // Delayed activation: short clicks pass through, long press/move activates drag
+      clickThresholdMs: 200,
+      moveThresholdPx: 5,
     }),
   );
-
-  // Minimized drag state: allows dragging the entire minimized toolbar
-  let minimizedDragCleanup: (() => void) | null = null;
-  disposer.add(() => {
-    minimizedDragCleanup?.();
-    minimizedDragCleanup = null;
-  });
 
   // Apply initial position (if provided)
   if (floatingPosition !== null) {
@@ -586,51 +600,43 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
   // ==========================================================================
 
   /**
-   * Toggle minimized state of toolbar
+   * Toggle minimized (collapsed) state of toolbar
+   * Design: toolbar collapses in-place from pill (580x44) to circle (44x44)
    */
   function setMinimized(value: boolean): void {
+    const wasMinimized = minimized;
     minimized = value;
     root.dataset.minimized = minimized ? 'true' : 'false';
 
-    // Update minimize button label, tooltip, and icon
-    minimizeBtn.setAttribute('aria-label', minimized ? 'Restore toolbar' : 'Minimize toolbar');
-    minimizeBtn.dataset.tooltip = minimized ? 'Restore' : 'Minimize';
-    minimizeBtn.replaceChildren(minimized ? createPlusIcon() : createMinusIcon());
-
+    // Close dropdown before collapsing
     if (minimized) {
-      // Close dropdown before minimizing
       setStructureOpen(false);
-
-      // Move minimize button to root for minimized state
-      root.append(minimizeBtn);
-
-      // Reset position to top-right corner when minimizing
-      setPosition(null);
-
-      // Install delayed-activation drag on root for minimized state
-      if (!minimizedDragCleanup) {
-        minimizedDragCleanup = installFloatingDrag({
-          handleEl: root,
-          targetEl: root,
-          clampMargin: CLAMP_MARGIN_PX,
-          onPositionChange: (pos) => setPosition(pos),
-          clickThresholdMs: 200,
-          moveThresholdPx: 5,
-        });
-      }
-    } else {
-      // Restore minimize button position
-      right.insertBefore(minimizeBtn, closeBtn);
-
-      // Remove minimized drag handler
-      if (minimizedDragCleanup) {
-        minimizedDragCleanup();
-        minimizedDragCleanup = null;
-      }
-
-      // Keep position null when restoring to center the toolbar
-      syncFloatingPositionStyles();
     }
+
+    // Re-clamp position on expand to prevent toolbar from overflowing viewport
+    // (user may have dragged collapsed toolbar to edge, expand would cause overflow)
+    if (wasMinimized && !minimized && floatingPosition) {
+      // Immediate clamp for reduced-motion users (no transition)
+      setPosition(floatingPosition);
+
+      // For normal motion, clamp again after transition ends (when size is final)
+      // Use { once: true } to auto-remove listener and prevent leaks
+      root.addEventListener(
+        'transitionend',
+        (event: TransitionEvent) => {
+          if (event.target !== root) return;
+          if (event.propertyName !== 'width' && event.propertyName !== 'height') return;
+          if (!minimized && floatingPosition) {
+            setPosition(floatingPosition);
+          }
+        },
+        { once: true },
+      );
+    }
+
+    // Update grip button label and tooltip (icon rotates via CSS)
+    dragHandle.setAttribute('aria-label', minimized ? 'Expand toolbar' : 'Collapse toolbar');
+    dragHandle.dataset.tooltip = minimized ? 'Expand' : 'Collapse';
   }
 
   // ==========================================================================
@@ -638,7 +644,8 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
   // ==========================================================================
 
   function renderCounts(): void {
-    countsEl.textContent = `Undo: ${undoCount} · Redo: ${redoCount}`;
+    undoCountValue.textContent = String(undoCount);
+    redoCountValue.textContent = String(redoCount);
   }
 
   function renderButtons(): void {
@@ -725,21 +732,10 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
     void handleApply();
   });
 
-  // Minimize button
-  disposer.listen(minimizeBtn, 'click', (event) => {
+  // Grip click toggles collapsed state (drag uses delayed activation, so short clicks pass through)
+  disposer.listen(dragHandle, 'click', (event) => {
     event.preventDefault();
-    event.stopPropagation();
     setMinimized(!minimized);
-  });
-
-  // Click anywhere on minimized toolbar root to restore (short click, not drag)
-  disposer.listen(root, 'click', (event) => {
-    if (!minimized) return;
-    // Don't restore if clicking minimize button (handled separately)
-    const target = event.target;
-    if (target === minimizeBtn || (target instanceof Node && minimizeBtn.contains(target))) return;
-    event.preventDefault();
-    setMinimized(false);
   });
 
   // Structure button - toggle dropdown

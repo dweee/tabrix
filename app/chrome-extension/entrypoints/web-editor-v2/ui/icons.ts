@@ -121,3 +121,34 @@ export function createRedoIcon(): SVGElement {
   svg.append(createStrokePath('M16 10H6a3 3 0 0 1 0-6h7M16 10l-3-3M16 10l-3 3'));
   return svg;
 }
+
+/**
+ * Chevron Up icon (^) for minimize/restore button
+ * Rotates 180deg when minimized to point down
+ */
+export function createChevronUpIcon(): SVGElement {
+  const svg = createSvgElement();
+  svg.append(createStrokePath('M6 12l4-4 4 4'));
+  return svg;
+}
+
+/**
+ * Chevron Down icon (small, 24x24 viewBox) for dropdown buttons
+ * Matches toolbar-ui.html design spec
+ */
+export function createChevronDownSmallIcon(): SVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'M19 9l-7 7-7-7');
+  path.setAttribute('stroke', 'currentColor');
+  path.setAttribute('stroke-width', '2');
+  path.setAttribute('stroke-linecap', 'round');
+  path.setAttribute('stroke-linejoin', 'round');
+  svg.append(path);
+
+  return svg;
+}

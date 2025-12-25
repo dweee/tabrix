@@ -14,54 +14,48 @@
 
 ## 整体进度概览
 
-| 阶段                   | 状态      | 完成时间 | 主要内容                                                       |
-| ---------------------- | --------- | -------- | -------------------------------------------------------------- |
-| Phase 1.1 Action 系统  | ✅ 完成   | -        | 27 种 Action 类型定义、执行器注册表                            |
-| Phase 1.2 选择器引擎   | ✅ 完成   | -        | 6 种策略、指纹验证、Shadow DOM 支持                            |
-| Phase 1.3 数据模型统一 | 🔄 进行中 | -        | P0-P3 完成，P4 待实施                                          |
-| - M1 低风险接线        | ✅ 完成   | 2025-12  | StepRunner 依赖注入、tabId 管理                                |
-| - M2 可控启用 hybrid   | ✅ 完成   | 2025-12  | 执行模式配置、最小 allowlist                                   |
-| - M2.1 双重策略修复    | ✅ 完成   | 2025-12  | skipRetry/skipNavWait 策略跳过                                 |
-| - P1.0 存储层统一      | ✅ 完成   | 2025-12  | ensureMigratedFromLocal、importFlowFromJson                    |
-| - M3-core 契约测试     | ✅ 完成   | 2025-12  | 42 个测试（adapter-policy + step-executor + session-dag-sync） |
-| - P2 录制链路迁移      | ✅ 完成   | 2025-12  | 增量式 DAG 同步、双写方案                                      |
-| - P4 清理旧类型        | ⏳ 待实施 | -        | 删除 Step 联合类型、Flow.steps 字段                            |
-| Phase 2-7              | ⏳ 待实施 | -        | 录制系统、回放引擎、Builder、高级功能                          |
+| 阶段                   | 状态      | 完成时间 | 主要内容                                                          |
+| ---------------------- | --------- | -------- | ----------------------------------------------------------------- |
+| Phase 1.1 Action 系统  | ✅ 完成   | -        | 27 种 Action 类型定义、执行器注册表                               |
+| Phase 1.2 选择器引擎   | ✅ 完成   | -        | 6 种策略、指纹验证、Shadow DOM 支持                               |
+| Phase 1.3 数据模型统一 | ✅ 完成   | 2025-12  | P0-P4 全部完成，ctx.tabId 同步完成                                |
+| - M1 低风险接线        | ✅ 完成   | 2025-12  | StepRunner 依赖注入、tabId 管理                                   |
+| - M2 可控启用 hybrid   | ✅ 完成   | 2025-12  | 执行模式配置、最小 allowlist                                      |
+| - M2.1 双重策略修复    | ✅ 完成   | 2025-12  | skipRetry/skipNavWait 策略跳过                                    |
+| - P1.0 存储层统一      | ✅ 完成   | 2025-12  | ensureMigratedFromLocal、importFlowFromJson                       |
+| - M3-core 契约测试     | ✅ 完成   | 2025-12  | 42 个测试（adapter-policy + step-executor + session-dag-sync）    |
+| - P2 录制链路迁移      | ✅ 完成   | 2025-12  | 增量式 DAG 同步、双写方案                                         |
+| - M3-full 集成测试     | ✅ 完成   | 2025-12  | 62 个测试（batch 1-3: routing + handlers + defer + control-flow） |
+| - UI 刷新机制          | ✅ 完成   | 2025-12  | RR_FLOWS_CHANGED 推送事件、popup/sidepanel 监听                   |
+| - P4 清理旧类型        | ✅ 完成   | 2025-12  | legacy-types.ts 拆分 + 停止 steps 写入 + 清理 fallback            |
+| - ctx.tabId 同步       | ✅ 完成   | 2025-12  | openTab/switchTab 后更新 ctx.tabId，确保后续步骤目标正确 tab      |
+| Phase 2-7              | ⏳ 待实施 | -        | 录制系统、回放引擎、Builder、高级功能                             |
 
-**当前测试状态**: 197 个测试全部通过
+**当前测试状态**: 269 个测试（全部通过）
 
 ---
 
 ## 下一步任务建议（供接手者参考）
 
-### 优先级 1: M3-full 完整集成测试
-
-验证 hybrid 模式下各类型行为一致性，特别关注：
-
-- aria selector 定位
-- script when:'after' defer 执行时机
-- control-flow 条件求值
-- openTab/switchTab 后 ctx.tabId 更新
-
-### 优先级 2: P4 清理旧类型
-
-- 删除 `types.ts` 中的 `Step` 联合类型
-- 删除 `Flow.steps` 字段（或移至 `legacy-types.ts`）
-- 更新 UI Builder 保存格式
-
-### 优先级 3: UI 刷新机制修复
-
-IndexedDB 迁移后，popup/sidepanel 不再监听 chrome.storage.local 变化：
-
-- 需要新的变更通知机制（可能通过 chrome.runtime.sendMessage）
-- 或改用 IndexedDB observer / BroadcastChannel
-
-### 优先级 4: 录制期实时 DAG 展示（可选）
+### 优先级 1: 录制期实时 DAG 展示（可选）
 
 当前 DAG 只在内存态，可考虑：
 
 - 将 nodes/edges 包含在 timeline 广播中
 - UI 端实时渲染 DAG 视图
+
+### 优先级 2: 进一步清理 ✅
+
+P4 已完成核心清理，可选后续优化全部完成：
+
+- [x] P0: 移除死代码（`App.vue` 的 `importFromSteps/exportToSteps`、`useBuilderStore.ts` 的 `exportSteps`）
+- [x] P1: 移除 `exportFlowForSave()` 中的冗余 steps 写入（存储层已自动 strip）
+- [x] P2: 移除 `session-manager.ts` 中对 `flow.steps` 的写入（nodes 作为单一真源）
+  - `appendSteps()` 不再写入 `f.steps`，直接操作 `f.nodes/f.edges`
+  - 新增 `getTimelineSteps()` 从 nodes 派生 steps 用于 timeline 广播（协议不变）
+  - 新增 `rechainEdges()` 用于 edge 不变式违反时的修复
+  - 测试已更新（269 测试全部通过）
+- 统一 `importFromSteps()` 功能到导入流程中（低优先级，保留供用户手动导入）
 
 ---
 
@@ -101,15 +95,16 @@ IndexedDB 迁移后，popup/sidepanel 不再监听 chrome.storage.local 变化�
 
 ### 进行中
 
-#### Phase 1.3: 数据模型统一 🔄
+#### Phase 1.3: 数据模型统一 ✅
 
-**当前状态**：P0、P1、P2、P3 已完成。P4 待后续迭代。
+**当前状态**：P0-P4 全部完成，ctx.tabId 同步完成。
 
 - P0 ✅：录制产物转换为 DAG，可直接回放
 - P1 ✅：存储层统一（ensureMigratedFromLocal、importFlowFromJson 多格式支持）
 - P2 ✅：录制链路迁移（增量式 DAG 同步，双写方案）
 - P3 ✅：22 个 Action Handlers 完整实现 + Scheduler 集成架构设计完成
-- P4 ⏳：清理旧 Step 类型
+- P4 ✅：清理旧 Step 类型（legacy-types.ts 拆分 + 停止 steps 写入 + 清理 fallback）
+- ctx.tabId ✅：openTab/switchTab 后更新 ctx.tabId
 
 **核心问题**：录制与回放数据格式不一致
 
@@ -820,7 +815,7 @@ pnpm test                                    # 运行所有测试
 pnpm test tests/record-replay/               # 运行 record-replay 相关测试
 ```
 
-**当前测试状态**: 197 个测试全部通过
+**当前测试状态**: 269 个测试（全部通过）
 
 **vitest mock 注意事项** (重要):
 
@@ -869,24 +864,176 @@ export function createMockRegistry(handlers: Map<string, any> = new Map()) {
 }
 ```
 
-**M3-full: 完整集成测试（待实施）**
+**M3-full: 完整集成测试（已完成 ✅）**
 
-1. [ ] 在 hybrid 模式下验证各类型行为一致性
-2. [ ] 特别关注：aria selector、script when:'after' defer、control-flow 条件求值
-3. [ ] openTab/switchTab 后更新 ctx.tabId
+1. ✅ **batch 1**: routing sanity + fill/key/scroll/wait/delay/assert/screenshot/drag (17 tests)
+2. ✅ **batch 2**: click/navigate routing + skipNavWait 策略 + tabs operations (19 tests, 2 todo)
+3. ✅ **batch 3**: script(when:after) defer + control-flow (if/foreach/while/switchFrame) (26 tests)
 
-**P4: 清理旧类型**
+##### M3-full 详细实现说明
 
-- [ ] 删除 `types.ts` 中的 `Step` 联合类型
-- [ ] 删除 `Flow.steps` 字段
-- [ ] 将旧类型移至 `legacy-types.ts`（如 UI 仍需要）
+**测试文件清单**:
+| 文件 | 测试数 | 覆盖内容 |
+|------|--------|----------|
+| `tests/record-replay/hybrid-actions.integration.test.ts` | 17 | batch 1: routing + 低风险 action handlers |
+| `tests/record-replay/high-risk-actions.integration.test.ts` | 11 | batch 2: click/navigate 路由 + skipNavWait 策略 |
+| `tests/record-replay/tab-cursor.integration.test.ts` | 8 (2 todo) | batch 2: tabs 操作 + ctx.tabId 同步占位 |
+| `tests/record-replay/script-control-flow.integration.test.ts` | 26 | batch 3: script defer + if/foreach/while/switchFrame |
+
+**测试策略**:
+
+- 使用真实 HybridStepExecutor + ActionRegistry + handlers
+- Mock 环境边界: handleCallTool, selectorLocator.locate, chrome.\* APIs
+- 使用 `vi.hoisted()` 确保 mock 正确提升
+
+**batch 1 覆盖场景** (`hybrid-actions.integration.test.ts`):
+
+- routing sanity: 验证 allowlist 路由（actions vs legacy）
+- fill: READ_PAGE + FILL 工具调用、变量插值
+- key: KEYBOARD 工具调用、复合键支持
+- scroll: chrome.scripting.executeScript offset 模式
+- wait: wait-helper 注入 + waitForSelector/waitForText 消息
+- delay: 定时器等待
+- assert: exists/visible 断言 + 失败路径
+- screenshot: SCREENSHOT 工具调用 + saveAs 变量存储
+- drag: COMPUTER left_click_drag 工具调用
+
+**batch 2 覆盖场景**:
+
+- `high-risk-actions.integration.test.ts`:
+  - click/dblclick/navigate/openTab/switchTab 默认走 legacy
+  - click opt-in: 自定义 allowlist 使 click 走 actions
+  - navigate skipNavWait=true: 跳过 beforeUrl 读取和 nav-wait
+  - navigate skipNavWait=false: 执行完整 nav-wait 流程
+  - navigate refresh: 页面刷新
+  - click 失败路径: element not visible, tool error
+
+- `tab-cursor.integration.test.ts`:
+  - openTab: newWindow/newTab 模式
+  - switchTab: byUrlContains/byTitleContains/byTabId
+  - switchTab 失败: no matching tab
+  - TODO: ctx.tabId 同步（M3 待办，当前 handlers 不更新 ctx.tabId）
+
+**batch 3 覆盖场景** (`script-control-flow.integration.test.ts`):
+
+- script routing: 默认走 legacy
+- script defer semantics: when='after' 返回 deferAfterScript，不立即执行
+- script when='before': legacy 和 actions opt-in 都立即执行
+- script saveAs: 结果存储到变量
+- if binary: truthy/falsy 条件求值 + nextLabel 返回
+- foreach: 空数组无 control directive，非空返回 foreach directive
+- while: false 条件无 directive，true 条件返回 while directive
+- switchFrame: top/urlContains/index 模式 + ctx.frameId 更新
+- 错误处理: script 执行失败、foreach listVar 非数组、switchFrame 找不到 frame
+
+**关键行为差异文档**:
+
+- Legacy script handler (`nodes/script.ts:8`): `when === 'after'` 返回 `{ deferAfterScript: s }`
+- Actions script handler: 直接执行，无 defer 支持
+- 这意味着 script with when='after' 应保持走 legacy 路径
+
+**UI 刷新机制（已完成 ✅）**
+
+IndexedDB 迁移后的 UI 刷新问题已通过推送事件解决。
+
+##### UI 刷新机制详细实现
+
+**问题**: IndexedDB 迁移后，popup/sidepanel 不再监听 chrome.storage.local 变化，导致 flow 增删改后 UI 不刷新。
+
+**解决方案**: 使用 `chrome.runtime.sendMessage` 推送 `RR_FLOWS_CHANGED` 事件。
+
+**修改文件清单**:
+| 文件 | 改动内容 |
+|------|----------|
+| `common/message-types.ts` | 新增 `RR_FLOWS_CHANGED` 消息类型 |
+| `record-replay/flow-store.ts` | 新增 `notifyFlowsChanged()` + 修改 saveFlow/deleteFlow/importFlowFromJson |
+| `popup/App.vue` | 监听 `RR_FLOWS_CHANGED` 事件刷新 flows |
+| `sidepanel/App.vue` | 监听 `RR_FLOWS_CHANGED` 事件刷新 flows |
+
+**核心实现** (`flow-store.ts`):
+
+```typescript
+let flowsChangedTimer: ReturnType<typeof setTimeout> | undefined;
+
+function notifyFlowsChanged(): void {
+  // 50ms 防抖，避免批量操作时频繁通知
+  if (flowsChangedTimer !== undefined) return;
+  flowsChangedTimer = setTimeout(() => {
+    flowsChangedTimer = undefined;
+    void chrome.runtime
+      .sendMessage({ type: BACKGROUND_MESSAGE_TYPES.RR_FLOWS_CHANGED })
+      .catch(() => {}); // 忽略无监听器错误
+  }, 50);
+}
+
+export async function saveFlow(flow: Flow, options?: { notify?: boolean }): Promise<void> {
+  await ensureMigratedFromLocal();
+  const normalizedFlow = normalizeFlowForSave(flow);
+  await IndexedDbStorage.flows.save(normalizedFlow);
+  if (options?.notify !== false) {
+    notifyFlowsChanged(); // 默认通知，可通过 options 禁用
+  }
+}
+```
+
+**UI 监听** (`popup/App.vue` / `sidepanel/App.vue`):
+
+```typescript
+const onMessage = (message: { type?: string }) => {
+  if (message.type === BACKGROUND_MESSAGE_TYPES.RR_FLOWS_CHANGED) {
+    loadFlows(); // 重新加载 flows
+  }
+};
+chrome.runtime.onMessage.addListener(onMessage);
+
+onUnmounted(() => {
+  chrome.runtime.onMessage.removeListener(onMessage);
+});
+```
+
+**importFlowFromJson 批量优化**:
+
+- 单个 flow 保存时禁用通知: `saveFlow(f, { notify: false })`
+- 全部导入完成后发送单次通知: `notifyFlowsChanged()`
+
+**P4: 清理旧类型** ✅
+
+- [x] **阶段1 完成**: 将旧 Step 类型移至 `legacy-types.ts`
+  - 创建 `legacy-types.ts` 包含所有 Step\* 类型和选择器类型
+  - `types.ts` 通过 `export type { ... } from './legacy-types'` 保持向后兼容
+  - 修复 `Flow.meta.stopBarrier` 类型缺失问题
+- [x] **阶段2 完成**: 停止 `steps` 字段写入，仅写入 `nodes/edges`
+  - `flow-store.ts` 新增 `stripStepsForSave()` 函数
+  - `saveFlow()` 先 normalize（生成 nodes/edges）再 strip（移除 steps）
+  - `lazyNormalize()` 同样在持久化前 strip steps
+  - `importFlowFromJson()` 保留 steps 用于 normalize，但 saveFlow 会自动 strip
+  - `Flow.steps` 类型改为 optional（`steps?: Step[]`）并标记 deprecated
+  - 新增 10 个契约测试（`flow-store-strip-steps.contract.test.ts`）
+- [x] **阶段3 完成**: 清理 fallback 逻辑，移除旧代码路径
+  - `execute-flow.ts`: 移除 `flow.steps` fallback，DAG 缺失时抛错
+  - `flow-store.ts`: `getFlow()` 和 `listFlows()` 返回时也 strip steps
+  - `lazyNormalize()` 返回 DAG-only flow（不再泄露 steps）
+  - `useBuilderStore.ts`: 移除 `initFromFlow` 中的 `stepsToNodes(deep.steps)` fallback
+  - 保留 `importFromSteps()` 用于用户手动从 steps 导入
+  - 保留 `normalizeFlowForSave()` 用于处理导入的旧 flow（steps→DAG 迁移）
 
 **风险点**：
 
 - 类型同名冲突：两个 `Flow` 类型容易 import 错
 - 变量结构不同：旧 `v.key/v.default` vs 新 `v.name/...`
-- 子流程执行：`execute-flow.ts` 有 `flow.steps` fallback
+- ~~子流程执行：`execute-flow.ts` 有 `flow.steps` fallback~~ ✅ 已移除
 - UI Builder 保存格式需同步适配
+
+**ctx.tabId 同步** ✅
+
+实现 openTab/switchTab 后自动更新 ctx.tabId，确保后续步骤目标正确的 tab：
+
+- [x] `ActionExecutionResult` 新增 `newTabId?: number` 字段
+- [x] `openTabHandler` 成功时返回 `{ status: 'success', newTabId: tabId }`
+- [x] `switchTabHandler` 成功时返回 `{ status: 'success', newTabId: targetTabId }`
+- [x] `adapter.ts:createStepExecutor()` 在 action 成功后同步 `result.newTabId` 到 `ctx.tabId`
+- [x] 2 个 todo 测试转为真实测试用例，验证后续步骤使用新 tabId
+- 涉及文件：`actions/types.ts`、`actions/handlers/tabs.ts`、`actions/adapter.ts`、`tests/record-replay/tab-cursor.integration.test.ts`
 
 #### P0 Bug 修复详情 ✅
 

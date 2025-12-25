@@ -480,6 +480,15 @@ export function createStepExecutor(registry: ActionRegistry) {
       ctx.frameId = actionCtx.frameId;
     }
 
+    // Sync tabId back (in case openTab/switchTab changed it)
+    // Chrome tabId is always a positive safe integer
+    if (result.status === 'success') {
+      const nextTabId = result.newTabId;
+      if (typeof nextTabId === 'number' && Number.isSafeInteger(nextTabId) && nextTabId > 0) {
+        ctx.tabId = nextTabId;
+      }
+    }
+
     // Convert result
     return { supported: true, result: actionResultToExecResult(result) };
   };

@@ -1016,7 +1016,18 @@ onMounted(async () => {
   await refreshRuns();
   await refreshTriggers();
 
-  // Auto-refresh flows list when storage rr_flows changes
+  // Push-based refresh for IndexedDB-backed flows
+  const onMessage = (message: { type?: string }) => {
+    try {
+      if (message?.type === BACKGROUND_MESSAGE_TYPES.RR_FLOWS_CHANGED) {
+        refresh();
+      }
+    } catch {}
+  };
+  chrome.runtime.onMessage.addListener(onMessage);
+  (window as any).__rr_sidepanel_onMessage = onMessage;
+
+  // Auto-refresh flows list when storage rr_flows changes (legacy fallback)
   const onChanged = (changes: any, area: string) => {
     try {
       if (area !== 'local') return;
@@ -1029,6 +1040,14 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  // Clean up runtime message listener
+  const msgFn = (window as any).__rr_sidepanel_onMessage;
+  if (msgFn && chrome?.runtime?.onMessage?.removeListener) {
+    try {
+      chrome.runtime.onMessage.removeListener(msgFn);
+    } catch {}
+  }
+  // Clean up storage change listener (legacy fallback)
   const fn = (window as any).__rr_sidepanel_onChanged;
   if (fn && chrome?.storage?.onChanged?.removeListener) {
     try {

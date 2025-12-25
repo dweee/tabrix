@@ -1,220 +1,63 @@
-// design note: comments in English
-import { STEP_TYPES } from '@/common/step-types';
+/**
+ * Record & Replay Core Types
+ *
+ * This file contains the core type definitions for the record-replay system.
+ * Legacy Step types have been moved to ./legacy-types.ts and are re-exported
+ * here for backward compatibility.
+ *
+ * Type system architecture:
+ * - Legacy types (./legacy-types.ts): Step-based execution model (being phased out)
+ * - Action types (./actions/types.ts): DAG-based execution model (new standard)
+ * - Core types (this file): Flow, Node, Edge, Run records (shared by both)
+ */
+
 import { NODE_TYPES } from '@/common/node-types';
 
-export type SelectorType = 'css' | 'xpath' | 'attr' | 'aria' | 'text';
+// =============================================================================
+// Re-export Legacy Types for Backward Compatibility
+// =============================================================================
 
-export interface SelectorCandidate {
-  type: SelectorType;
-  value: string; // literal selector or text/aria expression
-  weight?: number; // user-adjustable priority; higher first
-}
+export type {
+  // Selector types
+  SelectorType,
+  SelectorCandidate,
+  TargetLocator,
+  // Step types
+  StepType,
+  StepBase,
+  StepClick,
+  StepFill,
+  StepTriggerEvent,
+  StepSetAttribute,
+  StepScreenshot,
+  StepSwitchFrame,
+  StepLoopElements,
+  StepKey,
+  StepScroll,
+  StepDrag,
+  StepWait,
+  StepAssert,
+  StepScript,
+  StepIf,
+  StepForeach,
+  StepWhile,
+  StepHttp,
+  StepExtract,
+  StepOpenTab,
+  StepSwitchTab,
+  StepCloseTab,
+  StepNavigate,
+  StepHandleDownload,
+  StepExecuteFlow,
+  Step,
+} from './legacy-types';
 
-export interface TargetLocator {
-  ref?: string; // ephemeral ref from read_page
-  candidates: SelectorCandidate[]; // ordered by priority
-}
+// Import Step type for use in Flow interface
+import type { Step } from './legacy-types';
 
-export type StepType = (typeof STEP_TYPES)[keyof typeof STEP_TYPES];
-
-export interface StepBase {
-  id: string;
-  type: StepType;
-  timeoutMs?: number; // default 10000
-  retry?: { count: number; intervalMs: number; backoff?: 'none' | 'exp' };
-  screenshotOnFail?: boolean; // default true
-}
-
-export interface StepClick extends StepBase {
-  type: 'click' | 'dblclick';
-  target: TargetLocator;
-  before?: { scrollIntoView?: boolean; waitForSelector?: boolean };
-  after?: { waitForNavigation?: boolean; waitForNetworkIdle?: boolean };
-}
-
-export interface StepFill extends StepBase {
-  type: 'fill';
-  target: TargetLocator;
-  value: string; // may contain {var}
-}
-
-export interface StepTriggerEvent extends StepBase {
-  type: 'triggerEvent';
-  target: TargetLocator;
-  event: string; // e.g. 'input', 'change', 'mouseover'
-  bubbles?: boolean;
-  cancelable?: boolean;
-}
-
-export interface StepSetAttribute extends StepBase {
-  type: 'setAttribute';
-  target: TargetLocator;
-  name: string;
-  value?: string; // when omitted and remove=true, remove attribute
-  remove?: boolean;
-}
-
-export interface StepScreenshot extends StepBase {
-  type: 'screenshot';
-  selector?: string;
-  fullPage?: boolean;
-  saveAs?: string; // variable name to store base64
-}
-
-export interface StepSwitchFrame extends StepBase {
-  type: 'switchFrame';
-  frame?: { index?: number; urlContains?: string };
-}
-
-export interface StepLoopElements extends StepBase {
-  type: 'loopElements';
-  selector: string;
-  saveAs?: string; // list var name
-  itemVar?: string; // default 'item'
-  subflowId: string;
-}
-
-export interface StepKey extends StepBase {
-  type: 'key';
-  keys: string; // e.g. "Backspace Enter" or "cmd+a"
-  target?: TargetLocator; // optional focus target
-}
-
-export interface StepScroll extends StepBase {
-  type: 'scroll';
-  mode: 'element' | 'offset' | 'container';
-  target?: TargetLocator; // when mode = element / container
-  offset?: { x?: number; y?: number };
-}
-
-export interface StepDrag extends StepBase {
-  type: 'drag';
-  start: TargetLocator;
-  end: TargetLocator;
-  path?: Array<{ x: number; y: number }>; // sampled trajectory
-}
-
-export interface StepWait extends StepBase {
-  type: 'wait';
-  condition:
-    | { selector: string; visible?: boolean }
-    | { text: string; appear?: boolean }
-    | { navigation: true }
-    | { networkIdle: true }
-    | { sleep: number };
-}
-
-export interface StepAssert extends StepBase {
-  type: 'assert';
-  assert:
-    | { exists: string }
-    | { visible: string }
-    | { textPresent: string }
-    | { attribute: { selector: string; name: string; equals?: string; matches?: string } };
-  // 失败策略：stop=失败即停（默认）、warn=仅告警并继续、retry=触发重试机制
-  failStrategy?: 'stop' | 'warn' | 'retry';
-}
-
-export interface StepScript extends StepBase {
-  type: 'script';
-  world?: 'MAIN' | 'ISOLATED';
-  code: string; // user script string
-  when?: 'before' | 'after';
-}
-
-export interface StepIf extends StepBase {
-  type: 'if';
-  // condition supports: { var: string; equals?: any } | { expression: string }
-  condition: any;
-}
-
-export interface StepForeach extends StepBase {
-  type: 'foreach';
-  listVar: string;
-  itemVar?: string;
-  subflowId: string;
-}
-
-export interface StepWhile extends StepBase {
-  type: 'while';
-  condition: any;
-  subflowId: string;
-  maxIterations?: number;
-}
-
-export type Step =
-  | StepClick
-  | StepFill
-  | StepTriggerEvent
-  | StepSetAttribute
-  | StepScreenshot
-  | StepSwitchFrame
-  | StepLoopElements
-  | StepKey
-  | StepScroll
-  | StepDrag
-  | StepWait
-  | StepAssert
-  | StepScript
-  | StepIf
-  | StepForeach
-  | StepWhile
-  | (StepBase & { type: 'navigate'; url: string })
-  | StepHttp
-  | StepExtract
-  | StepOpenTab
-  | StepSwitchTab
-  | StepCloseTab
-  | (StepBase & {
-      type: 'handleDownload';
-      filenameContains?: string;
-      saveAs?: string;
-      waitForComplete?: boolean;
-    })
-  | (StepBase & {
-      type: 'executeFlow';
-      flowId: string;
-      inline?: boolean;
-      args?: Record<string, any>;
-    });
-
-export interface StepHttp extends StepBase {
-  type: 'http';
-  method?: string;
-  url: string;
-  headers?: Record<string, string>;
-  body?: any;
-  formData?: any;
-  saveAs?: string;
-  assign?: Record<string, string>;
-}
-
-export interface StepExtract extends StepBase {
-  type: 'extract';
-  selector?: string;
-  attr?: string; // 'text'|'textContent' to read text
-  js?: string; // custom JS that returns value
-  saveAs: string;
-}
-
-export interface StepOpenTab extends StepBase {
-  type: 'openTab';
-  url?: string;
-  newWindow?: boolean;
-}
-
-export interface StepSwitchTab extends StepBase {
-  type: 'switchTab';
-  tabId?: number;
-  urlContains?: string;
-  titleContains?: string;
-}
-
-export interface StepCloseTab extends StepBase {
-  type: 'closeTab';
-  tabIds?: number[];
-  url?: string;
-}
+// =============================================================================
+// Variable Definitions
+// =============================================================================
 
 export type VariableType = 'string' | 'number' | 'boolean' | 'enum' | 'array';
 
@@ -227,6 +70,10 @@ export interface VariableDef {
   type?: VariableType; // default to 'string' when omitted
   rules?: { required?: boolean; pattern?: string; enum?: string[] };
 }
+
+// =============================================================================
+// DAG Node and Edge Types (Flow V2)
+// =============================================================================
 
 export type NodeType = (typeof NODE_TYPES)[keyof typeof NODE_TYPES];
 
@@ -248,6 +95,10 @@ export interface Edge {
   label?: string;
 }
 
+// =============================================================================
+// Flow Definition
+// =============================================================================
+
 export interface Flow {
   id: string;
   name: string;
@@ -261,14 +112,36 @@ export interface Flow {
     bindings?: Array<{ type: 'domain' | 'path' | 'url'; value: string }>;
     tool?: { category?: string; description?: string };
     exposedOutputs?: Array<{ nodeId: string; as: string }>;
+    /** Recording stop barrier status (used during recording stop) */
+    stopBarrier?: {
+      ok: boolean;
+      sessionId?: string;
+      stoppedAt?: string;
+      failed?: Array<{
+        tabId: number;
+        skipped?: boolean;
+        reason?: string;
+        topTimedOut?: boolean;
+        topError?: string;
+        subframesFailed?: number;
+      }>;
+    };
   };
   variables?: VariableDef[];
-  steps: Step[];
-  // Flow V2（可选）：画布编排
+  /**
+   * @deprecated Use nodes/edges instead. This field is no longer written to storage.
+   * Kept as optional for backward compatibility with existing flows and imports.
+   */
+  steps?: Step[];
+  // Flow V2: DAG-based execution model
   nodes?: NodeBase[];
   edges?: Edge[];
   subflows?: Record<string, { nodes: NodeBase[]; edges: Edge[] }>;
 }
+
+// =============================================================================
+// Run Records and Results
+// =============================================================================
 
 export interface RunLogEntry {
   stepId: string;

@@ -809,6 +809,11 @@ export interface ActionExecutionResult<T extends ActionType = ActionType> {
   control?: ControlDirective;
   /** 执行耗时 */
   durationMs?: Milliseconds;
+  /**
+   * New tab ID after tab operations (openTab/switchTab).
+   * Used to update execution context for subsequent steps.
+   */
+  newTabId?: number;
 }
 
 /**

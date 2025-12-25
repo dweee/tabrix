@@ -1411,12 +1411,20 @@ const switchModel = async (newModel: ModelPreset) => {
 
 const setupServerStatusListener = () => {
   // eslint-disable-next-line no-undef
-  chrome.runtime.onMessage.addListener((message) => {
+  const onMessage = (message: { type?: string; payload?: unknown }) => {
+    // Server status changes
     if (message.type === BACKGROUND_MESSAGE_TYPES.SERVER_STATUS_CHANGED && message.payload) {
-      serverStatus.value = message.payload;
+      serverStatus.value = message.payload as any;
       console.log('Server status updated:', message.payload);
     }
-  });
+    // Flows changed - refresh list (IndexedDB-based notification)
+    if (message.type === BACKGROUND_MESSAGE_TYPES.RR_FLOWS_CHANGED) {
+      loadFlows();
+    }
+  };
+  chrome.runtime.onMessage.addListener(onMessage);
+  // Store reference for cleanup
+  (window as any).__rr_popup_onMessage = onMessage;
 };
 
 onMounted(async () => {
@@ -1450,6 +1458,14 @@ onMounted(async () => {
 onUnmounted(() => {
   stopModelStatusMonitoring();
   stopSemanticEngineStatusPolling();
+  // Clean up runtime message listener
+  try {
+    const msgFn = (window as any).__rr_popup_onMessage;
+    if (msgFn && chrome?.runtime?.onMessage?.removeListener) {
+      chrome.runtime.onMessage.removeListener(msgFn);
+    }
+  } catch {}
+  // Clean up storage change listener (legacy fallback)
   try {
     const fn = (window as any).__rr_popup_onChanged;
     if (fn && chrome?.storage?.onChanged?.removeListener) {

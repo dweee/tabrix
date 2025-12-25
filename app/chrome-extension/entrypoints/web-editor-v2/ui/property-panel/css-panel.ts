@@ -17,6 +17,7 @@ import { Disposer } from '../../utils/disposables';
 import type { TransactionManager } from '../../core/transaction-manager';
 import type { DesignControl } from './types';
 import { createClassEditor, MAX_SUGGESTION_CACHE, type ClassEditor } from './class-editor';
+import { createCssDefaultsProvider, type CssDefaultsProvider } from './css-defaults';
 import {
   collectCssPanelSnapshot,
   type CssPanelSnapshot,
@@ -304,9 +305,145 @@ function collectClassSuggestions(snapshot: CssPanelSnapshot): string[] {
 }
 
 /**
- * Create a rule block element
+ * Check if a declaration is a design token (CSS custom property)
  */
-function createRuleBlock(rule: CssRuleView, disposer: Disposer): HTMLElement {
+function isDesignToken(declName: string): boolean {
+  return declName.trim().startsWith('--');
+}
+
+/**
+ * Global/universal selectors to filter out (only show element-specific styles)
+ */
+const GLOBAL_SELECTORS = new Set(['*', 'html', 'body', ':root', ':where(*)', ':is(*)']);
+
+/**
+ * Check if a selector is a global/universal selector that should be filtered
+ */
+function isGlobalSelector(selector: string): boolean {
+  const normalized = selector.trim().toLowerCase();
+  if (GLOBAL_SELECTORS.has(normalized)) return true;
+  // Also filter selectors that are just combinations of global selectors
+  // e.g., "html *", "body *", "*, html", ":root *"
+  const parts = normalized.split(/\s*,\s*/);
+  return parts.every((part) => {
+    const tokens = part.split(/\s+/).filter(Boolean);
+    return tokens.every((t) => GLOBAL_SELECTORS.has(t) || t === '>' || t === '+' || t === '~');
+  });
+}
+
+// =============================================================================
+// Default Value Filtering
+// =============================================================================
+
+interface DefaultValueFilterContext {
+  defaults: CssDefaultsProvider;
+  tagName: string;
+  computedStyle: CSSStyleDeclaration | null;
+}
+
+/**
+ * Get the longhand properties affected by a declaration
+ */
+function getDeclAffectedProperties(decl: CssDeclView): readonly string[] {
+  if (Array.isArray((decl as CssDeclView & { affects?: string[] }).affects)) {
+    const affects = (decl as CssDeclView & { affects?: string[] }).affects;
+    if (affects && affects.length > 0) return affects;
+  }
+  return [decl.name];
+}
+
+/**
+ * Collect all properties that need baseline values for comparison
+ */
+function collectBaselineProperties(snapshot: CssPanelSnapshot): string[] {
+  const out = new Set<string>();
+
+  for (const section of snapshot.sections) {
+    for (const rule of section.rules) {
+      for (const decl of rule.decls) {
+        if (decl.status !== 'active') continue;
+        if (isDesignToken(decl.name)) continue;
+
+        for (const prop of getDeclAffectedProperties(decl)) {
+          const name = String(prop ?? '').trim();
+          if (name) out.add(name);
+        }
+      }
+    }
+  }
+
+  return Array.from(out);
+}
+
+/**
+ * Check if an active declaration's computed value matches browser default
+ */
+function isDefaultValueDecl(decl: CssDeclView, ctx: DefaultValueFilterContext): boolean {
+  if (decl.status !== 'active') return false;
+  if (!ctx.computedStyle) return false;
+
+  const props = getDeclAffectedProperties(decl);
+  let hasComparable = false;
+
+  for (const propRaw of props) {
+    const prop = String(propRaw ?? '').trim();
+    if (!prop) continue;
+
+    let computed = '';
+    try {
+      computed = String(ctx.computedStyle.getPropertyValue(prop) ?? '').trim();
+    } catch {
+      computed = '';
+    }
+
+    const baseline = ctx.defaults.getBaselineValue(ctx.tagName, prop);
+    if (computed || baseline) hasComparable = true;
+    if (computed !== baseline) return false;
+  }
+
+  return hasComparable;
+}
+
+/**
+ * Check if a declaration should be rendered (after all filters)
+ */
+function shouldRenderDecl(decl: CssDeclView, ctx: DefaultValueFilterContext): boolean {
+  if (isDesignToken(decl.name)) return false;
+  if (isDefaultValueDecl(decl, ctx)) return false;
+  return true;
+}
+
+/**
+ * Check if global selector filtering should apply for this element
+ * Don't filter global selectors when the selected element is html/body itself
+ */
+function shouldFilterGlobalSelector(selector: string, tagName: string): boolean {
+  if (!isGlobalSelector(selector)) return false;
+  // If selected element is html/body/:root, don't filter their matching selectors
+  const tag = tagName.toLowerCase();
+  if (tag === 'html' || tag === 'body') return false;
+  return true;
+}
+
+/**
+ * Create a rule block element
+ * Returns null if all declarations are filtered out (design tokens) or selector is global
+ */
+function createRuleBlock(
+  rule: CssRuleView,
+  disposer: Disposer,
+  ctx: DefaultValueFilterContext,
+): HTMLElement | null {
+  // Filter out global selectors (*, html, body, etc.) - only keep element-specific styles
+  const matchedSelector = rule.matchedSelector ?? rule.selector;
+  if (rule.origin === 'rule' && shouldFilterGlobalSelector(matchedSelector, ctx.tagName)) {
+    return null;
+  }
+
+  // Filter out design tokens and declarations matching browser defaults
+  const visibleDecls = rule.decls.filter((decl) => shouldRenderDecl(decl, ctx));
+  if (visibleDecls.length === 0) return null;
+
   const block = document.createElement('div');
   block.className = 'we-css-rule';
   block.dataset.ruleId = rule.id;
@@ -345,11 +482,11 @@ function createRuleBlock(rule: CssRuleView, disposer: Disposer): HTMLElement {
 
   block.append(header);
 
-  // Declarations list
+  // Declarations list (filtered)
   const declsContainer = document.createElement('div');
   declsContainer.className = 'we-css-decls';
 
-  for (const decl of rule.decls) {
+  for (const decl of visibleDecls) {
     const declEl = createDeclaration(decl);
     declsContainer.append(declEl);
   }
@@ -377,17 +514,22 @@ function createDeclaration(decl: CssDeclView): HTMLElement {
   colon.className = 'we-css-decl-colon';
   colon.textContent = ': ';
 
+  // Value container (for grid layout with !important outside truncated area)
+  const valueContainer = document.createElement('span');
+  valueContainer.className = 'we-css-decl-value-container';
+
   // Property value
   const value = document.createElement('span');
   value.className = 'we-css-decl-value';
   value.textContent = decl.value;
+  valueContainer.append(value);
 
-  // Important badge
+  // Important badge (separate element to avoid truncation)
   if (decl.important) {
     const imp = document.createElement('span');
     imp.className = 'we-css-decl-important';
-    imp.textContent = ' !important';
-    value.append(imp);
+    imp.textContent = '!important';
+    valueContainer.append(imp);
   }
 
   // Semicolon
@@ -395,15 +537,43 @@ function createDeclaration(decl: CssDeclView): HTMLElement {
   semi.className = 'we-css-decl-semi';
   semi.textContent = ';';
 
-  el.append(name, colon, value, semi);
+  el.append(name, colon, valueContainer, semi);
 
   return el;
 }
 
 /**
- * Create a section element (inline, matched, or inherited)
+ * Check if a rule has any renderable declarations (after filtering)
  */
-function createSection(section: CssSectionView, disposer: Disposer): HTMLElement {
+function hasRenderableRule(rule: CssRuleView, ctx: DefaultValueFilterContext): boolean {
+  // Filter out global selectors (unless selected element is html/body)
+  const matchedSelector = rule.matchedSelector ?? rule.selector;
+  if (rule.origin === 'rule' && shouldFilterGlobalSelector(matchedSelector, ctx.tagName)) {
+    return false;
+  }
+  // Check if any declarations should be rendered
+  return rule.decls.some((decl) => shouldRenderDecl(decl, ctx));
+}
+
+/**
+ * Check if a section has any renderable rules (after filtering)
+ */
+function hasRenderableDecls(section: CssSectionView, ctx: DefaultValueFilterContext): boolean {
+  return section.rules.some((rule) => hasRenderableRule(rule, ctx));
+}
+
+/**
+ * Create a section element (inline, matched, or inherited)
+ * Returns null if all rules are filtered out
+ */
+function createSection(
+  section: CssSectionView,
+  disposer: Disposer,
+  ctx: DefaultValueFilterContext,
+): HTMLElement | null {
+  // Skip sections with no renderable declarations after filtering
+  if (!hasRenderableDecls(section, ctx)) return null;
+
   const el = document.createElement('div');
   el.className = 'we-css-section';
   el.dataset.kind = section.kind;
@@ -426,9 +596,12 @@ function createSection(section: CssSectionView, disposer: Disposer): HTMLElement
   rulesContainer.className = 'we-css-section-rules';
 
   for (const rule of section.rules) {
-    const ruleEl = createRuleBlock(rule, disposer);
-    rulesContainer.append(ruleEl);
+    const ruleEl = createRuleBlock(rule, disposer, ctx);
+    if (ruleEl) rulesContainer.append(ruleEl);
   }
+
+  // Defensive: if all rules were filtered out, return null
+  if (rulesContainer.childElementCount === 0) return null;
 
   el.append(rulesContainer);
 
@@ -445,6 +618,10 @@ function createSection(section: CssSectionView, disposer: Disposer): HTMLElement
 export function createCssPanel(options: CssPanelOptions): CssPanel {
   const { container, transactionManager, onClassChange } = options;
   const disposer = new Disposer();
+
+  // CSS defaults provider for filtering browser default values
+  const defaultsProvider = createCssDefaultsProvider();
+  disposer.add(() => defaultsProvider.dispose());
 
   // State
   let currentTarget: Element | null = null;
@@ -534,8 +711,30 @@ export function createCssPanel(options: CssPanelOptions): CssPanel {
       return;
     }
 
-    // Check if there are any rules
-    const hasRules = snapshot.sections.some((s) => s.rules.length > 0);
+    // Build filter context for default value comparison
+    const tagName = currentTarget ? currentTarget.tagName.toLowerCase() : '';
+    let computedStyle: CSSStyleDeclaration | null = null;
+    try {
+      if (currentTarget?.isConnected) {
+        computedStyle = window.getComputedStyle(currentTarget);
+      }
+    } catch {
+      computedStyle = null;
+    }
+
+    const filterCtx: DefaultValueFilterContext = {
+      defaults: defaultsProvider,
+      tagName,
+      computedStyle,
+    };
+
+    // Pre-cache baseline values for all relevant properties
+    if (computedStyle && tagName) {
+      defaultsProvider.ensureBaselineValues(tagName, collectBaselineProperties(snapshot));
+    }
+
+    // Check if there are any renderable rules (after all filters)
+    const hasRules = snapshot.sections.some((section) => hasRenderableDecls(section, filterCtx));
 
     if (!hasRules) {
       emptyState.hidden = false;
@@ -571,11 +770,8 @@ export function createCssPanel(options: CssPanelOptions): CssPanel {
 
     // Render sections
     for (const section of snapshot.sections) {
-      // Skip empty sections
-      if (section.rules.length === 0) continue;
-
-      const sectionEl = createSection(section, disposer);
-      sectionsContainer.append(sectionEl);
+      const sectionEl = createSection(section, disposer, filterCtx);
+      if (sectionEl) sectionsContainer.append(sectionEl);
     }
   }
 
@@ -594,9 +790,9 @@ export function createCssPanel(options: CssPanelOptions): CssPanel {
       return;
     }
 
-    // Collect snapshot
+    // Collect snapshot (only direct styles, no inherited)
     snapshot = collectCssPanelSnapshot(currentTarget, {
-      maxInheritanceDepth: 10,
+      maxInheritanceDepth: 0,
     });
 
     // Update class suggestions cache (Phase 4.7)

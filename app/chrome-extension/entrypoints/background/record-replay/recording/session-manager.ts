@@ -36,8 +36,8 @@ export class RecordingSessionManager {
     stoppedTabs: new Set<number>(),
   };
 
-  // Session-level caches for incremental DAG sync (cleared on session start/stop)
-  private stepIndexMap: Map<string, number> = new Map();
+  // Session-level cache for incremental DAG sync (cleared on session start/stop)
+  // Note: stepIndexMap removed - we no longer write to flow.steps
   private nodeIndexMap: Map<string, number> = new Map();
   // Monotonic counter for edge id generation (avoids collision on delete/reorder)
   private edgeSeq: number = 0;
@@ -71,8 +71,7 @@ export class RecordingSessionManager {
   }
 
   async startSession(flow: Flow, originTabId: number): Promise<void> {
-    // Clear caches for fresh session
-    this.stepIndexMap.clear();
+    // Clear cache for fresh session
     this.nodeIndexMap.clear();
     this.edgeSeq = 0;
 
@@ -157,8 +156,7 @@ export class RecordingSessionManager {
     this.state.originTabId = null;
     this.state.activeTabs.clear();
     this.state.stoppedTabs.clear();
-    // Clear caches
-    this.stepIndexMap.clear();
+    // Clear cache
     this.nodeIndexMap.clear();
     this.edgeSeq = 0;
     return flow;
@@ -180,27 +178,33 @@ export class RecordingSessionManager {
    * Uses upsert semantics: if a step with the same id exists, update it in place.
    * This ensures fill steps get their final value even after initial flush.
    *
-   * DAG sync: maintains flow.nodes/edges in lockstep with flow.steps during recording.
+   * DAG sync: maintains flow.nodes/edges during recording.
    * - New step → create node + edge from previous node
    * - Upsert step → update node.config and node.type
-   * - Invariant violation → fallback to full stepsToDAG rebuild
+   * - Invariant violation → fallback to linear DAG rebuild
+   *
+   * Note: flow.steps is no longer written. Nodes are the source of truth.
    */
   appendSteps(steps: Step[]): void {
     const f = this.state.flow;
     if (!f || !Array.isArray(steps) || steps.length === 0) return;
 
     // Initialize arrays if missing
-    if (!Array.isArray(f.steps)) f.steps = [];
     if (!Array.isArray(f.nodes)) f.nodes = [];
     if (!Array.isArray(f.edges)) f.edges = [];
+
+    // Legacy compatibility: if flow only has steps, initialize DAG from them once
+    if (f.nodes.length === 0 && Array.isArray(f.steps) && f.steps.length > 0) {
+      this.rebuildDagFromSteps();
+    }
 
     const nodes = f.nodes;
     const edges = f.edges;
 
-    // Check invariants: nodes must be 1:1 with steps, edges must match linear chain
-    // If violated (e.g., imported flow, manual edit), rebuild DAG
-    if (!this.checkDagInvariant(f.steps, nodes, edges)) {
-      this.rebuildDag();
+    // Check invariants: edges must match linear chain
+    // If violated (e.g., imported flow, manual edit), rebuild linear chain
+    if (!this.checkDagInvariant(nodes, edges)) {
+      this.rechainEdges();
     }
 
     // Process each incoming step with upsert semantics + incremental DAG sync
@@ -211,14 +215,10 @@ export class RecordingSessionManager {
         step.id = `step_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       }
 
-      const existingIdx = this.stepIndexMap.get(step.id);
-      if (existingIdx !== undefined) {
-        // Upsert: update existing step in place
-        f.steps[existingIdx] = step;
-
-        // Sync node: update config and type
-        const nodeIdx = this.nodeIndexMap.get(step.id);
-        if (nodeIdx === undefined || !nodes[nodeIdx]) {
+      const nodeIdx = this.nodeIndexMap.get(step.id);
+      if (nodeIdx !== undefined) {
+        // Upsert: update existing node in place
+        if (!nodes[nodeIdx]) {
           needsRebuild = true;
           continue;
         }
@@ -228,11 +228,8 @@ export class RecordingSessionManager {
           config: mapStepToNodeConfig(step),
         };
       } else {
-        // Append: new step
-        const prevStepId = f.steps.length > 0 ? f.steps[f.steps.length - 1]?.id : undefined;
-
-        f.steps.push(step);
-        this.stepIndexMap.set(step.id, f.steps.length - 1);
+        // Append: new node
+        const prevNodeId = nodes.length > 0 ? nodes[nodes.length - 1]?.id : undefined;
 
         // Create corresponding node
         const newNode: NodeBase = {
@@ -244,15 +241,15 @@ export class RecordingSessionManager {
         this.nodeIndexMap.set(step.id, nodes.length - 1);
 
         // Create edge from previous node (if exists)
-        if (prevStepId) {
-          if (!this.nodeIndexMap.has(prevStepId)) {
+        if (prevNodeId) {
+          if (!this.nodeIndexMap.has(prevNodeId)) {
             needsRebuild = true;
             continue;
           }
-          const edgeId = `e_${this.edgeSeq++}_${prevStepId}_${step.id}`;
+          const edgeId = `e_${this.edgeSeq++}_${prevNodeId}_${step.id}`;
           edges.push({
             id: edgeId,
-            from: prevStepId,
+            from: prevNodeId,
             to: step.id,
             label: EDGE_LABELS.DEFAULT,
           });
@@ -260,9 +257,9 @@ export class RecordingSessionManager {
       }
     }
 
-    // Final invariant check: if any inconsistency detected, rebuild
-    if (needsRebuild || !this.checkDagInvariant(f.steps, nodes, edges)) {
-      this.rebuildDag();
+    // Final invariant check: if any inconsistency detected, rebuild edges
+    if (needsRebuild || !this.checkDagInvariant(nodes, edges)) {
+      this.rechainEdges();
     }
 
     // Update meta timestamp
@@ -274,7 +271,7 @@ export class RecordingSessionManager {
       // ignore meta update errors
     }
 
-    this.broadcastTimelineUpdate(steps);
+    this.broadcastTimelineUpdate();
   }
 
   /**
@@ -291,29 +288,23 @@ export class RecordingSessionManager {
 
   /**
    * Check DAG invariant for linear recording:
-   * - nodes.length === steps.length
-   * - edges.length === max(0, steps.length - 1)
-   * - Last edge (if exists) points to the last step
+   * - edges.length === max(0, nodes.length - 1)
+   * - Last edge (if exists) points to the last node
    */
-  private checkDagInvariant(steps: Step[], nodes: NodeBase[], edges: Edge[]): boolean {
-    const stepCount = steps.length;
-    const expectedEdgeCount = Math.max(0, stepCount - 1);
-
-    // Check node count matches step count
-    if (nodes.length !== stepCount) {
-      return false;
-    }
+  private checkDagInvariant(nodes: NodeBase[], edges: Edge[]): boolean {
+    const nodeCount = nodes.length;
+    const expectedEdgeCount = Math.max(0, nodeCount - 1);
 
     // Check edge count matches expected linear chain
     if (edges.length !== expectedEdgeCount) {
       return false;
     }
 
-    // Check last edge points to last step (if edges exist)
-    if (edges.length > 0 && steps.length > 0) {
+    // Check last edge points to last node (if edges exist)
+    if (edges.length > 0 && nodes.length > 0) {
       const lastEdge = edges[edges.length - 1];
-      const lastStepId = steps[steps.length - 1]?.id;
-      if (lastEdge.to !== lastStepId) {
+      const lastNodeId = nodes[nodes.length - 1]?.id;
+      if (lastEdge.to !== lastNodeId) {
         return false;
       }
     }
@@ -329,15 +320,7 @@ export class RecordingSessionManager {
     const f = this.state.flow;
     if (!f) return;
 
-    this.stepIndexMap.clear();
     this.nodeIndexMap.clear();
-
-    if (Array.isArray(f.steps)) {
-      for (let i = 0; i < f.steps.length; i++) {
-        const id = f.steps[i]?.id;
-        if (id) this.stepIndexMap.set(id, i);
-      }
-    }
 
     if (Array.isArray(f.nodes)) {
       for (let i = 0; i < f.nodes.length; i++) {
@@ -351,12 +334,12 @@ export class RecordingSessionManager {
   }
 
   /**
-   * Full DAG rebuild from steps. Used as fallback when invariants are violated.
-   * Clears existing nodes/edges and regenerates from scratch.
+   * Full DAG rebuild from legacy steps.
+   * Used when flow only has steps[] but no nodes[].
    */
-  private rebuildDag(): void {
+  private rebuildDagFromSteps(): void {
     const f = this.state.flow;
-    if (!f || !Array.isArray(f.steps)) return;
+    if (!f || !Array.isArray(f.steps) || f.steps.length === 0) return;
 
     const dag = stepsToDAG(f.steps);
 
@@ -380,6 +363,34 @@ export class RecordingSessionManager {
         from: e.from,
         to: e.to,
         label: e.label,
+      });
+    }
+
+    // Rebuild caches
+    this.rebuildCaches();
+  }
+
+  /**
+   * Re-chain edges linearly according to current nodes order.
+   * Used when edge invariant is violated but nodes exist.
+   */
+  private rechainEdges(): void {
+    const f = this.state.flow;
+    if (!f) return;
+
+    if (!Array.isArray(f.nodes)) f.nodes = [];
+    if (!Array.isArray(f.edges)) f.edges = [];
+
+    // Clear and re-chain edges
+    f.edges.length = 0;
+    for (let i = 0; i < f.nodes.length - 1; i++) {
+      const from = f.nodes[i].id;
+      const to = f.nodes[i + 1].id;
+      f.edges.push({
+        id: `e_${i}_${from}_${to}`,
+        from,
+        to,
+        label: EDGE_LABELS.DEFAULT,
       });
     }
 
@@ -424,12 +435,42 @@ export class RecordingSessionManager {
     }
   }
 
+  /**
+   * Derive timeline steps from nodes for UI broadcast.
+   * This keeps protocol compatibility with recorder.js without storing steps.
+   */
+  private getTimelineSteps(): Step[] {
+    const f = this.state.flow;
+    if (!f) return [];
+
+    // Primary: derive from nodes
+    if (Array.isArray(f.nodes) && f.nodes.length > 0) {
+      return f.nodes.map((n) => {
+        const cfg =
+          n && typeof n.config === 'object' && n.config != null
+            ? (n.config as Record<string, unknown>)
+            : {};
+        // Important: id and type must override any values in config
+        // (config may contain 'type' for trigger nodes, etc.)
+        return { ...cfg, id: n.id, type: n.type } as Step;
+      });
+    }
+
+    // Legacy fallback: use steps if no nodes (shouldn't happen in normal recording)
+    if (Array.isArray(f.steps) && f.steps.length > 0) {
+      return f.steps;
+    }
+
+    return [];
+  }
+
   // Broadcast timeline updates to relevant tabs (top-frame only)
-  broadcastTimelineUpdate(steps: Step[]): void {
+  broadcastTimelineUpdate(): void {
     try {
-      if (!steps || steps.length === 0) return;
-      // Send full timeline to keep UI consistent across tabs
-      const fullSteps = this.state.flow?.steps || [];
+      // Derive steps from nodes for UI consumption (protocol unchanged)
+      const fullSteps = this.getTimelineSteps();
+      if (fullSteps.length === 0) return;
+
       // Prefer broadcasting to all tabs that participated in this session, so timeline
       // stays consistent when user switches across tabs/windows during a single session.
       const targets = this.getActiveTabs();
