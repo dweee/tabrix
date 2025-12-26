@@ -411,8 +411,8 @@ function applyRename() {
 async function save() {
   // Use exportFlowForSave to properly handle subflow editing:
   // - Flushes current canvas state back to flowLocal (including subflow edits)
-  // - Generates steps from main flow nodes/edges
   // - Returns deep copy with correct nodes/edges from flowLocal
+  // Note: steps are NOT generated - nodes/edges are the source of truth
   const result = store.exportFlowForSave();
   await chrome.runtime.sendMessage({ type: BACKGROUND_MESSAGE_TYPES.RR_SAVE_FLOW, flow: result });
   try {

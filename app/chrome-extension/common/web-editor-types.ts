@@ -243,6 +243,12 @@ export interface Transaction {
   type: TransactionType;
   /** Target element locator */
   targetLocator: ElementLocator;
+  /**
+   * Stable element identifier for cross-transaction grouping.
+   * Used by AgentChat integration for element chips aggregation.
+   * Optional for backward compatibility with existing transactions.
+   */
+  elementKey?: string;
   /** State before change */
   before: TransactionSnapshot;
   /** State after change */
@@ -255,6 +261,148 @@ export interface Transaction {
   timestamp: number;
   /** Whether merged with previous transaction */
   merged: boolean;
+}
+
+// =============================================================================
+// AgentChat Integration Types (Phase 1.1)
+// =============================================================================
+
+/** Stable element identifier for aggregating transactions across UI contexts */
+export type WebEditorElementKey = string;
+
+/**
+ * Net effect payload for a single element aggregated from the undo stack.
+ * Designed to be directly consumable by prompt builders.
+ */
+export interface NetEffectPayload {
+  /** Stable element key */
+  elementKey: WebEditorElementKey;
+  /** Locator snapshot for element re-identification */
+  locator: ElementLocator;
+  /**
+   * Aggregated style changes (first before -> last after).
+   * Contains ONLY the affected properties, not a full style snapshot.
+   * Empty string value means the property was removed/unset.
+   */
+  styleChanges?: {
+    before: Record<string, string>;
+    after: Record<string, string>;
+  };
+  /** Aggregated text change (first before -> last after) */
+  textChange?: {
+    before: string;
+    after: string;
+  };
+  /** Aggregated class changes (first before -> last after) */
+  classChanges?: {
+    before: string[];
+    after: string[];
+  };
+}
+
+/** High-level change category for UI display */
+export type ElementChangeType = 'style' | 'text' | 'class' | 'mixed';
+
+/**
+ * Element change summary for Chips rendering in AgentChat.
+ * Aggregates multiple transactions for the same element.
+ */
+export interface ElementChangeSummary {
+  /** Stable element identifier */
+  elementKey: WebEditorElementKey;
+  /** Short label for Chips display (e.g., "button#submit") */
+  label: string;
+  /** Full label for tooltips with more context */
+  fullLabel: string;
+  /** Locator snapshot for highlighting and element recovery */
+  locator: ElementLocator;
+  /** High-level change category */
+  type: ElementChangeType;
+  /** Detailed change statistics for UI tooltips */
+  changes: {
+    style?: {
+      /** Number of new style properties added */
+      added: number;
+      /** Number of style properties removed */
+      removed: number;
+      /** Number of style properties modified */
+      modified: number;
+      /** List of affected style property names */
+      details: string[];
+    };
+    text?: {
+      /** Truncated preview of original text */
+      beforePreview: string;
+      /** Truncated preview of new text */
+      afterPreview: string;
+    };
+    class?: {
+      /** Classes added */
+      added: string[];
+      /** Classes removed */
+      removed: string[];
+    };
+  };
+  /** Contributing transaction IDs in chronological order */
+  transactionIds: string[];
+  /** Net effect payload for batch Apply */
+  netEffect: NetEffectPayload;
+  /** Timestamp of the most recent transaction */
+  updatedAt: number;
+  /** Debug source information if available */
+  debugSource?: DebugSource;
+}
+
+/** Action types for TX change events */
+export type WebEditorTxChangeAction = 'push' | 'merge' | 'undo' | 'redo' | 'clear' | 'rollback';
+
+/**
+ * TX change broadcast payload sent to Sidepanel/AgentChat.
+ * Emitted when the undo stack changes (push, undo, redo, clear).
+ */
+export interface WebEditorTxChangedPayload {
+  /** Source tab ID for multi-tab isolation */
+  tabId: number;
+  /** Action that triggered this change (for UI animations/incremental updates) */
+  action: WebEditorTxChangeAction;
+  /** Aggregated element-level summaries from the current undo stack */
+  elements: ElementChangeSummary[];
+  /** Current undo stack size */
+  undoCount: number;
+  /** Current redo stack size */
+  redoCount: number;
+  /** Whether there are applicable changes (style/text/class) */
+  hasApplicableChanges: boolean;
+  /** Page URL for context */
+  pageUrl?: string;
+}
+
+/**
+ * Batch Apply payload sent from web-editor to background.
+ */
+export interface WebEditorApplyBatchPayload {
+  /** Source tab ID */
+  tabId: number;
+  /** Element changes to apply */
+  elements: ElementChangeSummary[];
+  /** Element keys excluded by user */
+  excludedKeys: WebEditorElementKey[];
+  /** Page URL for context */
+  pageUrl?: string;
+}
+
+/**
+ * Highlight element request sent from AgentChat to the active tab.
+ */
+export interface WebEditorHighlightElementPayload {
+  /** Target tab ID */
+  tabId: number;
+  /** Element key to highlight */
+  elementKey: WebEditorElementKey;
+  /** Locator for element identification */
+  locator: ElementLocator;
+  /** Highlight mode: 'hover' to show, 'clear' to hide */
+  mode: 'hover' | 'clear';
 }
 
 // =============================================================================

@@ -427,7 +427,7 @@ const SHADOW_HOST_STYLES = /* css */ `
   /* ==========================================================================
    * Toolbar (Redesigned per toolbar-ui.html design spec)
    * - Bounce easing animations
-   * - Collapsible pill (580x44 <-> 44x44)
+   * - Collapsible pill (580x40 <-> 40x40)
    * - Grip icon rotation on collapse
    * ========================================================================== */
 
@@ -437,13 +437,14 @@ const SHADOW_HOST_STYLES = /* css */ `
     top: 16px;
     transform: translateX(-50%);
     width: 580px;
-    height: 44px;
+    height: 40px;
     max-width: calc(100vw - 32px);
     display: flex;
     align-items: center;
     background: #ffffff;
     border-radius: 999px;
-    box-shadow: 0 10px 15px -3px rgba(203, 213, 225, 0.5),
+    box-shadow: 0 -4px 10px -6px rgba(15, 23, 42, 0.18),
+      0 10px 15px -3px rgba(203, 213, 225, 0.5),
       0 4px 6px -4px rgba(203, 213, 225, 0.5);
     pointer-events: auto;
     user-select: none;
@@ -451,13 +452,8 @@ const SHADOW_HOST_STYLES = /* css */ `
     font-size: 11px;
     color: #475569;
     transition: width 500ms var(--we-ease-bounce), height 500ms var(--we-ease-bounce);
-    overflow: hidden;
-    will-change: width, height;
-  }
-
-  /* Allow dropdown menu overflow when menu is open and toolbar is expanded */
-  .we-toolbar[data-structure-open="true"][data-minimized="false"] {
     overflow: visible;
+    will-change: width, height;
   }
 
   .we-toolbar[data-position="bottom"] {
@@ -474,16 +470,18 @@ const SHADOW_HOST_STYLES = /* css */ `
     transform: none;
   }
 
-  /* Collapsed toolbar - 44x44 circle */
+  /* Collapsed toolbar - 40x40 circle */
   .we-toolbar[data-minimized="true"] {
-    width: 44px;
-    height: 44px;
+    width: 40px;
+    height: 40px;
   }
 
   /* Toolbar content row (collapses with toolbar) */
   .we-toolbar-content {
     display: flex;
     align-items: center;
+    flex: 1;
+    min-width: 0;
     gap: 10px;
     white-space: nowrap;
     padding-right: 8px;
@@ -503,10 +501,10 @@ const SHADOW_HOST_STYLES = /* css */ `
     pointer-events: auto;
   }
 
-  /* Grip toggle button (44x44, hover slate-50, active scale-90) */
+  /* Grip toggle button (40x40, hover slate-50, active scale-90) */
   .we-toolbar .we-drag-handle {
-    width: 44px;
-    height: 44px;
+    width: 40px;
+    height: 40px;
     flex-shrink: 0;
     border-radius: 999px;
     cursor: pointer;
@@ -673,6 +671,14 @@ const SHADOW_HOST_STYLES = /* css */ `
     width: 14px;
     height: 14px;
     display: block;
+  }
+
+  /* End actions container: pushes apply + close to far right */
+  .we-toolbar-end-actions {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
   }
 
   /* Apply button (indigo-500) */
@@ -922,26 +928,37 @@ const SHADOW_HOST_STYLES = /* css */ `
     border-bottom: 0;
   }
 
-  .we-prop-header-left {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
+  /* Symmetric header layout: drag (left) | tabs (center) | minimize (right) */
+  .we-prop-panel .we-header {
+    padding: 8px;
+    gap: 4px;
   }
 
-  .we-prop-target {
-    font-size: 10px;
-    color: var(--we-text-secondary);
-    max-width: 160px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .we-prop-panel .we-header .we-prop-tabs {
+    flex: 1;
+    justify-content: center;
   }
 
-  .we-prop-header-right {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
+  /* Minimize button chevron rotation */
+  .we-minimize-btn svg {
+    transition: transform 200ms ease;
+  }
+
+  .we-prop-panel[data-minimized="true"] .we-minimize-btn svg {
+    transform: rotate(180deg);
+  }
+
+  /* Header tooltips: show below to avoid being clipped by panel overflow */
+  .we-prop-panel .we-header [data-tooltip]::after {
+    bottom: auto;
+    top: calc(100% + 6px);
+  }
+
+  .we-prop-panel .we-header [data-tooltip]::before {
+    bottom: auto;
+    top: calc(100% + 2px);
+    border-top-color: transparent;
+    border-bottom-color: var(--we-text-primary);
   }
 
   /* Tab container with pill/segmented style (aligned with design spec) */
@@ -1003,7 +1020,6 @@ const SHADOW_HOST_STYLES = /* css */ `
 
   /* Force hidden state for property panel sections during minimization */
   .we-prop-body[hidden],
-  .we-prop-header-left[hidden],
   .we-prop-tabs[hidden] {
     display: none;
   }

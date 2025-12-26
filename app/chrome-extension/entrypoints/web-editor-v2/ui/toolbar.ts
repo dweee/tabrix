@@ -299,7 +299,7 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
   closeBtn.type = 'button';
   closeBtn.className = 'we-toolbar-close-btn';
   closeBtn.setAttribute('aria-label', 'Close Web Editor');
-  closeBtn.dataset.tooltip = 'Close';
+  closeBtn.dataset.tooltip = 'Exit Editor';
   closeBtn.append(createCloseIcon());
 
   // Hidden status live region (for screen readers)
@@ -500,8 +500,13 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
   // Assemble structure group: Structure dropdown + separator + Undo/Redo icons
   structureGroup.append(structureWrap, structureGroupSeparator, undoBtn, redoBtn);
 
+  // End actions: Apply + Close (pushed to right via margin-left: auto)
+  const endActions = document.createElement('div');
+  endActions.className = 'we-toolbar-end-actions';
+  endActions.append(applyBtn, closeBtn);
+
   // Assemble content row
-  content.append(indicator, historyEl, divider, structureGroup, applyBtn, closeBtn);
+  content.append(indicator, historyEl, divider, structureGroup, endActions);
 
   // Assemble root: grip + content + hidden status
   root.append(dragHandle, content, statusEl);

@@ -15,7 +15,7 @@
 
 import { Disposer } from '../../utils/disposables';
 import { installFloatingDrag, type FloatingPosition } from '../floating-drag';
-import { createChevronIcon, createCloseIcon, createGripIcon } from '../icons';
+import { createChevronIcon, createChevronUpIcon, createGripIcon } from '../icons';
 import type {
   PropertyPanel,
   PropertyPanelOptions,
@@ -79,45 +79,6 @@ function formatTargetLabel(element: Element): string {
   }
 
   return tag;
-}
-
-/**
- * Create sliders SVG icon for property panel minimize/expand button
- */
-function createSlidersIcon(): SVGElement {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 20 20');
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('aria-hidden', 'true');
-
-  // Three horizontal lines
-  const lines = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  lines.setAttribute('d', 'M4 5H16 M4 10H16 M4 15H16');
-  lines.setAttribute('stroke', 'currentColor');
-  lines.setAttribute('stroke-width', '2');
-  lines.setAttribute('stroke-linecap', 'round');
-  lines.setAttribute('stroke-linejoin', 'round');
-  svg.append(lines);
-
-  // Three knob circles at different positions
-  const knobs: ReadonlyArray<readonly [number, number]> = [
-    [7, 5],
-    [13, 10],
-    [9, 15],
-  ];
-
-  for (const [cx, cy] of knobs) {
-    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    circle.setAttribute('cx', String(cx));
-    circle.setAttribute('cy', String(cy));
-    circle.setAttribute('r', '1.75');
-    circle.setAttribute('fill', 'none');
-    circle.setAttribute('stroke', 'currentColor');
-    circle.setAttribute('stroke-width', '2');
-    svg.append(circle);
-  }
-
-  return svg;
 }
 
 /**
@@ -255,11 +216,11 @@ export function createPropertyPanel(options: PropertyPanelOptions): PropertyPane
   root.dataset.minimized = 'false';
   root.dataset.dragged = floatingPosition ? 'true' : 'false';
 
-  // Header
+  // Header (symmetric layout: drag | tabs | minimize)
   const header = document.createElement('header');
   header.className = 'we-header';
 
-  // Drag handle (grip) - placed directly in header for proper alignment
+  // Left: Drag handle (grip)
   const dragHandle = document.createElement('button');
   dragHandle.type = 'button';
   dragHandle.className = 'we-drag-handle';
@@ -267,22 +228,10 @@ export function createPropertyPanel(options: PropertyPanelOptions): PropertyPane
   dragHandle.dataset.tooltip = 'Drag';
   dragHandle.append(createGripIcon());
 
-  // Header left: title and target label (column layout)
-  const headerLeft = document.createElement('div');
-  headerLeft.className = 'we-prop-header-left';
-
-  const title = document.createElement('div');
-  title.className = 'we-title';
-  title.textContent = 'Properties';
-
+  // Target label (hidden, kept for data binding)
   const targetLabel = document.createElement('div');
   targetLabel.className = 'we-prop-target';
-
-  headerLeft.append(title, targetLabel);
-
-  // Header right: tabs and close button
-  const headerRight = document.createElement('div');
-  headerRight.className = 'we-prop-header-right';
+  targetLabel.hidden = true;
 
   // Tab buttons
   const tabsContainer = document.createElement('div');
@@ -319,38 +268,17 @@ export function createPropertyPanel(options: PropertyPanelOptions): PropertyPane
   domTabBtn.textContent = 'DOM';
 
   tabsContainer.append(designTabBtn, cssTabBtn, propsTabBtn, domTabBtn);
-  headerRight.append(tabsContainer);
 
-  // Minimize/expand button
+  // Right: Minimize/expand button with chevron icon
   const minimizeBtn = document.createElement('button');
   minimizeBtn.type = 'button';
-  minimizeBtn.className = 'we-icon-btn';
+  minimizeBtn.className = 'we-icon-btn we-minimize-btn';
   minimizeBtn.setAttribute('aria-label', 'Minimize property panel');
   minimizeBtn.dataset.tooltip = 'Minimize';
-  minimizeBtn.append(createSlidersIcon());
-  headerRight.append(minimizeBtn);
+  minimizeBtn.append(createChevronUpIcon());
 
-  // Close button reference (used in setMinimized)
-  let closeBtn: HTMLButtonElement | null = null;
-
-  // Close button (optional) - icon button style
-  if (options.onRequestClose) {
-    closeBtn = document.createElement('button');
-    closeBtn.type = 'button';
-    closeBtn.className = 'we-icon-btn';
-    closeBtn.setAttribute('aria-label', 'Close Web Editor');
-    closeBtn.dataset.tooltip = 'Close';
-    closeBtn.append(createCloseIcon());
-
-    disposer.listen(closeBtn, 'click', (event) => {
-      event.preventDefault();
-      options.onRequestClose?.();
-    });
-
-    headerRight.append(closeBtn);
-  }
-
-  header.append(dragHandle, headerLeft, headerRight);
+  // Symmetric layout: drag (left) | tabs (center) | minimize (right)
+  header.append(dragHandle, tabsContainer, minimizeBtn, targetLabel);
 
   // Body container
   const body = document.createElement('div');
@@ -642,9 +570,7 @@ export function createPropertyPanel(options: PropertyPanelOptions): PropertyPane
 
     // Hide/show body and header elements
     body.hidden = minimized;
-    headerLeft.hidden = minimized;
     tabsContainer.hidden = minimized;
-    if (closeBtn) closeBtn.hidden = minimized;
 
     // Update minimize button label and tooltip
     minimizeBtn.setAttribute(

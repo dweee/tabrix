@@ -11,16 +11,20 @@ import { IndexedDbClient } from '@/utils/indexeddb-client';
 type StoreName = 'flows' | 'runs' | 'published' | 'schedules' | 'triggers';
 
 const DB_NAME = 'rr_storage';
-const DB_VERSION = 1;
+// Version history:
+// v1: Initial schema with flows, runs, published, schedules, triggers stores
+// v2: (Previous iteration - no schema change, version was bumped during development)
+// v3: Current - ensure all stores exist, support upgrade from any previous version
+const DB_VERSION = 3;
+
+const REQUIRED_STORES = ['flows', 'runs', 'published', 'schedules', 'triggers'] as const;
 
 const idb = new IndexedDbClient(DB_NAME, DB_VERSION, (db, oldVersion) => {
-  switch (oldVersion) {
-    case 0: {
-      db.createObjectStore('flows', { keyPath: 'id' });
-      db.createObjectStore('runs', { keyPath: 'id' });
-      db.createObjectStore('published', { keyPath: 'id' });
-      db.createObjectStore('schedules', { keyPath: 'id' });
-      db.createObjectStore('triggers', { keyPath: 'id' });
+  // Idempotent upgrade: ensure all required stores exist regardless of oldVersion
+  // This handles both fresh installs (oldVersion=0) and upgrades from any version
+  for (const storeName of REQUIRED_STORES) {
+    if (!db.objectStoreNames.contains(storeName)) {
+      db.createObjectStore(storeName, { keyPath: 'id' });
     }
   }
 });
@@ -122,12 +126,21 @@ export const IndexedDbStorage = {
 
 // One-time migration from chrome.storage.local to IndexedDB
 let migrationPromise: Promise<void> | null = null;
+let migrationFailed = false;
+
 export async function ensureMigratedFromLocal(): Promise<void> {
+  // If previous migration failed, allow retry
+  if (migrationFailed) {
+    migrationPromise = null;
+    migrationFailed = false;
+  }
   if (migrationPromise) return migrationPromise;
+
   migrationPromise = (async () => {
     try {
       const flag = await chrome.storage.local.get(['rr_idb_migrated']);
       if (flag && flag['rr_idb_migrated']) return;
+
       // Read existing data from chrome.storage.local
       const res = await chrome.storage.local.get([
         'rr_flows',
@@ -141,15 +154,20 @@ export async function ensureMigratedFromLocal(): Promise<void> {
       const published = (res['rr_published_flows'] as PublishedFlowInfo[]) || [];
       const schedules = (res['rr_schedules'] as FlowSchedule[]) || [];
       const triggers = (res['rr_triggers'] as FlowTrigger[]) || [];
+
       // Write into IDB
       if (flows.length) await putMany('flows', flows);
       if (runs.length) await putMany('runs', runs);
       if (published.length) await putMany('published', published);
       if (schedules.length) await putMany('schedules', schedules);
       if (triggers.length) await putMany('triggers', triggers);
+
       await chrome.storage.local.set({ rr_idb_migrated: true });
     } catch (e) {
+      migrationFailed = true;
       console.error('IndexedDbStorage migration failed:', e);
+      // Re-throw to let callers know migration failed
+      throw e;
     }
   })();
   return migrationPromise;

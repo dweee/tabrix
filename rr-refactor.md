@@ -29,7 +29,7 @@
 | - UI 刷新机制          | ✅ 完成   | 2025-12  | RR_FLOWS_CHANGED 推送事件、popup/sidepanel 监听                   |
 | - P4 清理旧类型        | ✅ 完成   | 2025-12  | legacy-types.ts 拆分 + 停止 steps 写入 + 清理 fallback            |
 | - ctx.tabId 同步       | ✅ 完成   | 2025-12  | openTab/switchTab 后更新 ctx.tabId，确保后续步骤目标正确 tab      |
-| Phase 2-7              | ⏳ 待实施 | -        | 录制系统、回放引擎、Builder、高级功能                             |
+| Phase 2-7              | ⚠️ 已替代 | -        | 核心功能已在现有模块实现，详见"Phase 2-7: 后续阶段（已替代实现）" |
 
 **当前测试状态**: 269 个测试（全部通过）
 
@@ -55,6 +55,10 @@ P4 已完成核心清理，可选后续优化全部完成：
   - 新增 `getTimelineSteps()` 从 nodes 派生 steps 用于 timeline 广播（协议不变）
   - 新增 `rechainEdges()` 用于 edge 不变式违反时的修复
   - 测试已更新（269 测试全部通过）
+- [x] P3: 清理 `flow-builder.ts` 的 legacy steps 写入路径（2025-12-25）
+  - `createInitialFlow()` 现在初始化 `nodes: [], edges: []` 而非 `steps: []`
+  - 移除了 `appendSteps()` 函数，改为 `appendNodeToFlow()` 内部函数直接操作 DAG
+  - `addNavigationStep()` fallback 现在直接写入 nodes/edges，不再写 steps
 - 统一 `importFromSteps()` 功能到导入流程中（低优先级，保留供用户手动导入）
 
 ---
@@ -1076,36 +1080,58 @@ onUnmounted(() => {
 - [x] 更新 `accessibility-tree-helper.js` - 添加 `verifyFingerprint` action 处理
 - [ ] 抽取共用工具到 `shared/selector-core/` 供 web-editor-v2 复用（可选优化）
 
-#### Phase 2-7: 后续阶段
+#### Phase 2-7: 后续阶段（已替代实现）
 
-- Phase 2: 录制系统重写
-- Phase 3: 回放引擎重写
-- Phase 4: Builder 重构
-- Phase 5-7: 高级功能、iframe、测试
+原计划创建的独立模块文件未实现，但核心功能已散落在现有模块中：
+
+| 原计划文件                        | 实际实现位置                                           | 状态说明                                      |
+| --------------------------------- | ------------------------------------------------------ | --------------------------------------------- |
+| `recording/coordinator.ts`        | `recording/recorder-manager.ts` + `session-manager.ts` | 录制状态机、生命周期管理、stop barrier 已实现 |
+| `inject-scripts/event-capture.ts` | `inject-scripts/recorder.js`                           | 事件捕获、缓冲区、flush、iframe 支持已实现    |
+| `recording/action-composer.ts`    | `inject-scripts/recorder.js`                           | fill 合并、click/dblclick 区分已实现          |
+| `engine/executor.ts`              | `engine/scheduler.ts`                                  | DAG 遍历、控制流、执行上下文管理已实现        |
+
+**建议**：除非有明确的下一阶段需求（如 recorder.js 全面 TS 化、可插拔录制策略），否则不建议按文档重写这些模块，因为核心功能已存在，重构风险大于收益。
+
+- Phase 2: 录制系统 - 功能已在 `recorder.js` + `session-manager.ts` 中实现
+- Phase 3: 回放引擎 - 功能已在 `scheduler.ts` + `step-runner.ts` + `actions/handlers/*` 中实现
+- Phase 4: Builder 重构 - 待定
+- Phase 5-7: 高级功能、iframe、测试 - 部分已实现
 
 ---
 
-## 一、现状分析
+## 一、现状分析（历史参考，部分已过时）
+
+> **注意**：以下分析为重构前的历史状态，部分内容已过时。当前架构已实现 DAG 统一。
 
 ### 1.1 架构现状
+
+**重构前（已过时）**:
 
 ```
 录制: recorder.js -> content-message-handler -> session-manager -> flow-store (steps格式)
 回放: scheduler -> step-runner -> nodes/* (需要 nodes/edges 格式)
 ```
 
+**重构后（当前状态）**:
+
+```
+录制: recorder.js -> content-message-handler -> session-manager -> flow-store (nodes/edges 格式)
+回放: scheduler -> step-runner -> nodes/* (nodes/edges 格式)
+```
+
 ### 1.2 高严重度 Bug
 
-| Bug                    | 位置                                                | 描述                                   | 状态      |
-| ---------------------- | --------------------------------------------------- | -------------------------------------- | --------- |
-| 数据格式不兼容         | `flow-builder.ts` / `scheduler.ts`                  | 录制产生 steps，回放需要 nodes/edges   | ✅ 已修复 |
-| 变量丢失               | `recorder.js:609` / `content-message-handler.ts:18` | 变量只存本地，不传给 background        | ✅ 已修复 |
-| 步骤丢失               | `recorder.js:584-594`                               | pause/stop/导航时未 flush 缓冲区       | ✅ 已修复 |
-| fill 值不完整          | `recorder.js`                                       | debounce 800ms vs flush 100ms 时序冲突 | ✅ 已修复 |
-| stop barrier 丢步骤    | `recorder-manager.ts` / `recorder.js`               | stop 时 iframe 最后步骤可能丢失        | ✅ 已修复 |
-| trigger 无 handler     | `nodes/index.ts:58`                                 | UI 可用但运行时无执行器                | ✅ 已修复 |
-| 选择器桥死锁           | `accessibility-tree-helper.js:1051`                 | iframe 通信无超时                      | ✅ 已修复 |
-| Builder 保存丢失子流程 | `useBuilderStore.ts:392`                            | 编辑子流程时保存不会 flush             | ✅ 已修复 |
+| Bug                    | 位置                                                | 描述                                      | 状态      |
+| ---------------------- | --------------------------------------------------- | ----------------------------------------- | --------- |
+| 数据格式不兼容         | `flow-builder.ts` / `scheduler.ts`                  | ~~录制产生 steps~~ 现已统一为 nodes/edges | ✅ 已修复 |
+| 变量丢失               | `recorder.js:609` / `content-message-handler.ts:18` | 变量只存本地，不传给 background           | ✅ 已修复 |
+| 步骤丢失               | `recorder.js:584-594`                               | pause/stop/导航时未 flush 缓冲区          | ✅ 已修复 |
+| fill 值不完整          | `recorder.js`                                       | debounce 800ms vs flush 100ms 时序冲突    | ✅ 已修复 |
+| stop barrier 丢步骤    | `recorder-manager.ts` / `recorder.js`               | stop 时 iframe 最后步骤可能丢失           | ✅ 已修复 |
+| trigger 无 handler     | `nodes/index.ts:58`                                 | UI 可用但运行时无执行器                   | ✅ 已修复 |
+| 选择器桥死锁           | `accessibility-tree-helper.js:1051`                 | iframe 通信无超时                         | ✅ 已修复 |
+| Builder 保存丢失子流程 | `useBuilderStore.ts:392`                            | 编辑子流程时保存不会 flush                | ✅ 已修复 |
 
 ### 1.3 中严重度 Bug
 

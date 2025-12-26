@@ -5,7 +5,14 @@
  * Manages lifecycle of all subsystems (Shadow Host, Canvas, Interaction Engine, etc.)
  */
 
-import type { WebEditorState, WebEditorV2Api } from '@/common/web-editor-types';
+import type {
+  WebEditorApplyBatchPayload,
+  WebEditorState,
+  WebEditorTxChangedPayload,
+  WebEditorTxChangeAction,
+  WebEditorV2Api,
+} from '@/common/web-editor-types';
+import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import { WEB_EDITOR_V2_VERSION, WEB_EDITOR_V2_LOG_PREFIX } from '../constants';
 import { mountShadowHost, type ShadowHostManager } from '../ui/shadow-host';
 import { createToolbar, type Toolbar } from '../ui/toolbar';
@@ -32,6 +39,7 @@ import {
 } from './transaction-manager';
 import { locateElement } from './locator';
 import { sendTransactionToAgent } from './payload-builder';
+import { aggregateTransactionsByElement } from './transaction-aggregator';
 import {
   createExecutionTracker,
   type ExecutionTracker,
@@ -400,6 +408,67 @@ export function createWebEditorV2(): WebEditorV2Api {
     state.canvasOverlay.render();
   }
 
+  // ===========================================================================
+  // AgentChat Integration (Phase 1.4)
+  // ===========================================================================
+
+  const WEB_EDITOR_TX_CHANGED_SESSION_KEY_PREFIX = 'web-editor-v2-tx-changed-' as const;
+  const TX_CHANGED_BROADCAST_DEBOUNCE_MS = 100;
+
+  let txChangedBroadcastTimer: number | null = null;
+  let pendingTxAction: WebEditorTxChangeAction = 'push';
+
+  /**
+   * Broadcast aggregated transaction state to extension UI (e.g., Sidepanel).
+   *
+   * This runs on a short debounce because TransactionManager can emit frequent
+   * merge events during continuous interactions (e.g., dragging sliders).
+   *
+   * NOTE: tabId is set to 0 here; background script will fill in the actual
+   * tabId from sender.tab.id and update storage with per-tab keys.
+   */
+  function broadcastTxChanged(action: WebEditorTxChangeAction): void {
+    // Track the action for when debounce fires
+    pendingTxAction = action;
+
+    if (txChangedBroadcastTimer !== null) {
+      window.clearTimeout(txChangedBroadcastTimer);
+    }
+
+    txChangedBroadcastTimer = window.setTimeout(() => {
+      txChangedBroadcastTimer = null;
+
+      const tm = state.transactionManager;
+      if (!tm) return;
+
+      const undoStack = tm.getUndoStack();
+      const redoStack = tm.getRedoStack();
+      const elements = aggregateTransactionsByElement(undoStack);
+
+      const payload: WebEditorTxChangedPayload = {
+        tabId: 0, // Will be filled by background script from sender.tab.id
+        action: pendingTxAction,
+        elements,
+        undoCount: undoStack.length,
+        redoCount: redoStack.length,
+        hasApplicableChanges: elements.length > 0,
+        pageUrl: window.location.href,
+      };
+
+      // Broadcast to extension UI (background will handle storage persistence)
+      if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+        chrome.runtime
+          .sendMessage({
+            type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TX_CHANGED,
+            payload,
+          })
+          .catch(() => {
+            // Ignore if no listeners (e.g., sidepanel not open)
+          });
+      }
+    }, TX_CHANGED_BROADCAST_DEBOUNCE_MS);
+  }
+
   /**
    * Handle transaction changes from TransactionManager
    */
@@ -417,6 +486,9 @@ export function createWebEditorV2(): WebEditorV2Api {
     if (action === 'undo' || action === 'redo') {
       state.propertyPanel?.refresh();
     }
+
+    // Broadcast aggregated TX state for AgentChat integration (Phase 1.4)
+    broadcastTxChanged(action as WebEditorTxChangeAction);
 
     // Notify HMR consistency verifier of transaction change (Phase 4.8)
     state.hmrConsistencyVerifier?.onTransactionChange(event);
@@ -588,6 +660,96 @@ export function createWebEditorV2(): WebEditorV2Api {
       throw new Error(attemptRollbackOnFailure(originalMsg));
     } finally {
       // Clear snapshot regardless of outcome
+      state.applyingSnapshot = null;
+    }
+  }
+
+  /**
+   * Apply all applicable transactions to Agent (batch Apply to Code)
+   *
+   * Phase 1.4: Aggregates the undo stack by element and sends a single batch request.
+   * Unlike applyLatestTransaction, this does NOT auto-rollback on failure.
+   */
+  async function applyAllTransactions(): Promise<{ requestId?: string; sessionId?: string }> {
+    const tm = state.transactionManager;
+    if (!tm) {
+      throw new Error('Transaction manager not ready');
+    }
+
+    // Prevent concurrent apply operations
+    if (state.applyingSnapshot) {
+      throw new Error('Apply already in progress');
+    }
+
+    const undoStack = tm.getUndoStack();
+    if (undoStack.length === 0) {
+      throw new Error('No changes to apply');
+    }
+
+    // Block unsupported transaction types
+    for (const tx of undoStack) {
+      if (tx.type === 'move') {
+        throw new Error('Apply does not support reorder operations yet');
+      }
+      if (tx.type === 'structure') {
+        throw new Error('Apply does not support structure operations yet');
+      }
+      if (tx.type !== 'style' && tx.type !== 'text' && tx.type !== 'class') {
+        throw new Error(`Apply does not support "${tx.type}" transactions`);
+      }
+    }
+
+    const elements = aggregateTransactionsByElement(undoStack);
+    if (elements.length === 0) {
+      throw new Error('No net changes to apply');
+    }
+
+    // Snapshot latest transaction for concurrency tracking
+    const latestTx = undoStack[undoStack.length - 1]!;
+    state.applyingSnapshot = {
+      txId: latestTx.id,
+      txTimestamp: latestTx.timestamp,
+    };
+
+    try {
+      if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
+        throw new Error('Chrome runtime API not available');
+      }
+
+      const payload: WebEditorApplyBatchPayload = {
+        tabId: 0, // Will be filled by background script
+        elements,
+        excludedKeys: [], // TODO: Read from storage if exclude feature is implemented
+        pageUrl: window.location.href,
+      };
+
+      const resp = await chrome.runtime.sendMessage({
+        type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_APPLY_BATCH,
+        payload,
+      });
+
+      const r = resp as {
+        success?: unknown;
+        requestId?: unknown;
+        sessionId?: unknown;
+        error?: unknown;
+      } | null;
+
+      if (r && r.success === true) {
+        const requestId = typeof r.requestId === 'string' ? r.requestId : undefined;
+        const sessionId = typeof r.sessionId === 'string' ? r.sessionId : undefined;
+
+        // Start tracking execution status if we have a requestId
+        if (requestId && sessionId && state.executionTracker) {
+          state.executionTracker.track(requestId, sessionId);
+        }
+
+        return { requestId, sessionId };
+      }
+
+      const errorMsg = typeof r?.error === 'string' ? r.error : 'Agent request failed';
+      throw new Error(errorMsg);
+    } finally {
       state.applyingSnapshot = null;
     }
   }
@@ -786,18 +948,20 @@ export function createWebEditorV2(): WebEditorV2Api {
           const undoStack = tm.getUndoStack();
           if (undoStack.length === 0) return undefined;
 
-          const latestTx = undoStack[undoStack.length - 1];
-          if (!latestTx) return undefined;
-
-          // Apply only supports style and text transactions
-          if (latestTx.type === 'move') {
-            return 'Apply does not support reorder operations yet';
-          }
-          if (latestTx.type === 'structure') {
-            return 'Apply does not support structure operations yet';
-          }
-          if (latestTx.type !== 'style' && latestTx.type !== 'text') {
-            return `Apply does not support "${latestTx.type}" transactions`;
+          // Check all transactions for unsupported types (Phase 1.4)
+          // NOTE: We only do O(n) type checking here, NOT aggregation.
+          // Full net effect check happens in applyAllTransactions() to avoid
+          // performance issues during frequent merge events.
+          for (const tx of undoStack) {
+            if (tx.type === 'move') {
+              return 'Apply does not support reorder operations yet';
+            }
+            if (tx.type === 'structure') {
+              return 'Apply does not support structure operations yet';
+            }
+            if (tx.type !== 'style' && tx.type !== 'text' && tx.type !== 'class') {
+              return `Apply does not support "${tx.type}" transactions`;
+            }
           }
 
           return undefined;
@@ -831,7 +995,7 @@ export function createWebEditorV2(): WebEditorV2Api {
             }
           }
         },
-        onApply: applyLatestTransaction,
+        onApply: applyAllTransactions,
         onUndo: () => state.transactionManager?.undo(),
         onRedo: () => state.transactionManager?.redo(),
         onRequestClose: () => stop(),
@@ -971,6 +1135,12 @@ export function createWebEditorV2(): WebEditorV2Api {
     }
 
     state.active = false;
+
+    // Cancel pending debounced broadcasts (Phase 1.4)
+    if (txChangedBroadcastTimer !== null) {
+      window.clearTimeout(txChangedBroadcastTimer);
+      txChangedBroadcastTimer = null;
+    }
 
     try {
       // Cleanup in reverse order of initialization

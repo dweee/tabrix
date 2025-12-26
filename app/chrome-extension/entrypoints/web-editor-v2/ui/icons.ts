@@ -7,7 +7,7 @@
  * - Enable direct DOM manipulation
  *
  * Design standards:
- * - ViewBox: 20x20
+ * - ViewBox: 20x20 (default) or 24x24 (for specific icons)
  * - Stroke width: 2px
  * - Line caps/joins: round
  */
@@ -19,6 +19,14 @@
 function createSvgElement(): SVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 20 20');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+  return svg;
+}
+
+function createSvgElement24(): SVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('fill', 'none');
   svg.setAttribute('aria-hidden', 'true');
   return svg;
@@ -104,21 +112,21 @@ export function createChevronIcon(): SVGElement {
 
 /**
  * Undo icon (↶) for undo button
+ * Uses 24x24 viewBox matching toolbar-ui.html design spec
  */
 export function createUndoIcon(): SVGElement {
-  const svg = createSvgElement();
-  // Arrow pointing left with curved tail
-  svg.append(createStrokePath('M4 10h10a3 3 0 0 0 0-6H7M4 10l3-3M4 10l3 3'));
+  const svg = createSvgElement24();
+  svg.append(createStrokePath('M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6'));
   return svg;
 }
 
 /**
  * Redo icon (↷) for redo button
+ * Uses 24x24 viewBox matching toolbar-ui.html design spec
  */
 export function createRedoIcon(): SVGElement {
-  const svg = createSvgElement();
-  // Arrow pointing right with curved tail
-  svg.append(createStrokePath('M16 10H6a3 3 0 0 1 0-6h7M16 10l-3-3M16 10l-3 3'));
+  const svg = createSvgElement24();
+  svg.append(createStrokePath('M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6'));
   return svg;
 }
 
