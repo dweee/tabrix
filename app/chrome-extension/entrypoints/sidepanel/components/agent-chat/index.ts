@@ -5,6 +5,8 @@
 export { default as AgentChatShell } from './AgentChatShell.vue';
 export { default as AgentTopBar } from './AgentTopBar.vue';
 export { default as AgentComposer } from './AgentComposer.vue';
+export { default as WebEditorChanges } from './WebEditorChanges.vue';
+export { default as ElementChip } from './ElementChip.vue';
 export { default as AgentConversation } from './AgentConversation.vue';
 export { default as AgentRequestThread } from './AgentRequestThread.vue';
 export { default as AgentTimeline } from './AgentTimeline.vue';

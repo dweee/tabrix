@@ -124,89 +124,115 @@ function createBaseIconSvg(): SVGSVGElement {
   return svg;
 }
 
-function applyStroke(el: SVGElement, strokeWidth = '1.4'): void {
-  el.setAttribute('stroke', 'currentColor');
-  el.setAttribute('stroke-width', strokeWidth);
-  el.setAttribute('stroke-linecap', 'round');
-  el.setAttribute('stroke-linejoin', 'round');
-}
-
 function createTextAlignIcon(value: TextAlignValue): SVGElement {
   const svg = createBaseIconSvg();
-  const path = document.createElementNS(SVG_NS, 'path');
-  applyStroke(path, '1.4');
 
-  const iconPaths: Record<TextAlignValue, string> = {
-    left: 'M2.5 4.5H12.5M2.5 7.5H8.5M2.5 10.5H10.5',
-    center: 'M3.5 4.5H11.5M5.5 7.5H9.5M4.5 10.5H10.5',
-    right: 'M2.5 4.5H12.5M6.5 7.5H12.5M4.5 10.5H12.5',
-    justify: 'M2.5 4.5H12.5M2.5 7.5H12.5M2.5 10.5H12.5',
+  // 容器边框（虚线矩形表示容器）
+  const container = document.createElementNS(SVG_NS, 'rect');
+  container.setAttribute('x', '2');
+  container.setAttribute('y', '2');
+  container.setAttribute('width', '11');
+  container.setAttribute('height', '11');
+  container.setAttribute('rx', '1.5');
+  container.setAttribute('stroke', 'currentColor');
+  container.setAttribute('stroke-width', '1');
+  container.setAttribute('stroke-dasharray', '2 1');
+  container.setAttribute('fill', 'none');
+  container.setAttribute('opacity', '0.5');
+
+  // 文本行的位置配置：每行的 [x起点, 宽度]
+  const lineConfigs: Record<TextAlignValue, Array<[number, number]>> = {
+    left: [
+      [3.5, 8], // 长行
+      [3.5, 5], // 短行
+      [3.5, 6.5], // 中行
+    ],
+    center: [
+      [3.5, 8], // 长行居中
+      [5, 5], // 短行居中
+      [4.25, 6.5], // 中行居中
+    ],
+    right: [
+      [3.5, 8], // 长行
+      [6.5, 5], // 短行靠右
+      [5.5, 6.5], // 中行靠右
+    ],
+    justify: [
+      [3.5, 8], // 全宽
+      [3.5, 8], // 全宽
+      [3.5, 8], // 全宽
+    ],
   };
 
-  path.setAttribute('d', iconPaths[value]);
-  svg.append(path);
+  const yPositions = [4.5, 7.5, 10.5];
+  const configs = lineConfigs[value];
+
+  configs.forEach(([x, width], index) => {
+    const line = document.createElementNS(SVG_NS, 'rect');
+    line.setAttribute('x', String(x));
+    line.setAttribute('y', String(yPositions[index] - 0.5));
+    line.setAttribute('width', String(width));
+    line.setAttribute('height', '1');
+    line.setAttribute('rx', '0.5');
+    line.setAttribute('fill', 'currentColor');
+    svg.append(line);
+  });
+
+  svg.prepend(container);
   return svg;
 }
 
 function createVerticalAlignIcon(value: VerticalAlignValue): SVGElement {
   const svg = createBaseIconSvg();
 
-  // Baseline/guide line
-  const guide = document.createElementNS(SVG_NS, 'path');
-  applyStroke(guide, '1.2');
+  // 容器边框（虚线矩形表示容器）
+  const container = document.createElementNS(SVG_NS, 'rect');
+  container.setAttribute('x', '2');
+  container.setAttribute('y', '2');
+  container.setAttribute('width', '11');
+  container.setAttribute('height', '11');
+  container.setAttribute('rx', '1.5');
+  container.setAttribute('stroke', 'currentColor');
+  container.setAttribute('stroke-width', '1');
+  container.setAttribute('stroke-dasharray', '2 1');
+  container.setAttribute('fill', 'none');
+  container.setAttribute('opacity', '0.5');
 
-  // Content box representation
-  const rect = document.createElementNS(SVG_NS, 'rect');
-  rect.setAttribute('x', '4.5');
-  rect.setAttribute('width', '6');
-  rect.setAttribute('rx', '1');
-  rect.setAttribute('fill', 'none');
-  applyStroke(rect, '1.2');
+  // 内容块的 Y 坐标根据对齐方式不同
+  const blockY: Record<VerticalAlignValue, number> = {
+    top: 3.5, // 顶部对齐
+    middle: 5.5, // 居中对齐
+    bottom: 7.5, // 底部对齐
+    baseline: 6.5, // baseline 稍微偏下
+  };
 
-  let lineY = 10.5;
-  let rectY = 4;
-  let rectH = 6.5;
+  // 两个小方块表示子元素
+  const block1 = document.createElementNS(SVG_NS, 'rect');
+  block1.setAttribute('x', '4');
+  block1.setAttribute('y', String(blockY[value]));
+  block1.setAttribute('width', '3');
+  block1.setAttribute('height', '4');
+  block1.setAttribute('rx', '0.5');
+  block1.setAttribute('fill', 'currentColor');
 
-  switch (value) {
-    case 'top':
-      lineY = 2.5;
-      rectY = 2.5;
-      rectH = 6.5;
-      break;
-    case 'middle':
-      lineY = 7.5;
-      rectY = 4.5;
-      rectH = 6;
-      break;
-    case 'bottom':
-      lineY = 12.5;
-      rectY = 6;
-      rectH = 6.5;
-      break;
-    case 'baseline':
-      lineY = 10.5;
-      rectY = 4;
-      rectH = 6.5;
-      break;
-  }
+  const block2 = document.createElementNS(SVG_NS, 'rect');
+  block2.setAttribute('x', '8');
+  block2.setAttribute('y', String(blockY[value]));
+  block2.setAttribute('width', '3');
+  block2.setAttribute('height', '4');
+  block2.setAttribute('rx', '0.5');
+  block2.setAttribute('fill', 'currentColor');
 
-  guide.setAttribute('d', `M2.5 ${lineY}H12.5`);
-  rect.setAttribute('y', String(rectY));
-  rect.setAttribute('height', String(rectH));
+  svg.append(container, block1, block2);
 
-  svg.append(guide, rect);
-
-  // For baseline, add descender indicator
+  // baseline 模式添加基线指示线
   if (value === 'baseline') {
-    const desc = document.createElementNS(SVG_NS, 'rect');
-    desc.setAttribute('x', '8.5');
-    desc.setAttribute('y', String(lineY));
-    desc.setAttribute('width', '2.5');
-    desc.setAttribute('height', '2.5');
-    desc.setAttribute('rx', '0.8');
-    desc.setAttribute('fill', 'none');
-    applyStroke(desc, '1.2');
-    svg.append(desc);
+    const baselinePath = document.createElementNS(SVG_NS, 'path');
+    baselinePath.setAttribute('d', 'M3 10H12');
+    baselinePath.setAttribute('stroke', 'currentColor');
+    baselinePath.setAttribute('stroke-width', '1');
+    baselinePath.setAttribute('stroke-dasharray', '1.5 1');
+    svg.append(baselinePath);
   }
 
   return svg;

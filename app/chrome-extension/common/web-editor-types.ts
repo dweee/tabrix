@@ -42,6 +42,10 @@ export const WEB_EDITOR_V2_ACTIONS = {
   START: 'web_editor_start_v2',
   /** Stop V2 editor */
   STOP: 'web_editor_stop_v2',
+  /** Highlight an element (from sidepanel hover) */
+  HIGHLIGHT_ELEMENT: 'web_editor_highlight_element_v2',
+  /** Revert an element to its original state (Phase 2 - Selective Undo) */
+  REVERT_ELEMENT: 'web_editor_revert_element_v2',
 } as const;
 
 /**
@@ -405,6 +409,33 @@ export interface WebEditorHighlightElementPayload {
   mode: 'hover' | 'clear';
 }
 
+/**
+ * Revert element request sent from AgentChat to the active tab.
+ * Used for Phase 2 - Selective Undo (reverting individual element changes).
+ */
+export interface WebEditorRevertElementPayload {
+  /** Target tab ID */
+  tabId: number;
+  /** Element key to revert */
+  elementKey: WebEditorElementKey;
+}
+
+/**
+ * Revert element response from content script.
+ */
+export interface WebEditorRevertElementResponse {
+  /** Whether the revert was successful */
+  success: boolean;
+  /** What was reverted (for UI feedback) */
+  reverted?: {
+    style?: boolean;
+    text?: boolean;
+    class?: boolean;
+  };
+  /** Error message if revert failed */
+  error?: string;
+}
+
 // =============================================================================
 // Public API Interface
 // =============================================================================
@@ -422,6 +453,11 @@ export interface WebEditorV2Api {
   toggle: () => boolean;
   /** Get current state */
   getState: () => WebEditorState;
+  /**
+   * Revert a specific element to its original state (Phase 2 - Selective Undo).
+   * Creates a compensating transaction that can be undone.
+   */
+  revertElement: (elementKey: WebEditorElementKey) => Promise<WebEditorRevertElementResponse>;
 }
 
 // =============================================================================

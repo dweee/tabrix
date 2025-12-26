@@ -15,18 +15,29 @@
 
 ## 实施进度
 
-| 阶段    | 任务                           | 状态      | 备注                                  |
-| ------- | ------------------------------ | --------- | ------------------------------------- |
-| 分析    | 需求分析与决策点确认           | ✅ 完成   | 与 Codex 协作完成                     |
-| 分析    | 上下文收集 - 深挖关键技术细节  | ✅ 完成   | 识别了关键代码位置和接口缺口          |
-| 规划    | 任务规划 - 制定详细实施计划    | ✅ 完成   | 详细方案已定稿                        |
-| P1.1    | 定义消息类型和数据结构         | ✅ 完成   | message-types.ts, web-editor-types.ts |
-| P1.2    | 实现 elementKey 生成器         | ✅ 完成   | element-key.ts                        |
-| P1.3    | 实现 Transaction 聚合器        | ✅ 完成   | transaction-aggregator.ts             |
-| P1.4    | 改造 Apply 流程 + TX 广播      | ✅ 完成   | editor.ts                             |
-| P1.5    | Background 处理和 batch prompt | 🔄 进行中 | background/web-editor/index.ts        |
-| P1.6-11 | Sidepanel UI 组件              | ⏳ 待开始 | -                                     |
-| P2      | 双向联动（Selective Undo）     | ⏳ 待开始 | -                                     |
+| 阶段  | 任务                           | 状态    | 备注                                               |
+| ----- | ------------------------------ | ------- | -------------------------------------------------- |
+| 分析  | 需求分析与决策点确认           | ✅ 完成 | 与 Codex 协作完成                                  |
+| 分析  | 上下文收集 - 深挖关键技术细节  | ✅ 完成 | 识别了关键代码位置和接口缺口                       |
+| 规划  | 任务规划 - 制定详细实施计划    | ✅ 完成 | 详细方案已定稿                                     |
+| P1.1  | 定义消息类型和数据结构         | ✅ 完成 | message-types.ts, web-editor-types.ts              |
+| P1.2  | 实现 elementKey 生成器         | ✅ 完成 | element-key.ts                                     |
+| P1.3  | 实现 Transaction 聚合器        | ✅ 完成 | transaction-aggregator.ts                          |
+| P1.4  | 改造 Apply 流程 + TX 广播      | ✅ 完成 | editor.ts                                          |
+| P1.5  | Background 处理和 batch prompt | ✅ 完成 | background/web-editor/index.ts                     |
+| P1.6  | Sidepanel URL 参数支持         | ✅ 完成 | App.vue 支持 ?tab=agent-chat                       |
+| P1.7  | useWebEditorTxState composable | ✅ 完成 | useWebEditorTxState.ts                             |
+| P1.8  | WebEditorChanges.vue 容器组件  | ✅ 完成 | 视图切换、空状态、chips 渲染                       |
+| P1.9  | ElementChip.vue 展示组件       | ✅ 完成 | 图标、标签、状态、Teleport Tooltip                 |
+| P1.10 | Include/Exclude 切换逻辑       | ✅ 完成 | 点击切换、自动视图切换、持久化到 session storage   |
+| P1.11 | Hover 高亮功能                 | ✅ 完成 | 支持 Shadow DOM (locateElement)、fallback selector |
+| P1.12 | Apply dbSessionId 传递         | ✅ 完成 | 传递 dbSessionId 加载 session 配置                 |
+| P2.1  | 双向联动 - 消息类型定义        | ✅ 完成 | REVERT_ELEMENT action、payload、response types     |
+| P2.2  | 双向联动 - Background relay    | ✅ 完成 | 转发 REVERT 请求到 content script (frameId: 0)     |
+| P2.3  | 双向联动 - 补偿交易机制        | ✅ 完成 | editor.ts revertElement() 实现                     |
+| P2.4  | 双向联动 - Message listener    | ✅ 完成 | 处理 REVERT_ELEMENT action                         |
+| P2.5  | 双向联动 - ElementChip Revert  | ✅ 完成 | hover 时显示 × 按钮，点击触发 revert               |
+| P2.6  | 双向联动 - WebEditorChanges    | ✅ 完成 | handleRevert() 发送 REVERT 请求                    |
 
 ---
 
@@ -36,8 +47,8 @@
 
 - Apply 时从 `chrome.storage.local['agent-selected-session-id']` 读取当前选中的 DB session
 - 使用这个 DB sessionId 作为 native server API 的 URL path 参数
-- 同时在 payload 里传 `dbSessionId` 以加载 session 配置
-- 若无选中 session，需创建新 session（依赖 `projectId + engineName`）
+- 同时在 payload 里传 `dbSessionId` 以加载 session 配置（engine, model, options）
+- 若无选中 session，自动打开 AgentChat 引导用户选择/创建 session 后重试（避免产生孤儿 session）
 
 ### 2. elementKey 稳定标识方案
 
@@ -413,9 +424,9 @@ function revertElement(key: string): void {
 
 | #   | 任务                 | 优先级 | 依赖    | 状态 |
 | --- | -------------------- | ------ | ------- | ---- |
-| 2.1 | 实现补偿交易机制     | P1     | Phase 1 | ⏳   |
-| 2.2 | 增加 "Revert" 按钮   | P1     | 2.1     | ⏳   |
-| 2.3 | 处理 revert 失败场景 | P2     | 2.2     | ⏳   |
+| 2.1 | 实现补偿交易机制     | P1     | Phase 1 | ✅   |
+| 2.2 | 增加 "Revert" 按钮   | P1     | 2.1     | ✅   |
+| 2.3 | 处理 revert 失败场景 | P2     | 2.2     | ✅   |
 
 ---
 
@@ -532,34 +543,51 @@ elementKey?: string;  // 可选，向后兼容
 
 ---
 
-## 六、待完成工作
+## 六、Phase 1 已完成
 
-### Phase 1.5 - Background 处理 (下一步)
+### Phase 1.5 - Background 处理 ✅
 
-需要在 `background/web-editor/index.ts` 中：
+已在 `background/web-editor/index.ts` 中实现：
 
-1. 处理 `WEB_EDITOR_TX_CHANGED` 消息
+1. ✅ 处理 `WEB_EDITOR_TX_CHANGED` 消息
    - 从 `sender.tab.id` 获取 tabId
    - 填充 payload.tabId
    - 持久化到 `chrome.storage.session['web-editor-v2-tx-changed-{tabId}']`
    - 广播到 sidepanel
 
-2. 处理 `WEB_EDITOR_APPLY_BATCH` 消息
+2. ✅ 处理 `WEB_EDITOR_APPLY_BATCH` 消息
    - 尝试打开 sidepanel（带 `?tab=agent-chat` 参数）
    - 从 storage 读取 selectedSessionId
    - 调用 `buildAgentPromptBatch()` 构建批量 prompt
    - 调用 `/agent/chat/:sessionId/act`
 
-3. 新增 `buildAgentPromptBatch(elements)` 函数
+3. ✅ 处理 `WEB_EDITOR_HIGHLIGHT_ELEMENT` 消息
+   - 转发到 content script 进行元素高亮
+   - 返回高亮结果供 sidepanel 判断是否 fallback
 
-### Phase 1.6-1.11 - Sidepanel UI
+### Phase 1.6-1.11 - Sidepanel UI ✅
 
-- Sidepanel URL 参数增加 `tab=agent-chat`
-- 监听 `WEB_EDITOR_TX_CHANGED` 消息
-- 实现 `WebEditorChanges.vue` 组件
-- 实现 `ElementChip.vue` 组件
-- Include/Exclude 切换逻辑
-- Hover 高亮和 Tooltip
+- ✅ Sidepanel URL 参数增加 `tab=agent-chat` (App.vue)
+- ✅ 监听 `WEB_EDITOR_TX_CHANGED` 消息 (useWebEditorTxState.ts)
+- ✅ 实现 `WebEditorChanges.vue` 组件 (视图切换、空状态、chips 渲染)
+- ✅ 实现 `ElementChip.vue` 组件 (图标、标签、状态、Teleport Tooltip)
+- ✅ Include/Exclude 切换逻辑 (点击切换、自动视图切换)
+- ✅ Hover 高亮和 Tooltip (background handler + content overlay + fallback)
+
+### 关键实现细节
+
+1. **Tooltip 使用 Teleport** - 避免 overflow 裁切，同时 Teleport 到 `.agent-theme` 容器保留主题变量
+2. **高亮成功检查** - sidepanel 检查 background 和 content script 返回结果，失败时 fallback 到 element-marker
+3. **Chip unmount 清理** - 在组件卸载时发送 hover:end 清理残留高亮
+
+### 已知遗留优化项（非阻塞）
+
+| 优先级 | 问题                              | 说明                                                 | 建议方案                                    |
+| ------ | --------------------------------- | ---------------------------------------------------- | ------------------------------------------- |
+| P1     | Shadow DOM 高亮不支持             | 当前 `document.querySelector()` 无法穿透 shadow root | 需要解析 `locator.shadowHostChain` 逐层查找 |
+| P1     | excludedKeys 不持久化             | 刷新 sidepanel 后用户的 include/exclude 选择会丢失   | 持久化到 `chrome.storage.session` (per-tab) |
+| P2     | 每个 chip 注册 scroll/resize 监听 | 元素多时性能开销较大                                 | 改为全局单例管理或仅在 tooltip 激活时注册   |
+| P2     | 样式 token 命名不一致             | 使用了 `--ac-error` 而主题定义的是 `--ac-danger`     | 统一使用 `--ac-danger` 或添加别名           |
 
 ---
 
@@ -613,3 +641,114 @@ elementKey?: string;  // 可选，向后兼容
 
 Apply all the above style changes to the specified elements.
 ```
+
+---
+
+## 八、Phase 2 已完成 - 双向联动（Selective Undo）
+
+### 8.1 消息类型定义
+
+**文件**: `app/chrome-extension/common/message-types.ts`
+
+```typescript
+WEB_EDITOR_REVERT_ELEMENT: 'web_editor_revert_element',
+```
+
+**文件**: `app/chrome-extension/common/web-editor-types.ts`
+
+```typescript
+// WEB_EDITOR_V2_ACTIONS
+REVERT_ELEMENT: 'web_editor_revert_element_v2',
+
+// 新增 payload/response 类型
+export interface WebEditorRevertElementPayload {
+  tabId: number;
+  elementKey: WebEditorElementKey;
+}
+
+export interface WebEditorRevertElementResponse {
+  success: boolean;
+  reverted?: { style?: boolean; text?: boolean; class?: boolean };
+  error?: string;
+}
+
+// 扩展 WebEditorV2Api
+revertElement: (elementKey: WebEditorElementKey) => Promise<WebEditorRevertElementResponse>;
+```
+
+### 8.2 Background Relay
+
+**文件**: `app/chrome-extension/entrypoints/background/web-editor/index.ts`
+
+- 处理 `WEB_EDITOR_REVERT_ELEMENT` 消息
+- 验证 `tabId` 和 `elementKey`
+- 使用 `chrome.tabs.sendMessage(tabId, ..., { frameId: 0 })` 转发到主 frame
+- 返回 content script 的响应
+
+### 8.3 补偿交易机制
+
+**文件**: `app/chrome-extension/entrypoints/web-editor-v2/core/editor.ts`
+
+```typescript
+async function revertElement(
+  elementKey: WebEditorElementKey,
+): Promise<WebEditorRevertElementResponse> {
+  // 1. 使用 aggregateTransactionsByElement() 找到元素的净效果
+  // 2. 使用 locateElement() 定位 DOM 元素
+  // 3. 对每种类型的变更创建补偿交易：
+  //    - class: tm.recordClass(element, netEffect.classChanges.before)
+  //    - text: tm.recordText(element, netEffect.textChange.before)
+  //    - style: tm.beginMultiStyle() + handle.set(baselineStyles) + handle.commit()
+  // 4. 返回详细的 reverted 结果
+}
+```
+
+补偿交易会入栈到 undoStack，用户可再次 undo。
+
+### 8.4 Message Listener
+
+**文件**: `app/chrome-extension/entrypoints/web-editor-v2/core/message-listener.ts`
+
+```typescript
+// 类型守卫
+function isRevertRequest(request: unknown): request is WebEditorV2RevertRequest;
+
+// 异步处理
+if (isRevertRequest(request)) {
+  const result = await api.revertElement(request.elementKey);
+  sendResponse(result);
+  return true; // 异步响应
+}
+```
+
+### 8.5 UI 组件
+
+**文件**: `app/chrome-extension/entrypoints/sidepanel/components/agent-chat/ElementChip.vue`
+
+- 将根元素从 `<button>` 改为 `<div>` 容器
+- 主点击区域：toggle include/exclude
+- 新增 Revert 按钮（hover 时显示的 × 图标）
+- 新增 `emit('revert', elementKey)` 事件
+- hover 时 × 按钮变红
+
+**文件**: `app/chrome-extension/entrypoints/sidepanel/components/agent-chat/WebEditorChanges.vue`
+
+```typescript
+async function handleRevert(elementKey: WebEditorElementKey): Promise<void> {
+  const payload: WebEditorRevertElementPayload = { tabId, elementKey };
+  const result = await chrome.runtime.sendMessage({
+    type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_REVERT_ELEMENT,
+    payload,
+  });
+  // TX state 会通过 WEB_EDITOR_TX_CHANGED 广播自动更新
+}
+```
+
+### 8.6 已知改进建议（非阻塞）
+
+| 优先级 | 问题         | 说明                                        | 建议方案                         |
+| ------ | ------------ | ------------------------------------------- | -------------------------------- |
+| P2     | Undo 粒度    | 一次 revert 可能生成 2-3 条 tx，需多次 undo | 引入 composite/batch transaction |
+| P2     | UX 反馈      | 失败只打 console                            | 添加 toast/加载态/防重复点击     |
+| P2     | 键盘可访问性 | Revert 按钮仅 hover 显示                    | 让 focus 也能触达                |
+| P3     | 状态陈旧     | tab reload 时可能残留旧 chips               | 监听 tab 更新清理 storage        |

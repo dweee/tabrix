@@ -7,6 +7,8 @@
 
 import type {
   WebEditorApplyBatchPayload,
+  WebEditorElementKey,
+  WebEditorRevertElementResponse,
   WebEditorState,
   WebEditorTxChangedPayload,
   WebEditorTxChangeAction,
@@ -755,6 +757,128 @@ export function createWebEditorV2(): WebEditorV2Api {
   }
 
   /**
+   * Revert a specific element to its baseline state (Phase 2 - Selective Undo).
+   * Creates compensating transactions so the user can undo the revert.
+   */
+  async function revertElement(
+    elementKey: WebEditorElementKey,
+  ): Promise<WebEditorRevertElementResponse> {
+    const key = String(elementKey ?? '').trim();
+    if (!key) {
+      return { success: false, error: 'elementKey is required' };
+    }
+
+    const tm = state.transactionManager;
+    if (!tm) {
+      return { success: false, error: 'Transaction manager not ready' };
+    }
+
+    if (state.applyingSnapshot) {
+      return { success: false, error: 'Cannot revert while Apply is in progress' };
+    }
+
+    try {
+      const undoStack = tm.getUndoStack();
+      const summaries = aggregateTransactionsByElement(undoStack);
+      const summary = summaries.find((s) => s.elementKey === key);
+
+      if (!summary) {
+        return { success: false, error: 'Element not found in current changes' };
+      }
+
+      const element = locateElement(summary.locator);
+      if (!element || !element.isConnected) {
+        return { success: false, error: 'Failed to locate element for revert' };
+      }
+
+      const reverted: NonNullable<WebEditorRevertElementResponse['reverted']> = {};
+      let didRevert = false;
+
+      // Revert class first so subsequent locators are based on baseline classes.
+      const classChanges = summary.netEffect.classChanges;
+      if (classChanges) {
+        const baselineClasses = Array.isArray(classChanges.before) ? classChanges.before : [];
+        const beforeClasses = (() => {
+          try {
+            const list = (element as HTMLElement).classList;
+            if (list && typeof list[Symbol.iterator] === 'function') {
+              return Array.from(list).filter(Boolean);
+            }
+          } catch {
+            // Fallback for non-HTMLElement
+          }
+
+          const raw = element.getAttribute('class') ?? '';
+          return raw
+            .split(/\s+/)
+            .map((t) => t.trim())
+            .filter(Boolean);
+        })();
+
+        const tx = tm.recordClass(element, beforeClasses, baselineClasses);
+        if (tx) {
+          reverted.class = true;
+          didRevert = true;
+        }
+      }
+
+      // Revert text content
+      const textChange = summary.netEffect.textChange;
+      if (textChange) {
+        const baselineText = String(textChange.before ?? '');
+        const beforeText = element.textContent ?? '';
+
+        if (beforeText !== baselineText) {
+          element.textContent = baselineText;
+          const tx = tm.recordText(element, beforeText, baselineText);
+          if (tx) {
+            reverted.text = true;
+            didRevert = true;
+          }
+        }
+      }
+
+      // Revert styles
+      const styleChanges = summary.netEffect.styleChanges;
+      if (styleChanges) {
+        const before = styleChanges.before ?? {};
+        const after = styleChanges.after ?? {};
+
+        const properties = Array.from(new Set([...Object.keys(before), ...Object.keys(after)]))
+          .map((p) => String(p ?? '').trim())
+          .filter(Boolean);
+
+        if (properties.length > 0) {
+          const handle = tm.beginMultiStyle(element, properties);
+          if (handle) {
+            handle.set(before);
+            const tx = handle.commit({ merge: false });
+            if (tx) {
+              reverted.style = true;
+              didRevert = true;
+            }
+          }
+        }
+      }
+
+      if (!didRevert) {
+        return { success: false, error: 'No changes were reverted' };
+      }
+
+      // Ensure property panel reflects reverted values immediately
+      state.propertyPanel?.refresh();
+
+      return { success: true, reverted };
+    } catch (error) {
+      console.error(`${WEB_EDITOR_V2_LOG_PREFIX} Revert element failed:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /**
    * Handle transaction apply errors
    */
   function handleTransactionError(error: unknown): void {
@@ -1277,5 +1401,6 @@ export function createWebEditorV2(): WebEditorV2Api {
     stop,
     toggle,
     getState,
+    revertElement,
   };
 }

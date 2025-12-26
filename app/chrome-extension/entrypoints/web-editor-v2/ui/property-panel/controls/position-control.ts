@@ -42,19 +42,29 @@ const POSITION_VALUES: readonly PositionValue[] = [
   'sticky',
 ];
 
-// SVG path data for position icons
-const POSITION_ICON_PATHS: Record<PositionValue, string> = {
-  // Static: Simple square (no positioning context)
-  static: 'M3 3h9v9H3z',
-  // Relative: Square with offset arrow
-  relative: 'M3 3h7v7H3zM8 8l4 4M10 8v4h-4',
-  // Absolute: Square with corner anchors
-  absolute: 'M4 4h7v7H4zM2 2v2M2 2h2M13 2h-2M13 2v2M2 13v-2M2 13h2M13 13h-2M13 13v-2',
-  // Fixed: Square pinned to viewport edge
-  fixed: 'M1 1h13v13H1zM4 4h7v7H4z',
-  // Sticky: Square with top adhesion line
-  sticky: 'M2 3h11M4 6h7v6H4z',
-};
+function createBaseIconSvg(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 15 15');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  return svg;
+}
+
+function createIconContainer(svg: SVGSVGElement): void {
+  const container = document.createElementNS(SVG_NS, 'rect');
+  container.setAttribute('x', '2');
+  container.setAttribute('y', '2');
+  container.setAttribute('width', '11');
+  container.setAttribute('height', '11');
+  container.setAttribute('rx', '1.5');
+  container.setAttribute('stroke', 'currentColor');
+  container.setAttribute('stroke-width', '1');
+  container.setAttribute('stroke-dasharray', '2 1');
+  container.setAttribute('fill', 'none');
+  container.setAttribute('opacity', '0.5');
+  svg.prepend(container);
+}
 
 // =============================================================================
 // Transform Parsing Helpers
@@ -344,18 +354,110 @@ function extractRotateUnit(rotate: string): string {
 // =============================================================================
 
 function createPositionIcon(position: PositionValue): SVGElement {
-  const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('viewBox', '0 0 15 15');
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('aria-hidden', 'true');
-  svg.setAttribute('focusable', 'false');
+  const svg = createBaseIconSvg();
 
-  const path = document.createElementNS(SVG_NS, 'path');
-  path.setAttribute('stroke', 'currentColor');
-  path.setAttribute('stroke-width', '1');
-  path.setAttribute('d', POSITION_ICON_PATHS[position]);
-  svg.append(path);
+  const addBlock = (x: number, y: number, w: number, h: number, opacity = 1) => {
+    const rect = document.createElementNS(SVG_NS, 'rect');
+    rect.setAttribute('x', String(x));
+    rect.setAttribute('y', String(y));
+    rect.setAttribute('width', String(w));
+    rect.setAttribute('height', String(h));
+    rect.setAttribute('rx', '0.5');
+    rect.setAttribute('fill', 'currentColor');
+    if (opacity < 1) rect.setAttribute('opacity', String(opacity));
+    svg.append(rect);
+  };
 
+  const addLine = (x: number, y: number, w: number) => {
+    const line = document.createElementNS(SVG_NS, 'rect');
+    line.setAttribute('x', String(x));
+    line.setAttribute('y', String(y));
+    line.setAttribute('width', String(w));
+    line.setAttribute('height', '1');
+    line.setAttribute('rx', '0.5');
+    line.setAttribute('fill', 'currentColor');
+    svg.append(line);
+  };
+
+  const addPath = (d: string, strokeWidth = '1') => {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', strokeWidth);
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('fill', 'none');
+    svg.append(path);
+  };
+
+  switch (position) {
+    case 'static':
+      // 三条水平线表示正常文档流
+      addLine(3.5, 4.5, 8);
+      addLine(3.5, 7.5, 8);
+      addLine(3.5, 10.5, 8);
+      break;
+
+    case 'relative': {
+      // 虚线框表示原位置，实心块表示偏移后的位置
+      const ghost = document.createElementNS(SVG_NS, 'rect');
+      ghost.setAttribute('x', '3.5');
+      ghost.setAttribute('y', '3.5');
+      ghost.setAttribute('width', '4');
+      ghost.setAttribute('height', '4');
+      ghost.setAttribute('rx', '0.5');
+      ghost.setAttribute('stroke', 'currentColor');
+      ghost.setAttribute('stroke-width', '1');
+      ghost.setAttribute('stroke-dasharray', '1.5 1');
+      ghost.setAttribute('fill', 'none');
+      ghost.setAttribute('opacity', '0.5');
+      svg.append(ghost);
+      // 偏移后的实心块
+      addBlock(7.5, 7.5, 4, 4);
+      // 连接箭头
+      addPath('M5.5 7.5L7.5 9.5');
+      break;
+    }
+
+    case 'absolute':
+      // 定位参考线（从容器边缘到元素）
+      addPath('M3 5.5H6M8 3V6', '0.8');
+      // 元素块在右下角
+      addBlock(6, 6, 5, 5);
+      break;
+
+    case 'fixed': {
+      // 图钉形状表示固定
+      const pin = document.createElementNS(SVG_NS, 'circle');
+      pin.setAttribute('cx', '7.5');
+      pin.setAttribute('cy', '4');
+      pin.setAttribute('r', '1.5');
+      pin.setAttribute('fill', 'currentColor');
+      svg.append(pin);
+      // 图钉针
+      addPath('M7.5 5.5V8');
+      // 固定的元素
+      addBlock(4.5, 8, 6, 4);
+      break;
+    }
+
+    case 'sticky': {
+      // 顶部吸附线
+      const stickyLine = document.createElementNS(SVG_NS, 'rect');
+      stickyLine.setAttribute('x', '3');
+      stickyLine.setAttribute('y', '3');
+      stickyLine.setAttribute('width', '9');
+      stickyLine.setAttribute('height', '1.5');
+      stickyLine.setAttribute('rx', '0.5');
+      stickyLine.setAttribute('fill', 'currentColor');
+      stickyLine.setAttribute('opacity', '0.4');
+      svg.append(stickyLine);
+      // 吸附的元素
+      addBlock(4.5, 5, 6, 6);
+      break;
+    }
+  }
+
+  createIconContainer(svg);
   return svg;
 }
 
@@ -379,40 +481,72 @@ function createRotateIcon(): SVGElement {
 }
 
 function createFlipXIcon(): SVGElement {
-  const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('viewBox', '0 0 15 15');
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('aria-hidden', 'true');
-  svg.setAttribute('focusable', 'false');
+  const svg = createBaseIconSvg();
 
-  const path = document.createElementNS(SVG_NS, 'path');
-  path.setAttribute('stroke', 'currentColor');
-  path.setAttribute('stroke-width', '1.2');
-  path.setAttribute('stroke-linecap', 'round');
-  path.setAttribute('stroke-linejoin', 'round');
-  // Horizontal flip arrows
-  path.setAttribute('d', 'M4 4L1 7.5L4 11M11 4l3 3.5L11 11M7.5 2v11');
-  svg.append(path);
+  // 左侧镜像块（半透明表示原始）
+  const leftBlock = document.createElementNS(SVG_NS, 'rect');
+  leftBlock.setAttribute('x', '3.5');
+  leftBlock.setAttribute('y', '5');
+  leftBlock.setAttribute('width', '3');
+  leftBlock.setAttribute('height', '5');
+  leftBlock.setAttribute('rx', '0.5');
+  leftBlock.setAttribute('fill', 'currentColor');
+  leftBlock.setAttribute('opacity', '0.4');
 
+  // 右侧镜像块（实心表示翻转后）
+  const rightBlock = document.createElementNS(SVG_NS, 'rect');
+  rightBlock.setAttribute('x', '8.5');
+  rightBlock.setAttribute('y', '5');
+  rightBlock.setAttribute('width', '3');
+  rightBlock.setAttribute('height', '5');
+  rightBlock.setAttribute('rx', '0.5');
+  rightBlock.setAttribute('fill', 'currentColor');
+
+  // 中间镜像轴线
+  const axis = document.createElementNS(SVG_NS, 'path');
+  axis.setAttribute('d', 'M7.5 3V12');
+  axis.setAttribute('stroke', 'currentColor');
+  axis.setAttribute('stroke-width', '1');
+  axis.setAttribute('stroke-dasharray', '1.5 1');
+  axis.setAttribute('opacity', '0.6');
+
+  svg.append(leftBlock, rightBlock, axis);
+  createIconContainer(svg);
   return svg;
 }
 
 function createFlipYIcon(): SVGElement {
-  const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('viewBox', '0 0 15 15');
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('aria-hidden', 'true');
-  svg.setAttribute('focusable', 'false');
+  const svg = createBaseIconSvg();
 
-  const path = document.createElementNS(SVG_NS, 'path');
-  path.setAttribute('stroke', 'currentColor');
-  path.setAttribute('stroke-width', '1.2');
-  path.setAttribute('stroke-linecap', 'round');
-  path.setAttribute('stroke-linejoin', 'round');
-  // Vertical flip arrows
-  path.setAttribute('d', 'M4 4L7.5 1L11 4M4 11l3.5 3L11 11M2 7.5h11');
-  svg.append(path);
+  // 上方镜像块（半透明表示原始）
+  const topBlock = document.createElementNS(SVG_NS, 'rect');
+  topBlock.setAttribute('x', '5');
+  topBlock.setAttribute('y', '3.5');
+  topBlock.setAttribute('width', '5');
+  topBlock.setAttribute('height', '3');
+  topBlock.setAttribute('rx', '0.5');
+  topBlock.setAttribute('fill', 'currentColor');
+  topBlock.setAttribute('opacity', '0.4');
 
+  // 下方镜像块（实心表示翻转后）
+  const bottomBlock = document.createElementNS(SVG_NS, 'rect');
+  bottomBlock.setAttribute('x', '5');
+  bottomBlock.setAttribute('y', '8.5');
+  bottomBlock.setAttribute('width', '5');
+  bottomBlock.setAttribute('height', '3');
+  bottomBlock.setAttribute('rx', '0.5');
+  bottomBlock.setAttribute('fill', 'currentColor');
+
+  // 中间镜像轴线
+  const axis = document.createElementNS(SVG_NS, 'path');
+  axis.setAttribute('d', 'M3 7.5H12');
+  axis.setAttribute('stroke', 'currentColor');
+  axis.setAttribute('stroke-width', '1');
+  axis.setAttribute('stroke-dasharray', '1.5 1');
+  axis.setAttribute('opacity', '0.6');
+
+  svg.append(topBlock, bottomBlock, axis);
+  createIconContainer(svg);
   return svg;
 }
 

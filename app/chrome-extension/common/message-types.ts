@@ -63,6 +63,8 @@ export const BACKGROUND_MESSAGE_TYPES = {
   WEB_EDITOR_APPLY_BATCH: 'web_editor_apply_batch',
   WEB_EDITOR_TX_CHANGED: 'web_editor_tx_changed',
   WEB_EDITOR_HIGHLIGHT_ELEMENT: 'web_editor_highlight_element',
+  // Web editor <-> AgentChat integration (Phase 2 - Revert)
+  WEB_EDITOR_REVERT_ELEMENT: 'web_editor_revert_element',
   // Web editor props (Phase 7.1.6 early injection)
   WEB_EDITOR_PROPS_REGISTER_EARLY_INJECTION: 'web_editor_props_register_early_injection',
 } as const;

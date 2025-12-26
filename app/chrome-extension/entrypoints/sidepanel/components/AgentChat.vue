@@ -20,6 +20,9 @@
 
       <!-- Composer -->
       <template #composer>
+        <!-- Web Editor Changes Chips -->
+        <WebEditorChanges />
+
         <AgentComposer
           :model-value="chat.input.value"
           :attachments="attachments.attachments.value"
@@ -132,6 +135,7 @@ import {
   AgentChatShell,
   AgentTopBar,
   AgentComposer,
+  WebEditorChanges,
   AgentConversation,
   AgentProjectMenu,
   AgentSessionMenu,

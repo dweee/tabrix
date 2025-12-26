@@ -94,6 +94,8 @@ interface GridDimensionsFieldState {
   kind: 'grid-dimensions';
   properties: readonly ['grid-template-columns', 'grid-template-rows'];
   previewButton: HTMLButtonElement;
+  previewColsValue: HTMLSpanElement;
+  previewRowsValue: HTMLSpanElement;
   popover: HTMLDivElement;
   colsContainer: InputContainer;
   rowsContainer: InputContainer;
@@ -251,53 +253,85 @@ function applyStroke(el: SVGElement, strokeWidth = '1.2'): void {
 function createDisplayIcon(value: DisplayValue): SVGElement {
   const svg = createBaseIconSvg();
 
-  const addPath = (d: string, strokeWidth = '1.2') => {
-    const path = document.createElementNS(SVG_NS, 'path');
-    path.setAttribute('d', d);
-    applyStroke(path, strokeWidth);
-    svg.append(path);
-  };
+  // 容器边框（虚线矩形表示容器）
+  const container = document.createElementNS(SVG_NS, 'rect');
+  container.setAttribute('x', '2');
+  container.setAttribute('y', '2');
+  container.setAttribute('width', '11');
+  container.setAttribute('height', '11');
+  container.setAttribute('rx', '1.5');
+  container.setAttribute('stroke', 'currentColor');
+  container.setAttribute('stroke-width', '1');
+  container.setAttribute('stroke-dasharray', '2 1');
+  container.setAttribute('fill', 'none');
+  container.setAttribute('opacity', '0.5');
 
-  const addRect = (x: number, y: number, w: number, h: number) => {
+  const addBlock = (x: number, y: number, w: number, h: number) => {
     const rect = document.createElementNS(SVG_NS, 'rect');
     rect.setAttribute('x', String(x));
     rect.setAttribute('y', String(y));
     rect.setAttribute('width', String(w));
     rect.setAttribute('height', String(h));
-    rect.setAttribute('rx', '1');
-    applyStroke(rect);
+    rect.setAttribute('rx', '0.5');
+    rect.setAttribute('fill', 'currentColor');
     svg.append(rect);
+  };
+
+  const addLine = (x: number, y: number, w: number) => {
+    const line = document.createElementNS(SVG_NS, 'rect');
+    line.setAttribute('x', String(x));
+    line.setAttribute('y', String(y));
+    line.setAttribute('width', String(w));
+    line.setAttribute('height', '1');
+    line.setAttribute('rx', '0.5');
+    line.setAttribute('fill', 'currentColor');
+    svg.append(line);
   };
 
   switch (value) {
     case 'block':
-      addRect(2.5, 3, 10, 3);
-      addRect(2.5, 9, 10, 3);
+      // 两个全宽的块级元素，垂直堆叠
+      addBlock(3.5, 3.5, 8, 3);
+      addBlock(3.5, 8.5, 8, 3);
       break;
     case 'inline':
-      addPath('M2.5 4.5H12.5M2.5 7.5H8.5M2.5 10.5H10.5');
+      // 三行文本表示内联流
+      addLine(3.5, 4.5, 8);
+      addLine(3.5, 7.5, 5);
+      addLine(3.5, 10.5, 6.5);
       break;
     case 'inline-block':
-      addRect(2.5, 4, 4, 7);
-      addPath('M8 6H12.5M8 9H11.5');
+      // 左边一个块，右边两行文本
+      addBlock(3.5, 4.5, 3.5, 6);
+      addLine(8, 5.5, 4);
+      addLine(8, 8.5, 3);
       break;
     case 'flex':
-      addRect(2.5, 5, 3, 5);
-      addRect(6, 5, 3, 5);
-      addRect(9.5, 5, 3, 5);
+      // 三个水平排列的弹性子项
+      addBlock(3.5, 4.5, 2.5, 6);
+      addBlock(6.5, 4.5, 2.5, 6);
+      addBlock(9.5, 4.5, 2.5, 6);
       break;
     case 'grid':
-      addRect(2.5, 2.5, 4, 4);
-      addRect(8.5, 2.5, 4, 4);
-      addRect(2.5, 8.5, 4, 4);
-      addRect(8.5, 8.5, 4, 4);
+      // 2x2 网格布局
+      addBlock(3.5, 3.5, 3.5, 3.5);
+      addBlock(8, 3.5, 3.5, 3.5);
+      addBlock(3.5, 8, 3.5, 3.5);
+      addBlock(8, 8, 3.5, 3.5);
       break;
-    case 'none':
-      addRect(3, 3, 9, 9);
-      addPath('M3.5 11.5L11.5 3.5');
+    case 'none': {
+      // 禁用符号：斜线
+      const slash = document.createElementNS(SVG_NS, 'path');
+      slash.setAttribute('d', 'M4 11L11 4');
+      slash.setAttribute('stroke', 'currentColor');
+      slash.setAttribute('stroke-width', '1.5');
+      slash.setAttribute('stroke-linecap', 'round');
+      svg.append(slash);
       break;
+    }
   }
 
+  svg.prepend(container);
   return svg;
 }
 
@@ -320,33 +354,89 @@ function createFlowIcon(direction: FlexDirectionValue): SVGElement {
 
 function createHorizontalAlignIcon(value: AlignmentAxisValue): SVGElement {
   const svg = createBaseIconSvg();
-  const path = document.createElementNS(SVG_NS, 'path');
-  applyStroke(path, '1.4');
 
-  const D: Record<AlignmentAxisValue, string> = {
-    'flex-start': 'M2.5 4.5H12.5M2.5 7.5H8.5M2.5 10.5H10.5',
-    center: 'M3.5 4.5H11.5M5.5 7.5H9.5M4.5 10.5H10.5',
-    'flex-end': 'M2.5 4.5H12.5M6.5 7.5H12.5M4.5 10.5H12.5',
+  // 容器边框（虚线矩形表示容器）
+  const container = document.createElementNS(SVG_NS, 'rect');
+  container.setAttribute('x', '2');
+  container.setAttribute('y', '2');
+  container.setAttribute('width', '11');
+  container.setAttribute('height', '11');
+  container.setAttribute('rx', '1.5');
+  container.setAttribute('stroke', 'currentColor');
+  container.setAttribute('stroke-width', '1');
+  container.setAttribute('stroke-dasharray', '2 1');
+  container.setAttribute('fill', 'none');
+  container.setAttribute('opacity', '0.5');
+
+  // 内容块的 X 坐标根据对齐方式不同
+  const blockX: Record<AlignmentAxisValue, number> = {
+    'flex-start': 3.5, // 左对齐
+    center: 5.5, // 居中对齐
+    'flex-end': 7.5, // 右对齐
   };
 
-  path.setAttribute('d', D[value]);
-  svg.append(path);
+  // 两个小方块表示子元素（水平方向排列变为垂直方向排列）
+  const block1 = document.createElementNS(SVG_NS, 'rect');
+  block1.setAttribute('x', String(blockX[value]));
+  block1.setAttribute('y', '4');
+  block1.setAttribute('width', '4');
+  block1.setAttribute('height', '3');
+  block1.setAttribute('rx', '0.5');
+  block1.setAttribute('fill', 'currentColor');
+
+  const block2 = document.createElementNS(SVG_NS, 'rect');
+  block2.setAttribute('x', String(blockX[value]));
+  block2.setAttribute('y', '8');
+  block2.setAttribute('width', '4');
+  block2.setAttribute('height', '3');
+  block2.setAttribute('rx', '0.5');
+  block2.setAttribute('fill', 'currentColor');
+
+  svg.append(container, block1, block2);
   return svg;
 }
 
 function createVerticalAlignIcon(value: AlignmentAxisValue): SVGElement {
   const svg = createBaseIconSvg();
-  const path = document.createElementNS(SVG_NS, 'path');
-  applyStroke(path, '1.4');
 
-  const D: Record<AlignmentAxisValue, string> = {
-    'flex-start': 'M4 4.5H11M5 6.8H10M4.5 9.1H10.5',
-    center: 'M4 5.8H11M5 8H10M4.5 10.2H10.5',
-    'flex-end': 'M4 6.9H11M5 9.2H10M4.5 11.5H10.5',
+  // 容器边框（虚线矩形表示容器）
+  const container = document.createElementNS(SVG_NS, 'rect');
+  container.setAttribute('x', '2');
+  container.setAttribute('y', '2');
+  container.setAttribute('width', '11');
+  container.setAttribute('height', '11');
+  container.setAttribute('rx', '1.5');
+  container.setAttribute('stroke', 'currentColor');
+  container.setAttribute('stroke-width', '1');
+  container.setAttribute('stroke-dasharray', '2 1');
+  container.setAttribute('fill', 'none');
+  container.setAttribute('opacity', '0.5');
+
+  // 内容块的 Y 坐标根据对齐方式不同
+  const blockY: Record<AlignmentAxisValue, number> = {
+    'flex-start': 3.5, // 顶部对齐
+    center: 5.5, // 居中对齐
+    'flex-end': 7.5, // 底部对齐
   };
 
-  path.setAttribute('d', D[value]);
-  svg.append(path);
+  // 两个小方块表示子元素
+  const block1 = document.createElementNS(SVG_NS, 'rect');
+  block1.setAttribute('x', '4');
+  block1.setAttribute('y', String(blockY[value]));
+  block1.setAttribute('width', '3');
+  block1.setAttribute('height', '4');
+  block1.setAttribute('rx', '0.5');
+  block1.setAttribute('fill', 'currentColor');
+
+  const block2 = document.createElementNS(SVG_NS, 'rect');
+  block2.setAttribute('x', '8');
+  block2.setAttribute('y', String(blockY[value]));
+  block2.setAttribute('width', '3');
+  block2.setAttribute('height', '4');
+  block2.setAttribute('rx', '0.5');
+  block2.setAttribute('fill', 'currentColor');
+
+  svg.append(container, block1, block2);
   return svg;
 }
 
@@ -626,10 +716,19 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
   const gridPreviewButton = document.createElement('button');
   gridPreviewButton.type = 'button';
   gridPreviewButton.className = 'we-grid-dimensions-preview';
-  gridPreviewButton.textContent = '1 × 1';
   gridPreviewButton.setAttribute('aria-label', 'Grid dimensions');
   gridPreviewButton.setAttribute('aria-expanded', 'false');
   gridPreviewButton.setAttribute('aria-haspopup', 'dialog');
+
+  // Single line preview: cols × rows
+  const gridPreviewColsValue = document.createElement('span');
+  gridPreviewColsValue.textContent = '1';
+  const gridPreviewTimes = document.createElement('span');
+  gridPreviewTimes.textContent = ' × ';
+  const gridPreviewRowsValue = document.createElement('span');
+  gridPreviewRowsValue.textContent = '1';
+
+  gridPreviewButton.append(gridPreviewColsValue, gridPreviewTimes, gridPreviewRowsValue);
 
   const gridPopover = document.createElement('div');
   gridPopover.className = 'we-grid-dimensions-popover';
@@ -702,7 +801,7 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
   });
 
   // ---------------------------------------------------------------------------
-  // Gap row (row-gap and column-gap inputs)
+  // Gap row (row-gap and column-gap inputs) - vertical layout
   // ---------------------------------------------------------------------------
   const gapRow = document.createElement('div');
   gapRow.className = 'we-field';
@@ -710,25 +809,29 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
   gapLabel.className = 'we-field-label';
   gapLabel.textContent = 'Gap';
 
-  const gapInputsRow = document.createElement('div');
-  gapInputsRow.className = 'we-field-row';
+  const gapMount = document.createElement('div');
+  gapMount.className = 'we-field-content';
+
+  const gapInputs = document.createElement('div');
+  gapInputs.className = 'we-grid-gap-inputs';
 
   const rowGapContainer = createInputContainer({
     ariaLabel: 'Row gap',
     inputMode: 'decimal',
-    prefix: 'R',
+    prefix: createGridRowsIcon(),
     suffix: 'px',
   });
 
   const columnGapContainer = createInputContainer({
     ariaLabel: 'Column gap',
     inputMode: 'decimal',
-    prefix: 'C',
+    prefix: createGridColumnsIcon(),
     suffix: 'px',
   });
 
-  gapInputsRow.append(rowGapContainer.root, columnGapContainer.root);
-  gapRow.append(gapLabel, gapInputsRow);
+  gapInputs.append(rowGapContainer.root, columnGapContainer.root);
+  gapMount.append(gapInputs);
+  gapRow.append(gapLabel, gapMount);
 
   wireNumberStepping(disposer, rowGapContainer.input, { mode: 'css-length' });
   wireNumberStepping(disposer, columnGapContainer.input, { mode: 'css-length' });
@@ -790,6 +893,8 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
       kind: 'grid-dimensions',
       properties: ['grid-template-columns', 'grid-template-rows'] as const,
       previewButton: gridPreviewButton,
+      previewColsValue: gridPreviewColsValue,
+      previewRowsValue: gridPreviewRowsValue,
       popover: gridPopover,
       colsContainer,
       rowsContainer,
@@ -1051,7 +1156,8 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
 
       if (!target || !target.isConnected) {
         previewButton.disabled = true;
-        previewButton.textContent = '—';
+        field.previewColsValue.textContent = '—';
+        field.previewRowsValue.textContent = '—';
         previewButton.setAttribute('aria-expanded', 'false');
         popover.hidden = true;
         colsContainer.input.disabled = true;
@@ -1086,7 +1192,10 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
 
       colsContainer.input.value = String(cols);
       rowsContainer.input.value = String(rows);
-      previewButton.textContent = `${cols} × ${rows}`;
+      field.previewColsValue.textContent = String(cols);
+      field.previewRowsValue.textContent = String(rows);
+      // Update aria-label for screen readers
+      previewButton.setAttribute('aria-label', `Grid: ${cols} columns, ${rows} rows`);
 
       // Default rendering uses current values
       tooltip.hidden = true;
@@ -1292,12 +1401,23 @@ export function createLayoutControl(options: LayoutControlOptions): DesignContro
     });
 
     // Close popover when clicking outside
-    disposer.listen(document, 'click', (e: MouseEvent) => {
+    // Use capture phase to catch clicks in Shadow DOM
+    const rootNode = gridField.previewButton.getRootNode() as Document | ShadowRoot;
+    const clickTarget = rootNode instanceof ShadowRoot ? rootNode : document;
+
+    const handleOutsideClick = (e: Event): void => {
+      if (gridField.kind !== 'grid-dimensions') return;
       if (gridField.popover.hidden) return;
       const target = e.target as Node;
+      // Check if click is inside gridRow (which contains both button and popover)
       if (!gridRow.contains(target)) {
         setGridPopoverOpen(gridField, false);
       }
+    };
+
+    clickTarget.addEventListener('click', handleOutsideClick, true);
+    disposer.add(() => {
+      clickTarget.removeEventListener('click', handleOutsideClick, true);
     });
 
     // Inputs: live preview, blur commit, ESC rollback

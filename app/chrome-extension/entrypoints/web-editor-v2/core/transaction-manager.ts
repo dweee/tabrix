@@ -17,8 +17,10 @@ import type {
   StructureOperationData,
   Transaction,
   TransactionSnapshot,
+  WebEditorElementKey,
 } from '@/common/web-editor-types';
 import { Disposer } from '../utils/disposables';
+import { generateStableElementKey } from './element-key';
 import { createElementLocator, locateElement, locatorKey } from './locator';
 
 // =============================================================================
@@ -511,6 +513,13 @@ function generateTransactionId(timestamp: number): string {
 /**
  * Create a style transaction record from style maps.
  * This is the core factory used by both single-style and multi-style APIs.
+ *
+ * @param id - Unique transaction identifier
+ * @param locator - Target element locator
+ * @param beforeStyles - Style values before the change
+ * @param afterStyles - Style values after the change
+ * @param timestamp - Transaction timestamp
+ * @param elementKey - Optional stable element key for transaction grouping
  */
 function createStyleTransactionFromStyles(
   id: string,
@@ -518,6 +527,7 @@ function createStyleTransactionFromStyles(
   beforeStyles: Record<string, string>,
   afterStyles: Record<string, string>,
   timestamp: number,
+  elementKey?: WebEditorElementKey,
 ): Transaction {
   const beforeSnapshot: TransactionSnapshot = {
     locator,
@@ -533,6 +543,7 @@ function createStyleTransactionFromStyles(
     id,
     type: 'style',
     targetLocator: locator,
+    elementKey,
     before: beforeSnapshot,
     after: afterSnapshot,
     timestamp,
@@ -543,6 +554,14 @@ function createStyleTransactionFromStyles(
 /**
  * Create a style transaction record for a single property.
  * Convenience wrapper around createStyleTransactionFromStyles.
+ *
+ * @param id - Unique transaction identifier
+ * @param locator - Target element locator
+ * @param property - CSS property name
+ * @param beforeValue - Property value before the change
+ * @param afterValue - Property value after the change
+ * @param timestamp - Transaction timestamp
+ * @param elementKey - Optional stable element key for transaction grouping
  */
 function createStyleTransaction(
   id: string,
@@ -551,6 +570,7 @@ function createStyleTransaction(
   beforeValue: string,
   afterValue: string,
   timestamp: number,
+  elementKey?: WebEditorElementKey,
 ): Transaction {
   const prop = normalizePropertyName(property);
   return createStyleTransactionFromStyles(
@@ -559,11 +579,19 @@ function createStyleTransaction(
     { [prop]: beforeValue },
     { [prop]: afterValue },
     timestamp,
+    elementKey,
   );
 }
 
 /**
  * Create a text transaction record (Phase 2.7)
+ *
+ * @param id - Unique transaction identifier
+ * @param locator - Target element locator
+ * @param beforeText - Text content before the change
+ * @param afterText - Text content after the change
+ * @param timestamp - Transaction timestamp
+ * @param elementKey - Optional stable element key for transaction grouping
  */
 function createTextTransaction(
   id: string,
@@ -571,6 +599,7 @@ function createTextTransaction(
   beforeText: string,
   afterText: string,
   timestamp: number,
+  elementKey?: WebEditorElementKey,
 ): Transaction {
   const beforeSnapshot: TransactionSnapshot = {
     locator,
@@ -586,6 +615,7 @@ function createTextTransaction(
     id,
     type: 'text',
     targetLocator: locator,
+    elementKey,
     before: beforeSnapshot,
     after: afterSnapshot,
     timestamp,
@@ -598,6 +628,14 @@ function createTextTransaction(
  *
  * Uses separate before/after locators to improve undo/redo recovery
  * when CSS selectors include class-based matching.
+ *
+ * @param id - Unique transaction identifier
+ * @param beforeLocator - Element locator before class change
+ * @param afterLocator - Element locator after class change
+ * @param beforeClasses - Class list before the change
+ * @param afterClasses - Class list after the change
+ * @param timestamp - Transaction timestamp
+ * @param elementKey - Optional stable element key for transaction grouping
  */
 function createClassTransaction(
   id: string,
@@ -606,6 +644,7 @@ function createClassTransaction(
   beforeClasses: string[],
   afterClasses: string[],
   timestamp: number,
+  elementKey?: WebEditorElementKey,
 ): Transaction {
   const beforeSnapshot: TransactionSnapshot = {
     locator: beforeLocator,
@@ -621,6 +660,7 @@ function createClassTransaction(
     id,
     type: 'class',
     targetLocator: afterLocator,
+    elementKey,
     before: beforeSnapshot,
     after: afterSnapshot,
     timestamp,
@@ -630,6 +670,13 @@ function createClassTransaction(
 
 /**
  * Create a move transaction record (Phase 2.4-2.6)
+ *
+ * @param id - Unique transaction identifier
+ * @param beforeLocator - Element locator before move
+ * @param afterLocator - Element locator after move
+ * @param moveData - Move operation data (from/to positions)
+ * @param timestamp - Transaction timestamp
+ * @param elementKey - Optional stable element key for transaction grouping
  */
 function createMoveTransaction(
   id: string,
@@ -637,6 +684,7 @@ function createMoveTransaction(
   afterLocator: ElementLocator,
   moveData: MoveTransactionData,
   timestamp: number,
+  elementKey?: WebEditorElementKey,
 ): Transaction {
   const beforeSnapshot: TransactionSnapshot = {
     locator: beforeLocator,
@@ -650,6 +698,7 @@ function createMoveTransaction(
     id,
     type: 'move',
     targetLocator: afterLocator,
+    elementKey,
     before: beforeSnapshot,
     after: afterSnapshot,
     moveData,
@@ -663,6 +712,14 @@ function createMoveTransaction(
  *
  * Used for wrap/unwrap/delete/duplicate operations.
  * delete/duplicate store position + html for deterministic undo/redo.
+ *
+ * @param id - Unique transaction identifier
+ * @param targetLocator - Primary target element locator
+ * @param beforeLocator - Element locator before structure change
+ * @param afterLocator - Element locator after structure change
+ * @param structureData - Structure operation data
+ * @param timestamp - Transaction timestamp
+ * @param elementKey - Optional stable element key for transaction grouping
  */
 function createStructureTransaction(
   id: string,
@@ -671,6 +728,7 @@ function createStructureTransaction(
   afterLocator: ElementLocator,
   structureData: StructureOperationData,
   timestamp: number,
+  elementKey?: WebEditorElementKey,
 ): Transaction {
   const beforeSnapshot: TransactionSnapshot = { locator: beforeLocator };
   const afterSnapshot: TransactionSnapshot = { locator: afterLocator };
@@ -679,6 +737,7 @@ function createStructureTransaction(
     id,
     type: 'structure',
     targetLocator,
+    elementKey,
     before: beforeSnapshot,
     after: afterSnapshot,
     structureData,
@@ -1198,7 +1257,8 @@ export function createTransactionManager(
     const locator = createElementLocator(target);
     const timestamp = now();
     const id = generateTransactionId(timestamp);
-    const tx = createTextTransaction(id, locator, before, after, timestamp);
+    const elementKey = generateStableElementKey(target, locator.shadowHostChain);
+    const tx = createTextTransaction(id, locator, before, after, timestamp, elementKey);
 
     // No merge for text transactions in Phase 2
     pushTransaction(tx, false);
@@ -1237,13 +1297,24 @@ export function createTransactionManager(
     // Capture locator before applying change (class may affect selector matching)
     const beforeLocator = createElementLocator(target);
 
+    // Generate stable element key BEFORE class mutation to ensure consistency
+    const elementKey = generateStableElementKey(target, beforeLocator.shadowHostChain);
+
     // Apply the change
     applyClassListToElement(target, after);
 
     // Capture locator after applying change
     const afterLocator = createElementLocator(target);
 
-    const tx = createClassTransaction(id, beforeLocator, afterLocator, before, after, timestamp);
+    const tx = createClassTransaction(
+      id,
+      beforeLocator,
+      afterLocator,
+      before,
+      after,
+      timestamp,
+      elementKey,
+    );
 
     // No merge for class transactions (each add/remove is a discrete undo step)
     pushTransaction(tx, false);
@@ -1282,6 +1353,7 @@ export function createTransactionManager(
       if (!wrapper || !wrapper.isConnected) return null;
 
       const wrapperLocator = createElementLocator(wrapper);
+      const elementKey = generateStableElementKey(wrapper, wrapperLocator.shadowHostChain);
       const structureData: StructureOperationData = {
         action: 'wrap',
         wrapperTag: input.wrapperTag ?? 'div',
@@ -1295,6 +1367,7 @@ export function createTransactionManager(
         wrapperLocator,
         structureData,
         timestamp,
+        elementKey,
       );
 
       pushTransaction(tx, false);
@@ -1320,6 +1393,7 @@ export function createTransactionManager(
       if (!child || !child.isConnected) return null;
 
       const childLocator = createElementLocator(child);
+      const elementKey = generateStableElementKey(child, childLocator.shadowHostChain);
       const structureData: StructureOperationData = {
         action: 'unwrap',
         wrapperTag,
@@ -1333,6 +1407,7 @@ export function createTransactionManager(
         childLocator,
         structureData,
         timestamp,
+        elementKey,
       );
 
       pushTransaction(tx, false);
@@ -1351,6 +1426,8 @@ export function createTransactionManager(
       if (!html) return null;
 
       const beforeLocator = createElementLocator(target);
+      // Generate stable key BEFORE removing element from DOM
+      const elementKey = generateStableElementKey(target, beforeLocator.shadowHostChain);
       const afterLocator = position.parentLocator;
 
       try {
@@ -1372,6 +1449,7 @@ export function createTransactionManager(
         afterLocator,
         structureData,
         timestamp,
+        elementKey,
       );
 
       pushTransaction(tx, false);
@@ -1406,6 +1484,8 @@ export function createTransactionManager(
       if (!html) return null;
 
       const cloneLocator = createElementLocator(clone);
+      // Generate key for the NEW clone element (not the original target)
+      const elementKey = generateStableElementKey(clone, cloneLocator.shadowHostChain);
       const structureData: StructureOperationData = {
         action: 'duplicate',
         position,
@@ -1419,6 +1499,7 @@ export function createTransactionManager(
         cloneLocator,
         structureData,
         timestamp,
+        elementKey,
       );
 
       pushTransaction(tx, false);
@@ -1472,8 +1553,16 @@ export function createTransactionManager(
       }
 
       const afterLocator = createElementLocator(targetAfterMove);
+      const elementKey = generateStableElementKey(targetAfterMove, afterLocator.shadowHostChain);
       const moveData: MoveTransactionData = { from: from!, to };
-      const tx = createMoveTransaction(id, beforeLocator, afterLocator, moveData, now());
+      const tx = createMoveTransaction(
+        id,
+        beforeLocator,
+        afterLocator,
+        moveData,
+        now(),
+        elementKey,
+      );
 
       // No merge for move transactions
       pushTransaction(tx, false);
@@ -1510,6 +1599,9 @@ export function createTransactionManager(
     const beforeValue = readStyleValue(inlineStyle, prop);
     const id = generateTransactionId(now());
 
+    // Generate stable element key at the start (before any mutations)
+    const elementKey = generateStableElementKey(target, locator.shadowHostChain);
+
     let completed = false;
 
     function set(value: string): void {
@@ -1524,7 +1616,15 @@ export function createTransactionManager(
       const afterValue = readStyleValue(inlineStyle, prop);
       if (afterValue === beforeValue) return null;
 
-      const tx = createStyleTransaction(id, locator, prop, beforeValue, afterValue, now());
+      const tx = createStyleTransaction(
+        id,
+        locator,
+        prop,
+        beforeValue,
+        afterValue,
+        now(),
+        elementKey,
+      );
       pushTransaction(tx, commitOptions?.merge !== false);
       return tx;
     }
@@ -1581,6 +1681,9 @@ export function createTransactionManager(
     const startedAt = now();
     const id = generateTransactionId(startedAt);
 
+    // Generate stable element key at the start (before any mutations)
+    const elementKey = generateStableElementKey(target, locator.shadowHostChain);
+
     // Capture original values for all tracked properties
     const beforeValues: Record<string, string> = {};
     for (const prop of normalizedProps) {
@@ -1626,7 +1729,14 @@ export function createTransactionManager(
       // No changes - don't create a transaction
       if (Object.keys(beforeStyles).length === 0) return null;
 
-      const tx = createStyleTransactionFromStyles(id, locator, beforeStyles, afterStyles, now());
+      const tx = createStyleTransactionFromStyles(
+        id,
+        locator,
+        beforeStyles,
+        afterStyles,
+        now(),
+        elementKey,
+      );
 
       // Default to no-merge to preserve gesture undo granularity.
       // Multi-style edits (e.g., drag resize) should be single undo steps.

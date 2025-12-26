@@ -14,6 +14,7 @@ import { Disposer } from '../../../utils/disposables';
 import type { StyleTransactionHandle, TransactionManager } from '../../../core/transaction-manager';
 import { wireNumberStepping } from './number-stepping';
 import type { DesignControl } from '../types';
+import { createSliderInput, type SliderInput } from '../components/slider-input';
 
 // =============================================================================
 // Constants
@@ -28,21 +29,21 @@ const BOX_SIZING_VALUES = ['content-box', 'border-box'] as const;
 
 type AppearanceProperty = 'overflow' | 'box-sizing' | 'opacity';
 
-interface TextFieldState {
-  kind: 'text';
-  property: AppearanceProperty;
-  element: HTMLInputElement;
+interface OpacityFieldState {
+  kind: 'opacity';
+  property: 'opacity';
+  control: SliderInput;
   handle: StyleTransactionHandle | null;
 }
 
 interface SelectFieldState {
   kind: 'select';
-  property: AppearanceProperty;
+  property: Exclude<AppearanceProperty, 'opacity'>;
   element: HTMLSelectElement;
   handle: StyleTransactionHandle | null;
 }
 
-type FieldState = TextFieldState | SelectFieldState;
+type FieldState = OpacityFieldState | SelectFieldState;
 
 // =============================================================================
 // Helpers
@@ -60,6 +61,34 @@ function isFieldFocused(el: HTMLElement): boolean {
 
 function normalizeOpacity(raw: string): string {
   return raw.trim();
+}
+
+/** Regex to match valid numeric values for opacity (including decimal) */
+const OPACITY_NUMBER_REGEX = /^-?(?:(?:\d+\.\d+)|(?:\d+\.)|(?:\d+)|(?:\.\d+))$/;
+
+/**
+ * Clamp opacity value to valid range [0, 1]
+ */
+function clampOpacity(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  const clamped = Math.min(1, Math.max(0, value));
+  // Handle negative zero
+  return Object.is(clamped, -0) ? 0 : clamped;
+}
+
+/**
+ * Parse a string to a numeric opacity value
+ * Returns null if the string is not a valid number
+ */
+function parseOpacityNumber(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (!OPACITY_NUMBER_REGEX.test(trimmed)) return null;
+  // Handle trailing decimal point (e.g., "0.")
+  const normalized = trimmed.endsWith('.') ? trimmed.slice(0, -1) : trimmed;
+  const value = Number(normalized);
+  if (!Number.isFinite(value)) return null;
+  return value;
 }
 
 function readInlineValue(element: Element, property: string): string {
@@ -101,24 +130,6 @@ export function createAppearanceControl(options: AppearanceControlOptions): Desi
   // DOM Helpers
   // ===========================================================================
 
-  function createInputRow(
-    labelText: string,
-    ariaLabel: string,
-  ): { row: HTMLDivElement; input: HTMLInputElement } {
-    const row = document.createElement('div');
-    row.className = 'we-field';
-    const label = document.createElement('span');
-    label.className = 'we-field-label';
-    label.textContent = labelText;
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'we-input';
-    input.autocomplete = 'off';
-    input.setAttribute('aria-label', ariaLabel);
-    row.append(label, input);
-    return { row, input };
-  }
-
   function createSelectRow(
     labelText: string,
     ariaLabel: string,
@@ -156,9 +167,34 @@ export function createAppearanceControl(options: AppearanceControlOptions): Desi
     'Box Sizing',
     BOX_SIZING_VALUES,
   );
-  const { row: opacityRow, input: opacityInput } = createInputRow('Opacity', 'Opacity');
 
-  wireNumberStepping(disposer, opacityInput, {
+  // ---------------------------------------------------------------------------
+  // Opacity row with slider + input
+  // ---------------------------------------------------------------------------
+  const opacityRow = document.createElement('div');
+  opacityRow.className = 'we-field';
+
+  const opacityLabel = document.createElement('span');
+  opacityLabel.className = 'we-field-label';
+  opacityLabel.textContent = 'Opacity';
+
+  const opacityMount = document.createElement('div');
+  opacityMount.className = 'we-field-content';
+
+  opacityRow.append(opacityLabel, opacityMount);
+
+  const opacityControl = createSliderInput({
+    sliderAriaLabel: 'Opacity slider',
+    inputAriaLabel: 'Opacity value',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    inputMode: 'decimal',
+    inputWidthPx: 72,
+  });
+  opacityMount.append(opacityControl.root);
+
+  wireNumberStepping(disposer, opacityControl.input, {
     mode: 'number',
     min: 0,
     max: 1,
@@ -183,7 +219,7 @@ export function createAppearanceControl(options: AppearanceControlOptions): Desi
       element: boxSizingSelect,
       handle: null,
     },
-    opacity: { kind: 'text', property: 'opacity', element: opacityInput, handle: null },
+    opacity: { kind: 'opacity', property: 'opacity', control: opacityControl, handle: null },
   };
 
   const PROPS: readonly AppearanceProperty[] = ['overflow', 'box-sizing', 'opacity'];
@@ -231,26 +267,47 @@ export function createAppearanceControl(options: AppearanceControlOptions): Desi
     const field = fields[property];
     const target = currentTarget;
 
-    if (field.kind === 'text') {
-      const input = field.element;
+    if (field.kind === 'opacity') {
+      const { slider, input } = field.control;
 
       if (!target || !target.isConnected) {
-        input.disabled = true;
+        field.control.setDisabled(true);
+        slider.value = '0';
         input.value = '';
         input.placeholder = '';
         return;
       }
 
-      input.disabled = false;
+      field.control.setDisabled(false);
 
-      const isEditing = field.handle !== null || isFieldFocused(input);
+      const isEditing = field.handle !== null || isFieldFocused(slider) || isFieldFocused(input);
       if (isEditing && !force) return;
 
       const inlineValue = readInlineValue(target, property);
       const computedValue = readComputedValue(target, property);
-      input.value = inlineValue || computedValue;
+      const displayValue = inlineValue || computedValue;
+
+      input.value = displayValue;
       input.placeholder = '';
+
+      const inlineNumeric = parseOpacityNumber(displayValue);
+      const computedNumeric = parseOpacityNumber(computedValue);
+
+      // If inline value is non-numeric (e.g., var(...)), keep the text input
+      // but disable the slider (it cannot represent non-numeric values)
+      if (inlineValue && inlineNumeric === null) {
+        field.control.setSliderDisabled(true);
+        if (computedNumeric !== null) {
+          field.control.setSliderValue(clampOpacity(computedNumeric));
+        }
+        return;
+      }
+
+      const numeric = inlineNumeric ?? computedNumeric ?? 1;
+      field.control.setSliderDisabled(false);
+      field.control.setSliderValue(clampOpacity(numeric));
     } else {
+      // Handle select field (overflow / box-sizing)
       const select = field.element;
 
       if (!target || !target.isConnected) {
@@ -279,38 +336,92 @@ export function createAppearanceControl(options: AppearanceControlOptions): Desi
   // Event Wiring
   // ===========================================================================
 
-  function wireTextInput(property: AppearanceProperty): void {
-    const field = fields[property];
-    if (field.kind !== 'text') return;
+  function wireOpacity(): void {
+    const field = fields.opacity;
+    if (field.kind !== 'opacity') return;
 
-    const input = field.element;
-    const normalize = property === 'opacity' ? normalizeOpacity : (v: string) => v.trim();
+    const { slider, input } = field.control;
 
-    disposer.listen(input, 'input', () => {
-      const handle = beginTransaction(property);
-      if (handle) handle.set(normalize(input.value));
-    });
-
-    disposer.listen(input, 'blur', () => {
-      commitTransaction(property);
+    /**
+     * Commit opacity value with optional clamping for numeric values.
+     * Non-numeric values (like CSS variables) are preserved as-is.
+     */
+    const commit = () => {
+      // Normalize and clamp numeric values before committing
+      const raw = normalizeOpacity(input.value);
+      const numeric = parseOpacityNumber(raw);
+      if (numeric !== null) {
+        const clamped = clampOpacity(numeric);
+        const clampedStr = String(clamped);
+        // Update both input and style if value was clamped
+        if (raw !== clampedStr) {
+          input.value = clampedStr;
+          const handle = field.handle;
+          if (handle) handle.set(clampedStr);
+        }
+      }
+      commitTransaction('opacity');
       syncAllFields();
+    };
+
+    // Slider events
+    disposer.listen(slider, 'input', () => {
+      if (slider.disabled) return;
+      input.value = slider.value;
+      const handle = beginTransaction('opacity');
+      if (handle) handle.set(normalizeOpacity(slider.value));
     });
+
+    disposer.listen(slider, 'change', commit);
+    disposer.listen(slider, 'blur', commit);
+
+    disposer.listen(slider, 'keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commitTransaction('opacity');
+        syncAllFields();
+        slider.blur();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        rollbackTransaction('opacity');
+        syncField('opacity', true);
+      }
+    });
+
+    // Input events
+    disposer.listen(input, 'input', () => {
+      const raw = normalizeOpacity(input.value);
+      const handle = beginTransaction('opacity');
+      if (handle) handle.set(raw);
+
+      const numeric = parseOpacityNumber(raw);
+      if (numeric === null) {
+        // Empty keeps slider enabled; non-numeric disables the slider
+        field.control.setSliderDisabled(raw.length > 0);
+        return;
+      }
+
+      field.control.setSliderDisabled(false);
+      field.control.setSliderValue(clampOpacity(numeric));
+    });
+
+    disposer.listen(input, 'blur', commit);
 
     disposer.listen(input, 'keydown', (e: KeyboardEvent) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        commitTransaction(property);
+        commitTransaction('opacity');
         syncAllFields();
         input.blur();
       } else if (e.key === 'Escape') {
         e.preventDefault();
-        rollbackTransaction(property);
-        syncField(property, true);
+        rollbackTransaction('opacity');
+        syncField('opacity', true);
       }
     });
   }
 
-  function wireSelect(property: AppearanceProperty): void {
+  function wireSelect(property: Exclude<AppearanceProperty, 'opacity'>): void {
     const field = fields[property];
     if (field.kind !== 'select') return;
 
@@ -344,7 +455,7 @@ export function createAppearanceControl(options: AppearanceControlOptions): Desi
 
   wireSelect('overflow');
   wireSelect('box-sizing');
-  wireTextInput('opacity');
+  wireOpacity();
 
   // ===========================================================================
   // Public API

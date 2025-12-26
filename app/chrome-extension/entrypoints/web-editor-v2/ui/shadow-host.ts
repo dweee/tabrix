@@ -782,12 +782,12 @@ const SHADOW_HOST_STYLES = /* css */ `
     max-width: min(600px, calc(100vw - 400px));
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    background: var(--we-surface-bg);
-    border: 1px solid var(--we-border-subtle);
-    border-radius: var(--we-radius-panel);
-    box-shadow: var(--we-shadow-subtle);
+    gap: 2px;
+    padding: 6px 12px;
+    background: #5494D7;
+    border: none;
+    border-radius: 0;
+    box-shadow: 0 2px 8px rgba(84, 148, 215, 0.3);
     pointer-events: auto;
     user-select: none;
     overflow-x: auto;
@@ -813,36 +813,35 @@ const SHADOW_HOST_STYLES = /* css */ `
     display: inline-flex;
     align-items: center;
     max-width: 220px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    border: 1px solid var(--we-border-subtle);
-    background: var(--we-control-bg);
-    color: var(--we-text-primary);
+    padding: 2px 6px;
+    border-radius: 3px;
+    border: none;
+    background: transparent;
+    color: #ffffff;
     font-size: 12px;
+    font-weight: 500;
     line-height: 1.2;
     cursor: pointer;
     overflow: hidden;
     text-overflow: ellipsis;
+    transition: background 0.15s ease;
   }
 
   .we-crumb:hover {
-    background: var(--we-control-bg-hover);
-    border-color: var(--we-border-strong);
+    background: rgba(255, 255, 255, 0.15);
   }
 
   .we-crumb:active {
-    background: var(--we-control-bg-hover);
+    background: rgba(255, 255, 255, 0.25);
   }
 
   .we-crumb:focus-visible {
     outline: none;
-    box-shadow: 0 0 0 2px var(--we-focus-ring);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
   }
 
   .we-crumb--current {
-    background: rgba(99, 102, 241, 0.12);
-    border-color: rgba(99, 102, 241, 0.25);
-    color: #1d4ed8;
+    background: rgba(255, 255, 255, 0.2);
   }
 
   .we-crumb-sep {
@@ -851,12 +850,12 @@ const SHADOW_HOST_STYLES = /* css */ `
     justify-content: center;
     width: 14px;
     flex: 0 0 auto;
-    color: rgba(100, 116, 139, 0.9);
+    color: rgba(255, 255, 255, 0.7);
     font-size: 12px;
   }
 
   .we-crumb-sep--shadow {
-    color: rgba(99, 102, 241, 0.95);
+    color: rgba(255, 255, 255, 0.9);
   }
 
   .we-body {
@@ -1402,6 +1401,99 @@ const SHADOW_HOST_STYLES = /* css */ `
   }
 
   /* ==========================================================================
+   * Slider Input (Opacity and other numeric ranges)
+   * ========================================================================== */
+  .we-slider-input {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .we-slider-input__slider {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 28px;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    -webkit-appearance: none;
+    appearance: none;
+    cursor: pointer;
+  }
+
+  .we-slider-input__slider:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .we-slider-input__slider::-webkit-slider-runnable-track {
+    height: 4px;
+    background: linear-gradient(
+      to right,
+      var(--we-control-border-focus) 0%,
+      var(--we-control-border-focus) var(--progress, 0%),
+      var(--we-control-bg) var(--progress, 0%),
+      var(--we-control-bg) 100%
+    );
+    border: 1px solid var(--we-control-border-hover);
+    border-radius: 999px;
+  }
+
+  .we-slider-input__slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    margin-top: -5px; /* (12px thumb - 4px track) / 2 + border */
+    border-radius: 999px;
+    background: var(--we-control-bg-focus);
+    border: 1px solid var(--we-border-strong);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  }
+
+  .we-slider-input__slider:focus-visible {
+    outline: none;
+  }
+
+  .we-slider-input__slider:focus-visible::-webkit-slider-thumb {
+    border-color: var(--we-control-border-focus);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+  }
+
+  .we-slider-input__slider::-moz-range-track {
+    height: 4px;
+    background: linear-gradient(
+      to right,
+      var(--we-control-border-focus) 0%,
+      var(--we-control-border-focus) var(--progress, 0%),
+      var(--we-control-bg) var(--progress, 0%),
+      var(--we-control-bg) 100%
+    );
+    border: 1px solid var(--we-control-border-hover);
+    border-radius: 999px;
+  }
+
+  .we-slider-input__slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    background: var(--we-control-bg-focus);
+    border: 1px solid var(--we-border-strong);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  }
+
+  .we-slider-input__slider:focus-visible::-moz-range-thumb {
+    border-color: var(--we-control-border-focus);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+  }
+
+  .we-slider-input__number {
+    flex: 0 0 auto;
+  }
+
+  /* ==========================================================================
    * Icon Button Group (Phase 4.1)
    *
    * A single-select grid of icon buttons (e.g. flex-direction control).
@@ -1594,18 +1686,25 @@ const SHADOW_HOST_STYLES = /* css */ `
     overflow: visible;
   }
 
+  /* Gap inputs vertical layout */
+  .we-grid-gap-inputs {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
   /* ==========================================================================
    * Grid Dimensions Picker (Layout Control)
    * ========================================================================== */
 
   .we-grid-dimensions-preview {
     width: 100%;
-    height: 28px;
+    height: 64px; /* Match two rows of gap inputs: 28px + 8px gap + 28px */
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    font-size: 11px;
+    gap: 4px;
+    font-size: 12px;
     font-family: inherit;
     color: var(--we-text-primary);
     background: var(--we-control-bg);

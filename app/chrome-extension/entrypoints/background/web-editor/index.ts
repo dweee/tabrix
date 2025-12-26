@@ -1,9 +1,26 @@
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
-import { WEB_EDITOR_V2_ACTIONS, WEB_EDITOR_V1_ACTIONS } from '@/common/web-editor-types';
+import {
+  WEB_EDITOR_V2_ACTIONS,
+  WEB_EDITOR_V1_ACTIONS,
+  type ElementChangeSummary,
+  type WebEditorApplyBatchPayload,
+  type WebEditorTxChangedPayload,
+  type WebEditorHighlightElementPayload,
+  type WebEditorRevertElementPayload,
+} from '@/common/web-editor-types';
 
 const CONTEXT_MENU_ID = 'web_editor_toggle';
 const COMMAND_KEY = 'toggle_web_editor';
 const DEFAULT_NATIVE_SERVER_PORT = 12306;
+
+/** Storage key prefix for TX change session data (per-tab isolation) */
+const WEB_EDITOR_TX_CHANGED_SESSION_KEY_PREFIX = 'web-editor-v2-tx-changed-';
+
+/** Storage key prefix for excluded element keys (per-tab isolation, managed by sidepanel) */
+const WEB_EDITOR_EXCLUDED_KEYS_SESSION_KEY_PREFIX = 'web-editor-v2-excluded-keys-';
+
+/** Storage key for AgentChat selected session ID */
+const STORAGE_KEY_SELECTED_SESSION = 'agent-selected-session-id';
 
 // In-memory execution status cache (per requestId)
 interface ExecutionStatusEntry {
@@ -358,6 +375,152 @@ function normalizeApplyPayload(raw: unknown): WebEditorApplyPayload {
     debugSource,
     operation,
   };
+}
+
+/**
+ * Normalize and validate batch apply payload.
+ * Runtime validation for WebEditorApplyBatchPayload.
+ */
+function normalizeApplyBatchPayload(raw: unknown): WebEditorApplyBatchPayload {
+  const obj = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+
+  const tabIdRaw = Number(obj.tabId);
+  const tabId = Number.isFinite(tabIdRaw) && tabIdRaw > 0 ? tabIdRaw : 0;
+
+  const elements = Array.isArray(obj.elements) ? (obj.elements as ElementChangeSummary[]) : [];
+
+  const excludedKeys = Array.isArray(obj.excludedKeys)
+    ? obj.excludedKeys.map((k) => normalizeString(k).trim()).filter((k): k is string => Boolean(k))
+    : [];
+
+  const pageUrl = normalizeString(obj.pageUrl).trim() || undefined;
+
+  return { tabId, elements, excludedKeys, pageUrl };
+}
+
+/**
+ * Build a batch prompt for multiple element changes.
+ * Designed for AgentChat integration to apply multiple visual edits at once.
+ */
+function buildAgentPromptBatch(elements: readonly ElementChangeSummary[], pageUrl: string): string {
+  const lines: string[] = [];
+
+  // Header
+  lines.push('You are a senior frontend engineer working in a local codebase.');
+  lines.push(
+    'Goal: persist a batch of visual edits from the browser into the source code with minimal changes.',
+  );
+  lines.push('');
+
+  // Page context
+  lines.push(`Page URL: ${pageUrl}`);
+  lines.push('');
+
+  lines.push('## Batch Changes');
+  lines.push(`Total elements: ${elements.length}`);
+  lines.push('');
+  lines.push(
+    'For each element, prefer "source" (file/line/component) when available; otherwise use selectors/fingerprint to locate it.',
+  );
+  lines.push('');
+
+  // Element details
+  elements.forEach((element, index) => {
+    const title = element.fullLabel || element.label || element.elementKey;
+    lines.push(`### ${index + 1}. ${title}`);
+    lines.push(`- elementKey: ${element.elementKey}`);
+    lines.push(`- change type: ${element.type}`);
+
+    // Debug source (high-confidence location)
+    const ds = element.debugSource ?? element.locator?.debugSource;
+    if (ds?.file) {
+      const loc = ds.line ? `${ds.file}:${ds.line}${ds.column ? `:${ds.column}` : ''}` : ds.file;
+      lines.push(`- source: ${loc}${ds.componentName ? ` (${ds.componentName})` : ''}`);
+    }
+
+    // Locator hints for fallback
+    if (element.locator?.selectors?.length) {
+      lines.push('- selectors:');
+      for (const sel of element.locator.selectors.slice(0, 5)) {
+        lines.push(`  - ${sel}`);
+      }
+    }
+    if (element.locator?.fingerprint) {
+      lines.push(`- fingerprint: ${element.locator.fingerprint}`);
+    }
+    if (Array.isArray(element.locator?.path) && element.locator.path.length > 0) {
+      lines.push(`- path: ${JSON.stringify(element.locator.path)}`);
+    }
+    if (element.locator?.shadowHostChain?.length) {
+      lines.push(`- shadowHostChain: ${JSON.stringify(element.locator.shadowHostChain)}`);
+    }
+    lines.push('');
+
+    // Net effect details
+    const net = element.netEffect;
+    lines.push('#### Net Effect (apply these final values)');
+
+    if (net.textChange) {
+      lines.push('##### Text');
+      lines.push(`- before: ${JSON.stringify(net.textChange.before)}`);
+      lines.push(`- after: ${JSON.stringify(net.textChange.after)}`);
+      lines.push('');
+    }
+
+    if (net.classChanges) {
+      lines.push('##### Classes');
+      lines.push(`- before: ${net.classChanges.before.join(' ')}`);
+      lines.push(`- after: ${net.classChanges.after.join(' ')}`);
+      lines.push('');
+    }
+
+    if (net.styleChanges) {
+      lines.push('##### Styles (before → after)');
+      const before = net.styleChanges.before ?? {};
+      const after = net.styleChanges.after ?? {};
+      const allKeys = new Set([...Object.keys(before), ...Object.keys(after)]);
+      for (const key of Array.from(allKeys).sort()) {
+        const beforeVal = before[key] ?? '(unset)';
+        const afterRaw = Object.prototype.hasOwnProperty.call(after, key) ? after[key] : '(unset)';
+        const afterVal = afterRaw === '' ? '(removed)' : afterRaw;
+        if (beforeVal !== afterVal) {
+          lines.push(`- ${key}: "${beforeVal}" → "${afterVal}"`);
+        }
+      }
+      lines.push('');
+    }
+
+    // Fallback message if no specific changes
+    if (!net.textChange && !net.classChanges && !net.styleChanges) {
+      lines.push(
+        '- No net effect details available; use locator hints to inspect the element in code.',
+      );
+      lines.push('');
+    }
+  });
+
+  // Instructions
+  lines.push('## How to Apply');
+  lines.push('1. Use "source" when available to go directly to the component file.');
+  lines.push('2. Otherwise, use selectors/fingerprint/path to locate the element in the codebase.');
+  lines.push('3. Apply the net effect with minimal changes and correct styling conventions.');
+  lines.push('4. Avoid generated/bundled outputs; update source files only.');
+  lines.push('');
+
+  // Output format
+  lines.push('## Constraints');
+  lines.push('- Make the smallest safe edit possible for each element');
+  lines.push(
+    '- If Tailwind/CSS Modules/styled-components are used, update the correct styling source',
+  );
+  lines.push('- Do not change unrelated behavior or formatting');
+  lines.push('');
+
+  lines.push(
+    '## Output\nApply all the changes in the repo, then reply with a short summary of what file(s) you modified and the exact changes made.',
+  );
+
+  return lines.join('\n');
 }
 
 function buildAgentPrompt(payload: WebEditorApplyPayload): string {
@@ -741,6 +904,37 @@ async function getActiveTabId(): Promise<number | null> {
   }
 }
 
+/**
+ * Best-effort open the sidepanel with AgentChat tab selected.
+ * Used when batch apply is triggered to show the user the ongoing session.
+ */
+async function openAgentChatSidepanel(tabId: number, windowId?: number): Promise<void> {
+  try {
+    // Set sidepanel options to navigate to AgentChat tab
+    if ((chrome.sidePanel as any)?.setOptions) {
+      await (chrome.sidePanel as any).setOptions({
+        tabId,
+        path: 'sidepanel.html?tab=agent-chat',
+        enabled: true,
+      });
+    }
+
+    // Try to open the sidepanel
+    if (chrome.sidePanel && (chrome.sidePanel as any).open) {
+      try {
+        await (chrome.sidePanel as any).open({ tabId });
+      } catch {
+        // Fallback to window-level open if tab-level fails
+        if (typeof windowId === 'number') {
+          await (chrome.sidePanel as any).open({ windowId });
+        }
+      }
+    }
+  } catch {
+    // Best-effort: side panel may be unavailable in some environments
+  }
+}
+
 export function initWebEditorListeners(): void {
   ensureContextMenu().catch(() => {});
 
@@ -815,6 +1009,296 @@ export function initWebEditorListeners(): void {
           .catch(() => sendResponse({ success: false }));
         return true;
       }
+
+      // =======================================================================
+      // Phase 1.5: Handle TX_CHANGED broadcast from web-editor
+      // =======================================================================
+      if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TX_CHANGED) {
+        (async () => {
+          const senderTabId = (_sender as chrome.runtime.MessageSender)?.tab?.id;
+          if (typeof senderTabId !== 'number') {
+            sendResponse({ success: false, error: 'Sender tabId is required' });
+            return;
+          }
+
+          const rawPayload = message.payload as WebEditorTxChangedPayload | undefined;
+          if (!rawPayload || typeof rawPayload !== 'object') {
+            sendResponse({ success: false, error: 'Invalid payload' });
+            return;
+          }
+
+          // Hydrate payload with tabId from sender
+          const payload: WebEditorTxChangedPayload = { ...rawPayload, tabId: senderTabId };
+          const storageKey = `${WEB_EDITOR_TX_CHANGED_SESSION_KEY_PREFIX}${senderTabId}`;
+
+          // Persist to session storage for cold-start recovery
+          await chrome.storage.session.set({ [storageKey]: payload });
+
+          // Broadcast to sidepanel (best-effort, ignore errors if sidepanel is closed)
+          chrome.runtime
+            .sendMessage({
+              type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TX_CHANGED,
+              payload,
+            })
+            .catch(() => {
+              // Ignore errors - sidepanel may be closed
+            });
+
+          sendResponse({ success: true });
+        })().catch((error) => {
+          sendResponse({
+            success: false,
+            error: String(error instanceof Error ? error.message : error),
+          });
+        });
+        return true;
+      }
+
+      // =======================================================================
+      // Phase 1.5: Handle APPLY_BATCH from web-editor toolbar
+      // =======================================================================
+      if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_APPLY_BATCH) {
+        const payload = normalizeApplyBatchPayload(message.payload);
+        (async () => {
+          const senderTabId = (_sender as chrome.runtime.MessageSender)?.tab?.id;
+          const senderWindowId = (_sender as chrome.runtime.MessageSender)?.tab?.windowId;
+
+          // Best-effort: open AgentChat sidepanel so user can see the session
+          if (typeof senderTabId === 'number') {
+            openAgentChatSidepanel(senderTabId, senderWindowId).catch(() => {});
+          }
+
+          // Read storage for server port and selected session
+          const stored = await chrome.storage.local.get([
+            'nativeServerPort',
+            STORAGE_KEY_SELECTED_SESSION,
+          ]);
+
+          const portRaw = stored?.nativeServerPort;
+          const port = Number.isFinite(Number(portRaw))
+            ? Number(portRaw)
+            : DEFAULT_NATIVE_SERVER_PORT;
+
+          const sessionId = normalizeString(stored?.[STORAGE_KEY_SELECTED_SESSION]).trim();
+          if (!sessionId) {
+            // No session selected - sidepanel is already being opened (best-effort)
+            // User needs to select or create a session manually
+            sendResponse({
+              success: false,
+              error:
+                'No Agent session selected. Please select or create a session in AgentChat, then try Apply again.',
+            });
+            return;
+          }
+
+          // Hydrate payload with tabId
+          const hydratedPayload: WebEditorApplyBatchPayload =
+            typeof senderTabId === 'number' ? { ...payload, tabId: senderTabId } : payload;
+
+          // Read excluded keys from session storage (per-tab, managed by sidepanel)
+          let sessionExcludedKeys: string[] = [];
+          if (typeof senderTabId === 'number') {
+            const excludedSessionKey = `${WEB_EDITOR_EXCLUDED_KEYS_SESSION_KEY_PREFIX}${senderTabId}`;
+            try {
+              if (chrome.storage?.session?.get) {
+                const stored = (await chrome.storage.session.get(excludedSessionKey)) as Record<
+                  string,
+                  unknown
+                >;
+                const raw = stored?.[excludedSessionKey];
+                sessionExcludedKeys = Array.isArray(raw)
+                  ? raw.map((k) => normalizeString(k).trim()).filter(Boolean)
+                  : [];
+              }
+            } catch {
+              // Best-effort: ignore session storage failures
+            }
+          }
+
+          // Filter out excluded elements (union: payload excludedKeys + session excludedKeys)
+          const excluded = new Set([...hydratedPayload.excludedKeys, ...sessionExcludedKeys]);
+          const elements = hydratedPayload.elements.filter((e) => !excluded.has(e.elementKey));
+          if (elements.length === 0) {
+            sendResponse({ success: false, error: 'No elements selected to apply.' });
+            return;
+          }
+
+          // Build page URL from payload or sender tab
+          const pageUrl =
+            normalizeString(hydratedPayload.pageUrl).trim() ||
+            normalizeString((_sender as chrome.runtime.MessageSender)?.tab?.url).trim() ||
+            'unknown';
+
+          // Build batch prompt and send to agent
+          const instruction = buildAgentPromptBatch(elements, pageUrl);
+          const url = `http://127.0.0.1:${port}/agent/chat/${encodeURIComponent(sessionId)}/act`;
+
+          const resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              instruction,
+              // Pass dbSessionId so backend loads session-level configuration (engine, model, options)
+              dbSessionId: sessionId,
+            }),
+          });
+
+          if (!resp.ok) {
+            const text = await resp.text().catch(() => '');
+            sendResponse({
+              success: false,
+              error: text || `HTTP ${resp.status}`,
+            });
+            return;
+          }
+
+          const json: any = await resp.json().catch(() => ({}));
+          const requestId = json?.requestId as string | undefined;
+
+          if (requestId) {
+            // Start SSE subscription for status updates (fire and forget)
+            subscribeToSessionStatus(sessionId, requestId, port).catch(() => {});
+          }
+
+          sendResponse({ success: true, requestId, sessionId });
+        })().catch((error) => {
+          sendResponse({
+            success: false,
+            error: String(error instanceof Error ? error.message : error),
+          });
+        });
+        return true;
+      }
+
+      // =======================================================================
+      // Phase 1.8: Handle HIGHLIGHT_ELEMENT from sidepanel chips hover
+      // =======================================================================
+      if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_HIGHLIGHT_ELEMENT) {
+        const payload = message.payload as WebEditorHighlightElementPayload | undefined;
+        (async () => {
+          // Validate payload
+          const tabId = payload?.tabId;
+          if (typeof tabId !== 'number' || !Number.isFinite(tabId) || tabId <= 0) {
+            sendResponse({ success: false, error: 'Invalid tabId' });
+            return;
+          }
+
+          const mode = payload?.mode;
+          if (mode !== 'hover' && mode !== 'clear') {
+            sendResponse({ success: false, error: 'Invalid mode' });
+            return;
+          }
+
+          // Clear mode: forward directly without locator/selector validation
+          // This prevents overlay residue when sidepanel unmounts
+          if (mode === 'clear') {
+            try {
+              const response = await chrome.tabs.sendMessage(tabId, {
+                action: WEB_EDITOR_V2_ACTIONS.HIGHLIGHT_ELEMENT,
+                mode: 'clear',
+              });
+              sendResponse({ success: true, response });
+            } catch (error) {
+              sendResponse({
+                success: false,
+                error: String(error instanceof Error ? error.message : error),
+              });
+            }
+            return;
+          }
+
+          // Hover mode: validate and forward locator
+          const locator = payload?.locator;
+          if (!locator || typeof locator !== 'object') {
+            sendResponse({ success: false, error: 'Invalid locator' });
+            return;
+          }
+
+          // Extract best selector for fallback highlighting
+          const selectors = Array.isArray(locator.selectors) ? locator.selectors : [];
+          const primarySelector = selectors.find(
+            (s): s is string => typeof s === 'string' && s.trim().length > 0,
+          );
+
+          if (!primarySelector) {
+            sendResponse({ success: false, error: 'No valid selector in locator' });
+            return;
+          }
+
+          // Forward to web-editor content script
+          try {
+            const response = await chrome.tabs.sendMessage(tabId, {
+              action: WEB_EDITOR_V2_ACTIONS.HIGHLIGHT_ELEMENT,
+              locator, // Full locator for Shadow DOM/iframe support
+              selector: primarySelector, // Backward compatibility fallback
+              mode,
+              elementKey: payload.elementKey,
+            });
+
+            sendResponse({ success: true, response });
+          } catch (error) {
+            // Content script might not be available
+            sendResponse({
+              success: false,
+              error: String(error instanceof Error ? error.message : error),
+            });
+          }
+        })().catch((error) => {
+          sendResponse({
+            success: false,
+            error: String(error instanceof Error ? error.message : error),
+          });
+        });
+        return true;
+      }
+
+      // =======================================================================
+      // Phase 2: Handle REVERT_ELEMENT from sidepanel chips
+      // =======================================================================
+      if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_REVERT_ELEMENT) {
+        const payload = message.payload as WebEditorRevertElementPayload | undefined;
+        (async () => {
+          // Validate payload
+          const tabId = payload?.tabId;
+          if (typeof tabId !== 'number' || !Number.isFinite(tabId) || tabId <= 0) {
+            sendResponse({ success: false, error: 'Invalid tabId' });
+            return;
+          }
+
+          const elementKey = payload?.elementKey;
+          if (typeof elementKey !== 'string' || !elementKey.trim()) {
+            sendResponse({ success: false, error: 'Invalid elementKey' });
+            return;
+          }
+
+          // Forward to web-editor content script (frameId: 0 for main frame only)
+          try {
+            const response = await chrome.tabs.sendMessage(
+              tabId,
+              {
+                action: WEB_EDITOR_V2_ACTIONS.REVERT_ELEMENT,
+                elementKey,
+              },
+              { frameId: 0 },
+            );
+
+            sendResponse({ success: true, ...response });
+          } catch (error) {
+            // Content script might not be available
+            sendResponse({
+              success: false,
+              error: String(error instanceof Error ? error.message : error),
+            });
+          }
+        })().catch((error) => {
+          sendResponse({
+            success: false,
+            error: String(error instanceof Error ? error.message : error),
+          });
+        });
+        return true;
+      }
+
       if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_APPLY) {
         const payload = normalizeApplyPayload(message.payload);
         (async () => {

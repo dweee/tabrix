@@ -9,6 +9,7 @@ export { useAgentSessions } from './useAgentSessions';
 export { useAttachments } from './useAttachments';
 export { useAgentTheme, preloadAgentTheme, THEME_LABELS } from './useAgentTheme';
 export { useAgentThreads } from './useAgentThreads';
+export { useWebEditorTxState } from './useWebEditorTxState';
 
 export type { UseAgentServerOptions } from './useAgentServer';
 export type { UseAgentChatOptions } from './useAgentChat';
@@ -24,3 +25,4 @@ export type {
   AgentThreadState,
   UseAgentThreadsOptions,
 } from './useAgentThreads';
+export type { UseWebEditorTxStateOptions } from './useWebEditorTxState';

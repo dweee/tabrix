@@ -1010,6 +1010,8 @@ onMounted(async () => {
   if (tabParam === 'element-markers') {
     activeTab.value = 'element-markers';
     await loadMarkers();
+  } else if (tabParam === 'agent-chat') {
+    activeTab.value = 'agent-chat';
   }
 
   await refresh();

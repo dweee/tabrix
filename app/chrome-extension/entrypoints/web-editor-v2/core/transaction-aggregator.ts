@@ -347,7 +347,7 @@ function computeClassNetEffect(txs: readonly Transaction[]): ClassNetEffect | nu
  * - Elements with no net effect (changes that cancel out) are filtered.
  */
 export function aggregateTransactionsByElement(
-  transactions: Transaction[],
+  transactions: readonly Transaction[],
 ): ElementChangeSummary[] {
   // Sort by timestamp for deterministic results
   const indexed = transactions.map((tx, index) => ({ tx, index }));
@@ -485,7 +485,7 @@ export function aggregateTransactionsByElement(
  * @param transactions - Array of transactions to check
  * @returns True if there are applicable style/text/class changes
  */
-export function hasApplicableChanges(transactions: Transaction[]): boolean {
+export function hasApplicableChanges(transactions: readonly Transaction[]): boolean {
   const summaries = aggregateTransactionsByElement(transactions);
   return summaries.length > 0;
 }
@@ -496,7 +496,9 @@ export function hasApplicableChanges(transactions: Transaction[]): boolean {
  * @param transactions - Array of transactions to analyze
  * @returns Set of element keys with applicable changes
  */
-export function getChangedElementKeys(transactions: Transaction[]): Set<WebEditorElementKey> {
+export function getChangedElementKeys(
+  transactions: readonly Transaction[],
+): Set<WebEditorElementKey> {
   const summaries = aggregateTransactionsByElement(transactions);
   return new Set(summaries.map((s) => s.elementKey));
 }
