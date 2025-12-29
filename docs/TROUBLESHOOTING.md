@@ -44,7 +44,7 @@ This will check installation, manifest, permissions, and Node.js path.
 2. **Check if mcp-chrome-bridge is installed successfully**, ensure it's globally installed
 
 ```bash
-mcp-chrome-bridge -v
+mcp-chrome-bridge -V
 ```
 
 <img width="612" alt="Screenshot 2025-06-11 15 09 57" src="https://github.com/user-attachments/assets/59458532-e6e1-457c-8c82-3756a5dbb28e" />

@@ -50,7 +50,7 @@ mcp-chrome-bridge doctor
 1.1 **检查mcp-chrome-bridge是否安装成功**，确保是**全局安装**的
 
 ```bash
-mcp-chrome-bridge -v
+mcp-chrome-bridge -V
 ```
 
 <img width="612" alt="截屏2025-06-11 15 09 57" src="https://github.com/user-attachments/assets/59458532-e6e1-457c-8c82-3756a5dbb28e" />
