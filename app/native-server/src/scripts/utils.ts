@@ -11,6 +11,32 @@ export const mkdir = promisify(fs.mkdir);
 export const writeFile = promisify(fs.writeFile);
 
 /**
+ * Get the log directory path for wrapper scripts.
+ * Uses platform-appropriate user directories to avoid permission issues.
+ *
+ * - macOS: ~/Library/Logs/mcp-chrome-bridge
+ * - Windows: %LOCALAPPDATA%/mcp-chrome-bridge/logs
+ * - Linux: $XDG_STATE_HOME/mcp-chrome-bridge/logs or ~/.local/state/mcp-chrome-bridge/logs
+ */
+export function getLogDir(): string {
+  const homedir = os.homedir();
+
+  if (os.platform() === 'darwin') {
+    return path.join(homedir, 'Library', 'Logs', 'mcp-chrome-bridge');
+  } else if (os.platform() === 'win32') {
+    return path.join(
+      process.env.LOCALAPPDATA || path.join(homedir, 'AppData', 'Local'),
+      'mcp-chrome-bridge',
+      'logs',
+    );
+  } else {
+    // Linux: XDG_STATE_HOME or ~/.local/state
+    const xdgState = process.env.XDG_STATE_HOME || path.join(homedir, '.local', 'state');
+    return path.join(xdgState, 'mcp-chrome-bridge', 'logs');
+  }
+}
+
+/**
  * 打印彩色文本
  */
 export function colorText(text: string, color: string): string {
@@ -201,25 +227,36 @@ export async function createManifestContent(): Promise<any> {
 }
 
 /**
- * 验证Windows注册表项是否存在
+ * 验证Windows注册表项是否存在且指向正确路径
  */
 function verifyWindowsRegistryEntry(registryKey: string, expectedPath: string): boolean {
   if (os.platform() !== 'win32') {
     return true; // 非Windows平台跳过验证
   }
 
+  const normalizeForCompare = (filePath: string): string => path.normalize(filePath).toLowerCase();
+
   try {
-    const result = execSync(`reg query "${registryKey}" /ve`, { encoding: 'utf8', stdio: 'pipe' });
-    const lines = result.split('\n');
+    const output = execSync(`reg query "${registryKey}" /ve`, {
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+    const lines = output
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+
     for (const line of lines) {
-      if (line.includes('REG_SZ') && line.includes(expectedPath.replace(/\\/g, '\\\\'))) {
-        return true;
-      }
+      const match = line.match(/REG_SZ\s+(.*)$/i);
+      if (!match?.[1]) continue;
+      const actualPath = match[1].trim();
+      return normalizeForCompare(actualPath) === normalizeForCompare(expectedPath);
     }
-    return false;
-  } catch (error) {
-    return false;
+  } catch {
+    // ignore
   }
+
+  return false;
 }
 
 /**
@@ -266,8 +303,8 @@ export async function tryRegisterUserLevelHost(targetBrowsers?: BrowserType[]): 
         // Windows需要额外注册表项
         if (os.platform() === 'win32' && config.registryKey) {
           try {
-            const escapedPath = config.userManifestPath.replace(/\\/g, '\\\\');
-            const regCommand = `reg add "${config.registryKey}" /ve /t REG_SZ /d "${escapedPath}" /f`;
+            // 注意：不需要手动双写反斜杠，reg 命令会正确处理 Windows 路径
+            const regCommand = `reg add "${config.registryKey}" /ve /t REG_SZ /d "${config.userManifestPath}" /f`;
             execSync(regCommand, { stdio: 'pipe' });
 
             if (verifyWindowsRegistryEntry(config.registryKey, config.userManifestPath)) {
@@ -409,9 +446,8 @@ export async function registerWithElevatedPermissions(): Promise<void> {
     // 6. Windows特殊处理 - 设置系统级注册表
     if (os.platform() === 'win32') {
       const registryKey = `HKLM\\Software\\Google\\Chrome\\NativeMessagingHosts\\${HOST_NAME}`;
-      // 确保路径使用正确的转义格式
-      const escapedPath = manifestPath.replace(/\\/g, '\\\\');
-      const regCommand = `reg add "${registryKey}" /ve /t REG_SZ /d "${escapedPath}" /f`;
+      // 注意：不需要手动双写反斜杠，reg 命令会正确处理 Windows 路径
+      const regCommand = `reg add "${registryKey}" /ve /t REG_SZ /d "${manifestPath}" /f`;
 
       console.log(colorText(`Creating system registry entry: ${registryKey}`, 'blue'));
       console.log(colorText(`Manifest path: ${manifestPath}`, 'blue'));

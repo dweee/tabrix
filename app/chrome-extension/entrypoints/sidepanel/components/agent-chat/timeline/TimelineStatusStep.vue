@@ -1,8 +1,8 @@
 <template>
   <div class="flex items-center gap-2">
-    <!-- 螺旋动画图标（仅 running/starting 状态显示） -->
+    <!-- 螺旋动画图标（仅 running/starting 状态显示，且未被父组件隐藏时） -->
     <svg
-      v-if="isRunning"
+      v-if="isRunning && !hideIcon"
       class="loading-scribble w-4 h-4 flex-shrink-0"
       viewBox="0 0 100 100"
       fill="none"
@@ -33,6 +33,8 @@ import { getRandomLoadingText } from '../../../utils/loading-texts';
 
 const props = defineProps<{
   item: Extract<TimelineItem, { kind: 'status' }>;
+  /** Hide the loading icon (when parent component displays it in timeline node position) */
+  hideIcon?: boolean;
 }>();
 
 // 是否处于运行状态

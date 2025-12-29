@@ -87,9 +87,9 @@
         </svg>
       </span>
 
-      <!-- Element Label -->
+      <!-- Element Label (tagName only) -->
       <span class="truncate max-w-[140px]" :style="labelStyle">
-        {{ element.label }}
+        {{ chipTagName }}
       </span>
 
       <!-- Include/Exclude State Pill -->
@@ -171,7 +171,7 @@
                     class="mx-0.5"
                     >/</span
                   >
-                  <span :style="{ color: 'var(--ac-error, #ef4444)' }"
+                  <span :style="{ color: 'var(--ac-danger, #ef4444)' }"
                     >-{{ element.changes.style.removed }}</span
                   >
                 </template>
@@ -206,7 +206,7 @@
               <span :style="{ color: 'var(--ac-success, #10b981)' }">+</span> {{ classAddedText }}
             </div>
             <div v-if="classRemovedText" :style="tooltipDetailsStyle">
-              <span :style="{ color: 'var(--ac-error, #ef4444)' }">-</span> {{ classRemovedText }}
+              <span :style="{ color: 'var(--ac-danger, #ef4444)' }">-</span> {{ classRemovedText }}
             </div>
           </div>
         </div>
@@ -216,19 +216,26 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, ref, onMounted, onUnmounted } from 'vue';
+import { computed, ref, onMounted, onUnmounted, inject, watch, type Ref } from 'vue';
 import type { ElementChangeSummary, WebEditorElementKey } from '@/common/web-editor-types';
 
 // =============================================================================
 // Props & Emits
 // =============================================================================
 
-const props = defineProps<{
-  /** Element change summary to display */
-  element: ElementChangeSummary;
-  /** Whether this element is excluded from Apply */
-  excluded: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    /** Element change summary to display */
+    element: ElementChangeSummary;
+    /** Whether this element is excluded from Apply */
+    excluded: boolean;
+    /** Whether this element is currently selected in web-editor */
+    selected?: boolean;
+  }>(),
+  {
+    selected: false,
+  },
+);
 
 const emit = defineEmits<{
   /** Toggle include/exclude state */
@@ -255,9 +262,26 @@ const chipRect = ref<DOMRect | null>(null);
 /** Teleport target - find .agent-theme ancestor for theme variable inheritance */
 const tooltipTarget = ref<Element | null>(null);
 
+/**
+ * Inject scroll/resize trigger from parent WebEditorChanges component.
+ * This centralizes event listeners for better performance.
+ */
+const scrollResizeTrigger = inject<Ref<number>>('scrollResizeTrigger');
+
 // =============================================================================
 // Computed: UI State
 // =============================================================================
+
+/**
+ * Extract tagName from label for compact chip display.
+ * Label format is usually "tagName#id.class" or "tagName.class"
+ */
+const chipTagName = computed(() => {
+  const label = (props.element.label || '').trim();
+  // Extract tagName (first part before #, ., or space)
+  const match = label.match(/^([a-zA-Z][a-zA-Z0-9-]*)/);
+  return match?.[1]?.toLowerCase() || 'element';
+});
 
 const showTooltip = computed(() => isHovering.value || isFocused.value);
 
@@ -305,9 +329,18 @@ const ariaLabel = computed(() => {
 
 const chipContainerStyle = computed(() => {
   const active = showTooltip.value;
+  const isSelected = props.selected;
+
+  // Selected elements get accent border
+  const borderColor = isSelected
+    ? 'var(--ac-accent)'
+    : active
+      ? 'var(--ac-border-strong)'
+      : 'var(--ac-border)';
+
   return {
     backgroundColor: active ? 'var(--ac-hover-bg)' : 'var(--ac-surface)',
-    border: `var(--ac-border-width) solid ${active ? 'var(--ac-border-strong)' : 'var(--ac-border)'}`,
+    border: `var(--ac-border-width) solid ${borderColor}`,
     borderRadius: 'var(--ac-radius-button)',
     boxShadow: active ? 'var(--ac-shadow-card)' : 'none',
     color: props.excluded ? 'var(--ac-text-subtle)' : 'var(--ac-text-muted)',
@@ -474,20 +507,18 @@ function handleBlur(): void {
 // Lifecycle - Handle scroll/resize updates
 // =============================================================================
 
-let scrollRAF: number | null = null;
-
-function handleScrollOrResize(): void {
-  if (!showTooltip.value) return;
-
-  if (scrollRAF !== null) {
-    cancelAnimationFrame(scrollRAF);
-  }
-
-  scrollRAF = requestAnimationFrame(() => {
-    updateChipRect();
-    scrollRAF = null;
-  });
-}
+/**
+ * Watch for scroll/resize trigger changes from parent component.
+ * This replaces per-instance event listeners with a centralized approach.
+ */
+watch(
+  () => scrollResizeTrigger?.value,
+  () => {
+    if (showTooltip.value) {
+      updateChipRect();
+    }
+  },
+);
 
 onMounted(() => {
   // Find .agent-theme ancestor for tooltip teleport (preserves theme CSS variables)
@@ -495,20 +526,9 @@ onMounted(() => {
     const agentTheme = chipRef.value.closest('.agent-theme');
     tooltipTarget.value = agentTheme;
   }
-
-  // Listen for scroll and resize to update tooltip position
-  window.addEventListener('scroll', handleScrollOrResize, { passive: true, capture: true });
-  window.addEventListener('resize', handleScrollOrResize, { passive: true });
 });
 
 onUnmounted(() => {
-  window.removeEventListener('scroll', handleScrollOrResize, true);
-  window.removeEventListener('resize', handleScrollOrResize);
-
-  if (scrollRAF !== null) {
-    cancelAnimationFrame(scrollRAF);
-  }
-
   // Clear any active highlight when chip is unmounted (e.g., when toggling include/exclude)
   if (isHovering.value) {
     emit('hover:end', props.element);
@@ -541,7 +561,7 @@ onUnmounted(() => {
 <style scoped>
 /* Revert button hover effect */
 button[aria-label^='Revert']:hover {
-  background-color: var(--ac-error, #ef4444) !important;
+  background-color: var(--ac-danger, #ef4444) !important;
   color: white !important;
 }
 </style>

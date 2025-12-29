@@ -36,6 +36,7 @@ import {
   getSession,
   getSessionsByProject,
   getSessionsByProjectAndEngine,
+  getAllSessions,
   updateSession,
   type CreateSessionOptions,
   type UpdateSessionInput,
@@ -44,12 +45,28 @@ import { getProject } from '../../agent/project-service';
 import { getDefaultWorkspaceDir, getDefaultProjectRoot } from '../../agent/storage';
 import { openDirectoryPicker } from '../../agent/directory-picker';
 import type { EngineName } from '../../agent/engines/types';
+import { attachmentService } from '../../agent/attachment-service';
+import { openProjectDirectory } from '../../agent/open-project';
+import type {
+  AttachmentStatsResponse,
+  AttachmentCleanupRequest,
+  AttachmentCleanupResponse,
+  OpenProjectRequest,
+  OpenProjectTarget,
+} from 'chrome-mcp-shared';
 
 // Valid engine names for validation
 const VALID_ENGINE_NAMES: readonly EngineName[] = ['claude', 'codex', 'cursor', 'qwen', 'glm'];
 
 function isValidEngineName(name: string): name is EngineName {
   return VALID_ENGINE_NAMES.includes(name as EngineName);
+}
+
+// Valid open project targets
+const VALID_OPEN_TARGETS: readonly OpenProjectTarget[] = ['vscode', 'terminal'];
+
+function isValidOpenTarget(target: string): target is OpenProjectTarget {
+  return VALID_OPEN_TARGETS.includes(target as OpenProjectTarget);
 }
 
 // ============================================================
@@ -237,6 +254,20 @@ export function registerAgentRoutes(fastify: FastifyInstance, options: AgentRout
   // ============================================================
   // Session Routes
   // ============================================================
+
+  // List all sessions across all projects
+  fastify.get('/agent/sessions', async (_request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const sessions = await getAllSessions();
+      return reply.status(HTTP_STATUS.OK).send({ sessions });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      fastify.log.error({ err: error }, 'Failed to list all sessions');
+      return reply.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).send({
+        error: message || ERROR_MESSAGES.INTERNAL_SERVER_ERROR,
+      });
+    }
+  });
 
   // List sessions for a project
   fastify.get(
@@ -563,6 +594,140 @@ export function registerAgentRoutes(fastify: FastifyInstance, options: AgentRout
   );
 
   // ============================================================
+  // Open Project Routes
+  // ============================================================
+
+  /**
+   * POST /agent/sessions/:sessionId/open
+   * Open session's project directory in VSCode or terminal.
+   */
+  fastify.post(
+    '/agent/sessions/:sessionId/open',
+    async (
+      request: FastifyRequest<{
+        Params: { sessionId: string };
+        Body: OpenProjectRequest;
+      }>,
+      reply: FastifyReply,
+    ) => {
+      const { sessionId } = request.params;
+      const { target } = request.body || {};
+
+      if (!sessionId) {
+        return reply
+          .status(HTTP_STATUS.BAD_REQUEST)
+          .send({ success: false, error: 'sessionId is required' });
+      }
+      if (!target || typeof target !== 'string') {
+        return reply
+          .status(HTTP_STATUS.BAD_REQUEST)
+          .send({ success: false, error: 'target is required' });
+      }
+      if (!isValidOpenTarget(target)) {
+        return reply.status(HTTP_STATUS.BAD_REQUEST).send({
+          success: false,
+          error: `Invalid target. Must be one of: ${VALID_OPEN_TARGETS.join(', ')}`,
+        });
+      }
+
+      try {
+        // Get session and its project
+        const session = await getSession(sessionId);
+        if (!session) {
+          return reply
+            .status(HTTP_STATUS.NOT_FOUND)
+            .send({ success: false, error: 'Session not found' });
+        }
+
+        const project = await getProject(session.projectId);
+        if (!project) {
+          return reply
+            .status(HTTP_STATUS.NOT_FOUND)
+            .send({ success: false, error: 'Project not found' });
+        }
+
+        // Open the project directory
+        const result = await openProjectDirectory(project.rootPath, target);
+        if (result.success) {
+          return reply.status(HTTP_STATUS.OK).send({ success: true });
+        }
+        return reply.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).send({
+          success: false,
+          error: result.error,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        fastify.log.error({ err: error }, 'Failed to open session project');
+        return reply.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).send({
+          success: false,
+          error: message || ERROR_MESSAGES.INTERNAL_SERVER_ERROR,
+        });
+      }
+    },
+  );
+
+  /**
+   * POST /agent/projects/:projectId/open
+   * Open project directory in VSCode or terminal.
+   */
+  fastify.post(
+    '/agent/projects/:projectId/open',
+    async (
+      request: FastifyRequest<{
+        Params: { projectId: string };
+        Body: OpenProjectRequest;
+      }>,
+      reply: FastifyReply,
+    ) => {
+      const { projectId } = request.params;
+      const { target } = request.body || {};
+
+      if (!projectId) {
+        return reply
+          .status(HTTP_STATUS.BAD_REQUEST)
+          .send({ success: false, error: 'projectId is required' });
+      }
+      if (!target || typeof target !== 'string') {
+        return reply
+          .status(HTTP_STATUS.BAD_REQUEST)
+          .send({ success: false, error: 'target is required' });
+      }
+      if (!isValidOpenTarget(target)) {
+        return reply.status(HTTP_STATUS.BAD_REQUEST).send({
+          success: false,
+          error: `Invalid target. Must be one of: ${VALID_OPEN_TARGETS.join(', ')}`,
+        });
+      }
+
+      try {
+        const project = await getProject(projectId);
+        if (!project) {
+          return reply
+            .status(HTTP_STATUS.NOT_FOUND)
+            .send({ success: false, error: 'Project not found' });
+        }
+
+        // Open the project directory
+        const result = await openProjectDirectory(project.rootPath, target);
+        if (result.success) {
+          return reply.status(HTTP_STATUS.OK).send({ success: true });
+        }
+        return reply.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).send({
+          success: false,
+          error: result.error,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        fastify.log.error({ err: error }, 'Failed to open project');
+        return reply.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).send({
+          success: false,
+          error: message || ERROR_MESSAGES.INTERNAL_SERVER_ERROR,
+        });
+      }
+    },
+  );
+
+  // ============================================================
   // Chat Message Routes
   // ============================================================
 
@@ -780,6 +945,14 @@ export function registerAgentRoutes(fastify: FastifyInstance, options: AgentRout
 
   fastify.post(
     '/agent/chat/:sessionId/act',
+    {
+      // Increase body limit to support image attachments (base64 encoded)
+      // Default Fastify limit is 1MB, which is too small for images
+      config: {
+        rawBody: false,
+      },
+      bodyLimit: 50 * 1024 * 1024, // 50MB to support multiple images
+    },
     async (
       request: FastifyRequest<{ Params: { sessionId: string }; Body: AgentActRequest }>,
       reply: FastifyReply,
@@ -863,6 +1036,169 @@ export function registerAgentRoutes(fastify: FastifyInstance, options: AgentRout
         cancelledCount,
         sessionId,
       });
+    },
+  );
+
+  // ============================================================
+  // Attachment Routes
+  // ============================================================
+
+  /**
+   * GET /agent/attachments/stats
+   * Get statistics for all attachment caches.
+   */
+  fastify.get('/agent/attachments/stats', async (_request, reply) => {
+    try {
+      const stats = await attachmentService.getAttachmentStats();
+
+      // Enrich with project names from database
+      const projects = await listProjects();
+      const projectMap = new Map(projects.map((p) => [p.id, p.name]));
+      const dbProjectIds = new Set(projects.map((p) => p.id));
+
+      const enrichedProjects = stats.projects.map((p) => ({
+        ...p,
+        projectName: projectMap.get(p.projectId),
+        existsInDb: dbProjectIds.has(p.projectId),
+      }));
+
+      const orphanProjectIds = stats.projects
+        .filter((p) => !dbProjectIds.has(p.projectId))
+        .map((p) => p.projectId);
+
+      const response: AttachmentStatsResponse = {
+        success: true,
+        rootDir: stats.rootDir,
+        totalFiles: stats.totalFiles,
+        totalBytes: stats.totalBytes,
+        projects: enrichedProjects,
+        orphanProjectIds,
+      };
+
+      reply.status(HTTP_STATUS.OK).send(response);
+    } catch (error) {
+      fastify.log.error({ err: error }, 'Failed to get attachment stats');
+      reply
+        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+        .send({ error: ERROR_MESSAGES.INTERNAL_SERVER_ERROR });
+    }
+  });
+
+  /**
+   * GET /agent/attachments/:projectId/:filename
+   * Serve an attachment file.
+   */
+  fastify.get(
+    '/agent/attachments/:projectId/:filename',
+    async (
+      request: FastifyRequest<{ Params: { projectId: string; filename: string } }>,
+      reply: FastifyReply,
+    ) => {
+      const { projectId, filename } = request.params;
+
+      try {
+        // Validate and get file
+        const buffer = await attachmentService.readAttachment(projectId, filename);
+
+        // Determine content type from filename extension
+        const ext = filename.split('.').pop()?.toLowerCase();
+        let contentType = 'application/octet-stream';
+        switch (ext) {
+          case 'png':
+            contentType = 'image/png';
+            break;
+          case 'jpg':
+          case 'jpeg':
+            contentType = 'image/jpeg';
+            break;
+          case 'gif':
+            contentType = 'image/gif';
+            break;
+          case 'webp':
+            contentType = 'image/webp';
+            break;
+        }
+
+        reply
+          .header('Content-Type', contentType)
+          .header('Cache-Control', 'public, max-age=31536000, immutable')
+          .send(buffer);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+
+        if (message.includes('Invalid') || message.includes('traversal')) {
+          reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: message });
+          return;
+        }
+
+        // File not found or read error
+        reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Attachment not found' });
+      }
+    },
+  );
+
+  /**
+   * DELETE /agent/attachments/:projectId
+   * Clean up attachments for a specific project.
+   */
+  fastify.delete(
+    '/agent/attachments/:projectId',
+    async (request: FastifyRequest<{ Params: { projectId: string } }>, reply: FastifyReply) => {
+      const { projectId } = request.params;
+
+      try {
+        const result = await attachmentService.cleanupAttachments({ projectIds: [projectId] });
+
+        const response: AttachmentCleanupResponse = {
+          success: true,
+          scope: 'project',
+          removedFiles: result.removedFiles,
+          removedBytes: result.removedBytes,
+          results: result.results,
+        };
+
+        reply.status(HTTP_STATUS.OK).send(response);
+      } catch (error) {
+        fastify.log.error({ err: error }, 'Failed to cleanup project attachments');
+        reply
+          .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+          .send({ error: ERROR_MESSAGES.INTERNAL_SERVER_ERROR });
+      }
+    },
+  );
+
+  /**
+   * DELETE /agent/attachments
+   * Clean up attachments for all or selected projects.
+   */
+  fastify.delete(
+    '/agent/attachments',
+    async (request: FastifyRequest<{ Body?: AttachmentCleanupRequest }>, reply: FastifyReply) => {
+      try {
+        const body = request.body;
+        const projectIds = body?.projectIds;
+
+        const result = await attachmentService.cleanupAttachments(
+          projectIds ? { projectIds } : undefined,
+        );
+
+        const scope = projectIds && projectIds.length > 0 ? 'selected' : 'all';
+
+        const response: AttachmentCleanupResponse = {
+          success: true,
+          scope,
+          removedFiles: result.removedFiles,
+          removedBytes: result.removedBytes,
+          results: result.results,
+        };
+
+        reply.status(HTTP_STATUS.OK).send(response);
+      } catch (error) {
+        fastify.log.error({ err: error }, 'Failed to cleanup attachments');
+        reply
+          .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+          .send({ error: ERROR_MESSAGES.INTERNAL_SERVER_ERROR });
+      }
     },
   );
 }

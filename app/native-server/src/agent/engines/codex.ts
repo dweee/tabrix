@@ -10,6 +10,8 @@ import {
 import type { AgentEngine, EngineExecutionContext, EngineInitOptions } from './types';
 import type { AgentMessage, RealtimeEvent } from '../types';
 import { AgentToolBridge } from '../tool-bridge';
+import { getProject } from '../project-service';
+import { getChromeMcpUrl } from '../../constant';
 
 type TodoListPhase = 'started' | 'update' | 'completed';
 
@@ -51,9 +53,11 @@ export class CodexEngine implements AgentEngine {
       instruction,
       model,
       projectRoot,
+      projectId,
       requestId,
       signal,
       attachments,
+      resolvedImagePaths,
       codexConfig,
     } = options;
     const repoPath = this.resolveRepoPath(projectRoot);
@@ -79,6 +83,21 @@ export class CodexEngine implements AgentEngine {
       resolvedConfig.autoInstructions = CODEX_AUTO_INSTRUCTIONS;
     }
 
+    // Resolve project-scoped Chrome MCP toggle (default: enabled)
+    const enableChromeMcp = await (async (): Promise<boolean> => {
+      if (!projectId) return true;
+      try {
+        const project = await getProject(projectId);
+        return project?.enableChromeMcp !== false;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(
+          `[CodexEngine] Failed to load project enableChromeMcp, defaulting to enabled: ${message}`,
+        );
+        return true;
+      }
+    })();
+
     // Optionally append project context to the prompt
     const prompt = resolvedConfig.appendProjectContext
       ? await this.appendProjectContext(normalizedInstruction, repoPath)
@@ -99,13 +118,34 @@ export class CodexEngine implements AgentEngine {
     // Add Codex configuration arguments
     args.push(...this.buildCodexConfigArgs(resolvedConfig));
 
+    // Inject local Chrome MCP server via runtime config override (no global codex config mutation)
+    // Use a unique server name to avoid collision with any existing global config
+    if (enableChromeMcp) {
+      const chromeMcpUrl = getChromeMcpUrl();
+      // Set both url and type for complete HTTP MCP server configuration
+      args.push('-c', `mcp_servers.chrome_mcp_http.url=${JSON.stringify(chromeMcpUrl)}`);
+      args.push('-c', `mcp_servers.chrome_mcp_http.type="http"`);
+      console.error(`[CodexEngine] Chrome MCP server enabled: ${chromeMcpUrl}`);
+    } else {
+      console.error('[CodexEngine] Chrome MCP server disabled');
+    }
+
     if (model && model.trim()) {
       args.push('--model', model.trim());
     }
 
-    // Process image attachments
+    // Process image attachments - prefer resolvedImagePaths (persisted), fallback to temp files
     const tempFiles: string[] = [];
-    if (attachments && attachments.length > 0) {
+    const hasResolvedPaths = resolvedImagePaths && resolvedImagePaths.length > 0;
+
+    if (hasResolvedPaths) {
+      // Use pre-resolved persistent paths (preferred - no temp files needed)
+      console.error(`[CodexEngine] Using ${resolvedImagePaths.length} pre-resolved image path(s)`);
+      for (const imagePath of resolvedImagePaths) {
+        args.push('--image', imagePath);
+      }
+    } else if (attachments && attachments.length > 0) {
+      // Fallback: write base64 to temp files (legacy behavior)
       for (const attachment of attachments) {
         if (attachment.type === 'image') {
           try {
@@ -148,9 +188,28 @@ export class CodexEngine implements AgentEngine {
       const thinkingSegments: string[] = [];
 
       /**
-       * Cleanup and settle the promise (resolve or reject).
+       * Cleanup temporary files created for image attachments.
        */
-      const finish = (error?: unknown): void => {
+      const cleanupTempFiles = async (): Promise<void> => {
+        if (tempFiles.length === 0) return;
+
+        const fs = await import('node:fs/promises');
+        for (const filePath of tempFiles) {
+          try {
+            await fs.unlink(filePath);
+            console.error(`[CodexEngine] Cleaned up temp file: ${filePath}`);
+          } catch (err) {
+            // Ignore errors during cleanup - file may already be deleted
+            console.error(`[CodexEngine] Failed to cleanup temp file ${filePath}:`, err);
+          }
+        }
+      };
+
+      /**
+       * Cleanup and settle the promise (resolve or reject).
+       * Waits for temp file cleanup to complete before settling.
+       */
+      const finish = async (error?: unknown): Promise<void> => {
         if (settled) return;
         settled = true;
 
@@ -178,6 +237,9 @@ export class CodexEngine implements AgentEngine {
           }
         }
 
+        // Cleanup temp files after process is killed (wait for completion)
+        await cleanupTempFiles();
+
         // Settle the promise
         if (error) {
           reject(error instanceof Error ? error : new Error(String(error)));
@@ -192,14 +254,14 @@ export class CodexEngine implements AgentEngine {
           error instanceof Error
             ? error.message
             : stderrBuffer.slice(-5).join('\n') || 'Codex CLI failed to start';
-        finish(new Error(`CodexEngine: ${message}`));
+        void finish(new Error(`CodexEngine: ${message}`));
       });
 
       // Listen for abort signal to cancel execution
       const abortHandler = signal
         ? () => {
             console.error('[CodexEngine] Execution cancelled via abort signal');
-            finish(new Error('CodexEngine: execution was cancelled'));
+            void finish(new Error('CodexEngine: execution was cancelled'));
           }
         : null;
 
@@ -525,7 +587,7 @@ export class CodexEngine implements AgentEngine {
         emitAssistant(true);
         resetAssistantBuffers();
         hasCompleted = true;
-        finish(new Error(`CodexEngine: process terminated (${detail})`));
+        void finish(new Error(`CodexEngine: process terminated (${detail})`));
       });
 
       // Main event processing loop (wrapped in IIFE to handle async properly)
@@ -603,9 +665,9 @@ export class CodexEngine implements AgentEngine {
             hasCompleted = true;
           }
 
-          finish();
+          await finish();
         } catch (error) {
-          finish(error);
+          await finish(error);
         }
       })();
     });

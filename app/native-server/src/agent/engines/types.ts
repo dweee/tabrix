@@ -13,8 +13,15 @@ export interface EngineInitOptions {
   signal?: AbortSignal;
   /**
    * Optional attachments (images/files) to include with the instruction.
+   * Note: When using persisted attachments, use resolvedImagePaths instead.
    */
   attachments?: AgentAttachment[];
+  /**
+   * Resolved absolute paths to persisted image files.
+   * These are used by engines instead of writing temp files from base64.
+   * Set by chat-service after saving attachments to persistent storage.
+   */
+  resolvedImagePaths?: string[];
   /**
    * Optional project ID for session persistence.
    * When provided, engines can use this to save/load session state.

@@ -46,6 +46,8 @@ export const WEB_EDITOR_V2_ACTIONS = {
   HIGHLIGHT_ELEMENT: 'web_editor_highlight_element_v2',
   /** Revert an element to its original state (Phase 2 - Selective Undo) */
   REVERT_ELEMENT: 'web_editor_revert_element_v2',
+  /** Clear selection (from sidepanel after send) */
+  CLEAR_SELECTION: 'web_editor_clear_selection_v2',
 } as const;
 
 /**
@@ -437,6 +439,67 @@ export interface WebEditorRevertElementResponse {
 }
 
 // =============================================================================
+// Selection Sync Types
+// =============================================================================
+
+/**
+ * Summary of currently selected element.
+ * Lightweight payload for selection sync (no transaction data).
+ */
+export interface SelectedElementSummary {
+  /** Stable element identifier */
+  elementKey: WebEditorElementKey;
+  /** Locator for element identification and highlighting */
+  locator: ElementLocator;
+  /** Short display label (e.g., "div#app") */
+  label: string;
+  /** Full label with context (e.g., "body > div#app") */
+  fullLabel: string;
+  /** Tag name of the element */
+  tagName: string;
+  /** Timestamp for deduplication */
+  updatedAt: number;
+}
+
+/**
+ * Selection change broadcast payload.
+ * Sent immediately when user selects/deselects elements (no debounce).
+ */
+export interface WebEditorSelectionChangedPayload {
+  /** Source tab ID (filled by background from sender.tab.id) */
+  tabId: number;
+  /** Currently selected element, or null if deselected */
+  selected: SelectedElementSummary | null;
+  /** Page URL for context */
+  pageUrl?: string;
+}
+
+// =============================================================================
+// Execution Cancel Types
+// =============================================================================
+
+/**
+ * Payload for canceling an ongoing Apply execution.
+ * Sent from web-editor toolbar or sidepanel to background.
+ */
+export interface WebEditorCancelExecutionPayload {
+  /** Session ID of the execution to cancel */
+  sessionId: string;
+  /** Request ID of the execution to cancel */
+  requestId: string;
+}
+
+/**
+ * Response from cancel execution request.
+ */
+export interface WebEditorCancelExecutionResponse {
+  /** Whether the cancel request was successful */
+  success: boolean;
+  /** Error message if cancellation failed */
+  error?: string;
+}
+
+// =============================================================================
 // Public API Interface
 // =============================================================================
 
@@ -458,6 +521,11 @@ export interface WebEditorV2Api {
    * Creates a compensating transaction that can be undone.
    */
   revertElement: (elementKey: WebEditorElementKey) => Promise<WebEditorRevertElementResponse>;
+  /**
+   * Clear current selection (called from sidepanel after send).
+   * Triggers deselect and broadcasts null selection.
+   */
+  clearSelection: () => void;
 }
 
 // =============================================================================

@@ -7,7 +7,10 @@ import {
   type WebEditorTxChangedPayload,
   type WebEditorHighlightElementPayload,
   type WebEditorRevertElementPayload,
+  type WebEditorCancelExecutionPayload,
+  type WebEditorCancelExecutionResponse,
 } from '@/common/web-editor-types';
+import { openAgentChatSidepanel } from '../utils/sidepanel';
 
 const CONTEXT_MENU_ID = 'web_editor_toggle';
 const COMMAND_KEY = 'toggle_web_editor';
@@ -15,6 +18,7 @@ const DEFAULT_NATIVE_SERVER_PORT = 12306;
 
 /** Storage key prefix for TX change session data (per-tab isolation) */
 const WEB_EDITOR_TX_CHANGED_SESSION_KEY_PREFIX = 'web-editor-v2-tx-changed-';
+const WEB_EDITOR_SELECTION_SESSION_KEY_PREFIX = 'web-editor-v2-selection-';
 
 /** Storage key prefix for excluded element keys (per-tab isolation, managed by sidepanel) */
 const WEB_EDITOR_EXCLUDED_KEYS_SESSION_KEY_PREFIX = 'web-editor-v2-excluded-keys-';
@@ -161,8 +165,11 @@ function handleSseEvent(requestId: string, event: unknown): void {
     const message = data.message as string | undefined;
 
     // Map Agent status to our status
+    // - 'ready' -> 'running' (ready is a running sub-state)
+    // - 'error' -> 'failed' (normalize server 'error' to UI 'failed')
     let mappedStatus = status;
     if (status === 'ready') mappedStatus = 'running';
+    if (status === 'error') mappedStatus = 'failed';
 
     setExecutionStatus(requestId, mappedStatus, message);
   } else if (type === 'message' && data) {
@@ -904,39 +911,20 @@ async function getActiveTabId(): Promise<number | null> {
   }
 }
 
-/**
- * Best-effort open the sidepanel with AgentChat tab selected.
- * Used when batch apply is triggered to show the user the ongoing session.
- */
-async function openAgentChatSidepanel(tabId: number, windowId?: number): Promise<void> {
-  try {
-    // Set sidepanel options to navigate to AgentChat tab
-    if ((chrome.sidePanel as any)?.setOptions) {
-      await (chrome.sidePanel as any).setOptions({
-        tabId,
-        path: 'sidepanel.html?tab=agent-chat',
-        enabled: true,
-      });
-    }
-
-    // Try to open the sidepanel
-    if (chrome.sidePanel && (chrome.sidePanel as any).open) {
-      try {
-        await (chrome.sidePanel as any).open({ tabId });
-      } catch {
-        // Fallback to window-level open if tab-level fails
-        if (typeof windowId === 'number') {
-          await (chrome.sidePanel as any).open({ windowId });
-        }
-      }
-    }
-  } catch {
-    // Best-effort: side panel may be unavailable in some environments
-  }
-}
-
 export function initWebEditorListeners(): void {
   ensureContextMenu().catch(() => {});
+
+  // Clean up session storage when tab is closed to avoid stale data
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    try {
+      const keys = [
+        `${WEB_EDITOR_TX_CHANGED_SESSION_KEY_PREFIX}${tabId}`,
+        `${WEB_EDITOR_SELECTION_SESSION_KEY_PREFIX}${tabId}`,
+        `${WEB_EDITOR_EXCLUDED_KEYS_SESSION_KEY_PREFIX}${tabId}`,
+      ];
+      chrome.storage.session.remove(keys).catch(() => {});
+    } catch {}
+  });
 
   if ((chrome as any).contextMenus?.onClicked?.addListener) {
     chrome.contextMenus.onClicked.addListener(async (info, tab) => {
@@ -1032,7 +1020,14 @@ export function initWebEditorListeners(): void {
           const storageKey = `${WEB_EDITOR_TX_CHANGED_SESSION_KEY_PREFIX}${senderTabId}`;
 
           // Persist to session storage for cold-start recovery
-          await chrome.storage.session.set({ [storageKey]: payload });
+          // Remove keys on clear to avoid stale data (rollback still has edits, so keep it)
+          if (payload.action === 'clear') {
+            // Clear TX state and excluded keys together
+            const excludedKey = `${WEB_EDITOR_EXCLUDED_KEYS_SESSION_KEY_PREFIX}${senderTabId}`;
+            await chrome.storage.session.remove([storageKey, excludedKey]);
+          } else {
+            await chrome.storage.session.set({ [storageKey]: payload });
+          }
 
           // Broadcast to sidepanel (best-effort, ignore errors if sidepanel is closed)
           chrome.runtime
@@ -1055,6 +1050,93 @@ export function initWebEditorListeners(): void {
       }
 
       // =======================================================================
+      // Selection sync: Handle SELECTION_CHANGED broadcast from web-editor
+      // =======================================================================
+      if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_SELECTION_CHANGED) {
+        (async () => {
+          const senderTabId = (_sender as chrome.runtime.MessageSender)?.tab?.id;
+          if (typeof senderTabId !== 'number') {
+            sendResponse({ success: false, error: 'Sender tabId is required' });
+            return;
+          }
+
+          const rawPayload = message.payload as
+            | import('@/common/web-editor-types').WebEditorSelectionChangedPayload
+            | undefined;
+          if (!rawPayload || typeof rawPayload !== 'object') {
+            sendResponse({ success: false, error: 'Invalid payload' });
+            return;
+          }
+
+          // Hydrate payload with tabId from sender
+          const payload = { ...rawPayload, tabId: senderTabId };
+          const storageKey = `${WEB_EDITOR_SELECTION_SESSION_KEY_PREFIX}${senderTabId}`;
+
+          // Persist to session storage for cold-start recovery
+          // Remove key on deselection to avoid stale data
+          if (payload.selected === null) {
+            await chrome.storage.session.remove(storageKey);
+          } else {
+            await chrome.storage.session.set({ [storageKey]: payload });
+          }
+
+          // Broadcast to sidepanel (best-effort, ignore errors if sidepanel is closed)
+          chrome.runtime
+            .sendMessage({
+              type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_SELECTION_CHANGED,
+              payload,
+            })
+            .catch(() => {
+              // Ignore errors - sidepanel may be closed
+            });
+
+          sendResponse({ success: true });
+        })().catch((error) => {
+          sendResponse({
+            success: false,
+            error: String(error instanceof Error ? error.message : error),
+          });
+        });
+        return true;
+      }
+
+      // =======================================================================
+      // Clear selection: Handle CLEAR_SELECTION from sidepanel (after send)
+      // =======================================================================
+      if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_CLEAR_SELECTION) {
+        (async () => {
+          const payload = message.payload as { tabId?: number } | undefined;
+          const targetTabId = payload?.tabId;
+
+          if (typeof targetTabId !== 'number' || targetTabId <= 0) {
+            sendResponse({ success: false, error: 'Invalid tabId' });
+            return;
+          }
+
+          // Forward to content script (web-editor-v2)
+          try {
+            await chrome.tabs.sendMessage(targetTabId, {
+              action: WEB_EDITOR_V2_ACTIONS.CLEAR_SELECTION,
+            });
+            sendResponse({ success: true });
+          } catch (error) {
+            // Tab may be closed or web-editor not active - this is expected
+            sendResponse({
+              success: false,
+              error: error instanceof Error ? error.message : 'Failed to send to tab',
+            });
+          }
+        })().catch((error) => {
+          // Catch any unhandled errors in the async IIFE
+          sendResponse({
+            success: false,
+            error: String(error instanceof Error ? error.message : error),
+          });
+        });
+        return true;
+      }
+
+      // =======================================================================
       // Phase 1.5: Handle APPLY_BATCH from web-editor toolbar
       // =======================================================================
       if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_APPLY_BATCH) {
@@ -1062,11 +1144,6 @@ export function initWebEditorListeners(): void {
         (async () => {
           const senderTabId = (_sender as chrome.runtime.MessageSender)?.tab?.id;
           const senderWindowId = (_sender as chrome.runtime.MessageSender)?.tab?.windowId;
-
-          // Best-effort: open AgentChat sidepanel so user can see the session
-          if (typeof senderTabId === 'number') {
-            openAgentChatSidepanel(senderTabId, senderWindowId).catch(() => {});
-          }
 
           // Read storage for server port and selected session
           const stored = await chrome.storage.local.get([
@@ -1080,6 +1157,15 @@ export function initWebEditorListeners(): void {
             : DEFAULT_NATIVE_SERVER_PORT;
 
           const sessionId = normalizeString(stored?.[STORAGE_KEY_SELECTED_SESSION]).trim();
+
+          // Best-effort: open AgentChat sidepanel so user can see the session
+          // Pass sessionId for deep linking directly to chat view
+          if (typeof senderTabId === 'number') {
+            openAgentChatSidepanel(senderTabId, senderWindowId, sessionId || undefined).catch(
+              () => {},
+            );
+          }
+
           if (!sessionId) {
             // No session selected - sidepanel is already being opened (best-effort)
             // User needs to select or create a session manually
@@ -1133,6 +1219,9 @@ export function initWebEditorListeners(): void {
           const instruction = buildAgentPromptBatch(elements, pageUrl);
           const url = `http://127.0.0.1:${port}/agent/chat/${encodeURIComponent(sessionId)}/act`;
 
+          // Extract element labels for compact display
+          const elementLabels = elements.slice(0, 5).map((e) => e.label);
+
           const resp = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1140,6 +1229,15 @@ export function initWebEditorListeners(): void {
               instruction,
               // Pass dbSessionId so backend loads session-level configuration (engine, model, options)
               dbSessionId: sessionId,
+              // Display text for UI (compact representation)
+              displayText: `Apply ${elements.length} change${elements.length === 1 ? '' : 's'}`,
+              // Client metadata for special message rendering
+              clientMeta: {
+                kind: 'web_editor_apply_batch',
+                pageUrl,
+                elementCount: elements.length,
+                elementLabels,
+              },
             }),
           });
 
@@ -1309,7 +1407,6 @@ export function initWebEditorListeners(): void {
           const stored = await chrome.storage.local.get([
             'nativeServerPort',
             'agent-selected-project-id',
-            'agent-project-root-override',
           ]);
           const portRaw = stored?.nativeServerPort;
           const port = Number.isFinite(Number(portRaw))
@@ -1317,10 +1414,8 @@ export function initWebEditorListeners(): void {
             : DEFAULT_NATIVE_SERVER_PORT;
 
           const projectId = normalizeString(stored?.['agent-selected-project-id']).trim() || '';
-          const projectRootOverride =
-            normalizeString(stored?.['agent-project-root-override']).trim() || '';
 
-          if (!projectId && !projectRootOverride) {
+          if (!projectId) {
             return sendResponse({
               success: false,
               error:
@@ -1336,8 +1431,7 @@ export function initWebEditorListeners(): void {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               instruction,
-              projectId: projectId || undefined,
-              projectRoot: projectRootOverride || undefined,
+              projectId,
             }),
           });
 
@@ -1386,6 +1480,75 @@ export function initWebEditorListeners(): void {
           });
         }
         return false; // Synchronous response
+      }
+
+      // =======================================================================
+      // Cancel Execution: Handle WEB_EDITOR_CANCEL_EXECUTION from toolbar/sidepanel
+      // =======================================================================
+      if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_CANCEL_EXECUTION) {
+        const payload = message.payload as WebEditorCancelExecutionPayload | undefined;
+        (async () => {
+          // Validate payload
+          const sessionId = payload?.sessionId?.trim();
+          const requestId = payload?.requestId?.trim();
+
+          if (!sessionId) {
+            sendResponse({
+              success: false,
+              error: 'sessionId is required',
+            } as WebEditorCancelExecutionResponse);
+            return;
+          }
+          if (!requestId) {
+            sendResponse({
+              success: false,
+              error: 'requestId is required',
+            } as WebEditorCancelExecutionResponse);
+            return;
+          }
+
+          // Get server port
+          const stored = await chrome.storage.local.get(['nativeServerPort']);
+          const port = stored.nativeServerPort || DEFAULT_NATIVE_SERVER_PORT;
+
+          try {
+            // Call cancel API
+            const cancelUrl = `http://127.0.0.1:${port}/agent/chat/${encodeURIComponent(sessionId)}/cancel/${encodeURIComponent(requestId)}`;
+            const response = await fetch(cancelUrl, { method: 'DELETE' });
+
+            if (!response.ok) {
+              const errorText = await response.text().catch(() => `HTTP ${response.status}`);
+              sendResponse({
+                success: false,
+                error: errorText,
+              } as WebEditorCancelExecutionResponse);
+              return;
+            }
+
+            // Update local execution status cache
+            setExecutionStatus(requestId, 'cancelled', 'Execution cancelled by user');
+
+            // Abort SSE connection for this session
+            const sseConnection = sseConnections.get(sessionId);
+            if (sseConnection && sseConnection.lastRequestId === requestId) {
+              sseConnection.abort.abort();
+              sseConnections.delete(sessionId);
+            }
+
+            sendResponse({ success: true } as WebEditorCancelExecutionResponse);
+          } catch (error) {
+            sendResponse({
+              success: false,
+              error: String(error instanceof Error ? error.message : error),
+            } as WebEditorCancelExecutionResponse);
+          }
+        })().catch((error) => {
+          sendResponse({
+            success: false,
+            error: String(error instanceof Error ? error.message : error),
+          } as WebEditorCancelExecutionResponse);
+        });
+        return true; // Will respond asynchronously
       }
     } catch (error) {
       sendResponse({

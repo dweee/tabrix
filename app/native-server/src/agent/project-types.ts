@@ -18,6 +18,11 @@ export interface CreateOrUpdateProjectInput {
    */
   useCcr?: boolean;
   /**
+   * Whether to enable the local Chrome MCP server integration for this project.
+   * Defaults to true when omitted.
+   */
+  enableChromeMcp?: boolean;
+  /**
    * If true, create the directory if it doesn't exist.
    * Should only be set after user confirmation.
    */

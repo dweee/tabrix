@@ -5,6 +5,7 @@
   "main": "dist/index.js",
   "bin": {
     "mcp-chrome-bridge": "./dist/cli.js",
+    "chrome-mcp-bridge": "./dist/cli.js",
     "mcp-chrome-stdio": "./dist/mcp/mcp-server-stdio.js"
   },
   "scripts": {
@@ -22,7 +23,7 @@
     "dist"
   ],
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=20.0.0"
   },
   "preferGlobal": true,
   "keywords": [

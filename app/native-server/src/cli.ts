@@ -10,6 +10,8 @@ import {
   ensureExecutionPermissions,
 } from './scripts/utils';
 import { BrowserType, parseBrowserType, detectInstalledBrowsers } from './scripts/browser-config';
+import { runDoctor } from './scripts/doctor';
+import { runReport } from './scripts/report';
 
 // Import writeNodePath from postinstall
 async function writeNodePath(): Promise<void> {
@@ -184,6 +186,56 @@ program
       console.log(colorText(`Updated URL: ${config.url}`, 'blue'));
     } catch (error: any) {
       console.error(colorText(`Failed to update port: ${error.message}`, 'red'));
+      process.exit(1);
+    }
+  });
+
+// Diagnose installation and environment issues
+program
+  .command('doctor')
+  .description('Diagnose installation and environment issues')
+  .option('--json', 'Output diagnostics as JSON')
+  .option('--fix', 'Attempt to fix common issues automatically')
+  .option('-b, --browser <browser>', 'Target browser (chrome, chromium, or all)')
+  .action(async (options) => {
+    try {
+      const exitCode = await runDoctor({
+        json: Boolean(options.json),
+        fix: Boolean(options.fix),
+        browser: options.browser,
+      });
+      process.exit(exitCode);
+    } catch (error: any) {
+      console.error(colorText(`Doctor failed: ${error.message}`, 'red'));
+      process.exit(1);
+    }
+  });
+
+// Export diagnostic report for GitHub Issues
+program
+  .command('report')
+  .description('Export a diagnostic report for GitHub Issues')
+  .option('--json', 'Output report as JSON (default: Markdown)')
+  .option('--output <file>', 'Write report to file instead of stdout')
+  .option('--copy', 'Copy report to clipboard')
+  .option('--no-redact', 'Disable redaction of usernames/paths/tokens')
+  .option('--include-logs <mode>', 'Include wrapper logs: none | tail | full', 'tail')
+  .option('--log-lines <n>', 'Lines to include when --include-logs=tail', '200')
+  .option('-b, --browser <browser>', 'Target browser (chrome, chromium, or all)')
+  .action(async (options) => {
+    try {
+      const exitCode = await runReport({
+        json: Boolean(options.json),
+        output: options.output,
+        copy: Boolean(options.copy),
+        redact: options.redact,
+        includeLogs: options.includeLogs,
+        logLines: options.logLines ? parseInt(options.logLines, 10) : undefined,
+        browser: options.browser,
+      });
+      process.exit(exitCode);
+    } catch (error: any) {
+      console.error(colorText(`Report failed: ${error.message}`, 'red'));
       process.exit(1);
     }
   });

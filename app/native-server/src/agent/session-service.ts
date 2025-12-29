@@ -76,6 +76,24 @@ export interface ManagementInfo {
 }
 
 /**
+ * Structured preview metadata for session list display.
+ * When present, allows rendering special styles (e.g., chip for web editor apply).
+ */
+export interface AgentSessionPreviewMeta {
+  /** Compact display text (e.g., user's message or "Apply changes") */
+  displayText?: string;
+  /** Client metadata for special rendering */
+  clientMeta?: {
+    kind?: 'web_editor_apply_batch' | 'web_editor_apply_single';
+    pageUrl?: string;
+    elementCount?: number;
+    elementLabels?: string[];
+  };
+  /** Full content for tooltip preview (truncated to avoid payload bloat) */
+  fullContent?: string;
+}
+
+/**
  * Agent session representation.
  */
 export interface AgentSession {
@@ -86,6 +104,8 @@ export interface AgentSession {
   name?: string;
   /** Preview text from first user message, for display in session list */
   preview?: string;
+  /** Structured preview metadata for special rendering (e.g., web editor apply chip) */
+  previewMeta?: AgentSessionPreviewMeta;
   model?: string;
   permissionMode: string;
   allowDangerouslySkipPermissions: boolean;
@@ -231,6 +251,73 @@ function truncatePreview(text: string, maxLength: number = MAX_PREVIEW_LENGTH): 
 }
 
 /**
+ * Add preview to sessions by fetching first user message for each.
+ * Shared helper to avoid code duplication.
+ */
+async function addPreviewsToSessions(rows: SessionRow[]): Promise<AgentSession[]> {
+  const db = getDb();
+
+  return Promise.all(
+    rows.map(async (row) => {
+      const session = rowToSession(row);
+
+      // Query first user message for this session (include metadata for special rendering)
+      const firstUserMessages = await db
+        .select({ content: messages.content, metadata: messages.metadata })
+        .from(messages)
+        .where(and(eq(messages.sessionId, row.id), eq(messages.role, 'user')))
+        .orderBy(asc(messages.createdAt))
+        .limit(1);
+
+      if (firstUserMessages.length > 0 && firstUserMessages[0].content) {
+        const content = firstUserMessages[0].content;
+        const metadataJson = firstUserMessages[0].metadata;
+
+        session.preview = truncatePreview(content);
+
+        // Parse metadata to extract clientMeta/displayText for special rendering
+        if (metadataJson) {
+          try {
+            const parsed = JSON.parse(metadataJson) as Record<string, unknown>;
+
+            // Type-safe extraction with validation
+            const rawClientMeta = parsed.clientMeta;
+            const rawDisplayText = parsed.displayText;
+
+            // Validate displayText is a string
+            const displayText = typeof rawDisplayText === 'string' ? rawDisplayText : undefined;
+
+            // Validate clientMeta structure
+            const clientMeta =
+              rawClientMeta &&
+              typeof rawClientMeta === 'object' &&
+              'kind' in rawClientMeta &&
+              (rawClientMeta.kind === 'web_editor_apply_batch' ||
+                rawClientMeta.kind === 'web_editor_apply_single')
+                ? (rawClientMeta as AgentSessionPreviewMeta['clientMeta'])
+                : undefined;
+
+            // Only set previewMeta if we have valid special metadata
+            if (clientMeta || displayText) {
+              session.previewMeta = {
+                displayText: displayText || truncatePreview(content),
+                clientMeta,
+                // Truncate fullContent to avoid payload bloat (200 chars max)
+                fullContent: truncatePreview(content, 200),
+              };
+            }
+          } catch {
+            // Ignore JSON parse errors, just use plain preview
+          }
+        }
+      }
+
+      return session;
+    }),
+  );
+}
+
+/**
  * Get all sessions for a project, sorted by most recently updated.
  * Includes preview from first user message for each session.
  */
@@ -242,28 +329,18 @@ export async function getSessionsByProject(projectId: string): Promise<AgentSess
     .where(eq(sessions.projectId, projectId))
     .orderBy(desc(sessions.updatedAt));
 
-  // Get first user message for each session as preview
-  const sessionsWithPreview = await Promise.all(
-    rows.map(async (row) => {
-      const session = rowToSession(row);
+  return addPreviewsToSessions(rows);
+}
 
-      // Query first user message for this session
-      const firstUserMessages = await db
-        .select({ content: messages.content })
-        .from(messages)
-        .where(and(eq(messages.sessionId, row.id), eq(messages.role, 'user')))
-        .orderBy(asc(messages.createdAt))
-        .limit(1);
+/**
+ * Get all sessions across all projects, sorted by most recently updated.
+ * Includes preview from first user message for each session.
+ */
+export async function getAllSessions(): Promise<AgentSession[]> {
+  const db = getDb();
+  const rows = await db.select().from(sessions).orderBy(desc(sessions.updatedAt));
 
-      if (firstUserMessages.length > 0 && firstUserMessages[0].content) {
-        session.preview = truncatePreview(firstUserMessages[0].content);
-      }
-
-      return session;
-    }),
-  );
-
-  return sessionsWithPreview;
+  return addPreviewsToSessions(rows);
 }
 
 /**

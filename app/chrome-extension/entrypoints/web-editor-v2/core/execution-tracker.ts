@@ -17,7 +17,11 @@ import { Disposer } from '../utils/disposables';
 // Types
 // =============================================================================
 
-/** Execution status phases */
+/**
+ * Execution status phases.
+ * Note: 'error' is included for compatibility with AgentStatusEvent from server.
+ * Both 'error' and 'failed' are treated as terminal failure states.
+ */
 export type ExecutionStatus =
   | 'pending'
   | 'starting'
@@ -26,6 +30,7 @@ export type ExecutionStatus =
   | 'applying'
   | 'completed'
   | 'failed'
+  | 'error' // Agent server uses 'error', we accept both
   | 'timeout'
   | 'cancelled';
 
@@ -65,7 +70,14 @@ const DEFAULT_POLL_INTERVAL = 2000;
 const DEFAULT_TIMEOUT = 120000;
 
 // Terminal statuses that stop polling
-const TERMINAL_STATUSES: ExecutionStatus[] = ['completed', 'failed', 'timeout', 'cancelled'];
+// Note: 'error' is included for compatibility with AgentStatusEvent
+const TERMINAL_STATUSES: ExecutionStatus[] = [
+  'completed',
+  'failed',
+  'error',
+  'timeout',
+  'cancelled',
+];
 
 // =============================================================================
 // Helpers
@@ -90,6 +102,7 @@ function getStatusMessage(status: ExecutionStatus): string {
     case 'completed':
       return 'Completed';
     case 'failed':
+    case 'error': // Agent server uses 'error', treat same as 'failed'
       return 'Failed';
     case 'timeout':
       return 'Timed out';
@@ -148,13 +161,53 @@ export class ExecutionTracker {
   }
 
   /**
-   * Cancel tracking for a request
+   * Cancel tracking for a request.
+   * Sends a real cancel request to the background to abort the execution on the server.
+   * @returns Promise that resolves when cancel is complete (or fails silently)
    */
-  cancel(requestId: string): void {
+  async cancel(requestId: string): Promise<void> {
+    const state = this.executions.get(requestId);
+    if (!state) return;
+
+    // Stop polling immediately
     this.stopPolling(requestId);
 
-    const state = this.executions.get(requestId);
-    if (state && !isTerminalStatus(state.status)) {
+    // Don't cancel if already in terminal state
+    if (isTerminalStatus(state.status)) return;
+
+    // Update local state immediately for responsive UI
+    this.updateState(requestId, {
+      status: 'cancelled',
+      message: 'Cancelling...',
+    });
+
+    // Send cancel request to background
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_CANCEL_EXECUTION,
+        payload: {
+          sessionId: state.sessionId,
+          requestId: state.requestId,
+        },
+      });
+
+      // Update message based on response
+      if (response?.success) {
+        this.updateState(requestId, {
+          status: 'cancelled',
+          message: 'Cancelled by user',
+        });
+      } else {
+        // Cancel request failed, but we still mark as cancelled locally
+        console.warn('[ExecutionTracker] Cancel request failed:', response?.error);
+        this.updateState(requestId, {
+          status: 'cancelled',
+          message: 'Cancelled (server may still be running)',
+        });
+      }
+    } catch (error) {
+      // Network/extension error, still mark as cancelled locally
+      console.warn('[ExecutionTracker] Cancel request error:', error);
       this.updateState(requestId, {
         status: 'cancelled',
         message: 'Cancelled by user',

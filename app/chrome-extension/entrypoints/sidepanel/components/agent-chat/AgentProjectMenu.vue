@@ -174,23 +174,26 @@
       </label>
     </div>
 
-    <!-- Root Override -->
-    <div class="px-3 py-2 flex items-center gap-2">
-      <span class="text-xs w-12" :style="{ color: 'var(--ac-text-muted, #6e6e6e)' }"> Root </span>
-      <input
-        :value="projectRootOverride"
-        type="text"
-        placeholder="Override workspace path"
-        class="flex-1 px-2 py-1 text-xs rounded outline-none focus:ring-1 focus:ring-blue-500"
-        :style="{
-          fontFamily: 'var(--ac-font-mono, monospace)',
-          backgroundColor: 'var(--ac-surface-muted, #f2f0eb)',
-          border: 'var(--ac-border-width, 1px) solid var(--ac-border, #e5e5e5)',
-          color: 'var(--ac-text, #1a1a1a)',
-          borderRadius: 'var(--ac-radius-button, 8px)',
-        }"
-        @input="handleRootInput"
-      />
+    <!-- Chrome MCP Option - only shown when Claude or Codex CLI is selected -->
+    <div v-if="showChromeMcpOption" class="px-3 py-2 flex items-center gap-2">
+      <span class="text-xs w-12" :style="{ color: 'var(--ac-text-muted, #6e6e6e)' }"> MCP </span>
+      <label
+        class="flex items-center gap-2 cursor-pointer"
+        title="Enable local Chrome MCP server integration"
+      >
+        <input
+          type="checkbox"
+          :checked="enableChromeMcp"
+          class="w-4 h-4 rounded"
+          :style="{
+            accentColor: 'var(--ac-accent, #c87941)',
+          }"
+          @change="handleChromeMcpChange"
+        />
+        <span class="text-xs" :style="{ color: 'var(--ac-text, #1a1a1a)' }">
+          Enable Chrome MCP Server
+        </span>
+      </label>
     </div>
 
     <!-- Save Button -->
@@ -234,7 +237,7 @@ const props = defineProps<{
   model: string;
   reasoningEffort: CodexReasoningEffort;
   useCcr: boolean;
-  projectRootOverride: string;
+  enableChromeMcp: boolean;
   engines: AgentEngineInfo[];
   isPicking: boolean;
   isSaving: boolean;
@@ -248,7 +251,7 @@ const emit = defineEmits<{
   'model:update': [model: string];
   'reasoning-effort:update': [effort: CodexReasoningEffort];
   'ccr:update': [useCcr: boolean];
-  'root:update': [root: string];
+  'chrome-mcp:update': [enableChromeMcp: boolean];
   save: [];
 }>();
 
@@ -302,6 +305,12 @@ const showCcrOption = computed(() => {
   return props.selectedCli === 'claude';
 });
 
+// Show Chrome MCP option when Claude, Codex, or Auto (empty) CLI is selected
+// Auto typically defaults to Claude, and users should be able to manage this project-level setting
+const showChromeMcpOption = computed(() => {
+  return !props.selectedCli || props.selectedCli === 'claude' || props.selectedCli === 'codex';
+});
+
 // Handle CLI change - auto-select default model for the CLI
 function handleCliChange(event: Event): void {
   const cli = (event.target as HTMLSelectElement).value;
@@ -328,6 +337,10 @@ function handleCcrChange(event: Event): void {
   emit('ccr:update', (event.target as HTMLInputElement).checked);
 }
 
+function handleChromeMcpChange(event: Event): void {
+  emit('chrome-mcp:update', (event.target as HTMLInputElement).checked);
+}
+
 function handleModelChange(event: Event): void {
   const newModel = (event.target as HTMLSelectElement).value;
   emit('model:update', newModel);
@@ -347,10 +360,6 @@ function handleReasoningEffortChange(event: Event): void {
     'reasoning-effort:update',
     (event.target as HTMLSelectElement).value as CodexReasoningEffort,
   );
-}
-
-function handleRootInput(event: Event): void {
-  emit('root:update', (event.target as HTMLInputElement).value);
 }
 
 function handleSave(): void {

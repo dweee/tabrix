@@ -116,6 +116,7 @@
     --ac-timeline-node-hover: #a8a29e;
     --ac-timeline-node-active: var(--ac-accent);
     --ac-timeline-node-active-border: var(--ac-accent);
+    --ac-timeline-node-tool: #94a3b8;
     --ac-timeline-node-pulse-shadow:
       0 0 0 2px rgba(217, 119, 87, 0.25), 0 0 12px rgba(217, 119, 87, 0.2);
 
@@ -225,6 +226,7 @@
     --ac-timeline-node-hover: rgba(37, 99, 235, 0.55);
     --ac-timeline-node-active: var(--ac-accent);
     --ac-timeline-node-active-border: var(--ac-accent);
+    --ac-timeline-node-tool: rgba(37, 99, 235, 0.5);
     --ac-timeline-node-pulse-shadow:
       0 0 0 2px rgba(37, 99, 235, 0.25), 0 0 12px rgba(37, 99, 235, 0.2);
 
@@ -299,6 +301,7 @@
     --ac-timeline-node-hover: #a8a29e;
     --ac-timeline-node-active: var(--ac-accent);
     --ac-timeline-node-active-border: var(--ac-accent);
+    --ac-timeline-node-tool: #94a3b8;
     --ac-timeline-node-pulse-shadow:
       0 0 0 2px rgba(87, 83, 78, 0.25), 0 0 12px rgba(87, 83, 78, 0.2);
 
@@ -380,6 +383,7 @@
     --ac-timeline-node-hover: #374151;
     --ac-timeline-node-active: var(--ac-accent);
     --ac-timeline-node-active-border: #111827;
+    --ac-timeline-node-tool: #6b7280;
     --ac-timeline-node-pulse-shadow: 0 0 0 2px rgba(17, 24, 39, 1);
 
     --ac-chip-bg: #ffffff;
@@ -454,6 +458,7 @@
     --ac-timeline-node-hover: #6b7280;
     --ac-timeline-node-active: var(--ac-accent);
     --ac-timeline-node-active-border: var(--ac-accent);
+    --ac-timeline-node-tool: #64748b;
     --ac-timeline-node-pulse-shadow:
       0 0 0 2px rgba(192, 132, 252, 0.35), 0 0 14px rgba(192, 132, 252, 0.25);
 
@@ -536,6 +541,7 @@
     --ac-timeline-node-hover: #111827;
     --ac-timeline-node-active: #000000;
     --ac-timeline-node-active-border: #000000;
+    --ac-timeline-node-tool: #4b5563;
     --ac-timeline-node-pulse-shadow: 0 0 0 2px rgba(0, 0, 0, 1);
 
     --ac-chip-bg: #ffffff;

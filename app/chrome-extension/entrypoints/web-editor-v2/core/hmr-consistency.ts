@@ -186,7 +186,8 @@ const DOM_MUTATION_OPTIONS: MutationObserverInit = {
   characterData: true, // Needed for text content changes
 };
 
-const TERMINAL_EXEC_STATUSES = new Set(['completed', 'failed', 'timeout', 'cancelled']);
+// Note: 'error' is included for compatibility with AgentStatusEvent from server
+const TERMINAL_EXEC_STATUSES = new Set(['completed', 'failed', 'error', 'timeout', 'cancelled']);
 
 // Scoring thresholds for resolution confidence
 const RELAXED_CONFIDENCE_THRESHOLD = 8;

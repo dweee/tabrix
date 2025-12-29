@@ -144,6 +144,11 @@ function runMigrations(sqlite: Database.Database): void {
   if (!columnExists(sqlite, 'projects', 'use_ccr')) {
     sqlite.exec('ALTER TABLE projects ADD COLUMN use_ccr TEXT');
   }
+
+  // Migration 3: Add enable_chrome_mcp column to projects table (default enabled)
+  if (!columnExists(sqlite, 'projects', 'enable_chrome_mcp')) {
+    sqlite.exec("ALTER TABLE projects ADD COLUMN enable_chrome_mcp TEXT NOT NULL DEFAULT '1'");
+  }
 }
 
 /**

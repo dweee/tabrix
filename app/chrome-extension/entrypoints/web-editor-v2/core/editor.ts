@@ -9,6 +9,8 @@ import type {
   WebEditorApplyBatchPayload,
   WebEditorElementKey,
   WebEditorRevertElementResponse,
+  WebEditorSelectionChangedPayload,
+  SelectedElementSummary,
   WebEditorState,
   WebEditorTxChangedPayload,
   WebEditorTxChangeAction,
@@ -39,9 +41,14 @@ import {
   type TransactionManager,
   type TransactionChangeEvent,
 } from './transaction-manager';
-import { locateElement } from './locator';
+import { locateElement, createElementLocator } from './locator';
 import { sendTransactionToAgent } from './payload-builder';
 import { aggregateTransactionsByElement } from './transaction-aggregator';
+import {
+  generateStableElementKey,
+  generateElementLabel,
+  generateFullElementLabel,
+} from './element-key';
 import {
   createExecutionTracker,
   type ExecutionTracker,
@@ -351,6 +358,9 @@ export function createWebEditorV2(): WebEditorV2Api {
     // Notify HMR consistency verifier of selection change (Phase 4.8)
     state.hmrConsistencyVerifier?.onSelectionChange(element);
 
+    // Broadcast selection to sidepanel for AgentChat context
+    broadcastSelectionChanged(element);
+
     // Log selection with modifier info for debugging
     const modInfo = modifiers.alt ? ' (Alt: drill-up)' : '';
     console.log(`${WEB_EDITOR_V2_LOG_PREFIX} Selected${modInfo}:`, element.tagName, element);
@@ -380,6 +390,9 @@ export function createWebEditorV2(): WebEditorV2Api {
     // Notify HMR consistency verifier of deselection (Phase 4.8)
     // Deselection should cancel any ongoing verification
     state.hmrConsistencyVerifier?.onSelectionChange(null);
+
+    // Broadcast deselection to sidepanel
+    broadcastSelectionChanged(null);
 
     console.log(`${WEB_EDITOR_V2_LOG_PREFIX} Deselected`);
   }
@@ -469,6 +482,103 @@ export function createWebEditorV2(): WebEditorV2Api {
           });
       }
     }, TX_CHANGED_BROADCAST_DEBOUNCE_MS);
+  }
+
+  /** Last broadcasted selection key to avoid duplicate broadcasts */
+  let lastBroadcastedSelectionKey: string | null = null;
+
+  /**
+   * Broadcast selection change to sidepanel (no debounce - immediate).
+   * Called when user selects or deselects an element.
+   */
+  function broadcastSelectionChanged(element: Element | null): void {
+    // Build selected element summary if element is provided
+    let selected: SelectedElementSummary | null = null;
+
+    if (element) {
+      const elementKey = generateStableElementKey(element);
+
+      // Dedupe: skip if same element already broadcasted
+      if (elementKey === lastBroadcastedSelectionKey) return;
+      lastBroadcastedSelectionKey = elementKey;
+
+      const locator = createElementLocator(element);
+      selected = {
+        elementKey,
+        locator,
+        label: generateElementLabel(element),
+        fullLabel: generateFullElementLabel(element),
+        tagName: element.tagName.toLowerCase(),
+        updatedAt: Date.now(),
+      };
+    } else {
+      // Deselection - clear tracking
+      if (lastBroadcastedSelectionKey === null) return; // Already deselected
+      lastBroadcastedSelectionKey = null;
+    }
+
+    const payload: WebEditorSelectionChangedPayload = {
+      tabId: 0, // Will be filled by background script from sender.tab.id
+      selected,
+      pageUrl: window.location.href,
+    };
+
+    // Broadcast immediately (no debounce for selection changes)
+    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+      chrome.runtime
+        .sendMessage({
+          type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_SELECTION_CHANGED,
+          payload,
+        })
+        .catch(() => {
+          // Ignore if no listeners (e.g., sidepanel not open)
+        });
+    }
+  }
+
+  /**
+   * Broadcast "editor cleared" state when stopping.
+   * Sends empty TX and null selection to remove chips from sidepanel.
+   */
+  function broadcastEditorCleared(): void {
+    // Reset selection dedupe so next start can broadcast correctly
+    lastBroadcastedSelectionKey = null;
+
+    if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return;
+
+    const pageUrl = window.location.href;
+
+    // Send empty TX state
+    const txPayload: WebEditorTxChangedPayload = {
+      tabId: 0,
+      action: 'clear',
+      elements: [],
+      undoCount: 0,
+      redoCount: 0,
+      hasApplicableChanges: false,
+      pageUrl,
+    };
+
+    // Send null selection
+    const selectionPayload: WebEditorSelectionChangedPayload = {
+      tabId: 0,
+      selected: null,
+      pageUrl,
+    };
+
+    chrome.runtime
+      .sendMessage({
+        type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TX_CHANGED,
+        payload: txPayload,
+      })
+      .catch(() => {});
+
+    chrome.runtime
+      .sendMessage({
+        type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_SELECTION_CHANGED,
+        payload: selectionPayload,
+      })
+      .catch(() => {});
   }
 
   /**
@@ -879,6 +989,34 @@ export function createWebEditorV2(): WebEditorV2Api {
   }
 
   /**
+   * Clear current selection (called from sidepanel after send).
+   * Triggers handleDeselect which broadcasts null selection to sidepanel.
+   */
+  function clearSelection(): void {
+    if (!state.selectedElement) {
+      // Already deselected
+      return;
+    }
+
+    // Use EventController to properly transition to hover mode
+    // This triggers onDeselect callback → handleDeselect → broadcastSelectionChanged(null)
+    if (state.eventController) {
+      state.eventController.setMode('hover');
+
+      // Edge case: if setMode('hover') didn't trigger deselect (e.g., already in hover mode
+      // but selectedElement was set programmatically), manually call handleDeselect
+      if (state.selectedElement) {
+        handleDeselect();
+      }
+    } else {
+      // Fallback if eventController not available: directly call handleDeselect
+      handleDeselect();
+    }
+
+    console.log(`${WEB_EDITOR_V2_LOG_PREFIX} Selection cleared (from sidepanel)`);
+  }
+
+  /**
    * Handle transaction apply errors
    */
   function handleTransactionError(error: unknown): void {
@@ -1033,6 +1171,7 @@ export function createWebEditorV2(): WebEditorV2Api {
               applying: 'applying',
               completed: 'completed',
               failed: 'failed',
+              error: 'failed', // Server may return 'error', treat same as 'failed'
               timeout: 'timeout',
               cancelled: 'cancelled',
             };
@@ -1371,6 +1510,9 @@ export function createWebEditorV2(): WebEditorV2Api {
       state.hoveredElement = null;
       state.selectedElement = null;
       state.applyingSnapshot = null;
+    } finally {
+      // Always broadcast clear state to sidepanel (removes chips)
+      broadcastEditorCleared();
     }
   }
 
@@ -1402,5 +1544,6 @@ export function createWebEditorV2(): WebEditorV2Api {
     toggle,
     getState,
     revertElement,
+    clearSelection,
   };
 }

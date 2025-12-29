@@ -92,6 +92,10 @@ export default defineConfig({
         suggested_key: { default: 'Ctrl+Shift+E', mac: 'Command+Shift+E' },
         description: 'Toggle Web Editor mode',
       },
+      toggle_quick_panel: {
+        suggested_key: { default: 'Ctrl+Shift+K', mac: 'Command+Shift+K' },
+        description: 'Toggle Quick Panel AI Chat',
+      },
     },
     web_accessible_resources: [
       {

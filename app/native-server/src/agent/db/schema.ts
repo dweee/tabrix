@@ -32,6 +32,11 @@ export const projects = sqliteTable(
      * Stored as '1' (true) or '0'/null (false).
      */
     useCcr: text('use_ccr'),
+    /**
+     * Whether to enable the local Chrome MCP server integration for this project.
+     * Stored as '1' (true) or '0' (false). Default: '1' (enabled).
+     */
+    enableChromeMcp: text('enable_chrome_mcp').notNull().default('1'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
     lastActiveAt: text('last_active_at'),

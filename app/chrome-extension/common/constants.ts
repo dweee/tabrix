@@ -56,6 +56,11 @@ export const SUCCESS_MESSAGES = {
   SERVER_STOPPED: 'Server stopped successfully',
 } as const;
 
+// External Links
+export const LINKS = {
+  TROUBLESHOOTING: 'https://github.com/hangwin/mcp-chrome/blob/master/docs/TROUBLESHOOTING.md',
+} as const;
+
 // File Extensions and MIME Types
 export const FILE_TYPES = {
   STATIC_EXTENSIONS: [
@@ -215,6 +220,8 @@ export const SEMANTIC_CONFIG = {
 // Storage Keys
 export const STORAGE_KEYS = {
   SERVER_STATUS: 'serverStatus',
+  NATIVE_SERVER_PORT: 'nativeServerPort',
+  NATIVE_AUTO_CONNECT_ENABLED: 'nativeAutoConnectEnabled',
   SEMANTIC_MODEL: 'selectedModel',
   USER_PREFERENCES: 'userPreferences',
   VECTOR_INDEX: 'vectorIndex',

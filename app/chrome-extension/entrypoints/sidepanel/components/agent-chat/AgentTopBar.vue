@@ -2,15 +2,36 @@
   <div class="flex items-center justify-between w-full">
     <!-- Brand / Context -->
     <div class="flex items-center gap-3 overflow-hidden">
+      <!-- Back Button (when in chat view) -->
+      <button
+        v-if="showBackButton"
+        class="flex items-center justify-center w-8 h-8 -ml-3 flex-shrink-0 ac-btn"
+        :style="{
+          color: 'var(--ac-text-muted)',
+          borderRadius: 'var(--ac-radius-button)',
+        }"
+        title="Back to sessions"
+        @click="$emit('back')"
+      >
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M15 19l-7-7 7-7"
+          />
+        </svg>
+      </button>
+
       <!-- Brand -->
       <h1
-        class="text-lg font-medium tracking-tight flex-shrink-0"
+        class="text-lg font-medium tracking-tight flex-shrink-0 ml-[-10px]"
         :style="{
           fontFamily: 'var(--ac-font-heading)',
           color: 'var(--ac-text)',
         }"
       >
-        Claude Code
+        {{ brandLabel || 'Agent' }}
       </h1>
 
       <!-- Divider -->
@@ -86,6 +107,28 @@
         />
       </div>
 
+      <!-- Open Project Button -->
+      <button
+        class="p-1 ac-btn ac-hover-text"
+        :style="{ color: 'var(--ac-text-subtle)', borderRadius: 'var(--ac-radius-button)' }"
+        title="Open project in VS Code or Terminal"
+        @click="$emit('toggle:openProjectMenu')"
+      >
+        <svg
+          class="w-5 h-5"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          <line x1="12" y1="11" x2="12" y2="17" />
+          <line x1="9" y1="14" x2="15" y2="14" />
+        </svg>
+      </button>
+
       <!-- Theme & Settings Icon (Color Palette) -->
       <button
         class="p-1 ac-btn ac-hover-text"
@@ -123,12 +166,19 @@ const props = defineProps<{
   projectLabel: string;
   sessionLabel: string;
   connectionState: ConnectionState;
+  /** Whether to show back button (for returning to sessions list) */
+  showBackButton?: boolean;
+  /** Brand label to display (e.g., "Claude Code", "Codex") */
+  brandLabel?: string;
 }>();
 
 defineEmits<{
   'toggle:projectMenu': [];
   'toggle:sessionMenu': [];
   'toggle:settingsMenu': [];
+  'toggle:openProjectMenu': [];
+  /** Emitted when back button is clicked */
+  back: [];
 }>();
 
 const connectionColor = computed(() => {

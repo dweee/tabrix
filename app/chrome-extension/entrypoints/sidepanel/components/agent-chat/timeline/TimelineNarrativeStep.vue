@@ -9,6 +9,8 @@
     >
       <MarkdownRender
         :content="item.text ?? ''"
+        :custom-id="AGENTCHAT_MD_SCOPE"
+        :custom-html-tags="CUSTOM_HTML_TAGS"
         :max-live-nodes="0"
         :render-batch-size="16"
         :render-batch-delay="8"
@@ -26,6 +28,11 @@
 import type { TimelineItem } from '../../../composables/useAgentThreads';
 import MarkdownRender from 'markstream-vue';
 import 'markstream-vue/index.css';
+// Import to register custom components (side-effect)
+import { AGENTCHAT_MD_SCOPE } from './markstream-thinking';
+
+/** Custom HTML tags to be rendered by registered custom components */
+const CUSTOM_HTML_TAGS = ['thinking'] as const;
 
 defineProps<{
   item: Extract<TimelineItem, { kind: 'assistant_text' }>;

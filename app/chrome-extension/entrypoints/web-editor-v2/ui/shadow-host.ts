@@ -235,9 +235,10 @@ const SHADOW_HOST_STYLES = /* css */ `
   }
 
   /* UI container - for panels and controls */
+  /* Position below toolbar: 16px (toolbar top) + 40px (toolbar height) + 8px (gap) = 64px */
   #${WEB_EDITOR_V2_UI_ID} {
     position: fixed;
-    top: 16px;
+    top: 64px;
     right: 16px;
     pointer-events: auto;
     /* Inter font with system fallbacks (aligned with design spec) */
@@ -249,10 +250,11 @@ const SHADOW_HOST_STYLES = /* css */ `
   }
 
   /* Panel styles */
+  /* max-height: 100vh - 64px (top offset) - 16px (bottom margin) = 100vh - 80px */
   .we-panel {
     width: 280px;
     max-width: calc(100vw - 32px);
-    max-height: calc(100vh - 32px);
+    max-height: calc(100vh - 80px);
     background: var(--we-surface-bg);
     border: 1px solid var(--we-border-subtle);
     border-radius: var(--we-radius-panel);
@@ -895,7 +897,7 @@ const SHADOW_HOST_STYLES = /* css */ `
   .we-prop-panel {
     display: flex;
     flex-direction: column;
-    max-height: calc(100vh - 32px);
+    max-height: calc(100vh - 80px);
   }
 
   /* Dragged property panel: becomes a floating fixed panel positioned via left/top (inline styles) */

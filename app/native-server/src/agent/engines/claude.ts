@@ -3,6 +3,11 @@ import path from 'node:path';
 import type { AgentEngine, EngineExecutionContext, EngineInitOptions } from './types';
 import type { AgentMessage, RealtimeEvent } from '../types';
 import { detectCcr, validateCcrConfig } from '../ccr-detector';
+import { getProject } from '../project-service';
+import { getChromeMcpUrl } from '../../constant';
+
+// Images are provided to Claude Code via local file paths referenced in the prompt text.
+// Claude Code CLI reads images from local paths, so we write base64 images to temp files and reference them.
 
 /**
  * Tool action type for categorizing tool operations.
@@ -60,6 +65,7 @@ export class ClaudeEngine implements AgentEngine {
       requestId,
       signal,
       attachments,
+      resolvedImagePaths,
       projectId,
       permissionMode,
       allowDangerouslySkipPermissions,
@@ -81,7 +87,7 @@ export class ClaudeEngine implements AgentEngine {
     }
 
     // Dynamically import the Claude Agent SDK
-
+    // Images are passed via temp file paths appended to the prompt string
     let query: (args: { prompt: string; options?: Record<string, unknown> }) => AsyncIterable<any>;
     try {
       // Dynamic import to avoid hard dependency - install @anthropic-ai/claude-agent-sdk to use this engine
@@ -355,16 +361,77 @@ export class ClaudeEngine implements AgentEngine {
       return metadata;
     };
 
+    // State for temp file cleanup
+    const tempFiles: string[] = [];
+    const cleanupTempFiles = async (): Promise<void> => {
+      if (tempFiles.length === 0) return;
+
+      try {
+        const fs = await import('node:fs/promises');
+        for (const filePath of tempFiles) {
+          try {
+            await fs.unlink(filePath);
+            console.error(`[ClaudeEngine] Cleaned up temp file: ${filePath}`);
+          } catch (err) {
+            // Best-effort cleanup; ignore failures (file may already be deleted)
+            console.error(`[ClaudeEngine] Failed to cleanup temp file ${filePath}:`, err);
+          }
+        }
+      } catch (err) {
+        console.error('[ClaudeEngine] Failed to cleanup temp files:', err);
+      }
+    };
+
+    // Build prompt instruction (may be modified if images are attached)
+    let promptInstruction = normalizedInstruction;
+
     try {
       // Use console.error for logging to avoid polluting stdout (Native Messaging protocol)
       console.error(`[ClaudeEngine] Starting query with model: ${resolvedModel}`);
       console.error(`[ClaudeEngine] Working directory: ${repoPath}`);
 
-      // SDK 0.1.69 does not support `images` option. Image inputs must be implemented via
-      // SDKUserMessage image blocks (AsyncIterable prompt mode). For now, attachments are logged and skipped.
-      if (attachments && attachments.length > 0) {
+      // Check for image attachments - prefer resolvedImagePaths (persisted), fallback to temp files
+      const hasResolvedPaths = resolvedImagePaths && resolvedImagePaths.length > 0;
+      const imageAttachments = (attachments ?? []).filter((a) => a.type === 'image');
+      const hasImages = hasResolvedPaths || imageAttachments.length > 0;
+
+      if (hasImages) {
+        // Strip any legacy "Image #N path:" lines to avoid duplicating references
+        const instructionWithoutLegacyPaths = normalizedInstruction
+          .replace(/\n*Image #\d+ path: [^\n]+/g, '')
+          .trim();
+
+        const imageLines: string[] = [];
+
+        if (hasResolvedPaths) {
+          // Use pre-resolved persistent paths (preferred - no temp files needed)
+          console.error(
+            `[ClaudeEngine] Using ${resolvedImagePaths.length} pre-resolved image path(s)`,
+          );
+          for (let index = 0; index < resolvedImagePaths.length; index++) {
+            imageLines.push(`Image #${index + 1} path: ${resolvedImagePaths[index]}`);
+          }
+        } else {
+          // Fallback: write base64 to temp files (legacy behavior)
+          console.error(
+            `[ClaudeEngine] Writing ${imageAttachments.length} image attachment(s) to temp files (fallback)`,
+          );
+          for (let index = 0; index < imageAttachments.length; index++) {
+            const attachment = imageAttachments[index];
+            const tempFilePath = await this.writeAttachmentToTemp(attachment);
+            tempFiles.push(tempFilePath);
+            imageLines.push(`Image #${index + 1} path: ${tempFilePath}`);
+          }
+        }
+
+        // Build final instruction with image paths appended
+        promptInstruction = [instructionWithoutLegacyPaths, imageLines.join('\n')]
+          .filter((segment) => segment && segment.trim().length > 0)
+          .join('\n\n')
+          .trim();
+
         console.error(
-          `[ClaudeEngine] Warning: ${attachments.length} attachment(s) provided but SDK 0.1.69 images option is not supported`,
+          `[ClaudeEngine] Prompt with image paths: ${promptInstruction.slice(0, 200)}...`,
         );
       }
 
@@ -438,6 +505,21 @@ export class ClaudeEngine implements AgentEngine {
         optionsConfig && typeof optionsConfig === 'object' && !Array.isArray(optionsConfig)
           ? (optionsConfig as Record<string, unknown>)
           : undefined;
+
+      // Resolve project-scoped Chrome MCP toggle (default: enabled)
+      const enableChromeMcp = await (async (): Promise<boolean> => {
+        if (!projectId) return true;
+        try {
+          const project = await getProject(projectId);
+          return project?.enableChromeMcp !== false;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error(
+            `[ClaudeEngine] Failed to load project enableChromeMcp, defaulting to enabled: ${message}`,
+          );
+          return true;
+        }
+      })();
 
       // Resolve setting sources
       // SDK isolation mode: settingSources=[] prevents loading any filesystem settings
@@ -642,6 +724,43 @@ export class ClaudeEngine implements AgentEngine {
         }
       }
 
+      // Inject the local Chrome MCP server based on project preference.
+      // This only controls the built-in "chrome-mcp" entry; user-configured MCP servers remain untouched.
+      const CHROME_MCP_SERVER_NAME = 'chrome-mcp';
+      if (enableChromeMcp) {
+        const existingMcpServers =
+          queryOptions.mcpServers &&
+          typeof queryOptions.mcpServers === 'object' &&
+          !Array.isArray(queryOptions.mcpServers)
+            ? (queryOptions.mcpServers as Record<string, unknown>)
+            : {};
+
+        queryOptions.mcpServers = {
+          ...existingMcpServers,
+          [CHROME_MCP_SERVER_NAME]: {
+            type: 'http',
+            url: getChromeMcpUrl(),
+          },
+        };
+        console.error(`[ClaudeEngine] Chrome MCP server enabled: ${getChromeMcpUrl()}`);
+      } else if (
+        queryOptions.mcpServers &&
+        typeof queryOptions.mcpServers === 'object' &&
+        !Array.isArray(queryOptions.mcpServers)
+      ) {
+        // If Chrome MCP is disabled, remove it from existing mcpServers if present
+        const existing = queryOptions.mcpServers as Record<string, unknown>;
+        if (CHROME_MCP_SERVER_NAME in existing) {
+          const { [CHROME_MCP_SERVER_NAME]: _removed, ...rest } = existing;
+          if (Object.keys(rest).length > 0) {
+            queryOptions.mcpServers = rest;
+          } else {
+            delete (queryOptions as Record<string, unknown>).mcpServers;
+          }
+        }
+        console.error('[ClaudeEngine] Chrome MCP server disabled');
+      }
+
       // Add resume option if we have a valid Claude session ID
       if (resumeClaudeSessionId) {
         queryOptions.resume = resumeClaudeSessionId;
@@ -649,7 +768,7 @@ export class ClaudeEngine implements AgentEngine {
       }
 
       const response = query({
-        prompt: normalizedInstruction,
+        prompt: promptInstruction,
         options: queryOptions,
       });
 
@@ -1125,6 +1244,9 @@ export class ClaudeEngine implements AgentEngine {
       // Classify errors for better UX
       const errorMessage = this.classifyError(enhancedMessage, stderrBuffer);
       throw new Error(`ClaudeEngine: ${errorMessage}`);
+    } finally {
+      // Always cleanup temp files, even on error
+      await cleanupTempFiles();
     }
   }
 

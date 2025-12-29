@@ -6,6 +6,10 @@ import {
   BACKGROUND_MESSAGE_TYPES,
 } from '@/common/message-types';
 import { handleGifMessage } from './gif-encoder';
+import { initKeepalive } from './rr-keepalive';
+
+// 初始化 RR V3 Keepalive
+initKeepalive();
 
 // Global semantic similarity engine instance
 let similarityEngine: SemanticSimilarityEngine | null = null;

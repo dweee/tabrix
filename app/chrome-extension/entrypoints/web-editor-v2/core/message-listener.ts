@@ -58,6 +58,16 @@ interface WebEditorV2RevertResponse {
   error?: string;
 }
 
+/** Clear selection request from sidepanel (after send) */
+interface WebEditorV2ClearSelectionRequest {
+  action: typeof WEB_EDITOR_V2_ACTIONS.CLEAR_SELECTION;
+}
+
+/** Clear selection response */
+interface WebEditorV2ClearSelectionResponse {
+  success: boolean;
+}
+
 /** All possible V2 response types */
 type WebEditorV2Response =
   | WebEditorV2PingResponse
@@ -65,7 +75,8 @@ type WebEditorV2Response =
   | WebEditorV2StartResponse
   | WebEditorV2StopResponse
   | WebEditorV2HighlightResponse
-  | WebEditorV2RevertResponse;
+  | WebEditorV2RevertResponse
+  | WebEditorV2ClearSelectionResponse;
 
 // =============================================================================
 // Implementation
@@ -117,6 +128,15 @@ function isRevertRequest(request: unknown): request is WebEditorV2RevertRequest 
     typeof r.elementKey === 'string' &&
     r.elementKey.trim().length > 0
   );
+}
+
+/**
+ * Type guard for clear selection request
+ */
+function isClearSelectionRequest(request: unknown): request is WebEditorV2ClearSelectionRequest {
+  if (!request || typeof request !== 'object') return false;
+  const r = request as Record<string, unknown>;
+  return r.action === WEB_EDITOR_V2_ACTIONS.CLEAR_SELECTION;
 }
 
 // =============================================================================
@@ -198,6 +218,8 @@ function findElementBySelector(selector: string): Element | null {
  * - PING: Check if editor is active
  * - TOGGLE/START/STOP: Control editor state
  * - HIGHLIGHT_ELEMENT: Highlight element from sidepanel hover
+ * - REVERT_ELEMENT: Revert element to original state
+ * - CLEAR_SELECTION: Clear current selection (from sidepanel after send)
  *
  * @param api The WebEditorV2Api instance to delegate commands to
  * @returns Function to remove the listener
@@ -256,6 +278,13 @@ export function installMessageListener(api: WebEditorV2Api): RemoveMessageListen
         }
       })();
       return true; // Async response
+    }
+
+    // Handle clear selection requests (from sidepanel after send)
+    if (isClearSelectionRequest(request)) {
+      api.clearSelection();
+      sendResponse({ success: true });
+      return false; // Synchronous
     }
 
     // Only handle V2 requests for other actions

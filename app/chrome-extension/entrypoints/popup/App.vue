@@ -1,295 +1,295 @@
 <template>
-  <div class="popup-container">
-    <div class="header">
-      <div class="header-content">
-        <h1 class="header-title">Chrome MCP Server</h1>
-      </div>
-    </div>
-    <div class="content">
-      <div class="section">
-        <h2 class="section-title">{{ getMessage('nativeServerConfigLabel') }}</h2>
-        <div class="config-card">
-          <div class="status-section">
-            <div class="status-header">
-              <p class="status-label">{{ getMessage('runningStatusLabel') }}</p>
-              <button
-                class="refresh-status-button"
-                @click="refreshServerStatus"
-                :title="getMessage('refreshStatusButton')"
-              >
-                🔄
-              </button>
-            </div>
-            <div class="status-info">
-              <span :class="['status-dot', getStatusClass()]"></span>
-              <span class="status-text">{{ getStatusText() }}</span>
-            </div>
-            <div v-if="serverStatus.lastUpdated" class="status-timestamp">
-              {{ getMessage('lastUpdatedLabel') }}
-              {{ new Date(serverStatus.lastUpdated).toLocaleTimeString() }}
-            </div>
-          </div>
-
-          <div v-if="showMcpConfig" class="mcp-config-section">
-            <div class="mcp-config-header">
-              <p class="mcp-config-label">{{ getMessage('mcpServerConfigLabel') }}</p>
-              <button class="copy-config-button" @click="copyMcpConfig">
-                {{ copyButtonText }}
-              </button>
-            </div>
-            <div class="mcp-config-content">
-              <pre class="mcp-config-json">{{ mcpConfigJson }}</pre>
-            </div>
-          </div>
-          <div class="port-section">
-            <label for="port" class="port-label">{{ getMessage('connectionPortLabel') }}</label>
-            <input
-              type="text"
-              id="port"
-              :value="nativeServerPort"
-              @input="updatePort"
-              class="port-input"
-            />
-          </div>
-
-          <button class="connect-button" :disabled="isConnecting" @click="testNativeConnection">
-            <BoltIcon />
-            <span>{{
-              isConnecting
-                ? getMessage('connectingStatus')
-                : nativeConnectionStatus === 'connected'
-                  ? getMessage('disconnectButton')
-                  : getMessage('connectButton')
-            }}</span>
-          </button>
+  <div class="popup-container agent-theme" :data-agent-theme="agentTheme">
+    <!-- 首页 -->
+    <div v-show="currentView === 'home'" class="home-view">
+      <div class="header">
+        <div class="header-content">
+          <h1 class="header-title">Chrome MCP Server</h1>
         </div>
       </div>
-
-      <div class="section">
-        <h2 class="section-title">{{ getMessage('semanticEngineLabel') }}</h2>
-        <div class="semantic-engine-card">
-          <div class="semantic-engine-status">
-            <div class="status-info">
-              <span :class="['status-dot', getSemanticEngineStatusClass()]"></span>
-              <span class="status-text">{{ getSemanticEngineStatusText() }}</span>
-            </div>
-            <div v-if="semanticEngineLastUpdated" class="status-timestamp">
-              {{ getMessage('lastUpdatedLabel') }}
-              {{ new Date(semanticEngineLastUpdated).toLocaleTimeString() }}
-            </div>
-          </div>
-
-          <ProgressIndicator
-            v-if="isSemanticEngineInitializing"
-            :visible="isSemanticEngineInitializing"
-            :text="semanticEngineInitProgress"
-            :showSpinner="true"
-          />
-
-          <button
-            class="semantic-engine-button"
-            :disabled="isSemanticEngineInitializing"
-            @click="initializeSemanticEngine"
-          >
-            <BoltIcon />
-            <span>{{ getSemanticEngineButtonText() }}</span>
-          </button>
-        </div>
-      </div>
-
-      <div class="section">
-        <h2 class="section-title">{{ getMessage('embeddingModelLabel') }}</h2>
-
-        <ProgressIndicator
-          v-if="isModelSwitching || isModelDownloading"
-          :visible="isModelSwitching || isModelDownloading"
-          :text="getProgressText()"
-          :showSpinner="true"
-        />
-        <div v-if="modelInitializationStatus === 'error'" class="error-card">
-          <div class="error-content">
-            <div class="error-icon">⚠️</div>
-            <div class="error-details">
-              <p class="error-title">{{ getMessage('semanticEngineInitFailedStatus') }}</p>
-              <p class="error-message">{{
-                modelErrorMessage || getMessage('semanticEngineInitFailedStatus')
-              }}</p>
-              <p class="error-suggestion">{{ getErrorTypeText() }}</p>
-            </div>
-          </div>
-          <button
-            class="retry-button"
-            @click="retryModelInitialization"
-            :disabled="isModelSwitching || isModelDownloading"
-          >
-            <span>🔄</span>
-            <span>{{ getMessage('retryButton') }}</span>
-          </button>
-        </div>
-
-        <div class="model-list">
-          <div
-            v-for="model in availableModels"
-            :key="model.preset"
-            :class="[
-              'model-card',
-              {
-                selected: currentModel === model.preset,
-                disabled: isModelSwitching || isModelDownloading,
-              },
-            ]"
-            @click="
-              !isModelSwitching && !isModelDownloading && switchModel(model.preset as ModelPreset)
-            "
-          >
-            <div class="model-header">
-              <div class="model-info">
-                <p class="model-name" :class="{ 'selected-text': currentModel === model.preset }">
-                  {{ model.preset }}
-                </p>
-                <p class="model-description">{{ getModelDescription(model) }}</p>
+      <div class="content">
+        <!-- 服务配置卡片 -->
+        <div class="section">
+          <h2 class="section-title">{{ getMessage('nativeServerConfigLabel') }}</h2>
+          <div class="config-card">
+            <div class="status-section">
+              <div class="status-header">
+                <p class="status-label">{{ getMessage('runningStatusLabel') }}</p>
+                <button
+                  class="refresh-status-button"
+                  @click="refreshServerStatus"
+                  :title="getMessage('refreshStatusButton')"
+                >
+                  <RefreshIcon className="icon-small" />
+                </button>
               </div>
-              <div v-if="currentModel === model.preset" class="check-icon">
-                <CheckIcon class="text-white" />
+              <div class="status-info">
+                <span :class="['status-dot', getStatusClass()]"></span>
+                <span class="status-text">{{ getStatusText() }}</span>
+              </div>
+              <div v-if="serverStatus.lastUpdated" class="status-timestamp">
+                {{ getMessage('lastUpdatedLabel') }}
+                {{ new Date(serverStatus.lastUpdated).toLocaleTimeString() }}
               </div>
             </div>
-            <div class="model-tags">
-              <span class="model-tag performance">{{ getPerformanceText(model.performance) }}</span>
-              <span class="model-tag size">{{ model.size }}</span>
-              <span class="model-tag dimension">{{ model.dimension }}D</span>
+
+            <div v-if="showMcpConfig" class="mcp-config-section">
+              <div class="mcp-config-header">
+                <p class="mcp-config-label">{{ getMessage('mcpServerConfigLabel') }}</p>
+                <button class="copy-config-button" @click="copyMcpConfig">
+                  {{ copyButtonText }}
+                </button>
+              </div>
+              <div class="mcp-config-content">
+                <pre class="mcp-config-json">{{ mcpConfigJson }}</pre>
+              </div>
             </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="section">
-        <h2 class="section-title">{{ getMessage('indexDataManagementLabel') }}</h2>
-        <div class="stats-grid">
-          <div class="stats-card">
-            <div class="stats-header">
-              <p class="stats-label">{{ getMessage('indexedPagesLabel') }}</p>
-              <span class="stats-icon violet">
-                <DocumentIcon />
-              </span>
+            <div class="port-section">
+              <label for="port" class="port-label">{{ getMessage('connectionPortLabel') }}</label>
+              <input
+                type="text"
+                id="port"
+                :value="nativeServerPort"
+                @input="updatePort"
+                class="port-input"
+              />
             </div>
-            <p class="stats-value">{{ storageStats?.indexedPages || 0 }}</p>
-          </div>
 
-          <div class="stats-card">
-            <div class="stats-header">
-              <p class="stats-label">{{ getMessage('indexSizeLabel') }}</p>
-              <span class="stats-icon teal">
-                <DatabaseIcon />
-              </span>
-            </div>
-            <p class="stats-value">{{ formatIndexSize() }}</p>
-          </div>
-
-          <div class="stats-card">
-            <div class="stats-header">
-              <p class="stats-label">{{ getMessage('activeTabsLabel') }}</p>
-              <span class="stats-icon blue">
-                <TabIcon />
-              </span>
-            </div>
-            <p class="stats-value">{{ getActiveTabsCount() }}</p>
-          </div>
-
-          <div class="stats-card">
-            <div class="stats-header">
-              <p class="stats-label">{{ getMessage('vectorDocumentsLabel') }}</p>
-              <span class="stats-icon green">
-                <VectorIcon />
-              </span>
-            </div>
-            <p class="stats-value">{{ storageStats?.totalDocuments || 0 }}</p>
-          </div>
-        </div>
-        <ProgressIndicator
-          v-if="isClearingData && clearDataProgress"
-          :visible="isClearingData"
-          :text="clearDataProgress"
-          :showSpinner="true"
-        />
-
-        <button
-          class="danger-button"
-          :disabled="isClearingData"
-          @click="showClearConfirmation = true"
-        >
-          <TrashIcon />
-          <span>{{
-            isClearingData ? getMessage('clearingStatus') : getMessage('clearAllDataButton')
-          }}</span>
-        </button>
-      </div>
-
-      <div class="section">
-        <h2 class="section-title">录制与回放</h2>
-        <div class="rr-grid">
-          <div class="rr-controls" style="width: 100%">
-            <button class="connect-button" @click="startRecording" :disabled="rrRecording">
+            <button class="connect-button" :disabled="isConnecting" @click="testNativeConnection">
               <BoltIcon />
-              <span>{{ rrRecording ? '录制中...' : '开始录制' }}</span>
-            </button>
-            <button class="danger-button" @click="stopRecording" :disabled="!rrRecording">
-              <TrashIcon />
-              <span>停止并保存</span>
-            </button>
-            <button
-              class="semantic-engine-button"
-              @click="openWorkflowSidepanel"
-              title="打开侧边栏管理工作流"
-            >
-              工作流管理
+              <span>{{
+                isConnecting
+                  ? getMessage('connectingStatus')
+                  : nativeConnectionStatus === 'connected'
+                    ? getMessage('disconnectButton')
+                    : getMessage('connectButton')
+              }}</span>
             </button>
           </div>
         </div>
-      </div>
 
-      <div class="section">
-        <h2 class="section-title">网页编辑器</h2>
-        <div class="rr-grid">
-          <div class="rr-controls" style="width: 100%">
+        <!-- 快捷工具卡片 -->
+        <div class="section">
+          <h2 class="section-title">快捷工具</h2>
+          <div class="rr-icon-buttons">
             <button
-              class="semantic-engine-button"
+              class="rr-icon-btn rr-icon-btn-record has-tooltip"
+              :class="{ 'rr-icon-btn-recording': rrRecording }"
+              @click="startRecording"
+              :disabled="rrRecording"
+              :data-tooltip="rrRecording ? '录制中...' : '开始录制'"
+            >
+              <RecordIcon :recording="rrRecording" />
+            </button>
+            <button
+              class="rr-icon-btn rr-icon-btn-stop has-tooltip"
+              @click="stopRecording"
+              :disabled="!rrRecording"
+              data-tooltip="停止并保存"
+            >
+              <StopIcon />
+            </button>
+            <button
+              class="rr-icon-btn rr-icon-btn-edit has-tooltip"
               @click="toggleWebEditor"
-              title="在当前页面切换编辑模式（可用快捷键 Ctrl/Command + Shift + E）"
+              data-tooltip="开启页面编辑模式"
             >
-              切换编辑模式
+              <EditIcon />
             </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Model Cache Management Section -->
-      <ModelCacheManagement
-        :cache-stats="cacheStats"
-        :is-managing-cache="isManagingCache"
-        @cleanup-cache="cleanupCache"
-        @clear-all-cache="clearAllCache"
-      />
-
-      <!-- Element Marker Management Section -->
-      <div class="section">
-        <h2 class="section-title">元素标注管理</h2>
-        <div class="rr-grid">
-          <div class="rr-controls" style="width: 100%">
             <button
-              class="semantic-engine-button"
-              @click="openElementMarkerSidepanel"
-              title="打开侧边栏管理元素标注"
+              class="rr-icon-btn rr-icon-btn-marker has-tooltip"
+              @click="toggleElementMarker"
+              data-tooltip="开启元素标注"
             >
-              元素标注管理
+              <MarkerIcon />
+            </button>
+          </div>
+        </div>
+
+        <!-- 管理入口卡片 -->
+        <div class="section">
+          <h2 class="section-title">管理入口</h2>
+          <div class="entry-card">
+            <button class="entry-item" @click="openAgentSidepanel">
+              <div class="entry-icon agent">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="20"
+                  height="20"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                  />
+                </svg>
+              </div>
+              <div class="entry-content">
+                <span class="entry-title">智能助手</span>
+                <span class="entry-desc">AI Agent 对话与任务</span>
+              </div>
+              <svg
+                class="entry-arrow"
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+            <button class="entry-item" @click="openWorkflowSidepanel">
+              <div class="entry-icon workflow">
+                <WorkflowIcon />
+              </div>
+              <div class="entry-content">
+                <span class="entry-title">工作流管理</span>
+                <span class="entry-desc">录制与回放自动化流程</span>
+              </div>
+              <svg
+                class="entry-arrow"
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+            <button class="entry-item" @click="openElementMarkerSidepanel">
+              <div class="entry-icon marker">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="20"
+                  height="20"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+                  />
+                </svg>
+              </div>
+              <div class="entry-content">
+                <span class="entry-title">元素标注管理</span>
+                <span class="entry-desc">管理页面元素标注</span>
+              </div>
+              <svg
+                class="entry-arrow"
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+            <button class="entry-item" @click="currentView = 'local-model'">
+              <div class="entry-icon model">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="20"
+                  height="20"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                  />
+                </svg>
+              </div>
+              <div class="entry-content">
+                <span class="entry-title">本地模型</span>
+                <span class="entry-desc">语义引擎与模型管理</span>
+              </div>
+              <svg
+                class="entry-arrow"
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
             </button>
           </div>
         </div>
       </div>
+
+      <div class="footer">
+        <div class="footer-links">
+          <button class="footer-link" @click="openWelcomePage" title="View installation guide">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            Guide
+          </button>
+          <button class="footer-link" @click="openTroubleshooting" title="Troubleshooting">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+              />
+            </svg>
+            Docs
+          </button>
+        </div>
+        <p class="footer-text">chrome mcp server for ai</p>
+      </div>
     </div>
 
-    <div class="footer">
-      <p class="footer-text">chrome mcp server for ai</p>
-    </div>
+    <!-- 本地模型二级页面 -->
+    <LocalModelPage
+      v-show="currentView === 'local-model'"
+      :semantic-engine-status="semanticEngineStatus"
+      :is-semantic-engine-initializing="isSemanticEngineInitializing"
+      :semantic-engine-init-progress="semanticEngineInitProgress"
+      :semantic-engine-last-updated="semanticEngineLastUpdated"
+      :available-models="availableModels"
+      :current-model="currentModel"
+      :is-model-switching="isModelSwitching"
+      :is-model-downloading="isModelDownloading"
+      :model-download-progress="modelDownloadProgress"
+      :model-initialization-status="modelInitializationStatus"
+      :model-error-message="modelErrorMessage"
+      :model-error-type="modelErrorType"
+      :storage-stats="storageStats"
+      :is-clearing-data="isClearingData"
+      :clear-data-progress="clearDataProgress"
+      :cache-stats="cacheStats"
+      :is-managing-cache="isManagingCache"
+      @back="currentView = 'home'"
+      @initialize-semantic-engine="initializeSemanticEngine"
+      @switch-model="switchModel"
+      @retry-model-initialization="retryModelInitialization"
+      @show-clear-confirmation="showClearConfirmation = true"
+      @cleanup-cache="cleanupCache"
+      @clear-all-cache="clearAllCache"
+    />
 
     <ConfirmDialog
       :visible="showClearConfirmation"
@@ -325,11 +325,14 @@ import {
   cleanupModelCache,
 } from '@/utils/semantic-similarity-engine';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import { LINKS } from '@/common/constants';
 import { getMessage } from '@/utils/i18n';
+import { useAgentTheme, type AgentThemeId } from '../sidepanel/composables/useAgentTheme';
 
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import ProgressIndicator from './components/ProgressIndicator.vue';
 import ModelCacheManagement from './components/ModelCacheManagement.vue';
+import LocalModelPage from './components/LocalModelPage.vue';
 import {
   DocumentIcon,
   DatabaseIcon,
@@ -338,7 +341,19 @@ import {
   CheckIcon,
   TabIcon,
   VectorIcon,
+  RecordIcon,
+  StopIcon,
+  WorkflowIcon,
+  RefreshIcon,
+  EditIcon,
+  MarkerIcon,
 } from './components/icons';
+
+// AgentChat theme - 从preload中获取，保持与sidepanel一致
+const { theme: agentTheme, initTheme } = useAgentTheme();
+
+// 当前视图状态：首页 or 本地模型页
+const currentView = ref<'home' | 'local-model'>('home');
 
 // Record & Replay state
 const rrRecording = ref(false);
@@ -564,39 +579,39 @@ const getStatusClass = () => {
   }
 };
 
-// Open sidepanel from popup for workflow management
-async function openWorkflowSidepanel() {
+// Open sidepanel and close popup
+async function openSidepanelAndClose(tab: string) {
   try {
     const current = await chrome.windows.getCurrent();
-    // Ensure the side panel uses our page
-    if ((chrome.sidePanel as any)?.setOptions) {
-      await (chrome.sidePanel as any).setOptions({ path: 'sidepanel.html', enabled: true });
-    }
-    if (chrome.sidePanel && (chrome.sidePanel as any).open) {
-      await (chrome.sidePanel as any).open({ windowId: current.id! });
-    }
-  } catch (e) {
-    console.warn('打开侧边栏失败:', e);
-  }
-}
-
-// Open sidepanel for element marker management
-async function openElementMarkerSidepanel() {
-  try {
-    const current = await chrome.windows.getCurrent();
-    // Navigate sidepanel to element marker management page
     if ((chrome.sidePanel as any)?.setOptions) {
       await (chrome.sidePanel as any).setOptions({
-        path: 'sidepanel.html?tab=element-markers',
+        path: `sidepanel.html?tab=${tab}`,
         enabled: true,
       });
     }
     if (chrome.sidePanel && (chrome.sidePanel as any).open) {
       await (chrome.sidePanel as any).open({ windowId: current.id! });
     }
+    // Close popup after opening sidepanel
+    window.close();
   } catch (e) {
-    console.warn('打开元素标注管理失败:', e);
+    console.warn(`Failed to open sidepanel (${tab}):`, e);
   }
+}
+
+// Open sidepanel from popup for workflow management
+function openWorkflowSidepanel() {
+  openSidepanelAndClose('workflows');
+}
+
+// Open sidepanel for element marker management
+function openElementMarkerSidepanel() {
+  openSidepanelAndClose('element-markers');
+}
+
+// Open sidepanel for agent chat
+function openAgentSidepanel() {
+  openSidepanelAndClose('agent-chat');
 }
 
 async function toggleWebEditor() {
@@ -604,6 +619,41 @@ async function toggleWebEditor() {
     await chrome.runtime.sendMessage({ type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TOGGLE });
   } catch (error) {
     console.warn('切换网页编辑模式失败:', error);
+  }
+}
+
+async function toggleElementMarker() {
+  try {
+    // 获取当前活动tab
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) {
+      console.warn('无法获取当前tab');
+      return;
+    }
+
+    // 向background发送消息，启动元素标注
+    await chrome.runtime.sendMessage({
+      type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_START,
+      tabId: tab.id,
+    });
+  } catch (error) {
+    console.warn('开启元素标注失败:', error);
+  }
+}
+
+async function openWelcomePage() {
+  try {
+    await chrome.tabs.create({ url: chrome.runtime.getURL('welcome.html') });
+  } catch {
+    // ignore
+  }
+}
+
+async function openTroubleshooting() {
+  try {
+    await chrome.tabs.create({ url: LINKS.TROUBLESHOOTING });
+  } catch {
+    // ignore
   }
 }
 
@@ -1428,6 +1478,8 @@ const setupServerStatusListener = () => {
 };
 
 onMounted(async () => {
+  // 初始化主题
+  await initTheme();
   await loadPortPreference();
   await loadModelPreference();
   await checkNativeConnection();
@@ -1835,13 +1887,13 @@ onUnmounted(() => {
 }
 
 .config-card {
-  background: white;
-  border-radius: 16px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  padding: 20px;
+  background: var(--ac-surface, white);
+  border-radius: var(--ac-radius-card, 12px);
+  box-shadow: var(--ac-shadow-card, 0 1px 3px rgba(0, 0, 0, 0.08));
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 .semantic-engine-card {
   background: white;
@@ -1995,8 +2047,8 @@ onUnmounted(() => {
 
 .port-input:focus {
   outline: none;
-  border-color: #8b5cf6;
-  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+  border-color: var(--ac-accent, #d97757);
+  box-shadow: 0 0 0 3px var(--ac-accent-subtle, rgba(217, 119, 87, 0.12));
 }
 
 .connect-button {
@@ -2005,24 +2057,24 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: #8b5cf6;
-  color: white;
+  background: var(--ac-accent, #d97757);
+  color: var(--ac-accent-contrast, white);
   font-weight: 600;
   padding: 12px 16px;
-  border-radius: 8px;
+  border-radius: var(--ac-radius-button, 8px);
   border: none;
   cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  transition: all var(--ac-motion-fast, 120ms) ease;
+  box-shadow: var(--ac-shadow-card, 0 1px 3px rgba(0, 0, 0, 0.08));
 }
 
 .connect-button:hover:not(:disabled) {
-  background: #7c3aed;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  background: var(--ac-accent-hover, #c4664a);
+  box-shadow: var(--ac-shadow-float, 0 4px 20px -2px rgba(0, 0, 0, 0.05));
 }
 
 .connect-button:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 .error-card {
@@ -2125,23 +2177,56 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
-.icon-small {
-  width: 14px;
-  height: 14px;
+/* Icon sizes - use :deep to apply to child components */
+:deep(.icon-small) {
+  width: 16px;
+  height: 16px;
 }
 
-.icon-default {
+:deep(.icon-default) {
   width: 20px;
   height: 20px;
 }
 
-.icon-medium {
+:deep(.icon-medium) {
   width: 24px;
   height: 24px;
 }
 .footer {
   padding: 16px;
   margin-top: auto;
+}
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.footer-link {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.footer-link:hover {
+  color: #8b5cf6;
+  background: #e2e8f0;
+}
+
+.footer-link svg {
+  width: 14px;
+  height: 14px;
 }
 
 .footer-text {
@@ -2156,6 +2241,10 @@ onUnmounted(() => {
     width: 100%;
     height: 100vh;
     border-radius: 0;
+  }
+
+  .footer-links {
+    gap: 8px;
   }
 
   .rr-grid {
@@ -2233,5 +2322,248 @@ onUnmounted(() => {
   .stats-value {
     font-size: 24px;
   }
+}
+
+/* 快捷工具icon按钮样式 */
+.rr-icon-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-start;
+  padding: 16px;
+  background: var(--ac-surface, white);
+  border-radius: var(--ac-radius-card, 12px);
+  box-shadow: var(--ac-shadow-card, 0 1px 3px rgba(0, 0, 0, 0.08));
+}
+
+.rr-icon-btn {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ac-surface-muted, #f2f0eb);
+  border: none;
+  border-radius: var(--ac-radius-button, 8px);
+  color: var(--ac-text-muted, #6e6e6e);
+  cursor: pointer;
+  transition: all var(--ac-motion-fast, 120ms) ease;
+}
+
+.rr-icon-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: var(--ac-shadow-float, 0 4px 20px -2px rgba(0, 0, 0, 0.05));
+}
+
+.rr-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.rr-icon-btn svg {
+  width: 24px;
+  height: 24px;
+}
+
+/* 录制按钮 - 红色 */
+.rr-icon-btn-record {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.rr-icon-btn-record:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.2);
+  color: #dc2626;
+}
+
+/* 录制中状态 - 脉冲动画 */
+.rr-icon-btn-recording {
+  animation: pulse-recording 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-recording {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+  }
+}
+
+/* 停止按钮 - 深红色 */
+.rr-icon-btn-stop {
+  background: rgba(185, 28, 28, 0.1);
+  color: #b91c1c;
+}
+
+.rr-icon-btn-stop:hover:not(:disabled) {
+  background: rgba(185, 28, 28, 0.2);
+  color: #991b1b;
+}
+
+/* 编辑按钮 - 蓝色 */
+.rr-icon-btn-edit {
+  background: rgba(37, 99, 235, 0.1);
+  color: #2563eb;
+}
+
+.rr-icon-btn-edit:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.2);
+  color: #1d4ed8;
+}
+
+/* 标注按钮 - 绿色 */
+.rr-icon-btn-marker {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+}
+
+.rr-icon-btn-marker:hover:not(:disabled) {
+  background: rgba(16, 185, 129, 0.2);
+  color: #059669;
+}
+
+/* CSS Tooltip - instant display */
+.has-tooltip {
+  position: relative;
+}
+
+.has-tooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  color: var(--ac-text-inverse, #ffffff);
+  background-color: var(--ac-text, #1a1a1a);
+  border-radius: var(--ac-radius-button, 8px);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 80ms ease,
+    visibility 80ms ease;
+  pointer-events: none;
+  z-index: 100;
+}
+
+.has-tooltip::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: var(--ac-text, #1a1a1a);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 80ms ease,
+    visibility 80ms ease;
+  pointer-events: none;
+  z-index: 100;
+}
+
+.has-tooltip:hover::after,
+.has-tooltip:hover::before {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* 首页视图 */
+.home-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* 管理入口卡片样式 */
+.entry-card {
+  background: var(--ac-surface, white);
+  border-radius: var(--ac-radius-card, 12px);
+  box-shadow: var(--ac-shadow-card, 0 1px 3px rgba(0, 0, 0, 0.08));
+  overflow: hidden;
+}
+
+.entry-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--ac-border, #e7e5e4);
+  cursor: pointer;
+  transition: all var(--ac-motion-fast, 120ms) ease;
+  text-align: left;
+}
+
+.entry-item:last-child {
+  border-bottom: none;
+}
+
+.entry-item:hover {
+  background: var(--ac-hover-bg, #f5f5f4);
+}
+
+.entry-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--ac-radius-button, 8px);
+  flex-shrink: 0;
+}
+
+.entry-icon.agent {
+  background: rgba(217, 119, 87, 0.12);
+  color: var(--ac-accent, #d97757);
+}
+
+.entry-icon.workflow {
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563eb;
+}
+
+.entry-icon.marker {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+}
+
+.entry-icon.model {
+  background: rgba(139, 92, 246, 0.12);
+  color: #8b5cf6;
+}
+
+.entry-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.entry-title {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ac-text, #1a1a1a);
+  line-height: 1.3;
+}
+
+.entry-desc {
+  display: block;
+  font-size: 12px;
+  color: var(--ac-text-subtle, #a8a29e);
+  line-height: 1.3;
+  margin-top: 2px;
+}
+
+.entry-arrow {
+  color: var(--ac-text-subtle, #a8a29e);
+  flex-shrink: 0;
 }
 </style>

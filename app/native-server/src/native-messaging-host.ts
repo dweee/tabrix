@@ -120,7 +120,7 @@ export class NativeMessagingHost {
     try {
       switch (message.type) {
         case NativeMessageType.START:
-          await this.startServer(message.payload?.port || 3000);
+          await this.startServer(message.payload?.port || 12306);
           break;
         case NativeMessageType.STOP:
           await this.stopServer();

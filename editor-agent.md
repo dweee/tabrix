@@ -409,16 +409,16 @@ function revertElement(key: string): void {
 | 1.4  | 实现 Transaction 聚合器（transaction-aggregator.ts） | P0     | 1.2,1.3 | ✅   |
 | 1.5  | 改造 Apply 流程（editor.ts）                         | P0     | 1.4     | ✅   |
 | 1.6  | 增加 TX 变化广播（editor.ts）                        | P0     | 1.4     | ✅   |
-| 1.7  | Background 处理 APPLY_BATCH（index.ts）              | P0     | 1.5     | ⏳   |
-| 1.8  | 实现 batch prompt 构建（index.ts）                   | P0     | 1.7     | ⏳   |
-| 1.9  | Sidepanel URL 参数增加 agent-chat（App.vue）         | P1     | -       | ⏳   |
-| 1.10 | Sidepanel 监听 TX 变化消息                           | P1     | 1.6     | ⏳   |
-| 1.11 | 实现 WebEditorChanges 组件                           | P1     | 1.10    | ⏳   |
-| 1.12 | 实现 ElementChip 组件                                | P1     | 1.11    | ⏳   |
-| 1.13 | 实现 Include/Exclude 切换逻辑                        | P1     | 1.12    | ⏳   |
-| 1.14 | 实现 Hover 高亮（复用 element-marker）               | P2     | 1.12    | ⏳   |
-| 1.15 | 实现 Hover Tooltip（变更详情）                       | P2     | 1.12    | ⏳   |
-| 1.16 | Sidepanel 自动打开（best-effort）                    | P2     | 1.7     | ⏳   |
+| 1.7  | Background 处理 APPLY_BATCH（index.ts）              | P0     | 1.5     | ✅   |
+| 1.8  | 实现 batch prompt 构建（index.ts）                   | P0     | 1.7     | ✅   |
+| 1.9  | Sidepanel URL 参数增加 agent-chat（App.vue）         | P1     | -       | ✅   |
+| 1.10 | Sidepanel 监听 TX 变化消息                           | P1     | 1.6     | ✅   |
+| 1.11 | 实现 WebEditorChanges 组件                           | P1     | 1.10    | ✅   |
+| 1.12 | 实现 ElementChip 组件                                | P1     | 1.11    | ✅   |
+| 1.13 | 实现 Include/Exclude 切换逻辑                        | P1     | 1.12    | ✅   |
+| 1.14 | 实现 Hover 高亮（复用 element-marker）               | P2     | 1.12    | ✅   |
+| 1.15 | 实现 Hover Tooltip（变更详情）                       | P2     | 1.12    | ✅   |
+| 1.16 | Sidepanel 自动打开（best-effort）                    | P2     | 1.7     | ✅   |
 
 ### Phase 2 任务列表（双向联动）
 
@@ -582,12 +582,12 @@ elementKey?: string;  // 可选，向后兼容
 
 ### 已知遗留优化项（非阻塞）
 
-| 优先级 | 问题                              | 说明                                                 | 建议方案                                    |
-| ------ | --------------------------------- | ---------------------------------------------------- | ------------------------------------------- |
-| P1     | Shadow DOM 高亮不支持             | 当前 `document.querySelector()` 无法穿透 shadow root | 需要解析 `locator.shadowHostChain` 逐层查找 |
-| P1     | excludedKeys 不持久化             | 刷新 sidepanel 后用户的 include/exclude 选择会丢失   | 持久化到 `chrome.storage.session` (per-tab) |
-| P2     | 每个 chip 注册 scroll/resize 监听 | 元素多时性能开销较大                                 | 改为全局单例管理或仅在 tooltip 激活时注册   |
-| P2     | 样式 token 命名不一致             | 使用了 `--ac-error` 而主题定义的是 `--ac-danger`     | 统一使用 `--ac-danger` 或添加别名           |
+| 优先级 | 问题                              | 说明                                                 | 建议方案                                    | 状态      |
+| ------ | --------------------------------- | ---------------------------------------------------- | ------------------------------------------- | --------- |
+| P1     | Shadow DOM 高亮不支持             | 当前 `document.querySelector()` 无法穿透 shadow root | 需要解析 `locator.shadowHostChain` 逐层查找 | ✅ 已实现 |
+| P1     | excludedKeys 不持久化             | 刷新 sidepanel 后用户的 include/exclude 选择会丢失   | 持久化到 `chrome.storage.session` (per-tab) | ✅ 已实现 |
+| P2     | 每个 chip 注册 scroll/resize 监听 | 元素多时性能开销较大                                 | 改为全局单例管理或仅在 tooltip 激活时注册   | ✅ 已优化 |
+| P2     | 样式 token 命名不一致             | 使用了 `--ac-error` 而主题定义的是 `--ac-danger`     | 统一使用 `--ac-danger` 或添加别名           | ✅ 已修复 |
 
 ---
 

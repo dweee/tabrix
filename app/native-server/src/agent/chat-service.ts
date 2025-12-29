@@ -8,6 +8,7 @@ import type {
   RunningExecution,
 } from './engines/types';
 import type { AgentMessage, RealtimeEvent } from './types';
+import type { AttachmentMetadata } from 'chrome-mcp-shared';
 import { AgentStreamManager } from './stream-manager';
 import { getProject, touchProjectActivity, updateProjectClaudeSessionId } from './project-service';
 import { createMessage as persistAgentMessage } from './message-service';
@@ -17,6 +18,7 @@ import {
   updateManagementInfo,
   type AgentSession,
 } from './session-service';
+import { attachmentService, type SavedAttachment } from './attachment-service';
 
 export interface AgentChatServiceOptions {
   engines: AgentEngine[];
@@ -89,26 +91,25 @@ export class AgentChatService {
       }
     }
 
-    let projectRoot = payload.projectRoot;
-    let projectPreferredCli: EngineName | undefined;
-    let projectSelectedModel: string | undefined;
-    let projectUseCcr: boolean | undefined;
+    // Project is required - workspace path must come from project system
+    if (!projectId) {
+      throw new Error('projectId is required. Please select or create a project first.');
+    }
+
+    const project = await getProject(projectId);
+    if (!project) {
+      throw new Error(`Project not found for id: ${projectId}`);
+    }
+
+    const projectRoot = project.rootPath;
+    const projectPreferredCli = project.preferredCli as EngineName | undefined;
+    const projectSelectedModel = project.selectedModel;
+    const projectUseCcr = project.useCcr;
+
+    // Legacy fallback: if caller does not use sessions table, use project-level resume id
     let resumeClaudeSessionId: string | undefined;
-
-    if (!projectRoot && projectId) {
-      const project = await getProject(projectId);
-      if (!project) {
-        throw new Error(`Project not found for id: ${projectId}`);
-      }
-      projectRoot = project.rootPath;
-      projectPreferredCli = project.preferredCli as EngineName | undefined;
-      projectSelectedModel = project.selectedModel;
-      projectUseCcr = project.useCcr;
-
-      // Legacy fallback: if caller does not use sessions table, use project-level resume id
-      if (!dbSessionId) {
-        resumeClaudeSessionId = project.activeClaudeSessionId;
-      }
+    if (!dbSessionId) {
+      resumeClaudeSessionId = project.activeClaudeSessionId;
     }
 
     // Resolve engine name - session binding takes precedence
@@ -142,10 +143,71 @@ export class AgentChatService {
     }
 
     const now = new Date().toISOString();
+    const userMessageId = randomUUID();
+
+    // Process and persist image attachments
+    const savedAttachments: SavedAttachment[] = [];
+    let attachmentMetadata: AttachmentMetadata[] | undefined;
+    let resolvedImagePaths: string[] | undefined;
+
+    if (projectId && payload.attachments && payload.attachments.length > 0) {
+      const imageAttachments = payload.attachments.filter((a) => a.type === 'image');
+
+      if (imageAttachments.length > 0) {
+        try {
+          console.error(
+            `[AgentChatService] Saving ${imageAttachments.length} image attachment(s) for project ${projectId}`,
+          );
+
+          for (let i = 0; i < imageAttachments.length; i++) {
+            const attachment = imageAttachments[i];
+            const saved = await attachmentService.saveAttachment({
+              projectId,
+              messageId: userMessageId,
+              attachment,
+              index: i,
+            });
+            savedAttachments.push(saved);
+          }
+
+          // Build metadata array for message persistence
+          attachmentMetadata = savedAttachments.map((s) => s.metadata);
+          // Build paths array for engine consumption
+          resolvedImagePaths = savedAttachments.map((s) => s.absolutePath);
+
+          console.error(
+            `[AgentChatService] Saved ${savedAttachments.length} attachment(s): ${resolvedImagePaths.join(', ')}`,
+          );
+        } catch (error) {
+          console.error('[AgentChatService] Failed to save attachments:', error);
+          // Continue without attachments - don't fail the entire request
+        }
+      }
+    }
+
+    // Build metadata object for user message
+    // Include attachments, clientMeta, and displayText if present
+    let userMessageMetadata: Record<string, unknown> | undefined;
+    const hasAttachments = attachmentMetadata && attachmentMetadata.length > 0;
+    const hasClientMeta = payload.clientMeta !== undefined;
+    const hasDisplayText = payload.displayText !== undefined;
+
+    if (hasAttachments || hasClientMeta || hasDisplayText) {
+      userMessageMetadata = {};
+      if (hasAttachments) {
+        userMessageMetadata.attachments = attachmentMetadata;
+      }
+      if (hasClientMeta) {
+        userMessageMetadata.clientMeta = payload.clientMeta;
+      }
+      if (hasDisplayText) {
+        userMessageMetadata.displayText = payload.displayText;
+      }
+    }
 
     // Emit a canonical user message into the stream so UI can render from server events only.
     const userMessage: AgentMessage = {
-      id: randomUUID(),
+      id: userMessageId,
       sessionId,
       role: 'user',
       content: trimmed,
@@ -155,6 +217,7 @@ export class AgentChatService {
       isStreaming: false,
       isFinal: true,
       createdAt: now,
+      metadata: userMessageMetadata,
     };
 
     this.streamManager.publish({ type: 'message', data: userMessage });
@@ -173,6 +236,7 @@ export class AgentChatService {
           requestId,
           id: userMessage.id,
           createdAt: userMessage.createdAt,
+          metadata: userMessageMetadata,
         });
       } catch (error) {
         console.error('[AgentChatService] Failed to persist user message:', error);
@@ -259,7 +323,9 @@ export class AgentChatService {
       model: effectiveModel,
       projectRoot,
       requestId,
+      // Pass original attachments (for fallback) and resolved paths (preferred)
       attachments: payload.attachments,
+      resolvedImagePaths,
       projectId,
       dbSessionId,
       // Session-level configuration for ClaudeEngine

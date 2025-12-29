@@ -15,6 +15,7 @@ export enum NativeMessageType {
   SERVER_STOPPED = 'server_stopped',
   ERROR_FROM_NATIVE_HOST = 'error_from_native_host',
   CONNECT_NATIVE = 'connectNative',
+  ENSURE_NATIVE = 'ensure_native',
   PING_NATIVE = 'ping_native',
   DISCONNECT_NATIVE = 'disconnect_native',
 }

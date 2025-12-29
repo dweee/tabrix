@@ -164,6 +164,7 @@ function rowToProject(row: ProjectRow): AgentProject {
     selectedModel: row.selectedModel ?? undefined,
     activeClaudeSessionId: row.activeClaudeSessionId ?? undefined,
     useCcr: row.useCcr === '1',
+    enableChromeMcp: row.enableChromeMcp !== '0',
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     lastActiveAt: row.lastActiveAt ?? undefined,
@@ -203,9 +204,18 @@ export async function upsertProject(input: CreateOrUpdateProjectInput): Promise<
   const id = input.id?.trim() || randomUUID();
   const existing = await getProject(id);
 
-  // Convert boolean to string for SQLite storage ('1' or null)
+  // Convert booleans to strings for SQLite storage:
+  // - useCcr: '1' or null (legacy)
+  // - enableChromeMcp: '1' or '0' (non-null; defaults to enabled)
   const useCcrValue =
     input.useCcr !== undefined ? (input.useCcr ? '1' : null) : existing?.useCcr ? '1' : null;
+
+  let enableChromeMcpValue: '1' | '0';
+  if (typeof input.enableChromeMcp === 'boolean') {
+    enableChromeMcpValue = input.enableChromeMcp ? '1' : '0';
+  } else {
+    enableChromeMcpValue = existing?.enableChromeMcp === false ? '0' : '1';
+  }
 
   const projectData = {
     id,
@@ -217,6 +227,7 @@ export async function upsertProject(input: CreateOrUpdateProjectInput): Promise<
     // Preserve activeClaudeSessionId from existing project (not settable via upsert)
     activeClaudeSessionId: existing?.activeClaudeSessionId ?? null,
     useCcr: useCcrValue,
+    enableChromeMcp: enableChromeMcpValue,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     lastActiveAt: now,

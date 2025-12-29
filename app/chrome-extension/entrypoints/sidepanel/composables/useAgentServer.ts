@@ -60,13 +60,21 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
     }
   }
 
-  // Start native host connection using existing message type
-  async function startNativeHost(): Promise<boolean> {
+  /**
+   * Start native host connection.
+   * @param forceConnect - If true, use CONNECT_NATIVE (re-enables auto-connect).
+   *                       If false, use ENSURE_NATIVE (respects current auto-connect setting).
+   */
+  async function startNativeHost(forceConnect = false): Promise<boolean> {
     try {
       const response = await chrome.runtime.sendMessage({
-        type: NativeMessageType.CONNECT_NATIVE,
+        type: forceConnect ? NativeMessageType.CONNECT_NATIVE : NativeMessageType.ENSURE_NATIVE,
       });
-      nativeConnected.value = response?.success ?? false;
+      // Handle both response formats: { connected: boolean } and { success: boolean }
+      nativeConnected.value =
+        typeof response?.connected === 'boolean'
+          ? response.connected
+          : (response?.success ?? false);
       return nativeConnected.value;
     } catch (error) {
       console.error('Failed to start native host:', error);
@@ -99,15 +107,21 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
     }
   }
 
+  interface EnsureNativeServerOptions {
+    /** If true, use CONNECT_NATIVE to re-enable auto-connect */
+    forceConnect?: boolean;
+  }
+
   // Ensure native server is ready
-  async function ensureNativeServer(): Promise<boolean> {
+  async function ensureNativeServer(opts: EnsureNativeServerOptions = {}): Promise<boolean> {
+    const { forceConnect = false } = opts;
     connecting.value = true;
     try {
       // Step 1: Check native host connection
       let connected = await checkNativeHost();
       if (!connected) {
         // Try to start native host
-        connected = await startNativeHost();
+        connected = await startNativeHost(forceConnect);
         if (!connected) {
           console.error('Failed to connect to native host');
           return false;
@@ -216,11 +230,12 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
     currentStreamSessionId = null;
   }
 
-  // Reconnect to server
+  // Reconnect to server (explicit user action, re-enables auto-connect)
   async function reconnect(): Promise<void> {
     closeEventSource();
     reconnectAttempts = 0;
-    await ensureNativeServer();
+    // Explicit user reconnect: force connect to re-enable auto-connect in background
+    await ensureNativeServer({ forceConnect: true });
     if (isServerReady.value) {
       openEventSource();
     }

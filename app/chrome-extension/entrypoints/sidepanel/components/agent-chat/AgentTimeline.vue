@@ -1,13 +1,13 @@
 <template>
   <div class="pl-1 space-y-3">
-    <!-- Timeline container with left border -->
-    <div
-      class="relative pl-6 space-y-4 ml-1"
-      :style="{
-        borderLeft: 'var(--ac-timeline-line-width) solid var(--ac-timeline-line)',
-      }"
-    >
-      <AgentTimelineItem v-for="item in items" :key="item.id" :item="item" />
+    <!-- Timeline container -->
+    <div class="relative pl-5 space-y-4 ml-1">
+      <AgentTimelineItem
+        v-for="(item, index) in items"
+        :key="item.id"
+        :item="item"
+        :is-last="index === items.length - 1"
+      />
     </div>
   </div>
 </template>

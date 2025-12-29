@@ -8,7 +8,6 @@
 [![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-green.svg)](https://developer.chrome.com/docs/extensions/)
 [![Release](https://img.shields.io/github/v/release/hangwin/mcp-chrome.svg)](https://img.shields.io/github/v/release/hangwin/mcp-chrome.svg)
 
-
 > 🌟 **Turn your Chrome browser into your intelligent assistant** - Let AI take control of your browser, transforming it into a powerful AI-controlled automation tool.
 
 **📖 Documentation**: [English](README.md) | [中文](README_zh.md)
@@ -48,7 +47,7 @@ Chrome MCP Server is a Chrome extension-based **Model Context Protocol (MCP) ser
 
 ### Prerequisites
 
-- Node.js >= 18.19.0 and pnpm/npm
+- Node.js >= 20.0.0 and pnpm/npm
 - Chrome/Chromium browser
 
 ### Installation Steps

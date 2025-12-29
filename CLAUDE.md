@@ -6,7 +6,7 @@
 
 ## 何时使用 use-codex Skill
 
-当遇到以下情况时，使用 `use-codex` skill：
+当遇到以下情况时，使用 `use-codex` skill（你自己也要有自己的理解，才能和codex更好的商讨与合作）：
 
 ### 触发条件
 

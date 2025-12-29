@@ -1,6 +1,6 @@
 <template>
   <Transition name="changes-slide">
-    <div v-if="hasElements" class="mb-2">
+    <div v-if="showSection" class="mb-2">
       <!-- Header Row -->
       <div class="flex items-center justify-between px-1 mb-1.5 gap-2">
         <!-- Left: Label + Summary -->
@@ -9,15 +9,19 @@
             class="text-[11px] font-bold uppercase tracking-wider flex-shrink-0"
             :style="headerLabelStyle"
           >
-            Web Edits
+            {{ headerLabel }}
           </span>
           <span class="text-[10px] truncate" :style="headerMetaStyle">
             {{ summaryText }}
           </span>
         </div>
 
-        <!-- Right: View Toggle -->
-        <div class="flex items-center gap-0.5 p-0.5 flex-shrink-0" :style="toggleGroupStyle">
+        <!-- Right: View Toggle (only show when there are edits) -->
+        <div
+          v-if="hasElements"
+          class="flex items-center gap-0.5 p-0.5 flex-shrink-0"
+          :style="toggleGroupStyle"
+        >
           <button
             type="button"
             class="px-2 py-0.5 text-[10px] transition-colors"
@@ -41,20 +45,30 @@
 
       <!-- Chips Container -->
       <div class="flex gap-1.5 overflow-x-auto ac-scroll-hidden px-1 pb-1">
+        <!-- Selection-only chip (when selected element is not in edits) -->
+        <SelectionChip
+          v-if="showSelectionChip"
+          :selected="tx.selectedElement.value!"
+          @hover:start="handleSelectionHoverStart"
+          @hover:end="handleSelectionHoverEnd"
+        />
+
+        <!-- Edit chips -->
         <ElementChip
           v-for="element in visibleElements"
           :key="element.elementKey"
           :element="element"
           :excluded="isExcluded(element.elementKey)"
+          :selected="isSelectedElement(element.elementKey)"
           @toggle:exclude="handleToggleExclude"
           @revert="handleRevert"
           @hover:start="handleHoverStart"
           @hover:end="handleHoverEnd"
         />
 
-        <!-- Empty State -->
+        <!-- Empty State (only when no edits and no selection) -->
         <div
-          v-if="visibleElements.length === 0"
+          v-if="visibleElements.length === 0 && !showSelectionChip"
           class="px-2 py-1 text-[11px] italic"
           :style="emptyStateStyle"
         >
@@ -66,24 +80,44 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, ref, watch } from 'vue';
-import { useWebEditorTxState } from '../../composables';
+import { computed, ref, watch, provide, inject, onMounted, onUnmounted, type Ref } from 'vue';
+import { WEB_EDITOR_TX_STATE_INJECTION_KEY, type WebEditorTxStateReturn } from '../../composables';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import type {
   ElementChangeSummary,
   ElementLocator,
+  SelectedElementSummary,
   WebEditorElementKey,
   WebEditorHighlightElementPayload,
   WebEditorRevertElementPayload,
   WebEditorRevertElementResponse,
 } from '@/common/web-editor-types';
 import ElementChip from './ElementChip.vue';
+import SelectionChip from './SelectionChip.vue';
 
 // =============================================================================
-// Composables
+// Inject TX State from Parent (AgentChat.vue)
 // =============================================================================
 
-const tx = useWebEditorTxState();
+/**
+ * Inject the WebEditorTxState from AgentChat.vue parent.
+ * This pattern prevents duplicate listener registration that would occur
+ * if each component called useWebEditorTxState() independently.
+ *
+ * We use a helper function to ensure TypeScript understands tx is non-null after the check.
+ */
+function injectTxStateOrThrow(): WebEditorTxStateReturn {
+  const injected = inject<WebEditorTxStateReturn>(WEB_EDITOR_TX_STATE_INJECTION_KEY);
+  if (!injected) {
+    throw new Error(
+      '[WebEditorChanges] WebEditorTxState must be provided by parent component. ' +
+        'Ensure AgentChat.vue calls useWebEditorTxState() and provides it via WEB_EDITOR_TX_STATE_INJECTION_KEY.',
+    );
+  }
+  return injected;
+}
+
+const tx = injectTxStateOrThrow();
 
 // =============================================================================
 // Local State
@@ -91,6 +125,13 @@ const tx = useWebEditorTxState();
 
 /** Current view mode: show included or excluded elements */
 const viewMode = ref<'include' | 'exclude'>('include');
+
+/**
+ * Scroll/resize trigger - incremented when scroll or resize events occur.
+ * Provided to ElementChip children for tooltip position updates.
+ */
+const scrollResizeTrigger = ref(0);
+provide<Ref<number>>('scrollResizeTrigger', scrollResizeTrigger);
 
 // =============================================================================
 // Computed: Counts & Elements
@@ -100,6 +141,12 @@ const hasElements = computed(() => tx.allElements.value.length > 0);
 const includedCount = computed(() => tx.applicableElements.value.length);
 const excludedCount = computed(() => tx.excludedElements.value.length);
 
+/** Whether to show the section (has edits OR has selection) */
+const showSection = computed(() => tx.hasContent.value);
+
+/** Show selection-only chip when there's a selection that's not in edits */
+const showSelectionChip = computed(() => tx.hasSelection.value && !tx.isSelectionInEdits.value);
+
 /** Elements visible based on current view mode */
 const visibleElements = computed(() =>
   viewMode.value === 'exclude' ? tx.excludedElements.value : tx.applicableElements.value,
@@ -108,13 +155,53 @@ const visibleElements = computed(() =>
 /** Excluded keys as a Set for O(1) lookup */
 const excludedKeySet = computed(() => new Set(tx.excludedKeys.value));
 
+/** Selected element key for highlighting in edit chips */
+const selectedKey = computed(() => tx.selectedElement.value?.elementKey ?? null);
+
 // =============================================================================
 // Computed: UI Text
 // =============================================================================
 
+/** Header label - changes based on whether we have edits or just selection */
+const headerLabel = computed(() => {
+  if (hasElements.value) {
+    return 'Web Edits';
+  }
+  return 'Selected';
+});
+
+/**
+ * Extract tagName from selection for compact display.
+ */
+function getSelectionTagName(sel: typeof tx.selectedElement.value): string {
+  if (!sel) return '';
+  if (sel.tagName) return sel.tagName.toLowerCase();
+  const label = (sel.label || '').trim();
+  const match = label.match(/^([a-zA-Z][a-zA-Z0-9-]*)/);
+  return match?.[1]?.toLowerCase() || 'element';
+}
+
 const summaryText = computed(() => {
+  const sel = tx.selectedElement.value;
   const inc = includedCount.value;
   const exc = excludedCount.value;
+  const selTag = getSelectionTagName(sel);
+
+  // Selection-only mode
+  if (!hasElements.value && sel) {
+    return selTag;
+  }
+
+  // Edits mode with selection
+  if (sel && !tx.isSelectionInEdits.value) {
+    const parts = [`${selTag} selected`];
+    if (inc > 0 || exc > 0) {
+      parts.push(`${inc} edit${inc !== 1 ? 's' : ''}`);
+    }
+    return parts.join(' · ');
+  }
+
+  // Edits only
   if (exc > 0) {
     return `${inc} included · ${exc} excluded`;
   }
@@ -192,6 +279,10 @@ watch([includedCount, excludedCount], ([inc, exc]) => {
 
 function isExcluded(key: WebEditorElementKey): boolean {
   return excludedKeySet.value.has(key);
+}
+
+function isSelectedElement(key: WebEditorElementKey): boolean {
+  return selectedKey.value === key;
 }
 
 /**
@@ -374,6 +465,87 @@ async function handleHoverEnd(element: ElementChangeSummary): Promise<void> {
     // Silently ignore
   }
 }
+
+/**
+ * Handle hover start for selection-only chip.
+ */
+async function handleSelectionHoverStart(selected: SelectedElementSummary): Promise<void> {
+  try {
+    if (typeof chrome === 'undefined') return;
+
+    const tabId = tx.tabId.value;
+    if (!tabId) return;
+
+    const payload: WebEditorHighlightElementPayload = {
+      tabId,
+      elementKey: selected.elementKey,
+      locator: selected.locator,
+      mode: 'hover',
+    };
+
+    await chrome.runtime.sendMessage({
+      type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_HIGHLIGHT_ELEMENT,
+      payload,
+    });
+  } catch {
+    // Silently ignore
+  }
+}
+
+/**
+ * Handle hover end for selection-only chip.
+ */
+async function handleSelectionHoverEnd(selected: SelectedElementSummary): Promise<void> {
+  try {
+    if (typeof chrome === 'undefined') return;
+
+    const tabId = tx.tabId.value;
+    if (!tabId) return;
+
+    const payload: WebEditorHighlightElementPayload = {
+      tabId,
+      elementKey: selected.elementKey,
+      locator: selected.locator,
+      mode: 'clear',
+    };
+
+    await chrome.runtime.sendMessage({
+      type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_HIGHLIGHT_ELEMENT,
+      payload,
+    });
+  } catch {
+    // Silently ignore
+  }
+}
+
+// =============================================================================
+// Lifecycle - Global scroll/resize handlers (centralized for performance)
+// =============================================================================
+
+let scrollResizeRAF: number | null = null;
+
+function handleScrollOrResize(): void {
+  if (scrollResizeRAF !== null) {
+    cancelAnimationFrame(scrollResizeRAF);
+  }
+  scrollResizeRAF = requestAnimationFrame(() => {
+    scrollResizeTrigger.value++;
+    scrollResizeRAF = null;
+  });
+}
+
+onMounted(() => {
+  window.addEventListener('scroll', handleScrollOrResize, { passive: true, capture: true });
+  window.addEventListener('resize', handleScrollOrResize, { passive: true });
+});
+
+onUnmounted(() => {
+  window.removeEventListener('scroll', handleScrollOrResize, true);
+  window.removeEventListener('resize', handleScrollOrResize);
+  if (scrollResizeRAF !== null) {
+    cancelAnimationFrame(scrollResizeRAF);
+  }
+});
 </script>
 
 <style scoped>

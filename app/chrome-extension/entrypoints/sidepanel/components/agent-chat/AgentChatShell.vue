@@ -38,7 +38,7 @@
       <!-- Error Banner (above input) -->
       <div
         v-if="errorMessage"
-        class="mb-2 px-4 py-2 text-xs rounded-lg"
+        class="mb-2 px-4 py-2 text-xs rounded-lg flex items-start gap-2"
         :style="{
           backgroundColor: 'var(--ac-diff-del-bg)',
           color: 'var(--ac-danger)',
@@ -46,7 +46,35 @@
           borderRadius: 'var(--ac-radius-inner)',
         }"
       >
-        {{ errorMessage }}
+        <!-- Error message with scroll for long content -->
+        <div
+          class="min-w-0 flex-1 whitespace-pre-wrap break-all ac-scroll"
+          :style="{ maxHeight: '30vh', overflowY: 'auto', overflowWrap: 'anywhere' }"
+        >
+          {{ errorMessage }}
+        </div>
+
+        <!-- Dismiss button -->
+        <button
+          type="button"
+          class="p-1 flex-shrink-0 ac-btn ac-focus-ring"
+          :style="{
+            color: 'var(--ac-danger)',
+            borderRadius: 'var(--ac-radius-button)',
+          }"
+          aria-label="Dismiss error"
+          title="Dismiss"
+          @click="emit('error:dismiss')"
+        >
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+        </button>
       </div>
 
       <slot name="composer" />
@@ -70,7 +98,7 @@
           </span>
           <span class="opacity-50">·</span>
         </template>
-        <span>Claude Code Preview</span>
+        <span>{{ footerLabel || 'Agent Preview' }}</span>
       </div>
     </footer>
   </div>
@@ -83,6 +111,13 @@ import type { AgentUsageStats } from 'chrome-mcp-shared';
 defineProps<{
   errorMessage?: string | null;
   usage?: AgentUsageStats | null;
+  /** Footer label to display (e.g., "Claude Code Preview", "Codex Preview") */
+  footerLabel?: string;
+}>();
+
+const emit = defineEmits<{
+  /** Emitted when user clicks dismiss button on error banner */
+  'error:dismiss': [];
 }>();
 
 /**

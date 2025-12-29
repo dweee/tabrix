@@ -2,8 +2,19 @@
  * Composable for grouping messages into conversation threads.
  * Transforms flat AgentMessage[] into structured AgentThread[] for UI rendering.
  */
-import { computed, type Ref } from 'vue';
-import type { AgentMessage } from 'chrome-mcp-shared';
+import { computed, type InjectionKey, type Ref } from 'vue';
+import type {
+  AgentMessage,
+  AgentMessageAttachmentMetadata,
+  AttachmentMetadata,
+} from 'chrome-mcp-shared';
+import type { RequestState } from './useAgentChat';
+
+/**
+ * Injection key for agent server port.
+ * Provided by AgentChat.vue for child components to access attachment URLs.
+ */
+export const AGENT_SERVER_PORT_KEY: InjectionKey<Ref<number | null>> = Symbol('agentServerPort');
 
 /** Thread state */
 export type AgentThreadState =
@@ -56,6 +67,15 @@ export interface ToolPresentation {
 /** Timeline item types */
 export type TimelineItem =
   | {
+      kind: 'user_prompt';
+      id: string;
+      requestId?: string;
+      createdAt: string;
+      messageId: string;
+      text: string;
+      attachments: AttachmentMetadata[];
+    }
+  | {
       kind: 'assistant_text';
       id: string;
       requestId?: string;
@@ -91,6 +111,24 @@ export type TimelineItem =
       text?: string;
     };
 
+/** Client metadata for web editor apply messages */
+export interface WebEditorApplyMeta {
+  kind: 'web_editor_apply_batch' | 'web_editor_apply_single';
+  pageUrl?: string;
+  elementCount?: number;
+  elementLabels?: string[];
+}
+
+/** Thread header data for special message types */
+export interface ThreadHeader {
+  /** Display text (compact representation) */
+  displayText?: string;
+  /** Full prompt content for hover display */
+  fullContent: string;
+  /** Web editor apply metadata */
+  webEditorApply?: WebEditorApplyMeta;
+}
+
 /** A grouped conversation thread */
 export interface AgentThread {
   id: string;
@@ -99,12 +137,17 @@ export interface AgentThread {
   createdAt: string;
   state: AgentThreadState;
   items: TimelineItem[];
+  /** Attachments from the user prompt (for display in thread header) */
+  attachments: AttachmentMetadata[];
+  /** Thread header data for special message rendering */
+  header?: ThreadHeader;
 }
 
 /** Options for useAgentThreads */
 export interface UseAgentThreadsOptions {
   messages: Ref<AgentMessage[]>;
-  isStreaming: Ref<boolean>;
+  /** Request lifecycle state (replaces isStreaming for thread state calculation) */
+  requestState: Ref<RequestState>;
   currentRequestId: Ref<string | null>;
 }
 
@@ -399,11 +442,64 @@ function presentTool(msg: AgentMessage): ToolPresentation {
 }
 
 /**
+ * Type guard for AttachmentMetadata.
+ * Validates that an unknown value conforms to the AttachmentMetadata interface.
+ * Includes semantic validation (non-empty strings, valid numbers).
+ */
+function isAttachmentMetadata(value: unknown): value is AttachmentMetadata {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  const index = v.index;
+  const sizeBytes = v.sizeBytes;
+  return (
+    v.version === 1 &&
+    v.kind === 'image' &&
+    typeof v.projectId === 'string' &&
+    (v.projectId as string).trim().length > 0 &&
+    typeof v.messageId === 'string' &&
+    (v.messageId as string).trim().length > 0 &&
+    typeof index === 'number' &&
+    Number.isInteger(index) &&
+    index >= 0 &&
+    typeof v.filename === 'string' &&
+    (v.filename as string).trim().length > 0 &&
+    typeof v.urlPath === 'string' &&
+    (v.urlPath as string).trim().length > 0 &&
+    typeof v.mimeType === 'string' &&
+    (v.mimeType as string).trim().length > 0 &&
+    typeof sizeBytes === 'number' &&
+    Number.isFinite(sizeBytes) &&
+    sizeBytes >= 0 &&
+    typeof v.originalName === 'string' &&
+    (v.originalName as string).trim().length > 0 &&
+    typeof v.createdAt === 'string' &&
+    (v.createdAt as string).trim().length > 0
+  );
+}
+
+/**
+ * Extract validated attachments from a message's metadata.
+ * Returns sorted by index for consistent display order.
+ */
+function getMessageAttachments(msg: AgentMessage): AttachmentMetadata[] {
+  const meta = (msg.metadata ?? {}) as AgentMessageAttachmentMetadata;
+  const attachments = meta.attachments;
+  if (!Array.isArray(attachments)) return [];
+  return attachments.filter(isAttachmentMetadata).sort((a, b) => a.index - b.index);
+}
+
+/**
  * Map a message to a timeline item
  */
 function mapMessageToTimelineItem(msg: AgentMessage): TimelineItem | null {
   const createdAt = msg.createdAt;
   const requestId = msg.requestId?.trim() || undefined;
+
+  // User chat messages are displayed in thread header (title + attachments),
+  // so we don't create timeline items for them to avoid duplicate display.
+  if (msg.role === 'user' && msg.messageType === 'chat') {
+    return null;
+  }
 
   if (msg.role === 'assistant' && msg.messageType === 'chat') {
     return {
@@ -462,7 +558,7 @@ function mapMessageToTimelineItem(msg: AgentMessage): TimelineItem | null {
  */
 function buildThreads(
   messages: AgentMessage[],
-  isStreaming: boolean,
+  requestState: RequestState,
   currentRequestId: string | null,
 ): AgentThread[] {
   // Sort messages by createdAt
@@ -480,12 +576,15 @@ function buildThreads(
       firstAt: string;
       title?: string;
       items: TimelineItem[];
+      attachments: AttachmentMetadata[];
+      /** Thread header for special message types */
+      header?: ThreadHeader;
     }
   >();
 
   function ensureGroup(key: string, requestId: string | undefined, createdAt: string) {
     if (!groups.has(key)) {
-      groups.set(key, { key, requestId, firstAt: createdAt, items: [] });
+      groups.set(key, { key, requestId, firstAt: createdAt, items: [], attachments: [] });
     }
     return groups.get(key)!;
   }
@@ -506,9 +605,53 @@ function buildThreads(
 
     const group = ensureGroup(key, rid, msg.createdAt);
 
-    // Title: first user chat message in group wins
+    // Title, attachments, and header: first user chat message in group wins
     if (!group.title && msg.role === 'user' && msg.messageType === 'chat') {
-      group.title = msg.content.trim() || 'Untitled request';
+      const fullContent = msg.content.trim();
+      const attachments = getMessageAttachments(msg);
+      const meta = (msg.metadata ?? {}) as Record<string, unknown>;
+
+      // Extract client metadata for special message types (with runtime validation)
+      const rawClientMeta = meta.clientMeta;
+      const rawDisplayText = meta.displayText;
+
+      // Validate clientMeta structure
+      const clientMeta: WebEditorApplyMeta | undefined =
+        rawClientMeta &&
+        typeof rawClientMeta === 'object' &&
+        'kind' in rawClientMeta &&
+        typeof (rawClientMeta as Record<string, unknown>).kind === 'string' &&
+        ((rawClientMeta as Record<string, unknown>).kind === 'web_editor_apply_batch' ||
+          (rawClientMeta as Record<string, unknown>).kind === 'web_editor_apply_single')
+          ? (rawClientMeta as WebEditorApplyMeta)
+          : undefined;
+
+      const displayText = typeof rawDisplayText === 'string' ? rawDisplayText : undefined;
+
+      // Store attachments for thread header display
+      if (attachments.length > 0) {
+        group.attachments = attachments;
+      }
+
+      // Build thread header for special message types
+      if (clientMeta?.kind?.startsWith('web_editor_apply')) {
+        group.header = {
+          displayText: displayText || `Apply ${clientMeta.elementCount ?? 0} changes`,
+          fullContent,
+          webEditorApply: clientMeta,
+        };
+        // Use display text as title for web editor apply messages
+        group.title = displayText || `Apply ${clientMeta.elementCount ?? 0} changes`;
+      } else if (fullContent) {
+        group.title = fullContent;
+      } else {
+        // Image-only message - use attachment count as title
+        group.title =
+          attachments.length > 0
+            ? `Sent ${attachments.length} image${attachments.length === 1 ? '' : 's'}`
+            : 'Untitled request';
+      }
+
       group.firstAt = msg.createdAt;
     }
 
@@ -526,10 +669,15 @@ function buildThreads(
   for (const g of groups.values()) {
     const requestId = g.requestId;
 
-    // Determine thread state
+    // Determine thread state based on requestState (not isStreaming)
+    // This ensures the thread shows as running even during tool execution
+    const isActiveRequest =
+      requestState === 'starting' || requestState === 'ready' || requestState === 'running';
+
     let state: AgentThreadState = 'completed';
-    if (isStreaming && currentRequestId && requestId === currentRequestId) {
-      state = 'running';
+    if (isActiveRequest && currentRequestId && requestId === currentRequestId) {
+      // Map requestState to thread state
+      state = requestState === 'running' ? 'running' : 'starting';
     } else if (g.items.some((item) => item.kind === 'status')) {
       state = 'idle';
     }
@@ -537,16 +685,17 @@ function buildThreads(
     // Sort items by createdAt
     const items = [...g.items].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
-    // Add streaming status item if running
+    // Add status item for active requests
     // Use stable ID without Date.now() to prevent component remount on each render
-    if (state === 'running') {
+    if (state === 'running' || state === 'starting') {
+      const statusText = state === 'running' ? 'Working...' : 'Starting...';
       items.push({
         kind: 'status',
         id: `status:streaming:${requestId ?? 'current'}`,
         requestId,
         createdAt: new Date().toISOString(),
-        status: 'running',
-        text: 'Working...',
+        status: state,
+        text: statusText,
       });
     }
 
@@ -557,6 +706,8 @@ function buildThreads(
       createdAt: g.firstAt,
       state,
       items,
+      attachments: g.attachments,
+      header: g.header,
     });
   }
 
@@ -571,7 +722,7 @@ export function useAgentThreads(options: UseAgentThreadsOptions) {
   const threads = computed(() => {
     return buildThreads(
       options.messages.value,
-      options.isStreaming.value,
+      options.requestState.value,
       options.currentRequestId.value,
     );
   });

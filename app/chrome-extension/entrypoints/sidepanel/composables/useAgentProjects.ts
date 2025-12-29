@@ -6,7 +6,6 @@ import { ref, computed, watch } from 'vue';
 import type { AgentProject, AgentStoredMessage } from 'chrome-mcp-shared';
 
 const STORAGE_KEY_SELECTED_PROJECT = 'agent-selected-project-id';
-const STORAGE_KEY_PROJECT_ROOT_OVERRIDE = 'agent-project-root-override';
 
 interface PathValidationResult {
   valid: boolean;
@@ -44,7 +43,6 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
   const newProjectRootPath = ref('');
   const isCreatingProject = ref(false);
   const projectError = ref<string | null>(null);
-  const projectRootOverride = ref<string>('');
 
   // Computed
   const selectedProject = computed(() => {
@@ -78,29 +76,6 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
     }
   }
 
-  // Load project root override from storage
-  async function loadProjectRootOverride(): Promise<void> {
-    try {
-      const result = await chrome.storage.local.get(STORAGE_KEY_PROJECT_ROOT_OVERRIDE);
-      if (result[STORAGE_KEY_PROJECT_ROOT_OVERRIDE]) {
-        projectRootOverride.value = result[STORAGE_KEY_PROJECT_ROOT_OVERRIDE];
-      }
-    } catch (error) {
-      console.error('Failed to load project root override:', error);
-    }
-  }
-
-  // Save project root override to storage
-  async function saveProjectRootOverride(): Promise<void> {
-    try {
-      await chrome.storage.local.set({
-        [STORAGE_KEY_PROJECT_ROOT_OVERRIDE]: projectRootOverride.value,
-      });
-    } catch (error) {
-      console.error('Failed to save project root override:', error);
-    }
-  }
-
   // Fetch projects from server
   async function fetchProjects(): Promise<void> {
     const serverPort = options.getServerPort();
@@ -128,16 +103,35 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
     await fetchProjects();
   }
 
-  // Load chat history for a project
+  // Track pending history load with nonce to prevent A→B→A race conditions
+  let historyLoadNonce = 0;
+
+  /**
+   * Load chat history for a project with race-condition protection.
+   * Uses a nonce to handle A→B→A scenarios.
+   */
   async function loadChatHistory(projectId: string): Promise<void> {
     const serverPort = options.getServerPort();
     if (!serverPort || !projectId) return;
 
+    // Increment nonce - any subsequent load will invalidate this one
+    const myNonce = ++historyLoadNonce;
+
+    const isStillValid = (): boolean => {
+      return myNonce === historyLoadNonce && selectedProjectId.value === projectId;
+    };
+
     try {
       const url = `http://127.0.0.1:${serverPort}/agent/chat/${encodeURIComponent(projectId)}/messages?limit=100`;
       const response = await fetch(url);
+
+      if (!isStillValid()) return;
+
       if (response.ok) {
         const result = await response.json();
+
+        if (!isStillValid()) return;
+
         // Server returns { success, data: messages[], totalCount, pagination }
         const stored = result.data || [];
         options.onHistoryLoaded?.(stored);
@@ -502,11 +496,12 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
     }
   }
 
-  // Save project preference (CLI, model, useCcr)
+  // Save project preference (CLI, model, useCcr, enableChromeMcp)
   async function saveProjectPreference(
     cli?: string,
     model?: string,
     useCcr?: boolean,
+    enableChromeMcp?: boolean,
   ): Promise<void> {
     const project = selectedProject.value;
     const serverPort = options.getServerPort();
@@ -525,6 +520,7 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
           preferredCli: cli?.trim() ?? project.preferredCli,
           selectedModel: model?.trim() ?? project.selectedModel,
           useCcr: useCcr ?? project.useCcr,
+          enableChromeMcp: enableChromeMcp ?? project.enableChromeMcp,
         }),
       });
 
@@ -554,7 +550,6 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
     newProjectRootPath,
     isCreatingProject,
     projectError,
-    projectRootOverride,
 
     // Computed
     selectedProject,
@@ -563,8 +558,6 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
     // Methods
     loadSelectedProjectId,
     saveSelectedProjectId,
-    loadProjectRootOverride,
-    saveProjectRootOverride,
     fetchProjects,
     refreshProjects,
     loadChatHistory,

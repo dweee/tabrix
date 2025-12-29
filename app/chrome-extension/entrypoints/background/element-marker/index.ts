@@ -113,6 +113,18 @@ export function initElementMarkerListeners() {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     try {
       switch (message?.type) {
+        // Handle element marker start from popup
+        case BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_START: {
+          const tabId = message.tabId;
+          if (typeof tabId !== 'number') {
+            sendResponse({ success: false, error: 'invalid tabId' });
+            return true;
+          }
+          injectMarkerHelper(tabId)
+            .then(() => sendResponse({ success: true }))
+            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+          return true;
+        }
         case BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_LIST_ALL: {
           listAllMarkers()
             .then((markers) => sendResponse({ success: true, markers }))

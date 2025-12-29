@@ -4,7 +4,7 @@ This guide explains how to configure Codex CLI and Claude Code to connect to the
 
 ## Overview
 
-The Chrome MCP Server exposes its MCP interface at `http://127.0.0.1:56889/mcp` (default port).
+The Chrome MCP Server exposes its MCP interface at `http://127.0.0.1:12306/mcp` (default port).
 Both Codex CLI and Claude Code can connect to this endpoint to use Chrome browser control tools.
 
 ## Codex CLI Configuration
@@ -17,7 +17,7 @@ Add the following to your `~/.codex/config.json`:
 {
   "mcpServers": {
     "chrome-mcp": {
-      "url": "http://127.0.0.1:56889/mcp"
+      "url": "http://127.0.0.1:12306/mcp"
     }
   }
 }
@@ -28,7 +28,7 @@ Add the following to your `~/.codex/config.json`:
 Set the MCP URL via environment variable before running codex:
 
 ```bash
-export MCP_HTTP_PORT=56889
+export MCP_HTTP_PORT=12306
 ```
 
 ## Claude Code Configuration
@@ -41,7 +41,7 @@ Add the following to your `~/.claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "chrome-mcp": {
-      "url": "http://127.0.0.1:56889/mcp"
+      "url": "http://127.0.0.1:12306/mcp"
     }
   }
 }
@@ -79,8 +79,9 @@ After configuration, the CLI tools should be able to see and use Chrome MCP tool
 If you get "connection refused" errors:
 
 1. Ensure the Chrome extension is installed and the native server is running
-2. Check that the port matches (default: 56889)
+2. Check that the port matches (default: 12306)
 3. Verify no firewall is blocking localhost connections
+4. Run `mcp-chrome-bridge doctor` to diagnose issues
 
 ### Tools Not Appearing
 
@@ -92,14 +93,16 @@ If MCP tools don't appear in the CLI:
 
 ### Port Conflicts
 
-If port 56889 is already in use:
+If port 12306 is already in use:
 
 1. Set a custom port in the extension settings
 2. Update the CLI configuration to match the new port
+3. Run `mcp-chrome-bridge update-port <new-port>` to update the stdio config
 
 ## Environment Variables
 
 | Variable                     | Description                            | Default |
 | ---------------------------- | -------------------------------------- | ------- |
-| `MCP_HTTP_PORT`              | HTTP port for MCP server               | 56889   |
+| `MCP_HTTP_PORT`              | HTTP port for MCP server               | 12306   |
 | `MCP_ALLOWED_WORKSPACE_BASE` | Additional allowed workspace directory | (none)  |
+| `CHROME_MCP_NODE_PATH`       | Override Node.js executable path       | (auto)  |

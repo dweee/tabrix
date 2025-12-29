@@ -6,12 +6,19 @@
  * - Persist and recover state from chrome.storage.session
  * - Manage excluded element keys for selective Apply
  * - Provide reactive state for AgentChat chips UI
+ *
+ * Architecture:
+ * - The composable should be initialized ONCE at the AgentChat.vue level
+ * - It is then provided via Vue's provide/inject to child components
+ * - This prevents duplicate event listener registration
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, type InjectionKey } from 'vue';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import type {
   ElementChangeSummary,
+  SelectedElementSummary,
   WebEditorElementKey,
+  WebEditorSelectionChangedPayload,
   WebEditorTxChangedPayload,
   WebEditorTxChangeAction,
 } from '@/common/web-editor-types';
@@ -22,6 +29,7 @@ import type {
 
 const WEB_EDITOR_TX_CHANGED_SESSION_KEY_PREFIX = 'web-editor-v2-tx-changed-';
 const WEB_EDITOR_EXCLUDED_KEYS_SESSION_KEY_PREFIX = 'web-editor-v2-excluded-keys-';
+const WEB_EDITOR_SELECTION_SESSION_KEY_PREFIX = 'web-editor-v2-selection-';
 
 const VALID_TX_ACTIONS = new Set<WebEditorTxChangeAction>([
   'push',
@@ -46,6 +54,47 @@ function buildTxSessionKey(tabId: number): string {
 
 function buildExcludedKeysSessionKey(tabId: number): string {
   return `${WEB_EDITOR_EXCLUDED_KEYS_SESSION_KEY_PREFIX}${tabId}`;
+}
+
+function buildSelectionSessionKey(tabId: number): string {
+  return `${WEB_EDITOR_SELECTION_SESSION_KEY_PREFIX}${tabId}`;
+}
+
+/**
+ * Normalize and validate selection changed payload from storage or message.
+ * Returns null if the payload is invalid.
+ */
+function normalizeSelectionPayload(raw: unknown): WebEditorSelectionChangedPayload | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+
+  const tabId = Number(obj.tabId);
+  if (!Number.isFinite(tabId) || tabId <= 0) return null;
+
+  // Selected can be null (deselection) or an object
+  const selectedRaw = obj.selected;
+  let selected: SelectedElementSummary | null = null;
+
+  if (selectedRaw && typeof selectedRaw === 'object') {
+    const sel = selectedRaw as Record<string, unknown>;
+    const elementKey = typeof sel.elementKey === 'string' ? sel.elementKey.trim() : '';
+    if (!elementKey) return null; // Invalid selection
+
+    selected = {
+      elementKey,
+      locator: sel.locator as SelectedElementSummary['locator'],
+      label: typeof sel.label === 'string' ? sel.label : '',
+      fullLabel: typeof sel.fullLabel === 'string' ? sel.fullLabel : '',
+      tagName: typeof sel.tagName === 'string' ? sel.tagName : '',
+      updatedAt: typeof sel.updatedAt === 'number' ? sel.updatedAt : Date.now(),
+    };
+  }
+
+  return {
+    tabId,
+    selected,
+    pageUrl: typeof obj.pageUrl === 'string' ? obj.pageUrl : undefined,
+  };
 }
 
 /**
@@ -145,6 +194,20 @@ async function getActiveTabIdDefault(): Promise<number | null> {
   }
 }
 
+/**
+ * Get current window ID for filtering tab activation events.
+ * This prevents processing tab switches from other Chrome windows.
+ */
+async function getCurrentWindowId(): Promise<number | null> {
+  try {
+    if (typeof chrome === 'undefined' || !chrome.windows?.getCurrent) return null;
+    const win = await chrome.windows.getCurrent();
+    return typeof win?.id === 'number' ? win.id : null;
+  } catch {
+    return null;
+  }
+}
+
 // =============================================================================
 // Public API
 // =============================================================================
@@ -174,6 +237,12 @@ export function useWebEditorTxState(options: UseWebEditorTxStateOptions = {}) {
   /** Current TX state from web-editor */
   const txState = ref<WebEditorTxChangedPayload | null>(null);
 
+  /** Currently selected element (for context, may not have edits) */
+  const selectedElement = ref<SelectedElementSummary | null>(null);
+
+  /** Page URL from selection (may differ from txState.pageUrl if selection is newer) */
+  const selectionPageUrl = ref<string | null>(null);
+
   /** Excluded element keys (user-deselected elements) */
   const excludedKeys = ref<WebEditorElementKey[]>([]);
 
@@ -201,6 +270,24 @@ export function useWebEditorTxState(options: UseWebEditorTxStateOptions = {}) {
 
   /** Whether there are applicable changes to send to Agent */
   const hasChanges = computed<boolean>(() => applicableElements.value.length > 0);
+
+  /** Whether there is a selected element */
+  const hasSelection = computed<boolean>(() => selectedElement.value !== null);
+
+  /**
+   * Whether the selected element is also in the edits list.
+   * Used to decide if we need a separate "selection-only" chip.
+   */
+  const isSelectionInEdits = computed<boolean>(() => {
+    const sel = selectedElement.value;
+    if (!sel) return false;
+    return allElements.value.some((e) => e.elementKey === sel.elementKey);
+  });
+
+  /** Whether to show the web editor section (has edits OR has selection) */
+  const hasContent = computed<boolean>(
+    () => hasChanges.value || hasSelection.value || allElements.value.length > 0,
+  );
 
   // ==========================================================================
   // Actions
@@ -273,6 +360,8 @@ export function useWebEditorTxState(options: UseWebEditorTxStateOptions = {}) {
       tabId.value = null;
       txState.value = null;
       excludedKeys.value = [];
+      selectedElement.value = null;
+      selectionPageUrl.value = null;
       return;
     }
 
@@ -281,25 +370,31 @@ export function useWebEditorTxState(options: UseWebEditorTxStateOptions = {}) {
     if (isTabChange) {
       txState.value = null;
       excludedKeys.value = [];
+      selectedElement.value = null;
+      selectionPageUrl.value = null;
     }
     tabId.value = targetTabId;
 
     const seq = ++refreshSeq;
     const txKey = buildTxSessionKey(targetTabId);
     const excludedKey = buildExcludedKeysSessionKey(targetTabId);
+    const selectionKey = buildSelectionSessionKey(targetTabId);
 
     try {
       if (typeof chrome === 'undefined' || !chrome.storage?.session?.get) {
         txState.value = null;
         excludedKeys.value = [];
+        selectedElement.value = null;
+        selectionPageUrl.value = null;
         return;
       }
 
-      // Fetch both TX state and excluded keys in one call
-      const result = (await chrome.storage.session.get([txKey, excludedKey])) as Record<
-        string,
-        unknown
-      >;
+      // Fetch TX state, excluded keys, and selection in one call
+      const result = (await chrome.storage.session.get([
+        txKey,
+        excludedKey,
+        selectionKey,
+      ])) as Record<string, unknown>;
 
       // Check for stale async response
       if (seq !== refreshSeq) return;
@@ -311,6 +406,11 @@ export function useWebEditorTxState(options: UseWebEditorTxStateOptions = {}) {
       // Restore excluded keys from storage
       excludedKeys.value = normalizeExcludedKeys(result?.[excludedKey]);
 
+      // Restore selection from storage
+      const nextSelection = normalizeSelectionPayload(result?.[selectionKey]);
+      selectedElement.value = nextSelection?.selected ?? null;
+      selectionPageUrl.value = nextSelection?.pageUrl ?? null;
+
       // Prune stale excluded keys based on current elements
       pruneStaleExcludedKeys(nextTxState?.elements ?? null);
     } catch (error) {
@@ -318,6 +418,8 @@ export function useWebEditorTxState(options: UseWebEditorTxStateOptions = {}) {
       // On error, ensure clean state to prevent showing stale data
       txState.value = null;
       excludedKeys.value = [];
+      selectedElement.value = null;
+      selectionPageUrl.value = null;
     }
   }
 
@@ -337,19 +439,36 @@ export function useWebEditorTxState(options: UseWebEditorTxStateOptions = {}) {
       message && typeof message === 'object' ? (message as Record<string, unknown>) : null;
     if (!msg) return;
 
-    if (msg.type !== BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TX_CHANGED) return;
+    // Handle TX changed messages
+    if (msg.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TX_CHANGED) {
+      const next = normalizeTxChangedPayload(msg.payload);
+      if (!next) return;
 
-    const next = normalizeTxChangedPayload(msg.payload);
-    if (!next) return;
+      // Only process messages for the current tab
+      if (!isValidTabId(tabId.value)) return;
+      if (next.tabId !== tabId.value) return;
 
-    // Only process messages for the current tab
-    if (!isValidTabId(tabId.value)) return;
-    if (next.tabId !== tabId.value) return;
+      txState.value = next;
 
-    txState.value = next;
+      // Prune excluded keys that no longer exist (e.g., after undo/clear)
+      pruneStaleExcludedKeys(next.elements);
+      return;
+    }
 
-    // Prune excluded keys that no longer exist (e.g., after undo/clear)
-    pruneStaleExcludedKeys(next.elements);
+    // Handle selection changed messages
+    if (msg.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_SELECTION_CHANGED) {
+      const next = normalizeSelectionPayload(msg.payload);
+      if (!next) return;
+
+      // Only process messages for the current tab
+      if (!isValidTabId(tabId.value)) return;
+      if (next.tabId !== tabId.value) return;
+
+      selectedElement.value = next.selected;
+      // Store pageUrl from selection for context building
+      selectionPageUrl.value = next.pageUrl ?? null;
+      return;
+    }
   };
 
   /**
@@ -379,6 +498,37 @@ export function useWebEditorTxState(options: UseWebEditorTxStateOptions = {}) {
 
   /** Cleanup function for storage listener */
   let removeStorageListener: (() => void) | null = null;
+
+  /** Cleanup function for tab activated listener */
+  let removeTabActivatedListener: (() => void) | null = null;
+
+  /** Cached window ID to filter tab activation events from other windows */
+  let currentWindowId: number | null = null;
+
+  /**
+   * Handle tab activation events.
+   * Updates tabId and loads TX state when user switches to a different tab.
+   *
+   * Note: currentWindowId filtering is best-effort. If getCurrentWindowId() fails,
+   * events from all windows will be processed (acceptable fallback behavior).
+   */
+  const onTabActivated = (activeInfo: chrome.tabs.TabActiveInfo): void => {
+    try {
+      // Ignore events from other windows (best-effort filter)
+      if (currentWindowId !== null && activeInfo.windowId !== currentWindowId) return;
+
+      const nextTabId = activeInfo.tabId;
+      if (!isValidTabId(nextTabId)) return;
+
+      // Skip if already tracking this tab
+      if (nextTabId === tabId.value) return;
+
+      // Load TX state for the newly activated tab
+      void refreshFromStorage(nextTabId);
+    } catch (error) {
+      console.error('[useWebEditorTxState] Failed to handle tab activation:', error);
+    }
+  };
 
   // ==========================================================================
   // Lifecycle
@@ -425,6 +575,23 @@ export function useWebEditorTxState(options: UseWebEditorTxStateOptions = {}) {
       console.error('Failed to register WebEditor TX storage listener:', error);
     }
 
+    // Cache current window ID for filtering tab activation events
+    currentWindowId = await getCurrentWindowId();
+
+    // Register tab activation listener to track tab switches
+    try {
+      if (typeof chrome !== 'undefined' && chrome.tabs?.onActivated?.addListener) {
+        chrome.tabs.onActivated.addListener(onTabActivated);
+        removeTabActivatedListener = () => {
+          try {
+            chrome.tabs.onActivated.removeListener(onTabActivated);
+          } catch {}
+        };
+      }
+    } catch (error) {
+      console.error('[useWebEditorTxState] Failed to register tab activation listener:', error);
+    }
+
     // Initialize tab ID if not provided
     const getActiveTabId = options.getActiveTabId ?? getActiveTabIdDefault;
 
@@ -452,6 +619,10 @@ export function useWebEditorTxState(options: UseWebEditorTxStateOptions = {}) {
     // Clean up storage listener
     removeStorageListener?.();
     removeStorageListener = null;
+
+    // Clean up tab activation listener
+    removeTabActivatedListener?.();
+    removeTabActivatedListener = null;
   });
 
   // ==========================================================================
@@ -463,10 +634,15 @@ export function useWebEditorTxState(options: UseWebEditorTxStateOptions = {}) {
     tabId,
     txState,
     excludedKeys,
+    selectedElement,
+    selectionPageUrl,
 
     // UI State (computed)
     allElements,
     hasChanges,
+    hasSelection,
+    isSelectionInEdits,
+    hasContent,
     applicableElements,
     excludedElements,
 
@@ -476,3 +652,28 @@ export function useWebEditorTxState(options: UseWebEditorTxStateOptions = {}) {
     refreshFromStorage,
   };
 }
+
+// =============================================================================
+// Type Exports & Injection Key
+// =============================================================================
+
+/**
+ * Return type of useWebEditorTxState composable.
+ * Used for type-safe provide/inject.
+ */
+export type WebEditorTxStateReturn = ReturnType<typeof useWebEditorTxState>;
+
+/**
+ * Injection key for providing WebEditorTxState to child components.
+ * Use this with Vue's provide/inject pattern to avoid duplicate listener registration.
+ *
+ * @example
+ * // In AgentChat.vue (parent)
+ * const webEditorTx = useWebEditorTxState();
+ * provide(WEB_EDITOR_TX_STATE_INJECTION_KEY, webEditorTx);
+ *
+ * // In WebEditorChanges.vue (child)
+ * const tx = inject(WEB_EDITOR_TX_STATE_INJECTION_KEY);
+ */
+export const WEB_EDITOR_TX_STATE_INJECTION_KEY: InjectionKey<WebEditorTxStateReturn> =
+  Symbol('web-editor-tx-state');

@@ -198,4 +198,389 @@ Phase 0 ──→ Phase 1 ──→ Phase 2
 
 ---
 
-_最后更新: 2025-12_
+## 实施进度记录
+
+### Phase 0 ✅ 已完成
+
+| ID    | 状态 | 完成时间   | 备注                     |
+| ----- | ---- | ---------- | ------------------------ |
+| P0-01 | ✅   | 2025-12-27 | 目录骨架创建完成         |
+| P0-02 | ✅   | 2025-12-27 | domain 类型全部实现      |
+| P0-03 | ✅   | 2025-12-27 | engine 接口空实现        |
+| P0-04 | ✅   | 2025-12-27 | transport/keepalive 接口 |
+| P0-05 | ✅   | 2025-12-27 | storage 接口空实现       |
+| P0-06 | ✅   | 2025-12-27 | Offscreen keepalive 占位 |
+| P0-07 | ✅   | 2025-12-27 | 26 个 smoke 测试通过     |
+| P0-08 | ✅   | 2025-12-27 | V2 功能未受影响          |
+
+### Phase 1 🔄 进行中
+
+| ID    | 状态 | 完成时间   | 备注                                          |
+| ----- | ---- | ---------- | --------------------------------------------- |
+| P1-01 | ✅   | 2025-12-27 | IndexedDB schema 含 Phase 3 索引              |
+| P1-02 | ✅   | 2025-12-27 | FlowsStore CRUD 实现                          |
+| P1-03 | ✅   | 2025-12-27 | RunsStore 实现                                |
+| P1-04 | ✅   | 2025-12-27 | EventsStore 原子 seq 分配实现                 |
+| P1-05 | ✅   | 2025-12-27 | PersistentVarsStore 实现                      |
+| P1-06 | ✅   | 2025-12-27 | RunQueue 基础实现                             |
+| P1-07 | ✅   | 2025-12-27 | PluginRegistry 实现                           |
+| P1-08 | ✅   | 2025-12-27 | DAG 校验 + traversal 实现                     |
+| P1-09 | ✅   | 2025-12-27 | StorageBackedEventsBus 实现                   |
+| P1-10 | ✅   | 2025-12-27 | StorageBackedRunRunner 核心执行循环实现       |
+| P1-11 | ✅   | 2025-12-27 | onError 策略完整实现 + 8个契约测试            |
+| P1-12 | ✅   | 2025-12-27 | createChromeArtifactService 实现              |
+| P1-13 | ✅   | 2025-12-27 | 契约测试完成 (Events 13个 + onError 8个)      |
+| P1-14 | ✅   | 2025-12-27 | RpcServer 实现 (listRuns/getEvents/subscribe) |
+
+**当前测试状态**: 47 个测试全部通过
+
+**关键实现**:
+
+- `EventsStore.append()` 原子 seq 分配（单事务 runs+events）
+- `StorageBackedEventsBus` 广播在 commit 后发生
+- `StorageBackedRunRunner` 核心执行循环
+  - DAG 遍历执行
+  - 状态持久化 (RunRecordV3)
+  - pause/resume/cancel
+  - 断点支持 (BreakpointManager)
+  - SerialQueue 保证事件顺序
+  - onError: stop/continue/goto/retry
+- `createChromeArtifactService` - 基于 chrome.tabs.captureVisibleTab
+- `RpcServer` - Port RPC 服务端
+  - listRuns/getRun/getEvents/getFlow/listFlows
+  - subscribe/unsubscribe 事件订阅
+
+### Phase 2 ✅ 已完成
+
+| ID    | 状态 | 完成时间   | 备注                                                    |
+| ----- | ---- | ---------- | ------------------------------------------------------- |
+| P2-01 | ✅   | 2025-12-27 | BreakpointManager 已在 Phase 1 实现                     |
+| P2-02 | ✅   | 2025-12-27 | pause/resume/stepOver 通过 DebugController              |
+| P2-03 | ✅   | 2025-12-27 | DebugController 命令路由完成                            |
+| P2-04 | ✅   | 2025-12-27 | 变量查看/修改（getVar/setVar + 事件回放兜底）           |
+| P2-05 | ✅   | 2025-12-27 | RpcServer 集成 DebugController                          |
+| P2-06 | ✅   | 2025-12-27 | Debug UI MVP 完成                                       |
+| P2-07 | ✅   | 2025-12-27 | 9 个 Debugger 契约测试通过                              |
+| P2-08 | ✅   | 2025-12-27 | 手工验收清单完成 (docs/rr-v3-debugger-mvp-checklist.md) |
+
+**当前测试状态**: 56 个测试全部通过
+
+**Phase 2 关键实现**:
+
+- `DebugController` - 调试器控制面单一入口
+  - attach/detach 连接管理
+  - pause/resume/stepOver 执行控制
+  - setBreakpoints/add/remove 断点管理
+  - getVar/setVar 变量操作（支持事件回放兜底）
+  - getState 状态查询
+  - subscribe 状态订阅
+- `RunnerRegistry` - 活跃 Runner 管理
+- `RpcServer` 集成 - `rr_v3.debug` 方法路由到 DebugController
+- **UI Composables (2025-12-27 新增)**:
+  - `useRRV3Rpc` - Port-RPC 客户端
+    - chrome.runtime.Port 连接管理
+    - request/response RPC (超时/取消)
+    - 事件流订阅
+    - 自动重连 + 订阅恢复
+  - `useRRV3Debugger` - 调试器状态管理
+    - DebuggerCommand 封装
+    - DebuggerState 响应式维护
+    - autoRefreshOnEvents 自动刷新
+- **DebuggerPanel.vue** - Debug UI MVP
+  - 连接状态显示 + 重连按钮
+  - DebuggerState 实时显示
+  - 调试控制按钮 (Attach/Detach/Pause/Resume/StepOver)
+  - 断点列表展示
+  - 自动订阅/取消订阅事件流
+- **手工验收清单** - `docs/rr-v3-debugger-mvp-checklist.md`
+  - 9 大测试类别，30+ 测试用例
+  - Port-RPC 控制台辅助脚本
+  - 覆盖: Transport, UI, Attach/Detach, Pause/Resume, StepOver, Breakpoints, Variables, Reconnect, Edge Cases
+
+### Phase 3 ✅ 已完成
+
+| ID    | 状态 | 完成时间   | 备注                                 |
+| ----- | ---- | ---------- | ------------------------------------ |
+| P3-01 | ✅   | 2025-12-27 | Queue 存储模型已在 Phase 1 预先完成  |
+| P3-02 | ✅   | 2025-12-27 | claimNext 原子领取 + 23个契约测试    |
+| P3-03 | ✅   | 2025-12-27 | 租约续约与回收 + 10个契约测试        |
+| P3-04 | ✅   | 2025-12-27 | maxParallelRuns 调度器 + 9个单元测试 |
+| P3-05 | ✅   | 2025-12-27 | Offscreen keepalive 接入             |
+| P3-06 | ✅   | 2025-12-28 | 崩溃恢复 + 13个单元测试              |
+| P3-07 | ✅   | 2025-12-28 | 并行调度集成测试 + 13个集成测试      |
+| P3-08 | ✅   | 2025-12-27 | V3 run API + 16个单元测试            |
+
+**当前测试状态**: 140 个测试全部通过
+
+**P3-02 关键实现**:
+
+- `claimNext()` 原子领取实现
+  - 两步游标方案：step1 (prev) 找最高优先级，step2 (next) 找 FIFO
+  - 同一 readwrite 事务保证原子性（IndexedDB 串行化）
+  - IDBKeyRange.bound 使用 ±MAX_VALUE 覆盖完整数值范围
+  - 输入校验：ownerId 必填，now 必须有限
+- 23 个契约测试覆盖
+  - Basic CRUD (5 tests)
+  - Atomic claimNext (11 tests): 空队列、优先级排序、FIFO、原子更新、持久化、并发唯一性
+  - Status transitions (6 tests)
+  - Priority edge cases (2 tests): 负数、MAX_SAFE_INTEGER
+
+**P3-03 关键实现**:
+
+- `heartbeat()` 租约续约
+  - 续约 running + paused 状态（paused 也需要，避免调试时被 TTL 回收）
+  - 使用 status 索引 + cursor 迭代
+  - 只续约 ownerId 匹配的项
+- `reclaimExpiredLeases()` 过期回收
+  - 使用 lease_expiresAt 索引高效扫描
+  - IDBKeyRange.upperBound(now, true) 实现 strictly < now
+  - 过期的 running/paused → queued，清除 lease
+  - 保留 attempt 计数（不清零）
+- `LeaseManager` 更新：委托给 queue.reclaimExpiredLeases()
+- 10 个契约测试覆盖
+  - Heartbeat (4 tests): 续约、无项、无效输入
+  - Reclamation (6 tests): 过期回收、边界条件、多项回收、闭环验证
+
+**P3-04 关键实现**:
+
+- `createRunScheduler()` 调度器工厂
+  - kick + polling 混合策略（低延迟 + 兜底）
+  - 内存中 activeRunIds Set 跟踪并行执行
+  - re-entrancy 控制（pendingKick + pumpPromise）
+  - 周期性 reclaimExpiredLeases 回收过期租约
+  - 依赖注入支持测试（queue, leaseManager, execute）
+  - stop 安全保护（防止 stop 后继续 claim）
+- 9 个单元测试覆盖
+  - maxParallelRuns enforcement (3 tests)
+  - Lease reclamation interval (2 tests)
+  - Error handling (2 tests)
+  - State inspection (2 tests)
+
+**P3-08 关键实现**:
+
+- `rr_v3.enqueueRun` API
+  - 参数校验：flowId 必填，priority/maxAttempts 有限数值校验
+  - 创建 RunRecordV3 并持久化
+  - 入队到 RunQueue
+  - 通过 EventsBus 发布 run.queued 事件（确保 UI 广播）
+  - 触发 scheduler.kick() 启动调度
+  - 返回 { runId, position }（position 按调度顺序计算）
+- `rr_v3.listQueue` API
+  - 可选 status 过滤（白名单校验：queued/running/paused）
+  - 按 priority DESC + createdAt ASC 排序
+- `rr_v3.cancelQueueItem` API
+  - 仅允许取消 queued 状态（running/paused 需用 cancelRun）
+  - 从队列移除 + 更新 Run 状态为 canceled
+  - 通过 EventsBus 发布 run.canceled 事件
+- 16 个单元测试覆盖
+  - enqueueRun (8 tests): 完整流程、参数校验、NaN/Infinity 拒绝、maxAttempts >= 1
+  - listQueue (3 tests): 排序、过滤、无效 status 拒绝
+  - cancelQueueItem (5 tests): 完整流程、状态限制、reason 传递
+
+**P3-05 关键实现**:
+
+- 架构设计（解决 MV3 SW 30s 空闲终止问题）
+  - **Offscreen 主动连接**：Offscreen Document 使用 `chrome.runtime.connect()` 连接到 Background
+  - **Offscreen 发起心跳**：Offscreen 定时发送 `keepalive.ping`，Background 响应 `pong`
+  - **Background 控制**：通过 `keepalive.start/stop` 命令控制 Offscreen 的心跳循环
+- 协议常量下沉到 `common/rr-v3-keepalive-protocol.ts`，避免层级倒挂
+- `OffscreenKeepaliveController` 实现
+  - 引用计数机制（acquire/release）
+  - 第一次 acquire 时创建 Offscreen 并注册连接监听
+  - syncPromise 串行化避免竞态
+  - 不主动关闭 Offscreen（避免影响其他模块如语义相似度引擎）
+- Scheduler 集成：`start()` 时 acquire，`stop()` 时 release
+
+**P3-06 关键实现**:
+
+- `run.recovered` 事件类型
+  - `reason`: `sw_restart` | `lease_expired`
+  - `fromStatus`: 恢复前状态 (`running` | `paused`)
+  - `toStatus`: 恢复后状态 (`queued`)
+  - `prevOwnerId`: 原 ownerId（用于审计）
+- `recoverOrphanLeases(ownerId, now)` 队列方法
+  - 扫描所有 running/paused 项
+  - 孤儿判定：无 lease 或 `lease.ownerId !== currentOwnerId`
+  - 孤儿 running：回收为 queued，清除 lease，保留 attempt
+  - 孤儿 paused：接管 lease（更新 ownerId + 续约 TTL），保持 paused 状态
+  - 单一 readwrite 事务，原子性保证
+- `RecoveryCoordinator` 恢复协调器
+  - Step 1: 预清理（清除已终态或无 RunRecord 的队列项）
+  - Step 2: `recoverOrphanLeases()` 回收/接管孤儿租约（best-effort）
+  - Step 3: 同步 requeued running 的 RunRecord + 发送 `run.recovered` 事件
+  - Step 4: 同步 adopted paused 的 RunRecord
+  - 全程 best-effort，不阻止 SW 启动
+- `RecoveryEnabledKernel` 支持恢复的 Kernel 实现
+  - `recover()` 委托给 RecoveryCoordinator
+  - `getRunStatus()` 查询 RunRecord
+- 13 个单元测试覆盖
+  - Queue-level (6 tests): requeue/adopt、ownerId 匹配跳过、无 lease、attempt 保留、参数校验
+  - Coordinator-level (7 tests): requeue 发事件、adopt 不发事件、清理终态、清理无 RunRecord、混合场景、参数校验
+
+**P3-07 关键实现**:
+
+- 端到端调度测试 (4 tests)
+  - scheduler claims from real queue, executes, and marks done
+  - respects maxParallelRuns with real queue
+  - maintains FIFO within same priority
+  - higher priority runs first
+- 租约管理测试 (2 tests)
+  - heartbeat keeps leases alive during long runs
+  - expired leases are reclaimed by periodic scan
+- 崩溃恢复模拟 (5 tests)
+  - recovers orphan running items after restart
+  - adopts orphan paused items after restart
+  - preserves attempt count across recovery
+  - cleans terminal runs left in queue due to crash
+  - recovery then scheduler works correctly
+- 并发测试 (2 tests)
+  - handles multiple concurrent enqueue/claim cycles
+  - no double execution under concurrent kicks
+
+---
+
+## 里程碑状态
+
+| 里程碑            | 状态 | 完成标志                                          |
+| ----------------- | ---- | ------------------------------------------------- |
+| M1: 类型系统就绪  | ✅   | V3 类型编译通过，现有测试不破坏                   |
+| M2: 单 Run 可执行 | ✅   | 能执行简单 flow，事件落库                         |
+| M3: 可调试        | ✅   | 断点、单步、变量查看可用                          |
+| M4: 多 Run 并行   | ✅   | maxParallelRuns 生效，崩溃可恢复                  |
+| M5: 触发器完整    | 🔄   | 5 种触发器可用（已完成 4 种，DOM trigger 待完成） |
+| M6: 录制 V3       | ⏳   | TS 录制器，录制→保存→回放全链路                   |
+| **M7: UI 集成**   | 🔄   | WorkflowsView V3 ✅，Builder V3 重构待开始        |
+
+---
+
+## Phase 4 🔄 进行中
+
+| ID    | 状态 | 完成时间   | 备注                         |
+| ----- | ---- | ---------- | ---------------------------- |
+| P4-01 | ✅   | 2025-12-28 | TriggerStore CRUD + 契约测试 |
+| P4-02 | ✅   | 2025-12-28 | TriggerManager 完整实现      |
+| P4-03 | ✅   | 2025-12-28 | URL trigger                  |
+| P4-04 | ✅   | 2025-12-28 | Command trigger              |
+| P4-05 | ✅   | 2025-12-28 | ContextMenu trigger          |
+| P4-06 | ⏳   | -          | DOM trigger                  |
+| P4-07 | ✅   | 2025-12-28 | Cron trigger                 |
+| P4-08 | ⏳   | -          | 防抖/防风暴                  |
+| P4-09 | ✅   | 2025-12-28 | 触发器管理 RPC API           |
+| P4-10 | ⏳   | -          | Trigger tests                |
+
+**当前测试状态**: 599 个测试全部通过
+
+---
+
+## UI 集成进度 (2025-12-29)
+
+### 已完成
+
+| 任务                                | 状态 | 完成时间   | 备注                                                          |
+| ----------------------------------- | ---- | ---------- | ------------------------------------------------------------- |
+| Flow CRUD RPC APIs                  | ✅   | 2025-12-28 | rr_v3.saveFlow/getFlow/listFlows/deleteFlow                   |
+| V3 Workflows UI (useWorkflowsV3)    | ✅   | 2025-12-29 | Sidepanel WorkflowsView 使用 V3 数据源                        |
+| WorkflowsView V3 run status display | ✅   | 2025-12-29 | 支持 queued/running/paused/succeeded/failed/canceled 状态显示 |
+
+### 待确认问题 ⚠️
+
+在继续 Builder 重构之前，需要产品决策：
+
+**问题 1: V3 Builder 节点支持范围**
+
+V3 运行时目前**不支持**以下节点（handler 未实现或被排除）：
+
+- `foreach` - 循环迭代
+- `while` - 条件循环
+- `loopElements` - 循环元素
+- `executeFlow` - 调用子流程
+- `triggerEvent` - 触发 DOM 事件
+- `setAttribute` - 设置元素属性
+
+**选项**：
+
+- A) 从 Builder palette 移除这些节点（用户无法创建，避免生成不可运行的 Flow）
+- B) 保留但置灰/禁用，给出明确提示"V3 暂不支持"
+- C) 优先实现这些节点的 V3 handler（需要额外开发工作）
+
+**问题 2: 触发器/定时器 UI 位置**
+
+当前 V2 Builder 的触发器是放在画布的 "trigger 节点" 里，但 V3 触发器模型是独立的 `TriggerSpec`。
+
+**选项**：
+
+- A) 继续放在画布的 "trigger 节点" 里，保存时同步到 V3 TriggerSpec
+- B) 升级成 Builder 顶栏/独立面板，更符合 V3 触发器模型（更清晰但改动更大）
+
+---
+
+### 后续待办
+
+#### 🔴 高优先级（Builder V3 重构）
+
+1. **删除不需要的 V2 兼容代码**
+   - 删除 `storage/import/` 目录（v2-to-v3.ts, v2-reader.ts）
+   - 用户确认不需要旧数据迁移
+
+2. **Builder 数据层重构**
+   - 复用 `useRRV3Rpc` 上移到共享目录
+   - 替换 V2 消息通路 (`RR_GET_FLOW/RR_SAVE_FLOW`) → V3 RPC (`rr_v3.getFlow/saveFlow`)
+   - `useBuilderStore` 使用 V3 类型 (FlowV3, NodeV3)
+
+3. **Builder 保存/加载 V3 Flow**
+   - 保存时：计算 `entryNodeId`（排除 trigger 类型节点，找入度为 0 的可执行节点）
+   - 字段映射：`type` → `kind`
+
+4. **Builder palette 对齐 V3 能力**
+   - 根据产品决策处理不支持的节点类型
+   - 修复 Sidebar Flow 分类 bug（当前 Flow 区块永远为空）
+
+5. **Builder UX 改进**
+   - 修复自动保存状态机（dirty/saving/saved/error），所有保存 await 并处理失败
+   - 打通 Sidepanel 编辑入口（去掉 alert 占位符）
+
+6. **扩展 enqueueRun 支持 startNodeId**
+   - 当前 `rr_v3.enqueueRun` 不支持 `startNodeId` 入参
+   - 需要扩展 RPC 以支持"从选中节点运行"功能
+
+#### 🟡 中优先级（Trigger UI）
+
+7. **Sidepanel Trigger UI 连接 V3 RPC**
+   - 替换 alert 占位符
+   - 调用 `rr_v3.createTrigger/updateTrigger/deleteTrigger`
+
+#### 🟢 低优先级（清理）
+
+8. **删除 V2 相关代码**（在确认 V3 Builder 稳定后）
+   - `BACKGROUND_MESSAGE_TYPES.RR_*` 消息类型
+   - `entrypoints/background/record-replay/flow-store.ts` 相关
+   - 注意：这一步影响面大，需要谨慎评估
+
+---
+
+### 技术分析备忘
+
+#### V2 和 V3 Flow 结构差异
+
+| 字段         | V2 Flow                     | V3 FlowV3                    |
+| ------------ | --------------------------- | ---------------------------- |
+| 节点类型字段 | `type: NodeType`            | `kind: NodeKind`             |
+| 入口节点     | 无（根据入度推断）          | `entryNodeId: NodeId` (必填) |
+| 时间戳       | `meta?.createdAt/updatedAt` | `createdAt/updatedAt` (顶级) |
+| 绑定         | `meta.bindings[].type`      | `meta.bindings[].kind`       |
+| 版本         | `version: number`           | `schemaVersion: 3`           |
+
+**关键发现**: `node.config` 格式完全兼容！V3 ActionAdapter 直接将 `node.config` 作为 V2 Handler 的 `action.params` 传递。
+
+#### Builder 当前依赖的 V2 消息类型
+
+- `RR_GET_FLOW` → `rr_v3.getFlow`
+- `RR_SAVE_FLOW` → `rr_v3.saveFlow`
+- `RR_LIST_FLOWS` → `rr_v3.listFlows`
+- `RR_RUN_FLOW` → `rr_v3.enqueueRun`
+- `RR_EXPORT_FLOW` → 直接导出 FlowV3 JSON
+- `RR_LIST_TRIGGERS` → `rr_v3.listTriggers`
+
+---
+
+_最后更新: 2025-12-29_

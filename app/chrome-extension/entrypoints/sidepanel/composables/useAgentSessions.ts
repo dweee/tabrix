@@ -25,8 +25,10 @@ export interface UseAgentSessionsOptions {
 export function useAgentSessions(options: UseAgentSessionsOptions) {
   // State
   const sessions = ref<AgentSession[]>([]);
+  const allSessions = ref<AgentSession[]>([]); // All sessions across all projects
   const selectedSessionId = ref<string>('');
   const isLoadingSessions = ref(false);
+  const isLoadingAllSessions = ref(false);
   const isCreatingSession = ref(false);
   const sessionError = ref<string | null>(null);
 
@@ -60,10 +62,23 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     }
   }
 
-  // Fetch sessions for a project
+  // Track pending session fetch with nonce to prevent A→B→A race conditions
+  let fetchSessionsNonce = 0;
+
+  /**
+   * Fetch sessions for a project with race-condition protection.
+   * Uses a nonce to handle A→B→A scenarios.
+   */
   async function fetchSessions(projectId: string): Promise<void> {
     const serverPort = options.getServerPort();
     if (!serverPort || !projectId) return;
+
+    // Increment nonce - any subsequent fetch will invalidate this one
+    const myNonce = ++fetchSessionsNonce;
+
+    const isStillValid = (): boolean => {
+      return myNonce === fetchSessionsNonce;
+    };
 
     isLoadingSessions.value = true;
     sessionError.value = null;
@@ -71,8 +86,14 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     try {
       const url = `http://127.0.0.1:${serverPort}/agent/projects/${encodeURIComponent(projectId)}/sessions`;
       const response = await fetch(url);
+
+      if (!isStillValid()) return;
+
       if (response.ok) {
         const data = await response.json();
+
+        if (!isStillValid()) return;
+
         sessions.value = data.sessions || [];
 
         // If we have sessions but no selection, select the most recent one
@@ -92,7 +113,58 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     }
   }
 
-  // Create a new session
+  // Track pending all sessions fetch with nonce
+  let fetchAllSessionsNonce = 0;
+
+  /**
+   * Fetch all sessions across all projects.
+   * Used for the global sessions list view.
+   */
+  async function fetchAllSessions(): Promise<void> {
+    const serverPort = options.getServerPort();
+    if (!serverPort) return;
+
+    const myNonce = ++fetchAllSessionsNonce;
+
+    const isStillValid = (): boolean => {
+      return myNonce === fetchAllSessionsNonce;
+    };
+
+    isLoadingAllSessions.value = true;
+    sessionError.value = null;
+
+    try {
+      const url = `http://127.0.0.1:${serverPort}/agent/sessions`;
+      const response = await fetch(url);
+
+      if (!isStillValid()) return;
+
+      if (response.ok) {
+        const data = await response.json();
+
+        if (!isStillValid()) return;
+
+        allSessions.value = data.sessions || [];
+      } else {
+        const text = await response.text().catch(() => '');
+        sessionError.value = text || `HTTP ${response.status}`;
+      }
+    } catch (error) {
+      console.error('Failed to fetch all sessions:', error);
+      sessionError.value = error instanceof Error ? error.message : 'Failed to fetch sessions';
+    } finally {
+      isLoadingAllSessions.value = false;
+    }
+  }
+
+  // Track pending create session with nonce to prevent cross-project pollution
+  let createSessionNonce = 0;
+
+  /**
+   * Create a new session with race-condition protection.
+   * Uses a nonce to prevent cross-project state pollution when user switches
+   * projects during session creation.
+   */
   async function createSession(
     projectId: string,
     input: CreateAgentSessionInput,
@@ -103,6 +175,9 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
       sessionError.value = 'Server not available';
       return null;
     }
+
+    // Increment nonce - any subsequent create will invalidate this one
+    const myNonce = ++createSessionNonce;
 
     isCreatingSession.value = true;
     sessionError.value = null;
@@ -115,17 +190,31 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
         body: JSON.stringify(input),
       });
 
+      // Guard: check if this is still the expected create operation
+      if (myNonce !== createSessionNonce) {
+        // A newer create was initiated - discard this result
+        return null;
+      }
+
       if (!response.ok) {
         const text = await response.text().catch(() => '');
         throw new Error(text || `HTTP ${response.status}`);
       }
 
       const data = await response.json();
+
+      // Re-check after json parsing
+      if (myNonce !== createSessionNonce) {
+        return null;
+      }
+
       const session = data.session as AgentSession | undefined;
 
       if (session?.id) {
         // Add to local list and select it
         sessions.value = [session, ...sessions.value];
+        // Also add to allSessions (at front, as it's the newest)
+        allSessions.value = [session, ...allSessions.value.filter((s) => s.id !== session.id)];
         selectedSessionId.value = session.id;
         await saveSelectedSessionId();
         options.onSessionChanged?.(session.id);
@@ -135,6 +224,10 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
       sessionError.value = 'Session created but response is invalid';
       return null;
     } catch (error) {
+      // Guard: only handle error if still valid
+      if (myNonce !== createSessionNonce) {
+        return null;
+      }
       console.error('Failed to create session:', error);
       sessionError.value = error instanceof Error ? error.message : 'Failed to create session';
       return null;
@@ -192,6 +285,11 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
         if (index !== -1) {
           sessions.value[index] = session;
         }
+        // Also update allSessions (in-place to preserve order)
+        const allIndex = allSessions.value.findIndex((s) => s.id === session.id);
+        if (allIndex !== -1) {
+          allSessions.value[allIndex] = session;
+        }
         return session;
       }
 
@@ -215,6 +313,8 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
       if (response.ok || response.status === 204) {
         // Remove from local list
         sessions.value = sessions.value.filter((s) => s.id !== sessionId);
+        // Also remove from allSessions
+        allSessions.value = allSessions.value.filter((s) => s.id !== sessionId);
 
         // If deleted session was selected, select another one
         if (selectedSessionId.value === sessionId) {
@@ -360,26 +460,48 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
   /**
    * Update session preview locally (without server call).
    * Used when sending the first message to update the display immediately.
+   * @param sessionId - The session to update
+   * @param preview - The preview text (user's raw input)
+   * @param previewMeta - Optional structured metadata for special rendering (e.g., web editor apply chip)
    */
-  function updateSessionPreview(sessionId: string, preview: string): void {
+  function updateSessionPreview(
+    sessionId: string,
+    preview: string,
+    previewMeta?: AgentSession['previewMeta'],
+  ): void {
+    // Truncate to 50 chars with ellipsis
+    const maxLen = 50;
+    const trimmed = preview.trim().replace(/\s+/g, ' ');
+    const truncated = trimmed.length > maxLen ? trimmed.slice(0, maxLen - 1) + '…' : trimmed;
+
+    // Update in current project sessions
     const index = sessions.value.findIndex((s) => s.id === sessionId);
-    if (index !== -1) {
-      // Only update if there's no existing preview (first message)
-      if (!sessions.value[index].preview) {
-        // Truncate to 50 chars with ellipsis
-        const maxLen = 50;
-        const trimmed = preview.trim().replace(/\s+/g, ' ');
-        const truncated = trimmed.length > maxLen ? trimmed.slice(0, maxLen - 1) + '…' : trimmed;
-        sessions.value[index] = { ...sessions.value[index], preview: truncated };
-      }
+    if (index !== -1 && !sessions.value[index].preview) {
+      sessions.value[index] = {
+        ...sessions.value[index],
+        preview: truncated,
+        previewMeta,
+      };
+    }
+
+    // Also update in allSessions for global list view
+    const allIndex = allSessions.value.findIndex((s) => s.id === sessionId);
+    if (allIndex !== -1 && !allSessions.value[allIndex].preview) {
+      allSessions.value[allIndex] = {
+        ...allSessions.value[allIndex],
+        preview: truncated,
+        previewMeta,
+      };
     }
   }
 
   return {
     // State
     sessions,
+    allSessions,
     selectedSessionId,
     isLoadingSessions,
+    isLoadingAllSessions,
     isCreatingSession,
     sessionError,
 
@@ -391,6 +513,7 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     loadSelectedSessionId,
     saveSelectedSessionId,
     fetchSessions,
+    fetchAllSessions,
     createSession,
     getSession,
     updateSession,

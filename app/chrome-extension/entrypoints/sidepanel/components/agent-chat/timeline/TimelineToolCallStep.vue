@@ -3,7 +3,7 @@
     <div class="flex items-baseline gap-2 flex-wrap">
       <!-- Label -->
       <span
-        class="text-[11px] font-bold uppercase tracking-wider w-8 flex-shrink-0"
+        class="text-[11px] font-bold uppercase tracking-wider flex-shrink-0"
         :style="{
           color: labelColor,
         }"
