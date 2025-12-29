@@ -446,13 +446,16 @@ export function createWebEditorV2(): WebEditorV2Api {
     // Track the action for when debounce fires
     pendingTxAction = action;
 
+    // For 'clear' action, broadcast immediately without debounce
+    // This ensures UI updates instantly when user applies changes
+    const shouldBroadcastImmediately = action === 'clear';
+
     if (txChangedBroadcastTimer !== null) {
       window.clearTimeout(txChangedBroadcastTimer);
+      txChangedBroadcastTimer = null;
     }
 
-    txChangedBroadcastTimer = window.setTimeout(() => {
-      txChangedBroadcastTimer = null;
-
+    const doBroadcast = (): void => {
       const tm = state.transactionManager;
       if (!tm) return;
 
@@ -481,7 +484,13 @@ export function createWebEditorV2(): WebEditorV2Api {
             // Ignore if no listeners (e.g., sidepanel not open)
           });
       }
-    }, TX_CHANGED_BROADCAST_DEBOUNCE_MS);
+    };
+
+    if (shouldBroadcastImmediately) {
+      doBroadcast();
+    } else {
+      txChangedBroadcastTimer = window.setTimeout(doBroadcast, TX_CHANGED_BROADCAST_DEBOUNCE_MS);
+    }
   }
 
   /** Last broadcasted selection key to avoid duplicate broadcasts */
@@ -855,6 +864,14 @@ export function createWebEditorV2(): WebEditorV2Api {
         if (requestId && sessionId && state.executionTracker) {
           state.executionTracker.track(requestId, sessionId);
         }
+
+        // Clear transaction history after successful apply
+        // This prevents undo/redo since changes are now committed to code
+        tm.clear();
+
+        // Deselect current element after successful apply
+        // This clears the selection chip in the UI
+        handleDeselect();
 
         return { requestId, sessionId };
       }

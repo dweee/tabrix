@@ -12,6 +12,9 @@
 import { Disposer } from '@/entrypoints/web-editor-v2/utils/disposables';
 import type { QuickPanelView } from '../core/types';
 
+// SVG Icons
+const ICON_CLOSE = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>`;
+
 // ============================================================
 // Types
 // ============================================================
@@ -137,7 +140,7 @@ export function mountQuickPanelShell(options: QuickPanelShellOptions): QuickPane
   overlay.setAttribute('data-mcp-quick-panel-shell', 'true');
 
   const panel = document.createElement('div');
-  panel.className = 'qp-panel qp-liquid-shimmer';
+  panel.className = 'qp-panel';
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-modal', 'true');
   panel.setAttribute('aria-label', options.ariaLabel?.trim() || DEFAULT_ARIA_LABEL);
@@ -169,8 +172,8 @@ export function mountQuickPanelShell(options: QuickPanelShellOptions): QuickPane
 
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
-  closeBtn.className = 'qp-btn ac-btn ac-focus-ring';
-  closeBtn.textContent = 'Close';
+  closeBtn.className = 'qp-icon-btn ac-focus-ring';
+  closeBtn.innerHTML = ICON_CLOSE;
   closeBtn.setAttribute('aria-label', 'Close Quick Panel');
 
   headerRight.append(headerRightSearchMount, headerRightChatMount, closeBtn);

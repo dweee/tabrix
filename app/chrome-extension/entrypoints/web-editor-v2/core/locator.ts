@@ -11,6 +11,7 @@
  */
 
 import type { ElementLocator } from '@/common/web-editor-types';
+import { findDebugSource } from './debug-source';
 
 // =============================================================================
 // Types
@@ -642,11 +643,16 @@ export function generateCssSelector(
 export function createElementLocator(element: Element): ElementLocator {
   const root = getQueryRoot(element);
 
+  // Extract debug source (React/Vue component file path)
+  // This is best-effort and returns undefined if not available
+  const debugSource = findDebugSource(element) ?? undefined;
+
   return {
     selectors: generateSelectorCandidates(element, { root, maxCandidates: DEFAULT_MAX_CANDIDATES }),
     fingerprint: computeFingerprint(element),
     path: computeDomPath(element),
     shadowHostChain: getShadowHostChain(element),
+    debugSource,
   };
 }
 

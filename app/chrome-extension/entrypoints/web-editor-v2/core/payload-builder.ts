@@ -13,6 +13,7 @@
 import type { DebugSource, ElementLocator, Transaction } from '@/common/web-editor-types';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import { locateElement } from './locator';
+import { findReactDebugSource, findVueDebugSource } from './debug-source';
 
 // =============================================================================
 // Types
@@ -180,131 +181,6 @@ const TAILWIND_PATTERNS = [
  */
 function detectTailwind(classes: string[]): boolean {
   return classes.some((cls) => TAILWIND_PATTERNS.some((p) => p.test(cls)));
-}
-
-/**
- * Read component name from function/object
- */
-function readComponentName(value: unknown): string | undefined {
-  if (!value) return undefined;
-
-  if (typeof value === 'function') {
-    const fn = value as { displayName?: unknown; name?: unknown };
-    return readString(fn.displayName) ?? readString(fn.name);
-  }
-
-  const rec = asRecord(value);
-  if (rec) {
-    return readString(rec.displayName) ?? readString(rec.name);
-  }
-
-  return undefined;
-}
-
-// =============================================================================
-// React Debug Source Extraction
-// =============================================================================
-
-/**
- * Extract debug source from React Fiber
- */
-function extractReactDebugSource(fiber: unknown): DebugSource | null {
-  let current = fiber;
-
-  for (let i = 0; i < 40 && current; i++) {
-    const rec = asRecord(current);
-    if (!rec) break;
-
-    // Check _debugSource
-    const src = asRecord(rec._debugSource);
-    const file = readString(src?.fileName);
-    if (file) {
-      const componentName = readComponentName(rec.elementType) ?? readComponentName(rec.type);
-      return {
-        file,
-        line: readNumber(src?.lineNumber),
-        column: readNumber(src?.columnNumber),
-        componentName,
-      };
-    }
-
-    // Check owner's debug source
-    const owner = asRecord(rec._debugOwner);
-    const ownerSrc = asRecord(owner?._debugSource);
-    const ownerFile = readString(ownerSrc?.fileName);
-    if (ownerFile) {
-      const componentName = readComponentName(owner?.elementType) ?? readComponentName(owner?.type);
-      return {
-        file: ownerFile,
-        line: readNumber(ownerSrc?.lineNumber),
-        column: readNumber(ownerSrc?.columnNumber),
-        componentName,
-      };
-    }
-
-    current = rec.return;
-  }
-
-  return null;
-}
-
-/**
- * Find React debug source from element
- */
-function findReactDebugSource(element: Element): DebugSource | null {
-  try {
-    let node: Element | null = element;
-
-    for (let depth = 0; depth < 15 && node; depth++) {
-      const rec = node as unknown as Record<string, unknown>;
-
-      for (const key of Object.keys(rec)) {
-        if (key.startsWith('__reactFiber$') || key.startsWith('__reactInternalInstance$')) {
-          const source = extractReactDebugSource(rec[key]);
-          if (source) return source;
-        }
-      }
-
-      node = node.parentElement;
-    }
-  } catch {
-    // Best-effort only
-  }
-
-  return null;
-}
-
-// =============================================================================
-// Vue Debug Source Extraction
-// =============================================================================
-
-/**
- * Find Vue debug source from element
- */
-function findVueDebugSource(element: Element): DebugSource | null {
-  try {
-    let node: Element | null = element;
-
-    for (let depth = 0; depth < 15 && node; depth++) {
-      const rec = node as unknown as Record<string, unknown>;
-      const inst = asRecord(rec.__vueParentComponent);
-      const typeRec = asRecord(inst?.type);
-      const file = readString(typeRec?.__file);
-
-      if (file) {
-        return {
-          file,
-          componentName: readString(typeRec?.name),
-        };
-      }
-
-      node = node.parentElement;
-    }
-  } catch {
-    // Best-effort only
-  }
-
-  return null;
 }
 
 // =============================================================================

@@ -23,10 +23,10 @@
   const HIGHLIGHT_ID = '__mcp_element_picker_highlight__';
   const MAX_TEXT_LEN = 160;
 
-  // Highlight colors matching quick-panel accent
-  const HIGHLIGHT_COLOR = 'rgba(192, 132, 252, 0.95)';
-  const HIGHLIGHT_BG = 'rgba(192, 132, 252, 0.06)';
-  const HIGHLIGHT_SHADOW = 'rgba(192, 132, 252, 0.20)';
+  // Highlight colors matching Editorial accent (terracotta)
+  const HIGHLIGHT_COLOR = '#d97757';
+  const HIGHLIGHT_BG = 'rgba(217, 119, 87, 0.08)';
+  const HIGHLIGHT_BORDER = 'rgba(217, 119, 87, 0.4)';
 
   // ============================================================
   // State
@@ -144,8 +144,8 @@
       width: '0px',
       height: '0px',
       border: `2px solid ${HIGHLIGHT_COLOR}`,
-      borderRadius: '6px',
-      boxShadow: `0 0 0 2px ${HIGHLIGHT_SHADOW}`,
+      borderRadius: '4px',
+      boxShadow: `0 0 0 1px ${HIGHLIGHT_BORDER}`,
       background: HIGHLIGHT_BG,
       pointerEvents: 'none',
       zIndex: '2147483647',

@@ -80,6 +80,13 @@ defineProps<{
   font-weight: 600;
 }
 
+.markdown-content :deep(h1:first-child),
+.markdown-content :deep(h2:first-child),
+.markdown-content :deep(h3:first-child),
+.markdown-content :deep(h4:first-child) {
+  margin-top: 0;
+}
+
 .markdown-content :deep(blockquote) {
   border-left: var(--ac-border-width-strong) solid var(--ac-border);
   padding-left: 1em;

@@ -254,10 +254,51 @@ export async function openFileInVSCode(
       return { success: false, error: 'filePath is required' };
     }
 
-    // Resolve file path (relative paths are resolved against project root)
-    const absoluteFile = path.isAbsolute(trimmedFile)
-      ? path.resolve(trimmedFile)
-      : path.resolve(rootAbs, trimmedFile);
+    // Resolve file path with smart fallback
+    // Some frameworks (Vue/Vite) return paths like "/src/components/Foo.vue" which
+    // look absolute but are actually relative to project root. We try multiple strategies:
+    // 1. If path looks absolute and exists as-is, use it
+    // 2. Otherwise, strip leading slash and try as relative path
+    // 3. Finally, try as relative path directly
+    let absoluteFile: string = '';
+    let fileExists = false;
+
+    if (path.isAbsolute(trimmedFile)) {
+      // Try as true absolute path first
+      const asAbsolute = path.resolve(trimmedFile);
+      try {
+        const fileStat = await stat(asAbsolute);
+        if (fileStat.isFile()) {
+          absoluteFile = asAbsolute;
+          fileExists = true;
+        }
+      } catch {
+        // Not found as absolute path
+      }
+
+      // If not found and path starts with /, try stripping it and treating as relative
+      if (!fileExists && trimmedFile.startsWith('/')) {
+        const strippedPath = trimmedFile.slice(1);
+        const asRelative = path.resolve(rootAbs, strippedPath);
+        try {
+          const fileStat = await stat(asRelative);
+          if (fileStat.isFile()) {
+            absoluteFile = asRelative;
+            fileExists = true;
+          }
+        } catch {
+          // Not found as relative path either
+        }
+      }
+
+      // Default to absolute interpretation if nothing found
+      if (!absoluteFile) {
+        absoluteFile = path.resolve(trimmedFile);
+      }
+    } else {
+      // Relative path - resolve against project root
+      absoluteFile = path.resolve(rootAbs, trimmedFile);
+    }
 
     // Security: ensure file stays within project root
     const relativeToRoot = path.relative(rootAbs, absoluteFile);
@@ -265,14 +306,16 @@ export async function openFileInVSCode(
       return { success: false, error: 'File path must be within project directory' };
     }
 
-    // Check file exists (best-effort, don't fail hard if file is new)
-    try {
-      const fileStat = await stat(absoluteFile);
-      if (!fileStat.isFile()) {
-        return { success: false, error: `Not a file: ${absoluteFile}` };
+    // Check file exists
+    if (!fileExists) {
+      try {
+        const fileStat = await stat(absoluteFile);
+        if (!fileStat.isFile()) {
+          return { success: false, error: `Not a file: ${absoluteFile}` };
+        }
+      } catch {
+        return { success: false, error: `File does not exist: ${absoluteFile}` };
       }
-    } catch {
-      return { success: false, error: `File does not exist: ${absoluteFile}` };
     }
 
     // Validate and sanitize line/column

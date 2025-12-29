@@ -93,6 +93,11 @@ const TEXTAREA_MAX_HEIGHT_PX = 160;
 /** Auto-hide duration for success/warning banners */
 const BANNER_AUTO_HIDE_MS = 2400;
 
+// SVG Icons
+const ICON_CLOSE = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>`;
+const ICON_SEND = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>`;
+const ICON_STOP = `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>`;
+
 // ============================================================
 // Utility Functions
 // ============================================================
@@ -201,8 +206,8 @@ interface PanelDOMElements {
   messagesEl: HTMLDivElement;
   banner: HTMLDivElement;
   textarea: HTMLTextAreaElement;
-  cancelBtn: HTMLButtonElement;
-  sendBtn: HTMLButtonElement;
+  /** Unified action button: send/stop */
+  actionBtn: HTMLButtonElement;
 }
 
 function buildPanelDOM(options: QuickPanelAiChatPanelOptions): PanelDOMElements {
@@ -217,7 +222,7 @@ function buildPanelDOM(options: QuickPanelAiChatPanelOptions): PanelDOMElements 
 
   // Panel container
   const panel = document.createElement('div');
-  panel.className = 'qp-panel qp-liquid-shimmer';
+  panel.className = 'qp-panel';
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-modal', 'true');
   panel.setAttribute('aria-label', title);
@@ -264,8 +269,8 @@ function buildPanelDOM(options: QuickPanelAiChatPanelOptions): PanelDOMElements 
 
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
-  closeBtn.className = 'qp-btn ac-btn ac-focus-ring';
-  closeBtn.textContent = 'Close';
+  closeBtn.className = 'qp-icon-btn ac-focus-ring';
+  closeBtn.innerHTML = ICON_CLOSE;
   closeBtn.setAttribute('aria-label', 'Close Quick Panel');
 
   headerRight.append(streamIndicator, closeBtn);
@@ -333,20 +338,15 @@ function buildPanelDOM(options: QuickPanelAiChatPanelOptions): PanelDOMElements 
   const actionsRight = document.createElement('div');
   actionsRight.className = 'qp-actions-right';
 
-  const cancelBtn = document.createElement('button');
-  cancelBtn.type = 'button';
-  cancelBtn.className = 'qp-btn qp-btn--danger ac-btn ac-focus-ring';
-  cancelBtn.textContent = 'Cancel';
-  cancelBtn.hidden = true;
-  cancelBtn.setAttribute('aria-label', 'Cancel current request');
+  // Unified action button: shows send icon normally, stop icon when loading
+  const actionBtn = document.createElement('button');
+  actionBtn.type = 'button';
+  actionBtn.className = 'qp-icon-btn qp-icon-btn--action qp-icon-btn--primary ac-focus-ring';
+  actionBtn.innerHTML = ICON_SEND;
+  actionBtn.setAttribute('aria-label', 'Send message');
+  actionBtn.dataset.action = 'send';
 
-  const sendBtn = document.createElement('button');
-  sendBtn.type = 'button';
-  sendBtn.className = 'qp-btn qp-btn--primary ac-btn ac-focus-ring';
-  sendBtn.textContent = 'Send';
-  sendBtn.setAttribute('aria-label', 'Send message');
-
-  actionsRight.append(cancelBtn, sendBtn);
+  actionsRight.append(actionBtn);
   actions.append(actionsLeft, actionsRight);
   composer.append(banner, textarea, actions);
 
@@ -366,8 +366,7 @@ function buildPanelDOM(options: QuickPanelAiChatPanelOptions): PanelDOMElements 
     messagesEl,
     banner,
     textarea,
-    cancelBtn,
-    sendBtn,
+    actionBtn,
   };
 }
 
@@ -530,14 +529,31 @@ export function mountQuickPanelAiChatPanel(
 
   function renderControls(): void {
     const inputText = dom.textarea.value.trim();
-    const canSend = inputText.length > 0 && !state.sending && !state.streaming && !state.cancelling;
+    const isLoading = state.sending || state.streaming || state.cancelling;
+    const canSend = inputText.length > 0 && !isLoading;
+    const canCancel = state.currentRequestId !== null && !state.cancelling;
 
-    dom.sendBtn.disabled = !canSend;
-    dom.cancelBtn.hidden = !state.currentRequestId;
-    dom.cancelBtn.disabled = !state.currentRequestId || state.cancelling;
+    // Update action button state and appearance
+    if (isLoading) {
+      // Show stop icon when loading/streaming
+      dom.actionBtn.innerHTML = ICON_STOP;
+      dom.actionBtn.setAttribute('aria-label', 'Stop request');
+      dom.actionBtn.dataset.action = 'stop';
+      dom.actionBtn.disabled = !canCancel;
+      dom.actionBtn.classList.remove('qp-icon-btn--primary');
+      dom.actionBtn.classList.add('qp-icon-btn--danger');
+    } else {
+      // Show send icon when idle
+      dom.actionBtn.innerHTML = ICON_SEND;
+      dom.actionBtn.setAttribute('aria-label', 'Send message');
+      dom.actionBtn.dataset.action = 'send';
+      dom.actionBtn.disabled = !canSend;
+      dom.actionBtn.classList.remove('qp-icon-btn--danger');
+      dom.actionBtn.classList.add('qp-icon-btn--primary');
+    }
 
     // Stream indicator
-    dom.streamIndicator.hidden = !(state.sending || state.streaming || state.cancelling);
+    dom.streamIndicator.hidden = !isLoading;
     if (state.cancelling) {
       dom.streamText.textContent = 'Cancelling';
     } else if (state.sending) {
@@ -842,8 +858,17 @@ export function mountQuickPanelAiChatPanel(
   });
 
   disposer.listen(dom.closeBtn, 'click', () => close());
-  disposer.listen(dom.sendBtn, 'click', () => void sendCurrentInput());
-  disposer.listen(dom.cancelBtn, 'click', () => void cancelCurrentRequest());
+
+  // Unified action button handler: send or stop based on current state
+  disposer.listen(dom.actionBtn, 'click', () => {
+    if (disposed) return;
+    const action = dom.actionBtn.dataset.action;
+    if (action === 'stop') {
+      void cancelCurrentRequest();
+    } else {
+      void sendCurrentInput();
+    }
+  });
 
   disposer.listen(dom.textarea, 'input', () => {
     if (disposed) return;

@@ -770,70 +770,70 @@ export const TOOL_SCHEMAS: Tool[] = [
   //     required: ['query'],
   //   },
   // },
-  {
-    name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
-    description:
-      'inject the user-specified content script into the webpage. By default, inject into the currently active tab',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        url: {
-          type: 'string',
-          description:
-            'If a URL is specified, inject the script into the webpage corresponding to the URL.',
-        },
-        tabId: {
-          type: 'number',
-          description:
-            'Target an existing tab by ID to inject into. Overrides url/active tab selection when provided.',
-        },
-        windowId: {
-          type: 'number',
-          description:
-            'Target window ID for selecting active tab or creating new tab when url is provided and tabId is omitted.',
-        },
-        background: {
-          type: 'boolean',
-          description:
-            'Do not activate tab/focus window during injection when true (default: false).',
-        },
-        type: {
-          type: 'string',
-          description:
-            'the javaScript world for a script to execute within. must be ISOLATED or MAIN',
-        },
-        jsScript: {
-          type: 'string',
-          description: 'the content script to inject',
-        },
-      },
-      required: ['type', 'jsScript'],
-    },
-  },
-  {
-    name: TOOL_NAMES.BROWSER.SEND_COMMAND_TO_INJECT_SCRIPT,
-    description:
-      'if the script injected using chrome_inject_script listens for user-defined events, this tool can be used to trigger those events',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tabId: {
-          type: 'number',
-          description:
-            'the tab where you previously injected the script(if not provided,  use the currently active tab)',
-        },
-        eventName: {
-          type: 'string',
-          description: 'the eventName your injected content script listen for',
-        },
-        payload: {
-          type: 'string',
-          description: 'the payload passed to event, must be a json string',
-        },
-      },
-      required: ['eventName'],
-    },
-  },
+  // {
+  //   name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
+  //   description:
+  //     'inject the user-specified content script into the webpage. By default, inject into the currently active tab',
+  //   inputSchema: {
+  //     type: 'object',
+  //     properties: {
+  //       url: {
+  //         type: 'string',
+  //         description:
+  //           'If a URL is specified, inject the script into the webpage corresponding to the URL.',
+  //       },
+  //       tabId: {
+  //         type: 'number',
+  //         description:
+  //           'Target an existing tab by ID to inject into. Overrides url/active tab selection when provided.',
+  //       },
+  //       windowId: {
+  //         type: 'number',
+  //         description:
+  //           'Target window ID for selecting active tab or creating new tab when url is provided and tabId is omitted.',
+  //       },
+  //       background: {
+  //         type: 'boolean',
+  //         description:
+  //           'Do not activate tab/focus window during injection when true (default: false).',
+  //       },
+  //       type: {
+  //         type: 'string',
+  //         description:
+  //           'the javaScript world for a script to execute within. must be ISOLATED or MAIN',
+  //       },
+  //       jsScript: {
+  //         type: 'string',
+  //         description: 'the content script to inject',
+  //       },
+  //     },
+  //     required: ['type', 'jsScript'],
+  //   },
+  // },
+  // {
+  //   name: TOOL_NAMES.BROWSER.SEND_COMMAND_TO_INJECT_SCRIPT,
+  //   description:
+  //     'if the script injected using chrome_inject_script listens for user-defined events, this tool can be used to trigger those events',
+  //   inputSchema: {
+  //     type: 'object',
+  //     properties: {
+  //       tabId: {
+  //         type: 'number',
+  //         description:
+  //           'the tab where you previously injected the script(if not provided,  use the currently active tab)',
+  //       },
+  //       eventName: {
+  //         type: 'string',
+  //         description: 'the eventName your injected content script listen for',
+  //       },
+  //       payload: {
+  //         type: 'string',
+  //         description: 'the payload passed to event, must be a json string',
+  //       },
+  //     },
+  //     required: ['eventName'],
+  //   },
+  // },
   {
     name: TOOL_NAMES.BROWSER.JAVASCRIPT,
     description:

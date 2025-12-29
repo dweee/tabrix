@@ -277,6 +277,12 @@ export function mountQuickPanelShadowHost(
   const root = document.createElement('div');
   root.id = ROOT_ID;
   root.className = 'agent-theme qp-root';
+
+  // Apply theme synchronously BEFORE mounting to avoid flash
+  // Use system dark mode preference as initial hint
+  const initialTheme = getEffectiveThemeId(DEFAULT_THEME_ID);
+  root.dataset.agentTheme = initialTheme;
+
   uiRoot.append(root);
 
   // Mount to document
@@ -295,7 +301,7 @@ export function mountQuickPanelShadowHost(
     disposer.listen(root, eventType, stopPropagation);
   }
 
-  // Initial theme application
+  // Async update with stored theme (if different from initial)
   void (async () => {
     const themeId = await readStoredThemeId();
     applyThemeId(root, themeId);
