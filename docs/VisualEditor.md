@@ -10,7 +10,7 @@ Directly drag element edges on the canvas to adjust width, height, and font size
 
 <div align="center">
   <a href="https://youtu.be/76_DsUU7aHs">
-    <img src="https://i9.ytimg.com/vi/76_DsUU7aHs/mqdefault.jpg?sqp=CKSKy8oG-oaymwEmCMACELQB8quKqQMa8AEB-AH8CIAC0AWKAgwIABABGEYgWChlMA8=&rs=AOn4CLCXt44RoaMGWI5uKfEchtu7_VzfRw" alt="Interactive Sizing & Layout Adjustment" style="width:100%; max-width:600px;">
+    <img src="https://img.youtube.com/vi/76_DsUU7aHs/maxresdefault.jpg" alt="Interactive Sizing & Layout Adjustment" style="width:100%; max-width:600px;">
   </a>
 </div>
 
@@ -20,7 +20,7 @@ Manage CSS properties directly through a visual inspector panel. Effortlessly tw
 
 <div align="center">
   <a href="https://youtu.be/ADOzT7El2mI">
-    <img src="https://i9.ytimg.com/vi/76_DsUU7aHs/mqdefault.jpg?sqp=CKSKy8oG-oaymwEmCMACELQB8quKqQMa8AEB-AH8CIAC0AWKAgwIABABGEYgWChlMA8=&rs=AOn4CLCXt44RoaMGWI5uKfEchtu7_VzfRw" alt="Interactive Sizing & Layout Adjustment" style="width:100%; max-width:600px;">
+    <img src="https://img.youtube.com/vi/76_DsUU7aHs/maxresdefault.jpg" alt="Interactive Sizing & Layout Adjustment" style="width:100%; max-width:600px;">
   </a>
 </div>
 
@@ -30,7 +30,7 @@ Inspect and modify React and Vue component props in real-time. Test how your com
 
 <div align="center">
   <a href="https://youtu.be/PaIxdpGcEEk">
-    <img src="https://i9.ytimg.com/vi/76_DsUU7aHs/mqdefault.jpg?sqp=CKSKy8oG-oaymwEmCMACELQB8quKqQMa8AEB-AH8CIAC0AWKAgwIABABGEYgWChlMA8=&rs=AOn4CLCXt44RoaMGWI5uKfEchtu7_VzfRw" alt="Interactive Sizing & Layout Adjustment" style="width:100%; max-width:600px;">
+    <img src="https://img.youtube.com/vi/76_DsUU7aHs/maxresdefault.jpg" alt="Interactive Sizing & Layout Adjustment" style="width:100%; max-width:600px;">
   </a>
 </div>
 
@@ -42,6 +42,6 @@ Simply click an element and say, _"Make this bigger"_ or _"Change the background
 
 <div align="center">
   <a href="https://youtu.be/dSkt5HaTU_s">
-    <img src="https://i9.ytimg.com/vi/76_DsUU7aHs/mqdefault.jpg?sqp=CKSKy8oG-oaymwEmCMACELQB8quKqQMa8AEB-AH8CIAC0AWKAgwIABABGEYgWChlMA8=&rs=AOn4CLCXt44RoaMGWI5uKfEchtu7_VzfRw" alt="Interactive Sizing & Layout Adjustment" style="width:100%; max-width:600px;">
+    <img src="https://img.youtube.com/vi/76_DsUU7aHs/maxresdefault.jpg" alt="Interactive Sizing & Layout Adjustment" style="width:100%; max-width:600px;">
   </a>
 </div>
