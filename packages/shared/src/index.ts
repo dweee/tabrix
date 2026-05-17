@@ -13,3 +13,4 @@ export * from './capabilities';
 export * from './click';
 export * from './choose-context';
 export * from './execution-value';
+export * from './browser-task-thing-contract';

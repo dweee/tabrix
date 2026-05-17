@@ -21,6 +21,11 @@ const expectedDeclarationFragments = [
   'interface MemorySessionSummary',
   'interface MemoryReadSuccess',
   'interface MemoryReadError',
+  'interface BrowserTaskThingSummary',
+  'interface BrowserPageThingProjection',
+  'interface BrowserTaskEvidence',
+  'interface BrowserRuntimePolicy',
+  'interface BrowserDataSourceDecisionEvidence',
 ];
 
 for (const fragment of expectedDeclarationFragments) {
