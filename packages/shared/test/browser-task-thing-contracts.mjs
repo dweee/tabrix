@@ -18,6 +18,7 @@ import {
   BROWSER_TASK_THING_CONTRACT_VERSION,
   BROWSER_USER_ACTIVITY_LEVEL_VALUES,
   TOOL_SCHEMAS,
+  buildBrowserPageThingProjectionFromReadPage,
 } from '../dist/index.mjs';
 
 assert.equal(BROWSER_TASK_THING_CONTRACT_VERSION, 'v1');
@@ -98,6 +99,94 @@ const projection = {
 assert.equal(projection.chosenDataSource, 'dom_region_rows');
 assert.ok(projection.contextSavedChars > 0);
 assert.deepEqual(projection.changedRegions, ['search_results']);
+
+const mappedProjection = buildBrowserPageThingProjectionFromReadPage({
+  snapshot: {
+    mode: 'compact',
+    page: {
+      url: 'https://example.test/search?q=redacted',
+      title: 'Example Search',
+      pageType: 'web_page',
+    },
+    summary: {
+      pageRole: 'search_results_page',
+      primaryRegion: 'search_results',
+      quality: 'usable',
+    },
+    interactiveElements: [],
+    artifactRefs: [],
+    selectedDataSource: 'dom_region_rows',
+    readinessVerdict: 'ready',
+    visibleRegionRows: {
+      sourceDataSource: 'dom_region_rows',
+      rows: [
+        {
+          rowId: 'row_001',
+          title: 'Repository A',
+          primaryText: 'A useful repository',
+          secondaryText: null,
+          summary: null,
+          metaText: '10 stars',
+          interactionText: null,
+          visibleTextFields: ['title', 'primaryText', 'metaText'],
+          targetRef: 'tgt_repo_a',
+          targetRefCoverageRate: 1,
+          boundingBox: null,
+          regionId: 'search_results',
+          sourceRegion: 'search_results',
+          confidence: 0.91,
+          qualityReasons: ['title_and_target_ref'],
+        },
+      ],
+      rowCount: 1,
+      visibleRegionRowsUsed: true,
+      visibleRegionRowsRejectedReason: null,
+      sourceRegion: 'search_results',
+      rowExtractionConfidence: 0.91,
+      cardExtractorUsed: true,
+      cardPatternConfidence: 0.86,
+      cardRowsCount: 1,
+      rowOrder: 'visual_order',
+      targetRefCoverageRate: 1,
+      regionQualityScore: 0.88,
+      visibleDomRowsCandidateCount: 1,
+      visibleDomRowsSelectedCount: 1,
+      lowValueRegionRejectedCount: 0,
+      footerLikeRejectedCount: 0,
+      navigationLikeRejectedCount: 0,
+      targetRefCoverageRejectedCount: 0,
+      rejectedRegionReasonDistribution: {},
+      pageInfo: {
+        url: 'https://example.test/search',
+        title: 'Example Search',
+        viewport: { width: 1280, height: 720, dpr: 1 },
+        scrollY: 0,
+        pixelsAbove: 0,
+        pixelsBelow: 0,
+        visibleRegionCount: 1,
+        candidateRegionCount: 1,
+      },
+    },
+  },
+  projectionId: 'projection_from_fixture',
+  pageId: 'page_fixture',
+  tabId: 456,
+  ownerType: 'run_owned',
+  contextVersion: 'ctx_003',
+  previousContextVersion: 'ctx_002',
+  changedByActionId: 'action_search_002',
+  changeCause: 'search',
+  reusedRegions: ['global_nav'],
+  previousContextChars: 200,
+  userActivityLevel: 'none',
+  interferenceRisk: 'none',
+});
+
+assert.equal(mappedProjection.readiness, 'ready');
+assert.equal(mappedProjection.activeRegion, 'search_results');
+assert.equal(mappedProjection.chosenDataSource, 'dom_region_rows');
+assert.deepEqual(mappedProjection.refreshedRefs, ['tgt_repo_a']);
+assert.ok(mappedProjection.contextSavedChars > 0);
 
 const evidence = {
   evidenceId: 'evidence_001',

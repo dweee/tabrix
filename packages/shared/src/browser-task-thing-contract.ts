@@ -1,4 +1,8 @@
-import type { ReadPageReadinessVerdict, ReadPageSelectedDataSource } from './read-page-contract';
+import type {
+  ReadPageCompactSnapshot,
+  ReadPageReadinessVerdict,
+  ReadPageSelectedDataSource,
+} from './read-page-contract';
 
 export const BROWSER_TASK_THING_CONTRACT_VERSION = 'v1' as const;
 
@@ -237,4 +241,90 @@ export interface BrowserTaskEvidence {
   policyAudit: BrowserPolicyAuditEvent[];
   privacyRedaction: BrowserPrivacyRedactionEvidence;
   claimCoverage: BrowserClaimCoverageEvidence;
+}
+
+export interface BuildBrowserPageThingProjectionInput {
+  snapshot: ReadPageCompactSnapshot;
+  projectionId: string;
+  pageId: string;
+  tabId: number;
+  ownerType: BrowserPageOwnerType;
+  contextVersion: string;
+  previousContextVersion?: string | null;
+  changedByActionId?: string | null;
+  changeCause?: BrowserPageChangeCause;
+  changedRegions?: string[];
+  reusedRegions?: string[];
+  invalidatedRefs?: string[];
+  refreshedRefs?: string[];
+  previousContextChars?: number | null;
+  userActivityLevel?: BrowserUserActivityLevel;
+  interferenceRisk?: BrowserInterferenceRisk;
+}
+
+export function buildBrowserPageThingProjectionFromReadPage(
+  input: BuildBrowserPageThingProjectionInput,
+): BrowserPageThingProjection {
+  const { snapshot } = input;
+  const visibleRegionRows = snapshot.visibleRegionRows;
+  const activeRegion = visibleRegionRows?.sourceRegion ?? snapshot.summary.primaryRegion;
+  const contextChars = estimateSnapshotContextChars(snapshot);
+  const previousContextChars = input.previousContextChars ?? null;
+
+  return {
+    projectionId: input.projectionId,
+    pageId: input.pageId,
+    tabId: input.tabId,
+    ownerType: input.ownerType,
+    readiness: snapshot.readinessVerdict ?? 'unknown',
+    stability: 'stable',
+    contextVersion: input.contextVersion,
+    previousContextVersion: input.previousContextVersion ?? null,
+    changedByActionId: input.changedByActionId ?? null,
+    changeCause: input.changeCause ?? 'unknown',
+    activeRegion,
+    changedRegions: input.changedRegions ?? (activeRegion ? [activeRegion] : []),
+    reusedRegions: input.reusedRegions ?? [],
+    invalidatedRefs: input.invalidatedRefs ?? [],
+    refreshedRefs: input.refreshedRefs ?? collectVisibleRowTargetRefs(snapshot),
+    chosenDataSource: chooseProjectionDataSource(snapshot),
+    sourceConfidence: visibleRegionRows?.rowExtractionConfidence ?? 0,
+    sourceFreshness: 'fresh',
+    contextChars,
+    contextSavedChars: Math.max(0, (previousContextChars ?? contextChars) - contextChars),
+    userActivityLevel: input.userActivityLevel ?? 'unknown',
+    interferenceRisk: input.interferenceRisk ?? 'medium',
+  };
+}
+
+function chooseProjectionDataSource(snapshot: ReadPageCompactSnapshot): ReadPageSelectedDataSource {
+  if (snapshot.selectedDataSource) return snapshot.selectedDataSource;
+  if (snapshot.kind) return snapshot.kind;
+  if (snapshot.visibleRegionRows?.visibleRegionRowsUsed) return 'dom_region_rows';
+  if (snapshot.renderMode === 'markdown' && snapshot.markdown) return 'markdown';
+  return 'dom_json';
+}
+
+function estimateSnapshotContextChars(snapshot: ReadPageCompactSnapshot): number {
+  if (snapshot.markdown) return snapshot.markdown.length;
+  if (snapshot.visibleRegionRows) {
+    return snapshot.visibleRegionRows.rows.reduce((total, row) => {
+      return (
+        total +
+        row.title.length +
+        (row.primaryText?.length ?? 0) +
+        (row.secondaryText?.length ?? 0) +
+        (row.summary?.length ?? 0) +
+        (row.metaText?.length ?? 0) +
+        (row.interactionText?.length ?? 0)
+      );
+    }, 0);
+  }
+  return snapshot.summary.pageRole.length + (snapshot.summary.primaryRegion?.length ?? 0);
+}
+
+function collectVisibleRowTargetRefs(snapshot: ReadPageCompactSnapshot): string[] {
+  return (snapshot.visibleRegionRows?.rows ?? [])
+    .map((row) => row.targetRef)
+    .filter((targetRef): targetRef is string => Boolean(targetRef));
 }

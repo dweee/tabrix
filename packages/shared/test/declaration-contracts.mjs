@@ -26,6 +26,8 @@ const expectedDeclarationFragments = [
   'interface BrowserTaskEvidence',
   'interface BrowserRuntimePolicy',
   'interface BrowserDataSourceDecisionEvidence',
+  'interface BuildBrowserPageThingProjectionInput',
+  'function buildBrowserPageThingProjectionFromReadPage',
 ];
 
 for (const fragment of expectedDeclarationFragments) {
