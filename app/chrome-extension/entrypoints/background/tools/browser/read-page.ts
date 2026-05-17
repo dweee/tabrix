@@ -12,6 +12,7 @@ import {
   type ReadPageRenderMode,
   type ReadPageRequestedLayer,
   READ_PAGE_REQUESTED_LAYER_VALUES,
+  buildBrowserPageThingProjectionFromReadPage,
 } from '@tabrix/shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { ERROR_MESSAGES } from '@/common/constants';
@@ -249,6 +250,19 @@ function buildModeOutput(params: {
     ...stableLayer,
     ...extensionLayer,
   };
+  sharedPayload.pageProjection = buildBrowserPageThingProjectionFromReadPage({
+    snapshot: sharedPayload,
+    projectionId: `read_page:${params.tabId}:${sharedPayload.historyRef ?? 'snapshot'}`,
+    pageId: `tab:${params.tabId}`,
+    tabId: params.tabId,
+    ownerType: 'unknown',
+    contextVersion: sharedPayload.historyRef ?? `read_page:${params.tabId}`,
+    previousContextVersion: null,
+    changedByActionId: null,
+    changeCause: 'unknown',
+    userActivityLevel: 'unknown',
+    interferenceRisk: 'medium',
+  });
 
   return buildReadPageModeResult({
     sharedPayload,

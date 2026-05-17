@@ -36,6 +36,19 @@ function expectCommonSnapshotShape(payload: any, mode: 'compact' | 'normal' | 'f
     refMapCount: expect.any(Number),
   });
   expect(payload.frameContext).toBeNull();
+  expect(payload.pageProjection).toMatchObject({
+    projectionId: expect.any(String),
+    pageId: expect.any(String),
+    tabId: expect.any(Number),
+    ownerType: 'unknown',
+    readiness: expect.any(String),
+    stability: 'stable',
+    chosenDataSource: expect.any(String),
+    sourceFreshness: 'fresh',
+    userActivityLevel: 'unknown',
+    interferenceRisk: 'medium',
+  });
+  expect(payload.pageProjection.interferenceRisk).not.toBe('none');
   // B-011: historyRef is now populated with `read://<host>/<role>/<sha8>` whenever
   // the snapshot has a URL. Degraded paths (e.g. unsupported pages) keep null.
   if (payload.historyRef !== null) {

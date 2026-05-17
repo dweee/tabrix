@@ -357,6 +357,14 @@ export interface ReadPageExtensionFields {
    */
   kind?: ReadPageSelectedDataSource;
   selectedDataSource?: ReadPageSelectedDataSource;
+  /**
+   * V28 additive page/runtime truth projection.
+   * Built from the same read_page snapshot payload so downstream agents can
+   * consume lifecycle, data-source, ref-refresh, and context-size evidence
+   * without re-parsing nested read_page diagnostics. This is not an
+   * execution authority and does not replace `targetRef` / `candidateActions`.
+   */
+  pageProjection?: import('./browser-task-thing-contract').BrowserPageThingProjection;
   readinessVerdict?: ReadPageReadinessVerdict;
   rowCount?: number;
   visibleRegionRowsUsed?: boolean;
