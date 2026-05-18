@@ -27,6 +27,7 @@
 
 import {
   buildBrowserPageProjectionDelta,
+  type BrowserPageProjectionDeltaEvidenceBoundary,
   type BrowserPageProjectionDelta,
   type BrowserPageThingProjection,
   type ReadPageRequestedLayer,
@@ -55,6 +56,19 @@ export const DEFAULT_READ_BUDGET_PER_TASK = 6;
 const READ_BUDGET_HARD_CAP = 100;
 const MAX_LIVE_OBSERVED_CONTEXT_ENTRIES = 10;
 const MAX_LIFECYCLE_TIMELINE_EVENTS = 50;
+
+function inferProjectionEvidenceBoundary(
+  projection: BrowserPageThingProjection,
+): BrowserPageProjectionDeltaEvidenceBoundary {
+  if (
+    Number.isInteger(projection.tabId) &&
+    projection.tabId > 0 &&
+    projection.pageId === `tab:${projection.tabId}`
+  ) {
+    return { evidenceLevel: 'real_browser', realBrowserClaim: true };
+  }
+  return { evidenceLevel: 'integration', realBrowserClaim: false };
+}
 
 /**
  * Closed enum for `chosenSource` on a `chrome_read_page` outcome we
@@ -540,7 +554,7 @@ export class TaskSessionContext {
       currentProjection: projection,
       deltaId: `delta:${this.pageProjectionDeltaCount}:${projection.projectionId}`,
       deltaKind,
-      evidenceBoundary: { evidenceLevel: 'integration', realBrowserClaim: false },
+      evidenceBoundary: inferProjectionEvidenceBoundary(projection),
     });
     this.lastPageProjection = cloneBrowserPageThingProjection(projection);
     this.recordProjectionLifecycleEvents(projection, delta);

@@ -231,7 +231,7 @@ export interface BrowserPageProjectionDelta {
   previousContextChars: number | null;
   contextSavedChars: number;
   contextSavedRatio: number;
-  evidenceBoundary: BrowserTaskFixtureEvidenceBoundary;
+  evidenceBoundary: BrowserPageProjectionDeltaEvidenceBoundary;
 }
 
 export interface BrowserTaskThingSummary {
@@ -355,6 +355,13 @@ export interface BrowserTaskFixtureEvidenceBoundary {
   realBrowserClaim: false;
 }
 
+export type BrowserPageProjectionDeltaEvidenceBoundary =
+  | BrowserTaskFixtureEvidenceBoundary
+  | {
+      evidenceLevel: 'real_browser';
+      realBrowserClaim: true;
+    };
+
 export interface BrowserTaskDeterministicFixtureArtifact {
   artifactKind: typeof BROWSER_TASK_FIXTURE_ARTIFACT_KIND;
   contractVersion: typeof BROWSER_TASK_THING_CONTRACT_VERSION;
@@ -408,7 +415,8 @@ export function isBrowserPageProjectionDeltaArtifact(
     artifact.evidenceBoundary.realBrowserClaim === false &&
     BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES.includes(artifact.evidenceBoundary.evidenceLevel) &&
     artifact.deltaProjection.evidenceBoundary.realBrowserClaim === false &&
-    artifact.deltaProjection.evidenceBoundary.evidenceLevel === artifact.evidenceBoundary.evidenceLevel
+    artifact.deltaProjection.evidenceBoundary.evidenceLevel ===
+      artifact.evidenceBoundary.evidenceLevel
   );
 }
 
@@ -417,7 +425,7 @@ export interface BuildBrowserPageProjectionDeltaInput {
   currentProjection: BrowserPageThingProjection;
   deltaId: string;
   deltaKind: BrowserPageProjectionDeltaKind;
-  evidenceBoundary?: BrowserTaskFixtureEvidenceBoundary;
+  evidenceBoundary?: BrowserPageProjectionDeltaEvidenceBoundary;
 }
 
 export function buildBrowserPageProjectionDelta(
@@ -543,7 +551,10 @@ function chooseProjectionDataSource(snapshot: ReadPageCompactSnapshot): ReadPage
 
 function estimateSnapshotContextChars(snapshot: ReadPageCompactSnapshot): number {
   if (snapshot.markdown) return snapshot.markdown.length;
-  if (snapshot.visibleRegionRows?.visibleRegionRowsUsed && snapshot.visibleRegionRows.rows.length > 0) {
+  if (
+    snapshot.visibleRegionRows?.visibleRegionRowsUsed &&
+    snapshot.visibleRegionRows.rows.length > 0
+  ) {
     return snapshot.visibleRegionRows.rows.reduce((total, row) => {
       return (
         total +

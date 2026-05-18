@@ -297,6 +297,17 @@ assert.equal(postActionDelta.previousContextChars, 12000);
 assert.equal(postActionDelta.contextChars, 8000);
 assert.ok(postActionDelta.contextSavedChars > 0);
 assert.ok(postActionDelta.contextSavedRatio >= 0 && postActionDelta.contextSavedRatio <= 1);
+
+const realBrowserDelta = buildBrowserPageProjectionDelta({
+  previousProjection,
+  currentProjection,
+  deltaId: 'delta_real_browser_001',
+  deltaKind: 'post_action_delta',
+  evidenceBoundary: { evidenceLevel: 'real_browser', realBrowserClaim: true },
+});
+assert.equal(realBrowserDelta.evidenceBoundary.evidenceLevel, 'real_browser');
+assert.equal(realBrowserDelta.evidenceBoundary.realBrowserClaim, true);
+
 assert.throws(
   () =>
     buildBrowserPageProjectionDelta({

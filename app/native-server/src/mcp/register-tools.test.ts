@@ -755,8 +755,11 @@ describe('handleToolCall execution wrapper', () => {
       reusedRegions?: string[];
       refreshedRefs?: string[];
       selectedDataSource?: string;
+      pageId?: string;
+      tabId?: number;
       extraPayload?: Record<string, unknown>;
     }): string {
+      const tabId = input.tabId ?? 1;
       return JSON.stringify({
         kind: 'page',
         ...(input.extraPayload ?? {}),
@@ -768,8 +771,8 @@ describe('handleToolCall execution wrapper', () => {
         pageProjection: {
           projectionId: input.projectionId,
           projectionKind: 'read_snapshot_projection',
-          pageId: 'page_test',
-          tabId: 1,
+          pageId: input.pageId ?? 'page_test',
+          tabId,
           ownerType: 'run_owned',
           projectionCreatedAt: '2026-05-18T00:00:00.000Z',
           sourceObservedAt: '2026-05-18T00:00:00.000Z',
@@ -889,6 +892,10 @@ describe('handleToolCall execution wrapper', () => {
         toProjectionId: 'projection_initial',
         contextSavedChars: 0,
       });
+      expect(firstPayload.deltaContext.evidenceBoundary).toMatchObject({
+        evidenceLevel: 'integration',
+        realBrowserClaim: false,
+      });
       expect(firstPayload.aiContextEnvelope).toMatchObject({
         envelopeKind: 'delta_context',
         selectedDataSource: 'dom_json',
@@ -983,6 +990,35 @@ describe('handleToolCall execution wrapper', () => {
       expect(closePayload.lifecycleTimeline.at(-1)).toMatchObject({
         cleanupAction: 'chrome_close_tabs',
         cleanupTargetIds: [1],
+      });
+    });
+
+    it('marks AI-facing delta as real-browser evidence only for real tab projections', async () => {
+      markBridgeReady();
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_real_tab',
+          contextChars: 4200,
+          changedRegions: ['viewport'],
+          pageId: 'tab:42',
+          tabId: 42,
+        }),
+      );
+
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 42,
+        taskSessionId: 'real-browser-evidence-task',
+        requestedLayer: 'L0+L1',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.deltaContext.evidenceBoundary).toMatchObject({
+        evidenceLevel: 'real_browser',
+        realBrowserClaim: true,
+      });
+      expect(payload.aiContextEnvelope.deltaContext.evidenceBoundary).toMatchObject({
+        evidenceLevel: 'real_browser',
+        realBrowserClaim: true,
       });
     });
 
