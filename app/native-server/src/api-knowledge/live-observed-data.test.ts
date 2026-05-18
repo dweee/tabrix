@@ -623,6 +623,46 @@ describe('live-observed-data selector', () => {
     });
   });
 
+  it('rejects non-content task-query JSON as api_content', () => {
+    const out = run({
+      bundle: {
+        observationMode: 'cdp_enhanced',
+        cdpUsed: true,
+        cdpDetachSuccess: true,
+        debuggerConflict: false,
+        rawBodyPersisted: false,
+        requests: [
+          {
+            url: 'https://docs.example.test/_static/search-index.json',
+            method: 'GET',
+            type: 'xmlhttprequest',
+            statusCode: 200,
+            mimeType: 'application/json',
+            responseBody: JSON.stringify({
+              entries: [
+                {
+                  term: 'asyncio',
+                  definition:
+                    'A Python library entry loaded from shared documentation chrome, not from the current search results.',
+                },
+              ],
+            }),
+          },
+        ],
+      },
+      selectorContext: {
+        currentPageUrl: 'https://docs.example.test/search.html?q=asyncio',
+      },
+    });
+
+    expect(out.selected).toHaveLength(0);
+    expect(out.rejected[0]).toMatchObject({
+      fallbackUsed: true,
+      pageRegion: 'task_query_network',
+    });
+    expect(out.rejected[0].selectedDataSource).not.toBe('api_content');
+  });
+
   it('allows cross-origin search provider api_rows only when body matches the task query', () => {
     const out = run({
       bundle: {

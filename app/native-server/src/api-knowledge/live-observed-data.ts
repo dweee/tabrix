@@ -174,7 +174,11 @@ export function deriveLiveObservedApiDataFromBundle(
       allowTaskMatchedSafeSummaryRows,
     });
     if (!rowsResult.ok) {
-      if (contentResult.ok && relevance.relevant) {
+      if (
+        contentResult.ok &&
+        relevance.relevant &&
+        canSelectLiveContent(req, relevance.pageRegion)
+      ) {
         selected.push({
           ...baseEvidence,
           selectedDataSource: 'api_content',
@@ -568,6 +572,11 @@ function buildLiveContent(
   };
 }
 
+function canSelectLiveContent(req: CapturedNetworkRequest, pageRegion: string): boolean {
+  if (isContentSourceCandidate(req)) return true;
+  return pageRegion !== 'task_query_network' && pageRegion !== 'current_page_network';
+}
+
 function extractContentSections(value: unknown): LiveObservedContentSection[] {
   const sections: LiveObservedContentSection[] = [];
   collectContentSections(value, [], sections);
@@ -867,18 +876,6 @@ function buildRelevanceEvidence(args: {
       ),
     };
   }
-  if (args.contentAvailable && sameOriginAsCurrentPage(args.req, args.selectorContext)) {
-    return {
-      relevant: true,
-      fallbackCause: '',
-      pageRegion: 'content_source_network',
-      correlationScore: Math.max(
-        args.candidate.confidence,
-        LIVE_OBSERVED_TASK_QUERY_RELEVANCE_FLOOR,
-      ),
-    };
-  }
-
   return {
     relevant: false,
     fallbackCause:
