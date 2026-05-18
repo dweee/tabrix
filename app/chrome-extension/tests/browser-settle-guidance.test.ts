@@ -170,6 +170,84 @@ describe('browser settle guidance', () => {
     });
   });
 
+  it('bounds new background tab creation timeout and cleans only newly-created blank tabs', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
+    vi.mocked(chrome.tabs.query)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 11,
+          windowId: 1,
+          active: false,
+          status: 'complete',
+          url: 'about:blank',
+          title: 'Existing Blank',
+        } as chrome.tabs.Tab,
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 11,
+          windowId: 1,
+          active: false,
+          status: 'complete',
+          url: 'about:blank',
+          title: 'Existing Blank',
+        } as chrome.tabs.Tab,
+        {
+          id: 20,
+          windowId: 1,
+          active: false,
+          status: 'loading',
+          url: '',
+          title: '',
+        } as chrome.tabs.Tab,
+      ]);
+    vi.mocked(chrome.tabs.create).mockImplementation(() => new Promise<chrome.tabs.Tab>(() => {}));
+    vi.mocked(chrome.tabs.get).mockImplementation(async (tabId: number) => {
+      if (tabId === 20) {
+        return {
+          id: 20,
+          windowId: 1,
+          active: false,
+          status: 'loading',
+          url: '',
+          title: '',
+        } as chrome.tabs.Tab;
+      }
+      return {
+        id: tabId,
+        windowId: 1,
+        active: false,
+        status: 'complete',
+        url: 'about:blank',
+        title: 'Existing Blank',
+      } as chrome.tabs.Tab;
+    });
+
+    const executePromise = navigateTool.execute({
+      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      background: true,
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    const result = await executePromise;
+
+    expect(result.isError).toBe(true);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: false,
+      message: 'Failed to create navigation tab within bounded timeout',
+      requestedUrl: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      windowId: 1,
+      cleanupTabIds: [20],
+      pageReadable: false,
+      canAttemptStructuredRead: false,
+    });
+    expect(chrome.tabs.remove).toHaveBeenCalledWith(20);
+    expect(chrome.tabs.remove).not.toHaveBeenCalledWith(11);
+    vi.useRealTimers();
+  });
+
   it('returns structured-read guidance after explicit tab navigation times out at interactive', async () => {
     vi.mocked(chrome.tabs.query).mockResolvedValue([
       {

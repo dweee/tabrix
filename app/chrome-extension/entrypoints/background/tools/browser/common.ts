@@ -6,6 +6,7 @@ import { captureFrameOnAction, isAutoCaptureActive } from './gif-recorder';
 // Default window dimensions
 const DEFAULT_WINDOW_WIDTH = 1280;
 const DEFAULT_WINDOW_HEIGHT = 720;
+const NAVIGATE_CREATE_TAB_TIMEOUT_MS = 5000;
 
 interface NavigateToolParams {
   url?: string;
@@ -50,6 +51,36 @@ function buildNavigationReadinessFields(input: {
         ? 'navigation_interactive; structured_read_may_succeed'
         : 'navigation_not_readable; avoid chrome_read_page until navigation reaches a document',
   };
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+}
+
+async function removeBlankTabIfPresent(tabId: number): Promise<boolean> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const url = tab.url || tab.pendingUrl || '';
+    if (url === '' || url === 'about:blank') {
+      await chrome.tabs.remove(tabId);
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 function shouldAddWwwVariant(hostname: string): boolean {
@@ -484,11 +515,60 @@ class NavigateTool extends BaseBrowserToolExecutor {
         if (targetWindow && targetWindow.id !== undefined) {
           console.log(`Found target Window ID: ${targetWindow.id}`);
 
-          const newTab = await chrome.tabs.create({
-            url: url,
-            windowId: targetWindow.id,
-            active: background === true ? false : true,
-          });
+          const tabsBeforeCreate = await chrome.tabs.query({ windowId: targetWindow.id });
+          const existingTabIds = new Set(
+            tabsBeforeCreate
+              .map((tab) => tab.id)
+              .filter((id): id is number => typeof id === 'number'),
+          );
+          let newTab: chrome.tabs.Tab;
+          try {
+            newTab = await withTimeout(
+              chrome.tabs.create({
+                url: url,
+                windowId: targetWindow.id,
+                active: background === true ? false : true,
+              }),
+              NAVIGATE_CREATE_TAB_TIMEOUT_MS,
+              `chrome.tabs.create timed out after ${NAVIGATE_CREATE_TAB_TIMEOUT_MS}ms`,
+            );
+          } catch (error) {
+            const tabsAfterTimeout = await chrome.tabs.query({ windowId: targetWindow.id });
+            const blankTabs = tabsAfterTimeout.filter((tab) => {
+              const tabUrl = tab.url || tab.pendingUrl || '';
+              return (
+                typeof tab.id === 'number' &&
+                !existingTabIds.has(tab.id) &&
+                (tabUrl === '' || tabUrl === 'about:blank')
+              );
+            });
+            const cleanupTabIds: number[] = [];
+            for (const tab of blankTabs) {
+              if (typeof tab.id === 'number' && (await removeBlankTabIfPresent(tab.id))) {
+                cleanupTabIds.push(tab.id);
+              }
+            }
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    success: false,
+                    message: 'Failed to create navigation tab within bounded timeout',
+                    requestedUrl: url,
+                    windowId: targetWindow.id,
+                    error: error instanceof Error ? error.message : String(error),
+                    cleanupTabIds,
+                    pageReadable: false,
+                    canAttemptStructuredRead: false,
+                    nextStepHint:
+                      'navigation_failed_before_document; retry navigation or inspect browser status',
+                  }),
+                },
+              ],
+              isError: true,
+            };
+          }
           if (background !== true) {
             await chrome.windows.update(targetWindow.id, { focused: true });
           }
