@@ -728,6 +728,58 @@ describe('browser settle guidance', () => {
     expect(payload.extractionHint).not.toContain('appears complete');
   });
 
+  it('returns plain text evidence when htmlContent is requested', async () => {
+    vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: false,
+        status: 'complete',
+        url: 'https://chat.deepseek.com/share/example',
+        title: 'DeepSeek',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 200,
+      readyState: 'complete',
+    });
+    vi.mocked(chrome.tabs.create).mockResolvedValue({
+      id: 20,
+      windowId: 1,
+      active: false,
+      status: 'loading',
+      url: 'https://chat.deepseek.com/share/example',
+      title: 'Loading',
+    } as chrome.tabs.Tab);
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(webFetcherTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      htmlContent:
+        '<html><body><main>物模型 静态属性 时序属性 可控调节属性 服务/动作</main></body></html>',
+      htmlTextContent:
+        '物模型 静态属性 时序属性 可控调节属性 服务/动作。这个 HTML 派生文本比可见文本路径更完整，用于长内容完整度证据。',
+      htmlTextContentSource: 'cleaned_html_textContent',
+    });
+
+    const result = await webFetcherTool.execute({
+      url: 'https://chat.deepseek.com/share/example',
+      background: true,
+      htmlContent: true,
+    });
+
+    expect(result.isError).toBe(false);
+    expect((webFetcherTool as any).sendMessageToTab).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload.htmlContent).toContain('物模型');
+    expect(payload.htmlTextContent).toContain('可控调节属性');
+    expect(payload.htmlTextContentSource).toBe('cleaned_html_textContent');
+    expect(payload.htmlTextSummary).toMatchObject({
+      quality: 'sparse',
+      completeTextAvailable: false,
+    });
+  });
+
   it('returns compact structured snapshot from read_page', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 41,

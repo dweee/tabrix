@@ -148,6 +148,12 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
 
         if (htmlResponse.success) {
           result.htmlContent = htmlResponse.htmlContent;
+          if (typeof htmlResponse.htmlTextContent === 'string') {
+            result.htmlTextContent = htmlResponse.htmlTextContent;
+            result.htmlTextSummary = summarizeVisibleText(htmlResponse.htmlTextContent);
+            result.htmlTextContentSource =
+              htmlResponse.htmlTextContentSource || 'cleaned_html_textContent';
+          }
         } else {
           console.error('Failed to get HTML content:', htmlResponse.error);
           result.htmlContentError = htmlResponse.error;

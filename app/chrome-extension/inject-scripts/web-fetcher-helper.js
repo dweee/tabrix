@@ -2701,10 +2701,13 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
         }
 
         const cleanedHtml = cleanHtmlContent(rawHtml);
+        const htmlTextContent = extractTextFromHtml(cleanedHtml);
 
         sendResponse({
           success: true,
           htmlContent: cleanedHtml,
+          htmlTextContent,
+          htmlTextContentSource: 'cleaned_html_textContent',
           selector: request.selector,
         });
       } catch (error) {
@@ -2983,6 +2986,19 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
       );
     }
     return cleaned;
+  }
+
+  /**
+   * Extract plain text from already-cleaned HTML.
+   * This is a low-risk fallback for pages where visible text extraction is sparse
+   * but sanitized HTML still carries readable body content.
+   * @param {string} html - The cleaned HTML content
+   * @returns {string} - Plain text derived from cleaned HTML
+   */
+  function extractTextFromHtml(html) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html || '', 'text/html');
+    return cleanContent(doc.body?.textContent || doc.documentElement?.textContent || '');
   }
 
   /**
