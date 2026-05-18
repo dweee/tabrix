@@ -339,6 +339,43 @@ describe('handleToolCall execution wrapper', () => {
     expect(bridgeSpy).toHaveBeenCalledTimes(4);
   });
 
+  it('does not inherit stale primary-tab ownership for new-tab navigation without explicit task key', async () => {
+    markBridgeReady();
+    jest
+      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ tabId: 77 }) }],
+          isError: false,
+        },
+      } as never)
+      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ tabId: 88 }) }],
+          isError: false,
+        },
+      } as never);
+
+    await handleToolCall('chrome_navigate', {
+      url: 'https://example.test/first',
+    });
+    const secondNavigateResult = await handleToolCall('chrome_navigate', {
+      url: 'https://example.test/second',
+    });
+
+    expect(secondNavigateResult.isError).toBe(false);
+    const secondNavigatePayload = JSON.parse(String(secondNavigateResult.content[0].text));
+    expect(secondNavigatePayload.runtimePolicyAudit).toMatchObject({
+      verdict: 'allow',
+      reason: 'new_run_owned_tab',
+      runOwnedTabIds: [],
+    });
+  });
+
   it('releases stale run-owned tab ids reported as invalid by cleanup', async () => {
     markBridgeReady();
     jest

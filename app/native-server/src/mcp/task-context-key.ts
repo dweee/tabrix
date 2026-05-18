@@ -124,6 +124,20 @@ export function resolveTaskContextKey(
   const explicit = extractStableTaskKey(args);
   if (explicit) return explicit;
 
+  if (toolName === TOOL_NAMES.BROWSER.NAVIGATE) {
+    const argsObject = args && typeof args === 'object' ? (args as Record<string, unknown>) : null;
+    const url = argsObject && typeof argsObject.url === 'string' ? argsObject.url : null;
+    const refresh = argsObject?.refresh === true;
+    const tabId = argsObject?.tabId;
+    if (
+      url !== null &&
+      !refresh &&
+      !(typeof tabId === 'number' && Number.isInteger(tabId) && tabId > 0)
+    ) {
+      return null;
+    }
+  }
+
   const autoEligible =
     toolName === TOOL_NAMES.BROWSER.READ_PAGE ||
     toolName === TOOL_NAMES.BROWSER.NAVIGATE ||
