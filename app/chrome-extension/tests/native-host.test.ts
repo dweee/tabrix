@@ -726,4 +726,46 @@ describe('native host reconnect behavior', () => {
       success: true,
     });
   });
+
+  it('returns a websocket bridge error when a tool call exceeds the command timeout', async () => {
+    const firstPort = createMockPort();
+    const harness = createChromeHarness([firstPort]);
+    const wsHarness = createMockWebSocketHarness();
+    (globalThis as any).chrome = harness.chromeMock;
+    (globalThis as any).WebSocket = wsHarness.MockWebSocket as any;
+
+    const toolsModule = await import('@/entrypoints/background/tools');
+    vi.mocked(toolsModule.handleCallTool).mockImplementation(() => new Promise(() => {}) as any);
+
+    const nativeHostModule = await import('@/entrypoints/background/native-host');
+    nativeHostModule.initNativeHostListener();
+    await flushMicrotasks();
+
+    wsHarness.instances[0].emitOpen();
+    await flushMicrotasks();
+    wsHarness.instances[0].sent.length = 0;
+
+    wsHarness.instances[0].emitMessage({
+      type: 'command',
+      requestId: 'req-timeout',
+      connectionId: 'bridge-1',
+      sentAt: Date.now(),
+      command: {
+        action: 'call_tool',
+        payload: { name: 'chrome_navigate', args: { url: 'https://example.test' } },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(15_000);
+    await flushMicrotasks();
+
+    const timeoutResult = wsHarness.instances[0].sent
+      .map((entry) => JSON.parse(entry))
+      .find((entry) => entry.requestId === 'req-timeout');
+    expect(timeoutResult).toMatchObject({
+      type: 'result',
+      requestId: 'req-timeout',
+      success: false,
+      error: 'Bridge command timed out after 15000ms',
+    });
+  });
 });

@@ -34,6 +34,7 @@ const RECONNECT_MAX_DELAY_MS = 60_000;
 const RECONNECT_MAX_FAST_ATTEMPTS = 8;
 const RECONNECT_COOLDOWN_DELAY_MS = 5 * 60_000;
 const HEARTBEAT_INTERVAL_MS = 5_000;
+const BRIDGE_COMMAND_TIMEOUT_MS = 15_000;
 const BRIDGE_WS_BACKOFF_MS = [1_000, 2_000, 5_000, 10_000] as const;
 
 // ==================== Auto-connect State ====================
@@ -576,6 +577,25 @@ async function postFileOperationViaHttp(request: {
   return body?.payload;
 }
 
+async function withBridgeCommandTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(
+          () => reject(new Error(`Bridge command timed out after ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+}
+
 async function handleBridgeCommandMessage(message: BridgeCommandMessage): Promise<void> {
   const sendResult = async (result: BridgeResultMessage): Promise<void> => {
     try {
@@ -587,7 +607,10 @@ async function handleBridgeCommandMessage(message: BridgeCommandMessage): Promis
 
   try {
     if (message.command.action === 'call_tool') {
-      const result = await handleCallTool(message.command.payload);
+      const result = await withBridgeCommandTimeout(
+        handleCallTool(message.command.payload),
+        BRIDGE_COMMAND_TIMEOUT_MS,
+      );
       await sendResult({
         type: 'result',
         requestId: message.requestId,
