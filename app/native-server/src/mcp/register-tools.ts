@@ -1170,8 +1170,13 @@ function attachAiFacingDeltaContext(
   if (!isBrowserPageThingProjectionLike(projection)) return result;
 
   const deltaContext = taskContext.notePageProjectionAndBuildDelta(projection);
+  const payloadSelectedDataSource = readPayloadSelectedDataSource(payload);
   const selectedDataSource = readSelectedDataSource(payload, projection);
-  const selectedReason = readString(payload.decisionReason) ?? readString(payload.selectedReason);
+  const selectedReason =
+    selectedDataSource !== payloadSelectedDataSource &&
+    selectedDataSource === projection.chosenDataSource
+      ? 'projection_chosen_data_source'
+      : (readString(payload.decisionReason) ?? readString(payload.selectedReason));
   const fallbackReason =
     readString(payload.fallbackReason) ??
     readString(payload.fallbackCause) ??
@@ -1322,8 +1327,43 @@ function readSelectedDataSource(
   payload: Record<string, unknown>,
   projection: BrowserPageThingProjection,
 ): ReadPageSelectedDataSource {
+  if (projection.chosenDataSource === 'dom_region_rows' && hasReliableVisibleRows(payload)) {
+    return projection.chosenDataSource;
+  }
   const selected = readString(payload.selectedDataSource) ?? readString(payload.dataSource);
   return (selected ?? projection.chosenDataSource) as ReadPageSelectedDataSource;
+}
+
+function readPayloadSelectedDataSource(
+  payload: Record<string, unknown>,
+): ReadPageSelectedDataSource | null {
+  const selected = readString(payload.selectedDataSource) ?? readString(payload.dataSource);
+  return selected ? (selected as ReadPageSelectedDataSource) : null;
+}
+
+function hasReliableVisibleRows(payload: Record<string, unknown>): boolean {
+  const rowsPayload = readObject(payload.visibleRegionRows) ?? payload;
+  const rowCount =
+    readPositiveInteger(payload, 'rowCount') ??
+    readPositiveInteger(payload, 'visibleRegionRowCount') ??
+    readPositiveInteger(rowsPayload, 'rowCount');
+  const coverage =
+    readNumber(payload.targetRefCoverageRate) ?? readNumber(rowsPayload.targetRefCoverageRate);
+  const quality =
+    readNumber(payload.regionQualityScore) ?? readNumber(rowsPayload.regionQualityScore);
+  return (
+    (payload.visibleRegionRowsUsed === true || rowsPayload.visibleRegionRowsUsed === true) &&
+    rowCount !== null &&
+    rowCount > 0 &&
+    (coverage === null || coverage >= 0.8) &&
+    (quality === null || quality >= 0.7)
+  );
+}
+
+function readObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function extractReadPageRenderMode(input: unknown): 'json' | 'markdown' | null {

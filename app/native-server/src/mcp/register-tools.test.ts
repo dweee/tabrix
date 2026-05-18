@@ -819,6 +819,7 @@ describe('handleToolCall execution wrapper', () => {
       reusedRegions?: string[];
       refreshedRefs?: string[];
       selectedDataSource?: string;
+      projectionDataSource?: string;
       pageId?: string;
       tabId?: number;
       extraPayload?: Record<string, unknown>;
@@ -853,7 +854,7 @@ describe('handleToolCall execution wrapper', () => {
           reusedRegions: input.reusedRegions ?? [],
           invalidatedRefs: [],
           refreshedRefs: input.refreshedRefs ?? [],
-          chosenDataSource: input.selectedDataSource ?? 'dom_json',
+          chosenDataSource: input.projectionDataSource ?? input.selectedDataSource ?? 'dom_json',
           sourceConfidence: 0.9,
           sourceFreshness: 'fresh',
           contextChars: input.contextChars,
@@ -1312,6 +1313,50 @@ describe('handleToolCall execution wrapper', () => {
           rejectedSources: [
             { source: 'api_rows', reason: 'api_rows_unavailable_dom_region_rows_available' },
             { source: 'dom_region_rows', reason: 'markdown_reading_surface_preferred' },
+          ],
+        },
+      });
+    });
+
+    it('selects reliable DOM rows for AI context even when markdown is rendered', async () => {
+      markBridgeReady();
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_search_rows',
+          contextChars: 1200,
+          changedRegions: ['viewport'],
+          refreshedRefs: ['ref_repo_1', 'ref_repo_2'],
+          selectedDataSource: 'markdown',
+          projectionDataSource: 'dom_region_rows',
+          extraPayload: {
+            markdown: '# Repository search results',
+            decisionReason: 'markdown_reading_surface_preferred',
+            rowCount: 2,
+            visibleRegionRowsUsed: true,
+            visibleRegionRowCount: 2,
+            targetRefCoverageRate: 0.99,
+            regionQualityScore: 0.96,
+            apiRowsUnavailableReason: 'api_rows_unavailable_dom_region_rows_available',
+          },
+        }),
+      );
+
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'search-rows-read',
+        requestedLayer: 'L0+L1+L2',
+        render: 'markdown',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.markdown).toContain('Repository search results');
+      expect(payload.aiContextEnvelope).toMatchObject({
+        selectedDataSource: 'dom_region_rows',
+        dataSourceDecision: {
+          selectedSource: 'dom_region_rows',
+          selectedReason: 'projection_chosen_data_source',
+          rejectedSources: [
+            { source: 'api_rows', reason: 'api_rows_unavailable_dom_region_rows_available' },
           ],
         },
       });
