@@ -1,4 +1,4 @@
-import { normalizeToolCallResult } from './result-normalizer';
+import { normalizeToolCallResult, selectAiFacingToolContext } from './result-normalizer';
 
 describe('normalizeToolCallResult', () => {
   it('returns success summary for normal tool results', () => {
@@ -21,5 +21,59 @@ describe('normalizeToolCallResult', () => {
     expect(normalized.executionResult.status).toBe('failure');
     expect(normalized.errorCode).toBe('tool_call_error');
     expect(normalized.errorSummary).toBe('Tab not found');
+  });
+
+  it('selects delta context as the AI-facing tool context without replacing the raw result', () => {
+    const rawResult = {
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify({
+            kind: 'page',
+            pageContent: 'full page content that should not become the execution summary',
+            aiContextEnvelope: {
+              envelopeKind: 'delta_context',
+              contextSource: 'page_projection_delta',
+              selectedDataSource: 'dom_region_rows',
+              dataSourceDecision: {
+                sourceConfidence: 0.91,
+              },
+              deltaContext: {
+                deltaKind: 'post_action_delta',
+                changedRegions: ['result_list'],
+                reusedRegions: ['global_nav'],
+                contextChars: 1400,
+                contextSavedChars: 8600,
+              },
+            },
+          }),
+        },
+      ],
+      isError: false,
+    };
+
+    expect(selectAiFacingToolContext(rawResult)).toMatchObject({
+      contextKind: 'delta_context',
+      contextSource: 'page_projection_delta',
+      deltaKind: 'post_action_delta',
+      selectedDataSource: 'dom_region_rows',
+      changedRegions: ['result_list'],
+      reusedRegions: ['global_nav'],
+      contextChars: 1400,
+      contextSavedChars: 8600,
+      sourceConfidence: 0.91,
+    });
+
+    const normalized = normalizeToolCallResult('chrome_read_page', rawResult);
+    expect(normalized.stepSummary).toBe(
+      'AI context: post_action_delta; source=page_projection_delta; data=dom_region_rows; changed=result_list; reused=global_nav; savedChars=8600',
+    );
+    expect(normalized.executionResult.data).toMatchObject({
+      rawResult,
+      aiFacingContext: {
+        deltaKind: 'post_action_delta',
+        selectedDataSource: 'dom_region_rows',
+      },
+    });
   });
 });

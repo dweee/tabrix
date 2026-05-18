@@ -8,6 +8,18 @@ export interface ToolCallNormalization {
   errorSummary?: string;
 }
 
+export interface AiFacingToolContext {
+  contextKind: 'delta_context';
+  contextSource: string | null;
+  deltaKind: string | null;
+  selectedDataSource: string | null;
+  changedRegions: string[];
+  reusedRegions: string[];
+  contextChars: number | null;
+  contextSavedChars: number | null;
+  sourceConfidence: number | null;
+}
+
 function extractTextContent(result: CallToolResult): string[] {
   return (result.content || [])
     .filter((item): item is Extract<(typeof result.content)[number], { type: 'text' }> => {
@@ -17,13 +29,85 @@ function extractTextContent(result: CallToolResult): string[] {
     .filter(Boolean);
 }
 
+function parseFirstJsonObject(textParts: string[]): Record<string, unknown> | null {
+  const first = textParts[0];
+  if (!first) return null;
+  try {
+    const parsed = JSON.parse(first) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
+export function selectAiFacingToolContext(result: CallToolResult): AiFacingToolContext | null {
+  const textParts = extractTextContent(result);
+  const payload = parseFirstJsonObject(textParts);
+  if (!payload) return null;
+  const envelope = readRecord(payload.aiContextEnvelope);
+  if (!envelope || envelope.envelopeKind !== 'delta_context') return null;
+  const delta = readRecord(envelope.deltaContext);
+  if (!delta) return null;
+  const dataSourceDecision = readRecord(envelope.dataSourceDecision);
+
+  return {
+    contextKind: 'delta_context',
+    contextSource: readString(envelope.contextSource),
+    deltaKind: readString(delta.deltaKind),
+    selectedDataSource: readString(envelope.selectedDataSource),
+    changedRegions: readStringArray(delta.changedRegions),
+    reusedRegions: readStringArray(delta.reusedRegions),
+    contextChars: readNumber(delta.contextChars),
+    contextSavedChars: readNumber(delta.contextSavedChars),
+    sourceConfidence: readNumber(dataSourceDecision?.sourceConfidence),
+  };
+}
+
+function summarizeAiFacingContext(context: AiFacingToolContext): string {
+  const changed = context.changedRegions.length > 0 ? context.changedRegions.join(',') : 'none';
+  const reused = context.reusedRegions.length > 0 ? context.reusedRegions.join(',') : 'none';
+  const saved =
+    context.contextSavedChars === null ? 'unknown' : String(Math.max(0, context.contextSavedChars));
+  return [
+    `AI context: ${context.deltaKind ?? 'unknown_delta'}`,
+    `source=${context.contextSource ?? 'unknown'}`,
+    `data=${context.selectedDataSource ?? 'unknown'}`,
+    `changed=${changed}`,
+    `reused=${reused}`,
+    `savedChars=${saved}`,
+  ].join('; ');
+}
+
 export function normalizeToolCallResult(
   toolName: string,
   result: CallToolResult,
 ): ToolCallNormalization {
   const textParts = extractTextContent(result);
+  const aiFacingContext = result.isError ? null : selectAiFacingToolContext(result);
   const summary =
-    textParts[0] || (result.isError ? `Tool ${toolName} failed` : `Tool ${toolName} succeeded`);
+    (aiFacingContext ? summarizeAiFacingContext(aiFacingContext) : null) ||
+    textParts[0] ||
+    (result.isError ? `Tool ${toolName} failed` : `Tool ${toolName} succeeded`);
 
   if (result.isError) {
     return {
@@ -50,7 +134,7 @@ export function normalizeToolCallResult(
     executionResult: {
       status: 'success',
       summary,
-      data: result,
+      data: aiFacingContext ? { rawResult: result, aiFacingContext } : result,
       warnings: [],
       errors: [],
       artifacts: [],
