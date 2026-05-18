@@ -768,14 +768,15 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           lifecycleTimeline:
             decision.reason === 'read_redundant' ? taskContext.getLifecycleTimeline() : null,
         });
+        const normalizedWarning = normalizeToolCallResult(name, warningResult);
         sessionManager.completeStep(session.sessionId, step.stepId, {
           status: 'completed',
-          resultSummary: `chrome_read_page short-circuited (${warning})`,
+          resultSummary: normalizedWarning.stepSummary,
           operationLog,
         });
         sessionManager.finishSession(session.sessionId, {
           status: 'completed',
-          summary: `chrome_read_page short-circuited (${warning})`,
+          summary: normalizedWarning.executionResult.summary,
         });
         return warningResult;
       }

@@ -1119,6 +1119,10 @@ describe('handleToolCall execution wrapper', () => {
         },
       });
       expect(flowSpy).toHaveBeenCalledTimes(1);
+      const persisted = sessionManager.listSessions().at(-1);
+      expect(persisted?.summary).toBe(
+        'AI context: post_action_delta; source=cached_page_projection_delta; data=dom_json; changed=viewport; reused=none; savedChars=0',
+      );
     });
 
     it('marks AI-facing delta as real-browser evidence only for real tab projections', async () => {
