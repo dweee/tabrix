@@ -2771,11 +2771,12 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
             });
           } else {
             // Fallback to basic extraction
-            const textContent = document.body.innerText;
+            const fallback = extractFallbackTextContent();
             sendResponse({
               success: true,
-              textContent: textContent,
+              textContent: fallback.textContent,
               fallback: true,
+              fallbackSource: fallback.source,
             });
           }
         }
@@ -2871,6 +2872,57 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
     }
 
     return allIframeText.trim();
+  }
+
+  /**
+   * Extract fallback text when Readability cannot identify an article.
+   * Some SPA/virtual-list pages expose long answer bodies through textContent
+   * even when innerText is empty or too small.
+   * @returns {{textContent: string, source: string}}
+   */
+  function extractFallbackTextContent() {
+    const innerText = document.body?.innerText || '';
+    if (innerText.trim().length >= config.minTextLength) {
+      return {
+        textContent: cleanContent(innerText),
+        source: 'body_innerText',
+      };
+    }
+
+    const blockTexts = [];
+    const candidates = document.body
+      ? document.body.querySelectorAll(
+          'article, main, section, [role="main"], p, li, h1, h2, h3, h4, td, pre, blockquote, div',
+        )
+      : [];
+
+    for (const element of candidates) {
+      if (!isElementVisible(element)) continue;
+      if (element.closest('script, style, noscript, nav, aside')) continue;
+
+      const text = (element.textContent || '').replace(/\s+/g, ' ').trim();
+      if (text.length < config.minTextLength) continue;
+
+      const parentText = (element.parentElement?.textContent || '').replace(/\s+/g, ' ').trim();
+      if (parentText === text && element.parentElement && element.parentElement !== document.body) {
+        continue;
+      }
+
+      if (!blockTexts.includes(text)) {
+        blockTexts.push(text);
+      }
+
+      if (blockTexts.join('\n\n').length > config.maxTotalLength) {
+        break;
+      }
+    }
+
+    const textContent =
+      blockTexts.length > 0 ? blockTexts.join('\n\n') : document.body?.textContent || '';
+    return {
+      textContent: cleanContent(textContent),
+      source: blockTexts.length > 0 ? 'visible_textContent_blocks' : 'body_textContent',
+    };
   }
 
   /**
