@@ -185,12 +185,20 @@ export function extractTabIdFromCallToolResult(data: unknown): number | null {
 }
 
 export function extractInvalidTabIdsFromCallToolResult(data: unknown): number[] {
+  return extractPositiveIntegerArrayFromCallToolResult(data, 'invalidTabIds');
+}
+
+export function extractClosedTabIdsFromCallToolResult(data: unknown): number[] {
+  return extractPositiveIntegerArrayFromCallToolResult(data, 'closedTabIds');
+}
+
+function extractPositiveIntegerArrayFromCallToolResult(data: unknown, key: string): number[] {
   const payloads = extractObjectPayloadsFromCallToolResult(data);
   const ids = new Set<number>();
   for (const payload of payloads) {
-    const invalidTabIds = payload.invalidTabIds;
-    if (!Array.isArray(invalidTabIds)) continue;
-    for (const value of invalidTabIds) {
+    const values = payload[key];
+    if (!Array.isArray(values)) continue;
+    for (const value of values) {
       if (Number.isInteger(value) && value > 0) ids.add(value as number);
     }
   }

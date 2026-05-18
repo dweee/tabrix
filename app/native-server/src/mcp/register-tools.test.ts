@@ -399,6 +399,67 @@ describe('handleToolCall execution wrapper', () => {
     });
   });
 
+  it('releases run-owned tab ids reported as closed by cleanup', async () => {
+    markBridgeReady();
+    jest
+      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ tabId: 88 }) }],
+          isError: false,
+        },
+      } as never)
+      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                closedTabIds: [88],
+                invalidTabIds: [],
+              }),
+            },
+          ],
+          isError: false,
+        },
+      } as never)
+      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ tabId: 99 }) }],
+          isError: false,
+        },
+      } as never);
+
+    await handleToolCall('chrome_navigate', {
+      url: 'https://example.test/run-owned',
+      taskSessionId: 'w4b-closed-run-owned',
+    });
+    const cleanupResult = await handleToolCall('chrome_close_tabs', {
+      tabIds: [88],
+      taskSessionId: 'w4b-closed-run-owned',
+    });
+
+    expect(cleanupResult.isError).toBe(false);
+
+    const nextNavigateResult = await handleToolCall('chrome_navigate', {
+      url: 'https://example.test/next',
+      taskSessionId: 'w4b-closed-run-owned',
+    });
+    const nextNavigatePayload = JSON.parse(String(nextNavigateResult.content[0].text));
+    expect(nextNavigatePayload.runtimePolicyAudit).toMatchObject({
+      verdict: 'allow',
+      reason: 'new_run_owned_tab',
+      runOwnedTabIds: [],
+    });
+  });
+
   it('blocks strict impact actions on explicit tabs not owned by the task', async () => {
     markBridgeReady();
     const bridgeSpy = jest

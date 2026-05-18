@@ -40,6 +40,7 @@ import {
   createPolicyDeniedResult,
 } from './tool-call-results';
 import {
+  extractClosedTabIdsFromCallToolResult,
   extractInvalidTabIdsFromCallToolResult,
   extractTabIdFromCallToolResult,
   extractRequestedLayer,
@@ -977,6 +978,9 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       // bridge-confirmed read_page call.
       recordSuccessfulReadPage('unknown');
       if (name === 'chrome_close_tabs' && taskContext && rawResultWithEvidence.isError !== true) {
+        for (const closedTabId of extractClosedTabIdsFromCallToolResult(rawResultWithEvidence)) {
+          taskContext.releaseRunOwnedTab(closedTabId);
+        }
         for (const invalidTabId of extractInvalidTabIdsFromCallToolResult(rawResultWithEvidence)) {
           taskContext.releaseRunOwnedTab(invalidTabId);
         }
