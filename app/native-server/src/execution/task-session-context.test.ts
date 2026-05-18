@@ -435,5 +435,10 @@ describe('TaskSessionContext — V28 run-owned tab ownership', () => {
 
     expect(ctx.getRunOwnedTabIds()).toEqual([7]);
     expect(ctx.isRunOwnedTab(42)).toBe(false);
+
+    ctx.releaseRunOwnedTab(7);
+
+    expect(ctx.getRunOwnedTabIds()).toEqual([]);
+    expect(ctx.isRunOwnedTab(7)).toBe(false);
   });
 });

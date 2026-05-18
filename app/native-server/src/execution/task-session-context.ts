@@ -602,6 +602,12 @@ export class TaskSessionContext {
     }
   }
 
+  public releaseRunOwnedTab(tabId: number): void {
+    if (Number.isInteger(tabId) && tabId > 0) {
+      this.runOwnedTabIds.delete(tabId);
+    }
+  }
+
   public isRunOwnedTab(tabId: number): boolean {
     return this.runOwnedTabIds.has(tabId);
   }

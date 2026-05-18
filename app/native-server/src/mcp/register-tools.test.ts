@@ -337,6 +337,68 @@ describe('handleToolCall execution wrapper', () => {
     expect(bridgeSpy).toHaveBeenCalledTimes(4);
   });
 
+  it('releases stale run-owned tab ids reported as invalid by cleanup', async () => {
+    markBridgeReady();
+    jest
+      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ tabId: 77 }) }],
+          isError: false,
+        },
+      } as never)
+      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                closedTabIds: [],
+                invalidTabIds: [77],
+              }),
+            },
+          ],
+          isError: false,
+        },
+      } as never);
+
+    await handleToolCall('chrome_navigate', {
+      url: 'https://example.test/run-owned',
+      taskSessionId: 'w4b-stale-run-owned',
+    });
+    const cleanupResult = await handleToolCall('chrome_close_tabs', {
+      tabIds: [77],
+      taskSessionId: 'w4b-stale-run-owned',
+    });
+
+    expect(cleanupResult.isError).toBe(false);
+    const cleanupPayload = JSON.parse(String(cleanupResult.content[0].text));
+    expect(cleanupPayload.runtimePolicyAudit).toMatchObject({
+      verdict: 'allow',
+      reason: 'run_owned_tab',
+      runOwnedTabIds: [77],
+    });
+
+    const strictClickResult = await handleToolCall('chrome_click_element', {
+      tabId: 77,
+      ref: 'ref_77',
+      taskSessionId: 'w4b-stale-run-owned',
+      nonInterferencePolicy: 'strict',
+    });
+    expect(strictClickResult.isError).toBe(true);
+    const strictClickPayload = JSON.parse(String(strictClickResult.content[0].text));
+    expect(strictClickPayload.runtimePolicyAudit).toMatchObject({
+      verdict: 'block',
+      reason: 'non_run_owned_tab',
+      runOwnedTabIds: [],
+    });
+  });
+
   it('blocks strict impact actions on explicit tabs not owned by the task', async () => {
     markBridgeReady();
     const bridgeSpy = jest

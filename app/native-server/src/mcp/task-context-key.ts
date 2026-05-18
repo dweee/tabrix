@@ -183,3 +183,40 @@ export function extractTabIdFromCallToolResult(data: unknown): number | null {
   }
   return null;
 }
+
+export function extractInvalidTabIdsFromCallToolResult(data: unknown): number[] {
+  const payloads = extractObjectPayloadsFromCallToolResult(data);
+  const ids = new Set<number>();
+  for (const payload of payloads) {
+    const invalidTabIds = payload.invalidTabIds;
+    if (!Array.isArray(invalidTabIds)) continue;
+    for (const value of invalidTabIds) {
+      if (Number.isInteger(value) && value > 0) ids.add(value as number);
+    }
+  }
+  return Array.from(ids).sort((left, right) => left - right);
+}
+
+function extractObjectPayloadsFromCallToolResult(data: unknown): Array<Record<string, unknown>> {
+  const payloads: Array<Record<string, unknown>> = [];
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    payloads.push(data as Record<string, unknown>);
+    const content = (data as { content?: unknown }).content;
+    if (Array.isArray(content)) {
+      for (const entry of content) {
+        if (!entry || typeof entry !== 'object') continue;
+        const text = (entry as { text?: unknown }).text;
+        if (typeof text !== 'string' || text.length === 0) continue;
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            payloads.push(parsed as Record<string, unknown>);
+          }
+        } catch {
+          // Not JSON — skip.
+        }
+      }
+    }
+  }
+  return payloads;
+}
