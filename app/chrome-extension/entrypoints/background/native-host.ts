@@ -35,6 +35,7 @@ const RECONNECT_MAX_FAST_ATTEMPTS = 8;
 const RECONNECT_COOLDOWN_DELAY_MS = 5 * 60_000;
 const HEARTBEAT_INTERVAL_MS = 5_000;
 const BRIDGE_COMMAND_TIMEOUT_MS = 15_000;
+const BRIDGE_NAVIGATION_COMMAND_TIMEOUT_MS = 30_000;
 const BRIDGE_WS_BACKOFF_MS = [1_000, 2_000, 5_000, 10_000] as const;
 
 // ==================== Auto-connect State ====================
@@ -596,6 +597,14 @@ async function withBridgeCommandTimeout<T>(promise: Promise<T>, timeoutMs: numbe
   }
 }
 
+function bridgeCommandTimeoutMs(message: BridgeCommandMessage): number {
+  const toolName = message.command.payload?.name;
+  if (message.command.action === 'call_tool' && toolName === 'chrome_navigate') {
+    return BRIDGE_NAVIGATION_COMMAND_TIMEOUT_MS;
+  }
+  return BRIDGE_COMMAND_TIMEOUT_MS;
+}
+
 async function handleBridgeCommandMessage(message: BridgeCommandMessage): Promise<void> {
   const sendResult = async (result: BridgeResultMessage): Promise<void> => {
     try {
@@ -609,7 +618,7 @@ async function handleBridgeCommandMessage(message: BridgeCommandMessage): Promis
     if (message.command.action === 'call_tool') {
       const result = await withBridgeCommandTimeout(
         handleCallTool(message.command.payload),
-        BRIDGE_COMMAND_TIMEOUT_MS,
+        bridgeCommandTimeoutMs(message),
       );
       await sendResult({
         type: 'result',

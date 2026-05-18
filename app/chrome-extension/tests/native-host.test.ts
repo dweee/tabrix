@@ -727,7 +727,7 @@ describe('native host reconnect behavior', () => {
     });
   });
 
-  it('returns a websocket bridge error when a tool call exceeds the command timeout', async () => {
+  it('returns a websocket bridge error when a non-navigation tool call exceeds the command timeout', async () => {
     const firstPort = createMockPort();
     const harness = createChromeHarness([firstPort]);
     const wsHarness = createMockWebSocketHarness();
@@ -752,7 +752,7 @@ describe('native host reconnect behavior', () => {
       sentAt: Date.now(),
       command: {
         action: 'call_tool',
-        payload: { name: 'chrome_navigate', args: { url: 'https://example.test' } },
+        payload: { name: 'chrome_read_page', args: { tabId: 1 } },
       },
     });
     await vi.advanceTimersByTimeAsync(15_000);
@@ -766,6 +766,75 @@ describe('native host reconnect behavior', () => {
       requestId: 'req-timeout',
       success: false,
       error: 'Bridge command timed out after 15000ms',
+    });
+  });
+
+  it('allows navigation calls to exceed the default bridge timeout and return structured results', async () => {
+    const firstPort = createMockPort();
+    const harness = createChromeHarness([firstPort]);
+    const wsHarness = createMockWebSocketHarness();
+    (globalThis as any).chrome = harness.chromeMock;
+    (globalThis as any).WebSocket = wsHarness.MockWebSocket as any;
+
+    const toolsModule = await import('@/entrypoints/background/tools');
+    vi.mocked(toolsModule.handleCallTool).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    success: true,
+                    settled: false,
+                    settleReason: 'timeout',
+                    pageReadable: false,
+                    canAttemptStructuredRead: true,
+                  }),
+                },
+              ],
+              isError: false,
+            } as any);
+          }, 16_000);
+        }),
+    );
+
+    const nativeHostModule = await import('@/entrypoints/background/native-host');
+    nativeHostModule.initNativeHostListener();
+    await flushMicrotasks();
+
+    wsHarness.instances[0].emitOpen();
+    await flushMicrotasks();
+    wsHarness.instances[0].sent.length = 0;
+
+    wsHarness.instances[0].emitMessage({
+      type: 'command',
+      requestId: 'req-navigation',
+      connectionId: 'bridge-1',
+      sentAt: Date.now(),
+      command: {
+        action: 'call_tool',
+        payload: { name: 'chrome_navigate', args: { url: 'https://example.test' } },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(15_000);
+    await flushMicrotasks();
+    expect(
+      wsHarness.instances[0].sent
+        .map((entry) => JSON.parse(entry))
+        .find((entry) => entry.requestId === 'req-navigation'),
+    ).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flushMicrotasks();
+    const navigationResult = wsHarness.instances[0].sent
+      .map((entry) => JSON.parse(entry))
+      .find((entry) => entry.requestId === 'req-navigation');
+    expect(navigationResult).toMatchObject({
+      type: 'result',
+      requestId: 'req-navigation',
+      success: true,
     });
   });
 });
