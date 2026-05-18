@@ -250,9 +250,11 @@ function buildModeOutput(params: {
     ...stableLayer,
     ...extensionLayer,
   };
+  const observedAt = new Date().toISOString();
   sharedPayload.pageProjection = buildBrowserPageThingProjectionFromReadPage({
     snapshot: sharedPayload,
     projectionId: `read_page:${params.tabId}:${sharedPayload.historyRef ?? 'snapshot'}`,
+    observedAt,
     pageId: `tab:${params.tabId}`,
     tabId: params.tabId,
     ownerType: 'unknown',

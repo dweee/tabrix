@@ -26,6 +26,41 @@ export const BROWSER_TASK_SCENARIO_CLASS_VALUES = [
 ] as const;
 export type BrowserTaskScenarioClass = (typeof BROWSER_TASK_SCENARIO_CLASS_VALUES)[number];
 
+export const BROWSER_TASK_SCENARIO_PRIORITY_ORDER = [
+  'search_result_delta_v1',
+  'article_long_content_read_v1',
+  'background_no_focus_v1',
+  'active_user_tab_protection_v1',
+  'auth_collaboration_resume_v1',
+  'competitor_same_scenario_v1',
+] as const satisfies readonly BrowserTaskScenarioClass[];
+
+export const BROWSER_ASSISTANT_CLIENT_VALUES = [
+  'claude_code',
+  'codex',
+  'qwenpaw',
+  'cursor',
+  'unknown',
+] as const;
+export type BrowserAssistantClient = (typeof BROWSER_ASSISTANT_CLIENT_VALUES)[number] | string;
+
+export const BROWSER_PROFILE_MODE_VALUES = ['same_profile', 'isolated', 'unknown'] as const;
+export type BrowserProfileMode = (typeof BROWSER_PROFILE_MODE_VALUES)[number];
+
+export const BROWSER_COMPARISON_MODE_VALUES = [
+  'same_profile',
+  'not_comparable',
+  'reference_only',
+] as const;
+export type BrowserComparisonMode = (typeof BROWSER_COMPARISON_MODE_VALUES)[number];
+
+export const BROWSER_USER_BOUNDARY_MODE_VALUES = [
+  'protected_user_workspace',
+  'run_owned_workspace',
+  'unknown',
+] as const;
+export type BrowserUserBoundaryMode = (typeof BROWSER_USER_BOUNDARY_MODE_VALUES)[number];
+
 export const BROWSER_EXECUTION_MODE_VALUES = [
   'run_owned',
   'background',
@@ -132,8 +167,27 @@ export type BrowserUserActivityLevel = (typeof BROWSER_USER_ACTIVITY_LEVEL_VALUE
 export const BROWSER_INTERFERENCE_RISK_VALUES = ['none', 'low', 'medium', 'high'] as const;
 export type BrowserInterferenceRisk = (typeof BROWSER_INTERFERENCE_RISK_VALUES)[number];
 
+export const BROWSER_PROJECTION_KIND_VALUES = ['read_snapshot_projection'] as const;
+export type BrowserProjectionKind = (typeof BROWSER_PROJECTION_KIND_VALUES)[number];
+
+export const BROWSER_SOURCE_LINEAGE_VALUES = [
+  'dom',
+  'accessibility',
+  'api',
+  'cdp',
+  'text',
+  'mixed',
+  'unknown',
+] as const;
+export type BrowserSourceLineage = (typeof BROWSER_SOURCE_LINEAGE_VALUES)[number];
+
 export interface BrowserPageThingProjection {
   projectionId: string;
+  projectionKind: BrowserProjectionKind;
+  projectionCreatedAt: string;
+  sourceObservedAt: string;
+  sourceLineage: BrowserSourceLineage;
+  regionEvidenceRefs: string[];
   pageId: string;
   tabId: number;
   ownerType: BrowserPageOwnerType;
@@ -159,6 +213,13 @@ export interface BrowserPageThingProjection {
 
 export interface BrowserTaskThingSummary {
   taskId: string;
+  runId: string;
+  assistantClient: BrowserAssistantClient;
+  profileMode: BrowserProfileMode;
+  comparisonMode: BrowserComparisonMode;
+  userBoundaryMode: BrowserUserBoundaryMode;
+  startedAt: string;
+  endedAt: string | null;
   scenarioId: string;
   scenarioClass: BrowserTaskScenarioClass;
   status: BrowserTaskStatus;
@@ -185,6 +246,17 @@ export type BrowserTaskEvidenceLevel = (typeof BROWSER_TASK_EVIDENCE_LEVEL_VALUE
 export const BROWSER_EVIDENCE_FRESHNESS_VALUES = ['fresh', 'stale', 'expired'] as const;
 export type BrowserEvidenceFreshness = (typeof BROWSER_EVIDENCE_FRESHNESS_VALUES)[number];
 
+export const BROWSER_COMPETITOR_LANE_VALUES = [
+  'same_profile_extension',
+  'same_profile_mcp',
+  'isolated_browser',
+  'headless_agent',
+  'benchmark_only',
+  'not_comparable',
+  'not_applicable',
+] as const;
+export type BrowserCompetitorLane = (typeof BROWSER_COMPETITOR_LANE_VALUES)[number];
+
 export interface BrowserRejectedDataSource {
   source: ReadPageSelectedDataSource;
   reason: string;
@@ -205,7 +277,7 @@ export interface BrowserDataSourceDecisionEvidence {
 }
 
 export interface BrowserPolicyAuditEvent {
-  attribute: keyof BrowserRuntimePolicy;
+  field: keyof BrowserRuntimePolicy;
   requestedValue: unknown;
   previousValue: unknown;
   effectiveValue: unknown;
@@ -236,9 +308,10 @@ export interface BrowserTaskEvidence {
   artifactPath: string;
   evidenceLevel: BrowserTaskEvidenceLevel;
   freshness: BrowserEvidenceFreshness;
+  competitorLane: BrowserCompetitorLane;
   browserHygiene: BrowserHygieneEvidence;
   dataSourceDecision: BrowserDataSourceDecisionEvidence;
-  policyAudit: BrowserPolicyAuditEvent[];
+  runtimePolicyAudit: BrowserPolicyAuditEvent[];
   privacyRedaction: BrowserPrivacyRedactionEvidence;
   claimCoverage: BrowserClaimCoverageEvidence;
 }
@@ -246,6 +319,7 @@ export interface BrowserTaskEvidence {
 export interface BuildBrowserPageThingProjectionInput {
   snapshot: ReadPageCompactSnapshot;
   projectionId: string;
+  observedAt: string;
   pageId: string;
   tabId: number;
   ownerType: BrowserPageOwnerType;
@@ -273,6 +347,11 @@ export function buildBrowserPageThingProjectionFromReadPage(
 
   return {
     projectionId: input.projectionId,
+    projectionKind: 'read_snapshot_projection',
+    projectionCreatedAt: input.observedAt,
+    sourceObservedAt: input.observedAt,
+    sourceLineage: inferSourceLineage(chooseProjectionDataSource(snapshot)),
+    regionEvidenceRefs: buildRegionEvidenceRefs(snapshot),
     pageId: input.pageId,
     tabId: input.tabId,
     ownerType: input.ownerType,
@@ -295,6 +374,25 @@ export function buildBrowserPageThingProjectionFromReadPage(
     userActivityLevel: input.userActivityLevel ?? 'unknown',
     interferenceRisk: input.interferenceRisk ?? 'medium',
   };
+}
+
+function inferSourceLineage(source: ReadPageSelectedDataSource): BrowserSourceLineage {
+  if (source === 'api_rows') return 'api';
+  if (source === 'cdp_enhanced_api_rows') return 'cdp';
+  if (source === 'markdown') return 'text';
+  if (source === 'dom_region_rows' || source === 'dom_json') return 'dom';
+  return 'unknown';
+}
+
+function buildRegionEvidenceRefs(snapshot: ReadPageCompactSnapshot): string[] {
+  const refs = new Set<string>();
+  if (snapshot.visibleRegionRows?.sourceRegion) {
+    refs.add(`region:${snapshot.visibleRegionRows.sourceRegion}`);
+  }
+  for (const row of snapshot.visibleRegionRows?.rows ?? []) {
+    refs.add(`row:${row.rowId}`);
+  }
+  return [...refs];
 }
 
 function chooseProjectionDataSource(snapshot: ReadPageCompactSnapshot): ReadPageSelectedDataSource {
