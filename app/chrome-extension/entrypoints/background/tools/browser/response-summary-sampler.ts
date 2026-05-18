@@ -188,6 +188,8 @@ function selectSummaryRows(parsed: unknown): {
     }
   }
   if (!list) return { rows: [], listLength: null };
+  const nestedList = flattenNestedSummaryRows(list, arrayKeys);
+  if (nestedList.length > 0) list = nestedList;
   const rows: Array<Record<string, string | number | boolean | null>> = [];
   for (const raw of list.slice(0, MAX_ROWS)) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
@@ -203,6 +205,23 @@ function selectSummaryRows(parsed: unknown): {
     if (Object.keys(row).length > 0) rows.push(row);
   }
   return { rows, listLength: list.length };
+}
+
+function flattenNestedSummaryRows(list: unknown[], arrayKeys: string[]): unknown[] {
+  const nested: unknown[] = [];
+  for (const raw of list.slice(0, MAX_ROWS)) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const rawObject = raw as Record<string, unknown>;
+    for (const key of arrayKeys) {
+      const child = rawObject[key];
+      if (!Array.isArray(child)) continue;
+      const rowLike = child.filter(
+        (item) => item && typeof item === 'object' && !Array.isArray(item),
+      );
+      if (rowLike.length > 0) nested.push(...rowLike);
+    }
+  }
+  return nested.slice(0, MAX_ROWS);
 }
 
 function containsSensitiveField(parsed: unknown): boolean {

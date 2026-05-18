@@ -284,6 +284,26 @@ describe('classifyEndpointCandidate — V27-06 semantic typer', () => {
     expect(r.rowClassification.semanticType).toBe('mutation');
   });
 
+  it('classifies shape-evidenced multi-query POST endpoints as list', () => {
+    const r = classifyEndpointCandidate({
+      url: 'https://search-provider.example.test/1/indexes/*/queries?x-provider-agent=redacted',
+      method: 'POST',
+      type: 'xhr',
+      mimeType: 'application/json',
+      status: 200,
+      shape: shape({
+        kind: 'array',
+        rowCount: 10,
+        sampleItemKeys: ['description', 'title'],
+      }),
+    });
+    expect(r.semanticType).toBe('list');
+    expect(r.noiseReason).toBeNull();
+    expect(r.confidence).toBeGreaterThanOrEqual(0.7);
+    expect(r.evidenceLevel).toBe('shape_evidenced');
+    expect(r.rowClassification.semanticType).toBe('mutation');
+  });
+
   it('does not promote write-shaped POST endpoints even with JSON shape evidence', () => {
     const r = classifyEndpointCandidate({
       url: 'https://api.example.test/api/web/v1/notes/like',

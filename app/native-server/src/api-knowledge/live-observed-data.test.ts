@@ -725,6 +725,65 @@ describe('live-observed-data selector', () => {
     expect(JSON.stringify(out.selected[0])).not.toMatch(/"responseBody"/);
   });
 
+  it('allows multi-query search provider safe summary rows when they match the task query', () => {
+    const out = run({
+      bundle: {
+        observationMode: 'cdp_enhanced',
+        cdpUsed: true,
+        cdpDetachSuccess: true,
+        debuggerConflict: false,
+        responseBodySource: 'debugger_api',
+        rawBodyPersisted: false,
+        bodyCompacted: true,
+        requests: [
+          {
+            url: 'https://search-provider.example.test/1/indexes/*/queries?x-provider-agent=redacted',
+            method: 'POST',
+            type: 'XHR',
+            requestTime: 2000,
+            statusCode: 200,
+            mimeType: 'application/json',
+            safeResponseSummary: {
+              responseSummarySource: 'browser_context_summary',
+              bridgePath: 'main_world_to_content_to_native',
+              capturedAfterArm: true,
+              rawBodyPersisted: false,
+              privacyCheck: 'passed',
+              rejectedReason: null,
+              rows: [
+                {
+                  title: 'AI Search',
+                  description:
+                    'Algolia AI Search helps teams build search and discovery experiences.',
+                },
+              ],
+              rowCount: 10,
+              emptyResult: false,
+              fieldShapeSummaryAvailable: true,
+              fieldNames: ['description', 'title'],
+              taskQueryValueMatched: null,
+              samplerArmedAt: 1000,
+              capturedAt: 2100,
+            },
+          },
+        ],
+      },
+      selectorContext: {
+        currentPageUrl: 'https://www.example.test/search?query=AI%20Search',
+      },
+    });
+
+    expect(out.rejected).toHaveLength(0);
+    expect(out.selected[0]).toMatchObject({
+      selectedDataSource: 'cdp_enhanced_api_rows',
+      responseSummarySource: 'browser_context_summary',
+      pageRegion: 'task_query_network',
+      rowCount: 1,
+      rawBodyStored: false,
+    });
+    expect(out.selected[0].rows[0]?.title).toBe('AI Search');
+  });
+
   it('allows safe summary rows when CDP request time uses a monotonic clock', () => {
     const out = run({
       bundle: {

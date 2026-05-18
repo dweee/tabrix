@@ -166,7 +166,13 @@ export function deriveLiveObservedApiDataFromBundle(
       bundleCdpEvidence,
     });
 
-    const rowsResult = buildLiveRows(req, candidate, bundleCdpEvidence);
+    const allowTaskMatchedSafeSummaryRows =
+      relevance.relevant &&
+      relevance.pageRegion === 'task_query_network' &&
+      responsePayloadMatchesCurrentTask(req, input.selectorContext);
+    const rowsResult = buildLiveRows(req, candidate, bundleCdpEvidence, {
+      allowTaskMatchedSafeSummaryRows,
+    });
     if (!rowsResult.ok) {
       if (contentResult.ok && relevance.relevant) {
         selected.push({
@@ -336,6 +342,9 @@ function buildLiveRows(
   req: CapturedNetworkRequest,
   candidate: EndpointCandidate,
   cdpEvidence: LiveObservedCdpEvidence,
+  options?: {
+    allowTaskMatchedSafeSummaryRows?: boolean;
+  },
 ):
   | {
       ok: true;
@@ -375,7 +384,10 @@ function buildLiveRows(
     if (summary.privacyCheck === 'failed') {
       return { ok: false, cause: summary.rejectedReason ?? 'privacy_check_failed' };
     }
-    if (candidate.confidence < LIVE_OBSERVED_CONFIDENCE_FLOOR) {
+    if (
+      candidate.confidence < LIVE_OBSERVED_CONFIDENCE_FLOOR &&
+      options?.allowTaskMatchedSafeSummaryRows !== true
+    ) {
       return { ok: false, cause: 'low_confidence' };
     }
     if (summary.fieldShapeSummaryAvailable !== true && summary.emptyResult !== true) {

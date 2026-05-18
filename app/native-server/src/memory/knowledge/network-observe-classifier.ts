@@ -143,7 +143,7 @@ const DETAIL_TAIL_RE =
 const COLLECTION_PATH_RE =
   /\/(items|posts|articles|stories|comments|users|orgs|repos|issues|pulls|packages|search\/[a-z]+|catalog|index|topics|threads)\/?$/i;
 const READ_SHAPED_POST_PATH_RE =
-  /\b(search|query|lookup|autocomplete|suggest|list|items|results|records|rows|notes|packages|repositories)\b/i;
+  /\b(search|query|queries|lookup|autocomplete|suggest|list|items|results|records|rows|notes|packages|repositories)\b/i;
 const WRITE_SHAPED_PATH_RE =
   /\b(create|update|delete|remove|save|submit|upload|download|mutate|mutation|like|unlike|follow|unfollow|favorite|bookmark|comment|reply|share|checkout|purchase|order|login|logout|auth|token)\b/i;
 

@@ -230,6 +230,87 @@ describe('V27-CDP-01 network debugger controlled evidence', () => {
     );
   });
 
+  it('compacts nested search hits from multi-query JSON responses', async () => {
+    sendCommandMock.mockImplementation(async (_tabId: number, method: string) => {
+      if (method === 'Network.getResponseBody') {
+        return {
+          body: JSON.stringify({
+            results: [
+              {
+                nbHits: 8015,
+                hits: [
+                  {
+                    title: 'Browser automation guide',
+                    description: 'Use browser automation to test workflows.',
+                    url: 'https://example.test/browser-automation',
+                    objectID: 'opaque-result-id',
+                  },
+                ],
+              },
+            ],
+          }),
+          base64Encoded: false,
+        };
+      }
+      return {};
+    });
+    const start = await networkDebuggerStartTool.execute({
+      tabId: 88,
+      maxCaptureTime: 0,
+      inactivityTimeout: 0,
+    });
+    expect(start.isError).toBe(false);
+
+    const emitDebuggerEvent = (
+      networkDebuggerStartTool as unknown as {
+        handleDebuggerEvent: DebuggerListener;
+      }
+    ).handleDebuggerEvent.bind(networkDebuggerStartTool);
+
+    emitDebuggerEvent({ tabId: 88 }, 'Network.requestWillBeSent', {
+      requestId: 'multi-query',
+      request: {
+        url: 'https://search-provider.example.test/1/indexes/*/queries',
+        method: 'POST',
+      },
+      type: 'XHR',
+      timestamp: 100,
+    });
+    emitDebuggerEvent({ tabId: 88 }, 'Network.responseReceived', {
+      requestId: 'multi-query',
+      type: 'XHR',
+      timestamp: 101,
+      response: {
+        url: 'https://search-provider.example.test/1/indexes/*/queries',
+        status: 200,
+        statusText: 'OK',
+        mimeType: 'application/json',
+        headers: { 'content-type': 'application/json' },
+      },
+    });
+    await emitDebuggerEvent({ tabId: 88 }, 'Network.loadingFinished', {
+      requestId: 'multi-query',
+      encodedDataLength: 128,
+    });
+
+    const stop = await networkDebuggerStopTool.execute({ tabId: 88 });
+    const stopPayload = JSON.parse(String(stop.content[0].text));
+
+    expect(stop.isError).toBe(false);
+    expect(stopPayload.requests[0].safeResponseSummary).toMatchObject({
+      rowCount: 1,
+      fieldShapeSummaryAvailable: true,
+      rows: [
+        {
+          title: 'Browser automation guide',
+          description: 'Use browser automation to test workflows.',
+        },
+      ],
+    });
+    expect(stopPayload.requests[0].safeResponseSummary.rows[0]).not.toHaveProperty('url');
+    expect(stopPayload.requests[0].safeResponseSummary.rows[0]).not.toHaveProperty('objectID');
+  });
+
   it('reports debugger conflict as fallback evidence without claiming CDP use', async () => {
     attachMock.mockRejectedValueOnce(new Error('Debugger is already attached to tab 88'));
 
