@@ -855,6 +855,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           taskContext.noteRunOwnedTab(returnedTabId);
         }
       }
+      if (taskContext && shouldInvalidateReadAfterInteraction(name)) {
+        taskContext.notePageInteraction({
+          action: name,
+          tabId: readPositiveInteger(args, 'tabId'),
+        });
+      }
       const postResult = runPostProcessor({
         toolName: name,
         rawResult: response.data,
@@ -1114,6 +1120,14 @@ function attachReadPagePayloadMetadata(
         : block,
     ) as CallToolResult['content'],
   };
+}
+
+function shouldInvalidateReadAfterInteraction(toolName: string): boolean {
+  return (
+    toolName === TOOL_NAMES.BROWSER.CLICK ||
+    toolName === TOOL_NAMES.BROWSER.FILL ||
+    toolName === TOOL_NAMES.BROWSER.KEYBOARD
+  );
 }
 
 function attachAiFacingDeltaContext(

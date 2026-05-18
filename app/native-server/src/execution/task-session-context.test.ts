@@ -141,6 +141,27 @@ describe('TaskSessionContext — redundancy + layer demotion', () => {
     expect(decision.allowed).toBe(true);
     expect(decision.reason).toBe('');
   });
+
+  it('allows a fresh read after a successful page interaction', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteUrlChange('https://github.com/search?q=ACP&type=repositories', 'search_results');
+    ctx.noteReadPage({
+      layer: 'L0+L1',
+      source: 'dom_region_rows',
+      targetRefs: ['ref_1'],
+    });
+    expect(ctx.shouldAllowReadPage({ requestedLayer: 'L0+L1' }).reason).toBe('read_redundant');
+
+    ctx.notePageInteraction({ action: 'chrome_keyboard', tabId: 9 });
+
+    const decision = ctx.shouldAllowReadPage({ requestedLayer: 'L0+L1' });
+    expect(decision.allowed).toBe(true);
+    expect(decision.reason).toBe('');
+    expect(decision.suggestedLayer).toBe('L0+L1');
+    expect(ctx.targetRefsSeen.size).toBe(0);
+    expect(ctx.peekChooseContextDecision()).toBeNull();
+    expect(ctx.peekVisibleRegionRows()).toBeNull();
+  });
 });
 
 describe('TaskSessionContext — URL / pageRole invalidation', () => {
@@ -417,6 +438,30 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
       changedRegions: undefined,
       cleanupTargetIds: undefined,
     });
+  });
+
+  it('records interaction invalidation without discarding delta baseline', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteUrlChange('https://example.test/search', 'search_page');
+    ctx.notePageProjectionAndBuildDelta(makeProjection());
+    ctx.notePageInteraction({ action: 'chrome_keyboard', tabId: 9 });
+
+    const delta = ctx.notePageProjectionAndBuildDelta(
+      makeProjection({
+        projectionId: 'projection_after_scroll',
+        contextVersion: 'projection_after_scroll',
+        previousContextVersion: 'projection_initial',
+        changedByActionId: 'chrome_keyboard',
+        changeCause: 'pagination',
+        contextChars: 900,
+        contextSavedChars: 100,
+      }),
+    );
+
+    expect(delta.deltaKind).toBe('post_action_delta');
+    expect(delta.fromProjectionId).toBe('projection_initial');
+    expect(delta.toProjectionId).toBe('projection_after_scroll');
+    expect(ctx.getLifecycleTimeline().map((event) => event.kind)).toContain('refs_invalidated');
   });
 });
 

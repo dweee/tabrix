@@ -176,6 +176,11 @@ export interface NoteReadPageInput {
   apiFamilies?: ReadonlyArray<string> | null;
 }
 
+export interface NotePageInteractionInput {
+  action: string;
+  tabId?: number | null;
+}
+
 /**
  * Record a successful skip-read execution. Increments
  * `taskTotals.readPageAvoidedCount` and folds `tokensSavedEstimate` into
@@ -583,6 +588,28 @@ export class TaskSessionContext {
           this.apiEndpointFamiliesSeen.add(family);
       }
     }
+  }
+
+  public notePageInteraction(input: NotePageInteractionInput): void {
+    this.lastReadLayer = null;
+    this.lastReadSource = null;
+    this.targetRefsSeen.clear();
+    this._chooseContextDecision = null;
+    this.liveObservedApiData.length = 0;
+    this.liveObservedApiEvidence.length = 0;
+    this.visibleRegionRows = null;
+    const tabId =
+      typeof input.tabId === 'number' && Number.isInteger(input.tabId) && input.tabId > 0
+        ? input.tabId
+        : null;
+    this.recordLifecycleEvent({
+      kind: 'refs_invalidated',
+      url: this.currentUrl,
+      pageRole: this.pageRole,
+      tabId: tabId ?? undefined,
+      invalidatedRefs: ['interaction_may_change_page'],
+      projectionId: input.action,
+    });
   }
 
   public noteCleanup(input: { action: string; targetIds?: ReadonlyArray<number> | null }): void {

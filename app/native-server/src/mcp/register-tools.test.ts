@@ -1535,6 +1535,46 @@ describe('handleToolCall execution wrapper', () => {
       expect(auto.readPageCount).toBe(2);
     });
 
+    it('page interactions invalidate redundancy state for the next read on the same task', async () => {
+      markBridgeReady();
+      const ctx = sessionManager.getOrCreateExternalTaskContext('interaction-task');
+      ctx.noteRunOwnedTab(9);
+      Object.defineProperty(ctx, 'readBudget', { value: 5, writable: false });
+
+      mockReadPageRoundTrip('before-keyboard');
+      await handleToolCall('chrome_read_page', {
+        tabId: 9,
+        taskSessionId: 'interaction-task',
+        requestedLayer: 'L0+L1',
+      });
+      expect(ctx.lastReadLayer).toBe('L0+L1');
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: { content: [{ type: 'text', text: 'paged' }], isError: false },
+        } as never);
+      await handleToolCall('chrome_keyboard', {
+        tabId: 9,
+        keys: 'PageDown',
+        taskSessionId: 'interaction-task',
+      });
+      expect(ctx.lastReadLayer).toBeNull();
+
+      mockReadPageRoundTrip('after-keyboard');
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 9,
+        taskSessionId: 'interaction-task',
+        requestedLayer: 'L0+L1',
+      });
+      expect(String(result.content[0].text)).toBe('after-keyboard');
+      expect(result.isError).toBeFalsy();
+      expect(ctx.lastReadLayer).toBe('L0+L1');
+      expect(ctx.readPageCount).toBe(2);
+    });
+
     it('different tabIds do NOT share redundant state on the default MCP path', async () => {
       markBridgeReady();
       const tab1 = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
