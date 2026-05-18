@@ -1057,6 +1057,70 @@ describe('handleToolCall execution wrapper', () => {
       });
     });
 
+    it('returns cached AI-facing context for redundant same-layer reads without a bridge read', async () => {
+      markBridgeReady();
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_cached',
+          contextChars: 3600,
+          changedRegions: ['viewport'],
+          refreshedRefs: ['ref_cached'],
+          pageId: 'tab:7',
+          tabId: 7,
+        }),
+      );
+      const first = await handleToolCall('chrome_read_page', {
+        tabId: 7,
+        taskSessionId: 'redundant-delta-task',
+        requestedLayer: 'L0+L1',
+      });
+      const firstPayload = JSON.parse(String(first.content[0].text));
+      expect(firstPayload.deltaContext).toMatchObject({
+        deltaKind: 'initial_overview',
+        toProjectionId: 'projection_cached',
+      });
+
+      const flowSpy = jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never);
+      flowSpy.mockClear();
+      flowSpy.mockResolvedValueOnce({ status: 'success', items: [] } as never);
+      const second = await handleToolCall('chrome_read_page', {
+        tabId: 7,
+        taskSessionId: 'redundant-delta-task',
+        requestedLayer: 'L0+L1',
+      });
+      const secondPayload = JSON.parse(String(second.content[0].text));
+
+      expect(secondPayload.warning).toBe('read_redundant');
+      expect(secondPayload.pageProjection).toMatchObject({
+        projectionId: 'projection_cached',
+        tabId: 7,
+      });
+      expect(secondPayload.deltaContext).toMatchObject({
+        deltaKind: 'post_action_delta',
+        fromProjectionId: 'projection_cached',
+        toProjectionId: 'projection_cached',
+        changedRegions: ['viewport'],
+        refreshedRefs: ['ref_cached'],
+        evidenceBoundary: {
+          evidenceLevel: 'real_browser',
+          realBrowserClaim: true,
+        },
+      });
+      expect(secondPayload.aiContextEnvelope).toMatchObject({
+        contextSource: 'cached_page_projection_delta',
+        selectedDataSource: 'dom_json',
+        dataSourceDecision: {
+          selectedSource: 'dom_json',
+          selectedReason: 'cached_projection_reused_for_redundant_read',
+          privacySafety: 'redacted',
+        },
+      });
+      expect(flowSpy).toHaveBeenCalledTimes(1);
+    });
+
     it('marks AI-facing delta as real-browser evidence only for real tab projections', async () => {
       markBridgeReady();
       mockReadPageRoundTrip(

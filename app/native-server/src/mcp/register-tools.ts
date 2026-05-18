@@ -755,6 +755,18 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           decision,
           requestedLayer,
           operationLogHint,
+          cachedProjection:
+            decision.reason === 'read_redundant' ? taskContext.peekLastPageProjection() : null,
+          cachedDeltaContext:
+            decision.reason === 'read_redundant'
+              ? taskContext.buildCachedPageProjectionDelta()
+              : null,
+          cachedDataSourceDecision:
+            decision.reason === 'read_redundant'
+              ? taskContext.buildCachedDataSourceDecision()
+              : null,
+          lifecycleTimeline:
+            decision.reason === 'read_redundant' ? taskContext.getLifecycleTimeline() : null,
         });
         sessionManager.completeStep(session.sessionId, step.stepId, {
           status: 'completed',

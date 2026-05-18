@@ -27,6 +27,7 @@
 
 import {
   buildBrowserPageProjectionDelta,
+  type BrowserDataSourceDecisionEvidence,
   type BrowserPageProjectionDeltaEvidenceBoundary,
   type BrowserPageProjectionDelta,
   type BrowserPageThingProjection,
@@ -565,6 +566,40 @@ export class TaskSessionContext {
     this.lastPageProjection = cloneBrowserPageThingProjection(projection);
     this.recordProjectionLifecycleEvents(projection, delta);
     return delta;
+  }
+
+  public peekLastPageProjection(): BrowserPageThingProjection | null {
+    return this.lastPageProjection
+      ? cloneBrowserPageThingProjection(this.lastPageProjection)
+      : null;
+  }
+
+  public buildCachedPageProjectionDelta(): BrowserPageProjectionDelta | null {
+    if (!this.lastPageProjection) return null;
+    return buildBrowserPageProjectionDelta({
+      previousProjection: this.lastPageProjection,
+      currentProjection: this.lastPageProjection,
+      deltaId: `delta:cached:${this.lastPageProjection.projectionId}`,
+      deltaKind: 'post_action_delta',
+      evidenceBoundary: inferProjectionEvidenceBoundary(this.lastPageProjection),
+    });
+  }
+
+  public buildCachedDataSourceDecision(): BrowserDataSourceDecisionEvidence | null {
+    if (!this.lastPageProjection) return null;
+    return {
+      availableSources: [this.lastPageProjection.chosenDataSource],
+      selectedSource: this.lastPageProjection.chosenDataSource,
+      selectedReason: 'cached_projection_reused_for_redundant_read',
+      rejectedSources: [],
+      regionCorrelation: this.lastPageProjection.regionEvidenceRefs.length > 0 ? 1 : null,
+      taskRelevance: null,
+      privacySafety: 'redacted',
+      metadataCompleteness: this.lastPageProjection.regionEvidenceRefs.length > 0 ? 1 : null,
+      sourceFreshness: this.lastPageProjection.sourceFreshness,
+      sourceConfidence: this.lastPageProjection.sourceConfidence,
+      fallbackReason: null,
+    };
   }
 
   /**
