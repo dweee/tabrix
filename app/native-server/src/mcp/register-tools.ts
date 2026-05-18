@@ -80,6 +80,7 @@ import {
 import { listDynamicFlowTools } from './dynamic-flow-tools';
 import { proxyDynamicFlowTool } from './dynamic-flow-proxy';
 import {
+  recordPrimaryTabCleanupOutcome,
   recordPrimaryTabNavigationOutcome,
   resolvePrimaryTabOutgoingArgs,
 } from './primary-tab-outgoing-args';
@@ -978,7 +979,9 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       // bridge-confirmed read_page call.
       recordSuccessfulReadPage('unknown');
       if (name === 'chrome_close_tabs' && taskContext && rawResultWithEvidence.isError !== true) {
-        for (const closedTabId of extractClosedTabIdsFromCallToolResult(rawResultWithEvidence)) {
+        const closedTabIds = extractClosedTabIdsFromCallToolResult(rawResultWithEvidence);
+        recordPrimaryTabCleanupOutcome({ closedTabIds, primaryTabController });
+        for (const closedTabId of closedTabIds) {
           taskContext.releaseRunOwnedTab(closedTabId);
         }
         for (const invalidTabId of extractInvalidTabIdsFromCallToolResult(rawResultWithEvidence)) {

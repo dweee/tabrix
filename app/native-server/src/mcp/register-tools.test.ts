@@ -3,6 +3,7 @@ import { handleToolCall } from './register-tools';
 import { sessionManager } from '../execution/session-manager';
 import { bridgeRuntimeState } from '../server/bridge-state';
 import { bridgeCommandChannel } from '../server/bridge-command-channel';
+import { resetDefaultPrimaryTabController } from '../runtime/primary-tab-controller';
 
 describe('handleToolCall execution wrapper', () => {
   const markBridgeReady = () => {
@@ -28,6 +29,7 @@ describe('handleToolCall execution wrapper', () => {
   afterEach(() => {
     jest.restoreAllMocks();
     bridgeRuntimeState.reset();
+    resetDefaultPrimaryTabController();
     sessionManager.reset();
     delete process.env.ENABLE_MCP_TOOLS;
     delete process.env.DISABLE_MCP_TOOLS;
@@ -458,6 +460,7 @@ describe('handleToolCall execution wrapper', () => {
       reason: 'new_run_owned_tab',
       runOwnedTabIds: [],
     });
+    expect(bridgeRuntimeState.getSnapshot().benchmarkOwnedTabCount).toBe(1);
   });
 
   it('blocks strict impact actions on explicit tabs not owned by the task', async () => {

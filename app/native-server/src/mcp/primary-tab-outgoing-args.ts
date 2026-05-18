@@ -2,6 +2,15 @@ import type { PrimaryTabController } from '../runtime/primary-tab-controller';
 import { bridgeRuntimeState } from '../server/bridge-state';
 import { extractTabIdFromCallToolResult } from './task-context-key';
 
+function publishPrimaryTabSnapshot(primaryTabController: PrimaryTabController): void {
+  const ptSnapshot = primaryTabController.getSnapshot();
+  bridgeRuntimeState.setPrimaryTabSnapshot({
+    primaryTabId: ptSnapshot.primaryTabId,
+    primaryTabReuseRate: ptSnapshot.primaryTabReuseRate,
+    benchmarkOwnedTabCount: ptSnapshot.benchmarkOwnedTabCount,
+  });
+}
+
 export function resolvePrimaryTabOutgoingArgs(
   name: string,
   args: any,
@@ -34,10 +43,14 @@ export function recordPrimaryTabNavigationOutcome(input: {
       ? ((args as any).url as string)
       : null;
   primaryTabController.recordNavigation({ returnedTabId: responseTabId, url });
-  const ptSnapshot = primaryTabController.getSnapshot();
-  bridgeRuntimeState.setPrimaryTabSnapshot({
-    primaryTabId: ptSnapshot.primaryTabId,
-    primaryTabReuseRate: ptSnapshot.primaryTabReuseRate,
-    benchmarkOwnedTabCount: ptSnapshot.benchmarkOwnedTabCount,
-  });
+  publishPrimaryTabSnapshot(primaryTabController);
+}
+
+export function recordPrimaryTabCleanupOutcome(input: {
+  closedTabIds: ReadonlyArray<number>;
+  primaryTabController: PrimaryTabController;
+}): void {
+  const { closedTabIds, primaryTabController } = input;
+  primaryTabController.recordClosedTabs(closedTabIds);
+  publishPrimaryTabSnapshot(primaryTabController);
 }
