@@ -38,9 +38,11 @@ function summarizeVisibleText(text: string) {
     quality,
     warning: contentSparse
       ? 'Visible text is sparse. Prefer chrome_read_page for structured UI extraction before escalating to higher-risk tools.'
-      : structureSparse
+      : structureSparse && completeTextAvailable
         ? 'Visible text appears complete but structurally sparse. Prefer chrome_read_page when you need UI regions or target refs.'
-        : null,
+        : structureSparse
+          ? 'Visible text has limited structure and may be incomplete. Prefer chrome_read_page or htmlContent when completeness matters.'
+          : null,
   };
 }
 
@@ -182,9 +184,15 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
           if (result.textSummary.contentSparse) {
             result.extractionHint =
               'Visible text is sparse for this route. Prefer chrome_read_page to inspect structured UI before using javascript or coordinate-based fallbacks.';
-          } else if (result.textSummary.structureSparse) {
+          } else if (
+            result.textSummary.structureSparse &&
+            result.textSummary.completeTextAvailable
+          ) {
             result.extractionHint =
               'Visible text appears complete but structurally sparse for this route. Use chrome_read_page only when structured UI regions or target refs are needed.';
+          } else if (result.textSummary.structureSparse) {
+            result.extractionHint =
+              'Visible text has limited structure and may be incomplete for this route. Use chrome_read_page or htmlContent when completeness matters.';
           }
         } else {
           console.error('Failed to get text content:', textResponse.error);

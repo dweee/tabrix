@@ -577,6 +577,60 @@ describe('browser settle guidance', () => {
     expect(payload.extractionHint).not.toContain('higher-risk tools');
   });
 
+  it('does not call medium single-line text complete when structure is sparse', async () => {
+    vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: false,
+        status: 'complete',
+        url: 'https://chat.deepseek.com/share/example',
+        title: 'DeepSeek',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 200,
+      readyState: 'complete',
+    });
+    vi.mocked(chrome.tabs.create).mockResolvedValue({
+      id: 20,
+      windowId: 1,
+      active: false,
+      status: 'loading',
+      url: 'https://chat.deepseek.com/share/example',
+      title: 'Loading',
+    } as chrome.tabs.Tab);
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(webFetcherTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      textContent:
+        'Shared conversation prompt text is visible, but the generated answer body is not present in the current DOM.',
+      metadata: { lang: 'en' },
+    });
+
+    const result = await webFetcherTool.execute({
+      url: 'https://chat.deepseek.com/share/example',
+      background: true,
+      textContent: true,
+    });
+
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload.textSummary).toMatchObject({
+      quality: 'sparse',
+      sparse: true,
+      structureSparse: true,
+      contentSparse: false,
+      completeTextAvailable: false,
+      warning:
+        'Visible text has limited structure and may be incomplete. Prefer chrome_read_page or htmlContent when completeness matters.',
+    });
+    expect(payload.extractionHint).toBe(
+      'Visible text has limited structure and may be incomplete for this route. Use chrome_read_page or htmlContent when completeness matters.',
+    );
+    expect(payload.extractionHint).not.toContain('appears complete');
+  });
+
   it('returns compact structured snapshot from read_page', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 41,
