@@ -244,6 +244,47 @@ describe('browser settle guidance', () => {
     });
   });
 
+  it('uses pendingUrl for timed out new-tab navigation readiness guidance', async () => {
+    vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
+    vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: true,
+        status: 'loading',
+        url: '',
+        pendingUrl: 'https://github.com/search?q=ACP&type=repositories',
+        title: 'Repository search results',
+      },
+      settled: false,
+      timedOut: true,
+      reason: 'timeout',
+      waitedMs: 8000,
+      readyState: 'interactive',
+    });
+
+    const result = await navigateTool.execute({
+      url: 'https://github.com/search?q=ACP&type=repositories',
+      background: true,
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      requestedUrl: 'https://github.com/search?q=ACP&type=repositories',
+      finalUrl: 'https://github.com/search?q=ACP&type=repositories',
+      status: 'loading',
+      settled: false,
+      settleReason: 'timeout',
+      waitedMs: 8000,
+      readyState: 'interactive',
+      pageReadable: false,
+      canAttemptStructuredRead: true,
+      nextStepHint: 'navigation_interactive; structured_read_may_succeed',
+    });
+  });
+
   it('bounds new background tab creation timeout and cleans only newly-created blank tabs', async () => {
     vi.useFakeTimers();
     vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);

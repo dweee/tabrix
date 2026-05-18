@@ -53,6 +53,10 @@ function buildNavigationReadinessFields(input: {
   };
 }
 
+function getTabNavigationUrl(tab?: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'> | null): string {
+  return tab?.url || tab?.pendingUrl || '';
+}
+
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
   try {
@@ -613,8 +617,12 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
           // Trigger auto-capture on new tab
           if (newTab.id) {
-            await this.triggerAutoCapture(newTab.id, settleResult?.tab.url || newTab.url);
+            await this.triggerAutoCapture(
+              newTab.id,
+              getTabNavigationUrl(settleResult?.tab || newTab),
+            );
           }
+          const finalNavigationUrl = getTabNavigationUrl(settleResult?.tab || newTab);
 
           return {
             content: [
@@ -627,7 +635,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                   windowId: targetWindow.id,
                   targetWindowReason,
                   requestedUrl: url,
-                  finalUrl: settleResult?.tab.url || newTab.url,
+                  finalUrl: finalNavigationUrl,
                   status: settleResult?.tab.status || newTab.status,
                   settled: settleResult?.settled ?? false,
                   settleReason: settleResult?.reason || null,
@@ -636,7 +644,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                   ...buildNavigationReadinessFields({
                     settled: settleResult?.settled ?? false,
                     readyState: settleResult?.readyState || null,
-                    finalUrl: settleResult?.tab.url || newTab.url,
+                    finalUrl: finalNavigationUrl,
                     status: settleResult?.tab.status || newTab.status,
                   }),
                 }),
