@@ -949,4 +949,64 @@ describe('read_page mode', () => {
     expect(payload.completeTextRegion.normalizedLength).toBeGreaterThan(500);
     expect(payload.markdown).not.toContain(repeatedLongBody);
   });
+
+  it('keeps complete visible text route hints when visible rows are already usable', async () => {
+    const longBody = [
+      '如下是我个人对物模型的设想和定义。',
+      '物模型包含静态属性、时序属性、可控调节属性和服务/动作。',
+      '这段长内容模拟分享页中已经被结构化 rows 捕获，但仍需要完整正文 route hint。',
+    ].join('');
+    const repeatedLongBody = longBody.repeat(10);
+
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5243,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.com/shared-rows-and-long-content',
+      title: 'Shared Rows And Long Content',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sampleVisibleTextContent').mockResolvedValue(repeatedLongBody);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Shared conversation" [ref=ref_main] (x=300,y=80)',
+        '  - article "Shared answer" [ref=ref_card_1] (x=360,y=120)',
+        `    - link "${longBody}" [ref=ref_card_1_link] (x=360,y=150) href="/share/answer-1"`,
+        '    - generic "来自分享的对话" [ref=ref_card_1_source] (x=360,y=190)',
+        '  - article "Shared answer" [ref=ref_card_2] (x=360,y=460)',
+        '    - link "根据你的解释 哪可控调节属性 是不是也归属到 服务/动作中？" [ref=ref_card_2_link] (x=360,y=490) href="/share/answer-2"',
+        '    - generic "继续聊" [ref=ref_card_2_source] (x=360,y=530)',
+        '    - generic "正文段落 A" [ref=ref_card_1_body_a] (x=360,y=220)',
+        '    - generic "正文段落 B" [ref=ref_card_1_body_b] (x=360,y=250)',
+        '    - generic "正文段落 C" [ref=ref_card_1_body_c] (x=360,y=280)',
+        '    - generic "正文段落 D" [ref=ref_card_1_body_d] (x=360,y=310)',
+        '    - generic "正文段落 E" [ref=ref_card_1_body_e] (x=360,y=340)',
+        '    - generic "正文段落 F" [ref=ref_card_1_body_f] (x=360,y=370)',
+        '    - generic "正文段落 G" [ref=ref_card_1_body_g] (x=360,y=400)',
+        '    - generic "正文段落 H" [ref=ref_card_1_body_h] (x=360,y=430)',
+        '  - textbox "发送消息" [ref=ref_input] (x=360,y=600)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_card_1_link', selector: 'a[href="/share/answer-1"]' },
+        { ref: 'ref_card_2_link', selector: 'a[href="/share/answer-2"]' },
+        { ref: 'ref_input', selector: 'textarea' },
+      ],
+      stats: { processed: 20, included: 3, durationMs: 12 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact', render: 'markdown' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.visibleRegionRows.visibleRegionRowsUsed).toBe(true);
+    expect(payload.completeTextRegion).toMatchObject({
+      completeTextAvailable: true,
+      recommendation: 'use_chrome_get_web_content_for_full_body',
+    });
+    expect(payload.completeTextRegion.normalizedLength).toBeGreaterThan(500);
+    expect(payload.markdown).not.toContain(repeatedLongBody);
+  });
 });
