@@ -1235,6 +1235,45 @@ describe('handleToolCall execution wrapper', () => {
       });
     });
 
+    it('surfaces data source decision truthfulness for live observed API rows', async () => {
+      markBridgeReady();
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_api_rows',
+          contextChars: 2400,
+          changedRegions: ['api_rows'],
+          selectedDataSource: 'cdp_enhanced_api_rows',
+          projectionDataSource: 'cdp_enhanced_api_rows',
+          extraPayload: {
+            rowCount: 10,
+            metadataCompleteness: 1,
+            decisionReason: 'live_observed_current_task_api_data',
+          },
+        }),
+      );
+
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'api-rows-truthfulness-task',
+        requestedLayer: 'L0+L1',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.aiContextEnvelope.dataSourceDecision).toMatchObject({
+        availableSources: ['cdp_enhanced_api_rows'],
+        selectedSource: 'cdp_enhanced_api_rows',
+        selectedReason: 'live_observed_current_task_api_data',
+        rejectedSources: [],
+        regionCorrelation: 1,
+        taskRelevance: null,
+        privacySafety: 'redacted',
+        metadataCompleteness: 1,
+        sourceFreshness: 'fresh',
+        sourceConfidence: 0.9,
+        fallbackReason: null,
+      });
+    });
+
     it('preserves markdown reading surface instead of replacing it with DOM rows', async () => {
       markBridgeReady();
       const ctx = sessionManager.getOrCreateExternalTaskContext('markdown-long-read');

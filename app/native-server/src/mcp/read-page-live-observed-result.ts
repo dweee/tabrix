@@ -57,6 +57,20 @@ export function buildLiveObservedApiRowsSuccessResult(args: {
     responseBodySource: liveObserved.responseBodySource,
     bodyCompacted: liveObserved.bodyCompacted,
   };
+  const dataSourceDecision = {
+    availableSources: [liveObserved.selectedDataSource],
+    selectedSource: liveObserved.selectedDataSource,
+    selectedReason: 'live_observed_current_task_api_data',
+    rejectedSources: [],
+    fallbackReason: null,
+    regionCorrelation: liveObserved.correlationScore,
+    taskRelevance: liveObserved.correlationScore,
+    privacySafety: liveObserved.privacyCheck === 'passed' ? 'redacted' : 'unknown',
+    metadataCompleteness:
+      liveObserved.rowCount > 0 && liveObserved.fieldShapeSummaryAvailable ? 1 : 0,
+    sourceFreshness: 'fresh',
+    sourceConfidence: liveObserved.correlationScore,
+  };
   const apiPayload = {
     kind: liveObserved.selectedDataSource,
     readPageAvoided: true,
@@ -66,6 +80,13 @@ export function buildLiveObservedApiRowsSuccessResult(args: {
     dataSource: sourceKind,
     selectedDataSource: liveObserved.selectedDataSource,
     decisionReason: 'live_observed_current_task_api_data',
+    dataSourceDecision,
+    aiContextEnvelope: {
+      envelopeKind: 'live_observed_api_context',
+      contextSource: 'live_observed_current_task_api_data',
+      selectedDataSource: liveObserved.selectedDataSource,
+      dataSourceDecision,
+    },
     dispatcherInputSource: 'chrome_network_capture',
     fallbackPlan: {
       dataSource: 'dom_json',

@@ -470,8 +470,8 @@ export class TaskSessionContext {
     data: ReadonlyArray<LiveObservedApiData>,
     evidence: ReadonlyArray<LiveObservedApiEvidence> = [],
   ): void {
-    for (const item of data) {
-      this.liveObservedApiData.unshift(cloneLiveObservedApiData(item));
+    for (let index = data.length - 1; index >= 0; index -= 1) {
+      this.liveObservedApiData.unshift(cloneLiveObservedApiData(data[index]));
     }
     for (const item of evidence) {
       this.liveObservedApiEvidence.unshift({ ...item });

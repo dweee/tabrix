@@ -537,6 +537,47 @@ describe('deriveKnowledgeFromBundle', () => {
     expect(blob).not.toContain('Shared conversation');
   });
 
+  it('persists shape-evidenced read-shaped POST endpoints as observed search rows', () => {
+    const out = deriveKnowledgeFromBundle(
+      {
+        requests: [
+          {
+            url: 'https://search-provider.example.test/1/indexes/Item_dev/query',
+            method: 'POST',
+            type: 'xmlhttprequest',
+            mimeType: 'application/json',
+            statusCode: 200,
+            responseBody: JSON.stringify({
+              hits: [
+                {
+                  title: 'browser automation tools',
+                  points: 42,
+                  comments: 7,
+                },
+              ],
+            }),
+          },
+        ],
+      },
+      CTX,
+    );
+    const blob = JSON.stringify(out);
+
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      family: 'observed',
+      site: 'search-provider.example.test',
+      method: 'POST',
+      semanticType: 'search',
+      usableForTask: true,
+      noiseReason: null,
+      endpointSource: 'observed',
+      responseShapeSummary: 'object:keys=1',
+    });
+    expect(out[0].urlPattern).toBe('search-provider.example.test/:id/indexes/Item_dev/query');
+    expect(blob).not.toContain('browser automation');
+  });
+
   it('V26-FIX-03 — also writes classifier fields for GitHub family rows', () => {
     const out = deriveKnowledgeFromBundle(
       {

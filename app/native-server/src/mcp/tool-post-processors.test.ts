@@ -632,4 +632,69 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
       manager.close();
     }
   });
+
+  it('keeps shape-evidenced cross-origin POST search rows in task context', () => {
+    process.env[ENV_KEY] = 'api_knowledge';
+    const { manager, session, step } = bootstrap();
+    const taskContext = new TaskSessionContext();
+    const raw = wrap({
+      tabUrl: 'https://hn.algolia.com/?q=browser%20automation',
+      observationMode: 'cdp_enhanced',
+      cdpUsed: true,
+      cdpReason: 'need_response_body',
+      cdpAttachDurationMs: 8,
+      cdpDetachSuccess: true,
+      debuggerConflict: false,
+      responseBodySource: 'debugger_api',
+      rawBodyPersisted: false,
+      bodyCompacted: true,
+      requests: [
+        {
+          url: 'https://search-provider.example.test/1/indexes/Item_dev/query',
+          method: 'POST',
+          type: 'xmlhttprequest',
+          statusCode: 200,
+          mimeType: 'application/json',
+          specificResponseHeaders: { 'Content-Type': 'application/json; charset=UTF-8' },
+          responseBody: JSON.stringify({
+            hits: [
+              {
+                title: 'browser automation tools',
+                points: 42,
+                comments: 7,
+              },
+            ],
+          }),
+          base64Encoded: false,
+          responseBodySource: 'debugger_api',
+          rawBodyPersisted: false,
+          bodyCompacted: true,
+        },
+      ],
+    });
+
+    try {
+      runPostProcessor({
+        toolName: TOOL_NAMES.BROWSER.NETWORK_CAPTURE,
+        rawResult: raw,
+        stepId: step.stepId,
+        sessionId: session.sessionId,
+        sessionManager: manager,
+        taskContext,
+        args: {},
+      });
+
+      expect(taskContext.peekLiveObservedApiData()).toMatchObject({
+        selectedDataSource: 'cdp_enhanced_api_rows',
+        semanticType: 'search',
+        endpointSource: 'observed',
+        pageRegion: 'task_query_network',
+        responseSummarySource: 'debugger_body_probe',
+        responseBodySource: 'debugger_api',
+        rowCount: 1,
+      });
+    } finally {
+      manager.close();
+    }
+  });
 });

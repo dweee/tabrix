@@ -3,6 +3,10 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { NETWORK_FILTERS } from '@/common/constants';
+import {
+  buildSafeResponseSummaryFromJsonText,
+  type BrowserContextSafeResponseSummary,
+} from './response-summary-sampler';
 
 interface NetworkDebuggerStartToolParams {
   url?: string; // URL to navigate to or focus. If not provided, uses active tab.
@@ -36,6 +40,7 @@ interface NetworkRequestInfo {
   responseBodySource?: 'debugger_api';
   rawBodyPersisted?: false;
   bodyCompacted?: boolean;
+  safeResponseSummary?: BrowserContextSafeResponseSummary;
   base64Encoded?: boolean; // For responseBody
   encodedDataLength?: number; // Actual bytes received
   errorText?: string; // If loading failed
@@ -500,6 +505,18 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
           requestInfo.responseBodySource = 'debugger_api';
           requestInfo.rawBodyPersisted = false;
           requestInfo.bodyCompacted = responseBodyData.base64Encoded !== true;
+          requestInfo.safeResponseSummary =
+            buildSafeResponseSummaryFromJsonText({
+              url: requestInfo.url,
+              method: requestInfo.method,
+              status: requestInfo.statusCode ?? null,
+              contentType: requestInfo.mimeType ?? null,
+              body: responseBodyData.body ?? null,
+              base64Encoded: responseBodyData.base64Encoded,
+              capturedAfterArm: true,
+              samplerArmedAt: captureInfo.startTime,
+              capturedAt: Date.now(),
+            }) ?? undefined;
           captureInfo.responseBodySource = 'debugger_api';
           captureInfo.bodyCompacted =
             captureInfo.bodyCompacted || responseBodyData.base64Encoded !== true;

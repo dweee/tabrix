@@ -681,7 +681,7 @@ function classifyShapeEvidencedPostRead(
     if (typeof input.status !== 'number' || input.status < 200 || input.status >= 300) return null;
   }
   const type = (input.type || '').toLowerCase();
-  if (type && type !== 'fetch' && type !== 'xmlhttprequest') return null;
+  if (type && type !== 'fetch' && type !== 'xmlhttprequest' && type !== 'xhr') return null;
 
   const path = parsed.pathname.toLowerCase();
   if (WRITE_SHAPED_PATH_RE.test(path)) return null;

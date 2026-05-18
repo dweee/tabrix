@@ -131,6 +131,19 @@ describe('V27-CDP-01 network debugger controlled evidence', () => {
       rawBodyPersisted: false,
       bodyCompacted: true,
       base64Encoded: false,
+      safeResponseSummary: {
+        responseSummarySource: 'browser_context_summary',
+        rawBodyPersisted: false,
+        privacyCheck: 'passed',
+        method: 'GET',
+        rowCount: 1,
+        fieldShapeSummaryAvailable: true,
+        fieldNames: expect.arrayContaining(['score', 'title']),
+      },
+    });
+    expect(stopPayload.requests[0].safeResponseSummary.rows[0]).toMatchObject({
+      title: 'desk result',
+      score: 7,
     });
     expect(blob).toContain('responseBody');
     expect(blob).not.toContain('Authorization');

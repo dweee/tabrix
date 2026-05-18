@@ -69,6 +69,7 @@ const SENSITIVE_HEADER_NAMES: ReadonlySet<string> = new Set([
 
 const AUTH_HEADER_NAMES: ReadonlySet<string> = new Set(['authorization', 'proxy-authorization']);
 const COOKIE_HEADER_NAMES: ReadonlySet<string> = new Set(['cookie', 'set-cookie']);
+const READ_CANDIDATE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'POST']);
 
 const JSON_CONTENT_TYPE_RE = /\b(application\/json|application\/.*\+json|text\/json)\b/i;
 
@@ -248,9 +249,12 @@ export function deriveKnowledgeFromRequest(
   ctx: CaptureKnowledgeContext,
 ): UpsertKnowledgeApiEndpointInput | null {
   if (!req?.url || typeof req.url !== 'string') return null;
-  if (classifyCapturedRequestNoise(req) !== 'usable') return null;
 
   const method = normalizeMethod(req.method);
+  if (classifyCapturedRequestNoise(req) !== 'usable' && !canRecheckShapeEvidencedReadPost(req)) {
+    return null;
+  }
+  if (!READ_CANDIDATE_METHODS.has(method)) return null;
   // First try the family-aware GitHub classifier; if it
   // doesn't apply, fall back to a generic host-and-path normalizer
   // so non-platform URLs (HN, Wikipedia, …) can still seed Knowledge.
@@ -276,16 +280,32 @@ export function deriveKnowledgeFromRequest(
       base64Encoded: req.base64Encoded === true,
     });
 
-  // Generic semantic classifier. Family-agnostic; runs
-  // for GitHub rows too so the persisted `semantic_type` stays
-  // consistent across families.
-  const observed = classifyNetworkObserveEndpoint({
+  // Generic semantic classifier. Family-agnostic; runs for GitHub
+  // rows too so lineage can cite the legacy v1 verdict. The persisted
+  // task-facing semantic type uses the v2 candidate view below so
+  // shape-evidenced read-shaped POST endpoints are not frozen as
+  // mutation/noise rows.
+  const observedV1 = classifyNetworkObserveEndpoint({
     url: req.url,
     method,
     type: req.type,
     mimeType: contentType ?? undefined,
     queryKeys: requestSummary.queryKeys,
   });
+  const candidate = classifyEndpointCandidate({
+    url: req.url,
+    method,
+    type: req.type,
+    mimeType: contentType ?? undefined,
+    status:
+      typeof req.statusCode === 'number'
+        ? req.statusCode
+        : typeof req.status === 'number'
+          ? req.status
+          : null,
+    shape: summarizeEndpointShapeFromCapturedRequest(req, commonResponseHeaders),
+  });
+  const observed = mapCandidateToPersistedObserved(candidate, observedV1);
 
   // Derive `endpointSource` from the family
   // hint. `family='observed'` (any non-GitHub host) -> 'observed';
@@ -338,6 +358,53 @@ export function deriveKnowledgeFromRequest(
         endpointSource === 'seed_adapter' ? 'seed_adapter_default' : 'metadata_only',
     },
   };
+}
+
+function canRecheckShapeEvidencedReadPost(req: CapturedNetworkRequest): boolean {
+  if (normalizeMethod(req.method) !== 'POST') return false;
+  const type = (req.type || '').toLowerCase();
+  if (type && type !== 'fetch' && type !== 'xmlhttprequest' && type !== 'xhr') return false;
+  const mimeType = (req.mimeType || '').toLowerCase();
+  if (mimeType && !mimeType.includes('json')) return false;
+  return typeof req.responseBody === 'string' || req.safeResponseSummary?.capturedAfterArm === true;
+}
+
+function mapCandidateToPersistedObserved(
+  candidate: EndpointCandidate,
+  fallback: ReturnType<typeof classifyNetworkObserveEndpoint>,
+): Pick<
+  ReturnType<typeof classifyNetworkObserveEndpoint>,
+  'semanticType' | 'usableForTask' | 'noiseReason' | 'queryKeysSorted'
+> {
+  switch (candidate.semanticType) {
+    case 'search':
+    case 'list':
+    case 'detail':
+    case 'pagination':
+    case 'filter':
+      return {
+        semanticType: candidate.semanticType,
+        usableForTask: true,
+        noiseReason: null,
+        queryKeysSorted: candidate.queryKeysSorted,
+      };
+    case 'noise':
+      return {
+        semanticType: fallback.semanticType === 'mutation' ? 'unknown' : fallback.semanticType,
+        usableForTask: false,
+        noiseReason: candidate.noiseReason,
+        queryKeysSorted: candidate.queryKeysSorted,
+      };
+    case 'unknown_candidate':
+      return {
+        semanticType: 'unknown',
+        usableForTask: false,
+        noiseReason: candidate.noiseReason ?? fallback.noiseReason,
+        queryKeysSorted: candidate.queryKeysSorted,
+      };
+    default:
+      return fallback;
+  }
 }
 
 /**

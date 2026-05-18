@@ -487,3 +487,76 @@ describe('TaskSessionContext — V28 run-owned tab ownership', () => {
     expect(ctx.isRunOwnedTab(7)).toBe(false);
   });
 });
+
+describe('TaskSessionContext — live observed API data ordering', () => {
+  it('preserves selector priority when multiple candidates are recorded together', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    const base = {
+      endpointSource: 'observed' as const,
+      liveObservedEndpointId: null,
+      endpointSignature: 'POST search-provider.example.test/1/indexes/Item_dev/query',
+      semanticType: 'search' as const,
+      pageRegion: 'task_query_network',
+      correlationScore: 0.72,
+      fieldShapeSummaryAvailable: true,
+      privacyCheck: 'passed' as const,
+      fallbackCause: null,
+      fallbackUsed: false,
+      knowledgeUpserted: false,
+      observationMode: 'cdp_enhanced' as const,
+      cdpUsed: true,
+      cdpReason: 'need_response_body',
+      cdpAttachDurationMs: 1,
+      cdpDetachSuccess: true,
+      debuggerConflict: false,
+      responseBodySource: 'debugger_api' as const,
+      rawBodyPersisted: false as const,
+      bodyCompacted: true,
+      responseSummarySource: 'browser_context_summary' as const,
+      capturedAfterArm: true,
+      bridgePath: 'main_world_to_content_to_native' as const,
+      responseSummaryRejectedReason: null,
+      endpointFamily: 'search-provider.example.test/1/indexes/Item_dev/query',
+      compact: true as const,
+      rawBodyStored: false as const,
+    };
+
+    ctx.noteLiveObservedApiData([
+      {
+        ...base,
+        selectedDataSource: 'cdp_enhanced_api_rows',
+        dataPurpose: 'observed_search',
+        rows: [{ title: 'browser automation tools' }],
+        rowCount: 1,
+        contentText: null,
+        contentChars: 0,
+        contentSections: [],
+        contentSectionCount: 0,
+        emptyResult: false,
+        emptyReason: null,
+        emptyMessage: null,
+      },
+      {
+        ...base,
+        selectedDataSource: 'api_content',
+        dataPurpose: 'observed_search_content',
+        rows: [],
+        rowCount: 0,
+        contentText: 'browser automation summary',
+        contentChars: 26,
+        contentSections: [
+          { path: '$.hits[0].title', text: 'browser automation summary', chars: 26 },
+        ],
+        contentSectionCount: 1,
+        emptyResult: false,
+        emptyReason: null,
+        emptyMessage: null,
+      },
+    ]);
+
+    expect(ctx.peekLiveObservedApiData()).toMatchObject({
+      selectedDataSource: 'cdp_enhanced_api_rows',
+      rowCount: 1,
+    });
+  });
+});

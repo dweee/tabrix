@@ -20,7 +20,7 @@ import type {
   EndpointCandidateSemanticType,
 } from '../memory/knowledge/network-observe-classifier';
 import type { CorrelationConfidenceLevel } from '../memory/knowledge/knowledge-api-repository';
-import { findSensitivePaths } from '../runtime/privacy-gate';
+import { findSensitivePaths, isSensitiveKeyName } from '../runtime/privacy-gate';
 import { compactGenericRows } from './knowledge-driven-reader';
 
 const LIVE_OBSERVED_ROW_LIMIT = 10;
@@ -230,8 +230,28 @@ export function deriveLiveObservedApiDataFromBundle(
     });
   }
 
-  selected.sort((a, b) => b.correlationScore - a.correlationScore);
+  selected.sort(
+    (a, b) =>
+      liveObservedDataSourcePriority(b.selectedDataSource) -
+        liveObservedDataSourcePriority(a.selectedDataSource) ||
+      b.correlationScore - a.correlationScore,
+  );
   return { selected, rejected };
+}
+
+function liveObservedDataSourcePriority(
+  selectedDataSource: LiveObservedApiData['selectedDataSource'],
+): number {
+  switch (selectedDataSource) {
+    case 'cdp_enhanced_api_rows':
+      return 4;
+    case 'api_rows':
+      return 3;
+    case 'api_detail':
+      return 2;
+    case 'api_content':
+      return 1;
+  }
 }
 
 function buildObservedEndpointIdentity(
@@ -347,11 +367,9 @@ function buildLiveRows(
     if (summary.capturedAfterArm !== true) {
       return { ok: false, cause: 'response_summary_before_arm' };
     }
-    if (
-      typeof req.requestTime === 'number' &&
-      typeof summary.samplerArmedAt === 'number' &&
-      req.requestTime < summary.samplerArmedAt
-    ) {
+    const requestTime = req.requestTime;
+    const samplerArmedAt = summary.samplerArmedAt;
+    if (isEpochMs(requestTime) && isEpochMs(samplerArmedAt) && requestTime < samplerArmedAt) {
       return { ok: false, cause: 'response_before_sampler_arm' };
     }
     if (summary.privacyCheck === 'failed') {
@@ -366,15 +384,19 @@ function buildLiveRows(
     if (summary.emptyResult === true) {
       return { ok: true, selectedDataSource: 'api_rows', rows: [] };
     }
-    const safeSummaryPrivacy = findLiveRowsPrivacyLeak(summary.rows ?? []);
-    if (safeSummaryPrivacy !== null) {
-      return { ok: false, cause: safeSummaryPrivacy };
+    const sensitiveField = findSensitiveSummaryFieldName(summary.rows ?? []);
+    if (sensitiveField !== null) {
+      return { ok: false, cause: 'sensitive_row_content' };
     }
     const rows = Array.isArray(summary.rows)
       ? compactSafeSummaryRows(summary.rows, LIVE_OBSERVED_ROW_LIMIT)
       : [];
     if (rows.length === 0) {
       return { ok: false, cause: summary.rejectedReason ?? 'compact_rows_unavailable' };
+    }
+    const safeSummaryPrivacy = findLiveRowsPrivacyLeak(rows);
+    if (safeSummaryPrivacy !== null) {
+      return { ok: false, cause: safeSummaryPrivacy };
     }
     return {
       ok: true,
@@ -454,6 +476,10 @@ function buildLiveRows(
           : 'api_rows',
     rows,
   };
+}
+
+function isEpochMs(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 1_000_000_000_000;
 }
 
 function buildLiveContent(
@@ -615,7 +641,7 @@ function compactSafeSummaryRows(
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
     const row: ApiKnowledgeCompactRow = {};
     for (const key of Object.keys(raw)) {
-      if (SENSITIVE_FIELD_RE.test(key)) continue;
+      if (shouldDropSafeSummaryField(key)) continue;
       const value = raw[key];
       if (
         value === null ||
@@ -623,15 +649,76 @@ function compactSafeSummaryRows(
         typeof value === 'boolean' ||
         typeof value === 'string'
       ) {
-        row[key] =
-          typeof value === 'string' && value.length > SAFE_SUMMARY_STRING_VALUE_CAP
-            ? value.slice(0, SAFE_SUMMARY_STRING_VALUE_CAP)
-            : value;
+        const compacted = compactSafeSummaryScalarValue(key, value);
+        if (compacted !== undefined) row[key] = compacted;
       }
     }
+    const publicUrl = findSafeSummaryPublicUrl(raw);
+    if (publicUrl !== undefined) row.publicUrl = publicUrl;
     if (Object.keys(row).length > 0) out.push(row);
   }
   return out;
+}
+
+function shouldDropSafeSummaryField(key: string): boolean {
+  return (
+    SENSITIVE_FIELD_RE.test(key) || isSensitiveKeyName(key) || /(^|_)(object|record)?id$/i.test(key)
+  );
+}
+
+function compactSafeSummaryScalarValue(
+  key: string,
+  value: string | number | boolean | null,
+): string | number | boolean | null | undefined {
+  if (typeof value !== 'string') return value;
+  if (/(^|_)(url|href|link|permalink)$/i.test(key)) {
+    return undefined;
+  }
+  if (/^publicUrl$/i.test(key)) {
+    return sanitizeSummaryUrl(value);
+  }
+  if (value.length >= 32 && /^[A-Za-z0-9_-]+$/.test(value.trim())) return undefined;
+  return value.length > SAFE_SUMMARY_STRING_VALUE_CAP
+    ? value.slice(0, SAFE_SUMMARY_STRING_VALUE_CAP)
+    : value;
+}
+
+function sanitizeSummaryUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function findSafeSummaryPublicUrl(row: Record<string, unknown>): string | undefined {
+  for (const key of ['url', 'href', 'link', 'permalink', 'publicUrl']) {
+    const value = row[key];
+    if (typeof value !== 'string') continue;
+    const sanitized = sanitizeSummaryUrl(value);
+    if (sanitized !== undefined) return sanitized;
+  }
+  return undefined;
+}
+
+function findSensitiveSummaryFieldName(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const nested = findSensitiveSummaryFieldName(entry);
+      if (nested !== null) return nested;
+    }
+    return null;
+  }
+  if (!value || typeof value !== 'object') return null;
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (SENSITIVE_FIELD_RE.test(key)) return key;
+    const nested = findSensitiveSummaryFieldName(child);
+    if (nested !== null) return nested;
+  }
+  return null;
 }
 
 function findLiveRowsPrivacyLeak(value: unknown): string | null {
@@ -725,9 +812,38 @@ function buildRelevanceEvidence(args: {
     };
   }
   if (
+    READ_SHAPED_TYPES.has(args.candidate.semanticType) &&
+    responsePayloadMatchesCurrentTask(args.req, args.selectorContext)
+  ) {
+    return {
+      relevant: true,
+      fallbackCause: '',
+      pageRegion: 'task_query_network',
+      correlationScore: Math.max(
+        args.candidate.confidence,
+        LIVE_OBSERVED_TASK_QUERY_RELEVANCE_FLOOR,
+      ),
+    };
+  }
+  if (
     args.contentAvailable &&
     isContentSourceCandidate(args.req) &&
     sameOriginAsCurrentPage(args.req, args.selectorContext)
+  ) {
+    return {
+      relevant: true,
+      fallbackCause: '',
+      pageRegion: 'content_source_network',
+      correlationScore: Math.max(
+        args.candidate.confidence,
+        LIVE_OBSERVED_TASK_QUERY_RELEVANCE_FLOOR,
+      ),
+    };
+  }
+  if (
+    args.contentAvailable &&
+    isContentSourceCandidate(args.req) &&
+    responsePayloadMatchesCurrentTask(args.req, args.selectorContext)
   ) {
     return {
       relevant: true,
@@ -776,6 +892,41 @@ function sameOriginAsCurrentPage(
   const requestUrl = parseUrl(req.url);
   if (!currentUrl || !requestUrl) return false;
   return currentUrl.origin === requestUrl.origin;
+}
+
+function responsePayloadMatchesCurrentTask(
+  req: CapturedNetworkRequest,
+  selectorContext:
+    | {
+        currentPageUrl?: string | null;
+      }
+    | undefined,
+): boolean {
+  const body = typeof req.responseBody === 'string' ? req.responseBody : null;
+  const currentUrl = parseUrl(selectorContext?.currentPageUrl ?? null);
+  if (!currentUrl) return false;
+  const currentTerms = extractComparableSearchValues(currentUrl);
+  if (currentTerms.length === 0) return false;
+  const normalizedPayload = normalizeQueryValue(
+    body ?? safeSummaryRowsComparableText(req.safeResponseSummary?.rows),
+  );
+  if (!normalizedPayload) return false;
+  return currentTerms.some((term) => term.length >= 3 && normalizedPayload.includes(term));
+}
+
+function safeSummaryRowsComparableText(
+  rows: readonly Record<string, unknown>[] | undefined,
+): string {
+  if (!Array.isArray(rows) || rows.length === 0) return '';
+  const values: string[] = [];
+  for (const row of rows.slice(0, LIVE_OBSERVED_ROW_LIMIT)) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+    for (const value of Object.values(row)) {
+      if (typeof value === 'string') values.push(value);
+      else if (typeof value === 'number' || typeof value === 'boolean') values.push(String(value));
+    }
+  }
+  return values.join(' ');
 }
 
 function sanitizeRegion(value: string | null): string | null {

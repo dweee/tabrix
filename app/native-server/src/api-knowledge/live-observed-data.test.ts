@@ -205,7 +205,7 @@ describe('live-observed-data selector', () => {
             url: 'https://api.neutral-social.example.test/v1/search/items?keyword=',
             method: 'GET',
             type: 'xmlhttprequest',
-            requestTime: 900,
+            requestTime: 1_779_138_000_900,
             statusCode: 200,
             mimeType: 'application/json',
             safeResponseSummary: {
@@ -221,8 +221,8 @@ describe('live-observed-data selector', () => {
               fieldShapeSummaryAvailable: true,
               fieldNames: ['title'],
               taskQueryValueMatched: true,
-              samplerArmedAt: 1000,
-              capturedAt: 1100,
+              samplerArmedAt: 1_779_138_001_000,
+              capturedAt: 1_779_138_001_100,
             },
           },
         ],
@@ -620,6 +620,335 @@ describe('live-observed-data selector', () => {
       liveObservedEndpointId: null,
       pageRegion: 'content_source_network',
       rawBodyStored: false,
+    });
+  });
+
+  it('allows cross-origin search provider api_rows only when body matches the task query', () => {
+    const out = run({
+      bundle: {
+        observationMode: 'cdp_enhanced',
+        cdpUsed: true,
+        cdpDetachSuccess: true,
+        debuggerConflict: false,
+        rawBodyPersisted: false,
+        bodyCompacted: true,
+        requests: [
+          {
+            url: 'https://search-provider.example.test/1/indexes/Item_dev/query',
+            method: 'POST',
+            type: 'xmlhttprequest',
+            statusCode: 200,
+            mimeType: 'application/json',
+            responseBody: JSON.stringify({
+              hits: [
+                {
+                  title: 'browser automation tools',
+                  description:
+                    'A search result about browser automation with points and comments metadata.',
+                },
+              ],
+            }),
+          },
+        ],
+      },
+      selectorContext: {
+        currentPageUrl: 'https://neutral-social.example.test/search?q=browser%20automation',
+      },
+    });
+
+    expect(out.rejected).toHaveLength(0);
+    expect(out.selected[0]).toMatchObject({
+      selectedDataSource: 'cdp_enhanced_api_rows',
+      knowledgeUpserted: false,
+      pageRegion: 'task_query_network',
+      rowCount: 1,
+      rawBodyStored: false,
+    });
+    expect(out.selected[0].rows[0]?.title).toBe('browser automation tools');
+  });
+
+  it('allows cross-origin search provider api_rows from safe summary rows without raw responseBody', () => {
+    const out = run({
+      bundle: {
+        observationMode: 'cdp_enhanced',
+        cdpUsed: true,
+        cdpDetachSuccess: true,
+        debuggerConflict: false,
+        responseBodySource: 'debugger_api',
+        rawBodyPersisted: false,
+        bodyCompacted: true,
+        requests: [
+          {
+            url: 'https://search-provider.example.test/1/indexes/Item_dev/query',
+            method: 'POST',
+            type: 'XHR',
+            requestTime: 2000,
+            statusCode: 200,
+            mimeType: 'application/json',
+            safeResponseSummary: {
+              responseSummarySource: 'browser_context_summary',
+              bridgePath: 'main_world_to_content_to_native',
+              capturedAfterArm: true,
+              rawBodyPersisted: false,
+              privacyCheck: 'passed',
+              rejectedReason: null,
+              rows: [
+                {
+                  title: 'browser automation tools',
+                  description: 'points and comments metadata for browser automation results',
+                },
+              ],
+              rowCount: 1,
+              emptyResult: false,
+              fieldShapeSummaryAvailable: true,
+              fieldNames: ['description', 'title'],
+              taskQueryValueMatched: null,
+              samplerArmedAt: 1000,
+              capturedAt: 2100,
+            },
+          },
+        ],
+      },
+      selectorContext: {
+        currentPageUrl: 'https://neutral-social.example.test/search?q=browser%20automation',
+      },
+    });
+
+    expect(out.rejected).toHaveLength(0);
+    expect(out.selected[0]).toMatchObject({
+      selectedDataSource: 'cdp_enhanced_api_rows',
+      responseSummarySource: 'browser_context_summary',
+      pageRegion: 'task_query_network',
+      rowCount: 1,
+      rawBodyStored: false,
+    });
+    expect(JSON.stringify(out.selected[0])).not.toMatch(/"responseBody"/);
+  });
+
+  it('allows safe summary rows when CDP request time uses a monotonic clock', () => {
+    const out = run({
+      bundle: {
+        observationMode: 'cdp_enhanced',
+        cdpUsed: true,
+        cdpDetachSuccess: true,
+        debuggerConflict: false,
+        responseBodySource: 'debugger_api',
+        rawBodyPersisted: false,
+        bodyCompacted: true,
+        requests: [
+          {
+            url: 'https://search-provider.example.test/1/indexes/Item_dev/query',
+            method: 'POST',
+            type: 'XHR',
+            requestTime: 73381905.408,
+            statusCode: 200,
+            mimeType: 'application/json',
+            safeResponseSummary: {
+              responseSummarySource: 'browser_context_summary',
+              bridgePath: 'main_world_to_content_to_native',
+              capturedAfterArm: true,
+              rawBodyPersisted: false,
+              privacyCheck: 'passed',
+              rejectedReason: null,
+              rows: [
+                {
+                  title: 'browser automation tools',
+                  description: 'points and comments metadata for browser automation results',
+                },
+              ],
+              rowCount: 1,
+              emptyResult: false,
+              fieldShapeSummaryAvailable: true,
+              fieldNames: ['description', 'title'],
+              taskQueryValueMatched: null,
+              samplerArmedAt: 1_779_138_273_917,
+              capturedAt: 1_779_138_274_200,
+            },
+          },
+        ],
+      },
+      selectorContext: {
+        currentPageUrl: 'https://neutral-social.example.test/search?q=browser%20automation',
+      },
+    });
+
+    expect(out.rejected).toHaveLength(0);
+    expect(out.selected[0]).toMatchObject({
+      selectedDataSource: 'cdp_enhanced_api_rows',
+      responseSummarySource: 'browser_context_summary',
+      rowCount: 1,
+    });
+  });
+
+  it('sanitizes public result urls and opaque ids from browser-context api_rows', () => {
+    const out = run({
+      bundle: {
+        observationMode: 'cdp_enhanced',
+        cdpUsed: true,
+        cdpDetachSuccess: true,
+        debuggerConflict: false,
+        responseBodySource: 'debugger_api',
+        rawBodyPersisted: false,
+        bodyCompacted: true,
+        requests: [
+          {
+            url: 'https://search-provider.example.test/1/indexes/Item_dev/query?x-api-key=redacted',
+            method: 'POST',
+            type: 'XHR',
+            requestTime: 73381905.408,
+            statusCode: 200,
+            mimeType: 'application/json',
+            safeResponseSummary: {
+              responseSummarySource: 'browser_context_summary',
+              bridgePath: 'main_world_to_content_to_native',
+              capturedAfterArm: true,
+              rawBodyPersisted: false,
+              privacyCheck: 'passed',
+              rejectedReason: null,
+              rows: [
+                {
+                  title: 'Show HN: Browser automation for AI',
+                  url: 'https://github.com/example/browser-automation?utm_source=feed#readme',
+                  author: 'hugs',
+                  points: 443,
+                  num_comments: 124,
+                  objectID: '0123456789abcdef0123456789abcdef',
+                  story_text: 'browser automation result with points and comments metadata',
+                },
+              ],
+              rowCount: 1,
+              emptyResult: false,
+              fieldShapeSummaryAvailable: true,
+              fieldNames: [
+                'author',
+                'num_comments',
+                'objectID',
+                'points',
+                'story_text',
+                'title',
+                'url',
+              ],
+              taskQueryValueMatched: null,
+              samplerArmedAt: 1_779_138_273_917,
+              capturedAt: 1_779_138_274_200,
+            },
+          },
+        ],
+      },
+      selectorContext: {
+        currentPageUrl: 'https://neutral-social.example.test/search?q=browser%20automation',
+      },
+    });
+
+    expect(out.rejected).toHaveLength(0);
+    expect(out.selected[0]).toMatchObject({
+      selectedDataSource: 'cdp_enhanced_api_rows',
+      responseSummarySource: 'browser_context_summary',
+      rowCount: 1,
+    });
+    expect(out.selected[0].rows[0]).toMatchObject({
+      title: 'Show HN: Browser automation for AI',
+      publicUrl: 'https://github.com/example/browser-automation',
+      points: 443,
+      num_comments: 124,
+    });
+    const blob = JSON.stringify(out.selected[0]);
+    expect(blob).not.toContain('utm_source');
+    expect(blob).not.toContain('0123456789abcdef0123456789abcdef');
+    expect(blob).not.toMatch(/"url"/);
+  });
+
+  it('prefers safe API rows over same-response content summary when both are task-relevant', () => {
+    const out = run({
+      bundle: {
+        observationMode: 'cdp_enhanced',
+        cdpUsed: true,
+        cdpDetachSuccess: true,
+        debuggerConflict: false,
+        responseBodySource: 'debugger_api',
+        rawBodyPersisted: false,
+        bodyCompacted: true,
+        requests: [
+          {
+            url: 'https://search-provider.example.test/1/indexes/Item_dev/query',
+            method: 'POST',
+            type: 'XHR',
+            requestTime: 73381905.408,
+            statusCode: 200,
+            mimeType: 'application/json',
+            safeResponseSummary: {
+              responseSummarySource: 'browser_context_summary',
+              bridgePath: 'main_world_to_content_to_native',
+              capturedAfterArm: true,
+              rawBodyPersisted: false,
+              privacyCheck: 'passed',
+              rejectedReason: null,
+              rows: [
+                {
+                  title: 'browser automation tools',
+                  description: 'points and comments metadata for browser automation results',
+                },
+              ],
+              rowCount: 1,
+              emptyResult: false,
+              fieldShapeSummaryAvailable: true,
+              fieldNames: ['description', 'title'],
+              taskQueryValueMatched: null,
+              samplerArmedAt: 1_779_138_273_917,
+              capturedAt: 1_779_138_274_200,
+            },
+          },
+        ],
+      },
+      selectorContext: {
+        currentPageUrl: 'https://neutral-social.example.test/search?q=browser%20automation',
+      },
+    });
+
+    expect(out.selected).toHaveLength(1);
+    expect(out.selected[0]).toMatchObject({
+      rowCount: 1,
+      selectedDataSource: 'cdp_enhanced_api_rows',
+    });
+  });
+
+  it('rejects cross-origin search provider api_rows when response body does not match the task query', () => {
+    const out = run({
+      bundle: {
+        observationMode: 'cdp_enhanced',
+        cdpUsed: true,
+        cdpDetachSuccess: true,
+        debuggerConflict: false,
+        rawBodyPersisted: false,
+        bodyCompacted: true,
+        requests: [
+          {
+            url: 'https://search-provider.example.test/1/indexes/Item_dev/query',
+            method: 'POST',
+            type: 'xmlhttprequest',
+            statusCode: 200,
+            mimeType: 'application/json',
+            responseBody: JSON.stringify({
+              hits: [
+                {
+                  title: 'unrelated result',
+                  description:
+                    'A long enough content field about another topic with points and comments metadata.',
+                },
+              ],
+            }),
+          },
+        ],
+      },
+      selectorContext: {
+        currentPageUrl: 'https://neutral-social.example.test/search?q=browser%20automation',
+      },
+    });
+
+    expect(out.selected).toHaveLength(0);
+    expect(out.rejected[0]).toMatchObject({
+      fallbackCause: 'relevance_unproven',
+      pageRegion: 'current_page_network',
     });
   });
 

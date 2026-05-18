@@ -31,6 +31,19 @@ export interface BrowserContextSafeResponseSummary {
   capturedAt: number;
 }
 
+export interface BuildSafeResponseSummaryInput {
+  url: string;
+  method: string;
+  status: number | null;
+  contentType: string | null;
+  body: string | null;
+  base64Encoded?: boolean;
+  capturedAfterArm: boolean;
+  samplerArmedAt: number;
+  capturedAt?: number;
+  bridgePath?: ResponseSummaryBridgePath;
+}
+
 export interface ResponseSummarySamplerLifecycle {
   samplerArmedAt: number | null;
   samplerDisarmedAt: number | null;
@@ -102,6 +115,172 @@ function isSafeRowValue(value: unknown): value is string | number | boolean | nu
   );
 }
 
+function compactSamplerScalarValue(
+  key: string,
+  value: unknown,
+): string | number | boolean | null | undefined {
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    if (/(^|_)(url|href|link|permalink)$/i.test(key)) return undefined;
+    if (/^publicUrl$/i.test(key)) return sanitizePublicUrl(value);
+    if (value.length >= 32 && /^[A-Za-z0-9_-]+$/.test(value.trim())) return undefined;
+    return value.length > MAX_STRING_VALUE_LENGTH ? value.slice(0, MAX_STRING_VALUE_LENGTH) : value;
+  }
+  return undefined;
+}
+
+function shouldDropSummaryField(key: string): boolean {
+  return (
+    SENSITIVE_FIELD_RE.test(key) ||
+    /(^|_)(url|href|link|permalink)$/i.test(key) ||
+    /(^|_)(object|record)?id$/i.test(key)
+  );
+}
+
+function sanitizePublicUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function findPublicUrl(row: Record<string, unknown>): string | undefined {
+  for (const key of ['url', 'href', 'link', 'permalink', 'publicUrl']) {
+    const value = row[key];
+    if (typeof value !== 'string') continue;
+    const sanitized = sanitizePublicUrl(value);
+    if (sanitized !== undefined) return sanitized;
+  }
+  return undefined;
+}
+
+function selectSummaryRows(parsed: unknown): {
+  rows: Array<Record<string, string | number | boolean | null>>;
+  listLength: number | null;
+} {
+  const arrayKeys = [
+    'items',
+    'data',
+    'results',
+    'objects',
+    'hits',
+    'records',
+    'list',
+    'pages',
+    'edges',
+  ];
+  let list: unknown[] | null = null;
+  if (Array.isArray(parsed)) {
+    list = parsed;
+  } else if (parsed && typeof parsed === 'object') {
+    const parsedObject = parsed as Record<string, unknown>;
+    for (const key of arrayKeys) {
+      const candidate = parsedObject[key];
+      if (Array.isArray(candidate)) {
+        list = candidate;
+        break;
+      }
+    }
+  }
+  if (!list) return { rows: [], listLength: null };
+  const rows: Array<Record<string, string | number | boolean | null>> = [];
+  for (const raw of list.slice(0, MAX_ROWS)) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const row: Record<string, string | number | boolean | null> = {};
+    const rawObject = raw as Record<string, unknown>;
+    for (const key of Object.keys(rawObject).slice(0, MAX_KEYS_PER_ROW)) {
+      if (shouldDropSummaryField(key)) continue;
+      const compact = compactSamplerScalarValue(key, rawObject[key]);
+      if (compact !== undefined) row[key] = compact;
+    }
+    const publicUrl = findPublicUrl(rawObject);
+    if (publicUrl !== undefined) row.publicUrl = publicUrl;
+    if (Object.keys(row).length > 0) rows.push(row);
+  }
+  return { rows, listLength: list.length };
+}
+
+function containsSensitiveField(parsed: unknown): boolean {
+  if (!parsed || typeof parsed !== 'object') return false;
+  const stack: unknown[] = [parsed];
+  let inspected = 0;
+  while (stack.length > 0 && inspected < 80) {
+    inspected += 1;
+    const candidateNode = stack.pop();
+    if (!candidateNode || typeof candidateNode !== 'object') continue;
+    if (Array.isArray(candidateNode)) {
+      for (const item of candidateNode.slice(0, 5)) stack.push(item);
+      continue;
+    }
+    for (const key of Object.keys(candidateNode as Record<string, unknown>).slice(0, 20)) {
+      if (SENSITIVE_FIELD_RE.test(key)) return true;
+      stack.push((candidateNode as Record<string, unknown>)[key]);
+    }
+  }
+  return false;
+}
+
+export function buildSafeResponseSummaryFromJsonText(
+  input: BuildSafeResponseSummaryInput,
+): BrowserContextSafeResponseSummary | null {
+  if (
+    !input.contentType ||
+    !/\b(application\/json|application\/.*\+json|text\/json)\b/i.test(input.contentType)
+  ) {
+    return null;
+  }
+  if (input.base64Encoded === true) return null;
+
+  let parsed: unknown;
+  let rejectedReason: string | null = null;
+  try {
+    parsed = JSON.parse(String(input.body || 'null'));
+  } catch {
+    parsed = null;
+    rejectedReason = 'compact_rows_unavailable';
+  }
+
+  const privacyFailed = rejectedReason !== null || containsSensitiveField(parsed);
+  const compact = privacyFailed ? { rows: [], listLength: null } : selectSummaryRows(parsed);
+  const rows = compact.rows;
+  const compactUnavailable =
+    !privacyFailed &&
+    (compact.listLength === null || (compact.listLength > 0 && rows.length === 0));
+  const finalRejectedReason = privacyFailed
+    ? rejectedReason || 'sensitive_field'
+    : compactUnavailable
+      ? 'compact_rows_unavailable'
+      : null;
+  const fieldNames = Array.from(new Set(rows.flatMap((row) => Object.keys(row)))).sort();
+  const emptyResult = compact.listLength === 0 && !privacyFailed;
+
+  return {
+    responseSummarySource: 'browser_context_summary',
+    bridgePath: input.bridgePath ?? 'main_world_to_content_to_native',
+    capturedAfterArm: input.capturedAfterArm,
+    rawBodyPersisted: false,
+    privacyCheck: privacyFailed ? 'failed' : 'passed',
+    rejectedReason: finalRejectedReason,
+    method: normalizeMethod(input.method),
+    url: redactUrlForMetadata(input.url),
+    status: input.status,
+    contentType: normalizeContentType(input.contentType),
+    rows: privacyFailed ? [] : rows,
+    rowCount: privacyFailed ? 0 : rows.length,
+    emptyResult,
+    emptyResultEvidence: emptyResult ? 'empty_array' : null,
+    fieldShapeSummaryAvailable: !privacyFailed && fieldNames.length > 0,
+    fieldNames,
+    taskQueryValueMatched: null,
+    samplerArmedAt: input.samplerArmedAt,
+    capturedAt: input.capturedAt ?? nowMs(),
+  };
+}
+
 function sanitizeSummary(
   input: unknown,
   state: SamplerState,
@@ -132,13 +311,15 @@ function sanitizeSummary(
         privacyFailed = true;
         continue;
       }
-      const value = (rawRow as Record<string, unknown>)[key];
+      const rawObject = rawRow as Record<string, unknown>;
+      if (shouldDropSummaryField(key)) continue;
+      const value = rawObject[key];
       if (!isSafeRowValue(value)) continue;
-      row[key] =
-        typeof value === 'string' && value.length > MAX_STRING_VALUE_LENGTH
-          ? value.slice(0, MAX_STRING_VALUE_LENGTH)
-          : value;
+      const compact = compactSamplerScalarValue(key, value);
+      if (compact !== undefined) row[key] = compact;
     }
+    const publicUrl = findPublicUrl(rawRow as Record<string, unknown>);
+    if (publicUrl !== undefined) row.publicUrl = publicUrl;
     if (Object.keys(row).length > 0) rows.push(row);
   }
   const fieldNames = Array.from(new Set(rows.flatMap((row) => Object.keys(row)))).sort();
@@ -283,9 +464,46 @@ function buildMainWorldSampler(args: {
     return request.some((value) => current.includes(value));
   }
 
-  function compactSamplerScalarValue(value: unknown): string | number | boolean | null | undefined {
+  function compactSamplerScalarValue(
+    key: string,
+    value: unknown,
+  ): string | number | boolean | null | undefined {
     if (value === null || typeof value === 'number' || typeof value === 'boolean') return value;
-    if (typeof value === 'string') return value.length > 240 ? value.slice(0, 240) : value;
+    if (typeof value === 'string') {
+      if (/(^|_)(url|href|link|permalink)$/i.test(key)) return undefined;
+      if (/^publicUrl$/i.test(key)) return sanitizePublicUrl(value);
+      if (value.length >= 32 && /^[A-Za-z0-9_-]+$/.test(value.trim())) return undefined;
+      return value.length > 240 ? value.slice(0, 240) : value;
+    }
+    return undefined;
+  }
+
+  function shouldDropSummaryField(key: string): boolean {
+    return (
+      sensitiveRe.test(key) ||
+      /(^|_)(url|href|link|permalink)$/i.test(key) ||
+      /(^|_)(object|record)?id$/i.test(key)
+    );
+  }
+
+  function sanitizePublicUrl(value: string): string | undefined {
+    try {
+      const url = new URL(value);
+      url.search = '';
+      url.hash = '';
+      return url.toString();
+    } catch {
+      return undefined;
+    }
+  }
+
+  function findPublicUrl(row: Record<string, unknown>): string | undefined {
+    for (const key of ['url', 'href', 'link', 'permalink', 'publicUrl']) {
+      const value = row[key];
+      if (typeof value !== 'string') continue;
+      const sanitized = sanitizePublicUrl(value);
+      if (sanitized !== undefined) return sanitized;
+    }
     return undefined;
   }
 
@@ -322,11 +540,14 @@ function buildMainWorldSampler(args: {
     for (const raw of list.slice(0, 10)) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
       const row: Record<string, string | number | boolean | null> = {};
-      for (const key of Object.keys(raw as Record<string, unknown>).slice(0, 12)) {
-        if (sensitiveRe.test(key)) continue;
-        const compact = compactSamplerScalarValue((raw as Record<string, unknown>)[key]);
+      const rawObject = raw as Record<string, unknown>;
+      for (const key of Object.keys(rawObject).slice(0, 12)) {
+        if (shouldDropSummaryField(key)) continue;
+        const compact = compactSamplerScalarValue(key, rawObject[key]);
         if (compact !== undefined) row[key] = compact;
       }
+      const publicUrl = findPublicUrl(rawObject);
+      if (publicUrl !== undefined) row.publicUrl = publicUrl;
       if (Object.keys(row).length > 0) rows.push(row);
     }
     return { rows, listLength: list.length };
