@@ -543,7 +543,7 @@ function chooseProjectionDataSource(snapshot: ReadPageCompactSnapshot): ReadPage
 
 function estimateSnapshotContextChars(snapshot: ReadPageCompactSnapshot): number {
   if (snapshot.markdown) return snapshot.markdown.length;
-  if (snapshot.visibleRegionRows) {
+  if (snapshot.visibleRegionRows?.visibleRegionRowsUsed && snapshot.visibleRegionRows.rows.length > 0) {
     return snapshot.visibleRegionRows.rows.reduce((total, row) => {
       return (
         total +
@@ -556,6 +556,18 @@ function estimateSnapshotContextChars(snapshot: ReadPageCompactSnapshot): number
       );
     }, 0);
   }
+
+  const structuralPayload = {
+    summary: snapshot.summary,
+    interactiveElements: snapshot.interactiveElements,
+    highValueObjects: snapshot.highValueObjects,
+    candidateActions: snapshot.candidateActions,
+    pageContext: snapshot.pageContext,
+    artifactRefs: snapshot.artifactRefs,
+  };
+  const structuralChars = JSON.stringify(structuralPayload).length;
+  if (structuralChars > 2) return structuralChars;
+
   return snapshot.summary.pageRole.length + (snapshot.summary.primaryRegion?.length ?? 0);
 }
 

@@ -946,6 +946,14 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
       fallbackUsed: 'none',
     });
     expect(payload).not.toHaveProperty('pageContent');
+    expect(payload).toHaveProperty('pageProjection');
+    expect(payload.pageProjection).toMatchObject({
+      projectionKind: 'read_snapshot_projection',
+      chosenDataSource: 'dom_region_rows',
+      activeRegion: 'main_results',
+      changedRegions: ['main_results'],
+      refreshedRefs: ['ref_result_1', 'ref_result_2'],
+    });
     const operationLog = takeLatestReadPageOperationLog(completeSpy);
     expect(operationLog).toMatchObject({
       selectedDataSource: 'dom_region_rows',

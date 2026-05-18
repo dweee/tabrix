@@ -1,5 +1,9 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import type { ReadPageRequestedLayer } from '@tabrix/shared';
+import {
+  buildBrowserPageThingProjectionFromReadPage,
+  type ReadPageCompactSnapshot,
+  type ReadPageRequestedLayer,
+} from '@tabrix/shared';
 import type { DataSourceDecision, TaskIntentClass } from '../execution/data-source-router';
 import type { LayerContractEnvelope } from '../execution/layer-contract';
 import type { TaskVisibleRegionRowsData } from '../execution/task-session-context';
@@ -60,7 +64,7 @@ export function buildDomRegionRowsSuccessResult(args: {
   apiRowsUnavailableReason: string;
   readCount: number;
 }): { result: CallToolResult; operationLog: ReadPageOperationLogHint } {
-  const payload = {
+  const payload: Record<string, unknown> = {
     kind: 'dom_region_rows',
     readPageAvoided: false,
     sourceDataSource: 'dom_region_rows',
@@ -96,6 +100,7 @@ export function buildDomRegionRowsSuccessResult(args: {
     fallbackCause: null,
     fallbackUsed: 'none',
   };
+  payload.pageProjection = buildDomRegionRowsPageProjection(payload, args);
 
   return {
     result: {
@@ -125,6 +130,69 @@ export function buildDomRegionRowsSuccessResult(args: {
       },
     },
   };
+}
+
+function buildDomRegionRowsPageProjection(
+  payload: Record<string, unknown>,
+  args: {
+    requestedLayer: ReadPageRequestedLayer;
+    routerDecision: DataSourceDecision;
+    visibleRows: TaskVisibleRegionRowsData;
+  },
+) {
+  const observedAt = new Date().toISOString();
+  const snapshot = {
+    ...payload,
+    kind: 'dom_region_rows',
+    selectedDataSource: 'dom_region_rows',
+    readinessVerdict: 'ready',
+    summary: {
+      pageRole:
+        inferDomRegionRowsTaskIntent(
+          args.routerDecision as unknown as ChooseContextDecisionSnapshot,
+          args.visibleRows,
+        ) ?? 'search_list',
+      primaryRegion: args.visibleRows.sourceRegion,
+      primaryRegionConfidence: args.visibleRows.rowExtractionConfidence,
+      footerOnly: false,
+      anchorTexts: [],
+    },
+    visibleRegionRows: {
+      sourceDataSource: 'dom_region_rows',
+      rows: args.visibleRows.rows,
+      rowCount: args.visibleRows.rowCount,
+      visibleRegionRowsUsed: true,
+      sourceRegion: args.visibleRows.sourceRegion,
+      rowExtractionConfidence: args.visibleRows.rowExtractionConfidence,
+      cardExtractorUsed: args.visibleRows.cardExtractorUsed,
+      cardPatternConfidence: args.visibleRows.cardPatternConfidence,
+      cardRowsCount: args.visibleRows.cardRowsCount,
+      rowOrder: args.visibleRows.rowOrder,
+      targetRefCoverageRate: args.visibleRows.targetRefCoverageRate ?? null,
+      regionQualityScore: args.visibleRows.regionQualityScore ?? null,
+    },
+  } as unknown as ReadPageCompactSnapshot;
+
+  return buildBrowserPageThingProjectionFromReadPage({
+    snapshot,
+    projectionId: `dom_region_rows:${observedAt}`,
+    observedAt,
+    pageId: 'unknown',
+    tabId: -1,
+    ownerType: 'unknown',
+    contextVersion: `dom_region_rows:${observedAt}`,
+    previousContextVersion: null,
+    changedByActionId: null,
+    changeCause: 'unknown',
+    changedRegions: [args.visibleRows.sourceRegion],
+    reusedRegions: [],
+    invalidatedRefs: [],
+    refreshedRefs: args.visibleRows.rows
+      .map((row) => row.targetRef)
+      .filter((targetRef): targetRef is string => Boolean(targetRef)),
+    userActivityLevel: 'unknown',
+    interferenceRisk: 'medium',
+  });
 }
 
 export function buildDomRegionRowsRejectedLogHint(args: {
