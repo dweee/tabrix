@@ -140,6 +140,80 @@ describe('V27-P0-REAL-01 visible region rows', () => {
     );
   });
 
+  it('keeps more than five high-confidence visible result rows for list tasks', () => {
+    const pageContent = [
+      '- main "Repository search results" [ref=ref_main] (x=640,y=370)',
+      ...Array.from({ length: 10 }, (_, index) => {
+        const rowNumber = index + 1;
+        const y = 150 + index * 82;
+        return [
+          `  - generic "Repository result" [ref=ref_repo_${rowNumber}] (x=260,y=${y})`,
+          `    - link "example/project-${rowNumber}" [ref=ref_repo_${rowNumber}_link] (x=260,y=${y}) href="/example/project-${rowNumber}"`,
+          `    - generic "Repository ${rowNumber} summary" [ref=ref_desc_${rowNumber}] (x=260,y=${y + 28})`,
+          `    - link "${1000 - rowNumber}" [ref=ref_star_${rowNumber}] (x=620,y=${y + 56}) href="/example/project-${rowNumber}/stargazers"`,
+          `    - generic "Updated May ${rowNumber}, 2026" [ref=ref_updated_${rowNumber}] (x=700,y=${y + 56})`,
+        ].join('\n');
+      }),
+    ].join('\n');
+
+    const rows = extractVisibleRegionRows({
+      sourceRegion: 'search_results',
+      url: 'https://example.test/search?q=automation&type=repositories',
+      title: 'Repository search results',
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      pageContent,
+      maxRows: 10,
+    });
+
+    expect(rows.visibleRegionRowsUsed).toBe(true);
+    expect(rows.rowCount).toBe(10);
+    expect(rows.visibleDomRowsCandidateCount).toBe(10);
+    expect(rows.visibleDomRowsSelectedCount).toBe(10);
+    expect(rows.targetRefCoverageRate).toBeGreaterThanOrEqual(0.95);
+    expect(rows.rows.map((row) => row.title)).toEqual(
+      Array.from({ length: 10 }, (_, index) => `example/project-${index + 1}`),
+    );
+  });
+
+  it('filters shell rows when high-confidence business rows are present', () => {
+    const pageContent = [
+      '- main "Repository search results" [ref=ref_main] (x=640,y=370)',
+      ...Array.from({ length: 8 }, (_, index) => {
+        const rowNumber = index + 1;
+        const y = 150 + index * 82;
+        return [
+          `  - generic "Repository result" [ref=ref_repo_${rowNumber}] (x=260,y=${y})`,
+          `    - link "example/project-${rowNumber}" [ref=ref_repo_${rowNumber}_link] (x=260,y=${y}) href="/example/project-${rowNumber}"`,
+          `    - generic "Repository ${rowNumber} summary" [ref=ref_desc_${rowNumber}] (x=260,y=${y + 28})`,
+          `    - link "${1000 - rowNumber} stars" [ref=ref_star_${rowNumber}] (x=620,y=${y + 56}) href="/example/project-${rowNumber}/stargazers"`,
+        ].join('\n');
+      }),
+      '- link "Pull requests" [ref=ref_pull_requests] (x=30,y=80) href="/pulls"',
+      '- link "Issues" [ref=ref_issues] (x=30,y=110) href="/issues"',
+      '- link "Repositories" [ref=ref_repositories] (x=30,y=140) href="/search?type=repositories"',
+      '- link "TypeScript" [ref=ref_ts] (x=30,y=180) href="/search?l=typescript"',
+      '- link "Public" [ref=ref_public] (x=30,y=220) href="/search?visibility=public"',
+    ].join('\n');
+
+    const rows = extractVisibleRegionRows({
+      sourceRegion: 'search_results',
+      url: 'https://example.test/search?q=automation&type=repositories',
+      title: 'Repository search results',
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      pageContent,
+      maxRows: 20,
+    });
+
+    expect(rows.visibleRegionRowsUsed).toBe(true);
+    expect(rows.rowCount).toBe(8);
+    expect(rows.rows.map((row) => row.title)).toEqual(
+      Array.from({ length: 8 }, (_, index) => `example/project-${index + 1}`),
+    );
+    expect(rows.rows.map((row) => row.title).join(' ')).not.toMatch(
+      /Pull requests|Issues|Repositories|TypeScript|Public/,
+    );
+  });
+
   it('groups sparse GitHub-like repo links with nearby metadata rows', () => {
     const rows = extractVisibleRegionRows({
       sourceRegion: 'viewport',

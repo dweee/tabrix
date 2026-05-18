@@ -139,18 +139,17 @@ export function extractVisibleRegionRows(input: {
     rejectedReasonDistribution,
     searchShellContext,
   );
-  const candidateRows = orderedGroups
-    .map((group) => buildRow(group, searchShellContext))
-    .filter((row): row is VisibleRegionRow => row !== null)
-    .filter((row) => !isMetaOnlyRow(row))
-    .slice(0, Math.max(1, Math.floor(input.maxRows ?? 20)));
+  const candidateRows = preferBusinessRows(
+    orderedGroups
+      .map((group) => buildRow(group, searchShellContext))
+      .filter((row): row is VisibleRegionRow => row !== null)
+      .filter((row) => !isMetaOnlyRow(row)),
+  ).slice(0, Math.max(1, Math.floor(input.maxRows ?? 20)));
   const candidateTargetRefCoverageRate = candidateRows.length
     ? clampConfidence(candidateRows.filter((row) => row.targetRef).length / candidateRows.length)
     : 0;
   const rows =
-    candidateRows.length >= 2 && candidateRows.length <= 5 && candidateTargetRefCoverageRate >= 0.95
-      ? candidateRows
-      : [];
+    candidateRows.length >= 2 && candidateTargetRefCoverageRate >= 0.95 ? candidateRows : [];
   if (candidateRows.length > 0 && rows.length === 0) {
     if (candidateRows.length < 2) {
       rejectedReasonDistribution.single_isolated_text += candidateRows.length;
@@ -953,6 +952,35 @@ function averageRowQualityBonus(rows: VisibleRegionRow[]): number {
   if (rows.length === 0) return 0;
   const total = rows.reduce((sum, row) => sum + Math.min(4, row.qualityReasons.length), 0);
   return total / rows.length / 20;
+}
+
+function preferBusinessRows(rows: VisibleRegionRow[]): VisibleRegionRow[] {
+  if (rows.length < 2) return rows;
+  const businessRows = rows.filter((row) => isBusinessResultRow(row));
+  return businessRows.length >= 2 ? businessRows : rows;
+}
+
+function isBusinessResultRow(row: VisibleRegionRow): boolean {
+  if (!row.targetRef) return false;
+  if (!row.boundingBox) return false;
+  if (row.qualityReasons.includes('minimal_visible_text')) return false;
+  if (row.metaText || row.interactionText) return true;
+  return isObjectLikeResultTitle(row.title);
+}
+
+function isObjectLikeResultTitle(value: string): boolean {
+  const normalized = normalizeText(value);
+  if (!normalized) return false;
+  if (isLowValueShellText(normalized)) return false;
+  if (/^[^\s/]{1,80}\/[^\s/]{1,120}$/.test(normalized)) return true;
+  if (/\b[\w.-]+\.[a-z]{2,}\b/i.test(normalized)) return true;
+  if (normalized.length >= 16 && normalized.split(/\s+/).filter(Boolean).length >= 3) {
+    return true;
+  }
+  if (normalized.length >= 10 && /[\u4e00-\u9fff]/.test(normalized)) {
+    return true;
+  }
+  return false;
 }
 
 function buildRow(
