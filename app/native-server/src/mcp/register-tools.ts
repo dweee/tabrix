@@ -8,7 +8,11 @@ import nativeMessagingHostInstance from '../native-messaging-host';
 import { NativeMessageType, TOOL_NAMES, TOOL_SCHEMAS, getRequiredCapability } from '@tabrix/shared';
 import { isToolAllowedByPolicy } from '../policy/phase0-opt-in';
 import { getCurrentCapabilityEnv, isCapabilityEnabled } from '../policy/capabilities';
-import { evaluateNonInterferencePreflight } from '../policy/non-interference-preflight';
+import {
+  attachRuntimePolicyAuditToResult,
+  evaluateNonInterferencePreflight,
+  isImpactToolName,
+} from '../policy/non-interference-preflight';
 import { sessionManager } from '../execution/session-manager';
 import type { TaskSessionContext } from '../execution/task-session-context';
 import { normalizeToolCallResult } from '../execution/result-normalizer';
@@ -765,8 +769,15 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     if (!nonInterferenceVerdict.allowed) {
       const payload = {
         ok: false,
-        code: 'TABRIX_NON_INTERFERENCE_BLOCKED',
+        code:
+          nonInterferenceVerdict.audit.verdict === 'collaboration_required'
+            ? 'TABRIX_ACTION_COLLABORATION_REQUIRED'
+            : 'TABRIX_NON_INTERFERENCE_BLOCKED',
         message: nonInterferenceVerdict.message,
+        actionPreflight: {
+          verdict: nonInterferenceVerdict.audit.verdict,
+          reason: nonInterferenceVerdict.audit.reason,
+        },
         runtimePolicyAudit: nonInterferenceVerdict.audit,
       };
       const result = createErrorResult(JSON.stringify(payload));
@@ -948,8 +959,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           : name === 'chrome_close_tabs' && taskContext && rawResultWithEvidence.isError !== true
             ? attachLifecycleTimelineContext(rawResultWithEvidence, taskContext)
             : rawResultWithEvidence;
-      const normalized = normalizeToolCallResult(name, aiFacingResult);
-      const toolResultFailed = aiFacingResult.isError === true;
+      const resultWithPolicyAudit =
+        isImpactToolName(name) && rawResultWithEvidence.isError !== true
+          ? attachRuntimePolicyAuditToResult(aiFacingResult, nonInterferenceVerdict.audit)
+          : aiFacingResult;
+      const normalized = normalizeToolCallResult(name, resultWithPolicyAudit);
+      const toolResultFailed = resultWithPolicyAudit.isError === true;
       sessionManager.completeStep(session.sessionId, step.stepId, {
         status: 'completed',
         resultSummary: normalized.stepSummary,
@@ -978,7 +993,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         status: 'completed',
         summary: normalized.executionResult.summary,
       });
-      return aiFacingResult;
+      return resultWithPolicyAudit;
     } else {
       const responseError = String(response.error || 'Unknown tool error');
       const isBridgeError =

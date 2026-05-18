@@ -322,6 +322,18 @@ describe('handleToolCall execution wrapper', () => {
     });
 
     expect(clickResult.isError).toBe(false);
+    const clickPayload = JSON.parse(String(clickResult.content[0].text));
+    expect(clickPayload.actionPreflight).toMatchObject({
+      verdict: 'allow',
+      reason: 'run_owned_tab',
+    });
+    expect(clickPayload.runtimePolicyAudit).toMatchObject({
+      policy: 'non_interference',
+      mode: 'strict',
+      verdict: 'allow',
+      reason: 'run_owned_tab',
+      targetTabId: 77,
+    });
     expect(bridgeSpy).toHaveBeenCalledTimes(4);
   });
 
@@ -345,6 +357,35 @@ describe('handleToolCall execution wrapper', () => {
       verdict: 'block',
       reason: 'non_run_owned_tab',
       targetTabId: 55,
+    });
+    expect(bridgeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns collaboration_required preflight without calling the extension', async () => {
+    markBridgeReady();
+    const bridgeSpy = jest
+      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+      .mockResolvedValueOnce({ status: 'success', items: [] } as never);
+
+    const result = await handleToolCall('chrome_click_element', {
+      ref: 'ref_login',
+      taskSessionId: 'w5a-collaboration',
+      runtimePolicy: { desiredExecutionMode: 'collaboration' },
+    });
+
+    expect(result.isError).toBe(true);
+    const payload = JSON.parse(String(result.content[0].text));
+    expect(payload).toMatchObject({
+      ok: false,
+      code: 'TABRIX_ACTION_COLLABORATION_REQUIRED',
+      actionPreflight: {
+        verdict: 'collaboration_required',
+        reason: 'collaboration_requested',
+      },
+      runtimePolicyAudit: {
+        verdict: 'collaboration_required',
+        reason: 'collaboration_requested',
+      },
     });
     expect(bridgeSpy).toHaveBeenCalledTimes(1);
   });

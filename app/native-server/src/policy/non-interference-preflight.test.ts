@@ -66,4 +66,26 @@ describe('evaluateNonInterferencePreflight', () => {
     expect(verdict.allowed).toBe(false);
     expect(verdict.audit.reason).toBe('active_user_tab_unprotected');
   });
+
+  it('returns collaboration_required when current-tab impact explicitly asks for collaboration', () => {
+    const verdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.CLICK,
+      args: {
+        ref: 'ref_login',
+        runtimePolicy: { desiredExecutionMode: 'collaboration' },
+      },
+      taskContext: new TaskSessionContext({ readBudget: 6 }),
+    });
+
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.audit).toMatchObject({
+      verdict: 'collaboration_required',
+      reason: 'collaboration_requested',
+    });
+    expect(verdict.audit.browserPolicyAudit[0]).toMatchObject({
+      field: 'desiredExecutionMode',
+      verdict: 'applied',
+      source: 'policy',
+    });
+  });
 });

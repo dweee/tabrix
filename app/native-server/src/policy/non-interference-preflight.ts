@@ -1,4 +1,8 @@
-import { TOOL_NAMES } from '@tabrix/shared';
+import {
+  TOOL_NAMES,
+  type BrowserPolicyAuditEvent,
+  type BrowserRuntimePolicy,
+} from '@tabrix/shared';
 import type { TaskSessionContext } from '../execution/task-session-context';
 
 export type NonInterferenceVerdictReason =
@@ -7,19 +11,23 @@ export type NonInterferenceVerdictReason =
   | 'run_owned_tab'
   | 'legacy_explicit_tab_allowed'
   | 'user_confirmed'
+  | 'collaboration_requested'
   | 'active_user_tab_unprotected'
   | 'non_run_owned_tab'
   | 'close_non_run_owned_tab';
+
+export type ActionPreflightVerdictKind = 'allow' | 'block' | 'collaboration_required';
 
 export interface RuntimePolicyAudit {
   policy: 'non_interference';
   mode: 'default' | 'strict';
   toolName: string;
-  verdict: 'allow' | 'block';
+  verdict: ActionPreflightVerdictKind;
   reason: NonInterferenceVerdictReason;
   targetTabId: number | null;
   targetTabIds: number[];
   runOwnedTabIds: number[];
+  browserPolicyAudit: BrowserPolicyAuditEvent[];
 }
 
 export interface NonInterferencePreflightVerdict {
@@ -45,6 +53,7 @@ export function evaluateNonInterferencePreflight(input: {
   const runOwnedTabIds = input.taskContext ? [...input.taskContext.getRunOwnedTabIds()] : [];
   const targetTabId = readPositiveInteger(input.args, 'tabId');
   const targetTabIds = readPositiveIntegerArray(input.args, 'tabIds');
+  const wantsCollaboration = readDesiredExecutionMode(input.args) === 'collaboration';
 
   if (!IMPACT_TOOL_NAMES.has(input.toolName)) {
     return allow(input, mode, 'not_impact_tool', targetTabId, targetTabIds, runOwnedTabIds);
@@ -63,6 +72,17 @@ export function evaluateNonInterferencePreflight(input: {
       return allow(input, mode, 'run_owned_tab', targetTabId, targetTabIds, runOwnedTabIds);
     }
     if (targetTabId === null) {
+      if (wantsCollaboration) {
+        return collaborationRequired(
+          input,
+          mode,
+          'collaboration_requested',
+          'Navigation requires foreground collaboration before touching the current active user tab.',
+          targetTabId,
+          targetTabIds,
+          runOwnedTabIds,
+        );
+      }
       return block(
         input,
         mode,
@@ -130,6 +150,17 @@ export function evaluateNonInterferencePreflight(input: {
   }
 
   if (targetTabId === null) {
+    if (wantsCollaboration) {
+      return collaborationRequired(
+        input,
+        mode,
+        'collaboration_requested',
+        'Impact action requires foreground collaboration before touching the current active user tab.',
+        targetTabId,
+        targetTabIds,
+        runOwnedTabIds,
+      );
+    }
     return block(
       input,
       mode,
@@ -158,6 +189,46 @@ export function evaluateNonInterferencePreflight(input: {
     : allow(input, mode, 'legacy_explicit_tab_allowed', targetTabId, targetTabIds, runOwnedTabIds);
 }
 
+export function isImpactToolName(toolName: string): boolean {
+  return IMPACT_TOOL_NAMES.has(toolName);
+}
+
+export function attachRuntimePolicyAuditToResult<T extends { content?: unknown }>(
+  result: T,
+  audit: RuntimePolicyAudit,
+): T {
+  const content = Array.isArray(result.content) ? result.content : null;
+  if (!content) return result;
+
+  return {
+    ...result,
+    content: content.map((block, index) => {
+      if (index !== 0 || !block || typeof block !== 'object') return block;
+      const text = (block as { text?: unknown }).text;
+      if (typeof text !== 'string' || text.length === 0) return block;
+      let payload: Record<string, unknown>;
+      try {
+        const parsed = JSON.parse(text);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return block;
+        payload = parsed as Record<string, unknown>;
+      } catch {
+        payload = { message: text };
+      }
+      return {
+        ...block,
+        text: JSON.stringify({
+          ...payload,
+          actionPreflight: {
+            verdict: audit.verdict,
+            reason: audit.reason,
+          },
+          runtimePolicyAudit: audit,
+        }),
+      };
+    }),
+  };
+}
+
 function allow(
   input: { toolName: string },
   mode: RuntimePolicyAudit['mode'],
@@ -178,6 +249,11 @@ function allow(
       targetTabId,
       targetTabIds,
       runOwnedTabIds,
+      browserPolicyAudit: buildBrowserPolicyAudit({
+        reason,
+        verdict: 'allow',
+        source: 'runtime',
+      }),
     },
   };
 }
@@ -203,8 +279,64 @@ function block(
       targetTabId,
       targetTabIds,
       runOwnedTabIds,
+      browserPolicyAudit: buildBrowserPolicyAudit({
+        reason,
+        verdict: 'block',
+        source: 'policy',
+      }),
     },
   };
+}
+
+function collaborationRequired(
+  input: { toolName: string },
+  mode: RuntimePolicyAudit['mode'],
+  reason: NonInterferenceVerdictReason,
+  message: string,
+  targetTabId: number | null,
+  targetTabIds: number[],
+  runOwnedTabIds: number[],
+): NonInterferencePreflightVerdict {
+  return {
+    allowed: false,
+    message,
+    audit: {
+      policy: 'non_interference',
+      mode,
+      toolName: input.toolName,
+      verdict: 'collaboration_required',
+      reason,
+      targetTabId,
+      targetTabIds,
+      runOwnedTabIds,
+      browserPolicyAudit: buildBrowserPolicyAudit({
+        reason,
+        verdict: 'collaboration_required',
+        source: 'policy',
+      }),
+    },
+  };
+}
+
+function buildBrowserPolicyAudit(input: {
+  reason: NonInterferenceVerdictReason;
+  verdict: ActionPreflightVerdictKind;
+  source: BrowserPolicyAuditEvent['source'];
+}): BrowserPolicyAuditEvent[] {
+  const field: keyof BrowserRuntimePolicy =
+    input.verdict === 'block' ? 'riskPolicy' : 'desiredExecutionMode';
+  return [
+    {
+      field,
+      requestedValue: input.reason,
+      previousValue: 'unknown',
+      effectiveValue: input.verdict === 'block' ? 'read_only' : 'run_owned',
+      verdict: input.verdict === 'block' ? 'rejected' : 'applied',
+      reason: input.reason,
+      at: new Date().toISOString(),
+      source: input.source,
+    },
+  ];
 }
 
 function hasUserConfirmation(args: unknown): boolean {
@@ -225,6 +357,18 @@ function readStrictPolicyMode(args: unknown): boolean {
     typeof runtimePolicy === 'object' &&
     (runtimePolicy as Record<string, unknown>).nonInterference === 'strict'
   );
+}
+
+function readDesiredExecutionMode(args: unknown): string | null {
+  if (!args || typeof args !== 'object') return null;
+  const record = args as Record<string, unknown>;
+  if (typeof record.desiredExecutionMode === 'string') return record.desiredExecutionMode;
+  const runtimePolicy = record.runtimePolicy;
+  return runtimePolicy !== null &&
+    typeof runtimePolicy === 'object' &&
+    typeof (runtimePolicy as Record<string, unknown>).desiredExecutionMode === 'string'
+    ? (runtimePolicy as Record<string, string>).desiredExecutionMode
+    : null;
 }
 
 function readString(args: unknown, key: string): string | null {
