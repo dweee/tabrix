@@ -21,6 +21,8 @@ function dispatchKeyboard(request: Record<string, unknown>) {
 describe('keyboard helper scroll diagnostics', () => {
   beforeEach(async () => {
     vi.restoreAllMocks();
+    delete (window as typeof window & { __KEYBOARD_HELPER_INITIALIZED__?: boolean })
+      .__KEYBOARD_HELPER_INITIALIZED__;
     document.body.innerHTML = '<main style="height: 4000px">Scrollable page</main>';
     Object.defineProperty(document.documentElement, 'clientHeight', {
       configurable: true,
@@ -64,5 +66,55 @@ describe('keyboard helper scroll diagnostics', () => {
       },
     });
     expect(document.documentElement.scrollTop).toBeGreaterThan(0);
+  });
+
+  it('falls back to the focused scroll container when the document cannot scroll', async () => {
+    Object.defineProperty(document.documentElement, 'scrollHeight', {
+      configurable: true,
+      value: 800,
+    });
+    document.body.innerHTML = `
+      <textarea id="conversation" class="conversation-scroll-area"></textarea>
+    `;
+    const textarea = document.querySelector('#conversation') as HTMLTextAreaElement;
+    Object.defineProperty(textarea, 'clientHeight', {
+      configurable: true,
+      value: 200,
+    });
+    Object.defineProperty(textarea, 'scrollHeight', {
+      configurable: true,
+      value: 1200,
+    });
+    textarea.focus();
+
+    const response = await dispatchKeyboard({
+      action: 'simulateKeyboard',
+      keys: 'PageDown',
+    });
+
+    expect(response.success).toBe(true);
+    const results = response.results as Array<{
+      scrollDiagnostics: {
+        changed: boolean;
+        fallback: {
+          applied: boolean;
+          reason: string;
+          targetKind: string;
+          targetTagName: string;
+          targetId: string;
+        } | null;
+      };
+    }>;
+    expect(results[0].scrollDiagnostics).toMatchObject({
+      changed: true,
+      fallback: {
+        applied: true,
+        reason: 'synthetic_keyboard_did_not_scroll_container',
+        targetKind: 'element',
+        targetTagName: 'TEXTAREA',
+        targetId: 'conversation',
+      },
+    });
+    expect(textarea.scrollTop).toBeGreaterThan(0);
   });
 });

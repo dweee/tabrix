@@ -92,6 +92,7 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
   function getScrollDiagnostics() {
     const scrollingElement = document.scrollingElement || document.documentElement || document.body;
     const activeElement = document.activeElement || document.body;
+    const activeScroll = getElementScrollMetrics(activeElement);
     return {
       window: {
         scrollX: Math.round(window.scrollX || 0),
@@ -112,7 +113,20 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
         id: activeElement && activeElement.id,
         className: activeElement && activeElement.className,
         type: activeElement && activeElement.type,
+        ...activeScroll,
       },
+    };
+  }
+
+  function getElementScrollMetrics(element) {
+    if (!element) return {};
+    return {
+      scrollTop: Math.round(Number(element.scrollTop || 0)),
+      scrollLeft: Math.round(Number(element.scrollLeft || 0)),
+      scrollHeight: Math.round(Number(element.scrollHeight || 0)),
+      scrollWidth: Math.round(Number(element.scrollWidth || 0)),
+      clientHeight: Math.round(Number(element.clientHeight || 0)),
+      clientWidth: Math.round(Number(element.clientWidth || 0)),
     };
   }
 
@@ -122,21 +136,55 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
       before.window.scrollX !== after.window.scrollX ||
       before.window.scrollY !== after.window.scrollY ||
       before.document.scrollTop !== after.document.scrollTop ||
-      before.document.scrollLeft !== after.document.scrollLeft
+      before.document.scrollLeft !== after.document.scrollLeft ||
+      before.activeElement?.scrollTop !== after.activeElement?.scrollTop ||
+      before.activeElement?.scrollLeft !== after.activeElement?.scrollLeft
     );
   }
 
-  function maybeFallbackScroll(parsedKeyInfo, before, after) {
+  function isScrollableElement(element) {
+    if (!element) return false;
+    return Number(element.scrollHeight || 0) > Number(element.clientHeight || 0) + 1;
+  }
+
+  function findFallbackScrollElement(startElement) {
+    const scrollingElement = document.scrollingElement || document.documentElement || document.body;
+    if (isScrollableElement(scrollingElement)) {
+      return { element: scrollingElement, kind: 'document' };
+    }
+
+    let current = startElement && startElement.nodeType === 1 ? startElement : null;
+    while (current && current !== document.body && current !== document.documentElement) {
+      if (isScrollableElement(current)) {
+        return { element: current, kind: 'element' };
+      }
+      current = current.parentElement;
+    }
+
+    return null;
+  }
+
+  function getFallbackViewportHeight(scrollTarget) {
+    if (scrollTarget?.kind === 'element') {
+      return Math.max(1, scrollTarget.element.clientHeight || window.innerHeight || 0);
+    }
+    return Math.max(1, window.innerHeight || scrollTarget?.element?.clientHeight || 0);
+  }
+
+  function maybeFallbackScroll(parsedKeyInfo, before, after, eventTarget) {
     if (!parsedKeyInfo || hasScrollChanged(before, after)) {
       return null;
     }
 
-    const scrollingElement = document.scrollingElement || document.documentElement || document.body;
-    if (!scrollingElement) {
+    const scrollTarget = findFallbackScrollElement(
+      eventTarget || document.activeElement || document.body,
+    );
+    if (!scrollTarget) {
       return null;
     }
 
-    const viewportHeight = Math.max(1, window.innerHeight || scrollingElement.clientHeight || 0);
+    const scrollingElement = scrollTarget.element;
+    const viewportHeight = getFallbackViewportHeight(scrollTarget);
     const key = parsedKeyInfo.key;
     let deltaY = 0;
     let targetTop = null;
@@ -160,21 +208,39 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
     const beforeTop = scrollingElement.scrollTop || window.scrollY || 0;
     if (targetTop !== null) {
       scrollingElement.scrollTop = targetTop;
-      window.scrollTo(window.scrollX || 0, targetTop);
+      if (scrollTarget.kind === 'document') {
+        window.scrollTo(window.scrollX || 0, targetTop);
+      }
     } else {
       scrollingElement.scrollTop = beforeTop + deltaY;
-      window.scrollBy(0, deltaY);
+      if (scrollTarget.kind === 'document') {
+        window.scrollBy(0, deltaY);
+      }
     }
 
     const fallbackAfter = getScrollDiagnostics();
+    const applied =
+      scrollTarget.kind === 'document'
+        ? hasScrollChanged(before, fallbackAfter)
+        : scrollingElement.scrollTop !== beforeTop;
     return {
-      applied: hasScrollChanged(before, fallbackAfter),
+      applied,
       key,
-      reason: 'synthetic_keyboard_did_not_scroll_page',
+      reason:
+        scrollTarget.kind === 'document'
+          ? 'synthetic_keyboard_did_not_scroll_page'
+          : 'synthetic_keyboard_did_not_scroll_container',
+      targetKind: scrollTarget.kind,
+      targetTagName: scrollingElement.tagName || null,
+      targetId: scrollingElement.id || null,
+      targetClassName: String(scrollingElement.className || '').slice(0, 120) || null,
       beforeTop: Math.round(beforeTop),
       deltaY,
       targetTop,
-      afterTop: fallbackAfter.document.scrollTop,
+      afterTop:
+        scrollTarget.kind === 'document'
+          ? fallbackAfter.document.scrollTop
+          : Math.round(scrollingElement.scrollTop || 0),
       diagnosticsAfter: fallbackAfter,
     };
   }
@@ -340,19 +406,26 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
           parsedKeyInfo,
           scrollBefore,
           scrollAfterDispatch,
+          element,
         );
         const scrollAfter = fallbackScroll?.diagnosticsAfter || scrollAfterDispatch;
+        const scrollChanged =
+          hasScrollChanged(scrollBefore, scrollAfter) || !!fallbackScroll?.applied;
         operationResults.push({
           keyCombination: comboString,
           ...dispatchResult,
           scrollDiagnostics: {
             before: scrollBefore,
             after: scrollAfter,
-            changed: hasScrollChanged(scrollBefore, scrollAfter),
+            changed: scrollChanged,
             fallback: fallbackScroll
               ? {
                   applied: fallbackScroll.applied,
                   reason: fallbackScroll.reason,
+                  targetKind: fallbackScroll.targetKind,
+                  targetTagName: fallbackScroll.targetTagName,
+                  targetId: fallbackScroll.targetId,
+                  targetClassName: fallbackScroll.targetClassName,
                   deltaY: fallbackScroll.deltaY,
                   targetTop: fallbackScroll.targetTop,
                   beforeTop: fallbackScroll.beforeTop,
