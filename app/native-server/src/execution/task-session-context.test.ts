@@ -12,6 +12,7 @@ import {
   resolveReadBudgetFromEnv,
 } from './task-session-context';
 import type { ChooseContextDecisionSnapshot } from './skip-read-orchestrator';
+import type { BrowserPageThingProjection } from '@tabrix/shared';
 
 describe('resolveReadBudgetFromEnv', () => {
   it('returns the default when the env key is unset', () => {
@@ -333,5 +334,88 @@ describe('TaskSessionContext — V26-03 noteChooseContextDecision (correction #3
     ctx.noteChooseContextDecision(REPLAY_DECISION_FOR_CTX);
     ctx.noteUrlChange('https://a.example/x', 'role_a');
     expect(ctx.peekChooseContextDecision()).toBe(REPLAY_DECISION_FOR_CTX);
+  });
+});
+
+function makeProjection(
+  overrides: Partial<BrowserPageThingProjection> = {},
+): BrowserPageThingProjection {
+  return {
+    projectionId: 'projection_initial',
+    projectionKind: 'read_snapshot_projection',
+    projectionCreatedAt: '2026-05-18T00:00:00.000Z',
+    sourceObservedAt: '2026-05-18T00:00:00.000Z',
+    sourceLineage: 'dom',
+    regionEvidenceRefs: ['region:viewport'],
+    pageId: 'page_test',
+    tabId: 9,
+    ownerType: 'run_owned',
+    readiness: 'ready',
+    stability: 'stable',
+    contextVersion: 'projection_initial',
+    previousContextVersion: null,
+    changedByActionId: null,
+    changeCause: 'unknown',
+    activeRegion: 'viewport',
+    changedRegions: ['viewport'],
+    reusedRegions: [],
+    invalidatedRefs: [],
+    refreshedRefs: ['ref_1'],
+    chosenDataSource: 'dom_json',
+    sourceConfidence: 0.9,
+    sourceFreshness: 'fresh',
+    contextChars: 1000,
+    contextSavedChars: 0,
+    userActivityLevel: 'idle',
+    interferenceRisk: 'low',
+    ...overrides,
+  };
+}
+
+describe('TaskSessionContext — V28 lifecycle timeline', () => {
+  it('records ordered navigation, projection, delta, ref, and cleanup events', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteUrlChange('https://example.test/search', 'search_page');
+    ctx.notePageProjectionAndBuildDelta(makeProjection());
+    ctx.noteCleanup({ action: 'chrome_close_tabs', targetIds: [9] });
+
+    const timeline = ctx.getLifecycleTimeline();
+    expect(timeline.map((event) => event.kind)).toEqual([
+      'navigation',
+      'readiness_observed',
+      'projection_created',
+      'region_changed',
+      'refs_refreshed',
+      'delta_created',
+      'cleanup',
+    ]);
+    expect(timeline.map((event) => event.index)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(timeline[0]).toMatchObject({
+      url: 'https://example.test/search',
+      pageRole: 'search_page',
+    });
+    expect(timeline[5]).toMatchObject({
+      projectionId: 'projection_initial',
+      changedRegions: ['viewport'],
+      refreshedRefs: ['ref_1'],
+    });
+    expect(timeline[6]).toMatchObject({
+      cleanupAction: 'chrome_close_tabs',
+      cleanupTargetIds: [9],
+    });
+  });
+
+  it('keeps lifecycle timeline snapshots immutable to callers', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteUrlChange('https://example.test/a', 'page');
+    const [event] = ctx.getLifecycleTimeline();
+    event.changedRegions = ['mutated'];
+    event.cleanupTargetIds = [123];
+
+    expect(ctx.getLifecycleTimeline()[0]).toMatchObject({
+      kind: 'navigation',
+      changedRegions: undefined,
+      cleanupTargetIds: undefined,
+    });
   });
 });

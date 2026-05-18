@@ -663,6 +663,19 @@ describe('handleToolCall execution wrapper', () => {
 
     it('attaches AI-facing projection delta across consecutive chrome_read_page calls', async () => {
       markBridgeReady();
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: { content: [{ type: 'text', text: 'navigated' }], isError: false },
+        } as never);
+      await handleToolCall('chrome_navigate', {
+        tabId: 1,
+        taskSessionId: 'delta-task',
+        url: 'https://example.test/search',
+      });
+
       mockReadPageRoundTrip(
         readPagePayloadWithProjection({
           projectionId: 'projection_initial',
@@ -720,6 +733,54 @@ describe('handleToolCall execution wrapper', () => {
       expect(secondPayload.aiContextEnvelope).toMatchObject({
         contextSource: 'page_projection_delta',
         selectedDataSource: 'dom_json',
+      });
+      expect(
+        secondPayload.aiContextEnvelope.lifecycleTimeline.map(
+          (event: { kind: string }) => event.kind,
+        ),
+      ).toEqual([
+        'navigation',
+        'readiness_observed',
+        'projection_created',
+        'region_changed',
+        'delta_created',
+        'readiness_observed',
+        'projection_created',
+        'region_changed',
+        'refs_refreshed',
+        'delta_created',
+      ]);
+      expect(secondPayload.aiContextEnvelope.lifecycleTimeline[0]).toMatchObject({
+        kind: 'navigation',
+        url: 'https://example.test/search',
+      });
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({ success: true, closedTabIds: [1] }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      const closeResult = await handleToolCall('chrome_close_tabs', {
+        taskSessionId: 'delta-task',
+        tabIds: [1],
+      });
+      const closePayload = JSON.parse(String(closeResult.content[0].text));
+      expect(
+        closePayload.lifecycleTimeline.map((event: { kind: string }) => event.kind).at(-1),
+      ).toBe('cleanup');
+      expect(closePayload.lifecycleTimeline.at(-1)).toMatchObject({
+        cleanupAction: 'chrome_close_tabs',
+        cleanupTargetIds: [1],
       });
     });
 

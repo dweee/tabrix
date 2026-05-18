@@ -54,6 +54,7 @@ export const DEFAULT_READ_BUDGET_PER_TASK = 6;
  */
 const READ_BUDGET_HARD_CAP = 100;
 const MAX_LIVE_OBSERVED_CONTEXT_ENTRIES = 10;
+const MAX_LIFECYCLE_TIMELINE_EVENTS = 50;
 
 /**
  * Closed enum for `chosenSource` on a `chrome_read_page` outcome we
@@ -203,6 +204,34 @@ export interface TaskTotalsSnapshot {
   tokensSavedEstimateTotal: number;
 }
 
+export type TaskLifecycleEventKind =
+  | 'navigation'
+  | 'readiness_observed'
+  | 'projection_created'
+  | 'region_changed'
+  | 'refs_refreshed'
+  | 'refs_invalidated'
+  | 'delta_created'
+  | 'cleanup';
+
+export interface TaskLifecycleEvent {
+  eventId: string;
+  index: number;
+  at: string;
+  kind: TaskLifecycleEventKind;
+  url: string | null;
+  pageRole: string | null;
+  projectionId?: string;
+  deltaId?: string;
+  tabId?: number;
+  changedRegions?: string[];
+  reusedRegions?: string[];
+  invalidatedRefs?: string[];
+  refreshedRefs?: string[];
+  cleanupAction?: string;
+  cleanupTargetIds?: number[];
+}
+
 export interface ShouldAllowReadPageInput {
   /**
    * The layer the caller WANTS. The gate may suggest a different
@@ -314,6 +343,8 @@ export class TaskSessionContext {
   private _tokensSavedEstimateTotal = 0;
   private lastPageProjection: BrowserPageThingProjection | null = null;
   private pageProjectionDeltaCount = 0;
+  private lifecycleEventCount = 0;
+  private readonly lifecycleTimeline: TaskLifecycleEvent[] = [];
 
   /**
    * Most recent `choose_context` decision recorded for this task. The
@@ -367,6 +398,11 @@ export class TaskSessionContext {
       this.lastReadLayer = null;
       this.lastReadSource = null;
       this.targetRefsSeen.clear();
+      this.recordLifecycleEvent({
+        kind: 'navigation',
+        url: nextUrl,
+        pageRole: nextRole,
+      });
       // A stale decision against the prior page is unsafe. Drop it so the
       // orchestrator never skips a read on the new page based on a decision
       // that targeted the old one.
@@ -506,6 +542,7 @@ export class TaskSessionContext {
       evidenceBoundary: { evidenceLevel: 'integration', realBrowserClaim: false },
     });
     this.lastPageProjection = cloneBrowserPageThingProjection(projection);
+    this.recordProjectionLifecycleEvents(projection, delta);
     return delta;
   }
 
@@ -529,6 +566,111 @@ export class TaskSessionContext {
         if (typeof family === 'string' && family.length > 0)
           this.apiEndpointFamiliesSeen.add(family);
       }
+    }
+  }
+
+  public noteCleanup(input: { action: string; targetIds?: ReadonlyArray<number> | null }): void {
+    this.recordLifecycleEvent({
+      kind: 'cleanup',
+      url: this.currentUrl,
+      pageRole: this.pageRole,
+      cleanupAction: input.action,
+      cleanupTargetIds: input.targetIds ? [...input.targetIds] : undefined,
+    });
+  }
+
+  public getLifecycleTimeline(): readonly TaskLifecycleEvent[] {
+    return this.lifecycleTimeline.map((event) => ({
+      ...event,
+      changedRegions: event.changedRegions ? [...event.changedRegions] : undefined,
+      reusedRegions: event.reusedRegions ? [...event.reusedRegions] : undefined,
+      invalidatedRefs: event.invalidatedRefs ? [...event.invalidatedRefs] : undefined,
+      refreshedRefs: event.refreshedRefs ? [...event.refreshedRefs] : undefined,
+      cleanupTargetIds: event.cleanupTargetIds ? [...event.cleanupTargetIds] : undefined,
+    }));
+  }
+
+  private recordProjectionLifecycleEvents(
+    projection: BrowserPageThingProjection,
+    delta: BrowserPageProjectionDelta,
+  ): void {
+    this.recordLifecycleEvent({
+      kind: 'readiness_observed',
+      url: this.currentUrl,
+      pageRole: this.pageRole,
+      projectionId: projection.projectionId,
+      tabId: projection.tabId,
+    });
+    this.recordLifecycleEvent({
+      kind: 'projection_created',
+      url: this.currentUrl,
+      pageRole: this.pageRole,
+      projectionId: projection.projectionId,
+      tabId: projection.tabId,
+    });
+    if (projection.changedRegions.length > 0) {
+      this.recordLifecycleEvent({
+        kind: 'region_changed',
+        url: this.currentUrl,
+        pageRole: this.pageRole,
+        projectionId: projection.projectionId,
+        tabId: projection.tabId,
+        changedRegions: projection.changedRegions,
+        reusedRegions: projection.reusedRegions,
+      });
+    }
+    if (projection.refreshedRefs.length > 0) {
+      this.recordLifecycleEvent({
+        kind: 'refs_refreshed',
+        url: this.currentUrl,
+        pageRole: this.pageRole,
+        projectionId: projection.projectionId,
+        tabId: projection.tabId,
+        refreshedRefs: projection.refreshedRefs,
+      });
+    }
+    if (projection.invalidatedRefs.length > 0) {
+      this.recordLifecycleEvent({
+        kind: 'refs_invalidated',
+        url: this.currentUrl,
+        pageRole: this.pageRole,
+        projectionId: projection.projectionId,
+        tabId: projection.tabId,
+        invalidatedRefs: projection.invalidatedRefs,
+      });
+    }
+    this.recordLifecycleEvent({
+      kind: 'delta_created',
+      url: this.currentUrl,
+      pageRole: this.pageRole,
+      projectionId: projection.projectionId,
+      deltaId: delta.deltaId,
+      tabId: projection.tabId,
+      changedRegions: delta.changedRegions,
+      reusedRegions: delta.reusedRegions,
+      invalidatedRefs: delta.invalidatedRefs,
+      refreshedRefs: delta.refreshedRefs,
+    });
+  }
+
+  private recordLifecycleEvent(input: Omit<TaskLifecycleEvent, 'eventId' | 'index' | 'at'>): void {
+    this.lifecycleEventCount += 1;
+    this.lifecycleTimeline.push({
+      ...input,
+      eventId: `lifecycle:${this.lifecycleEventCount}`,
+      index: this.lifecycleEventCount,
+      at: new Date().toISOString(),
+      changedRegions: input.changedRegions ? [...input.changedRegions] : undefined,
+      reusedRegions: input.reusedRegions ? [...input.reusedRegions] : undefined,
+      invalidatedRefs: input.invalidatedRefs ? [...input.invalidatedRefs] : undefined,
+      refreshedRefs: input.refreshedRefs ? [...input.refreshedRefs] : undefined,
+      cleanupTargetIds: input.cleanupTargetIds ? [...input.cleanupTargetIds] : undefined,
+    });
+    if (this.lifecycleTimeline.length > MAX_LIFECYCLE_TIMELINE_EVENTS) {
+      this.lifecycleTimeline.splice(
+        0,
+        this.lifecycleTimeline.length - MAX_LIFECYCLE_TIMELINE_EVENTS,
+      );
     }
   }
 

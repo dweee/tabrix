@@ -762,6 +762,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           : null;
       taskContext.noteUrlChange(url);
     }
+    if (taskContext && name === 'chrome_close_tabs') {
+      taskContext.noteCleanup({
+        action: 'chrome_close_tabs',
+        targetIds: readNumericArray(args, 'tabIds'),
+      });
+    }
     // When the orchestrator demanded a fallback for `chrome_read_page`,
     // replace the caller's `requestedLayer` (which may be the schema
     // default `'L0+L1+L2'`) with the clamped fallback entry layer (`L0`
@@ -897,7 +903,9 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       const aiFacingResult =
         name === 'chrome_read_page' && taskContext && rawResultWithEvidence.isError !== true
           ? attachAiFacingDeltaContext(rawResultWithEvidence, taskContext)
-          : rawResultWithEvidence;
+          : name === 'chrome_close_tabs' && taskContext && rawResultWithEvidence.isError !== true
+            ? attachLifecycleTimelineContext(rawResultWithEvidence, taskContext)
+            : rawResultWithEvidence;
       const normalized = normalizeToolCallResult(name, aiFacingResult);
       const toolResultFailed = aiFacingResult.isError === true;
       sessionManager.completeStep(session.sessionId, step.stepId, {
@@ -1039,7 +1047,34 @@ function attachAiFacingDeltaContext(
       sourceFreshness: projection.sourceFreshness,
     },
     deltaContext,
+    lifecycleTimeline: taskContext.getLifecycleTimeline(),
   };
+
+  return {
+    ...result,
+    content: result.content.map((block, index) =>
+      index === 0 && block.type === 'text' ? { ...block, text: JSON.stringify(payload) } : block,
+    ) as CallToolResult['content'],
+  };
+}
+
+function attachLifecycleTimelineContext(
+  result: CallToolResult,
+  taskContext: TaskSessionContext,
+): CallToolResult {
+  const first = result.content?.[0];
+  if (!first || first.type !== 'text' || typeof first.text !== 'string') return result;
+
+  let payload: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(first.text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return result;
+    payload = parsed as Record<string, unknown>;
+  } catch {
+    return result;
+  }
+
+  payload.lifecycleTimeline = taskContext.getLifecycleTimeline();
 
   return {
     ...result,
@@ -1072,4 +1107,12 @@ function readSelectedDataSource(
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function readNumericArray(input: unknown, key: string): number[] | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const raw = (input as Record<string, unknown>)[key];
+  if (!Array.isArray(raw)) return null;
+  const values = raw.filter((value): value is number => Number.isInteger(value));
+  return values.length > 0 ? values : null;
 }
