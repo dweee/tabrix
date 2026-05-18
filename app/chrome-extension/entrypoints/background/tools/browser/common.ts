@@ -17,6 +17,7 @@ interface NavigateToolParams {
   tabId?: number;
   windowId?: number;
   background?: boolean; // when true, do not activate tab or focus window
+  settleTimeoutMs?: number;
 }
 
 function buildNavigationReadinessFields(input: {
@@ -55,6 +56,11 @@ function buildNavigationReadinessFields(input: {
 
 function getTabNavigationUrl(tab?: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'> | null): string {
   return tab?.url || tab?.pendingUrl || '';
+}
+
+function normalizeSettleTimeoutMs(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  return Math.min(Math.max(Math.trunc(value), 1000), 60000);
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
@@ -214,7 +220,9 @@ class NavigateTool extends BaseBrowserToolExecutor {
       tabId,
       background,
       windowId,
+      settleTimeoutMs,
     } = args;
+    const settleOptions = { timeoutMs: normalizeSettleTimeoutMs(settleTimeoutMs) };
 
     console.log(
       `Attempting to ${refresh ? 'refresh current tab' : `open URL: ${url}`} with options:`,
@@ -234,6 +242,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
         const settleResult = await this.waitForTabSettled(targetTab.id, {
           previousUrl,
           requireUrlChange: false,
+          ...settleOptions,
         });
 
         console.log(`Refreshed tab ID: ${targetTab.id}`);
@@ -303,6 +312,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
         const settleResult = await this.waitForTabSettled(targetTab.id, {
           previousUrl,
           requireUrlChange: true,
+          ...settleOptions,
         });
         const updatedTab = settleResult.tab;
 
@@ -441,6 +451,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
         const settleResult = await this.waitForTabSettled(existingTab.id, {
           previousUrl,
           requireUrlChange: shouldNavigateExplicitTab,
+          ...settleOptions,
         });
         const updatedTab = settleResult.tab;
 
@@ -502,7 +513,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
           // Trigger auto-capture if the new window has a tab
           const firstTab = newWindow.tabs?.[0];
           if (firstTab?.id) {
-            const settleResult = await this.waitForTabSettled(firstTab.id);
+            const settleResult = await this.waitForTabSettled(firstTab.id, settleOptions);
             await this.triggerAutoCapture(firstTab.id, settleResult.tab.url);
 
             return {
@@ -613,7 +624,9 @@ class NavigateTool extends BaseBrowserToolExecutor {
             `URL opened in new Tab ID: ${newTab.id} in existing Window ID: ${targetWindow.id}`,
           );
 
-          const settleResult = newTab.id ? await this.waitForTabSettled(newTab.id) : null;
+          const settleResult = newTab.id
+            ? await this.waitForTabSettled(newTab.id, settleOptions)
+            : null;
 
           // Trigger auto-capture on new tab
           if (newTab.id) {
@@ -670,7 +683,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
             // Trigger auto-capture if fallback window has a tab
             const firstTab = fallbackWindow.tabs?.[0];
             if (firstTab?.id) {
-              const settleResult = await this.waitForTabSettled(firstTab.id);
+              const settleResult = await this.waitForTabSettled(firstTab.id, settleOptions);
               await this.triggerAutoCapture(firstTab.id, settleResult.tab.url);
 
               return {

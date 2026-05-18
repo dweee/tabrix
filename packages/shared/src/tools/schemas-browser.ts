@@ -493,6 +493,11 @@ export const BROWSER_SCHEMAS: Tool[] = [
           description:
             'Refresh the current active tab instead of navigating to a URL. When true, the url parameter is ignored. Defaults to false',
         },
+        settleTimeoutMs: {
+          type: 'number',
+          description:
+            'Optional navigation settle timeout in milliseconds. Defaults to the runtime standard timeout; use a larger value only for slow pages where a document must become readable. Clamped to 1000-60000.',
+        },
       },
       required: [],
     },

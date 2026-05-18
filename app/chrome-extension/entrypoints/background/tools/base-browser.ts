@@ -17,7 +17,13 @@ interface WaitForTabSettledResult {
   tab: chrome.tabs.Tab;
   settled: boolean;
   timedOut: boolean;
-  reason: 'already_complete' | 'complete' | 'complete_after_url_change' | 'timeout' | 'tab_missing';
+  reason:
+    | 'already_complete'
+    | 'complete'
+    | 'complete_after_url_change'
+    | 'interactive'
+    | 'timeout'
+    | 'tab_missing';
   waitedMs: number;
   readyState: string | null;
 }
@@ -225,11 +231,19 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
       readyState: await this.getTabDocumentReadyState(tabId),
     });
 
-    const isSettledTab = (tab: chrome.tabs.Tab): WaitForTabSettledResult['reason'] | null => {
+    const isSettledTab = async (
+      tab: chrome.tabs.Tab,
+    ): Promise<WaitForTabSettledResult['reason'] | null> => {
       const currentUrl = this.normalizeComparableUrl(tab.url || tab.pendingUrl);
       const urlChanged = !requireUrlChange || !previousUrl || currentUrl !== previousUrl;
       if (tab.status === 'complete' && urlChanged) {
         return previousUrl && requireUrlChange ? 'complete_after_url_change' : 'complete';
+      }
+      if (urlChanged && currentUrl && currentUrl !== 'about:blank') {
+        const readyState = await this.getTabDocumentReadyState(tabId);
+        if (readyState === 'interactive' || readyState === 'complete') {
+          return 'interactive';
+        }
       }
       return null;
     };
@@ -248,17 +262,18 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
       };
     }
 
-    const initialReason = isSettledTab(currentTab);
+    const initialReason = await isSettledTab(currentTab);
     if (initialReason) {
-      return buildState(
-        currentTab,
-        previousUrl && requireUrlChange ? 'complete_after_url_change' : 'already_complete',
-        false,
-      );
+      const reason =
+        initialReason === 'complete' && !(previousUrl && requireUrlChange)
+          ? 'already_complete'
+          : initialReason;
+      return buildState(currentTab, reason, false);
     }
 
     return await new Promise<WaitForTabSettledResult>((resolve) => {
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+      let finished = false;
 
       const cleanup = () => {
         chrome.tabs.onUpdated.removeListener(handleUpdated);
@@ -273,6 +288,8 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
         timedOut: boolean,
         updatedTab?: chrome.tabs.Tab,
       ) => {
+        if (finished) return;
+        finished = true;
         cleanup();
         let finalTab = updatedTab;
         if (!finalTab) {
@@ -299,10 +316,12 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
         updatedTab: chrome.tabs.Tab,
       ) => {
         if (updatedTabId !== tabId) return;
-        const reason = isSettledTab(updatedTab);
-        if (reason || changeInfo.status === 'complete') {
-          void finish(reason || 'complete', false, updatedTab);
-        }
+        void (async () => {
+          const reason = await isSettledTab(updatedTab);
+          if (reason || changeInfo.status === 'complete') {
+            await finish(reason || 'complete', false, updatedTab);
+          }
+        })();
       };
 
       chrome.tabs.onUpdated.addListener(handleUpdated);

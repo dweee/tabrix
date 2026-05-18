@@ -167,6 +167,34 @@ describe('browser settle guidance', () => {
     });
   });
 
+  it('passes a bounded custom settle timeout to new-tab navigation waits', async () => {
+    vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
+    const waitForTabSettled = vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: false,
+        status: 'complete',
+        url: 'https://example.com/search?q=browser',
+        title: 'Search',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 9000,
+      readyState: 'complete',
+    });
+
+    const result = await navigateTool.execute({
+      url: 'https://example.com/search?q=browser',
+      background: true,
+      settleTimeoutMs: 90000,
+    } as any);
+
+    expect(result.isError).toBe(false);
+    expect(waitForTabSettled).toHaveBeenCalledWith(20, { timeoutMs: 60000 });
+  });
+
   it('allows structured reads when navigation is interactive with a document URL', async () => {
     vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
     vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
@@ -203,6 +231,34 @@ describe('browser settle guidance', () => {
       canAttemptStructuredRead: true,
       nextStepHint: 'navigation_interactive; structured_read_may_succeed',
     });
+  });
+
+  it('treats an interactive document URL as settled before waiting for full load', async () => {
+    vi.useFakeTimers();
+    (chrome as any).scripting = {
+      executeScript: vi
+        .fn()
+        .mockResolvedValue([{ result: 'interactive' } as chrome.scripting.InjectionResult<string>]),
+    };
+    vi.mocked(chrome.tabs.get).mockResolvedValue({
+      id: 20,
+      windowId: 1,
+      active: false,
+      status: 'loading',
+      url: 'https://example.com/search?q=browser',
+      title: 'Loading',
+    } as chrome.tabs.Tab);
+
+    const result = await (navigateTool as any).waitForTabSettled(20);
+
+    expect(result).toMatchObject({
+      settled: true,
+      timedOut: false,
+      reason: 'interactive',
+      readyState: 'interactive',
+    });
+    expect(chrome.tabs.onUpdated.addListener).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it('marks timed out new-tab navigation as not readable before read_page', async () => {
