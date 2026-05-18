@@ -528,6 +528,55 @@ describe('browser settle guidance', () => {
     });
   });
 
+  it('does not treat long single-line article text as incomplete sparse content', async () => {
+    const articleText = [
+      'If Codex does not feel useful yet, the missing piece is often the browser and skill context around it.',
+      'This article walks through five concrete tools, explains when each one matters, and includes enough detail for a reader to recover the full list without opening another page.',
+      'The body is intentionally normalized into one visible text line because many article pages collapse readable content that way after extraction.',
+      'A quality model should still tell the assistant that the text body is available, while separately warning that UI structure and target refs require chrome_read_page.',
+      'awesome-codex-skills, repomix, follow-builders, codex-plusplus, and keep-codex-fast are all present in the extracted text body.',
+    ].join(' ');
+
+    vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: false,
+        status: 'complete',
+        url: 'https://example.com/article',
+        title: 'Long Article',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 200,
+      readyState: 'complete',
+    });
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(webFetcherTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      textContent: articleText,
+      article: { title: 'Long Article', byline: 'Author', siteName: 'Example', excerpt: '' },
+    });
+
+    const result = await webFetcherTool.execute({
+      url: 'https://example.com/article',
+      background: true,
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload.textSummary).toMatchObject({
+      quality: 'complete_text_sparse_structure',
+      sparse: false,
+      structureSparse: true,
+      contentSparse: false,
+      completeTextAvailable: true,
+    });
+    expect(payload.extractionHint).toContain('structurally sparse');
+    expect(payload.extractionHint).not.toContain('higher-risk tools');
+  });
+
   it('returns compact structured snapshot from read_page', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 41,
