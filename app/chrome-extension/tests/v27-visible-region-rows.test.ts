@@ -1931,6 +1931,51 @@ describe('V27-P0-REAL-01 visible region rows', () => {
     }
   });
 
+  it('treats reliable visible rows as ready even when text summary is weak', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5313,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/spa-search?q=ai',
+      title: 'SPA search',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Results" [ref=ref_main] (x=212,y=571)',
+        '  - article "Result card" [ref=ref_card_1] (x=212,y=120)',
+        '    - link "AI workflow setup guide" [ref=ref_card_1_link] (x=212,y=120) href="/items/1"',
+        '  - article "Result card" [ref=ref_card_2] (x=212,y=220)',
+        '    - link "AI tool comparison checklist" [ref=ref_card_2_link] (x=212,y=220) href="/items/2"',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_card_1_link', selector: 'a[href="/items/1"]' },
+        { ref: 'ref_card_2_link', selector: 'a[href="/items/2"]' },
+      ],
+      stats: { processed: 5, included: 5, durationMs: 6 },
+      viewport: { width: 424, height: 1143, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact', render: 'markdown' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload).toMatchObject({
+      kind: 'dom_region_rows',
+      selectedDataSource: 'dom_region_rows',
+      readinessVerdict: 'ready',
+      readinessReason: null,
+      rowCount: 2,
+      visibleRegionRowsUsed: true,
+    });
+    expect(payload.visibleRegionRows).toMatchObject({
+      targetRefCoverageRate: 0.99,
+      visibleRegionRowsUsed: true,
+    });
+  });
+
   it('emits empty readiness evidence for empty pages without rows', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 5305,

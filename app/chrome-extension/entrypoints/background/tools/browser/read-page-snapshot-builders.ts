@@ -142,11 +142,13 @@ export function buildExtensionLayer(params: {
   const readinessVerdict =
     params.pageType === 'unsupported_page'
       ? 'error'
-      : !hasTextSignal
-        ? 'empty'
-        : shellOnlyRows
-          ? 'blocked'
-          : 'ready';
+      : hasVisibleRows
+        ? 'ready'
+        : !hasTextSignal
+          ? 'empty'
+          : shellOnlyRows
+            ? 'blocked'
+            : 'ready';
   const readinessReason = shellOnlyRows
     ? params.visibleRegionRows.footerLikeRejectedCount +
         params.visibleRegionRows.navigationLikeRejectedCount >
