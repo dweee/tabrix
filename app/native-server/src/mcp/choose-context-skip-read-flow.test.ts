@@ -954,6 +954,21 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
       changedRegions: ['main_results'],
       refreshedRefs: ['ref_result_1', 'ref_result_2'],
     });
+    expect(payload.deltaContext).toMatchObject({
+      deltaKind: 'initial_overview',
+      fromProjectionId: null,
+      changedRegions: ['main_results'],
+      refreshedRefs: ['ref_result_1', 'ref_result_2'],
+    });
+    expect(payload.aiContextEnvelope).toMatchObject({
+      envelopeKind: 'delta_context',
+      contextSource: 'page_projection_delta',
+      selectedDataSource: 'dom_region_rows',
+      dataSourceDecision: {
+        selectedSource: 'dom_region_rows',
+        fallbackReason: 'api_unavailable',
+      },
+    });
     const operationLog = takeLatestReadPageOperationLog(completeSpy);
     expect(operationLog).toMatchObject({
       selectedDataSource: 'dom_region_rows',

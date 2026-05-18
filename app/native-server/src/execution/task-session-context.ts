@@ -25,7 +25,12 @@
  * budget.
  */
 
-import type { ReadPageRequestedLayer } from '@tabrix/shared';
+import {
+  buildBrowserPageProjectionDelta,
+  type BrowserPageProjectionDelta,
+  type BrowserPageThingProjection,
+  type ReadPageRequestedLayer,
+} from '@tabrix/shared';
 import type {
   LiveObservedApiData,
   LiveObservedApiEvidence,
@@ -307,6 +312,8 @@ export class TaskSessionContext {
    */
   private _readPageAvoidedCount = 0;
   private _tokensSavedEstimateTotal = 0;
+  private lastPageProjection: BrowserPageThingProjection | null = null;
+  private pageProjectionDeltaCount = 0;
 
   /**
    * Most recent `choose_context` decision recorded for this task. The
@@ -479,6 +486,30 @@ export class TaskSessionContext {
   }
 
   /**
+   * Record the newest AI-facing page projection and return the compact
+   * projection delta the caller can attach to a read result. The previous
+   * projection intentionally survives URL changes inside the same task: a
+   * navigation/search/filter is exactly the moment the AI needs a
+   * post-action delta instead of a fresh full context dump.
+   */
+  public notePageProjectionAndBuildDelta(
+    projection: BrowserPageThingProjection,
+  ): BrowserPageProjectionDelta {
+    const previousProjection = this.lastPageProjection;
+    const deltaKind = previousProjection === null ? 'initial_overview' : 'post_action_delta';
+    this.pageProjectionDeltaCount += 1;
+    const delta = buildBrowserPageProjectionDelta({
+      previousProjection,
+      currentProjection: projection,
+      deltaId: `delta:${this.pageProjectionDeltaCount}:${projection.projectionId}`,
+      deltaKind,
+      evidenceBoundary: { evidenceLevel: 'integration', realBrowserClaim: false },
+    });
+    this.lastPageProjection = cloneBrowserPageThingProjection(projection);
+    return delta;
+  }
+
+  /**
    * Record a successful `chrome_read_page` outcome. Increments
    * `readPageCount` exactly once per call. The caller is responsible
    * for invoking this AFTER the bridge returns success — failed
@@ -602,5 +633,18 @@ function cloneVisibleRegionRowsData(input: TaskVisibleRegionRowsData): TaskVisib
     rejectedRegionReasonDistribution: input.rejectedRegionReasonDistribution
       ? { ...input.rejectedRegionReasonDistribution }
       : undefined,
+  };
+}
+
+function cloneBrowserPageThingProjection(
+  input: BrowserPageThingProjection,
+): BrowserPageThingProjection {
+  return {
+    ...input,
+    changedRegions: [...input.changedRegions],
+    reusedRegions: [...input.reusedRegions],
+    invalidatedRefs: [...input.invalidatedRefs],
+    refreshedRefs: [...input.refreshedRefs],
+    regionEvidenceRefs: [...input.regionEvidenceRefs],
   };
 }

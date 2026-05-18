@@ -559,6 +559,50 @@ describe('handleToolCall execution wrapper', () => {
         } as never);
     }
 
+    function readPagePayloadWithProjection(input: {
+      projectionId: string;
+      contextChars: number;
+      changedRegions: string[];
+      reusedRegions?: string[];
+      refreshedRefs?: string[];
+      selectedDataSource?: string;
+    }): string {
+      return JSON.stringify({
+        kind: 'page',
+        selectedDataSource: input.selectedDataSource ?? 'dom_json',
+        decisionReason: 'read_page_snapshot',
+        pageProjection: {
+          projectionId: input.projectionId,
+          projectionKind: 'read_snapshot_projection',
+          pageId: 'page_test',
+          tabId: 1,
+          ownerType: 'run_owned',
+          projectionCreatedAt: '2026-05-18T00:00:00.000Z',
+          sourceObservedAt: '2026-05-18T00:00:00.000Z',
+          sourceLineage: 'dom',
+          regionEvidenceRefs: ['region:viewport'],
+          readiness: 'ready',
+          stability: 'stable',
+          contextVersion: input.projectionId,
+          previousContextVersion: null,
+          changedByActionId: null,
+          changeCause: 'unknown',
+          activeRegion: 'viewport',
+          changedRegions: input.changedRegions,
+          reusedRegions: input.reusedRegions ?? [],
+          invalidatedRefs: [],
+          refreshedRefs: input.refreshedRefs ?? [],
+          chosenDataSource: input.selectedDataSource ?? 'dom_json',
+          sourceConfidence: 0.9,
+          sourceFreshness: 'fresh',
+          contextChars: input.contextChars,
+          contextSavedChars: 0,
+          userActivityLevel: 'idle',
+          interferenceRisk: 'low',
+        },
+      });
+    }
+
     it('accumulates readPageCount across consecutive chrome_read_page calls sharing taskSessionId', async () => {
       markBridgeReady();
       // Three calls with budget=2 → first two pass through, third
@@ -615,6 +659,68 @@ describe('handleToolCall execution wrapper', () => {
       const persisted = sessionManager.peekExternalTaskContext('shared-task');
       expect(persisted).toBe(ctx);
       expect(persisted!.readPageCount).toBe(2);
+    });
+
+    it('attaches AI-facing projection delta across consecutive chrome_read_page calls', async () => {
+      markBridgeReady();
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_initial',
+          contextChars: 12000,
+          changedRegions: ['viewport'],
+        }),
+      );
+      const r1 = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'delta-task',
+        requestedLayer: 'L0+L1',
+      });
+      const firstPayload = JSON.parse(String(r1.content[0].text));
+      expect(firstPayload.deltaContext).toMatchObject({
+        deltaKind: 'initial_overview',
+        fromProjectionId: null,
+        toProjectionId: 'projection_initial',
+        contextSavedChars: 0,
+      });
+      expect(firstPayload.aiContextEnvelope).toMatchObject({
+        envelopeKind: 'delta_context',
+        selectedDataSource: 'dom_json',
+        dataSourceDecision: {
+          selectedSource: 'dom_json',
+          selectedReason: 'read_page_snapshot',
+        },
+      });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_post',
+          contextChars: 3200,
+          changedRegions: ['search_results'],
+          reusedRegions: ['global_nav'],
+          refreshedRefs: ['ref_result_1'],
+        }),
+      );
+      const r2 = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'delta-task',
+        requestedLayer: 'L0+L1+L2',
+      });
+      const secondPayload = JSON.parse(String(r2.content[0].text));
+      expect(secondPayload.deltaContext).toMatchObject({
+        deltaKind: 'post_action_delta',
+        fromProjectionId: 'projection_initial',
+        toProjectionId: 'projection_post',
+        changedRegions: ['search_results'],
+        reusedRegions: ['global_nav'],
+        refreshedRefs: ['ref_result_1'],
+        contextChars: 3200,
+        previousContextChars: 12000,
+        contextSavedChars: 8800,
+      });
+      expect(secondPayload.aiContextEnvelope).toMatchObject({
+        contextSource: 'page_projection_delta',
+        selectedDataSource: 'dom_json',
+      });
     });
 
     it('does NOT cross-contaminate budgets between distinct taskSessionIds', async () => {

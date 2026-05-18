@@ -9,6 +9,7 @@ import { NativeMessageType, TOOL_NAMES, TOOL_SCHEMAS, getRequiredCapability } fr
 import { isToolAllowedByPolicy } from '../policy/phase0-opt-in';
 import { getCurrentCapabilityEnv, isCapabilityEnabled } from '../policy/capabilities';
 import { sessionManager } from '../execution/session-manager';
+import type { TaskSessionContext } from '../execution/task-session-context';
 import { normalizeToolCallResult } from '../execution/result-normalizer';
 import { planSkipRead, type SkipReadPlan } from '../execution/skip-read-orchestrator';
 import { readApiKnowledgeEndpointPlan } from '../api/api-knowledge';
@@ -77,6 +78,7 @@ import {
 import { bridgeRuntimeState } from '../server/bridge-state';
 import { bridgeCommandChannel } from '../server/bridge-command-channel';
 import { getDefaultPrimaryTabController } from '../runtime/primary-tab-controller';
+import type { BrowserPageThingProjection, ReadPageSelectedDataSource } from '@tabrix/shared';
 
 /**
  * Production wiring for the `experience_replay` handler.
@@ -862,6 +864,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
               apiRowsUnavailableReason: apiUnavailableReason,
               readCount: taskContext.readPageCount,
             });
+            const aiFacingDomRowsResult = attachAiFacingDeltaContext(domRowsResult, taskContext);
             sessionManager.completeStep(session.sessionId, step.stepId, {
               status: 'completed',
               resultSummary: 'chrome_read_page fulfilled via visible DOM region rows',
@@ -873,7 +876,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
               status: 'completed',
               summary: 'chrome_read_page fulfilled via visible DOM region rows',
             });
-            return domRowsResult;
+            return aiFacingDomRowsResult;
           }
 
           const rejectedReason = buildVisibleRowsRejectionReason(visibleRows);
@@ -891,8 +894,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       // dom_region_rows may replace the payload, but it is still one
       // bridge-confirmed read_page call.
       recordSuccessfulReadPage('unknown');
-      const normalized = normalizeToolCallResult(name, rawResultWithEvidence);
-      const toolResultFailed = rawResultWithEvidence.isError === true;
+      const aiFacingResult =
+        name === 'chrome_read_page' && taskContext && rawResultWithEvidence.isError !== true
+          ? attachAiFacingDeltaContext(rawResultWithEvidence, taskContext)
+          : rawResultWithEvidence;
+      const normalized = normalizeToolCallResult(name, aiFacingResult);
+      const toolResultFailed = aiFacingResult.isError === true;
       sessionManager.completeStep(session.sessionId, step.stepId, {
         status: 'completed',
         resultSummary: normalized.stepSummary,
@@ -921,7 +928,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         status: 'completed',
         summary: normalized.executionResult.summary,
       });
-      return rawResultWithEvidence;
+      return aiFacingResult;
     } else {
       const responseError = String(response.error || 'Unknown tool error');
       const isBridgeError =
@@ -991,3 +998,78 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     return result;
   }
 };
+
+function attachAiFacingDeltaContext(
+  result: CallToolResult,
+  taskContext: TaskSessionContext,
+): CallToolResult {
+  const first = result.content?.[0];
+  if (!first || first.type !== 'text' || typeof first.text !== 'string') return result;
+
+  let payload: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(first.text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return result;
+    payload = parsed as Record<string, unknown>;
+  } catch {
+    return result;
+  }
+
+  const projection = payload.pageProjection;
+  if (!isBrowserPageThingProjectionLike(projection)) return result;
+
+  const deltaContext = taskContext.notePageProjectionAndBuildDelta(projection);
+  const selectedDataSource = readSelectedDataSource(payload, projection);
+  const selectedReason = readString(payload.decisionReason) ?? readString(payload.selectedReason);
+  const fallbackReason =
+    readString(payload.fallbackReason) ??
+    readString(payload.fallbackCause) ??
+    readString(payload.apiRowsUnavailableReason);
+
+  payload.deltaContext = deltaContext;
+  payload.aiContextEnvelope = {
+    envelopeKind: 'delta_context',
+    contextSource: 'page_projection_delta',
+    selectedDataSource,
+    dataSourceDecision: {
+      selectedSource: selectedDataSource,
+      selectedReason,
+      fallbackReason,
+      sourceConfidence: projection.sourceConfidence,
+      sourceFreshness: projection.sourceFreshness,
+    },
+    deltaContext,
+  };
+
+  return {
+    ...result,
+    content: result.content.map((block, index) =>
+      index === 0 && block.type === 'text' ? { ...block, text: JSON.stringify(payload) } : block,
+    ) as CallToolResult['content'],
+  };
+}
+
+function isBrowserPageThingProjectionLike(input: unknown): input is BrowserPageThingProjection {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
+  const projection = input as Partial<BrowserPageThingProjection>;
+  return (
+    typeof projection.projectionId === 'string' &&
+    typeof projection.contextChars === 'number' &&
+    Array.isArray(projection.changedRegions) &&
+    Array.isArray(projection.reusedRegions) &&
+    Array.isArray(projection.invalidatedRefs) &&
+    Array.isArray(projection.refreshedRefs)
+  );
+}
+
+function readSelectedDataSource(
+  payload: Record<string, unknown>,
+  projection: BrowserPageThingProjection,
+): ReadPageSelectedDataSource {
+  const selected = readString(payload.selectedDataSource) ?? readString(payload.dataSource);
+  return (selected ?? projection.chosenDataSource) as ReadPageSelectedDataSource;
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
