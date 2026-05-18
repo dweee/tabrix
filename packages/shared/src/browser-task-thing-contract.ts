@@ -170,6 +170,13 @@ export type BrowserInterferenceRisk = (typeof BROWSER_INTERFERENCE_RISK_VALUES)[
 export const BROWSER_PROJECTION_KIND_VALUES = ['read_snapshot_projection'] as const;
 export type BrowserProjectionKind = (typeof BROWSER_PROJECTION_KIND_VALUES)[number];
 
+export const BROWSER_PAGE_PROJECTION_DELTA_KIND_VALUES = [
+  'initial_overview',
+  'post_action_delta',
+] as const;
+export type BrowserPageProjectionDeltaKind =
+  (typeof BROWSER_PAGE_PROJECTION_DELTA_KIND_VALUES)[number];
+
 export const BROWSER_SOURCE_LINEAGE_VALUES = [
   'dom',
   'accessibility',
@@ -209,6 +216,22 @@ export interface BrowserPageThingProjection {
   contextSavedChars: number;
   userActivityLevel: BrowserUserActivityLevel;
   interferenceRisk: BrowserInterferenceRisk;
+}
+
+export interface BrowserPageProjectionDelta {
+  deltaId: string;
+  deltaKind: BrowserPageProjectionDeltaKind;
+  fromProjectionId: string | null;
+  toProjectionId: string;
+  changedRegions: string[];
+  reusedRegions: string[];
+  invalidatedRefs: string[];
+  refreshedRefs: string[];
+  contextChars: number;
+  previousContextChars: number | null;
+  contextSavedChars: number;
+  contextSavedRatio: number;
+  evidenceBoundary: BrowserTaskFixtureEvidenceBoundary;
 }
 
 export interface BrowserTaskThingSummary {
@@ -342,6 +365,14 @@ export interface BrowserTaskDeterministicFixtureArtifact {
   evidenceBoundary: BrowserTaskFixtureEvidenceBoundary;
 }
 
+export interface BrowserPageProjectionDeltaArtifact {
+  artifactKind: typeof BROWSER_TASK_FIXTURE_ARTIFACT_KIND;
+  contractVersion: typeof BROWSER_TASK_THING_CONTRACT_VERSION;
+  generatedAt: string;
+  deltaProjection: BrowserPageProjectionDelta;
+  evidenceBoundary: BrowserTaskFixtureEvidenceBoundary;
+}
+
 export function isBrowserTaskPrivacyRedactionSafe(
   privacyRedaction: BrowserPrivacyRedactionEvidence,
 ): boolean {
@@ -366,6 +397,61 @@ export function isBrowserTaskDeterministicFixtureArtifact(
     artifact.evidence.competitorLane === 'not_applicable' &&
     isBrowserTaskPrivacyRedactionSafe(artifact.evidence.privacyRedaction)
   );
+}
+
+export function isBrowserPageProjectionDeltaArtifact(
+  artifact: BrowserPageProjectionDeltaArtifact,
+): boolean {
+  return (
+    artifact.artifactKind === BROWSER_TASK_FIXTURE_ARTIFACT_KIND &&
+    artifact.contractVersion === BROWSER_TASK_THING_CONTRACT_VERSION &&
+    artifact.evidenceBoundary.realBrowserClaim === false &&
+    BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES.includes(artifact.evidenceBoundary.evidenceLevel) &&
+    artifact.deltaProjection.evidenceBoundary.realBrowserClaim === false &&
+    artifact.deltaProjection.evidenceBoundary.evidenceLevel === artifact.evidenceBoundary.evidenceLevel
+  );
+}
+
+export interface BuildBrowserPageProjectionDeltaInput {
+  previousProjection: BrowserPageThingProjection | null;
+  currentProjection: BrowserPageThingProjection;
+  deltaId: string;
+  deltaKind: BrowserPageProjectionDeltaKind;
+  evidenceBoundary?: BrowserTaskFixtureEvidenceBoundary;
+}
+
+export function buildBrowserPageProjectionDelta(
+  input: BuildBrowserPageProjectionDeltaInput,
+): BrowserPageProjectionDelta {
+  if (input.deltaKind === 'post_action_delta' && input.previousProjection === null) {
+    throw new Error('post_action_delta requires previousProjection');
+  }
+
+  const previousContextChars = input.previousProjection?.contextChars ?? null;
+  const contextSavedChars = Math.max(
+    0,
+    previousContextChars === null ? 0 : previousContextChars - input.currentProjection.contextChars,
+  );
+  const contextSavedRatio =
+    previousContextChars === null || previousContextChars <= 0
+      ? 0
+      : Math.min(1, contextSavedChars / previousContextChars);
+
+  return {
+    deltaId: input.deltaId,
+    deltaKind: input.deltaKind,
+    fromProjectionId: input.previousProjection?.projectionId ?? null,
+    toProjectionId: input.currentProjection.projectionId,
+    changedRegions: input.currentProjection.changedRegions,
+    reusedRegions: input.currentProjection.reusedRegions,
+    invalidatedRefs: input.currentProjection.invalidatedRefs,
+    refreshedRefs: input.currentProjection.refreshedRefs,
+    contextChars: input.currentProjection.contextChars,
+    previousContextChars,
+    contextSavedChars,
+    contextSavedRatio,
+    evidenceBoundary: input.evidenceBoundary ?? { evidenceLevel: 'unit', realBrowserClaim: false },
+  };
 }
 
 export interface BuildBrowserPageThingProjectionInput {

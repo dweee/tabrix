@@ -24,11 +24,14 @@ import {
   BROWSER_TASK_THING_CONTRACT_VERSION,
   BROWSER_PROFILE_MODE_VALUES,
   BROWSER_PROJECTION_KIND_VALUES,
+  BROWSER_PAGE_PROJECTION_DELTA_KIND_VALUES,
   BROWSER_ASSISTANT_CLIENT_VALUES,
   BROWSER_USER_BOUNDARY_MODE_VALUES,
   BROWSER_USER_ACTIVITY_LEVEL_VALUES,
   TOOL_SCHEMAS,
+  buildBrowserPageProjectionDelta,
   buildBrowserPageThingProjectionFromReadPage,
+  isBrowserPageProjectionDeltaArtifact,
   isBrowserTaskDeterministicFixtureArtifact,
   isBrowserTaskPrivacyRedactionSafe,
 } from '../dist/index.mjs';
@@ -53,6 +56,8 @@ assert.ok(BROWSER_PAGE_OWNER_TYPE_VALUES.includes('baseline'));
 assert.ok(BROWSER_PAGE_STABILITY_VALUES.includes('stale'));
 assert.ok(BROWSER_PAGE_CHANGE_CAUSE_VALUES.includes('background_refresh'));
 assert.ok(BROWSER_PROJECTION_KIND_VALUES.includes('read_snapshot_projection'));
+assert.ok(BROWSER_PAGE_PROJECTION_DELTA_KIND_VALUES.includes('initial_overview'));
+assert.ok(BROWSER_PAGE_PROJECTION_DELTA_KIND_VALUES.includes('post_action_delta'));
 assert.ok(BROWSER_SOURCE_LINEAGE_VALUES.includes('dom'));
 assert.ok(BROWSER_SOURCE_FRESHNESS_VALUES.includes('fresh'));
 assert.ok(BROWSER_USER_ACTIVITY_LEVEL_VALUES.includes('recent_input'));
@@ -234,6 +239,101 @@ assert.equal(mappedProjection.sourceObservedAt, '2026-05-18T00:00:02.000Z');
 assert.equal(mappedProjection.sourceLineage, 'dom');
 assert.deepEqual(mappedProjection.regionEvidenceRefs, ['region:search_results', 'row:row_001']);
 assert.ok(mappedProjection.contextSavedChars > 0);
+
+const initialDelta = buildBrowserPageProjectionDelta({
+  previousProjection: null,
+  currentProjection: projection,
+  deltaId: 'delta_initial_001',
+  deltaKind: 'initial_overview',
+});
+
+assert.equal(initialDelta.deltaKind, 'initial_overview');
+assert.equal(initialDelta.fromProjectionId, null);
+assert.equal(initialDelta.toProjectionId, 'projection_001');
+assert.deepEqual(initialDelta.changedRegions, ['search_results']);
+assert.deepEqual(initialDelta.reusedRegions, ['global_nav']);
+assert.deepEqual(initialDelta.invalidatedRefs, ['tgt_old']);
+assert.deepEqual(initialDelta.refreshedRefs, ['tgt_new']);
+assert.equal(initialDelta.previousContextChars, null);
+assert.equal(initialDelta.contextSavedChars, 0);
+assert.equal(initialDelta.contextSavedRatio, 0);
+assert.equal(initialDelta.evidenceBoundary.evidenceLevel, 'unit');
+assert.equal(initialDelta.evidenceBoundary.realBrowserClaim, false);
+
+const previousProjection = {
+  ...projection,
+  projectionId: 'projection_previous_001',
+  contextChars: 12000,
+  changedRegions: ['initial_results'],
+  reusedRegions: [],
+  invalidatedRefs: [],
+  refreshedRefs: ['tgt_old'],
+};
+const currentProjection = {
+  ...projection,
+  projectionId: 'projection_current_001',
+  contextChars: 8000,
+  changedRegions: ['search_results'],
+  reusedRegions: ['global_nav'],
+  invalidatedRefs: ['tgt_old'],
+  refreshedRefs: ['tgt_new'],
+};
+const postActionDelta = buildBrowserPageProjectionDelta({
+  previousProjection,
+  currentProjection,
+  deltaId: 'delta_post_action_001',
+  deltaKind: 'post_action_delta',
+  evidenceBoundary: { evidenceLevel: 'integration', realBrowserClaim: false },
+});
+
+assert.equal(postActionDelta.deltaKind, 'post_action_delta');
+assert.equal(postActionDelta.fromProjectionId, 'projection_previous_001');
+assert.equal(postActionDelta.toProjectionId, 'projection_current_001');
+assert.deepEqual(postActionDelta.changedRegions, ['search_results']);
+assert.deepEqual(postActionDelta.reusedRegions, ['global_nav']);
+assert.deepEqual(postActionDelta.invalidatedRefs, ['tgt_old']);
+assert.deepEqual(postActionDelta.refreshedRefs, ['tgt_new']);
+assert.equal(postActionDelta.previousContextChars, 12000);
+assert.equal(postActionDelta.contextChars, 8000);
+assert.ok(postActionDelta.contextSavedChars > 0);
+assert.ok(postActionDelta.contextSavedRatio >= 0 && postActionDelta.contextSavedRatio <= 1);
+assert.throws(
+  () =>
+    buildBrowserPageProjectionDelta({
+      previousProjection: null,
+      currentProjection,
+      deltaId: 'delta_invalid_001',
+      deltaKind: 'post_action_delta',
+    }),
+  /post_action_delta requires previousProjection/,
+);
+
+const deltaArtifact = {
+  artifactKind: 'deterministic_fixture',
+  contractVersion: BROWSER_TASK_THING_CONTRACT_VERSION,
+  generatedAt: '2026-05-18T00:00:04.000Z',
+  deltaProjection: postActionDelta,
+  evidenceBoundary: { evidenceLevel: 'integration', realBrowserClaim: false },
+};
+
+assert.equal(isBrowserPageProjectionDeltaArtifact(deltaArtifact), true);
+assert.equal(
+  isBrowserPageProjectionDeltaArtifact({
+    ...deltaArtifact,
+    evidenceBoundary: { evidenceLevel: 'integration', realBrowserClaim: true },
+  }),
+  false,
+);
+assert.equal(
+  isBrowserPageProjectionDeltaArtifact({
+    ...deltaArtifact,
+    deltaProjection: {
+      ...postActionDelta,
+      evidenceBoundary: { evidenceLevel: 'unit', realBrowserClaim: false },
+    },
+  }),
+  false,
+);
 
 const evidence = {
   evidenceId: 'evidence_001',
