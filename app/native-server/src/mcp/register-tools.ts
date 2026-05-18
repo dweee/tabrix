@@ -863,7 +863,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         taskContext: taskContextEarly,
         args,
       });
-      const rawResultWithEvidence = withFallbackEvidence(postResult.rawResult, apiFallbackEvidence);
+      let rawResultWithEvidence = withFallbackEvidence(postResult.rawResult, apiFallbackEvidence);
       let readPageRecorded = false;
       const recordSuccessfulReadPage = (
         source: 'unknown' | 'dom_region_rows',
@@ -885,6 +885,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         if (visibleRows) {
           const requestedLayer =
             forcedReadPageLayer ?? extractRequestedLayer(args) ?? READ_PAGE_DEFAULT_LAYER;
+          const readPageRenderMode = extractReadPageRenderMode(args);
           const recordedDecisionForRows = taskContext.peekChooseContextDecision();
           const apiUnavailableReason =
             apiFallbackEvidence?.fallbackCause ??
@@ -901,7 +902,10 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
             domRegionRowsEvidence: taskContext.peekVisibleRegionRowsEvidence(),
           });
 
-          if (routerDecision.selectedDataSource === 'dom_region_rows') {
+          if (
+            readPageRenderMode !== 'markdown' &&
+            routerDecision.selectedDataSource === 'dom_region_rows'
+          ) {
             recordSuccessfulReadPage(
               'dom_region_rows',
               visibleRows.rows
@@ -936,7 +940,21 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
             return aiFacingDomRowsResult;
           }
 
-          const rejectedReason = buildVisibleRowsRejectionReason(visibleRows);
+          const rejectedReason =
+            readPageRenderMode === 'markdown'
+              ? 'markdown_reading_surface_preferred'
+              : buildVisibleRowsRejectionReason(visibleRows);
+          if (readPageRenderMode === 'markdown') {
+            rawResultWithEvidence = attachReadPagePayloadMetadata(rawResultWithEvidence, {
+              selectedDataSource: 'markdown',
+              dataSource: 'markdown',
+              decisionReason: 'markdown_reading_surface_preferred',
+              visibleRegionRowsUsed: false,
+              visibleRegionRowCount: visibleRows.rowCount,
+              visibleRegionRowsRejectedReason: rejectedReason,
+              apiRowsUnavailableReason: apiUnavailableReason,
+            });
+          }
           operationLogHint = buildDomRegionRowsRejectedLogHint({
             existing: operationLogHint,
             visibleRows,
@@ -1067,6 +1085,32 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     return result;
   }
 };
+
+function attachReadPagePayloadMetadata(
+  result: CallToolResult,
+  metadata: Record<string, unknown>,
+): CallToolResult {
+  const first = result.content?.[0];
+  if (!first || first.type !== 'text' || typeof first.text !== 'string') return result;
+
+  let payload: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(first.text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return result;
+    payload = parsed as Record<string, unknown>;
+  } catch {
+    return result;
+  }
+
+  return {
+    ...result,
+    content: result.content.map((block, index) =>
+      index === 0 && block.type === 'text'
+        ? { ...block, text: JSON.stringify({ ...payload, ...metadata }) }
+        : block,
+    ) as CallToolResult['content'],
+  };
+}
 
 function attachAiFacingDeltaContext(
   result: CallToolResult,
@@ -1242,6 +1286,12 @@ function readSelectedDataSource(
 ): ReadPageSelectedDataSource {
   const selected = readString(payload.selectedDataSource) ?? readString(payload.dataSource);
   return (selected ?? projection.chosenDataSource) as ReadPageSelectedDataSource;
+}
+
+function extractReadPageRenderMode(input: unknown): 'json' | 'markdown' | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const render = (input as Record<string, unknown>).render;
+  return render === 'json' || render === 'markdown' ? render : null;
 }
 
 function readString(value: unknown): string | null {

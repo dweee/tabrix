@@ -967,6 +967,126 @@ describe('handleToolCall execution wrapper', () => {
       });
     });
 
+    it('preserves markdown reading surface instead of replacing it with DOM rows', async () => {
+      markBridgeReady();
+      const ctx = sessionManager.getOrCreateExternalTaskContext('markdown-long-read');
+      ctx.noteVisibleRegionRows({
+        sourceDataSource: 'dom_region_rows',
+        available: true,
+        rowCount: 2,
+        confidence: 0.95,
+        rows: [
+          {
+            title: 'Article paragraph 1',
+            primaryText: 'Visible row summary one',
+            secondaryText: null,
+            metaText: null,
+            targetRef: 'ref_1',
+            visibleTextFields: ['title', 'primaryText'],
+            qualityReasons: [],
+            source: {
+              type: 'high_value_object',
+              sourceId: 'hvo_1',
+              sourceIndex: 0,
+            },
+            sourceRegion: 'article_body',
+            confidence: 0.95,
+          },
+          {
+            title: 'Article paragraph 2',
+            primaryText: 'Visible row summary two',
+            secondaryText: null,
+            metaText: null,
+            targetRef: 'ref_2',
+            visibleTextFields: ['title', 'primaryText'],
+            qualityReasons: [],
+            source: {
+              type: 'high_value_object',
+              sourceId: 'hvo_2',
+              sourceIndex: 1,
+            },
+            sourceRegion: 'article_body',
+            confidence: 0.95,
+          },
+        ],
+        visibleRegionRowsUsed: true,
+        visibleRegionRowsRejectedReason: null,
+        sourceRegion: 'article_body',
+        rowExtractionConfidence: 0.95,
+        cardExtractorUsed: false,
+        cardPatternConfidence: 0,
+        cardRowsCount: 0,
+        rowOrder: 'visual_order',
+        targetRefCoverageRate: 1,
+        regionQualityScore: 0.95,
+      });
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_markdown',
+          contextChars: 9000,
+          changedRegions: ['article_body'],
+          selectedDataSource: 'markdown',
+          extraPayload: {
+            markdown: '# Long Article\n\nFull article body that must not be truncated.',
+            decisionReason: 'markdown_reading_surface_preferred',
+            visibleRegionRows: {
+              sourceDataSource: 'dom_region_rows',
+              rows: [
+                {
+                  title: 'Article paragraph 1',
+                  primaryText: 'Visible row summary one',
+                  secondaryText: null,
+                  metaText: null,
+                  targetRef: 'ref_1',
+                },
+                {
+                  title: 'Article paragraph 2',
+                  primaryText: 'Visible row summary two',
+                  secondaryText: null,
+                  metaText: null,
+                  targetRef: 'ref_2',
+                },
+              ],
+              rowCount: 2,
+              visibleRegionRowsUsed: true,
+              visibleRegionRowsRejectedReason: null,
+              sourceRegion: 'article_body',
+              rowExtractionConfidence: 0.95,
+              cardExtractorUsed: false,
+              cardPatternConfidence: 0,
+              cardRowsCount: 0,
+              rowOrder: 'visual_order',
+              targetRefCoverageRate: 1,
+              regionQualityScore: 0.95,
+            },
+          },
+        }),
+      );
+
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'markdown-long-read',
+        requestedLayer: 'L0+L1+L2',
+        render: 'markdown',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.kind).toBe('page');
+      expect(payload.rows).toBeUndefined();
+      expect(payload.markdown).toContain('Full article body');
+      expect(payload.aiContextEnvelope).toMatchObject({
+        selectedDataSource: 'markdown',
+        dataSourceDecision: {
+          selectedSource: 'markdown',
+          selectedReason: 'markdown_reading_surface_preferred',
+          rejectedSources: [
+            { source: 'api_rows', reason: 'api_rows_unavailable_dom_region_rows_available' },
+            { source: 'dom_region_rows', reason: 'markdown_reading_surface_preferred' },
+          ],
+        },
+      });
+    });
+
     it('does NOT cross-contaminate budgets between distinct taskSessionIds', async () => {
       markBridgeReady();
       const ctxA = sessionManager.getOrCreateExternalTaskContext('task-A');
