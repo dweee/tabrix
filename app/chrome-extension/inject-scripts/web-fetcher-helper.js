@@ -2762,6 +2762,7 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
             sendResponse({
               success: true,
               textContent: fullContent,
+              contentDiagnostics: buildContentDiagnostics(fullContent),
               article: {
                 title: article.title,
                 byline: article.byline,
@@ -2780,6 +2781,7 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
               textContent: fallback.textContent,
               fallback: true,
               fallbackSource: fallback.source,
+              contentDiagnostics: buildContentDiagnostics(fallback.textContent),
             });
           }
         }
@@ -2926,6 +2928,52 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
       textContent: cleanContent(textContent),
       source: blockTexts.length > 0 ? 'visible_textContent_blocks' : 'body_textContent',
     };
+  }
+
+  function buildContentDiagnostics(extractedText) {
+    const extractedLength = cleanContent(extractedText || '').length;
+    const scrollContainers = findScrollableTextContainers().slice(0, 5);
+    const bestScrollableTextLength = scrollContainers.reduce(
+      (max, item) => Math.max(max, item.textLength),
+      0,
+    );
+    return {
+      extractedLength,
+      scrollContainerCandidateCount: scrollContainers.length,
+      bestScrollableTextLength,
+      longScrollableContentLikely: bestScrollableTextLength > extractedLength * 1.5,
+      scrollContainers,
+    };
+  }
+
+  function findScrollableTextContainers() {
+    if (!document.body) return [];
+    const candidates = [];
+    const elements = document.body.querySelectorAll('main, article, section, div, textarea');
+    for (const element of elements) {
+      if (!isElementVisible(element)) continue;
+      if (element.closest('script, style, noscript, nav, aside')) continue;
+      const scrollHeight = Number(element.scrollHeight || 0);
+      const clientHeight = Number(element.clientHeight || 0);
+      if (scrollHeight <= clientHeight + 40) continue;
+      const text = cleanContent(element.innerText || element.textContent || '');
+      if (text.length < config.minTextLength) continue;
+      const tagName = element.tagName;
+      const redactTextPreview = tagName === 'TEXTAREA';
+      candidates.push({
+        tagName,
+        id: element.id || null,
+        className: String(element.className || '').slice(0, 120) || null,
+        scrollTop: Math.round(Number(element.scrollTop || 0)),
+        scrollHeight: Math.round(scrollHeight),
+        clientHeight: Math.round(clientHeight),
+        textLength: text.length,
+        textPreview: redactTextPreview ? null : text.slice(0, 160),
+        textPreviewRedacted: redactTextPreview,
+      });
+    }
+    candidates.sort((a, b) => b.textLength - a.textLength || b.scrollHeight - a.scrollHeight);
+    return candidates;
   }
 
   /**

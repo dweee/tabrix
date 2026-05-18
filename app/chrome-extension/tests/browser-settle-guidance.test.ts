@@ -703,6 +703,24 @@ describe('browser settle guidance', () => {
       success: true,
       textContent:
         'Shared conversation prompt text is visible, but the generated answer body is not present in the current DOM.',
+      contentDiagnostics: {
+        extractedLength: 98,
+        scrollContainerCandidateCount: 1,
+        bestScrollableTextLength: 900,
+        longScrollableContentLikely: true,
+        scrollContainers: [
+          {
+            tagName: 'TEXTAREA',
+            className: 'conversation-scroll-area',
+            scrollTop: 0,
+            scrollHeight: 1600,
+            clientHeight: 320,
+            textLength: 900,
+            textPreview: null,
+            textPreviewRedacted: true,
+          },
+        ],
+      },
       metadata: { lang: 'en' },
     });
 
@@ -726,6 +744,10 @@ describe('browser settle guidance', () => {
       'Visible text has limited structure and may be incomplete for this route. Use chrome_read_page or htmlContent when completeness matters.',
     );
     expect(payload.extractionHint).not.toContain('appears complete');
+    expect(payload.contentDiagnostics).toMatchObject({
+      scrollContainerCandidateCount: 1,
+      longScrollableContentLikely: true,
+    });
   });
 
   it('returns plain text evidence when htmlContent is requested', async () => {

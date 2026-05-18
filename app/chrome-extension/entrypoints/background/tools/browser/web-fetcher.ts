@@ -170,6 +170,9 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
         if (textResponse.success) {
           result.textContent = textResponse.textContent;
           result.textSummary = summarizeVisibleText(textResponse.textContent || '');
+          if (textResponse.contentDiagnostics) {
+            result.contentDiagnostics = textResponse.contentDiagnostics;
+          }
 
           // Include article metadata if available
           if (textResponse.article) {
