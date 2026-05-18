@@ -129,6 +129,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
               message: result.message || 'Keyboard operation successful',
               targetElement: result.targetElement,
               results: result.results,
+              scrollDiagnostics: result.targetElement?.scrollDiagnostics,
             }),
           },
         ],

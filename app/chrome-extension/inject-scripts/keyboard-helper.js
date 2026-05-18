@@ -89,6 +89,96 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
     });
   }
 
+  function getScrollDiagnostics() {
+    const scrollingElement = document.scrollingElement || document.documentElement || document.body;
+    const activeElement = document.activeElement || document.body;
+    return {
+      window: {
+        scrollX: Math.round(window.scrollX || 0),
+        scrollY: Math.round(window.scrollY || 0),
+        innerWidth: Math.round(window.innerWidth || 0),
+        innerHeight: Math.round(window.innerHeight || 0),
+      },
+      document: {
+        scrollTop: Math.round(scrollingElement ? scrollingElement.scrollTop || 0 : 0),
+        scrollLeft: Math.round(scrollingElement ? scrollingElement.scrollLeft || 0 : 0),
+        scrollHeight: Math.round(scrollingElement ? scrollingElement.scrollHeight || 0 : 0),
+        scrollWidth: Math.round(scrollingElement ? scrollingElement.scrollWidth || 0 : 0),
+        clientHeight: Math.round(scrollingElement ? scrollingElement.clientHeight || 0 : 0),
+        clientWidth: Math.round(scrollingElement ? scrollingElement.clientWidth || 0 : 0),
+      },
+      activeElement: {
+        tagName: activeElement && activeElement.tagName,
+        id: activeElement && activeElement.id,
+        className: activeElement && activeElement.className,
+        type: activeElement && activeElement.type,
+      },
+    };
+  }
+
+  function hasScrollChanged(before, after) {
+    if (!before || !after) return false;
+    return (
+      before.window.scrollX !== after.window.scrollX ||
+      before.window.scrollY !== after.window.scrollY ||
+      before.document.scrollTop !== after.document.scrollTop ||
+      before.document.scrollLeft !== after.document.scrollLeft
+    );
+  }
+
+  function maybeFallbackScroll(parsedKeyInfo, before, after) {
+    if (!parsedKeyInfo || hasScrollChanged(before, after)) {
+      return null;
+    }
+
+    const scrollingElement = document.scrollingElement || document.documentElement || document.body;
+    if (!scrollingElement) {
+      return null;
+    }
+
+    const viewportHeight = Math.max(1, window.innerHeight || scrollingElement.clientHeight || 0);
+    const key = parsedKeyInfo.key;
+    let deltaY = 0;
+    let targetTop = null;
+
+    if (key === 'PageDown') {
+      deltaY = Math.max(1, Math.round(viewportHeight * 0.85));
+    } else if (key === 'PageUp') {
+      deltaY = -Math.max(1, Math.round(viewportHeight * 0.85));
+    } else if (key === 'ArrowDown') {
+      deltaY = 80;
+    } else if (key === 'ArrowUp') {
+      deltaY = -80;
+    } else if (key === 'Home') {
+      targetTop = 0;
+    } else if (key === 'End') {
+      targetTop = scrollingElement.scrollHeight;
+    } else {
+      return null;
+    }
+
+    const beforeTop = scrollingElement.scrollTop || window.scrollY || 0;
+    if (targetTop !== null) {
+      scrollingElement.scrollTop = targetTop;
+      window.scrollTo(window.scrollX || 0, targetTop);
+    } else {
+      scrollingElement.scrollTop = beforeTop + deltaY;
+      window.scrollBy(0, deltaY);
+    }
+
+    const fallbackAfter = getScrollDiagnostics();
+    return {
+      applied: hasScrollChanged(before, fallbackAfter),
+      key,
+      reason: 'synthetic_keyboard_did_not_scroll_page',
+      beforeTop: Math.round(beforeTop),
+      deltaY,
+      targetTop,
+      afterTop: fallbackAfter.document.scrollTop,
+      diagnosticsAfter: fallbackAfter,
+    };
+  }
+
   /**
    * Parses a key string (e.g., "Ctrl+Shift+A", "Enter") into a main key and modifiers.
    * @param {string} keyString - String representation of a single key press (can include modifiers).
@@ -180,7 +270,6 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
       bubbles: true,
       cancelable: true,
       composed: true, // Important for shadow DOM
-      view: window,
       ...modifiers, // ctrlKey, altKey, shiftKey, metaKey
       // keyCode/which are deprecated but often set for compatibility
       keyCode: keyCode || (key.length === 1 ? key.charCodeAt(0) : 0),
@@ -244,10 +333,33 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
           continue; // Skip to next combination in sequence
         }
 
+        const scrollBefore = getScrollDiagnostics();
         const dispatchResult = dispatchKeyEvents(parsedKeyInfo, element);
+        const scrollAfterDispatch = getScrollDiagnostics();
+        const fallbackScroll = maybeFallbackScroll(
+          parsedKeyInfo,
+          scrollBefore,
+          scrollAfterDispatch,
+        );
+        const scrollAfter = fallbackScroll?.diagnosticsAfter || scrollAfterDispatch;
         operationResults.push({
           keyCombination: comboString,
           ...dispatchResult,
+          scrollDiagnostics: {
+            before: scrollBefore,
+            after: scrollAfter,
+            changed: hasScrollChanged(scrollBefore, scrollAfter),
+            fallback: fallbackScroll
+              ? {
+                  applied: fallbackScroll.applied,
+                  reason: fallbackScroll.reason,
+                  deltaY: fallbackScroll.deltaY,
+                  targetTop: fallbackScroll.targetTop,
+                  beforeTop: fallbackScroll.beforeTop,
+                  afterTop: fallbackScroll.afterTop,
+                }
+              : null,
+          },
         });
 
         if (dispatchResult.error) {
@@ -274,6 +386,7 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
           id: element.id,
           className: element.className,
           type: element.type, // if applicable e.g. for input
+          scrollDiagnostics: getScrollDiagnostics(),
           waitDiagnostics: {
             focus: focusWait || { waitedMs: 0, reason: 'already_focused', ready: true },
           },

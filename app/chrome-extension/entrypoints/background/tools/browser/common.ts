@@ -114,6 +114,35 @@ function normalizeComparableUrl(url?: string): string {
   }
 }
 
+async function getPreferredWindowForUrl(
+  url: string,
+  candidateTabs: chrome.tabs.Tab[],
+): Promise<{ window: chrome.windows.Window | null; reason: string }> {
+  const candidateWindowId = candidateTabs.find(
+    (tab) => typeof tab.windowId === 'number' && !tab.discarded,
+  )?.windowId;
+
+  if (typeof candidateWindowId === 'number') {
+    try {
+      return {
+        window: await chrome.windows.get(candidateWindowId, { populate: false }),
+        reason: 'same_site_existing_window',
+      };
+    } catch {
+      // Fall through to the normal last-focused window path.
+    }
+  }
+
+  try {
+    return {
+      window: await chrome.windows.getLastFocused({ populate: false }),
+      reason: 'last_focused_window',
+    };
+  } catch {
+    return { window: null, reason: 'no_window_available' };
+  }
+}
+
 export function buildNavigateUrlPatterns(input: string): string[] {
   const patterns = new Set<string>();
 
@@ -505,11 +534,14 @@ class NavigateTool extends BaseBrowserToolExecutor {
         console.log('Opening URL in the last active window.');
         // Try to open a new tab in the specified window, otherwise the most recently active window
         let targetWindow: chrome.windows.Window | null = null;
+        let targetWindowReason = 'explicit_window';
         if (typeof windowId === 'number') {
           targetWindow = await chrome.windows.get(windowId, { populate: false });
         }
         if (!targetWindow) {
-          targetWindow = await chrome.windows.getLastFocused({ populate: false });
+          const preferred = await getPreferredWindowForUrl(url, candidateTabs);
+          targetWindow = preferred.window;
+          targetWindowReason = preferred.reason;
         }
 
         if (targetWindow && targetWindow.id !== undefined) {
@@ -593,6 +625,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                   message: 'Opened URL in new tab in existing window',
                   tabId: settleResult?.tab.id || newTab.id,
                   windowId: targetWindow.id,
+                  targetWindowReason,
                   requestedUrl: url,
                   finalUrl: settleResult?.tab.url || newTab.url,
                   status: settleResult?.tab.status || newTab.status,

@@ -93,6 +93,80 @@ describe('browser settle guidance', () => {
     });
   });
 
+  it('opens new tabs in an existing same-site window before falling back to last-focused', async () => {
+    vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
+    (chrome.windows.get as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => ({ id }),
+    );
+    vi.mocked(chrome.tabs.query)
+      .mockResolvedValueOnce([
+        {
+          id: 90,
+          windowId: 9,
+          active: false,
+          discarded: false,
+          status: 'complete',
+          url: 'https://github.com/dashboard',
+          title: 'GitHub',
+        } as chrome.tabs.Tab,
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 90,
+          windowId: 9,
+          active: false,
+          discarded: false,
+          status: 'complete',
+          url: 'https://github.com/dashboard',
+          title: 'GitHub',
+        } as chrome.tabs.Tab,
+      ]);
+    vi.mocked(chrome.tabs.create).mockResolvedValue({
+      id: 91,
+      windowId: 9,
+      active: false,
+      status: 'loading',
+      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      title: 'Loading',
+    } as chrome.tabs.Tab);
+    vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 91,
+        windowId: 9,
+        active: false,
+        status: 'complete',
+        url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+        title: 'Search',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 300,
+      readyState: 'complete',
+    });
+
+    const result = await navigateTool.execute({
+      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      background: true,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(chrome.windows.get).toHaveBeenCalledWith(9, { populate: false });
+    expect(chrome.windows.getLastFocused).not.toHaveBeenCalled();
+    expect(chrome.tabs.create).toHaveBeenCalledWith({
+      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      windowId: 9,
+      active: false,
+    });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      windowId: 9,
+      targetWindowReason: 'same_site_existing_window',
+      pageReadable: true,
+    });
+  });
+
   it('allows structured reads when navigation is interactive with a document URL', async () => {
     vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
     vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
