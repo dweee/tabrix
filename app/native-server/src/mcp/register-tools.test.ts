@@ -693,11 +693,16 @@ describe('handleToolCall execution wrapper', () => {
       reusedRegions?: string[];
       refreshedRefs?: string[];
       selectedDataSource?: string;
+      extraPayload?: Record<string, unknown>;
     }): string {
       return JSON.stringify({
         kind: 'page',
+        ...(input.extraPayload ?? {}),
         selectedDataSource: input.selectedDataSource ?? 'dom_json',
-        decisionReason: 'read_page_snapshot',
+        decisionReason:
+          typeof input.extraPayload?.decisionReason === 'string'
+            ? input.extraPayload.decisionReason
+            : 'read_page_snapshot',
         pageProjection: {
           projectionId: input.projectionId,
           projectionKind: 'read_snapshot_projection',
@@ -826,8 +831,16 @@ describe('handleToolCall execution wrapper', () => {
         envelopeKind: 'delta_context',
         selectedDataSource: 'dom_json',
         dataSourceDecision: {
+          availableSources: ['dom_json'],
           selectedSource: 'dom_json',
           selectedReason: 'read_page_snapshot',
+          rejectedSources: [],
+          regionCorrelation: 1,
+          privacySafety: 'redacted',
+          metadataCompleteness: null,
+          sourceConfidence: 0.9,
+          sourceFreshness: 'fresh',
+          fallbackReason: null,
         },
       });
 
@@ -908,6 +921,49 @@ describe('handleToolCall execution wrapper', () => {
       expect(closePayload.lifecycleTimeline.at(-1)).toMatchObject({
         cleanupAction: 'chrome_close_tabs',
         cleanupTargetIds: [1],
+      });
+    });
+
+    it('surfaces data source decision truthfulness for DOM fallback rows', async () => {
+      markBridgeReady();
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_dom_rows',
+          contextChars: 2400,
+          changedRegions: ['result_list'],
+          refreshedRefs: ['ref_result_1', 'ref_result_2'],
+          selectedDataSource: 'dom_region_rows',
+          extraPayload: {
+            kind: 'dom_region_rows',
+            rowCount: 2,
+            visibleRegionRowsUsed: true,
+            visibleRegionRowCount: 2,
+            targetRefCoverageRate: 1,
+            apiRowsUnavailableReason: 'observed_api_rows_not_available',
+            decisionReason: 'visible_dom_rows_selected',
+          },
+        }),
+      );
+
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'truthfulness-task',
+        requestedLayer: 'L0+L1+L2',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.aiContextEnvelope.dataSourceDecision).toMatchObject({
+        availableSources: ['dom_region_rows'],
+        selectedSource: 'dom_region_rows',
+        selectedReason: 'visible_dom_rows_selected',
+        rejectedSources: [{ source: 'api_rows', reason: 'observed_api_rows_not_available' }],
+        regionCorrelation: 1,
+        taskRelevance: null,
+        privacySafety: 'redacted',
+        metadataCompleteness: 1,
+        sourceFreshness: 'fresh',
+        sourceConfidence: 0.9,
+        fallbackReason: 'observed_api_rows_not_available',
       });
     });
 
