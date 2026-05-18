@@ -17,6 +17,8 @@ import {
   BROWSER_SOURCE_FRESHNESS_VALUES,
   BROWSER_TASK_SCENARIO_PRIORITY_ORDER,
   BROWSER_TASK_EVIDENCE_LEVEL_VALUES,
+  BROWSER_TASK_FIXTURE_ARTIFACT_KIND,
+  BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES,
   BROWSER_TASK_SCENARIO_CLASS_VALUES,
   BROWSER_TASK_STATUS_VALUES,
   BROWSER_TASK_THING_CONTRACT_VERSION,
@@ -27,6 +29,8 @@ import {
   BROWSER_USER_ACTIVITY_LEVEL_VALUES,
   TOOL_SCHEMAS,
   buildBrowserPageThingProjectionFromReadPage,
+  isBrowserTaskDeterministicFixtureArtifact,
+  isBrowserTaskPrivacyRedactionSafe,
 } from '../dist/index.mjs';
 
 assert.equal(BROWSER_TASK_THING_CONTRACT_VERSION, 'v1');
@@ -56,6 +60,9 @@ assert.ok(BROWSER_INTERFERENCE_RISK_VALUES.includes('high'));
 assert.ok(BROWSER_TASK_EVIDENCE_LEVEL_VALUES.includes('real_browser'));
 assert.ok(BROWSER_EVIDENCE_FRESHNESS_VALUES.includes('expired'));
 assert.ok(BROWSER_COMPETITOR_LANE_VALUES.includes('same_profile_extension'));
+assert.equal(BROWSER_TASK_FIXTURE_ARTIFACT_KIND, 'deterministic_fixture');
+assert.ok(BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES.includes('unit'));
+assert.equal(BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES.includes('real_browser'), false);
 
 const summary = {
   taskId: 'btt_001',
@@ -285,6 +292,50 @@ assert.equal(evidence.dataSourceDecision.rejectedSources[0].source, 'api_rows');
 assert.equal(evidence.privacyRedaction.fullApiBodiesPersisted, false);
 assert.equal(evidence.runtimePolicyAudit[0].field, 'focusPolicy');
 assert.equal(evidence.competitorLane, 'not_applicable');
+assert.equal(isBrowserTaskPrivacyRedactionSafe(evidence.privacyRedaction), true);
+
+const fixtureEvidence = {
+  ...evidence,
+  evidenceId: 'evidence_fixture_001',
+  evidenceLevel: 'unit',
+  artifactPath: '.claude/test-reports/v28-fixture-example.json',
+};
+
+const deterministicFixtureArtifact = {
+  artifactKind: 'deterministic_fixture',
+  contractVersion: BROWSER_TASK_THING_CONTRACT_VERSION,
+  generatedAt: '2026-05-18T00:00:03.000Z',
+  summary,
+  pageProjection: projection,
+  evidence: fixtureEvidence,
+  evidenceBoundary: {
+    evidenceLevel: 'unit',
+    realBrowserClaim: false,
+  },
+};
+
+assert.equal(isBrowserTaskDeterministicFixtureArtifact(deterministicFixtureArtifact), true);
+assert.equal(
+  isBrowserTaskDeterministicFixtureArtifact({
+    ...deterministicFixtureArtifact,
+    evidenceBoundary: { evidenceLevel: 'unit', realBrowserClaim: true },
+  }),
+  false,
+);
+assert.equal(
+  isBrowserTaskDeterministicFixtureArtifact({
+    ...deterministicFixtureArtifact,
+    evidence: { ...fixtureEvidence, evidenceLevel: 'real_browser' },
+  }),
+  false,
+);
+assert.equal(
+  isBrowserTaskPrivacyRedactionSafe({
+    ...fixtureEvidence.privacyRedaction,
+    fullApiBodiesPersisted: true,
+  }),
+  false,
+);
 
 const schemaNames = new Set(TOOL_SCHEMAS.map((schema) => schema.name));
 assert.equal(schemaNames.has('browser_task_thing'), false);

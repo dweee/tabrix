@@ -316,6 +316,58 @@ export interface BrowserTaskEvidence {
   claimCoverage: BrowserClaimCoverageEvidence;
 }
 
+export const BROWSER_TASK_FIXTURE_ARTIFACT_KIND = 'deterministic_fixture' as const;
+
+export const BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES = [
+  'source',
+  'unit',
+  'integration',
+  'local_runner',
+] as const satisfies readonly BrowserTaskEvidenceLevel[];
+export type BrowserTaskFixtureEvidenceLevel =
+  (typeof BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES)[number];
+
+export interface BrowserTaskFixtureEvidenceBoundary {
+  evidenceLevel: BrowserTaskFixtureEvidenceLevel;
+  realBrowserClaim: false;
+}
+
+export interface BrowserTaskDeterministicFixtureArtifact {
+  artifactKind: typeof BROWSER_TASK_FIXTURE_ARTIFACT_KIND;
+  contractVersion: typeof BROWSER_TASK_THING_CONTRACT_VERSION;
+  generatedAt: string;
+  summary: BrowserTaskThingSummary;
+  pageProjection: BrowserPageThingProjection;
+  evidence: BrowserTaskEvidence;
+  evidenceBoundary: BrowserTaskFixtureEvidenceBoundary;
+}
+
+export function isBrowserTaskPrivacyRedactionSafe(
+  privacyRedaction: BrowserPrivacyRedactionEvidence,
+): boolean {
+  return (
+    privacyRedaction.userTypedContentPersisted === false &&
+    privacyRedaction.formValuesPersisted === false &&
+    privacyRedaction.fullApiBodiesPersisted === false &&
+    privacyRedaction.credentialsOrTokensPersisted === false
+  );
+}
+
+export function isBrowserTaskDeterministicFixtureArtifact(
+  artifact: BrowserTaskDeterministicFixtureArtifact,
+): boolean {
+  return (
+    artifact.artifactKind === BROWSER_TASK_FIXTURE_ARTIFACT_KIND &&
+    artifact.contractVersion === BROWSER_TASK_THING_CONTRACT_VERSION &&
+    artifact.evidenceBoundary.realBrowserClaim === false &&
+    BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES.includes(artifact.evidenceBoundary.evidenceLevel) &&
+    artifact.evidence.evidenceLevel === artifact.evidenceBoundary.evidenceLevel &&
+    artifact.evidence.freshness === 'fresh' &&
+    artifact.evidence.competitorLane === 'not_applicable' &&
+    isBrowserTaskPrivacyRedactionSafe(artifact.evidence.privacyRedaction)
+  );
+}
+
 export interface BuildBrowserPageThingProjectionInput {
   snapshot: ReadPageCompactSnapshot;
   projectionId: string;
