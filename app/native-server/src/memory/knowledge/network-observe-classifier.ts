@@ -142,6 +142,10 @@ const DETAIL_TAIL_RE =
 
 const COLLECTION_PATH_RE =
   /\/(items|posts|articles|stories|comments|users|orgs|repos|issues|pulls|packages|search\/[a-z]+|catalog|index|topics|threads)\/?$/i;
+const READ_SHAPED_POST_PATH_RE =
+  /\b(search|query|lookup|autocomplete|suggest|list|items|results|records|rows|notes|packages|repositories)\b/i;
+const WRITE_SHAPED_PATH_RE =
+  /\b(create|update|delete|remove|save|submit|upload|download|mutate|mutation|like|unlike|follow|unfollow|favorite|bookmark|comment|reply|share|checkout|purchase|order|login|logout|auth|token)\b/i;
 
 /** Lower-case-only JSON content-type sniff. Tolerates `+json`. */
 function looksLikeJson(mimeType: string | undefined): boolean {
@@ -665,6 +669,41 @@ function mapLegacySemanticToCandidateSemantic(
   }
 }
 
+function classifyShapeEvidencedPostRead(
+  input: EndpointCandidateClassifierInput,
+  shape: EndpointShapeSummary | null,
+  parsed: URL | null,
+): EndpointCandidateSemanticType | null {
+  if (normalizeMethod(input.method) !== 'POST') return null;
+  if (!parsed || !shape?.available || isEmptyShape(shape)) return null;
+  if (shape.contentTypeBucket !== 'json' && !looksLikeJson(input.mimeType)) return null;
+  if (input.status !== null && input.status !== undefined) {
+    if (typeof input.status !== 'number' || input.status < 200 || input.status >= 300) return null;
+  }
+  const type = (input.type || '').toLowerCase();
+  if (type && type !== 'fetch' && type !== 'xmlhttprequest') return null;
+
+  const path = parsed.pathname.toLowerCase();
+  if (WRITE_SHAPED_PATH_RE.test(path)) return null;
+  if (!READ_SHAPED_POST_PATH_RE.test(path)) return null;
+
+  const queryKeysSorted = input.queryKeys
+    ? Array.from(new Set(input.queryKeys.map((k) => k.toLowerCase()))).sort()
+    : extractQueryKeysFromUrl(parsed);
+  const hasSearchKey = queryKeysSorted.some(
+    (k) => SEARCH_QUERY_KEYS.has(k) || SEARCH_QUERY_KEY_RE.test(k),
+  );
+  const hasPaginationKey = queryKeysSorted.some((k) => PAGINATION_QUERY_KEYS.has(k));
+  const hasFilterKey = queryKeysSorted.some((k) => FILTER_QUERY_KEYS.has(k));
+  if (hasSearchKey || SEARCH_PATH_RE.test(path)) return 'search';
+  if (hasPaginationKey) return 'pagination';
+  if (hasFilterKey) return 'filter';
+  if (COLLECTION_PATH_RE.test(parsed.pathname) || READ_SHAPED_POST_PATH_RE.test(path)) {
+    return 'list';
+  }
+  return null;
+}
+
 function classifyContentTypeBucket(mimeType: string | null | undefined): EndpointContentTypeBucket {
   if (!mimeType) return 'unknown';
   const m = mimeType.toLowerCase();
@@ -693,15 +732,21 @@ function classifyContentTypeBucket(mimeType: string | null | undefined): Endpoin
  *
  *   1. Invalid URL          → `unknown_candidate` / `invalid_url`.
  *   2. Favicon / source-map → `noise` / `noise_*`. (additive over v1)
- *   3. v1 noise verdict     → `noise` / v1's noiseReason.
+ *   3. v1 non-mutation noise verdict
+ *                           → `noise` / v1's noiseReason.
  *      (asset / analytics / auth / private / telemetry / mutation)
  *   4. status 4xx/5xx       → `error` / `status_<class>`.
  *   5. Document content-type → `document` / `document_response`.
- *   6. Shape says empty     → `empty` / `empty_response`.
- *   7. v1 read-shaped verdict (search/list/detail/pagination/filter)
+ *   6. Shape-evidenced read POST
+ *                           → read-shaped candidate. The v1 persisted
+ *                              row verdict remains mutation/noise; this
+ *                              current-task v2 candidate is only allowed
+ *                              when path + JSON shape prove read intent.
+ *   7. Shape says empty     → `empty` / `empty_response`.
+ *   8. v1 read-shaped verdict (search/list/detail/pagination/filter)
  *                            → carry through, evidence elevated when
  *                              shape confirms a non-empty body.
- *   8. Otherwise            → `unknown_candidate` / v1's noiseReason.
+ *   9. Otherwise            → `unknown_candidate` / v1's noiseReason.
  *
  * The classifier never assigns `> 0.85` confidence — Knowledge
  * promotion is the authority on whether a candidate becomes high-confidence.
@@ -791,14 +836,13 @@ export function classifyEndpointCandidate(
     };
   }
 
-  // 3. v1 noise verdicts collapse into `noise`.
+  // 3. v1 non-mutation noise verdicts collapse into `noise`.
   if (
     v1.semanticType === 'asset' ||
     v1.semanticType === 'analytics' ||
     v1.semanticType === 'auth' ||
     v1.semanticType === 'private' ||
-    v1.semanticType === 'telemetry' ||
-    v1.semanticType === 'mutation'
+    v1.semanticType === 'telemetry'
   ) {
     return {
       semanticType: 'noise',
@@ -864,7 +908,41 @@ export function classifyEndpointCandidate(
     };
   }
 
-  // 6. Shape says empty — only when shape evidence is available AND
+  // 6. Shape-evidenced read-shaped POST endpoints. Some modern sites
+  //    use POST for search/list reads because query state is too large
+  //    for a URL. We allow this only as a current-task v2 candidate:
+  //    JSON shape must be available, the path must be read-shaped, and
+  //    write-shaped paths remain noise. This is generic and deliberately
+  //    not tied to a host or platform.
+  if (v1.semanticType === 'mutation' && v1.noiseReason === 'non_read_method') {
+    const postSemantic = classifyShapeEvidencedPostRead(input, shape, parsed);
+    if (postSemantic !== null) {
+      const postEvidenceKinds: EndpointCandidateEvidenceKind[] = ['path', 'content_type', 'shape'];
+      if (queryKeysSorted.length > 0) postEvidenceKinds.push('query');
+      return {
+        semanticType: postSemantic,
+        noiseReason: null,
+        confidence: 0.72,
+        evidenceLevel: 'shape_evidenced',
+        shape,
+        queryKeysSorted,
+        rowClassification: v1,
+        ...evidenceContract(postEvidenceKinds),
+      };
+    }
+    return {
+      semanticType: 'noise',
+      noiseReason: v1.noiseReason ?? 'non_read_method',
+      confidence: 0.6,
+      evidenceLevel,
+      shape,
+      queryKeysSorted,
+      rowClassification: v1,
+      ...evidenceContract(['path']),
+    };
+  }
+
+  // 7. Shape says empty — only when shape evidence is available AND
   //    no v1 noise verdict already dominated. We avoid second-
   //    guessing `unknown` v1 verdicts: an empty shape on a
   //    `no_signal` URL is still `unknown_candidate`, not `empty`.
@@ -891,7 +969,7 @@ export function classifyEndpointCandidate(
     }
   }
 
-  // 7. v1 read-shaped verdict — promote into v2 candidate enum.
+  // 8. v1 read-shaped verdict — promote into v2 candidate enum.
   if (v1.usableForTask) {
     const baseConfidence =
       evidenceLevel === 'shape_evidenced' && shape && !isEmptyShape(shape) ? 0.8 : 0.65;

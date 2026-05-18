@@ -262,6 +262,45 @@ describe('classifyEndpointCandidate — V27-06 semantic typer', () => {
     });
     expect(r.confidence).toBeLessThanOrEqual(0.85);
   });
+
+  it('classifies shape-evidenced read-shaped POST search endpoints as search', () => {
+    const r = classifyEndpointCandidate({
+      url: 'https://api.example.test/api/web/v1/search/notes',
+      method: 'POST',
+      type: 'fetch',
+      mimeType: 'application/json',
+      status: 200,
+      shape: shape({
+        kind: 'object',
+        topLevelKeys: ['data'],
+        fieldTypes: { data: 'array' },
+        rowCount: 20,
+      }),
+    });
+    expect(r.semanticType).toBe('search');
+    expect(r.noiseReason).toBeNull();
+    expect(r.confidence).toBeGreaterThanOrEqual(0.7);
+    expect(r.evidenceLevel).toBe('shape_evidenced');
+    expect(r.rowClassification.semanticType).toBe('mutation');
+  });
+
+  it('does not promote write-shaped POST endpoints even with JSON shape evidence', () => {
+    const r = classifyEndpointCandidate({
+      url: 'https://api.example.test/api/web/v1/notes/like',
+      method: 'POST',
+      type: 'fetch',
+      mimeType: 'application/json',
+      status: 200,
+      shape: shape({
+        kind: 'object',
+        topLevelKeys: ['data'],
+        fieldTypes: { data: 'array' },
+        rowCount: 1,
+      }),
+    });
+    expect(r.semanticType).toBe('noise');
+    expect(r.noiseReason).toBe('non_read_method');
+  });
 });
 
 describe('classifyEndpointCandidate — GitHub public fixture', () => {
@@ -491,6 +530,27 @@ describe('deriveEndpointCandidatesFromBundle — bundle path', () => {
     expect(c).not.toBeNull();
     expect(c!.semanticType).toBe('search');
     expect(c!.evidenceLevel).toBe('shape_evidenced');
+    expect(c!.shape?.rowCount).toBe(2);
+  });
+
+  it('derives a usable read-shaped POST candidate from captured search rows', () => {
+    const req: CapturedNetworkRequest = {
+      url: 'https://api.example.test/api/web/v1/search/notes',
+      method: 'POST',
+      type: 'fetch',
+      mimeType: 'application/json',
+      status: 200,
+      responseBody: JSON.stringify({
+        data: [
+          { id: 'n1', title: 'AI tools' },
+          { id: 'n2', title: 'browser automation' },
+        ],
+      }),
+    };
+    const c = deriveEndpointCandidateFromRequest(req, EMPTY_HEADERS);
+    expect(c).not.toBeNull();
+    expect(c!.semanticType).toBe('search');
+    expect(c!.confidence).toBeGreaterThanOrEqual(0.7);
     expect(c!.shape?.rowCount).toBe(2);
   });
 });
