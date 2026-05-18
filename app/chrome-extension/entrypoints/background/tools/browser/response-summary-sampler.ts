@@ -171,6 +171,7 @@ function selectSummaryRows(parsed: unknown): {
     'records',
     'list',
     'pages',
+    'documents',
     'edges',
   ];
   let list: unknown[] | null = null;

@@ -149,6 +149,87 @@ describe('V27-CDP-01 network debugger controlled evidence', () => {
     expect(blob).not.toContain('Authorization');
   });
 
+  it('compacts document-list JSON shapes into safe rows', async () => {
+    sendCommandMock.mockImplementation(async (_tabId: number, method: string) => {
+      if (method === 'Network.getResponseBody') {
+        return {
+          body: JSON.stringify({
+            documents: [
+              {
+                title: 'Browser automation testing',
+                summary: 'Run automated tests in multiple browsers.',
+                score: 90.5,
+                mdn_url: '/docs/testing/browser-automation',
+                slug: 'testing/browser-automation',
+              },
+            ],
+          }),
+          base64Encoded: false,
+        };
+      }
+      return {};
+    });
+    const start = await networkDebuggerStartTool.execute({
+      tabId: 88,
+      maxCaptureTime: 0,
+      inactivityTimeout: 0,
+    });
+    expect(start.isError).toBe(false);
+
+    const emitDebuggerEvent = (
+      networkDebuggerStartTool as unknown as {
+        handleDebuggerEvent: DebuggerListener;
+      }
+    ).handleDebuggerEvent.bind(networkDebuggerStartTool);
+
+    emitDebuggerEvent({ tabId: 88 }, 'Network.requestWillBeSent', {
+      requestId: 'doc-list',
+      request: {
+        url: 'https://api.docs.example.test/v1/search?q=browser&page=1',
+        method: 'GET',
+      },
+      type: 'Fetch',
+      timestamp: 100,
+    });
+    emitDebuggerEvent({ tabId: 88 }, 'Network.responseReceived', {
+      requestId: 'doc-list',
+      type: 'Fetch',
+      timestamp: 101,
+      response: {
+        url: 'https://api.docs.example.test/v1/search?q=browser&page=1',
+        status: 200,
+        statusText: 'OK',
+        mimeType: 'application/json',
+        headers: { 'content-type': 'application/json' },
+      },
+    });
+    await emitDebuggerEvent({ tabId: 88 }, 'Network.loadingFinished', {
+      requestId: 'doc-list',
+      encodedDataLength: 128,
+    });
+
+    const stop = await networkDebuggerStopTool.execute({ tabId: 88 });
+    const stopPayload = JSON.parse(String(stop.content[0].text));
+
+    expect(stop.isError).toBe(false);
+    expect(stopPayload.requests[0].safeResponseSummary).toMatchObject({
+      rowCount: 1,
+      fieldShapeSummaryAvailable: true,
+      rows: [
+        {
+          title: 'Browser automation testing',
+          summary: 'Run automated tests in multiple browsers.',
+          score: 90.5,
+        },
+      ],
+    });
+    expect(stopPayload.requests[0].safeResponseSummary.rows[0]).not.toHaveProperty('mdn_url');
+    expect(stopPayload.requests[0].safeResponseSummary.rows[0]).toHaveProperty(
+      'slug',
+      'testing/browser-automation',
+    );
+  });
+
   it('reports debugger conflict as fallback evidence without claiming CDP use', async () => {
     attachMock.mockRejectedValueOnce(new Error('Debugger is already attached to tab 88'));
 
