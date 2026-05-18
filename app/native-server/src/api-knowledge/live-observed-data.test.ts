@@ -485,6 +485,144 @@ describe('live-observed-data selector', () => {
     });
   });
 
+  it('correlated content endpoint produces api_content without claiming api rows', () => {
+    const requestUrl = 'https://neutral-social.example.test/api/share/content?share_id=abc123';
+    const out = run({
+      bundle: {
+        observationMode: 'cdp_enhanced',
+        cdpUsed: true,
+        cdpReason: 'need_response_body',
+        cdpAttachDurationMs: 18,
+        cdpDetachSuccess: true,
+        debuggerConflict: false,
+        responseBodySource: 'debugger_api',
+        rawBodyPersisted: false,
+        bodyCompacted: true,
+        requests: [
+          {
+            url: requestUrl,
+            method: 'GET',
+            type: 'xmlhttprequest',
+            statusCode: 200,
+            mimeType: 'application/json',
+            responseBody: JSON.stringify({
+              ok: true,
+              data: {
+                title: 'Shared conversation about browser task thing model',
+                content:
+                  '物模型把静态属性、时序属性、可控调节属性和服务动作分开。' +
+                  '在浏览器自动化场景中，Tabrix 应该把页面和任务都看成可观察、可控制、可审计的对象。' +
+                  '这样 AI 助手可以读取完整正文，同时保留数据源证据和低干扰策略。',
+              },
+            }),
+          },
+        ],
+      },
+      upsertedBySignature: upsertState(requestUrl, 'high_confidence', 'article_body'),
+    });
+    const blob = JSON.stringify(out);
+
+    expect(out.rejected).toHaveLength(0);
+    expect(out.selected[0]).toMatchObject({
+      endpointSource: 'observed',
+      selectedDataSource: 'api_content',
+      semanticType: 'unknown_candidate',
+      rowCount: 0,
+      contentSectionCount: 1,
+      pageRegion: 'article_body',
+      rawBodyStored: false,
+      rawBodyPersisted: false,
+      privacyCheck: 'passed',
+      fallbackCause: null,
+      fallbackUsed: false,
+    });
+    expect(out.selected[0].contentText).toContain('物模型');
+    expect(out.selected[0].contentText).toContain('浏览器自动化场景');
+    expect(blob).not.toMatch(/"responseBody"/);
+    expect(blob).not.toContain('share_id=abc123');
+  });
+
+  it('keeps long single-field api_content within the response text cap', () => {
+    const requestUrl = 'https://neutral-social.example.test/api/share/content?share_id=abc123';
+    const longBody =
+      '物模型把静态属性、时序属性、可控调节属性和服务动作分开。' +
+      '浏览器自动化场景需要完整正文作为证据。'.repeat(500);
+    const out = run({
+      bundle: {
+        observationMode: 'cdp_enhanced',
+        cdpUsed: true,
+        cdpDetachSuccess: true,
+        debuggerConflict: false,
+        rawBodyPersisted: false,
+        requests: [
+          {
+            url: requestUrl,
+            method: 'GET',
+            type: 'xmlhttprequest',
+            statusCode: 200,
+            mimeType: 'application/json',
+            responseBody: JSON.stringify({
+              ok: true,
+              data: { content: longBody },
+            }),
+          },
+        ],
+      },
+      upsertedBySignature: upsertState(requestUrl, 'high_confidence', 'article_body'),
+    });
+
+    expect(out.selected[0]).toMatchObject({
+      selectedDataSource: 'api_content',
+      contentSectionCount: 1,
+    });
+    expect(out.selected[0].contentText).toHaveLength(longBody.length);
+    expect(out.selected[0].contentSections[0]?.chars).toBe(longBody.length);
+  });
+
+  it('does not require knowledge upsert state for same-origin api_content', () => {
+    const requestUrl = 'https://neutral-social.example.test/api/share/content?share_id=abc123';
+    const out = run({
+      bundle: {
+        observationMode: 'cdp_enhanced',
+        cdpUsed: true,
+        cdpDetachSuccess: true,
+        debuggerConflict: false,
+        rawBodyPersisted: false,
+        requests: [
+          {
+            url: requestUrl,
+            method: 'GET',
+            type: 'xmlhttprequest',
+            statusCode: 200,
+            mimeType: 'application/json',
+            responseBody: JSON.stringify({
+              ok: true,
+              data: {
+                content:
+                  '物模型把静态属性、时序属性、可控调节属性和服务动作分开。' +
+                  '浏览器自动化场景可以从同源内容接口读取完整正文，但不能持久化原始响应体。' +
+                  '这个能力用于真实页面长内容读取，必须保留数据源证据、同源相关性、隐私过滤和低干扰浏览器清理证据。',
+              },
+            }),
+          },
+        ],
+      },
+      selectorContext: {
+        currentPageUrl: 'https://neutral-social.example.test/share/abc123',
+      },
+    });
+
+    expect(out.rejected).toHaveLength(0);
+    expect(out.selected[0]).toMatchObject({
+      selectedDataSource: 'api_content',
+      endpointFamily: 'neutral-social.example.test/api/share/content',
+      knowledgeUpserted: false,
+      liveObservedEndpointId: null,
+      pageRegion: 'content_source_network',
+      rawBodyStored: false,
+    });
+  });
+
   it('path-only search/list similarity is not enough', () => {
     const requestUrl = 'https://api.neutral-social.example.test/v1/search/items';
     const out = run({

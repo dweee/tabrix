@@ -863,6 +863,7 @@ function cloneLiveObservedApiData(input: LiveObservedApiData): LiveObservedApiDa
   return {
     ...input,
     rows: input.rows.map((row) => ({ ...row })),
+    contentSections: input.contentSections.map((section) => ({ ...section })),
   };
 }
 

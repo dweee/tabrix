@@ -495,6 +495,48 @@ describe('deriveKnowledgeFromBundle', () => {
     expect(typeof generic.responseShapeSummary).toBe('string');
   });
 
+  it('V28-W7A — captures generic content endpoint metadata without raw body values', () => {
+    const out = deriveKnowledgeFromBundle(
+      {
+        requests: [
+          {
+            url: 'https://neutral-social.example.test/api/share/content?share_id=abc123',
+            method: 'GET',
+            type: 'xmlhttprequest',
+            mimeType: 'application/json',
+            statusCode: 200,
+            responseBody: JSON.stringify({
+              ok: true,
+              data: {
+                title: 'Shared conversation',
+                content:
+                  '物模型把静态属性、时序属性、可控调节属性和服务动作分开。' +
+                  '在浏览器自动化场景中，Tabrix 应该把页面和任务都看成对象。',
+              },
+            }),
+          },
+        ],
+      },
+      CTX,
+    );
+    const blob = JSON.stringify(out);
+
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      family: 'observed',
+      site: 'neutral-social.example.test',
+      semanticType: 'unknown',
+      usableForTask: false,
+      noiseReason: 'no_signal',
+      endpointSource: 'observed',
+    });
+    expect(out[0].urlPattern).toBe('neutral-social.example.test/api/share/content');
+    expect(out[0].responseShapeSummary).toBe('object:keys=2');
+    expect(blob).not.toContain('abc123');
+    expect(blob).not.toContain('物模型');
+    expect(blob).not.toContain('Shared conversation');
+  });
+
   it('V26-FIX-03 — also writes classifier fields for GitHub family rows', () => {
     const out = deriveKnowledgeFromBundle(
       {

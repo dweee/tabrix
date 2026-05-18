@@ -480,6 +480,114 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
     });
     assertNoCallToolInvocation(bridgeSpy);
   });
+
+  it('V28-W7A current-task content endpoint returns api_content without bridge fallback', async () => {
+    process.env[CAPABILITIES_ENV_KEY] = 'api_knowledge';
+    markBridgeReady();
+    const requestUrl = 'https://neutral-social.example.test/api/share/content?share_id=abc123';
+    sessionManager
+      .getOrCreateExternalTaskContext('mcp:auto:tab:39')
+      .noteUrlChange('https://neutral-social.example.test/share/abc123', 'article');
+    const captureBundle = {
+      tabUrl: 'https://neutral-social.example.test/share/abc123',
+      observationMode: 'cdp_enhanced',
+      cdpUsed: true,
+      cdpReason: 'need_response_body',
+      cdpAttachDurationMs: 18,
+      cdpDetachSuccess: true,
+      debuggerConflict: false,
+      responseBodySource: 'debugger_api',
+      rawBodyPersisted: false,
+      bodyCompacted: true,
+      requests: [
+        {
+          url: requestUrl,
+          method: 'GET',
+          type: 'xmlhttprequest',
+          statusCode: 200,
+          mimeType: 'application/json',
+          specificResponseHeaders: { 'Content-Type': 'application/json; charset=utf-8' },
+          responseBody: JSON.stringify({
+            ok: true,
+            data: {
+              title: 'Shared conversation about browser task thing model',
+              content:
+                '物模型把静态属性、时序属性、可控调节属性和服务动作分开。' +
+                '在浏览器自动化场景中，Tabrix 应该把页面和任务都看成可观察、可控制、可审计的对象。' +
+                '这样 AI 助手可以读取完整正文，同时保留数据源证据和低干扰策略。',
+              items: [
+                {
+                  type: 'article_body',
+                  text: 'Content endpoint shape marker for safe observed knowledge rows.',
+                },
+              ],
+            },
+          }),
+          responseBodySource: 'debugger_api',
+          rawBodyPersisted: false,
+          bodyCompacted: true,
+        },
+      ],
+    };
+    const bridgeSpy = mockBridgeRoundTrip(JSON.stringify(captureBundle));
+
+    const captureResult = await handleToolCall(TOOL_NAMES.BROWSER.NETWORK_CAPTURE, {
+      action: 'stop',
+      tabId: 39,
+    });
+    expect(captureResult.isError).toBeFalsy();
+
+    const ctx = sessionManager.peekExternalTaskContext('mcp:auto:tab:39');
+    expect(ctx?.peekLiveObservedApiData()).toMatchObject({
+      selectedDataSource: 'api_content',
+      rowCount: 0,
+      contentSectionCount: 1,
+      observationMode: 'cdp_enhanced',
+      responseBodySource: 'debugger_api',
+      rawBodyPersisted: false,
+      bodyCompacted: true,
+      pageRegion: 'content_source_network',
+    });
+
+    bridgeSpy.mockClear();
+    const completeSpy = jest.spyOn(sessionManager, 'completeStep');
+    const readResult = await handleToolCall('chrome_read_page', {
+      requestedLayer: 'L0+L1+L2',
+      tabId: 39,
+    });
+
+    expect(readResult.isError).toBeFalsy();
+    const payload = JSON.parse(String(readResult.content[0].text)) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      kind: 'api_content',
+      liveObservedDataUsed: true,
+      selectedDataSource: 'api_content',
+      sourceKind: 'api_content',
+      contentSectionCount: 1,
+      rowCount: 0,
+      rawBodyStored: false,
+      rawBodyPersisted: false,
+      fallbackUsed: 'none',
+      operationLogSuccess: true,
+    });
+    expect(String(payload.contentText)).toContain('物模型');
+    expect(String(payload.contentText)).toContain('浏览器自动化场景');
+    expect(payload).not.toHaveProperty('rawBody');
+    expect(payload).not.toHaveProperty('responseBody');
+    expect(JSON.stringify(payload)).not.toContain('share_id=abc123');
+
+    const operationLog = takeLatestReadPageOperationLog(completeSpy);
+    expect(operationLog).toMatchObject({
+      selectedDataSource: 'api_content',
+      resultKind: 'api_content',
+      success: true,
+      metadata: {
+        apiTelemetry: 'live_observed_api_content',
+        contentSectionCount: '1',
+      },
+    });
+    assertNoCallToolInvocation(bridgeSpy);
+  });
   it('V27-10R observed verified empty is a successful empty api_rows state', async () => {
     process.env[CAPABILITIES_ENV_KEY] = 'api_knowledge';
     markBridgeReady();

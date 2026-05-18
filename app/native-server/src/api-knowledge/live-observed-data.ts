@@ -19,14 +19,14 @@ import type {
   EndpointCandidate,
   EndpointCandidateSemanticType,
 } from '../memory/knowledge/network-observe-classifier';
-import type {
-  CorrelationConfidenceLevel,
-  UpsertKnowledgeApiEndpointInput,
-} from '../memory/knowledge/knowledge-api-repository';
+import type { CorrelationConfidenceLevel } from '../memory/knowledge/knowledge-api-repository';
 import { findSensitivePaths } from '../runtime/privacy-gate';
 import { compactGenericRows } from './knowledge-driven-reader';
 
 const LIVE_OBSERVED_ROW_LIMIT = 10;
+const LIVE_OBSERVED_CONTENT_TEXT_CAP = 24_000;
+const LIVE_OBSERVED_CONTENT_SECTION_LIMIT = 24;
+const LIVE_OBSERVED_CONTENT_SECTION_VALUE_CAP = LIVE_OBSERVED_CONTENT_TEXT_CAP;
 const LIVE_OBSERVED_CONFIDENCE_FLOOR = 0.7;
 const LIVE_OBSERVED_TASK_QUERY_RELEVANCE_FLOOR = 0.72;
 const LIVE_OBSERVED_DOM_CORRELATION_FLOOR = 0.9;
@@ -42,7 +42,19 @@ const SAFE_SUMMARY_STRING_VALUE_CAP = 240;
 const SENSITIVE_FIELD_RE =
   /(authorization|cookie|password|passwd|token|secret|session|csrf|xsrf|api[_-]?key)/i;
 
+interface LiveObservedEndpointIdentity {
+  endpointFamily: string;
+  endpointSignature: string;
+}
+
 export type LiveObservedSelectedDataSource = 'api_rows' | 'api_detail' | 'cdp_enhanced_api_rows';
+export type LiveObservedContentSelectedDataSource = 'api_content';
+
+export interface LiveObservedContentSection {
+  path: string;
+  text: string;
+  chars: number;
+}
 
 export interface LiveObservedCdpEvidence {
   observationMode: 'no_cdp' | 'cdp_enhanced';
@@ -76,11 +88,15 @@ export interface LiveObservedApiEvidence extends LiveObservedCdpEvidence {
 }
 
 export interface LiveObservedApiData extends LiveObservedApiEvidence {
-  selectedDataSource: LiveObservedSelectedDataSource;
+  selectedDataSource: LiveObservedSelectedDataSource | LiveObservedContentSelectedDataSource;
   endpointFamily: string;
   dataPurpose: string;
   rows: ApiKnowledgeCompactRow[];
   rowCount: number;
+  contentText: string | null;
+  contentChars: number;
+  contentSections: LiveObservedContentSection[];
+  contentSectionCount: number;
   emptyResult: boolean;
   emptyReason: 'no_matching_records' | null;
   emptyMessage: string | null;
@@ -124,18 +140,24 @@ export function deriveLiveObservedApiDataFromBundle(
   for (const req of input.bundle.requests ?? []) {
     const upsert = deriveKnowledgeFromRequest(req, commonReq, commonRes, input.ctx);
     const candidate = deriveEndpointCandidateFromRequest(req, commonRes);
-    if (!upsert || !candidate) continue;
-    if (upsert.endpointSource !== 'observed') continue;
+    if (!candidate) continue;
+    const identity = upsert ? null : buildObservedEndpointIdentity(req);
+    if (!upsert && !identity) continue;
+    if (upsert && upsert.endpointSource !== 'observed') continue;
 
-    const upsertState = input.upsertedBySignature.get(upsert.endpointSignature);
+    const endpointSignature = upsert?.endpointSignature ?? identity!.endpointSignature;
+    const endpointFamily = upsert?.urlPattern ?? identity!.endpointFamily;
+    const upsertState = input.upsertedBySignature.get(endpointSignature);
+    const contentResult = buildLiveContent(req, candidate, bundleCdpEvidence);
     const relevance = buildRelevanceEvidence({
       req,
       candidate,
       upsertState,
+      contentAvailable: contentResult.ok,
       selectorContext: input.selectorContext,
     });
     const baseEvidence = buildEvidence({
-      upsert,
+      endpointSignature,
       candidate,
       req,
       upsertState,
@@ -146,6 +168,29 @@ export function deriveLiveObservedApiDataFromBundle(
 
     const rowsResult = buildLiveRows(req, candidate, bundleCdpEvidence);
     if (!rowsResult.ok) {
+      if (contentResult.ok && relevance.relevant) {
+        selected.push({
+          ...baseEvidence,
+          selectedDataSource: 'api_content',
+          endpointFamily,
+          dataPurpose: `observed_${candidate.semanticType}_content`,
+          rows: [],
+          rowCount: 0,
+          contentText: contentResult.contentText,
+          contentChars: contentResult.contentChars,
+          contentSections: contentResult.contentSections,
+          contentSectionCount: contentResult.contentSections.length,
+          emptyResult: contentResult.contentChars === 0,
+          emptyReason: contentResult.contentChars === 0 ? 'no_matching_records' : null,
+          emptyMessage:
+            contentResult.contentChars === 0
+              ? `Observed API endpoint ${endpointFamily} succeeded but returned no safe content.`
+              : null,
+          compact: true,
+          rawBodyStored: false,
+        });
+        continue;
+      }
       rejected.push({
         ...baseEvidence,
         privacyCheck: privacyCheckForRowsFailure(rowsResult.cause),
@@ -166,15 +211,19 @@ export function deriveLiveObservedApiDataFromBundle(
     selected.push({
       ...baseEvidence,
       selectedDataSource: rowsResult.selectedDataSource,
-      endpointFamily: upsert.urlPattern,
+      endpointFamily,
       dataPurpose: `observed_${candidate.semanticType}`,
       rows: rowsResult.rows,
       rowCount: rowsResult.rows.length,
+      contentText: null,
+      contentChars: 0,
+      contentSections: [],
+      contentSectionCount: 0,
       emptyResult: rowsResult.rows.length === 0,
       emptyReason: rowsResult.rows.length === 0 ? 'no_matching_records' : null,
       emptyMessage:
         rowsResult.rows.length === 0
-          ? `Observed API endpoint ${upsert.urlPattern} succeeded but returned no records.`
+          ? `Observed API endpoint ${endpointFamily} succeeded but returned no records.`
           : null,
       compact: true,
       rawBodyStored: false,
@@ -185,8 +234,36 @@ export function deriveLiveObservedApiDataFromBundle(
   return { selected, rejected };
 }
 
+function buildObservedEndpointIdentity(
+  req: CapturedNetworkRequest,
+): LiveObservedEndpointIdentity | null {
+  const method = String(req.method || 'GET').toUpperCase();
+  let parsed: URL;
+  try {
+    parsed = new URL(req.url);
+  } catch {
+    return null;
+  }
+  const collapsed = parsed.pathname
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => {
+      if (/^\d+$/.test(segment)) return ':id';
+      if (/^[0-9a-f]{16,}$/i.test(segment)) return ':id';
+      if (segment.length > 24 && /^[a-z0-9_-]+$/i.test(segment)) return ':slug';
+      return segment.toLowerCase();
+    })
+    .join('/');
+  const path = collapsed.length > 0 ? `/${collapsed}` : '/';
+  const endpointFamily = `${parsed.hostname.toLowerCase()}${path}`;
+  return {
+    endpointFamily,
+    endpointSignature: `${method} ${endpointFamily}`,
+  };
+}
+
 function buildEvidence(input: {
-  upsert: UpsertKnowledgeApiEndpointInput;
+  endpointSignature: string;
   candidate: EndpointCandidate;
   req: CapturedNetworkRequest;
   upsertState:
@@ -206,7 +283,7 @@ function buildEvidence(input: {
     endpointSource: 'observed',
     ...input.bundleCdpEvidence,
     liveObservedEndpointId: input.upsertState?.endpointId ?? null,
-    endpointSignature: input.upsert.endpointSignature,
+    endpointSignature: input.endpointSignature,
     semanticType: input.candidate.semanticType,
     pageRegion: input.pageRegion,
     correlationScore: input.correlationScore,
@@ -379,6 +456,139 @@ function buildLiveRows(
   };
 }
 
+function buildLiveContent(
+  req: CapturedNetworkRequest,
+  candidate: EndpointCandidate,
+  cdpEvidence: LiveObservedCdpEvidence,
+):
+  | {
+      ok: true;
+      contentText: string;
+      contentChars: number;
+      contentSections: LiveObservedContentSection[];
+    }
+  | {
+      ok: false;
+      cause: string;
+    } {
+  const status =
+    typeof req.statusCode === 'number'
+      ? req.statusCode
+      : typeof req.status === 'number'
+        ? req.status
+        : null;
+  if (status !== null && (status < 200 || status >= 300))
+    return { ok: false, cause: 'endpoint_error' };
+  if (cdpEvidence.observationMode === 'cdp_enhanced' && cdpEvidence.cdpDetachSuccess !== true) {
+    return { ok: false, cause: 'cdp_detach_failed' };
+  }
+  if (cdpEvidence.observationMode === 'cdp_enhanced' && cdpEvidence.debuggerConflict === true) {
+    return { ok: false, cause: 'debugger_conflict' };
+  }
+  if (cdpEvidence.observationMode === 'cdp_enhanced' && cdpEvidence.rawBodyPersisted !== false) {
+    return { ok: false, cause: 'raw_body_persistence_risk' };
+  }
+  if (candidate.semanticType === 'noise' || candidate.semanticType === 'error') {
+    return { ok: false, cause: candidate.noiseReason ?? 'noise_endpoint' };
+  }
+  const body = typeof req.responseBody === 'string' ? req.responseBody : null;
+  if (!body || req.base64Encoded === true) {
+    return {
+      ok: false,
+      cause: candidate.responseBodyUnavailable
+        ? 'response_summary_unavailable'
+        : 'response_body_unavailable',
+    };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return { ok: false, cause: 'content_parse_failed' };
+  }
+  const sections = extractContentSections(parsed);
+  if (sections.length === 0) return { ok: false, cause: 'content_text_unavailable' };
+  if (
+    candidate.confidence < LIVE_OBSERVED_CONFIDENCE_FLOOR &&
+    !isContentSourceCandidate(req) &&
+    sections.length === 0
+  ) {
+    return { ok: false, cause: 'low_confidence' };
+  }
+  const contentPrivacy = findLiveRowsPrivacyLeak(sections);
+  if (contentPrivacy !== null) return { ok: false, cause: contentPrivacy };
+  const text = sections.map((section) => section.text).join('\n\n');
+  return {
+    ok: true,
+    contentText:
+      text.length > LIVE_OBSERVED_CONTENT_TEXT_CAP
+        ? text.slice(0, LIVE_OBSERVED_CONTENT_TEXT_CAP)
+        : text,
+    contentChars: text.length,
+    contentSections: sections,
+  };
+}
+
+function extractContentSections(value: unknown): LiveObservedContentSection[] {
+  const sections: LiveObservedContentSection[] = [];
+  collectContentSections(value, [], sections);
+  return sections.sort((a, b) => b.chars - a.chars).slice(0, LIVE_OBSERVED_CONTENT_SECTION_LIMIT);
+}
+
+function collectContentSections(
+  value: unknown,
+  path: readonly string[],
+  out: LiveObservedContentSection[],
+): void {
+  if (out.length >= LIVE_OBSERVED_CONTENT_SECTION_LIMIT * 2) return;
+  if (typeof value === 'string') {
+    const normalized = normalizeContentText(value);
+    if (normalized.length >= 80 && path.some(isContentFieldName)) {
+      out.push({
+        path: path.join('.'),
+        text:
+          normalized.length > LIVE_OBSERVED_CONTENT_SECTION_VALUE_CAP
+            ? normalized.slice(0, LIVE_OBSERVED_CONTENT_SECTION_VALUE_CAP)
+            : normalized,
+        chars: normalized.length,
+      });
+    }
+    return;
+  }
+  if (value === null || value === undefined) return;
+  if (Array.isArray(value)) {
+    value.slice(0, 12).forEach((entry, index) => {
+      collectContentSections(entry, [...path, String(index)], out);
+    });
+    return;
+  }
+  if (typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (SENSITIVE_FIELD_RE.test(key)) continue;
+    collectContentSections(child, [...path, key], out);
+  }
+}
+
+function normalizeContentText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function isContentFieldName(value: string): boolean {
+  return /\b(content|text|body|markdown|message|answer|summary|description|title)\b/i.test(value);
+}
+
+function isContentSourceCandidate(req: CapturedNetworkRequest): boolean {
+  try {
+    const path = new URL(req.url).pathname;
+    return /\b(content|article|detail|conversation|thread|document|doc|page|body|post)\b/i.test(
+      path,
+    );
+  } catch {
+    return false;
+  }
+}
+
 function buildCdpEvidence(bundle: CapturedNetworkBundle): LiveObservedCdpEvidence {
   const cdpEnhanced = bundle.observationMode === 'cdp_enhanced' || bundle.cdpUsed === true;
   return {
@@ -440,6 +650,7 @@ function privacyCheckForRowsFailure(cause: string): 'passed' | 'failed' {
 function buildRelevanceEvidence(args: {
   req: CapturedNetworkRequest;
   candidate: EndpointCandidate;
+  contentAvailable: boolean;
   upsertState:
     | {
         endpointId: string | null;
@@ -513,6 +724,32 @@ function buildRelevanceEvidence(args: {
       ),
     };
   }
+  if (
+    args.contentAvailable &&
+    isContentSourceCandidate(args.req) &&
+    sameOriginAsCurrentPage(args.req, args.selectorContext)
+  ) {
+    return {
+      relevant: true,
+      fallbackCause: '',
+      pageRegion: 'content_source_network',
+      correlationScore: Math.max(
+        args.candidate.confidence,
+        LIVE_OBSERVED_TASK_QUERY_RELEVANCE_FLOOR,
+      ),
+    };
+  }
+  if (args.contentAvailable && sameOriginAsCurrentPage(args.req, args.selectorContext)) {
+    return {
+      relevant: true,
+      fallbackCause: '',
+      pageRegion: 'content_source_network',
+      correlationScore: Math.max(
+        args.candidate.confidence,
+        LIVE_OBSERVED_TASK_QUERY_RELEVANCE_FLOOR,
+      ),
+    };
+  }
 
   return {
     relevant: false,
@@ -525,6 +762,20 @@ function buildRelevanceEvidence(args: {
     pageRegion: 'current_page_network',
     correlationScore: args.candidate.confidence,
   };
+}
+
+function sameOriginAsCurrentPage(
+  req: CapturedNetworkRequest,
+  selectorContext:
+    | {
+        currentPageUrl?: string | null;
+      }
+    | undefined,
+): boolean {
+  const currentUrl = parseUrl(selectorContext?.currentPageUrl ?? null);
+  const requestUrl = parseUrl(req.url);
+  if (!currentUrl || !requestUrl) return false;
+  return currentUrl.origin === requestUrl.origin;
 }
 
 function sanitizeRegion(value: string | null): string | null {
