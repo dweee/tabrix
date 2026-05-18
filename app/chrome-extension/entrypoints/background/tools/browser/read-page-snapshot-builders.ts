@@ -6,6 +6,7 @@ import type {
   ReadPagePageType,
   ReadPageRenderMode,
   ReadPageRequestedLayer,
+  ReadPageCompleteTextRegion,
 } from '@tabrix/shared';
 import { buildTaskProtocol } from './read-page-task-protocol';
 import type { PageRole } from './read-page-understanding';
@@ -64,6 +65,7 @@ export function buildExtensionLayer(params: {
   interactiveElements: SnapshotInteractiveElement[];
   pageContext: ReadPagePageContext;
   visibleRegionRows: VisibleRegionRowsResult;
+  visibleTextContent?: string | null;
   /** When 'L0' or 'L0+L1', strip detail layers below the requested envelope. */
   requestedLayer: ReadPageRequestedLayer;
 }): ReadPageExtensionFields {
@@ -181,6 +183,7 @@ export function buildExtensionLayer(params: {
     L1: includeL1 ? taskProtocol.L1 : undefined,
     L2: includeL2 ? taskProtocol.L2 : undefined,
     visibleRegionRows: params.visibleRegionRows,
+    completeTextRegion: buildCompleteTextRegion(params.visibleTextContent),
     renderMode: params.renderMode,
     markdown,
   };
@@ -202,4 +205,35 @@ export function buildExtensionLayer(params: {
     });
   }
   return extensionLayer as ReadPageExtensionFields;
+}
+
+function buildCompleteTextRegion(
+  text: string | null | undefined,
+): ReadPageCompleteTextRegion | null {
+  if (!text) return null;
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  const lineCount = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean).length;
+  const normalizedLength = normalized.length;
+  const contentSparse = normalizedLength < 80;
+  const structureSparse = lineCount < 3;
+  const completeTextAvailable = normalizedLength >= 500;
+  if (!completeTextAvailable) return null;
+  return {
+    sourceDataSource: 'web_content_text',
+    sourceRoute: 'visible_text_sample',
+    charCount: text.length,
+    normalizedLength,
+    lineCount,
+    completeTextAvailable,
+    structureSparse,
+    contentSparse,
+    quality: structureSparse ? 'complete_text_sparse_structure' : 'usable',
+    recommendation: 'use_chrome_get_web_content_for_full_body',
+    reason: structureSparse
+      ? 'complete_visible_text_available_but_structurally_sparse'
+      : 'complete_visible_text_available',
+  };
 }

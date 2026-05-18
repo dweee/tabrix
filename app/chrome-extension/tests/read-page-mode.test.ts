@@ -892,4 +892,61 @@ describe('read_page mode', () => {
       ]),
     );
   });
+
+  it('surfaces complete visible text as a body-region route hint without dumping the body', async () => {
+    const longBody = [
+      '基于你提出的“一切皆对象”与“万物互联”思想，我对物模型进行了体系化扩展。',
+      '这段正文故意模拟分享页里可见但结构稀疏的长文本内容，用来证明 read_page 能识别完整正文存在。',
+      'AI 助手应看到 completeTextRegion 证据，然后按需调用 chrome_get_web_content 获取完整正文。',
+    ].join('');
+    const repeatedLongBody = longBody.repeat(12);
+
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5242,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.com/shared-long-content',
+      title: 'Shared Long Content',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sampleVisibleTextContent').mockResolvedValue(repeatedLongBody);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Shared conversation" [ref=ref_main] (x=300,y=80)',
+        '  - article "Shared answer" [ref=ref_answer] (x=360,y=120)',
+        '    - generic "短摘要" [ref=ref_summary] (x=360,y=150)',
+        '    - generic "已思考（用时 38 秒）" [ref=ref_meta] (x=360,y=190)',
+        '  - textbox "发送消息" [ref=ref_input] (x=360,y=600)',
+        '  - button "深度思考" [ref=ref_button] (x=520,y=600)',
+        '  - link "历史对话" [ref=ref_history] (x=120,y=200) href="/history"',
+        '  - generic "侧边栏" [ref=ref_sidebar] (x=80,y=120)',
+        '  - generic "页面底部" [ref=ref_footer] (x=80,y=700)',
+        '  - generic "更多内容" [ref=ref_more] (x=360,y=240)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_answer', selector: 'article' },
+        { ref: 'ref_input', selector: 'textarea' },
+        { ref: 'ref_button', selector: 'button.deep' },
+        { ref: 'ref_history', selector: 'a.history' },
+      ],
+      stats: { processed: 10, included: 9, durationMs: 8 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact', render: 'markdown' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.completeTextRegion).toMatchObject({
+      sourceDataSource: 'web_content_text',
+      sourceRoute: 'visible_text_sample',
+      completeTextAvailable: true,
+      recommendation: 'use_chrome_get_web_content_for_full_body',
+      reason: 'complete_visible_text_available_but_structurally_sparse',
+    });
+    expect(payload.completeTextRegion.normalizedLength).toBeGreaterThan(500);
+    expect(payload.markdown).not.toContain(repeatedLongBody);
+  });
 });

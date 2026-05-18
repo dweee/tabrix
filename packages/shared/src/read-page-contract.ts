@@ -335,6 +335,20 @@ export interface ReadPageVisibleRegionRows {
   pageInfo: ReadPageVisibleRegionPageInfo;
 }
 
+export interface ReadPageCompleteTextRegion {
+  sourceDataSource: 'web_content_text';
+  sourceRoute: 'visible_text_sample';
+  charCount: number;
+  normalizedLength: number;
+  lineCount: number;
+  completeTextAvailable: boolean;
+  structureSparse: boolean;
+  contentSparse: boolean;
+  quality: 'complete_text_sparse_structure' | 'usable' | 'sparse';
+  recommendation: 'use_chrome_get_web_content_for_full_body';
+  reason: string;
+}
+
 export interface ReadPageExtensionFields {
   candidateActions?: ReadPageCandidateAction[];
   pageContext?: ReadPagePageContext;
@@ -349,6 +363,7 @@ export interface ReadPageExtensionFields {
   L1?: ReadPageTaskLevel1;
   L2?: ReadPageTaskLevel2;
   visibleRegionRows?: ReadPageVisibleRegionRows;
+  completeTextRegion?: ReadPageCompleteTextRegion | null;
   /**
    * V27 additive AI-facing data-source router evidence.
    * Mirrors `visibleRegionRows` only when DOM region rows are actually used,
