@@ -345,6 +345,7 @@ export class TaskSessionContext {
   private pageProjectionDeltaCount = 0;
   private lifecycleEventCount = 0;
   private readonly lifecycleTimeline: TaskLifecycleEvent[] = [];
+  private readonly runOwnedTabIds = new Set<number>();
 
   /**
    * Most recent `choose_context` decision recorded for this task. The
@@ -570,6 +571,11 @@ export class TaskSessionContext {
   }
 
   public noteCleanup(input: { action: string; targetIds?: ReadonlyArray<number> | null }): void {
+    if (input.targetIds) {
+      for (const tabId of input.targetIds) {
+        this.runOwnedTabIds.delete(tabId);
+      }
+    }
     this.recordLifecycleEvent({
       kind: 'cleanup',
       url: this.currentUrl,
@@ -588,6 +594,20 @@ export class TaskSessionContext {
       refreshedRefs: event.refreshedRefs ? [...event.refreshedRefs] : undefined,
       cleanupTargetIds: event.cleanupTargetIds ? [...event.cleanupTargetIds] : undefined,
     }));
+  }
+
+  public noteRunOwnedTab(tabId: number): void {
+    if (Number.isInteger(tabId) && tabId > 0) {
+      this.runOwnedTabIds.add(tabId);
+    }
+  }
+
+  public isRunOwnedTab(tabId: number): boolean {
+    return this.runOwnedTabIds.has(tabId);
+  }
+
+  public getRunOwnedTabIds(): readonly number[] {
+    return Array.from(this.runOwnedTabIds).sort((left, right) => left - right);
   }
 
   private recordProjectionLifecycleEvents(

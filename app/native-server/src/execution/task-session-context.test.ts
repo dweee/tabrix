@@ -419,3 +419,21 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
     });
   });
 });
+
+describe('TaskSessionContext — V28 run-owned tab ownership', () => {
+  it('tracks run-owned tab ids and removes them after cleanup', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+
+    ctx.noteRunOwnedTab(42);
+    ctx.noteRunOwnedTab(7);
+    ctx.noteRunOwnedTab(-1);
+
+    expect(ctx.getRunOwnedTabIds()).toEqual([7, 42]);
+    expect(ctx.isRunOwnedTab(42)).toBe(true);
+
+    ctx.noteCleanup({ action: 'chrome_close_tabs', targetIds: [42] });
+
+    expect(ctx.getRunOwnedTabIds()).toEqual([7]);
+    expect(ctx.isRunOwnedTab(42)).toBe(false);
+  });
+});

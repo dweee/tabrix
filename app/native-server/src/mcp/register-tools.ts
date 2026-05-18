@@ -8,6 +8,7 @@ import nativeMessagingHostInstance from '../native-messaging-host';
 import { NativeMessageType, TOOL_NAMES, TOOL_SCHEMAS, getRequiredCapability } from '@tabrix/shared';
 import { isToolAllowedByPolicy } from '../policy/phase0-opt-in';
 import { getCurrentCapabilityEnv, isCapabilityEnabled } from '../policy/capabilities';
+import { evaluateNonInterferencePreflight } from '../policy/non-interference-preflight';
 import { sessionManager } from '../execution/session-manager';
 import type { TaskSessionContext } from '../execution/task-session-context';
 import { normalizeToolCallResult } from '../execution/result-normalizer';
@@ -35,6 +36,7 @@ import {
   createPolicyDeniedResult,
 } from './tool-call-results';
 import {
+  extractTabIdFromCallToolResult,
   extractRequestedLayer,
   READ_PAGE_DEFAULT_LAYER,
   resolveTaskContextKey,
@@ -755,18 +757,45 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         return warningResult;
       }
     }
+    const nonInterferenceVerdict = evaluateNonInterferencePreflight({
+      toolName: name,
+      args: outgoingArgs,
+      taskContext,
+    });
+    if (!nonInterferenceVerdict.allowed) {
+      const payload = {
+        ok: false,
+        code: 'TABRIX_NON_INTERFERENCE_BLOCKED',
+        message: nonInterferenceVerdict.message,
+        runtimePolicyAudit: nonInterferenceVerdict.audit,
+      };
+      const result = createErrorResult(JSON.stringify(payload));
+      sessionManager.completeStep(session.sessionId, step.stepId, {
+        status: 'failed',
+        errorCode: 'non_interference_blocked',
+        resultSummary: `${name} blocked by non-interference policy`,
+        operationLog: {
+          decisionReason: nonInterferenceVerdict.audit.reason,
+          metadata: {
+            decisionReason: nonInterferenceVerdict.audit.reason,
+            actionOutcome: 'blocked',
+            executionMode: 'non_interference_policy',
+          },
+        },
+      });
+      sessionManager.finishSession(session.sessionId, {
+        status: 'failed',
+        summary: `${name} blocked by non-interference policy`,
+      });
+      return result;
+    }
+
     if (taskContext && name === 'chrome_navigate') {
       const url =
         args && typeof args === 'object' && typeof (args as any).url === 'string'
           ? ((args as any).url as string)
           : null;
       taskContext.noteUrlChange(url);
-    }
-    if (taskContext && name === 'chrome_close_tabs') {
-      taskContext.noteCleanup({
-        action: 'chrome_close_tabs',
-        targetIds: readNumericArray(args, 'tabIds'),
-      });
     }
     // When the orchestrator demanded a fallback for `chrome_read_page`,
     // replace the caller's `requestedLayer` (which may be the schema
@@ -803,6 +832,13 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     // without throwing.
     recordPrimaryTabNavigationOutcome({ name, args, response, primaryTabController });
     if (response.status === 'success') {
+      if (taskContext && name === 'chrome_navigate') {
+        const returnedTabId = extractTabIdFromCallToolResult(response.data);
+        const explicitTabId = readPositiveInteger(args, 'tabId');
+        if (returnedTabId !== null && explicitTabId === null) {
+          taskContext.noteRunOwnedTab(returnedTabId);
+        }
+      }
       const postResult = runPostProcessor({
         toolName: name,
         rawResult: response.data,
@@ -900,6 +936,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       // dom_region_rows may replace the payload, but it is still one
       // bridge-confirmed read_page call.
       recordSuccessfulReadPage('unknown');
+      if (name === 'chrome_close_tabs' && taskContext && rawResultWithEvidence.isError !== true) {
+        taskContext.noteCleanup({
+          action: 'chrome_close_tabs',
+          targetIds: readNumericArray(args, 'tabIds'),
+        });
+      }
       const aiFacingResult =
         name === 'chrome_read_page' && taskContext && rawResultWithEvidence.isError !== true
           ? attachAiFacingDeltaContext(rawResultWithEvidence, taskContext)
@@ -1115,4 +1157,10 @@ function readNumericArray(input: unknown, key: string): number[] | null {
   if (!Array.isArray(raw)) return null;
   const values = raw.filter((value): value is number => Number.isInteger(value));
   return values.length > 0 ? values : null;
+}
+
+function readPositiveInteger(input: unknown, key: string): number | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const raw = (input as Record<string, unknown>)[key];
+  return Number.isInteger(raw) && (raw as number) > 0 ? (raw as number) : null;
 }

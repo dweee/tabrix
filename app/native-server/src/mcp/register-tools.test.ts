@@ -263,6 +263,92 @@ describe('handleToolCall execution wrapper', () => {
     expect(summary.length).toBe('hunter2'.length);
   });
 
+  it('blocks active user tab impact actions before the extension call', async () => {
+    markBridgeReady();
+    const bridgeSpy = jest
+      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+      .mockResolvedValueOnce({ status: 'success', items: [] } as never);
+
+    const result = await handleToolCall('chrome_click_element', { ref: 'ref_42' });
+
+    expect(result.isError).toBe(true);
+    const payload = JSON.parse(String(result.content[0].text));
+    expect(payload).toMatchObject({
+      ok: false,
+      code: 'TABRIX_NON_INTERFERENCE_BLOCKED',
+      runtimePolicyAudit: {
+        policy: 'non_interference',
+        verdict: 'block',
+        reason: 'active_user_tab_unprotected',
+        targetTabId: null,
+      },
+    });
+    expect(bridgeSpy).toHaveBeenCalledTimes(1);
+    const session = sessionManager.listSessions()[0];
+    expect(session.steps[0].status).toBe('failed');
+    expect(session.steps[0].errorCode).toBe('non_interference_blocked');
+  });
+
+  it('allows impact actions on a run-owned tab created by the same task session', async () => {
+    markBridgeReady();
+    const bridgeSpy = jest
+      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ tabId: 77 }) }],
+          isError: false,
+        },
+      } as never)
+      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ ok: true }) }],
+          isError: false,
+        },
+      } as never);
+
+    await handleToolCall('chrome_navigate', {
+      url: 'https://example.test/run-owned',
+      taskSessionId: 'w4b-run-owned',
+    });
+    const clickResult = await handleToolCall('chrome_click_element', {
+      tabId: 77,
+      ref: 'ref_77',
+      taskSessionId: 'w4b-run-owned',
+      nonInterferencePolicy: 'strict',
+    });
+
+    expect(clickResult.isError).toBe(false);
+    expect(bridgeSpy).toHaveBeenCalledTimes(4);
+  });
+
+  it('blocks strict impact actions on explicit tabs not owned by the task', async () => {
+    markBridgeReady();
+    const bridgeSpy = jest
+      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+      .mockResolvedValueOnce({ status: 'success', items: [] } as never);
+
+    const result = await handleToolCall('chrome_keyboard', {
+      tabId: 55,
+      keys: 'Enter',
+      taskSessionId: 'w4b-strict',
+      nonInterferencePolicy: 'strict',
+    });
+
+    expect(result.isError).toBe(true);
+    const payload = JSON.parse(String(result.content[0].text));
+    expect(payload.runtimePolicyAudit).toMatchObject({
+      mode: 'strict',
+      verdict: 'block',
+      reason: 'non_run_owned_tab',
+      targetTabId: 55,
+    });
+    expect(bridgeSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('allows non-sensitive tools when MCP_DISABLE_SENSITIVE_TOOLS is set', async () => {
     markBridgeReady();
     process.env.MCP_DISABLE_SENSITIVE_TOOLS = 'true';
