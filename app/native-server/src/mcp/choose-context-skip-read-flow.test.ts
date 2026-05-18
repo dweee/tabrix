@@ -1117,6 +1117,13 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
     });
     expect(payload).not.toHaveProperty('kind', 'api_rows');
     expect(payload).not.toHaveProperty('pageContent');
+    expect(payload.pageProjection).toMatchObject({
+      pageId: 'tab:43',
+      tabId: 43,
+    });
+    expect(payload.deltaContext).toMatchObject({
+      evidenceBoundary: { evidenceLevel: 'real_browser', realBrowserClaim: true },
+    });
     const rows = payload.rows as Array<Record<string, unknown>>;
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({

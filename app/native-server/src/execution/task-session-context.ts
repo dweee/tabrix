@@ -111,6 +111,7 @@ export interface TaskVisibleRegionRow {
 
 export interface TaskVisibleRegionRowsData extends RouterDomRegionRowsEvidence {
   sourceDataSource: 'dom_region_rows';
+  sourceTabId?: number | null;
   rows: TaskVisibleRegionRow[];
   visibleRegionRowsUsed: boolean;
   visibleRegionRowsRejectedReason: string | null;

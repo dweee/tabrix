@@ -177,8 +177,14 @@ function buildDomRegionRowsPageProjection(
     snapshot,
     projectionId: `dom_region_rows:${observedAt}`,
     observedAt,
-    pageId: 'unknown',
-    tabId: -1,
+    pageId:
+      typeof args.visibleRows.sourceTabId === 'number' && args.visibleRows.sourceTabId > 0
+        ? `tab:${args.visibleRows.sourceTabId}`
+        : 'unknown',
+    tabId:
+      typeof args.visibleRows.sourceTabId === 'number' && args.visibleRows.sourceTabId > 0
+        ? args.visibleRows.sourceTabId
+        : -1,
     ownerType: 'unknown',
     contextVersion: `dom_region_rows:${observedAt}`,
     previousContextVersion: null,

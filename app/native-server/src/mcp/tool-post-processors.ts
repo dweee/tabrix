@@ -79,7 +79,10 @@ function pickTabIdFromArgs(args: unknown): number | null {
   return typeof tabId === 'number' && Number.isFinite(tabId) ? tabId : null;
 }
 
-function readVisibleRegionRowsFromResult(result: CallToolResult): TaskVisibleRegionRowsData | null {
+function readVisibleRegionRowsFromResult(
+  result: CallToolResult,
+  sourceTabId: number | null,
+): TaskVisibleRegionRowsData | null {
   const first = result.content?.[0];
   if (!first || first.type !== 'text' || typeof first.text !== 'string') return null;
   let parsed: unknown;
@@ -139,6 +142,7 @@ function readVisibleRegionRowsFromResult(result: CallToolResult): TaskVisibleReg
       : null;
   return {
     sourceDataSource: 'dom_region_rows',
+    sourceTabId,
     rows,
     rowCount,
     available: visibleRowsPayload.visibleRegionRowsUsed === true && rowCount > 0 && rows.length > 0,
@@ -239,7 +243,9 @@ export const chromeReadPagePostProcessor: ToolPostProcessor = (ctx) => {
     extraArtifactRefs: [],
   };
   try {
-    ctx.taskContext?.noteVisibleRegionRows(readVisibleRegionRowsFromResult(ctx.rawResult));
+    ctx.taskContext?.noteVisibleRegionRows(
+      readVisibleRegionRowsFromResult(ctx.rawResult, pickTabIdFromArgs(ctx.args)),
+    );
     const service = ctx.sessionManager.pageSnapshots;
     if (!service) return empty;
 
