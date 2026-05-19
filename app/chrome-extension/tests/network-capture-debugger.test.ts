@@ -311,6 +311,93 @@ describe('V27-CDP-01 network debugger controlled evidence', () => {
     expect(stopPayload.requests[0].safeResponseSummary.rows[0]).not.toHaveProperty('objectID');
   });
 
+  it('waits for an in-flight response body summary before stopping capture', async () => {
+    let bodyRequested = false;
+    sendCommandMock.mockImplementation(async (_tabId: number, method: string) => {
+      if (method === 'Network.getResponseBody') {
+        bodyRequested = true;
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({
+              body: JSON.stringify({
+                results: [
+                  {
+                    hits: [
+                      {
+                        title: 'Delayed browser automation result',
+                        points: 12,
+                      },
+                    ],
+                  },
+                ],
+              }),
+              base64Encoded: false,
+            });
+          }, 25);
+        });
+      }
+      return {};
+    });
+    const start = await networkDebuggerStartTool.execute({
+      tabId: 88,
+      maxCaptureTime: 0,
+      inactivityTimeout: 0,
+    });
+    expect(start.isError).toBe(false);
+
+    const emitDebuggerEvent = (
+      networkDebuggerStartTool as unknown as {
+        handleDebuggerEvent: DebuggerListener;
+      }
+    ).handleDebuggerEvent.bind(networkDebuggerStartTool);
+
+    emitDebuggerEvent({ tabId: 88 }, 'Network.requestWillBeSent', {
+      requestId: 'delayed-query',
+      request: {
+        url: 'https://search-provider.example.test/1/indexes/Item_dev/query',
+        method: 'POST',
+        postData: JSON.stringify({ query: 'browser automation' }),
+      },
+      type: 'XHR',
+      timestamp: 100,
+    });
+    emitDebuggerEvent({ tabId: 88 }, 'Network.responseReceived', {
+      requestId: 'delayed-query',
+      type: 'XHR',
+      timestamp: 101,
+      response: {
+        url: 'https://search-provider.example.test/1/indexes/Item_dev/query',
+        status: 200,
+        statusText: 'OK',
+        mimeType: 'application/json',
+        headers: { 'content-type': 'application/json' },
+      },
+    });
+    void emitDebuggerEvent({ tabId: 88 }, 'Network.loadingFinished', {
+      requestId: 'delayed-query',
+      encodedDataLength: 128,
+    });
+    expect(bodyRequested).toBe(true);
+
+    const stop = await networkDebuggerStopTool.execute({ tabId: 88 });
+    const stopPayload = JSON.parse(String(stop.content[0].text));
+
+    expect(stop.isError).toBe(false);
+    expect(stopPayload.requests[0]).toMatchObject({
+      responseBodySource: 'debugger_api',
+      bodyCompacted: true,
+      safeResponseSummary: {
+        rowCount: 1,
+        rows: [
+          {
+            title: 'Delayed browser automation result',
+            points: 12,
+          },
+        ],
+      },
+    });
+  });
+
   it('reports debugger conflict as fallback evidence without claiming CDP use', async () => {
     attachMock.mockRejectedValueOnce(new Error('Debugger is already attached to tab 88'));
 

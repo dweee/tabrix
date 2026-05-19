@@ -70,6 +70,7 @@ const DEBUGGER_PROTOCOL_VERSION = '1.3';
 const MAX_RESPONSE_BODY_SIZE_BYTES = 1 * 1024 * 1024; // 1MB
 const DEFAULT_MAX_CAPTURE_TIME_MS = 3 * 60 * 1000; // 3 minutes
 const DEFAULT_INACTIVITY_TIMEOUT_MS = 60 * 1000; // 1 minute
+const STOP_PENDING_BODY_WAIT_MS = 1_500;
 
 /**
  * Network capture start tool - uses Chrome Debugger API to start capturing network requests
@@ -608,6 +609,19 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     return responseBodyPromise;
   }
 
+  private async waitForPendingResponseBodies(tabId: number): Promise<void> {
+    const pendingPrefix = `${tabId}_`;
+    const pending = Array.from(this.pendingResponseBodies.entries())
+      .filter(([key]) => key.startsWith(pendingPrefix))
+      .map(([, promise]) => promise.catch(() => null));
+    if (pending.length === 0) return;
+
+    await Promise.race([
+      Promise.allSettled(pending),
+      new Promise((resolve) => setTimeout(resolve, STOP_PENDING_BODY_WAIT_MS)),
+    ]);
+  }
+
   private cleanupCapture(tabId: number) {
     if (this.captureTimers.has(tabId)) {
       clearTimeout(this.captureTimers.get(tabId)!);
@@ -649,6 +663,8 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     );
 
     try {
+      await this.waitForPendingResponseBodies(tabId);
+
       let cdpDetachSuccess = false;
       // Attempt to disable network and detach via manager; it will no-op if others own the session
       try {
