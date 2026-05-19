@@ -14,12 +14,15 @@ import {
   isImpactToolName,
 } from '../policy/non-interference-preflight';
 import { sessionManager } from '../execution/session-manager';
-import type { TaskSessionContext } from '../execution/task-session-context';
+import type {
+  TaskSessionContext,
+  TaskVisibleRegionRowsData,
+} from '../execution/task-session-context';
 import { normalizeToolCallResult } from '../execution/result-normalizer';
 import { planSkipRead, type SkipReadPlan } from '../execution/skip-read-orchestrator';
 import { readApiKnowledgeEndpointPlan } from '../api/api-knowledge';
 import { mapDataSourceToLayerContract } from '../execution/layer-contract';
-import { routeDataSource } from '../execution/data-source-router';
+import { routeDataSource, type DataSourceDecision } from '../execution/data-source-router';
 import { runPostProcessor } from './tool-post-processors';
 import { getNativeToolHandler } from './native-tool-handlers';
 import type {
@@ -92,6 +95,8 @@ import type {
   BrowserPageThingProjection,
   ReadPageSelectedDataSource,
 } from '@tabrix/shared';
+
+const DEFAULT_AUTO_TASK_CONTEXT_KEY = 'mcp:auto:tab:default';
 
 /**
  * Production wiring for the `experience_replay` handler.
@@ -827,6 +832,9 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           ? ((args as any).url as string)
           : null;
       taskContext.noteUrlChange(url);
+      if (externalTaskKeyEarly === null && url !== null) {
+        sessionManager.peekExternalTaskContext(DEFAULT_AUTO_TASK_CONTEXT_KEY)?.noteUrlChange(url);
+      }
     }
     // When the orchestrator demanded a fallback for `chrome_read_page`,
     // replace the caller's `requestedLayer` (which may be the schema
@@ -967,14 +975,30 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
               ? 'markdown_reading_surface_preferred'
               : buildVisibleRowsRejectionReason(visibleRows);
           if (readPageRenderMode === 'markdown') {
+            const preferVisibleRowsForAi = shouldPreferVisibleRowsForMarkdownAiContext(
+              visibleRows,
+              routerDecision,
+            );
             rawResultWithEvidence = attachReadPagePayloadMetadata(rawResultWithEvidence, {
               selectedDataSource: 'markdown',
               dataSource: 'markdown',
               decisionReason: 'markdown_reading_surface_preferred',
-              visibleRegionRowsUsed: false,
+              visibleRegionRowsUsed: preferVisibleRowsForAi,
               visibleRegionRowCount: visibleRows.rowCount,
-              visibleRegionRowsRejectedReason: rejectedReason,
+              visibleRegionRowsRejectedReason: preferVisibleRowsForAi ? null : rejectedReason,
               apiRowsUnavailableReason: apiUnavailableReason,
+              ...(preferVisibleRowsForAi
+                ? {
+                    aiPreferredDataSource: 'dom_region_rows',
+                    aiPreferredDataSourceReason: routerDecision.decisionReason,
+                    rows: visibleRows.rows,
+                    rowCount: visibleRows.rowCount,
+                    targetRefCoverageRate: visibleRows.targetRefCoverageRate ?? null,
+                    regionQualityScore: visibleRows.regionQualityScore ?? null,
+                    rowExtractionConfidence: visibleRows.rowExtractionConfidence,
+                    sourceRegion: visibleRows.sourceRegion,
+                  }
+                : {}),
             });
           }
           operationLogHint = buildDomRegionRowsRejectedLogHint({
@@ -1142,6 +1166,24 @@ function attachReadPagePayloadMetadata(
   };
 }
 
+function shouldPreferVisibleRowsForMarkdownAiContext(
+  visibleRows: TaskVisibleRegionRowsData,
+  routerDecision: DataSourceDecision,
+): boolean {
+  if (routerDecision.selectedDataSource !== 'dom_region_rows') return false;
+
+  const region = visibleRows.sourceRegion.toLowerCase();
+  const semanticListRegion =
+    region.includes('result') ||
+    region.includes('list') ||
+    region.includes('search') ||
+    region.includes('feed') ||
+    region.includes('grid') ||
+    region.includes('card');
+
+  return semanticListRegion || visibleRows.cardRowsCount > 0 || visibleRows.cardExtractorUsed;
+}
+
 function shouldInvalidateReadAfterInteraction(toolName: string): boolean {
   return (
     toolName === TOOL_NAMES.BROWSER.CLICK ||
@@ -1173,10 +1215,12 @@ function attachAiFacingDeltaContext(
   const payloadSelectedDataSource = readPayloadSelectedDataSource(payload);
   const selectedDataSource = readSelectedDataSource(payload, projection);
   const selectedReason =
-    selectedDataSource !== payloadSelectedDataSource &&
-    selectedDataSource === projection.chosenDataSource
-      ? 'projection_chosen_data_source'
-      : (readString(payload.decisionReason) ?? readString(payload.selectedReason));
+    selectedDataSource === readString(payload.aiPreferredDataSource)
+      ? (readString(payload.aiPreferredDataSourceReason) ?? 'ai_context_prefers_visible_rows')
+      : selectedDataSource !== payloadSelectedDataSource &&
+          selectedDataSource === projection.chosenDataSource
+        ? 'projection_chosen_data_source'
+        : (readString(payload.decisionReason) ?? readString(payload.selectedReason));
   const fallbackReason =
     readString(payload.fallbackReason) ??
     readString(payload.fallbackCause) ??
@@ -1327,6 +1371,10 @@ function readSelectedDataSource(
   payload: Record<string, unknown>,
   projection: BrowserPageThingProjection,
 ): ReadPageSelectedDataSource {
+  const aiPreferred = readString(payload.aiPreferredDataSource);
+  if (aiPreferred === 'dom_region_rows' && hasReliableVisibleRows(payload)) {
+    return aiPreferred;
+  }
   if (projection.chosenDataSource === 'dom_region_rows' && hasReliableVisibleRows(payload)) {
     return projection.chosenDataSource;
   }
