@@ -393,6 +393,160 @@ describe('V27-CDP-01 network debugger controlled evidence', () => {
     );
   });
 
+  it('compacts nested row arrays below generic response containers', async () => {
+    sendCommandMock.mockImplementation(async (_tabId: number, method: string) => {
+      if (method === 'Network.getResponseBody') {
+        return {
+          body: JSON.stringify({
+            response: {
+              payload: {
+                results: [
+                  {
+                    title: 'Browser automation workflow',
+                    description: 'Automate browser tasks from a live page.',
+                    rank: 3,
+                    href: 'https://example.test/browser-automation-workflow',
+                  },
+                ],
+              },
+            },
+          }),
+          base64Encoded: false,
+        };
+      }
+      return {};
+    });
+    const start = await networkDebuggerStartTool.execute({
+      tabId: 88,
+      maxCaptureTime: 0,
+      inactivityTimeout: 0,
+    });
+    expect(start.isError).toBe(false);
+
+    const emitDebuggerEvent = (
+      networkDebuggerStartTool as unknown as {
+        handleDebuggerEvent: DebuggerListener;
+      }
+    ).handleDebuggerEvent.bind(networkDebuggerStartTool);
+
+    emitDebuggerEvent({ tabId: 88 }, 'Network.requestWillBeSent', {
+      requestId: 'nested-list',
+      request: {
+        url: 'https://api.search.example.test/v1/query',
+        method: 'POST',
+        postData: JSON.stringify({ query: 'browser automation' }),
+      },
+      type: 'XHR',
+      timestamp: 100,
+    });
+    emitDebuggerEvent({ tabId: 88 }, 'Network.responseReceived', {
+      requestId: 'nested-list',
+      type: 'XHR',
+      timestamp: 101,
+      response: {
+        url: 'https://api.search.example.test/v1/query',
+        status: 200,
+        statusText: 'OK',
+        mimeType: 'application/json',
+        headers: { 'content-type': 'application/json' },
+      },
+    });
+    await emitDebuggerEvent({ tabId: 88 }, 'Network.loadingFinished', {
+      requestId: 'nested-list',
+      encodedDataLength: 128,
+    });
+
+    const stop = await networkDebuggerStopTool.execute({ tabId: 88 });
+    const stopPayload = JSON.parse(String(stop.content[0].text));
+
+    expect(stop.isError).toBe(false);
+    expect(stopPayload.requests[0].safeResponseSummary).toMatchObject({
+      rejectedReason: null,
+      rowCount: 1,
+      fieldShapeSummaryAvailable: true,
+      rows: [
+        {
+          title: 'Browser automation workflow',
+          description: 'Automate browser tasks from a live page.',
+          rank: 3,
+        },
+      ],
+    });
+    expect(stopPayload.requests[0].safeResponseSummary.rows[0]).not.toHaveProperty('href');
+  });
+
+  it('does not treat generic config arrays as safe result rows', async () => {
+    sendCommandMock.mockImplementation(async (_tabId: number, method: string) => {
+      if (method === 'Network.getResponseBody') {
+        return {
+          body: JSON.stringify({
+            response: {
+              payload: {
+                results: [
+                  {
+                    code: 'US',
+                    abbreviation: 'US',
+                  },
+                ],
+              },
+            },
+          }),
+          base64Encoded: false,
+        };
+      }
+      return {};
+    });
+    const start = await networkDebuggerStartTool.execute({
+      tabId: 88,
+      maxCaptureTime: 0,
+      inactivityTimeout: 0,
+    });
+    expect(start.isError).toBe(false);
+
+    const emitDebuggerEvent = (
+      networkDebuggerStartTool as unknown as {
+        handleDebuggerEvent: DebuggerListener;
+      }
+    ).handleDebuggerEvent.bind(networkDebuggerStartTool);
+
+    emitDebuggerEvent({ tabId: 88 }, 'Network.requestWillBeSent', {
+      requestId: 'config-list',
+      request: {
+        url: 'https://api.config.example.test/v1/zones',
+        method: 'GET',
+      },
+      type: 'XHR',
+      timestamp: 100,
+    });
+    emitDebuggerEvent({ tabId: 88 }, 'Network.responseReceived', {
+      requestId: 'config-list',
+      type: 'XHR',
+      timestamp: 101,
+      response: {
+        url: 'https://api.config.example.test/v1/zones',
+        status: 200,
+        statusText: 'OK',
+        mimeType: 'application/json',
+        headers: { 'content-type': 'application/json' },
+      },
+    });
+    await emitDebuggerEvent({ tabId: 88 }, 'Network.loadingFinished', {
+      requestId: 'config-list',
+      encodedDataLength: 128,
+    });
+
+    const stop = await networkDebuggerStopTool.execute({ tabId: 88 });
+    const stopPayload = JSON.parse(String(stop.content[0].text));
+
+    expect(stop.isError).toBe(false);
+    expect(stopPayload.requests[0].safeResponseSummary).toMatchObject({
+      rejectedReason: 'compact_rows_unavailable',
+      rowCount: 0,
+      fieldShapeSummaryAvailable: false,
+      rows: [],
+    });
+  });
+
   it('waits for an in-flight response body summary before stopping capture', async () => {
     let bodyRequested = false;
     sendCommandMock.mockImplementation(async (_tabId: number, method: string) => {

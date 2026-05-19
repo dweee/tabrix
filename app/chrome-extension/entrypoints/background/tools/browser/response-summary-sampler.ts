@@ -3,6 +3,7 @@ const DEFAULT_TTL_MS = 30_000;
 const DISARM_SCRIPT_TIMEOUT_MS = 2_000;
 const MAX_ROWS = 10;
 const MAX_KEYS_PER_ROW = 12;
+const MAX_ROW_ARRAY_SEARCH_DEPTH = 3;
 const MAX_STRING_VALUE_LENGTH = 240;
 const SENSITIVE_FIELD_RE =
   /(authorization|cookie|password|passwd|token|secret|session|csrf|xsrf|api[_-]?key)/i;
@@ -188,6 +189,7 @@ function selectSummaryRows(parsed: unknown): {
       }
     }
     if (!list) list = selectTopLevelRowLikeArray(parsedObject);
+    if (!list) list = selectNestedRowLikeArray(parsedObject, arrayKeys);
   }
   if (!list) return { rows: [], listLength: null };
   const nestedList = flattenNestedSummaryRows(list, arrayKeys);
@@ -218,9 +220,46 @@ function selectTopLevelRowLikeArray(parsedObject: Record<string, unknown>): unkn
   return null;
 }
 
+function selectNestedRowLikeArray(
+  parsedObject: Record<string, unknown>,
+  preferredArrayKeys: string[],
+): unknown[] | null {
+  const queue: Array<{ value: unknown; depth: number }> = [{ value: parsedObject, depth: 0 }];
+  let inspected = 0;
+  while (queue.length > 0 && inspected < 80) {
+    inspected += 1;
+    const current = queue.shift();
+    if (!current || current.depth >= MAX_ROW_ARRAY_SEARCH_DEPTH) continue;
+    if (!current.value || typeof current.value !== 'object' || Array.isArray(current.value))
+      continue;
+    const currentObject = current.value as Record<string, unknown>;
+    for (const key of Object.keys(currentObject).slice(0, MAX_KEYS_PER_ROW)) {
+      if (shouldDropSummaryField(key)) continue;
+      const child = currentObject[key];
+      if (
+        Array.isArray(child) &&
+        preferredArrayKeys.includes(key) &&
+        isRowLikeSummaryArray(child)
+      ) {
+        return child;
+      }
+    }
+    for (const key of Object.keys(currentObject).slice(0, MAX_KEYS_PER_ROW)) {
+      if (shouldDropSummaryField(key)) continue;
+      const child = currentObject[key];
+      if (child && typeof child === 'object' && !Array.isArray(child)) {
+        queue.push({ value: child, depth: current.depth + 1 });
+      }
+    }
+  }
+  return null;
+}
+
 function isRowLikeSummaryArray(candidate: unknown): candidate is unknown[] {
   if (!Array.isArray(candidate)) return false;
-  return candidate.slice(0, MAX_ROWS).some((raw) => countCompactSummaryFields(raw) >= 2);
+  return candidate
+    .slice(0, MAX_ROWS)
+    .some((raw) => countCompactSummaryFields(raw) >= 2 && hasSummaryLabelField(raw));
 }
 
 function countCompactSummaryFields(raw: unknown): number {
@@ -232,6 +271,19 @@ function countCompactSummaryFields(raw: unknown): number {
     if (compactSamplerScalarValue(key, rawObject[key]) !== undefined) count += 1;
   }
   return count;
+}
+
+function hasSummaryLabelField(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  const rawObject = raw as Record<string, unknown>;
+  return Object.keys(rawObject)
+    .slice(0, MAX_KEYS_PER_ROW)
+    .some(
+      (key) =>
+        !shouldDropSummaryField(key) &&
+        /(title|name|label|text|description|summary|content)$/i.test(key) &&
+        compactSamplerScalarValue(key, rawObject[key]) !== undefined,
+    );
 }
 
 function flattenNestedSummaryRows(list: unknown[], arrayKeys: string[]): unknown[] {
@@ -582,6 +634,7 @@ function buildMainWorldSampler(args: {
         }
       }
       if (!list) list = selectTopLevelRowLikeArray(parsedObject);
+      if (!list) list = selectNestedRowLikeArray(parsedObject, arrayKeys);
     }
     if (!list) return { rows: [], listLength: null };
     const nestedList = flattenNestedSummaryRows(list, arrayKeys);
@@ -612,9 +665,46 @@ function buildMainWorldSampler(args: {
     return null;
   }
 
+  function selectNestedRowLikeArray(
+    parsedObject: Record<string, unknown>,
+    preferredArrayKeys: string[],
+  ): unknown[] | null {
+    const queue: Array<{ value: unknown; depth: number }> = [{ value: parsedObject, depth: 0 }];
+    let inspected = 0;
+    while (queue.length > 0 && inspected < 80) {
+      inspected += 1;
+      const current = queue.shift();
+      if (!current || current.depth >= 3) continue;
+      if (!current.value || typeof current.value !== 'object' || Array.isArray(current.value))
+        continue;
+      const currentObject = current.value as Record<string, unknown>;
+      for (const key of Object.keys(currentObject).slice(0, 12)) {
+        if (shouldDropSummaryField(key)) continue;
+        const child = currentObject[key];
+        if (
+          Array.isArray(child) &&
+          preferredArrayKeys.includes(key) &&
+          isRowLikeSummaryArray(child)
+        ) {
+          return child;
+        }
+      }
+      for (const key of Object.keys(currentObject).slice(0, 12)) {
+        if (shouldDropSummaryField(key)) continue;
+        const child = currentObject[key];
+        if (child && typeof child === 'object' && !Array.isArray(child)) {
+          queue.push({ value: child, depth: current.depth + 1 });
+        }
+      }
+    }
+    return null;
+  }
+
   function isRowLikeSummaryArray(candidate: unknown): candidate is unknown[] {
     if (!Array.isArray(candidate)) return false;
-    return candidate.slice(0, 10).some((raw) => countCompactSummaryFields(raw) >= 2);
+    return candidate
+      .slice(0, 10)
+      .some((raw) => countCompactSummaryFields(raw) >= 2 && hasSummaryLabelField(raw));
   }
 
   function countCompactSummaryFields(raw: unknown): number {
@@ -626,6 +716,19 @@ function buildMainWorldSampler(args: {
       if (compactSamplerScalarValue(key, rawObject[key]) !== undefined) count += 1;
     }
     return count;
+  }
+
+  function hasSummaryLabelField(raw: unknown): boolean {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+    const rawObject = raw as Record<string, unknown>;
+    return Object.keys(rawObject)
+      .slice(0, 12)
+      .some(
+        (key) =>
+          !shouldDropSummaryField(key) &&
+          /(title|name|label|text|description|summary|content)$/i.test(key) &&
+          compactSamplerScalarValue(key, rawObject[key]) !== undefined,
+      );
   }
 
   function flattenNestedSummaryRows(list: unknown[], arrayKeys: string[]): unknown[] {
