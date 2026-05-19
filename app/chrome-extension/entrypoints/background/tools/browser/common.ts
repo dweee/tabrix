@@ -58,6 +58,32 @@ function getTabNavigationUrl(tab?: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'> |
   return tab?.url || tab?.pendingUrl || '';
 }
 
+async function waitForCreatedDocumentTabAfterTimeout(input: {
+  windowId: number;
+  existingTabIds: ReadonlySet<number>;
+  targetUrl: string;
+  pickBestMatch: (target: string, tabsToPick: chrome.tabs.Tab[]) => chrome.tabs.Tab | undefined;
+}): Promise<chrome.tabs.Tab | undefined> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const tabs = await chrome.tabs.query({ windowId: input.windowId });
+    const createdDocumentTabs = tabs.filter((tab) => {
+      const tabUrl = getTabNavigationUrl(tab);
+      return (
+        typeof tab.id === 'number' &&
+        !input.existingTabIds.has(tab.id) &&
+        tabUrl &&
+        tabUrl !== 'about:blank'
+      );
+    });
+    const matched = input.pickBestMatch(input.targetUrl, createdDocumentTabs);
+    if (matched) return matched;
+    if (attempt === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+  return undefined;
+}
+
 function normalizeSettleTimeoutMs(value: unknown): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
   return Math.min(Math.max(Math.trunc(value), 1000), 60000);
@@ -389,7 +415,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
         let best: { tab?: chrome.tabs.Tab; score: number } = { score: -1 };
 
         for (const tab of tabsToPick) {
-          const tabUrlStr = tab.url || '';
+          const tabUrlStr = getTabNavigationUrl(tab);
           let tabUrl: URL | undefined;
           try {
             tabUrl = new URL(tabUrlStr);
@@ -580,6 +606,45 @@ class NavigateTool extends BaseBrowserToolExecutor {
               `chrome.tabs.create timed out after ${NAVIGATE_CREATE_TAB_TIMEOUT_MS}ms`,
             );
           } catch (error) {
+            const timeoutNavigationTab = await waitForCreatedDocumentTabAfterTimeout({
+              windowId: targetWindow.id,
+              existingTabIds,
+              targetUrl: url,
+              pickBestMatch,
+            });
+            if (timeoutNavigationTab?.id !== undefined) {
+              const finalNavigationUrl = getTabNavigationUrl(timeoutNavigationTab);
+              const readyState =
+                timeoutNavigationTab.status === 'complete' ? 'complete' : 'interactive';
+              return {
+                content: [
+                  {
+                    type: 'text',
+                    text: JSON.stringify({
+                      success: true,
+                      message: 'Opened URL in new tab after create timeout',
+                      tabId: timeoutNavigationTab.id,
+                      windowId: targetWindow.id,
+                      targetWindowReason,
+                      requestedUrl: url,
+                      finalUrl: finalNavigationUrl,
+                      status: timeoutNavigationTab.status,
+                      settled: false,
+                      settleReason: 'create_timeout_but_document_tab_found',
+                      waitedMs: NAVIGATE_CREATE_TAB_TIMEOUT_MS,
+                      readyState,
+                      ...buildNavigationReadinessFields({
+                        settled: false,
+                        readyState,
+                        finalUrl: finalNavigationUrl,
+                        status: timeoutNavigationTab.status,
+                      }),
+                    }),
+                  },
+                ],
+                isError: false,
+              };
+            }
             const tabsAfterTimeout = await chrome.tabs.query({ windowId: targetWindow.id });
             const blankTabs = tabsAfterTimeout.filter((tab) => {
               const tabUrl = tab.url || tab.pendingUrl || '';

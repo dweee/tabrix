@@ -373,6 +373,42 @@ describe('browser settle guidance', () => {
           url: '',
           title: '',
         } as chrome.tabs.Tab,
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 11,
+          windowId: 1,
+          active: false,
+          status: 'complete',
+          url: 'about:blank',
+          title: 'Existing Blank',
+        } as chrome.tabs.Tab,
+        {
+          id: 20,
+          windowId: 1,
+          active: false,
+          status: 'loading',
+          url: '',
+          title: '',
+        } as chrome.tabs.Tab,
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 11,
+          windowId: 1,
+          active: false,
+          status: 'complete',
+          url: 'about:blank',
+          title: 'Existing Blank',
+        } as chrome.tabs.Tab,
+        {
+          id: 20,
+          windowId: 1,
+          active: false,
+          status: 'loading',
+          url: '',
+          title: '',
+        } as chrome.tabs.Tab,
       ]);
     vi.mocked(chrome.tabs.create).mockImplementation(() => new Promise<chrome.tabs.Tab>(() => {}));
     vi.mocked(chrome.tabs.get).mockImplementation(async (tabId: number) => {
@@ -400,7 +436,7 @@ describe('browser settle guidance', () => {
       url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
       background: true,
     });
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(5250);
     const result = await executePromise;
 
     expect(result.isError).toBe(true);
@@ -416,6 +452,90 @@ describe('browser settle guidance', () => {
     });
     expect(chrome.tabs.remove).toHaveBeenCalledWith(20);
     expect(chrome.tabs.remove).not.toHaveBeenCalledWith(11);
+    vi.useRealTimers();
+  });
+
+  it('returns a readable tab when tab creation times out after the document tab appears', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
+    vi.spyOn(navigateTool as any, 'waitForTabSettled');
+    vi.mocked(chrome.tabs.query)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 20,
+          windowId: 1,
+          active: false,
+          status: 'loading',
+          url: 'https://nextjs.org/docs/app/getting-started/installation',
+          title: 'Getting Started: Installation | Next.js',
+        } as chrome.tabs.Tab,
+      ]);
+    vi.mocked(chrome.tabs.create).mockImplementation(() => new Promise<chrome.tabs.Tab>(() => {}));
+
+    const executePromise = navigateTool.execute({
+      url: 'https://nextjs.org/docs/app/getting-started/installation',
+      background: true,
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    const result = await executePromise;
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      message: 'Opened URL in new tab after create timeout',
+      tabId: 20,
+      requestedUrl: 'https://nextjs.org/docs/app/getting-started/installation',
+      finalUrl: 'https://nextjs.org/docs/app/getting-started/installation',
+      status: 'loading',
+      settled: false,
+      settleReason: 'create_timeout_but_document_tab_found',
+      readyState: 'interactive',
+      pageReadable: false,
+      canAttemptStructuredRead: true,
+      nextStepHint: 'navigation_interactive; structured_read_may_succeed',
+    });
+    expect(chrome.tabs.remove).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('waits briefly for a pending URL tab after creation timeout', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
+    vi.mocked(chrome.tabs.query)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 21,
+          windowId: 1,
+          active: false,
+          status: 'loading',
+          url: '',
+          pendingUrl: 'https://nextjs.org/docs/app/getting-started/installation',
+          title: 'Getting Started: Installation | Next.js',
+        } as chrome.tabs.Tab,
+      ]);
+    vi.mocked(chrome.tabs.create).mockImplementation(() => new Promise<chrome.tabs.Tab>(() => {}));
+
+    const executePromise = navigateTool.execute({
+      url: 'https://nextjs.org/docs/app/getting-started/installation',
+      background: true,
+    });
+    await vi.advanceTimersByTimeAsync(5250);
+    const result = await executePromise;
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      tabId: 21,
+      finalUrl: 'https://nextjs.org/docs/app/getting-started/installation',
+      canAttemptStructuredRead: true,
+    });
     vi.useRealTimers();
   });
 

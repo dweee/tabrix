@@ -752,7 +752,7 @@ describe('native host reconnect behavior', () => {
       sentAt: Date.now(),
       command: {
         action: 'call_tool',
-        payload: { name: 'chrome_read_page', args: { tabId: 1 } },
+        payload: { name: 'chrome_click_element', args: { tabId: 1, selector: '#submit' } },
       },
     });
     await vi.advanceTimersByTimeAsync(15_000);
@@ -836,5 +836,284 @@ describe('native host reconnect behavior', () => {
       requestId: 'req-navigation',
       success: true,
     });
+  });
+
+  it('keeps navigation bridge open long enough for bounded settle results', async () => {
+    const firstPort = createMockPort();
+    const harness = createChromeHarness([firstPort]);
+    const wsHarness = createMockWebSocketHarness();
+    (globalThis as any).chrome = harness.chromeMock;
+    (globalThis as any).WebSocket = wsHarness.MockWebSocket as any;
+
+    const toolsModule = await import('@/entrypoints/background/tools');
+    vi.mocked(toolsModule.handleCallTool).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    success: true,
+                    tabId: 42,
+                    settled: false,
+                    settleReason: 'timeout',
+                    pageReadable: false,
+                    canAttemptStructuredRead: true,
+                  }),
+                },
+              ],
+              isError: false,
+            } as any);
+          }, 60_000);
+        }),
+    );
+
+    const nativeHostModule = await import('@/entrypoints/background/native-host');
+    nativeHostModule.initNativeHostListener();
+    await flushMicrotasks();
+
+    wsHarness.instances[0].emitOpen();
+    await flushMicrotasks();
+    wsHarness.instances[0].sent.length = 0;
+
+    wsHarness.instances[0].emitMessage({
+      type: 'command',
+      requestId: 'req-slow-navigation',
+      connectionId: 'bridge-1',
+      sentAt: Date.now(),
+      command: {
+        action: 'call_tool',
+        payload: { name: 'chrome_navigate', args: { url: 'https://example.test/slow' } },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(59_000);
+    await flushMicrotasks();
+    expect(
+      wsHarness.instances[0].sent
+        .map((entry) => JSON.parse(entry))
+        .find((entry) => entry.requestId === 'req-slow-navigation'),
+    ).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flushMicrotasks();
+    const navigationResult = wsHarness.instances[0].sent
+      .map((entry) => JSON.parse(entry))
+      .find((entry) => entry.requestId === 'req-slow-navigation');
+    expect(navigationResult).toMatchObject({
+      type: 'result',
+      requestId: 'req-slow-navigation',
+      success: true,
+    });
+    expect(navigationResult.payload.data.content[0].text).toContain('"tabId":42');
+  });
+
+  it('adds bridge headroom when navigation requests a long settle timeout', async () => {
+    const firstPort = createMockPort();
+    const harness = createChromeHarness([firstPort]);
+    const wsHarness = createMockWebSocketHarness();
+    (globalThis as any).chrome = harness.chromeMock;
+    (globalThis as any).WebSocket = wsHarness.MockWebSocket as any;
+
+    const toolsModule = await import('@/entrypoints/background/tools');
+    vi.mocked(toolsModule.handleCallTool).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    success: true,
+                    tabId: 42,
+                    settled: true,
+                    settleReason: 'interactive',
+                    pageReadable: false,
+                    canAttemptStructuredRead: true,
+                  }),
+                },
+              ],
+              isError: false,
+            } as any);
+          }, 86_000);
+        }),
+    );
+
+    const nativeHostModule = await import('@/entrypoints/background/native-host');
+    nativeHostModule.initNativeHostListener();
+    await flushMicrotasks();
+
+    wsHarness.instances[0].emitOpen();
+    await flushMicrotasks();
+    wsHarness.instances[0].sent.length = 0;
+
+    wsHarness.instances[0].emitMessage({
+      type: 'command',
+      requestId: 'req-long-settle-navigation',
+      connectionId: 'bridge-1',
+      sentAt: Date.now(),
+      command: {
+        action: 'call_tool',
+        payload: {
+          name: 'chrome_navigate',
+          args: { url: 'https://example.test/slow', settleTimeoutMs: 60_000 },
+        },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(75_000);
+    await flushMicrotasks();
+    expect(
+      wsHarness.instances[0].sent
+        .map((entry) => JSON.parse(entry))
+        .find((entry) => entry.requestId === 'req-long-settle-navigation'),
+    ).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(11_000);
+    await flushMicrotasks();
+    const navigationResult = wsHarness.instances[0].sent
+      .map((entry) => JSON.parse(entry))
+      .find((entry) => entry.requestId === 'req-long-settle-navigation');
+    expect(navigationResult).toMatchObject({
+      type: 'result',
+      requestId: 'req-long-settle-navigation',
+      success: true,
+    });
+    expect(navigationResult.payload.data.content[0].text).toContain('"tabId":42');
+  });
+
+  it('allows network capture stop calls to collect response bodies beyond default timeout', async () => {
+    const firstPort = createMockPort();
+    const harness = createChromeHarness([firstPort]);
+    const wsHarness = createMockWebSocketHarness();
+    (globalThis as any).chrome = harness.chromeMock;
+    (globalThis as any).WebSocket = wsHarness.MockWebSocket as any;
+
+    const toolsModule = await import('@/entrypoints/background/tools');
+    vi.mocked(toolsModule.handleCallTool).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    success: true,
+                    requests: [{ url: 'https://example.test/api', responseBody: '[omitted]' }],
+                  }),
+                },
+              ],
+              isError: false,
+            } as any);
+          }, 20_000);
+        }),
+    );
+
+    const nativeHostModule = await import('@/entrypoints/background/native-host');
+    nativeHostModule.initNativeHostListener();
+    await flushMicrotasks();
+
+    wsHarness.instances[0].emitOpen();
+    await flushMicrotasks();
+    wsHarness.instances[0].sent.length = 0;
+
+    wsHarness.instances[0].emitMessage({
+      type: 'command',
+      requestId: 'req-network-capture-stop',
+      connectionId: 'bridge-1',
+      sentAt: Date.now(),
+      command: {
+        action: 'call_tool',
+        payload: { name: 'chrome_network_capture', args: { action: 'stop', tabId: 42 } },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(15_000);
+    await flushMicrotasks();
+    expect(
+      wsHarness.instances[0].sent
+        .map((entry) => JSON.parse(entry))
+        .find((entry) => entry.requestId === 'req-network-capture-stop'),
+    ).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await flushMicrotasks();
+    const captureResult = wsHarness.instances[0].sent
+      .map((entry) => JSON.parse(entry))
+      .find((entry) => entry.requestId === 'req-network-capture-stop');
+    expect(captureResult).toMatchObject({
+      type: 'result',
+      requestId: 'req-network-capture-stop',
+      success: true,
+    });
+  });
+
+  it('allows read_page calls to finish on complex documents beyond default timeout', async () => {
+    const firstPort = createMockPort();
+    const harness = createChromeHarness([firstPort]);
+    const wsHarness = createMockWebSocketHarness();
+    (globalThis as any).chrome = harness.chromeMock;
+    (globalThis as any).WebSocket = wsHarness.MockWebSocket as any;
+
+    const toolsModule = await import('@/entrypoints/background/tools');
+    vi.mocked(toolsModule.handleCallTool).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    success: true,
+                    selectedDataSource: 'dom_region_rows',
+                    rowCount: 5,
+                  }),
+                },
+              ],
+              isError: false,
+            } as any);
+          }, 45_000);
+        }),
+    );
+
+    const nativeHostModule = await import('@/entrypoints/background/native-host');
+    nativeHostModule.initNativeHostListener();
+    await flushMicrotasks();
+
+    wsHarness.instances[0].emitOpen();
+    await flushMicrotasks();
+    wsHarness.instances[0].sent.length = 0;
+
+    wsHarness.instances[0].emitMessage({
+      type: 'command',
+      requestId: 'req-read-page',
+      connectionId: 'bridge-1',
+      sentAt: Date.now(),
+      command: {
+        action: 'call_tool',
+        payload: { name: 'chrome_read_page', args: { tabId: 42 } },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(15_000);
+    await flushMicrotasks();
+    expect(
+      wsHarness.instances[0].sent
+        .map((entry) => JSON.parse(entry))
+        .find((entry) => entry.requestId === 'req-read-page'),
+    ).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await flushMicrotasks();
+    const readPageResult = wsHarness.instances[0].sent
+      .map((entry) => JSON.parse(entry))
+      .find((entry) => entry.requestId === 'req-read-page');
+    expect(readPageResult).toMatchObject({
+      type: 'result',
+      requestId: 'req-read-page',
+      success: true,
+    });
+    expect(readPageResult.payload.data.content[0].text).toContain('"dom_region_rows"');
   });
 });
