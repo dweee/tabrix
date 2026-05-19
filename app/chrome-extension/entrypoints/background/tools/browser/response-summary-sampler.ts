@@ -1,5 +1,6 @@
 const MESSAGE_TYPE = 'tabrix:v27-response-summary';
 const DEFAULT_TTL_MS = 30_000;
+const DISARM_SCRIPT_TIMEOUT_MS = 2_000;
 const MAX_ROWS = 10;
 const MAX_KEYS_PER_ROW = 12;
 const MAX_STRING_VALUE_LENGTH = 240;
@@ -768,6 +769,12 @@ function buildMainWorldDisarm(args: { samplerId: string }) {
   return { ok: true };
 }
 
+function rejectAfterMs(ms: number, message: string): Promise<never> {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(message)), ms);
+  });
+}
+
 export class ResponseSummarySamplerManager {
   private readonly states = new Map<number, SamplerState>();
   private listenerInstalled = false;
@@ -859,14 +866,21 @@ export class ResponseSummarySamplerManager {
     state.disarmedAt = nowMs();
     state.disarmReason = reason;
     try {
-      await chrome.scripting.executeScript({
-        target: { tabId, allFrames: false },
-        world: 'MAIN' as chrome.scripting.ExecutionWorld,
-        func: buildMainWorldDisarm,
-        args: [{ samplerId: state.samplerId }],
-      });
-    } catch {
-      state.lastRejectedReason = state.lastRejectedReason ?? 'sampler_disarm_failed';
+      await Promise.race([
+        chrome.scripting.executeScript({
+          target: { tabId, allFrames: false },
+          world: 'MAIN' as chrome.scripting.ExecutionWorld,
+          func: buildMainWorldDisarm,
+          args: [{ samplerId: state.samplerId }],
+        }),
+        rejectAfterMs(DISARM_SCRIPT_TIMEOUT_MS, 'sampler_disarm_timeout'),
+      ]);
+    } catch (error) {
+      state.lastRejectedReason =
+        state.lastRejectedReason ??
+        (error instanceof Error && error.message === 'sampler_disarm_timeout'
+          ? 'sampler_disarm_timeout'
+          : 'sampler_disarm_failed');
     }
     this.states.delete(tabId);
     const first = state.summaries[0] ?? null;
