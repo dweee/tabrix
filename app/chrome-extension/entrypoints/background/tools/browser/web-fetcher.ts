@@ -20,6 +20,7 @@ const WEB_FETCHER_CONTENT_MESSAGE_RETRY_DELAY_MS = 1_000;
 const WEB_FETCHER_CREATE_TAB_TIMEOUT_MS = 5_000;
 const WEB_FETCHER_CREATE_TAB_RECOVERY_DELAY_MS = 250;
 const WEB_FETCHER_DEFAULT_SETTLE_TIMEOUT_MS = 5_000;
+const WEB_FETCHER_URL_CONTENT_SETTLE_TIMEOUT_MS = 30_000;
 const WEB_FETCHER_EMPTY_TEXT_RETRY_DELAY_MS = 1_000;
 const WEB_FETCHER_EMPTY_TEXT_MAX_RETRIES = 5;
 
@@ -27,6 +28,13 @@ function normalizeSettleTimeoutMs(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value))
     return WEB_FETCHER_DEFAULT_SETTLE_TIMEOUT_MS;
   return Math.min(Math.max(Math.trunc(value), 1_000), 60_000);
+}
+
+function normalizeUrlContentSettleTimeoutMs(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return normalizeSettleTimeoutMs(value);
+  }
+  return WEB_FETCHER_URL_CONTENT_SETTLE_TIMEOUT_MS;
 }
 
 function delay(ms: number): Promise<void> {
@@ -223,7 +231,9 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
     const explicitTabId = args.tabId;
     const background = args.background === true;
     const windowId = args.windowId;
-    const settleTimeoutMs = normalizeSettleTimeoutMs(args.settleTimeoutMs);
+    const settleTimeoutMs = url
+      ? normalizeUrlContentSettleTimeoutMs(args.settleTimeoutMs)
+      : normalizeSettleTimeoutMs(args.settleTimeoutMs);
 
     console.log(`Starting web fetcher with options:`, {
       htmlContent,
