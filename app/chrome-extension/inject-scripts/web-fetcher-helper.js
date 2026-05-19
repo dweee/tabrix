@@ -2732,10 +2732,22 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
               success: true,
               textContent: textContent,
               selector: request.selector,
+              textMode: 'selector',
+              textContentSource: 'selector_innerText',
             });
           } else {
             throw new Error(`No element found matching selector: ${request.selector}`);
           }
+        } else if (request.textMode === 'full-visible') {
+          const textContent = cleanContent(document.body?.innerText || '');
+          sendResponse({
+            success: true,
+            textContent,
+            textMode: 'full-visible',
+            textContentSource: 'document_body_innerText',
+            contentDiagnostics: buildContentDiagnostics(textContent),
+            metadata: extractPageMetadata(),
+          });
         } else {
           // Otherwise use Readability to extract the main content
           const documentClone = document.cloneNode(true);
@@ -2762,6 +2774,8 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
             sendResponse({
               success: true,
               textContent: fullContent,
+              textMode: 'body',
+              textContentSource: 'readability_body_text',
               contentDiagnostics: buildContentDiagnostics(fullContent),
               article: {
                 title: article.title,
@@ -2781,6 +2795,8 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
               textContent: fallback.textContent,
               fallback: true,
               fallbackSource: fallback.source,
+              textMode: 'body',
+              textContentSource: `fallback_${fallback.source}`,
               contentDiagnostics: buildContentDiagnostics(fallback.textContent),
             });
           }

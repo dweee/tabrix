@@ -739,7 +739,9 @@ describe('browser settle guidance', () => {
       url: 'http://127.0.0.1:62100/page2',
     });
 
-    expect((webFetcherTool as any).waitForTabSettled).toHaveBeenCalledWith(20);
+    expect((webFetcherTool as any).waitForTabSettled).toHaveBeenCalledWith(20, {
+      timeoutMs: 5000,
+    });
     expect(result.isError).toBe(false);
     const payload = JSON.parse((result.content[0] as { text: string }).text);
     expect(payload).toMatchObject({
@@ -762,6 +764,87 @@ describe('browser settle guidance', () => {
       quality: 'usable',
       sparse: false,
     });
+  });
+
+  it('honors a bounded custom settle timeout before extracting web content', async () => {
+    const waitForTabSettled = vi
+      .spyOn(webFetcherTool as any, 'waitForTabSettled')
+      .mockResolvedValue({
+        tab: {
+          id: 20,
+          windowId: 1,
+          active: false,
+          status: 'loading',
+          url: 'https://nextjs.org/docs/app/getting-started/installation',
+          title: 'Getting Started: Installation | Next.js',
+        },
+        settled: false,
+        timedOut: true,
+        reason: 'timeout',
+        waitedMs: 1000,
+        readyState: 'interactive',
+      });
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(webFetcherTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      textContent:
+        'Manual installation\nSystem requirements\nRun the development server\nCreate the app directory',
+      textMode: 'body',
+      textContentSource: 'readability_body_text',
+      metadata: { lang: 'en' },
+    });
+    vi.mocked(chrome.tabs.get).mockResolvedValue({
+      id: 20,
+      windowId: 1,
+      active: false,
+      status: 'loading',
+      url: 'https://nextjs.org/docs/app/getting-started/installation',
+      title: 'Getting Started: Installation | Next.js',
+    } as chrome.tabs.Tab);
+
+    const result = await webFetcherTool.execute({
+      url: 'https://nextjs.org/docs/app/getting-started/installation',
+      background: true,
+      settleTimeoutMs: 90000,
+    } as any);
+
+    expect(waitForTabSettled).toHaveBeenCalledWith(20, { timeoutMs: 60000 });
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload.settle).toMatchObject({
+      timedOut: true,
+      reason: 'timeout',
+      readyState: 'interactive',
+    });
+    expect(payload.textContent).toContain('Manual installation');
+  });
+
+  it('does not hang when document readyState probing never resolves', async () => {
+    const originalScripting = chrome.scripting;
+    try {
+      vi.mocked(chrome.tabs.get).mockResolvedValue({
+        id: 20,
+        windowId: 1,
+        active: false,
+        status: 'loading',
+        url: 'https://nextjs.org/docs/app/getting-started/installation',
+        title: 'Loading',
+      } as chrome.tabs.Tab);
+      (chrome as any).scripting = {
+        executeScript: vi.fn().mockImplementation(() => new Promise(() => {})),
+      };
+
+      const result = await (webFetcherTool as any).waitForTabSettled(20, { timeoutMs: 1 });
+
+      expect(result).toMatchObject({
+        settled: false,
+        timedOut: true,
+        reason: 'timeout',
+        readyState: null,
+      });
+    } finally {
+      (chrome as any).scripting = originalScripting;
+    }
   });
 
   it('retries visible text extraction when the first content request hangs', async () => {
@@ -947,6 +1030,53 @@ describe('browser settle guidance', () => {
     });
     expect(payload.extractionHint).toContain('structurally sparse');
     expect(payload.extractionHint).not.toContain('higher-risk tools');
+  });
+
+  it('labels full-visible web content mode without changing the default body mode', async () => {
+    vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: false,
+        status: 'complete',
+        url: 'https://nextjs.org/docs/app/getting-started/installation',
+        title: 'Getting Started: Installation | Next.js',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 200,
+      readyState: 'complete',
+    });
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendMessageToTab = vi.spyOn(webFetcherTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      textContent:
+        'Docs API Reference Version 16 Installation Manual installation and system requirements are visible.',
+      textMode: 'full-visible',
+      textContentSource: 'document_body_innerText',
+      metadata: { lang: 'en' },
+    });
+
+    const result = await webFetcherTool.execute({
+      url: 'https://nextjs.org/docs/app/getting-started/installation',
+      background: true,
+      textMode: 'full-visible',
+    });
+
+    expect(sendMessageToTab).toHaveBeenCalledWith(
+      20,
+      expect.objectContaining({
+        action: 'getTextContent',
+        textMode: 'full-visible',
+      }),
+    );
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      textMode: 'full-visible',
+      textContentSource: 'document_body_innerText',
+    });
+    expect(payload.textContent).toContain('API Reference');
   });
 
   it('does not call medium single-line text complete when structure is sparse', async () => {

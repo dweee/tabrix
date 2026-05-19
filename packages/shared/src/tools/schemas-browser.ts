@@ -635,6 +635,17 @@ export const BROWSER_SCHEMAS: Tool[] = [
           description:
             'Get the visible text content of the page with metadata. Ignored if htmlContent is true (default: true)',
         },
+        textMode: {
+          type: 'string',
+          enum: ['body', 'full-visible'],
+          description:
+            'Text extraction mode when textContent is true. body (default) extracts the main article/body text to reduce noise; full-visible returns page-level visible text similar to document.body.innerText for coverage comparisons.',
+        },
+        settleTimeoutMs: {
+          type: 'number',
+          description:
+            'Optional timeout in milliseconds to wait for a newly opened URL tab to settle before extracting content. Defaults to a bounded web-content timeout; clamped to 1000-60000.',
+        },
 
         selector: {
           type: 'string',

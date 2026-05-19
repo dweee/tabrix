@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 async function loadWebFetcherHelper() {
   vi.resetModules();
+  delete (window as unknown as { __WEB_FETCHER_HELPER_INITIALIZED__?: boolean })
+    .__WEB_FETCHER_HELPER_INITIALIZED__;
   await import('../inject-scripts/web-fetcher-helper.js');
 }
 
@@ -78,5 +80,42 @@ describe('web fetcher content diagnostics', () => {
     });
     expect(diagnostics.scrollContainers[0].textPreview).toContain('W3C');
     expect(diagnostics.scrollContainers[0].textPreview).toContain('固件升级');
+  });
+
+  it('can return full visible page text separately from body extraction', async () => {
+    document.body.innerHTML = `
+      <nav>Docs API Reference Version 16</nav>
+      <main>
+        <article>
+          <h1>Installation</h1>
+          <p>Manual installation and system requirements are the task body.</p>
+        </article>
+      </main>
+    `;
+    Object.defineProperty(document.body, 'innerText', {
+      configurable: true,
+      value:
+        'Docs API Reference Version 16\nInstallation\nManual installation and system requirements are the task body.',
+    });
+    const articleClone = document.implementation.createHTMLDocument('article');
+    articleClone.body.innerHTML =
+      '<article><h1>Installation</h1><p>Manual installation and system requirements are the task body.</p></article>';
+    vi.spyOn(document, 'cloneNode').mockReturnValue(articleClone as unknown as Node);
+
+    const bodyResponse = await dispatchWebFetcher({ action: 'getTextContent' });
+    const fullVisibleResponse = await dispatchWebFetcher({
+      action: 'getTextContent',
+      textMode: 'full-visible',
+    });
+
+    expect(bodyResponse.success).toBe(true);
+    expect(fullVisibleResponse.success).toBe(true);
+    expect(bodyResponse.textMode).toBe('body');
+    expect(bodyResponse.textContentSource).toBe('readability_body_text');
+    expect(String(bodyResponse.textContent)).not.toContain('API Reference');
+    expect(fullVisibleResponse.textMode).toBe('full-visible');
+    expect(fullVisibleResponse.textContentSource).toBe('document_body_innerText');
+    expect(String(fullVisibleResponse.textContent)).toContain('API Reference');
+    expect(String(fullVisibleResponse.textContent)).toContain('Manual installation');
   });
 });

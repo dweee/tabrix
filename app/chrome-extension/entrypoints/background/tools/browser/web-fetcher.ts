@@ -6,17 +6,26 @@ import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 interface WebFetcherToolParams {
   htmlContent?: boolean; // get the visible HTML content of the current page. default: false
   textContent?: boolean; // get the visible text content of the current page. default: true
+  textMode?: 'body' | 'full-visible'; // body uses article extraction; full-visible uses page-level visible text
   url?: string; // optional URL to fetch content from (if not provided, uses active tab)
   selector?: string; // optional CSS selector to get content from a specific element
   tabId?: number; // target existing tab id
   background?: boolean; // do not activate/focus
   windowId?: number; // target window id to pick active tab or create tab
+  settleTimeoutMs?: number; // optional new-tab settle timeout before extraction
 }
 
 const WEB_FETCHER_CONTENT_MESSAGE_TIMEOUT_MS = 15_000;
 const WEB_FETCHER_CONTENT_MESSAGE_RETRY_DELAY_MS = 1_000;
 const WEB_FETCHER_CREATE_TAB_TIMEOUT_MS = 5_000;
 const WEB_FETCHER_CREATE_TAB_RECOVERY_DELAY_MS = 250;
+const WEB_FETCHER_DEFAULT_SETTLE_TIMEOUT_MS = 5_000;
+
+function normalizeSettleTimeoutMs(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value))
+    return WEB_FETCHER_DEFAULT_SETTLE_TIMEOUT_MS;
+  return Math.min(Math.max(Math.trunc(value), 1_000), 60_000);
+}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -164,15 +173,18 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
     // Handle mutually exclusive parameters: if htmlContent is true, textContent is forced to false
     const htmlContent = args.htmlContent === true;
     const textContent = htmlContent ? false : args.textContent !== false; // Default is true, unless htmlContent is true or textContent is explicitly set to false
+    const textMode = args.textMode === 'full-visible' ? 'full-visible' : 'body';
     const url = args.url;
     const selector = args.selector;
     const explicitTabId = args.tabId;
     const background = args.background === true;
     const windowId = args.windowId;
+    const settleTimeoutMs = normalizeSettleTimeoutMs(args.settleTimeoutMs);
 
     console.log(`Starting web fetcher with options:`, {
       htmlContent,
       textContent,
+      textMode,
       url,
       selector,
     });
@@ -243,7 +255,9 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
 
           if (tab.id) {
             console.log('Waiting for newly opened tab to settle...');
-            const settleResult = await this.waitForTabSettled(tab.id);
+            const settleResult = await this.waitForTabSettled(tab.id, {
+              timeoutMs: settleTimeoutMs,
+            });
             tab = settleResult.tab;
             settleMetadata = {
               settled: settleResult.settled,
@@ -325,6 +339,7 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
         const textRequest = await this.sendContentRequestWithRetry(tab.id, {
           action: TOOL_MESSAGE_TYPES.WEB_FETCHER_GET_TEXT_CONTENT,
           selector: selector,
+          textMode,
         });
         const textResponse = textRequest.response;
         result.textContentRequest = {
@@ -334,6 +349,8 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
 
         if (textResponse.success) {
           result.textContent = textResponse.textContent;
+          result.textMode = textResponse.textMode || textMode;
+          result.textContentSource = textResponse.textContentSource || 'readability_body_text';
           result.textSummary = summarizeVisibleText(textResponse.textContent || '');
           if (textResponse.contentDiagnostics) {
             result.contentDiagnostics = textResponse.contentDiagnostics;

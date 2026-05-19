@@ -3,6 +3,7 @@ import type { ToolResult } from '@/common/tool-handler';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 
 const PING_TIMEOUT_MS = 300;
+const DOCUMENT_READY_STATE_TIMEOUT_MS = 500;
 const TAB_SETTLE_TIMEOUT_MS = 8000;
 const TAB_ACTIVATION_TIMEOUT_MS = 1500;
 const TAB_POLL_INTERVAL_MS = 100;
@@ -199,10 +200,23 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
 
   private async getTabDocumentReadyState(tabId: number): Promise<string | null> {
     try {
-      const [{ result }] = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: () => document.readyState,
-      });
+      const [{ result }] = await Promise.race([
+        chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => document.readyState,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `document.readyState probe timed out after ${DOCUMENT_READY_STATE_TIMEOUT_MS}ms`,
+                ),
+              ),
+            DOCUMENT_READY_STATE_TIMEOUT_MS,
+          ),
+        ),
+      ]);
       return typeof result === 'string' ? result : null;
     } catch {
       return null;
