@@ -547,6 +547,76 @@ describe('V27-CDP-01 network debugger controlled evidence', () => {
     });
   });
 
+  it('marks non-2xx JSON responses as blocked instead of unavailable rows', async () => {
+    sendCommandMock.mockImplementation(async (_tabId: number, method: string) => {
+      if (method === 'Network.getResponseBody') {
+        return {
+          body: JSON.stringify({
+            data: [
+              {
+                title: 'Blocked result should not be trusted',
+                description: 'The endpoint rejected this request.',
+              },
+            ],
+          }),
+          base64Encoded: false,
+        };
+      }
+      return {};
+    });
+    const start = await networkDebuggerStartTool.execute({
+      tabId: 88,
+      maxCaptureTime: 0,
+      inactivityTimeout: 0,
+    });
+    expect(start.isError).toBe(false);
+
+    const emitDebuggerEvent = (
+      networkDebuggerStartTool as unknown as {
+        handleDebuggerEvent: DebuggerListener;
+      }
+    ).handleDebuggerEvent.bind(networkDebuggerStartTool);
+
+    emitDebuggerEvent({ tabId: 88 }, 'Network.requestWillBeSent', {
+      requestId: 'blocked-search',
+      request: {
+        url: 'https://api.social.example.test/v1/search/notes',
+        method: 'POST',
+      },
+      type: 'XHR',
+      timestamp: 100,
+    });
+    emitDebuggerEvent({ tabId: 88 }, 'Network.responseReceived', {
+      requestId: 'blocked-search',
+      type: 'XHR',
+      timestamp: 101,
+      response: {
+        url: 'https://api.social.example.test/v1/search/notes',
+        status: 461,
+        statusText: 'Blocked',
+        mimeType: 'application/json',
+        headers: { 'content-type': 'application/json' },
+      },
+    });
+    await emitDebuggerEvent({ tabId: 88 }, 'Network.loadingFinished', {
+      requestId: 'blocked-search',
+      encodedDataLength: 128,
+    });
+
+    const stop = await networkDebuggerStopTool.execute({ tabId: 88 });
+    const stopPayload = JSON.parse(String(stop.content[0].text));
+
+    expect(stop.isError).toBe(false);
+    expect(stopPayload.requests[0].safeResponseSummary).toMatchObject({
+      status: 461,
+      privacyCheck: 'failed',
+      rejectedReason: 'http_status_blocked',
+      rowCount: 0,
+      fieldShapeSummaryAvailable: false,
+      rows: [],
+    });
+  });
+
   it('waits for an in-flight response body summary before stopping capture', async () => {
     let bodyRequested = false;
     sendCommandMock.mockImplementation(async (_tabId: number, method: string) => {

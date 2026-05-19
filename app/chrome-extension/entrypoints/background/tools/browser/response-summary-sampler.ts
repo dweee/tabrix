@@ -211,6 +211,14 @@ function selectSummaryRows(parsed: unknown): {
   return { rows, listLength: list.length };
 }
 
+function isBlockedHttpStatus(status: number | null): boolean {
+  return typeof status === 'number' && status >= 400;
+}
+
+function responseRejectedReasonForStatus(status: number | null): string | null {
+  return isBlockedHttpStatus(status) ? 'http_status_blocked' : null;
+}
+
 function selectTopLevelRowLikeArray(parsedObject: Record<string, unknown>): unknown[] | null {
   for (const key of Object.keys(parsedObject).slice(0, MAX_KEYS_PER_ROW)) {
     if (shouldDropSummaryField(key)) continue;
@@ -343,14 +351,16 @@ export function buildSafeResponseSummaryFromJsonText(
     rejectedReason = 'compact_rows_unavailable';
   }
 
-  const privacyFailed = rejectedReason !== null || containsSensitiveField(parsed);
+  const statusRejectedReason = responseRejectedReasonForStatus(input.status);
+  const privacyFailed =
+    rejectedReason !== null || statusRejectedReason !== null || containsSensitiveField(parsed);
   const compact = privacyFailed ? { rows: [], listLength: null } : selectSummaryRows(parsed);
   const rows = compact.rows;
   const compactUnavailable =
     !privacyFailed &&
     (compact.listLength === null || (compact.listLength > 0 && rows.length === 0));
   const finalRejectedReason = privacyFailed
-    ? rejectedReason || 'sensitive_field'
+    ? rejectedReason || statusRejectedReason || 'sensitive_field'
     : compactUnavailable
       ? 'compact_rows_unavailable'
       : null;
@@ -768,6 +778,14 @@ function buildMainWorldSampler(args: {
     return false;
   }
 
+  function isBlockedHttpStatusLocal(status: number | null): boolean {
+    return typeof status === 'number' && status >= 400;
+  }
+
+  function responseRejectedReasonForStatusLocal(status: number | null): string | null {
+    return isBlockedHttpStatusLocal(status) ? 'http_status_blocked' : null;
+  }
+
   function postSummary(input: {
     url: string;
     method: string;
@@ -777,7 +795,11 @@ function buildMainWorldSampler(args: {
     rejectedReason: string | null;
   }) {
     if (Date.now() > expiresAt) return;
-    const privacyFailed = input.rejectedReason !== null || containsSensitiveField(input.parsed);
+    const statusRejectedReason = responseRejectedReasonForStatusLocal(input.status);
+    const privacyFailed =
+      input.rejectedReason !== null ||
+      statusRejectedReason !== null ||
+      containsSensitiveField(input.parsed);
     const compact = privacyFailed
       ? { rows: [], listLength: null }
       : selectSummaryRows(input.parsed);
@@ -796,7 +818,7 @@ function buildMainWorldSampler(args: {
           rawBodyPersisted: false,
           privacyCheck: privacyFailed ? 'failed' : 'passed',
           rejectedReason: privacyFailed
-            ? input.rejectedReason || 'sensitive_field'
+            ? input.rejectedReason || statusRejectedReason || 'sensitive_field'
             : compactUnavailable
               ? 'compact_rows_unavailable'
               : null,
