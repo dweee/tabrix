@@ -87,6 +87,141 @@ describe('non-web tab guards', () => {
     expect(injectSpy).not.toHaveBeenCalled();
   });
 
+  it('waits for explicit pending http tabs before applying the non-web guard', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 3108,
+      title: '',
+      url: '',
+      pendingUrl: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+    });
+    const waitSpy = vi.spyOn(readPageTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 3108,
+        title: 'Search · ACP · GitHub',
+        url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+        status: 'complete',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 120,
+      readyState: 'complete',
+    });
+    const injectSpy = vi
+      .spyOn(readPageTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        'Link "repo-one/acp"',
+        'Link "repo-two/mcp-agent"',
+        'Text "Repository results sorted by stars"',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_1', role: 'link', name: 'repo-one/acp' },
+        { ref: 'ref_2', role: 'link', name: 'repo-two/mcp-agent' },
+        { ref: 'ref_3', role: 'text', name: 'Repository results sorted by stars' },
+      ],
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      stats: { processed: 3, included: 3, durationMs: 1 },
+    });
+
+    const result = await readPageTool.execute({ tabId: 3108 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(waitSpy).toHaveBeenCalledWith(3108, { timeoutMs: 5000 });
+    expect(injectSpy).toHaveBeenCalled();
+    expect(payload.reason).not.toBe('unsupported_page_type');
+    expect(payload.page.url).toBe(
+      'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+    );
+  });
+
+  it('waits for explicit loading http tabs before injecting read_page helpers', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 3109,
+      title: 'Search · ACP · GitHub',
+      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      status: 'loading',
+    });
+    const waitSpy = vi.spyOn(readPageTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 3109,
+        title: 'Search · ACP · GitHub',
+        url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+        status: 'complete',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 120,
+      readyState: 'complete',
+    });
+    const injectSpy = vi
+      .spyOn(readPageTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        'Link "repo-one/acp"',
+        'Link "repo-two/mcp-agent"',
+        'Text "Repository results sorted by stars"',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_1', role: 'link', name: 'repo-one/acp' },
+        { ref: 'ref_2', role: 'link', name: 'repo-two/mcp-agent' },
+        { ref: 'ref_3', role: 'text', name: 'Repository results sorted by stars' },
+      ],
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      stats: { processed: 3, included: 3, durationMs: 1 },
+    });
+
+    const result = await readPageTool.execute({ tabId: 3109 });
+
+    expect(result.isError).toBe(false);
+    expect(waitSpy).toHaveBeenCalledWith(3109, { timeoutMs: 5000 });
+    expect(injectSpy).toHaveBeenCalled();
+  });
+
+  it('reinjects the read_page helper when the first content message has no receiver', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 3110,
+      title: 'Search · ACP · GitHub',
+      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      status: 'complete',
+    });
+    const injectSpy = vi
+      .spyOn(readPageTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+    const sendMessageSpy = vi
+      .spyOn(readPageTool as any, 'sendMessageToTab')
+      .mockRejectedValueOnce(
+        new Error('Could not establish connection. Receiving end does not exist.'),
+      )
+      .mockResolvedValueOnce({
+        success: true,
+        pageContent: [
+          'Link "repo-one/acp"',
+          'Link "repo-two/mcp-agent"',
+          'Text "Repository results sorted by stars"',
+        ].join('\n'),
+        refMap: [
+          { ref: 'ref_1', role: 'link', name: 'repo-one/acp' },
+          { ref: 'ref_2', role: 'link', name: 'repo-two/mcp-agent' },
+          { ref: 'ref_3', role: 'text', name: 'Repository results sorted by stars' },
+        ],
+        viewport: { width: 1280, height: 720, dpr: 1 },
+        stats: { processed: 3, included: 3, durationMs: 1 },
+      });
+
+    const result = await readPageTool.execute({ tabId: 3110 });
+
+    expect(result.isError).toBe(false);
+    expect(injectSpy).toHaveBeenCalledTimes(2);
+    expect(sendMessageSpy).toHaveBeenCalledTimes(2);
+  });
+
   it('returns a structured page_unreadable response when read_page injection hits an error page', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 3106,

@@ -54,6 +54,8 @@ interface ReadPageParams {
 }
 
 const READ_PAGE_SPARSE_RETRY_DELAY_MS = 450;
+const READ_PAGE_PENDING_DOCUMENT_WAIT_MS = 5000;
+const READ_PAGE_CONTENT_MESSAGE_RETRY_DELAY_MS = 450;
 const INTERACTIVE_ELEMENTS_HELPER_FILE = 'inject-scripts/interactive-elements-helper.js';
 const INTERACTIVE_ELEMENTS_HELPER_PING_TIMEOUT_MS = 300;
 const VISIBLE_TEXT_FALLBACK_MAX_CHARS = 12_000;
@@ -61,6 +63,10 @@ const VISIBLE_ROWS_TARGET_REF_REPAIR_THRESHOLD = 0.95;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getTabNavigationUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {
+  return String(tab.url || tab.pendingUrl || '');
 }
 
 function reconcilePageUnderstandingWithVisibleRows(payload: Record<string, any>): void {
@@ -351,6 +357,22 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     return fallback && fallback.success && Array.isArray(fallback.elements) ? fallback : null;
   }
 
+  private async generateAccessibilityTreeWithRetry(tabId: number, message: unknown): Promise<any> {
+    try {
+      return await this.sendMessageToTab(tabId, message);
+    } catch (error) {
+      await delay(READ_PAGE_CONTENT_MESSAGE_RETRY_DELAY_MS);
+      await this.injectContentScript(
+        tabId,
+        ['inject-scripts/accessibility-tree-helper.js'],
+        false,
+        'ISOLATED',
+        true,
+      );
+      return await this.sendMessageToTab(tabId, message);
+    }
+  }
+
   private async repairVisibleRowsTargetRefs(params: {
     tabId: number;
     basePayload: Record<string, any>;
@@ -470,11 +492,24 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         "Stay on the safe path first: prefer ref-based actions from chrome_read_page or chrome_get_interactive_elements. If the specific element you need is still missing, use chrome_screenshot for visual confirmation and coordinates. Reserve chrome_computer or chrome_javascript for explicit fallback/debug cases only. Also note: 'markedElements' are user-marked elements and have the highest priority when choosing targets.";
 
       const explicit = await this.tryGetTab(args?.tabId);
-      const tab = explicit || (await this.getActiveTabOrThrowInWindow(args?.windowId));
+      let tab = explicit || (await this.getActiveTabOrThrowInWindow(args?.windowId));
       if (!tab.id)
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
+      const tabId = tab.id;
 
-      const currentUrl = String(tab.url || '');
+      const initialNavigationUrl = getTabNavigationUrl(tab);
+      if (
+        explicit &&
+        /^https?:\/\//i.test(initialNavigationUrl) &&
+        (!tab.url || tab.status === 'loading')
+      ) {
+        const settleResult = await this.waitForTabSettled(tabId, {
+          timeoutMs: READ_PAGE_PENDING_DOCUMENT_WAIT_MS,
+        });
+        tab = settleResult.tab;
+      }
+
+      const currentUrl = getTabNavigationUrl(tab);
       const currentTitle = String(tab.title || '');
       const schemeGuard = inferSchemeGuard(currentUrl);
 
@@ -499,7 +534,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
                 ...buildModeOutput({
                   mode: selectedMode,
                   renderMode: selectedRender,
-                  tabId: tab.id,
+                  tabId,
                   currentUrl,
                   currentTitle,
                   pageType: schemeGuard.pageType,
@@ -549,7 +584,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       // Inject helper in ISOLATED world to enable chrome.runtime messaging
       // Inject into all frames to support same-origin iframe operations
       await this.injectContentScript(
-        tab.id,
+        tabId,
         ['inject-scripts/accessibility-tree-helper.js'],
         false,
         'ISOLATED',
@@ -557,7 +592,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       );
 
       // Ask content script to generate accessibility tree
-      let resp = await this.sendMessageToTab(tab.id, {
+      let resp = await this.generateAccessibilityTreeWithRetry(tabId, {
         action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
         filter: filter || null,
         depth: requestedDepth,
@@ -576,7 +611,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
 
       if (treeOk && isSparse) {
         await delay(READ_PAGE_SPARSE_RETRY_DELAY_MS);
-        const retryResp = await this.sendMessageToTab(tab.id, {
+        const retryResp = await this.generateAccessibilityTreeWithRetry(tabId, {
           action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
           filter: filter || null,
           depth: requestedDepth,
@@ -672,7 +707,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       reconcilePageUnderstandingWithVisibleRows(basePayload);
 
       if (treeOk && !userControlled && !basePayload.visibleTextContent) {
-        const visibleTextContent = await this.sampleVisibleTextContent(tab.id);
+        const visibleTextContent = await this.sampleVisibleTextContent(tabId);
         if (visibleTextContent) {
           basePayload.visibleTextContent = visibleTextContent;
           if (!basePayload.visibleRegionRows.visibleRegionRowsUsed) {
@@ -696,7 +731,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         }
       }
       await this.repairVisibleRowsTargetRefs({
-        tabId: tab.id,
+        tabId,
         basePayload,
         pageUnderstanding,
         currentUrl,
@@ -709,7 +744,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         const modePayload = buildModeOutput({
           mode: selectedMode,
           renderMode: selectedRender,
-          tabId: tab.id,
+          tabId,
           currentUrl,
           currentTitle,
           pageType: schemeGuard.pageType,
@@ -761,7 +796,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       // Newly opened MV3 pages can report document complete before the
       // injected helper is ready to answer its first runtime message.
       try {
-        const fallback = await this.collectInteractiveElementsFallback(tab.id);
+        const fallback = await this.collectInteractiveElementsFallback(tabId);
 
         if (fallback) {
           const merged = fallback.elements.slice(0, 150);
@@ -800,7 +835,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             pixelsBelow: typeof fallback?.pixelsBelow === 'number' ? fallback.pixelsBelow : null,
           });
           if (!basePayload.visibleRegionRows.visibleRegionRowsUsed) {
-            const visibleTextContent = await this.sampleVisibleTextContent(tab.id);
+            const visibleTextContent = await this.sampleVisibleTextContent(tabId);
             if (visibleTextContent) {
               basePayload.visibleTextContent = visibleTextContent;
               basePayload.visibleRegionRows = extractVisibleRegionRows({
@@ -822,7 +857,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           const modePayload = buildModeOutput({
             mode: selectedMode,
             renderMode: selectedRender,
-            tabId: tab.id,
+            tabId,
             currentUrl,
             currentTitle,
             pageType: schemeGuard.pageType,
