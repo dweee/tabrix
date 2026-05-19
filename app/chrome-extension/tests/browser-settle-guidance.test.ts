@@ -300,6 +300,46 @@ describe('browser settle guidance', () => {
     });
   });
 
+  it('allows structured reads when navigation reaches a document URL but readyState probing times out', async () => {
+    vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
+    vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: true,
+        status: 'loading',
+        url: 'https://www.npmjs.com/search?q=playwright',
+        title: 'Search | npm',
+      },
+      settled: false,
+      timedOut: true,
+      reason: 'timeout',
+      waitedMs: 8000,
+      readyState: null,
+    });
+
+    const result = await navigateTool.execute({
+      url: 'https://www.npmjs.com/search?q=playwright',
+      background: true,
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      requestedUrl: 'https://www.npmjs.com/search?q=playwright',
+      finalUrl: 'https://www.npmjs.com/search?q=playwright',
+      status: 'loading',
+      settled: false,
+      settleReason: 'timeout',
+      waitedMs: 8000,
+      readyState: null,
+      pageReadable: false,
+      canAttemptStructuredRead: true,
+      nextStepHint: 'navigation_document_url_detected; structured_read_may_succeed',
+    });
+  });
+
   it('uses pendingUrl for timed out new-tab navigation readiness guidance', async () => {
     vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
     vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({

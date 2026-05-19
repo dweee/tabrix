@@ -33,10 +33,12 @@ function buildNavigationReadinessFields(input: {
   const staleAfterAttempt =
     previousUrl.length > 0 &&
     normalizeComparableUrl(previousUrl) === normalizeComparableUrl(finalUrl);
+  const hasReachedTargetDocument = hasDocumentUrl && !staleAfterAttempt;
+  const hasReadableReadyState =
+    input.readyState === 'interactive' || input.readyState === 'complete';
+  const hasDocumentUrlWithUnknownReadyState = hasReachedTargetDocument && input.readyState == null;
   const canAttemptStructuredRead =
-    hasDocumentUrl &&
-    !staleAfterAttempt &&
-    (input.readyState === 'interactive' || input.readyState === 'complete');
+    hasReachedTargetDocument && (hasReadableReadyState || hasDocumentUrlWithUnknownReadyState);
   const pageReadable =
     input.settled === true &&
     input.readyState === 'complete' &&
@@ -49,7 +51,9 @@ function buildNavigationReadinessFields(input: {
     nextStepHint: pageReadable
       ? 'safe_to_read_page'
       : canAttemptStructuredRead
-        ? 'navigation_interactive; structured_read_may_succeed'
+        ? hasReadableReadyState
+          ? 'navigation_interactive; structured_read_may_succeed'
+          : 'navigation_document_url_detected; structured_read_may_succeed'
         : 'navigation_not_readable; avoid chrome_read_page until navigation reaches a document',
   };
 }
