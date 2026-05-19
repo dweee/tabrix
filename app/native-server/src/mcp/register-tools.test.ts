@@ -1140,8 +1140,13 @@ describe('handleToolCall execution wrapper', () => {
         deltaKind: 'post_action_delta',
         fromProjectionId: 'projection_cached',
         toProjectionId: 'projection_cached',
-        changedRegions: ['viewport'],
-        refreshedRefs: ['ref_cached'],
+        changedRegions: [],
+        reusedRegions: ['viewport'],
+        refreshedRefs: [],
+        contextChars: 0,
+        previousContextChars: 3600,
+        contextSavedChars: 3600,
+        contextSavedRatio: 1,
         evidenceBoundary: {
           evidenceLevel: 'real_browser',
           realBrowserClaim: true,
@@ -1159,7 +1164,7 @@ describe('handleToolCall execution wrapper', () => {
       expect(flowSpy).toHaveBeenCalledTimes(1);
       const persisted = sessionManager.listSessions().at(-1);
       expect(persisted?.summary).toBe(
-        'AI context: post_action_delta; source=cached_page_projection_delta; data=dom_json; changed=viewport; reused=none; savedChars=0',
+        'AI context: post_action_delta; source=cached_page_projection_delta; data=dom_json; changed=none; reused=viewport; savedChars=3600',
       );
     });
 

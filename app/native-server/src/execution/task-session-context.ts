@@ -576,13 +576,25 @@ export class TaskSessionContext {
 
   public buildCachedPageProjectionDelta(): BrowserPageProjectionDelta | null {
     if (!this.lastPageProjection) return null;
-    return buildBrowserPageProjectionDelta({
-      previousProjection: this.lastPageProjection,
-      currentProjection: this.lastPageProjection,
+    const reusedRegions = this.lastPageProjection.activeRegion
+      ? [this.lastPageProjection.activeRegion]
+      : [...this.lastPageProjection.changedRegions];
+    const previousContextChars = Math.max(0, this.lastPageProjection.contextChars);
+    return {
       deltaId: `delta:cached:${this.lastPageProjection.projectionId}`,
       deltaKind: 'post_action_delta',
+      fromProjectionId: this.lastPageProjection.projectionId,
+      toProjectionId: this.lastPageProjection.projectionId,
+      changedRegions: [],
+      reusedRegions,
+      invalidatedRefs: [],
+      refreshedRefs: [],
+      contextChars: 0,
+      previousContextChars,
+      contextSavedChars: previousContextChars,
+      contextSavedRatio: previousContextChars > 0 ? 1 : 0,
       evidenceBoundary: inferProjectionEvidenceBoundary(this.lastPageProjection),
-    });
+    };
   }
 
   public buildCachedDataSourceDecision(): BrowserDataSourceDecisionEvidence | null {
