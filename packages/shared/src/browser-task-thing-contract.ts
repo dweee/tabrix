@@ -487,7 +487,7 @@ export function buildBrowserPageThingProjectionFromReadPage(
 ): BrowserPageThingProjection {
   const { snapshot } = input;
   const visibleRegionRows = snapshot.visibleRegionRows;
-  const activeRegion = visibleRegionRows?.sourceRegion ?? snapshot.summary.primaryRegion;
+  const activeRegion = inferProjectionActiveRegion(snapshot);
   const contextChars = estimateSnapshotContextChars(snapshot);
   const previousContextChars = input.previousContextChars ?? null;
 
@@ -532,13 +532,39 @@ function inferSourceLineage(source: ReadPageSelectedDataSource): BrowserSourceLi
 
 function buildRegionEvidenceRefs(snapshot: ReadPageCompactSnapshot): string[] {
   const refs = new Set<string>();
-  if (snapshot.visibleRegionRows?.sourceRegion) {
-    refs.add(`region:${snapshot.visibleRegionRows.sourceRegion}`);
+  const activeRegion = inferProjectionActiveRegion(snapshot);
+  if (activeRegion) {
+    refs.add(`region:${activeRegion}`);
   }
   for (const row of snapshot.visibleRegionRows?.rows ?? []) {
     refs.add(`row:${row.rowId}`);
   }
   return [...refs];
+}
+
+function inferProjectionActiveRegion(snapshot: ReadPageCompactSnapshot): string | null {
+  const sourceRegion = snapshot.visibleRegionRows?.sourceRegion ?? snapshot.summary.primaryRegion;
+  if (sourceRegion !== 'viewport') return sourceRegion;
+  if (!snapshot.visibleRegionRows?.visibleRegionRowsUsed) return sourceRegion;
+  if (snapshot.visibleRegionRows.rowCount <= 0) return sourceRegion;
+  if (snapshot.visibleRegionRows.rowExtractionConfidence < 0.7) return sourceRegion;
+  const role = snapshot.summary.pageRole.toLowerCase();
+  if (role.includes('search') || role.includes('list') || role.includes('results')) {
+    return 'result_list';
+  }
+  if (hasStrongVisibleResultRows(snapshot)) return 'result_list';
+  return sourceRegion;
+}
+
+function hasStrongVisibleResultRows(snapshot: ReadPageCompactSnapshot): boolean {
+  const rows = snapshot.visibleRegionRows;
+  if (!rows) return false;
+  return (
+    rows.rowCount >= 3 &&
+    rows.targetRefCoverageRate >= 0.95 &&
+    rows.regionQualityScore >= 0.7 &&
+    rows.cardExtractorUsed === true
+  );
 }
 
 function chooseProjectionDataSource(snapshot: ReadPageCompactSnapshot): ReadPageSelectedDataSource {
