@@ -20,6 +20,8 @@ const WEB_FETCHER_CONTENT_MESSAGE_RETRY_DELAY_MS = 1_000;
 const WEB_FETCHER_CREATE_TAB_TIMEOUT_MS = 5_000;
 const WEB_FETCHER_CREATE_TAB_RECOVERY_DELAY_MS = 250;
 const WEB_FETCHER_DEFAULT_SETTLE_TIMEOUT_MS = 5_000;
+const WEB_FETCHER_EMPTY_TEXT_RETRY_DELAY_MS = 1_000;
+const WEB_FETCHER_EMPTY_TEXT_MAX_RETRIES = 5;
 
 function normalizeSettleTimeoutMs(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value))
@@ -121,6 +123,14 @@ async function findCreatedTabAfterTimeout(input: {
 class WebFetcherTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.WEB_FETCHER;
 
+  private shouldRetryEmptyTextResponse(response: any): boolean {
+    return (
+      response?.success === true &&
+      typeof response.textContent === 'string' &&
+      response.textContent.trim().length === 0
+    );
+  }
+
   private async sendContentRequestWithRetry(
     tabId: number,
     message: unknown,
@@ -164,6 +174,40 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
         }`,
       );
     }
+  }
+
+  private async sendTextRequestWithDynamicContentRetry(
+    tabId: number,
+    message: unknown,
+    options: { retryEmptyContent: boolean },
+  ): Promise<{
+    response: any;
+    attempts: number;
+    timedOut: boolean;
+    emptyContentRetries: number;
+  }> {
+    let request = await this.sendContentRequestWithRetry(tabId, message);
+    let emptyContentRetries = 0;
+
+    while (
+      options.retryEmptyContent &&
+      emptyContentRetries < WEB_FETCHER_EMPTY_TEXT_MAX_RETRIES &&
+      this.shouldRetryEmptyTextResponse(request.response)
+    ) {
+      emptyContentRetries += 1;
+      await delay(WEB_FETCHER_EMPTY_TEXT_RETRY_DELAY_MS);
+      const nextRequest = await this.sendContentRequestWithRetry(tabId, message);
+      request = {
+        response: nextRequest.response,
+        attempts: request.attempts + nextRequest.attempts,
+        timedOut: request.timedOut || nextRequest.timedOut,
+      };
+    }
+
+    return {
+      ...request,
+      emptyContentRetries,
+    };
   }
 
   /**
@@ -336,15 +380,22 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
 
       // Get text content if requested (and htmlContent is not true)
       if (textContent) {
-        const textRequest = await this.sendContentRequestWithRetry(tab.id, {
-          action: TOOL_MESSAGE_TYPES.WEB_FETCHER_GET_TEXT_CONTENT,
-          selector: selector,
-          textMode,
-        });
+        const textRequest = await this.sendTextRequestWithDynamicContentRetry(
+          tab.id,
+          {
+            action: TOOL_MESSAGE_TYPES.WEB_FETCHER_GET_TEXT_CONTENT,
+            selector: selector,
+            textMode,
+          },
+          {
+            retryEmptyContent: createdTabForUrl && !selector,
+          },
+        );
         const textResponse = textRequest.response;
         result.textContentRequest = {
           attempts: textRequest.attempts,
           timedOutBeforeRetry: textRequest.timedOut,
+          emptyContentRetries: textRequest.emptyContentRetries,
         };
 
         if (textResponse.success) {

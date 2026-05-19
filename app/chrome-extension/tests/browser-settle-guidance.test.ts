@@ -913,6 +913,65 @@ describe('browser settle guidance', () => {
     vi.useRealTimers();
   });
 
+  it('retries empty visible text from a newly created dynamic page before reporting success', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: false,
+        status: 'complete',
+        url: 'https://chat.deepseek.com/share/example',
+        title: 'DeepSeek - 探索未至之境',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 200,
+      readyState: 'complete',
+    });
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendMessageToTab = vi
+      .spyOn(webFetcherTool as any, 'sendMessageToTab')
+      .mockResolvedValueOnce({
+        success: true,
+        textContent: '',
+        textMode: 'full-visible',
+        textContentSource: 'document_body_innerText',
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        textContent: '物模型包含静态属性、时序属性和可控调节属性。延迟渲染后的分享页正文已经可见。',
+        textMode: 'full-visible',
+        textContentSource: 'document_body_innerText',
+      });
+
+    const executePromise = webFetcherTool.execute({
+      url: 'https://chat.deepseek.com/share/example',
+      background: true,
+      textMode: 'full-visible',
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    const result = await executePromise;
+
+    expect(result.isError).toBe(false);
+    expect(sendMessageToTab).toHaveBeenCalledTimes(2);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      createdTabForUrl: true,
+      textContentRequest: {
+        attempts: 2,
+        emptyContentRetries: 1,
+      },
+      textMode: 'full-visible',
+      textContentSource: 'document_body_innerText',
+    });
+    expect(payload.textContent).toContain('可控调节属性');
+    vi.useRealTimers();
+  });
+
   it('recovers a readable web content tab when tab creation times out after the document appears', async () => {
     vi.useFakeTimers();
     vi.mocked(chrome.tabs.query)
