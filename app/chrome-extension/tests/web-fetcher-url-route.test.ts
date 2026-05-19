@@ -52,7 +52,25 @@ describe('web fetcher URL route', () => {
         waitedMs: 30000,
         readyState: 'interactive',
       });
-    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockImplementation(
+      async (
+        _tabId: number,
+        _files: string[],
+        _injectImmediately?: boolean,
+        _world?: unknown,
+        _allFrames?: boolean,
+        _frameIds?: number[],
+        onTiming?: (timing: unknown) => void,
+      ) => {
+        onTiming?.({
+          pingMs: 300,
+          pingStatus: 'failed_or_timeout',
+          executeScriptMs: 42,
+          injected: true,
+          totalMs: 342,
+        });
+      },
+    );
     vi.spyOn(webFetcherTool as any, 'sendMessageToTab').mockResolvedValue({
       success: true,
       textContent: 'Installation manual content '.repeat(40),
@@ -79,6 +97,15 @@ describe('web fetcher URL route', () => {
       },
     });
     expect(payload.textSummary.completeTextAvailable).toBe(true);
+    expect(payload.contentScriptInjection).toEqual(
+      expect.objectContaining({
+        pingMs: expect.any(Number),
+        pingStatus: expect.any(String),
+        executeScriptMs: expect.any(Number),
+        injected: true,
+        totalMs: expect.any(Number),
+      }),
+    );
     expect(payload.timing).toEqual(
       expect.objectContaining({
         resolveTabMs: expect.any(Number),

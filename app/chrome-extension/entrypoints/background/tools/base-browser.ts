@@ -43,6 +43,14 @@ interface WaitForTabActivatedResult {
   windowFocused: boolean | null;
 }
 
+interface ContentScriptInjectionTiming {
+  pingMs: number;
+  pingStatus: 'pong' | 'failed_or_timeout' | 'unexpected_response';
+  executeScriptMs: number | null;
+  injected: boolean;
+  totalMs: number;
+}
+
 /**
  * Base class for browser tool executors
  */
@@ -79,9 +87,13 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
     world: 'MAIN' | 'ISOLATED' = 'ISOLATED',
     allFrames: boolean = false,
     frameIds?: number[],
+    onTiming?: (timing: ContentScriptInjectionTiming) => void,
   ): Promise<void> {
+    const startedAt = Date.now();
+    let pingMs = 0;
     try {
       const pingFrameId = frameIds?.[0];
+      const pingStartedAt = Date.now();
       const response = await Promise.race([
         typeof pingFrameId === 'number'
           ? chrome.tabs.sendMessage(
@@ -97,15 +109,32 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
           ),
         ),
       ]);
+      pingMs = Date.now() - pingStartedAt;
 
       if (response && response.status === 'pong') {
+        onTiming?.({
+          pingMs,
+          pingStatus: 'pong',
+          executeScriptMs: null,
+          injected: false,
+          totalMs: Date.now() - startedAt,
+        });
         return;
       }
+      onTiming?.({
+        pingMs,
+        pingStatus: 'unexpected_response',
+        executeScriptMs: null,
+        injected: false,
+        totalMs: Date.now() - startedAt,
+      });
     } catch {
+      pingMs = Date.now() - startedAt;
       // Ping failure is expected when the script hasn't been injected yet.
     }
 
     try {
+      const executeScriptStartedAt = Date.now();
       const target: { tabId: number; allFrames?: boolean; frameIds?: number[] } = { tabId };
       if (frameIds && frameIds.length > 0) {
         target.frameIds = frameIds;
@@ -118,6 +147,13 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
         injectImmediately,
         world,
       } as any);
+      onTiming?.({
+        pingMs,
+        pingStatus: 'failed_or_timeout',
+        executeScriptMs: Date.now() - executeScriptStartedAt,
+        injected: true,
+        totalMs: Date.now() - startedAt,
+      });
     } catch (injectionError) {
       const errorMessage =
         injectionError instanceof Error ? injectionError.message : String(injectionError);

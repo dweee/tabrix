@@ -370,9 +370,23 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
         result.settle = settleMetadata;
       }
 
+      let injectTiming: unknown = null;
       const injectStartedAt = Date.now();
-      await this.injectContentScript(tab.id, ['inject-scripts/web-fetcher-helper.js']);
+      await this.injectContentScript(
+        tab.id,
+        ['inject-scripts/web-fetcher-helper.js'],
+        false,
+        'ISOLATED',
+        false,
+        undefined,
+        (timing) => {
+          injectTiming = timing;
+        },
+      );
       recordPhaseTiming('injectContentScriptMs', injectStartedAt);
+      if (injectTiming) {
+        result.contentScriptInjection = injectTiming;
+      }
 
       // Get HTML content if requested
       if (htmlContent) {
