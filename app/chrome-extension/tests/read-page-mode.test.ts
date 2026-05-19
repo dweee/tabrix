@@ -393,6 +393,90 @@ describe('read_page mode', () => {
     );
   });
 
+  it('reports auth_or_login_required when a sparse page is a login boundary', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5244,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.com/login',
+      title: 'Sign in',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sampleVisibleTextContent').mockResolvedValue(
+      '请先登录后继续访问此页面。手机号登录 扫码登录',
+    );
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "登录提示" [ref=ref_main] (x=640,y=260)',
+        '  - heading "请先登录" [ref=ref_heading] (x=640,y=180)',
+        '  - generic "请先登录后继续访问此页面。手机号登录 扫码登录" [ref=ref_login_hint] (x=640,y=220)',
+        '  - textbox "手机号" [ref=ref_phone] (x=600,y=280)',
+        '  - textbox "验证码" [ref=ref_code] (x=600,y=330)',
+        '  - button "登录" [ref=ref_login_button] (x=640,y=380)',
+        '  - link "用户协议" [ref=ref_terms] (x=580,y=430)',
+        '  - link "隐私政策" [ref=ref_privacy] (x=700,y=430)',
+        '  - link "帮助中心" [ref=ref_help] (x=820,y=430)',
+        '  - generic "登录后可继续查看内容" [ref=ref_notice] (x=640,y=470)',
+      ].join('\n'),
+      refMap: [],
+      stats: { processed: 1, included: 1, durationMs: 5 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.readinessVerdict).toBe('blocked');
+    expect(payload.readinessReason).toBe('auth_or_login_required');
+    expect(payload.rowCount).toBe(0);
+    expect(payload.visibleRegionRowsUsed).toBe(false);
+  });
+
+  it('reports challenge_or_verification when a sparse page is a verification boundary', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5245,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.com/security-check',
+      title: 'Security Check',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sampleVisibleTextContent').mockResolvedValue(
+      '请完成安全验证，拖动滑块通过人机验证后继续访问。',
+    );
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "安全验证" [ref=ref_main] (x=640,y=260)',
+        '  - heading "请完成安全验证" [ref=ref_heading] (x=640,y=180)',
+        '  - generic "拖动滑块通过人机验证后继续访问。" [ref=ref_verify] (x=640,y=220)',
+        '  - slider "滑块验证" [ref=ref_slider] (x=640,y=300)',
+        '  - button "刷新验证" [ref=ref_refresh] (x=640,y=360)',
+        '  - link "帮助" [ref=ref_help] (x=640,y=420)',
+        '  - generic "请勿关闭页面" [ref=ref_hint] (x=640,y=460)',
+        '  - generic "验证完成后自动继续" [ref=ref_continue] (x=640,y=500)',
+        '  - link "反馈问题" [ref=ref_feedback] (x=640,y=540)',
+        '  - generic "页面底部信息" [ref=ref_footer] (x=640,y=680)',
+      ].join('\n'),
+      refMap: [],
+      stats: { processed: 1, included: 1, durationMs: 5 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.readinessVerdict).toBe('blocked');
+    expect(payload.readinessReason).toBe('challenge_or_verification');
+    expect(payload.rowCount).toBe(0);
+    expect(payload.visibleRegionRowsUsed).toBe(false);
+  });
+
   it('keeps compact short and full detailed on complex pages', async () => {
     const mockSend = vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
       success: true,

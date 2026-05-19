@@ -134,6 +134,13 @@ export function buildExtensionLayer(params: {
     !hasVisibleRows &&
     params.visibleRegionRows.visibleDomRowsCandidateCount === 0 &&
     shellRejectedCount > 0;
+  const blockedReadinessReason = hasVisibleRows
+    ? null
+    : inferBlockedReadinessReason({
+        currentUrl: params.currentUrl,
+        currentTitle: params.currentTitle,
+        visibleTextContent: params.visibleTextContent,
+      });
   const selectedDataSource = hasVisibleRows
     ? 'dom_region_rows'
     : params.renderMode === 'markdown'
@@ -144,18 +151,22 @@ export function buildExtensionLayer(params: {
       ? 'error'
       : hasVisibleRows
         ? 'ready'
-        : !hasTextSignal
-          ? 'empty'
-          : shellOnlyRows
-            ? 'blocked'
-            : 'ready';
-  const readinessReason = shellOnlyRows
-    ? params.visibleRegionRows.footerLikeRejectedCount +
-        params.visibleRegionRows.navigationLikeRejectedCount >
-      0
-      ? 'footer_or_navigation_only'
-      : 'business_rows_unavailable'
-    : null;
+        : blockedReadinessReason
+          ? 'blocked'
+          : !hasTextSignal
+            ? 'empty'
+            : shellOnlyRows
+              ? 'blocked'
+              : 'ready';
+  const readinessReason = blockedReadinessReason
+    ? blockedReadinessReason
+    : shellOnlyRows
+      ? params.visibleRegionRows.footerLikeRejectedCount +
+          params.visibleRegionRows.navigationLikeRejectedCount >
+        0
+        ? 'footer_or_navigation_only'
+        : 'business_rows_unavailable'
+      : null;
   const extensionLayer = {
     kind: selectedDataSource,
     selectedDataSource,
@@ -207,6 +218,35 @@ export function buildExtensionLayer(params: {
     });
   }
   return extensionLayer as ReadPageExtensionFields;
+}
+
+function inferBlockedReadinessReason(params: {
+  currentUrl: string;
+  currentTitle: string;
+  visibleTextContent?: string | null;
+}): 'auth_or_login_required' | 'challenge_or_verification' | null {
+  const signal = [params.currentUrl, params.currentTitle, params.visibleTextContent || '']
+    .join(' ')
+    .toLowerCase();
+  if (!signal.trim()) return null;
+
+  if (
+    /\b(log[ -]?in|sign[ -]?in|auth|authenticate|unauthorized)\b/.test(signal) ||
+    /请先登录|登录后|未登录|账号登录|手机号登录|扫码登录/.test(signal)
+  ) {
+    return 'auth_or_login_required';
+  }
+
+  if (
+    /\b(captcha|recaptcha|verification|verify|security check|challenge|robot|unusual traffic|access denied)\b/.test(
+      signal,
+    ) ||
+    /人机验证|验证码|安全验证|访问验证|身份验证|拖动滑块|滑块验证|风控/.test(signal)
+  ) {
+    return 'challenge_or_verification';
+  }
+
+  return null;
 }
 
 function buildCompleteTextRegion(
