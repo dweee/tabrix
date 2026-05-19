@@ -2671,6 +2671,8 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
     minTextLength: 20,
     maxTotalLength: 500000,
     minParagraphLength: 2,
+    maxDiagnosticsElements: 400,
+    largeDomElementThreshold: 400,
   };
 
   // Listen for messages from the extension
@@ -2739,16 +2741,39 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
             throw new Error(`No element found matching selector: ${request.selector}`);
           }
         } else if (request.textMode === 'full-visible') {
-          const textContent = cleanContent(document.body?.innerText || '');
+          const fallback = extractFastBodyTextContent('body_textContent');
+          const textContent = fallback.textContent;
           sendResponse({
             success: true,
             textContent,
             textMode: 'full-visible',
-            textContentSource: 'document_body_innerText',
-            contentDiagnostics: buildContentDiagnostics(textContent),
+            fallback: true,
+            fallbackSource: fallback.source,
+            textContentSource: `fallback_${fallback.source}`,
+            contentDiagnostics: buildContentDiagnostics(textContent, {
+              skipContainerScan: true,
+              skipReason: 'full_visible_fast_path',
+            }),
             metadata: extractPageMetadata(),
           });
         } else {
+          if (isLargeDomForTextExtraction()) {
+            const fallback = extractFastBodyTextContent('large_dom_body_textContent');
+            sendResponse({
+              success: true,
+              textContent: fallback.textContent,
+              fallback: true,
+              fallbackSource: fallback.source,
+              textMode: 'body',
+              textContentSource: `fallback_${fallback.source}`,
+              contentDiagnostics: buildContentDiagnostics(fallback.textContent, {
+                skipContainerScan: true,
+                skipReason: 'large_dom_fast_path',
+              }),
+              metadata: extractPageMetadata(),
+            });
+            return true;
+          }
           // Otherwise use Readability to extract the main content
           const documentClone = document.cloneNode(true);
 
@@ -2901,9 +2926,26 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
    * even when innerText is empty or too small.
    * @returns {{textContent: string, source: string}}
    */
-  function extractFallbackTextContent() {
-    const innerText = document.body?.innerText || '';
-    if (innerText.trim().length >= config.minTextLength) {
+  function isLargeDomForTextExtraction() {
+    if (!document.body) return false;
+    return document.body.getElementsByTagName('*').length > config.largeDomElementThreshold;
+  }
+
+  function extractFastBodyTextContent(source) {
+    return {
+      textContent: cleanContent(document.body?.textContent || ''),
+      source,
+    };
+  }
+
+  function extractFallbackTextContent(options = {}) {
+    const preferTextContent = options.preferTextContent === true;
+    if (preferTextContent) {
+      return extractFastBodyTextContent('large_dom_body_textContent');
+    }
+
+    const innerText = preferTextContent ? '' : document.body?.innerText || '';
+    if (!preferTextContent && innerText.trim().length >= config.minTextLength) {
       return {
         textContent: cleanContent(innerText),
         source: 'body_innerText',
@@ -2940,15 +2982,34 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
 
     const textContent =
       blockTexts.length > 0 ? blockTexts.join('\n\n') : document.body?.textContent || '';
+    const source =
+      blockTexts.length > 0
+        ? 'visible_textContent_blocks'
+        : preferTextContent
+          ? 'large_dom_body_textContent'
+          : 'body_textContent';
     return {
       textContent: cleanContent(textContent),
-      source: blockTexts.length > 0 ? 'visible_textContent_blocks' : 'body_textContent',
+      source,
     };
   }
 
-  function buildContentDiagnostics(extractedText) {
+  function buildContentDiagnostics(extractedText, options = {}) {
     const extractedLength = cleanContent(extractedText || '').length;
-    const scrollContainers = findScrollableTextContainers().slice(0, 5);
+    if (options.skipContainerScan === true) {
+      return {
+        extractedLength,
+        scrollContainerCandidateCount: 0,
+        bestScrollableTextLength: 0,
+        longScrollableContentLikely: false,
+        scrollContainers: [],
+        diagnosticsSkipped: true,
+        diagnosticsSkippedReason: options.skipReason || 'fast_path',
+      };
+    }
+
+    const diagnostics = findScrollableTextContainers();
+    const scrollContainers = diagnostics.containers.slice(0, 5);
     const bestScrollableTextLength = scrollContainers.reduce(
       (max, item) => Math.max(max, item.textLength),
       0,
@@ -2959,14 +3020,30 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
       bestScrollableTextLength,
       longScrollableContentLikely: bestScrollableTextLength > extractedLength * 1.5,
       scrollContainers,
+      diagnosticsCapped: diagnostics.capped,
+      diagnosticsScannedElementCount: diagnostics.scannedElementCount,
+      diagnosticsMatchedElementCount: diagnostics.matchedElementCount,
     };
   }
 
   function findScrollableTextContainers() {
-    if (!document.body) return [];
+    if (!document.body)
+      return {
+        containers: [],
+        capped: false,
+        scannedElementCount: 0,
+        matchedElementCount: 0,
+      };
     const candidates = [];
     const elements = document.body.querySelectorAll('main, article, section, div, textarea');
+    let scannedElementCount = 0;
+    let capped = false;
     for (const element of elements) {
+      scannedElementCount += 1;
+      if (scannedElementCount > config.maxDiagnosticsElements) {
+        capped = true;
+        break;
+      }
       if (!isElementVisible(element)) continue;
       if (element.closest('script, style, noscript, nav, aside')) continue;
       const scrollHeight = Number(element.scrollHeight || 0);
@@ -2989,7 +3066,12 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
       });
     }
     candidates.sort((a, b) => b.textLength - a.textLength || b.scrollHeight - a.scrollHeight);
-    return candidates;
+    return {
+      containers: candidates,
+      capped,
+      scannedElementCount,
+      matchedElementCount: elements.length,
+    };
   }
 
   /**

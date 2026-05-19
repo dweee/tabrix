@@ -71,6 +71,8 @@ describe('web fetcher content diagnostics', () => {
     expect(response.contentDiagnostics).toMatchObject({
       scrollContainerCandidateCount: 1,
       longScrollableContentLikely: true,
+      diagnosticsCapped: false,
+      diagnosticsScannedElementCount: 2,
     });
     const diagnostics = response.contentDiagnostics as {
       scrollContainers: Array<{ id: string; textPreview: string }>;
@@ -80,6 +82,81 @@ describe('web fetcher content diagnostics', () => {
     });
     expect(diagnostics.scrollContainers[0].textPreview).toContain('W3C');
     expect(diagnostics.scrollContainers[0].textPreview).toContain('固件升级');
+  });
+
+  it('uses bounded textContent fallback for large DOM body reads', async () => {
+    document.body.innerHTML = `
+      <main>
+        <section>
+          <h1>Installation</h1>
+          <p>Manual installation and system requirements are available here.</p>
+        </section>
+        ${Array.from({ length: 450 }, (_, index) => `<div class="noisy-app-shell-${index}">chrome ${index}</div>`).join('')}
+      </main>
+    `;
+    Object.defineProperty(document.body, 'innerText', {
+      configurable: true,
+      get: () => {
+        throw new Error('innerText should not be used for large DOM fallback');
+      },
+    });
+    const cloneSpy = vi.spyOn(document, 'cloneNode');
+    const querySpy = vi.spyOn(document.body, 'querySelectorAll');
+
+    const response = await dispatchWebFetcher({ action: 'getTextContent' });
+
+    expect(response.success).toBe(true);
+    expect(cloneSpy).not.toHaveBeenCalled();
+    expect(querySpy).not.toHaveBeenCalled();
+    expect(response).toMatchObject({
+      fallback: true,
+      fallbackSource: 'large_dom_body_textContent',
+      textMode: 'body',
+      textContentSource: 'fallback_large_dom_body_textContent',
+    });
+    expect(String(response.textContent)).toContain('Manual installation');
+    expect(response.contentDiagnostics).toMatchObject({
+      diagnosticsSkipped: true,
+      diagnosticsSkippedReason: 'large_dom_fast_path',
+    });
+  });
+
+  it('uses bounded textContent fallback for large DOM full-visible reads', async () => {
+    document.body.innerHTML = `
+      <main>
+        <section>
+          <h1>Full visible docs</h1>
+          <p>Full visible mode must also avoid costly innerText on large app shells.</p>
+        </section>
+        ${Array.from({ length: 450 }, (_, index) => `<div class="noisy-app-shell-${index}">shell ${index}</div>`).join('')}
+      </main>
+    `;
+    Object.defineProperty(document.body, 'innerText', {
+      configurable: true,
+      get: () => {
+        throw new Error('innerText should not be used for large DOM fallback');
+      },
+    });
+    const querySpy = vi.spyOn(document.body, 'querySelectorAll');
+
+    const response = await dispatchWebFetcher({
+      action: 'getTextContent',
+      textMode: 'full-visible',
+    });
+
+    expect(response.success).toBe(true);
+    expect(querySpy).not.toHaveBeenCalled();
+    expect(response).toMatchObject({
+      fallback: true,
+      fallbackSource: 'body_textContent',
+      textMode: 'full-visible',
+      textContentSource: 'fallback_body_textContent',
+    });
+    expect(String(response.textContent)).toContain('Full visible mode');
+    expect(response.contentDiagnostics).toMatchObject({
+      diagnosticsSkipped: true,
+      diagnosticsSkippedReason: 'full_visible_fast_path',
+    });
   });
 
   it('can return full visible page text separately from body extraction', async () => {
@@ -114,7 +191,7 @@ describe('web fetcher content diagnostics', () => {
     expect(bodyResponse.textContentSource).toBe('readability_body_text');
     expect(String(bodyResponse.textContent)).not.toContain('API Reference');
     expect(fullVisibleResponse.textMode).toBe('full-visible');
-    expect(fullVisibleResponse.textContentSource).toBe('document_body_innerText');
+    expect(fullVisibleResponse.textContentSource).toBe('fallback_body_textContent');
     expect(String(fullVisibleResponse.textContent)).toContain('API Reference');
     expect(String(fullVisibleResponse.textContent)).toContain('Manual installation');
   });
