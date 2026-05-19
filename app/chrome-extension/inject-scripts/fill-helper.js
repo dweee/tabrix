@@ -49,8 +49,11 @@ if (window.__FILL_HELPER_INITIALIZED__) {
     return new Promise((resolve) => {
       let lastRect = null;
       let stableFrames = 0;
+      let done = false;
       const deadline = startedAt + Math.max(0, maxMs);
       const finish = (reason, ready) => {
+        if (done) return;
+        done = true;
         resolve({
           waitedMs: Math.max(0, Math.round(nowMs() - startedAt)),
           reason,
@@ -71,7 +74,7 @@ if (window.__FILL_HELPER_INITIALIZED__) {
             finish('timeout_disconnected', false);
             return;
           }
-          if (!requestNextFrame(check)) finish('raf_unavailable', false);
+          if (!requestNextFrame(check)) setTimeout(check, 16);
           return;
         }
         const rect = element.getBoundingClientRect();
@@ -102,9 +105,10 @@ if (window.__FILL_HELPER_INITIALIZED__) {
           finish('timeout', false);
           return;
         }
-        if (!requestNextFrame(check)) finish('raf_unavailable', false);
+        if (!requestNextFrame(check)) setTimeout(check, 16);
       };
       check();
+      setTimeout(() => finish('watchdog_timeout', false), Math.max(0, maxMs) + 50);
     });
   }
 

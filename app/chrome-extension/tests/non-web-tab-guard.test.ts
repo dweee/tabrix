@@ -222,6 +222,76 @@ describe('non-web tab guards', () => {
     expect(sendMessageSpy).toHaveBeenCalledTimes(2);
   });
 
+  it('waits for explicit loading http tabs before filling form controls', async () => {
+    vi.spyOn(fillTool as any, 'tryGetTab').mockResolvedValue({
+      id: 3111,
+      title: 'All | Search powered by Algolia',
+      url: 'https://hn.algolia.com/?q=browser%20automation',
+      status: 'loading',
+    });
+    const waitSpy = vi.spyOn(fillTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 3111,
+        title: 'All | Search powered by Algolia',
+        url: 'https://hn.algolia.com/?q=browser%20automation',
+        status: 'complete',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 120,
+      readyState: 'complete',
+    });
+    const injectSpy = vi.spyOn(fillTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(fillTool as any, 'sendMessageToTab').mockResolvedValue({
+      message: 'Fill operation successful',
+      elementInfo: { tagName: 'INPUT' },
+    });
+
+    const result = await fillTool.execute({
+      tabId: 3111,
+      selector: 'input[type="search"]',
+      value: 'playwright automation',
+    });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(waitSpy).toHaveBeenCalledWith(3111, { timeoutMs: 5000 });
+    expect(injectSpy).toHaveBeenCalled();
+    expect(payload.success).toBe(true);
+  });
+
+  it('reinjects the fill helper when the first content message has no receiver', async () => {
+    vi.spyOn(fillTool as any, 'tryGetTab').mockResolvedValue({
+      id: 3112,
+      title: 'All | Search powered by Algolia',
+      url: 'https://hn.algolia.com/?q=browser%20automation',
+      status: 'complete',
+    });
+    const injectSpy = vi.spyOn(fillTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendMessageSpy = vi
+      .spyOn(fillTool as any, 'sendMessageToTab')
+      .mockRejectedValueOnce(
+        new Error('Could not establish connection. Receiving end does not exist.'),
+      )
+      .mockResolvedValueOnce({
+        message: 'Fill operation successful',
+        elementInfo: { tagName: 'INPUT' },
+      });
+
+    const result = await fillTool.execute({
+      tabId: 3112,
+      selector: 'input[type="search"]',
+      value: 'playwright automation',
+    });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(injectSpy).toHaveBeenCalledTimes(2);
+    expect(sendMessageSpy).toHaveBeenCalledTimes(2);
+    expect(payload.success).toBe(true);
+  });
+
   it('returns a structured page_unreadable response when read_page injection hits an error page', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 3106,

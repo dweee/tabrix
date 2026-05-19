@@ -34,6 +34,8 @@ const NEW_TAB_OBSERVE_AMBIGUOUS_CAP_MS = 75;
 const NEW_TAB_OBSERVE_VERIFIER_CAP_BUFFER_MS = 50;
 export const NEW_TAB_OBSERVE_DRAIN_VERIFIER_MS =
   CLICK_VERIFIER_READBACK_MAX_MS + NEW_TAB_OBSERVE_VERIFIER_CAP_BUFFER_MS;
+const FILL_PENDING_DOCUMENT_WAIT_MS = 5000;
+const FILL_CONTENT_MESSAGE_RETRY_DELAY_MS = 450;
 
 interface Coordinates {
   x: number;
@@ -152,6 +154,10 @@ function inferInteractionSchemeGuard(url: string): InteractionSchemeGuard {
     unsupportedPageType: 'non_web_tab',
     recommendedAction: 'switch_to_http_tab',
   };
+}
+
+function getTabNavigationUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {
+  return String(tab.url || tab.pendingUrl || '');
 }
 
 function createUnsupportedTabResponse(
@@ -1070,6 +1076,20 @@ interface FillToolParams {
 class FillTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.FILL;
 
+  private async sendFillMessageWithRetry(
+    tabId: number,
+    message: Record<string, unknown>,
+    frameId?: number,
+  ): Promise<any> {
+    try {
+      return await this.sendMessageToTab(tabId, message, frameId);
+    } catch (error) {
+      await this.sleep(FILL_CONTENT_MESSAGE_RETRY_DELAY_MS);
+      await this.injectContentScript(tabId, ['inject-scripts/fill-helper.js']);
+      return await this.sendMessageToTab(tabId, message, frameId);
+    }
+  }
+
   /**
    * Execute fill operation
    */
@@ -1090,11 +1110,24 @@ class FillTool extends BaseBrowserToolExecutor {
 
     try {
       const explicit = await this.tryGetTab(args.tabId);
-      const tab = explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
+      let tab = explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
       if (!tab.id) {
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
       }
-      const schemeGuard = inferInteractionSchemeGuard(String(tab.url || ''));
+      const tabId = tab.id;
+      const initialNavigationUrl = getTabNavigationUrl(tab);
+      if (
+        explicit &&
+        (tab.status === 'loading' || !tab.url) &&
+        /^https?:\/\//i.test(initialNavigationUrl)
+      ) {
+        const settleResult = await this.waitForTabSettled(tabId, {
+          timeoutMs: FILL_PENDING_DOCUMENT_WAIT_MS,
+        });
+        tab = settleResult.tab;
+      }
+
+      const schemeGuard = inferInteractionSchemeGuard(getTabNavigationUrl(tab));
       if (!schemeGuard.allowed) {
         return createUnsupportedTabResponse('fill', tab, schemeGuard);
       }
@@ -1104,7 +1137,7 @@ class FillTool extends BaseBrowserToolExecutor {
         explicitSelector: selector,
         explicitSelectorType: selectorType,
         candidateAction: args.candidateAction,
-        tabId: tab.id,
+        tabId,
         lookupStableTargetRef,
       });
 
@@ -1132,10 +1165,10 @@ class FillTool extends BaseBrowserToolExecutor {
 
       // If selector is XPath, convert to ref first
       if (finalSelector && finalSelectorType === 'xpath') {
-        await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
+        await this.injectContentScript(tabId, ['inject-scripts/accessibility-tree-helper.js']);
         try {
           const resolved = await this.sendMessageToTab(
-            tab.id,
+            tabId,
             {
               action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
               selector: finalSelector,
@@ -1158,11 +1191,11 @@ class FillTool extends BaseBrowserToolExecutor {
         }
       }
 
-      await this.injectContentScript(tab.id, ['inject-scripts/fill-helper.js']);
+      await this.injectContentScript(tabId, ['inject-scripts/fill-helper.js']);
 
       // Send fill message to content script
-      const result = await this.sendMessageToTab(
-        tab.id,
+      const result = await this.sendFillMessageWithRetry(
+        tabId,
         {
           action: TOOL_MESSAGE_TYPES.FILL_ELEMENT,
           selector: finalSelector,
