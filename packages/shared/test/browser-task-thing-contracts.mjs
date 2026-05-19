@@ -240,6 +240,85 @@ assert.equal(mappedProjection.sourceLineage, 'dom');
 assert.deepEqual(mappedProjection.regionEvidenceRefs, ['region:search_results', 'row:row_001']);
 assert.ok(mappedProjection.contextSavedChars > 0);
 
+const longContentProjection = buildBrowserPageThingProjectionFromReadPage({
+  snapshot: {
+    mode: 'compact',
+    page: {
+      url: 'https://example.test/share/long-content',
+      title: 'Shared Long Content',
+      pageType: 'web_page',
+    },
+    summary: {
+      pageRole: 'unknown',
+      primaryRegion: 'viewport',
+      quality: 'usable',
+    },
+    interactiveElements: [],
+    artifactRefs: [],
+    selectedDataSource: 'markdown',
+    readinessVerdict: 'ready',
+    renderMode: 'markdown',
+    markdown: 'Short markdown projection of sidebar and top objects.',
+    completeTextRegion: {
+      sourceDataSource: 'web_content_text',
+      sourceRoute: 'visible_text_sample',
+      charCount: 12200,
+      normalizedLength: 11644,
+      lineCount: 334,
+      completeTextAvailable: true,
+      structureSparse: false,
+      contentSparse: false,
+      quality: 'usable',
+      recommendation: 'use_chrome_get_web_content_for_full_body',
+      reason: 'complete_visible_text_available',
+    },
+    visibleRegionRows: {
+      sourceDataSource: 'dom_region_rows',
+      rows: [],
+      rowCount: 0,
+      visibleRegionRowsUsed: false,
+      visibleRegionRowsRejectedReason: 'markdown_reading_surface_preferred',
+      sourceRegion: 'viewport',
+      rowExtractionConfidence: 0,
+      cardExtractorUsed: false,
+      cardPatternConfidence: 0,
+      cardRowsCount: 0,
+      rowOrder: 'visual_order',
+      targetRefCoverageRate: 0,
+      regionQualityScore: 0,
+      visibleDomRowsCandidateCount: 0,
+      visibleDomRowsSelectedCount: 0,
+      lowValueRegionRejectedCount: 0,
+      footerLikeRejectedCount: 0,
+      navigationLikeRejectedCount: 0,
+      targetRefCoverageRejectedCount: 0,
+      rejectedRegionReasonDistribution: {},
+      pageInfo: {
+        url: 'https://example.test/share/long-content',
+        title: 'Shared Long Content',
+        viewport: { width: 1280, height: 720, dpr: 1 },
+        scrollY: 0,
+        pixelsAbove: 0,
+        pixelsBelow: 0,
+        visibleRegionCount: 1,
+        candidateRegionCount: 1,
+      },
+    },
+  },
+  projectionId: 'projection_from_long_content',
+  observedAt: '2026-05-18T00:00:02.500Z',
+  pageId: 'page_long_content',
+  tabId: 654,
+  ownerType: 'run_owned',
+  contextVersion: 'ctx_long_content',
+  previousContextChars: 16000,
+});
+
+assert.equal(longContentProjection.chosenDataSource, 'markdown');
+assert.equal(longContentProjection.sourceLineage, 'text');
+assert.equal(longContentProjection.contextChars, 11644);
+assert.equal(longContentProjection.contextSavedChars, 4356);
+
 const viewportSearchProjection = buildBrowserPageThingProjectionFromReadPage({
   snapshot: {
     mode: 'compact',

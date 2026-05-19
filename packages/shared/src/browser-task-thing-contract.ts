@@ -568,6 +568,7 @@ function hasStrongVisibleResultRows(snapshot: ReadPageCompactSnapshot): boolean 
 }
 
 function chooseProjectionDataSource(snapshot: ReadPageCompactSnapshot): ReadPageSelectedDataSource {
+  if (shouldPreferCompleteTextRegion(snapshot)) return 'markdown';
   if (snapshot.selectedDataSource) return snapshot.selectedDataSource;
   if (snapshot.kind) return snapshot.kind;
   if (snapshot.visibleRegionRows?.visibleRegionRowsUsed) return 'dom_region_rows';
@@ -576,6 +577,11 @@ function chooseProjectionDataSource(snapshot: ReadPageCompactSnapshot): ReadPage
 }
 
 function estimateSnapshotContextChars(snapshot: ReadPageCompactSnapshot): number {
+  if (shouldPreferCompleteTextRegion(snapshot)) {
+    return (
+      snapshot.completeTextRegion?.normalizedLength ?? snapshot.completeTextRegion?.charCount ?? 0
+    );
+  }
   if (snapshot.markdown) return snapshot.markdown.length;
   if (
     snapshot.visibleRegionRows?.visibleRegionRowsUsed &&
@@ -606,6 +612,34 @@ function estimateSnapshotContextChars(snapshot: ReadPageCompactSnapshot): number
   if (structuralChars > 2) return structuralChars;
 
   return snapshot.summary.pageRole.length + (snapshot.summary.primaryRegion?.length ?? 0);
+}
+
+function shouldPreferCompleteTextRegion(snapshot: ReadPageCompactSnapshot): boolean {
+  const completeText = snapshot.completeTextRegion;
+  if (!completeText?.completeTextAvailable) return false;
+
+  const completeTextLength = completeText.normalizedLength || completeText.charCount || 0;
+  if (completeTextLength < 500) return false;
+
+  const inlineMarkdownLength = snapshot.markdown?.length ?? 0;
+  if (inlineMarkdownLength > 0 && completeTextLength >= inlineMarkdownLength * 2) {
+    return true;
+  }
+
+  const rowChars =
+    snapshot.visibleRegionRows?.rows.reduce((total, row) => {
+      return (
+        total +
+        row.title.length +
+        (row.primaryText?.length ?? 0) +
+        (row.secondaryText?.length ?? 0) +
+        (row.summary?.length ?? 0) +
+        (row.metaText?.length ?? 0) +
+        (row.interactionText?.length ?? 0)
+      );
+    }, 0) ?? 0;
+
+  return rowChars > 0 && completeTextLength >= rowChars * 2;
 }
 
 function collectVisibleRowTargetRefs(snapshot: ReadPageCompactSnapshot): string[] {
