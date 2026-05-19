@@ -56,6 +56,22 @@ export function buildVisibleRowsRejectionReason(visibleRows: TaskVisibleRegionRo
   return 'dom_region_rows_not_selected';
 }
 
+function inferDomRegionRowsSemanticRegion(
+  decision: ChooseContextDecisionSnapshot | DataSourceDecision | null,
+  visibleRows: TaskVisibleRegionRowsData,
+): string {
+  const sourceRegion = visibleRows.sourceRegion || 'viewport';
+  if (sourceRegion !== 'viewport') return sourceRegion;
+
+  const taskIntent = inferDomRegionRowsTaskIntent(
+    decision as ChooseContextDecisionSnapshot | null,
+    visibleRows,
+  );
+  if (taskIntent === 'search_list') return 'result_list';
+
+  return sourceRegion;
+}
+
 export function buildDomRegionRowsSuccessResult(args: {
   requestedLayer: ReadPageRequestedLayer;
   routerDecision: DataSourceDecision;
@@ -141,18 +157,19 @@ function buildDomRegionRowsPageProjection(
   },
 ) {
   const observedAt = new Date().toISOString();
+  const taskIntent = inferDomRegionRowsTaskIntent(
+    args.routerDecision as unknown as ChooseContextDecisionSnapshot,
+    args.visibleRows,
+  );
+  const semanticRegion = inferDomRegionRowsSemanticRegion(args.routerDecision, args.visibleRows);
   const snapshot = {
     ...payload,
     kind: 'dom_region_rows',
     selectedDataSource: 'dom_region_rows',
     readinessVerdict: 'ready',
     summary: {
-      pageRole:
-        inferDomRegionRowsTaskIntent(
-          args.routerDecision as unknown as ChooseContextDecisionSnapshot,
-          args.visibleRows,
-        ) ?? 'search_list',
-      primaryRegion: args.visibleRows.sourceRegion,
+      pageRole: taskIntent ?? 'search_list',
+      primaryRegion: semanticRegion,
       primaryRegionConfidence: args.visibleRows.rowExtractionConfidence,
       footerOnly: false,
       anchorTexts: [],
@@ -162,7 +179,7 @@ function buildDomRegionRowsPageProjection(
       rows: args.visibleRows.rows,
       rowCount: args.visibleRows.rowCount,
       visibleRegionRowsUsed: true,
-      sourceRegion: args.visibleRows.sourceRegion,
+      sourceRegion: semanticRegion,
       rowExtractionConfidence: args.visibleRows.rowExtractionConfidence,
       cardExtractorUsed: args.visibleRows.cardExtractorUsed,
       cardPatternConfidence: args.visibleRows.cardPatternConfidence,
@@ -190,7 +207,7 @@ function buildDomRegionRowsPageProjection(
     previousContextVersion: null,
     changedByActionId: null,
     changeCause: 'unknown',
-    changedRegions: [args.visibleRows.sourceRegion],
+    changedRegions: [semanticRegion],
     reusedRegions: [],
     invalidatedRefs: [],
     refreshedRefs: args.visibleRows.rows
