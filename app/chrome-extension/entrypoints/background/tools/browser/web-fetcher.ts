@@ -13,6 +13,31 @@ interface WebFetcherToolParams {
   windowId?: number; // target window id to pick active tab or create tab
 }
 
+const WEB_FETCHER_CONTENT_MESSAGE_TIMEOUT_MS = 15_000;
+const WEB_FETCHER_CONTENT_MESSAGE_RETRY_DELAY_MS = 1_000;
+const WEB_FETCHER_CREATE_TAB_TIMEOUT_MS = 5_000;
+const WEB_FETCHER_CREATE_TAB_RECOVERY_DELAY_MS = 250;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+}
+
 function summarizeVisibleText(text: string) {
   const normalized = (text || '').replace(/\s+/g, ' ').trim();
   const lineCount = (text || '')
@@ -46,8 +71,91 @@ function summarizeVisibleText(text: string) {
   };
 }
 
+function getTabUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {
+  return tab.url || tab.pendingUrl || '';
+}
+
+function normalizeComparableUrl(url?: string): string {
+  if (!url) return '';
+  try {
+    const parsed = new URL(url);
+    const normalizedPath =
+      parsed.pathname !== '/' && parsed.pathname.endsWith('/')
+        ? parsed.pathname.slice(0, -1)
+        : parsed.pathname || '/';
+    return `${parsed.origin}${normalizedPath}${parsed.search}`;
+  } catch {
+    return url.trim();
+  }
+}
+
+async function findCreatedTabAfterTimeout(input: {
+  url: string;
+  windowId?: number;
+  existingTabIds: ReadonlySet<number>;
+}): Promise<chrome.tabs.Tab | null> {
+  await delay(WEB_FETCHER_CREATE_TAB_RECOVERY_DELAY_MS);
+  const targetUrl = normalizeComparableUrl(input.url);
+  const tabs =
+    typeof input.windowId === 'number'
+      ? await chrome.tabs.query({ windowId: input.windowId })
+      : await chrome.tabs.query({});
+  return (
+    tabs.find((tab) => {
+      if (typeof tab.id !== 'number' || input.existingTabIds.has(tab.id)) return false;
+      const tabUrl = normalizeComparableUrl(getTabUrl(tab));
+      return tabUrl === targetUrl;
+    }) || null
+  );
+}
+
 class WebFetcherTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.WEB_FETCHER;
+
+  private async sendContentRequestWithRetry(
+    tabId: number,
+    message: unknown,
+  ): Promise<{
+    response: any;
+    attempts: number;
+    timedOut: boolean;
+  }> {
+    let firstError: unknown = null;
+    try {
+      return {
+        response: await withTimeout(
+          this.sendMessageToTab(tabId, message),
+          WEB_FETCHER_CONTENT_MESSAGE_TIMEOUT_MS,
+          `Web fetcher content request timed out after ${WEB_FETCHER_CONTENT_MESSAGE_TIMEOUT_MS}ms`,
+        ),
+        attempts: 1,
+        timedOut: false,
+      };
+    } catch (error) {
+      firstError = error;
+    }
+
+    await delay(WEB_FETCHER_CONTENT_MESSAGE_RETRY_DELAY_MS);
+    await this.injectContentScript(tabId, ['inject-scripts/web-fetcher-helper.js']);
+
+    try {
+      return {
+        response: await withTimeout(
+          this.sendMessageToTab(tabId, message),
+          WEB_FETCHER_CONTENT_MESSAGE_TIMEOUT_MS,
+          `Web fetcher content request retry timed out after ${WEB_FETCHER_CONTENT_MESSAGE_TIMEOUT_MS}ms`,
+        ),
+        attempts: 2,
+        timedOut: firstError instanceof Error && /timed out/i.test(firstError.message),
+      };
+    } catch (secondError) {
+      throw new Error(
+        `Web fetcher content request failed after retry: ${
+          secondError instanceof Error ? secondError.message : String(secondError)
+        }`,
+      );
+    }
+  }
 
   /**
    * Execute web fetcher operation
@@ -72,6 +180,15 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
     try {
       // Get tab to fetch content from
       let tab;
+      let createdTabForUrl = false;
+      let createTimedOutRecovered = false;
+      let settleMetadata: {
+        settled: boolean;
+        timedOut: boolean;
+        reason: string;
+        waitedMs: number;
+        readyState: string | null;
+      } | null = null;
 
       if (typeof explicitTabId === 'number') {
         tab = await chrome.tabs.get(explicitTabId);
@@ -95,15 +212,46 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
         } else {
           // Create new tab with the URL
           console.log(`No existing tab found with URL: ${url}, creating new tab`);
-          tab = await chrome.tabs.create({
-            url,
-            active: background ? false : true,
-            ...(typeof windowId === 'number' ? { windowId } : {}),
-          });
+          const existingTabIds = new Set(
+            allTabs
+              .map((existingTab) => existingTab.id)
+              .filter((id): id is number => typeof id === 'number'),
+          );
+          try {
+            tab = await withTimeout(
+              chrome.tabs.create({
+                url,
+                active: background ? false : true,
+                ...(typeof windowId === 'number' ? { windowId } : {}),
+              }),
+              WEB_FETCHER_CREATE_TAB_TIMEOUT_MS,
+              `Web fetcher tab creation timed out after ${WEB_FETCHER_CREATE_TAB_TIMEOUT_MS}ms`,
+            );
+          } catch (createError) {
+            const recoveredTab = await findCreatedTabAfterTimeout({
+              url,
+              windowId,
+              existingTabIds,
+            });
+            if (!recoveredTab) {
+              throw createError;
+            }
+            tab = recoveredTab;
+            createTimedOutRecovered = true;
+          }
+          createdTabForUrl = true;
 
           if (tab.id) {
             console.log('Waiting for newly opened tab to settle...');
-            tab = (await this.waitForTabSettled(tab.id)).tab;
+            const settleResult = await this.waitForTabSettled(tab.id);
+            tab = settleResult.tab;
+            settleMetadata = {
+              settled: settleResult.settled,
+              timedOut: settleResult.timedOut,
+              reason: settleResult.reason,
+              waitedMs: settleResult.waitedMs,
+              readyState: settleResult.readyState,
+            };
           }
         }
       } else {
@@ -133,18 +281,30 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
       // Prepare result object
       const result: any = {
         success: true,
+        tabId: tab.id,
+        windowId: tab.windowId,
         url: tab.url,
         title: tab.title,
+        createdTabForUrl,
+        createTimedOutRecovered,
       };
+      if (settleMetadata) {
+        result.settle = settleMetadata;
+      }
 
       await this.injectContentScript(tab.id, ['inject-scripts/web-fetcher-helper.js']);
 
       // Get HTML content if requested
       if (htmlContent) {
-        const htmlResponse = await this.sendMessageToTab(tab.id, {
+        const htmlRequest = await this.sendContentRequestWithRetry(tab.id, {
           action: TOOL_MESSAGE_TYPES.WEB_FETCHER_GET_HTML_CONTENT,
           selector: selector,
         });
+        const htmlResponse = htmlRequest.response;
+        result.htmlContentRequest = {
+          attempts: htmlRequest.attempts,
+          timedOutBeforeRetry: htmlRequest.timedOut,
+        };
 
         if (htmlResponse.success) {
           result.htmlContent = htmlResponse.htmlContent;
@@ -162,10 +322,15 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
 
       // Get text content if requested (and htmlContent is not true)
       if (textContent) {
-        const textResponse = await this.sendMessageToTab(tab.id, {
+        const textRequest = await this.sendContentRequestWithRetry(tab.id, {
           action: TOOL_MESSAGE_TYPES.WEB_FETCHER_GET_TEXT_CONTENT,
           selector: selector,
         });
+        const textResponse = textRequest.response;
+        result.textContentRequest = {
+          attempts: textRequest.attempts,
+          timedOutBeforeRetry: textRequest.timedOut,
+        };
 
         if (textResponse.success) {
           result.textContent = textResponse.textContent;
@@ -207,6 +372,14 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
           console.error('Failed to get text content:', textResponse.error);
           result.textContentError = textResponse.error;
         }
+      }
+
+      try {
+        const latestTab = await chrome.tabs.get(tab.id);
+        result.url = latestTab.url || result.url;
+        result.title = latestTab.title || result.title;
+      } catch {
+        // The user may close the tab after extraction; keep the metadata already captured.
       }
 
       // Interactive elements feature has been removed

@@ -1116,4 +1116,75 @@ describe('native host reconnect behavior', () => {
     });
     expect(readPageResult.payload.data.content[0].text).toContain('"dom_region_rows"');
   });
+
+  it('allows web content extraction to finish on slow real documents beyond default timeout', async () => {
+    const firstPort = createMockPort();
+    const harness = createChromeHarness([firstPort]);
+    const wsHarness = createMockWebSocketHarness();
+    (globalThis as any).chrome = harness.chromeMock;
+    (globalThis as any).WebSocket = wsHarness.MockWebSocket as any;
+
+    const toolsModule = await import('@/entrypoints/background/tools');
+    vi.mocked(toolsModule.handleCallTool).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    success: true,
+                    textLength: 12_000,
+                    completeTextAvailable: true,
+                  }),
+                },
+              ],
+              isError: false,
+            } as any);
+          }, 45_000);
+        }),
+    );
+
+    const nativeHostModule = await import('@/entrypoints/background/native-host');
+    nativeHostModule.initNativeHostListener();
+    await flushMicrotasks();
+
+    wsHarness.instances[0].emitOpen();
+    await flushMicrotasks();
+    wsHarness.instances[0].sent.length = 0;
+
+    wsHarness.instances[0].emitMessage({
+      type: 'command',
+      requestId: 'req-web-content',
+      connectionId: 'bridge-1',
+      sentAt: Date.now(),
+      command: {
+        action: 'call_tool',
+        payload: {
+          name: 'chrome_get_web_content',
+          args: { url: 'https://nextjs.org/docs/app/getting-started/installation' },
+        },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(15_000);
+    await flushMicrotasks();
+    expect(
+      wsHarness.instances[0].sent
+        .map((entry) => JSON.parse(entry))
+        .find((entry) => entry.requestId === 'req-web-content'),
+    ).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await flushMicrotasks();
+    const webContentResult = wsHarness.instances[0].sent
+      .map((entry) => JSON.parse(entry))
+      .find((entry) => entry.requestId === 'req-web-content');
+    expect(webContentResult).toMatchObject({
+      type: 'result',
+      requestId: 'req-web-content',
+      success: true,
+    });
+    expect(webContentResult.payload.data.content[0].text).toContain('"completeTextAvailable"');
+  });
 });

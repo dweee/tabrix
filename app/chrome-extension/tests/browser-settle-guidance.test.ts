@@ -726,6 +726,14 @@ describe('browser settle guidance', () => {
         'Line one describes the feature in detail.\nLine two explains the safe path for browser automation.\nLine three confirms the page is stable and ready for structured extraction.\nLine four adds enough visible text to move this sample beyond sparse mode.',
       metadata: { lang: 'en' },
     });
+    vi.mocked(chrome.tabs.get).mockResolvedValue({
+      id: 20,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'http://127.0.0.1:62100/page2',
+      title: 'Settled Page',
+    } as chrome.tabs.Tab);
 
     const result = await webFetcherTool.execute({
       url: 'http://127.0.0.1:62100/page2',
@@ -736,13 +744,160 @@ describe('browser settle guidance', () => {
     const payload = JSON.parse((result.content[0] as { text: string }).text);
     expect(payload).toMatchObject({
       success: true,
+      tabId: 20,
+      createdTabForUrl: true,
       url: 'http://127.0.0.1:62100/page2',
       title: 'Settled Page',
+      settle: {
+        settled: true,
+        timedOut: false,
+        reason: 'complete',
+      },
+      textContentRequest: {
+        attempts: 1,
+        timedOutBeforeRetry: false,
+      },
     });
     expect(payload.textSummary).toMatchObject({
       quality: 'usable',
       sparse: false,
     });
+  });
+
+  it('retries visible text extraction when the first content request hangs', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: false,
+        status: 'complete',
+        url: 'https://nextjs.org/docs/app/getting-started/installation',
+        title: 'Getting Started: Installation | Next.js',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 200,
+      readyState: 'complete',
+    });
+    const injectContentScript = vi
+      .spyOn(webFetcherTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+    const sendMessageToTab = vi
+      .spyOn(webFetcherTool as any, 'sendMessageToTab')
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockResolvedValueOnce({
+        success: true,
+        textContent:
+          'Manual installation. Create a new Next.js app. Terminal examples and package manager options are visible in the page body. This text proves the real document body can be extracted after a bounded retry.',
+        article: {
+          title: 'Getting Started: Installation',
+          byline: 'Vercel',
+          siteName: 'Next.js',
+          excerpt: '',
+        },
+      });
+
+    const executePromise = webFetcherTool.execute({
+      url: 'https://nextjs.org/docs/app/getting-started/installation',
+      background: true,
+      textContent: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    const result = await executePromise;
+
+    expect(result.isError).toBe(false);
+    expect(injectContentScript).toHaveBeenCalledTimes(2);
+    expect(sendMessageToTab).toHaveBeenCalledTimes(2);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      tabId: 20,
+      createdTabForUrl: true,
+      textContentRequest: {
+        attempts: 2,
+        timedOutBeforeRetry: true,
+      },
+      article: {
+        title: 'Getting Started: Installation',
+        byline: 'Vercel',
+      },
+    });
+    expect(payload.textContent).toContain('Manual installation');
+    vi.useRealTimers();
+  });
+
+  it('recovers a readable web content tab when tab creation times out after the document appears', async () => {
+    vi.useFakeTimers();
+    vi.mocked(chrome.tabs.query)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 20,
+          windowId: 1,
+          active: false,
+          status: 'loading',
+          url: 'https://nextjs.org/docs/app/getting-started/installation',
+          pendingUrl: undefined,
+          title: 'Getting Started: Installation | Next.js',
+        } as chrome.tabs.Tab,
+      ]);
+    vi.mocked(chrome.tabs.create).mockImplementation(() => new Promise<chrome.tabs.Tab>(() => {}));
+    vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: false,
+        status: 'complete',
+        url: 'https://nextjs.org/docs/app/getting-started/installation',
+        title: 'Getting Started: Installation | Next.js',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 200,
+      readyState: 'complete',
+    });
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(webFetcherTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      textContent:
+        'Next.js installation docs are visible after recovering the tab created by Chrome even though tabs.create did not resolve in time.',
+    });
+    vi.mocked(chrome.tabs.get).mockResolvedValue({
+      id: 20,
+      windowId: 1,
+      active: false,
+      status: 'complete',
+      url: 'https://nextjs.org/docs/app/getting-started/installation',
+      title: 'Getting Started: Installation | Next.js',
+    } as chrome.tabs.Tab);
+
+    const executePromise = webFetcherTool.execute({
+      url: 'https://nextjs.org/docs/app/getting-started/installation',
+      background: true,
+      textContent: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(250);
+    const result = await executePromise;
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      tabId: 20,
+      createdTabForUrl: true,
+      createTimedOutRecovered: true,
+      url: 'https://nextjs.org/docs/app/getting-started/installation',
+      title: 'Getting Started: Installation | Next.js',
+    });
+    expect(payload.textContent).toContain('recovering the tab');
+    vi.useRealTimers();
   });
 
   it('does not treat long single-line article text as incomplete sparse content', async () => {
