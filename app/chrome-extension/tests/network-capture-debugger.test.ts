@@ -311,6 +311,88 @@ describe('V27-CDP-01 network debugger controlled evidence', () => {
     expect(stopPayload.requests[0].safeResponseSummary.rows[0]).not.toHaveProperty('objectID');
   });
 
+  it('compacts top-level row arrays even when the response key is site-defined', async () => {
+    sendCommandMock.mockImplementation(async (_tabId: number, method: string) => {
+      if (method === 'Network.getResponseBody') {
+        return {
+          body: JSON.stringify({
+            crates: [
+              {
+                name: 'browser-automation',
+                description: 'Control browsers for automated workflow testing.',
+                downloads: 12345,
+                max_version: '1.2.3',
+                repository_url: 'https://example.test/browser-automation',
+              },
+            ],
+            meta: { total: 1 },
+          }),
+          base64Encoded: false,
+        };
+      }
+      return {};
+    });
+    const start = await networkDebuggerStartTool.execute({
+      tabId: 88,
+      maxCaptureTime: 0,
+      inactivityTimeout: 0,
+    });
+    expect(start.isError).toBe(false);
+
+    const emitDebuggerEvent = (
+      networkDebuggerStartTool as unknown as {
+        handleDebuggerEvent: DebuggerListener;
+      }
+    ).handleDebuggerEvent.bind(networkDebuggerStartTool);
+
+    emitDebuggerEvent({ tabId: 88 }, 'Network.requestWillBeSent', {
+      requestId: 'site-defined-list',
+      request: {
+        url: 'https://api.registry.example.test/v1/search?q=browser%20automation',
+        method: 'GET',
+      },
+      type: 'XHR',
+      timestamp: 100,
+    });
+    emitDebuggerEvent({ tabId: 88 }, 'Network.responseReceived', {
+      requestId: 'site-defined-list',
+      type: 'XHR',
+      timestamp: 101,
+      response: {
+        url: 'https://api.registry.example.test/v1/search?q=browser%20automation',
+        status: 200,
+        statusText: 'OK',
+        mimeType: 'application/json',
+        headers: { 'content-type': 'application/json' },
+      },
+    });
+    await emitDebuggerEvent({ tabId: 88 }, 'Network.loadingFinished', {
+      requestId: 'site-defined-list',
+      encodedDataLength: 128,
+    });
+
+    const stop = await networkDebuggerStopTool.execute({ tabId: 88 });
+    const stopPayload = JSON.parse(String(stop.content[0].text));
+
+    expect(stop.isError).toBe(false);
+    expect(stopPayload.requests[0].safeResponseSummary).toMatchObject({
+      rejectedReason: null,
+      rowCount: 1,
+      fieldShapeSummaryAvailable: true,
+      rows: [
+        {
+          name: 'browser-automation',
+          description: 'Control browsers for automated workflow testing.',
+          downloads: 12345,
+          max_version: '1.2.3',
+        },
+      ],
+    });
+    expect(stopPayload.requests[0].safeResponseSummary.rows[0]).not.toHaveProperty(
+      'repository_url',
+    );
+  });
+
   it('waits for an in-flight response body summary before stopping capture', async () => {
     let bodyRequested = false;
     sendCommandMock.mockImplementation(async (_tabId: number, method: string) => {

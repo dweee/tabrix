@@ -187,6 +187,7 @@ function selectSummaryRows(parsed: unknown): {
         break;
       }
     }
+    if (!list) list = selectTopLevelRowLikeArray(parsedObject);
   }
   if (!list) return { rows: [], listLength: null };
   const nestedList = flattenNestedSummaryRows(list, arrayKeys);
@@ -206,6 +207,31 @@ function selectSummaryRows(parsed: unknown): {
     if (Object.keys(row).length > 0) rows.push(row);
   }
   return { rows, listLength: list.length };
+}
+
+function selectTopLevelRowLikeArray(parsedObject: Record<string, unknown>): unknown[] | null {
+  for (const key of Object.keys(parsedObject).slice(0, MAX_KEYS_PER_ROW)) {
+    if (shouldDropSummaryField(key)) continue;
+    const candidate = parsedObject[key];
+    if (isRowLikeSummaryArray(candidate)) return candidate;
+  }
+  return null;
+}
+
+function isRowLikeSummaryArray(candidate: unknown): candidate is unknown[] {
+  if (!Array.isArray(candidate)) return false;
+  return candidate.slice(0, MAX_ROWS).some((raw) => countCompactSummaryFields(raw) >= 2);
+}
+
+function countCompactSummaryFields(raw: unknown): number {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return 0;
+  let count = 0;
+  const rawObject = raw as Record<string, unknown>;
+  for (const key of Object.keys(rawObject).slice(0, MAX_KEYS_PER_ROW)) {
+    if (shouldDropSummaryField(key)) continue;
+    if (compactSamplerScalarValue(key, rawObject[key]) !== undefined) count += 1;
+  }
+  return count;
 }
 
 function flattenNestedSummaryRows(list: unknown[], arrayKeys: string[]): unknown[] {
@@ -555,8 +581,11 @@ function buildMainWorldSampler(args: {
           break;
         }
       }
+      if (!list) list = selectTopLevelRowLikeArray(parsedObject);
     }
     if (!list) return { rows: [], listLength: null };
+    const nestedList = flattenNestedSummaryRows(list, arrayKeys);
+    if (nestedList.length > 0) list = nestedList;
     const rows: Array<Record<string, string | number | boolean | null>> = [];
     for (const raw of list.slice(0, 10)) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
@@ -572,6 +601,48 @@ function buildMainWorldSampler(args: {
       if (Object.keys(row).length > 0) rows.push(row);
     }
     return { rows, listLength: list.length };
+  }
+
+  function selectTopLevelRowLikeArray(parsedObject: Record<string, unknown>): unknown[] | null {
+    for (const key of Object.keys(parsedObject).slice(0, 12)) {
+      if (shouldDropSummaryField(key)) continue;
+      const candidate = parsedObject[key];
+      if (isRowLikeSummaryArray(candidate)) return candidate;
+    }
+    return null;
+  }
+
+  function isRowLikeSummaryArray(candidate: unknown): candidate is unknown[] {
+    if (!Array.isArray(candidate)) return false;
+    return candidate.slice(0, 10).some((raw) => countCompactSummaryFields(raw) >= 2);
+  }
+
+  function countCompactSummaryFields(raw: unknown): number {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return 0;
+    let count = 0;
+    const rawObject = raw as Record<string, unknown>;
+    for (const key of Object.keys(rawObject).slice(0, 12)) {
+      if (shouldDropSummaryField(key)) continue;
+      if (compactSamplerScalarValue(key, rawObject[key]) !== undefined) count += 1;
+    }
+    return count;
+  }
+
+  function flattenNestedSummaryRows(list: unknown[], arrayKeys: string[]): unknown[] {
+    const nested: unknown[] = [];
+    for (const raw of list.slice(0, 10)) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+      const rawObject = raw as Record<string, unknown>;
+      for (const key of arrayKeys) {
+        const child = rawObject[key];
+        if (!Array.isArray(child)) continue;
+        const rowLike = child.filter(
+          (item) => item && typeof item === 'object' && !Array.isArray(item),
+        );
+        if (rowLike.length > 0) nested.push(...rowLike);
+      }
+    }
+    return nested.slice(0, 10);
   }
 
   function containsSensitiveField(parsed: unknown): boolean {
