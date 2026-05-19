@@ -222,6 +222,12 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
    * Execute web fetcher operation
    */
   async execute(args: WebFetcherToolParams): Promise<ToolResult> {
+    const operationStartedAt = Date.now();
+    const phaseTimings: Record<string, number> = {};
+    const recordPhaseTiming = (key: string, startedAt: number) => {
+      phaseTimings[key] = Date.now() - startedAt;
+    };
+
     // Handle mutually exclusive parameters: if htmlContent is true, textContent is forced to false
     const htmlContent = args.htmlContent === true;
     const textContent = htmlContent ? false : args.textContent !== false; // Default is true, unless htmlContent is true or textContent is explicitly set to false
@@ -256,6 +262,7 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
         readyState: string | null;
       } | null = null;
 
+      const resolveTabStartedAt = Date.now();
       if (typeof explicitTabId === 'number') {
         tab = await chrome.tabs.get(explicitTabId);
       } else if (url) {
@@ -333,6 +340,7 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
         }
         tab = tabs[0];
       }
+      recordPhaseTiming('resolveTabMs', resolveTabStartedAt);
 
       if (!tab.id) {
         return createErrorResponse('Tab has no ID');
@@ -340,10 +348,12 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
 
       // Optionally bring tab/window to foreground
       if (!background) {
+        const focusStartedAt = Date.now();
         await this.ensureFocus(tab, {
           activate: true,
           focusWindow: true,
         });
+        recordPhaseTiming('focusMs', focusStartedAt);
       }
 
       // Prepare result object
@@ -360,14 +370,18 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
         result.settle = settleMetadata;
       }
 
+      const injectStartedAt = Date.now();
       await this.injectContentScript(tab.id, ['inject-scripts/web-fetcher-helper.js']);
+      recordPhaseTiming('injectContentScriptMs', injectStartedAt);
 
       // Get HTML content if requested
       if (htmlContent) {
+        const htmlRequestStartedAt = Date.now();
         const htmlRequest = await this.sendContentRequestWithRetry(tab.id, {
           action: TOOL_MESSAGE_TYPES.WEB_FETCHER_GET_HTML_CONTENT,
           selector: selector,
         });
+        recordPhaseTiming('htmlContentRequestMs', htmlRequestStartedAt);
         const htmlResponse = htmlRequest.response;
         result.htmlContentRequest = {
           attempts: htmlRequest.attempts,
@@ -390,6 +404,7 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
 
       // Get text content if requested (and htmlContent is not true)
       if (textContent) {
+        const textRequestStartedAt = Date.now();
         const textRequest = await this.sendTextRequestWithDynamicContentRetry(
           tab.id,
           {
@@ -401,6 +416,7 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
             retryEmptyContent: createdTabForUrl && !selector,
           },
         );
+        recordPhaseTiming('textContentRequestMs', textRequestStartedAt);
         const textResponse = textRequest.response;
         result.textContentRequest = {
           attempts: textRequest.attempts,
@@ -453,12 +469,19 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
       }
 
       try {
+        const refreshMetadataStartedAt = Date.now();
         const latestTab = await chrome.tabs.get(tab.id);
         result.url = latestTab.url || result.url;
         result.title = latestTab.title || result.title;
+        recordPhaseTiming('refreshTabMetadataMs', refreshMetadataStartedAt);
       } catch {
         // The user may close the tab after extraction; keep the metadata already captured.
       }
+
+      result.timing = {
+        ...phaseTimings,
+        totalMs: Date.now() - operationStartedAt,
+      };
 
       // Interactive elements feature has been removed
 

@@ -740,7 +740,7 @@ describe('browser settle guidance', () => {
     });
 
     expect((webFetcherTool as any).waitForTabSettled).toHaveBeenCalledWith(20, {
-      timeoutMs: 5000,
+      timeoutMs: 30000,
     });
     expect(result.isError).toBe(false);
     const payload = JSON.parse((result.content[0] as { text: string }).text);

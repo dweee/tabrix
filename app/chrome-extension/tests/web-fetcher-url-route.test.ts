@@ -79,6 +79,16 @@ describe('web fetcher URL route', () => {
       },
     });
     expect(payload.textSummary.completeTextAvailable).toBe(true);
+    expect(payload.timing).toEqual(
+      expect.objectContaining({
+        resolveTabMs: expect.any(Number),
+        focusMs: expect.any(Number),
+        injectContentScriptMs: expect.any(Number),
+        textContentRequestMs: expect.any(Number),
+        refreshTabMetadataMs: expect.any(Number),
+        totalMs: expect.any(Number),
+      }),
+    );
   });
 
   it('still honors an explicit URL settle budget', async () => {
