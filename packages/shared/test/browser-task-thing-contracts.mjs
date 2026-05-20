@@ -401,6 +401,7 @@ const viewportSearchProjection = buildBrowserPageThingProjectionFromReadPage({
 });
 
 assert.equal(viewportSearchProjection.activeRegion, 'result_list');
+assert.equal(viewportSearchProjection.chosenDataSource, 'markdown');
 assert.deepEqual(viewportSearchProjection.changedRegions, ['result_list']);
 assert.deepEqual(viewportSearchProjection.regionEvidenceRefs, [
   'region:result_list',
@@ -518,7 +519,88 @@ const viewportStrongRowsProjection = buildBrowserPageThingProjectionFromReadPage
 });
 
 assert.equal(viewportStrongRowsProjection.activeRegion, 'result_list');
+assert.equal(viewportStrongRowsProjection.chosenDataSource, 'markdown');
 assert.deepEqual(viewportStrongRowsProjection.changedRegions, ['result_list']);
+
+const selectedRowsWithCompleteTextProjection = buildBrowserPageThingProjectionFromReadPage({
+  snapshot: {
+    mode: 'compact',
+    page: {
+      url: 'https://example.test/search?q=redacted',
+      title: 'Selected Rows With Complete Text',
+      pageType: 'web_page',
+    },
+    summary: {
+      pageRole: 'search_results_page',
+      primaryRegion: 'viewport',
+      quality: 'usable',
+    },
+    interactiveElements: [],
+    artifactRefs: [],
+    selectedDataSource: 'dom_region_rows',
+    readinessVerdict: 'ready',
+    completeTextRegion: {
+      sourceDataSource: 'web_content_text',
+      sourceRoute: 'visible_text_sample',
+      charCount: 1200,
+      normalizedLength: 1200,
+      lineCount: 60,
+      completeTextAvailable: true,
+      structureSparse: false,
+      contentSparse: false,
+      reason: 'complete_visible_text_available',
+    },
+    visibleRegionRows: {
+      sourceDataSource: 'dom_region_rows',
+      rows: [
+        {
+          rowId: 'selected_row_001',
+          title: 'Selected Row',
+          primaryText: 'A selected structured row',
+          secondaryText: null,
+          summary: null,
+          metaText: 'fresh',
+          interactionText: null,
+          visibleTextFields: ['title', 'primaryText'],
+          targetRef: 'tgt_selected_row',
+          targetRefCoverageRate: 1,
+          boundingBox: null,
+          regionId: 'viewport',
+          sourceRegion: 'viewport',
+          confidence: 0.82,
+          qualityReasons: ['title_and_target_ref'],
+        },
+      ],
+      rowCount: 1,
+      visibleRegionRowsUsed: true,
+      visibleRegionRowsRejectedReason: null,
+      sourceRegion: 'viewport',
+      rowExtractionConfidence: 0.82,
+      cardExtractorUsed: true,
+      cardPatternConfidence: 0.82,
+      cardRowsCount: 1,
+      rowOrder: 'visual_order',
+      targetRefCoverageRate: 1,
+      regionQualityScore: 0.82,
+      visibleDomRowsCandidateCount: 1,
+      visibleDomRowsSelectedCount: 1,
+      lowValueRegionRejectedCount: 0,
+      footerLikeRejectedCount: 0,
+      navigationLikeRejectedCount: 0,
+      targetRefCoverageRejectedCount: 0,
+      rejectedRegionReasonDistribution: {},
+    },
+  },
+  projectionId: 'projection_from_selected_rows_with_complete_text',
+  observedAt: '2026-05-18T00:00:03.750Z',
+  pageId: 'page_fixture',
+  tabId: 791,
+  ownerType: 'run_owned',
+  contextVersion: 'ctx_004c',
+});
+
+assert.equal(selectedRowsWithCompleteTextProjection.chosenDataSource, 'dom_region_rows');
+assert.equal(selectedRowsWithCompleteTextProjection.sourceLineage, 'dom');
 
 const readyTaskState = buildBrowserTaskStateVerdict({ projection });
 assert.deepEqual(readyTaskState, {

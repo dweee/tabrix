@@ -1188,7 +1188,7 @@ describe('handleToolCall execution wrapper', () => {
       expect(flowSpy).toHaveBeenCalledTimes(1);
       const persisted = sessionManager.listSessions().at(-1);
       expect(persisted?.summary).toBe(
-        'AI context: post_action_delta; state=ready; next=continue_read; source=cached_page_projection_delta; data=dom_json; changed=none; reused=viewport; savedChars=3600',
+        'AI context: post_action_delta; state=ready; next=continue_read; source=cached_page_projection_delta; data=dom_json; reason=cached_projection_reused_for_redundant_read; fallback=none; rejected=none; metadata=1; confidence=0.9; changed=none; reused=viewport; savedChars=3600',
       );
     });
 
@@ -1274,6 +1274,13 @@ describe('handleToolCall execution wrapper', () => {
         sourceFreshness: 'fresh',
         sourceConfidence: 0.9,
         fallbackReason: 'observed_api_rows_not_available',
+      });
+      expect(payload.pageProjection).toMatchObject({
+        chosenDataSource: 'dom_region_rows',
+        sourceLineage: 'dom',
+      });
+      expect(payload.deltaContext).toMatchObject({
+        toProjectionId: payload.pageProjection.projectionId,
       });
       expect(payload.aiContextEnvelope.taskState).toMatchObject({
         state: 'ready',
@@ -1510,6 +1517,10 @@ describe('handleToolCall execution wrapper', () => {
             { source: 'api_rows', reason: 'api_rows_unavailable_dom_region_rows_available' },
           ],
         },
+      });
+      expect(payload.pageProjection).toMatchObject({
+        chosenDataSource: 'dom_region_rows',
+        sourceLineage: 'dom',
       });
     });
 

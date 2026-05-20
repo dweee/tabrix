@@ -15,10 +15,14 @@ export interface AiFacingToolContext {
   recommendedNextAction: string | null;
   deltaKind: string | null;
   selectedDataSource: string | null;
+  selectedReason: string | null;
+  rejectedSourceReasons: string[];
+  fallbackReason: string | null;
   changedRegions: string[];
   reusedRegions: string[];
   contextChars: number | null;
   contextSavedChars: number | null;
+  metadataCompleteness: number | null;
   sourceConfidence: number | null;
 }
 
@@ -62,6 +66,20 @@ function readStringArray(value: unknown): string[] {
     : [];
 }
 
+function readRejectedSourceReasons(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      const record = readRecord(item);
+      if (!record) return null;
+      const source = readString(record.source);
+      const reason = readString(record.reason);
+      if (!source && !reason) return null;
+      return `${source ?? 'unknown'}:${reason ?? 'not_reported'}`;
+    })
+    .filter((item): item is string => item !== null);
+}
+
 export function selectAiFacingToolContext(result: CallToolResult): AiFacingToolContext | null {
   const textParts = extractTextContent(result);
   const payload = parseFirstJsonObject(textParts);
@@ -80,10 +98,14 @@ export function selectAiFacingToolContext(result: CallToolResult): AiFacingToolC
     recommendedNextAction: readString(taskState?.recommendedNextAction),
     deltaKind: readString(delta.deltaKind),
     selectedDataSource: readString(envelope.selectedDataSource),
+    selectedReason: readString(dataSourceDecision?.selectedReason),
+    rejectedSourceReasons: readRejectedSourceReasons(dataSourceDecision?.rejectedSources),
+    fallbackReason: readString(dataSourceDecision?.fallbackReason),
     changedRegions: readStringArray(delta.changedRegions),
     reusedRegions: readStringArray(delta.reusedRegions),
     contextChars: readNumber(delta.contextChars),
     contextSavedChars: readNumber(delta.contextSavedChars),
+    metadataCompleteness: readNumber(dataSourceDecision?.metadataCompleteness),
     sourceConfidence: readNumber(dataSourceDecision?.sourceConfidence),
   };
 }
@@ -93,12 +115,19 @@ function summarizeAiFacingContext(context: AiFacingToolContext): string {
   const reused = context.reusedRegions.length > 0 ? context.reusedRegions.join(',') : 'none';
   const saved =
     context.contextSavedChars === null ? 'unknown' : String(Math.max(0, context.contextSavedChars));
+  const rejected =
+    context.rejectedSourceReasons.length > 0 ? context.rejectedSourceReasons.join(',') : 'none';
   return [
     `AI context: ${context.deltaKind ?? 'unknown_delta'}`,
     `state=${context.taskState ?? 'unknown'}`,
     `next=${context.recommendedNextAction ?? 'unknown'}`,
     `source=${context.contextSource ?? 'unknown'}`,
     `data=${context.selectedDataSource ?? 'unknown'}`,
+    `reason=${context.selectedReason ?? 'unknown'}`,
+    `fallback=${context.fallbackReason ?? 'none'}`,
+    `rejected=${rejected}`,
+    `metadata=${context.metadataCompleteness ?? 'unknown'}`,
+    `confidence=${context.sourceConfidence ?? 'unknown'}`,
     `changed=${changed}`,
     `reused=${reused}`,
     `savedChars=${saved}`,

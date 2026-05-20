@@ -40,6 +40,10 @@ describe('normalizeToolCallResult', () => {
                 recommendedNextAction: 'continue_read',
               },
               dataSourceDecision: {
+                selectedReason: 'visible_dom_rows_selected',
+                rejectedSources: [{ source: 'api_rows', reason: 'not_correlated' }],
+                fallbackReason: 'api_rows_unavailable',
+                metadataCompleteness: 0.99,
                 sourceConfidence: 0.91,
               },
               deltaContext: {
@@ -63,16 +67,20 @@ describe('normalizeToolCallResult', () => {
       recommendedNextAction: 'continue_read',
       deltaKind: 'post_action_delta',
       selectedDataSource: 'dom_region_rows',
+      selectedReason: 'visible_dom_rows_selected',
+      rejectedSourceReasons: ['api_rows:not_correlated'],
+      fallbackReason: 'api_rows_unavailable',
       changedRegions: ['result_list'],
       reusedRegions: ['global_nav'],
       contextChars: 1400,
       contextSavedChars: 8600,
+      metadataCompleteness: 0.99,
       sourceConfidence: 0.91,
     });
 
     const normalized = normalizeToolCallResult('chrome_read_page', rawResult);
     expect(normalized.stepSummary).toBe(
-      'AI context: post_action_delta; state=ready; next=continue_read; source=page_projection_delta; data=dom_region_rows; changed=result_list; reused=global_nav; savedChars=8600',
+      'AI context: post_action_delta; state=ready; next=continue_read; source=page_projection_delta; data=dom_region_rows; reason=visible_dom_rows_selected; fallback=api_rows_unavailable; rejected=api_rows:not_correlated; metadata=0.99; confidence=0.91; changed=result_list; reused=global_nav; savedChars=8600',
     );
     expect(normalized.executionResult.data).toMatchObject({
       rawResult,

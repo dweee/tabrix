@@ -960,6 +960,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
             const compatDomRowsResult = mergeReadPagePayloadMetadata(
               rawResultWithEvidence,
               domRowsResult,
+              { omitFullPageContent: true },
             );
             const aiFacingDomRowsResult = attachAiFacingDeltaContext(
               compatDomRowsResult,
@@ -1152,6 +1153,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
 function attachReadPagePayloadMetadata(
   result: CallToolResult,
   metadata: Record<string, unknown>,
+  options: { omitFullPageContent?: boolean } = {},
 ): CallToolResult {
   const first = result.content?.[0];
   if (!first || first.type !== 'text' || typeof first.text !== 'string') return result;
@@ -1165,11 +1167,16 @@ function attachReadPagePayloadMetadata(
     return result;
   }
 
+  const mergedPayload = { ...payload, ...metadata };
+  if (options.omitFullPageContent) {
+    delete mergedPayload.pageContent;
+  }
+
   return {
     ...result,
     content: result.content.map((block, index) =>
       index === 0 && block.type === 'text'
-        ? { ...block, text: JSON.stringify({ ...payload, ...metadata }) }
+        ? { ...block, text: JSON.stringify(mergedPayload) }
         : block,
     ) as CallToolResult['content'],
   };
@@ -1178,6 +1185,7 @@ function attachReadPagePayloadMetadata(
 function mergeReadPagePayloadMetadata(
   baseResult: CallToolResult,
   metadataResult: CallToolResult,
+  options: { omitFullPageContent?: boolean } = {},
 ): CallToolResult {
   const first = metadataResult.content?.[0];
   if (!first || first.type !== 'text' || typeof first.text !== 'string') return baseResult;
@@ -1191,7 +1199,7 @@ function mergeReadPagePayloadMetadata(
     return baseResult;
   }
 
-  return attachReadPagePayloadMetadata(baseResult, metadata);
+  return attachReadPagePayloadMetadata(baseResult, metadata, options);
 }
 
 function shouldPreferVisibleRowsForMarkdownAiContext(
@@ -1239,14 +1247,19 @@ function attachAiFacingDeltaContext(
   const projection = payload.pageProjection;
   if (!isBrowserPageThingProjectionLike(projection)) return result;
 
-  const deltaContext = taskContext.notePageProjectionAndBuildDelta(projection);
   const payloadSelectedDataSource = readPayloadSelectedDataSource(payload);
   const selectedDataSource = readSelectedDataSource(payload, projection);
+  const aiFacingProjection = normalizeAiFacingProjectionDataSource(
+    projection,
+    selectedDataSource,
+    payload,
+  );
+  const deltaContext = taskContext.notePageProjectionAndBuildDelta(aiFacingProjection);
   const selectedReason =
     selectedDataSource === readString(payload.aiPreferredDataSource)
       ? (readString(payload.aiPreferredDataSourceReason) ?? 'ai_context_prefers_visible_rows')
       : selectedDataSource !== payloadSelectedDataSource &&
-          selectedDataSource === projection.chosenDataSource
+          selectedDataSource === aiFacingProjection.chosenDataSource
         ? 'projection_chosen_data_source'
         : (readString(payload.decisionReason) ?? readString(payload.selectedReason));
   const fallbackReason =
@@ -1255,17 +1268,18 @@ function attachAiFacingDeltaContext(
     readString(payload.apiRowsUnavailableReason);
   const dataSourceDecision = buildAiFacingDataSourceDecision({
     payload,
-    projection,
+    projection: aiFacingProjection,
     selectedDataSource,
     selectedReason,
     fallbackReason,
   });
   const taskState = buildAiFacingTaskState({
     payload,
-    projection,
+    projection: aiFacingProjection,
     fallbackReason,
   });
 
+  payload.pageProjection = aiFacingProjection;
   payload.deltaContext = deltaContext;
   payload.aiContextEnvelope = {
     envelopeKind: 'delta_context',
@@ -1283,6 +1297,40 @@ function attachAiFacingDeltaContext(
       index === 0 && block.type === 'text' ? { ...block, text: JSON.stringify(payload) } : block,
     ) as CallToolResult['content'],
   };
+}
+
+function normalizeAiFacingProjectionDataSource(
+  projection: BrowserPageThingProjection,
+  selectedDataSource: ReadPageSelectedDataSource,
+  payload: Record<string, unknown>,
+): BrowserPageThingProjection {
+  if (
+    selectedDataSource !== 'dom_region_rows' ||
+    projection.chosenDataSource === 'dom_region_rows' ||
+    !hasVisibleRowsEvidence(payload)
+  ) {
+    return projection;
+  }
+
+  return {
+    ...projection,
+    chosenDataSource: 'dom_region_rows',
+    sourceLineage: 'dom',
+    sourceConfidence: readNumber(payload.rowExtractionConfidence) ?? projection.sourceConfidence,
+  };
+}
+
+function hasVisibleRowsEvidence(payload: Record<string, unknown>): boolean {
+  const rowsPayload = readObject(payload.visibleRegionRows) ?? payload;
+  const rowCount =
+    readPositiveInteger(payload, 'rowCount') ??
+    readPositiveInteger(payload, 'visibleRegionRowCount') ??
+    readPositiveInteger(rowsPayload, 'rowCount');
+  return (
+    (payload.visibleRegionRowsUsed === true || rowsPayload.visibleRegionRowsUsed === true) &&
+    rowCount !== null &&
+    rowCount > 0
+  );
 }
 
 function buildAiFacingTaskState(args: {

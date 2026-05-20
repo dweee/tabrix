@@ -730,12 +730,20 @@ function hasStrongVisibleResultRows(snapshot: ReadPageCompactSnapshot): boolean 
 }
 
 function chooseProjectionDataSource(snapshot: ReadPageCompactSnapshot): ReadPageSelectedDataSource {
+  if (snapshot.selectedDataSource === 'dom_region_rows' && hasReliableVisibleRows(snapshot)) {
+    return 'dom_region_rows';
+  }
   if (shouldPreferCompleteTextRegion(snapshot)) return 'markdown';
   if (snapshot.selectedDataSource) return snapshot.selectedDataSource;
   if (snapshot.kind) return snapshot.kind;
   if (snapshot.visibleRegionRows?.visibleRegionRowsUsed) return 'dom_region_rows';
   if (snapshot.renderMode === 'markdown' && snapshot.markdown) return 'markdown';
   return 'dom_json';
+}
+
+function hasReliableVisibleRows(snapshot: ReadPageCompactSnapshot): boolean {
+  const rows = snapshot.visibleRegionRows;
+  return Boolean(rows?.visibleRegionRowsUsed && rows.rowCount > 0);
 }
 
 function estimateSnapshotContextChars(snapshot: ReadPageCompactSnapshot): number {
