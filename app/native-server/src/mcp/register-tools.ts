@@ -955,7 +955,14 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
               apiRowsUnavailableReason: apiUnavailableReason,
               readCount: taskContext.readPageCount,
             });
-            const aiFacingDomRowsResult = attachAiFacingDeltaContext(domRowsResult, taskContext);
+            const compatDomRowsResult = mergeReadPagePayloadMetadata(
+              rawResultWithEvidence,
+              domRowsResult,
+            );
+            const aiFacingDomRowsResult = attachAiFacingDeltaContext(
+              compatDomRowsResult,
+              taskContext,
+            );
             sessionManager.completeStep(session.sessionId, step.stepId, {
               status: 'completed',
               resultSummary: 'chrome_read_page fulfilled via visible DOM region rows',
@@ -1164,6 +1171,25 @@ function attachReadPagePayloadMetadata(
         : block,
     ) as CallToolResult['content'],
   };
+}
+
+function mergeReadPagePayloadMetadata(
+  baseResult: CallToolResult,
+  metadataResult: CallToolResult,
+): CallToolResult {
+  const first = metadataResult.content?.[0];
+  if (!first || first.type !== 'text' || typeof first.text !== 'string') return baseResult;
+
+  let metadata: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(first.text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return baseResult;
+    metadata = parsed as Record<string, unknown>;
+  } catch {
+    return baseResult;
+  }
+
+  return attachReadPagePayloadMetadata(baseResult, metadata);
 }
 
 function shouldPreferVisibleRowsForMarkdownAiContext(

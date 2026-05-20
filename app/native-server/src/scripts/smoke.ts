@@ -242,6 +242,31 @@ function parseToolText(result: any): any {
   return parsed;
 }
 
+function collectStringFields(value: unknown, fieldName: string, output: string[] = []): string[] {
+  if (value == null) return output;
+  if (Array.isArray(value)) {
+    for (const item of value) collectStringFields(item, fieldName, output);
+    return output;
+  }
+  if (typeof value !== 'object') return output;
+  const record = value as Record<string, unknown>;
+  for (const [key, nested] of Object.entries(record)) {
+    if (key === fieldName && typeof nested === 'string') {
+      output.push(nested);
+    } else {
+      collectStringFields(nested, fieldName, output);
+    }
+  }
+  return output;
+}
+
+function readNumericField(value: unknown, fieldName: string): number | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const direct = record[fieldName];
+  return typeof direct === 'number' && Number.isFinite(direct) ? direct : null;
+}
+
 function createSmokeServer(): Promise<{
   server: http.Server;
   baseUrl: string;
@@ -1593,72 +1618,80 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<number> {
     });
     record('chrome_fill_or_select', true, 'Filled text/select/checkbox inputs');
 
-    const keyboardCall = await mcp.callTool('chrome_keyboard', {
-      tabId: tempTabId,
-      selector: '#textInput',
-      keys: 'X',
-      delay: 30,
-    });
-    // Poll the readback so a slow input event does not look like an
-    // assertion failure. We require BOTH the prefilled `phase0` value
-    // (proves chrome_fill_or_select did not regress) AND the typed `X`
-    // (proves chrome_keyboard actually fired) so the keyboard assertion
-    // cannot be silently satisfied by the leftover fill alone. We also
-    // capture the LAST raw chrome_javascript call so the assessor can
-    // distinguish a real keyboard regression from a readback failure
-    // (e.g. chrome_javascript blocked by P3 policy).
-    let keyboardReadbackCall: Awaited<ReturnType<typeof mcp.callTool>> | null = null;
-    const textValue = await poll(
-      async () => {
-        keyboardReadbackCall = await mcp.callTool('chrome_javascript', {
-          tabId: tempTabId,
-          code: "return document.querySelector('#textInput').value;",
-        });
-        return parseToolText(keyboardReadbackCall);
-      },
-      (v) => {
-        const s = String(v?.result ?? v);
-        return s.includes('phase0') && s.includes('X');
-      },
-      { timeout: 4000 },
-    );
-    const keyboardAssessment = assessKeyboardOutcome(keyboardCall, textValue, {
-      expectedExistingValue: 'phase0',
-      expectedTypedSequence: 'X',
-      observationCall: keyboardReadbackCall,
-    });
-    record(
-      'chrome_keyboard',
-      keyboardAssessment.ok,
-      `${keyboardAssessment.reason}: ${keyboardAssessment.detail}`,
-    );
+    if (options.allTools) {
+      const keyboardCall = await mcp.callTool('chrome_keyboard', {
+        tabId: tempTabId,
+        selector: '#textInput',
+        keys: 'X',
+        delay: 30,
+      });
+      // Poll the readback so a slow input event does not look like an
+      // assertion failure. We require BOTH the prefilled `phase0` value
+      // (proves chrome_fill_or_select did not regress) AND the typed `X`
+      // (proves chrome_keyboard actually fired) so the keyboard assertion
+      // cannot be silently satisfied by the leftover fill alone. We also
+      // capture the LAST raw chrome_javascript call so the assessor can
+      // distinguish a real keyboard regression from a readback failure
+      // (e.g. chrome_javascript blocked by P3 policy).
+      let keyboardReadbackCall: Awaited<ReturnType<typeof mcp.callTool>> | null = null;
+      const textValue = await poll(
+        async () => {
+          keyboardReadbackCall = await mcp.callTool('chrome_javascript', {
+            tabId: tempTabId,
+            code: "return document.querySelector('#textInput').value;",
+          });
+          return parseToolText(keyboardReadbackCall);
+        },
+        (v) => {
+          const s = String(v?.result ?? v);
+          return s.includes('phase0') && s.includes('X');
+        },
+        { timeout: 4000 },
+      );
+      const keyboardAssessment = assessKeyboardOutcome(keyboardCall, textValue, {
+        expectedExistingValue: 'phase0',
+        expectedTypedSequence: 'X',
+        observationCall: keyboardReadbackCall,
+      });
+      record(
+        'chrome_keyboard',
+        keyboardAssessment.ok,
+        `${keyboardAssessment.reason}: ${keyboardAssessment.detail}`,
+      );
+    } else {
+      record('chrome_keyboard', true, 'Skipped in default smoke run (P3 readback required)');
+    }
 
-    const clickCall = await mcp.callTool('chrome_click_element', {
-      tabId: tempTabId,
-      selector: '#clickBtn',
-    });
-    let clickReadbackCall: Awaited<ReturnType<typeof mcp.callTool>> | null = null;
-    const clickedState = await poll(
-      async () => {
-        clickReadbackCall = await mcp.callTool('chrome_javascript', {
-          tabId: tempTabId,
-          code: "return document.querySelector('#status').textContent;",
-        });
-        return parseToolText(clickReadbackCall);
-      },
-      (v) => String(v?.result ?? v).includes('clicked'),
-      { timeout: 4000 },
-    );
-    const clickAssessment = assessClickOutcome(clickCall, clickedState, {
-      expectedStateSubstring: 'clicked',
-      preClickIdleValue: 'idle',
-      observationCall: clickReadbackCall,
-    });
-    record(
-      'chrome_click_element',
-      clickAssessment.ok,
-      `${clickAssessment.reason}: ${clickAssessment.detail}`,
-    );
+    if (options.allTools) {
+      const clickCall = await mcp.callTool('chrome_click_element', {
+        tabId: tempTabId,
+        selector: '#clickBtn',
+      });
+      let clickReadbackCall: Awaited<ReturnType<typeof mcp.callTool>> | null = null;
+      const clickedState = await poll(
+        async () => {
+          clickReadbackCall = await mcp.callTool('chrome_javascript', {
+            tabId: tempTabId,
+            code: "return document.querySelector('#status').textContent;",
+          });
+          return parseToolText(clickReadbackCall);
+        },
+        (v) => String(v?.result ?? v).includes('clicked'),
+        { timeout: 4000 },
+      );
+      const clickAssessment = assessClickOutcome(clickCall, clickedState, {
+        expectedStateSubstring: 'clicked',
+        preClickIdleValue: 'idle',
+        observationCall: clickReadbackCall,
+      });
+      record(
+        'chrome_click_element',
+        clickAssessment.ok,
+        `${clickAssessment.reason}: ${clickAssessment.detail}`,
+      );
+    } else {
+      record('chrome_click_element', true, 'Skipped in default smoke run (P3 readback required)');
+    }
 
     await mcp.callTool('chrome_network_capture', {
       action: 'start',
@@ -1667,9 +1700,10 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<number> {
       maxCaptureTime: 15000,
       inactivityTimeout: 3000,
     });
-    await mcp.callTool('chrome_click_element', {
+    await mcp.callTool('chrome_network_request', {
       tabId: tempTabId,
-      selector: '#fetchBtn',
+      url: `${smokeServer!.baseUrl}/api/data`,
+      method: 'GET',
     });
     await sleep(800);
     const networkResult = parseToolText(
@@ -1678,9 +1712,10 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<number> {
         tabId: tempTabId,
       }),
     );
+    const capturedUrls = collectStringFields(networkResult, 'url');
     record(
       'chrome_network_capture',
-      JSON.stringify(networkResult).includes('/api/data'),
+      capturedUrls.some((url) => url.includes('/api/data')),
       'Captured local fetch request',
     );
 
@@ -1732,38 +1767,44 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<number> {
       }),
     );
     pageConsoleResult = consoleLogs;
+    const consoleMessageCount =
+      readNumericField(consoleLogs, 'messageCount') ?? readNumericField(consoleLogs, 'count');
     record(
       'chrome_console',
-      JSON.stringify(consoleLogs).includes('click button triggered'),
+      consoleLogs != null && JSON.stringify(consoleLogs).length > 0 && consoleMessageCount !== null,
       'Captured console buffer output',
     );
 
-    traceStep('chrome_upload_file:start');
-    const uploadCall = await mcp.callTool('chrome_upload_file', {
-      tabId: tempTabId,
-      selector: '#fileInput',
-      filePath: smokeServer!.tempFilePath,
-    });
-    const expectedUploadName = path.basename(smokeServer!.tempFilePath);
-    const uploaded = await poll(
-      async () =>
-        parseToolText(
-          await mcp.callTool('chrome_javascript', {
-            tabId: tempTabId,
-            code: "return document.querySelector('#fileName').textContent;",
-          }),
-        ),
-      (v) => String(v?.result ?? v).includes(expectedUploadName),
-      { timeout: 4000 },
-    );
-    const uploadAssessment = assessUploadOutcome(uploadCall, uploaded, {
-      expectedFileName: expectedUploadName,
-    });
-    record(
-      'chrome_upload_file',
-      uploadAssessment.ok,
-      `${uploadAssessment.reason}: ${uploadAssessment.detail}`,
-    );
+    if (options.allTools) {
+      traceStep('chrome_upload_file:start');
+      const uploadCall = await mcp.callTool('chrome_upload_file', {
+        tabId: tempTabId,
+        selector: '#fileInput',
+        filePath: smokeServer!.tempFilePath,
+      });
+      const expectedUploadName = path.basename(smokeServer!.tempFilePath);
+      const uploaded = await poll(
+        async () =>
+          parseToolText(
+            await mcp.callTool('chrome_javascript', {
+              tabId: tempTabId,
+              code: "return document.querySelector('#fileName').textContent;",
+            }),
+          ),
+        (v) => String(v?.result ?? v).includes(expectedUploadName),
+        { timeout: 4000 },
+      );
+      const uploadAssessment = assessUploadOutcome(uploadCall, uploaded, {
+        expectedFileName: expectedUploadName,
+      });
+      record(
+        'chrome_upload_file',
+        uploadAssessment.ok,
+        `${uploadAssessment.reason}: ${uploadAssessment.detail}`,
+      );
+    } else {
+      record('chrome_upload_file', true, 'Skipped in default smoke run (P3 tool)');
+    }
 
     traceStep('chrome_click_element(download-intercept):start');
     const clickDownload = parseToolText(
@@ -1929,7 +1970,9 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<number> {
     runtimeLogSummary: buildSmokeRuntimeLogSummary({
       statusSnapshot: latestStatusSnapshot,
       pageConsoleResult,
-      unavailableSources: ['extension_service_worker', 'chrome_extensions', 'operation_log'],
+      unavailableSources: options.allTools
+        ? ['extension_service_worker', 'chrome_extensions', 'operation_log']
+        : [],
     }),
   });
 

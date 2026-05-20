@@ -864,6 +864,17 @@ describe('handleToolCall execution wrapper', () => {
       const tabId = input.tabId ?? 1;
       return JSON.stringify({
         kind: 'page',
+        mode: 'compact',
+        page: {
+          url: 'https://example.test/search',
+          title: 'Search',
+          pageType: 'web_page',
+        },
+        summary: {
+          pageRole: 'search_results',
+          primaryRegion: 'results',
+        },
+        interactiveElements: [],
         ...(input.extraPayload ?? {}),
         selectedDataSource: input.selectedDataSource ?? 'dom_json',
         decisionReason:
@@ -1225,6 +1236,19 @@ describe('handleToolCall execution wrapper', () => {
       });
       const payload = JSON.parse(String(result.content[0].text));
 
+      expect(payload).toMatchObject({
+        mode: 'compact',
+        page: {
+          url: 'https://example.test/search',
+          title: 'Search',
+          pageType: 'web_page',
+        },
+        summary: {
+          pageRole: 'search_results',
+          primaryRegion: 'results',
+        },
+      });
+      expect(Array.isArray(payload.interactiveElements)).toBe(true);
       expect(payload.aiContextEnvelope.dataSourceDecision).toMatchObject({
         availableSources: ['dom_region_rows'],
         selectedSource: 'dom_region_rows',
