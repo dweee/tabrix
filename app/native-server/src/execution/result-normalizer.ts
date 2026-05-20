@@ -11,6 +11,8 @@ export interface ToolCallNormalization {
 export interface AiFacingToolContext {
   contextKind: 'delta_context';
   contextSource: string | null;
+  taskState: string | null;
+  recommendedNextAction: string | null;
   deltaKind: string | null;
   selectedDataSource: string | null;
   changedRegions: string[];
@@ -69,10 +71,13 @@ export function selectAiFacingToolContext(result: CallToolResult): AiFacingToolC
   const delta = readRecord(envelope.deltaContext);
   if (!delta) return null;
   const dataSourceDecision = readRecord(envelope.dataSourceDecision);
+  const taskState = readRecord(envelope.taskState);
 
   return {
     contextKind: 'delta_context',
     contextSource: readString(envelope.contextSource),
+    taskState: readString(taskState?.state),
+    recommendedNextAction: readString(taskState?.recommendedNextAction),
     deltaKind: readString(delta.deltaKind),
     selectedDataSource: readString(envelope.selectedDataSource),
     changedRegions: readStringArray(delta.changedRegions),
@@ -90,6 +95,8 @@ function summarizeAiFacingContext(context: AiFacingToolContext): string {
     context.contextSavedChars === null ? 'unknown' : String(Math.max(0, context.contextSavedChars));
   return [
     `AI context: ${context.deltaKind ?? 'unknown_delta'}`,
+    `state=${context.taskState ?? 'unknown'}`,
+    `next=${context.recommendedNextAction ?? 'unknown'}`,
     `source=${context.contextSource ?? 'unknown'}`,
     `data=${context.selectedDataSource ?? 'unknown'}`,
     `changed=${changed}`,

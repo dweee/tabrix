@@ -26,11 +26,14 @@ import {
   BROWSER_PROJECTION_KIND_VALUES,
   BROWSER_PAGE_PROJECTION_DELTA_KIND_VALUES,
   BROWSER_ASSISTANT_CLIENT_VALUES,
+  BROWSER_TASK_NEXT_ACTION_VALUES,
+  BROWSER_TASK_STATE_VALUES,
   BROWSER_USER_BOUNDARY_MODE_VALUES,
   BROWSER_USER_ACTIVITY_LEVEL_VALUES,
   TOOL_SCHEMAS,
   buildBrowserPageProjectionDelta,
   buildBrowserPageThingProjectionFromReadPage,
+  buildBrowserTaskStateVerdict,
   isBrowserPageProjectionDeltaArtifact,
   isBrowserTaskDeterministicFixtureArtifact,
   isBrowserTaskPrivacyRedactionSafe,
@@ -38,6 +41,8 @@ import {
 
 assert.equal(BROWSER_TASK_THING_CONTRACT_VERSION, 'v1');
 assert.ok(BROWSER_TASK_STATUS_VALUES.includes('pass_with_gaps'));
+assert.ok(BROWSER_TASK_STATE_VALUES.includes('login_required'));
+assert.ok(BROWSER_TASK_NEXT_ACTION_VALUES.includes('user_collaboration'));
 assert.ok(BROWSER_TASK_SCENARIO_CLASS_VALUES.includes('search_result_delta_v1'));
 assert.deepEqual(BROWSER_TASK_SCENARIO_PRIORITY_ORDER.slice(0, 2), [
   'search_result_delta_v1',
@@ -514,6 +519,48 @@ const viewportStrongRowsProjection = buildBrowserPageThingProjectionFromReadPage
 
 assert.equal(viewportStrongRowsProjection.activeRegion, 'result_list');
 assert.deepEqual(viewportStrongRowsProjection.changedRegions, ['result_list']);
+
+const readyTaskState = buildBrowserTaskStateVerdict({ projection });
+assert.deepEqual(readyTaskState, {
+  state: 'ready',
+  reason: 'page_projection_ready_and_stable',
+  readiness: 'ready',
+  stability: 'stable',
+  sourceConfidence: 0.84,
+  sourceFreshness: 'fresh',
+  userActivityLevel: 'none',
+  interferenceRisk: 'none',
+  recommendedNextAction: 'continue_read',
+});
+
+assert.deepEqual(
+  buildBrowserTaskStateVerdict({
+    projection: {
+      ...projection,
+      readiness: 'blocked',
+    },
+    readinessReason: 'auth_or_login_required',
+  }),
+  {
+    state: 'login_required',
+    reason: 'auth_or_login_required',
+    readiness: 'blocked',
+    stability: 'stable',
+    sourceConfidence: 0.84,
+    sourceFreshness: 'fresh',
+    userActivityLevel: 'none',
+    interferenceRisk: 'none',
+    recommendedNextAction: 'user_collaboration',
+  },
+);
+
+assert.equal(
+  buildBrowserTaskStateVerdict({
+    projection,
+    policyDeniedReason: 'active_user_tab_protected',
+  }).state,
+  'policy_denied',
+);
 
 const initialDelta = buildBrowserPageProjectionDelta({
   previousProjection: null,

@@ -5,6 +5,7 @@ import type {
   BrowserPageThingProjection,
   ReadPageRequestedLayer,
 } from '@tabrix/shared';
+import { buildBrowserTaskStateVerdict } from '@tabrix/shared';
 import type { ShouldAllowReadPageResult } from '../execution/task-session-context';
 import type { ReadPageOperationLogHint } from './read-page-dom-region-rows-result';
 
@@ -34,6 +35,10 @@ export function buildReadPageWarningResult(args: {
     warningPayload.aiContextEnvelope = {
       envelopeKind: 'delta_context',
       contextSource: 'cached_page_projection_delta',
+      taskState: buildBrowserTaskStateVerdict({
+        projection: args.cachedProjection,
+        readinessReason: warning,
+      }),
       selectedDataSource: args.cachedProjection.chosenDataSource,
       dataSourceDecision: args.cachedDataSourceDecision ?? null,
       deltaContext: args.cachedDeltaContext,

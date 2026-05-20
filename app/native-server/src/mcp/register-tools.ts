@@ -93,8 +93,10 @@ import { getDefaultPrimaryTabController } from '../runtime/primary-tab-controlle
 import type {
   BrowserDataSourceDecisionEvidence,
   BrowserPageThingProjection,
+  BrowserTaskStateVerdict,
   ReadPageSelectedDataSource,
 } from '@tabrix/shared';
+import { buildBrowserTaskStateVerdict } from '@tabrix/shared';
 
 const DEFAULT_AUTO_TASK_CONTEXT_KEY = 'mcp:auto:tab:default';
 
@@ -1258,11 +1260,17 @@ function attachAiFacingDeltaContext(
     selectedReason,
     fallbackReason,
   });
+  const taskState = buildAiFacingTaskState({
+    payload,
+    projection,
+    fallbackReason,
+  });
 
   payload.deltaContext = deltaContext;
   payload.aiContextEnvelope = {
     envelopeKind: 'delta_context',
     contextSource: 'page_projection_delta',
+    taskState,
     selectedDataSource,
     dataSourceDecision,
     deltaContext,
@@ -1275,6 +1283,27 @@ function attachAiFacingDeltaContext(
       index === 0 && block.type === 'text' ? { ...block, text: JSON.stringify(payload) } : block,
     ) as CallToolResult['content'],
   };
+}
+
+function buildAiFacingTaskState(args: {
+  payload: Record<string, unknown>;
+  projection: BrowserPageThingProjection;
+  fallbackReason: string | null;
+}): BrowserTaskStateVerdict {
+  const readinessReason =
+    readString(args.payload.readinessReason) ??
+    readString(args.payload.blockedReadinessReason) ??
+    args.fallbackReason;
+  const policyDeniedReason =
+    readString(args.payload.policyDeniedReason) ?? readString(args.payload.policyReason);
+  const externalBlockedReason =
+    readString(args.payload.externalBlockedReason) ?? readString(args.payload.externalBlockReason);
+  return buildBrowserTaskStateVerdict({
+    projection: args.projection,
+    readinessReason,
+    policyDeniedReason,
+    externalBlockedReason,
+  });
 }
 
 function buildAiFacingDataSourceDecision(args: {

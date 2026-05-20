@@ -1024,6 +1024,11 @@ describe('handleToolCall execution wrapper', () => {
           sourceFreshness: 'fresh',
           fallbackReason: null,
         },
+        taskState: {
+          state: 'ready',
+          reason: 'page_projection_ready_and_stable',
+          recommendedNextAction: 'continue_read',
+        },
       });
 
       mockReadPageRoundTrip(
@@ -1054,6 +1059,10 @@ describe('handleToolCall execution wrapper', () => {
       });
       expect(secondPayload.aiContextEnvelope).toMatchObject({
         contextSource: 'page_projection_delta',
+        taskState: {
+          state: 'ready',
+          recommendedNextAction: 'continue_read',
+        },
         selectedDataSource: 'dom_json',
       });
       expect(
@@ -1165,6 +1174,10 @@ describe('handleToolCall execution wrapper', () => {
       });
       expect(secondPayload.aiContextEnvelope).toMatchObject({
         contextSource: 'cached_page_projection_delta',
+        taskState: {
+          state: 'ready',
+          recommendedNextAction: 'continue_read',
+        },
         selectedDataSource: 'dom_json',
         dataSourceDecision: {
           selectedSource: 'dom_json',
@@ -1175,7 +1188,7 @@ describe('handleToolCall execution wrapper', () => {
       expect(flowSpy).toHaveBeenCalledTimes(1);
       const persisted = sessionManager.listSessions().at(-1);
       expect(persisted?.summary).toBe(
-        'AI context: post_action_delta; source=cached_page_projection_delta; data=dom_json; changed=none; reused=viewport; savedChars=3600',
+        'AI context: post_action_delta; state=ready; next=continue_read; source=cached_page_projection_delta; data=dom_json; changed=none; reused=viewport; savedChars=3600',
       );
     });
 
@@ -1261,6 +1274,10 @@ describe('handleToolCall execution wrapper', () => {
         sourceFreshness: 'fresh',
         sourceConfidence: 0.9,
         fallbackReason: 'observed_api_rows_not_available',
+      });
+      expect(payload.aiContextEnvelope.taskState).toMatchObject({
+        state: 'ready',
+        recommendedNextAction: 'continue_read',
       });
     });
 

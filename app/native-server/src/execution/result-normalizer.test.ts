@@ -35,6 +35,10 @@ describe('normalizeToolCallResult', () => {
               envelopeKind: 'delta_context',
               contextSource: 'page_projection_delta',
               selectedDataSource: 'dom_region_rows',
+              taskState: {
+                state: 'ready',
+                recommendedNextAction: 'continue_read',
+              },
               dataSourceDecision: {
                 sourceConfidence: 0.91,
               },
@@ -55,6 +59,8 @@ describe('normalizeToolCallResult', () => {
     expect(selectAiFacingToolContext(rawResult)).toMatchObject({
       contextKind: 'delta_context',
       contextSource: 'page_projection_delta',
+      taskState: 'ready',
+      recommendedNextAction: 'continue_read',
       deltaKind: 'post_action_delta',
       selectedDataSource: 'dom_region_rows',
       changedRegions: ['result_list'],
@@ -66,7 +72,7 @@ describe('normalizeToolCallResult', () => {
 
     const normalized = normalizeToolCallResult('chrome_read_page', rawResult);
     expect(normalized.stepSummary).toBe(
-      'AI context: post_action_delta; source=page_projection_delta; data=dom_region_rows; changed=result_list; reused=global_nav; savedChars=8600',
+      'AI context: post_action_delta; state=ready; next=continue_read; source=page_projection_delta; data=dom_region_rows; changed=result_list; reused=global_nav; savedChars=8600',
     );
     expect(normalized.executionResult.data).toMatchObject({
       rawResult,

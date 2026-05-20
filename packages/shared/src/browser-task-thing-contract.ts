@@ -16,6 +16,31 @@ export const BROWSER_TASK_STATUS_VALUES = [
 ] as const;
 export type BrowserTaskStatus = (typeof BROWSER_TASK_STATUS_VALUES)[number];
 
+export const BROWSER_TASK_STATE_VALUES = [
+  'ready',
+  'loading',
+  'empty',
+  'blocked',
+  'login_required',
+  'challenge_required',
+  'policy_denied',
+  'external_blocked',
+  'error',
+  'unknown',
+] as const;
+export type BrowserTaskState = (typeof BROWSER_TASK_STATE_VALUES)[number];
+
+export const BROWSER_TASK_NEXT_ACTION_VALUES = [
+  'continue_read',
+  'wait_and_retry',
+  'user_collaboration',
+  'respect_policy_gate',
+  'inspect_fallback',
+  'stop_or_debug',
+  'unknown',
+] as const;
+export type BrowserTaskNextAction = (typeof BROWSER_TASK_NEXT_ACTION_VALUES)[number];
+
 export const BROWSER_TASK_SCENARIO_CLASS_VALUES = [
   'search_result_delta_v1',
   'background_no_focus_v1',
@@ -216,6 +241,18 @@ export interface BrowserPageThingProjection {
   contextSavedChars: number;
   userActivityLevel: BrowserUserActivityLevel;
   interferenceRisk: BrowserInterferenceRisk;
+}
+
+export interface BrowserTaskStateVerdict {
+  state: BrowserTaskState;
+  reason: string;
+  readiness: ReadPageReadinessVerdict;
+  stability: BrowserPageStability;
+  sourceConfidence: number | null;
+  sourceFreshness: BrowserSourceFreshness;
+  userActivityLevel: BrowserUserActivityLevel;
+  interferenceRisk: BrowserInterferenceRisk;
+  recommendedNextAction: BrowserTaskNextAction;
 }
 
 export interface BrowserPageProjectionDelta {
@@ -520,6 +557,131 @@ export function buildBrowserPageThingProjectionFromReadPage(
     userActivityLevel: input.userActivityLevel ?? 'unknown',
     interferenceRisk: input.interferenceRisk ?? 'medium',
   };
+}
+
+export interface BuildBrowserTaskStateVerdictInput {
+  projection: BrowserPageThingProjection;
+  readinessReason?: string | null;
+  policyDeniedReason?: string | null;
+  externalBlockedReason?: string | null;
+}
+
+export function buildBrowserTaskStateVerdict(
+  input: BuildBrowserTaskStateVerdictInput,
+): BrowserTaskStateVerdict {
+  const reasonText = [
+    input.policyDeniedReason,
+    input.externalBlockedReason,
+    input.readinessReason,
+    input.projection.readiness,
+    input.projection.stability,
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .join(' ')
+    .toLowerCase();
+
+  const state = inferBrowserTaskState(input, reasonText);
+  return {
+    state,
+    reason: inferBrowserTaskStateReason(input, state),
+    readiness: input.projection.readiness,
+    stability: input.projection.stability,
+    sourceConfidence: Number.isFinite(input.projection.sourceConfidence)
+      ? input.projection.sourceConfidence
+      : null,
+    sourceFreshness: input.projection.sourceFreshness,
+    userActivityLevel: input.projection.userActivityLevel,
+    interferenceRisk: input.projection.interferenceRisk,
+    recommendedNextAction: recommendNextActionForTaskState(state),
+  };
+}
+
+function inferBrowserTaskState(
+  input: BuildBrowserTaskStateVerdictInput,
+  reasonText: string,
+): BrowserTaskState {
+  if (input.policyDeniedReason) return 'policy_denied';
+  if (input.externalBlockedReason) return 'external_blocked';
+  if (matchesAny(reasonText, ['captcha', 'recaptcha', 'verification', 'verify', 'challenge'])) {
+    return 'challenge_required';
+  }
+  if (matchesAny(reasonText, ['login', 'signin', 'sign in', 'auth_or_login_required'])) {
+    return 'login_required';
+  }
+  if (input.projection.stability === 'loading' || input.projection.stability === 'changing') {
+    return 'loading';
+  }
+  if (input.projection.readiness === 'empty') return 'empty';
+  if (input.projection.readiness === 'error') return 'error';
+  if (input.projection.readiness === 'blocked') return 'blocked';
+  if (input.projection.readiness === 'ready' && input.projection.stability === 'stable') {
+    return 'ready';
+  }
+  if (input.projection.sourceFreshness === 'stale' || input.projection.stability === 'stale') {
+    return 'blocked';
+  }
+  return 'unknown';
+}
+
+function inferBrowserTaskStateReason(
+  input: BuildBrowserTaskStateVerdictInput,
+  state: BrowserTaskState,
+): string {
+  if (input.policyDeniedReason) return input.policyDeniedReason;
+  if (input.externalBlockedReason) return input.externalBlockedReason;
+  if (input.readinessReason) return input.readinessReason;
+  switch (state) {
+    case 'ready':
+      return 'page_projection_ready_and_stable';
+    case 'loading':
+      return 'page_projection_loading_or_changing';
+    case 'empty':
+      return 'readiness_empty';
+    case 'blocked':
+      return 'readiness_blocked_or_stale';
+    case 'login_required':
+      return 'auth_or_login_required';
+    case 'challenge_required':
+      return 'challenge_or_verification_required';
+    case 'policy_denied':
+      return 'policy_denied';
+    case 'external_blocked':
+      return 'external_blocked';
+    case 'error':
+      return 'readiness_error';
+    case 'unknown':
+      return 'insufficient_task_state_evidence';
+    default:
+      return 'insufficient_task_state_evidence';
+  }
+}
+
+function recommendNextActionForTaskState(state: BrowserTaskState): BrowserTaskNextAction {
+  switch (state) {
+    case 'ready':
+    case 'empty':
+      return 'continue_read';
+    case 'loading':
+      return 'wait_and_retry';
+    case 'login_required':
+    case 'challenge_required':
+      return 'user_collaboration';
+    case 'policy_denied':
+      return 'respect_policy_gate';
+    case 'blocked':
+    case 'external_blocked':
+      return 'inspect_fallback';
+    case 'error':
+      return 'stop_or_debug';
+    case 'unknown':
+      return 'unknown';
+    default:
+      return 'unknown';
+  }
+}
+
+function matchesAny(text: string, needles: string[]): boolean {
+  return needles.some((needle) => text.includes(needle));
 }
 
 function inferSourceLineage(source: ReadPageSelectedDataSource): BrowserSourceLineage {
