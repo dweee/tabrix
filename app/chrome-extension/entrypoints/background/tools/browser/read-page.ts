@@ -2,6 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import {
   TOOL_NAMES,
+  type BrowserUserActivityLevel,
   type ReadPageCompactSnapshot,
   type ReadPageFullSnapshot,
   type ReadPageMode,
@@ -67,6 +68,19 @@ function delay(ms: number): Promise<void> {
 
 function getTabNavigationUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {
   return String(tab.url || tab.pendingUrl || '');
+}
+
+function inferUserActivityLevel(input: {
+  isCurrentTabActive: boolean | null;
+  isCurrentWindowFocused: boolean | null;
+}): BrowserUserActivityLevel {
+  if (input.isCurrentTabActive === true && input.isCurrentWindowFocused === true) {
+    return 'active';
+  }
+  if (input.isCurrentTabActive === false || input.isCurrentWindowFocused === false) {
+    return 'none';
+  }
+  return 'unknown';
 }
 
 function reconcilePageUnderstandingWithVisibleRows(payload: Record<string, any>): void {
@@ -135,6 +149,9 @@ function buildModeOutput(params: {
   mode: ReadPageMode;
   renderMode: ReadPageRenderMode;
   tabId: number;
+  currentWindowId: number | null;
+  isCurrentTabActive: boolean | null;
+  isCurrentWindowFocused: boolean | null;
   currentUrl: string;
   currentTitle: string;
   pageType: PageType;
@@ -256,8 +273,15 @@ function buildModeOutput(params: {
   const sharedPayload: ReadPageCompactSnapshot = {
     ...stableLayer,
     ...extensionLayer,
+    currentWindowId: params.currentWindowId,
+    isCurrentTabActive: params.isCurrentTabActive,
+    isCurrentWindowFocused: params.isCurrentWindowFocused,
   };
   const observedAt = new Date().toISOString();
+  const userActivityLevel = inferUserActivityLevel({
+    isCurrentTabActive: params.isCurrentTabActive,
+    isCurrentWindowFocused: params.isCurrentWindowFocused,
+  });
   sharedPayload.pageProjection = buildBrowserPageThingProjectionFromReadPage({
     snapshot: sharedPayload,
     projectionId: `read_page:${params.tabId}:${sharedPayload.historyRef ?? 'snapshot'}`,
@@ -269,7 +293,7 @@ function buildModeOutput(params: {
     previousContextVersion: null,
     changedByActionId: null,
     changeCause: 'unknown',
-    userActivityLevel: 'unknown',
+    userActivityLevel,
     interferenceRisk: 'medium',
   });
 
@@ -511,6 +535,20 @@ class ReadPageTool extends BaseBrowserToolExecutor {
 
       const currentUrl = getTabNavigationUrl(tab);
       const currentTitle = String(tab.title || '');
+      const currentWindowId = Number.isInteger(tab.windowId) ? tab.windowId : null;
+      const isCurrentTabActive = typeof tab.active === 'boolean' ? tab.active : null;
+      let isCurrentWindowFocused: boolean | null = null;
+      if (currentWindowId !== null && typeof chrome.windows?.get === 'function') {
+        try {
+          const currentWindow = await chrome.windows.get(currentWindowId, { populate: false });
+          isCurrentWindowFocused =
+            currentWindow && typeof currentWindow.focused === 'boolean'
+              ? currentWindow.focused
+              : null;
+        } catch {
+          isCurrentWindowFocused = null;
+        }
+      }
       const schemeGuard = inferSchemeGuard(currentUrl);
 
       if (!schemeGuard.supportedForContentScript) {
@@ -535,6 +573,9 @@ class ReadPageTool extends BaseBrowserToolExecutor {
                   mode: selectedMode,
                   renderMode: selectedRender,
                   tabId,
+                  currentWindowId,
+                  isCurrentTabActive,
+                  isCurrentWindowFocused,
                   currentUrl,
                   currentTitle,
                   pageType: schemeGuard.pageType,
@@ -745,6 +786,9 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           mode: selectedMode,
           renderMode: selectedRender,
           tabId,
+          currentWindowId,
+          isCurrentTabActive,
+          isCurrentWindowFocused,
           currentUrl,
           currentTitle,
           pageType: schemeGuard.pageType,
@@ -858,6 +902,9 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             mode: selectedMode,
             renderMode: selectedRender,
             tabId,
+            currentWindowId,
+            isCurrentTabActive,
+            isCurrentWindowFocused,
             currentUrl,
             currentTitle,
             pageType: schemeGuard.pageType,

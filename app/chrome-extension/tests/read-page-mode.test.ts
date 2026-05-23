@@ -50,9 +50,14 @@ function expectCommonSnapshotShape(payload: any, mode: 'compact' | 'normal' | 'f
     stability: 'stable',
     chosenDataSource: expect.any(String),
     sourceFreshness: 'fresh',
-    userActivityLevel: 'unknown',
     interferenceRisk: 'medium',
   });
+  expect(['none', 'active', 'recent_input', 'unknown']).toContain(
+    payload.pageProjection.userActivityLevel,
+  );
+  expect(payload.currentWindowId).toEqual(expect.any(Number));
+  expect(payload.isCurrentTabActive).toEqual(expect.any(Boolean));
+  expect([true, false, null]).toContain(payload.isCurrentWindowFocused);
   expect(Date.parse(payload.pageProjection.projectionCreatedAt)).not.toBeNaN();
   expect(Date.parse(payload.pageProjection.sourceObservedAt)).not.toBeNaN();
   expect(payload.pageProjection.interferenceRisk).not.toBe('none');
@@ -89,6 +94,13 @@ function expectCommonSnapshotShape(payload: any, mode: 'compact' | 'normal' | 'f
 describe('read_page mode', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    if (!chrome.windows) {
+      (chrome as any).windows = {
+        get: vi.fn().mockResolvedValue({ id: 1, focused: true }),
+      };
+    } else {
+      (chrome.windows as any).get = vi.fn().mockResolvedValue({ id: 1, focused: true });
+    }
   });
 
   it('returns an error for unsupported mode values', async () => {
@@ -153,8 +165,93 @@ describe('read_page mode', () => {
       type: expect.any(String),
       value: expect.any(String),
     });
+    expect(payload.pageProjection.userActivityLevel).toBe('active');
     expect(payload.diagnostics).toBeUndefined();
     expect(payload.fullSnapshot).toBeUndefined();
+  });
+
+  it('returns null window focus truth when chrome.windows.get is unavailable', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5202,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.com/profile',
+      title: 'Profile',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows as any).get = vi.fn().mockRejectedValue(new Error('windows api unavailable'));
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent:
+        '- form "Profile" [ref=ref_0] (x=640,y=300)\n  - textbox "Display name" [ref=ref_1] (x=600,y=260)\n  - textbox "Email" [ref=ref_2] (x=600,y=300)\n  - button "Save" [ref=ref_3] (x=600,y=340)\n  - link "Security" [ref=ref_4] (x=500,y=340)\n- heading "Profile" [ref=ref_5] (x=320,y=100)\n- generic "Account settings" [ref=ref_6] (x=320,y=140)\n- generic "Sidebar" [ref=ref_7] (x=900,y=220)\n- generic "Footer" [ref=ref_8] (x=300,y=560)',
+      refMap: [
+        { ref: 'ref_1', selector: '#display-name' },
+        { ref: 'ref_2', selector: '#email' },
+        { ref: 'ref_3', selector: 'button[type=submit]' },
+        { ref: 'ref_4', selector: 'a[href="/security"]' },
+      ],
+      stats: { processed: 12, included: 8, durationMs: 6 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.mode).toBe('compact');
+    expect(payload.currentWindowId).toBe(1);
+    expect(payload.isCurrentTabActive).toBe(true);
+    expect(payload.isCurrentWindowFocused).toBeNull();
+    expect(payload.pageProjection.userActivityLevel).toBe('unknown');
+  });
+
+  it('marks user activity as none when the current tab is not active', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5203,
+      windowId: 1,
+      active: false,
+      status: 'complete',
+      url: 'https://example.com/docs',
+      title: 'Docs',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const collectInteractiveElementsFallback = vi.spyOn(
+      readPageTool as any,
+      'collectInteractiveElementsFallback',
+    );
+    (chrome.windows as any).get = vi.fn().mockResolvedValue({ id: 1, focused: true });
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Docs" [ref=ref_0] (x=320,y=100)',
+        '  - heading "API reference" [ref=ref_1] (x=320,y=140)',
+        '  - link "Get started" [ref=ref_2] (x=320,y=180)',
+        '  - link "Quickstart" [ref=ref_3] (x=320,y=220)',
+        '  - button "Copy example" [ref=ref_4] (x=320,y=260)',
+        '  - generic "Installation" [ref=ref_5] (x=320,y=300)',
+        '  - generic "Configuration" [ref=ref_6] (x=320,y=340)',
+        '  - generic "Usage" [ref=ref_7] (x=320,y=380)',
+        '  - generic "Examples" [ref=ref_8] (x=320,y=420)',
+        '  - generic "Footer" [ref=ref_9] (x=320,y=460)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_2', selector: 'a[href="/get-started"]' },
+        { ref: 'ref_3', selector: 'a[href="/quickstart"]' },
+        { ref: 'ref_4', selector: 'button.copy-example' },
+      ],
+      stats: { processed: 10, included: 8, durationMs: 5 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact', tabId: 5203 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(collectInteractiveElementsFallback).not.toHaveBeenCalled();
+    expect(payload.isCurrentTabActive).toBe(false);
+    expect(payload.isCurrentWindowFocused).toBe(true);
+    expect(payload.pageProjection.userActivityLevel).toBe('none');
   });
 
   it('retries once when the first accessibility tree is sparse and the page hydrates late', async () => {
