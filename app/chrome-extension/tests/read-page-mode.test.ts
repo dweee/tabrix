@@ -7,6 +7,24 @@ const MODE_MINIMUM_FIELDS: Record<'compact' | 'normal' | 'full', string[]> = {
   full: ['mode', 'page', 'summary', 'interactiveElements', 'artifactRefs', 'fullSnapshot'],
 };
 
+function hasNestedOwnProperty(target: unknown, path: string): boolean {
+  const segments = path.split('.');
+  let current: unknown = target;
+
+  for (const segment of segments) {
+    if (
+      current === null ||
+      typeof current !== 'object' ||
+      !Object.prototype.hasOwnProperty.call(current, segment)
+    ) {
+      return false;
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+
+  return true;
+}
+
 function expectCommonSnapshotShape(payload: any, mode: 'compact' | 'normal' | 'full') {
   for (const field of MODE_MINIMUM_FIELDS[mode]) {
     expect(payload).toHaveProperty(field);
@@ -1502,14 +1520,14 @@ describe('read_page mode', () => {
     expect(result.isError).toBe(false);
     expect(payload.pageProjection.sourceTruthChain).toBeDefined();
     expect(payload.pageProjection.sourceTruthChain.primaryOrigin).toMatch(
-      /^(dom|accessibility|api|cdp|text|inference|unknown)$/,
+      /^(dom|accessibility|api|cdp|text|browser_runtime|inference|unknown)$/,
     );
     expect(Array.isArray(payload.pageProjection.sourceTruthChain.fieldProvenances)).toBe(true);
     expect(payload.pageProjection.sourceTruthChain.fieldProvenances.length).toBeGreaterThan(0);
     expect(Date.parse(payload.pageProjection.sourceTruthChain.provenanceCreatedAt)).not.toBeNaN();
   });
 
-  it('marks inferred fields (pageRole, activeRegion) as non-fact in sourceTruthChain', async () => {
+  it('marks browser runtime metadata fields with browser_runtime origin', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 6502,
       windowId: 1,
@@ -1548,17 +1566,109 @@ describe('read_page mode', () => {
 
     expect(result.isError).toBe(false);
     const { fieldProvenances } = payload.pageProjection.sourceTruthChain;
-    const pageRoleProv = fieldProvenances.find(
-      (fp: { field: string }) => fp.field === 'pageProjection.pageRole',
-    );
+    const runtimeFields = [
+      'pageProjection.pageId',
+      'pageProjection.tabId',
+      'pageProjection.stability',
+    ];
+    for (const field of runtimeFields) {
+      expect(fieldProvenances).toContainEqual(
+        expect.objectContaining({ field, origin: 'browser_runtime', isFact: true }),
+      );
+    }
+  });
+
+  it('marks inferred fields (activeRegion) as non-fact in sourceTruthChain', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 6502,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.com/test-6502',
+      title: 'Test Tab 6502',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows as any).get = vi.fn().mockResolvedValue({ id: 1, focused: true });
+    (chrome.idle.queryState as any).mockResolvedValue('active');
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '  - generic "Row0" [ref=ref_0] (x=320,y=100)',
+        '  - generic "Row1" [ref=ref_1] (x=320,y=140)',
+        '  - generic "Row2" [ref=ref_2] (x=320,y=180)',
+        '  - generic "Row3" [ref=ref_3] (x=320,y=220)',
+        '  - generic "Row4" [ref=ref_4] (x=320,y=260)',
+        '  - generic "Row5" [ref=ref_5] (x=320,y=300)',
+        '  - generic "Row6" [ref=ref_6] (x=320,y=340)',
+        '  - generic "Row7" [ref=ref_7] (x=320,y=380)',
+        '  - generic "Row8" [ref=ref_8] (x=320,y=420)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_2', selector: 'a.a' },
+        { ref: 'ref_3', selector: 'a.b' },
+        { ref: 'ref_4', selector: 'button.c' },
+      ],
+      stats: { processed: 10, included: 9, durationMs: 5 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact', tabId: 6502 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    const { fieldProvenances } = payload.pageProjection.sourceTruthChain;
     const activeRegionProv = fieldProvenances.find(
-      (fp: { field: string }) => fp.field === 'pageProjection.activeRegion',
+      (fp: { field: string; origin: string; isFact: boolean }) =>
+        fp.field === 'pageProjection.activeRegion',
     );
-    expect(pageRoleProv).toBeDefined();
-    expect(pageRoleProv.origin).toBe('inference');
-    expect(pageRoleProv.isFact).toBe(false);
+    expect(
+      fieldProvenances.some((fp: { field: string }) => fp.field === 'pageProjection.pageRole'),
+    ).toBe(false);
     expect(activeRegionProv).toBeDefined();
     expect(activeRegionProv.origin).toBe('inference');
     expect(activeRegionProv.isFact).toBe(false);
+  });
+
+  it('maps every sourceTruthChain field provenance to an actual pageProjection property', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 6503,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.com/test-6503',
+      title: 'Test Tab 6503',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows as any).get = vi.fn().mockResolvedValue({ id: 1, focused: true });
+    (chrome.idle.queryState as any).mockResolvedValue('active');
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '  - generic "Row0" [ref=ref_0] (x=320,y=100)',
+        '  - generic "Row1" [ref=ref_1] (x=320,y=140)',
+        '  - generic "Row2" [ref=ref_2] (x=320,y=180)',
+        '  - generic "Row3" [ref=ref_3] (x=320,y=220)',
+        '  - generic "Row4" [ref=ref_4] (x=320,y=260)',
+        '  - generic "Row5" [ref=ref_5] (x=320,y=300)',
+        '  - generic "Row6" [ref=ref_6] (x=320,y=340)',
+        '  - generic "Row7" [ref=ref_7] (x=320,y=380)',
+        '  - generic "Row8" [ref=ref_8] (x=320,y=420)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_2', selector: 'a.a' },
+        { ref: 'ref_3', selector: 'a.b' },
+        { ref: 'ref_4', selector: 'button.c' },
+      ],
+      stats: { processed: 10, included: 9, durationMs: 5 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact', tabId: 6503 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    for (const provenance of payload.pageProjection.sourceTruthChain.fieldProvenances) {
+      expect(hasNestedOwnProperty(payload, provenance.field)).toBe(true);
+    }
   });
 });

@@ -220,6 +220,7 @@ export const SOURCE_TRUTH_ORIGIN_VALUES = [
   'api',
   'cdp',
   'text',
+  'browser_runtime',
   'inference',
   'unknown',
 ] as const;
@@ -736,20 +737,11 @@ function buildSourceTruthChain(
   const lineage = inferSourceLineage(source);
   const primaryOrigin = sourceLineageToOrigin(lineage);
   const contentOrigin: SourceTruthOrigin = primaryOrigin === 'unknown' ? 'unknown' : primaryOrigin;
-  const rows = snapshot.visibleRegionRows;
-  const hasRows = (rows?.rows?.length ?? 0) > 0;
-
   const fieldProvenances: FieldProvenance[] = [
-    { field: 'pageProjection.pageId', origin: 'dom', isFact: true },
-    { field: 'pageProjection.tabId', origin: 'dom', isFact: true },
+    { field: 'pageProjection.pageId', origin: 'browser_runtime', isFact: true },
+    { field: 'pageProjection.tabId', origin: 'browser_runtime', isFact: true },
     { field: 'pageProjection.readiness', origin: contentOrigin, isFact: true },
-    { field: 'pageProjection.stability', origin: 'dom', isFact: true },
-    {
-      field: 'pageProjection.visibleRegionRows',
-      origin: hasRows ? contentOrigin : 'unknown',
-      isFact: hasRows,
-    },
-    { field: 'pageProjection.pageRole', origin: 'inference', isFact: false },
+    { field: 'pageProjection.stability', origin: 'browser_runtime', isFact: true },
     { field: 'pageProjection.activeRegion', origin: 'inference', isFact: false },
   ];
 
