@@ -9,6 +9,7 @@ import {
   CONTEXT_LEVELS,
   FACT_OBSERVATION_EVENT_KINDS,
   LIFECYCLE_EVENT_KINDS,
+  LIFECYCLE_EVIDENCE_ARTIFACT_SECTIONS,
   LIFECYCLE_FLAGS,
   LIFECYCLE_STATES,
   NAVIGATION_INTENTS,
@@ -16,6 +17,8 @@ import {
   NETWORK_FACT_NOISE_CLASSES,
   NETWORK_FACT_SIZE_CLASSES,
   OBSERVATION_KINDS,
+  POSTCONDITION_SOURCE_ORIGINS,
+  POSTCONDITION_VERDICTS,
   READINESS_STATES,
   RECOMMENDED_LAYERS,
   RECOMMENDED_LAYER_REASONS,
@@ -134,6 +137,32 @@ assertClosedVocabulary('ACTION_OUTCOMES', ACTION_OUTCOMES, [
   'unknown',
 ]);
 
+assertClosedVocabulary('POSTCONDITION_VERDICTS', POSTCONDITION_VERDICTS, [
+  'passed',
+  'failed',
+  'unknown',
+]);
+
+assertClosedVocabulary('POSTCONDITION_SOURCE_ORIGINS', POSTCONDITION_SOURCE_ORIGINS, [
+  'runtime',
+  'action_outcome_classifier',
+  'inference',
+  'unknown',
+]);
+
+assertClosedVocabulary('LIFECYCLE_EVIDENCE_ARTIFACT_SECTIONS', LIFECYCLE_EVIDENCE_ARTIFACT_SECTIONS, [
+  'scenario_baseline',
+  'event_timeline',
+  'signal_sequence',
+  'scope_transitions',
+  'action_log',
+  'browser_hygiene_closeout',
+  'source_truth_chain',
+  'claim_boundary',
+  'final_verdict',
+  'unknown',
+]);
+
 assertClosedVocabulary('READINESS_STATES', READINESS_STATES, [
   'error',
   'empty',
@@ -210,6 +239,6 @@ console.log(
   JSON.stringify({
     status: 'PASS',
     contract: 'browser-fact',
-    vocabularyCount: 19,
+    vocabularyCount: 22,
   }),
 );

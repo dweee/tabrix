@@ -1,0 +1,172 @@
+/**
+ * BNS-05 lifecycle evidence artifact producer.
+ *
+ * Pure fixture-tested artifact builder. This first slice summarizes BNS-01
+ * events and BNS-04A postcondition results only; BNS-02/BNS-03 sections are
+ * intentionally explicit unavailable slots.
+ */
+import type {
+  BrowserSourceTruthChain,
+  BrowserTaskEvidenceLevel,
+  BrowserTaskScenarioClass,
+  BrowserStreamEvent,
+  LifecycleEvidenceArtifact,
+  LifecycleEvidenceBrowserHygiene,
+  LifecycleEvidenceFinalVerdict,
+  LifecycleEvidenceKeyEvent,
+  PostconditionResult,
+  PostconditionVerdict,
+} from '@tabrix/shared';
+
+const DEFAULT_MAX_KEY_EVENTS = 50;
+
+export interface ProduceLifecycleEvidenceArtifactInput {
+  artifactId: string;
+  evidenceLevel: BrowserTaskEvidenceLevel;
+  scenarioId: string;
+  scenarioClass: BrowserTaskScenarioClass | string;
+  startedAtMs: number;
+  streamEvents?: BrowserStreamEvent[];
+  postconditionResults?: PostconditionResult[];
+  sourceTruthChain?: BrowserSourceTruthChain | null;
+  browserHygiene?: Partial<LifecycleEvidenceBrowserHygiene> | null;
+}
+
+export interface ProduceLifecycleEvidenceArtifactOptions {
+  now?: () => number;
+  maxKeyEvents?: number;
+}
+
+export function produceLifecycleEvidenceArtifact(
+  input: ProduceLifecycleEvidenceArtifactInput,
+  options: ProduceLifecycleEvidenceArtifactOptions = {},
+): LifecycleEvidenceArtifact {
+  const producedAtMs = options.now ? options.now() : Date.now();
+  const maxKeyEvents = Math.max(0, options.maxKeyEvents ?? DEFAULT_MAX_KEY_EVENTS);
+  const streamEvents = input.streamEvents ?? [];
+  const postconditionResults = input.postconditionResults ?? [];
+
+  return {
+    artifactId: input.artifactId,
+    version: 1,
+    evidenceLevel: input.evidenceLevel,
+    scenarioId: input.scenarioId,
+    scenarioClass: input.scenarioClass,
+    baseline: {
+      scenarioId: input.scenarioId,
+      scenarioClass: input.scenarioClass,
+      evidenceLevel: input.evidenceLevel,
+      startedAtMs: input.startedAtMs,
+    },
+    eventTimeline: {
+      available: streamEvents.length > 0,
+      totalEvents: streamEvents.length,
+      eventsByKind: countEventsByKind(streamEvents),
+      firstEventAtMs: firstObservedAt(streamEvents),
+      lastEventAtMs: lastObservedAt(streamEvents),
+      keyEvents: streamEvents.slice(0, maxKeyEvents).map(toKeyEvent),
+    },
+    signalSequence: {
+      available: false,
+      reason: 'bns_02_not_available',
+    },
+    scopeTransitions: {
+      available: false,
+      reason: 'bns_03_not_available',
+    },
+    actionLog: buildActionLog(postconditionResults),
+    browserHygiene: buildBrowserHygiene(input.browserHygiene),
+    sourceTruthChain: input.sourceTruthChain ?? null,
+    claimBoundary: {
+      deterministicArtifactOnly:
+        input.evidenceLevel !== 'real_browser' && input.evidenceLevel !== 'competitor',
+      realBrowserProven: false,
+      commercialGradeProven: false,
+      competitorSuperiorityProven: false,
+      fallbackSuccessSeparated: false,
+      sourceRouteProven: hasFactSourceRoute(input.sourceTruthChain ?? null),
+    },
+    finalVerdict: deriveFinalVerdict(postconditionResults),
+    producedAtMs,
+  };
+}
+
+function countEventsByKind(events: BrowserStreamEvent[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const event of events) {
+    counts[event.kind] = (counts[event.kind] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function firstObservedAt(events: BrowserStreamEvent[]): number | null {
+  if (events.length === 0) return null;
+  return Math.min(...events.map((event) => event.observedAtMs));
+}
+
+function lastObservedAt(events: BrowserStreamEvent[]): number | null {
+  if (events.length === 0) return null;
+  return Math.max(...events.map((event) => event.observedAtMs));
+}
+
+function toKeyEvent(event: BrowserStreamEvent): LifecycleEvidenceKeyEvent {
+  return {
+    streamEventId: event.streamEventId,
+    kind: event.kind,
+    observedAtMs: event.observedAtMs,
+    tabId: event.tabId,
+    urlPattern: event.urlPattern,
+    sourceObservationKind: event.sourceObservationKind,
+  };
+}
+
+function buildActionLog(entries: PostconditionResult[]) {
+  return {
+    available: entries.length > 0,
+    totalActions: entries.length,
+    passed: countVerdict(entries, 'passed'),
+    failed: countVerdict(entries, 'failed'),
+    unknown: countVerdict(entries, 'unknown'),
+    entries,
+  };
+}
+
+function countVerdict(entries: PostconditionResult[], verdict: PostconditionVerdict): number {
+  return entries.filter((entry) => entry.verdict === verdict).length;
+}
+
+function buildBrowserHygiene(
+  input: Partial<LifecycleEvidenceBrowserHygiene> | null | undefined,
+): LifecycleEvidenceBrowserHygiene {
+  return {
+    available: input?.available ?? false,
+    baselineTabs: input?.baselineTabs ?? null,
+    runOwnedTabsClosed: input?.runOwnedTabsClosed ?? null,
+    baselineChanged: input?.baselineChanged ?? null,
+    notes: input?.notes ?? [],
+  };
+}
+
+function hasFactSourceRoute(sourceTruthChain: BrowserSourceTruthChain | null): boolean {
+  return (
+    sourceTruthChain?.fieldProvenances.some((provenance) => provenance.isFact === true) ?? false
+  );
+}
+
+function deriveFinalVerdict(entries: PostconditionResult[]): LifecycleEvidenceFinalVerdict {
+  if (entries.length === 0) {
+    return { verdict: 'unknown', confidence: 0, reason: 'no_postcondition_results' };
+  }
+  if (entries.some((entry) => entry.verdict === 'failed')) {
+    return { verdict: 'task_failed', confidence: 0.85, reason: 'postcondition_failed' };
+  }
+  const passed = entries.some((entry) => entry.verdict === 'passed');
+  const unknown = entries.some((entry) => entry.verdict === 'unknown');
+  if (passed && unknown) {
+    return { verdict: 'partial_success', confidence: 0.6, reason: 'mixed_postcondition_results' };
+  }
+  if (passed) {
+    return { verdict: 'task_success', confidence: 0.8, reason: 'postconditions_passed' };
+  }
+  return { verdict: 'unknown', confidence: 0.2, reason: 'postconditions_unknown' };
+}

@@ -17,6 +17,11 @@
  *   (`packages/shared/src/tools.ts`) are not modified by observation
  *   type changes.
  */
+import type {
+  BrowserSourceTruthChain,
+  BrowserTaskEvidenceLevel,
+  BrowserTaskScenarioClass,
+} from './browser-task-thing-contract';
 
 // ---------------------------------------------------------------------------
 // Lifecycle state machine
@@ -557,6 +562,69 @@ export interface ActionOutcomeSnapshot {
 }
 
 // ---------------------------------------------------------------------------
+// Action postcondition verifier (BNS-04)
+// ---------------------------------------------------------------------------
+
+/**
+ * Closed-enum verdict for the first BNS-04 postcondition verifier slice.
+ * This is not a product-grade or real-browser acceptance verdict; it only
+ * describes whether an already-classified action outcome supports the expected
+ * class of effect for the frozen action kind.
+ */
+export type PostconditionVerdict = 'passed' | 'failed' | 'unknown';
+
+export const POSTCONDITION_VERDICTS = [
+  'passed',
+  'failed',
+  'unknown',
+] as const satisfies ReadonlyArray<PostconditionVerdict>;
+
+/**
+ * Minimum provenance taxonomy for BNS-04 postcondition results.
+ * The verifier consumes runtime action envelopes, classifier snapshots, and a
+ * deterministic inference matrix.
+ */
+export type PostconditionSourceOrigin =
+  | 'runtime'
+  | 'action_outcome_classifier'
+  | 'inference'
+  | 'unknown';
+
+export const POSTCONDITION_SOURCE_ORIGINS = [
+  'runtime',
+  'action_outcome_classifier',
+  'inference',
+  'unknown',
+] as const satisfies ReadonlyArray<PostconditionSourceOrigin>;
+
+export type PostconditionEvidenceRefKind = 'action_outcome' | 'stream_event' | 'unknown';
+
+/**
+ * Coarse evidence reference for BNS-04. Current authoritative inputs expose
+ * `actionId`, but not per-signal ids or standalone classifier snapshot ids, so
+ * implementations must not invent event-level ids.
+ */
+export interface PostconditionEvidenceRef {
+  kind: PostconditionEvidenceRefKind;
+  id: string;
+  origin: PostconditionSourceOrigin;
+}
+
+export interface PostconditionResult {
+  actionId: string;
+  actionKind: ActionKind;
+  tabId: number | null;
+  urlPattern: string | null;
+  verdict: PostconditionVerdict;
+  reason: string;
+  observedOutcome: ActionOutcome;
+  observedOutcomeConfidence: number;
+  sourceEventRefs: PostconditionEvidenceRef[];
+  sourceOrigins: PostconditionSourceOrigin[];
+  producedAtMs: number;
+}
+
+// ---------------------------------------------------------------------------
 // Readiness + Complexity profilers
 // ---------------------------------------------------------------------------
 
@@ -1051,5 +1119,121 @@ export interface StreamHealthSnapshot {
   /** Per-subscriber health descriptors (order matches registration). */
   subscribers: StreamSubscriberHealth[];
   /** Producer wallclock for this snapshot (ms). */
+  producedAtMs: number;
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle evidence artifact (BNS-05)
+// ---------------------------------------------------------------------------
+
+export type LifecycleEvidenceArtifactSection =
+  | 'scenario_baseline'
+  | 'event_timeline'
+  | 'signal_sequence'
+  | 'scope_transitions'
+  | 'action_log'
+  | 'browser_hygiene_closeout'
+  | 'source_truth_chain'
+  | 'claim_boundary'
+  | 'final_verdict'
+  | 'unknown';
+
+export const LIFECYCLE_EVIDENCE_ARTIFACT_SECTIONS = [
+  'scenario_baseline',
+  'event_timeline',
+  'signal_sequence',
+  'scope_transitions',
+  'action_log',
+  'browser_hygiene_closeout',
+  'source_truth_chain',
+  'claim_boundary',
+  'final_verdict',
+  'unknown',
+] as const satisfies ReadonlyArray<LifecycleEvidenceArtifactSection>;
+
+export interface LifecycleEvidenceBaseline {
+  scenarioId: string;
+  scenarioClass: BrowserTaskScenarioClass | string;
+  evidenceLevel: BrowserTaskEvidenceLevel;
+  startedAtMs: number;
+}
+
+export interface LifecycleEvidenceKeyEvent {
+  streamEventId: string;
+  kind: BrowserStreamEventKind;
+  observedAtMs: number;
+  tabId: number | null;
+  urlPattern: string | null;
+  sourceObservationKind: ObservationKind | null;
+}
+
+export interface LifecycleEvidenceEventTimeline {
+  available: boolean;
+  totalEvents: number;
+  eventsByKind: Record<string, number>;
+  firstEventAtMs: number | null;
+  lastEventAtMs: number | null;
+  keyEvents: LifecycleEvidenceKeyEvent[];
+}
+
+export interface LifecycleEvidenceUnavailableSection {
+  available: false;
+  reason: string;
+}
+
+export interface LifecycleEvidenceActionLog {
+  available: boolean;
+  totalActions: number;
+  passed: number;
+  failed: number;
+  unknown: number;
+  entries: PostconditionResult[];
+}
+
+export interface LifecycleEvidenceBrowserHygiene {
+  available: boolean;
+  baselineTabs: number | null;
+  runOwnedTabsClosed: number | null;
+  baselineChanged: boolean | null;
+  notes: string[];
+}
+
+export interface LifecycleEvidenceClaimBoundary {
+  deterministicArtifactOnly: boolean;
+  realBrowserProven: boolean;
+  commercialGradeProven: boolean;
+  competitorSuperiorityProven: boolean;
+  fallbackSuccessSeparated: boolean;
+  sourceRouteProven: boolean;
+}
+
+export type LifecycleEvidenceFinalVerdictKind =
+  | 'task_success'
+  | 'task_failed'
+  | 'partial_success'
+  | 'blocked'
+  | 'unknown';
+
+export interface LifecycleEvidenceFinalVerdict {
+  verdict: LifecycleEvidenceFinalVerdictKind;
+  confidence: number;
+  reason: string;
+}
+
+export interface LifecycleEvidenceArtifact {
+  artifactId: string;
+  version: 1;
+  evidenceLevel: BrowserTaskEvidenceLevel;
+  scenarioId: string;
+  scenarioClass: BrowserTaskScenarioClass | string;
+  baseline: LifecycleEvidenceBaseline;
+  eventTimeline: LifecycleEvidenceEventTimeline;
+  signalSequence: LifecycleEvidenceUnavailableSection;
+  scopeTransitions: LifecycleEvidenceUnavailableSection;
+  actionLog: LifecycleEvidenceActionLog;
+  browserHygiene: LifecycleEvidenceBrowserHygiene;
+  sourceTruthChain: BrowserSourceTruthChain | null;
+  claimBoundary: LifecycleEvidenceClaimBoundary;
+  finalVerdict: LifecycleEvidenceFinalVerdict;
   producedAtMs: number;
 }
