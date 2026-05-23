@@ -209,6 +209,8 @@ describe('web fetcher URL route', () => {
       metrics: {
         textMode: 'full-visible',
         headingLikeLineCount: 8,
+        sectionMarkerCount: 8,
+        structureEvidenceCount: 8,
         markerTokenCount: 9,
         tailCoveragePresent: true,
         coverageEvidencePresent: true,
@@ -224,6 +226,54 @@ describe('web fetcher URL route', () => {
     expect(payload.longContentCoverageGate.evidence.markerTokens).toEqual(
       expect.arrayContaining(['SENTINEL-ALPHA', 'SENTINEL-HOTEL', 'FINAL-COVERAGE-CHECK']),
     );
+  });
+
+  it('detects section structure when full-visible text is collapsed to one line', async () => {
+    vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 42,
+        windowId: 7,
+        active: true,
+        status: 'complete',
+        url: 'https://example.test/docs',
+        title: 'Docs',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 1000,
+      readyState: 'complete',
+    });
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(webFetcherTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      textContent:
+        'Section 1: Opening SENTINEL-ALPHA Section 2: Events SENTINEL-BRAVO ' +
+        'Section 3: DOM SENTINEL-CHARLIE Section 4: Source SENTINEL-DELTA ' +
+        'Section 5: Scope SENTINEL-ECHO Section 6: Checks SENTINEL-FOXTROT ' +
+        'Section 7: Hygiene SENTINEL-GOLF Section 8: Closing SENTINEL-HOTEL ' +
+        'FINAL-COVERAGE-CHECK',
+      textMode: 'full-visible',
+      textContentSource: 'fallback_body_textContent',
+    });
+
+    const result = await webFetcherTool.execute({
+      tabId: 42,
+      textContent: true,
+      textMode: 'full-visible',
+    });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(payload.longContentCoverageGate).toMatchObject({
+      verdict: 'complete',
+      metrics: {
+        lineCount: 1,
+        sectionMarkerCount: 8,
+        structureEvidenceCount: 8,
+        markerTokenCount: 9,
+        tailCoveragePresent: true,
+      },
+    });
   });
 
   it('does not mark long content coverage complete outside full-visible mode', async () => {

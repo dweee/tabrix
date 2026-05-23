@@ -97,6 +97,9 @@ function buildLongContentCoverageGate(text: string, textMode: 'body' | 'full-vis
     .filter(Boolean);
   const normalized = (text || '').replace(/\s+/g, ' ').trim();
   const headingLikeLines = lines.filter(isLongContentHeadingLine);
+  const sectionMarkers = Array.from(
+    new Set(normalized.match(/\b(?:section|chapter|part|step|heading)\s+\d+[\s:.-]/gi) ?? []),
+  );
   const markerTokens = Array.from(
     new Set(normalized.match(/\b[A-Z][A-Z0-9]+(?:-[A-Z0-9]+){1,}\b/g) ?? []),
   );
@@ -106,7 +109,8 @@ function buildLongContentCoverageGate(text: string, textMode: 'body' | 'full-vis
     tailMarkerTokens.length > 0 ||
     /\b(final|closing|conclusion|summary|end)\b/i.test(tailWindow) ||
     /尾段|结尾|结束|总结/.test(tailWindow);
-  const structureCovered = headingLikeLines.length >= 6;
+  const structureEvidenceCount = Math.max(headingLikeLines.length, sectionMarkers.length);
+  const structureCovered = structureEvidenceCount >= 6;
   const markerCovered = markerTokens.length >= 3;
   const coverageEvidencePresent =
     normalized.length >= 2400 || lines.length >= 12 || structureCovered || markerTokens.length >= 6;
@@ -130,6 +134,8 @@ function buildLongContentCoverageGate(text: string, textMode: 'body' | 'full-vis
       normalizedLength: normalized.length,
       lineCount: lines.length,
       headingLikeLineCount: headingLikeLines.length,
+      sectionMarkerCount: sectionMarkers.length,
+      structureEvidenceCount,
       markerTokenCount: markerTokens.length,
       tailMarkerTokenCount: tailMarkerTokens.length,
       tailCoveragePresent: hasTailCoverage,
@@ -137,6 +143,7 @@ function buildLongContentCoverageGate(text: string, textMode: 'body' | 'full-vis
     },
     evidence: {
       headingLikeLines: headingLikeLines.slice(0, 12),
+      sectionMarkers: sectionMarkers.slice(0, 12),
       markerTokens: markerTokens.slice(0, 24),
       tailMarkerTokens: tailMarkerTokens.slice(0, 12),
     },
