@@ -941,3 +941,115 @@ export const OBSERVATION_KINDS = [
   'tab_event',
   'unknown',
 ] as const satisfies ReadonlyArray<ObservationKind>;
+
+// ---------------------------------------------------------------------------
+// Browser Event Stream (BNS-01)
+// ---------------------------------------------------------------------------
+
+/** Opaque correlation id used to group nearby stream events. */
+export type CorrelationGroupId = string;
+
+/**
+ * Closed-enum kind of internal stream event. Mirrors the bridge
+ * `ObservationKind` set with `observation_`-prefixed stream kinds so
+ * downstream consumers can distinguish raw bridge events from
+ * stream-forwarded ones.
+ *
+ * Always includes `'unknown'` per the shared invariant.
+ */
+export type BrowserStreamEventKind =
+  | 'observation_lifecycle'
+  | 'observation_fact_snapshot'
+  | 'observation_action_outcome'
+  | 'observation_tab_event'
+  | 'observation_unknown'
+  | 'unknown';
+
+export const BROWSER_STREAM_EVENT_KINDS = [
+  'observation_lifecycle',
+  'observation_fact_snapshot',
+  'observation_action_outcome',
+  'observation_tab_event',
+  'observation_unknown',
+  'unknown',
+] as const satisfies ReadonlyArray<BrowserStreamEventKind>;
+
+/**
+ * Mapping from bridge `ObservationKind` to internal stream event kind.
+ * Pure function contract: implementations MUST use this mapping so
+ * downstream subscribers see stable, predictable event kinds.
+ */
+export const OBSERVATION_TO_STREAM_EVENT_KIND: Readonly<
+  Record<ObservationKind, BrowserStreamEventKind>
+> = Object.freeze({
+  lifecycle_event: 'observation_lifecycle',
+  fact_snapshot: 'observation_fact_snapshot',
+  action_outcome: 'observation_action_outcome',
+  tab_event: 'observation_tab_event',
+  unknown: 'observation_unknown',
+});
+
+/**
+ * Unified internal event envelope. Every bridge observation that
+ * passes through the stream router produces a `BrowserStreamEvent`.
+ */
+export interface BrowserStreamEvent {
+  /** Producer-side opaque id, stable per event. */
+  streamEventId: string;
+  /** Advisory correlation group. Events sharing the same
+   *  `correlationGroupId` are likely related (same tab, close in
+   *  time). The derivation is a pure function over `(tabId,
+   *  observedAtMs)` — same tab + within correlation window = same group. */
+  correlationGroupId: CorrelationGroupId;
+  /** Closed-enum stream event kind. */
+  kind: BrowserStreamEventKind;
+  /** Producer wallclock for the event (ms). */
+  observedAtMs: number;
+  /** The tab this event is about. `null` when unknown. */
+  tabId: number | null;
+  /** Brand-neutral path-only urlPattern. `null` when unknown. */
+  urlPattern: string | null;
+  /** The original bridge observation kind this event was derived from. */
+  sourceObservationKind: ObservationKind | null;
+  /** The original bridge observation payload, forwarded unchanged. */
+  sourcePayload: unknown | null;
+}
+
+/**
+ * Per-subscriber health descriptor. The stream router snapshots these
+ * on demand for diagnostic consumers.
+ */
+export interface StreamSubscriberHealth {
+  /** Subscriber id assigned at registration. */
+  subscriberId: string;
+  /** Event kinds this subscriber is registered for. */
+  subscribedKinds: BrowserStreamEventKind[];
+  /** Cumulative events dispatched to this subscriber since registration. */
+  eventsDispatched: number;
+  /** Cumulative events dropped because the subscriber threw an error
+   *  or failed its own health check. */
+  eventsDropped: number;
+  /** Wallclock of the most recent event acknowledged by this
+   *  subscriber (ms). `null` if no events have been dispatched yet. */
+  lastAcknowledgedAtMs: number | null;
+  /** Is the subscriber believed to be healthy? Derived from the
+   *  subscriber's own health check and zero delivery errors. */
+  healthy: boolean;
+}
+
+/**
+ * Stream health snapshot, consumed by the existing diagnostics
+ * surface (`observation-diagnostics.ts`).
+ */
+export interface StreamHealthSnapshot {
+  /** Total events dispatched across the stream since init. */
+  totalEventsDispatched: number;
+  /** Total events dropped due to no subscribers or fan-out errors. */
+  totalEventsDropped: number;
+  /** Count of currently registered subscribers. */
+  subscriberCount: number;
+  /** Per-subscriber health descriptors (order matches registration). */
+  subscribers: StreamSubscriberHealth[];
+  /** Producer wallclock for this snapshot (ms). */
+  producedAtMs: number;
+}

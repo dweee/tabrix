@@ -38,6 +38,7 @@ import {
   recordObservationTabEvent,
   recordObservationUnknown,
 } from './observation-diagnostics';
+import { dispatchBridgeObservationToStream } from './browser-event-stream';
 
 interface IngestDeps {
   lifecycle: LifecycleStateMachine;
@@ -100,7 +101,7 @@ export function ingestBridgeObservation(
         // websocket. Best-effort.
         recordObservationUnknown(payload.kind);
       }
-      return;
+      break;
     }
     case 'fact_snapshot': {
       try {
@@ -120,7 +121,7 @@ export function ingestBridgeObservation(
         // command. Drop on shape error.
         recordObservationUnknown(payload.kind);
       }
-      return;
+      break;
     }
     case 'action_outcome': {
       try {
@@ -149,7 +150,7 @@ export function ingestBridgeObservation(
         // Best-effort.
         recordObservationUnknown(payload.kind);
       }
-      return;
+      break;
     }
     case 'tab_event': {
       try {
@@ -175,7 +176,7 @@ export function ingestBridgeObservation(
         // Best-effort.
         recordObservationUnknown(payload.kind);
       }
-      return;
+      break;
     }
     case 'unknown':
     default:
@@ -183,6 +184,11 @@ export function ingestBridgeObservation(
       // dropped without error so a newer extension paired with this
       // native server does not crash ingestion.
       recordObservationUnknown(payload.kind);
-      return;
+      break;
   }
+
+  // BNS-01: forward every valid bridge observation to the event stream.
+  // Subscribers receive events after the existing singletons have
+  // processed the observation — this is additive, fire-and-forget.
+  dispatchBridgeObservationToStream(message);
 }

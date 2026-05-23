@@ -69,6 +69,7 @@ releases/chrome-extension/latest/*.zip
 .private-artifacts/
 .private-tests/
 .playwright-mcp/
+.qoder/
 
 # Local codex-cli prompt scratch (not part of repo contract)
 .codex-prompts/

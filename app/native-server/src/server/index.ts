@@ -48,6 +48,7 @@ import {
   getObservationDiagnosticsSnapshot,
   type ObservationDiagnosticsSnapshot,
 } from '../runtime/observation-diagnostics';
+import { getEventStreamHealthSnapshot } from '../runtime/browser-event-stream';
 
 // Compatibility guard:
 // @hono/node-server may call socket.destroySoon() while draining incoming requests.

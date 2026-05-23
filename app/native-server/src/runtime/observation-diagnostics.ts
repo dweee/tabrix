@@ -30,6 +30,12 @@ export interface ObservationDiagnosticsSnapshot {
   factSnapshotCount: number;
   trackedContextCount: number;
   sensitivePersistedCount: 0;
+  /** BNS-01: events forwarded to the browser event stream. */
+  streamEventsDispatched: number;
+  /** BNS-01: stream events dropped (null message, no subscribers). */
+  streamEventsDropped: number;
+  /** BNS-01: number of registered stream subscribers. */
+  streamSubscriberCount: number;
 }
 
 interface MutableDiagnostics {
@@ -149,6 +155,12 @@ export function getObservationDiagnosticsSnapshot(
   input: {
     factSnapshotCount?: number;
     trackedContextCount?: number;
+    /** BNS-01: events forwarded to the stream. */
+    streamEventsDispatched?: number;
+    /** BNS-01: stream events dropped. */
+    streamEventsDropped?: number;
+    /** BNS-01: active stream subscriber count. */
+    streamSubscriberCount?: number;
   } = {},
 ): ObservationDiagnosticsSnapshot {
   return {
@@ -172,6 +184,15 @@ export function getObservationDiagnosticsSnapshot(
       ? input.trackedContextCount!
       : 0,
     sensitivePersistedCount: 0,
+    streamEventsDispatched: Number.isInteger(input.streamEventsDispatched)
+      ? input.streamEventsDispatched!
+      : 0,
+    streamEventsDropped: Number.isInteger(input.streamEventsDropped)
+      ? input.streamEventsDropped!
+      : 0,
+    streamSubscriberCount: Number.isInteger(input.streamSubscriberCount)
+      ? input.streamSubscriberCount!
+      : 0,
   };
 }
 
