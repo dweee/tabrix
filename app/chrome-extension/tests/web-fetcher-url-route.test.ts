@@ -154,4 +154,114 @@ describe('web fetcher URL route', () => {
     expect(result.isError).toBe(false);
     expect(waitForTabSettled).toHaveBeenCalledWith(42, { timeoutMs: 12000 });
   });
+
+  it('adds a strong long-content coverage gate for full-visible text', async () => {
+    vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 42,
+        windowId: 7,
+        active: true,
+        status: 'complete',
+        url: 'https://example.test/docs',
+        title: 'Docs',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 1000,
+      readyState: 'complete',
+    });
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(webFetcherTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      textContent: [
+        'Section 1: Opening Contract',
+        'SENTINEL-ALPHA ' + 'opening detail '.repeat(40),
+        'Section 2: Event Coverage',
+        'SENTINEL-BRAVO ' + 'event detail '.repeat(40),
+        'Section 3: DOM Facts',
+        'SENTINEL-CHARLIE ' + 'dom detail '.repeat(40),
+        'Section 4: Source Truth',
+        'SENTINEL-DELTA ' + 'source detail '.repeat(40),
+        'Section 5: Watch Scope',
+        'SENTINEL-ECHO ' + 'watch detail '.repeat(40),
+        'Section 6: Postconditions',
+        'SENTINEL-FOXTROT ' + 'postcondition detail '.repeat(40),
+        'Section 7: Browser Hygiene',
+        'SENTINEL-GOLF ' + 'hygiene detail '.repeat(40),
+        'Section 8: Closing Coverage Marker',
+        'SENTINEL-HOTEL FINAL-COVERAGE-CHECK ' + 'closing detail '.repeat(60),
+      ].join('\n'),
+      textMode: 'full-visible',
+      textContentSource: 'document_body_innerText',
+    });
+
+    const result = await webFetcherTool.execute({
+      tabId: 42,
+      textContent: true,
+      textMode: 'full-visible',
+    });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(payload.longContentCoverageGate).toMatchObject({
+      gateId: 'long-content-coverage-gate:web_content_text',
+      verdict: 'complete',
+      metrics: {
+        textMode: 'full-visible',
+        headingLikeLineCount: 8,
+        markerTokenCount: 9,
+        tailCoveragePresent: true,
+      },
+      boundary: {
+        metadataOnly: true,
+        rawContentPersisted: false,
+        llmUsed: false,
+        genericHeuristic: true,
+        siteSpecificRules: false,
+      },
+    });
+    expect(payload.longContentCoverageGate.evidence.markerTokens).toEqual(
+      expect.arrayContaining(['SENTINEL-ALPHA', 'SENTINEL-HOTEL', 'FINAL-COVERAGE-CHECK']),
+    );
+  });
+
+  it('does not mark long content coverage complete outside full-visible mode', async () => {
+    vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 42,
+        windowId: 7,
+        active: true,
+        status: 'complete',
+        url: 'https://example.test/docs',
+        title: 'Docs',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 1000,
+      readyState: 'complete',
+    });
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(webFetcherTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      textContent: 'Section 1: Opening\nSENTINEL-ALPHA\n' + 'body detail '.repeat(300),
+      textMode: 'body',
+      textContentSource: 'readability_body_text',
+    });
+
+    const result = await webFetcherTool.execute({
+      tabId: 42,
+      textContent: true,
+      textMode: 'body',
+    });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(payload.longContentCoverageGate).toMatchObject({
+      verdict: 'mode_insufficient',
+      recommendedAction: 'retry chrome_get_web_content with textMode=full-visible',
+      metrics: {
+        textMode: 'body',
+      },
+    });
+  });
 });

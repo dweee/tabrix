@@ -90,6 +90,78 @@ function summarizeVisibleText(text: string) {
   };
 }
 
+function buildLongContentCoverageGate(text: string, textMode: 'body' | 'full-visible') {
+  const lines = (text || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const normalized = (text || '').replace(/\s+/g, ' ').trim();
+  const headingLikeLines = lines.filter(isLongContentHeadingLine);
+  const markerTokens = Array.from(
+    new Set(normalized.match(/\b[A-Z][A-Z0-9]+(?:-[A-Z0-9]+){1,}\b/g) ?? []),
+  );
+  const tailWindow = normalized.slice(Math.max(0, normalized.length - 800));
+  const tailMarkerTokens = markerTokens.filter((token) => tailWindow.includes(token));
+  const hasTailCoverage =
+    tailMarkerTokens.length > 0 ||
+    /\b(final|closing|conclusion|summary|end)\b/i.test(tailWindow) ||
+    /尾段|结尾|结束|总结/.test(tailWindow);
+  const longEnough = normalized.length >= 2400 && lines.length >= 12;
+  const structureCovered = headingLikeLines.length >= 6;
+  const markerCovered = markerTokens.length >= 3;
+  const verdict =
+    textMode !== 'full-visible'
+      ? 'mode_insufficient'
+      : !longEnough
+        ? 'not_applicable'
+        : structureCovered && markerCovered && hasTailCoverage
+          ? 'complete'
+          : structureCovered || markerCovered
+            ? 'coverage_insufficient'
+            : 'structure_sparse';
+
+  return {
+    gateId: 'long-content-coverage-gate:web_content_text',
+    verdict,
+    metrics: {
+      textMode,
+      charCount: (text || '').length,
+      normalizedLength: normalized.length,
+      lineCount: lines.length,
+      headingLikeLineCount: headingLikeLines.length,
+      markerTokenCount: markerTokens.length,
+      tailMarkerTokenCount: tailMarkerTokens.length,
+      tailCoveragePresent: hasTailCoverage,
+    },
+    evidence: {
+      headingLikeLines: headingLikeLines.slice(0, 12),
+      markerTokens: markerTokens.slice(0, 24),
+      tailMarkerTokens: tailMarkerTokens.slice(0, 12),
+    },
+    recommendedAction:
+      verdict === 'complete'
+        ? null
+        : textMode !== 'full-visible'
+          ? 'retry chrome_get_web_content with textMode=full-visible'
+          : 'collect stronger full-text structure, marker, or tail coverage before claiming complete',
+    boundary: {
+      metadataOnly: true,
+      rawContentPersisted: false,
+      llmUsed: false,
+      genericHeuristic: true,
+      siteSpecificRules: false,
+    },
+  };
+}
+
+function isLongContentHeadingLine(line: string): boolean {
+  return (
+    /^(section|chapter|part|step|heading)\s+\d+[\s:.-]/i.test(line) ||
+    /^\d+(?:\.\d+)*[\s.:-]+[A-Z][\w\s-]{8,}$/.test(line) ||
+    /^#{1,6}\s+\S+/.test(line)
+  );
+}
+
 function getTabUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {
   return tab.url || tab.pendingUrl || '';
 }
@@ -443,6 +515,10 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
           result.textMode = textResponse.textMode || textMode;
           result.textContentSource = textResponse.textContentSource || 'readability_body_text';
           result.textSummary = summarizeVisibleText(textResponse.textContent || '');
+          result.longContentCoverageGate = buildLongContentCoverageGate(
+            textResponse.textContent || '',
+            result.textMode,
+          );
           if (textResponse.contentDiagnostics) {
             result.contentDiagnostics = textResponse.contentDiagnostics;
           }
