@@ -53,6 +53,7 @@ export default defineConfig({
       'webNavigation',
       'debugger',
       'history',
+      'idle',
       'bookmarks',
       'offscreen',
       'storage',

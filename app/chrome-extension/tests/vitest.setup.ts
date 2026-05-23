@@ -29,7 +29,7 @@ if (typeof globalThis.chrome === 'undefined') {
       local: {
         get: vi.fn().mockResolvedValue({}),
         set: vi.fn().mockResolvedValue(undefined),
-        remove: vi.fn().mockResolvedValue(undefined),
+        remove: vi.fn().mockResolvedValue({}),
       },
     },
     tabs: {
@@ -69,6 +69,12 @@ if (typeof globalThis.chrome === 'undefined') {
       create: vi.fn(),
       remove: vi.fn(),
       onClicked: { addListener: vi.fn(), removeListener: vi.fn() },
+    },
+    idle: {
+      queryState: vi.fn().mockResolvedValue('idle'),
+    },
+    scripting: {
+      executeScript: vi.fn().mockResolvedValue([{ result: '' }]),
     },
   };
 }

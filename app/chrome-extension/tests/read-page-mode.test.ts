@@ -1190,4 +1190,133 @@ describe('read_page mode', () => {
     expect(payload.completeTextRegion.normalizedLength).toBeGreaterThan(500);
     expect(payload.markdown).not.toContain(repeatedLongBody);
   });
+
+  it('returns recent_input when tab is inactive but system idle state is active', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5301,
+      windowId: 1,
+      active: false,
+      status: 'complete',
+      url: 'https://example.com/background-tab',
+      title: 'Background Tab',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows as any).get = vi.fn().mockResolvedValue({ id: 1, focused: true });
+    (chrome.idle.queryState as any).mockResolvedValue('active');
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Background" [ref=ref_0] (x=320,y=100)',
+        '  - heading "Dashboard" [ref=ref_1] (x=320,y=140)',
+        '  - link "Home" [ref=ref_2] (x=320,y=180)',
+        '  - link "Settings" [ref=ref_3] (x=320,y=220)',
+        '  - button "Refresh" [ref=ref_4] (x=320,y=260)',
+        '  - generic "Status" [ref=ref_5] (x=320,y=300)',
+        '  - generic "Metrics" [ref=ref_6] (x=320,y=340)',
+        '  - generic "Activity" [ref=ref_7] (x=320,y=380)',
+        '  - generic "Footer" [ref=ref_8] (x=320,y=420)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_2', selector: 'a[href="/home"]' },
+        { ref: 'ref_3', selector: 'a[href="/settings"]' },
+        { ref: 'ref_4', selector: 'button.refresh' },
+      ],
+      stats: { processed: 10, included: 9, durationMs: 5 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact', tabId: 5301 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.isCurrentTabActive).toBe(false);
+    expect(payload.isCurrentWindowFocused).toBe(true);
+    expect(payload.pageProjection.userActivityLevel).toBe('recent_input');
+  });
+
+  it('returns none when tab is inactive and system is locked', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5302,
+      windowId: 1,
+      active: false,
+      status: 'complete',
+      url: 'https://example.com/locked-tab',
+      title: 'Locked Tab',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows as any).get = vi.fn().mockResolvedValue({ id: 1, focused: true });
+    (chrome.idle.queryState as any).mockResolvedValue('locked');
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Locked" [ref=ref_0] (x=320,y=100)',
+        '  - heading "Session" [ref=ref_1] (x=320,y=140)',
+        '  - link "Login" [ref=ref_2] (x=320,y=180)',
+        '  - link "Help" [ref=ref_3] (x=320,y=220)',
+        '  - button "Retry" [ref=ref_4] (x=320,y=260)',
+        '  - generic "Info" [ref=ref_5] (x=320,y=300)',
+        '  - generic "Details" [ref=ref_6] (x=320,y=340)',
+        '  - generic "Options" [ref=ref_7] (x=320,y=380)',
+        '  - generic "Footer" [ref=ref_8] (x=320,y=420)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_2', selector: 'a[href="/login"]' },
+        { ref: 'ref_3', selector: 'a[href="/help"]' },
+        { ref: 'ref_4', selector: 'button.retry' },
+      ],
+      stats: { processed: 10, included: 9, durationMs: 5 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact', tabId: 5302 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.isCurrentTabActive).toBe(false);
+    expect(payload.isCurrentWindowFocused).toBe(true);
+    expect(payload.pageProjection.userActivityLevel).toBe('none');
+  });
+
+  it('returns recent_input when window is unfocused but system idle state is active', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5303,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.com/unfocused-window',
+      title: 'Unfocused Window',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows as any).get = vi.fn().mockResolvedValue({ id: 1, focused: false });
+    (chrome.idle.queryState as any).mockResolvedValue('active');
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Unfocused" [ref=ref_0] (x=320,y=100)',
+        '  - heading "Editor" [ref=ref_1] (x=320,y=140)',
+        '  - link "File" [ref=ref_2] (x=320,y=180)',
+        '  - link "Edit" [ref=ref_3] (x=320,y=220)',
+        '  - button "Save" [ref=ref_4] (x=320,y=260)',
+        '  - generic "Canvas" [ref=ref_5] (x=320,y=300)',
+        '  - generic "Layers" [ref=ref_6] (x=320,y=340)',
+        '  - generic "Properties" [ref=ref_7] (x=320,y=380)',
+        '  - generic "Toolbar" [ref=ref_8] (x=320,y=420)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_2', selector: 'a[href="/file"]' },
+        { ref: 'ref_3', selector: 'a[href="/edit"]' },
+        { ref: 'ref_4', selector: 'button.save' },
+      ],
+      stats: { processed: 10, included: 9, durationMs: 5 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact', tabId: 5303 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.isCurrentTabActive).toBe(true);
+    expect(payload.isCurrentWindowFocused).toBe(false);
+    expect(payload.pageProjection.userActivityLevel).toBe('recent_input');
+  });
 });

@@ -70,17 +70,28 @@ function getTabNavigationUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): 
   return String(tab.url || tab.pendingUrl || '');
 }
 
-function inferUserActivityLevel(input: {
+async function inferUserActivityLevel(input: {
   isCurrentTabActive: boolean | null;
   isCurrentWindowFocused: boolean | null;
-}): BrowserUserActivityLevel {
+}): Promise<BrowserUserActivityLevel> {
+  // Fast path: user is directly viewing the tab
   if (input.isCurrentTabActive === true && input.isCurrentWindowFocused === true) {
     return 'active';
   }
-  if (input.isCurrentTabActive === false || input.isCurrentWindowFocused === false) {
-    return 'none';
+  // Cannot determine — missing API data
+  if (input.isCurrentTabActive === null || input.isCurrentWindowFocused === null) {
+    return 'unknown';
   }
-  return 'unknown';
+  // User is NOT viewing the tab — check system idle state
+  try {
+    if (typeof chrome?.idle?.queryState === 'function') {
+      const state = await chrome.idle.queryState(15);
+      if (state === 'active') return 'recent_input';
+    }
+  } catch {
+    /* fall through to 'none' */
+  }
+  return 'none';
 }
 
 function reconcilePageUnderstandingWithVisibleRows(payload: Record<string, any>): void {
@@ -145,7 +156,7 @@ function attachFallbackRefs(
   });
 }
 
-function buildModeOutput(params: {
+async function buildModeOutput(params: {
   mode: ReadPageMode;
   renderMode: ReadPageRenderMode;
   tabId: number;
@@ -188,7 +199,7 @@ function buildModeOutput(params: {
   visibleRegionRows: VisibleRegionRowsResult;
   /** Layer envelope; defaults to 'L0+L1+L2' for legacy callers. */
   requestedLayer: ReadPageRequestedLayer;
-}): ReadPageCompactSnapshot | ReadPageNormalSnapshot | ReadPageFullSnapshot {
+}): Promise<ReadPageCompactSnapshot | ReadPageNormalSnapshot | ReadPageFullSnapshot> {
   const interactiveLimit = params.mode === 'compact' ? 24 : 80;
   const interactiveElements = buildInteractiveElements(
     params.pageContent,
@@ -278,7 +289,7 @@ function buildModeOutput(params: {
     isCurrentWindowFocused: params.isCurrentWindowFocused,
   };
   const observedAt = new Date().toISOString();
-  const userActivityLevel = inferUserActivityLevel({
+  const userActivityLevel = await inferUserActivityLevel({
     isCurrentTabActive: params.isCurrentTabActive,
     isCurrentWindowFocused: params.isCurrentWindowFocused,
   });
@@ -563,53 +574,55 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           .filter(Boolean)
           .join('\n');
 
+        const unsupportedModeOutput = await buildModeOutput({
+          mode: selectedMode,
+          renderMode: selectedRender,
+          tabId,
+          currentWindowId,
+          isCurrentTabActive,
+          isCurrentWindowFocused,
+          currentUrl,
+          currentTitle,
+          pageType: schemeGuard.pageType,
+          scheme: schemeGuard.scheme,
+          pageRole: 'unknown',
+          primaryRegion: null,
+          primaryRegionConfidence: null,
+          footerOnly: false,
+          anchorTexts: [],
+          pageContent: guardPageContent,
+          visibleTextContent: null,
+          contentSummary: summarizePageContent(guardPageContent),
+          stats: { processed: 0, included: 0, durationMs: 0 },
+          viewport: { width: null, height: null, dpr: null },
+          filter: filter || 'all',
+          depth: requestedDepth ?? null,
+          focus: focusRefId ? { refId: focusRefId, found: false } : null,
+          sparse: true,
+          fallbackUsed: false,
+          fallbackSource: null,
+          refMapCount: 0,
+          markedElements: [],
+          elements: [],
+          count: 0,
+          reason: 'unsupported_page_type',
+          tips: standardTips,
+          refMap: [],
+          candidateActions: [],
+          visibleRegionRows: extractVisibleRegionRows({
+            pageContent: '',
+            sourceRegion: 'unsupported_page',
+          }),
+          requestedLayer: selectedLayer,
+        });
+
         return {
           content: [
             {
               type: 'text',
               text: JSON.stringify({
                 success: false,
-                ...buildModeOutput({
-                  mode: selectedMode,
-                  renderMode: selectedRender,
-                  tabId,
-                  currentWindowId,
-                  isCurrentTabActive,
-                  isCurrentWindowFocused,
-                  currentUrl,
-                  currentTitle,
-                  pageType: schemeGuard.pageType,
-                  scheme: schemeGuard.scheme,
-                  pageRole: 'unknown',
-                  primaryRegion: null,
-                  primaryRegionConfidence: null,
-                  footerOnly: false,
-                  anchorTexts: [],
-                  pageContent: guardPageContent,
-                  visibleTextContent: null,
-                  contentSummary: summarizePageContent(guardPageContent),
-                  stats: { processed: 0, included: 0, durationMs: 0 },
-                  viewport: { width: null, height: null, dpr: null },
-                  filter: filter || 'all',
-                  depth: requestedDepth ?? null,
-                  focus: focusRefId ? { refId: focusRefId, found: false } : null,
-                  sparse: true,
-                  fallbackUsed: false,
-                  fallbackSource: null,
-                  refMapCount: 0,
-                  markedElements: [],
-                  elements: [],
-                  count: 0,
-                  reason: 'unsupported_page_type',
-                  tips: standardTips,
-                  refMap: [],
-                  candidateActions: [],
-                  visibleRegionRows: extractVisibleRegionRows({
-                    pageContent: '',
-                    sourceRegion: 'unsupported_page',
-                  }),
-                  requestedLayer: selectedLayer,
-                }),
+                ...unsupportedModeOutput,
                 reason: 'unsupported_page_type',
                 pageType: schemeGuard.pageType,
                 scheme: schemeGuard.scheme,
@@ -782,7 +795,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       // Normal path: return tree when the tree is sufficiently rich or the
       // visible-text fallback has already recovered business rows.
       if (treeOk && (!isSparse || basePayload.visibleRegionRows.visibleRegionRowsUsed)) {
-        const modePayload = buildModeOutput({
+        const modePayload = await buildModeOutput({
           mode: selectedMode,
           renderMode: selectedRender,
           tabId,
@@ -898,7 +911,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           }
           reconcilePageUnderstandingWithVisibleRows(basePayload);
 
-          const modePayload = buildModeOutput({
+          const modePayload = await buildModeOutput({
             mode: selectedMode,
             renderMode: selectedRender,
             tabId,
