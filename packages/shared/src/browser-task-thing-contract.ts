@@ -517,6 +517,7 @@ export interface BuildBrowserPageThingProjectionInput {
   previousContextChars?: number | null;
   userActivityLevel?: BrowserUserActivityLevel;
   interferenceRisk?: BrowserInterferenceRisk;
+  stability?: BrowserPageStability;
 }
 
 export function buildBrowserPageThingProjectionFromReadPage(
@@ -539,7 +540,7 @@ export function buildBrowserPageThingProjectionFromReadPage(
     tabId: input.tabId,
     ownerType: input.ownerType,
     readiness: snapshot.readinessVerdict ?? 'unknown',
-    stability: 'stable',
+    stability: input.stability ?? 'stable',
     contextVersion: input.contextVersion,
     previousContextVersion: input.previousContextVersion ?? null,
     changedByActionId: input.changedByActionId ?? null,

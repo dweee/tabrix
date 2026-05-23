@@ -2,6 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import {
   TOOL_NAMES,
+  type BrowserPageStability,
   type BrowserUserActivityLevel,
   type ReadPageCompactSnapshot,
   type ReadPageFullSnapshot,
@@ -68,6 +69,19 @@ function delay(ms: number): Promise<void> {
 
 function getTabNavigationUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {
   return String(tab.url || tab.pendingUrl || '');
+}
+
+/**
+ * Infer page stability from tab properties.
+ * Returns 'loading' when the document is still loading,
+ * 'stale' when the tab has been discarded or unloaded,
+ * 'stable' when the page is fully loaded and interactive.
+ */
+function inferPageStability(tab: { status?: string; discarded?: boolean }): BrowserPageStability {
+  if (tab.discarded === true) return 'stale';
+  if (tab.status === 'loading') return 'loading';
+  if (tab.status === 'unloaded') return 'stale';
+  return 'stable';
 }
 
 async function inferUserActivityLevel(input: {
@@ -163,6 +177,7 @@ async function buildModeOutput(params: {
   currentWindowId: number | null;
   isCurrentTabActive: boolean | null;
   isCurrentWindowFocused: boolean | null;
+  pageStability: BrowserPageStability;
   currentUrl: string;
   currentTitle: string;
   pageType: PageType;
@@ -306,6 +321,7 @@ async function buildModeOutput(params: {
     changeCause: 'unknown',
     userActivityLevel,
     interferenceRisk: 'medium',
+    stability: params.pageStability,
   });
 
   return buildReadPageModeResult({
@@ -560,6 +576,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           isCurrentWindowFocused = null;
         }
       }
+      const pageStability = inferPageStability(tab);
       const schemeGuard = inferSchemeGuard(currentUrl);
 
       if (!schemeGuard.supportedForContentScript) {
@@ -581,6 +598,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           currentWindowId,
           isCurrentTabActive,
           isCurrentWindowFocused,
+          pageStability,
           currentUrl,
           currentTitle,
           pageType: schemeGuard.pageType,
@@ -802,6 +820,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           currentWindowId,
           isCurrentTabActive,
           isCurrentWindowFocused,
+          pageStability,
           currentUrl,
           currentTitle,
           pageType: schemeGuard.pageType,
@@ -918,6 +937,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             currentWindowId,
             isCurrentTabActive,
             isCurrentWindowFocused,
+            pageStability,
             currentUrl,
             currentTitle,
             pageType: schemeGuard.pageType,

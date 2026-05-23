@@ -47,7 +47,7 @@ function expectCommonSnapshotShape(payload: any, mode: 'compact' | 'normal' | 'f
     tabId: expect.any(Number),
     ownerType: 'unknown',
     readiness: expect.any(String),
-    stability: 'stable',
+    stability: expect.stringMatching(/^(stable|loading|changing|stale|unknown)$/),
     chosenDataSource: expect.any(String),
     sourceFreshness: 'fresh',
     interferenceRisk: 'medium',
@@ -1232,6 +1232,148 @@ describe('read_page mode', () => {
     expect(payload.isCurrentTabActive).toBe(false);
     expect(payload.isCurrentWindowFocused).toBe(true);
     expect(payload.pageProjection.userActivityLevel).toBe('recent_input');
+  });
+  it('returns loading stability when tab status is loading', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 6401,
+      windowId: 1,
+      active: true,
+      status: 'loading',
+      url: 'https://example.com/test-6401',
+      title: 'Test Tab 6401',
+    });
+    Object.defineProperty(readPageTool, 'waitForTabSettled', {
+      value: vi.fn().mockResolvedValue({
+        tab: {
+          id: 6401,
+          windowId: 1,
+          active: true,
+          status: 'loading',
+          url: 'https://example.com/test-6401',
+          title: 'Test Tab 6401',
+        },
+        settled: false,
+        timedOut: true,
+        reason: 'timeout',
+        waitedMs: 100,
+        readyState: null,
+      }),
+      writable: true,
+      configurable: true,
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows as any).get = vi.fn().mockResolvedValue({ id: 1, focused: true });
+    (chrome.idle.queryState as any).mockResolvedValue('active');
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '  - generic "Row0" [ref=ref_0] (x=320,y=100)',
+        '  - generic "Row1" [ref=ref_1] (x=320,y=140)',
+        '  - generic "Row2" [ref=ref_2] (x=320,y=180)',
+        '  - generic "Row3" [ref=ref_3] (x=320,y=220)',
+        '  - generic "Row4" [ref=ref_4] (x=320,y=260)',
+        '  - generic "Row5" [ref=ref_5] (x=320,y=300)',
+        '  - generic "Row6" [ref=ref_6] (x=320,y=340)',
+        '  - generic "Row7" [ref=ref_7] (x=320,y=380)',
+        '  - generic "Row8" [ref=ref_8] (x=320,y=420)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_2', selector: 'a.a' },
+        { ref: 'ref_3', selector: 'a.b' },
+        { ref: 'ref_4', selector: 'button.c' },
+      ],
+      stats: { processed: 10, included: 9, durationMs: 5 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact', tabId: 6401 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.pageProjection.stability).toBe('loading');
+  });
+
+  it('returns stale stability when tab is discarded', async () => {
+    (chrome.tabs.get as any).mockResolvedValueOnce({
+      id: 6402,
+      windowId: 1,
+      active: false,
+      status: 'complete',
+      discarded: true,
+      url: 'https://example.com/test-6402',
+      title: 'Test Tab 6402',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows as any).get = vi.fn().mockResolvedValue({ id: 1, focused: true });
+    (chrome.idle.queryState as any).mockResolvedValue('idle');
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '  - generic "Row0" [ref=ref_0] (x=320,y=100)',
+        '  - generic "Row1" [ref=ref_1] (x=320,y=140)',
+        '  - generic "Row2" [ref=ref_2] (x=320,y=180)',
+        '  - generic "Row3" [ref=ref_3] (x=320,y=220)',
+        '  - generic "Row4" [ref=ref_4] (x=320,y=260)',
+        '  - generic "Row5" [ref=ref_5] (x=320,y=300)',
+        '  - generic "Row6" [ref=ref_6] (x=320,y=340)',
+        '  - generic "Row7" [ref=ref_7] (x=320,y=380)',
+        '  - generic "Row8" [ref=ref_8] (x=320,y=420)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_2', selector: 'a.a' },
+        { ref: 'ref_3', selector: 'a.b' },
+        { ref: 'ref_4', selector: 'button.c' },
+      ],
+      stats: { processed: 10, included: 9, durationMs: 5 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact', tabId: 6402 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.pageProjection.stability).toBe('stale');
+  });
+
+  it('returns stale stability when tab status is unloaded', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 6403,
+      windowId: 1,
+      active: false,
+      status: 'unloaded',
+      url: 'https://example.com/test-6403',
+      title: 'Test Tab 6403',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows as any).get = vi.fn().mockResolvedValue({ id: 1, focused: true });
+    (chrome.idle.queryState as any).mockResolvedValue('idle');
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '  - generic "Row0" [ref=ref_0] (x=320,y=100)',
+        '  - generic "Row1" [ref=ref_1] (x=320,y=140)',
+        '  - generic "Row2" [ref=ref_2] (x=320,y=180)',
+        '  - generic "Row3" [ref=ref_3] (x=320,y=220)',
+        '  - generic "Row4" [ref=ref_4] (x=320,y=260)',
+        '  - generic "Row5" [ref=ref_5] (x=320,y=300)',
+        '  - generic "Row6" [ref=ref_6] (x=320,y=340)',
+        '  - generic "Row7" [ref=ref_7] (x=320,y=380)',
+        '  - generic "Row8" [ref=ref_8] (x=320,y=420)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_2', selector: 'a.a' },
+        { ref: 'ref_3', selector: 'a.b' },
+        { ref: 'ref_4', selector: 'button.c' },
+      ],
+      stats: { processed: 10, included: 9, durationMs: 5 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact', tabId: 6403 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.pageProjection.stability).toBe('stale');
   });
 
   it('returns none when tab is inactive and system is locked', async () => {
