@@ -27,9 +27,12 @@ export interface ProduceLifecycleEvidenceArtifactInput {
   scenarioClass: BrowserTaskScenarioClass | string;
   startedAtMs: number;
   streamEvents?: BrowserStreamEvent[];
-  postconditionResults?: PostconditionResult[];
   sourceTruthChain?: BrowserSourceTruthChain | null;
   browserHygiene?: Partial<LifecycleEvidenceBrowserHygiene> | null;
+  postconditionEvidence?: {
+    source: 'bns_04_verifier';
+    results: PostconditionResult[];
+  };
 }
 
 export interface ProduceLifecycleEvidenceArtifactOptions {
@@ -44,7 +47,11 @@ export function produceLifecycleEvidenceArtifact(
   const producedAtMs = options.now ? options.now() : Date.now();
   const maxKeyEvents = Math.max(0, options.maxKeyEvents ?? DEFAULT_MAX_KEY_EVENTS);
   const streamEvents = input.streamEvents ?? [];
-  const postconditionResults = input.postconditionResults ?? [];
+  const postconditionResults =
+    input.postconditionEvidence?.source === 'bns_04_verifier'
+      ? input.postconditionEvidence.results
+      : [];
+  const browserHygiene = buildBrowserHygiene(input.browserHygiene);
 
   return {
     artifactId: input.artifactId,
@@ -75,7 +82,7 @@ export function produceLifecycleEvidenceArtifact(
       reason: 'bns_03_not_available',
     },
     actionLog: buildActionLog(postconditionResults),
-    browserHygiene: buildBrowserHygiene(input.browserHygiene),
+    browserHygiene,
     sourceTruthChain: input.sourceTruthChain ?? null,
     claimBoundary: {
       deterministicArtifactOnly:
@@ -84,9 +91,9 @@ export function produceLifecycleEvidenceArtifact(
       commercialGradeProven: false,
       competitorSuperiorityProven: false,
       fallbackSuccessSeparated: false,
-      sourceRouteProven: hasFactSourceRoute(input.sourceTruthChain ?? null),
+      sourceRouteProven: false,
     },
-    finalVerdict: deriveFinalVerdict(postconditionResults),
+    finalVerdict: deriveFinalVerdict(postconditionResults, browserHygiene),
     producedAtMs,
   };
 }
@@ -147,13 +154,10 @@ function buildBrowserHygiene(
   };
 }
 
-function hasFactSourceRoute(sourceTruthChain: BrowserSourceTruthChain | null): boolean {
-  return (
-    sourceTruthChain?.fieldProvenances.some((provenance) => provenance.isFact === true) ?? false
-  );
-}
-
-function deriveFinalVerdict(entries: PostconditionResult[]): LifecycleEvidenceFinalVerdict {
+function deriveFinalVerdict(
+  entries: PostconditionResult[],
+  browserHygiene: LifecycleEvidenceBrowserHygiene,
+): LifecycleEvidenceFinalVerdict {
   if (entries.length === 0) {
     return { verdict: 'unknown', confidence: 0, reason: 'no_postcondition_results' };
   }
@@ -166,6 +170,9 @@ function deriveFinalVerdict(entries: PostconditionResult[]): LifecycleEvidenceFi
     return { verdict: 'partial_success', confidence: 0.6, reason: 'mixed_postcondition_results' };
   }
   if (passed) {
+    if (!browserHygiene.available) {
+      return { verdict: 'unknown', confidence: 0.3, reason: 'browser_hygiene_unavailable' };
+    }
     return { verdict: 'task_success', confidence: 0.8, reason: 'postconditions_passed' };
   }
   return { verdict: 'unknown', confidence: 0.2, reason: 'postconditions_unknown' };

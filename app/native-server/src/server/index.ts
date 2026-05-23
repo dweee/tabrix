@@ -49,6 +49,10 @@ import {
   type ObservationDiagnosticsSnapshot,
 } from '../runtime/observation-diagnostics';
 import { getEventStreamHealthSnapshot } from '../runtime/browser-event-stream';
+import {
+  startLifecycleEvidenceRuntime,
+  stopLifecycleEvidenceRuntime,
+} from '../runtime/lifecycle-evidence-runtime-bootstrap';
 
 // Compatibility guard:
 // @hono/node-server may call socket.destroySoon() while draining incoming requests.
@@ -860,10 +864,12 @@ export class Server {
       this.isRunning = true;
       this.bridgeState.startWatching();
       bridgeCommandChannel.attach(this.fastify.server);
+      startLifecycleEvidenceRuntime();
     } catch (err) {
       this.listeningPort = null;
       this.isRunning = false;
       this.bridgeState.stopWatching();
+      stopLifecycleEvidenceRuntime();
       throw err;
     }
   }
@@ -882,6 +888,7 @@ export class Server {
       this.bridgeState.reset();
       this.clearNativeHost();
       bridgeCommandChannel.reset();
+      stopLifecycleEvidenceRuntime();
     } catch (err) {
       this.listeningPort = null;
       this.isRunning = false;
@@ -889,6 +896,7 @@ export class Server {
       this.bridgeState.reset();
       this.clearNativeHost();
       bridgeCommandChannel.reset();
+      stopLifecycleEvidenceRuntime();
       throw err;
     }
   }

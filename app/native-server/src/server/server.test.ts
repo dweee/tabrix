@@ -1,11 +1,15 @@
 import { describe, expect, test, afterAll, beforeAll, jest } from '@jest/globals';
 import supertest from 'supertest';
 import Server from './index';
+import { Server as ServerClass } from './index';
 import { SERVER_CONFIG } from '../constant';
 import { sessionManager } from '../execution/session-manager';
 import { tokenManager } from './auth';
 import type { TokenData } from './auth';
 import { bridgeRuntimeState } from './bridge-state';
+import type { BridgeObservationMessage, BridgeObservationMessagePayload } from '@tabrix/shared';
+import { dispatchBridgeObservationToStream } from '../runtime/browser-event-stream';
+import { getLifecycleEvidenceCollectorSnapshot } from '../runtime/lifecycle-evidence-collector';
 
 /** 非本机 IP，用于触发 onRequest 中的 Bearer 校验分支 */
 const REMOTE_CLIENT_IP = '192.168.99.1';
@@ -27,6 +31,25 @@ function parseStreamableJson(text: string): any {
 
   const payload = dataLines[dataLines.length - 1];
   return payload ? JSON.parse(payload) : {};
+}
+
+function makeLifecycleObservation(tabId: number, observedAtMs: number): BridgeObservationMessage {
+  const payload: BridgeObservationMessagePayload = {
+    kind: 'lifecycle_event',
+    data: {
+      tabId,
+      observedAtMs,
+      urlPattern: 'example.test/runtime',
+    },
+  };
+  return {
+    type: 'observation',
+    kind: 'lifecycle_event',
+    connectionId: 'server-test-conn',
+    extensionId: 'server-test-ext',
+    sentAt: observedAtMs,
+    payload,
+  };
 }
 
 describe('服务器测试', () => {
@@ -224,6 +247,42 @@ describe('服务器测试', () => {
       },
     });
     expect(typeof response.body.data.execution.lastSessionId).toBe('string');
+  });
+
+  describe('BNS-05 lifecycle evidence runtime bootstrap', () => {
+    test('Server.start 注册 collector，Server.stop 注销并清空 buffer', async () => {
+      const server = new ServerClass();
+      await server.start(0);
+      expect(getLifecycleEvidenceCollectorSnapshot().registered).toBe(true);
+
+      dispatchBridgeObservationToStream(makeLifecycleObservation(42, 1_700_000_000_000));
+      expect(getLifecycleEvidenceCollectorSnapshot().bufferedEvents).toBe(1);
+
+      await server.stop();
+      expect(getLifecycleEvidenceCollectorSnapshot()).toMatchObject({
+        registered: false,
+        bufferedEvents: 0,
+        droppedEvents: 0,
+        lastEventAtMs: null,
+      });
+    });
+
+    test('Server.restart 不重复注册且不保留旧 buffer', async () => {
+      const server = new ServerClass();
+      await server.start(0);
+      dispatchBridgeObservationToStream(makeLifecycleObservation(42, 1_700_000_000_000));
+      expect(getLifecycleEvidenceCollectorSnapshot().bufferedEvents).toBe(1);
+
+      await server.restart(0);
+
+      expect(getLifecycleEvidenceCollectorSnapshot()).toMatchObject({
+        registered: true,
+        bufferedEvents: 0,
+        droppedEvents: 0,
+        lastEventAtMs: null,
+      });
+      await server.stop();
+    });
   });
 
   describe('Token 管理接口（本机）', () => {

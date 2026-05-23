@@ -197,7 +197,7 @@ describe('lifecycle-evidence-artifact — action log and verdicts', () => {
         scenarioId: 'scenario-5',
         scenarioClass: 'search_result_delta_v1',
         startedAtMs: T0,
-        postconditionResults: entries,
+        postconditionEvidence: { source: 'bns_04_verifier', results: entries },
       },
       { now: () => PRODUCED_AT },
     );
@@ -216,7 +216,34 @@ describe('lifecycle-evidence-artifact — action log and verdicts', () => {
     ]);
   });
 
-  it('derives task_success when all postconditions pass', () => {
+  it('does not synthesize BNS-04 evidence without trusted postconditionEvidence', () => {
+    const artifact = produceLifecycleEvidenceArtifact(
+      {
+        artifactId: 'artifact-untrusted-postconditions',
+        evidenceLevel: 'unit',
+        scenarioId: 'scenario-untrusted-postconditions',
+        scenarioClass: 'search_result_delta_v1',
+        startedAtMs: T0,
+      },
+      { now: () => PRODUCED_AT },
+    );
+
+    expect(artifact.actionLog).toMatchObject({
+      available: false,
+      totalActions: 0,
+      passed: 0,
+      failed: 0,
+      unknown: 0,
+      entries: [],
+    });
+    expect(artifact.finalVerdict).toEqual({
+      verdict: 'unknown',
+      confidence: 0,
+      reason: 'no_postcondition_results',
+    });
+  });
+
+  it('keeps verdict unknown when postconditions pass but browser hygiene is unavailable', () => {
     const artifact = produceLifecycleEvidenceArtifact(
       {
         artifactId: 'artifact-6',
@@ -224,7 +251,39 @@ describe('lifecycle-evidence-artifact — action log and verdicts', () => {
         scenarioId: 'scenario-6',
         scenarioClass: 'search_result_delta_v1',
         startedAtMs: T0,
-        postconditionResults: [makePostcondition({ verdict: 'passed' })],
+        postconditionEvidence: {
+          source: 'bns_04_verifier',
+          results: [makePostcondition({ verdict: 'passed' })],
+        },
+      },
+      { now: () => PRODUCED_AT },
+    );
+    expect(artifact.finalVerdict).toEqual({
+      verdict: 'unknown',
+      confidence: 0.3,
+      reason: 'browser_hygiene_unavailable',
+    });
+  });
+
+  it('derives task_success when postconditions pass and browser hygiene is available', () => {
+    const artifact = produceLifecycleEvidenceArtifact(
+      {
+        artifactId: 'artifact-6-hygiene',
+        evidenceLevel: 'unit',
+        scenarioId: 'scenario-6-hygiene',
+        scenarioClass: 'search_result_delta_v1',
+        startedAtMs: T0,
+        postconditionEvidence: {
+          source: 'bns_04_verifier',
+          results: [makePostcondition({ verdict: 'passed' })],
+        },
+        browserHygiene: {
+          available: true,
+          baselineTabs: 3,
+          runOwnedTabsClosed: 1,
+          baselineChanged: false,
+          notes: [],
+        },
       },
       { now: () => PRODUCED_AT },
     );
@@ -239,10 +298,13 @@ describe('lifecycle-evidence-artifact — action log and verdicts', () => {
         scenarioId: 'scenario-7',
         scenarioClass: 'search_result_delta_v1',
         startedAtMs: T0,
-        postconditionResults: [
-          makePostcondition({ verdict: 'passed' }),
-          makePostcondition({ verdict: 'failed' }),
-        ],
+        postconditionEvidence: {
+          source: 'bns_04_verifier',
+          results: [
+            makePostcondition({ verdict: 'passed' }),
+            makePostcondition({ verdict: 'failed' }),
+          ],
+        },
       },
       { now: () => PRODUCED_AT },
     );
@@ -257,10 +319,13 @@ describe('lifecycle-evidence-artifact — action log and verdicts', () => {
         scenarioId: 'scenario-8',
         scenarioClass: 'search_result_delta_v1',
         startedAtMs: T0,
-        postconditionResults: [
-          makePostcondition({ verdict: 'passed' }),
-          makePostcondition({ verdict: 'unknown' }),
-        ],
+        postconditionEvidence: {
+          source: 'bns_04_verifier',
+          results: [
+            makePostcondition({ verdict: 'passed' }),
+            makePostcondition({ verdict: 'unknown' }),
+          ],
+        },
       },
       { now: () => PRODUCED_AT },
     );
@@ -283,7 +348,7 @@ describe('lifecycle-evidence-artifact — action log and verdicts', () => {
 });
 
 describe('lifecycle-evidence-artifact — claim boundary', () => {
-  it('does not let deterministic artifacts claim real-browser, commercial, or competitor proof', () => {
+  it('does not let deterministic artifacts claim real-browser, commercial, competitor, or source-route proof', () => {
     const artifact = produceLifecycleEvidenceArtifact(
       {
         artifactId: 'artifact-10',
@@ -301,8 +366,25 @@ describe('lifecycle-evidence-artifact — claim boundary', () => {
       realBrowserProven: false,
       commercialGradeProven: false,
       competitorSuperiorityProven: false,
-      sourceRouteProven: true,
+      sourceRouteProven: false,
     });
+  });
+
+  it('does not treat source truth provenance as live source-route proof', () => {
+    const artifact = produceLifecycleEvidenceArtifact(
+      {
+        artifactId: 'artifact-source-route',
+        evidenceLevel: 'integration',
+        scenarioId: 'scenario-source-route',
+        scenarioClass: 'search_result_delta_v1',
+        startedAtMs: T0,
+        sourceTruthChain: makeSourceTruthChain(),
+      },
+      { now: () => PRODUCED_AT },
+    );
+
+    expect(artifact.sourceTruthChain?.fieldProvenances.some((entry) => entry.isFact)).toBe(true);
+    expect(artifact.claimBoundary.sourceRouteProven).toBe(false);
   });
 
   it('still refuses commercial-grade proof even when evidenceLevel is real_browser', () => {
