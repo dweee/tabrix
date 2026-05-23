@@ -91,11 +91,17 @@ import {
 import { bridgeRuntimeState } from '../server/bridge-state';
 import { bridgeCommandChannel } from '../server/bridge-command-channel';
 import { getDefaultPrimaryTabController } from '../runtime/primary-tab-controller';
+import {
+  evaluateStructuredReadGate,
+  type StructuredReadGateResult,
+} from '../runtime/structured-read-gate';
 import type {
   BrowserDataSourceDecisionEvidence,
   BrowserPageOwnerType,
   BrowserPageThingProjection,
   BrowserTaskStateVerdict,
+  ReadPageCompactSnapshot,
+  ReadPageMode,
   ReadPageOwnershipRuntimeSummary,
   ReadPageSelectedDataSource,
 } from '@tabrix/shared';
@@ -1367,6 +1373,7 @@ function attachAiFacingDeltaContext(
     projection: aiFacingProjection,
     fallbackReason,
   });
+  const structuredReadGate = buildStructuredReadGate(payload, normalizedAiFacingProjection);
 
   payload.pageProjection = normalizedAiFacingProjection;
   payload.ownershipRuntime = buildAiFacingOwnershipRuntimeSummary(
@@ -1374,6 +1381,7 @@ function attachAiFacingDeltaContext(
     normalizedAiFacingProjection,
     runtimeFields,
   );
+  payload.structuredReadGate = structuredReadGate;
   payload.deltaContext = deltaContext;
   payload.aiContextEnvelope = {
     envelopeKind: 'delta_context',
@@ -1381,6 +1389,7 @@ function attachAiFacingDeltaContext(
     taskState,
     selectedDataSource,
     dataSourceDecision,
+    structuredReadGate,
     deltaContext,
     lifecycleTimeline: taskContext.getLifecycleTimeline(),
   };
@@ -1391,6 +1400,22 @@ function attachAiFacingDeltaContext(
       index === 0 && block.type === 'text' ? { ...block, text: JSON.stringify(payload) } : block,
     ) as CallToolResult['content'],
   };
+}
+
+function buildStructuredReadGate(
+  payload: Record<string, unknown>,
+  projection: BrowserPageThingProjection,
+): StructuredReadGateResult {
+  return evaluateStructuredReadGate({
+    snapshot: payload as unknown as ReadPageCompactSnapshot,
+    readMode: readReadPageMode(payload.mode),
+    nowMs: Date.now(),
+    gateId: `structured-read-gate:${projection.projectionId}`,
+  });
+}
+
+function readReadPageMode(value: unknown): ReadPageMode {
+  return value === 'normal' || value === 'full' || value === 'compact' ? value : 'compact';
 }
 
 function normalizeAiFacingProjectionDataSource(
