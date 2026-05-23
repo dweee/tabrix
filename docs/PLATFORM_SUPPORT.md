@@ -38,6 +38,6 @@ Do not describe macOS or Linux support as fully production-proven unless the spe
 
 ## Related Docs
 
-- `STABLE_QUICKSTART.md`
-- `TESTING.md`
-- `RELEASE_PROCESS.md`
+- [`QUICKSTART.md`](./QUICKSTART.md)
+- [`TESTING.md`](./TESTING.md)
+- [`RELEASE_PROCESS.md`](./RELEASE_PROCESS.md)

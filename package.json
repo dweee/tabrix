@@ -52,7 +52,8 @@
     "benchmark:v24": "node ./scripts/benchmark-v24.mjs",
     "benchmark:v25": "node ./scripts/benchmark-v25.mjs",
     "size:check": "node ./scripts/check-bundle-size.mjs",
-    "ci:check": "pnpm run i18n:check && pnpm run docs:check && pnpm run typecheck && pnpm run test:core && pnpm run audit",
+    "verify": "pnpm run typecheck && pnpm run lint && pnpm run test:core",
+    "ci:check": "pnpm run i18n:check && pnpm run docs:check && pnpm run typecheck && pnpm run lint && pnpm run test:core && pnpm run audit",
     "prepare": "husky"
   },
   "devDependencies": {

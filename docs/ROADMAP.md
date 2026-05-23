@@ -37,29 +37,41 @@ This is the path most likely to make Tabrix uniquely useful for Codex, Claude De
 
 ## Now
 
-Current near-term priorities:
+Current near-term priorities and recently delivered capabilities:
+
+**Transport & diagnostics (ongoing):**
 
 - make `Streamable HTTP` and `stdio` the most reliable MCP entry paths
 - improve reconnect, diagnostics, and install recovery
 - reduce first-success friction for new users and contributors
-- keep compact page reading, endpoint provenance, fallback evidence, and operation logs understandable
-- keep the public docs tightly aligned with the actual code surface
+- browser auto-launch and recovery when an assistant calls Tabrix and Chrome is not ready
 
-In public terms, this is about making Tabrix easier to trust, easier to install, and easier to use in a real browser workflow.
+**Page reading & AI-facing evidence (delivered v2.7):**
+
+- structured L0/L1/L2 layered page reading with task protocol and complexity-aware source routing
+- AI-facing task state verdicts (`BrowserTaskStateVerdict`) and data-source routing evidence (`BrowserDataSourceDecisionEvidence`)
+- browser page projection deltas (`BrowserPageProjectionDelta`) for post-action change detection and token savings
+- Markdown / document reading surface for long-form content, help pages, and README files
+- browser-observed API response sampling with privacy-safe JSON row summarization
+- compact endpoint provenance with fallback DOM reading when API paths are unsafe or uncertain
+
+**Policy & safety (delivered v2.7):**
+
+- MKEP Policy risk-tier gating for every P3-classified tool, with an explicit opt-in flow exposed via MCP
+
+In public terms: Tabrix now provides structured, layered page reading with built-in evidence about data-source choices, plus safe API response sampling when endpoints are observed and classified. The Policy gating surface is complete.
 
 ## Next
 
-Once the main connection path is stable, the next major product upgrades are:
+Once the current page-reading and evidence surface stabilizes, the next major product upgrades are:
 
-- structured page snapshots instead of long noisy page text by default
 - MKEP Memory-backed run history and operation-log explainability (Session / Task / Step viewers in the sidepanel)
 - MKEP Knowledge expansion beyond the GitHub seed (URL catalogue, menu / region / endpoint knowledge for additional sites)
-- broader browser-observed endpoint classification for safe read-only data paths
-- a Markdown / document reading surface for documents, help pages, README files, and long-form content
-- MKEP Policy risk-tier gating for every P3-classified tool, with an explicit opt-in flow exposed via MCP
+- extend browser-observed endpoint classification to more site families, with seed adapters for high-value public sites
 - stronger real-browser MCP E2E coverage and fixture-based regression testing
-- browser auto-launch and recovery when an assistant calls Tabrix and Chrome is not ready
 - better locator stability through fingerprinting, fallback chains, and more deterministic targeting
+- internal read-page module refactoring to reduce complexity and extract site-specific adapters from neutral core logic
+- Experience layer design: define the contract between Knowledge-recorded paths and Experience-reusable recipes
 
 These upgrades matter because they improve success rate, reduce token cost, and make browser actions more predictable.
 

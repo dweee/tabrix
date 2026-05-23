@@ -22,9 +22,9 @@ The release remains backward compatible for the supported MCP read/control tools
 
 ## Release Gate Summary
 
-Gate B strict PASS evidence is required before publishing this release. The release gate checks the maintainer-private real-browser benchmark report and validates API/DOM fallback behavior, operation-log writes, primary-tab reuse, latency gates, competitor deltas, and sensitive-data persistence.
+Gate B strict PASS evidence is required before publishing this release. The release gate is evaluated in the maintainer-private real-browser acceptance lane and checks API/DOM fallback behavior, operation-log writes, primary-tab reuse, latency gates, competitor deltas, and sensitive-data persistence.
 
-Public-safe summary of the accepted Gate B contract:
+Public-safe summary of the Gate B contract:
 
 - evidence kind: real MCP / real browser
 - API knowledge hit rate above threshold
@@ -36,6 +36,8 @@ Public-safe summary of the accepted Gate B contract:
 - latency gate failures are zero
 - sensitive persisted count is zero
 - seed_adapter remains a transitional source lineage and is disclosed here intentionally
+
+This public summary describes the required contract and safe aggregate counters only. Raw benchmark JSON, screenshots, private scenario outputs, account-specific URLs, and final maintainer release judgment stay outside the public repository.
 
 ## Known Boundaries
 

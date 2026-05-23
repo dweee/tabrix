@@ -47,7 +47,7 @@ This document explains the current public compatibility posture for MCP clients 
 
 ## Related Docs
 
-- `CLIENT_CONFIG_QUICKREF.md`
-- `STABLE_QUICKSTART.md`
-- `PLATFORM_SUPPORT.md`
-- `TESTING.md`
+- [`CLI_AND_MCP.md`](./CLI_AND_MCP.md)
+- [`QUICKSTART.md`](./QUICKSTART.md)
+- [`PLATFORM_SUPPORT.md`](./PLATFORM_SUPPORT.md)
+- [`TESTING.md`](./TESTING.md)

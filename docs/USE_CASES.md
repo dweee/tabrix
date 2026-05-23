@@ -84,7 +84,28 @@ It is written for the open-source cold-start phase:
 - the AI can work with the browser context you already use for support work
 - reduces context-switching between manual browsing and assistant help
 
-## 5. Remote Browser Capability Sharing
+## 5. Content and Community Research
+
+**Good fit when:**
+
+- you want an assistant to inspect public or logged-in community pages that are already open in your browser
+- you need to compare search results, posts, repository pages, comments, or visible engagement signals
+- you want the assistant to stay read-only while preserving the browser profile you normally use
+
+**Typical flow:**
+
+1. open the target site or search results in Chrome
+2. ask the assistant to read the visible results or open a small number of detail pages
+3. extract titles, authors, visible metadata, summaries, or comparison points
+4. verify the output against the page and keep the task read-only
+
+**Why Tabrix helps:**
+
+- works against the real browser profile instead of a blank automation profile
+- can combine structured reads, scoped DOM fallback, screenshots, and browser state checks
+- keeps API or endpoint-shaped reads evidence-bounded instead of treating every site as a guaranteed API source
+
+## 6. Remote Browser Capability Sharing
 
 **Good fit when:**
 
@@ -114,6 +135,6 @@ Tabrix is currently not best described as:
 
 For the current public product surface, read:
 
-- `PRODUCT_SURFACE_MATRIX.md`
-- `STABLE_QUICKSTART.md`
-- `CLIENT_CONFIG_QUICKREF.md`
+- [`PRODUCT_SURFACE_MATRIX.md`](./PRODUCT_SURFACE_MATRIX.md)
+- [`QUICKSTART.md`](./QUICKSTART.md)
+- [`CLI_AND_MCP.md`](./CLI_AND_MCP.md)

@@ -113,8 +113,7 @@ class YourNewTool extends BaseBrowserToolExecutor {
 ### Third-Party Reuse Rules
 
 - Classify any external source as `direct`, `rewrite`, or `design-only` before using it.
-- Follow the repository rules in [THIRD_PARTY_REUSE_MATRIX.md](./THIRD_PARTY_REUSE_MATRIX.md) and [THIRD_PARTY_REUSE_WORKFLOW.md](./THIRD_PARTY_REUSE_WORKFLOW.md).
-- If a PR ships third-party code or a direct dependency, update [`NOTICE`](../NOTICE) and add a source record such as `docs/third-party/<project>.md`; follow [Third-Party Reuse Workflow](./THIRD_PARTY_REUSE_WORKFLOW.md).
+- If a PR ships third-party code or a direct dependency, update [`NOTICE`](./NOTICE) and add a source record such as `docs/third-party/<project>.md`.
 - If a PR only rewrites an idea after reading upstream code, add a source record but do not update `NOTICE`.
 - `AGPL`, commercial, or unclear licensing defaults to `design-only`; do not copy that code into Tabrix.
 
@@ -199,8 +198,6 @@ For feature requests, please provide:
 - [Chrome Extension Development](https://developer.chrome.com/docs/extensions/)
 - [WXT Framework Documentation](https://wxt.dev/)
 - [TypeScript Handbook](https://www.typescriptlang.org/docs/)
-- [Third-Party Reuse Matrix](./THIRD_PARTY_REUSE_MATRIX.md)
-- [Third-Party Reuse Workflow](./THIRD_PARTY_REUSE_WORKFLOW.md)
 
 ## 🤝 Community
 

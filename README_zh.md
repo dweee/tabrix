@@ -8,13 +8,14 @@
 
 让真实 Chrome 成为 MCP 原生的 AI 执行层。
 
-Tabrix 由 Chrome 扩展 + 本地原生服务组成，让任意 MCP 客户端都能安全高效地操作你日常使用的浏览器会话（保留登录态、Cookie、上下文）。
+Tabrix 由 Chrome 扩展 + 本地原生服务组成，让支持 MCP 的客户端都能安全高效地操作你日常使用的浏览器会话（保留登录态、Cookie、上下文）。
 
 面向新一代 AI 助手而设计，让模型直接工作在用户每天都在使用的浏览器里。
 
 - 复用真实登录 Chrome 会话，而不是反复重建全新浏览器运行时
 - 同时支持 `Streamable HTTP` 和 `stdio` 两条 MCP 主接入路径
 - 以本地优先为默认前提，并支持基于 Token 的局域网远程接入
+- 按需恢复：当真实浏览器请求到达但 Chrome 或 bridge 未就绪时，Tabrix 会尝试自动拉起/重连，并在可行时继续原请求
 
 **文档**: [English](README.md) | [中文](README_zh.md)
 

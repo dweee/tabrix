@@ -6,12 +6,30 @@ What matters is the **role** an AI plays for a given task (see "Tiered Execution
 
 This repository uses a strict "small, verifiable, low-regression" workflow for AI-assisted development.
 
-All code changes in this repository must follow the `karpathy-guidelines` skill:
+All code changes in this repository must follow the `karpathy-guidelines` skill when it is available. If that named skill is not available in the current AI assistant, follow the same baseline rules:
 
 - think before coding
 - keep the change as small as possible
 - define a verifiable success condition
 - prefer a real fix over a temporary suppression
+
+## Workspace and Collaboration Guardrails
+
+Before changing any file, confirm the actual repository root and working tree you are about to edit:
+
+```bash
+git rev-parse --show-toplevel
+git status --short --branch
+```
+
+If the user names a specific path such as `E:\projects\AI\codex\main_tabrix`, treat that path as authoritative. Do not silently edit a detached worktree, temporary checkout, or sibling clone and then report success for the named project directory.
+
+When another assistant or maintainer is actively developing in the same checkout:
+
+- do not touch the same implementation files unless the user explicitly asks you to take over;
+- prefer read-only review, documentation-only edits, or a separate owner-lane brief;
+- state the exact file scope before editing;
+- re-check `git status --short --branch` before and after the task so unrelated concurrent changes are not attributed to your work.
 
 ## Mandatory Read Path
 
@@ -125,22 +143,23 @@ The following product surfaces were removed from the public product surface and 
 
 If a task seems to require any of these surfaces, stop and ask. The strategic value of the removed surfaces has been remapped to MKEP work tracked in maintainer-private planning, while the public boundary remains [`docs/PRODUCT_SURFACE_MATRIX.md`](./docs/PRODUCT_SURFACE_MATRIX.md).
 
-## Tiered Execution Model (any AI assistant)
+## Role-Based Execution Model (any AI assistant)
 
-This repository splits AI-assisted work into two execution lanes. The split is based on **task nature**, not on which AI product is running. Any AI assistant (Claude, Codex, Cursor Agent, Cline, Windsurf, GPT-5, Gemini, future entrants) may run either lane — but must pick the right lane per task and must not silently cross the line.
+This repository splits AI-assisted work into three lanes. The split is based on **task responsibility**, not on which AI product is running. Any AI assistant (Claude, Codex, Cursor Agent, Cline, Windsurf, GPT-5, Gemini, QwenPaw, future entrants) may run any lane, but it must know which lane it is acting in and must not silently cross the boundary.
 
-| | **Owner-lane** | **Fast-lane** |
-| --- | --- | --- |
-| Who runs it | Any AI assistant **acting as the task owner** (or a human maintainer) | Any AI assistant **dispatched to execute a pre-authored brief**, including the same AI that just wrote the brief |
-| Typical invocation | Interactive session, free to ask clarifying questions, designs the approach | Non-interactive / narrow session with an explicit brief; often a CLI fast-mode (`codex exec`, `cursor-agent run`, etc.) or a sub-agent |
-| Allowed to decide | Architecture, public contracts, schema, risk tier, backlog entries, whether a removed surface should come back | Only how to carry out a decision the owner-lane already wrote down |
-| Commit authority | Yes (after verification) | No — produces a diff / patch; the owner-lane verifies and commits |
+| | **Owner-lane** | **Executor-lane** | **Acceptance-lane** |
+| --- | --- | --- | --- |
+| Who runs it | Any AI assistant **acting as the task owner** (or a human maintainer) | Any AI assistant dispatched to execute a pre-authored brief | Any AI assistant or maintainer validating product-level behavior |
+| Typical responsibility | Product manager + technical manager + architect: define user value, scope, architecture, contracts, risks, and task order | Implement a bounded change exactly within the brief | Test manager: verify runtime claims, choose scenario-library coverage, compare competitors, and judge evidence |
+| Allowed to decide | Architecture, public contracts, schema, risk tier, backlog entries, removed-surface questions, task acceptance criteria | Only how to carry out an already-approved decision | Whether the evidence supports the claimed product behavior |
+| Must not do | Pretend implementation-only evidence proves product readiness | Change architecture, public contracts, schema, risk tier, or scope | Hide capability gaps behind fallback success or unit tests |
+| Commit authority | Yes, after verification | No by default — returns a diff / patch for owner review | Usually no — produces acceptance evidence and gaps |
 
-The purpose of the split is to keep **decision quality** high while still getting the speed advantage of mechanical execution. Both lanes are first-class — an AI assistant that only ever does mechanical work is still a full contributor, and an AI assistant that drives owner-lane work does not need permission from any other tool to do so.
+The purpose of the split is to keep **decision quality, execution focus, and acceptance evidence** separate. One AI assistant may perform multiple lanes in one session, but it must explicitly switch responsibilities and close each lane with the matching evidence standard.
 
-### Fast-lane allowlist (mechanical tasks)
+### Executor-lane allowlist (mechanical tasks)
 
-When running fast-lane, an AI assistant **may** do:
+When running executor-lane, an AI assistant **may** do:
 
 1. Rename a symbol / file repo-wide with explicit search-and-replace rules.
 2. Migrate imports after a module move when source and target paths are both given.
@@ -150,9 +169,9 @@ When running fast-lane, an AI assistant **may** do:
 6. Run existing lint / format / typecheck / test scripts and report the output verbatim.
 7. Apply a diff that the owner-lane drafted in prose but did not commit yet.
 
-### Fast-lane must not do
+### Executor-lane must not do
 
-When running fast-lane, an AI assistant **must not** do any of the following — stop and return control to the owner-lane:
+When running executor-lane, an AI assistant **must not** do any of the following — stop and return control to the owner-lane:
 
 1. Choose between two architectural approaches. If two designs are on the table, stop.
 2. Change a public contract: MCP tool schema (`packages/shared/src/tools/**`), `read_page` HVO contract (`read-page-contract.ts`), HTTP route shape, or a cross-process message type.
@@ -162,28 +181,28 @@ When running fast-lane, an AI assistant **must not** do any of the following —
 6. Touch dependency versions or the lockfile beyond what a prior owner-lane migration already dictates.
 7. Decide whether a removed surface should come back. Always escalate.
 
-If you are a single AI assistant running both lanes within one session, the enforcement is the same: the moment you hit a "fast-lane must not do" item, switch mental mode to owner-lane (design → write it down → then execute) rather than silently deciding inside the fast path.
+If you are a single AI assistant running multiple lanes within one session, the enforcement is the same: the moment you hit an "executor-lane must not do" item, switch to owner-lane (design → write it down → then execute) rather than silently deciding inside the execution path.
 
 ### Hand-off protocol
 
-When owner-lane and fast-lane are two different AI assistants (or two different sessions of the same one):
+When owner-lane and executor-lane are two different AI assistants (or two different sessions of the same one):
 
-- **Owner-lane writes** a prose brief pointing at one `B-XXX` backlog item, with: (a) files fast-lane may touch, (b) files fast-lane must not touch, (c) explicit acceptance criteria, (d) the verification commands to run at the end.
-- **Fast-lane runs** the task and returns: exit status of each verification command, the list of files changed, and any decision point it hit where the brief was ambiguous.
+- **Owner-lane writes** a prose brief pointing at one `B-XXX` backlog item, with: (a) files executor-lane may touch, (b) files executor-lane must not touch, (c) explicit acceptance criteria, (d) the verification commands to run at the end.
+- **Executor-lane runs** the task and returns: exit status of each verification command, the list of files changed, and any decision point it hit where the brief was ambiguous.
 - **Owner-lane reviews** the diff, re-runs the same verification locally, and is the one who commits and pushes.
 
-When owner-lane and fast-lane are the same session, the protocol is the same but executed inline: write the brief as a short plan block in the conversation, then do the mechanical work, then verify, then commit.
+When owner-lane and executor-lane are the same session, the protocol is the same but executed inline: write the brief as a short plan block in the conversation, then do the mechanical work, then verify, then commit.
 
-### Operational notes: running fast-lane under a restricted CLI sandbox
+### Operational notes: running executor-lane under a restricted CLI sandbox
 
-Some AI CLIs run fast-lane under a filesystem sandbox (e.g. `codex exec --sandbox workspace-write`). Those environments have historically had constraints that are **not bugs in the AI product** — they are the sandbox's security model — so the operational workarounds below apply regardless of which CLI is used:
+Some AI CLIs run executor-lane under a filesystem sandbox (e.g. `codex exec --sandbox workspace-write`). Those environments have historically had constraints that are **not bugs in the AI product** — they are the sandbox's security model — so the operational workarounds below apply regardless of which CLI is used:
 
-- On Windows, `workspace-write`-style sandboxes may deny writes to `.git/` (observed 2026-04-20 during B-004 with Codex CLI: `Unable to create .git/index.lock: Permission denied`). Do NOT ask a sandboxed fast-lane to `git add` / `git commit`.
-- Acceptable invocation shapes for any sandboxed fast-lane:
-  1. **Draft-only**: fast-lane edits files in place under `workspace-write`; the owner-lane is responsible for `git add` / `git commit` / `git push`. Make the brief's "finish" step `git diff --stat` (not `git commit`).
-  2. **Full autopilot**: run the CLI's equivalent of "bypass approvals and sandbox" (e.g. `codex exec --dangerously-bypass-approvals-and-sandbox`) inside a throw-away worktree, where the fast-lane may commit; only use when the task is self-contained and the worktree is disposable.
-- If a sandboxed fast-lane stops mid-task with a permission error, revert any whitespace-only / line-ending changes (`git checkout -- <files>`) before the owner-lane resumes manually — otherwise the diff review becomes noisy.
-- **Verification commands inside these sandboxes also surprise**: during B-009, `pnpm -r typecheck` spawned by the sandboxed fast-lane failed with `spawn EPERM`, while `pnpm run docs:check` succeeded. Do not treat a sandbox-side typecheck failure as a real regression. The owner-lane must always re-run the full verification locally before committing.
+- On Windows, `workspace-write`-style sandboxes may deny writes to `.git/` (observed 2026-04-20 during B-004 with Codex CLI: `Unable to create .git/index.lock: Permission denied`). Do NOT ask a sandboxed executor-lane to `git add` / `git commit`.
+- Acceptable invocation shapes for any sandboxed executor-lane:
+  1. **Draft-only**: executor-lane edits files in place under `workspace-write`; the owner-lane is responsible for `git add` / `git commit` / `git push`. Make the brief's "finish" step `git diff --stat` (not `git commit`).
+  2. **Full autopilot**: run the CLI's equivalent of "bypass approvals and sandbox" (e.g. `codex exec --dangerously-bypass-approvals-and-sandbox`) inside a throw-away worktree, where the executor-lane may commit; only use when the task is self-contained and the worktree is disposable.
+- If a sandboxed executor-lane stops mid-task with a permission error, revert any whitespace-only / line-ending changes (`git checkout -- <files>`) before the owner-lane resumes manually — otherwise the diff review becomes noisy.
+- **Verification commands inside these sandboxes also surprise**: during B-009, `pnpm -r typecheck` spawned by the sandboxed executor-lane failed with `spawn EPERM`, while `pnpm run docs:check` succeeded. Do not treat a sandbox-side typecheck failure as a real regression. The owner-lane must always re-run the full verification locally before committing.
 
 ## Operational Guardrails
 
@@ -216,7 +235,7 @@ Every backlog item whose scope touches the Memory / Knowledge / Experience SQLit
 
 Why: three of the five real bugs in Sprints 1–2 were one side of the extension / native-server / shared DTO triangle drifting from the other two. Forcing a citation turns "I remember what that shape is" into "grep confirms this shape is the same".
 
-Applies equally to owner-lane and fast-lane tasks. Whoever drafts the backlog item (any AI assistant or a human maintainer) puts the citation in the `- **Schema cite**:` bullet (see B-005 / B-006 for examples).
+Applies equally to owner-lane and executor-lane tasks. Whoever drafts the backlog item (any AI assistant or a human maintainer) puts the citation in the `- **Schema cite**:` bullet (see B-005 / B-006 for examples).
 
 ## Code Quality Governance Phase 1 Status
 
@@ -231,6 +250,8 @@ Normal feature/enhancement work may resume only after owner-lane preflight and u
 - preserve privacy rules and do not stage/commit `.claude/` or `.agents/`.
 
 For future governance phases, the current status source is `.claude/handoffs/TABRIX_CODE_QUALITY_GOVERNANCE_PROGRESS_LEDGER_zh.md`.
+
+That `.claude/` path is a maintainer-private overlay and may not exist in public clones. External contributors and public-only assistants should use the public docs listed in this file instead of recreating or depending on private state files.
 
 ## Public Source Of Truth
 
@@ -260,5 +281,8 @@ Default expectations:
 18. Documentation placement. Public English docs go under `docs/`. Chinese-language public material belongs only in root `README_zh.md` and this file. Internal governance, audit, gate maintenance, PRD, roadmap sequencing, and acceptance evidence are maintained outside this public repository by the project maintainers. Do not reintroduce deleted internal documents into `docs/` without an explicit governance decision.
 19. Removed-surface invariant. Before adding any MCP tool, background listener, popup entry, sidepanel tab, or shared type, check it against the "Removed Surfaces" list above. If the change looks like it would reintroduce a removed surface in any form — including under a different name — stop and surface the question instead of implementing it.
 20. Planning invariant. Every non-trivial feature or refactor commit should reference a public issue, a public roadmap item, or a maintainer-private `B-*` item when one exists. Do not create or update public sprint-backlog files under `docs/`.
+21. Product-level acceptance invariant. Source inspection, unit tests, deterministic fixtures, simulated pages, and public CI are necessary but not sufficient for claims about real browser behavior, API/DOM/CDP data-source reuse, Browser Hygiene, same-profile login reuse, competitor superiority, or release readiness. Those claims require acceptance-lane evidence.
+22. Scenario-library invariant. Acceptance-lane validation should choose the most relevant scenario or scenarios from the maintainer-private real-user scenario library for the feature under test. Do not hard-code a small fixed set of sites as the only acceptance path. Real site URLs, account states, screenshots, raw responses, competitor run artifacts, and login-dependent flows belong outside the public repository.
+23. Capability-gap invariant. A successful fallback path does not prove the higher-level capability. For example, DOM fallback success does not prove API reuse, and a browser task finishing does not prove competitor parity unless the same-scenario comparison captured tool path, profile mode, data source, accuracy, latency, token/cost where available, and Browser Hygiene.
 
 If a task conflicts with these rules, stop and surface the tradeoff instead of guessing.
