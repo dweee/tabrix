@@ -886,6 +886,9 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         const explicitTabId = readPositiveInteger(args, 'tabId');
         if (returnedTabId !== null && explicitTabId === null) {
           taskContext.noteRunOwnedTab(returnedTabId);
+          sessionManager
+            .getOrCreateExternalTaskContext(`mcp:auto:tab:${returnedTabId}`)
+            .noteRunOwnedTab(returnedTabId);
         }
       }
       if (taskContext && shouldInvalidateReadAfterInteraction(name)) {

@@ -2422,6 +2422,18 @@ describe('handleToolCall execution wrapper', () => {
       expect(auto.readPageCount).toBe(2);
     });
 
+    it('records run-owned identity on the returned tab auto context for new-tab navigation', async () => {
+      markBridgeReady();
+
+      mockNavigateRoundTrip('opened', 77);
+      await handleToolCall('chrome_navigate', { url: 'https://example.test/new-tab' });
+
+      const returnedTabContext = sessionManager.peekExternalTaskContext('mcp:auto:tab:77');
+      expect(returnedTabContext).not.toBeNull();
+      expect(returnedTabContext?.isRunOwnedTab(77)).toBe(true);
+      expect(returnedTabContext?.getRunOwnedTabIds()).toEqual([77]);
+    });
+
     it('page interactions invalidate redundancy state for the next read on the same task', async () => {
       markBridgeReady();
       const ctx = sessionManager.getOrCreateExternalTaskContext('interaction-task');
