@@ -349,7 +349,55 @@ export interface ReadPageCompleteTextRegion {
   reason: string;
 }
 
+export type ReadPageCurrentTabRunOwnershipVerdict =
+  | 'run_owned_by_task'
+  | 'not_run_owned_by_task'
+  | 'unknown';
+
+export type ReadPageCurrentTabPrimaryRelationVerdict =
+  | 'current_tab_is_primary'
+  | 'current_tab_differs_from_primary'
+  | 'primary_tab_unknown'
+  | 'current_tab_unknown';
+
+export type ReadPageProtectedScopeVerdict = 'protected' | 'not_protected' | 'unknown';
+
+export type ReadPageCleanupEligibilityVerdict = 'eligible' | 'not_eligible' | 'unknown';
+
+export type ReadPageProtectReason =
+  | 'current_tab_unknown'
+  | 'not_run_owned_by_task'
+  | 'current_tab_is_primary'
+  | 'primary_tab_unknown'
+  | null;
+
+export interface ReadPageOwnershipRuntimeSummary {
+  currentTabId: number | null;
+  currentWindowId: number | null;
+  isCurrentTabActive: boolean | null;
+  isCurrentWindowFocused: boolean | null;
+  currentOwnerType: import('./browser-task-thing-contract').BrowserPageOwnerType;
+  currentTabRunOwnershipVerdict: ReadPageCurrentTabRunOwnershipVerdict;
+  currentTabPrimaryRelationVerdict: ReadPageCurrentTabPrimaryRelationVerdict;
+  protectedScopeVerdict: ReadPageProtectedScopeVerdict;
+  cleanupEligibility: ReadPageCleanupEligibilityVerdict;
+  protectReason: ReadPageProtectReason;
+  isCurrentTabRunOwnedByTask: boolean;
+  runOwnedTabIds: number[];
+  runOwnedTabCount: number;
+  defaultProtection: 'protect_unknown_and_user_owned';
+  bridgeState: string | null;
+  primaryTabId: number | null;
+  primaryTabReuseRate: number | null;
+  benchmarkOwnedTabCount: number | null;
+  heartbeatTabCount: number | null;
+  heartbeatWindowCount: number | null;
+}
+
 export interface ReadPageExtensionFields {
+  currentWindowId?: number | null;
+  isCurrentTabActive?: boolean | null;
+  isCurrentWindowFocused?: boolean | null;
   candidateActions?: ReadPageCandidateAction[];
   pageContext?: ReadPagePageContext;
   frameContext?: ReadPageFrameContext | null;
@@ -380,6 +428,7 @@ export interface ReadPageExtensionFields {
    * execution authority and does not replace `targetRef` / `candidateActions`.
    */
   pageProjection?: import('./browser-task-thing-contract').BrowserPageThingProjection;
+  ownershipRuntime?: ReadPageOwnershipRuntimeSummary;
   readinessVerdict?: ReadPageReadinessVerdict;
   rowCount?: number;
   visibleRegionRowsUsed?: boolean;
