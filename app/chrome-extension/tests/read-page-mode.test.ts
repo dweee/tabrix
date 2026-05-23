@@ -1461,4 +1461,104 @@ describe('read_page mode', () => {
     expect(payload.isCurrentWindowFocused).toBe(false);
     expect(payload.pageProjection.userActivityLevel).toBe('recent_input');
   });
+
+  it('includes sourceTruthChain with correct primaryOrigin in projection output', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 6501,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.com/test-6501',
+      title: 'Test Tab 6501',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows as any).get = vi.fn().mockResolvedValue({ id: 1, focused: true });
+    (chrome.idle.queryState as any).mockResolvedValue('active');
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '  - generic "Row0" [ref=ref_0] (x=320,y=100)',
+        '  - generic "Row1" [ref=ref_1] (x=320,y=140)',
+        '  - generic "Row2" [ref=ref_2] (x=320,y=180)',
+        '  - generic "Row3" [ref=ref_3] (x=320,y=220)',
+        '  - generic "Row4" [ref=ref_4] (x=320,y=260)',
+        '  - generic "Row5" [ref=ref_5] (x=320,y=300)',
+        '  - generic "Row6" [ref=ref_6] (x=320,y=340)',
+        '  - generic "Row7" [ref=ref_7] (x=320,y=380)',
+        '  - generic "Row8" [ref=ref_8] (x=320,y=420)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_2', selector: 'a.a' },
+        { ref: 'ref_3', selector: 'a.b' },
+        { ref: 'ref_4', selector: 'button.c' },
+      ],
+      stats: { processed: 10, included: 9, durationMs: 5 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact', tabId: 6501 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.pageProjection.sourceTruthChain).toBeDefined();
+    expect(payload.pageProjection.sourceTruthChain.primaryOrigin).toMatch(
+      /^(dom|accessibility|api|cdp|text|inference|unknown)$/,
+    );
+    expect(Array.isArray(payload.pageProjection.sourceTruthChain.fieldProvenances)).toBe(true);
+    expect(payload.pageProjection.sourceTruthChain.fieldProvenances.length).toBeGreaterThan(0);
+    expect(Date.parse(payload.pageProjection.sourceTruthChain.provenanceCreatedAt)).not.toBeNaN();
+  });
+
+  it('marks inferred fields (pageRole, activeRegion) as non-fact in sourceTruthChain', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 6502,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.com/test-6502',
+      title: 'Test Tab 6502',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows as any).get = vi.fn().mockResolvedValue({ id: 1, focused: true });
+    (chrome.idle.queryState as any).mockResolvedValue('active');
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '  - generic "Row0" [ref=ref_0] (x=320,y=100)',
+        '  - generic "Row1" [ref=ref_1] (x=320,y=140)',
+        '  - generic "Row2" [ref=ref_2] (x=320,y=180)',
+        '  - generic "Row3" [ref=ref_3] (x=320,y=220)',
+        '  - generic "Row4" [ref=ref_4] (x=320,y=260)',
+        '  - generic "Row5" [ref=ref_5] (x=320,y=300)',
+        '  - generic "Row6" [ref=ref_6] (x=320,y=340)',
+        '  - generic "Row7" [ref=ref_7] (x=320,y=380)',
+        '  - generic "Row8" [ref=ref_8] (x=320,y=420)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_2', selector: 'a.a' },
+        { ref: 'ref_3', selector: 'a.b' },
+        { ref: 'ref_4', selector: 'button.c' },
+      ],
+      stats: { processed: 10, included: 9, durationMs: 5 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact', tabId: 6502 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    const { fieldProvenances } = payload.pageProjection.sourceTruthChain;
+    const pageRoleProv = fieldProvenances.find(
+      (fp: { field: string }) => fp.field === 'pageProjection.pageRole',
+    );
+    const activeRegionProv = fieldProvenances.find(
+      (fp: { field: string }) => fp.field === 'pageProjection.activeRegion',
+    );
+    expect(pageRoleProv).toBeDefined();
+    expect(pageRoleProv.origin).toBe('inference');
+    expect(pageRoleProv.isFact).toBe(false);
+    expect(activeRegionProv).toBeDefined();
+    expect(activeRegionProv.origin).toBe('inference');
+    expect(activeRegionProv.isFact).toBe(false);
+  });
 });

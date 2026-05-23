@@ -213,6 +213,30 @@ export const BROWSER_SOURCE_LINEAGE_VALUES = [
 ] as const;
 export type BrowserSourceLineage = (typeof BROWSER_SOURCE_LINEAGE_VALUES)[number];
 
+// P6 Source Truth Chain - field-level provenance tracking
+export const SOURCE_TRUTH_ORIGIN_VALUES = [
+  'dom',
+  'accessibility',
+  'api',
+  'cdp',
+  'text',
+  'inference',
+  'unknown',
+] as const;
+export type SourceTruthOrigin = (typeof SOURCE_TRUTH_ORIGIN_VALUES)[number];
+
+export interface FieldProvenance {
+  field: string;
+  origin: SourceTruthOrigin;
+  isFact: boolean;
+}
+
+export interface BrowserSourceTruthChain {
+  primaryOrigin: SourceTruthOrigin;
+  fieldProvenances: FieldProvenance[];
+  provenanceCreatedAt: string;
+}
+
 export interface BrowserPageThingProjection {
   projectionId: string;
   projectionKind: BrowserProjectionKind;
@@ -241,6 +265,7 @@ export interface BrowserPageThingProjection {
   contextSavedChars: number;
   userActivityLevel: BrowserUserActivityLevel;
   interferenceRisk: BrowserInterferenceRisk;
+  sourceTruthChain: BrowserSourceTruthChain;
 }
 
 export interface BrowserTaskStateVerdict {
@@ -557,6 +582,11 @@ export function buildBrowserPageThingProjectionFromReadPage(
     contextSavedChars: Math.max(0, (previousContextChars ?? contextChars) - contextChars),
     userActivityLevel: input.userActivityLevel ?? 'unknown',
     interferenceRisk: input.interferenceRisk ?? 'medium',
+    sourceTruthChain: buildSourceTruthChain(
+      chooseProjectionDataSource(snapshot),
+      snapshot,
+      input.observedAt,
+    ),
   };
 }
 
@@ -691,6 +721,39 @@ function inferSourceLineage(source: ReadPageSelectedDataSource): BrowserSourceLi
   if (source === 'markdown') return 'text';
   if (source === 'dom_region_rows' || source === 'dom_json') return 'dom';
   return 'unknown';
+}
+
+function sourceLineageToOrigin(lineage: BrowserSourceLineage): SourceTruthOrigin {
+  if (lineage === 'mixed' || lineage === 'unknown') return 'unknown';
+  return lineage;
+}
+
+function buildSourceTruthChain(
+  source: ReadPageSelectedDataSource,
+  snapshot: ReadPageCompactSnapshot,
+  observedAt: string,
+): BrowserSourceTruthChain {
+  const lineage = inferSourceLineage(source);
+  const primaryOrigin = sourceLineageToOrigin(lineage);
+  const contentOrigin: SourceTruthOrigin = primaryOrigin === 'unknown' ? 'unknown' : primaryOrigin;
+  const rows = snapshot.visibleRegionRows;
+  const hasRows = (rows?.rows?.length ?? 0) > 0;
+
+  const fieldProvenances: FieldProvenance[] = [
+    { field: 'pageProjection.pageId', origin: 'dom', isFact: true },
+    { field: 'pageProjection.tabId', origin: 'dom', isFact: true },
+    { field: 'pageProjection.readiness', origin: contentOrigin, isFact: true },
+    { field: 'pageProjection.stability', origin: 'dom', isFact: true },
+    {
+      field: 'pageProjection.visibleRegionRows',
+      origin: hasRows ? contentOrigin : 'unknown',
+      isFact: hasRows,
+    },
+    { field: 'pageProjection.pageRole', origin: 'inference', isFact: false },
+    { field: 'pageProjection.activeRegion', origin: 'inference', isFact: false },
+  ];
+
+  return { primaryOrigin, fieldProvenances, provenanceCreatedAt: observedAt };
 }
 
 function buildRegionEvidenceRefs(snapshot: ReadPageCompactSnapshot): string[] {
