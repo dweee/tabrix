@@ -208,6 +208,60 @@ describe('structured-read-gate — verdicts', () => {
     expect(result.verdict).toBe('structure_sparse');
   });
 
+  it('does not mark long text complete when structured section evidence is too low', () => {
+    const result = evaluate(
+      {
+        taskMode: 'read',
+        complexityLevel: 'complex',
+        completeTextRegion: {
+          sourceDataSource: 'web_content_text',
+          sourceRoute: 'visible_text_sample',
+          charCount: 4_287,
+          normalizedLength: 4_100,
+          lineCount: 34,
+          completeTextAvailable: true,
+          structureSparse: false,
+          contentSparse: false,
+          quality: 'usable',
+          recommendation: 'use_chrome_get_web_content_for_full_body',
+          reason: 'complete text metadata available',
+        },
+        visibleRegionRows: {
+          sourceDataSource: 'dom_region_rows',
+          rows: [],
+          rowCount: 5,
+          visibleRegionRowsUsed: true,
+          visibleRegionRowsRejectedReason: null,
+          sourceRegion: 'content',
+          rowExtractionConfidence: 0.9,
+          cardExtractorUsed: false,
+          cardPatternConfidence: 0,
+          cardRowsCount: 0,
+          rowOrder: 'visual_order',
+          targetRefCoverageRate: 0.92,
+          regionQualityScore: 0.91,
+          visibleDomRowsCandidateCount: 5,
+          visibleDomRowsSelectedCount: 5,
+          lowValueRegionRejectedCount: 0,
+          footerLikeRejectedCount: 0,
+          navigationLikeRejectedCount: 0,
+          targetRefCoverageRejectedCount: 0,
+          rejectedRegionReasonDistribution: {},
+          pageInfo: {
+            scrollY: 0,
+            viewportHeight: 800,
+            documentHeight: 3200,
+          },
+        },
+      },
+      'full',
+    );
+
+    expect(result.verdict).toBe('structure_sparse');
+    expect(result.metrics.sectionCount).toBe(5);
+    expect(result.gapDescription).toContain('structure');
+  });
+
   it('returns not_applicable for non-long-content snapshots instead of complete', () => {
     const result = evaluate({
       taskMode: 'search',

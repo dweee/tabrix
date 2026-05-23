@@ -83,7 +83,7 @@ const DEFAULT_OPTIONS: StructuredReadGateOptions = {
   minCompleteBodyCharCount: 2400,
   minCompleteLineCount: 18,
   minCompleteCoverageRatio: 0.65,
-  minCompleteSectionCount: 3,
+  minCompleteSectionCount: 6,
   summaryOnlyBodyCharCount: 900,
   lowBodyCharCount: 900,
   minSubstantialBodyCharCount: 1800,
@@ -140,6 +140,10 @@ export function evaluateStructuredReadGate(
     metrics.structureSparse === true &&
     metrics.bodyCharCount >= options.minSubstantialBodyCharCount
   ) {
+    return buildResult(input, metrics, evidenceBasis, 'structure_sparse');
+  }
+
+  if (hasInsufficientStructureForCompletion(metrics, options)) {
     return buildResult(input, metrics, evidenceBasis, 'structure_sparse');
   }
 
@@ -279,6 +283,21 @@ function isComplete(
     metrics.lineCount >= options.minCompleteLineCount &&
     metrics.sectionCount >= options.minCompleteSectionCount &&
     metrics.coverageRatio >= options.minCompleteCoverageRatio
+  );
+}
+
+function hasInsufficientStructureForCompletion(
+  metrics: StructuredReadGateMetrics,
+  options: StructuredReadGateOptions,
+): boolean {
+  return (
+    metrics.completeTextAvailable === true &&
+    metrics.contentSparse !== true &&
+    metrics.structureSparse !== true &&
+    metrics.bodyCharCount >= options.minCompleteBodyCharCount &&
+    metrics.lineCount >= options.minCompleteLineCount &&
+    metrics.coverageRatio >= options.minCompleteCoverageRatio &&
+    metrics.sectionCount < options.minCompleteSectionCount
   );
 }
 
