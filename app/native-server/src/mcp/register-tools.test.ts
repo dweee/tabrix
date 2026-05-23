@@ -761,6 +761,36 @@ describe('handleToolCall execution wrapper', () => {
       // reads already noted → the next call is over budget.
       const ctx = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
       Object.defineProperty(ctx, 'readBudget', { value: 2, writable: false });
+      ctx.notePageProjectionAndBuildDelta({
+        projectionId: 'projection_before_budget',
+        projectionKind: 'read_snapshot_projection',
+        projectionCreatedAt: '2026-05-18T00:00:00.000Z',
+        sourceObservedAt: '2026-05-18T00:00:00.000Z',
+        sourceLineage: 'dom',
+        regionEvidenceRefs: ['region:viewport'],
+        pageId: 'page_before_budget',
+        tabId: 1,
+        ownerType: 'run_owned',
+        readiness: 'ready',
+        stability: 'stable',
+        contextVersion: 'read://example.test/before/ctx',
+        previousContextVersion: null,
+        changedByActionId: null,
+        changeCause: 'unknown',
+        activeRegion: 'viewport',
+        changedRegions: ['viewport'],
+        reusedRegions: [],
+        invalidatedRefs: [],
+        refreshedRefs: [],
+        chosenDataSource: 'dom_json',
+        sourceConfidence: 0.9,
+        sourceFreshness: 'fresh',
+        contextChars: 1200,
+        contextSavedChars: 0,
+        userActivityLevel: 'unknown',
+        interferenceRisk: 'medium',
+      });
+      ctx.noteUrlChange('https://new.example/bar');
       ctx.noteReadPage({ layer: 'L0+L1', source: 'dom_json' });
       ctx.noteReadPage({ layer: 'L0+L1', source: 'dom_json' });
       const dynamicFlowSpy = jest
@@ -780,6 +810,13 @@ describe('handleToolCall execution wrapper', () => {
         readBudget: 2,
         suggestedLayer: 'L0+L1',
       });
+      expect(payload.pageProjection).toBeUndefined();
+      expect(payload.deltaContext).toBeUndefined();
+      expect(payload.aiContextEnvelope).toBeUndefined();
+      expect(payload.ownershipRuntime).toBeUndefined();
+      expect(payload.currentWindowId).toBeUndefined();
+      expect(payload.isCurrentTabActive).toBeUndefined();
+      expect(payload.isCurrentWindowFocused).toBeUndefined();
       // Critical contract: the bridge `call_tool` round-trip MUST NOT
       // happen on a budget-blocked read. The dynamic-flow-list call
       // (mocked above) is the only allowed extension call.
@@ -859,6 +896,7 @@ describe('handleToolCall execution wrapper', () => {
       projectionDataSource?: string;
       pageId?: string;
       tabId?: number;
+      ownerType?: 'run_owned' | 'user_owned' | 'baseline' | 'unknown';
       extraPayload?: Record<string, unknown>;
     }): string {
       const tabId = input.tabId ?? 1;
@@ -875,6 +913,9 @@ describe('handleToolCall execution wrapper', () => {
           primaryRegion: 'results',
         },
         interactiveElements: [],
+        currentWindowId: 3,
+        isCurrentTabActive: true,
+        isCurrentWindowFocused: true,
         ...(input.extraPayload ?? {}),
         selectedDataSource: input.selectedDataSource ?? 'dom_json',
         decisionReason:
@@ -886,7 +927,7 @@ describe('handleToolCall execution wrapper', () => {
           projectionKind: 'read_snapshot_projection',
           pageId: input.pageId ?? 'page_test',
           tabId,
-          ownerType: 'run_owned',
+          ownerType: input.ownerType ?? 'run_owned',
           projectionCreatedAt: '2026-05-18T00:00:00.000Z',
           sourceObservedAt: '2026-05-18T00:00:00.000Z',
           sourceLineage: 'dom',
@@ -1155,6 +1196,20 @@ describe('handleToolCall execution wrapper', () => {
       expect(secondPayload.pageProjection).toMatchObject({
         projectionId: 'projection_cached',
         tabId: 7,
+      });
+      expect(secondPayload.currentWindowId).toBe(3);
+      expect(secondPayload.isCurrentTabActive).toBe(true);
+      expect(secondPayload.isCurrentWindowFocused).toBe(true);
+      expect(secondPayload.ownershipRuntime).toMatchObject({
+        currentTabId: 7,
+        currentWindowId: 3,
+        isCurrentTabActive: true,
+        isCurrentWindowFocused: true,
+        currentOwnerType: 'user_owned',
+        isCurrentTabRunOwnedByTask: false,
+        runOwnedTabIds: [],
+        runOwnedTabCount: 0,
+        defaultProtection: 'protect_unknown_and_user_owned',
       });
       expect(secondPayload.deltaContext).toMatchObject({
         deltaKind: 'post_action_delta',
@@ -1462,6 +1517,7 @@ describe('handleToolCall execution wrapper', () => {
             apiRowsUnavailableReason: 'api_rows_unavailable_dom_region_rows_available',
             visibleRegionRows: {
               sourceDataSource: 'dom_region_rows',
+              sourceTabId: 12,
               rows: [
                 {
                   title: 'Repo result 1',
@@ -1494,11 +1550,13 @@ describe('handleToolCall execution wrapper', () => {
               cardRowsCount: 0,
             },
           },
+          tabId: 12,
+          ownerType: 'user_owned',
         }),
       );
 
       const result = await handleToolCall('chrome_read_page', {
-        tabId: 1,
+        tabId: 12,
         taskSessionId: 'search-rows-read',
         requestedLayer: 'L0+L1+L2',
         render: 'markdown',
@@ -1521,6 +1579,490 @@ describe('handleToolCall execution wrapper', () => {
       expect(payload.pageProjection).toMatchObject({
         chosenDataSource: 'dom_region_rows',
         sourceLineage: 'dom',
+        ownerType: 'user_owned',
+      });
+      expect(payload.ownershipRuntime).toMatchObject({
+        currentTabId: 12,
+        currentOwnerType: 'user_owned',
+        isCurrentTabRunOwnedByTask: false,
+      });
+    });
+
+    it('keeps unknown ownership when the source tab is missing', async () => {
+      markBridgeReady();
+      const ctx = sessionManager.getOrCreateExternalTaskContext('unknown-owner-search-rows');
+      ctx.noteVisibleRegionRows({
+        sourceDataSource: 'dom_region_rows',
+        sourceTabId: 0,
+        available: true,
+        rowCount: 1,
+        confidence: 0.9,
+        rows: [
+          {
+            title: 'Repo result 1',
+            primaryText: 'Repository result one',
+            secondaryText: null,
+            metaText: null,
+            targetRef: 'ref_repo_1',
+            sourceRegion: 'visible_results',
+            confidence: 0.9,
+          },
+        ],
+        visibleRegionRowsUsed: true,
+        visibleRegionRowsRejectedReason: null,
+        sourceRegion: 'visible_results',
+        rowExtractionConfidence: 0.9,
+        targetRefCoverageRate: 1,
+        regionQualityScore: 0.96,
+        cardExtractorUsed: false,
+        cardPatternConfidence: 0,
+        cardRowsCount: 0,
+        rowOrder: 'visual_order',
+      });
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_unknown_owner',
+          contextChars: 1200,
+          changedRegions: ['viewport'],
+          selectedDataSource: 'markdown',
+          ownerType: 'unknown',
+          extraPayload: {
+            markdown: '# Repository search results',
+            decisionReason: 'markdown_reading_surface_preferred',
+            apiRowsUnavailableReason: 'api_rows_unavailable_dom_region_rows_available',
+          },
+        }),
+      );
+
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'unknown-owner-search-rows',
+        requestedLayer: 'L0+L1+L2',
+        render: 'markdown',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.pageProjection).toMatchObject({
+        ownerType: 'user_owned',
+      });
+    });
+
+    it('surfaces run-owned ownership truth for DOM rows selected into AI context', async () => {
+      markBridgeReady();
+      bridgeRuntimeState.setPrimaryTabSnapshot({
+        primaryTabId: 9,
+        primaryTabReuseRate: 1,
+        benchmarkOwnedTabCount: 1,
+      });
+      bridgeRuntimeState.recordHeartbeat({
+        tabCount: 6,
+        windowCount: 1,
+      });
+      const ctx = sessionManager.getOrCreateExternalTaskContext('run-owned-search-rows');
+      ctx.noteRunOwnedTab(9);
+      ctx.noteVisibleRegionRows({
+        sourceDataSource: 'dom_region_rows',
+        sourceTabId: 9,
+        available: true,
+        rowCount: 2,
+        confidence: 0.9,
+        rows: [
+          {
+            title: 'Repo result 1',
+            primaryText: 'Repository result one',
+            secondaryText: null,
+            metaText: null,
+            targetRef: 'ref_repo_1',
+            sourceRegion: 'visible_results',
+            confidence: 0.9,
+          },
+          {
+            title: 'Repo result 2',
+            primaryText: 'Repository result two',
+            secondaryText: null,
+            metaText: null,
+            targetRef: 'ref_repo_2',
+            sourceRegion: 'visible_results',
+            confidence: 0.9,
+          },
+        ],
+        visibleRegionRowsUsed: true,
+        visibleRegionRowsRejectedReason: null,
+        sourceRegion: 'visible_results',
+        rowExtractionConfidence: 0.9,
+        targetRefCoverageRate: 0.99,
+        regionQualityScore: 0.96,
+        cardExtractorUsed: false,
+        cardPatternConfidence: 0,
+        cardRowsCount: 0,
+        rowOrder: 'visual_order',
+      });
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_run_owned_search_rows',
+          contextChars: 1200,
+          changedRegions: ['viewport'],
+          refreshedRefs: ['ref_repo_1', 'ref_repo_2'],
+          tabId: 9,
+          selectedDataSource: 'markdown',
+          extraPayload: {
+            markdown: '# Repository search results',
+            decisionReason: 'markdown_reading_surface_preferred',
+            apiRowsUnavailableReason: 'api_rows_unavailable_dom_region_rows_available',
+          },
+        }),
+      );
+
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 9,
+        taskSessionId: 'run-owned-search-rows',
+        requestedLayer: 'L0+L1+L2',
+        render: 'markdown',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.pageProjection).toMatchObject({
+        ownerType: 'run_owned',
+      });
+      expect(payload.ownershipRuntime).toMatchObject({
+        currentTabId: 9,
+        currentWindowId: 3,
+        isCurrentTabActive: true,
+        isCurrentWindowFocused: true,
+        currentOwnerType: 'run_owned',
+        currentTabRunOwnershipVerdict: 'run_owned_by_task',
+        currentTabPrimaryRelationVerdict: 'current_tab_is_primary',
+        protectedScopeVerdict: 'protected',
+        cleanupEligibility: 'not_eligible',
+        protectReason: 'current_tab_is_primary',
+        isCurrentTabRunOwnedByTask: true,
+        runOwnedTabIds: [9],
+        runOwnedTabCount: 1,
+        defaultProtection: 'protect_unknown_and_user_owned',
+        bridgeState: 'READY',
+        primaryTabId: 9,
+        primaryTabReuseRate: 1,
+        benchmarkOwnedTabCount: 1,
+        heartbeatTabCount: 6,
+        heartbeatWindowCount: 1,
+      });
+    });
+
+    it('surfaces user-owned ownership summary when the current tab is not run-owned', async () => {
+      markBridgeReady();
+      bridgeRuntimeState.setPrimaryTabSnapshot({
+        primaryTabId: 12,
+        primaryTabReuseRate: 0.75,
+        benchmarkOwnedTabCount: 3,
+      });
+      bridgeRuntimeState.recordHeartbeat({
+        tabCount: 8,
+        windowCount: 2,
+      });
+      const ctx = sessionManager.getOrCreateExternalTaskContext('user-owned-search-rows');
+      ctx.noteRunOwnedTab(9);
+      ctx.noteVisibleRegionRows({
+        sourceDataSource: 'dom_region_rows',
+        sourceTabId: 12,
+        available: true,
+        rowCount: 1,
+        confidence: 0.88,
+        rows: [
+          {
+            title: 'User-owned result',
+            primaryText: 'User-owned row',
+            secondaryText: null,
+            metaText: null,
+            targetRef: 'ref_user_owned_1',
+            sourceRegion: 'visible_results',
+            confidence: 0.88,
+          },
+        ],
+        visibleRegionRowsUsed: true,
+        visibleRegionRowsRejectedReason: null,
+        sourceRegion: 'visible_results',
+        rowExtractionConfidence: 0.88,
+        targetRefCoverageRate: 0.95,
+        regionQualityScore: 0.9,
+        cardExtractorUsed: false,
+        cardPatternConfidence: 0,
+        cardRowsCount: 0,
+        rowOrder: 'visual_order',
+      });
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_user_owned_search_rows',
+          contextChars: 900,
+          changedRegions: ['viewport'],
+          tabId: 12,
+          selectedDataSource: 'dom_region_rows',
+          projectionDataSource: 'dom_region_rows',
+          ownerType: 'unknown',
+          extraPayload: {
+            visibleRegionRows: {
+              sourceDataSource: 'dom_region_rows',
+              sourceTabId: 12,
+              rows: [
+                {
+                  title: 'User-owned result',
+                  primaryText: 'User-owned row',
+                  secondaryText: null,
+                  metaText: null,
+                  targetRef: 'ref_user_owned_1',
+                  sourceRegion: 'visible_results',
+                  confidence: 0.88,
+                },
+              ],
+              rowCount: 1,
+              visibleRegionRowsUsed: true,
+              visibleRegionRowsRejectedReason: null,
+              sourceRegion: 'visible_results',
+              rowExtractionConfidence: 0.88,
+              targetRefCoverageRate: 0.95,
+              regionQualityScore: 0.9,
+              cardExtractorUsed: false,
+              cardPatternConfidence: 0,
+              cardRowsCount: 0,
+            },
+          },
+        }),
+      );
+
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 12,
+        taskSessionId: 'user-owned-search-rows',
+        requestedLayer: 'L0+L1+L2',
+        render: 'markdown',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.aiContextEnvelope).toMatchObject({
+        selectedDataSource: 'dom_region_rows',
+      });
+      expect(payload.pageProjection).toMatchObject({
+        chosenDataSource: 'dom_region_rows',
+        ownerType: 'user_owned',
+      });
+      expect(payload.ownershipRuntime).toMatchObject({
+        currentTabId: 12,
+        currentWindowId: 3,
+        isCurrentTabActive: true,
+        isCurrentWindowFocused: true,
+        currentOwnerType: 'user_owned',
+        currentTabRunOwnershipVerdict: 'not_run_owned_by_task',
+        currentTabPrimaryRelationVerdict: 'current_tab_is_primary',
+        protectedScopeVerdict: 'protected',
+        cleanupEligibility: 'not_eligible',
+        protectReason: 'not_run_owned_by_task',
+        isCurrentTabRunOwnedByTask: false,
+        runOwnedTabIds: [9],
+        runOwnedTabCount: 1,
+        primaryTabId: 12,
+        primaryTabReuseRate: 0.75,
+        benchmarkOwnedTabCount: 3,
+        heartbeatTabCount: 8,
+        heartbeatWindowCount: 2,
+      });
+    });
+
+    it('surfaces eligible cleanup for a run-owned tab that differs from the primary tab', async () => {
+      markBridgeReady();
+      bridgeRuntimeState.setPrimaryTabSnapshot({
+        primaryTabId: 12,
+        primaryTabReuseRate: 0.75,
+        benchmarkOwnedTabCount: 3,
+      });
+      bridgeRuntimeState.recordHeartbeat({
+        tabCount: 8,
+        windowCount: 2,
+      });
+      const ctx = sessionManager.getOrCreateExternalTaskContext(
+        'run-owned-non-primary-search-rows',
+      );
+      ctx.noteRunOwnedTab(9);
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_run_owned_non_primary_search_rows',
+          contextChars: 900,
+          changedRegions: ['viewport'],
+          tabId: 9,
+          selectedDataSource: 'markdown',
+          ownerType: 'unknown',
+          extraPayload: {
+            markdown: '# Run-owned non-primary page',
+            decisionReason: 'markdown_reading_surface_preferred',
+          },
+        }),
+      );
+
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 9,
+        taskSessionId: 'run-owned-non-primary-search-rows',
+        requestedLayer: 'L0+L1+L2',
+        render: 'markdown',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.pageProjection).toMatchObject({
+        ownerType: 'run_owned',
+      });
+      expect(payload.ownershipRuntime).toMatchObject({
+        currentTabId: 9,
+        currentWindowId: 3,
+        isCurrentTabActive: true,
+        isCurrentWindowFocused: true,
+        currentOwnerType: 'run_owned',
+        currentTabRunOwnershipVerdict: 'run_owned_by_task',
+        currentTabPrimaryRelationVerdict: 'current_tab_differs_from_primary',
+        protectedScopeVerdict: 'not_protected',
+        cleanupEligibility: 'eligible',
+        protectReason: null,
+        isCurrentTabRunOwnedByTask: true,
+        runOwnedTabIds: [9],
+        runOwnedTabCount: 1,
+        primaryTabId: 12,
+        primaryTabReuseRate: 0.75,
+        benchmarkOwnedTabCount: 3,
+        heartbeatTabCount: 8,
+        heartbeatWindowCount: 2,
+      });
+    });
+
+    it('keeps ownerType consistent between pageProjection and ownershipRuntime on markdown path', async () => {
+      markBridgeReady();
+      bridgeRuntimeState.setPrimaryTabSnapshot({
+        primaryTabId: 5,
+        primaryTabReuseRate: 1,
+        benchmarkOwnedTabCount: 2,
+      });
+      bridgeRuntimeState.recordHeartbeat({
+        tabCount: 4,
+        windowCount: 1,
+      });
+      const ctx = sessionManager.getOrCreateExternalTaskContext('markdown-user-owned-consistency');
+      ctx.noteRunOwnedTab(5);
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_markdown_user_owned',
+          contextChars: 600,
+          changedRegions: ['viewport'],
+          tabId: 7,
+          selectedDataSource: 'markdown',
+          ownerType: 'unknown',
+          extraPayload: {
+            markdown: '# User tab content',
+            decisionReason: 'markdown_reading_surface_preferred',
+          },
+        }),
+      );
+
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 7,
+        taskSessionId: 'markdown-user-owned-consistency',
+        requestedLayer: 'L0+L1+L2',
+        render: 'markdown',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      // Tab 7 is NOT run-owned (only tab 5 is) →
+      // both pageProjection.ownerType and ownershipRuntime.currentOwnerType must agree
+      expect(payload.pageProjection.ownerType).toBe('user_owned');
+      expect(payload.ownershipRuntime.currentOwnerType).toBe(payload.pageProjection.ownerType);
+      expect(payload.ownershipRuntime).toMatchObject({
+        currentTabId: 7,
+        currentOwnerType: 'user_owned',
+        currentTabRunOwnershipVerdict: 'not_run_owned_by_task',
+        isCurrentTabRunOwnedByTask: false,
+        runOwnedTabIds: [5],
+        runOwnedTabCount: 1,
+        defaultProtection: 'protect_unknown_and_user_owned',
+      });
+    });
+
+    it('degrades ownership summary to unknown when the current tab cannot be trusted', async () => {
+      markBridgeReady();
+      const ctx = sessionManager.getOrCreateExternalTaskContext('unknown-summary-search-rows');
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_unknown_summary_search_rows',
+          contextChars: 700,
+          changedRegions: ['viewport'],
+          tabId: -1,
+          selectedDataSource: 'markdown',
+          ownerType: 'unknown',
+          extraPayload: {
+            currentWindowId: null,
+            isCurrentTabActive: null,
+            isCurrentWindowFocused: null,
+          },
+        }),
+      );
+
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 0,
+        taskSessionId: 'unknown-summary-search-rows',
+        requestedLayer: 'L0+L1+L2',
+        render: 'markdown',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.ownershipRuntime).toMatchObject({
+        currentTabId: null,
+        currentWindowId: null,
+        isCurrentTabActive: null,
+        isCurrentWindowFocused: null,
+        currentOwnerType: 'unknown',
+        currentTabRunOwnershipVerdict: 'unknown',
+        currentTabPrimaryRelationVerdict: 'current_tab_unknown',
+        protectedScopeVerdict: 'unknown',
+        cleanupEligibility: 'unknown',
+        protectReason: 'current_tab_unknown',
+        isCurrentTabRunOwnedByTask: false,
+        runOwnedTabIds: [],
+        runOwnedTabCount: 0,
+        defaultProtection: 'protect_unknown_and_user_owned',
+      });
+      expect(ctx.getRunOwnedTabIds()).toEqual([]);
+    });
+
+    it('drops stale run-owned summary after cleanup releases the tab', async () => {
+      markBridgeReady();
+      const ctx = sessionManager.getOrCreateExternalTaskContext('cleanup-owned-search-rows');
+      ctx.noteRunOwnedTab(21);
+      ctx.releaseRunOwnedTab(21);
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_cleanup_owned_search_rows',
+          contextChars: 850,
+          changedRegions: ['viewport'],
+          tabId: 21,
+          selectedDataSource: 'markdown',
+          ownerType: 'unknown',
+        }),
+      );
+
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 21,
+        taskSessionId: 'cleanup-owned-search-rows',
+        requestedLayer: 'L0+L1+L2',
+        render: 'markdown',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.pageProjection).toMatchObject({
+        ownerType: 'user_owned',
+      });
+      expect(payload.ownershipRuntime).toMatchObject({
+        currentTabId: 21,
+        currentOwnerType: 'user_owned',
+        currentTabRunOwnershipVerdict: 'not_run_owned_by_task',
+        currentTabPrimaryRelationVerdict: 'primary_tab_unknown',
+        protectedScopeVerdict: 'protected',
+        cleanupEligibility: 'not_eligible',
+        protectReason: 'not_run_owned_by_task',
+        isCurrentTabRunOwnedByTask: false,
+        runOwnedTabIds: [],
+        runOwnedTabCount: 0,
       });
     });
 
@@ -1560,6 +2102,9 @@ describe('handleToolCall execution wrapper', () => {
       });
       const payload = JSON.parse(String(ra2.content[0].text));
       expect(payload.warning).toBe('read_budget_exceeded');
+      expect(payload.currentWindowId).toBeUndefined();
+      expect(payload.isCurrentTabActive).toBeUndefined();
+      expect(payload.isCurrentWindowFocused).toBeUndefined();
       expect(flowSpy).toHaveBeenCalledTimes(1);
     });
 
@@ -1840,6 +2385,9 @@ describe('handleToolCall execution wrapper', () => {
         readPageCount: 2,
         readBudget: 2,
       });
+      expect(payload.currentWindowId).toBeUndefined();
+      expect(payload.isCurrentTabActive).toBeUndefined();
+      expect(payload.isCurrentWindowFocused).toBeUndefined();
       expect(flowSpy).toHaveBeenCalledTimes(1);
     });
 

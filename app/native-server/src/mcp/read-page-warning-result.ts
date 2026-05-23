@@ -6,7 +6,10 @@ import type {
   ReadPageRequestedLayer,
 } from '@tabrix/shared';
 import { buildBrowserTaskStateVerdict } from '@tabrix/shared';
-import type { ShouldAllowReadPageResult } from '../execution/task-session-context';
+import type {
+  ShouldAllowReadPageResult,
+  TaskPageRuntimeFields as ReadPageWarningRuntimeFields,
+} from '../execution/task-session-context';
 import type { ReadPageOperationLogHint } from './read-page-dom-region-rows-result';
 
 export function buildReadPageWarningResult(args: {
@@ -17,6 +20,7 @@ export function buildReadPageWarningResult(args: {
   cachedDeltaContext?: BrowserPageProjectionDelta | null;
   cachedDataSourceDecision?: BrowserDataSourceDecisionEvidence | null;
   lifecycleTimeline?: readonly unknown[] | null;
+  runtimeFields?: ReadPageWarningRuntimeFields | null;
 }): {
   result: CallToolResult;
   warning: string;
@@ -32,6 +36,9 @@ export function buildReadPageWarningResult(args: {
   if (args.cachedProjection && args.cachedDeltaContext) {
     warningPayload.pageProjection = args.cachedProjection;
     warningPayload.deltaContext = args.cachedDeltaContext;
+    warningPayload.currentWindowId = args.runtimeFields?.currentWindowId ?? null;
+    warningPayload.isCurrentTabActive = args.runtimeFields?.isCurrentTabActive ?? null;
+    warningPayload.isCurrentWindowFocused = args.runtimeFields?.isCurrentWindowFocused ?? null;
     warningPayload.aiContextEnvelope = {
       envelopeKind: 'delta_context',
       contextSource: 'cached_page_projection_delta',

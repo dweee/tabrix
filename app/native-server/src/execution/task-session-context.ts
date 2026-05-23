@@ -162,6 +162,12 @@ export interface ShouldAllowReadPageResult {
   readBudget: number;
 }
 
+export interface TaskPageRuntimeFields {
+  currentWindowId: number | null;
+  isCurrentTabActive: boolean | null;
+  isCurrentWindowFocused: boolean | null;
+}
+
 export interface NoteReadPageInput {
   layer: ReadPageRequestedLayer;
   source: TaskReadSource;
@@ -363,6 +369,7 @@ export class TaskSessionContext {
   private _readPageAvoidedCount = 0;
   private _tokensSavedEstimateTotal = 0;
   private lastPageProjection: BrowserPageThingProjection | null = null;
+  private lastPageRuntimeFields: TaskPageRuntimeFields | null = null;
   private pageProjectionDeltaCount = 0;
   private lifecycleEventCount = 0;
   private readonly lifecycleTimeline: TaskLifecycleEvent[] = [];
@@ -552,6 +559,7 @@ export class TaskSessionContext {
    */
   public notePageProjectionAndBuildDelta(
     projection: BrowserPageThingProjection,
+    runtimeFields: TaskPageRuntimeFields | null = null,
   ): BrowserPageProjectionDelta {
     const previousProjection = this.lastPageProjection;
     const deltaKind = previousProjection === null ? 'initial_overview' : 'post_action_delta';
@@ -564,6 +572,7 @@ export class TaskSessionContext {
       evidenceBoundary: inferProjectionEvidenceBoundary(projection),
     });
     this.lastPageProjection = cloneBrowserPageThingProjection(projection);
+    this.lastPageRuntimeFields = runtimeFields ? cloneTaskPageRuntimeFields(runtimeFields) : null;
     this.recordProjectionLifecycleEvents(projection, delta);
     return delta;
   }
@@ -571,6 +580,12 @@ export class TaskSessionContext {
   public peekLastPageProjection(): BrowserPageThingProjection | null {
     return this.lastPageProjection
       ? cloneBrowserPageThingProjection(this.lastPageProjection)
+      : null;
+  }
+
+  public peekLastPageRuntimeFields(): TaskPageRuntimeFields | null {
+    return this.lastPageRuntimeFields
+      ? cloneTaskPageRuntimeFields(this.lastPageRuntimeFields)
       : null;
   }
 
@@ -891,6 +906,14 @@ function cloneVisibleRegionRowsData(input: TaskVisibleRegionRowsData): TaskVisib
     rejectedRegionReasonDistribution: input.rejectedRegionReasonDistribution
       ? { ...input.rejectedRegionReasonDistribution }
       : undefined,
+  };
+}
+
+function cloneTaskPageRuntimeFields(input: TaskPageRuntimeFields): TaskPageRuntimeFields {
+  return {
+    currentWindowId: input.currentWindowId,
+    isCurrentTabActive: input.isCurrentTabActive,
+    isCurrentWindowFocused: input.isCurrentWindowFocused,
   };
 }
 

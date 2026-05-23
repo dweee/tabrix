@@ -1,6 +1,7 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import {
   buildBrowserPageThingProjectionFromReadPage,
+  type BrowserPageOwnerType,
   type ReadPageCompactSnapshot,
   type ReadPageRequestedLayer,
 } from '@tabrix/shared';
@@ -77,6 +78,7 @@ export function buildDomRegionRowsSuccessResult(args: {
   routerDecision: DataSourceDecision;
   layerContract: LayerContractEnvelope;
   visibleRows: TaskVisibleRegionRowsData;
+  ownerType: BrowserPageOwnerType;
   apiRowsUnavailableReason: string;
   readCount: number;
 }): { result: CallToolResult; operationLog: ReadPageOperationLogHint } {
@@ -154,6 +156,7 @@ function buildDomRegionRowsPageProjection(
     requestedLayer: ReadPageRequestedLayer;
     routerDecision: DataSourceDecision;
     visibleRows: TaskVisibleRegionRowsData;
+    ownerType: BrowserPageOwnerType;
   },
 ) {
   const observedAt = new Date().toISOString();
@@ -202,7 +205,7 @@ function buildDomRegionRowsPageProjection(
       typeof args.visibleRows.sourceTabId === 'number' && args.visibleRows.sourceTabId > 0
         ? args.visibleRows.sourceTabId
         : -1,
-    ownerType: 'unknown',
+    ownerType: args.ownerType,
     contextVersion: `dom_region_rows:${observedAt}`,
     previousContextVersion: null,
     changedByActionId: null,

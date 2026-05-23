@@ -107,6 +107,7 @@ describe('buildDomRegionRowsSuccessResult', () => {
         fallbackEntryLayer: 'L0+L1',
       }),
       visibleRows: makeVisibleRows('viewport'),
+      ownerType: 'run_owned',
       apiRowsUnavailableReason: 'api_rows_unavailable',
       readCount: 1,
     });
@@ -118,6 +119,7 @@ describe('buildDomRegionRowsSuccessResult', () => {
       activeRegion: 'result_list',
       changedRegions: ['result_list'],
       chosenDataSource: 'dom_region_rows',
+      ownerType: 'run_owned',
       regionEvidenceRefs: ['region:result_list', 'row:row_1', 'row:row_2'],
       refreshedRefs: ['ref_1', 'ref_2'],
     });
@@ -133,6 +135,7 @@ describe('buildDomRegionRowsSuccessResult', () => {
         fallbackEntryLayer: 'L0+L1',
       }),
       visibleRows: makeVisibleRows('article_body'),
+      ownerType: 'user_owned',
       apiRowsUnavailableReason: 'api_rows_unavailable',
       readCount: 1,
     });
@@ -143,6 +146,29 @@ describe('buildDomRegionRowsSuccessResult', () => {
     expect(payload.pageProjection).toMatchObject({
       activeRegion: 'article_body',
       changedRegions: ['article_body'],
+      ownerType: 'user_owned',
+    });
+  });
+
+  it('keeps unknown ownership when no source tab is available', () => {
+    const { result } = buildDomRegionRowsSuccessResult({
+      requestedLayer: 'L0+L1',
+      routerDecision: makeRouterDecision(),
+      layerContract: mapDataSourceToLayerContract({
+        dataSource: 'dom_region_rows',
+        requestedLayer: 'L0+L1',
+        fallbackEntryLayer: 'L0+L1',
+      }),
+      visibleRows: { ...makeVisibleRows('viewport'), sourceTabId: 0 },
+      ownerType: 'unknown',
+      apiRowsUnavailableReason: 'api_rows_unavailable',
+      readCount: 1,
+    });
+
+    const payload = JSON.parse(String(result.content[0].text));
+
+    expect(payload.pageProjection).toMatchObject({
+      ownerType: 'unknown',
     });
   });
 });

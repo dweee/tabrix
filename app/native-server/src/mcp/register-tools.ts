@@ -15,6 +15,7 @@ import {
 } from '../policy/non-interference-preflight';
 import { sessionManager } from '../execution/session-manager';
 import type {
+  TaskPageRuntimeFields,
   TaskSessionContext,
   TaskVisibleRegionRowsData,
 } from '../execution/task-session-context';
@@ -92,8 +93,10 @@ import { bridgeCommandChannel } from '../server/bridge-command-channel';
 import { getDefaultPrimaryTabController } from '../runtime/primary-tab-controller';
 import type {
   BrowserDataSourceDecisionEvidence,
+  BrowserPageOwnerType,
   BrowserPageThingProjection,
   BrowserTaskStateVerdict,
+  ReadPageOwnershipRuntimeSummary,
   ReadPageSelectedDataSource,
 } from '@tabrix/shared';
 import { buildBrowserTaskStateVerdict } from '@tabrix/shared';
@@ -754,6 +757,10 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         forcedReadPageLayer ?? extractRequestedLayer(args) ?? READ_PAGE_DEFAULT_LAYER;
       const decision = taskContext.shouldAllowReadPage({ requestedLayer });
       if (!decision.allowed || decision.reason === 'read_redundant') {
+        const shouldReuseCachedProjection = decision.reason === 'read_redundant';
+        const cachedProjection = shouldReuseCachedProjection
+          ? taskContext.peekLastPageProjection()
+          : null;
         const {
           result: warningResult,
           warning,
@@ -762,18 +769,17 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           decision,
           requestedLayer,
           operationLogHint,
-          cachedProjection:
-            decision.reason === 'read_redundant' ? taskContext.peekLastPageProjection() : null,
-          cachedDeltaContext:
-            decision.reason === 'read_redundant'
-              ? taskContext.buildCachedPageProjectionDelta()
-              : null,
-          cachedDataSourceDecision:
-            decision.reason === 'read_redundant'
-              ? taskContext.buildCachedDataSourceDecision()
-              : null,
-          lifecycleTimeline:
-            decision.reason === 'read_redundant' ? taskContext.getLifecycleTimeline() : null,
+          cachedProjection,
+          cachedDeltaContext: cachedProjection
+            ? taskContext.buildCachedPageProjectionDelta()
+            : null,
+          cachedDataSourceDecision: cachedProjection
+            ? taskContext.buildCachedDataSourceDecision()
+            : null,
+          lifecycleTimeline: cachedProjection ? taskContext.getLifecycleTimeline() : null,
+          runtimeFields: shouldReuseCachedProjection
+            ? taskContext.peekLastPageRuntimeFields()
+            : null,
         });
         const normalizedWarning = normalizeToolCallResult(name, warningResult);
         sessionManager.completeStep(session.sessionId, step.stepId, {
@@ -785,7 +791,9 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           status: 'completed',
           summary: normalizedWarning.executionResult.summary,
         });
-        return warningResult;
+        return cachedProjection
+          ? attachAiFacingOwnershipRuntime(warningResult, taskContext)
+          : warningResult;
       }
     }
     const nonInterferenceVerdict = evaluateNonInterferencePreflight({
@@ -949,11 +957,18 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
               requestedLayer,
               fallbackEntryLayer: 'L0+L1',
             });
+            const ownerType: BrowserPageOwnerType =
+              typeof visibleRows.sourceTabId === 'number' && visibleRows.sourceTabId > 0
+                ? taskContext.isRunOwnedTab(visibleRows.sourceTabId)
+                  ? 'run_owned'
+                  : 'user_owned'
+                : 'unknown';
             const { result: domRowsResult, operationLog } = buildDomRegionRowsSuccessResult({
               requestedLayer,
               routerDecision,
               layerContract,
               visibleRows,
+              ownerType,
               apiRowsUnavailableReason: apiUnavailableReason,
               readCount: taskContext.readPageCount,
             });
@@ -1007,6 +1022,10 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
                     regionQualityScore: visibleRows.regionQualityScore ?? null,
                     rowExtractionConfidence: visibleRows.rowExtractionConfidence,
                     sourceRegion: visibleRows.sourceRegion,
+                    sourceTabId:
+                      typeof visibleRows.sourceTabId === 'number' && visibleRows.sourceTabId > 0
+                        ? visibleRows.sourceTabId
+                        : null,
                   }
                 : {}),
             });
@@ -1228,6 +1247,59 @@ function shouldInvalidateReadAfterInteraction(toolName: string): boolean {
   );
 }
 
+function attachAiFacingOwnershipRuntime(
+  result: CallToolResult,
+  taskContext: TaskSessionContext,
+): CallToolResult {
+  const first = result.content?.[0];
+  if (!first || first.type !== 'text' || typeof first.text !== 'string') return result;
+
+  let payload: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(first.text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return result;
+    payload = parsed as Record<string, unknown>;
+  } catch {
+    return result;
+  }
+
+  const projection = payload.pageProjection;
+  if (!isBrowserPageThingProjectionLike(projection)) return result;
+
+  const payloadSelectedDataSource = readPayloadSelectedDataSource(payload);
+  const selectedDataSource = readSelectedDataSource(payload, projection);
+  const aiFacingProjection = normalizeAiFacingProjectionDataSource(
+    projection,
+    selectedDataSource,
+    payload,
+  );
+  const normalizedAiFacingProjection = normalizeAiFacingProjectionOwnerType(
+    taskContext,
+    aiFacingProjection,
+    selectedDataSource,
+    payload,
+  );
+  const runtimeFields: TaskPageRuntimeFields = {
+    currentWindowId: readPositiveInteger(payload, 'currentWindowId'),
+    isCurrentTabActive: readBoolean(payload, 'isCurrentTabActive'),
+    isCurrentWindowFocused: readBoolean(payload, 'isCurrentWindowFocused'),
+  };
+
+  payload.pageProjection = normalizedAiFacingProjection;
+  payload.ownershipRuntime = buildAiFacingOwnershipRuntimeSummary(
+    taskContext,
+    normalizedAiFacingProjection,
+    runtimeFields,
+  );
+
+  return {
+    ...result,
+    content: result.content.map((block, index) =>
+      index === 0 && block.type === 'text' ? { ...block, text: JSON.stringify(payload) } : block,
+    ) as CallToolResult['content'],
+  };
+}
+
 function attachAiFacingDeltaContext(
   result: CallToolResult,
   taskContext: TaskSessionContext,
@@ -1254,7 +1326,21 @@ function attachAiFacingDeltaContext(
     selectedDataSource,
     payload,
   );
-  const deltaContext = taskContext.notePageProjectionAndBuildDelta(aiFacingProjection);
+  const normalizedAiFacingProjection = normalizeAiFacingProjectionOwnerType(
+    taskContext,
+    aiFacingProjection,
+    selectedDataSource,
+    payload,
+  );
+  const runtimeFields: TaskPageRuntimeFields = {
+    currentWindowId: readPositiveInteger(payload, 'currentWindowId'),
+    isCurrentTabActive: readBoolean(payload, 'isCurrentTabActive'),
+    isCurrentWindowFocused: readBoolean(payload, 'isCurrentWindowFocused'),
+  };
+  const deltaContext = taskContext.notePageProjectionAndBuildDelta(
+    normalizedAiFacingProjection,
+    runtimeFields,
+  );
   const selectedReason =
     selectedDataSource === readString(payload.aiPreferredDataSource)
       ? (readString(payload.aiPreferredDataSourceReason) ?? 'ai_context_prefers_visible_rows')
@@ -1279,7 +1365,12 @@ function attachAiFacingDeltaContext(
     fallbackReason,
   });
 
-  payload.pageProjection = aiFacingProjection;
+  payload.pageProjection = normalizedAiFacingProjection;
+  payload.ownershipRuntime = buildAiFacingOwnershipRuntimeSummary(
+    taskContext,
+    normalizedAiFacingProjection,
+    runtimeFields,
+  );
   payload.deltaContext = deltaContext;
   payload.aiContextEnvelope = {
     envelopeKind: 'delta_context',
@@ -1320,6 +1411,52 @@ function normalizeAiFacingProjectionDataSource(
   };
 }
 
+function normalizeAiFacingProjectionOwnerType(
+  taskContext: TaskSessionContext,
+  projection: BrowserPageThingProjection,
+  selectedDataSource: ReadPageSelectedDataSource,
+  payload: Record<string, unknown>,
+): BrowserPageThingProjection {
+  const sourceTabId = resolveOwnerTypeSourceTabId(selectedDataSource, projection, payload);
+
+  if (sourceTabId === null) {
+    return {
+      ...projection,
+      ownerType: 'unknown',
+    };
+  }
+
+  const ownerType: BrowserPageOwnerType = taskContext.isRunOwnedTab(sourceTabId)
+    ? 'run_owned'
+    : projection.ownerType === 'baseline'
+      ? 'baseline'
+      : 'user_owned';
+  return {
+    ...projection,
+    ownerType,
+  };
+}
+
+function resolveOwnerTypeSourceTabId(
+  selectedDataSource: ReadPageSelectedDataSource,
+  projection: BrowserPageThingProjection,
+  payload: Record<string, unknown>,
+): number | null {
+  if (selectedDataSource === 'dom_region_rows') {
+    const rowsPayload = readObject(payload.visibleRegionRows) ?? payload;
+    return (
+      readPositiveInteger(payload, 'sourceTabId') ??
+      readPositiveInteger(rowsPayload, 'sourceTabId') ??
+      readProjectionTabId(projection)
+    );
+  }
+  return readProjectionTabId(projection);
+}
+
+function readProjectionTabId(projection: BrowserPageThingProjection): number | null {
+  return Number.isInteger(projection.tabId) && projection.tabId > 0 ? projection.tabId : null;
+}
+
 function hasVisibleRowsEvidence(payload: Record<string, unknown>): boolean {
   const rowsPayload = readObject(payload.visibleRegionRows) ?? payload;
   const rowCount =
@@ -1331,6 +1468,89 @@ function hasVisibleRowsEvidence(payload: Record<string, unknown>): boolean {
     rowCount !== null &&
     rowCount > 0
   );
+}
+
+function buildAiFacingOwnershipRuntimeSummary(
+  taskContext: TaskSessionContext,
+  projection: BrowserPageThingProjection,
+  runtimeFields: TaskPageRuntimeFields,
+): ReadPageOwnershipRuntimeSummary {
+  const snapshot = getBridgeSnapshot();
+  const runOwnedTabIds = [...taskContext.getRunOwnedTabIds()];
+  const currentTabId =
+    Number.isInteger(projection.tabId) && projection.tabId > 0 ? projection.tabId : null;
+  const { currentWindowId, isCurrentTabActive, isCurrentWindowFocused } = runtimeFields;
+  const isCurrentTabRunOwnedByTask =
+    currentTabId !== null && taskContext.isRunOwnedTab(currentTabId);
+  // Trust the normalized projection's ownerType as the single source of
+  // truth. normalizeAiFacingProjectionOwnerType() already derives the
+  // authoritative value from the same taskContext + tabId inputs, so
+  // re-deriving here would create a second independent chain that could
+  // drift out of sync.
+  const currentOwnerType: BrowserPageOwnerType = projection.ownerType;
+  const currentTabRunOwnershipVerdict =
+    currentTabId === null
+      ? 'unknown'
+      : isCurrentTabRunOwnedByTask
+        ? 'run_owned_by_task'
+        : 'not_run_owned_by_task';
+  const currentTabPrimaryRelationVerdict =
+    currentTabId === null
+      ? 'current_tab_unknown'
+      : snapshot.primaryTabId === null
+        ? 'primary_tab_unknown'
+        : currentTabId === snapshot.primaryTabId
+          ? 'current_tab_is_primary'
+          : 'current_tab_differs_from_primary';
+  const protectedScopeVerdict =
+    currentTabId === null
+      ? 'unknown'
+      : !isCurrentTabRunOwnedByTask || currentTabPrimaryRelationVerdict === 'current_tab_is_primary'
+        ? 'protected'
+        : currentTabPrimaryRelationVerdict === 'primary_tab_unknown'
+          ? 'unknown'
+          : 'not_protected';
+  const cleanupEligibility =
+    currentTabId === null
+      ? 'unknown'
+      : !isCurrentTabRunOwnedByTask || currentTabPrimaryRelationVerdict === 'current_tab_is_primary'
+        ? 'not_eligible'
+        : currentTabPrimaryRelationVerdict === 'primary_tab_unknown'
+          ? 'unknown'
+          : 'eligible';
+  const protectReason =
+    currentTabId === null
+      ? 'current_tab_unknown'
+      : !isCurrentTabRunOwnedByTask
+        ? 'not_run_owned_by_task'
+        : currentTabPrimaryRelationVerdict === 'current_tab_is_primary'
+          ? 'current_tab_is_primary'
+          : currentTabPrimaryRelationVerdict === 'primary_tab_unknown'
+            ? 'primary_tab_unknown'
+            : null;
+
+  return {
+    currentTabId,
+    currentWindowId,
+    isCurrentTabActive,
+    isCurrentWindowFocused,
+    currentOwnerType,
+    currentTabRunOwnershipVerdict,
+    currentTabPrimaryRelationVerdict,
+    protectedScopeVerdict,
+    cleanupEligibility,
+    protectReason,
+    isCurrentTabRunOwnedByTask,
+    runOwnedTabIds,
+    runOwnedTabCount: runOwnedTabIds.length,
+    defaultProtection: 'protect_unknown_and_user_owned',
+    bridgeState: snapshot.bridgeState ?? null,
+    primaryTabId: snapshot.primaryTabId,
+    primaryTabReuseRate: snapshot.primaryTabReuseRate,
+    benchmarkOwnedTabCount: snapshot.benchmarkOwnedTabCount,
+    heartbeatTabCount: snapshot.heartbeat.tabCount,
+    heartbeatWindowCount: snapshot.heartbeat.windowCount,
+  };
 }
 
 function buildAiFacingTaskState(args: {
@@ -1525,6 +1745,12 @@ function extractReadPageRenderMode(input: unknown): 'json' | 'markdown' | null {
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function readBoolean(input: unknown, key: string): boolean | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const raw = (input as Record<string, unknown>)[key];
+  return typeof raw === 'boolean' ? raw : null;
 }
 
 function readNumber(value: unknown): number | null {
