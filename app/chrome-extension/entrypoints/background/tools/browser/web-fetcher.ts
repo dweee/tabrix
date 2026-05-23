@@ -106,13 +106,14 @@ function buildLongContentCoverageGate(text: string, textMode: 'body' | 'full-vis
     tailMarkerTokens.length > 0 ||
     /\b(final|closing|conclusion|summary|end)\b/i.test(tailWindow) ||
     /尾段|结尾|结束|总结/.test(tailWindow);
-  const longEnough = normalized.length >= 2400 && lines.length >= 12;
   const structureCovered = headingLikeLines.length >= 6;
   const markerCovered = markerTokens.length >= 3;
+  const coverageEvidencePresent =
+    normalized.length >= 2400 || lines.length >= 12 || structureCovered || markerTokens.length >= 6;
   const verdict =
     textMode !== 'full-visible'
       ? 'mode_insufficient'
-      : !longEnough
+      : !coverageEvidencePresent
         ? 'not_applicable'
         : structureCovered && markerCovered && hasTailCoverage
           ? 'complete'
@@ -132,6 +133,7 @@ function buildLongContentCoverageGate(text: string, textMode: 'body' | 'full-vis
       markerTokenCount: markerTokens.length,
       tailMarkerTokenCount: tailMarkerTokens.length,
       tailCoveragePresent: hasTailCoverage,
+      coverageEvidencePresent,
     },
     evidence: {
       headingLikeLines: headingLikeLines.slice(0, 12),

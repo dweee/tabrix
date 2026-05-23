@@ -211,6 +211,7 @@ describe('web fetcher URL route', () => {
         headingLikeLineCount: 8,
         markerTokenCount: 9,
         tailCoveragePresent: true,
+        coverageEvidencePresent: true,
       },
       boundary: {
         metadataOnly: true,
