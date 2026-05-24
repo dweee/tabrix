@@ -1015,6 +1015,114 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     ]);
   });
 
+  it.each([
+    {
+      name: 'auth',
+      taskContext: {
+        intent: 'resume auth collaboration',
+        pageRole: 'login_required',
+        pageStability: 'stable' as const,
+      },
+      expectedScopeKind: 'auth',
+      expectedReason: 'generic_auth_category_match',
+      expectedRegion: {
+        regionId: 'credential_input',
+        regionPurpose: 'input',
+        expectedRole: 'textbox',
+      },
+    },
+    {
+      name: 'challenge',
+      taskContext: {
+        intent: 'resume verification collaboration',
+        pageRole: 'challenge_required',
+        pageStability: 'stable' as const,
+      },
+      expectedScopeKind: 'challenge',
+      expectedReason: 'generic_challenge_category_match',
+      expectedRegion: {
+        regionId: 'challenge_prompt',
+        regionPurpose: 'feedback',
+        expectedRole: 'status',
+      },
+    },
+    {
+      name: 'multi_tab',
+      taskContext: {
+        intent: 'review multi tab state',
+        pageRole: 'tab_management',
+        pageStability: 'stable' as const,
+      },
+      expectedScopeKind: 'multi_tab',
+      expectedReason: 'generic_multi_tab_category_match',
+      expectedRegion: {
+        regionId: 'tab_set',
+        regionPurpose: 'navigation',
+        expectedRole: null,
+      },
+    },
+    {
+      name: 'user_takeover',
+      taskContext: {
+        intent: 'pause for user takeover',
+        pageRole: 'user_took_over',
+        pageStability: 'stable' as const,
+      },
+      expectedScopeKind: 'user_takeover',
+      expectedReason: 'generic_user_takeover_category_match',
+      expectedRegion: {
+        regionId: 'user_activity_region',
+        regionPurpose: 'feedback',
+        expectedRole: null,
+      },
+    },
+  ])(
+    'derives BNS-03 $name watch scope transitions into runtime artifacts',
+    ({ taskContext, expectedScopeKind, expectedReason, expectedRegion }) => {
+      ensureLifecycleEvidenceCollectorRegistered();
+      dispatchBridgeObservationToStream(
+        makeBridgeMessage('fact_snapshot', {
+          tabId: 42,
+          observedAtMs: T0,
+          data: {
+            stable: true,
+          },
+        }),
+      );
+
+      const artifact = produceRuntimeLifecycleEvidenceArtifact({
+        artifactId: `runtime-artifact-scope-${expectedScopeKind}`,
+        evidenceLevel: 'integration',
+        scenarioId: `scenario-scope-${expectedScopeKind}`,
+        scenarioClass: 'search_result_delta_v1',
+        startedAtMs: T0,
+        endedAtMs: T0,
+        eventWindow: { tabIds: [42] },
+        taskContext,
+      });
+
+      expect(artifact.scopeTransitions).toMatchObject({
+        available: true,
+        totalTransitions: 1,
+        transitions: [
+          {
+            scopeKind: expectedScopeKind,
+            tabId: 42,
+            reason: expectedReason,
+            producedAtMs: T0,
+          },
+        ],
+      });
+      expect(
+        artifact.scopeTransitions.available ? artifact.scopeTransitions.transitions[0].regions : [],
+      ).toEqual(expect.arrayContaining([expectedRegion]));
+      expect(artifact.claimBoundary).toMatchObject({
+        realBrowserProven: false,
+        commercialGradeProven: false,
+      });
+    },
+  );
+
   it('keeps BNS-03 unavailable when task context is absent', () => {
     ensureLifecycleEvidenceCollectorRegistered();
 
