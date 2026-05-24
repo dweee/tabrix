@@ -45,6 +45,9 @@ export function deriveWaitForStabilitySignal(
     if (verdict === 'ready_to_act') {
       return buildSignal(event, 'ready_to_act', nowMs, options.confidence ?? 0.85);
     }
+    if (verdict === 'user_took_over') {
+      return buildSignal(event, 'user_took_over', nowMs, options.confidence ?? 0.9);
+    }
     if (verdict === 'stable') return null;
     latestUnknown ??= event;
   }
@@ -71,7 +74,7 @@ function sortNewestFirst(events: readonly BrowserStreamEvent[]): BrowserStreamEv
     .sort((a, b) => b.observedAtMs - a.observedAtMs);
 }
 
-type EventVerdict = 'wait_for_stability' | 'ready_to_act' | 'stable' | 'unknown';
+type EventVerdict = 'wait_for_stability' | 'ready_to_act' | 'user_took_over' | 'stable' | 'unknown';
 
 function classifyEvent(event: BrowserStreamEvent): EventVerdict {
   const data = getBridgeData(event.sourcePayload);
@@ -114,6 +117,9 @@ function classifyFactSnapshotData(data: Record<string, unknown>): EventVerdict {
   );
   if (!signals) return 'unknown';
 
+  if (payload.userActivityLevel === 'recent_input' && payload.interferenceRisk === 'high') {
+    return 'user_took_over';
+  }
   if (signals.routeStable === 'false' || signals.documentComplete === 'false') {
     return 'wait_for_stability';
   }

@@ -220,6 +220,175 @@ describe('semantic-signal-aggregator — wait_for_stability', () => {
     expect(signal).toBeNull();
   });
 
+  it('emits user_took_over only for explicit recent input with high interference risk', () => {
+    const signal = deriveWaitForStabilitySignal(
+      [
+        makeEvent({
+          streamEventId: 'user-activity-fact',
+          kind: 'observation_fact_snapshot',
+          sourceObservationKind: 'fact_snapshot',
+          sourcePayload: {
+            kind: 'fact_snapshot',
+            data: {
+              factSnapshotId: 'fact-user-took-over',
+              observedAtMs: T0,
+              payload: {
+                eventKind: 'readiness_signal',
+                signals: {
+                  documentComplete: 'true',
+                  routeStable: 'true',
+                  keyRegionReady: 'true',
+                  networkQuiet: 'true',
+                  observedAtMs: T0,
+                },
+                tabId: 100,
+                urlPattern: 'example.test/list',
+                sessionId: null,
+                userActivityLevel: 'recent_input',
+                interferenceRisk: 'high',
+              },
+            },
+          },
+        }),
+      ],
+      PRODUCED_AT,
+    );
+
+    expect(signal).toMatchObject({
+      kind: 'user_took_over',
+      confidence: 0.9,
+      sourceOrigins: ['browser_stream'],
+    });
+    expect(signal?.signalId).toBe(`sig_user_took_over_user-activity-fact_${PRODUCED_AT}`);
+  });
+
+  it('prioritizes user_took_over over page readiness waits when recent input is high risk', () => {
+    const signal = deriveWaitForStabilitySignal(
+      [
+        makeEvent({
+          streamEventId: 'user-activity-not-ready',
+          kind: 'observation_fact_snapshot',
+          sourceObservationKind: 'fact_snapshot',
+          sourcePayload: {
+            kind: 'fact_snapshot',
+            data: {
+              factSnapshotId: 'fact-user-took-over-not-ready',
+              observedAtMs: T0,
+              payload: {
+                eventKind: 'readiness_signal',
+                signals: {
+                  documentComplete: 'false',
+                  routeStable: 'false',
+                  keyRegionReady: 'unknown',
+                  networkQuiet: 'unknown',
+                  observedAtMs: T0,
+                },
+                tabId: 100,
+                urlPattern: 'example.test/list',
+                sessionId: null,
+                userActivityLevel: 'recent_input',
+                interferenceRisk: 'high',
+              },
+            },
+          },
+        }),
+      ],
+      PRODUCED_AT,
+    );
+
+    expect(signal?.kind).toBe('user_took_over');
+  });
+
+  it('does not infer user_took_over from weak or unknown user activity facts', () => {
+    const activeLow = deriveWaitForStabilitySignal(
+      [
+        makeEvent({
+          kind: 'observation_fact_snapshot',
+          sourceObservationKind: 'fact_snapshot',
+          sourcePayload: {
+            kind: 'fact_snapshot',
+            data: {
+              factSnapshotId: 'fact-active-low',
+              observedAtMs: T0,
+              payload: {
+                eventKind: 'readiness_signal',
+                signals: {
+                  documentComplete: 'true',
+                  routeStable: 'true',
+                  keyRegionReady: 'true',
+                  networkQuiet: 'true',
+                  observedAtMs: T0,
+                },
+                tabId: 100,
+                urlPattern: 'example.test/list',
+                sessionId: null,
+                userActivityLevel: 'active',
+                interferenceRisk: 'low',
+              },
+            },
+          },
+        }),
+      ],
+      PRODUCED_AT,
+    );
+    const unknownHigh = deriveWaitForStabilitySignal(
+      [
+        makeEvent({
+          kind: 'observation_fact_snapshot',
+          sourceObservationKind: 'fact_snapshot',
+          sourcePayload: {
+            kind: 'fact_snapshot',
+            data: {
+              factSnapshotId: 'fact-unknown-high',
+              observedAtMs: T0,
+              payload: {
+                eventKind: 'readiness_signal',
+                signals: {
+                  documentComplete: 'true',
+                  routeStable: 'true',
+                  keyRegionReady: 'true',
+                  networkQuiet: 'true',
+                  observedAtMs: T0,
+                },
+                tabId: 100,
+                urlPattern: 'example.test/list',
+                sessionId: null,
+                userActivityLevel: 'unknown',
+                interferenceRisk: 'high',
+              },
+            },
+          },
+        }),
+      ],
+      PRODUCED_AT,
+    );
+
+    expect(activeLow?.kind).toBe('ready_to_act');
+    expect(unknownHigh?.kind).toBe('ready_to_act');
+  });
+
+  it('does not infer user_took_over from window focus changes alone', () => {
+    const signal = deriveWaitForStabilitySignal(
+      [
+        makeEvent({
+          kind: 'observation_tab_event',
+          sourceObservationKind: 'tab_event',
+          sourcePayload: {
+            kind: 'tab_event',
+            data: {
+              eventKind: 'window_focus_changed',
+              tabId: -1,
+              windowId: -1,
+            },
+          },
+        }),
+      ],
+      PRODUCED_AT,
+    );
+
+    expect(signal).toBeNull();
+  });
+
   it('does not emit for unsupported fact payloads or live bfcache tab events', () => {
     const unsupportedFact = deriveWaitForStabilitySignal(
       [
@@ -289,14 +458,14 @@ describe('semantic-signal-aggregator — wait_for_stability', () => {
     expect(signal?.sourceEventRefs[0].streamEventId).toBe('older-loading');
   });
 
-  it('keeps unimplemented semantic signal kinds out of shared contract', () => {
+  it('keeps the shared semantic signal contract explicit', () => {
     expect(SEMANTIC_SIGNAL_KINDS).toEqual([
       'wait_for_stability',
       'ready_to_act',
+      'user_took_over',
       'postcondition_failed',
       'unknown',
     ]);
-    expect(SEMANTIC_SIGNAL_KINDS).not.toContain('user_took_over');
   });
 });
 
