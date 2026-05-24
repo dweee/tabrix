@@ -105,6 +105,23 @@ export interface ToolFailureLifecycleEvidenceArtifactInput {
   sourceTruthChain?: BrowserSourceTruthChain | null;
 }
 
+export interface ToolCloseoutLifecycleEvidenceArtifactInput {
+  artifactId: string;
+  evidenceLevel: RuntimeEvidenceLevel;
+  scenarioId: string;
+  scenarioClass: BrowserTaskScenarioClass | string;
+  startedAtMs: number;
+  endedAtMs: number;
+  actionId: string;
+  actionKind: ActionKind;
+  tabId: number | null;
+  reason: string;
+  observedOutcome?: PostconditionResult['observedOutcome'];
+  observedOutcomeConfidence?: number;
+  sourceTruthChain?: BrowserSourceTruthChain | null;
+  browserHygiene: Partial<LifecycleEvidenceBrowserHygiene>;
+}
+
 const bufferedEvents: BufferedLifecycleEvidenceEvent[] = [];
 const bufferedSignals: BufferedSemanticSignal[] = [];
 const bufferedPostconditions: BufferedPostconditionResult[] = [];
@@ -318,6 +335,47 @@ export function produceToolFailureLifecycleEvidenceArtifact(
   return artifact;
 }
 
+export function produceToolCloseoutLifecycleEvidenceArtifact(
+  input: ToolCloseoutLifecycleEvidenceArtifactInput,
+): LifecycleEvidenceArtifact {
+  assertValidToolCloseoutArtifactInput(input);
+  const postconditionResult: PostconditionResult = {
+    actionId: input.actionId,
+    actionKind: input.actionKind,
+    tabId: input.tabId,
+    urlPattern: null,
+    verdict: 'passed',
+    reason: input.reason,
+    observedOutcome: input.observedOutcome ?? 'unknown',
+    observedOutcomeConfidence: input.observedOutcomeConfidence ?? 0.75,
+    sourceEventRefs: [{ kind: 'unknown', id: input.actionId, origin: 'runtime' }],
+    sourceOrigins: ['runtime', 'inference'],
+    producedAtMs: input.endedAtMs,
+  };
+
+  const artifact = produceLifecycleEvidenceArtifact({
+    artifactId: input.artifactId,
+    evidenceLevel: input.evidenceLevel,
+    scenarioId: input.scenarioId,
+    scenarioClass: input.scenarioClass,
+    startedAtMs: input.startedAtMs,
+    streamEvents: [],
+    semanticSignals: [],
+    scopeTransitions: [],
+    postconditionEvidence: {
+      source: 'bns_04_verifier',
+      results: [postconditionResult],
+    },
+    browserHygiene: {
+      ...input.browserHygiene,
+      available: true,
+    },
+    sourceTruthChain: input.sourceTruthChain ?? null,
+  });
+  recordLifecycleEvidenceArtifact(artifact);
+  return artifact;
+}
+
 function buildRuntimeScopeTransitions(
   input: RuntimeLifecycleEvidenceArtifactInput,
   streamEvents: BrowserStreamEvent[],
@@ -506,5 +564,34 @@ function assertValidToolFailureArtifactInput(
   }
   if (input.reason.length === 0) {
     throw new Error('BNS-05 tool failure collector requires reason');
+  }
+}
+
+function assertValidToolCloseoutArtifactInput(
+  input: ToolCloseoutLifecycleEvidenceArtifactInput,
+): void {
+  const evidenceLevel = input.evidenceLevel as BrowserTaskEvidenceLevel;
+  if (evidenceLevel === 'real_browser' || evidenceLevel === 'competitor') {
+    throw new Error(
+      'BNS-05 tool closeout collector does not accept real_browser or competitor evidence',
+    );
+  }
+  if (!Number.isFinite(input.startedAtMs) || !Number.isFinite(input.endedAtMs)) {
+    throw new Error('BNS-05 tool closeout collector requires finite startedAtMs and endedAtMs');
+  }
+  if (input.endedAtMs < input.startedAtMs) {
+    throw new Error('BNS-05 tool closeout collector requires endedAtMs >= startedAtMs');
+  }
+  if (input.actionId.length === 0) {
+    throw new Error('BNS-05 tool closeout collector requires actionId');
+  }
+  if (!isActionKind(input.actionKind)) {
+    throw new Error('BNS-05 tool closeout collector requires a valid actionKind');
+  }
+  if (input.reason.length === 0) {
+    throw new Error('BNS-05 tool closeout collector requires reason');
+  }
+  if (input.browserHygiene.baselineChanged !== false) {
+    throw new Error('BNS-05 tool closeout collector requires unchanged browser hygiene');
   }
 }

@@ -1338,6 +1338,45 @@ describe('handleToolCall execution wrapper', () => {
         cleanupAction: 'chrome_close_tabs',
         cleanupTargetIds: [1],
       });
+      expect(getLifecycleEvidenceArtifactStoreSnapshot()).toMatchObject({
+        bufferedArtifacts: 1,
+        lastFinalVerdict: 'task_success',
+      });
+      const artifacts = listLifecycleEvidenceArtifacts();
+      expect(artifacts).toHaveLength(1);
+      expect(artifacts[0]).toMatchObject({
+        scenarioId: 'mcp:chrome_close_tabs:cleanup_success',
+        scenarioClass: 'browser_hygiene_closeout_v1',
+        actionLog: {
+          available: true,
+          totalActions: 1,
+          passed: 1,
+          failed: 0,
+          unknown: 0,
+        },
+        browserHygiene: {
+          available: true,
+          runOwnedTabsClosed: 1,
+          baselineChanged: false,
+        },
+        finalVerdict: { verdict: 'task_success', reason: 'postconditions_passed' },
+        claimBoundary: {
+          deterministicArtifactOnly: true,
+          realBrowserProven: false,
+          commercialGradeProven: false,
+          competitorSuperiorityProven: false,
+        },
+      });
+      expect(artifacts[0].actionLog.entries[0]).toMatchObject({
+        actionKind: 'unknown',
+        tabId: 1,
+        verdict: 'passed',
+        reason: 'close_tabs_cleanup_succeeded',
+      });
+      const serializedArtifact = JSON.stringify(artifacts[0]);
+      expect(serializedArtifact).not.toContain('PRIVATE_PAGE_BODY_SHOULD_NOT_APPEAR');
+      expect(serializedArtifact).not.toContain('Authorization');
+      expect(serializedArtifact).not.toContain('sourcePayload');
     });
 
     it('returns cached AI-facing context for redundant same-layer reads without a bridge read', async () => {

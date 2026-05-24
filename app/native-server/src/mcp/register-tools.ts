@@ -95,7 +95,10 @@ import {
   evaluateStructuredReadGate,
   type StructuredReadGateResult,
 } from '../runtime/structured-read-gate';
-import { produceToolFailureLifecycleEvidenceArtifact } from '../runtime/lifecycle-evidence-collector';
+import {
+  produceToolCloseoutLifecycleEvidenceArtifact,
+  produceToolFailureLifecycleEvidenceArtifact,
+} from '../runtime/lifecycle-evidence-collector';
 import type {
   BrowserDataSourceDecisionEvidence,
   BrowserPageOwnerType,
@@ -110,6 +113,7 @@ import { buildBrowserTaskStateVerdict } from '@tabrix/shared';
 
 const DEFAULT_AUTO_TASK_CONTEXT_KEY = 'mcp:auto:tab:default';
 const TOOL_FAILURE_ARTIFACT_SCENARIO_ID = 'mcp:chrome_read_page:page_unreadable';
+const TOOL_CLOSEOUT_ARTIFACT_SCENARIO_ID = 'mcp:chrome_close_tabs:cleanup_success';
 
 type TaskContextKeySource = 'external_task_key' | 'internal_task_id';
 
@@ -1076,16 +1080,24 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       recordSuccessfulReadPage('unknown');
       if (name === 'chrome_close_tabs' && taskContext && rawResultWithEvidence.isError !== true) {
         const closedTabIds = extractClosedTabIdsFromCallToolResult(rawResultWithEvidence);
+        const invalidTabIds = extractInvalidTabIdsFromCallToolResult(rawResultWithEvidence);
         recordPrimaryTabCleanupOutcome({ closedTabIds, primaryTabController });
         for (const closedTabId of closedTabIds) {
           taskContext.releaseRunOwnedTab(closedTabId);
         }
-        for (const invalidTabId of extractInvalidTabIdsFromCallToolResult(rawResultWithEvidence)) {
+        for (const invalidTabId of invalidTabIds) {
           taskContext.releaseRunOwnedTab(invalidTabId);
         }
         taskContext.noteCleanup({
           action: 'chrome_close_tabs',
           targetIds: readNumericArray(args, 'tabIds'),
+        });
+        maybeRecordCloseTabsSuccessLifecycleArtifact({
+          args,
+          closedTabIds,
+          invalidTabIds,
+          startedAtMs: toolCallStartedAtMs,
+          endedAtMs: Date.now(),
         });
       }
       const aiFacingResult =
@@ -1267,6 +1279,45 @@ function maybeRecordReadPageFailureLifecycleArtifact(input: {
     reason: 'page_unreadable',
     observedOutcome: 'unknown',
     observedOutcomeConfidence: 0.85,
+  });
+}
+
+function maybeRecordCloseTabsSuccessLifecycleArtifact(input: {
+  args: unknown;
+  closedTabIds: number[];
+  invalidTabIds: number[];
+  startedAtMs: number;
+  endedAtMs: number;
+}): void {
+  const targetTabIds = readNumericArray(input.args, 'tabIds') ?? [];
+  const tabId = input.closedTabIds[0] ?? input.invalidTabIds[0] ?? targetTabIds[0] ?? null;
+  const actionIdTab = typeof tabId === 'number' ? tabId : 'none';
+
+  produceToolCloseoutLifecycleEvidenceArtifact({
+    artifactId: `mcp-close-success-${input.startedAtMs}-${actionIdTab}`,
+    evidenceLevel: 'integration',
+    scenarioId: TOOL_CLOSEOUT_ARTIFACT_SCENARIO_ID,
+    scenarioClass: 'browser_hygiene_closeout_v1',
+    startedAtMs: input.startedAtMs,
+    endedAtMs: input.endedAtMs,
+    actionId: `mcp:chrome_close_tabs:${actionIdTab}:${input.startedAtMs}`,
+    actionKind: 'unknown',
+    tabId: typeof tabId === 'number' ? tabId : null,
+    reason: 'close_tabs_cleanup_succeeded',
+    observedOutcome: 'unknown',
+    observedOutcomeConfidence: 0.75,
+    browserHygiene: {
+      available: true,
+      baselineTabs: null,
+      runOwnedTabsClosed: input.closedTabIds.length + input.invalidTabIds.length,
+      baselineChanged: false,
+      notes: [
+        `closedTabCount=${input.closedTabIds.length}`,
+        `invalidTabCount=${input.invalidTabIds.length}`,
+        `requestedTabCount=${targetTabIds.length}`,
+        'deterministic_closeout_only=true',
+      ],
+    },
   });
 }
 

@@ -12,6 +12,7 @@ import {
 import {
   ensureLifecycleEvidenceCollectorRegistered,
   getLifecycleEvidenceCollectorSnapshot,
+  produceToolCloseoutLifecycleEvidenceArtifact,
   produceRuntimeLifecycleEvidenceArtifact,
   produceToolFailureLifecycleEvidenceArtifact,
   resetLifecycleEvidenceCollectorForTests,
@@ -741,6 +742,89 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     expect(serialized).not.toContain('Authorization');
     expect(serialized).not.toContain('cookie');
     expect(serialized).not.toContain('PRIVATE_PAGE_BODY_SHOULD_NOT_APPEAR');
+  });
+
+  it('records bounded successful tool closeout evidence with browser hygiene', () => {
+    const artifact = produceToolCloseoutLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-tool-closeout',
+      evidenceLevel: 'integration',
+      scenarioId: 'tool-close-tabs-success',
+      scenarioClass: 'browser_hygiene_closeout_v1',
+      startedAtMs: T0,
+      endedAtMs: T0 + 10,
+      actionId: 'mcp:chrome_close_tabs:42',
+      actionKind: 'unknown',
+      tabId: 42,
+      reason: 'close_tabs_cleanup_succeeded',
+      browserHygiene: {
+        available: true,
+        baselineTabs: null,
+        runOwnedTabsClosed: 1,
+        baselineChanged: false,
+        notes: ['closedTabCount=1'],
+      },
+    });
+
+    expect(artifact.finalVerdict).toMatchObject({
+      verdict: 'task_success',
+      reason: 'postconditions_passed',
+    });
+    expect(artifact.actionLog).toMatchObject({
+      available: true,
+      totalActions: 1,
+      passed: 1,
+      failed: 0,
+      unknown: 0,
+    });
+    expect(artifact.actionLog.entries[0]).toMatchObject({
+      actionId: 'mcp:chrome_close_tabs:42',
+      actionKind: 'unknown',
+      tabId: 42,
+      verdict: 'passed',
+      reason: 'close_tabs_cleanup_succeeded',
+    });
+    expect(artifact.browserHygiene).toMatchObject({
+      available: true,
+      runOwnedTabsClosed: 1,
+      baselineChanged: false,
+    });
+    expect(artifact.claimBoundary).toMatchObject({
+      deterministicArtifactOnly: true,
+      realBrowserProven: false,
+      commercialGradeProven: false,
+      competitorSuperiorityProven: false,
+    });
+    expect(getLifecycleEvidenceArtifactStoreSnapshot()).toMatchObject({
+      bufferedArtifacts: 1,
+      lastArtifactId: 'runtime-artifact-tool-closeout',
+      lastFinalVerdict: 'task_success',
+    });
+    const serialized = JSON.stringify(listLifecycleEvidenceArtifacts());
+    expect(serialized).not.toContain('sourcePayload');
+    expect(serialized).not.toContain('Authorization');
+    expect(serialized).not.toContain('secret-token');
+  });
+
+  it('rejects closeout success when browser hygiene changed', () => {
+    expect(() =>
+      produceToolCloseoutLifecycleEvidenceArtifact({
+        artifactId: 'runtime-artifact-tool-closeout-changed',
+        evidenceLevel: 'integration',
+        scenarioId: 'tool-close-tabs-success',
+        scenarioClass: 'browser_hygiene_closeout_v1',
+        startedAtMs: T0,
+        endedAtMs: T0 + 10,
+        actionId: 'mcp:chrome_close_tabs:42',
+        actionKind: 'unknown',
+        tabId: 42,
+        reason: 'close_tabs_cleanup_succeeded',
+        browserHygiene: {
+          available: true,
+          runOwnedTabsClosed: 1,
+          baselineChanged: true,
+        },
+      }),
+    ).toThrow(/unchanged browser hygiene/);
   });
 
   it('derives BNS-03 dynamic watch scope transitions from task context', () => {
