@@ -152,6 +152,20 @@ function completeVisibleRegionRows(params: {
   });
 }
 
+function shouldSampleVisibleText(input: {
+  treeOk: boolean;
+  userControlled: boolean;
+  requestedDepth: number | undefined;
+  focusRefId: string | undefined;
+  rows: VisibleRegionRowsResult;
+}): boolean {
+  if (!input.treeOk) return false;
+  if (!input.userControlled) return true;
+  if (input.rows.visibleRegionRowsUsed) return false;
+  if (input.focusRefId) return false;
+  return input.requestedDepth !== undefined && input.requestedDepth <= 3;
+}
+
 function shouldRepairVisibleRowsTargetRefs(rows: VisibleRegionRowsResult | undefined): boolean {
   return (
     rows?.visibleRegionRowsUsed === true &&
@@ -780,7 +794,16 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       };
       reconcilePageUnderstandingWithVisibleRows(basePayload);
 
-      if (treeOk && !userControlled && !basePayload.visibleTextContent) {
+      if (
+        shouldSampleVisibleText({
+          treeOk,
+          userControlled,
+          requestedDepth,
+          focusRefId,
+          rows: basePayload.visibleRegionRows,
+        }) &&
+        !basePayload.visibleTextContent
+      ) {
         const visibleTextContent = await this.sampleVisibleTextContent(tabId);
         if (visibleTextContent) {
           basePayload.visibleTextContent = visibleTextContent;

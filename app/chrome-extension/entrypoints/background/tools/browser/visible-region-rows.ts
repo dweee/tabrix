@@ -157,20 +157,24 @@ export function extractVisibleRegionRows(input: {
       rejectedReasonDistribution.target_ref_coverage_insufficient += candidateRows.length;
     }
   }
-  const visibleTextFallback =
-    rows.length === 0
-      ? buildVisibleTextFallbackRows({
-          visibleTextContent: input.visibleTextContent,
-          fallbackInteractiveElements: input.fallbackInteractiveElements,
-          sourceRegion,
-          searchShellContext,
-          maxRows: Math.min(
-            VISIBLE_TEXT_FALLBACK_MAX_ROWS,
-            Math.max(1, Math.floor(input.maxRows ?? VISIBLE_TEXT_FALLBACK_MAX_ROWS)),
-          ),
-        })
-      : { rows: [], rejectedReasonDistribution: emptyRejectedDistribution() };
-  const selectedRows = rows.length > 0 ? rows : visibleTextFallback.rows;
+  const shouldTryVisibleTextFallback =
+    rows.length === 0 || (input.visibleTextContent && hasShellDominatedRows(rows));
+  const visibleTextFallback = shouldTryVisibleTextFallback
+    ? buildVisibleTextFallbackRows({
+        visibleTextContent: input.visibleTextContent,
+        fallbackInteractiveElements: input.fallbackInteractiveElements,
+        sourceRegion,
+        searchShellContext,
+        maxRows: Math.min(
+          VISIBLE_TEXT_FALLBACK_MAX_ROWS,
+          Math.max(1, Math.floor(input.maxRows ?? VISIBLE_TEXT_FALLBACK_MAX_ROWS)),
+        ),
+      })
+    : { rows: [], rejectedReasonDistribution: emptyRejectedDistribution() };
+  const selectedRows =
+    rows.length > 0 && !shouldPreferVisibleTextRows(rows, visibleTextFallback.rows)
+      ? rows
+      : visibleTextFallback.rows;
   mergeRejectedDistribution(
     rejectedReasonDistribution,
     visibleTextFallback.rejectedReasonDistribution,
@@ -958,6 +962,26 @@ function preferBusinessRows(rows: VisibleRegionRow[]): VisibleRegionRow[] {
   if (rows.length < 2) return rows;
   const businessRows = rows.filter((row) => isBusinessResultRow(row));
   return businessRows.length >= 2 ? businessRows : rows;
+}
+
+function shouldPreferVisibleTextRows(
+  rows: VisibleRegionRow[],
+  visibleTextRows: VisibleRegionRow[],
+): boolean {
+  if (visibleTextRows.length < 2) return false;
+  if (rows.length === 0) return true;
+  return (
+    hasShellDominatedRows(rows) &&
+    visibleTextRows.some((row) => row.primaryText || row.secondaryText)
+  );
+}
+
+function hasShellDominatedRows(rows: VisibleRegionRow[]): boolean {
+  if (rows.length === 0) return false;
+  const weakRows = rows.filter(
+    (row) => !row.primaryText && !row.secondaryText && !row.metaText && !row.interactionText,
+  ).length;
+  return weakRows / rows.length >= 0.5;
 }
 
 function isBusinessResultRow(row: VisibleRegionRow): boolean {

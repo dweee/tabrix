@@ -100,6 +100,43 @@ describe('visible region rows', () => {
     expect(rows.visibleDomRowsCandidateCount).toBeGreaterThanOrEqual(2);
   });
 
+  it('prefers body-visible business rows over shallow shell-dominated candidates', () => {
+    const rows = extractVisibleRegionRows({
+      sourceRegion: 'search_results',
+      url: 'https://example.test/search?q=workflow',
+      title: 'Search results for workflow',
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      pageContent: [
+        '- generic "Search page shell" [ref=ref_shell] (x=1,y=1)',
+        '  - button "Open menu" [ref=ref_menu] (x=30,y=24)',
+        '  - button "Search or jump to" [ref=ref_search] (x=420,y=42)',
+      ].join('\n'),
+      fallbackInteractiveElements: [
+        { ref: 'ref_nav_1', role: 'link', name: 'Homepage keyboard shortcut' },
+        { ref: 'ref_filter_1', role: 'link', name: 'Repositories11.1k results' },
+        { ref: 'ref_filter_2', role: 'link', name: 'Pull requests242k results' },
+        { ref: 'ref_lang_1', role: 'link', name: 'Jupyter Notebook' },
+      ],
+      visibleTextContent: [
+        'Search results for workflow',
+        'Workflow planning guide for distributed teams',
+        'Practical steps for coordinating browser tasks across reviewers.',
+        'Updated today',
+        'Operations checklist for reliable browser handoffs',
+        'A field checklist for keeping evidence, ownership, and actions aligned.',
+        'Updated yesterday',
+      ].join('\n'),
+    });
+
+    expect(rows.visibleRegionRowsUsed).toBe(true);
+    expect(rows.sourceRegion).toBe('visible_text');
+    expect(rows.rows.map((row) => row.title)).toEqual([
+      'Workflow planning guide for distributed teams',
+      'Operations checklist for reliable browser handoffs',
+    ]);
+    expect(rows.rows.every((row) => row.sourceRegion === 'visible_text')).toBe(true);
+  });
+
   it('keeps shell-only body-visible text rejected with diagnostics', () => {
     const rows = extractVisibleRegionRows({
       sourceRegion: 'search_results',

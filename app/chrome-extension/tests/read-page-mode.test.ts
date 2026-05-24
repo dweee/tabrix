@@ -603,6 +603,70 @@ describe('read_page mode', () => {
     ]);
   });
 
+  it('recovers search rows from body-visible text for shallow explicit depth reads', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5217,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/search?q=workflow',
+      title: 'Search results for workflow',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sampleVisibleText = vi
+      .spyOn(readPageTool as any, 'sampleVisibleTextContent')
+      .mockResolvedValue(
+        [
+          'Search results for workflow',
+          'Workflow planning guide for distributed teams',
+          'Practical steps for coordinating browser tasks across reviewers.',
+          'Updated today',
+          'Operations checklist for reliable browser handoffs',
+          'A field checklist for keeping evidence, ownership, and actions aligned.',
+          'Updated yesterday',
+        ].join('\n'),
+      );
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- banner "Site header" [ref=ref_banner] (x=640,y=40)',
+        '  - link "Home" [ref=ref_home] (x=40,y=40) href="/"',
+        '- search "Search controls" [ref=ref_search] (x=420,y=96)',
+        '  - searchbox "Search query" [ref=ref_query] (x=420,y=96)',
+        '  - button "Search" [ref=ref_search_button] (x=760,y=96)',
+        '- navigation "Result filters" [ref=ref_filters] (x=220,y=160)',
+        '  - button "All" [ref=ref_all] (x=220,y=160)',
+        '  - button "Recent" [ref=ref_recent] (x=280,y=160)',
+        '- footer "Footer" [ref=ref_footer] (x=640,y=680)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_home', selector: 'a[href="/"]' },
+        { ref: 'ref_query', selector: 'input[type="search"]' },
+        { ref: 'ref_search_button', selector: 'button.search' },
+        { ref: 'ref_all', selector: 'button.all' },
+        { ref: 'ref_recent', selector: 'button.recent' },
+      ],
+      stats: { processed: 9, included: 9, durationMs: 7 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact', depth: 3 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expectCommonSnapshotShape(payload, 'compact');
+    expect(sampleVisibleText).toHaveBeenCalled();
+    expect(payload.pageContext.depth).toBe(3);
+    expect(payload.pageContext.fallbackSource).toBe('visible_text');
+    expect(payload).toMatchObject({
+      taskMode: 'search',
+      rowCount: 2,
+      visibleRegionRowsUsed: true,
+      readinessVerdict: 'ready',
+    });
+    expect(payload.watchScope.scopeKind).toBe('search');
+  });
+
   it('echoes explicit full mode', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 5202,
