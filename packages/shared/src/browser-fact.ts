@@ -1127,16 +1127,17 @@ export interface StreamHealthSnapshot {
 // ---------------------------------------------------------------------------
 
 /**
- * Closed-enum semantic signal kinds approved for the first BNS-02 slice.
+ * Closed-enum semantic signal kinds approved for the BNS runtime signal layer.
  *
  * Boundary: this is an internal bridge/runtime contract, not a public MCP tool
- * schema. Do not add action success, user-takeover, or postcondition verdicts
- * here; those belong to their dedicated BNS modules.
+ * schema. Keep every new value brand-neutral and backed by deterministic
+ * evidence before adding it here.
  */
-export type SemanticSignalKind = 'wait_for_stability' | 'unknown';
+export type SemanticSignalKind = 'wait_for_stability' | 'postcondition_failed' | 'unknown';
 
 export const SEMANTIC_SIGNAL_KINDS = [
   'wait_for_stability',
+  'postcondition_failed',
   'unknown',
 ] as const satisfies ReadonlyArray<SemanticSignalKind>;
 

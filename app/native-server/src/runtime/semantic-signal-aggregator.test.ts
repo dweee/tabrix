@@ -1,6 +1,9 @@
-import type { BrowserStreamEvent } from '@tabrix/shared';
+import type { BrowserStreamEvent, PostconditionResult } from '@tabrix/shared';
 import { SEMANTIC_SIGNAL_KINDS } from '@tabrix/shared';
-import { deriveWaitForStabilitySignal } from './semantic-signal-aggregator';
+import {
+  derivePostconditionFailedSignal,
+  deriveWaitForStabilitySignal,
+} from './semantic-signal-aggregator';
 
 const T0 = 1_700_000_000_000;
 const PRODUCED_AT = T0 + 9_999;
@@ -212,10 +215,79 @@ describe('semantic-signal-aggregator — wait_for_stability', () => {
     expect(signal?.sourceEventRefs[0].streamEventId).toBe('older-loading');
   });
 
-  it('keeps unsupported semantic signal kinds out of shared contract', () => {
-    expect(SEMANTIC_SIGNAL_KINDS).toEqual(['wait_for_stability', 'unknown']);
+  it('keeps unimplemented semantic signal kinds out of shared contract', () => {
+    expect(SEMANTIC_SIGNAL_KINDS).toEqual([
+      'wait_for_stability',
+      'postcondition_failed',
+      'unknown',
+    ]);
     expect(SEMANTIC_SIGNAL_KINDS).not.toContain('ready_to_act');
     expect(SEMANTIC_SIGNAL_KINDS).not.toContain('user_took_over');
-    expect(SEMANTIC_SIGNAL_KINDS).not.toContain('postcondition_failed');
+  });
+});
+
+describe('semantic-signal-aggregator — postcondition_failed', () => {
+  function makePostcondition(overrides: Partial<PostconditionResult> = {}): PostconditionResult {
+    return {
+      actionId: overrides.actionId ?? 'act-1',
+      actionKind: overrides.actionKind ?? 'click',
+      tabId: overrides.tabId ?? 100,
+      urlPattern: overrides.urlPattern ?? 'example.test/list',
+      verdict: overrides.verdict ?? 'failed',
+      reason: overrides.reason ?? 'no_relevant_effect_observed',
+      observedOutcome: overrides.observedOutcome ?? 'no_observed_change',
+      observedOutcomeConfidence: overrides.observedOutcomeConfidence ?? 0.9,
+      sourceEventRefs: overrides.sourceEventRefs ?? [
+        { kind: 'unknown', id: 'act-1', origin: 'runtime' },
+      ],
+      sourceOrigins: overrides.sourceOrigins ?? ['runtime'],
+      producedAtMs: overrides.producedAtMs ?? T0,
+    };
+  }
+
+  it('emits postcondition_failed for failed postconditions', () => {
+    const event = makeEvent({
+      streamEventId: 'action-event-1',
+      kind: 'observation_action_outcome',
+      sourceObservationKind: 'action_outcome',
+    });
+    const signal = derivePostconditionFailedSignal(
+      makePostcondition({ verdict: 'failed' }),
+      event,
+      PRODUCED_AT,
+    );
+
+    expect(signal).toMatchObject({
+      kind: 'postcondition_failed',
+      confidence: 0.85,
+      tabId: 100,
+      urlPattern: 'example.test/list',
+      sourceOrigins: ['browser_stream'],
+      producedAtMs: PRODUCED_AT,
+    });
+    expect(signal?.signalId).toBe(`sig_postcondition_failed_action-event-1_${PRODUCED_AT}`);
+    expect(signal?.sourceEventRefs).toEqual([
+      {
+        streamEventId: 'action-event-1',
+        eventKind: 'observation_action_outcome',
+        sourceObservationKind: 'action_outcome',
+        observedAtMs: T0,
+      },
+    ]);
+  });
+
+  it('does not emit for passed or unknown postconditions', () => {
+    const event = makeEvent({ sourceObservationKind: 'action_outcome' });
+
+    expect(
+      derivePostconditionFailedSignal(makePostcondition({ verdict: 'passed' }), event, PRODUCED_AT),
+    ).toBeNull();
+    expect(
+      derivePostconditionFailedSignal(
+        makePostcondition({ verdict: 'unknown' }),
+        event,
+        PRODUCED_AT,
+      ),
+    ).toBeNull();
   });
 });

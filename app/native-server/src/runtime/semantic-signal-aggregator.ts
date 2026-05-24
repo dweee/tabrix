@@ -2,6 +2,7 @@ import type {
   BrowserStreamEvent,
   FactObservationPayload,
   LifecycleEventKind,
+  PostconditionResult,
   SemanticSignal,
   SemanticSignalKind,
   SignalEvidenceRef,
@@ -47,6 +48,15 @@ export function deriveWaitForStabilitySignal(
   if (!options.explicitUnknownFallback) return null;
   if (!latestUnknown) return null;
   return buildSignal(latestUnknown, 'unknown', nowMs, options.confidence ?? 0.2);
+}
+
+export function derivePostconditionFailedSignal(
+  postcondition: PostconditionResult,
+  streamEvent: BrowserStreamEvent,
+  nowMs: number,
+): SemanticSignal | null {
+  if (postcondition.verdict !== 'failed') return null;
+  return buildSignal(streamEvent, 'postcondition_failed', nowMs, 0.85);
 }
 
 function sortNewestFirst(events: readonly BrowserStreamEvent[]): BrowserStreamEvent[] {

@@ -31,7 +31,10 @@ import {
   getDefaultPrimaryTabController,
   type PrimaryTabControllerSnapshot,
 } from './primary-tab-controller';
-import { deriveWaitForStabilitySignal } from './semantic-signal-aggregator';
+import {
+  derivePostconditionFailedSignal,
+  deriveWaitForStabilitySignal,
+} from './semantic-signal-aggregator';
 import { deriveDynamicWatchScope, type DynamicWatchScope } from './dynamic-watch-scope';
 
 const SUBSCRIBER_ID = 'bns05_lifecycle_evidence_collector';
@@ -156,6 +159,18 @@ const subscriber: EventStreamSubscriber = {
         correlationGroupId: event.correlationGroupId,
       });
       lastPostconditionAtMs = postcondition.producedAtMs;
+      const postconditionSignal = derivePostconditionFailedSignal(
+        postcondition,
+        event,
+        postcondition.producedAtMs,
+      );
+      if (postconditionSignal) {
+        bufferedSignals.push({
+          signal: postconditionSignal,
+          correlationGroupId: event.correlationGroupId,
+        });
+        lastSignalAtMs = postconditionSignal.producedAtMs;
+      }
     }
 
     while (bufferedEvents.length > maxBufferedEvents) {

@@ -541,6 +541,16 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
       observedOutcome: 'no_observed_change',
       reason: 'no_relevant_effect_observed',
     });
+    expect(artifact.signalSequence).toMatchObject({
+      available: true,
+      totalSignals: 1,
+      signalsByKind: { postcondition_failed: 1 },
+    });
+    expect(artifact.signalSequence.signals[0]).toMatchObject({
+      kind: 'postcondition_failed',
+      confidence: 0.85,
+      sourceOrigins: ['browser_stream'],
+    });
     expect(artifact.finalVerdict).toEqual({
       verdict: 'task_failed',
       confidence: 0.85,
