@@ -239,6 +239,66 @@ describe('handleToolCall execution wrapper', () => {
     expect(serializedArtifact).not.toContain('sourcePayload');
   });
 
+  it('emits a lifecycle artifact when a failed read payload is not marked as an MCP transport error', async () => {
+    markBridgeReady();
+    const failedReadBody = {
+      success: false,
+      reason: 'page_unreadable',
+      pageType: 'browser_error_page',
+      historyRef: 'memory://snapshot/public-ref',
+      pageContent: 'PRIVATE_PAGE_BODY_SHOULD_NOT_APPEAR',
+      Authorization: 'Bearer secret-token',
+    };
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      items: [],
+    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      data: {
+        content: [{ type: 'text', text: JSON.stringify(failedReadBody) }],
+        isError: false,
+      },
+    } as never);
+
+    expect(getLifecycleEvidenceArtifactStoreSnapshot().bufferedArtifacts).toBe(0);
+
+    const result = await handleToolCall('chrome_read_page', { tabId: 43 });
+
+    expect(result.isError).toBe(false);
+    const returnedBody = JSON.parse(String((result.content as any[])[0].text));
+    expect(returnedBody).toMatchObject({
+      success: false,
+      reason: 'page_unreadable',
+      pageType: 'browser_error_page',
+      pageContent: 'PRIVATE_PAGE_BODY_SHOULD_NOT_APPEAR',
+    });
+    expect(returnedBody.historyRef).toMatch(/^memory:\/\/snapshot\/[0-9a-f-]+$/);
+    expect(returnedBody.lifecycleEvidenceArtifacts).toBeUndefined();
+    expect(getLifecycleEvidenceArtifactStoreSnapshot()).toMatchObject({
+      bufferedArtifacts: 1,
+      lastFinalVerdict: 'task_failed',
+    });
+    const artifacts = listLifecycleEvidenceArtifacts();
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0]).toMatchObject({
+      scenarioClass: 'postcondition_failure_v1',
+      actionLog: { available: true, totalActions: 1, failed: 1 },
+      finalVerdict: { verdict: 'task_failed', reason: 'postcondition_failed' },
+    });
+    expect(artifacts[0].actionLog.entries[0]).toMatchObject({
+      actionKind: 'unknown',
+      tabId: 43,
+      verdict: 'failed',
+      reason: 'page_unreadable',
+    });
+    const serializedArtifact = JSON.stringify(artifacts[0]);
+    expect(serializedArtifact).not.toContain('PRIVATE_PAGE_BODY_SHOULD_NOT_APPEAR');
+    expect(serializedArtifact).not.toContain('secret-token');
+    expect(serializedArtifact).not.toContain('Authorization');
+    expect(serializedArtifact).not.toContain('sourcePayload');
+  });
+
   it('persists a memory_actions row and injects historyRef for chrome_click_element', async () => {
     markBridgeReady();
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({

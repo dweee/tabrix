@@ -1227,7 +1227,7 @@ function maybeRecordReadPageFailureLifecycleArtifact(input: {
   startedAtMs: number;
   endedAtMs: number;
 }): void {
-  if (input.name !== 'chrome_read_page' || input.result.isError !== true) return;
+  if (input.name !== 'chrome_read_page') return;
   const payload = readJsonObjectFromCallToolResult(input.result);
   if (!payload) return;
   if (payload.success !== false) return;
