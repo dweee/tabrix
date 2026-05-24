@@ -389,6 +389,87 @@ describe('semantic-signal-aggregator — wait_for_stability', () => {
     expect(signal).toBeNull();
   });
 
+  it('emits results_changed for action outcomes with explicit DOM region evidence', () => {
+    const signal = deriveWaitForStabilitySignal(
+      [
+        makeEvent({
+          streamEventId: 'action-dom-change',
+          kind: 'observation_action_outcome',
+          sourceObservationKind: 'action_outcome',
+          sourcePayload: {
+            kind: 'action_outcome',
+            data: {
+              actionId: 'act-dom-change',
+              outcome: 'changed_region',
+              outcomeConfidence: 0.9,
+              observedSignalKinds: ['dom_region_changed'],
+              producedAtMs: T0,
+            },
+          },
+        }),
+      ],
+      PRODUCED_AT,
+    );
+
+    expect(signal).toMatchObject({
+      kind: 'results_changed',
+      confidence: 0.8,
+      sourceOrigins: ['browser_stream'],
+    });
+    expect(signal?.signalId).toBe(`sig_results_changed_action-dom-change_${PRODUCED_AT}`);
+    expect(signal?.sourceEventRefs).toEqual([
+      {
+        streamEventId: 'action-dom-change',
+        eventKind: 'observation_action_outcome',
+        sourceObservationKind: 'action_outcome',
+        observedAtMs: T0,
+      },
+    ]);
+  });
+
+  it('does not emit results_changed without explicit DOM region evidence', () => {
+    const onlyNetwork = deriveWaitForStabilitySignal(
+      [
+        makeEvent({
+          kind: 'observation_action_outcome',
+          sourceObservationKind: 'action_outcome',
+          sourcePayload: {
+            kind: 'action_outcome',
+            data: {
+              actionId: 'act-network',
+              outcome: 'network_activity',
+              outcomeConfidence: 0.9,
+              observedSignalKinds: ['network_completed'],
+              producedAtMs: T0,
+            },
+          },
+        }),
+      ],
+      PRODUCED_AT,
+    );
+    const missingSignals = deriveWaitForStabilitySignal(
+      [
+        makeEvent({
+          kind: 'observation_action_outcome',
+          sourceObservationKind: 'action_outcome',
+          sourcePayload: {
+            kind: 'action_outcome',
+            data: {
+              actionId: 'act-missing',
+              outcome: 'changed_region',
+              outcomeConfidence: 0.9,
+              producedAtMs: T0,
+            },
+          },
+        }),
+      ],
+      PRODUCED_AT,
+    );
+
+    expect(onlyNetwork).toBeNull();
+    expect(missingSignals).toBeNull();
+  });
+
   it('does not emit for unsupported fact payloads or live bfcache tab events', () => {
     const unsupportedFact = deriveWaitForStabilitySignal(
       [
@@ -463,6 +544,7 @@ describe('semantic-signal-aggregator — wait_for_stability', () => {
       'wait_for_stability',
       'ready_to_act',
       'user_took_over',
+      'results_changed',
       'postcondition_failed',
       'unknown',
     ]);

@@ -1137,6 +1137,7 @@ export type SemanticSignalKind =
   | 'wait_for_stability'
   | 'ready_to_act'
   | 'user_took_over'
+  | 'results_changed'
   | 'postcondition_failed'
   | 'unknown';
 
@@ -1144,6 +1145,7 @@ export const SEMANTIC_SIGNAL_KINDS = [
   'wait_for_stability',
   'ready_to_act',
   'user_took_over',
+  'results_changed',
   'postcondition_failed',
   'unknown',
 ] as const satisfies ReadonlyArray<SemanticSignalKind>;

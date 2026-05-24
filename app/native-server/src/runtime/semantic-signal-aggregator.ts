@@ -48,6 +48,9 @@ export function deriveWaitForStabilitySignal(
     if (verdict === 'user_took_over') {
       return buildSignal(event, 'user_took_over', nowMs, options.confidence ?? 0.9);
     }
+    if (verdict === 'results_changed') {
+      return buildSignal(event, 'results_changed', nowMs, options.confidence ?? 0.8);
+    }
     if (verdict === 'stable') return null;
     latestUnknown ??= event;
   }
@@ -74,7 +77,13 @@ function sortNewestFirst(events: readonly BrowserStreamEvent[]): BrowserStreamEv
     .sort((a, b) => b.observedAtMs - a.observedAtMs);
 }
 
-type EventVerdict = 'wait_for_stability' | 'ready_to_act' | 'user_took_over' | 'stable' | 'unknown';
+type EventVerdict =
+  | 'wait_for_stability'
+  | 'ready_to_act'
+  | 'user_took_over'
+  | 'results_changed'
+  | 'stable'
+  | 'unknown';
 
 function classifyEvent(event: BrowserStreamEvent): EventVerdict {
   const data = getBridgeData(event.sourcePayload);
@@ -91,6 +100,12 @@ function classifyEvent(event: BrowserStreamEvent): EventVerdict {
   }
   if (event.kind === 'observation_tab_event' || event.sourceObservationKind === 'tab_event') {
     return classifyTabData(data);
+  }
+  if (
+    event.kind === 'observation_action_outcome' ||
+    event.sourceObservationKind === 'action_outcome'
+  ) {
+    return classifyActionOutcomeData(data);
   }
   return 'unknown';
 }
@@ -147,6 +162,12 @@ function classifyTabData(data: Record<string, unknown>): EventVerdict {
     }
   }
   return 'unknown';
+}
+
+function classifyActionOutcomeData(data: Record<string, unknown>): EventVerdict {
+  const observedSignalKinds = data.observedSignalKinds;
+  if (!Array.isArray(observedSignalKinds)) return 'unknown';
+  return observedSignalKinds.includes('dom_region_changed') ? 'results_changed' : 'unknown';
 }
 
 function buildSignal(
