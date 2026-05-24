@@ -1138,6 +1138,7 @@ export type SemanticSignalKind =
   | 'ready_to_act'
   | 'user_took_over'
   | 'results_changed'
+  | 'error_page_detected'
   | 'postcondition_failed'
   | 'unknown';
 
@@ -1146,6 +1147,7 @@ export const SEMANTIC_SIGNAL_KINDS = [
   'ready_to_act',
   'user_took_over',
   'results_changed',
+  'error_page_detected',
   'postcondition_failed',
   'unknown',
 ] as const satisfies ReadonlyArray<SemanticSignalKind>;

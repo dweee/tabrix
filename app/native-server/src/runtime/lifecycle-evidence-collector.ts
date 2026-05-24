@@ -109,6 +109,7 @@ export interface ToolFailureLifecycleEvidenceArtifactInput {
   observedOutcome?: PostconditionResult['observedOutcome'];
   observedOutcomeConfidence?: number;
   sourceTruthChain?: BrowserSourceTruthChain | null;
+  semanticSignals?: SemanticSignal[];
 }
 
 export interface ToolCloseoutLifecycleEvidenceArtifactInput {
@@ -340,7 +341,7 @@ export function produceToolFailureLifecycleEvidenceArtifact(
     scenarioClass: input.scenarioClass,
     startedAtMs: input.startedAtMs,
     streamEvents: [],
-    semanticSignals: [],
+    semanticSignals: input.semanticSignals ?? [],
     scopeTransitions: [],
     postconditionEvidence: {
       source: 'bns_04_verifier',

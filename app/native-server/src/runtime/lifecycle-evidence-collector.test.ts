@@ -773,6 +773,25 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
       reason: 'page_unreadable',
       observedOutcome: 'unknown',
       observedOutcomeConfidence: 0.85,
+      semanticSignals: [
+        {
+          signalId: 'sig-error-page-detected',
+          kind: 'error_page_detected',
+          confidence: 0.9,
+          tabId: 42,
+          urlPattern: null,
+          sourceEventRefs: [
+            {
+              streamEventId: 'mcp-read-failure-42',
+              eventKind: 'observation_unknown',
+              sourceObservationKind: null,
+              observedAtMs: T0 + 10,
+            },
+          ],
+          sourceOrigins: ['runtime_inference'],
+          producedAtMs: T0 + 10,
+        },
+      ],
     });
 
     expect(artifact.finalVerdict).toMatchObject({
@@ -792,6 +811,15 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
       reason: 'page_unreadable',
       sourceEventRefs: [{ kind: 'unknown', id: 'mcp:chrome_read_page:42', origin: 'runtime' }],
       sourceOrigins: ['runtime', 'inference'],
+    });
+    expect(artifact.signalSequence).toMatchObject({
+      available: true,
+      totalSignals: 1,
+      signalsByKind: { error_page_detected: 1 },
+    });
+    expect(artifact.signalSequence.signals[0]).toMatchObject({
+      kind: 'error_page_detected',
+      sourceOrigins: ['runtime_inference'],
     });
     expect(getLifecycleEvidenceArtifactStoreSnapshot()).toMatchObject({
       bufferedArtifacts: 1,

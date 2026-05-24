@@ -6,6 +6,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import nativeMessagingHostInstance from '../native-messaging-host';
 import { NativeMessageType, TOOL_NAMES, TOOL_SCHEMAS, getRequiredCapability } from '@tabrix/shared';
+import type { SemanticSignal } from '@tabrix/shared';
 import { isToolAllowedByPolicy } from '../policy/phase0-opt-in';
 import { getCurrentCapabilityEnv, isCapabilityEnabled } from '../policy/capabilities';
 import {
@@ -1279,6 +1280,25 @@ function maybeRecordReadPageFailureLifecycleArtifact(input: {
     reason: 'page_unreadable',
     observedOutcome: 'unknown',
     observedOutcomeConfidence: 0.85,
+    semanticSignals: [
+      {
+        signalId: `sig_error_page_detected_mcp-read-failure-${input.startedAtMs}-${tabId}`,
+        kind: 'error_page_detected',
+        confidence: 0.9,
+        tabId,
+        urlPattern: null,
+        sourceEventRefs: [
+          {
+            streamEventId: `mcp-read-failure-${input.startedAtMs}-${tabId}`,
+            eventKind: 'observation_unknown',
+            sourceObservationKind: null,
+            observedAtMs: input.endedAtMs,
+          },
+        ],
+        sourceOrigins: ['runtime_inference'],
+        producedAtMs: input.endedAtMs,
+      } satisfies SemanticSignal,
+    ],
   });
 }
 

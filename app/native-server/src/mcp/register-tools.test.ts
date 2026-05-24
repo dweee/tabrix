@@ -223,8 +223,19 @@ describe('handleToolCall execution wrapper', () => {
     expect(artifacts).toHaveLength(1);
     expect(artifacts[0]).toMatchObject({
       scenarioClass: 'postcondition_failure_v1',
+      signalSequence: {
+        available: true,
+        totalSignals: 1,
+        signalsByKind: { error_page_detected: 1 },
+      },
       actionLog: { available: true, totalActions: 1, failed: 1 },
       finalVerdict: { verdict: 'task_failed', reason: 'postcondition_failed' },
+    });
+    expect(artifacts[0].signalSequence.signals[0]).toMatchObject({
+      kind: 'error_page_detected',
+      confidence: 0.9,
+      tabId: 42,
+      sourceOrigins: ['runtime_inference'],
     });
     expect(artifacts[0].actionLog.entries[0]).toMatchObject({
       actionKind: 'unknown',
@@ -283,8 +294,19 @@ describe('handleToolCall execution wrapper', () => {
     expect(artifacts).toHaveLength(1);
     expect(artifacts[0]).toMatchObject({
       scenarioClass: 'postcondition_failure_v1',
+      signalSequence: {
+        available: true,
+        totalSignals: 1,
+        signalsByKind: { error_page_detected: 1 },
+      },
       actionLog: { available: true, totalActions: 1, failed: 1 },
       finalVerdict: { verdict: 'task_failed', reason: 'postcondition_failed' },
+    });
+    expect(artifacts[0].signalSequence.signals[0]).toMatchObject({
+      kind: 'error_page_detected',
+      confidence: 0.9,
+      tabId: 43,
+      sourceOrigins: ['runtime_inference'],
     });
     expect(artifacts[0].actionLog.entries[0]).toMatchObject({
       actionKind: 'unknown',
@@ -297,6 +319,34 @@ describe('handleToolCall execution wrapper', () => {
     expect(serializedArtifact).not.toContain('secret-token');
     expect(serializedArtifact).not.toContain('Authorization');
     expect(serializedArtifact).not.toContain('sourcePayload');
+  });
+
+  it('does not emit error_page_detected for non-browser-error read failures', async () => {
+    markBridgeReady();
+    const failedReadBody = {
+      success: false,
+      reason: 'page_unreadable',
+      pageType: 'normal_page',
+      pageContent: 'PRIVATE_PAGE_BODY_SHOULD_NOT_APPEAR',
+      Authorization: 'Bearer secret-token',
+    };
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      items: [],
+    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      data: {
+        content: [{ type: 'text', text: JSON.stringify(failedReadBody) }],
+        isError: true,
+      },
+    } as never);
+
+    const result = await handleToolCall('chrome_read_page', { tabId: 44 });
+
+    expect(result.isError).toBe(true);
+    expect(getLifecycleEvidenceArtifactStoreSnapshot().bufferedArtifacts).toBe(0);
+    expect(listLifecycleEvidenceArtifacts()).toHaveLength(0);
   });
 
   it('persists a memory_actions row and injects historyRef for chrome_click_element', async () => {

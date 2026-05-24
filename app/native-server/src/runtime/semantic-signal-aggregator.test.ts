@@ -545,6 +545,7 @@ describe('semantic-signal-aggregator — wait_for_stability', () => {
       'ready_to_act',
       'user_took_over',
       'results_changed',
+      'error_page_detected',
       'postcondition_failed',
       'unknown',
     ]);
