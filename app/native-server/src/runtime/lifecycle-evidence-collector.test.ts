@@ -5,6 +5,11 @@ import type {
 } from '@tabrix/shared';
 import { dispatchBridgeObservationToStream, resetEventStream } from './browser-event-stream';
 import {
+  getLifecycleEvidenceArtifactStoreSnapshot,
+  listLifecycleEvidenceArtifacts,
+  resetLifecycleEvidenceArtifactStoreForTests,
+} from './lifecycle-evidence-artifact-store';
+import {
   ensureLifecycleEvidenceCollectorRegistered,
   getLifecycleEvidenceCollectorSnapshot,
   produceRuntimeLifecycleEvidenceArtifact,
@@ -75,6 +80,7 @@ function makeBridgeMessage(
 beforeEach(() => {
   resetEventStream();
   resetLifecycleEvidenceCollectorForTests();
+  resetLifecycleEvidenceArtifactStoreForTests();
 });
 
 describe('lifecycle-evidence-collector — registration', () => {
@@ -317,6 +323,9 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     expect(serialized).not.toContain('PRIVATE_TEXT_SHOULD_NOT_APPEAR');
     expect(serialized).not.toContain('secret-token');
     expect(serialized).not.toContain('sourcePayload');
+    expect(JSON.stringify(listLifecycleEvidenceArtifacts())).not.toContain(
+      'PRIVATE_TEXT_SHOULD_NOT_APPEAR',
+    );
   });
 
   it('does not emit raw sourcePayload through derived semantic signals', () => {
@@ -650,6 +659,41 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     expect(serialized).not.toContain('PRIVATE_TEXT_SHOULD_NOT_APPEAR');
     expect(serialized).not.toContain('secret-token');
     expect(serialized).not.toContain('sourcePayload');
+  });
+
+  it('records produced artifacts as first-class runtime evidence', () => {
+    ensureLifecycleEvidenceCollectorRegistered();
+    dispatchBridgeObservationToStream(
+      makeBridgeMessage('action_outcome', {
+        tabId: 42,
+        observedAtMs: T0,
+        data: {
+          actionId: 'act-store',
+          actionKind: 'click',
+          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 }],
+        },
+      }),
+    );
+
+    const artifact = produceRuntimeLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-store',
+      evidenceLevel: 'integration',
+      scenarioId: 'scenario-store',
+      scenarioClass: 'search_result_delta_v1',
+      startedAtMs: T0,
+      endedAtMs: T0,
+      eventWindow: { tabIds: [42] },
+    });
+
+    expect(getLifecycleEvidenceArtifactStoreSnapshot()).toMatchObject({
+      bufferedArtifacts: 1,
+      lastArtifactId: 'runtime-artifact-store',
+      lastFinalVerdict: artifact.finalVerdict.verdict,
+    });
+    expect(listLifecycleEvidenceArtifacts()[0]).toMatchObject({
+      artifactId: 'runtime-artifact-store',
+      actionLog: { available: true, totalActions: 1 },
+    });
   });
 });
 

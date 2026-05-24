@@ -53,6 +53,10 @@ import {
   startLifecycleEvidenceRuntime,
   stopLifecycleEvidenceRuntime,
 } from '../runtime/lifecycle-evidence-runtime-bootstrap';
+import {
+  getLifecycleEvidenceArtifactStoreSnapshot,
+  type LifecycleEvidenceArtifactStoreSnapshot,
+} from '../runtime/lifecycle-evidence-artifact-store';
 
 // Compatibility guard:
 // @hono/node-server may call socket.destroySoon() while draining incoming requests.
@@ -158,6 +162,7 @@ interface ServerStatusSnapshot {
     unknown: string[];
   };
   v27Observation: ObservationDiagnosticsSnapshot;
+  lifecycleEvidenceArtifacts: LifecycleEvidenceArtifactStoreSnapshot;
 }
 
 export type { ConnectedClient };
@@ -943,6 +948,7 @@ export class Server {
       factSnapshotCount: getDefaultFactCollector().size(),
       trackedContextCount: getDefaultContextManager().size(),
     });
+    const lifecycleEvidenceArtifacts = getLifecycleEvidenceArtifactStoreSnapshot();
 
     return {
       isRunning: this.isRunning,
@@ -982,6 +988,7 @@ export class Server {
       },
       capabilities,
       v27Observation,
+      lifecycleEvidenceArtifacts,
     };
   }
 

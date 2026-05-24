@@ -21,6 +21,7 @@ import {
 } from './browser-event-stream';
 import { classifyActionOutcome } from './action-outcome-classifier';
 import { verifyActionPostcondition } from './action-postcondition-verifier';
+import { recordLifecycleEvidenceArtifact } from './lifecycle-evidence-artifact-store';
 import { produceLifecycleEvidenceArtifact } from './lifecycle-evidence-artifact';
 import {
   getDefaultPrimaryTabController,
@@ -236,7 +237,7 @@ export function produceRuntimeLifecycleEvidenceArtifact(
     .filter((entry) => !hasCorrelationFilter || correlationGroupIds.has(entry.correlationGroupId))
     .map((entry) => entry.result);
 
-  return produceLifecycleEvidenceArtifact({
+  const artifact = produceLifecycleEvidenceArtifact({
     artifactId: input.artifactId,
     evidenceLevel: input.evidenceLevel,
     scenarioId: input.scenarioId,
@@ -251,6 +252,8 @@ export function produceRuntimeLifecycleEvidenceArtifact(
     browserHygiene: buildRuntimeBrowserHygiene(),
     sourceTruthChain: input.sourceTruthChain ?? null,
   });
+  recordLifecycleEvidenceArtifact(artifact);
+  return artifact;
 }
 
 function derivePostconditionResult(event: BrowserStreamEvent): PostconditionResult | null {

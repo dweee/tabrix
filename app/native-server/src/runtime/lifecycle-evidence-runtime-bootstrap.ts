@@ -3,6 +3,7 @@ import {
   resetLifecycleEvidenceCollector,
   unregisterLifecycleEvidenceCollector,
 } from './lifecycle-evidence-collector';
+import { resetLifecycleEvidenceArtifactStore } from './lifecycle-evidence-artifact-store';
 
 export function startLifecycleEvidenceRuntime(): boolean {
   return ensureLifecycleEvidenceCollectorRegistered();
@@ -11,4 +12,5 @@ export function startLifecycleEvidenceRuntime(): boolean {
 export function stopLifecycleEvidenceRuntime(): void {
   unregisterLifecycleEvidenceCollector();
   resetLifecycleEvidenceCollector();
+  resetLifecycleEvidenceArtifactStore();
 }

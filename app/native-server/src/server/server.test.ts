@@ -10,6 +10,10 @@ import { bridgeRuntimeState } from './bridge-state';
 import type { BridgeObservationMessage, BridgeObservationMessagePayload } from '@tabrix/shared';
 import { dispatchBridgeObservationToStream } from '../runtime/browser-event-stream';
 import { getLifecycleEvidenceCollectorSnapshot } from '../runtime/lifecycle-evidence-collector';
+import {
+  getLifecycleEvidenceArtifactStoreSnapshot,
+  recordLifecycleEvidenceArtifact,
+} from '../runtime/lifecycle-evidence-artifact-store';
 
 /** 非本机 IP，用于触发 onRequest 中的 Bearer 校验分支 */
 const REMOTE_CLIENT_IP = '192.168.99.1';
@@ -52,6 +56,68 @@ function makeLifecycleObservation(tabId: number, observedAtMs: number): BridgeOb
   };
 }
 
+function recordDummyLifecycleArtifact(): void {
+  recordLifecycleEvidenceArtifact({
+    artifactId: 'server-test-artifact',
+    version: 1,
+    evidenceLevel: 'integration',
+    scenarioId: 'server-test-scenario',
+    scenarioClass: 'search_result_delta_v1',
+    baseline: {
+      scenarioId: 'server-test-scenario',
+      scenarioClass: 'search_result_delta_v1',
+      evidenceLevel: 'integration',
+      startedAtMs: 1_700_000_000_000,
+    },
+    eventTimeline: {
+      available: false,
+      totalEvents: 0,
+      eventsByKind: {},
+      firstEventAtMs: null,
+      lastEventAtMs: null,
+      keyEvents: [],
+    },
+    signalSequence: {
+      available: false,
+      reason: 'bns_02_not_available',
+    },
+    scopeTransitions: {
+      available: false,
+      reason: 'bns_03_not_available',
+    },
+    actionLog: {
+      available: false,
+      totalActions: 0,
+      passed: 0,
+      failed: 0,
+      unknown: 0,
+      entries: [],
+    },
+    browserHygiene: {
+      available: false,
+      baselineTabs: null,
+      runOwnedTabsClosed: null,
+      baselineChanged: null,
+      notes: [],
+    },
+    sourceTruthChain: null,
+    claimBoundary: {
+      deterministicArtifactOnly: true,
+      realBrowserProven: false,
+      commercialGradeProven: false,
+      competitorSuperiorityProven: false,
+      fallbackSuccessSeparated: false,
+      sourceRouteProven: false,
+    },
+    finalVerdict: {
+      verdict: 'unknown',
+      confidence: 0,
+      reason: 'no_postcondition_results',
+    },
+    producedAtMs: 1_700_000_000_001,
+  });
+}
+
 describe('服务器测试', () => {
   // 启动服务器测试实例
   beforeAll(async () => {
@@ -89,6 +155,11 @@ describe('服务器测试', () => {
       port: null,
       authEnabled: false,
       nativeHostAttached: false,
+      lifecycleEvidenceArtifacts: {
+        bufferedArtifacts: 0,
+        droppedArtifacts: 0,
+        lastArtifactId: null,
+      },
     });
     expect(response.body.data.bridge).toMatchObject({
       bridgeState: expect.any(String),
@@ -257,6 +328,13 @@ describe('服务器测试', () => {
 
       dispatchBridgeObservationToStream(makeLifecycleObservation(42, 1_700_000_000_000));
       expect(getLifecycleEvidenceCollectorSnapshot().bufferedEvents).toBe(1);
+      recordDummyLifecycleArtifact();
+      expect(getLifecycleEvidenceArtifactStoreSnapshot().bufferedArtifacts).toBe(1);
+      expect(server.getStatusSnapshot().lifecycleEvidenceArtifacts).toMatchObject({
+        bufferedArtifacts: 1,
+        lastArtifactId: 'server-test-artifact',
+        lastFinalVerdict: 'unknown',
+      });
 
       await server.stop();
       expect(getLifecycleEvidenceCollectorSnapshot()).toMatchObject({
@@ -264,6 +342,11 @@ describe('服务器测试', () => {
         bufferedEvents: 0,
         droppedEvents: 0,
         lastEventAtMs: null,
+      });
+      expect(getLifecycleEvidenceArtifactStoreSnapshot()).toMatchObject({
+        bufferedArtifacts: 0,
+        droppedArtifacts: 0,
+        lastArtifactId: null,
       });
     });
 
