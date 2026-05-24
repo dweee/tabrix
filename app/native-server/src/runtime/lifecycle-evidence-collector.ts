@@ -126,6 +126,7 @@ export interface ToolCloseoutLifecycleEvidenceArtifactInput {
   reason: string;
   observedOutcome?: PostconditionResult['observedOutcome'];
   observedOutcomeConfidence?: number;
+  unsupportedPostconditionReason?: string;
   sourceTruthChain?: BrowserSourceTruthChain | null;
   browserHygiene: Partial<LifecycleEvidenceBrowserHygiene>;
 }
@@ -366,7 +367,9 @@ export function produceToolCloseoutLifecycleEvidenceArtifact(
     tabId: input.tabId,
     urlPattern: null,
     verdict: supportedPostcondition ? 'passed' : 'unknown',
-    reason: supportedPostcondition ? input.reason : 'unsupported_action_kind_postcondition',
+    reason: supportedPostcondition
+      ? input.reason
+      : (input.unsupportedPostconditionReason ?? 'unsupported_action_kind_postcondition'),
     observedOutcome: input.observedOutcome ?? 'unknown',
     observedOutcomeConfidence: input.observedOutcomeConfidence ?? 0.75,
     sourceEventRefs: [{ kind: 'unknown', id: input.actionId, origin: 'runtime' }],

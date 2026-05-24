@@ -1325,6 +1325,7 @@ function maybeRecordCloseTabsSuccessLifecycleArtifact(input: {
     actionKind: 'unknown',
     tabId: typeof tabId === 'number' ? tabId : null,
     reason: 'close_tabs_cleanup_succeeded',
+    unsupportedPostconditionReason: 'close_action_kind_blocked_by_shared_contract',
     observedOutcome: 'unknown',
     observedOutcomeConfidence: 0.75,
     browserHygiene: {
@@ -1338,6 +1339,7 @@ function maybeRecordCloseTabsSuccessLifecycleArtifact(input: {
         `invalidTabCount=${input.invalidTabIds.length}`,
         `requestedTabCount=${targetTabIds.length}`,
         'deterministic_closeout_only=true',
+        'v3RequiredAction=close',
       ],
     },
   });

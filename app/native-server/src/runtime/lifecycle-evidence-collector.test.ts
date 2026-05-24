@@ -1008,6 +1008,41 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     });
   });
 
+  it('keeps close-tab closeout honest when the shared action-kind contract has no close kind', () => {
+    const artifact = produceToolCloseoutLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-tool-closeout-close-contract-gap',
+      evidenceLevel: 'integration',
+      scenarioId: 'tool-close-tabs-success',
+      scenarioClass: 'browser_hygiene_closeout_v1',
+      startedAtMs: T0,
+      endedAtMs: T0 + 10,
+      actionId: 'mcp:chrome_close_tabs:42',
+      actionKind: 'unknown',
+      tabId: 42,
+      reason: 'close_tabs_cleanup_succeeded',
+      unsupportedPostconditionReason: 'close_action_kind_blocked_by_shared_contract',
+      browserHygiene: {
+        available: true,
+        runOwnedTabsClosed: 1,
+        baselineChanged: false,
+        checks: makeCleanHygieneChecks(),
+        notes: ['v3RequiredAction=close'],
+      },
+    });
+
+    expect(artifact.finalVerdict).toMatchObject({
+      verdict: 'unknown',
+      reason: 'postconditions_unknown',
+    });
+    expect(artifact.actionLog.entries[0]).toMatchObject({
+      actionKind: 'unknown',
+      tabId: 42,
+      verdict: 'unknown',
+      reason: 'close_action_kind_blocked_by_shared_contract',
+    });
+    expect(artifact.browserHygiene.notes).toContain('v3RequiredAction=close');
+  });
+
   it('rejects closeout success when browser hygiene changed', () => {
     expect(() =>
       produceToolCloseoutLifecycleEvidenceArtifact({

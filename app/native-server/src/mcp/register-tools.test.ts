@@ -1448,8 +1448,9 @@ describe('handleToolCall execution wrapper', () => {
         actionKind: 'unknown',
         tabId: 1,
         verdict: 'unknown',
-        reason: 'unsupported_action_kind_postcondition',
+        reason: 'close_action_kind_blocked_by_shared_contract',
       });
+      expect(artifacts[0].browserHygiene.notes).toContain('v3RequiredAction=close');
       const serializedArtifact = JSON.stringify(artifacts[0]);
       expect(serializedArtifact).not.toContain('PRIVATE_PAGE_BODY_SHOULD_NOT_APPEAR');
       expect(serializedArtifact).not.toContain('Authorization');
