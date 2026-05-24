@@ -1790,6 +1790,74 @@ describe('handleToolCall execution wrapper', () => {
       });
     });
 
+    it('exposes mode-insufficient structured-read reason in chrome_read_page AI-facing output', async () => {
+      markBridgeReady();
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_long_content_compact_shallow',
+          contextChars: 1200,
+          changedRegions: ['article_body'],
+          refreshedRefs: ['ref_article_heading'],
+          extraPayload: {
+            mode: 'compact',
+            taskMode: 'read',
+            complexityLevel: 'complex',
+            summary: {
+              pageRole: 'article',
+              primaryRegion: 'content',
+              quality: 'usable',
+            },
+            completeTextRegion: {
+              completeTextAvailable: false,
+              charCount: 1200,
+              lineCount: 12,
+              structureSparse: false,
+              contentSparse: false,
+            },
+          },
+        }),
+      );
+
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'long-content-compact-shallow-gate',
+        mode: 'compact',
+        requestedLayer: 'L0+L1+L2',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.structuredReadGate).toMatchObject({
+        gateId: 'structured-read-gate:projection_long_content_compact_shallow',
+        verdict: 'mode_insufficient',
+        reasonCode: 'mode_insufficient_shallow_read',
+        gapDescription: 'current read mode is too shallow for a long-content candidate',
+        recommendedAction: 'request normal or full mode for long-content reading',
+        metrics: {
+          readMode: 'compact',
+          taskMode: 'read',
+          complexityLevel: 'complex',
+          pageRole: 'article',
+          primaryRegion: 'content',
+          completeTextAvailable: false,
+          contentSparse: false,
+        },
+        boundary: {
+          metadataOnly: true,
+          rawContentInspected: false,
+          browserIoPerformed: false,
+          publicContractChanged: false,
+          commercialGradeProven: false,
+        },
+      });
+      expect(payload.structuredReadGate.metrics.bodyCharCount).toBe(1200);
+      expect(payload.aiContextEnvelope.structuredReadGate).toMatchObject({
+        gateId: 'structured-read-gate:projection_long_content_compact_shallow',
+        verdict: 'mode_insufficient',
+        reasonCode: 'mode_insufficient_shallow_read',
+        recommendedAction: 'request normal or full mode for long-content reading',
+      });
+    });
+
     it('marks AI-facing delta as real-browser evidence only for real tab projections', async () => {
       markBridgeReady();
       mockReadPageRoundTrip(
