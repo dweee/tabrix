@@ -2,8 +2,7 @@
  * BNS-05 lifecycle evidence artifact producer.
  *
  * Pure fixture-tested artifact builder. This slice summarizes BNS-01 events,
- * BNS-02 semantic signals, and BNS-04 postcondition results. BNS-03 scope
- * remains an explicit unavailable slot.
+ * BNS-02 semantic signals, BNS-03 watch scopes, and BNS-04 postcondition results.
  */
 import type {
   BrowserSourceTruthChain,
@@ -14,6 +13,8 @@ import type {
   LifecycleEvidenceBrowserHygiene,
   LifecycleEvidenceFinalVerdict,
   LifecycleEvidenceKeyEvent,
+  LifecycleEvidenceScopeTransition,
+  LifecycleEvidenceScopeTransitions,
   LifecycleEvidenceSignalSequence,
   LifecycleEvidenceUnavailableSection,
   PostconditionResult,
@@ -31,6 +32,7 @@ export interface ProduceLifecycleEvidenceArtifactInput {
   startedAtMs: number;
   streamEvents?: BrowserStreamEvent[];
   semanticSignals?: SemanticSignal[];
+  scopeTransitions?: LifecycleEvidenceScopeTransition[];
   sourceTruthChain?: BrowserSourceTruthChain | null;
   browserHygiene?: Partial<LifecycleEvidenceBrowserHygiene> | null;
   postconditionEvidence?: {
@@ -78,10 +80,7 @@ export function produceLifecycleEvidenceArtifact(
       keyEvents: streamEvents.slice(0, maxKeyEvents).map(toKeyEvent),
     },
     signalSequence: buildSignalSequence(input.semanticSignals),
-    scopeTransitions: {
-      available: false,
-      reason: 'bns_03_not_available',
-    },
+    scopeTransitions: buildScopeTransitions(input.scopeTransitions),
     actionLog: buildActionLog(postconditionResults),
     browserHygiene,
     sourceTruthChain: input.sourceTruthChain ?? null,
@@ -96,6 +95,26 @@ export function produceLifecycleEvidenceArtifact(
     },
     finalVerdict: deriveFinalVerdict(postconditionResults, browserHygiene),
     producedAtMs,
+  };
+}
+
+function buildScopeTransitions(
+  transitions: LifecycleEvidenceScopeTransition[] | undefined,
+): LifecycleEvidenceScopeTransitions | LifecycleEvidenceUnavailableSection {
+  if (!transitions || transitions.length === 0) {
+    return {
+      available: false,
+      reason: 'bns_03_not_available',
+    };
+  }
+
+  return {
+    available: true,
+    totalTransitions: transitions.length,
+    transitions: transitions.map((transition) => ({
+      ...transition,
+      regions: transition.regions.map((region) => ({ ...region })),
+    })),
   };
 }
 

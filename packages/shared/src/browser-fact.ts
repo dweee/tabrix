@@ -1246,6 +1246,42 @@ export interface LifecycleEvidenceSignalSequence {
   signals: SemanticSignal[];
 }
 
+export type LifecycleEvidenceScopeKind =
+  | 'search'
+  | 'form'
+  | 'long_content'
+  | 'loading'
+  | 'idle'
+  | 'unknown';
+
+export type LifecycleEvidenceScopeRegionPurpose =
+  | 'input'
+  | 'output'
+  | 'feedback'
+  | 'navigation'
+  | 'unknown';
+
+export interface LifecycleEvidenceScopeRegion {
+  regionId: string;
+  regionPurpose: LifecycleEvidenceScopeRegionPurpose;
+  expectedRole: string | null;
+}
+
+export interface LifecycleEvidenceScopeTransition {
+  scopeKind: LifecycleEvidenceScopeKind;
+  tabId: number | null;
+  regions: LifecycleEvidenceScopeRegion[];
+  confidence: number;
+  reason: string;
+  producedAtMs: number;
+}
+
+export interface LifecycleEvidenceScopeTransitions {
+  available: boolean;
+  totalTransitions: number;
+  transitions: LifecycleEvidenceScopeTransition[];
+}
+
 export interface LifecycleEvidenceActionLog {
   available: boolean;
   totalActions: number;
@@ -1294,7 +1330,7 @@ export interface LifecycleEvidenceArtifact {
   baseline: LifecycleEvidenceBaseline;
   eventTimeline: LifecycleEvidenceEventTimeline;
   signalSequence: LifecycleEvidenceSignalSequence | LifecycleEvidenceUnavailableSection;
-  scopeTransitions: LifecycleEvidenceUnavailableSection;
+  scopeTransitions: LifecycleEvidenceScopeTransitions | LifecycleEvidenceUnavailableSection;
   actionLog: LifecycleEvidenceActionLog;
   browserHygiene: LifecycleEvidenceBrowserHygiene;
   sourceTruthChain: BrowserSourceTruthChain | null;

@@ -695,6 +695,73 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
       actionLog: { available: true, totalActions: 1 },
     });
   });
+
+  it('derives BNS-03 dynamic watch scope transitions from task context', () => {
+    ensureLifecycleEvidenceCollectorRegistered();
+    dispatchBridgeObservationToStream(
+      makeBridgeMessage('fact_snapshot', {
+        tabId: 42,
+        observedAtMs: T0,
+        data: {
+          stable: true,
+        },
+      }),
+    );
+
+    const artifact = produceRuntimeLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-scope',
+      evidenceLevel: 'integration',
+      scenarioId: 'scenario-scope',
+      scenarioClass: 'search_result_delta_v1',
+      startedAtMs: T0,
+      endedAtMs: T0,
+      eventWindow: { tabIds: [42] },
+      taskContext: {
+        intent: 'search for release notes',
+        pageRole: 'search_results',
+        pageStability: 'stable',
+      },
+    });
+
+    expect(artifact.scopeTransitions).toMatchObject({
+      available: true,
+      totalTransitions: 1,
+      transitions: [
+        {
+          scopeKind: 'search',
+          tabId: 42,
+          reason: 'generic_search_category_match',
+          producedAtMs: T0,
+        },
+      ],
+    });
+    expect(
+      artifact.scopeTransitions.available ? artifact.scopeTransitions.transitions[0].regions : [],
+    ).toEqual([
+      { regionId: 'query_input', regionPurpose: 'input', expectedRole: 'searchbox' },
+      { regionId: 'result_region', regionPurpose: 'output', expectedRole: null },
+      { regionId: 'empty_state', regionPurpose: 'feedback', expectedRole: null },
+    ]);
+  });
+
+  it('keeps BNS-03 unavailable when task context is absent', () => {
+    ensureLifecycleEvidenceCollectorRegistered();
+
+    const artifact = produceRuntimeLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-no-scope',
+      evidenceLevel: 'integration',
+      scenarioId: 'scenario-no-scope',
+      scenarioClass: 'search_result_delta_v1',
+      startedAtMs: T0,
+      endedAtMs: T0,
+      eventWindow: { tabIds: [42] },
+    });
+
+    expect(artifact.scopeTransitions).toEqual({
+      available: false,
+      reason: 'bns_03_not_available',
+    });
+  });
 });
 
 describe('lifecycle-evidence-collector — bounds and validation', () => {

@@ -9,6 +9,7 @@ import type {
   CorrelationGroupId,
   LifecycleEvidenceArtifact,
   LifecycleEvidenceBrowserHygiene,
+  LifecycleEvidenceScopeTransition,
   ObservationKind,
   PostconditionResult,
   SemanticSignal,
@@ -28,6 +29,7 @@ import {
   type PrimaryTabControllerSnapshot,
 } from './primary-tab-controller';
 import { deriveWaitForStabilitySignal } from './semantic-signal-aggregator';
+import { deriveDynamicWatchScope, type DynamicWatchScope } from './dynamic-watch-scope';
 
 const SUBSCRIBER_ID = 'bns05_lifecycle_evidence_collector';
 const DEFAULT_MAX_BUFFERED_EVENTS = 500;
@@ -78,6 +80,11 @@ export interface RuntimeLifecycleEvidenceArtifactInput {
   eventWindow: {
     tabIds: number[];
     correlationGroupIds?: string[];
+  };
+  taskContext?: {
+    intent?: string | null;
+    pageRole?: string | null;
+    pageStability?: 'stable' | 'loading' | 'changing' | 'stale' | 'unknown';
   };
   sourceTruthChain?: BrowserSourceTruthChain | null;
 }
@@ -245,6 +252,7 @@ export function produceRuntimeLifecycleEvidenceArtifact(
     startedAtMs: input.startedAtMs,
     streamEvents,
     semanticSignals,
+    scopeTransitions: buildRuntimeScopeTransitions(input, streamEvents),
     postconditionEvidence: {
       source: 'bns_04_verifier',
       results: postconditionResults,
@@ -254,6 +262,51 @@ export function produceRuntimeLifecycleEvidenceArtifact(
   });
   recordLifecycleEvidenceArtifact(artifact);
   return artifact;
+}
+
+function buildRuntimeScopeTransitions(
+  input: RuntimeLifecycleEvidenceArtifactInput,
+  streamEvents: BrowserStreamEvent[],
+): LifecycleEvidenceScopeTransition[] {
+  if (!input.taskContext) return [];
+
+  const scope = deriveDynamicWatchScope({
+    tabId: input.eventWindow.tabIds[0] ?? null,
+    intent: input.taskContext.intent ?? null,
+    pageRole: input.taskContext.pageRole ?? null,
+    pageStability: input.taskContext.pageStability ?? 'unknown',
+    evidenceWindow: {
+      startedAtMs: input.startedAtMs,
+      endedAtMs: input.endedAtMs,
+      eventsByKind: countEventsByKind(streamEvents),
+    },
+    nowMs: input.endedAtMs,
+  });
+
+  return [toLifecycleScopeTransition(scope)];
+}
+
+function toLifecycleScopeTransition(scope: DynamicWatchScope): LifecycleEvidenceScopeTransition {
+  return {
+    scopeKind: scope.scopeKind,
+    tabId: scope.tabId,
+    regions: scope.regions.map((region) => ({
+      regionId: region.regionId,
+      regionPurpose: region.regionPurpose,
+      expectedRole: region.expectedRole,
+    })),
+    confidence: scope.confidence,
+    reason: scope.reason,
+    producedAtMs: scope.producedAtMs,
+  };
+}
+
+function countEventsByKind(events: BrowserStreamEvent[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const event of events) {
+    counts[event.kind] = (counts[event.kind] ?? 0) + 1;
+  }
+  return counts;
 }
 
 function derivePostconditionResult(event: BrowserStreamEvent): PostconditionResult | null {

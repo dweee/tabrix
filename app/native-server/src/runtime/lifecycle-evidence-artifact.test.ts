@@ -278,6 +278,83 @@ describe('lifecycle-evidence-artifact — signal sequence', () => {
   });
 });
 
+describe('lifecycle-evidence-artifact — scope transitions', () => {
+  it('emits BNS-03 scope transitions when supplied', () => {
+    const artifact = produceLifecycleEvidenceArtifact(
+      {
+        artifactId: 'artifact-scope',
+        evidenceLevel: 'unit',
+        scenarioId: 'scenario-scope',
+        scenarioClass: 'search_result_delta_v1',
+        startedAtMs: T0,
+        scopeTransitions: [
+          {
+            scopeKind: 'search',
+            tabId: 42,
+            regions: [
+              { regionId: 'query_input', regionPurpose: 'input', expectedRole: 'searchbox' },
+              { regionId: 'result_region', regionPurpose: 'output', expectedRole: null },
+            ],
+            confidence: 0.7,
+            reason: 'generic_search_category_match',
+            producedAtMs: T0 + 100,
+          },
+        ],
+      },
+      { now: () => PRODUCED_AT },
+    );
+
+    expect(artifact.scopeTransitions).toEqual({
+      available: true,
+      totalTransitions: 1,
+      transitions: [
+        {
+          scopeKind: 'search',
+          tabId: 42,
+          regions: [
+            { regionId: 'query_input', regionPurpose: 'input', expectedRole: 'searchbox' },
+            { regionId: 'result_region', regionPurpose: 'output', expectedRole: null },
+          ],
+          confidence: 0.7,
+          reason: 'generic_search_category_match',
+          producedAtMs: T0 + 100,
+        },
+      ],
+    });
+  });
+
+  it('does not let BNS-03 scope guidance claim real browser proof', () => {
+    const artifact = produceLifecycleEvidenceArtifact(
+      {
+        artifactId: 'artifact-scope-boundary',
+        evidenceLevel: 'unit',
+        scenarioId: 'scenario-scope-boundary',
+        scenarioClass: 'search_result_delta_v1',
+        startedAtMs: T0,
+        scopeTransitions: [
+          {
+            scopeKind: 'form',
+            tabId: 42,
+            regions: [
+              { regionId: 'primary_input', regionPurpose: 'input', expectedRole: 'textbox' },
+            ],
+            confidence: 0.7,
+            reason: 'generic_form_category_match',
+            producedAtMs: T0 + 100,
+          },
+        ],
+      },
+      { now: () => PRODUCED_AT },
+    );
+
+    expect(artifact.claimBoundary).toMatchObject({
+      realBrowserProven: false,
+      commercialGradeProven: false,
+      competitorSuperiorityProven: false,
+    });
+  });
+});
+
 describe('lifecycle-evidence-artifact — action log and verdicts', () => {
   it('summarizes BNS-04A postcondition results without changing verdicts', () => {
     const entries = [
