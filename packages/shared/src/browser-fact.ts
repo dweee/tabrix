@@ -1237,6 +1237,15 @@ export interface LifecycleEvidenceUnavailableSection {
   reason: string;
 }
 
+export interface LifecycleEvidenceSignalSequence {
+  available: boolean;
+  totalSignals: number;
+  signalsByKind: Record<string, number>;
+  firstSignalAtMs: number | null;
+  lastSignalAtMs: number | null;
+  signals: SemanticSignal[];
+}
+
 export interface LifecycleEvidenceActionLog {
   available: boolean;
   totalActions: number;
@@ -1284,7 +1293,7 @@ export interface LifecycleEvidenceArtifact {
   scenarioClass: BrowserTaskScenarioClass | string;
   baseline: LifecycleEvidenceBaseline;
   eventTimeline: LifecycleEvidenceEventTimeline;
-  signalSequence: LifecycleEvidenceUnavailableSection;
+  signalSequence: LifecycleEvidenceSignalSequence | LifecycleEvidenceUnavailableSection;
   scopeTransitions: LifecycleEvidenceUnavailableSection;
   actionLog: LifecycleEvidenceActionLog;
   browserHygiene: LifecycleEvidenceBrowserHygiene;

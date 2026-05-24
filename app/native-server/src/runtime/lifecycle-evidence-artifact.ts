@@ -1,9 +1,9 @@
 /**
  * BNS-05 lifecycle evidence artifact producer.
  *
- * Pure fixture-tested artifact builder. This first slice summarizes BNS-01
- * events and BNS-04A postcondition results only; BNS-02/BNS-03 sections are
- * intentionally explicit unavailable slots.
+ * Pure fixture-tested artifact builder. This slice summarizes BNS-01 events,
+ * BNS-02 semantic signals, and BNS-04 postcondition results. BNS-03 scope
+ * remains an explicit unavailable slot.
  */
 import type {
   BrowserSourceTruthChain,
@@ -14,8 +14,11 @@ import type {
   LifecycleEvidenceBrowserHygiene,
   LifecycleEvidenceFinalVerdict,
   LifecycleEvidenceKeyEvent,
+  LifecycleEvidenceSignalSequence,
+  LifecycleEvidenceUnavailableSection,
   PostconditionResult,
   PostconditionVerdict,
+  SemanticSignal,
 } from '@tabrix/shared';
 
 const DEFAULT_MAX_KEY_EVENTS = 50;
@@ -27,6 +30,7 @@ export interface ProduceLifecycleEvidenceArtifactInput {
   scenarioClass: BrowserTaskScenarioClass | string;
   startedAtMs: number;
   streamEvents?: BrowserStreamEvent[];
+  semanticSignals?: SemanticSignal[];
   sourceTruthChain?: BrowserSourceTruthChain | null;
   browserHygiene?: Partial<LifecycleEvidenceBrowserHygiene> | null;
   postconditionEvidence?: {
@@ -73,10 +77,7 @@ export function produceLifecycleEvidenceArtifact(
       lastEventAtMs: lastObservedAt(streamEvents),
       keyEvents: streamEvents.slice(0, maxKeyEvents).map(toKeyEvent),
     },
-    signalSequence: {
-      available: false,
-      reason: 'bns_02_not_available',
-    },
+    signalSequence: buildSignalSequence(input.semanticSignals),
     scopeTransitions: {
       available: false,
       reason: 'bns_03_not_available',
@@ -102,6 +103,34 @@ function countEventsByKind(events: BrowserStreamEvent[]): Record<string, number>
   const counts: Record<string, number> = {};
   for (const event of events) {
     counts[event.kind] = (counts[event.kind] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function buildSignalSequence(
+  signals: SemanticSignal[] | undefined,
+): LifecycleEvidenceSignalSequence | LifecycleEvidenceUnavailableSection {
+  if (!signals || signals.length === 0) {
+    return {
+      available: false,
+      reason: 'bns_02_not_available',
+    };
+  }
+
+  return {
+    available: true,
+    totalSignals: signals.length,
+    signalsByKind: countSignalsByKind(signals),
+    firstSignalAtMs: Math.min(...signals.map((signal) => signal.producedAtMs)),
+    lastSignalAtMs: Math.max(...signals.map((signal) => signal.producedAtMs)),
+    signals,
+  };
+}
+
+function countSignalsByKind(signals: SemanticSignal[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const signal of signals) {
+    counts[signal.kind] = (counts[signal.kind] ?? 0) + 1;
   }
   return counts;
 }

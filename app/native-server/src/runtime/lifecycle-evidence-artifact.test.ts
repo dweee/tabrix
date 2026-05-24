@@ -2,6 +2,7 @@ import type {
   BrowserSourceTruthChain,
   BrowserStreamEvent,
   PostconditionResult,
+  SemanticSignal,
 } from '@tabrix/shared';
 import { produceLifecycleEvidenceArtifact } from './lifecycle-evidence-artifact';
 
@@ -39,6 +40,26 @@ function makePostcondition(overrides: Partial<PostconditionResult> = {}): Postco
       },
     ],
     sourceOrigins: overrides.sourceOrigins ?? ['runtime', 'action_outcome_classifier', 'inference'],
+    producedAtMs: overrides.producedAtMs ?? T0 + 500,
+  };
+}
+
+function makeSemanticSignal(overrides: Partial<SemanticSignal> = {}): SemanticSignal {
+  return {
+    signalId: overrides.signalId ?? 'signal-1',
+    kind: overrides.kind ?? 'wait_for_stability',
+    confidence: overrides.confidence ?? 0.8,
+    tabId: overrides.tabId ?? 100,
+    urlPattern: overrides.urlPattern ?? 'example.test/list',
+    sourceEventRefs: overrides.sourceEventRefs ?? [
+      {
+        streamEventId: 'stream-1',
+        eventKind: 'observation_lifecycle',
+        sourceObservationKind: 'lifecycle_event',
+        observedAtMs: T0,
+      },
+    ],
+    sourceOrigins: overrides.sourceOrigins ?? ['browser_stream'],
     producedAtMs: overrides.producedAtMs ?? T0 + 500,
   };
 }
@@ -177,6 +198,81 @@ describe('lifecycle-evidence-artifact — event timeline', () => {
 
     expect(artifact.eventTimeline.keyEvents).toHaveLength(2);
     const serialized = JSON.stringify(artifact.eventTimeline.keyEvents);
+    expect(serialized).not.toContain('PRIVATE_TEXT_SHOULD_NOT_APPEAR');
+    expect(serialized).not.toContain('Authorization');
+  });
+});
+
+describe('lifecycle-evidence-artifact — signal sequence', () => {
+  it('emits a BNS-02 signal sequence when semantic signals are supplied', () => {
+    const artifact = produceLifecycleEvidenceArtifact(
+      {
+        artifactId: 'artifact-signals',
+        evidenceLevel: 'unit',
+        scenarioId: 'scenario-signals',
+        scenarioClass: 'search_result_delta_v1',
+        startedAtMs: T0,
+        semanticSignals: [
+          makeSemanticSignal({ signalId: 'sig-wait', producedAtMs: T0 + 300 }),
+          makeSemanticSignal({ signalId: 'sig-unknown', kind: 'unknown', producedAtMs: T0 + 100 }),
+        ],
+      },
+      { now: () => PRODUCED_AT },
+    );
+
+    expect(artifact.signalSequence).toMatchObject({
+      available: true,
+      totalSignals: 2,
+      signalsByKind: {
+        wait_for_stability: 1,
+        unknown: 1,
+      },
+      firstSignalAtMs: T0 + 100,
+      lastSignalAtMs: T0 + 300,
+    });
+  });
+
+  it('keeps BNS-02 unavailable when no semantic signals are supplied', () => {
+    const artifact = produceLifecycleEvidenceArtifact(
+      {
+        artifactId: 'artifact-no-signals',
+        evidenceLevel: 'unit',
+        scenarioId: 'scenario-no-signals',
+        scenarioClass: 'search_result_delta_v1',
+        startedAtMs: T0,
+      },
+      { now: () => PRODUCED_AT },
+    );
+
+    expect(artifact.signalSequence).toEqual({
+      available: false,
+      reason: 'bns_02_not_available',
+    });
+  });
+
+  it('records only semantic-signal evidence refs and not raw stream payloads', () => {
+    const artifact = produceLifecycleEvidenceArtifact(
+      {
+        artifactId: 'artifact-signal-privacy',
+        evidenceLevel: 'unit',
+        scenarioId: 'scenario-signal-privacy',
+        scenarioClass: 'search_result_delta_v1',
+        startedAtMs: T0,
+        streamEvents: [
+          makeStreamEvent({
+            sourcePayload: {
+              rawText: 'PRIVATE_TEXT_SHOULD_NOT_APPEAR',
+              Authorization: 'secret',
+            },
+          }),
+        ],
+        semanticSignals: [makeSemanticSignal()],
+      },
+      { now: () => PRODUCED_AT },
+    );
+
+    const serialized = JSON.stringify(artifact.signalSequence);
+    expect(serialized).toContain('stream-1');
     expect(serialized).not.toContain('PRIVATE_TEXT_SHOULD_NOT_APPEAR');
     expect(serialized).not.toContain('Authorization');
   });
