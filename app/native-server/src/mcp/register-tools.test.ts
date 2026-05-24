@@ -4,6 +4,11 @@ import { sessionManager } from '../execution/session-manager';
 import { bridgeRuntimeState } from '../server/bridge-state';
 import { bridgeCommandChannel } from '../server/bridge-command-channel';
 import { resetDefaultPrimaryTabController } from '../runtime/primary-tab-controller';
+import {
+  getLifecycleEvidenceArtifactStoreSnapshot,
+  listLifecycleEvidenceArtifacts,
+  resetLifecycleEvidenceArtifactStoreForTests,
+} from '../runtime/lifecycle-evidence-artifact-store';
 
 describe('handleToolCall execution wrapper', () => {
   const markBridgeReady = () => {
@@ -30,6 +35,7 @@ describe('handleToolCall execution wrapper', () => {
     jest.restoreAllMocks();
     bridgeRuntimeState.reset();
     resetDefaultPrimaryTabController();
+    resetLifecycleEvidenceArtifactStoreForTests();
     sessionManager.reset();
     delete process.env.ENABLE_MCP_TOOLS;
     delete process.env.DISABLE_MCP_TOOLS;
@@ -181,6 +187,56 @@ describe('handleToolCall execution wrapper', () => {
     const step = sessions[0].steps[0];
     expect(step.artifactRefs).toHaveLength(1);
     expect(step.artifactRefs![0]).toBe(body.historyRef);
+  });
+
+  it('emits a lifecycle artifact for a failed page-unreadable read result', async () => {
+    markBridgeReady();
+    const failedReadBody = {
+      success: false,
+      reason: 'page_unreadable',
+      pageType: 'browser_error_page',
+      pageContent: 'PRIVATE_PAGE_BODY_SHOULD_NOT_APPEAR',
+      Authorization: 'Bearer secret-token',
+    };
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      items: [],
+    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      data: {
+        content: [{ type: 'text', text: JSON.stringify(failedReadBody) }],
+        isError: true,
+      },
+    } as never);
+
+    expect(getLifecycleEvidenceArtifactStoreSnapshot().bufferedArtifacts).toBe(0);
+
+    const result = await handleToolCall('chrome_read_page', { tabId: 42 });
+
+    expect(result.isError).toBe(true);
+    expect(getLifecycleEvidenceArtifactStoreSnapshot()).toMatchObject({
+      bufferedArtifacts: 1,
+      lastFinalVerdict: 'task_failed',
+    });
+    const artifacts = listLifecycleEvidenceArtifacts();
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0]).toMatchObject({
+      scenarioClass: 'postcondition_failure_v1',
+      actionLog: { available: true, totalActions: 1, failed: 1 },
+      finalVerdict: { verdict: 'task_failed', reason: 'postcondition_failed' },
+    });
+    expect(artifacts[0].actionLog.entries[0]).toMatchObject({
+      actionKind: 'unknown',
+      tabId: 42,
+      verdict: 'failed',
+      reason: 'page_unreadable',
+    });
+    const serializedArtifact = JSON.stringify(artifacts[0]);
+    expect(serializedArtifact).not.toContain('PRIVATE_PAGE_BODY_SHOULD_NOT_APPEAR');
+    expect(serializedArtifact).not.toContain('secret-token');
+    expect(serializedArtifact).not.toContain('Authorization');
+    expect(serializedArtifact).not.toContain('sourcePayload');
   });
 
   it('persists a memory_actions row and injects historyRef for chrome_click_element', async () => {

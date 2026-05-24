@@ -95,6 +95,7 @@ import {
   evaluateStructuredReadGate,
   type StructuredReadGateResult,
 } from '../runtime/structured-read-gate';
+import { produceToolFailureLifecycleEvidenceArtifact } from '../runtime/lifecycle-evidence-collector';
 import type {
   BrowserDataSourceDecisionEvidence,
   BrowserPageOwnerType,
@@ -108,6 +109,7 @@ import type {
 import { buildBrowserTaskStateVerdict } from '@tabrix/shared';
 
 const DEFAULT_AUTO_TASK_CONTEXT_KEY = 'mcp:auto:tab:default';
+const TOOL_FAILURE_ARTIFACT_SCENARIO_ID = 'mcp:chrome_read_page:page_unreadable';
 
 /**
  * Production wiring for the `experience_replay` handler.
@@ -299,6 +301,7 @@ export const setupTools = (server: McpServer) => {
 };
 
 export const handleToolCall = async (name: string, args: any): Promise<CallToolResult> => {
+  const toolCallStartedAtMs = Date.now();
   const task = sessionManager.createTask({
     taskType: name.startsWith('flow.') ? 'flow-call' : 'tool-call',
     title: `Execute ${name}`,
@@ -1073,6 +1076,13 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           : name === 'chrome_close_tabs' && taskContext && rawResultWithEvidence.isError !== true
             ? attachLifecycleTimelineContext(rawResultWithEvidence, taskContext)
             : rawResultWithEvidence;
+      maybeRecordReadPageFailureLifecycleArtifact({
+        name,
+        args,
+        result: aiFacingResult,
+        startedAtMs: toolCallStartedAtMs,
+        endedAtMs: Date.now(),
+      });
       const resultWithPolicyAudit =
         isImpactToolName(name) && rawResultWithEvidence.isError !== true
           ? attachRuntimePolicyAuditToResult(aiFacingResult, nonInterferenceVerdict.audit)
@@ -1208,6 +1218,51 @@ function attachReadPagePayloadMetadata(
         : block,
     ) as CallToolResult['content'],
   };
+}
+
+function maybeRecordReadPageFailureLifecycleArtifact(input: {
+  name: string;
+  args: unknown;
+  result: CallToolResult;
+  startedAtMs: number;
+  endedAtMs: number;
+}): void {
+  if (input.name !== 'chrome_read_page' || input.result.isError !== true) return;
+  const payload = readJsonObjectFromCallToolResult(input.result);
+  if (!payload) return;
+  if (payload.success !== false) return;
+  if (payload.reason !== 'page_unreadable') return;
+  if (payload.pageType !== 'browser_error_page') return;
+  const tabId = readPositiveInteger(input.args, 'tabId');
+  if (tabId === null) return;
+
+  produceToolFailureLifecycleEvidenceArtifact({
+    artifactId: `mcp-read-failure-${input.startedAtMs}-${tabId}`,
+    evidenceLevel: 'integration',
+    scenarioId: TOOL_FAILURE_ARTIFACT_SCENARIO_ID,
+    scenarioClass: 'postcondition_failure_v1',
+    startedAtMs: input.startedAtMs,
+    endedAtMs: input.endedAtMs,
+    actionId: `mcp:chrome_read_page:${tabId}:${input.startedAtMs}`,
+    actionKind: 'unknown',
+    tabId,
+    reason: 'page_unreadable',
+    observedOutcome: 'unknown',
+    observedOutcomeConfidence: 0.85,
+  });
+}
+
+function readJsonObjectFromCallToolResult(result: CallToolResult): Record<string, unknown> | null {
+  const first = result.content?.[0];
+  if (!first || first.type !== 'text' || typeof first.text !== 'string') return null;
+
+  try {
+    const parsed = JSON.parse(first.text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
 }
 
 function mergeReadPagePayloadMetadata(

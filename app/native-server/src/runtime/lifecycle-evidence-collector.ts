@@ -89,6 +89,22 @@ export interface RuntimeLifecycleEvidenceArtifactInput {
   sourceTruthChain?: BrowserSourceTruthChain | null;
 }
 
+export interface ToolFailureLifecycleEvidenceArtifactInput {
+  artifactId: string;
+  evidenceLevel: RuntimeEvidenceLevel;
+  scenarioId: string;
+  scenarioClass: BrowserTaskScenarioClass | string;
+  startedAtMs: number;
+  endedAtMs: number;
+  actionId: string;
+  actionKind: ActionKind;
+  tabId: number | null;
+  reason: string;
+  observedOutcome?: PostconditionResult['observedOutcome'];
+  observedOutcomeConfidence?: number;
+  sourceTruthChain?: BrowserSourceTruthChain | null;
+}
+
 const bufferedEvents: BufferedLifecycleEvidenceEvent[] = [];
 const bufferedSignals: BufferedSemanticSignal[] = [];
 const bufferedPostconditions: BufferedPostconditionResult[] = [];
@@ -264,6 +280,44 @@ export function produceRuntimeLifecycleEvidenceArtifact(
   return artifact;
 }
 
+export function produceToolFailureLifecycleEvidenceArtifact(
+  input: ToolFailureLifecycleEvidenceArtifactInput,
+): LifecycleEvidenceArtifact {
+  assertValidToolFailureArtifactInput(input);
+  const postconditionResult: PostconditionResult = {
+    actionId: input.actionId,
+    actionKind: input.actionKind,
+    tabId: input.tabId,
+    urlPattern: null,
+    verdict: 'failed',
+    reason: input.reason,
+    observedOutcome: input.observedOutcome ?? 'unknown',
+    observedOutcomeConfidence: input.observedOutcomeConfidence ?? 0.85,
+    sourceEventRefs: [{ kind: 'unknown', id: input.actionId, origin: 'runtime' }],
+    sourceOrigins: ['runtime', 'inference'],
+    producedAtMs: input.endedAtMs,
+  };
+
+  const artifact = produceLifecycleEvidenceArtifact({
+    artifactId: input.artifactId,
+    evidenceLevel: input.evidenceLevel,
+    scenarioId: input.scenarioId,
+    scenarioClass: input.scenarioClass,
+    startedAtMs: input.startedAtMs,
+    streamEvents: [],
+    semanticSignals: [],
+    scopeTransitions: [],
+    postconditionEvidence: {
+      source: 'bns_04_verifier',
+      results: [postconditionResult],
+    },
+    browserHygiene: buildRuntimeBrowserHygiene(),
+    sourceTruthChain: input.sourceTruthChain ?? null,
+  });
+  recordLifecycleEvidenceArtifact(artifact);
+  return artifact;
+}
+
 function buildRuntimeScopeTransitions(
   input: RuntimeLifecycleEvidenceArtifactInput,
   streamEvents: BrowserStreamEvent[],
@@ -426,5 +480,31 @@ function assertValidRuntimeArtifactInput(input: RuntimeLifecycleEvidenceArtifact
   }
   if (!Array.isArray(input.eventWindow.tabIds) || input.eventWindow.tabIds.length === 0) {
     throw new Error('BNS-05 runtime collector requires a non-empty tabIds event window');
+  }
+}
+
+function assertValidToolFailureArtifactInput(
+  input: ToolFailureLifecycleEvidenceArtifactInput,
+): void {
+  const evidenceLevel = input.evidenceLevel as BrowserTaskEvidenceLevel;
+  if (evidenceLevel === 'real_browser' || evidenceLevel === 'competitor') {
+    throw new Error(
+      'BNS-05 tool failure collector does not accept real_browser or competitor evidence',
+    );
+  }
+  if (!Number.isFinite(input.startedAtMs) || !Number.isFinite(input.endedAtMs)) {
+    throw new Error('BNS-05 tool failure collector requires finite startedAtMs and endedAtMs');
+  }
+  if (input.endedAtMs < input.startedAtMs) {
+    throw new Error('BNS-05 tool failure collector requires endedAtMs >= startedAtMs');
+  }
+  if (input.actionId.length === 0) {
+    throw new Error('BNS-05 tool failure collector requires actionId');
+  }
+  if (!isActionKind(input.actionKind)) {
+    throw new Error('BNS-05 tool failure collector requires a valid actionKind');
+  }
+  if (input.reason.length === 0) {
+    throw new Error('BNS-05 tool failure collector requires reason');
   }
 }

@@ -13,6 +13,7 @@ import {
   ensureLifecycleEvidenceCollectorRegistered,
   getLifecycleEvidenceCollectorSnapshot,
   produceRuntimeLifecycleEvidenceArtifact,
+  produceToolFailureLifecycleEvidenceArtifact,
   resetLifecycleEvidenceCollectorForTests,
   setLifecycleEvidenceCollectorHygieneSnapshotProviderForTests,
   setLifecycleEvidenceCollectorMaxBufferedEventsForTests,
@@ -694,6 +695,52 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
       artifactId: 'runtime-artifact-store',
       actionLog: { available: true, totalActions: 1 },
     });
+  });
+
+  it('records bounded failed tool evidence without raw payload content', () => {
+    const artifact = produceToolFailureLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-tool-failure',
+      evidenceLevel: 'integration',
+      scenarioId: 'tool-failure-read-page',
+      scenarioClass: 'postcondition_failure_v1',
+      startedAtMs: T0,
+      endedAtMs: T0 + 10,
+      actionId: 'mcp:chrome_read_page:42',
+      actionKind: 'unknown',
+      tabId: 42,
+      reason: 'page_unreadable',
+      observedOutcome: 'unknown',
+      observedOutcomeConfidence: 0.85,
+    });
+
+    expect(artifact.finalVerdict).toMatchObject({
+      verdict: 'task_failed',
+      reason: 'postcondition_failed',
+    });
+    expect(artifact.actionLog).toMatchObject({
+      available: true,
+      totalActions: 1,
+      failed: 1,
+    });
+    expect(artifact.actionLog.entries[0]).toMatchObject({
+      actionId: 'mcp:chrome_read_page:42',
+      actionKind: 'unknown',
+      tabId: 42,
+      verdict: 'failed',
+      reason: 'page_unreadable',
+      sourceEventRefs: [{ kind: 'unknown', id: 'mcp:chrome_read_page:42', origin: 'runtime' }],
+      sourceOrigins: ['runtime', 'inference'],
+    });
+    expect(getLifecycleEvidenceArtifactStoreSnapshot()).toMatchObject({
+      bufferedArtifacts: 1,
+      lastArtifactId: 'runtime-artifact-tool-failure',
+      lastFinalVerdict: 'task_failed',
+    });
+    const serialized = JSON.stringify(listLifecycleEvidenceArtifacts());
+    expect(serialized).not.toContain('sourcePayload');
+    expect(serialized).not.toContain('Authorization');
+    expect(serialized).not.toContain('cookie');
+    expect(serialized).not.toContain('PRIVATE_PAGE_BODY_SHOULD_NOT_APPEAR');
   });
 
   it('derives BNS-03 dynamic watch scope transitions from task context', () => {
