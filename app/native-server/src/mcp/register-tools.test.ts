@@ -1668,7 +1668,7 @@ describe('handleToolCall execution wrapper', () => {
       });
     });
 
-    it('keeps unknown ownership when the source tab is missing', async () => {
+    it('falls back to the projection tab when the visible-row source tab is missing', async () => {
       markBridgeReady();
       const ctx = sessionManager.getOrCreateExternalTaskContext('unknown-owner-search-rows');
       ctx.noteVisibleRegionRows({
@@ -1724,6 +1724,11 @@ describe('handleToolCall execution wrapper', () => {
 
       expect(payload.pageProjection).toMatchObject({
         ownerType: 'user_owned',
+      });
+      expect(payload.ownershipRuntime).toMatchObject({
+        currentTabId: 1,
+        currentOwnerType: 'user_owned',
+        currentTabRunOwnershipVerdict: 'not_run_owned_by_task',
       });
     });
 
