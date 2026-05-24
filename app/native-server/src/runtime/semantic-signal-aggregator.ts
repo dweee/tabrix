@@ -42,6 +42,9 @@ export function deriveWaitForStabilitySignal(
     if (verdict === 'wait_for_stability') {
       return buildSignal(event, 'wait_for_stability', nowMs, options.confidence ?? 0.8);
     }
+    if (verdict === 'ready_to_act') {
+      return buildSignal(event, 'ready_to_act', nowMs, options.confidence ?? 0.85);
+    }
     if (verdict === 'stable') return null;
     latestUnknown ??= event;
   }
@@ -68,7 +71,7 @@ function sortNewestFirst(events: readonly BrowserStreamEvent[]): BrowserStreamEv
     .sort((a, b) => b.observedAtMs - a.observedAtMs);
 }
 
-type EventVerdict = 'wait_for_stability' | 'stable' | 'unknown';
+type EventVerdict = 'wait_for_stability' | 'ready_to_act' | 'stable' | 'unknown';
 
 function classifyEvent(event: BrowserStreamEvent): EventVerdict {
   const data = getBridgeData(event.sourcePayload);
@@ -113,6 +116,14 @@ function classifyFactSnapshotData(data: Record<string, unknown>): EventVerdict {
 
   if (signals.routeStable === 'false' || signals.documentComplete === 'false') {
     return 'wait_for_stability';
+  }
+  if (
+    signals.documentComplete === 'true' &&
+    signals.routeStable === 'true' &&
+    signals.keyRegionReady === 'true' &&
+    signals.networkQuiet === 'true'
+  ) {
+    return 'ready_to_act';
   }
   if (signals.routeStable === 'true' || signals.documentComplete === 'true') {
     return 'stable';

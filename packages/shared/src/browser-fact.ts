@@ -1133,10 +1133,15 @@ export interface StreamHealthSnapshot {
  * schema. Keep every new value brand-neutral and backed by deterministic
  * evidence before adding it here.
  */
-export type SemanticSignalKind = 'wait_for_stability' | 'postcondition_failed' | 'unknown';
+export type SemanticSignalKind =
+  | 'wait_for_stability'
+  | 'ready_to_act'
+  | 'postcondition_failed'
+  | 'unknown';
 
 export const SEMANTIC_SIGNAL_KINDS = [
   'wait_for_stability',
+  'ready_to_act',
   'postcondition_failed',
   'unknown',
 ] as const satisfies ReadonlyArray<SemanticSignalKind>;

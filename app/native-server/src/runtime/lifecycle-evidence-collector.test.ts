@@ -200,6 +200,57 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     });
   });
 
+  it('derives ready_to_act signal sequence from runtime readiness facts', () => {
+    ensureLifecycleEvidenceCollectorRegistered();
+    dispatchBridgeObservationToStream(
+      makeBridgeMessage('fact_snapshot', {
+        tabId: 42,
+        observedAtMs: T0 + 10,
+        data: {
+          factSnapshotId: 'fact-ready',
+          payload: {
+            eventKind: 'readiness_signal',
+            signals: {
+              documentComplete: 'true',
+              routeStable: 'true',
+              keyRegionReady: 'true',
+              networkQuiet: 'true',
+              observedAtMs: T0 + 10,
+            },
+            tabId: 42,
+            urlPattern: 'example.test/list',
+            sessionId: null,
+          },
+        },
+      }),
+    );
+
+    const artifact = produceRuntimeLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-ready-to-act',
+      evidenceLevel: 'integration',
+      scenarioId: 'scenario-ready-to-act',
+      scenarioClass: 'search_result_delta_v1',
+      startedAtMs: T0,
+      endedAtMs: T0 + 30,
+      eventWindow: { tabIds: [42] },
+    });
+
+    expect(getLifecycleEvidenceCollectorSnapshot()).toMatchObject({
+      bufferedSignals: 1,
+      lastSignalAtMs: T0 + 10,
+    });
+    expect(artifact.signalSequence).toMatchObject({
+      available: true,
+      totalSignals: 1,
+      signalsByKind: { ready_to_act: 1 },
+    });
+    expect(artifact.signalSequence.signals[0]).toMatchObject({
+      kind: 'ready_to_act',
+      confidence: 0.85,
+      sourceOrigins: ['browser_stream'],
+    });
+  });
+
   it('does not derive a wait signal for stable lifecycle completion', () => {
     ensureLifecycleEvidenceCollectorRegistered();
     dispatchBridgeObservationToStream(

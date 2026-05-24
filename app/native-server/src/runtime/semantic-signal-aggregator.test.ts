@@ -146,6 +146,80 @@ describe('semantic-signal-aggregator — wait_for_stability', () => {
     expect(signal?.kind).toBe('wait_for_stability');
   });
 
+  it('emits ready_to_act for a readiness snapshot that proves all readiness gates', () => {
+    const signal = deriveWaitForStabilitySignal(
+      [
+        makeEvent({
+          streamEventId: 'ready-fact',
+          kind: 'observation_fact_snapshot',
+          sourceObservationKind: 'fact_snapshot',
+          sourcePayload: {
+            kind: 'fact_snapshot',
+            data: {
+              factSnapshotId: 'fact-ready',
+              observedAtMs: T0,
+              payload: {
+                eventKind: 'readiness_signal',
+                signals: {
+                  documentComplete: 'true',
+                  routeStable: 'true',
+                  keyRegionReady: 'true',
+                  networkQuiet: 'true',
+                  observedAtMs: T0,
+                },
+                tabId: 100,
+                urlPattern: 'example.test/list',
+                sessionId: null,
+              },
+            },
+          },
+        }),
+      ],
+      PRODUCED_AT,
+    );
+
+    expect(signal).toMatchObject({
+      kind: 'ready_to_act',
+      confidence: 0.85,
+      sourceOrigins: ['browser_stream'],
+    });
+    expect(signal?.signalId).toBe(`sig_ready_to_act_ready-fact_${PRODUCED_AT}`);
+  });
+
+  it('does not emit ready_to_act when any readiness gate is unknown', () => {
+    const signal = deriveWaitForStabilitySignal(
+      [
+        makeEvent({
+          kind: 'observation_fact_snapshot',
+          sourceObservationKind: 'fact_snapshot',
+          sourcePayload: {
+            kind: 'fact_snapshot',
+            data: {
+              factSnapshotId: 'fact-not-ready',
+              observedAtMs: T0,
+              payload: {
+                eventKind: 'readiness_signal',
+                signals: {
+                  documentComplete: 'true',
+                  routeStable: 'true',
+                  keyRegionReady: 'unknown',
+                  networkQuiet: 'true',
+                  observedAtMs: T0,
+                },
+                tabId: 100,
+                urlPattern: 'example.test/list',
+                sessionId: null,
+              },
+            },
+          },
+        }),
+      ],
+      PRODUCED_AT,
+    );
+
+    expect(signal).toBeNull();
+  });
+
   it('does not emit for unsupported fact payloads or live bfcache tab events', () => {
     const unsupportedFact = deriveWaitForStabilitySignal(
       [
@@ -218,10 +292,10 @@ describe('semantic-signal-aggregator — wait_for_stability', () => {
   it('keeps unimplemented semantic signal kinds out of shared contract', () => {
     expect(SEMANTIC_SIGNAL_KINDS).toEqual([
       'wait_for_stability',
+      'ready_to_act',
       'postcondition_failed',
       'unknown',
     ]);
-    expect(SEMANTIC_SIGNAL_KINDS).not.toContain('ready_to_act');
     expect(SEMANTIC_SIGNAL_KINDS).not.toContain('user_took_over');
   });
 });
