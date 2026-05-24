@@ -1340,7 +1340,7 @@ describe('handleToolCall execution wrapper', () => {
       });
       expect(getLifecycleEvidenceArtifactStoreSnapshot()).toMatchObject({
         bufferedArtifacts: 1,
-        lastFinalVerdict: 'task_success',
+        lastFinalVerdict: 'unknown',
       });
       const artifacts = listLifecycleEvidenceArtifacts();
       expect(artifacts).toHaveLength(1);
@@ -1350,16 +1350,16 @@ describe('handleToolCall execution wrapper', () => {
         actionLog: {
           available: true,
           totalActions: 1,
-          passed: 1,
+          passed: 0,
           failed: 0,
-          unknown: 0,
+          unknown: 1,
         },
         browserHygiene: {
           available: true,
           runOwnedTabsClosed: 1,
           baselineChanged: false,
         },
-        finalVerdict: { verdict: 'task_success', reason: 'postconditions_passed' },
+        finalVerdict: { verdict: 'unknown', reason: 'postconditions_unknown' },
         claimBoundary: {
           deterministicArtifactOnly: true,
           realBrowserProven: false,
@@ -1370,8 +1370,8 @@ describe('handleToolCall execution wrapper', () => {
       expect(artifacts[0].actionLog.entries[0]).toMatchObject({
         actionKind: 'unknown',
         tabId: 1,
-        verdict: 'passed',
-        reason: 'close_tabs_cleanup_succeeded',
+        verdict: 'unknown',
+        reason: 'unsupported_action_kind_postcondition',
       });
       const serializedArtifact = JSON.stringify(artifacts[0]);
       expect(serializedArtifact).not.toContain('PRIVATE_PAGE_BODY_SHOULD_NOT_APPEAR');

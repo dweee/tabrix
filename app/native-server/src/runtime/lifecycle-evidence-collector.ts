@@ -21,7 +21,10 @@ import {
   type EventStreamSubscriber,
 } from './browser-event-stream';
 import { classifyActionOutcome } from './action-outcome-classifier';
-import { verifyActionPostcondition } from './action-postcondition-verifier';
+import {
+  getActionPostconditionCoverageMatrix,
+  verifyActionPostcondition,
+} from './action-postcondition-verifier';
 import { recordLifecycleEvidenceArtifact } from './lifecycle-evidence-artifact-store';
 import { produceLifecycleEvidenceArtifact } from './lifecycle-evidence-artifact';
 import {
@@ -339,13 +342,14 @@ export function produceToolCloseoutLifecycleEvidenceArtifact(
   input: ToolCloseoutLifecycleEvidenceArtifactInput,
 ): LifecycleEvidenceArtifact {
   assertValidToolCloseoutArtifactInput(input);
+  const supportedPostcondition = isSupportedCloseoutPostconditionAction(input.actionKind);
   const postconditionResult: PostconditionResult = {
     actionId: input.actionId,
     actionKind: input.actionKind,
     tabId: input.tabId,
     urlPattern: null,
-    verdict: 'passed',
-    reason: input.reason,
+    verdict: supportedPostcondition ? 'passed' : 'unknown',
+    reason: supportedPostcondition ? input.reason : 'unsupported_action_kind_postcondition',
     observedOutcome: input.observedOutcome ?? 'unknown',
     observedOutcomeConfidence: input.observedOutcomeConfidence ?? 0.75,
     sourceEventRefs: [{ kind: 'unknown', id: input.actionId, origin: 'runtime' }],
@@ -466,6 +470,13 @@ function extractActionOutcomeEnvelope(sourcePayload: unknown): ActionOutcomeEven
 
 function isActionKind(value: unknown): value is ActionKind {
   return typeof value === 'string' && (ACTION_KINDS as readonly string[]).includes(value);
+}
+
+function isSupportedCloseoutPostconditionAction(actionKind: ActionKind): boolean {
+  const coverageRow = getActionPostconditionCoverageMatrix().find(
+    (row) => row.sharedActionKind === actionKind,
+  );
+  return coverageRow?.status === 'supported';
 }
 
 function buildRuntimeBrowserHygiene(): Partial<LifecycleEvidenceBrowserHygiene> | null {

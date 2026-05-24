@@ -744,7 +744,7 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     expect(serialized).not.toContain('PRIVATE_PAGE_BODY_SHOULD_NOT_APPEAR');
   });
 
-  it('records bounded successful tool closeout evidence with browser hygiene', () => {
+  it('records bounded successful tool closeout evidence for supported actions with browser hygiene', () => {
     const artifact = produceToolCloseoutLifecycleEvidenceArtifact({
       artifactId: 'runtime-artifact-tool-closeout',
       evidenceLevel: 'integration',
@@ -752,10 +752,10 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
       scenarioClass: 'browser_hygiene_closeout_v1',
       startedAtMs: T0,
       endedAtMs: T0 + 10,
-      actionId: 'mcp:chrome_close_tabs:42',
-      actionKind: 'unknown',
+      actionId: 'mcp:chrome_click_element:42',
+      actionKind: 'click',
       tabId: 42,
-      reason: 'close_tabs_cleanup_succeeded',
+      reason: 'click_postcondition_succeeded',
       browserHygiene: {
         available: true,
         baselineTabs: null,
@@ -777,11 +777,11 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
       unknown: 0,
     });
     expect(artifact.actionLog.entries[0]).toMatchObject({
-      actionId: 'mcp:chrome_close_tabs:42',
-      actionKind: 'unknown',
+      actionId: 'mcp:chrome_click_element:42',
+      actionKind: 'click',
       tabId: 42,
       verdict: 'passed',
-      reason: 'close_tabs_cleanup_succeeded',
+      reason: 'click_postcondition_succeeded',
     });
     expect(artifact.browserHygiene).toMatchObject({
       available: true,
@@ -805,6 +805,57 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     expect(serialized).not.toContain('secret-token');
   });
 
+  it('downgrades closeout postconditions for unsupported action kinds instead of claiming success', () => {
+    const baseInput = {
+      artifactId: 'runtime-artifact-tool-closeout-unsupported',
+      evidenceLevel: 'integration' as const,
+      scenarioId: 'tool-close-tabs-success',
+      scenarioClass: 'browser_hygiene_closeout_v1',
+      startedAtMs: T0,
+      endedAtMs: T0 + 10,
+      actionId: 'mcp:chrome_close_tabs:42',
+      tabId: 42,
+      reason: 'close_tabs_cleanup_succeeded',
+      browserHygiene: {
+        available: true,
+        runOwnedTabsClosed: 1,
+        baselineChanged: false,
+      },
+    };
+
+    const unknownArtifact = produceToolCloseoutLifecycleEvidenceArtifact({
+      ...baseInput,
+      actionKind: 'unknown',
+    });
+    const keyboardArtifact = produceToolCloseoutLifecycleEvidenceArtifact({
+      ...baseInput,
+      artifactId: 'runtime-artifact-tool-closeout-keyboard',
+      actionKind: 'keyboard',
+    });
+
+    for (const artifact of [unknownArtifact, keyboardArtifact]) {
+      expect(artifact.finalVerdict).toMatchObject({
+        verdict: 'unknown',
+        reason: 'postconditions_unknown',
+      });
+      expect(artifact.actionLog).toMatchObject({
+        available: true,
+        totalActions: 1,
+        passed: 0,
+        failed: 0,
+        unknown: 1,
+      });
+      expect(artifact.actionLog.entries[0]).toMatchObject({
+        verdict: 'unknown',
+        reason: 'unsupported_action_kind_postcondition',
+      });
+    }
+    expect(getLifecycleEvidenceArtifactStoreSnapshot()).toMatchObject({
+      bufferedArtifacts: 2,
+      lastFinalVerdict: 'unknown',
+    });
+  });
+
   it('rejects closeout success when browser hygiene changed', () => {
     expect(() =>
       produceToolCloseoutLifecycleEvidenceArtifact({
@@ -815,7 +866,7 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
         startedAtMs: T0,
         endedAtMs: T0 + 10,
         actionId: 'mcp:chrome_close_tabs:42',
-        actionKind: 'unknown',
+        actionKind: 'click',
         tabId: 42,
         reason: 'close_tabs_cleanup_succeeded',
         browserHygiene: {
