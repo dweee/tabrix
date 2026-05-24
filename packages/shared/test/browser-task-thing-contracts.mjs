@@ -19,6 +19,8 @@ import {
   BROWSER_TASK_EVIDENCE_LEVEL_VALUES,
   BROWSER_TASK_FIXTURE_ARTIFACT_KIND,
   BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES,
+  BROWSER_TASK_LOCAL_EVIDENCE_LEVEL_VALUES,
+  BROWSER_TASK_REAL_ACCEPTANCE_EVIDENCE_LEVEL_VALUES,
   BROWSER_TASK_SCENARIO_CLASS_VALUES,
   BROWSER_TASK_STATUS_VALUES,
   BROWSER_TASK_THING_CONTRACT_VERSION,
@@ -44,10 +46,40 @@ assert.ok(BROWSER_TASK_STATUS_VALUES.includes('pass_with_gaps'));
 assert.ok(BROWSER_TASK_STATE_VALUES.includes('login_required'));
 assert.ok(BROWSER_TASK_NEXT_ACTION_VALUES.includes('user_collaboration'));
 assert.ok(BROWSER_TASK_SCENARIO_CLASS_VALUES.includes('search_result_delta_v1'));
+assert.deepEqual(
+  [
+    'search_result_delta_v1',
+    'auth_collaboration_resume_v1',
+    'article_long_content_read_v1',
+    'user_takeover_collaboration_v1',
+    'error_recovery_v1',
+    'multi_tab_hygiene_v1',
+    'postcondition_failure_v1',
+    'competitor_same_scenario_v1',
+  ].filter((scenarioClass) => !BROWSER_TASK_SCENARIO_CLASS_VALUES.includes(scenarioClass)),
+  [],
+);
 assert.deepEqual(BROWSER_TASK_SCENARIO_PRIORITY_ORDER.slice(0, 2), [
   'search_result_delta_v1',
   'article_long_content_read_v1',
 ]);
+assert.deepEqual(
+  [...BROWSER_TASK_SCENARIO_PRIORITY_ORDER],
+  [
+    'search_result_delta_v1',
+    'article_long_content_read_v1',
+    'background_no_focus_v1',
+    'active_user_tab_protection_v1',
+    'auth_collaboration_resume_v1',
+    'user_takeover_collaboration_v1',
+    'error_recovery_v1',
+    'multi_tab_hygiene_v1',
+    'postcondition_failure_v1',
+    'long_content_structured_read_gate_v1',
+    'browser_hygiene_closeout_v1',
+    'competitor_same_scenario_v1',
+  ],
+);
 assert.ok(BROWSER_ASSISTANT_CLIENT_VALUES.includes('claude_code'));
 assert.ok(BROWSER_PROFILE_MODE_VALUES.includes('same_profile'));
 assert.ok(BROWSER_COMPARISON_MODE_VALUES.includes('reference_only'));
@@ -68,11 +100,31 @@ assert.ok(BROWSER_SOURCE_FRESHNESS_VALUES.includes('fresh'));
 assert.ok(BROWSER_USER_ACTIVITY_LEVEL_VALUES.includes('recent_input'));
 assert.ok(BROWSER_INTERFERENCE_RISK_VALUES.includes('high'));
 assert.ok(BROWSER_TASK_EVIDENCE_LEVEL_VALUES.includes('real_browser'));
+assert.ok(BROWSER_TASK_EVIDENCE_LEVEL_VALUES.includes('private_scenario'));
+assert.ok(BROWSER_TASK_EVIDENCE_LEVEL_VALUES.includes('same_scenario_competitor'));
+assert.ok(BROWSER_TASK_EVIDENCE_LEVEL_VALUES.includes('release_gate'));
+assert.deepEqual([...BROWSER_TASK_LOCAL_EVIDENCE_LEVEL_VALUES], [
+  'source',
+  'unit',
+  'integration',
+  'local_runner',
+]);
+assert.deepEqual([...BROWSER_TASK_REAL_ACCEPTANCE_EVIDENCE_LEVEL_VALUES], [
+  'real_browser',
+  'private_scenario',
+  'competitor',
+  'same_scenario_competitor',
+  'release_gate',
+]);
 assert.ok(BROWSER_EVIDENCE_FRESHNESS_VALUES.includes('expired'));
 assert.ok(BROWSER_COMPETITOR_LANE_VALUES.includes('same_profile_extension'));
 assert.equal(BROWSER_TASK_FIXTURE_ARTIFACT_KIND, 'deterministic_fixture');
 assert.ok(BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES.includes('unit'));
 assert.equal(BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES.includes('real_browser'), false);
+assert.equal(BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES.includes('private_scenario'), false);
+assert.equal(BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES.includes('competitor'), false);
+assert.equal(BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES.includes('same_scenario_competitor'), false);
+assert.equal(BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES.includes('release_gate'), false);
 
 const summary = {
   taskId: 'btt_001',

@@ -1316,4 +1316,55 @@ describe('lifecycle-evidence-collector — bounds and validation', () => {
       }),
     ).toThrow(/endedAtMs >= startedAtMs/);
   });
+
+  it.each([
+    'real_browser',
+    'private_scenario',
+    'competitor',
+    'same_scenario_competitor',
+    'release_gate',
+  ])('rejects %s evidence from runtime collectors', (evidenceLevel) => {
+    expect(() =>
+      produceRuntimeLifecycleEvidenceArtifact({
+        artifactId: `runtime-artifact-${evidenceLevel}`,
+        evidenceLevel,
+        scenarioId: `scenario-${evidenceLevel}`,
+        scenarioClass: 'search_result_delta_v1',
+        startedAtMs: T0,
+        endedAtMs: T0,
+        eventWindow: { tabIds: [42] },
+      } as any),
+    ).toThrow(/only accepts source, unit, integration, or local_runner evidence/);
+
+    expect(() =>
+      produceToolFailureLifecycleEvidenceArtifact({
+        artifactId: `tool-failure-artifact-${evidenceLevel}`,
+        evidenceLevel,
+        scenarioId: `scenario-${evidenceLevel}`,
+        scenarioClass: 'postcondition_failure_v1',
+        startedAtMs: T0,
+        endedAtMs: T0,
+        actionId: 'action-1',
+        actionKind: 'click',
+        tabId: 42,
+        reason: 'failure reason',
+      } as any),
+    ).toThrow(/only accepts source, unit, integration, or local_runner evidence/);
+
+    expect(() =>
+      produceToolCloseoutLifecycleEvidenceArtifact({
+        artifactId: `tool-closeout-artifact-${evidenceLevel}`,
+        evidenceLevel,
+        scenarioId: `scenario-${evidenceLevel}`,
+        scenarioClass: 'browser_hygiene_closeout_v1',
+        startedAtMs: T0,
+        endedAtMs: T0,
+        actionId: 'action-2',
+        actionKind: 'click',
+        tabId: 42,
+        reason: 'closeout reason',
+        browserHygiene: { available: true },
+      } as any),
+    ).toThrow(/only accepts source, unit, integration, or local_runner evidence/);
+  });
 });

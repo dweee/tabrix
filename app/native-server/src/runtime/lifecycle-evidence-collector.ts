@@ -15,7 +15,7 @@ import type {
   PostconditionResult,
   SemanticSignal,
 } from '@tabrix/shared';
-import { ACTION_KINDS } from '@tabrix/shared';
+import { ACTION_KINDS, BROWSER_TASK_LOCAL_EVIDENCE_LEVEL_VALUES } from '@tabrix/shared';
 import {
   registerEventStreamSubscriber,
   unregisterEventStreamSubscriber,
@@ -41,7 +41,7 @@ import { deriveDynamicWatchScope, type DynamicWatchScope } from './dynamic-watch
 const SUBSCRIBER_ID = 'bns05_lifecycle_evidence_collector';
 const DEFAULT_MAX_BUFFERED_EVENTS = 500;
 
-type RuntimeEvidenceLevel = Exclude<BrowserTaskEvidenceLevel, 'real_browser' | 'competitor'>;
+type RuntimeEvidenceLevel = (typeof BROWSER_TASK_LOCAL_EVIDENCE_LEVEL_VALUES)[number];
 
 interface BufferedLifecycleEvidenceEvent {
   streamEventId: string;
@@ -607,9 +607,10 @@ function toSanitizedStreamEvent(event: BufferedLifecycleEvidenceEvent): BrowserS
 }
 
 function assertValidRuntimeArtifactInput(input: RuntimeLifecycleEvidenceArtifactInput): void {
-  const evidenceLevel = input.evidenceLevel as BrowserTaskEvidenceLevel;
-  if (evidenceLevel === 'real_browser' || evidenceLevel === 'competitor') {
-    throw new Error('BNS-05 runtime collector does not accept real_browser or competitor evidence');
+  if (!isRuntimeEvidenceLevel(input.evidenceLevel)) {
+    throw new Error(
+      'BNS-05 runtime collector only accepts source, unit, integration, or local_runner evidence',
+    );
   }
   if (!Number.isFinite(input.startedAtMs) || !Number.isFinite(input.endedAtMs)) {
     throw new Error('BNS-05 runtime collector requires finite startedAtMs and endedAtMs');
@@ -625,10 +626,9 @@ function assertValidRuntimeArtifactInput(input: RuntimeLifecycleEvidenceArtifact
 function assertValidToolFailureArtifactInput(
   input: ToolFailureLifecycleEvidenceArtifactInput,
 ): void {
-  const evidenceLevel = input.evidenceLevel as BrowserTaskEvidenceLevel;
-  if (evidenceLevel === 'real_browser' || evidenceLevel === 'competitor') {
+  if (!isRuntimeEvidenceLevel(input.evidenceLevel)) {
     throw new Error(
-      'BNS-05 tool failure collector does not accept real_browser or competitor evidence',
+      'BNS-05 tool failure collector only accepts source, unit, integration, or local_runner evidence',
     );
   }
   if (!Number.isFinite(input.startedAtMs) || !Number.isFinite(input.endedAtMs)) {
@@ -651,10 +651,9 @@ function assertValidToolFailureArtifactInput(
 function assertValidToolCloseoutArtifactInput(
   input: ToolCloseoutLifecycleEvidenceArtifactInput,
 ): void {
-  const evidenceLevel = input.evidenceLevel as BrowserTaskEvidenceLevel;
-  if (evidenceLevel === 'real_browser' || evidenceLevel === 'competitor') {
+  if (!isRuntimeEvidenceLevel(input.evidenceLevel)) {
     throw new Error(
-      'BNS-05 tool closeout collector does not accept real_browser or competitor evidence',
+      'BNS-05 tool closeout collector only accepts source, unit, integration, or local_runner evidence',
     );
   }
   if (!Number.isFinite(input.startedAtMs) || !Number.isFinite(input.endedAtMs)) {
@@ -675,4 +674,12 @@ function assertValidToolCloseoutArtifactInput(
   if (input.browserHygiene.baselineChanged !== false) {
     throw new Error('BNS-05 tool closeout collector requires unchanged browser hygiene');
   }
+}
+
+function isRuntimeEvidenceLevel(
+  evidenceLevel: BrowserTaskEvidenceLevel,
+): evidenceLevel is RuntimeEvidenceLevel {
+  return (BROWSER_TASK_LOCAL_EVIDENCE_LEVEL_VALUES as readonly BrowserTaskEvidenceLevel[]).includes(
+    evidenceLevel,
+  );
 }

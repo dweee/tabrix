@@ -22,7 +22,10 @@ import type {
   PostconditionVerdict,
   SemanticSignal,
 } from '@tabrix/shared';
-import { LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_KINDS } from '@tabrix/shared';
+import {
+  BROWSER_TASK_LOCAL_EVIDENCE_LEVEL_VALUES,
+  LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_KINDS,
+} from '@tabrix/shared';
 
 const DEFAULT_MAX_KEY_EVENTS = 50;
 
@@ -87,8 +90,7 @@ export function produceLifecycleEvidenceArtifact(
     browserHygiene,
     sourceTruthChain: input.sourceTruthChain ?? null,
     claimBoundary: {
-      deterministicArtifactOnly:
-        input.evidenceLevel !== 'real_browser' && input.evidenceLevel !== 'competitor',
+      deterministicArtifactOnly: isLocalEvidenceLevel(input.evidenceLevel),
       realBrowserProven: false,
       commercialGradeProven: false,
       competitorSuperiorityProven: false,
@@ -98,6 +100,12 @@ export function produceLifecycleEvidenceArtifact(
     finalVerdict: deriveFinalVerdict(postconditionResults, browserHygiene),
     producedAtMs,
   };
+}
+
+function isLocalEvidenceLevel(evidenceLevel: BrowserTaskEvidenceLevel): boolean {
+  return (BROWSER_TASK_LOCAL_EVIDENCE_LEVEL_VALUES as readonly BrowserTaskEvidenceLevel[]).includes(
+    evidenceLevel,
+  );
 }
 
 function buildScopeTransitions(

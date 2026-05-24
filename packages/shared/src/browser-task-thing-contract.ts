@@ -47,6 +47,12 @@ export const BROWSER_TASK_SCENARIO_CLASS_VALUES = [
   'active_user_tab_protection_v1',
   'auth_collaboration_resume_v1',
   'article_long_content_read_v1',
+  'user_takeover_collaboration_v1',
+  'error_recovery_v1',
+  'multi_tab_hygiene_v1',
+  'postcondition_failure_v1',
+  'long_content_structured_read_gate_v1',
+  'browser_hygiene_closeout_v1',
   'competitor_same_scenario_v1',
 ] as const;
 export type BrowserTaskScenarioClass = (typeof BROWSER_TASK_SCENARIO_CLASS_VALUES)[number];
@@ -57,6 +63,12 @@ export const BROWSER_TASK_SCENARIO_PRIORITY_ORDER = [
   'background_no_focus_v1',
   'active_user_tab_protection_v1',
   'auth_collaboration_resume_v1',
+  'user_takeover_collaboration_v1',
+  'error_recovery_v1',
+  'multi_tab_hygiene_v1',
+  'postcondition_failure_v1',
+  'long_content_structured_read_gate_v1',
+  'browser_hygiene_closeout_v1',
   'competitor_same_scenario_v1',
 ] as const satisfies readonly BrowserTaskScenarioClass[];
 
@@ -325,9 +337,31 @@ export const BROWSER_TASK_EVIDENCE_LEVEL_VALUES = [
   'integration',
   'local_runner',
   'real_browser',
+  'private_scenario',
   'competitor',
+  'same_scenario_competitor',
+  'release_gate',
 ] as const;
 export type BrowserTaskEvidenceLevel = (typeof BROWSER_TASK_EVIDENCE_LEVEL_VALUES)[number];
+
+export const BROWSER_TASK_LOCAL_EVIDENCE_LEVEL_VALUES = [
+  'source',
+  'unit',
+  'integration',
+  'local_runner',
+] as const satisfies readonly BrowserTaskEvidenceLevel[];
+export type BrowserTaskLocalEvidenceLevel =
+  (typeof BROWSER_TASK_LOCAL_EVIDENCE_LEVEL_VALUES)[number];
+
+export const BROWSER_TASK_REAL_ACCEPTANCE_EVIDENCE_LEVEL_VALUES = [
+  'real_browser',
+  'private_scenario',
+  'competitor',
+  'same_scenario_competitor',
+  'release_gate',
+] as const satisfies readonly BrowserTaskEvidenceLevel[];
+export type BrowserTaskRealAcceptanceEvidenceLevel =
+  (typeof BROWSER_TASK_REAL_ACCEPTANCE_EVIDENCE_LEVEL_VALUES)[number];
 
 export const BROWSER_EVIDENCE_FRESHNESS_VALUES = ['fresh', 'stale', 'expired'] as const;
 export type BrowserEvidenceFreshness = (typeof BROWSER_EVIDENCE_FRESHNESS_VALUES)[number];

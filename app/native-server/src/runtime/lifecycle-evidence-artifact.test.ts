@@ -724,4 +724,24 @@ describe('lifecycle-evidence-artifact — claim boundary', () => {
     expect(artifact.claimBoundary.realBrowserProven).toBe(false);
     expect(artifact.claimBoundary.commercialGradeProven).toBe(false);
   });
+
+  it.each(['private_scenario', 'same_scenario_competitor', 'release_gate'] as const)(
+    'does not label %s evidence as deterministic-only',
+    (evidenceLevel) => {
+      const artifact = produceLifecycleEvidenceArtifact(
+        {
+          artifactId: `artifact-${evidenceLevel}`,
+          evidenceLevel,
+          scenarioId: `scenario-${evidenceLevel}`,
+          scenarioClass: 'search_result_delta_v1',
+          startedAtMs: T0,
+        },
+        { now: () => PRODUCED_AT },
+      );
+
+      expect(artifact.claimBoundary.deterministicArtifactOnly).toBe(false);
+      expect(artifact.claimBoundary.commercialGradeProven).toBe(false);
+      expect(artifact.claimBoundary.competitorSuperiorityProven).toBe(false);
+    },
+  );
 });
