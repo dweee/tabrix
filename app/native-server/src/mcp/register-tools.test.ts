@@ -1858,6 +1858,72 @@ describe('handleToolCall execution wrapper', () => {
       });
     });
 
+    it('exposes metadata-insufficient structured-read reason in chrome_read_page AI-facing output', async () => {
+      markBridgeReady();
+      const metadataInsufficientPayload = readPagePayloadWithProjection({
+        projectionId: 'projection_long_content_metadata_insufficient',
+        contextChars: 0,
+        changedRegions: ['content_region'],
+        refreshedRefs: ['ref_content_region'],
+        extraPayload: {
+          mode: 'normal',
+          taskMode: 'read',
+          complexityLevel: 'complex',
+          summary: {
+            pageRole: '',
+            primaryRegion: null,
+          },
+        },
+      });
+      const sourcePayload = JSON.parse(metadataInsufficientPayload);
+      expect(sourcePayload.completeTextRegion).toBeUndefined();
+      expect(sourcePayload.visibleRegionRows).toBeUndefined();
+      mockReadPageRoundTrip(metadataInsufficientPayload);
+
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'long-content-metadata-insufficient-gate',
+        mode: 'normal',
+        requestedLayer: 'L0+L1+L2',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.completeTextRegion).toBeUndefined();
+      expect(payload.visibleRegionRows).toBeUndefined();
+      expect(payload.structuredReadGate).toMatchObject({
+        gateId: 'structured-read-gate:projection_long_content_metadata_insufficient',
+        verdict: 'unknown',
+        reasonCode: 'metadata_insufficient',
+        gapDescription: 'insufficient metadata to prove structured read completeness',
+        recommendedAction: 'collect stronger read_page metadata before making a completion claim',
+        metrics: {
+          readMode: 'normal',
+          taskMode: 'read',
+          complexityLevel: 'complex',
+          pageRole: '',
+          primaryRegion: null,
+          completeTextAvailable: null,
+          structureSparse: null,
+          contentSparse: null,
+        },
+        boundary: {
+          metadataOnly: true,
+          rawContentInspected: false,
+          browserIoPerformed: false,
+          publicContractChanged: false,
+          commercialGradeProven: false,
+        },
+      });
+      expect(payload.structuredReadGate.evidenceBasis).not.toContain('completeTextRegion');
+      expect(payload.structuredReadGate.evidenceBasis).not.toContain('visibleRegionRows');
+      expect(payload.aiContextEnvelope.structuredReadGate).toMatchObject({
+        gateId: 'structured-read-gate:projection_long_content_metadata_insufficient',
+        verdict: 'unknown',
+        reasonCode: 'metadata_insufficient',
+        recommendedAction: 'collect stronger read_page metadata before making a completion claim',
+      });
+    });
+
     it('marks AI-facing delta as real-browser evidence only for real tab projections', async () => {
       markBridgeReady();
       mockReadPageRoundTrip(
