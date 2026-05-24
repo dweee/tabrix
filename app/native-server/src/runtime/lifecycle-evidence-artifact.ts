@@ -11,6 +11,7 @@ import type {
   BrowserStreamEvent,
   LifecycleEvidenceArtifact,
   LifecycleEvidenceBrowserHygiene,
+  LifecycleEvidenceBrowserHygieneCheck,
   LifecycleEvidenceFinalVerdict,
   LifecycleEvidenceKeyEvent,
   LifecycleEvidenceScopeTransition,
@@ -21,6 +22,7 @@ import type {
   PostconditionVerdict,
   SemanticSignal,
 } from '@tabrix/shared';
+import { LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_KINDS } from '@tabrix/shared';
 
 const DEFAULT_MAX_KEY_EVENTS = 50;
 
@@ -198,8 +200,29 @@ function buildBrowserHygiene(
     baselineTabs: input?.baselineTabs ?? null,
     runOwnedTabsClosed: input?.runOwnedTabsClosed ?? null,
     baselineChanged: input?.baselineChanged ?? null,
-    notes: input?.notes ?? [],
+    checks: buildBrowserHygieneChecks(input?.checks),
+    notes: input?.notes ? [...input.notes] : [],
   };
+}
+
+function buildBrowserHygieneChecks(
+  input: LifecycleEvidenceBrowserHygieneCheck[] | undefined,
+): LifecycleEvidenceBrowserHygieneCheck[] {
+  const byKind = new Map(input?.map((check) => [check.kind, check]));
+
+  return LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_KINDS.filter((kind) => kind !== 'unknown').map(
+    (kind) => {
+      const reported = byKind.get(kind);
+      if (reported) {
+        return { ...reported };
+      }
+      return {
+        kind,
+        verdict: 'unknown',
+        reason: 'browser_hygiene_check_not_reported',
+      };
+    },
+  );
 }
 
 function deriveFinalVerdict(
@@ -223,6 +246,17 @@ function deriveFinalVerdict(
     }
     if (browserHygiene.baselineChanged) {
       return { verdict: 'blocked', confidence: 0.7, reason: 'browser_hygiene_changed' };
+    }
+    if (browserHygiene.checks.some((check) => check.verdict === 'fail')) {
+      return { verdict: 'blocked', confidence: 0.75, reason: 'browser_hygiene_check_failed' };
+    }
+    const requiredChecksPassed = LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_KINDS.filter(
+      (kind) => kind !== 'unknown',
+    ).every((kind) =>
+      browserHygiene.checks.some((check) => check.kind === kind && check.verdict === 'pass'),
+    );
+    if (!requiredChecksPassed) {
+      return { verdict: 'unknown', confidence: 0.4, reason: 'browser_hygiene_check_incomplete' };
     }
     return { verdict: 'task_success', confidence: 0.8, reason: 'postconditions_passed' };
   }

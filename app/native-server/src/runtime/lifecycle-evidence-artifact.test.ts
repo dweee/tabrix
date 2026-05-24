@@ -1,6 +1,7 @@
 import type {
   BrowserSourceTruthChain,
   BrowserStreamEvent,
+  LifecycleEvidenceBrowserHygieneCheck,
   PostconditionResult,
   SemanticSignal,
 } from '@tabrix/shared';
@@ -73,6 +74,27 @@ function makeSourceTruthChain(): BrowserSourceTruthChain {
     ],
     provenanceCreatedAt: '2026-05-24T00:00:00.000Z',
   };
+}
+
+function makeHygieneChecks(
+  overrides: Partial<LifecycleEvidenceBrowserHygieneCheck>[] = [],
+): LifecycleEvidenceBrowserHygieneCheck[] {
+  const base: LifecycleEvidenceBrowserHygieneCheck[] = [
+    {
+      kind: 'tab_window_baseline',
+      verdict: 'pass',
+      reason: 'pre_post_tab_window_baseline_unchanged',
+    },
+    { kind: 'active_tab_restore', verdict: 'pass', reason: 'active_tab_restored' },
+    { kind: 'run_owned_cleanup', verdict: 'pass', reason: 'run_owned_tabs_cleaned' },
+    { kind: 'user_owned_protection', verdict: 'pass', reason: 'user_owned_tabs_protected' },
+    { kind: 'failure_cleanup', verdict: 'pass', reason: 'failure_cleanup_not_needed' },
+  ];
+
+  return base.map((check) => {
+    const override = overrides.find((candidate) => candidate.kind === check.kind);
+    return { ...check, ...override };
+  });
 }
 
 describe('lifecycle-evidence-artifact — artifact shape', () => {
@@ -438,6 +460,63 @@ describe('lifecycle-evidence-artifact — action log and verdicts', () => {
     });
   });
 
+  it('keeps verdict unknown when browser hygiene omits fixed checklist evidence', () => {
+    const artifact = produceLifecycleEvidenceArtifact(
+      {
+        artifactId: 'artifact-6-hygiene-incomplete',
+        evidenceLevel: 'unit',
+        scenarioId: 'scenario-6-hygiene-incomplete',
+        scenarioClass: 'search_result_delta_v1',
+        startedAtMs: T0,
+        postconditionEvidence: {
+          source: 'bns_04_verifier',
+          results: [makePostcondition({ verdict: 'passed' })],
+        },
+        browserHygiene: {
+          available: true,
+          baselineTabs: 3,
+          runOwnedTabsClosed: 1,
+          baselineChanged: false,
+          notes: [],
+        },
+      },
+      { now: () => PRODUCED_AT },
+    );
+
+    expect(artifact.browserHygiene.checks).toEqual([
+      {
+        kind: 'tab_window_baseline',
+        verdict: 'unknown',
+        reason: 'browser_hygiene_check_not_reported',
+      },
+      {
+        kind: 'active_tab_restore',
+        verdict: 'unknown',
+        reason: 'browser_hygiene_check_not_reported',
+      },
+      {
+        kind: 'run_owned_cleanup',
+        verdict: 'unknown',
+        reason: 'browser_hygiene_check_not_reported',
+      },
+      {
+        kind: 'user_owned_protection',
+        verdict: 'unknown',
+        reason: 'browser_hygiene_check_not_reported',
+      },
+      {
+        kind: 'failure_cleanup',
+        verdict: 'unknown',
+        reason: 'browser_hygiene_check_not_reported',
+      },
+    ]);
+    expect(artifact.finalVerdict).toEqual({
+      verdict: 'unknown',
+      confidence: 0.4,
+      reason: 'browser_hygiene_check_incomplete',
+    });
+  });
+
   it('derives task_success when postconditions pass and browser hygiene is available', () => {
     const artifact = produceLifecycleEvidenceArtifact(
       {
@@ -455,12 +534,14 @@ describe('lifecycle-evidence-artifact — action log and verdicts', () => {
           baselineTabs: 3,
           runOwnedTabsClosed: 1,
           baselineChanged: false,
+          checks: makeHygieneChecks(),
           notes: [],
         },
       },
       { now: () => PRODUCED_AT },
     );
     expect(artifact.finalVerdict.verdict).toBe('task_success');
+    expect(artifact.browserHygiene.checks).toEqual(makeHygieneChecks());
   });
 
   it('blocks task_success when browser hygiene reports baseline change', () => {
@@ -480,6 +561,7 @@ describe('lifecycle-evidence-artifact — action log and verdicts', () => {
           baselineTabs: 3,
           runOwnedTabsClosed: 0,
           baselineChanged: true,
+          checks: makeHygieneChecks(),
           notes: ['violations=1'],
         },
       },
@@ -489,6 +571,43 @@ describe('lifecycle-evidence-artifact — action log and verdicts', () => {
       verdict: 'blocked',
       confidence: 0.7,
       reason: 'browser_hygiene_changed',
+    });
+  });
+
+  it('blocks task_success when a browser hygiene checklist item fails', () => {
+    const artifact = produceLifecycleEvidenceArtifact(
+      {
+        artifactId: 'artifact-6-hygiene-check-failed',
+        evidenceLevel: 'unit',
+        scenarioId: 'scenario-6-hygiene-check-failed',
+        scenarioClass: 'search_result_delta_v1',
+        startedAtMs: T0,
+        postconditionEvidence: {
+          source: 'bns_04_verifier',
+          results: [makePostcondition({ verdict: 'passed' })],
+        },
+        browserHygiene: {
+          available: true,
+          baselineTabs: 3,
+          runOwnedTabsClosed: 1,
+          baselineChanged: false,
+          checks: makeHygieneChecks([
+            {
+              kind: 'user_owned_protection',
+              verdict: 'fail',
+              reason: 'user_owned_tab_closed',
+            },
+          ]),
+          notes: [],
+        },
+      },
+      { now: () => PRODUCED_AT },
+    );
+
+    expect(artifact.finalVerdict).toEqual({
+      verdict: 'blocked',
+      confidence: 0.75,
+      reason: 'browser_hygiene_check_failed',
     });
   });
 

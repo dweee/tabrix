@@ -10,6 +10,9 @@ import {
   FACT_OBSERVATION_EVENT_KINDS,
   LIFECYCLE_EVENT_KINDS,
   LIFECYCLE_EVIDENCE_ARTIFACT_SECTIONS,
+  LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_KINDS,
+  LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_REASONS,
+  LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_VERDICTS,
   LIFECYCLE_FLAGS,
   LIFECYCLE_STATES,
   NAVIGATION_INTENTS,
@@ -166,6 +169,45 @@ assertClosedVocabulary('LIFECYCLE_EVIDENCE_ARTIFACT_SECTIONS', LIFECYCLE_EVIDENC
   'unknown',
 ]);
 
+assertClosedVocabulary(
+  'LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_KINDS',
+  LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_KINDS,
+  [
+    'tab_window_baseline',
+    'active_tab_restore',
+    'run_owned_cleanup',
+    'user_owned_protection',
+    'failure_cleanup',
+    'unknown',
+  ],
+);
+
+assertClosedVocabulary(
+  'LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_VERDICTS',
+  LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_VERDICTS,
+  ['pass', 'fail', 'unknown'],
+);
+
+assertClosedVocabulary(
+  'LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_REASONS',
+  LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_REASONS,
+  [
+    'pre_post_tab_window_baseline_unchanged',
+    'pre_post_tab_window_baseline_changed',
+    'active_tab_restored',
+    'active_tab_not_restored',
+    'run_owned_tabs_cleaned',
+    'run_owned_tabs_left_open',
+    'user_owned_tabs_protected',
+    'user_owned_tab_closed',
+    'failure_cleanup_completed',
+    'failure_cleanup_failed',
+    'failure_cleanup_not_needed',
+    'browser_hygiene_check_not_reported',
+    'unknown',
+  ],
+);
+
 assertClosedVocabulary('READINESS_STATES', READINESS_STATES, [
   'error',
   'empty',
@@ -273,6 +315,6 @@ console.log(
   JSON.stringify({
     status: 'PASS',
     contract: 'browser-fact',
-    vocabularyCount: 24,
+    vocabularyCount: 27,
   }),
 );

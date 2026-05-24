@@ -1308,11 +1308,74 @@ export interface LifecycleEvidenceActionLog {
   entries: PostconditionResult[];
 }
 
+export type LifecycleEvidenceBrowserHygieneCheckKind =
+  | 'tab_window_baseline'
+  | 'active_tab_restore'
+  | 'run_owned_cleanup'
+  | 'user_owned_protection'
+  | 'failure_cleanup'
+  | 'unknown';
+
+export const LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_KINDS = [
+  'tab_window_baseline',
+  'active_tab_restore',
+  'run_owned_cleanup',
+  'user_owned_protection',
+  'failure_cleanup',
+  'unknown',
+] as const satisfies ReadonlyArray<LifecycleEvidenceBrowserHygieneCheckKind>;
+
+export type LifecycleEvidenceBrowserHygieneCheckVerdict = 'pass' | 'fail' | 'unknown';
+
+export const LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_VERDICTS = [
+  'pass',
+  'fail',
+  'unknown',
+] as const satisfies ReadonlyArray<LifecycleEvidenceBrowserHygieneCheckVerdict>;
+
+export type LifecycleEvidenceBrowserHygieneCheckReason =
+  | 'pre_post_tab_window_baseline_unchanged'
+  | 'pre_post_tab_window_baseline_changed'
+  | 'active_tab_restored'
+  | 'active_tab_not_restored'
+  | 'run_owned_tabs_cleaned'
+  | 'run_owned_tabs_left_open'
+  | 'user_owned_tabs_protected'
+  | 'user_owned_tab_closed'
+  | 'failure_cleanup_completed'
+  | 'failure_cleanup_failed'
+  | 'failure_cleanup_not_needed'
+  | 'browser_hygiene_check_not_reported'
+  | 'unknown';
+
+export const LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_REASONS = [
+  'pre_post_tab_window_baseline_unchanged',
+  'pre_post_tab_window_baseline_changed',
+  'active_tab_restored',
+  'active_tab_not_restored',
+  'run_owned_tabs_cleaned',
+  'run_owned_tabs_left_open',
+  'user_owned_tabs_protected',
+  'user_owned_tab_closed',
+  'failure_cleanup_completed',
+  'failure_cleanup_failed',
+  'failure_cleanup_not_needed',
+  'browser_hygiene_check_not_reported',
+  'unknown',
+] as const satisfies ReadonlyArray<LifecycleEvidenceBrowserHygieneCheckReason>;
+
+export interface LifecycleEvidenceBrowserHygieneCheck {
+  kind: LifecycleEvidenceBrowserHygieneCheckKind;
+  verdict: LifecycleEvidenceBrowserHygieneCheckVerdict;
+  reason: LifecycleEvidenceBrowserHygieneCheckReason;
+}
+
 export interface LifecycleEvidenceBrowserHygiene {
   available: boolean;
   baselineTabs: number | null;
   runOwnedTabsClosed: number | null;
   baselineChanged: boolean | null;
+  checks: LifecycleEvidenceBrowserHygieneCheck[];
   notes: string[];
 }
 

@@ -1,6 +1,7 @@
 import type {
   BridgeObservationMessage,
   BridgeObservationMessagePayload,
+  LifecycleEvidenceBrowserHygieneCheck,
   ObservationKind,
 } from '@tabrix/shared';
 import { dispatchBridgeObservationToStream, resetEventStream } from './browser-event-stream';
@@ -77,6 +78,20 @@ function makeBridgeMessage(
     sentAt: overrides.sentAt ?? T0,
     payload,
   };
+}
+
+function makeCleanHygieneChecks(): LifecycleEvidenceBrowserHygieneCheck[] {
+  return [
+    {
+      kind: 'tab_window_baseline',
+      verdict: 'pass',
+      reason: 'pre_post_tab_window_baseline_unchanged',
+    },
+    { kind: 'active_tab_restore', verdict: 'pass', reason: 'active_tab_restored' },
+    { kind: 'run_owned_cleanup', verdict: 'pass', reason: 'run_owned_tabs_cleaned' },
+    { kind: 'user_owned_protection', verdict: 'pass', reason: 'user_owned_tabs_protected' },
+    { kind: 'failure_cleanup', verdict: 'pass', reason: 'failure_cleanup_not_needed' },
+  ];
 }
 
 beforeEach(() => {
@@ -460,7 +475,7 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     });
   });
 
-  it('derives task_success when passed postconditions have clean runtime hygiene evidence', () => {
+  it('keeps verdict unknown when passed postconditions have only coarse runtime hygiene evidence', () => {
     setRuntimeHygieneSnapshot({ primaryTabReuseRate: 1, benchmarkOwnedTabCount: 1 });
     ensureLifecycleEvidenceCollectorRegistered();
     dispatchBridgeObservationToStream(
@@ -497,9 +512,9 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
       'violations=0',
     ]);
     expect(artifact.finalVerdict).toEqual({
-      verdict: 'task_success',
-      confidence: 0.8,
-      reason: 'postconditions_passed',
+      verdict: 'unknown',
+      confidence: 0.4,
+      reason: 'browser_hygiene_check_incomplete',
     });
   });
 
@@ -850,6 +865,7 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
         baselineTabs: null,
         runOwnedTabsClosed: 1,
         baselineChanged: false,
+        checks: makeCleanHygieneChecks(),
         notes: ['closedTabCount=1'],
       },
     });
@@ -909,6 +925,7 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
         available: true,
         runOwnedTabsClosed: 1,
         baselineChanged: false,
+        checks: makeCleanHygieneChecks(),
       },
     };
 
