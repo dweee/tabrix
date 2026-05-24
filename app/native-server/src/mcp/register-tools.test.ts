@@ -1607,6 +1607,7 @@ describe('handleToolCall execution wrapper', () => {
       expect(payload.structuredReadGate).toMatchObject({
         gateId: 'structured-read-gate:projection_long_content_full',
         verdict: 'complete',
+        reasonCode: 'complete_read_metadata_satisfied',
         gapDescription: null,
         recommendedAction: null,
         metrics: {
@@ -1639,6 +1640,7 @@ describe('handleToolCall execution wrapper', () => {
       expect(payload.aiContextEnvelope.structuredReadGate).toMatchObject({
         gateId: 'structured-read-gate:projection_long_content_full',
         verdict: 'complete',
+        reasonCode: 'complete_read_metadata_satisfied',
       });
     });
 
