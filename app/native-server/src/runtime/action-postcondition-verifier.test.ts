@@ -4,10 +4,23 @@ import type {
   ActionOutcomeEventEnvelope,
   ActionOutcomeSnapshot,
 } from '@tabrix/shared';
-import { verifyActionPostcondition } from './action-postcondition-verifier';
+import {
+  getActionPostconditionCoverageMatrix,
+  verifyActionPostcondition,
+} from './action-postcondition-verifier';
 
 const T0 = 1_700_000_000_000;
 const PRODUCED_AT = T0 + 9_999;
+const V3_REQUIRED_ACTIONS = [
+  'navigate',
+  'click',
+  'type',
+  'fill',
+  'submit',
+  'scroll',
+  'read',
+  'close',
+] as const;
 
 function makeEnvelope(
   overrides: Partial<ActionOutcomeEventEnvelope> = {},
@@ -39,6 +52,84 @@ function verify(actionKind: ActionKind, outcome: ActionOutcome, confidence = 0.8
     { now: () => PRODUCED_AT },
   );
 }
+
+describe('action-postcondition-verifier — coverage matrix', () => {
+  it('lists every V3 required action exactly once', () => {
+    const requiredRows = getActionPostconditionCoverageMatrix().filter((row) => row.requiredByV3);
+    expect(requiredRows.map((row) => row.action)).toEqual(V3_REQUIRED_ACTIONS);
+  });
+
+  it('marks current shared ActionKind rows supported only where verifier has a matrix', () => {
+    const rows = getActionPostconditionCoverageMatrix();
+    const supportedRows = rows.filter((row) => row.status === 'supported');
+
+    expect(supportedRows.map((row) => row.action)).toEqual(['navigate', 'click', 'fill', 'submit']);
+    expect(supportedRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'click',
+          sharedActionKind: 'click',
+          expectedOutcomes: [
+            'navigated_same_tab',
+            'navigated_new_tab',
+            'spa_partial_update',
+            'modal_opened',
+          ],
+          failOutcomes: ['no_observed_change'],
+        }),
+        expect.objectContaining({
+          action: 'navigate',
+          sharedActionKind: 'navigate',
+          expectedOutcomes: ['navigated_same_tab', 'navigated_new_tab'],
+          failOutcomes: ['no_observed_change'],
+        }),
+        expect.objectContaining({
+          action: 'fill',
+          sharedActionKind: 'fill',
+          expectedOutcomes: ['spa_partial_update'],
+          failOutcomes: ['no_observed_change'],
+        }),
+      ]),
+    );
+  });
+
+  it('marks V3 actions absent from shared ActionKind as blocked by contract', () => {
+    const blockedRows = getActionPostconditionCoverageMatrix().filter(
+      (row) => row.status === 'blocked_by_shared_action_kind_contract',
+    );
+
+    expect(blockedRows.map((row) => row.action)).toEqual(['type', 'scroll', 'read', 'close']);
+    for (const row of blockedRows) {
+      expect(row.sharedActionKind).toBeNull();
+      expect(row.expectedOutcomes).toEqual([]);
+      expect(row.unknownHandling).toBe(
+        'must_not_be_claimed_supported_until_shared_action_kind_exists',
+      );
+    }
+  });
+
+  it('keeps keyboard and unknown explicit but not product-complete', () => {
+    const rows = getActionPostconditionCoverageMatrix();
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'keyboard',
+          requiredByV3: false,
+          sharedActionKind: 'keyboard',
+          status: 'not_product_complete',
+          unknownHandling: 'verifier_always_returns_unknown',
+        }),
+        expect.objectContaining({
+          action: 'unknown',
+          requiredByV3: false,
+          sharedActionKind: 'unknown',
+          status: 'not_product_complete',
+          unknownHandling: 'verifier_always_returns_unknown',
+        }),
+      ]),
+    );
+  });
+});
 
 describe('action-postcondition-verifier — verdict matrix', () => {
   const passRows: Array<[ActionKind, ActionOutcome]> = [
