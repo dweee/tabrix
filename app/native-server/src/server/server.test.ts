@@ -334,6 +334,9 @@ describe('服务器测试', () => {
         bufferedArtifacts: 1,
         lastArtifactId: 'server-test-artifact',
         lastFinalVerdict: 'unknown',
+        lastFinalVerdictReason: 'no_postcondition_results',
+        lastScenarioId: 'server-test-scenario',
+        lastScenarioClass: 'search_result_delta_v1',
       });
 
       await server.stop();

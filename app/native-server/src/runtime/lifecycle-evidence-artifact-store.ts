@@ -1,4 +1,9 @@
-import type { LifecycleEvidenceArtifact, LifecycleEvidenceFinalVerdictKind } from '@tabrix/shared';
+import type {
+  ActionKind,
+  LifecycleEvidenceArtifact,
+  LifecycleEvidenceFinalVerdictKind,
+  PostconditionVerdict,
+} from '@tabrix/shared';
 
 const DEFAULT_MAX_ARTIFACTS = 20;
 
@@ -14,6 +19,12 @@ export interface LifecycleEvidenceArtifactStoreSnapshot {
   droppedArtifacts: number;
   lastArtifactId: string | null;
   lastFinalVerdict: LifecycleEvidenceFinalVerdictKind | null;
+  lastFinalVerdictReason: string | null;
+  lastScenarioId: string | null;
+  lastScenarioClass: string | null;
+  lastActionKind: ActionKind | null;
+  lastPostconditionVerdict: PostconditionVerdict | null;
+  lastPostconditionReason: string | null;
   lastProducedAtMs: number | null;
   maxArtifacts: number;
 }
@@ -37,11 +48,19 @@ export function listLifecycleEvidenceArtifacts(): LifecycleEvidenceArtifact[] {
 }
 
 export function getLifecycleEvidenceArtifactStoreSnapshot(): LifecycleEvidenceArtifactStoreSnapshot {
+  const lastArtifact = artifacts.at(-1) ?? null;
+  const lastPostcondition = lastArtifact?.actionLog.entries.at(-1) ?? null;
   return {
     bufferedArtifacts: artifacts.length,
     droppedArtifacts,
     lastArtifactId,
     lastFinalVerdict,
+    lastFinalVerdictReason: lastArtifact?.finalVerdict.reason ?? null,
+    lastScenarioId: lastArtifact?.scenarioId ?? null,
+    lastScenarioClass: lastArtifact?.scenarioClass ?? null,
+    lastActionKind: lastPostcondition?.actionKind ?? null,
+    lastPostconditionVerdict: lastPostcondition?.verdict ?? null,
+    lastPostconditionReason: lastPostcondition?.reason ?? null,
     lastProducedAtMs,
     maxArtifacts,
   };

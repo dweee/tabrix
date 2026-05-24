@@ -88,6 +88,28 @@ describe('lifecycle-evidence-artifact-store', () => {
           confidence: 0.8,
           reason: 'postconditions_passed',
         },
+        actionLog: {
+          available: true,
+          totalActions: 1,
+          passed: 1,
+          failed: 0,
+          unknown: 0,
+          entries: [
+            {
+              actionId: 'action-1',
+              actionKind: 'click',
+              tabId: 42,
+              urlPattern: null,
+              verdict: 'passed',
+              reason: 'outcome_supports_click',
+              observedOutcome: 'modal_opened',
+              observedOutcomeConfidence: 0.8,
+              sourceEventRefs: [{ kind: 'unknown', id: 'action-1', origin: 'runtime' }],
+              sourceOrigins: ['runtime'],
+              producedAtMs: T0 + 10,
+            },
+          ],
+        },
         producedAtMs: T0 + 10,
       }),
     );
@@ -97,9 +119,66 @@ describe('lifecycle-evidence-artifact-store', () => {
       droppedArtifacts: 0,
       lastArtifactId: 'artifact-success',
       lastFinalVerdict: 'task_success',
+      lastFinalVerdictReason: 'postconditions_passed',
+      lastScenarioId: 'scenario-1',
+      lastScenarioClass: 'search_result_delta_v1',
+      lastActionKind: 'click',
+      lastPostconditionVerdict: 'passed',
+      lastPostconditionReason: 'outcome_supports_click',
       lastProducedAtMs: T0 + 10,
       maxArtifacts: 20,
     });
+  });
+
+  it('exposes only redaction-safe last artifact reasons in the compact snapshot', () => {
+    recordLifecycleEvidenceArtifact(
+      makeArtifact({
+        artifactId: 'artifact-close-contract-gap',
+        scenarioId: 'mcp:chrome_close_tabs:cleanup_success',
+        scenarioClass: 'browser_hygiene_closeout_v1',
+        actionLog: {
+          available: true,
+          totalActions: 1,
+          passed: 0,
+          failed: 0,
+          unknown: 1,
+          entries: [
+            {
+              actionId: 'mcp:chrome_close_tabs:42',
+              actionKind: 'unknown',
+              tabId: 42,
+              urlPattern: 'private.example/should-not-be-in-snapshot',
+              verdict: 'unknown',
+              reason: 'close_action_kind_blocked_by_shared_contract',
+              observedOutcome: 'unknown',
+              observedOutcomeConfidence: 0.75,
+              sourceEventRefs: [{ kind: 'unknown', id: 'action-1', origin: 'runtime' }],
+              sourceOrigins: ['runtime'],
+              producedAtMs: T0 + 1,
+            },
+          ],
+        },
+        finalVerdict: {
+          verdict: 'unknown',
+          confidence: 0.2,
+          reason: 'postconditions_unknown',
+        },
+      }),
+    );
+
+    const snapshot = getLifecycleEvidenceArtifactStoreSnapshot();
+    expect(snapshot).toMatchObject({
+      lastArtifactId: 'artifact-close-contract-gap',
+      lastFinalVerdict: 'unknown',
+      lastFinalVerdictReason: 'postconditions_unknown',
+      lastScenarioId: 'mcp:chrome_close_tabs:cleanup_success',
+      lastScenarioClass: 'browser_hygiene_closeout_v1',
+      lastActionKind: 'unknown',
+      lastPostconditionVerdict: 'unknown',
+      lastPostconditionReason: 'close_action_kind_blocked_by_shared_contract',
+    });
+    expect(JSON.stringify(snapshot)).not.toContain('private.example');
+    expect(JSON.stringify(snapshot)).not.toContain('urlPattern');
   });
 
   it('returns cloned artifacts so callers cannot mutate store state', () => {
