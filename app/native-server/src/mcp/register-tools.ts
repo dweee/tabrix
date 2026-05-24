@@ -111,6 +111,15 @@ import { buildBrowserTaskStateVerdict } from '@tabrix/shared';
 const DEFAULT_AUTO_TASK_CONTEXT_KEY = 'mcp:auto:tab:default';
 const TOOL_FAILURE_ARTIFACT_SCENARIO_ID = 'mcp:chrome_read_page:page_unreadable';
 
+type TaskContextKeySource = 'external_task_key' | 'internal_task_id';
+
+interface TaskContextAttachment {
+  toolName: string;
+  taskContext: TaskSessionContext | null;
+  taskContextKey: string;
+  taskContextKeySource: TaskContextKeySource;
+}
+
 /**
  * Production wiring for the `experience_replay` handler.
  * Binds:
@@ -517,6 +526,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     // resolution sites the harder it is for a future edit to drift
     // the chooser-write and reader-peek apart.
     const taskContext = taskContextEarly;
+    const taskContextAttachment: TaskContextAttachment = {
+      toolName: name,
+      taskContext,
+      taskContextKey: externalTaskKeyEarly ?? task.taskId,
+      taskContextKeySource: externalTaskKeyEarly ? 'external_task_key' : 'internal_task_id',
+    };
     // When the orchestrator returns `'fallback_required'` we MUST
     // forward to the bridge with the clamped fallback entry layer (`L0`
     // / `L0+L1`), never the caller's original `requestedLayer`.
@@ -801,8 +816,8 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           summary: normalizedWarning.executionResult.summary,
         });
         return cachedProjection
-          ? attachAiFacingOwnershipRuntime(warningResult, taskContext)
-          : warningResult;
+          ? attachAiFacingOwnershipRuntime(warningResult, taskContextAttachment)
+          : attachTaskContextEnvelopeToJsonResult(warningResult, taskContextAttachment);
       }
     }
     const nonInterferenceVerdict = evaluateNonInterferencePreflight({
@@ -824,7 +839,10 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         },
         runtimePolicyAudit: nonInterferenceVerdict.audit,
       };
-      const result = createErrorResult(JSON.stringify(payload));
+      const result = attachTaskContextEnvelopeToJsonResult(
+        createErrorResult(JSON.stringify(payload)),
+        taskContextAttachment,
+      );
       sessionManager.completeStep(session.sessionId, step.stepId, {
         status: 'failed',
         errorCode: 'non_interference_blocked',
@@ -991,7 +1009,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
             );
             const aiFacingDomRowsResult = attachAiFacingDeltaContext(
               compatDomRowsResult,
-              taskContext,
+              taskContextAttachment,
             );
             sessionManager.completeStep(session.sessionId, step.stepId, {
               status: 'completed',
@@ -1071,10 +1089,10 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         });
       }
       const aiFacingResult =
-        name === 'chrome_read_page' && taskContext && rawResultWithEvidence.isError !== true
-          ? attachAiFacingDeltaContext(rawResultWithEvidence, taskContext)
-          : name === 'chrome_close_tabs' && taskContext && rawResultWithEvidence.isError !== true
-            ? attachLifecycleTimelineContext(rawResultWithEvidence, taskContext)
+        name === 'chrome_read_page' && taskContext
+          ? attachAiFacingDeltaContext(rawResultWithEvidence, taskContextAttachment)
+          : name === 'chrome_close_tabs' && taskContext
+            ? attachLifecycleTimelineContext(rawResultWithEvidence, taskContextAttachment)
             : rawResultWithEvidence;
       maybeRecordReadPageFailureLifecycleArtifact({
         name,
@@ -1313,7 +1331,7 @@ function shouldInvalidateReadAfterInteraction(toolName: string): boolean {
 
 function attachAiFacingOwnershipRuntime(
   result: CallToolResult,
-  taskContext: TaskSessionContext,
+  attachment: TaskContextAttachment,
 ): CallToolResult {
   const first = result.content?.[0];
   if (!first || first.type !== 'text' || typeof first.text !== 'string') return result;
@@ -1328,7 +1346,12 @@ function attachAiFacingOwnershipRuntime(
   }
 
   const projection = payload.pageProjection;
-  if (!isBrowserPageThingProjectionLike(projection)) return result;
+  if (!isBrowserPageThingProjectionLike(projection)) {
+    return attachTaskContextEnvelopeToJsonResult(result, attachment);
+  }
+  if (!attachment.taskContext) {
+    return attachTaskContextEnvelopeToJsonResult(result, attachment);
+  }
 
   const payloadSelectedDataSource = readPayloadSelectedDataSource(payload);
   const selectedDataSource = readSelectedDataSource(payload, projection);
@@ -1338,7 +1361,7 @@ function attachAiFacingOwnershipRuntime(
     payload,
   );
   const normalizedAiFacingProjection = normalizeAiFacingProjectionOwnerType(
-    taskContext,
+    attachment.taskContext,
     aiFacingProjection,
     selectedDataSource,
     payload,
@@ -1351,10 +1374,18 @@ function attachAiFacingOwnershipRuntime(
 
   payload.pageProjection = normalizedAiFacingProjection;
   payload.ownershipRuntime = buildAiFacingOwnershipRuntimeSummary(
-    taskContext,
+    attachment.taskContext,
     normalizedAiFacingProjection,
     runtimeFields,
   );
+  payload.taskContextEnvelope = buildTaskContextEnvelope(attachment);
+  const aiContextEnvelope = readObject(payload.aiContextEnvelope);
+  if (aiContextEnvelope) {
+    payload.aiContextEnvelope = {
+      ...aiContextEnvelope,
+      taskContext: buildTaskContextEnvelope(attachment),
+    };
+  }
 
   return {
     ...result,
@@ -1366,7 +1397,7 @@ function attachAiFacingOwnershipRuntime(
 
 function attachAiFacingDeltaContext(
   result: CallToolResult,
-  taskContext: TaskSessionContext,
+  attachment: TaskContextAttachment,
 ): CallToolResult {
   const first = result.content?.[0];
   if (!first || first.type !== 'text' || typeof first.text !== 'string') return result;
@@ -1381,7 +1412,12 @@ function attachAiFacingDeltaContext(
   }
 
   const projection = payload.pageProjection;
-  if (!isBrowserPageThingProjectionLike(projection)) return result;
+  if (!isBrowserPageThingProjectionLike(projection)) {
+    return attachTaskContextEnvelopeToJsonResult(result, attachment);
+  }
+  if (!attachment.taskContext) {
+    return attachTaskContextEnvelopeToJsonResult(result, attachment);
+  }
 
   const payloadSelectedDataSource = readPayloadSelectedDataSource(payload);
   const selectedDataSource = readSelectedDataSource(payload, projection);
@@ -1391,7 +1427,7 @@ function attachAiFacingDeltaContext(
     payload,
   );
   const normalizedAiFacingProjection = normalizeAiFacingProjectionOwnerType(
-    taskContext,
+    attachment.taskContext,
     aiFacingProjection,
     selectedDataSource,
     payload,
@@ -1401,7 +1437,7 @@ function attachAiFacingDeltaContext(
     isCurrentTabActive: readBoolean(payload, 'isCurrentTabActive'),
     isCurrentWindowFocused: readBoolean(payload, 'isCurrentWindowFocused'),
   };
-  const deltaContext = taskContext.notePageProjectionAndBuildDelta(
+  const deltaContext = attachment.taskContext.notePageProjectionAndBuildDelta(
     normalizedAiFacingProjection,
     runtimeFields,
   );
@@ -1432,21 +1468,23 @@ function attachAiFacingDeltaContext(
 
   payload.pageProjection = normalizedAiFacingProjection;
   payload.ownershipRuntime = buildAiFacingOwnershipRuntimeSummary(
-    taskContext,
+    attachment.taskContext,
     normalizedAiFacingProjection,
     runtimeFields,
   );
   payload.structuredReadGate = structuredReadGate;
   payload.deltaContext = deltaContext;
+  payload.taskContextEnvelope = buildTaskContextEnvelope(attachment);
   payload.aiContextEnvelope = {
     envelopeKind: 'delta_context',
     contextSource: 'page_projection_delta',
+    taskContext: buildTaskContextEnvelope(attachment),
     taskState,
     selectedDataSource,
     dataSourceDecision,
     structuredReadGate,
     deltaContext,
-    lifecycleTimeline: taskContext.getLifecycleTimeline(),
+    lifecycleTimeline: attachment.taskContext.getLifecycleTimeline(),
   };
 
   return {
@@ -1636,6 +1674,75 @@ function buildAiFacingOwnershipRuntimeSummary(
   };
 }
 
+function buildTaskContextEnvelope(attachment: TaskContextAttachment): Record<string, unknown> {
+  const { taskContext } = attachment;
+  if (!taskContext) {
+    return {
+      envelopeKind: 'task_context',
+      status: 'context_missing',
+      source: 'unavailable',
+      taskContextKey: attachment.taskContextKey,
+      taskContextKeySource: attachment.taskContextKeySource,
+      toolName: attachment.toolName,
+      reason: 'task_session_context_unavailable',
+      evidenceBoundary: {
+        deterministicOnly: true,
+        realBrowserProven: false,
+        commercialDeliveryProven: false,
+      },
+    };
+  }
+
+  return {
+    envelopeKind: 'task_context',
+    status: 'attached',
+    source: 'task_session_context',
+    taskContextKey: attachment.taskContextKey,
+    taskContextKeySource: attachment.taskContextKeySource,
+    toolName: attachment.toolName,
+    currentUrlKnown: taskContext.currentUrl !== null,
+    pageRoleKnown: taskContext.pageRole !== null,
+    readPageCount: taskContext.readPageCount,
+    readBudget: taskContext.readBudget,
+    readPageRemainingBudget: Math.max(0, taskContext.readBudget - taskContext.readPageCount),
+    lastReadLayer: taskContext.lastReadLayer,
+    lastReadSource: taskContext.lastReadSource,
+    lifecycleEventCount: taskContext.getLifecycleTimeline().length,
+    runOwnedTabCount: taskContext.getRunOwnedTabIds().length,
+    taskTotals: taskContext.getTaskTotals(),
+    evidenceBoundary: {
+      deterministicOnly: true,
+      realBrowserProven: false,
+      commercialDeliveryProven: false,
+    },
+  };
+}
+
+function attachTaskContextEnvelopeToJsonResult(
+  result: CallToolResult,
+  attachment: TaskContextAttachment,
+): CallToolResult {
+  const first = result.content?.[0];
+  if (!first || first.type !== 'text' || typeof first.text !== 'string') return result;
+
+  let payload: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(first.text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return result;
+    payload = parsed as Record<string, unknown>;
+  } catch {
+    return result;
+  }
+
+  payload.taskContextEnvelope = buildTaskContextEnvelope(attachment);
+  return {
+    ...result,
+    content: result.content.map((block, index) =>
+      index === 0 && block.type === 'text' ? { ...block, text: JSON.stringify(payload) } : block,
+    ) as CallToolResult['content'],
+  };
+}
+
 function buildAiFacingTaskState(args: {
   payload: Record<string, unknown>;
   projection: BrowserPageThingProjection;
@@ -1736,7 +1843,7 @@ function inferMetadataCompleteness(
 
 function attachLifecycleTimelineContext(
   result: CallToolResult,
-  taskContext: TaskSessionContext,
+  attachment: TaskContextAttachment,
 ): CallToolResult {
   const first = result.content?.[0];
   if (!first || first.type !== 'text' || typeof first.text !== 'string') return result;
@@ -1750,7 +1857,8 @@ function attachLifecycleTimelineContext(
     return result;
   }
 
-  payload.lifecycleTimeline = taskContext.getLifecycleTimeline();
+  payload.taskContextEnvelope = buildTaskContextEnvelope(attachment);
+  payload.lifecycleTimeline = attachment.taskContext?.getLifecycleTimeline() ?? [];
 
   return {
     ...result,

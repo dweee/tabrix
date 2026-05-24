@@ -654,6 +654,18 @@ describe('handleToolCall execution wrapper', () => {
 
     expect(result.isError).toBe(true);
     const payload = JSON.parse(String(result.content[0].text));
+    expect(payload.taskContextEnvelope).toMatchObject({
+      status: 'attached',
+      source: 'task_session_context',
+      taskContextKey: 'w5a-collaboration',
+      taskContextKeySource: 'external_task_key',
+      toolName: 'chrome_click_element',
+      evidenceBoundary: {
+        deterministicOnly: true,
+        realBrowserProven: false,
+        commercialDeliveryProven: false,
+      },
+    });
     expect(payload).toMatchObject({
       ok: false,
       code: 'TABRIX_ACTION_COLLABORATION_REQUIRED',
@@ -920,11 +932,24 @@ describe('handleToolCall execution wrapper', () => {
 
       expect(result.isError).toBeFalsy();
       const payload = JSON.parse(String(result.content[0].text));
-      expect(payload).toEqual({
+      expect(payload).toMatchObject({
         warning: 'read_budget_exceeded',
         readPageCount: 2,
         readBudget: 2,
         suggestedLayer: 'L0+L1',
+        taskContextEnvelope: {
+          status: 'attached',
+          source: 'task_session_context',
+          taskContextKey: 'mcp:auto:tab:1',
+          taskContextKeySource: 'external_task_key',
+          toolName: 'chrome_read_page',
+          readPageRemainingBudget: 0,
+          evidenceBoundary: {
+            deterministicOnly: true,
+            realBrowserProven: false,
+            commercialDeliveryProven: false,
+          },
+        },
       });
       expect(payload.pageProjection).toBeUndefined();
       expect(payload.deltaContext).toBeUndefined();
@@ -1168,6 +1193,23 @@ describe('handleToolCall execution wrapper', () => {
       });
       expect(firstPayload.aiContextEnvelope).toMatchObject({
         envelopeKind: 'delta_context',
+        taskContext: {
+          envelopeKind: 'task_context',
+          status: 'attached',
+          source: 'task_session_context',
+          taskContextKey: 'delta-task',
+          taskContextKeySource: 'external_task_key',
+          toolName: 'chrome_read_page',
+          readPageCount: 1,
+          readBudget: expect.any(Number),
+          lifecycleEventCount: 5,
+          runOwnedTabCount: 0,
+          evidenceBoundary: {
+            deterministicOnly: true,
+            realBrowserProven: false,
+            commercialDeliveryProven: false,
+          },
+        },
         selectedDataSource: 'dom_json',
         dataSourceDecision: {
           availableSources: ['dom_json'],
@@ -1185,6 +1227,18 @@ describe('handleToolCall execution wrapper', () => {
           state: 'ready',
           reason: 'page_projection_ready_and_stable',
           recommendedNextAction: 'continue_read',
+        },
+      });
+      expect(firstPayload.taskContextEnvelope).toMatchObject({
+        status: 'attached',
+        source: 'task_session_context',
+        taskContextKey: 'delta-task',
+        taskContextKeySource: 'external_task_key',
+        toolName: 'chrome_read_page',
+        evidenceBoundary: {
+          deterministicOnly: true,
+          realBrowserProven: false,
+          commercialDeliveryProven: false,
         },
       });
 
@@ -1263,6 +1317,20 @@ describe('handleToolCall execution wrapper', () => {
         tabIds: [1],
       });
       const closePayload = JSON.parse(String(closeResult.content[0].text));
+      expect(closePayload.taskContextEnvelope).toMatchObject({
+        status: 'attached',
+        source: 'task_session_context',
+        taskContextKey: 'delta-task',
+        taskContextKeySource: 'external_task_key',
+        toolName: 'chrome_close_tabs',
+        lifecycleEventCount: 11,
+        runOwnedTabCount: 0,
+        evidenceBoundary: {
+          deterministicOnly: true,
+          realBrowserProven: false,
+          commercialDeliveryProven: false,
+        },
+      });
       expect(
         closePayload.lifecycleTimeline.map((event: { kind: string }) => event.kind).at(-1),
       ).toBe('cleanup');
@@ -1345,6 +1413,13 @@ describe('handleToolCall execution wrapper', () => {
       });
       expect(secondPayload.aiContextEnvelope).toMatchObject({
         contextSource: 'cached_page_projection_delta',
+        taskContext: {
+          status: 'attached',
+          source: 'task_session_context',
+          taskContextKey: 'redundant-delta-task',
+          taskContextKeySource: 'external_task_key',
+          toolName: 'chrome_read_page',
+        },
         taskState: {
           state: 'ready',
           recommendedNextAction: 'continue_read',
@@ -1355,6 +1430,13 @@ describe('handleToolCall execution wrapper', () => {
           selectedReason: 'cached_projection_reused_for_redundant_read',
           privacySafety: 'redacted',
         },
+      });
+      expect(secondPayload.taskContextEnvelope).toMatchObject({
+        status: 'attached',
+        source: 'task_session_context',
+        taskContextKey: 'redundant-delta-task',
+        taskContextKeySource: 'external_task_key',
+        toolName: 'chrome_read_page',
       });
       expect(flowSpy).toHaveBeenCalledTimes(1);
       const persisted = sessionManager.listSessions().at(-1);
