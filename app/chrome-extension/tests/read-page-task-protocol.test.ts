@@ -399,6 +399,53 @@ describe('read_page task protocol', () => {
     expect(protocol.watchScope.regions).toEqual([]);
   });
 
+  it('surfaces V3 collaboration watch scopes through the read_page task protocol', () => {
+    const cases = [
+      {
+        name: 'auth',
+        params: createBaseParams({ pageRole: 'login_required', primaryRegion: 'login_form' }),
+        expectedScope: 'auth',
+        expectedRegions: ['credential_input', 'auth_submit_control', 'auth_feedback_region'],
+      },
+      {
+        name: 'challenge',
+        params: createBaseParams({ pageRole: 'challenge_required' }),
+        expectedScope: 'challenge',
+        expectedRegions: ['challenge_prompt', 'verification_input', 'challenge_feedback_region'],
+      },
+      {
+        name: 'multi_tab',
+        params: createBaseParams({
+          pageRole: 'tab_management',
+          primaryRegion: 'window_state',
+        }),
+        expectedScope: 'multi_tab',
+        expectedRegions: ['tab_set', 'active_tab', 'window_focus_state'],
+      },
+      {
+        name: 'user_takeover',
+        params: createBaseParams({ pageRole: 'user_took_over' }),
+        expectedScope: 'user_takeover',
+        expectedRegions: ['user_activity_region', 'protected_focus_region'],
+      },
+    ] as const;
+
+    for (const item of cases) {
+      const protocol = buildTaskProtocol(item.params as any);
+
+      expect(protocol.watchScope.scopeKind).toBe(item.expectedScope);
+      expect(protocol.watchScope.regions.map((region) => region.regionId)).toEqual(
+        item.expectedRegions,
+      );
+      expect(protocol.watchScope.boundary).toMatchObject({
+        deterministicGuidanceOnly: true,
+        browserHygieneProven: false,
+        realBrowserProven: false,
+        commercialGradeProven: false,
+      });
+    }
+  });
+
   it.each([
     {
       name: 'maps repo_home to read from role and primary region',

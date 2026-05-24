@@ -80,7 +80,9 @@ function expectCommonSnapshotShape(payload: any, mode: 'compact' | 'normal' | 'f
   expect(Date.parse(payload.pageProjection.sourceObservedAt)).not.toBeNaN();
   expect(payload.pageProjection.interferenceRisk).not.toBe('none');
   expect(payload.watchScope).toMatchObject({
-    scopeKind: expect.stringMatching(/^(search|form|long_content|loading|idle|unknown)$/),
+    scopeKind: expect.stringMatching(
+      /^(search|form|auth|challenge|long_content|multi_tab|user_takeover|loading|idle|unknown)$/,
+    ),
     boundary: {
       deterministicGuidanceOnly: true,
       realBrowserProven: false,
