@@ -389,6 +389,167 @@ describe('semantic-signal-aggregator — wait_for_stability', () => {
     expect(signal).toBeNull();
   });
 
+  it('emits login_required from closed page role evidence', () => {
+    const signal = deriveWaitForStabilitySignal(
+      [
+        makeEvent({
+          streamEventId: 'login-required-fact',
+          kind: 'observation_fact_snapshot',
+          sourceObservationKind: 'fact_snapshot',
+          sourcePayload: {
+            kind: 'fact_snapshot',
+            data: {
+              factSnapshotId: 'fact-login-required',
+              observedAtMs: T0,
+              payload: {
+                eventKind: 'readiness_signal',
+                signals: {
+                  documentComplete: 'true',
+                  routeStable: 'true',
+                  keyRegionReady: 'unknown',
+                  networkQuiet: 'unknown',
+                  observedAtMs: T0,
+                },
+                tabId: 100,
+                urlPattern: 'example.test/session',
+                sessionId: null,
+                pageRole: 'login_required',
+              },
+            },
+          },
+        }),
+      ],
+      PRODUCED_AT,
+    );
+
+    expect(signal).toMatchObject({
+      kind: 'login_required',
+      confidence: 0.9,
+      sourceOrigins: ['browser_stream'],
+    });
+    expect(signal?.signalId).toBe(`sig_login_required_login-required-fact_${PRODUCED_AT}`);
+  });
+
+  it('emits challenge_required from exact structured readiness reason', () => {
+    const signal = deriveWaitForStabilitySignal(
+      [
+        makeEvent({
+          streamEventId: 'challenge-required-fact',
+          kind: 'observation_fact_snapshot',
+          sourceObservationKind: 'fact_snapshot',
+          sourcePayload: {
+            kind: 'fact_snapshot',
+            data: {
+              factSnapshotId: 'fact-challenge-required',
+              observedAtMs: T0,
+              payload: {
+                eventKind: 'readiness_signal',
+                signals: {
+                  documentComplete: 'true',
+                  routeStable: 'true',
+                  keyRegionReady: 'unknown',
+                  networkQuiet: 'unknown',
+                  observedAtMs: T0,
+                },
+                tabId: 100,
+                urlPattern: 'example.test/check',
+                sessionId: null,
+                readinessReason: 'challenge_or_verification_required',
+              },
+            },
+          },
+        }),
+      ],
+      PRODUCED_AT,
+    );
+
+    expect(signal).toMatchObject({
+      kind: 'challenge_required',
+      confidence: 0.9,
+      sourceOrigins: ['browser_stream'],
+    });
+    expect(signal?.signalId).toBe(`sig_challenge_required_challenge-required-fact_${PRODUCED_AT}`);
+  });
+
+  it('emits error_page_detected from closed error readiness evidence', () => {
+    const signal = deriveWaitForStabilitySignal(
+      [
+        makeEvent({
+          streamEventId: 'error-page-fact',
+          kind: 'observation_fact_snapshot',
+          sourceObservationKind: 'fact_snapshot',
+          sourcePayload: {
+            kind: 'fact_snapshot',
+            data: {
+              factSnapshotId: 'fact-error-page',
+              observedAtMs: T0,
+              payload: {
+                eventKind: 'readiness_signal',
+                signals: {
+                  documentComplete: 'true',
+                  routeStable: 'true',
+                  keyRegionReady: 'unknown',
+                  networkQuiet: 'unknown',
+                  observedAtMs: T0,
+                },
+                tabId: 100,
+                urlPattern: 'example.test/error',
+                sessionId: null,
+                readinessVerdict: 'error',
+              },
+            },
+          },
+        }),
+      ],
+      PRODUCED_AT,
+    );
+
+    expect(signal).toMatchObject({
+      kind: 'error_page_detected',
+      confidence: 0.9,
+      sourceOrigins: ['browser_stream'],
+    });
+    expect(signal?.signalId).toBe(`sig_error_page_detected_error-page-fact_${PRODUCED_AT}`);
+  });
+
+  it('does not infer auth, challenge, or error states from arbitrary prose or URL text', () => {
+    const signal = deriveWaitForStabilitySignal(
+      [
+        makeEvent({
+          streamEventId: 'weak-auth-text',
+          kind: 'observation_fact_snapshot',
+          sourceObservationKind: 'fact_snapshot',
+          urlPattern: 'example.test/login',
+          sourcePayload: {
+            kind: 'fact_snapshot',
+            data: {
+              factSnapshotId: 'fact-weak-auth-text',
+              observedAtMs: T0,
+              payload: {
+                eventKind: 'readiness_signal',
+                signals: {
+                  documentComplete: 'true',
+                  routeStable: 'true',
+                  keyRegionReady: 'unknown',
+                  networkQuiet: 'unknown',
+                  observedAtMs: T0,
+                },
+                tabId: 100,
+                urlPattern: 'example.test/login',
+                sessionId: null,
+                readinessReason: 'please login to continue',
+                pageType: 'error themed page',
+              },
+            },
+          },
+        }),
+      ],
+      PRODUCED_AT,
+    );
+
+    expect(signal).toBeNull();
+  });
+
   it('emits results_changed for action outcomes with explicit DOM region evidence', () => {
     const signal = deriveWaitForStabilitySignal(
       [
@@ -544,6 +705,8 @@ describe('semantic-signal-aggregator — wait_for_stability', () => {
       'wait_for_stability',
       'ready_to_act',
       'user_took_over',
+      'login_required',
+      'challenge_required',
       'results_changed',
       'error_page_detected',
       'postcondition_failed',

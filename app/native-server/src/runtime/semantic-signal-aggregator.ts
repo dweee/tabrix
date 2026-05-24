@@ -48,8 +48,17 @@ export function deriveWaitForStabilitySignal(
     if (verdict === 'user_took_over') {
       return buildSignal(event, 'user_took_over', nowMs, options.confidence ?? 0.9);
     }
+    if (verdict === 'login_required') {
+      return buildSignal(event, 'login_required', nowMs, options.confidence ?? 0.9);
+    }
+    if (verdict === 'challenge_required') {
+      return buildSignal(event, 'challenge_required', nowMs, options.confidence ?? 0.9);
+    }
     if (verdict === 'results_changed') {
       return buildSignal(event, 'results_changed', nowMs, options.confidence ?? 0.8);
+    }
+    if (verdict === 'error_page_detected') {
+      return buildSignal(event, 'error_page_detected', nowMs, options.confidence ?? 0.9);
     }
     if (verdict === 'stable') return null;
     latestUnknown ??= event;
@@ -81,7 +90,10 @@ type EventVerdict =
   | 'wait_for_stability'
   | 'ready_to_act'
   | 'user_took_over'
+  | 'login_required'
+  | 'challenge_required'
   | 'results_changed'
+  | 'error_page_detected'
   | 'stable'
   | 'unknown';
 
@@ -135,6 +147,8 @@ function classifyFactSnapshotData(data: Record<string, unknown>): EventVerdict {
   if (payload.userActivityLevel === 'recent_input' && payload.interferenceRisk === 'high') {
     return 'user_took_over';
   }
+  const pageStateVerdict = classifyStructuredPageState(payload, envelope);
+  if (pageStateVerdict !== 'unknown') return pageStateVerdict;
   if (signals.routeStable === 'false' || signals.documentComplete === 'false') {
     return 'wait_for_stability';
   }
@@ -168,6 +182,31 @@ function classifyActionOutcomeData(data: Record<string, unknown>): EventVerdict 
   const observedSignalKinds = data.observedSignalKinds;
   if (!Array.isArray(observedSignalKinds)) return 'unknown';
   return observedSignalKinds.includes('dom_region_changed') ? 'results_changed' : 'unknown';
+}
+
+function classifyStructuredPageState(
+  payload: Record<string, unknown>,
+  envelope: Record<string, unknown>,
+): EventVerdict {
+  const pageRole = firstString(payload.pageRole, envelope.pageRole);
+  const readinessVerdict = firstString(payload.readinessVerdict, envelope.readinessVerdict);
+  const readinessReason = firstString(payload.readinessReason, envelope.readinessReason);
+  const pageType = firstString(payload.pageType, envelope.pageType);
+
+  if (pageRole === 'challenge_required' || isChallengeReason(readinessReason)) {
+    return 'challenge_required';
+  }
+  if (pageRole === 'login_required' || isLoginReason(readinessReason)) {
+    return 'login_required';
+  }
+  if (
+    pageRole === 'error_page_detected' ||
+    readinessVerdict === 'error' ||
+    pageType === 'browser_error_page'
+  ) {
+    return 'error_page_detected';
+  }
+  return 'unknown';
 }
 
 function buildSignal(
@@ -207,6 +246,21 @@ function getBridgeData(payload: unknown): Record<string, unknown> | null {
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
+}
+
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
+  return null;
+}
+
+function isLoginReason(value: string | null): boolean {
+  return value === 'auth_or_login_required';
+}
+
+function isChallengeReason(value: string | null): boolean {
+  return value === 'challenge_or_verification_required' || value === 'challenge_or_verification';
 }
 
 function isLifecycleEventKind(value: unknown): value is LifecycleEventKind {

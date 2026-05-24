@@ -1137,6 +1137,8 @@ export type SemanticSignalKind =
   | 'wait_for_stability'
   | 'ready_to_act'
   | 'user_took_over'
+  | 'login_required'
+  | 'challenge_required'
   | 'results_changed'
   | 'error_page_detected'
   | 'postcondition_failed'
@@ -1146,6 +1148,8 @@ export const SEMANTIC_SIGNAL_KINDS = [
   'wait_for_stability',
   'ready_to_act',
   'user_took_over',
+  'login_required',
+  'challenge_required',
   'results_changed',
   'error_page_detected',
   'postcondition_failed',
