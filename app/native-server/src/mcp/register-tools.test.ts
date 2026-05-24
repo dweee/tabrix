@@ -1408,6 +1408,33 @@ describe('handleToolCall execution wrapper', () => {
           available: true,
           runOwnedTabsClosed: 1,
           baselineChanged: false,
+          checks: [
+            {
+              kind: 'tab_window_baseline',
+              verdict: 'unknown',
+              reason: 'browser_hygiene_check_not_reported',
+            },
+            {
+              kind: 'active_tab_restore',
+              verdict: 'unknown',
+              reason: 'browser_hygiene_check_not_reported',
+            },
+            {
+              kind: 'run_owned_cleanup',
+              verdict: 'pass',
+              reason: 'run_owned_tabs_cleaned',
+            },
+            {
+              kind: 'user_owned_protection',
+              verdict: 'pass',
+              reason: 'user_owned_tabs_protected',
+            },
+            {
+              kind: 'failure_cleanup',
+              verdict: 'pass',
+              reason: 'failure_cleanup_not_needed',
+            },
+          ],
         },
         finalVerdict: { verdict: 'unknown', reason: 'postconditions_unknown' },
         claimBoundary: {

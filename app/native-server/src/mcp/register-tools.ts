@@ -6,6 +6,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import nativeMessagingHostInstance from '../native-messaging-host';
 import { NativeMessageType, TOOL_NAMES, TOOL_SCHEMAS, getRequiredCapability } from '@tabrix/shared';
+import type { LifecycleEvidenceBrowserHygieneCheck } from '@tabrix/shared';
 import type { SemanticSignal } from '@tabrix/shared';
 import { isToolAllowedByPolicy } from '../policy/phase0-opt-in';
 import { getCurrentCapabilityEnv, isCapabilityEnabled } from '../policy/capabilities';
@@ -1331,6 +1332,7 @@ function maybeRecordCloseTabsSuccessLifecycleArtifact(input: {
       baselineTabs: null,
       runOwnedTabsClosed: input.closedTabIds.length + input.invalidTabIds.length,
       baselineChanged: false,
+      checks: buildCloseTabsSuccessHygieneChecks(input),
       notes: [
         `closedTabCount=${input.closedTabIds.length}`,
         `invalidTabCount=${input.invalidTabIds.length}`,
@@ -1339,6 +1341,40 @@ function maybeRecordCloseTabsSuccessLifecycleArtifact(input: {
       ],
     },
   });
+}
+
+function buildCloseTabsSuccessHygieneChecks(input: {
+  closedTabIds: number[];
+  invalidTabIds: number[];
+}): LifecycleEvidenceBrowserHygieneCheck[] {
+  const cleanupCount = input.closedTabIds.length + input.invalidTabIds.length;
+  return [
+    {
+      kind: 'tab_window_baseline',
+      verdict: 'unknown',
+      reason: 'browser_hygiene_check_not_reported',
+    },
+    {
+      kind: 'active_tab_restore',
+      verdict: 'unknown',
+      reason: 'browser_hygiene_check_not_reported',
+    },
+    {
+      kind: 'run_owned_cleanup',
+      verdict: cleanupCount > 0 ? 'pass' : 'unknown',
+      reason: cleanupCount > 0 ? 'run_owned_tabs_cleaned' : 'browser_hygiene_check_not_reported',
+    },
+    {
+      kind: 'user_owned_protection',
+      verdict: 'pass',
+      reason: 'user_owned_tabs_protected',
+    },
+    {
+      kind: 'failure_cleanup',
+      verdict: 'pass',
+      reason: 'failure_cleanup_not_needed',
+    },
+  ];
 }
 
 function readJsonObjectFromCallToolResult(result: CallToolResult): Record<string, unknown> | null {
