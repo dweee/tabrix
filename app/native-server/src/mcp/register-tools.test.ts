@@ -1714,6 +1714,82 @@ describe('handleToolCall execution wrapper', () => {
       });
     });
 
+    it('exposes coverage-insufficient structured-read reason in chrome_read_page AI-facing output', async () => {
+      markBridgeReady();
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_long_content_low_coverage',
+          contextChars: 1400,
+          changedRegions: ['article_body'],
+          refreshedRefs: ['ref_article_section'],
+          extraPayload: {
+            mode: 'normal',
+            taskMode: 'read',
+            complexityLevel: 'complex',
+            summary: {
+              pageRole: 'article',
+              primaryRegion: 'content',
+              quality: 'usable',
+            },
+            completeTextRegion: {
+              completeTextAvailable: false,
+              charCount: 1400,
+              lineCount: 14,
+              structureSparse: false,
+              contentSparse: false,
+            },
+            visibleRegionRows: {
+              rowCount: 3,
+              rows: [],
+              targetRefCoverageRate: 0.42,
+              regionQualityScore: 0.4,
+            },
+          },
+        }),
+      );
+
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'long-content-low-coverage-gate',
+        mode: 'normal',
+        requestedLayer: 'L0+L1+L2',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.structuredReadGate).toMatchObject({
+        gateId: 'structured-read-gate:projection_long_content_low_coverage',
+        verdict: 'coverage_insufficient',
+        reasonCode: 'coverage_insufficient_content_region',
+        gapDescription: 'captured metadata does not prove enough content-region coverage',
+        recommendedAction: 'expand content-region coverage before treating the read as complete',
+        metrics: {
+          readMode: 'normal',
+          taskMode: 'read',
+          complexityLevel: 'complex',
+          pageRole: 'article',
+          primaryRegion: 'content',
+          completeTextAvailable: false,
+          structureSparse: false,
+          contentSparse: false,
+        },
+        boundary: {
+          metadataOnly: true,
+          rawContentInspected: false,
+          browserIoPerformed: false,
+          publicContractChanged: false,
+          commercialGradeProven: false,
+        },
+      });
+      expect(payload.structuredReadGate.metrics.bodyCharCount).toBe(1400);
+      expect(payload.structuredReadGate.metrics.coverageRatio).toBe(0.42);
+      expect(payload.aiContextEnvelope.structuredReadGate).toMatchObject({
+        gateId: 'structured-read-gate:projection_long_content_low_coverage',
+        verdict: 'coverage_insufficient',
+        reasonCode: 'coverage_insufficient_content_region',
+        recommendedAction: 'expand content-region coverage before treating the read as complete',
+      });
+    });
+
     it('marks AI-facing delta as real-browser evidence only for real tab projections', async () => {
       markBridgeReady();
       mockReadPageRoundTrip(
