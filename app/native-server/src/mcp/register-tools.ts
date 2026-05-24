@@ -116,6 +116,7 @@ import { buildBrowserTaskStateVerdict } from '@tabrix/shared';
 const DEFAULT_AUTO_TASK_CONTEXT_KEY = 'mcp:auto:tab:default';
 const TOOL_FAILURE_ARTIFACT_SCENARIO_ID = 'mcp:chrome_read_page:page_unreadable';
 const TOOL_CLOSEOUT_ARTIFACT_SCENARIO_ID = 'mcp:chrome_close_tabs:cleanup_success';
+const STRUCTURED_READ_GATE_ARTIFACT_SCENARIO_ID = 'mcp:chrome_read_page:structured_read_gate';
 
 type TaskContextKeySource = 'external_task_key' | 'internal_task_id';
 
@@ -1115,6 +1116,13 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         startedAtMs: toolCallStartedAtMs,
         endedAtMs: Date.now(),
       });
+      maybeRecordStructuredReadGateLifecycleArtifact({
+        name,
+        args,
+        result: aiFacingResult,
+        startedAtMs: toolCallStartedAtMs,
+        endedAtMs: Date.now(),
+      });
       const resultWithPolicyAudit =
         isImpactToolName(name) && rawResultWithEvidence.isError !== true
           ? attachRuntimePolicyAuditToResult(aiFacingResult, nonInterferenceVerdict.audit)
@@ -1301,6 +1309,55 @@ function maybeRecordReadPageFailureLifecycleArtifact(input: {
       } satisfies SemanticSignal,
     ],
   });
+}
+
+function maybeRecordStructuredReadGateLifecycleArtifact(input: {
+  name: string;
+  args: unknown;
+  result: CallToolResult;
+  startedAtMs: number;
+  endedAtMs: number;
+}): void {
+  if (input.name !== 'chrome_read_page') return;
+  const payload = readJsonObjectFromCallToolResult(input.result);
+  if (!payload) return;
+  const structuredReadGate = readObject(payload.structuredReadGate);
+  if (!structuredReadGate) return;
+  const verdict = readString(structuredReadGate.verdict);
+  if (!verdict) return;
+  if (!isActionableStructuredReadIncompleteVerdict(verdict)) return;
+  const reasonCode = readString(structuredReadGate.reasonCode) ?? `structured_read_${verdict}`;
+  const projection = readObject(payload.pageProjection);
+  const tabId =
+    readPositiveInteger(input.args, 'tabId') ??
+    (projection ? readPositiveInteger(projection, 'tabId') : null) ??
+    readPositiveInteger(payload, 'tabId');
+  if (tabId === null) return;
+  const reason = `structured_read_incomplete:${reasonCode}`;
+
+  produceToolFailureLifecycleEvidenceArtifact({
+    artifactId: `mcp-structured-read-gate-${input.startedAtMs}-${tabId}`,
+    evidenceLevel: 'integration',
+    scenarioId: STRUCTURED_READ_GATE_ARTIFACT_SCENARIO_ID,
+    scenarioClass: 'long_content_structured_read_gate_v1',
+    startedAtMs: input.startedAtMs,
+    endedAtMs: input.endedAtMs,
+    actionId: `mcp:chrome_read_page:structured_read_gate:${tabId}:${input.startedAtMs}`,
+    actionKind: 'unknown',
+    tabId,
+    reason,
+    observedOutcome: 'unknown',
+    observedOutcomeConfidence: 0.8,
+  });
+}
+
+function isActionableStructuredReadIncompleteVerdict(verdict: string): boolean {
+  return (
+    verdict === 'summary_only' ||
+    verdict === 'coverage_insufficient' ||
+    verdict === 'mode_insufficient' ||
+    verdict === 'structure_sparse'
+  );
 }
 
 function maybeRecordCloseTabsSuccessLifecycleArtifact(input: {

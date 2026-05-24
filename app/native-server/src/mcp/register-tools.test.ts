@@ -1668,12 +1668,12 @@ describe('handleToolCall execution wrapper', () => {
               structureSparse: false,
               contentSparse: true,
             },
+            sourcePayload: 'PRIVATE_SOURCE_PAYLOAD_SHOULD_NOT_APPEAR',
           },
         }),
       );
 
       const result = await handleToolCall('chrome_read_page', {
-        tabId: 1,
         taskSessionId: 'long-content-summary-only-gate',
         mode: 'normal',
         requestedLayer: 'L0+L1+L2',
@@ -1712,6 +1712,36 @@ describe('handleToolCall execution wrapper', () => {
         recommendedAction:
           'request full or normal mode and verify body coverage before summarizing',
       });
+      expect(getLifecycleEvidenceArtifactStoreSnapshot()).toMatchObject({
+        bufferedArtifacts: 1,
+        lastFinalVerdict: 'task_failed',
+      });
+      const artifacts = listLifecycleEvidenceArtifacts();
+      expect(artifacts).toHaveLength(1);
+      expect(artifacts[0]).toMatchObject({
+        scenarioId: 'mcp:chrome_read_page:structured_read_gate',
+        scenarioClass: 'long_content_structured_read_gate_v1',
+        actionLog: {
+          available: true,
+          totalActions: 1,
+          failed: 1,
+        },
+        claimBoundary: {
+          deterministicArtifactOnly: true,
+          realBrowserProven: false,
+          commercialGradeProven: false,
+        },
+      });
+      expect(artifacts[0].actionLog.entries[0]).toMatchObject({
+        actionKind: 'unknown',
+        tabId: 1,
+        verdict: 'failed',
+        reason: 'structured_read_incomplete:summary_only_body_missing',
+      });
+      const serializedArtifact = JSON.stringify(artifacts[0]);
+      expect(serializedArtifact).toContain('summary_only_body_missing');
+      expect(serializedArtifact).not.toContain('PRIVATE_SOURCE_PAYLOAD_SHOULD_NOT_APPEAR');
+      expect(serializedArtifact).not.toContain('sourcePayload');
     });
 
     it('exposes coverage-insufficient structured-read reason in chrome_read_page AI-facing output', async () => {
@@ -1922,6 +1952,43 @@ describe('handleToolCall execution wrapper', () => {
         reasonCode: 'metadata_insufficient',
         recommendedAction: 'collect stronger read_page metadata before making a completion claim',
       });
+      expect(getLifecycleEvidenceArtifactStoreSnapshot().bufferedArtifacts).toBe(0);
+      expect(listLifecycleEvidenceArtifacts()).toHaveLength(0);
+    });
+
+    it('does not emit a lifecycle artifact for unknown structured-read verdicts', async () => {
+      markBridgeReady();
+      const unknownGatePayload = readPagePayloadWithProjection({
+        projectionId: 'projection_long_content_unknown_gate',
+        contextChars: 1000,
+        changedRegions: ['content_region'],
+        refreshedRefs: ['ref_content_region'],
+        extraPayload: {
+          mode: 'normal',
+          taskMode: 'read',
+          complexityLevel: 'complex',
+          summary: {
+            pageRole: '',
+            primaryRegion: null,
+          },
+        },
+      });
+      mockReadPageRoundTrip(unknownGatePayload);
+
+      const result = await handleToolCall('chrome_read_page', {
+        taskSessionId: 'long-content-unknown-gate',
+        mode: 'normal',
+        requestedLayer: 'L0+L1+L2',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.structuredReadGate).toMatchObject({
+        gateId: 'structured-read-gate:projection_long_content_unknown_gate',
+        verdict: 'unknown',
+        reasonCode: 'metadata_insufficient',
+      });
+      expect(getLifecycleEvidenceArtifactStoreSnapshot().bufferedArtifacts).toBe(0);
+      expect(listLifecycleEvidenceArtifacts()).toHaveLength(0);
     });
 
     it('exposes structure-sparse structured-read reason in chrome_read_page AI-facing output', async () => {
