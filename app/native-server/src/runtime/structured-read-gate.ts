@@ -17,6 +17,18 @@ export const STRUCTURED_READ_GATE_VERDICTS = [
 
 export type StructuredReadGateVerdict = (typeof STRUCTURED_READ_GATE_VERDICTS)[number];
 
+export const STRUCTURED_READ_GATE_REASON_CODES = [
+  'complete_read_metadata_satisfied',
+  'not_long_content_candidate',
+  'summary_only_body_missing',
+  'structure_sparse_sections_missing',
+  'coverage_insufficient_content_region',
+  'mode_insufficient_shallow_read',
+  'metadata_insufficient',
+] as const;
+
+export type StructuredReadGateReasonCode = (typeof STRUCTURED_READ_GATE_REASON_CODES)[number];
+
 export type StructuredReadEvidenceBasis =
   | 'summary'
   | 'taskMode'
@@ -55,6 +67,7 @@ export interface StructuredReadGateMetrics {
 export interface StructuredReadGateResult {
   gateId: string;
   verdict: StructuredReadGateVerdict;
+  reasonCode: StructuredReadGateReasonCode;
   gapDescription: string | null;
   recommendedAction: string | null;
   metrics: StructuredReadGateMetrics;
@@ -350,6 +363,7 @@ function buildResult(
   return {
     gateId: input.gateId ?? `structured-read-gate-${input.nowMs}`,
     verdict,
+    reasonCode: reasonCodeFor(verdict),
     gapDescription: gapDescriptionFor(verdict),
     recommendedAction: recommendedActionFor(verdict),
     metrics,
@@ -365,6 +379,25 @@ function buildResult(
     },
     producedAtMs: input.nowMs,
   };
+}
+
+function reasonCodeFor(verdict: StructuredReadGateVerdict): StructuredReadGateReasonCode {
+  switch (verdict) {
+    case 'complete':
+      return 'complete_read_metadata_satisfied';
+    case 'not_applicable':
+      return 'not_long_content_candidate';
+    case 'summary_only':
+      return 'summary_only_body_missing';
+    case 'structure_sparse':
+      return 'structure_sparse_sections_missing';
+    case 'coverage_insufficient':
+      return 'coverage_insufficient_content_region';
+    case 'mode_insufficient':
+      return 'mode_insufficient_shallow_read';
+    case 'unknown':
+      return 'metadata_insufficient';
+  }
 }
 
 function gapDescriptionFor(verdict: StructuredReadGateVerdict): string | null {

@@ -81,6 +81,7 @@ describe('structured-read-gate — verdicts', () => {
     );
 
     expect(result.verdict).toBe('complete');
+    expect(result.reasonCode).toBe('complete_read_metadata_satisfied');
     expect(result.gapDescription).toBeNull();
     expect(result.recommendedAction).toBeNull();
     expect(result.metrics.bodyCharCount).toBe(5_200);
@@ -109,6 +110,7 @@ describe('structured-read-gate — verdicts', () => {
     );
 
     expect(result.verdict).toBe('mode_insufficient');
+    expect(result.reasonCode).toBe('mode_insufficient_shallow_read');
   });
 
   it('marks title and summary-only metadata as summary_only', () => {
@@ -130,6 +132,7 @@ describe('structured-read-gate — verdicts', () => {
     });
 
     expect(result.verdict).toBe('summary_only');
+    expect(result.reasonCode).toBe('summary_only_body_missing');
     expect(result.gapDescription).toContain('body content');
   });
 
@@ -184,6 +187,7 @@ describe('structured-read-gate — verdicts', () => {
     });
 
     expect(result.verdict).toBe('coverage_insufficient');
+    expect(result.reasonCode).toBe('coverage_insufficient_content_region');
   });
 
   it('marks substantial unstructured body metadata as structure_sparse', () => {
@@ -206,6 +210,7 @@ describe('structured-read-gate — verdicts', () => {
     });
 
     expect(result.verdict).toBe('structure_sparse');
+    expect(result.reasonCode).toBe('structure_sparse_sections_missing');
   });
 
   it('does not mark long text complete when structured section evidence is too low', () => {
@@ -258,6 +263,7 @@ describe('structured-read-gate — verdicts', () => {
     );
 
     expect(result.verdict).toBe('structure_sparse');
+    expect(result.reasonCode).toBe('structure_sparse_sections_missing');
     expect(result.metrics.sectionCount).toBe(5);
     expect(result.gapDescription).toContain('structure');
   });
@@ -287,6 +293,7 @@ describe('structured-read-gate — verdicts', () => {
     });
 
     expect(result.verdict).toBe('not_applicable');
+    expect(result.reasonCode).toBe('not_long_content_candidate');
     expect(result.gapDescription).toBeNull();
   });
 
@@ -307,6 +314,7 @@ describe('structured-read-gate — verdicts', () => {
     });
 
     expect(result.verdict).toBe('unknown');
+    expect(result.reasonCode).toBe('metadata_insufficient');
   });
 });
 
