@@ -1,4 +1,6 @@
 import type {
+  ActionOutcomeEventEnvelope,
+  ActionKind,
   BrowserSourceTruthChain,
   BrowserStreamEvent,
   BrowserStreamEventKind,
@@ -7,13 +9,17 @@ import type {
   CorrelationGroupId,
   LifecycleEvidenceArtifact,
   ObservationKind,
+  PostconditionResult,
   SemanticSignal,
 } from '@tabrix/shared';
+import { ACTION_KINDS } from '@tabrix/shared';
 import {
   registerEventStreamSubscriber,
   unregisterEventStreamSubscriber,
   type EventStreamSubscriber,
 } from './browser-event-stream';
+import { classifyActionOutcome } from './action-outcome-classifier';
+import { verifyActionPostcondition } from './action-postcondition-verifier';
 import { produceLifecycleEvidenceArtifact } from './lifecycle-evidence-artifact';
 import { deriveWaitForStabilitySignal } from './semantic-signal-aggregator';
 
@@ -37,14 +43,22 @@ interface BufferedSemanticSignal {
   correlationGroupId: CorrelationGroupId;
 }
 
+interface BufferedPostconditionResult {
+  result: PostconditionResult;
+  correlationGroupId: CorrelationGroupId;
+}
+
 export interface LifecycleEvidenceCollectorSnapshot {
   registered: boolean;
   bufferedEvents: number;
   bufferedSignals: number;
+  bufferedPostconditions: number;
   droppedEvents: number;
   droppedSignals: number;
+  droppedPostconditions: number;
   lastEventAtMs: number | null;
   lastSignalAtMs: number | null;
+  lastPostconditionAtMs: number | null;
   maxBufferedEvents: number;
 }
 
@@ -64,11 +78,14 @@ export interface RuntimeLifecycleEvidenceArtifactInput {
 
 const bufferedEvents: BufferedLifecycleEvidenceEvent[] = [];
 const bufferedSignals: BufferedSemanticSignal[] = [];
+const bufferedPostconditions: BufferedPostconditionResult[] = [];
 let registered = false;
 let droppedEvents = 0;
 let droppedSignals = 0;
+let droppedPostconditions = 0;
 let lastEventAtMs: number | null = null;
 let lastSignalAtMs: number | null = null;
+let lastPostconditionAtMs: number | null = null;
 let maxBufferedEvents = DEFAULT_MAX_BUFFERED_EVENTS;
 
 const subscriber: EventStreamSubscriber = {
@@ -82,6 +99,14 @@ const subscriber: EventStreamSubscriber = {
       bufferedSignals.push({ signal, correlationGroupId: event.correlationGroupId });
       lastSignalAtMs = signal.producedAtMs;
     }
+    const postcondition = derivePostconditionResult(event);
+    if (postcondition) {
+      bufferedPostconditions.push({
+        result: postcondition,
+        correlationGroupId: event.correlationGroupId,
+      });
+      lastPostconditionAtMs = postcondition.producedAtMs;
+    }
 
     while (bufferedEvents.length > maxBufferedEvents) {
       bufferedEvents.shift();
@@ -90,6 +115,10 @@ const subscriber: EventStreamSubscriber = {
     while (bufferedSignals.length > maxBufferedEvents) {
       bufferedSignals.shift();
       droppedSignals += 1;
+    }
+    while (bufferedPostconditions.length > maxBufferedEvents) {
+      bufferedPostconditions.shift();
+      droppedPostconditions += 1;
     }
   },
   healthCheck() {
@@ -113,10 +142,13 @@ export function unregisterLifecycleEvidenceCollector(): boolean {
 export function resetLifecycleEvidenceCollector(): void {
   bufferedEvents.length = 0;
   bufferedSignals.length = 0;
+  bufferedPostconditions.length = 0;
   droppedEvents = 0;
   droppedSignals = 0;
+  droppedPostconditions = 0;
   lastEventAtMs = null;
   lastSignalAtMs = null;
+  lastPostconditionAtMs = null;
 }
 
 export function resetLifecycleEvidenceCollectorForTests(): void {
@@ -131,6 +163,14 @@ export function setLifecycleEvidenceCollectorMaxBufferedEventsForTests(max: numb
     bufferedEvents.shift();
     droppedEvents += 1;
   }
+  while (bufferedSignals.length > maxBufferedEvents) {
+    bufferedSignals.shift();
+    droppedSignals += 1;
+  }
+  while (bufferedPostconditions.length > maxBufferedEvents) {
+    bufferedPostconditions.shift();
+    droppedPostconditions += 1;
+  }
 }
 
 export function getLifecycleEvidenceCollectorSnapshot(): LifecycleEvidenceCollectorSnapshot {
@@ -138,10 +178,13 @@ export function getLifecycleEvidenceCollectorSnapshot(): LifecycleEvidenceCollec
     registered,
     bufferedEvents: bufferedEvents.length,
     bufferedSignals: bufferedSignals.length,
+    bufferedPostconditions: bufferedPostconditions.length,
     droppedEvents,
     droppedSignals,
+    droppedPostconditions,
     lastEventAtMs,
     lastSignalAtMs,
+    lastPostconditionAtMs,
     maxBufferedEvents,
   };
 }
@@ -170,6 +213,15 @@ export function produceRuntimeLifecycleEvidenceArtifact(
     .filter((entry) => entry.signal.tabId !== null && tabIds.has(entry.signal.tabId))
     .filter((entry) => !hasCorrelationFilter || correlationGroupIds.has(entry.correlationGroupId))
     .map((entry) => entry.signal);
+  const postconditionResults = bufferedPostconditions
+    .filter(
+      (entry) =>
+        entry.result.producedAtMs >= input.startedAtMs &&
+        entry.result.producedAtMs <= input.endedAtMs,
+    )
+    .filter((entry) => entry.result.tabId !== null && tabIds.has(entry.result.tabId))
+    .filter((entry) => !hasCorrelationFilter || correlationGroupIds.has(entry.correlationGroupId))
+    .map((entry) => entry.result);
 
   return produceLifecycleEvidenceArtifact({
     artifactId: input.artifactId,
@@ -179,8 +231,59 @@ export function produceRuntimeLifecycleEvidenceArtifact(
     startedAtMs: input.startedAtMs,
     streamEvents,
     semanticSignals,
+    postconditionEvidence: {
+      source: 'bns_04_verifier',
+      results: postconditionResults,
+    },
     sourceTruthChain: input.sourceTruthChain ?? null,
   });
+}
+
+function derivePostconditionResult(event: BrowserStreamEvent): PostconditionResult | null {
+  if (event.sourceObservationKind !== 'action_outcome') return null;
+  const envelope = extractActionOutcomeEnvelope(event.sourcePayload);
+  if (!envelope) return null;
+
+  try {
+    const snapshot = classifyActionOutcome(envelope, {
+      now: () => event.observedAtMs,
+    });
+    return verifyActionPostcondition(envelope, snapshot, {
+      now: () => event.observedAtMs,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function extractActionOutcomeEnvelope(sourcePayload: unknown): ActionOutcomeEventEnvelope | null {
+  if (!sourcePayload || typeof sourcePayload !== 'object') return null;
+  const payload = sourcePayload as { data?: unknown };
+  if (!payload.data || typeof payload.data !== 'object') return null;
+  const data = payload.data as Partial<ActionOutcomeEventEnvelope>;
+  if (
+    typeof data.actionId !== 'string' ||
+    !isActionKind(data.actionKind) ||
+    typeof data.tabId !== 'number' ||
+    !Number.isFinite(data.tabId) ||
+    typeof data.observedAtMs !== 'number' ||
+    !Number.isFinite(data.observedAtMs) ||
+    !Array.isArray(data.signals)
+  ) {
+    return null;
+  }
+  return {
+    actionId: data.actionId,
+    actionKind: data.actionKind,
+    tabId: data.tabId,
+    urlPattern: typeof data.urlPattern === 'string' ? data.urlPattern : null,
+    observedAtMs: data.observedAtMs,
+    signals: data.signals,
+  };
+}
+
+function isActionKind(value: unknown): value is ActionKind {
+  return typeof value === 'string' && (ACTION_KINDS as readonly string[]).includes(value);
 }
 
 function sanitizeEvent(event: BrowserStreamEvent): BufferedLifecycleEvidenceEvent {

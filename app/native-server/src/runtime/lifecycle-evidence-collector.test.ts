@@ -58,10 +58,13 @@ describe('lifecycle-evidence-collector — registration', () => {
       registered: false,
       bufferedEvents: 0,
       bufferedSignals: 0,
+      bufferedPostconditions: 0,
       droppedEvents: 0,
       droppedSignals: 0,
+      droppedPostconditions: 0,
       lastEventAtMs: null,
       lastSignalAtMs: null,
+      lastPostconditionAtMs: null,
     });
   });
 
@@ -94,10 +97,13 @@ describe('lifecycle-evidence-collector — registration', () => {
       registered: false,
       bufferedEvents: 0,
       bufferedSignals: 0,
+      bufferedPostconditions: 0,
       droppedEvents: 0,
       droppedSignals: 0,
+      droppedPostconditions: 0,
       lastEventAtMs: null,
       lastSignalAtMs: null,
+      lastPostconditionAtMs: null,
     });
   });
 });
@@ -223,6 +229,7 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
       available: false,
       reason: 'bns_02_not_available',
     });
+    expect(artifact.actionLog.available).toBe(false);
   });
 
   it('uses correlation groups only as an intersection filter', () => {
@@ -318,10 +325,18 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     expect(serialized).not.toContain('sourcePayload');
   });
 
-  it('keeps runtime artifact verdict unknown because no BNS-04/Hygiene adapter is wired', () => {
+  it('derives BNS-04 postcondition action log from runtime action outcome events', () => {
     ensureLifecycleEvidenceCollectorRegistered();
     dispatchBridgeObservationToStream(
-      makeBridgeMessage('action_outcome', { tabId: 42, observedAtMs: T0 }),
+      makeBridgeMessage('action_outcome', {
+        tabId: 42,
+        observedAtMs: T0,
+        data: {
+          actionId: 'act-click-1',
+          actionKind: 'click',
+          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 + 10 }],
+        },
+      }),
     );
 
     const artifact = produceRuntimeLifecycleEvidenceArtifact({
@@ -334,12 +349,187 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
       eventWindow: { tabIds: [42] },
     });
 
-    expect(artifact.actionLog.available).toBe(false);
+    expect(getLifecycleEvidenceCollectorSnapshot()).toMatchObject({
+      bufferedPostconditions: 1,
+      lastPostconditionAtMs: T0,
+    });
+    expect(artifact.actionLog).toMatchObject({
+      available: true,
+      totalActions: 1,
+      passed: 1,
+      failed: 0,
+      unknown: 0,
+    });
+    expect(artifact.actionLog.entries[0]).toMatchObject({
+      actionId: 'act-click-1',
+      actionKind: 'click',
+      verdict: 'passed',
+      observedOutcome: 'spa_partial_update',
+    });
     expect(artifact.finalVerdict).toEqual({
       verdict: 'unknown',
-      confidence: 0,
-      reason: 'no_postcondition_results',
+      confidence: 0.3,
+      reason: 'browser_hygiene_unavailable',
     });
+  });
+
+  it('turns no-observed-change action outcomes into failed postconditions', () => {
+    ensureLifecycleEvidenceCollectorRegistered();
+    dispatchBridgeObservationToStream(
+      makeBridgeMessage('action_outcome', {
+        tabId: 42,
+        observedAtMs: T0,
+        data: {
+          actionId: 'act-click-noop',
+          actionKind: 'click',
+          signals: [],
+        },
+      }),
+    );
+
+    const artifact = produceRuntimeLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-failed-postcondition',
+      evidenceLevel: 'integration',
+      scenarioId: 'scenario-failed-postcondition',
+      scenarioClass: 'postcondition_failure_v1',
+      startedAtMs: T0,
+      endedAtMs: T0,
+      eventWindow: { tabIds: [42] },
+    });
+
+    expect(artifact.actionLog).toMatchObject({
+      available: true,
+      totalActions: 1,
+      passed: 0,
+      failed: 1,
+      unknown: 0,
+    });
+    expect(artifact.actionLog.entries[0]).toMatchObject({
+      actionId: 'act-click-noop',
+      verdict: 'failed',
+      observedOutcome: 'no_observed_change',
+      reason: 'no_relevant_effect_observed',
+    });
+    expect(artifact.finalVerdict).toEqual({
+      verdict: 'task_failed',
+      confidence: 0.85,
+      reason: 'postcondition_failed',
+    });
+  });
+
+  it('filters postcondition evidence by artifact window and tab scope', () => {
+    ensureLifecycleEvidenceCollectorRegistered();
+    dispatchBridgeObservationToStream(
+      makeBridgeMessage('action_outcome', {
+        tabId: 7,
+        observedAtMs: T0 - 1,
+        data: {
+          actionId: 'act-before-window',
+          actionKind: 'click',
+          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 }],
+        },
+      }),
+    );
+    dispatchBridgeObservationToStream(
+      makeBridgeMessage('action_outcome', {
+        tabId: 8,
+        observedAtMs: T0 + 10,
+        data: {
+          actionId: 'act-other-tab',
+          actionKind: 'click',
+          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 + 10 }],
+        },
+      }),
+    );
+    dispatchBridgeObservationToStream(
+      makeBridgeMessage('action_outcome', {
+        tabId: 7,
+        observedAtMs: T0 + 20,
+        data: {
+          actionId: 'act-in-scope',
+          actionKind: 'click',
+          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 + 20 }],
+        },
+      }),
+    );
+
+    const artifact = produceRuntimeLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-filtered-postconditions',
+      evidenceLevel: 'integration',
+      scenarioId: 'scenario-filtered-postconditions',
+      scenarioClass: 'postcondition_failure_v1',
+      startedAtMs: T0,
+      endedAtMs: T0 + 30,
+      eventWindow: { tabIds: [7] },
+    });
+
+    expect(artifact.actionLog).toMatchObject({
+      available: true,
+      totalActions: 1,
+      passed: 1,
+    });
+    expect(artifact.actionLog.entries.map((entry) => entry.actionId)).toEqual(['act-in-scope']);
+  });
+
+  it('drops malformed action outcome payloads instead of guessing postconditions', () => {
+    ensureLifecycleEvidenceCollectorRegistered();
+    dispatchBridgeObservationToStream(
+      makeBridgeMessage('action_outcome', {
+        tabId: 42,
+        observedAtMs: T0,
+        data: {
+          actionId: 'act-malformed',
+          actionKind: 'close',
+          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 }],
+        },
+      }),
+    );
+
+    const artifact = produceRuntimeLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-malformed-postcondition',
+      evidenceLevel: 'integration',
+      scenarioId: 'scenario-malformed-postcondition',
+      scenarioClass: 'postcondition_failure_v1',
+      startedAtMs: T0,
+      endedAtMs: T0,
+      eventWindow: { tabIds: [42] },
+    });
+
+    expect(getLifecycleEvidenceCollectorSnapshot().bufferedPostconditions).toBe(0);
+    expect(artifact.actionLog.available).toBe(false);
+  });
+
+  it('does not emit raw sourcePayload through derived postcondition evidence', () => {
+    ensureLifecycleEvidenceCollectorRegistered();
+    dispatchBridgeObservationToStream(
+      makeBridgeMessage('action_outcome', {
+        tabId: 42,
+        observedAtMs: T0,
+        data: {
+          actionId: 'act-private',
+          actionKind: 'click',
+          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 }],
+          rawText: 'PRIVATE_TEXT_SHOULD_NOT_APPEAR',
+          Authorization: 'secret-token',
+        },
+      }),
+    );
+
+    const artifact = produceRuntimeLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-postcondition-private',
+      evidenceLevel: 'integration',
+      scenarioId: 'scenario-postcondition-private',
+      scenarioClass: 'postcondition_failure_v1',
+      startedAtMs: T0,
+      endedAtMs: T0,
+      eventWindow: { tabIds: [42] },
+    });
+
+    const serialized = JSON.stringify(artifact.actionLog);
+    expect(serialized).toContain('act-private');
+    expect(serialized).not.toContain('PRIVATE_TEXT_SHOULD_NOT_APPEAR');
+    expect(serialized).not.toContain('secret-token');
+    expect(serialized).not.toContain('sourcePayload');
   });
 });
 
