@@ -92,6 +92,7 @@ interface TaskModeSignalContext {
   title: string;
   pageRole: string;
   primaryRegion: string;
+  hasVisibleRegionRows: boolean;
   signalText: string[];
   highValueText: string[];
 }
@@ -217,6 +218,7 @@ function buildTaskModeSignalContext(
     title: String(params.currentTitle || '').toLowerCase(),
     pageRole: String(params.pageRole || ''),
     primaryRegion: String(params.primaryRegion || ''),
+    hasVisibleRegionRows: Boolean(params.visibleRegionRows?.visibleRegionRowsUsed),
     signalText: [...interactiveLabels, ...candidateLabels, ...actionHints].map((item) =>
       item.toLowerCase(),
     ),
@@ -233,6 +235,9 @@ function buildTaskModeSignalContext(
 
 function scoreTaskMode(mode: RankedTaskMode, context: TaskModeSignalContext): number {
   let score = 0;
+  const hasRoleOrRegionHint =
+    PAGE_ROLE_TASK_MODE_HINTS[context.pageRole] === mode ||
+    PRIMARY_REGION_TASK_MODE_HINTS[context.primaryRegion] === mode;
   if (PAGE_ROLE_TASK_MODE_HINTS[context.pageRole] === mode) {
     score += 6;
   }
@@ -241,10 +246,14 @@ function scoreTaskMode(mode: RankedTaskMode, context: TaskModeSignalContext): nu
   }
 
   const patterns = TASK_MODE_SIGNAL_PATTERNS[mode];
-  score += countPatternMatches(patterns, [context.title]) * 3;
+  const titleMatchCount = countPatternMatches(patterns, [context.title]);
+  score += titleMatchCount * (mode === 'search' && !context.hasVisibleRegionRows ? 1 : 3);
   score += countPatternMatches(patterns, context.signalText) * 2;
   score += countPatternMatches(patterns, context.highValueText) * 3;
 
+  if (mode === 'search' && context.hasVisibleRegionRows && titleMatchCount > 0) {
+    score += 3;
+  }
   if (mode === 'search' && /\/issues(?:\/?|$)/i.test(context.url)) {
     score += 4;
   }
@@ -258,6 +267,14 @@ function scoreTaskMode(mode: RankedTaskMode, context: TaskModeSignalContext): nu
     score += 4;
   }
 
+  if (
+    mode === 'search' &&
+    !context.hasVisibleRegionRows &&
+    !hasRoleOrRegionHint &&
+    !/\/issues(?:\/?|$)/i.test(context.url)
+  ) {
+    return Math.min(score, 4);
+  }
   return score;
 }
 

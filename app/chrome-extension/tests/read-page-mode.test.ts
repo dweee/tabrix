@@ -413,6 +413,194 @@ describe('read_page mode', () => {
     expect(payload.taskMode).toBe('search');
   });
 
+  it('maps generic search result rows to search task mode and watch scope', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5205,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/search?q=workflow',
+      title: 'Search results for workflow',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Search results for workflow" [ref=ref_main] (x=640,y=370)',
+        '  - listitem "Result" [ref=ref_result_1] (x=280,y=160)',
+        '    - link "Workflow planning guide for distributed teams" [ref=ref_result_1_link] (x=280,y=150) href="/items/workflow-planning"',
+        '    - generic "Practical steps for coordinating browser tasks across reviewers." [ref=ref_result_1_desc] (x=280,y=186)',
+        '    - generic "Updated today" [ref=ref_result_1_meta] (x=280,y=224)',
+        '  - listitem "Result" [ref=ref_result_2] (x=280,y=270)',
+        '    - link "Operations checklist for reliable browser handoffs" [ref=ref_result_2_link] (x=280,y=260) href="/items/browser-handoffs"',
+        '    - generic "A field checklist for keeping evidence, ownership, and actions aligned." [ref=ref_result_2_desc] (x=280,y=296)',
+        '    - generic "Updated yesterday" [ref=ref_result_2_meta] (x=280,y=334)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_result_1_link', selector: 'a[href="/items/workflow-planning"]' },
+        { ref: 'ref_result_2_link', selector: 'a[href="/items/browser-handoffs"]' },
+      ],
+      stats: { processed: 8, included: 8, durationMs: 7 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expectCommonSnapshotShape(payload, 'compact');
+    expect(payload).toMatchObject({
+      taskMode: 'search',
+      rowCount: 2,
+      visibleRegionRowsUsed: true,
+      readinessVerdict: 'ready',
+    });
+    expect(payload.watchScope.scopeKind).toBe('search');
+    expect(payload.visibleRegionRows.rows.map((row: { title: string }) => row.title)).toEqual([
+      'Workflow planning guide for distributed teams',
+      'Operations checklist for reliable browser handoffs',
+    ]);
+  });
+
+  it('does not map shell-only search pages to search watch scope', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5206,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/search?q=workflow',
+      title: 'Search results for workflow',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'ensureInteractiveElementsHelper').mockResolvedValue(undefined);
+    const sendMessage = vi.spyOn(readPageTool as any, 'sendMessageToTab');
+    sendMessage
+      .mockResolvedValueOnce({
+        success: true,
+        pageContent: [
+          '- banner "Site header" [ref=ref_banner] (x=640,y=40)',
+          '  - link "Home" [ref=ref_home] (x=40,y=40) href="/"',
+          '- search "Search controls" [ref=ref_search] (x=420,y=96)',
+          '  - searchbox "Search query" [ref=ref_query] (x=420,y=96)',
+          '  - button "Search" [ref=ref_search_button] (x=760,y=96)',
+          '- navigation "Result filters" [ref=ref_filters] (x=220,y=160)',
+          '  - button "All" [ref=ref_all] (x=220,y=160)',
+          '  - button "Recent" [ref=ref_recent] (x=280,y=160)',
+          '- footer "Footer" [ref=ref_footer] (x=640,y=680)',
+          '  - link "Privacy" [ref=ref_privacy] (x=600,y=680) href="/privacy"',
+          '  - link "Terms" [ref=ref_terms] (x=680,y=680) href="/terms"',
+        ].join('\n'),
+        refMap: [
+          { ref: 'ref_home', selector: 'a[href="/"]' },
+          { ref: 'ref_query', selector: 'input[type="search"]' },
+          { ref: 'ref_search_button', selector: 'button.search' },
+        ],
+        stats: { processed: 10, included: 10, durationMs: 7 },
+        viewport: { width: 1280, height: 720, dpr: 1 },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        pageContent: '- generic "Search shell" [ref=ref_shell] (x=640,y=300)',
+        refMap: [],
+        stats: { processed: 1, included: 1, durationMs: 4 },
+        viewport: { width: 1280, height: 720, dpr: 1 },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        elements: [
+          { type: 'link', text: 'Home', selector: 'a[href="/"]', href: '/' },
+          { type: 'button', text: 'Search', selector: 'button.search' },
+          { type: 'button', text: 'All', selector: 'button.all' },
+          { type: 'link', text: 'Privacy', selector: 'a[href="/privacy"]', href: '/privacy' },
+        ],
+        scrollY: 0,
+        pixelsBelow: 0,
+      });
+
+    const result = await readPageTool.execute({ mode: 'compact' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expectCommonSnapshotShape(payload, 'compact');
+    expect(payload).toMatchObject({
+      taskMode: 'read',
+      rowCount: 0,
+      visibleRegionRowsUsed: false,
+    });
+    expect(payload.watchScope.scopeKind).not.toBe('search');
+    expect(payload.visibleRegionRows.rows).toEqual([]);
+  });
+
+  it('recovers search rows from body-visible text when a non-sparse tree is shell-heavy', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5207,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/search?q=workflow',
+      title: 'Search results for workflow',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sampleVisibleText = vi
+      .spyOn(readPageTool as any, 'sampleVisibleTextContent')
+      .mockResolvedValue(
+        [
+          'Search results for workflow',
+          'Workflow planning guide for distributed teams',
+          'Practical steps for coordinating browser tasks across reviewers.',
+          'Updated today',
+          'Operations checklist for reliable browser handoffs',
+          'A field checklist for keeping evidence, ownership, and actions aligned.',
+          'Updated yesterday',
+        ].join('\n'),
+      );
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- banner "Site header" [ref=ref_banner] (x=640,y=40)',
+        '  - link "Home" [ref=ref_home] (x=40,y=40) href="/"',
+        '- search "Search controls" [ref=ref_search] (x=420,y=96)',
+        '  - searchbox "Search query" [ref=ref_query] (x=420,y=96)',
+        '  - button "Search" [ref=ref_search_button] (x=760,y=96)',
+        '- navigation "Result filters" [ref=ref_filters] (x=220,y=160)',
+        '  - button "All" [ref=ref_all] (x=220,y=160)',
+        '  - button "Recent" [ref=ref_recent] (x=280,y=160)',
+        '- footer "Footer" [ref=ref_footer] (x=640,y=680)',
+        '  - link "Privacy" [ref=ref_privacy] (x=600,y=680) href="/privacy"',
+        '  - link "Terms" [ref=ref_terms] (x=680,y=680) href="/terms"',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_home', selector: 'a[href="/"]' },
+        { ref: 'ref_query', selector: 'input[type="search"]' },
+        { ref: 'ref_search_button', selector: 'button.search' },
+        { ref: 'ref_all', selector: 'button.all' },
+        { ref: 'ref_recent', selector: 'button.recent' },
+      ],
+      stats: { processed: 10, included: 10, durationMs: 7 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expectCommonSnapshotShape(payload, 'compact');
+    expect(sampleVisibleText).toHaveBeenCalled();
+    expect(payload).toMatchObject({
+      taskMode: 'search',
+      rowCount: 2,
+      visibleRegionRowsUsed: true,
+      readinessVerdict: 'ready',
+    });
+    expect(payload.pageContext.fallbackSource).toBe('visible_text');
+    expect(payload.watchScope.scopeKind).toBe('search');
+    expect(payload.visibleRegionRows.sourceRegion).toBe('visible_text');
+    expect(payload.visibleRegionRows.rows.map((row: { title: string }) => row.title)).toEqual([
+      'Workflow planning guide for distributed teams',
+      'Operations checklist for reliable browser handoffs',
+    ]);
+  });
+
   it('echoes explicit full mode', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 5202,
