@@ -57,8 +57,11 @@ describe('lifecycle-evidence-collector — registration', () => {
     expect(getLifecycleEvidenceCollectorSnapshot()).toMatchObject({
       registered: false,
       bufferedEvents: 0,
+      bufferedSignals: 0,
       droppedEvents: 0,
+      droppedSignals: 0,
       lastEventAtMs: null,
+      lastSignalAtMs: null,
     });
   });
 
@@ -90,8 +93,11 @@ describe('lifecycle-evidence-collector — registration', () => {
     expect(getLifecycleEvidenceCollectorSnapshot()).toMatchObject({
       registered: false,
       bufferedEvents: 0,
+      bufferedSignals: 0,
       droppedEvents: 0,
+      droppedSignals: 0,
       lastEventAtMs: null,
+      lastSignalAtMs: null,
     });
   });
 });
@@ -121,6 +127,64 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     expect(artifact.eventTimeline.eventsByKind).toEqual({
       observation_lifecycle: 1,
       observation_fact_snapshot: 1,
+    });
+  });
+
+  it('derives wait_for_stability signal sequence from runtime stream events', () => {
+    ensureLifecycleEvidenceCollectorRegistered();
+    dispatchBridgeObservationToStream(
+      makeBridgeMessage('lifecycle_event', {
+        tabId: 42,
+        observedAtMs: T0 + 10,
+        data: { eventKind: 'before_navigate' },
+      }),
+    );
+
+    const artifact = produceRuntimeLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-signals',
+      evidenceLevel: 'integration',
+      scenarioId: 'scenario-signals',
+      scenarioClass: 'search_result_delta_v1',
+      startedAtMs: T0,
+      endedAtMs: T0 + 30,
+      eventWindow: { tabIds: [42] },
+    });
+
+    expect(getLifecycleEvidenceCollectorSnapshot()).toMatchObject({
+      bufferedSignals: 1,
+      lastSignalAtMs: T0 + 10,
+    });
+    expect(artifact.signalSequence).toMatchObject({
+      available: true,
+      totalSignals: 1,
+      signalsByKind: { wait_for_stability: 1 },
+    });
+  });
+
+  it('does not derive a wait signal for stable lifecycle completion', () => {
+    ensureLifecycleEvidenceCollectorRegistered();
+    dispatchBridgeObservationToStream(
+      makeBridgeMessage('lifecycle_event', {
+        tabId: 42,
+        observedAtMs: T0 + 10,
+        data: { eventKind: 'document_complete' },
+      }),
+    );
+
+    const artifact = produceRuntimeLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-stable',
+      evidenceLevel: 'integration',
+      scenarioId: 'scenario-stable',
+      scenarioClass: 'search_result_delta_v1',
+      startedAtMs: T0,
+      endedAtMs: T0 + 30,
+      eventWindow: { tabIds: [42] },
+    });
+
+    expect(getLifecycleEvidenceCollectorSnapshot().bufferedSignals).toBe(0);
+    expect(artifact.signalSequence).toEqual({
+      available: false,
+      reason: 'bns_02_not_available',
     });
   });
 
@@ -154,6 +218,10 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
       kind: 'observation_fact_snapshot',
       tabId: 7,
       observedAtMs: T0 + 10,
+    });
+    expect(artifact.signalSequence).toEqual({
+      available: false,
+      reason: 'bns_02_not_available',
     });
   });
 
@@ -219,6 +287,37 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     expect(serialized).not.toContain('sourcePayload');
   });
 
+  it('does not emit raw sourcePayload through derived semantic signals', () => {
+    ensureLifecycleEvidenceCollectorRegistered();
+    dispatchBridgeObservationToStream(
+      makeBridgeMessage('lifecycle_event', {
+        tabId: 42,
+        observedAtMs: T0,
+        data: {
+          eventKind: 'before_navigate',
+          rawText: 'PRIVATE_TEXT_SHOULD_NOT_APPEAR',
+          Authorization: 'secret-token',
+        },
+      }),
+    );
+
+    const artifact = produceRuntimeLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-signal-private',
+      evidenceLevel: 'integration',
+      scenarioId: 'scenario-signal-private',
+      scenarioClass: 'search_result_delta_v1',
+      startedAtMs: T0,
+      endedAtMs: T0,
+      eventWindow: { tabIds: [42] },
+    });
+
+    const serialized = JSON.stringify(artifact.signalSequence);
+    expect(serialized).toContain('wait_for_stability');
+    expect(serialized).not.toContain('PRIVATE_TEXT_SHOULD_NOT_APPEAR');
+    expect(serialized).not.toContain('secret-token');
+    expect(serialized).not.toContain('sourcePayload');
+  });
+
   it('keeps runtime artifact verdict unknown because no BNS-04/Hygiene adapter is wired', () => {
     ensureLifecycleEvidenceCollectorRegistered();
     dispatchBridgeObservationToStream(
@@ -248,14 +347,32 @@ describe('lifecycle-evidence-collector — bounds and validation', () => {
   it('evicts old events when the buffer is bounded', () => {
     ensureLifecycleEvidenceCollectorRegistered();
     setLifecycleEvidenceCollectorMaxBufferedEventsForTests(2);
-    dispatchBridgeObservationToStream(makeBridgeMessage('lifecycle_event', { observedAtMs: T0 }));
-    dispatchBridgeObservationToStream(makeBridgeMessage('fact_snapshot', { observedAtMs: T0 + 1 }));
-    dispatchBridgeObservationToStream(makeBridgeMessage('tab_event', { observedAtMs: T0 + 2 }));
+    dispatchBridgeObservationToStream(
+      makeBridgeMessage('lifecycle_event', {
+        observedAtMs: T0,
+        data: { eventKind: 'before_navigate' },
+      }),
+    );
+    dispatchBridgeObservationToStream(
+      makeBridgeMessage('lifecycle_event', {
+        observedAtMs: T0 + 1,
+        data: { eventKind: 'committed' },
+      }),
+    );
+    dispatchBridgeObservationToStream(
+      makeBridgeMessage('tab_event', {
+        observedAtMs: T0 + 2,
+        data: { eventKind: 'tab_removed' },
+      }),
+    );
 
     expect(getLifecycleEvidenceCollectorSnapshot()).toMatchObject({
       bufferedEvents: 2,
+      bufferedSignals: 2,
       droppedEvents: 1,
+      droppedSignals: 1,
       lastEventAtMs: T0 + 2,
+      lastSignalAtMs: T0 + 2,
     });
   });
 

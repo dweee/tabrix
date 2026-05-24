@@ -7,6 +7,7 @@ import type {
   CorrelationGroupId,
   LifecycleEvidenceArtifact,
   ObservationKind,
+  SemanticSignal,
 } from '@tabrix/shared';
 import {
   registerEventStreamSubscriber,
@@ -14,6 +15,7 @@ import {
   type EventStreamSubscriber,
 } from './browser-event-stream';
 import { produceLifecycleEvidenceArtifact } from './lifecycle-evidence-artifact';
+import { deriveWaitForStabilitySignal } from './semantic-signal-aggregator';
 
 const SUBSCRIBER_ID = 'bns05_lifecycle_evidence_collector';
 const DEFAULT_MAX_BUFFERED_EVENTS = 500;
@@ -30,11 +32,19 @@ interface BufferedLifecycleEvidenceEvent {
   sourceObservationKind: ObservationKind | null;
 }
 
+interface BufferedSemanticSignal {
+  signal: SemanticSignal;
+  correlationGroupId: CorrelationGroupId;
+}
+
 export interface LifecycleEvidenceCollectorSnapshot {
   registered: boolean;
   bufferedEvents: number;
+  bufferedSignals: number;
   droppedEvents: number;
+  droppedSignals: number;
   lastEventAtMs: number | null;
+  lastSignalAtMs: number | null;
   maxBufferedEvents: number;
 }
 
@@ -53,9 +63,12 @@ export interface RuntimeLifecycleEvidenceArtifactInput {
 }
 
 const bufferedEvents: BufferedLifecycleEvidenceEvent[] = [];
+const bufferedSignals: BufferedSemanticSignal[] = [];
 let registered = false;
 let droppedEvents = 0;
+let droppedSignals = 0;
 let lastEventAtMs: number | null = null;
+let lastSignalAtMs: number | null = null;
 let maxBufferedEvents = DEFAULT_MAX_BUFFERED_EVENTS;
 
 const subscriber: EventStreamSubscriber = {
@@ -64,10 +77,19 @@ const subscriber: EventStreamSubscriber = {
     const sanitized = sanitizeEvent(event);
     bufferedEvents.push(sanitized);
     lastEventAtMs = sanitized.observedAtMs;
+    const signal = deriveWaitForStabilitySignal([event], event.observedAtMs);
+    if (signal) {
+      bufferedSignals.push({ signal, correlationGroupId: event.correlationGroupId });
+      lastSignalAtMs = signal.producedAtMs;
+    }
 
     while (bufferedEvents.length > maxBufferedEvents) {
       bufferedEvents.shift();
       droppedEvents += 1;
+    }
+    while (bufferedSignals.length > maxBufferedEvents) {
+      bufferedSignals.shift();
+      droppedSignals += 1;
     }
   },
   healthCheck() {
@@ -90,8 +112,11 @@ export function unregisterLifecycleEvidenceCollector(): boolean {
 
 export function resetLifecycleEvidenceCollector(): void {
   bufferedEvents.length = 0;
+  bufferedSignals.length = 0;
   droppedEvents = 0;
+  droppedSignals = 0;
   lastEventAtMs = null;
+  lastSignalAtMs = null;
 }
 
 export function resetLifecycleEvidenceCollectorForTests(): void {
@@ -112,8 +137,11 @@ export function getLifecycleEvidenceCollectorSnapshot(): LifecycleEvidenceCollec
   return {
     registered,
     bufferedEvents: bufferedEvents.length,
+    bufferedSignals: bufferedSignals.length,
     droppedEvents,
+    droppedSignals,
     lastEventAtMs,
+    lastSignalAtMs,
     maxBufferedEvents,
   };
 }
@@ -133,6 +161,15 @@ export function produceRuntimeLifecycleEvidenceArtifact(
     .filter((event) => event.tabId !== null && tabIds.has(event.tabId))
     .filter((event) => !hasCorrelationFilter || correlationGroupIds.has(event.correlationGroupId))
     .map(toSanitizedStreamEvent);
+  const semanticSignals = bufferedSignals
+    .filter(
+      (entry) =>
+        entry.signal.producedAtMs >= input.startedAtMs &&
+        entry.signal.producedAtMs <= input.endedAtMs,
+    )
+    .filter((entry) => entry.signal.tabId !== null && tabIds.has(entry.signal.tabId))
+    .filter((entry) => !hasCorrelationFilter || correlationGroupIds.has(entry.correlationGroupId))
+    .map((entry) => entry.signal);
 
   return produceLifecycleEvidenceArtifact({
     artifactId: input.artifactId,
@@ -141,6 +178,7 @@ export function produceRuntimeLifecycleEvidenceArtifact(
     scenarioClass: input.scenarioClass,
     startedAtMs: input.startedAtMs,
     streamEvents,
+    semanticSignals,
     sourceTruthChain: input.sourceTruthChain ?? null,
   });
 }
