@@ -202,6 +202,9 @@ function deriveFinalVerdict(
     if (!browserHygiene.available) {
       return { verdict: 'unknown', confidence: 0.3, reason: 'browser_hygiene_unavailable' };
     }
+    if (browserHygiene.baselineChanged) {
+      return { verdict: 'blocked', confidence: 0.7, reason: 'browser_hygiene_changed' };
+    }
     return { verdict: 'task_success', confidence: 0.8, reason: 'postconditions_passed' };
   }
   return { verdict: 'unknown', confidence: 0.2, reason: 'postconditions_unknown' };

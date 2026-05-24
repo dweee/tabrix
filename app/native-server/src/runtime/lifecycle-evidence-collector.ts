@@ -8,6 +8,7 @@ import type {
   BrowserTaskScenarioClass,
   CorrelationGroupId,
   LifecycleEvidenceArtifact,
+  LifecycleEvidenceBrowserHygiene,
   ObservationKind,
   PostconditionResult,
   SemanticSignal,
@@ -21,6 +22,10 @@ import {
 import { classifyActionOutcome } from './action-outcome-classifier';
 import { verifyActionPostcondition } from './action-postcondition-verifier';
 import { produceLifecycleEvidenceArtifact } from './lifecycle-evidence-artifact';
+import {
+  getDefaultPrimaryTabController,
+  type PrimaryTabControllerSnapshot,
+} from './primary-tab-controller';
 import { deriveWaitForStabilitySignal } from './semantic-signal-aggregator';
 
 const SUBSCRIBER_ID = 'bns05_lifecycle_evidence_collector';
@@ -79,6 +84,7 @@ export interface RuntimeLifecycleEvidenceArtifactInput {
 const bufferedEvents: BufferedLifecycleEvidenceEvent[] = [];
 const bufferedSignals: BufferedSemanticSignal[] = [];
 const bufferedPostconditions: BufferedPostconditionResult[] = [];
+let hygieneSnapshotProvider: (() => PrimaryTabControllerSnapshot) | null = null;
 let registered = false;
 let droppedEvents = 0;
 let droppedSignals = 0;
@@ -155,6 +161,7 @@ export function resetLifecycleEvidenceCollectorForTests(): void {
   unregisterLifecycleEvidenceCollector();
   resetLifecycleEvidenceCollector();
   maxBufferedEvents = DEFAULT_MAX_BUFFERED_EVENTS;
+  hygieneSnapshotProvider = null;
 }
 
 export function setLifecycleEvidenceCollectorMaxBufferedEventsForTests(max: number): void {
@@ -187,6 +194,12 @@ export function getLifecycleEvidenceCollectorSnapshot(): LifecycleEvidenceCollec
     lastPostconditionAtMs,
     maxBufferedEvents,
   };
+}
+
+export function setLifecycleEvidenceCollectorHygieneSnapshotProviderForTests(
+  provider: (() => PrimaryTabControllerSnapshot) | null,
+): void {
+  hygieneSnapshotProvider = provider;
 }
 
 export function produceRuntimeLifecycleEvidenceArtifact(
@@ -235,6 +248,7 @@ export function produceRuntimeLifecycleEvidenceArtifact(
       source: 'bns_04_verifier',
       results: postconditionResults,
     },
+    browserHygiene: buildRuntimeBrowserHygiene(),
     sourceTruthChain: input.sourceTruthChain ?? null,
   });
 }
@@ -284,6 +298,44 @@ function extractActionOutcomeEnvelope(sourcePayload: unknown): ActionOutcomeEven
 
 function isActionKind(value: unknown): value is ActionKind {
   return typeof value === 'string' && (ACTION_KINDS as readonly string[]).includes(value);
+}
+
+function buildRuntimeBrowserHygiene(): Partial<LifecycleEvidenceBrowserHygiene> | null {
+  const snapshot = getRuntimeHygieneSnapshot();
+  if (
+    snapshot.expectedPrimaryTabNavigations === 0 &&
+    snapshot.benchmarkOwnedTabCount === 0 &&
+    snapshot.violations.length === 0
+  ) {
+    return null;
+  }
+
+  const baselineChanged =
+    snapshot.violations.length > 0 ||
+    (snapshot.primaryTabReuseRate !== null && snapshot.primaryTabReuseRate < 1);
+  const notes = [
+    `primaryTabReuseRate=${formatNullableNumber(snapshot.primaryTabReuseRate)}`,
+    `benchmarkOwnedTabCount=${snapshot.benchmarkOwnedTabCount}`,
+    `violations=${snapshot.violations.length}`,
+  ];
+
+  return {
+    available: true,
+    baselineTabs: null,
+    runOwnedTabsClosed: null,
+    baselineChanged,
+    notes,
+  };
+}
+
+function getRuntimeHygieneSnapshot(): PrimaryTabControllerSnapshot {
+  return hygieneSnapshotProvider
+    ? hygieneSnapshotProvider()
+    : getDefaultPrimaryTabController().getSnapshot();
+}
+
+function formatNullableNumber(value: number | null): string {
+  return value === null ? 'n/a' : value.toFixed(3);
 }
 
 function sanitizeEvent(event: BrowserStreamEvent): BufferedLifecycleEvidenceEvent {

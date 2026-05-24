@@ -9,11 +9,36 @@ import {
   getLifecycleEvidenceCollectorSnapshot,
   produceRuntimeLifecycleEvidenceArtifact,
   resetLifecycleEvidenceCollectorForTests,
+  setLifecycleEvidenceCollectorHygieneSnapshotProviderForTests,
   setLifecycleEvidenceCollectorMaxBufferedEventsForTests,
   unregisterLifecycleEvidenceCollector,
 } from './lifecycle-evidence-collector';
+import type { PrimaryTabHygieneViolationKind } from './primary-tab-controller';
 
 const T0 = 1_700_000_000_000;
+
+function setRuntimeHygieneSnapshot(overrides: {
+  primaryTabReuseRate?: number | null;
+  benchmarkOwnedTabCount?: number;
+  expectedPrimaryTabNavigations?: number;
+  samePrimaryTabNavigations?: number;
+  violations?: Array<{ scenarioId: string | null; kind: string; detail?: string }>;
+}): void {
+  setLifecycleEvidenceCollectorHygieneSnapshotProviderForTests(() => ({
+    primaryTabId: 42,
+    primaryTabReuseRate: overrides.primaryTabReuseRate ?? 1,
+    benchmarkOwnedTabCount: overrides.benchmarkOwnedTabCount ?? 1,
+    samePrimaryTabNavigations: overrides.samePrimaryTabNavigations ?? 1,
+    expectedPrimaryTabNavigations: overrides.expectedPrimaryTabNavigations ?? 1,
+    observedTabIds: [42],
+    allowsNewTabScenarioIds: [],
+    violations: (overrides.violations ?? []).map((violation) => ({
+      scenarioId: violation.scenarioId,
+      kind: violation.kind as PrimaryTabHygieneViolationKind,
+      ...(violation.detail ? { detail: violation.detail } : {}),
+    })),
+  }));
+}
 
 function makeBridgeMessage(
   kind: ObservationKind,
@@ -370,6 +395,101 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
       verdict: 'unknown',
       confidence: 0.3,
       reason: 'browser_hygiene_unavailable',
+    });
+  });
+
+  it('derives task_success when passed postconditions have clean runtime hygiene evidence', () => {
+    setRuntimeHygieneSnapshot({ primaryTabReuseRate: 1, benchmarkOwnedTabCount: 1 });
+    ensureLifecycleEvidenceCollectorRegistered();
+    dispatchBridgeObservationToStream(
+      makeBridgeMessage('action_outcome', {
+        tabId: 42,
+        observedAtMs: T0,
+        data: {
+          actionId: 'act-click-clean-hygiene',
+          actionKind: 'click',
+          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 }],
+        },
+      }),
+    );
+
+    const artifact = produceRuntimeLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-clean-hygiene',
+      evidenceLevel: 'integration',
+      scenarioId: 'scenario-clean-hygiene',
+      scenarioClass: 'search_result_delta_v1',
+      startedAtMs: T0,
+      endedAtMs: T0,
+      eventWindow: { tabIds: [42] },
+    });
+
+    expect(artifact.browserHygiene).toMatchObject({
+      available: true,
+      baselineTabs: null,
+      runOwnedTabsClosed: null,
+      baselineChanged: false,
+    });
+    expect(artifact.browserHygiene.notes).toEqual([
+      'primaryTabReuseRate=1.000',
+      'benchmarkOwnedTabCount=1',
+      'violations=0',
+    ]);
+    expect(artifact.finalVerdict).toEqual({
+      verdict: 'task_success',
+      confidence: 0.8,
+      reason: 'postconditions_passed',
+    });
+  });
+
+  it('surfaces runtime hygiene violations on lifecycle artifacts', () => {
+    setRuntimeHygieneSnapshot({
+      primaryTabReuseRate: 0.5,
+      benchmarkOwnedTabCount: 2,
+      expectedPrimaryTabNavigations: 2,
+      samePrimaryTabNavigations: 1,
+      violations: [
+        {
+          scenarioId: 'scenario-hygiene-violation',
+          kind: 'tab_id_changed_after_navigation',
+        },
+      ],
+    });
+    ensureLifecycleEvidenceCollectorRegistered();
+    dispatchBridgeObservationToStream(
+      makeBridgeMessage('action_outcome', {
+        tabId: 42,
+        observedAtMs: T0,
+        data: {
+          actionId: 'act-click-hygiene-violation',
+          actionKind: 'click',
+          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 }],
+        },
+      }),
+    );
+
+    const artifact = produceRuntimeLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-hygiene-violation',
+      evidenceLevel: 'integration',
+      scenarioId: 'scenario-hygiene-violation',
+      scenarioClass: 'search_result_delta_v1',
+      startedAtMs: T0,
+      endedAtMs: T0,
+      eventWindow: { tabIds: [42] },
+    });
+
+    expect(artifact.browserHygiene).toMatchObject({
+      available: true,
+      baselineChanged: true,
+    });
+    expect(artifact.browserHygiene.notes).toEqual([
+      'primaryTabReuseRate=0.500',
+      'benchmarkOwnedTabCount=2',
+      'violations=1',
+    ]);
+    expect(artifact.finalVerdict).toEqual({
+      verdict: 'blocked',
+      confidence: 0.7,
+      reason: 'browser_hygiene_changed',
     });
   });
 

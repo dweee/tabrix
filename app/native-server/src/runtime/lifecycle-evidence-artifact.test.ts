@@ -386,6 +386,35 @@ describe('lifecycle-evidence-artifact — action log and verdicts', () => {
     expect(artifact.finalVerdict.verdict).toBe('task_success');
   });
 
+  it('blocks task_success when browser hygiene reports baseline change', () => {
+    const artifact = produceLifecycleEvidenceArtifact(
+      {
+        artifactId: 'artifact-6-hygiene-changed',
+        evidenceLevel: 'unit',
+        scenarioId: 'scenario-6-hygiene-changed',
+        scenarioClass: 'search_result_delta_v1',
+        startedAtMs: T0,
+        postconditionEvidence: {
+          source: 'bns_04_verifier',
+          results: [makePostcondition({ verdict: 'passed' })],
+        },
+        browserHygiene: {
+          available: true,
+          baselineTabs: 3,
+          runOwnedTabsClosed: 0,
+          baselineChanged: true,
+          notes: ['violations=1'],
+        },
+      },
+      { now: () => PRODUCED_AT },
+    );
+    expect(artifact.finalVerdict).toEqual({
+      verdict: 'blocked',
+      confidence: 0.7,
+      reason: 'browser_hygiene_changed',
+    });
+  });
+
   it('derives task_failed when any postcondition fails', () => {
     const artifact = produceLifecycleEvidenceArtifact(
       {
