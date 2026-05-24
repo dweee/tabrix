@@ -1395,6 +1395,8 @@ function maybeRecordCloseTabsSuccessLifecycleArtifact(input: {
         `closedTabCount=${input.closedTabIds.length}`,
         `invalidTabCount=${input.invalidTabIds.length}`,
         `requestedTabCount=${targetTabIds.length}`,
+        'browserHygieneEvidenceCompleteness=partial',
+        'browserHygieneMissingChecks=tab_window_baseline,active_tab_restore',
         'deterministic_closeout_only=true',
         'v3RequiredAction=close',
       ],

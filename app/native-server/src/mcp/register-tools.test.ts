@@ -1450,6 +1450,12 @@ describe('handleToolCall execution wrapper', () => {
         verdict: 'unknown',
         reason: 'close_action_kind_blocked_by_shared_contract',
       });
+      expect(artifacts[0].browserHygiene.notes).toContain(
+        'browserHygieneEvidenceCompleteness=partial',
+      );
+      expect(artifacts[0].browserHygiene.notes).toContain(
+        'browserHygieneMissingChecks=tab_window_baseline,active_tab_restore',
+      );
       expect(artifacts[0].browserHygiene.notes).toContain('v3RequiredAction=close');
       const serializedArtifact = JSON.stringify(artifacts[0]);
       expect(serializedArtifact).not.toContain('PRIVATE_PAGE_BODY_SHOULD_NOT_APPEAR');
