@@ -22,6 +22,8 @@ import {
   READINESS_STATES,
   RECOMMENDED_LAYERS,
   RECOMMENDED_LAYER_REASONS,
+  SEMANTIC_SIGNAL_KINDS,
+  SEMANTIC_SIGNAL_SOURCE_ORIGINS,
   STABLE_REF_REVALIDATION_OUTCOMES,
   TAB_WINDOW_EVENT_KINDS,
 } from '../dist/index.mjs';
@@ -235,10 +237,29 @@ assertClosedVocabulary('OBSERVATION_KINDS', OBSERVATION_KINDS, [
   'unknown',
 ]);
 
+assertClosedVocabulary('SEMANTIC_SIGNAL_KINDS', SEMANTIC_SIGNAL_KINDS, [
+  'wait_for_stability',
+  'unknown',
+]);
+
+assertClosedVocabulary('SEMANTIC_SIGNAL_SOURCE_ORIGINS', SEMANTIC_SIGNAL_SOURCE_ORIGINS, [
+  'browser_stream',
+  'page_projection',
+  'runtime_inference',
+  'unknown',
+]);
+
+for (const unsupported of ['ready_to_act', 'user_took_over', 'postcondition_failed']) {
+  assert.ok(
+    !SEMANTIC_SIGNAL_KINDS.includes(unsupported),
+    `SEMANTIC_SIGNAL_KINDS must not include ${unsupported}`,
+  );
+}
+
 console.log(
   JSON.stringify({
     status: 'PASS',
     contract: 'browser-fact',
-    vocabularyCount: 22,
+    vocabularyCount: 24,
   }),
 );

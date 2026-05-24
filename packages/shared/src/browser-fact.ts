@@ -1123,6 +1123,62 @@ export interface StreamHealthSnapshot {
 }
 
 // ---------------------------------------------------------------------------
+// Semantic Signal Aggregator (BNS-02)
+// ---------------------------------------------------------------------------
+
+/**
+ * Closed-enum semantic signal kinds approved for the first BNS-02 slice.
+ *
+ * Boundary: this is an internal bridge/runtime contract, not a public MCP tool
+ * schema. Do not add action success, user-takeover, or postcondition verdicts
+ * here; those belong to their dedicated BNS modules.
+ */
+export type SemanticSignalKind = 'wait_for_stability' | 'unknown';
+
+export const SEMANTIC_SIGNAL_KINDS = [
+  'wait_for_stability',
+  'unknown',
+] as const satisfies ReadonlyArray<SemanticSignalKind>;
+
+/**
+ * Closed-enum origin for a semantic signal. The first implementation uses
+ * `browser_stream`; the other values reserve evidence provenance without
+ * adding state DTOs or MCP schema.
+ */
+export type SemanticSignalSourceOrigin =
+  | 'browser_stream'
+  | 'page_projection'
+  | 'runtime_inference'
+  | 'unknown';
+
+export const SEMANTIC_SIGNAL_SOURCE_ORIGINS = [
+  'browser_stream',
+  'page_projection',
+  'runtime_inference',
+  'unknown',
+] as const satisfies ReadonlyArray<SemanticSignalSourceOrigin>;
+
+/** Minimal pointer back to the stream event that caused a signal. */
+export interface SignalEvidenceRef {
+  streamEventId: string;
+  eventKind: BrowserStreamEventKind;
+  sourceObservationKind: ObservationKind | null;
+  observedAtMs: number;
+}
+
+/** Narrow semantic signal DTO for BNS-02 Batch A. */
+export interface SemanticSignal {
+  signalId: string;
+  kind: SemanticSignalKind;
+  confidence: number;
+  tabId: number | null;
+  urlPattern: string | null;
+  sourceEventRefs: SignalEvidenceRef[];
+  sourceOrigins: SemanticSignalSourceOrigin[];
+  producedAtMs: number;
+}
+
+// ---------------------------------------------------------------------------
 // Lifecycle evidence artifact (BNS-05)
 // ---------------------------------------------------------------------------
 
