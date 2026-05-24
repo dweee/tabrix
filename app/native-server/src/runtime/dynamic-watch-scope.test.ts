@@ -126,6 +126,29 @@ describe('dynamic-watch-scope — deterministic scope derivation', () => {
     ]);
   });
 
+  it('maps generic error recovery context to error_recovery scope', () => {
+    const byIntent = deriveDynamicWatchScope(
+      baseInput({
+        intent: 'recover from failed page state and retry',
+        evidenceWindow: {
+          startedAtMs: T0,
+          endedAtMs: T0 + 100,
+          eventsByKind: { observation_fact_snapshot: 1 },
+        },
+      }),
+    );
+    const byRole = deriveDynamicWatchScope(baseInput({ pageRole: 'error_page_detected' }));
+
+    expect(byIntent.scopeKind).toBe('error_recovery');
+    expect(byIntent.reason).toBe('generic_error_recovery_category_match');
+    expect(byIntent.regions.map((region) => region.regionId)).toEqual([
+      'error_indicator',
+      'retry_control',
+      'recovery_feedback_region',
+    ]);
+    expect(byRole.scopeKind).toBe('error_recovery');
+  });
+
   it('maps null evidenceWindow and no category match to idle', () => {
     const scope = deriveDynamicWatchScope(baseInput({ intent: 'continue', evidenceWindow: null }));
 
@@ -218,6 +241,7 @@ describe('dynamic-watch-scope — boundary and neutrality', () => {
       deriveDynamicWatchScope(baseInput({ pageRole: 'challenge_required' })),
       deriveDynamicWatchScope(baseInput({ pageRole: 'tab_management' })),
       deriveDynamicWatchScope(baseInput({ pageRole: 'user_took_over' })),
+      deriveDynamicWatchScope(baseInput({ pageRole: 'error_page_detected' })),
       deriveDynamicWatchScope(baseInput({ intent: 'read article' })),
       deriveDynamicWatchScope(baseInput({ pageStability: 'loading' })),
     ];

@@ -81,7 +81,7 @@ function expectCommonSnapshotShape(payload: any, mode: 'compact' | 'normal' | 'f
   expect(payload.pageProjection.interferenceRisk).not.toBe('none');
   expect(payload.watchScope).toMatchObject({
     scopeKind: expect.stringMatching(
-      /^(search|form|auth|challenge|long_content|multi_tab|user_takeover|loading|idle|unknown)$/,
+      /^(search|form|auth|challenge|long_content|multi_tab|error_recovery|user_takeover|loading|idle|unknown)$/,
     ),
     boundary: {
       deterministicGuidanceOnly: true,

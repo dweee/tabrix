@@ -428,6 +428,12 @@ describe('read_page task protocol', () => {
         expectedScope: 'user_takeover',
         expectedRegions: ['user_activity_region', 'protected_focus_region'],
       },
+      {
+        name: 'error_recovery',
+        params: createBaseParams({ pageRole: 'error_page_detected' }),
+        expectedScope: 'error_recovery',
+        expectedRegions: ['error_indicator', 'retry_control', 'recovery_feedback_region'],
+      },
     ] as const;
 
     for (const item of cases) {

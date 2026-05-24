@@ -1076,6 +1076,21 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
         expectedRole: null,
       },
     },
+    {
+      name: 'error_recovery',
+      taskContext: {
+        intent: 'recover from error state',
+        pageRole: 'error_page_detected',
+        pageStability: 'stable' as const,
+      },
+      expectedScopeKind: 'error_recovery',
+      expectedReason: 'generic_error_recovery_category_match',
+      expectedRegion: {
+        regionId: 'error_indicator',
+        regionPurpose: 'feedback',
+        expectedRole: 'alert',
+      },
+    },
   ])(
     'derives BNS-03 $name watch scope transitions into runtime artifacts',
     ({ taskContext, expectedScopeKind, expectedReason, expectedRegion }) => {

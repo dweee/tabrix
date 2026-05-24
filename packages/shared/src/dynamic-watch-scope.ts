@@ -5,6 +5,7 @@ export const WATCH_SCOPE_KINDS = [
   'challenge',
   'long_content',
   'multi_tab',
+  'error_recovery',
   'user_takeover',
   'loading',
   'idle',
@@ -94,6 +95,11 @@ const REGIONS_BY_SCOPE_KIND: Record<WatchScopeKind, WatchScopeRegion[]> = {
     { regionId: 'active_tab', regionPurpose: 'navigation', expectedRole: null },
     { regionId: 'window_focus_state', regionPurpose: 'feedback', expectedRole: null },
   ],
+  error_recovery: [
+    { regionId: 'error_indicator', regionPurpose: 'feedback', expectedRole: 'alert' },
+    { regionId: 'retry_control', regionPurpose: 'input', expectedRole: 'button' },
+    { regionId: 'recovery_feedback_region', regionPurpose: 'feedback', expectedRole: 'status' },
+  ],
   user_takeover: [
     { regionId: 'user_activity_region', regionPurpose: 'feedback', expectedRole: null },
     { regionId: 'protected_focus_region', regionPurpose: 'feedback', expectedRole: null },
@@ -110,6 +116,7 @@ const SEARCH_TERMS = ['search', 'find', 'query', 'result'];
 const FORM_TERMS = ['form', 'submit', 'input'];
 const AUTH_TERMS = ['auth', 'login', 'signin', 'credential'];
 const CHALLENGE_TERMS = ['challenge', 'verification', 'captcha'];
+const ERROR_RECOVERY_TERMS = ['error', 'failed', 'failure', 'recover', 'recovery', 'retry'];
 
 export function deriveDynamicWatchScope(input: DeriveDynamicWatchScopeInput): DynamicWatchScope {
   const text = `${input.intent ?? ''} ${input.pageRole ?? ''}`.toLowerCase();
@@ -162,6 +169,7 @@ function deriveScopeKind(
   }
   if (matchesAny(text, CHALLENGE_TERMS)) return 'challenge';
   if (matchesAny(text, AUTH_TERMS)) return 'auth';
+  if (matchesAny(text, ERROR_RECOVERY_TERMS)) return 'error_recovery';
   if (matchesAny(text, LONG_CONTENT_TERMS)) return 'long_content';
   if (matchesAny(text, SEARCH_TERMS)) return 'search';
   if (matchesAny(text, FORM_TERMS)) return 'form';
@@ -209,6 +217,8 @@ function reasonFor(scopeKind: WatchScopeKind): string {
       return 'no_relevant_activity';
     case 'multi_tab':
       return 'generic_multi_tab_category_match';
+    case 'error_recovery':
+      return 'generic_error_recovery_category_match';
     case 'user_takeover':
       return 'generic_user_takeover_category_match';
     case 'unknown':

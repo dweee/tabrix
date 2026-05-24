@@ -262,6 +262,7 @@ assertClosedVocabulary('WATCH_SCOPE_KINDS', WATCH_SCOPE_KINDS, [
   'challenge',
   'long_content',
   'multi_tab',
+  'error_recovery',
   'user_takeover',
   'loading',
   'idle',

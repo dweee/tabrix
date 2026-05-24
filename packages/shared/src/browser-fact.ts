@@ -1265,6 +1265,7 @@ export type LifecycleEvidenceScopeKind =
   | 'challenge'
   | 'long_content'
   | 'multi_tab'
+  | 'error_recovery'
   | 'user_takeover'
   | 'loading'
   | 'idle'
