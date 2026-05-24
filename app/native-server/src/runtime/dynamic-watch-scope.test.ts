@@ -54,7 +54,7 @@ describe('dynamic-watch-scope — deterministic scope derivation', () => {
 
   it('maps generic form intent and pageRole to form scope', () => {
     const byIntent = deriveDynamicWatchScope(baseInput({ intent: 'submit the form' }));
-    const byRole = deriveDynamicWatchScope(baseInput({ pageRole: 'login_required' }));
+    const byRole = deriveDynamicWatchScope(baseInput({ pageRole: 'form_region' }));
 
     expect(byIntent.scopeKind).toBe('form');
     expect(byRole.scopeKind).toBe('form');
@@ -62,6 +62,67 @@ describe('dynamic-watch-scope — deterministic scope derivation', () => {
       'primary_input',
       'submit_control',
       'feedback_region',
+    ]);
+  });
+
+  it('maps closed auth and challenge page roles to collaboration scopes', () => {
+    const authScope = deriveDynamicWatchScope(baseInput({ pageRole: 'login_required' }));
+    const challengeScope = deriveDynamicWatchScope(baseInput({ pageRole: 'challenge_required' }));
+
+    expect(authScope.scopeKind).toBe('auth');
+    expect(authScope.regions.map((region) => region.regionId)).toEqual([
+      'credential_input',
+      'auth_submit_control',
+      'auth_feedback_region',
+    ]);
+    expect(challengeScope.scopeKind).toBe('challenge');
+    expect(challengeScope.regions.map((region) => region.regionId)).toEqual([
+      'challenge_prompt',
+      'verification_input',
+      'challenge_feedback_region',
+    ]);
+  });
+
+  it('maps neutral multi-tab task context to multi_tab scope', () => {
+    const scope = deriveDynamicWatchScope(
+      baseInput({
+        intent: 'review multi tab window state',
+        pageRole: 'tab_management',
+        evidenceWindow: {
+          startedAtMs: T0,
+          endedAtMs: T0 + 100,
+          eventsByKind: { observation_tab_event: 2 },
+        },
+      }),
+    );
+
+    expect(scope.scopeKind).toBe('multi_tab');
+    expect(scope.regions.map((region) => region.regionId)).toEqual([
+      'tab_set',
+      'active_tab',
+      'window_focus_state',
+    ]);
+    expect(scope.boundary.browserHygieneProven).toBe(false);
+  });
+
+  it('maps explicit user takeover context to user_takeover scope without ownership proof', () => {
+    const scope = deriveDynamicWatchScope(
+      baseInput({
+        intent: 'pause because user takeover interference is protected',
+        pageRole: 'user_took_over',
+        evidenceWindow: {
+          startedAtMs: T0,
+          endedAtMs: T0 + 100,
+          eventsByKind: { observation_fact_snapshot: 1 },
+        },
+      }),
+    );
+
+    expect(scope.scopeKind).toBe('user_takeover');
+    expect(scope.evidenceBasis.ownershipTruthClaimed).toBe(false);
+    expect(scope.regions.map((region) => region.regionId)).toEqual([
+      'user_activity_region',
+      'protected_focus_region',
     ]);
   });
 
@@ -99,10 +160,36 @@ describe('dynamic-watch-scope — deterministic scope derivation', () => {
     expect(scope.scopeKind).toBe('unknown');
     expect(scope.reason).toBe('activity_without_safe_scope_class');
   });
+
+  it('does not misroute generic verify or interference wording into protected scopes', () => {
+    const verifyResults = deriveDynamicWatchScope(
+      baseInput({
+        intent: 'verify results',
+        evidenceWindow: {
+          startedAtMs: T0,
+          endedAtMs: T0 + 100,
+          eventsByKind: { observation_fact_snapshot: 1 },
+        },
+      }),
+    );
+    const networkInterference = deriveDynamicWatchScope(
+      baseInput({
+        intent: 'review network interference',
+        evidenceWindow: {
+          startedAtMs: T0,
+          endedAtMs: T0 + 100,
+          eventsByKind: { observation_fact_snapshot: 1 },
+        },
+      }),
+    );
+
+    expect(verifyResults.scopeKind).toBe('unknown');
+    expect(networkInterference.scopeKind).toBe('unknown');
+  });
 });
 
 describe('dynamic-watch-scope — boundary and neutrality', () => {
-  it('does not emit multi-tab ownership regions in the first slice', () => {
+  it('emits multi-tab regions as deterministic guidance only', () => {
     const scope = deriveDynamicWatchScope(
       baseInput({
         intent: 'clean up tabs and restore the baseline window',
@@ -116,16 +203,21 @@ describe('dynamic-watch-scope — boundary and neutrality', () => {
     );
 
     const serialized = JSON.stringify(scope);
-    expect(scope.scopeKind).toBe('unknown');
+    expect(scope.scopeKind).toBe('multi_tab');
     expect(serialized).not.toContain('run_owned');
     expect(serialized).not.toContain('baseline_tab');
     expect(serialized).not.toContain('cleanup');
+    expect(scope.boundary.browserHygieneProven).toBe(false);
   });
 
   it('never emits selectors, hostnames, site names, or UI text anchors in regions', () => {
     const scopes = [
       deriveDynamicWatchScope(baseInput({ intent: 'search for docs' })),
       deriveDynamicWatchScope(baseInput({ intent: 'submit form' })),
+      deriveDynamicWatchScope(baseInput({ pageRole: 'login_required' })),
+      deriveDynamicWatchScope(baseInput({ pageRole: 'challenge_required' })),
+      deriveDynamicWatchScope(baseInput({ pageRole: 'tab_management' })),
+      deriveDynamicWatchScope(baseInput({ pageRole: 'user_took_over' })),
       deriveDynamicWatchScope(baseInput({ intent: 'read article' })),
       deriveDynamicWatchScope(baseInput({ pageStability: 'loading' })),
     ];

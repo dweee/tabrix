@@ -1261,7 +1261,11 @@ export interface LifecycleEvidenceSignalSequence {
 export type LifecycleEvidenceScopeKind =
   | 'search'
   | 'form'
+  | 'auth'
+  | 'challenge'
   | 'long_content'
+  | 'multi_tab'
+  | 'user_takeover'
   | 'loading'
   | 'idle'
   | 'unknown';

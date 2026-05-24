@@ -26,6 +26,7 @@ import {
   SEMANTIC_SIGNAL_SOURCE_ORIGINS,
   STABLE_REF_REVALIDATION_OUTCOMES,
   TAB_WINDOW_EVENT_KINDS,
+  WATCH_SCOPE_KINDS,
 } from '../dist/index.mjs';
 
 function assertClosedVocabulary(name, actual, expected) {
@@ -239,6 +240,11 @@ assertClosedVocabulary('OBSERVATION_KINDS', OBSERVATION_KINDS, [
 
 assertClosedVocabulary('SEMANTIC_SIGNAL_KINDS', SEMANTIC_SIGNAL_KINDS, [
   'wait_for_stability',
+  'ready_to_act',
+  'user_took_over',
+  'results_changed',
+  'error_page_detected',
+  'postcondition_failed',
   'unknown',
 ]);
 
@@ -249,12 +255,18 @@ assertClosedVocabulary('SEMANTIC_SIGNAL_SOURCE_ORIGINS', SEMANTIC_SIGNAL_SOURCE_
   'unknown',
 ]);
 
-for (const unsupported of ['ready_to_act', 'user_took_over', 'postcondition_failed']) {
-  assert.ok(
-    !SEMANTIC_SIGNAL_KINDS.includes(unsupported),
-    `SEMANTIC_SIGNAL_KINDS must not include ${unsupported}`,
-  );
-}
+assertClosedVocabulary('WATCH_SCOPE_KINDS', WATCH_SCOPE_KINDS, [
+  'search',
+  'form',
+  'auth',
+  'challenge',
+  'long_content',
+  'multi_tab',
+  'user_takeover',
+  'loading',
+  'idle',
+  'unknown',
+]);
 
 console.log(
   JSON.stringify({
