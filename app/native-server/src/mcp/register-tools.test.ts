@@ -1644,6 +1644,76 @@ describe('handleToolCall execution wrapper', () => {
       });
     });
 
+    it('exposes summary-only structured-read reason in chrome_read_page AI-facing output', async () => {
+      markBridgeReady();
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_long_content_summary_only',
+          contextChars: 420,
+          changedRegions: ['article_body'],
+          refreshedRefs: ['ref_article_title'],
+          extraPayload: {
+            mode: 'normal',
+            taskMode: 'read',
+            complexityLevel: 'complex',
+            summary: {
+              pageRole: 'article',
+              primaryRegion: 'content',
+              quality: 'usable',
+            },
+            completeTextRegion: {
+              completeTextAvailable: false,
+              charCount: 420,
+              lineCount: 4,
+              structureSparse: false,
+              contentSparse: true,
+            },
+          },
+        }),
+      );
+
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'long-content-summary-only-gate',
+        mode: 'normal',
+        requestedLayer: 'L0+L1+L2',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.structuredReadGate).toMatchObject({
+        gateId: 'structured-read-gate:projection_long_content_summary_only',
+        verdict: 'summary_only',
+        reasonCode: 'summary_only_body_missing',
+        recommendedAction:
+          'request full or normal mode and verify body coverage before summarizing',
+        metrics: {
+          readMode: 'normal',
+          taskMode: 'read',
+          complexityLevel: 'complex',
+          pageRole: 'article',
+          primaryRegion: 'content',
+          completeTextAvailable: false,
+          contentSparse: true,
+        },
+        boundary: {
+          metadataOnly: true,
+          rawContentInspected: false,
+          browserIoPerformed: false,
+          publicContractChanged: false,
+          commercialGradeProven: false,
+        },
+      });
+      expect(payload.structuredReadGate.gapDescription).toContain('body content');
+      expect(payload.structuredReadGate.metrics.bodyCharCount).toBe(420);
+      expect(payload.aiContextEnvelope.structuredReadGate).toMatchObject({
+        gateId: 'structured-read-gate:projection_long_content_summary_only',
+        verdict: 'summary_only',
+        reasonCode: 'summary_only_body_missing',
+        recommendedAction:
+          'request full or normal mode and verify body coverage before summarizing',
+      });
+    });
+
     it('marks AI-facing delta as real-browser evidence only for real tab projections', async () => {
       markBridgeReady();
       mockReadPageRoundTrip(
