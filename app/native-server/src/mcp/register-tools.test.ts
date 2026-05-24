@@ -1924,6 +1924,86 @@ describe('handleToolCall execution wrapper', () => {
       });
     });
 
+    it('exposes structure-sparse structured-read reason in chrome_read_page AI-facing output', async () => {
+      markBridgeReady();
+      const structureSparsePayload = readPagePayloadWithProjection({
+        projectionId: 'projection_long_content_structure_sparse',
+        contextChars: 3100,
+        changedRegions: ['article_body'],
+        refreshedRefs: ['ref_article_body'],
+        extraPayload: {
+          mode: 'normal',
+          taskMode: 'read',
+          complexityLevel: 'complex',
+          summary: {
+            pageRole: 'article',
+            primaryRegion: 'content',
+            quality: 'usable',
+          },
+          completeTextRegion: {
+            completeTextAvailable: true,
+            charCount: 3100,
+            lineCount: 30,
+            structureSparse: true,
+            contentSparse: false,
+          },
+        },
+      });
+      const sourcePayload = JSON.parse(structureSparsePayload);
+      expect(sourcePayload.completeTextRegion).toMatchObject({
+        completeTextAvailable: true,
+        charCount: 3100,
+        structureSparse: true,
+        contentSparse: false,
+      });
+      expect(sourcePayload.visibleRegionRows).toBeUndefined();
+      mockReadPageRoundTrip(structureSparsePayload);
+
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'long-content-structure-sparse-gate',
+        mode: 'normal',
+        requestedLayer: 'L0+L1+L2',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.visibleRegionRows).toBeUndefined();
+      expect(payload.structuredReadGate).toMatchObject({
+        gateId: 'structured-read-gate:projection_long_content_structure_sparse',
+        verdict: 'structure_sparse',
+        reasonCode: 'structure_sparse_sections_missing',
+        gapDescription: 'content exists but lacks enough structure for complete-read proof',
+        recommendedAction: 'request a more structured read or scroll-and-reread before summarizing',
+        metrics: {
+          readMode: 'normal',
+          taskMode: 'read',
+          complexityLevel: 'complex',
+          pageRole: 'article',
+          primaryRegion: 'content',
+          completeTextAvailable: true,
+          structureSparse: true,
+          contentSparse: false,
+        },
+        boundary: {
+          metadataOnly: true,
+          rawContentInspected: false,
+          browserIoPerformed: false,
+          publicContractChanged: false,
+          commercialGradeProven: false,
+        },
+      });
+      expect(payload.structuredReadGate.metrics.bodyCharCount).toBe(3100);
+      expect(payload.structuredReadGate.evidenceBasis).toEqual(
+        expect.arrayContaining(['summary', 'taskMode', 'complexityLevel', 'completeTextRegion']),
+      );
+      expect(payload.aiContextEnvelope.structuredReadGate).toMatchObject({
+        gateId: 'structured-read-gate:projection_long_content_structure_sparse',
+        verdict: 'structure_sparse',
+        reasonCode: 'structure_sparse_sections_missing',
+        recommendedAction: 'request a more structured read or scroll-and-reread before summarizing',
+      });
+    });
+
     it('marks AI-facing delta as real-browser evidence only for real tab projections', async () => {
       markBridgeReady();
       mockReadPageRoundTrip(
