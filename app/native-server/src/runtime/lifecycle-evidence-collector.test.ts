@@ -475,7 +475,7 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     });
   });
 
-  it('keeps verdict unknown when passed postconditions have only coarse runtime hygiene evidence', () => {
+  it('keeps verdict unknown when runtime hygiene leaves cleanup checks unproven', () => {
     setRuntimeHygieneSnapshot({ primaryTabReuseRate: 1, benchmarkOwnedTabCount: 1 });
     ensureLifecycleEvidenceCollectorRegistered();
     dispatchBridgeObservationToStream(
@@ -510,6 +510,29 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
       'primaryTabReuseRate=1.000',
       'benchmarkOwnedTabCount=1',
       'violations=0',
+    ]);
+    expect(artifact.browserHygiene.checks).toEqual([
+      {
+        kind: 'tab_window_baseline',
+        verdict: 'pass',
+        reason: 'pre_post_tab_window_baseline_unchanged',
+      },
+      { kind: 'active_tab_restore', verdict: 'pass', reason: 'active_tab_restored' },
+      {
+        kind: 'run_owned_cleanup',
+        verdict: 'unknown',
+        reason: 'browser_hygiene_check_not_reported',
+      },
+      {
+        kind: 'user_owned_protection',
+        verdict: 'unknown',
+        reason: 'browser_hygiene_check_not_reported',
+      },
+      {
+        kind: 'failure_cleanup',
+        verdict: 'unknown',
+        reason: 'browser_hygiene_check_not_reported',
+      },
     ]);
     expect(artifact.finalVerdict).toEqual({
       verdict: 'unknown',
@@ -562,6 +585,29 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
       'primaryTabReuseRate=0.500',
       'benchmarkOwnedTabCount=2',
       'violations=1',
+    ]);
+    expect(artifact.browserHygiene.checks).toEqual([
+      {
+        kind: 'tab_window_baseline',
+        verdict: 'fail',
+        reason: 'pre_post_tab_window_baseline_changed',
+      },
+      { kind: 'active_tab_restore', verdict: 'fail', reason: 'active_tab_not_restored' },
+      {
+        kind: 'run_owned_cleanup',
+        verdict: 'unknown',
+        reason: 'browser_hygiene_check_not_reported',
+      },
+      {
+        kind: 'user_owned_protection',
+        verdict: 'unknown',
+        reason: 'browser_hygiene_check_not_reported',
+      },
+      {
+        kind: 'failure_cleanup',
+        verdict: 'unknown',
+        reason: 'browser_hygiene_check_not_reported',
+      },
     ]);
     expect(artifact.finalVerdict).toEqual({
       verdict: 'blocked',

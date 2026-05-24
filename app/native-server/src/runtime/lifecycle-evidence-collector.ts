@@ -9,6 +9,7 @@ import type {
   CorrelationGroupId,
   LifecycleEvidenceArtifact,
   LifecycleEvidenceBrowserHygiene,
+  LifecycleEvidenceBrowserHygieneCheck,
   LifecycleEvidenceScopeTransition,
   ObservationKind,
   PostconditionResult,
@@ -519,8 +520,58 @@ function buildRuntimeBrowserHygiene(): Partial<LifecycleEvidenceBrowserHygiene> 
     baselineTabs: null,
     runOwnedTabsClosed: null,
     baselineChanged,
+    checks: buildRuntimeBrowserHygieneChecks(snapshot, baselineChanged),
     notes,
   };
+}
+
+function buildRuntimeBrowserHygieneChecks(
+  snapshot: PrimaryTabControllerSnapshot,
+  baselineChanged: boolean,
+): LifecycleEvidenceBrowserHygieneCheck[] {
+  const primaryTabRestoreObserved =
+    snapshot.expectedPrimaryTabNavigations > 0 && snapshot.primaryTabReuseRate !== null;
+  const activeTabRestoreVerdict =
+    primaryTabRestoreObserved && snapshot.primaryTabReuseRate !== null
+      ? snapshot.primaryTabReuseRate >= 1
+        ? 'pass'
+        : 'fail'
+      : 'unknown';
+
+  return [
+    {
+      kind: 'tab_window_baseline',
+      verdict: baselineChanged ? 'fail' : 'pass',
+      reason: baselineChanged
+        ? 'pre_post_tab_window_baseline_changed'
+        : 'pre_post_tab_window_baseline_unchanged',
+    },
+    {
+      kind: 'active_tab_restore',
+      verdict: activeTabRestoreVerdict,
+      reason:
+        activeTabRestoreVerdict === 'pass'
+          ? 'active_tab_restored'
+          : activeTabRestoreVerdict === 'fail'
+            ? 'active_tab_not_restored'
+            : 'browser_hygiene_check_not_reported',
+    },
+    {
+      kind: 'run_owned_cleanup',
+      verdict: 'unknown',
+      reason: 'browser_hygiene_check_not_reported',
+    },
+    {
+      kind: 'user_owned_protection',
+      verdict: 'unknown',
+      reason: 'browser_hygiene_check_not_reported',
+    },
+    {
+      kind: 'failure_cleanup',
+      verdict: 'unknown',
+      reason: 'browser_hygiene_check_not_reported',
+    },
+  ];
 }
 
 function getRuntimeHygieneSnapshot(): PrimaryTabControllerSnapshot {
