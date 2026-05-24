@@ -371,9 +371,32 @@ describe('read_page task protocol', () => {
     expect(protocol.L1.overview).toContain(
       'Top objects: Practical automation planning guide for small teams, Reliable operations checklist for browser based AI assistants',
     );
+    expect(protocol.watchScope).toMatchObject({
+      scopeKind: 'search',
+      tabId: null,
+      reason: 'generic_search_category_match',
+      boundary: {
+        deterministicGuidanceOnly: true,
+        realBrowserProven: false,
+        commercialGradeProven: false,
+      },
+    });
+    expect(protocol.watchScope.regions.map((region) => region.regionId)).toEqual([
+      'query_input',
+      'result_region',
+      'empty_state',
+    ]);
     expect(protocol.highValueObjects.map((item) => item.label).join(' ')).not.toMatch(
       /Download app/i,
     );
+  });
+
+  it('keeps neutral read pages idle instead of treating read mode as long_content', () => {
+    const protocol = buildTaskProtocol(createBaseParams({ pageRole: 'web_page' }) as any);
+
+    expect(protocol.taskMode).toBe('read');
+    expect(protocol.watchScope.scopeKind).toBe('idle');
+    expect(protocol.watchScope.regions).toEqual([]);
   });
 
   it.each([

@@ -428,6 +428,14 @@ export interface ReadPageExtensionFields {
    * execution authority and does not replace `targetRef` / `candidateActions`.
    */
   pageProjection?: import('./browser-task-thing-contract').BrowserPageThingProjection;
+  /**
+   * BNS-03 additive attention guidance for the current read snapshot.
+   *
+   * This is deterministic guidance for AI planning, not proof that the
+   * browser task scope is correct. It carries abstract scope kinds and
+   * region purposes, not selectors, hostnames, or site-specific anchors.
+   */
+  watchScope?: import('./dynamic-watch-scope').DynamicWatchScope;
   ownershipRuntime?: ReadPageOwnershipRuntimeSummary;
   readinessVerdict?: ReadPageReadinessVerdict;
   rowCount?: number;

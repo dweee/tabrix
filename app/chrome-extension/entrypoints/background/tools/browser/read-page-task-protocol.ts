@@ -10,7 +10,9 @@ import type {
   ReadPageTaskLevel1,
   ReadPageTaskLevel2,
   ReadPageTaskMode,
+  DynamicWatchScope,
 } from '@tabrix/shared';
+import { deriveDynamicWatchScope } from '@tabrix/shared';
 import type {
   CollectInputs,
   ObjectLayerContext,
@@ -46,6 +48,8 @@ interface TaskProtocolParams {
     lineCount: number;
     quality: string;
   };
+  tabId?: number | null;
+  pageStability?: 'stable' | 'loading' | 'changing' | 'stale' | 'unknown';
   /**
    * Optional artifact-ref pointing at the Markdown projection of this
    * snapshot. When present, `L2.markdownRef` will surface it so upstream
@@ -64,6 +68,7 @@ interface TaskProtocolResult {
   complexityLevel: ReadPageComplexityLevel;
   sourceKind: ReadPageSourceKind;
   highValueObjects: ReadPageHighValueObject[];
+  watchScope: DynamicWatchScope;
   L0: ReadPageTaskLevel0;
   L1: ReadPageTaskLevel1;
   L2: ReadPageTaskLevel2;
@@ -600,6 +605,36 @@ function buildLevel2(params: TaskProtocolParams): ReadPageTaskLevel2 {
   };
 }
 
+function buildWatchScope(
+  params: TaskProtocolParams,
+  taskMode: ReadPageTaskMode,
+): DynamicWatchScope {
+  const watchIntent =
+    taskMode === 'read'
+      ? [params.primaryRegion, params.pageRole].filter(Boolean).join(' ')
+      : taskMode;
+  const nowMs = Date.now();
+
+  return deriveDynamicWatchScope({
+    tabId: params.tabId ?? null,
+    intent: watchIntent || null,
+    pageRole: params.pageRole,
+    pageStability: params.pageStability ?? 'unknown',
+    evidenceWindow: {
+      startedAtMs: nowMs,
+      endedAtMs: nowMs,
+      eventsByKind: {
+        interactive_element: params.interactiveElements.length,
+        candidate_action: params.candidateActions.length,
+        high_value_object: params.visibleRegionRows?.visibleRegionRowsUsed
+          ? params.visibleRegionRows.rowCount
+          : 0,
+      },
+    },
+    nowMs,
+  });
+}
+
 export function buildTaskProtocol(params: TaskProtocolParams): TaskProtocolResult {
   const priors = resolvePageObjectPriors(PAGE_OBJECT_FAMILY_ADAPTERS, params.pageRole);
   const complexityLevel = inferComplexityLevel(params);
@@ -617,12 +652,14 @@ export function buildTaskProtocol(params: TaskProtocolParams): TaskProtocolResul
   const L0 = buildLevel0(taskMode, params.pageRole, params.primaryRegion, highValueObjects, priors);
   const L1 = buildLevel1(params, highValueObjects);
   const L2 = buildLevel2(params);
+  const watchScope = buildWatchScope(params, taskMode);
 
   return {
     taskMode,
     complexityLevel,
     sourceKind,
     highValueObjects,
+    watchScope,
     L0,
     L1,
     L2,

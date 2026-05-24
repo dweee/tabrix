@@ -268,6 +268,8 @@ async function buildModeOutput(params: {
     renderMode: params.renderMode,
     currentUrl: params.currentUrl,
     currentTitle: params.currentTitle,
+    tabId: params.tabId,
+    pageStability: params.pageStability,
     pageType: params.pageType,
     pageRole: params.pageRole,
     primaryRegion: params.primaryRegion,

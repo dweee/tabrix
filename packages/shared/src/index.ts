@@ -14,3 +14,4 @@ export * from './click';
 export * from './choose-context';
 export * from './execution-value';
 export * from './browser-task-thing-contract';
+export * from './dynamic-watch-scope';

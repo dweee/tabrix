@@ -51,6 +51,8 @@ export function buildExtensionLayer(params: {
   renderMode: ReadPageRenderMode;
   currentUrl: string;
   currentTitle: string;
+  tabId: number | null;
+  pageStability: 'stable' | 'loading' | 'changing' | 'stale' | 'unknown';
   pageType: ReadPagePageType;
   pageRole: PageRole;
   primaryRegion: string | null;
@@ -74,6 +76,8 @@ export function buildExtensionLayer(params: {
     mode: params.mode,
     currentUrl: params.currentUrl,
     currentTitle: params.currentTitle,
+    tabId: params.tabId ?? null,
+    pageStability: params.pageStability ?? 'unknown',
     pageType: params.pageType,
     pageRole: params.pageRole,
     primaryRegion: params.primaryRegion,
@@ -191,6 +195,7 @@ export function buildExtensionLayer(params: {
     taskMode: taskProtocol.taskMode,
     complexityLevel: taskProtocol.complexityLevel,
     sourceKind: taskProtocol.sourceKind,
+    watchScope: taskProtocol.watchScope,
     highValueObjects: taskProtocol.highValueObjects,
     L0: taskProtocol.L0,
     L1: includeL1 ? taskProtocol.L1 : undefined,

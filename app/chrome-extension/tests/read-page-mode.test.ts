@@ -79,6 +79,15 @@ function expectCommonSnapshotShape(payload: any, mode: 'compact' | 'normal' | 'f
   expect(Date.parse(payload.pageProjection.projectionCreatedAt)).not.toBeNaN();
   expect(Date.parse(payload.pageProjection.sourceObservedAt)).not.toBeNaN();
   expect(payload.pageProjection.interferenceRisk).not.toBe('none');
+  expect(payload.watchScope).toMatchObject({
+    scopeKind: expect.stringMatching(/^(search|form|long_content|loading|idle|unknown)$/),
+    boundary: {
+      deterministicGuidanceOnly: true,
+      realBrowserProven: false,
+      commercialGradeProven: false,
+    },
+  });
+  expect(Array.isArray(payload.watchScope.regions)).toBe(true);
   // B-011: historyRef is now populated with `read://<host>/<role>/<sha8>` whenever
   // the snapshot has a URL. Degraded paths (e.g. unsupported pages) keep null.
   if (payload.historyRef !== null) {
