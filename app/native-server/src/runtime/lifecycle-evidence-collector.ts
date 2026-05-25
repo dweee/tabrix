@@ -131,6 +131,44 @@ export interface ToolCloseoutLifecycleEvidenceArtifactInput {
   browserHygiene: Partial<LifecycleEvidenceBrowserHygiene>;
 }
 
+export interface TaskLifecycleTimelineEventInput {
+  eventId: string;
+  index: number;
+  at: string;
+  kind: string;
+  tabId?: number;
+  url?: string | null;
+  pageRole?: string | null;
+}
+
+export interface UnifiedTaskCloseoutLifecycleEvidenceArtifactInput {
+  artifactId: string;
+  evidenceLevel: RuntimeEvidenceLevel;
+  scenarioId: string;
+  scenarioClass: BrowserTaskScenarioClass | string;
+  startedAtMs: number;
+  endedAtMs: number;
+  tabIds: number[];
+  taskTimeline: readonly TaskLifecycleTimelineEventInput[];
+  readAction?: {
+    actionId: string;
+    tabId: number | null;
+    verdict: PostconditionResult['verdict'];
+    reason: string;
+    observedOutcome?: PostconditionResult['observedOutcome'];
+    observedOutcomeConfidence?: number;
+  } | null;
+  closeAction: {
+    actionId: string;
+    tabId: number | null;
+    reason: string;
+    observedOutcome?: PostconditionResult['observedOutcome'];
+    observedOutcomeConfidence?: number;
+  };
+  sourceTruthChain?: BrowserSourceTruthChain | null;
+  browserHygiene: Partial<LifecycleEvidenceBrowserHygiene>;
+}
+
 const bufferedEvents: BufferedLifecycleEvidenceEvent[] = [];
 const bufferedSignals: BufferedSemanticSignal[] = [];
 const bufferedPostconditions: BufferedPostconditionResult[] = [];
@@ -400,6 +438,39 @@ export function produceToolCloseoutLifecycleEvidenceArtifact(
   return artifact;
 }
 
+export function produceUnifiedTaskCloseoutLifecycleEvidenceArtifact(
+  input: UnifiedTaskCloseoutLifecycleEvidenceArtifactInput,
+): LifecycleEvidenceArtifact {
+  assertValidUnifiedTaskCloseoutArtifactInput(input);
+  const streamEvents = input.taskTimeline.map((event, index) =>
+    taskTimelineEventToStreamEvent(event, input, index),
+  );
+  const semanticSignals = deriveTaskTimelineSemanticSignals(streamEvents, input.taskTimeline);
+  const postconditionResults = buildUnifiedTaskPostconditionResults(input);
+
+  const artifact = produceLifecycleEvidenceArtifact({
+    artifactId: input.artifactId,
+    evidenceLevel: input.evidenceLevel,
+    scenarioId: input.scenarioId,
+    scenarioClass: input.scenarioClass,
+    startedAtMs: input.startedAtMs,
+    streamEvents,
+    semanticSignals,
+    scopeTransitions: buildUnifiedTaskScopeTransitions(input),
+    postconditionEvidence: {
+      source: 'bns_04_verifier',
+      results: postconditionResults,
+    },
+    browserHygiene: {
+      ...input.browserHygiene,
+      available: true,
+    },
+    sourceTruthChain: input.sourceTruthChain ?? null,
+  });
+  recordLifecycleEvidenceArtifact(artifact);
+  return artifact;
+}
+
 function buildRuntimeScopeTransitions(
   input: RuntimeLifecycleEvidenceArtifactInput,
   streamEvents: BrowserStreamEvent[],
@@ -497,6 +568,172 @@ function isSupportedCloseoutPostconditionAction(actionKind: ActionKind): boolean
     (row) => row.sharedActionKind === actionKind,
   );
   return coverageRow?.status === 'supported';
+}
+
+function taskTimelineEventToStreamEvent(
+  event: TaskLifecycleTimelineEventInput,
+  input: UnifiedTaskCloseoutLifecycleEvidenceArtifactInput,
+  index: number,
+): BrowserStreamEvent {
+  const observedAtMs = Date.parse(event.at);
+  return {
+    streamEventId: `task_${sanitizeIdentifier(event.eventId || `event_${index + 1}`)}`,
+    correlationGroupId: `task_${sanitizeIdentifier(input.scenarioId)}`,
+    kind: 'observation_unknown',
+    observedAtMs: Number.isFinite(observedAtMs) ? observedAtMs : input.startedAtMs + index,
+    tabId: normalizeTimelineTabId(event.tabId, input.tabIds),
+    urlPattern: null,
+    sourceObservationKind: null,
+    sourcePayload: null,
+  };
+}
+
+function deriveTaskTimelineSemanticSignals(
+  streamEvents: BrowserStreamEvent[],
+  timeline: readonly TaskLifecycleTimelineEventInput[],
+): SemanticSignal[] {
+  const signals: SemanticSignal[] = [];
+  for (let index = 0; index < timeline.length; index += 1) {
+    const event = timeline[index];
+    const streamEvent = streamEvents[index];
+    if (!streamEvent) continue;
+    if (event.kind === 'readiness_observed' || event.kind === 'projection_created') {
+      signals.push({
+        signalId: `sig_ready_${streamEvent.streamEventId}`,
+        kind: 'ready_to_act',
+        confidence: 0.75,
+        tabId: streamEvent.tabId,
+        urlPattern: null,
+        sourceEventRefs: [
+          {
+            streamEventId: streamEvent.streamEventId,
+            eventKind: streamEvent.kind,
+            sourceObservationKind: null,
+            observedAtMs: streamEvent.observedAtMs,
+          },
+        ],
+        sourceOrigins: ['page_projection'],
+        producedAtMs: streamEvent.observedAtMs,
+      });
+    }
+    if (event.kind === 'region_changed' || event.kind === 'delta_created') {
+      signals.push({
+        signalId: `sig_results_${streamEvent.streamEventId}`,
+        kind: 'results_changed',
+        confidence: 0.7,
+        tabId: streamEvent.tabId,
+        urlPattern: null,
+        sourceEventRefs: [
+          {
+            streamEventId: streamEvent.streamEventId,
+            eventKind: streamEvent.kind,
+            sourceObservationKind: null,
+            observedAtMs: streamEvent.observedAtMs,
+          },
+        ],
+        sourceOrigins: ['page_projection'],
+        producedAtMs: streamEvent.observedAtMs,
+      });
+    }
+  }
+  return signals;
+}
+
+function buildUnifiedTaskPostconditionResults(
+  input: UnifiedTaskCloseoutLifecycleEvidenceArtifactInput,
+): PostconditionResult[] {
+  const results: PostconditionResult[] = [];
+  if (input.readAction) {
+    results.push({
+      actionId: input.readAction.actionId,
+      actionKind: 'read',
+      tabId: input.readAction.tabId,
+      urlPattern: null,
+      verdict: input.readAction.verdict,
+      reason: input.readAction.reason,
+      observedOutcome: input.readAction.observedOutcome ?? 'unknown',
+      observedOutcomeConfidence: input.readAction.observedOutcomeConfidence ?? 0.7,
+      sourceEventRefs: [{ kind: 'unknown', id: input.readAction.actionId, origin: 'runtime' }],
+      sourceOrigins: ['runtime', 'inference'],
+      producedAtMs: input.endedAtMs,
+    });
+  }
+  results.push({
+    actionId: input.closeAction.actionId,
+    actionKind: 'close',
+    tabId: input.closeAction.tabId,
+    urlPattern: null,
+    verdict: 'passed',
+    reason: input.closeAction.reason,
+    observedOutcome: input.closeAction.observedOutcome ?? 'unknown',
+    observedOutcomeConfidence: input.closeAction.observedOutcomeConfidence ?? 0.75,
+    sourceEventRefs: [{ kind: 'unknown', id: input.closeAction.actionId, origin: 'runtime' }],
+    sourceOrigins: ['runtime', 'inference'],
+    producedAtMs: input.endedAtMs,
+  });
+  return results;
+}
+
+function buildUnifiedTaskScopeTransitions(
+  input: UnifiedTaskCloseoutLifecycleEvidenceArtifactInput,
+): LifecycleEvidenceScopeTransition[] {
+  const pageRole = inferTimelinePageRole(input.taskTimeline);
+  const scope = deriveDynamicWatchScope({
+    tabId: input.tabIds[0] ?? null,
+    intent: inferTimelineIntent(input.taskTimeline),
+    pageRole,
+    pageStability: 'stable',
+    evidenceWindow: {
+      startedAtMs: input.startedAtMs,
+      endedAtMs: input.endedAtMs,
+      eventsByKind: countTimelineEventsByKind(input.taskTimeline),
+    },
+    nowMs: input.endedAtMs,
+  });
+  return [toLifecycleScopeTransition(scope)];
+}
+
+function inferTimelineIntent(timeline: readonly TaskLifecycleTimelineEventInput[]): string {
+  const hasCleanup = timeline.some((event) => event.kind === 'cleanup');
+  const hasRead = timeline.some(
+    (event) => event.kind === 'readiness_observed' || event.kind === 'projection_created',
+  );
+  const hasNavigation = timeline.some((event) => event.kind === 'navigation');
+  if (hasNavigation && hasRead && hasCleanup) return 'navigate_read_close';
+  if (hasRead && hasCleanup) return 'read_close';
+  return 'task_closeout';
+}
+
+function inferTimelinePageRole(
+  timeline: readonly TaskLifecycleTimelineEventInput[],
+): string | null {
+  const eventWithPageRole = timeline.find(
+    (event): event is TaskLifecycleTimelineEventInput & { pageRole: string } =>
+      typeof (event as TaskLifecycleTimelineEventInput & { pageRole?: unknown }).pageRole ===
+        'string' &&
+      ((event as TaskLifecycleTimelineEventInput & { pageRole?: string }).pageRole?.length ?? 0) >
+        0,
+  );
+  return eventWithPageRole?.pageRole ?? null;
+}
+
+function countTimelineEventsByKind(
+  timeline: readonly TaskLifecycleTimelineEventInput[],
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const event of timeline) {
+    counts[event.kind] = (counts[event.kind] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function normalizeTimelineTabId(tabId: unknown, tabIds: readonly number[]): number | null {
+  if (typeof tabId === 'number' && Number.isInteger(tabId) && tabId > 0) return tabId;
+  return tabIds[0] ?? null;
+}
+
+function sanitizeIdentifier(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_:-]/g, '_').slice(0, 120);
 }
 
 function buildRuntimeBrowserHygiene(): Partial<LifecycleEvidenceBrowserHygiene> | null {
@@ -673,6 +910,31 @@ function assertValidToolCloseoutArtifactInput(
   }
   if (input.browserHygiene.baselineChanged !== false) {
     throw new Error('BNS-05 tool closeout collector requires unchanged browser hygiene');
+  }
+}
+
+function assertValidUnifiedTaskCloseoutArtifactInput(
+  input: UnifiedTaskCloseoutLifecycleEvidenceArtifactInput,
+): void {
+  if (!isRuntimeEvidenceLevel(input.evidenceLevel)) {
+    throw new Error(
+      'BNS-05 unified task closeout only accepts source, unit, integration, or local_runner evidence',
+    );
+  }
+  if (!Number.isFinite(input.startedAtMs) || !Number.isFinite(input.endedAtMs)) {
+    throw new Error('BNS-05 unified task closeout requires finite startedAtMs and endedAtMs');
+  }
+  if (input.endedAtMs < input.startedAtMs) {
+    throw new Error('BNS-05 unified task closeout requires endedAtMs >= startedAtMs');
+  }
+  if (!Array.isArray(input.tabIds) || input.tabIds.length === 0) {
+    throw new Error('BNS-05 unified task closeout requires at least one tabId');
+  }
+  if (!Array.isArray(input.taskTimeline) || input.taskTimeline.length === 0) {
+    throw new Error('BNS-05 unified task closeout requires a non-empty task timeline');
+  }
+  if (input.browserHygiene.baselineChanged !== false) {
+    throw new Error('BNS-05 unified task closeout requires unchanged browser hygiene');
   }
 }
 

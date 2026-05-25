@@ -153,6 +153,8 @@ function uniqueOrigins(values: SourceTruthOrigin[]): SourceTruthOrigin[] {
 }
 
 function isMixed(origins: SourceTruthOrigin[]): boolean {
-  const nonInference = origins.filter((origin) => origin !== 'inference');
+  const nonInference = origins.filter(
+    (origin) => origin !== 'inference' && origin !== 'browser_runtime',
+  );
   return new Set(nonInference).size > 1;
 }

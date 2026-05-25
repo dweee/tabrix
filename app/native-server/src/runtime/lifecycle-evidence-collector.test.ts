@@ -16,6 +16,7 @@ import {
   produceToolCloseoutLifecycleEvidenceArtifact,
   produceRuntimeLifecycleEvidenceArtifact,
   produceToolFailureLifecycleEvidenceArtifact,
+  produceUnifiedTaskCloseoutLifecycleEvidenceArtifact,
   resetLifecycleEvidenceCollectorForTests,
   setLifecycleEvidenceCollectorHygieneSnapshotProviderForTests,
   setLifecycleEvidenceCollectorMaxBufferedEventsForTests,
@@ -732,7 +733,7 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
         observedAtMs: T0,
         data: {
           actionId: 'act-malformed',
-          actionKind: 'close',
+          actionKind: 'scroll',
           signals: [{ kind: 'dom_region_changed', observedAtMs: T0 }],
         },
       }),
@@ -956,6 +957,90 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     expect(serialized).not.toContain('secret-token');
   });
 
+  it('records a unified navigate/read/close task closeout without leaking raw timeline URLs', () => {
+    const artifact = produceUnifiedTaskCloseoutLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-unified-closeout',
+      evidenceLevel: 'integration',
+      scenarioId: 'tool-unified-closeout',
+      scenarioClass: 'browser_hygiene_closeout_v1',
+      startedAtMs: T0,
+      endedAtMs: T0 + 30,
+      tabIds: [42],
+      taskTimeline: [
+        {
+          eventId: 'lifecycle:1',
+          index: 1,
+          at: new Date(T0).toISOString(),
+          kind: 'navigation',
+          tabId: 42,
+          url: 'https://private.example/account?token=SECRET',
+        },
+        {
+          eventId: 'lifecycle:2',
+          index: 2,
+          at: new Date(T0 + 10).toISOString(),
+          kind: 'projection_created',
+          tabId: 42,
+        },
+        {
+          eventId: 'lifecycle:3',
+          index: 3,
+          at: new Date(T0 + 20).toISOString(),
+          kind: 'cleanup',
+          tabId: 42,
+        },
+      ],
+      readAction: {
+        actionId: 'mcp:chrome_read_page:42',
+        tabId: 42,
+        verdict: 'passed',
+        reason: 'read_page_projection_available',
+        observedOutcome: 'content_changed',
+      },
+      closeAction: {
+        actionId: 'mcp:chrome_close_tabs:42',
+        tabId: 42,
+        reason: 'close_tabs_cleanup_succeeded',
+      },
+      sourceTruthChain: {
+        primaryOrigin: 'dom',
+        provenanceCreatedAt: new Date(T0).toISOString(),
+        fieldProvenances: [
+          { field: 'pageProjection.chosenDataSource', origin: 'dom', isFact: true },
+        ],
+      },
+      browserHygiene: {
+        available: true,
+        baselineTabs: null,
+        runOwnedTabsClosed: 1,
+        baselineChanged: false,
+        checks: makeCleanHygieneChecks(),
+        notes: ['sourceRouteHonestyBoundary=not_integrated_until_R3'],
+      },
+    });
+
+    expect(artifact.eventTimeline).toMatchObject({
+      available: true,
+      totalEvents: 3,
+      eventsByKind: { observation_unknown: 3 },
+    });
+    expect(artifact.signalSequence).toMatchObject({
+      available: true,
+      signalsByKind: { ready_to_act: 1 },
+    });
+    expect(artifact.scopeTransitions).toMatchObject({ available: true, totalTransitions: 1 });
+    expect(artifact.actionLog).toMatchObject({
+      available: true,
+      totalActions: 2,
+      passed: 2,
+    });
+    expect(artifact.sourceTruthChain?.primaryOrigin).toBe('dom');
+    expect(artifact.claimBoundary.sourceRouteProven).toBe(false);
+    const serialized = JSON.stringify(artifact);
+    expect(serialized).not.toContain('private.example');
+    expect(serialized).not.toContain('SECRET');
+  });
+
   it('downgrades closeout postconditions for unsupported action kinds instead of claiming success', () => {
     const baseInput = {
       artifactId: 'runtime-artifact-tool-closeout-unsupported',
@@ -1008,19 +1093,18 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     });
   });
 
-  it('keeps close-tab closeout honest when the shared action-kind contract has no close kind', () => {
+  it('uses the close action kind for close-tab closeout once the shared contract supports it', () => {
     const artifact = produceToolCloseoutLifecycleEvidenceArtifact({
-      artifactId: 'runtime-artifact-tool-closeout-close-contract-gap',
+      artifactId: 'runtime-artifact-tool-closeout-close-action-kind',
       evidenceLevel: 'integration',
       scenarioId: 'tool-close-tabs-success',
       scenarioClass: 'browser_hygiene_closeout_v1',
       startedAtMs: T0,
       endedAtMs: T0 + 10,
       actionId: 'mcp:chrome_close_tabs:42',
-      actionKind: 'unknown',
+      actionKind: 'close',
       tabId: 42,
       reason: 'close_tabs_cleanup_succeeded',
-      unsupportedPostconditionReason: 'close_action_kind_blocked_by_shared_contract',
       browserHygiene: {
         available: true,
         runOwnedTabsClosed: 1,
@@ -1031,14 +1115,14 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     });
 
     expect(artifact.finalVerdict).toMatchObject({
-      verdict: 'unknown',
-      reason: 'postconditions_unknown',
+      verdict: 'task_success',
+      reason: 'postconditions_passed',
     });
     expect(artifact.actionLog.entries[0]).toMatchObject({
-      actionKind: 'unknown',
+      actionKind: 'close',
       tabId: 42,
-      verdict: 'unknown',
-      reason: 'close_action_kind_blocked_by_shared_contract',
+      verdict: 'passed',
+      reason: 'close_tabs_cleanup_succeeded',
     });
     expect(artifact.browserHygiene.notes).toContain('v3RequiredAction=close');
   });

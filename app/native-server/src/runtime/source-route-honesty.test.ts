@@ -101,6 +101,16 @@ describe('source-route-honesty — conservative proof labels', () => {
     });
   });
 
+  it('does not treat browser_runtime metadata provenance as mixed data-source proof', () => {
+    expect(
+      classify('dom_json', chain({ primaryOrigin: 'dom', facts: ['browser_runtime', 'dom'] })),
+    ).toMatchObject({
+      verdict: 'dom_fallback',
+      sourceOrigins: ['browser_runtime', 'dom'],
+      reason: 'dom_or_text_route_selected',
+    });
+  });
+
   it('labels missing and blocked inputs explicitly', () => {
     expect(classify(null)).toMatchObject({
       verdict: 'unknown',

@@ -100,9 +100,7 @@ function buildLongContentCoverageGate(text: string, textMode: 'body' | 'full-vis
   const sectionMarkers = Array.from(
     new Set(normalized.match(/\b(?:section|chapter|part|step|heading)\s+\d+[\s:.-]/gi) ?? []),
   );
-  const markerTokens = Array.from(
-    new Set(normalized.match(/\b[A-Z][A-Z0-9]+(?:-[A-Z0-9]+){1,}\b/g) ?? []),
-  );
+  const markerTokens = extractLongContentMarkerTokens(normalized);
   const tailWindow = normalized.slice(Math.max(0, normalized.length - 800));
   const tailMarkerTokens = markerTokens.filter((token) => tailWindow.includes(token));
   const hasTailCoverage =
@@ -169,6 +167,27 @@ function isLongContentHeadingLine(line: string): boolean {
     /^\d+(?:\.\d+)*[\s.:-]+[A-Z][\w\s-]{8,}$/.test(line) ||
     /^#{1,6}\s+\S+/.test(line)
   );
+}
+
+function extractLongContentMarkerTokens(text: string): string[] {
+  const markerLikeTokens = new Set<string>();
+  for (const match of text.match(/[A-Z][A-Z0-9]+(?:-[A-Z0-9]+){1,}/g) ?? []) {
+    markerLikeTokens.add(match);
+  }
+  for (const match of text.match(/\b(?:sentinel|marker)[-\s]+[a-z0-9-]+/gi) ?? []) {
+    const normalized = match.trim().replace(/\s+/g, '-').toUpperCase();
+    const markerSuffix = normalized.replace(/^(?:SENTINEL|MARKER)-/, '');
+    if (
+      /[A-Z0-9]+-[A-Z0-9-]+/.test(normalized) &&
+      !/^(?:SENTINEL|MARKER|SECTION|COVERAGE|FINAL)-/.test(markerSuffix)
+    ) {
+      markerLikeTokens.add(normalized);
+    }
+  }
+  for (const match of text.match(/\bfinal[-\s]+coverage[-\s]+check\b/gi) ?? []) {
+    markerLikeTokens.add(match.trim().replace(/\s+/g, '-').toUpperCase());
+  }
+  return Array.from(markerLikeTokens);
 }
 
 function getTabUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {

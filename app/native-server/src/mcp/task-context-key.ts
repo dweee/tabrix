@@ -77,7 +77,9 @@ export const READ_PAGE_DEFAULT_LAYER: ReadPageRequestedLayer = 'L0+L1+L2';
  *
  * Only `chrome_read_page` (the gated tool), `chrome_navigate` (the
  * tool that invalidates the gate's lastReadLayer / targetRefsSeen
- * via `noteUrlChange`), `chrome_network_capture` (the live observed API
+ * via `noteUrlChange`), single-target `chrome_close_tabs` (the cleanup
+ * closeout for a run-owned tab opened earlier in the same MCP task path),
+ * `chrome_network_capture` (the live observed API
  * writer), and `tabrix_choose_context` (the decision writer that the
  * `chrome_read_page` shim consumes via
  * `peekChooseContextDecision`) participate in auto-keying. Every
@@ -136,6 +138,16 @@ export function resolveTaskContextKey(
     ) {
       return null;
     }
+  }
+
+  if (toolName === TOOL_NAMES.BROWSER.CLOSE_TABS) {
+    const argTabIds =
+      args && typeof args === 'object' ? (args as Record<string, unknown>).tabIds : undefined;
+    if (!Array.isArray(argTabIds)) return null;
+    const tabIds = argTabIds.filter(
+      (tabId): tabId is number => Number.isInteger(tabId) && tabId > 0,
+    );
+    return tabIds.length === 1 ? `mcp:auto:tab:${tabIds[0]}` : null;
   }
 
   const autoEligible =

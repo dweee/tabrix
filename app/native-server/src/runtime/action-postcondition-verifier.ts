@@ -116,22 +116,22 @@ const ACTION_POSTCONDITION_COVERAGE_MATRIX: readonly ActionPostconditionCoverage
     {
       action: 'read',
       requiredByV3: true,
-      sharedActionKind: null,
-      status: 'blocked_by_shared_action_kind_contract',
+      sharedActionKind: 'read',
+      status: 'not_product_complete',
       expectedOutcomes: [],
       failOutcomes: [],
-      unknownHandling: 'must_not_be_claimed_supported_until_shared_action_kind_exists',
-      reason: 'read_is_not_a_shared_action_kind',
+      unknownHandling: 'read_success_requires_structured_read_gate_evidence',
+      reason: 'read_shared_action_kind_exists_but_success_matrix_deferred_to_r2',
     },
     {
       action: 'close',
       requiredByV3: true,
-      sharedActionKind: null,
-      status: 'blocked_by_shared_action_kind_contract',
+      sharedActionKind: 'close',
+      status: 'supported',
       expectedOutcomes: [],
-      failOutcomes: [],
-      unknownHandling: 'must_not_be_claimed_supported_until_shared_action_kind_exists',
-      reason: 'close_is_not_a_shared_action_kind',
+      failOutcomes: ['no_observed_change'],
+      unknownHandling: 'tool_closeout_requires_browser_hygiene_evidence',
+      reason: 'close_shared_action_kind_supported_by_tool_closeout',
     },
     {
       action: 'keyboard',
@@ -217,6 +217,9 @@ function verdictFor(
       return verdictFromOutcome(outcome, SUPPORTED_CLICK_SUBMIT_OUTCOMES);
     case 'navigate':
       return verdictFromOutcome(outcome, SUPPORTED_NAVIGATE_OUTCOMES);
+    case 'close':
+      return verdictFromOutcome(outcome, []);
+    case 'read':
     case 'keyboard':
     case 'unknown':
       return 'unknown';
@@ -240,6 +243,7 @@ function reasonFor(
 ): string {
   if (!flags.actionIdMatches) return 'action_id_mismatch';
   if (flags.confidenceBelowThreshold) return 'low_confidence';
+  if (actionKind === 'read') return 'read_success_requires_structured_read_gate_evidence';
   if (actionKind === 'keyboard') return 'keyboard_not_supported';
   if (actionKind === 'unknown') return 'unknown_action_kind';
   if (verdict === 'passed') return `outcome_supports_${actionKind}`;

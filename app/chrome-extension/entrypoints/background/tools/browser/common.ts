@@ -811,6 +811,24 @@ interface CloseTabsToolParams {
   windowId?: number;
 }
 
+interface CloseTabsBrowserSnapshot {
+  tabCount: number;
+  windowCount: number;
+  focusedWindowId: number | null;
+  activeTabId: number | null;
+}
+
+interface CloseTabsBrowserHygieneEvidence {
+  kind: 'close_tabs_hygiene_v1';
+  before: CloseTabsBrowserSnapshot;
+  after: CloseTabsBrowserSnapshot;
+  closedTabIds: number[];
+  invalidTabIds: number[];
+  tabWindowBaselineUnchanged: boolean | null;
+  activeTabRestored: boolean | null;
+  activeTabRestoreReason: string;
+}
+
 /**
  * Tool for closing browser tabs
  */
@@ -879,7 +897,9 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
           return createErrorResponse('Found tabs but could not get their IDs');
         }
 
+        const hygieneBefore = await captureCloseTabsBrowserSnapshot();
         await chrome.tabs.remove(tabIdsToClose);
+        const hygieneAfter = await captureCloseTabsBrowserSnapshot();
 
         return {
           content: [
@@ -890,6 +910,12 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
                 message: `Closed ${tabIdsToClose.length} tabs with URL: ${url}`,
                 closedCount: tabIdsToClose.length,
                 closedTabIds: tabIdsToClose,
+                browserHygieneEvidence: buildCloseTabsBrowserHygieneEvidence({
+                  before: hygieneBefore,
+                  after: hygieneAfter,
+                  closedTabIds: tabIdsToClose,
+                  invalidTabIds: [],
+                }),
               }),
             },
           ],
@@ -934,7 +960,10 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
           };
         }
 
+        const hygieneBefore = await captureCloseTabsBrowserSnapshot();
         await chrome.tabs.remove(validTabIds);
+        const hygieneAfter = await captureCloseTabsBrowserSnapshot();
+        const invalidTabIds = tabIds.filter((id) => !validTabIds.includes(id));
 
         return {
           content: [
@@ -945,7 +974,13 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
                 message: `Closed ${validTabIds.length} tabs`,
                 closedCount: validTabIds.length,
                 closedTabIds: validTabIds,
-                invalidTabIds: tabIds.filter((id) => !validTabIds.includes(id)),
+                invalidTabIds,
+                browserHygieneEvidence: buildCloseTabsBrowserHygieneEvidence({
+                  before: hygieneBefore,
+                  after: hygieneAfter,
+                  closedTabIds: validTabIds,
+                  invalidTabIds,
+                }),
               }),
             },
           ],
@@ -963,6 +998,67 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
       );
     }
   }
+}
+
+async function captureCloseTabsBrowserSnapshot(): Promise<CloseTabsBrowserSnapshot> {
+  const [tabs, windows] = await Promise.all([
+    chrome.tabs.query({}),
+    chrome.windows.getAll({ populate: false }),
+  ]);
+  const focusedWindow = windows.find((window) => window.focused === true);
+  const focusedWindowId = typeof focusedWindow?.id === 'number' ? focusedWindow.id : null;
+  const activeTab =
+    focusedWindowId === null
+      ? tabs.find((tab) => tab.active === true)
+      : tabs.find((tab) => tab.active === true && tab.windowId === focusedWindowId);
+
+  return {
+    tabCount: tabs.length,
+    windowCount: windows.length,
+    focusedWindowId,
+    activeTabId: typeof activeTab?.id === 'number' ? activeTab.id : null,
+  };
+}
+
+function buildCloseTabsBrowserHygieneEvidence(input: {
+  before: CloseTabsBrowserSnapshot;
+  after: CloseTabsBrowserSnapshot;
+  closedTabIds: number[];
+  invalidTabIds: number[];
+}): CloseTabsBrowserHygieneEvidence {
+  const closed = new Set(input.closedTabIds);
+  const expectedTabCountAfter = input.before.tabCount - input.closedTabIds.length;
+  const tabWindowBaselineUnchanged =
+    expectedTabCountAfter >= 0
+      ? input.after.tabCount === expectedTabCountAfter &&
+        input.after.windowCount === input.before.windowCount
+      : null;
+  const beforeActiveTabClosed =
+    input.before.activeTabId !== null && closed.has(input.before.activeTabId);
+  const activeTabRestored =
+    input.before.activeTabId === null || input.after.activeTabId === null
+      ? null
+      : beforeActiveTabClosed
+        ? !closed.has(input.after.activeTabId)
+        : input.after.activeTabId === input.before.activeTabId;
+
+  return {
+    kind: 'close_tabs_hygiene_v1',
+    before: input.before,
+    after: input.after,
+    closedTabIds: [...input.closedTabIds],
+    invalidTabIds: [...input.invalidTabIds],
+    tabWindowBaselineUnchanged,
+    activeTabRestored,
+    activeTabRestoreReason:
+      activeTabRestored === true
+        ? beforeActiveTabClosed
+          ? 'active_tab_restored_to_surviving_tab'
+          : 'active_tab_preserved'
+        : activeTabRestored === false
+          ? 'active_tab_not_restored'
+          : 'active_tab_restore_not_observed',
+  };
 }
 
 export const closeTabsTool = new CloseTabsTool();

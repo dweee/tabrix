@@ -63,7 +63,13 @@ describe('action-postcondition-verifier — coverage matrix', () => {
     const rows = getActionPostconditionCoverageMatrix();
     const supportedRows = rows.filter((row) => row.status === 'supported');
 
-    expect(supportedRows.map((row) => row.action)).toEqual(['navigate', 'click', 'fill', 'submit']);
+    expect(supportedRows.map((row) => row.action)).toEqual([
+      'navigate',
+      'click',
+      'fill',
+      'submit',
+      'close',
+    ]);
     expect(supportedRows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -89,6 +95,13 @@ describe('action-postcondition-verifier — coverage matrix', () => {
           expectedOutcomes: ['spa_partial_update'],
           failOutcomes: ['no_observed_change'],
         }),
+        expect.objectContaining({
+          action: 'close',
+          sharedActionKind: 'close',
+          expectedOutcomes: [],
+          failOutcomes: ['no_observed_change'],
+          unknownHandling: 'tool_closeout_requires_browser_hygiene_evidence',
+        }),
       ]),
     );
   });
@@ -98,7 +111,7 @@ describe('action-postcondition-verifier — coverage matrix', () => {
       (row) => row.status === 'blocked_by_shared_action_kind_contract',
     );
 
-    expect(blockedRows.map((row) => row.action)).toEqual(['type', 'scroll', 'read', 'close']);
+    expect(blockedRows.map((row) => row.action)).toEqual(['type', 'scroll']);
     for (const row of blockedRows) {
       expect(row.sharedActionKind).toBeNull();
       expect(row.expectedOutcomes).toEqual([]);
@@ -106,6 +119,20 @@ describe('action-postcondition-verifier — coverage matrix', () => {
         'must_not_be_claimed_supported_until_shared_action_kind_exists',
       );
     }
+  });
+
+  it('keeps read explicit but not product-complete until R2 adds success evidence', () => {
+    expect(getActionPostconditionCoverageMatrix()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'read',
+          requiredByV3: true,
+          sharedActionKind: 'read',
+          status: 'not_product_complete',
+          unknownHandling: 'read_success_requires_structured_read_gate_evidence',
+        }),
+      ]),
+    );
   });
 
   it('keeps keyboard and unknown explicit but not product-complete', () => {
@@ -155,6 +182,7 @@ describe('action-postcondition-verifier — verdict matrix', () => {
     ['fill', 'no_observed_change'],
     ['submit', 'no_observed_change'],
     ['navigate', 'no_observed_change'],
+    ['close', 'no_observed_change'],
   ];
 
   it.each(failRows)('returns failed for %s + %s', (actionKind, outcome) => {
@@ -193,6 +221,14 @@ describe('action-postcondition-verifier — verdict matrix', () => {
     ];
     for (const outcome of outcomes) {
       expect(verify('navigate', outcome).verdict).toBe('unknown');
+    }
+  });
+
+  it('returns unknown for read outcomes until structured read success evidence is wired', () => {
+    for (const outcome of ['spa_partial_update', 'no_observed_change'] as ActionOutcome[]) {
+      const result = verify('read', outcome);
+      expect(result.verdict).toBe('unknown');
+      expect(result.reason).toBe('read_success_requires_structured_read_gate_evidence');
     }
   });
 

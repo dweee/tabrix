@@ -133,23 +133,23 @@ describe('lifecycle-evidence-artifact-store', () => {
   it('exposes only redaction-safe last artifact reasons in the compact snapshot', () => {
     recordLifecycleEvidenceArtifact(
       makeArtifact({
-        artifactId: 'artifact-close-contract-gap',
+        artifactId: 'artifact-close-action-kind',
         scenarioId: 'mcp:chrome_close_tabs:cleanup_success',
         scenarioClass: 'browser_hygiene_closeout_v1',
         actionLog: {
           available: true,
           totalActions: 1,
-          passed: 0,
+          passed: 1,
           failed: 0,
-          unknown: 1,
+          unknown: 0,
           entries: [
             {
               actionId: 'mcp:chrome_close_tabs:42',
-              actionKind: 'unknown',
+              actionKind: 'close',
               tabId: 42,
               urlPattern: 'private.example/should-not-be-in-snapshot',
-              verdict: 'unknown',
-              reason: 'close_action_kind_blocked_by_shared_contract',
+              verdict: 'passed',
+              reason: 'close_tabs_cleanup_succeeded',
               observedOutcome: 'unknown',
               observedOutcomeConfidence: 0.75,
               sourceEventRefs: [{ kind: 'unknown', id: 'action-1', origin: 'runtime' }],
@@ -168,14 +168,14 @@ describe('lifecycle-evidence-artifact-store', () => {
 
     const snapshot = getLifecycleEvidenceArtifactStoreSnapshot();
     expect(snapshot).toMatchObject({
-      lastArtifactId: 'artifact-close-contract-gap',
+      lastArtifactId: 'artifact-close-action-kind',
       lastFinalVerdict: 'unknown',
       lastFinalVerdictReason: 'postconditions_unknown',
       lastScenarioId: 'mcp:chrome_close_tabs:cleanup_success',
       lastScenarioClass: 'browser_hygiene_closeout_v1',
-      lastActionKind: 'unknown',
-      lastPostconditionVerdict: 'unknown',
-      lastPostconditionReason: 'close_action_kind_blocked_by_shared_contract',
+      lastActionKind: 'close',
+      lastPostconditionVerdict: 'passed',
+      lastPostconditionReason: 'close_tabs_cleanup_succeeded',
     });
     expect(JSON.stringify(snapshot)).not.toContain('private.example');
     expect(JSON.stringify(snapshot)).not.toContain('urlPattern');

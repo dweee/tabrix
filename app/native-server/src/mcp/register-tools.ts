@@ -100,16 +100,24 @@ import {
 import {
   produceToolCloseoutLifecycleEvidenceArtifact,
   produceToolFailureLifecycleEvidenceArtifact,
+  produceUnifiedTaskCloseoutLifecycleEvidenceArtifact,
 } from '../runtime/lifecycle-evidence-collector';
+import {
+  classifySourceRouteHonesty,
+  type SourceRouteHonestyResult,
+} from '../runtime/source-route-honesty';
 import type {
   BrowserDataSourceDecisionEvidence,
   BrowserPageOwnerType,
   BrowserPageThingProjection,
+  BrowserSourceLineage,
+  BrowserSourceTruthChain,
   BrowserTaskStateVerdict,
   ReadPageCompactSnapshot,
   ReadPageMode,
   ReadPageOwnershipRuntimeSummary,
   ReadPageSelectedDataSource,
+  SourceTruthOrigin,
 } from '@tabrix/shared';
 import { buildBrowserTaskStateVerdict } from '@tabrix/shared';
 
@@ -125,6 +133,21 @@ interface TaskContextAttachment {
   taskContext: TaskSessionContext | null;
   taskContextKey: string;
   taskContextKeySource: TaskContextKeySource;
+}
+
+interface CloseTabsBrowserSnapshot {
+  tabCount: number;
+  windowCount: number;
+  focusedWindowId: number | null;
+  activeTabId: number | null;
+}
+
+interface CloseTabsBrowserHygieneEvidence {
+  before: CloseTabsBrowserSnapshot;
+  after: CloseTabsBrowserSnapshot;
+  tabWindowBaselineUnchanged: boolean | null;
+  activeTabRestored: boolean | null;
+  activeTabRestoreReason: string | null;
 }
 
 /**
@@ -1097,8 +1120,10 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         });
         maybeRecordCloseTabsSuccessLifecycleArtifact({
           args,
+          result: rawResultWithEvidence,
           closedTabIds,
           invalidTabIds,
+          taskContext,
           startedAtMs: toolCallStartedAtMs,
           endedAtMs: Date.now(),
         });
@@ -1284,7 +1309,7 @@ function maybeRecordReadPageFailureLifecycleArtifact(input: {
     startedAtMs: input.startedAtMs,
     endedAtMs: input.endedAtMs,
     actionId: `mcp:chrome_read_page:${tabId}:${input.startedAtMs}`,
-    actionKind: 'unknown',
+    actionKind: 'read',
     tabId,
     reason: 'page_unreadable',
     observedOutcome: 'unknown',
@@ -1343,7 +1368,7 @@ function maybeRecordStructuredReadGateLifecycleArtifact(input: {
     startedAtMs: input.startedAtMs,
     endedAtMs: input.endedAtMs,
     actionId: `mcp:chrome_read_page:structured_read_gate:${tabId}:${input.startedAtMs}`,
-    actionKind: 'unknown',
+    actionKind: 'read',
     tabId,
     reason,
     observedOutcome: 'unknown',
@@ -1362,14 +1387,103 @@ function isActionableStructuredReadIncompleteVerdict(verdict: string): boolean {
 
 function maybeRecordCloseTabsSuccessLifecycleArtifact(input: {
   args: unknown;
+  result: unknown;
   closedTabIds: number[];
   invalidTabIds: number[];
+  taskContext?: TaskSessionContext | null;
   startedAtMs: number;
   endedAtMs: number;
 }): void {
   const targetTabIds = readNumericArray(input.args, 'tabIds') ?? [];
   const tabId = input.closedTabIds[0] ?? input.invalidTabIds[0] ?? targetTabIds[0] ?? null;
   const actionIdTab = typeof tabId === 'number' ? tabId : 'none';
+  const browserHygieneEvidence = extractCloseTabsBrowserHygieneEvidence(input.result);
+  const sourceRouteHonesty = input.taskContext?.peekLastSourceRouteHonesty() ?? null;
+  const hygieneChecks = buildCloseTabsSuccessHygieneChecks(input, browserHygieneEvidence);
+  const incompleteCheckKinds = hygieneChecks
+    .filter((check) => check.verdict === 'unknown')
+    .map((check) => check.kind);
+  const browserHygiene = {
+    available: true,
+    baselineTabs: browserHygieneEvidence?.after.tabCount ?? null,
+    runOwnedTabsClosed: input.closedTabIds.length + input.invalidTabIds.length,
+    baselineChanged: browserHygieneEvidence?.tabWindowBaselineUnchanged === false,
+    checks: hygieneChecks,
+    notes: [
+      `closedTabCount=${input.closedTabIds.length}`,
+      `invalidTabCount=${input.invalidTabIds.length}`,
+      `requestedTabCount=${targetTabIds.length}`,
+      `browserHygieneEvidenceCompleteness=${incompleteCheckKinds.length === 0 ? 'complete' : 'partial'}`,
+      ...(incompleteCheckKinds.length > 0
+        ? [`browserHygieneMissingChecks=${incompleteCheckKinds.join(',')}`]
+        : []),
+      ...(browserHygieneEvidence
+        ? [
+            `tabWindowBaselineUnchanged=${browserHygieneEvidence.tabWindowBaselineUnchanged}`,
+            `activeTabRestoreReason=${browserHygieneEvidence.activeTabRestoreReason ?? 'unknown'}`,
+          ]
+        : ['closeTabsBrowserHygieneEvidence=missing']),
+      ...(sourceRouteHonesty
+        ? [
+            `sourceRouteHonestyVerdict=${sourceRouteHonesty.verdict}`,
+            `sourceRouteHonestyReason=${sourceRouteHonesty.reason}`,
+            `sourceRouteSelectedDataSource=${sourceRouteHonesty.selectedDataSource ?? 'unknown'}`,
+            `sourceRouteFallbackUsed=${sourceRouteHonesty.fallbackUsed}`,
+            `sourceRouteHasFactEvidence=${sourceRouteHonesty.hasFactEvidence}`,
+          ]
+        : ['sourceRouteHonestyVerdict=unknown']),
+      'sourceRouteHonestyBoundary=runtime_visible_api_cdp_not_proven',
+      'apiCdpReuseProven=false',
+      'v3RequiredAction=close',
+    ],
+  };
+
+  const taskTimeline = input.taskContext?.getLifecycleTimeline() ?? [];
+  const unifiedTabIds = uniquePositiveIntegers([
+    ...input.closedTabIds,
+    ...input.invalidTabIds,
+    ...targetTabIds,
+    ...(typeof tabId === 'number' ? [tabId] : []),
+    ...(input.taskContext?.peekLastPageProjection()?.tabId
+      ? [input.taskContext.peekLastPageProjection()!.tabId]
+      : []),
+  ]);
+  if (input.taskContext && taskTimeline.length > 0 && unifiedTabIds.length > 0) {
+    const lastProjection = input.taskContext.peekLastPageProjection();
+    const hasRead = input.taskContext.readPageCount > 0;
+    produceUnifiedTaskCloseoutLifecycleEvidenceArtifact({
+      artifactId: `mcp-unified-closeout-${input.startedAtMs}-${actionIdTab}`,
+      evidenceLevel: 'integration',
+      scenarioId: TOOL_CLOSEOUT_ARTIFACT_SCENARIO_ID,
+      scenarioClass: 'browser_hygiene_closeout_v1',
+      startedAtMs: inferTaskTimelineStartedAtMs(taskTimeline, input.startedAtMs),
+      endedAtMs: input.endedAtMs,
+      tabIds: unifiedTabIds,
+      taskTimeline,
+      readAction: hasRead
+        ? {
+            actionId: `mcp:chrome_read_page:${lastProjection?.tabId ?? actionIdTab}:${input.startedAtMs}`,
+            tabId: lastProjection?.tabId ?? (typeof tabId === 'number' ? tabId : null),
+            verdict: lastProjection ? 'passed' : 'unknown',
+            reason: lastProjection
+              ? 'read_page_projection_available'
+              : 'read_page_success_observed_without_projection',
+            observedOutcome: 'unknown',
+            observedOutcomeConfidence: lastProjection ? 0.7 : 0.4,
+          }
+        : null,
+      closeAction: {
+        actionId: `mcp:chrome_close_tabs:${actionIdTab}:${input.startedAtMs}`,
+        tabId: typeof tabId === 'number' ? tabId : null,
+        reason: 'close_tabs_cleanup_succeeded',
+        observedOutcome: 'unknown',
+        observedOutcomeConfidence: 0.75,
+      },
+      sourceTruthChain: input.taskContext.peekLastSourceTruthChain(),
+      browserHygiene,
+    });
+    return;
+  }
 
   produceToolCloseoutLifecycleEvidenceArtifact({
     artifactId: `mcp-close-success-${input.startedAtMs}-${actionIdTab}`,
@@ -1379,47 +1493,26 @@ function maybeRecordCloseTabsSuccessLifecycleArtifact(input: {
     startedAtMs: input.startedAtMs,
     endedAtMs: input.endedAtMs,
     actionId: `mcp:chrome_close_tabs:${actionIdTab}:${input.startedAtMs}`,
-    actionKind: 'unknown',
+    actionKind: 'close',
     tabId: typeof tabId === 'number' ? tabId : null,
     reason: 'close_tabs_cleanup_succeeded',
-    unsupportedPostconditionReason: 'close_action_kind_blocked_by_shared_contract',
     observedOutcome: 'unknown',
     observedOutcomeConfidence: 0.75,
-    browserHygiene: {
-      available: true,
-      baselineTabs: null,
-      runOwnedTabsClosed: input.closedTabIds.length + input.invalidTabIds.length,
-      baselineChanged: false,
-      checks: buildCloseTabsSuccessHygieneChecks(input),
-      notes: [
-        `closedTabCount=${input.closedTabIds.length}`,
-        `invalidTabCount=${input.invalidTabIds.length}`,
-        `requestedTabCount=${targetTabIds.length}`,
-        'browserHygieneEvidenceCompleteness=partial',
-        'browserHygieneMissingChecks=tab_window_baseline,active_tab_restore',
-        'deterministic_closeout_only=true',
-        'v3RequiredAction=close',
-      ],
-    },
+    browserHygiene,
   });
 }
 
-function buildCloseTabsSuccessHygieneChecks(input: {
-  closedTabIds: number[];
-  invalidTabIds: number[];
-}): LifecycleEvidenceBrowserHygieneCheck[] {
+function buildCloseTabsSuccessHygieneChecks(
+  input: {
+    closedTabIds: number[];
+    invalidTabIds: number[];
+  },
+  evidence: CloseTabsBrowserHygieneEvidence | null,
+): LifecycleEvidenceBrowserHygieneCheck[] {
   const cleanupCount = input.closedTabIds.length + input.invalidTabIds.length;
   return [
-    {
-      kind: 'tab_window_baseline',
-      verdict: 'unknown',
-      reason: 'browser_hygiene_check_not_reported',
-    },
-    {
-      kind: 'active_tab_restore',
-      verdict: 'unknown',
-      reason: 'browser_hygiene_check_not_reported',
-    },
+    buildCloseTabsTabWindowBaselineCheck(evidence),
+    buildCloseTabsActiveTabRestoreCheck(evidence),
     {
       kind: 'run_owned_cleanup',
       verdict: cleanupCount > 0 ? 'pass' : 'unknown',
@@ -1436,6 +1529,130 @@ function buildCloseTabsSuccessHygieneChecks(input: {
       reason: 'failure_cleanup_not_needed',
     },
   ];
+}
+
+function buildCloseTabsTabWindowBaselineCheck(
+  evidence: CloseTabsBrowserHygieneEvidence | null,
+): LifecycleEvidenceBrowserHygieneCheck {
+  if (evidence?.tabWindowBaselineUnchanged === true) {
+    return {
+      kind: 'tab_window_baseline',
+      verdict: 'pass',
+      reason: 'pre_post_tab_window_baseline_unchanged',
+    };
+  }
+  if (evidence?.tabWindowBaselineUnchanged === false) {
+    return {
+      kind: 'tab_window_baseline',
+      verdict: 'fail',
+      reason: 'pre_post_tab_window_baseline_changed',
+    };
+  }
+  return {
+    kind: 'tab_window_baseline',
+    verdict: 'unknown',
+    reason: 'browser_hygiene_check_not_reported',
+  };
+}
+
+function buildCloseTabsActiveTabRestoreCheck(
+  evidence: CloseTabsBrowserHygieneEvidence | null,
+): LifecycleEvidenceBrowserHygieneCheck {
+  if (evidence?.activeTabRestored === true) {
+    return {
+      kind: 'active_tab_restore',
+      verdict: 'pass',
+      reason: 'active_tab_restored',
+    };
+  }
+  if (evidence?.activeTabRestored === false) {
+    return {
+      kind: 'active_tab_restore',
+      verdict: 'fail',
+      reason: 'active_tab_not_restored',
+    };
+  }
+  return {
+    kind: 'active_tab_restore',
+    verdict: 'unknown',
+    reason: 'browser_hygiene_check_not_reported',
+  };
+}
+
+function extractCloseTabsBrowserHygieneEvidence(
+  result: unknown,
+): CloseTabsBrowserHygieneEvidence | null {
+  for (const payload of extractObjectPayloadsFromToolResult(result)) {
+    const rawEvidence = readObject(payload.browserHygieneEvidence);
+    if (!rawEvidence) continue;
+    const before = readCloseTabsBrowserSnapshot(rawEvidence.before);
+    const after = readCloseTabsBrowserSnapshot(rawEvidence.after);
+    if (!before || !after) continue;
+    return {
+      before,
+      after,
+      tabWindowBaselineUnchanged: readNullableBoolean(rawEvidence, 'tabWindowBaselineUnchanged'),
+      activeTabRestored: readNullableBoolean(rawEvidence, 'activeTabRestored'),
+      activeTabRestoreReason: readString(rawEvidence.activeTabRestoreReason),
+    };
+  }
+  return null;
+}
+
+function readCloseTabsBrowserSnapshot(input: unknown): CloseTabsBrowserSnapshot | null {
+  const snapshot = readObject(input);
+  if (!snapshot) return null;
+  const tabCount = readNonNegativeInteger(snapshot, 'tabCount');
+  const windowCount = readNonNegativeInteger(snapshot, 'windowCount');
+  if (tabCount === null || windowCount === null) return null;
+  return {
+    tabCount,
+    windowCount,
+    focusedWindowId: readPositiveInteger(snapshot, 'focusedWindowId'),
+    activeTabId: readPositiveInteger(snapshot, 'activeTabId'),
+  };
+}
+
+function extractObjectPayloadsFromToolResult(data: unknown): Array<Record<string, unknown>> {
+  const payloads: Array<Record<string, unknown>> = [];
+  const root = readObject(data);
+  if (!root) return payloads;
+  payloads.push(root);
+  const content = root.content;
+  if (!Array.isArray(content)) return payloads;
+  for (const entry of content) {
+    const block = readObject(entry);
+    if (!block || typeof block.text !== 'string' || block.text.length === 0) continue;
+    try {
+      const parsed = JSON.parse(block.text);
+      const payload = readObject(parsed);
+      if (payload) payloads.push(payload);
+    } catch {
+      // Not JSON; skip.
+    }
+  }
+  return payloads;
+}
+
+function uniquePositiveIntegers(values: ReadonlyArray<number | null | undefined>): number[] {
+  return [
+    ...new Set(
+      values.filter(
+        (value): value is number =>
+          typeof value === 'number' && Number.isInteger(value) && value > 0,
+      ),
+    ),
+  ];
+}
+
+function inferTaskTimelineStartedAtMs(
+  timeline: ReadonlyArray<{ at: string }>,
+  fallbackStartedAtMs: number,
+): number {
+  const parsed = timeline
+    .map((event) => Date.parse(event.at))
+    .filter((value) => Number.isFinite(value));
+  return parsed.length > 0 ? Math.min(...parsed) : fallbackStartedAtMs;
 }
 
 function readJsonObjectFromCallToolResult(result: CallToolResult): Record<string, unknown> | null {
@@ -1534,16 +1751,20 @@ function attachAiFacingOwnershipRuntime(
     selectedDataSource,
     payload,
   );
+  const projectionWithSourceTruth = ensureProjectionSourceTruthChain(
+    normalizedAiFacingProjection,
+    selectedDataSource,
+  );
   const runtimeFields: TaskPageRuntimeFields = {
     currentWindowId: readPositiveInteger(payload, 'currentWindowId'),
     isCurrentTabActive: readBoolean(payload, 'isCurrentTabActive'),
     isCurrentWindowFocused: readBoolean(payload, 'isCurrentWindowFocused'),
   };
 
-  payload.pageProjection = normalizedAiFacingProjection;
+  payload.pageProjection = projectionWithSourceTruth;
   payload.ownershipRuntime = buildAiFacingOwnershipRuntimeSummary(
     attachment.taskContext,
-    normalizedAiFacingProjection,
+    projectionWithSourceTruth,
     runtimeFields,
   );
   payload.taskContextEnvelope = buildTaskContextEnvelope(attachment);
@@ -1600,13 +1821,17 @@ function attachAiFacingDeltaContext(
     selectedDataSource,
     payload,
   );
+  const projectionWithSourceTruth = ensureProjectionSourceTruthChain(
+    normalizedAiFacingProjection,
+    selectedDataSource,
+  );
   const runtimeFields: TaskPageRuntimeFields = {
     currentWindowId: readPositiveInteger(payload, 'currentWindowId'),
     isCurrentTabActive: readBoolean(payload, 'isCurrentTabActive'),
     isCurrentWindowFocused: readBoolean(payload, 'isCurrentWindowFocused'),
   };
   const deltaContext = attachment.taskContext.notePageProjectionAndBuildDelta(
-    normalizedAiFacingProjection,
+    projectionWithSourceTruth,
     runtimeFields,
   );
   const selectedReason =
@@ -1627,20 +1852,29 @@ function attachAiFacingDeltaContext(
     selectedReason,
     fallbackReason,
   });
+  const sourceRouteHonesty = classifySourceRouteHonesty({
+    selectedDataSource,
+    sourceTruthChain: projectionWithSourceTruth.sourceTruthChain,
+    fallbackReason,
+  });
+  attachment.taskContext.noteSourceRouteHonesty(
+    toTaskSourceRouteHonestySnapshot(sourceRouteHonesty),
+  );
   const taskState = buildAiFacingTaskState({
     payload,
     projection: aiFacingProjection,
     fallbackReason,
   });
-  const structuredReadGate = buildStructuredReadGate(payload, normalizedAiFacingProjection);
+  const structuredReadGate = buildStructuredReadGate(payload, projectionWithSourceTruth);
 
-  payload.pageProjection = normalizedAiFacingProjection;
+  payload.pageProjection = projectionWithSourceTruth;
   payload.ownershipRuntime = buildAiFacingOwnershipRuntimeSummary(
     attachment.taskContext,
-    normalizedAiFacingProjection,
+    projectionWithSourceTruth,
     runtimeFields,
   );
   payload.structuredReadGate = structuredReadGate;
+  payload.sourceRouteHonesty = buildAiFacingSourceRouteHonesty(sourceRouteHonesty);
   payload.deltaContext = deltaContext;
   payload.taskContextEnvelope = buildTaskContextEnvelope(attachment);
   payload.aiContextEnvelope = {
@@ -1650,6 +1884,7 @@ function attachAiFacingDeltaContext(
     taskState,
     selectedDataSource,
     dataSourceDecision,
+    sourceRouteHonesty: buildAiFacingSourceRouteHonesty(sourceRouteHonesty),
     structuredReadGate,
     deltaContext,
     lifecycleTimeline: attachment.taskContext.getLifecycleTimeline(),
@@ -1724,6 +1959,67 @@ function normalizeAiFacingProjectionOwnerType(
     ...projection,
     ownerType,
   };
+}
+
+function ensureProjectionSourceTruthChain(
+  projection: BrowserPageThingProjection,
+  selectedDataSource: ReadPageSelectedDataSource,
+): BrowserPageThingProjection {
+  if (isBrowserSourceTruthChainLike(projection.sourceTruthChain)) return projection;
+  const primaryOrigin = inferSourceTruthOrigin(projection.sourceLineage, selectedDataSource);
+  const provenanceCreatedAt =
+    typeof projection.sourceObservedAt === 'string' && projection.sourceObservedAt.length > 0
+      ? projection.sourceObservedAt
+      : new Date().toISOString();
+  return {
+    ...projection,
+    sourceTruthChain: {
+      primaryOrigin,
+      provenanceCreatedAt,
+      fieldProvenances: [
+        { field: 'pageProjection.projectionId', origin: 'browser_runtime', isFact: true },
+        { field: 'pageProjection.chosenDataSource', origin: primaryOrigin, isFact: true },
+        { field: 'pageProjection.sourceLineage', origin: primaryOrigin, isFact: true },
+        { field: 'sourceRouteHonestyBoundary', origin: 'inference', isFact: false },
+      ],
+    },
+  };
+}
+
+function isBrowserSourceTruthChainLike(input: unknown): input is BrowserSourceTruthChain {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
+  const chain = input as Partial<BrowserSourceTruthChain>;
+  return (
+    typeof chain.primaryOrigin === 'string' &&
+    Array.isArray(chain.fieldProvenances) &&
+    typeof chain.provenanceCreatedAt === 'string'
+  );
+}
+
+function inferSourceTruthOrigin(
+  sourceLineage: BrowserSourceLineage,
+  selectedDataSource: ReadPageSelectedDataSource,
+): SourceTruthOrigin {
+  if (selectedDataSource === 'api_rows') return 'api';
+  if (selectedDataSource === 'cdp_enhanced_api_rows') return 'cdp';
+  if (selectedDataSource === 'markdown') return 'text';
+  if (selectedDataSource === 'dom_json' || selectedDataSource === 'dom_region_rows') return 'dom';
+  switch (sourceLineage) {
+    case 'dom':
+      return 'dom';
+    case 'accessibility':
+      return 'accessibility';
+    case 'api':
+      return 'api';
+    case 'cdp':
+      return 'cdp';
+    case 'text':
+      return 'text';
+    case 'mixed':
+      return 'inference';
+    default:
+      return 'unknown';
+  }
 }
 
 function resolveOwnerTypeSourceTabId(
@@ -1962,6 +2258,49 @@ function buildAiFacingDataSourceDecision(args: {
   };
 }
 
+function buildAiFacingSourceRouteHonesty(
+  result: SourceRouteHonestyResult,
+): Record<string, unknown> {
+  const proofGateRequired = isApiCdpProofVerdict(result.verdict);
+  return {
+    verdict: proofGateRequired ? 'unknown' : result.verdict,
+    selectedDataSource: result.selectedDataSource,
+    reason: proofGateRequired ? 'api_cdp_reuse_requires_r5_gate' : result.reason,
+    fallbackUsed: result.fallbackUsed,
+    sourceOrigins: result.sourceOrigins,
+    factOrigins: result.factOrigins,
+    hasFactEvidence: result.hasFactEvidence,
+    proofGate: proofGateRequired ? 'r5_required' : null,
+    sourceRouteCandidate: proofGateRequired
+      ? result.verdict === 'api_proven'
+        ? 'api_source_with_fact_evidence'
+        : 'cdp_source_with_fact_evidence'
+      : null,
+    apiCdpReuseProven: false,
+  };
+}
+
+function toTaskSourceRouteHonestySnapshot(result: SourceRouteHonestyResult): {
+  verdict: string;
+  selectedDataSource: string | null;
+  reason: string;
+  fallbackUsed: boolean;
+  hasFactEvidence: boolean;
+} {
+  const proofGateRequired = isApiCdpProofVerdict(result.verdict);
+  return {
+    verdict: proofGateRequired ? 'unknown' : result.verdict,
+    selectedDataSource: result.selectedDataSource,
+    reason: proofGateRequired ? 'api_cdp_reuse_requires_r5_gate' : result.reason,
+    fallbackUsed: result.fallbackUsed,
+    hasFactEvidence: result.hasFactEvidence,
+  };
+}
+
+function isApiCdpProofVerdict(verdict: SourceRouteHonestyResult['verdict']): boolean {
+  return verdict === 'api_proven' || verdict === 'cdp_proven';
+}
+
 function inferAvailableDataSources(
   payload: Record<string, unknown>,
   selectedDataSource: ReadPageSelectedDataSource,
@@ -2112,6 +2451,12 @@ function readBoolean(input: unknown, key: string): boolean | null {
   return typeof raw === 'boolean' ? raw : null;
 }
 
+function readNullableBoolean(input: unknown, key: string): boolean | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const raw = (input as Record<string, unknown>)[key];
+  return typeof raw === 'boolean' ? raw : null;
+}
+
 function readNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
@@ -2134,4 +2479,10 @@ function readPositiveInteger(input: unknown, key: string): number | null {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
   const raw = (input as Record<string, unknown>)[key];
   return Number.isInteger(raw) && (raw as number) > 0 ? (raw as number) : null;
+}
+
+function readNonNegativeInteger(input: unknown, key: string): number | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const raw = (input as Record<string, unknown>)[key];
+  return Number.isInteger(raw) && (raw as number) >= 0 ? (raw as number) : null;
 }

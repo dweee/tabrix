@@ -438,13 +438,23 @@ export interface BrowserFactSnapshotEnvelope {
  *
  * Always includes `'unknown'` per the shared invariant.
  */
-export type ActionKind = 'click' | 'fill' | 'submit' | 'navigate' | 'keyboard' | 'unknown';
+export type ActionKind =
+  | 'click'
+  | 'fill'
+  | 'submit'
+  | 'navigate'
+  | 'read'
+  | 'close'
+  | 'keyboard'
+  | 'unknown';
 
 export const ACTION_KINDS = [
   'click',
   'fill',
   'submit',
   'navigate',
+  'read',
+  'close',
   'keyboard',
   'unknown',
 ] as const satisfies ReadonlyArray<ActionKind>;

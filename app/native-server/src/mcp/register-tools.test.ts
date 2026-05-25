@@ -238,7 +238,7 @@ describe('handleToolCall execution wrapper', () => {
       sourceOrigins: ['runtime_inference'],
     });
     expect(artifacts[0].actionLog.entries[0]).toMatchObject({
-      actionKind: 'unknown',
+      actionKind: 'read',
       tabId: 42,
       verdict: 'failed',
       reason: 'page_unreadable',
@@ -309,7 +309,7 @@ describe('handleToolCall execution wrapper', () => {
       sourceOrigins: ['runtime_inference'],
     });
     expect(artifacts[0].actionLog.entries[0]).toMatchObject({
-      actionKind: 'unknown',
+      actionKind: 'read',
       tabId: 43,
       verdict: 'failed',
       reason: 'page_unreadable',
@@ -1325,6 +1325,16 @@ describe('handleToolCall execution wrapper', () => {
           recommendedNextAction: 'continue_read',
         },
         selectedDataSource: 'dom_json',
+        sourceRouteHonesty: {
+          verdict: 'dom_fallback',
+          selectedDataSource: 'dom_json',
+          apiCdpReuseProven: false,
+        },
+      });
+      expect(secondPayload.sourceRouteHonesty).toMatchObject({
+        verdict: 'dom_fallback',
+        selectedDataSource: 'dom_json',
+        apiCdpReuseProven: false,
       });
       expect(
         secondPayload.aiContextEnvelope.lifecycleTimeline.map(
@@ -1356,7 +1366,30 @@ describe('handleToolCall execution wrapper', () => {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify({ success: true, closedTabIds: [1] }),
+                text: JSON.stringify({
+                  success: true,
+                  closedTabIds: [1],
+                  browserHygieneEvidence: {
+                    kind: 'close_tabs_hygiene_v1',
+                    before: {
+                      tabCount: 3,
+                      windowCount: 1,
+                      focusedWindowId: 10,
+                      activeTabId: 1,
+                    },
+                    after: {
+                      tabCount: 2,
+                      windowCount: 1,
+                      focusedWindowId: 10,
+                      activeTabId: 2,
+                    },
+                    closedTabIds: [1],
+                    invalidTabIds: [],
+                    tabWindowBaselineUnchanged: true,
+                    activeTabRestored: true,
+                    activeTabRestoreReason: 'active_tab_restored_to_surviving_tab',
+                  },
+                }),
               },
             ],
             isError: false,
@@ -1390,34 +1423,53 @@ describe('handleToolCall execution wrapper', () => {
       });
       expect(getLifecycleEvidenceArtifactStoreSnapshot()).toMatchObject({
         bufferedArtifacts: 1,
-        lastFinalVerdict: 'unknown',
+        lastFinalVerdict: 'task_success',
       });
       const artifacts = listLifecycleEvidenceArtifacts();
       expect(artifacts).toHaveLength(1);
       expect(artifacts[0]).toMatchObject({
         scenarioId: 'mcp:chrome_close_tabs:cleanup_success',
         scenarioClass: 'browser_hygiene_closeout_v1',
+        eventTimeline: {
+          available: true,
+          totalEvents: 11,
+        },
+        signalSequence: {
+          available: true,
+          signalsByKind: {
+            ready_to_act: 4,
+            results_changed: 4,
+          },
+        },
+        scopeTransitions: {
+          available: true,
+          totalTransitions: 1,
+        },
         actionLog: {
           available: true,
-          totalActions: 1,
-          passed: 0,
+          totalActions: 2,
+          passed: 2,
           failed: 0,
-          unknown: 1,
+          unknown: 0,
+        },
+        sourceTruthChain: {
+          primaryOrigin: 'dom',
         },
         browserHygiene: {
           available: true,
+          baselineTabs: 2,
           runOwnedTabsClosed: 1,
           baselineChanged: false,
           checks: [
             {
               kind: 'tab_window_baseline',
-              verdict: 'unknown',
-              reason: 'browser_hygiene_check_not_reported',
+              verdict: 'pass',
+              reason: 'pre_post_tab_window_baseline_unchanged',
             },
             {
               kind: 'active_tab_restore',
-              verdict: 'unknown',
-              reason: 'browser_hygiene_check_not_reported',
+              verdict: 'pass',
+              reason: 'active_tab_restored',
             },
             {
               kind: 'run_owned_cleanup',
@@ -1436,7 +1488,7 @@ describe('handleToolCall execution wrapper', () => {
             },
           ],
         },
-        finalVerdict: { verdict: 'unknown', reason: 'postconditions_unknown' },
+        finalVerdict: { verdict: 'task_success', reason: 'postconditions_passed' },
         claimBoundary: {
           deterministicArtifactOnly: true,
           realBrowserProven: false,
@@ -1445,17 +1497,31 @@ describe('handleToolCall execution wrapper', () => {
         },
       });
       expect(artifacts[0].actionLog.entries[0]).toMatchObject({
-        actionKind: 'unknown',
+        actionKind: 'read',
         tabId: 1,
-        verdict: 'unknown',
-        reason: 'close_action_kind_blocked_by_shared_contract',
+        verdict: 'passed',
+        reason: 'read_page_projection_available',
       });
+      expect(artifacts[0].actionLog.entries[1]).toMatchObject({
+        actionKind: 'close',
+        tabId: 1,
+        verdict: 'passed',
+        reason: 'close_tabs_cleanup_succeeded',
+      });
+      expect(artifacts[0].claimBoundary.sourceRouteProven).toBe(false);
       expect(artifacts[0].browserHygiene.notes).toContain(
-        'browserHygieneEvidenceCompleteness=partial',
+        'browserHygieneEvidenceCompleteness=complete',
       );
+      expect(artifacts[0].browserHygiene.notes).toContain('tabWindowBaselineUnchanged=true');
       expect(artifacts[0].browserHygiene.notes).toContain(
-        'browserHygieneMissingChecks=tab_window_baseline,active_tab_restore',
+        'activeTabRestoreReason=active_tab_restored_to_surviving_tab',
       );
+      expect(artifacts[0].browserHygiene.notes).toContain('sourceRouteHonestyVerdict=dom_fallback');
+      expect(artifacts[0].browserHygiene.notes).toContain('sourceRouteSelectedDataSource=dom_json');
+      expect(artifacts[0].browserHygiene.notes).toContain(
+        'sourceRouteHonestyBoundary=runtime_visible_api_cdp_not_proven',
+      );
+      expect(artifacts[0].browserHygiene.notes).toContain('apiCdpReuseProven=false');
       expect(artifacts[0].browserHygiene.notes).toContain('v3RequiredAction=close');
       const serializedArtifact = JSON.stringify(artifacts[0]);
       expect(serializedArtifact).not.toContain('PRIVATE_PAGE_BODY_SHOULD_NOT_APPEAR');
@@ -1739,7 +1805,7 @@ describe('handleToolCall execution wrapper', () => {
         },
       });
       expect(artifacts[0].actionLog.entries[0]).toMatchObject({
-        actionKind: 'unknown',
+        actionKind: 'read',
         tabId: 1,
         verdict: 'failed',
         reason: 'structured_read_incomplete:summary_only_body_missing',
@@ -2210,6 +2276,26 @@ describe('handleToolCall execution wrapper', () => {
         sourceConfidence: 0.9,
         fallbackReason: null,
       });
+      expect(payload.sourceRouteHonesty).toMatchObject({
+        verdict: 'unknown',
+        selectedDataSource: 'cdp_enhanced_api_rows',
+        reason: 'api_cdp_reuse_requires_r5_gate',
+        proofGate: 'r5_required',
+        sourceRouteCandidate: 'cdp_source_with_fact_evidence',
+        apiCdpReuseProven: false,
+      });
+      expect(payload.aiContextEnvelope.sourceRouteHonesty).toMatchObject({
+        verdict: 'unknown',
+        selectedDataSource: 'cdp_enhanced_api_rows',
+        reason: 'api_cdp_reuse_requires_r5_gate',
+        proofGate: 'r5_required',
+        sourceRouteCandidate: 'cdp_source_with_fact_evidence',
+        apiCdpReuseProven: false,
+      });
+      expect(JSON.stringify(payload.sourceRouteHonesty)).not.toContain('cdp_proven');
+      expect(JSON.stringify(payload.aiContextEnvelope.sourceRouteHonesty)).not.toContain(
+        'cdp_proven',
+      );
     });
 
     it('preserves markdown reading surface instead of replacing it with DOM rows', async () => {
@@ -3267,6 +3353,56 @@ describe('handleToolCall execution wrapper', () => {
       expect(returnedTabContext).not.toBeNull();
       expect(returnedTabContext?.isRunOwnedTab(77)).toBe(true);
       expect(returnedTabContext?.getRunOwnedTabIds()).toEqual([77]);
+    });
+
+    it('reuses the returned tab auto context for explicit close_tabs cleanup', async () => {
+      markBridgeReady();
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [{ type: 'text', text: JSON.stringify({ tabId: 77 }) }],
+            isError: false,
+          },
+        } as never)
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  closedTabIds: [77],
+                  invalidTabIds: [],
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+
+      await handleToolCall('chrome_navigate', { url: 'https://example.test/new-tab' });
+      const closeResult = await handleToolCall('chrome_close_tabs', { tabIds: [77] });
+      const closePayload = JSON.parse(String(closeResult.content[0].text));
+
+      expect(closeResult.isError).toBe(false);
+      expect(closePayload.taskContextEnvelope).toMatchObject({
+        taskContextKey: 'mcp:auto:tab:77',
+        taskContextKeySource: 'external_task_key',
+        toolName: 'chrome_close_tabs',
+      });
+      expect(closePayload.runtimePolicyAudit).toMatchObject({
+        verdict: 'allow',
+        reason: 'run_owned_tab',
+        targetTabIds: [77],
+        runOwnedTabIds: [77],
+      });
+      const returnedTabContext = sessionManager.peekExternalTaskContext('mcp:auto:tab:77');
+      expect(returnedTabContext?.getRunOwnedTabIds()).toEqual([]);
     });
 
     it('page interactions invalidate redundancy state for the next read on the same task', async () => {

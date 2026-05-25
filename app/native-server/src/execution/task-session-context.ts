@@ -26,6 +26,7 @@
  */
 
 import {
+  type BrowserSourceTruthChain,
   buildBrowserPageProjectionDelta,
   type BrowserDataSourceDecisionEvidence,
   type BrowserPageProjectionDeltaEvidenceBoundary,
@@ -259,6 +260,14 @@ export interface TaskLifecycleEvent {
   cleanupTargetIds?: number[];
 }
 
+export interface TaskSourceRouteHonestySnapshot {
+  verdict: string;
+  selectedDataSource: string | null;
+  reason: string;
+  fallbackUsed: boolean;
+  hasFactEvidence: boolean;
+}
+
 export interface ShouldAllowReadPageInput {
   /**
    * The layer the caller WANTS. The gate may suggest a different
@@ -369,6 +378,8 @@ export class TaskSessionContext {
   private _readPageAvoidedCount = 0;
   private _tokensSavedEstimateTotal = 0;
   private lastPageProjection: BrowserPageThingProjection | null = null;
+  private lastSourceTruthChain: BrowserSourceTruthChain | null = null;
+  private lastSourceRouteHonesty: TaskSourceRouteHonestySnapshot | null = null;
   private lastPageRuntimeFields: TaskPageRuntimeFields | null = null;
   private pageProjectionDeltaCount = 0;
   private lifecycleEventCount = 0;
@@ -572,6 +583,7 @@ export class TaskSessionContext {
       evidenceBoundary: inferProjectionEvidenceBoundary(projection),
     });
     this.lastPageProjection = cloneBrowserPageThingProjection(projection);
+    this.lastSourceTruthChain = cloneBrowserSourceTruthChain(projection.sourceTruthChain);
     this.lastPageRuntimeFields = runtimeFields ? cloneTaskPageRuntimeFields(runtimeFields) : null;
     this.recordProjectionLifecycleEvents(projection, delta);
     return delta;
@@ -587,6 +599,20 @@ export class TaskSessionContext {
     return this.lastPageRuntimeFields
       ? cloneTaskPageRuntimeFields(this.lastPageRuntimeFields)
       : null;
+  }
+
+  public peekLastSourceTruthChain(): BrowserSourceTruthChain | null {
+    return this.lastSourceTruthChain
+      ? cloneBrowserSourceTruthChain(this.lastSourceTruthChain)
+      : null;
+  }
+
+  public noteSourceRouteHonesty(input: TaskSourceRouteHonestySnapshot | null): void {
+    this.lastSourceRouteHonesty = input ? { ...input } : null;
+  }
+
+  public peekLastSourceRouteHonesty(): TaskSourceRouteHonestySnapshot | null {
+    return this.lastSourceRouteHonesty ? { ...this.lastSourceRouteHonesty } : null;
   }
 
   public buildCachedPageProjectionDelta(): BrowserPageProjectionDelta | null {
@@ -920,6 +946,7 @@ function cloneTaskPageRuntimeFields(input: TaskPageRuntimeFields): TaskPageRunti
 function cloneBrowserPageThingProjection(
   input: BrowserPageThingProjection,
 ): BrowserPageThingProjection {
+  const sourceTruthChain = cloneBrowserSourceTruthChain(input.sourceTruthChain);
   return {
     ...input,
     changedRegions: [...input.changedRegions],
@@ -927,5 +954,17 @@ function cloneBrowserPageThingProjection(
     invalidatedRefs: [...input.invalidatedRefs],
     refreshedRefs: [...input.refreshedRefs],
     regionEvidenceRefs: [...input.regionEvidenceRefs],
+    ...(sourceTruthChain ? { sourceTruthChain } : {}),
+  };
+}
+
+function cloneBrowserSourceTruthChain(
+  input: BrowserSourceTruthChain | null | undefined,
+): BrowserSourceTruthChain | null {
+  if (!input) return null;
+  return {
+    primaryOrigin: input.primaryOrigin,
+    provenanceCreatedAt: input.provenanceCreatedAt,
+    fieldProvenances: input.fieldProvenances.map((entry) => ({ ...entry })),
   };
 }

@@ -276,6 +276,55 @@ describe('web fetcher URL route', () => {
     });
   });
 
+  it('keeps marker coverage when full-visible text preserves section markers but flattens marker punctuation', async () => {
+    vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 42,
+        windowId: 7,
+        active: true,
+        status: 'complete',
+        url: 'https://example.test/docs',
+        title: 'Docs',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 1000,
+      readyState: 'complete',
+    });
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(webFetcherTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      textContent:
+        'Section 1: Opening marker alpha Section 2: Events marker bravo ' +
+        'Section 3: DOM marker charlie Section 4: Source marker delta ' +
+        'Section 5: Scope marker echo Section 6: Checks marker foxtrot ' +
+        'Section 7: Hygiene marker golf Section 8: Closing marker hotel ' +
+        'final coverage check',
+      textMode: 'full-visible',
+      textContentSource: 'fallback_body_textContent',
+    });
+
+    const result = await webFetcherTool.execute({
+      tabId: 42,
+      textContent: true,
+      textMode: 'full-visible',
+    });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(payload.longContentCoverageGate).toMatchObject({
+      verdict: 'complete',
+      metrics: {
+        sectionMarkerCount: 8,
+        markerTokenCount: 9,
+        tailCoveragePresent: true,
+      },
+    });
+    expect(payload.longContentCoverageGate.evidence.markerTokens).toEqual(
+      expect.arrayContaining(['MARKER-ALPHA', 'MARKER-HOTEL', 'FINAL-COVERAGE-CHECK']),
+    );
+  });
+
   it('does not mark long content coverage complete outside full-visible mode', async () => {
     vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
       tab: {

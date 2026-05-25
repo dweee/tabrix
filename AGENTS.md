@@ -13,6 +13,12 @@ All code changes in this repository must follow the `karpathy-guidelines` skill 
 - define a verifiable success condition
 - prefer a real fix over a temporary suppression
 
+## Command Output
+Protect context usage. **Any command with unknown or potentially large output must be byte-capped.**  
+Default pattern: 
+COMMAND 2>&1 | head -c 4000 
+
+
 ## Workspace and Collaboration Guardrails
 
 Before changing any file, confirm the actual repository root and working tree you are about to edit:

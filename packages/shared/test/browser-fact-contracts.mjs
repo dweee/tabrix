@@ -119,6 +119,8 @@ assertClosedVocabulary('ACTION_KINDS', ACTION_KINDS, [
   'fill',
   'submit',
   'navigate',
+  'read',
+  'close',
   'keyboard',
   'unknown',
 ]);
