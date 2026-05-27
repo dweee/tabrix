@@ -661,6 +661,59 @@ describe('browser world inventory', () => {
     expect(JSON.stringify(snapshot.recentEvents)).not.toContain('example.test');
   });
 
+  it('applies pending AI operation evidence when a tab is observed after the tool call', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    markBrowserWorldTabAiOperated(40, 'read_page');
+    listeners.tabCreated[0]?.({
+      id: 40,
+      windowId: 1,
+      url: 'https://late-observed.test/',
+      title: 'Late observed',
+      active: false,
+      status: 'complete',
+      discarded: false,
+      audible: false,
+      mutedInfo: { muted: false },
+      pinned: false,
+    });
+
+    const snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.aiOpenedTabIds).toEqual([]);
+    expect(snapshot.userOrPageOpenedTabIds).toEqual([10, 11, 40]);
+    expect(snapshot.tabs.find((tab) => tab.tabId === 40)).toMatchObject({
+      tabId: 40,
+      openedBy: 'user_or_page',
+      openedByConfidence: 0.7,
+      aiOperationState: 'recently_operated',
+      lastAiOperation: 'read_page',
+      lastAiOperationConfidence: 0.95,
+      lastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
+      canTabrixOperate: true,
+    });
+    expect(snapshot.summary.aiOperationState).toMatchObject({
+      browserActiveTabId: 10,
+      latestAiOperatedTabId: 40,
+      latestAiOperation: 'read_page',
+      latestAiOperationConfidence: 0.95,
+      latestAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
+      latestAiOperatedTabOpenedBy: 'user_or_page',
+      relationToBrowserActiveTab: 'latest_ai_operated_background_tab',
+      canContinueOnLatestAiOperatedTab: false,
+    });
+    expect(snapshot.summary.currentOperationConclusion).toContain(
+      'latest AI-operated tab 40 is not browser-active',
+    );
+    expect(snapshot.recentEvents.at(-1)).toMatchObject({
+      eventKind: 'tab_created',
+      tabId: 40,
+      openedBy: 'user_or_page',
+      status: 'complete',
+    });
+    expect(JSON.stringify(snapshot.recentEvents)).not.toContain('late-observed.test');
+  });
+
   it('summarizes multi-tab cleanup as one dynamic object-state conclusion', async () => {
     initBrowserWorldInventory();
     await getBrowserWorldSnapshot();

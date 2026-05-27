@@ -365,6 +365,10 @@ const MAX_RECENT_BROWSER_WORLD_EVENTS = 50;
 const tabsById = new Map<number, BrowserWorldTabObject>();
 const windowsById = new Map<number, BrowserWorldWindowObject>();
 const pendingAiCreatedTabIds = new Set<number>();
+const pendingAiOperatedTabs = new Map<
+  number,
+  { operation: string; operatedAtMs: number; reason: string }
+>();
 const recentEvents: BrowserWorldEvent[] = [];
 let initialized = false;
 let lastObservedAtMs: number | null = null;
@@ -430,6 +434,8 @@ function normalizeTab(
   const url = tabUrl(tab);
   const operability = isOperableUrl(url);
   const wasAiPending = pendingAiCreatedTabIds.delete(tab.id);
+  const pendingAiOperation = pendingAiOperatedTabs.get(tab.id) ?? null;
+  if (pendingAiOperation) pendingAiOperatedTabs.delete(tab.id);
   const openedBy = wasAiPending ? 'ai' : (previous?.openedBy ?? 'user_or_page');
   const openedByReason = wasAiPending
     ? 'marked_by_tabrix_navigation_before_tabs_onCreated'
@@ -460,12 +466,29 @@ function normalizeTab(
     openedByConfidence: openedBy === 'ai' ? 0.95 : 0.7,
     openedByReason,
     aiOperationState:
-      previous?.aiOperationState ?? (openedBy === 'ai' ? 'recently_operated' : 'idle'),
-    lastAiOperation: previous?.lastAiOperation ?? (openedBy === 'ai' ? 'tab_created' : null),
-    lastAiOperationAtMs: previous?.lastAiOperationAtMs ?? (openedBy === 'ai' ? observedAt : null),
+      pendingAiOperation || previous?.aiOperationState === 'recently_operated'
+        ? 'recently_operated'
+        : openedBy === 'ai'
+          ? 'recently_operated'
+          : 'idle',
+    lastAiOperation:
+      pendingAiOperation?.operation ??
+      previous?.lastAiOperation ??
+      (openedBy === 'ai' ? 'tab_created' : null),
+    lastAiOperationAtMs:
+      pendingAiOperation?.operatedAtMs ??
+      previous?.lastAiOperationAtMs ??
+      (openedBy === 'ai' ? observedAt : null),
     lastAiOperationConfidence:
-      previous?.lastAiOperationConfidence ?? (openedBy === 'ai' ? 0.95 : null),
+      pendingAiOperation !== null
+        ? 0.95
+        : typeof previous?.lastAiOperationConfidence === 'number'
+          ? previous.lastAiOperationConfidence
+          : openedBy === 'ai'
+            ? 0.95
+            : null,
     lastAiOperationReason:
+      pendingAiOperation?.reason ??
       previous?.lastAiOperationReason ??
       (openedBy === 'ai' ? 'marked_by_tabrix_navigation_before_tabs_onCreated' : null),
     createdAtMs: previous?.createdAtMs ?? observedAt,
@@ -875,6 +898,12 @@ export function markBrowserWorldTabAiOperated(
       lastAiOperationReason: `marked_by_tabrix_tool_execution:${operation}`,
       updatedAtMs: nowMs(),
     });
+  } else {
+    pendingAiOperatedTabs.set(tabId, {
+      operation,
+      operatedAtMs: nowMs(),
+      reason: `marked_by_tabrix_tool_execution:${operation}`,
+    });
   }
   pushEvent({
     eventKind: 'ai_tab_marked',
@@ -1033,6 +1062,7 @@ export function resetBrowserWorldInventoryForTests(): void {
   tabsById.clear();
   windowsById.clear();
   pendingAiCreatedTabIds.clear();
+  pendingAiOperatedTabs.clear();
   recentEvents.length = 0;
   initialized = false;
   lastObservedAtMs = null;
