@@ -16,12 +16,23 @@ class WindowTool extends BaseBrowserToolExecutor {
             return {
               tabId: tab.tabId,
               url: tab.url || '',
+              pendingUrl: tab.pendingUrl || '',
               title: tab.title || '',
               active: tab.active || false,
+              status: tab.status,
+              discarded: tab.discarded,
+              audible: tab.audible,
+              muted: tab.muted,
+              pinned: tab.pinned,
+              openerTabId: tab.openerTabId,
               openedBy: tab.openedBy,
+              openedByConfidence: tab.openedByConfidence,
+              openedByReason: tab.openedByReason,
               canTabrixOperate: tab.canTabrixOperate,
               operabilityReason: tab.operabilityReason,
               aiOperationState: tab.aiOperationState,
+              lastAiOperation: tab.lastAiOperation,
+              lastAiOperationAtMs: tab.lastAiOperationAtMs,
             };
           });
         const activeTab = tabs.find((tab) => tab.active === true) || null;
