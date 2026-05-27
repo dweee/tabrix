@@ -801,6 +801,48 @@ describe('browser world inventory', () => {
     );
   });
 
+  it('does not let repeated Chrome refreshes evict real lifecycle events', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    listeners.tabUpdated[0]?.(
+      10,
+      { status: 'complete' },
+      {
+        id: 10,
+        windowId: 1,
+        url: 'https://example.test/a',
+        title: 'A refreshed',
+        active: true,
+        status: 'complete',
+      },
+    );
+
+    const changed = await getBrowserWorldSnapshot();
+    expect(
+      changed.recentEvents.filter((event) => event.eventKind === 'inventory_seeded'),
+    ).toHaveLength(1);
+    expect(changed.recentEvents.at(-1)).toMatchObject({
+      eventKind: 'tab_updated',
+      tabId: 10,
+    });
+
+    for (let index = 0; index < 60; index += 1) {
+      await refreshBrowserWorldSnapshot();
+    }
+
+    const refreshed = await getBrowserWorldSnapshot();
+    expect(
+      refreshed.recentEvents.filter((event) => event.eventKind === 'inventory_seeded'),
+    ).toHaveLength(1);
+    expect(refreshed.recentEvents.some((event) => event.eventKind === 'tab_updated')).toBe(true);
+    expect(refreshed.summary.tabLifecycleState).toMatchObject({
+      latestEventKind: 'tab_updated',
+      latestEventTabId: 10,
+      recentUpdatedCount: 1,
+    });
+  });
+
   it('updates BrowserWindowObject operability when window state changes', async () => {
     initBrowserWorldInventory();
     await getBrowserWorldSnapshot();

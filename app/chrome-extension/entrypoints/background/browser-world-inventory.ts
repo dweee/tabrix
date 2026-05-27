@@ -358,6 +358,7 @@ let initialized = false;
 let lastObservedAtMs: number | null = null;
 let attached = false;
 let detachCallbacks: Array<() => void> = [];
+let initialInventorySeedEventRecorded = false;
 
 function nowMs(): number {
   return Date.now();
@@ -544,7 +545,12 @@ async function seedFromChrome(): Promise<void> {
     }
   }
   initialized = true;
-  pushEvent({ eventKind: 'inventory_seeded', tabId: null, windowId: null });
+  if (!initialInventorySeedEventRecorded) {
+    initialInventorySeedEventRecorded = true;
+    pushEvent({ eventKind: 'inventory_seeded', tabId: null, windowId: null });
+    return;
+  }
+  recordObserved();
 }
 
 function bind(hook: EventHook | undefined, listener: any): void {
@@ -895,4 +901,5 @@ export function resetBrowserWorldInventoryForTests(): void {
   initialized = false;
   lastObservedAtMs = null;
   attached = false;
+  initialInventorySeedEventRecorded = false;
 }
