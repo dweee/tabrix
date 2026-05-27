@@ -2122,6 +2122,83 @@ describe('read_page object lifecycle', () => {
     );
   });
 
+  it('treats QR visual fingerprint changes as QR refresh evidence', () => {
+    const before = buildReadPageObjectLifecycle([
+      region({
+        regionId: 'region_modal',
+        regionType: 'modal',
+        state: 'auth_prompt_candidate',
+        confidence: 0.8,
+      }),
+      region({
+        regionId: 'region_qr',
+        regionType: 'qr_code',
+        state: 'waiting_scan_candidate',
+        targetability: 'locator_chain',
+        objects: [
+          {
+            objectId: 'qr_visual_1',
+            label: 'QR visual',
+            objectType: 'qr_visual:visual_11111111',
+            actionTypes: ['capture_element'],
+            targetability: 'locator_chain',
+            confidence: 0.8,
+            reason: 'QR candidate',
+          },
+        ],
+      }),
+    ]);
+    const after = buildReadPageObjectLifecycle(
+      [
+        region({
+          regionId: 'region_modal',
+          regionType: 'modal',
+          state: 'auth_prompt_candidate',
+          confidence: 0.8,
+        }),
+        region({
+          regionId: 'region_qr',
+          regionType: 'qr_code',
+          state: 'waiting_scan_candidate',
+          targetability: 'locator_chain',
+          objects: [
+            {
+              objectId: 'qr_visual_1',
+              label: 'QR visual',
+              objectType: 'qr_visual:visual_22222222',
+              actionTypes: ['capture_element'],
+              targetability: 'locator_chain',
+              confidence: 0.8,
+              reason: 'QR candidate',
+            },
+          ],
+        }),
+      ],
+      { previous: before },
+    );
+
+    const view = buildReadPageBrowserPageObjectView({ objectLifecycle: after });
+
+    expect(after.changes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          objectFamily: 'qr_code',
+          changeKind: 'changed',
+        }),
+      ]),
+    );
+    expect(view.semanticEvents.map((event) => event.eventType)).toEqual(
+      expect.arrayContaining(['qr_waiting', 'qr_refreshed']),
+    );
+    expect(view.dynamicAttributeSummary?.primaryConclusion).toContain(
+      'QR object changed candidate',
+    );
+    expect(view.dynamicAttributeSummary?.primaryConclusion).toContain('not login success');
+    expect(view.semanticEvents.map((event) => event.eventType)).not.toContain(
+      'auth_succeeded_candidate',
+    );
+  });
+
   it('reports expired QR state as refresh-needed instead of plain waiting', () => {
     const lifecycle = buildReadPageObjectLifecycle([
       region({

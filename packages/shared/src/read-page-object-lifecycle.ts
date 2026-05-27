@@ -157,6 +157,7 @@ function signatureForLifecycleItem(item: ReadPageObjectLifecycleItem): string {
   return JSON.stringify({
     family: item.objectFamily,
     regionType: item.regionType,
+    objectType: item.objectType,
     state: item.state,
     targetability: item.targetability,
     actionTypes: [...item.actionTypes].sort(),

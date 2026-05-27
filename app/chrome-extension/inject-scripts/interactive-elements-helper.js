@@ -293,6 +293,8 @@
     };
     const valueState = getValueState(el);
     if (valueState) info.valueState = valueState;
+    const visualSignature = getVisualSignature(el);
+    if (visualSignature) info.visualSignature = visualSignature;
     if (includeCoordinates) {
       const rect = el.getBoundingClientRect();
       info.coordinates = {
@@ -315,6 +317,31 @@
       info.href = el.getAttribute('href') || el.href;
     }
     return info;
+  }
+
+  function getVisualSignature(el) {
+    const tagName = el && el.tagName ? String(el.tagName).toLowerCase() : '';
+    if (!/^(img|canvas|svg)$/.test(tagName)) return '';
+    const rawParts = [
+      tagName,
+      el.getAttribute && el.getAttribute('src'),
+      typeof el.currentSrc === 'string' ? el.currentSrc : '',
+      el.getAttribute && el.getAttribute('data-src'),
+      el.getAttribute && el.getAttribute('data-url'),
+      el.getAttribute && el.getAttribute('aria-label'),
+      el.getAttribute && el.getAttribute('alt'),
+      el.getAttribute && el.getAttribute('title'),
+      typeof el.className === 'string' ? el.className : '',
+    ]
+      .filter(Boolean)
+      .join('|');
+    if (!rawParts) return '';
+    let hash = 2166136261;
+    for (let i = 0; i < rawParts.length; i += 1) {
+      hash ^= rawParts.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `visual_${(hash >>> 0).toString(16).padStart(8, '0')}`;
   }
 
   function countInteractiveDescendants(el, limit = 12) {

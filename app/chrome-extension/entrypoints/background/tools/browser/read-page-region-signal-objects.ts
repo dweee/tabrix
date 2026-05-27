@@ -17,6 +17,7 @@ export interface ReadPageVisualElementHint {
   selector: string;
   role?: string;
   rect?: { x: number; y: number; width: number; height: number } | null;
+  visualSignature?: string;
   reason: string;
   confidence: number;
 }
@@ -36,7 +37,7 @@ export function buildVisualElementRegionObjects(
       object: {
         objectId: item.id,
         label: 'QR visual element candidate',
-        objectType: 'qr_visual',
+        objectType: item.visualSignature ? `qr_visual:${item.visualSignature}` : 'qr_visual',
         role: item.role || 'img',
         actionTypes: ['capture_element'],
         targetability: 'locator_chain',

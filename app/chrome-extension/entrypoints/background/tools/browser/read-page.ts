@@ -470,6 +470,11 @@ function scoreQrVisualElementHint(
     selector,
     role,
     rect,
+    visualSignature:
+      typeof element?.visualSignature === 'string' &&
+      /^visual_[a-f0-9]{8}$/i.test(element.visualSignature)
+        ? element.visualSignature.toLowerCase()
+        : undefined,
     reason: 'qr_visual_element_signal',
     confidence: Math.min(0.92, Math.max(0.54, score / 180)),
     score,
