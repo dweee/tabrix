@@ -5,6 +5,7 @@ import {
   assertPublicHttpUrl,
   buildPublicSmokeUrl,
   buildRedactedBrowserWorldSummary,
+  buildRedactedReadPageAlignmentSummary,
   extractJsonObject,
   extractNavigateTabId,
   parseArgs,
@@ -150,8 +151,96 @@ test('buildRedactedBrowserWorldSummary counts window visibility states without U
   });
 });
 
+test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fields', () => {
+  const summary = buildRedactedReadPageAlignmentSummary(
+    {
+      ownershipRuntime: {
+        currentTabId: 42,
+        currentWindowId: 7,
+        currentWindowState: 'normal',
+        isCurrentTabActive: true,
+        isCurrentWindowFocused: true,
+        browserActiveTabId: 42,
+        browserActiveTabIdKnown: true,
+        isReadTargetBrowserActiveTab: true,
+        currentTabUrl: 'https://private.example.test/dashboard',
+        currentTabTitle: 'Private Dashboard',
+        currentTabStatus: 'complete',
+        currentTabOpenedBy: 'ai',
+        currentTabOpenedByConfidence: 0.9,
+        currentTabAiOperationState: 'recently_operated',
+        currentTabCanTabrixOperate: true,
+        currentTabRuntimeStateSource: 'browser_world_inventory',
+        currentOwnerType: 'run_owned',
+      },
+      browserPageObjectCompact: {
+        source: 'read_page_browser_page_object_compact',
+        status: 'single_snapshot',
+        watchStatus: 'snapshot_only',
+        primaryConclusion: 'Private Dashboard contains confidential user text',
+        changedGroups: ['tab_state'],
+        transitionCount: 0,
+        facts: {
+          window: {
+            currentWindowId: 7,
+            currentWindowState: 'normal',
+            isCurrentWindowFocused: true,
+          },
+          tab: {
+            readTargetTabId: 42,
+            currentActiveTabId: 42,
+            browserActiveTabId: 42,
+            currentTabUrl: 'https://private.example.test/dashboard',
+            currentTabTitle: 'Private Dashboard',
+            openedBy: 'ai',
+            isRunOwnedByTask: false,
+            runtimeStateSource: 'browser_world_inventory',
+          },
+          page: {
+            pageText: 'confidential visible page text',
+          },
+        },
+        operationSummary: 'Click the private billing button',
+        evidenceSummary: 'Private Dashboard title observed',
+        claimBoundary: 'raw claim',
+      },
+      pageContent: 'confidential visible page text',
+      markdown: 'Private Dashboard markdown',
+    },
+    42,
+  );
+
+  const serialized = JSON.stringify(summary);
+  assert.equal(serialized.includes('private.example.test'), false);
+  assert.equal(serialized.includes('Private Dashboard'), false);
+  assert.equal(serialized.includes('confidential visible page text'), false);
+  assert.equal(serialized.includes('private billing'), false);
+  assert.deepEqual(summary.alignment, {
+    ownershipRuntimePresent: true,
+    browserPageObjectCompactPresent: true,
+    browserPageObjectCompactSource: 'expected',
+    browserWorldRuntimeSource: true,
+    targetTabMatchesReadPage: true,
+    readTargetIsBrowserActive: true,
+    tabOwnerIsAi: true,
+    tabOperable: true,
+  });
+  assert.deepEqual(summary.compact.safeTabFacts, {
+    readTargetTabId: 42,
+    currentActiveTabId: 42,
+    browserActiveTabId: 42,
+    openedBy: 'ai',
+    isRunOwnedByTask: false,
+    runtimeStateSource: 'browser_world_inventory',
+  });
+});
+
 test('parseArgs supports observer-only window-state scenario', () => {
   assert.equal(parseArgs(['--scenario', 'window-state']).scenario, 'window-state');
+});
+
+test('parseArgs supports read-page scenario', () => {
+  assert.equal(parseArgs(['--scenario', 'read-page']).scenario, 'read-page');
 });
 
 test('parseArgs supports safe smoke switches', () => {

@@ -29,8 +29,8 @@ prints only browser-world counts, booleans, compact limits, and claim
 boundaries. It intentionally does not print tab URLs, titles, account state,
 screenshots, cookies, network bodies, or page text, so owner-lane smoke checks
 do not leak the maintainer's current browser session. It supports single-tab,
-lifecycle, multi-public-target matrix, and observer-only window-state smoke
-scenarios.
+lifecycle, multi-public-target matrix, observer-only window-state, and
+read_page / BrowserPageObject alignment smoke scenarios.
 
 ## Private Evidence Bridges
 

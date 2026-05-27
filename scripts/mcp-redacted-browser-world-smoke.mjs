@@ -217,6 +217,88 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
   };
 }
 
+export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = null) {
+  const ownershipRuntime = payload?.ownershipRuntime;
+  const compact = payload?.browserPageObjectCompact;
+  const fullObject = payload?.browserPageObject;
+  const compactFacts = compact?.facts && typeof compact.facts === 'object' ? compact.facts : {};
+  const compactWindowFacts =
+    compactFacts.window && typeof compactFacts.window === 'object' ? compactFacts.window : {};
+  const compactTabFacts =
+    compactFacts.tab && typeof compactFacts.tab === 'object' ? compactFacts.tab : {};
+
+  return {
+    callSucceeded: true,
+    hasOwnershipRuntime: Boolean(ownershipRuntime),
+    hasBrowserPageObjectCompact: Boolean(compact),
+    hasBrowserPageObject: Boolean(fullObject),
+    runtime: {
+      currentTabIdPresent: Number.isInteger(ownershipRuntime?.currentTabId),
+      currentTabIdMatchesTarget:
+        Number.isInteger(targetTabId) && Number.isInteger(ownershipRuntime?.currentTabId)
+          ? ownershipRuntime.currentTabId === targetTabId
+          : null,
+      currentWindowIdPresent: Number.isInteger(ownershipRuntime?.currentWindowId),
+      currentWindowState: ownershipRuntime?.currentWindowState ?? null,
+      isCurrentTabActive: ownershipRuntime?.isCurrentTabActive ?? null,
+      isCurrentWindowFocused: ownershipRuntime?.isCurrentWindowFocused ?? null,
+      browserActiveTabIdKnown: ownershipRuntime?.browserActiveTabIdKnown ?? null,
+      isReadTargetBrowserActiveTab: ownershipRuntime?.isReadTargetBrowserActiveTab ?? null,
+      currentTabOpenedBy: ownershipRuntime?.currentTabOpenedBy ?? null,
+      currentTabOpenedByConfidence: ownershipRuntime?.currentTabOpenedByConfidence ?? null,
+      currentTabAiOperationState: ownershipRuntime?.currentTabAiOperationState ?? null,
+      currentTabCanTabrixOperate: ownershipRuntime?.currentTabCanTabrixOperate ?? null,
+      currentTabStatus: ownershipRuntime?.currentTabStatus ?? null,
+      currentTabRuntimeStateSource: ownershipRuntime?.currentTabRuntimeStateSource ?? null,
+      currentOwnerType: ownershipRuntime?.currentOwnerType ?? null,
+    },
+    compact: {
+      source: compact?.source ?? null,
+      status: compact?.status ?? null,
+      watchStatus: compact?.watchStatus ?? null,
+      changedGroupCount: Array.isArray(compact?.changedGroups)
+        ? compact.changedGroups.length
+        : null,
+      transitionCount: Number.isInteger(compact?.transitionCount) ? compact.transitionCount : null,
+      hasWindowFacts: Boolean(compactFacts.window),
+      hasTabFacts: Boolean(compactFacts.tab),
+      hasPageFacts: Boolean(compactFacts.page),
+      safeWindowFacts: {
+        currentWindowId: compactWindowFacts.currentWindowId ?? null,
+        currentWindowState: compactWindowFacts.currentWindowState ?? null,
+        isCurrentWindowFocused: compactWindowFacts.isCurrentWindowFocused ?? null,
+      },
+      safeTabFacts: {
+        readTargetTabId: compactTabFacts.readTargetTabId ?? compactTabFacts.currentTabId ?? null,
+        currentActiveTabId: compactTabFacts.currentActiveTabId ?? null,
+        browserActiveTabId: compactTabFacts.browserActiveTabId ?? null,
+        openedBy: compactTabFacts.openedBy ?? null,
+        isRunOwnedByTask: compactTabFacts.isRunOwnedByTask ?? null,
+        runtimeStateSource: compactTabFacts.runtimeStateSource ?? null,
+      },
+    },
+    alignment: {
+      ownershipRuntimePresent: Boolean(ownershipRuntime),
+      browserPageObjectCompactPresent: Boolean(compact),
+      browserPageObjectCompactSource:
+        compact?.source === 'read_page_browser_page_object_compact'
+          ? 'expected'
+          : 'missing_or_other',
+      browserWorldRuntimeSource:
+        ownershipRuntime?.currentTabRuntimeStateSource === 'browser_world_inventory',
+      targetTabMatchesReadPage:
+        Number.isInteger(targetTabId) && Number.isInteger(ownershipRuntime?.currentTabId)
+          ? ownershipRuntime.currentTabId === targetTabId
+          : null,
+      readTargetIsBrowserActive: ownershipRuntime?.isReadTargetBrowserActiveTab ?? null,
+      tabOwnerIsAi: ownershipRuntime?.currentTabOpenedBy === 'ai',
+      tabOperable: ownershipRuntime?.currentTabCanTabrixOperate ?? null,
+    },
+    claimBoundary:
+      'Redacted read_page alignment summary only. It proves candidate BrowserPageObject/runtime alignment for this public read snapshot, not page understanding correctness, login/logout completion, API/CDP reuse, release readiness, or product delivery grade.',
+  };
+}
+
 function callCliJson(cliPath, args, timeoutMs) {
   const output = execFileSync(process.execPath, [cliPath, ...args], {
     encoding: 'utf8',
@@ -434,11 +516,53 @@ function runWindowStateSmoke(cliPath, args) {
   };
 }
 
+function runReadPageSmoke(cliPath, smokeUrl, args) {
+  if (args.skipOpen) {
+    throw new Error('--scenario read-page cannot be combined with --skip-open.');
+  }
+
+  const navigatePayload = callMcpTool(
+    cliPath,
+    'chrome_navigate',
+    { url: buildPublicSmokeUrl(smokeUrl, 'read_page', String(Date.now())) },
+    args.timeoutMs,
+  );
+  const openedTabId = extractNavigateTabId(navigatePayload);
+  const readPagePayload = callMcpTool(
+    cliPath,
+    'chrome_read_page',
+    Number.isInteger(openedTabId) ? { tabId: openedTabId, depth: 1 } : { depth: 1 },
+    args.timeoutMs,
+  );
+  const redactedReadPage = buildRedactedReadPageAlignmentSummary(readPagePayload, openedTabId);
+  const closeResult =
+    Number.isInteger(openedTabId) && !args.keepOpen
+      ? closeRunTabs(cliPath, [openedTabId], args.timeoutMs)
+      : { attempted: false, succeeded: null, requestedCount: 0, closedCount: 0 };
+
+  return {
+    scenario: 'read-page',
+    openedPublicTestTab: Number.isInteger(openedTabId),
+    closeAttempted: closeResult.attempted,
+    closeSucceeded: closeResult.succeeded,
+    redactedReadPage,
+    alignmentPassed:
+      redactedReadPage.alignment.ownershipRuntimePresent === true &&
+      redactedReadPage.alignment.browserPageObjectCompactPresent === true &&
+      redactedReadPage.alignment.browserPageObjectCompactSource === 'expected' &&
+      redactedReadPage.alignment.browserWorldRuntimeSource === true &&
+      redactedReadPage.alignment.targetTabMatchesReadPage === true &&
+      redactedReadPage.alignment.readTargetIsBrowserActive === true &&
+      redactedReadPage.alignment.tabOwnerIsAi === true &&
+      redactedReadPage.alignment.tabOperable === true,
+  };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(
-      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|matrix|window-state] [--skip-open] [--keep-open]\n`,
+      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|matrix|window-state|read-page] [--skip-open] [--keep-open]\n`,
     );
     return;
   }
@@ -454,9 +578,11 @@ async function main() {
         ? runMatrixSmoke(cliPath, smokeUrls, args)
         : args.scenario === 'window-state'
           ? runWindowStateSmoke(cliPath, args)
-          : args.scenario === 'lifecycle'
-            ? runLifecycleSmoke(cliPath, smokeUrl, args)
-            : runSingleSmoke(cliPath, smokeUrl, args);
+          : args.scenario === 'read-page'
+            ? runReadPageSmoke(cliPath, smokeUrl, args)
+            : args.scenario === 'lifecycle'
+              ? runLifecycleSmoke(cliPath, smokeUrl, args)
+              : runSingleSmoke(cliPath, smokeUrl, args);
 
     process.stdout.write(
       `${JSON.stringify(
