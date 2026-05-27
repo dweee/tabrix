@@ -44,12 +44,19 @@ export async function runStdioSmoke(options: StdioSmokeOptions = {}): Promise<nu
 
   let client: Client | null = null;
   let transport: StdioClientTransport | null = null;
+  let childStderrBytes = 0;
+  let childStderrChunkCount = 0;
 
   try {
     transport = new StdioClientTransport({
       command: process.execPath,
       args: [stdioServerPath],
       env: process.env as Record<string, string>,
+      stderr: 'pipe',
+    });
+    transport.stderr?.on('data', (chunk: Buffer | string) => {
+      childStderrBytes += Buffer.byteLength(chunk);
+      childStderrChunkCount += 1;
     });
 
     client = new Client({ name: 'stdio-smoke', version: '1.0.0' }, { capabilities: {} });
@@ -91,6 +98,13 @@ export async function runStdioSmoke(options: StdioSmokeOptions = {}): Promise<nu
     await client.close();
     client = null;
     record('close', true, 'Stdio server shut down cleanly');
+    record(
+      'stderr-isolated',
+      true,
+      childStderrChunkCount > 0
+        ? `Child stderr captured separately (${childStderrBytes} bytes, ${childStderrChunkCount} chunks)`
+        : 'Child stderr stayed quiet',
+    );
   } catch (error) {
     record('fatal', false, stringifyError(error));
   } finally {
