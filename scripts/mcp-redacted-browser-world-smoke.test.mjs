@@ -58,6 +58,13 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
         },
       },
       browserWorld: {
+        windows: [
+          {
+            visibilityState: 'visible',
+            focused: true,
+            canTabrixOperate: true,
+          },
+        ],
         tabs: [
           {
             tabId: 20,
@@ -83,6 +90,14 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
     openedBy: 'ai',
     canTabrixOperate: true,
     status: 'complete',
+  });
+  assert.deepEqual(summary.windows, {
+    total: 1,
+    visible: 1,
+    minimized: 0,
+    unknown: 0,
+    focused: 1,
+    operable: 1,
   });
 });
 
@@ -111,6 +126,32 @@ test('buildRedactedBrowserWorldSummary checks active tab across all compact wind
   assert.equal(summary.activeTabIncludedInCompactTabs, true);
   assert.equal(summary.omittedTabCount, 4);
   assert.equal(JSON.stringify(summary).includes('private.example.test'), false);
+});
+
+test('buildRedactedBrowserWorldSummary counts window visibility states without URL fields', () => {
+  const summary = buildRedactedBrowserWorldSummary({
+    browserWorld: {
+      windows: [
+        { visibilityState: 'visible', focused: true, canTabrixOperate: true },
+        { visibilityState: 'minimized', focused: false, canTabrixOperate: false },
+        { visibilityState: 'unknown', focused: false, canTabrixOperate: null },
+      ],
+      tabs: [],
+    },
+  });
+
+  assert.deepEqual(summary.windows, {
+    total: 3,
+    visible: 1,
+    minimized: 1,
+    unknown: 1,
+    focused: 1,
+    operable: 1,
+  });
+});
+
+test('parseArgs supports observer-only window-state scenario', () => {
+  assert.equal(parseArgs(['--scenario', 'window-state']).scenario, 'window-state');
 });
 
 test('parseArgs supports safe smoke switches', () => {

@@ -159,6 +159,11 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
   );
   const activeTabId = payload?.compactSummary?.activeObject?.tabId ?? null;
   const allTabs = Array.isArray(payload?.browserWorld?.tabs) ? payload.browserWorld.tabs : [];
+  const allWindows = Array.isArray(payload?.browserWorld?.windows)
+    ? payload.browserWorld.windows
+    : Array.isArray(payload?.windows)
+      ? payload.windows
+      : [];
   const targetTab = Number.isInteger(targetTabId)
     ? allTabs.find((tab) => tab?.tabId === targetTabId)
     : null;
@@ -187,6 +192,17 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
       aiOpenedTabs: payload?.summary?.counts?.aiOpenedTabs ?? null,
       userOrPageOpenedTabs: payload?.summary?.counts?.userOrPageOpenedTabs ?? null,
       operableTabs: payload?.summary?.counts?.operableTabs ?? null,
+    },
+    windows: {
+      total: allWindows.length,
+      visible: allWindows.filter((window) => window?.visibilityState === 'visible').length,
+      minimized: allWindows.filter((window) => window?.visibilityState === 'minimized').length,
+      unknown: allWindows.filter(
+        (window) => !['visible', 'minimized'].includes(String(window?.visibilityState || '')),
+      ).length,
+      focused: allWindows.filter((window) => window?.focused === true || window?.isFocused === true)
+        .length,
+      operable: allWindows.filter((window) => window?.canTabrixOperate === true).length,
     },
     targetTab: Number.isInteger(targetTabId)
       ? {
@@ -401,11 +417,28 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
   };
 }
 
+function runWindowStateSmoke(cliPath, args) {
+  if (!args.skipOpen) {
+    // This scenario is observer-only by design; it must not create or mutate windows.
+  }
+  const browserWorldPayload = callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs);
+  const redacted = buildRedactedBrowserWorldSummary(browserWorldPayload, null);
+  return {
+    scenario: 'window-state',
+    observerOnly: true,
+    redacted,
+    verdict:
+      redacted.windows.total > 0 && redacted.hasBrowserWorldDetail
+        ? 'WINDOW_STATE_OBSERVED'
+        : 'WINDOW_STATE_NOT_PROVEN',
+  };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(
-      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|matrix] [--skip-open] [--keep-open]\n`,
+      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|matrix|window-state] [--skip-open] [--keep-open]\n`,
     );
     return;
   }
@@ -419,9 +452,11 @@ async function main() {
     const smokeResult =
       args.scenario === 'matrix'
         ? runMatrixSmoke(cliPath, smokeUrls, args)
-        : args.scenario === 'lifecycle'
-          ? runLifecycleSmoke(cliPath, smokeUrl, args)
-          : runSingleSmoke(cliPath, smokeUrl, args);
+        : args.scenario === 'window-state'
+          ? runWindowStateSmoke(cliPath, args)
+          : args.scenario === 'lifecycle'
+            ? runLifecycleSmoke(cliPath, smokeUrl, args)
+            : runSingleSmoke(cliPath, smokeUrl, args);
 
     process.stdout.write(
       `${JSON.stringify(
