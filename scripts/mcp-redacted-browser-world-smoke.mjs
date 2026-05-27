@@ -1449,6 +1449,16 @@ export function buildWindowStateMutationProof(redactedWindowState) {
   };
 }
 
+function hasCurrentTabAttributeGroups(redacted) {
+  return (
+    redacted?.currentTabAttributeGroups?.identity?.tabIdPresent === true &&
+    typeof redacted.currentTabAttributeGroups?.runtime?.status === 'string' &&
+    typeof redacted.currentTabAttributeGroups?.ownership?.openedBy === 'string' &&
+    typeof redacted.currentTabAttributeGroups?.operability?.reason === 'string' &&
+    redacted?.tabAttributeGroupClaimBoundaryPresent === true
+  );
+}
+
 export function buildWindowStateDriftSummary(samples) {
   const observedSamples = samples.filter((sample) => sample?.verdict === 'WINDOW_STATE_OBSERVED');
   const compactBoundedSamples = samples.filter(
@@ -1459,6 +1469,9 @@ export function buildWindowStateDriftSummary(samples) {
   );
   const refreshHealthSamples = samples.filter(
     (sample) => typeof sample?.redacted?.refreshHealth?.lastRefreshDecision === 'string',
+  );
+  const currentTabAttributeGroupSamples = samples.filter((sample) =>
+    hasCurrentTabAttributeGroups(sample?.redacted),
   );
   const windowCounts = samples.map((sample) => sample?.redacted?.windows?.total);
   const tabCounts = samples.map((sample) => sample?.redacted?.tabCount);
@@ -1483,6 +1496,8 @@ export function buildWindowStateDriftSummary(samples) {
       samples.length > 0 && retentionBoundedSamples.length === samples.length,
     allSamplesRefreshHealthPresent:
       samples.length > 0 && refreshHealthSamples.length === samples.length,
+    allSamplesCurrentTabAttributeGroupsPresent:
+      samples.length > 0 && currentTabAttributeGroupSamples.length === samples.length,
     windowCountStable,
     tabCountStable,
     focusedWindowCountStable,
@@ -1513,7 +1528,8 @@ function runWindowStateSmoke(cliPath, args) {
       redacted.windows.total > 0 &&
       redacted.hasBrowserWorldDetail &&
       redacted.objectInventoryPresent === true &&
-      redacted.browserObjectEdgeSummaryPresent === true
+      redacted.browserObjectEdgeSummaryPresent === true &&
+      hasCurrentTabAttributeGroups(redacted)
         ? 'WINDOW_STATE_OBSERVED'
         : 'WINDOW_STATE_NOT_PROVEN',
   };
@@ -1540,6 +1556,8 @@ function runWindowStateDriftSmoke(cliPath, args) {
       compactSummaryBounded: sample.redacted.compactSummaryBounded,
       retentionWithinLimit: sample.redacted.retentionWithinLimit,
       refreshHealth: sample.redacted.refreshHealth,
+      currentTabAttributeGroups: sample.redacted.currentTabAttributeGroups,
+      tabAttributeGroupClaimBoundaryPresent: sample.redacted.tabAttributeGroupClaimBoundaryPresent,
       objectInventory: sample.redacted.objectInventory,
       windowStateMatrix: sample.redacted.windowStateMatrix,
       windowOperationState: sample.redacted.windowOperationState,
@@ -1549,7 +1567,8 @@ function runWindowStateDriftSmoke(cliPath, args) {
       driftSummary.allSamplesObserved === true &&
       driftSummary.allSamplesCompactBounded === true &&
       driftSummary.allSamplesRetentionBounded === true &&
-      driftSummary.allSamplesRefreshHealthPresent === true
+      driftSummary.allSamplesRefreshHealthPresent === true &&
+      driftSummary.allSamplesCurrentTabAttributeGroupsPresent === true
         ? 'WINDOW_STATE_REPEATED_OBSERVER_PASS'
         : 'WINDOW_STATE_REPEATED_OBSERVER_NOT_PROVEN',
   };
@@ -1625,9 +1644,16 @@ export function isSmokeResultPassing(result) {
       result.postCleanup?.browserObjectEdgeSummaryPresent === true
     );
   }
-  if (result.scenario === 'window-state') return result.verdict === 'WINDOW_STATE_OBSERVED';
+  if (result.scenario === 'window-state') {
+    return (
+      result.verdict === 'WINDOW_STATE_OBSERVED' && hasCurrentTabAttributeGroups(result.redacted)
+    );
+  }
   if (result.scenario === 'window-state-drift') {
-    return result.verdict === 'WINDOW_STATE_REPEATED_OBSERVER_PASS';
+    return (
+      result.verdict === 'WINDOW_STATE_REPEATED_OBSERVER_PASS' &&
+      result.driftSummary?.allSamplesCurrentTabAttributeGroupsPresent === true
+    );
   }
   if (result.scenario === 'single') {
     return (

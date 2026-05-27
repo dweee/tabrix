@@ -21,6 +21,15 @@ import {
   stringifyRedactedSmokeOutput,
 } from './mcp-redacted-browser-world-smoke.mjs';
 
+function redactedCurrentTabAttributeGroups() {
+  return {
+    identity: { tabIdPresent: true },
+    runtime: { status: 'complete' },
+    ownership: { openedBy: 'user_or_page' },
+    operability: { reason: 'regular_web_page' },
+  };
+}
+
 test('extractJsonObject parses the bounded CLI Result payload', () => {
   const parsed = extractJsonObject('tabrix mcp call get_windows_and_tabs\n\nResult\n{"ok":true}\n');
   assert.deepEqual(parsed, { ok: true });
@@ -764,6 +773,8 @@ test('buildWindowStateDriftSummary reports stable repeated observer samples', ()
         refreshHealth: {
           lastRefreshDecision: 'full_chrome_resync',
         },
+        currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
+        tabAttributeGroupClaimBoundaryPresent: true,
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
       },
@@ -777,6 +788,8 @@ test('buildWindowStateDriftSummary reports stable repeated observer samples', ()
         refreshHealth: {
           lastRefreshDecision: 'skipped_recent_resync',
         },
+        currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
+        tabAttributeGroupClaimBoundaryPresent: true,
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
       },
@@ -789,6 +802,7 @@ test('buildWindowStateDriftSummary reports stable repeated observer samples', ()
     allSamplesCompactBounded: true,
     allSamplesRetentionBounded: true,
     allSamplesRefreshHealthPresent: true,
+    allSamplesCurrentTabAttributeGroupsPresent: true,
     windowCountStable: true,
     tabCountStable: true,
     focusedWindowCountStable: true,
@@ -810,6 +824,8 @@ test('buildWindowStateDriftSummary reports drift without failing observation', (
         refreshHealth: {
           lastRefreshDecision: 'full_chrome_resync',
         },
+        currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
+        tabAttributeGroupClaimBoundaryPresent: true,
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
       },
@@ -823,6 +839,8 @@ test('buildWindowStateDriftSummary reports drift without failing observation', (
         refreshHealth: {
           lastRefreshDecision: 'skipped_recent_resync',
         },
+        currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
+        tabAttributeGroupClaimBoundaryPresent: true,
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
       },
@@ -833,6 +851,7 @@ test('buildWindowStateDriftSummary reports drift without failing observation', (
   assert.equal(summary.allSamplesCompactBounded, true);
   assert.equal(summary.allSamplesRetentionBounded, true);
   assert.equal(summary.allSamplesRefreshHealthPresent, true);
+  assert.equal(summary.allSamplesCurrentTabAttributeGroupsPresent, true);
   assert.equal(summary.windowCountStable, true);
   assert.equal(summary.tabCountStable, false);
   assert.equal(summary.driftObserved, true);
@@ -849,6 +868,8 @@ test('buildWindowStateDriftSummary requires refresh health for every sample', ()
         refreshHealth: {
           lastRefreshDecision: 'full_chrome_resync',
         },
+        currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
+        tabAttributeGroupClaimBoundaryPresent: true,
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
       },
@@ -859,6 +880,8 @@ test('buildWindowStateDriftSummary requires refresh health for every sample', ()
         tabCount: 4,
         compactSummaryBounded: true,
         retentionWithinLimit: true,
+        currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
+        tabAttributeGroupClaimBoundaryPresent: true,
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
       },
@@ -1432,13 +1455,44 @@ test('isSmokeResultPassing keeps observer verdicts strict and explicit', () => {
     isSmokeResultPassing({
       scenario: 'window-state',
       verdict: 'WINDOW_STATE_OBSERVED',
+      redacted: {
+        currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
+        tabAttributeGroupClaimBoundaryPresent: true,
+      },
     }),
     true,
   );
   assert.equal(
     isSmokeResultPassing({
       scenario: 'window-state',
+      verdict: 'WINDOW_STATE_OBSERVED',
+    }),
+    false,
+  );
+  assert.equal(
+    isSmokeResultPassing({
+      scenario: 'window-state',
       verdict: 'WINDOW_STATE_NOT_PROVEN',
+    }),
+    false,
+  );
+  assert.equal(
+    isSmokeResultPassing({
+      scenario: 'window-state-drift',
+      driftSummary: {
+        allSamplesCurrentTabAttributeGroupsPresent: true,
+      },
+      verdict: 'WINDOW_STATE_REPEATED_OBSERVER_PASS',
+    }),
+    true,
+  );
+  assert.equal(
+    isSmokeResultPassing({
+      scenario: 'window-state-drift',
+      driftSummary: {
+        allSamplesCurrentTabAttributeGroupsPresent: false,
+      },
+      verdict: 'WINDOW_STATE_REPEATED_OBSERVER_PASS',
     }),
     false,
   );
