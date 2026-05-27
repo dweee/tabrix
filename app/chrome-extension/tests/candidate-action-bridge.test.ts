@@ -88,6 +88,86 @@ describe('candidateAction bridge', () => {
     expect(payload.verification.requiresFreshReadPage).toBe(true);
   });
 
+  it('resolves safe hover from candidateAction locator css with duplicate-safe selector lookup', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4108,
+      title: 'App',
+      url: 'https://example.com/app',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi
+      .spyOn(clickTool as any, 'sendMessageToTab')
+      .mockImplementation(async (_tabId, message) => {
+        if (message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR) {
+          return { success: true, ref: 'ref_resolved_more' };
+        }
+        if (message.action === TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF) {
+          return { success: true, target: { tagName: 'DIV', text: 'More' } };
+        }
+        return { success: false, error: 'unexpected message' };
+      });
+
+    const result = await clickTool.execute({
+      interaction: 'hover',
+      candidateAction: {
+        targetRef: 'ref_text_menu_1',
+        locatorChain: [{ type: 'css', value: '.sidebar .menu-trigger' }],
+      },
+    } as any);
+
+    expect(result.isError).toBe(false);
+    expect(sendSpy).toHaveBeenCalledWith(
+      4108,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+        selector: '.sidebar .menu-trigger',
+        isXPath: false,
+        allowMultiple: true,
+      }),
+      undefined,
+    );
+    expect(sendSpy).toHaveBeenCalledWith(
+      4108,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF,
+        ref: 'ref_resolved_more',
+      }),
+      undefined,
+    );
+  });
+
+  it('returns structured diagnostics when safe hover selector cannot be resolved', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4109,
+      title: 'App',
+      url: 'https://example.com/app',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: false,
+      error: 'selector not found: .menu-trigger',
+    });
+
+    const result = await clickTool.execute({
+      interaction: 'hover',
+      candidateAction: {
+        targetRef: 'ref_text_menu_2',
+        locatorChain: [{ type: 'css', value: '.menu-trigger' }],
+      },
+    } as any);
+
+    expect(result.isError).toBe(true);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload).toMatchObject({
+      success: false,
+      dispatchSucceeded: false,
+      clickMethod: 'candidateAction',
+      resultShape: 'structured_click_error',
+    });
+    expect(payload.message).toContain('Failed to resolve hover selector');
+    expect(payload.message).toContain('selector not found');
+  });
+
   it('rejects coordinate-only safe hover so menu discovery stays ref based', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4107,

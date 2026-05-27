@@ -863,6 +863,7 @@ class ClickTool extends BaseBrowserToolExecutor {
               action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
               selector: finalSelector,
               isXPath: true,
+              allowMultiple: interaction === 'hover',
             },
             frameId,
           );
@@ -891,6 +892,7 @@ class ClickTool extends BaseBrowserToolExecutor {
                 action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
                 selector: finalSelector,
                 isXPath: false,
+                allowMultiple: true,
               },
               frameId,
             );
@@ -898,22 +900,26 @@ class ClickTool extends BaseBrowserToolExecutor {
               finalRef = resolved.ref;
               finalSelector = undefined;
             } else {
-              return createErrorResponse(
-                `Failed to resolve hover selector: ${resolved?.error || 'unknown error'}`,
-              );
+              return createStructuredClickHelperErrorResponse({
+                message: `Failed to resolve hover selector: ${resolved?.error || 'unknown error'}`,
+                clickMethod: requestedClickMethod,
+              });
             }
           } catch (error) {
-            return createErrorResponse(
-              `Error resolving hover selector: ${error instanceof Error ? error.message : String(error)}`,
-            );
+            return createStructuredClickHelperErrorResponse({
+              message: `Error resolving hover selector: ${error instanceof Error ? error.message : String(error)}`,
+              clickMethod: requestedClickMethod,
+            });
           }
         }
 
         if (!finalRef) {
-          return createErrorResponse(
-            ERROR_MESSAGES.INVALID_PARAMETERS +
+          return createStructuredClickHelperErrorResponse({
+            message:
+              ERROR_MESSAGES.INVALID_PARAMETERS +
               ': Safe hover requires a resolvable element ref from chrome_read_page',
-          );
+            clickMethod: requestedClickMethod,
+          });
         }
 
         await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
@@ -926,7 +932,11 @@ class ClickTool extends BaseBrowserToolExecutor {
           frameId,
         );
         if (!hoverResult?.success) {
-          return createErrorResponse(hoverResult?.error || 'Hover dispatch failed');
+          return createStructuredClickHelperErrorResponse({
+            message: hoverResult?.error || 'Hover dispatch failed',
+            clickMethod: requestedClickMethod,
+            elementInfo: hoverResult?.target,
+          });
         }
 
         return {
