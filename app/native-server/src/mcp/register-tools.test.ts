@@ -1353,6 +1353,26 @@ describe('handleToolCall execution wrapper', () => {
           refreshedRefs: ['ref_menu_button', 'ref_action_1'],
           extraPayload: {
             objectLifecycle: objectLifecycleFixture(['ref_menu_button', 'ref_action_1']),
+            ownershipRuntime: {
+              currentTabUrl: 'https://example.test/runtime',
+              currentTabPendingUrl: '',
+              currentTabTitle: 'Runtime page',
+              currentTabStatus: 'complete',
+              currentTabDiscarded: false,
+              currentTabAudible: false,
+              currentTabMuted: false,
+              currentTabPinned: true,
+              currentTabOpenerTabId: 8,
+              currentTabOpenedBy: 'ai',
+              currentTabOpenedByConfidence: 0.95,
+              currentTabOpenedByReason: 'marked_by_tabrix_navigation_result',
+              currentTabAiOperationState: 'recently_operated',
+              currentTabLastAiOperation: 'read_page',
+              currentTabLastAiOperationAtMs: 1770000000000,
+              currentTabCanTabrixOperate: true,
+              currentTabOperabilityReason: 'regular_web_page',
+              currentTabRuntimeStateSource: 'browser_world_inventory',
+            },
           },
         }),
       );
@@ -1394,6 +1414,27 @@ describe('handleToolCall execution wrapper', () => {
         watchStatus: expect.stringContaining('candidate'),
         primaryConclusion: expect.stringContaining('Menu expanded candidate'),
         changedGroups: expect.arrayContaining(['menu_state']),
+        facts: {
+          tab: {
+            currentTabUrl: 'https://example.test/runtime',
+            currentTabStatus: 'complete',
+            currentTabPinned: true,
+            openedBy: 'ai',
+            openedByConfidence: 0.95,
+            canTabrixOperate: true,
+            operabilityReason: 'regular_web_page',
+            runtimeStateSource: 'browser_world_inventory',
+          },
+        },
+      });
+      expect(payload.ownershipRuntime).toMatchObject({
+        currentTabUrl: 'https://example.test/runtime',
+        currentTabStatus: 'complete',
+        currentTabPinned: true,
+        currentTabOpenedBy: 'ai',
+        currentTabOpenedByConfidence: 0.95,
+        currentTabCanTabrixOperate: true,
+        currentTabRuntimeStateSource: 'browser_world_inventory',
       });
       expect(payload.aiContextEnvelope.primaryConclusion).toContain('Menu expanded candidate');
       expect(payload.aiContextEnvelope.watchStatus).toEqual(

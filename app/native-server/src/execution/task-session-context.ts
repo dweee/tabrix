@@ -179,6 +179,24 @@ export interface TaskPageRuntimeFields {
   browserActiveTabId: number | null;
   browserActiveTabIdKnown: boolean;
   isReadTargetBrowserActiveTab: boolean | null;
+  currentTabUrl?: string | null;
+  currentTabPendingUrl?: string | null;
+  currentTabTitle?: string | null;
+  currentTabStatus?: string | null;
+  currentTabDiscarded?: boolean | null;
+  currentTabAudible?: boolean | null;
+  currentTabMuted?: boolean | null;
+  currentTabPinned?: boolean | null;
+  currentTabOpenerTabId?: number | null;
+  currentTabOpenedBy?: 'ai' | 'user_or_page' | 'unknown' | null;
+  currentTabOpenedByConfidence?: number | null;
+  currentTabOpenedByReason?: string | null;
+  currentTabAiOperationState?: 'idle' | 'recently_operated' | 'closed' | null;
+  currentTabLastAiOperation?: string | null;
+  currentTabLastAiOperationAtMs?: number | null;
+  currentTabCanTabrixOperate?: boolean | null;
+  currentTabOperabilityReason?: string | null;
+  currentTabRuntimeStateSource?: 'browser_world_inventory' | 'chrome_tab_snapshot' | 'unknown';
 }
 
 export interface NoteReadPageInput {

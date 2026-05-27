@@ -562,6 +562,65 @@ describe('read_page object lifecycle', () => {
     expect(view.dynamicAttributeSummary?.summary).toContain('Single snapshot only');
   });
 
+  it('surfaces Browser World tab runtime state in BrowserPageObject compact facts', () => {
+    const view = buildReadPageBrowserPageObjectView({
+      pageRegions: [],
+      pageOperationMap: operationMap(),
+      objectLifecycle: buildReadPageObjectLifecycle([]),
+      pageProjection: pageProjection({
+        tabId: 42,
+        pageId: 'tab:42',
+        ownerType: 'run_owned',
+        stability: 'loading',
+      }),
+      ownershipRuntime: ownershipRuntime({
+        currentTabUrl: 'https://example.test/runtime',
+        currentTabPendingUrl: '',
+        currentTabTitle: 'Runtime page',
+        currentTabStatus: 'loading',
+        currentTabDiscarded: false,
+        currentTabAudible: true,
+        currentTabMuted: false,
+        currentTabPinned: true,
+        currentTabOpenerTabId: 7,
+        currentTabOpenedBy: 'ai',
+        currentTabOpenedByConfidence: 0.95,
+        currentTabOpenedByReason: 'marked_by_tabrix_navigation_result',
+        currentTabAiOperationState: 'recently_operated',
+        currentTabLastAiOperation: 'read_page',
+        currentTabLastAiOperationAtMs: 1770000000000,
+        currentTabCanTabrixOperate: true,
+        currentTabOperabilityReason: 'regular_web_page',
+        currentTabRuntimeStateSource: 'browser_world_inventory',
+      }),
+      selectedDataSource: 'dom_region_rows',
+      sourceRouteHonestyVerdict: null,
+    });
+
+    expect(view.attributeGroups.tab_state.summary).toContain('status=loading');
+    expect(view.attributeGroups.tab_state.summary).toContain('operable=true');
+    expect(view.compact?.facts.tab).toMatchObject({
+      objectKind: 'BrowserTabObject',
+      currentTabId: 42,
+      currentTabUrl: 'https://example.test/runtime',
+      currentTabTitle: 'Runtime page',
+      currentTabStatus: 'loading',
+      currentTabAudible: true,
+      currentTabPinned: true,
+      currentTabOpenerTabId: 7,
+      ownerType: 'run_owned',
+      openedBy: 'ai',
+      openedByConfidence: 0.95,
+      openedByReason: 'marked_by_tabrix_navigation_result',
+      canTabrixOperate: true,
+      operabilityReason: 'regular_web_page',
+      aiOperationState: 'recently_operated',
+      lastAiOperation: 'read_page',
+      lastAiOperationAtMs: 1770000000000,
+      runtimeStateSource: 'browser_world_inventory',
+    });
+  });
+
   it('keeps account-like handles and numeric stats out of visible menu entry summaries', () => {
     const lifecycle = buildReadPageObjectLifecycle([
       region({

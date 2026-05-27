@@ -1844,6 +1844,119 @@ function shouldInvalidateReadAfterWindowFocusChange(toolName: string, args: unkn
   return true;
 }
 
+function readTaskPageRuntimeFields(payload: Record<string, unknown>): TaskPageRuntimeFields {
+  const ownershipRuntime = readObject(payload.ownershipRuntime);
+  const compactTabFacts = readObject(
+    readObject(readObject(payload.browserPageObjectCompact)?.facts)?.tab,
+  );
+  const readCompactString = (key: string): string | null => readString(compactTabFacts?.[key]);
+  const readCompactInteger = (key: string): number | null => readInteger(compactTabFacts, key);
+  const readCompactBoolean = (key: string): boolean | null => readBoolean(compactTabFacts, key);
+  const readCompactNumber = (key: string): number | null => {
+    const raw = compactTabFacts?.[key];
+    return typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
+  };
+  const readNestedString = (key: string): string | null =>
+    readString(ownershipRuntime?.[key]) ?? readString(payload[key]);
+  const readNestedInteger = (key: string): number | null =>
+    readInteger(ownershipRuntime, key) ?? readInteger(payload, key);
+  const readNestedPositiveInteger = (key: string): number | null =>
+    readPositiveInteger(ownershipRuntime, key) ?? readPositiveInteger(payload, key);
+  const readNestedBoolean = (key: string): boolean | null =>
+    readBoolean(ownershipRuntime, key) ?? readBoolean(payload, key);
+  const readNestedNumber = (key: string): number | null => {
+    const nestedRaw = ownershipRuntime?.[key];
+    if (typeof nestedRaw === 'number' && Number.isFinite(nestedRaw)) return nestedRaw;
+    const payloadRaw = payload[key];
+    return typeof payloadRaw === 'number' && Number.isFinite(payloadRaw) ? payloadRaw : null;
+  };
+  const openedBy = readNestedString('currentTabOpenedBy');
+  const aiOperationState = readNestedString('currentTabAiOperationState');
+  const runtimeStateSource = readNestedString('currentTabRuntimeStateSource');
+
+  return {
+    currentWindowId: readPositiveInteger(payload, 'currentWindowId'),
+    currentWindowState: readWindowRuntimeState(payload, 'currentWindowState'),
+    currentWindowWidth: readPositiveInteger(payload, 'currentWindowWidth'),
+    currentWindowHeight: readPositiveInteger(payload, 'currentWindowHeight'),
+    currentWindowLeft: readInteger(payload, 'currentWindowLeft'),
+    currentWindowTop: readInteger(payload, 'currentWindowTop'),
+    isCurrentTabActive: readBoolean(payload, 'isCurrentTabActive'),
+    isCurrentWindowFocused: readBoolean(payload, 'isCurrentWindowFocused'),
+    browserActiveTabId: readPositiveInteger(payload, 'browserActiveTabId'),
+    browserActiveTabIdKnown: readBoolean(payload, 'browserActiveTabIdKnown') === true,
+    isReadTargetBrowserActiveTab: readBoolean(payload, 'isReadTargetBrowserActiveTab'),
+    currentTabUrl: readNestedString('currentTabUrl') ?? readCompactString('currentTabUrl'),
+    currentTabPendingUrl:
+      readNestedString('currentTabPendingUrl') ?? readCompactString('currentTabPendingUrl'),
+    currentTabTitle: readNestedString('currentTabTitle') ?? readCompactString('currentTabTitle'),
+    currentTabStatus: readNestedString('currentTabStatus') ?? readCompactString('currentTabStatus'),
+    currentTabDiscarded:
+      readNestedBoolean('currentTabDiscarded') ?? readCompactBoolean('currentTabDiscarded'),
+    currentTabAudible:
+      readNestedBoolean('currentTabAudible') ?? readCompactBoolean('currentTabAudible'),
+    currentTabMuted: readNestedBoolean('currentTabMuted') ?? readCompactBoolean('currentTabMuted'),
+    currentTabPinned:
+      readNestedBoolean('currentTabPinned') ?? readCompactBoolean('currentTabPinned'),
+    currentTabOpenerTabId:
+      readNestedPositiveInteger('currentTabOpenerTabId') ??
+      readCompactInteger('currentTabOpenerTabId'),
+    currentTabOpenedBy:
+      (openedBy === 'ai' || openedBy === 'user_or_page' || openedBy === 'unknown'
+        ? openedBy
+        : null) ??
+      (() => {
+        const compactOpenedBy = readCompactString('openedBy');
+        return compactOpenedBy === 'ai' ||
+          compactOpenedBy === 'user_or_page' ||
+          compactOpenedBy === 'unknown'
+          ? compactOpenedBy
+          : null;
+      })(),
+    currentTabOpenedByConfidence:
+      readNestedNumber('currentTabOpenedByConfidence') ?? readCompactNumber('openedByConfidence'),
+    currentTabOpenedByReason:
+      readNestedString('currentTabOpenedByReason') ?? readCompactString('openedByReason'),
+    currentTabAiOperationState:
+      (aiOperationState === 'idle' ||
+      aiOperationState === 'recently_operated' ||
+      aiOperationState === 'closed'
+        ? aiOperationState
+        : null) ??
+      (() => {
+        const compactAiOperationState = readCompactString('aiOperationState');
+        return compactAiOperationState === 'idle' ||
+          compactAiOperationState === 'recently_operated' ||
+          compactAiOperationState === 'closed'
+          ? compactAiOperationState
+          : null;
+      })(),
+    currentTabLastAiOperation:
+      readNestedString('currentTabLastAiOperation') ?? readCompactString('lastAiOperation'),
+    currentTabLastAiOperationAtMs:
+      readNestedInteger('currentTabLastAiOperationAtMs') ??
+      readCompactInteger('lastAiOperationAtMs'),
+    currentTabCanTabrixOperate:
+      readNestedBoolean('currentTabCanTabrixOperate') ?? readCompactBoolean('canTabrixOperate'),
+    currentTabOperabilityReason:
+      readNestedString('currentTabOperabilityReason') ?? readCompactString('operabilityReason'),
+    currentTabRuntimeStateSource:
+      (runtimeStateSource === 'browser_world_inventory' ||
+      runtimeStateSource === 'chrome_tab_snapshot' ||
+      runtimeStateSource === 'unknown'
+        ? runtimeStateSource
+        : null) ??
+      (() => {
+        const compactRuntimeStateSource = readCompactString('runtimeStateSource');
+        return compactRuntimeStateSource === 'browser_world_inventory' ||
+          compactRuntimeStateSource === 'chrome_tab_snapshot' ||
+          compactRuntimeStateSource === 'unknown'
+          ? compactRuntimeStateSource
+          : 'unknown';
+      })(),
+  };
+}
+
 function attachAiFacingOwnershipRuntime(
   result: CallToolResult,
   attachment: TaskContextAttachment,
@@ -1885,19 +1998,7 @@ function attachAiFacingOwnershipRuntime(
     normalizedAiFacingProjection,
     selectedDataSource,
   );
-  const runtimeFields: TaskPageRuntimeFields = {
-    currentWindowId: readPositiveInteger(payload, 'currentWindowId'),
-    currentWindowState: readWindowRuntimeState(payload, 'currentWindowState'),
-    currentWindowWidth: readPositiveInteger(payload, 'currentWindowWidth'),
-    currentWindowHeight: readPositiveInteger(payload, 'currentWindowHeight'),
-    currentWindowLeft: readInteger(payload, 'currentWindowLeft'),
-    currentWindowTop: readInteger(payload, 'currentWindowTop'),
-    isCurrentTabActive: readBoolean(payload, 'isCurrentTabActive'),
-    isCurrentWindowFocused: readBoolean(payload, 'isCurrentWindowFocused'),
-    browserActiveTabId: readPositiveInteger(payload, 'browserActiveTabId'),
-    browserActiveTabIdKnown: readBoolean(payload, 'browserActiveTabIdKnown') === true,
-    isReadTargetBrowserActiveTab: readBoolean(payload, 'isReadTargetBrowserActiveTab'),
-  };
+  const runtimeFields = readTaskPageRuntimeFields(payload);
 
   const ownershipRuntime = buildAiFacingOwnershipRuntimeSummary(
     attachment.taskContext,
@@ -2028,19 +2129,7 @@ function attachAiFacingDeltaContext(
       ].filter((ref, index, refs) => refs.indexOf(ref) === index),
     };
   }
-  const runtimeFields: TaskPageRuntimeFields = {
-    currentWindowId: readPositiveInteger(payload, 'currentWindowId'),
-    currentWindowState: readWindowRuntimeState(payload, 'currentWindowState'),
-    currentWindowWidth: readPositiveInteger(payload, 'currentWindowWidth'),
-    currentWindowHeight: readPositiveInteger(payload, 'currentWindowHeight'),
-    currentWindowLeft: readInteger(payload, 'currentWindowLeft'),
-    currentWindowTop: readInteger(payload, 'currentWindowTop'),
-    isCurrentTabActive: readBoolean(payload, 'isCurrentTabActive'),
-    isCurrentWindowFocused: readBoolean(payload, 'isCurrentWindowFocused'),
-    browserActiveTabId: readPositiveInteger(payload, 'browserActiveTabId'),
-    browserActiveTabIdKnown: readBoolean(payload, 'browserActiveTabIdKnown') === true,
-    isReadTargetBrowserActiveTab: readBoolean(payload, 'isReadTargetBrowserActiveTab'),
-  };
+  const runtimeFields = readTaskPageRuntimeFields(payload);
   const previousPageProjection = attachment.taskContext.peekLastPageProjection();
   const previousRuntimeFields = attachment.taskContext.peekLastPageRuntimeFields();
   const deltaContext = attachment.taskContext.notePageProjectionAndBuildDelta(
@@ -2425,6 +2514,24 @@ function buildAiFacingOwnershipRuntimeSummary(
     browserActiveTabId,
     browserActiveTabIdKnown,
     isReadTargetBrowserActiveTab,
+    currentTabUrl: runtimeFields.currentTabUrl ?? null,
+    currentTabPendingUrl: runtimeFields.currentTabPendingUrl ?? null,
+    currentTabTitle: runtimeFields.currentTabTitle ?? null,
+    currentTabStatus: runtimeFields.currentTabStatus ?? null,
+    currentTabDiscarded: runtimeFields.currentTabDiscarded ?? null,
+    currentTabAudible: runtimeFields.currentTabAudible ?? null,
+    currentTabMuted: runtimeFields.currentTabMuted ?? null,
+    currentTabPinned: runtimeFields.currentTabPinned ?? null,
+    currentTabOpenerTabId: runtimeFields.currentTabOpenerTabId ?? null,
+    currentTabOpenedBy: runtimeFields.currentTabOpenedBy ?? null,
+    currentTabOpenedByConfidence: runtimeFields.currentTabOpenedByConfidence ?? null,
+    currentTabOpenedByReason: runtimeFields.currentTabOpenedByReason ?? null,
+    currentTabAiOperationState: runtimeFields.currentTabAiOperationState ?? null,
+    currentTabLastAiOperation: runtimeFields.currentTabLastAiOperation ?? null,
+    currentTabLastAiOperationAtMs: runtimeFields.currentTabLastAiOperationAtMs ?? null,
+    currentTabCanTabrixOperate: runtimeFields.currentTabCanTabrixOperate ?? null,
+    currentTabOperabilityReason: runtimeFields.currentTabOperabilityReason ?? null,
+    currentTabRuntimeStateSource: runtimeFields.currentTabRuntimeStateSource ?? 'unknown',
     currentOwnerType,
     currentTabRunOwnershipVerdict,
     currentTabPrimaryRelationVerdict,

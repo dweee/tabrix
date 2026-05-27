@@ -46,6 +46,7 @@ import {
 import {
   getBrowserWorldSnapshot,
   markBrowserWorldTabAiOperated,
+  type BrowserWorldTabObject,
 } from '../../browser-world-inventory';
 
 interface ReadPageStats {
@@ -675,6 +676,9 @@ async function buildModeOutput(params: {
   sharedPayload.ownershipRuntime = buildReadPageOwnershipRuntimeSummary({
     tabId: params.tabId,
     currentOwnerType: ownerType,
+    currentUrl: params.currentUrl,
+    currentTitle: params.currentTitle,
+    browserWorldTab,
     currentWindowId: params.currentWindowId,
     currentWindowState: params.currentWindowState,
     currentWindowWidth: params.currentWindowWidth,
@@ -745,6 +749,9 @@ function browserWorldTabOpenedByToOwnerType(
 function buildReadPageOwnershipRuntimeSummary(params: {
   tabId: number;
   currentOwnerType: BrowserPageOwnerType;
+  currentUrl: string;
+  currentTitle: string;
+  browserWorldTab: BrowserWorldTabObject | null;
   currentWindowId: number | null;
   currentWindowState: ReadPageWindowRuntimeState | null;
   currentWindowWidth: number | null;
@@ -770,6 +777,26 @@ function buildReadPageOwnershipRuntimeSummary(params: {
     browserActiveTabId: params.browserActiveTabId,
     browserActiveTabIdKnown: params.browserActiveTabIdKnown,
     isReadTargetBrowserActiveTab: params.isReadTargetBrowserActiveTab,
+    currentTabUrl: params.browserWorldTab?.url || params.currentUrl || null,
+    currentTabPendingUrl: params.browserWorldTab?.pendingUrl ?? null,
+    currentTabTitle: params.browserWorldTab?.title || params.currentTitle || null,
+    currentTabStatus: params.browserWorldTab?.status ?? null,
+    currentTabDiscarded: params.browserWorldTab?.discarded ?? null,
+    currentTabAudible: params.browserWorldTab?.audible ?? null,
+    currentTabMuted: params.browserWorldTab?.muted ?? null,
+    currentTabPinned: params.browserWorldTab?.pinned ?? null,
+    currentTabOpenerTabId: params.browserWorldTab?.openerTabId ?? null,
+    currentTabOpenedBy: params.browserWorldTab?.openedBy ?? null,
+    currentTabOpenedByConfidence: params.browserWorldTab?.openedByConfidence ?? null,
+    currentTabOpenedByReason: params.browserWorldTab?.openedByReason ?? null,
+    currentTabAiOperationState: params.browserWorldTab?.aiOperationState ?? null,
+    currentTabLastAiOperation: params.browserWorldTab?.lastAiOperation ?? null,
+    currentTabLastAiOperationAtMs: params.browserWorldTab?.lastAiOperationAtMs ?? null,
+    currentTabCanTabrixOperate: params.browserWorldTab?.canTabrixOperate ?? null,
+    currentTabOperabilityReason: params.browserWorldTab?.operabilityReason ?? null,
+    currentTabRuntimeStateSource: params.browserWorldTab
+      ? 'browser_world_inventory'
+      : 'chrome_tab_snapshot',
     currentOwnerType: params.currentOwnerType,
     currentTabRunOwnershipVerdict: 'unknown',
     currentTabPrimaryRelationVerdict: 'unknown',

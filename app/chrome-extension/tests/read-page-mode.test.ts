@@ -201,6 +201,19 @@ describe('read_page mode', () => {
       type: expect.any(String),
       value: expect.any(String),
     });
+    expect(payload.ownershipRuntime).toMatchObject({
+      currentTabId: 5201,
+      currentTabUrl: 'https://example.com/checkout',
+      currentTabTitle: 'Checkout',
+      currentTabRuntimeStateSource: expect.any(String),
+    });
+    expect(payload.browserPageObjectCompact.facts.tab).toMatchObject({
+      objectKind: 'BrowserTabObject',
+      currentTabId: 5201,
+      currentTabUrl: 'https://example.com/checkout',
+      currentTabTitle: 'Checkout',
+      runtimeStateSource: expect.any(String),
+    });
     expect(payload.pageProjection.userActivityLevel).toBe('active');
     expect(payload.diagnostics).toBeUndefined();
     expect(payload.fullSnapshot).toBeUndefined();
