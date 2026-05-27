@@ -46,6 +46,7 @@ class WindowTool extends BaseBrowserToolExecutor {
         source: 'chrome_windows_get_all_with_browser_world_inventory',
         windowCount: browserWorld.windowCount,
         tabCount: browserWorld.tabCount,
+        summary: browserWorld.summary,
         browserWorld,
         windows: structuredWindows,
       };

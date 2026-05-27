@@ -913,6 +913,9 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
         }
 
         const hygieneBefore = await captureCloseTabsBrowserSnapshot();
+        for (const tabId of tabIdsToClose) {
+          markBrowserWorldTabAiOperated(tabId, 'close_tabs_requested');
+        }
         await chrome.tabs.remove(tabIdsToClose);
         const hygieneAfter = await captureCloseTabsBrowserSnapshot();
 
@@ -976,6 +979,9 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
         }
 
         const hygieneBefore = await captureCloseTabsBrowserSnapshot();
+        for (const tabId of validTabIds) {
+          markBrowserWorldTabAiOperated(tabId, 'close_tabs_requested');
+        }
         await chrome.tabs.remove(validTabIds);
         const hygieneAfter = await captureCloseTabsBrowserSnapshot();
         const invalidTabIds = tabIds.filter((id) => !validTabIds.includes(id));
@@ -1118,6 +1124,7 @@ class SwitchTabTool extends BaseBrowserToolExecutor {
           ? null
           : await this.waitForTabSettled(tabId, { timeoutMs: 5000 });
       const updatedTab = settleResult?.tab || activationResult.tab;
+      markBrowserWorldTabAiOperated(updatedTab.id, 'switch_tab');
 
       return {
         content: [

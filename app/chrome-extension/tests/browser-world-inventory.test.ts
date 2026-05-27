@@ -3,6 +3,8 @@ import {
   getBrowserWorldSnapshot,
   initBrowserWorldInventory,
   markBrowserWorldTabAiCreated,
+  markBrowserWorldTabAiOperated,
+  refreshBrowserWorldSnapshot,
   resetBrowserWorldInventoryForTests,
 } from '@/entrypoints/background/browser-world-inventory';
 
@@ -90,6 +92,7 @@ describe('browser world inventory', () => {
     expect(snapshot.tabs[0]).toMatchObject({
       tabId: 10,
       openedBy: 'user_or_page',
+      openedByReason: 'observed_by_chrome_inventory_without_ai_marker',
       canTabrixOperate: true,
     });
     expect(snapshot.tabs[1]).toMatchObject({
@@ -132,6 +135,7 @@ describe('browser world inventory', () => {
     expect(snapshot.tabs.find((tab) => tab.tabId === 20)).toMatchObject({
       url: 'https://ai-opened.test/done',
       openedBy: 'ai',
+      openedByReason: 'marked_by_tabrix_navigation_before_tabs_onCreated',
       active: true,
     });
 
@@ -142,6 +146,39 @@ describe('browser world inventory', () => {
       eventKind: 'tab_removed',
       tabId: 20,
       openedBy: 'ai',
+    });
+  });
+
+  it('preserves AI ownership and operation state across full Chrome refreshes', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    markBrowserWorldTabAiCreated(10);
+    markBrowserWorldTabAiOperated(10, 'read_page');
+
+    const refreshed = await refreshBrowserWorldSnapshot();
+
+    expect(refreshed.aiOpenedTabIds).toEqual([10]);
+    expect(refreshed.summary).toMatchObject({
+      activeTab: {
+        tabId: 10,
+        openedBy: 'ai',
+        canTabrixOperate: true,
+      },
+      counts: {
+        windows: 1,
+        tabs: 2,
+        aiOpenedTabs: 1,
+        userOrPageOpenedTabs: 1,
+        operableTabs: 1,
+      },
+    });
+    expect(refreshed.tabs.find((tab) => tab.tabId === 10)).toMatchObject({
+      openedBy: 'ai',
+      openedByReason: 'marked_by_tabrix_navigation_result',
+      aiOperationState: 'recently_operated',
+      lastAiOperation: 'read_page',
+      canTabrixOperate: true,
     });
   });
 });

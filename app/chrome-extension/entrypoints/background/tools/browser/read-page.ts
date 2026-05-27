@@ -42,6 +42,7 @@ import {
   extractGlobalMenuLabelsForTargetRecovery,
   type ReadPageVisualElementHint,
 } from './read-page-task-protocol';
+import { markBrowserWorldTabAiOperated } from '../../browser-world-inventory';
 
 interface ReadPageStats {
   processed: number;
@@ -1083,6 +1084,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       if (!tab.id)
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
       const tabId = tab.id;
+      markBrowserWorldTabAiOperated(tabId, 'read_page');
 
       const initialNavigationUrl = getTabNavigationUrl(tab);
       if (

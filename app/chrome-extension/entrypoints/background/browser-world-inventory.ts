@@ -16,8 +16,10 @@ export interface BrowserWorldTabObject {
   openerTabId: number | null;
   openedBy: BrowserWorldTabOpenedBy;
   openedByConfidence: number;
+  openedByReason: string;
   aiOperationState: 'idle' | 'recently_operated' | 'closed';
   lastAiOperation: string | null;
+  lastAiOperationAtMs: number | null;
   createdAtMs: number;
   updatedAtMs: number;
   closedAtMs: number | null;
@@ -54,9 +56,30 @@ export interface BrowserWorldSnapshot {
   aiOpenedTabIds: number[];
   userOrPageOpenedTabIds: number[];
   operableTabIds: number[];
+  summary: BrowserWorldSummary;
   recentEvents: BrowserWorldEvent[];
   windows: BrowserWorldWindowObject[];
   tabs: BrowserWorldTabObject[];
+}
+
+export interface BrowserWorldSummary {
+  primaryConclusion: string;
+  activeTab: {
+    tabId: number | null;
+    windowId: number | null;
+    url: string | null;
+    title: string | null;
+    openedBy: BrowserWorldTabOpenedBy | null;
+    canTabrixOperate: boolean | null;
+  };
+  counts: {
+    windows: number;
+    tabs: number;
+    aiOpenedTabs: number;
+    userOrPageOpenedTabs: number;
+    operableTabs: number;
+  };
+  recentChangeSummary: string;
 }
 
 export interface BrowserWorldEvent {
@@ -124,6 +147,12 @@ function normalizeTab(
   const operability = isOperableUrl(url);
   const wasAiPending = pendingAiCreatedTabIds.delete(tab.id);
   const openedBy = wasAiPending ? 'ai' : (previous?.openedBy ?? 'user_or_page');
+  const openedByReason = wasAiPending
+    ? 'marked_by_tabrix_navigation_before_tabs_onCreated'
+    : (previous?.openedByReason ??
+      (typeof tab.openerTabId === 'number'
+        ? 'chrome_tabs_openerTabId_present'
+        : 'observed_by_chrome_inventory_without_ai_marker'));
   return {
     objectKind: 'BrowserTabObject',
     tabId: tab.id,
@@ -145,9 +174,11 @@ function normalizeTab(
       typeof tab.openerTabId === 'number' ? tab.openerTabId : (previous?.openerTabId ?? null),
     openedBy,
     openedByConfidence: openedBy === 'ai' ? 0.95 : 0.7,
+    openedByReason,
     aiOperationState:
       previous?.aiOperationState ?? (openedBy === 'ai' ? 'recently_operated' : 'idle'),
     lastAiOperation: previous?.lastAiOperation ?? (openedBy === 'ai' ? 'tab_created' : null),
+    lastAiOperationAtMs: previous?.lastAiOperationAtMs ?? (openedBy === 'ai' ? observedAt : null),
     createdAtMs: previous?.createdAtMs ?? observedAt,
     updatedAtMs: observedAt,
     closedAtMs: null,
@@ -190,13 +221,15 @@ function pushEvent(event: Omit<BrowserWorldEvent, 'observedAtMs'>): void {
 async function seedFromChrome(): Promise<void> {
   if (typeof chrome?.windows?.getAll !== 'function') return;
   const windows = await chrome.windows.getAll({ populate: true });
+  const previousTabs = new Map(tabsById);
   windowsById.clear();
   tabsById.clear();
   for (const window of windows) {
     const normalizedWindow = normalizeWindow(window);
     if (normalizedWindow) windowsById.set(normalizedWindow.windowId, normalizedWindow);
     for (const tab of window.tabs ?? []) {
-      const normalizedTab = normalizeTab(tab, undefined, normalizedWindow?.windowId ?? null);
+      const previous = typeof tab.id === 'number' ? previousTabs.get(tab.id) : undefined;
+      const normalizedTab = normalizeTab(tab, previous, normalizedWindow?.windowId ?? null);
       if (normalizedTab) tabsById.set(normalizedTab.tabId, normalizedTab);
     }
   }
@@ -331,15 +364,19 @@ export function initBrowserWorldInventory(): void {
 
 export function markBrowserWorldTabAiCreated(tabId: number | null | undefined): void {
   if (typeof tabId !== 'number' || tabId < 0) return;
-  pendingAiCreatedTabIds.add(tabId);
   const previous = tabsById.get(tabId);
+  if (!previous) {
+    pendingAiCreatedTabIds.add(tabId);
+  }
   if (previous) {
     tabsById.set(tabId, {
       ...previous,
       openedBy: 'ai',
       openedByConfidence: 0.95,
+      openedByReason: 'marked_by_tabrix_navigation_result',
       aiOperationState: 'recently_operated',
       lastAiOperation: 'tab_created',
+      lastAiOperationAtMs: nowMs(),
       updatedAtMs: nowMs(),
     });
   }
@@ -363,6 +400,7 @@ export function markBrowserWorldTabAiOperated(
       ...previous,
       aiOperationState: 'recently_operated',
       lastAiOperation: operation,
+      lastAiOperationAtMs: nowMs(),
       updatedAtMs: nowMs(),
     });
   }
@@ -396,6 +434,15 @@ function buildSnapshot(): BrowserWorldSnapshot {
     focusedWindow?.activeTabId ??
     tabs.find((tab) => tab.active === true && tab.windowId === focusedWindow?.windowId)?.tabId ??
     null;
+  const activeTab = tabs.find((tab) => tab.tabId === browserActiveTab) ?? null;
+  const aiOpenedTabIds = tabs.filter((tab) => tab.openedBy === 'ai').map((tab) => tab.tabId);
+  const userOrPageOpenedTabIds = tabs
+    .filter((tab) => tab.openedBy === 'user_or_page')
+    .map((tab) => tab.tabId);
+  const operableTabIds = tabs
+    .filter((tab) => tab.canTabrixOperate === true)
+    .map((tab) => tab.tabId);
+  const recentChangeSummary = summarizeRecentEvents(recentEvents);
   return {
     source: 'extension_browser_world_inventory',
     version: 1,
@@ -406,15 +453,61 @@ function buildSnapshot(): BrowserWorldSnapshot {
     tabCount: tabs.length,
     focusedWindowId: focusedWindow?.windowId ?? null,
     browserActiveTabId: browserActiveTab,
-    aiOpenedTabIds: tabs.filter((tab) => tab.openedBy === 'ai').map((tab) => tab.tabId),
-    userOrPageOpenedTabIds: tabs
-      .filter((tab) => tab.openedBy === 'user_or_page')
-      .map((tab) => tab.tabId),
-    operableTabIds: tabs.filter((tab) => tab.canTabrixOperate === true).map((tab) => tab.tabId),
+    aiOpenedTabIds,
+    userOrPageOpenedTabIds,
+    operableTabIds,
+    summary: {
+      primaryConclusion: `Browser world snapshot: ${windows.length} window(s), ${tabs.length} tab(s), activeTab=${browserActiveTab ?? 'unknown'}, aiOpenedTabs=${aiOpenedTabIds.length}, operableTabs=${operableTabIds.length}.`,
+      activeTab: {
+        tabId: activeTab?.tabId ?? null,
+        windowId: activeTab?.windowId ?? null,
+        url: activeTab?.url ?? null,
+        title: activeTab?.title ?? null,
+        openedBy: activeTab?.openedBy ?? null,
+        canTabrixOperate: activeTab?.canTabrixOperate ?? null,
+      },
+      counts: {
+        windows: windows.length,
+        tabs: tabs.length,
+        aiOpenedTabs: aiOpenedTabIds.length,
+        userOrPageOpenedTabs: userOrPageOpenedTabIds.length,
+        operableTabs: operableTabIds.length,
+      },
+      recentChangeSummary,
+    },
     recentEvents: [...recentEvents],
     windows,
     tabs,
   };
+}
+
+function summarizeRecentEvents(events: readonly BrowserWorldEvent[]): string {
+  const last = events.at(-1);
+  if (!last) return 'No browser lifecycle event observed yet.';
+  switch (last.eventKind) {
+    case 'tab_created':
+      return `Last change: tab ${last.tabId ?? 'unknown'} was created in window ${last.windowId ?? 'unknown'}; openedBy=${last.openedBy ?? 'unknown'}.`;
+    case 'tab_updated':
+      return `Last change: tab ${last.tabId ?? 'unknown'} was updated.`;
+    case 'tab_removed':
+      return `Last change: tab ${last.tabId ?? 'unknown'} was removed; previousOpenedBy=${last.openedBy ?? 'unknown'}.`;
+    case 'tab_activated':
+      return `Last change: tab ${last.tabId ?? 'unknown'} became active in window ${last.windowId ?? 'unknown'}.`;
+    case 'window_focus_changed':
+      return `Last change: focused window is ${last.windowId ?? 'unknown'}.`;
+    case 'window_created':
+      return `Last change: window ${last.windowId ?? 'unknown'} was created.`;
+    case 'window_removed':
+      return `Last change: window ${last.windowId ?? 'unknown'} was removed.`;
+    case 'tab_replaced':
+      return `Last change: tab was replaced by tab ${last.tabId ?? 'unknown'}.`;
+    case 'ai_tab_marked':
+      return `Last change: tab ${last.tabId ?? 'unknown'} was marked as operated by Tabrix.`;
+    case 'inventory_seeded':
+      return 'Last change: browser world inventory was refreshed from Chrome.';
+    default:
+      return 'Last change: browser lifecycle event observed.';
+  }
 }
 
 export function resetBrowserWorldInventoryForTests(): void {
