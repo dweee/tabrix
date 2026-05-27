@@ -426,6 +426,9 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     currentOperationConclusionPresent:
       typeof payload?.compactSummary?.currentOperationConclusion === 'string' ||
       typeof payload?.summary?.currentOperationConclusion === 'string',
+    browserObjectEdgeSummaryPresent:
+      typeof payload?.compactSummary?.browserObjectEdgeSummary === 'string' ||
+      typeof payload?.summary?.browserObjectEdgeSummary === 'string',
     dynamicObjectUpdateSummaryPresent:
       typeof payload?.compactSummary?.dynamicObjectUpdateSummary === 'string' ||
       typeof payload?.summary?.dynamicObjectUpdateSummary === 'string',
@@ -585,6 +588,7 @@ function buildStepSummary(step, payload, targetTabId) {
     counts: redacted.counts,
     tabLifecycleState: redacted.tabLifecycleState,
     tabLifecycleConclusionPresent: redacted.tabLifecycleConclusionPresent,
+    browserObjectEdgeSummaryPresent: redacted.browserObjectEdgeSummaryPresent,
     dynamicObjectUpdateSummaryPresent: redacted.dynamicObjectUpdateSummaryPresent,
     retentionWithinLimit: redacted.retentionWithinLimit,
     compactSummaryBounded: redacted.compactSummaryBounded,

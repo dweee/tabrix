@@ -204,6 +204,8 @@ describe('get_windows_and_tabs state inventory', () => {
         },
         currentOperationConclusion:
           'Current operation object: no AI-operated tab page object has been observed yet.',
+        browserObjectEdgeSummary:
+          'Browser object edge state: windows total=2, visible=1, minimized=1, focused=1, operable=1; tabs total=2, active=1, background=1, loading=1, operable=2, aiOpened=0, userOrPageOpened=2; currentWindow=focused_window_visible_operable; currentOperation=no_ai_operation_observed',
         dynamicObjectUpdateSummary:
           'Dynamic object update: no browser object change observed; retainedWindows=2, retainedTabs=2, activeTab=102.',
         retentionPolicy: {

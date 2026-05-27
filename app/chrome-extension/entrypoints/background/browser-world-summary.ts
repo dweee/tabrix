@@ -270,6 +270,20 @@ export function summarizeCurrentWindow(state: BrowserWorldWindowOperationState):
   return `Current window object: focused window ${state.focusedWindowId ?? 'unknown'} has unknown operability; state=${state.focusedWindowState ?? 'unknown'}, visibility=${state.focusedWindowVisibilityState ?? 'unknown'}.`;
 }
 
+export function summarizeBrowserObjectEdgeState(
+  windowMatrix: BrowserWorldWindowStateMatrix,
+  tabMatrix: BrowserWorldTabStateMatrix,
+  windowOperationState: BrowserWorldWindowOperationState,
+  aiOperationState: BrowserWorldAiOperationState,
+): string {
+  return [
+    `Browser object edge state: windows total=${windowMatrix.total}, visible=${windowMatrix.visible}, minimized=${windowMatrix.minimized}, focused=${windowMatrix.focused}, operable=${windowMatrix.operable}`,
+    `tabs total=${tabMatrix.total}, active=${tabMatrix.active}, background=${tabMatrix.background}, loading=${tabMatrix.loading}, operable=${tabMatrix.operable}, aiOpened=${tabMatrix.aiOpened}, userOrPageOpened=${tabMatrix.userOrPageOpened}`,
+    `currentWindow=${windowOperationState.relationToCurrentOperableWindow}`,
+    `currentOperation=${aiOperationState.relationToBrowserActiveTab}`,
+  ].join('; ');
+}
+
 export function buildTabAttributeGroups(
   tab: BrowserWorldTabObject,
 ): BrowserWorldTabAttributeGroups {

@@ -211,6 +211,9 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.currentOperationConclusion).toBe(
       'Current operation object: no AI-operated tab page object has been observed yet.',
     );
+    expect(snapshot.summary.browserObjectEdgeSummary).toBe(
+      'Browser object edge state: windows total=1, visible=1, minimized=0, focused=1, operable=1; tabs total=2, active=1, background=1, loading=0, operable=1, aiOpened=0, userOrPageOpened=2; currentWindow=focused_window_visible_operable; currentOperation=no_ai_operation_observed',
+    );
     expect(snapshot.windows[0]).toMatchObject({
       windowId: 1,
       visibilityState: 'visible',
@@ -829,6 +832,10 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.recentChangeSummary).toContain(
       'bounds or state changed; state=minimized, visibility=minimized',
     );
+    expect(snapshot.summary.browserObjectEdgeSummary).toContain(
+      'windows total=1, visible=0, minimized=1, focused=0, operable=0',
+    );
+    expect(snapshot.summary.browserObjectEdgeSummary).toContain('currentWindow=no_focused_window');
 
     listeners.windowBoundsChanged[0]?.({
       id: 1,
@@ -877,6 +884,12 @@ describe('browser world inventory', () => {
     });
     expect(snapshot.summary.currentWindowConclusion).toContain(
       'focused window 1 is visible and operable',
+    );
+    expect(snapshot.summary.browserObjectEdgeSummary).toContain(
+      'windows total=1, visible=1, minimized=0, focused=1, operable=1',
+    );
+    expect(snapshot.summary.browserObjectEdgeSummary).toContain(
+      'currentWindow=focused_window_visible_operable',
     );
     expect(snapshot.summary.objectChangeConclusion).toContain('visibility=visible');
   });
