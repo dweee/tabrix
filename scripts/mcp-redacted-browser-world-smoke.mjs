@@ -213,6 +213,69 @@ export function extractNavigateTabId(payload) {
   return findFirstNumberByKey(payload, ['tabId']);
 }
 
+function redactTabAttributeGroups(groups) {
+  if (!groups || typeof groups !== 'object') return null;
+  return {
+    identity: groups.identity
+      ? {
+          objectKind:
+            typeof groups.identity.objectKind === 'string' ? groups.identity.objectKind : null,
+          tabIdPresent: Number.isInteger(groups.identity.tabId),
+          windowIdPresent: Number.isInteger(groups.identity.windowId),
+          urlPresent: typeof groups.identity.url === 'string' && groups.identity.url.length > 0,
+          titlePresent:
+            typeof groups.identity.title === 'string' && groups.identity.title.length > 0,
+        }
+      : null,
+    runtime: groups.runtime
+      ? {
+          active: typeof groups.runtime.active === 'boolean' ? groups.runtime.active : null,
+          status: typeof groups.runtime.status === 'string' ? groups.runtime.status : null,
+          pendingUrlPresent:
+            typeof groups.runtime.pendingUrl === 'string' && groups.runtime.pendingUrl.length > 0,
+          discarded:
+            typeof groups.runtime.discarded === 'boolean' ? groups.runtime.discarded : null,
+          audible: typeof groups.runtime.audible === 'boolean' ? groups.runtime.audible : null,
+          muted: typeof groups.runtime.muted === 'boolean' ? groups.runtime.muted : null,
+          pinned: typeof groups.runtime.pinned === 'boolean' ? groups.runtime.pinned : null,
+          openerTabIdPresent: Number.isInteger(groups.runtime.openerTabId),
+        }
+      : null,
+    ownership: groups.ownership
+      ? {
+          openedBy:
+            typeof groups.ownership.openedBy === 'string' ? groups.ownership.openedBy : null,
+          confidence:
+            typeof groups.ownership.confidence === 'number' ? groups.ownership.confidence : null,
+          reasonPresent: typeof groups.ownership.reason === 'string',
+          aiOperationState:
+            typeof groups.ownership.aiOperationState === 'string'
+              ? groups.ownership.aiOperationState
+              : null,
+          lastAiOperation:
+            typeof groups.ownership.lastAiOperation === 'string'
+              ? groups.ownership.lastAiOperation
+              : null,
+          lastAiOperationAtMsPresent: Number.isInteger(groups.ownership.lastAiOperationAtMs),
+          lastAiOperationConfidence:
+            typeof groups.ownership.lastAiOperationConfidence === 'number'
+              ? groups.ownership.lastAiOperationConfidence
+              : null,
+          lastAiOperationReasonPresent: typeof groups.ownership.lastAiOperationReason === 'string',
+        }
+      : null,
+    operability: groups.operability
+      ? {
+          canTabrixOperate:
+            typeof groups.operability.canTabrixOperate === 'boolean'
+              ? groups.operability.canTabrixOperate
+              : null,
+          reason: typeof groups.operability.reason === 'string' ? groups.operability.reason : null,
+        }
+      : null,
+  };
+}
+
 export function buildPublicSmokeUrl(baseUrl, caseName, runId = 'manual') {
   const parsed = new URL(assertPublicHttpUrl(baseUrl));
   parsed.searchParams.set('tabrix_smoke_case', caseName);
@@ -274,6 +337,14 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
   const activeObject = payload?.compactSummary?.activeObject ?? null;
   const browserActiveObject = payload?.compactSummary?.browserActiveObject ?? null;
   const latestAiOperatedObject = payload?.compactSummary?.latestAiOperatedObject ?? null;
+  const currentTabAttributeGroups =
+    payload?.compactSummary?.currentTabAttributeGroups ??
+    payload?.summary?.currentTabAttributeGroups ??
+    null;
+  const lastAiOperatedTabAttributeGroups =
+    payload?.compactSummary?.lastAiOperatedTabAttributeGroups ??
+    payload?.summary?.lastAiOperatedTabAttributeGroups ??
+    null;
   const operationRouting = payload?.compactSummary?.operationRouting ?? null;
   const aiRoutingBrief = payload?.compactSummary?.aiRoutingBrief ?? null;
   const operationTargetBrief = payload?.compactSummary?.operationTargetBrief ?? null;
@@ -525,6 +596,10 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
       : null,
     browserActiveObject: redactCompactOperationObject(browserActiveObject),
     latestAiOperatedObject: redactCompactOperationObject(latestAiOperatedObject),
+    currentTabAttributeGroups: redactTabAttributeGroups(currentTabAttributeGroups),
+    lastAiOperatedTabAttributeGroups: redactTabAttributeGroups(lastAiOperatedTabAttributeGroups),
+    tabAttributeGroupClaimBoundaryPresent:
+      typeof payload?.compactSummary?.tabAttributeGroupClaimBoundary === 'string',
     operationRouting: operationRouting
       ? {
           browserActiveTabIdPresent: Number.isInteger(operationRouting.browserActiveTabId),
@@ -1011,6 +1086,9 @@ export function buildStepSummary(step, payload, targetTabId) {
     activeObject: redacted.activeObject,
     browserActiveObject: redacted.browserActiveObject,
     latestAiOperatedObject: redacted.latestAiOperatedObject,
+    currentTabAttributeGroups: redacted.currentTabAttributeGroups,
+    lastAiOperatedTabAttributeGroups: redacted.lastAiOperatedTabAttributeGroups,
+    tabAttributeGroupClaimBoundaryPresent: redacted.tabAttributeGroupClaimBoundaryPresent,
     operationRouting: redacted.operationRouting,
     aiRoutingBrief: redacted.aiRoutingBrief,
     operationTargetBrief: redacted.operationTargetBrief,
@@ -1124,6 +1202,15 @@ export function isLifecycleStepPassing(step) {
     step.latestAiOperatedObject?.objectPresent === true &&
     step.latestAiOperatedObject?.tabIdPresent === true &&
     typeof step.latestAiOperatedObject?.operabilityReason === 'string' &&
+    step.currentTabAttributeGroups?.identity?.tabIdPresent === true &&
+    typeof step.currentTabAttributeGroups?.runtime?.status === 'string' &&
+    typeof step.currentTabAttributeGroups?.ownership?.openedBy === 'string' &&
+    typeof step.currentTabAttributeGroups?.operability?.reason === 'string' &&
+    step.lastAiOperatedTabAttributeGroups?.identity?.tabIdPresent === true &&
+    typeof step.lastAiOperatedTabAttributeGroups?.runtime?.status === 'string' &&
+    typeof step.lastAiOperatedTabAttributeGroups?.ownership?.openedBy === 'string' &&
+    typeof step.lastAiOperatedTabAttributeGroups?.operability?.reason === 'string' &&
+    step.tabAttributeGroupClaimBoundaryPresent === true &&
     step.operationRouting?.browserActiveTabIdPresent === true &&
     step.operationRouting?.latestAiOperatedTabIdPresent === true &&
     typeof step.operationRouting?.relationToBrowserActiveTab === 'string' &&

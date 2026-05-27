@@ -404,6 +404,38 @@ describe('get_windows_and_tabs state inventory', () => {
         },
       ],
     });
+    expect(payload.compactSummary.currentTabAttributeGroups).toMatchObject({
+      identity: {
+        objectKind: 'BrowserTabObject',
+        tabId: 102,
+        windowId: 10,
+        url: 'https://example.test/active',
+        title: 'Active',
+      },
+      runtime: {
+        active: true,
+        status: 'loading',
+        discarded: false,
+        audible: true,
+        muted: true,
+        pinned: true,
+        openerTabId: 101,
+      },
+      ownership: {
+        openedBy: 'user_or_page',
+        confidence: 0.7,
+        reason: 'chrome_tabs_openerTabId_present',
+        aiOperationState: 'idle',
+      },
+      operability: {
+        canTabrixOperate: true,
+        reason: 'regular_web_page',
+      },
+    });
+    expect(payload.compactSummary.lastAiOperatedTabAttributeGroups).toBeNull();
+    expect(payload.compactSummary.tabAttributeGroupClaimBoundary).toContain(
+      'browser object identity/runtime/ownership/operability only',
+    );
   });
 
   it('surfaces browser-active and latest AI-operated objects for routing decisions', async () => {
@@ -471,6 +503,43 @@ describe('get_windows_and_tabs state inventory', () => {
       lastAiOperationConfidence: 0.95,
       lastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
       canTabrixOperate: true,
+    });
+    expect(payload.compactSummary.currentTabAttributeGroups).toMatchObject({
+      identity: {
+        tabId: 201,
+        title: 'Active User Page',
+      },
+      runtime: {
+        active: true,
+        status: 'complete',
+      },
+      ownership: {
+        openedBy: 'user_or_page',
+        aiOperationState: 'idle',
+      },
+      operability: {
+        canTabrixOperate: true,
+      },
+    });
+    expect(payload.compactSummary.lastAiOperatedTabAttributeGroups).toMatchObject({
+      identity: {
+        tabId: 202,
+        title: 'AI Target',
+      },
+      runtime: {
+        active: false,
+        status: 'complete',
+      },
+      ownership: {
+        openedBy: 'user_or_page',
+        aiOperationState: 'recently_operated',
+        lastAiOperation: 'read_page',
+        lastAiOperationConfidence: 0.95,
+        lastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
+      },
+      operability: {
+        canTabrixOperate: true,
+      },
     });
     expect(payload.compactSummary.operationRouting).toMatchObject({
       browserActiveTabId: 201,

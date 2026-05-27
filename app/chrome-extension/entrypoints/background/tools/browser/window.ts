@@ -402,6 +402,10 @@ class WindowTool extends BaseBrowserToolExecutor {
             latestAiOperatedTab,
             'latest_ai_operated_tab',
           ),
+          currentTabAttributeGroups: browserWorld.summary.currentTabAttributeGroups,
+          lastAiOperatedTabAttributeGroups: browserWorld.summary.lastAiOperatedTabAttributeGroups,
+          tabAttributeGroupClaimBoundary:
+            'Tab attribute groups describe browser object identity/runtime/ownership/operability only; they do not prove page content, account state, login success, task success, or API/CDP reuse.',
           operationRouting: {
             browserActiveTabId: browserWorld.browserActiveTabId,
             latestAiOperatedTabId: browserWorld.summary.aiOperationState.latestAiOperatedTabId,
