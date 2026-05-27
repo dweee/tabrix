@@ -554,6 +554,13 @@ function markActiveTabWithinWindow(windowId: number, activeTabId: number): void 
   }
 }
 
+function markFocusedWindow(focusedWindowId: number | null): void {
+  for (const [id, window] of windowsById) {
+    const focused = id === focusedWindowId;
+    windowsById.set(id, { ...window, focused, isFocused: focused, updatedAtMs: nowMs() });
+  }
+}
+
 function refreshWindowDerivedTabState(windowId: number): void {
   const window = windowsById.get(windowId);
   if (!window) return;
@@ -764,6 +771,7 @@ export function initBrowserWorldInventory(): void {
     const normalized = normalizeWindow(window);
     if (normalized) windowsById.set(normalized.windowId, normalized);
     upsertTabsFromWindow(window);
+    if (normalized?.focused === true) markFocusedWindow(normalized.windowId);
     pushEvent({
       eventKind: 'window_created',
       tabId: normalized?.activeTabId ?? null,
@@ -793,10 +801,7 @@ export function initBrowserWorldInventory(): void {
     });
   });
   bind(chrome.windows?.onFocusChanged, (windowId: number) => {
-    for (const [id, window] of windowsById) {
-      const focused = id === windowId;
-      windowsById.set(id, { ...window, focused, isFocused: focused, updatedAtMs: nowMs() });
-    }
+    markFocusedWindow(windowId >= 0 ? windowId : null);
     const focusedWindow = windowsById.get(windowId);
     pushEvent({
       eventKind: 'window_focus_changed',
@@ -812,6 +817,7 @@ export function initBrowserWorldInventory(): void {
     const normalized = normalizeWindow(window, previous);
     if (normalized) windowsById.set(normalized.windowId, normalized);
     upsertTabsFromWindow(window);
+    if (normalized?.focused === true) markFocusedWindow(normalized.windowId);
     pushEvent({
       eventKind: 'window_bounds_changed',
       tabId: normalized?.activeTabId ?? null,

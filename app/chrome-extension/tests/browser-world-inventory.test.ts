@@ -767,6 +767,65 @@ describe('browser world inventory', () => {
     );
   });
 
+  it('keeps only the newly created focused BrowserWindowObject focused', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    listeners.windowCreated[0]?.({
+      id: 2,
+      focused: true,
+      state: 'normal',
+      type: 'normal',
+      width: 900,
+      height: 700,
+      left: 20,
+      top: 30,
+      tabs: [
+        {
+          id: 21,
+          windowId: 2,
+          url: 'https://focused-window.test/',
+          title: 'Focused window',
+          active: true,
+          status: 'complete',
+          discarded: false,
+          audible: false,
+          mutedInfo: { muted: false },
+          pinned: false,
+        },
+      ],
+    } as chrome.windows.Window);
+
+    const snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.focusedWindowId).toBe(2);
+    expect(snapshot.browserActiveTabId).toBe(21);
+    expect(snapshot.windows.find((window) => window.windowId === 1)).toMatchObject({
+      windowId: 1,
+      focused: false,
+      isFocused: false,
+    });
+    expect(snapshot.windows.find((window) => window.windowId === 2)).toMatchObject({
+      windowId: 2,
+      focused: true,
+      isFocused: true,
+      activeTabId: 21,
+      activeTabCanOperate: true,
+      canTabrixOperate: true,
+    });
+    expect(snapshot.summary.windowStateMatrix).toMatchObject({
+      total: 2,
+      focused: 1,
+      unfocused: 1,
+      operable: 2,
+    });
+    expect(snapshot.summary.windowOperationState).toMatchObject({
+      focusedWindowId: 2,
+      focusedWindowActiveTabId: 21,
+      relationToCurrentOperableWindow: 'focused_window_visible_operable',
+      canOperateFocusedWindow: true,
+    });
+  });
+
   it('keeps BrowserWindowObject focus and operability in sync when active state changes', async () => {
     initBrowserWorldInventory();
     await getBrowserWorldSnapshot();
