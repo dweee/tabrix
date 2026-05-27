@@ -3851,6 +3851,29 @@ describe('handleToolCall execution wrapper', () => {
       expect(auto.readPageCount).toBe(2);
     });
 
+    it('chrome_navigate refresh invalidates redundancy state for the next default-shape read', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:91');
+      Object.defineProperty(auto, 'readBudget', { value: 5, writable: false });
+
+      mockReadPageRoundTrip('before-refresh');
+      await handleToolCall('chrome_read_page', { tabId: 91, requestedLayer: 'L0+L1' });
+      expect(auto.lastReadLayer).toBe('L0+L1');
+
+      mockNavigateRoundTrip('refreshed', 91);
+      await handleToolCall('chrome_navigate', { tabId: 91, refresh: true });
+      expect(auto.lastReadLayer).toBeNull();
+
+      mockReadPageRoundTrip('after-refresh');
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 91,
+        requestedLayer: 'L0+L1',
+      });
+      expect(result.isError).toBeFalsy();
+      expect(auto.lastReadLayer).toBe('L0+L1');
+      expect(auto.readPageCount).toBe(2);
+    });
+
     it('records run-owned identity on the returned tab auto context for new-tab navigation', async () => {
       markBridgeReady();
 

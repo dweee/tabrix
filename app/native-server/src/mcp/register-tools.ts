@@ -975,7 +975,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         });
       }
       const postProcessorRawResult = ensureStructuredLegacyActionResult(name, response.data);
-      if (taskContext && shouldInvalidateReadAfterInteraction(name)) {
+      if (taskContext && shouldInvalidateReadAfterInteraction(name, args)) {
         taskContext.notePageInteraction({
           action: name,
           tabId: readPositiveInteger(args, 'tabId'),
@@ -1784,13 +1784,19 @@ function shouldPreferVisibleRowsForMarkdownAiContext(
   return semanticListRegion || visibleRows.cardRowsCount > 0 || visibleRows.cardExtractorUsed;
 }
 
-function shouldInvalidateReadAfterInteraction(toolName: string): boolean {
-  return (
+function shouldInvalidateReadAfterInteraction(toolName: string, args?: unknown): boolean {
+  if (
     toolName === TOOL_NAMES.BROWSER.CLICK ||
     toolName === TOOL_NAMES.BROWSER.FILL ||
     toolName === TOOL_NAMES.BROWSER.KEYBOARD ||
     toolName === TOOL_NAMES.BROWSER.SWITCH_TAB
-  );
+  ) {
+    return true;
+  }
+
+  if (toolName !== TOOL_NAMES.BROWSER.NAVIGATE) return false;
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return false;
+  return (args as Record<string, unknown>).refresh === true;
 }
 
 function inferPageInteractionChangeCause(
