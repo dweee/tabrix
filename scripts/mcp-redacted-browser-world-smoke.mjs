@@ -860,6 +860,9 @@ export function buildStepSummary(step, payload, targetTabId) {
     compactTabLimit: redacted.compactTabLimit,
     activeTabIncludedInCompactTabs: redacted.activeTabIncludedInCompactTabs,
     activeObject: redacted.activeObject,
+    browserActiveObject: redacted.browserActiveObject,
+    latestAiOperatedObject: redacted.latestAiOperatedObject,
+    operationRouting: redacted.operationRouting,
     targetTab: redacted.targetTab,
     counts: redacted.counts,
     tabLifecycleState: redacted.tabLifecycleState,
@@ -1090,6 +1093,17 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
             typeof step.activeObject?.tabStatus === 'string' &&
             typeof step.activeObject?.tabOperabilityReason === 'string' &&
             typeof step.activeObject?.windowOperabilityReason === 'string' &&
+            step.browserActiveObject?.objectPresent === true &&
+            step.browserActiveObject?.tabIdPresent === true &&
+            typeof step.browserActiveObject?.operabilityReason === 'string' &&
+            step.latestAiOperatedObject?.objectPresent === true &&
+            step.latestAiOperatedObject?.tabIdPresent === true &&
+            typeof step.latestAiOperatedObject?.operabilityReason === 'string' &&
+            step.operationRouting?.browserActiveTabIdPresent === true &&
+            step.operationRouting?.latestAiOperatedTabIdPresent === true &&
+            typeof step.operationRouting?.relationToBrowserActiveTab === 'string' &&
+            step.operationRouting?.summaryPresent === true &&
+            step.operationRouting?.claimBoundaryPresent === true &&
             step.activeTabIncludedInCompactTabs === true,
         ),
     };
