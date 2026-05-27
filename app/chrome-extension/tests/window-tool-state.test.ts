@@ -1,8 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { windowTool } from '@/entrypoints/background/tools/browser/window';
+import {
+  getBrowserWorldSnapshot,
+  markBrowserWorldTabAiOperated,
+  resetBrowserWorldInventoryForTests,
+} from '@/entrypoints/background/browser-world-inventory';
 
 describe('get_windows_and_tabs state inventory', () => {
   beforeEach(() => {
+    resetBrowserWorldInventoryForTests();
     (chrome as unknown as { windows: { getAll: ReturnType<typeof vi.fn> } }).windows = {
       getAll: vi.fn(),
     };
@@ -101,6 +107,45 @@ describe('get_windows_and_tabs state inventory', () => {
             'Browser object inventory: windows=2, tabs=2, activeTab=102, aiOpened=0, userOrPageOpened=2, operable=2, currentOperation=no_ai_operation_observed.',
           claimBoundary:
             'Object inventory summary contains browser lifecycle ids and routing facts only; it does not prove page content understanding, account state, login success, or API/CDP reuse.',
+        },
+        browserActiveObject: {
+          objectKind: 'BrowserTabObject',
+          role: 'browser_active_tab',
+          tabId: 102,
+          windowId: 10,
+          title: 'Active',
+          url: 'https://example.test/active',
+          active: true,
+          status: 'loading',
+          openedBy: 'user_or_page',
+          openedByConfidence: 0.7,
+          openedByReason: 'chrome_tabs_openerTabId_present',
+          aiOperationState: 'idle',
+          lastAiOperation: null,
+          lastAiOperationConfidence: null,
+          lastAiOperationReason: null,
+          canTabrixOperate: true,
+          operabilityReason: 'regular_web_page',
+        },
+        latestAiOperatedObject: {
+          objectKind: 'BrowserTabObject',
+          role: 'latest_ai_operated_tab',
+          tabId: null,
+          windowId: null,
+          operabilityReason: 'tab_not_observed',
+        },
+        operationRouting: {
+          browserActiveTabId: 102,
+          latestAiOperatedTabId: null,
+          relationToBrowserActiveTab: 'no_ai_operation_observed',
+          canContinueOnLatestAiOperatedTab: null,
+          latestAiOperation: null,
+          latestAiOperationConfidence: null,
+          latestAiOperationReason: null,
+          summary:
+            'Current operation object: no AI-operated tab page object has been observed yet.',
+          claimBoundary:
+            'Operation routing identifies browser tab objects only; it does not prove page action postconditions or task completion.',
         },
         windows: [
           {
@@ -328,6 +373,86 @@ describe('get_windows_and_tabs state inventory', () => {
         },
       ],
     });
+  });
+
+  it('surfaces browser-active and latest AI-operated objects for routing decisions', async () => {
+    const windows = [
+      {
+        id: 10,
+        state: 'normal',
+        focused: true,
+        type: 'normal',
+        incognito: false,
+        tabs: [
+          {
+            id: 201,
+            url: 'https://example.test/active',
+            pendingUrl: '',
+            title: 'Active User Page',
+            active: true,
+            status: 'complete',
+            discarded: false,
+            audible: false,
+            mutedInfo: { muted: false },
+            pinned: false,
+          },
+          {
+            id: 202,
+            url: 'https://example.test/ai-target',
+            pendingUrl: '',
+            title: 'AI Target',
+            active: false,
+            status: 'complete',
+            discarded: false,
+            audible: false,
+            mutedInfo: { muted: false },
+            pinned: false,
+          },
+        ],
+      },
+    ] as chrome.windows.Window[];
+
+    (
+      chrome as unknown as { windows: { getAll: ReturnType<typeof vi.fn> } }
+    ).windows.getAll.mockResolvedValue(windows);
+
+    await getBrowserWorldSnapshot();
+    markBrowserWorldTabAiOperated(202, 'read_page');
+
+    const result = await windowTool.execute();
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.compactSummary.browserActiveObject).toMatchObject({
+      role: 'browser_active_tab',
+      tabId: 201,
+      title: 'Active User Page',
+      active: true,
+      openedBy: 'user_or_page',
+      canTabrixOperate: true,
+    });
+    expect(payload.compactSummary.latestAiOperatedObject).toMatchObject({
+      role: 'latest_ai_operated_tab',
+      tabId: 202,
+      title: 'AI Target',
+      active: false,
+      lastAiOperation: 'read_page',
+      lastAiOperationConfidence: 0.95,
+      lastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
+      canTabrixOperate: true,
+    });
+    expect(payload.compactSummary.operationRouting).toMatchObject({
+      browserActiveTabId: 201,
+      latestAiOperatedTabId: 202,
+      relationToBrowserActiveTab: 'latest_ai_operated_background_tab',
+      canContinueOnLatestAiOperatedTab: false,
+      latestAiOperation: 'read_page',
+      latestAiOperationConfidence: 0.95,
+      latestAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
+    });
+    expect(payload.compactSummary.operationRouting.summary).toContain(
+      'latest AI-operated tab 202 is not browser-active',
+    );
   });
 
   it('keeps compactSummary bounded while preserving full window tab detail', async () => {

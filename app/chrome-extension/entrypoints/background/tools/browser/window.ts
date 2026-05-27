@@ -1,7 +1,10 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
-import { refreshBrowserWorldSnapshot } from '../../browser-world-inventory';
+import {
+  refreshBrowserWorldSnapshot,
+  type BrowserWorldTabObject,
+} from '../../browser-world-inventory';
 
 const COMPACT_TABS_PER_WINDOW_LIMIT = 12;
 const COMPACT_OBJECT_ID_LIMIT = 12;
@@ -36,11 +39,60 @@ function buildCompactIdSet(ids: number[]) {
   };
 }
 
+function buildCompactTabObject(tab: BrowserWorldTabObject | null, role: string) {
+  if (!tab) {
+    return {
+      objectKind: 'BrowserTabObject',
+      role,
+      tabId: null,
+      windowId: null,
+      title: null,
+      url: null,
+      active: null,
+      status: null,
+      openedBy: null,
+      openedByConfidence: null,
+      openedByReason: null,
+      aiOperationState: null,
+      lastAiOperation: null,
+      lastAiOperationConfidence: null,
+      lastAiOperationReason: null,
+      canTabrixOperate: null,
+      operabilityReason: 'tab_not_observed',
+    };
+  }
+  return {
+    objectKind: tab.objectKind,
+    role,
+    tabId: tab.tabId,
+    windowId: tab.windowId,
+    title: tab.title,
+    url: tab.url,
+    active: tab.active,
+    status: tab.status,
+    openedBy: tab.openedBy,
+    openedByConfidence: tab.openedByConfidence,
+    openedByReason: tab.openedByReason,
+    aiOperationState: tab.aiOperationState,
+    lastAiOperation: tab.lastAiOperation,
+    lastAiOperationConfidence: tab.lastAiOperationConfidence,
+    lastAiOperationReason: tab.lastAiOperationReason,
+    canTabrixOperate: tab.canTabrixOperate,
+    operabilityReason: tab.operabilityReason,
+  };
+}
+
 class WindowTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS;
   async execute(): Promise<ToolResult> {
     try {
       const browserWorld = await refreshBrowserWorldSnapshot();
+      const browserActiveTab =
+        browserWorld.tabs.find((tab) => tab.tabId === browserWorld.browserActiveTabId) ?? null;
+      const latestAiOperatedTab =
+        browserWorld.tabs.find(
+          (tab) => tab.tabId === browserWorld.summary.aiOperationState.latestAiOperatedTabId,
+        ) ?? null;
 
       const structuredWindows = browserWorld.windows.map((window) => {
         const tabs = browserWorld.tabs
@@ -150,6 +202,26 @@ class WindowTool extends BaseBrowserToolExecutor {
             summary: `Browser object inventory: windows=${browserWorld.windowCount}, tabs=${browserWorld.tabCount}, activeTab=${browserWorld.browserActiveTabId ?? 'unknown'}, aiOpened=${browserWorld.aiOpenedTabIds.length}, userOrPageOpened=${browserWorld.userOrPageOpenedTabIds.length}, operable=${browserWorld.operableTabIds.length}, currentOperation=${browserWorld.summary.aiOperationState.relationToBrowserActiveTab}.`,
             claimBoundary:
               'Object inventory summary contains browser lifecycle ids and routing facts only; it does not prove page content understanding, account state, login success, or API/CDP reuse.',
+          },
+          browserActiveObject: buildCompactTabObject(browserActiveTab, 'browser_active_tab'),
+          latestAiOperatedObject: buildCompactTabObject(
+            latestAiOperatedTab,
+            'latest_ai_operated_tab',
+          ),
+          operationRouting: {
+            browserActiveTabId: browserWorld.browserActiveTabId,
+            latestAiOperatedTabId: browserWorld.summary.aiOperationState.latestAiOperatedTabId,
+            relationToBrowserActiveTab:
+              browserWorld.summary.aiOperationState.relationToBrowserActiveTab,
+            canContinueOnLatestAiOperatedTab:
+              browserWorld.summary.aiOperationState.canContinueOnLatestAiOperatedTab,
+            latestAiOperation: browserWorld.summary.aiOperationState.latestAiOperation,
+            latestAiOperationConfidence:
+              browserWorld.summary.aiOperationState.latestAiOperationConfidence,
+            latestAiOperationReason: browserWorld.summary.aiOperationState.latestAiOperationReason,
+            summary: browserWorld.summary.currentOperationConclusion,
+            claimBoundary:
+              'Operation routing identifies browser tab objects only; it does not prove page action postconditions or task completion.',
           },
           windows: structuredWindows.map((window) => ({
             windowId: window.windowId,
