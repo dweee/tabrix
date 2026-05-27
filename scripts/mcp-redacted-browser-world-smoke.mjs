@@ -267,6 +267,36 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     payload?.compactSummary?.aiOperationState ?? payload?.summary?.aiOperationState ?? null;
   const objectInventory =
     payload?.compactSummary?.objectInventory ?? payload?.summary?.objectInventory ?? null;
+  const browserActiveObject = payload?.compactSummary?.browserActiveObject ?? null;
+  const latestAiOperatedObject = payload?.compactSummary?.latestAiOperatedObject ?? null;
+  const operationRouting = payload?.compactSummary?.operationRouting ?? null;
+  const redactCompactOperationObject = (object) =>
+    object
+      ? {
+          objectPresent: true,
+          role: typeof object.role === 'string' ? object.role : null,
+          tabIdPresent: Number.isInteger(object.tabId),
+          windowIdPresent: Number.isInteger(object.windowId),
+          active: typeof object.active === 'boolean' ? object.active : null,
+          status: typeof object.status === 'string' ? object.status : null,
+          openedBy: typeof object.openedBy === 'string' ? object.openedBy : null,
+          openedByConfidence:
+            typeof object.openedByConfidence === 'number' ? object.openedByConfidence : null,
+          aiOperationState:
+            typeof object.aiOperationState === 'string' ? object.aiOperationState : null,
+          lastAiOperation:
+            typeof object.lastAiOperation === 'string' ? object.lastAiOperation : null,
+          lastAiOperationConfidence:
+            typeof object.lastAiOperationConfidence === 'number'
+              ? object.lastAiOperationConfidence
+              : null,
+          lastAiOperationReasonPresent: typeof object.lastAiOperationReason === 'string',
+          canTabrixOperate:
+            typeof object.canTabrixOperate === 'boolean' ? object.canTabrixOperate : null,
+          operabilityReason:
+            typeof object.operabilityReason === 'string' ? object.operabilityReason : null,
+        }
+      : { objectPresent: false };
 
   return {
     callSucceeded: true,
@@ -425,6 +455,34 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
             : null,
           summaryPresent: typeof objectInventory.summary === 'string',
           claimBoundaryPresent: typeof objectInventory.claimBoundary === 'string',
+        }
+      : null,
+    browserActiveObject: redactCompactOperationObject(browserActiveObject),
+    latestAiOperatedObject: redactCompactOperationObject(latestAiOperatedObject),
+    operationRouting: operationRouting
+      ? {
+          browserActiveTabIdPresent: Number.isInteger(operationRouting.browserActiveTabId),
+          latestAiOperatedTabIdPresent: Number.isInteger(operationRouting.latestAiOperatedTabId),
+          relationToBrowserActiveTab:
+            typeof operationRouting.relationToBrowserActiveTab === 'string'
+              ? operationRouting.relationToBrowserActiveTab
+              : null,
+          canContinueOnLatestAiOperatedTab:
+            typeof operationRouting.canContinueOnLatestAiOperatedTab === 'boolean'
+              ? operationRouting.canContinueOnLatestAiOperatedTab
+              : null,
+          latestAiOperation:
+            typeof operationRouting.latestAiOperation === 'string'
+              ? operationRouting.latestAiOperation
+              : null,
+          latestAiOperationConfidence:
+            typeof operationRouting.latestAiOperationConfidence === 'number'
+              ? operationRouting.latestAiOperationConfidence
+              : null,
+          latestAiOperationReasonPresent:
+            typeof operationRouting.latestAiOperationReason === 'string',
+          summaryPresent: typeof operationRouting.summary === 'string',
+          claimBoundaryPresent: typeof operationRouting.claimBoundary === 'string',
         }
       : null,
     tabStateMatrix: tabStateMatrix
