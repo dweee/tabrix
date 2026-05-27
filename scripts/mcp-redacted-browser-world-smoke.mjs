@@ -11,6 +11,7 @@ const DEFAULT_PUBLIC_URL = 'https://example.com/?tabrix_browser_world_smoke=1';
 export function parseArgs(argv) {
   const args = {
     url: DEFAULT_PUBLIC_URL,
+    urls: [],
     keepOpen: false,
     skipOpen: false,
     scenario: 'single',
@@ -20,6 +21,15 @@ export function parseArgs(argv) {
     const part = argv[index];
     if (part === '--url') {
       args.url = argv[index + 1] || '';
+      if (args.url) args.urls.push(args.url);
+      index += 1;
+    } else if (part === '--urls') {
+      args.urls.push(
+        ...(argv[index + 1] || '')
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean),
+      );
       index += 1;
     } else if (part === '--keep-open') {
       args.keepOpen = true;
@@ -37,6 +47,11 @@ export function parseArgs(argv) {
     }
   }
   return args;
+}
+
+export function resolveSmokeUrls(args) {
+  const urls = args.urls?.length ? args.urls : [args.url || DEFAULT_PUBLIC_URL];
+  return urls.map((url) => assertPublicHttpUrl(url));
 }
 
 export function assertPublicHttpUrl(rawUrl) {
@@ -354,24 +369,59 @@ function runLifecycleSmoke(cliPath, smokeUrl, args) {
   };
 }
 
+function runMatrixSmoke(cliPath, smokeUrls, args) {
+  if (args.skipOpen) {
+    throw new Error('--scenario matrix cannot be combined with --skip-open.');
+  }
+  const targets = smokeUrls.map((smokeUrl, index) => {
+    const result = runLifecycleSmoke(cliPath, smokeUrl, args);
+    return {
+      targetIndex: index + 1,
+      openedPublicTestTabs: result.openedPublicTestTabs,
+      closeSucceeded: result.closeSucceeded,
+      cleanup: result.cleanup,
+      lifecycleMatrix: result.lifecycleMatrix,
+      passed:
+        result.openedPublicTestTabs === 3 &&
+        result.closeSucceeded === true &&
+        result.lifecycleMatrix.every(
+          (step) =>
+            step.targetTab?.wasFound === true &&
+            step.targetTab?.openedBy === 'ai' &&
+            step.targetTab?.canTabrixOperate === true &&
+            step.activeTabIncludedInCompactTabs === true,
+        ),
+    };
+  });
+  return {
+    scenario: 'matrix',
+    targetCount: targets.length,
+    allTargetsPassed: targets.every((target) => target.passed),
+    targets,
+  };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(
-      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--scenario single|lifecycle] [--skip-open] [--keep-open]\n`,
+      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|matrix] [--skip-open] [--keep-open]\n`,
     );
     return;
   }
 
-  const smokeUrl = assertPublicHttpUrl(args.url);
+  const smokeUrls = resolveSmokeUrls(args);
+  const smokeUrl = smokeUrls[0];
   const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const cliPath = path.join(rootDir, 'app', 'native-server', 'dist', 'cli.js');
 
   try {
     const smokeResult =
-      args.scenario === 'lifecycle'
-        ? runLifecycleSmoke(cliPath, smokeUrl, args)
-        : runSingleSmoke(cliPath, smokeUrl, args);
+      args.scenario === 'matrix'
+        ? runMatrixSmoke(cliPath, smokeUrls, args)
+        : args.scenario === 'lifecycle'
+          ? runLifecycleSmoke(cliPath, smokeUrl, args)
+          : runSingleSmoke(cliPath, smokeUrl, args);
 
     process.stdout.write(
       `${JSON.stringify(

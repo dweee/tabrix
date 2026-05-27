@@ -8,6 +8,7 @@ import {
   extractJsonObject,
   extractNavigateTabId,
   parseArgs,
+  resolveSmokeUrls,
 } from './mcp-redacted-browser-world-smoke.mjs';
 
 test('extractJsonObject parses the bounded CLI Result payload', () => {
@@ -124,12 +125,28 @@ test('parseArgs supports safe smoke switches', () => {
     ]),
     {
       url: 'https://example.org/',
+      urls: ['https://example.org/'],
       keepOpen: true,
       skipOpen: true,
       scenario: 'lifecycle',
       timeoutMs: 60_000,
     },
   );
+});
+
+test('resolveSmokeUrls supports repeated and comma-separated public urls', () => {
+  const args = parseArgs([
+    '--url',
+    'https://example.com/a',
+    '--urls',
+    'https://example.org/b,https://example.net/c',
+  ]);
+
+  assert.deepEqual(resolveSmokeUrls(args), [
+    'https://example.com/a',
+    'https://example.org/b',
+    'https://example.net/c',
+  ]);
 });
 
 test('buildPublicSmokeUrl keeps the target public and adds case metadata', () => {
