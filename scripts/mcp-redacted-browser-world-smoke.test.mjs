@@ -627,6 +627,9 @@ test('buildWindowStateDriftSummary reports stable repeated observer samples', ()
         tabCount: 4,
         compactSummaryBounded: true,
         retentionWithinLimit: true,
+        refreshHealth: {
+          lastRefreshDecision: 'full_chrome_resync',
+        },
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
       },
@@ -637,6 +640,9 @@ test('buildWindowStateDriftSummary reports stable repeated observer samples', ()
         tabCount: 4,
         compactSummaryBounded: true,
         retentionWithinLimit: true,
+        refreshHealth: {
+          lastRefreshDecision: 'skipped_recent_resync',
+        },
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
       },
@@ -648,6 +654,7 @@ test('buildWindowStateDriftSummary reports stable repeated observer samples', ()
     allSamplesObserved: true,
     allSamplesCompactBounded: true,
     allSamplesRetentionBounded: true,
+    allSamplesRefreshHealthPresent: true,
     windowCountStable: true,
     tabCountStable: true,
     focusedWindowCountStable: true,
@@ -666,6 +673,9 @@ test('buildWindowStateDriftSummary reports drift without failing observation', (
         tabCount: 4,
         compactSummaryBounded: true,
         retentionWithinLimit: true,
+        refreshHealth: {
+          lastRefreshDecision: 'full_chrome_resync',
+        },
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
       },
@@ -676,6 +686,9 @@ test('buildWindowStateDriftSummary reports drift without failing observation', (
         tabCount: 5,
         compactSummaryBounded: true,
         retentionWithinLimit: true,
+        refreshHealth: {
+          lastRefreshDecision: 'skipped_recent_resync',
+        },
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
       },
@@ -685,9 +698,41 @@ test('buildWindowStateDriftSummary reports drift without failing observation', (
   assert.equal(summary.allSamplesObserved, true);
   assert.equal(summary.allSamplesCompactBounded, true);
   assert.equal(summary.allSamplesRetentionBounded, true);
+  assert.equal(summary.allSamplesRefreshHealthPresent, true);
   assert.equal(summary.windowCountStable, true);
   assert.equal(summary.tabCountStable, false);
   assert.equal(summary.driftObserved, true);
+});
+
+test('buildWindowStateDriftSummary requires refresh health for every sample', () => {
+  const summary = buildWindowStateDriftSummary([
+    {
+      verdict: 'WINDOW_STATE_OBSERVED',
+      redacted: {
+        tabCount: 4,
+        compactSummaryBounded: true,
+        retentionWithinLimit: true,
+        refreshHealth: {
+          lastRefreshDecision: 'full_chrome_resync',
+        },
+        windows: { total: 1, focused: 1 },
+        windowOperationState: { focusedWindowState: 'normal' },
+      },
+    },
+    {
+      verdict: 'WINDOW_STATE_OBSERVED',
+      redacted: {
+        tabCount: 4,
+        compactSummaryBounded: true,
+        retentionWithinLimit: true,
+        windows: { total: 1, focused: 1 },
+        windowOperationState: { focusedWindowState: 'normal' },
+      },
+    },
+  ]);
+
+  assert.equal(summary.allSamplesObserved, true);
+  assert.equal(summary.allSamplesRefreshHealthPresent, false);
 });
 
 test('buildPostCloseTargetCleanupSummary reports closed targets without raw tab data', () => {

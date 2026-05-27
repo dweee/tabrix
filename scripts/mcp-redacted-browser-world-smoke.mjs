@@ -1370,6 +1370,9 @@ export function buildWindowStateDriftSummary(samples) {
   const retentionBoundedSamples = samples.filter(
     (sample) => sample?.redacted?.retentionWithinLimit === true,
   );
+  const refreshHealthSamples = samples.filter(
+    (sample) => typeof sample?.redacted?.refreshHealth?.lastRefreshDecision === 'string',
+  );
   const windowCounts = samples.map((sample) => sample?.redacted?.windows?.total);
   const tabCounts = samples.map((sample) => sample?.redacted?.tabCount);
   const focusedWindowCounts = samples.map((sample) => sample?.redacted?.windows?.focused);
@@ -1391,6 +1394,8 @@ export function buildWindowStateDriftSummary(samples) {
     allSamplesCompactBounded: samples.length > 0 && compactBoundedSamples.length === samples.length,
     allSamplesRetentionBounded:
       samples.length > 0 && retentionBoundedSamples.length === samples.length,
+    allSamplesRefreshHealthPresent:
+      samples.length > 0 && refreshHealthSamples.length === samples.length,
     windowCountStable,
     tabCountStable,
     focusedWindowCountStable,
@@ -1447,6 +1452,7 @@ function runWindowStateDriftSmoke(cliPath, args) {
       tabCount: sample.redacted.tabCount,
       compactSummaryBounded: sample.redacted.compactSummaryBounded,
       retentionWithinLimit: sample.redacted.retentionWithinLimit,
+      refreshHealth: sample.redacted.refreshHealth,
       objectInventory: sample.redacted.objectInventory,
       windowStateMatrix: sample.redacted.windowStateMatrix,
       windowOperationState: sample.redacted.windowOperationState,
@@ -1455,7 +1461,8 @@ function runWindowStateDriftSmoke(cliPath, args) {
     verdict:
       driftSummary.allSamplesObserved === true &&
       driftSummary.allSamplesCompactBounded === true &&
-      driftSummary.allSamplesRetentionBounded === true
+      driftSummary.allSamplesRetentionBounded === true &&
+      driftSummary.allSamplesRefreshHealthPresent === true
         ? 'WINDOW_STATE_REPEATED_OBSERVER_PASS'
         : 'WINDOW_STATE_REPEATED_OBSERVER_NOT_PROVEN',
   };
