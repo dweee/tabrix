@@ -186,6 +186,7 @@ function sendMcpJsonRpcError(
   body: unknown,
   code: number,
   message: string,
+  data?: Record<string, unknown>,
 ): void {
   reply.code(statusCode).send({
     jsonrpc: '2.0',
@@ -193,6 +194,7 @@ function sendMcpJsonRpcError(
     error: {
       code,
       message,
+      ...(data ? { data } : {}),
     },
   });
 }
@@ -742,6 +744,11 @@ export class Server {
           request.body,
           -32001,
           ERROR_MESSAGES.STALE_MCP_SESSION,
+          {
+            retryable: true,
+            recoveryAction: 'reinitialize_without_session_id',
+            staleSessionIdReceived: true,
+          },
         );
         return;
       } else if (!sessionId && isInitializeRequest(request.body)) {

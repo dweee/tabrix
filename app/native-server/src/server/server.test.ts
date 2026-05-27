@@ -652,6 +652,11 @@ describe('服务器测试', () => {
       error: {
         code: -32001,
         message: expect.stringContaining('MCP session not found'),
+        data: {
+          retryable: true,
+          recoveryAction: 'reinitialize_without_session_id',
+          staleSessionIdReceived: true,
+        },
       },
     });
     expect(stale.body.error.message).toContain('initialize');
