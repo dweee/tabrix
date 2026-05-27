@@ -500,11 +500,27 @@ function buildRuntimeStateGroup(
   const projection = input.pageProjection;
   const status = projection?.readiness ?? 'unknown';
   const stability = projection?.stability ?? 'unknown';
+  const browserRuntimeSource = input.ownershipRuntime?.currentTabRuntimeStateSource ?? 'unknown';
+  const pageContentSource = input.selectedDataSource ?? projection?.chosenDataSource ?? 'unknown';
   return groupState({
     status,
-    summary: `readiness=${status}; stability=${stability}; selectedDataSource=${input.selectedDataSource ?? 'unknown'}`,
+    summary:
+      `readiness=${status}; stability=${stability}; ` +
+      `selectedDataSource=${pageContentSource}; ` +
+      `browserRuntimeSource=${browserRuntimeSource}; pageContentSource=${pageContentSource}; ` +
+      'browser object state and page content understanding are separate evidence lanes.',
+    facts: {
+      objectKind: 'BrowserRuntimeEvidence',
+      browserRuntimeSource,
+      pageContentSource,
+      readiness: status,
+      stability,
+    },
     confidence: projection ? projection.sourceConfidence : 0.3,
-    evidenceRefs: projection?.projectionId ? [`projection:${projection.projectionId}`] : [],
+    evidenceRefs: [
+      ...(projection?.projectionId ? [`projection:${projection.projectionId}`] : []),
+      ...(input.ownershipRuntime ? ['ownershipRuntime'] : []),
+    ],
   });
 }
 
@@ -1146,11 +1162,29 @@ function buildEvidenceStateGroup(
   input: BuildReadPageBrowserPageObjectViewInput,
 ): ReadPageBrowserPageObjectGroupState {
   const verdict = input.sourceRouteHonestyVerdict ?? 'unknown';
+  const browserRuntimeSource = input.ownershipRuntime?.currentTabRuntimeStateSource ?? 'unknown';
+  const pageContentSource =
+    input.selectedDataSource ?? input.pageProjection?.chosenDataSource ?? 'unknown';
   return groupState({
     status: verdict,
-    summary: `sourceRouteHonesty=${verdict}; lifecycle=${input.objectLifecycle.status}; dom_fallback_or_unknown_must_not_be_treated_as_api_cdp_proof.`,
+    summary:
+      `sourceRouteHonesty=${verdict}; lifecycle=${input.objectLifecycle.status}; ` +
+      `browserRuntimeSource=${browserRuntimeSource}; pageContentSource=${pageContentSource}; ` +
+      'browser window/tab state is runtime evidence, pageRegions/content are page evidence; ' +
+      'dom_fallback_or_unknown_must_not_be_treated_as_api_cdp_proof.',
+    facts: {
+      objectKind: 'BrowserEvidenceBoundary',
+      sourceRouteHonesty: verdict,
+      lifecycleStatus: input.objectLifecycle.status,
+      browserRuntimeSource,
+      pageContentSource,
+    },
     confidence: verdict === 'unknown' ? 0.35 : 0.65,
-    evidenceRefs: ['objectLifecycle', 'sourceRouteHonesty'],
+    evidenceRefs: [
+      'objectLifecycle',
+      'sourceRouteHonesty',
+      ...(input.ownershipRuntime ? ['ownershipRuntime'] : []),
+    ],
   });
 }
 

@@ -606,6 +606,25 @@ describe('read_page object lifecycle', () => {
     expect(view.attributeGroups.tab_state.summary).toContain(
       'aiOperationReason=marked_by_tabrix_tool_execution:read_page',
     );
+    expect(view.attributeGroups.runtime_state.summary).toContain(
+      'browserRuntimeSource=browser_world_inventory',
+    );
+    expect(view.attributeGroups.runtime_state.summary).toContain(
+      'pageContentSource=dom_region_rows',
+    );
+    expect(view.attributeGroups.runtime_state.summary).toContain('separate evidence lanes');
+    expect(view.attributeGroups.evidence_state.summary).toContain(
+      'browserRuntimeSource=browser_world_inventory',
+    );
+    expect(view.attributeGroups.evidence_state.summary).toContain(
+      'pageContentSource=dom_region_rows',
+    );
+    expect(view.attributeGroups.evidence_state.summary).toContain(
+      'browser window/tab state is runtime evidence',
+    );
+    expect(view.attributeGroups.evidence_state.summary).toContain(
+      'pageRegions/content are page evidence',
+    );
     expect(view.compact?.primaryConclusion).toContain('One Tab page object');
     expect(view.compact?.primaryConclusion).toContain('tab=42');
     expect(view.compact?.primaryConclusion).toContain('active=true');
