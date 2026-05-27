@@ -723,6 +723,75 @@ describe('browser world inventory', () => {
     });
   });
 
+  it('refreshes BrowserWindowObject operability when the active tab URL changes', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    listeners.tabUpdated[0]?.(
+      10,
+      { status: 'complete', url: 'chrome://settings' },
+      {
+        id: 10,
+        windowId: 1,
+        url: 'chrome://settings',
+        title: 'Settings',
+        active: true,
+        status: 'complete',
+      },
+    );
+
+    let snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.tabs.find((tab) => tab.tabId === 10)).toMatchObject({
+      tabId: 10,
+      active: true,
+      canTabrixOperate: false,
+      operabilityReason: 'browser_internal_page',
+    });
+    expect(snapshot.windows[0]).toMatchObject({
+      activeTabId: 10,
+      activeTabCanOperate: false,
+      canTabrixOperate: false,
+      operabilityReason: 'active_tab_not_operable',
+    });
+    expect(snapshot.summary.windowOperationState).toMatchObject({
+      focusedWindowId: 1,
+      focusedWindowActiveTabCanOperate: false,
+      relationToCurrentOperableWindow: 'focused_window_not_operable',
+    });
+
+    listeners.tabUpdated[0]?.(
+      10,
+      { status: 'complete', url: 'https://example.test/restored' },
+      {
+        id: 10,
+        windowId: 1,
+        url: 'https://example.test/restored',
+        title: 'Restored',
+        active: true,
+        status: 'complete',
+      },
+    );
+
+    snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.tabs.find((tab) => tab.tabId === 10)).toMatchObject({
+      tabId: 10,
+      active: true,
+      canTabrixOperate: true,
+      operabilityReason: 'regular_web_page',
+    });
+    expect(snapshot.windows[0]).toMatchObject({
+      activeTabId: 10,
+      activeTabCanOperate: true,
+      canTabrixOperate: true,
+      operabilityReason: 'active_tab_operable_in_visible_window',
+    });
+    expect(snapshot.summary.windowOperationState).toMatchObject({
+      focusedWindowId: 1,
+      focusedWindowActiveTabCanOperate: true,
+      relationToCurrentOperableWindow: 'focused_window_visible_operable',
+    });
+  });
+
   it('preserves AI ownership and operation state across full Chrome refreshes', async () => {
     initBrowserWorldInventory();
     await getBrowserWorldSnapshot();

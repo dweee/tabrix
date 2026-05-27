@@ -622,6 +622,9 @@ export function initBrowserWorldInventory(): void {
         previous,
       );
       if (normalized) tabsById.set(tabId, normalized);
+      if (typeof normalized?.windowId === 'number' && normalized.active === true) {
+        refreshWindowActiveTabState(normalized.windowId, tabId);
+      }
       pushEvent({
         eventKind: 'tab_updated',
         tabId,
