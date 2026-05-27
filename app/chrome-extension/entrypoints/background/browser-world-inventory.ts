@@ -87,6 +87,8 @@ export interface BrowserWorldSummary {
   };
   currentTabObject: BrowserWorldTabStateSummary | null;
   lastAiOperatedTabObject: BrowserWorldTabStateSummary | null;
+  currentTabAttributeGroups: BrowserWorldTabAttributeGroups | null;
+  lastAiOperatedTabAttributeGroups: BrowserWorldTabAttributeGroups | null;
   counts: {
     windows: number;
     tabs: number;
@@ -96,6 +98,38 @@ export interface BrowserWorldSummary {
   };
   recentChangeSummary: string;
   objectChangeConclusion: string;
+}
+
+export interface BrowserWorldTabAttributeGroups {
+  identity: {
+    objectKind: 'BrowserTabObject';
+    tabId: number;
+    windowId: number | null;
+    url: string;
+    title: string;
+  };
+  runtime: {
+    active: boolean | null;
+    status: string | null;
+    pendingUrl: string;
+    discarded: boolean | null;
+    audible: boolean | null;
+    muted: boolean | null;
+    pinned: boolean | null;
+    openerTabId: number | null;
+  };
+  ownership: {
+    openedBy: BrowserWorldTabOpenedBy;
+    confidence: number;
+    reason: string;
+    aiOperationState: BrowserWorldTabObject['aiOperationState'];
+    lastAiOperation: string | null;
+    lastAiOperationAtMs: number | null;
+  };
+  operability: {
+    canTabrixOperate: boolean | null;
+    reason: string;
+  };
 }
 
 export interface BrowserWorldTabStateSummary {
@@ -597,6 +631,10 @@ function buildSnapshot(): BrowserWorldSnapshot {
       },
       currentTabObject: activeTab ? summarizeTabState(activeTab) : null,
       lastAiOperatedTabObject: lastAiOperatedTab ? summarizeTabState(lastAiOperatedTab) : null,
+      currentTabAttributeGroups: activeTab ? buildTabAttributeGroups(activeTab) : null,
+      lastAiOperatedTabAttributeGroups: lastAiOperatedTab
+        ? buildTabAttributeGroups(lastAiOperatedTab)
+        : null,
       counts: {
         windows: windows.length,
         tabs: tabs.length,
@@ -615,6 +653,40 @@ function buildSnapshot(): BrowserWorldSnapshot {
     recentEvents: [...recentEvents],
     windows,
     tabs,
+  };
+}
+
+function buildTabAttributeGroups(tab: BrowserWorldTabObject): BrowserWorldTabAttributeGroups {
+  return {
+    identity: {
+      objectKind: 'BrowserTabObject',
+      tabId: tab.tabId,
+      windowId: tab.windowId,
+      url: tab.url,
+      title: tab.title,
+    },
+    runtime: {
+      active: tab.active,
+      status: tab.status,
+      pendingUrl: tab.pendingUrl,
+      discarded: tab.discarded,
+      audible: tab.audible,
+      muted: tab.muted,
+      pinned: tab.pinned,
+      openerTabId: tab.openerTabId,
+    },
+    ownership: {
+      openedBy: tab.openedBy,
+      confidence: tab.openedByConfidence,
+      reason: tab.openedByReason,
+      aiOperationState: tab.aiOperationState,
+      lastAiOperation: tab.lastAiOperation,
+      lastAiOperationAtMs: tab.lastAiOperationAtMs,
+    },
+    operability: {
+      canTabrixOperate: tab.canTabrixOperate,
+      reason: tab.operabilityReason,
+    },
   };
 }
 
@@ -656,7 +728,7 @@ function summarizeObjectChangeConclusion(
     return 'No browser object change has been observed yet.';
   }
   if (last.eventKind === 'tab_activated' && activeTab) {
-    return `Current page object is tab ${activeTab.tabId}; owner=${activeTab.openedBy}, operable=${activeTab.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
+    return `Current page object is tab ${activeTab.tabId}; identity=window ${activeTab.windowId ?? 'unknown'}, runtime=status ${activeTab.status ?? 'unknown'}, ownership=${activeTab.openedBy}, operable=${activeTab.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
   }
   if (last.eventKind === 'tab_created') {
     return `Page object tab ${last.tabId ?? 'unknown'} was created; owner=${last.openedBy ?? 'unknown'}, status=${last.status ?? 'unknown'}.`;

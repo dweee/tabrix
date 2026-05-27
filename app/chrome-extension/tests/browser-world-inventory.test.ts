@@ -133,7 +133,30 @@ describe('browser world inventory', () => {
       canTabrixOperate: true,
       operabilityReason: 'regular_web_page',
     });
+    expect(snapshot.summary.currentTabAttributeGroups).toMatchObject({
+      identity: {
+        objectKind: 'BrowserTabObject',
+        tabId: 10,
+        windowId: 1,
+        url: 'https://example.test/a',
+      },
+      runtime: {
+        active: true,
+        status: 'complete',
+        pinned: false,
+      },
+      ownership: {
+        openedBy: 'user_or_page',
+        confidence: 0.7,
+        aiOperationState: 'idle',
+      },
+      operability: {
+        canTabrixOperate: true,
+        reason: 'regular_web_page',
+      },
+    });
     expect(snapshot.summary.lastAiOperatedTabObject).toBeNull();
+    expect(snapshot.summary.lastAiOperatedTabAttributeGroups).toBeNull();
     expect(snapshot.tabs[0]).toMatchObject({
       tabId: 10,
       openedBy: 'user_or_page',
@@ -197,6 +220,8 @@ describe('browser world inventory', () => {
     expect(snapshot.aiOpenedTabIds).toEqual([20]);
     expect(snapshot.browserActiveTabId).toBe(20);
     expect(snapshot.summary.objectChangeConclusion).toContain('Current page object is tab 20');
+    expect(snapshot.summary.objectChangeConclusion).toContain('runtime=status complete');
+    expect(snapshot.summary.objectChangeConclusion).toContain('ownership=ai');
     expect(snapshot.summary.currentTabObject).toMatchObject({
       tabId: 20,
       status: 'complete',
@@ -205,6 +230,31 @@ describe('browser world inventory', () => {
       muted: true,
       pinned: true,
       openerTabId: 10,
+    });
+    expect(snapshot.summary.currentTabAttributeGroups).toMatchObject({
+      identity: {
+        tabId: 20,
+        windowId: 1,
+        url: 'https://ai-opened.test/done',
+      },
+      runtime: {
+        active: true,
+        status: 'complete',
+        audible: true,
+        muted: true,
+        pinned: true,
+        openerTabId: 10,
+      },
+      ownership: {
+        openedBy: 'ai',
+        confidence: 0.95,
+        reason: 'marked_by_tabrix_navigation_before_tabs_onCreated',
+        aiOperationState: 'recently_operated',
+      },
+      operability: {
+        canTabrixOperate: true,
+        reason: 'regular_web_page',
+      },
     });
     expect(snapshot.tabs.find((tab) => tab.tabId === 20)).toMatchObject({
       url: 'https://ai-opened.test/done',
@@ -389,6 +439,20 @@ describe('browser world inventory', () => {
         aiOperationState: 'recently_operated',
         lastAiOperation: 'read_page',
         canTabrixOperate: true,
+      },
+      lastAiOperatedTabAttributeGroups: {
+        identity: {
+          tabId: 10,
+          windowId: 1,
+        },
+        ownership: {
+          openedBy: 'ai',
+          aiOperationState: 'recently_operated',
+          lastAiOperation: 'read_page',
+        },
+        operability: {
+          canTabrixOperate: true,
+        },
       },
       counts: {
         windows: 1,
