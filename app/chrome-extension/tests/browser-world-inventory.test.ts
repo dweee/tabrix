@@ -30,6 +30,7 @@ describe('browser world inventory', () => {
     windowCreated: [] as Listener[],
     windowRemoved: [] as Listener[],
     windowFocusChanged: [] as Listener[],
+    windowBoundsChanged: [] as Listener[],
   };
 
   beforeEach(() => {
@@ -74,6 +75,7 @@ describe('browser world inventory', () => {
       onCreated: hook(listeners.windowCreated),
       onRemoved: hook(listeners.windowRemoved),
       onFocusChanged: hook(listeners.windowFocusChanged),
+      onBoundsChanged: hook(listeners.windowBoundsChanged),
     };
   });
 
@@ -89,6 +91,22 @@ describe('browser world inventory', () => {
     expect(snapshot.browserActiveTabId).toBe(10);
     expect(snapshot.userOrPageOpenedTabIds).toEqual([10, 11]);
     expect(snapshot.operableTabIds).toEqual([10]);
+    expect(snapshot.summary.activeWindow).toMatchObject({
+      windowId: 1,
+      state: 'normal',
+      visibilityState: 'visible',
+      focused: true,
+      canTabrixOperate: true,
+    });
+    expect(snapshot.windows[0]).toMatchObject({
+      windowId: 1,
+      visibilityState: 'visible',
+      isFocused: true,
+      isMinimized: false,
+      activeTabCanOperate: true,
+      canTabrixOperate: true,
+      operabilityReason: 'active_tab_operable_in_visible_window',
+    });
     expect(snapshot.tabs[0]).toMatchObject({
       tabId: 10,
       openedBy: 'user_or_page',
@@ -180,5 +198,37 @@ describe('browser world inventory', () => {
       lastAiOperation: 'read_page',
       canTabrixOperate: true,
     });
+  });
+
+  it('updates BrowserWindowObject operability when window state changes', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    listeners.windowBoundsChanged[0]?.({
+      id: 1,
+      focused: false,
+      state: 'minimized',
+      type: 'normal',
+      tabs: [
+        {
+          id: 10,
+          windowId: 1,
+          url: 'https://example.test/a',
+          title: 'A',
+          active: true,
+          status: 'complete',
+        },
+      ],
+    } as chrome.windows.Window);
+
+    const snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.windows[0]).toMatchObject({
+      windowId: 1,
+      visibilityState: 'minimized',
+      isMinimized: true,
+      canTabrixOperate: false,
+      operabilityReason: 'window_minimized',
+    });
+    expect(snapshot.summary.recentChangeSummary).toContain('bounds or state changed');
   });
 });

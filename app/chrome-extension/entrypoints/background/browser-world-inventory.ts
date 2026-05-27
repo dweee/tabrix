@@ -32,6 +32,9 @@ export interface BrowserWorldWindowObject {
   windowId: number;
   focused: boolean | null;
   state: string;
+  visibilityState: 'visible' | 'minimized' | 'unknown';
+  isFocused: boolean | null;
+  isMinimized: boolean | null;
   type: string;
   incognito: boolean | null;
   width: number | null;
@@ -39,6 +42,9 @@ export interface BrowserWorldWindowObject {
   left: number | null;
   top: number | null;
   activeTabId: number | null;
+  activeTabCanOperate: boolean | null;
+  canTabrixOperate: boolean | null;
+  operabilityReason: string;
   tabCount: number;
   updatedAtMs: number;
 }
@@ -64,6 +70,13 @@ export interface BrowserWorldSnapshot {
 
 export interface BrowserWorldSummary {
   primaryConclusion: string;
+  activeWindow: {
+    windowId: number | null;
+    state: string | null;
+    visibilityState: BrowserWorldWindowObject['visibilityState'] | null;
+    focused: boolean | null;
+    canTabrixOperate: boolean | null;
+  };
   activeTab: {
     tabId: number | null;
     windowId: number | null;
@@ -93,6 +106,7 @@ export interface BrowserWorldEvent {
     | 'window_created'
     | 'window_removed'
     | 'window_focus_changed'
+    | 'window_bounds_changed'
     | 'ai_tab_marked';
   observedAtMs: number;
   tabId: number | null;
@@ -134,6 +148,33 @@ function isOperableUrl(url: string): { canOperate: boolean | null; reason: strin
     return { canOperate: false, reason: 'browser_internal_page' };
   }
   return { canOperate: null, reason: 'unknown_scheme' };
+}
+
+function isOperableWindow(
+  window: Pick<chrome.windows.Window, 'state' | 'type'>,
+  activeTabCanOperate: boolean | null,
+): { canOperate: boolean | null; reason: string } {
+  const windowType = String(window.type || 'unknown');
+  const windowState = String(window.state || 'unknown');
+  if (windowType !== 'normal' && windowType !== 'popup') {
+    return { canOperate: false, reason: 'unsupported_window_type' };
+  }
+  if (windowState === 'minimized') return { canOperate: false, reason: 'window_minimized' };
+  if (windowState === 'unknown') return { canOperate: null, reason: 'window_state_unknown' };
+  if (activeTabCanOperate === false)
+    return { canOperate: false, reason: 'active_tab_not_operable' };
+  if (activeTabCanOperate === null)
+    return { canOperate: null, reason: 'active_tab_operability_unknown' };
+  return { canOperate: true, reason: 'active_tab_operable_in_visible_window' };
+}
+
+function visibilityStateFromChromeWindow(
+  window: Pick<chrome.windows.Window, 'state'>,
+): BrowserWorldWindowObject['visibilityState'] {
+  const state = String(window.state || 'unknown');
+  if (state === 'minimized') return 'minimized';
+  if (state === 'normal' || state === 'maximized' || state === 'fullscreen') return 'visible';
+  return 'unknown';
 }
 
 function normalizeTab(
@@ -191,11 +232,17 @@ function normalizeWindow(window: chrome.windows.Window): BrowserWorldWindowObjec
   if (typeof window.id !== 'number') return null;
   const tabs = Array.isArray(window.tabs) ? window.tabs : [];
   const activeTab = tabs.find((tab) => tab.active === true);
+  const activeTabCanOperate = activeTab ? isOperableUrl(tabUrl(activeTab)).canOperate : null;
+  const windowOperability = isOperableWindow(window, activeTabCanOperate);
+  const state = String(window.state || 'unknown');
   return {
     objectKind: 'BrowserWindowObject',
     windowId: window.id,
     focused: typeof window.focused === 'boolean' ? window.focused : null,
-    state: String(window.state || 'unknown'),
+    state,
+    visibilityState: visibilityStateFromChromeWindow(window),
+    isFocused: typeof window.focused === 'boolean' ? window.focused : null,
+    isMinimized: state === 'minimized' ? true : state === 'unknown' ? null : false,
     type: String(window.type || 'unknown'),
     incognito: typeof window.incognito === 'boolean' ? window.incognito : null,
     width: readInteger(window.width),
@@ -203,6 +250,9 @@ function normalizeWindow(window: chrome.windows.Window): BrowserWorldWindowObjec
     left: readInteger(window.left),
     top: readInteger(window.top),
     activeTabId: typeof activeTab?.id === 'number' ? activeTab.id : null,
+    activeTabCanOperate,
+    canTabrixOperate: windowOperability.canOperate,
+    operabilityReason: windowOperability.reason,
     tabCount: tabs.length,
     updatedAtMs: nowMs(),
   };
@@ -360,6 +410,15 @@ export function initBrowserWorldInventory(): void {
     }
     pushEvent({ eventKind: 'window_focus_changed', tabId: null, windowId });
   });
+  bind((chrome.windows as any)?.onBoundsChanged, (window: chrome.windows.Window) => {
+    const normalized = normalizeWindow(window);
+    if (normalized) windowsById.set(normalized.windowId, normalized);
+    pushEvent({
+      eventKind: 'window_bounds_changed',
+      tabId: normalized?.activeTabId ?? null,
+      windowId: normalized?.windowId ?? null,
+    });
+  });
 }
 
 export function markBrowserWorldTabAiCreated(tabId: number | null | undefined): void {
@@ -458,6 +517,13 @@ function buildSnapshot(): BrowserWorldSnapshot {
     operableTabIds,
     summary: {
       primaryConclusion: `Browser world snapshot: ${windows.length} window(s), ${tabs.length} tab(s), activeTab=${browserActiveTab ?? 'unknown'}, aiOpenedTabs=${aiOpenedTabIds.length}, operableTabs=${operableTabIds.length}.`,
+      activeWindow: {
+        windowId: focusedWindow?.windowId ?? null,
+        state: focusedWindow?.state ?? null,
+        visibilityState: focusedWindow?.visibilityState ?? null,
+        focused: focusedWindow?.focused ?? null,
+        canTabrixOperate: focusedWindow?.canTabrixOperate ?? null,
+      },
       activeTab: {
         tabId: activeTab?.tabId ?? null,
         windowId: activeTab?.windowId ?? null,
@@ -495,6 +561,8 @@ function summarizeRecentEvents(events: readonly BrowserWorldEvent[]): string {
       return `Last change: tab ${last.tabId ?? 'unknown'} became active in window ${last.windowId ?? 'unknown'}.`;
     case 'window_focus_changed':
       return `Last change: focused window is ${last.windowId ?? 'unknown'}.`;
+    case 'window_bounds_changed':
+      return `Last change: window ${last.windowId ?? 'unknown'} bounds or state changed.`;
     case 'window_created':
       return `Last change: window ${last.windowId ?? 'unknown'} was created.`;
     case 'window_removed':

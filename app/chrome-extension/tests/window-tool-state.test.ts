@@ -58,7 +58,10 @@ describe('get_windows_and_tabs state inventory', () => {
         {
           windowId: 10,
           state: 'normal',
+          visibilityState: 'visible',
           focused: true,
+          isFocused: true,
+          isMinimized: false,
           type: 'normal',
           incognito: false,
           width: 1280,
@@ -66,6 +69,9 @@ describe('get_windows_and_tabs state inventory', () => {
           left: 100,
           top: 50,
           activeTabId: 102,
+          activeTabCanOperate: true,
+          canTabrixOperate: true,
+          operabilityReason: 'active_tab_operable_in_visible_window',
           tabCount: 2,
           tabs: [
             {
@@ -85,7 +91,10 @@ describe('get_windows_and_tabs state inventory', () => {
         {
           windowId: 20,
           state: 'minimized',
+          visibilityState: 'minimized',
           focused: false,
+          isFocused: false,
+          isMinimized: true,
           type: 'popup',
           incognito: true,
           width: null,
@@ -93,6 +102,9 @@ describe('get_windows_and_tabs state inventory', () => {
           left: null,
           top: null,
           activeTabId: null,
+          activeTabCanOperate: null,
+          canTabrixOperate: false,
+          operabilityReason: 'window_minimized',
           tabCount: 0,
           tabs: [],
         },

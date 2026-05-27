@@ -29,7 +29,10 @@ class WindowTool extends BaseBrowserToolExecutor {
         return {
           windowId: window.windowId,
           state: window.state || 'unknown',
+          visibilityState: window.visibilityState,
           focused: typeof window.focused === 'boolean' ? window.focused : null,
+          isFocused: window.isFocused,
+          isMinimized: window.isMinimized,
           type: window.type || 'unknown',
           incognito: typeof window.incognito === 'boolean' ? window.incognito : null,
           width: Number.isInteger(window.width) ? window.width : null,
@@ -37,6 +40,9 @@ class WindowTool extends BaseBrowserToolExecutor {
           left: Number.isInteger(window.left) ? window.left : null,
           top: Number.isInteger(window.top) ? window.top : null,
           activeTabId: activeTab ? activeTab.tabId : null,
+          activeTabCanOperate: window.activeTabCanOperate,
+          canTabrixOperate: window.canTabrixOperate,
+          operabilityReason: window.operabilityReason,
           tabCount: tabs.length,
           tabs,
         };
