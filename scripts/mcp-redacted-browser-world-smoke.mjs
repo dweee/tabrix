@@ -1126,11 +1126,18 @@ export function buildStepSummary(step, payload, targetTabId) {
 export function buildPostCloseTargetCleanupSummary(payload, targetTabIds) {
   return uniqueNumbers(targetTabIds).map((tabId, index) => {
     const redacted = buildRedactedBrowserWorldSummary(payload, tabId);
+    const targetNoLongerRetained = redacted.targetTab?.wasFound === false;
     return {
       targetIndex: index + 1,
       targetTabFound: redacted.targetTab?.wasFound ?? false,
+      targetNoLongerRetained,
+      closedTargetNotOperable: targetNoLongerRetained
+        ? true
+        : redacted.targetTab?.canTabrixOperate === false,
       compactSummaryBounded: redacted.compactSummaryBounded,
       retentionWithinLimit: redacted.retentionWithinLimit,
+      claimBoundary:
+        'Post-close cleanup summary uses redacted Browser World object retention only; it does not expose URL, title, page content, account state, or task success.',
     };
   });
 }
@@ -1363,6 +1370,8 @@ function runLifecycleSmoke(cliPath, smokeUrl, args) {
         postCloseTargets.every(
           (target) =>
             target.targetTabFound === false &&
+            target.targetNoLongerRetained === true &&
+            target.closedTargetNotOperable === true &&
             target.compactSummaryBounded === true &&
             target.retentionWithinLimit === true,
         )
@@ -1393,6 +1402,22 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
   const windowState = runWindowStateSmoke(cliPath, { ...args, skipOpen: true });
   const targets = smokeUrls.map((smokeUrl, index) => {
     const result = runLifecycleSmoke(cliPath, smokeUrl, args);
+    const lifecycleMatrix = result.lifecycleMatrix.map((step) => ({
+      step: step.step,
+      targetFound: step.targetTab?.wasFound ?? null,
+      targetOpenedBy: step.targetTab?.openedBy ?? null,
+      targetCanTabrixOperate: step.targetTab?.canTabrixOperate ?? null,
+      targetActiveMatchesLifecycleStep: step.targetActiveMatchesLifecycleStep,
+      relationToBrowserActiveMatchesLifecycleStep: step.relationToBrowserActiveMatchesLifecycleStep,
+      operationTargetRoleMatchesLifecycleStep: step.operationTargetRoleMatchesLifecycleStep,
+      latestAiOperationMatchesLifecycleStep: step.latestAiOperationMatchesLifecycleStep,
+      currentTabAttributeGroupsPresent:
+        step.currentTabAttributeGroups?.identity?.tabIdPresent === true,
+      lastAiOperatedTabAttributeGroupsPresent:
+        step.lastAiOperatedTabAttributeGroups?.identity?.tabIdPresent === true,
+      retentionWithinLimit: step.retentionWithinLimit,
+      compactSummaryBounded: step.compactSummaryBounded,
+    }));
     return {
       targetIndex: index + 1,
       openedPublicTestTabs: result.openedPublicTestTabs,
@@ -1400,7 +1425,7 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
       cleanup: result.cleanup,
       postCleanup: result.postCleanup,
       postCloseTargets: result.postCloseTargets,
-      lifecycleMatrix: result.lifecycleMatrix,
+      lifecycleMatrix,
       passed:
         result.openedPublicTestTabs === 3 &&
         result.closeSucceeded === true &&
@@ -1409,6 +1434,7 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
         result.postCleanup?.retentionWithinLimit === true &&
         result.postCleanup?.compactSummaryBounded === true &&
         result.postCleanup?.browserObjectEdgeSummaryPresent === true &&
+        result.postCleanup?.currentTabAttributeGroups?.identity?.tabIdPresent === true &&
         (result.postCleanup?.tabLifecycleState?.recentRemovedCount ?? 0) >= 3,
     };
   });
@@ -1641,7 +1667,10 @@ export function isSmokeResultPassing(result) {
       result.allLifecycleStepsPassed === true &&
       result.postCleanup?.retentionWithinLimit === true &&
       result.postCleanup?.compactSummaryBounded === true &&
-      result.postCleanup?.browserObjectEdgeSummaryPresent === true
+      result.postCleanup?.browserObjectEdgeSummaryPresent === true &&
+      result.postCleanup?.currentTabAttributeGroups?.identity?.tabIdPresent === true &&
+      (result.postCleanup?.tabLifecycleState?.recentRemovedCount ?? 0) >=
+        result.openedPublicTestTabs
     );
   }
   if (result.scenario === 'window-state') {

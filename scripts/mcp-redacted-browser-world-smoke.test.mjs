@@ -910,14 +910,22 @@ test('buildPostCloseTargetCleanupSummary reports closed targets without raw tab 
     {
       targetIndex: 1,
       targetTabFound: true,
+      targetNoLongerRetained: false,
+      closedTargetNotOperable: false,
       compactSummaryBounded: true,
       retentionWithinLimit: true,
+      claimBoundary:
+        'Post-close cleanup summary uses redacted Browser World object retention only; it does not expose URL, title, page content, account state, or task success.',
     },
     {
       targetIndex: 2,
       targetTabFound: false,
+      targetNoLongerRetained: true,
+      closedTargetNotOperable: true,
       compactSummaryBounded: true,
       retentionWithinLimit: true,
+      claimBoundary:
+        'Post-close cleanup summary uses redacted Browser World object retention only; it does not expose URL, title, page content, account state, or task success.',
     },
   ]);
   assert.equal(JSON.stringify(summary).includes('private.example.test'), false);
@@ -1451,6 +1459,40 @@ test('isSmokeResultPassing fails redacted matrix results that are not proven', (
 });
 
 test('isSmokeResultPassing keeps observer verdicts strict and explicit', () => {
+  const lifecycleResult = {
+    openedPublicTestTabs: 3,
+    closeSucceeded: true,
+    cleanupTargetsPassed: true,
+    allLifecycleStepsPassed: true,
+    postCleanup: {
+      retentionWithinLimit: true,
+      compactSummaryBounded: true,
+      browserObjectEdgeSummaryPresent: true,
+      currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
+      tabLifecycleState: { recentRemovedCount: 3 },
+    },
+  };
+  assert.equal(isSmokeResultPassing(lifecycleResult), true);
+  assert.equal(
+    isSmokeResultPassing({
+      ...lifecycleResult,
+      postCleanup: {
+        ...lifecycleResult.postCleanup,
+        currentTabAttributeGroups: null,
+      },
+    }),
+    false,
+  );
+  assert.equal(
+    isSmokeResultPassing({
+      ...lifecycleResult,
+      postCleanup: {
+        ...lifecycleResult.postCleanup,
+        tabLifecycleState: { recentRemovedCount: 2 },
+      },
+    }),
+    false,
+  );
   assert.equal(
     isSmokeResultPassing({
       scenario: 'window-state',
