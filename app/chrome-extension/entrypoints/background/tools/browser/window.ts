@@ -3,6 +3,31 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
 import { refreshBrowserWorldSnapshot } from '../../browser-world-inventory';
 
+const COMPACT_TABS_PER_WINDOW_LIMIT = 12;
+
+type StructuredTabForWindowSummary = {
+  tabId: number;
+  title: string;
+  url: string;
+  active: boolean;
+  status: string | null;
+  openedBy: string;
+  canTabrixOperate: boolean | null;
+  operabilityReason: string;
+};
+
+function selectCompactTabsForWindow(
+  tabs: StructuredTabForWindowSummary[],
+): StructuredTabForWindowSummary[] {
+  if (tabs.length <= COMPACT_TABS_PER_WINDOW_LIMIT) return tabs;
+  const selected = tabs.slice(0, COMPACT_TABS_PER_WINDOW_LIMIT);
+  const activeTab = tabs.find((tab) => tab.active === true);
+  if (activeTab && !selected.some((tab) => tab.tabId === activeTab.tabId)) {
+    selected[selected.length - 1] = activeTab;
+  }
+  return selected;
+}
+
 class WindowTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS;
   async execute(): Promise<ToolResult> {
@@ -90,16 +115,20 @@ class WindowTool extends BaseBrowserToolExecutor {
             canTabrixOperate: window.canTabrixOperate,
             operabilityReason: window.operabilityReason,
             tabCount: window.tabCount,
-            tabs: window.tabs.map((tab) => ({
-              tabId: tab.tabId,
-              title: tab.title,
-              url: tab.url,
-              active: tab.active,
-              status: tab.status,
-              openedBy: tab.openedBy,
-              canTabrixOperate: tab.canTabrixOperate,
-              operabilityReason: tab.operabilityReason,
-            })),
+            compactTabLimit: COMPACT_TABS_PER_WINDOW_LIMIT,
+            omittedTabCount: Math.max(0, window.tabs.length - COMPACT_TABS_PER_WINDOW_LIMIT),
+            tabs: selectCompactTabsForWindow(
+              window.tabs.map((tab) => ({
+                tabId: tab.tabId,
+                title: tab.title,
+                url: tab.url,
+                active: tab.active,
+                status: tab.status,
+                openedBy: tab.openedBy,
+                canTabrixOperate: tab.canTabrixOperate,
+                operabilityReason: tab.operabilityReason,
+              })),
+            ),
           })),
           recentChangeSummary: browserWorld.summary.recentChangeSummary,
           objectChangeConclusion: browserWorld.summary.objectChangeConclusion,

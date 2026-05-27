@@ -198,4 +198,61 @@ describe('get_windows_and_tabs state inventory', () => {
       ],
     });
   });
+
+  it('keeps compactSummary bounded while preserving full window tab detail', async () => {
+    const tabs = Array.from({ length: 20 }, (_, index) => {
+      const tabId = 101 + index;
+      return {
+        id: tabId,
+        url: `https://many-tabs.test/${tabId}`,
+        pendingUrl: '',
+        title: `Tab ${tabId}`,
+        active: tabId === 120,
+        status: 'complete',
+        discarded: false,
+        audible: false,
+        mutedInfo: { muted: false },
+        pinned: false,
+      };
+    });
+
+    (
+      chrome as unknown as { windows: { getAll: ReturnType<typeof vi.fn> } }
+    ).windows.getAll.mockResolvedValueOnce([
+      {
+        id: 10,
+        state: 'normal',
+        focused: true,
+        type: 'normal',
+        incognito: false,
+        tabs,
+      },
+    ] as chrome.windows.Window[]);
+
+    const result = await windowTool.execute();
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.windowCount).toBe(1);
+    expect(payload.tabCount).toBe(20);
+    expect(payload.windows[0].tabs).toHaveLength(20);
+    expect(payload.compactSummary.windows[0]).toMatchObject({
+      windowId: 10,
+      tabCount: 20,
+      compactTabLimit: 12,
+      omittedTabCount: 8,
+      activeTabId: 120,
+    });
+    expect(payload.compactSummary.windows[0].tabs).toHaveLength(12);
+    expect(payload.compactSummary.windows[0].tabs.at(-1)).toMatchObject({
+      tabId: 120,
+      active: true,
+      title: 'Tab 120',
+    });
+    expect(payload.compactSummary.activeObject).toMatchObject({
+      tabId: 120,
+      title: 'Tab 120',
+      canTabrixOperate: true,
+    });
+  });
 });

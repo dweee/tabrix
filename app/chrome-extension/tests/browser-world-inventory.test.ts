@@ -496,7 +496,7 @@ describe('browser world inventory', () => {
       ],
     } as chrome.windows.Window);
 
-    const snapshot = await getBrowserWorldSnapshot();
+    let snapshot = await getBrowserWorldSnapshot();
     expect(snapshot.windows[0]).toMatchObject({
       windowId: 1,
       visibilityState: 'minimized',
@@ -505,5 +505,70 @@ describe('browser world inventory', () => {
       operabilityReason: 'window_minimized',
     });
     expect(snapshot.summary.recentChangeSummary).toContain('bounds or state changed');
+
+    listeners.windowBoundsChanged[0]?.({
+      id: 1,
+      focused: true,
+      state: 'normal',
+      type: 'normal',
+      width: 1280,
+      height: 720,
+      left: 0,
+      top: 0,
+      tabs: [
+        {
+          id: 10,
+          windowId: 1,
+          url: 'https://example.test/a',
+          title: 'A',
+          active: true,
+          status: 'complete',
+        },
+      ],
+    } as chrome.windows.Window);
+
+    snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.windows[0]).toMatchObject({
+      windowId: 1,
+      visibilityState: 'visible',
+      isMinimized: false,
+      isFocused: true,
+      canTabrixOperate: true,
+      operabilityReason: 'active_tab_operable_in_visible_window',
+    });
+    expect(snapshot.summary.objectChangeConclusion).toContain('visibility=visible');
+  });
+
+  it('caps recent browser lifecycle events under high tab churn without storing URLs in events', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    for (let index = 0; index < 60; index += 1) {
+      const tabId = 1000 + index;
+      listeners.tabUpdated[0]?.(
+        tabId,
+        { status: 'complete' },
+        {
+          id: tabId,
+          windowId: 1,
+          url: `https://bulk-tabs.test/${index}`,
+          title: `Bulk ${index}`,
+          active: false,
+          status: 'complete',
+        },
+      );
+    }
+
+    const snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.recentEvents).toHaveLength(50);
+    expect(snapshot.recentEvents[0]).toMatchObject({
+      eventKind: 'tab_updated',
+      tabId: 1010,
+    });
+    expect(snapshot.recentEvents.at(-1)).toMatchObject({
+      eventKind: 'tab_updated',
+      tabId: 1059,
+    });
+    expect(snapshot.recentEvents.some((event) => 'url' in event)).toBe(false);
   });
 });
