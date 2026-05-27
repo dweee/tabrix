@@ -397,6 +397,7 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
   const operationRouting = payload?.compactSummary?.operationRouting ?? null;
   const aiRoutingBrief = payload?.compactSummary?.aiRoutingBrief ?? null;
   const operationTargetBrief = payload?.compactSummary?.operationTargetBrief ?? null;
+  const aiActionReadiness = payload?.compactSummary?.aiActionReadiness ?? null;
   const redactCompactOperationObject = (object) =>
     object
       ? {
@@ -724,6 +725,27 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
               : null,
           summaryPresent: typeof operationTargetBrief.summary === 'string',
           claimBoundaryPresent: typeof operationTargetBrief.claimBoundary === 'string',
+        }
+      : null,
+    aiActionReadiness: aiActionReadiness
+      ? {
+          readiness:
+            typeof aiActionReadiness.readiness === 'string' ? aiActionReadiness.readiness : null,
+          targetRole:
+            typeof aiActionReadiness.targetRole === 'string' ? aiActionReadiness.targetRole : null,
+          targetTabIdPresent: Number.isInteger(aiActionReadiness.targetTabId),
+          browserActiveTabIdPresent: Number.isInteger(aiActionReadiness.browserActiveTabId),
+          latestAiOperatedTabIdPresent: Number.isInteger(aiActionReadiness.latestAiOperatedTabId),
+          canProceedToPageLevelCheck:
+            typeof aiActionReadiness.canProceedToPageLevelCheck === 'boolean'
+              ? aiActionReadiness.canProceedToPageLevelCheck
+              : null,
+          requiredBeforeAction:
+            typeof aiActionReadiness.requiredBeforeAction === 'string'
+              ? aiActionReadiness.requiredBeforeAction
+              : null,
+          summaryPresent: typeof aiActionReadiness.summary === 'string',
+          claimBoundaryPresent: typeof aiActionReadiness.claimBoundary === 'string',
         }
       : null,
     tabStateMatrix: tabStateMatrix
@@ -1144,6 +1166,7 @@ export function buildStepSummary(step, payload, targetTabId) {
     operationRouting: redacted.operationRouting,
     aiRoutingBrief: redacted.aiRoutingBrief,
     operationTargetBrief: redacted.operationTargetBrief,
+    aiActionReadiness: redacted.aiActionReadiness,
     targetTab: redacted.targetTab,
     counts: redacted.counts,
     tabLifecycleState: redacted.tabLifecycleState,
@@ -1283,6 +1306,7 @@ export function isLifecycleStepPassing(step) {
     typeof step.operationTargetBrief?.nextRequiredCheck === 'string' &&
     step.operationTargetBrief?.summaryPresent === true &&
     step.operationTargetBrief?.claimBoundaryPresent === true &&
+    hasAiActionReadiness(step) &&
     step.activeTabIncludedInCompactTabs === true
   );
 }
@@ -1617,6 +1641,17 @@ function hasCurrentTabAttributeGroups(redacted) {
   );
 }
 
+function hasAiActionReadiness(redacted) {
+  return (
+    typeof redacted?.aiActionReadiness?.readiness === 'string' &&
+    typeof redacted.aiActionReadiness?.targetRole === 'string' &&
+    typeof redacted.aiActionReadiness?.canProceedToPageLevelCheck === 'boolean' &&
+    typeof redacted.aiActionReadiness?.requiredBeforeAction === 'string' &&
+    redacted.aiActionReadiness?.summaryPresent === true &&
+    redacted.aiActionReadiness?.claimBoundaryPresent === true
+  );
+}
+
 export function buildWindowStateDriftSummary(samples) {
   const observedSamples = samples.filter((sample) => sample?.verdict === 'WINDOW_STATE_OBSERVED');
   const compactBoundedSamples = samples.filter(
@@ -1630,6 +1665,9 @@ export function buildWindowStateDriftSummary(samples) {
   );
   const currentTabAttributeGroupSamples = samples.filter((sample) =>
     hasCurrentTabAttributeGroups(sample?.redacted),
+  );
+  const aiActionReadinessSamples = samples.filter((sample) =>
+    hasAiActionReadiness(sample?.redacted),
   );
   const windowCounts = samples.map((sample) => sample?.redacted?.windows?.total);
   const tabCounts = samples.map((sample) => sample?.redacted?.tabCount);
@@ -1656,6 +1694,8 @@ export function buildWindowStateDriftSummary(samples) {
       samples.length > 0 && refreshHealthSamples.length === samples.length,
     allSamplesCurrentTabAttributeGroupsPresent:
       samples.length > 0 && currentTabAttributeGroupSamples.length === samples.length,
+    allSamplesAiActionReadinessPresent:
+      samples.length > 0 && aiActionReadinessSamples.length === samples.length,
     windowCountStable,
     tabCountStable,
     focusedWindowCountStable,
@@ -1687,7 +1727,8 @@ function runWindowStateSmoke(cliPath, args) {
       redacted.hasBrowserWorldDetail &&
       redacted.objectInventoryPresent === true &&
       redacted.browserObjectEdgeSummaryPresent === true &&
-      hasCurrentTabAttributeGroups(redacted)
+      hasCurrentTabAttributeGroups(redacted) &&
+      hasAiActionReadiness(redacted)
         ? 'WINDOW_STATE_OBSERVED'
         : 'WINDOW_STATE_NOT_PROVEN',
   };
@@ -1726,7 +1767,8 @@ function runWindowStateDriftSmoke(cliPath, args) {
       driftSummary.allSamplesCompactBounded === true &&
       driftSummary.allSamplesRetentionBounded === true &&
       driftSummary.allSamplesRefreshHealthPresent === true &&
-      driftSummary.allSamplesCurrentTabAttributeGroupsPresent === true
+      driftSummary.allSamplesCurrentTabAttributeGroupsPresent === true &&
+      driftSummary.allSamplesAiActionReadinessPresent === true
         ? 'WINDOW_STATE_REPEATED_OBSERVER_PASS'
         : 'WINDOW_STATE_REPEATED_OBSERVER_NOT_PROVEN',
   };

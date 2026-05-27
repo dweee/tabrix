@@ -31,6 +31,20 @@ function redactedCurrentTabAttributeGroups() {
   };
 }
 
+function redactedAiActionReadiness() {
+  return {
+    readiness: 'ready_for_page_level_check',
+    targetRole: 'latest_ai_operated_active_tab',
+    targetTabIdPresent: true,
+    browserActiveTabIdPresent: true,
+    latestAiOperatedTabIdPresent: true,
+    canProceedToPageLevelCheck: true,
+    requiredBeforeAction: 'page_level_read_or_postcondition_check',
+    summaryPresent: true,
+    claimBoundaryPresent: true,
+  };
+}
+
 test('extractJsonObject parses the bounded CLI Result payload', () => {
   const parsed = extractJsonObject('tabrix mcp call get_windows_and_tabs\n\nResult\n{"ok":true}\n');
   assert.deepEqual(parsed, { ok: true });
@@ -325,6 +339,18 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
           summary:
             'Operation target brief includes https://private.example.test/dashboard and Private Dashboard.',
           claimBoundary: 'Operation target brief boundary.',
+        },
+        aiActionReadiness: {
+          readiness: 'ready_for_page_level_check',
+          targetRole: 'latest_ai_operated_active_tab',
+          targetTabId: 20,
+          browserActiveTabId: 20,
+          latestAiOperatedTabId: 20,
+          canProceedToPageLevelCheck: true,
+          requiredBeforeAction: 'page_level_read_or_postcondition_check',
+          summary:
+            'AI action readiness includes https://private.example.test/dashboard and Private Dashboard.',
+          claimBoundary: 'AI action readiness boundary.',
         },
         tabStateMatrix: {
           total: 20,
@@ -641,6 +667,17 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
     summaryPresent: true,
     claimBoundaryPresent: true,
   });
+  assert.deepEqual(summary.aiActionReadiness, {
+    readiness: 'ready_for_page_level_check',
+    targetRole: 'latest_ai_operated_active_tab',
+    targetTabIdPresent: true,
+    browserActiveTabIdPresent: true,
+    latestAiOperatedTabIdPresent: true,
+    canProceedToPageLevelCheck: true,
+    requiredBeforeAction: 'page_level_read_or_postcondition_check',
+    summaryPresent: true,
+    claimBoundaryPresent: true,
+  });
   assert.deepEqual(summary.tabStateMatrix, {
     total: 20,
     active: 1,
@@ -789,6 +826,7 @@ test('buildWindowStateDriftSummary reports stable repeated observer samples', ()
         },
         currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
         tabAttributeGroupClaimBoundaryPresent: true,
+        aiActionReadiness: redactedAiActionReadiness(),
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
       },
@@ -804,6 +842,7 @@ test('buildWindowStateDriftSummary reports stable repeated observer samples', ()
         },
         currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
         tabAttributeGroupClaimBoundaryPresent: true,
+        aiActionReadiness: redactedAiActionReadiness(),
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
       },
@@ -817,6 +856,7 @@ test('buildWindowStateDriftSummary reports stable repeated observer samples', ()
     allSamplesRetentionBounded: true,
     allSamplesRefreshHealthPresent: true,
     allSamplesCurrentTabAttributeGroupsPresent: true,
+    allSamplesAiActionReadinessPresent: true,
     windowCountStable: true,
     tabCountStable: true,
     focusedWindowCountStable: true,
@@ -840,6 +880,7 @@ test('buildWindowStateDriftSummary reports drift without failing observation', (
         },
         currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
         tabAttributeGroupClaimBoundaryPresent: true,
+        aiActionReadiness: redactedAiActionReadiness(),
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
       },
@@ -855,6 +896,7 @@ test('buildWindowStateDriftSummary reports drift without failing observation', (
         },
         currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
         tabAttributeGroupClaimBoundaryPresent: true,
+        aiActionReadiness: redactedAiActionReadiness(),
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
       },
@@ -866,6 +908,7 @@ test('buildWindowStateDriftSummary reports drift without failing observation', (
   assert.equal(summary.allSamplesRetentionBounded, true);
   assert.equal(summary.allSamplesRefreshHealthPresent, true);
   assert.equal(summary.allSamplesCurrentTabAttributeGroupsPresent, true);
+  assert.equal(summary.allSamplesAiActionReadinessPresent, true);
   assert.equal(summary.windowCountStable, true);
   assert.equal(summary.tabCountStable, false);
   assert.equal(summary.driftObserved, true);
@@ -884,6 +927,7 @@ test('buildWindowStateDriftSummary requires refresh health for every sample', ()
         },
         currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
         tabAttributeGroupClaimBoundaryPresent: true,
+        aiActionReadiness: redactedAiActionReadiness(),
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
       },
@@ -1189,6 +1233,7 @@ test('isLifecycleStepPassing rejects stale operation target routing', () => {
       summaryPresent: true,
       claimBoundaryPresent: true,
     },
+    aiActionReadiness: redactedAiActionReadiness(),
     activeTabIncludedInCompactTabs: true,
   };
 

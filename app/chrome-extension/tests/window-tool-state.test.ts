@@ -176,6 +176,19 @@ describe('get_windows_and_tabs state inventory', () => {
           claimBoundary:
             'Target brief uses browser object routing only; it does not prove page content, user intent, or task success.',
         },
+        aiActionReadiness: {
+          readiness: 'ready_for_page_level_check',
+          targetRole: 'browser_active_tab_candidate',
+          targetTabId: 102,
+          browserActiveTabId: 102,
+          latestAiOperatedTabId: null,
+          canProceedToPageLevelCheck: true,
+          requiredBeforeAction: 'read_or_select_intended_target',
+          summary:
+            'AI action readiness: targetRole=browser_active_tab_candidate, targetTab=102 is browser-operable; proceed only to read_or_select_intended_target.',
+          claimBoundary:
+            'Action readiness permits only the next page-level verification step; it is not task success, page understanding, or postcondition proof.',
+        },
         windows: [
           {
             windowId: 10,
@@ -578,6 +591,19 @@ describe('get_windows_and_tabs state inventory', () => {
         'Operation target brief: latest AI-operated tab 202 is not browser-active; active tab is 201, so do not act until the intended tab is reselected or reread.',
       claimBoundary:
         'Target brief proves a browser object mismatch only; it does not decide user intent or task success.',
+    });
+    expect(payload.compactSummary.aiActionReadiness).toMatchObject({
+      readiness: 'reselect_or_reread_required',
+      targetRole: 'latest_ai_operated_background_tab',
+      targetTabId: 202,
+      browserActiveTabId: 201,
+      latestAiOperatedTabId: 202,
+      canProceedToPageLevelCheck: false,
+      requiredBeforeAction: 'reselect_or_reread_latest_ai_operated_tab',
+      summary:
+        'AI action readiness: targetRole=latest_ai_operated_background_tab, targetTab=202, browserActiveTab=201; reselect_or_reread_latest_ai_operated_tab is required before acting.',
+      claimBoundary:
+        'Action readiness uses browser object state only; it does not prove page content, task intent, action postconditions, or task success.',
     });
     expect(payload.compactSummary.objectChangeSummary).toBe(
       'Object change summary: AI operation read_page was recorded on tab 202; AI last operated tab 202, but the active tab is 201; reselect or reread before continuing.',

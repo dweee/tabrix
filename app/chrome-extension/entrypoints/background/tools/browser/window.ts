@@ -269,6 +269,86 @@ function buildOperationTargetBrief(args: {
   };
 }
 
+function buildAiActionReadiness(args: {
+  operationTargetBrief: ReturnType<typeof buildOperationTargetBrief>;
+  currentWindowRelation: string;
+}) {
+  const target = args.operationTargetBrief;
+  if (
+    args.currentWindowRelation === 'no_window_observed' ||
+    args.currentWindowRelation === 'no_focused_window'
+  ) {
+    return {
+      readiness: 'blocked_no_focused_window',
+      targetRole: target.targetRole,
+      targetTabId: target.targetTabId,
+      browserActiveTabId: target.browserActiveTabId,
+      latestAiOperatedTabId: target.latestAiOperatedTabId,
+      canProceedToPageLevelCheck: false,
+      requiredBeforeAction: 'restore_or_focus_browser_window',
+      summary:
+        'AI action readiness: no focused operable browser window is proven; restore or focus a window before acting on a page object.',
+      claimBoundary:
+        'Action readiness uses browser object state only; it does not prove page content, task intent, action postconditions, or task success.',
+    };
+  }
+  if (args.currentWindowRelation === 'focused_window_minimized') {
+    return {
+      readiness: 'blocked_window_minimized',
+      targetRole: target.targetRole,
+      targetTabId: target.targetTabId,
+      browserActiveTabId: target.browserActiveTabId,
+      latestAiOperatedTabId: target.latestAiOperatedTabId,
+      canProceedToPageLevelCheck: false,
+      requiredBeforeAction: 'restore_window_then_refresh_browser_snapshot',
+      summary:
+        'AI action readiness: focused window is minimized; restore the window and refresh browser object state before acting.',
+      claimBoundary:
+        'Action readiness uses browser object state only; it does not prove page content, task intent, action postconditions, or task success.',
+    };
+  }
+  if (target.shouldReselectBeforeAction) {
+    return {
+      readiness: 'reselect_or_reread_required',
+      targetRole: target.targetRole,
+      targetTabId: target.targetTabId,
+      browserActiveTabId: target.browserActiveTabId,
+      latestAiOperatedTabId: target.latestAiOperatedTabId,
+      canProceedToPageLevelCheck: false,
+      requiredBeforeAction: target.nextRequiredCheck,
+      summary: `AI action readiness: targetRole=${target.targetRole}, targetTab=${target.targetTabId ?? 'unknown'}, browserActiveTab=${target.browserActiveTabId ?? 'unknown'}; ${target.nextRequiredCheck} is required before acting.`,
+      claimBoundary:
+        'Action readiness uses browser object state only; it does not prove page content, task intent, action postconditions, or task success.',
+    };
+  }
+  if (target.targetCanTabrixOperate === true) {
+    return {
+      readiness: 'ready_for_page_level_check',
+      targetRole: target.targetRole,
+      targetTabId: target.targetTabId,
+      browserActiveTabId: target.browserActiveTabId,
+      latestAiOperatedTabId: target.latestAiOperatedTabId,
+      canProceedToPageLevelCheck: true,
+      requiredBeforeAction: target.nextRequiredCheck,
+      summary: `AI action readiness: targetRole=${target.targetRole}, targetTab=${target.targetTabId ?? 'unknown'} is browser-operable; proceed only to ${target.nextRequiredCheck}.`,
+      claimBoundary:
+        'Action readiness permits only the next page-level verification step; it is not task success, page understanding, or postcondition proof.',
+    };
+  }
+  return {
+    readiness: 'target_not_operable_or_unknown',
+    targetRole: target.targetRole,
+    targetTabId: target.targetTabId,
+    browserActiveTabId: target.browserActiveTabId,
+    latestAiOperatedTabId: target.latestAiOperatedTabId,
+    canProceedToPageLevelCheck: false,
+    requiredBeforeAction: 'refresh_or_select_operable_target',
+    summary: `AI action readiness: targetRole=${target.targetRole}, targetTab=${target.targetTabId ?? 'unknown'} is not proven operable; refresh or choose an operable target before acting.`,
+    claimBoundary:
+      'Action readiness uses browser object state only; it does not prove page content, task intent, action postconditions, or task success.',
+  };
+}
+
 class WindowTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS;
   async execute(): Promise<ToolResult> {
@@ -280,6 +360,29 @@ class WindowTool extends BaseBrowserToolExecutor {
         browserWorld.tabs.find(
           (tab) => tab.tabId === browserWorld.summary.aiOperationState.latestAiOperatedTabId,
         ) ?? null;
+      const aiRoutingBrief = buildAiRoutingBrief({
+        browserActiveTabId: browserWorld.browserActiveTabId,
+        latestAiOperatedTabId: browserWorld.summary.aiOperationState.latestAiOperatedTabId,
+        latestAiOperation: browserWorld.summary.aiOperationState.latestAiOperation,
+        relationToBrowserActiveTab:
+          browserWorld.summary.aiOperationState.relationToBrowserActiveTab,
+        canContinueOnLatestAiOperatedTab:
+          browserWorld.summary.aiOperationState.canContinueOnLatestAiOperatedTab,
+        activeTabCanOperate: browserActiveTab?.canTabrixOperate ?? null,
+      });
+      const operationTargetBrief = buildOperationTargetBrief({
+        browserActiveTab,
+        latestAiOperatedTab,
+        relationToBrowserActiveTab:
+          browserWorld.summary.aiOperationState.relationToBrowserActiveTab,
+        canContinueOnLatestAiOperatedTab:
+          browserWorld.summary.aiOperationState.canContinueOnLatestAiOperatedTab,
+      });
+      const aiActionReadiness = buildAiActionReadiness({
+        operationTargetBrief,
+        currentWindowRelation:
+          browserWorld.summary.windowOperationState.relationToCurrentOperableWindow,
+      });
 
       const structuredWindows = browserWorld.windows.map((window) => {
         const tabs = browserWorld.tabs
@@ -421,24 +524,9 @@ class WindowTool extends BaseBrowserToolExecutor {
             claimBoundary:
               'Operation routing identifies browser tab objects only; it does not prove page action postconditions or task completion.',
           },
-          aiRoutingBrief: buildAiRoutingBrief({
-            browserActiveTabId: browserWorld.browserActiveTabId,
-            latestAiOperatedTabId: browserWorld.summary.aiOperationState.latestAiOperatedTabId,
-            latestAiOperation: browserWorld.summary.aiOperationState.latestAiOperation,
-            relationToBrowserActiveTab:
-              browserWorld.summary.aiOperationState.relationToBrowserActiveTab,
-            canContinueOnLatestAiOperatedTab:
-              browserWorld.summary.aiOperationState.canContinueOnLatestAiOperatedTab,
-            activeTabCanOperate: browserActiveTab?.canTabrixOperate ?? null,
-          }),
-          operationTargetBrief: buildOperationTargetBrief({
-            browserActiveTab,
-            latestAiOperatedTab,
-            relationToBrowserActiveTab:
-              browserWorld.summary.aiOperationState.relationToBrowserActiveTab,
-            canContinueOnLatestAiOperatedTab:
-              browserWorld.summary.aiOperationState.canContinueOnLatestAiOperatedTab,
-          }),
+          aiRoutingBrief,
+          operationTargetBrief,
+          aiActionReadiness,
           windows: structuredWindows.map((window) => ({
             windowId: window.windowId,
             state: window.state,
