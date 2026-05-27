@@ -2,6 +2,10 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
 import { captureFrameOnAction, isAutoCaptureActive } from './gif-recorder';
+import {
+  markBrowserWorldTabAiCreated,
+  markBrowserWorldTabAiOperated,
+} from '../../browser-world-inventory';
 
 // Default window dimensions
 const DEFAULT_WINDOW_WIDTH = 1280;
@@ -484,6 +488,10 @@ class NavigateTool extends BaseBrowserToolExecutor {
           ...settleOptions,
         });
         const updatedTab = settleResult.tab;
+        markBrowserWorldTabAiOperated(
+          updatedTab.id,
+          shouldNavigateExplicitTab ? 'navigate_existing_tab' : 'activate_existing_tab',
+        );
 
         // Trigger auto-capture on existing tab activation
         await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
@@ -543,7 +551,9 @@ class NavigateTool extends BaseBrowserToolExecutor {
           // Trigger auto-capture if the new window has a tab
           const firstTab = newWindow.tabs?.[0];
           if (firstTab?.id) {
+            markBrowserWorldTabAiCreated(firstTab.id);
             const settleResult = await this.waitForTabSettled(firstTab.id, settleOptions);
+            markBrowserWorldTabAiOperated(settleResult.tab.id, 'navigate_new_window_tab');
             await this.triggerAutoCapture(firstTab.id, settleResult.tab.url);
 
             return {
@@ -609,6 +619,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
               NAVIGATE_CREATE_TAB_TIMEOUT_MS,
               `chrome.tabs.create timed out after ${NAVIGATE_CREATE_TAB_TIMEOUT_MS}ms`,
             );
+            markBrowserWorldTabAiCreated(newTab.id);
           } catch (error) {
             const timeoutNavigationTab = await waitForCreatedDocumentTabAfterTimeout({
               windowId: targetWindow.id,
@@ -617,6 +628,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
               pickBestMatch,
             });
             if (timeoutNavigationTab?.id !== undefined) {
+              markBrowserWorldTabAiCreated(timeoutNavigationTab.id);
               const finalNavigationUrl = getTabNavigationUrl(timeoutNavigationTab);
               const readyState =
                 timeoutNavigationTab.status === 'complete' ? 'complete' : 'interactive';
@@ -696,6 +708,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
           const settleResult = newTab.id
             ? await this.waitForTabSettled(newTab.id, settleOptions)
             : null;
+          markBrowserWorldTabAiOperated(settleResult?.tab.id || newTab.id, 'navigate_new_tab');
 
           // Trigger auto-capture on new tab
           if (newTab.id) {
@@ -752,7 +765,9 @@ class NavigateTool extends BaseBrowserToolExecutor {
             // Trigger auto-capture if fallback window has a tab
             const firstTab = fallbackWindow.tabs?.[0];
             if (firstTab?.id) {
+              markBrowserWorldTabAiCreated(firstTab.id);
               const settleResult = await this.waitForTabSettled(firstTab.id, settleOptions);
+              markBrowserWorldTabAiOperated(settleResult.tab.id, 'navigate_fallback_window_tab');
               await this.triggerAutoCapture(firstTab.id, settleResult.tab.url);
 
               return {

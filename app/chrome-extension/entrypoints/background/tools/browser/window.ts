@@ -1,29 +1,33 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
+import { refreshBrowserWorldSnapshot } from '../../browser-world-inventory';
 
 class WindowTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS;
   async execute(): Promise<ToolResult> {
     try {
-      const windows = await chrome.windows.getAll({ populate: true });
-      let tabCount = 0;
+      const browserWorld = await refreshBrowserWorldSnapshot();
 
-      const structuredWindows = windows.map((window) => {
-        const tabs =
-          window.tabs?.map((tab) => {
-            tabCount++;
+      const structuredWindows = browserWorld.windows.map((window) => {
+        const tabs = browserWorld.tabs
+          .filter((tab) => tab.windowId === window.windowId)
+          .map((tab) => {
             return {
-              tabId: tab.id || 0,
+              tabId: tab.tabId,
               url: tab.url || '',
               title: tab.title || '',
               active: tab.active || false,
+              openedBy: tab.openedBy,
+              canTabrixOperate: tab.canTabrixOperate,
+              operabilityReason: tab.operabilityReason,
+              aiOperationState: tab.aiOperationState,
             };
-          }) || [];
+          });
         const activeTab = tabs.find((tab) => tab.active === true) || null;
 
         return {
-          windowId: window.id || 0,
+          windowId: window.windowId,
           state: window.state || 'unknown',
           focused: typeof window.focused === 'boolean' ? window.focused : null,
           type: window.type || 'unknown',
@@ -39,8 +43,10 @@ class WindowTool extends BaseBrowserToolExecutor {
       });
 
       const result = {
-        windowCount: windows.length,
-        tabCount: tabCount,
+        source: 'chrome_windows_get_all_with_browser_world_inventory',
+        windowCount: browserWorld.windowCount,
+        tabCount: browserWorld.tabCount,
+        browserWorld,
         windows: structuredWindows,
       };
 
