@@ -1929,6 +1929,75 @@ describe('read_page object lifecycle', () => {
     );
   });
 
+  it('detects privacy-safe empty to non-empty form value state changes', () => {
+    const before = buildReadPageObjectLifecycle([
+      region({
+        regionId: 'region_form',
+        regionType: 'form',
+        state: 'input_available_candidate',
+        targetability: 'locator_chain',
+        objects: [
+          {
+            objectId: 'ref_search',
+            label: 'search area',
+            objectType: 'control',
+            role: 'textbox',
+            valueState: 'empty',
+            actionTypes: ['fill'],
+            targetability: 'locator_chain',
+            confidence: 0.78,
+            reason: 'form input candidate',
+          },
+        ],
+      }),
+    ]);
+    const after = buildReadPageObjectLifecycle(
+      [
+        region({
+          regionId: 'region_form',
+          regionType: 'form',
+          state: 'input_available_candidate',
+          targetability: 'locator_chain',
+          objects: [
+            {
+              objectId: 'ref_search',
+              label: 'search area',
+              objectType: 'control',
+              role: 'textbox',
+              valueState: 'non_empty',
+              actionTypes: ['fill'],
+              targetability: 'locator_chain',
+              confidence: 0.78,
+              reason: 'form input candidate',
+            },
+          ],
+        }),
+      ],
+      { previous: before },
+    );
+
+    const view = buildReadPageBrowserPageObjectView({ objectLifecycle: after });
+
+    expect(after.changedObjectCount).toBeGreaterThan(0);
+    expect(view.semanticEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: 'content_changed',
+          targetGroup: 'action_state',
+          targetObjectFamily: 'form_control',
+          postconditionStatus: 'unknown',
+          summary: expect.stringContaining('form/search control change'),
+        }),
+      ]),
+    );
+    expect(view.dynamicAttributeSummary).toMatchObject({
+      status: 'semantic_transition_candidate',
+      primaryConclusion: expect.stringContaining('form/search control change'),
+      changedGroups: expect.arrayContaining(['action_state']),
+    });
+    expect(JSON.stringify(view)).not.toContain('secret-search-query');
+  });
+
   it('reports unknown_or_noise when raw lifecycle changes do not prove a target transition', () => {
     const noisy: ReadPageObjectLifecycleSummary = {
       source: 'read_page_regions',

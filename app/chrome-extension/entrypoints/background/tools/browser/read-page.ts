@@ -354,6 +354,29 @@ function attachInteractiveRects<T extends { ref?: string; rect?: unknown }>(
   });
 }
 
+function attachInteractiveValueState<
+  T extends { ref?: string; valueState?: 'empty' | 'non_empty' | 'unknown' },
+>(elements: T[], refMap: any[]): T[] {
+  const valueStateByRef = new Map<string, 'empty' | 'non_empty' | 'unknown'>();
+  for (const entry of Array.isArray(refMap) ? refMap : []) {
+    const ref = typeof entry?.ref === 'string' ? entry.ref.trim() : '';
+    if (!ref) continue;
+    const rawValue =
+      Object.prototype.hasOwnProperty.call(entry, 'value') ||
+      Object.prototype.hasOwnProperty.call(entry, 'currentValue')
+        ? (entry.value ?? entry.currentValue)
+        : undefined;
+    if (rawValue === undefined || rawValue === null) continue;
+    valueStateByRef.set(ref, String(rawValue).length > 0 ? 'non_empty' : 'empty');
+  }
+  if (valueStateByRef.size === 0) return elements;
+  return elements.map((element) => {
+    if (!element.ref || element.valueState) return element;
+    const valueState = valueStateByRef.get(element.ref);
+    return valueState ? { ...element, valueState } : element;
+  });
+}
+
 function hasQrVisibleContext(pageContent: string, visibleTextContent?: string | null): boolean {
   const text = `${pageContent || ''}\n${visibleTextContent || ''}`;
   if (!text.trim()) return false;
@@ -500,13 +523,16 @@ async function buildModeOutput(params: {
   requestedLayer: ReadPageRequestedLayer;
 }): Promise<ReadPageCompactSnapshot | ReadPageNormalSnapshot | ReadPageFullSnapshot> {
   const interactiveLimit = params.mode === 'compact' ? 24 : 80;
-  const interactiveElements = attachInteractiveRects(
-    buildInteractiveElements(
-      params.pageContent,
-      params.elements,
-      interactiveLimit,
-      params.mode,
-      params.currentUrl,
+  const interactiveElements = attachInteractiveValueState(
+    attachInteractiveRects(
+      buildInteractiveElements(
+        params.pageContent,
+        params.elements,
+        interactiveLimit,
+        params.mode,
+        params.currentUrl,
+      ),
+      params.refMap,
     ),
     params.refMap,
   );

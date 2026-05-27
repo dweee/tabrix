@@ -52,6 +52,12 @@ export interface ReadPageInteractiveElement {
   role: string;
   name: string;
   /**
+   * Optional privacy-safe form value state. This deliberately never carries
+   * the raw input value; it only lets BrowserPageObject detect empty/non-empty
+   * form/search state changes across read_page snapshots.
+   */
+  valueState?: 'empty' | 'non_empty' | 'unknown';
+  /**
    * Optional raw `href` captured from the DOM snapshot. Present only for
    * link-like elements. Consumers MUST treat this as optional; older
    * snapshots do not emit it.
@@ -224,6 +230,10 @@ export interface ReadPageRegionObject {
   label: string;
   objectType?: ReadPageObjectType | string;
   role?: string;
+  /**
+   * Optional privacy-safe form value state. Never contains raw user input.
+   */
+  valueState?: 'empty' | 'non_empty' | 'unknown';
   targetRef?: string;
   /**
    * Optional non-action locator chain for region objects that are visible and

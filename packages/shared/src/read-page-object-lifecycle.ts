@@ -91,6 +91,9 @@ function objectLifecycleItem(
     ...region.candidateActionIds,
   ].filter((item): item is string => Boolean(item));
   const objectId = safePublicRef(object.objectId);
+  const state = object.valueState
+    ? `${region.state || 'unknown'}:value_${object.valueState}`
+    : region.state || 'unknown';
 
   return {
     objectKey: `object:${region.regionType}:${stableObjectKey(object.targetRef || object.objectId)}`,
@@ -99,7 +102,7 @@ function objectLifecycleItem(
     ...(objectId ? { objectId } : {}),
     objectFamily: familyForObject(region.regionType, object),
     objectType: object.objectType ? String(object.objectType) : undefined,
-    state: region.state || 'unknown',
+    state,
     targetability: object.targetability,
     actionTypes: [...object.actionTypes],
     candidateActionIds: [...region.candidateActionIds],

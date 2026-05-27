@@ -6,6 +6,7 @@ interface SnapshotNode {
   ref: string;
   depth: number;
   href: string | null;
+  valueState: 'empty' | 'non_empty' | 'unknown' | null;
 }
 
 export type SnapshotInteractiveElement = ReadPageInteractiveElement;
@@ -137,6 +138,10 @@ function parseSnapshotNodesFromPageContent(pageContent: string): SnapshotNode[] 
     if (!match) continue;
     const indent = rawLine.length - rawLine.trimStart().length;
     const hrefMatch = trimmedLine.match(/\shref="([^"]+)"/i);
+    const valueMatch =
+      trimmedLine.match(/\svalue="([^"]*)"/i) ??
+      trimmedLine.match(/\svalue:\s*"([^"]*)"/i) ??
+      trimmedLine.match(/\svalue='([^']*)'/i);
     nodes.push({
       role: String(match[1] || 'generic')
         .trim()
@@ -147,6 +152,7 @@ function parseSnapshotNodesFromPageContent(pageContent: string): SnapshotNode[] 
       ref: String(match[3] || '').trim(),
       depth: Math.max(0, Math.floor(indent / 2)),
       href: hrefMatch ? String(hrefMatch[1] || '').trim() : null,
+      valueState: valueMatch ? valueStateFromRaw(valueMatch[1]) : null,
     });
     if (nodes.length >= 300) break;
   }
@@ -219,7 +225,15 @@ function toInteractiveElement(node: SnapshotNode): SnapshotInteractiveElement {
   };
   const href = typeof node.href === 'string' ? node.href.trim() : '';
   if (href) element.href = href;
+  if (node.valueState) element.valueState = node.valueState;
   return element;
+}
+
+function valueStateFromRaw(value: unknown): 'empty' | 'non_empty' | 'unknown' {
+  if (value === null || value === undefined) return 'unknown';
+  if (typeof value === 'boolean') return value ? 'non_empty' : 'empty';
+  const raw = String(value);
+  return raw.length > 0 ? 'non_empty' : 'empty';
 }
 
 function normalizeFallbackRole(item: any): string {
@@ -262,6 +276,9 @@ function buildFallbackNodes(fallbackElements: any[]): SnapshotNode[] {
     name: String(item?.text || item?.name || item?.ariaLabel || '').trim(),
     depth: 0,
     href: typeof item?.href === 'string' ? item.href : null,
+    valueState: Object.prototype.hasOwnProperty.call(item ?? {}, 'value')
+      ? valueStateFromRaw(item.value)
+      : null,
   }));
 }
 
