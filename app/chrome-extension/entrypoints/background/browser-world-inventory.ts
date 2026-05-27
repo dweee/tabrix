@@ -63,9 +63,20 @@ export interface BrowserWorldSnapshot {
   userOrPageOpenedTabIds: number[];
   operableTabIds: number[];
   summary: BrowserWorldSummary;
+  retentionPolicy: BrowserWorldRetentionPolicy;
   recentEvents: BrowserWorldEvent[];
   windows: BrowserWorldWindowObject[];
   tabs: BrowserWorldTabObject[];
+}
+
+export interface BrowserWorldRetentionPolicy {
+  recentEventLimit: number;
+  recentEventsRetained: number;
+  windowObjectsRetained: number;
+  tabObjectsRetained: number;
+  refreshMode: 'event_driven_with_on_demand_chrome_resync';
+  eventPrivacyBoundary: string;
+  detailBoundary: string;
 }
 
 export interface BrowserWorldSummary {
@@ -182,6 +193,8 @@ type EventHook = {
   removeListener?: (listener: any) => void;
 };
 
+const MAX_RECENT_BROWSER_WORLD_EVENTS = 50;
+
 const tabsById = new Map<number, BrowserWorldTabObject>();
 const windowsById = new Map<number, BrowserWorldWindowObject>();
 const pendingAiCreatedTabIds = new Set<number>();
@@ -213,7 +226,7 @@ function isOperableUrl(url: string): { canOperate: boolean | null; reason: strin
 }
 
 function isOperableWindow(
-  window: Pick<chrome.windows.Window, 'state' | 'type'>,
+  window: { state?: unknown; type?: unknown },
   activeTabCanOperate: boolean | null,
 ): { canOperate: boolean | null; reason: string } {
   const windowType = String(window.type || 'unknown');
@@ -230,9 +243,9 @@ function isOperableWindow(
   return { canOperate: true, reason: 'active_tab_operable_in_visible_window' };
 }
 
-function visibilityStateFromChromeWindow(
-  window: Pick<chrome.windows.Window, 'state'>,
-): BrowserWorldWindowObject['visibilityState'] {
+function visibilityStateFromChromeWindow(window: {
+  state?: unknown;
+}): BrowserWorldWindowObject['visibilityState'] {
   const state = String(window.state || 'unknown');
   if (state === 'minimized') return 'minimized';
   if (state === 'normal' || state === 'maximized' || state === 'fullscreen') return 'visible';
@@ -351,7 +364,7 @@ function recordObserved(): void {
 
 function pushEvent(event: Omit<BrowserWorldEvent, 'observedAtMs'>): void {
   recentEvents.push({ ...event, observedAtMs: nowMs() });
-  while (recentEvents.length > 50) recentEvents.shift();
+  while (recentEvents.length > MAX_RECENT_BROWSER_WORLD_EVENTS) recentEvents.shift();
   recordObserved();
 }
 
@@ -642,6 +655,17 @@ function buildSnapshot(): BrowserWorldSnapshot {
         lastAiOperatedTab,
         focusedWindow ?? null,
       ),
+    },
+    retentionPolicy: {
+      recentEventLimit: MAX_RECENT_BROWSER_WORLD_EVENTS,
+      recentEventsRetained: recentEvents.length,
+      windowObjectsRetained: windows.length,
+      tabObjectsRetained: tabs.length,
+      refreshMode: 'event_driven_with_on_demand_chrome_resync',
+      eventPrivacyBoundary:
+        'Recent browser lifecycle events retain ids, status, ownership, and timestamps only; they do not retain tab URLs, titles, page text, screenshots, cookies, account state, QR payloads, or network bodies.',
+      detailBoundary:
+        'Current BrowserWindowObject and BrowserTabObject details may include live tab URLs and titles for AI operation routing; do not copy raw details into public evidence.',
     },
     recentEvents: [...recentEvents],
     windows,

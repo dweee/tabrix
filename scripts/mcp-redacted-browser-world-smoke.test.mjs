@@ -49,6 +49,16 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
             tabs: [{ tabId: 20, url: 'https://private.example.test/dashboard' }],
           },
         ],
+        retentionPolicy: {
+          recentEventLimit: 50,
+          recentEventsRetained: 12,
+          windowObjectsRetained: 1,
+          tabObjectsRetained: 20,
+          refreshMode: 'event_driven_with_on_demand_chrome_resync',
+          eventPrivacyBoundary:
+            'Recent browser lifecycle events retain ids only and do not retain https://private.example.test/dashboard.',
+          detailBoundary: 'Detailed objects may include Private Dashboard titles.',
+        },
         claimBoundary: 'Browser lifecycle summary only.',
       },
       summary: {
@@ -91,6 +101,15 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
     openedBy: 'ai',
     canTabrixOperate: true,
     status: 'complete',
+  });
+  assert.deepEqual(summary.retentionPolicy, {
+    recentEventLimit: 50,
+    recentEventsRetained: 12,
+    windowObjectsRetained: 1,
+    tabObjectsRetained: 20,
+    refreshMode: 'event_driven_with_on_demand_chrome_resync',
+    eventPrivacyBoundaryPresent: true,
+    detailBoundaryPresent: true,
   });
   assert.deepEqual(summary.windows, {
     total: 1,

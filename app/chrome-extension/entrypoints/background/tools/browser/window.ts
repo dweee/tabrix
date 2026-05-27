@@ -132,6 +132,7 @@ class WindowTool extends BaseBrowserToolExecutor {
           })),
           recentChangeSummary: browserWorld.summary.recentChangeSummary,
           objectChangeConclusion: browserWorld.summary.objectChangeConclusion,
+          retentionPolicy: browserWorld.retentionPolicy,
           claimBoundary:
             'Browser lifecycle summary only; page content, account state, login success, and API/CDP reuse require separate evidence.',
         },

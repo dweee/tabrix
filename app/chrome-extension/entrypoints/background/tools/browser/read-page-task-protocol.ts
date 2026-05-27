@@ -126,7 +126,7 @@ const PAGE_OBJECT_FAMILY_ADAPTERS: readonly PageObjectFamilyAdapter[] = [
 const MAX_REGION_OBJECTS = 5;
 const MAX_NAVIGATION_REGION_OBJECTS = 12;
 
-function buildInteractiveMap(elements: ReadPageInteractiveElement[]) {
+function buildInteractiveMap(elements: readonly ReadPageInteractiveElement[]) {
   const map = new Map<string, ReadPageInteractiveElement>();
   for (const element of elements) {
     if (!element?.ref) continue;

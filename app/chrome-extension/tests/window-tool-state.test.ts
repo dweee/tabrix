@@ -110,6 +110,12 @@ describe('get_windows_and_tabs state inventory', () => {
             tabCount: 0,
           },
         ],
+        retentionPolicy: {
+          recentEventLimit: 50,
+          windowObjectsRetained: 2,
+          tabObjectsRetained: 2,
+          refreshMode: 'event_driven_with_on_demand_chrome_resync',
+        },
         claimBoundary:
           'Browser lifecycle summary only; page content, account state, login success, and API/CDP reuse require separate evidence.',
       },
@@ -243,6 +249,15 @@ describe('get_windows_and_tabs state inventory', () => {
       omittedTabCount: 8,
       activeTabId: 120,
     });
+    expect(payload.compactSummary.retentionPolicy).toMatchObject({
+      recentEventLimit: 50,
+      windowObjectsRetained: 1,
+      tabObjectsRetained: 20,
+    });
+    expect(payload.compactSummary.retentionPolicy.recentEventsRetained).toBeGreaterThanOrEqual(1);
+    expect(payload.compactSummary.retentionPolicy.recentEventsRetained).toBeLessThanOrEqual(
+      payload.compactSummary.retentionPolicy.recentEventLimit,
+    );
     expect(payload.compactSummary.windows[0].tabs).toHaveLength(12);
     expect(payload.compactSummary.windows[0].tabs.at(-1)).toMatchObject({
       tabId: 120,

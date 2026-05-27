@@ -95,6 +95,18 @@ describe('browser world inventory', () => {
     expect(snapshot.source).toBe('extension_browser_world_inventory');
     expect(snapshot.windowCount).toBe(1);
     expect(snapshot.tabCount).toBe(2);
+    expect(snapshot.retentionPolicy).toMatchObject({
+      recentEventLimit: 50,
+      windowObjectsRetained: 1,
+      tabObjectsRetained: 2,
+      refreshMode: 'event_driven_with_on_demand_chrome_resync',
+    });
+    expect(snapshot.retentionPolicy.recentEventsRetained).toBeGreaterThanOrEqual(1);
+    expect(snapshot.retentionPolicy.recentEventsRetained).toBeLessThanOrEqual(
+      snapshot.retentionPolicy.recentEventLimit,
+    );
+    expect(snapshot.retentionPolicy.eventPrivacyBoundary).toContain('do not retain tab URLs');
+    expect(snapshot.retentionPolicy.detailBoundary).toContain('live tab URLs and titles');
     expect(snapshot.focusedWindowId).toBe(1);
     expect(snapshot.browserActiveTabId).toBe(10);
     expect(snapshot.userOrPageOpenedTabIds).toEqual([10, 11]);
@@ -561,6 +573,12 @@ describe('browser world inventory', () => {
 
     const snapshot = await getBrowserWorldSnapshot();
     expect(snapshot.recentEvents).toHaveLength(50);
+    expect(snapshot.retentionPolicy).toMatchObject({
+      recentEventLimit: 50,
+      recentEventsRetained: 50,
+      windowObjectsRetained: 1,
+      tabObjectsRetained: 62,
+    });
     expect(snapshot.recentEvents[0]).toMatchObject({
       eventKind: 'tab_updated',
       tabId: 1010,
@@ -570,5 +588,8 @@ describe('browser world inventory', () => {
       tabId: 1059,
     });
     expect(snapshot.recentEvents.some((event) => 'url' in event)).toBe(false);
+    expect(snapshot.recentEvents.some((event) => 'title' in event)).toBe(false);
+    expect(JSON.stringify(snapshot.recentEvents)).not.toContain('bulk-tabs.test');
+    expect(JSON.stringify(snapshot.recentEvents)).not.toContain('Bulk 59');
   });
 });

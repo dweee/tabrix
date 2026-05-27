@@ -173,6 +173,7 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     (sum, window) => sum + (Number.isInteger(window?.omittedTabCount) ? window.omittedTabCount : 0),
     0,
   );
+  const retentionPolicy = payload?.compactSummary?.retentionPolicy ?? payload?.retentionPolicy;
 
   return {
     callSucceeded: true,
@@ -183,6 +184,25 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     compactTabLimit,
     omittedTabCount,
     compactTabsShown: compactTabs.length,
+    retentionPolicy: retentionPolicy
+      ? {
+          recentEventLimit: Number.isInteger(retentionPolicy.recentEventLimit)
+            ? retentionPolicy.recentEventLimit
+            : null,
+          recentEventsRetained: Number.isInteger(retentionPolicy.recentEventsRetained)
+            ? retentionPolicy.recentEventsRetained
+            : null,
+          windowObjectsRetained: Number.isInteger(retentionPolicy.windowObjectsRetained)
+            ? retentionPolicy.windowObjectsRetained
+            : null,
+          tabObjectsRetained: Number.isInteger(retentionPolicy.tabObjectsRetained)
+            ? retentionPolicy.tabObjectsRetained
+            : null,
+          refreshMode: retentionPolicy.refreshMode ?? null,
+          eventPrivacyBoundaryPresent: typeof retentionPolicy.eventPrivacyBoundary === 'string',
+          detailBoundaryPresent: typeof retentionPolicy.detailBoundary === 'string',
+        }
+      : null,
     activeTabIncludedInCompactTabs:
       Number.isInteger(activeTabId) && compactTabs.length
         ? compactTabs.some((tab) => tab?.tabId === activeTabId)

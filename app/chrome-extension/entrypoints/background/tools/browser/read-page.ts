@@ -799,7 +799,7 @@ function buildReadPageOwnershipRuntimeSummary(params: {
       : 'chrome_tab_snapshot',
     currentOwnerType: params.currentOwnerType,
     currentTabRunOwnershipVerdict: 'unknown',
-    currentTabPrimaryRelationVerdict: 'unknown',
+    currentTabPrimaryRelationVerdict: 'current_tab_unknown',
     protectedScopeVerdict: 'unknown',
     cleanupEligibility: 'unknown',
     protectReason: null,
@@ -903,11 +903,22 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     });
     const elements = Array.isArray(fallback?.elements) ? fallback.elements : [];
     return elements
-      .map((element: any, index: number) => scoreQrVisualElementHint(element, index))
-      .filter((item): item is ReadPageVisualElementHint & { score: number } => Boolean(item))
-      .sort((left, right) => right.score - left.score)
+      .map((element: unknown, index: number) => scoreQrVisualElementHint(element, index))
+      .filter(
+        (
+          item: (ReadPageVisualElementHint & { score: number }) | null,
+        ): item is ReadPageVisualElementHint & {
+          score: number;
+        } => Boolean(item),
+      )
+      .sort(
+        (
+          left: ReadPageVisualElementHint & { score: number },
+          right: ReadPageVisualElementHint & { score: number },
+        ) => right.score - left.score,
+      )
       .slice(0, 3)
-      .map(({ score: _score, ...item }) => item);
+      .map(({ score: _score, ...item }: ReadPageVisualElementHint & { score: number }) => item);
   }
 
   private async recoverGlobalMenuTextTargets(params: {
