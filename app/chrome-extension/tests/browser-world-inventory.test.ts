@@ -27,6 +27,8 @@ describe('browser world inventory', () => {
     tabRemoved: [] as Listener[],
     tabActivated: [] as Listener[],
     tabReplaced: [] as Listener[],
+    tabAttached: [] as Listener[],
+    tabDetached: [] as Listener[],
     windowCreated: [] as Listener[],
     windowRemoved: [] as Listener[],
     windowFocusChanged: [] as Listener[],
@@ -41,6 +43,8 @@ describe('browser world inventory', () => {
     (chrome.tabs as any).onRemoved = hook(listeners.tabRemoved);
     (chrome.tabs as any).onActivated = hook(listeners.tabActivated);
     (chrome.tabs as any).onReplaced = hook(listeners.tabReplaced);
+    (chrome.tabs as any).onAttached = hook(listeners.tabAttached);
+    (chrome.tabs as any).onDetached = hook(listeners.tabDetached);
     (chrome as any).windows = {
       getAll: vi.fn().mockResolvedValue([
         {
@@ -973,6 +977,98 @@ describe('browser world inventory', () => {
       'currentWindow=focused_window_visible_operable',
     );
     expect(snapshot.summary.objectChangeConclusion).toContain('visibility=visible');
+  });
+
+  it('tracks tab page object detach and attach across browser windows', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    listeners.windowCreated[0]?.({
+      id: 2,
+      focused: false,
+      state: 'normal',
+      type: 'normal',
+      width: 900,
+      height: 700,
+      left: 20,
+      top: 30,
+      tabs: [],
+    } as chrome.windows.Window);
+    listeners.tabDetached[0]?.(10, { oldWindowId: 1, oldPosition: 0 });
+
+    let snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.tabs.find((tab) => tab.tabId === 10)).toMatchObject({
+      tabId: 10,
+      windowId: null,
+      active: false,
+      openedBy: 'user_or_page',
+    });
+    expect(snapshot.windows.find((window) => window.windowId === 1)).toMatchObject({
+      windowId: 1,
+      activeTabId: null,
+      tabCount: 1,
+    });
+    expect(snapshot.summary.tabLifecycleState).toMatchObject({
+      latestEventKind: 'tab_detached',
+      latestEventTabId: 10,
+      latestEventWindowId: 1,
+      recentDetachedCount: 1,
+      retainedTabCount: 2,
+    });
+    expect(snapshot.summary.recentChangeSummary).toContain('tab 10 detached from window 1');
+    expect(snapshot.summary.objectChangeConclusion).toContain(
+      'Page object tab 10 detached from window 1',
+    );
+    expect(snapshot.summary.objectChangeSummary).toContain('tab 10 detached from window 1');
+    expect(snapshot.summary.dynamicObjectUpdateSummary).toContain('tab 10 detached from window 1');
+    expect(snapshot.recentEvents.at(-1)).toMatchObject({
+      eventKind: 'tab_detached',
+      tabId: 10,
+      windowId: 1,
+      oldWindowId: 1,
+      openedBy: 'user_or_page',
+    });
+    expect(JSON.stringify(snapshot.recentEvents)).not.toContain('example.test');
+
+    listeners.tabAttached[0]?.(10, { newWindowId: 2, newPosition: 0 });
+
+    snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.tabs.find((tab) => tab.tabId === 10)).toMatchObject({
+      tabId: 10,
+      windowId: 2,
+      active: false,
+      openedBy: 'user_or_page',
+      canTabrixOperate: true,
+    });
+    expect(snapshot.windows.find((window) => window.windowId === 2)).toMatchObject({
+      windowId: 2,
+      activeTabId: null,
+      tabCount: 1,
+      canTabrixOperate: null,
+      operabilityReason: 'active_tab_operability_unknown',
+    });
+    expect(snapshot.summary.tabLifecycleState).toMatchObject({
+      latestEventKind: 'tab_attached',
+      latestEventTabId: 10,
+      latestEventWindowId: 2,
+      recentAttachedCount: 1,
+      recentDetachedCount: 1,
+      retainedTabCount: 2,
+    });
+    expect(snapshot.summary.recentChangeSummary).toContain('tab 10 attached to window 2');
+    expect(snapshot.summary.objectChangeConclusion).toContain(
+      'Page object tab 10 attached to window 2',
+    );
+    expect(snapshot.summary.objectChangeSummary).toContain('tab 10 attached to window 2');
+    expect(snapshot.summary.dynamicObjectUpdateSummary).toContain('tab 10 attached to window 2');
+    expect(snapshot.recentEvents.at(-1)).toMatchObject({
+      eventKind: 'tab_attached',
+      tabId: 10,
+      windowId: 2,
+      newWindowId: 2,
+      openedBy: 'user_or_page',
+    });
+    expect(JSON.stringify(snapshot.recentEvents)).not.toContain('example.test');
   });
 
   it('caps recent browser lifecycle events under high tab churn without storing URLs in events', async () => {

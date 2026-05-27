@@ -75,7 +75,9 @@ function isTabLifecycleEvent(event: BrowserWorldEvent): event is BrowserWorldEve
     event.eventKind === 'tab_updated' ||
     event.eventKind === 'tab_removed' ||
     event.eventKind === 'tab_activated' ||
-    event.eventKind === 'tab_replaced'
+    event.eventKind === 'tab_replaced' ||
+    event.eventKind === 'tab_attached' ||
+    event.eventKind === 'tab_detached'
   );
 }
 
@@ -96,6 +98,8 @@ export function buildTabLifecycleState(
     recentUpdatedCount: tabEvents.filter((event) => event.eventKind === 'tab_updated').length,
     recentActivatedCount: tabEvents.filter((event) => event.eventKind === 'tab_activated').length,
     recentReplacedCount: tabEvents.filter((event) => event.eventKind === 'tab_replaced').length,
+    recentAttachedCount: tabEvents.filter((event) => event.eventKind === 'tab_attached').length,
+    recentDetachedCount: tabEvents.filter((event) => event.eventKind === 'tab_detached').length,
     recentRemovedCount: tabEvents.filter((event) => event.eventKind === 'tab_removed').length,
     retainedTabCount: tabs.length,
     activeTabId: activeTab?.tabId ?? null,
@@ -109,9 +113,9 @@ export function summarizeTabLifecycle(state: BrowserWorldTabLifecycleState): str
     return `Tab page object lifecycle: no tab lifecycle event observed; retainedTabs=${state.retainedTabCount}, activeTab=${state.activeTabId ?? 'unknown'}.`;
   }
   if (state.latestEventKind === 'tab_replaced') {
-    return `Tab page object lifecycle: latest=${state.latestEventKind}, tab=${state.latestEventTabId ?? 'unknown'}, replacedTab=${state.latestReplacedTabId ?? 'unknown'}, retainedTabs=${state.retainedTabCount}, activeTab=${state.activeTabId ?? 'unknown'}, created=${state.recentCreatedCount}, updated=${state.recentUpdatedCount}, activated=${state.recentActivatedCount}, replaced=${state.recentReplacedCount}, removed=${state.recentRemovedCount}.`;
+    return `Tab page object lifecycle: latest=${state.latestEventKind}, tab=${state.latestEventTabId ?? 'unknown'}, replacedTab=${state.latestReplacedTabId ?? 'unknown'}, retainedTabs=${state.retainedTabCount}, activeTab=${state.activeTabId ?? 'unknown'}, created=${state.recentCreatedCount}, updated=${state.recentUpdatedCount}, activated=${state.recentActivatedCount}, replaced=${state.recentReplacedCount}, attached=${state.recentAttachedCount}, detached=${state.recentDetachedCount}, removed=${state.recentRemovedCount}.`;
   }
-  return `Tab page object lifecycle: latest=${state.latestEventKind}, tab=${state.latestEventTabId ?? 'unknown'}, status=${state.latestEventStatus ?? 'unknown'}, retainedTabs=${state.retainedTabCount}, activeTab=${state.activeTabId ?? 'unknown'}, created=${state.recentCreatedCount}, updated=${state.recentUpdatedCount}, activated=${state.recentActivatedCount}, replaced=${state.recentReplacedCount}, removed=${state.recentRemovedCount}.`;
+  return `Tab page object lifecycle: latest=${state.latestEventKind}, tab=${state.latestEventTabId ?? 'unknown'}, status=${state.latestEventStatus ?? 'unknown'}, retainedTabs=${state.retainedTabCount}, activeTab=${state.activeTabId ?? 'unknown'}, created=${state.recentCreatedCount}, updated=${state.recentUpdatedCount}, activated=${state.recentActivatedCount}, replaced=${state.recentReplacedCount}, attached=${state.recentAttachedCount}, detached=${state.recentDetachedCount}, removed=${state.recentRemovedCount}.`;
 }
 
 export function buildAiOperationState(
@@ -375,6 +379,12 @@ export function summarizeObjectChangeConclusion(
   if (last.eventKind === 'tab_replaced') {
     return `Page object tab ${last.replacedTabId ?? 'unknown'} was replaced by tab ${last.tabId ?? 'unknown'}; owner=${last.openedBy ?? 'unknown'}.`;
   }
+  if (last.eventKind === 'tab_detached') {
+    return `Page object tab ${last.tabId ?? 'unknown'} detached from window ${last.oldWindowId ?? last.windowId ?? 'unknown'}; owner=${last.openedBy ?? 'unknown'}.`;
+  }
+  if (last.eventKind === 'tab_attached') {
+    return `Page object tab ${last.tabId ?? 'unknown'} attached to window ${last.newWindowId ?? last.windowId ?? 'unknown'}; owner=${last.openedBy ?? 'unknown'}.`;
+  }
   if (last.eventKind === 'ai_tab_marked' && lastAiOperatedTab) {
     return `Latest AI-operated page object is tab ${lastAiOperatedTab.tabId}; operation=${lastAiOperatedTab.lastAiOperation ?? 'unknown'}, confidence=${lastAiOperatedTab.lastAiOperationConfidence ?? 'unknown'}, reason=${lastAiOperatedTab.lastAiOperationReason ?? 'unknown'}, operable=${lastAiOperatedTab.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
   }
@@ -458,6 +468,12 @@ export function summarizeObjectChangeSummary(
   if (last.eventKind === 'tab_replaced') {
     return `Object change summary: tab ${last.replacedTabId ?? 'unknown'} was replaced by tab ${last.tabId ?? 'unknown'}; retained tabs=${lifecycleState.retainedTabCount}; ${routing}`;
   }
+  if (last.eventKind === 'tab_detached') {
+    return `Object change summary: tab ${last.tabId ?? 'unknown'} detached from window ${last.oldWindowId ?? last.windowId ?? 'unknown'}; retained tabs=${lifecycleState.retainedTabCount}; ${routing}`;
+  }
+  if (last.eventKind === 'tab_attached') {
+    return `Object change summary: tab ${last.tabId ?? 'unknown'} attached to window ${last.newWindowId ?? last.windowId ?? 'unknown'}; retained tabs=${lifecycleState.retainedTabCount}; ${routing}`;
+  }
   if (last.eventKind === 'ai_tab_marked') {
     return `Object change summary: AI operation ${aiOperationState.latestAiOperation ?? last.aiOperation ?? 'unknown'} was recorded on tab ${aiOperationState.latestAiOperatedTabId ?? last.tabId ?? 'unknown'}; ${routing}`;
   }
@@ -509,6 +525,12 @@ export function summarizeDynamicObjectUpdate(
   if (last.eventKind === 'tab_replaced') {
     return `Dynamic object update: tab ${last.replacedTabId ?? 'unknown'} was replaced by tab ${last.tabId ?? 'unknown'}; owner=${last.openedBy ?? 'unknown'}, retainedTabs=${lifecycleState.retainedTabCount}, activeTab=${lifecycleState.activeTabId ?? 'unknown'}.`;
   }
+  if (last.eventKind === 'tab_detached') {
+    return `Dynamic object update: tab ${last.tabId ?? 'unknown'} detached from window ${last.oldWindowId ?? last.windowId ?? 'unknown'}; owner=${last.openedBy ?? 'unknown'}, retainedTabs=${lifecycleState.retainedTabCount}, activeTab=${lifecycleState.activeTabId ?? 'unknown'}.`;
+  }
+  if (last.eventKind === 'tab_attached') {
+    return `Dynamic object update: tab ${last.tabId ?? 'unknown'} attached to window ${last.newWindowId ?? last.windowId ?? 'unknown'}; owner=${last.openedBy ?? 'unknown'}, retainedTabs=${lifecycleState.retainedTabCount}, activeTab=${lifecycleState.activeTabId ?? 'unknown'}.`;
+  }
   if (last.eventKind === 'ai_tab_marked') {
     return `Dynamic object update: latest AI-operated page object is tab ${aiOperationState.latestAiOperatedTabId ?? last.tabId ?? 'unknown'}; operation=${aiOperationState.latestAiOperation ?? 'unknown'}, confidence=${aiOperationState.latestAiOperationConfidence ?? 'unknown'}, reason=${aiOperationState.latestAiOperationReason ?? 'unknown'}, relationToActive=${aiOperationState.relationToBrowserActiveTab}, canContinue=${aiOperationState.canContinueOnLatestAiOperatedTab === true ? 'yes' : 'no_or_unknown'}.`;
   }
@@ -547,6 +569,10 @@ export function summarizeRecentEvents(events: readonly BrowserWorldEvent[]): str
       return `Last change: window ${last.windowId ?? 'unknown'} was removed; removedTabs=${last.removedTabCount ?? 'unknown'}, removedAiOpenedTabs=${last.removedAiOpenedTabCount ?? 'unknown'}.`;
     case 'tab_replaced':
       return `Last change: tab ${last.replacedTabId ?? 'unknown'} was replaced by tab ${last.tabId ?? 'unknown'}.`;
+    case 'tab_detached':
+      return `Last change: tab ${last.tabId ?? 'unknown'} detached from window ${last.oldWindowId ?? last.windowId ?? 'unknown'}.`;
+    case 'tab_attached':
+      return `Last change: tab ${last.tabId ?? 'unknown'} attached to window ${last.newWindowId ?? last.windowId ?? 'unknown'}.`;
     case 'ai_tab_marked':
       return `Last change: tab ${last.tabId ?? 'unknown'} was marked as operated by Tabrix; operation=${last.aiOperation ?? 'unknown'}, reason=${last.aiOperationReason ?? 'unknown'}.`;
     case 'inventory_seeded':

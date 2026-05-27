@@ -215,7 +215,9 @@ export type BrowserWorldTabLifecycleEventKind =
   | 'tab_updated'
   | 'tab_removed'
   | 'tab_activated'
-  | 'tab_replaced';
+  | 'tab_replaced'
+  | 'tab_attached'
+  | 'tab_detached';
 
 export interface BrowserWorldTabLifecycleState {
   latestEventKind: BrowserWorldTabLifecycleEventKind | null;
@@ -227,6 +229,8 @@ export interface BrowserWorldTabLifecycleState {
   recentUpdatedCount: number;
   recentActivatedCount: number;
   recentReplacedCount: number;
+  recentAttachedCount: number;
+  recentDetachedCount: number;
   recentRemovedCount: number;
   retainedTabCount: number;
   activeTabId: number | null;
@@ -327,6 +331,8 @@ export interface BrowserWorldEvent {
     | 'tab_removed'
     | 'tab_activated'
     | 'tab_replaced'
+    | 'tab_attached'
+    | 'tab_detached'
     | 'window_created'
     | 'window_removed'
     | 'window_focus_changed'
@@ -336,6 +342,8 @@ export interface BrowserWorldEvent {
   tabId: number | null;
   replacedTabId?: number | null;
   windowId: number | null;
+  oldWindowId?: number | null;
+  newWindowId?: number | null;
   openedBy?: BrowserWorldTabOpenedBy;
   status?: string | null;
   aiOperation?: string | null;
@@ -523,6 +531,24 @@ function refreshWindowActiveTabState(windowId: number, activeTabId: number | nul
   });
 }
 
+function refreshWindowDerivedTabState(windowId: number): void {
+  const window = windowsById.get(windowId);
+  if (!window) return;
+  const tabs = Array.from(tabsById.values()).filter((tab) => tab.windowId === windowId);
+  const activeTab = tabs.find((tab) => tab.active === true) ?? null;
+  const activeTabCanOperate = activeTab?.canTabrixOperate ?? null;
+  const windowOperability = isOperableWindow(window, activeTabCanOperate);
+  windowsById.set(windowId, {
+    ...window,
+    activeTabId: activeTab?.tabId ?? null,
+    activeTabCanOperate,
+    canTabrixOperate: windowOperability.canOperate,
+    operabilityReason: windowOperability.reason,
+    tabCount: tabs.length,
+    updatedAtMs: nowMs(),
+  });
+}
+
 function recordObserved(): void {
   lastObservedAtMs = nowMs();
 }
@@ -652,6 +678,47 @@ export function initBrowserWorldInventory(): void {
       tabId: addedTabId,
       replacedTabId: removedTabId,
       windowId: previous?.windowId ?? null,
+      openedBy: previous?.openedBy,
+      status: previous?.status ?? null,
+    });
+  });
+  bind((chrome.tabs as any)?.onDetached, (tabId: number, detachInfo: any) => {
+    const oldWindowId = readInteger(detachInfo?.oldWindowId);
+    const previous = tabsById.get(tabId);
+    if (previous) {
+      tabsById.set(tabId, {
+        ...previous,
+        windowId: null,
+        active: false,
+        updatedAtMs: nowMs(),
+      });
+    }
+    if (oldWindowId !== null) refreshWindowDerivedTabState(oldWindowId);
+    pushEvent({
+      eventKind: 'tab_detached',
+      tabId,
+      windowId: oldWindowId,
+      oldWindowId,
+      openedBy: previous?.openedBy,
+      status: previous?.status ?? null,
+    });
+  });
+  bind((chrome.tabs as any)?.onAttached, (tabId: number, attachInfo: any) => {
+    const newWindowId = readInteger(attachInfo?.newWindowId);
+    const previous = tabsById.get(tabId);
+    if (previous) {
+      tabsById.set(tabId, {
+        ...previous,
+        windowId: newWindowId,
+        updatedAtMs: nowMs(),
+      });
+    }
+    if (newWindowId !== null) refreshWindowDerivedTabState(newWindowId);
+    pushEvent({
+      eventKind: 'tab_attached',
+      tabId,
+      windowId: newWindowId,
+      newWindowId,
       openedBy: previous?.openedBy,
       status: previous?.status ?? null,
     });
