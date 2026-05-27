@@ -1463,7 +1463,7 @@ function formatActionLinkedTargetConclusion(
 function semanticEventConclusionLabel(event: ReadPageBrowserPageSemanticEvent): string {
   switch (event.eventType) {
     case 'menu_expanded':
-      return 'a menu expanded candidate';
+      return formatMenuExpandedConclusionLabel(event.summary);
     case 'auth_succeeded_candidate':
       return 'an authentication state-change candidate';
     case 'logout_succeeded_candidate':
@@ -1481,6 +1481,14 @@ function semanticEventConclusionLabel(event: ReadPageBrowserPageSemanticEvent): 
     default:
       return 'a page semantic change candidate';
   }
+}
+
+function formatMenuExpandedConclusionLabel(summary: string): string {
+  const normalized = trimConclusion(summary, 'Menu expanded candidate.');
+  const detail = normalized
+    .replace(/^Menu expanded candidate:\s*/i, '')
+    .replace(/\s+Current visible entries:\s+/i, ' visible entries: ');
+  return `a menu expanded candidate: ${detail}`;
 }
 
 function readStringFact(

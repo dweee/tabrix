@@ -834,6 +834,10 @@ describe('read_page object lifecycle', () => {
     expect(view.dynamicAttributeSummary?.primaryConclusion).toContain(
       'was followed by a menu expanded candidate',
     );
+    expect(view.dynamicAttributeSummary?.primaryConclusion).toContain('1 menu action(s) appeared');
+    expect(view.dynamicAttributeSummary?.primaryConclusion).toContain(
+      'visible entries: More, Settings',
+    );
     expect(view.dynamicAttributeSummary?.primaryConclusion).toContain(
       'postcondition verification is still required',
     );
