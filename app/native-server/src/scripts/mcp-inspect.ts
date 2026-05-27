@@ -101,6 +101,22 @@ function parseArgPair(raw: string): { key: string; value: unknown } {
     throw new Error(`Tool arguments from --arg must use key=value format, got: ${raw}`);
   }
 
+  if (valueText.startsWith('@json:')) {
+    const filePath = valueText.slice('@json:'.length);
+    if (!filePath) {
+      throw new Error(`Tool argument ${key} used @json: without a file path`);
+    }
+    const fileContent = fs.readFileSync(filePath, 'utf8').trim();
+    if (!fileContent) {
+      throw new Error(`Tool argument ${key} JSON file is empty: ${filePath}`);
+    }
+    try {
+      return { key, value: JSON.parse(fileContent) };
+    } catch (error) {
+      throw new Error(`Tool argument ${key} JSON file is invalid: ${stringifyError(error)}`);
+    }
+  }
+
   try {
     return { key, value: JSON.parse(valueText) };
   } catch {

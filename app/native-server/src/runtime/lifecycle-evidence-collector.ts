@@ -24,6 +24,7 @@ import {
 import { classifyActionOutcome } from './action-outcome-classifier';
 import {
   getActionPostconditionCoverageMatrix,
+  type RegionStatePostconditionResult,
   verifyActionPostcondition,
 } from './action-postcondition-verifier';
 import { recordLifecycleEvidenceArtifact } from './lifecycle-evidence-artifact-store';
@@ -165,6 +166,10 @@ export interface UnifiedTaskCloseoutLifecycleEvidenceArtifactInput {
     observedOutcome?: PostconditionResult['observedOutcome'];
     observedOutcomeConfidence?: number;
   };
+  regionStatePostconditions?: readonly {
+    actionKind: ActionKind;
+    result: RegionStatePostconditionResult;
+  }[];
   sourceTruthChain?: BrowserSourceTruthChain | null;
   browserHygiene: Partial<LifecycleEvidenceBrowserHygiene>;
 }
@@ -658,6 +663,27 @@ function buildUnifiedTaskPostconditionResults(
       producedAtMs: input.endedAtMs,
     });
   }
+  for (const regionState of input.regionStatePostconditions ?? []) {
+    results.push({
+      actionId: regionState.result.actionId,
+      actionKind: regionState.actionKind,
+      tabId: input.tabIds[0] ?? null,
+      urlPattern: null,
+      verdict: regionState.result.verdict,
+      reason: buildRegionStatePostconditionReason(regionState.result),
+      observedOutcome: 'unknown',
+      observedOutcomeConfidence: regionState.result.verdict === 'unknown' ? 0.5 : 0.75,
+      sourceEventRefs: [
+        {
+          kind: 'unknown',
+          id: `region_state:${regionState.result.kind}:${regionState.result.actionId}`,
+          origin: 'inference',
+        },
+      ],
+      sourceOrigins: ['runtime', 'inference'],
+      producedAtMs: regionState.result.producedAtMs,
+    });
+  }
   results.push({
     actionId: input.closeAction.actionId,
     actionKind: 'close',
@@ -672,6 +698,20 @@ function buildUnifiedTaskPostconditionResults(
     producedAtMs: input.endedAtMs,
   });
   return results;
+}
+
+function buildRegionStatePostconditionReason(result: RegionStatePostconditionResult): string {
+  const before = result.beforeSummary.join('|') || 'none';
+  const after = result.afterSummary.join('|') || 'none';
+  return [
+    `region_state_${result.kind}`,
+    result.reason,
+    `before=${before}`,
+    `after=${after}`,
+    result.claimBoundary,
+  ]
+    .join(';')
+    .slice(0, 600);
 }
 
 function buildUnifiedTaskScopeTransitions(

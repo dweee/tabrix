@@ -3,6 +3,8 @@ import type {
   BridgeObservationMessagePayload,
   LifecycleEvidenceBrowserHygieneCheck,
   ObservationKind,
+  ReadPageRegion,
+  ReadPageRegionType,
 } from '@tabrix/shared';
 import { dispatchBridgeObservationToStream, resetEventStream } from './browser-event-stream';
 import {
@@ -22,6 +24,7 @@ import {
   setLifecycleEvidenceCollectorMaxBufferedEventsForTests,
   unregisterLifecycleEvidenceCollector,
 } from './lifecycle-evidence-collector';
+import { verifyRegionStatePostcondition } from './action-postcondition-verifier';
 import type { PrimaryTabHygieneViolationKind } from './primary-tab-controller';
 
 const T0 = 1_700_000_000_000;
@@ -93,6 +96,23 @@ function makeCleanHygieneChecks(): LifecycleEvidenceBrowserHygieneCheck[] {
     { kind: 'user_owned_protection', verdict: 'pass', reason: 'user_owned_tabs_protected' },
     { kind: 'failure_cleanup', verdict: 'pass', reason: 'failure_cleanup_not_needed' },
   ];
+}
+
+function region(
+  regionType: ReadPageRegionType,
+  state: string,
+  overrides: Partial<ReadPageRegion> = {},
+): ReadPageRegion {
+  return {
+    regionId: overrides.regionId ?? `${regionType}-1`,
+    regionType,
+    state,
+    confidence: overrides.confidence ?? 0.8,
+    objects: overrides.objects ?? [],
+    candidateActionIds: overrides.candidateActionIds ?? [],
+    targetability: overrides.targetability ?? 'unknown',
+    claimBoundary: overrides.claimBoundary ?? 'deterministic test fixture only',
+  };
 }
 
 beforeEach(() => {
@@ -1039,6 +1059,106 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     const serialized = JSON.stringify(artifact);
     expect(serialized).not.toContain('private.example');
     expect(serialized).not.toContain('SECRET');
+  });
+
+  it('carries region-state postconditions into the unified lifecycle action log', () => {
+    const logoutState = verifyRegionStatePostcondition({
+      kind: 'logout_completed',
+      actionId: 'act-logout',
+      beforeRegions: [region('account', 'logged_in_candidate')],
+      afterRegions: [region('account', 'logged_out_candidate')],
+      now: () => T0 + 15,
+    });
+    const qrState = verifyRegionStatePostcondition({
+      kind: 'qr_waiting',
+      actionId: 'act-qr',
+      beforeRegions: [],
+      afterRegions: [region('qr_code', 'waiting_scan_candidate')],
+      now: () => T0 + 16,
+    });
+
+    const artifact = produceUnifiedTaskCloseoutLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-unified-region-state-closeout',
+      evidenceLevel: 'integration',
+      scenarioId: 'tool-unified-region-state-closeout',
+      scenarioClass: 'auth_state_change_v1',
+      startedAtMs: T0,
+      endedAtMs: T0 + 30,
+      tabIds: [42],
+      taskTimeline: [
+        {
+          eventId: 'lifecycle:1',
+          index: 1,
+          at: new Date(T0).toISOString(),
+          kind: 'projection_created',
+          tabId: 42,
+          pageRole: 'login_required',
+        },
+        {
+          eventId: 'lifecycle:2',
+          index: 2,
+          at: new Date(T0 + 20).toISOString(),
+          kind: 'region_changed',
+          tabId: 42,
+        },
+        {
+          eventId: 'lifecycle:3',
+          index: 3,
+          at: new Date(T0 + 30).toISOString(),
+          kind: 'cleanup',
+          tabId: 42,
+        },
+      ],
+      readAction: {
+        actionId: 'mcp:chrome_read_page:42',
+        tabId: 42,
+        verdict: 'passed',
+        reason: 'read_page_projection_available',
+      },
+      regionStatePostconditions: [
+        { actionKind: 'click', result: logoutState },
+        { actionKind: 'read', result: qrState },
+      ],
+      closeAction: {
+        actionId: 'mcp:chrome_close_tabs:42',
+        tabId: 42,
+        reason: 'close_tabs_cleanup_succeeded',
+      },
+      browserHygiene: {
+        available: true,
+        baselineTabs: null,
+        runOwnedTabsClosed: 1,
+        baselineChanged: false,
+        checks: makeCleanHygieneChecks(),
+      },
+    });
+
+    expect(artifact.actionLog).toMatchObject({
+      available: true,
+      totalActions: 4,
+      passed: 4,
+    });
+    expect(artifact.actionLog.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionId: 'act-logout',
+          actionKind: 'click',
+          verdict: 'passed',
+          reason: expect.stringContaining('region_state_logout_completed'),
+        }),
+        expect.objectContaining({
+          actionId: 'act-qr',
+          actionKind: 'read',
+          verdict: 'passed',
+          reason: expect.stringContaining('QR presence alone is not business success'),
+        }),
+      ]),
+    );
+    const serialized = JSON.stringify(artifact);
+    expect(serialized).toContain('before=account:logged_in_candidate:unknown:actions:0');
+    expect(serialized).toContain('after=account:logged_out_candidate:unknown:actions:0');
+    expect(serialized).not.toContain('cookie');
+    expect(serialized).not.toContain('Authorization');
   });
 
   it('downgrades closeout postconditions for unsupported action kinds instead of claiming success', () => {

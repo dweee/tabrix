@@ -627,6 +627,27 @@ export class SessionManager {
     return this.externalTaskContexts.get(externalKey) ?? null;
   }
 
+  public releaseExternalTaskContext(externalKey: string): boolean {
+    return this.externalTaskContexts.delete(externalKey);
+  }
+
+  public noteWindowFocusMayHaveChangedForExternalTaskContexts(input: {
+    action: string;
+    sourceExternalKey?: string | null;
+    tabId?: number | null;
+  }): number {
+    let invalidatedCount = 0;
+    for (const [externalKey, taskContext] of this.externalTaskContexts) {
+      if (input.sourceExternalKey && externalKey === input.sourceExternalKey) continue;
+      taskContext.notePageInteraction({
+        action: input.action,
+        tabId: input.tabId ?? null,
+      });
+      invalidatedCount += 1;
+    }
+    return invalidatedCount;
+  }
+
   public getTask(taskId: string): Task {
     const task = this.tasks.get(taskId);
     if (!task) {

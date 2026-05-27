@@ -13,8 +13,9 @@
  *    target-evidence signal that demands it.
  * 2. Read budget is configurable via `TABRIX_READ_BUDGET_PER_TASK`
  *    (positive integer; falls back to 6).
- * 3. URL OR pageRole change invalidates `lastReadLayer` and
- *    `targetRefsSeen` so a fresh page on the same task starts clean.
+ * 3. URL OR pageRole change invalidates `lastReadLayer`,
+ *    `lastReadRequestKey`, and `targetRefsSeen` so a fresh page on the same
+ *    task starts clean.
  * 4. Layer demotion (e.g. `L0+L1+L2 → L0`) is allowed but flagged via
  *    `reason='layer_demotion'` so callers can surface the warning.
  *
@@ -28,10 +29,13 @@
 import {
   type BrowserSourceTruthChain,
   buildBrowserPageProjectionDelta,
+  compareReadPageObjectLifecycleSummaries,
   type BrowserDataSourceDecisionEvidence,
+  type BrowserPageChangeCause,
   type BrowserPageProjectionDeltaEvidenceBoundary,
   type BrowserPageProjectionDelta,
   type BrowserPageThingProjection,
+  type ReadPageObjectLifecycleSummary,
   type ReadPageRequestedLayer,
 } from '@tabrix/shared';
 import type {
@@ -165,13 +169,22 @@ export interface ShouldAllowReadPageResult {
 
 export interface TaskPageRuntimeFields {
   currentWindowId: number | null;
+  currentWindowState: import('@tabrix/shared').ReadPageWindowRuntimeState | null;
+  currentWindowWidth: number | null;
+  currentWindowHeight: number | null;
+  currentWindowLeft: number | null;
+  currentWindowTop: number | null;
   isCurrentTabActive: boolean | null;
   isCurrentWindowFocused: boolean | null;
+  browserActiveTabId: number | null;
+  browserActiveTabIdKnown: boolean;
+  isReadTargetBrowserActiveTab: boolean | null;
 }
 
 export interface NoteReadPageInput {
   layer: ReadPageRequestedLayer;
   source: TaskReadSource;
+  requestKey?: string | null;
   /**
    * Stable target refs the read surfaced. Folded into `targetRefsSeen` so a
    * follow-up read for the same targets is bucketed as redundant.
@@ -187,6 +200,15 @@ export interface NoteReadPageInput {
 export interface NotePageInteractionInput {
   action: string;
   tabId?: number | null;
+  changeCause?: BrowserPageChangeCause | null;
+  targetRefs?: ReadonlyArray<string> | null;
+}
+
+export interface TaskPageInteractionSnapshot {
+  action: string;
+  tabId: number | null;
+  changeCause: BrowserPageChangeCause;
+  targetRefs: string[];
 }
 
 /**
@@ -274,6 +296,12 @@ export interface ShouldAllowReadPageInput {
    * layer (always `'L0+L1'` on a first read).
    */
   requestedLayer: ReadPageRequestedLayer;
+  /**
+   * Optional normalized read shape. Same layer + same request key may reuse
+   * the cached projection; changing mode/depth/filter/ref/render requires a
+   * fresh read even when the public layer string is unchanged.
+   */
+  requestKey?: string | null;
 }
 
 /**
@@ -338,6 +366,7 @@ export class TaskSessionContext {
    * first read OR after a URL/pageRole change invalidated it.
    */
   public lastReadLayer: ReadPageRequestedLayer | null = null;
+  public lastReadRequestKey: string | null = null;
 
   /**
    * Source route of the most recent successful read.
@@ -380,7 +409,9 @@ export class TaskSessionContext {
   private lastPageProjection: BrowserPageThingProjection | null = null;
   private lastSourceTruthChain: BrowserSourceTruthChain | null = null;
   private lastSourceRouteHonesty: TaskSourceRouteHonestySnapshot | null = null;
+  private lastObjectLifecycle: ReadPageObjectLifecycleSummary | null = null;
   private lastPageRuntimeFields: TaskPageRuntimeFields | null = null;
+  private pendingPageInteraction: TaskPageInteractionSnapshot | null = null;
   private pageProjectionDeltaCount = 0;
   private lifecycleEventCount = 0;
   private readonly lifecycleTimeline: TaskLifecycleEvent[] = [];
@@ -436,8 +467,10 @@ export class TaskSessionContext {
     if (nextRole !== null) this.pageRole = nextRole;
     if (urlChanged || roleChanged) {
       this.lastReadLayer = null;
+      this.lastReadRequestKey = null;
       this.lastReadSource = null;
       this.targetRefsSeen.clear();
+      this.lastObjectLifecycle = null;
       this.recordLifecycleEvent({
         kind: 'navigation',
         url: nextUrl,
@@ -615,6 +648,18 @@ export class TaskSessionContext {
     return this.lastSourceRouteHonesty ? { ...this.lastSourceRouteHonesty } : null;
   }
 
+  public noteObjectLifecycleAndBuildDelta(
+    current: ReadPageObjectLifecycleSummary,
+  ): ReadPageObjectLifecycleSummary {
+    const compared = compareReadPageObjectLifecycleSummaries(this.lastObjectLifecycle, current);
+    this.lastObjectLifecycle = cloneObjectLifecycleSummary(current);
+    return compared;
+  }
+
+  public peekLastObjectLifecycle(): ReadPageObjectLifecycleSummary | null {
+    return this.lastObjectLifecycle ? cloneObjectLifecycleSummary(this.lastObjectLifecycle) : null;
+  }
+
   public buildCachedPageProjectionDelta(): BrowserPageProjectionDelta | null {
     if (!this.lastPageProjection) return null;
     const reusedRegions = this.lastPageProjection.activeRegion
@@ -664,6 +709,7 @@ export class TaskSessionContext {
   public noteReadPage(input: NoteReadPageInput): void {
     this.readPageCount += 1;
     this.lastReadLayer = input.layer;
+    this.lastReadRequestKey = normalizeReadRequestKey(input.requestKey);
     this.lastReadSource = input.source;
     if (input.targetRefs) {
       for (const ref of input.targetRefs) {
@@ -680,6 +726,7 @@ export class TaskSessionContext {
 
   public notePageInteraction(input: NotePageInteractionInput): void {
     this.lastReadLayer = null;
+    this.lastReadRequestKey = null;
     this.lastReadSource = null;
     this.targetRefsSeen.clear();
     this._chooseContextDecision = null;
@@ -690,14 +737,34 @@ export class TaskSessionContext {
       typeof input.tabId === 'number' && Number.isInteger(input.tabId) && input.tabId > 0
         ? input.tabId
         : null;
+    this.pendingPageInteraction = {
+      action: input.action,
+      tabId,
+      changeCause: input.changeCause ?? 'unknown',
+      targetRefs: normalizeTargetRefs(input.targetRefs),
+    };
     this.recordLifecycleEvent({
       kind: 'refs_invalidated',
       url: this.currentUrl,
       pageRole: this.pageRole,
       tabId: tabId ?? undefined,
-      invalidatedRefs: ['interaction_may_change_page'],
+      invalidatedRefs: ['interaction_may_change_page', ...normalizeTargetRefs(input.targetRefs)],
       projectionId: input.action,
     });
+  }
+
+  public consumePendingPageInteraction(
+    tabId: number | null | undefined,
+  ): TaskPageInteractionSnapshot | null {
+    const pending = this.pendingPageInteraction;
+    if (!pending) return null;
+    const normalizedTabId =
+      typeof tabId === 'number' && Number.isInteger(tabId) && tabId > 0 ? tabId : null;
+    if (pending.tabId !== null && normalizedTabId !== null && pending.tabId !== normalizedTabId) {
+      return null;
+    }
+    this.pendingPageInteraction = null;
+    return { ...pending };
   }
 
   public noteCleanup(input: { action: string; targetIds?: ReadonlyArray<number> | null }): void {
@@ -837,9 +904,9 @@ export class TaskSessionContext {
    *
    * Decision tree:
    *   1. Budget exceeded → `allowed=false`, `reason='read_budget_exceeded'`.
-   *   2. Same URL, same requested layer as last read → allowed but
-   *      flagged `reason='read_redundant'` (caller may choose to
-   *      short-circuit and reuse the cached projection).
+   *   2. Same URL, same requested layer and same request shape as last read
+   *      → allowed but flagged `reason='read_redundant'` (caller may choose
+   *      to short-circuit and reuse the cached projection).
    *   3. Layer demotion (requested < lastReadLayer) → allowed but
    *      flagged `reason='layer_demotion'` so the operator can spot
    *      pathological L2→L0 churn.
@@ -851,6 +918,7 @@ export class TaskSessionContext {
    */
   public shouldAllowReadPage(input: ShouldAllowReadPageInput): ShouldAllowReadPageResult {
     const requested = input.requestedLayer;
+    const requestKey = normalizeReadRequestKey(input.requestKey);
     const isFirstReadOnPage = this.lastReadLayer === null;
     const suggestedLayer: ReadPageRequestedLayer = isFirstReadOnPage ? 'L0+L1' : requested;
 
@@ -864,7 +932,11 @@ export class TaskSessionContext {
       };
     }
 
-    if (!isFirstReadOnPage && this.lastReadLayer === requested) {
+    if (
+      !isFirstReadOnPage &&
+      this.lastReadLayer === requested &&
+      this.lastReadRequestKey === requestKey
+    ) {
       return {
         allowed: true,
         reason: 'read_redundant',
@@ -912,6 +984,27 @@ function layerRank(layer: ReadPageRequestedLayer): number {
   }
 }
 
+function normalizeReadRequestKey(value: string | null | undefined): string | null {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeTargetRefs(values: ReadonlyArray<string> | null | undefined): string[] {
+  if (!values) return [];
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    const trimmed = value.trim();
+    if (!/^[A-Za-z0-9:_-]{1,96}$/.test(trimmed)) continue;
+    if (seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    result.push(trimmed);
+    if (result.length >= 3) break;
+  }
+  return result;
+}
+
 function cloneLiveObservedApiData(input: LiveObservedApiData): LiveObservedApiData {
   return {
     ...input,
@@ -938,8 +1031,31 @@ function cloneVisibleRegionRowsData(input: TaskVisibleRegionRowsData): TaskVisib
 function cloneTaskPageRuntimeFields(input: TaskPageRuntimeFields): TaskPageRuntimeFields {
   return {
     currentWindowId: input.currentWindowId,
+    currentWindowState: input.currentWindowState,
+    currentWindowWidth: input.currentWindowWidth,
+    currentWindowHeight: input.currentWindowHeight,
+    currentWindowLeft: input.currentWindowLeft,
+    currentWindowTop: input.currentWindowTop,
     isCurrentTabActive: input.isCurrentTabActive,
     isCurrentWindowFocused: input.isCurrentWindowFocused,
+    browserActiveTabId: input.browserActiveTabId,
+    browserActiveTabIdKnown: input.browserActiveTabIdKnown,
+    isReadTargetBrowserActiveTab: input.isReadTargetBrowserActiveTab,
+  };
+}
+
+function cloneObjectLifecycleSummary(
+  input: ReadPageObjectLifecycleSummary,
+): ReadPageObjectLifecycleSummary {
+  return {
+    ...input,
+    items: input.items.map((item) => ({
+      ...item,
+      actionTypes: [...item.actionTypes],
+      candidateActionIds: [...item.candidateActionIds],
+      evidenceRefs: [...item.evidenceRefs],
+    })),
+    changes: input.changes.map((change) => ({ ...change })),
   };
 }
 

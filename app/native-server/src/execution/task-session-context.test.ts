@@ -12,7 +12,7 @@ import {
   resolveReadBudgetFromEnv,
 } from './task-session-context';
 import type { ChooseContextDecisionSnapshot } from './skip-read-orchestrator';
-import type { BrowserPageThingProjection } from '@tabrix/shared';
+import type { BrowserPageThingProjection, ReadPageObjectLifecycleSummary } from '@tabrix/shared';
 
 describe('resolveReadBudgetFromEnv', () => {
   it('returns the default when the env key is unset', () => {
@@ -122,6 +122,23 @@ describe('TaskSessionContext — redundancy + layer demotion', () => {
     expect(decision.allowed).toBe(true);
     expect(decision.reason).toBe('read_redundant');
     expect(decision.suggestedLayer).toBe('L0+L1');
+  });
+
+  it('allows a same-layer read when the request shape changes', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteUrlChange('https://example.test/app', 'web_page');
+    ctx.noteReadPage({
+      layer: 'L0+L1+L2',
+      source: 'dom_json',
+      requestKey: 'mode=compact|depth=4',
+    });
+    const decision = ctx.shouldAllowReadPage({
+      requestedLayer: 'L0+L1+L2',
+      requestKey: 'mode=normal|depth=8',
+    });
+    expect(decision.allowed).toBe(true);
+    expect(decision.reason).toBe('');
+    expect(decision.suggestedLayer).toBe('L0+L1+L2');
   });
 
   it('flags L0+L1+L2 → L0+L1 as layer_demotion (still allowed)', () => {
@@ -463,7 +480,79 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
     expect(delta.toProjectionId).toBe('projection_after_scroll');
     expect(ctx.getLifecycleTimeline().map((event) => event.kind)).toContain('refs_invalidated');
   });
+
+  it('carries pending interaction metadata once for the matching tab', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.notePageInteraction({
+      action: 'chrome_click_element',
+      tabId: 9,
+      changeCause: 'click',
+      targetRefs: ['ref_menu', 'button.primary', 'ref_menu', 'bad ref with spaces'],
+    });
+
+    expect(ctx.consumePendingPageInteraction(8)).toBeNull();
+    expect(ctx.consumePendingPageInteraction(9)).toEqual({
+      action: 'chrome_click_element',
+      tabId: 9,
+      changeCause: 'click',
+      targetRefs: ['ref_menu'],
+    });
+    expect(ctx.consumePendingPageInteraction(9)).toBeNull();
+  });
+
+  it('compares read_page object lifecycle snapshots and keeps the stored copy immutable', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    const before = makeObjectLifecycle('collapsed_or_expandable_candidate', []);
+    const first = ctx.noteObjectLifecycleAndBuildDelta(before);
+    const after = makeObjectLifecycle('action_available_candidate', ['ca_logout']);
+    const second = ctx.noteObjectLifecycleAndBuildDelta(after);
+
+    expect(first.status).toBe('single_snapshot');
+    expect(second.status).toBe('compared_snapshot');
+    expect(second.changes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          objectKey: 'region:menu:region_menu',
+          changeKind: 'changed',
+          beforeState: 'collapsed_or_expandable_candidate',
+          afterState: 'action_available_candidate',
+        }),
+      ]),
+    );
+
+    after.items[0].state = 'mutated_by_caller';
+    expect(ctx.peekLastObjectLifecycle()?.items[0].state).toBe('action_available_candidate');
+  });
 });
+
+function makeObjectLifecycle(
+  menuState: string,
+  candidateActionIds: string[],
+): ReadPageObjectLifecycleSummary {
+  return {
+    source: 'read_page_regions',
+    status: 'single_snapshot',
+    objectCount: 1,
+    changedObjectCount: 0,
+    items: [
+      {
+        objectKey: 'region:menu:region_menu',
+        regionId: 'region_menu',
+        regionType: 'menu',
+        objectFamily: 'menu_surface',
+        state: menuState,
+        targetability: 'target_ref',
+        actionTypes: [],
+        candidateActionIds,
+        evidenceRefs: candidateActionIds,
+        confidence: 0.8,
+        claimBoundary: 'region candidate only',
+      },
+    ],
+    changes: [],
+    claimBoundary: 'single snapshot only',
+  };
+}
 
 describe('TaskSessionContext — V28 run-owned tab ownership', () => {
   it('tracks run-owned tab ids and removes them after cleanup', () => {

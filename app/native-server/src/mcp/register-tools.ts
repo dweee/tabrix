@@ -5,8 +5,15 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import nativeMessagingHostInstance from '../native-messaging-host';
-import { NativeMessageType, TOOL_NAMES, TOOL_SCHEMAS, getRequiredCapability } from '@tabrix/shared';
+import {
+  NativeMessageType,
+  TOOL_NAMES,
+  TOOL_SCHEMAS,
+  buildReadPageBrowserPageObjectView,
+  getRequiredCapability,
+} from '@tabrix/shared';
 import type { LifecycleEvidenceBrowserHygieneCheck } from '@tabrix/shared';
+import type { ReadPageObjectLifecycleSummary } from '@tabrix/shared';
 import type { SemanticSignal } from '@tabrix/shared';
 import { isToolAllowedByPolicy } from '../policy/phase0-opt-in';
 import { getCurrentCapabilityEnv, isCapabilityEnabled } from '../policy/capabilities';
@@ -108,14 +115,20 @@ import {
 } from '../runtime/source-route-honesty';
 import type {
   BrowserDataSourceDecisionEvidence,
+  BrowserPageChangeCause,
   BrowserPageOwnerType,
   BrowserPageThingProjection,
+  ReadPageBrowserPageObjectCompactView,
   BrowserSourceLineage,
   BrowserSourceTruthChain,
   BrowserTaskStateVerdict,
   ReadPageCompactSnapshot,
   ReadPageMode,
+  ReadPageRequestedLayer,
   ReadPageOwnershipRuntimeSummary,
+  ReadPageWindowRuntimeState,
+  ReadPageOperationMap,
+  ReadPageRegion,
   ReadPageSelectedDataSource,
   SourceTruthOrigin,
 } from '@tabrix/shared';
@@ -529,9 +542,10 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     // `chrome_read_page` schema, so a strict client may strip them on
     // the wire). See `resolveTaskContextKey` above for the full ladder;
     // the short version is: explicit > args.tabId > bridge.primaryTabId
-    // > single-process `mcp:auto:tab:default`. Auto-keying only fires
-    // for `chrome_read_page` and `chrome_navigate`, so click/fill /
-    // navigate-adjacent tools cannot mint phantom contexts.
+    // > single-process `mcp:auto:tab:default`. Auto-keying fires only
+    // for read/navigate and page-changing interaction tools, so the
+    // next read after a click/fill/keyboard action can verify fresh
+    // page state without screenshots or manual cache busting.
     //
     // When `resolveTaskContextKey` returns null (only possible for
     // tools outside the auto set without an explicit key), we fall
@@ -809,10 +823,15 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       // bridge.
       const requestedLayer =
         forcedReadPageLayer ?? extractRequestedLayer(args) ?? READ_PAGE_DEFAULT_LAYER;
-      const decision = taskContext.shouldAllowReadPage({ requestedLayer });
+      const readPageRequestKey = buildReadPageRequestKey(args, requestedLayer);
+      const decision = taskContext.shouldAllowReadPage({
+        requestedLayer,
+        requestKey: readPageRequestKey,
+      });
       if (!decision.allowed || decision.reason === 'read_redundant') {
-        const shouldReuseCachedProjection = decision.reason === 'read_redundant';
-        const cachedProjection = shouldReuseCachedProjection
+        const shouldAttachCachedProjection =
+          decision.reason === 'read_redundant' || decision.reason === 'read_budget_exceeded';
+        const cachedProjection = shouldAttachCachedProjection
           ? taskContext.peekLastPageProjection()
           : null;
         const {
@@ -831,7 +850,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
             ? taskContext.buildCachedDataSourceDecision()
             : null,
           lifecycleTimeline: cachedProjection ? taskContext.getLifecycleTimeline() : null,
-          runtimeFields: shouldReuseCachedProjection
+          runtimeFields: shouldAttachCachedProjection
             ? taskContext.peekLastPageRuntimeFields()
             : null,
         });
@@ -948,15 +967,25 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
             .noteRunOwnedTab(returnedTabId);
         }
       }
+      if (shouldInvalidateReadAfterWindowFocusChange(name, outgoingArgs)) {
+        sessionManager.noteWindowFocusMayHaveChangedForExternalTaskContexts({
+          action: name,
+          sourceExternalKey: externalTaskKeyEarly,
+          tabId: readPositiveInteger(outgoingArgs, 'tabId'),
+        });
+      }
+      const postProcessorRawResult = ensureStructuredLegacyActionResult(name, response.data);
       if (taskContext && shouldInvalidateReadAfterInteraction(name)) {
         taskContext.notePageInteraction({
           action: name,
           tabId: readPositiveInteger(args, 'tabId'),
+          changeCause: inferPageInteractionChangeCause(name, postProcessorRawResult),
+          targetRefs: readInteractionTargetRefs(args),
         });
       }
       const postResult = runPostProcessor({
         toolName: name,
-        rawResult: response.data,
+        rawResult: postProcessorRawResult,
         stepId: step.stepId,
         sessionId: session.sessionId,
         sessionManager,
@@ -973,9 +1002,11 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         if (postResult.rawResult.isError === true) return;
         const requestedLayer =
           forcedReadPageLayer ?? extractRequestedLayer(args) ?? READ_PAGE_DEFAULT_LAYER;
+        const readPageRequestKey = buildReadPageRequestKey(args, requestedLayer);
         taskContext.noteReadPage({
           layer: requestedLayer,
           source,
+          requestKey: readPageRequestKey,
           targetRefs,
         });
         readPageRecorded = true;
@@ -1110,9 +1141,11 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         recordPrimaryTabCleanupOutcome({ closedTabIds, primaryTabController });
         for (const closedTabId of closedTabIds) {
           taskContext.releaseRunOwnedTab(closedTabId);
+          sessionManager.releaseExternalTaskContext(buildAutoTabTaskContextKey(closedTabId));
         }
         for (const invalidTabId of invalidTabIds) {
           taskContext.releaseRunOwnedTab(invalidTabId);
+          sessionManager.releaseExternalTaskContext(buildAutoTabTaskContextKey(invalidTabId));
         }
         taskContext.noteCleanup({
           action: 'chrome_close_tabs',
@@ -1148,10 +1181,9 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         startedAtMs: toolCallStartedAtMs,
         endedAtMs: Date.now(),
       });
-      const resultWithPolicyAudit =
-        isImpactToolName(name) && rawResultWithEvidence.isError !== true
-          ? attachRuntimePolicyAuditToResult(aiFacingResult, nonInterferenceVerdict.audit)
-          : aiFacingResult;
+      const resultWithPolicyAudit = isImpactToolName(name)
+        ? attachRuntimePolicyAuditToResult(aiFacingResult, nonInterferenceVerdict.audit)
+        : aiFacingResult;
       const normalized = normalizeToolCallResult(name, resultWithPolicyAudit);
       const toolResultFailed = resultWithPolicyAudit.isError === true;
       sessionManager.completeStep(session.sessionId, step.stepId, {
@@ -1281,6 +1313,52 @@ function attachReadPagePayloadMetadata(
       index === 0 && block.type === 'text'
         ? { ...block, text: JSON.stringify(mergedPayload) }
         : block,
+    ) as CallToolResult['content'],
+  };
+}
+
+function ensureStructuredLegacyActionResult(
+  toolName: string,
+  result: CallToolResult,
+): CallToolResult {
+  if (toolName !== TOOL_NAMES.BROWSER.CLICK) return result;
+  const first = result.content?.[0];
+  if (!first || first.type !== 'text' || typeof first.text !== 'string') return result;
+  try {
+    const parsed = JSON.parse(first.text);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return result;
+  } catch {
+    // Fall through and wrap the legacy text result.
+  }
+
+  const legacyWasError = (result as { isError?: boolean }).isError === true;
+  const payload = {
+    success: false,
+    dispatchSucceeded: !legacyWasError,
+    observedOutcome: legacyWasError ? 'no_observed_change' : 'verification_unavailable',
+    verification: {
+      navigationOccurred: false,
+      urlChanged: false,
+      newTabOpened: false,
+      domChanged: false,
+      stateChanged: false,
+      focusChanged: false,
+    },
+    clickDiff: { kind: 'unknown' },
+    navigationOccurred: false,
+    lane: 'tabrix_owned',
+    message: legacyWasError
+      ? 'Legacy text click error was normalized; click dispatch and post-action state are not proven'
+      : 'Legacy text click result was normalized; post-action state is not proven without structured click signals or a follow-up read',
+    clickMethod: 'unknown',
+    resultShape: legacyWasError ? 'legacy_text_error_normalized' : 'legacy_text_normalized',
+    rawTextLength: first.text.length,
+  };
+
+  return {
+    ...result,
+    content: result.content.map((block, index) =>
+      index === 0 && block.type === 'text' ? { ...block, text: JSON.stringify(payload) } : block,
     ) as CallToolResult['content'],
   };
 }
@@ -1710,8 +1788,54 @@ function shouldInvalidateReadAfterInteraction(toolName: string): boolean {
   return (
     toolName === TOOL_NAMES.BROWSER.CLICK ||
     toolName === TOOL_NAMES.BROWSER.FILL ||
-    toolName === TOOL_NAMES.BROWSER.KEYBOARD
+    toolName === TOOL_NAMES.BROWSER.KEYBOARD ||
+    toolName === TOOL_NAMES.BROWSER.SWITCH_TAB
   );
+}
+
+function inferPageInteractionChangeCause(
+  toolName: string,
+  result: CallToolResult,
+): BrowserPageChangeCause {
+  if (toolName !== TOOL_NAMES.BROWSER.CLICK) return 'unknown';
+  const payload = readJsonObjectFromCallToolResult(result);
+  const observedOutcome =
+    payload && typeof payload.observedOutcome === 'string' ? payload.observedOutcome : null;
+  if (
+    observedOutcome === null ||
+    observedOutcome === 'no_observed_change' ||
+    observedOutcome === 'verification_unavailable'
+  ) {
+    return 'unknown';
+  }
+  return 'click';
+}
+
+function readInteractionTargetRefs(args: unknown): string[] {
+  const input = readObject(args);
+  if (!input) return [];
+  const refs = [
+    readSafeTargetRef(input.ref),
+    readSafeTargetRef(readObject(input.candidateAction)?.targetRef),
+  ].filter((ref): ref is string => ref !== null);
+  return refs.filter((ref, index) => refs.indexOf(ref) === index).slice(0, 3);
+}
+
+function readSafeTargetRef(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return /^[A-Za-z0-9:_-]{1,96}$/.test(trimmed) ? trimmed : null;
+}
+
+function shouldInvalidateReadAfterWindowFocusChange(toolName: string, args: unknown): boolean {
+  if (toolName !== TOOL_NAMES.BROWSER.NAVIGATE) return false;
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return false;
+  const input = args as Record<string, unknown>;
+  if (input.background === true || input.refresh === true) return false;
+  if (readPositiveInteger(input, 'tabId') !== null) return false;
+  const url = typeof input.url === 'string' ? input.url : null;
+  if (!url || url === 'back' || url === 'forward') return false;
+  return true;
 }
 
 function attachAiFacingOwnershipRuntime(
@@ -1757,22 +1881,37 @@ function attachAiFacingOwnershipRuntime(
   );
   const runtimeFields: TaskPageRuntimeFields = {
     currentWindowId: readPositiveInteger(payload, 'currentWindowId'),
+    currentWindowState: readWindowRuntimeState(payload, 'currentWindowState'),
+    currentWindowWidth: readPositiveInteger(payload, 'currentWindowWidth'),
+    currentWindowHeight: readPositiveInteger(payload, 'currentWindowHeight'),
+    currentWindowLeft: readInteger(payload, 'currentWindowLeft'),
+    currentWindowTop: readInteger(payload, 'currentWindowTop'),
     isCurrentTabActive: readBoolean(payload, 'isCurrentTabActive'),
     isCurrentWindowFocused: readBoolean(payload, 'isCurrentWindowFocused'),
+    browserActiveTabId: readPositiveInteger(payload, 'browserActiveTabId'),
+    browserActiveTabIdKnown: readBoolean(payload, 'browserActiveTabIdKnown') === true,
+    isReadTargetBrowserActiveTab: readBoolean(payload, 'isReadTargetBrowserActiveTab'),
   };
 
-  payload.pageProjection = projectionWithSourceTruth;
-  payload.ownershipRuntime = buildAiFacingOwnershipRuntimeSummary(
+  const ownershipRuntime = buildAiFacingOwnershipRuntimeSummary(
     attachment.taskContext,
     projectionWithSourceTruth,
     runtimeFields,
   );
+  payload.pageProjection = projectionWithSourceTruth;
+  payload.ownershipRuntime = ownershipRuntime;
   payload.taskContextEnvelope = buildTaskContextEnvelope(attachment);
   const aiContextEnvelope = readObject(payload.aiContextEnvelope);
   if (aiContextEnvelope) {
     payload.aiContextEnvelope = {
       ...aiContextEnvelope,
       taskContext: buildTaskContextEnvelope(attachment),
+      pageObjectSummary: buildCachedReadPageObjectSummary({
+        warning: typeof payload.warning === 'string' ? payload.warning : 'cached_read_warning',
+        projection: projectionWithSourceTruth,
+        ownershipRuntime,
+        selectedDataSource,
+      }),
     };
   }
 
@@ -1781,6 +1920,50 @@ function attachAiFacingOwnershipRuntime(
     content: result.content.map((block, index) =>
       index === 0 && block.type === 'text' ? { ...block, text: JSON.stringify(payload) } : block,
     ) as CallToolResult['content'],
+  };
+}
+
+function buildCachedReadPageObjectSummary(args: {
+  warning: string;
+  projection: BrowserPageThingProjection;
+  ownershipRuntime: ReadPageOwnershipRuntimeSummary;
+  selectedDataSource: ReadPageSelectedDataSource | null;
+}): ReadPageBrowserPageObjectCompactView {
+  const lifecycle: ReadPageObjectLifecycleSummary = {
+    source: 'read_page_regions',
+    status: 'single_snapshot',
+    objectCount: 0,
+    changedObjectCount: 0,
+    items: [],
+    changes: [],
+    claimBoundary:
+      'Cached read warning has no fresh page-region lifecycle objects; this summary is derived from cached projection plus current Window/Tab runtime fields.',
+  };
+  const view = buildReadPageBrowserPageObjectView({
+    objectLifecycle: lifecycle,
+    pageProjection: args.projection,
+    ownershipRuntime: args.ownershipRuntime,
+    selectedDataSource: args.selectedDataSource,
+  });
+  const compact = view.compact!;
+  const degraded =
+    args.ownershipRuntime.currentWindowState === 'minimized' ||
+    args.ownershipRuntime.isCurrentWindowFocused === false ||
+    args.ownershipRuntime.isCurrentTabActive === false;
+  return {
+    ...compact,
+    watchStatus: degraded ? 'runtime_degraded' : 'stable_or_unknown',
+    primaryConclusion: degraded
+      ? `Cached page state reused for ${args.warning}; current runtime is visually degraded, so do not claim fresh visual/page proof.`
+      : `Cached page state reused for ${args.warning}; Window/Tab runtime facts are attached, but page content was not freshly read.`,
+    changedGroups: degraded
+      ? ['window_state', 'tab_state', 'visual_reliability', 'evidence_state']
+      : ['evidence_state'],
+    transitionCount: degraded ? 4 : 1,
+    evidenceSummary:
+      'cached_read_warning: pageProjection is reused; Window/Tab facts come from the latest runtime fields; no fresh DOM/API/CDP read happened.',
+    claimBoundary:
+      'Cached pageObjectSummary is AI-facing runtime context only. It does not prove page content freshness, login/logout success, API/CDP reuse, or task completion.',
   };
 }
 
@@ -1821,15 +2004,39 @@ function attachAiFacingDeltaContext(
     selectedDataSource,
     payload,
   );
-  const projectionWithSourceTruth = ensureProjectionSourceTruthChain(
+  let projectionWithSourceTruth = ensureProjectionSourceTruthChain(
     normalizedAiFacingProjection,
     selectedDataSource,
   );
+  const pendingInteraction = attachment.taskContext.consumePendingPageInteraction(
+    projectionWithSourceTruth.tabId,
+  );
+  if (pendingInteraction) {
+    projectionWithSourceTruth = {
+      ...projectionWithSourceTruth,
+      changedByActionId: pendingInteraction.action,
+      changeCause: pendingInteraction.changeCause,
+      invalidatedRefs: [
+        ...pendingInteraction.targetRefs,
+        ...projectionWithSourceTruth.invalidatedRefs,
+      ].filter((ref, index, refs) => refs.indexOf(ref) === index),
+    };
+  }
   const runtimeFields: TaskPageRuntimeFields = {
     currentWindowId: readPositiveInteger(payload, 'currentWindowId'),
+    currentWindowState: readWindowRuntimeState(payload, 'currentWindowState'),
+    currentWindowWidth: readPositiveInteger(payload, 'currentWindowWidth'),
+    currentWindowHeight: readPositiveInteger(payload, 'currentWindowHeight'),
+    currentWindowLeft: readInteger(payload, 'currentWindowLeft'),
+    currentWindowTop: readInteger(payload, 'currentWindowTop'),
     isCurrentTabActive: readBoolean(payload, 'isCurrentTabActive'),
     isCurrentWindowFocused: readBoolean(payload, 'isCurrentWindowFocused'),
+    browserActiveTabId: readPositiveInteger(payload, 'browserActiveTabId'),
+    browserActiveTabIdKnown: readBoolean(payload, 'browserActiveTabIdKnown') === true,
+    isReadTargetBrowserActiveTab: readBoolean(payload, 'isReadTargetBrowserActiveTab'),
   };
+  const previousPageProjection = attachment.taskContext.peekLastPageProjection();
+  const previousRuntimeFields = attachment.taskContext.peekLastPageRuntimeFields();
   const deltaContext = attachment.taskContext.notePageProjectionAndBuildDelta(
     projectionWithSourceTruth,
     runtimeFields,
@@ -1857,6 +2064,8 @@ function attachAiFacingDeltaContext(
     sourceTruthChain: projectionWithSourceTruth.sourceTruthChain,
     fallbackReason,
   });
+  const aiFacingSourceRouteHonesty = buildAiFacingSourceRouteHonesty(sourceRouteHonesty);
+  const apiCdpProofBoundary = buildAiFacingApiCdpProofBoundary(sourceRouteHonesty);
   attachment.taskContext.noteSourceRouteHonesty(
     toTaskSourceRouteHonestySnapshot(sourceRouteHonesty),
   );
@@ -1866,15 +2075,56 @@ function attachAiFacingDeltaContext(
     fallbackReason,
   });
   const structuredReadGate = buildStructuredReadGate(payload, projectionWithSourceTruth);
-
-  payload.pageProjection = projectionWithSourceTruth;
-  payload.ownershipRuntime = buildAiFacingOwnershipRuntimeSummary(
+  const previousOwnershipRuntime = previousRuntimeFields
+    ? buildAiFacingOwnershipRuntimeSummary(
+        attachment.taskContext,
+        projectionWithSourceTruth,
+        previousRuntimeFields,
+      )
+    : null;
+  const ownershipRuntime = buildAiFacingOwnershipRuntimeSummary(
     attachment.taskContext,
     projectionWithSourceTruth,
     runtimeFields,
   );
+  const objectLifecycle = isReadPageObjectLifecycleSummary(payload.objectLifecycle)
+    ? attachment.taskContext.noteObjectLifecycleAndBuildDelta(payload.objectLifecycle)
+    : null;
+  const browserPageObject = objectLifecycle
+    ? buildReadPageBrowserPageObjectView({
+        pageRegions: readPageRegions(payload.pageRegions),
+        pageOperationMap: readPageOperationMap(payload.pageOperationMap),
+        objectLifecycle,
+        previousPageProjection,
+        pageProjection: projectionWithSourceTruth,
+        previousOwnershipRuntime,
+        ownershipRuntime,
+        selectedDataSource,
+        sourceRouteHonestyVerdict: sourceRouteHonesty.verdict,
+      })
+    : null;
+  const readMode = readReadPageMode(payload.mode);
+  const includeFullBrowserPageObjectInAiEnvelope = readMode === 'full';
+  const pageObjectDetailPolicy = browserPageObject
+    ? {
+        readMode,
+        summaryField: 'pageObjectSummary',
+        fullObjectField: 'browserPageObject',
+        fullObjectInAiEnvelope: includeFullBrowserPageObjectInAiEnvelope,
+        reason: includeFullBrowserPageObjectInAiEnvelope
+          ? 'full_read_mode_requested'
+          : 'compact_or_normal_read_mode_prefers_summary_first',
+      }
+    : null;
+
+  payload.pageProjection = projectionWithSourceTruth;
+  if (objectLifecycle) {
+    payload.objectLifecycle = objectLifecycle;
+  }
+  payload.ownershipRuntime = ownershipRuntime;
   payload.structuredReadGate = structuredReadGate;
-  payload.sourceRouteHonesty = buildAiFacingSourceRouteHonesty(sourceRouteHonesty);
+  payload.sourceRouteHonesty = aiFacingSourceRouteHonesty;
+  payload.apiCdpProofBoundary = apiCdpProofBoundary;
   payload.deltaContext = deltaContext;
   payload.taskContextEnvelope = buildTaskContextEnvelope(attachment);
   payload.aiContextEnvelope = {
@@ -1884,8 +2134,20 @@ function attachAiFacingDeltaContext(
     taskState,
     selectedDataSource,
     dataSourceDecision,
-    sourceRouteHonesty: buildAiFacingSourceRouteHonesty(sourceRouteHonesty),
+    sourceRouteHonesty: aiFacingSourceRouteHonesty,
+    apiCdpProofBoundary,
     structuredReadGate,
+    ...(objectLifecycle ? { objectLifecycle } : {}),
+    ...(pageObjectDetailPolicy ? { pageObjectDetailPolicy } : {}),
+    ...(browserPageObject && includeFullBrowserPageObjectInAiEnvelope ? { browserPageObject } : {}),
+    ...(browserPageObject?.compact
+      ? {
+          pageObjectSummary: browserPageObject.compact,
+          primaryConclusion: browserPageObject.compact.primaryConclusion,
+          watchStatus: browserPageObject.compact.watchStatus,
+          changedGroups: browserPageObject.compact.changedGroups,
+        }
+      : {}),
     deltaContext,
     lifecycleTimeline: attachment.taskContext.getLifecycleTimeline(),
   };
@@ -1912,6 +2174,24 @@ function buildStructuredReadGate(
 
 function readReadPageMode(value: unknown): ReadPageMode {
   return value === 'normal' || value === 'full' || value === 'compact' ? value : 'compact';
+}
+
+function buildReadPageRequestKey(args: unknown, requestedLayer: ReadPageRequestedLayer): string {
+  const input =
+    args && typeof args === 'object' && !Array.isArray(args)
+      ? (args as Record<string, unknown>)
+      : {};
+  const mode = readReadPageMode(input.mode);
+  const render = extractReadPageRenderMode(input) ?? 'json';
+  const filter = typeof input.filter === 'string' ? input.filter : 'all';
+  const depth =
+    typeof input.depth === 'number' && Number.isFinite(input.depth) ? input.depth : null;
+  const refId = typeof input.refId === 'string' ? input.refId : '';
+  return JSON.stringify({ requestedLayer, mode, render, filter, depth, refId });
+}
+
+function buildAutoTabTaskContextKey(tabId: number): string {
+  return `mcp:auto:tab:${tabId}`;
 }
 
 function normalizeAiFacingProjectionDataSource(
@@ -2064,7 +2344,19 @@ function buildAiFacingOwnershipRuntimeSummary(
   const runOwnedTabIds = [...taskContext.getRunOwnedTabIds()];
   const currentTabId =
     Number.isInteger(projection.tabId) && projection.tabId > 0 ? projection.tabId : null;
-  const { currentWindowId, isCurrentTabActive, isCurrentWindowFocused } = runtimeFields;
+  const {
+    currentWindowId,
+    currentWindowState,
+    currentWindowWidth,
+    currentWindowHeight,
+    currentWindowLeft,
+    currentWindowTop,
+    isCurrentTabActive,
+    isCurrentWindowFocused,
+    browserActiveTabId,
+    browserActiveTabIdKnown,
+    isReadTargetBrowserActiveTab,
+  } = runtimeFields;
   const isCurrentTabRunOwnedByTask =
     currentTabId !== null && taskContext.isRunOwnedTab(currentTabId);
   // Trust the normalized projection's ownerType as the single source of
@@ -2117,8 +2409,16 @@ function buildAiFacingOwnershipRuntimeSummary(
   return {
     currentTabId,
     currentWindowId,
+    currentWindowState,
+    currentWindowWidth,
+    currentWindowHeight,
+    currentWindowLeft,
+    currentWindowTop,
     isCurrentTabActive,
     isCurrentWindowFocused,
+    browserActiveTabId,
+    browserActiveTabIdKnown,
+    isReadTargetBrowserActiveTab,
     currentOwnerType,
     currentTabRunOwnershipVerdict,
     currentTabPrimaryRelationVerdict,
@@ -2280,6 +2580,50 @@ function buildAiFacingSourceRouteHonesty(
   };
 }
 
+function buildAiFacingApiCdpProofBoundary(
+  result: SourceRouteHonestyResult,
+): Record<string, unknown> {
+  if (result.verdict === 'api_proven' || result.verdict === 'cdp_proven') {
+    return {
+      proofStatus: 'requires_r5_gate',
+      apiCdpReuseProven: false,
+      selectedDataSource: result.selectedDataSource,
+      sourceRouteCandidate:
+        result.verdict === 'api_proven'
+          ? 'api_source_with_fact_evidence'
+          : 'cdp_source_with_fact_evidence',
+      reason: 'api_cdp_reuse_requires_r5_gate',
+      safeClaim:
+        'API/CDP-like source evidence is present, but API/CDP reuse is not proven until the R5 proof gate passes.',
+      notSafeClaim:
+        'Do not claim API proven, CDP proven, API reuse, CDP reuse, or product delivery grade.',
+    };
+  }
+
+  if (result.verdict === 'dom_fallback') {
+    return {
+      proofStatus: 'not_proven_dom_fallback',
+      apiCdpReuseProven: false,
+      selectedDataSource: result.selectedDataSource,
+      sourceRouteCandidate: null,
+      reason: result.reason,
+      safeClaim: 'This read used a DOM/text fallback route only.',
+      notSafeClaim: 'DOM fallback success must not be claimed as API/CDP reuse proof.',
+    };
+  }
+
+  return {
+    proofStatus: result.verdict === 'blocked' ? 'blocked' : 'not_proven',
+    apiCdpReuseProven: false,
+    selectedDataSource: result.selectedDataSource,
+    sourceRouteCandidate: null,
+    reason: result.reason,
+    safeClaim: 'API/CDP reuse proof is not available from this read.',
+    notSafeClaim:
+      'Do not claim API proven, CDP proven, API reuse, CDP reuse, or product delivery grade.',
+  };
+}
+
 function toTaskSourceRouteHonestySnapshot(result: SourceRouteHonestyResult): {
   verdict: string;
   selectedDataSource: string | null;
@@ -2435,6 +2779,30 @@ function readObject(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function readPageRegions(value: unknown): ReadPageRegion[] {
+  return Array.isArray(value) ? (value as ReadPageRegion[]) : [];
+}
+
+function readPageOperationMap(value: unknown): ReadPageOperationMap | null {
+  const object = readObject(value);
+  if (!object || !Array.isArray(object.zones)) return null;
+  return object as unknown as ReadPageOperationMap;
+}
+
+function isReadPageObjectLifecycleSummary(value: unknown): value is ReadPageObjectLifecycleSummary {
+  const object = readObject(value);
+  if (!object) return false;
+  return (
+    object.source === 'read_page_regions' &&
+    (object.status === 'single_snapshot' || object.status === 'compared_snapshot') &&
+    Number.isFinite(object.objectCount) &&
+    Number.isFinite(object.changedObjectCount) &&
+    Array.isArray(object.items) &&
+    Array.isArray(object.changes) &&
+    typeof object.claimBoundary === 'string'
+  );
+}
+
 function extractReadPageRenderMode(input: unknown): 'json' | 'markdown' | null {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
   const render = (input as Record<string, unknown>).render;
@@ -2481,8 +2849,30 @@ function readPositiveInteger(input: unknown, key: string): number | null {
   return Number.isInteger(raw) && (raw as number) > 0 ? (raw as number) : null;
 }
 
+function readInteger(input: unknown, key: string): number | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const raw = (input as Record<string, unknown>)[key];
+  return Number.isInteger(raw) ? (raw as number) : null;
+}
+
 function readNonNegativeInteger(input: unknown, key: string): number | null {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
   const raw = (input as Record<string, unknown>)[key];
   return Number.isInteger(raw) && (raw as number) >= 0 ? (raw as number) : null;
+}
+
+function readWindowRuntimeState(input: unknown, key: string): ReadPageWindowRuntimeState | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const raw = (input as Record<string, unknown>)[key];
+  if (
+    raw === 'normal' ||
+    raw === 'minimized' ||
+    raw === 'maximized' ||
+    raw === 'fullscreen' ||
+    raw === 'docked' ||
+    raw === 'unknown'
+  ) {
+    return raw;
+  }
+  return null;
 }

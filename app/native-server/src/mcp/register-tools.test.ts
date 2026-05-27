@@ -392,6 +392,128 @@ describe('handleToolCall execution wrapper', () => {
     expect(actions[0].status).toBe('success');
   });
 
+  it('normalizes legacy text chrome_click_element results as unproven structured outcomes', async () => {
+    markBridgeReady();
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      items: [],
+    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      data: {
+        content: [{ type: 'text', text: 'clicked' }],
+        isError: false,
+      },
+    } as never);
+
+    const result = await handleToolCall('chrome_click_element', { tabId: 1, ref: 'e-1' });
+
+    expect(result.isError).toBe(false);
+    const body = JSON.parse(String((result.content as any[])[0].text));
+    expect(body).toMatchObject({
+      success: false,
+      dispatchSucceeded: true,
+      observedOutcome: 'verification_unavailable',
+      resultShape: 'legacy_text_normalized',
+      rawTextLength: 7,
+      historyRef: expect.stringMatching(/^memory:\/\/action\/[0-9a-f-]+$/),
+    });
+    expect(body.message).toContain('post-action state is not proven');
+    expect(JSON.stringify(body)).not.toContain('clicked');
+  });
+
+  it('normalizes legacy text chrome_click_element errors without claiming dispatch success', async () => {
+    markBridgeReady();
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      items: [],
+    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      data: {
+        content: [{ type: 'text', text: 'Element ref not found' }],
+        isError: true,
+      },
+    } as never);
+
+    const result = await handleToolCall('chrome_click_element', { tabId: 1, ref: 'missing-ref' });
+
+    expect(result.isError).toBe(true);
+    const body = JSON.parse(String((result.content as any[])[0].text));
+    expect(body).toMatchObject({
+      success: false,
+      dispatchSucceeded: false,
+      observedOutcome: 'no_observed_change',
+      resultShape: 'legacy_text_error_normalized',
+      rawTextLength: 21,
+      historyRef: expect.stringMatching(/^memory:\/\/action\/[0-9a-f-]+$/),
+    });
+    expect(body.message).toContain('click dispatch and post-action state are not proven');
+    expect(JSON.stringify(body)).not.toContain('Element ref not found');
+  });
+
+  it('attaches runtime preflight evidence to structured chrome_click_element errors', async () => {
+    markBridgeReady();
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      items: [],
+    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      data: {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              dispatchSucceeded: false,
+              observedOutcome: 'no_observed_change',
+              verification: {
+                navigationOccurred: false,
+                urlChanged: false,
+                newTabOpened: false,
+                domChanged: false,
+                stateChanged: false,
+                focusChanged: false,
+              },
+              clickDiff: { kind: 'no_change' },
+              navigationOccurred: false,
+              lane: 'tabrix_owned',
+              message:
+                'Click helper returned an error; click dispatch and post-action state are not proven',
+              clickMethod: 'selector',
+              resultShape: 'structured_click_error',
+            }),
+          },
+        ],
+        isError: true,
+      },
+    } as never);
+
+    const result = await handleToolCall('chrome_click_element', {
+      tabId: 1,
+      selector: '#missing',
+    });
+
+    expect(result.isError).toBe(true);
+    const body = JSON.parse(String((result.content as any[])[0].text));
+    expect(body).toMatchObject({
+      success: false,
+      dispatchSucceeded: false,
+      resultShape: 'structured_click_error',
+      clickMethod: 'selector',
+      actionPreflight: {
+        verdict: 'allow',
+      },
+      runtimePolicyAudit: {
+        policy: 'non_interference',
+        toolName: 'chrome_click_element',
+        verdict: 'allow',
+      },
+    });
+    expect(body.historyRef).toMatch(/^memory:\/\/action\/[0-9a-f-]+$/);
+  });
+
   it('redacts fill value and omits result_blob for chrome_fill_or_select', async () => {
     markBridgeReady();
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
@@ -932,7 +1054,7 @@ describe('handleToolCall execution wrapper', () => {
   // entry the gate will look up. No `getTaskContext` spy is used.
   // -------------------------------------------------------------------
   describe('V26-05 read-budget gate', () => {
-    it('chrome_read_page returns a structured warning without a bridge call when budget is exceeded', async () => {
+    it('chrome_read_page returns a structured warning with cached page state when budget is exceeded', async () => {
       markBridgeReady();
       // Pre-populate the same auto-key the gate will resolve for
       // `{ tabId: 1 }` (no explicit task key). Budget = 2 with two
@@ -1001,13 +1123,41 @@ describe('handleToolCall execution wrapper', () => {
           },
         },
       });
-      expect(payload.pageProjection).toBeUndefined();
-      expect(payload.deltaContext).toBeUndefined();
-      expect(payload.aiContextEnvelope).toBeUndefined();
-      expect(payload.ownershipRuntime).toBeUndefined();
-      expect(payload.currentWindowId).toBeUndefined();
-      expect(payload.isCurrentTabActive).toBeUndefined();
-      expect(payload.isCurrentWindowFocused).toBeUndefined();
+      expect(payload.pageProjection).toMatchObject({
+        projectionId: 'projection_before_budget',
+        pageId: 'page_before_budget',
+        tabId: 1,
+        ownerType: 'user_owned',
+      });
+      expect(payload.cachedPageStateSummary).toMatchObject({
+        summaryKind: 'cached_page_state',
+        freshness: 'cached_not_fresh',
+        warning: 'read_budget_exceeded',
+        readiness: 'ready',
+        stability: 'stable',
+        activeRegion: 'viewport',
+        contextSavedRatio: 1,
+        currentWindowId: null,
+        isCurrentTabActive: null,
+        isCurrentWindowFocused: null,
+        nextStepHint: 'cached_state_only_start_new_task_or_navigate_for_fresh_read',
+      });
+      expect(payload.deltaContext).toMatchObject({
+        deltaKind: 'post_action_delta',
+        contextSavedRatio: 1,
+      });
+      expect(payload.aiContextEnvelope).toMatchObject({
+        envelopeKind: 'delta_context',
+        contextSource: 'cached_page_projection_delta',
+        selectedDataSource: 'dom_json',
+      });
+      expect(payload.ownershipRuntime).toMatchObject({
+        currentTabId: 1,
+        currentOwnerType: 'user_owned',
+      });
+      expect(payload.currentWindowId).toBeNull();
+      expect(payload.isCurrentTabActive).toBeNull();
+      expect(payload.isCurrentWindowFocused).toBeNull();
       // Critical contract: the bridge `call_tool` round-trip MUST NOT
       // happen on a budget-blocked read. The dynamic-flow-list call
       // (mocked above) is the only allowed extension call.
@@ -1145,6 +1295,188 @@ describe('handleToolCall execution wrapper', () => {
       });
     }
 
+    function objectLifecycleFixture(
+      ids: readonly string[],
+      status: 'single_snapshot' | 'compared_snapshot' = 'single_snapshot',
+    ): Record<string, unknown> {
+      return {
+        source: 'read_page_regions',
+        status,
+        objectCount: ids.length,
+        changedObjectCount: 0,
+        items: ids.map((id) => ({
+          objectKey: `object:menu:${id}`,
+          regionId: 'region_menu',
+          regionType: 'menu',
+          objectId: id,
+          objectFamily: 'menu_item',
+          state: 'visible_candidate',
+          targetability: 'target_ref',
+          actionTypes: ['click'],
+          candidateActionIds: [`ca_${id}`],
+          evidenceRefs: [id],
+          confidence: 0.8,
+          claimBoundary: 'test redacted lifecycle item',
+        })),
+        changes: [],
+        claimBoundary: 'single snapshot in extension payload',
+      };
+    }
+
+    it('surfaces compared objectLifecycle in the AI-facing chrome_read_page payload', async () => {
+      markBridgeReady();
+      const ctx = sessionManager.getOrCreateExternalTaskContext('object-lifecycle-task');
+      Object.defineProperty(ctx, 'readBudget', { value: 4, writable: false });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'object-before',
+          contextChars: 100,
+          changedRegions: ['menu'],
+          extraPayload: {
+            objectLifecycle: objectLifecycleFixture(['ref_menu_button']),
+          },
+        }),
+      );
+      const before = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'object-lifecycle-task',
+        requestedLayer: 'L0+L1',
+      });
+      expect(before.isError).toBeFalsy();
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'object-after',
+          contextChars: 120,
+          changedRegions: ['menu'],
+          refreshedRefs: ['ref_menu_button', 'ref_action_1'],
+          extraPayload: {
+            objectLifecycle: objectLifecycleFixture(['ref_menu_button', 'ref_action_1']),
+          },
+        }),
+      );
+      const after = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'object-lifecycle-task',
+        requestedLayer: 'L0+L1+L2',
+      });
+      expect(after.isError).toBeFalsy();
+      const payload = JSON.parse(String(after.content[0].text));
+
+      expect(payload.objectLifecycle).toMatchObject({
+        status: 'compared_snapshot',
+        changedObjectCount: 1,
+      });
+      expect(payload.objectLifecycle.changes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            objectKey: 'object:menu:ref_action_1',
+            changeKind: 'appeared',
+          }),
+        ]),
+      );
+      expect(payload.aiContextEnvelope.objectLifecycle).toMatchObject({
+        status: 'compared_snapshot',
+        changedObjectCount: 1,
+      });
+      expect(payload.aiContextEnvelope.pageObjectDetailPolicy).toMatchObject({
+        readMode: 'compact',
+        summaryField: 'pageObjectSummary',
+        fullObjectField: 'browserPageObject',
+        fullObjectInAiEnvelope: false,
+        reason: 'compact_or_normal_read_mode_prefers_summary_first',
+      });
+      expect(payload.aiContextEnvelope.browserPageObject).toBeUndefined();
+      expect(payload.aiContextEnvelope.pageObjectSummary).toMatchObject({
+        source: 'read_page_browser_page_object_compact',
+        status: 'compared_snapshot',
+        watchStatus: expect.stringContaining('candidate'),
+        primaryConclusion: expect.stringContaining('Menu expanded candidate'),
+        changedGroups: expect.arrayContaining(['menu_state']),
+      });
+      expect(payload.aiContextEnvelope.primaryConclusion).toContain('Menu expanded candidate');
+      expect(payload.aiContextEnvelope.watchStatus).toEqual(
+        payload.aiContextEnvelope.pageObjectSummary.watchStatus,
+      );
+      expect(payload.aiContextEnvelope.changedGroups).toEqual(
+        payload.aiContextEnvelope.pageObjectSummary.changedGroups,
+      );
+    });
+
+    it('keeps the full browserPageObject in the AI envelope for full-mode chrome_read_page', async () => {
+      markBridgeReady();
+      const ctx = sessionManager.getOrCreateExternalTaskContext('object-lifecycle-full-task');
+      Object.defineProperty(ctx, 'readBudget', { value: 4, writable: false });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'object-full-before',
+          contextChars: 100,
+          changedRegions: ['menu'],
+          extraPayload: {
+            objectLifecycle: objectLifecycleFixture(['ref_menu_button']),
+          },
+        }),
+      );
+      const before = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'object-lifecycle-full-task',
+        requestedLayer: 'L0+L1',
+      });
+      expect(before.isError).toBeFalsy();
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'object-full-after',
+          contextChars: 120,
+          changedRegions: ['menu'],
+          refreshedRefs: ['ref_menu_button', 'ref_action_1'],
+          extraPayload: {
+            mode: 'full',
+            objectLifecycle: objectLifecycleFixture(['ref_menu_button', 'ref_action_1']),
+          },
+        }),
+      );
+      const after = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'object-lifecycle-full-task',
+        requestedLayer: 'L0+L1+L2',
+        mode: 'full',
+      });
+      expect(after.isError).toBeFalsy();
+      const payload = JSON.parse(String(after.content[0].text));
+
+      expect(payload.aiContextEnvelope.pageObjectDetailPolicy).toMatchObject({
+        readMode: 'full',
+        summaryField: 'pageObjectSummary',
+        fullObjectField: 'browserPageObject',
+        fullObjectInAiEnvelope: true,
+        reason: 'full_read_mode_requested',
+      });
+      expect(payload.aiContextEnvelope.pageObjectSummary).toMatchObject({
+        source: 'read_page_browser_page_object_compact',
+        status: 'compared_snapshot',
+        primaryConclusion: expect.stringContaining('Menu expanded candidate'),
+      });
+      expect(payload.aiContextEnvelope.browserPageObject).toMatchObject({
+        source: 'read_page_browser_page_object',
+        status: 'compared_snapshot',
+        rawLifecycleStats: {
+          changedObjectCount: 1,
+        },
+      });
+      expect(payload.aiContextEnvelope.browserPageObject.semanticEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            eventType: 'menu_expanded',
+            targetGroup: 'menu_state',
+            postconditionStatus: 'candidate_only',
+          }),
+        ]),
+      );
+    });
+
     it('accumulates readPageCount across consecutive chrome_read_page calls sharing taskSessionId', async () => {
       markBridgeReady();
       // Three calls with budget=2 → first two pass through, third
@@ -1201,6 +1533,34 @@ describe('handleToolCall execution wrapper', () => {
       const persisted = sessionManager.peekExternalTaskContext('shared-task');
       expect(persisted).toBe(ctx);
       expect(persisted!.readPageCount).toBe(2);
+    });
+
+    it('does not short-circuit same-layer reads when mode or depth changes', async () => {
+      markBridgeReady();
+
+      mockReadPageRoundTrip('first compact read');
+      const r1 = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'same-layer-shape-task',
+        requestedLayer: 'L0+L1+L2',
+        mode: 'compact',
+        depth: 4,
+      });
+      expect(r1.isError).toBeFalsy();
+
+      mockReadPageRoundTrip('second normal read');
+      const r2 = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'same-layer-shape-task',
+        requestedLayer: 'L0+L1+L2',
+        mode: 'normal',
+        depth: 8,
+      });
+
+      expect(r2.isError).toBeFalsy();
+      expect(String(r2.content[0].text)).toBe('second normal read');
+      const ctx = sessionManager.peekExternalTaskContext('same-layer-shape-task');
+      expect(ctx!.readPageCount).toBe(2);
     });
 
     it('attaches AI-facing projection delta across consecutive chrome_read_page calls', async () => {
@@ -1330,11 +1690,24 @@ describe('handleToolCall execution wrapper', () => {
           selectedDataSource: 'dom_json',
           apiCdpReuseProven: false,
         },
+        apiCdpProofBoundary: {
+          proofStatus: 'not_proven_dom_fallback',
+          apiCdpReuseProven: false,
+          selectedDataSource: 'dom_json',
+          safeClaim: 'This read used a DOM/text fallback route only.',
+          notSafeClaim: 'DOM fallback success must not be claimed as API/CDP reuse proof.',
+        },
       });
       expect(secondPayload.sourceRouteHonesty).toMatchObject({
         verdict: 'dom_fallback',
         selectedDataSource: 'dom_json',
         apiCdpReuseProven: false,
+      });
+      expect(secondPayload.apiCdpProofBoundary).toMatchObject({
+        proofStatus: 'not_proven_dom_fallback',
+        apiCdpReuseProven: false,
+        selectedDataSource: 'dom_json',
+        notSafeClaim: 'DOM fallback success must not be claimed as API/CDP reuse proof.',
       });
       expect(
         secondPayload.aiContextEnvelope.lifecycleTimeline.map(
@@ -1602,6 +1975,48 @@ describe('handleToolCall execution wrapper', () => {
       });
       expect(secondPayload.aiContextEnvelope).toMatchObject({
         contextSource: 'cached_page_projection_delta',
+        pageObjectSummary: {
+          source: 'read_page_browser_page_object_compact',
+          rootObjectId: 'browser_page:tab:7',
+          watchStatus: 'stable_or_unknown',
+          primaryConclusion:
+            'Cached page state reused for read_redundant; Window/Tab runtime facts are attached, but page content was not freshly read.',
+          changedGroups: ['evidence_state'],
+          facts: {
+            window: {
+              objectKind: 'BrowserWindowObject',
+              currentWindowId: 3,
+              currentWindowState: null,
+              isFocused: true,
+              isMinimized: false,
+              isVisible: true,
+            },
+            tab: {
+              objectKind: 'BrowserTabObject',
+              currentTabId: 7,
+              isActive: true,
+              ownerType: 'user_owned',
+              runOwnedTabCount: 0,
+            },
+            page: {
+              objectKind: 'BrowserPageObject',
+              pageId: 'tab:7',
+              tabId: 7,
+              selectedDataSource: 'dom_json',
+            },
+            visualReliability: {
+              objectKind: 'BrowserVisualReliability',
+              isCurrentWindowFocused: true,
+              isCurrentTabActive: true,
+              isWindowMinimized: false,
+              visualReliabilityCandidate: true,
+            },
+          },
+          evidenceSummary:
+            'cached_read_warning: pageProjection is reused; Window/Tab facts come from the latest runtime fields; no fresh DOM/API/CDP read happened.',
+          claimBoundary:
+            'Cached pageObjectSummary is AI-facing runtime context only. It does not prove page content freshness, login/logout success, API/CDP reuse, or task completion.',
+        },
         taskContext: {
           status: 'attached',
           source: 'task_session_context',
@@ -1632,6 +2047,83 @@ describe('handleToolCall execution wrapper', () => {
       expect(persisted?.summary).toBe(
         'AI context: post_action_delta; state=ready; next=continue_read; source=cached_page_projection_delta; data=dom_json; reason=cached_projection_reused_for_redundant_read; fallback=none; rejected=none; metadata=1; confidence=0.9; changed=none; reused=viewport; savedChars=3600',
       );
+    });
+
+    it('marks cached pageObjectSummary as runtime_degraded when the cached window is minimized', async () => {
+      markBridgeReady();
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_cached_minimized',
+          contextChars: 1800,
+          changedRegions: ['viewport'],
+          pageId: 'tab:17',
+          tabId: 17,
+          extraPayload: {
+            currentWindowId: 33,
+            currentWindowState: 'minimized',
+            currentWindowWidth: 900,
+            currentWindowHeight: 640,
+            currentWindowLeft: 12,
+            currentWindowTop: 34,
+            isCurrentTabActive: true,
+            isCurrentWindowFocused: false,
+          },
+        }),
+      );
+      await handleToolCall('chrome_read_page', {
+        tabId: 17,
+        taskSessionId: 'redundant-minimized-window-task',
+        requestedLayer: 'L0+L1',
+      });
+
+      const flowSpy = jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never);
+      flowSpy.mockClear();
+      flowSpy.mockResolvedValueOnce({ status: 'success', items: [] } as never);
+      const second = await handleToolCall('chrome_read_page', {
+        tabId: 17,
+        taskSessionId: 'redundant-minimized-window-task',
+        requestedLayer: 'L0+L1',
+      });
+      const payload = JSON.parse(String(second.content[0].text));
+
+      expect(payload.warning).toBe('read_redundant');
+      expect(payload.currentWindowState).toBe('minimized');
+      expect(payload.isCurrentWindowFocused).toBe(false);
+      expect(payload.cachedPageStateSummary).toMatchObject({
+        currentWindowState: 'minimized',
+        isCurrentTabActive: true,
+        isCurrentWindowFocused: false,
+      });
+      expect(payload.aiContextEnvelope.pageObjectSummary).toMatchObject({
+        watchStatus: 'runtime_degraded',
+        changedGroups: ['window_state', 'tab_state', 'visual_reliability', 'evidence_state'],
+        facts: {
+          window: {
+            objectKind: 'BrowserWindowObject',
+            currentWindowId: 33,
+            currentWindowState: 'minimized',
+            isFocused: false,
+            isMinimized: true,
+            isVisible: false,
+            width: 900,
+            height: 640,
+          },
+          visualReliability: {
+            objectKind: 'BrowserVisualReliability',
+            isCurrentWindowFocused: false,
+            isCurrentTabActive: true,
+            isWindowMinimized: true,
+            visualReliabilityCandidate: false,
+          },
+        },
+      });
+      expect(payload.aiContextEnvelope.pageObjectSummary.primaryConclusion).toContain(
+        'current runtime is visually degraded',
+      );
+      expect(flowSpy).toHaveBeenCalledTimes(1);
     });
 
     it('exposes structured-read gate verdict in chrome_read_page AI-facing output', async () => {
@@ -2292,10 +2784,26 @@ describe('handleToolCall execution wrapper', () => {
         sourceRouteCandidate: 'cdp_source_with_fact_evidence',
         apiCdpReuseProven: false,
       });
+      expect(payload.apiCdpProofBoundary).toMatchObject({
+        proofStatus: 'requires_r5_gate',
+        apiCdpReuseProven: false,
+        selectedDataSource: 'cdp_enhanced_api_rows',
+        sourceRouteCandidate: 'cdp_source_with_fact_evidence',
+        reason: 'api_cdp_reuse_requires_r5_gate',
+        notSafeClaim:
+          'Do not claim API proven, CDP proven, API reuse, CDP reuse, or product delivery grade.',
+      });
+      expect(payload.aiContextEnvelope.apiCdpProofBoundary).toMatchObject({
+        proofStatus: 'requires_r5_gate',
+        apiCdpReuseProven: false,
+        selectedDataSource: 'cdp_enhanced_api_rows',
+        sourceRouteCandidate: 'cdp_source_with_fact_evidence',
+      });
       expect(JSON.stringify(payload.sourceRouteHonesty)).not.toContain('cdp_proven');
       expect(JSON.stringify(payload.aiContextEnvelope.sourceRouteHonesty)).not.toContain(
         'cdp_proven',
       );
+      expect(JSON.stringify(payload.apiCdpProofBoundary)).not.toContain('cdp_proven');
     });
 
     it('preserves markdown reading surface instead of replacing it with DOM rows', async () => {
@@ -3355,6 +3863,32 @@ describe('handleToolCall execution wrapper', () => {
       expect(returnedTabContext?.getRunOwnedTabIds()).toEqual([77]);
     });
 
+    it('new focused navigation invalidates cached reads for other tab contexts', async () => {
+      markBridgeReady();
+      const existingTabContext = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:10');
+      Object.defineProperty(existingTabContext, 'readBudget', { value: 5, writable: false });
+
+      mockReadPageRoundTrip('before-focus-change');
+      await handleToolCall('chrome_read_page', { tabId: 10, requestedLayer: 'L0+L1' });
+      expect(existingTabContext.lastReadLayer).toBe('L0+L1');
+
+      mockNavigateRoundTrip('opened-focused-window', 88);
+      await handleToolCall('chrome_navigate', {
+        url: 'https://example.test/focused-window',
+        newWindow: true,
+      });
+      expect(existingTabContext.lastReadLayer).toBeNull();
+
+      mockReadPageRoundTrip('after-focus-change');
+      const afterFocusChangeRead = await handleToolCall('chrome_read_page', {
+        tabId: 10,
+        requestedLayer: 'L0+L1',
+      });
+      expect(String(afterFocusChangeRead.content[0].text)).toBe('after-focus-change');
+      expect(existingTabContext.lastReadLayer).toBe('L0+L1');
+      expect(existingTabContext.readPageCount).toBe(2);
+    });
+
     it('reuses the returned tab auto context for explicit close_tabs cleanup', async () => {
       markBridgeReady();
       jest
@@ -3401,8 +3935,7 @@ describe('handleToolCall execution wrapper', () => {
         targetTabIds: [77],
         runOwnedTabIds: [77],
       });
-      const returnedTabContext = sessionManager.peekExternalTaskContext('mcp:auto:tab:77');
-      expect(returnedTabContext?.getRunOwnedTabIds()).toEqual([]);
+      expect(sessionManager.peekExternalTaskContext('mcp:auto:tab:77')).toBeNull();
     });
 
     it('page interactions invalidate redundancy state for the next read on the same task', async () => {
@@ -3445,6 +3978,60 @@ describe('handleToolCall execution wrapper', () => {
       expect(ctx.readPageCount).toBe(2);
     });
 
+    it('switch_tab invalidates cached read state so Tab activity is re-observed', async () => {
+      markBridgeReady();
+      const ctx = sessionManager.getOrCreateExternalTaskContext('switch-tab-task');
+      ctx.noteRunOwnedTab(9);
+      Object.defineProperty(ctx, 'readBudget', { value: 5, writable: false });
+
+      mockReadPageRoundTrip('before-switch');
+      await handleToolCall('chrome_read_page', {
+        tabId: 9,
+        taskSessionId: 'switch-tab-task',
+        requestedLayer: 'L0+L1',
+      });
+      expect(ctx.lastReadLayer).toBe('L0+L1');
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  tabId: 9,
+                  windowId: 3,
+                  activated: true,
+                  windowFocused: true,
+                  settled: true,
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      await handleToolCall('chrome_switch_tab', {
+        tabId: 9,
+        taskSessionId: 'switch-tab-task',
+      });
+      expect(ctx.lastReadLayer).toBeNull();
+
+      mockReadPageRoundTrip('after-switch');
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 9,
+        taskSessionId: 'switch-tab-task',
+        requestedLayer: 'L0+L1',
+      });
+      expect(String(result.content[0].text)).toBe('after-switch');
+      expect(result.isError).toBeFalsy();
+      expect(ctx.lastReadLayer).toBe('L0+L1');
+      expect(ctx.readPageCount).toBe(2);
+    });
+
     it('different tabIds do NOT share redundant state on the default MCP path', async () => {
       markBridgeReady();
       const tab1 = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
@@ -3471,6 +4058,52 @@ describe('handleToolCall execution wrapper', () => {
       expect(tab2.lastReadLayer).toBe('L0+L1+L2');
       // tab 1's state is untouched.
       expect(tab1.readPageCount).toBe(1);
+    });
+
+    it('auto-keyed switch_tab invalidates same-tab read state', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:9');
+      Object.defineProperty(auto, 'readBudget', { value: 5, writable: false });
+
+      mockReadPageRoundTrip('auto-before-switch');
+      await handleToolCall('chrome_read_page', {
+        tabId: 9,
+        requestedLayer: 'L0+L1',
+      });
+      expect(auto.lastReadLayer).toBe('L0+L1');
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  tabId: 9,
+                  windowId: 3,
+                  activated: true,
+                  windowFocused: true,
+                  settled: true,
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      await handleToolCall('chrome_switch_tab', { tabId: 9 });
+      expect(auto.lastReadLayer).toBeNull();
+
+      mockReadPageRoundTrip('auto-after-switch');
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 9,
+        requestedLayer: 'L0+L1',
+      });
+      expect(String(result.content[0].text)).toBe('auto-after-switch');
+      expect(auto.readPageCount).toBe(2);
     });
 
     it('explicit taskSessionId still beats the auto-derived per-tab key', async () => {
@@ -3506,10 +4139,18 @@ describe('handleToolCall execution wrapper', () => {
       expect(fallback.readPageCount).toBe(2);
     });
 
-    it('auto-keying does NOT fire for non-budgeted tools (e.g. chrome_click_element)', async () => {
+    it('auto-keyed click invalidates same-tab read state for post-action verification', async () => {
       markBridgeReady();
-      // A click on tab 1 must not pre-create an auto context, since
-      // click never visits the budget gate or the URL invalidator.
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
+      Object.defineProperty(auto, 'readBudget', { value: 5, writable: false });
+
+      mockReadPageRoundTrip('before-click');
+      await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+      expect(auto.lastReadLayer).toBe('L0+L1');
+
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
         .mockResolvedValueOnce({ status: 'success', items: [] } as never)
@@ -3518,9 +4159,15 @@ describe('handleToolCall execution wrapper', () => {
           data: { content: [{ type: 'text', text: 'clicked' }], isError: false },
         } as never);
       await handleToolCall('chrome_click_element', { tabId: 1, ref: 'ref_42' });
+      expect(auto.lastReadLayer).toBeNull();
 
-      expect(sessionManager.peekExternalTaskContext('mcp:auto:tab:1')).toBeNull();
-      expect(sessionManager.peekExternalTaskContext('mcp:auto:tab:default')).toBeNull();
+      mockReadPageRoundTrip('after-click');
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+      expect(String(result.content[0].text)).toBe('after-click');
+      expect(auto.readPageCount).toBe(2);
     });
   });
 });

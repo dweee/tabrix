@@ -7,7 +7,9 @@ import type {
 import {
   getActionPostconditionCoverageMatrix,
   verifyActionPostcondition,
+  verifyRegionStatePostcondition,
 } from './action-postcondition-verifier';
+import type { ReadPageRegion, ReadPageRegionType } from '@tabrix/shared';
 
 const T0 = 1_700_000_000_000;
 const PRODUCED_AT = T0 + 9_999;
@@ -51,6 +53,24 @@ function verify(actionKind: ActionKind, outcome: ActionOutcome, confidence = 0.8
     makeSnapshot({ outcome, outcomeConfidence: confidence }),
     { now: () => PRODUCED_AT },
   );
+}
+
+function region(
+  regionType: ReadPageRegionType,
+  state: string,
+  overrides: Partial<ReadPageRegion> = {},
+): ReadPageRegion {
+  return {
+    regionId: overrides.regionId ?? `${regionType}-1`,
+    regionType,
+    state,
+    confidence: overrides.confidence ?? 0.8,
+    label: overrides.label,
+    objects: overrides.objects ?? [],
+    candidateActionIds: overrides.candidateActionIds ?? [],
+    targetability: overrides.targetability ?? 'unknown',
+    claimBoundary: overrides.claimBoundary ?? 'deterministic test fixture only',
+  };
 }
 
 describe('action-postcondition-verifier — coverage matrix', () => {
@@ -177,18 +197,18 @@ describe('action-postcondition-verifier — verdict matrix', () => {
     expect(verify(actionKind, outcome).verdict).toBe('passed');
   });
 
-  const failRows: Array<[ActionKind, ActionOutcome]> = [
-    ['click', 'no_observed_change'],
-    ['fill', 'no_observed_change'],
-    ['submit', 'no_observed_change'],
-    ['navigate', 'no_observed_change'],
-    ['close', 'no_observed_change'],
+  const failRows: Array<[ActionKind, ActionOutcome, string]> = [
+    ['click', 'no_observed_change', 'no_relevant_effect_observed'],
+    ['fill', 'no_observed_change', 'form_input_state_change_not_proven'],
+    ['submit', 'no_observed_change', 'form_submit_or_search_results_not_proven'],
+    ['navigate', 'no_observed_change', 'no_relevant_effect_observed'],
+    ['close', 'no_observed_change', 'no_relevant_effect_observed'],
   ];
 
-  it.each(failRows)('returns failed for %s + %s', (actionKind, outcome) => {
+  it.each(failRows)('returns failed for %s + %s', (actionKind, outcome, reason) => {
     const result = verify(actionKind, outcome);
     expect(result.verdict).toBe('failed');
-    expect(result.reason).toBe('no_relevant_effect_observed');
+    expect(result.reason).toBe(reason);
   });
 
   const inconclusiveOutcomes: ActionOutcome[] = ['multiple_signals', 'ambiguous', 'unknown'];
@@ -344,5 +364,129 @@ describe('action-postcondition-verifier — output contract', () => {
     const a = verifyActionPostcondition(envelope, snapshot, { now: () => PRODUCED_AT });
     const b = verifyActionPostcondition(envelope, snapshot, { now: () => PRODUCED_AT });
     expect(a).toEqual(b);
+  });
+});
+
+describe('action-postcondition-verifier — R4A region-state postconditions', () => {
+  it('passes menu_opened only when menu actions appear after the action', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'menu_opened',
+      actionId: 'act-menu',
+      beforeRegions: [region('menu', 'collapsed_or_expandable_candidate')],
+      afterRegions: [
+        region('menu', 'action_available_candidate', { candidateActionIds: ['ca_logout'] }),
+      ],
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result).toMatchObject({
+      actionId: 'act-menu',
+      kind: 'menu_opened',
+      verdict: 'passed',
+      reason: 'menu_region_expanded_or_actions_appeared',
+      producedAtMs: PRODUCED_AT,
+    });
+    expect(result.claimBoundary).toContain('click success, timeout, or QR presence alone');
+  });
+
+  it('keeps menu_opened unknown when the menu state does not change', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'menu_opened',
+      actionId: 'act-menu',
+      beforeRegions: [region('menu', 'collapsed_or_expandable_candidate')],
+      afterRegions: [region('menu', 'collapsed_or_expandable_candidate')],
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('unknown');
+    expect(result.reason).toBe('menu_state_change_not_proven');
+  });
+
+  it('passes login_completed only when auth prompt disappears and account appears', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'login_completed',
+      actionId: 'act-login',
+      beforeRegions: [
+        region('modal', 'open_candidate'),
+        region('qr_code', 'waiting_scan_candidate'),
+      ],
+      afterRegions: [region('account', 'logged_in_candidate')],
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('passed');
+    expect(result.reason).toBe('account_region_appeared_after_auth_prompt');
+  });
+
+  it('does not treat a visible QR code as login success', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'login_completed',
+      actionId: 'act-login',
+      beforeRegions: [region('qr_code', 'waiting_scan_candidate')],
+      afterRegions: [region('qr_code', 'waiting_scan_candidate')],
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('unknown');
+    expect(result.reason).toBe('auth_prompt_still_present');
+  });
+
+  it('does not treat an account candidate as login success while QR is still visible', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'login_completed',
+      actionId: 'act-login',
+      beforeRegions: [
+        region('modal', 'open_candidate'),
+        region('qr_code', 'waiting_scan_candidate'),
+      ],
+      afterRegions: [
+        region('account', 'logged_in_candidate'),
+        region('qr_code', 'waiting_scan_candidate'),
+      ],
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('unknown');
+    expect(result.reason).toBe('auth_prompt_still_present');
+  });
+
+  it('passes logout_completed only when logged-in account changes to logged-out evidence', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'logout_completed',
+      actionId: 'act-logout',
+      beforeRegions: [region('account', 'logged_in_candidate')],
+      afterRegions: [region('account', 'logged_out_candidate')],
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('passed');
+    expect(result.reason).toBe('logged_out_or_auth_prompt_visible_after');
+  });
+
+  it('fails logout_completed when logged-in account is still present after the action', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'logout_completed',
+      actionId: 'act-logout',
+      beforeRegions: [region('account', 'logged_in_candidate')],
+      afterRegions: [region('account', 'logged_in_candidate')],
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('failed');
+    expect(result.reason).toBe('account_region_still_logged_in');
+  });
+
+  it('treats QR waiting as scan-wait evidence only, not login success', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'qr_waiting',
+      actionId: 'act-qr',
+      beforeRegions: [],
+      afterRegions: [region('qr_code', 'waiting_scan_candidate')],
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('passed');
+    expect(result.reason).toBe('qr_region_waiting_for_scan');
+    expect(result.claimBoundary).toContain('QR presence alone is not business success');
   });
 });

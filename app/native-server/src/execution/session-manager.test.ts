@@ -275,4 +275,23 @@ describe('SessionManager', () => {
       mgr.close();
     }
   });
+
+  it('can release an externally keyed task context after browser cleanup', () => {
+    const mgr = new SessionManager();
+    try {
+      const first = mgr.getOrCreateExternalTaskContext('mcp:auto:tab:10');
+      first.noteReadPage({ layer: 'L0+L1', source: 'unknown' });
+
+      expect(mgr.peekExternalTaskContext('mcp:auto:tab:10')).toBe(first);
+      expect(mgr.releaseExternalTaskContext('mcp:auto:tab:10')).toBe(true);
+      expect(mgr.peekExternalTaskContext('mcp:auto:tab:10')).toBeNull();
+      expect(mgr.releaseExternalTaskContext('mcp:auto:tab:10')).toBe(false);
+
+      const second = mgr.getOrCreateExternalTaskContext('mcp:auto:tab:10');
+      expect(second).not.toBe(first);
+      expect(second.readPageCount).toBe(0);
+    } finally {
+      mgr.close();
+    }
+  });
 });

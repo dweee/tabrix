@@ -12,6 +12,7 @@ import type {
   ActionOutcomeSnapshot,
   PostconditionResult,
   PostconditionVerdict,
+  ReadPageRegion,
 } from '@tabrix/shared';
 
 const DEFAULT_CONFIDENCE_THRESHOLD = 0.6;
@@ -160,6 +161,32 @@ export interface VerifyActionPostconditionOptions {
   confidenceThreshold?: number;
 }
 
+export type RegionStatePostconditionKind =
+  | 'menu_opened'
+  | 'menu_closed'
+  | 'login_completed'
+  | 'logout_completed'
+  | 'qr_waiting';
+
+export interface RegionStatePostconditionInput {
+  kind: RegionStatePostconditionKind;
+  actionId: string;
+  beforeRegions: readonly ReadPageRegion[];
+  afterRegions: readonly ReadPageRegion[];
+  now?: () => number;
+}
+
+export interface RegionStatePostconditionResult {
+  actionId: string;
+  kind: RegionStatePostconditionKind;
+  verdict: PostconditionVerdict;
+  reason: string;
+  beforeSummary: string[];
+  afterSummary: string[];
+  producedAtMs: number;
+  claimBoundary: string;
+}
+
 export function getActionPostconditionCoverageMatrix(): readonly ActionPostconditionCoverageRow[] {
   return ACTION_POSTCONDITION_COVERAGE_MATRIX;
 }
@@ -198,6 +225,167 @@ export function verifyActionPostcondition(
     sourceOrigins: ['runtime', 'action_outcome_classifier', 'inference'],
     producedAtMs,
   };
+}
+
+export function verifyRegionStatePostcondition(
+  input: RegionStatePostconditionInput,
+): RegionStatePostconditionResult {
+  const producedAtMs = input.now ? input.now() : Date.now();
+  const beforeSummary = summarizeRegions(input.beforeRegions);
+  const afterSummary = summarizeRegions(input.afterRegions);
+  const result = verdictForRegionState(input.kind, input.beforeRegions, input.afterRegions);
+
+  return {
+    actionId: input.actionId,
+    kind: input.kind,
+    verdict: result.verdict,
+    reason: result.reason,
+    beforeSummary,
+    afterSummary,
+    producedAtMs,
+    claimBoundary:
+      'region-state postconditions require before/after page-region evidence; click success, timeout, or QR presence alone is not business success',
+  };
+}
+
+function verdictForRegionState(
+  kind: RegionStatePostconditionKind,
+  beforeRegions: readonly ReadPageRegion[],
+  afterRegions: readonly ReadPageRegion[],
+): { verdict: PostconditionVerdict; reason: string } {
+  if (afterRegions.length === 0) {
+    return { verdict: 'unknown', reason: 'after_region_evidence_missing' };
+  }
+
+  switch (kind) {
+    case 'menu_opened':
+      return verdictForMenuOpened(beforeRegions, afterRegions);
+    case 'menu_closed':
+      return verdictForMenuClosed(beforeRegions, afterRegions);
+    case 'login_completed':
+      return verdictForLoginCompleted(beforeRegions, afterRegions);
+    case 'logout_completed':
+      return verdictForLogoutCompleted(beforeRegions, afterRegions);
+    case 'qr_waiting':
+      return verdictForQrWaiting(afterRegions);
+  }
+}
+
+function verdictForMenuOpened(
+  beforeRegions: readonly ReadPageRegion[],
+  afterRegions: readonly ReadPageRegion[],
+): { verdict: PostconditionVerdict; reason: string } {
+  const beforeMenu = regionsByType(beforeRegions, 'menu');
+  const afterMenu = regionsByType(afterRegions, 'menu');
+  if (afterMenu.length === 0) return { verdict: 'failed', reason: 'menu_region_not_visible_after' };
+
+  const beforeActionIds = new Set(beforeMenu.flatMap((region) => region.candidateActionIds));
+  const afterActionIds = new Set(afterMenu.flatMap((region) => region.candidateActionIds));
+  const gainedAction = [...afterActionIds].some((id) => !beforeActionIds.has(id));
+  const afterExpanded = afterMenu.some((region) =>
+    ['expanded', 'expanded_candidate', 'action_available_candidate', 'open_candidate'].includes(
+      region.state,
+    ),
+  );
+  if (afterExpanded && (gainedAction || beforeMenu.length === 0)) {
+    return { verdict: 'passed', reason: 'menu_region_expanded_or_actions_appeared' };
+  }
+  return { verdict: 'unknown', reason: 'menu_state_change_not_proven' };
+}
+
+function verdictForMenuClosed(
+  beforeRegions: readonly ReadPageRegion[],
+  afterRegions: readonly ReadPageRegion[],
+): { verdict: PostconditionVerdict; reason: string } {
+  const beforeMenu = regionsByType(beforeRegions, 'menu');
+  const afterMenu = regionsByType(afterRegions, 'menu');
+  if (beforeMenu.length === 0)
+    return { verdict: 'unknown', reason: 'before_menu_evidence_missing' };
+  if (afterMenu.length === 0) return { verdict: 'passed', reason: 'menu_region_disappeared' };
+  const beforeHadActions = beforeMenu.some((region) => region.candidateActionIds.length > 0);
+  const afterHadActions = afterMenu.some((region) => region.candidateActionIds.length > 0);
+  if (beforeHadActions && !afterHadActions) {
+    return { verdict: 'passed', reason: 'menu_actions_disappeared' };
+  }
+  return { verdict: 'unknown', reason: 'menu_close_state_change_not_proven' };
+}
+
+function verdictForLoginCompleted(
+  beforeRegions: readonly ReadPageRegion[],
+  afterRegions: readonly ReadPageRegion[],
+): { verdict: PostconditionVerdict; reason: string } {
+  const beforeAuth = hasAuthPrompt(beforeRegions) || hasLoggedOutAccount(beforeRegions);
+  const afterAccount = regionsByType(afterRegions, 'account').some(
+    (region) => region.state === 'logged_in_candidate',
+  );
+  const afterAuthPrompt = hasAuthPrompt(afterRegions);
+  if (beforeAuth && afterAccount && !afterAuthPrompt) {
+    return { verdict: 'passed', reason: 'account_region_appeared_after_auth_prompt' };
+  }
+  if (afterAuthPrompt) return { verdict: 'unknown', reason: 'auth_prompt_still_present' };
+  return { verdict: 'unknown', reason: 'login_state_change_not_proven' };
+}
+
+function verdictForLogoutCompleted(
+  beforeRegions: readonly ReadPageRegion[],
+  afterRegions: readonly ReadPageRegion[],
+): { verdict: PostconditionVerdict; reason: string } {
+  const beforeLoggedIn = regionsByType(beforeRegions, 'account').some(
+    (region) => region.state === 'logged_in_candidate',
+  );
+  if (!beforeLoggedIn) return { verdict: 'unknown', reason: 'before_logged_in_evidence_missing' };
+  if (hasLoggedOutAccount(afterRegions) || hasAuthPrompt(afterRegions)) {
+    return { verdict: 'passed', reason: 'logged_out_or_auth_prompt_visible_after' };
+  }
+  const afterLoggedIn = regionsByType(afterRegions, 'account').some(
+    (region) => region.state === 'logged_in_candidate',
+  );
+  if (afterLoggedIn) return { verdict: 'failed', reason: 'account_region_still_logged_in' };
+  return { verdict: 'unknown', reason: 'logout_state_change_not_proven' };
+}
+
+function verdictForQrWaiting(afterRegions: readonly ReadPageRegion[]): {
+  verdict: PostconditionVerdict;
+  reason: string;
+} {
+  const qrRegion = regionsByType(afterRegions, 'qr_code').find((region) =>
+    ['waiting_scan_candidate', 'waiting_scan', 'refreshed'].includes(region.state),
+  );
+  if (qrRegion) return { verdict: 'passed', reason: 'qr_region_waiting_for_scan' };
+  return { verdict: 'unknown', reason: 'qr_waiting_state_not_proven' };
+}
+
+function regionsByType(
+  regions: readonly ReadPageRegion[],
+  regionType: ReadPageRegion['regionType'],
+): ReadPageRegion[] {
+  return regions.filter((region) => region.regionType === regionType);
+}
+
+function hasAuthPrompt(regions: readonly ReadPageRegion[]): boolean {
+  return regions.some(
+    (region) =>
+      (region.regionType === 'modal' && region.state === 'open_candidate') ||
+      (region.regionType === 'qr_code' &&
+        ['waiting_scan_candidate', 'waiting_scan', 'refreshed'].includes(region.state)),
+  );
+}
+
+function hasLoggedOutAccount(regions: readonly ReadPageRegion[]): boolean {
+  return regionsByType(regions, 'account').some(
+    (region) => region.state === 'logged_out_candidate',
+  );
+}
+
+function summarizeRegions(regions: readonly ReadPageRegion[]): string[] {
+  return regions.map((region) =>
+    [
+      region.regionType,
+      region.state,
+      region.targetability,
+      `actions:${region.candidateActionIds.length}`,
+    ].join(':'),
+  );
 }
 
 function verdictFor(
@@ -247,6 +435,12 @@ function reasonFor(
   if (actionKind === 'keyboard') return 'keyboard_not_supported';
   if (actionKind === 'unknown') return 'unknown_action_kind';
   if (verdict === 'passed') return `outcome_supports_${actionKind}`;
+  if (verdict === 'failed' && actionKind === 'fill') {
+    return 'form_input_state_change_not_proven';
+  }
+  if (verdict === 'failed' && actionKind === 'submit') {
+    return 'form_submit_or_search_results_not_proven';
+  }
   if (verdict === 'failed') return 'no_relevant_effect_observed';
   return `outcome_inconclusive_${outcome}`;
 }

@@ -77,15 +77,15 @@ export const READ_PAGE_DEFAULT_LAYER: ReadPageRequestedLayer = 'L0+L1+L2';
  *
  * Only `chrome_read_page` (the gated tool), `chrome_navigate` (the
  * tool that invalidates the gate's lastReadLayer / targetRefsSeen
- * via `noteUrlChange`), single-target `chrome_close_tabs` (the cleanup
- * closeout for a run-owned tab opened earlier in the same MCP task path),
- * `chrome_network_capture` (the live observed API
- * writer), and `tabrix_choose_context` (the decision writer that the
- * `chrome_read_page` shim consumes via
- * `peekChooseContextDecision`) participate in auto-keying. Every
- * other tool returns `null`, so click/fill/screenshot/etc. cannot
- * accidentally mint phantom external task contexts or pollute the
- * LRU map.
+ * via `noteUrlChange`), click/fill/keyboard interaction tools (the
+ * actions that can make the next read a post-action state check),
+ * single-target `chrome_close_tabs` (the cleanup closeout for a run-owned
+ * tab opened earlier in the same MCP task path), `chrome_network_capture`
+ * (the live observed API writer), and `tabrix_choose_context` (the decision
+ * writer that the `chrome_read_page` shim consumes via
+ * `peekChooseContextDecision`) participate in auto-keying. Every other tool
+ * returns `null`, so screenshots and unrelated helpers cannot accidentally
+ * mint phantom external task contexts or pollute the LRU map.
  *
  * `tabrix_choose_context` joins the auto set so a chooser → reader pair
  * issued back-to-back without an explicit `taskSessionId` lands on the
@@ -153,6 +153,10 @@ export function resolveTaskContextKey(
   const autoEligible =
     toolName === TOOL_NAMES.BROWSER.READ_PAGE ||
     toolName === TOOL_NAMES.BROWSER.NAVIGATE ||
+    toolName === TOOL_NAMES.BROWSER.CLICK ||
+    toolName === TOOL_NAMES.BROWSER.FILL ||
+    toolName === TOOL_NAMES.BROWSER.KEYBOARD ||
+    toolName === TOOL_NAMES.BROWSER.SWITCH_TAB ||
     toolName === TOOL_NAMES.BROWSER.NETWORK_CAPTURE ||
     toolName === TOOL_NAMES.CONTEXT.CHOOSE;
   if (!autoEligible) return null;
