@@ -1028,10 +1028,13 @@ function buildCloseTabsBrowserHygieneEvidence(input: {
 }): CloseTabsBrowserHygieneEvidence {
   const closed = new Set(input.closedTabIds);
   const expectedTabCountAfter = input.before.tabCount - input.closedTabIds.length;
+  const windowCountDelta = input.before.windowCount - input.after.windowCount;
+  const windowCountCompatible =
+    input.after.windowCount === input.before.windowCount ||
+    (windowCountDelta > 0 && windowCountDelta <= input.closedTabIds.length);
   const tabWindowBaselineUnchanged =
     expectedTabCountAfter >= 0
-      ? input.after.tabCount === expectedTabCountAfter &&
-        input.after.windowCount === input.before.windowCount
+      ? input.after.tabCount === expectedTabCountAfter && windowCountCompatible
       : null;
   const beforeActiveTabClosed =
     input.before.activeTabId !== null && closed.has(input.before.activeTabId);

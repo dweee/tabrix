@@ -20,10 +20,21 @@ class WindowTool extends BaseBrowserToolExecutor {
               active: tab.active || false,
             };
           }) || [];
+        const activeTab = tabs.find((tab) => tab.active === true) || null;
 
         return {
           windowId: window.id || 0,
-          tabs: tabs,
+          state: window.state || 'unknown',
+          focused: typeof window.focused === 'boolean' ? window.focused : null,
+          type: window.type || 'unknown',
+          incognito: typeof window.incognito === 'boolean' ? window.incognito : null,
+          width: Number.isInteger(window.width) ? window.width : null,
+          height: Number.isInteger(window.height) ? window.height : null,
+          left: Number.isInteger(window.left) ? window.left : null,
+          top: Number.isInteger(window.top) ? window.top : null,
+          activeTabId: activeTab ? activeTab.tabId : null,
+          tabCount: tabs.length,
+          tabs,
         };
       });
 
