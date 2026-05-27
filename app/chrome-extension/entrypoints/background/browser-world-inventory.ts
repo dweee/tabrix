@@ -652,10 +652,12 @@ export function initBrowserWorldInventory(): void {
   );
   bind(chrome.tabs?.onRemoved, (tabId: number, info: chrome.tabs.TabRemoveInfo) => {
     const previous = tabsById.get(tabId);
+    const windowId =
+      typeof info?.windowId === 'number' ? info.windowId : (previous?.windowId ?? null);
     if (previous) {
       tabsById.set(tabId, {
         ...previous,
-        windowId: typeof info?.windowId === 'number' ? info.windowId : previous.windowId,
+        windowId,
         active: false,
         aiOperationState: 'closed',
         updatedAtMs: nowMs(),
@@ -663,11 +665,12 @@ export function initBrowserWorldInventory(): void {
       });
       tabsById.delete(tabId);
     }
+    if (windowId !== null) refreshWindowDerivedTabState(windowId);
     pendingAiCreatedTabIds.delete(tabId);
     pushEvent({
       eventKind: 'tab_removed',
       tabId,
-      windowId: typeof info?.windowId === 'number' ? info.windowId : (previous?.windowId ?? null),
+      windowId,
       openedBy: previous?.openedBy,
       aiOperation: previous?.lastAiOperation,
       aiOperationReason: previous?.lastAiOperationReason,

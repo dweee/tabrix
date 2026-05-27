@@ -478,6 +478,13 @@ describe('browser world inventory', () => {
     listeners.tabRemoved[0]?.(20, { windowId: 1, isWindowClosing: false });
     snapshot = await getBrowserWorldSnapshot();
     expect(snapshot.tabs.some((tab) => tab.tabId === 20)).toBe(false);
+    expect(snapshot.windows[0]).toMatchObject({
+      activeTabId: null,
+      activeTabCanOperate: null,
+      tabCount: 2,
+      canTabrixOperate: null,
+      operabilityReason: 'active_tab_operability_unknown',
+    });
     expect(snapshot.summary.tabLifecycleState).toMatchObject({
       latestEventKind: 'tab_removed',
       latestEventTabId: 20,
@@ -568,6 +575,13 @@ describe('browser world inventory', () => {
 
     const snapshot = await getBrowserWorldSnapshot();
     expect(snapshot.tabs.some((tab) => tab.tabId === 10)).toBe(false);
+    expect(snapshot.windows[0]).toMatchObject({
+      activeTabId: null,
+      activeTabCanOperate: null,
+      tabCount: 1,
+      canTabrixOperate: null,
+      operabilityReason: 'active_tab_operability_unknown',
+    });
     expect(snapshot.summary.recentChangeSummary).toContain(
       'tab 10 was removed; previousOpenedBy=user_or_page, lastAiOperation=close_tabs_requested',
     );
