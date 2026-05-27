@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   assertPublicHttpUrl,
+  buildPublicSmokeUrl,
   buildRedactedBrowserWorldSummary,
   extractJsonObject,
   extractNavigateTabId,
@@ -84,11 +85,57 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
   });
 });
 
-test('parseArgs supports safe smoke switches', () => {
-  assert.deepEqual(parseArgs(['--url', 'https://example.org/', '--keep-open', '--skip-open']), {
-    url: 'https://example.org/',
-    keepOpen: true,
-    skipOpen: true,
-    timeoutMs: 60_000,
+test('buildRedactedBrowserWorldSummary checks active tab across all compact windows', () => {
+  const summary = buildRedactedBrowserWorldSummary({
+    windowCount: 2,
+    tabCount: 3,
+    compactSummary: {
+      activeObject: { tabId: 3, url: 'https://private.example.test/active' },
+      windows: [
+        {
+          compactTabLimit: 12,
+          omittedTabCount: 4,
+          tabs: [{ tabId: 1 }],
+        },
+        {
+          compactTabLimit: 12,
+          omittedTabCount: 0,
+          tabs: [{ tabId: 3, url: 'https://private.example.test/active' }],
+        },
+      ],
+    },
+    browserWorld: { tabs: [] },
   });
+
+  assert.equal(summary.activeTabIncludedInCompactTabs, true);
+  assert.equal(summary.omittedTabCount, 4);
+  assert.equal(JSON.stringify(summary).includes('private.example.test'), false);
+});
+
+test('parseArgs supports safe smoke switches', () => {
+  assert.deepEqual(
+    parseArgs([
+      '--url',
+      'https://example.org/',
+      '--keep-open',
+      '--skip-open',
+      '--scenario',
+      'lifecycle',
+    ]),
+    {
+      url: 'https://example.org/',
+      keepOpen: true,
+      skipOpen: true,
+      scenario: 'lifecycle',
+      timeoutMs: 60_000,
+    },
+  );
+});
+
+test('buildPublicSmokeUrl keeps the target public and adds case metadata', () => {
+  assert.equal(
+    buildPublicSmokeUrl('https://example.com/start?x=1', 'foreground', 'run-1'),
+    'https://example.com/start?x=1&tabrix_smoke_case=foreground&tabrix_smoke_run=run-1',
+  );
+  assert.throws(() => buildPublicSmokeUrl('http://localhost:3000/', 'foreground', 'run-1'));
 });

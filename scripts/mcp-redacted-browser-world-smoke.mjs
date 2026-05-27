@@ -13,6 +13,7 @@ export function parseArgs(argv) {
     url: DEFAULT_PUBLIC_URL,
     keepOpen: false,
     skipOpen: false,
+    scenario: 'single',
     timeoutMs: 60_000,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -24,6 +25,9 @@ export function parseArgs(argv) {
       args.keepOpen = true;
     } else if (part === '--skip-open') {
       args.skipOpen = true;
+    } else if (part === '--scenario') {
+      args.scenario = argv[index + 1] || 'single';
+      index += 1;
     } else if (part === '--timeout-ms') {
       const parsed = Number(argv[index + 1]);
       if (Number.isFinite(parsed) && parsed > 0) args.timeoutMs = parsed;
@@ -124,14 +128,31 @@ export function extractNavigateTabId(payload) {
   return findFirstNumberByKey(payload, ['tabId']);
 }
 
+export function buildPublicSmokeUrl(baseUrl, caseName, runId = 'manual') {
+  const parsed = new URL(assertPublicHttpUrl(baseUrl));
+  parsed.searchParams.set('tabrix_smoke_case', caseName);
+  parsed.searchParams.set('tabrix_smoke_run', runId);
+  return parsed.toString();
+}
+
 export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
-  const compactWindow = payload?.compactSummary?.windows?.[0] ?? null;
-  const compactTabs = Array.isArray(compactWindow?.tabs) ? compactWindow.tabs : [];
+  const compactWindows = Array.isArray(payload?.compactSummary?.windows)
+    ? payload.compactSummary.windows
+    : [];
+  const compactTabs = compactWindows.flatMap((window) =>
+    Array.isArray(window?.tabs) ? window.tabs : [],
+  );
   const activeTabId = payload?.compactSummary?.activeObject?.tabId ?? null;
   const allTabs = Array.isArray(payload?.browserWorld?.tabs) ? payload.browserWorld.tabs : [];
   const targetTab = Number.isInteger(targetTabId)
     ? allTabs.find((tab) => tab?.tabId === targetTabId)
     : null;
+  const compactTabLimit =
+    compactWindows.find((window) => window?.compactTabLimit !== undefined)?.compactTabLimit ?? null;
+  const omittedTabCount = compactWindows.reduce(
+    (sum, window) => sum + (Number.isInteger(window?.omittedTabCount) ? window.omittedTabCount : 0),
+    0,
+  );
 
   return {
     callSucceeded: true,
@@ -139,8 +160,8 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     windowCount: Number.isInteger(payload?.windowCount) ? payload.windowCount : null,
     tabCount: Number.isInteger(payload?.tabCount) ? payload.tabCount : null,
     hasCompactSummary: Boolean(payload?.compactSummary),
-    compactTabLimit: compactWindow?.compactTabLimit ?? null,
-    omittedTabCount: compactWindow?.omittedTabCount ?? null,
+    compactTabLimit,
+    omittedTabCount,
     compactTabsShown: compactTabs.length,
     activeTabIncludedInCompactTabs:
       Number.isInteger(activeTabId) && compactTabs.length
@@ -175,11 +196,169 @@ function callCliJson(cliPath, args, timeoutMs) {
   return extractJsonObject(output);
 }
 
+function callMcpTool(cliPath, toolName, toolArgs, timeoutMs) {
+  const args = ['mcp', 'call', toolName];
+  if (toolArgs && Object.keys(toolArgs).length) {
+    args.push('--args', JSON.stringify(toolArgs));
+  }
+  return callCliJson(cliPath, args, timeoutMs);
+}
+
+function uniqueNumbers(values) {
+  return [...new Set(values.filter((value) => Number.isInteger(value)))];
+}
+
+function buildStepSummary(step, payload, targetTabId) {
+  const redacted = buildRedactedBrowserWorldSummary(payload, targetTabId);
+  return {
+    step,
+    windowCount: redacted.windowCount,
+    tabCount: redacted.tabCount,
+    compactTabLimit: redacted.compactTabLimit,
+    activeTabIncludedInCompactTabs: redacted.activeTabIncludedInCompactTabs,
+    targetTab: redacted.targetTab,
+    counts: redacted.counts,
+  };
+}
+
+function closeRunTabs(cliPath, tabIds, timeoutMs) {
+  const uniqueTabIds = uniqueNumbers(tabIds);
+  if (!uniqueTabIds.length) {
+    return { attempted: false, succeeded: null, requestedCount: 0, closedCount: 0 };
+  }
+  const closePayload = callMcpTool(
+    cliPath,
+    'chrome_close_tabs',
+    { tabIds: uniqueTabIds },
+    timeoutMs,
+  );
+  const closedCount = Number.isInteger(closePayload?.closedCount) ? closePayload.closedCount : 0;
+  return {
+    attempted: true,
+    succeeded: closePayload?.success === true || closedCount === uniqueTabIds.length,
+    requestedCount: uniqueTabIds.length,
+    closedCount,
+  };
+}
+
+function runSingleSmoke(cliPath, smokeUrl, args) {
+  let openedTabId = null;
+  if (!args.skipOpen) {
+    const navigatePayload = callMcpTool(
+      cliPath,
+      'chrome_navigate',
+      { url: smokeUrl },
+      args.timeoutMs,
+    );
+    openedTabId = extractNavigateTabId(navigatePayload);
+  }
+
+  const browserWorldPayload = callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs);
+  const redacted = buildRedactedBrowserWorldSummary(browserWorldPayload, openedTabId);
+  const closeResult =
+    Number.isInteger(openedTabId) && !args.keepOpen
+      ? closeRunTabs(cliPath, [openedTabId], args.timeoutMs)
+      : { attempted: false, succeeded: null, requestedCount: 0, closedCount: 0 };
+
+  return {
+    scenario: 'single',
+    openedPublicTestTab: Number.isInteger(openedTabId),
+    closeAttempted: closeResult.attempted,
+    closeSucceeded: closeResult.succeeded,
+    redacted,
+  };
+}
+
+function runLifecycleSmoke(cliPath, smokeUrl, args) {
+  if (args.skipOpen) {
+    throw new Error('--scenario lifecycle cannot be combined with --skip-open.');
+  }
+
+  const runId = String(Date.now());
+  const openedTabIds = [];
+  const lifecycleMatrix = [];
+
+  const foregroundPayload = callMcpTool(
+    cliPath,
+    'chrome_navigate',
+    { url: buildPublicSmokeUrl(smokeUrl, 'foreground', runId) },
+    args.timeoutMs,
+  );
+  const foregroundTabId = extractNavigateTabId(foregroundPayload);
+  openedTabIds.push(foregroundTabId);
+  lifecycleMatrix.push(
+    buildStepSummary(
+      'foreground_open',
+      callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs),
+      foregroundTabId,
+    ),
+  );
+
+  const backgroundPayload = callMcpTool(
+    cliPath,
+    'chrome_navigate',
+    { url: buildPublicSmokeUrl(smokeUrl, 'background', runId), background: true },
+    args.timeoutMs,
+  );
+  const backgroundTabId = extractNavigateTabId(backgroundPayload);
+  openedTabIds.push(backgroundTabId);
+  lifecycleMatrix.push(
+    buildStepSummary(
+      'background_open',
+      callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs),
+      backgroundTabId,
+    ),
+  );
+
+  if (Number.isInteger(backgroundTabId)) {
+    callMcpTool(cliPath, 'chrome_switch_tab', { tabId: backgroundTabId }, args.timeoutMs);
+  }
+  lifecycleMatrix.push(
+    buildStepSummary(
+      'switch_to_background_tab',
+      callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs),
+      backgroundTabId,
+    ),
+  );
+
+  const newWindowPayload = callMcpTool(
+    cliPath,
+    'chrome_navigate',
+    { url: buildPublicSmokeUrl(smokeUrl, 'new_window', runId), newWindow: true },
+    args.timeoutMs,
+  );
+  const newWindowTabId = extractNavigateTabId(newWindowPayload);
+  openedTabIds.push(newWindowTabId);
+  lifecycleMatrix.push(
+    buildStepSummary(
+      'new_window_open',
+      callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs),
+      newWindowTabId,
+    ),
+  );
+
+  const closeResult = args.keepOpen
+    ? { attempted: false, succeeded: null, requestedCount: 0, closedCount: 0 }
+    : closeRunTabs(cliPath, openedTabIds, args.timeoutMs);
+
+  return {
+    scenario: 'lifecycle',
+    openedPublicTestTabs: uniqueNumbers(openedTabIds).length,
+    closeAttempted: closeResult.attempted,
+    closeSucceeded: closeResult.succeeded,
+    cleanup: {
+      requestedCount: closeResult.requestedCount,
+      closedCount: closeResult.closedCount,
+    },
+    lifecycleMatrix,
+  };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(
-      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--skip-open] [--keep-open]\n`,
+      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--scenario single|lifecycle] [--skip-open] [--keep-open]\n`,
     );
     return;
   }
@@ -188,46 +367,18 @@ async function main() {
   const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const cliPath = path.join(rootDir, 'app', 'native-server', 'dist', 'cli.js');
 
-  let openedTabId = null;
-  let closeAttempted = false;
-  let closeSucceeded = null;
-
   try {
-    if (!args.skipOpen) {
-      const navigatePayload = callCliJson(
-        cliPath,
-        ['mcp', 'call', 'chrome_navigate', '--args', JSON.stringify({ url: smokeUrl })],
-        args.timeoutMs,
-      );
-      openedTabId = extractNavigateTabId(navigatePayload);
-    }
-
-    const browserWorldPayload = callCliJson(
-      cliPath,
-      ['mcp', 'call', 'get_windows_and_tabs'],
-      args.timeoutMs,
-    );
-    const redacted = buildRedactedBrowserWorldSummary(browserWorldPayload, openedTabId);
-
-    if (Number.isInteger(openedTabId) && !args.keepOpen) {
-      closeAttempted = true;
-      const closePayload = callCliJson(
-        cliPath,
-        ['mcp', 'call', 'chrome_close_tabs', '--args', JSON.stringify({ tabIds: [openedTabId] })],
-        args.timeoutMs,
-      );
-      closeSucceeded = closePayload?.success === true || closePayload?.closedCount === 1;
-    }
+    const smokeResult =
+      args.scenario === 'lifecycle'
+        ? runLifecycleSmoke(cliPath, smokeUrl, args)
+        : runSingleSmoke(cliPath, smokeUrl, args);
 
     process.stdout.write(
       `${JSON.stringify(
         {
           ok: true,
           smokeKind: 'redacted_browser_world_mcp_smoke',
-          openedPublicTestTab: Number.isInteger(openedTabId),
-          closeAttempted,
-          closeSucceeded,
-          redacted,
+          ...smokeResult,
           privacyBoundary:
             'No tab URLs, titles, account state, screenshots, cookies, network bodies, or page text are printed by this script.',
         },
