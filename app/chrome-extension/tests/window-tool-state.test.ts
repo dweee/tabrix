@@ -169,6 +169,24 @@ describe('get_windows_and_tabs state inventory', () => {
         },
         tabStateConclusion:
           'Tab page object matrix: 2 tab(s), active=1, background=1, loading=1, complete=1, aiOpened=0, userOrPageOpened=2, operable=2, activeTab=102, latestAiOperatedTab=none.',
+        tabLifecycleState: {
+          latestEventKind: null,
+          latestEventTabId: null,
+          latestEventWindowId: null,
+          latestEventStatus: null,
+          latestReplacedTabId: null,
+          recentCreatedCount: 0,
+          recentUpdatedCount: 0,
+          recentActivatedCount: 0,
+          recentReplacedCount: 0,
+          recentRemovedCount: 0,
+          retainedTabCount: 2,
+          activeTabId: 102,
+          aiOpenedRetainedCount: 0,
+          userOrPageOpenedRetainedCount: 2,
+        },
+        tabLifecycleConclusion:
+          'Tab page object lifecycle: no tab lifecycle event observed; retainedTabs=2, activeTab=102.',
         aiOperationState: {
           browserActiveTabId: 102,
           latestAiOperatedTabId: null,

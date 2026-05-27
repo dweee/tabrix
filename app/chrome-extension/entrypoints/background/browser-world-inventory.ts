@@ -113,6 +113,8 @@ export interface BrowserWorldSummary {
   currentWindowConclusion: string;
   tabStateMatrix: BrowserWorldTabStateMatrix;
   tabStateConclusion: string;
+  tabLifecycleState: BrowserWorldTabLifecycleState;
+  tabLifecycleConclusion: string;
   aiOperationState: BrowserWorldAiOperationState;
   currentOperationConclusion: string;
   recentChangeSummary: string;
@@ -181,6 +183,30 @@ export interface BrowserWorldTabStateMatrix {
   operabilityUnknown: number;
   statusCounts: Record<string, number>;
   ownerCounts: Record<BrowserWorldTabOpenedBy, number>;
+}
+
+export type BrowserWorldTabLifecycleEventKind =
+  | 'tab_created'
+  | 'tab_updated'
+  | 'tab_removed'
+  | 'tab_activated'
+  | 'tab_replaced';
+
+export interface BrowserWorldTabLifecycleState {
+  latestEventKind: BrowserWorldTabLifecycleEventKind | null;
+  latestEventTabId: number | null;
+  latestEventWindowId: number | null;
+  latestEventStatus: string | null;
+  latestReplacedTabId: number | null;
+  recentCreatedCount: number;
+  recentUpdatedCount: number;
+  recentActivatedCount: number;
+  recentReplacedCount: number;
+  recentRemovedCount: number;
+  retainedTabCount: number;
+  activeTabId: number | null;
+  aiOpenedRetainedCount: number;
+  userOrPageOpenedRetainedCount: number;
 }
 
 export type BrowserWorldAiOperationRelation =
@@ -715,6 +741,7 @@ function buildSnapshot(): BrowserWorldSnapshot {
   const windowStateMatrix = buildWindowStateMatrix(windows);
   const windowOperationState = buildWindowOperationState(windowStateMatrix, focusedWindow ?? null);
   const tabStateMatrix = buildTabStateMatrix(tabs);
+  const tabLifecycleState = buildTabLifecycleState(recentEvents, tabs, activeTab);
   const lastAiOperatedTab =
     tabs
       .filter((tab) => tab.lastAiOperationAtMs !== null)
@@ -770,6 +797,8 @@ function buildSnapshot(): BrowserWorldSnapshot {
       currentWindowConclusion: summarizeCurrentWindow(windowOperationState),
       tabStateMatrix,
       tabStateConclusion: summarizeTabStateMatrix(tabStateMatrix, activeTab, lastAiOperatedTab),
+      tabLifecycleState,
+      tabLifecycleConclusion: summarizeTabLifecycle(tabLifecycleState),
       aiOperationState,
       currentOperationConclusion: summarizeCurrentOperation(aiOperationState),
       recentChangeSummary,
@@ -845,6 +874,53 @@ function summarizeTabStateMatrix(
     return 'Tab page object matrix: no tab page object is currently retained.';
   }
   return `Tab page object matrix: ${matrix.total} tab(s), active=${matrix.active}, background=${matrix.background}, loading=${matrix.loading}, complete=${matrix.complete}, aiOpened=${matrix.aiOpened}, userOrPageOpened=${matrix.userOrPageOpened}, operable=${matrix.operable}, activeTab=${activeTab?.tabId ?? 'unknown'}, latestAiOperatedTab=${lastAiOperatedTab?.tabId ?? 'none'}.`;
+}
+
+function isTabLifecycleEvent(event: BrowserWorldEvent): event is BrowserWorldEvent & {
+  eventKind: BrowserWorldTabLifecycleEventKind;
+} {
+  return (
+    event.eventKind === 'tab_created' ||
+    event.eventKind === 'tab_updated' ||
+    event.eventKind === 'tab_removed' ||
+    event.eventKind === 'tab_activated' ||
+    event.eventKind === 'tab_replaced'
+  );
+}
+
+function buildTabLifecycleState(
+  events: readonly BrowserWorldEvent[],
+  tabs: readonly BrowserWorldTabObject[],
+  activeTab: BrowserWorldTabObject | null,
+): BrowserWorldTabLifecycleState {
+  const tabEvents = events.filter(isTabLifecycleEvent);
+  const latest = tabEvents.at(-1) ?? null;
+  return {
+    latestEventKind: latest?.eventKind ?? null,
+    latestEventTabId: latest?.tabId ?? null,
+    latestEventWindowId: latest?.windowId ?? null,
+    latestEventStatus: latest?.status ?? null,
+    latestReplacedTabId: latest?.replacedTabId ?? null,
+    recentCreatedCount: tabEvents.filter((event) => event.eventKind === 'tab_created').length,
+    recentUpdatedCount: tabEvents.filter((event) => event.eventKind === 'tab_updated').length,
+    recentActivatedCount: tabEvents.filter((event) => event.eventKind === 'tab_activated').length,
+    recentReplacedCount: tabEvents.filter((event) => event.eventKind === 'tab_replaced').length,
+    recentRemovedCount: tabEvents.filter((event) => event.eventKind === 'tab_removed').length,
+    retainedTabCount: tabs.length,
+    activeTabId: activeTab?.tabId ?? null,
+    aiOpenedRetainedCount: tabs.filter((tab) => tab.openedBy === 'ai').length,
+    userOrPageOpenedRetainedCount: tabs.filter((tab) => tab.openedBy === 'user_or_page').length,
+  };
+}
+
+function summarizeTabLifecycle(state: BrowserWorldTabLifecycleState): string {
+  if (!state.latestEventKind) {
+    return `Tab page object lifecycle: no tab lifecycle event observed; retainedTabs=${state.retainedTabCount}, activeTab=${state.activeTabId ?? 'unknown'}.`;
+  }
+  if (state.latestEventKind === 'tab_replaced') {
+    return `Tab page object lifecycle: latest=${state.latestEventKind}, tab=${state.latestEventTabId ?? 'unknown'}, replacedTab=${state.latestReplacedTabId ?? 'unknown'}, retainedTabs=${state.retainedTabCount}, activeTab=${state.activeTabId ?? 'unknown'}, created=${state.recentCreatedCount}, updated=${state.recentUpdatedCount}, activated=${state.recentActivatedCount}, replaced=${state.recentReplacedCount}, removed=${state.recentRemovedCount}.`;
+  }
+  return `Tab page object lifecycle: latest=${state.latestEventKind}, tab=${state.latestEventTabId ?? 'unknown'}, status=${state.latestEventStatus ?? 'unknown'}, retainedTabs=${state.retainedTabCount}, activeTab=${state.activeTabId ?? 'unknown'}, created=${state.recentCreatedCount}, updated=${state.recentUpdatedCount}, activated=${state.recentActivatedCount}, replaced=${state.recentReplacedCount}, removed=${state.recentRemovedCount}.`;
 }
 
 function buildAiOperationState(

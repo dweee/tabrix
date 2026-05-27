@@ -180,6 +180,23 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.tabStateConclusion).toContain(
       'Tab page object matrix: 2 tab(s), active=1, background=1',
     );
+    expect(snapshot.summary.tabLifecycleState).toMatchObject({
+      latestEventKind: null,
+      latestEventTabId: null,
+      latestEventWindowId: null,
+      latestEventStatus: null,
+      latestReplacedTabId: null,
+      recentCreatedCount: 0,
+      recentUpdatedCount: 0,
+      recentActivatedCount: 0,
+      recentReplacedCount: 0,
+      recentRemovedCount: 0,
+      retainedTabCount: 2,
+      activeTabId: 10,
+      aiOpenedRetainedCount: 0,
+      userOrPageOpenedRetainedCount: 2,
+    });
+    expect(snapshot.summary.tabLifecycleConclusion).toContain('no tab lifecycle event observed');
     expect(snapshot.summary.aiOperationState).toMatchObject({
       browserActiveTabId: 10,
       latestAiOperatedTabId: null,
@@ -298,6 +315,22 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.recentChangeSummary).toContain(
       'tab 20 was updated; openedBy=ai, status=complete',
     );
+    expect(snapshot.summary.tabLifecycleState).toMatchObject({
+      latestEventKind: 'tab_updated',
+      latestEventTabId: 20,
+      latestEventWindowId: 1,
+      latestEventStatus: 'complete',
+      recentCreatedCount: 1,
+      recentUpdatedCount: 1,
+      recentActivatedCount: 0,
+      recentReplacedCount: 0,
+      recentRemovedCount: 0,
+      retainedTabCount: 3,
+      activeTabId: 10,
+      aiOpenedRetainedCount: 1,
+      userOrPageOpenedRetainedCount: 2,
+    });
+    expect(snapshot.summary.tabLifecycleConclusion).toContain('latest=tab_updated, tab=20');
     expect(snapshot.summary.objectChangeConclusion).toContain(
       'Page object tab 20 was updated; owner=ai, status=complete',
     );
@@ -322,6 +355,15 @@ describe('browser world inventory', () => {
     snapshot = await getBrowserWorldSnapshot();
     expect(snapshot.aiOpenedTabIds).toEqual([20]);
     expect(snapshot.browserActiveTabId).toBe(20);
+    expect(snapshot.summary.tabLifecycleState).toMatchObject({
+      latestEventKind: 'tab_activated',
+      latestEventTabId: 20,
+      latestEventWindowId: 1,
+      recentCreatedCount: 1,
+      recentUpdatedCount: 1,
+      recentActivatedCount: 1,
+      activeTabId: 20,
+    });
     expect(snapshot.summary.objectChangeConclusion).toContain('Current page object is tab 20');
     expect(snapshot.summary.objectChangeConclusion).toContain('runtime=status complete');
     expect(snapshot.summary.objectChangeConclusion).toContain('ownership=ai');
@@ -409,6 +451,15 @@ describe('browser world inventory', () => {
     listeners.tabRemoved[0]?.(20, { windowId: 1, isWindowClosing: false });
     snapshot = await getBrowserWorldSnapshot();
     expect(snapshot.tabs.some((tab) => tab.tabId === 20)).toBe(false);
+    expect(snapshot.summary.tabLifecycleState).toMatchObject({
+      latestEventKind: 'tab_removed',
+      latestEventTabId: 20,
+      latestEventWindowId: 1,
+      latestEventStatus: null,
+      recentRemovedCount: 1,
+      retainedTabCount: 2,
+    });
+    expect(snapshot.summary.tabLifecycleConclusion).toContain('latest=tab_removed, tab=20');
     expect(snapshot.summary.objectChangeConclusion).toContain('Page object tab 20 was removed');
     expect(snapshot.recentEvents.at(-1)).toMatchObject({
       eventKind: 'tab_removed',
@@ -449,6 +500,17 @@ describe('browser world inventory', () => {
       recentlyOperatedByAi: 1,
       statusCounts: { complete: 2, loading: 1 },
     });
+    expect(snapshot.summary.tabLifecycleState).toMatchObject({
+      latestEventKind: 'tab_replaced',
+      latestEventTabId: 31,
+      latestReplacedTabId: 30,
+      recentCreatedCount: 1,
+      recentReplacedCount: 1,
+      retainedTabCount: 3,
+    });
+    expect(snapshot.summary.tabLifecycleConclusion).toContain(
+      'latest=tab_replaced, tab=31, replacedTab=30',
+    );
     expect(snapshot.summary.recentChangeSummary).toContain('tab 30 was replaced by tab 31');
     expect(snapshot.summary.objectChangeConclusion).toContain(
       'Page object tab 30 was replaced by tab 31; owner=ai',

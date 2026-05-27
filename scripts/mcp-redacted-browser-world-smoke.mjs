@@ -180,6 +180,8 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     payload?.compactSummary?.windowOperationState ?? payload?.summary?.windowOperationState ?? null;
   const tabStateMatrix =
     payload?.compactSummary?.tabStateMatrix ?? payload?.summary?.tabStateMatrix ?? null;
+  const tabLifecycleState =
+    payload?.compactSummary?.tabLifecycleState ?? payload?.summary?.tabLifecycleState ?? null;
   const aiOperationState =
     payload?.compactSummary?.aiOperationState ?? payload?.summary?.aiOperationState ?? null;
 
@@ -323,6 +325,51 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     tabStateConclusionPresent:
       typeof payload?.compactSummary?.tabStateConclusion === 'string' ||
       typeof payload?.summary?.tabStateConclusion === 'string',
+    tabLifecycleState: tabLifecycleState
+      ? {
+          latestEventKind:
+            typeof tabLifecycleState.latestEventKind === 'string'
+              ? tabLifecycleState.latestEventKind
+              : null,
+          latestEventTabIdPresent: Number.isInteger(tabLifecycleState.latestEventTabId),
+          latestEventWindowIdPresent: Number.isInteger(tabLifecycleState.latestEventWindowId),
+          latestEventStatus:
+            typeof tabLifecycleState.latestEventStatus === 'string'
+              ? tabLifecycleState.latestEventStatus
+              : null,
+          latestReplacedTabIdPresent: Number.isInteger(tabLifecycleState.latestReplacedTabId),
+          recentCreatedCount: Number.isInteger(tabLifecycleState.recentCreatedCount)
+            ? tabLifecycleState.recentCreatedCount
+            : null,
+          recentUpdatedCount: Number.isInteger(tabLifecycleState.recentUpdatedCount)
+            ? tabLifecycleState.recentUpdatedCount
+            : null,
+          recentActivatedCount: Number.isInteger(tabLifecycleState.recentActivatedCount)
+            ? tabLifecycleState.recentActivatedCount
+            : null,
+          recentReplacedCount: Number.isInteger(tabLifecycleState.recentReplacedCount)
+            ? tabLifecycleState.recentReplacedCount
+            : null,
+          recentRemovedCount: Number.isInteger(tabLifecycleState.recentRemovedCount)
+            ? tabLifecycleState.recentRemovedCount
+            : null,
+          retainedTabCount: Number.isInteger(tabLifecycleState.retainedTabCount)
+            ? tabLifecycleState.retainedTabCount
+            : null,
+          activeTabIdPresent: Number.isInteger(tabLifecycleState.activeTabId),
+          aiOpenedRetainedCount: Number.isInteger(tabLifecycleState.aiOpenedRetainedCount)
+            ? tabLifecycleState.aiOpenedRetainedCount
+            : null,
+          userOrPageOpenedRetainedCount: Number.isInteger(
+            tabLifecycleState.userOrPageOpenedRetainedCount,
+          )
+            ? tabLifecycleState.userOrPageOpenedRetainedCount
+            : null,
+        }
+      : null,
+    tabLifecycleConclusionPresent:
+      typeof payload?.compactSummary?.tabLifecycleConclusion === 'string' ||
+      typeof payload?.summary?.tabLifecycleConclusion === 'string',
     aiOperationState: aiOperationState
       ? {
           browserActiveTabIdPresent: Number.isInteger(aiOperationState.browserActiveTabId),
@@ -520,6 +567,8 @@ function buildStepSummary(step, payload, targetTabId) {
     activeTabIncludedInCompactTabs: redacted.activeTabIncludedInCompactTabs,
     targetTab: redacted.targetTab,
     counts: redacted.counts,
+    tabLifecycleState: redacted.tabLifecycleState,
+    tabLifecycleConclusionPresent: redacted.tabLifecycleConclusionPresent,
   };
 }
 
@@ -642,6 +691,14 @@ function runLifecycleSmoke(cliPath, smokeUrl, args) {
   const closeResult = args.keepOpen
     ? { attempted: false, succeeded: null, requestedCount: 0, closedCount: 0 }
     : closeRunTabs(cliPath, openedTabIds, args.timeoutMs);
+  const postCleanup =
+    closeResult.attempted === true
+      ? buildStepSummary(
+          'post_cleanup',
+          callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs),
+          null,
+        )
+      : null;
 
   return {
     scenario: 'lifecycle',
@@ -652,6 +709,7 @@ function runLifecycleSmoke(cliPath, smokeUrl, args) {
       requestedCount: closeResult.requestedCount,
       closedCount: closeResult.closedCount,
     },
+    postCleanup,
     lifecycleMatrix,
   };
 }
@@ -667,10 +725,12 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
       openedPublicTestTabs: result.openedPublicTestTabs,
       closeSucceeded: result.closeSucceeded,
       cleanup: result.cleanup,
+      postCleanup: result.postCleanup,
       lifecycleMatrix: result.lifecycleMatrix,
       passed:
         result.openedPublicTestTabs === 3 &&
         result.closeSucceeded === true &&
+        (result.postCleanup?.tabLifecycleState?.recentRemovedCount ?? 0) >= 3 &&
         result.lifecycleMatrix.every(
           (step) =>
             step.targetTab?.wasFound === true &&

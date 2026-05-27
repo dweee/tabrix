@@ -109,6 +109,24 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
           ownerCounts: { ai: 1, user_or_page: 19, unknown: 0 },
         },
         tabStateConclusion: 'Tab page object matrix includes Private Dashboard title.',
+        tabLifecycleState: {
+          latestEventKind: 'tab_updated',
+          latestEventTabId: 20,
+          latestEventWindowId: 1,
+          latestEventStatus: 'complete',
+          latestReplacedTabId: null,
+          recentCreatedCount: 1,
+          recentUpdatedCount: 2,
+          recentActivatedCount: 1,
+          recentReplacedCount: 0,
+          recentRemovedCount: 0,
+          retainedTabCount: 20,
+          activeTabId: 20,
+          aiOpenedRetainedCount: 1,
+          userOrPageOpenedRetainedCount: 19,
+        },
+        tabLifecycleConclusion:
+          'Tab lifecycle includes https://private.example.test/dashboard and Private Dashboard.',
         aiOperationState: {
           browserActiveTabId: 20,
           latestAiOperatedTabId: 20,
@@ -224,6 +242,23 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
     operabilityUnknown: 0,
   });
   assert.equal(summary.tabStateConclusionPresent, true);
+  assert.deepEqual(summary.tabLifecycleState, {
+    latestEventKind: 'tab_updated',
+    latestEventTabIdPresent: true,
+    latestEventWindowIdPresent: true,
+    latestEventStatus: 'complete',
+    latestReplacedTabIdPresent: false,
+    recentCreatedCount: 1,
+    recentUpdatedCount: 2,
+    recentActivatedCount: 1,
+    recentReplacedCount: 0,
+    recentRemovedCount: 0,
+    retainedTabCount: 20,
+    activeTabIdPresent: true,
+    aiOpenedRetainedCount: 1,
+    userOrPageOpenedRetainedCount: 19,
+  });
+  assert.equal(summary.tabLifecycleConclusionPresent, true);
   assert.deepEqual(summary.aiOperationState, {
     browserActiveTabIdPresent: true,
     latestAiOperatedTabIdPresent: true,
