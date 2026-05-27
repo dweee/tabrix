@@ -300,6 +300,23 @@ describe('browser world inventory', () => {
       pinned: true,
       openerTabId: 10,
     });
+
+    let snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.windows[0]).toMatchObject({
+      windowId: 1,
+      activeTabId: 10,
+      activeTabCanOperate: true,
+      tabCount: 3,
+      canTabrixOperate: true,
+      operabilityReason: 'active_tab_operable_in_visible_window',
+    });
+    expect(snapshot.summary.tabLifecycleState).toMatchObject({
+      latestEventKind: 'tab_created',
+      latestEventTabId: 20,
+      retainedTabCount: 3,
+      activeTabId: 10,
+    });
+
     listeners.tabUpdated[0]?.(
       20,
       { status: 'complete' },
@@ -318,7 +335,7 @@ describe('browser world inventory', () => {
       },
     );
 
-    let snapshot = await getBrowserWorldSnapshot();
+    snapshot = await getBrowserWorldSnapshot();
     expect(snapshot.summary.recentChangeSummary).toContain(
       'tab 20 was updated; openedBy=ai, status=complete',
     );
@@ -507,6 +524,48 @@ describe('browser world inventory', () => {
       openedBy: 'ai',
     });
     expect(snapshot.recentEvents.some((event) => 'url' in event)).toBe(false);
+  });
+
+  it('resyncs the window active tab immediately when a new active tab is created', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    listeners.tabCreated[0]?.({
+      id: 21,
+      windowId: 1,
+      url: 'https://active-new.test/',
+      title: 'Active new',
+      active: true,
+      status: 'complete',
+      discarded: false,
+      audible: false,
+      mutedInfo: { muted: false },
+      pinned: false,
+      openerTabId: 10,
+    });
+
+    const snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.browserActiveTabId).toBe(21);
+    expect(snapshot.windows[0]).toMatchObject({
+      windowId: 1,
+      activeTabId: 21,
+      activeTabCanOperate: true,
+      tabCount: 3,
+      canTabrixOperate: true,
+      operabilityReason: 'active_tab_operable_in_visible_window',
+    });
+    expect(snapshot.tabs.find((tab) => tab.tabId === 10)).toMatchObject({ active: false });
+    expect(snapshot.tabs.find((tab) => tab.tabId === 21)).toMatchObject({
+      active: true,
+      openedBy: 'user_or_page',
+      canTabrixOperate: true,
+    });
+    expect(snapshot.summary.tabLifecycleState).toMatchObject({
+      latestEventKind: 'tab_created',
+      latestEventTabId: 21,
+      retainedTabCount: 3,
+      activeTabId: 21,
+    });
   });
 
   it('summarizes tab replacement as an object lifecycle transition', async () => {

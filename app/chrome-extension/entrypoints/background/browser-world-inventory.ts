@@ -547,6 +547,13 @@ function refreshWindowActiveTabState(windowId: number, activeTabId: number | nul
   });
 }
 
+function markActiveTabWithinWindow(windowId: number, activeTabId: number): void {
+  for (const [id, tab] of tabsById) {
+    if (tab.windowId === windowId)
+      tabsById.set(id, { ...tab, active: id === activeTabId, updatedAtMs: nowMs() });
+  }
+}
+
 function refreshWindowDerivedTabState(windowId: number): void {
   const window = windowsById.get(windowId);
   if (!window) return;
@@ -620,7 +627,14 @@ export function initBrowserWorldInventory(): void {
 
   bind(chrome.tabs?.onCreated, (tab: chrome.tabs.Tab) => {
     const normalized = normalizeTab(tab, undefined);
-    if (normalized) tabsById.set(normalized.tabId, normalized);
+    if (normalized) {
+      tabsById.set(normalized.tabId, normalized);
+      if (typeof normalized.windowId === 'number') {
+        if (normalized.active === true)
+          markActiveTabWithinWindow(normalized.windowId, normalized.tabId);
+        refreshWindowDerivedTabState(normalized.windowId);
+      }
+    }
     pushEvent({
       eventKind: 'tab_created',
       tabId: normalized?.tabId ?? null,
@@ -638,8 +652,9 @@ export function initBrowserWorldInventory(): void {
         previous,
       );
       if (normalized) tabsById.set(tabId, normalized);
-      if (typeof normalized?.windowId === 'number' && normalized.active === true) {
-        refreshWindowActiveTabState(normalized.windowId, tabId);
+      if (typeof normalized?.windowId === 'number') {
+        if (normalized.active === true) markActiveTabWithinWindow(normalized.windowId, tabId);
+        refreshWindowDerivedTabState(normalized.windowId);
       }
       pushEvent({
         eventKind: 'tab_updated',
@@ -679,10 +694,7 @@ export function initBrowserWorldInventory(): void {
   bind((chrome.tabs as any)?.onActivated, (activeInfo: chrome.tabs.TabActiveInfo) => {
     const tabId = activeInfo.tabId;
     const windowId = activeInfo.windowId;
-    for (const [id, tab] of tabsById) {
-      if (tab.windowId === windowId)
-        tabsById.set(id, { ...tab, active: id === tabId, updatedAtMs: nowMs() });
-    }
+    markActiveTabWithinWindow(windowId, tabId);
     const window = windowsById.get(windowId);
     if (window) refreshWindowActiveTabState(windowId, tabId);
     pushEvent({ eventKind: 'tab_activated', tabId, windowId });
@@ -696,6 +708,7 @@ export function initBrowserWorldInventory(): void {
         tabId: addedTabId,
         updatedAtMs: nowMs(),
       });
+      if (previous.windowId !== null) refreshWindowDerivedTabState(previous.windowId);
     }
     pushEvent({
       eventKind: 'tab_replaced',
