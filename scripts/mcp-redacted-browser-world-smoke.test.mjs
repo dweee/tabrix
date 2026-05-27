@@ -1396,6 +1396,21 @@ test('buildReadPageMatrixTargetResult accepts background read targets when objec
       alignmentPassed: false,
       matrixAlignmentPassed: true,
       redactedReadPage: {
+        alignment: {
+          operationTargetBriefPresent: true,
+        },
+        compact: {
+          safeTabFacts: {
+            operationTargetRole: 'read_target_background_tab',
+            operationTargetBasis: 'read_target_differs_from_browser_active_tab',
+            operationTargetCanTabrixOperate: true,
+            operationTargetOperabilityReason: 'regular_web_page',
+            shouldReselectBeforeAction: true,
+            nextRequiredCheck: 'reselect_or_reread_read_target_before_action',
+            operationTargetSummaryPresent: true,
+            operationTargetClaimBoundaryPresent: true,
+          },
+        },
         pageRegionRuntime: {
           pageRegionsPresent: true,
           pageOperationMapPresent: true,
@@ -1434,7 +1449,136 @@ test('buildReadPageMatrixTargetResult accepts background read targets when objec
     target.browserWorldAfterRead.relationToBrowserActiveTab,
     'latest_ai_operated_background_tab',
   );
+  assert.deepEqual(target.readPageOperationTarget, {
+    role: 'read_target_background_tab',
+    basis: 'read_target_differs_from_browser_active_tab',
+    canTabrixOperate: true,
+    operabilityReason: 'regular_web_page',
+    shouldReselectBeforeAction: true,
+    nextRequiredCheck: 'reselect_or_reread_read_target_before_action',
+    summaryPresent: true,
+    claimBoundaryPresent: true,
+    relationConsistentWithBrowserWorld: true,
+  });
   assert.equal(target.passed, true);
+});
+
+test('buildReadPageMatrixTargetResult fails when read_page operation target evidence is incomplete', () => {
+  const target = buildReadPageMatrixTargetResult(
+    {
+      openedPublicTestTab: true,
+      closeSucceeded: true,
+      cleanupPassed: true,
+      alignmentPassed: false,
+      matrixAlignmentPassed: true,
+      redactedReadPage: {
+        alignment: {
+          operationTargetBriefPresent: true,
+        },
+        compact: {
+          safeTabFacts: {
+            operationTargetRole: 'read_target_background_tab',
+            operationTargetBasis: 'read_target_differs_from_browser_active_tab',
+            operationTargetCanTabrixOperate: true,
+            operationTargetOperabilityReason: 'regular_web_page',
+            nextRequiredCheck: 'reselect_or_reread_read_target_before_action',
+            operationTargetSummaryPresent: true,
+            operationTargetClaimBoundaryPresent: true,
+          },
+        },
+        pageRegionRuntime: {
+          pageRegionsPresent: true,
+          pageOperationMapPresent: true,
+        },
+        runtime: {
+          currentTabIdPresent: true,
+          currentTabIdMatchesTarget: true,
+          isCurrentTabActive: false,
+          isReadTargetBrowserActiveTab: false,
+          currentTabCanTabrixOperate: true,
+          currentTabLastAiOperation: 'read_page',
+        },
+      },
+      redactedBrowserWorldAfterRead: {
+        targetTab: { wasFound: true },
+        compactSummaryBounded: true,
+        retentionWithinLimit: true,
+        aiOperationState: {
+          latestAiOperation: 'read_page',
+          relationToBrowserActiveTab: 'latest_ai_operated_background_tab',
+        },
+      },
+      redactedBrowserWorldAfterClose: {
+        targetTab: { wasFound: false },
+        compactSummaryBounded: true,
+        retentionWithinLimit: true,
+      },
+    },
+    1,
+  );
+
+  assert.equal(target.readPageOperationTarget.shouldReselectBeforeAction, null);
+  assert.equal(target.readPageOperationTarget.relationConsistentWithBrowserWorld, true);
+  assert.equal(target.passed, false);
+});
+
+test('buildReadPageMatrixTargetResult fails when read_page and browserWorld disagree on target relation', () => {
+  const target = buildReadPageMatrixTargetResult(
+    {
+      openedPublicTestTab: true,
+      closeSucceeded: true,
+      cleanupPassed: true,
+      alignmentPassed: true,
+      matrixAlignmentPassed: true,
+      redactedReadPage: {
+        alignment: {
+          operationTargetBriefPresent: true,
+        },
+        compact: {
+          safeTabFacts: {
+            operationTargetRole: 'read_target_browser_active_tab',
+            operationTargetBasis: 'read_target_matches_browser_active_tab',
+            operationTargetCanTabrixOperate: true,
+            operationTargetOperabilityReason: 'regular_web_page',
+            shouldReselectBeforeAction: false,
+            nextRequiredCheck: 'page_level_content_or_postcondition_check',
+            operationTargetSummaryPresent: true,
+            operationTargetClaimBoundaryPresent: true,
+          },
+        },
+        pageRegionRuntime: {
+          pageRegionsPresent: true,
+          pageOperationMapPresent: true,
+        },
+        runtime: {
+          currentTabIdPresent: true,
+          currentTabIdMatchesTarget: true,
+          isCurrentTabActive: true,
+          isReadTargetBrowserActiveTab: true,
+          currentTabCanTabrixOperate: true,
+          currentTabLastAiOperation: 'read_page',
+        },
+      },
+      redactedBrowserWorldAfterRead: {
+        targetTab: { wasFound: true },
+        compactSummaryBounded: true,
+        retentionWithinLimit: true,
+        aiOperationState: {
+          latestAiOperation: 'read_page',
+          relationToBrowserActiveTab: 'latest_ai_operated_background_tab',
+        },
+      },
+      redactedBrowserWorldAfterClose: {
+        targetTab: { wasFound: false },
+        compactSummaryBounded: true,
+        retentionWithinLimit: true,
+      },
+    },
+    1,
+  );
+
+  assert.equal(target.readPageOperationTarget.relationConsistentWithBrowserWorld, false);
+  assert.equal(target.passed, false);
 });
 
 test('isSmokeResultPassing fails redacted matrix results that are not proven', () => {

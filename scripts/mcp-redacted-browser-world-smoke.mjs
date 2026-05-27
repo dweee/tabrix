@@ -1026,6 +1026,9 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       operationTargetBriefPresent:
         typeof compactTabFacts.operationTargetRole === 'string' &&
         typeof compactTabFacts.operationTargetBasis === 'string' &&
+        typeof compactTabFacts.operationTargetCanTabrixOperate === 'boolean' &&
+        typeof compactTabFacts.operationTargetOperabilityReason === 'string' &&
+        typeof compactTabFacts.shouldReselectBeforeAction === 'boolean' &&
         typeof compactTabFacts.nextRequiredCheck === 'string' &&
         typeof compactTabFacts.operationTargetSummary === 'string' &&
         typeof compactTabFacts.operationTargetClaimBoundary === 'string',
@@ -1619,6 +1622,25 @@ function runReadPageMatrixSmoke(cliPath, smokeUrls, args) {
 }
 
 export function buildReadPageMatrixTargetResult(result, targetIndex) {
+  const readPageOperationTarget = result.redactedReadPage?.compact?.safeTabFacts ?? {};
+  const browserWorldRelation =
+    result.redactedBrowserWorldAfterRead?.aiOperationState?.relationToBrowserActiveTab ?? null;
+  const readPageOperationTargetBriefPresent =
+    result.redactedReadPage?.alignment?.operationTargetBriefPresent === true &&
+    typeof readPageOperationTarget.operationTargetRole === 'string' &&
+    typeof readPageOperationTarget.operationTargetBasis === 'string' &&
+    typeof readPageOperationTarget.operationTargetCanTabrixOperate === 'boolean' &&
+    typeof readPageOperationTarget.operationTargetOperabilityReason === 'string' &&
+    typeof readPageOperationTarget.shouldReselectBeforeAction === 'boolean' &&
+    typeof readPageOperationTarget.nextRequiredCheck === 'string' &&
+    readPageOperationTarget.operationTargetSummaryPresent === true &&
+    readPageOperationTarget.operationTargetClaimBoundaryPresent === true;
+  const operationTargetRelationConsistent =
+    readPageOperationTarget.operationTargetRole === 'read_target_browser_active_tab'
+      ? browserWorldRelation === 'same_as_browser_active'
+      : readPageOperationTarget.operationTargetRole === 'read_target_background_tab'
+        ? browserWorldRelation === 'latest_ai_operated_background_tab'
+        : false;
   return {
     targetIndex,
     openedPublicTestTab: result.openedPublicTestTab,
@@ -1627,6 +1649,17 @@ export function buildReadPageMatrixTargetResult(result, targetIndex) {
     matrixAlignmentPassed: result.matrixAlignmentPassed,
     pageRegionRuntime: result.redactedReadPage.pageRegionRuntime,
     runtime: result.redactedReadPage.runtime,
+    readPageOperationTarget: {
+      role: readPageOperationTarget.operationTargetRole ?? null,
+      basis: readPageOperationTarget.operationTargetBasis ?? null,
+      canTabrixOperate: readPageOperationTarget.operationTargetCanTabrixOperate ?? null,
+      operabilityReason: readPageOperationTarget.operationTargetOperabilityReason ?? null,
+      shouldReselectBeforeAction: readPageOperationTarget.shouldReselectBeforeAction ?? null,
+      nextRequiredCheck: readPageOperationTarget.nextRequiredCheck ?? null,
+      summaryPresent: readPageOperationTarget.operationTargetSummaryPresent === true,
+      claimBoundaryPresent: readPageOperationTarget.operationTargetClaimBoundaryPresent === true,
+      relationConsistentWithBrowserWorld: operationTargetRelationConsistent,
+    },
     browserWorldAfterRead: {
       targetTabFound: result.redactedBrowserWorldAfterRead.targetTab?.wasFound ?? false,
       latestAiOperation:
@@ -1649,6 +1682,8 @@ export function buildReadPageMatrixTargetResult(result, targetIndex) {
       result.closeSucceeded === true &&
       result.cleanupPassed === true &&
       result.matrixAlignmentPassed === true &&
+      readPageOperationTargetBriefPresent === true &&
+      operationTargetRelationConsistent === true &&
       result.redactedBrowserWorldAfterRead.targetTab?.wasFound === true &&
       result.redactedBrowserWorldAfterRead.compactSummaryBounded === true &&
       result.redactedBrowserWorldAfterRead.retentionWithinLimit === true,
