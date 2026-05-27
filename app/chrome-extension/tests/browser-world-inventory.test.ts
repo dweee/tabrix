@@ -977,21 +977,14 @@ describe('browser world inventory', () => {
       focused: false,
       state: 'minimized',
       type: 'normal',
-      tabs: [
-        {
-          id: 10,
-          windowId: 1,
-          url: 'https://example.test/a',
-          title: 'A',
-          active: true,
-          status: 'complete',
-        },
-      ],
     } as chrome.windows.Window);
 
     let snapshot = await getBrowserWorldSnapshot();
     expect(snapshot.windows[0]).toMatchObject({
       windowId: 1,
+      activeTabId: 10,
+      activeTabCanOperate: true,
+      tabCount: 2,
       visibilityState: 'minimized',
       isMinimized: true,
       canTabrixOperate: false,
@@ -1029,21 +1022,14 @@ describe('browser world inventory', () => {
       height: 720,
       left: 0,
       top: 0,
-      tabs: [
-        {
-          id: 10,
-          windowId: 1,
-          url: 'https://example.test/a',
-          title: 'A',
-          active: true,
-          status: 'complete',
-        },
-      ],
     } as chrome.windows.Window);
 
     snapshot = await getBrowserWorldSnapshot();
     expect(snapshot.windows[0]).toMatchObject({
       windowId: 1,
+      activeTabId: 10,
+      activeTabCanOperate: true,
+      tabCount: 2,
       visibilityState: 'visible',
       isMinimized: false,
       isFocused: true,

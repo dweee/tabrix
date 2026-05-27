@@ -476,11 +476,27 @@ function normalizeTab(
   };
 }
 
-function normalizeWindow(window: chrome.windows.Window): BrowserWorldWindowObject | null {
+function normalizeWindow(
+  window: chrome.windows.Window,
+  previous?: BrowserWorldWindowObject,
+): BrowserWorldWindowObject | null {
   if (typeof window.id !== 'number') return null;
-  const tabs = Array.isArray(window.tabs) ? window.tabs : [];
-  const activeTab = tabs.find((tab) => tab.active === true);
-  const activeTabCanOperate = activeTab ? isOperableUrl(tabUrl(activeTab)).canOperate : null;
+  const hasTabPayload = Array.isArray(window.tabs);
+  const payloadTabs = hasTabPayload ? (window.tabs ?? []) : [];
+  const knownTabs = hasTabPayload
+    ? []
+    : Array.from(tabsById.values()).filter((tab) => tab.windowId === window.id);
+  const activePayloadTab = payloadTabs.find((tab) => tab.active === true);
+  const activeKnownTab =
+    knownTabs.find((tab) => tab.active === true) ??
+    (typeof previous?.activeTabId === 'number' ? tabsById.get(previous.activeTabId) : undefined);
+  const activeTabId =
+    typeof activePayloadTab?.id === 'number'
+      ? activePayloadTab.id
+      : (activeKnownTab?.tabId ?? previous?.activeTabId ?? null);
+  const activeTabCanOperate = activePayloadTab
+    ? isOperableUrl(tabUrl(activePayloadTab)).canOperate
+    : (activeKnownTab?.canTabrixOperate ?? previous?.activeTabCanOperate ?? null);
   const windowOperability = isOperableWindow(window, activeTabCanOperate);
   const state = String(window.state || 'unknown');
   return {
@@ -497,11 +513,11 @@ function normalizeWindow(window: chrome.windows.Window): BrowserWorldWindowObjec
     height: readInteger(window.height),
     left: readInteger(window.left),
     top: readInteger(window.top),
-    activeTabId: typeof activeTab?.id === 'number' ? activeTab.id : null,
+    activeTabId,
     activeTabCanOperate,
     canTabrixOperate: windowOperability.canOperate,
     operabilityReason: windowOperability.reason,
-    tabCount: tabs.length,
+    tabCount: hasTabPayload ? payloadTabs.length : knownTabs.length || previous?.tabCount || 0,
     updatedAtMs: nowMs(),
   };
 }
@@ -776,7 +792,8 @@ export function initBrowserWorldInventory(): void {
     });
   });
   bind((chrome.windows as any)?.onBoundsChanged, (window: chrome.windows.Window) => {
-    const normalized = normalizeWindow(window);
+    const previous = typeof window.id === 'number' ? windowsById.get(window.id) : undefined;
+    const normalized = normalizeWindow(window, previous);
     if (normalized) windowsById.set(normalized.windowId, normalized);
     upsertTabsFromWindow(window);
     pushEvent({
