@@ -18,6 +18,7 @@ export interface ReadPageVisualElementHint {
   role?: string;
   rect?: { x: number; y: number; width: number; height: number } | null;
   visualSignature?: string;
+  qrSignal?: boolean;
   reason: string;
   confidence: number;
 }
@@ -27,10 +28,7 @@ export function buildVisualElementRegionObjects(
 ): Array<{ regionType: ReadPageRegionType; object: ReadPageRegionObject }> {
   const items = Array.isArray(visualElements) ? visualElements : [];
   return items
-    .filter(
-      (item) =>
-        item.selector && /qr|qrcode|scan|二维码|扫码|扫一扫/i.test(`${item.label} ${item.reason}`),
-    )
+    .filter((item) => item.selector && item.qrSignal === true)
     .slice(0, 3)
     .map((item) => ({
       regionType: 'qr_code' as const,

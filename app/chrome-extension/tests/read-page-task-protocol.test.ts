@@ -4,6 +4,7 @@ import {
   redactSensitiveCandidateActionsForAi,
   redactSensitiveInteractiveElementsForAi,
 } from '@/entrypoints/background/tools/browser/read-page-task-protocol';
+import { buildVisualElementRegionObjects } from '@/entrypoints/background/tools/browser/read-page-region-signal-objects';
 import { buildPageOperationMap } from '@/entrypoints/background/tools/browser/read-page-operation-map';
 
 function createBaseParams(overrides: Record<string, unknown> = {}) {
@@ -43,6 +44,50 @@ function createBaseParams(overrides: Record<string, unknown> = {}) {
 }
 
 describe('read_page task protocol', () => {
+  it('does not promote generic visual elements to QR regions without explicit QR signal', () => {
+    expect(
+      buildVisualElementRegionObjects([
+        {
+          id: 'visual_generic_square',
+          label: 'QR visual element candidate',
+          selector: 'main img:nth-of-type(1)',
+          role: 'img',
+          rect: { x: 10, y: 10, width: 160, height: 160 },
+          visualSignature: 'visual_11111111',
+          reason: 'qr_visual_element_signal',
+          confidence: 0.82,
+        },
+      ]),
+    ).toEqual([]);
+  });
+
+  it('keeps explicitly signaled QR visual elements targetable for element capture', () => {
+    expect(
+      buildVisualElementRegionObjects([
+        {
+          id: 'visual_qr',
+          label: 'QR visual element candidate',
+          selector: '[data-testid="login-qr"] img',
+          role: 'img',
+          rect: { x: 10, y: 10, width: 160, height: 160 },
+          visualSignature: 'visual_22222222',
+          qrSignal: true,
+          reason: 'qr_visual_element_signal',
+          confidence: 0.82,
+        },
+      ]),
+    ).toEqual([
+      expect.objectContaining({
+        regionType: 'qr_code',
+        object: expect.objectContaining({
+          objectId: 'visual_qr',
+          objectType: 'qr_visual:visual_22222222',
+          targetability: 'locator_chain',
+        }),
+      }),
+    ]);
+  });
+
   it('keeps workflow_run_shell in monitor mode before detail diagnostics are visible', () => {
     const protocol = buildTaskProtocol({
       mode: 'compact',
@@ -1900,6 +1945,7 @@ describe('read_page task protocol', () => {
               selector: '[data-testid="qr-code"]',
               role: 'img',
               rect: { x: 200, y: 160, width: 180, height: 180 },
+              qrSignal: true,
               reason: 'qr_visual_element_signal',
               confidence: 0.88,
             },

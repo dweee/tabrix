@@ -442,25 +442,28 @@ function scoreQrVisualElementHint(
   if (aspectRatio < 0.65 || aspectRatio > 1.55) return null;
 
   const role = String(element?.tagName || element?.type || element?.role || 'img').toLowerCase();
-  const signal = [
+  const attributeSignal = [
     element?.text,
     element?.alt,
     element?.title,
     element?.className,
     element?.role,
     role,
-    selector,
   ]
     .filter(Boolean)
     .join(' ');
+  const scoringSignal = [attributeSignal, selector].filter(Boolean).join(' ');
+
+  const hasExplicitQrSignal = /\b(qr|qrcode|scan code)\b|二维码|扫码|扫一扫/i.test(attributeSignal);
+  if (!hasExplicitQrSignal) return null;
 
   let score = 0;
-  if (/\b(qr|qrcode|scan code)\b|二维码|扫码|扫一扫/i.test(signal)) score += 120;
+  score += 120;
   if (/\b(canvas|img|svg|selected)\b/i.test(role)) score += 24;
   if (rect.width >= 100 && rect.width <= 360 && rect.height >= 100 && rect.height <= 360)
     score += 36;
   if (String(element?.text || '').trim().length === 0) score += 18;
-  if (/\b(logo|brand|avatar|icon)\b|小红书|微信|apple|google/i.test(signal)) score -= 80;
+  if (/\b(logo|brand|avatar|icon)\b|小红书|微信|apple|google/i.test(scoringSignal)) score -= 80;
   score -= Math.min(20, index * 2);
 
   if (score < 40) return null;
@@ -475,6 +478,7 @@ function scoreQrVisualElementHint(
       /^visual_[a-f0-9]{8}$/i.test(element.visualSignature)
         ? element.visualSignature.toLowerCase()
         : undefined,
+    qrSignal: true,
     reason: 'qr_visual_element_signal',
     confidence: Math.min(0.92, Math.max(0.54, score / 180)),
     score,
