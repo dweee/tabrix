@@ -102,6 +102,9 @@ export interface BrowserWorldTabStateSummary {
   objectKind: 'BrowserTabObject';
   tabId: number;
   windowId: number | null;
+  url: string;
+  pendingUrl: string;
+  title: string;
   active: boolean | null;
   status: string | null;
   openedBy: BrowserWorldTabOpenedBy;
@@ -583,6 +586,9 @@ function summarizeTabState(tab: BrowserWorldTabObject): BrowserWorldTabStateSumm
     objectKind: 'BrowserTabObject',
     tabId: tab.tabId,
     windowId: tab.windowId,
+    url: tab.url,
+    pendingUrl: tab.pendingUrl,
+    title: tab.title,
     active: tab.active,
     status: tab.status,
     openedBy: tab.openedBy,
