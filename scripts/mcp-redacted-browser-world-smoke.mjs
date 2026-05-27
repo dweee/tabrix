@@ -698,6 +698,18 @@ function buildStepSummary(step, payload, targetTabId) {
   };
 }
 
+export function buildPostCloseTargetCleanupSummary(payload, targetTabIds) {
+  return uniqueNumbers(targetTabIds).map((tabId, index) => {
+    const redacted = buildRedactedBrowserWorldSummary(payload, tabId);
+    return {
+      targetIndex: index + 1,
+      targetTabFound: redacted.targetTab?.wasFound ?? false,
+      compactSummaryBounded: redacted.compactSummaryBounded,
+      retentionWithinLimit: redacted.retentionWithinLimit,
+    };
+  });
+}
+
 function expectedTargetActiveForLifecycleStep(step) {
   if (step === 'background_open') return false;
   if (
@@ -829,12 +841,24 @@ function runLifecycleSmoke(cliPath, smokeUrl, args) {
   const closeResult = args.keepOpen
     ? { attempted: false, succeeded: null, requestedCount: 0, closedCount: 0 }
     : closeRunTabs(cliPath, openedTabIds, args.timeoutMs);
-  const postCleanup =
+  const postCleanupPayload =
     closeResult.attempted === true
-      ? buildStepSummary(
-          'post_cleanup',
-          callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs),
-          null,
+      ? callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs)
+      : null;
+  const postCleanup =
+    postCleanupPayload !== null ? buildStepSummary('post_cleanup', postCleanupPayload, null) : null;
+  const postCloseTargets =
+    postCleanupPayload !== null
+      ? buildPostCloseTargetCleanupSummary(postCleanupPayload, openedTabIds)
+      : [];
+  const cleanupTargetsPassed =
+    closeResult.attempted === true
+      ? postCloseTargets.length === uniqueNumbers(openedTabIds).length &&
+        postCloseTargets.every(
+          (target) =>
+            target.targetTabFound === false &&
+            target.compactSummaryBounded === true &&
+            target.retentionWithinLimit === true,
         )
       : null;
 
@@ -843,11 +867,13 @@ function runLifecycleSmoke(cliPath, smokeUrl, args) {
     openedPublicTestTabs: uniqueNumbers(openedTabIds).length,
     closeAttempted: closeResult.attempted,
     closeSucceeded: closeResult.succeeded,
+    cleanupTargetsPassed,
     cleanup: {
       requestedCount: closeResult.requestedCount,
       closedCount: closeResult.closedCount,
     },
     postCleanup,
+    postCloseTargets,
     lifecycleMatrix,
   };
 }
@@ -865,10 +891,12 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
       closeSucceeded: result.closeSucceeded,
       cleanup: result.cleanup,
       postCleanup: result.postCleanup,
+      postCloseTargets: result.postCloseTargets,
       lifecycleMatrix: result.lifecycleMatrix,
       passed:
         result.openedPublicTestTabs === 3 &&
         result.closeSucceeded === true &&
+        result.cleanupTargetsPassed === true &&
         result.postCleanup?.retentionWithinLimit === true &&
         result.postCleanup?.compactSummaryBounded === true &&
         result.postCleanup?.browserObjectEdgeSummaryPresent === true &&

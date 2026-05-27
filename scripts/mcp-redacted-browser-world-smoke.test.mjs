@@ -5,6 +5,7 @@ import {
   assertPublicHttpUrl,
   assertRedactedSmokeOutputSafe,
   buildPublicSmokeUrl,
+  buildPostCloseTargetCleanupSummary,
   buildRedactedBrowserWorldSummary,
   buildRedactedReadPageAlignmentSummary,
   extractJsonObject,
@@ -371,6 +372,38 @@ test('buildRedactedBrowserWorldSummary counts window visibility states without U
     focused: 1,
     operable: 1,
   });
+});
+
+test('buildPostCloseTargetCleanupSummary reports closed targets without raw tab data', () => {
+  const summary = buildPostCloseTargetCleanupSummary(
+    {
+      compactSummary: {
+        windows: [{ compactTabLimit: 12, tabs: [{ tabId: 7 }] }],
+        retentionPolicy: { recentEventLimit: 50, recentEventsRetained: 4 },
+      },
+      browserWorld: {
+        tabs: [{ tabId: 7, url: 'https://private.example.test/open', title: 'Private Still Open' }],
+      },
+    },
+    [7, 8],
+  );
+
+  assert.deepEqual(summary, [
+    {
+      targetIndex: 1,
+      targetTabFound: true,
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+    {
+      targetIndex: 2,
+      targetTabFound: false,
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+  ]);
+  assert.equal(JSON.stringify(summary).includes('private.example.test'), false);
+  assert.equal(JSON.stringify(summary).includes('Private Still Open'), false);
 });
 
 test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fields', () => {
