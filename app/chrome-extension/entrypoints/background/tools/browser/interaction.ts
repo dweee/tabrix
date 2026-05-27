@@ -37,6 +37,39 @@ export const NEW_TAB_OBSERVE_DRAIN_VERIFIER_MS =
 const FILL_PENDING_DOCUMENT_WAIT_MS = 5000;
 const FILL_CONTENT_MESSAGE_RETRY_DELAY_MS = 450;
 
+function firstCandidateCssLocator(
+  candidateAction: CandidateActionInput | undefined,
+): string | undefined {
+  const locatorChain = candidateAction?.locatorChain;
+  if (!Array.isArray(locatorChain)) return undefined;
+  for (const locator of locatorChain) {
+    if (locator?.type !== 'css') continue;
+    const value = typeof locator.value === 'string' ? locator.value.trim() : '';
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function shouldRetryFillWithCandidateCss(params: {
+  explicitRef?: string;
+  finalRef?: string;
+  finalSelector?: string;
+  candidateCss?: string;
+  error?: unknown;
+}): boolean {
+  if (params.explicitRef) return false;
+  if (!params.finalRef || params.finalSelector || !params.candidateCss) return false;
+  const message =
+    params.error instanceof Error
+      ? params.error.message
+      : typeof params.error === 'string'
+        ? params.error
+        : '';
+  return /ref .*not found|not visible|selector "undefined"|element for ref not found/i.test(
+    message,
+  );
+}
+
 interface Coordinates {
   x: number;
   y: number;
@@ -45,6 +78,7 @@ interface Coordinates {
 interface ClickToolParams {
   selector?: string; // CSS selector or XPath for the element to click
   selectorType?: 'css' | 'xpath'; // Type of selector (default: 'css')
+  interaction?: 'click' | 'hover'; // Default click. Hover is safe discovery for known refs/selectors.
   ref?: string; // Element ref from accessibility tree (window.__claudeElementMap)
   candidateAction?: CandidateActionInput; // Optional action seed from read_page
   coordinates?: Coordinates; // Coordinates to click at (x, y relative to viewport)
@@ -277,7 +311,7 @@ function buildClickDiffSummary(
   const hasChange =
     browser.newTabOpened ||
     beforeUnloadFired ||
-    urlDelta !== 'none' ||
+    (urlDelta !== 'none' && urlDelta !== 'unavailable') ||
     domChanged ||
     dialogAdded ||
     menuAdded ||
@@ -299,6 +333,60 @@ function buildClickDiffSummary(
     menuAdded,
     focusChanged,
     stateChanged,
+  };
+}
+
+export function buildStructuredClickHelperErrorResult(input: {
+  message: string;
+  clickMethod: string;
+  elementInfo?: unknown;
+  browserSignals: ClickBrowserSignals;
+}) {
+  const verification: ClickVerification = {
+    navigationOccurred: false,
+    urlChanged: false,
+    newTabOpened: input.browserSignals.newTabOpened,
+    domChanged: false,
+    stateChanged: false,
+    focusChanged: false,
+  };
+
+  return {
+    success: false,
+    dispatchSucceeded: false,
+    observedOutcome: 'no_observed_change' as ClickObservedOutcome,
+    verification,
+    clickDiff: buildClickDiffSummary(null, input.browserSignals),
+    navigationOccurred: false,
+    lane: TABRIX_OWNED_LANE,
+    message: `Click helper returned an error; click dispatch and post-action state are not proven (${input.message})`,
+    elementInfo: input.elementInfo,
+    clickMethod: input.clickMethod,
+    resultShape: 'structured_click_error',
+  };
+}
+
+function createStructuredClickHelperErrorResponse(input: {
+  message: string;
+  clickMethod: string;
+  elementInfo?: unknown;
+  browserSignals?: ClickBrowserSignals;
+}): ToolResult {
+  return {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify(
+          buildStructuredClickHelperErrorResult({
+            message: input.message,
+            clickMethod: input.clickMethod,
+            elementInfo: input.elementInfo,
+            browserSignals: input.browserSignals ?? { newTabOpened: false },
+          }),
+        ),
+      },
+    ],
+    isError: true,
   };
 }
 
@@ -674,6 +762,7 @@ class ClickTool extends BaseBrowserToolExecutor {
     const {
       selector,
       selectorType = 'css',
+      interaction = 'click',
       coordinates,
       waitForNavigation = false,
       timeout = TIMEOUTS.DEFAULT_WAIT * 5,
@@ -684,7 +773,13 @@ class ClickTool extends BaseBrowserToolExecutor {
       modifiers,
     } = args;
 
-    console.log(`Starting click operation with options:`, args);
+    console.log(`Starting ${interaction} operation with options:`, args);
+
+    if (interaction !== 'click' && interaction !== 'hover') {
+      return createErrorResponse(
+        ERROR_MESSAGES.INVALID_PARAMETERS + ': interaction must be "click" or "hover"',
+      );
+    }
 
     if (!selector && !coordinates && !args.ref && !args.candidateAction) {
       return createErrorResponse(
@@ -692,6 +787,16 @@ class ClickTool extends BaseBrowserToolExecutor {
           ': Provide ref or selector or coordinates (or candidateAction)',
       );
     }
+
+    const requestedClickMethod = coordinates
+      ? 'coordinates'
+      : args.ref
+        ? 'ref'
+        : selector
+          ? 'selector'
+          : args.candidateAction
+            ? 'candidateAction'
+            : 'unknown';
 
     try {
       // Resolve tab
@@ -702,7 +807,7 @@ class ClickTool extends BaseBrowserToolExecutor {
       }
       const schemeGuard = inferInteractionSchemeGuard(String(tab.url || ''));
       if (!schemeGuard.allowed) {
-        return createUnsupportedTabResponse('click', tab, schemeGuard);
+        return createUnsupportedTabResponse(interaction, tab, schemeGuard);
       }
 
       // Snapshot the pre-click URL so the verifier can report
@@ -733,6 +838,13 @@ class ClickTool extends BaseBrowserToolExecutor {
       let finalRef = resolvedTarget.ref;
       let finalSelector = resolvedTarget.selector;
       const finalSelectorType = resolvedTarget.selectorType || selectorType;
+
+      if (interaction === 'hover' && coordinates && !finalRef && !finalSelector) {
+        return createErrorResponse(
+          ERROR_MESSAGES.INVALID_PARAMETERS +
+            ': Safe hover requires ref, selector, or candidateAction. Coordinate-only hover remains a high-risk chrome_computer fallback.',
+        );
+      }
 
       if (!coordinates && !finalRef && !finalSelector) {
         return createErrorResponse(
@@ -767,6 +879,80 @@ class ClickTool extends BaseBrowserToolExecutor {
             `Error resolving XPath: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
+      }
+
+      if (interaction === 'hover') {
+        if (finalSelector && !finalRef) {
+          await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
+          try {
+            const resolved = await this.sendMessageToTab(
+              tab.id,
+              {
+                action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+                selector: finalSelector,
+                isXPath: false,
+              },
+              frameId,
+            );
+            if (resolved && resolved.success && resolved.ref) {
+              finalRef = resolved.ref;
+              finalSelector = undefined;
+            } else {
+              return createErrorResponse(
+                `Failed to resolve hover selector: ${resolved?.error || 'unknown error'}`,
+              );
+            }
+          } catch (error) {
+            return createErrorResponse(
+              `Error resolving hover selector: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+
+        if (!finalRef) {
+          return createErrorResponse(
+            ERROR_MESSAGES.INVALID_PARAMETERS +
+              ': Safe hover requires a resolvable element ref from chrome_read_page',
+          );
+        }
+
+        await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
+        const hoverResult = await this.sendMessageToTab(
+          tab.id,
+          {
+            action: TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF,
+            ref: finalRef,
+          },
+          frameId,
+        );
+        if (!hoverResult?.success) {
+          return createErrorResponse(hoverResult?.error || 'Hover dispatch failed');
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                dispatchSucceeded: true,
+                interaction: 'hover',
+                observedOutcome: 'verification_required',
+                verification: {
+                  requiresFreshReadPage: true,
+                  menuExpansionProven: false,
+                  businessSuccessProven: false,
+                },
+                lane: TABRIX_OWNED_LANE,
+                message:
+                  'Hover dispatched to a known element; run chrome_read_page again to verify menu/modal/page-region changes.',
+                elementInfo: hoverResult.target,
+                hoverMethod: 'ref',
+              }),
+            },
+          ],
+          isError: false,
+        };
       }
 
       if (args.allowDownloadClick !== true) {
@@ -955,11 +1141,17 @@ class ClickTool extends BaseBrowserToolExecutor {
         clickMethod = 'unknown';
       }
 
-      // If the helper returned an explicit error, propagate it verbatim with
-      // the contract fields zeroed out (no dispatch, no observed outcome to
-      // merge).
+      // If the helper returned an explicit error, keep the response structured.
+      // A plain text error is normalized later by native-server as a legacy
+      // shape, which strips useful action diagnostics from AI-facing output.
       if (result && typeof result === 'object' && 'error' in result && result.error) {
-        return createErrorResponse(String(result.error));
+        const browserSignals = await browserSignalsPromise;
+        return createStructuredClickHelperErrorResponse({
+          message: String(result.error),
+          clickMethod,
+          elementInfo: (result as { elementInfo?: unknown }).elementInfo,
+          browserSignals,
+        });
       }
 
       const browserSignals = await browserSignalsPromise;
@@ -1049,9 +1241,10 @@ class ClickTool extends BaseBrowserToolExecutor {
       };
     } catch (error) {
       console.error('Error in click operation:', error);
-      return createErrorResponse(
-        `Error performing click: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      return createStructuredClickHelperErrorResponse({
+        message: `Error performing click: ${error instanceof Error ? error.message : String(error)}`,
+        clickMethod: requestedClickMethod,
+      });
     }
   }
 }
@@ -1155,6 +1348,7 @@ class FillTool extends BaseBrowserToolExecutor {
       let finalRef = resolvedTarget.ref;
       let finalSelector = resolvedTarget.selector;
       const finalSelectorType = resolvedTarget.selectorType || selectorType;
+      const candidateCssFallback = firstCandidateCssLocator(args.candidateAction);
 
       if (!finalRef && !finalSelector) {
         return createErrorResponse(
@@ -1194,16 +1388,50 @@ class FillTool extends BaseBrowserToolExecutor {
       await this.injectContentScript(tabId, ['inject-scripts/fill-helper.js']);
 
       // Send fill message to content script
-      const result = await this.sendFillMessageWithRetry(
-        tabId,
-        {
-          action: TOOL_MESSAGE_TYPES.FILL_ELEMENT,
-          selector: finalSelector,
-          ref: finalRef,
-          value,
-        },
-        frameId,
-      );
+      const sendFill = (message: Record<string, unknown>) =>
+        this.sendFillMessageWithRetry(tabId, message, frameId);
+      const primaryFillMessage = {
+        action: TOOL_MESSAGE_TYPES.FILL_ELEMENT,
+        selector: finalSelector,
+        ref: finalRef,
+        value,
+      };
+      const cssFallbackFillMessage = {
+        action: TOOL_MESSAGE_TYPES.FILL_ELEMENT,
+        selector: candidateCssFallback,
+        value,
+      };
+      let result;
+      try {
+        result = await sendFill(primaryFillMessage);
+      } catch (error) {
+        if (
+          shouldRetryFillWithCandidateCss({
+            explicitRef: ref,
+            finalRef,
+            finalSelector,
+            candidateCss: candidateCssFallback,
+            error,
+          })
+        ) {
+          result = await sendFill(cssFallbackFillMessage);
+        } else {
+          throw error;
+        }
+      }
+
+      if (
+        result?.error &&
+        shouldRetryFillWithCandidateCss({
+          explicitRef: ref,
+          finalRef,
+          finalSelector,
+          candidateCss: candidateCssFallback,
+          error: result.error,
+        })
+      ) {
+        result = await sendFill(cssFallbackFillMessage);
+      }
 
       if (result && result.error) {
         return createErrorResponse(result.error);
@@ -1217,6 +1445,13 @@ class FillTool extends BaseBrowserToolExecutor {
               success: true,
               message: result.message || 'Fill operation successful',
               elementInfo: result.elementInfo,
+              observedOutcome: null,
+              postconditionVerdict: 'unknown',
+              postconditionReason: 'form_input_state_change_not_proven_by_tool_closeout',
+              recommendedNextAction:
+                'Call chrome_read_page after this action to compare page/form state before claiming task success.',
+              claimBoundary:
+                'fill success only proves the input dispatch completed; it does not prove form/search result state changed',
             }),
           },
         ],

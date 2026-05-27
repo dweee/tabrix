@@ -38,6 +38,7 @@ const BRIDGE_COMMAND_TIMEOUT_MS = 15_000;
 const BRIDGE_NAVIGATION_COMMAND_TIMEOUT_MS = 75_000;
 const BRIDGE_NETWORK_CAPTURE_COMMAND_TIMEOUT_MS = 60_000;
 const BRIDGE_READ_PAGE_COMMAND_TIMEOUT_MS = 60_000;
+const BRIDGE_SCREENSHOT_COMMAND_TIMEOUT_MS = 60_000;
 const BRIDGE_WEB_CONTENT_COMMAND_TIMEOUT_MS = 60_000;
 const BRIDGE_NAVIGATION_COMMAND_OVERHEAD_MS = 30_000;
 const BRIDGE_WS_BACKOFF_MS = [1_000, 2_000, 5_000, 10_000] as const;
@@ -618,6 +619,9 @@ function bridgeCommandTimeoutMs(message: BridgeCommandMessage): number {
   }
   if (message.command.action === 'call_tool' && toolName === 'chrome_read_page') {
     return BRIDGE_READ_PAGE_COMMAND_TIMEOUT_MS;
+  }
+  if (message.command.action === 'call_tool' && toolName === 'chrome_screenshot') {
+    return BRIDGE_SCREENSHOT_COMMAND_TIMEOUT_MS;
   }
   if (message.command.action === 'call_tool' && toolName === 'chrome_get_web_content') {
     return BRIDGE_WEB_CONTENT_COMMAND_TIMEOUT_MS;

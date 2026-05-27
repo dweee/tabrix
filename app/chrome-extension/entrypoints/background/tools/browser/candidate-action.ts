@@ -78,43 +78,71 @@ function isStableTargetRef(value: string): boolean {
   return value.startsWith(STABLE_TARGET_REF_PREFIX);
 }
 
+function isSyntheticTextMenuRef(value: string): boolean {
+  return value.startsWith('ref_text_menu_');
+}
+
+function isFallbackRef(value: string): boolean {
+  return value.startsWith('ref_fallback_');
+}
+
+function resolveStableTargetRef(params: ResolveCandidateActionTargetParams, targetRef: string) {
+  const lookup = params.lookupStableTargetRef;
+  const tabId = params.tabId;
+  if (lookup && typeof tabId === 'number') {
+    const resolved = lookup(tabId, targetRef);
+    if (resolved) {
+      return {
+        ref: resolved,
+        source: 'candidate_stable_target_ref' as const,
+      };
+    }
+  }
+  return {
+    source: 'unresolved_stable_target_ref' as const,
+    unresolvedStableTargetRef: targetRef,
+  };
+}
+
 export function resolveCandidateActionTarget(
   params: ResolveCandidateActionTargetParams,
 ): ResolvedCandidateActionTarget {
   const explicitRef = asNonEmptyString(params.explicitRef);
   if (explicitRef) {
+    // AI callers often copy the AI-facing `targetRef` into `ref`. Stable
+    // `tgt_*` values are not page-local refs, so route them through the same
+    // live snapshot registry instead of forwarding a guaranteed-miss handle.
+    if (isStableTargetRef(explicitRef)) {
+      return resolveStableTargetRef(params, explicitRef);
+    }
     return {
       ref: explicitRef,
       source: 'explicit_ref',
     };
   }
 
+  const locatorRef = firstLocatorValue(params.candidateAction?.locatorChain, 'ref');
+  const locatorCss = firstLocatorValue(params.candidateAction?.locatorChain, 'css');
   const candidateTargetRef = asNonEmptyString(params.candidateAction?.targetRef);
   if (candidateTargetRef) {
+    if (
+      (isSyntheticTextMenuRef(candidateTargetRef) || isFallbackRef(candidateTargetRef)) &&
+      locatorCss
+    ) {
+      return {
+        selector: locatorCss,
+        selectorType: 'css',
+        source: 'candidate_locator_css',
+      };
+    }
+
     // Stable targetRefs (`tgt_*`) MUST route through the per-tab snapshot
     // registry. They are not valid accessibility-tree handles, so
     // forwarding one straight to the content script would always miss.
     // Failing closed here also prevents the click bridge from silently
     // aiming at a stale per-snapshot ref that happens to share a prefix.
     if (isStableTargetRef(candidateTargetRef)) {
-      const lookup = params.lookupStableTargetRef;
-      const tabId = params.tabId;
-      if (lookup && typeof tabId === 'number') {
-        const resolved = lookup(tabId, candidateTargetRef);
-        if (resolved) {
-          return {
-            ref: resolved,
-            source: 'candidate_stable_target_ref',
-          };
-        }
-      }
-      // Surface the unresolved case explicitly so the bridge can return a
-      // helpful "call chrome_read_page first" error instead of a generic
-      // "ref not found" message from the content-script side.
-      return {
-        source: 'unresolved_stable_target_ref',
-        unresolvedStableTargetRef: candidateTargetRef,
-      };
+      return resolveStableTargetRef(params, candidateTargetRef);
     }
     return {
       ref: candidateTargetRef,
@@ -131,7 +159,14 @@ export function resolveCandidateActionTarget(
     };
   }
 
-  const locatorRef = firstLocatorValue(params.candidateAction?.locatorChain, 'ref');
+  if (locatorRef && isSyntheticTextMenuRef(locatorRef) && locatorCss) {
+    return {
+      selector: locatorCss,
+      selectorType: 'css',
+      source: 'candidate_locator_css',
+    };
+  }
+
   if (locatorRef) {
     return {
       ref: locatorRef,
@@ -139,7 +174,6 @@ export function resolveCandidateActionTarget(
     };
   }
 
-  const locatorCss = firstLocatorValue(params.candidateAction?.locatorChain, 'css');
   if (locatorCss) {
     return {
       selector: locatorCss,

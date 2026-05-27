@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { clickTool, fillTool } from '@/entrypoints/background/tools/browser/interaction';
 import { computerTool } from '@/entrypoints/background/tools/browser/computer';
+import { keyboardTool } from '@/entrypoints/background/tools/browser/keyboard';
 import {
   __resetStableTargetRefRegistryForTests,
   recordStableTargetRefSnapshot,
@@ -46,6 +47,67 @@ describe('candidateAction bridge', () => {
     );
   });
 
+  it('resolves safe hover target from candidateAction.targetRef without using chrome_computer', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4106,
+      title: 'App',
+      url: 'https://example.com/app',
+    });
+    const injectSpy = vi
+      .spyOn(clickTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      target: { tagName: 'BUTTON', text: 'More' },
+    });
+
+    const result = await clickTool.execute({
+      interaction: 'hover',
+      candidateAction: {
+        targetRef: 'ref_more',
+      },
+    } as any);
+
+    expect(result.isError).toBe(false);
+    expect(injectSpy).toHaveBeenCalledWith(4106, ['inject-scripts/accessibility-tree-helper.js']);
+    expect(sendSpy).toHaveBeenCalledWith(
+      4106,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF,
+        ref: 'ref_more',
+      }),
+      undefined,
+    );
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload).toMatchObject({
+      success: true,
+      interaction: 'hover',
+      observedOutcome: 'verification_required',
+      lane: 'tabrix_owned',
+    });
+    expect(payload.verification.requiresFreshReadPage).toBe(true);
+  });
+
+  it('rejects coordinate-only safe hover so menu discovery stays ref based', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4107,
+      title: 'App',
+      url: 'https://example.com/app',
+    });
+    const sendSpy = vi
+      .spyOn(clickTool as any, 'sendMessageToTab')
+      .mockResolvedValue({ success: true });
+
+    const result = await clickTool.execute({
+      interaction: 'hover',
+      coordinates: { x: 20, y: 20 },
+    } as any);
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content?.[0] as any)?.text || '')).toContain('Coordinate-only hover');
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
   it('resolves fill target from candidateAction.locatorChain(css)', async () => {
     vi.spyOn(fillTool as any, 'tryGetTab').mockResolvedValue({
       id: 4102,
@@ -69,11 +131,132 @@ describe('candidateAction bridge', () => {
     });
 
     expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload).toMatchObject({
+      success: true,
+      observedOutcome: null,
+      postconditionVerdict: 'unknown',
+      postconditionReason: 'form_input_state_change_not_proven_by_tool_closeout',
+    });
+    expect(payload.claimBoundary).toContain('does not prove form/search result state changed');
     expect(sendSpy).toHaveBeenCalledWith(
       4102,
       expect.objectContaining({
         action: TOOL_MESSAGE_TYPES.FILL_ELEMENT,
         selector: 'input[name=email]',
+      }),
+      undefined,
+    );
+  });
+
+  it('marks Enter keyboard dispatch as postcondition-unproven until a fresh read observes state', async () => {
+    vi.spyOn(keyboardTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4110,
+      title: 'Search',
+      url: 'https://example.com/search',
+    });
+    vi.spyOn(keyboardTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(keyboardTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      message: 'Keyboard operation successful',
+    });
+
+    const result = await keyboardTool.execute({
+      keys: 'Enter',
+      selector: 'input[type=search]',
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload).toMatchObject({
+      success: true,
+      observedOutcome: null,
+      postconditionVerdict: 'unknown',
+      postconditionReason: 'form_submit_or_search_results_not_proven_by_tool_closeout',
+    });
+    expect(payload.recommendedNextAction).toContain('chrome_read_page');
+    expect(payload.claimBoundary).toContain(
+      'does not prove page, form, menu, or search state changed',
+    );
+  });
+
+  it('retries fill with candidateAction css when a page-local ref is stale or hidden', async () => {
+    vi.spyOn(fillTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4108,
+      title: 'Search',
+      url: 'https://example.com/search',
+    });
+    vi.spyOn(fillTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi
+      .spyOn(fillTool as any, 'sendMessageToTab')
+      .mockResolvedValueOnce({
+        error: 'Element with selector "undefined" is not visible',
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        message: 'Fill operation successful',
+      });
+
+    const result = await fillTool.execute({
+      value: 'tabrix',
+      candidateAction: {
+        targetRef: 'ref_hidden_search',
+        locatorChain: [{ type: 'css', value: 'dialog[open] input[type=search]' }],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    expect(sendSpy).toHaveBeenNthCalledWith(
+      1,
+      4108,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.FILL_ELEMENT,
+        ref: 'ref_hidden_search',
+      }),
+      undefined,
+    );
+    expect(sendSpy).toHaveBeenNthCalledWith(
+      2,
+      4108,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.FILL_ELEMENT,
+        selector: 'dialog[open] input[type=search]',
+      }),
+      undefined,
+    );
+  });
+
+  it('retries fill with candidateAction css when ref dispatch throws before returning a result', async () => {
+    vi.spyOn(fillTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4109,
+      title: 'Search',
+      url: 'https://example.com/search',
+    });
+    vi.spyOn(fillTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi
+      .spyOn(fillTool as any, 'sendMessageToTab')
+      .mockRejectedValueOnce(new Error('Element with selector "undefined" is not visible'))
+      .mockRejectedValueOnce(new Error('Element with selector "undefined" is not visible'))
+      .mockResolvedValueOnce({
+        success: true,
+        message: 'Fill operation successful',
+      });
+
+    const result = await fillTool.execute({
+      value: 'tabrix',
+      candidateAction: {
+        targetRef: 'ref_hidden_search',
+        locatorChain: [{ type: 'css', value: 'dialog[open] input[type=search]' }],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    expect(sendSpy).toHaveBeenNthCalledWith(
+      3,
+      4109,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.FILL_ELEMENT,
+        selector: 'dialog[open] input[type=search]',
       }),
       undefined,
     );
@@ -189,6 +372,57 @@ describe('candidateAction bridge', () => {
     expect(sendSpy).not.toHaveBeenCalled();
   });
 
+  it('B-011: resolves click target when AI passes stable targetRef as ref', async () => {
+    recordStableTargetRefSnapshot(4209, [{ targetRef: 'tgt_menu_more', ref: 'ref_more_live' }]);
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4209,
+      title: 'App',
+      url: 'https://example.com/app',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      message: 'Click operation successful',
+    });
+
+    const result = await clickTool.execute({
+      ref: 'tgt_menu_more',
+      allowDownloadClick: true,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(sendSpy).toHaveBeenCalledWith(
+      4209,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+        ref: 'ref_more_live',
+      }),
+      undefined,
+    );
+  });
+
+  it('B-011: ref with unresolved stable targetRef fails before dispatch', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4210,
+      title: 'App',
+      url: 'https://example.com/app',
+    });
+    const sendSpy = vi
+      .spyOn(clickTool as any, 'sendMessageToTab')
+      .mockResolvedValue({ success: true });
+
+    const result = await clickTool.execute({
+      ref: 'tgt_missing_menu',
+      allowDownloadClick: true,
+    });
+
+    expect(result.isError).toBe(true);
+    const text = String((result.content?.[0] as any)?.text || '');
+    expect(text).toContain('tgt_missing_menu');
+    expect(text).toContain('chrome_read_page');
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
   it('B-011: legacy ref_* targetRef path is unchanged (regression guard)', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4203,
@@ -210,6 +444,69 @@ describe('candidateAction bridge', () => {
     expect(sendSpy).toHaveBeenCalledWith(
       4203,
       expect.objectContaining({ ref: 'ref_legacy_value' }),
+      undefined,
+    );
+  });
+
+  it('uses a safe css locator for synthetic text-menu refs when available', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4208,
+      title: 'App',
+      url: 'https://example.com/app',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      message: 'Click operation successful',
+    });
+
+    const result = await clickTool.execute({
+      candidateAction: {
+        targetRef: 'ref_text_menu_42',
+        locatorChain: [
+          { type: 'ref', value: 'ref_text_menu_42' },
+          { type: 'css', value: 'nav > button:nth-child(2)' },
+        ],
+      },
+      allowDownloadClick: true,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(sendSpy).toHaveBeenCalledWith(
+      4208,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+        selector: 'nav > button:nth-child(2)',
+      }),
+      undefined,
+    );
+  });
+
+  it('uses a safe css locator for fallback refs when available', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4211,
+      title: 'Example',
+      url: 'https://example.com/',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+    });
+
+    const result = await clickTool.execute({
+      candidateAction: {
+        targetRef: 'ref_fallback_1',
+        locatorChain: [{ type: 'css', value: 'body > div > p:nth-of-type(2) > a' }],
+      },
+      allowDownloadClick: true,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(sendSpy).toHaveBeenCalledWith(
+      4211,
+      expect.objectContaining({
+        selector: 'body > div > p:nth-of-type(2) > a',
+      }),
       undefined,
     );
   });

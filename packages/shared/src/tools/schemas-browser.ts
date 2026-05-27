@@ -536,7 +536,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
         },
         fullPage: {
           type: 'boolean',
-          description: 'Store screenshot of the entire page (default: true)',
+          description: 'Store screenshot of the entire page (default: false)',
         },
         savePng: {
           type: 'boolean',
@@ -1089,7 +1089,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.CLICK,
     description:
-      'Click on an element in a web page. Supports multiple targeting methods: CSS selector, XPath, element ref (from chrome_read_page), or viewport coordinates. More focused than chrome_computer for simple click operations.',
+      'Click on or safely hover a known element in a web page. Supports multiple targeting methods: CSS selector, XPath, element ref (from chrome_read_page), or viewport coordinates for clicks. Hover is limited to ref/selector/candidateAction targets and must be followed by chrome_read_page verification. More focused than chrome_computer for simple element operations.',
     annotations: {
       destructiveHint: true,
     },
@@ -1104,6 +1104,12 @@ export const BROWSER_SCHEMAS: Tool[] = [
           type: 'string',
           enum: ['css', 'xpath'],
           description: 'Type of selector (default: "css").',
+        },
+        interaction: {
+          type: 'string',
+          enum: ['click', 'hover'],
+          description:
+            'Element interaction to perform. Default is "click". "hover" is a safe discovery action for known refs/selectors/candidateActions only; coordinate-only hover is intentionally rejected and should remain a chrome_computer fallback.',
         },
         ref: {
           type: 'string',

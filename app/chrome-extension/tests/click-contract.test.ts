@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  buildStructuredClickHelperErrorResult,
   mergeClickSignals,
   observeNewTabUntil,
   type ClickPageSignals,
@@ -241,6 +242,50 @@ describe('mergeClickSignals (pure function)', () => {
     );
     expect(merged.observedOutcome).toBe('focus_changed');
     expect(merged.success).toBe(true);
+  });
+});
+
+describe('buildStructuredClickHelperErrorResult', () => {
+  it('keeps helper errors in the structured click contract instead of legacy text', () => {
+    const result = buildStructuredClickHelperErrorResult({
+      message: 'Element ref "ref_missing" not found',
+      clickMethod: 'ref',
+      browserSignals: { newTabOpened: false },
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      dispatchSucceeded: false,
+      observedOutcome: 'no_observed_change',
+      clickMethod: 'ref',
+      resultShape: 'structured_click_error',
+      lane: 'tabrix_owned',
+      verification: {
+        navigationOccurred: false,
+        urlChanged: false,
+        newTabOpened: false,
+        domChanged: false,
+        stateChanged: false,
+        focusChanged: false,
+      },
+    });
+    expect(result.message).toContain('click dispatch and post-action state are not proven');
+    expect(result.message).toContain('Element ref "ref_missing" not found');
+    expect(JSON.stringify(result)).not.toContain('legacy_text_error_normalized');
+  });
+
+  it('defaults missing browser signals to a non-proven structured error', () => {
+    const result = buildStructuredClickHelperErrorResult({
+      message: 'Error performing click: Could not establish connection',
+      clickMethod: 'selector',
+      browserSignals: { newTabOpened: false },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.dispatchSucceeded).toBe(false);
+    expect(result.observedOutcome).toBe('no_observed_change');
+    expect(result.clickDiff).toEqual({ kind: 'no_change' });
+    expect(result.resultShape).toBe('structured_click_error');
   });
 });
 

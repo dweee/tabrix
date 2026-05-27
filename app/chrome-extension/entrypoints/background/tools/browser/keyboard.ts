@@ -119,6 +119,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
       if (result.error) {
         return createErrorResponse(result.error);
       }
+      const submitLikeKey = keys.trim().toLowerCase() === 'enter';
 
       return {
         content: [
@@ -130,6 +131,16 @@ class KeyboardTool extends BaseBrowserToolExecutor {
               targetElement: result.targetElement,
               results: result.results,
               scrollDiagnostics: result.targetElement?.scrollDiagnostics,
+              observedOutcome: null,
+              postconditionVerdict: 'unknown',
+              postconditionReason: submitLikeKey
+                ? 'form_submit_or_search_results_not_proven_by_tool_closeout'
+                : 'keyboard_postcondition_not_observed_by_tool_closeout',
+              recommendedNextAction: submitLikeKey
+                ? 'Call chrome_read_page after Enter to verify navigation, result-region, or form-state changes.'
+                : 'Call chrome_read_page after this keyboard action when page state matters.',
+              claimBoundary:
+                'keyboard success only proves key dispatch completed; it does not prove page, form, menu, or search state changed',
             }),
           },
         ],

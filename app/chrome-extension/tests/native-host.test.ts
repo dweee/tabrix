@@ -1117,6 +1117,77 @@ describe('native host reconnect behavior', () => {
     expect(readPageResult.payload.data.content[0].text).toContain('"dom_region_rows"');
   });
 
+  it('allows screenshot calls to finish beyond the default bridge timeout', async () => {
+    const firstPort = createMockPort();
+    const harness = createChromeHarness([firstPort]);
+    const wsHarness = createMockWebSocketHarness();
+    (globalThis as any).chrome = harness.chromeMock;
+    (globalThis as any).WebSocket = wsHarness.MockWebSocket as any;
+
+    const toolsModule = await import('@/entrypoints/background/tools');
+    vi.mocked(toolsModule.handleCallTool).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    success: true,
+                    screenshot: 'base64-redacted',
+                    selector: '[data-auth-qr]',
+                  }),
+                },
+              ],
+              isError: false,
+            } as any);
+          }, 20_000);
+        }),
+    );
+
+    const nativeHostModule = await import('@/entrypoints/background/native-host');
+    nativeHostModule.initNativeHostListener();
+    await flushMicrotasks();
+
+    wsHarness.instances[0].emitOpen();
+    await flushMicrotasks();
+    wsHarness.instances[0].sent.length = 0;
+
+    wsHarness.instances[0].emitMessage({
+      type: 'command',
+      requestId: 'req-screenshot',
+      connectionId: 'bridge-1',
+      sentAt: Date.now(),
+      command: {
+        action: 'call_tool',
+        payload: {
+          name: 'chrome_screenshot',
+          args: { tabId: 42, selector: '[data-auth-qr]', storeBase64: true, savePng: false },
+        },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(15_000);
+    await flushMicrotasks();
+    expect(
+      wsHarness.instances[0].sent
+        .map((entry) => JSON.parse(entry))
+        .find((entry) => entry.requestId === 'req-screenshot'),
+    ).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await flushMicrotasks();
+    const screenshotResult = wsHarness.instances[0].sent
+      .map((entry) => JSON.parse(entry))
+      .find((entry) => entry.requestId === 'req-screenshot');
+    expect(screenshotResult).toMatchObject({
+      type: 'result',
+      requestId: 'req-screenshot',
+      success: true,
+    });
+    expect(screenshotResult.payload.data.content[0].text).toContain('"base64-redacted"');
+  });
+
   it('allows web content extraction to finish on slow real documents beyond default timeout', async () => {
     const firstPort = createMockPort();
     const harness = createChromeHarness([firstPort]);
