@@ -12,19 +12,45 @@ type Listener = (...args: any[]) => void;
 
 const FORBIDDEN_EVENT_KEYS = [
   'url',
+  'rawUrl',
+  'privateUrl',
   'pendingUrl',
   'title',
+  'rawTitle',
   'pageText',
   'markdown',
   'screenshot',
   'screenshots',
+  'rawScreenshot',
+  'rawImage',
   'cookie',
   'cookies',
+  'authorization',
+  'authToken',
+  'token',
+  'secret',
+  'networkRequest',
+  'networkResponse',
   'networkBody',
   'rawNetworkBody',
+  'requestBody',
+  'responseBody',
   'account',
+  'accountId',
+  'accountName',
+  'accountState',
+  'profileName',
   'qrCode',
+  'qrImage',
   'qrPayload',
+];
+
+const FORBIDDEN_EVENT_STRING_PATTERNS = [
+  /https?:\/\//i,
+  /data:image\//i,
+  /\bBearer\s+[A-Za-z0-9._~+/=-]+/i,
+  /\b(?:Cookie|Set-Cookie):\s*[^;\s=]+=/i,
+  /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i,
 ];
 
 function hook(bucket: Listener[]) {
@@ -44,8 +70,9 @@ function expectRecentEventsPublicSafe(events: Array<Record<string, unknown>>) {
     }
   }
   const serialized = JSON.stringify(events);
-  expect(serialized).not.toContain('https://');
-  expect(serialized).not.toContain('http://');
+  for (const pattern of FORBIDDEN_EVENT_STRING_PATTERNS) {
+    expect(serialized).not.toMatch(pattern);
+  }
 }
 
 describe('browser world inventory', () => {
