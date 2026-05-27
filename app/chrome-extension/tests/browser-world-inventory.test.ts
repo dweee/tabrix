@@ -135,6 +135,23 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.windowStateConclusion).toContain(
       'Window object matrix: 1 window(s), visible=1, minimized=0, focused=1, operable=1',
     );
+    expect(snapshot.summary.windowOperationState).toMatchObject({
+      focusedWindowId: 1,
+      focusedWindowState: 'normal',
+      focusedWindowVisibilityState: 'visible',
+      focusedWindowCanOperate: true,
+      focusedWindowActiveTabId: 10,
+      focusedWindowActiveTabCanOperate: true,
+      relationToCurrentOperableWindow: 'focused_window_visible_operable',
+      canOperateFocusedWindow: true,
+      visibleWindowCount: 1,
+      minimizedWindowCount: 0,
+      operableWindowCount: 1,
+      inoperableWindowCount: 0,
+    });
+    expect(snapshot.summary.currentWindowConclusion).toContain(
+      'focused window 1 is visible and operable',
+    );
     expect(snapshot.summary.tabStateMatrix).toMatchObject({
       total: 2,
       active: 1,
@@ -529,6 +546,15 @@ describe('browser world inventory', () => {
       inoperable: 1,
       operabilityUnknown: 0,
     });
+    expect(snapshot.summary.windowOperationState).toMatchObject({
+      focusedWindowId: null,
+      relationToCurrentOperableWindow: 'no_focused_window',
+      canOperateFocusedWindow: null,
+      visibleWindowCount: 1,
+      operableWindowCount: 0,
+      inoperableWindowCount: 1,
+    });
+    expect(snapshot.summary.currentWindowConclusion).toContain('no focused browser window');
 
     listeners.windowFocusChanged[0]?.(1);
     snapshot = await getBrowserWorldSnapshot();
@@ -540,6 +566,11 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.windowStateMatrix).toMatchObject({
       focused: 1,
       unfocused: 0,
+    });
+    expect(snapshot.summary.windowOperationState).toMatchObject({
+      focusedWindowId: 1,
+      relationToCurrentOperableWindow: 'focused_window_not_operable',
+      canOperateFocusedWindow: false,
     });
   });
 
@@ -676,7 +707,17 @@ describe('browser world inventory', () => {
       inoperable: 1,
       stateCounts: { minimized: 1 },
     });
-    expect(snapshot.summary.recentChangeSummary).toContain('bounds or state changed');
+    expect(snapshot.summary.windowOperationState).toMatchObject({
+      focusedWindowId: null,
+      relationToCurrentOperableWindow: 'no_focused_window',
+      visibleWindowCount: 0,
+      minimizedWindowCount: 1,
+      operableWindowCount: 0,
+      inoperableWindowCount: 1,
+    });
+    expect(snapshot.summary.recentChangeSummary).toContain(
+      'bounds or state changed; state=minimized, visibility=minimized',
+    );
 
     listeners.windowBoundsChanged[0]?.({
       id: 1,
@@ -715,6 +756,17 @@ describe('browser world inventory', () => {
       operable: 1,
       stateCounts: { normal: 1 },
     });
+    expect(snapshot.summary.windowOperationState).toMatchObject({
+      focusedWindowId: 1,
+      focusedWindowState: 'normal',
+      focusedWindowVisibilityState: 'visible',
+      focusedWindowCanOperate: true,
+      relationToCurrentOperableWindow: 'focused_window_visible_operable',
+      canOperateFocusedWindow: true,
+    });
+    expect(snapshot.summary.currentWindowConclusion).toContain(
+      'focused window 1 is visible and operable',
+    );
     expect(snapshot.summary.objectChangeConclusion).toContain('visibility=visible');
   });
 

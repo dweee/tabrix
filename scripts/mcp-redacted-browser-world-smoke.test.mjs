@@ -73,6 +73,22 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
           stateCounts: { normal: 1 },
         },
         windowStateConclusion: 'Window object matrix includes private current window title.',
+        windowOperationState: {
+          focusedWindowId: 1,
+          focusedWindowState: 'normal',
+          focusedWindowVisibilityState: 'visible',
+          focusedWindowCanOperate: true,
+          focusedWindowActiveTabId: 20,
+          focusedWindowActiveTabCanOperate: true,
+          relationToCurrentOperableWindow: 'focused_window_visible_operable',
+          canOperateFocusedWindow: true,
+          visibleWindowCount: 1,
+          minimizedWindowCount: 0,
+          operableWindowCount: 1,
+          inoperableWindowCount: 0,
+        },
+        currentWindowConclusion:
+          'Current window object includes https://private.example.test/dashboard and Private Dashboard.',
         tabStateMatrix: {
           total: 20,
           active: 1,
@@ -175,6 +191,21 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
     operabilityUnknown: 0,
   });
   assert.equal(summary.windowStateConclusionPresent, true);
+  assert.deepEqual(summary.windowOperationState, {
+    focusedWindowIdPresent: true,
+    focusedWindowState: 'normal',
+    focusedWindowVisibilityState: 'visible',
+    focusedWindowCanOperate: true,
+    focusedWindowActiveTabIdPresent: true,
+    focusedWindowActiveTabCanOperate: true,
+    relationToCurrentOperableWindow: 'focused_window_visible_operable',
+    canOperateFocusedWindow: true,
+    visibleWindowCount: 1,
+    minimizedWindowCount: 0,
+    operableWindowCount: 1,
+    inoperableWindowCount: 0,
+  });
+  assert.equal(summary.currentWindowConclusionPresent, true);
   assert.deepEqual(summary.tabStateMatrix, {
     total: 20,
     active: 1,

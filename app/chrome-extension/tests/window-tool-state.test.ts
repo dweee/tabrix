@@ -126,6 +126,22 @@ describe('get_windows_and_tabs state inventory', () => {
         },
         windowStateConclusion:
           'Window object matrix: 2 window(s), visible=1, minimized=1, focused=1, operable=1, focusedWindow=10, focusedWindowOperable=yes.',
+        windowOperationState: {
+          focusedWindowId: 10,
+          focusedWindowState: 'normal',
+          focusedWindowVisibilityState: 'visible',
+          focusedWindowCanOperate: true,
+          focusedWindowActiveTabId: 102,
+          focusedWindowActiveTabCanOperate: true,
+          relationToCurrentOperableWindow: 'focused_window_visible_operable',
+          canOperateFocusedWindow: true,
+          visibleWindowCount: 1,
+          minimizedWindowCount: 1,
+          operableWindowCount: 1,
+          inoperableWindowCount: 1,
+        },
+        currentWindowConclusion:
+          'Current window object: focused window 10 is visible and operable; activeTab=102.',
         tabStateMatrix: {
           total: 2,
           active: 1,

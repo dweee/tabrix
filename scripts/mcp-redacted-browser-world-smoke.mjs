@@ -176,6 +176,8 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
   const retentionPolicy = payload?.compactSummary?.retentionPolicy ?? payload?.retentionPolicy;
   const windowStateMatrix =
     payload?.compactSummary?.windowStateMatrix ?? payload?.summary?.windowStateMatrix ?? null;
+  const windowOperationState =
+    payload?.compactSummary?.windowOperationState ?? payload?.summary?.windowOperationState ?? null;
   const tabStateMatrix =
     payload?.compactSummary?.tabStateMatrix ?? payload?.summary?.tabStateMatrix ?? null;
   const aiOperationState =
@@ -240,6 +242,53 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     windowStateConclusionPresent:
       typeof payload?.compactSummary?.windowStateConclusion === 'string' ||
       typeof payload?.summary?.windowStateConclusion === 'string',
+    windowOperationState: windowOperationState
+      ? {
+          focusedWindowIdPresent: Number.isInteger(windowOperationState.focusedWindowId),
+          focusedWindowState:
+            typeof windowOperationState.focusedWindowState === 'string'
+              ? windowOperationState.focusedWindowState
+              : null,
+          focusedWindowVisibilityState:
+            typeof windowOperationState.focusedWindowVisibilityState === 'string'
+              ? windowOperationState.focusedWindowVisibilityState
+              : null,
+          focusedWindowCanOperate:
+            typeof windowOperationState.focusedWindowCanOperate === 'boolean'
+              ? windowOperationState.focusedWindowCanOperate
+              : null,
+          focusedWindowActiveTabIdPresent: Number.isInteger(
+            windowOperationState.focusedWindowActiveTabId,
+          ),
+          focusedWindowActiveTabCanOperate:
+            typeof windowOperationState.focusedWindowActiveTabCanOperate === 'boolean'
+              ? windowOperationState.focusedWindowActiveTabCanOperate
+              : null,
+          relationToCurrentOperableWindow:
+            typeof windowOperationState.relationToCurrentOperableWindow === 'string'
+              ? windowOperationState.relationToCurrentOperableWindow
+              : null,
+          canOperateFocusedWindow:
+            typeof windowOperationState.canOperateFocusedWindow === 'boolean'
+              ? windowOperationState.canOperateFocusedWindow
+              : null,
+          visibleWindowCount: Number.isInteger(windowOperationState.visibleWindowCount)
+            ? windowOperationState.visibleWindowCount
+            : null,
+          minimizedWindowCount: Number.isInteger(windowOperationState.minimizedWindowCount)
+            ? windowOperationState.minimizedWindowCount
+            : null,
+          operableWindowCount: Number.isInteger(windowOperationState.operableWindowCount)
+            ? windowOperationState.operableWindowCount
+            : null,
+          inoperableWindowCount: Number.isInteger(windowOperationState.inoperableWindowCount)
+            ? windowOperationState.inoperableWindowCount
+            : null,
+        }
+      : null,
+    currentWindowConclusionPresent:
+      typeof payload?.compactSummary?.currentWindowConclusion === 'string' ||
+      typeof payload?.summary?.currentWindowConclusion === 'string',
     tabStateMatrix: tabStateMatrix
       ? {
           total: Number.isInteger(tabStateMatrix.total) ? tabStateMatrix.total : null,

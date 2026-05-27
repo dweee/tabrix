@@ -109,6 +109,8 @@ export interface BrowserWorldSummary {
   };
   windowStateMatrix: BrowserWorldWindowStateMatrix;
   windowStateConclusion: string;
+  windowOperationState: BrowserWorldWindowOperationState;
+  currentWindowConclusion: string;
   tabStateMatrix: BrowserWorldTabStateMatrix;
   tabStateConclusion: string;
   aiOperationState: BrowserWorldAiOperationState;
@@ -130,6 +132,29 @@ export interface BrowserWorldWindowStateMatrix {
   operabilityUnknown: number;
   stateCounts: Record<string, number>;
   typeCounts: Record<string, number>;
+}
+
+export type BrowserWorldWindowOperationRelation =
+  | 'focused_window_visible_operable'
+  | 'focused_window_minimized'
+  | 'focused_window_not_operable'
+  | 'focused_window_operability_unknown'
+  | 'no_focused_window'
+  | 'no_window_observed';
+
+export interface BrowserWorldWindowOperationState {
+  focusedWindowId: number | null;
+  focusedWindowState: string | null;
+  focusedWindowVisibilityState: BrowserWorldWindowObject['visibilityState'] | null;
+  focusedWindowCanOperate: boolean | null;
+  focusedWindowActiveTabId: number | null;
+  focusedWindowActiveTabCanOperate: boolean | null;
+  relationToCurrentOperableWindow: BrowserWorldWindowOperationRelation;
+  canOperateFocusedWindow: boolean | null;
+  visibleWindowCount: number;
+  minimizedWindowCount: number;
+  operableWindowCount: number;
+  inoperableWindowCount: number;
 }
 
 export interface BrowserWorldTabStateMatrix {
@@ -256,6 +281,9 @@ export interface BrowserWorldEvent {
   windowId: number | null;
   openedBy?: BrowserWorldTabOpenedBy;
   status?: string | null;
+  windowState?: string | null;
+  windowVisibilityState?: BrowserWorldWindowObject['visibilityState'];
+  canTabrixOperate?: boolean | null;
 }
 
 type EventHook = {
@@ -564,6 +592,9 @@ export function initBrowserWorldInventory(): void {
       eventKind: 'window_created',
       tabId: normalized?.activeTabId ?? null,
       windowId: normalized?.windowId ?? null,
+      windowState: normalized?.state ?? null,
+      windowVisibilityState: normalized?.visibilityState,
+      canTabrixOperate: normalized?.canTabrixOperate ?? null,
     });
   });
   bind(chrome.windows?.onRemoved, (windowId: number) => {
@@ -578,7 +609,15 @@ export function initBrowserWorldInventory(): void {
       const focused = id === windowId;
       windowsById.set(id, { ...window, focused, isFocused: focused, updatedAtMs: nowMs() });
     }
-    pushEvent({ eventKind: 'window_focus_changed', tabId: null, windowId });
+    const focusedWindow = windowsById.get(windowId);
+    pushEvent({
+      eventKind: 'window_focus_changed',
+      tabId: null,
+      windowId,
+      windowState: focusedWindow?.state ?? null,
+      windowVisibilityState: focusedWindow?.visibilityState,
+      canTabrixOperate: focusedWindow?.canTabrixOperate ?? null,
+    });
   });
   bind((chrome.windows as any)?.onBoundsChanged, (window: chrome.windows.Window) => {
     const normalized = normalizeWindow(window);
@@ -588,6 +627,9 @@ export function initBrowserWorldInventory(): void {
       eventKind: 'window_bounds_changed',
       tabId: normalized?.activeTabId ?? null,
       windowId: normalized?.windowId ?? null,
+      windowState: normalized?.state ?? null,
+      windowVisibilityState: normalized?.visibilityState,
+      canTabrixOperate: normalized?.canTabrixOperate ?? null,
     });
   });
 }
@@ -671,6 +713,7 @@ function buildSnapshot(): BrowserWorldSnapshot {
     .filter((tab) => tab.canTabrixOperate === true)
     .map((tab) => tab.tabId);
   const windowStateMatrix = buildWindowStateMatrix(windows);
+  const windowOperationState = buildWindowOperationState(windowStateMatrix, focusedWindow ?? null);
   const tabStateMatrix = buildTabStateMatrix(tabs);
   const lastAiOperatedTab =
     tabs
@@ -723,6 +766,8 @@ function buildSnapshot(): BrowserWorldSnapshot {
       },
       windowStateMatrix,
       windowStateConclusion: summarizeWindowStateMatrix(windowStateMatrix, focusedWindow ?? null),
+      windowOperationState,
+      currentWindowConclusion: summarizeCurrentWindow(windowOperationState),
       tabStateMatrix,
       tabStateConclusion: summarizeTabStateMatrix(tabStateMatrix, activeTab, lastAiOperatedTab),
       aiOperationState,
@@ -899,6 +944,65 @@ function summarizeWindowStateMatrix(
   return `Window object matrix: ${matrix.total} window(s), visible=${matrix.visible}, minimized=${matrix.minimized}, focused=${matrix.focused}, operable=${matrix.operable}, focusedWindow=${focusedWindow?.windowId ?? 'unknown'}, focusedWindowOperable=${focusedWindow?.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
 }
 
+function buildWindowOperationState(
+  matrix: BrowserWorldWindowStateMatrix,
+  focusedWindow: BrowserWorldWindowObject | null,
+): BrowserWorldWindowOperationState {
+  const relationToCurrentOperableWindow = classifyWindowOperationRelation(matrix, focusedWindow);
+  return {
+    focusedWindowId: focusedWindow?.windowId ?? null,
+    focusedWindowState: focusedWindow?.state ?? null,
+    focusedWindowVisibilityState: focusedWindow?.visibilityState ?? null,
+    focusedWindowCanOperate: focusedWindow?.canTabrixOperate ?? null,
+    focusedWindowActiveTabId: focusedWindow?.activeTabId ?? null,
+    focusedWindowActiveTabCanOperate: focusedWindow?.activeTabCanOperate ?? null,
+    relationToCurrentOperableWindow,
+    canOperateFocusedWindow:
+      relationToCurrentOperableWindow === 'focused_window_visible_operable'
+        ? true
+        : focusedWindow
+          ? false
+          : null,
+    visibleWindowCount: matrix.visible,
+    minimizedWindowCount: matrix.minimized,
+    operableWindowCount: matrix.operable,
+    inoperableWindowCount: matrix.inoperable,
+  };
+}
+
+function classifyWindowOperationRelation(
+  matrix: BrowserWorldWindowStateMatrix,
+  focusedWindow: BrowserWorldWindowObject | null,
+): BrowserWorldWindowOperationRelation {
+  if (matrix.total === 0) return 'no_window_observed';
+  if (!focusedWindow) return 'no_focused_window';
+  if (focusedWindow.visibilityState === 'minimized') return 'focused_window_minimized';
+  if (focusedWindow.canTabrixOperate === true && focusedWindow.visibilityState === 'visible') {
+    return 'focused_window_visible_operable';
+  }
+  if (focusedWindow.canTabrixOperate === false) return 'focused_window_not_operable';
+  return 'focused_window_operability_unknown';
+}
+
+function summarizeCurrentWindow(state: BrowserWorldWindowOperationState): string {
+  if (state.relationToCurrentOperableWindow === 'no_window_observed') {
+    return 'Current window object: no browser window object is currently retained.';
+  }
+  if (state.relationToCurrentOperableWindow === 'no_focused_window') {
+    return `Current window object: no focused browser window; visible=${state.visibleWindowCount}, minimized=${state.minimizedWindowCount}, operable=${state.operableWindowCount}. Do not assume an active operation container until focus is restored.`;
+  }
+  if (state.relationToCurrentOperableWindow === 'focused_window_visible_operable') {
+    return `Current window object: focused window ${state.focusedWindowId ?? 'unknown'} is visible and operable; activeTab=${state.focusedWindowActiveTabId ?? 'unknown'}.`;
+  }
+  if (state.relationToCurrentOperableWindow === 'focused_window_minimized') {
+    return `Current window object: focused window ${state.focusedWindowId ?? 'unknown'} is minimized; activeTab=${state.focusedWindowActiveTabId ?? 'unknown'}. Browser actions that require visible UI should wait for restore.`;
+  }
+  if (state.relationToCurrentOperableWindow === 'focused_window_not_operable') {
+    return `Current window object: focused window ${state.focusedWindowId ?? 'unknown'} is visibleState=${state.focusedWindowVisibilityState ?? 'unknown'} but not operable; reason is represented by BrowserWindowObject.operabilityReason.`;
+  }
+  return `Current window object: focused window ${state.focusedWindowId ?? 'unknown'} has unknown operability; state=${state.focusedWindowState ?? 'unknown'}, visibility=${state.focusedWindowVisibilityState ?? 'unknown'}.`;
+}
+
 function buildTabAttributeGroups(tab: BrowserWorldTabObject): BrowserWorldTabAttributeGroups {
   return {
     identity: {
@@ -1014,11 +1118,11 @@ function summarizeRecentEvents(events: readonly BrowserWorldEvent[]): string {
     case 'tab_activated':
       return `Last change: tab ${last.tabId ?? 'unknown'} became active in window ${last.windowId ?? 'unknown'}.`;
     case 'window_focus_changed':
-      return `Last change: focused window is ${last.windowId ?? 'unknown'}.`;
+      return `Last change: focused window is ${last.windowId ?? 'unknown'}; state=${last.windowState ?? 'unknown'}, visibility=${last.windowVisibilityState ?? 'unknown'}, operable=${last.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
     case 'window_bounds_changed':
-      return `Last change: window ${last.windowId ?? 'unknown'} bounds or state changed.`;
+      return `Last change: window ${last.windowId ?? 'unknown'} bounds or state changed; state=${last.windowState ?? 'unknown'}, visibility=${last.windowVisibilityState ?? 'unknown'}, operable=${last.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
     case 'window_created':
-      return `Last change: window ${last.windowId ?? 'unknown'} was created.`;
+      return `Last change: window ${last.windowId ?? 'unknown'} was created; state=${last.windowState ?? 'unknown'}, visibility=${last.windowVisibilityState ?? 'unknown'}, operable=${last.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
     case 'window_removed':
       return `Last change: window ${last.windowId ?? 'unknown'} was removed.`;
     case 'tab_replaced':
