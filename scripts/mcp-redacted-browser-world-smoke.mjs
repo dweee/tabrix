@@ -935,16 +935,34 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
   };
 }
 
+export function buildWindowStateMutationProof(redactedWindowState) {
+  return {
+    requestedCapability: 'window_minimize_restore',
+    observationOnly: true,
+    windowStateObserved:
+      redactedWindowState?.windows?.total > 0 &&
+      Boolean(redactedWindowState?.windowStateMatrix) &&
+      Boolean(redactedWindowState?.windowOperationState),
+    mutationToolAvailable: false,
+    mutationAttempted: false,
+    verdict: 'NOT_PROVEN_NO_SAFE_MCP_WINDOW_MUTATION_TOOL',
+    claimBoundary:
+      'This public smoke can observe BrowserWindowObject state, but it does not prove minimize/restore transitions because the current public MCP tool list has no safe window-state mutation tool.',
+  };
+}
+
 function runWindowStateSmoke(cliPath, args) {
   if (!args.skipOpen) {
     // This scenario is observer-only by design; it must not create or mutate windows.
   }
   const browserWorldPayload = callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs);
   const redacted = buildRedactedBrowserWorldSummary(browserWorldPayload, null);
+  const windowStateMutation = buildWindowStateMutationProof(redacted);
   return {
     scenario: 'window-state',
     observerOnly: true,
     redacted,
+    windowStateMutation,
     verdict:
       redacted.windows.total > 0 &&
       redacted.hasBrowserWorldDetail &&

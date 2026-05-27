@@ -8,6 +8,7 @@ import {
   buildPostCloseTargetCleanupSummary,
   buildRedactedBrowserWorldSummary,
   buildRedactedReadPageAlignmentSummary,
+  buildWindowStateMutationProof,
   extractJsonObject,
   extractNavigateTabId,
   parseArgs,
@@ -372,6 +373,26 @@ test('buildRedactedBrowserWorldSummary counts window visibility states without U
     focused: 1,
     operable: 1,
   });
+});
+
+test('buildWindowStateMutationProof marks minimize restore as not proven without mutation tool', () => {
+  assert.deepEqual(
+    buildWindowStateMutationProof({
+      windows: { total: 1 },
+      windowStateMatrix: { total: 1 },
+      windowOperationState: { focusedWindowState: 'normal' },
+    }),
+    {
+      requestedCapability: 'window_minimize_restore',
+      observationOnly: true,
+      windowStateObserved: true,
+      mutationToolAvailable: false,
+      mutationAttempted: false,
+      verdict: 'NOT_PROVEN_NO_SAFE_MCP_WINDOW_MUTATION_TOOL',
+      claimBoundary:
+        'This public smoke can observe BrowserWindowObject state, but it does not prove minimize/restore transitions because the current public MCP tool list has no safe window-state mutation tool.',
+    },
+  );
 });
 
 test('buildPostCloseTargetCleanupSummary reports closed targets without raw tab data', () => {
