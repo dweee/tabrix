@@ -897,9 +897,18 @@ function runReadPageMatrixSmoke(cliPath, smokeUrls, args) {
         compactSummaryBounded: result.redactedBrowserWorldAfterRead.compactSummaryBounded,
         retentionWithinLimit: result.redactedBrowserWorldAfterRead.retentionWithinLimit,
       },
+      browserWorldAfterClose: result.redactedBrowserWorldAfterClose
+        ? {
+            targetTabFound: result.redactedBrowserWorldAfterClose.targetTab?.wasFound ?? false,
+            compactSummaryBounded: result.redactedBrowserWorldAfterClose.compactSummaryBounded,
+            retentionWithinLimit: result.redactedBrowserWorldAfterClose.retentionWithinLimit,
+          }
+        : null,
+      cleanupPassed: result.cleanupPassed,
       passed:
         result.openedPublicTestTab === true &&
         result.closeSucceeded === true &&
+        result.cleanupPassed === true &&
         result.alignmentPassed === true &&
         result.redactedBrowserWorldAfterRead.targetTab?.wasFound === true &&
         result.redactedBrowserWorldAfterRead.compactSummaryBounded === true &&
@@ -943,14 +952,30 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
     Number.isInteger(openedTabId) && !args.keepOpen
       ? closeRunTabs(cliPath, [openedTabId], args.timeoutMs)
       : { attempted: false, succeeded: null, requestedCount: 0, closedCount: 0 };
+  const redactedBrowserWorldAfterClose =
+    closeResult.attempted === true
+      ? buildRedactedBrowserWorldSummary(
+          callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs),
+          openedTabId,
+        )
+      : null;
+  const cleanupPassed =
+    closeResult.attempted === true
+      ? closeResult.succeeded === true &&
+        redactedBrowserWorldAfterClose?.targetTab?.wasFound === false &&
+        redactedBrowserWorldAfterClose?.compactSummaryBounded === true &&
+        redactedBrowserWorldAfterClose?.retentionWithinLimit === true
+      : null;
 
   return {
     scenario: 'read-page',
     openedPublicTestTab: Number.isInteger(openedTabId),
     closeAttempted: closeResult.attempted,
     closeSucceeded: closeResult.succeeded,
+    cleanupPassed,
     redactedReadPage,
     redactedBrowserWorldAfterRead,
+    redactedBrowserWorldAfterClose,
     alignmentPassed:
       redactedReadPage.alignment.ownershipRuntimePresent === true &&
       redactedReadPage.alignment.browserPageObjectCompactPresent === true &&
@@ -972,6 +997,7 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
       redactedReadPage.alignment.pageOperationZonesPresent === true &&
       redactedReadPage.alignment.pageOperationClaimBoundaryPresent === true &&
       redactedBrowserWorldAfterRead.targetTab?.wasFound === true &&
+      cleanupPassed === true &&
       redactedBrowserWorldAfterRead.browserObjectEdgeSummaryPresent === true &&
       redactedBrowserWorldAfterRead.aiOperationState?.latestAiOperatedTabIdPresent === true &&
       redactedBrowserWorldAfterRead.aiOperationState?.latestAiOperation === 'read_page' &&
