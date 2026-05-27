@@ -601,6 +601,9 @@ describe('read_page object lifecycle', () => {
 
     expect(view.attributeGroups.tab_state.summary).toContain('status=loading');
     expect(view.attributeGroups.tab_state.summary).toContain('operable=true');
+    expect(view.attributeGroups.tab_state.summary).toContain(
+      'operationTarget=read_target_browser_active_tab',
+    );
     expect(view.attributeGroups.tab_state.summary).toContain('aiOperation=read_page');
     expect(view.attributeGroups.tab_state.summary).toContain('aiOperationConfidence=0.95');
     expect(view.attributeGroups.tab_state.summary).toContain(
@@ -658,6 +661,12 @@ describe('read_page object lifecycle', () => {
       lastAiOperationConfidence: 0.95,
       lastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
       runtimeStateSource: 'browser_world_inventory',
+      operationTargetRole: 'read_target_browser_active_tab',
+      operationTargetBasis: 'read_target_matches_browser_active_tab',
+      operationTargetCanTabrixOperate: true,
+      operationTargetOperabilityReason: 'regular_web_page',
+      shouldReselectBeforeAction: false,
+      nextRequiredCheck: 'page_level_content_or_postcondition_check',
     });
   });
 
@@ -1255,6 +1264,13 @@ describe('read_page object lifecycle', () => {
     expect(view.attributeGroups.tab_state.summary).toContain('readTargetIsBrowserActive=true');
     expect(view.attributeGroups.tab_state.summary).toContain('primaryRunTab=42');
     expect(view.attributeGroups.tab_state.summary).toContain('owner=run_owned');
+    expect(view.attributeGroups.tab_state.summary).toContain(
+      'operationTarget=read_target_browser_active_tab',
+    );
+    expect(view.attributeGroups.tab_state.summary).toContain('shouldReselectBeforeAction=false');
+    expect(view.attributeGroups.tab_state.summary).toContain(
+      'nextRequiredCheck=refresh_or_choose_operable_target',
+    );
     expect(view.attributeGroups.tab_state.facts).toMatchObject({
       objectKind: 'BrowserTabObject',
       readTargetTabId: 42,
@@ -1266,6 +1282,12 @@ describe('read_page object lifecycle', () => {
       isReadTargetBrowserActiveTab: true,
       isActive: true,
       ownerType: 'run_owned',
+      operationTargetRole: 'read_target_browser_active_tab',
+      operationTargetBasis: 'read_target_matches_browser_active_tab',
+      operationTargetCanTabrixOperate: null,
+      operationTargetOperabilityReason: 'read_target_operability_unknown',
+      shouldReselectBeforeAction: false,
+      nextRequiredCheck: 'refresh_or_choose_operable_target',
       cleanupEligibility: 'not_eligible',
       protectedScopeVerdict: 'protected',
       readTargetPrimaryRelationVerdict: 'current_tab_is_primary',
@@ -1341,6 +1363,10 @@ describe('read_page object lifecycle', () => {
           isReadTargetBrowserActiveTab: true,
           isActive: true,
           ownerType: 'run_owned',
+          operationTargetRole: 'read_target_browser_active_tab',
+          operationTargetBasis: 'read_target_matches_browser_active_tab',
+          shouldReselectBeforeAction: false,
+          nextRequiredCheck: 'refresh_or_choose_operable_target',
           currentTabRunOwnershipVerdict: 'run_owned_by_task',
           readTargetPrimaryRelationVerdict: 'current_tab_is_primary',
           currentTabPrimaryRelationVerdict: 'current_tab_is_primary',
@@ -1402,6 +1428,8 @@ describe('read_page object lifecycle', () => {
     expect(view.attributeGroups.tab_state.facts).toMatchObject({
       isReadTargetTabActive: false,
       isActive: false,
+      operationTargetRole: 'read_target_browser_active_tab',
+      shouldReselectBeforeAction: false,
     });
     expect(view.attributeGroups.visual_reliability.facts).toMatchObject({
       isCurrentWindowFocused: false,
@@ -1423,6 +1451,59 @@ describe('read_page object lifecycle', () => {
       primaryConclusion: expect.stringContaining('Runtime visibility degraded'),
       changedGroups: expect.arrayContaining(['visual_reliability', 'window_state', 'tab_state']),
     });
+  });
+
+  it('marks a background read target as requiring reselect before browser actions', () => {
+    const lifecycle = buildReadPageObjectLifecycle([
+      region({
+        regionId: 'region_content',
+        regionType: 'content',
+        state: 'content_available_candidate',
+        confidence: 0.7,
+      }),
+    ]);
+
+    const view = buildReadPageBrowserPageObjectView({
+      objectLifecycle: lifecycle,
+      pageProjection: pageProjection(),
+      ownershipRuntime: ownershipRuntime({
+        currentTabId: 42,
+        isCurrentTabActive: false,
+        browserActiveTabId: 99,
+        browserActiveTabIdKnown: true,
+        isReadTargetBrowserActiveTab: false,
+        currentTabCanTabrixOperate: true,
+        currentTabOperabilityReason: 'regular_web_page',
+      }),
+    });
+
+    expect(view.attributeGroups.tab_state.summary).toContain(
+      'operationTarget=read_target_background_tab',
+    );
+    expect(view.attributeGroups.tab_state.summary).toContain('shouldReselectBeforeAction=true');
+    expect(view.attributeGroups.tab_state.summary).toContain(
+      'nextRequiredCheck=reselect_or_reread_read_target_before_action',
+    );
+    expect(view.attributeGroups.tab_state.facts).toMatchObject({
+      readTargetTabId: 42,
+      browserActiveTabId: 99,
+      isReadTargetBrowserActiveTab: false,
+      operationTargetRole: 'read_target_background_tab',
+      operationTargetBasis: 'read_target_differs_from_browser_active_tab',
+      operationTargetCanTabrixOperate: true,
+      operationTargetOperabilityReason: 'regular_web_page',
+      shouldReselectBeforeAction: true,
+      nextRequiredCheck: 'reselect_or_reread_read_target_before_action',
+    });
+    expect(view.compact?.facts.tab).toMatchObject({
+      readTargetTabId: 42,
+      browserActiveTabId: 99,
+      isReadTargetBrowserActiveTab: false,
+      operationTargetRole: 'read_target_background_tab',
+      shouldReselectBeforeAction: true,
+      nextRequiredCheck: 'reselect_or_reread_read_target_before_action',
+    });
+    expect(view.attributeGroups.visual_reliability.status).toBe('degraded');
   });
 
   it('labels background reads as read-target tab state without asserting browser active-tab identity', () => {

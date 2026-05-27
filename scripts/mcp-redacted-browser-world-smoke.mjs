@@ -837,6 +837,33 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
           typeof compactTabFacts.browserWorldCurrentOperationConclusion === 'string',
         isRunOwnedByTask: compactTabFacts.isRunOwnedByTask ?? null,
         runtimeStateSource: compactTabFacts.runtimeStateSource ?? null,
+        operationTargetRole:
+          typeof compactTabFacts.operationTargetRole === 'string'
+            ? compactTabFacts.operationTargetRole
+            : null,
+        operationTargetBasis:
+          typeof compactTabFacts.operationTargetBasis === 'string'
+            ? compactTabFacts.operationTargetBasis
+            : null,
+        operationTargetCanTabrixOperate:
+          typeof compactTabFacts.operationTargetCanTabrixOperate === 'boolean'
+            ? compactTabFacts.operationTargetCanTabrixOperate
+            : null,
+        operationTargetOperabilityReason:
+          typeof compactTabFacts.operationTargetOperabilityReason === 'string'
+            ? compactTabFacts.operationTargetOperabilityReason
+            : null,
+        shouldReselectBeforeAction:
+          typeof compactTabFacts.shouldReselectBeforeAction === 'boolean'
+            ? compactTabFacts.shouldReselectBeforeAction
+            : null,
+        nextRequiredCheck:
+          typeof compactTabFacts.nextRequiredCheck === 'string'
+            ? compactTabFacts.nextRequiredCheck
+            : null,
+        operationTargetSummaryPresent: typeof compactTabFacts.operationTargetSummary === 'string',
+        operationTargetClaimBoundaryPresent:
+          typeof compactTabFacts.operationTargetClaimBoundary === 'string',
       },
     },
     pageRegionRuntime: {
@@ -878,6 +905,12 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       browserWorldCurrentOperationConclusionPresent:
         typeof ownershipRuntime?.browserWorldCurrentOperationConclusion === 'string' &&
         typeof compactTabFacts.browserWorldCurrentOperationConclusion === 'string',
+      operationTargetBriefPresent:
+        typeof compactTabFacts.operationTargetRole === 'string' &&
+        typeof compactTabFacts.operationTargetBasis === 'string' &&
+        typeof compactTabFacts.nextRequiredCheck === 'string' &&
+        typeof compactTabFacts.operationTargetSummary === 'string' &&
+        typeof compactTabFacts.operationTargetClaimBoundary === 'string',
       targetTabMatchesReadPage:
         Number.isInteger(targetTabId) && Number.isInteger(ownershipRuntime?.currentTabId)
           ? ownershipRuntime.currentTabId === targetTabId
@@ -1475,6 +1508,7 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
       redactedReadPage.alignment.currentTabAiOperationEvidencePresent === true &&
       redactedReadPage.alignment.browserWorldObjectChangeSummaryPresent === true &&
       redactedReadPage.alignment.browserWorldCurrentOperationConclusionPresent === true &&
+      redactedReadPage.alignment.operationTargetBriefPresent === true &&
       redactedReadPage.alignment.targetTabMatchesReadPage === true &&
       redactedReadPage.alignment.tabOwnerIsAi === true &&
       redactedReadPage.alignment.tabOperable === true &&
@@ -1500,6 +1534,7 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
       redactedReadPage.alignment.currentTabAiOperationEvidencePresent === true &&
       redactedReadPage.alignment.browserWorldObjectChangeSummaryPresent === true &&
       redactedReadPage.alignment.browserWorldCurrentOperationConclusionPresent === true &&
+      redactedReadPage.alignment.operationTargetBriefPresent === true &&
       redactedReadPage.alignment.targetTabMatchesReadPage === true &&
       redactedReadPage.alignment.readTargetIsBrowserActive === true &&
       redactedReadPage.alignment.tabOwnerIsAi === true &&

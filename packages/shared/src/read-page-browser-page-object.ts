@@ -164,6 +164,14 @@ export function buildReadPageBrowserPageObjectCompactView(
         'browserWorldObjectChangeSummary',
         'browserWorldCurrentOperationConclusion',
         'runtimeStateSource',
+        'operationTargetRole',
+        'operationTargetBasis',
+        'operationTargetCanTabrixOperate',
+        'operationTargetOperabilityReason',
+        'shouldReselectBeforeAction',
+        'nextRequiredCheck',
+        'operationTargetSummary',
+        'operationTargetClaimBoundary',
         'protectedScopeVerdict',
         'currentTabRunOwnershipVerdict',
         'readTargetPrimaryRelationVerdict',
@@ -606,9 +614,17 @@ function buildTabStateGroup(
   const aiOperation = ownershipRuntime?.currentTabLastAiOperation ?? null;
   const aiOperationConfidence = ownershipRuntime?.currentTabLastAiOperationConfidence ?? null;
   const aiOperationReason = ownershipRuntime?.currentTabLastAiOperationReason ?? null;
+  const operationTarget = buildReadTargetOperationBrief({
+    tabId,
+    ownershipRuntime,
+    active,
+    browserActiveTabId,
+    readTargetIsBrowserActive,
+    operability,
+  });
   return groupState({
     status: active === true ? 'active' : active === false ? 'background' : 'unknown',
-    summary: `Tab state: readTargetTab=${Number.isInteger(tabId) ? tabId : 'unknown'} is ${active === true ? 'active in its window' : active === false ? 'background/not active in its window' : 'activity unknown'}; status=${status}; browserActiveTab=${ownershipRuntime?.browserActiveTabIdKnown ? formatNullableNumber(browserActiveTabId) : 'unknown'}; readTargetIsBrowserActive=${formatTriState(readTargetIsBrowserActive)}; primaryRunTab=${formatNullableNumber(primaryTabId)}; owner=${owner}; operable=${formatTriState(operability)}; aiOperation=${aiOperation ?? 'none'}; aiOperationConfidence=${aiOperationConfidence ?? 'unknown'}; aiOperationReason=${aiOperationReason ?? 'unknown'}; cleanup=${cleanup}; protection=${protection}.`,
+    summary: `Tab state: readTargetTab=${Number.isInteger(tabId) ? tabId : 'unknown'} is ${active === true ? 'active in its window' : active === false ? 'background/not active in its window' : 'activity unknown'}; status=${status}; browserActiveTab=${ownershipRuntime?.browserActiveTabIdKnown ? formatNullableNumber(browserActiveTabId) : 'unknown'}; readTargetIsBrowserActive=${formatTriState(readTargetIsBrowserActive)}; primaryRunTab=${formatNullableNumber(primaryTabId)}; owner=${owner}; operable=${formatTriState(operability)}; operationTarget=${operationTarget.operationTargetRole}; shouldReselectBeforeAction=${formatTriState(operationTarget.shouldReselectBeforeAction)}; nextRequiredCheck=${operationTarget.nextRequiredCheck}; aiOperation=${aiOperation ?? 'none'}; aiOperationConfidence=${aiOperationConfidence ?? 'unknown'}; aiOperationReason=${aiOperationReason ?? 'unknown'}; cleanup=${cleanup}; protection=${protection}.`,
     facts: {
       objectKind: 'BrowserTabObject',
       readTargetTabId: tabId,
@@ -644,6 +660,14 @@ function buildTabStateGroup(
       browserWorldCurrentOperationConclusion:
         ownershipRuntime?.browserWorldCurrentOperationConclusion ?? null,
       runtimeStateSource: ownershipRuntime?.currentTabRuntimeStateSource ?? 'unknown',
+      operationTargetRole: operationTarget.operationTargetRole,
+      operationTargetBasis: operationTarget.operationTargetBasis,
+      operationTargetCanTabrixOperate: operationTarget.operationTargetCanTabrixOperate,
+      operationTargetOperabilityReason: operationTarget.operationTargetOperabilityReason,
+      shouldReselectBeforeAction: operationTarget.shouldReselectBeforeAction,
+      nextRequiredCheck: operationTarget.nextRequiredCheck,
+      operationTargetSummary: operationTarget.operationTargetSummary,
+      operationTargetClaimBoundary: operationTarget.operationTargetClaimBoundary,
       protectedScopeVerdict: protection,
       currentTabRunOwnershipVerdict: ownershipRuntime?.currentTabRunOwnershipVerdict ?? null,
       readTargetPrimaryRelationVerdict: ownershipRuntime?.currentTabPrimaryRelationVerdict ?? null,
@@ -658,6 +682,87 @@ function buildTabStateGroup(
       ...(ownershipRuntime ? ['ownershipRuntime'] : []),
     ],
   });
+}
+
+function buildReadTargetOperationBrief(input: {
+  tabId: number | null;
+  ownershipRuntime: ReadPageOwnershipRuntimeSummary | null | undefined;
+  active: boolean | null;
+  browserActiveTabId: number | null;
+  readTargetIsBrowserActive: boolean | null;
+  operability: boolean | null;
+}): {
+  operationTargetRole: string;
+  operationTargetBasis: string;
+  operationTargetCanTabrixOperate: boolean | null;
+  operationTargetOperabilityReason: string;
+  shouldReselectBeforeAction: boolean | null;
+  nextRequiredCheck: string;
+  operationTargetSummary: string;
+  operationTargetClaimBoundary: string;
+} {
+  const tabText = Number.isInteger(input.tabId) ? String(input.tabId) : 'unknown';
+  const browserActiveText = Number.isInteger(input.browserActiveTabId)
+    ? String(input.browserActiveTabId)
+    : 'unknown';
+  const operabilityReason =
+    input.ownershipRuntime?.currentTabOperabilityReason ?? 'read_target_operability_unknown';
+  const boundary =
+    'Read-page operation target facts use browser window/tab runtime state only; they do not prove page content understanding, user intent, action success, or API/CDP reuse.';
+
+  if (!input.ownershipRuntime) {
+    return {
+      operationTargetRole: 'unknown',
+      operationTargetBasis: 'ownership_runtime_missing',
+      operationTargetCanTabrixOperate: null,
+      operationTargetOperabilityReason: 'ownership_runtime_missing',
+      shouldReselectBeforeAction: true,
+      nextRequiredCheck: 'refresh_browser_runtime_state',
+      operationTargetSummary:
+        'Read-page operation target: runtime ownership facts are missing; refresh browser runtime state before acting.',
+      operationTargetClaimBoundary: boundary,
+    };
+  }
+
+  if (input.readTargetIsBrowserActive === true) {
+    return {
+      operationTargetRole: 'read_target_browser_active_tab',
+      operationTargetBasis: 'read_target_matches_browser_active_tab',
+      operationTargetCanTabrixOperate: input.operability,
+      operationTargetOperabilityReason: operabilityReason,
+      shouldReselectBeforeAction: false,
+      nextRequiredCheck:
+        input.operability === true
+          ? 'page_level_content_or_postcondition_check'
+          : 'refresh_or_choose_operable_target',
+      operationTargetSummary: `Read-page operation target: tab ${tabText} is the browser-active read target; use page-level evidence before claiming action success.`,
+      operationTargetClaimBoundary: boundary,
+    };
+  }
+
+  if (input.readTargetIsBrowserActive === false) {
+    return {
+      operationTargetRole: 'read_target_background_tab',
+      operationTargetBasis: 'read_target_differs_from_browser_active_tab',
+      operationTargetCanTabrixOperate: input.operability,
+      operationTargetOperabilityReason: operabilityReason,
+      shouldReselectBeforeAction: true,
+      nextRequiredCheck: 'reselect_or_reread_read_target_before_action',
+      operationTargetSummary: `Read-page operation target: read target tab ${tabText} is not browser-active; browser-active tab is ${browserActiveText}, so reselect or reread before browser actions.`,
+      operationTargetClaimBoundary: boundary,
+    };
+  }
+
+  return {
+    operationTargetRole: 'read_target_relation_unknown',
+    operationTargetBasis: 'browser_active_relation_unknown',
+    operationTargetCanTabrixOperate: input.operability,
+    operationTargetOperabilityReason: operabilityReason,
+    shouldReselectBeforeAction: true,
+    nextRequiredCheck: 'refresh_browser_object_snapshot',
+    operationTargetSummary: `Read-page operation target: relation between read target tab ${tabText} and browser-active tab ${browserActiveText} is unknown; refresh before acting.`,
+    operationTargetClaimBoundary: boundary,
+  };
 }
 
 function buildPageStateGroup(

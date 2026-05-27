@@ -928,6 +928,15 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
               'Current operation object includes https://private.example.test/dashboard and Private Dashboard.',
             isRunOwnedByTask: false,
             runtimeStateSource: 'browser_world_inventory',
+            operationTargetRole: 'read_target_browser_active_tab',
+            operationTargetBasis: 'read_target_matches_browser_active_tab',
+            operationTargetCanTabrixOperate: true,
+            operationTargetOperabilityReason: 'regular_web_page',
+            shouldReselectBeforeAction: false,
+            nextRequiredCheck: 'page_level_content_or_postcondition_check',
+            operationTargetSummary:
+              'Read-page operation target includes https://private.example.test/dashboard and Private Dashboard.',
+            operationTargetClaimBoundary: 'Read-page operation target boundary.',
           },
           page: {
             pageText: 'confidential visible page text',
@@ -1003,6 +1012,7 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     ownershipRuntimeAiOperationEvidencePresent: true,
     compactAiOperationEvidencePresent: true,
     currentTabAiOperationEvidencePresent: true,
+    operationTargetBriefPresent: true,
     targetTabMatchesReadPage: true,
     readTargetIsBrowserActive: true,
     tabOwnerIsAi: true,
@@ -1040,6 +1050,14 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     browserWorldCurrentOperationConclusionPresent: true,
     isRunOwnedByTask: false,
     runtimeStateSource: 'browser_world_inventory',
+    operationTargetRole: 'read_target_browser_active_tab',
+    operationTargetBasis: 'read_target_matches_browser_active_tab',
+    operationTargetCanTabrixOperate: true,
+    operationTargetOperabilityReason: 'regular_web_page',
+    shouldReselectBeforeAction: false,
+    nextRequiredCheck: 'page_level_content_or_postcondition_check',
+    operationTargetSummaryPresent: true,
+    operationTargetClaimBoundaryPresent: true,
   });
 });
 
