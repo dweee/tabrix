@@ -17,6 +17,7 @@ import {
   type ReadPageWindowRuntimeState,
   type ReadPageObjectLifecycleSummary,
   type BrowserPageThingProjection,
+  type BrowserPageOwnerType,
   READ_PAGE_REQUESTED_LAYER_VALUES,
   buildReadPageBrowserPageObjectView,
   buildBrowserPageThingProjectionFromReadPage,
@@ -42,7 +43,10 @@ import {
   extractGlobalMenuLabelsForTargetRecovery,
   type ReadPageVisualElementHint,
 } from './read-page-task-protocol';
-import { markBrowserWorldTabAiOperated } from '../../browser-world-inventory';
+import {
+  getBrowserWorldSnapshot,
+  markBrowserWorldTabAiOperated,
+} from '../../browser-world-inventory';
 
 interface ReadPageStats {
   processed: number;
@@ -650,13 +654,16 @@ async function buildModeOutput(params: {
     isCurrentTabActive: params.isCurrentTabActive,
     isCurrentWindowFocused: params.isCurrentWindowFocused,
   });
+  const browserWorld = await getBrowserWorldSnapshot();
+  const browserWorldTab = browserWorld.tabs.find((tab) => tab.tabId === params.tabId) ?? null;
+  const ownerType = browserWorldTabOpenedByToOwnerType(browserWorldTab?.openedBy);
   sharedPayload.pageProjection = buildBrowserPageThingProjectionFromReadPage({
     snapshot: sharedPayload,
     projectionId: `read_page:${params.tabId}:${sharedPayload.historyRef ?? 'snapshot'}`,
     observedAt,
     pageId: `tab:${params.tabId}`,
     tabId: params.tabId,
-    ownerType: 'unknown',
+    ownerType,
     contextVersion: sharedPayload.historyRef ?? `read_page:${params.tabId}`,
     previousContextVersion: null,
     changedByActionId: null,
@@ -667,6 +674,7 @@ async function buildModeOutput(params: {
   });
   sharedPayload.ownershipRuntime = buildReadPageOwnershipRuntimeSummary({
     tabId: params.tabId,
+    currentOwnerType: ownerType,
     currentWindowId: params.currentWindowId,
     currentWindowState: params.currentWindowState,
     currentWindowWidth: params.currentWindowWidth,
@@ -726,8 +734,17 @@ async function buildModeOutput(params: {
   });
 }
 
+function browserWorldTabOpenedByToOwnerType(
+  openedBy: 'ai' | 'user_or_page' | 'unknown' | undefined,
+): BrowserPageOwnerType {
+  if (openedBy === 'ai') return 'run_owned';
+  if (openedBy === 'user_or_page') return 'user_owned';
+  return 'unknown';
+}
+
 function buildReadPageOwnershipRuntimeSummary(params: {
   tabId: number;
+  currentOwnerType: BrowserPageOwnerType;
   currentWindowId: number | null;
   currentWindowState: ReadPageWindowRuntimeState | null;
   currentWindowWidth: number | null;
@@ -753,7 +770,7 @@ function buildReadPageOwnershipRuntimeSummary(params: {
     browserActiveTabId: params.browserActiveTabId,
     browserActiveTabIdKnown: params.browserActiveTabIdKnown,
     isReadTargetBrowserActiveTab: params.isReadTargetBrowserActiveTab,
-    currentOwnerType: 'unknown',
+    currentOwnerType: params.currentOwnerType,
     currentTabRunOwnershipVerdict: 'unknown',
     currentTabPrimaryRelationVerdict: 'unknown',
     protectedScopeVerdict: 'unknown',

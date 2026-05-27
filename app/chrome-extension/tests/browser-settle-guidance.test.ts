@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { navigateTool, switchTabTool } from '@/entrypoints/background/tools/browser/common';
 import { webFetcherTool } from '@/entrypoints/background/tools/browser/web-fetcher';
 import { readPageTool } from '@/entrypoints/background/tools/browser/read-page';
+import { resetBrowserWorldInventoryForTests } from '@/entrypoints/background/browser-world-inventory';
 
 describe('browser settle guidance', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    resetBrowserWorldInventoryForTests();
     if (!chrome.tabs.reload) {
       (chrome.tabs as any).reload = vi.fn().mockResolvedValue(undefined);
     } else {
@@ -1316,6 +1318,24 @@ describe('browser settle guidance', () => {
       title: 'Smoke',
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows.getAll as any).mockResolvedValueOnce([
+      {
+        id: 1,
+        focused: true,
+        state: 'normal',
+        type: 'normal',
+        tabs: [
+          {
+            id: 41,
+            windowId: 1,
+            active: true,
+            status: 'complete',
+            url: 'http://127.0.0.1:62100/',
+            title: 'Smoke',
+          },
+        ],
+      },
+    ]);
     vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
       success: true,
       pageContent:
@@ -1339,6 +1359,12 @@ describe('browser settle guidance', () => {
     });
     expect(payload.page).toMatchObject({
       pageType: 'web_page',
+    });
+    expect(payload.pageProjection).toMatchObject({
+      ownerType: 'user_owned',
+    });
+    expect(payload.ownershipRuntime).toMatchObject({
+      currentOwnerType: 'user_owned',
     });
     expect(Array.isArray(payload.interactiveElements)).toBe(true);
     expect(Array.isArray(payload.candidateActions)).toBe(true);
