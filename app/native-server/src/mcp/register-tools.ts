@@ -1936,6 +1936,12 @@ function readTaskPageRuntimeFields(payload: Record<string, unknown>): TaskPageRu
     currentTabLastAiOperationAtMs:
       readNestedInteger('currentTabLastAiOperationAtMs') ??
       readCompactInteger('lastAiOperationAtMs'),
+    currentTabLastAiOperationConfidence:
+      readNestedNumber('currentTabLastAiOperationConfidence') ??
+      readCompactNumber('lastAiOperationConfidence'),
+    currentTabLastAiOperationReason:
+      readNestedString('currentTabLastAiOperationReason') ??
+      readCompactString('lastAiOperationReason'),
     currentTabCanTabrixOperate:
       readNestedBoolean('currentTabCanTabrixOperate') ?? readCompactBoolean('canTabrixOperate'),
     currentTabOperabilityReason:
@@ -2529,6 +2535,8 @@ function buildAiFacingOwnershipRuntimeSummary(
     currentTabAiOperationState: runtimeFields.currentTabAiOperationState ?? null,
     currentTabLastAiOperation: runtimeFields.currentTabLastAiOperation ?? null,
     currentTabLastAiOperationAtMs: runtimeFields.currentTabLastAiOperationAtMs ?? null,
+    currentTabLastAiOperationConfidence: runtimeFields.currentTabLastAiOperationConfidence ?? null,
+    currentTabLastAiOperationReason: runtimeFields.currentTabLastAiOperationReason ?? null,
     currentTabCanTabrixOperate: runtimeFields.currentTabCanTabrixOperate ?? null,
     currentTabOperabilityReason: runtimeFields.currentTabOperabilityReason ?? null,
     currentTabRuntimeStateSource: runtimeFields.currentTabRuntimeStateSource ?? 'unknown',

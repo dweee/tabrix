@@ -599,6 +599,14 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
     compactFacts.window && typeof compactFacts.window === 'object' ? compactFacts.window : {};
   const compactTabFacts =
     compactFacts.tab && typeof compactFacts.tab === 'object' ? compactFacts.tab : {};
+  const ownershipRuntimeAiOperationEvidencePresent =
+    typeof ownershipRuntime?.currentTabLastAiOperation === 'string' &&
+    typeof ownershipRuntime?.currentTabLastAiOperationConfidence === 'number' &&
+    typeof ownershipRuntime?.currentTabLastAiOperationReason === 'string';
+  const compactAiOperationEvidencePresent =
+    typeof compactTabFacts?.lastAiOperation === 'string' &&
+    typeof compactTabFacts?.lastAiOperationConfidence === 'number' &&
+    typeof compactTabFacts?.lastAiOperationReason === 'string';
   const pageRegions = Array.isArray(payload?.pageRegions) ? payload.pageRegions : [];
   const operationMap = payload?.pageOperationMap;
   const operationZones = Array.isArray(operationMap?.zones) ? operationMap.zones : [];
@@ -645,6 +653,13 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       currentTabOpenedBy: ownershipRuntime?.currentTabOpenedBy ?? null,
       currentTabOpenedByConfidence: ownershipRuntime?.currentTabOpenedByConfidence ?? null,
       currentTabAiOperationState: ownershipRuntime?.currentTabAiOperationState ?? null,
+      currentTabLastAiOperation: ownershipRuntime?.currentTabLastAiOperation ?? null,
+      currentTabLastAiOperationConfidence:
+        typeof ownershipRuntime?.currentTabLastAiOperationConfidence === 'number'
+          ? ownershipRuntime.currentTabLastAiOperationConfidence
+          : null,
+      currentTabLastAiOperationReasonPresent:
+        typeof ownershipRuntime?.currentTabLastAiOperationReason === 'string',
       currentTabCanTabrixOperate: ownershipRuntime?.currentTabCanTabrixOperate ?? null,
       currentTabStatus: ownershipRuntime?.currentTabStatus ?? null,
       currentTabRuntimeStateSource: ownershipRuntime?.currentTabRuntimeStateSource ?? null,
@@ -674,6 +689,9 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
         currentActiveTabId: compactTabFacts.currentActiveTabId ?? null,
         browserActiveTabId: compactTabFacts.browserActiveTabId ?? null,
         openedBy: compactTabFacts.openedBy ?? null,
+        lastAiOperation: compactTabFacts.lastAiOperation ?? null,
+        lastAiOperationConfidence: compactTabFacts.lastAiOperationConfidence ?? null,
+        lastAiOperationReasonPresent: typeof compactTabFacts.lastAiOperationReason === 'string',
         isRunOwnedByTask: compactTabFacts.isRunOwnedByTask ?? null,
         runtimeStateSource: compactTabFacts.runtimeStateSource ?? null,
       },
@@ -707,6 +725,10 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       currentWindowStateKnown: typeof ownershipRuntime?.currentWindowState === 'string',
       currentTabStatusKnown: typeof ownershipRuntime?.currentTabStatus === 'string',
       currentTabOperabilityKnown: typeof ownershipRuntime?.currentTabCanTabrixOperate === 'boolean',
+      ownershipRuntimeAiOperationEvidencePresent,
+      compactAiOperationEvidencePresent,
+      currentTabAiOperationEvidencePresent:
+        ownershipRuntimeAiOperationEvidencePresent || compactAiOperationEvidencePresent,
       targetTabMatchesReadPage:
         Number.isInteger(targetTabId) && Number.isInteger(ownershipRuntime?.currentTabId)
           ? ownershipRuntime.currentTabId === targetTabId
@@ -1235,6 +1257,7 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
       redactedReadPage.alignment.currentWindowStateKnown === true &&
       redactedReadPage.alignment.currentTabStatusKnown === true &&
       redactedReadPage.alignment.currentTabOperabilityKnown === true &&
+      redactedReadPage.alignment.currentTabAiOperationEvidencePresent === true &&
       redactedReadPage.alignment.targetTabMatchesReadPage === true &&
       redactedReadPage.alignment.readTargetIsBrowserActive === true &&
       redactedReadPage.alignment.tabOwnerIsAi === true &&

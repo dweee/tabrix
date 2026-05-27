@@ -589,6 +589,8 @@ describe('read_page object lifecycle', () => {
         currentTabAiOperationState: 'recently_operated',
         currentTabLastAiOperation: 'read_page',
         currentTabLastAiOperationAtMs: 1770000000000,
+        currentTabLastAiOperationConfidence: 0.95,
+        currentTabLastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
         currentTabCanTabrixOperate: true,
         currentTabOperabilityReason: 'regular_web_page',
         currentTabRuntimeStateSource: 'browser_world_inventory',
@@ -599,6 +601,11 @@ describe('read_page object lifecycle', () => {
 
     expect(view.attributeGroups.tab_state.summary).toContain('status=loading');
     expect(view.attributeGroups.tab_state.summary).toContain('operable=true');
+    expect(view.attributeGroups.tab_state.summary).toContain('aiOperation=read_page');
+    expect(view.attributeGroups.tab_state.summary).toContain('aiOperationConfidence=0.95');
+    expect(view.attributeGroups.tab_state.summary).toContain(
+      'aiOperationReason=marked_by_tabrix_tool_execution:read_page',
+    );
     expect(view.compact?.primaryConclusion).toContain('One Tab page object');
     expect(view.compact?.primaryConclusion).toContain('tab=42');
     expect(view.compact?.primaryConclusion).toContain('active=true');
@@ -629,6 +636,8 @@ describe('read_page object lifecycle', () => {
       aiOperationState: 'recently_operated',
       lastAiOperation: 'read_page',
       lastAiOperationAtMs: 1770000000000,
+      lastAiOperationConfidence: 0.95,
+      lastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
       runtimeStateSource: 'browser_world_inventory',
     });
   });

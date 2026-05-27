@@ -159,6 +159,8 @@ export function buildReadPageBrowserPageObjectCompactView(
         'aiOperationState',
         'lastAiOperation',
         'lastAiOperationAtMs',
+        'lastAiOperationConfidence',
+        'lastAiOperationReason',
         'runtimeStateSource',
         'protectedScopeVerdict',
         'currentTabRunOwnershipVerdict',
@@ -583,9 +585,12 @@ function buildTabStateGroup(
   const readTargetIsBrowserActive = ownershipRuntime?.isReadTargetBrowserActiveTab ?? null;
   const status = ownershipRuntime?.currentTabStatus ?? projection?.stability ?? 'unknown';
   const operability = ownershipRuntime?.currentTabCanTabrixOperate ?? null;
+  const aiOperation = ownershipRuntime?.currentTabLastAiOperation ?? null;
+  const aiOperationConfidence = ownershipRuntime?.currentTabLastAiOperationConfidence ?? null;
+  const aiOperationReason = ownershipRuntime?.currentTabLastAiOperationReason ?? null;
   return groupState({
     status: active === true ? 'active' : active === false ? 'background' : 'unknown',
-    summary: `Tab state: readTargetTab=${Number.isInteger(tabId) ? tabId : 'unknown'} is ${active === true ? 'active in its window' : active === false ? 'background/not active in its window' : 'activity unknown'}; status=${status}; browserActiveTab=${ownershipRuntime?.browserActiveTabIdKnown ? formatNullableNumber(browserActiveTabId) : 'unknown'}; readTargetIsBrowserActive=${formatTriState(readTargetIsBrowserActive)}; primaryRunTab=${formatNullableNumber(primaryTabId)}; owner=${owner}; operable=${formatTriState(operability)}; cleanup=${cleanup}; protection=${protection}.`,
+    summary: `Tab state: readTargetTab=${Number.isInteger(tabId) ? tabId : 'unknown'} is ${active === true ? 'active in its window' : active === false ? 'background/not active in its window' : 'activity unknown'}; status=${status}; browserActiveTab=${ownershipRuntime?.browserActiveTabIdKnown ? formatNullableNumber(browserActiveTabId) : 'unknown'}; readTargetIsBrowserActive=${formatTriState(readTargetIsBrowserActive)}; primaryRunTab=${formatNullableNumber(primaryTabId)}; owner=${owner}; operable=${formatTriState(operability)}; aiOperation=${aiOperation ?? 'none'}; aiOperationConfidence=${aiOperationConfidence ?? 'unknown'}; aiOperationReason=${aiOperationReason ?? 'unknown'}; cleanup=${cleanup}; protection=${protection}.`,
     facts: {
       objectKind: 'BrowserTabObject',
       readTargetTabId: tabId,
@@ -613,8 +618,10 @@ function buildTabStateGroup(
       canTabrixOperate: operability,
       operabilityReason: ownershipRuntime?.currentTabOperabilityReason ?? null,
       aiOperationState: ownershipRuntime?.currentTabAiOperationState ?? null,
-      lastAiOperation: ownershipRuntime?.currentTabLastAiOperation ?? null,
+      lastAiOperation: aiOperation,
       lastAiOperationAtMs: ownershipRuntime?.currentTabLastAiOperationAtMs ?? null,
+      lastAiOperationConfidence: aiOperationConfidence,
+      lastAiOperationReason: aiOperationReason,
       runtimeStateSource: ownershipRuntime?.currentTabRuntimeStateSource ?? 'unknown',
       protectedScopeVerdict: protection,
       currentTabRunOwnershipVerdict: ownershipRuntime?.currentTabRunOwnershipVerdict ?? null,

@@ -757,6 +757,8 @@ export interface ReadPageOwnershipRuntimeSummary {
   currentTabAiOperationState?: 'idle' | 'recently_operated' | 'closed' | null;
   currentTabLastAiOperation?: string | null;
   currentTabLastAiOperationAtMs?: number | null;
+  currentTabLastAiOperationConfidence?: number | null;
+  currentTabLastAiOperationReason?: string | null;
   currentTabCanTabrixOperate?: boolean | null;
   currentTabOperabilityReason?: string | null;
   currentTabRuntimeStateSource?: 'browser_world_inventory' | 'chrome_tab_snapshot' | 'unknown';

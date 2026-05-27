@@ -764,6 +764,19 @@ function buildReadPageOwnershipRuntimeSummary(params: {
   browserActiveTabIdKnown: boolean;
   isReadTargetBrowserActiveTab: boolean | null;
 }): ReadPageOwnershipRuntimeSummary {
+  const lastAiOperation = params.browserWorldTab?.lastAiOperation ?? null;
+  const lastAiOperationConfidence =
+    typeof params.browserWorldTab?.lastAiOperationConfidence === 'number'
+      ? params.browserWorldTab.lastAiOperationConfidence
+      : lastAiOperation
+        ? 0.7
+        : null;
+  const lastAiOperationReason =
+    params.browserWorldTab?.lastAiOperationReason ??
+    (lastAiOperation
+      ? `browser_world_inventory_operation_marker_without_reason:${lastAiOperation}`
+      : null);
+
   return {
     currentTabId: params.tabId,
     currentWindowId: params.currentWindowId,
@@ -790,8 +803,10 @@ function buildReadPageOwnershipRuntimeSummary(params: {
     currentTabOpenedByConfidence: params.browserWorldTab?.openedByConfidence ?? null,
     currentTabOpenedByReason: params.browserWorldTab?.openedByReason ?? null,
     currentTabAiOperationState: params.browserWorldTab?.aiOperationState ?? null,
-    currentTabLastAiOperation: params.browserWorldTab?.lastAiOperation ?? null,
+    currentTabLastAiOperation: lastAiOperation,
     currentTabLastAiOperationAtMs: params.browserWorldTab?.lastAiOperationAtMs ?? null,
+    currentTabLastAiOperationConfidence: lastAiOperationConfidence,
+    currentTabLastAiOperationReason: lastAiOperationReason,
     currentTabCanTabrixOperate: params.browserWorldTab?.canTabrixOperate ?? null,
     currentTabOperabilityReason: params.browserWorldTab?.operabilityReason ?? null,
     currentTabRuntimeStateSource: params.browserWorldTab
