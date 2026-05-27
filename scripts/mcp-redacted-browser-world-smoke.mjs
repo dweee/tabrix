@@ -272,6 +272,7 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
   const latestAiOperatedObject = payload?.compactSummary?.latestAiOperatedObject ?? null;
   const operationRouting = payload?.compactSummary?.operationRouting ?? null;
   const aiRoutingBrief = payload?.compactSummary?.aiRoutingBrief ?? null;
+  const operationTargetBrief = payload?.compactSummary?.operationTargetBrief ?? null;
   const redactCompactOperationObject = (object) =>
     object
       ? {
@@ -516,6 +517,46 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
               ? aiRoutingBrief.canContinueOnLatestAiOperatedTab
               : null,
           claimBoundaryPresent: typeof aiRoutingBrief.claimBoundary === 'string',
+        }
+      : null,
+    operationTargetBrief: operationTargetBrief
+      ? {
+          targetTabIdPresent: Number.isInteger(operationTargetBrief.targetTabId),
+          targetWindowIdPresent: Number.isInteger(operationTargetBrief.targetWindowId),
+          targetRole:
+            typeof operationTargetBrief.targetRole === 'string'
+              ? operationTargetBrief.targetRole
+              : null,
+          targetBasis:
+            typeof operationTargetBrief.targetBasis === 'string'
+              ? operationTargetBrief.targetBasis
+              : null,
+          targetCanTabrixOperate:
+            typeof operationTargetBrief.targetCanTabrixOperate === 'boolean'
+              ? operationTargetBrief.targetCanTabrixOperate
+              : null,
+          targetOperabilityReason:
+            typeof operationTargetBrief.targetOperabilityReason === 'string'
+              ? operationTargetBrief.targetOperabilityReason
+              : null,
+          browserActiveTabIdPresent: Number.isInteger(operationTargetBrief.browserActiveTabId),
+          latestAiOperatedTabIdPresent: Number.isInteger(
+            operationTargetBrief.latestAiOperatedTabId,
+          ),
+          relationToBrowserActiveTab:
+            typeof operationTargetBrief.relationToBrowserActiveTab === 'string'
+              ? operationTargetBrief.relationToBrowserActiveTab
+              : null,
+          shouldReselectBeforeAction:
+            typeof operationTargetBrief.shouldReselectBeforeAction === 'boolean'
+              ? operationTargetBrief.shouldReselectBeforeAction
+              : null,
+          nextRequiredCheck:
+            typeof operationTargetBrief.nextRequiredCheck === 'string'
+              ? operationTargetBrief.nextRequiredCheck
+              : null,
+          summaryPresent: typeof operationTargetBrief.summary === 'string',
+          claimBoundaryPresent: typeof operationTargetBrief.claimBoundary === 'string',
         }
       : null,
     tabStateMatrix: tabStateMatrix
@@ -893,6 +934,7 @@ export function buildStepSummary(step, payload, targetTabId) {
     latestAiOperatedObject: redacted.latestAiOperatedObject,
     operationRouting: redacted.operationRouting,
     aiRoutingBrief: redacted.aiRoutingBrief,
+    operationTargetBrief: redacted.operationTargetBrief,
     targetTab: redacted.targetTab,
     counts: redacted.counts,
     tabLifecycleState: redacted.tabLifecycleState,
@@ -1139,6 +1181,11 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
             step.aiRoutingBrief?.summaryPresent === true &&
             step.aiRoutingBrief?.recommendedNextCheckPresent === true &&
             step.aiRoutingBrief?.claimBoundaryPresent === true &&
+            step.operationTargetBrief?.targetTabIdPresent === true &&
+            typeof step.operationTargetBrief?.targetRole === 'string' &&
+            typeof step.operationTargetBrief?.nextRequiredCheck === 'string' &&
+            step.operationTargetBrief?.summaryPresent === true &&
+            step.operationTargetBrief?.claimBoundaryPresent === true &&
             step.activeTabIncludedInCompactTabs === true,
         ),
     };

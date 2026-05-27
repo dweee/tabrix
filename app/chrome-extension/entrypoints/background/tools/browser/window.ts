@@ -155,6 +155,120 @@ function buildAiRoutingBrief(args: {
   };
 }
 
+function buildOperationTargetBrief(args: {
+  browserActiveTab: BrowserWorldTabObject | null;
+  latestAiOperatedTab: BrowserWorldTabObject | null;
+  relationToBrowserActiveTab: string;
+  canContinueOnLatestAiOperatedTab: boolean | null;
+}) {
+  const activeTabId = args.browserActiveTab?.tabId ?? null;
+  const latestAiTabId = args.latestAiOperatedTab?.tabId ?? null;
+
+  if (args.relationToBrowserActiveTab === 'no_ai_operation_observed') {
+    return {
+      targetTabId: activeTabId,
+      targetWindowId: args.browserActiveTab?.windowId ?? null,
+      targetRole: 'browser_active_tab_candidate',
+      targetBasis: 'no_ai_operated_tab_observed',
+      targetCanTabrixOperate: args.browserActiveTab?.canTabrixOperate ?? null,
+      targetOperabilityReason:
+        args.browserActiveTab?.operabilityReason ?? 'active_tab_not_observed',
+      browserActiveTabId: activeTabId,
+      latestAiOperatedTabId: null,
+      relationToBrowserActiveTab: args.relationToBrowserActiveTab,
+      shouldReselectBeforeAction: false,
+      nextRequiredCheck: 'read_or_select_intended_target',
+      summary:
+        activeTabId === null
+          ? 'Operation target brief: no AI-operated tab is known and no browser-active tab is observed; select a target before acting.'
+          : `Operation target brief: no AI-operated tab is known; browser-active tab ${activeTabId} is only a candidate target until it is read or explicitly selected.`,
+      claimBoundary:
+        'Target brief uses browser object routing only; it does not prove page content, user intent, or task success.',
+    };
+  }
+
+  if (args.relationToBrowserActiveTab === 'same_as_browser_active') {
+    return {
+      targetTabId: latestAiTabId,
+      targetWindowId: args.latestAiOperatedTab?.windowId ?? null,
+      targetRole: 'latest_ai_operated_active_tab',
+      targetBasis: 'latest_ai_operated_tab_matches_browser_active_tab',
+      targetCanTabrixOperate: args.latestAiOperatedTab?.canTabrixOperate ?? null,
+      targetOperabilityReason:
+        args.latestAiOperatedTab?.operabilityReason ?? 'latest_ai_operated_tab_not_observed',
+      browserActiveTabId: activeTabId,
+      latestAiOperatedTabId: latestAiTabId,
+      relationToBrowserActiveTab: args.relationToBrowserActiveTab,
+      shouldReselectBeforeAction: false,
+      nextRequiredCheck:
+        args.canContinueOnLatestAiOperatedTab === true
+          ? 'page_level_read_or_postcondition_check'
+          : 'refresh_target_state',
+      summary: `Operation target brief: latest AI-operated tab ${latestAiTabId ?? 'unknown'} is also browser-active; continue only after page-level evidence is refreshed.`,
+      claimBoundary:
+        'Target brief proves routing alignment only; page action completion still needs read/postcondition evidence.',
+    };
+  }
+
+  if (args.relationToBrowserActiveTab === 'latest_ai_operated_background_tab') {
+    return {
+      targetTabId: latestAiTabId,
+      targetWindowId: args.latestAiOperatedTab?.windowId ?? null,
+      targetRole: 'latest_ai_operated_background_tab',
+      targetBasis: 'latest_ai_operated_tab_differs_from_browser_active_tab',
+      targetCanTabrixOperate: args.latestAiOperatedTab?.canTabrixOperate ?? null,
+      targetOperabilityReason:
+        args.latestAiOperatedTab?.operabilityReason ?? 'latest_ai_operated_tab_not_observed',
+      browserActiveTabId: activeTabId,
+      latestAiOperatedTabId: latestAiTabId,
+      relationToBrowserActiveTab: args.relationToBrowserActiveTab,
+      shouldReselectBeforeAction: true,
+      nextRequiredCheck: 'reselect_or_reread_latest_ai_operated_tab',
+      summary: `Operation target brief: latest AI-operated tab ${latestAiTabId ?? 'unknown'} is not browser-active; active tab is ${activeTabId ?? 'unknown'}, so do not act until the intended tab is reselected or reread.`,
+      claimBoundary:
+        'Target brief proves a browser object mismatch only; it does not decide user intent or task success.',
+    };
+  }
+
+  if (args.relationToBrowserActiveTab === 'browser_active_not_latest_ai_operated') {
+    return {
+      targetTabId: latestAiTabId,
+      targetWindowId: args.latestAiOperatedTab?.windowId ?? null,
+      targetRole: 'ambiguous_latest_ai_operated_tab',
+      targetBasis: 'browser_active_tab_differs_from_latest_ai_operated_tab',
+      targetCanTabrixOperate: args.latestAiOperatedTab?.canTabrixOperate ?? null,
+      targetOperabilityReason:
+        args.latestAiOperatedTab?.operabilityReason ?? 'latest_ai_operated_tab_not_observed',
+      browserActiveTabId: activeTabId,
+      latestAiOperatedTabId: latestAiTabId,
+      relationToBrowserActiveTab: args.relationToBrowserActiveTab,
+      shouldReselectBeforeAction: true,
+      nextRequiredCheck: 'refresh_routing_and_choose_target',
+      summary: `Operation target brief: browser-active tab ${activeTabId ?? 'unknown'} differs from latest AI-operated tab ${latestAiTabId ?? 'unknown'}; refresh routing before acting.`,
+      claimBoundary:
+        'Target brief identifies target ambiguity only; it must not be treated as a page or task verdict.',
+    };
+  }
+
+  return {
+    targetTabId: null,
+    targetWindowId: null,
+    targetRole: 'unknown',
+    targetBasis: 'routing_relation_unknown',
+    targetCanTabrixOperate: null,
+    targetOperabilityReason: 'routing_relation_unknown',
+    browserActiveTabId: activeTabId,
+    latestAiOperatedTabId: latestAiTabId,
+    relationToBrowserActiveTab: args.relationToBrowserActiveTab,
+    shouldReselectBeforeAction: true,
+    nextRequiredCheck: 'refresh_browser_object_snapshot',
+    summary:
+      'Operation target brief: browser object routing is unknown; refresh the browser snapshot before acting.',
+    claimBoundary:
+      'Target brief is uncertain and must not be used as operation permission or task evidence.',
+  };
+}
+
 class WindowTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS;
   async execute(): Promise<ToolResult> {
@@ -312,6 +426,14 @@ class WindowTool extends BaseBrowserToolExecutor {
             canContinueOnLatestAiOperatedTab:
               browserWorld.summary.aiOperationState.canContinueOnLatestAiOperatedTab,
             activeTabCanOperate: browserActiveTab?.canTabrixOperate ?? null,
+          }),
+          operationTargetBrief: buildOperationTargetBrief({
+            browserActiveTab,
+            latestAiOperatedTab,
+            relationToBrowserActiveTab:
+              browserWorld.summary.aiOperationState.relationToBrowserActiveTab,
+            canContinueOnLatestAiOperatedTab:
+              browserWorld.summary.aiOperationState.canContinueOnLatestAiOperatedTab,
           }),
           windows: structuredWindows.map((window) => ({
             windowId: window.windowId,

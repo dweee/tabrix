@@ -159,6 +159,23 @@ describe('get_windows_and_tabs state inventory', () => {
           claimBoundary:
             'Browser routing brief uses tab/window lifecycle state only; it does not prove page content, task success, or action postconditions.',
         },
+        operationTargetBrief: {
+          targetTabId: 102,
+          targetWindowId: 10,
+          targetRole: 'browser_active_tab_candidate',
+          targetBasis: 'no_ai_operated_tab_observed',
+          targetCanTabrixOperate: true,
+          targetOperabilityReason: 'regular_web_page',
+          browserActiveTabId: 102,
+          latestAiOperatedTabId: null,
+          relationToBrowserActiveTab: 'no_ai_operation_observed',
+          shouldReselectBeforeAction: false,
+          nextRequiredCheck: 'read_or_select_intended_target',
+          summary:
+            'Operation target brief: no AI-operated tab is known; browser-active tab 102 is only a candidate target until it is read or explicitly selected.',
+          claimBoundary:
+            'Target brief uses browser object routing only; it does not prove page content, user intent, or task success.',
+        },
         windows: [
           {
             windowId: 10,
@@ -475,6 +492,23 @@ describe('get_windows_and_tabs state inventory', () => {
       canContinueOnLatestAiOperatedTab: false,
       claimBoundary:
         'Browser routing brief proves the operation target is not the browser-active tab; it does not prove page content or task result.',
+    });
+    expect(payload.compactSummary.operationTargetBrief).toMatchObject({
+      targetTabId: 202,
+      targetWindowId: 10,
+      targetRole: 'latest_ai_operated_background_tab',
+      targetBasis: 'latest_ai_operated_tab_differs_from_browser_active_tab',
+      targetCanTabrixOperate: true,
+      targetOperabilityReason: 'regular_web_page',
+      browserActiveTabId: 201,
+      latestAiOperatedTabId: 202,
+      relationToBrowserActiveTab: 'latest_ai_operated_background_tab',
+      shouldReselectBeforeAction: true,
+      nextRequiredCheck: 'reselect_or_reread_latest_ai_operated_tab',
+      summary:
+        'Operation target brief: latest AI-operated tab 202 is not browser-active; active tab is 201, so do not act until the intended tab is reselected or reread.',
+      claimBoundary:
+        'Target brief proves a browser object mismatch only; it does not decide user intent or task success.',
     });
     expect(payload.compactSummary.objectChangeSummary).toBe(
       'Object change summary: AI operation read_page was recorded on tab 202; AI last operated tab 202, but the active tab is 201; reselect or reread before continuing.',
