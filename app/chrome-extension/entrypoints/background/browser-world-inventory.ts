@@ -95,6 +95,7 @@ export interface BrowserWorldSummary {
     operableTabs: number;
   };
   recentChangeSummary: string;
+  objectChangeConclusion: string;
 }
 
 export interface BrowserWorldTabStateSummary {
@@ -564,6 +565,12 @@ function buildSnapshot(): BrowserWorldSnapshot {
         operableTabs: operableTabIds.length,
       },
       recentChangeSummary,
+      objectChangeConclusion: summarizeObjectChangeConclusion(
+        recentEvents,
+        activeTab,
+        lastAiOperatedTab,
+        focusedWindow ?? null,
+      ),
     },
     recentEvents: [...recentEvents],
     windows,
@@ -587,6 +594,38 @@ function summarizeTabState(tab: BrowserWorldTabObject): BrowserWorldTabStateSumm
     canTabrixOperate: tab.canTabrixOperate,
     operabilityReason: tab.operabilityReason,
   };
+}
+
+function summarizeObjectChangeConclusion(
+  events: readonly BrowserWorldEvent[],
+  activeTab: BrowserWorldTabObject | null,
+  lastAiOperatedTab: BrowserWorldTabObject | null,
+  focusedWindow: BrowserWorldWindowObject | null,
+): string {
+  const last =
+    [...events].reverse().find((event) => event.eventKind !== 'inventory_seeded') ?? events.at(-1);
+  if (!last) {
+    return 'No browser object change has been observed yet.';
+  }
+  if (last.eventKind === 'tab_activated' && activeTab) {
+    return `Current page object is tab ${activeTab.tabId}; owner=${activeTab.openedBy}, operable=${activeTab.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
+  }
+  if (last.eventKind === 'ai_tab_marked' && lastAiOperatedTab) {
+    return `Latest AI-operated page object is tab ${lastAiOperatedTab.tabId}; operation=${lastAiOperatedTab.lastAiOperation ?? 'unknown'}, operable=${lastAiOperatedTab.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
+  }
+  if (last.eventKind === 'tab_removed') {
+    return `Page object tab ${last.tabId ?? 'unknown'} was removed; previousOwner=${last.openedBy ?? 'unknown'}.`;
+  }
+  if (last.eventKind === 'window_bounds_changed' && focusedWindow) {
+    return `Active window object is ${focusedWindow.windowId}; visibility=${focusedWindow.visibilityState}, operable=${focusedWindow.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
+  }
+  if (last.eventKind === 'window_focus_changed') {
+    return `Focused window object changed to ${last.windowId ?? 'unknown'}.`;
+  }
+  if (lastAiOperatedTab) {
+    return `Latest AI-operated page object is tab ${lastAiOperatedTab.tabId}; operation=${lastAiOperatedTab.lastAiOperation ?? 'unknown'}, operable=${lastAiOperatedTab.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
+  }
+  return summarizeRecentEvents(events);
 }
 
 function summarizeRecentEvents(events: readonly BrowserWorldEvent[]): string {

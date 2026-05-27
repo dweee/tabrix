@@ -160,6 +160,7 @@ describe('browser world inventory', () => {
     let snapshot = await getBrowserWorldSnapshot();
     expect(snapshot.aiOpenedTabIds).toEqual([20]);
     expect(snapshot.browserActiveTabId).toBe(20);
+    expect(snapshot.summary.objectChangeConclusion).toContain('Current page object is tab 20');
     expect(snapshot.tabs.find((tab) => tab.tabId === 20)).toMatchObject({
       url: 'https://ai-opened.test/done',
       openedBy: 'ai',
@@ -170,6 +171,7 @@ describe('browser world inventory', () => {
     listeners.tabRemoved[0]?.(20, { windowId: 1, isWindowClosing: false });
     snapshot = await getBrowserWorldSnapshot();
     expect(snapshot.tabs.some((tab) => tab.tabId === 20)).toBe(false);
+    expect(snapshot.summary.objectChangeConclusion).toContain('Page object tab 20 was removed');
     expect(snapshot.recentEvents.at(-1)).toMatchObject({
       eventKind: 'tab_removed',
       tabId: 20,
@@ -183,6 +185,11 @@ describe('browser world inventory', () => {
 
     markBrowserWorldTabAiCreated(10);
     markBrowserWorldTabAiOperated(10, 'read_page');
+
+    const operated = await getBrowserWorldSnapshot();
+    expect(operated.summary.objectChangeConclusion).toContain(
+      'Latest AI-operated page object is tab 10',
+    );
 
     const refreshed = await refreshBrowserWorldSnapshot();
 
@@ -222,6 +229,9 @@ describe('browser world inventory', () => {
       lastAiOperation: 'read_page',
       canTabrixOperate: true,
     });
+    expect(refreshed.summary.objectChangeConclusion).toContain(
+      'Latest AI-operated page object is tab 10',
+    );
   });
 
   it('updates BrowserWindowObject operability when window state changes', async () => {
