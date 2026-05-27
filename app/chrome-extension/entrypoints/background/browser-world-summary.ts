@@ -388,12 +388,18 @@ export function summarizeDynamicObjectUpdate(
     return `Dynamic object update: no browser object change observed; retainedWindows=${windowOperationState.visibleWindowCount + windowOperationState.minimizedWindowCount}, retainedTabs=${lifecycleState.retainedTabCount}, activeTab=${lifecycleState.activeTabId ?? 'unknown'}.`;
   }
   if (last.eventKind === 'tab_removed') {
+    if (lifecycleState.recentRemovedCount > 1) {
+      return `Dynamic object update: ${lifecycleState.recentRemovedCount} tab page object(s) were removed recently; latestRemovedTab=${last.tabId ?? 'unknown'}, previousOwner=${last.openedBy ?? 'unknown'}, retainedTabs=${lifecycleState.retainedTabCount}, aiOpenedRetained=${lifecycleState.aiOpenedRetainedCount}, activeTab=${lifecycleState.activeTabId ?? 'unknown'}.`;
+    }
     return `Dynamic object update: tab ${last.tabId ?? 'unknown'} was removed; previousOwner=${last.openedBy ?? 'unknown'}, retainedTabs=${lifecycleState.retainedTabCount}, aiOpenedRetained=${lifecycleState.aiOpenedRetainedCount}, activeTab=${lifecycleState.activeTabId ?? 'unknown'}.`;
   }
   if (last.eventKind === 'tab_activated' && activeTab) {
     return `Dynamic object update: current page object switched to tab ${activeTab.tabId}; owner=${activeTab.openedBy}, status=${activeTab.status ?? 'unknown'}, operable=${activeTab.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}, focusedWindow=${focusedWindow?.windowId ?? 'unknown'}.`;
   }
   if (last.eventKind === 'tab_created') {
+    if (lifecycleState.recentCreatedCount > 1) {
+      return `Dynamic object update: ${lifecycleState.recentCreatedCount} tab page object(s) were created recently; latestCreatedTab=${last.tabId ?? 'unknown'}, owner=${last.openedBy ?? 'unknown'}, status=${last.status ?? 'unknown'}, retainedTabs=${lifecycleState.retainedTabCount}, aiOpenedRetained=${lifecycleState.aiOpenedRetainedCount}.`;
+    }
     return `Dynamic object update: tab ${last.tabId ?? 'unknown'} was created; owner=${last.openedBy ?? 'unknown'}, status=${last.status ?? 'unknown'}, retainedTabs=${lifecycleState.retainedTabCount}, aiOpenedRetained=${lifecycleState.aiOpenedRetainedCount}.`;
   }
   if (last.eventKind === 'tab_updated') {

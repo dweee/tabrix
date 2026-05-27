@@ -535,6 +535,43 @@ describe('browser world inventory', () => {
     });
   });
 
+  it('summarizes multi-tab cleanup as one dynamic object-state conclusion', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    for (const tabId of [21, 22]) {
+      markBrowserWorldTabAiCreated(tabId);
+      listeners.tabCreated[0]?.({
+        id: tabId,
+        windowId: 1,
+        url: `https://cleanup-tabs.test/${tabId}`,
+        title: `Cleanup ${tabId}`,
+        active: false,
+        status: 'complete',
+      });
+    }
+
+    listeners.tabRemoved[0]?.(21, { windowId: 1, isWindowClosing: false });
+    listeners.tabRemoved[0]?.(22, { windowId: 1, isWindowClosing: false });
+
+    const snapshot = await getBrowserWorldSnapshot();
+
+    expect(snapshot.summary.tabLifecycleState).toMatchObject({
+      latestEventKind: 'tab_removed',
+      latestEventTabId: 22,
+      recentCreatedCount: 2,
+      recentRemovedCount: 2,
+      retainedTabCount: 2,
+      activeTabId: 10,
+      aiOpenedRetainedCount: 0,
+    });
+    expect(snapshot.summary.dynamicObjectUpdateSummary).toBe(
+      'Dynamic object update: 2 tab page object(s) were removed recently; latestRemovedTab=22, previousOwner=ai, retainedTabs=2, aiOpenedRetained=0, activeTab=10.',
+    );
+    expect(snapshot.recentEvents.some((event) => 'url' in event)).toBe(false);
+    expect(JSON.stringify(snapshot.recentEvents)).not.toContain('cleanup-tabs.test');
+  });
+
   it('adds and removes BrowserWindowObject instances with their contained tab objects', async () => {
     initBrowserWorldInventory();
     await getBrowserWorldSnapshot();
