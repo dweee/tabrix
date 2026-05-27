@@ -85,6 +85,8 @@ export interface BrowserWorldSummary {
     openedBy: BrowserWorldTabOpenedBy | null;
     canTabrixOperate: boolean | null;
   };
+  currentTabObject: BrowserWorldTabStateSummary | null;
+  lastAiOperatedTabObject: BrowserWorldTabStateSummary | null;
   counts: {
     windows: number;
     tabs: number;
@@ -93,6 +95,22 @@ export interface BrowserWorldSummary {
     operableTabs: number;
   };
   recentChangeSummary: string;
+}
+
+export interface BrowserWorldTabStateSummary {
+  objectKind: 'BrowserTabObject';
+  tabId: number;
+  windowId: number | null;
+  active: boolean | null;
+  status: string | null;
+  openedBy: BrowserWorldTabOpenedBy;
+  openedByConfidence: number;
+  openedByReason: string;
+  aiOperationState: BrowserWorldTabObject['aiOperationState'];
+  lastAiOperation: string | null;
+  lastAiOperationAtMs: number | null;
+  canTabrixOperate: boolean | null;
+  operabilityReason: string;
 }
 
 export interface BrowserWorldEvent {
@@ -501,6 +519,10 @@ function buildSnapshot(): BrowserWorldSnapshot {
   const operableTabIds = tabs
     .filter((tab) => tab.canTabrixOperate === true)
     .map((tab) => tab.tabId);
+  const lastAiOperatedTab =
+    tabs
+      .filter((tab) => tab.lastAiOperationAtMs !== null)
+      .sort((a, b) => (b.lastAiOperationAtMs ?? 0) - (a.lastAiOperationAtMs ?? 0))[0] ?? null;
   const recentChangeSummary = summarizeRecentEvents(recentEvents);
   return {
     source: 'extension_browser_world_inventory',
@@ -532,6 +554,8 @@ function buildSnapshot(): BrowserWorldSnapshot {
         openedBy: activeTab?.openedBy ?? null,
         canTabrixOperate: activeTab?.canTabrixOperate ?? null,
       },
+      currentTabObject: activeTab ? summarizeTabState(activeTab) : null,
+      lastAiOperatedTabObject: lastAiOperatedTab ? summarizeTabState(lastAiOperatedTab) : null,
       counts: {
         windows: windows.length,
         tabs: tabs.length,
@@ -544,6 +568,24 @@ function buildSnapshot(): BrowserWorldSnapshot {
     recentEvents: [...recentEvents],
     windows,
     tabs,
+  };
+}
+
+function summarizeTabState(tab: BrowserWorldTabObject): BrowserWorldTabStateSummary {
+  return {
+    objectKind: 'BrowserTabObject',
+    tabId: tab.tabId,
+    windowId: tab.windowId,
+    active: tab.active,
+    status: tab.status,
+    openedBy: tab.openedBy,
+    openedByConfidence: tab.openedByConfidence,
+    openedByReason: tab.openedByReason,
+    aiOperationState: tab.aiOperationState,
+    lastAiOperation: tab.lastAiOperation,
+    lastAiOperationAtMs: tab.lastAiOperationAtMs,
+    canTabrixOperate: tab.canTabrixOperate,
+    operabilityReason: tab.operabilityReason,
   };
 }
 

@@ -107,6 +107,16 @@ describe('browser world inventory', () => {
       canTabrixOperate: true,
       operabilityReason: 'active_tab_operable_in_visible_window',
     });
+    expect(snapshot.summary.currentTabObject).toMatchObject({
+      objectKind: 'BrowserTabObject',
+      tabId: 10,
+      windowId: 1,
+      active: true,
+      openedBy: 'user_or_page',
+      canTabrixOperate: true,
+      operabilityReason: 'regular_web_page',
+    });
+    expect(snapshot.summary.lastAiOperatedTabObject).toBeNull();
     expect(snapshot.tabs[0]).toMatchObject({
       tabId: 10,
       openedBy: 'user_or_page',
@@ -181,6 +191,20 @@ describe('browser world inventory', () => {
       activeTab: {
         tabId: 10,
         openedBy: 'ai',
+        canTabrixOperate: true,
+      },
+      currentTabObject: {
+        tabId: 10,
+        openedBy: 'ai',
+        aiOperationState: 'recently_operated',
+        lastAiOperation: 'read_page',
+        canTabrixOperate: true,
+      },
+      lastAiOperatedTabObject: {
+        tabId: 10,
+        openedBy: 'ai',
+        aiOperationState: 'recently_operated',
+        lastAiOperation: 'read_page',
         canTabrixOperate: true,
       },
       counts: {
