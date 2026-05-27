@@ -8,6 +8,7 @@ import {
   buildPostCloseTargetCleanupSummary,
   buildRedactedBrowserWorldSummary,
   buildRedactedReadPageAlignmentSummary,
+  buildWindowStateDriftSummary,
   buildWindowStateMutationProof,
   extractJsonObject,
   extractNavigateTabId,
@@ -395,6 +396,77 @@ test('buildWindowStateMutationProof marks minimize restore as not proven without
   );
 });
 
+test('buildWindowStateDriftSummary reports stable repeated observer samples', () => {
+  const samples = [
+    {
+      verdict: 'WINDOW_STATE_OBSERVED',
+      redacted: {
+        tabCount: 4,
+        compactSummaryBounded: true,
+        retentionWithinLimit: true,
+        windows: { total: 1, focused: 1 },
+        windowOperationState: { focusedWindowState: 'normal' },
+      },
+    },
+    {
+      verdict: 'WINDOW_STATE_OBSERVED',
+      redacted: {
+        tabCount: 4,
+        compactSummaryBounded: true,
+        retentionWithinLimit: true,
+        windows: { total: 1, focused: 1 },
+        windowOperationState: { focusedWindowState: 'normal' },
+      },
+    },
+  ];
+
+  assert.deepEqual(buildWindowStateDriftSummary(samples), {
+    sampleCount: 2,
+    allSamplesObserved: true,
+    allSamplesCompactBounded: true,
+    allSamplesRetentionBounded: true,
+    windowCountStable: true,
+    tabCountStable: true,
+    focusedWindowCountStable: true,
+    focusedWindowStateStable: true,
+    driftObserved: false,
+    claimBoundary:
+      'Observer-only repeated Browser World sampling. Drift can be caused by real browser, user, or page activity and is not by itself a product failure.',
+  });
+});
+
+test('buildWindowStateDriftSummary reports drift without failing observation', () => {
+  const summary = buildWindowStateDriftSummary([
+    {
+      verdict: 'WINDOW_STATE_OBSERVED',
+      redacted: {
+        tabCount: 4,
+        compactSummaryBounded: true,
+        retentionWithinLimit: true,
+        windows: { total: 1, focused: 1 },
+        windowOperationState: { focusedWindowState: 'normal' },
+      },
+    },
+    {
+      verdict: 'WINDOW_STATE_OBSERVED',
+      redacted: {
+        tabCount: 5,
+        compactSummaryBounded: true,
+        retentionWithinLimit: true,
+        windows: { total: 1, focused: 1 },
+        windowOperationState: { focusedWindowState: 'normal' },
+      },
+    },
+  ]);
+
+  assert.equal(summary.allSamplesObserved, true);
+  assert.equal(summary.allSamplesCompactBounded, true);
+  assert.equal(summary.allSamplesRetentionBounded, true);
+  assert.equal(summary.windowCountStable, true);
+  assert.equal(summary.tabCountStable, false);
+  assert.equal(summary.driftObserved, true);
+});
+
 test('buildPostCloseTargetCleanupSummary reports closed targets without raw tab data', () => {
   const summary = buildPostCloseTargetCleanupSummary(
     {
@@ -581,6 +653,29 @@ test('parseArgs supports observer-only window-state scenario', () => {
   assert.equal(parseArgs(['--scenario', 'window-state']).scenario, 'window-state');
 });
 
+test('parseArgs supports observer-only window-state drift sampling', () => {
+  assert.deepEqual(
+    parseArgs([
+      '--scenario',
+      'window-state-drift',
+      '--sample-count',
+      '4',
+      '--sample-interval-ms',
+      '10',
+    ]),
+    {
+      url: 'https://example.com/?tabrix_browser_world_smoke=1',
+      urls: [],
+      keepOpen: false,
+      skipOpen: false,
+      sampleCount: 4,
+      sampleIntervalMs: 10,
+      scenario: 'window-state-drift',
+      timeoutMs: 60_000,
+    },
+  );
+});
+
 test('parseArgs supports read-page scenario', () => {
   assert.equal(parseArgs(['--scenario', 'read-page']).scenario, 'read-page');
 });
@@ -604,6 +699,8 @@ test('parseArgs supports safe smoke switches', () => {
       urls: ['https://example.org/'],
       keepOpen: true,
       skipOpen: true,
+      sampleCount: 3,
+      sampleIntervalMs: 250,
       scenario: 'lifecycle',
       timeoutMs: 60_000,
     },

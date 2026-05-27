@@ -15,6 +15,8 @@ export function parseArgs(argv) {
     urls: [],
     keepOpen: false,
     skipOpen: false,
+    sampleCount: 3,
+    sampleIntervalMs: 250,
     scenario: 'single',
     timeoutMs: 60_000,
   };
@@ -36,6 +38,18 @@ export function parseArgs(argv) {
       args.keepOpen = true;
     } else if (part === '--skip-open') {
       args.skipOpen = true;
+    } else if (part === '--sample-count') {
+      const parsed = Number(argv[index + 1]);
+      if (Number.isInteger(parsed) && parsed > 0) {
+        args.sampleCount = Math.min(parsed, 10);
+      }
+      index += 1;
+    } else if (part === '--sample-interval-ms') {
+      const parsed = Number(argv[index + 1]);
+      if (Number.isInteger(parsed) && parsed >= 0) {
+        args.sampleIntervalMs = Math.min(parsed, 5_000);
+      }
+      index += 1;
     } else if (part === '--scenario') {
       args.scenario = argv[index + 1] || 'single';
       index += 1;
@@ -48,6 +62,11 @@ export function parseArgs(argv) {
     }
   }
   return args;
+}
+
+function sleepMs(ms) {
+  if (!Number.isInteger(ms) || ms <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 export function resolveSmokeUrls(args) {
@@ -951,6 +970,49 @@ export function buildWindowStateMutationProof(redactedWindowState) {
   };
 }
 
+export function buildWindowStateDriftSummary(samples) {
+  const observedSamples = samples.filter((sample) => sample?.verdict === 'WINDOW_STATE_OBSERVED');
+  const compactBoundedSamples = samples.filter(
+    (sample) => sample?.redacted?.compactSummaryBounded === true,
+  );
+  const retentionBoundedSamples = samples.filter(
+    (sample) => sample?.redacted?.retentionWithinLimit === true,
+  );
+  const windowCounts = samples.map((sample) => sample?.redacted?.windows?.total);
+  const tabCounts = samples.map((sample) => sample?.redacted?.tabCount);
+  const focusedWindowCounts = samples.map((sample) => sample?.redacted?.windows?.focused);
+  const focusedWindowStates = samples.map(
+    (sample) => sample?.redacted?.windowOperationState?.focusedWindowState,
+  );
+  const uniqueKnownValues = (values) => new Set(values.filter((value) => value !== null)).size;
+  const allPresent = (values) => values.every((value) => value !== null && value !== undefined);
+  const windowCountStable = allPresent(windowCounts) && uniqueKnownValues(windowCounts) <= 1;
+  const tabCountStable = allPresent(tabCounts) && uniqueKnownValues(tabCounts) <= 1;
+  const focusedWindowCountStable =
+    allPresent(focusedWindowCounts) && uniqueKnownValues(focusedWindowCounts) <= 1;
+  const focusedWindowStateStable =
+    allPresent(focusedWindowStates) && uniqueKnownValues(focusedWindowStates) <= 1;
+
+  return {
+    sampleCount: samples.length,
+    allSamplesObserved: samples.length > 0 && observedSamples.length === samples.length,
+    allSamplesCompactBounded: samples.length > 0 && compactBoundedSamples.length === samples.length,
+    allSamplesRetentionBounded:
+      samples.length > 0 && retentionBoundedSamples.length === samples.length,
+    windowCountStable,
+    tabCountStable,
+    focusedWindowCountStable,
+    focusedWindowStateStable,
+    driftObserved:
+      !windowCountStable ||
+      !tabCountStable ||
+      !focusedWindowCountStable ||
+      !focusedWindowStateStable,
+    claimBoundary:
+      'Observer-only repeated Browser World sampling. Drift can be caused by real browser, user, or page activity and is not by itself a product failure.',
+  };
+}
+
 function runWindowStateSmoke(cliPath, args) {
   if (!args.skipOpen) {
     // This scenario is observer-only by design; it must not create or mutate windows.
@@ -969,6 +1031,39 @@ function runWindowStateSmoke(cliPath, args) {
       redacted.browserObjectEdgeSummaryPresent === true
         ? 'WINDOW_STATE_OBSERVED'
         : 'WINDOW_STATE_NOT_PROVEN',
+  };
+}
+
+function runWindowStateDriftSmoke(cliPath, args) {
+  const samples = [];
+  for (let index = 0; index < args.sampleCount; index += 1) {
+    samples.push(runWindowStateSmoke(cliPath, { ...args, skipOpen: true }));
+    if (index < args.sampleCount - 1) sleepMs(args.sampleIntervalMs);
+  }
+  const driftSummary = buildWindowStateDriftSummary(samples);
+  return {
+    scenario: 'window-state-drift',
+    observerOnly: true,
+    sampleCount: samples.length,
+    sampleIntervalMs: args.sampleIntervalMs,
+    driftSummary,
+    samples: samples.map((sample, index) => ({
+      sampleIndex: index + 1,
+      verdict: sample.verdict,
+      windowCount: sample.redacted.windowCount,
+      tabCount: sample.redacted.tabCount,
+      compactSummaryBounded: sample.redacted.compactSummaryBounded,
+      retentionWithinLimit: sample.redacted.retentionWithinLimit,
+      windowStateMatrix: sample.redacted.windowStateMatrix,
+      windowOperationState: sample.redacted.windowOperationState,
+      windowStateMutation: sample.windowStateMutation,
+    })),
+    verdict:
+      driftSummary.allSamplesObserved === true &&
+      driftSummary.allSamplesCompactBounded === true &&
+      driftSummary.allSamplesRetentionBounded === true
+        ? 'WINDOW_STATE_REPEATED_OBSERVER_PASS'
+        : 'WINDOW_STATE_REPEATED_OBSERVER_NOT_PROVEN',
   };
 }
 
@@ -1107,7 +1202,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(
-      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|matrix|window-state|read-page|read-page-matrix] [--skip-open] [--keep-open]\n`,
+      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|matrix|window-state|window-state-drift|read-page|read-page-matrix] [--sample-count 3] [--sample-interval-ms 250] [--skip-open] [--keep-open]\n`,
     );
     return;
   }
@@ -1123,13 +1218,15 @@ async function main() {
         ? runMatrixSmoke(cliPath, smokeUrls, args)
         : args.scenario === 'window-state'
           ? runWindowStateSmoke(cliPath, args)
-          : args.scenario === 'read-page'
-            ? runReadPageSmoke(cliPath, smokeUrl, args)
-            : args.scenario === 'read-page-matrix'
-              ? runReadPageMatrixSmoke(cliPath, smokeUrls, args)
-              : args.scenario === 'lifecycle'
-                ? runLifecycleSmoke(cliPath, smokeUrl, args)
-                : runSingleSmoke(cliPath, smokeUrl, args);
+          : args.scenario === 'window-state-drift'
+            ? runWindowStateDriftSmoke(cliPath, args)
+            : args.scenario === 'read-page'
+              ? runReadPageSmoke(cliPath, smokeUrl, args)
+              : args.scenario === 'read-page-matrix'
+                ? runReadPageMatrixSmoke(cliPath, smokeUrls, args)
+                : args.scenario === 'lifecycle'
+                  ? runLifecycleSmoke(cliPath, smokeUrl, args)
+                  : runSingleSmoke(cliPath, smokeUrl, args);
 
     const output = {
       ok: true,
