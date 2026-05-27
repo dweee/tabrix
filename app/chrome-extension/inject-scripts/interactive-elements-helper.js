@@ -239,6 +239,16 @@
       text: getAccessibleName(el) || el.textContent?.trim(),
       isInteractive: isInteractiveOverride !== null ? isInteractiveOverride : isActuallyInteractive,
       disabled: el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true',
+      tagName: el.tagName ? el.tagName.toLowerCase() : '',
+      className:
+        typeof el.className === 'string'
+          ? el.className
+          : el.className && typeof el.className.baseVal === 'string'
+            ? el.className.baseVal
+            : '',
+      alt: el.getAttribute('alt') || '',
+      title: el.getAttribute('title') || '',
+      role: el.getAttribute('role') || '',
     };
     if (includeCoordinates) {
       const rect = el.getBoundingClientRect();

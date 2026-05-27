@@ -1,13 +1,32 @@
-export type FallbackRefMap = Array<{ ref: string; selector: string } | null>;
+export type FallbackRefMap = Array<{
+  ref: string;
+  selector: string;
+  rect?: { x: number; y: number; width: number; height: number };
+} | null>;
 
 /** Parallel to `elements` (same length): entry or `null` when no selector. */
 export function buildFallbackRefMap(elements: any[]): FallbackRefMap {
   return (elements || []).slice(0, 150).map((element: any, index: number) => {
     const selector = typeof element?.selector === 'string' ? element.selector.trim() : '';
     if (!selector) return null;
+    const rect = element?.coordinates?.rect;
     return {
       ref: `ref_fallback_${index + 1}`,
       selector,
+      ...(rect &&
+      Number.isFinite(rect.x) &&
+      Number.isFinite(rect.y) &&
+      Number.isFinite(rect.width) &&
+      Number.isFinite(rect.height)
+        ? {
+            rect: {
+              x: Number(rect.x),
+              y: Number(rect.y),
+              width: Number(rect.width),
+              height: Number(rect.height),
+            },
+          }
+        : {}),
     };
   });
 }

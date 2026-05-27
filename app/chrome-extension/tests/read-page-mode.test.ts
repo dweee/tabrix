@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readPageTool } from '@/entrypoints/background/tools/browser/read-page';
+import { buildInteractiveElements } from '@/entrypoints/background/tools/browser/read-page-interactive-elements';
+import { buildCandidateActions } from '@/entrypoints/background/tools/browser/read-page-candidate-actions';
 
 const MODE_MINIMUM_FIELDS: Record<'compact' | 'normal' | 'full', string[]> = {
   compact: ['mode', 'page', 'summary', 'interactiveElements', 'artifactRefs'],
@@ -123,6 +125,7 @@ function expectCommonSnapshotShape(payload: any, mode: 'compact' | 'normal' | 'f
 describe('read_page mode', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    (readPageTool as any).__resetObjectLifecycleCacheForTests?.();
     if (!chrome.windows) {
       (chrome as any).windows = {
         get: vi.fn().mockResolvedValue({ id: 1, focused: true }),
@@ -197,6 +200,169 @@ describe('read_page mode', () => {
     expect(payload.pageProjection.userActivityLevel).toBe('active');
     expect(payload.diagnostics).toBeUndefined();
     expect(payload.fullSnapshot).toBeUndefined();
+  });
+
+  it('preserves recovered text menu targets when the accessibility snapshot already has enough actions', () => {
+    const elements = buildInteractiveElements(
+      [
+        '- button "Home" [ref=ref_home] (x=40,y=40)',
+        '- button "Search" [ref=ref_search] (x=40,y=80)',
+        '- button "Messages" [ref=ref_messages] (x=40,y=120)',
+        '- button "Profile" [ref=ref_profile] (x=40,y=160)',
+      ].join('\n'),
+      [
+        {
+          ref: 'ref_text_menu_more',
+          text: 'More',
+          role: 'button',
+          selector: '[data-menu-more]',
+          isInteractive: true,
+        },
+      ],
+      8,
+      'full',
+      'https://example.com/app',
+    );
+
+    expect(elements.map((element) => element.ref)).toContain('ref_text_menu_more');
+  });
+
+  it('recovers target refs for visible text menu labels that exist only as non-targetable text', async () => {
+    const collectInteractiveElementsFallback = vi
+      .spyOn(readPageTool as any, 'collectInteractiveElementsFallback')
+      .mockImplementation(async (_tabId: number, options: { textQuery?: string }) => {
+        if (options.textQuery === '退出登录') {
+          return {
+            success: true,
+            elements: [
+              {
+                type: 'text',
+                selector:
+                  'body > main > nav > div:nth-of-type(7) > div > div:nth-of-type(3) > span',
+                text: '退出登录',
+                isInteractive: true,
+                coordinates: {
+                  x: 64,
+                  y: 620,
+                  rect: { x: 32, y: 610, width: 64, height: 18 },
+                },
+              },
+            ],
+          };
+        }
+        if (options.textQuery !== '更多') return { success: true, elements: [] };
+        return {
+          success: true,
+          elements: [
+            {
+              type: 'text',
+              selector: 'body > main > nav > div:nth-of-type(7) > span',
+              text: '更多',
+              isInteractive: true,
+              coordinates: {
+                x: 84,
+                y: 806,
+                rect: { x: 68, y: 796, width: 32, height: 18 },
+              },
+            },
+          ],
+        };
+      });
+    const basePayload: any = {
+      visibleTextContent: [
+        '首页',
+        '点点',
+        'ai',
+        '直播',
+        '发布',
+        '消息',
+        '我',
+        '点点 ai',
+        '更多',
+        '帮助与客服',
+        '设置',
+        '退出登录',
+        '关于我们',
+      ].join('\n'),
+      elements: [
+        { text: '更多' },
+        ...Array.from({ length: 150 }, (_item, index) => ({ text: `Content ${index}` })),
+      ],
+      refMap: Array.from({ length: 150 }, (_item, index) => ({
+        ref: `ref_existing_${index}`,
+        selector: `[data-content="${index}"]`,
+      })),
+      count: 151,
+    };
+
+    const recovered = await (readPageTool as any).recoverGlobalMenuTextTargets({
+      tabId: 5218,
+      basePayload,
+    });
+
+    expect(recovered).toBe(true);
+    expect(collectInteractiveElementsFallback).toHaveBeenCalledWith(
+      5218,
+      expect.objectContaining({ textQuery: '更多' }),
+    );
+    expect(collectInteractiveElementsFallback).toHaveBeenCalledWith(
+      5218,
+      expect.objectContaining({ textQuery: '退出登录' }),
+    );
+    expect(basePayload.elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ref: expect.stringMatching(/^ref_text_menu_/),
+          role: 'button',
+          selector: 'body > main > nav > div:nth-of-type(7)',
+          text: '更多',
+        }),
+        expect.objectContaining({
+          ref: expect.stringMatching(/^ref_text_menu_/),
+          role: 'button',
+          selector: 'body > main > nav > div:nth-of-type(7) > div > div:nth-of-type(3)',
+          text: '退出登录',
+        }),
+      ]),
+    );
+    expect(basePayload.elements[0]).toMatchObject({
+      selector: 'body > main > nav > div:nth-of-type(7)',
+      text: '更多',
+    });
+  });
+
+  it('keeps recovered text menu actions ahead of long content lists', () => {
+    const contentElements = Array.from({ length: 40 }, (_item, index) => ({
+      ref: `ref_content_${index}`,
+      role: 'link',
+      name: `Content card ${index}`,
+    }));
+    const actions = buildCandidateActions(
+      [
+        ...contentElements,
+        { ref: 'ref_text_menu_more', role: 'button', name: '更多' },
+        { ref: 'ref_text_menu_logout', role: 'button', name: '退出登录' },
+      ],
+      [
+        ...contentElements.map((element, index) => ({
+          ref: element.ref,
+          selector: `[data-card="${index}"]`,
+        })),
+        { ref: 'ref_text_menu_more', selector: '[data-menu-more]' },
+        { ref: 'ref_text_menu_logout', selector: '[data-menu-logout]' },
+      ],
+    );
+
+    expect(
+      actions
+        .map((action) => action.targetRef)
+        .slice(0, 2)
+        .sort(),
+    ).toEqual(['ref_text_menu_logout', 'ref_text_menu_more']);
+    expect(actions.find((action) => action.targetRef === 'ref_text_menu_more')).toMatchObject({
+      actionType: 'click',
+      locatorChain: expect.arrayContaining([{ type: 'css', value: '[data-menu-more]' }]),
+    });
   });
 
   it('returns null window focus truth when chrome.windows.get is unavailable', async () => {
@@ -281,6 +447,85 @@ describe('read_page mode', () => {
     expect(payload.isCurrentTabActive).toBe(false);
     expect(payload.isCurrentWindowFocused).toBe(true);
     expect(payload.pageProjection.userActivityLevel).toBe('none');
+    expect(payload.browserPageObjectCompact.facts.tab).toMatchObject({
+      objectKind: 'BrowserTabObject',
+      currentTabId: 5203,
+      isActive: false,
+    });
+    expect(payload.browserPageObjectCompact.facts.visualReliability).toMatchObject({
+      objectKind: 'BrowserVisualReliability',
+      isCurrentWindowFocused: true,
+      isCurrentTabActive: false,
+      visualReliabilityCandidate: false,
+      degraded: true,
+    });
+  });
+
+  it('surfaces minimized and unfocused window state as degraded BrowserWindowObject evidence', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5220,
+      windowId: 77,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/window-state',
+      title: 'Window State',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows as any).get = vi.fn().mockResolvedValue({
+      id: 77,
+      focused: false,
+      state: 'minimized',
+      width: 900,
+      height: 640,
+      left: 12,
+      top: 34,
+    });
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Window state page" [ref=ref_main] (x=320,y=100)',
+        '  - heading "Window state" [ref=ref_heading] (x=320,y=140)',
+        '  - button "Open menu" [ref=ref_menu] (x=320,y=180)',
+        '  - link "Details" [ref=ref_details] (x=320,y=220)',
+        '- footer "Footer" [ref=ref_footer] (x=320,y=680)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_menu', selector: 'button.menu' },
+        { ref: 'ref_details', selector: 'a.details' },
+        { ref: 'ref_heading', selector: 'h1' },
+      ],
+      stats: { processed: 5, included: 5, durationMs: 7 },
+      viewport: { width: 900, height: 640, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.currentWindowId).toBe(77);
+    expect(payload.currentWindowState).toBe('minimized');
+    expect(payload.currentWindowWidth).toBe(900);
+    expect(payload.currentWindowHeight).toBe(640);
+    expect(payload.currentWindowLeft).toBe(12);
+    expect(payload.currentWindowTop).toBe(34);
+    expect(payload.isCurrentWindowFocused).toBe(false);
+    expect(payload.browserPageObjectCompact.facts.window).toMatchObject({
+      objectKind: 'BrowserWindowObject',
+      currentWindowId: 77,
+      currentWindowState: 'minimized',
+      isFocused: false,
+      isMinimized: true,
+      width: 900,
+      height: 640,
+    });
+    expect(payload.browserPageObjectCompact.facts.visualReliability).toMatchObject({
+      objectKind: 'BrowserVisualReliability',
+      isCurrentWindowFocused: false,
+      isCurrentTabActive: true,
+      isWindowMinimized: true,
+      visualReliabilityCandidate: false,
+      degraded: true,
+    });
   });
 
   it('retries once when the first accessibility tree is sparse and the page hydrates late', async () => {
@@ -603,6 +848,300 @@ describe('read_page mode', () => {
     ]);
   });
 
+  it('supplements shell-heavy reads with DOM interactive controls when snapshot actions are too sparse', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5208,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/app',
+      title: 'Workspace',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'ensureInteractiveElementsHelper').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sampleVisibleTextContent').mockResolvedValue(null);
+    const sendMessage = vi.spyOn(readPageTool as any, 'sendMessageToTab');
+    sendMessage
+      .mockResolvedValueOnce({
+        success: true,
+        pageContent: [
+          '- main "Application shell" [ref=ref_main]',
+          '  - button "Open" [ref=ref_open]',
+          '  - generic "Workspace heading" [ref=ref_heading]',
+          '  - generic "Recent activity" [ref=ref_recent]',
+          '  - generic "Pinned area" [ref=ref_pinned]',
+          '  - generic "Status area" [ref=ref_status]',
+          '  - generic "Footer link group" [ref=ref_footer]',
+          '  - generic "Help text" [ref=ref_help]',
+          '  - generic "Legal text" [ref=ref_legal]',
+          '  - generic "Version text" [ref=ref_version]',
+        ].join('\n'),
+        refMap: [{ ref: 'ref_open', selector: 'button.open' }],
+        stats: { processed: 10, included: 10, durationMs: 8 },
+        viewport: { width: 1280, height: 720, dpr: 1 },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        elements: [
+          { type: 'button', text: 'Menu', selector: 'button.menu', isInteractive: true },
+          {
+            type: 'interactive',
+            text: 'Account',
+            selector: '[data-user-menu]',
+            isInteractive: true,
+          },
+          { type: 'input', text: 'Search', selector: 'input.search', isInteractive: true },
+        ],
+      });
+
+    const result = await readPageTool.execute({ mode: 'compact' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expectCommonSnapshotShape(payload, 'compact');
+    expect(payload.browserPageObject).toBeUndefined();
+    expect(payload.browserPageObjectCompact).toMatchObject({
+      source: 'read_page_browser_page_object_compact',
+      rootObjectId: expect.any(String),
+      facts: expect.objectContaining({
+        window: expect.objectContaining({ objectKind: 'BrowserWindowObject' }),
+        tab: expect.objectContaining({ objectKind: 'BrowserTabObject' }),
+        page: expect.objectContaining({ objectKind: 'BrowserPageObject' }),
+      }),
+      primaryConclusion: expect.any(String),
+      claimBoundary: expect.stringContaining('candidate'),
+    });
+    expect(JSON.stringify(payload.browserPageObjectCompact)).not.toContain('attributeGroups');
+    expect(JSON.stringify(payload.browserPageObjectCompact)).not.toContain('semanticEvents');
+    expect(payload.browserPageObjectCompact).toMatchObject({
+      watchStatus: expect.any(String),
+      changedGroups: expect.any(Array),
+      transitionCount: expect.any(Number),
+    });
+    expect(payload.browserPageObjectCompact).toEqual(
+      expect.objectContaining({
+        claimBoundary: expect.stringContaining('candidate evidence only'),
+      }),
+    );
+    expect(payload.pageContext.fallbackSource).toBe('interactive_shell_supplement');
+    expect(payload.interactiveElements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ref: 'ref_open', role: 'button' }),
+        expect.objectContaining({
+          ref: 'ref_fallback_1',
+          role: 'button',
+          name: 'menu action candidate',
+        }),
+        expect.objectContaining({
+          ref: 'ref_fallback_2',
+          role: 'button',
+          name: 'account action candidate',
+        }),
+        expect.objectContaining({ ref: 'ref_fallback_3', role: 'textbox', name: 'Search' }),
+      ]),
+    );
+    expect(payload.candidateActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ targetRef: 'ref_fallback_1', actionType: 'click' }),
+        expect.objectContaining({ targetRef: 'ref_fallback_3', actionType: 'fill' }),
+      ]),
+    );
+    expect(payload.pageOperationMap.zones).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ purpose: 'open_menu' }),
+        expect.objectContaining({ purpose: 'search' }),
+      ]),
+    );
+  });
+
+  it('compares object lifecycle against the previous same-tab read_page snapshot', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5219,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/app',
+      title: 'Workspace',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sampleVisibleTextContent').mockResolvedValue(null);
+    vi.spyOn(readPageTool as any, 'collectInteractiveElementsFallback').mockResolvedValue({
+      success: true,
+      elements: [],
+    });
+    const sendMessage = vi.spyOn(readPageTool as any, 'sendMessageToTab');
+    sendMessage
+      .mockResolvedValueOnce({
+        success: true,
+        pageContent: [
+          '- navigation "Primary navigation" [ref=ref_nav] (x=100,y=360)',
+          '  - button "Menu" [ref=ref_menu] (x=60,y=120)',
+          '- main "Workspace content" [ref=ref_main] (x=640,y=360)',
+          '  - heading "Overview" [ref=ref_heading] (x=320,y=120)',
+          '  - generic "Status ready" [ref=ref_status] (x=320,y=180)',
+          '  - generic "Recent activity" [ref=ref_activity] (x=320,y=240)',
+          '- footer "Footer" [ref=ref_footer] (x=640,y=680)',
+        ].join('\n'),
+        refMap: [
+          { ref: 'ref_menu', selector: 'button.menu' },
+          { ref: 'ref_heading', selector: 'h1' },
+          { ref: 'ref_status', selector: '[data-status]' },
+        ],
+        stats: { processed: 7, included: 7, durationMs: 7 },
+        viewport: { width: 1280, height: 720, dpr: 1 },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        pageContent: [
+          '- navigation "Primary navigation" [ref=ref_nav] (x=100,y=360)',
+          '  - button "Menu" [ref=ref_menu] (x=60,y=120)',
+          '  - button "Settings" [ref=ref_settings] (x=60,y=180)',
+          '  - button "Help" [ref=ref_help] (x=60,y=240)',
+          '- main "Workspace content" [ref=ref_main] (x=640,y=360)',
+          '  - heading "Overview" [ref=ref_heading] (x=320,y=120)',
+          '  - generic "Status ready" [ref=ref_status] (x=320,y=180)',
+          '  - generic "Recent activity" [ref=ref_activity] (x=320,y=240)',
+          '- footer "Footer" [ref=ref_footer] (x=640,y=680)',
+        ].join('\n'),
+        refMap: [
+          { ref: 'ref_menu', selector: 'button.menu' },
+          { ref: 'ref_settings', selector: 'button.settings' },
+          { ref: 'ref_help', selector: 'button.help' },
+        ],
+        stats: { processed: 9, included: 9, durationMs: 8 },
+        viewport: { width: 1280, height: 720, dpr: 1 },
+      });
+
+    const first = await readPageTool.execute({ mode: 'compact' });
+    const second = await readPageTool.execute({ mode: 'compact' });
+    const firstPayload = JSON.parse((first.content[0] as { text: string }).text);
+    const secondPayload = JSON.parse((second.content[0] as { text: string }).text);
+
+    expect(first.isError).toBe(false);
+    expect(second.isError).toBe(false);
+    expect(firstPayload.objectLifecycle).toMatchObject({
+      status: 'single_snapshot',
+      changedObjectCount: 0,
+    });
+    expect(secondPayload.objectLifecycle).toMatchObject({
+      status: 'compared_snapshot',
+    });
+    expect(secondPayload.objectLifecycle.changedObjectCount).toBeGreaterThan(0);
+    expect(secondPayload.browserPageObjectCompact).toMatchObject({
+      watchStatus: expect.stringContaining('candidate'),
+      transitionCount: expect.any(Number),
+    });
+    expect(secondPayload.browserPageObjectCompact.transitionCount).toBeGreaterThan(0);
+    expect(secondPayload.browserPageObjectCompact.primaryConclusion).toMatch(
+      /Menu expanded candidate/i,
+    );
+    expect(secondPayload.browserPageObjectCompact.primaryConclusion).not.toMatch(
+      /^Page state changed/i,
+    );
+  });
+
+  it('compares bounded watch-loop runtime state across same-tab read_page snapshots', async () => {
+    const tabSequence = [
+      {
+        id: 5221,
+        windowId: 78,
+        active: true,
+        status: 'complete',
+        url: 'https://example.test/runtime-watch',
+        title: 'Runtime Watch',
+      },
+      {
+        id: 5221,
+        windowId: 78,
+        active: false,
+        status: 'complete',
+        url: 'https://example.test/runtime-watch',
+        title: 'Runtime Watch',
+      },
+    ];
+    vi.spyOn(readPageTool as any, 'tryGetTab')
+      .mockResolvedValueOnce(tabSequence[0])
+      .mockResolvedValueOnce(tabSequence[1]);
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sampleVisibleTextContent').mockResolvedValue(null);
+    vi.spyOn(readPageTool as any, 'collectInteractiveElementsFallback').mockResolvedValue({
+      success: true,
+      elements: [],
+    });
+    (chrome.windows as any).get = vi
+      .fn()
+      .mockResolvedValueOnce({
+        id: 78,
+        focused: true,
+        state: 'normal',
+        width: 1200,
+        height: 800,
+        left: 20,
+        top: 30,
+      })
+      .mockResolvedValueOnce({
+        id: 78,
+        focused: false,
+        state: 'minimized',
+        width: 1200,
+        height: 800,
+        left: 20,
+        top: 30,
+      });
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Runtime watch page" [ref=ref_main] (x=320,y=100)',
+        '  - heading "Runtime watch" [ref=ref_heading] (x=320,y=140)',
+        '  - button "Open menu" [ref=ref_menu] (x=320,y=180)',
+        '  - link "Details" [ref=ref_details] (x=320,y=220)',
+        '  - generic "Status ready" [ref=ref_status] (x=320,y=260)',
+        '  - generic "Activity" [ref=ref_activity] (x=320,y=300)',
+        '  - generic "Panel" [ref=ref_panel] (x=320,y=340)',
+        '  - generic "Sidebar" [ref=ref_sidebar] (x=760,y=220)',
+        '  - generic "Footer text" [ref=ref_footer_text] (x=320,y=620)',
+        '- footer "Footer" [ref=ref_footer] (x=320,y=680)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_menu', selector: 'button.menu' },
+        { ref: 'ref_details', selector: 'a.details' },
+        { ref: 'ref_heading', selector: 'h1' },
+      ],
+      stats: { processed: 10, included: 10, durationMs: 7 },
+      viewport: { width: 1200, height: 800, dpr: 1 },
+    });
+
+    const first = await readPageTool.execute({ mode: 'compact' });
+    const second = await readPageTool.execute({ mode: 'compact' });
+    const firstPayload = JSON.parse((first.content[0] as { text: string }).text);
+    const secondPayload = JSON.parse((second.content[0] as { text: string }).text);
+
+    expect(first.isError).toBe(false);
+    expect(second.isError).toBe(false);
+    expect(firstPayload.browserPageObjectCompact.facts.window).toMatchObject({
+      currentWindowState: 'normal',
+      isFocused: true,
+      isMinimized: false,
+    });
+    expect(secondPayload.objectLifecycle.status).toBe('compared_snapshot');
+    expect(secondPayload.browserPageObjectCompact.transitionCount).toBeGreaterThan(0);
+    expect(secondPayload.browserPageObjectCompact.changedGroups).toEqual(
+      expect.arrayContaining(['window_state', 'tab_state', 'visual_reliability']),
+    );
+    expect(secondPayload.browserPageObjectCompact.facts.window).toMatchObject({
+      currentWindowState: 'minimized',
+      isFocused: false,
+      isMinimized: true,
+    });
+    expect(secondPayload.browserPageObjectCompact.facts.tab).toMatchObject({
+      isActive: false,
+    });
+    expect(secondPayload.browserPageObjectCompact.facts.visualReliability).toMatchObject({
+      degraded: true,
+      visualReliabilityCandidate: false,
+    });
+  });
+
   it('recovers search rows from body-visible text for shallow explicit depth reads', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 5217,
@@ -765,7 +1304,8 @@ describe('read_page mode', () => {
         expect.objectContaining({
           actionType: 'click',
           targetRef: 'ref_login',
-          matchReason: expect.stringContaining('primary action'),
+          matchReason: 'redacted_auth_action_signal',
+          locatorChain: [{ type: 'css', value: 'button[type=submit]' }],
         }),
       ]),
     );
@@ -1410,6 +1950,67 @@ describe('read_page mode', () => {
     });
     expect(payload.completeTextRegion.normalizedLength).toBeGreaterThan(500);
     expect(payload.markdown).not.toContain(repeatedLongBody);
+  });
+
+  it('samples bounded visible text for full deep reads so page regions can recover dynamic state', async () => {
+    const visibleText = [
+      'window.__APP_STATE__={"authenticated":true,"userInfo":{"id":"private-user-id","displayName":"Private Name"}};',
+      'Home Messages Notifications Publish navigation area.',
+      'Warning: optional browser capability unavailable.',
+      'Main feed content '.repeat(40),
+    ].join(' ');
+
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5249,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.com/dynamic-app',
+      title: 'Dynamic App',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const visibleTextSpy = vi
+      .spyOn(readPageTool as any, 'sampleVisibleTextContent')
+      .mockResolvedValue(visibleText);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- document "Dynamic App" [ref=ref_doc] (x=0,y=0)',
+        '  - generic "" [ref=ref_generic_1] (x=10,y=10)',
+        '  - generic "" [ref=ref_generic_2] (x=20,y=20)',
+        '  - generic "" [ref=ref_generic_3] (x=30,y=30)',
+      ].join('\n'),
+      refMap: [{ ref: 'ref_generic_1', selector: 'main' }],
+      stats: { processed: 4, included: 4, durationMs: 5 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'full', depth: 8 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(visibleTextSpy).toHaveBeenCalled();
+    expect(payload.pageRegions.map((item: any) => item.regionType)).toEqual(
+      expect.arrayContaining(['account', 'navigation', 'content', 'feedback']),
+    );
+    expect(payload.pageRegions.find((item: any) => item.regionType === 'account')).toMatchObject({
+      state: 'logged_in_candidate',
+      targetability: 'not_clickable',
+    });
+    expect(payload.pageOperationMap.zones.map((item: any) => item.purpose)).toEqual(
+      expect.arrayContaining(['account', 'navigate', 'read_content', 'observe_feedback']),
+    );
+    expect(
+      payload.pageOperationMap.zones.find((item: any) => item.purpose === 'account'),
+    ).toMatchObject({
+      label: 'account area candidate',
+      readiness: 'not_targetable',
+    });
+    const serialized = JSON.stringify(payload.pageRegions);
+    expect(serialized).not.toContain('private-user-id');
+    expect(serialized).not.toContain('Private Name');
+    expect(JSON.stringify(payload.pageOperationMap)).not.toContain('private-user-id');
+    expect(JSON.stringify(payload.pageOperationMap)).not.toContain('Private Name');
   });
 
   it('keeps complete visible text route hints when visible rows are already usable', async () => {

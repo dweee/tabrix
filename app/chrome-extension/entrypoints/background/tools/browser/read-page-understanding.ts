@@ -28,7 +28,17 @@ const PAGE_FAMILY_ADAPTERS: PageFamilyAdapter[] = [
 const LOGIN_GATE_RULES: RegionRule[] = [
   {
     region: 'login_gate',
-    patterns: [/登录/i, /login/i, /signin/i, /手机号/i, /验证码/i, /phone/i, /code/i],
+    patterns: [
+      /登录/i,
+      /login/i,
+      /sign[ -]?in/i,
+      /手机号/i,
+      /验证码/i,
+      /phone/i,
+      /verification code/i,
+      /one[- ]?time code/i,
+      /security code/i,
+    ],
     minMatches: 2,
     priority: 1000,
     confidence: 'high',
@@ -65,12 +75,14 @@ function runFamilyAdapters(context: PageUnderstandingContext): PageUnderstanding
 
 function inferLoginRequired(context: PageUnderstandingContext): PageUnderstandingSummary | null {
   const loginSignals = [context.lowerUrl, context.lowerTitle, context.content];
-  const hasLoginHint = hasAnySignal(loginSignals, [/登录/i, /login/i, /signin/i]);
+  const hasLoginHint = hasAnySignal(loginSignals, [/登录/i, /login/i, /sign[ -]?in/i]);
   const hasCredentialHint = hasAnySignal(loginSignals, [
     /手机号/i,
     /验证码/i,
     /phone/i,
-    /code/i,
+    /verification code/i,
+    /one[- ]?time code/i,
+    /security code/i,
     /password/i,
     /密码/i,
     /email/i,

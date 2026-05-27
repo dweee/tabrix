@@ -141,6 +141,29 @@ describe('read_page understanding', () => {
     expect(summary.primaryRegionConfidence).toBe('high');
   });
 
+  it('detects English sign-in forms from credential fields', () => {
+    const summary = inferPageUnderstanding(
+      'https://example.com/sign-in',
+      'Sign in',
+      'Email Password Remember me Submit',
+    );
+
+    expect(summary.pageRole).toBe('login_required');
+    expect(summary.primaryRegion).toBe('login_gate');
+    expect(summary.primaryRegionConfidence).toBe('high');
+  });
+
+  it('does not treat public documentation pages as login gates because they mention code', () => {
+    const summary = inferPageUnderstanding(
+      'https://developer.mozilla.org/en-US/',
+      'MDN Web Docs',
+      'Search the site References HTML JavaScript HTTP response status codes Sign in Create an account',
+    );
+
+    expect(summary.pageRole).not.toBe('login_required');
+    expect(summary.primaryRegion).not.toBe('login_gate');
+  });
+
   it('falls back to outer_shell for footer-only content', () => {
     const summary = inferPageUnderstanding(
       'https://example.com',

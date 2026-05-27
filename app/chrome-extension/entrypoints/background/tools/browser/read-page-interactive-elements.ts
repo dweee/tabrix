@@ -70,6 +70,9 @@ const DEFAULT_COMPACT_SCORING_CONTEXT: CompactScoringContext = {
   workflowRunDetail: false,
 };
 
+const MIN_ACTIONABLE_SNAPSHOT_ELEMENTS_FOR_FALLBACK = 3;
+const TEXT_MENU_TARGET_RECOVERY_REF_PREFIX = 'ref_text_menu_';
+
 function isGithubWorkflowRunDetailUrl(url: string): boolean {
   return GITHUB_WORKFLOW_RUN_DETAIL_URL_PATTERN.test(String(url || '').trim());
 }
@@ -219,6 +222,105 @@ function toInteractiveElement(node: SnapshotNode): SnapshotInteractiveElement {
   return element;
 }
 
+function normalizeFallbackRole(item: any): string {
+  const raw = String(item?.role || item?.type || '')
+    .trim()
+    .toLowerCase();
+  switch (raw) {
+    case 'input':
+    case 'textarea':
+    case 'text':
+      return 'textbox';
+    case 'select':
+      return 'combobox';
+    case 'interactive':
+      return 'button';
+    case 'button':
+    case 'link':
+    case 'checkbox':
+    case 'radio':
+    case 'tab':
+    case 'menuitem':
+    case 'slider':
+    case 'option':
+    case 'treeitem':
+    case 'switch':
+    case 'searchbox':
+    case 'combobox':
+    case 'textbox':
+      return raw;
+    default:
+      return item?.isInteractive === true ? 'button' : 'generic';
+  }
+}
+
+function buildFallbackNodes(fallbackElements: any[]): SnapshotNode[] {
+  const fromFallback = Array.isArray(fallbackElements) ? fallbackElements : [];
+  return fromFallback.map((item: any, index: number) => ({
+    ref: String(item?.ref || item?.selector || `fallback_${index + 1}`),
+    role: normalizeFallbackRole(item),
+    name: String(item?.text || item?.name || item?.ariaLabel || '').trim(),
+    depth: 0,
+    href: typeof item?.href === 'string' ? item.href : null,
+  }));
+}
+
+function mergeSnapshotWithFallback(
+  snapshotElements: SnapshotInteractiveElement[],
+  fallbackNodes: SnapshotNode[],
+  limit: number,
+): SnapshotInteractiveElement[] {
+  if (fallbackNodes.length === 0 || snapshotElements.length >= limit) return snapshotElements;
+  const merged = [...snapshotElements];
+  const seen = new Set(
+    snapshotElements.map(
+      (item) =>
+        `${String(item.ref || '').trim()}|${String(item.role || '').trim()}|${String(item.name || '').trim()}`,
+    ),
+  );
+  for (const node of fallbackNodes) {
+    const element = toInteractiveElement(node);
+    const key = `${String(element.ref || '').trim()}|${String(element.role || '').trim()}|${String(element.name || '').trim()}`;
+    if (!element.ref || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(element);
+    if (merged.length >= limit) break;
+  }
+  return merged;
+}
+
+function isTextMenuTargetRecoveryNode(node: SnapshotNode): boolean {
+  return String(node.ref || '').startsWith(TEXT_MENU_TARGET_RECOVERY_REF_PREFIX);
+}
+
+function mergeSnapshotWithTextMenuTargetRecovery(
+  snapshotElements: SnapshotInteractiveElement[],
+  fallbackNodes: SnapshotNode[],
+  limit: number,
+): SnapshotInteractiveElement[] {
+  const textMenuTargetNodes = fallbackNodes.filter(isTextMenuTargetRecoveryNode);
+  if (textMenuTargetNodes.length === 0) return snapshotElements;
+
+  const merged = mergeSnapshotWithFallback(
+    snapshotElements,
+    textMenuTargetNodes,
+    Number.MAX_SAFE_INTEGER,
+  );
+  if (merged.length <= limit) return merged;
+
+  const targetRefs = new Set(
+    textMenuTargetNodes.map((node) => String(node.ref || '').trim()).filter(Boolean),
+  );
+  const targetRecoveryElements = merged.filter((item) =>
+    targetRefs.has(String(item.ref || '').trim()),
+  );
+  const regularElements = merged.filter((item) => !targetRefs.has(String(item.ref || '').trim()));
+  return [
+    ...regularElements.slice(0, Math.max(0, limit - targetRecoveryElements.length)),
+    ...targetRecoveryElements,
+  ].slice(0, limit);
+}
+
 function prioritizeCompactNodes(
   nodes: SnapshotNode[],
   limit: number,
@@ -269,16 +371,14 @@ export function buildInteractiveElements(
           .slice(0, limit)
           .map((node) => toInteractiveElement(node));
 
-  if (fromSnapshot.length > 0) return fromSnapshot;
+  const fallbackNodes = buildFallbackNodes(fallbackElements);
+  if (fromSnapshot.length > 0) {
+    if (fromSnapshot.length >= MIN_ACTIONABLE_SNAPSHOT_ELEMENTS_FOR_FALLBACK) {
+      return mergeSnapshotWithTextMenuTargetRecovery(fromSnapshot, fallbackNodes, limit);
+    }
+    return mergeSnapshotWithFallback(fromSnapshot, fallbackNodes, limit);
+  }
 
-  const fromFallback = Array.isArray(fallbackElements) ? fallbackElements : [];
-  const fallbackNodes: SnapshotNode[] = fromFallback.map((item: any, index: number) => ({
-    ref: String(item?.ref || item?.selector || `fallback_${index + 1}`),
-    role: String(item?.type || 'generic').toLowerCase(),
-    name: String(item?.text || '').trim(),
-    depth: 0,
-    href: typeof item?.href === 'string' ? item.href : null,
-  }));
   if (mode === 'compact') {
     return prioritizeCompactNodes(fallbackNodes, limit, scoringContext);
   }

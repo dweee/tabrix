@@ -8,7 +8,12 @@ import type {
   ReadPageRequestedLayer,
   ReadPageCompleteTextRegion,
 } from '@tabrix/shared';
-import { buildTaskProtocol } from './read-page-task-protocol';
+import {
+  buildTaskProtocol,
+  redactSensitiveCandidateActionsForAi,
+  redactSensitiveInteractiveElementsForAi,
+  type ReadPageVisualElementHint,
+} from './read-page-task-protocol';
 import type { PageRole } from './read-page-understanding';
 import { buildHistoryRef } from './stable-target-ref';
 import { buildMarkdownProjection, MARKDOWN_ARTIFACT_KIND } from './read-page-markdown';
@@ -29,6 +34,9 @@ export function buildStableSnapshotLayer(params: {
   interactiveElements: SnapshotInteractiveElement[];
   artifactRefs: SnapshotArtifactRef[];
 }): Omit<ReadPageCompactSnapshot, keyof ReadPageExtensionFields> {
+  const aiFacingInteractiveElements = redactSensitiveInteractiveElementsForAi(
+    params.interactiveElements,
+  );
   return {
     mode: params.mode,
     page: {
@@ -41,7 +49,7 @@ export function buildStableSnapshotLayer(params: {
       primaryRegion: params.primaryRegion,
       quality: params.quality,
     },
-    interactiveElements: params.interactiveElements,
+    interactiveElements: aiFacingInteractiveElements,
     artifactRefs: params.artifactRefs,
   };
 }
@@ -68,10 +76,19 @@ export function buildExtensionLayer(params: {
   pageContext: ReadPagePageContext;
   visibleRegionRows: VisibleRegionRowsResult;
   visibleTextContent?: string | null;
+  visualElements?: ReadPageVisualElementHint[];
   /** When 'L0' or 'L0+L1', strip detail layers below the requested envelope. */
   requestedLayer: ReadPageRequestedLayer;
 }): ReadPageExtensionFields {
   const markdownArtifact = params.artifactRefs.find((item) => item.kind === MARKDOWN_ARTIFACT_KIND);
+  const aiFacingInteractiveElements = redactSensitiveInteractiveElementsForAi(
+    params.interactiveElements,
+    params.candidateActions,
+  );
+  const aiFacingCandidateActions = redactSensitiveCandidateActionsForAi(
+    params.candidateActions,
+    params.interactiveElements,
+  );
   const taskProtocol = buildTaskProtocol({
     mode: params.mode,
     currentUrl: params.currentUrl,
@@ -86,6 +103,8 @@ export function buildExtensionLayer(params: {
     artifactRefs: params.artifactRefs,
     pageContext: params.pageContext,
     contentSummary: params.contentSummary,
+    visibleTextContent: params.visibleTextContent,
+    visualElements: params.visualElements,
     markdownArtifactRef: markdownArtifact?.ref ?? null,
     visibleRegionRows: params.visibleRegionRows,
   });
@@ -116,7 +135,7 @@ export function buildExtensionLayer(params: {
       pageRole: params.pageRole,
       primaryRegion: params.primaryRegion,
       highValueObjects: taskProtocol.highValueObjects,
-      interactiveElements: params.interactiveElements,
+      interactiveElements: aiFacingInteractiveElements,
     });
     markdown = projected || null;
   }
@@ -186,7 +205,7 @@ export function buildExtensionLayer(params: {
     navigationLikeRejectedCount: params.visibleRegionRows.navigationLikeRejectedCount,
     targetRefCoverageRejectedCount: params.visibleRegionRows.targetRefCoverageRejectedCount,
     rejectedRegionReasonDistribution: params.visibleRegionRows.rejectedRegionReasonDistribution,
-    candidateActions: includeL1 ? params.candidateActions : [],
+    candidateActions: includeL1 ? aiFacingCandidateActions : [],
     pageContext: params.pageContext,
     // T3.2: reserved extension fields (not locked as long-term schema yet).
     frameContext: null,
@@ -197,6 +216,9 @@ export function buildExtensionLayer(params: {
     sourceKind: taskProtocol.sourceKind,
     watchScope: taskProtocol.watchScope,
     highValueObjects: taskProtocol.highValueObjects,
+    pageRegions: taskProtocol.pageRegions,
+    pageOperationMap: taskProtocol.pageOperationMap,
+    objectLifecycle: taskProtocol.objectLifecycle,
     L0: taskProtocol.L0,
     L1: includeL1 ? taskProtocol.L1 : undefined,
     L2: includeL2 ? taskProtocol.L2 : undefined,

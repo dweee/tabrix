@@ -17,6 +17,24 @@ function buildRefSelectorMap(refMap: any[]): Map<string, string> {
   return map;
 }
 
+function scoreCandidateElementPriority(element: ReadPageInteractiveElement, index: number): number {
+  const ref = String(element.ref || '');
+  const name = String(element.name || '').trim();
+  let score = 0;
+  if (ref.startsWith('ref_text_menu_')) score += 120;
+  if (/\b(menu|more|settings?|logout|sign out|log out)\b|菜单|更多|设置|退出|注销/i.test(name)) {
+    score += 80;
+  }
+  if (
+    /^(home|dashboard|messages?|notifications?|publish|create|live|profile|account|me|my|about|首页|消息|通知|发布|直播|我的?|个人中心|关于我们)$/i.test(
+      name,
+    )
+  ) {
+    score += 32;
+  }
+  return score - Math.min(index, 100) / 1000;
+}
+
 export function buildCandidateActions(
   interactiveElements: ReadPageInteractiveElement[],
   refMap: any[],
@@ -28,7 +46,16 @@ export function buildCandidateActions(
     /(submit|save|continue|next|confirm|login|sign in|search|checkout|提交|保存|继续|下一步|确认|登录|搜索)/i;
 
   const seeds: CandidateActionSeed[] = [];
-  for (const element of interactiveElements) {
+  const prioritizedElements = [...interactiveElements]
+    .map((element, index) => ({
+      element,
+      index,
+      score: scoreCandidateElementPriority(element, index),
+    }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .map(({ element }) => element);
+
+  for (const element of prioritizedElements) {
     if (!element.ref) continue;
     const role = String(element.role || '').toLowerCase();
     const name = String(element.name || '').trim();
@@ -64,7 +91,7 @@ export function buildCandidateActions(
       matchReason,
       locatorChain,
     });
-    if (seeds.length >= 8) break;
+    if (seeds.length >= 20) break;
   }
   return seeds;
 }

@@ -13,8 +13,14 @@ import {
   type ReadPagePrimaryRegionConfidence,
   type ReadPageRenderMode,
   type ReadPageRequestedLayer,
+  type ReadPageOwnershipRuntimeSummary,
+  type ReadPageWindowRuntimeState,
+  type ReadPageObjectLifecycleSummary,
+  type BrowserPageThingProjection,
   READ_PAGE_REQUESTED_LAYER_VALUES,
+  buildReadPageBrowserPageObjectView,
   buildBrowserPageThingProjectionFromReadPage,
+  buildReadPageObjectLifecycle,
 } from '@tabrix/shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { ERROR_MESSAGES } from '@/common/constants';
@@ -32,6 +38,10 @@ import { buildFallbackRefMap, formatElementsAsPageContent } from './read-page-fa
 import { buildExtensionLayer, buildStableSnapshotLayer } from './read-page-snapshot-builders';
 import { buildReadPageModeResult } from './read-page-mode-result';
 import { extractVisibleRegionRows, type VisibleRegionRowsResult } from './visible-region-rows';
+import {
+  extractGlobalMenuLabelsForTargetRecovery,
+  type ReadPageVisualElementHint,
+} from './read-page-task-protocol';
 
 interface ReadPageStats {
   processed: number;
@@ -62,9 +72,95 @@ const INTERACTIVE_ELEMENTS_HELPER_FILE = 'inject-scripts/interactive-elements-he
 const INTERACTIVE_ELEMENTS_HELPER_PING_TIMEOUT_MS = 300;
 const VISIBLE_TEXT_FALLBACK_MAX_CHARS = 12_000;
 const VISIBLE_ROWS_TARGET_REF_REPAIR_THRESHOLD = 0.95;
+const OBJECT_LIFECYCLE_CACHE_MAX_TABS = 64;
+const QR_VISUAL_ELEMENT_SELECTOR = [
+  '[class*="qr"]',
+  '[class*="QR"]',
+  '[class*="qrcode"]',
+  '[class*="QRCode"]',
+  '[aria-label*="qr"]',
+  '[aria-label*="QR"]',
+  '[aria-label*="二维码"]',
+  '[alt*="qr"]',
+  '[alt*="QR"]',
+  '[alt*="二维码"]',
+  '[title*="qr"]',
+  '[title*="QR"]',
+  '[title*="二维码"]',
+  'canvas',
+  'img',
+].join(', ');
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const objectLifecycleByTab = new Map<
+  number,
+  {
+    url: string;
+    lifecycle: ReadPageObjectLifecycleSummary;
+    pageProjection: BrowserPageThingProjection | null;
+    ownershipRuntime: ReadPageOwnershipRuntimeSummary | null;
+  }
+>();
+
+function rememberObjectLifecycleSnapshot(
+  tabId: number,
+  url: string,
+  lifecycle: ReadPageObjectLifecycleSummary,
+  pageProjection: BrowserPageThingProjection | null,
+  ownershipRuntime: ReadPageOwnershipRuntimeSummary | null,
+): void {
+  if (!Number.isFinite(tabId)) return;
+  objectLifecycleByTab.delete(tabId);
+  objectLifecycleByTab.set(tabId, { url, lifecycle, pageProjection, ownershipRuntime });
+  while (objectLifecycleByTab.size > OBJECT_LIFECYCLE_CACHE_MAX_TABS) {
+    const firstKey = objectLifecycleByTab.keys().next().value;
+    if (firstKey === undefined) break;
+    objectLifecycleByTab.delete(firstKey);
+  }
+}
+
+function buildBoundedWatchLoopSnapshot(params: {
+  tabId: number;
+  url: string;
+  pageRegions: ReadPageCompactSnapshot['pageRegions'];
+  lifecycle: ReadPageObjectLifecycleSummary;
+  pageProjection: BrowserPageThingProjection | null;
+  ownershipRuntime: ReadPageOwnershipRuntimeSummary | null;
+}): {
+  objectLifecycle: ReadPageObjectLifecycleSummary;
+  previousPageProjection: BrowserPageThingProjection | null;
+  previousOwnershipRuntime: ReadPageOwnershipRuntimeSummary | null;
+} {
+  const currentSingleSnapshot = params.lifecycle;
+  const previous = objectLifecycleByTab.get(params.tabId);
+  rememberObjectLifecycleSnapshot(
+    params.tabId,
+    params.url,
+    currentSingleSnapshot,
+    params.pageProjection,
+    params.ownershipRuntime,
+  );
+  if (!previous || previous.url !== params.url || !Array.isArray(params.pageRegions)) {
+    return {
+      objectLifecycle: currentSingleSnapshot,
+      previousPageProjection: null,
+      previousOwnershipRuntime: null,
+    };
+  }
+  return {
+    objectLifecycle: buildReadPageObjectLifecycle(params.pageRegions, {
+      previous: previous.lifecycle,
+    }),
+    previousPageProjection: previous.pageProjection,
+    previousOwnershipRuntime: previous.ownershipRuntime,
+  };
+}
+
+function resetObjectLifecycleCacheForTests(): void {
+  objectLifecycleByTab.clear();
 }
 
 function getTabNavigationUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {
@@ -155,14 +251,16 @@ function completeVisibleRegionRows(params: {
 function shouldSampleVisibleText(input: {
   treeOk: boolean;
   userControlled: boolean;
+  mode: ReadPageMode;
   requestedDepth: number | undefined;
   focusRefId: string | undefined;
   rows: VisibleRegionRowsResult;
 }): boolean {
   if (!input.treeOk) return false;
+  if (input.focusRefId) return false;
+  if (input.mode === 'full') return true;
   if (!input.userControlled) return true;
   if (input.rows.visibleRegionRowsUsed) return false;
-  if (input.focusRefId) return false;
   return input.requestedDepth !== undefined && input.requestedDepth <= 3;
 }
 
@@ -184,13 +282,184 @@ function attachFallbackRefs(
   });
 }
 
+function promoteTextMenuTriggerSelector(selector: unknown): string | undefined {
+  const raw = typeof selector === 'string' ? selector.trim() : '';
+  if (!raw) return undefined;
+  const parts = raw
+    .split(/\s*>\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length < 3) return raw;
+  const last = parts[parts.length - 1]?.toLowerCase() || '';
+  if (/^(span|svg|path|img|i|em|strong)(?::|\[|\.|#|$)/.test(last)) {
+    return parts.slice(0, -1).join(' > ');
+  }
+  return raw;
+}
+
+function extractVisibleMenuActionLabelsForTargetRecovery(visibleTextContent: unknown): string[] {
+  const seen = new Set<string>();
+  const labels: string[] = [];
+  const lines = String(visibleTextContent || '')
+    .split(/\r?\n+/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  for (const line of lines) {
+    if (line.length > 18) continue;
+    if (
+      !/\b(log[ -]?out|sign[ -]?out|settings?|help|support|feedback)\b|退出|注销|设置|帮助|客服|反馈/i.test(
+        line,
+      )
+    ) {
+      continue;
+    }
+    const key = line.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    labels.push(line);
+    if (labels.length >= 8) break;
+  }
+  return labels;
+}
+
+function attachInteractiveRects<T extends { ref?: string; rect?: unknown }>(
+  elements: T[],
+  refMap: any[],
+): T[] {
+  const rectByRef = new Map<string, { x: number; y: number; width: number; height: number }>();
+  for (const entry of Array.isArray(refMap) ? refMap : []) {
+    const ref = typeof entry?.ref === 'string' ? entry.ref.trim() : '';
+    const rect = entry?.rect;
+    if (
+      !ref ||
+      !rect ||
+      !Number.isFinite(rect.x) ||
+      !Number.isFinite(rect.y) ||
+      !Number.isFinite(rect.width) ||
+      !Number.isFinite(rect.height)
+    ) {
+      continue;
+    }
+    rectByRef.set(ref, {
+      x: Number(rect.x),
+      y: Number(rect.y),
+      width: Number(rect.width),
+      height: Number(rect.height),
+    });
+  }
+  if (rectByRef.size === 0) return elements;
+  return elements.map((element) => {
+    const rect = element.ref ? rectByRef.get(element.ref) : undefined;
+    return rect ? { ...element, rect } : element;
+  });
+}
+
+function hasQrVisibleContext(pageContent: string, visibleTextContent?: string | null): boolean {
+  const text = `${pageContent || ''}\n${visibleTextContent || ''}`;
+  if (!text.trim()) return false;
+  const hasQrSignal = /\b(qr|qrcode|scan code)\b|二维码|扫码|扫一扫/i.test(text);
+  const authHidden = /"?(?:showLogin|loginModalVisible|authModalVisible)"?\s*:\s*false/i.test(text);
+  return hasQrSignal && !authHidden;
+}
+
+function normalizeWindowRuntimeState(value: unknown): ReadPageWindowRuntimeState | null {
+  if (
+    value === 'normal' ||
+    value === 'minimized' ||
+    value === 'maximized' ||
+    value === 'fullscreen' ||
+    value === 'docked'
+  ) {
+    return value;
+  }
+  return typeof value === 'string' ? 'unknown' : null;
+}
+
+function readWindowInteger(value: unknown): number | null {
+  return Number.isInteger(value) ? (value as number) : null;
+}
+
+function finiteRect(rect: any): { x: number; y: number; width: number; height: number } | null {
+  if (
+    rect &&
+    Number.isFinite(rect.x) &&
+    Number.isFinite(rect.y) &&
+    Number.isFinite(rect.width) &&
+    Number.isFinite(rect.height)
+  ) {
+    return {
+      x: Number(rect.x),
+      y: Number(rect.y),
+      width: Number(rect.width),
+      height: Number(rect.height),
+    };
+  }
+  return null;
+}
+
+function scoreQrVisualElementHint(
+  element: any,
+  index: number,
+): (ReadPageVisualElementHint & { score: number }) | null {
+  const selector = typeof element?.selector === 'string' ? element.selector.trim() : '';
+  if (!selector) return null;
+  const rect = finiteRect(element?.coordinates?.rect);
+  if (!rect || rect.width < 40 || rect.height < 40) return null;
+  const area = rect.width * rect.height;
+  if (area < 2_000 || area > 160_000) return null;
+  const aspectRatio = rect.width / Math.max(1, rect.height);
+  if (aspectRatio < 0.65 || aspectRatio > 1.55) return null;
+
+  const role = String(element?.tagName || element?.type || element?.role || 'img').toLowerCase();
+  const signal = [
+    element?.text,
+    element?.alt,
+    element?.title,
+    element?.className,
+    element?.role,
+    role,
+    selector,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  let score = 0;
+  if (/\b(qr|qrcode|scan code)\b|二维码|扫码|扫一扫/i.test(signal)) score += 120;
+  if (/\b(canvas|img|svg|selected)\b/i.test(role)) score += 24;
+  if (rect.width >= 100 && rect.width <= 360 && rect.height >= 100 && rect.height <= 360)
+    score += 36;
+  if (String(element?.text || '').trim().length === 0) score += 18;
+  if (/\b(logo|brand|avatar|icon)\b|小红书|微信|apple|google/i.test(signal)) score -= 80;
+  score -= Math.min(20, index * 2);
+
+  if (score < 40) return null;
+  return {
+    id: `qr_visual_${index + 1}`,
+    label: 'QR visual element candidate',
+    selector,
+    role,
+    rect,
+    reason: 'qr_visual_element_signal',
+    confidence: Math.min(0.92, Math.max(0.54, score / 180)),
+    score,
+  };
+}
+
 async function buildModeOutput(params: {
   mode: ReadPageMode;
   renderMode: ReadPageRenderMode;
   tabId: number;
   currentWindowId: number | null;
+  currentWindowState: ReadPageWindowRuntimeState | null;
+  currentWindowWidth: number | null;
+  currentWindowHeight: number | null;
+  currentWindowLeft: number | null;
+  currentWindowTop: number | null;
   isCurrentTabActive: boolean | null;
   isCurrentWindowFocused: boolean | null;
+  browserActiveTabId: number | null;
+  browserActiveTabIdKnown: boolean;
+  isReadTargetBrowserActiveTab: boolean | null;
   pageStability: BrowserPageStability;
   currentUrl: string;
   currentTitle: string;
@@ -225,17 +494,21 @@ async function buildModeOutput(params: {
   tips: string;
   refMap: any[];
   candidateActions: CandidateActionSeed[];
+  visualElements: ReadPageVisualElementHint[];
   visibleRegionRows: VisibleRegionRowsResult;
   /** Layer envelope; defaults to 'L0+L1+L2' for legacy callers. */
   requestedLayer: ReadPageRequestedLayer;
 }): Promise<ReadPageCompactSnapshot | ReadPageNormalSnapshot | ReadPageFullSnapshot> {
   const interactiveLimit = params.mode === 'compact' ? 24 : 80;
-  const interactiveElements = buildInteractiveElements(
-    params.pageContent,
-    params.elements,
-    interactiveLimit,
-    params.mode,
-    params.currentUrl,
+  const interactiveElements = attachInteractiveRects(
+    buildInteractiveElements(
+      params.pageContent,
+      params.elements,
+      interactiveLimit,
+      params.mode,
+      params.currentUrl,
+    ),
+    params.refMap,
   );
   const visibleRegionRows = completeVisibleRegionRows({
     rows: params.visibleRegionRows,
@@ -294,6 +567,7 @@ async function buildModeOutput(params: {
     pageContext,
     visibleRegionRows,
     visibleTextContent: params.visibleTextContent,
+    visualElements: params.visualElements,
     requestedLayer: params.requestedLayer,
   });
 
@@ -316,8 +590,16 @@ async function buildModeOutput(params: {
     ...stableLayer,
     ...extensionLayer,
     currentWindowId: params.currentWindowId,
+    currentWindowState: params.currentWindowState,
+    currentWindowWidth: params.currentWindowWidth,
+    currentWindowHeight: params.currentWindowHeight,
+    currentWindowLeft: params.currentWindowLeft,
+    currentWindowTop: params.currentWindowTop,
     isCurrentTabActive: params.isCurrentTabActive,
     isCurrentWindowFocused: params.isCurrentWindowFocused,
+    browserActiveTabId: params.browserActiveTabId,
+    browserActiveTabIdKnown: params.browserActiveTabIdKnown,
+    isReadTargetBrowserActiveTab: params.isReadTargetBrowserActiveTab,
   };
   const observedAt = new Date().toISOString();
   const userActivityLevel = await inferUserActivityLevel({
@@ -339,6 +621,48 @@ async function buildModeOutput(params: {
     interferenceRisk: 'medium',
     stability: params.pageStability,
   });
+  sharedPayload.ownershipRuntime = buildReadPageOwnershipRuntimeSummary({
+    tabId: params.tabId,
+    currentWindowId: params.currentWindowId,
+    currentWindowState: params.currentWindowState,
+    currentWindowWidth: params.currentWindowWidth,
+    currentWindowHeight: params.currentWindowHeight,
+    currentWindowLeft: params.currentWindowLeft,
+    currentWindowTop: params.currentWindowTop,
+    isCurrentTabActive: params.isCurrentTabActive,
+    isCurrentWindowFocused: params.isCurrentWindowFocused,
+    browserActiveTabId: params.browserActiveTabId,
+    browserActiveTabIdKnown: params.browserActiveTabIdKnown,
+    isReadTargetBrowserActiveTab: params.isReadTargetBrowserActiveTab,
+  });
+  if (sharedPayload.objectLifecycle) {
+    const watchLoopSnapshot = buildBoundedWatchLoopSnapshot({
+      tabId: params.tabId,
+      url: params.currentUrl,
+      pageRegions: sharedPayload.pageRegions,
+      lifecycle: sharedPayload.objectLifecycle,
+      pageProjection: sharedPayload.pageProjection,
+      ownershipRuntime: sharedPayload.ownershipRuntime,
+    });
+    sharedPayload.objectLifecycle = watchLoopSnapshot.objectLifecycle;
+    const browserPageObject = buildReadPageBrowserPageObjectView({
+      pageRegions: sharedPayload.pageRegions,
+      pageOperationMap: sharedPayload.pageOperationMap,
+      objectLifecycle: sharedPayload.objectLifecycle,
+      previousPageProjection: watchLoopSnapshot.previousPageProjection,
+      pageProjection: sharedPayload.pageProjection,
+      previousOwnershipRuntime: watchLoopSnapshot.previousOwnershipRuntime,
+      ownershipRuntime: sharedPayload.ownershipRuntime,
+      selectedDataSource: sharedPayload.selectedDataSource,
+      sourceRouteHonestyVerdict: null,
+    });
+    sharedPayload.browserPageObjectCompact = browserPageObject.compact;
+    if (params.mode === 'compact') {
+      delete sharedPayload.browserPageObject;
+    } else {
+      sharedPayload.browserPageObject = browserPageObject;
+    }
+  }
 
   return buildReadPageModeResult({
     sharedPayload,
@@ -358,8 +682,58 @@ async function buildModeOutput(params: {
   });
 }
 
+function buildReadPageOwnershipRuntimeSummary(params: {
+  tabId: number;
+  currentWindowId: number | null;
+  currentWindowState: ReadPageWindowRuntimeState | null;
+  currentWindowWidth: number | null;
+  currentWindowHeight: number | null;
+  currentWindowLeft: number | null;
+  currentWindowTop: number | null;
+  isCurrentTabActive: boolean | null;
+  isCurrentWindowFocused: boolean | null;
+  browserActiveTabId: number | null;
+  browserActiveTabIdKnown: boolean;
+  isReadTargetBrowserActiveTab: boolean | null;
+}): ReadPageOwnershipRuntimeSummary {
+  return {
+    currentTabId: params.tabId,
+    currentWindowId: params.currentWindowId,
+    currentWindowState: params.currentWindowState,
+    currentWindowWidth: params.currentWindowWidth,
+    currentWindowHeight: params.currentWindowHeight,
+    currentWindowLeft: params.currentWindowLeft,
+    currentWindowTop: params.currentWindowTop,
+    isCurrentTabActive: params.isCurrentTabActive,
+    isCurrentWindowFocused: params.isCurrentWindowFocused,
+    browserActiveTabId: params.browserActiveTabId,
+    browserActiveTabIdKnown: params.browserActiveTabIdKnown,
+    isReadTargetBrowserActiveTab: params.isReadTargetBrowserActiveTab,
+    currentOwnerType: 'unknown',
+    currentTabRunOwnershipVerdict: 'unknown',
+    currentTabPrimaryRelationVerdict: 'unknown',
+    protectedScopeVerdict: 'unknown',
+    cleanupEligibility: 'unknown',
+    protectReason: null,
+    isCurrentTabRunOwnedByTask: false,
+    runOwnedTabIds: [],
+    runOwnedTabCount: 0,
+    defaultProtection: 'protect_unknown_and_user_owned',
+    bridgeState: null,
+    primaryTabId: null,
+    primaryTabReuseRate: null,
+    benchmarkOwnedTabCount: null,
+    heartbeatTabCount: null,
+    heartbeatWindowCount: null,
+  };
+}
+
 class ReadPageTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.READ_PAGE;
+
+  __resetObjectLifecycleCacheForTests(): void {
+    resetObjectLifecycleCacheForTests();
+  }
 
   private async ensureInteractiveElementsHelper(tabId: number): Promise<void> {
     try {
@@ -410,18 +784,121 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     }
   }
 
-  private async collectInteractiveElementsFallback(tabId: number): Promise<any | null> {
+  private async collectInteractiveElementsFallback(
+    tabId: number,
+    options: { textQuery?: string; selector?: string; includeCoordinates?: boolean } = {},
+  ): Promise<any | null> {
     let fallback: any = null;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       if (attempt > 0) await delay(READ_PAGE_SPARSE_RETRY_DELAY_MS);
       await this.ensureInteractiveElementsHelper(tabId);
       fallback = await this.sendMessageToTab(tabId, {
         action: TOOL_MESSAGE_TYPES.GET_INTERACTIVE_ELEMENTS,
-        includeCoordinates: true,
+        includeCoordinates: options.includeCoordinates !== false,
+        ...(options.selector ? { selector: options.selector } : {}),
+        ...(options.textQuery ? { textQuery: options.textQuery } : {}),
       });
       if (fallback && fallback.success && Array.isArray(fallback.elements)) break;
     }
     return fallback && fallback.success && Array.isArray(fallback.elements) ? fallback : null;
+  }
+
+  private async collectQrVisualElements(params: {
+    tabId: number;
+    pageContent: string;
+    visibleTextContent?: string | null;
+  }): Promise<ReadPageVisualElementHint[]> {
+    if (!hasQrVisibleContext(params.pageContent, params.visibleTextContent)) return [];
+    const fallback = await this.collectInteractiveElementsFallback(params.tabId, {
+      selector: QR_VISUAL_ELEMENT_SELECTOR,
+      includeCoordinates: true,
+    });
+    const elements = Array.isArray(fallback?.elements) ? fallback.elements : [];
+    return elements
+      .map((element: any, index: number) => scoreQrVisualElementHint(element, index))
+      .filter((item): item is ReadPageVisualElementHint & { score: number } => Boolean(item))
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 3)
+      .map(({ score: _score, ...item }) => item);
+  }
+
+  private async recoverGlobalMenuTextTargets(params: {
+    tabId: number;
+    basePayload: any;
+  }): Promise<boolean> {
+    const labels = Array.from(
+      new Set([
+        ...extractGlobalMenuLabelsForTargetRecovery(params.basePayload.visibleTextContent),
+        ...extractVisibleMenuActionLabelsForTargetRecovery(params.basePayload.visibleTextContent),
+      ]),
+    )
+      .filter((label) => label.length <= 18)
+      .slice(0, 16);
+    if (labels.length === 0) return false;
+
+    const existingTargetableLabels = new Set(
+      (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
+        .filter((element: any) => {
+          const selector = typeof element?.selector === 'string' ? element.selector.trim() : '';
+          const href = typeof element?.href === 'string' ? element.href.trim() : '';
+          return Boolean(selector || href);
+        })
+        .map((element: any) =>
+          String(element?.name || element?.text || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase(),
+        )
+        .filter(Boolean),
+    );
+    const recovered: any[] = [];
+    for (const label of labels) {
+      const normalizedLabel = label.replace(/\s+/g, ' ').trim().toLowerCase();
+      if (!normalizedLabel || existingTargetableLabels.has(normalizedLabel)) continue;
+      const fallback = await this.collectInteractiveElementsFallback(params.tabId, {
+        textQuery: label,
+        includeCoordinates: true,
+      });
+      const first = Array.isArray(fallback?.elements) ? fallback.elements[0] : null;
+      if (!first?.selector) continue;
+      recovered.push({
+        ...first,
+        selector: promoteTextMenuTriggerSelector(first.selector) || first.selector,
+        text: label,
+        name: label,
+        role: first.role || 'button',
+        type: first.type === 'text' ? 'interactive' : first.type || 'interactive',
+      });
+      existingTargetableLabels.add(normalizedLabel);
+    }
+    if (recovered.length === 0) return false;
+
+    const existingElements = Array.isArray(params.basePayload.elements)
+      ? params.basePayload.elements
+      : [];
+    const existingRefMap = Array.isArray(params.basePayload.refMap)
+      ? params.basePayload.refMap
+      : [];
+    const offset = existingRefMap.filter((entry: unknown) => entry != null).length;
+    const recoveredRefMap = buildFallbackRefMap(recovered).map((entry, index) =>
+      entry ? { ...entry, ref: `ref_text_menu_${offset + index + 1}` } : null,
+    );
+    const recoveredWithRefs = attachFallbackRefs(recovered, recoveredRefMap);
+
+    params.basePayload.elements = [...recoveredWithRefs, ...existingElements].slice(0, 150);
+    params.basePayload.refMap = [...recoveredRefMap, ...existingRefMap].slice(0, 150);
+    params.basePayload.refMapCount = params.basePayload.refMap.filter(
+      (entry: unknown) => entry != null,
+    ).length;
+    params.basePayload.count = Math.max(
+      Number(params.basePayload.count || 0),
+      params.basePayload.elements.length,
+    );
+    params.basePayload.fallbackUsed = true;
+    params.basePayload.fallbackSource = params.basePayload.fallbackSource
+      ? `${params.basePayload.fallbackSource}+text_menu_target_recovery`
+      : 'text_menu_target_recovery';
+    return true;
   }
 
   private async generateAccessibilityTreeWithRetry(tabId: number, message: unknown): Promise<any> {
@@ -581,15 +1058,46 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       const currentWindowId = Number.isInteger(tab.windowId) ? tab.windowId : null;
       const isCurrentTabActive = typeof tab.active === 'boolean' ? tab.active : null;
       let isCurrentWindowFocused: boolean | null = null;
+      let currentWindowState: ReadPageWindowRuntimeState | null = null;
+      let currentWindowWidth: number | null = null;
+      let currentWindowHeight: number | null = null;
+      let currentWindowLeft: number | null = null;
+      let currentWindowTop: number | null = null;
+      let browserActiveTabId: number | null = null;
+      let browserActiveTabIdKnown = false;
+      let isReadTargetBrowserActiveTab: boolean | null = null;
       if (currentWindowId !== null && typeof chrome.windows?.get === 'function') {
         try {
-          const currentWindow = await chrome.windows.get(currentWindowId, { populate: false });
+          const currentWindow = await chrome.windows.get(currentWindowId, { populate: true });
           isCurrentWindowFocused =
             currentWindow && typeof currentWindow.focused === 'boolean'
               ? currentWindow.focused
               : null;
+          currentWindowState = normalizeWindowRuntimeState(currentWindow?.state);
+          currentWindowWidth = readWindowInteger(currentWindow?.width);
+          currentWindowHeight = readWindowInteger(currentWindow?.height);
+          currentWindowLeft = readWindowInteger(currentWindow?.left);
+          currentWindowTop = readWindowInteger(currentWindow?.top);
+          const activeWindowTab = Array.isArray(currentWindow?.tabs)
+            ? currentWindow.tabs.find((windowTab) => windowTab.active === true)
+            : null;
+          browserActiveTabId =
+            activeWindowTab && Number.isInteger(activeWindowTab.id) ? activeWindowTab.id! : null;
+          browserActiveTabIdKnown = browserActiveTabId !== null;
+          isReadTargetBrowserActiveTab =
+            browserActiveTabIdKnown && Number.isInteger(tabId)
+              ? browserActiveTabId === tabId
+              : null;
         } catch {
           isCurrentWindowFocused = null;
+          currentWindowState = null;
+          currentWindowWidth = null;
+          currentWindowHeight = null;
+          currentWindowLeft = null;
+          currentWindowTop = null;
+          browserActiveTabId = null;
+          browserActiveTabIdKnown = false;
+          isReadTargetBrowserActiveTab = null;
         }
       }
       const pageStability = inferPageStability(tab);
@@ -612,8 +1120,16 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           renderMode: selectedRender,
           tabId,
           currentWindowId,
+          currentWindowState,
+          currentWindowWidth,
+          currentWindowHeight,
+          currentWindowLeft,
+          currentWindowTop,
           isCurrentTabActive,
           isCurrentWindowFocused,
+          browserActiveTabId,
+          browserActiveTabIdKnown,
+          isReadTargetBrowserActiveTab,
           pageStability,
           currentUrl,
           currentTitle,
@@ -643,6 +1159,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           tips: standardTips,
           refMap: [],
           candidateActions: [],
+          visualElements: [],
           visibleRegionRows: extractVisibleRegionRows({
             pageContent: '',
             sourceRegion: 'unsupported_page',
@@ -781,6 +1298,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         reason: null,
         refMap: Array.isArray(resp?.refMap) ? resp.refMap : [],
         candidateActions: [],
+        visualElements: [],
         visibleRegionRows: extractVisibleRegionRows({
           pageContent,
           sourceRegion: pageUnderstanding.primaryRegion,
@@ -798,6 +1316,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         shouldSampleVisibleText({
           treeOk,
           userControlled,
+          mode: selectedMode,
           requestedDepth,
           focusRefId,
           rows: basePayload.visibleRegionRows,
@@ -835,6 +1354,39 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         currentTitle,
       });
 
+      if (
+        treeOk &&
+        !focusRefId &&
+        !isSparse &&
+        treeInteractiveElements.length < 3 &&
+        !basePayload.fallbackUsed
+      ) {
+        const fallback = await this.collectInteractiveElementsFallback(tabId);
+        if (fallback && fallback.elements.length > treeInteractiveElements.length) {
+          const merged = fallback.elements.slice(0, 150);
+          const fallbackRefMap = buildFallbackRefMap(merged);
+          const mergedWithRefs = attachFallbackRefs(merged, fallbackRefMap);
+          basePayload.fallbackUsed = true;
+          basePayload.fallbackSource = 'interactive_shell_supplement';
+          basePayload.elements = mergedWithRefs;
+          basePayload.count = fallback.elements.length;
+          basePayload.refMap =
+            Array.isArray(basePayload.refMap) && basePayload.refMap.length > 0
+              ? [...basePayload.refMap, ...fallbackRefMap]
+              : fallbackRefMap;
+          basePayload.refMapCount = basePayload.refMap.filter(
+            (entry: unknown) => entry != null,
+          ).length;
+        }
+      }
+
+      await this.recoverGlobalMenuTextTargets({ tabId, basePayload });
+      basePayload.visualElements = await this.collectQrVisualElements({
+        tabId,
+        pageContent: String(basePayload.pageContent || ''),
+        visibleTextContent: basePayload.visibleTextContent,
+      });
+
       // Normal path: return tree when the tree is sufficiently rich or the
       // visible-text fallback has already recovered business rows.
       if (treeOk && (!isSparse || basePayload.visibleRegionRows.visibleRegionRowsUsed)) {
@@ -843,8 +1395,16 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           renderMode: selectedRender,
           tabId,
           currentWindowId,
+          currentWindowState,
+          currentWindowWidth,
+          currentWindowHeight,
+          currentWindowLeft,
+          currentWindowTop,
           isCurrentTabActive,
           isCurrentWindowFocused,
+          browserActiveTabId,
+          browserActiveTabIdKnown,
+          isReadTargetBrowserActiveTab,
           pageStability,
           currentUrl,
           currentTitle,
@@ -874,6 +1434,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           tips: basePayload.tips,
           refMap: basePayload.refMap,
           candidateActions: basePayload.candidateActions,
+          visualElements: basePayload.visualElements,
           visibleRegionRows: basePayload.visibleRegionRows,
           requestedLayer: selectedLayer,
         });
@@ -954,14 +1515,27 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             }
           }
           reconcilePageUnderstandingWithVisibleRows(basePayload);
+          basePayload.visualElements = await this.collectQrVisualElements({
+            tabId,
+            pageContent: String(basePayload.pageContent || ''),
+            visibleTextContent: basePayload.visibleTextContent,
+          });
 
           const modePayload = await buildModeOutput({
             mode: selectedMode,
             renderMode: selectedRender,
             tabId,
             currentWindowId,
+            currentWindowState,
+            currentWindowWidth,
+            currentWindowHeight,
+            currentWindowLeft,
+            currentWindowTop,
             isCurrentTabActive,
             isCurrentWindowFocused,
+            browserActiveTabId,
+            browserActiveTabIdKnown,
+            isReadTargetBrowserActiveTab,
             pageStability,
             currentUrl,
             currentTitle,
@@ -991,6 +1565,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             tips: basePayload.tips,
             refMap: basePayload.refMap,
             candidateActions: basePayload.candidateActions,
+            visualElements: basePayload.visualElements,
             visibleRegionRows: basePayload.visibleRegionRows,
             requestedLayer: selectedLayer,
           });
