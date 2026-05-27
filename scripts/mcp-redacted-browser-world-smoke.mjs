@@ -169,11 +169,22 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     : null;
   const compactTabLimit =
     compactWindows.find((window) => window?.compactTabLimit !== undefined)?.compactTabLimit ?? null;
+  const compactSummaryBounded =
+    compactWindows.length > 0 && Number.isInteger(compactTabLimit)
+      ? compactWindows.every(
+          (window) => Array.isArray(window?.tabs) && window.tabs.length <= Number(compactTabLimit),
+        )
+      : null;
   const omittedTabCount = compactWindows.reduce(
     (sum, window) => sum + (Number.isInteger(window?.omittedTabCount) ? window.omittedTabCount : 0),
     0,
   );
   const retentionPolicy = payload?.compactSummary?.retentionPolicy ?? payload?.retentionPolicy;
+  const retentionWithinLimit =
+    Number.isInteger(retentionPolicy?.recentEventLimit) &&
+    Number.isInteger(retentionPolicy?.recentEventsRetained)
+      ? retentionPolicy.recentEventsRetained <= retentionPolicy.recentEventLimit
+      : null;
   const windowStateMatrix =
     payload?.compactSummary?.windowStateMatrix ?? payload?.summary?.windowStateMatrix ?? null;
   const windowOperationState =
@@ -192,8 +203,10 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     tabCount: Number.isInteger(payload?.tabCount) ? payload.tabCount : null,
     hasCompactSummary: Boolean(payload?.compactSummary),
     compactTabLimit,
+    compactSummaryBounded,
     omittedTabCount,
     compactTabsShown: compactTabs.length,
+    retentionWithinLimit,
     retentionPolicy: retentionPolicy
       ? {
           recentEventLimit: Number.isInteger(retentionPolicy.recentEventLimit)
@@ -573,6 +586,8 @@ function buildStepSummary(step, payload, targetTabId) {
     tabLifecycleState: redacted.tabLifecycleState,
     tabLifecycleConclusionPresent: redacted.tabLifecycleConclusionPresent,
     dynamicObjectUpdateSummaryPresent: redacted.dynamicObjectUpdateSummaryPresent,
+    retentionWithinLimit: redacted.retentionWithinLimit,
+    compactSummaryBounded: redacted.compactSummaryBounded,
   };
 }
 
@@ -735,6 +750,8 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
       passed:
         result.openedPublicTestTabs === 3 &&
         result.closeSucceeded === true &&
+        result.postCleanup?.retentionWithinLimit === true &&
+        result.postCleanup?.compactSummaryBounded === true &&
         (result.postCleanup?.tabLifecycleState?.recentRemovedCount ?? 0) >= 3 &&
         result.lifecycleMatrix.every(
           (step) =>
@@ -742,6 +759,8 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
             step.targetTab?.openedBy === 'ai' &&
             step.targetTab?.canTabrixOperate === true &&
             step.dynamicObjectUpdateSummaryPresent === true &&
+            step.retentionWithinLimit === true &&
+            step.compactSummaryBounded === true &&
             step.activeTabIncludedInCompactTabs === true,
         ),
     };
@@ -754,7 +773,11 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
     readPage,
     allTargetsPassed:
       windowState.verdict === 'WINDOW_STATE_OBSERVED' &&
+      windowState.redacted.retentionWithinLimit === true &&
+      windowState.redacted.compactSummaryBounded === true &&
       readPage.alignmentPassed === true &&
+      readPage.redactedBrowserWorldAfterRead.retentionWithinLimit === true &&
+      readPage.redactedBrowserWorldAfterRead.compactSummaryBounded === true &&
       targets.every((target) => target.passed),
     targets,
   };

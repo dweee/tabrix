@@ -198,6 +198,8 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
     eventPrivacyBoundaryPresent: true,
     detailBoundaryPresent: true,
   });
+  assert.equal(summary.retentionWithinLimit, true);
+  assert.equal(summary.compactSummaryBounded, true);
   assert.deepEqual(summary.windowStateMatrix, {
     total: 1,
     visible: 1,
@@ -311,6 +313,8 @@ test('buildRedactedBrowserWorldSummary checks active tab across all compact wind
 
   assert.equal(summary.activeTabIncludedInCompactTabs, true);
   assert.equal(summary.omittedTabCount, 4);
+  assert.equal(summary.compactSummaryBounded, true);
+  assert.equal(summary.retentionWithinLimit, null);
   assert.equal(JSON.stringify(summary).includes('private.example.test'), false);
 });
 
