@@ -3,6 +3,7 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
+import { markBrowserWorldTabAiOperated } from '../../browser-world-inventory';
 
 interface KeyboardToolParams {
   keys: string; // Required: string representing keys or key combinations to simulate (e.g., "Enter", "Ctrl+C")
@@ -121,6 +122,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
       }
       const submitLikeKey = keys.trim().toLowerCase() === 'enter';
 
+      markBrowserWorldTabAiOperated(tab.id, 'keyboard');
       return {
         content: [
           {

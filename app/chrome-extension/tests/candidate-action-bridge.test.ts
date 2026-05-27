@@ -4,6 +4,10 @@ import { clickTool, fillTool } from '@/entrypoints/background/tools/browser/inte
 import { computerTool } from '@/entrypoints/background/tools/browser/computer';
 import { keyboardTool } from '@/entrypoints/background/tools/browser/keyboard';
 import {
+  getBrowserWorldSnapshot,
+  resetBrowserWorldInventoryForTests,
+} from '@/entrypoints/background/browser-world-inventory';
+import {
   __resetStableTargetRefRegistryForTests,
   recordStableTargetRefSnapshot,
 } from '@/entrypoints/background/tools/browser/stable-target-ref-registry';
@@ -12,7 +16,36 @@ describe('candidateAction bridge', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     __resetStableTargetRefRegistryForTests();
+    resetBrowserWorldInventoryForTests();
   });
+
+  function mockBrowserWorldTab(tabId: number, url = 'https://example.com/app') {
+    (chrome as any).windows = {
+      ...((chrome as any).windows ?? {}),
+      getAll: vi.fn().mockResolvedValue([
+        {
+          id: 1,
+          focused: true,
+          state: 'normal',
+          type: 'normal',
+          tabs: [
+            {
+              id: tabId,
+              windowId: 1,
+              url,
+              title: 'App',
+              active: true,
+              status: 'complete',
+              discarded: false,
+              audible: false,
+              mutedInfo: { muted: false },
+              pinned: false,
+            },
+          ],
+        },
+      ]),
+    };
+  }
 
   it('resolves click target from candidateAction.targetRef', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
@@ -258,6 +291,79 @@ describe('candidateAction bridge', () => {
     expect(payload.claimBoundary).toContain(
       'does not prove page, form, menu, or search state changed',
     );
+  });
+
+  it('updates Browser World latest AI operation after click, fill, and keyboard dispatches', async () => {
+    mockBrowserWorldTab(4120);
+    await getBrowserWorldSnapshot();
+
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4120,
+      title: 'App',
+      url: 'https://example.com/app',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(clickTool as any, 'preflightDownloadIntercept').mockResolvedValue({
+      interceptedDownload: false,
+    });
+    vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      dispatchSucceeded: true,
+      signals: { domChanged: true },
+    });
+
+    await clickTool.execute({ selector: '#open', tabId: 4120 });
+    let snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.summary.aiOperationState).toMatchObject({
+      latestAiOperatedTabId: 4120,
+      latestAiOperation: 'click_element',
+      latestAiOperationConfidence: 0.95,
+      latestAiOperationReason: 'marked_by_tabrix_tool_execution:click_element',
+      relationToBrowserActiveTab: 'same_as_browser_active',
+    });
+
+    vi.restoreAllMocks();
+    mockBrowserWorldTab(4120);
+    vi.spyOn(fillTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4120,
+      title: 'App',
+      url: 'https://example.com/app',
+      status: 'complete',
+    });
+    vi.spyOn(fillTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(fillTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      message: 'Fill operation successful',
+    });
+
+    await fillTool.execute({ selector: 'input[name=q]', value: 'tabrix', tabId: 4120 });
+    snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.summary.aiOperationState).toMatchObject({
+      latestAiOperatedTabId: 4120,
+      latestAiOperation: 'fill_or_select',
+      latestAiOperationReason: 'marked_by_tabrix_tool_execution:fill_or_select',
+    });
+
+    vi.restoreAllMocks();
+    mockBrowserWorldTab(4120);
+    vi.spyOn(keyboardTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4120,
+      title: 'App',
+      url: 'https://example.com/app',
+    });
+    vi.spyOn(keyboardTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(keyboardTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      message: 'Keyboard operation successful',
+    });
+
+    await keyboardTool.execute({ keys: 'Enter', tabId: 4120 });
+    snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.summary.aiOperationState).toMatchObject({
+      latestAiOperatedTabId: 4120,
+      latestAiOperation: 'keyboard',
+      latestAiOperationReason: 'marked_by_tabrix_tool_execution:keyboard',
+    });
   });
 
   it('retries fill with candidateAction css when a page-local ref is stale or hidden', async () => {

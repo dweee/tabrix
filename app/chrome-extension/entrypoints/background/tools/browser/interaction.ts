@@ -13,6 +13,7 @@ import { prearmDialogHandling } from './dialog-prearm';
 import { type CandidateActionInput, resolveCandidateActionTarget } from './candidate-action';
 import { lookupStableTargetRef } from './stable-target-ref-registry';
 import { armActionOutcome } from '../../observers/action-outcome-singleton';
+import { markBrowserWorldTabAiOperated } from '../../browser-world-inventory';
 import {
   CLICK_VERIFIER_READBACK_MAX_MS,
   type ClickVerifierContext,
@@ -939,6 +940,7 @@ class ClickTool extends BaseBrowserToolExecutor {
           });
         }
 
+        markBrowserWorldTabAiOperated(tab.id, 'click_element_hover');
         return {
           content: [
             {
@@ -988,6 +990,7 @@ class ClickTool extends BaseBrowserToolExecutor {
             );
           }
 
+          markBrowserWorldTabAiOperated(tab.id, 'click_download_intercepted');
           return {
             content: [
               {
@@ -1114,6 +1117,7 @@ class ClickTool extends BaseBrowserToolExecutor {
           );
         }
 
+        markBrowserWorldTabAiOperated(tab.id, 'click_download_intercepted');
         return {
           content: [
             {
@@ -1217,6 +1221,9 @@ class ClickTool extends BaseBrowserToolExecutor {
         }
       }
 
+      if (merged.dispatchSucceeded) {
+        markBrowserWorldTabAiOperated(tab.id, 'click_element');
+      }
       return {
         content: [
           {
@@ -1447,6 +1454,7 @@ class FillTool extends BaseBrowserToolExecutor {
         return createErrorResponse(result.error);
       }
 
+      markBrowserWorldTabAiOperated(tabId, 'fill_or_select');
       return {
         content: [
           {
