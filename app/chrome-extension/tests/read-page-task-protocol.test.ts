@@ -555,6 +555,31 @@ describe('read_page task protocol', () => {
     expect(protocol.taskMode).toBe(expected);
   });
 
+  it('does not infer search from a non-GitHub issues route without structured search evidence', () => {
+    const protocol = buildTaskProtocol(
+      createBaseParams({
+        currentUrl: 'https://example.com/issues',
+        currentTitle: 'Issues',
+        pageRole: 'web_page',
+        primaryRegion: 'main_content',
+        interactiveElements: [{ ref: 'ref_article', role: 'link', name: 'Known platform issues' }],
+        candidateActions: [
+          {
+            id: 'ca_click_ref_article',
+            actionType: 'click',
+            targetRef: 'ref_article',
+            confidence: 0.72,
+            matchReason: 'content item from structured snapshot',
+            locatorChain: [{ type: 'aria', value: 'Known platform issues' }],
+          },
+        ],
+      }) as any,
+    );
+
+    expect(protocol.taskMode).toBe('read');
+    expect(protocol.watchScope.scopeKind).not.toBe('search');
+  });
+
   // ----- B-011: stable targetRef on HVO ----------------------------------
   describe('B-011 stable targetRef integration', () => {
     function buildRepoHomeParams(refSuffix: string) {
