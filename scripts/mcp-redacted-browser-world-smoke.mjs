@@ -541,6 +541,11 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       tabPageObjectSummaryPresent: String(compact?.primaryConclusion || '').includes(
         'One Tab page object',
       ),
+      currentTabIdPresent: Number.isInteger(ownershipRuntime?.currentTabId),
+      currentWindowIdPresent: Number.isInteger(ownershipRuntime?.currentWindowId),
+      currentWindowStateKnown: typeof ownershipRuntime?.currentWindowState === 'string',
+      currentTabStatusKnown: typeof ownershipRuntime?.currentTabStatus === 'string',
+      currentTabOperabilityKnown: typeof ownershipRuntime?.currentTabCanTabrixOperate === 'boolean',
       targetTabMatchesReadPage:
         Number.isInteger(targetTabId) && Number.isInteger(ownershipRuntime?.currentTabId)
           ? ownershipRuntime.currentTabId === targetTabId
@@ -867,6 +872,11 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
       redactedReadPage.alignment.browserPageObjectCompactSource === 'expected' &&
       redactedReadPage.alignment.browserWorldRuntimeSource === true &&
       redactedReadPage.alignment.tabPageObjectSummaryPresent === true &&
+      redactedReadPage.alignment.currentTabIdPresent === true &&
+      redactedReadPage.alignment.currentWindowIdPresent === true &&
+      redactedReadPage.alignment.currentWindowStateKnown === true &&
+      redactedReadPage.alignment.currentTabStatusKnown === true &&
+      redactedReadPage.alignment.currentTabOperabilityKnown === true &&
       redactedReadPage.alignment.targetTabMatchesReadPage === true &&
       redactedReadPage.alignment.readTargetIsBrowserActive === true &&
       redactedReadPage.alignment.tabOwnerIsAi === true &&
