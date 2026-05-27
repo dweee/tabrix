@@ -956,6 +956,9 @@ function uniqueNumbers(values) {
 export function buildStepSummary(step, payload, targetTabId) {
   const redacted = buildRedactedBrowserWorldSummary(payload, targetTabId);
   const expectedTargetActive = expectedTargetActiveForLifecycleStep(step);
+  const expectedRelationToBrowserActiveTab = expectedRelationToBrowserActiveForLifecycleStep(step);
+  const expectedOperationTargetRole = expectedOperationTargetRoleForLifecycleStep(step);
+  const expectedLatestAiOperation = expectedLatestAiOperationForLifecycleStep(step);
   return {
     step,
     windowCount: redacted.windowCount,
@@ -974,6 +977,23 @@ export function buildStepSummary(step, payload, targetTabId) {
     tabLifecycleConclusionPresent: redacted.tabLifecycleConclusionPresent,
     targetActiveMatchesLifecycleStep:
       expectedTargetActive === null ? null : redacted.targetTab?.active === expectedTargetActive,
+    expectedRelationToBrowserActiveTab,
+    relationToBrowserActiveMatchesLifecycleStep:
+      expectedRelationToBrowserActiveTab === null
+        ? null
+        : redacted.operationRouting?.relationToBrowserActiveTab ===
+          expectedRelationToBrowserActiveTab,
+    expectedOperationTargetRole,
+    operationTargetRoleMatchesLifecycleStep:
+      expectedOperationTargetRole === null
+        ? null
+        : redacted.operationTargetBrief?.targetRole === expectedOperationTargetRole,
+    expectedLatestAiOperation,
+    latestAiOperationMatchesLifecycleStep:
+      expectedLatestAiOperation === null
+        ? null
+        : redacted.operationRouting?.latestAiOperation === expectedLatestAiOperation &&
+          redacted.browserActiveObject?.lastAiOperation === expectedLatestAiOperation,
     browserObjectEdgeSummaryPresent: redacted.browserObjectEdgeSummaryPresent,
     objectChangeSummaryPresent: redacted.objectChangeSummaryPresent,
     dynamicObjectUpdateSummaryPresent: redacted.dynamicObjectUpdateSummaryPresent,
@@ -1004,6 +1024,78 @@ function expectedTargetActiveForLifecycleStep(step) {
     return true;
   }
   return null;
+}
+
+function expectedRelationToBrowserActiveForLifecycleStep(step) {
+  if (step === 'background_open') return 'latest_ai_operated_background_tab';
+  if (
+    step === 'foreground_open' ||
+    step === 'switch_to_background_tab' ||
+    step === 'new_window_open'
+  ) {
+    return 'same_as_browser_active';
+  }
+  return null;
+}
+
+function expectedOperationTargetRoleForLifecycleStep(step) {
+  if (step === 'background_open') return 'latest_ai_operated_background_tab';
+  if (
+    step === 'foreground_open' ||
+    step === 'switch_to_background_tab' ||
+    step === 'new_window_open'
+  ) {
+    return 'latest_ai_operated_active_tab';
+  }
+  return null;
+}
+
+function expectedLatestAiOperationForLifecycleStep(step) {
+  if (step === 'foreground_open' || step === 'background_open') return 'navigate_new_tab';
+  if (step === 'switch_to_background_tab') return 'switch_tab';
+  if (step === 'new_window_open') return 'navigate_new_window_tab';
+  return null;
+}
+
+export function isLifecycleStepPassing(step) {
+  return (
+    step?.targetTab?.wasFound === true &&
+    step.targetTab.openedBy === 'ai' &&
+    step.targetTab.canTabrixOperate === true &&
+    step.targetActiveMatchesLifecycleStep === true &&
+    step.relationToBrowserActiveMatchesLifecycleStep === true &&
+    step.operationTargetRoleMatchesLifecycleStep === true &&
+    step.latestAiOperationMatchesLifecycleStep === true &&
+    step.browserObjectEdgeSummaryPresent === true &&
+    step.objectChangeSummaryPresent === true &&
+    step.dynamicObjectUpdateSummaryPresent === true &&
+    step.retentionWithinLimit === true &&
+    step.compactSummaryBounded === true &&
+    step.activeObject?.tabIdPresent === true &&
+    typeof step.activeObject?.tabStatus === 'string' &&
+    typeof step.activeObject?.tabOperabilityReason === 'string' &&
+    typeof step.activeObject?.windowOperabilityReason === 'string' &&
+    step.browserActiveObject?.objectPresent === true &&
+    step.browserActiveObject?.tabIdPresent === true &&
+    typeof step.browserActiveObject?.operabilityReason === 'string' &&
+    step.latestAiOperatedObject?.objectPresent === true &&
+    step.latestAiOperatedObject?.tabIdPresent === true &&
+    typeof step.latestAiOperatedObject?.operabilityReason === 'string' &&
+    step.operationRouting?.browserActiveTabIdPresent === true &&
+    step.operationRouting?.latestAiOperatedTabIdPresent === true &&
+    typeof step.operationRouting?.relationToBrowserActiveTab === 'string' &&
+    step.operationRouting?.summaryPresent === true &&
+    step.operationRouting?.claimBoundaryPresent === true &&
+    step.aiRoutingBrief?.summaryPresent === true &&
+    step.aiRoutingBrief?.recommendedNextCheckPresent === true &&
+    step.aiRoutingBrief?.claimBoundaryPresent === true &&
+    step.operationTargetBrief?.targetTabIdPresent === true &&
+    typeof step.operationTargetBrief?.targetRole === 'string' &&
+    typeof step.operationTargetBrief?.nextRequiredCheck === 'string' &&
+    step.operationTargetBrief?.summaryPresent === true &&
+    step.operationTargetBrief?.claimBoundaryPresent === true &&
+    step.activeTabIncludedInCompactTabs === true
+  );
 }
 
 function closeRunTabs(cliPath, tabIds, timeoutMs) {
@@ -1145,6 +1237,7 @@ function runLifecycleSmoke(cliPath, smokeUrl, args) {
             target.retentionWithinLimit === true,
         )
       : null;
+  const allLifecycleStepsPassed = lifecycleMatrix.every((step) => isLifecycleStepPassing(step));
 
   return {
     scenario: 'lifecycle',
@@ -1152,6 +1245,7 @@ function runLifecycleSmoke(cliPath, smokeUrl, args) {
     closeAttempted: closeResult.attempted,
     closeSucceeded: closeResult.succeeded,
     cleanupTargetsPassed,
+    allLifecycleStepsPassed,
     cleanup: {
       requestedCount: closeResult.requestedCount,
       closedCount: closeResult.closedCount,
@@ -1181,46 +1275,11 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
         result.openedPublicTestTabs === 3 &&
         result.closeSucceeded === true &&
         result.cleanupTargetsPassed === true &&
+        result.allLifecycleStepsPassed === true &&
         result.postCleanup?.retentionWithinLimit === true &&
         result.postCleanup?.compactSummaryBounded === true &&
         result.postCleanup?.browserObjectEdgeSummaryPresent === true &&
-        (result.postCleanup?.tabLifecycleState?.recentRemovedCount ?? 0) >= 3 &&
-        result.lifecycleMatrix.every(
-          (step) =>
-            step.targetTab?.wasFound === true &&
-            step.targetTab?.openedBy === 'ai' &&
-            step.targetTab?.canTabrixOperate === true &&
-            step.targetActiveMatchesLifecycleStep === true &&
-            step.browserObjectEdgeSummaryPresent === true &&
-            step.objectChangeSummaryPresent === true &&
-            step.dynamicObjectUpdateSummaryPresent === true &&
-            step.retentionWithinLimit === true &&
-            step.compactSummaryBounded === true &&
-            step.activeObject?.tabIdPresent === true &&
-            typeof step.activeObject?.tabStatus === 'string' &&
-            typeof step.activeObject?.tabOperabilityReason === 'string' &&
-            typeof step.activeObject?.windowOperabilityReason === 'string' &&
-            step.browserActiveObject?.objectPresent === true &&
-            step.browserActiveObject?.tabIdPresent === true &&
-            typeof step.browserActiveObject?.operabilityReason === 'string' &&
-            step.latestAiOperatedObject?.objectPresent === true &&
-            step.latestAiOperatedObject?.tabIdPresent === true &&
-            typeof step.latestAiOperatedObject?.operabilityReason === 'string' &&
-            step.operationRouting?.browserActiveTabIdPresent === true &&
-            step.operationRouting?.latestAiOperatedTabIdPresent === true &&
-            typeof step.operationRouting?.relationToBrowserActiveTab === 'string' &&
-            step.operationRouting?.summaryPresent === true &&
-            step.operationRouting?.claimBoundaryPresent === true &&
-            step.aiRoutingBrief?.summaryPresent === true &&
-            step.aiRoutingBrief?.recommendedNextCheckPresent === true &&
-            step.aiRoutingBrief?.claimBoundaryPresent === true &&
-            step.operationTargetBrief?.targetTabIdPresent === true &&
-            typeof step.operationTargetBrief?.targetRole === 'string' &&
-            typeof step.operationTargetBrief?.nextRequiredCheck === 'string' &&
-            step.operationTargetBrief?.summaryPresent === true &&
-            step.operationTargetBrief?.claimBoundaryPresent === true &&
-            step.activeTabIncludedInCompactTabs === true,
-        ),
+        (result.postCleanup?.tabLifecycleState?.recentRemovedCount ?? 0) >= 3,
     };
   });
   const readPage = runReadPageSmoke(cliPath, smokeUrls[0], args);
@@ -1423,6 +1482,7 @@ export function isSmokeResultPassing(result) {
       result.openedPublicTestTabs === 3 &&
       result.closeSucceeded === true &&
       result.cleanupTargetsPassed === true &&
+      result.allLifecycleStepsPassed === true &&
       result.postCleanup?.retentionWithinLimit === true &&
       result.postCleanup?.compactSummaryBounded === true &&
       result.postCleanup?.browserObjectEdgeSummaryPresent === true

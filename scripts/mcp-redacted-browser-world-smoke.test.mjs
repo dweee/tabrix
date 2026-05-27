@@ -14,6 +14,7 @@ import {
   buildWindowStateMutationProof,
   extractJsonObject,
   extractNavigateTabId,
+  isLifecycleStepPassing,
   isSmokeResultPassing,
   parseArgs,
   resolveSmokeUrls,
@@ -776,7 +777,9 @@ test('buildStepSummary includes active object operability reasons without raw UR
           summary: 'Private operation target summary',
           claimBoundary: 'Private operation target boundary',
         },
+        browserObjectEdgeSummary: 'Private browser object edge summary',
         objectChangeSummary: 'Private object change summary',
+        dynamicObjectUpdateSummary: 'Private dynamic object update summary',
         windows: [{ compactTabLimit: 12, tabs: [{ tabId: 7 }] }],
         retentionPolicy: { recentEventLimit: 50, recentEventsRetained: 4 },
       },
@@ -863,10 +866,87 @@ test('buildStepSummary includes active object operability reasons without raw UR
     claimBoundaryPresent: true,
   });
   assert.equal(summary.targetActiveMatchesLifecycleStep, true);
+  assert.equal(summary.expectedRelationToBrowserActiveTab, 'same_as_browser_active');
+  assert.equal(summary.relationToBrowserActiveMatchesLifecycleStep, true);
+  assert.equal(summary.expectedOperationTargetRole, 'latest_ai_operated_active_tab');
+  assert.equal(summary.operationTargetRoleMatchesLifecycleStep, true);
+  assert.equal(summary.expectedLatestAiOperation, 'navigate_new_tab');
+  assert.equal(summary.latestAiOperationMatchesLifecycleStep, true);
   assert.equal(summary.objectChangeSummaryPresent, true);
   assert.equal(JSON.stringify(summary).includes('private.example.test'), false);
   assert.equal(JSON.stringify(summary).includes('Private Active'), false);
   assert.equal(JSON.stringify(summary).includes('Private operation'), false);
+});
+
+test('isLifecycleStepPassing rejects stale operation target routing', () => {
+  const passingStep = {
+    targetTab: {
+      wasFound: true,
+      openedBy: 'ai',
+      canTabrixOperate: true,
+    },
+    targetActiveMatchesLifecycleStep: true,
+    relationToBrowserActiveMatchesLifecycleStep: true,
+    operationTargetRoleMatchesLifecycleStep: true,
+    latestAiOperationMatchesLifecycleStep: true,
+    browserObjectEdgeSummaryPresent: true,
+    objectChangeSummaryPresent: true,
+    dynamicObjectUpdateSummaryPresent: true,
+    retentionWithinLimit: true,
+    compactSummaryBounded: true,
+    activeObject: {
+      tabIdPresent: true,
+      tabStatus: 'complete',
+      tabOperabilityReason: 'regular_web_page',
+      windowOperabilityReason: 'active_tab_operable_in_visible_window',
+    },
+    browserActiveObject: {
+      objectPresent: true,
+      tabIdPresent: true,
+      operabilityReason: 'regular_web_page',
+    },
+    latestAiOperatedObject: {
+      objectPresent: true,
+      tabIdPresent: true,
+      operabilityReason: 'regular_web_page',
+    },
+    operationRouting: {
+      browserActiveTabIdPresent: true,
+      latestAiOperatedTabIdPresent: true,
+      relationToBrowserActiveTab: 'same_as_browser_active',
+      summaryPresent: true,
+      claimBoundaryPresent: true,
+    },
+    aiRoutingBrief: {
+      summaryPresent: true,
+      recommendedNextCheckPresent: true,
+      claimBoundaryPresent: true,
+    },
+    operationTargetBrief: {
+      targetTabIdPresent: true,
+      targetRole: 'latest_ai_operated_active_tab',
+      nextRequiredCheck: 'page_level_read_or_postcondition_check',
+      summaryPresent: true,
+      claimBoundaryPresent: true,
+    },
+    activeTabIncludedInCompactTabs: true,
+  };
+
+  assert.equal(isLifecycleStepPassing(passingStep), true);
+  assert.equal(
+    isLifecycleStepPassing({
+      ...passingStep,
+      relationToBrowserActiveMatchesLifecycleStep: false,
+    }),
+    false,
+  );
+  assert.equal(
+    isLifecycleStepPassing({
+      ...passingStep,
+      operationTargetRoleMatchesLifecycleStep: false,
+    }),
+    false,
+  );
 });
 
 test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fields', () => {
