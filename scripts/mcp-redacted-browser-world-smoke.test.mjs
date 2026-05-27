@@ -11,6 +11,7 @@ import {
   extractNavigateTabId,
   parseArgs,
   resolveSmokeUrls,
+  stringifyRedactedSmokeOutput,
 } from './mcp-redacted-browser-world-smoke.mjs';
 
 test('extractJsonObject parses the bounded CLI Result payload', () => {
@@ -31,6 +32,19 @@ test('assertRedactedSmokeOutputSafe rejects raw URL strings and raw fields', () 
     assertRedactedSmokeOutputSafe({ target: { label: 'https://private.example.test/dashboard' } }),
   );
   assert.throws(() => assertRedactedSmokeOutputSafe({ target: { pageText: 'private text' } }));
+});
+
+test('stringifyRedactedSmokeOutput enforces a byte limit after privacy checks', () => {
+  assert.equal(
+    stringifyRedactedSmokeOutput({ ok: true, targets: [{ targetIndex: 1 }] }, 200).includes(
+      '"ok": true',
+    ),
+    true,
+  );
+  assert.throws(() => stringifyRedactedSmokeOutput({ ok: true, summary: 'x'.repeat(100) }, 40));
+  assert.throws(() =>
+    stringifyRedactedSmokeOutput({ ok: true, summary: 'https://private.example.test' }, 500),
+  );
 });
 
 test('assertPublicHttpUrl rejects local targets', () => {

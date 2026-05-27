@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const DEFAULT_PUBLIC_URL = 'https://example.com/?tabrix_browser_world_smoke=1';
+const REDACTED_OUTPUT_BYTE_LIMIT = 64 * 1024;
 
 export function parseArgs(argv) {
   const args = {
@@ -156,6 +157,18 @@ export function assertRedactedSmokeOutputSafe(value, pathParts = []) {
     }
     assertRedactedSmokeOutputSafe(nested, [...pathParts, key]);
   }
+}
+
+export function stringifyRedactedSmokeOutput(output, byteLimit = REDACTED_OUTPUT_BYTE_LIMIT) {
+  assertRedactedSmokeOutputSafe(output);
+  const serialized = JSON.stringify(output, null, 2);
+  const byteLength = Buffer.byteLength(serialized, 'utf8');
+  if (byteLength > byteLimit) {
+    throw new Error(
+      `Redacted smoke output is too large: ${byteLength} byte(s), limit ${byteLimit} byte(s).`,
+    );
+  }
+  return `${serialized}\n`;
 }
 
 function findFirstNumberByKey(value, keys) {
@@ -1079,8 +1092,7 @@ async function main() {
       privacyBoundary:
         'No tab URLs, titles, account state, screenshots, cookies, network bodies, or page text are printed by this script.',
     };
-    assertRedactedSmokeOutputSafe(output);
-    process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+    process.stdout.write(stringifyRedactedSmokeOutput(output));
   } catch (error) {
     process.stderr.write(
       `${JSON.stringify(
