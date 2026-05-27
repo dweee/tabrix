@@ -67,6 +67,52 @@ describe('get_windows_and_tabs state inventory', () => {
     expect(payload).toMatchObject({
       windowCount: 2,
       tabCount: 2,
+      compactSummary: {
+        activeObject: {
+          windowId: 10,
+          windowState: 'normal',
+          windowVisibilityState: 'visible',
+          tabId: 102,
+          tabWindowId: 10,
+          url: 'https://example.test/active',
+          title: 'Active',
+          openedBy: 'user_or_page',
+          canTabrixOperate: true,
+        },
+        windows: [
+          {
+            windowId: 10,
+            focused: true,
+            activeTabId: 102,
+            canTabrixOperate: true,
+            tabCount: 2,
+            tabs: [
+              {
+                tabId: 101,
+                title: 'Example',
+                active: false,
+                openedBy: 'user_or_page',
+                canTabrixOperate: true,
+              },
+              {
+                tabId: 102,
+                title: 'Active',
+                active: true,
+                openedBy: 'user_or_page',
+                canTabrixOperate: true,
+              },
+            ],
+          },
+          {
+            windowId: 20,
+            visibilityState: 'minimized',
+            canTabrixOperate: false,
+            tabCount: 0,
+          },
+        ],
+        claimBoundary:
+          'Browser lifecycle summary only; page content, account state, login success, and API/CDP reuse require separate evidence.',
+      },
       windows: [
         {
           windowId: 10,

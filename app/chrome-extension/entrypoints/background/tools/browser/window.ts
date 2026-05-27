@@ -63,6 +63,49 @@ class WindowTool extends BaseBrowserToolExecutor {
         source: 'chrome_windows_get_all_with_browser_world_inventory',
         windowCount: browserWorld.windowCount,
         tabCount: browserWorld.tabCount,
+        compactSummary: {
+          primaryConclusion: browserWorld.summary.primaryConclusion,
+          activeObject: {
+            windowId: browserWorld.summary.activeWindow.windowId,
+            windowState: browserWorld.summary.activeWindow.state,
+            windowVisibilityState: browserWorld.summary.activeWindow.visibilityState,
+            tabId: browserWorld.summary.activeTab.tabId,
+            tabWindowId: browserWorld.summary.activeTab.windowId,
+            url: browserWorld.summary.activeTab.url,
+            title: browserWorld.summary.activeTab.title,
+            openedBy: browserWorld.summary.activeTab.openedBy,
+            canTabrixOperate:
+              browserWorld.summary.activeTab.canTabrixOperate === false ||
+              browserWorld.summary.activeWindow.canTabrixOperate === false
+                ? false
+                : (browserWorld.summary.activeTab.canTabrixOperate ??
+                  browserWorld.summary.activeWindow.canTabrixOperate),
+          },
+          windows: structuredWindows.map((window) => ({
+            windowId: window.windowId,
+            state: window.state,
+            visibilityState: window.visibilityState,
+            focused: window.focused,
+            activeTabId: window.activeTabId,
+            canTabrixOperate: window.canTabrixOperate,
+            operabilityReason: window.operabilityReason,
+            tabCount: window.tabCount,
+            tabs: window.tabs.map((tab) => ({
+              tabId: tab.tabId,
+              title: tab.title,
+              url: tab.url,
+              active: tab.active,
+              status: tab.status,
+              openedBy: tab.openedBy,
+              canTabrixOperate: tab.canTabrixOperate,
+              operabilityReason: tab.operabilityReason,
+            })),
+          })),
+          recentChangeSummary: browserWorld.summary.recentChangeSummary,
+          objectChangeConclusion: browserWorld.summary.objectChangeConclusion,
+          claimBoundary:
+            'Browser lifecycle summary only; page content, account state, login success, and API/CDP reuse require separate evidence.',
+        },
         summary: browserWorld.summary,
         browserWorld,
         windows: structuredWindows,
