@@ -154,6 +154,45 @@ describe('read_page task protocol', () => {
     expect(protocol.L0.summary).not.toContain('fix(t4): stabilize workflow run detail baseline');
   });
 
+  it('carries privacy-safe form value state into page regions and lifecycle', () => {
+    const protocol = buildTaskProtocol(
+      createBaseParams({
+        interactiveElements: [
+          {
+            ref: 'ref_search',
+            role: 'textbox',
+            name: 'Search',
+            valueState: 'non_empty',
+          },
+        ],
+        candidateActions: [
+          {
+            id: 'ca_fill_ref_search',
+            actionType: 'fill',
+            targetRef: 'ref_search',
+            confidence: 0.72,
+            matchReason: 'primary action inferred from interactive label',
+            locatorChain: [{ type: 'ref', value: 'ref_search' }],
+          },
+        ],
+      }),
+    );
+
+    const formRegion = protocol.pageRegions.find((region) => region.regionType === 'form');
+    expect(formRegion?.objects.find((object) => object.objectId === 'ref_search')).toMatchObject({
+      objectId: 'ref_search',
+      valueState: 'non_empty',
+    });
+    expect(protocol.objectLifecycle.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          objectKey: 'object:form:ref_search',
+          state: 'input_available_candidate:value_non_empty',
+        }),
+      ]),
+    );
+  });
+
   it('falls back to generic high-value objects when snapshot has no repo tabs', () => {
     const protocol = buildTaskProtocol(
       createBaseParams({

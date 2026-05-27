@@ -94,8 +94,9 @@
       const input = /** @type {HTMLInputElement} */ (el);
       const type = input.getAttribute('type') || '';
       const val = input.getAttribute('value');
-      if (type === 'submit' && val && val.trim()) return val.trim();
-      if (input.value && input.value.length < 50 && input.value.trim()) return input.value.trim();
+      if ((type === 'submit' || type === 'button' || type === 'reset') && val && val.trim()) {
+        return val.trim();
+      }
     }
     if (['button', 'a', 'summary'].includes(tag)) {
       let text = '';
@@ -126,6 +127,43 @@
       return v.length > 50 ? v.substring(0, 50) + '...' : v;
     }
     return '';
+  }
+
+  function inferValueState(el) {
+    if (!el || !el.tagName) return null;
+    const tag = el.tagName.toLowerCase();
+    const role = String((el.getAttribute && el.getAttribute('role')) || '').toLowerCase();
+    if (
+      tag === 'input' ||
+      tag === 'textarea' ||
+      tag === 'select' ||
+      el.getAttribute('contenteditable') === 'true'
+    ) {
+      const rawValue =
+        tag === 'select'
+          ? /** @type {HTMLSelectElement} */ (el).value
+          : tag === 'textarea'
+            ? /** @type {HTMLTextAreaElement} */ (el).value
+            : tag === 'input'
+              ? /** @type {HTMLInputElement} */ (el).value
+              : el.textContent || '';
+      return String(rawValue || '').length > 0 ? 'non_empty' : 'empty';
+    }
+    if (
+      role === 'textbox' ||
+      role === 'searchbox' ||
+      role === 'combobox' ||
+      role === 'spinbutton'
+    ) {
+      const ariaValue =
+        el.getAttribute('aria-valuetext') ||
+        el.getAttribute('aria-valuenow') ||
+        el.getAttribute('data-value') ||
+        '';
+      if (ariaValue) return 'non_empty';
+      return 'unknown';
+    }
+    return null;
   }
 
   /**
@@ -563,6 +601,8 @@
       if (type) line += ` type="${type}"`;
       const placeholder = el.getAttribute('placeholder');
       if (placeholder) line += ` placeholder="${placeholder}"`;
+      const valueState = inferValueState(el);
+      if (valueState) line += ` valueState="${valueState}"`;
       // Surface disabled/pointer-events for better agent judgement
       try {
         const disabled = el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true';
@@ -578,7 +618,7 @@
 
       // Only collect ref mapping for interactive elements to limit cost
       if (isInteractive(el) && refMap.length < REF_MAP_LIMIT) {
-        refMap.push({
+        const refEntry = {
           ref: /** @type {string} */ (refId),
           selector: generateSelector(el),
           rect: {
@@ -587,7 +627,9 @@
             width: rect.width,
             height: rect.height,
           },
-        });
+        };
+        if (valueState) refEntry.valueState = valueState;
+        refMap.push(refEntry);
       }
     }
     if (state.processed >= MAX_NODES) return;

@@ -142,6 +142,9 @@ function parseSnapshotNodesFromPageContent(pageContent: string): SnapshotNode[] 
       trimmedLine.match(/\svalue="([^"]*)"/i) ??
       trimmedLine.match(/\svalue:\s*"([^"]*)"/i) ??
       trimmedLine.match(/\svalue='([^']*)'/i);
+    const valueStateMatch =
+      trimmedLine.match(/\svalueState="(empty|non_empty|unknown)"/i) ??
+      trimmedLine.match(/\svalue-state="(empty|non_empty|unknown)"/i);
     nodes.push({
       role: String(match[1] || 'generic')
         .trim()
@@ -152,7 +155,11 @@ function parseSnapshotNodesFromPageContent(pageContent: string): SnapshotNode[] 
       ref: String(match[3] || '').trim(),
       depth: Math.max(0, Math.floor(indent / 2)),
       href: hrefMatch ? String(hrefMatch[1] || '').trim() : null,
-      valueState: valueMatch ? valueStateFromRaw(valueMatch[1]) : null,
+      valueState: valueStateMatch
+        ? normalizeValueState(valueStateMatch[1])
+        : valueMatch
+          ? valueStateFromRaw(valueMatch[1])
+          : null,
     });
     if (nodes.length >= 300) break;
   }
@@ -236,6 +243,10 @@ function valueStateFromRaw(value: unknown): 'empty' | 'non_empty' | 'unknown' {
   return raw.length > 0 ? 'non_empty' : 'empty';
 }
 
+function normalizeValueState(value: unknown): 'empty' | 'non_empty' | 'unknown' | null {
+  return value === 'empty' || value === 'non_empty' || value === 'unknown' ? value : null;
+}
+
 function normalizeFallbackRole(item: any): string {
   const raw = String(item?.role || item?.type || '')
     .trim()
@@ -276,9 +287,11 @@ function buildFallbackNodes(fallbackElements: any[]): SnapshotNode[] {
     name: String(item?.text || item?.name || item?.ariaLabel || '').trim(),
     depth: 0,
     href: typeof item?.href === 'string' ? item.href : null,
-    valueState: Object.prototype.hasOwnProperty.call(item ?? {}, 'value')
-      ? valueStateFromRaw(item.value)
-      : null,
+    valueState:
+      normalizeValueState(item?.valueState) ??
+      (Object.prototype.hasOwnProperty.call(item ?? {}, 'value')
+        ? valueStateFromRaw(item.value)
+        : null),
   }));
 }
 

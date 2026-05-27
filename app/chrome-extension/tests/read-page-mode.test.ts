@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readPageTool } from '@/entrypoints/background/tools/browser/read-page';
 import { buildInteractiveElements } from '@/entrypoints/background/tools/browser/read-page-interactive-elements';
+import {
+  buildFallbackRefMap,
+  formatElementsAsPageContent,
+} from '@/entrypoints/background/tools/browser/read-page-fallback-format';
 import { buildCandidateActions } from '@/entrypoints/background/tools/browser/read-page-candidate-actions';
 
 const MODE_MINIMUM_FIELDS: Record<'compact' | 'normal' | 'full', string[]> = {
@@ -225,6 +229,64 @@ describe('read_page mode', () => {
     );
 
     expect(elements.map((element) => element.ref)).toContain('ref_text_menu_more');
+  });
+
+  it('preserves privacy-safe input value state without exposing raw values', () => {
+    const elements = buildInteractiveElements(
+      [
+        '- searchbox "Search" [ref=ref_search] valueState="non_empty"',
+        '- textbox "Comment" [ref=ref_comment] value-state="empty"',
+      ].join('\n'),
+      [
+        {
+          ref: 'ref_fallback_filter',
+          text: 'Filter',
+          role: 'input',
+          selector: '[data-filter]',
+          isInteractive: true,
+          valueState: 'non_empty',
+        },
+      ],
+      8,
+      'full',
+      'https://example.com/app',
+    );
+
+    expect(elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ref: 'ref_search', valueState: 'non_empty' }),
+        expect.objectContaining({ ref: 'ref_comment', valueState: 'empty' }),
+        expect.objectContaining({ ref: 'ref_fallback_filter', valueState: 'non_empty' }),
+      ]),
+    );
+  });
+
+  it('formats fallback value state as a redacted state only', () => {
+    const refMap = buildFallbackRefMap([
+      {
+        selector: '[data-search]',
+        text: 'Search',
+        type: 'input',
+        valueState: 'non_empty',
+        value: 'private search text',
+      },
+    ]);
+    const pageContent = formatElementsAsPageContent(
+      [
+        {
+          selector: '[data-search]',
+          text: 'Search',
+          type: 'input',
+          valueState: 'non_empty',
+          value: 'private search text',
+        },
+      ],
+      refMap,
+    );
+
+    expect(refMap[0]).toMatchObject({ valueState: 'non_empty' });
+    expect(pageContent).toContain('valueState="non_empty"');
+    expect(pageContent).not.toContain('private search text');
   });
 
   it('recovers target refs for visible text menu labels that exist only as non-targetable text', async () => {

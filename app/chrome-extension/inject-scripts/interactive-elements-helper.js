@@ -197,13 +197,54 @@
     }
     const parentLabel = el.closest('label');
     if (parentLabel) return parentLabel.textContent?.trim() || '';
+    const tag = el.tagName ? el.tagName.toLowerCase() : '';
+    if (tag === 'input') {
+      const inputType = String(el.getAttribute('type') || '').toLowerCase();
+      if (inputType === 'submit' || inputType === 'button' || inputType === 'reset') {
+        const valueLabel = el.getAttribute('value');
+        if (valueLabel && valueLabel.trim()) return valueLabel.trim();
+      }
+    }
     return (
-      el.getAttribute('placeholder') ||
-      el.getAttribute('value') ||
-      el.textContent?.trim() ||
-      el.getAttribute('title') ||
-      ''
+      el.getAttribute('placeholder') || el.textContent?.trim() || el.getAttribute('title') || ''
     );
+  }
+
+  function getValueState(el) {
+    if (!(el instanceof Element)) return null;
+    const tag = el.tagName.toLowerCase();
+    const role = String(el.getAttribute('role') || '').toLowerCase();
+    if (
+      tag === 'input' ||
+      tag === 'textarea' ||
+      tag === 'select' ||
+      el.getAttribute('contenteditable') === 'true'
+    ) {
+      const rawValue =
+        tag === 'select'
+          ? /** @type {HTMLSelectElement} */ (el).value
+          : tag === 'textarea'
+            ? /** @type {HTMLTextAreaElement} */ (el).value
+            : tag === 'input'
+              ? /** @type {HTMLInputElement} */ (el).value
+              : el.textContent || '';
+      return String(rawValue || '').length > 0 ? 'non_empty' : 'empty';
+    }
+    if (
+      role === 'textbox' ||
+      role === 'searchbox' ||
+      role === 'combobox' ||
+      role === 'spinbutton'
+    ) {
+      const ariaValue =
+        el.getAttribute('aria-valuetext') ||
+        el.getAttribute('aria-valuenow') ||
+        el.getAttribute('data-value') ||
+        '';
+      if (ariaValue) return 'non_empty';
+      return 'unknown';
+    }
+    return null;
   }
 
   /**
@@ -250,6 +291,8 @@
       title: el.getAttribute('title') || '',
       role: el.getAttribute('role') || '',
     };
+    const valueState = getValueState(el);
+    if (valueState) info.valueState = valueState;
     if (includeCoordinates) {
       const rect = el.getBoundingClientRect();
       info.coordinates = {

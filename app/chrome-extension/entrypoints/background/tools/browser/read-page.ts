@@ -361,6 +361,14 @@ function attachInteractiveValueState<
   for (const entry of Array.isArray(refMap) ? refMap : []) {
     const ref = typeof entry?.ref === 'string' ? entry.ref.trim() : '';
     if (!ref) continue;
+    if (
+      entry?.valueState === 'empty' ||
+      entry?.valueState === 'non_empty' ||
+      entry?.valueState === 'unknown'
+    ) {
+      valueStateByRef.set(ref, entry.valueState);
+      continue;
+    }
     const rawValue =
       Object.prototype.hasOwnProperty.call(entry, 'value') ||
       Object.prototype.hasOwnProperty.call(entry, 'currentValue')

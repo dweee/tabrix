@@ -622,6 +622,7 @@ function buildRegionObjects(
       objectId: element.ref,
       label: element.name || element.role || element.ref,
       role: element.role,
+      valueState: element.valueState,
       actionTypes: Array.from(new Set(actions.map((item) => item.actionType).filter(Boolean))),
       targetability: actions.some((item) => item.locatorChain.length > 0)
         ? 'locator_chain'
