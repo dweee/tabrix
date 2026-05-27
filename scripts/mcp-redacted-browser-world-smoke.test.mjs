@@ -8,6 +8,7 @@ import {
   buildPostCloseTargetCleanupSummary,
   buildRedactedBrowserWorldSummary,
   buildRedactedReadPageAlignmentSummary,
+  buildStepSummary,
   buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
   buildWindowStateMutationProof,
@@ -647,6 +648,56 @@ test('buildPostCloseTargetCleanupSummary reports closed targets without raw tab 
   ]);
   assert.equal(JSON.stringify(summary).includes('private.example.test'), false);
   assert.equal(JSON.stringify(summary).includes('Private Still Open'), false);
+});
+
+test('buildStepSummary includes active object operability reasons without raw URL fields', () => {
+  const summary = buildStepSummary(
+    'foreground_open',
+    {
+      windowCount: 1,
+      tabCount: 1,
+      compactSummary: {
+        activeObject: {
+          tabId: 7,
+          windowId: 1,
+          url: 'https://private.example.test/active',
+          title: 'Private Active',
+          tabStatus: 'complete',
+          openedBy: 'ai',
+          canTabrixOperate: true,
+          tabOperabilityReason: 'regular_web_page',
+          windowOperabilityReason: 'active_tab_operable_in_visible_window',
+        },
+        windows: [{ compactTabLimit: 12, tabs: [{ tabId: 7 }] }],
+        retentionPolicy: { recentEventLimit: 50, recentEventsRetained: 4 },
+      },
+      browserWorld: {
+        tabs: [
+          {
+            tabId: 7,
+            active: true,
+            openedBy: 'ai',
+            canTabrixOperate: true,
+            status: 'complete',
+          },
+        ],
+      },
+    },
+    7,
+  );
+
+  assert.deepEqual(summary.activeObject, {
+    tabIdPresent: true,
+    windowIdPresent: true,
+    tabStatus: 'complete',
+    openedBy: 'ai',
+    canTabrixOperate: true,
+    tabOperabilityReason: 'regular_web_page',
+    windowOperabilityReason: 'active_tab_operable_in_visible_window',
+  });
+  assert.equal(summary.targetActiveMatchesLifecycleStep, true);
+  assert.equal(JSON.stringify(summary).includes('private.example.test'), false);
+  assert.equal(JSON.stringify(summary).includes('Private Active'), false);
 });
 
 test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fields', () => {

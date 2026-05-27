@@ -850,7 +850,7 @@ function uniqueNumbers(values) {
   return [...new Set(values.filter((value) => Number.isInteger(value)))];
 }
 
-function buildStepSummary(step, payload, targetTabId) {
+export function buildStepSummary(step, payload, targetTabId) {
   const redacted = buildRedactedBrowserWorldSummary(payload, targetTabId);
   const expectedTargetActive = expectedTargetActiveForLifecycleStep(step);
   return {
@@ -859,6 +859,7 @@ function buildStepSummary(step, payload, targetTabId) {
     tabCount: redacted.tabCount,
     compactTabLimit: redacted.compactTabLimit,
     activeTabIncludedInCompactTabs: redacted.activeTabIncludedInCompactTabs,
+    activeObject: redacted.activeObject,
     targetTab: redacted.targetTab,
     counts: redacted.counts,
     tabLifecycleState: redacted.tabLifecycleState,
@@ -1085,6 +1086,10 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
             step.dynamicObjectUpdateSummaryPresent === true &&
             step.retentionWithinLimit === true &&
             step.compactSummaryBounded === true &&
+            step.activeObject?.tabIdPresent === true &&
+            typeof step.activeObject?.tabStatus === 'string' &&
+            typeof step.activeObject?.tabOperabilityReason === 'string' &&
+            typeof step.activeObject?.windowOperabilityReason === 'string' &&
             step.activeTabIncludedInCompactTabs === true,
         ),
     };
