@@ -756,12 +756,14 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
         result.closeSucceeded === true &&
         result.postCleanup?.retentionWithinLimit === true &&
         result.postCleanup?.compactSummaryBounded === true &&
+        result.postCleanup?.browserObjectEdgeSummaryPresent === true &&
         (result.postCleanup?.tabLifecycleState?.recentRemovedCount ?? 0) >= 3 &&
         result.lifecycleMatrix.every(
           (step) =>
             step.targetTab?.wasFound === true &&
             step.targetTab?.openedBy === 'ai' &&
             step.targetTab?.canTabrixOperate === true &&
+            step.browserObjectEdgeSummaryPresent === true &&
             step.dynamicObjectUpdateSummaryPresent === true &&
             step.retentionWithinLimit === true &&
             step.compactSummaryBounded === true &&
@@ -779,9 +781,11 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
       windowState.verdict === 'WINDOW_STATE_OBSERVED' &&
       windowState.redacted.retentionWithinLimit === true &&
       windowState.redacted.compactSummaryBounded === true &&
+      windowState.redacted.browserObjectEdgeSummaryPresent === true &&
       readPage.alignmentPassed === true &&
       readPage.redactedBrowserWorldAfterRead.retentionWithinLimit === true &&
       readPage.redactedBrowserWorldAfterRead.compactSummaryBounded === true &&
+      readPage.redactedBrowserWorldAfterRead.browserObjectEdgeSummaryPresent === true &&
       targets.every((target) => target.passed),
     targets,
   };
@@ -798,7 +802,9 @@ function runWindowStateSmoke(cliPath, args) {
     observerOnly: true,
     redacted,
     verdict:
-      redacted.windows.total > 0 && redacted.hasBrowserWorldDetail
+      redacted.windows.total > 0 &&
+      redacted.hasBrowserWorldDetail &&
+      redacted.browserObjectEdgeSummaryPresent === true
         ? 'WINDOW_STATE_OBSERVED'
         : 'WINDOW_STATE_NOT_PROVEN',
   };
@@ -850,6 +856,7 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
       redactedReadPage.alignment.tabOwnerIsAi === true &&
       redactedReadPage.alignment.tabOperable === true &&
       redactedBrowserWorldAfterRead.targetTab?.wasFound === true &&
+      redactedBrowserWorldAfterRead.browserObjectEdgeSummaryPresent === true &&
       redactedBrowserWorldAfterRead.aiOperationState?.latestAiOperatedTabIdPresent === true &&
       redactedBrowserWorldAfterRead.aiOperationState?.latestAiOperation === 'read_page' &&
       redactedBrowserWorldAfterRead.aiOperationState?.relationToBrowserActiveTab ===
