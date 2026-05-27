@@ -79,6 +79,27 @@ describe('get_windows_and_tabs state inventory', () => {
           openedBy: 'user_or_page',
           canTabrixOperate: true,
         },
+        objectInventory: {
+          objectModel: 'BrowserWorldObject -> BrowserWindowObject[] -> BrowserTabObject[]',
+          compactIdLimit: 12,
+          windowObjectCount: 2,
+          tabPageObjectCount: 2,
+          activeWindowId: 10,
+          browserActiveTabId: 102,
+          latestAiOperatedTabId: null,
+          currentOperationRelation: 'no_ai_operation_observed',
+          canContinueOnLatestAiOperatedTab: null,
+          aiOpened: { ids: [], omittedCount: 0 },
+          userOrPageOpened: { ids: [101, 102], omittedCount: 0 },
+          unknownOpened: { ids: [], omittedCount: 0 },
+          operable: { ids: [101, 102], omittedCount: 0 },
+          inoperable: { ids: [], omittedCount: 0 },
+          recentlyOperatedByAi: { ids: [], omittedCount: 0 },
+          summary:
+            'Browser object inventory: windows=2, tabs=2, activeTab=102, aiOpened=0, userOrPageOpened=2, operable=2, currentOperation=no_ai_operation_observed.',
+          claimBoundary:
+            'Object inventory summary contains browser lifecycle ids and routing facts only; it does not prove page content understanding, account state, login success, or API/CDP reuse.',
+        },
         windows: [
           {
             windowId: 10,
@@ -366,6 +387,24 @@ describe('get_windows_and_tabs state inventory', () => {
       tabId: 120,
       title: 'Tab 120',
       canTabrixOperate: true,
+    });
+    expect(payload.compactSummary.objectInventory).toMatchObject({
+      compactIdLimit: 12,
+      windowObjectCount: 1,
+      tabPageObjectCount: 20,
+      browserActiveTabId: 120,
+      currentOperationRelation: 'no_ai_operation_observed',
+      aiOpened: { ids: [], omittedCount: 0 },
+      userOrPageOpened: {
+        ids: [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112],
+        omittedCount: 8,
+      },
+      operable: {
+        ids: [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112],
+        omittedCount: 8,
+      },
+      summary:
+        'Browser object inventory: windows=1, tabs=20, activeTab=120, aiOpened=0, userOrPageOpened=20, operable=20, currentOperation=no_ai_operation_observed.',
     });
     expect(payload.compactSummary.windowStateMatrix).toMatchObject({
       total: 1,

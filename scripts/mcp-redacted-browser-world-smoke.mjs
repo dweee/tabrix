@@ -265,6 +265,8 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     payload?.compactSummary?.tabLifecycleState ?? payload?.summary?.tabLifecycleState ?? null;
   const aiOperationState =
     payload?.compactSummary?.aiOperationState ?? payload?.summary?.aiOperationState ?? null;
+  const objectInventory =
+    payload?.compactSummary?.objectInventory ?? payload?.summary?.objectInventory ?? null;
 
   return {
     callSucceeded: true,
@@ -374,6 +376,51 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     currentWindowConclusionPresent:
       typeof payload?.compactSummary?.currentWindowConclusion === 'string' ||
       typeof payload?.summary?.currentWindowConclusion === 'string',
+    objectInventory: objectInventory
+      ? {
+          objectModelPresent: typeof objectInventory.objectModel === 'string',
+          compactIdLimit: Number.isInteger(objectInventory.compactIdLimit)
+            ? objectInventory.compactIdLimit
+            : null,
+          windowObjectCount: Number.isInteger(objectInventory.windowObjectCount)
+            ? objectInventory.windowObjectCount
+            : null,
+          tabPageObjectCount: Number.isInteger(objectInventory.tabPageObjectCount)
+            ? objectInventory.tabPageObjectCount
+            : null,
+          activeWindowIdPresent: Number.isInteger(objectInventory.activeWindowId),
+          browserActiveTabIdPresent: Number.isInteger(objectInventory.browserActiveTabId),
+          latestAiOperatedTabIdPresent: Number.isInteger(objectInventory.latestAiOperatedTabId),
+          currentOperationRelation:
+            typeof objectInventory.currentOperationRelation === 'string'
+              ? objectInventory.currentOperationRelation
+              : null,
+          canContinueOnLatestAiOperatedTab:
+            typeof objectInventory.canContinueOnLatestAiOperatedTab === 'boolean'
+              ? objectInventory.canContinueOnLatestAiOperatedTab
+              : null,
+          aiOpenedShown: Array.isArray(objectInventory.aiOpened?.ids)
+            ? objectInventory.aiOpened.ids.length
+            : null,
+          userOrPageOpenedShown: Array.isArray(objectInventory.userOrPageOpened?.ids)
+            ? objectInventory.userOrPageOpened.ids.length
+            : null,
+          unknownOpenedShown: Array.isArray(objectInventory.unknownOpened?.ids)
+            ? objectInventory.unknownOpened.ids.length
+            : null,
+          operableShown: Array.isArray(objectInventory.operable?.ids)
+            ? objectInventory.operable.ids.length
+            : null,
+          inoperableShown: Array.isArray(objectInventory.inoperable?.ids)
+            ? objectInventory.inoperable.ids.length
+            : null,
+          recentlyOperatedByAiShown: Array.isArray(objectInventory.recentlyOperatedByAi?.ids)
+            ? objectInventory.recentlyOperatedByAi.ids.length
+            : null,
+          summaryPresent: typeof objectInventory.summary === 'string',
+          claimBoundaryPresent: typeof objectInventory.claimBoundary === 'string',
+        }
+      : null,
     tabStateMatrix: tabStateMatrix
       ? {
           total: Number.isInteger(tabStateMatrix.total) ? tabStateMatrix.total : null,
@@ -496,6 +543,7 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     currentOperationConclusionPresent:
       typeof payload?.compactSummary?.currentOperationConclusion === 'string' ||
       typeof payload?.summary?.currentOperationConclusion === 'string',
+    objectInventoryPresent: Boolean(objectInventory),
     browserObjectEdgeSummaryPresent:
       typeof payload?.compactSummary?.browserObjectEdgeSummary === 'string' ||
       typeof payload?.summary?.browserObjectEdgeSummary === 'string',
@@ -1028,6 +1076,7 @@ function runWindowStateSmoke(cliPath, args) {
     verdict:
       redacted.windows.total > 0 &&
       redacted.hasBrowserWorldDetail &&
+      redacted.objectInventoryPresent === true &&
       redacted.browserObjectEdgeSummaryPresent === true
         ? 'WINDOW_STATE_OBSERVED'
         : 'WINDOW_STATE_NOT_PROVEN',
@@ -1054,6 +1103,7 @@ function runWindowStateDriftSmoke(cliPath, args) {
       tabCount: sample.redacted.tabCount,
       compactSummaryBounded: sample.redacted.compactSummaryBounded,
       retentionWithinLimit: sample.redacted.retentionWithinLimit,
+      objectInventory: sample.redacted.objectInventory,
       windowStateMatrix: sample.redacted.windowStateMatrix,
       windowOperationState: sample.redacted.windowOperationState,
       windowStateMutation: sample.windowStateMutation,

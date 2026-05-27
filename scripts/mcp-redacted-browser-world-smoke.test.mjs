@@ -122,6 +122,26 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
         },
         currentWindowConclusion:
           'Current window object includes https://private.example.test/dashboard and Private Dashboard.',
+        objectInventory: {
+          objectModel: 'BrowserWorldObject -> BrowserWindowObject[] -> BrowserTabObject[]',
+          compactIdLimit: 12,
+          windowObjectCount: 1,
+          tabPageObjectCount: 20,
+          activeWindowId: 1,
+          browserActiveTabId: 20,
+          latestAiOperatedTabId: 20,
+          currentOperationRelation: 'same_as_browser_active',
+          canContinueOnLatestAiOperatedTab: true,
+          aiOpened: { ids: [20], omittedCount: 0 },
+          userOrPageOpened: { ids: [1, 2, 3], omittedCount: 16 },
+          unknownOpened: { ids: [], omittedCount: 0 },
+          operable: { ids: [20], omittedCount: 19 },
+          inoperable: { ids: [], omittedCount: 0 },
+          recentlyOperatedByAi: { ids: [20], omittedCount: 0 },
+          summary:
+            'Browser object inventory includes https://private.example.test/dashboard and Private Dashboard.',
+          claimBoundary: 'Object inventory summary only.',
+        },
         tabStateMatrix: {
           total: 20,
           active: 1,
@@ -263,6 +283,25 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
     inoperableWindowCount: 0,
   });
   assert.equal(summary.currentWindowConclusionPresent, true);
+  assert.deepEqual(summary.objectInventory, {
+    objectModelPresent: true,
+    compactIdLimit: 12,
+    windowObjectCount: 1,
+    tabPageObjectCount: 20,
+    activeWindowIdPresent: true,
+    browserActiveTabIdPresent: true,
+    latestAiOperatedTabIdPresent: true,
+    currentOperationRelation: 'same_as_browser_active',
+    canContinueOnLatestAiOperatedTab: true,
+    aiOpenedShown: 1,
+    userOrPageOpenedShown: 3,
+    unknownOpenedShown: 0,
+    operableShown: 1,
+    inoperableShown: 0,
+    recentlyOperatedByAiShown: 1,
+    summaryPresent: true,
+    claimBoundaryPresent: true,
+  });
   assert.deepEqual(summary.tabStateMatrix, {
     total: 20,
     active: 1,
@@ -313,6 +352,7 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
     closedRetainedTabCount: 0,
   });
   assert.equal(summary.currentOperationConclusionPresent, true);
+  assert.equal(summary.objectInventoryPresent, true);
   assert.equal(summary.browserObjectEdgeSummaryPresent, true);
   assert.equal(summary.dynamicObjectUpdateSummaryPresent, true);
   assert.deepEqual(summary.windows, {

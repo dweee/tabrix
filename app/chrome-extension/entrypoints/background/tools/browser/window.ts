@@ -4,6 +4,7 @@ import { TOOL_NAMES } from '@tabrix/shared';
 import { refreshBrowserWorldSnapshot } from '../../browser-world-inventory';
 
 const COMPACT_TABS_PER_WINDOW_LIMIT = 12;
+const COMPACT_OBJECT_ID_LIMIT = 12;
 
 type StructuredTabForWindowSummary = {
   tabId: number;
@@ -26,6 +27,13 @@ function selectCompactTabsForWindow(
     selected[selected.length - 1] = activeTab;
   }
   return selected;
+}
+
+function buildCompactIdSet(ids: number[]) {
+  return {
+    ids: ids.slice(0, COMPACT_OBJECT_ID_LIMIT),
+    omittedCount: Math.max(0, ids.length - COMPACT_OBJECT_ID_LIMIT),
+  };
 }
 
 class WindowTool extends BaseBrowserToolExecutor {
@@ -105,6 +113,38 @@ class WindowTool extends BaseBrowserToolExecutor {
                 ? false
                 : (browserWorld.summary.activeTab.canTabrixOperate ??
                   browserWorld.summary.activeWindow.canTabrixOperate),
+          },
+          objectInventory: {
+            objectModel: 'BrowserWorldObject -> BrowserWindowObject[] -> BrowserTabObject[]',
+            compactIdLimit: COMPACT_OBJECT_ID_LIMIT,
+            windowObjectCount: browserWorld.windowCount,
+            tabPageObjectCount: browserWorld.tabCount,
+            activeWindowId: browserWorld.summary.activeWindow.windowId,
+            browserActiveTabId: browserWorld.browserActiveTabId,
+            latestAiOperatedTabId: browserWorld.summary.aiOperationState.latestAiOperatedTabId,
+            currentOperationRelation:
+              browserWorld.summary.aiOperationState.relationToBrowserActiveTab,
+            canContinueOnLatestAiOperatedTab:
+              browserWorld.summary.aiOperationState.canContinueOnLatestAiOperatedTab,
+            aiOpened: buildCompactIdSet(browserWorld.aiOpenedTabIds),
+            userOrPageOpened: buildCompactIdSet(browserWorld.userOrPageOpenedTabIds),
+            unknownOpened: buildCompactIdSet(
+              browserWorld.tabs.filter((tab) => tab.openedBy === 'unknown').map((tab) => tab.tabId),
+            ),
+            operable: buildCompactIdSet(browserWorld.operableTabIds),
+            inoperable: buildCompactIdSet(
+              browserWorld.tabs
+                .filter((tab) => tab.canTabrixOperate === false)
+                .map((tab) => tab.tabId),
+            ),
+            recentlyOperatedByAi: buildCompactIdSet(
+              browserWorld.tabs
+                .filter((tab) => tab.aiOperationState === 'recently_operated')
+                .map((tab) => tab.tabId),
+            ),
+            summary: `Browser object inventory: windows=${browserWorld.windowCount}, tabs=${browserWorld.tabCount}, activeTab=${browserWorld.browserActiveTabId ?? 'unknown'}, aiOpened=${browserWorld.aiOpenedTabIds.length}, userOrPageOpened=${browserWorld.userOrPageOpenedTabIds.length}, operable=${browserWorld.operableTabIds.length}, currentOperation=${browserWorld.summary.aiOperationState.relationToBrowserActiveTab}.`,
+            claimBoundary:
+              'Object inventory summary contains browser lifecycle ids and routing facts only; it does not prove page content understanding, account state, login success, or API/CDP reuse.',
           },
           windows: structuredWindows.map((window) => ({
             windowId: window.windowId,
