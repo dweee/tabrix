@@ -722,6 +722,7 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
   if (args.skipOpen) {
     throw new Error('--scenario matrix cannot be combined with --skip-open.');
   }
+  const windowState = runWindowStateSmoke(cliPath, { ...args, skipOpen: true });
   const targets = smokeUrls.map((smokeUrl, index) => {
     const result = runLifecycleSmoke(cliPath, smokeUrl, args);
     return {
@@ -740,14 +741,21 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
             step.targetTab?.wasFound === true &&
             step.targetTab?.openedBy === 'ai' &&
             step.targetTab?.canTabrixOperate === true &&
+            step.dynamicObjectUpdateSummaryPresent === true &&
             step.activeTabIncludedInCompactTabs === true,
         ),
     };
   });
+  const readPage = runReadPageSmoke(cliPath, smokeUrls[0], args);
   return {
     scenario: 'matrix',
     targetCount: targets.length,
-    allTargetsPassed: targets.every((target) => target.passed),
+    windowState,
+    readPage,
+    allTargetsPassed:
+      windowState.verdict === 'WINDOW_STATE_OBSERVED' &&
+      readPage.alignmentPassed === true &&
+      targets.every((target) => target.passed),
     targets,
   };
 }
