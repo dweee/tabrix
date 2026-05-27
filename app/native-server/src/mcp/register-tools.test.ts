@@ -1374,6 +1374,10 @@ describe('handleToolCall execution wrapper', () => {
               currentTabCanTabrixOperate: true,
               currentTabOperabilityReason: 'regular_web_page',
               currentTabRuntimeStateSource: 'browser_world_inventory',
+              browserWorldObjectChangeSummary:
+                'Object change summary: active tab was read; no page content claim.',
+              browserWorldCurrentOperationConclusion:
+                'Current operation: read_page marked the tab as recently operated.',
             },
           },
         }),
@@ -1426,6 +1430,10 @@ describe('handleToolCall execution wrapper', () => {
             lastAiOperation: 'read_page',
             lastAiOperationConfidence: 0.95,
             lastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
+            browserWorldObjectChangeSummary:
+              'Object change summary: active tab was read; no page content claim.',
+            browserWorldCurrentOperationConclusion:
+              'Current operation: read_page marked the tab as recently operated.',
             canTabrixOperate: true,
             operabilityReason: 'regular_web_page',
             runtimeStateSource: 'browser_world_inventory',
@@ -1443,6 +1451,10 @@ describe('handleToolCall execution wrapper', () => {
         currentTabLastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
         currentTabCanTabrixOperate: true,
         currentTabRuntimeStateSource: 'browser_world_inventory',
+        browserWorldObjectChangeSummary:
+          'Object change summary: active tab was read; no page content claim.',
+        browserWorldCurrentOperationConclusion:
+          'Current operation: read_page marked the tab as recently operated.',
       });
       expect(payload.aiContextEnvelope.primaryConclusion).toContain('Menu expanded candidate');
       expect(payload.aiContextEnvelope.watchStatus).toEqual(

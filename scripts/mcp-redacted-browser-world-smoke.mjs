@@ -746,6 +746,10 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       currentTabStatus: ownershipRuntime?.currentTabStatus ?? null,
       currentTabRuntimeStateSource: ownershipRuntime?.currentTabRuntimeStateSource ?? null,
       currentOwnerType: ownershipRuntime?.currentOwnerType ?? null,
+      browserWorldObjectChangeSummaryPresent:
+        typeof ownershipRuntime?.browserWorldObjectChangeSummary === 'string',
+      browserWorldCurrentOperationConclusionPresent:
+        typeof ownershipRuntime?.browserWorldCurrentOperationConclusion === 'string',
     },
     compact: {
       source: compact?.source ?? null,
@@ -774,6 +778,10 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
         lastAiOperation: compactTabFacts.lastAiOperation ?? null,
         lastAiOperationConfidence: compactTabFacts.lastAiOperationConfidence ?? null,
         lastAiOperationReasonPresent: typeof compactTabFacts.lastAiOperationReason === 'string',
+        browserWorldObjectChangeSummaryPresent:
+          typeof compactTabFacts.browserWorldObjectChangeSummary === 'string',
+        browserWorldCurrentOperationConclusionPresent:
+          typeof compactTabFacts.browserWorldCurrentOperationConclusion === 'string',
         isRunOwnedByTask: compactTabFacts.isRunOwnedByTask ?? null,
         runtimeStateSource: compactTabFacts.runtimeStateSource ?? null,
       },
@@ -811,6 +819,12 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       compactAiOperationEvidencePresent,
       currentTabAiOperationEvidencePresent:
         ownershipRuntimeAiOperationEvidencePresent || compactAiOperationEvidencePresent,
+      browserWorldObjectChangeSummaryPresent:
+        typeof ownershipRuntime?.browserWorldObjectChangeSummary === 'string' &&
+        typeof compactTabFacts.browserWorldObjectChangeSummary === 'string',
+      browserWorldCurrentOperationConclusionPresent:
+        typeof ownershipRuntime?.browserWorldCurrentOperationConclusion === 'string' &&
+        typeof compactTabFacts.browserWorldCurrentOperationConclusion === 'string',
       targetTabMatchesReadPage:
         Number.isInteger(targetTabId) && Number.isInteger(ownershipRuntime?.currentTabId)
           ? ownershipRuntime.currentTabId === targetTabId
@@ -1396,6 +1410,8 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
       redactedReadPage.alignment.currentTabStatusKnown === true &&
       redactedReadPage.alignment.currentTabOperabilityKnown === true &&
       redactedReadPage.alignment.currentTabAiOperationEvidencePresent === true &&
+      redactedReadPage.alignment.browserWorldObjectChangeSummaryPresent === true &&
+      redactedReadPage.alignment.browserWorldCurrentOperationConclusionPresent === true &&
       redactedReadPage.alignment.targetTabMatchesReadPage === true &&
       redactedReadPage.alignment.tabOwnerIsAi === true &&
       redactedReadPage.alignment.tabOperable === true &&
@@ -1419,6 +1435,8 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
       redactedReadPage.alignment.currentTabStatusKnown === true &&
       redactedReadPage.alignment.currentTabOperabilityKnown === true &&
       redactedReadPage.alignment.currentTabAiOperationEvidencePresent === true &&
+      redactedReadPage.alignment.browserWorldObjectChangeSummaryPresent === true &&
+      redactedReadPage.alignment.browserWorldCurrentOperationConclusionPresent === true &&
       redactedReadPage.alignment.targetTabMatchesReadPage === true &&
       redactedReadPage.alignment.readTargetIsBrowserActive === true &&
       redactedReadPage.alignment.tabOwnerIsAi === true &&

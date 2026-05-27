@@ -1960,6 +1960,12 @@ function readTaskPageRuntimeFields(payload: Record<string, unknown>): TaskPageRu
           ? compactRuntimeStateSource
           : 'unknown';
       })(),
+    browserWorldObjectChangeSummary:
+      readNestedString('browserWorldObjectChangeSummary') ??
+      readCompactString('browserWorldObjectChangeSummary'),
+    browserWorldCurrentOperationConclusion:
+      readNestedString('browserWorldCurrentOperationConclusion') ??
+      readCompactString('browserWorldCurrentOperationConclusion'),
   };
 }
 
@@ -2540,6 +2546,9 @@ function buildAiFacingOwnershipRuntimeSummary(
     currentTabCanTabrixOperate: runtimeFields.currentTabCanTabrixOperate ?? null,
     currentTabOperabilityReason: runtimeFields.currentTabOperabilityReason ?? null,
     currentTabRuntimeStateSource: runtimeFields.currentTabRuntimeStateSource ?? 'unknown',
+    browserWorldObjectChangeSummary: runtimeFields.browserWorldObjectChangeSummary ?? null,
+    browserWorldCurrentOperationConclusion:
+      runtimeFields.browserWorldCurrentOperationConclusion ?? null,
     currentOwnerType,
     currentTabRunOwnershipVerdict,
     currentTabPrimaryRelationVerdict,

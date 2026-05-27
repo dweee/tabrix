@@ -817,6 +817,10 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
         currentTabLastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
         currentTabCanTabrixOperate: true,
         currentTabRuntimeStateSource: 'browser_world_inventory',
+        browserWorldObjectChangeSummary:
+          'Object change summary includes https://private.example.test/dashboard and Private Dashboard.',
+        browserWorldCurrentOperationConclusion:
+          'Current operation object includes https://private.example.test/dashboard and Private Dashboard.',
         currentOwnerType: 'run_owned',
       },
       browserPageObjectCompact: {
@@ -843,6 +847,10 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
             lastAiOperation: 'read_page',
             lastAiOperationConfidence: 0.95,
             lastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
+            browserWorldObjectChangeSummary:
+              'Object change summary includes https://private.example.test/dashboard and Private Dashboard.',
+            browserWorldCurrentOperationConclusion:
+              'Current operation object includes https://private.example.test/dashboard and Private Dashboard.',
             isRunOwnedByTask: false,
             runtimeStateSource: 'browser_world_inventory',
           },
@@ -929,6 +937,8 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     pageOperationMapPresent: true,
     pageOperationZonesPresent: true,
     pageOperationClaimBoundaryPresent: true,
+    browserWorldObjectChangeSummaryPresent: true,
+    browserWorldCurrentOperationConclusionPresent: true,
   });
   assert.deepEqual(summary.pageRegionRuntime, {
     pageRegionsPresent: true,
@@ -951,6 +961,8 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     lastAiOperation: 'read_page',
     lastAiOperationConfidence: 0.95,
     lastAiOperationReasonPresent: true,
+    browserWorldObjectChangeSummaryPresent: true,
+    browserWorldCurrentOperationConclusionPresent: true,
     isRunOwnedByTask: false,
     runtimeStateSource: 'browser_world_inventory',
   });

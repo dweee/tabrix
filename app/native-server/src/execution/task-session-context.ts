@@ -199,6 +199,8 @@ export interface TaskPageRuntimeFields {
   currentTabCanTabrixOperate?: boolean | null;
   currentTabOperabilityReason?: string | null;
   currentTabRuntimeStateSource?: 'browser_world_inventory' | 'chrome_tab_snapshot' | 'unknown';
+  browserWorldObjectChangeSummary?: string | null;
+  browserWorldCurrentOperationConclusion?: string | null;
 }
 
 export interface NoteReadPageInput {
@@ -1061,6 +1063,28 @@ function cloneTaskPageRuntimeFields(input: TaskPageRuntimeFields): TaskPageRunti
     browserActiveTabId: input.browserActiveTabId,
     browserActiveTabIdKnown: input.browserActiveTabIdKnown,
     isReadTargetBrowserActiveTab: input.isReadTargetBrowserActiveTab,
+    currentTabUrl: input.currentTabUrl,
+    currentTabPendingUrl: input.currentTabPendingUrl,
+    currentTabTitle: input.currentTabTitle,
+    currentTabStatus: input.currentTabStatus,
+    currentTabDiscarded: input.currentTabDiscarded,
+    currentTabAudible: input.currentTabAudible,
+    currentTabMuted: input.currentTabMuted,
+    currentTabPinned: input.currentTabPinned,
+    currentTabOpenerTabId: input.currentTabOpenerTabId,
+    currentTabOpenedBy: input.currentTabOpenedBy,
+    currentTabOpenedByConfidence: input.currentTabOpenedByConfidence,
+    currentTabOpenedByReason: input.currentTabOpenedByReason,
+    currentTabAiOperationState: input.currentTabAiOperationState,
+    currentTabLastAiOperation: input.currentTabLastAiOperation,
+    currentTabLastAiOperationAtMs: input.currentTabLastAiOperationAtMs,
+    currentTabLastAiOperationConfidence: input.currentTabLastAiOperationConfidence,
+    currentTabLastAiOperationReason: input.currentTabLastAiOperationReason,
+    currentTabCanTabrixOperate: input.currentTabCanTabrixOperate,
+    currentTabOperabilityReason: input.currentTabOperabilityReason,
+    currentTabRuntimeStateSource: input.currentTabRuntimeStateSource,
+    browserWorldObjectChangeSummary: input.browserWorldObjectChangeSummary,
+    browserWorldCurrentOperationConclusion: input.browserWorldCurrentOperationConclusion,
   };
 }
 

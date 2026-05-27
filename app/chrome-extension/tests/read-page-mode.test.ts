@@ -206,6 +206,8 @@ describe('read_page mode', () => {
       currentTabUrl: 'https://example.com/checkout',
       currentTabTitle: 'Checkout',
       currentTabRuntimeStateSource: expect.any(String),
+      browserWorldObjectChangeSummary: expect.stringContaining('Object change summary:'),
+      browserWorldCurrentOperationConclusion: expect.any(String),
     });
     expect(payload.browserPageObjectCompact.facts.tab).toMatchObject({
       objectKind: 'BrowserTabObject',
@@ -213,6 +215,8 @@ describe('read_page mode', () => {
       currentTabUrl: 'https://example.com/checkout',
       currentTabTitle: 'Checkout',
       runtimeStateSource: expect.any(String),
+      browserWorldObjectChangeSummary: expect.stringContaining('Object change summary:'),
+      browserWorldCurrentOperationConclusion: expect.any(String),
     });
     expect(payload.pageProjection.userActivityLevel).toBe('active');
     expect(payload.diagnostics).toBeUndefined();

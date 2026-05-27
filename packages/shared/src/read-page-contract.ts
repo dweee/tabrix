@@ -762,6 +762,14 @@ export interface ReadPageOwnershipRuntimeSummary {
   currentTabCanTabrixOperate?: boolean | null;
   currentTabOperabilityReason?: string | null;
   currentTabRuntimeStateSource?: 'browser_world_inventory' | 'chrome_tab_snapshot' | 'unknown';
+  /**
+   * Optional AI-facing Browser World summary for the current read_page target.
+   * This is browser lifecycle/object-routing evidence only. It must not be
+   * treated as page content understanding, task success, account-state proof,
+   * or API/CDP reuse proof.
+   */
+  browserWorldObjectChangeSummary?: string | null;
+  browserWorldCurrentOperationConclusion?: string | null;
   currentOwnerType: import('./browser-task-thing-contract').BrowserPageOwnerType;
   currentTabRunOwnershipVerdict: ReadPageCurrentTabRunOwnershipVerdict;
   currentTabPrimaryRelationVerdict: ReadPageCurrentTabPrimaryRelationVerdict;

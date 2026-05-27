@@ -690,6 +690,8 @@ async function buildModeOutput(params: {
     browserActiveTabId: params.browserActiveTabId,
     browserActiveTabIdKnown: params.browserActiveTabIdKnown,
     isReadTargetBrowserActiveTab: params.isReadTargetBrowserActiveTab,
+    browserWorldObjectChangeSummary: browserWorld.summary.objectChangeSummary,
+    browserWorldCurrentOperationConclusion: browserWorld.summary.currentOperationConclusion,
   });
   if (sharedPayload.objectLifecycle) {
     const watchLoopSnapshot = buildBoundedWatchLoopSnapshot({
@@ -763,6 +765,8 @@ function buildReadPageOwnershipRuntimeSummary(params: {
   browserActiveTabId: number | null;
   browserActiveTabIdKnown: boolean;
   isReadTargetBrowserActiveTab: boolean | null;
+  browserWorldObjectChangeSummary: string | null;
+  browserWorldCurrentOperationConclusion: string | null;
 }): ReadPageOwnershipRuntimeSummary {
   const lastAiOperation = params.browserWorldTab?.lastAiOperation ?? null;
   const lastAiOperationConfidence =
@@ -812,6 +816,8 @@ function buildReadPageOwnershipRuntimeSummary(params: {
     currentTabRuntimeStateSource: params.browserWorldTab
       ? 'browser_world_inventory'
       : 'chrome_tab_snapshot',
+    browserWorldObjectChangeSummary: params.browserWorldObjectChangeSummary,
+    browserWorldCurrentOperationConclusion: params.browserWorldCurrentOperationConclusion,
     currentOwnerType: params.currentOwnerType,
     currentTabRunOwnershipVerdict: 'unknown',
     currentTabPrimaryRelationVerdict: 'current_tab_unknown',

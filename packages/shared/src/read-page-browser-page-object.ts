@@ -161,6 +161,8 @@ export function buildReadPageBrowserPageObjectCompactView(
         'lastAiOperationAtMs',
         'lastAiOperationConfidence',
         'lastAiOperationReason',
+        'browserWorldObjectChangeSummary',
+        'browserWorldCurrentOperationConclusion',
         'runtimeStateSource',
         'protectedScopeVerdict',
         'currentTabRunOwnershipVerdict',
@@ -638,6 +640,9 @@ function buildTabStateGroup(
       lastAiOperationAtMs: ownershipRuntime?.currentTabLastAiOperationAtMs ?? null,
       lastAiOperationConfidence: aiOperationConfidence,
       lastAiOperationReason: aiOperationReason,
+      browserWorldObjectChangeSummary: ownershipRuntime?.browserWorldObjectChangeSummary ?? null,
+      browserWorldCurrentOperationConclusion:
+        ownershipRuntime?.browserWorldCurrentOperationConclusion ?? null,
       runtimeStateSource: ownershipRuntime?.currentTabRuntimeStateSource ?? 'unknown',
       protectedScopeVerdict: protection,
       currentTabRunOwnershipVerdict: ownershipRuntime?.currentTabRunOwnershipVerdict ?? null,
