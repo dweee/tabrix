@@ -875,6 +875,47 @@ function runWindowStateSmoke(cliPath, args) {
   };
 }
 
+function runReadPageMatrixSmoke(cliPath, smokeUrls, args) {
+  if (args.skipOpen) {
+    throw new Error('--scenario read-page-matrix cannot be combined with --skip-open.');
+  }
+  const targets = smokeUrls.map((smokeUrl, index) => {
+    const result = runReadPageSmoke(cliPath, smokeUrl, args);
+    return {
+      targetIndex: index + 1,
+      openedPublicTestTab: result.openedPublicTestTab,
+      closeSucceeded: result.closeSucceeded,
+      alignmentPassed: result.alignmentPassed,
+      pageRegionRuntime: result.redactedReadPage.pageRegionRuntime,
+      runtime: result.redactedReadPage.runtime,
+      browserWorldAfterRead: {
+        targetTabFound: result.redactedBrowserWorldAfterRead.targetTab?.wasFound ?? false,
+        latestAiOperation:
+          result.redactedBrowserWorldAfterRead.aiOperationState?.latestAiOperation ?? null,
+        relationToBrowserActiveTab:
+          result.redactedBrowserWorldAfterRead.aiOperationState?.relationToBrowserActiveTab ?? null,
+        compactSummaryBounded: result.redactedBrowserWorldAfterRead.compactSummaryBounded,
+        retentionWithinLimit: result.redactedBrowserWorldAfterRead.retentionWithinLimit,
+      },
+      passed:
+        result.openedPublicTestTab === true &&
+        result.closeSucceeded === true &&
+        result.alignmentPassed === true &&
+        result.redactedBrowserWorldAfterRead.targetTab?.wasFound === true &&
+        result.redactedBrowserWorldAfterRead.compactSummaryBounded === true &&
+        result.redactedBrowserWorldAfterRead.retentionWithinLimit === true,
+    };
+  });
+  return {
+    scenario: 'read-page-matrix',
+    targetCount: targets.length,
+    allTargetsPassed: targets.length > 0 && targets.every((target) => target.passed),
+    targets,
+    claimBoundary:
+      'Redacted public no-login read_page matrix only. It proves runtime presence of Browser World alignment and page region operation-map evidence for these public pages, not page understanding correctness, private login/logout, API/CDP reuse, release readiness, or product delivery grade.',
+  };
+}
+
 function runReadPageSmoke(cliPath, smokeUrl, args) {
   if (args.skipOpen) {
     throw new Error('--scenario read-page cannot be combined with --skip-open.');
@@ -943,7 +984,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(
-      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|matrix|window-state|read-page] [--skip-open] [--keep-open]\n`,
+      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|matrix|window-state|read-page|read-page-matrix] [--skip-open] [--keep-open]\n`,
     );
     return;
   }
@@ -961,9 +1002,11 @@ async function main() {
           ? runWindowStateSmoke(cliPath, args)
           : args.scenario === 'read-page'
             ? runReadPageSmoke(cliPath, smokeUrl, args)
-            : args.scenario === 'lifecycle'
-              ? runLifecycleSmoke(cliPath, smokeUrl, args)
-              : runSingleSmoke(cliPath, smokeUrl, args);
+            : args.scenario === 'read-page-matrix'
+              ? runReadPageMatrixSmoke(cliPath, smokeUrls, args)
+              : args.scenario === 'lifecycle'
+                ? runLifecycleSmoke(cliPath, smokeUrl, args)
+                : runSingleSmoke(cliPath, smokeUrl, args);
 
     process.stdout.write(
       `${JSON.stringify(

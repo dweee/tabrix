@@ -501,6 +501,10 @@ test('parseArgs supports read-page scenario', () => {
   assert.equal(parseArgs(['--scenario', 'read-page']).scenario, 'read-page');
 });
 
+test('parseArgs supports read-page matrix scenario', () => {
+  assert.equal(parseArgs(['--scenario', 'read-page-matrix']).scenario, 'read-page-matrix');
+});
+
 test('parseArgs supports safe smoke switches', () => {
   assert.deepEqual(
     parseArgs([
