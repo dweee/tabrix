@@ -1258,6 +1258,35 @@ export function buildReadPageMatrixTargetResult(result, targetIndex) {
   };
 }
 
+export function isSmokeResultPassing(result) {
+  if (!result || typeof result !== 'object') return false;
+  if (typeof result.allTargetsPassed === 'boolean') return result.allTargetsPassed;
+  if (typeof result.alignmentPassed === 'boolean') return result.alignmentPassed;
+  if (typeof result.cleanupTargetsPassed === 'boolean') {
+    return (
+      result.openedPublicTestTabs === 3 &&
+      result.closeSucceeded === true &&
+      result.cleanupTargetsPassed === true &&
+      result.postCleanup?.retentionWithinLimit === true &&
+      result.postCleanup?.compactSummaryBounded === true &&
+      result.postCleanup?.browserObjectEdgeSummaryPresent === true
+    );
+  }
+  if (result.scenario === 'window-state') return result.verdict === 'WINDOW_STATE_OBSERVED';
+  if (result.scenario === 'window-state-drift') {
+    return result.verdict === 'WINDOW_STATE_REPEATED_OBSERVER_PASS';
+  }
+  if (result.scenario === 'single') {
+    return (
+      result.redacted?.callSucceeded === true &&
+      result.redacted?.compactSummaryBounded === true &&
+      result.redacted?.retentionWithinLimit === true &&
+      (result.closeAttempted !== true || result.closeSucceeded === true)
+    );
+  }
+  return false;
+}
+
 function runReadPageSmoke(cliPath, smokeUrl, args) {
   if (args.skipOpen) {
     throw new Error('--scenario read-page cannot be combined with --skip-open.');
@@ -1393,14 +1422,17 @@ async function main() {
                   ? runLifecycleSmoke(cliPath, smokeUrl, args)
                   : runSingleSmoke(cliPath, smokeUrl, args);
 
+    const smokePassed = isSmokeResultPassing(smokeResult);
     const output = {
-      ok: true,
+      ok: smokePassed,
       smokeKind: 'redacted_browser_world_mcp_smoke',
+      smokePassed,
       ...smokeResult,
       privacyBoundary:
         'No tab URLs, titles, account state, screenshots, cookies, network bodies, or page text are printed by this script.',
     };
     process.stdout.write(stringifyRedactedSmokeOutput(output));
+    if (!smokePassed) process.exitCode = 1;
   } catch (error) {
     process.stderr.write(
       `${JSON.stringify(

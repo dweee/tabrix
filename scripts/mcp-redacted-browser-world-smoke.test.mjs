@@ -13,6 +13,7 @@ import {
   buildWindowStateMutationProof,
   extractJsonObject,
   extractNavigateTabId,
+  isSmokeResultPassing,
   parseArgs,
   resolveSmokeUrls,
   stringifyRedactedSmokeOutput,
@@ -843,6 +844,51 @@ test('buildReadPageMatrixTargetResult accepts background read targets when objec
     'latest_ai_operated_background_tab',
   );
   assert.equal(target.passed, true);
+});
+
+test('isSmokeResultPassing fails redacted matrix results that are not proven', () => {
+  assert.equal(
+    isSmokeResultPassing({
+      scenario: 'read-page-matrix',
+      targetCount: 2,
+      allTargetsPassed: false,
+      targets: [{ passed: true }, { passed: false }],
+    }),
+    false,
+  );
+  assert.equal(
+    isSmokeResultPassing({
+      scenario: 'read-page-matrix',
+      targetCount: 2,
+      allTargetsPassed: true,
+      targets: [{ passed: true }, { passed: true }],
+    }),
+    true,
+  );
+});
+
+test('isSmokeResultPassing keeps observer verdicts strict and explicit', () => {
+  assert.equal(
+    isSmokeResultPassing({
+      scenario: 'window-state',
+      verdict: 'WINDOW_STATE_OBSERVED',
+    }),
+    true,
+  );
+  assert.equal(
+    isSmokeResultPassing({
+      scenario: 'window-state',
+      verdict: 'WINDOW_STATE_NOT_PROVEN',
+    }),
+    false,
+  );
+  assert.equal(
+    isSmokeResultPassing({
+      scenario: 'window-state-drift',
+      verdict: 'WINDOW_STATE_REPEATED_OBSERVER_NOT_PROVEN',
+    }),
+    false,
+  );
 });
 
 test('parseArgs supports observer-only window-state scenario', () => {
