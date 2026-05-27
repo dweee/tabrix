@@ -171,6 +171,32 @@ function canWriteReply(reply: FastifyReply): boolean {
   return !reply.sent && !reply.raw.writableEnded && !reply.raw.headersSent;
 }
 
+function getJsonRpcRequestId(body: unknown): string | number | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const maybeId = (body as { id?: unknown }).id;
+  if (typeof maybeId === 'string' || typeof maybeId === 'number' || maybeId === null) {
+    return maybeId;
+  }
+  return null;
+}
+
+function sendMcpJsonRpcError(
+  reply: FastifyReply,
+  statusCode: number,
+  body: unknown,
+  code: number,
+  message: string,
+): void {
+  reply.code(statusCode).send({
+    jsonrpc: '2.0',
+    id: getJsonRpcRequestId(body),
+    error: {
+      code,
+      message,
+    },
+  });
+}
+
 function getLocalNetworkAddresses(): string[] {
   const interfaces = os.networkInterfaces();
   const virtualPatterns =
@@ -710,7 +736,13 @@ export class Server {
       if (transport) {
         // Existing session found, proceed.
       } else if (sessionId && !transport) {
-        reply.code(HTTP_STATUS.BAD_REQUEST).send({ error: ERROR_MESSAGES.STALE_MCP_SESSION });
+        sendMcpJsonRpcError(
+          reply,
+          HTTP_STATUS.BAD_REQUEST,
+          request.body,
+          -32001,
+          ERROR_MESSAGES.STALE_MCP_SESSION,
+        );
         return;
       } else if (!sessionId && isInitializeRequest(request.body)) {
         const createdSessionId = randomUUID();
@@ -752,7 +784,13 @@ export class Server {
         };
         await server.connect(transport);
       } else {
-        reply.code(HTTP_STATUS.BAD_REQUEST).send({ error: ERROR_MESSAGES.INVALID_MCP_REQUEST });
+        sendMcpJsonRpcError(
+          reply,
+          HTTP_STATUS.BAD_REQUEST,
+          request.body,
+          -32600,
+          ERROR_MESSAGES.INVALID_MCP_REQUEST,
+        );
         return;
       }
 
@@ -768,9 +806,13 @@ export class Server {
           this.sessions.remove(newSessionId, 'initialize-failed');
         }
         if (canWriteReply(reply)) {
-          reply
-            .code(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-            .send({ error: ERROR_MESSAGES.MCP_REQUEST_PROCESSING_ERROR });
+          sendMcpJsonRpcError(
+            reply,
+            HTTP_STATUS.INTERNAL_SERVER_ERROR,
+            request.body,
+            -32603,
+            ERROR_MESSAGES.MCP_REQUEST_PROCESSING_ERROR,
+          );
         }
       }
     });

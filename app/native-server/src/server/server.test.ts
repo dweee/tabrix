@@ -629,6 +629,35 @@ describe('服务器测试', () => {
     expect([200, 204]).toContain(del.status);
   });
 
+  test('POST /mcp stale session 返回 JSON-RPC 错误信封', async () => {
+    const stale = await supertest(Server.getInstance().server)
+      .post('/mcp')
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .set('mcp-session-id', 'stale-session-for-json-rpc-envelope-test')
+      .send({
+        jsonrpc: '2.0',
+        id: 99,
+        method: 'tools/call',
+        params: {
+          name: 'get_windows_and_tabs',
+          arguments: {},
+        },
+      })
+      .expect(400);
+
+    expect(stale.body).toMatchObject({
+      jsonrpc: '2.0',
+      id: 99,
+      error: {
+        code: -32001,
+        message: expect.stringContaining('MCP session not found'),
+      },
+    });
+    expect(stale.body.error.message).toContain('initialize');
+    expect(stale.body.error).not.toBe('MCP session not found');
+  });
+
   test('DELETE /mcp 对已不存在的 session 应返回 204', async () => {
     await supertest(Server.getInstance().server)
       .delete('/mcp')
