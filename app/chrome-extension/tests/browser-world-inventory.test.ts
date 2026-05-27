@@ -60,6 +60,10 @@ describe('browser world inventory', () => {
               title: 'A',
               active: true,
               status: 'complete',
+              discarded: false,
+              audible: false,
+              mutedInfo: { muted: false },
+              pinned: false,
             },
             {
               id: 11,
@@ -68,6 +72,10 @@ describe('browser world inventory', () => {
               title: 'Extensions',
               active: false,
               status: 'complete',
+              discarded: false,
+              audible: false,
+              mutedInfo: { muted: false },
+              pinned: true,
             },
           ],
         },
@@ -116,6 +124,11 @@ describe('browser world inventory', () => {
       title: 'A',
       active: true,
       status: 'complete',
+      discarded: false,
+      audible: false,
+      muted: false,
+      pinned: false,
+      openerTabId: null,
       openedBy: 'user_or_page',
       canTabrixOperate: true,
       operabilityReason: 'regular_web_page',
@@ -146,6 +159,11 @@ describe('browser world inventory', () => {
       title: 'AI opened',
       active: false,
       status: 'loading',
+      discarded: false,
+      audible: true,
+      mutedInfo: { muted: true },
+      pinned: true,
+      openerTabId: 10,
     });
     listeners.tabUpdated[0]?.(
       20,
@@ -157,6 +175,11 @@ describe('browser world inventory', () => {
         title: 'AI opened done',
         active: false,
         status: 'complete',
+        discarded: false,
+        audible: true,
+        mutedInfo: { muted: true },
+        pinned: true,
+        openerTabId: 10,
       },
     );
     listeners.tabActivated[0]?.({ tabId: 20, windowId: 1 });
@@ -165,8 +188,23 @@ describe('browser world inventory', () => {
     expect(snapshot.aiOpenedTabIds).toEqual([20]);
     expect(snapshot.browserActiveTabId).toBe(20);
     expect(snapshot.summary.objectChangeConclusion).toContain('Current page object is tab 20');
+    expect(snapshot.summary.currentTabObject).toMatchObject({
+      tabId: 20,
+      status: 'complete',
+      discarded: false,
+      audible: true,
+      muted: true,
+      pinned: true,
+      openerTabId: 10,
+    });
     expect(snapshot.tabs.find((tab) => tab.tabId === 20)).toMatchObject({
       url: 'https://ai-opened.test/done',
+      status: 'complete',
+      discarded: false,
+      audible: true,
+      muted: true,
+      pinned: true,
+      openerTabId: 10,
       openedBy: 'ai',
       openedByReason: 'marked_by_tabrix_navigation_before_tabs_onCreated',
       active: true,

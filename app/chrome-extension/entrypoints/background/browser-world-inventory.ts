@@ -107,6 +107,11 @@ export interface BrowserWorldTabStateSummary {
   title: string;
   active: boolean | null;
   status: string | null;
+  discarded: boolean | null;
+  audible: boolean | null;
+  muted: boolean | null;
+  pinned: boolean | null;
+  openerTabId: number | null;
   openedBy: BrowserWorldTabOpenedBy;
   openedByConfidence: number;
   openedByReason: string;
@@ -591,6 +596,11 @@ function summarizeTabState(tab: BrowserWorldTabObject): BrowserWorldTabStateSumm
     title: tab.title,
     active: tab.active,
     status: tab.status,
+    discarded: tab.discarded,
+    audible: tab.audible,
+    muted: tab.muted,
+    pinned: tab.pinned,
+    openerTabId: tab.openerTabId,
     openedBy: tab.openedBy,
     openedByConfidence: tab.openedByConfidence,
     openedByReason: tab.openedByReason,
