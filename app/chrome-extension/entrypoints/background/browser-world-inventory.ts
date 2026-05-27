@@ -287,6 +287,31 @@ function normalizeWindow(window: chrome.windows.Window): BrowserWorldWindowObjec
   };
 }
 
+function upsertTabsFromWindow(window: chrome.windows.Window): void {
+  const fallbackWindowId = typeof window.id === 'number' ? window.id : null;
+  for (const tab of window.tabs ?? []) {
+    const previous = typeof tab.id === 'number' ? tabsById.get(tab.id) : undefined;
+    const normalized = normalizeTab(tab, previous, fallbackWindowId);
+    if (normalized) tabsById.set(normalized.tabId, normalized);
+  }
+}
+
+function refreshWindowActiveTabState(windowId: number, activeTabId: number | null): void {
+  const window = windowsById.get(windowId);
+  if (!window) return;
+  const activeTab = typeof activeTabId === 'number' ? tabsById.get(activeTabId) : undefined;
+  const activeTabCanOperate = activeTab?.canTabrixOperate ?? null;
+  const windowOperability = isOperableWindow(window, activeTabCanOperate);
+  windowsById.set(windowId, {
+    ...window,
+    activeTabId,
+    activeTabCanOperate,
+    canTabrixOperate: windowOperability.canOperate,
+    operabilityReason: windowOperability.reason,
+    updatedAtMs: nowMs(),
+  });
+}
+
 function recordObserved(): void {
   lastObservedAtMs = nowMs();
 }
@@ -396,9 +421,7 @@ export function initBrowserWorldInventory(): void {
         tabsById.set(id, { ...tab, active: id === tabId, updatedAtMs: nowMs() });
     }
     const window = windowsById.get(windowId);
-    if (window) {
-      windowsById.set(windowId, { ...window, activeTabId: tabId, updatedAtMs: nowMs() });
-    }
+    if (window) refreshWindowActiveTabState(windowId, tabId);
     pushEvent({ eventKind: 'tab_activated', tabId, windowId });
   });
   bind((chrome.tabs as any)?.onReplaced, (addedTabId: number, removedTabId: number) => {
@@ -424,6 +447,7 @@ export function initBrowserWorldInventory(): void {
   bind(chrome.windows?.onCreated, (window: chrome.windows.Window) => {
     const normalized = normalizeWindow(window);
     if (normalized) windowsById.set(normalized.windowId, normalized);
+    upsertTabsFromWindow(window);
     pushEvent({
       eventKind: 'window_created',
       tabId: normalized?.activeTabId ?? null,
@@ -439,13 +463,15 @@ export function initBrowserWorldInventory(): void {
   });
   bind(chrome.windows?.onFocusChanged, (windowId: number) => {
     for (const [id, window] of windowsById) {
-      windowsById.set(id, { ...window, focused: id === windowId, updatedAtMs: nowMs() });
+      const focused = id === windowId;
+      windowsById.set(id, { ...window, focused, isFocused: focused, updatedAtMs: nowMs() });
     }
     pushEvent({ eventKind: 'window_focus_changed', tabId: null, windowId });
   });
   bind((chrome.windows as any)?.onBoundsChanged, (window: chrome.windows.Window) => {
     const normalized = normalizeWindow(window);
     if (normalized) windowsById.set(normalized.windowId, normalized);
+    upsertTabsFromWindow(window);
     pushEvent({
       eventKind: 'window_bounds_changed',
       tabId: normalized?.activeTabId ?? null,

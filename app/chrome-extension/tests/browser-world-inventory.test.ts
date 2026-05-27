@@ -265,6 +265,93 @@ describe('browser world inventory', () => {
     });
   });
 
+  it('adds and removes BrowserWindowObject instances with their contained tab objects', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    listeners.windowCreated[0]?.({
+      id: 2,
+      focused: false,
+      state: 'normal',
+      type: 'normal',
+      width: 900,
+      height: 700,
+      left: 20,
+      top: 30,
+      tabs: [
+        {
+          id: 21,
+          windowId: 2,
+          url: 'https://new-window.test/',
+          title: 'New window',
+          active: true,
+          status: 'complete',
+          discarded: false,
+          audible: false,
+          mutedInfo: { muted: false },
+          pinned: false,
+        },
+      ],
+    } as chrome.windows.Window);
+
+    let snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.windowCount).toBe(2);
+    expect(snapshot.tabCount).toBe(3);
+    expect(snapshot.browserActiveTabId).toBe(10);
+    expect(snapshot.windows.find((window) => window.windowId === 2)).toMatchObject({
+      windowId: 2,
+      activeTabId: 21,
+      tabCount: 1,
+      canTabrixOperate: true,
+    });
+    expect(snapshot.tabs.find((tab) => tab.tabId === 21)).toMatchObject({
+      tabId: 21,
+      windowId: 2,
+      url: 'https://new-window.test/',
+      active: true,
+      canTabrixOperate: true,
+    });
+    expect(snapshot.summary.recentChangeSummary).toContain('window 2 was created');
+
+    listeners.windowRemoved[0]?.(2);
+    snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.windowCount).toBe(1);
+    expect(snapshot.tabs.some((tab) => tab.windowId === 2)).toBe(false);
+    expect(snapshot.summary.recentChangeSummary).toContain('window 2 was removed');
+  });
+
+  it('keeps BrowserWindowObject focus and operability in sync when active state changes', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    listeners.tabActivated[0]?.({ tabId: 11, windowId: 1 });
+
+    let snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.browserActiveTabId).toBe(11);
+    expect(snapshot.windows[0]).toMatchObject({
+      activeTabId: 11,
+      activeTabCanOperate: false,
+      canTabrixOperate: false,
+      operabilityReason: 'active_tab_not_operable',
+    });
+
+    listeners.windowFocusChanged[0]?.(-1);
+    snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.focusedWindowId).toBeNull();
+    expect(snapshot.windows[0]).toMatchObject({
+      focused: false,
+      isFocused: false,
+    });
+
+    listeners.windowFocusChanged[0]?.(1);
+    snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.focusedWindowId).toBe(1);
+    expect(snapshot.windows[0]).toMatchObject({
+      focused: true,
+      isFocused: true,
+    });
+  });
+
   it('preserves AI ownership and operation state across full Chrome refreshes', async () => {
     initBrowserWorldInventory();
     await getBrowserWorldSnapshot();
