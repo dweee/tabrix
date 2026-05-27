@@ -175,7 +175,6 @@ export interface BrowserWorldEvent {
   windowId: number | null;
   openedBy?: BrowserWorldTabOpenedBy;
   status?: string | null;
-  url?: string;
 }
 
 type EventHook = {
@@ -403,7 +402,6 @@ export function initBrowserWorldInventory(): void {
       windowId: normalized?.windowId ?? null,
       openedBy: normalized?.openedBy,
       status: normalized?.status ?? null,
-      url: normalized?.url,
     });
   });
   bind(
@@ -421,7 +419,6 @@ export function initBrowserWorldInventory(): void {
         windowId: normalized?.windowId ?? null,
         openedBy: normalized?.openedBy,
         status: normalized?.status ?? null,
-        url: normalized?.url,
       });
     },
   );
@@ -444,7 +441,6 @@ export function initBrowserWorldInventory(): void {
       tabId,
       windowId: typeof info?.windowId === 'number' ? info.windowId : (previous?.windowId ?? null),
       openedBy: previous?.openedBy,
-      url: previous?.url,
     });
   });
   bind((chrome.tabs as any)?.onActivated, (activeInfo: chrome.tabs.TabActiveInfo) => {
@@ -475,7 +471,6 @@ export function initBrowserWorldInventory(): void {
       windowId: previous?.windowId ?? null,
       openedBy: previous?.openedBy,
       status: previous?.status ?? null,
-      url: previous?.url,
     });
   });
   bind(chrome.windows?.onCreated, (window: chrome.windows.Window) => {
@@ -537,7 +532,6 @@ export function markBrowserWorldTabAiCreated(tabId: number | null | undefined): 
     tabId,
     windowId: previous?.windowId ?? null,
     openedBy: 'ai',
-    url: previous?.url,
   });
 }
 
@@ -561,7 +555,6 @@ export function markBrowserWorldTabAiOperated(
     tabId,
     windowId: previous?.windowId ?? null,
     openedBy: previous?.openedBy,
-    url: previous?.url,
   });
 }
 

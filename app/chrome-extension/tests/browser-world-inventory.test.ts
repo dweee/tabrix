@@ -278,6 +278,7 @@ describe('browser world inventory', () => {
       tabId: 20,
       openedBy: 'ai',
     });
+    expect(snapshot.recentEvents.some((event) => 'url' in event)).toBe(false);
   });
 
   it('summarizes tab replacement as an object lifecycle transition', async () => {
