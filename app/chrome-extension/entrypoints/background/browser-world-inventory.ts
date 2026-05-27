@@ -653,6 +653,8 @@ export function initBrowserWorldInventory(): void {
       tabId,
       windowId: typeof info?.windowId === 'number' ? info.windowId : (previous?.windowId ?? null),
       openedBy: previous?.openedBy,
+      aiOperation: previous?.lastAiOperation,
+      aiOperationReason: previous?.lastAiOperationReason,
     });
   });
   bind((chrome.tabs as any)?.onActivated, (activeInfo: chrome.tabs.TabActiveInfo) => {

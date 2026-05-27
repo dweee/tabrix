@@ -559,6 +559,35 @@ describe('browser world inventory', () => {
     });
   });
 
+  it('preserves close-request AI operation evidence when removing a user-opened tab', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    markBrowserWorldTabAiOperated(10, 'close_tabs_requested');
+    listeners.tabRemoved[0]?.(10, { windowId: 1, isWindowClosing: false });
+
+    const snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.tabs.some((tab) => tab.tabId === 10)).toBe(false);
+    expect(snapshot.summary.recentChangeSummary).toContain(
+      'tab 10 was removed; previousOpenedBy=user_or_page, lastAiOperation=close_tabs_requested',
+    );
+    expect(snapshot.summary.objectChangeConclusion).toContain(
+      'Page object tab 10 was removed; previousOwner=user_or_page, lastAiOperation=close_tabs_requested',
+    );
+    expect(snapshot.summary.objectChangeSummary).toBe(
+      'Object change summary: tab 10 was removed; retained tabs=1; active tab=unknown; the removed tab had AI operation close_tabs_requested, so do not continue on tab 10.',
+    );
+    expect(snapshot.recentEvents.at(-1)).toMatchObject({
+      eventKind: 'tab_removed',
+      tabId: 10,
+      windowId: 1,
+      openedBy: 'user_or_page',
+      aiOperation: 'close_tabs_requested',
+      aiOperationReason: 'marked_by_tabrix_tool_execution:close_tabs_requested',
+    });
+    expect(JSON.stringify(snapshot.recentEvents)).not.toContain('example.test');
+  });
+
   it('summarizes multi-tab cleanup as one dynamic object-state conclusion', async () => {
     initBrowserWorldInventory();
     await getBrowserWorldSnapshot();

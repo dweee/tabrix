@@ -389,7 +389,7 @@ export function summarizeObjectChangeConclusion(
     return `Latest AI-operated page object is tab ${lastAiOperatedTab.tabId}; operation=${lastAiOperatedTab.lastAiOperation ?? 'unknown'}, confidence=${lastAiOperatedTab.lastAiOperationConfidence ?? 'unknown'}, reason=${lastAiOperatedTab.lastAiOperationReason ?? 'unknown'}, operable=${lastAiOperatedTab.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
   }
   if (last.eventKind === 'tab_removed') {
-    return `Page object tab ${last.tabId ?? 'unknown'} was removed; previousOwner=${last.openedBy ?? 'unknown'}.`;
+    return `Page object tab ${last.tabId ?? 'unknown'} was removed; previousOwner=${last.openedBy ?? 'unknown'}, lastAiOperation=${last.aiOperation ?? 'none'}.`;
   }
   if (last.eventKind === 'window_bounds_changed' && focusedWindow) {
     return `Active window object is ${focusedWindow.windowId}; visibility=${focusedWindow.visibilityState}, operable=${focusedWindow.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
@@ -412,6 +412,9 @@ function summarizeObjectRouting(
 ): string {
   if (lastEvent?.eventKind === 'tab_removed' && lastEvent.openedBy === 'ai') {
     return `the removed tab was AI-owned, so do not continue on tab ${lastEvent.tabId ?? 'unknown'}.`;
+  }
+  if (lastEvent?.eventKind === 'tab_removed' && lastEvent.aiOperation) {
+    return `the removed tab had AI operation ${lastEvent.aiOperation}, so do not continue on tab ${lastEvent.tabId ?? 'unknown'}.`;
   }
   if (aiOperationState.relationToBrowserActiveTab === 'no_ai_operation_observed') {
     return 'no AI-operated tab is known yet.';
@@ -556,7 +559,7 @@ export function summarizeRecentEvents(events: readonly BrowserWorldEvent[]): str
     case 'tab_updated':
       return `Last change: tab ${last.tabId ?? 'unknown'} was updated; openedBy=${last.openedBy ?? 'unknown'}, status=${last.status ?? 'unknown'}.`;
     case 'tab_removed':
-      return `Last change: tab ${last.tabId ?? 'unknown'} was removed; previousOpenedBy=${last.openedBy ?? 'unknown'}.`;
+      return `Last change: tab ${last.tabId ?? 'unknown'} was removed; previousOpenedBy=${last.openedBy ?? 'unknown'}, lastAiOperation=${last.aiOperation ?? 'none'}.`;
     case 'tab_activated':
       return `Last change: tab ${last.tabId ?? 'unknown'} became active in window ${last.windowId ?? 'unknown'}.`;
     case 'window_focus_changed':
