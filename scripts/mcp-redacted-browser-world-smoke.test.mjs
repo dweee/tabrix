@@ -397,6 +397,47 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
         evidenceSummary: 'Private Dashboard title observed',
         claimBoundary: 'raw claim',
       },
+      pageRegions: [
+        {
+          regionId: 'private-region-content',
+          regionType: 'content',
+          state: 'content_available_candidate',
+          confidence: 0.72,
+          label: 'Private Dashboard content area',
+          objects: [
+            {
+              objectId: 'private-object-billing',
+              label: 'private billing button',
+              actionTypes: ['read'],
+              targetability: 'unknown',
+              confidence: 0.51,
+              reason: 'fixture includes confidential visible page text',
+            },
+          ],
+          candidateActionIds: ['private-action-billing'],
+          targetability: 'unknown',
+          claimBoundary: 'candidate page region only',
+        },
+      ],
+      pageOperationMap: {
+        summary: 'Private Dashboard operation map',
+        zones: [
+          {
+            zoneId: 'private-zone-read',
+            regionId: 'private-region-content',
+            regionType: 'content',
+            purpose: 'read_content',
+            label: 'private billing action',
+            state: 'content_available_candidate',
+            readiness: 'ready',
+            targetability: 'unknown',
+            candidateActionIds: ['private-action-billing'],
+            evidenceLevel: 'deterministic_fixture',
+            claimBoundary: 'planning guidance only',
+          },
+        ],
+        claimBoundary: 'page operation map candidate only',
+      },
       pageContent: 'confidential visible page text',
       markdown: 'Private Dashboard markdown',
     },
@@ -423,6 +464,23 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     readTargetIsBrowserActive: true,
     tabOwnerIsAi: true,
     tabOperable: true,
+    pageRegionsPresent: true,
+    pageRegionClaimBoundariesPresent: true,
+    pageOperationMapPresent: true,
+    pageOperationZonesPresent: true,
+    pageOperationClaimBoundaryPresent: true,
+  });
+  assert.deepEqual(summary.pageRegionRuntime, {
+    pageRegionsPresent: true,
+    pageRegionCount: 1,
+    regionTypes: ['content'],
+    targetableRegionCount: 0,
+    regionObjectCount: 1,
+    candidateActionRegionCount: 1,
+    pageOperationMapPresent: true,
+    operationZoneCount: 1,
+    operationPurposes: ['read_content'],
+    operationClaimBoundaryPresent: true,
   });
   assert.equal(summary.compact.hasTabPageObjectSummary, true);
   assert.deepEqual(summary.compact.safeTabFacts, {

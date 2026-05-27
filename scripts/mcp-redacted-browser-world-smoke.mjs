@@ -475,6 +475,31 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
     compactFacts.window && typeof compactFacts.window === 'object' ? compactFacts.window : {};
   const compactTabFacts =
     compactFacts.tab && typeof compactFacts.tab === 'object' ? compactFacts.tab : {};
+  const pageRegions = Array.isArray(payload?.pageRegions) ? payload.pageRegions : [];
+  const operationMap = payload?.pageOperationMap;
+  const operationZones = Array.isArray(operationMap?.zones) ? operationMap.zones : [];
+  const regionTypes = [
+    ...new Set(
+      pageRegions
+        .map((region) => region?.regionType)
+        .filter((regionType) => typeof regionType === 'string'),
+    ),
+  ].sort();
+  const operationPurposes = [
+    ...new Set(
+      operationZones.map((zone) => zone?.purpose).filter((purpose) => typeof purpose === 'string'),
+    ),
+  ].sort();
+  const targetableRegionCount = pageRegions.filter(
+    (region) => region?.targetability === 'target_ref' || region?.targetability === 'locator_chain',
+  ).length;
+  const regionObjectCount = pageRegions.reduce(
+    (count, region) => count + (Array.isArray(region?.objects) ? region.objects.length : 0),
+    0,
+  );
+  const candidateActionRegionCount = pageRegions.filter(
+    (region) => Array.isArray(region?.candidateActionIds) && region.candidateActionIds.length > 0,
+  ).length;
 
   return {
     callSucceeded: true,
@@ -529,6 +554,18 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
         runtimeStateSource: compactTabFacts.runtimeStateSource ?? null,
       },
     },
+    pageRegionRuntime: {
+      pageRegionsPresent: pageRegions.length > 0,
+      pageRegionCount: pageRegions.length,
+      regionTypes,
+      targetableRegionCount,
+      regionObjectCount,
+      candidateActionRegionCount,
+      pageOperationMapPresent: Boolean(operationMap),
+      operationZoneCount: operationZones.length,
+      operationPurposes,
+      operationClaimBoundaryPresent: typeof operationMap?.claimBoundary === 'string',
+    },
     alignment: {
       ownershipRuntimePresent: Boolean(ownershipRuntime),
       browserPageObjectCompactPresent: Boolean(compact),
@@ -553,6 +590,13 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       readTargetIsBrowserActive: ownershipRuntime?.isReadTargetBrowserActiveTab ?? null,
       tabOwnerIsAi: ownershipRuntime?.currentTabOpenedBy === 'ai',
       tabOperable: ownershipRuntime?.currentTabCanTabrixOperate ?? null,
+      pageRegionsPresent: pageRegions.length > 0,
+      pageRegionClaimBoundariesPresent:
+        pageRegions.length > 0 &&
+        pageRegions.every((region) => typeof region?.claimBoundary === 'string'),
+      pageOperationMapPresent: Boolean(operationMap),
+      pageOperationZonesPresent: operationZones.length > 0,
+      pageOperationClaimBoundaryPresent: typeof operationMap?.claimBoundary === 'string',
     },
     claimBoundary:
       'Redacted read_page alignment summary only. It proves candidate BrowserPageObject/runtime alignment for this public read snapshot, not page understanding correctness, login/logout completion, API/CDP reuse, release readiness, or product delivery grade.',
@@ -881,6 +925,11 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
       redactedReadPage.alignment.readTargetIsBrowserActive === true &&
       redactedReadPage.alignment.tabOwnerIsAi === true &&
       redactedReadPage.alignment.tabOperable === true &&
+      redactedReadPage.alignment.pageRegionsPresent === true &&
+      redactedReadPage.alignment.pageRegionClaimBoundariesPresent === true &&
+      redactedReadPage.alignment.pageOperationMapPresent === true &&
+      redactedReadPage.alignment.pageOperationZonesPresent === true &&
+      redactedReadPage.alignment.pageOperationClaimBoundaryPresent === true &&
       redactedBrowserWorldAfterRead.targetTab?.wasFound === true &&
       redactedBrowserWorldAfterRead.browserObjectEdgeSummaryPresent === true &&
       redactedBrowserWorldAfterRead.aiOperationState?.latestAiOperatedTabIdPresent === true &&
