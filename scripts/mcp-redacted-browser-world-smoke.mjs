@@ -263,6 +263,9 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       hasWindowFacts: Boolean(compactFacts.window),
       hasTabFacts: Boolean(compactFacts.tab),
       hasPageFacts: Boolean(compactFacts.page),
+      hasTabPageObjectSummary: String(compact?.primaryConclusion || '').includes(
+        'One Tab page object',
+      ),
       safeWindowFacts: {
         currentWindowId: compactWindowFacts.currentWindowId ?? null,
         currentWindowState: compactWindowFacts.currentWindowState ?? null,
@@ -286,6 +289,9 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
           : 'missing_or_other',
       browserWorldRuntimeSource:
         ownershipRuntime?.currentTabRuntimeStateSource === 'browser_world_inventory',
+      tabPageObjectSummaryPresent: String(compact?.primaryConclusion || '').includes(
+        'One Tab page object',
+      ),
       targetTabMatchesReadPage:
         Number.isInteger(targetTabId) && Number.isInteger(ownershipRuntime?.currentTabId)
           ? ownershipRuntime.currentTabId === targetTabId
@@ -551,6 +557,7 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
       redactedReadPage.alignment.browserPageObjectCompactPresent === true &&
       redactedReadPage.alignment.browserPageObjectCompactSource === 'expected' &&
       redactedReadPage.alignment.browserWorldRuntimeSource === true &&
+      redactedReadPage.alignment.tabPageObjectSummaryPresent === true &&
       redactedReadPage.alignment.targetTabMatchesReadPage === true &&
       redactedReadPage.alignment.readTargetIsBrowserActive === true &&
       redactedReadPage.alignment.tabOwnerIsAi === true &&

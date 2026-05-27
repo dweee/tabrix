@@ -177,7 +177,8 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
         source: 'read_page_browser_page_object_compact',
         status: 'single_snapshot',
         watchStatus: 'snapshot_only',
-        primaryConclusion: 'Private Dashboard contains confidential user text',
+        primaryConclusion:
+          'Current BrowserPageObject snapshot: One Tab page object: tab=42; active=true; browserActive=true; owner=run_owned; openedBy=ai; operable=true; window=normal; focused=true; page=ready/stable; runtime=browser_world_inventory; source=dom_region_rows.',
         changedGroups: ['tab_state'],
         transitionCount: 0,
         facts: {
@@ -220,11 +221,13 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     browserPageObjectCompactPresent: true,
     browserPageObjectCompactSource: 'expected',
     browserWorldRuntimeSource: true,
+    tabPageObjectSummaryPresent: true,
     targetTabMatchesReadPage: true,
     readTargetIsBrowserActive: true,
     tabOwnerIsAi: true,
     tabOperable: true,
   });
+  assert.equal(summary.compact.hasTabPageObjectSummary, true);
   assert.deepEqual(summary.compact.safeTabFacts, {
     readTargetTabId: 42,
     currentActiveTabId: 42,

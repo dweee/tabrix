@@ -1361,6 +1361,11 @@ function buildSingleSnapshotCurrentPageConclusion(
   >,
 ): string {
   const highlights = [
+    singleSnapshotTabPageObjectSummary(
+      attributeGroups.window_state,
+      attributeGroups.tab_state,
+      attributeGroups.page_state,
+    ),
     singleSnapshotGroupSummary(attributeGroups.menu_state),
     singleSnapshotGroupSummary(attributeGroups.auth_state),
     singleSnapshotGroupSummary(attributeGroups.qr_state),
@@ -1373,7 +1378,41 @@ function buildSingleSnapshotCurrentPageConclusion(
     return 'Current BrowserPageObject snapshot is visible, but no AI-usable page area or action summary is available yet. No before/after dynamic transition is proven.';
   }
 
-  return `Current BrowserPageObject snapshot: ${highlights.slice(0, 4).join(' ')} No before/after dynamic transition is proven.`;
+  return `Current BrowserPageObject snapshot: ${highlights.slice(0, 6).join(' ')} No before/after dynamic transition is proven.`;
+}
+
+function singleSnapshotTabPageObjectSummary(
+  windowGroup: ReadPageBrowserPageObjectGroupState | undefined,
+  tabGroup: ReadPageBrowserPageObjectGroupState | undefined,
+  pageGroup: ReadPageBrowserPageObjectGroupState | undefined,
+): string | null {
+  const windowFacts = windowGroup?.facts;
+  const tabFacts = tabGroup?.facts;
+  const pageFacts = pageGroup?.facts;
+  if (!windowFacts && !tabFacts && !pageFacts) return null;
+
+  const tabId =
+    readNumberFact(tabFacts, 'readTargetTabId') ?? readNumberFact(tabFacts, 'currentTabId');
+  const active =
+    readBooleanFact(tabFacts, 'isReadTargetTabActive') ?? readBooleanFact(tabFacts, 'isActive');
+  const browserActive = readBooleanFact(tabFacts, 'isReadTargetBrowserActiveTab');
+  const owner = readStringFact(tabFacts, 'ownerType') ?? 'unknown';
+  const openedBy = readStringFact(tabFacts, 'openedBy') ?? 'unknown';
+  const operable = readBooleanFact(tabFacts, 'canTabrixOperate');
+  const windowState = readStringFact(windowFacts, 'currentWindowState') ?? 'unknown';
+  const focused = readBooleanFact(windowFacts, 'isFocused');
+  const readiness = readStringFact(pageFacts, 'readiness') ?? 'unknown';
+  const stability = readStringFact(pageFacts, 'stability') ?? 'unknown';
+  const runtimeSource = readStringFact(tabFacts, 'runtimeStateSource') ?? 'unknown';
+  const selectedDataSource = readStringFact(pageFacts, 'selectedDataSource') ?? 'unknown';
+
+  return (
+    `One Tab page object: tab=${formatNullableNumber(tabId)}; ` +
+    `active=${formatTriState(active)}; browserActive=${formatTriState(browserActive)}; ` +
+    `owner=${owner}; openedBy=${openedBy}; operable=${formatTriState(operable)}; ` +
+    `window=${windowState}; focused=${formatTriState(focused)}; ` +
+    `page=${readiness}/${stability}; runtime=${runtimeSource}; source=${selectedDataSource}.`
+  );
 }
 
 function singleSnapshotGroupSummary(
@@ -1544,6 +1583,22 @@ function readStringArrayFact(
   const value = facts?.[key];
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
+}
+
+function readNumberFact(
+  facts: Record<string, string | number | boolean | null | string[] | number[]> | undefined,
+  key: string,
+): number | null {
+  const value = facts?.[key];
+  return Number.isFinite(value) ? Number(value) : null;
+}
+
+function readBooleanFact(
+  facts: Record<string, string | number | boolean | null | string[] | number[]> | undefined,
+  key: string,
+): boolean | null {
+  const value = facts?.[key];
+  return typeof value === 'boolean' ? value : null;
 }
 
 function formatChangedAreaSentence(changes: readonly ReadPageObjectLifecycleChange[]): string {

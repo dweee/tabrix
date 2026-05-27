@@ -599,6 +599,18 @@ describe('read_page object lifecycle', () => {
 
     expect(view.attributeGroups.tab_state.summary).toContain('status=loading');
     expect(view.attributeGroups.tab_state.summary).toContain('operable=true');
+    expect(view.compact?.primaryConclusion).toContain('One Tab page object');
+    expect(view.compact?.primaryConclusion).toContain('tab=42');
+    expect(view.compact?.primaryConclusion).toContain('active=true');
+    expect(view.compact?.primaryConclusion).toContain('browserActive=true');
+    expect(view.compact?.primaryConclusion).toContain('owner=run_owned');
+    expect(view.compact?.primaryConclusion).toContain('openedBy=ai');
+    expect(view.compact?.primaryConclusion).toContain('operable=true');
+    expect(view.compact?.primaryConclusion).toContain('window=normal');
+    expect(view.compact?.primaryConclusion).toContain('runtime=browser_world_inventory');
+    expect(view.compact?.primaryConclusion).toContain('source=dom_region_rows');
+    expect(view.compact?.primaryConclusion).not.toContain('https://example.test/runtime');
+    expect(view.compact?.primaryConclusion).not.toContain('Runtime page');
     expect(view.compact?.facts.tab).toMatchObject({
       objectKind: 'BrowserTabObject',
       currentTabId: 42,
@@ -1323,6 +1335,9 @@ describe('read_page object lifecycle', () => {
       claimBoundary: expect.stringContaining('candidate evidence only'),
     });
     expect(view.compact?.primaryConclusion).toContain('Content visible');
+    expect(view.compact?.primaryConclusion).toContain('One Tab page object');
+    expect(view.compact?.primaryConclusion).toContain('tab=42');
+    expect(view.compact?.primaryConclusion).toContain('owner=run_owned');
     expect(view.compact?.primaryConclusion).toContain(
       'No before/after dynamic transition is proven',
     );
