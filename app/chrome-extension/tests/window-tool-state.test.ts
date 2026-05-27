@@ -150,6 +150,15 @@ describe('get_windows_and_tabs state inventory', () => {
           claimBoundary:
             'Operation routing identifies browser tab objects only; it does not prove page action postconditions or task completion.',
         },
+        aiRoutingBrief: {
+          summary:
+            'AI routing brief: browser-active tab=102, activeTab=operable, latestAiOperatedTab=none; no prior AI tab operation is known.',
+          recommendedNextCheck:
+            'Read or select the intended target before assuming the active page is the AI operation target.',
+          canContinueOnLatestAiOperatedTab: null,
+          claimBoundary:
+            'Browser routing brief uses tab/window lifecycle state only; it does not prove page content, task success, or action postconditions.',
+        },
         windows: [
           {
             windowId: 10,
@@ -458,6 +467,15 @@ describe('get_windows_and_tabs state inventory', () => {
     expect(payload.compactSummary.operationRouting.summary).toContain(
       'latest AI-operated tab 202 is not browser-active',
     );
+    expect(payload.compactSummary.aiRoutingBrief).toMatchObject({
+      summary:
+        'AI routing brief: latest AI-operated tab=202 is background while browser-active tab=201; operation=read_page.',
+      recommendedNextCheck:
+        'Reselect or reread the latest AI-operated tab before continuing the task.',
+      canContinueOnLatestAiOperatedTab: false,
+      claimBoundary:
+        'Browser routing brief proves the operation target is not the browser-active tab; it does not prove page content or task result.',
+    });
     expect(payload.compactSummary.objectChangeSummary).toBe(
       'Object change summary: AI operation read_page was recorded on tab 202; AI last operated tab 202, but the active tab is 201; reselect or reread before continuing.',
     );

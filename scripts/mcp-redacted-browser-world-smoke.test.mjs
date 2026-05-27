@@ -199,6 +199,14 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
             'Current operation object includes https://private.example.test/dashboard and Private Dashboard.',
           claimBoundary: 'Operation routing summary only.',
         },
+        aiRoutingBrief: {
+          summary:
+            'AI routing brief includes https://private.example.test/dashboard and Private Dashboard.',
+          recommendedNextCheck:
+            'Continue only after the next page-level read/postcondition check still passes.',
+          canContinueOnLatestAiOperatedTab: true,
+          claimBoundary: 'Browser routing brief summary only.',
+        },
         tabStateMatrix: {
           total: 20,
           active: 1,
@@ -413,6 +421,12 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
     latestAiOperationConfidence: 0.95,
     latestAiOperationReasonPresent: true,
     summaryPresent: true,
+    claimBoundaryPresent: true,
+  });
+  assert.deepEqual(summary.aiRoutingBrief, {
+    summaryPresent: true,
+    recommendedNextCheckPresent: true,
+    canContinueOnLatestAiOperatedTab: true,
     claimBoundaryPresent: true,
   });
   assert.deepEqual(summary.tabStateMatrix, {

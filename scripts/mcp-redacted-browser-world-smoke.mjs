@@ -271,6 +271,7 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
   const browserActiveObject = payload?.compactSummary?.browserActiveObject ?? null;
   const latestAiOperatedObject = payload?.compactSummary?.latestAiOperatedObject ?? null;
   const operationRouting = payload?.compactSummary?.operationRouting ?? null;
+  const aiRoutingBrief = payload?.compactSummary?.aiRoutingBrief ?? null;
   const redactCompactOperationObject = (object) =>
     object
       ? {
@@ -504,6 +505,17 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
             typeof operationRouting.latestAiOperationReason === 'string',
           summaryPresent: typeof operationRouting.summary === 'string',
           claimBoundaryPresent: typeof operationRouting.claimBoundary === 'string',
+        }
+      : null,
+    aiRoutingBrief: aiRoutingBrief
+      ? {
+          summaryPresent: typeof aiRoutingBrief.summary === 'string',
+          recommendedNextCheckPresent: typeof aiRoutingBrief.recommendedNextCheck === 'string',
+          canContinueOnLatestAiOperatedTab:
+            typeof aiRoutingBrief.canContinueOnLatestAiOperatedTab === 'boolean'
+              ? aiRoutingBrief.canContinueOnLatestAiOperatedTab
+              : null,
+          claimBoundaryPresent: typeof aiRoutingBrief.claimBoundary === 'string',
         }
       : null,
     tabStateMatrix: tabStateMatrix
@@ -880,6 +892,7 @@ export function buildStepSummary(step, payload, targetTabId) {
     browserActiveObject: redacted.browserActiveObject,
     latestAiOperatedObject: redacted.latestAiOperatedObject,
     operationRouting: redacted.operationRouting,
+    aiRoutingBrief: redacted.aiRoutingBrief,
     targetTab: redacted.targetTab,
     counts: redacted.counts,
     tabLifecycleState: redacted.tabLifecycleState,
@@ -1123,6 +1136,9 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
             typeof step.operationRouting?.relationToBrowserActiveTab === 'string' &&
             step.operationRouting?.summaryPresent === true &&
             step.operationRouting?.claimBoundaryPresent === true &&
+            step.aiRoutingBrief?.summaryPresent === true &&
+            step.aiRoutingBrief?.recommendedNextCheckPresent === true &&
+            step.aiRoutingBrief?.claimBoundaryPresent === true &&
             step.activeTabIncludedInCompactTabs === true,
         ),
     };
