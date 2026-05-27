@@ -6,6 +6,7 @@ import {
   assertRedactedSmokeOutputSafe,
   buildPublicSmokeUrl,
   buildPostCloseTargetCleanupSummary,
+  buildPublicNoLoginLifecycleCoverageSummary,
   buildRedactedBrowserWorldSummary,
   buildRedactedReadPageAlignmentSummary,
   buildStepSummary,
@@ -1195,6 +1196,81 @@ test('isLifecycleStepPassing rejects stale operation target routing', () => {
   );
 });
 
+test('buildPublicNoLoginLifecycleCoverageSummary separates proven and not-proven lifecycle edges', () => {
+  const coverage = buildPublicNoLoginLifecycleCoverageSummary({
+    openedPublicTestTabs: 3,
+    cleanupTargetsPassed: true,
+    lifecycleMatrix: [
+      { step: 'foreground_open' },
+      { step: 'background_open' },
+      { step: 'switch_to_background_tab' },
+      { step: 'new_window_open' },
+    ],
+    postCleanup: {
+      tabLifecycleState: {
+        recentCreatedCount: 3,
+        recentUpdatedCount: 2,
+        recentActivatedCount: 1,
+        recentRemovedCount: 3,
+      },
+    },
+    postCloseTargets: [
+      { targetNoLongerRetained: true, closedTargetNotOperable: true },
+      { targetNoLongerRetained: true, closedTargetNotOperable: true },
+      { targetNoLongerRetained: true, closedTargetNotOperable: true },
+    ],
+  });
+
+  assert.deepEqual(coverage.coveredInThisRun, {
+    tabCreated: true,
+    tabUpdated: true,
+    tabActivated: true,
+    tabRemoved: true,
+    foregroundTabOpen: true,
+    backgroundTabOpen: true,
+    switchToBackgroundTab: true,
+    newWindowTabOpen: true,
+    postCloseTargetCleanup: true,
+  });
+  assert.equal(coverage.minimumPublicLifecycleCoveragePassed, true);
+  assert.deepEqual(coverage.notProvenInThisRun, [
+    'tab_replaced',
+    'tab_attached',
+    'tab_detached',
+    'window_minimize_restore',
+    'private_or_login_page_lifecycle',
+  ]);
+  assert.match(coverage.claimBoundary, /does not prove tab replace\/attach\/detach/);
+});
+
+test('buildPublicNoLoginLifecycleCoverageSummary fails minimum coverage when close proof is weak', () => {
+  const coverage = buildPublicNoLoginLifecycleCoverageSummary({
+    openedPublicTestTabs: 3,
+    cleanupTargetsPassed: true,
+    lifecycleMatrix: [
+      { step: 'foreground_open' },
+      { step: 'background_open' },
+      { step: 'switch_to_background_tab' },
+      { step: 'new_window_open' },
+    ],
+    postCleanup: {
+      tabLifecycleState: {
+        recentCreatedCount: 3,
+        recentActivatedCount: 1,
+        recentRemovedCount: 2,
+      },
+    },
+    postCloseTargets: [
+      { targetNoLongerRetained: true, closedTargetNotOperable: true },
+      { targetNoLongerRetained: true, closedTargetNotOperable: true },
+    ],
+  });
+
+  assert.equal(coverage.coveredInThisRun.tabRemoved, false);
+  assert.equal(coverage.coveredInThisRun.postCloseTargetCleanup, false);
+  assert.equal(coverage.minimumPublicLifecycleCoveragePassed, false);
+});
+
 test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fields', () => {
   const summary = buildRedactedReadPageAlignmentSummary(
     {
@@ -1608,6 +1684,9 @@ test('isSmokeResultPassing keeps observer verdicts strict and explicit', () => {
     closeSucceeded: true,
     cleanupTargetsPassed: true,
     allLifecycleStepsPassed: true,
+    publicLifecycleCoverage: {
+      minimumPublicLifecycleCoveragePassed: true,
+    },
     postCleanup: {
       retentionWithinLimit: true,
       compactSummaryBounded: true,

@@ -1238,6 +1238,80 @@ export function isLifecycleStepPassing(step) {
   );
 }
 
+export function buildPublicNoLoginLifecycleCoverageSummary(result) {
+  const openedPublicTestTabs = Number.isInteger(result?.openedPublicTestTabs)
+    ? result.openedPublicTestTabs
+    : 0;
+  const steps = new Set(
+    Array.isArray(result?.lifecycleMatrix)
+      ? result.lifecycleMatrix.map((step) => step?.step).filter((step) => typeof step === 'string')
+      : [],
+  );
+  const lifecycle = result?.postCleanup?.tabLifecycleState ?? {};
+  const recentCreatedCount = Number.isInteger(lifecycle.recentCreatedCount)
+    ? lifecycle.recentCreatedCount
+    : null;
+  const recentUpdatedCount = Number.isInteger(lifecycle.recentUpdatedCount)
+    ? lifecycle.recentUpdatedCount
+    : null;
+  const recentActivatedCount = Number.isInteger(lifecycle.recentActivatedCount)
+    ? lifecycle.recentActivatedCount
+    : null;
+  const recentRemovedCount = Number.isInteger(lifecycle.recentRemovedCount)
+    ? lifecycle.recentRemovedCount
+    : null;
+  const postCloseTargets = Array.isArray(result?.postCloseTargets) ? result.postCloseTargets : [];
+  const tabCreatedObserved =
+    openedPublicTestTabs > 0 &&
+    recentCreatedCount !== null &&
+    recentCreatedCount >= openedPublicTestTabs;
+  const tabActivatedObserved =
+    (recentActivatedCount !== null && recentActivatedCount > 0) ||
+    steps.has('switch_to_background_tab');
+  const tabRemovedObserved =
+    openedPublicTestTabs > 0 &&
+    recentRemovedCount !== null &&
+    recentRemovedCount >= openedPublicTestTabs;
+  const postCloseTargetCleanupObserved =
+    result?.cleanupTargetsPassed === true &&
+    postCloseTargets.length === openedPublicTestTabs &&
+    postCloseTargets.every(
+      (target) =>
+        target?.targetNoLongerRetained === true && target?.closedTargetNotOperable === true,
+    );
+  const newWindowTabObserved = steps.has('new_window_open');
+
+  return {
+    publicNoLoginOnly: true,
+    coveredInThisRun: {
+      tabCreated: tabCreatedObserved,
+      tabUpdated: recentUpdatedCount !== null && recentUpdatedCount > 0,
+      tabActivated: tabActivatedObserved,
+      tabRemoved: tabRemovedObserved,
+      foregroundTabOpen: steps.has('foreground_open'),
+      backgroundTabOpen: steps.has('background_open'),
+      switchToBackgroundTab: steps.has('switch_to_background_tab'),
+      newWindowTabOpen: newWindowTabObserved,
+      postCloseTargetCleanup: postCloseTargetCleanupObserved,
+    },
+    notProvenInThisRun: [
+      'tab_replaced',
+      'tab_attached',
+      'tab_detached',
+      'window_minimize_restore',
+      'private_or_login_page_lifecycle',
+    ],
+    minimumPublicLifecycleCoveragePassed:
+      tabCreatedObserved === true &&
+      tabActivatedObserved === true &&
+      tabRemovedObserved === true &&
+      newWindowTabObserved === true &&
+      postCloseTargetCleanupObserved === true,
+    claimBoundary:
+      'Public no-login lifecycle coverage proves only the listed browser object transitions observed in this run. It does not prove tab replace/attach/detach, window minimize/restore mutation, private/login flows, page understanding correctness, API/CDP reuse, release readiness, or product delivery grade.',
+  };
+}
+
 function closeRunTabs(cliPath, tabIds, timeoutMs) {
   const uniqueTabIds = uniqueNumbers(tabIds);
   if (!uniqueTabIds.length) {
@@ -1381,7 +1455,7 @@ function runLifecycleSmoke(cliPath, smokeUrl, args) {
       : null;
   const allLifecycleStepsPassed = lifecycleMatrix.every((step) => isLifecycleStepPassing(step));
 
-  return {
+  const result = {
     scenario: 'lifecycle',
     openedPublicTestTabs: uniqueNumbers(openedTabIds).length,
     closeAttempted: closeResult.attempted,
@@ -1395,6 +1469,10 @@ function runLifecycleSmoke(cliPath, smokeUrl, args) {
     postCleanup,
     postCloseTargets,
     lifecycleMatrix,
+  };
+  return {
+    ...result,
+    publicLifecycleCoverage: buildPublicNoLoginLifecycleCoverageSummary(result),
   };
 }
 
@@ -1428,12 +1506,14 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
       cleanup: result.cleanup,
       postCleanup: result.postCleanup,
       postCloseTargets: result.postCloseTargets,
+      publicLifecycleCoverage: result.publicLifecycleCoverage,
       lifecycleMatrix,
       passed:
         result.openedPublicTestTabs === 3 &&
         result.closeSucceeded === true &&
         result.cleanupTargetsPassed === true &&
         result.allLifecycleStepsPassed === true &&
+        result.publicLifecycleCoverage?.minimumPublicLifecycleCoveragePassed === true &&
         result.postCleanup?.retentionWithinLimit === true &&
         result.postCleanup?.compactSummaryBounded === true &&
         result.postCleanup?.browserObjectEdgeSummaryPresent === true &&
@@ -1700,6 +1780,7 @@ export function isSmokeResultPassing(result) {
       result.closeSucceeded === true &&
       result.cleanupTargetsPassed === true &&
       result.allLifecycleStepsPassed === true &&
+      result.publicLifecycleCoverage?.minimumPublicLifecycleCoveragePassed === true &&
       result.postCleanup?.retentionWithinLimit === true &&
       result.postCleanup?.compactSummaryBounded === true &&
       result.postCleanup?.browserObjectEdgeSummaryPresent === true &&
