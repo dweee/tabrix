@@ -176,6 +176,8 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
   const retentionPolicy = payload?.compactSummary?.retentionPolicy ?? payload?.retentionPolicy;
   const windowStateMatrix =
     payload?.compactSummary?.windowStateMatrix ?? payload?.summary?.windowStateMatrix ?? null;
+  const tabStateMatrix =
+    payload?.compactSummary?.tabStateMatrix ?? payload?.summary?.tabStateMatrix ?? null;
 
   return {
     callSucceeded: true,
@@ -236,6 +238,40 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     windowStateConclusionPresent:
       typeof payload?.compactSummary?.windowStateConclusion === 'string' ||
       typeof payload?.summary?.windowStateConclusion === 'string',
+    tabStateMatrix: tabStateMatrix
+      ? {
+          total: Number.isInteger(tabStateMatrix.total) ? tabStateMatrix.total : null,
+          active: Number.isInteger(tabStateMatrix.active) ? tabStateMatrix.active : null,
+          background: Number.isInteger(tabStateMatrix.background)
+            ? tabStateMatrix.background
+            : null,
+          activityUnknown: Number.isInteger(tabStateMatrix.activityUnknown)
+            ? tabStateMatrix.activityUnknown
+            : null,
+          loading: Number.isInteger(tabStateMatrix.loading) ? tabStateMatrix.loading : null,
+          complete: Number.isInteger(tabStateMatrix.complete) ? tabStateMatrix.complete : null,
+          discarded: Number.isInteger(tabStateMatrix.discarded) ? tabStateMatrix.discarded : null,
+          muted: Number.isInteger(tabStateMatrix.muted) ? tabStateMatrix.muted : null,
+          pinned: Number.isInteger(tabStateMatrix.pinned) ? tabStateMatrix.pinned : null,
+          aiOpened: Number.isInteger(tabStateMatrix.aiOpened) ? tabStateMatrix.aiOpened : null,
+          userOrPageOpened: Number.isInteger(tabStateMatrix.userOrPageOpened)
+            ? tabStateMatrix.userOrPageOpened
+            : null,
+          recentlyOperatedByAi: Number.isInteger(tabStateMatrix.recentlyOperatedByAi)
+            ? tabStateMatrix.recentlyOperatedByAi
+            : null,
+          operable: Number.isInteger(tabStateMatrix.operable) ? tabStateMatrix.operable : null,
+          inoperable: Number.isInteger(tabStateMatrix.inoperable)
+            ? tabStateMatrix.inoperable
+            : null,
+          operabilityUnknown: Number.isInteger(tabStateMatrix.operabilityUnknown)
+            ? tabStateMatrix.operabilityUnknown
+            : null,
+        }
+      : null,
+    tabStateConclusionPresent:
+      typeof payload?.compactSummary?.tabStateConclusion === 'string' ||
+      typeof payload?.summary?.tabStateConclusion === 'string',
     activeTabIncludedInCompactTabs:
       Number.isInteger(activeTabId) && compactTabs.length
         ? compactTabs.some((tab) => tab?.tabId === activeTabId)

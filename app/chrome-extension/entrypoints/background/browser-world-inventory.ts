@@ -109,6 +109,8 @@ export interface BrowserWorldSummary {
   };
   windowStateMatrix: BrowserWorldWindowStateMatrix;
   windowStateConclusion: string;
+  tabStateMatrix: BrowserWorldTabStateMatrix;
+  tabStateConclusion: string;
   recentChangeSummary: string;
   objectChangeConclusion: string;
 }
@@ -126,6 +128,32 @@ export interface BrowserWorldWindowStateMatrix {
   operabilityUnknown: number;
   stateCounts: Record<string, number>;
   typeCounts: Record<string, number>;
+}
+
+export interface BrowserWorldTabStateMatrix {
+  total: number;
+  active: number;
+  background: number;
+  activityUnknown: number;
+  loading: number;
+  complete: number;
+  statusUnknown: number;
+  discarded: number;
+  audible: number;
+  muted: number;
+  pinned: number;
+  withOpener: number;
+  aiOpened: number;
+  userOrPageOpened: number;
+  unknownOpened: number;
+  recentlyOperatedByAi: number;
+  idleForAi: number;
+  closedRetained: number;
+  operable: number;
+  inoperable: number;
+  operabilityUnknown: number;
+  statusCounts: Record<string, number>;
+  ownerCounts: Record<BrowserWorldTabOpenedBy, number>;
 }
 
 export interface BrowserWorldTabAttributeGroups {
@@ -618,6 +646,7 @@ function buildSnapshot(): BrowserWorldSnapshot {
     .filter((tab) => tab.canTabrixOperate === true)
     .map((tab) => tab.tabId);
   const windowStateMatrix = buildWindowStateMatrix(windows);
+  const tabStateMatrix = buildTabStateMatrix(tabs);
   const lastAiOperatedTab =
     tabs
       .filter((tab) => tab.lastAiOperationAtMs !== null)
@@ -668,6 +697,8 @@ function buildSnapshot(): BrowserWorldSnapshot {
       },
       windowStateMatrix,
       windowStateConclusion: summarizeWindowStateMatrix(windowStateMatrix, focusedWindow ?? null),
+      tabStateMatrix,
+      tabStateConclusion: summarizeTabStateMatrix(tabStateMatrix, activeTab, lastAiOperatedTab),
       recentChangeSummary,
       objectChangeConclusion: summarizeObjectChangeConclusion(
         recentEvents,
@@ -691,6 +722,56 @@ function buildSnapshot(): BrowserWorldSnapshot {
     windows,
     tabs,
   };
+}
+
+function buildTabStateMatrix(tabs: readonly BrowserWorldTabObject[]): BrowserWorldTabStateMatrix {
+  const statusCounts: Record<string, number> = {};
+  const ownerCounts: Record<BrowserWorldTabOpenedBy, number> = {
+    ai: 0,
+    user_or_page: 0,
+    unknown: 0,
+  };
+  for (const tab of tabs) {
+    const status = String(tab.status || 'unknown');
+    statusCounts[status] = (statusCounts[status] ?? 0) + 1;
+    ownerCounts[tab.openedBy] = (ownerCounts[tab.openedBy] ?? 0) + 1;
+  }
+  return {
+    total: tabs.length,
+    active: tabs.filter((tab) => tab.active === true).length,
+    background: tabs.filter((tab) => tab.active === false).length,
+    activityUnknown: tabs.filter((tab) => tab.active === null).length,
+    loading: tabs.filter((tab) => tab.status === 'loading').length,
+    complete: tabs.filter((tab) => tab.status === 'complete').length,
+    statusUnknown: tabs.filter((tab) => !tab.status).length,
+    discarded: tabs.filter((tab) => tab.discarded === true).length,
+    audible: tabs.filter((tab) => tab.audible === true).length,
+    muted: tabs.filter((tab) => tab.muted === true).length,
+    pinned: tabs.filter((tab) => tab.pinned === true).length,
+    withOpener: tabs.filter((tab) => tab.openerTabId !== null).length,
+    aiOpened: tabs.filter((tab) => tab.openedBy === 'ai').length,
+    userOrPageOpened: tabs.filter((tab) => tab.openedBy === 'user_or_page').length,
+    unknownOpened: tabs.filter((tab) => tab.openedBy === 'unknown').length,
+    recentlyOperatedByAi: tabs.filter((tab) => tab.aiOperationState === 'recently_operated').length,
+    idleForAi: tabs.filter((tab) => tab.aiOperationState === 'idle').length,
+    closedRetained: tabs.filter((tab) => tab.aiOperationState === 'closed').length,
+    operable: tabs.filter((tab) => tab.canTabrixOperate === true).length,
+    inoperable: tabs.filter((tab) => tab.canTabrixOperate === false).length,
+    operabilityUnknown: tabs.filter((tab) => tab.canTabrixOperate === null).length,
+    statusCounts,
+    ownerCounts,
+  };
+}
+
+function summarizeTabStateMatrix(
+  matrix: BrowserWorldTabStateMatrix,
+  activeTab: BrowserWorldTabObject | null,
+  lastAiOperatedTab: BrowserWorldTabObject | null,
+): string {
+  if (matrix.total === 0) {
+    return 'Tab page object matrix: no tab page object is currently retained.';
+  }
+  return `Tab page object matrix: ${matrix.total} tab(s), active=${matrix.active}, background=${matrix.background}, loading=${matrix.loading}, complete=${matrix.complete}, aiOpened=${matrix.aiOpened}, userOrPageOpened=${matrix.userOrPageOpened}, operable=${matrix.operable}, activeTab=${activeTab?.tabId ?? 'unknown'}, latestAiOperatedTab=${lastAiOperatedTab?.tabId ?? 'none'}.`;
 }
 
 function buildWindowStateMatrix(

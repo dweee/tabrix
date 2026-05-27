@@ -135,6 +135,34 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.windowStateConclusion).toContain(
       'Window object matrix: 1 window(s), visible=1, minimized=0, focused=1, operable=1',
     );
+    expect(snapshot.summary.tabStateMatrix).toMatchObject({
+      total: 2,
+      active: 1,
+      background: 1,
+      activityUnknown: 0,
+      loading: 0,
+      complete: 2,
+      statusUnknown: 0,
+      discarded: 0,
+      audible: 0,
+      muted: 0,
+      pinned: 1,
+      withOpener: 0,
+      aiOpened: 0,
+      userOrPageOpened: 2,
+      unknownOpened: 0,
+      recentlyOperatedByAi: 0,
+      idleForAi: 2,
+      closedRetained: 0,
+      operable: 1,
+      inoperable: 1,
+      operabilityUnknown: 0,
+      statusCounts: { complete: 2 },
+      ownerCounts: { ai: 0, user_or_page: 2, unknown: 0 },
+    });
+    expect(snapshot.summary.tabStateConclusion).toContain(
+      'Tab page object matrix: 2 tab(s), active=1, background=1',
+    );
     expect(snapshot.windows[0]).toMatchObject({
       windowId: 1,
       visibilityState: 'visible',
@@ -285,6 +313,25 @@ describe('browser world inventory', () => {
         reason: 'regular_web_page',
       },
     });
+    expect(snapshot.summary.tabStateMatrix).toMatchObject({
+      total: 3,
+      active: 1,
+      background: 2,
+      complete: 3,
+      audible: 1,
+      muted: 1,
+      pinned: 2,
+      withOpener: 1,
+      aiOpened: 1,
+      userOrPageOpened: 2,
+      recentlyOperatedByAi: 1,
+      idleForAi: 2,
+      operable: 2,
+      inoperable: 1,
+      statusCounts: { complete: 3 },
+      ownerCounts: { ai: 1, user_or_page: 2, unknown: 0 },
+    });
+    expect(snapshot.summary.tabStateConclusion).toContain('activeTab=20');
     expect(snapshot.tabs.find((tab) => tab.tabId === 20)).toMatchObject({
       url: 'https://ai-opened.test/done',
       status: 'complete',
@@ -332,6 +379,14 @@ describe('browser world inventory', () => {
       openedBy: 'ai',
       status: 'loading',
       url: 'https://replace.test/loading',
+    });
+    expect(snapshot.summary.tabStateMatrix).toMatchObject({
+      total: 3,
+      loading: 1,
+      complete: 2,
+      aiOpened: 1,
+      recentlyOperatedByAi: 1,
+      statusCounts: { complete: 2, loading: 1 },
     });
     expect(snapshot.summary.recentChangeSummary).toContain('tab 30 was replaced by tab 31');
     expect(snapshot.summary.objectChangeConclusion).toContain(
@@ -502,6 +557,15 @@ describe('browser world inventory', () => {
         aiOpenedTabs: 1,
         userOrPageOpenedTabs: 1,
         operableTabs: 1,
+      },
+      tabStateMatrix: {
+        total: 2,
+        aiOpened: 1,
+        userOrPageOpened: 1,
+        recentlyOperatedByAi: 1,
+        idleForAi: 1,
+        operable: 1,
+        inoperable: 1,
       },
     });
     expect(refreshed.tabs.find((tab) => tab.tabId === 10)).toMatchObject({

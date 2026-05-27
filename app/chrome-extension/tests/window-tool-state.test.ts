@@ -126,6 +126,33 @@ describe('get_windows_and_tabs state inventory', () => {
         },
         windowStateConclusion:
           'Window object matrix: 2 window(s), visible=1, minimized=1, focused=1, operable=1, focusedWindow=10, focusedWindowOperable=yes.',
+        tabStateMatrix: {
+          total: 2,
+          active: 1,
+          background: 1,
+          activityUnknown: 0,
+          loading: 1,
+          complete: 1,
+          statusUnknown: 0,
+          discarded: 0,
+          audible: 1,
+          muted: 1,
+          pinned: 1,
+          withOpener: 1,
+          aiOpened: 0,
+          userOrPageOpened: 2,
+          unknownOpened: 0,
+          recentlyOperatedByAi: 0,
+          idleForAi: 2,
+          closedRetained: 0,
+          operable: 2,
+          inoperable: 0,
+          operabilityUnknown: 0,
+          statusCounts: { complete: 1, loading: 1 },
+          ownerCounts: { ai: 0, user_or_page: 2, unknown: 0 },
+        },
+        tabStateConclusion:
+          'Tab page object matrix: 2 tab(s), active=1, background=1, loading=1, complete=1, aiOpened=0, userOrPageOpened=2, operable=2, activeTab=102, latestAiOperatedTab=none.',
         retentionPolicy: {
           recentEventLimit: 50,
           windowObjectsRetained: 2,
@@ -294,5 +321,19 @@ describe('get_windows_and_tabs state inventory', () => {
       stateCounts: { normal: 1 },
       typeCounts: { normal: 1 },
     });
+    expect(payload.compactSummary.tabStateMatrix).toMatchObject({
+      total: 20,
+      active: 1,
+      background: 19,
+      complete: 20,
+      aiOpened: 0,
+      userOrPageOpened: 20,
+      operable: 20,
+      statusCounts: { complete: 20 },
+      ownerCounts: { ai: 0, user_or_page: 20, unknown: 0 },
+    });
+    expect(payload.compactSummary.tabStateConclusion).toContain(
+      'Tab page object matrix: 20 tab(s), active=1, background=19',
+    );
   });
 });

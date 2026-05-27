@@ -73,6 +73,26 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
           stateCounts: { normal: 1 },
         },
         windowStateConclusion: 'Window object matrix includes private current window title.',
+        tabStateMatrix: {
+          total: 20,
+          active: 1,
+          background: 19,
+          activityUnknown: 0,
+          loading: 2,
+          complete: 18,
+          discarded: 1,
+          muted: 1,
+          pinned: 3,
+          aiOpened: 1,
+          userOrPageOpened: 19,
+          recentlyOperatedByAi: 1,
+          operable: 20,
+          inoperable: 0,
+          operabilityUnknown: 0,
+          statusCounts: { complete: 18, loading: 2 },
+          ownerCounts: { ai: 1, user_or_page: 19, unknown: 0 },
+        },
+        tabStateConclusion: 'Tab page object matrix includes Private Dashboard title.',
         claimBoundary: 'Browser lifecycle summary only.',
       },
       summary: {
@@ -138,6 +158,24 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
     operabilityUnknown: 0,
   });
   assert.equal(summary.windowStateConclusionPresent, true);
+  assert.deepEqual(summary.tabStateMatrix, {
+    total: 20,
+    active: 1,
+    background: 19,
+    activityUnknown: 0,
+    loading: 2,
+    complete: 18,
+    discarded: 1,
+    muted: 1,
+    pinned: 3,
+    aiOpened: 1,
+    userOrPageOpened: 19,
+    recentlyOperatedByAi: 1,
+    operable: 20,
+    inoperable: 0,
+    operabilityUnknown: 0,
+  });
+  assert.equal(summary.tabStateConclusionPresent, true);
   assert.deepEqual(summary.windows, {
     total: 1,
     visible: 1,
