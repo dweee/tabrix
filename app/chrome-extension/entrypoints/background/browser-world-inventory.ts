@@ -77,6 +77,7 @@ export interface BrowserWorldSnapshot {
   initialized: boolean;
   observedAtMs: number;
   snapshotAgeMs: number | null;
+  refreshHealth: BrowserWorldRefreshHealth;
   windowCount: number;
   tabCount: number;
   focusedWindowId: number | null;
@@ -97,8 +98,25 @@ export interface BrowserWorldRetentionPolicy {
   windowObjectsRetained: number;
   tabObjectsRetained: number;
   refreshMode: 'event_driven_with_on_demand_chrome_resync';
+  minFullChromeResyncIntervalMs: number;
   eventPrivacyBoundary: string;
   detailBoundary: string;
+}
+
+export interface BrowserWorldRefreshHealth {
+  fullChromeResyncCount: number;
+  skippedChromeResyncCount: number;
+  minFullChromeResyncIntervalMs: number;
+  lastFullChromeResyncAtMs: number | null;
+  lastFullChromeResyncDurationMs: number | null;
+  lastFullChromeResyncStatus: 'never' | 'success' | 'failed';
+  lastFullChromeResyncReason: 'initial_seed' | 'on_demand_refresh' | null;
+  lastRefreshDecision:
+    | 'full_chrome_resync'
+    | 'skipped_recent_resync'
+    | 'chrome_inventory_unavailable'
+    | 'failed';
+  lastRefreshDecisionReason: string;
 }
 
 export interface BrowserWorldSummary {
@@ -361,6 +379,7 @@ type EventHook = {
 };
 
 const MAX_RECENT_BROWSER_WORLD_EVENTS = 50;
+const MIN_FULL_CHROME_RESYNC_INTERVAL_MS = 250;
 
 const tabsById = new Map<number, BrowserWorldTabObject>();
 const windowsById = new Map<number, BrowserWorldWindowObject>();
@@ -375,6 +394,15 @@ let lastObservedAtMs: number | null = null;
 let attached = false;
 let detachCallbacks: Array<() => void> = [];
 let initialInventorySeedEventRecorded = false;
+let fullChromeResyncCount = 0;
+let skippedChromeResyncCount = 0;
+let lastFullChromeResyncAtMs: number | null = null;
+let lastFullChromeResyncDurationMs: number | null = null;
+let lastFullChromeResyncStatus: BrowserWorldRefreshHealth['lastFullChromeResyncStatus'] = 'never';
+let lastFullChromeResyncReason: BrowserWorldRefreshHealth['lastFullChromeResyncReason'] = null;
+let lastRefreshDecision: BrowserWorldRefreshHealth['lastRefreshDecision'] =
+  'chrome_inventory_unavailable';
+let lastRefreshDecisionReason = 'Chrome window inventory has not been requested yet.';
 
 function nowMs(): number {
   return Date.now();
@@ -619,9 +647,42 @@ function pushEvent(event: Omit<BrowserWorldEvent, 'observedAtMs'>): void {
   recordObserved();
 }
 
-async function seedFromChrome(): Promise<void> {
-  if (typeof chrome?.windows?.getAll !== 'function') return;
-  const windows = await chrome.windows.getAll({ populate: true });
+async function seedFromChrome(
+  reason: BrowserWorldRefreshHealth['lastFullChromeResyncReason'] = 'initial_seed',
+  options: { allowThrottle?: boolean } = {},
+): Promise<void> {
+  const startedAt = nowMs();
+  if (
+    options.allowThrottle === true &&
+    lastFullChromeResyncAtMs !== null &&
+    startedAt - lastFullChromeResyncAtMs < MIN_FULL_CHROME_RESYNC_INTERVAL_MS
+  ) {
+    skippedChromeResyncCount += 1;
+    lastRefreshDecision = 'skipped_recent_resync';
+    lastRefreshDecisionReason =
+      'Skipped full chrome.windows.getAll resync because the local Browser World snapshot was refreshed recently.';
+    return;
+  }
+  if (typeof chrome?.windows?.getAll !== 'function') {
+    lastRefreshDecision = 'chrome_inventory_unavailable';
+    lastRefreshDecisionReason =
+      'chrome.windows.getAll is unavailable; keeping any existing local Browser World state.';
+    return;
+  }
+  let windows: chrome.windows.Window[];
+  try {
+    windows = await chrome.windows.getAll({ populate: true });
+  } catch (error) {
+    lastFullChromeResyncStatus = 'failed';
+    lastFullChromeResyncReason = reason;
+    lastFullChromeResyncDurationMs = Math.max(0, nowMs() - startedAt);
+    lastRefreshDecision = 'failed';
+    lastRefreshDecisionReason =
+      error instanceof Error
+        ? `Full Chrome resync failed: ${error.name || 'Error'}`
+        : 'Full Chrome resync failed with a non-Error value.';
+    throw error;
+  }
   const previousTabs = new Map(tabsById);
   windowsById.clear();
   tabsById.clear();
@@ -634,6 +695,14 @@ async function seedFromChrome(): Promise<void> {
       if (normalizedTab) tabsById.set(normalizedTab.tabId, normalizedTab);
     }
   }
+  fullChromeResyncCount += 1;
+  lastFullChromeResyncAtMs = nowMs();
+  lastFullChromeResyncDurationMs = Math.max(0, lastFullChromeResyncAtMs - startedAt);
+  lastFullChromeResyncStatus = 'success';
+  lastFullChromeResyncReason = reason;
+  lastRefreshDecision = 'full_chrome_resync';
+  lastRefreshDecisionReason =
+    'Completed chrome.windows.getAll resync and rebuilt Browser World window/tab objects.';
   initialized = true;
   if (!initialInventorySeedEventRecorded) {
     initialInventorySeedEventRecorded = true;
@@ -658,7 +727,7 @@ function bind(hook: EventHook | undefined, listener: any): void {
 export function initBrowserWorldInventory(): void {
   if (attached) return;
   attached = true;
-  void seedFromChrome().catch(() => {
+  void seedFromChrome('initial_seed').catch(() => {
     initialized = false;
   });
 
@@ -926,13 +995,13 @@ export function markBrowserWorldTabAiOperated(
 
 export async function getBrowserWorldSnapshot(): Promise<BrowserWorldSnapshot> {
   if (!initialized) {
-    await seedFromChrome().catch(() => undefined);
+    await seedFromChrome('initial_seed').catch(() => undefined);
   }
   return buildSnapshot();
 }
 
 export async function refreshBrowserWorldSnapshot(): Promise<BrowserWorldSnapshot> {
-  await seedFromChrome().catch(() => undefined);
+  await seedFromChrome('on_demand_refresh', { allowThrottle: initialized }).catch(() => undefined);
   return buildSnapshot();
 }
 
@@ -969,6 +1038,17 @@ function buildSnapshot(): BrowserWorldSnapshot {
     initialized,
     observedAtMs,
     snapshotAgeMs: lastObservedAtMs === null ? null : Math.max(0, observedAtMs - lastObservedAtMs),
+    refreshHealth: {
+      fullChromeResyncCount,
+      skippedChromeResyncCount,
+      minFullChromeResyncIntervalMs: MIN_FULL_CHROME_RESYNC_INTERVAL_MS,
+      lastFullChromeResyncAtMs,
+      lastFullChromeResyncDurationMs,
+      lastFullChromeResyncStatus,
+      lastFullChromeResyncReason,
+      lastRefreshDecision,
+      lastRefreshDecisionReason,
+    },
     windowCount: windows.length,
     tabCount: tabs.length,
     focusedWindowId: focusedWindow?.windowId ?? null,
@@ -1054,6 +1134,7 @@ function buildSnapshot(): BrowserWorldSnapshot {
       windowObjectsRetained: windows.length,
       tabObjectsRetained: tabs.length,
       refreshMode: 'event_driven_with_on_demand_chrome_resync',
+      minFullChromeResyncIntervalMs: MIN_FULL_CHROME_RESYNC_INTERVAL_MS,
       eventPrivacyBoundary:
         'Recent browser lifecycle events retain ids, status, ownership, and timestamps only; they do not retain tab URLs, titles, page text, screenshots, cookies, account state, QR payloads, or network bodies.',
       detailBoundary:
@@ -1077,4 +1158,12 @@ export function resetBrowserWorldInventoryForTests(): void {
   lastObservedAtMs = null;
   attached = false;
   initialInventorySeedEventRecorded = false;
+  fullChromeResyncCount = 0;
+  skippedChromeResyncCount = 0;
+  lastFullChromeResyncAtMs = null;
+  lastFullChromeResyncDurationMs = null;
+  lastFullChromeResyncStatus = 'never';
+  lastFullChromeResyncReason = null;
+  lastRefreshDecision = 'chrome_inventory_unavailable';
+  lastRefreshDecisionReason = 'Chrome window inventory has not been requested yet.';
 }

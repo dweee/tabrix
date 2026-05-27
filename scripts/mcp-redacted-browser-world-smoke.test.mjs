@@ -98,9 +98,21 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
           windowObjectsRetained: 1,
           tabObjectsRetained: 20,
           refreshMode: 'event_driven_with_on_demand_chrome_resync',
+          minFullChromeResyncIntervalMs: 250,
           eventPrivacyBoundary:
             'Recent browser lifecycle events retain ids only and do not retain https://private.example.test/dashboard.',
           detailBoundary: 'Detailed objects may include Private Dashboard titles.',
+        },
+        refreshHealth: {
+          fullChromeResyncCount: 3,
+          skippedChromeResyncCount: 1,
+          minFullChromeResyncIntervalMs: 250,
+          lastFullChromeResyncAtMs: 123456789,
+          lastFullChromeResyncDurationMs: 7,
+          lastFullChromeResyncStatus: 'success',
+          lastFullChromeResyncReason: 'on_demand_refresh',
+          lastRefreshDecision: 'full_chrome_resync',
+          lastRefreshDecisionReason: 'Completed private refresh for fixture.',
         },
         windowStateMatrix: {
           total: 1,
@@ -334,8 +346,19 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
     windowObjectsRetained: 1,
     tabObjectsRetained: 20,
     refreshMode: 'event_driven_with_on_demand_chrome_resync',
+    minFullChromeResyncIntervalMs: 250,
     eventPrivacyBoundaryPresent: true,
     detailBoundaryPresent: true,
+  });
+  assert.deepEqual(summary.refreshHealth, {
+    fullChromeResyncCount: 3,
+    skippedChromeResyncCount: 1,
+    minFullChromeResyncIntervalMs: 250,
+    lastFullChromeResyncDurationMs: 7,
+    lastFullChromeResyncStatus: 'success',
+    lastFullChromeResyncReason: 'on_demand_refresh',
+    lastRefreshDecision: 'full_chrome_resync',
+    lastRefreshDecisionReasonPresent: true,
   });
   assert.equal(summary.retentionWithinLimit, true);
   assert.equal(summary.compactSummaryBounded, true);

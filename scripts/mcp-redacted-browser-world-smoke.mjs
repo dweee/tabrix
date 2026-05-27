@@ -250,6 +250,10 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     0,
   );
   const retentionPolicy = payload?.compactSummary?.retentionPolicy ?? payload?.retentionPolicy;
+  const refreshHealth =
+    payload?.compactSummary?.refreshHealth ??
+    payload?.browserWorld?.refreshHealth ??
+    payload?.refreshHealth;
   const retentionWithinLimit =
     Number.isInteger(retentionPolicy?.recentEventLimit) &&
     Number.isInteger(retentionPolicy?.recentEventsRetained)
@@ -327,8 +331,47 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
             ? retentionPolicy.tabObjectsRetained
             : null,
           refreshMode: retentionPolicy.refreshMode ?? null,
+          minFullChromeResyncIntervalMs: Number.isInteger(
+            retentionPolicy.minFullChromeResyncIntervalMs,
+          )
+            ? retentionPolicy.minFullChromeResyncIntervalMs
+            : null,
           eventPrivacyBoundaryPresent: typeof retentionPolicy.eventPrivacyBoundary === 'string',
           detailBoundaryPresent: typeof retentionPolicy.detailBoundary === 'string',
+        }
+      : null,
+    refreshHealth: refreshHealth
+      ? {
+          fullChromeResyncCount: Number.isInteger(refreshHealth.fullChromeResyncCount)
+            ? refreshHealth.fullChromeResyncCount
+            : null,
+          skippedChromeResyncCount: Number.isInteger(refreshHealth.skippedChromeResyncCount)
+            ? refreshHealth.skippedChromeResyncCount
+            : null,
+          minFullChromeResyncIntervalMs: Number.isInteger(
+            refreshHealth.minFullChromeResyncIntervalMs,
+          )
+            ? refreshHealth.minFullChromeResyncIntervalMs
+            : null,
+          lastFullChromeResyncDurationMs: Number.isInteger(
+            refreshHealth.lastFullChromeResyncDurationMs,
+          )
+            ? refreshHealth.lastFullChromeResyncDurationMs
+            : null,
+          lastFullChromeResyncStatus:
+            typeof refreshHealth.lastFullChromeResyncStatus === 'string'
+              ? refreshHealth.lastFullChromeResyncStatus
+              : null,
+          lastFullChromeResyncReason:
+            typeof refreshHealth.lastFullChromeResyncReason === 'string'
+              ? refreshHealth.lastFullChromeResyncReason
+              : null,
+          lastRefreshDecision:
+            typeof refreshHealth.lastRefreshDecision === 'string'
+              ? refreshHealth.lastRefreshDecision
+              : null,
+          lastRefreshDecisionReasonPresent:
+            typeof refreshHealth.lastRefreshDecisionReason === 'string',
         }
       : null,
     windowStateMatrix: windowStateMatrix

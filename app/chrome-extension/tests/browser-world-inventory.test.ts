@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getBrowserWorldSnapshot,
   initBrowserWorldInventory,
@@ -119,6 +119,10 @@ describe('browser world inventory', () => {
     };
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('keeps a local window/tab snapshot without a bridge connection', async () => {
     initBrowserWorldInventory();
 
@@ -132,7 +136,18 @@ describe('browser world inventory', () => {
       windowObjectsRetained: 1,
       tabObjectsRetained: 2,
       refreshMode: 'event_driven_with_on_demand_chrome_resync',
+      minFullChromeResyncIntervalMs: 250,
     });
+    expect(snapshot.refreshHealth).toMatchObject({
+      fullChromeResyncCount: expect.any(Number),
+      skippedChromeResyncCount: 0,
+      minFullChromeResyncIntervalMs: 250,
+      lastFullChromeResyncStatus: 'success',
+      lastFullChromeResyncReason: 'initial_seed',
+      lastRefreshDecision: 'full_chrome_resync',
+    });
+    expect(snapshot.refreshHealth.fullChromeResyncCount).toBeGreaterThanOrEqual(1);
+    expect(snapshot.refreshHealth.lastFullChromeResyncDurationMs).not.toBeNull();
     expect(snapshot.retentionPolicy.recentEventsRetained).toBeGreaterThanOrEqual(1);
     expect(snapshot.retentionPolicy.recentEventsRetained).toBeLessThanOrEqual(
       snapshot.retentionPolicy.recentEventLimit,
@@ -1178,6 +1193,45 @@ describe('browser world inventory', () => {
       latestEventKind: 'tab_updated',
       latestEventTabId: 10,
       recentUpdatedCount: 1,
+    });
+  });
+
+  it('throttles repeated full Chrome resyncs while keeping the local snapshot readable', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+
+    const first = await refreshBrowserWorldSnapshot();
+    expect(chrome.windows.getAll).toHaveBeenCalledTimes(1);
+    expect(first.refreshHealth).toMatchObject({
+      fullChromeResyncCount: 1,
+      skippedChromeResyncCount: 0,
+      lastFullChromeResyncStatus: 'success',
+      lastFullChromeResyncReason: 'on_demand_refresh',
+      lastRefreshDecision: 'full_chrome_resync',
+    });
+
+    vi.setSystemTime(1_100);
+    const skipped = await refreshBrowserWorldSnapshot();
+    expect(chrome.windows.getAll).toHaveBeenCalledTimes(1);
+    expect(skipped.windowCount).toBe(1);
+    expect(skipped.tabCount).toBe(2);
+    expect(skipped.refreshHealth).toMatchObject({
+      fullChromeResyncCount: 1,
+      skippedChromeResyncCount: 1,
+      minFullChromeResyncIntervalMs: 250,
+      lastRefreshDecision: 'skipped_recent_resync',
+    });
+    expect(skipped.refreshHealth.lastRefreshDecisionReason).toContain(
+      'Browser World snapshot was refreshed recently',
+    );
+
+    vi.setSystemTime(1_260);
+    const refreshed = await refreshBrowserWorldSnapshot();
+    expect(chrome.windows.getAll).toHaveBeenCalledTimes(2);
+    expect(refreshed.refreshHealth).toMatchObject({
+      fullChromeResyncCount: 2,
+      skippedChromeResyncCount: 1,
+      lastRefreshDecision: 'full_chrome_resync',
     });
   });
 

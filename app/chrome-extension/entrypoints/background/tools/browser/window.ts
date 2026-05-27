@@ -474,6 +474,7 @@ class WindowTool extends BaseBrowserToolExecutor {
           objectChangeSummary: browserWorld.summary.objectChangeSummary,
           dynamicObjectUpdateSummary: browserWorld.summary.dynamicObjectUpdateSummary,
           objectChangeConclusion: browserWorld.summary.objectChangeConclusion,
+          refreshHealth: browserWorld.refreshHealth,
           retentionPolicy: browserWorld.retentionPolicy,
           claimBoundary:
             'Browser lifecycle summary only; page content, account state, login success, and API/CDP reuse require separate evidence.',
