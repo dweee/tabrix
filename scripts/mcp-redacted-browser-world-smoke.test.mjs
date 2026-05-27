@@ -49,6 +49,19 @@ test('assertRedactedSmokeOutputSafe rejects raw URL strings and raw fields', () 
     assertRedactedSmokeOutputSafe({ target: { label: 'https://private.example.test/dashboard' } }),
   );
   assert.throws(() => assertRedactedSmokeOutputSafe({ target: { pageText: 'private text' } }));
+  assert.throws(() => assertRedactedSmokeOutputSafe({ auth: { accountState: 'logged_in' } }));
+  assert.throws(() => assertRedactedSmokeOutputSafe({ auth: { qrPayload: 'opaque-qr-data' } }));
+  assert.throws(() => assertRedactedSmokeOutputSafe({ auth: { rawScreenshot: '<png>' } }));
+  assert.throws(() => assertRedactedSmokeOutputSafe({ network: { requestBody: 'private=1' } }));
+  assert.throws(() =>
+    assertRedactedSmokeOutputSafe({ auth: { qrImagePreview: 'data:image/png;base64,abc' } }),
+  );
+  assert.throws(() =>
+    assertRedactedSmokeOutputSafe({ network: { header: 'Authorization: Bearer abc.def' } }),
+  );
+  assert.throws(() =>
+    assertRedactedSmokeOutputSafe({ network: { header: 'Cookie: session_id=abc' } }),
+  );
 });
 
 test('stringifyRedactedSmokeOutput enforces a byte limit after privacy checks', () => {
@@ -1221,6 +1234,7 @@ test('buildPublicNoLoginLifecycleCoverageSummary separates proven and not-proven
     ],
   });
 
+  assert.doesNotThrow(() => assertRedactedSmokeOutputSafe(coverage));
   assert.deepEqual(coverage.coveredInThisRun, {
     tabCreated: true,
     tabUpdated: true,

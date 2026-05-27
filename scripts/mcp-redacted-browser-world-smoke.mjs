@@ -142,23 +142,72 @@ export function extractJsonObject(text) {
 
 const FORBIDDEN_REDACTED_OUTPUT_KEYS = new Set([
   'url',
+  'rawUrl',
+  'privateUrl',
+  'pendingUrl',
   'title',
+  'rawTitle',
+  'account',
+  'accountId',
+  'accountName',
+  'accountState',
+  'profileName',
+  'qrCode',
+  'qrImage',
+  'qrPayload',
   'cookie',
   'cookies',
+  'authorization',
+  'authToken',
+  'token',
+  'secret',
   'screenshot',
   'screenshots',
+  'rawScreenshot',
+  'rawImage',
+  'networkRequest',
+  'networkResponse',
   'networkBody',
   'rawNetworkBody',
+  'requestBody',
+  'responseBody',
   'pageText',
   'markdown',
 ]);
 
+const FORBIDDEN_REDACTED_OUTPUT_STRING_PATTERNS = [
+  {
+    pattern: /https?:\/\//i,
+    reason: 'raw URL',
+  },
+  {
+    pattern: /data:image\//i,
+    reason: 'raw image payload',
+  },
+  {
+    pattern: /\bBearer\s+[A-Za-z0-9._~+/=-]+/i,
+    reason: 'authorization bearer token',
+  },
+  {
+    pattern: /\b(?:Cookie|Set-Cookie):\s*[^;\s=]+=/i,
+    reason: 'cookie header',
+  },
+  {
+    pattern: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i,
+    reason: 'private key material',
+  },
+];
+
 export function assertRedactedSmokeOutputSafe(value, pathParts = []) {
   if (!value || typeof value !== 'object') {
-    if (typeof value === 'string' && /https?:\/\//i.test(value)) {
-      throw new Error(
-        `Redacted smoke output contains a raw URL at ${pathParts.join('.') || '<root>'}.`,
-      );
+    if (typeof value === 'string') {
+      for (const { pattern, reason } of FORBIDDEN_REDACTED_OUTPUT_STRING_PATTERNS) {
+        if (pattern.test(value)) {
+          throw new Error(
+            `Redacted smoke output contains ${reason} at ${pathParts.join('.') || '<root>'}.`,
+          );
+        }
+      }
     }
     return;
   }
