@@ -578,6 +578,7 @@ function uniqueNumbers(values) {
 
 function buildStepSummary(step, payload, targetTabId) {
   const redacted = buildRedactedBrowserWorldSummary(payload, targetTabId);
+  const expectedTargetActive = expectedTargetActiveForLifecycleStep(step);
   return {
     step,
     windowCount: redacted.windowCount,
@@ -588,11 +589,25 @@ function buildStepSummary(step, payload, targetTabId) {
     counts: redacted.counts,
     tabLifecycleState: redacted.tabLifecycleState,
     tabLifecycleConclusionPresent: redacted.tabLifecycleConclusionPresent,
+    targetActiveMatchesLifecycleStep:
+      expectedTargetActive === null ? null : redacted.targetTab?.active === expectedTargetActive,
     browserObjectEdgeSummaryPresent: redacted.browserObjectEdgeSummaryPresent,
     dynamicObjectUpdateSummaryPresent: redacted.dynamicObjectUpdateSummaryPresent,
     retentionWithinLimit: redacted.retentionWithinLimit,
     compactSummaryBounded: redacted.compactSummaryBounded,
   };
+}
+
+function expectedTargetActiveForLifecycleStep(step) {
+  if (step === 'background_open') return false;
+  if (
+    step === 'foreground_open' ||
+    step === 'switch_to_background_tab' ||
+    step === 'new_window_open'
+  ) {
+    return true;
+  }
+  return null;
 }
 
 function closeRunTabs(cliPath, tabIds, timeoutMs) {
@@ -763,6 +778,7 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
             step.targetTab?.wasFound === true &&
             step.targetTab?.openedBy === 'ai' &&
             step.targetTab?.canTabrixOperate === true &&
+            step.targetActiveMatchesLifecycleStep === true &&
             step.browserObjectEdgeSummaryPresent === true &&
             step.dynamicObjectUpdateSummaryPresent === true &&
             step.retentionWithinLimit === true &&
