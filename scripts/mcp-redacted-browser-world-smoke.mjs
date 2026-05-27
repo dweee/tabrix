@@ -1209,39 +1209,7 @@ function runReadPageMatrixSmoke(cliPath, smokeUrls, args) {
   }
   const targets = smokeUrls.map((smokeUrl, index) => {
     const result = runReadPageSmoke(cliPath, smokeUrl, args);
-    return {
-      targetIndex: index + 1,
-      openedPublicTestTab: result.openedPublicTestTab,
-      closeSucceeded: result.closeSucceeded,
-      alignmentPassed: result.alignmentPassed,
-      pageRegionRuntime: result.redactedReadPage.pageRegionRuntime,
-      runtime: result.redactedReadPage.runtime,
-      browserWorldAfterRead: {
-        targetTabFound: result.redactedBrowserWorldAfterRead.targetTab?.wasFound ?? false,
-        latestAiOperation:
-          result.redactedBrowserWorldAfterRead.aiOperationState?.latestAiOperation ?? null,
-        relationToBrowserActiveTab:
-          result.redactedBrowserWorldAfterRead.aiOperationState?.relationToBrowserActiveTab ?? null,
-        compactSummaryBounded: result.redactedBrowserWorldAfterRead.compactSummaryBounded,
-        retentionWithinLimit: result.redactedBrowserWorldAfterRead.retentionWithinLimit,
-      },
-      browserWorldAfterClose: result.redactedBrowserWorldAfterClose
-        ? {
-            targetTabFound: result.redactedBrowserWorldAfterClose.targetTab?.wasFound ?? false,
-            compactSummaryBounded: result.redactedBrowserWorldAfterClose.compactSummaryBounded,
-            retentionWithinLimit: result.redactedBrowserWorldAfterClose.retentionWithinLimit,
-          }
-        : null,
-      cleanupPassed: result.cleanupPassed,
-      passed:
-        result.openedPublicTestTab === true &&
-        result.closeSucceeded === true &&
-        result.cleanupPassed === true &&
-        result.alignmentPassed === true &&
-        result.redactedBrowserWorldAfterRead.targetTab?.wasFound === true &&
-        result.redactedBrowserWorldAfterRead.compactSummaryBounded === true &&
-        result.redactedBrowserWorldAfterRead.retentionWithinLimit === true,
-    };
+    return buildReadPageMatrixTargetResult(result, index + 1);
   });
   return {
     scenario: 'read-page-matrix',
@@ -1250,6 +1218,43 @@ function runReadPageMatrixSmoke(cliPath, smokeUrls, args) {
     targets,
     claimBoundary:
       'Redacted public no-login read_page matrix only. It proves runtime presence of Browser World alignment and page region operation-map evidence for these public pages, not page understanding correctness, private login/logout, API/CDP reuse, release readiness, or product delivery grade.',
+  };
+}
+
+export function buildReadPageMatrixTargetResult(result, targetIndex) {
+  return {
+    targetIndex,
+    openedPublicTestTab: result.openedPublicTestTab,
+    closeSucceeded: result.closeSucceeded,
+    alignmentPassed: result.alignmentPassed,
+    matrixAlignmentPassed: result.matrixAlignmentPassed,
+    pageRegionRuntime: result.redactedReadPage.pageRegionRuntime,
+    runtime: result.redactedReadPage.runtime,
+    browserWorldAfterRead: {
+      targetTabFound: result.redactedBrowserWorldAfterRead.targetTab?.wasFound ?? false,
+      latestAiOperation:
+        result.redactedBrowserWorldAfterRead.aiOperationState?.latestAiOperation ?? null,
+      relationToBrowserActiveTab:
+        result.redactedBrowserWorldAfterRead.aiOperationState?.relationToBrowserActiveTab ?? null,
+      compactSummaryBounded: result.redactedBrowserWorldAfterRead.compactSummaryBounded,
+      retentionWithinLimit: result.redactedBrowserWorldAfterRead.retentionWithinLimit,
+    },
+    browserWorldAfterClose: result.redactedBrowserWorldAfterClose
+      ? {
+          targetTabFound: result.redactedBrowserWorldAfterClose.targetTab?.wasFound ?? false,
+          compactSummaryBounded: result.redactedBrowserWorldAfterClose.compactSummaryBounded,
+          retentionWithinLimit: result.redactedBrowserWorldAfterClose.retentionWithinLimit,
+        }
+      : null,
+    cleanupPassed: result.cleanupPassed,
+    passed:
+      result.openedPublicTestTab === true &&
+      result.closeSucceeded === true &&
+      result.cleanupPassed === true &&
+      result.matrixAlignmentPassed === true &&
+      result.redactedBrowserWorldAfterRead.targetTab?.wasFound === true &&
+      result.redactedBrowserWorldAfterRead.compactSummaryBounded === true &&
+      result.redactedBrowserWorldAfterRead.retentionWithinLimit === true,
   };
 }
 
@@ -1304,6 +1309,29 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
     redactedReadPage,
     redactedBrowserWorldAfterRead,
     redactedBrowserWorldAfterClose,
+    matrixAlignmentPassed:
+      redactedReadPage.alignment.ownershipRuntimePresent === true &&
+      redactedReadPage.alignment.browserPageObjectCompactPresent === true &&
+      redactedReadPage.alignment.browserPageObjectCompactSource === 'expected' &&
+      redactedReadPage.alignment.browserWorldRuntimeSource === true &&
+      redactedReadPage.alignment.tabPageObjectSummaryPresent === true &&
+      redactedReadPage.alignment.currentTabIdPresent === true &&
+      redactedReadPage.alignment.currentWindowIdPresent === true &&
+      redactedReadPage.alignment.currentWindowStateKnown === true &&
+      redactedReadPage.alignment.currentTabStatusKnown === true &&
+      redactedReadPage.alignment.currentTabOperabilityKnown === true &&
+      redactedReadPage.alignment.currentTabAiOperationEvidencePresent === true &&
+      redactedReadPage.alignment.targetTabMatchesReadPage === true &&
+      redactedReadPage.alignment.tabOwnerIsAi === true &&
+      redactedReadPage.alignment.tabOperable === true &&
+      redactedReadPage.alignment.pageRegionsPresent === true &&
+      redactedReadPage.alignment.pageRegionClaimBoundariesPresent === true &&
+      redactedReadPage.alignment.pageOperationMapPresent === true &&
+      redactedReadPage.alignment.pageOperationZonesPresent === true &&
+      redactedReadPage.alignment.pageOperationClaimBoundaryPresent === true &&
+      redactedBrowserWorldAfterRead.targetTab?.wasFound === true &&
+      cleanupPassed === true &&
+      redactedBrowserWorldAfterRead.browserObjectEdgeSummaryPresent === true,
     alignmentPassed:
       redactedReadPage.alignment.ownershipRuntimePresent === true &&
       redactedReadPage.alignment.browserPageObjectCompactPresent === true &&

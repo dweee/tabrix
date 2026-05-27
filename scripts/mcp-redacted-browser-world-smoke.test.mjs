@@ -8,6 +8,7 @@ import {
   buildPostCloseTargetCleanupSummary,
   buildRedactedBrowserWorldSummary,
   buildRedactedReadPageAlignmentSummary,
+  buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
   buildWindowStateMutationProof,
   extractJsonObject,
@@ -792,6 +793,56 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     isRunOwnedByTask: false,
     runtimeStateSource: 'browser_world_inventory',
   });
+});
+
+test('buildReadPageMatrixTargetResult accepts background read targets when object evidence is complete', () => {
+  const target = buildReadPageMatrixTargetResult(
+    {
+      openedPublicTestTab: true,
+      closeSucceeded: true,
+      cleanupPassed: true,
+      alignmentPassed: false,
+      matrixAlignmentPassed: true,
+      redactedReadPage: {
+        pageRegionRuntime: {
+          pageRegionsPresent: true,
+          pageOperationMapPresent: true,
+        },
+        runtime: {
+          currentTabIdPresent: true,
+          currentTabIdMatchesTarget: true,
+          isCurrentTabActive: false,
+          isReadTargetBrowserActiveTab: false,
+          currentTabCanTabrixOperate: true,
+          currentTabLastAiOperation: 'read_page',
+        },
+      },
+      redactedBrowserWorldAfterRead: {
+        targetTab: { wasFound: true },
+        compactSummaryBounded: true,
+        retentionWithinLimit: true,
+        aiOperationState: {
+          latestAiOperation: 'read_page',
+          relationToBrowserActiveTab: 'latest_ai_operated_background_tab',
+        },
+      },
+      redactedBrowserWorldAfterClose: {
+        targetTab: { wasFound: false },
+        compactSummaryBounded: true,
+        retentionWithinLimit: true,
+      },
+    },
+    1,
+  );
+
+  assert.equal(target.alignmentPassed, false);
+  assert.equal(target.matrixAlignmentPassed, true);
+  assert.equal(target.runtime.isReadTargetBrowserActiveTab, false);
+  assert.equal(
+    target.browserWorldAfterRead.relationToBrowserActiveTab,
+    'latest_ai_operated_background_tab',
+  );
+  assert.equal(target.passed, true);
 });
 
 test('parseArgs supports observer-only window-state scenario', () => {
