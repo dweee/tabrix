@@ -225,13 +225,12 @@ function buildSemanticEvents(
     lifecycle.changedObjectCount > 0 &&
     events.length === 0
   ) {
+    const noTargetSummary = buildNoTargetTransitionSummary(lifecycle.changes);
     events.push(
       semanticEvent({
         eventType: 'unknown_or_noise',
         targetGroup: 'task_relation',
-        summary:
-          'Page changed, but no AI-usable target-state transition was proven. ' +
-          formatChangedAreaSentence(lifecycle.changes),
+        summary: noTargetSummary,
         confidence: 0.35,
         evidenceRefs: changedEvidenceRefs(lifecycle.changes),
       }),
@@ -1327,13 +1326,18 @@ function buildDynamicAttributeSummary(
   }
 
   if (lifecycle.changedObjectCount > 0) {
+    const noTargetSummary = buildNoTargetTransitionSummary(lifecycle.changes);
+    const changedGroups = dedupeAttributeGroups([
+      'task_relation',
+      ...changedAreaAttributeGroups(lifecycle.changes),
+    ]);
     return {
       status: 'changed_without_target_transition',
-      primaryConclusion: `No AI-usable target transition was proven. ${formatChangedAreaSentence(lifecycle.changes)}`,
+      primaryConclusion: noTargetSummary,
       summary:
-        `${formatChangedAreaSentence(lifecycle.changes)} ` +
+        `${noTargetSummary} ` +
         'The change did not condense into a target-state transition such as menu opened, auth changed, QR refreshed, or content changed.',
-      changedGroups: ['task_relation'],
+      changedGroups,
       transitionCount: lifecycle.changedObjectCount,
       confidence: 0.38,
       evidenceRefs: changedEvidenceRefs(lifecycle.changes),
@@ -1606,6 +1610,50 @@ function formatChangedAreaSentence(changes: readonly ReadPageObjectLifecycleChan
   return areaSummary
     ? `State changes: ${areaSummary}.`
     : 'State changes are not specific enough to summarize.';
+}
+
+function buildNoTargetTransitionSummary(changes: readonly ReadPageObjectLifecycleChange[]): string {
+  const areaSummary = formatChangedAreaSummary(changes);
+  const groupedChanges = areaSummary || 'not specific enough to summarize';
+  return (
+    `Object-change summary: ${groupedChanges}. ` +
+    'No AI-usable transition was proven: menu opened, auth changed, QR refreshed/expired, content changed, and form result changed all remain not_proven.'
+  );
+}
+
+function changedAreaAttributeGroups(
+  changes: readonly ReadPageObjectLifecycleChange[],
+): ReadPageBrowserPageObjectAttributeGroup[] {
+  return dedupeAttributeGroups(
+    changes
+      .filter((change) => change.changeKind !== 'unchanged')
+      .map((change) => changedAreaAttributeGroup(change.objectFamily))
+      .filter((group): group is ReadPageBrowserPageObjectAttributeGroup => group !== null),
+  );
+}
+
+function changedAreaAttributeGroup(
+  family: ReadPageObjectLifecycleFamily,
+): ReadPageBrowserPageObjectAttributeGroup | null {
+  switch (family) {
+    case 'auth_surface':
+    case 'account_identity':
+      return 'auth_state';
+    case 'qr_code':
+      return 'qr_state';
+    case 'menu_surface':
+    case 'menu_item':
+      return 'menu_state';
+    case 'form_control':
+      return 'action_state';
+    case 'feedback_surface':
+      return 'task_relation';
+    case 'content_collection':
+      return 'content_state';
+    case 'unknown':
+    default:
+      return null;
+  }
 }
 
 function formatChangedAreaSummary(changes: readonly ReadPageObjectLifecycleChange[]): string {

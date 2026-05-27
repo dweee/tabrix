@@ -2103,27 +2103,71 @@ describe('read_page object lifecycle', () => {
         targetGroup: 'task_relation',
       }),
     ]);
-    expect(view.semanticEvents[0].summary).toContain('State changes: unknown_state changed');
+    expect(view.semanticEvents[0].summary).toContain(
+      'Object-change summary: unknown_state changed',
+    );
+    expect(view.semanticEvents[0].summary).toContain(
+      'menu opened, auth changed, QR refreshed/expired, content changed, and form result changed all remain not_proven',
+    );
     expect(view.semanticEvents[0].summary).not.toContain('unknown_state 32');
     expect(view.semanticEvents[0].summary).not.toContain('low-level object changes');
     expect(view.attributeGroups.task_relation.summary).toContain(
-      'State changes: unknown_state changed',
+      'Object-change summary: unknown_state changed',
     );
+    expect(view.attributeGroups.task_relation.summary).toContain('not_proven');
     expect(view.attributeGroups.task_relation.summary).not.toContain('unknown_state 32');
     expect(view.attributeGroups.task_relation.summary).toContain(
-      'no AI-usable target-state transition',
+      'No AI-usable transition was proven',
     );
     expect(view.attributeGroups.task_relation.summary).not.toContain('low-level object changes');
     expect(view.dynamicAttributeSummary).toMatchObject({
       status: 'changed_without_target_transition',
       primaryConclusion:
-        'No AI-usable target transition was proven. State changes: unknown_state changed.',
+        'Object-change summary: unknown_state changed. No AI-usable transition was proven: menu opened, auth changed, QR refreshed/expired, content changed, and form result changed all remain not_proven.',
       changedGroups: ['task_relation'],
       transitionCount: 32,
     });
-    expect(view.dynamicAttributeSummary?.summary).toContain('State changes: unknown_state changed');
+    expect(view.dynamicAttributeSummary?.summary).toContain(
+      'Object-change summary: unknown_state changed',
+    );
+    expect(view.dynamicAttributeSummary?.summary).toContain('not_proven');
     expect(view.dynamicAttributeSummary?.summary).not.toContain('unknown_state 32');
     expect(view.dynamicAttributeSummary?.summary).not.toContain('low-level object changes');
+  });
+
+  it('summarizes no-target object changes without claiming completion', () => {
+    const noTarget: ReadPageObjectLifecycleSummary = {
+      source: 'read_page_regions',
+      status: 'compared_snapshot',
+      objectCount: 2,
+      changedObjectCount: 2,
+      items: [],
+      changes: [
+        {
+          objectKey: 'feedback:toast',
+          objectFamily: 'feedback_surface',
+          regionType: 'feedback',
+          beforeState: 'unknown',
+          afterState: 'visible_candidate',
+          changeKind: 'appeared',
+          claimBoundary: 'test feedback only',
+        },
+      ],
+      claimBoundary: 'compared snapshot only',
+    };
+
+    const view = buildReadPageBrowserPageObjectView({ objectLifecycle: noTarget });
+
+    expect(view.dynamicAttributeSummary).toMatchObject({
+      status: 'changed_without_target_transition',
+      primaryConclusion: expect.stringContaining('Object-change summary: feedback_state appeared'),
+      changedGroups: ['task_relation'],
+    });
+    expect(view.dynamicAttributeSummary?.primaryConclusion).toContain('not_proven');
+    expect(view.dynamicAttributeSummary?.primaryConclusion).not.toContain('2');
+    expect(view.dynamicAttributeSummary?.summary).toContain(
+      'The change did not condense into a target-state transition',
+    );
   });
 
   it('keeps QR refresh as QR evidence instead of login success proof', () => {
