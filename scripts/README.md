@@ -16,12 +16,19 @@ site state:
 - `audit-prod.mjs` (`pnpm run audit`)
 - `check-release-readiness.mjs` (`pnpm run release:check`)
 - `t4-github-baseline.mjs` and its fixture tests
+- `mcp-redacted-browser-world-smoke.mjs` (`pnpm run smoke:browser-world:redacted`)
 
 `check-release-readiness.mjs` validates package metadata, notes placement, and
 the version-appropriate benchmark gate. For v2.6.0+ local owner-lane runs it
 requires private transformed benchmark evidence; GitHub Actions fresh checkouts
 validate the committed public release-notes summary because private evidence is
 not available there.
+
+`mcp-redacted-browser-world-smoke.mjs` calls the local Tabrix MCP runtime and
+prints only browser-world counts, booleans, compact limits, and claim
+boundaries. It intentionally does not print tab URLs, titles, account state,
+screenshots, cookies, network bodies, or page text, so owner-lane smoke checks
+do not leak the maintainer's current browser session.
 
 ## Private Evidence Bridges
 
