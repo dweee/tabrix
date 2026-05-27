@@ -635,7 +635,21 @@ describe('browser world inventory', () => {
     snapshot = await getBrowserWorldSnapshot();
     expect(snapshot.windowCount).toBe(1);
     expect(snapshot.tabs.some((tab) => tab.windowId === 2)).toBe(false);
-    expect(snapshot.summary.recentChangeSummary).toContain('window 2 was removed');
+    expect(snapshot.recentEvents.at(-1)).toMatchObject({
+      eventKind: 'window_removed',
+      windowId: 2,
+      removedTabCount: 1,
+      removedAiOpenedTabCount: 0,
+    });
+    expect(snapshot.summary.recentChangeSummary).toContain(
+      'window 2 was removed; removedTabs=1, removedAiOpenedTabs=0',
+    );
+    expect(snapshot.summary.dynamicObjectUpdateSummary).toContain(
+      'window 2 was removed; removedTabs=1, removedAiOpenedTabs=0',
+    );
+    expect(snapshot.summary.objectChangeConclusion).toContain(
+      'Window object 2 was removed; removedTabs=1, removedAiOpenedTabs=0',
+    );
   });
 
   it('keeps BrowserWindowObject focus and operability in sync when active state changes', async () => {

@@ -387,6 +387,9 @@ export function summarizeObjectChangeConclusion(
   if (last.eventKind === 'window_focus_changed') {
     return `Focused window object changed to ${last.windowId ?? 'unknown'}.`;
   }
+  if (last.eventKind === 'window_removed') {
+    return `Window object ${last.windowId ?? 'unknown'} was removed; removedTabs=${last.removedTabCount ?? 'unknown'}, removedAiOpenedTabs=${last.removedAiOpenedTabCount ?? 'unknown'}.`;
+  }
   if (lastAiOperatedTab) {
     return `Latest AI-operated page object is tab ${lastAiOperatedTab.tabId}; operation=${lastAiOperatedTab.lastAiOperation ?? 'unknown'}, confidence=${lastAiOperatedTab.lastAiOperationConfidence ?? 'unknown'}, reason=${lastAiOperatedTab.lastAiOperationReason ?? 'unknown'}, operable=${lastAiOperatedTab.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
   }
@@ -439,7 +442,7 @@ export function summarizeDynamicObjectUpdate(
     return `Dynamic object update: window ${last.windowId ?? 'unknown'} changed; state=${last.windowState ?? 'unknown'}, visibility=${last.windowVisibilityState ?? 'unknown'}, operable=${last.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}, focusedWindow=${focusedWindow?.windowId ?? 'unknown'}.`;
   }
   if (last.eventKind === 'window_removed') {
-    return `Dynamic object update: window ${last.windowId ?? 'unknown'} was removed; visibleWindows=${windowOperationState.visibleWindowCount}, minimizedWindows=${windowOperationState.minimizedWindowCount}, retainedTabs=${lifecycleState.retainedTabCount}.`;
+    return `Dynamic object update: window ${last.windowId ?? 'unknown'} was removed; removedTabs=${last.removedTabCount ?? 'unknown'}, removedAiOpenedTabs=${last.removedAiOpenedTabCount ?? 'unknown'}, visibleWindows=${windowOperationState.visibleWindowCount}, minimizedWindows=${windowOperationState.minimizedWindowCount}, retainedTabs=${lifecycleState.retainedTabCount}.`;
   }
   return `Dynamic object update: browser object changed; latestEvent=${last.eventKind}, activeTab=${activeTab?.tabId ?? 'unknown'}, retainedTabs=${lifecycleState.retainedTabCount}.`;
 }
@@ -464,7 +467,7 @@ export function summarizeRecentEvents(events: readonly BrowserWorldEvent[]): str
     case 'window_created':
       return `Last change: window ${last.windowId ?? 'unknown'} was created; state=${last.windowState ?? 'unknown'}, visibility=${last.windowVisibilityState ?? 'unknown'}, operable=${last.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
     case 'window_removed':
-      return `Last change: window ${last.windowId ?? 'unknown'} was removed.`;
+      return `Last change: window ${last.windowId ?? 'unknown'} was removed; removedTabs=${last.removedTabCount ?? 'unknown'}, removedAiOpenedTabs=${last.removedAiOpenedTabCount ?? 'unknown'}.`;
     case 'tab_replaced':
       return `Last change: tab ${last.replacedTabId ?? 'unknown'} was replaced by tab ${last.tabId ?? 'unknown'}.`;
     case 'ai_tab_marked':

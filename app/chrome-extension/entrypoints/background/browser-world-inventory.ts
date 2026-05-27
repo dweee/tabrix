@@ -341,6 +341,8 @@ export interface BrowserWorldEvent {
   windowState?: string | null;
   windowVisibilityState?: BrowserWorldWindowObject['visibilityState'];
   canTabrixOperate?: boolean | null;
+  removedTabCount?: number | null;
+  removedAiOpenedTabCount?: number | null;
 }
 
 type EventHook = {
@@ -666,11 +668,23 @@ export function initBrowserWorldInventory(): void {
     });
   });
   bind(chrome.windows?.onRemoved, (windowId: number) => {
+    let removedTabCount = 0;
+    let removedAiOpenedTabCount = 0;
     windowsById.delete(windowId);
     for (const [tabId, tab] of tabsById) {
-      if (tab.windowId === windowId) tabsById.delete(tabId);
+      if (tab.windowId === windowId) {
+        removedTabCount += 1;
+        if (tab.openedBy === 'ai') removedAiOpenedTabCount += 1;
+        tabsById.delete(tabId);
+      }
     }
-    pushEvent({ eventKind: 'window_removed', tabId: null, windowId });
+    pushEvent({
+      eventKind: 'window_removed',
+      tabId: null,
+      windowId,
+      removedTabCount,
+      removedAiOpenedTabCount,
+    });
   });
   bind(chrome.windows?.onFocusChanged, (windowId: number) => {
     for (const [id, window] of windowsById) {
