@@ -61,6 +61,21 @@ export interface ReadPageInteractiveElement {
    * vs a workflow run on GitHub `/actions`).
    */
   href?: string;
+  /**
+   * Optional viewport rectangle captured from the current DOM snapshot.
+   * Consumers MUST treat this as advisory and snapshot-local. It exists so
+   * AI-facing planning can distinguish common app-shell menu locations such
+   * as left sidebars, top navigation, bottom navigation, and top-right
+   * account menus without falling back to screenshots or coordinates.
+   */
+  rect?: ReadPageElementRect;
+}
+
+export interface ReadPageElementRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface ReadPageArtifactRef {
@@ -80,6 +95,18 @@ export interface ReadPageCandidateAction {
   confidence: number;
   matchReason: string;
   locatorChain: ReadPageCandidateActionLocator[];
+}
+
+export interface ReadPageExecutableAction {
+  candidateActionId: string;
+  actionType: 'click' | 'fill' | string;
+  targetRef: string;
+  locatorChain: ReadPageCandidateActionLocator[];
+  toolName: string;
+  toolArgs: {
+    candidateAction: ReadPageCandidateAction;
+  };
+  claimBoundary: string;
 }
 
 export interface ReadPagePageContext {
@@ -143,6 +170,319 @@ export interface ReadPageHighValueObjectAction {
   type: 'open_detail' | 'click' | 'fill' | 'navigate' | 'expand' | string;
   ref?: string;
   actionType?: string;
+}
+
+export const READ_PAGE_REGION_TYPES = [
+  'navigation',
+  'content',
+  'account',
+  'menu',
+  'modal',
+  'qr_code',
+  'form',
+  'feedback',
+  'unknown',
+] as const;
+
+export type ReadPageRegionType = (typeof READ_PAGE_REGION_TYPES)[number];
+
+export const READ_PAGE_REGION_TARGETABILITY_VALUES = [
+  'target_ref',
+  'locator_chain',
+  'not_clickable',
+  'unknown',
+] as const;
+
+export type ReadPageRegionTargetability = (typeof READ_PAGE_REGION_TARGETABILITY_VALUES)[number];
+
+export const READ_PAGE_REGION_LAYOUT_HINTS = [
+  'left_sidebar',
+  'top_navigation',
+  'right_sidebar',
+  'bottom_navigation',
+  'top_right',
+  'inline',
+  'unknown',
+] as const;
+
+export type ReadPageRegionLayoutHint = (typeof READ_PAGE_REGION_LAYOUT_HINTS)[number];
+
+export const READ_PAGE_REGION_MENU_ITEM_ROLES = [
+  'primary_navigation',
+  'overflow_menu_trigger',
+  'account_entry',
+  'secondary_menu_action',
+  'auth_entry',
+  'content_action',
+  'unknown',
+] as const;
+
+export type ReadPageRegionMenuItemRole = (typeof READ_PAGE_REGION_MENU_ITEM_ROLES)[number];
+
+export interface ReadPageRegionObject {
+  objectId: string;
+  label: string;
+  objectType?: ReadPageObjectType | string;
+  role?: string;
+  targetRef?: string;
+  /**
+   * Optional non-action locator chain for region objects that are visible and
+   * inspectable but not semantically clickable, such as QR image/canvas areas.
+   * This is not an execution authority; callers still need a tool-specific
+   * action and postcondition check.
+   */
+  locatorChain?: ReadPageCandidateActionLocator[];
+  actionTypes: string[];
+  targetability: ReadPageRegionTargetability;
+  confidence: number;
+  reason: string;
+  primaryAction?: ReadPageExecutableAction;
+  layoutHint?: ReadPageRegionLayoutHint;
+  menuItemRole?: ReadPageRegionMenuItemRole;
+}
+
+export interface ReadPageRegion {
+  regionId: string;
+  regionType: ReadPageRegionType;
+  state: string;
+  confidence: number;
+  label?: string;
+  objects: ReadPageRegionObject[];
+  candidateActionIds: string[];
+  targetability: ReadPageRegionTargetability;
+  layoutHint?: ReadPageRegionLayoutHint;
+  claimBoundary: string;
+}
+
+export const READ_PAGE_OPERATION_PURPOSES = [
+  'navigate',
+  'search',
+  'read_content',
+  'open_menu',
+  'account',
+  'auth',
+  'scan_qr',
+  'submit_form',
+  'observe_feedback',
+  'unknown',
+] as const;
+
+export type ReadPageOperationPurpose = (typeof READ_PAGE_OPERATION_PURPOSES)[number];
+
+export const READ_PAGE_OPERATION_READINESS_VALUES = [
+  'ready',
+  'needs_expand',
+  'blocked',
+  'not_targetable',
+  'unknown',
+] as const;
+
+export type ReadPageOperationReadiness = (typeof READ_PAGE_OPERATION_READINESS_VALUES)[number];
+
+export interface ReadPageOperationZone {
+  zoneId: string;
+  regionId: string;
+  regionType: ReadPageRegionType;
+  purpose: ReadPageOperationPurpose;
+  label: string;
+  state: string;
+  readiness: ReadPageOperationReadiness;
+  targetability: ReadPageRegionTargetability;
+  candidateActionIds: string[];
+  primaryAction?: ReadPageExecutableAction;
+  evidenceLevel: string;
+  claimBoundary: string;
+}
+
+export interface ReadPageOperationMap {
+  summary: string;
+  zones: ReadPageOperationZone[];
+  claimBoundary: string;
+}
+
+export const READ_PAGE_OBJECT_LIFECYCLE_FAMILIES = [
+  'auth_surface',
+  'qr_code',
+  'account_identity',
+  'menu_surface',
+  'menu_item',
+  'form_control',
+  'feedback_surface',
+  'content_collection',
+  'unknown',
+] as const;
+
+export type ReadPageObjectLifecycleFamily = (typeof READ_PAGE_OBJECT_LIFECYCLE_FAMILIES)[number];
+
+export const READ_PAGE_OBJECT_LIFECYCLE_CHANGE_KINDS = [
+  'appeared',
+  'disappeared',
+  'changed',
+  'unchanged',
+  'unknown',
+] as const;
+
+export type ReadPageObjectLifecycleChangeKind =
+  (typeof READ_PAGE_OBJECT_LIFECYCLE_CHANGE_KINDS)[number];
+
+export interface ReadPageObjectLifecycleItem {
+  objectKey: string;
+  regionId: string;
+  regionType: ReadPageRegionType;
+  objectId?: string;
+  objectFamily: ReadPageObjectLifecycleFamily;
+  objectType?: string;
+  state: string;
+  targetability: ReadPageRegionTargetability;
+  actionTypes: string[];
+  candidateActionIds: string[];
+  evidenceRefs: string[];
+  confidence: number;
+  claimBoundary: string;
+}
+
+export interface ReadPageObjectLifecycleChange {
+  objectKey: string;
+  objectFamily: ReadPageObjectLifecycleFamily;
+  regionType: ReadPageRegionType;
+  beforeState?: string;
+  afterState?: string;
+  changeKind: ReadPageObjectLifecycleChangeKind;
+  claimBoundary: string;
+}
+
+export interface ReadPageObjectLifecycleSummary {
+  source: 'read_page_regions';
+  status: 'single_snapshot' | 'compared_snapshot';
+  objectCount: number;
+  changedObjectCount: number;
+  items: ReadPageObjectLifecycleItem[];
+  changes: ReadPageObjectLifecycleChange[];
+  claimBoundary: string;
+}
+
+export const READ_PAGE_BROWSER_PAGE_OBJECT_ATTRIBUTE_GROUPS = [
+  'identity',
+  'window_state',
+  'tab_state',
+  'page_state',
+  'visual_reliability',
+  'runtime_state',
+  'layout_regions',
+  'menu_state',
+  'auth_state',
+  'qr_state',
+  'content_state',
+  'action_state',
+  'evidence_state',
+  'task_relation',
+] as const;
+
+export type ReadPageBrowserPageObjectAttributeGroup =
+  (typeof READ_PAGE_BROWSER_PAGE_OBJECT_ATTRIBUTE_GROUPS)[number];
+
+export const READ_PAGE_BROWSER_PAGE_SEMANTIC_EVENT_TYPES = [
+  'menu_expanded',
+  'qr_waiting',
+  'qr_expired_candidate',
+  'qr_refreshed',
+  'auth_succeeded_candidate',
+  'logout_succeeded_candidate',
+  'content_changed',
+  'unknown_or_noise',
+] as const;
+
+export type ReadPageBrowserPageSemanticEventType =
+  (typeof READ_PAGE_BROWSER_PAGE_SEMANTIC_EVENT_TYPES)[number];
+
+export type ReadPageBrowserPageSemanticPostconditionStatus =
+  | 'not_evaluated'
+  | 'candidate_only'
+  | 'unknown'
+  | 'failed';
+
+export interface ReadPageBrowserPageSemanticEvent {
+  eventType: ReadPageBrowserPageSemanticEventType;
+  summary: string;
+  targetGroup: ReadPageBrowserPageObjectAttributeGroup;
+  targetObjectFamily?: ReadPageObjectLifecycleFamily;
+  beforeState?: string;
+  afterState?: string;
+  confidence: number;
+  evidenceRefs: string[];
+  postconditionStatus: ReadPageBrowserPageSemanticPostconditionStatus;
+  claimBoundary: string;
+}
+
+export const READ_PAGE_BROWSER_PAGE_OBJECT_WATCH_STATUSES = [
+  'single_snapshot_only',
+  'semantic_transition_candidate',
+  'page_transition_candidate',
+  'runtime_transition_candidate',
+  'runtime_degraded',
+  'changed_without_target_transition',
+  'stable_or_unknown',
+] as const;
+
+export type ReadPageBrowserPageObjectWatchStatus =
+  (typeof READ_PAGE_BROWSER_PAGE_OBJECT_WATCH_STATUSES)[number];
+
+export interface ReadPageBrowserPageObjectWatchSummary {
+  status: ReadPageBrowserPageObjectWatchStatus;
+  primaryConclusion?: string;
+  summary: string;
+  changedGroups: ReadPageBrowserPageObjectAttributeGroup[];
+  transitionCount: number;
+  confidence: number;
+  evidenceRefs: string[];
+  claimBoundary: string;
+}
+
+export interface ReadPageBrowserPageObjectGroupState {
+  status: string;
+  summary: string;
+  facts?: Record<string, string | number | boolean | null | string[] | number[]>;
+  confidence: number;
+  evidenceRefs: string[];
+  claimBoundary: string;
+}
+
+export interface ReadPageBrowserPageObjectCompactView {
+  source: 'read_page_browser_page_object_compact';
+  rootObjectId: string;
+  status: ReadPageBrowserPageObjectView['status'];
+  watchStatus: ReadPageBrowserPageObjectWatchStatus;
+  primaryConclusion: string;
+  changedGroups: ReadPageBrowserPageObjectAttributeGroup[];
+  transitionCount: number;
+  facts: {
+    window?: Record<string, string | number | boolean | null | string[] | number[]>;
+    tab?: Record<string, string | number | boolean | null | string[] | number[]>;
+    page?: Record<string, string | number | boolean | null | string[] | number[]>;
+    visualReliability?: Record<string, string | number | boolean | null | string[] | number[]>;
+  };
+  operationSummary?: string;
+  evidenceSummary?: string;
+  claimBoundary: string;
+}
+
+export interface ReadPageBrowserPageObjectView {
+  source: 'read_page_browser_page_object';
+  rootObjectId: string;
+  status: 'single_snapshot' | 'compared_snapshot';
+  attributeGroups: Record<
+    ReadPageBrowserPageObjectAttributeGroup,
+    ReadPageBrowserPageObjectGroupState
+  >;
+  semanticEvents: ReadPageBrowserPageSemanticEvent[];
+  dynamicAttributeSummary?: ReadPageBrowserPageObjectWatchSummary;
+  rawLifecycleStats: {
+    status: ReadPageObjectLifecycleSummary['status'];
+    objectCount: number;
+    changedObjectCount: number;
+  };
+  compact?: ReadPageBrowserPageObjectCompactView;
+  claimBoundary: string;
 }
 
 /**
@@ -371,11 +711,27 @@ export type ReadPageProtectReason =
   | 'primary_tab_unknown'
   | null;
 
+export type ReadPageWindowRuntimeState =
+  | 'normal'
+  | 'minimized'
+  | 'maximized'
+  | 'fullscreen'
+  | 'docked'
+  | 'unknown';
+
 export interface ReadPageOwnershipRuntimeSummary {
   currentTabId: number | null;
   currentWindowId: number | null;
+  currentWindowState: ReadPageWindowRuntimeState | null;
+  currentWindowWidth: number | null;
+  currentWindowHeight: number | null;
+  currentWindowLeft: number | null;
+  currentWindowTop: number | null;
   isCurrentTabActive: boolean | null;
   isCurrentWindowFocused: boolean | null;
+  browserActiveTabId: number | null;
+  browserActiveTabIdKnown: boolean;
+  isReadTargetBrowserActiveTab: boolean | null;
   currentOwnerType: import('./browser-task-thing-contract').BrowserPageOwnerType;
   currentTabRunOwnershipVerdict: ReadPageCurrentTabRunOwnershipVerdict;
   currentTabPrimaryRelationVerdict: ReadPageCurrentTabPrimaryRelationVerdict;
@@ -396,8 +752,16 @@ export interface ReadPageOwnershipRuntimeSummary {
 
 export interface ReadPageExtensionFields {
   currentWindowId?: number | null;
+  currentWindowState?: ReadPageWindowRuntimeState | null;
+  currentWindowWidth?: number | null;
+  currentWindowHeight?: number | null;
+  currentWindowLeft?: number | null;
+  currentWindowTop?: number | null;
   isCurrentTabActive?: boolean | null;
   isCurrentWindowFocused?: boolean | null;
+  browserActiveTabId?: number | null;
+  browserActiveTabIdKnown?: boolean;
+  isReadTargetBrowserActiveTab?: boolean | null;
   candidateActions?: ReadPageCandidateAction[];
   pageContext?: ReadPagePageContext;
   frameContext?: ReadPageFrameContext | null;
@@ -407,6 +771,54 @@ export interface ReadPageExtensionFields {
   complexityLevel?: ReadPageComplexityLevel;
   sourceKind?: ReadPageSourceKind;
   highValueObjects?: ReadPageHighValueObject[];
+  /**
+   * V28 R4A additive page-region perception output.
+   *
+   * This is an AI-facing page understanding surface, not an execution
+   * authority. Click/fill execution still uses `targetRef` and
+   * `candidateActions`. Region states are bounded evidence claims and must
+   * not be treated as proof that login/logout/business completion succeeded.
+   */
+  pageRegions?: ReadPageRegion[];
+  /**
+   * V28 R4A additive page-operation planning map.
+   *
+   * This tells an AI assistant what the page appears able to do before it
+   * chooses a tool action. It deliberately summarizes regions into generic
+   * purposes and readiness states. It must not carry raw account identifiers,
+   * QR payloads, cookies, tokens, or private page text. Execution still goes
+   * through `candidateActions` / `targetRef`; this map is planning guidance,
+   * not a click authority or proof of business completion.
+   */
+  pageOperationMap?: ReadPageOperationMap;
+  /**
+   * V28 R4C additive browser-object lifecycle summary.
+   *
+   * This is a redacted evidence surface derived from pageRegions and
+   * pageOperationMap. It is not an execution authority, not proof of login or
+   * business completion, and not a replacement for postcondition verification.
+   * A single snapshot can only say which browser objects are currently
+   * candidate-visible; state transitions require fresh before/after reads.
+   */
+  objectLifecycle?: ReadPageObjectLifecycleSummary;
+  /**
+   * V28 R4C additive AI-facing BrowserPageThing view.
+   *
+   * This is a derived projection over pageRegions, pageOperationMap, and
+   * objectLifecycle. It groups dynamic page attributes and condenses noisy
+   * lifecycle deltas into semantic events. It is not an execution authority,
+   * not proof of login/logout/business completion, and not API/CDP proof.
+   */
+  browserPageObject?: ReadPageBrowserPageObjectView;
+  /**
+   * Compact V28 BrowserPageObject projection for default AI reads.
+   *
+   * It preserves the current conclusion, changed attribute groups, key
+   * BrowserWindow/BrowserTab/BrowserPage facts, operation summary, and claim
+   * boundary without dumping all nested attribute groups and semantic events.
+   * It is candidate evidence only and never an execution authority.
+   */
+  browserPageObjectCompact?: ReadPageBrowserPageObjectCompactView;
   L0?: ReadPageTaskLevel0;
   L1?: ReadPageTaskLevel1;
   L2?: ReadPageTaskLevel2;
@@ -538,6 +950,10 @@ export const READ_PAGE_TASK_PROTOCOL_FIELDS = [
   'complexityLevel',
   'sourceKind',
   'highValueObjects',
+  'pageRegions',
+  'pageOperationMap',
+  'objectLifecycle',
+  'watchScope',
   'L0',
   'L1',
   'L2',

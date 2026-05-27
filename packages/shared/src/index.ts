@@ -5,6 +5,8 @@ export * from './labels';
 export * from './bridge-ws';
 export * from './browser-fact';
 export * from './read-page-contract';
+export * from './read-page-browser-page-object';
+export * from './read-page-object-lifecycle';
 export * from './memory';
 export * from './experience';
 export * from './experience-replay';

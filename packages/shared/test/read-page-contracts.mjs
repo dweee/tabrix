@@ -4,6 +4,14 @@ import {
   LAYER_DISPATCH_REASON_VALUES,
   LAYER_SOURCE_ROUTE_VALUES,
   READ_PAGE_MODE_MINIMUM_FIELDS,
+  READ_PAGE_REGION_TARGETABILITY_VALUES,
+  READ_PAGE_REGION_TYPES,
+  READ_PAGE_OPERATION_PURPOSES,
+  READ_PAGE_OPERATION_READINESS_VALUES,
+  READ_PAGE_REGION_LAYOUT_HINTS,
+  READ_PAGE_REGION_MENU_ITEM_ROLES,
+  READ_PAGE_OBJECT_LIFECYCLE_CHANGE_KINDS,
+  READ_PAGE_OBJECT_LIFECYCLE_FAMILIES,
   READ_PAGE_REQUESTED_LAYER_VALUES,
   READ_PAGE_TASK_PROTOCOL_FIELDS,
   STABLE_TARGET_REF_PREFIX,
@@ -42,9 +50,93 @@ assert.deepEqual(READ_PAGE_TASK_PROTOCOL_FIELDS, [
   'complexityLevel',
   'sourceKind',
   'highValueObjects',
+  'pageRegions',
+  'pageOperationMap',
+  'objectLifecycle',
+  'watchScope',
   'L0',
   'L1',
   'L2',
+]);
+
+assert.deepEqual(READ_PAGE_REGION_TYPES, [
+  'navigation',
+  'content',
+  'account',
+  'menu',
+  'modal',
+  'qr_code',
+  'form',
+  'feedback',
+  'unknown',
+]);
+
+assert.deepEqual(READ_PAGE_REGION_TARGETABILITY_VALUES, [
+  'target_ref',
+  'locator_chain',
+  'not_clickable',
+  'unknown',
+]);
+
+assert.deepEqual(READ_PAGE_REGION_LAYOUT_HINTS, [
+  'left_sidebar',
+  'top_navigation',
+  'right_sidebar',
+  'bottom_navigation',
+  'top_right',
+  'inline',
+  'unknown',
+]);
+
+assert.deepEqual(READ_PAGE_REGION_MENU_ITEM_ROLES, [
+  'primary_navigation',
+  'overflow_menu_trigger',
+  'account_entry',
+  'secondary_menu_action',
+  'auth_entry',
+  'content_action',
+  'unknown',
+]);
+
+assert.deepEqual(READ_PAGE_OPERATION_PURPOSES, [
+  'navigate',
+  'search',
+  'read_content',
+  'open_menu',
+  'account',
+  'auth',
+  'scan_qr',
+  'submit_form',
+  'observe_feedback',
+  'unknown',
+]);
+
+assert.deepEqual(READ_PAGE_OPERATION_READINESS_VALUES, [
+  'ready',
+  'needs_expand',
+  'blocked',
+  'not_targetable',
+  'unknown',
+]);
+
+assert.deepEqual(READ_PAGE_OBJECT_LIFECYCLE_FAMILIES, [
+  'auth_surface',
+  'qr_code',
+  'account_identity',
+  'menu_surface',
+  'menu_item',
+  'form_control',
+  'feedback_surface',
+  'content_collection',
+  'unknown',
+]);
+
+assert.deepEqual(READ_PAGE_OBJECT_LIFECYCLE_CHANGE_KINDS, [
+  'appeared',
+  'disappeared',
+  'changed',
+  'unchanged',
+  'unknown',
 ]);
 
 assert.deepEqual(READ_PAGE_MODE_MINIMUM_FIELDS, {
