@@ -10,6 +10,23 @@ import {
 
 type Listener = (...args: any[]) => void;
 
+const FORBIDDEN_EVENT_KEYS = [
+  'url',
+  'pendingUrl',
+  'title',
+  'pageText',
+  'markdown',
+  'screenshot',
+  'screenshots',
+  'cookie',
+  'cookies',
+  'networkBody',
+  'rawNetworkBody',
+  'account',
+  'qrCode',
+  'qrPayload',
+];
+
 function hook(bucket: Listener[]) {
   return {
     addListener: vi.fn((listener: Listener) => bucket.push(listener)),
@@ -18,6 +35,17 @@ function hook(bucket: Listener[]) {
       if (index >= 0) bucket.splice(index, 1);
     }),
   };
+}
+
+function expectRecentEventsPublicSafe(events: Array<Record<string, unknown>>) {
+  for (const event of events) {
+    for (const key of FORBIDDEN_EVENT_KEYS) {
+      expect(event).not.toHaveProperty(key);
+    }
+  }
+  const serialized = JSON.stringify(events);
+  expect(serialized).not.toContain('https://');
+  expect(serialized).not.toContain('http://');
 }
 
 describe('browser world inventory', () => {
@@ -523,7 +551,7 @@ describe('browser world inventory', () => {
       tabId: 20,
       openedBy: 'ai',
     });
-    expect(snapshot.recentEvents.some((event) => 'url' in event)).toBe(false);
+    expectRecentEventsPublicSafe(snapshot.recentEvents);
   });
 
   it('resyncs the window active tab immediately when a new active tab is created', async () => {
@@ -1376,9 +1404,31 @@ describe('browser world inventory', () => {
       eventKind: 'tab_updated',
       tabId: 1059,
     });
-    expect(snapshot.recentEvents.some((event) => 'url' in event)).toBe(false);
-    expect(snapshot.recentEvents.some((event) => 'title' in event)).toBe(false);
+    expectRecentEventsPublicSafe(snapshot.recentEvents);
     expect(JSON.stringify(snapshot.recentEvents)).not.toContain('bulk-tabs.test');
     expect(JSON.stringify(snapshot.recentEvents)).not.toContain('Bulk 59');
+  });
+
+  it('sanitizes AI operation labels before they enter Browser World events', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    markBrowserWorldTabAiOperated(10, 'https://private.example.test/token?secret=1');
+
+    const snapshot = await getBrowserWorldSnapshot();
+
+    expect(snapshot.tabs.find((tab) => tab.tabId === 10)).toMatchObject({
+      lastAiOperation: 'unknown_ai_operation',
+      lastAiOperationReason: 'marked_by_tabrix_tool_execution:unknown_ai_operation',
+    });
+    expect(snapshot.recentEvents.at(-1)).toMatchObject({
+      eventKind: 'ai_tab_marked',
+      tabId: 10,
+      aiOperation: 'unknown_ai_operation',
+      aiOperationReason: 'marked_by_tabrix_tool_execution:unknown_ai_operation',
+    });
+    expectRecentEventsPublicSafe(snapshot.recentEvents);
+    expect(JSON.stringify(snapshot.recentEvents)).not.toContain('private.example.test');
+    expect(JSON.stringify(snapshot.recentEvents)).not.toContain('secret=1');
   });
 });

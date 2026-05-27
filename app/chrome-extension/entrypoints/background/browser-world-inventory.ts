@@ -384,6 +384,13 @@ function readInteger(value: unknown): number | null {
   return Number.isInteger(value) ? (value as number) : null;
 }
 
+function safeAiOperationLabel(operation: string): string {
+  const trimmed = String(operation || '').trim();
+  if (!trimmed || trimmed.length > 80) return 'unknown_ai_operation';
+  if (!/^[a-z][a-z0-9_-]*$/i.test(trimmed)) return 'unknown_ai_operation';
+  return trimmed;
+}
+
 function tabUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {
   return String(tab.url || tab.pendingUrl || '');
 }
@@ -887,22 +894,24 @@ export function markBrowserWorldTabAiOperated(
   operation: string,
 ): void {
   if (typeof tabId !== 'number' || tabId < 0) return;
+  const safeOperation = safeAiOperationLabel(operation);
+  const safeReason = `marked_by_tabrix_tool_execution:${safeOperation}`;
   const previous = tabsById.get(tabId);
   if (previous) {
     tabsById.set(tabId, {
       ...previous,
       aiOperationState: 'recently_operated',
-      lastAiOperation: operation,
+      lastAiOperation: safeOperation,
       lastAiOperationAtMs: nowMs(),
       lastAiOperationConfidence: 0.95,
-      lastAiOperationReason: `marked_by_tabrix_tool_execution:${operation}`,
+      lastAiOperationReason: safeReason,
       updatedAtMs: nowMs(),
     });
   } else {
     pendingAiOperatedTabs.set(tabId, {
-      operation,
+      operation: safeOperation,
       operatedAtMs: nowMs(),
-      reason: `marked_by_tabrix_tool_execution:${operation}`,
+      reason: safeReason,
     });
   }
   pushEvent({
@@ -910,8 +919,8 @@ export function markBrowserWorldTabAiOperated(
     tabId,
     windowId: previous?.windowId ?? null,
     openedBy: previous?.openedBy,
-    aiOperation: operation,
-    aiOperationReason: `marked_by_tabrix_tool_execution:${operation}`,
+    aiOperation: safeOperation,
+    aiOperationReason: safeReason,
   });
 }
 
