@@ -110,6 +110,22 @@ describe('get_windows_and_tabs state inventory', () => {
             tabCount: 0,
           },
         ],
+        windowStateMatrix: {
+          total: 2,
+          visible: 1,
+          minimized: 1,
+          unknownVisibility: 0,
+          focused: 1,
+          unfocused: 1,
+          focusUnknown: 0,
+          operable: 1,
+          inoperable: 1,
+          operabilityUnknown: 0,
+          stateCounts: { normal: 1, minimized: 1 },
+          typeCounts: { normal: 1, popup: 1 },
+        },
+        windowStateConclusion:
+          'Window object matrix: 2 window(s), visible=1, minimized=1, focused=1, operable=1, focusedWindow=10, focusedWindowOperable=yes.',
         retentionPolicy: {
           recentEventLimit: 50,
           windowObjectsRetained: 2,
@@ -268,6 +284,15 @@ describe('get_windows_and_tabs state inventory', () => {
       tabId: 120,
       title: 'Tab 120',
       canTabrixOperate: true,
+    });
+    expect(payload.compactSummary.windowStateMatrix).toMatchObject({
+      total: 1,
+      visible: 1,
+      minimized: 0,
+      focused: 1,
+      operable: 1,
+      stateCounts: { normal: 1 },
+      typeCounts: { normal: 1 },
     });
   });
 });

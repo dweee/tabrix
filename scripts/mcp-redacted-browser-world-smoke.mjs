@@ -174,6 +174,8 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     0,
   );
   const retentionPolicy = payload?.compactSummary?.retentionPolicy ?? payload?.retentionPolicy;
+  const windowStateMatrix =
+    payload?.compactSummary?.windowStateMatrix ?? payload?.summary?.windowStateMatrix ?? null;
 
   return {
     callSucceeded: true,
@@ -203,6 +205,37 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
           detailBoundaryPresent: typeof retentionPolicy.detailBoundary === 'string',
         }
       : null,
+    windowStateMatrix: windowStateMatrix
+      ? {
+          total: Number.isInteger(windowStateMatrix.total) ? windowStateMatrix.total : null,
+          visible: Number.isInteger(windowStateMatrix.visible) ? windowStateMatrix.visible : null,
+          minimized: Number.isInteger(windowStateMatrix.minimized)
+            ? windowStateMatrix.minimized
+            : null,
+          unknownVisibility: Number.isInteger(windowStateMatrix.unknownVisibility)
+            ? windowStateMatrix.unknownVisibility
+            : null,
+          focused: Number.isInteger(windowStateMatrix.focused) ? windowStateMatrix.focused : null,
+          unfocused: Number.isInteger(windowStateMatrix.unfocused)
+            ? windowStateMatrix.unfocused
+            : null,
+          focusUnknown: Number.isInteger(windowStateMatrix.focusUnknown)
+            ? windowStateMatrix.focusUnknown
+            : null,
+          operable: Number.isInteger(windowStateMatrix.operable)
+            ? windowStateMatrix.operable
+            : null,
+          inoperable: Number.isInteger(windowStateMatrix.inoperable)
+            ? windowStateMatrix.inoperable
+            : null,
+          operabilityUnknown: Number.isInteger(windowStateMatrix.operabilityUnknown)
+            ? windowStateMatrix.operabilityUnknown
+            : null,
+        }
+      : null,
+    windowStateConclusionPresent:
+      typeof payload?.compactSummary?.windowStateConclusion === 'string' ||
+      typeof payload?.summary?.windowStateConclusion === 'string',
     activeTabIncludedInCompactTabs:
       Number.isInteger(activeTabId) && compactTabs.length
         ? compactTabs.some((tab) => tab?.tabId === activeTabId)

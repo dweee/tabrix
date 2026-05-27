@@ -59,6 +59,20 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
             'Recent browser lifecycle events retain ids only and do not retain https://private.example.test/dashboard.',
           detailBoundary: 'Detailed objects may include Private Dashboard titles.',
         },
+        windowStateMatrix: {
+          total: 1,
+          visible: 1,
+          minimized: 0,
+          unknownVisibility: 0,
+          focused: 1,
+          unfocused: 0,
+          focusUnknown: 0,
+          operable: 1,
+          inoperable: 0,
+          operabilityUnknown: 0,
+          stateCounts: { normal: 1 },
+        },
+        windowStateConclusion: 'Window object matrix includes private current window title.',
         claimBoundary: 'Browser lifecycle summary only.',
       },
       summary: {
@@ -111,6 +125,19 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
     eventPrivacyBoundaryPresent: true,
     detailBoundaryPresent: true,
   });
+  assert.deepEqual(summary.windowStateMatrix, {
+    total: 1,
+    visible: 1,
+    minimized: 0,
+    unknownVisibility: 0,
+    focused: 1,
+    unfocused: 0,
+    focusUnknown: 0,
+    operable: 1,
+    inoperable: 0,
+    operabilityUnknown: 0,
+  });
+  assert.equal(summary.windowStateConclusionPresent, true);
   assert.deepEqual(summary.windows, {
     total: 1,
     visible: 1,

@@ -118,6 +118,23 @@ describe('browser world inventory', () => {
       focused: true,
       canTabrixOperate: true,
     });
+    expect(snapshot.summary.windowStateMatrix).toMatchObject({
+      total: 1,
+      visible: 1,
+      minimized: 0,
+      unknownVisibility: 0,
+      focused: 1,
+      unfocused: 0,
+      focusUnknown: 0,
+      operable: 1,
+      inoperable: 0,
+      operabilityUnknown: 0,
+      stateCounts: { normal: 1 },
+      typeCounts: { normal: 1 },
+    });
+    expect(snapshot.summary.windowStateConclusion).toContain(
+      'Window object matrix: 1 window(s), visible=1, minimized=0, focused=1, operable=1',
+    );
     expect(snapshot.windows[0]).toMatchObject({
       windowId: 1,
       visibilityState: 'visible',
@@ -405,6 +422,14 @@ describe('browser world inventory', () => {
       focused: false,
       isFocused: false,
     });
+    expect(snapshot.summary.windowStateMatrix).toMatchObject({
+      total: 1,
+      focused: 0,
+      unfocused: 1,
+      operable: 0,
+      inoperable: 1,
+      operabilityUnknown: 0,
+    });
 
     listeners.windowFocusChanged[0]?.(1);
     snapshot = await getBrowserWorldSnapshot();
@@ -412,6 +437,10 @@ describe('browser world inventory', () => {
     expect(snapshot.windows[0]).toMatchObject({
       focused: true,
       isFocused: true,
+    });
+    expect(snapshot.summary.windowStateMatrix).toMatchObject({
+      focused: 1,
+      unfocused: 0,
     });
   });
 
@@ -516,6 +545,13 @@ describe('browser world inventory', () => {
       canTabrixOperate: false,
       operabilityReason: 'window_minimized',
     });
+    expect(snapshot.summary.windowStateMatrix).toMatchObject({
+      visible: 0,
+      minimized: 1,
+      focused: 0,
+      inoperable: 1,
+      stateCounts: { minimized: 1 },
+    });
     expect(snapshot.summary.recentChangeSummary).toContain('bounds or state changed');
 
     listeners.windowBoundsChanged[0]?.({
@@ -547,6 +583,13 @@ describe('browser world inventory', () => {
       isFocused: true,
       canTabrixOperate: true,
       operabilityReason: 'active_tab_operable_in_visible_window',
+    });
+    expect(snapshot.summary.windowStateMatrix).toMatchObject({
+      visible: 1,
+      minimized: 0,
+      focused: 1,
+      operable: 1,
+      stateCounts: { normal: 1 },
     });
     expect(snapshot.summary.objectChangeConclusion).toContain('visibility=visible');
   });

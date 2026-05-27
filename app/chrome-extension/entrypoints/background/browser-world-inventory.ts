@@ -107,8 +107,25 @@ export interface BrowserWorldSummary {
     userOrPageOpenedTabs: number;
     operableTabs: number;
   };
+  windowStateMatrix: BrowserWorldWindowStateMatrix;
+  windowStateConclusion: string;
   recentChangeSummary: string;
   objectChangeConclusion: string;
+}
+
+export interface BrowserWorldWindowStateMatrix {
+  total: number;
+  visible: number;
+  minimized: number;
+  unknownVisibility: number;
+  focused: number;
+  unfocused: number;
+  focusUnknown: number;
+  operable: number;
+  inoperable: number;
+  operabilityUnknown: number;
+  stateCounts: Record<string, number>;
+  typeCounts: Record<string, number>;
 }
 
 export interface BrowserWorldTabAttributeGroups {
@@ -600,6 +617,7 @@ function buildSnapshot(): BrowserWorldSnapshot {
   const operableTabIds = tabs
     .filter((tab) => tab.canTabrixOperate === true)
     .map((tab) => tab.tabId);
+  const windowStateMatrix = buildWindowStateMatrix(windows);
   const lastAiOperatedTab =
     tabs
       .filter((tab) => tab.lastAiOperationAtMs !== null)
@@ -648,6 +666,8 @@ function buildSnapshot(): BrowserWorldSnapshot {
         userOrPageOpenedTabs: userOrPageOpenedTabIds.length,
         operableTabs: operableTabIds.length,
       },
+      windowStateMatrix,
+      windowStateConclusion: summarizeWindowStateMatrix(windowStateMatrix, focusedWindow ?? null),
       recentChangeSummary,
       objectChangeConclusion: summarizeObjectChangeConclusion(
         recentEvents,
@@ -671,6 +691,46 @@ function buildSnapshot(): BrowserWorldSnapshot {
     windows,
     tabs,
   };
+}
+
+function buildWindowStateMatrix(
+  windows: readonly BrowserWorldWindowObject[],
+): BrowserWorldWindowStateMatrix {
+  const stateCounts: Record<string, number> = {};
+  const typeCounts: Record<string, number> = {};
+  for (const window of windows) {
+    const state = String(window.state || 'unknown');
+    const type = String(window.type || 'unknown');
+    stateCounts[state] = (stateCounts[state] ?? 0) + 1;
+    typeCounts[type] = (typeCounts[type] ?? 0) + 1;
+  }
+  return {
+    total: windows.length,
+    visible: windows.filter((window) => window.visibilityState === 'visible').length,
+    minimized: windows.filter((window) => window.visibilityState === 'minimized').length,
+    unknownVisibility: windows.filter((window) => window.visibilityState === 'unknown').length,
+    focused: windows.filter((window) => window.focused === true || window.isFocused === true)
+      .length,
+    unfocused: windows.filter((window) => window.focused === false || window.isFocused === false)
+      .length,
+    focusUnknown: windows.filter((window) => window.focused === null && window.isFocused === null)
+      .length,
+    operable: windows.filter((window) => window.canTabrixOperate === true).length,
+    inoperable: windows.filter((window) => window.canTabrixOperate === false).length,
+    operabilityUnknown: windows.filter((window) => window.canTabrixOperate === null).length,
+    stateCounts,
+    typeCounts,
+  };
+}
+
+function summarizeWindowStateMatrix(
+  matrix: BrowserWorldWindowStateMatrix,
+  focusedWindow: BrowserWorldWindowObject | null,
+): string {
+  if (matrix.total === 0) {
+    return 'Window object matrix: no browser window object is currently retained.';
+  }
+  return `Window object matrix: ${matrix.total} window(s), visible=${matrix.visible}, minimized=${matrix.minimized}, focused=${matrix.focused}, operable=${matrix.operable}, focusedWindow=${focusedWindow?.windowId ?? 'unknown'}, focusedWindowOperable=${focusedWindow?.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
 }
 
 function buildTabAttributeGroups(tab: BrowserWorldTabObject): BrowserWorldTabAttributeGroups {
