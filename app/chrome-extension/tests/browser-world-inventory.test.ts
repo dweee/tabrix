@@ -182,9 +182,18 @@ describe('browser world inventory', () => {
         openerTabId: 10,
       },
     );
-    listeners.tabActivated[0]?.({ tabId: 20, windowId: 1 });
 
     let snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.summary.recentChangeSummary).toContain(
+      'tab 20 was updated; openedBy=ai, status=complete',
+    );
+    expect(snapshot.summary.objectChangeConclusion).toContain(
+      'Page object tab 20 was updated; owner=ai, status=complete',
+    );
+
+    listeners.tabActivated[0]?.({ tabId: 20, windowId: 1 });
+
+    snapshot = await getBrowserWorldSnapshot();
     expect(snapshot.aiOpenedTabIds).toEqual([20]);
     expect(snapshot.browserActiveTabId).toBe(20);
     expect(snapshot.summary.objectChangeConclusion).toContain('Current page object is tab 20');
@@ -217,6 +226,41 @@ describe('browser world inventory', () => {
     expect(snapshot.recentEvents.at(-1)).toMatchObject({
       eventKind: 'tab_removed',
       tabId: 20,
+      openedBy: 'ai',
+    });
+  });
+
+  it('summarizes tab replacement as an object lifecycle transition', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    markBrowserWorldTabAiCreated(30);
+    listeners.tabCreated[0]?.({
+      id: 30,
+      windowId: 1,
+      url: 'https://replace.test/loading',
+      title: 'Replacing',
+      active: false,
+      status: 'loading',
+    });
+    listeners.tabReplaced[0]?.(31, 30);
+
+    const snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.tabs.some((tab) => tab.tabId === 30)).toBe(false);
+    expect(snapshot.tabs.find((tab) => tab.tabId === 31)).toMatchObject({
+      tabId: 31,
+      openedBy: 'ai',
+      status: 'loading',
+      url: 'https://replace.test/loading',
+    });
+    expect(snapshot.summary.recentChangeSummary).toContain('tab 30 was replaced by tab 31');
+    expect(snapshot.summary.objectChangeConclusion).toContain(
+      'Page object tab 30 was replaced by tab 31; owner=ai',
+    );
+    expect(snapshot.recentEvents.at(-1)).toMatchObject({
+      eventKind: 'tab_replaced',
+      tabId: 31,
+      replacedTabId: 30,
       openedBy: 'ai',
     });
   });

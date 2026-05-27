@@ -137,8 +137,10 @@ export interface BrowserWorldEvent {
     | 'ai_tab_marked';
   observedAtMs: number;
   tabId: number | null;
+  replacedTabId?: number | null;
   windowId: number | null;
   openedBy?: BrowserWorldTabOpenedBy;
+  status?: string | null;
   url?: string;
 }
 
@@ -341,6 +343,7 @@ export function initBrowserWorldInventory(): void {
       tabId: normalized?.tabId ?? null,
       windowId: normalized?.windowId ?? null,
       openedBy: normalized?.openedBy,
+      status: normalized?.status ?? null,
       url: normalized?.url,
     });
   });
@@ -358,6 +361,7 @@ export function initBrowserWorldInventory(): void {
         tabId,
         windowId: normalized?.windowId ?? null,
         openedBy: normalized?.openedBy,
+        status: normalized?.status ?? null,
         url: normalized?.url,
       });
     },
@@ -410,8 +414,10 @@ export function initBrowserWorldInventory(): void {
     pushEvent({
       eventKind: 'tab_replaced',
       tabId: addedTabId,
+      replacedTabId: removedTabId,
       windowId: previous?.windowId ?? null,
       openedBy: previous?.openedBy,
+      status: previous?.status ?? null,
       url: previous?.url,
     });
   });
@@ -626,6 +632,15 @@ function summarizeObjectChangeConclusion(
   if (last.eventKind === 'tab_activated' && activeTab) {
     return `Current page object is tab ${activeTab.tabId}; owner=${activeTab.openedBy}, operable=${activeTab.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
   }
+  if (last.eventKind === 'tab_created') {
+    return `Page object tab ${last.tabId ?? 'unknown'} was created; owner=${last.openedBy ?? 'unknown'}, status=${last.status ?? 'unknown'}.`;
+  }
+  if (last.eventKind === 'tab_updated') {
+    return `Page object tab ${last.tabId ?? 'unknown'} was updated; owner=${last.openedBy ?? 'unknown'}, status=${last.status ?? 'unknown'}.`;
+  }
+  if (last.eventKind === 'tab_replaced') {
+    return `Page object tab ${last.replacedTabId ?? 'unknown'} was replaced by tab ${last.tabId ?? 'unknown'}; owner=${last.openedBy ?? 'unknown'}.`;
+  }
   if (last.eventKind === 'ai_tab_marked' && lastAiOperatedTab) {
     return `Latest AI-operated page object is tab ${lastAiOperatedTab.tabId}; operation=${lastAiOperatedTab.lastAiOperation ?? 'unknown'}, operable=${lastAiOperatedTab.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
   }
@@ -645,13 +660,14 @@ function summarizeObjectChangeConclusion(
 }
 
 function summarizeRecentEvents(events: readonly BrowserWorldEvent[]): string {
-  const last = events.at(-1);
+  const last =
+    [...events].reverse().find((event) => event.eventKind !== 'inventory_seeded') ?? events.at(-1);
   if (!last) return 'No browser lifecycle event observed yet.';
   switch (last.eventKind) {
     case 'tab_created':
-      return `Last change: tab ${last.tabId ?? 'unknown'} was created in window ${last.windowId ?? 'unknown'}; openedBy=${last.openedBy ?? 'unknown'}.`;
+      return `Last change: tab ${last.tabId ?? 'unknown'} was created in window ${last.windowId ?? 'unknown'}; openedBy=${last.openedBy ?? 'unknown'}, status=${last.status ?? 'unknown'}.`;
     case 'tab_updated':
-      return `Last change: tab ${last.tabId ?? 'unknown'} was updated.`;
+      return `Last change: tab ${last.tabId ?? 'unknown'} was updated; openedBy=${last.openedBy ?? 'unknown'}, status=${last.status ?? 'unknown'}.`;
     case 'tab_removed':
       return `Last change: tab ${last.tabId ?? 'unknown'} was removed; previousOpenedBy=${last.openedBy ?? 'unknown'}.`;
     case 'tab_activated':
@@ -665,7 +681,7 @@ function summarizeRecentEvents(events: readonly BrowserWorldEvent[]): string {
     case 'window_removed':
       return `Last change: window ${last.windowId ?? 'unknown'} was removed.`;
     case 'tab_replaced':
-      return `Last change: tab was replaced by tab ${last.tabId ?? 'unknown'}.`;
+      return `Last change: tab ${last.replacedTabId ?? 'unknown'} was replaced by tab ${last.tabId ?? 'unknown'}.`;
     case 'ai_tab_marked':
       return `Last change: tab ${last.tabId ?? 'unknown'} was marked as operated by Tabrix.`;
     case 'inventory_seeded':
