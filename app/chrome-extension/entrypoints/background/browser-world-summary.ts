@@ -396,6 +396,83 @@ export function summarizeObjectChangeConclusion(
   return summarizeRecentEvents(events);
 }
 
+function summarizeObjectRouting(
+  aiOperationState: BrowserWorldAiOperationState,
+  lastEvent: BrowserWorldEvent | undefined,
+): string {
+  if (lastEvent?.eventKind === 'tab_removed' && lastEvent.openedBy === 'ai') {
+    return `the removed tab was AI-owned, so do not continue on tab ${lastEvent.tabId ?? 'unknown'}.`;
+  }
+  if (aiOperationState.relationToBrowserActiveTab === 'no_ai_operation_observed') {
+    return 'no AI-operated tab is known yet.';
+  }
+  if (aiOperationState.relationToBrowserActiveTab === 'same_as_browser_active') {
+    return `AI can continue on tab ${aiOperationState.latestAiOperatedTabId ?? 'unknown'} if the next page-level check still passes.`;
+  }
+  if (aiOperationState.relationToBrowserActiveTab === 'latest_ai_operated_background_tab') {
+    return `AI last operated tab ${aiOperationState.latestAiOperatedTabId ?? 'unknown'}, but the active tab is ${aiOperationState.browserActiveTabId ?? 'unknown'}; reselect or reread before continuing.`;
+  }
+  if (aiOperationState.relationToBrowserActiveTab === 'browser_active_not_latest_ai_operated') {
+    return `browser active tab ${aiOperationState.browserActiveTabId ?? 'unknown'} differs from latest AI-operated tab ${aiOperationState.latestAiOperatedTabId ?? 'unknown'}; refresh routing before continuing.`;
+  }
+  return `latest AI-operated tab relation is unknown; refresh routing before continuing.`;
+}
+
+export function summarizeObjectChangeSummary(
+  events: readonly BrowserWorldEvent[],
+  activeTab: BrowserWorldTabObject | null,
+  lastAiOperatedTab: BrowserWorldTabObject | null,
+  focusedWindow: BrowserWorldWindowObject | null,
+  lifecycleState: BrowserWorldTabLifecycleState,
+  aiOperationState: BrowserWorldAiOperationState,
+  windowOperationState: BrowserWorldWindowOperationState,
+): string {
+  const last =
+    [...events].reverse().find((event) => event.eventKind !== 'inventory_seeded') ?? events.at(-1);
+  const activeTabText = activeTab
+    ? `active tab ${activeTab.tabId} is ${activeTab.status ?? 'unknown'} and ${activeTab.canTabrixOperate === true ? 'operable' : 'not operable or unknown'}`
+    : 'active tab is unknown';
+  const routing = summarizeObjectRouting(aiOperationState, last);
+
+  if (!last || last.eventKind === 'inventory_seeded') {
+    return `Object change summary: no recent browser object change; ${activeTabText}; ${routing}`;
+  }
+  if (last.eventKind === 'tab_activated') {
+    return `Object change summary: current page switched to tab ${last.tabId ?? activeTab?.tabId ?? 'unknown'}; ${activeTabText}; ${routing}`;
+  }
+  if (last.eventKind === 'tab_updated') {
+    const target =
+      last.tabId === activeTab?.tabId
+        ? 'the active page'
+        : last.tabId === lastAiOperatedTab?.tabId
+          ? 'the latest AI-operated page'
+          : 'a background page';
+    return `Object change summary: ${target} tab ${last.tabId ?? 'unknown'} changed to status ${last.status ?? 'unknown'}; ${activeTabText}; ${routing}`;
+  }
+  if (last.eventKind === 'tab_created') {
+    return `Object change summary: tab ${last.tabId ?? 'unknown'} was created with owner=${last.openedBy ?? 'unknown'}; retained tabs=${lifecycleState.retainedTabCount}; ${routing}`;
+  }
+  if (last.eventKind === 'tab_removed') {
+    return `Object change summary: tab ${last.tabId ?? 'unknown'} was removed; retained tabs=${lifecycleState.retainedTabCount}; active tab=${lifecycleState.activeTabId ?? 'unknown'}; ${routing}`;
+  }
+  if (last.eventKind === 'tab_replaced') {
+    return `Object change summary: tab ${last.replacedTabId ?? 'unknown'} was replaced by tab ${last.tabId ?? 'unknown'}; retained tabs=${lifecycleState.retainedTabCount}; ${routing}`;
+  }
+  if (last.eventKind === 'ai_tab_marked') {
+    return `Object change summary: AI operation ${aiOperationState.latestAiOperation ?? last.aiOperation ?? 'unknown'} was recorded on tab ${aiOperationState.latestAiOperatedTabId ?? last.tabId ?? 'unknown'}; ${routing}`;
+  }
+  if (last.eventKind === 'window_focus_changed') {
+    return `Object change summary: focused window changed to ${last.windowId ?? 'unknown'}; window relation=${windowOperationState.relationToCurrentOperableWindow}; ${activeTabText}; ${routing}`;
+  }
+  if (last.eventKind === 'window_bounds_changed' || last.eventKind === 'window_created') {
+    return `Object change summary: window ${last.windowId ?? focusedWindow?.windowId ?? 'unknown'} is ${last.windowVisibilityState ?? focusedWindow?.visibilityState ?? 'unknown'}; current window relation=${windowOperationState.relationToCurrentOperableWindow}; ${routing}`;
+  }
+  if (last.eventKind === 'window_removed') {
+    return `Object change summary: window ${last.windowId ?? 'unknown'} was removed with ${last.removedTabCount ?? 'unknown'} tab(s); retained tabs=${lifecycleState.retainedTabCount}; ${routing}`;
+  }
+  return `Object change summary: browser object changed; ${activeTabText}; ${routing}`;
+}
+
 export function summarizeDynamicObjectUpdate(
   events: readonly BrowserWorldEvent[],
   activeTab: BrowserWorldTabObject | null,

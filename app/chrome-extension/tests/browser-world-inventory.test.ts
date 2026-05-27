@@ -340,6 +340,9 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.objectChangeConclusion).toContain(
       'Page object tab 20 was updated; owner=ai, status=complete',
     );
+    expect(snapshot.summary.objectChangeSummary).toBe(
+      'Object change summary: the latest AI-operated page tab 20 changed to status complete; active tab 10 is complete and operable; AI last operated tab 20, but the active tab is 10; reselect or reread before continuing.',
+    );
     expect(snapshot.summary.aiOperationState).toMatchObject({
       browserActiveTabId: 10,
       latestAiOperatedTabId: 20,
@@ -376,6 +379,9 @@ describe('browser world inventory', () => {
       activeTabId: 20,
     });
     expect(snapshot.summary.objectChangeConclusion).toContain('Current page object is tab 20');
+    expect(snapshot.summary.objectChangeSummary).toBe(
+      'Object change summary: current page switched to tab 20; active tab 20 is complete and operable; AI can continue on tab 20 if the next page-level check still passes.',
+    );
     expect(snapshot.summary.dynamicObjectUpdateSummary).toBe(
       'Dynamic object update: current page object switched to tab 20; owner=ai, status=complete, operable=yes, focusedWindow=1.',
     );
@@ -481,6 +487,9 @@ describe('browser world inventory', () => {
       'Dynamic object update: tab 20 was removed; previousOwner=ai, retainedTabs=2, aiOpenedRetained=0, activeTab=unknown.',
     );
     expect(snapshot.summary.objectChangeConclusion).toContain('Page object tab 20 was removed');
+    expect(snapshot.summary.objectChangeSummary).toBe(
+      'Object change summary: tab 20 was removed; retained tabs=2; active tab=unknown; the removed tab was AI-owned, so do not continue on tab 20.',
+    );
     expect(snapshot.recentEvents.at(-1)).toMatchObject({
       eventKind: 'tab_removed',
       tabId: 20,

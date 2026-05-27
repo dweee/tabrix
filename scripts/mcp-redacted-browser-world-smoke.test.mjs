@@ -256,6 +256,8 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
           'Current operation object includes https://private.example.test/dashboard and Private Dashboard.',
         browserObjectEdgeSummary:
           'Browser object edge state: windows total=1, visible=1, minimized=0, focused=1, operable=1; tabs total=20, active=1, background=19, loading=2, operable=20, aiOpened=1, userOrPageOpened=19; currentWindow=focused_window_visible_operable; currentOperation=same_as_browser_active',
+        objectChangeSummary:
+          'Object change summary includes https://private.example.test/dashboard and Private Dashboard.',
         dynamicObjectUpdateSummary:
           'Dynamic object update includes https://private.example.test/dashboard and Private Dashboard.',
         claimBoundary: 'Browser lifecycle summary only.',
@@ -465,6 +467,7 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
   assert.equal(summary.currentOperationConclusionPresent, true);
   assert.equal(summary.objectInventoryPresent, true);
   assert.equal(summary.browserObjectEdgeSummaryPresent, true);
+  assert.equal(summary.objectChangeSummaryPresent, true);
   assert.equal(summary.dynamicObjectUpdateSummaryPresent, true);
   assert.deepEqual(summary.windows, {
     total: 1,
@@ -713,6 +716,7 @@ test('buildStepSummary includes active object operability reasons without raw UR
           summary: 'Private operation summary',
           claimBoundary: 'Private operation boundary',
         },
+        objectChangeSummary: 'Private object change summary',
         windows: [{ compactTabLimit: 12, tabs: [{ tabId: 7 }] }],
         retentionPolicy: { recentEventLimit: 50, recentEventsRetained: 4 },
       },
@@ -784,6 +788,7 @@ test('buildStepSummary includes active object operability reasons without raw UR
     claimBoundaryPresent: true,
   });
   assert.equal(summary.targetActiveMatchesLifecycleStep, true);
+  assert.equal(summary.objectChangeSummaryPresent, true);
   assert.equal(JSON.stringify(summary).includes('private.example.test'), false);
   assert.equal(JSON.stringify(summary).includes('Private Active'), false);
   assert.equal(JSON.stringify(summary).includes('Private operation'), false);

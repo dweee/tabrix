@@ -277,6 +277,8 @@ describe('get_windows_and_tabs state inventory', () => {
           'Current operation object: no AI-operated tab page object has been observed yet.',
         browserObjectEdgeSummary:
           'Browser object edge state: windows total=2, visible=1, minimized=1, focused=1, operable=1; tabs total=2, active=1, background=1, loading=1, operable=2, aiOpened=0, userOrPageOpened=2; currentWindow=focused_window_visible_operable; currentOperation=no_ai_operation_observed',
+        objectChangeSummary:
+          'Object change summary: no recent browser object change; active tab 102 is loading and operable; no AI-operated tab is known yet.',
         dynamicObjectUpdateSummary:
           'Dynamic object update: no browser object change observed; retainedWindows=2, retainedTabs=2, activeTab=102.',
         retentionPolicy: {
@@ -455,6 +457,9 @@ describe('get_windows_and_tabs state inventory', () => {
     });
     expect(payload.compactSummary.operationRouting.summary).toContain(
       'latest AI-operated tab 202 is not browser-active',
+    );
+    expect(payload.compactSummary.objectChangeSummary).toBe(
+      'Object change summary: AI operation read_page was recorded on tab 202; AI last operated tab 202, but the active tab is 201; reselect or reread before continuing.',
     );
   });
 

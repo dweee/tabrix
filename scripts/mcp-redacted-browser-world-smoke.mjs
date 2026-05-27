@@ -632,6 +632,9 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     browserObjectEdgeSummaryPresent:
       typeof payload?.compactSummary?.browserObjectEdgeSummary === 'string' ||
       typeof payload?.summary?.browserObjectEdgeSummary === 'string',
+    objectChangeSummaryPresent:
+      typeof payload?.compactSummary?.objectChangeSummary === 'string' ||
+      typeof payload?.summary?.objectChangeSummary === 'string',
     dynamicObjectUpdateSummaryPresent:
       typeof payload?.compactSummary?.dynamicObjectUpdateSummary === 'string' ||
       typeof payload?.summary?.dynamicObjectUpdateSummary === 'string',
@@ -870,6 +873,7 @@ export function buildStepSummary(step, payload, targetTabId) {
     targetActiveMatchesLifecycleStep:
       expectedTargetActive === null ? null : redacted.targetTab?.active === expectedTargetActive,
     browserObjectEdgeSummaryPresent: redacted.browserObjectEdgeSummaryPresent,
+    objectChangeSummaryPresent: redacted.objectChangeSummaryPresent,
     dynamicObjectUpdateSummaryPresent: redacted.dynamicObjectUpdateSummaryPresent,
     retentionWithinLimit: redacted.retentionWithinLimit,
     compactSummaryBounded: redacted.compactSummaryBounded,
@@ -1086,6 +1090,7 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
             step.targetTab?.canTabrixOperate === true &&
             step.targetActiveMatchesLifecycleStep === true &&
             step.browserObjectEdgeSummaryPresent === true &&
+            step.objectChangeSummaryPresent === true &&
             step.dynamicObjectUpdateSummaryPresent === true &&
             step.retentionWithinLimit === true &&
             step.compactSummaryBounded === true &&
@@ -1123,6 +1128,7 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
       readPage.redactedBrowserWorldAfterRead.retentionWithinLimit === true &&
       readPage.redactedBrowserWorldAfterRead.compactSummaryBounded === true &&
       readPage.redactedBrowserWorldAfterRead.browserObjectEdgeSummaryPresent === true &&
+      readPage.redactedBrowserWorldAfterRead.objectChangeSummaryPresent === true &&
       targets.every((target) => target.passed),
     targets,
   };
