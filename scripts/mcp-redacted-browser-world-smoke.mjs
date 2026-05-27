@@ -267,6 +267,7 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     payload?.compactSummary?.aiOperationState ?? payload?.summary?.aiOperationState ?? null;
   const objectInventory =
     payload?.compactSummary?.objectInventory ?? payload?.summary?.objectInventory ?? null;
+  const activeObject = payload?.compactSummary?.activeObject ?? null;
   const browserActiveObject = payload?.compactSummary?.browserActiveObject ?? null;
   const latestAiOperatedObject = payload?.compactSummary?.latestAiOperatedObject ?? null;
   const operationRouting = payload?.compactSummary?.operationRouting ?? null;
@@ -455,6 +456,26 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
             : null,
           summaryPresent: typeof objectInventory.summary === 'string',
           claimBoundaryPresent: typeof objectInventory.claimBoundary === 'string',
+        }
+      : null,
+    activeObject: activeObject
+      ? {
+          tabIdPresent: Number.isInteger(activeObject.tabId),
+          windowIdPresent: Number.isInteger(activeObject.windowId),
+          tabStatus: typeof activeObject.tabStatus === 'string' ? activeObject.tabStatus : null,
+          openedBy: typeof activeObject.openedBy === 'string' ? activeObject.openedBy : null,
+          canTabrixOperate:
+            typeof activeObject.canTabrixOperate === 'boolean'
+              ? activeObject.canTabrixOperate
+              : null,
+          tabOperabilityReason:
+            typeof activeObject.tabOperabilityReason === 'string'
+              ? activeObject.tabOperabilityReason
+              : null,
+          windowOperabilityReason:
+            typeof activeObject.windowOperabilityReason === 'string'
+              ? activeObject.windowOperabilityReason
+              : null,
         }
       : null,
     browserActiveObject: redactCompactOperationObject(browserActiveObject),

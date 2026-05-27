@@ -83,6 +83,9 @@ describe('get_windows_and_tabs state inventory', () => {
           url: 'https://example.test/active',
           title: 'Active',
           openedBy: 'user_or_page',
+          tabStatus: 'loading',
+          tabOperabilityReason: 'regular_web_page',
+          windowOperabilityReason: 'active_tab_operable_in_visible_window',
           canTabrixOperate: true,
         },
         objectInventory: {
@@ -517,6 +520,9 @@ describe('get_windows_and_tabs state inventory', () => {
     expect(payload.compactSummary.activeObject).toMatchObject({
       tabId: 120,
       title: 'Tab 120',
+      tabStatus: 'complete',
+      tabOperabilityReason: 'regular_web_page',
+      windowOperabilityReason: 'active_tab_operable_in_visible_window',
       canTabrixOperate: true,
     });
     expect(payload.compactSummary.objectInventory).toMatchObject({

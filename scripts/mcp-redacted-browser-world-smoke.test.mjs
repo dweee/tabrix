@@ -74,8 +74,14 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
       compactSummary: {
         activeObject: {
           tabId: 20,
+          windowId: 1,
           url: 'https://private.example.test/dashboard',
           title: 'Private Dashboard',
+          tabStatus: 'complete',
+          openedBy: 'ai',
+          canTabrixOperate: true,
+          tabOperabilityReason: 'regular_web_page',
+          windowOperabilityReason: 'active_tab_operable_in_visible_window',
         },
         windows: [
           {
@@ -369,6 +375,15 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
     lastAiOperationReasonPresent: true,
     canTabrixOperate: true,
     operabilityReason: 'regular_web_page',
+  });
+  assert.deepEqual(summary.activeObject, {
+    tabIdPresent: true,
+    windowIdPresent: true,
+    tabStatus: 'complete',
+    openedBy: 'ai',
+    canTabrixOperate: true,
+    tabOperabilityReason: 'regular_web_page',
+    windowOperabilityReason: 'active_tab_operable_in_visible_window',
   });
   assert.deepEqual(summary.latestAiOperatedObject, {
     objectPresent: true,

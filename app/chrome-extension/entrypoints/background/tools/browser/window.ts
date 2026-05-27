@@ -161,6 +161,13 @@ class WindowTool extends BaseBrowserToolExecutor {
             url: browserWorld.summary.activeTab.url,
             title: browserWorld.summary.activeTab.title,
             openedBy: browserWorld.summary.activeTab.openedBy,
+            tabStatus: browserWorld.summary.currentTabObject?.status ?? null,
+            tabOperabilityReason:
+              browserWorld.summary.currentTabObject?.operabilityReason ?? 'active_tab_not_observed',
+            windowOperabilityReason:
+              structuredWindows.find(
+                (window) => window.windowId === browserWorld.summary.activeWindow.windowId,
+              )?.operabilityReason ?? 'active_window_not_observed',
             canTabrixOperate:
               browserWorld.summary.activeTab.canTabrixOperate === false ||
               browserWorld.summary.activeWindow.canTabrixOperate === false
