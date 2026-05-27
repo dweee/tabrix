@@ -391,6 +391,12 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
           activeWindowIdPresent: Number.isInteger(objectInventory.activeWindowId),
           browserActiveTabIdPresent: Number.isInteger(objectInventory.browserActiveTabId),
           latestAiOperatedTabIdPresent: Number.isInteger(objectInventory.latestAiOperatedTabId),
+          latestAiOperationConfidence:
+            typeof objectInventory.latestAiOperationConfidence === 'number'
+              ? objectInventory.latestAiOperationConfidence
+              : null,
+          latestAiOperationReasonPresent:
+            typeof objectInventory.latestAiOperationReason === 'string',
           currentOperationRelation:
             typeof objectInventory.currentOperationRelation === 'string'
               ? objectInventory.currentOperationRelation

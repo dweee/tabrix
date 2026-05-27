@@ -131,6 +131,8 @@ export function buildAiOperationState(
     latestAiOperatedTabId: lastAiOperatedTab?.tabId ?? null,
     latestAiOperation: lastAiOperatedTab?.lastAiOperation ?? null,
     latestAiOperationAtMs: lastAiOperatedTab?.lastAiOperationAtMs ?? null,
+    latestAiOperationConfidence: lastAiOperatedTab?.lastAiOperationConfidence ?? null,
+    latestAiOperationReason: lastAiOperatedTab?.lastAiOperationReason ?? null,
     latestAiOperatedTabActive: lastAiOperatedTab?.active ?? null,
     latestAiOperatedTabWindowId: lastAiOperatedTab?.windowId ?? null,
     latestAiOperatedTabOpenedBy: lastAiOperatedTab?.openedBy ?? null,
@@ -312,6 +314,8 @@ export function buildTabAttributeGroups(
       aiOperationState: tab.aiOperationState,
       lastAiOperation: tab.lastAiOperation,
       lastAiOperationAtMs: tab.lastAiOperationAtMs,
+      lastAiOperationConfidence: tab.lastAiOperationConfidence,
+      lastAiOperationReason: tab.lastAiOperationReason,
     },
     operability: {
       canTabrixOperate: tab.canTabrixOperate,
@@ -341,6 +345,8 @@ export function summarizeTabState(tab: BrowserWorldTabObject): BrowserWorldTabSt
     aiOperationState: tab.aiOperationState,
     lastAiOperation: tab.lastAiOperation,
     lastAiOperationAtMs: tab.lastAiOperationAtMs,
+    lastAiOperationConfidence: tab.lastAiOperationConfidence,
+    lastAiOperationReason: tab.lastAiOperationReason,
     canTabrixOperate: tab.canTabrixOperate,
     operabilityReason: tab.operabilityReason,
   };
@@ -370,7 +376,7 @@ export function summarizeObjectChangeConclusion(
     return `Page object tab ${last.replacedTabId ?? 'unknown'} was replaced by tab ${last.tabId ?? 'unknown'}; owner=${last.openedBy ?? 'unknown'}.`;
   }
   if (last.eventKind === 'ai_tab_marked' && lastAiOperatedTab) {
-    return `Latest AI-operated page object is tab ${lastAiOperatedTab.tabId}; operation=${lastAiOperatedTab.lastAiOperation ?? 'unknown'}, operable=${lastAiOperatedTab.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
+    return `Latest AI-operated page object is tab ${lastAiOperatedTab.tabId}; operation=${lastAiOperatedTab.lastAiOperation ?? 'unknown'}, confidence=${lastAiOperatedTab.lastAiOperationConfidence ?? 'unknown'}, reason=${lastAiOperatedTab.lastAiOperationReason ?? 'unknown'}, operable=${lastAiOperatedTab.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
   }
   if (last.eventKind === 'tab_removed') {
     return `Page object tab ${last.tabId ?? 'unknown'} was removed; previousOwner=${last.openedBy ?? 'unknown'}.`;
@@ -382,7 +388,7 @@ export function summarizeObjectChangeConclusion(
     return `Focused window object changed to ${last.windowId ?? 'unknown'}.`;
   }
   if (lastAiOperatedTab) {
-    return `Latest AI-operated page object is tab ${lastAiOperatedTab.tabId}; operation=${lastAiOperatedTab.lastAiOperation ?? 'unknown'}, operable=${lastAiOperatedTab.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
+    return `Latest AI-operated page object is tab ${lastAiOperatedTab.tabId}; operation=${lastAiOperatedTab.lastAiOperation ?? 'unknown'}, confidence=${lastAiOperatedTab.lastAiOperationConfidence ?? 'unknown'}, reason=${lastAiOperatedTab.lastAiOperationReason ?? 'unknown'}, operable=${lastAiOperatedTab.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}.`;
   }
   return summarizeRecentEvents(events);
 }
@@ -424,7 +430,7 @@ export function summarizeDynamicObjectUpdate(
     return `Dynamic object update: tab ${last.replacedTabId ?? 'unknown'} was replaced by tab ${last.tabId ?? 'unknown'}; owner=${last.openedBy ?? 'unknown'}, retainedTabs=${lifecycleState.retainedTabCount}, activeTab=${lifecycleState.activeTabId ?? 'unknown'}.`;
   }
   if (last.eventKind === 'ai_tab_marked') {
-    return `Dynamic object update: latest AI-operated page object is tab ${aiOperationState.latestAiOperatedTabId ?? last.tabId ?? 'unknown'}; operation=${aiOperationState.latestAiOperation ?? 'unknown'}, relationToActive=${aiOperationState.relationToBrowserActiveTab}, canContinue=${aiOperationState.canContinueOnLatestAiOperatedTab === true ? 'yes' : 'no_or_unknown'}.`;
+    return `Dynamic object update: latest AI-operated page object is tab ${aiOperationState.latestAiOperatedTabId ?? last.tabId ?? 'unknown'}; operation=${aiOperationState.latestAiOperation ?? 'unknown'}, confidence=${aiOperationState.latestAiOperationConfidence ?? 'unknown'}, reason=${aiOperationState.latestAiOperationReason ?? 'unknown'}, relationToActive=${aiOperationState.relationToBrowserActiveTab}, canContinue=${aiOperationState.canContinueOnLatestAiOperatedTab === true ? 'yes' : 'no_or_unknown'}.`;
   }
   if (last.eventKind === 'window_focus_changed') {
     return `Dynamic object update: focused window changed to ${last.windowId ?? 'unknown'}; relation=${windowOperationState.relationToCurrentOperableWindow}, visibleWindows=${windowOperationState.visibleWindowCount}, minimizedWindows=${windowOperationState.minimizedWindowCount}.`;
@@ -462,7 +468,7 @@ export function summarizeRecentEvents(events: readonly BrowserWorldEvent[]): str
     case 'tab_replaced':
       return `Last change: tab ${last.replacedTabId ?? 'unknown'} was replaced by tab ${last.tabId ?? 'unknown'}.`;
     case 'ai_tab_marked':
-      return `Last change: tab ${last.tabId ?? 'unknown'} was marked as operated by Tabrix.`;
+      return `Last change: tab ${last.tabId ?? 'unknown'} was marked as operated by Tabrix; operation=${last.aiOperation ?? 'unknown'}, reason=${last.aiOperationReason ?? 'unknown'}.`;
     case 'inventory_seeded':
       return 'Last change: browser world inventory was refreshed from Chrome.';
     default:

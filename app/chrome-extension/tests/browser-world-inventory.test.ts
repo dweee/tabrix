@@ -344,6 +344,8 @@ describe('browser world inventory', () => {
       browserActiveTabId: 10,
       latestAiOperatedTabId: 20,
       latestAiOperation: 'tab_created',
+      latestAiOperationConfidence: 0.95,
+      latestAiOperationReason: 'marked_by_tabrix_navigation_before_tabs_onCreated',
       latestAiOperatedTabActive: false,
       latestAiOperatedTabOpenedBy: 'ai',
       latestAiOperatedTabCanOperate: true,
@@ -723,6 +725,8 @@ describe('browser world inventory', () => {
         openedBy: 'ai',
         aiOperationState: 'recently_operated',
         lastAiOperation: 'read_page',
+        lastAiOperationConfidence: 0.95,
+        lastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
         canTabrixOperate: true,
       },
       lastAiOperatedTabObject: {
@@ -741,6 +745,8 @@ describe('browser world inventory', () => {
           openedBy: 'ai',
           aiOperationState: 'recently_operated',
           lastAiOperation: 'read_page',
+          lastAiOperationConfidence: 0.95,
+          lastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
         },
         operability: {
           canTabrixOperate: true,
@@ -766,6 +772,8 @@ describe('browser world inventory', () => {
         browserActiveTabId: 10,
         latestAiOperatedTabId: 10,
         latestAiOperation: 'read_page',
+        latestAiOperationConfidence: 0.95,
+        latestAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
         latestAiOperatedTabActive: true,
         latestAiOperatedTabOpenedBy: 'ai',
         latestAiOperatedTabCanOperate: true,
@@ -784,6 +792,8 @@ describe('browser world inventory', () => {
       openedByReason: 'marked_by_tabrix_navigation_result',
       aiOperationState: 'recently_operated',
       lastAiOperation: 'read_page',
+      lastAiOperationConfidence: 0.95,
+      lastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
       canTabrixOperate: true,
     });
     expect(refreshed.summary.objectChangeConclusion).toContain(

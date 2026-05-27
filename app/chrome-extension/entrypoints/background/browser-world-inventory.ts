@@ -39,6 +39,8 @@ export interface BrowserWorldTabObject {
   aiOperationState: 'idle' | 'recently_operated' | 'closed';
   lastAiOperation: string | null;
   lastAiOperationAtMs: number | null;
+  lastAiOperationConfidence: number | null;
+  lastAiOperationReason: string | null;
   createdAtMs: number;
   updatedAtMs: number;
   closedAtMs: number | null;
@@ -242,6 +244,8 @@ export interface BrowserWorldAiOperationState {
   latestAiOperatedTabId: number | null;
   latestAiOperation: string | null;
   latestAiOperationAtMs: number | null;
+  latestAiOperationConfidence: number | null;
+  latestAiOperationReason: string | null;
   latestAiOperatedTabActive: boolean | null;
   latestAiOperatedTabWindowId: number | null;
   latestAiOperatedTabOpenedBy: BrowserWorldTabOpenedBy | null;
@@ -278,6 +282,8 @@ export interface BrowserWorldTabAttributeGroups {
     aiOperationState: BrowserWorldTabObject['aiOperationState'];
     lastAiOperation: string | null;
     lastAiOperationAtMs: number | null;
+    lastAiOperationConfidence: number | null;
+    lastAiOperationReason: string | null;
   };
   operability: {
     canTabrixOperate: boolean | null;
@@ -305,6 +311,8 @@ export interface BrowserWorldTabStateSummary {
   aiOperationState: BrowserWorldTabObject['aiOperationState'];
   lastAiOperation: string | null;
   lastAiOperationAtMs: number | null;
+  lastAiOperationConfidence: number | null;
+  lastAiOperationReason: string | null;
   canTabrixOperate: boolean | null;
   operabilityReason: string;
 }
@@ -328,6 +336,8 @@ export interface BrowserWorldEvent {
   windowId: number | null;
   openedBy?: BrowserWorldTabOpenedBy;
   status?: string | null;
+  aiOperation?: string | null;
+  aiOperationReason?: string | null;
   windowState?: string | null;
   windowVisibilityState?: BrowserWorldWindowObject['visibilityState'];
   canTabrixOperate?: boolean | null;
@@ -440,6 +450,11 @@ function normalizeTab(
       previous?.aiOperationState ?? (openedBy === 'ai' ? 'recently_operated' : 'idle'),
     lastAiOperation: previous?.lastAiOperation ?? (openedBy === 'ai' ? 'tab_created' : null),
     lastAiOperationAtMs: previous?.lastAiOperationAtMs ?? (openedBy === 'ai' ? observedAt : null),
+    lastAiOperationConfidence:
+      previous?.lastAiOperationConfidence ?? (openedBy === 'ai' ? 0.95 : null),
+    lastAiOperationReason:
+      previous?.lastAiOperationReason ??
+      (openedBy === 'ai' ? 'marked_by_tabrix_navigation_before_tabs_onCreated' : null),
     createdAtMs: previous?.createdAtMs ?? observedAt,
     updatedAtMs: observedAt,
     closedAtMs: null,
@@ -696,6 +711,8 @@ export function markBrowserWorldTabAiCreated(tabId: number | null | undefined): 
       aiOperationState: 'recently_operated',
       lastAiOperation: 'tab_created',
       lastAiOperationAtMs: nowMs(),
+      lastAiOperationConfidence: 0.95,
+      lastAiOperationReason: 'marked_by_tabrix_navigation_result',
       updatedAtMs: nowMs(),
     });
   }
@@ -704,6 +721,8 @@ export function markBrowserWorldTabAiCreated(tabId: number | null | undefined): 
     tabId,
     windowId: previous?.windowId ?? null,
     openedBy: 'ai',
+    aiOperation: 'tab_created',
+    aiOperationReason: 'marked_by_tabrix_navigation_result',
   });
 }
 
@@ -719,6 +738,8 @@ export function markBrowserWorldTabAiOperated(
       aiOperationState: 'recently_operated',
       lastAiOperation: operation,
       lastAiOperationAtMs: nowMs(),
+      lastAiOperationConfidence: 0.95,
+      lastAiOperationReason: `marked_by_tabrix_tool_execution:${operation}`,
       updatedAtMs: nowMs(),
     });
   }
@@ -727,6 +748,8 @@ export function markBrowserWorldTabAiOperated(
     tabId,
     windowId: previous?.windowId ?? null,
     openedBy: previous?.openedBy,
+    aiOperation: operation,
+    aiOperationReason: `marked_by_tabrix_tool_execution:${operation}`,
   });
 }
 

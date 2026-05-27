@@ -66,6 +66,8 @@ class WindowTool extends BaseBrowserToolExecutor {
               aiOperationState: tab.aiOperationState,
               lastAiOperation: tab.lastAiOperation,
               lastAiOperationAtMs: tab.lastAiOperationAtMs,
+              lastAiOperationConfidence: tab.lastAiOperationConfidence,
+              lastAiOperationReason: tab.lastAiOperationReason,
             };
           });
         const activeTab = tabs.find((tab) => tab.active === true) || null;
@@ -122,6 +124,9 @@ class WindowTool extends BaseBrowserToolExecutor {
             activeWindowId: browserWorld.summary.activeWindow.windowId,
             browserActiveTabId: browserWorld.browserActiveTabId,
             latestAiOperatedTabId: browserWorld.summary.aiOperationState.latestAiOperatedTabId,
+            latestAiOperationConfidence:
+              browserWorld.summary.aiOperationState.latestAiOperationConfidence,
+            latestAiOperationReason: browserWorld.summary.aiOperationState.latestAiOperationReason,
             currentOperationRelation:
               browserWorld.summary.aiOperationState.relationToBrowserActiveTab,
             canContinueOnLatestAiOperatedTab:
