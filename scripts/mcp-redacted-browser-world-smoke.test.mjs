@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   assertPublicHttpUrl,
+  assertRedactedSmokeOutputSafe,
   buildPublicSmokeUrl,
   buildRedactedBrowserWorldSummary,
   buildRedactedReadPageAlignmentSummary,
@@ -15,6 +16,21 @@ import {
 test('extractJsonObject parses the bounded CLI Result payload', () => {
   const parsed = extractJsonObject('tabrix mcp call get_windows_and_tabs\n\nResult\n{"ok":true}\n');
   assert.deepEqual(parsed, { ok: true });
+});
+
+test('assertRedactedSmokeOutputSafe rejects raw URL strings and raw fields', () => {
+  assert.doesNotThrow(() =>
+    assertRedactedSmokeOutputSafe({
+      ok: true,
+      target: { targetIndex: 1, regionTypes: ['navigation'], operationPurposes: ['navigate'] },
+      privacyBoundary: 'No raw browser data is printed.',
+    }),
+  );
+  assert.throws(() => assertRedactedSmokeOutputSafe({ target: { url: 'redacted' } }));
+  assert.throws(() =>
+    assertRedactedSmokeOutputSafe({ target: { label: 'https://private.example.test/dashboard' } }),
+  );
+  assert.throws(() => assertRedactedSmokeOutputSafe({ target: { pageText: 'private text' } }));
 });
 
 test('assertPublicHttpUrl rejects local targets', () => {

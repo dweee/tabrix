@@ -120,6 +120,44 @@ export function extractJsonObject(text) {
   throw new Error('Unterminated JSON object in CLI output.');
 }
 
+const FORBIDDEN_REDACTED_OUTPUT_KEYS = new Set([
+  'url',
+  'title',
+  'cookie',
+  'cookies',
+  'screenshot',
+  'screenshots',
+  'networkBody',
+  'rawNetworkBody',
+  'pageText',
+  'markdown',
+]);
+
+export function assertRedactedSmokeOutputSafe(value, pathParts = []) {
+  if (!value || typeof value !== 'object') {
+    if (typeof value === 'string' && /https?:\/\//i.test(value)) {
+      throw new Error(
+        `Redacted smoke output contains a raw URL at ${pathParts.join('.') || '<root>'}.`,
+      );
+    }
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      assertRedactedSmokeOutputSafe(item, [...pathParts, String(index)]),
+    );
+    return;
+  }
+
+  for (const [key, nested] of Object.entries(value)) {
+    if (FORBIDDEN_REDACTED_OUTPUT_KEYS.has(key)) {
+      throw new Error(`Redacted smoke output contains forbidden raw field "${key}".`);
+    }
+    assertRedactedSmokeOutputSafe(nested, [...pathParts, key]);
+  }
+}
+
 function findFirstNumberByKey(value, keys) {
   if (!value || typeof value !== 'object') return null;
   for (const key of keys) {
@@ -1034,19 +1072,15 @@ async function main() {
                 ? runLifecycleSmoke(cliPath, smokeUrl, args)
                 : runSingleSmoke(cliPath, smokeUrl, args);
 
-    process.stdout.write(
-      `${JSON.stringify(
-        {
-          ok: true,
-          smokeKind: 'redacted_browser_world_mcp_smoke',
-          ...smokeResult,
-          privacyBoundary:
-            'No tab URLs, titles, account state, screenshots, cookies, network bodies, or page text are printed by this script.',
-        },
-        null,
-        2,
-      )}\n`,
-    );
+    const output = {
+      ok: true,
+      smokeKind: 'redacted_browser_world_mcp_smoke',
+      ...smokeResult,
+      privacyBoundary:
+        'No tab URLs, titles, account state, screenshots, cookies, network bodies, or page text are printed by this script.',
+    };
+    assertRedactedSmokeOutputSafe(output);
+    process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
   } catch (error) {
     process.stderr.write(
       `${JSON.stringify(
