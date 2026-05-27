@@ -144,6 +144,8 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
         },
         currentOperationConclusion:
           'Current operation object includes https://private.example.test/dashboard and Private Dashboard.',
+        dynamicObjectUpdateSummary:
+          'Dynamic object update includes https://private.example.test/dashboard and Private Dashboard.',
         claimBoundary: 'Browser lifecycle summary only.',
       },
       summary: {
@@ -274,6 +276,7 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
     closedRetainedTabCount: 0,
   });
   assert.equal(summary.currentOperationConclusionPresent, true);
+  assert.equal(summary.dynamicObjectUpdateSummaryPresent, true);
   assert.deepEqual(summary.windows, {
     total: 1,
     visible: 1,

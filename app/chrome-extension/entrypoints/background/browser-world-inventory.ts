@@ -7,6 +7,7 @@ import {
   buildWindowStateMatrix,
   summarizeCurrentOperation,
   summarizeCurrentWindow,
+  summarizeDynamicObjectUpdate,
   summarizeObjectChangeConclusion,
   summarizeRecentEvents,
   summarizeTabLifecycle,
@@ -135,6 +136,7 @@ export interface BrowserWorldSummary {
   aiOperationState: BrowserWorldAiOperationState;
   currentOperationConclusion: string;
   recentChangeSummary: string;
+  dynamicObjectUpdateSummary: string;
   objectChangeConclusion: string;
 }
 
@@ -819,6 +821,15 @@ function buildSnapshot(): BrowserWorldSnapshot {
       aiOperationState,
       currentOperationConclusion: summarizeCurrentOperation(aiOperationState),
       recentChangeSummary,
+      dynamicObjectUpdateSummary: summarizeDynamicObjectUpdate(
+        recentEvents,
+        activeTab,
+        lastAiOperatedTab,
+        focusedWindow ?? null,
+        tabLifecycleState,
+        aiOperationState,
+        windowOperationState,
+      ),
       objectChangeConclusion: summarizeObjectChangeConclusion(
         recentEvents,
         activeTab,

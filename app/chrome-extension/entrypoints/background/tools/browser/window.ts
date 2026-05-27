@@ -141,6 +141,7 @@ class WindowTool extends BaseBrowserToolExecutor {
           aiOperationState: browserWorld.summary.aiOperationState,
           currentOperationConclusion: browserWorld.summary.currentOperationConclusion,
           recentChangeSummary: browserWorld.summary.recentChangeSummary,
+          dynamicObjectUpdateSummary: browserWorld.summary.dynamicObjectUpdateSummary,
           objectChangeConclusion: browserWorld.summary.objectChangeConclusion,
           retentionPolicy: browserWorld.retentionPolicy,
           claimBoundary:

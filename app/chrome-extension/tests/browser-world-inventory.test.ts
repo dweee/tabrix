@@ -331,6 +331,9 @@ describe('browser world inventory', () => {
       userOrPageOpenedRetainedCount: 2,
     });
     expect(snapshot.summary.tabLifecycleConclusion).toContain('latest=tab_updated, tab=20');
+    expect(snapshot.summary.dynamicObjectUpdateSummary).toBe(
+      'Dynamic object update: tab 20 was updated; owner=ai, status=complete, currentActiveTab=10, latestAiOperated=yes.',
+    );
     expect(snapshot.summary.objectChangeConclusion).toContain(
       'Page object tab 20 was updated; owner=ai, status=complete',
     );
@@ -365,6 +368,9 @@ describe('browser world inventory', () => {
       activeTabId: 20,
     });
     expect(snapshot.summary.objectChangeConclusion).toContain('Current page object is tab 20');
+    expect(snapshot.summary.dynamicObjectUpdateSummary).toBe(
+      'Dynamic object update: current page object switched to tab 20; owner=ai, status=complete, operable=yes, focusedWindow=1.',
+    );
     expect(snapshot.summary.objectChangeConclusion).toContain('runtime=status complete');
     expect(snapshot.summary.objectChangeConclusion).toContain('ownership=ai');
     expect(snapshot.summary.currentTabObject).toMatchObject({
@@ -460,6 +466,9 @@ describe('browser world inventory', () => {
       retainedTabCount: 2,
     });
     expect(snapshot.summary.tabLifecycleConclusion).toContain('latest=tab_removed, tab=20');
+    expect(snapshot.summary.dynamicObjectUpdateSummary).toBe(
+      'Dynamic object update: tab 20 was removed; previousOwner=ai, retainedTabs=2, aiOpenedRetained=0, activeTab=unknown.',
+    );
     expect(snapshot.summary.objectChangeConclusion).toContain('Page object tab 20 was removed');
     expect(snapshot.recentEvents.at(-1)).toMatchObject({
       eventKind: 'tab_removed',
@@ -512,6 +521,9 @@ describe('browser world inventory', () => {
       'latest=tab_replaced, tab=31, replacedTab=30',
     );
     expect(snapshot.summary.recentChangeSummary).toContain('tab 30 was replaced by tab 31');
+    expect(snapshot.summary.dynamicObjectUpdateSummary).toBe(
+      'Dynamic object update: tab 30 was replaced by tab 31; owner=ai, retainedTabs=3, activeTab=10.',
+    );
     expect(snapshot.summary.objectChangeConclusion).toContain(
       'Page object tab 30 was replaced by tab 31; owner=ai',
     );

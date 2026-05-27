@@ -373,6 +373,51 @@ export function summarizeObjectChangeConclusion(
   return summarizeRecentEvents(events);
 }
 
+export function summarizeDynamicObjectUpdate(
+  events: readonly BrowserWorldEvent[],
+  activeTab: BrowserWorldTabObject | null,
+  lastAiOperatedTab: BrowserWorldTabObject | null,
+  focusedWindow: BrowserWorldWindowObject | null,
+  lifecycleState: BrowserWorldTabLifecycleState,
+  aiOperationState: BrowserWorldAiOperationState,
+  windowOperationState: BrowserWorldWindowOperationState,
+): string {
+  const last =
+    [...events].reverse().find((event) => event.eventKind !== 'inventory_seeded') ?? events.at(-1);
+  if (!last || last.eventKind === 'inventory_seeded') {
+    return `Dynamic object update: no browser object change observed; retainedWindows=${windowOperationState.visibleWindowCount + windowOperationState.minimizedWindowCount}, retainedTabs=${lifecycleState.retainedTabCount}, activeTab=${lifecycleState.activeTabId ?? 'unknown'}.`;
+  }
+  if (last.eventKind === 'tab_removed') {
+    return `Dynamic object update: tab ${last.tabId ?? 'unknown'} was removed; previousOwner=${last.openedBy ?? 'unknown'}, retainedTabs=${lifecycleState.retainedTabCount}, aiOpenedRetained=${lifecycleState.aiOpenedRetainedCount}, activeTab=${lifecycleState.activeTabId ?? 'unknown'}.`;
+  }
+  if (last.eventKind === 'tab_activated' && activeTab) {
+    return `Dynamic object update: current page object switched to tab ${activeTab.tabId}; owner=${activeTab.openedBy}, status=${activeTab.status ?? 'unknown'}, operable=${activeTab.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}, focusedWindow=${focusedWindow?.windowId ?? 'unknown'}.`;
+  }
+  if (last.eventKind === 'tab_created') {
+    return `Dynamic object update: tab ${last.tabId ?? 'unknown'} was created; owner=${last.openedBy ?? 'unknown'}, status=${last.status ?? 'unknown'}, retainedTabs=${lifecycleState.retainedTabCount}, aiOpenedRetained=${lifecycleState.aiOpenedRetainedCount}.`;
+  }
+  if (last.eventKind === 'tab_updated') {
+    const isLatestAiOperated = last.tabId === lastAiOperatedTab?.tabId;
+    return `Dynamic object update: tab ${last.tabId ?? 'unknown'} was updated; owner=${last.openedBy ?? 'unknown'}, status=${last.status ?? 'unknown'}, currentActiveTab=${activeTab?.tabId ?? 'unknown'}, latestAiOperated=${isLatestAiOperated ? 'yes' : 'no_or_unknown'}.`;
+  }
+  if (last.eventKind === 'tab_replaced') {
+    return `Dynamic object update: tab ${last.replacedTabId ?? 'unknown'} was replaced by tab ${last.tabId ?? 'unknown'}; owner=${last.openedBy ?? 'unknown'}, retainedTabs=${lifecycleState.retainedTabCount}, activeTab=${lifecycleState.activeTabId ?? 'unknown'}.`;
+  }
+  if (last.eventKind === 'ai_tab_marked') {
+    return `Dynamic object update: latest AI-operated page object is tab ${aiOperationState.latestAiOperatedTabId ?? last.tabId ?? 'unknown'}; operation=${aiOperationState.latestAiOperation ?? 'unknown'}, relationToActive=${aiOperationState.relationToBrowserActiveTab}, canContinue=${aiOperationState.canContinueOnLatestAiOperatedTab === true ? 'yes' : 'no_or_unknown'}.`;
+  }
+  if (last.eventKind === 'window_focus_changed') {
+    return `Dynamic object update: focused window changed to ${last.windowId ?? 'unknown'}; relation=${windowOperationState.relationToCurrentOperableWindow}, visibleWindows=${windowOperationState.visibleWindowCount}, minimizedWindows=${windowOperationState.minimizedWindowCount}.`;
+  }
+  if (last.eventKind === 'window_bounds_changed' || last.eventKind === 'window_created') {
+    return `Dynamic object update: window ${last.windowId ?? 'unknown'} changed; state=${last.windowState ?? 'unknown'}, visibility=${last.windowVisibilityState ?? 'unknown'}, operable=${last.canTabrixOperate === true ? 'yes' : 'no_or_unknown'}, focusedWindow=${focusedWindow?.windowId ?? 'unknown'}.`;
+  }
+  if (last.eventKind === 'window_removed') {
+    return `Dynamic object update: window ${last.windowId ?? 'unknown'} was removed; visibleWindows=${windowOperationState.visibleWindowCount}, minimizedWindows=${windowOperationState.minimizedWindowCount}, retainedTabs=${lifecycleState.retainedTabCount}.`;
+  }
+  return `Dynamic object update: browser object changed; latestEvent=${last.eventKind}, activeTab=${activeTab?.tabId ?? 'unknown'}, retainedTabs=${lifecycleState.retainedTabCount}.`;
+}
+
 export function summarizeRecentEvents(events: readonly BrowserWorldEvent[]): string {
   const last =
     [...events].reverse().find((event) => event.eventKind !== 'inventory_seeded') ?? events.at(-1);
