@@ -178,6 +178,8 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     payload?.compactSummary?.windowStateMatrix ?? payload?.summary?.windowStateMatrix ?? null;
   const tabStateMatrix =
     payload?.compactSummary?.tabStateMatrix ?? payload?.summary?.tabStateMatrix ?? null;
+  const aiOperationState =
+    payload?.compactSummary?.aiOperationState ?? payload?.summary?.aiOperationState ?? null;
 
   return {
     callSucceeded: true,
@@ -272,6 +274,49 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     tabStateConclusionPresent:
       typeof payload?.compactSummary?.tabStateConclusion === 'string' ||
       typeof payload?.summary?.tabStateConclusion === 'string',
+    aiOperationState: aiOperationState
+      ? {
+          browserActiveTabIdPresent: Number.isInteger(aiOperationState.browserActiveTabId),
+          latestAiOperatedTabIdPresent: Number.isInteger(aiOperationState.latestAiOperatedTabId),
+          latestAiOperation:
+            typeof aiOperationState.latestAiOperation === 'string'
+              ? aiOperationState.latestAiOperation
+              : null,
+          latestAiOperationAtMsPresent: Number.isInteger(aiOperationState.latestAiOperationAtMs),
+          latestAiOperatedTabActive:
+            typeof aiOperationState.latestAiOperatedTabActive === 'boolean'
+              ? aiOperationState.latestAiOperatedTabActive
+              : null,
+          latestAiOperatedTabOpenedBy:
+            typeof aiOperationState.latestAiOperatedTabOpenedBy === 'string'
+              ? aiOperationState.latestAiOperatedTabOpenedBy
+              : null,
+          latestAiOperatedTabCanOperate:
+            typeof aiOperationState.latestAiOperatedTabCanOperate === 'boolean'
+              ? aiOperationState.latestAiOperatedTabCanOperate
+              : null,
+          relationToBrowserActiveTab:
+            typeof aiOperationState.relationToBrowserActiveTab === 'string'
+              ? aiOperationState.relationToBrowserActiveTab
+              : null,
+          canContinueOnLatestAiOperatedTab:
+            typeof aiOperationState.canContinueOnLatestAiOperatedTab === 'boolean'
+              ? aiOperationState.canContinueOnLatestAiOperatedTab
+              : null,
+          aiOpenedTabCount: Number.isInteger(aiOperationState.aiOpenedTabCount)
+            ? aiOperationState.aiOpenedTabCount
+            : null,
+          recentlyOperatedTabCount: Number.isInteger(aiOperationState.recentlyOperatedTabCount)
+            ? aiOperationState.recentlyOperatedTabCount
+            : null,
+          closedRetainedTabCount: Number.isInteger(aiOperationState.closedRetainedTabCount)
+            ? aiOperationState.closedRetainedTabCount
+            : null,
+        }
+      : null,
+    currentOperationConclusionPresent:
+      typeof payload?.compactSummary?.currentOperationConclusion === 'string' ||
+      typeof payload?.summary?.currentOperationConclusion === 'string',
     activeTabIncludedInCompactTabs:
       Number.isInteger(activeTabId) && compactTabs.length
         ? compactTabs.some((tab) => tab?.tabId === activeTabId)
@@ -630,6 +675,10 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
     args.timeoutMs,
   );
   const redactedReadPage = buildRedactedReadPageAlignmentSummary(readPagePayload, openedTabId);
+  const redactedBrowserWorldAfterRead = buildRedactedBrowserWorldSummary(
+    callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs),
+    openedTabId,
+  );
   const closeResult =
     Number.isInteger(openedTabId) && !args.keepOpen
       ? closeRunTabs(cliPath, [openedTabId], args.timeoutMs)
@@ -641,6 +690,7 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
     closeAttempted: closeResult.attempted,
     closeSucceeded: closeResult.succeeded,
     redactedReadPage,
+    redactedBrowserWorldAfterRead,
     alignmentPassed:
       redactedReadPage.alignment.ownershipRuntimePresent === true &&
       redactedReadPage.alignment.browserPageObjectCompactPresent === true &&
@@ -650,7 +700,12 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
       redactedReadPage.alignment.targetTabMatchesReadPage === true &&
       redactedReadPage.alignment.readTargetIsBrowserActive === true &&
       redactedReadPage.alignment.tabOwnerIsAi === true &&
-      redactedReadPage.alignment.tabOperable === true,
+      redactedReadPage.alignment.tabOperable === true &&
+      redactedBrowserWorldAfterRead.targetTab?.wasFound === true &&
+      redactedBrowserWorldAfterRead.aiOperationState?.latestAiOperatedTabIdPresent === true &&
+      redactedBrowserWorldAfterRead.aiOperationState?.latestAiOperation === 'read_page' &&
+      redactedBrowserWorldAfterRead.aiOperationState?.relationToBrowserActiveTab ===
+        'same_as_browser_active',
   };
 }
 

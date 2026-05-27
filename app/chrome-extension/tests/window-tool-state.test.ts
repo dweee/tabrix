@@ -153,6 +153,23 @@ describe('get_windows_and_tabs state inventory', () => {
         },
         tabStateConclusion:
           'Tab page object matrix: 2 tab(s), active=1, background=1, loading=1, complete=1, aiOpened=0, userOrPageOpened=2, operable=2, activeTab=102, latestAiOperatedTab=none.',
+        aiOperationState: {
+          browserActiveTabId: 102,
+          latestAiOperatedTabId: null,
+          latestAiOperation: null,
+          latestAiOperationAtMs: null,
+          latestAiOperatedTabActive: null,
+          latestAiOperatedTabWindowId: null,
+          latestAiOperatedTabOpenedBy: null,
+          latestAiOperatedTabCanOperate: null,
+          relationToBrowserActiveTab: 'no_ai_operation_observed',
+          canContinueOnLatestAiOperatedTab: null,
+          aiOpenedTabCount: 0,
+          recentlyOperatedTabCount: 0,
+          closedRetainedTabCount: 0,
+        },
+        currentOperationConclusion:
+          'Current operation object: no AI-operated tab page object has been observed yet.',
         retentionPolicy: {
           recentEventLimit: 50,
           windowObjectsRetained: 2,

@@ -93,6 +93,23 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
           ownerCounts: { ai: 1, user_or_page: 19, unknown: 0 },
         },
         tabStateConclusion: 'Tab page object matrix includes Private Dashboard title.',
+        aiOperationState: {
+          browserActiveTabId: 20,
+          latestAiOperatedTabId: 20,
+          latestAiOperation: 'read_page',
+          latestAiOperationAtMs: 123456789,
+          latestAiOperatedTabActive: true,
+          latestAiOperatedTabWindowId: 1,
+          latestAiOperatedTabOpenedBy: 'ai',
+          latestAiOperatedTabCanOperate: true,
+          relationToBrowserActiveTab: 'same_as_browser_active',
+          canContinueOnLatestAiOperatedTab: true,
+          aiOpenedTabCount: 1,
+          recentlyOperatedTabCount: 1,
+          closedRetainedTabCount: 0,
+        },
+        currentOperationConclusion:
+          'Current operation object includes https://private.example.test/dashboard and Private Dashboard.',
         claimBoundary: 'Browser lifecycle summary only.',
       },
       summary: {
@@ -176,6 +193,21 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
     operabilityUnknown: 0,
   });
   assert.equal(summary.tabStateConclusionPresent, true);
+  assert.deepEqual(summary.aiOperationState, {
+    browserActiveTabIdPresent: true,
+    latestAiOperatedTabIdPresent: true,
+    latestAiOperation: 'read_page',
+    latestAiOperationAtMsPresent: true,
+    latestAiOperatedTabActive: true,
+    latestAiOperatedTabOpenedBy: 'ai',
+    latestAiOperatedTabCanOperate: true,
+    relationToBrowserActiveTab: 'same_as_browser_active',
+    canContinueOnLatestAiOperatedTab: true,
+    aiOpenedTabCount: 1,
+    recentlyOperatedTabCount: 1,
+    closedRetainedTabCount: 0,
+  });
+  assert.equal(summary.currentOperationConclusionPresent, true);
   assert.deepEqual(summary.windows, {
     total: 1,
     visible: 1,

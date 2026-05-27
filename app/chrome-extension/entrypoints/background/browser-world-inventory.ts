@@ -111,6 +111,8 @@ export interface BrowserWorldSummary {
   windowStateConclusion: string;
   tabStateMatrix: BrowserWorldTabStateMatrix;
   tabStateConclusion: string;
+  aiOperationState: BrowserWorldAiOperationState;
+  currentOperationConclusion: string;
   recentChangeSummary: string;
   objectChangeConclusion: string;
 }
@@ -154,6 +156,29 @@ export interface BrowserWorldTabStateMatrix {
   operabilityUnknown: number;
   statusCounts: Record<string, number>;
   ownerCounts: Record<BrowserWorldTabOpenedBy, number>;
+}
+
+export type BrowserWorldAiOperationRelation =
+  | 'same_as_browser_active'
+  | 'latest_ai_operated_background_tab'
+  | 'browser_active_not_latest_ai_operated'
+  | 'no_ai_operation_observed'
+  | 'unknown';
+
+export interface BrowserWorldAiOperationState {
+  browserActiveTabId: number | null;
+  latestAiOperatedTabId: number | null;
+  latestAiOperation: string | null;
+  latestAiOperationAtMs: number | null;
+  latestAiOperatedTabActive: boolean | null;
+  latestAiOperatedTabWindowId: number | null;
+  latestAiOperatedTabOpenedBy: BrowserWorldTabOpenedBy | null;
+  latestAiOperatedTabCanOperate: boolean | null;
+  relationToBrowserActiveTab: BrowserWorldAiOperationRelation;
+  canContinueOnLatestAiOperatedTab: boolean | null;
+  aiOpenedTabCount: number;
+  recentlyOperatedTabCount: number;
+  closedRetainedTabCount: number;
 }
 
 export interface BrowserWorldTabAttributeGroups {
@@ -651,6 +676,7 @@ function buildSnapshot(): BrowserWorldSnapshot {
     tabs
       .filter((tab) => tab.lastAiOperationAtMs !== null)
       .sort((a, b) => (b.lastAiOperationAtMs ?? 0) - (a.lastAiOperationAtMs ?? 0))[0] ?? null;
+  const aiOperationState = buildAiOperationState(tabs, activeTab, lastAiOperatedTab);
   const recentChangeSummary = summarizeRecentEvents(recentEvents);
   return {
     source: 'extension_browser_world_inventory',
@@ -699,6 +725,8 @@ function buildSnapshot(): BrowserWorldSnapshot {
       windowStateConclusion: summarizeWindowStateMatrix(windowStateMatrix, focusedWindow ?? null),
       tabStateMatrix,
       tabStateConclusion: summarizeTabStateMatrix(tabStateMatrix, activeTab, lastAiOperatedTab),
+      aiOperationState,
+      currentOperationConclusion: summarizeCurrentOperation(aiOperationState),
       recentChangeSummary,
       objectChangeConclusion: summarizeObjectChangeConclusion(
         recentEvents,
@@ -772,6 +800,63 @@ function summarizeTabStateMatrix(
     return 'Tab page object matrix: no tab page object is currently retained.';
   }
   return `Tab page object matrix: ${matrix.total} tab(s), active=${matrix.active}, background=${matrix.background}, loading=${matrix.loading}, complete=${matrix.complete}, aiOpened=${matrix.aiOpened}, userOrPageOpened=${matrix.userOrPageOpened}, operable=${matrix.operable}, activeTab=${activeTab?.tabId ?? 'unknown'}, latestAiOperatedTab=${lastAiOperatedTab?.tabId ?? 'none'}.`;
+}
+
+function buildAiOperationState(
+  tabs: readonly BrowserWorldTabObject[],
+  activeTab: BrowserWorldTabObject | null,
+  lastAiOperatedTab: BrowserWorldTabObject | null,
+): BrowserWorldAiOperationState {
+  const relationToBrowserActiveTab = classifyAiOperationRelation(activeTab, lastAiOperatedTab);
+  const canContinueOnLatestAiOperatedTab =
+    lastAiOperatedTab === null
+      ? null
+      : relationToBrowserActiveTab === 'same_as_browser_active' &&
+        lastAiOperatedTab.canTabrixOperate === true;
+
+  return {
+    browserActiveTabId: activeTab?.tabId ?? null,
+    latestAiOperatedTabId: lastAiOperatedTab?.tabId ?? null,
+    latestAiOperation: lastAiOperatedTab?.lastAiOperation ?? null,
+    latestAiOperationAtMs: lastAiOperatedTab?.lastAiOperationAtMs ?? null,
+    latestAiOperatedTabActive: lastAiOperatedTab?.active ?? null,
+    latestAiOperatedTabWindowId: lastAiOperatedTab?.windowId ?? null,
+    latestAiOperatedTabOpenedBy: lastAiOperatedTab?.openedBy ?? null,
+    latestAiOperatedTabCanOperate: lastAiOperatedTab?.canTabrixOperate ?? null,
+    relationToBrowserActiveTab,
+    canContinueOnLatestAiOperatedTab,
+    aiOpenedTabCount: tabs.filter((tab) => tab.openedBy === 'ai').length,
+    recentlyOperatedTabCount: tabs.filter((tab) => tab.aiOperationState === 'recently_operated')
+      .length,
+    closedRetainedTabCount: tabs.filter((tab) => tab.aiOperationState === 'closed').length,
+  };
+}
+
+function classifyAiOperationRelation(
+  activeTab: BrowserWorldTabObject | null,
+  lastAiOperatedTab: BrowserWorldTabObject | null,
+): BrowserWorldAiOperationRelation {
+  if (!lastAiOperatedTab) return 'no_ai_operation_observed';
+  if (!activeTab) return 'unknown';
+  if (activeTab.tabId === lastAiOperatedTab.tabId) return 'same_as_browser_active';
+  if (lastAiOperatedTab.active === false) return 'latest_ai_operated_background_tab';
+  return 'browser_active_not_latest_ai_operated';
+}
+
+function summarizeCurrentOperation(state: BrowserWorldAiOperationState): string {
+  if (state.relationToBrowserActiveTab === 'no_ai_operation_observed') {
+    return 'Current operation object: no AI-operated tab page object has been observed yet.';
+  }
+  if (state.relationToBrowserActiveTab === 'same_as_browser_active') {
+    return `Current operation object: latest AI-operated tab ${state.latestAiOperatedTabId ?? 'unknown'} is also the browser-active tab; operation=${state.latestAiOperation ?? 'unknown'}, operable=${state.canContinueOnLatestAiOperatedTab === true ? 'yes' : 'no_or_unknown'}.`;
+  }
+  if (state.relationToBrowserActiveTab === 'latest_ai_operated_background_tab') {
+    return `Current operation object: latest AI-operated tab ${state.latestAiOperatedTabId ?? 'unknown'} is not browser-active; browserActiveTab=${state.browserActiveTabId ?? 'unknown'}, operation=${state.latestAiOperation ?? 'unknown'}. Do not assume the AI target is still the active page without reselecting or rereading it.`;
+  }
+  if (state.relationToBrowserActiveTab === 'browser_active_not_latest_ai_operated') {
+    return `Current operation object: browser-active tab ${state.browserActiveTabId ?? 'unknown'} is different from latest AI-operated tab ${state.latestAiOperatedTabId ?? 'unknown'}; operation=${state.latestAiOperation ?? 'unknown'}. Treat the operation target as uncertain until refreshed.`;
+  }
+  return `Current operation object: latest AI-operated tab ${state.latestAiOperatedTabId ?? 'unknown'} exists but relation to browser-active tab is unknown.`;
 }
 
 function buildWindowStateMatrix(

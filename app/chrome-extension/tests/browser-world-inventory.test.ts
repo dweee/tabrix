@@ -163,6 +163,20 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.tabStateConclusion).toContain(
       'Tab page object matrix: 2 tab(s), active=1, background=1',
     );
+    expect(snapshot.summary.aiOperationState).toMatchObject({
+      browserActiveTabId: 10,
+      latestAiOperatedTabId: null,
+      latestAiOperation: null,
+      latestAiOperatedTabActive: null,
+      relationToBrowserActiveTab: 'no_ai_operation_observed',
+      canContinueOnLatestAiOperatedTab: null,
+      aiOpenedTabCount: 0,
+      recentlyOperatedTabCount: 0,
+      closedRetainedTabCount: 0,
+    });
+    expect(snapshot.summary.currentOperationConclusion).toBe(
+      'Current operation object: no AI-operated tab page object has been observed yet.',
+    );
     expect(snapshot.windows[0]).toMatchObject({
       windowId: 1,
       visibilityState: 'visible',
@@ -270,6 +284,21 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.objectChangeConclusion).toContain(
       'Page object tab 20 was updated; owner=ai, status=complete',
     );
+    expect(snapshot.summary.aiOperationState).toMatchObject({
+      browserActiveTabId: 10,
+      latestAiOperatedTabId: 20,
+      latestAiOperation: 'tab_created',
+      latestAiOperatedTabActive: false,
+      latestAiOperatedTabOpenedBy: 'ai',
+      latestAiOperatedTabCanOperate: true,
+      relationToBrowserActiveTab: 'latest_ai_operated_background_tab',
+      canContinueOnLatestAiOperatedTab: false,
+      aiOpenedTabCount: 1,
+      recentlyOperatedTabCount: 1,
+    });
+    expect(snapshot.summary.currentOperationConclusion).toContain(
+      'latest AI-operated tab 20 is not browser-active',
+    );
 
     listeners.tabActivated[0]?.({ tabId: 20, windowId: 1 });
 
@@ -332,6 +361,21 @@ describe('browser world inventory', () => {
       ownerCounts: { ai: 1, user_or_page: 2, unknown: 0 },
     });
     expect(snapshot.summary.tabStateConclusion).toContain('activeTab=20');
+    expect(snapshot.summary.aiOperationState).toMatchObject({
+      browserActiveTabId: 20,
+      latestAiOperatedTabId: 20,
+      latestAiOperation: 'tab_created',
+      latestAiOperatedTabActive: true,
+      latestAiOperatedTabOpenedBy: 'ai',
+      latestAiOperatedTabCanOperate: true,
+      relationToBrowserActiveTab: 'same_as_browser_active',
+      canContinueOnLatestAiOperatedTab: true,
+      aiOpenedTabCount: 1,
+      recentlyOperatedTabCount: 1,
+    });
+    expect(snapshot.summary.currentOperationConclusion).toContain(
+      'latest AI-operated tab 20 is also the browser-active tab',
+    );
     expect(snapshot.tabs.find((tab) => tab.tabId === 20)).toMatchObject({
       url: 'https://ai-opened.test/done',
       status: 'complete',
@@ -567,7 +611,23 @@ describe('browser world inventory', () => {
         operable: 1,
         inoperable: 1,
       },
+      aiOperationState: {
+        browserActiveTabId: 10,
+        latestAiOperatedTabId: 10,
+        latestAiOperation: 'read_page',
+        latestAiOperatedTabActive: true,
+        latestAiOperatedTabOpenedBy: 'ai',
+        latestAiOperatedTabCanOperate: true,
+        relationToBrowserActiveTab: 'same_as_browser_active',
+        canContinueOnLatestAiOperatedTab: true,
+        aiOpenedTabCount: 1,
+        recentlyOperatedTabCount: 1,
+        closedRetainedTabCount: 0,
+      },
     });
+    expect(refreshed.summary.currentOperationConclusion).toContain(
+      'latest AI-operated tab 10 is also the browser-active tab',
+    );
     expect(refreshed.tabs.find((tab) => tab.tabId === 10)).toMatchObject({
       openedBy: 'ai',
       openedByReason: 'marked_by_tabrix_navigation_result',
