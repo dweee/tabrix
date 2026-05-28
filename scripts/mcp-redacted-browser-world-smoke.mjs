@@ -1905,6 +1905,11 @@ function runWindowStateSmoke(cliPath, args) {
       redacted.windows.total > 0 &&
       redacted.hasBrowserWorldDetail &&
       redacted.objectInventoryPresent === true &&
+      redacted.retentionWithinLimit === true &&
+      redacted.compactSummaryBounded === true &&
+      redacted.retentionPolicy?.eventPrivacyBoundaryPresent === true &&
+      redacted.retentionPolicy?.detailBoundaryPresent === true &&
+      typeof redacted.refreshHealth?.lastRefreshDecision === 'string' &&
       redacted.browserObjectSnapshotConclusionPresent === true &&
       redacted.browserObjectEdgeSummaryPresent === true &&
       Boolean(redacted.windowLifecycleState) &&
@@ -2092,8 +2097,17 @@ export function isSmokeResultPassing(result) {
   if (result.scenario === 'window-state') {
     return (
       result.verdict === 'WINDOW_STATE_OBSERVED' &&
+      result.redacted?.retentionWithinLimit === true &&
+      result.redacted?.compactSummaryBounded === true &&
+      result.redacted?.retentionPolicy?.eventPrivacyBoundaryPresent === true &&
+      result.redacted?.retentionPolicy?.detailBoundaryPresent === true &&
+      typeof result.redacted?.refreshHealth?.lastRefreshDecision === 'string' &&
+      result.redacted?.objectInventoryPresent === true &&
       result.redacted?.browserObjectSnapshotConclusionPresent === true &&
-      hasCurrentTabAttributeGroups(result.redacted) &&
+      result.redacted?.browserObjectEdgeSummaryPresent === true &&
+      (hasCurrentTabAttributeGroups(result.redacted) ||
+        hasExplicitNoFocusedWindowState(result.redacted)) &&
+      hasAiActionReadiness(result.redacted) &&
       Boolean(result.redacted?.windowLifecycleState) &&
       result.redacted?.windowLifecycleConclusionPresent === true
     );
@@ -2101,7 +2115,11 @@ export function isSmokeResultPassing(result) {
   if (result.scenario === 'window-state-drift') {
     return (
       result.verdict === 'WINDOW_STATE_REPEATED_OBSERVER_PASS' &&
+      result.driftSummary?.allSamplesCompactBounded === true &&
+      result.driftSummary?.allSamplesRetentionBounded === true &&
+      result.driftSummary?.allSamplesRefreshHealthPresent === true &&
       result.driftSummary?.allSamplesWindowLifecyclePresent === true &&
+      result.driftSummary?.refreshThrottleProof?.proofSatisfied === true &&
       result.driftSummary?.allSamplesCurrentTabStateAccountedFor === true
     );
   }

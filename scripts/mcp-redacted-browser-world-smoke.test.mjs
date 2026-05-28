@@ -2040,14 +2040,52 @@ test('isSmokeResultPassing keeps observer verdicts strict and explicit', () => {
       scenario: 'window-state',
       verdict: 'WINDOW_STATE_OBSERVED',
       redacted: {
+        retentionWithinLimit: true,
+        compactSummaryBounded: true,
+        retentionPolicy: {
+          eventPrivacyBoundaryPresent: true,
+          detailBoundaryPresent: true,
+        },
+        refreshHealth: {
+          lastRefreshDecision: 'full_chrome_resync',
+        },
+        objectInventoryPresent: true,
         browserObjectSnapshotConclusionPresent: true,
+        browserObjectEdgeSummaryPresent: true,
         currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
         tabAttributeGroupClaimBoundaryPresent: true,
+        aiActionReadiness: redactedAiActionReadiness(),
         windowLifecycleState: redactedWindowLifecycleState(),
         windowLifecycleConclusionPresent: true,
       },
     }),
     true,
+  );
+  assert.equal(
+    isSmokeResultPassing({
+      scenario: 'window-state',
+      verdict: 'WINDOW_STATE_OBSERVED',
+      redacted: {
+        retentionWithinLimit: false,
+        compactSummaryBounded: true,
+        retentionPolicy: {
+          eventPrivacyBoundaryPresent: true,
+          detailBoundaryPresent: true,
+        },
+        refreshHealth: {
+          lastRefreshDecision: 'full_chrome_resync',
+        },
+        objectInventoryPresent: true,
+        browserObjectSnapshotConclusionPresent: true,
+        browserObjectEdgeSummaryPresent: true,
+        currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
+        tabAttributeGroupClaimBoundaryPresent: true,
+        aiActionReadiness: redactedAiActionReadiness(),
+        windowLifecycleState: redactedWindowLifecycleState(),
+        windowLifecycleConclusionPresent: true,
+      },
+    }),
+    false,
   );
   assert.equal(
     isSmokeResultPassing({
@@ -2067,8 +2105,12 @@ test('isSmokeResultPassing keeps observer verdicts strict and explicit', () => {
     isSmokeResultPassing({
       scenario: 'window-state-drift',
       driftSummary: {
+        allSamplesCompactBounded: true,
+        allSamplesRetentionBounded: true,
+        allSamplesRefreshHealthPresent: true,
         allSamplesCurrentTabStateAccountedFor: true,
         allSamplesWindowLifecyclePresent: true,
+        refreshThrottleProof: { proofSatisfied: true },
       },
       verdict: 'WINDOW_STATE_REPEATED_OBSERVER_PASS',
     }),
@@ -2078,8 +2120,27 @@ test('isSmokeResultPassing keeps observer verdicts strict and explicit', () => {
     isSmokeResultPassing({
       scenario: 'window-state-drift',
       driftSummary: {
+        allSamplesCompactBounded: true,
+        allSamplesRetentionBounded: true,
+        allSamplesRefreshHealthPresent: true,
+        allSamplesCurrentTabStateAccountedFor: true,
+        allSamplesWindowLifecyclePresent: true,
+        refreshThrottleProof: { proofSatisfied: false },
+      },
+      verdict: 'WINDOW_STATE_REPEATED_OBSERVER_PASS',
+    }),
+    false,
+  );
+  assert.equal(
+    isSmokeResultPassing({
+      scenario: 'window-state-drift',
+      driftSummary: {
+        allSamplesCompactBounded: true,
+        allSamplesRetentionBounded: true,
+        allSamplesRefreshHealthPresent: true,
         allSamplesCurrentTabStateAccountedFor: false,
         allSamplesWindowLifecyclePresent: true,
+        refreshThrottleProof: { proofSatisfied: true },
       },
       verdict: 'WINDOW_STATE_REPEATED_OBSERVER_PASS',
     }),
