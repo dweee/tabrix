@@ -9,6 +9,7 @@ import {
   buildPublicNoLoginLifecycleCoverageSummary,
   buildRedactedBrowserWorldSummary,
   buildRedactedReadPageAlignmentSummary,
+  buildBackgroundReadTargetFocusProof,
   buildStepSummary,
   buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
@@ -1832,6 +1833,48 @@ test('buildReadPageMatrixTargetResult accepts background read targets when objec
     actionReadinessBriefPresent: true,
   });
   assert.equal(target.passed, true);
+});
+
+test('buildBackgroundReadTargetFocusProof proves foreground remains active without exposing ids', () => {
+  const proof = buildBackgroundReadTargetFocusProof(
+    {
+      browserWorld: {
+        browserActiveTabId: 10,
+        summary: {
+          aiOperationState: {
+            latestAiOperatedTabId: 20,
+          },
+        },
+      },
+      windows: [
+        {
+          tabs: [
+            { id: 10, url: 'https://private.example.test/foreground', title: 'Private Foreground' },
+            { id: 20, url: 'https://private.example.test/background', title: 'Private Background' },
+          ],
+        },
+      ],
+    },
+    10,
+    20,
+  );
+
+  assert.deepEqual(proof, {
+    foregroundTabOpened: true,
+    backgroundTabOpened: true,
+    browserActiveTabKnown: true,
+    latestAiOperatedTabKnown: true,
+    browserActiveTabStayedOnForeground: true,
+    latestAiOperatedTabIsBackground: true,
+    backgroundTargetIsNotBrowserActive: true,
+    claimBoundary:
+      'Focus proof is redacted boolean evidence only; it does not expose tab ids, URLs, titles, page content, account state, or task success.',
+  });
+  const serialized = JSON.stringify(proof);
+  assert.equal(serialized.includes('private.example.test'), false);
+  assert.equal(serialized.includes('Private Foreground'), false);
+  assert.equal(serialized.includes('10'), false);
+  assert.equal(serialized.includes('20'), false);
 });
 
 test('buildReadPageMatrixTargetResult fails when read_page operation target evidence is incomplete', () => {

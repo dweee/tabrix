@@ -2114,6 +2114,46 @@ function hasReadPageMatrixAlignmentEvidence({
   );
 }
 
+export function buildBackgroundReadTargetFocusProof(
+  browserWorldPayload,
+  foregroundTabId,
+  backgroundTabId,
+) {
+  const browserWorld = browserWorldPayload?.browserWorld ?? browserWorldPayload ?? {};
+  const aiOperationState =
+    browserWorld?.summary?.aiOperationState ??
+    browserWorldPayload?.compactSummary?.aiOperationState ??
+    browserWorldPayload?.summary?.aiOperationState ??
+    {};
+  const browserActiveTabId =
+    Number.isInteger(browserWorld?.browserActiveTabId) ? browserWorld.browserActiveTabId : null;
+  const latestAiOperatedTabId = Number.isInteger(aiOperationState?.latestAiOperatedTabId)
+    ? aiOperationState.latestAiOperatedTabId
+    : null;
+  const foregroundKnown = Number.isInteger(foregroundTabId);
+  const backgroundKnown = Number.isInteger(backgroundTabId);
+  return {
+    foregroundTabOpened: foregroundKnown,
+    backgroundTabOpened: backgroundKnown,
+    browserActiveTabKnown: Number.isInteger(browserActiveTabId),
+    latestAiOperatedTabKnown: Number.isInteger(latestAiOperatedTabId),
+    browserActiveTabStayedOnForeground:
+      foregroundKnown && Number.isInteger(browserActiveTabId)
+        ? browserActiveTabId === foregroundTabId
+        : null,
+    latestAiOperatedTabIsBackground:
+      backgroundKnown && Number.isInteger(latestAiOperatedTabId)
+        ? latestAiOperatedTabId === backgroundTabId
+        : null,
+    backgroundTargetIsNotBrowserActive:
+      backgroundKnown && Number.isInteger(browserActiveTabId)
+        ? browserActiveTabId !== backgroundTabId
+        : null,
+    claimBoundary:
+      'Focus proof is redacted boolean evidence only; it does not expose tab ids, URLs, titles, page content, account state, or task success.',
+  };
+}
+
 function runReadPageBackgroundTargetSmoke(cliPath, smokeUrl, args) {
   if (args.skipOpen) {
     throw new Error('--scenario read-page-background-target cannot be combined with --skip-open.');
@@ -2145,8 +2185,19 @@ function runReadPageBackgroundTargetSmoke(cliPath, smokeUrl, args) {
     args.timeoutMs,
   );
   const redactedReadPage = buildRedactedReadPageAlignmentSummary(readPagePayload, backgroundTabId);
+  const browserWorldPayloadAfterRead = callMcpTool(
+    cliPath,
+    'get_windows_and_tabs',
+    {},
+    args.timeoutMs,
+  );
   const redactedBrowserWorldAfterRead = buildRedactedBrowserWorldSummary(
-    callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs),
+    browserWorldPayloadAfterRead,
+    backgroundTabId,
+  );
+  const focusProof = buildBackgroundReadTargetFocusProof(
+    browserWorldPayloadAfterRead,
+    foregroundTabId,
     backgroundTabId,
   );
   const closeResult =
@@ -2199,10 +2250,14 @@ function runReadPageBackgroundTargetSmoke(cliPath, smokeUrl, args) {
       target.passed === true &&
       target.runtime?.isCurrentTabActive === false &&
       target.runtime?.isReadTargetBrowserActiveTab === false &&
+      focusProof.browserActiveTabStayedOnForeground === true &&
+      focusProof.latestAiOperatedTabIsBackground === true &&
+      focusProof.backgroundTargetIsNotBrowserActive === true &&
       target.readPageOperationTarget?.role === 'read_target_background_tab' &&
       target.browserWorldAfterRead?.relationToBrowserActiveTab ===
         'latest_ai_operated_background_tab',
     target,
+    focusProof,
     claimBoundary:
       'Redacted public no-login background read_page target only. It proves explicit background read target relation for this public page, not page understanding correctness, private login/logout, API/CDP reuse, release readiness, or product delivery grade.',
   };
