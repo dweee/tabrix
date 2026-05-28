@@ -667,7 +667,56 @@ describe('read_page object lifecycle', () => {
       operationTargetOperabilityReason: 'regular_web_page',
       shouldReselectBeforeAction: false,
       nextRequiredCheck: 'page_level_content_or_postcondition_check',
+      actionReadiness: 'ready_for_page_level_check',
+      canProceedToPageLevelCheck: true,
+      requiredBeforeAction: 'page_level_content_or_postcondition_check',
     });
+  });
+
+  it('blocks BrowserPageObject action readiness when the read target is not safely operable', () => {
+    const minimizedView = buildReadPageBrowserPageObjectView({
+      objectLifecycle: buildReadPageObjectLifecycle([]),
+      pageProjection: pageProjection(),
+      ownershipRuntime: ownershipRuntime({
+        currentWindowState: 'minimized',
+        isCurrentWindowFocused: true,
+        currentTabCanTabrixOperate: true,
+        currentTabOperabilityReason: 'regular_web_page',
+      }),
+    });
+
+    expect(minimizedView.compact?.facts.tab).toMatchObject({
+      operationTargetRole: 'read_target_browser_active_tab',
+      actionReadiness: 'blocked_window_minimized',
+      canProceedToPageLevelCheck: false,
+      requiredBeforeAction: 'restore_window_then_refresh_browser_snapshot',
+    });
+    expect(minimizedView.attributeGroups.tab_state.summary).toContain(
+      'actionReadiness=blocked_window_minimized',
+    );
+
+    const backgroundView = buildReadPageBrowserPageObjectView({
+      objectLifecycle: buildReadPageObjectLifecycle([]),
+      pageProjection: pageProjection(),
+      ownershipRuntime: ownershipRuntime({
+        isCurrentTabActive: false,
+        browserActiveTabId: 99,
+        isReadTargetBrowserActiveTab: false,
+        currentTabCanTabrixOperate: true,
+        currentTabOperabilityReason: 'regular_web_page',
+      }),
+    });
+
+    expect(backgroundView.compact?.facts.tab).toMatchObject({
+      operationTargetRole: 'read_target_background_tab',
+      shouldReselectBeforeAction: true,
+      actionReadiness: 'reselect_or_reread_required',
+      canProceedToPageLevelCheck: false,
+      requiredBeforeAction: 'reselect_or_reread_read_target_before_action',
+    });
+    expect(backgroundView.compact?.facts.tab?.actionReadinessClaimBoundary).toContain(
+      'browser object state only',
+    );
   });
 
   it('keeps account-like handles and numeric stats out of visible menu entry summaries', () => {

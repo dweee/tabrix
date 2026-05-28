@@ -1053,6 +1053,21 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
         operationTargetSummaryPresent: typeof compactTabFacts.operationTargetSummary === 'string',
         operationTargetClaimBoundaryPresent:
           typeof compactTabFacts.operationTargetClaimBoundary === 'string',
+        actionReadiness:
+          typeof compactTabFacts.actionReadiness === 'string'
+            ? compactTabFacts.actionReadiness
+            : null,
+        canProceedToPageLevelCheck:
+          typeof compactTabFacts.canProceedToPageLevelCheck === 'boolean'
+            ? compactTabFacts.canProceedToPageLevelCheck
+            : null,
+        requiredBeforeAction:
+          typeof compactTabFacts.requiredBeforeAction === 'string'
+            ? compactTabFacts.requiredBeforeAction
+            : null,
+        actionReadinessSummaryPresent: typeof compactTabFacts.actionReadinessSummary === 'string',
+        actionReadinessClaimBoundaryPresent:
+          typeof compactTabFacts.actionReadinessClaimBoundary === 'string',
       },
     },
     pageRegionRuntime: {
@@ -1103,6 +1118,12 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
         typeof compactTabFacts.nextRequiredCheck === 'string' &&
         typeof compactTabFacts.operationTargetSummary === 'string' &&
         typeof compactTabFacts.operationTargetClaimBoundary === 'string',
+      actionReadinessBriefPresent:
+        typeof compactTabFacts.actionReadiness === 'string' &&
+        typeof compactTabFacts.canProceedToPageLevelCheck === 'boolean' &&
+        typeof compactTabFacts.requiredBeforeAction === 'string' &&
+        typeof compactTabFacts.actionReadinessSummary === 'string' &&
+        typeof compactTabFacts.actionReadinessClaimBoundary === 'string',
       targetTabMatchesReadPage:
         Number.isInteger(targetTabId) && Number.isInteger(ownershipRuntime?.currentTabId)
           ? ownershipRuntime.currentTabId === targetTabId
@@ -1968,6 +1989,7 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
       redactedReadPage.alignment.browserWorldObjectChangeSummaryPresent === true &&
       redactedReadPage.alignment.browserWorldCurrentOperationConclusionPresent === true &&
       redactedReadPage.alignment.operationTargetBriefPresent === true &&
+      redactedReadPage.alignment.actionReadinessBriefPresent === true &&
       redactedReadPage.alignment.targetTabMatchesReadPage === true &&
       redactedReadPage.alignment.tabOwnerIsAi === true &&
       redactedReadPage.alignment.tabOperable === true &&
@@ -1994,6 +2016,7 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
       redactedReadPage.alignment.browserWorldObjectChangeSummaryPresent === true &&
       redactedReadPage.alignment.browserWorldCurrentOperationConclusionPresent === true &&
       redactedReadPage.alignment.operationTargetBriefPresent === true &&
+      redactedReadPage.alignment.actionReadinessBriefPresent === true &&
       redactedReadPage.alignment.targetTabMatchesReadPage === true &&
       redactedReadPage.alignment.readTargetIsBrowserActive === true &&
       redactedReadPage.alignment.tabOwnerIsAi === true &&

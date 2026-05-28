@@ -172,6 +172,11 @@ export function buildReadPageBrowserPageObjectCompactView(
         'nextRequiredCheck',
         'operationTargetSummary',
         'operationTargetClaimBoundary',
+        'actionReadiness',
+        'canProceedToPageLevelCheck',
+        'requiredBeforeAction',
+        'actionReadinessSummary',
+        'actionReadinessClaimBoundary',
         'protectedScopeVerdict',
         'currentTabRunOwnershipVerdict',
         'readTargetPrimaryRelationVerdict',
@@ -622,9 +627,13 @@ function buildTabStateGroup(
     readTargetIsBrowserActive,
     operability,
   });
+  const actionReadiness = buildReadTargetActionReadiness({
+    operationTarget,
+    ownershipRuntime,
+  });
   return groupState({
     status: active === true ? 'active' : active === false ? 'background' : 'unknown',
-    summary: `Tab state: readTargetTab=${Number.isInteger(tabId) ? tabId : 'unknown'} is ${active === true ? 'active in its window' : active === false ? 'background/not active in its window' : 'activity unknown'}; status=${status}; browserActiveTab=${ownershipRuntime?.browserActiveTabIdKnown ? formatNullableNumber(browserActiveTabId) : 'unknown'}; readTargetIsBrowserActive=${formatTriState(readTargetIsBrowserActive)}; primaryRunTab=${formatNullableNumber(primaryTabId)}; owner=${owner}; operable=${formatTriState(operability)}; operationTarget=${operationTarget.operationTargetRole}; shouldReselectBeforeAction=${formatTriState(operationTarget.shouldReselectBeforeAction)}; nextRequiredCheck=${operationTarget.nextRequiredCheck}; aiOperation=${aiOperation ?? 'none'}; aiOperationConfidence=${aiOperationConfidence ?? 'unknown'}; aiOperationReason=${aiOperationReason ?? 'unknown'}; cleanup=${cleanup}; protection=${protection}.`,
+    summary: `Tab state: readTargetTab=${Number.isInteger(tabId) ? tabId : 'unknown'} is ${active === true ? 'active in its window' : active === false ? 'background/not active in its window' : 'activity unknown'}; status=${status}; browserActiveTab=${ownershipRuntime?.browserActiveTabIdKnown ? formatNullableNumber(browserActiveTabId) : 'unknown'}; readTargetIsBrowserActive=${formatTriState(readTargetIsBrowserActive)}; primaryRunTab=${formatNullableNumber(primaryTabId)}; owner=${owner}; operable=${formatTriState(operability)}; operationTarget=${operationTarget.operationTargetRole}; actionReadiness=${actionReadiness.actionReadiness}; canProceedToPageLevelCheck=${formatTriState(actionReadiness.canProceedToPageLevelCheck)}; requiredBeforeAction=${actionReadiness.requiredBeforeAction}; shouldReselectBeforeAction=${formatTriState(operationTarget.shouldReselectBeforeAction)}; nextRequiredCheck=${operationTarget.nextRequiredCheck}; aiOperation=${aiOperation ?? 'none'}; aiOperationConfidence=${aiOperationConfidence ?? 'unknown'}; aiOperationReason=${aiOperationReason ?? 'unknown'}; cleanup=${cleanup}; protection=${protection}.`,
     facts: {
       objectKind: 'BrowserTabObject',
       readTargetTabId: tabId,
@@ -668,6 +677,11 @@ function buildTabStateGroup(
       nextRequiredCheck: operationTarget.nextRequiredCheck,
       operationTargetSummary: operationTarget.operationTargetSummary,
       operationTargetClaimBoundary: operationTarget.operationTargetClaimBoundary,
+      actionReadiness: actionReadiness.actionReadiness,
+      canProceedToPageLevelCheck: actionReadiness.canProceedToPageLevelCheck,
+      requiredBeforeAction: actionReadiness.requiredBeforeAction,
+      actionReadinessSummary: actionReadiness.actionReadinessSummary,
+      actionReadinessClaimBoundary: actionReadiness.actionReadinessClaimBoundary,
       protectedScopeVerdict: protection,
       currentTabRunOwnershipVerdict: ownershipRuntime?.currentTabRunOwnershipVerdict ?? null,
       readTargetPrimaryRelationVerdict: ownershipRuntime?.currentTabPrimaryRelationVerdict ?? null,
@@ -683,6 +697,8 @@ function buildTabStateGroup(
     ],
   });
 }
+
+type ReadTargetOperationBrief = ReturnType<typeof buildReadTargetOperationBrief>;
 
 function buildReadTargetOperationBrief(input: {
   tabId: number | null;
@@ -762,6 +778,78 @@ function buildReadTargetOperationBrief(input: {
     nextRequiredCheck: 'refresh_browser_object_snapshot',
     operationTargetSummary: `Read-page operation target: relation between read target tab ${tabText} and browser-active tab ${browserActiveText} is unknown; refresh before acting.`,
     operationTargetClaimBoundary: boundary,
+  };
+}
+
+function buildReadTargetActionReadiness(input: {
+  operationTarget: ReadTargetOperationBrief;
+  ownershipRuntime: ReadPageOwnershipRuntimeSummary | null | undefined;
+}): {
+  actionReadiness:
+    | 'ready_for_page_level_check'
+    | 'reselect_or_reread_required'
+    | 'blocked_no_focused_window'
+    | 'blocked_window_minimized'
+    | 'target_not_operable_or_unknown';
+  canProceedToPageLevelCheck: boolean;
+  requiredBeforeAction: string;
+  actionReadinessSummary: string;
+  actionReadinessClaimBoundary: string;
+} {
+  const boundary =
+    'Read-page action readiness uses browser object state only; it permits at most the next page-level read/postcondition check and does not prove page content, task intent, action success, or API/CDP reuse.';
+  const target = input.operationTarget;
+  const targetText = target.operationTargetRole;
+  const targetOperabilityText = formatTriState(target.operationTargetCanTabrixOperate);
+
+  if (!input.ownershipRuntime || input.ownershipRuntime.isCurrentWindowFocused !== true) {
+    return {
+      actionReadiness: 'blocked_no_focused_window',
+      canProceedToPageLevelCheck: false,
+      requiredBeforeAction: 'restore_or_focus_browser_window',
+      actionReadinessSummary:
+        'Read-page action readiness: no focused browser window is proven for the read target; restore or focus a window before acting.',
+      actionReadinessClaimBoundary: boundary,
+    };
+  }
+
+  if (input.ownershipRuntime.currentWindowState === 'minimized') {
+    return {
+      actionReadiness: 'blocked_window_minimized',
+      canProceedToPageLevelCheck: false,
+      requiredBeforeAction: 'restore_window_then_refresh_browser_snapshot',
+      actionReadinessSummary:
+        'Read-page action readiness: the read target window is minimized; restore the window and refresh browser object state before acting.',
+      actionReadinessClaimBoundary: boundary,
+    };
+  }
+
+  if (target.shouldReselectBeforeAction) {
+    return {
+      actionReadiness: 'reselect_or_reread_required',
+      canProceedToPageLevelCheck: false,
+      requiredBeforeAction: target.nextRequiredCheck,
+      actionReadinessSummary: `Read-page action readiness: targetRole=${targetText} requires ${target.nextRequiredCheck} before acting.`,
+      actionReadinessClaimBoundary: boundary,
+    };
+  }
+
+  if (target.operationTargetCanTabrixOperate === true) {
+    return {
+      actionReadiness: 'ready_for_page_level_check',
+      canProceedToPageLevelCheck: true,
+      requiredBeforeAction: target.nextRequiredCheck,
+      actionReadinessSummary: `Read-page action readiness: targetRole=${targetText} is browser-operable; proceed only to ${target.nextRequiredCheck}.`,
+      actionReadinessClaimBoundary: boundary,
+    };
+  }
+
+  return {
+    actionReadiness: 'target_not_operable_or_unknown',
+    canProceedToPageLevelCheck: false,
+    requiredBeforeAction: 'refresh_or_select_operable_target',
+    actionReadinessSummary: `Read-page action readiness: targetRole=${targetText} operability=${targetOperabilityText}; refresh or select an operable target before acting.`,
+    actionReadinessClaimBoundary: boundary,
   };
 }
 

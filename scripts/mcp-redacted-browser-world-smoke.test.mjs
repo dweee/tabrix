@@ -1398,6 +1398,12 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
             operationTargetSummary:
               'Read-page operation target includes https://private.example.test/dashboard and Private Dashboard.',
             operationTargetClaimBoundary: 'Read-page operation target boundary.',
+            actionReadiness: 'ready_for_page_level_check',
+            canProceedToPageLevelCheck: true,
+            requiredBeforeAction: 'page_level_content_or_postcondition_check',
+            actionReadinessSummary:
+              'Read-page action readiness includes https://private.example.test/dashboard and Private Dashboard.',
+            actionReadinessClaimBoundary: 'Read-page action readiness boundary.',
           },
           page: {
             pageText: 'confidential visible page text',
@@ -1474,6 +1480,7 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     compactAiOperationEvidencePresent: true,
     currentTabAiOperationEvidencePresent: true,
     operationTargetBriefPresent: true,
+    actionReadinessBriefPresent: true,
     targetTabMatchesReadPage: true,
     readTargetIsBrowserActive: true,
     tabOwnerIsAi: true,
@@ -1519,6 +1526,11 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     nextRequiredCheck: 'page_level_content_or_postcondition_check',
     operationTargetSummaryPresent: true,
     operationTargetClaimBoundaryPresent: true,
+    actionReadiness: 'ready_for_page_level_check',
+    canProceedToPageLevelCheck: true,
+    requiredBeforeAction: 'page_level_content_or_postcondition_check',
+    actionReadinessSummaryPresent: true,
+    actionReadinessClaimBoundaryPresent: true,
   });
 });
 

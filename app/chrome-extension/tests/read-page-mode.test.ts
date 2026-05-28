@@ -217,6 +217,9 @@ describe('read_page mode', () => {
       runtimeStateSource: expect.any(String),
       browserWorldObjectChangeSummary: expect.stringContaining('Object change summary:'),
       browserWorldCurrentOperationConclusion: expect.any(String),
+      actionReadiness: 'reselect_or_reread_required',
+      canProceedToPageLevelCheck: false,
+      requiredBeforeAction: 'refresh_browser_object_snapshot',
     });
     expect(payload.pageProjection.userActivityLevel).toBe('active');
     expect(payload.diagnostics).toBeUndefined();
