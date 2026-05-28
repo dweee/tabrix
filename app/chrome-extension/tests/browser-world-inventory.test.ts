@@ -401,7 +401,15 @@ describe('browser world inventory', () => {
 
     listeners.tabUpdated[0]?.(
       20,
-      { status: 'complete' },
+      {
+        url: 'https://ai-opened.test/done',
+        title: 'AI opened done',
+        status: 'complete',
+        audible: true,
+        mutedInfo: { muted: true },
+        pinned: true,
+        discarded: false,
+      },
       {
         id: 20,
         windowId: 1,
@@ -419,15 +427,29 @@ describe('browser world inventory', () => {
 
     snapshot = await getBrowserWorldSnapshot();
     expect(snapshot.summary.recentChangeSummary).toContain(
-      'tab 20 was updated; openedBy=ai, status=complete',
+      'tab 20 was updated; changed=url,title,status,audible,muted,pinned,discarded, openedBy=ai, status=complete',
     );
     expect(snapshot.summary.tabLifecycleState).toMatchObject({
       latestEventKind: 'tab_updated',
       latestEventTabId: 20,
       latestEventWindowId: 1,
       latestEventStatus: 'complete',
+      latestUrlChanged: true,
+      latestTitleChanged: true,
+      latestStatusChanged: true,
+      latestAudibleChanged: true,
+      latestMutedChanged: true,
+      latestPinnedChanged: true,
+      latestDiscardedChanged: true,
       recentCreatedCount: 1,
       recentUpdatedCount: 1,
+      recentUrlChangedCount: 1,
+      recentTitleChangedCount: 1,
+      recentStatusChangedCount: 1,
+      recentAudibleChangedCount: 1,
+      recentMutedChangedCount: 1,
+      recentPinnedChangedCount: 1,
+      recentDiscardedChangedCount: 1,
       recentActivatedCount: 0,
       recentReplacedCount: 0,
       recentRemovedCount: 0,
@@ -437,14 +459,17 @@ describe('browser world inventory', () => {
       userOrPageOpenedRetainedCount: 2,
     });
     expect(snapshot.summary.tabLifecycleConclusion).toContain('latest=tab_updated, tab=20');
+    expect(snapshot.summary.tabLifecycleConclusion).toContain(
+      'changed=url,title,status,audible,muted,pinned,discarded',
+    );
     expect(snapshot.summary.dynamicObjectUpdateSummary).toBe(
-      'Dynamic object update: tab 20 was updated; owner=ai, status=complete, currentActiveTab=10, latestAiOperated=yes.',
+      'Dynamic object update: tab 20 was updated; changed=url,title,status,audible,muted,pinned,discarded, owner=ai, status=complete, currentActiveTab=10, latestAiOperated=yes.',
     );
     expect(snapshot.summary.objectChangeConclusion).toContain(
-      'Page object tab 20 was updated; owner=ai, status=complete',
+      'Page object tab 20 was updated; changed=url,title,status,audible,muted,pinned,discarded, owner=ai, status=complete',
     );
     expect(snapshot.summary.objectChangeSummary).toBe(
-      'Object change summary: the latest AI-operated page tab 20 changed to status complete; active tab 10 is complete and operable; AI last operated tab 20, but the active tab is 10; reselect or reread before continuing.',
+      'Object change summary: the latest AI-operated page tab 20 changed attributes=url,title,status,audible,muted,pinned,discarded with status complete; active tab 10 is complete and operable; AI last operated tab 20, but the active tab is 10; reselect or reread before continuing.',
     );
     expect(snapshot.summary.aiOperationState).toMatchObject({
       browserActiveTabId: 10,

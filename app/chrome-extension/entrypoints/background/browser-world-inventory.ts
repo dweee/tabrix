@@ -272,9 +272,23 @@ export interface BrowserWorldTabLifecycleState {
   latestEventTabId: number | null;
   latestEventWindowId: number | null;
   latestEventStatus: string | null;
+  latestUrlChanged: boolean | null;
+  latestTitleChanged: boolean | null;
+  latestStatusChanged: boolean | null;
+  latestAudibleChanged: boolean | null;
+  latestMutedChanged: boolean | null;
+  latestPinnedChanged: boolean | null;
+  latestDiscardedChanged: boolean | null;
   latestReplacedTabId: number | null;
   recentCreatedCount: number;
   recentUpdatedCount: number;
+  recentUrlChangedCount: number;
+  recentTitleChangedCount: number;
+  recentStatusChangedCount: number;
+  recentAudibleChangedCount: number;
+  recentMutedChangedCount: number;
+  recentPinnedChangedCount: number;
+  recentDiscardedChangedCount: number;
   recentActivatedCount: number;
   recentReplacedCount: number;
   recentAttachedCount: number;
@@ -394,6 +408,13 @@ export interface BrowserWorldEvent {
   newWindowId?: number | null;
   openedBy?: BrowserWorldTabOpenedBy;
   status?: string | null;
+  urlChanged?: boolean;
+  titleChanged?: boolean;
+  statusChanged?: boolean;
+  audibleChanged?: boolean;
+  mutedChanged?: boolean;
+  pinnedChanged?: boolean;
+  discardedChanged?: boolean;
   aiOperation?: string | null;
   aiOperationReason?: string | null;
   windowState?: string | null;
@@ -754,6 +775,22 @@ function bind(hook: EventHook | undefined, listener: any): void {
   });
 }
 
+function hasOwnChange(changeInfo: chrome.tabs.TabChangeInfo, key: keyof chrome.tabs.TabChangeInfo) {
+  return Object.prototype.hasOwnProperty.call(changeInfo, key);
+}
+
+function buildTabUpdateChangeFlags(changeInfo: chrome.tabs.TabChangeInfo) {
+  return {
+    urlChanged: hasOwnChange(changeInfo, 'url'),
+    titleChanged: hasOwnChange(changeInfo, 'title'),
+    statusChanged: hasOwnChange(changeInfo, 'status'),
+    audibleChanged: hasOwnChange(changeInfo, 'audible'),
+    mutedChanged: hasOwnChange(changeInfo, 'mutedInfo'),
+    pinnedChanged: hasOwnChange(changeInfo, 'pinned'),
+    discardedChanged: hasOwnChange(changeInfo, 'discarded'),
+  };
+}
+
 export function initBrowserWorldInventory(): void {
   if (attached) return;
   attached = true;
@@ -782,6 +819,7 @@ export function initBrowserWorldInventory(): void {
   bind(
     chrome.tabs?.onUpdated,
     (tabId: number, _changeInfo: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab) => {
+      const changeFlags = buildTabUpdateChangeFlags(_changeInfo);
       const previous = tabsById.get(tabId);
       const normalized = normalizeTab(
         { ...previous, ...tab, id: tabId } as chrome.tabs.Tab,
@@ -798,6 +836,7 @@ export function initBrowserWorldInventory(): void {
         windowId: normalized?.windowId ?? null,
         openedBy: normalized?.openedBy,
         status: normalized?.status ?? null,
+        ...changeFlags,
       });
     },
   );

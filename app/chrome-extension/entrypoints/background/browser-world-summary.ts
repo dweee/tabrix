@@ -90,14 +90,33 @@ export function buildTabLifecycleState(
 ): BrowserWorldTabLifecycleState {
   const tabEvents = events.filter(isTabLifecycleEvent);
   const latest = tabEvents.at(-1) ?? null;
+  const updatedEvents = tabEvents.filter((event) => event.eventKind === 'tab_updated');
   return {
     latestEventKind: latest?.eventKind ?? null,
     latestEventTabId: latest?.tabId ?? null,
     latestEventWindowId: latest?.windowId ?? null,
     latestEventStatus: latest?.status ?? null,
+    latestUrlChanged: latest?.eventKind === 'tab_updated' ? latest.urlChanged === true : null,
+    latestTitleChanged: latest?.eventKind === 'tab_updated' ? latest.titleChanged === true : null,
+    latestStatusChanged: latest?.eventKind === 'tab_updated' ? latest.statusChanged === true : null,
+    latestAudibleChanged:
+      latest?.eventKind === 'tab_updated' ? latest.audibleChanged === true : null,
+    latestMutedChanged: latest?.eventKind === 'tab_updated' ? latest.mutedChanged === true : null,
+    latestPinnedChanged: latest?.eventKind === 'tab_updated' ? latest.pinnedChanged === true : null,
+    latestDiscardedChanged:
+      latest?.eventKind === 'tab_updated' ? latest.discardedChanged === true : null,
     latestReplacedTabId: latest?.replacedTabId ?? null,
     recentCreatedCount: tabEvents.filter((event) => event.eventKind === 'tab_created').length,
-    recentUpdatedCount: tabEvents.filter((event) => event.eventKind === 'tab_updated').length,
+    recentUpdatedCount: updatedEvents.length,
+    recentUrlChangedCount: updatedEvents.filter((event) => event.urlChanged === true).length,
+    recentTitleChangedCount: updatedEvents.filter((event) => event.titleChanged === true).length,
+    recentStatusChangedCount: updatedEvents.filter((event) => event.statusChanged === true).length,
+    recentAudibleChangedCount: updatedEvents.filter((event) => event.audibleChanged === true)
+      .length,
+    recentMutedChangedCount: updatedEvents.filter((event) => event.mutedChanged === true).length,
+    recentPinnedChangedCount: updatedEvents.filter((event) => event.pinnedChanged === true).length,
+    recentDiscardedChangedCount: updatedEvents.filter((event) => event.discardedChanged === true)
+      .length,
     recentActivatedCount: tabEvents.filter((event) => event.eventKind === 'tab_activated').length,
     recentReplacedCount: tabEvents.filter((event) => event.eventKind === 'tab_replaced').length,
     recentAttachedCount: tabEvents.filter((event) => event.eventKind === 'tab_attached').length,
@@ -116,6 +135,18 @@ export function summarizeTabLifecycle(state: BrowserWorldTabLifecycleState): str
   }
   if (state.latestEventKind === 'tab_replaced') {
     return `Tab page object lifecycle: latest=${state.latestEventKind}, tab=${state.latestEventTabId ?? 'unknown'}, replacedTab=${state.latestReplacedTabId ?? 'unknown'}, retainedTabs=${state.retainedTabCount}, activeTab=${state.activeTabId ?? 'unknown'}, created=${state.recentCreatedCount}, updated=${state.recentUpdatedCount}, activated=${state.recentActivatedCount}, replaced=${state.recentReplacedCount}, attached=${state.recentAttachedCount}, detached=${state.recentDetachedCount}, removed=${state.recentRemovedCount}.`;
+  }
+  if (state.latestEventKind === 'tab_updated') {
+    const changedAttributes = [
+      state.latestUrlChanged ? 'url' : null,
+      state.latestTitleChanged ? 'title' : null,
+      state.latestStatusChanged ? 'status' : null,
+      state.latestAudibleChanged ? 'audible' : null,
+      state.latestMutedChanged ? 'muted' : null,
+      state.latestPinnedChanged ? 'pinned' : null,
+      state.latestDiscardedChanged ? 'discarded' : null,
+    ].filter(Boolean);
+    return `Tab page object lifecycle: latest=${state.latestEventKind}, tab=${state.latestEventTabId ?? 'unknown'}, status=${state.latestEventStatus ?? 'unknown'}, changed=${changedAttributes.length ? changedAttributes.join(',') : 'unknown_or_none'}, retainedTabs=${state.retainedTabCount}, activeTab=${state.activeTabId ?? 'unknown'}, created=${state.recentCreatedCount}, updated=${state.recentUpdatedCount}, urlChanged=${state.recentUrlChangedCount}, titleChanged=${state.recentTitleChangedCount}, statusChanged=${state.recentStatusChangedCount}, activated=${state.recentActivatedCount}, replaced=${state.recentReplacedCount}, attached=${state.recentAttachedCount}, detached=${state.recentDetachedCount}, removed=${state.recentRemovedCount}.`;
   }
   return `Tab page object lifecycle: latest=${state.latestEventKind}, tab=${state.latestEventTabId ?? 'unknown'}, status=${state.latestEventStatus ?? 'unknown'}, retainedTabs=${state.retainedTabCount}, activeTab=${state.activeTabId ?? 'unknown'}, created=${state.recentCreatedCount}, updated=${state.recentUpdatedCount}, activated=${state.recentActivatedCount}, replaced=${state.recentReplacedCount}, attached=${state.recentAttachedCount}, detached=${state.recentDetachedCount}, removed=${state.recentRemovedCount}.`;
 }
@@ -430,7 +461,7 @@ export function summarizeObjectChangeConclusion(
     return `Page object tab ${last.tabId ?? 'unknown'} was created; owner=${last.openedBy ?? 'unknown'}, status=${last.status ?? 'unknown'}.`;
   }
   if (last.eventKind === 'tab_updated') {
-    return `Page object tab ${last.tabId ?? 'unknown'} was updated; owner=${last.openedBy ?? 'unknown'}, status=${last.status ?? 'unknown'}.`;
+    return `Page object tab ${last.tabId ?? 'unknown'} was updated; changed=${summarizeChangedTabAttributes(last)}, owner=${last.openedBy ?? 'unknown'}, status=${last.status ?? 'unknown'}.`;
   }
   if (last.eventKind === 'tab_replaced') {
     return `Page object tab ${last.replacedTabId ?? 'unknown'} was replaced by tab ${last.tabId ?? 'unknown'}; owner=${last.openedBy ?? 'unknown'}.`;
@@ -516,7 +547,7 @@ export function summarizeObjectChangeSummary(
         : last.tabId === lastAiOperatedTab?.tabId
           ? 'the latest AI-operated page'
           : 'a background page';
-    return `Object change summary: ${target} tab ${last.tabId ?? 'unknown'} changed to status ${last.status ?? 'unknown'}; ${activeTabText}; ${routing}`;
+    return `Object change summary: ${target} tab ${last.tabId ?? 'unknown'} changed attributes=${summarizeChangedTabAttributes(last)} with status ${last.status ?? 'unknown'}; ${activeTabText}; ${routing}`;
   }
   if (last.eventKind === 'tab_created') {
     return `Object change summary: tab ${last.tabId ?? 'unknown'} was created with owner=${last.openedBy ?? 'unknown'}; retained tabs=${lifecycleState.retainedTabCount}; ${routing}`;
@@ -579,7 +610,7 @@ export function summarizeDynamicObjectUpdate(
   }
   if (last.eventKind === 'tab_updated') {
     const isLatestAiOperated = last.tabId === lastAiOperatedTab?.tabId;
-    return `Dynamic object update: tab ${last.tabId ?? 'unknown'} was updated; owner=${last.openedBy ?? 'unknown'}, status=${last.status ?? 'unknown'}, currentActiveTab=${activeTab?.tabId ?? 'unknown'}, latestAiOperated=${isLatestAiOperated ? 'yes' : 'no_or_unknown'}.`;
+    return `Dynamic object update: tab ${last.tabId ?? 'unknown'} was updated; changed=${summarizeChangedTabAttributes(last)}, owner=${last.openedBy ?? 'unknown'}, status=${last.status ?? 'unknown'}, currentActiveTab=${activeTab?.tabId ?? 'unknown'}, latestAiOperated=${isLatestAiOperated ? 'yes' : 'no_or_unknown'}.`;
   }
   if (last.eventKind === 'tab_replaced') {
     return `Dynamic object update: tab ${last.replacedTabId ?? 'unknown'} was replaced by tab ${last.tabId ?? 'unknown'}; owner=${last.openedBy ?? 'unknown'}, retainedTabs=${lifecycleState.retainedTabCount}, activeTab=${lifecycleState.activeTabId ?? 'unknown'}.`;
@@ -605,6 +636,19 @@ export function summarizeDynamicObjectUpdate(
   return `Dynamic object update: browser object changed; latestEvent=${last.eventKind}, activeTab=${activeTab?.tabId ?? 'unknown'}, retainedTabs=${lifecycleState.retainedTabCount}.`;
 }
 
+function summarizeChangedTabAttributes(event: BrowserWorldEvent): string {
+  const changed = [
+    event.urlChanged === true ? 'url' : null,
+    event.titleChanged === true ? 'title' : null,
+    event.statusChanged === true ? 'status' : null,
+    event.audibleChanged === true ? 'audible' : null,
+    event.mutedChanged === true ? 'muted' : null,
+    event.pinnedChanged === true ? 'pinned' : null,
+    event.discardedChanged === true ? 'discarded' : null,
+  ].filter(Boolean);
+  return changed.length ? changed.join(',') : 'unknown_or_none';
+}
+
 export function summarizeRecentEvents(events: readonly BrowserWorldEvent[]): string {
   const last =
     [...events].reverse().find((event) => event.eventKind !== 'inventory_seeded') ?? events.at(-1);
@@ -613,7 +657,7 @@ export function summarizeRecentEvents(events: readonly BrowserWorldEvent[]): str
     case 'tab_created':
       return `Last change: tab ${last.tabId ?? 'unknown'} was created in window ${last.windowId ?? 'unknown'}; openedBy=${last.openedBy ?? 'unknown'}, status=${last.status ?? 'unknown'}.`;
     case 'tab_updated':
-      return `Last change: tab ${last.tabId ?? 'unknown'} was updated; openedBy=${last.openedBy ?? 'unknown'}, status=${last.status ?? 'unknown'}.`;
+      return `Last change: tab ${last.tabId ?? 'unknown'} was updated; changed=${summarizeChangedTabAttributes(last)}, openedBy=${last.openedBy ?? 'unknown'}, status=${last.status ?? 'unknown'}.`;
     case 'tab_removed':
       return `Last change: tab ${last.tabId ?? 'unknown'} was removed; previousOpenedBy=${last.openedBy ?? 'unknown'}, lastAiOperation=${last.aiOperation ?? 'none'}.`;
     case 'tab_activated':

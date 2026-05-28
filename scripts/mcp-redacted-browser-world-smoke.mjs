@@ -848,6 +848,15 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
             typeof tabLifecycleState.latestEventStatus === 'string'
               ? tabLifecycleState.latestEventStatus
               : null,
+          latestChangedAttributes: [
+            tabLifecycleState.latestUrlChanged === true ? 'url' : null,
+            tabLifecycleState.latestTitleChanged === true ? 'title' : null,
+            tabLifecycleState.latestStatusChanged === true ? 'status' : null,
+            tabLifecycleState.latestAudibleChanged === true ? 'audible' : null,
+            tabLifecycleState.latestMutedChanged === true ? 'muted' : null,
+            tabLifecycleState.latestPinnedChanged === true ? 'pinned' : null,
+            tabLifecycleState.latestDiscardedChanged === true ? 'discarded' : null,
+          ].filter(Boolean),
           latestReplacedTabIdPresent: Number.isInteger(tabLifecycleState.latestReplacedTabId),
           recentCreatedCount: Number.isInteger(tabLifecycleState.recentCreatedCount)
             ? tabLifecycleState.recentCreatedCount
@@ -855,6 +864,21 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
           recentUpdatedCount: Number.isInteger(tabLifecycleState.recentUpdatedCount)
             ? tabLifecycleState.recentUpdatedCount
             : null,
+          recentUrlChangedCount: Number.isInteger(tabLifecycleState.recentUrlChangedCount)
+            ? tabLifecycleState.recentUrlChangedCount
+            : null,
+          recentTitleChangedCount: Number.isInteger(tabLifecycleState.recentTitleChangedCount)
+            ? tabLifecycleState.recentTitleChangedCount
+            : null,
+          recentStatusChangedCount: Number.isInteger(tabLifecycleState.recentStatusChangedCount)
+            ? tabLifecycleState.recentStatusChangedCount
+            : null,
+          recentRuntimeFlagChangedCount: [
+            tabLifecycleState.recentAudibleChangedCount,
+            tabLifecycleState.recentMutedChangedCount,
+            tabLifecycleState.recentPinnedChangedCount,
+            tabLifecycleState.recentDiscardedChangedCount,
+          ].reduce((total, value) => total + (Number.isInteger(value) ? value : 0), 0),
           recentActivatedCount: Number.isInteger(tabLifecycleState.recentActivatedCount)
             ? tabLifecycleState.recentActivatedCount
             : null,
