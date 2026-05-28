@@ -226,6 +226,18 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.currentWindowConclusion).toContain(
       'focused window 1 is visible and operable',
     );
+    expect(snapshot.summary.windowLifecycleState).toMatchObject({
+      latestEventKind: null,
+      latestEventWindowId: null,
+      retainedWindowCount: 1,
+      focusedWindowId: 1,
+      visibleWindowCount: 1,
+      minimizedWindowCount: 0,
+      operableWindowCount: 1,
+    });
+    expect(snapshot.summary.windowLifecycleConclusion).toContain(
+      'Window object lifecycle: no window lifecycle event observed',
+    );
     expect(snapshot.summary.tabStateMatrix).toMatchObject({
       total: 2,
       active: 1,
@@ -868,6 +880,17 @@ describe('browser world inventory', () => {
       canTabrixOperate: true,
     });
     expect(snapshot.summary.recentChangeSummary).toContain('window 2 was created');
+    expect(snapshot.summary.windowLifecycleState).toMatchObject({
+      latestEventKind: 'window_created',
+      latestEventWindowId: 2,
+      latestEventState: 'normal',
+      latestEventVisibilityState: 'visible',
+      latestEventCanTabrixOperate: true,
+      recentCreatedCount: 1,
+      retainedWindowCount: 2,
+      focusedWindowId: 1,
+    });
+    expect(snapshot.summary.windowLifecycleConclusion).toContain('latest=window_created, window=2');
 
     listeners.windowRemoved[0]?.(2);
     snapshot = await getBrowserWorldSnapshot();
@@ -887,6 +910,19 @@ describe('browser world inventory', () => {
     );
     expect(snapshot.summary.objectChangeConclusion).toContain(
       'Window object 2 was removed; removedTabs=1, removedAiOpenedTabs=0',
+    );
+    expect(snapshot.summary.windowLifecycleState).toMatchObject({
+      latestEventKind: 'window_removed',
+      latestEventWindowId: 2,
+      latestRemovedTabCount: 1,
+      latestRemovedAiOpenedTabCount: 0,
+      recentCreatedCount: 1,
+      recentRemovedCount: 1,
+      retainedWindowCount: 1,
+      focusedWindowId: 1,
+    });
+    expect(snapshot.summary.windowLifecycleConclusion).toContain(
+      'latest=window_removed, window=2, removedTabs=1',
     );
   });
 
@@ -947,6 +983,14 @@ describe('browser world inventory', () => {
       relationToCurrentOperableWindow: 'focused_window_visible_operable',
       canOperateFocusedWindow: true,
     });
+    expect(snapshot.summary.windowLifecycleState).toMatchObject({
+      latestEventKind: 'window_created',
+      latestEventWindowId: 2,
+      retainedWindowCount: 2,
+      focusedWindowId: 2,
+      visibleWindowCount: 2,
+      operableWindowCount: 2,
+    });
   });
 
   it('keeps BrowserWindowObject focus and operability in sync when active state changes', async () => {
@@ -988,6 +1032,13 @@ describe('browser world inventory', () => {
       inoperableWindowCount: 1,
     });
     expect(snapshot.summary.currentWindowConclusion).toContain('no focused browser window');
+    expect(snapshot.summary.windowLifecycleState).toMatchObject({
+      latestEventKind: 'window_focus_changed',
+      latestEventWindowId: -1,
+      recentFocusChangedCount: 1,
+      retainedWindowCount: 1,
+      focusedWindowId: null,
+    });
 
     listeners.windowFocusChanged[0]?.(1);
     snapshot = await getBrowserWorldSnapshot();
@@ -1004,6 +1055,13 @@ describe('browser world inventory', () => {
       focusedWindowId: 1,
       relationToCurrentOperableWindow: 'focused_window_not_operable',
       canOperateFocusedWindow: false,
+    });
+    expect(snapshot.summary.windowLifecycleState).toMatchObject({
+      latestEventKind: 'window_focus_changed',
+      latestEventWindowId: 1,
+      recentFocusChangedCount: 2,
+      retainedWindowCount: 1,
+      focusedWindowId: 1,
     });
   });
 

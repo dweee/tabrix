@@ -45,6 +45,18 @@ function redactedAiActionReadiness() {
   };
 }
 
+function redactedWindowLifecycleState() {
+  return {
+    latestEventKind: null,
+    retainedWindowCount: 1,
+    focusedWindowIdPresent: true,
+    visibleWindowCount: 1,
+    minimizedWindowCount: 0,
+    operableWindowCount: 1,
+    inoperableWindowCount: 0,
+  };
+}
+
 test('extractJsonObject parses the bounded CLI Result payload', () => {
   const parsed = extractJsonObject('tabrix mcp call get_windows_and_tabs\n\nResult\n{"ok":true}\n');
   assert.deepEqual(parsed, { ok: true });
@@ -829,6 +841,8 @@ test('buildWindowStateDriftSummary reports stable repeated observer samples', ()
         aiActionReadiness: redactedAiActionReadiness(),
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
+        windowLifecycleState: redactedWindowLifecycleState(),
+        windowLifecycleConclusionPresent: true,
       },
     },
     {
@@ -845,6 +859,8 @@ test('buildWindowStateDriftSummary reports stable repeated observer samples', ()
         aiActionReadiness: redactedAiActionReadiness(),
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
+        windowLifecycleState: redactedWindowLifecycleState(),
+        windowLifecycleConclusionPresent: true,
       },
     },
   ];
@@ -855,6 +871,7 @@ test('buildWindowStateDriftSummary reports stable repeated observer samples', ()
     allSamplesCompactBounded: true,
     allSamplesRetentionBounded: true,
     allSamplesRefreshHealthPresent: true,
+    allSamplesWindowLifecyclePresent: true,
     refreshThrottleProof: {
       requestedSampleIntervalMs: null,
       minimumObservedSampleIntervalMs: null,
@@ -897,6 +914,8 @@ test('buildWindowStateDriftSummary reports drift without failing observation', (
         aiActionReadiness: redactedAiActionReadiness(),
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
+        windowLifecycleState: redactedWindowLifecycleState(),
+        windowLifecycleConclusionPresent: true,
       },
     },
     {
@@ -913,6 +932,8 @@ test('buildWindowStateDriftSummary reports drift without failing observation', (
         aiActionReadiness: redactedAiActionReadiness(),
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
+        windowLifecycleState: redactedWindowLifecycleState(),
+        windowLifecycleConclusionPresent: true,
       },
     },
   ]);
@@ -938,6 +959,8 @@ test('buildWindowStateDriftSummary requires skipped resync proof for sub-throttl
     aiActionReadiness: redactedAiActionReadiness(),
     windows: { total: 1, focused: 1 },
     windowOperationState: { focusedWindowState: 'normal' },
+    windowLifecycleState: redactedWindowLifecycleState(),
+    windowLifecycleConclusionPresent: true,
   };
 
   const summary = buildWindowStateDriftSummary(
@@ -991,6 +1014,8 @@ test('buildWindowStateDriftSummary requires refresh health for every sample', ()
         aiActionReadiness: redactedAiActionReadiness(),
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
+        windowLifecycleState: redactedWindowLifecycleState(),
+        windowLifecycleConclusionPresent: true,
       },
     },
     {
@@ -1001,8 +1026,11 @@ test('buildWindowStateDriftSummary requires refresh health for every sample', ()
         retentionWithinLimit: true,
         currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
         tabAttributeGroupClaimBoundaryPresent: true,
+        aiActionReadiness: redactedAiActionReadiness(),
         windows: { total: 1, focused: 1 },
         windowOperationState: { focusedWindowState: 'normal' },
+        windowLifecycleState: redactedWindowLifecycleState(),
+        windowLifecycleConclusionPresent: true,
       },
     },
   ]);
@@ -1941,6 +1969,8 @@ test('isSmokeResultPassing keeps observer verdicts strict and explicit', () => {
       redacted: {
         currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
         tabAttributeGroupClaimBoundaryPresent: true,
+        windowLifecycleState: redactedWindowLifecycleState(),
+        windowLifecycleConclusionPresent: true,
       },
     }),
     true,
@@ -1964,6 +1994,7 @@ test('isSmokeResultPassing keeps observer verdicts strict and explicit', () => {
       scenario: 'window-state-drift',
       driftSummary: {
         allSamplesCurrentTabAttributeGroupsPresent: true,
+        allSamplesWindowLifecyclePresent: true,
       },
       verdict: 'WINDOW_STATE_REPEATED_OBSERVER_PASS',
     }),

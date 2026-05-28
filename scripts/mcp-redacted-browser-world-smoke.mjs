@@ -375,6 +375,8 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     payload?.compactSummary?.windowStateMatrix ?? payload?.summary?.windowStateMatrix ?? null;
   const windowOperationState =
     payload?.compactSummary?.windowOperationState ?? payload?.summary?.windowOperationState ?? null;
+  const windowLifecycleState =
+    payload?.compactSummary?.windowLifecycleState ?? payload?.summary?.windowLifecycleState ?? null;
   const tabStateMatrix =
     payload?.compactSummary?.tabStateMatrix ?? payload?.summary?.tabStateMatrix ?? null;
   const tabLifecycleState =
@@ -573,6 +575,58 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     currentWindowConclusionPresent:
       typeof payload?.compactSummary?.currentWindowConclusion === 'string' ||
       typeof payload?.summary?.currentWindowConclusion === 'string',
+    windowLifecycleState: windowLifecycleState
+      ? {
+          latestEventKind:
+            typeof windowLifecycleState.latestEventKind === 'string'
+              ? windowLifecycleState.latestEventKind
+              : null,
+          latestEventWindowIdPresent: Number.isInteger(windowLifecycleState.latestEventWindowId),
+          latestEventState:
+            typeof windowLifecycleState.latestEventState === 'string'
+              ? windowLifecycleState.latestEventState
+              : null,
+          latestEventVisibilityState:
+            typeof windowLifecycleState.latestEventVisibilityState === 'string'
+              ? windowLifecycleState.latestEventVisibilityState
+              : null,
+          latestEventCanTabrixOperate:
+            typeof windowLifecycleState.latestEventCanTabrixOperate === 'boolean'
+              ? windowLifecycleState.latestEventCanTabrixOperate
+              : null,
+          recentCreatedCount: Number.isInteger(windowLifecycleState.recentCreatedCount)
+            ? windowLifecycleState.recentCreatedCount
+            : null,
+          recentRemovedCount: Number.isInteger(windowLifecycleState.recentRemovedCount)
+            ? windowLifecycleState.recentRemovedCount
+            : null,
+          recentFocusChangedCount: Number.isInteger(windowLifecycleState.recentFocusChangedCount)
+            ? windowLifecycleState.recentFocusChangedCount
+            : null,
+          recentBoundsChangedCount: Number.isInteger(windowLifecycleState.recentBoundsChangedCount)
+            ? windowLifecycleState.recentBoundsChangedCount
+            : null,
+          retainedWindowCount: Number.isInteger(windowLifecycleState.retainedWindowCount)
+            ? windowLifecycleState.retainedWindowCount
+            : null,
+          focusedWindowIdPresent: Number.isInteger(windowLifecycleState.focusedWindowId),
+          visibleWindowCount: Number.isInteger(windowLifecycleState.visibleWindowCount)
+            ? windowLifecycleState.visibleWindowCount
+            : null,
+          minimizedWindowCount: Number.isInteger(windowLifecycleState.minimizedWindowCount)
+            ? windowLifecycleState.minimizedWindowCount
+            : null,
+          operableWindowCount: Number.isInteger(windowLifecycleState.operableWindowCount)
+            ? windowLifecycleState.operableWindowCount
+            : null,
+          inoperableWindowCount: Number.isInteger(windowLifecycleState.inoperableWindowCount)
+            ? windowLifecycleState.inoperableWindowCount
+            : null,
+        }
+      : null,
+    windowLifecycleConclusionPresent:
+      typeof payload?.compactSummary?.windowLifecycleConclusion === 'string' ||
+      typeof payload?.summary?.windowLifecycleConclusion === 'string',
     objectInventory: objectInventory
       ? {
           objectModelPresent: typeof objectInventory.objectModel === 'string',
@@ -1684,6 +1738,11 @@ export function buildWindowStateDriftSummary(samples, options = {}) {
   const refreshHealthSamples = samples.filter(
     (sample) => typeof sample?.redacted?.refreshHealth?.lastRefreshDecision === 'string',
   );
+  const windowLifecycleSamples = samples.filter(
+    (sample) =>
+      sample?.redacted?.windowLifecycleState &&
+      sample?.redacted?.windowLifecycleConclusionPresent === true,
+  );
   const currentTabAttributeGroupSamples = samples.filter((sample) =>
     hasCurrentTabAttributeGroups(sample?.redacted),
   );
@@ -1743,6 +1802,8 @@ export function buildWindowStateDriftSummary(samples, options = {}) {
       samples.length > 0 && retentionBoundedSamples.length === samples.length,
     allSamplesRefreshHealthPresent:
       samples.length > 0 && refreshHealthSamples.length === samples.length,
+    allSamplesWindowLifecyclePresent:
+      samples.length > 0 && windowLifecycleSamples.length === samples.length,
     refreshThrottleProof: {
       requestedSampleIntervalMs,
       minimumObservedSampleIntervalMs,
@@ -1798,6 +1859,8 @@ function runWindowStateSmoke(cliPath, args) {
       redacted.hasBrowserWorldDetail &&
       redacted.objectInventoryPresent === true &&
       redacted.browserObjectEdgeSummaryPresent === true &&
+      Boolean(redacted.windowLifecycleState) &&
+      redacted.windowLifecycleConclusionPresent === true &&
       hasCurrentTabAttributeGroups(redacted) &&
       hasAiActionReadiness(redacted)
         ? 'WINDOW_STATE_OBSERVED'
@@ -1839,6 +1902,8 @@ function runWindowStateDriftSmoke(cliPath, args) {
       objectInventory: sample.redacted.objectInventory,
       windowStateMatrix: sample.redacted.windowStateMatrix,
       windowOperationState: sample.redacted.windowOperationState,
+      windowLifecycleState: sample.redacted.windowLifecycleState,
+      windowLifecycleConclusionPresent: sample.redacted.windowLifecycleConclusionPresent,
       windowStateMutation: sample.windowStateMutation,
     })),
     verdict:
@@ -1846,6 +1911,7 @@ function runWindowStateDriftSmoke(cliPath, args) {
       driftSummary.allSamplesCompactBounded === true &&
       driftSummary.allSamplesRetentionBounded === true &&
       driftSummary.allSamplesRefreshHealthPresent === true &&
+      driftSummary.allSamplesWindowLifecyclePresent === true &&
       driftSummary.refreshThrottleProof.proofSatisfied === true &&
       driftSummary.allSamplesCurrentTabAttributeGroupsPresent === true &&
       driftSummary.allSamplesAiActionReadinessPresent === true
@@ -1977,12 +2043,16 @@ export function isSmokeResultPassing(result) {
   }
   if (result.scenario === 'window-state') {
     return (
-      result.verdict === 'WINDOW_STATE_OBSERVED' && hasCurrentTabAttributeGroups(result.redacted)
+      result.verdict === 'WINDOW_STATE_OBSERVED' &&
+      hasCurrentTabAttributeGroups(result.redacted) &&
+      Boolean(result.redacted?.windowLifecycleState) &&
+      result.redacted?.windowLifecycleConclusionPresent === true
     );
   }
   if (result.scenario === 'window-state-drift') {
     return (
       result.verdict === 'WINDOW_STATE_REPEATED_OBSERVER_PASS' &&
+      result.driftSummary?.allSamplesWindowLifecyclePresent === true &&
       result.driftSummary?.allSamplesCurrentTabAttributeGroupsPresent === true
     );
   }

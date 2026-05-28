@@ -9,6 +9,8 @@ import type {
   BrowserWorldTabOpenedBy,
   BrowserWorldTabStateMatrix,
   BrowserWorldTabStateSummary,
+  BrowserWorldWindowLifecycleEventKind,
+  BrowserWorldWindowLifecycleState,
   BrowserWorldWindowObject,
   BrowserWorldWindowOperationRelation,
   BrowserWorldWindowOperationState,
@@ -255,6 +257,60 @@ function classifyWindowOperationRelation(
   }
   if (focusedWindow.canTabrixOperate === false) return 'focused_window_not_operable';
   return 'focused_window_operability_unknown';
+}
+
+function isWindowLifecycleEvent(event: BrowserWorldEvent): event is BrowserWorldEvent & {
+  eventKind: BrowserWorldWindowLifecycleEventKind;
+} {
+  return (
+    event.eventKind === 'window_created' ||
+    event.eventKind === 'window_removed' ||
+    event.eventKind === 'window_focus_changed' ||
+    event.eventKind === 'window_bounds_changed'
+  );
+}
+
+export function buildWindowLifecycleState(
+  events: readonly BrowserWorldEvent[],
+  windows: readonly BrowserWorldWindowObject[],
+  focusedWindow: BrowserWorldWindowObject | null,
+  matrix: BrowserWorldWindowStateMatrix,
+): BrowserWorldWindowLifecycleState {
+  const windowEvents = events.filter(isWindowLifecycleEvent);
+  const latest = windowEvents.at(-1) ?? null;
+  return {
+    latestEventKind: latest?.eventKind ?? null,
+    latestEventWindowId: latest?.windowId ?? null,
+    latestEventState: latest?.windowState ?? null,
+    latestEventVisibilityState: latest?.windowVisibilityState ?? null,
+    latestEventCanTabrixOperate: latest?.canTabrixOperate ?? null,
+    latestRemovedTabCount: latest?.removedTabCount ?? null,
+    latestRemovedAiOpenedTabCount: latest?.removedAiOpenedTabCount ?? null,
+    recentCreatedCount: windowEvents.filter((event) => event.eventKind === 'window_created').length,
+    recentRemovedCount: windowEvents.filter((event) => event.eventKind === 'window_removed').length,
+    recentFocusChangedCount: windowEvents.filter(
+      (event) => event.eventKind === 'window_focus_changed',
+    ).length,
+    recentBoundsChangedCount: windowEvents.filter(
+      (event) => event.eventKind === 'window_bounds_changed',
+    ).length,
+    retainedWindowCount: windows.length,
+    focusedWindowId: focusedWindow?.windowId ?? null,
+    visibleWindowCount: matrix.visible,
+    minimizedWindowCount: matrix.minimized,
+    operableWindowCount: matrix.operable,
+    inoperableWindowCount: matrix.inoperable,
+  };
+}
+
+export function summarizeWindowLifecycle(state: BrowserWorldWindowLifecycleState): string {
+  if (!state.latestEventKind) {
+    return `Window object lifecycle: no window lifecycle event observed; retainedWindows=${state.retainedWindowCount}, focusedWindow=${state.focusedWindowId ?? 'unknown'}, visible=${state.visibleWindowCount}, minimized=${state.minimizedWindowCount}, operable=${state.operableWindowCount}.`;
+  }
+  if (state.latestEventKind === 'window_removed') {
+    return `Window object lifecycle: latest=${state.latestEventKind}, window=${state.latestEventWindowId ?? 'unknown'}, removedTabs=${state.latestRemovedTabCount ?? 'unknown'}, removedAiOpenedTabs=${state.latestRemovedAiOpenedTabCount ?? 'unknown'}, retainedWindows=${state.retainedWindowCount}, focusedWindow=${state.focusedWindowId ?? 'unknown'}, created=${state.recentCreatedCount}, focusChanged=${state.recentFocusChangedCount}, boundsChanged=${state.recentBoundsChangedCount}, removed=${state.recentRemovedCount}.`;
+  }
+  return `Window object lifecycle: latest=${state.latestEventKind}, window=${state.latestEventWindowId ?? 'unknown'}, state=${state.latestEventState ?? 'unknown'}, visibility=${state.latestEventVisibilityState ?? 'unknown'}, operable=${state.latestEventCanTabrixOperate === true ? 'yes' : 'no_or_unknown'}, retainedWindows=${state.retainedWindowCount}, focusedWindow=${state.focusedWindowId ?? 'unknown'}, created=${state.recentCreatedCount}, focusChanged=${state.recentFocusChangedCount}, boundsChanged=${state.recentBoundsChangedCount}, removed=${state.recentRemovedCount}.`;
 }
 
 export function summarizeCurrentWindow(state: BrowserWorldWindowOperationState): string {

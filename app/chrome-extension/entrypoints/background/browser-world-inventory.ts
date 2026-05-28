@@ -3,6 +3,7 @@ import {
   buildTabAttributeGroups,
   buildTabLifecycleState,
   buildTabStateMatrix,
+  buildWindowLifecycleState,
   buildWindowOperationState,
   buildWindowStateMatrix,
   summarizeCurrentOperation,
@@ -15,6 +16,7 @@ import {
   summarizeTabLifecycle,
   summarizeTabState,
   summarizeTabStateMatrix,
+  summarizeWindowLifecycle,
   summarizeWindowStateMatrix,
 } from './browser-world-summary';
 
@@ -151,6 +153,8 @@ export interface BrowserWorldSummary {
   windowStateConclusion: string;
   windowOperationState: BrowserWorldWindowOperationState;
   currentWindowConclusion: string;
+  windowLifecycleState: BrowserWorldWindowLifecycleState;
+  windowLifecycleConclusion: string;
   tabStateMatrix: BrowserWorldTabStateMatrix;
   tabStateConclusion: string;
   tabLifecycleState: BrowserWorldTabLifecycleState;
@@ -196,6 +200,32 @@ export interface BrowserWorldWindowOperationState {
   focusedWindowActiveTabCanOperate: boolean | null;
   relationToCurrentOperableWindow: BrowserWorldWindowOperationRelation;
   canOperateFocusedWindow: boolean | null;
+  visibleWindowCount: number;
+  minimizedWindowCount: number;
+  operableWindowCount: number;
+  inoperableWindowCount: number;
+}
+
+export type BrowserWorldWindowLifecycleEventKind =
+  | 'window_created'
+  | 'window_removed'
+  | 'window_focus_changed'
+  | 'window_bounds_changed';
+
+export interface BrowserWorldWindowLifecycleState {
+  latestEventKind: BrowserWorldWindowLifecycleEventKind | null;
+  latestEventWindowId: number | null;
+  latestEventState: string | null;
+  latestEventVisibilityState: BrowserWorldWindowObject['visibilityState'] | null;
+  latestEventCanTabrixOperate: boolean | null;
+  latestRemovedTabCount: number | null;
+  latestRemovedAiOpenedTabCount: number | null;
+  recentCreatedCount: number;
+  recentRemovedCount: number;
+  recentFocusChangedCount: number;
+  recentBoundsChangedCount: number;
+  retainedWindowCount: number;
+  focusedWindowId: number | null;
   visibleWindowCount: number;
   minimizedWindowCount: number;
   operableWindowCount: number;
@@ -1024,6 +1054,12 @@ function buildSnapshot(): BrowserWorldSnapshot {
     .map((tab) => tab.tabId);
   const windowStateMatrix = buildWindowStateMatrix(windows);
   const windowOperationState = buildWindowOperationState(windowStateMatrix, focusedWindow ?? null);
+  const windowLifecycleState = buildWindowLifecycleState(
+    recentEvents,
+    windows,
+    focusedWindow ?? null,
+    windowStateMatrix,
+  );
   const tabStateMatrix = buildTabStateMatrix(tabs);
   const tabLifecycleState = buildTabLifecycleState(recentEvents, tabs, activeTab);
   const lastAiOperatedTab =
@@ -1090,6 +1126,8 @@ function buildSnapshot(): BrowserWorldSnapshot {
       windowStateConclusion: summarizeWindowStateMatrix(windowStateMatrix, focusedWindow ?? null),
       windowOperationState,
       currentWindowConclusion: summarizeCurrentWindow(windowOperationState),
+      windowLifecycleState,
+      windowLifecycleConclusion: summarizeWindowLifecycle(windowLifecycleState),
       tabStateMatrix,
       tabStateConclusion: summarizeTabStateMatrix(tabStateMatrix, activeTab, lastAiOperatedTab),
       tabLifecycleState,
