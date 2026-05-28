@@ -855,6 +855,20 @@ test('buildWindowStateDriftSummary reports stable repeated observer samples', ()
     allSamplesCompactBounded: true,
     allSamplesRetentionBounded: true,
     allSamplesRefreshHealthPresent: true,
+    refreshThrottleProof: {
+      requestedSampleIntervalMs: null,
+      minimumObservedSampleIntervalMs: null,
+      minimumObservedFullResyncIntervalMs: null,
+      sampledInsideThrottleWindow: false,
+      fullChromeResyncSamples: 1,
+      skippedRecentResyncSamples: 1,
+      failedRefreshSamples: 0,
+      unavailableRefreshSamples: 0,
+      skippedRecentResyncObserved: true,
+      proofSatisfied: true,
+      claimBoundary:
+        'Throttle proof uses redacted refresh decisions only. It proves repeated observer sampling did not require every sample to perform a full Chrome resync; it does not prove page content or task success.',
+    },
     allSamplesCurrentTabAttributeGroupsPresent: true,
     allSamplesAiActionReadinessPresent: true,
     windowCountStable: true,
@@ -912,6 +926,53 @@ test('buildWindowStateDriftSummary reports drift without failing observation', (
   assert.equal(summary.windowCountStable, true);
   assert.equal(summary.tabCountStable, false);
   assert.equal(summary.driftObserved, true);
+});
+
+test('buildWindowStateDriftSummary requires skipped resync proof for sub-throttle sampling', () => {
+  const baseRedacted = {
+    tabCount: 4,
+    compactSummaryBounded: true,
+    retentionWithinLimit: true,
+    currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
+    tabAttributeGroupClaimBoundaryPresent: true,
+    aiActionReadiness: redactedAiActionReadiness(),
+    windows: { total: 1, focused: 1 },
+    windowOperationState: { focusedWindowState: 'normal' },
+  };
+
+  const summary = buildWindowStateDriftSummary(
+    [
+      {
+        verdict: 'WINDOW_STATE_OBSERVED',
+        redacted: {
+          ...baseRedacted,
+          refreshHealth: {
+            fullChromeResyncCount: 3,
+            skippedChromeResyncCount: 0,
+            minFullChromeResyncIntervalMs: 250,
+            lastRefreshDecision: 'full_chrome_resync',
+          },
+        },
+      },
+      {
+        verdict: 'WINDOW_STATE_OBSERVED',
+        redacted: {
+          ...baseRedacted,
+          refreshHealth: {
+            fullChromeResyncCount: 4,
+            skippedChromeResyncCount: 0,
+            minFullChromeResyncIntervalMs: 250,
+            lastRefreshDecision: 'full_chrome_resync',
+          },
+        },
+      },
+    ],
+    { sampleIntervalMs: 50, observedSampleIntervalsMs: [50] },
+  );
+
+  assert.equal(summary.refreshThrottleProof.sampledInsideThrottleWindow, true);
+  assert.equal(summary.refreshThrottleProof.skippedRecentResyncObserved, false);
+  assert.equal(summary.refreshThrottleProof.proofSatisfied, false);
 });
 
 test('buildWindowStateDriftSummary requires refresh health for every sample', () => {

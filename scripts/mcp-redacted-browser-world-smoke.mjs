@@ -1673,7 +1673,7 @@ function hasAiActionReadiness(redacted) {
   );
 }
 
-export function buildWindowStateDriftSummary(samples) {
+export function buildWindowStateDriftSummary(samples, options = {}) {
   const observedSamples = samples.filter((sample) => sample?.verdict === 'WINDOW_STATE_OBSERVED');
   const compactBoundedSamples = samples.filter(
     (sample) => sample?.redacted?.compactSummaryBounded === true,
@@ -1689,6 +1689,36 @@ export function buildWindowStateDriftSummary(samples) {
   );
   const aiActionReadinessSamples = samples.filter((sample) =>
     hasAiActionReadiness(sample?.redacted),
+  );
+  const refreshHealthValues = samples
+    .map((sample) => sample?.redacted?.refreshHealth)
+    .filter((refreshHealth) => refreshHealth && typeof refreshHealth === 'object');
+  const refreshDecisions = refreshHealthValues.map(
+    (refreshHealth) => refreshHealth.lastRefreshDecision,
+  );
+  const minFullChromeResyncIntervals = refreshHealthValues
+    .map((refreshHealth) => refreshHealth.minFullChromeResyncIntervalMs)
+    .filter(Number.isInteger);
+  const minimumObservedFullResyncIntervalMs =
+    minFullChromeResyncIntervals.length > 0 ? Math.min(...minFullChromeResyncIntervals) : null;
+  const requestedSampleIntervalMs = Number.isInteger(options?.sampleIntervalMs)
+    ? options.sampleIntervalMs
+    : null;
+  const observedSampleIntervalsMs = Array.isArray(options?.observedSampleIntervalsMs)
+    ? options.observedSampleIntervalsMs.filter(Number.isInteger)
+    : [];
+  const minimumObservedSampleIntervalMs =
+    observedSampleIntervalsMs.length > 0 ? Math.min(...observedSampleIntervalsMs) : null;
+  const sampledInsideThrottleWindow =
+    samples.length > 1 &&
+    minimumObservedSampleIntervalMs !== null &&
+    minimumObservedFullResyncIntervalMs !== null &&
+    minimumObservedSampleIntervalMs < minimumObservedFullResyncIntervalMs;
+  const skippedRecentResyncObserved = refreshHealthValues.some(
+    (refreshHealth) =>
+      refreshHealth.lastRefreshDecision === 'skipped_recent_resync' ||
+      (Number.isInteger(refreshHealth.skippedChromeResyncCount) &&
+        refreshHealth.skippedChromeResyncCount > 0),
   );
   const windowCounts = samples.map((sample) => sample?.redacted?.windows?.total);
   const tabCounts = samples.map((sample) => sample?.redacted?.tabCount);
@@ -1713,6 +1743,26 @@ export function buildWindowStateDriftSummary(samples) {
       samples.length > 0 && retentionBoundedSamples.length === samples.length,
     allSamplesRefreshHealthPresent:
       samples.length > 0 && refreshHealthSamples.length === samples.length,
+    refreshThrottleProof: {
+      requestedSampleIntervalMs,
+      minimumObservedSampleIntervalMs,
+      minimumObservedFullResyncIntervalMs,
+      sampledInsideThrottleWindow,
+      fullChromeResyncSamples: refreshDecisions.filter(
+        (decision) => decision === 'full_chrome_resync',
+      ).length,
+      skippedRecentResyncSamples: refreshDecisions.filter(
+        (decision) => decision === 'skipped_recent_resync',
+      ).length,
+      failedRefreshSamples: refreshDecisions.filter((decision) => decision === 'failed').length,
+      unavailableRefreshSamples: refreshDecisions.filter(
+        (decision) => decision === 'chrome_inventory_unavailable',
+      ).length,
+      skippedRecentResyncObserved,
+      proofSatisfied: sampledInsideThrottleWindow ? skippedRecentResyncObserved : true,
+      claimBoundary:
+        'Throttle proof uses redacted refresh decisions only. It proves repeated observer sampling did not require every sample to perform a full Chrome resync; it does not prove page content or task success.',
+    },
     allSamplesCurrentTabAttributeGroupsPresent:
       samples.length > 0 && currentTabAttributeGroupSamples.length === samples.length,
     allSamplesAiActionReadinessPresent:
@@ -1757,11 +1807,19 @@ function runWindowStateSmoke(cliPath, args) {
 
 function runWindowStateDriftSmoke(cliPath, args) {
   const samples = [];
+  const sampleStartTimes = [];
   for (let index = 0; index < args.sampleCount; index += 1) {
+    sampleStartTimes.push(Date.now());
     samples.push(runWindowStateSmoke(cliPath, { ...args, skipOpen: true }));
     if (index < args.sampleCount - 1) sleepMs(args.sampleIntervalMs);
   }
-  const driftSummary = buildWindowStateDriftSummary(samples);
+  const observedSampleIntervalsMs = sampleStartTimes
+    .slice(1)
+    .map((startedAtMs, index) => Math.max(0, startedAtMs - sampleStartTimes[index]));
+  const driftSummary = buildWindowStateDriftSummary(samples, {
+    sampleIntervalMs: args.sampleIntervalMs,
+    observedSampleIntervalsMs,
+  });
   return {
     scenario: 'window-state-drift',
     observerOnly: true,
@@ -1788,6 +1846,7 @@ function runWindowStateDriftSmoke(cliPath, args) {
       driftSummary.allSamplesCompactBounded === true &&
       driftSummary.allSamplesRetentionBounded === true &&
       driftSummary.allSamplesRefreshHealthPresent === true &&
+      driftSummary.refreshThrottleProof.proofSatisfied === true &&
       driftSummary.allSamplesCurrentTabAttributeGroupsPresent === true &&
       driftSummary.allSamplesAiActionReadinessPresent === true
         ? 'WINDOW_STATE_REPEATED_OBSERVER_PASS'
