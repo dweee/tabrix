@@ -186,7 +186,7 @@ describe('browser world inventory', () => {
     expect(snapshot.userOrPageOpenedTabIds).toEqual([10, 11]);
     expect(snapshot.operableTabIds).toEqual([10]);
     expect(snapshot.summary.primaryConclusion).toBe(
-      'Browser object snapshot: focusedWindow=1, visibility=visible, operable=yes; activeTab=10, status=complete, owner=user_or_page, operable=yes; latestAiTab=none, relation=no_ai_operation_observed; inventory=windows:1, tabs:2, ai:0, userOrPage:2, operable:1; recent=Last change: browser world inventory was refreshed from Chrome.; next=read_or_select_intended_target',
+      'Browser object snapshot: focusedWindow=1, visibility=visible, operable=yes; activeTab=10, status=complete, owner=user_or_page, source=user_or_unknown, operable=yes; latestAiTab=none, relation=no_ai_operation_observed; inventory=windows:1, tabs:2, ai:0, page:0, userOrUnknown:2, userOrPage:2, operable:1; recent=Last change: browser world inventory was refreshed from Chrome.; next=read_or_select_intended_target',
     );
     expect(snapshot.summary.activeWindow).toMatchObject({
       windowId: 1,
@@ -256,6 +256,8 @@ describe('browser world inventory', () => {
       withOpener: 0,
       aiOpened: 0,
       userOrPageOpened: 2,
+      pageOpened: 0,
+      userOrUnknownOpened: 2,
       unknownOpened: 0,
       recentlyOperatedByAi: 0,
       idleForAi: 2,
@@ -265,6 +267,7 @@ describe('browser world inventory', () => {
       operabilityUnknown: 0,
       statusCounts: { complete: 2 },
       ownerCounts: { ai: 0, user_or_page: 2, unknown: 0 },
+      openedBySourceCounts: { ai_tool: 0, page_opener: 0, user_or_unknown: 2, unknown: 0 },
     });
     expect(snapshot.summary.tabStateConclusion).toContain(
       'Tab page object matrix: 2 tab(s), active=1, background=1',
@@ -301,7 +304,7 @@ describe('browser world inventory', () => {
       'Current operation object: no AI-operated tab page object has been observed yet.',
     );
     expect(snapshot.summary.browserObjectEdgeSummary).toBe(
-      'Browser object edge state: windows total=1, visible=1, minimized=0, focused=1, operable=1; tabs total=2, active=1, background=1, loading=0, operable=1, aiOpened=0, userOrPageOpened=2; currentWindow=focused_window_visible_operable; currentOperation=no_ai_operation_observed',
+      'Browser object edge state: windows total=1, visible=1, minimized=0, focused=1, operable=1; tabs total=2, active=1, background=1, loading=0, operable=1, aiOpened=0, pageOpened=0, userOrUnknownOpened=2, userOrPageOpened=2; currentWindow=focused_window_visible_operable; currentOperation=no_ai_operation_observed',
     );
     expect(snapshot.windows[0]).toMatchObject({
       windowId: 1,
@@ -327,6 +330,7 @@ describe('browser world inventory', () => {
       pinned: false,
       openerTabId: null,
       openedBy: 'user_or_page',
+      openedBySource: 'user_or_unknown',
       canTabrixOperate: true,
       operabilityReason: 'regular_web_page',
     });
@@ -344,7 +348,8 @@ describe('browser world inventory', () => {
       },
       ownership: {
         openedBy: 'user_or_page',
-        confidence: 0.7,
+        openedBySource: 'user_or_unknown',
+        confidence: 0.55,
         aiOperationState: 'idle',
       },
       operability: {
@@ -357,7 +362,8 @@ describe('browser world inventory', () => {
     expect(snapshot.tabs[0]).toMatchObject({
       tabId: 10,
       openedBy: 'user_or_page',
-      openedByReason: 'observed_by_chrome_inventory_without_ai_marker',
+      openedBySource: 'user_or_unknown',
+      openedByReason: 'observed_by_chrome_inventory_without_ai_marker_or_opener',
       canTabrixOperate: true,
     });
     expect(snapshot.tabs[1]).toMatchObject({
@@ -475,7 +481,7 @@ describe('browser world inventory', () => {
       'Object change summary: the latest AI-operated page tab 20 changed attributes=url,title,status,audible,muted,pinned,discarded with status complete; active tab 10 is complete and operable; AI last operated tab 20, but the active tab is 10; reselect or reread before continuing.',
     );
     expect(snapshot.summary.primaryConclusion).toContain(
-      'activeTab=10, status=complete, owner=user_or_page, operable=yes',
+      'activeTab=10, status=complete, owner=user_or_page, source=user_or_unknown, operable=yes',
     );
     expect(snapshot.summary.primaryConclusion).toContain(
       'latestAiTab=20, relation=latest_ai_operated_background_tab, canContinue=no',
@@ -501,7 +507,7 @@ describe('browser world inventory', () => {
       'latest AI-operated tab 20 is not browser-active',
     );
     expect(snapshot.summary.browserObjectEdgeSummary).toBe(
-      'Browser object edge state: windows total=1, visible=1, minimized=0, focused=1, operable=1; tabs total=3, active=1, background=2, loading=0, operable=2, aiOpened=1, userOrPageOpened=2; currentWindow=focused_window_visible_operable; currentOperation=latest_ai_operated_background_tab',
+      'Browser object edge state: windows total=1, visible=1, minimized=0, focused=1, operable=1; tabs total=3, active=1, background=2, loading=0, operable=2, aiOpened=1, pageOpened=0, userOrUnknownOpened=2, userOrPageOpened=2; currentWindow=focused_window_visible_operable; currentOperation=latest_ai_operated_background_tab',
     );
 
     listeners.tabActivated[0]?.({ tabId: 20, windowId: 1 });
@@ -523,7 +529,7 @@ describe('browser world inventory', () => {
       'Object change summary: current page switched to tab 20; active tab 20 is complete and operable; AI can continue on tab 20 if the next page-level check still passes.',
     );
     expect(snapshot.summary.primaryConclusion).toContain(
-      'activeTab=20, status=complete, owner=ai, operable=yes',
+      'activeTab=20, status=complete, owner=ai, source=ai_tool, operable=yes',
     );
     expect(snapshot.summary.primaryConclusion).toContain(
       'latestAiTab=20, relation=same_as_browser_active, canContinue=yes',
@@ -605,7 +611,7 @@ describe('browser world inventory', () => {
       'latest AI-operated tab 20 is also the browser-active tab',
     );
     expect(snapshot.summary.browserObjectEdgeSummary).toBe(
-      'Browser object edge state: windows total=1, visible=1, minimized=0, focused=1, operable=1; tabs total=3, active=1, background=2, loading=0, operable=2, aiOpened=1, userOrPageOpened=2; currentWindow=focused_window_visible_operable; currentOperation=same_as_browser_active',
+      'Browser object edge state: windows total=1, visible=1, minimized=0, focused=1, operable=1; tabs total=3, active=1, background=2, loading=0, operable=2, aiOpened=1, pageOpened=0, userOrUnknownOpened=2, userOrPageOpened=2; currentWindow=focused_window_visible_operable; currentOperation=same_as_browser_active',
     );
     expect(snapshot.tabs.find((tab) => tab.tabId === 20)).toMatchObject({
       url: 'https://ai-opened.test/done',
@@ -813,7 +819,8 @@ describe('browser world inventory', () => {
     expect(snapshot.tabs.find((tab) => tab.tabId === 40)).toMatchObject({
       tabId: 40,
       openedBy: 'user_or_page',
-      openedByConfidence: 0.7,
+      openedBySource: 'user_or_unknown',
+      openedByConfidence: 0.55,
       aiOperationState: 'recently_operated',
       lastAiOperation: 'read_page',
       lastAiOperationConfidence: 0.95,

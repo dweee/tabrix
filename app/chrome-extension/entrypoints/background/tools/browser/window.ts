@@ -51,6 +51,7 @@ function buildCompactTabObject(tab: BrowserWorldTabObject | null, role: string) 
       active: null,
       status: null,
       openedBy: null,
+      openedBySource: null,
       openedByConfidence: null,
       openedByReason: null,
       aiOperationState: null,
@@ -71,6 +72,7 @@ function buildCompactTabObject(tab: BrowserWorldTabObject | null, role: string) 
     active: tab.active,
     status: tab.status,
     openedBy: tab.openedBy,
+    openedBySource: tab.openedBySource,
     openedByConfidence: tab.openedByConfidence,
     openedByReason: tab.openedByReason,
     aiOperationState: tab.aiOperationState,
@@ -401,6 +403,7 @@ class WindowTool extends BaseBrowserToolExecutor {
               pinned: tab.pinned,
               openerTabId: tab.openerTabId,
               openedBy: tab.openedBy,
+              openedBySource: tab.openedBySource,
               openedByConfidence: tab.openedByConfidence,
               openedByReason: tab.openedByReason,
               canTabrixOperate: tab.canTabrixOperate,
@@ -451,6 +454,7 @@ class WindowTool extends BaseBrowserToolExecutor {
             url: browserWorld.summary.activeTab.url,
             title: browserWorld.summary.activeTab.title,
             openedBy: browserWorld.summary.activeTab.openedBy,
+            openedBySource: browserWorld.summary.activeTab.openedBySource,
             tabStatus: browserWorld.summary.currentTabObject?.status ?? null,
             tabOperabilityReason:
               browserWorld.summary.currentTabObject?.operabilityReason ?? 'active_tab_not_observed',
@@ -482,6 +486,16 @@ class WindowTool extends BaseBrowserToolExecutor {
               browserWorld.summary.aiOperationState.canContinueOnLatestAiOperatedTab,
             aiOpened: buildCompactIdSet(browserWorld.aiOpenedTabIds),
             userOrPageOpened: buildCompactIdSet(browserWorld.userOrPageOpenedTabIds),
+            pageOpened: buildCompactIdSet(
+              browserWorld.tabs
+                .filter((tab) => tab.openedBySource === 'page_opener')
+                .map((tab) => tab.tabId),
+            ),
+            userOrUnknownOpened: buildCompactIdSet(
+              browserWorld.tabs
+                .filter((tab) => tab.openedBySource === 'user_or_unknown')
+                .map((tab) => tab.tabId),
+            ),
             unknownOpened: buildCompactIdSet(
               browserWorld.tabs.filter((tab) => tab.openedBy === 'unknown').map((tab) => tab.tabId),
             ),
@@ -496,7 +510,7 @@ class WindowTool extends BaseBrowserToolExecutor {
                 .filter((tab) => tab.aiOperationState === 'recently_operated')
                 .map((tab) => tab.tabId),
             ),
-            summary: `Browser object inventory: windows=${browserWorld.windowCount}, tabs=${browserWorld.tabCount}, activeTab=${browserWorld.browserActiveTabId ?? 'unknown'}, aiOpened=${browserWorld.aiOpenedTabIds.length}, userOrPageOpened=${browserWorld.userOrPageOpenedTabIds.length}, operable=${browserWorld.operableTabIds.length}, currentOperation=${browserWorld.summary.aiOperationState.relationToBrowserActiveTab}.`,
+            summary: `Browser object inventory: windows=${browserWorld.windowCount}, tabs=${browserWorld.tabCount}, activeTab=${browserWorld.browserActiveTabId ?? 'unknown'}, aiOpened=${browserWorld.aiOpenedTabIds.length}, pageOpened=${browserWorld.tabs.filter((tab) => tab.openedBySource === 'page_opener').length}, userOrUnknownOpened=${browserWorld.tabs.filter((tab) => tab.openedBySource === 'user_or_unknown').length}, userOrPageOpened=${browserWorld.userOrPageOpenedTabIds.length}, operable=${browserWorld.operableTabIds.length}, currentOperation=${browserWorld.summary.aiOperationState.relationToBrowserActiveTab}.`,
             claimBoundary:
               'Object inventory summary contains browser lifecycle ids and routing facts only; it does not prove page content understanding, account state, login success, or API/CDP reuse.',
           },
@@ -546,6 +560,7 @@ class WindowTool extends BaseBrowserToolExecutor {
                 active: tab.active,
                 status: tab.status,
                 openedBy: tab.openedBy,
+                openedBySource: tab.openedBySource,
                 canTabrixOperate: tab.canTabrixOperate,
                 operabilityReason: tab.operabilityReason,
               })),

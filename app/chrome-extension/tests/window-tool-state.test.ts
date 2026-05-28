@@ -83,6 +83,7 @@ describe('get_windows_and_tabs state inventory', () => {
           url: 'https://example.test/active',
           title: 'Active',
           openedBy: 'user_or_page',
+          openedBySource: 'page_opener',
           tabStatus: 'loading',
           tabOperabilityReason: 'regular_web_page',
           windowOperabilityReason: 'active_tab_operable_in_visible_window',
@@ -102,12 +103,14 @@ describe('get_windows_and_tabs state inventory', () => {
           canContinueOnLatestAiOperatedTab: null,
           aiOpened: { ids: [], omittedCount: 0 },
           userOrPageOpened: { ids: [101, 102], omittedCount: 0 },
+          pageOpened: { ids: [102], omittedCount: 0 },
+          userOrUnknownOpened: { ids: [101], omittedCount: 0 },
           unknownOpened: { ids: [], omittedCount: 0 },
           operable: { ids: [101, 102], omittedCount: 0 },
           inoperable: { ids: [], omittedCount: 0 },
           recentlyOperatedByAi: { ids: [], omittedCount: 0 },
           summary:
-            'Browser object inventory: windows=2, tabs=2, activeTab=102, aiOpened=0, userOrPageOpened=2, operable=2, currentOperation=no_ai_operation_observed.',
+            'Browser object inventory: windows=2, tabs=2, activeTab=102, aiOpened=0, pageOpened=1, userOrUnknownOpened=1, userOrPageOpened=2, operable=2, currentOperation=no_ai_operation_observed.',
           claimBoundary:
             'Object inventory summary contains browser lifecycle ids and routing facts only; it does not prove page content understanding, account state, login success, or API/CDP reuse.',
         },
@@ -121,7 +124,8 @@ describe('get_windows_and_tabs state inventory', () => {
           active: true,
           status: 'loading',
           openedBy: 'user_or_page',
-          openedByConfidence: 0.7,
+          openedBySource: 'page_opener',
+          openedByConfidence: 0.85,
           openedByReason: 'chrome_tabs_openerTabId_present',
           aiOperationState: 'idle',
           lastAiOperation: null,
@@ -267,6 +271,8 @@ describe('get_windows_and_tabs state inventory', () => {
           withOpener: 1,
           aiOpened: 0,
           userOrPageOpened: 2,
+          pageOpened: 1,
+          userOrUnknownOpened: 1,
           unknownOpened: 0,
           recentlyOperatedByAi: 0,
           idleForAi: 2,
@@ -276,9 +282,10 @@ describe('get_windows_and_tabs state inventory', () => {
           operabilityUnknown: 0,
           statusCounts: { complete: 1, loading: 1 },
           ownerCounts: { ai: 0, user_or_page: 2, unknown: 0 },
+          openedBySourceCounts: { ai_tool: 0, page_opener: 1, user_or_unknown: 1, unknown: 0 },
         },
         tabStateConclusion:
-          'Tab page object matrix: 2 tab(s), active=1, background=1, loading=1, complete=1, aiOpened=0, userOrPageOpened=2, operable=2, activeTab=102, latestAiOperatedTab=none.',
+          'Tab page object matrix: 2 tab(s), active=1, background=1, loading=1, complete=1, aiOpened=0, pageOpened=1, userOrUnknownOpened=1, userOrPageOpened=2, operable=2, activeTab=102, latestAiOperatedTab=none.',
         tabLifecycleState: {
           latestEventKind: null,
           latestEventTabId: null,
@@ -315,7 +322,7 @@ describe('get_windows_and_tabs state inventory', () => {
         currentOperationConclusion:
           'Current operation object: no AI-operated tab page object has been observed yet.',
         browserObjectEdgeSummary:
-          'Browser object edge state: windows total=2, visible=1, minimized=1, focused=1, operable=1; tabs total=2, active=1, background=1, loading=1, operable=2, aiOpened=0, userOrPageOpened=2; currentWindow=focused_window_visible_operable; currentOperation=no_ai_operation_observed',
+          'Browser object edge state: windows total=2, visible=1, minimized=1, focused=1, operable=1; tabs total=2, active=1, background=1, loading=1, operable=2, aiOpened=0, pageOpened=1, userOrUnknownOpened=1, userOrPageOpened=2; currentWindow=focused_window_visible_operable; currentOperation=no_ai_operation_observed',
         objectChangeSummary:
           'Object change summary: no recent browser object change; active tab 102 is loading and operable; no AI-operated tab is known yet.',
         dynamicObjectUpdateSummary:
@@ -362,8 +369,9 @@ describe('get_windows_and_tabs state inventory', () => {
               pinned: false,
               openerTabId: null,
               openedBy: 'user_or_page',
-              openedByConfidence: 0.7,
-              openedByReason: 'observed_by_chrome_inventory_without_ai_marker',
+              openedBySource: 'user_or_unknown',
+              openedByConfidence: 0.55,
+              openedByReason: 'observed_by_chrome_inventory_without_ai_marker_or_opener',
               canTabrixOperate: true,
               operabilityReason: 'regular_web_page',
               aiOperationState: 'idle',
@@ -384,7 +392,8 @@ describe('get_windows_and_tabs state inventory', () => {
               pinned: true,
               openerTabId: 101,
               openedBy: 'user_or_page',
-              openedByConfidence: 0.7,
+              openedBySource: 'page_opener',
+              openedByConfidence: 0.85,
               openedByReason: 'chrome_tabs_openerTabId_present',
               canTabrixOperate: true,
               operabilityReason: 'regular_web_page',
@@ -436,7 +445,8 @@ describe('get_windows_and_tabs state inventory', () => {
       },
       ownership: {
         openedBy: 'user_or_page',
-        confidence: 0.7,
+        openedBySource: 'page_opener',
+        confidence: 0.85,
         reason: 'chrome_tabs_openerTabId_present',
         aiOperationState: 'idle',
       },
@@ -688,12 +698,17 @@ describe('get_windows_and_tabs state inventory', () => {
         ids: [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112],
         omittedCount: 8,
       },
+      pageOpened: { ids: [], omittedCount: 0 },
+      userOrUnknownOpened: {
+        ids: [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112],
+        omittedCount: 8,
+      },
       operable: {
         ids: [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112],
         omittedCount: 8,
       },
       summary:
-        'Browser object inventory: windows=1, tabs=20, activeTab=120, aiOpened=0, userOrPageOpened=20, operable=20, currentOperation=no_ai_operation_observed.',
+        'Browser object inventory: windows=1, tabs=20, activeTab=120, aiOpened=0, pageOpened=0, userOrUnknownOpened=20, userOrPageOpened=20, operable=20, currentOperation=no_ai_operation_observed.',
     });
     expect(payload.compactSummary.windowStateMatrix).toMatchObject({
       total: 1,

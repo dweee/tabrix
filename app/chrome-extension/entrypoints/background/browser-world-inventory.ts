@@ -22,6 +22,11 @@ import {
 } from './browser-world-summary';
 
 export type BrowserWorldTabOpenedBy = 'ai' | 'user_or_page' | 'unknown';
+export type BrowserWorldTabOpenedBySource =
+  | 'ai_tool'
+  | 'page_opener'
+  | 'user_or_unknown'
+  | 'unknown';
 
 export interface BrowserWorldTabObject {
   objectKind: 'BrowserTabObject';
@@ -38,6 +43,7 @@ export interface BrowserWorldTabObject {
   pinned: boolean | null;
   openerTabId: number | null;
   openedBy: BrowserWorldTabOpenedBy;
+  openedBySource: BrowserWorldTabOpenedBySource;
   openedByConfidence: number;
   openedByReason: string;
   aiOperationState: 'idle' | 'recently_operated' | 'closed';
@@ -137,6 +143,7 @@ export interface BrowserWorldSummary {
     url: string | null;
     title: string | null;
     openedBy: BrowserWorldTabOpenedBy | null;
+    openedBySource: BrowserWorldTabOpenedBySource | null;
     canTabrixOperate: boolean | null;
   };
   currentTabObject: BrowserWorldTabStateSummary | null;
@@ -248,6 +255,8 @@ export interface BrowserWorldTabStateMatrix {
   withOpener: number;
   aiOpened: number;
   userOrPageOpened: number;
+  pageOpened: number;
+  userOrUnknownOpened: number;
   unknownOpened: number;
   recentlyOperatedByAi: number;
   idleForAi: number;
@@ -257,6 +266,7 @@ export interface BrowserWorldTabStateMatrix {
   operabilityUnknown: number;
   statusCounts: Record<string, number>;
   ownerCounts: Record<BrowserWorldTabOpenedBy, number>;
+  openedBySourceCounts: Record<BrowserWorldTabOpenedBySource, number>;
 }
 
 export type BrowserWorldTabLifecycleEventKind =
@@ -346,6 +356,7 @@ export interface BrowserWorldTabAttributeGroups {
   };
   ownership: {
     openedBy: BrowserWorldTabOpenedBy;
+    openedBySource: BrowserWorldTabOpenedBySource;
     confidence: number;
     reason: string;
     aiOperationState: BrowserWorldTabObject['aiOperationState'];
@@ -375,6 +386,7 @@ export interface BrowserWorldTabStateSummary {
   pinned: boolean | null;
   openerTabId: number | null;
   openedBy: BrowserWorldTabOpenedBy;
+  openedBySource: BrowserWorldTabOpenedBySource;
   openedByConfidence: number;
   openedByReason: string;
   aiOperationState: BrowserWorldTabObject['aiOperationState'];
@@ -408,6 +420,7 @@ export interface BrowserWorldEvent {
   oldWindowId?: number | null;
   newWindowId?: number | null;
   openedBy?: BrowserWorldTabOpenedBy;
+  openedBySource?: BrowserWorldTabOpenedBySource;
   status?: string | null;
   urlChanged?: boolean;
   titleChanged?: boolean;
@@ -511,6 +524,48 @@ function visibilityStateFromChromeWindow(window: {
   return 'unknown';
 }
 
+function inferTabOpenSource(args: {
+  wasAiPending: boolean;
+  openerTabId: number | null;
+  previous?: BrowserWorldTabObject;
+}): {
+  openedBy: BrowserWorldTabOpenedBy;
+  openedBySource: BrowserWorldTabOpenedBySource;
+  openedByConfidence: number;
+  openedByReason: string;
+} {
+  if (args.wasAiPending) {
+    return {
+      openedBy: 'ai',
+      openedBySource: 'ai_tool',
+      openedByConfidence: 0.95,
+      openedByReason: 'marked_by_tabrix_navigation_before_tabs_onCreated',
+    };
+  }
+  if (args.previous) {
+    return {
+      openedBy: args.previous.openedBy,
+      openedBySource: args.previous.openedBySource,
+      openedByConfidence: args.previous.openedByConfidence,
+      openedByReason: args.previous.openedByReason,
+    };
+  }
+  if (typeof args.openerTabId === 'number') {
+    return {
+      openedBy: 'user_or_page',
+      openedBySource: 'page_opener',
+      openedByConfidence: 0.85,
+      openedByReason: 'chrome_tabs_openerTabId_present',
+    };
+  }
+  return {
+    openedBy: 'user_or_page',
+    openedBySource: 'user_or_unknown',
+    openedByConfidence: 0.55,
+    openedByReason: 'observed_by_chrome_inventory_without_ai_marker_or_opener',
+  };
+}
+
 function normalizeTab(
   tab: chrome.tabs.Tab,
   previous?: BrowserWorldTabObject,
@@ -523,13 +578,14 @@ function normalizeTab(
   const wasAiPending = pendingAiCreatedTabIds.delete(tab.id);
   const pendingAiOperation = pendingAiOperatedTabs.get(tab.id) ?? null;
   if (pendingAiOperation) pendingAiOperatedTabs.delete(tab.id);
-  const openedBy = wasAiPending ? 'ai' : (previous?.openedBy ?? 'user_or_page');
-  const openedByReason = wasAiPending
-    ? 'marked_by_tabrix_navigation_before_tabs_onCreated'
-    : (previous?.openedByReason ??
-      (typeof tab.openerTabId === 'number'
-        ? 'chrome_tabs_openerTabId_present'
-        : 'observed_by_chrome_inventory_without_ai_marker'));
+  const openerTabId =
+    typeof tab.openerTabId === 'number' ? tab.openerTabId : (previous?.openerTabId ?? null);
+  const openSource = inferTabOpenSource({
+    wasAiPending,
+    openerTabId,
+    previous,
+  });
+  const openedBy = openSource.openedBy;
   return {
     objectKind: 'BrowserTabObject',
     tabId: tab.id,
@@ -547,11 +603,11 @@ function normalizeTab(
     muted:
       typeof tab.mutedInfo?.muted === 'boolean' ? tab.mutedInfo.muted : (previous?.muted ?? null),
     pinned: typeof tab.pinned === 'boolean' ? tab.pinned : (previous?.pinned ?? null),
-    openerTabId:
-      typeof tab.openerTabId === 'number' ? tab.openerTabId : (previous?.openerTabId ?? null),
+    openerTabId,
     openedBy,
-    openedByConfidence: openedBy === 'ai' ? 0.95 : 0.7,
-    openedByReason,
+    openedBySource: openSource.openedBySource,
+    openedByConfidence: openSource.openedByConfidence,
+    openedByReason: openSource.openedByReason,
     aiOperationState:
       pendingAiOperation || previous?.aiOperationState === 'recently_operated'
         ? 'recently_operated'
@@ -1008,6 +1064,7 @@ export function markBrowserWorldTabAiCreated(tabId: number | null | undefined): 
     tabsById.set(tabId, {
       ...previous,
       openedBy: 'ai',
+      openedBySource: 'ai_tool',
       openedByConfidence: 0.95,
       openedByReason: 'marked_by_tabrix_navigation_result',
       aiOperationState: 'recently_operated',
@@ -1023,6 +1080,7 @@ export function markBrowserWorldTabAiCreated(tabId: number | null | undefined): 
     tabId,
     windowId: previous?.windowId ?? null,
     openedBy: 'ai',
+    openedBySource: 'ai_tool',
     aiOperation: 'tab_created',
     aiOperationReason: 'marked_by_tabrix_navigation_result',
   });
@@ -1058,6 +1116,7 @@ export function markBrowserWorldTabAiOperated(
     tabId,
     windowId: previous?.windowId ?? null,
     openedBy: previous?.openedBy,
+    openedBySource: previous?.openedBySource,
     aiOperation: safeOperation,
     aiOperationReason: safeReason,
   });
@@ -1088,6 +1147,12 @@ function buildSnapshot(): BrowserWorldSnapshot {
   const aiOpenedTabIds = tabs.filter((tab) => tab.openedBy === 'ai').map((tab) => tab.tabId);
   const userOrPageOpenedTabIds = tabs
     .filter((tab) => tab.openedBy === 'user_or_page')
+    .map((tab) => tab.tabId);
+  const pageOpenedTabIds = tabs
+    .filter((tab) => tab.openedBySource === 'page_opener')
+    .map((tab) => tab.tabId);
+  const userOrUnknownOpenedTabIds = tabs
+    .filter((tab) => tab.openedBySource === 'user_or_unknown')
     .map((tab) => tab.tabId);
   const operableTabIds = tabs
     .filter((tab) => tab.canTabrixOperate === true)
@@ -1156,6 +1221,7 @@ function buildSnapshot(): BrowserWorldSnapshot {
         url: activeTab?.url ?? null,
         title: activeTab?.title ?? null,
         openedBy: activeTab?.openedBy ?? null,
+        openedBySource: activeTab?.openedBySource ?? null,
         canTabrixOperate: activeTab?.canTabrixOperate ?? null,
       },
       currentTabObject: activeTab ? summarizeTabState(activeTab) : null,
@@ -1169,6 +1235,8 @@ function buildSnapshot(): BrowserWorldSnapshot {
         tabs: tabs.length,
         aiOpenedTabs: aiOpenedTabIds.length,
         userOrPageOpenedTabs: userOrPageOpenedTabIds.length,
+        pageOpenedTabs: pageOpenedTabIds.length,
+        userOrUnknownOpenedTabs: userOrUnknownOpenedTabIds.length,
         operableTabs: operableTabIds.length,
       },
       windowStateMatrix,

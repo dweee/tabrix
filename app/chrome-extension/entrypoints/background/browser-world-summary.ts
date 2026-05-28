@@ -7,6 +7,7 @@ import type {
   BrowserWorldTabLifecycleState,
   BrowserWorldTabObject,
   BrowserWorldTabOpenedBy,
+  BrowserWorldTabOpenedBySource,
   BrowserWorldTabStateMatrix,
   BrowserWorldTabStateSummary,
   BrowserWorldWindowLifecycleEventKind,
@@ -26,10 +27,17 @@ export function buildTabStateMatrix(
     user_or_page: 0,
     unknown: 0,
   };
+  const openedBySourceCounts: Record<BrowserWorldTabOpenedBySource, number> = {
+    ai_tool: 0,
+    page_opener: 0,
+    user_or_unknown: 0,
+    unknown: 0,
+  };
   for (const tab of tabs) {
     const status = String(tab.status || 'unknown');
     statusCounts[status] = (statusCounts[status] ?? 0) + 1;
     ownerCounts[tab.openedBy] = (ownerCounts[tab.openedBy] ?? 0) + 1;
+    openedBySourceCounts[tab.openedBySource] = (openedBySourceCounts[tab.openedBySource] ?? 0) + 1;
   }
   return {
     total: tabs.length,
@@ -46,6 +54,8 @@ export function buildTabStateMatrix(
     withOpener: tabs.filter((tab) => tab.openerTabId !== null).length,
     aiOpened: tabs.filter((tab) => tab.openedBy === 'ai').length,
     userOrPageOpened: tabs.filter((tab) => tab.openedBy === 'user_or_page').length,
+    pageOpened: tabs.filter((tab) => tab.openedBySource === 'page_opener').length,
+    userOrUnknownOpened: tabs.filter((tab) => tab.openedBySource === 'user_or_unknown').length,
     unknownOpened: tabs.filter((tab) => tab.openedBy === 'unknown').length,
     recentlyOperatedByAi: tabs.filter((tab) => tab.aiOperationState === 'recently_operated').length,
     idleForAi: tabs.filter((tab) => tab.aiOperationState === 'idle').length,
@@ -55,6 +65,7 @@ export function buildTabStateMatrix(
     operabilityUnknown: tabs.filter((tab) => tab.canTabrixOperate === null).length,
     statusCounts,
     ownerCounts,
+    openedBySourceCounts,
   };
 }
 
@@ -66,7 +77,7 @@ export function summarizeTabStateMatrix(
   if (matrix.total === 0) {
     return 'Tab page object matrix: no tab page object is currently retained.';
   }
-  return `Tab page object matrix: ${matrix.total} tab(s), active=${matrix.active}, background=${matrix.background}, loading=${matrix.loading}, complete=${matrix.complete}, aiOpened=${matrix.aiOpened}, userOrPageOpened=${matrix.userOrPageOpened}, operable=${matrix.operable}, activeTab=${activeTab?.tabId ?? 'unknown'}, latestAiOperatedTab=${lastAiOperatedTab?.tabId ?? 'none'}.`;
+  return `Tab page object matrix: ${matrix.total} tab(s), active=${matrix.active}, background=${matrix.background}, loading=${matrix.loading}, complete=${matrix.complete}, aiOpened=${matrix.aiOpened}, pageOpened=${matrix.pageOpened}, userOrUnknownOpened=${matrix.userOrUnknownOpened}, userOrPageOpened=${matrix.userOrPageOpened}, operable=${matrix.operable}, activeTab=${activeTab?.tabId ?? 'unknown'}, latestAiOperatedTab=${lastAiOperatedTab?.tabId ?? 'none'}.`;
 }
 
 function isTabLifecycleEvent(event: BrowserWorldEvent): event is BrowserWorldEvent & {
@@ -371,7 +382,7 @@ export function summarizeBrowserObjectEdgeState(
 ): string {
   return [
     `Browser object edge state: windows total=${windowMatrix.total}, visible=${windowMatrix.visible}, minimized=${windowMatrix.minimized}, focused=${windowMatrix.focused}, operable=${windowMatrix.operable}`,
-    `tabs total=${tabMatrix.total}, active=${tabMatrix.active}, background=${tabMatrix.background}, loading=${tabMatrix.loading}, operable=${tabMatrix.operable}, aiOpened=${tabMatrix.aiOpened}, userOrPageOpened=${tabMatrix.userOrPageOpened}`,
+    `tabs total=${tabMatrix.total}, active=${tabMatrix.active}, background=${tabMatrix.background}, loading=${tabMatrix.loading}, operable=${tabMatrix.operable}, aiOpened=${tabMatrix.aiOpened}, pageOpened=${tabMatrix.pageOpened}, userOrUnknownOpened=${tabMatrix.userOrUnknownOpened}, userOrPageOpened=${tabMatrix.userOrPageOpened}`,
     `currentWindow=${windowOperationState.relationToCurrentOperableWindow}`,
     `currentOperation=${aiOperationState.relationToBrowserActiveTab}`,
   ].join('; ');
@@ -419,9 +430,13 @@ export function summarizeBrowserWorldSnapshot(args: {
 }): string {
   const aiOpenedCount = args.tabs.filter((tab) => tab.openedBy === 'ai').length;
   const userOrPageOpenedCount = args.tabs.filter((tab) => tab.openedBy === 'user_or_page').length;
+  const pageOpenedCount = args.tabs.filter((tab) => tab.openedBySource === 'page_opener').length;
+  const userOrUnknownOpenedCount = args.tabs.filter(
+    (tab) => tab.openedBySource === 'user_or_unknown',
+  ).length;
   const operableCount = args.tabs.filter((tab) => tab.canTabrixOperate === true).length;
   const activeTabText = args.activeTab
-    ? `activeTab=${args.activeTab.tabId}, status=${args.activeTab.status ?? 'unknown'}, owner=${args.activeTab.openedBy}, operable=${formatBooleanState(args.activeTab.canTabrixOperate)}`
+    ? `activeTab=${args.activeTab.tabId}, status=${args.activeTab.status ?? 'unknown'}, owner=${args.activeTab.openedBy}, source=${args.activeTab.openedBySource}, operable=${formatBooleanState(args.activeTab.canTabrixOperate)}`
     : 'activeTab=unknown';
   const focusedWindowText = args.focusedWindow
     ? `focusedWindow=${args.focusedWindow.windowId}, visibility=${args.focusedWindow.visibilityState}, operable=${formatBooleanState(args.focusedWindow.canTabrixOperate)}`
@@ -433,7 +448,7 @@ export function summarizeBrowserWorldSnapshot(args: {
     `Browser object snapshot: ${focusedWindowText}`,
     activeTabText,
     latestAiText,
-    `inventory=windows:${args.windows.length}, tabs:${args.tabs.length}, ai:${aiOpenedCount}, userOrPage:${userOrPageOpenedCount}, operable:${operableCount}`,
+    `inventory=windows:${args.windows.length}, tabs:${args.tabs.length}, ai:${aiOpenedCount}, page:${pageOpenedCount}, userOrUnknown:${userOrUnknownOpenedCount}, userOrPage:${userOrPageOpenedCount}, operable:${operableCount}`,
     `recent=${args.recentChangeSummary}`,
     `next=${summarizeSnapshotNextCheck(args.windowOperationState, args.aiOperationState)}`,
   ].join('; ');
@@ -462,6 +477,7 @@ export function buildTabAttributeGroups(
     },
     ownership: {
       openedBy: tab.openedBy,
+      openedBySource: tab.openedBySource,
       confidence: tab.openedByConfidence,
       reason: tab.openedByReason,
       aiOperationState: tab.aiOperationState,
@@ -493,6 +509,7 @@ export function summarizeTabState(tab: BrowserWorldTabObject): BrowserWorldTabSt
     pinned: tab.pinned,
     openerTabId: tab.openerTabId,
     openedBy: tab.openedBy,
+    openedBySource: tab.openedBySource,
     openedByConfidence: tab.openedByConfidence,
     openedByReason: tab.openedByReason,
     aiOperationState: tab.aiOperationState,
