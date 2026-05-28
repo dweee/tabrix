@@ -1549,6 +1549,7 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
         currentTabTitle: 'Private Dashboard',
         currentTabStatus: 'complete',
         currentTabOpenedBy: 'ai',
+        currentTabOpenedBySource: 'ai_tool',
         currentTabOpenedByConfidence: 0.9,
         currentTabAiOperationState: 'recently_operated',
         currentTabLastAiOperation: 'read_page',
@@ -1558,6 +1559,8 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
         currentTabRuntimeStateSource: 'browser_world_inventory',
         browserWorldObjectChangeSummary:
           'Object change summary includes https://private.example.test/dashboard and Private Dashboard.',
+        browserWorldActionableObjectChangeSummary:
+          'Actionable object change includes https://private.example.test/dashboard and Private Dashboard.',
         browserWorldCurrentOperationConclusion:
           'Current operation object includes https://private.example.test/dashboard and Private Dashboard.',
         currentOwnerType: 'run_owned',
@@ -1583,11 +1586,14 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
             currentTabUrl: 'https://private.example.test/dashboard',
             currentTabTitle: 'Private Dashboard',
             openedBy: 'ai',
+            openedBySource: 'ai_tool',
             lastAiOperation: 'read_page',
             lastAiOperationConfidence: 0.95,
             lastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
             browserWorldObjectChangeSummary:
               'Object change summary includes https://private.example.test/dashboard and Private Dashboard.',
+            browserWorldActionableObjectChangeSummary:
+              'Actionable object change includes https://private.example.test/dashboard and Private Dashboard.',
             browserWorldCurrentOperationConclusion:
               'Current operation object includes https://private.example.test/dashboard and Private Dashboard.',
             isRunOwnedByTask: false,
@@ -1694,6 +1700,7 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     pageOperationZonesPresent: true,
     pageOperationClaimBoundaryPresent: true,
     browserWorldObjectChangeSummaryPresent: true,
+    browserWorldActionableObjectChangeSummaryPresent: true,
     browserWorldCurrentOperationConclusionPresent: true,
   });
   assert.deepEqual(summary.pageRegionRuntime, {
@@ -1714,10 +1721,12 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     currentActiveTabId: 42,
     browserActiveTabId: 42,
     openedBy: 'ai',
+    openedBySource: 'ai_tool',
     lastAiOperation: 'read_page',
     lastAiOperationConfidence: 0.95,
     lastAiOperationReasonPresent: true,
     browserWorldObjectChangeSummaryPresent: true,
+    browserWorldActionableObjectChangeSummaryPresent: true,
     browserWorldCurrentOperationConclusionPresent: true,
     isRunOwnedByTask: false,
     runtimeStateSource: 'browser_world_inventory',

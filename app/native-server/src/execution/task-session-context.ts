@@ -189,6 +189,7 @@ export interface TaskPageRuntimeFields {
   currentTabPinned?: boolean | null;
   currentTabOpenerTabId?: number | null;
   currentTabOpenedBy?: 'ai' | 'user_or_page' | 'unknown' | null;
+  currentTabOpenedBySource?: 'ai_tool' | 'page_opener' | 'user_or_unknown' | 'unknown' | null;
   currentTabOpenedByConfidence?: number | null;
   currentTabOpenedByReason?: string | null;
   currentTabAiOperationState?: 'idle' | 'recently_operated' | 'closed' | null;
@@ -200,6 +201,7 @@ export interface TaskPageRuntimeFields {
   currentTabOperabilityReason?: string | null;
   currentTabRuntimeStateSource?: 'browser_world_inventory' | 'chrome_tab_snapshot' | 'unknown';
   browserWorldObjectChangeSummary?: string | null;
+  browserWorldActionableObjectChangeSummary?: string | null;
   browserWorldCurrentOperationConclusion?: string | null;
 }
 
@@ -1073,6 +1075,7 @@ function cloneTaskPageRuntimeFields(input: TaskPageRuntimeFields): TaskPageRunti
     currentTabPinned: input.currentTabPinned,
     currentTabOpenerTabId: input.currentTabOpenerTabId,
     currentTabOpenedBy: input.currentTabOpenedBy,
+    currentTabOpenedBySource: input.currentTabOpenedBySource,
     currentTabOpenedByConfidence: input.currentTabOpenedByConfidence,
     currentTabOpenedByReason: input.currentTabOpenedByReason,
     currentTabAiOperationState: input.currentTabAiOperationState,
@@ -1084,6 +1087,7 @@ function cloneTaskPageRuntimeFields(input: TaskPageRuntimeFields): TaskPageRunti
     currentTabOperabilityReason: input.currentTabOperabilityReason,
     currentTabRuntimeStateSource: input.currentTabRuntimeStateSource,
     browserWorldObjectChangeSummary: input.browserWorldObjectChangeSummary,
+    browserWorldActionableObjectChangeSummary: input.browserWorldActionableObjectChangeSummary,
     browserWorldCurrentOperationConclusion: input.browserWorldCurrentOperationConclusion,
   };
 }

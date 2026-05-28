@@ -691,6 +691,9 @@ async function buildModeOutput(params: {
     browserActiveTabIdKnown: params.browserActiveTabIdKnown,
     isReadTargetBrowserActiveTab: params.isReadTargetBrowserActiveTab,
     browserWorldObjectChangeSummary: browserWorld.summary.objectChangeSummary,
+    browserWorldActionableObjectChangeSummary:
+      browserWorld.summary.actionableObjectChangeSummary ??
+      browserWorld.summary.objectChangeSummary,
     browserWorldCurrentOperationConclusion: browserWorld.summary.currentOperationConclusion,
   });
   if (sharedPayload.objectLifecycle) {
@@ -748,6 +751,17 @@ function browserWorldTabOpenedByToOwnerType(
   return 'unknown';
 }
 
+function deriveBrowserWorldTabOpenedBySource(
+  tab: BrowserWorldTabObject | null,
+): ReadPageOwnershipRuntimeSummary['currentTabOpenedBySource'] {
+  if (!tab) return null;
+  if (tab.openedBySource) return tab.openedBySource;
+  if (tab.openedBy === 'ai') return 'ai_tool';
+  if (tab.openedBy === 'user_or_page' && Number.isInteger(tab.openerTabId)) return 'page_opener';
+  if (tab.openedBy === 'user_or_page') return 'user_or_unknown';
+  return 'unknown';
+}
+
 function buildReadPageOwnershipRuntimeSummary(params: {
   tabId: number;
   currentOwnerType: BrowserPageOwnerType;
@@ -766,6 +780,7 @@ function buildReadPageOwnershipRuntimeSummary(params: {
   browserActiveTabIdKnown: boolean;
   isReadTargetBrowserActiveTab: boolean | null;
   browserWorldObjectChangeSummary: string | null;
+  browserWorldActionableObjectChangeSummary: string | null;
   browserWorldCurrentOperationConclusion: string | null;
 }): ReadPageOwnershipRuntimeSummary {
   const lastAiOperation = params.browserWorldTab?.lastAiOperation ?? null;
@@ -804,6 +819,7 @@ function buildReadPageOwnershipRuntimeSummary(params: {
     currentTabPinned: params.browserWorldTab?.pinned ?? null,
     currentTabOpenerTabId: params.browserWorldTab?.openerTabId ?? null,
     currentTabOpenedBy: params.browserWorldTab?.openedBy ?? null,
+    currentTabOpenedBySource: deriveBrowserWorldTabOpenedBySource(params.browserWorldTab),
     currentTabOpenedByConfidence: params.browserWorldTab?.openedByConfidence ?? null,
     currentTabOpenedByReason: params.browserWorldTab?.openedByReason ?? null,
     currentTabAiOperationState: params.browserWorldTab?.aiOperationState ?? null,
@@ -817,6 +833,7 @@ function buildReadPageOwnershipRuntimeSummary(params: {
       ? 'browser_world_inventory'
       : 'chrome_tab_snapshot',
     browserWorldObjectChangeSummary: params.browserWorldObjectChangeSummary,
+    browserWorldActionableObjectChangeSummary: params.browserWorldActionableObjectChangeSummary,
     browserWorldCurrentOperationConclusion: params.browserWorldCurrentOperationConclusion,
     currentOwnerType: params.currentOwnerType,
     currentTabRunOwnershipVerdict: 'unknown',

@@ -207,6 +207,9 @@ describe('read_page mode', () => {
       currentTabTitle: 'Checkout',
       currentTabRuntimeStateSource: expect.any(String),
       browserWorldObjectChangeSummary: expect.stringContaining('Object change summary:'),
+      browserWorldActionableObjectChangeSummary: expect.stringContaining(
+        'Actionable object change:',
+      ),
       browserWorldCurrentOperationConclusion: expect.any(String),
     });
     expect(payload.browserPageObjectCompact.facts.tab).toMatchObject({
@@ -216,6 +219,9 @@ describe('read_page mode', () => {
       currentTabTitle: 'Checkout',
       runtimeStateSource: expect.any(String),
       browserWorldObjectChangeSummary: expect.stringContaining('Object change summary:'),
+      browserWorldActionableObjectChangeSummary: expect.stringContaining(
+        'Actionable object change:',
+      ),
       browserWorldCurrentOperationConclusion: expect.any(String),
       actionReadiness: 'reselect_or_reread_required',
       canProceedToPageLevelCheck: false,

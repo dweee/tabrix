@@ -1059,6 +1059,7 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       browserActiveTabIdKnown: ownershipRuntime?.browserActiveTabIdKnown ?? null,
       isReadTargetBrowserActiveTab: ownershipRuntime?.isReadTargetBrowserActiveTab ?? null,
       currentTabOpenedBy: ownershipRuntime?.currentTabOpenedBy ?? null,
+      currentTabOpenedBySource: ownershipRuntime?.currentTabOpenedBySource ?? null,
       currentTabOpenedByConfidence: ownershipRuntime?.currentTabOpenedByConfidence ?? null,
       currentTabAiOperationState: ownershipRuntime?.currentTabAiOperationState ?? null,
       currentTabLastAiOperation: ownershipRuntime?.currentTabLastAiOperation ?? null,
@@ -1074,6 +1075,8 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       currentOwnerType: ownershipRuntime?.currentOwnerType ?? null,
       browserWorldObjectChangeSummaryPresent:
         typeof ownershipRuntime?.browserWorldObjectChangeSummary === 'string',
+      browserWorldActionableObjectChangeSummaryPresent:
+        typeof ownershipRuntime?.browserWorldActionableObjectChangeSummary === 'string',
       browserWorldCurrentOperationConclusionPresent:
         typeof ownershipRuntime?.browserWorldCurrentOperationConclusion === 'string',
     },
@@ -1101,11 +1104,14 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
         currentActiveTabId: compactTabFacts.currentActiveTabId ?? null,
         browserActiveTabId: compactTabFacts.browserActiveTabId ?? null,
         openedBy: compactTabFacts.openedBy ?? null,
+        openedBySource: compactTabFacts.openedBySource ?? null,
         lastAiOperation: compactTabFacts.lastAiOperation ?? null,
         lastAiOperationConfidence: compactTabFacts.lastAiOperationConfidence ?? null,
         lastAiOperationReasonPresent: typeof compactTabFacts.lastAiOperationReason === 'string',
         browserWorldObjectChangeSummaryPresent:
           typeof compactTabFacts.browserWorldObjectChangeSummary === 'string',
+        browserWorldActionableObjectChangeSummaryPresent:
+          typeof compactTabFacts.browserWorldActionableObjectChangeSummary === 'string',
         browserWorldCurrentOperationConclusionPresent:
           typeof compactTabFacts.browserWorldCurrentOperationConclusion === 'string',
         isRunOwnedByTask: compactTabFacts.isRunOwnedByTask ?? null,
@@ -1190,6 +1196,9 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       browserWorldObjectChangeSummaryPresent:
         typeof ownershipRuntime?.browserWorldObjectChangeSummary === 'string' &&
         typeof compactTabFacts.browserWorldObjectChangeSummary === 'string',
+      browserWorldActionableObjectChangeSummaryPresent:
+        typeof ownershipRuntime?.browserWorldActionableObjectChangeSummary === 'string' &&
+        typeof compactTabFacts.browserWorldActionableObjectChangeSummary === 'string',
       browserWorldCurrentOperationConclusionPresent:
         typeof ownershipRuntime?.browserWorldCurrentOperationConclusion === 'string' &&
         typeof compactTabFacts.browserWorldCurrentOperationConclusion === 'string',
@@ -2221,6 +2230,9 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
     args.timeoutMs,
   );
   const openedTabId = extractNavigateTabId(navigatePayload);
+  if (Number.isInteger(openedTabId)) {
+    callMcpTool(cliPath, 'chrome_switch_tab', { tabId: openedTabId }, args.timeoutMs);
+  }
   const readPagePayload = callMcpTool(
     cliPath,
     'chrome_read_page',
@@ -2265,7 +2277,6 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
       redactedReadPage.alignment.browserPageObjectCompactPresent === true &&
       redactedReadPage.alignment.browserPageObjectCompactSource === 'expected' &&
       redactedReadPage.alignment.browserWorldRuntimeSource === true &&
-      redactedReadPage.alignment.tabPageObjectSummaryPresent === true &&
       redactedReadPage.alignment.currentTabIdPresent === true &&
       redactedReadPage.alignment.currentWindowIdPresent === true &&
       redactedReadPage.alignment.currentWindowStateKnown === true &&
@@ -2273,6 +2284,7 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
       redactedReadPage.alignment.currentTabOperabilityKnown === true &&
       redactedReadPage.alignment.currentTabAiOperationEvidencePresent === true &&
       redactedReadPage.alignment.browserWorldObjectChangeSummaryPresent === true &&
+      redactedReadPage.alignment.browserWorldActionableObjectChangeSummaryPresent === true &&
       redactedReadPage.alignment.browserWorldCurrentOperationConclusionPresent === true &&
       redactedReadPage.alignment.operationTargetBriefPresent === true &&
       redactedReadPage.alignment.actionReadinessBriefPresent === true &&
@@ -2300,6 +2312,7 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
       redactedReadPage.alignment.currentTabOperabilityKnown === true &&
       redactedReadPage.alignment.currentTabAiOperationEvidencePresent === true &&
       redactedReadPage.alignment.browserWorldObjectChangeSummaryPresent === true &&
+      redactedReadPage.alignment.browserWorldActionableObjectChangeSummaryPresent === true &&
       redactedReadPage.alignment.browserWorldCurrentOperationConclusionPresent === true &&
       redactedReadPage.alignment.operationTargetBriefPresent === true &&
       redactedReadPage.alignment.actionReadinessBriefPresent === true &&

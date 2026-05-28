@@ -1364,6 +1364,7 @@ describe('handleToolCall execution wrapper', () => {
               currentTabPinned: true,
               currentTabOpenerTabId: 8,
               currentTabOpenedBy: 'ai',
+              currentTabOpenedBySource: 'ai_tool',
               currentTabOpenedByConfidence: 0.95,
               currentTabOpenedByReason: 'marked_by_tabrix_navigation_result',
               currentTabAiOperationState: 'recently_operated',
@@ -1376,6 +1377,8 @@ describe('handleToolCall execution wrapper', () => {
               currentTabRuntimeStateSource: 'browser_world_inventory',
               browserWorldObjectChangeSummary:
                 'Object change summary: active tab was read; no page content claim.',
+              browserWorldActionableObjectChangeSummary:
+                'Actionable object change: latest AI-operated tab is active and operable.',
               browserWorldCurrentOperationConclusion:
                 'Current operation: read_page marked the tab as recently operated.',
             },
@@ -1426,12 +1429,15 @@ describe('handleToolCall execution wrapper', () => {
             currentTabStatus: 'complete',
             currentTabPinned: true,
             openedBy: 'ai',
+            openedBySource: 'ai_tool',
             openedByConfidence: 0.95,
             lastAiOperation: 'read_page',
             lastAiOperationConfidence: 0.95,
             lastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
             browserWorldObjectChangeSummary:
               'Object change summary: active tab was read; no page content claim.',
+            browserWorldActionableObjectChangeSummary:
+              'Actionable object change: latest AI-operated tab is active and operable.',
             browserWorldCurrentOperationConclusion:
               'Current operation: read_page marked the tab as recently operated.',
             canTabrixOperate: true,
@@ -1445,6 +1451,7 @@ describe('handleToolCall execution wrapper', () => {
         currentTabStatus: 'complete',
         currentTabPinned: true,
         currentTabOpenedBy: 'ai',
+        currentTabOpenedBySource: 'ai_tool',
         currentTabOpenedByConfidence: 0.95,
         currentTabLastAiOperation: 'read_page',
         currentTabLastAiOperationConfidence: 0.95,
@@ -1453,6 +1460,8 @@ describe('handleToolCall execution wrapper', () => {
         currentTabRuntimeStateSource: 'browser_world_inventory',
         browserWorldObjectChangeSummary:
           'Object change summary: active tab was read; no page content claim.',
+        browserWorldActionableObjectChangeSummary:
+          'Actionable object change: latest AI-operated tab is active and operable.',
         browserWorldCurrentOperationConclusion:
           'Current operation: read_page marked the tab as recently operated.',
       });

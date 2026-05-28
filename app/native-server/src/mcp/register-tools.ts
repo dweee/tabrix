@@ -1871,6 +1871,7 @@ function readTaskPageRuntimeFields(payload: Record<string, unknown>): TaskPageRu
     return typeof payloadRaw === 'number' && Number.isFinite(payloadRaw) ? payloadRaw : null;
   };
   const openedBy = readNestedString('currentTabOpenedBy');
+  const openedBySource = readNestedString('currentTabOpenedBySource');
   const aiOperationState = readNestedString('currentTabAiOperationState');
   const runtimeStateSource = readNestedString('currentTabRuntimeStateSource');
 
@@ -1911,6 +1912,22 @@ function readTaskPageRuntimeFields(payload: Record<string, unknown>): TaskPageRu
           compactOpenedBy === 'user_or_page' ||
           compactOpenedBy === 'unknown'
           ? compactOpenedBy
+          : null;
+      })(),
+    currentTabOpenedBySource:
+      (openedBySource === 'ai_tool' ||
+      openedBySource === 'page_opener' ||
+      openedBySource === 'user_or_unknown' ||
+      openedBySource === 'unknown'
+        ? openedBySource
+        : null) ??
+      (() => {
+        const compactOpenedBySource = readCompactString('openedBySource');
+        return compactOpenedBySource === 'ai_tool' ||
+          compactOpenedBySource === 'page_opener' ||
+          compactOpenedBySource === 'user_or_unknown' ||
+          compactOpenedBySource === 'unknown'
+          ? compactOpenedBySource
           : null;
       })(),
     currentTabOpenedByConfidence:
@@ -1963,6 +1980,9 @@ function readTaskPageRuntimeFields(payload: Record<string, unknown>): TaskPageRu
     browserWorldObjectChangeSummary:
       readNestedString('browserWorldObjectChangeSummary') ??
       readCompactString('browserWorldObjectChangeSummary'),
+    browserWorldActionableObjectChangeSummary:
+      readNestedString('browserWorldActionableObjectChangeSummary') ??
+      readCompactString('browserWorldActionableObjectChangeSummary'),
     browserWorldCurrentOperationConclusion:
       readNestedString('browserWorldCurrentOperationConclusion') ??
       readCompactString('browserWorldCurrentOperationConclusion'),
@@ -2536,6 +2556,7 @@ function buildAiFacingOwnershipRuntimeSummary(
     currentTabPinned: runtimeFields.currentTabPinned ?? null,
     currentTabOpenerTabId: runtimeFields.currentTabOpenerTabId ?? null,
     currentTabOpenedBy: runtimeFields.currentTabOpenedBy ?? null,
+    currentTabOpenedBySource: runtimeFields.currentTabOpenedBySource ?? null,
     currentTabOpenedByConfidence: runtimeFields.currentTabOpenedByConfidence ?? null,
     currentTabOpenedByReason: runtimeFields.currentTabOpenedByReason ?? null,
     currentTabAiOperationState: runtimeFields.currentTabAiOperationState ?? null,
@@ -2547,6 +2568,8 @@ function buildAiFacingOwnershipRuntimeSummary(
     currentTabOperabilityReason: runtimeFields.currentTabOperabilityReason ?? null,
     currentTabRuntimeStateSource: runtimeFields.currentTabRuntimeStateSource ?? 'unknown',
     browserWorldObjectChangeSummary: runtimeFields.browserWorldObjectChangeSummary ?? null,
+    browserWorldActionableObjectChangeSummary:
+      runtimeFields.browserWorldActionableObjectChangeSummary ?? null,
     browserWorldCurrentOperationConclusion:
       runtimeFields.browserWorldCurrentOperationConclusion ?? null,
     currentOwnerType,

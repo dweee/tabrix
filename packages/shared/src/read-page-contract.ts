@@ -752,6 +752,7 @@ export interface ReadPageOwnershipRuntimeSummary {
   currentTabPinned?: boolean | null;
   currentTabOpenerTabId?: number | null;
   currentTabOpenedBy?: 'ai' | 'user_or_page' | 'unknown' | null;
+  currentTabOpenedBySource?: 'ai_tool' | 'page_opener' | 'user_or_unknown' | 'unknown' | null;
   currentTabOpenedByConfidence?: number | null;
   currentTabOpenedByReason?: string | null;
   currentTabAiOperationState?: 'idle' | 'recently_operated' | 'closed' | null;
@@ -769,6 +770,7 @@ export interface ReadPageOwnershipRuntimeSummary {
    * or API/CDP reuse proof.
    */
   browserWorldObjectChangeSummary?: string | null;
+  browserWorldActionableObjectChangeSummary?: string | null;
   browserWorldCurrentOperationConclusion?: string | null;
   currentOwnerType: import('./browser-task-thing-contract').BrowserPageOwnerType;
   currentTabRunOwnershipVerdict: ReadPageCurrentTabRunOwnershipVerdict;

@@ -584,6 +584,7 @@ describe('read_page object lifecycle', () => {
         currentTabPinned: true,
         currentTabOpenerTabId: 7,
         currentTabOpenedBy: 'ai',
+        currentTabOpenedBySource: 'ai_tool',
         currentTabOpenedByConfidence: 0.95,
         currentTabOpenedByReason: 'marked_by_tabrix_navigation_result',
         currentTabAiOperationState: 'recently_operated',
@@ -594,6 +595,8 @@ describe('read_page object lifecycle', () => {
         currentTabCanTabrixOperate: true,
         currentTabOperabilityReason: 'regular_web_page',
         currentTabRuntimeStateSource: 'browser_world_inventory',
+        browserWorldActionableObjectChangeSummary:
+          'Actionable object change: latest AI-operated tab is active and operable.',
       }),
       selectedDataSource: 'dom_region_rows',
       sourceRouteHonestyVerdict: null,
@@ -601,6 +604,10 @@ describe('read_page object lifecycle', () => {
 
     expect(view.attributeGroups.tab_state.summary).toContain('status=loading');
     expect(view.attributeGroups.tab_state.summary).toContain('operable=true');
+    expect(view.attributeGroups.tab_state.summary).toContain('openedBySource=ai_tool');
+    expect(view.attributeGroups.tab_state.summary).toContain(
+      'browserWorldActionable=Actionable object change:',
+    );
     expect(view.attributeGroups.tab_state.summary).toContain(
       'operationTarget=read_target_browser_active_tab',
     );
@@ -651,6 +658,7 @@ describe('read_page object lifecycle', () => {
       currentTabOpenerTabId: 7,
       ownerType: 'run_owned',
       openedBy: 'ai',
+      openedBySource: 'ai_tool',
       openedByConfidence: 0.95,
       openedByReason: 'marked_by_tabrix_navigation_result',
       canTabrixOperate: true,
@@ -660,6 +668,8 @@ describe('read_page object lifecycle', () => {
       lastAiOperationAtMs: 1770000000000,
       lastAiOperationConfidence: 0.95,
       lastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
+      browserWorldActionableObjectChangeSummary:
+        'Actionable object change: latest AI-operated tab is active and operable.',
       runtimeStateSource: 'browser_world_inventory',
       operationTargetRole: 'read_target_browser_active_tab',
       operationTargetBasis: 'read_target_matches_browser_active_tab',
