@@ -2794,8 +2794,71 @@ describe('read_page object lifecycle', () => {
 
     const view = buildReadPageBrowserPageObjectView({ objectLifecycle: after });
 
+    expect(view.semanticEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: 'auth_required_candidate',
+          targetGroup: 'auth_state',
+          targetObjectFamily: 'auth_surface',
+          postconditionStatus: 'candidate_only',
+        }),
+      ]),
+    );
+    expect(view.dynamicAttributeSummary).toMatchObject({
+      status: 'semantic_transition_candidate',
+      primaryConclusion: expect.stringContaining('Authentication required candidate'),
+      changedGroups: expect.arrayContaining(['auth_state']),
+    });
+    expect(view.dynamicAttributeSummary?.primaryConclusion).toContain(
+      'login success is not proven',
+    );
     expect(view.semanticEvents.map((event) => event.eventType)).not.toContain(
       'logout_succeeded_candidate',
+    );
+  });
+
+  it('reports an auth-required object even when no QR object is present', () => {
+    const lifecycle = buildReadPageObjectLifecycle([
+      region({
+        regionId: 'region_modal',
+        regionType: 'modal',
+        state: 'auth_prompt_candidate',
+        confidence: 0.8,
+        targetability: 'locator_chain',
+        objects: [
+          {
+            objectId: 'ref_auth_form',
+            label: 'Sign in',
+            objectType: 'auth_form',
+            actionTypes: ['click', 'fill'],
+            targetability: 'locator_chain',
+            confidence: 0.76,
+            reason: 'generic auth surface candidate',
+          },
+        ],
+      }),
+    ]);
+
+    const view = buildReadPageBrowserPageObjectView({ objectLifecycle: lifecycle });
+
+    expect(view.semanticEvents).toEqual([
+      expect.objectContaining({
+        eventType: 'auth_required_candidate',
+        targetGroup: 'auth_state',
+        targetObjectFamily: 'auth_surface',
+        postconditionStatus: 'candidate_only',
+      }),
+    ]);
+    expect(view.dynamicAttributeSummary).toMatchObject({
+      status: 'semantic_transition_candidate',
+      primaryConclusion: expect.stringContaining('Authentication required candidate'),
+      changedGroups: expect.arrayContaining(['auth_state']),
+    });
+    expect(view.dynamicAttributeSummary?.primaryConclusion).toContain(
+      'user action may be required',
+    );
+    expect(view.dynamicAttributeSummary?.primaryConclusion).toContain(
+      'login success is not proven',
     );
   });
 });

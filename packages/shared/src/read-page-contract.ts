@@ -396,6 +396,7 @@ export const READ_PAGE_BROWSER_PAGE_SEMANTIC_EVENT_TYPES = [
   'qr_waiting',
   'qr_expired_candidate',
   'qr_refreshed',
+  'auth_required_candidate',
   'auth_succeeded_candidate',
   'logout_succeeded_candidate',
   'content_changed',

@@ -401,7 +401,29 @@ function buildQrEvents(
 function buildAuthEvents(
   lifecycle: ReadPageObjectLifecycleSummary,
 ): ReadPageBrowserPageSemanticEvent[] {
-  if (lifecycle.status !== 'compared_snapshot') return [];
+  const currentAuthRequired = lifecycle.items.find(
+    (item) =>
+      item.objectFamily === 'auth_surface' ||
+      (item.objectFamily === 'account_identity' && looksLoggedOutOrAuthRequired(item.state)),
+  );
+  const currentLoggedInAccount = lifecycle.items.some(
+    (item) => item.objectFamily === 'account_identity' && looksLoggedIn(item.state),
+  );
+  if (lifecycle.status !== 'compared_snapshot') {
+    if (!currentAuthRequired || currentLoggedInAccount) return [];
+    return [
+      semanticEvent({
+        eventType: 'auth_required_candidate',
+        targetGroup: 'auth_state',
+        targetObjectFamily: currentAuthRequired.objectFamily,
+        afterState: currentAuthRequired.state,
+        summary:
+          'Authentication required candidate: auth/login surface is visible or logged-out account state is present; user action may be required. Do not claim login success until account state changes and auth prompt disappears.',
+        confidence: Math.min(currentAuthRequired.confidence, 0.72),
+        evidenceRefs: currentAuthRequired.evidenceRefs,
+      }),
+    ];
+  }
   const changes = changesForFamilies(lifecycle, ['auth_surface', 'account_identity', 'qr_code']);
   const authDisappeared = changes.some(
     (change) =>
@@ -409,15 +431,21 @@ function buildAuthEvents(
       change.changeKind === 'disappeared',
   );
   const accountAppearedOrLoggedIn = changes.some(
-    (change) =>
-      change.objectFamily === 'account_identity' &&
-      (change.changeKind === 'appeared' || looksLoggedIn(change.afterState)),
+    (change) => change.objectFamily === 'account_identity' && looksLoggedIn(change.afterState),
   );
   const loggedInAccountDisappeared = changes.some(
     (change) =>
       change.objectFamily === 'account_identity' &&
       change.changeKind === 'disappeared' &&
       looksLoggedIn(change.beforeState),
+  );
+  const authRequiredAppearedOrChanged = changes.some(
+    (change) =>
+      (change.objectFamily === 'auth_surface' &&
+        (change.changeKind === 'appeared' || looksAuthRequired(change.afterState))) ||
+      (change.objectFamily === 'account_identity' &&
+        (change.changeKind === 'appeared' || change.changeKind === 'changed') &&
+        looksLoggedOutOrAuthRequired(change.afterState)),
   );
 
   const events: ReadPageBrowserPageSemanticEvent[] = [];
@@ -430,6 +458,19 @@ function buildAuthEvents(
         summary:
           'Authentication success candidate: auth/QR prompt disappeared and account state appeared or changed.',
         confidence: 0.74,
+        evidenceRefs: changedEvidenceRefs(changes),
+      }),
+    );
+  }
+  if (authRequiredAppearedOrChanged && !accountAppearedOrLoggedIn) {
+    events.push(
+      semanticEvent({
+        eventType: 'auth_required_candidate',
+        targetGroup: 'auth_state',
+        targetObjectFamily: 'auth_surface',
+        summary:
+          'Authentication required candidate: auth/login surface appeared or logged-out account state is visible; user action may be required. Do not claim login success until account state changes and auth prompt disappears.',
+        confidence: 0.66,
         evidenceRefs: changedEvidenceRefs(changes),
       }),
     );
@@ -1742,6 +1783,8 @@ function buildSemanticPrimaryConclusion(event: ReadPageBrowserPageSemanticEvent)
       return trimConclusion(event.summary, 'Menu state changed: menu expanded candidate.');
     case 'auth_succeeded_candidate':
       return 'Authentication success candidate: auth prompt disappeared and account state changed; postcondition verification is still required.';
+    case 'auth_required_candidate':
+      return 'Authentication required candidate: auth/login surface or logged-out account state is visible; user action may be required and login success is not proven.';
     case 'logout_succeeded_candidate':
       return 'Logout success candidate: logged-in account state changed; postcondition verification is still required.';
     case 'qr_expired_candidate':
@@ -1791,6 +1834,8 @@ function semanticEventConclusionLabel(event: ReadPageBrowserPageSemanticEvent): 
       return formatMenuExpandedConclusionLabel(event.summary);
     case 'auth_succeeded_candidate':
       return 'an authentication state-change candidate';
+    case 'auth_required_candidate':
+      return 'an authentication-required candidate';
     case 'logout_succeeded_candidate':
       return 'a logout state-change candidate';
     case 'qr_expired_candidate':
@@ -2248,6 +2293,8 @@ function semanticEventPriority(event: ReadPageBrowserPageSemanticEvent): number 
       return 2;
     case 'qr_refreshed':
       return 3;
+    case 'auth_required_candidate':
+      return 3.2;
     case 'menu_expanded':
       return 4;
     case 'qr_waiting':
@@ -2368,7 +2415,26 @@ function looksExpanded(state: string | undefined): boolean {
 }
 
 function looksLoggedIn(state: string | undefined): boolean {
-  return /logged[_ -]?in|authenticated|account/i.test(state ?? '');
+  const normalized = state ?? '';
+  if (/logged[_ -]?out|signed[_ -]?out|unauthenticated|anonymous/i.test(normalized)) {
+    return false;
+  }
+  return /logged[_ -]?in|authenticated|account/i.test(normalized);
+}
+
+function looksAuthRequired(state: string | undefined): boolean {
+  return /auth[_ -]?(prompt|required|challenge|surface)|login|sign[_ -]?in|prompt|challenge|required/i.test(
+    state ?? '',
+  );
+}
+
+function looksLoggedOutOrAuthRequired(state: string | undefined): boolean {
+  return (
+    /logged[_ -]?out|signed[_ -]?out|unauthenticated|anonymous/i.test(state ?? '') ||
+    /auth[_ -]?(required|prompt|challenge)|login[_ -]?required|sign[_ -]?in[_ -]?required/i.test(
+      state ?? '',
+    )
+  );
 }
 
 function buildRootObjectId(projection: BrowserPageThingProjection | null | undefined): string {
