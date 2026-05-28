@@ -10,6 +10,7 @@ import {
   summarizeCurrentWindow,
   summarizeBrowserWorldSnapshot,
   summarizeBrowserObjectEdgeState,
+  summarizeActionableObjectChange,
   summarizeDynamicObjectUpdate,
   summarizeObjectChangeConclusion,
   summarizeObjectChangeSummary,
@@ -171,6 +172,7 @@ export interface BrowserWorldSummary {
   currentOperationConclusion: string;
   browserObjectEdgeSummary: string;
   recentChangeSummary: string;
+  actionableObjectChangeSummary: string;
   objectChangeSummary: string;
   dynamicObjectUpdateSummary: string;
   objectChangeConclusion: string;
@@ -870,6 +872,7 @@ export function initBrowserWorldInventory(): void {
       tabId: normalized?.tabId ?? null,
       windowId: normalized?.windowId ?? null,
       openedBy: normalized?.openedBy,
+      openedBySource: normalized?.openedBySource,
       status: normalized?.status ?? null,
     });
   });
@@ -892,6 +895,7 @@ export function initBrowserWorldInventory(): void {
         tabId,
         windowId: normalized?.windowId ?? null,
         openedBy: normalized?.openedBy,
+        openedBySource: normalized?.openedBySource,
         status: normalized?.status ?? null,
         ...changeFlags,
       });
@@ -919,6 +923,7 @@ export function initBrowserWorldInventory(): void {
       tabId,
       windowId,
       openedBy: previous?.openedBy,
+      openedBySource: previous?.openedBySource,
       aiOperation: previous?.lastAiOperation,
       aiOperationReason: previous?.lastAiOperationReason,
     });
@@ -948,6 +953,7 @@ export function initBrowserWorldInventory(): void {
       replacedTabId: removedTabId,
       windowId: previous?.windowId ?? null,
       openedBy: previous?.openedBy,
+      openedBySource: previous?.openedBySource,
       status: previous?.status ?? null,
     });
   });
@@ -969,6 +975,7 @@ export function initBrowserWorldInventory(): void {
       windowId: oldWindowId,
       oldWindowId,
       openedBy: previous?.openedBy,
+      openedBySource: previous?.openedBySource,
       status: previous?.status ?? null,
     });
   });
@@ -989,6 +996,7 @@ export function initBrowserWorldInventory(): void {
       windowId: newWindowId,
       newWindowId,
       openedBy: previous?.openedBy,
+      openedBySource: previous?.openedBySource,
       status: previous?.status ?? null,
     });
   });
@@ -1258,6 +1266,14 @@ function buildSnapshot(): BrowserWorldSnapshot {
         aiOperationState,
       ),
       recentChangeSummary,
+      actionableObjectChangeSummary: summarizeActionableObjectChange(
+        recentEvents,
+        activeTab,
+        lastAiOperatedTab,
+        tabLifecycleState,
+        aiOperationState,
+        windowOperationState,
+      ),
       objectChangeSummary: summarizeObjectChangeSummary(
         recentEvents,
         activeTab,

@@ -480,6 +480,9 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.objectChangeSummary).toBe(
       'Object change summary: the latest AI-operated page tab 20 changed attributes=url,title,status,audible,muted,pinned,discarded with status complete; active tab 10 is complete and operable; AI last operated tab 20, but the active tab is 10; reselect or reread before continuing.',
     );
+    expect(snapshot.summary.actionableObjectChangeSummary).toBe(
+      'Actionable object change: latest AI tab 20 changed url,title,status,audible,muted,pinned,discarded; activeTab=10 user-or-unknown status=complete operable=yes; next=reselect_or_reread_latest_ai_operated_tab.',
+    );
     expect(snapshot.summary.primaryConclusion).toContain(
       'activeTab=10, status=complete, owner=user_or_page, source=user_or_unknown, operable=yes',
     );
@@ -527,6 +530,9 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.objectChangeConclusion).toContain('Current page object is tab 20');
     expect(snapshot.summary.objectChangeSummary).toBe(
       'Object change summary: current page switched to tab 20; active tab 20 is complete and operable; AI can continue on tab 20 if the next page-level check still passes.',
+    );
+    expect(snapshot.summary.actionableObjectChangeSummary).toBe(
+      'Actionable object change: current active page is tab 20 AI-opened; next=page_level_read_or_postcondition_check.',
     );
     expect(snapshot.summary.primaryConclusion).toContain(
       'activeTab=20, status=complete, owner=ai, source=ai_tool, operable=yes',
@@ -652,6 +658,9 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.objectChangeSummary).toBe(
       'Object change summary: tab 20 was removed; retained tabs=2; active tab=unknown; the removed tab was AI-owned, so do not continue on tab 20.',
     );
+    expect(snapshot.summary.actionableObjectChangeSummary).toBe(
+      'Actionable object change: removed tab was an AI target; do not continue on tab 20; retainedTabs=2; next=select_or_open_target_tab.',
+    );
     expect(snapshot.recentEvents.at(-1)).toMatchObject({
       eventKind: 'tab_removed',
       tabId: 20,
@@ -700,6 +709,9 @@ describe('browser world inventory', () => {
       retainedTabCount: 3,
       activeTabId: 21,
     });
+    expect(snapshot.summary.actionableObjectChangeSummary).toBe(
+      'Actionable object change: page-opened tab 21 was created, created tab is active; retainedTabs=3; next=read_or_select_intended_target.',
+    );
   });
 
   it('summarizes tab replacement as an object lifecycle transition', async () => {
