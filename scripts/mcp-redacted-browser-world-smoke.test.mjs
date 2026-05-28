@@ -45,6 +45,13 @@ function redactedAiActionReadiness() {
   };
 }
 
+function redactedRetentionPolicy() {
+  return {
+    eventPrivacyBoundaryPresent: true,
+    detailBoundaryPresent: true,
+  };
+}
+
 function redactedWindowLifecycleState() {
   return {
     latestEventKind: null,
@@ -869,6 +876,7 @@ test('buildWindowStateDriftSummary reports stable repeated observer samples', ()
         tabCount: 4,
         compactSummaryBounded: true,
         retentionWithinLimit: true,
+        retentionPolicy: redactedRetentionPolicy(),
         refreshHealth: {
           lastRefreshDecision: 'full_chrome_resync',
         },
@@ -887,6 +895,7 @@ test('buildWindowStateDriftSummary reports stable repeated observer samples', ()
         tabCount: 4,
         compactSummaryBounded: true,
         retentionWithinLimit: true,
+        retentionPolicy: redactedRetentionPolicy(),
         refreshHealth: {
           lastRefreshDecision: 'skipped_recent_resync',
         },
@@ -906,8 +915,17 @@ test('buildWindowStateDriftSummary reports stable repeated observer samples', ()
     allSamplesObserved: true,
     allSamplesCompactBounded: true,
     allSamplesRetentionBounded: true,
+    allSamplesPrivacyBoundariesPresent: true,
     allSamplesRefreshHealthPresent: true,
     allSamplesWindowLifecyclePresent: true,
+    sampleDurationStats: {
+      sampleCountWithDuration: 0,
+      totalObservedSampleDurationMs: 0,
+      maxObservedSampleDurationMs: null,
+      averageObservedSampleDurationMs: null,
+      claimBoundary:
+        'Observer sample duration is measured around redacted get_windows_and_tabs smoke calls only. It is a local smoke signal, not a full performance benchmark.',
+    },
     refreshThrottleProof: {
       requestedSampleIntervalMs: null,
       minimumObservedSampleIntervalMs: null,
@@ -925,6 +943,21 @@ test('buildWindowStateDriftSummary reports stable repeated observer samples', ()
     allSamplesCurrentTabAttributeGroupsPresent: true,
     allSamplesCurrentTabStateAccountedFor: true,
     allSamplesAiActionReadinessPresent: true,
+    observerStabilityProof: {
+      proofSatisfied: true,
+      sampleCount: 2,
+      allSamplesObserved: true,
+      allSamplesCompactBounded: true,
+      allSamplesRetentionBounded: true,
+      allSamplesPrivacyBoundariesPresent: true,
+      allSamplesRefreshHealthPresent: true,
+      allSamplesWindowLifecyclePresent: true,
+      allSamplesCurrentTabStateAccountedFor: true,
+      allSamplesAiActionReadinessPresent: true,
+      refreshThrottleProofSatisfied: true,
+      claimBoundary:
+        'Long-running observer stability proof covers repeated public no-login Browser World observation contract only. It does not prove login/account flows, page understanding, API/CDP reuse, or product delivery grade.',
+    },
     windowCountStable: true,
     tabCountStable: true,
     focusedWindowCountStable: true,
@@ -943,6 +976,7 @@ test('buildWindowStateDriftSummary reports drift without failing observation', (
         tabCount: 4,
         compactSummaryBounded: true,
         retentionWithinLimit: true,
+        retentionPolicy: redactedRetentionPolicy(),
         refreshHealth: {
           lastRefreshDecision: 'full_chrome_resync',
         },
@@ -961,6 +995,7 @@ test('buildWindowStateDriftSummary reports drift without failing observation', (
         tabCount: 5,
         compactSummaryBounded: true,
         retentionWithinLimit: true,
+        retentionPolicy: redactedRetentionPolicy(),
         refreshHealth: {
           lastRefreshDecision: 'skipped_recent_resync',
         },
@@ -978,10 +1013,12 @@ test('buildWindowStateDriftSummary reports drift without failing observation', (
   assert.equal(summary.allSamplesObserved, true);
   assert.equal(summary.allSamplesCompactBounded, true);
   assert.equal(summary.allSamplesRetentionBounded, true);
+  assert.equal(summary.allSamplesPrivacyBoundariesPresent, true);
   assert.equal(summary.allSamplesRefreshHealthPresent, true);
   assert.equal(summary.allSamplesCurrentTabAttributeGroupsPresent, true);
   assert.equal(summary.allSamplesCurrentTabStateAccountedFor, true);
   assert.equal(summary.allSamplesAiActionReadinessPresent, true);
+  assert.equal(summary.observerStabilityProof.proofSatisfied, true);
   assert.equal(summary.windowCountStable, true);
   assert.equal(summary.tabCountStable, false);
   assert.equal(summary.driftObserved, true);
@@ -995,6 +1032,7 @@ test('buildWindowStateDriftSummary accounts for explicit no-focused-window state
         tabCount: 1,
         compactSummaryBounded: true,
         retentionWithinLimit: true,
+        retentionPolicy: redactedRetentionPolicy(),
         refreshHealth: {
           lastRefreshDecision: 'full_chrome_resync',
         },
@@ -1027,6 +1065,7 @@ test('buildWindowStateDriftSummary requires skipped resync proof for sub-throttl
     tabCount: 4,
     compactSummaryBounded: true,
     retentionWithinLimit: true,
+    retentionPolicy: redactedRetentionPolicy(),
     currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
     tabAttributeGroupClaimBoundaryPresent: true,
     aiActionReadiness: redactedAiActionReadiness(),
@@ -1079,6 +1118,7 @@ test('buildWindowStateDriftSummary requires refresh health for every sample', ()
         tabCount: 4,
         compactSummaryBounded: true,
         retentionWithinLimit: true,
+        retentionPolicy: redactedRetentionPolicy(),
         refreshHealth: {
           lastRefreshDecision: 'full_chrome_resync',
         },
@@ -1097,6 +1137,7 @@ test('buildWindowStateDriftSummary requires refresh health for every sample', ()
         tabCount: 4,
         compactSummaryBounded: true,
         retentionWithinLimit: true,
+        retentionPolicy: redactedRetentionPolicy(),
         currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
         tabAttributeGroupClaimBoundaryPresent: true,
         aiActionReadiness: redactedAiActionReadiness(),
@@ -2107,10 +2148,13 @@ test('isSmokeResultPassing keeps observer verdicts strict and explicit', () => {
       driftSummary: {
         allSamplesCompactBounded: true,
         allSamplesRetentionBounded: true,
+        allSamplesPrivacyBoundariesPresent: true,
         allSamplesRefreshHealthPresent: true,
         allSamplesCurrentTabStateAccountedFor: true,
+        allSamplesAiActionReadinessPresent: true,
         allSamplesWindowLifecyclePresent: true,
         refreshThrottleProof: { proofSatisfied: true },
+        observerStabilityProof: { proofSatisfied: true },
       },
       verdict: 'WINDOW_STATE_REPEATED_OBSERVER_PASS',
     }),
@@ -2122,10 +2166,13 @@ test('isSmokeResultPassing keeps observer verdicts strict and explicit', () => {
       driftSummary: {
         allSamplesCompactBounded: true,
         allSamplesRetentionBounded: true,
+        allSamplesPrivacyBoundariesPresent: true,
         allSamplesRefreshHealthPresent: true,
         allSamplesCurrentTabStateAccountedFor: true,
+        allSamplesAiActionReadinessPresent: true,
         allSamplesWindowLifecyclePresent: true,
         refreshThrottleProof: { proofSatisfied: false },
+        observerStabilityProof: { proofSatisfied: false },
       },
       verdict: 'WINDOW_STATE_REPEATED_OBSERVER_PASS',
     }),
