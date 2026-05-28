@@ -1260,6 +1260,8 @@ describe('browser world inventory', () => {
         tabs: 2,
         aiOpenedTabs: 1,
         userOrPageOpenedTabs: 1,
+        pageOpenedTabs: 0,
+        userOrUnknownOpenedTabs: 1,
         operableTabs: 1,
       },
       tabStateMatrix: {

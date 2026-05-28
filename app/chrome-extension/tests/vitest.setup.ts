@@ -38,6 +38,7 @@ if (typeof globalThis.chrome === 'undefined') {
       create: vi.fn().mockResolvedValue({ id: 1 }),
       update: vi.fn().mockResolvedValue({}),
       remove: vi.fn().mockResolvedValue(undefined),
+      sendMessage: vi.fn().mockResolvedValue(null),
       captureVisibleTab: vi.fn().mockResolvedValue('data:image/png;base64,'),
       onRemoved: { addListener: vi.fn(), removeListener: vi.fn() },
       onCreated: { addListener: vi.fn(), removeListener: vi.fn() },
@@ -75,6 +76,17 @@ if (typeof globalThis.chrome === 'undefined') {
     },
     scripting: {
       executeScript: vi.fn().mockResolvedValue([{ result: '' }]),
+    },
+    windows: {
+      get: vi.fn().mockResolvedValue({ id: 1, focused: true, state: 'normal', type: 'normal' }),
+      getAll: vi.fn().mockResolvedValue([]),
+      create: vi.fn().mockResolvedValue({ id: 1 }),
+      update: vi.fn().mockResolvedValue({}),
+      remove: vi.fn().mockResolvedValue(undefined),
+      getLastFocused: vi.fn().mockResolvedValue({ id: 1, focused: true }),
+      onCreated: { addListener: vi.fn(), removeListener: vi.fn() },
+      onRemoved: { addListener: vi.fn(), removeListener: vi.fn() },
+      onFocusChanged: { addListener: vi.fn(), removeListener: vi.fn() },
     },
   };
 }

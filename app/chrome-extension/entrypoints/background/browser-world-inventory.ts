@@ -156,6 +156,8 @@ export interface BrowserWorldSummary {
     tabs: number;
     aiOpenedTabs: number;
     userOrPageOpenedTabs: number;
+    pageOpenedTabs: number;
+    userOrUnknownOpenedTabs: number;
     operableTabs: number;
   };
   windowStateMatrix: BrowserWorldWindowStateMatrix;

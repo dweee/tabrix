@@ -194,6 +194,7 @@ describe('non-web tab guards', () => {
     const injectSpy = vi
       .spyOn(readPageTool as any, 'injectContentScript')
       .mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'collectInteractiveElementsFallback').mockResolvedValue(null);
     const sendMessageSpy = vi
       .spyOn(readPageTool as any, 'sendMessageToTab')
       .mockRejectedValueOnce(
