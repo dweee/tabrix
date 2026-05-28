@@ -62,6 +62,19 @@ test('extractJsonObject parses the bounded CLI Result payload', () => {
   assert.deepEqual(parsed, { ok: true });
 });
 
+test('extractJsonObject ignores JSON-RPC prelude objects before the CLI Result payload', () => {
+  const parsed = extractJsonObject(
+    [
+      'debug JsonRpcMessage {"jsonrpc":"2.0","method":"notifications/progress"}',
+      'tabrix mcp call get_windows_and_tabs',
+      '',
+      'Result',
+      '{"ok":true,"windowCount":1}',
+    ].join('\n'),
+  );
+  assert.deepEqual(parsed, { ok: true, windowCount: 1 });
+});
+
 test('assertRedactedSmokeOutputSafe rejects raw URL strings and raw fields', () => {
   assert.doesNotThrow(() =>
     assertRedactedSmokeOutputSafe({
