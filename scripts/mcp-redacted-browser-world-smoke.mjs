@@ -1580,23 +1580,23 @@ function runLifecycleSmoke(cliPath, smokeUrl, args) {
   );
   const backgroundTabId = extractNavigateTabId(backgroundPayload);
   openedTabIds.push(backgroundTabId);
+  const beforeSwitchPayload = callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs);
   lifecycleMatrix.push(
-    buildStepSummary(
-      'background_open',
-      callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs),
-      backgroundTabId,
-    ),
+    buildStepSummary('background_open', beforeSwitchPayload, backgroundTabId),
   );
 
   if (Number.isInteger(backgroundTabId)) {
     callMcpTool(cliPath, 'chrome_switch_tab', { tabId: backgroundTabId }, args.timeoutMs);
   }
+  const afterSwitchPayload = callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs);
   lifecycleMatrix.push(
-    buildStepSummary(
-      'switch_to_background_tab',
-      callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs),
-      backgroundTabId,
-    ),
+    buildStepSummary('switch_to_background_tab', afterSwitchPayload, backgroundTabId),
+  );
+  const activeSwitchProof = buildActiveTabSwitchProof(
+    beforeSwitchPayload,
+    afterSwitchPayload,
+    foregroundTabId,
+    backgroundTabId,
   );
 
   const newWindowPayload = callMcpTool(
@@ -1655,6 +1655,7 @@ function runLifecycleSmoke(cliPath, smokeUrl, args) {
     },
     postCleanup,
     postCloseTargets,
+    activeSwitchProof,
     lifecycleMatrix,
   };
   return {
@@ -1693,6 +1694,7 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
       cleanup: result.cleanup,
       postCleanup: result.postCleanup,
       postCloseTargets: result.postCloseTargets,
+      activeSwitchProof: result.activeSwitchProof,
       publicLifecycleCoverage: result.publicLifecycleCoverage,
       lifecycleMatrix,
       passed:
@@ -1700,6 +1702,9 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
         result.closeSucceeded === true &&
         result.cleanupTargetsPassed === true &&
         result.allLifecycleStepsPassed === true &&
+        result.activeSwitchProof?.browserActiveChangedToTarget === true &&
+        result.activeSwitchProof?.afterLatestAiOperatedIsTo === true &&
+        result.activeSwitchProof?.afterLatestAiOperationIsSwitchTab === true &&
         result.publicLifecycleCoverage?.minimumPublicLifecycleCoveragePassed === true &&
         result.postCleanup?.retentionWithinLimit === true &&
         result.postCleanup?.compactSummaryBounded === true &&
@@ -2154,6 +2159,62 @@ export function buildBackgroundReadTargetFocusProof(
   };
 }
 
+function getBrowserWorldStateIds(browserWorldPayload) {
+  const browserWorld = browserWorldPayload?.browserWorld ?? browserWorldPayload ?? {};
+  const aiOperationState =
+    browserWorld?.summary?.aiOperationState ??
+    browserWorldPayload?.compactSummary?.aiOperationState ??
+    browserWorldPayload?.summary?.aiOperationState ??
+    {};
+  return {
+    browserActiveTabId: Number.isInteger(browserWorld?.browserActiveTabId)
+      ? browserWorld.browserActiveTabId
+      : null,
+    latestAiOperatedTabId: Number.isInteger(aiOperationState?.latestAiOperatedTabId)
+      ? aiOperationState.latestAiOperatedTabId
+      : null,
+    latestAiOperation:
+      typeof aiOperationState?.latestAiOperation === 'string'
+        ? aiOperationState.latestAiOperation
+        : null,
+  };
+}
+
+export function buildActiveTabSwitchProof(beforePayload, afterPayload, fromTabId, toTabId) {
+  const before = getBrowserWorldStateIds(beforePayload);
+  const after = getBrowserWorldStateIds(afterPayload);
+  const fromKnown = Number.isInteger(fromTabId);
+  const toKnown = Number.isInteger(toTabId);
+  return {
+    fromTabOpened: fromKnown,
+    toTabOpened: toKnown,
+    beforeBrowserActiveKnown: Number.isInteger(before.browserActiveTabId),
+    afterBrowserActiveKnown: Number.isInteger(after.browserActiveTabId),
+    beforeBrowserActiveWasFrom:
+      fromKnown && Number.isInteger(before.browserActiveTabId)
+        ? before.browserActiveTabId === fromTabId
+        : null,
+    afterBrowserActiveIsTo:
+      toKnown && Number.isInteger(after.browserActiveTabId)
+        ? after.browserActiveTabId === toTabId
+        : null,
+    browserActiveChangedToTarget:
+      fromKnown &&
+      toKnown &&
+      Number.isInteger(before.browserActiveTabId) &&
+      Number.isInteger(after.browserActiveTabId)
+        ? before.browserActiveTabId === fromTabId && after.browserActiveTabId === toTabId
+        : null,
+    afterLatestAiOperatedIsTo:
+      toKnown && Number.isInteger(after.latestAiOperatedTabId)
+        ? after.latestAiOperatedTabId === toTabId
+        : null,
+    afterLatestAiOperationIsSwitchTab: after.latestAiOperation === 'switch_tab',
+    claimBoundary:
+      'Active switch proof is redacted boolean evidence only; it does not expose tab ids, URLs, titles, page content, account state, or task success.',
+  };
+}
+
 function runReadPageBackgroundTargetSmoke(cliPath, smokeUrl, args) {
   if (args.skipOpen) {
     throw new Error('--scenario read-page-background-target cannot be combined with --skip-open.');
@@ -2357,6 +2418,9 @@ export function isSmokeResultPassing(result) {
       result.closeSucceeded === true &&
       result.cleanupTargetsPassed === true &&
       result.allLifecycleStepsPassed === true &&
+      result.activeSwitchProof?.browserActiveChangedToTarget === true &&
+      result.activeSwitchProof?.afterLatestAiOperatedIsTo === true &&
+      result.activeSwitchProof?.afterLatestAiOperationIsSwitchTab === true &&
       result.publicLifecycleCoverage?.minimumPublicLifecycleCoveragePassed === true &&
       result.postCleanup?.retentionWithinLimit === true &&
       result.postCleanup?.compactSummaryBounded === true &&

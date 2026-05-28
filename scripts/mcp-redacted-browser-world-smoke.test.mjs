@@ -9,6 +9,7 @@ import {
   buildPublicNoLoginLifecycleCoverageSummary,
   buildRedactedBrowserWorldSummary,
   buildRedactedReadPageAlignmentSummary,
+  buildActiveTabSwitchProof,
   buildBackgroundReadTargetFocusProof,
   buildStepSummary,
   buildReadPageMatrixTargetResult,
@@ -1877,6 +1878,61 @@ test('buildBackgroundReadTargetFocusProof proves foreground remains active witho
   assert.equal(serialized.includes('20'), false);
 });
 
+test('buildActiveTabSwitchProof proves active tab changed without exposing ids', () => {
+  const beforePayload = {
+    browserWorld: {
+      browserActiveTabId: 10,
+      summary: {
+        aiOperationState: {
+          latestAiOperatedTabId: 20,
+          latestAiOperation: 'navigate_new_tab',
+        },
+      },
+    },
+    windows: [
+      {
+        tabs: [
+          { id: 10, url: 'https://private.example.test/foreground', title: 'Private Foreground' },
+          { id: 20, url: 'https://private.example.test/background', title: 'Private Background' },
+        ],
+      },
+    ],
+  };
+  const afterPayload = {
+    browserWorld: {
+      browserActiveTabId: 20,
+      summary: {
+        aiOperationState: {
+          latestAiOperatedTabId: 20,
+          latestAiOperation: 'switch_tab',
+        },
+      },
+    },
+    windows: beforePayload.windows,
+  };
+
+  const proof = buildActiveTabSwitchProof(beforePayload, afterPayload, 10, 20);
+
+  assert.deepEqual(proof, {
+    fromTabOpened: true,
+    toTabOpened: true,
+    beforeBrowserActiveKnown: true,
+    afterBrowserActiveKnown: true,
+    beforeBrowserActiveWasFrom: true,
+    afterBrowserActiveIsTo: true,
+    browserActiveChangedToTarget: true,
+    afterLatestAiOperatedIsTo: true,
+    afterLatestAiOperationIsSwitchTab: true,
+    claimBoundary:
+      'Active switch proof is redacted boolean evidence only; it does not expose tab ids, URLs, titles, page content, account state, or task success.',
+  });
+  const serialized = JSON.stringify(proof);
+  assert.equal(serialized.includes('private.example.test'), false);
+  assert.equal(serialized.includes('Private Foreground'), false);
+  assert.equal(serialized.includes('10'), false);
+  assert.equal(serialized.includes('20'), false);
+});
+
 test('buildReadPageMatrixTargetResult fails when read_page operation target evidence is incomplete', () => {
   const target = buildReadPageMatrixTargetResult(
     {
@@ -2096,6 +2152,11 @@ test('isSmokeResultPassing keeps observer verdicts strict and explicit', () => {
     closeSucceeded: true,
     cleanupTargetsPassed: true,
     allLifecycleStepsPassed: true,
+    activeSwitchProof: {
+      browserActiveChangedToTarget: true,
+      afterLatestAiOperatedIsTo: true,
+      afterLatestAiOperationIsSwitchTab: true,
+    },
     publicLifecycleCoverage: {
       minimumPublicLifecycleCoveragePassed: true,
     },
@@ -2108,6 +2169,16 @@ test('isSmokeResultPassing keeps observer verdicts strict and explicit', () => {
     },
   };
   assert.equal(isSmokeResultPassing(lifecycleResult), true);
+  assert.equal(
+    isSmokeResultPassing({
+      ...lifecycleResult,
+      activeSwitchProof: {
+        ...lifecycleResult.activeSwitchProof,
+        browserActiveChangedToTarget: false,
+      },
+    }),
+    false,
+  );
   assert.equal(
     isSmokeResultPassing({
       ...lifecycleResult,
