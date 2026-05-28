@@ -185,6 +185,9 @@ describe('browser world inventory', () => {
     expect(snapshot.browserActiveTabId).toBe(10);
     expect(snapshot.userOrPageOpenedTabIds).toEqual([10, 11]);
     expect(snapshot.operableTabIds).toEqual([10]);
+    expect(snapshot.summary.primaryConclusion).toBe(
+      'Browser object snapshot: focusedWindow=1, visibility=visible, operable=yes; activeTab=10, status=complete, owner=user_or_page, operable=yes; latestAiTab=none, relation=no_ai_operation_observed; inventory=windows:1, tabs:2, ai:0, userOrPage:2, operable:1; recent=Last change: browser world inventory was refreshed from Chrome.; next=read_or_select_intended_target',
+    );
     expect(snapshot.summary.activeWindow).toMatchObject({
       windowId: 1,
       state: 'normal',
@@ -471,6 +474,15 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.objectChangeSummary).toBe(
       'Object change summary: the latest AI-operated page tab 20 changed attributes=url,title,status,audible,muted,pinned,discarded with status complete; active tab 10 is complete and operable; AI last operated tab 20, but the active tab is 10; reselect or reread before continuing.',
     );
+    expect(snapshot.summary.primaryConclusion).toContain(
+      'activeTab=10, status=complete, owner=user_or_page, operable=yes',
+    );
+    expect(snapshot.summary.primaryConclusion).toContain(
+      'latestAiTab=20, relation=latest_ai_operated_background_tab, canContinue=no',
+    );
+    expect(snapshot.summary.primaryConclusion).toContain(
+      'next=reselect_or_reread_latest_ai_operated_tab',
+    );
     expect(snapshot.summary.aiOperationState).toMatchObject({
       browserActiveTabId: 10,
       latestAiOperatedTabId: 20,
@@ -509,6 +521,15 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.objectChangeConclusion).toContain('Current page object is tab 20');
     expect(snapshot.summary.objectChangeSummary).toBe(
       'Object change summary: current page switched to tab 20; active tab 20 is complete and operable; AI can continue on tab 20 if the next page-level check still passes.',
+    );
+    expect(snapshot.summary.primaryConclusion).toContain(
+      'activeTab=20, status=complete, owner=ai, operable=yes',
+    );
+    expect(snapshot.summary.primaryConclusion).toContain(
+      'latestAiTab=20, relation=same_as_browser_active, canContinue=yes',
+    );
+    expect(snapshot.summary.primaryConclusion).toContain(
+      'next=page_level_read_or_postcondition_check',
     );
     expect(snapshot.summary.dynamicObjectUpdateSummary).toBe(
       'Dynamic object update: current page object switched to tab 20; owner=ai, status=complete, operable=yes, focusedWindow=1.',

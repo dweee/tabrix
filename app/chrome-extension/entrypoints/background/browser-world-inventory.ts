@@ -8,6 +8,7 @@ import {
   buildWindowStateMatrix,
   summarizeCurrentOperation,
   summarizeCurrentWindow,
+  summarizeBrowserWorldSnapshot,
   summarizeBrowserObjectEdgeState,
   summarizeDynamicObjectUpdate,
   summarizeObjectChangeConclusion,
@@ -1107,6 +1108,15 @@ function buildSnapshot(): BrowserWorldSnapshot {
       .sort((a, b) => (b.lastAiOperationAtMs ?? 0) - (a.lastAiOperationAtMs ?? 0))[0] ?? null;
   const aiOperationState = buildAiOperationState(tabs, activeTab, lastAiOperatedTab);
   const recentChangeSummary = summarizeRecentEvents(recentEvents);
+  const primaryConclusion = summarizeBrowserWorldSnapshot({
+    windows,
+    tabs,
+    activeTab,
+    focusedWindow: focusedWindow ?? null,
+    windowOperationState,
+    aiOperationState,
+    recentChangeSummary,
+  });
   return {
     source: 'extension_browser_world_inventory',
     version: 1,
@@ -1132,7 +1142,7 @@ function buildSnapshot(): BrowserWorldSnapshot {
     userOrPageOpenedTabIds,
     operableTabIds,
     summary: {
-      primaryConclusion: `Browser world snapshot: ${windows.length} window(s), ${tabs.length} tab(s), activeTab=${browserActiveTab ?? 'unknown'}, aiOpenedTabs=${aiOpenedTabIds.length}, operableTabs=${operableTabIds.length}.`,
+      primaryConclusion,
       activeWindow: {
         windowId: focusedWindow?.windowId ?? null,
         state: focusedWindow?.state ?? null,

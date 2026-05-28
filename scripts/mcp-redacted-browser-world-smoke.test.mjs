@@ -123,6 +123,8 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
       windowCount: 1,
       tabCount: 20,
       compactSummary: {
+        primaryConclusion:
+          'Browser object snapshot: focusedWindow=1, visibility=visible, operable=yes; activeTab=20, status=complete, owner=ai, operable=yes; latestAiTab=20, relation=same_as_browser_active, canContinue=yes; inventory=windows:1, tabs:20, ai:1, userOrPage:19, operable:20; recent=Last change redacted.; next=page_level_read_or_postcondition_check',
         activeObject: {
           tabId: 20,
           windowId: 1,
@@ -759,6 +761,8 @@ test('buildRedactedBrowserWorldSummary omits URL and title fields', () => {
     closedRetainedTabCount: 0,
   });
   assert.equal(summary.currentOperationConclusionPresent, true);
+  assert.equal(summary.primaryConclusionPresent, true);
+  assert.equal(summary.browserObjectSnapshotConclusionPresent, true);
   assert.equal(summary.objectInventoryPresent, true);
   assert.equal(summary.browserObjectEdgeSummaryPresent, true);
   assert.equal(summary.objectChangeSummaryPresent, true);
@@ -1986,6 +1990,7 @@ test('isSmokeResultPassing keeps observer verdicts strict and explicit', () => {
       scenario: 'window-state',
       verdict: 'WINDOW_STATE_OBSERVED',
       redacted: {
+        browserObjectSnapshotConclusionPresent: true,
         currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
         tabAttributeGroupClaimBoundaryPresent: true,
         windowLifecycleState: redactedWindowLifecycleState(),

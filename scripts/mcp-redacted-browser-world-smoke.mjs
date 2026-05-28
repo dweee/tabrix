@@ -948,6 +948,12 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     currentOperationConclusionPresent:
       typeof payload?.compactSummary?.currentOperationConclusion === 'string' ||
       typeof payload?.summary?.currentOperationConclusion === 'string',
+    primaryConclusionPresent:
+      typeof payload?.compactSummary?.primaryConclusion === 'string' ||
+      typeof payload?.summary?.primaryConclusion === 'string',
+    browserObjectSnapshotConclusionPresent: String(
+      payload?.compactSummary?.primaryConclusion || payload?.summary?.primaryConclusion || '',
+    ).startsWith('Browser object snapshot:'),
     objectInventoryPresent: Boolean(objectInventory),
     browserObjectEdgeSummaryPresent:
       typeof payload?.compactSummary?.browserObjectEdgeSummary === 'string' ||
@@ -1882,6 +1888,7 @@ function runWindowStateSmoke(cliPath, args) {
       redacted.windows.total > 0 &&
       redacted.hasBrowserWorldDetail &&
       redacted.objectInventoryPresent === true &&
+      redacted.browserObjectSnapshotConclusionPresent === true &&
       redacted.browserObjectEdgeSummaryPresent === true &&
       Boolean(redacted.windowLifecycleState) &&
       redacted.windowLifecycleConclusionPresent === true &&
@@ -2068,6 +2075,7 @@ export function isSmokeResultPassing(result) {
   if (result.scenario === 'window-state') {
     return (
       result.verdict === 'WINDOW_STATE_OBSERVED' &&
+      result.redacted?.browserObjectSnapshotConclusionPresent === true &&
       hasCurrentTabAttributeGroups(result.redacted) &&
       Boolean(result.redacted?.windowLifecycleState) &&
       result.redacted?.windowLifecycleConclusionPresent === true

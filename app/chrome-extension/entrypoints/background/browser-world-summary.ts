@@ -377,6 +377,68 @@ export function summarizeBrowserObjectEdgeState(
   ].join('; ');
 }
 
+function formatBooleanState(value: boolean | null | undefined): 'yes' | 'no' | 'unknown' {
+  if (value === true) return 'yes';
+  if (value === false) return 'no';
+  return 'unknown';
+}
+
+function summarizeSnapshotNextCheck(
+  windowOperationState: BrowserWorldWindowOperationState,
+  aiOperationState: BrowserWorldAiOperationState,
+): string {
+  if (
+    windowOperationState.relationToCurrentOperableWindow === 'no_window_observed' ||
+    windowOperationState.relationToCurrentOperableWindow === 'no_focused_window'
+  ) {
+    return 'restore_or_focus_browser_window';
+  }
+  if (windowOperationState.relationToCurrentOperableWindow === 'focused_window_minimized') {
+    return 'restore_window_then_refresh_browser_snapshot';
+  }
+  if (
+    aiOperationState.relationToBrowserActiveTab === 'latest_ai_operated_background_tab' ||
+    aiOperationState.relationToBrowserActiveTab === 'browser_active_not_latest_ai_operated'
+  ) {
+    return 'reselect_or_reread_latest_ai_operated_tab';
+  }
+  if (aiOperationState.relationToBrowserActiveTab === 'same_as_browser_active') {
+    return 'page_level_read_or_postcondition_check';
+  }
+  return 'read_or_select_intended_target';
+}
+
+export function summarizeBrowserWorldSnapshot(args: {
+  windows: readonly BrowserWorldWindowObject[];
+  tabs: readonly BrowserWorldTabObject[];
+  activeTab: BrowserWorldTabObject | null;
+  focusedWindow: BrowserWorldWindowObject | null;
+  windowOperationState: BrowserWorldWindowOperationState;
+  aiOperationState: BrowserWorldAiOperationState;
+  recentChangeSummary: string;
+}): string {
+  const aiOpenedCount = args.tabs.filter((tab) => tab.openedBy === 'ai').length;
+  const userOrPageOpenedCount = args.tabs.filter((tab) => tab.openedBy === 'user_or_page').length;
+  const operableCount = args.tabs.filter((tab) => tab.canTabrixOperate === true).length;
+  const activeTabText = args.activeTab
+    ? `activeTab=${args.activeTab.tabId}, status=${args.activeTab.status ?? 'unknown'}, owner=${args.activeTab.openedBy}, operable=${formatBooleanState(args.activeTab.canTabrixOperate)}`
+    : 'activeTab=unknown';
+  const focusedWindowText = args.focusedWindow
+    ? `focusedWindow=${args.focusedWindow.windowId}, visibility=${args.focusedWindow.visibilityState}, operable=${formatBooleanState(args.focusedWindow.canTabrixOperate)}`
+    : 'focusedWindow=unknown';
+  const latestAiText = args.aiOperationState.latestAiOperatedTabId
+    ? `latestAiTab=${args.aiOperationState.latestAiOperatedTabId}, relation=${args.aiOperationState.relationToBrowserActiveTab}, canContinue=${formatBooleanState(args.aiOperationState.canContinueOnLatestAiOperatedTab)}`
+    : `latestAiTab=none, relation=${args.aiOperationState.relationToBrowserActiveTab}`;
+  return [
+    `Browser object snapshot: ${focusedWindowText}`,
+    activeTabText,
+    latestAiText,
+    `inventory=windows:${args.windows.length}, tabs:${args.tabs.length}, ai:${aiOpenedCount}, userOrPage:${userOrPageOpenedCount}, operable:${operableCount}`,
+    `recent=${args.recentChangeSummary}`,
+    `next=${summarizeSnapshotNextCheck(args.windowOperationState, args.aiOperationState)}`,
+  ].join('; ');
+}
+
 export function buildTabAttributeGroups(
   tab: BrowserWorldTabObject,
 ): BrowserWorldTabAttributeGroups {
