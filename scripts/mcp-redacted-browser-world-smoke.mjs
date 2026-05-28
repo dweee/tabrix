@@ -1827,6 +1827,13 @@ export function buildReadPageMatrixTargetResult(result, targetIndex) {
     typeof readPageOperationTarget.nextRequiredCheck === 'string' &&
     readPageOperationTarget.operationTargetSummaryPresent === true &&
     readPageOperationTarget.operationTargetClaimBoundaryPresent === true;
+  const readPageActionReadinessBriefPresent =
+    result.redactedReadPage?.alignment?.actionReadinessBriefPresent === true &&
+    typeof readPageOperationTarget.actionReadiness === 'string' &&
+    typeof readPageOperationTarget.canProceedToPageLevelCheck === 'boolean' &&
+    typeof readPageOperationTarget.requiredBeforeAction === 'string' &&
+    readPageOperationTarget.actionReadinessSummaryPresent === true &&
+    readPageOperationTarget.actionReadinessClaimBoundaryPresent === true;
   const operationTargetRelationConsistent =
     readPageOperationTarget.operationTargetRole === 'read_target_browser_active_tab'
       ? browserWorldRelation === 'same_as_browser_active'
@@ -1851,6 +1858,13 @@ export function buildReadPageMatrixTargetResult(result, targetIndex) {
       summaryPresent: readPageOperationTarget.operationTargetSummaryPresent === true,
       claimBoundaryPresent: readPageOperationTarget.operationTargetClaimBoundaryPresent === true,
       relationConsistentWithBrowserWorld: operationTargetRelationConsistent,
+      actionReadiness: readPageOperationTarget.actionReadiness ?? null,
+      canProceedToPageLevelCheck: readPageOperationTarget.canProceedToPageLevelCheck ?? null,
+      requiredBeforeAction: readPageOperationTarget.requiredBeforeAction ?? null,
+      actionReadinessSummaryPresent: readPageOperationTarget.actionReadinessSummaryPresent === true,
+      actionReadinessClaimBoundaryPresent:
+        readPageOperationTarget.actionReadinessClaimBoundaryPresent === true,
+      actionReadinessBriefPresent: readPageActionReadinessBriefPresent,
     },
     browserWorldAfterRead: {
       targetTabFound: result.redactedBrowserWorldAfterRead.targetTab?.wasFound ?? false,
@@ -1875,6 +1889,7 @@ export function buildReadPageMatrixTargetResult(result, targetIndex) {
       result.cleanupPassed === true &&
       result.matrixAlignmentPassed === true &&
       readPageOperationTargetBriefPresent === true &&
+      readPageActionReadinessBriefPresent === true &&
       operationTargetRelationConsistent === true &&
       result.redactedBrowserWorldAfterRead.targetTab?.wasFound === true &&
       result.redactedBrowserWorldAfterRead.compactSummaryBounded === true &&

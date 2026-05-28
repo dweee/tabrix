@@ -1545,6 +1545,7 @@ test('buildReadPageMatrixTargetResult accepts background read targets when objec
       redactedReadPage: {
         alignment: {
           operationTargetBriefPresent: true,
+          actionReadinessBriefPresent: true,
         },
         compact: {
           safeTabFacts: {
@@ -1556,6 +1557,11 @@ test('buildReadPageMatrixTargetResult accepts background read targets when objec
             nextRequiredCheck: 'reselect_or_reread_read_target_before_action',
             operationTargetSummaryPresent: true,
             operationTargetClaimBoundaryPresent: true,
+            actionReadiness: 'reselect_or_reread_required',
+            canProceedToPageLevelCheck: false,
+            requiredBeforeAction: 'reselect_or_reread_read_target_before_action',
+            actionReadinessSummaryPresent: true,
+            actionReadinessClaimBoundaryPresent: true,
           },
         },
         pageRegionRuntime: {
@@ -1606,6 +1612,12 @@ test('buildReadPageMatrixTargetResult accepts background read targets when objec
     summaryPresent: true,
     claimBoundaryPresent: true,
     relationConsistentWithBrowserWorld: true,
+    actionReadiness: 'reselect_or_reread_required',
+    canProceedToPageLevelCheck: false,
+    requiredBeforeAction: 'reselect_or_reread_read_target_before_action',
+    actionReadinessSummaryPresent: true,
+    actionReadinessClaimBoundaryPresent: true,
+    actionReadinessBriefPresent: true,
   });
   assert.equal(target.passed, true);
 });
@@ -1621,6 +1633,7 @@ test('buildReadPageMatrixTargetResult fails when read_page operation target evid
       redactedReadPage: {
         alignment: {
           operationTargetBriefPresent: true,
+          actionReadinessBriefPresent: true,
         },
         compact: {
           safeTabFacts: {
@@ -1628,6 +1641,73 @@ test('buildReadPageMatrixTargetResult fails when read_page operation target evid
             operationTargetBasis: 'read_target_differs_from_browser_active_tab',
             operationTargetCanTabrixOperate: true,
             operationTargetOperabilityReason: 'regular_web_page',
+            nextRequiredCheck: 'reselect_or_reread_read_target_before_action',
+            operationTargetSummaryPresent: true,
+            operationTargetClaimBoundaryPresent: true,
+            actionReadiness: 'reselect_or_reread_required',
+            canProceedToPageLevelCheck: false,
+            requiredBeforeAction: 'reselect_or_reread_read_target_before_action',
+            actionReadinessSummaryPresent: true,
+            actionReadinessClaimBoundaryPresent: true,
+          },
+        },
+        pageRegionRuntime: {
+          pageRegionsPresent: true,
+          pageOperationMapPresent: true,
+        },
+        runtime: {
+          currentTabIdPresent: true,
+          currentTabIdMatchesTarget: true,
+          isCurrentTabActive: false,
+          isReadTargetBrowserActiveTab: false,
+          currentTabCanTabrixOperate: true,
+          currentTabLastAiOperation: 'read_page',
+        },
+      },
+      redactedBrowserWorldAfterRead: {
+        targetTab: { wasFound: true },
+        compactSummaryBounded: true,
+        retentionWithinLimit: true,
+        aiOperationState: {
+          latestAiOperation: 'read_page',
+          relationToBrowserActiveTab: 'latest_ai_operated_background_tab',
+        },
+      },
+      redactedBrowserWorldAfterClose: {
+        targetTab: { wasFound: false },
+        compactSummaryBounded: true,
+        retentionWithinLimit: true,
+      },
+    },
+    1,
+  );
+
+  assert.equal(target.readPageOperationTarget.shouldReselectBeforeAction, null);
+  assert.equal(target.readPageOperationTarget.actionReadinessBriefPresent, true);
+  assert.equal(target.readPageOperationTarget.relationConsistentWithBrowserWorld, true);
+  assert.equal(target.passed, false);
+});
+
+test('buildReadPageMatrixTargetResult fails when read_page action readiness evidence is missing', () => {
+  const target = buildReadPageMatrixTargetResult(
+    {
+      openedPublicTestTab: true,
+      closeSucceeded: true,
+      cleanupPassed: true,
+      alignmentPassed: false,
+      matrixAlignmentPassed: true,
+      redactedReadPage: {
+        alignment: {
+          operationTargetBriefPresent: true,
+          actionReadinessBriefPresent: false,
+        },
+        compact: {
+          safeTabFacts: {
+            operationTargetRole: 'read_target_background_tab',
+            operationTargetBasis: 'read_target_differs_from_browser_active_tab',
+            operationTargetCanTabrixOperate: true,
+            operationTargetOperabilityReason: 'regular_web_page',
+            shouldReselectBeforeAction: true,
             nextRequiredCheck: 'reselect_or_reread_read_target_before_action',
             operationTargetSummaryPresent: true,
             operationTargetClaimBoundaryPresent: true,
@@ -1664,7 +1744,7 @@ test('buildReadPageMatrixTargetResult fails when read_page operation target evid
     1,
   );
 
-  assert.equal(target.readPageOperationTarget.shouldReselectBeforeAction, null);
+  assert.equal(target.readPageOperationTarget.actionReadinessBriefPresent, false);
   assert.equal(target.readPageOperationTarget.relationConsistentWithBrowserWorld, true);
   assert.equal(target.passed, false);
 });
@@ -1680,6 +1760,7 @@ test('buildReadPageMatrixTargetResult fails when read_page and browserWorld disa
       redactedReadPage: {
         alignment: {
           operationTargetBriefPresent: true,
+          actionReadinessBriefPresent: true,
         },
         compact: {
           safeTabFacts: {
@@ -1691,6 +1772,11 @@ test('buildReadPageMatrixTargetResult fails when read_page and browserWorld disa
             nextRequiredCheck: 'page_level_content_or_postcondition_check',
             operationTargetSummaryPresent: true,
             operationTargetClaimBoundaryPresent: true,
+            actionReadiness: 'ready_for_page_level_check',
+            canProceedToPageLevelCheck: true,
+            requiredBeforeAction: 'page_level_content_or_postcondition_check',
+            actionReadinessSummaryPresent: true,
+            actionReadinessClaimBoundaryPresent: true,
           },
         },
         pageRegionRuntime: {
