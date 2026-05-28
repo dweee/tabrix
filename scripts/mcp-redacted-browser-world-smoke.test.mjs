@@ -923,6 +923,7 @@ test('buildWindowStateDriftSummary reports stable repeated observer samples', ()
         'Throttle proof uses redacted refresh decisions only. It proves repeated observer sampling did not require every sample to perform a full Chrome resync; it does not prove page content or task success.',
     },
     allSamplesCurrentTabAttributeGroupsPresent: true,
+    allSamplesCurrentTabStateAccountedFor: true,
     allSamplesAiActionReadinessPresent: true,
     windowCountStable: true,
     tabCountStable: true,
@@ -979,10 +980,46 @@ test('buildWindowStateDriftSummary reports drift without failing observation', (
   assert.equal(summary.allSamplesRetentionBounded, true);
   assert.equal(summary.allSamplesRefreshHealthPresent, true);
   assert.equal(summary.allSamplesCurrentTabAttributeGroupsPresent, true);
+  assert.equal(summary.allSamplesCurrentTabStateAccountedFor, true);
   assert.equal(summary.allSamplesAiActionReadinessPresent, true);
   assert.equal(summary.windowCountStable, true);
   assert.equal(summary.tabCountStable, false);
   assert.equal(summary.driftObserved, true);
+});
+
+test('buildWindowStateDriftSummary accounts for explicit no-focused-window state', () => {
+  const summary = buildWindowStateDriftSummary([
+    {
+      verdict: 'WINDOW_STATE_OBSERVED',
+      redacted: {
+        tabCount: 1,
+        compactSummaryBounded: true,
+        retentionWithinLimit: true,
+        refreshHealth: {
+          lastRefreshDecision: 'full_chrome_resync',
+        },
+        currentTabAttributeGroups: null,
+        tabAttributeGroupClaimBoundaryPresent: true,
+        aiActionReadiness: redactedAiActionReadiness(),
+        windows: { total: 1, focused: 0 },
+        objectInventory: { browserActiveTabIdPresent: false },
+        windowOperationState: {
+          relationToCurrentOperableWindow: 'no_focused_window',
+          focusedWindowIdPresent: false,
+          focusedWindowState: null,
+        },
+        windowLifecycleState: {
+          ...redactedWindowLifecycleState(),
+          focusedWindowIdPresent: false,
+        },
+        windowLifecycleConclusionPresent: true,
+      },
+    },
+  ]);
+
+  assert.equal(summary.allSamplesObserved, true);
+  assert.equal(summary.allSamplesCurrentTabAttributeGroupsPresent, false);
+  assert.equal(summary.allSamplesCurrentTabStateAccountedFor, true);
 });
 
 test('buildWindowStateDriftSummary requires skipped resync proof for sub-throttle sampling', () => {
@@ -2030,7 +2067,7 @@ test('isSmokeResultPassing keeps observer verdicts strict and explicit', () => {
     isSmokeResultPassing({
       scenario: 'window-state-drift',
       driftSummary: {
-        allSamplesCurrentTabAttributeGroupsPresent: true,
+        allSamplesCurrentTabStateAccountedFor: true,
         allSamplesWindowLifecyclePresent: true,
       },
       verdict: 'WINDOW_STATE_REPEATED_OBSERVER_PASS',
@@ -2041,7 +2078,8 @@ test('isSmokeResultPassing keeps observer verdicts strict and explicit', () => {
     isSmokeResultPassing({
       scenario: 'window-state-drift',
       driftSummary: {
-        allSamplesCurrentTabAttributeGroupsPresent: false,
+        allSamplesCurrentTabStateAccountedFor: false,
+        allSamplesWindowLifecyclePresent: true,
       },
       verdict: 'WINDOW_STATE_REPEATED_OBSERVER_PASS',
     }),

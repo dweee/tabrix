@@ -1757,6 +1757,16 @@ function hasAiActionReadiness(redacted) {
   );
 }
 
+function hasExplicitNoFocusedWindowState(redacted) {
+  return (
+    redacted?.windows?.focused === 0 &&
+    redacted?.windowOperationState?.relationToCurrentOperableWindow === 'no_focused_window' &&
+    redacted?.windowOperationState?.focusedWindowIdPresent === false &&
+    redacted?.windowLifecycleState?.focusedWindowIdPresent === false &&
+    redacted?.objectInventory?.browserActiveTabIdPresent === false
+  );
+}
+
 export function buildWindowStateDriftSummary(samples, options = {}) {
   const observedSamples = samples.filter((sample) => sample?.verdict === 'WINDOW_STATE_OBSERVED');
   const compactBoundedSamples = samples.filter(
@@ -1775,6 +1785,11 @@ export function buildWindowStateDriftSummary(samples, options = {}) {
   );
   const currentTabAttributeGroupSamples = samples.filter((sample) =>
     hasCurrentTabAttributeGroups(sample?.redacted),
+  );
+  const currentTabStateAccountedSamples = samples.filter(
+    (sample) =>
+      hasCurrentTabAttributeGroups(sample?.redacted) ||
+      hasExplicitNoFocusedWindowState(sample?.redacted),
   );
   const aiActionReadinessSamples = samples.filter((sample) =>
     hasAiActionReadiness(sample?.redacted),
@@ -1856,6 +1871,8 @@ export function buildWindowStateDriftSummary(samples, options = {}) {
     },
     allSamplesCurrentTabAttributeGroupsPresent:
       samples.length > 0 && currentTabAttributeGroupSamples.length === samples.length,
+    allSamplesCurrentTabStateAccountedFor:
+      samples.length > 0 && currentTabStateAccountedSamples.length === samples.length,
     allSamplesAiActionReadinessPresent:
       samples.length > 0 && aiActionReadinessSamples.length === samples.length,
     windowCountStable,
@@ -1892,7 +1909,7 @@ function runWindowStateSmoke(cliPath, args) {
       redacted.browserObjectEdgeSummaryPresent === true &&
       Boolean(redacted.windowLifecycleState) &&
       redacted.windowLifecycleConclusionPresent === true &&
-      hasCurrentTabAttributeGroups(redacted) &&
+      (hasCurrentTabAttributeGroups(redacted) || hasExplicitNoFocusedWindowState(redacted)) &&
       hasAiActionReadiness(redacted)
         ? 'WINDOW_STATE_OBSERVED'
         : 'WINDOW_STATE_NOT_PROVEN',
@@ -1944,7 +1961,7 @@ function runWindowStateDriftSmoke(cliPath, args) {
       driftSummary.allSamplesRefreshHealthPresent === true &&
       driftSummary.allSamplesWindowLifecyclePresent === true &&
       driftSummary.refreshThrottleProof.proofSatisfied === true &&
-      driftSummary.allSamplesCurrentTabAttributeGroupsPresent === true &&
+      driftSummary.allSamplesCurrentTabStateAccountedFor === true &&
       driftSummary.allSamplesAiActionReadinessPresent === true
         ? 'WINDOW_STATE_REPEATED_OBSERVER_PASS'
         : 'WINDOW_STATE_REPEATED_OBSERVER_NOT_PROVEN',
@@ -2085,7 +2102,7 @@ export function isSmokeResultPassing(result) {
     return (
       result.verdict === 'WINDOW_STATE_REPEATED_OBSERVER_PASS' &&
       result.driftSummary?.allSamplesWindowLifecyclePresent === true &&
-      result.driftSummary?.allSamplesCurrentTabAttributeGroupsPresent === true
+      result.driftSummary?.allSamplesCurrentTabStateAccountedFor === true
     );
   }
   if (result.scenario === 'single') {
