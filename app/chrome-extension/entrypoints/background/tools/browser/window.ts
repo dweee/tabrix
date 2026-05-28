@@ -355,7 +355,7 @@ class WindowTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS;
   async execute(): Promise<ToolResult> {
     try {
-      const browserWorld = await refreshBrowserWorldSnapshot();
+      const browserWorld = await refreshBrowserWorldSnapshot({ forceFullChromeResync: true });
       const browserActiveTab =
         browserWorld.tabs.find((tab) => tab.tabId === browserWorld.browserActiveTabId) ?? null;
       const latestAiOperatedTab =

@@ -1377,13 +1377,21 @@ describe('browser world inventory', () => {
       'Browser World snapshot was refreshed recently',
     );
 
+    const forced = await refreshBrowserWorldSnapshot({ forceFullChromeResync: true });
+    expect(chrome.windows.getAll).toHaveBeenCalledTimes(2);
+    expect(forced.refreshHealth).toMatchObject({
+      fullChromeResyncCount: 2,
+      skippedChromeResyncCount: 1,
+      lastRefreshDecision: 'full_chrome_resync',
+    });
+
     vi.setSystemTime(1_260);
     const refreshed = await refreshBrowserWorldSnapshot();
     expect(chrome.windows.getAll).toHaveBeenCalledTimes(2);
     expect(refreshed.refreshHealth).toMatchObject({
       fullChromeResyncCount: 2,
-      skippedChromeResyncCount: 1,
-      lastRefreshDecision: 'full_chrome_resync',
+      skippedChromeResyncCount: 2,
+      lastRefreshDecision: 'skipped_recent_resync',
     });
   });
 

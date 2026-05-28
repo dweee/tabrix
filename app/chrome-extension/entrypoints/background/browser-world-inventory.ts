@@ -1139,8 +1139,14 @@ export async function getBrowserWorldSnapshot(): Promise<BrowserWorldSnapshot> {
   return buildSnapshot();
 }
 
-export async function refreshBrowserWorldSnapshot(): Promise<BrowserWorldSnapshot> {
-  await seedFromChrome('on_demand_refresh', { allowThrottle: initialized }).catch(() => undefined);
+export async function refreshBrowserWorldSnapshot(
+  options: {
+    forceFullChromeResync?: boolean;
+  } = {},
+): Promise<BrowserWorldSnapshot> {
+  await seedFromChrome('on_demand_refresh', {
+    allowThrottle: initialized && options.forceFullChromeResync !== true,
+  }).catch(() => undefined);
   return buildSnapshot();
 }
 
