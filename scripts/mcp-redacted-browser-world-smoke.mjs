@@ -1796,6 +1796,63 @@ export function buildPageOpenerParentRereadAfterChildCloseProof({
   };
 }
 
+export function buildPageOpenerChildCloseActiveReturnProof({
+  browserWorldPayload,
+  parentTabId,
+  childTabId,
+}) {
+  const browserWorld = browserWorldPayload?.browserWorld ?? browserWorldPayload ?? {};
+  const tabs = extractBrowserWorldTabs(browserWorldPayload);
+  const parentTab = Number.isInteger(parentTabId)
+    ? tabs.find((tab) => tab?.tabId === parentTabId)
+    : null;
+  const childTab = Number.isInteger(childTabId)
+    ? tabs.find((tab) => tab?.tabId === childTabId)
+    : null;
+  const browserActiveTabId = Number.isInteger(browserWorld?.browserActiveTabId)
+    ? browserWorld.browserActiveTabId
+    : null;
+  const parentKnown = Number.isInteger(parentTabId);
+  const childKnown = Number.isInteger(childTabId);
+  const browserActiveKnown = Number.isInteger(browserActiveTabId);
+  const browserActiveReturnedToParent =
+    parentKnown && browserActiveKnown ? browserActiveTabId === parentTabId : null;
+  const browserActiveIsNotChild =
+    childKnown && browserActiveKnown ? browserActiveTabId !== childTabId : null;
+  const parentObserved = Boolean(parentTab);
+  const childNoLongerObserved = childKnown ? !childTab : null;
+  const parentStillAiOpened =
+    parentTab?.openedBy === 'ai' && parentTab?.openedBySource === 'ai_tool';
+  const parentActive = parentObserved ? parentTab?.active === true : null;
+  const parentOperable = parentObserved ? parentTab?.canTabrixOperate === true : null;
+  return {
+    publicNoLoginOnly: true,
+    parentTabOpened: parentKnown,
+    childTabOpened: childKnown,
+    browserActiveKnown,
+    browserActiveReturnedToParent,
+    browserActiveIsNotChild,
+    parentObserved,
+    childNoLongerObserved,
+    parentStillAiOpened,
+    parentActive,
+    parentOperable,
+    proofSatisfied:
+      parentKnown === true &&
+      childKnown === true &&
+      browserActiveKnown === true &&
+      browserActiveReturnedToParent === true &&
+      browserActiveIsNotChild === true &&
+      parentObserved === true &&
+      childNoLongerObserved === true &&
+      parentStillAiOpened === true &&
+      parentActive === true &&
+      parentOperable === true,
+    claimBoundary:
+      'Page-opener child close active-return proof is redacted boolean evidence only; it proves the browser-active tab returned to the AI-opened parent after the page-opened child closed in one public no-login run. It does not expose tab ids, URLs, titles, page content, account state, task success, API/CDP reuse, or release readiness.',
+  };
+}
+
 function closeRunTabs(cliPath, tabIds, timeoutMs) {
   const uniqueTabIds = uniqueNumbers(tabIds);
   if (!uniqueTabIds.length) {
@@ -2735,6 +2792,14 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
           childTabId,
         })
       : null;
+  const childCloseActiveReturnProof =
+    browserWorldPayloadAfterChildClose !== null
+      ? buildPageOpenerChildCloseActiveReturnProof({
+          browserWorldPayload: browserWorldPayloadAfterChildClose,
+          parentTabId,
+          childTabId,
+        })
+      : null;
   const parentReadPagePayload =
     browserWorldPayloadAfterChildClose !== null && Number.isInteger(parentTabId)
       ? callMcpTool(cliPath, 'chrome_read_page', { tabId: parentTabId, depth: 1 }, args.timeoutMs)
@@ -2812,12 +2877,14 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
     proof,
     readAlignmentProof,
     childCloseIsolationProof,
+    childCloseActiveReturnProof,
     parentRereadAfterChildCloseProof,
     cleanupTargetsPassed,
     allTargetsPassed:
       proof.proofSatisfied === true &&
       readAlignmentProof?.proofSatisfied === true &&
       childCloseIsolationProof?.proofSatisfied === true &&
+      childCloseActiveReturnProof?.proofSatisfied === true &&
       parentRereadAfterChildCloseProof?.proofSatisfied === true &&
       closeResult.succeeded === true &&
       cleanupTargetsPassed === true,

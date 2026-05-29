@@ -17,6 +17,7 @@ import {
   buildPageOpenerReadAlignmentProof,
   buildPageOpenerChildCloseIsolationProof,
   buildPageOpenerParentRereadAfterChildCloseProof,
+  buildPageOpenerChildCloseActiveReturnProof,
   buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
   buildWindowStateMutationProof,
@@ -1908,6 +1909,69 @@ test('buildPageOpenerParentRereadAfterChildCloseProof fails when reread targets 
   assert.equal(proof.browserWorldChildNoLongerObserved, true);
   assert.equal(proof.readRuntimeParentIsAi, false);
   assert.equal(proof.compactTabParentIsAi, false);
+  assert.equal(proof.proofSatisfied, false);
+});
+
+test('buildPageOpenerChildCloseActiveReturnProof proves browser active tab returns to parent', () => {
+  const proof = buildPageOpenerChildCloseActiveReturnProof({
+    parentTabId: 100,
+    childTabId: 101,
+    browserWorldPayload: {
+      browserWorld: {
+        browserActiveTabId: 100,
+        tabs: [
+          {
+            tabId: 100,
+            url: 'https://private.example.test/parent',
+            title: 'Private Parent',
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+            active: true,
+            canTabrixOperate: true,
+          },
+        ],
+      },
+    },
+  });
+
+  assert.equal(proof.browserActiveKnown, true);
+  assert.equal(proof.browserActiveReturnedToParent, true);
+  assert.equal(proof.browserActiveIsNotChild, true);
+  assert.equal(proof.parentObserved, true);
+  assert.equal(proof.childNoLongerObserved, true);
+  assert.equal(proof.parentStillAiOpened, true);
+  assert.equal(proof.parentActive, true);
+  assert.equal(proof.parentOperable, true);
+  assert.equal(proof.proofSatisfied, true);
+  assert.doesNotThrow(() => assertRedactedSmokeOutputSafe(proof));
+  assert.equal(JSON.stringify(proof).includes('private.example.test'), false);
+});
+
+test('buildPageOpenerChildCloseActiveReturnProof fails when browser active tab is not parent', () => {
+  const proof = buildPageOpenerChildCloseActiveReturnProof({
+    parentTabId: 100,
+    childTabId: 101,
+    browserWorldPayload: {
+      browserWorld: {
+        browserActiveTabId: 102,
+        tabs: [
+          {
+            tabId: 100,
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+            active: false,
+            canTabrixOperate: true,
+          },
+        ],
+      },
+    },
+  });
+
+  assert.equal(proof.browserActiveKnown, true);
+  assert.equal(proof.browserActiveReturnedToParent, false);
+  assert.equal(proof.browserActiveIsNotChild, true);
+  assert.equal(proof.parentObserved, true);
+  assert.equal(proof.parentActive, false);
   assert.equal(proof.proofSatisfied, false);
 });
 
