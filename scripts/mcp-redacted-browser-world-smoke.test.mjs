@@ -13,6 +13,7 @@ import {
   buildBackgroundReadTargetFocusProof,
   buildStepSummary,
   buildOwnershipMixProof,
+  buildPageOpenerOwnershipProof,
   buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
   buildWindowStateMutationProof,
@@ -1594,6 +1595,76 @@ test('buildOwnershipMixProof fails when non-AI tab ownership is absent', () => {
   assert.equal(proof.proofSatisfied, false);
 });
 
+test('buildPageOpenerOwnershipProof proves target blank child ownership without raw page data', () => {
+  const proof = buildPageOpenerOwnershipProof({
+    parentTabId: 100,
+    childTabId: 101,
+    clickPayload: { verification: { newTabOpened: true } },
+    browserWorldPayload: {
+      summary: { counts: { pageOpenedTabs: 1 } },
+      browserWorld: {
+        tabs: [
+          {
+            tabId: 100,
+            url: 'https://private.example.test/parent',
+            title: 'Private Parent',
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+          },
+          {
+            tabId: 101,
+            openerTabId: 100,
+            url: 'https://private.example.test/child',
+            title: 'Private Child',
+            openedBy: 'user_or_page',
+            openedBySource: 'page_opener',
+          },
+        ],
+      },
+    },
+  });
+
+  assert.equal(proof.parentTabOpened, true);
+  assert.equal(proof.parentObserved, true);
+  assert.equal(proof.childObserved, true);
+  assert.equal(proof.clickNewTabObserved, true);
+  assert.equal(proof.childOpenedByUserOrPage, true);
+  assert.equal(proof.childOpenedBySourcePageOpener, true);
+  assert.equal(proof.openerMatchesParent, true);
+  assert.equal(proof.childIsNotAiOpened, true);
+  assert.equal(proof.proofSatisfied, true);
+  assert.doesNotThrow(() => assertRedactedSmokeOutputSafe(proof));
+  assert.equal(JSON.stringify(proof).includes('private.example.test'), false);
+});
+
+test('buildPageOpenerOwnershipProof fails when child is not page opener sourced', () => {
+  const proof = buildPageOpenerOwnershipProof({
+    parentTabId: 100,
+    childTabId: 101,
+    clickPayload: { clickDiff: { newTabOpened: true } },
+    browserWorldPayload: {
+      summary: { counts: { pageOpenedTabs: 0 } },
+      browserWorld: {
+        tabs: [
+          { tabId: 100, openedBy: 'ai', openedBySource: 'ai_tool' },
+          {
+            tabId: 101,
+            openerTabId: null,
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+          },
+        ],
+      },
+    },
+  });
+
+  assert.equal(proof.childObserved, true);
+  assert.equal(proof.childOpenedBySourcePageOpener, false);
+  assert.equal(proof.openerMatchesParent, null);
+  assert.equal(proof.childIsNotAiOpened, false);
+  assert.equal(proof.proofSatisfied, false);
+});
+
 test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fields', () => {
   const summary = buildRedactedReadPageAlignmentSummary(
     {
@@ -2430,6 +2501,13 @@ test('parseArgs supports lifecycle ownership mix scenario', () => {
   assert.equal(
     parseArgs(['--scenario', 'lifecycle-ownership-mix']).scenario,
     'lifecycle-ownership-mix',
+  );
+});
+
+test('parseArgs supports page opener ownership scenario', () => {
+  assert.equal(
+    parseArgs(['--scenario', 'page-opener-ownership']).scenario,
+    'page-opener-ownership',
   );
 });
 

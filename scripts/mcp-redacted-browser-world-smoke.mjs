@@ -1543,6 +1543,80 @@ export function buildOwnershipMixProof(result) {
   };
 }
 
+function extractBrowserWorldTabs(payload) {
+  return Array.isArray(payload?.browserWorld?.tabs) ? payload.browserWorld.tabs : [];
+}
+
+function findPageOpenedChildTabId(payload, parentTabId) {
+  if (!Number.isInteger(parentTabId)) return null;
+  const child = extractBrowserWorldTabs(payload).find(
+    (tab) =>
+      Number.isInteger(tab?.tabId) &&
+      tab.openerTabId === parentTabId &&
+      tab.openedBy === 'user_or_page' &&
+      tab.openedBySource === 'page_opener',
+  );
+  return Number.isInteger(child?.tabId) ? child.tabId : null;
+}
+
+export function buildPageOpenerOwnershipProof({
+  browserWorldPayload,
+  clickPayload,
+  parentTabId,
+  childTabId,
+}) {
+  const tabs = extractBrowserWorldTabs(browserWorldPayload);
+  const parentTab = Number.isInteger(parentTabId)
+    ? tabs.find((tab) => tab?.tabId === parentTabId)
+    : null;
+  const childTab = Number.isInteger(childTabId)
+    ? tabs.find((tab) => tab?.tabId === childTabId)
+    : null;
+  const pageOpenedTabs =
+    browserWorldPayload?.summary?.counts?.pageOpenedTabs ??
+    browserWorldPayload?.compactSummary?.tabStateMatrix?.pageOpened ??
+    null;
+  const clickNewTabObserved =
+    clickPayload?.verification?.newTabOpened === true ||
+    clickPayload?.clickDiff?.newTabOpened === true;
+  const parentKnown = Number.isInteger(parentTabId);
+  const childKnown = Number.isInteger(childTabId);
+  const childObserved = Boolean(childTab);
+  const childOpenedByUserOrPage = childTab?.openedBy === 'user_or_page';
+  const childOpenedBySourcePageOpener = childTab?.openedBySource === 'page_opener';
+  const openerMatchesParent =
+    childObserved && parentKnown && Number.isInteger(childTab?.openerTabId)
+      ? childTab.openerTabId === parentTabId
+      : null;
+  const childIsNotAiOpened = childObserved ? childTab?.openedBy !== 'ai' : null;
+  return {
+    publicNoLoginOnly: true,
+    parentTabOpened: parentKnown,
+    parentObserved: Boolean(parentTab),
+    childTabOpened: childKnown,
+    childObserved,
+    clickNewTabObserved,
+    childOpenedByUserOrPage,
+    childOpenedBySourcePageOpener,
+    childHasOpener: Number.isInteger(childTab?.openerTabId),
+    openerMatchesParent,
+    childIsNotAiOpened,
+    pageOpenedTabsObserved: Number.isInteger(pageOpenedTabs) ? pageOpenedTabs > 0 : null,
+    proofSatisfied:
+      parentKnown === true &&
+      Boolean(parentTab) === true &&
+      childKnown === true &&
+      childObserved === true &&
+      clickNewTabObserved === true &&
+      childOpenedByUserOrPage === true &&
+      childOpenedBySourcePageOpener === true &&
+      openerMatchesParent === true &&
+      childIsNotAiOpened === true,
+    claimBoundary:
+      'Page-opener ownership proof is redacted boolean evidence only; it proves a public no-login target-blank click produced a browser tab marked as page_opener. It does not expose tab ids, URLs, titles, page content, account state, task success, API/CDP reuse, or release readiness.',
+  };
+}
+
 function closeRunTabs(cliPath, tabIds, timeoutMs) {
   const uniqueTabIds = uniqueNumbers(tabIds);
   if (!uniqueTabIds.length) {
@@ -2394,6 +2468,104 @@ function runReadPageBackgroundTargetSmoke(cliPath, smokeUrl, args) {
   };
 }
 
+function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
+  if (args.skipOpen) {
+    throw new Error('--scenario page-opener-ownership cannot be combined with --skip-open.');
+  }
+
+  const runId = String(Date.now());
+  if (smokeUrl === DEFAULT_PUBLIC_URL) {
+    throw new Error(
+      '--scenario page-opener-ownership requires --url for a public no-login page with an a[target="_blank"] link.',
+    );
+  }
+  const openerUrl = buildPublicSmokeUrl(smokeUrl, 'page_opener_parent', runId);
+  const parentPayload = callMcpTool(
+    cliPath,
+    'chrome_navigate',
+    { url: openerUrl },
+    args.timeoutMs,
+  );
+  const parentTabId = extractNavigateTabId(parentPayload);
+  const clickPayload = Number.isInteger(parentTabId)
+    ? callMcpTool(
+        cliPath,
+        'chrome_click_element',
+        {
+          tabId: parentTabId,
+          selector: 'a[target="_blank"]',
+          waitForNavigation: false,
+          timeout: 5_000,
+        },
+        args.timeoutMs,
+      )
+    : { success: false, verification: { newTabOpened: false } };
+  sleepMs(750);
+  const browserWorldPayloadAfterClick = callMcpTool(
+    cliPath,
+    'get_windows_and_tabs',
+    {},
+    args.timeoutMs,
+  );
+  const childTabId = findPageOpenedChildTabId(browserWorldPayloadAfterClick, parentTabId);
+  const proof = buildPageOpenerOwnershipProof({
+    browserWorldPayload: browserWorldPayloadAfterClick,
+    clickPayload,
+    parentTabId,
+    childTabId,
+  });
+  const redactedBrowserWorldAfterClick = buildRedactedBrowserWorldSummary(
+    browserWorldPayloadAfterClick,
+    childTabId,
+  );
+  const closeTargets = uniqueNumbers([parentTabId, childTabId]);
+  const closeResult =
+    !args.keepOpen && closeTargets.length
+      ? closeRunTabs(cliPath, closeTargets, args.timeoutMs)
+      : { attempted: false, succeeded: null, requestedCount: 0, closedCount: 0 };
+  const browserWorldAfterClose =
+    closeResult.attempted === true
+      ? callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs)
+      : null;
+  const postCloseTargets =
+    browserWorldAfterClose !== null
+      ? buildPostCloseTargetCleanupSummary(browserWorldAfterClose, closeTargets)
+      : [];
+  const cleanupTargetsPassed =
+    closeResult.attempted === true
+      ? postCloseTargets.length === closeTargets.length &&
+        postCloseTargets.every(
+          (target) =>
+            target.targetTabFound === false &&
+            target.targetNoLongerRetained === true &&
+            target.closedTargetNotOperable === true &&
+            target.compactSummaryBounded === true &&
+            target.retentionWithinLimit === true,
+        )
+      : null;
+
+  return {
+    scenario: 'page-opener-ownership',
+    openedPublicTestTabs: closeTargets.length,
+    closeAttempted: closeResult.attempted,
+    closeSucceeded: closeResult.succeeded,
+    cleanup: {
+      requestedCount: closeResult.requestedCount,
+      closedCount: closeResult.closedCount,
+    },
+    redactedBrowserWorldAfterClick,
+    postCloseTargets,
+    proof,
+    cleanupTargetsPassed,
+    allTargetsPassed:
+      proof.proofSatisfied === true &&
+      closeResult.succeeded === true &&
+      cleanupTargetsPassed === true,
+    claimBoundary:
+      'Redacted public no-login page opener ownership smoke only. It proves a target-blank link can create a browser tab classified as page_opener in this run, not page understanding correctness, private login/logout, API/CDP reuse, release readiness, or product delivery grade.',
+  };
+}
+
 export function buildReadPageMatrixTargetResult(result, targetIndex) {
   const readPageOperationTarget = result.redactedReadPage?.compact?.safeTabFacts ?? {};
   const browserWorldRelation =
@@ -2642,7 +2814,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(
-      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|lifecycle-ownership-mix|matrix|window-state|window-state-drift|read-page|read-page-matrix|read-page-background-target] [--sample-count 3] [--sample-interval-ms 250] [--skip-open] [--keep-open]\n`,
+      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|lifecycle-ownership-mix|page-opener-ownership|matrix|window-state|window-state-drift|read-page|read-page-matrix|read-page-background-target] [--sample-count 3] [--sample-interval-ms 250] [--skip-open] [--keep-open]\n`,
     );
     return;
   }
@@ -2668,9 +2840,11 @@ async function main() {
                   ? runReadPageBackgroundTargetSmoke(cliPath, smokeUrl, args)
                   : args.scenario === 'lifecycle-ownership-mix'
                     ? runLifecycleOwnershipMixSmoke(cliPath, smokeUrl, args)
-                    : args.scenario === 'lifecycle'
-                      ? runLifecycleSmoke(cliPath, smokeUrl, args)
-                      : runSingleSmoke(cliPath, smokeUrl, args);
+                    : args.scenario === 'page-opener-ownership'
+                      ? runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args)
+                      : args.scenario === 'lifecycle'
+                        ? runLifecycleSmoke(cliPath, smokeUrl, args)
+                        : runSingleSmoke(cliPath, smokeUrl, args);
 
     const smokePassed = isSmokeResultPassing(smokeResult);
     const output = {
