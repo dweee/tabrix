@@ -16,6 +16,7 @@ import {
   buildPageOpenerOwnershipProof,
   buildPageOpenerReadAlignmentProof,
   buildPageOpenerChildCloseIsolationProof,
+  buildPageOpenerParentRereadAfterChildCloseProof,
   buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
   buildWindowStateMutationProof,
@@ -1810,6 +1811,103 @@ test('buildPageOpenerChildCloseIsolationProof fails when parent disappears after
   assert.equal(proof.childNoLongerObserved, true);
   assert.equal(proof.parentStillAiOpened, null);
   assert.equal(proof.parentOperable, null);
+  assert.equal(proof.proofSatisfied, false);
+});
+
+test('buildPageOpenerParentRereadAfterChildCloseProof proves parent can be reread after child closes', () => {
+  const proof = buildPageOpenerParentRereadAfterChildCloseProof({
+    parentTabId: 100,
+    childTabId: 101,
+    browserWorldPayload: {
+      browserWorld: {
+        tabs: [
+          {
+            tabId: 100,
+            url: 'https://private.example.test/parent',
+            title: 'Private Parent',
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+            canTabrixOperate: true,
+          },
+        ],
+      },
+    },
+    readPagePayload: {
+      ownershipRuntime: {
+        currentTabId: 100,
+        currentTabOpenedBy: 'ai',
+        currentTabOpenedBySource: 'ai_tool',
+        currentTabCanTabrixOperate: true,
+        currentTabRuntimeStateSource: 'browser_world_inventory',
+        currentTabUrl: 'https://private.example.test/parent',
+        currentTabTitle: 'Private Parent',
+      },
+      browserPageObjectCompact: {
+        facts: {
+          tab: {
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+          },
+        },
+      },
+      browserPageObject: {
+        privatePageTitle: 'Private Parent',
+      },
+    },
+  });
+
+  assert.equal(proof.readTargetMatchesParent, true);
+  assert.equal(proof.browserWorldParentObserved, true);
+  assert.equal(proof.browserWorldChildNoLongerObserved, true);
+  assert.equal(proof.browserWorldParentIsAi, true);
+  assert.equal(proof.readRuntimeParentIsAi, true);
+  assert.equal(proof.compactTabParentIsAi, true);
+  assert.equal(proof.parentOperable, true);
+  assert.equal(proof.proofSatisfied, true);
+  assert.doesNotThrow(() => assertRedactedSmokeOutputSafe(proof));
+  assert.equal(JSON.stringify(proof).includes('private.example.test'), false);
+});
+
+test('buildPageOpenerParentRereadAfterChildCloseProof fails when reread targets the closed child', () => {
+  const proof = buildPageOpenerParentRereadAfterChildCloseProof({
+    parentTabId: 100,
+    childTabId: 101,
+    browserWorldPayload: {
+      browserWorld: {
+        tabs: [
+          {
+            tabId: 100,
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+            canTabrixOperate: true,
+          },
+        ],
+      },
+    },
+    readPagePayload: {
+      ownershipRuntime: {
+        currentTabId: 101,
+        currentTabOpenedBy: 'user_or_page',
+        currentTabOpenedBySource: 'page_opener',
+        currentTabCanTabrixOperate: false,
+        currentTabRuntimeStateSource: 'browser_world_inventory',
+      },
+      browserPageObjectCompact: {
+        facts: {
+          tab: {
+            openedBy: 'user_or_page',
+            openedBySource: 'page_opener',
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(proof.readTargetMatchesParent, false);
+  assert.equal(proof.browserWorldParentObserved, true);
+  assert.equal(proof.browserWorldChildNoLongerObserved, true);
+  assert.equal(proof.readRuntimeParentIsAi, false);
+  assert.equal(proof.compactTabParentIsAi, false);
   assert.equal(proof.proofSatisfied, false);
 });
 

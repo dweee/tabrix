@@ -1725,6 +1725,77 @@ export function buildPageOpenerChildCloseIsolationProof({
   };
 }
 
+export function buildPageOpenerParentRereadAfterChildCloseProof({
+  readPagePayload,
+  browserWorldPayload,
+  parentTabId,
+  childTabId,
+}) {
+  const tabs = extractBrowserWorldTabs(browserWorldPayload);
+  const parentTab = Number.isInteger(parentTabId)
+    ? tabs.find((tab) => tab?.tabId === parentTabId)
+    : null;
+  const childTab = Number.isInteger(childTabId)
+    ? tabs.find((tab) => tab?.tabId === childTabId)
+    : null;
+  const ownershipRuntime = readPagePayload?.ownershipRuntime ?? {};
+  const compactFacts =
+    readPagePayload?.browserPageObjectCompact?.facts &&
+    typeof readPagePayload.browserPageObjectCompact.facts === 'object'
+      ? readPagePayload.browserPageObjectCompact.facts
+      : {};
+  const compactTabFacts =
+    compactFacts.tab && typeof compactFacts.tab === 'object' ? compactFacts.tab : {};
+  const parentKnown = Number.isInteger(parentTabId);
+  const childKnown = Number.isInteger(childTabId);
+  const readTargetMatchesParent =
+    parentKnown && Number.isInteger(ownershipRuntime.currentTabId)
+      ? ownershipRuntime.currentTabId === parentTabId
+      : null;
+  const browserWorldParentObserved = Boolean(parentTab);
+  const browserWorldChildNoLongerObserved = childKnown ? !childTab : null;
+  const browserWorldParentIsAi =
+    parentTab?.openedBy === 'ai' && parentTab?.openedBySource === 'ai_tool';
+  const readRuntimeParentIsAi =
+    ownershipRuntime.currentTabOpenedBy === 'ai' &&
+    ownershipRuntime.currentTabOpenedBySource === 'ai_tool';
+  const compactTabParentIsAi =
+    compactTabFacts.openedBy === 'ai' && compactTabFacts.openedBySource === 'ai_tool';
+  const readRuntimeSourceIsBrowserWorld =
+    ownershipRuntime.currentTabRuntimeStateSource === 'browser_world_inventory';
+  const parentOperable =
+    ownershipRuntime.currentTabCanTabrixOperate === true || parentTab?.canTabrixOperate === true;
+  return {
+    publicNoLoginOnly: true,
+    parentTabOpened: parentKnown,
+    childTabOpened: childKnown,
+    readTargetMatchesParent,
+    browserWorldParentObserved,
+    browserWorldChildNoLongerObserved,
+    browserWorldParentIsAi,
+    readRuntimeParentIsAi,
+    compactTabParentIsAi,
+    readRuntimeSourceIsBrowserWorld,
+    parentOperable,
+    readPageCompactPresent: Boolean(readPagePayload?.browserPageObjectCompact),
+    readPageObjectPresent: Boolean(readPagePayload?.browserPageObject),
+    proofSatisfied:
+      parentKnown === true &&
+      childKnown === true &&
+      readTargetMatchesParent === true &&
+      browserWorldParentObserved === true &&
+      browserWorldChildNoLongerObserved === true &&
+      browserWorldParentIsAi === true &&
+      readRuntimeParentIsAi === true &&
+      compactTabParentIsAi === true &&
+      readRuntimeSourceIsBrowserWorld === true &&
+      parentOperable === true &&
+      Boolean(readPagePayload?.browserPageObjectCompact) === true,
+    claimBoundary:
+      'Page-opener parent re-read proof is redacted boolean evidence only; it proves read_page can return to the AI-opened parent after the page-opened child closes in one public no-login run. It does not expose tab ids, URLs, titles, page content, account state, task success, API/CDP reuse, or release readiness.',
+  };
+}
+
 function closeRunTabs(cliPath, tabIds, timeoutMs) {
   const uniqueTabIds = uniqueNumbers(tabIds);
   if (!uniqueTabIds.length) {
@@ -2664,6 +2735,27 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
           childTabId,
         })
       : null;
+  const parentReadPagePayload =
+    browserWorldPayloadAfterChildClose !== null && Number.isInteger(parentTabId)
+      ? callMcpTool(cliPath, 'chrome_read_page', { tabId: parentTabId, depth: 1 }, args.timeoutMs)
+      : null;
+  const browserWorldPayloadAfterParentRead =
+    parentReadPagePayload !== null
+      ? callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs)
+      : null;
+  const redactedParentReadPage =
+    parentReadPagePayload !== null
+      ? buildRedactedReadPageAlignmentSummary(parentReadPagePayload, parentTabId)
+      : null;
+  const parentRereadAfterChildCloseProof =
+    parentReadPagePayload !== null && browserWorldPayloadAfterParentRead !== null
+      ? buildPageOpenerParentRereadAfterChildCloseProof({
+          readPagePayload: parentReadPagePayload,
+          browserWorldPayload: browserWorldPayloadAfterParentRead,
+          parentTabId,
+          childTabId,
+        })
+      : null;
   const remainingCloseTargets = uniqueNumbers([
     parentTabId,
     childCloseResult.succeeded === true ? null : childTabId,
@@ -2715,15 +2807,18 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
     },
     redactedBrowserWorldAfterClick,
     redactedReadPage,
+    redactedParentReadPage,
     postCloseTargets,
     proof,
     readAlignmentProof,
     childCloseIsolationProof,
+    parentRereadAfterChildCloseProof,
     cleanupTargetsPassed,
     allTargetsPassed:
       proof.proofSatisfied === true &&
       readAlignmentProof?.proofSatisfied === true &&
       childCloseIsolationProof?.proofSatisfied === true &&
+      parentRereadAfterChildCloseProof?.proofSatisfied === true &&
       closeResult.succeeded === true &&
       cleanupTargetsPassed === true,
     claimBoundary:
