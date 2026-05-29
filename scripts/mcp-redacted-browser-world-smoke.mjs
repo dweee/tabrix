@@ -1617,6 +1617,68 @@ export function buildPageOpenerOwnershipProof({
   };
 }
 
+export function buildPageOpenerReadAlignmentProof({
+  readPagePayload,
+  browserWorldPayload,
+  childTabId,
+}) {
+  const tabs = extractBrowserWorldTabs(browserWorldPayload);
+  const childTab = Number.isInteger(childTabId)
+    ? tabs.find((tab) => tab?.tabId === childTabId)
+    : null;
+  const ownershipRuntime = readPagePayload?.ownershipRuntime ?? {};
+  const compactFacts =
+    readPagePayload?.browserPageObjectCompact?.facts &&
+    typeof readPagePayload.browserPageObjectCompact.facts === 'object'
+      ? readPagePayload.browserPageObjectCompact.facts
+      : {};
+  const compactTabFacts =
+    compactFacts.tab && typeof compactFacts.tab === 'object' ? compactFacts.tab : {};
+  const targetKnown = Number.isInteger(childTabId);
+  const readTargetMatchesChild =
+    targetKnown && Number.isInteger(ownershipRuntime.currentTabId)
+      ? ownershipRuntime.currentTabId === childTabId
+      : null;
+  const browserWorldChildObserved = Boolean(childTab);
+  const browserWorldChildIsPageOpener =
+    childTab?.openedBy === 'user_or_page' && childTab?.openedBySource === 'page_opener';
+  const readRuntimeIsPageOpener =
+    ownershipRuntime.currentTabOpenedBy === 'user_or_page' &&
+    ownershipRuntime.currentTabOpenedBySource === 'page_opener';
+  const compactTabIsPageOpener =
+    compactTabFacts.openedBy === 'user_or_page' &&
+    compactTabFacts.openedBySource === 'page_opener';
+  const readRuntimeSourceIsBrowserWorld =
+    ownershipRuntime.currentTabRuntimeStateSource === 'browser_world_inventory';
+  const childOperable =
+    ownershipRuntime.currentTabCanTabrixOperate === true || childTab?.canTabrixOperate === true;
+  return {
+    publicNoLoginOnly: true,
+    targetTabKnown: targetKnown,
+    readTargetMatchesChild,
+    browserWorldChildObserved,
+    browserWorldChildIsPageOpener,
+    readRuntimeIsPageOpener,
+    compactTabIsPageOpener,
+    readRuntimeSourceIsBrowserWorld,
+    childOperable,
+    readPageCompactPresent: Boolean(readPagePayload?.browserPageObjectCompact),
+    readPageObjectPresent: Boolean(readPagePayload?.browserPageObject),
+    proofSatisfied:
+      targetKnown === true &&
+      readTargetMatchesChild === true &&
+      browserWorldChildObserved === true &&
+      browserWorldChildIsPageOpener === true &&
+      readRuntimeIsPageOpener === true &&
+      compactTabIsPageOpener === true &&
+      readRuntimeSourceIsBrowserWorld === true &&
+      childOperable === true &&
+      Boolean(readPagePayload?.browserPageObjectCompact) === true,
+    claimBoundary:
+      'Page-opener read alignment proof is redacted boolean evidence only; it proves read_page preserved page_opener ownership in the BrowserPageObject runtime view for one public no-login child tab. It does not expose tab ids, URLs, titles, page content, account state, task success, API/CDP reuse, or release readiness.',
+  };
+}
+
 function closeRunTabs(cliPath, tabIds, timeoutMs) {
   const uniqueTabIds = uniqueNumbers(tabIds);
   if (!uniqueTabIds.length) {
@@ -2518,6 +2580,27 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
     browserWorldPayloadAfterClick,
     childTabId,
   );
+  const readPagePayload = Number.isInteger(childTabId)
+    ? callMcpTool(cliPath, 'chrome_read_page', { tabId: childTabId, depth: 1 }, args.timeoutMs)
+    : null;
+  const browserWorldPayloadAfterRead = callMcpTool(
+    cliPath,
+    'get_windows_and_tabs',
+    {},
+    args.timeoutMs,
+  );
+  const redactedReadPage =
+    readPagePayload !== null
+      ? buildRedactedReadPageAlignmentSummary(readPagePayload, childTabId)
+      : null;
+  const readAlignmentProof =
+    readPagePayload !== null
+      ? buildPageOpenerReadAlignmentProof({
+          readPagePayload,
+          browserWorldPayload: browserWorldPayloadAfterRead,
+          childTabId,
+        })
+      : null;
   const closeTargets = uniqueNumbers([parentTabId, childTabId]);
   const closeResult =
     !args.keepOpen && closeTargets.length
@@ -2554,11 +2637,14 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
       closedCount: closeResult.closedCount,
     },
     redactedBrowserWorldAfterClick,
+    redactedReadPage,
     postCloseTargets,
     proof,
+    readAlignmentProof,
     cleanupTargetsPassed,
     allTargetsPassed:
       proof.proofSatisfied === true &&
+      readAlignmentProof?.proofSatisfied === true &&
       closeResult.succeeded === true &&
       cleanupTargetsPassed === true,
     claimBoundary:

@@ -14,6 +14,7 @@ import {
   buildStepSummary,
   buildOwnershipMixProof,
   buildPageOpenerOwnershipProof,
+  buildPageOpenerReadAlignmentProof,
   buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
   buildWindowStateMutationProof,
@@ -1662,6 +1663,100 @@ test('buildPageOpenerOwnershipProof fails when child is not page opener sourced'
   assert.equal(proof.childOpenedBySourcePageOpener, false);
   assert.equal(proof.openerMatchesParent, null);
   assert.equal(proof.childIsNotAiOpened, false);
+  assert.equal(proof.proofSatisfied, false);
+});
+
+test('buildPageOpenerReadAlignmentProof proves read_page keeps child page opener source', () => {
+  const proof = buildPageOpenerReadAlignmentProof({
+    childTabId: 101,
+    browserWorldPayload: {
+      browserWorld: {
+        tabs: [
+          {
+            tabId: 101,
+            openerTabId: 100,
+            url: 'https://private.example.test/child',
+            title: 'Private Child',
+            openedBy: 'user_or_page',
+            openedBySource: 'page_opener',
+            canTabrixOperate: true,
+          },
+        ],
+      },
+    },
+    readPagePayload: {
+      ownershipRuntime: {
+        currentTabId: 101,
+        currentTabOpenedBy: 'user_or_page',
+        currentTabOpenedBySource: 'page_opener',
+        currentTabCanTabrixOperate: true,
+        currentTabRuntimeStateSource: 'browser_world_inventory',
+        currentTabUrl: 'https://private.example.test/child',
+        currentTabTitle: 'Private Child',
+      },
+      browserPageObjectCompact: {
+        facts: {
+          tab: {
+            openedBy: 'user_or_page',
+            openedBySource: 'page_opener',
+          },
+        },
+      },
+      browserPageObject: {
+        privatePageTitle: 'Private Child',
+      },
+    },
+  });
+
+  assert.equal(proof.readTargetMatchesChild, true);
+  assert.equal(proof.browserWorldChildIsPageOpener, true);
+  assert.equal(proof.readRuntimeIsPageOpener, true);
+  assert.equal(proof.compactTabIsPageOpener, true);
+  assert.equal(proof.readRuntimeSourceIsBrowserWorld, true);
+  assert.equal(proof.childOperable, true);
+  assert.equal(proof.proofSatisfied, true);
+  assert.doesNotThrow(() => assertRedactedSmokeOutputSafe(proof));
+  assert.equal(JSON.stringify(proof).includes('private.example.test'), false);
+});
+
+test('buildPageOpenerReadAlignmentProof fails when read_page loses page opener source', () => {
+  const proof = buildPageOpenerReadAlignmentProof({
+    childTabId: 101,
+    browserWorldPayload: {
+      browserWorld: {
+        tabs: [
+          {
+            tabId: 101,
+            openerTabId: 100,
+            openedBy: 'user_or_page',
+            openedBySource: 'page_opener',
+            canTabrixOperate: true,
+          },
+        ],
+      },
+    },
+    readPagePayload: {
+      ownershipRuntime: {
+        currentTabId: 101,
+        currentTabOpenedBy: 'ai',
+        currentTabOpenedBySource: 'ai_tool',
+        currentTabCanTabrixOperate: true,
+        currentTabRuntimeStateSource: 'browser_world_inventory',
+      },
+      browserPageObjectCompact: {
+        facts: {
+          tab: {
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(proof.browserWorldChildIsPageOpener, true);
+  assert.equal(proof.readRuntimeIsPageOpener, false);
+  assert.equal(proof.compactTabIsPageOpener, false);
   assert.equal(proof.proofSatisfied, false);
 });
 
