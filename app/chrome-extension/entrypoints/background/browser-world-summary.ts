@@ -419,6 +419,38 @@ function summarizeSnapshotNextCheck(
   return 'read_or_select_intended_target';
 }
 
+function summarizeRoutingDecision(
+  windowOperationState: BrowserWorldWindowOperationState,
+  aiOperationState: BrowserWorldAiOperationState,
+): string {
+  const nextRequiredCheck = summarizeSnapshotNextCheck(windowOperationState, aiOperationState);
+
+  if (
+    windowOperationState.relationToCurrentOperableWindow === 'no_window_observed' ||
+    windowOperationState.relationToCurrentOperableWindow === 'no_focused_window'
+  ) {
+    return `routing=blocked_no_focused_window, blockingReason=${windowOperationState.relationToCurrentOperableWindow}, next=${nextRequiredCheck}`;
+  }
+
+  if (windowOperationState.relationToCurrentOperableWindow === 'focused_window_minimized') {
+    return `routing=blocked_window_minimized, blockingReason=${windowOperationState.relationToCurrentOperableWindow}, next=${nextRequiredCheck}`;
+  }
+
+  if (aiOperationState.relationToBrowserActiveTab === 'latest_ai_operated_background_tab') {
+    return `routing=latest_ai_operated_background_tab, blockingReason=latest_ai_operated_tab_not_browser_active, next=${nextRequiredCheck}`;
+  }
+
+  if (aiOperationState.relationToBrowserActiveTab === 'browser_active_not_latest_ai_operated') {
+    return `routing=ambiguous_target_selection, blockingReason=browser_active_tab_differs_from_latest_ai_operated_tab, next=${nextRequiredCheck}`;
+  }
+
+  if (aiOperationState.relationToBrowserActiveTab === 'same_as_browser_active') {
+    return `routing=ready_for_page_level_check, blockingReason=none, next=${nextRequiredCheck}`;
+  }
+
+  return `routing=target_selection_required, blockingReason=no_ai_operated_tab_observed, next=${nextRequiredCheck}`;
+}
+
 export function summarizeBrowserWorldSnapshot(args: {
   windows: readonly BrowserWorldWindowObject[];
   tabs: readonly BrowserWorldTabObject[];
@@ -444,13 +476,17 @@ export function summarizeBrowserWorldSnapshot(args: {
   const latestAiText = args.aiOperationState.latestAiOperatedTabId
     ? `latestAiTab=${args.aiOperationState.latestAiOperatedTabId}, relation=${args.aiOperationState.relationToBrowserActiveTab}, canContinue=${formatBooleanState(args.aiOperationState.canContinueOnLatestAiOperatedTab)}`
     : `latestAiTab=none, relation=${args.aiOperationState.relationToBrowserActiveTab}`;
+  const routingDecision = summarizeRoutingDecision(
+    args.windowOperationState,
+    args.aiOperationState,
+  );
   return [
     `Browser object snapshot: ${focusedWindowText}`,
     activeTabText,
     latestAiText,
+    routingDecision,
     `inventory=windows:${args.windows.length}, tabs:${args.tabs.length}, ai:${aiOpenedCount}, page:${pageOpenedCount}, userOrUnknown:${userOrUnknownOpenedCount}, userOrPage:${userOrPageOpenedCount}, operable:${operableCount}`,
     `recent=${args.recentChangeSummary}`,
-    `next=${summarizeSnapshotNextCheck(args.windowOperationState, args.aiOperationState)}`,
   ].join('; ');
 }
 

@@ -186,7 +186,7 @@ describe('browser world inventory', () => {
     expect(snapshot.userOrPageOpenedTabIds).toEqual([10, 11]);
     expect(snapshot.operableTabIds).toEqual([10]);
     expect(snapshot.summary.primaryConclusion).toBe(
-      'Browser object snapshot: focusedWindow=1, visibility=visible, operable=yes; activeTab=10, status=complete, owner=user_or_page, source=user_or_unknown, operable=yes; latestAiTab=none, relation=no_ai_operation_observed; inventory=windows:1, tabs:2, ai:0, page:0, userOrUnknown:2, userOrPage:2, operable:1; recent=Last change: browser world inventory was refreshed from Chrome.; next=read_or_select_intended_target',
+      'Browser object snapshot: focusedWindow=1, visibility=visible, operable=yes; activeTab=10, status=complete, owner=user_or_page, source=user_or_unknown, operable=yes; latestAiTab=none, relation=no_ai_operation_observed; routing=target_selection_required, blockingReason=no_ai_operated_tab_observed, next=read_or_select_intended_target; inventory=windows:1, tabs:2, ai:0, page:0, userOrUnknown:2, userOrPage:2, operable:1; recent=Last change: browser world inventory was refreshed from Chrome.',
     );
     expect(snapshot.summary.activeWindow).toMatchObject({
       windowId: 1,
