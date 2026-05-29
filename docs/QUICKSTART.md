@@ -197,6 +197,26 @@ The daemon listens on the same port (default `12306`) and serves all non-browser
 
 Override the default port with the `CHROME_MCP_PORT` environment variable.
 
+For local Claude Preview workflows, this repo also ships `.claude/launch.json` with two launch targets:
+
+- `tabrix-native-daemon` uses `scripts/start-native-daemon.mjs` to reuse an existing healthy daemon on `12306` or build and launch `app/native-server/dist/daemon-entry.js` when needed.
+- `tabrix-extension-dev` starts the WXT dev server on a fixed `3000` port.
+
+After extension code changes, the low-friction local refresh order is:
+
+1. keep `tabrix-extension-dev` running,
+2. verify the daemon with `/ping` and `/status`,
+3. trigger `node scripts/reload-extension.mjs` to ask the already-installed unpacked extension to reload itself in Chrome,
+4. if Chrome does not answer the reload callback, reload the unpacked extension manually once in `chrome://extensions/`.
+
+A quick verification sequence is:
+
+```bash
+curl http://127.0.0.1:12306/ping
+curl http://127.0.0.1:12306/status
+node scripts/reload-extension.mjs
+```
+
 ---
 
 ## 9. Troubleshooting order
