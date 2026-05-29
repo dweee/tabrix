@@ -15,6 +15,7 @@ import {
   buildOwnershipMixProof,
   buildPageOpenerOwnershipProof,
   buildPageOpenerReadAlignmentProof,
+  buildPageOpenerChildCloseIsolationProof,
   buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
   buildWindowStateMutationProof,
@@ -1757,6 +1758,58 @@ test('buildPageOpenerReadAlignmentProof fails when read_page loses page opener s
   assert.equal(proof.browserWorldChildIsPageOpener, true);
   assert.equal(proof.readRuntimeIsPageOpener, false);
   assert.equal(proof.compactTabIsPageOpener, false);
+  assert.equal(proof.proofSatisfied, false);
+});
+
+test('buildPageOpenerChildCloseIsolationProof proves child close keeps parent operable', () => {
+  const proof = buildPageOpenerChildCloseIsolationProof({
+    parentTabId: 100,
+    childTabId: 101,
+    closeResult: { attempted: true, succeeded: true, requestedCount: 1, closedCount: 1 },
+    browserWorldPayload: {
+      browserWorld: {
+        tabs: [
+          {
+            tabId: 100,
+            url: 'https://private.example.test/parent',
+            title: 'Private Parent',
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+            canTabrixOperate: true,
+          },
+        ],
+      },
+    },
+  });
+
+  assert.equal(proof.childCloseAttempted, true);
+  assert.equal(proof.childCloseSucceeded, true);
+  assert.equal(proof.parentObserved, true);
+  assert.equal(proof.childNoLongerObserved, true);
+  assert.equal(proof.parentStillAiOpened, true);
+  assert.equal(proof.parentOperable, true);
+  assert.equal(proof.proofSatisfied, true);
+  assert.doesNotThrow(() => assertRedactedSmokeOutputSafe(proof));
+  assert.equal(JSON.stringify(proof).includes('private.example.test'), false);
+});
+
+test('buildPageOpenerChildCloseIsolationProof fails when parent disappears after child close', () => {
+  const proof = buildPageOpenerChildCloseIsolationProof({
+    parentTabId: 100,
+    childTabId: 101,
+    closeResult: { attempted: true, succeeded: true, requestedCount: 1, closedCount: 1 },
+    browserWorldPayload: {
+      browserWorld: {
+        tabs: [],
+      },
+    },
+  });
+
+  assert.equal(proof.childCloseSucceeded, true);
+  assert.equal(proof.parentObserved, false);
+  assert.equal(proof.childNoLongerObserved, true);
+  assert.equal(proof.parentStillAiOpened, null);
+  assert.equal(proof.parentOperable, null);
   assert.equal(proof.proofSatisfied, false);
 });
 

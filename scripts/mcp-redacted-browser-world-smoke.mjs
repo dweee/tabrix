@@ -1679,6 +1679,52 @@ export function buildPageOpenerReadAlignmentProof({
   };
 }
 
+export function buildPageOpenerChildCloseIsolationProof({
+  browserWorldPayload,
+  closeResult,
+  parentTabId,
+  childTabId,
+}) {
+  const tabs = extractBrowserWorldTabs(browserWorldPayload);
+  const parentTab = Number.isInteger(parentTabId)
+    ? tabs.find((tab) => tab?.tabId === parentTabId)
+    : null;
+  const childTab = Number.isInteger(childTabId)
+    ? tabs.find((tab) => tab?.tabId === childTabId)
+    : null;
+  const parentKnown = Number.isInteger(parentTabId);
+  const childKnown = Number.isInteger(childTabId);
+  const parentObserved = Boolean(parentTab);
+  const childNoLongerObserved = childKnown ? !childTab : null;
+  const parentStillAiOpened = parentObserved ? parentTab?.openedBy === 'ai' : null;
+  const parentOperable = parentObserved ? parentTab?.canTabrixOperate === true : null;
+  const childCloseSucceeded =
+    closeResult?.succeeded === true &&
+    closeResult?.requestedCount === 1 &&
+    closeResult?.closedCount === 1;
+  return {
+    publicNoLoginOnly: true,
+    parentTabOpened: parentKnown,
+    childTabOpened: childKnown,
+    childCloseAttempted: closeResult?.attempted === true,
+    childCloseSucceeded,
+    parentObserved,
+    childNoLongerObserved,
+    parentStillAiOpened,
+    parentOperable,
+    proofSatisfied:
+      parentKnown === true &&
+      childKnown === true &&
+      childCloseSucceeded === true &&
+      parentObserved === true &&
+      childNoLongerObserved === true &&
+      parentStillAiOpened === true &&
+      parentOperable === true,
+    claimBoundary:
+      'Page-opener child close isolation proof is redacted boolean evidence only; it proves closing the page-opened child did not remove or de-operabilize the AI-opened parent in one public no-login run. It does not expose tab ids, URLs, titles, page content, account state, task success, API/CDP reuse, or release readiness.',
+  };
+}
+
 function closeRunTabs(cliPath, tabIds, timeoutMs) {
   const uniqueTabIds = uniqueNumbers(tabIds);
   if (!uniqueTabIds.length) {
@@ -2601,11 +2647,42 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
           childTabId,
         })
       : null;
-  const closeTargets = uniqueNumbers([parentTabId, childTabId]);
-  const closeResult =
-    !args.keepOpen && closeTargets.length
-      ? closeRunTabs(cliPath, closeTargets, args.timeoutMs)
+  const childCloseResult =
+    !args.keepOpen && Number.isInteger(childTabId)
+      ? closeRunTabs(cliPath, [childTabId], args.timeoutMs)
       : { attempted: false, succeeded: null, requestedCount: 0, closedCount: 0 };
+  const browserWorldPayloadAfterChildClose =
+    childCloseResult.attempted === true
+      ? callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs)
+      : null;
+  const childCloseIsolationProof =
+    browserWorldPayloadAfterChildClose !== null
+      ? buildPageOpenerChildCloseIsolationProof({
+          browserWorldPayload: browserWorldPayloadAfterChildClose,
+          closeResult: childCloseResult,
+          parentTabId,
+          childTabId,
+        })
+      : null;
+  const remainingCloseTargets = uniqueNumbers([
+    parentTabId,
+    childCloseResult.succeeded === true ? null : childTabId,
+  ]);
+  const remainingCloseResult =
+    !args.keepOpen && remainingCloseTargets.length
+      ? closeRunTabs(cliPath, remainingCloseTargets, args.timeoutMs)
+      : { attempted: false, succeeded: null, requestedCount: 0, closedCount: 0 };
+  const closeTargets = uniqueNumbers([parentTabId, childTabId]);
+  const closeResult = args.keepOpen
+    ? { attempted: false, succeeded: null, requestedCount: 0, closedCount: 0 }
+    : {
+        attempted: childCloseResult.attempted === true || remainingCloseResult.attempted === true,
+        succeeded:
+          childCloseResult.succeeded === true &&
+          (remainingCloseResult.succeeded === true || remainingCloseTargets.length === 0),
+        requestedCount: childCloseResult.requestedCount + remainingCloseResult.requestedCount,
+        closedCount: childCloseResult.closedCount + remainingCloseResult.closedCount,
+      };
   const browserWorldAfterClose =
     closeResult.attempted === true
       ? callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs)
@@ -2641,10 +2718,12 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
     postCloseTargets,
     proof,
     readAlignmentProof,
+    childCloseIsolationProof,
     cleanupTargetsPassed,
     allTargetsPassed:
       proof.proofSatisfied === true &&
       readAlignmentProof?.proofSatisfied === true &&
+      childCloseIsolationProof?.proofSatisfied === true &&
       closeResult.succeeded === true &&
       cleanupTargetsPassed === true,
     claimBoundary:
