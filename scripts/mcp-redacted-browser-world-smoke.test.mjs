@@ -12,6 +12,7 @@ import {
   buildActiveTabSwitchProof,
   buildBackgroundReadTargetFocusProof,
   buildStepSummary,
+  buildOwnershipMixProof,
   buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
   buildWindowStateMutationProof,
@@ -1535,6 +1536,64 @@ test('buildPublicNoLoginLifecycleCoverageSummary fails minimum coverage when clo
   assert.equal(coverage.minimumPublicLifecycleCoveragePassed, false);
 });
 
+test('buildOwnershipMixProof proves AI and non-AI tab ownership without raw ids', () => {
+  const proof = buildOwnershipMixProof({
+    openedPublicTestTabs: 3,
+    lifecycleMatrix: [
+      {
+        step: 'foreground_open',
+        targetTab: { wasFound: true, openedBy: 'ai' },
+        counts: { aiOpenedTabs: 1, userOrPageOpenedTabs: 1 },
+      },
+      {
+        step: 'background_open',
+        targetTab: { wasFound: true, openedBy: 'ai' },
+        counts: { aiOpenedTabs: 2, userOrPageOpenedTabs: 1 },
+      },
+      {
+        step: 'new_window_open',
+        targetTab: { wasFound: true, openedBy: 'ai' },
+        counts: { aiOpenedTabs: 3, userOrPageOpenedTabs: 1 },
+      },
+    ],
+  });
+
+  assert.deepEqual(proof, {
+    publicNoLoginOnly: true,
+    openedPublicTestTabs: 3,
+    maxAiOpenedTabs: 3,
+    maxUserOrPageOpenedTabs: 1,
+    aiOpenedTabsObserved: true,
+    userOrPageOpenedTabsObserved: true,
+    mixedOwnershipObserved: true,
+    aiTargetsMarked: true,
+    proofSatisfied: true,
+    claimBoundary:
+      'Ownership mix proof is redacted count and boolean evidence only; it does not expose tab ids, URLs, titles, page content, account state, or task success.',
+  });
+  const serialized = JSON.stringify(proof);
+  assert.equal(serialized.includes('https://'), false);
+  assert.equal(serialized.includes('Private'), false);
+});
+
+test('buildOwnershipMixProof fails when non-AI tab ownership is absent', () => {
+  const proof = buildOwnershipMixProof({
+    openedPublicTestTabs: 2,
+    lifecycleMatrix: [
+      {
+        step: 'foreground_open',
+        targetTab: { wasFound: true, openedBy: 'ai' },
+        counts: { aiOpenedTabs: 2, userOrPageOpenedTabs: 0 },
+      },
+    ],
+  });
+
+  assert.equal(proof.aiOpenedTabsObserved, true);
+  assert.equal(proof.userOrPageOpenedTabsObserved, false);
+  assert.equal(proof.mixedOwnershipObserved, false);
+  assert.equal(proof.proofSatisfied, false);
+});
+
 test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fields', () => {
   const summary = buildRedactedReadPageAlignmentSummary(
     {
@@ -2364,6 +2423,13 @@ test('parseArgs supports read-page background target scenario', () => {
   assert.equal(
     parseArgs(['--scenario', 'read-page-background-target']).scenario,
     'read-page-background-target',
+  );
+});
+
+test('parseArgs supports lifecycle ownership mix scenario', () => {
+  assert.equal(
+    parseArgs(['--scenario', 'lifecycle-ownership-mix']).scenario,
+    'lifecycle-ownership-mix',
   );
 });
 

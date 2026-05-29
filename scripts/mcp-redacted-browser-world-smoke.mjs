@@ -1499,6 +1499,50 @@ export function buildPublicNoLoginLifecycleCoverageSummary(result) {
   };
 }
 
+export function buildOwnershipMixProof(result) {
+  const lifecycleMatrix = Array.isArray(result?.lifecycleMatrix) ? result.lifecycleMatrix : [];
+  const openedPublicTestTabs = Number.isInteger(result?.openedPublicTestTabs)
+    ? result.openedPublicTestTabs
+    : 0;
+  const maxAiOpenedTabs = lifecycleMatrix.reduce(
+    (max, step) =>
+      Math.max(max, Number.isInteger(step?.counts?.aiOpenedTabs) ? step.counts.aiOpenedTabs : 0),
+    0,
+  );
+  const maxUserOrPageOpenedTabs = lifecycleMatrix.reduce(
+    (max, step) =>
+      Math.max(
+        max,
+        Number.isInteger(step?.counts?.userOrPageOpenedTabs)
+          ? step.counts.userOrPageOpenedTabs
+          : 0,
+      ),
+    0,
+  );
+  const targetSteps = lifecycleMatrix.filter((step) => step?.targetTab?.wasFound === true);
+  const aiTargetsMarked =
+    targetSteps.length > 0 && targetSteps.every((step) => step.targetTab?.openedBy === 'ai');
+  const aiOpenedTabsObserved =
+    openedPublicTestTabs > 0 && maxAiOpenedTabs >= openedPublicTestTabs;
+  const userOrPageOpenedTabsObserved = maxUserOrPageOpenedTabs > 0;
+  return {
+    publicNoLoginOnly: true,
+    openedPublicTestTabs,
+    maxAiOpenedTabs,
+    maxUserOrPageOpenedTabs,
+    aiOpenedTabsObserved,
+    userOrPageOpenedTabsObserved,
+    mixedOwnershipObserved: aiOpenedTabsObserved === true && userOrPageOpenedTabsObserved === true,
+    aiTargetsMarked,
+    proofSatisfied:
+      aiOpenedTabsObserved === true &&
+      userOrPageOpenedTabsObserved === true &&
+      aiTargetsMarked === true,
+    claimBoundary:
+      'Ownership mix proof is redacted count and boolean evidence only; it does not expose tab ids, URLs, titles, page content, account state, or task success.',
+  };
+}
+
 function closeRunTabs(cliPath, tabIds, timeoutMs) {
   const uniqueTabIds = uniqueNumbers(tabIds);
   if (!uniqueTabIds.length) {
@@ -1731,6 +1775,32 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
       readPage.redactedBrowserWorldAfterRead.objectChangeSummaryPresent === true &&
       targets.every((target) => target.passed),
     targets,
+  };
+}
+
+function runLifecycleOwnershipMixSmoke(cliPath, smokeUrl, args) {
+  const lifecycle = runLifecycleSmoke(cliPath, smokeUrl, args);
+  const ownershipMixProof = buildOwnershipMixProof(lifecycle);
+  return {
+    scenario: 'lifecycle-ownership-mix',
+    lifecyclePassed: isSmokeResultPassing(lifecycle),
+    openedPublicTestTabs: lifecycle.openedPublicTestTabs,
+    closeSucceeded: lifecycle.closeSucceeded,
+    cleanupTargetsPassed: lifecycle.cleanupTargetsPassed,
+    allLifecycleStepsPassed: lifecycle.allLifecycleStepsPassed,
+    cleanup: lifecycle.cleanup,
+    ownershipMixProof,
+    publicLifecycleCoverage: lifecycle.publicLifecycleCoverage,
+    compactStepOwnership: lifecycle.lifecycleMatrix.map((step) => ({
+      step: step.step,
+      targetFound: step.targetTab?.wasFound ?? null,
+      targetOpenedBy: step.targetTab?.openedBy ?? null,
+      counts: step.counts,
+    })),
+    allTargetsPassed:
+      isSmokeResultPassing(lifecycle) === true && ownershipMixProof.proofSatisfied === true,
+    claimBoundary:
+      'Redacted public no-login ownership mix smoke. It proves only that this run observed AI-opened test tabs and at least one non-AI browser tab in the same Browser World snapshot series.',
   };
 }
 
@@ -2572,7 +2642,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(
-      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|matrix|window-state|window-state-drift|read-page|read-page-matrix|read-page-background-target] [--sample-count 3] [--sample-interval-ms 250] [--skip-open] [--keep-open]\n`,
+      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|lifecycle-ownership-mix|matrix|window-state|window-state-drift|read-page|read-page-matrix|read-page-background-target] [--sample-count 3] [--sample-interval-ms 250] [--skip-open] [--keep-open]\n`,
     );
     return;
   }
@@ -2596,9 +2666,11 @@ async function main() {
                 ? runReadPageMatrixSmoke(cliPath, smokeUrls, args)
                 : args.scenario === 'read-page-background-target'
                   ? runReadPageBackgroundTargetSmoke(cliPath, smokeUrl, args)
-                  : args.scenario === 'lifecycle'
-                    ? runLifecycleSmoke(cliPath, smokeUrl, args)
-                    : runSingleSmoke(cliPath, smokeUrl, args);
+                  : args.scenario === 'lifecycle-ownership-mix'
+                    ? runLifecycleOwnershipMixSmoke(cliPath, smokeUrl, args)
+                    : args.scenario === 'lifecycle'
+                      ? runLifecycleSmoke(cliPath, smokeUrl, args)
+                      : runSingleSmoke(cliPath, smokeUrl, args);
 
     const smokePassed = isSmokeResultPassing(smokeResult);
     const output = {
