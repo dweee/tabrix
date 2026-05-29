@@ -773,6 +773,7 @@ export interface ReadPageOwnershipRuntimeSummary {
   browserWorldObjectChangeSummary?: string | null;
   browserWorldActionableObjectChangeSummary?: string | null;
   browserWorldCurrentOperationConclusion?: string | null;
+  browserWorldRoutingDecisionSummary?: string | null;
   currentOwnerType: import('./browser-task-thing-contract').BrowserPageOwnerType;
   currentTabRunOwnershipVerdict: ReadPageCurrentTabRunOwnershipVerdict;
   currentTabPrimaryRelationVerdict: ReadPageCurrentTabPrimaryRelationVerdict;

@@ -695,6 +695,7 @@ async function buildModeOutput(params: {
       browserWorld.summary.actionableObjectChangeSummary ??
       browserWorld.summary.objectChangeSummary,
     browserWorldCurrentOperationConclusion: browserWorld.summary.currentOperationConclusion,
+    browserWorldRoutingDecisionSummary: browserWorld.summary.primaryConclusion,
   });
   if (sharedPayload.objectLifecycle) {
     const watchLoopSnapshot = buildBoundedWatchLoopSnapshot({
@@ -782,6 +783,7 @@ function buildReadPageOwnershipRuntimeSummary(params: {
   browserWorldObjectChangeSummary: string | null;
   browserWorldActionableObjectChangeSummary: string | null;
   browserWorldCurrentOperationConclusion: string | null;
+  browserWorldRoutingDecisionSummary: string | null;
 }): ReadPageOwnershipRuntimeSummary {
   const lastAiOperation = params.browserWorldTab?.lastAiOperation ?? null;
   const lastAiOperationConfidence =
@@ -835,6 +837,7 @@ function buildReadPageOwnershipRuntimeSummary(params: {
     browserWorldObjectChangeSummary: params.browserWorldObjectChangeSummary,
     browserWorldActionableObjectChangeSummary: params.browserWorldActionableObjectChangeSummary,
     browserWorldCurrentOperationConclusion: params.browserWorldCurrentOperationConclusion,
+    browserWorldRoutingDecisionSummary: params.browserWorldRoutingDecisionSummary,
     currentOwnerType: params.currentOwnerType,
     currentTabRunOwnershipVerdict: 'unknown',
     currentTabPrimaryRelationVerdict: 'current_tab_unknown',

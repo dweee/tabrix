@@ -714,6 +714,8 @@ function buildTabStateGroup(
         ownershipRuntime?.browserWorldActionableObjectChangeSummary ?? null,
       browserWorldCurrentOperationConclusion:
         ownershipRuntime?.browserWorldCurrentOperationConclusion ?? null,
+      browserWorldRoutingDecisionSummary:
+        ownershipRuntime?.browserWorldRoutingDecisionSummary ?? null,
       runtimeStateSource: ownershipRuntime?.currentTabRuntimeStateSource ?? 'unknown',
       operationTargetRole: operationTarget.operationTargetRole,
       operationTargetBasis: operationTarget.operationTargetBasis,
