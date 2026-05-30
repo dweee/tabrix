@@ -597,6 +597,8 @@ describe('read_page object lifecycle', () => {
         currentTabRuntimeStateSource: 'browser_world_inventory',
         browserWorldActionableObjectChangeSummary:
           'Actionable object change: latest AI-operated tab is active and operable.',
+        browserWorldRoutingDecisionSummary:
+          'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
       }),
       selectedDataSource: 'dom_region_rows',
       sourceRouteHonestyVerdict: null,
@@ -645,6 +647,12 @@ describe('read_page object lifecycle', () => {
     expect(view.compact?.primaryConclusion).toContain('window=normal');
     expect(view.compact?.primaryConclusion).toContain('runtime=browser_world_inventory');
     expect(view.compact?.primaryConclusion).toContain('source=dom_region_rows');
+    expect(view.compact?.primaryConclusion).toContain(
+      'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
+    );
+    expect(view.dynamicAttributeSummary?.primaryConclusion).toContain(
+      'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
+    );
     expect(view.compact?.primaryConclusion).not.toContain('https://example.test/runtime');
     expect(view.compact?.primaryConclusion).not.toContain('Runtime page');
     expect(view.compact?.facts.tab).toMatchObject({
@@ -670,6 +678,8 @@ describe('read_page object lifecycle', () => {
       lastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
       browserWorldActionableObjectChangeSummary:
         'Actionable object change: latest AI-operated tab is active and operable.',
+      browserWorldRoutingDecisionSummary:
+        'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
       runtimeStateSource: 'browser_world_inventory',
       operationTargetRole: 'read_target_browser_active_tab',
       operationTargetBasis: 'read_target_matches_browser_active_tab',

@@ -253,6 +253,62 @@ describe('read_page mode', () => {
     expect(payload.fullSnapshot).toBeUndefined();
   });
 
+  it.each(['normal', 'full'] as const)(
+    'preserves BrowserWorld routing summary in %s read_page output',
+    async (mode) => {
+      vi.spyOn(browserWorldInventory, 'getBrowserWorldSnapshot').mockResolvedValue({
+        summary: {
+          primaryConclusion: 'primary-summary-that-should-not-flow-into-routing-field',
+          routingDecisionSummary:
+            'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
+          objectChangeSummary: 'Object change summary: no relevant browser object change observed.',
+          actionableObjectChangeSummary:
+            'Actionable object change: no actionable browser object transition observed.',
+          currentOperationConclusion:
+            'Current operation conclusion: browser object state is stable enough for page-level inspection.',
+        },
+        tabs: [],
+      } as any);
+      vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+        id: 5202,
+        windowId: 1,
+        active: true,
+        status: 'complete',
+        url: 'https://example.com/checkout',
+        title: 'Checkout',
+      });
+      vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+      vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+        success: true,
+        pageContent:
+          '- form "Checkout" [ref=ref_0] (x=640,y=300)\n  - textbox "Email" [ref=ref_1] (x=600,y=260)\n  - textbox "Card number" [ref=ref_2] (x=600,y=300)\n  - button "Submit order" [ref=ref_3] (x=600,y=340)\n  - link "Back to cart" [ref=ref_4] (x=500,y=340)\n- heading "Checkout" [ref=ref_5] (x=320,y=100)\n- generic "Secure payment" [ref=ref_6] (x=320,y=140)\n- generic "Order summary" [ref=ref_7] (x=900,y=220)\n- generic "Terms" [ref=ref_8] (x=300,y=520)\n- generic "Footer" [ref=ref_9] (x=300,y=560)',
+        refMap: [
+          { ref: 'ref_1', selector: '#email' },
+          { ref: 'ref_2', selector: '#card-number' },
+          { ref: 'ref_3', selector: 'button[type=submit]' },
+        ],
+        stats: { processed: 12, included: 8, durationMs: 11 },
+        viewport: { width: 1280, height: 720, dpr: 1 },
+      });
+
+      const result = await readPageTool.execute({ mode });
+      const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+      expect(result.isError).toBe(false);
+      expectCommonSnapshotShape(payload, mode);
+      expect(payload.ownershipRuntime.browserWorldRoutingDecisionSummary).toBe(
+        'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
+      );
+      expect(payload.ownershipRuntime.browserWorldRoutingDecisionSummary).not.toBe(
+        'primary-summary-that-should-not-flow-into-routing-field',
+      );
+      expect(payload.browserPageObjectCompact.facts.tab.browserWorldRoutingDecisionSummary).toBe(
+        'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
+      );
+      expect(payload.browserPageObjectCompact.claimBoundary).toContain('candidate evidence only');
+    },
+  );
+
   it('preserves recovered text menu targets when the accessibility snapshot already has enough actions', () => {
     const elements = buildInteractiveElements(
       [

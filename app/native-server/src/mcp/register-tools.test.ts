@@ -1381,6 +1381,8 @@ describe('handleToolCall execution wrapper', () => {
                 'Actionable object change: latest AI-operated tab is active and operable.',
               browserWorldCurrentOperationConclusion:
                 'Current operation: read_page marked the tab as recently operated.',
+              browserWorldRoutingDecisionSummary:
+                'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
             },
           },
         }),
@@ -1440,6 +1442,8 @@ describe('handleToolCall execution wrapper', () => {
               'Actionable object change: latest AI-operated tab is active and operable.',
             browserWorldCurrentOperationConclusion:
               'Current operation: read_page marked the tab as recently operated.',
+            browserWorldRoutingDecisionSummary:
+              'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
             canTabrixOperate: true,
             operabilityReason: 'regular_web_page',
             runtimeStateSource: 'browser_world_inventory',
@@ -1464,6 +1468,8 @@ describe('handleToolCall execution wrapper', () => {
           'Actionable object change: latest AI-operated tab is active and operable.',
         browserWorldCurrentOperationConclusion:
           'Current operation: read_page marked the tab as recently operated.',
+        browserWorldRoutingDecisionSummary:
+          'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
       });
       expect(payload.aiContextEnvelope.primaryConclusion).toContain('Menu expanded candidate');
       expect(payload.aiContextEnvelope.watchStatus).toEqual(

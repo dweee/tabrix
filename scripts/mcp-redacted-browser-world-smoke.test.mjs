@@ -2005,6 +2005,8 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
           'Actionable object change includes https://private.example.test/dashboard and Private Dashboard.',
         browserWorldCurrentOperationConclusion:
           'Current operation object includes https://private.example.test/dashboard and Private Dashboard.',
+        browserWorldRoutingDecisionSummary:
+          'Routing summary includes https://private.example.test/dashboard and Private Dashboard.',
         currentOwnerType: 'run_owned',
       },
       browserPageObjectCompact: {
@@ -2038,6 +2040,8 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
               'Actionable object change includes https://private.example.test/dashboard and Private Dashboard.',
             browserWorldCurrentOperationConclusion:
               'Current operation object includes https://private.example.test/dashboard and Private Dashboard.',
+            browserWorldRoutingDecisionSummary:
+              'Routing summary includes https://private.example.test/dashboard and Private Dashboard.',
             isRunOwnedByTask: false,
             runtimeStateSource: 'browser_world_inventory',
             operationTargetRole: 'read_target_browser_active_tab',
@@ -2144,6 +2148,7 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     browserWorldObjectChangeSummaryPresent: true,
     browserWorldActionableObjectChangeSummaryPresent: true,
     browserWorldCurrentOperationConclusionPresent: true,
+    browserWorldRoutingDecisionSummaryPresent: true,
   });
   assert.deepEqual(summary.pageRegionRuntime, {
     pageRegionsPresent: true,
@@ -2170,6 +2175,7 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     browserWorldObjectChangeSummaryPresent: true,
     browserWorldActionableObjectChangeSummaryPresent: true,
     browserWorldCurrentOperationConclusionPresent: true,
+    browserWorldRoutingDecisionSummaryPresent: true,
     isRunOwnedByTask: false,
     runtimeStateSource: 'browser_world_inventory',
     operationTargetRole: 'read_target_browser_active_tab',

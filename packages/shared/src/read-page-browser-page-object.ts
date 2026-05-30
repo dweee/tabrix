@@ -1697,14 +1697,15 @@ function singleSnapshotTabPageObjectSummary(
   const stability = readStringFact(pageFacts, 'stability') ?? 'unknown';
   const runtimeSource = readStringFact(tabFacts, 'runtimeStateSource') ?? 'unknown';
   const selectedDataSource = readStringFact(pageFacts, 'selectedDataSource') ?? 'unknown';
+  const routingDecision = readStringFact(tabFacts, 'browserWorldRoutingDecisionSummary');
 
-  return (
+  const summary =
     `One Tab page object: tab=${formatNullableNumber(tabId)}; ` +
     `active=${formatTriState(active)}; browserActive=${formatTriState(browserActive)}; ` +
     `owner=${owner}; openedBy=${openedBy}; operable=${formatTriState(operable)}; ` +
     `window=${windowState}; focused=${formatTriState(focused)}; ` +
-    `page=${readiness}/${stability}; runtime=${runtimeSource}; source=${selectedDataSource}.`
-  );
+    `page=${readiness}/${stability}; runtime=${runtimeSource}; source=${selectedDataSource}.`;
+  return routingDecision ? `${summary} ${routingDecision}.` : summary;
 }
 
 function singleSnapshotGroupSummary(

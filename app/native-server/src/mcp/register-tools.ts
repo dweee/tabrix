@@ -1986,6 +1986,9 @@ function readTaskPageRuntimeFields(payload: Record<string, unknown>): TaskPageRu
     browserWorldCurrentOperationConclusion:
       readNestedString('browserWorldCurrentOperationConclusion') ??
       readCompactString('browserWorldCurrentOperationConclusion'),
+    browserWorldRoutingDecisionSummary:
+      readNestedString('browserWorldRoutingDecisionSummary') ??
+      readCompactString('browserWorldRoutingDecisionSummary'),
   };
 }
 
@@ -2572,6 +2575,7 @@ function buildAiFacingOwnershipRuntimeSummary(
       runtimeFields.browserWorldActionableObjectChangeSummary ?? null,
     browserWorldCurrentOperationConclusion:
       runtimeFields.browserWorldCurrentOperationConclusion ?? null,
+    browserWorldRoutingDecisionSummary: runtimeFields.browserWorldRoutingDecisionSummary ?? null,
     currentOwnerType,
     currentTabRunOwnershipVerdict,
     currentTabPrimaryRelationVerdict,

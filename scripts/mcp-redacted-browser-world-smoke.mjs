@@ -1079,6 +1079,8 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
         typeof ownershipRuntime?.browserWorldActionableObjectChangeSummary === 'string',
       browserWorldCurrentOperationConclusionPresent:
         typeof ownershipRuntime?.browserWorldCurrentOperationConclusion === 'string',
+      browserWorldRoutingDecisionSummaryPresent:
+        typeof ownershipRuntime?.browserWorldRoutingDecisionSummary === 'string',
     },
     compact: {
       source: compact?.source ?? null,
@@ -1114,6 +1116,8 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
           typeof compactTabFacts.browserWorldActionableObjectChangeSummary === 'string',
         browserWorldCurrentOperationConclusionPresent:
           typeof compactTabFacts.browserWorldCurrentOperationConclusion === 'string',
+        browserWorldRoutingDecisionSummaryPresent:
+          typeof compactTabFacts.browserWorldRoutingDecisionSummary === 'string',
         isRunOwnedByTask: compactTabFacts.isRunOwnedByTask ?? null,
         runtimeStateSource: compactTabFacts.runtimeStateSource ?? null,
         operationTargetRole:
@@ -1202,6 +1206,9 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       browserWorldCurrentOperationConclusionPresent:
         typeof ownershipRuntime?.browserWorldCurrentOperationConclusion === 'string' &&
         typeof compactTabFacts.browserWorldCurrentOperationConclusion === 'string',
+      browserWorldRoutingDecisionSummaryPresent:
+        typeof ownershipRuntime?.browserWorldRoutingDecisionSummary === 'string' &&
+        typeof compactTabFacts.browserWorldRoutingDecisionSummary === 'string',
       operationTargetBriefPresent:
         typeof compactTabFacts.operationTargetRole === 'string' &&
         typeof compactTabFacts.operationTargetBasis === 'string' &&
@@ -2482,6 +2489,7 @@ function hasReadPageMatrixAlignmentEvidence({
     alignment.browserWorldObjectChangeSummaryPresent === true &&
     alignment.browserWorldActionableObjectChangeSummaryPresent === true &&
     alignment.browserWorldCurrentOperationConclusionPresent === true &&
+    alignment.browserWorldRoutingDecisionSummaryPresent === true &&
     alignment.operationTargetBriefPresent === true &&
     alignment.actionReadinessBriefPresent === true &&
     alignment.targetTabMatchesReadPage === true &&

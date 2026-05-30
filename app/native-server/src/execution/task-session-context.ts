@@ -203,6 +203,7 @@ export interface TaskPageRuntimeFields {
   browserWorldObjectChangeSummary?: string | null;
   browserWorldActionableObjectChangeSummary?: string | null;
   browserWorldCurrentOperationConclusion?: string | null;
+  browserWorldRoutingDecisionSummary?: string | null;
 }
 
 export interface NoteReadPageInput {
@@ -1089,6 +1090,7 @@ function cloneTaskPageRuntimeFields(input: TaskPageRuntimeFields): TaskPageRunti
     browserWorldObjectChangeSummary: input.browserWorldObjectChangeSummary,
     browserWorldActionableObjectChangeSummary: input.browserWorldActionableObjectChangeSummary,
     browserWorldCurrentOperationConclusion: input.browserWorldCurrentOperationConclusion,
+    browserWorldRoutingDecisionSummary: input.browserWorldRoutingDecisionSummary,
   };
 }
 
