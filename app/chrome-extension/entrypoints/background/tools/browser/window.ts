@@ -515,6 +515,7 @@ class WindowTool extends BaseBrowserToolExecutor {
               'Object inventory summary contains browser lifecycle ids and routing facts only; it does not prove page content understanding, account state, login success, or API/CDP reuse.',
           },
           browserActiveObject: buildCompactTabObject(browserActiveTab, 'browser_active_tab'),
+          routingDecisionSummary: browserWorld.summary.routingDecisionSummary,
           latestAiOperatedObject: buildCompactTabObject(
             latestAiOperatedTab,
             'latest_ai_operated_tab',
@@ -534,7 +535,9 @@ class WindowTool extends BaseBrowserToolExecutor {
             latestAiOperationConfidence:
               browserWorld.summary.aiOperationState.latestAiOperationConfidence,
             latestAiOperationReason: browserWorld.summary.aiOperationState.latestAiOperationReason,
-            summary: browserWorld.summary.currentOperationConclusion,
+            summary:
+              browserWorld.summary.routingDecisionSummary ??
+              browserWorld.summary.currentOperationConclusion,
             claimBoundary:
               'Operation routing identifies browser tab objects only; it does not prove page action postconditions or task completion.',
           },

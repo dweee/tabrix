@@ -9,6 +9,7 @@ import {
   summarizeCurrentOperation,
   summarizeCurrentWindow,
   summarizeBrowserWorldSnapshot,
+  summarizeRoutingDecision,
   summarizeBrowserObjectEdgeState,
   summarizeActionableObjectChange,
   summarizeDynamicObjectUpdate,
@@ -131,6 +132,7 @@ export interface BrowserWorldRefreshHealth {
 
 export interface BrowserWorldSummary {
   primaryConclusion: string;
+  routingDecisionSummary: string;
   activeWindow: {
     windowId: number | null;
     state: string | null;
@@ -1189,6 +1191,7 @@ function buildSnapshot(): BrowserWorldSnapshot {
       .sort((a, b) => (b.lastAiOperationAtMs ?? 0) - (a.lastAiOperationAtMs ?? 0))[0] ?? null;
   const aiOperationState = buildAiOperationState(tabs, activeTab, lastAiOperatedTab);
   const recentChangeSummary = summarizeRecentEvents(recentEvents);
+  const routingDecisionSummary = summarizeRoutingDecision(windowOperationState, aiOperationState);
   const primaryConclusion = summarizeBrowserWorldSnapshot({
     windows,
     tabs,
@@ -1224,6 +1227,7 @@ function buildSnapshot(): BrowserWorldSnapshot {
     operableTabIds,
     summary: {
       primaryConclusion,
+      routingDecisionSummary,
       activeWindow: {
         windowId: focusedWindow?.windowId ?? null,
         state: focusedWindow?.state ?? null,

@@ -419,7 +419,7 @@ function summarizeSnapshotNextCheck(
   return 'read_or_select_intended_target';
 }
 
-function summarizeRoutingDecision(
+export function summarizeRoutingDecision(
   windowOperationState: BrowserWorldWindowOperationState,
   aiOperationState: BrowserWorldAiOperationState,
 ): string {
