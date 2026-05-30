@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readPageTool } from '@/entrypoints/background/tools/browser/read-page';
 import { buildInteractiveElements } from '@/entrypoints/background/tools/browser/read-page-interactive-elements';
+import * as browserWorldInventory from '@/entrypoints/background/browser-world-inventory';
 import {
   buildFallbackRefMap,
   formatElementsAsPageContent,
@@ -148,6 +149,19 @@ describe('read_page mode', () => {
   });
 
   it('defaults mode to compact', async () => {
+    vi.spyOn(browserWorldInventory, 'getBrowserWorldSnapshot').mockResolvedValue({
+      summary: {
+        primaryConclusion: 'primary-summary-that-should-not-flow-into-routing-field',
+        routingDecisionSummary:
+          'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
+        objectChangeSummary: 'Object change summary: no relevant browser object change observed.',
+        actionableObjectChangeSummary:
+          'Actionable object change: no actionable browser object transition observed.',
+        currentOperationConclusion:
+          'Current operation conclusion: browser object state is stable enough for page-level inspection.',
+      },
+      tabs: [],
+    } as any);
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 5201,
       windowId: 1,
@@ -211,7 +225,12 @@ describe('read_page mode', () => {
         'Actionable object change:',
       ),
       browserWorldCurrentOperationConclusion: expect.any(String),
+      browserWorldRoutingDecisionSummary:
+        'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
     });
+    expect(payload.ownershipRuntime.browserWorldRoutingDecisionSummary).not.toBe(
+      'primary-summary-that-should-not-flow-into-routing-field',
+    );
     expect(payload.browserPageObjectCompact.facts.tab).toMatchObject({
       objectKind: 'BrowserTabObject',
       currentTabId: 5201,
@@ -223,6 +242,8 @@ describe('read_page mode', () => {
         'Actionable object change:',
       ),
       browserWorldCurrentOperationConclusion: expect.any(String),
+      browserWorldRoutingDecisionSummary:
+        'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
       actionReadiness: 'reselect_or_reread_required',
       canProceedToPageLevelCheck: false,
       requiredBeforeAction: 'refresh_browser_object_snapshot',

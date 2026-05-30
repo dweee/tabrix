@@ -695,7 +695,7 @@ async function buildModeOutput(params: {
       browserWorld.summary.actionableObjectChangeSummary ??
       browserWorld.summary.objectChangeSummary,
     browserWorldCurrentOperationConclusion: browserWorld.summary.currentOperationConclusion,
-    browserWorldRoutingDecisionSummary: browserWorld.summary.primaryConclusion,
+    browserWorldRoutingDecisionSummary: browserWorld.summary.routingDecisionSummary,
   });
   if (sharedPayload.objectLifecycle) {
     const watchLoopSnapshot = buildBoundedWatchLoopSnapshot({

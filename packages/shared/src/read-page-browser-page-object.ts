@@ -165,6 +165,7 @@ export function buildReadPageBrowserPageObjectCompactView(
         'browserWorldObjectChangeSummary',
         'browserWorldActionableObjectChangeSummary',
         'browserWorldCurrentOperationConclusion',
+        'browserWorldRoutingDecisionSummary',
         'runtimeStateSource',
         'operationTargetRole',
         'operationTargetBasis',
