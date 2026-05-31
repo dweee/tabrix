@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildAcceptanceBrief,
   parseArgs,
   validatePrivateAuthLifecyclePreflight,
 } from './v28-private-auth-lifecycle-preflight.mjs';
@@ -126,10 +127,31 @@ test('parseArgs supports input and template options', () => {
   assert.deepEqual(parseArgs(['--input', 'manifest.json']), {
     input: 'manifest.json',
     printTemplate: false,
+    printAcceptanceBrief: false,
   });
   assert.deepEqual(parseArgs(['--print-template']), {
     input: null,
     printTemplate: true,
+    printAcceptanceBrief: false,
+  });
+  assert.deepEqual(parseArgs(['--print-acceptance-brief']), {
+    input: null,
+    printTemplate: false,
+    printAcceptanceBrief: true,
   });
   assert.throws(() => parseArgs(['--unknown']), /Unknown argument/);
+});
+
+test('buildAcceptanceBrief defines private auth acceptance evidence without pass claims', () => {
+  const brief = buildAcceptanceBrief();
+
+  assert.equal(brief.scenarioClass, 'auth_collaboration_resume_v1');
+  assert.match(brief.objective, /owner-private inputs/);
+  assert.ok(brief.requiredOwnerInputs.privateTargetUrl);
+  assert.ok(brief.requiredRuntimeEvidence.qrObjectLifecycle);
+  assert.ok(brief.passBar.includes('Browser Hygiene PASS or explicit BLOCKED classification'));
+  assert.ok(brief.artifactContract.privateOnlyFields.includes('rawQrImage'));
+  assert.ok(brief.artifactContract.privateOnlyFields.includes('privateTargetUrl'));
+  assert.ok(brief.claimBoundary.notSafeToClaim.includes('private scenario PASS'));
+  assert.ok(brief.claimBoundary.notSafeToClaim.includes('product delivery grade'));
 });

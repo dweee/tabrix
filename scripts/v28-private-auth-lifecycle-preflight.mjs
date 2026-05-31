@@ -151,6 +151,79 @@ function buildTemplate() {
   };
 }
 
+export function buildAcceptanceBrief() {
+  return {
+    scenarioClass: REQUIRED_SCENARIO_CLASS,
+    objective:
+      'Run auth_collaboration_resume_v1 only when owner-private inputs and live user cooperation are available.',
+    requiredOwnerInputs: {
+      privateTargetUrl: 'owner-provided outside the public repo',
+      nonSensitiveExpectedTerms:
+        'owner-provided terms that can prove logged-in/account-restored state without exposing private account data',
+      sameProfileEvidence: 'same_profile must be confirmed before the run starts',
+      liveAuthCooperation:
+        'owner/user must complete the auth step, such as QR scan or another visible auth challenge',
+    },
+    requiredRuntimeEvidence: {
+      beforeSnapshot:
+        'fresh read_page pageRegions must expose auth/modal/account/qr state before user auth cooperation',
+      qrObjectLifecycle:
+        'monitor with fresh region reads; record state, timestamp, locator presence, and hash prefixes only when QR element capture exists',
+      postAuthSnapshot:
+        'fresh read_page must show auth modal resolved and account/logged-in state or owner expected terms present',
+      postActionStateSummary:
+        'summary must separate click/tool success from business auth success',
+      browserHygiene:
+        'baseline/final tab and window state must be recorded and Browser Hygiene must PASS or be explicitly BLOCKED',
+    },
+    artifactContract: {
+      allowedPublicSummaryFields: [
+        'scenarioClass',
+        'runId',
+        'mainTabrixHead',
+        'status',
+        'evidenceLevel',
+        'browserHygieneVerdict',
+        'qrLifecycleStateSummary',
+        'postAuthStateSummary',
+        'claimBoundary',
+        'freshnessTimestamp',
+      ],
+      privateOnlyFields: [
+        'privateTargetUrl',
+        'rawVisibleText',
+        'rawQrImage',
+        'rawScreenshot',
+        'accountIdentity',
+        'cookies',
+        'authorization',
+        'tokens',
+      ],
+    },
+    passBar: [
+      'same-profile/private target evidence present',
+      'auth/modal/QR/account regions observed with fresh reads',
+      'QR lifecycle monitor does not infer disappearance from cached redundant reads',
+      'login/account restoration proven by fresh post-auth state, not by click success alone',
+      'Browser Hygiene PASS or explicit BLOCKED classification',
+      'redacted private artifact written outside the public repo',
+    ],
+    claimBoundary: {
+      safeToClaim:
+        'this brief defines the private acceptance contract and can guide a future live run',
+      notSafeToClaim: [
+        'private scenario PASS',
+        'login/logout success',
+        'QR lifecycle proven',
+        'auth collaboration resume proven',
+        'Browser Hygiene PASS for a private run',
+        'product delivery grade',
+        'release ready',
+      ],
+    },
+  };
+}
+
 export function validatePrivateAuthLifecyclePreflight(manifest) {
   const missingFields = [];
   const invalidFields = [];
@@ -283,6 +356,7 @@ export function parseArgs(argv) {
   const args = {
     input: null,
     printTemplate: false,
+    printAcceptanceBrief: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -292,6 +366,8 @@ export function parseArgs(argv) {
       index += 1;
     } else if (arg === '--print-template') {
       args.printTemplate = true;
+    } else if (arg === '--print-acceptance-brief') {
+      args.printAcceptanceBrief = true;
     } else if (arg === '--help' || arg === '-h') {
       args.help = true;
     } else {
@@ -306,6 +382,7 @@ function printHelp() {
   process.stdout.write(`Usage:
   node scripts/v28-private-auth-lifecycle-preflight.mjs --input <manifest.json>
   node scripts/v28-private-auth-lifecycle-preflight.mjs --print-template
+  node scripts/v28-private-auth-lifecycle-preflight.mjs --print-acceptance-brief
 `);
 }
 
@@ -318,6 +395,11 @@ export function runCli(argv = process.argv.slice(2)) {
 
   if (args.printTemplate) {
     process.stdout.write(`${JSON.stringify(buildTemplate(), null, 2)}\n`);
+    return 0;
+  }
+
+  if (args.printAcceptanceBrief) {
+    process.stdout.write(`${JSON.stringify(buildAcceptanceBrief(), null, 2)}\n`);
     return 0;
   }
 
