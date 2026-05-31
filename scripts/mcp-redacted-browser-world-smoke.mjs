@@ -1016,6 +1016,9 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
     typeof compactTabFacts?.lastAiOperationConfidence === 'number' &&
     typeof compactTabFacts?.lastAiOperationReason === 'string';
   const pageRegions = Array.isArray(payload?.pageRegions) ? payload.pageRegions : [];
+  const interactiveElements = Array.isArray(payload?.interactiveElements)
+    ? payload.interactiveElements
+    : [];
   const operationMap = payload?.pageOperationMap;
   const operationZones = Array.isArray(operationMap?.zones) ? operationMap.zones : [];
   const regionTypes = [
@@ -1039,6 +1042,14 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
   );
   const candidateActionRegionCount = pageRegions.filter(
     (region) => Array.isArray(region?.candidateActionIds) && region.candidateActionIds.length > 0,
+  ).length;
+  const valueStateSummary = buildValueStateSummary(pageRegions, interactiveElements);
+  const searchOperationZones = operationZones.filter((zone) => zone?.purpose === 'search');
+  const searchFillOperationZoneCount = searchOperationZones.filter(
+    (zone) => zone?.primaryAction?.actionType === 'fill',
+  ).length;
+  const readySearchOperationZoneCount = searchOperationZones.filter(
+    (zone) => zone?.readiness === 'ready',
   ).length;
 
   return {
@@ -1174,6 +1185,10 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       pageOperationMapPresent: Boolean(operationMap),
       operationZoneCount: operationZones.length,
       operationPurposes,
+      searchOperationZoneCount: searchOperationZones.length,
+      searchFillOperationZoneCount,
+      readySearchOperationZoneCount,
+      ...valueStateSummary,
       operationClaimBoundaryPresent: typeof operationMap?.claimBoundary === 'string',
     },
     alignment: {
@@ -1264,6 +1279,72 @@ function callMcpTool(cliPath, toolName, toolArgs, timeoutMs) {
 
 function uniqueNumbers(values) {
   return [...new Set(values.filter((value) => Number.isInteger(value)))];
+}
+
+function isKnownValueState(valueState) {
+  return valueState === 'empty' || valueState === 'non_empty' || valueState === 'unknown';
+}
+
+function buildValueStateSummary(pageRegions, interactiveElements = []) {
+  const summary = {
+    valueStateObjectCount: 0,
+    emptyValueStateObjectCount: 0,
+    nonEmptyValueStateObjectCount: 0,
+    unknownValueStateObjectCount: 0,
+    fillableValueStateObjectCount: 0,
+    emptyFillableValueStateObjectCount: 0,
+    nonEmptyFillableValueStateObjectCount: 0,
+    unknownFillableValueStateObjectCount: 0,
+  };
+
+  for (const region of Array.isArray(pageRegions) ? pageRegions : []) {
+    const regionObjects = Array.isArray(region?.objects) ? region.objects : [];
+    const isFormRegion = region?.regionType === 'form';
+    for (const object of regionObjects) {
+      const valueState = object?.valueState;
+      if (!isKnownValueState(valueState)) continue;
+
+      summary.valueStateObjectCount += 1;
+      if (valueState === 'empty') summary.emptyValueStateObjectCount += 1;
+      if (valueState === 'non_empty') summary.nonEmptyValueStateObjectCount += 1;
+      if (valueState === 'unknown') summary.unknownValueStateObjectCount += 1;
+
+      const actionTypes = Array.isArray(object?.actionTypes) ? object.actionTypes : [];
+      const isFillableObject = isFormRegion || actionTypes.includes('fill');
+      if (!isFillableObject) continue;
+
+      summary.fillableValueStateObjectCount += 1;
+      if (valueState === 'empty') summary.emptyFillableValueStateObjectCount += 1;
+      if (valueState === 'non_empty') summary.nonEmptyFillableValueStateObjectCount += 1;
+      if (valueState === 'unknown') summary.unknownFillableValueStateObjectCount += 1;
+    }
+  }
+
+  for (const element of Array.isArray(interactiveElements) ? interactiveElements : []) {
+    const valueState = element?.valueState;
+    if (!isKnownValueState(valueState)) continue;
+
+    summary.valueStateObjectCount += 1;
+    if (valueState === 'empty') summary.emptyValueStateObjectCount += 1;
+    if (valueState === 'non_empty') summary.nonEmptyValueStateObjectCount += 1;
+    if (valueState === 'unknown') summary.unknownValueStateObjectCount += 1;
+
+    const elementType = typeof element?.type === 'string' ? element.type : '';
+    const isFillableElement =
+      elementType === 'input' ||
+      elementType === 'textarea' ||
+      elementType === 'select' ||
+      elementType === 'searchbox' ||
+      typeof element?.ref === 'string';
+    if (!isFillableElement) continue;
+
+    summary.fillableValueStateObjectCount += 1;
+    if (valueState === 'empty') summary.emptyFillableValueStateObjectCount += 1;
+    if (valueState === 'non_empty') summary.nonEmptyFillableValueStateObjectCount += 1;
+    if (valueState === 'unknown') summary.unknownFillableValueStateObjectCount += 1;
+  }
+
+  return summary;
 }
 
 export function buildStepSummary(step, payload, targetTabId) {
@@ -2966,6 +3047,79 @@ export function buildPublicSearchEntryMatrixProof(targets) {
   };
 }
 
+export function buildSearchFormPostActionSummaryProof({
+  beforeReadPage,
+  afterReadPage,
+  fillSummary,
+  cleanupPassed,
+  browserWorldAfterFill,
+  browserWorldAfterClose,
+} = {}) {
+  const beforeRuntime = beforeReadPage?.pageRegionRuntime ?? {};
+  const afterRuntime = afterReadPage?.pageRegionRuntime ?? {};
+  const beforeNonEmptyFillableCount = Number.isInteger(
+    beforeRuntime.nonEmptyFillableValueStateObjectCount,
+  )
+    ? beforeRuntime.nonEmptyFillableValueStateObjectCount
+    : 0;
+  const afterNonEmptyFillableCount = Number.isInteger(
+    afterRuntime.nonEmptyFillableValueStateObjectCount,
+  )
+    ? afterRuntime.nonEmptyFillableValueStateObjectCount
+    : 0;
+  const beforeSearchPurposePresent =
+    Array.isArray(beforeRuntime.operationPurposes) && beforeRuntime.operationPurposes.includes('search');
+  const afterSearchPurposePresent =
+    Array.isArray(afterRuntime.operationPurposes) && afterRuntime.operationPurposes.includes('search');
+  const browserWorldObservedFillOperation =
+    browserWorldAfterFill?.browserActiveObject?.lastAiOperation === 'fill_or_select' ||
+    browserWorldAfterFill?.latestAiOperatedObject?.lastAiOperation === 'fill_or_select' ||
+    browserWorldAfterFill?.aiOperationState?.latestAiOperation === 'fill_or_select';
+  const fillDispatched = fillSummary?.success === true;
+  const afterNonEmptyFillableObserved = afterNonEmptyFillableCount > beforeNonEmptyFillableCount;
+
+  const proofSatisfied =
+    beforeReadPage?.alignment?.ownershipRuntimePresent === true &&
+    afterReadPage?.alignment?.ownershipRuntimePresent === true &&
+    beforeReadPage?.alignment?.pageOperationMapPresent === true &&
+    afterReadPage?.alignment?.pageOperationMapPresent === true &&
+    beforeSearchPurposePresent === true &&
+    afterSearchPurposePresent === true &&
+    beforeRuntime.searchFillOperationZoneCount > 0 &&
+    afterRuntime.fillableValueStateObjectCount > 0 &&
+    fillDispatched === true &&
+    browserWorldObservedFillOperation === true &&
+    afterNonEmptyFillableObserved === true &&
+    cleanupPassed === true &&
+    browserWorldAfterFill?.targetTab?.wasFound === true &&
+    browserWorldAfterClose?.targetTab?.wasFound === false &&
+    browserWorldAfterFill?.compactSummaryBounded === true &&
+    browserWorldAfterFill?.retentionWithinLimit === true &&
+    browserWorldAfterClose?.compactSummaryBounded === true &&
+    browserWorldAfterClose?.retentionWithinLimit === true;
+
+  return {
+    publicNoLoginOnly: true,
+    beforeSearchPurposePresent,
+    afterSearchPurposePresent,
+    beforeSearchFillOperationZoneCount: beforeRuntime.searchFillOperationZoneCount ?? null,
+    afterSearchFillOperationZoneCount: afterRuntime.searchFillOperationZoneCount ?? null,
+    beforeFillableValueStateObjectCount: beforeRuntime.fillableValueStateObjectCount ?? null,
+    afterFillableValueStateObjectCount: afterRuntime.fillableValueStateObjectCount ?? null,
+    beforeNonEmptyFillableValueStateObjectCount: beforeNonEmptyFillableCount,
+    afterNonEmptyFillableValueStateObjectCount: afterNonEmptyFillableCount,
+    fillDispatched,
+    browserWorldObservedFillOperation,
+    afterNonEmptyFillableObserved,
+    cleanupPassed: cleanupPassed === true,
+    browserWorldTargetObservedAfterFill: browserWorldAfterFill?.targetTab?.wasFound === true,
+    browserWorldAfterCloseClean: browserWorldAfterClose?.targetTab?.wasFound === false,
+    proofSatisfied,
+    claimBoundary:
+      'Public search/form post-action summary proof is redacted boolean/count evidence only. It proves one selected public no-login search fill action was dispatched and a follow-up read_page observed a non-empty fillable value state with BrowserWorld cleanup. It does not expose raw input, URLs, titles, page content, account state, screenshots, cookies, network bodies, submitted search results, private flows, API/CDP reuse, competitor parity, release readiness, or product delivery grade.',
+  };
+}
+
 function runPublicSearchEntryMatrixSmoke(cliPath, smokeUrls, args) {
   const matrix = runReadPageMatrixSmoke(cliPath, smokeUrls, args);
   const publicSearchEntryMatrixProof = buildPublicSearchEntryMatrixProof(matrix.targets);
@@ -2978,6 +3132,137 @@ function runPublicSearchEntryMatrixSmoke(cliPath, smokeUrls, args) {
     publicSearchEntryMatrixProof,
     claimBoundary:
       'Redacted public no-login search-entry matrix only. It proves selected public pages expose a search operation purpose with BrowserWorld/read_page alignment and Browser Hygiene cleanup, not search-result correctness, private login/logout, API/CDP reuse, release readiness, or product delivery grade.',
+  };
+}
+
+function selectSearchFillOperation(readPagePayload) {
+  const operationZones = Array.isArray(readPagePayload?.pageOperationMap?.zones)
+    ? readPagePayload.pageOperationMap.zones
+    : [];
+  return (
+    operationZones.find(
+      (zone) =>
+        zone?.purpose === 'search' &&
+        zone?.readiness === 'ready' &&
+        zone?.primaryAction?.actionType === 'fill' &&
+        zone?.primaryAction?.toolName === 'chrome_fill_or_select' &&
+        zone?.primaryAction?.toolArgs?.candidateAction,
+    ) ??
+    operationZones.find(
+      (zone) =>
+        zone?.purpose === 'search' &&
+        zone?.primaryAction?.actionType === 'fill' &&
+        zone?.primaryAction?.toolName === 'chrome_fill_or_select' &&
+        zone?.primaryAction?.toolArgs?.candidateAction,
+    ) ??
+    null
+  );
+}
+
+function buildRedactedFillSummary(fillPayload) {
+  return {
+    success: fillPayload?.success === true,
+    postconditionVerdict:
+      typeof fillPayload?.postconditionVerdict === 'string'
+        ? fillPayload.postconditionVerdict
+        : null,
+    recommendedNextActionIsReadPage: fillPayload?.recommendedNextAction === 'chrome_read_page',
+    claimBoundaryPresent: typeof fillPayload?.claimBoundary === 'string',
+  };
+}
+
+function runPublicSearchFormPostActionSmoke(cliPath, smokeUrl, args) {
+  if (args.skipOpen) {
+    throw new Error('--scenario public-search-form-post-action cannot be combined with --skip-open.');
+  }
+
+  const navigatePayload = callMcpTool(
+    cliPath,
+    'chrome_navigate',
+    { url: buildPublicSmokeUrl(smokeUrl, 'search_form_post_action', String(Date.now())) },
+    args.timeoutMs,
+  );
+  const openedTabId = extractNavigateTabId(navigatePayload);
+  if (Number.isInteger(openedTabId)) {
+    callMcpTool(cliPath, 'chrome_switch_tab', { tabId: openedTabId }, args.timeoutMs);
+  }
+
+  const beforeReadPagePayload = callMcpTool(
+    cliPath,
+    'chrome_read_page',
+    Number.isInteger(openedTabId) ? { tabId: openedTabId, depth: 1 } : { depth: 1 },
+    args.timeoutMs,
+  );
+  const beforeReadPage = buildRedactedReadPageAlignmentSummary(beforeReadPagePayload, openedTabId);
+  const selectedSearchFillOperation = selectSearchFillOperation(beforeReadPagePayload);
+  if (!selectedSearchFillOperation) {
+    throw new Error('No ready public search fill operation was exposed by read_page.');
+  }
+
+  const fillPayload = callMcpTool(
+    cliPath,
+    'chrome_fill_or_select',
+    {
+      tabId: openedTabId,
+      candidateAction: selectedSearchFillOperation.primaryAction.toolArgs.candidateAction,
+      value: 'tabrix observation spine',
+    },
+    args.timeoutMs,
+  );
+  const fillSummary = buildRedactedFillSummary(fillPayload);
+  const browserWorldAfterFill = buildRedactedBrowserWorldSummary(
+    callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs),
+    openedTabId,
+  );
+  const afterReadPagePayload = callMcpTool(
+    cliPath,
+    'chrome_read_page',
+    Number.isInteger(openedTabId) ? { tabId: openedTabId, depth: 1 } : { depth: 1 },
+    args.timeoutMs,
+  );
+  const afterReadPage = buildRedactedReadPageAlignmentSummary(afterReadPagePayload, openedTabId);
+  const closeResult =
+    Number.isInteger(openedTabId) && !args.keepOpen
+      ? closeRunTabs(cliPath, [openedTabId], args.timeoutMs)
+      : { attempted: false, succeeded: null, requestedCount: 0, closedCount: 0 };
+  const browserWorldAfterClose =
+    closeResult.attempted === true
+      ? buildRedactedBrowserWorldSummary(
+          callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs),
+          openedTabId,
+        )
+      : null;
+  const cleanupPassed =
+    closeResult.attempted === true
+      ? closeResult.succeeded === true &&
+        browserWorldAfterClose?.targetTab?.wasFound === false &&
+        browserWorldAfterClose?.compactSummaryBounded === true &&
+        browserWorldAfterClose?.retentionWithinLimit === true
+      : null;
+  const postActionSummaryProof = buildSearchFormPostActionSummaryProof({
+    beforeReadPage,
+    afterReadPage,
+    fillSummary,
+    cleanupPassed,
+    browserWorldAfterFill,
+    browserWorldAfterClose,
+  });
+
+  return {
+    scenario: 'public-search-form-post-action',
+    openedPublicTestTab: Number.isInteger(openedTabId),
+    closeAttempted: closeResult.attempted,
+    closeSucceeded: closeResult.succeeded,
+    cleanupPassed,
+    fillSummary,
+    beforeReadPage,
+    afterReadPage,
+    browserWorldAfterFill,
+    browserWorldAfterClose,
+    postActionSummaryProof,
+    allTargetsPassed: postActionSummaryProof.proofSatisfied === true,
+    claimBoundary:
+      'Redacted public no-login search/form post-action summary smoke only. It proves one selected public page exposed a search fill operation and follow-up read_page observed non-empty fillable value-state counts after fill, not search-result correctness, private login/logout, API/CDP reuse, release readiness, or product delivery grade.',
   };
 }
 
@@ -3721,7 +4006,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(
-      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|lifecycle-ownership-mix|page-opener-ownership|matrix|window-state|window-state-drift|read-page|read-page-matrix|read-page-background-target|public-search-entry-matrix] [--sample-count 3] [--sample-interval-ms 250] [--skip-open] [--keep-open]\n`,
+      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|lifecycle-ownership-mix|page-opener-ownership|matrix|window-state|window-state-drift|read-page|read-page-matrix|read-page-background-target|public-search-entry-matrix|public-search-form-post-action] [--sample-count 3] [--sample-interval-ms 250] [--skip-open] [--keep-open]\n`,
     );
     return;
   }
@@ -3745,15 +4030,17 @@ async function main() {
               ? runReadPageMatrixSmoke(cliPath, smokeUrls, args)
               : args.scenario === 'public-search-entry-matrix'
                 ? runPublicSearchEntryMatrixSmoke(cliPath, smokeUrls, args)
-                : args.scenario === 'read-page-background-target'
-                  ? runReadPageBackgroundTargetSmoke(cliPath, smokeUrl, args)
-                  : args.scenario === 'lifecycle-ownership-mix'
-                    ? runLifecycleOwnershipMixSmoke(cliPath, smokeUrl, args)
-                    : args.scenario === 'page-opener-ownership'
-                      ? runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args)
-                      : args.scenario === 'lifecycle'
-                        ? runLifecycleSmoke(cliPath, smokeUrl, args)
-                        : runSingleSmoke(cliPath, smokeUrl, args);
+                : args.scenario === 'public-search-form-post-action'
+                  ? runPublicSearchFormPostActionSmoke(cliPath, smokeUrl, args)
+                  : args.scenario === 'read-page-background-target'
+                    ? runReadPageBackgroundTargetSmoke(cliPath, smokeUrl, args)
+                    : args.scenario === 'lifecycle-ownership-mix'
+                      ? runLifecycleOwnershipMixSmoke(cliPath, smokeUrl, args)
+                      : args.scenario === 'page-opener-ownership'
+                        ? runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args)
+                        : args.scenario === 'lifecycle'
+                          ? runLifecycleSmoke(cliPath, smokeUrl, args)
+                          : runSingleSmoke(cliPath, smokeUrl, args);
 
     const smokePassed = isSmokeResultPassing(smokeResult);
     const output = {

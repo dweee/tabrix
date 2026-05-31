@@ -24,6 +24,7 @@ import {
   buildPageOpenerPostCloseCompactFactsProof,
   buildPageOpenerChildCloseActiveReturnProof,
   buildPublicSearchEntryMatrixProof,
+  buildSearchFormPostActionSummaryProof,
   buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
   buildWindowStateMutationProof,
@@ -2713,6 +2714,17 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     pageOperationMapPresent: true,
     operationZoneCount: 1,
     operationPurposes: ['read_content'],
+    searchOperationZoneCount: 0,
+    searchFillOperationZoneCount: 0,
+    readySearchOperationZoneCount: 0,
+    valueStateObjectCount: 0,
+    emptyValueStateObjectCount: 0,
+    nonEmptyValueStateObjectCount: 0,
+    unknownValueStateObjectCount: 0,
+    fillableValueStateObjectCount: 0,
+    emptyFillableValueStateObjectCount: 0,
+    nonEmptyFillableValueStateObjectCount: 0,
+    unknownFillableValueStateObjectCount: 0,
     operationClaimBoundaryPresent: true,
   });
   assert.equal(summary.compact.hasTabPageObjectSummary, true);
@@ -3022,6 +3034,120 @@ test('buildPublicSearchEntryMatrixProof fails when a target only exposes submit 
   assert.equal(proof.targets[0].searchPurposePresent, false);
   assert.equal(proof.targets[0].passed, false);
   assert.equal(proof.allTargetsPassed, false);
+  assert.equal(proof.proofSatisfied, false);
+});
+
+test('buildSearchFormPostActionSummaryProof proves post-fill non-empty value state', () => {
+  const proof = buildSearchFormPostActionSummaryProof({
+    beforeReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      pageRegionRuntime: {
+        operationPurposes: ['read_content', 'search'],
+        searchFillOperationZoneCount: 1,
+        fillableValueStateObjectCount: 1,
+        nonEmptyFillableValueStateObjectCount: 0,
+      },
+    },
+    afterReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      runtime: {
+        currentTabLastAiOperation: 'fill_or_select',
+      },
+      compact: {
+        safeTabFacts: {
+          lastAiOperation: 'fill_or_select',
+        },
+      },
+      pageRegionRuntime: {
+        operationPurposes: ['read_content', 'search'],
+        searchFillOperationZoneCount: 1,
+        fillableValueStateObjectCount: 1,
+        nonEmptyFillableValueStateObjectCount: 1,
+      },
+    },
+    fillSummary: {
+      success: true,
+      recommendedNextActionIsReadPage: true,
+      claimBoundaryPresent: true,
+    },
+    cleanupPassed: true,
+    browserWorldAfterFill: {
+      targetTab: { wasFound: true },
+      browserActiveObject: {
+        lastAiOperation: 'fill_or_select',
+      },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+    browserWorldAfterClose: {
+      targetTab: { wasFound: false },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+  });
+
+  assert.equal(proof.beforeSearchPurposePresent, true);
+  assert.equal(proof.afterSearchPurposePresent, true);
+  assert.equal(proof.fillDispatched, true);
+  assert.equal(proof.browserWorldObservedFillOperation, true);
+  assert.equal(proof.afterNonEmptyFillableObserved, true);
+  assert.equal(proof.proofSatisfied, true);
+  assert.doesNotThrow(() => assertRedactedSmokeOutputSafe(proof));
+});
+
+test('buildSearchFormPostActionSummaryProof fails without post-fill value-state transition', () => {
+  const proof = buildSearchFormPostActionSummaryProof({
+    beforeReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      pageRegionRuntime: {
+        operationPurposes: ['search'],
+        searchFillOperationZoneCount: 1,
+        fillableValueStateObjectCount: 1,
+        nonEmptyFillableValueStateObjectCount: 0,
+      },
+    },
+    afterReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      runtime: {
+        currentTabLastAiOperation: 'fill_or_select',
+      },
+      pageRegionRuntime: {
+        operationPurposes: ['search'],
+        searchFillOperationZoneCount: 1,
+        fillableValueStateObjectCount: 1,
+        nonEmptyFillableValueStateObjectCount: 0,
+      },
+    },
+    fillSummary: { success: true },
+    cleanupPassed: true,
+    browserWorldAfterFill: {
+      targetTab: { wasFound: true },
+      browserActiveObject: {
+        lastAiOperation: 'fill_or_select',
+      },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+    browserWorldAfterClose: {
+      targetTab: { wasFound: false },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+  });
+
+  assert.equal(proof.afterNonEmptyFillableObserved, false);
   assert.equal(proof.proofSatisfied, false);
 });
 
@@ -3456,6 +3582,13 @@ test('parseArgs supports public search entry matrix scenario', () => {
   assert.equal(
     parseArgs(['--scenario', 'public-search-entry-matrix']).scenario,
     'public-search-entry-matrix',
+  );
+});
+
+test('parseArgs supports public search form post-action scenario', () => {
+  assert.equal(
+    parseArgs(['--scenario', 'public-search-form-post-action']).scenario,
+    'public-search-form-post-action',
   );
 });
 
