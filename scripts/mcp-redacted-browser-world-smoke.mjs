@@ -1587,6 +1587,126 @@ export function buildPublicNoLoginLifecycleCoverageSummary(result) {
   };
 }
 
+export function buildWindowTabPageTransitionMatrixProof(matrixResult) {
+  const targets = Array.isArray(matrixResult?.targets) ? matrixResult.targets : [];
+  const windowState = matrixResult?.windowState;
+  const readPage = matrixResult?.readPage;
+  const targetProofs = targets.map((target) => {
+    const coverage = target?.publicLifecycleCoverage ?? {};
+    const covered = coverage.coveredInThisRun ?? {};
+    const lifecycleSteps = Array.isArray(target?.lifecycleMatrix) ? target.lifecycleMatrix : [];
+    const stepNames = new Set(
+      lifecycleSteps.map((step) => step?.step).filter((step) => typeof step === 'string'),
+    );
+    const requiredStepsPresent =
+      stepNames.has('foreground_open') &&
+      stepNames.has('background_open') &&
+      stepNames.has('switch_to_background_tab') &&
+      stepNames.has('new_window_open');
+    const allStepRoutingMatches =
+      lifecycleSteps.length >= 4 &&
+      lifecycleSteps.every(
+        (step) =>
+          step?.targetFound === true &&
+          step?.targetOpenedBy === 'ai' &&
+          step?.targetCanTabrixOperate === true &&
+          step?.targetActiveMatchesLifecycleStep === true &&
+          step?.relationToBrowserActiveMatchesLifecycleStep === true &&
+          step?.operationTargetRoleMatchesLifecycleStep === true &&
+          step?.latestAiOperationMatchesLifecycleStep === true &&
+          step?.currentTabAttributeGroupsPresent === true &&
+          step?.lastAiOperatedTabAttributeGroupsPresent === true &&
+          step?.retentionWithinLimit === true &&
+          step?.compactSummaryBounded === true,
+      );
+    const lifecycleEdgesObserved =
+      covered.tabCreated === true &&
+      covered.tabUpdated === true &&
+      covered.tabActivated === true &&
+      covered.tabRemoved === true &&
+      covered.foregroundTabOpen === true &&
+      covered.backgroundTabOpen === true &&
+      covered.switchToBackgroundTab === true &&
+      covered.newWindowTabOpen === true &&
+      covered.postCloseTargetCleanup === true;
+    const cleanupObserved =
+      target?.closeSucceeded === true &&
+      Array.isArray(target?.postCloseTargets) &&
+      target.postCloseTargets.length === target?.openedPublicTestTabs &&
+      target.postCloseTargets.every(
+        (closedTarget) =>
+          closedTarget?.targetNoLongerRetained === true &&
+          closedTarget?.closedTargetNotOperable === true,
+      );
+    const proofSatisfied =
+      target?.passed === true &&
+      target?.openedPublicTestTabs === 3 &&
+      requiredStepsPresent === true &&
+      allStepRoutingMatches === true &&
+      lifecycleEdgesObserved === true &&
+      cleanupObserved === true &&
+      target?.activeSwitchProof?.browserActiveChangedToTarget === true &&
+      target?.activeSwitchProof?.afterLatestAiOperatedIsTo === true &&
+      target?.activeSwitchProof?.afterLatestAiOperationIsSwitchTab === true &&
+      target?.postCleanup?.browserObjectEdgeSummaryPresent === true &&
+      target?.postCleanup?.currentTabAttributeGroups?.identity?.tabIdPresent === true;
+    return {
+      targetIndex: Number.isInteger(target?.targetIndex) ? target.targetIndex : null,
+      openedPublicTestTabs: target?.openedPublicTestTabs ?? null,
+      requiredStepsPresent,
+      allStepRoutingMatches,
+      lifecycleEdgesObserved,
+      cleanupObserved,
+      activeSwitchObserved: target?.activeSwitchProof?.browserActiveChangedToTarget === true,
+      postCleanupObjectFactsPresent:
+        target?.postCleanup?.browserObjectEdgeSummaryPresent === true &&
+        target?.postCleanup?.currentTabAttributeGroups?.identity?.tabIdPresent === true,
+      proofSatisfied,
+    };
+  });
+
+  const windowObserverProven =
+    windowState?.verdict === 'WINDOW_STATE_OBSERVED' &&
+    windowState?.redacted?.windowStateMatrix?.total > 0 &&
+    windowState?.redacted?.windowOperationState?.focusedWindowIdPresent === true &&
+    windowState?.redacted?.windowLifecycleState?.retainedWindowCount > 0 &&
+    windowState?.redacted?.windowLifecycleConclusionPresent === true &&
+    windowState?.redacted?.retentionWithinLimit === true &&
+    windowState?.redacted?.compactSummaryBounded === true;
+  const pageReadAlignmentProven =
+    readPage?.alignmentPassed === true &&
+    readPage?.redactedReadPage?.alignment?.ownershipRuntimePresent === true &&
+    readPage?.redactedReadPage?.alignment?.browserWorldRuntimeSource === true &&
+    readPage?.redactedReadPage?.alignment?.pageOperationMapPresent === true &&
+    readPage?.redactedReadPage?.alignment?.pageRegionsPresent === true &&
+    readPage?.redactedBrowserWorldAfterRead?.targetTab?.wasFound === true &&
+    readPage?.redactedBrowserWorldAfterClose?.targetTab?.wasFound === false;
+  const allTargetsProven =
+    targetProofs.length > 0 && targetProofs.every((target) => target.proofSatisfied === true);
+
+  return {
+    publicNoLoginOnly: true,
+    targetCount: targetProofs.length,
+    windowObserverProven,
+    pageReadAlignmentProven,
+    allTargetsProven,
+    targets: targetProofs,
+    notProvenInThisRun: [
+      'tab_replaced',
+      'tab_attached',
+      'tab_detached',
+      'window_minimize_restore',
+      'private_or_login_page_lifecycle',
+    ],
+    proofSatisfied:
+      windowObserverProven === true &&
+      pageReadAlignmentProven === true &&
+      allTargetsProven === true,
+    claimBoundary:
+      'Public Window/Tab/Page transition matrix proof is redacted boolean/count evidence only. It proves selected public no-login lifecycle runs observed foreground/background/switch/new-window/cleanup tab transitions, one window observer snapshot, and one read_page BrowserWorld/Page alignment path. It does not prove tab replace/attach/detach, window minimize/restore mutation, private/login flows, page understanding correctness, API/CDP reuse, competitor parity, release readiness, or product delivery grade.',
+  };
+}
+
 export function buildOwnershipMixProof(result) {
   const lifecycleMatrix = Array.isArray(result?.lifecycleMatrix) ? result.lifecycleMatrix : [];
   const openedPublicTestTabs = Number.isInteger(result?.openedPublicTestTabs)
@@ -2605,7 +2725,7 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
     };
   });
   const readPage = runReadPageSmoke(cliPath, smokeUrls[0], args);
-  return {
+  const result = {
     scenario: 'matrix',
     targetCount: targets.length,
     windowState,
@@ -2622,6 +2742,10 @@ function runMatrixSmoke(cliPath, smokeUrls, args) {
       readPage.redactedBrowserWorldAfterRead.objectChangeSummaryPresent === true &&
       targets.every((target) => target.passed),
     targets,
+  };
+  return {
+    ...result,
+    windowTabPageTransitionMatrixProof: buildWindowTabPageTransitionMatrixProof(result),
   };
 }
 
@@ -3842,6 +3966,23 @@ export function buildReadPageMatrixTargetResult(result, targetIndex) {
   };
 }
 
+function runPublicWindowTabPageTransitionMatrixSmoke(cliPath, smokeUrls, args) {
+  const matrix = runMatrixSmoke(cliPath, smokeUrls, args);
+  return {
+    scenario: 'public-window-tab-page-transition-matrix',
+    targetCount: matrix.targetCount,
+    windowTabPageTransitionMatrixProof: matrix.windowTabPageTransitionMatrixProof,
+    windowState: matrix.windowState,
+    readPage: matrix.readPage,
+    targets: matrix.targets,
+    allTargetsPassed:
+      matrix.allTargetsPassed === true &&
+      matrix.windowTabPageTransitionMatrixProof?.proofSatisfied === true,
+    claimBoundary:
+      'Redacted public no-login Window/Tab/Page transition matrix only. It proves selected public lifecycle targets observed foreground/background/switch/new-window/cleanup tab transitions, window observer state, and read_page BrowserWorld/Page alignment, not private/login flows, tab replace/attach/detach, window minimize/restore mutation, API/CDP reuse, release readiness, or product delivery grade.',
+  };
+}
+
 export function isSmokeResultPassing(result) {
   if (!result || typeof result !== 'object') return false;
   if (typeof result.allTargetsPassed === 'boolean') return result.allTargetsPassed;
@@ -4006,7 +4147,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(
-      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|lifecycle-ownership-mix|page-opener-ownership|matrix|window-state|window-state-drift|read-page|read-page-matrix|read-page-background-target|public-search-entry-matrix|public-search-form-post-action] [--sample-count 3] [--sample-interval-ms 250] [--skip-open] [--keep-open]\n`,
+      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|lifecycle-ownership-mix|page-opener-ownership|matrix|window-state|window-state-drift|read-page|read-page-matrix|read-page-background-target|public-search-entry-matrix|public-search-form-post-action|public-window-tab-page-transition-matrix] [--sample-count 3] [--sample-interval-ms 250] [--skip-open] [--keep-open]\n`,
     );
     return;
   }
@@ -4030,8 +4171,10 @@ async function main() {
               ? runReadPageMatrixSmoke(cliPath, smokeUrls, args)
               : args.scenario === 'public-search-entry-matrix'
                 ? runPublicSearchEntryMatrixSmoke(cliPath, smokeUrls, args)
-                : args.scenario === 'public-search-form-post-action'
-                  ? runPublicSearchFormPostActionSmoke(cliPath, smokeUrl, args)
+              : args.scenario === 'public-search-form-post-action'
+                ? runPublicSearchFormPostActionSmoke(cliPath, smokeUrl, args)
+                : args.scenario === 'public-window-tab-page-transition-matrix'
+                  ? runPublicWindowTabPageTransitionMatrixSmoke(cliPath, smokeUrls, args)
                   : args.scenario === 'read-page-background-target'
                     ? runReadPageBackgroundTargetSmoke(cliPath, smokeUrl, args)
                     : args.scenario === 'lifecycle-ownership-mix'

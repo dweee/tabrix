@@ -7,6 +7,7 @@ import {
   buildPublicSmokeUrl,
   buildPostCloseTargetCleanupSummary,
   buildPublicNoLoginLifecycleCoverageSummary,
+  buildWindowTabPageTransitionMatrixProof,
   buildRedactedBrowserWorldSummary,
   buildRedactedReadPageAlignmentSummary,
   buildActiveTabSwitchProof,
@@ -1546,6 +1547,144 @@ test('buildPublicNoLoginLifecycleCoverageSummary fails minimum coverage when clo
   assert.equal(coverage.coveredInThisRun.tabRemoved, false);
   assert.equal(coverage.coveredInThisRun.postCloseTargetCleanup, false);
   assert.equal(coverage.minimumPublicLifecycleCoveragePassed, false);
+});
+
+function redactedTransitionTarget(overrides = {}) {
+  const lifecycleMatrix = [
+    'foreground_open',
+    'background_open',
+    'switch_to_background_tab',
+    'new_window_open',
+  ].map((step) => ({
+    step,
+    targetFound: true,
+    targetOpenedBy: 'ai',
+    targetCanTabrixOperate: true,
+    targetActiveMatchesLifecycleStep: true,
+    relationToBrowserActiveMatchesLifecycleStep: true,
+    operationTargetRoleMatchesLifecycleStep: true,
+    latestAiOperationMatchesLifecycleStep: true,
+    currentTabAttributeGroupsPresent: true,
+    lastAiOperatedTabAttributeGroupsPresent: true,
+    retentionWithinLimit: true,
+    compactSummaryBounded: true,
+  }));
+  return {
+    targetIndex: 1,
+    openedPublicTestTabs: 3,
+    closeSucceeded: true,
+    passed: true,
+    activeSwitchProof: {
+      browserActiveChangedToTarget: true,
+      afterLatestAiOperatedIsTo: true,
+      afterLatestAiOperationIsSwitchTab: true,
+    },
+    publicLifecycleCoverage: {
+      coveredInThisRun: {
+        tabCreated: true,
+        tabUpdated: true,
+        tabActivated: true,
+        tabRemoved: true,
+        foregroundTabOpen: true,
+        backgroundTabOpen: true,
+        switchToBackgroundTab: true,
+        newWindowTabOpen: true,
+        postCloseTargetCleanup: true,
+      },
+    },
+    postCleanup: {
+      browserObjectEdgeSummaryPresent: true,
+      currentTabAttributeGroups: redactedCurrentTabAttributeGroups(),
+    },
+    postCloseTargets: [
+      { targetNoLongerRetained: true, closedTargetNotOperable: true },
+      { targetNoLongerRetained: true, closedTargetNotOperable: true },
+      { targetNoLongerRetained: true, closedTargetNotOperable: true },
+    ],
+    lifecycleMatrix,
+    ...overrides,
+  };
+}
+
+test('buildWindowTabPageTransitionMatrixProof proves selected public transition matrix', () => {
+  const proof = buildWindowTabPageTransitionMatrixProof({
+    windowState: {
+      verdict: 'WINDOW_STATE_OBSERVED',
+      redacted: {
+        windowStateMatrix: { total: 1 },
+        windowOperationState: { focusedWindowIdPresent: true },
+        windowLifecycleState: { retainedWindowCount: 1 },
+        windowLifecycleConclusionPresent: true,
+        retentionWithinLimit: true,
+        compactSummaryBounded: true,
+      },
+    },
+    readPage: {
+      alignmentPassed: true,
+      redactedReadPage: {
+        alignment: {
+          ownershipRuntimePresent: true,
+          browserWorldRuntimeSource: true,
+          pageOperationMapPresent: true,
+          pageRegionsPresent: true,
+        },
+      },
+      redactedBrowserWorldAfterRead: {
+        targetTab: { wasFound: true },
+      },
+      redactedBrowserWorldAfterClose: {
+        targetTab: { wasFound: false },
+      },
+    },
+    targets: [redactedTransitionTarget()],
+  });
+
+  assert.equal(proof.windowObserverProven, true);
+  assert.equal(proof.pageReadAlignmentProven, true);
+  assert.equal(proof.allTargetsProven, true);
+  assert.equal(proof.targets[0].requiredStepsPresent, true);
+  assert.equal(proof.targets[0].lifecycleEdgesObserved, true);
+  assert.equal(proof.targets[0].cleanupObserved, true);
+  assert.equal(proof.proofSatisfied, true);
+  assert.doesNotThrow(() => assertRedactedSmokeOutputSafe(proof));
+});
+
+test('buildWindowTabPageTransitionMatrixProof fails when page read alignment is missing', () => {
+  const proof = buildWindowTabPageTransitionMatrixProof({
+    windowState: {
+      verdict: 'WINDOW_STATE_OBSERVED',
+      redacted: {
+        windowStateMatrix: { total: 1 },
+        windowOperationState: { focusedWindowIdPresent: true },
+        windowLifecycleState: { retainedWindowCount: 1 },
+        windowLifecycleConclusionPresent: true,
+        retentionWithinLimit: true,
+        compactSummaryBounded: true,
+      },
+    },
+    readPage: {
+      alignmentPassed: false,
+      redactedReadPage: {
+        alignment: {
+          ownershipRuntimePresent: true,
+          browserWorldRuntimeSource: true,
+          pageOperationMapPresent: false,
+          pageRegionsPresent: true,
+        },
+      },
+      redactedBrowserWorldAfterRead: {
+        targetTab: { wasFound: true },
+      },
+      redactedBrowserWorldAfterClose: {
+        targetTab: { wasFound: false },
+      },
+    },
+    targets: [redactedTransitionTarget()],
+  });
+
+  assert.equal(proof.pageReadAlignmentProven, false);
+  assert.equal(proof.allTargetsProven, true);
+  assert.equal(proof.proofSatisfied, false);
 });
 
 test('buildOwnershipMixProof proves AI and non-AI tab ownership without raw ids', () => {
@@ -3589,6 +3728,13 @@ test('parseArgs supports public search form post-action scenario', () => {
   assert.equal(
     parseArgs(['--scenario', 'public-search-form-post-action']).scenario,
     'public-search-form-post-action',
+  );
+});
+
+test('parseArgs supports public window tab page transition matrix scenario', () => {
+  assert.equal(
+    parseArgs(['--scenario', 'public-window-tab-page-transition-matrix']).scenario,
+    'public-window-tab-page-transition-matrix',
   );
 });
 
