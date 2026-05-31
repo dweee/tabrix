@@ -27,6 +27,7 @@ import {
   buildPublicSearchEntryMatrixProof,
   buildSearchFormPostActionSummaryProof,
   buildMenuPostActionLifecycleProof,
+  buildContentPostActionLifecycleProof,
   buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
   buildWindowStateMutationProof,
@@ -105,6 +106,19 @@ test('assertRedactedSmokeOutputSafe rejects raw URL strings and raw fields', () 
       ok: true,
       target: { targetIndex: 1, regionTypes: ['navigation'], operationPurposes: ['navigate'] },
       privacyBoundary: 'No raw browser data is printed.',
+    }),
+  );
+  assert.doesNotThrow(() =>
+    assertRedactedSmokeOutputSafe({
+      ok: false,
+      toolError: {
+        toolFailed: true,
+        name: 'Error',
+        exitCode: 1,
+        signal: null,
+        message:
+          'MCP tool call failed; raw command, stdout, and stderr are intentionally redacted.',
+      },
     }),
   );
   assert.throws(() => assertRedactedSmokeOutputSafe({ target: { url: 'redacted' } }));
@@ -2799,6 +2813,28 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
             evidenceLevel: 'deterministic_fixture',
             claimBoundary: 'planning guidance only',
           },
+          {
+            zoneId: 'private-zone-nav',
+            regionId: 'private-region-content',
+            regionType: 'content',
+            purpose: 'navigate',
+            label: 'private navigation action',
+            state: 'navigation_candidate',
+            readiness: 'ready',
+            targetability: 'target_ref',
+            candidateActionIds: ['private-action-nav'],
+            primaryAction: {
+              actionType: 'click',
+              toolName: 'chrome_click_element',
+              toolArgs: {
+                candidateAction: {
+                  targetRef: 'private-ref',
+                },
+              },
+            },
+            evidenceLevel: 'deterministic_fixture',
+            claimBoundary: 'planning guidance only',
+          },
         ],
         claimBoundary: 'page operation map candidate only',
       },
@@ -2821,6 +2857,19 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
             confidence: 0.8,
             claimBoundary: 'private lifecycle boundary',
           },
+          {
+            objectKey: 'private-content-collection',
+            regionId: 'private-region-content',
+            regionType: 'content',
+            objectFamily: 'content_collection',
+            state: 'private content visible',
+            targetability: 'unknown',
+            actionTypes: ['read'],
+            candidateActionIds: ['private-action-content'],
+            evidenceRefs: ['private-evidence'],
+            confidence: 0.8,
+            claimBoundary: 'private lifecycle boundary',
+          },
         ],
         changes: [
           {
@@ -2829,6 +2878,15 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
             regionType: 'menu',
             beforeState: 'private hidden',
             afterState: 'private menu item visible',
+            changeKind: 'appeared',
+            claimBoundary: 'private lifecycle change',
+          },
+          {
+            objectKey: 'private-content-collection',
+            objectFamily: 'content_collection',
+            regionType: 'content',
+            beforeState: 'private content stale',
+            afterState: 'private content visible',
             changeKind: 'appeared',
             claimBoundary: 'private lifecycle change',
           },
@@ -2847,6 +2905,13 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
             evidenceRefs: ['private-evidence'],
             claimBoundary: 'private group boundary',
           },
+          content_state: {
+            status: 'private content changed',
+            summary: 'Private Dashboard content state text',
+            confidence: 0.8,
+            evidenceRefs: ['private-evidence'],
+            claimBoundary: 'private group boundary',
+          },
         },
         semanticEvents: [
           {
@@ -2859,13 +2924,23 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
             postconditionStatus: 'candidate_only',
             claimBoundary: 'private event boundary',
           },
+          {
+            eventType: 'content_changed',
+            summary: 'Private Dashboard content changed',
+            targetGroup: 'content_state',
+            targetObjectFamily: 'content_collection',
+            confidence: 0.8,
+            evidenceRefs: ['private-evidence'],
+            postconditionStatus: 'candidate_only',
+            claimBoundary: 'private event boundary',
+          },
         ],
         dynamicAttributeSummary: {
           status: 'semantic_transition_candidate',
           primaryConclusion: 'Private Dashboard transition',
           summary: 'Private Dashboard dynamic summary',
-          changedGroups: ['menu_state'],
-          transitionCount: 1,
+          changedGroups: ['menu_state', 'content_state'],
+          transitionCount: 2,
           confidence: 0.8,
           evidenceRefs: ['private-evidence'],
           claimBoundary: 'private dynamic boundary',
@@ -2926,14 +3001,17 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     regionObjectCount: 1,
     candidateActionRegionCount: 1,
     pageOperationMapPresent: true,
-    operationZoneCount: 1,
-    operationPurposes: ['read_content'],
+    operationZoneCount: 2,
+    operationPurposes: ['navigate', 'read_content'],
     searchOperationZoneCount: 0,
     searchFillOperationZoneCount: 0,
     readySearchOperationZoneCount: 0,
     menuOperationZoneCount: 0,
     menuClickOperationZoneCount: 0,
     readyMenuOperationZoneCount: 0,
+    navigateOperationZoneCount: 1,
+    navigateClickOperationZoneCount: 1,
+    readyNavigateOperationZoneCount: 1,
     valueStateObjectCount: 0,
     emptyValueStateObjectCount: 0,
     nonEmptyValueStateObjectCount: 0,
@@ -2949,26 +3027,32 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     objectLifecycleStatus: 'compared_snapshot',
     objectLifecycleObjectCount: 1,
     objectLifecycleChangedObjectCount: 1,
-    objectLifecycleChangeCount: 1,
+    objectLifecycleChangeCount: 2,
     menuLifecycleItemCount: 1,
     menuLifecycleChangeCount: 1,
     menuAppearedChangeCount: 1,
+    contentLifecycleItemCount: 1,
+    contentLifecycleChangeCount: 1,
+    contentAppearedChangeCount: 1,
     objectLifecycleClaimBoundaryPresent: true,
     browserPageObjectPresent: true,
     browserPageObjectStatus: 'compared_snapshot',
     browserPageObjectClaimBoundaryPresent: true,
-    semanticEventCount: 1,
+    semanticEventCount: 2,
     menuExpandedEventCount: 1,
+    contentChangedEventCount: 1,
     menuStateGroupPresent: true,
+    contentStateGroupPresent: true,
     dynamicAttributeSummaryPresent: true,
     dynamicAttributeStatus: 'semantic_transition_candidate',
-    dynamicTransitionCount: 1,
-    dynamicChangedGroupCount: 1,
+    dynamicTransitionCount: 2,
+    dynamicChangedGroupCount: 2,
     compactStatus: 'single_snapshot',
     compactWatchStatus: 'snapshot_only',
     compactTransitionCount: 0,
     compactChangedGroupCount: 1,
     compactMenuStateChanged: false,
+    compactContentStateChanged: false,
     compactClaimBoundaryPresent: true,
   });
   assert.equal(summary.compact.hasTabPageObjectSummary, true);
@@ -3523,6 +3607,182 @@ test('buildMenuPostActionLifecycleProof fails without post-click lifecycle trans
   assert.equal(proof.proofSatisfied, false);
 });
 
+test('buildContentPostActionLifecycleProof proves post-click content lifecycle transition', () => {
+  const proof = buildContentPostActionLifecycleProof({
+    beforeReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      pageRegionRuntime: {
+        operationPurposes: ['navigate', 'read_content'],
+        navigateOperationZoneCount: 1,
+        navigateClickOperationZoneCount: 1,
+        readyNavigateOperationZoneCount: 1,
+      },
+      pageObjectRuntime: {
+        objectLifecycleStatus: 'single_snapshot',
+        contentLifecycleItemCount: 1,
+      },
+    },
+    afterReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      pageRegionRuntime: {
+        operationPurposes: ['read_content'],
+      },
+      pageObjectRuntime: {
+        objectLifecycleStatus: 'compared_snapshot',
+        objectLifecycleChangedObjectCount: 2,
+        contentLifecycleItemCount: 3,
+        contentLifecycleChangeCount: 2,
+        contentChangedEventCount: 1,
+        browserPageObjectStatus: 'compared_snapshot',
+        dynamicAttributeSummaryPresent: true,
+        compactTransitionCount: 2,
+        compactContentStateChanged: true,
+      },
+    },
+    clickSummary: {
+      success: true,
+      recommendedNextActionIsReadPage: true,
+      claimBoundaryPresent: true,
+    },
+    cleanupPassed: true,
+    browserWorldAfterClick: {
+      targetTab: { wasFound: true },
+      aiOperationState: {
+        latestAiOperation: 'click_element',
+      },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+    browserWorldAfterClose: {
+      targetTab: { wasFound: false },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+  });
+
+  assert.equal(proof.beforeNavigatePurposePresent, true);
+  assert.equal(proof.clickDispatched, true);
+  assert.equal(proof.browserWorldObservedClickOperation, true);
+  assert.equal(proof.afterComparedSnapshot, true);
+  assert.equal(proof.contentLifecycleTransitionObserved, true);
+  assert.equal(proof.contentBearingLifecycleTransitionObserved, true);
+  assert.equal(proof.browserPageObjectTransitionObserved, true);
+  assert.equal(proof.proofSatisfied, true);
+  assert.doesNotThrow(() => assertRedactedSmokeOutputSafe(proof));
+});
+
+test('buildContentPostActionLifecycleProof accepts generic lifecycle change on content-bearing pages', () => {
+  const proof = buildContentPostActionLifecycleProof({
+    beforeReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      pageRegionRuntime: {
+        operationPurposes: ['navigate'],
+        navigateOperationZoneCount: 1,
+        navigateClickOperationZoneCount: 1,
+      },
+    },
+    afterReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      pageObjectRuntime: {
+        objectLifecycleStatus: 'compared_snapshot',
+        objectLifecycleChangedObjectCount: 3,
+        contentLifecycleItemCount: 2,
+        contentLifecycleChangeCount: 0,
+        contentChangedEventCount: 0,
+        browserPageObjectStatus: 'compared_snapshot',
+        dynamicAttributeSummaryPresent: false,
+        compactTransitionCount: 1,
+        compactContentStateChanged: false,
+      },
+    },
+    clickSummary: { success: true },
+    cleanupPassed: true,
+    browserWorldAfterClick: {
+      targetTab: { wasFound: true },
+      browserActiveObject: {
+        lastAiOperation: 'click_element',
+      },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+    browserWorldAfterClose: {
+      targetTab: { wasFound: false },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+  });
+
+  assert.equal(proof.contentLifecycleTransitionObserved, false);
+  assert.equal(proof.contentBearingLifecycleTransitionObserved, true);
+  assert.equal(proof.proofSatisfied, true);
+});
+
+test('buildContentPostActionLifecycleProof fails without post-click content-bearing lifecycle transition', () => {
+  const proof = buildContentPostActionLifecycleProof({
+    beforeReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      pageRegionRuntime: {
+        operationPurposes: ['navigate'],
+        navigateOperationZoneCount: 1,
+        navigateClickOperationZoneCount: 1,
+      },
+    },
+    afterReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      pageObjectRuntime: {
+        objectLifecycleStatus: 'compared_snapshot',
+        objectLifecycleChangedObjectCount: 0,
+        contentLifecycleItemCount: 2,
+        contentLifecycleChangeCount: 0,
+        contentChangedEventCount: 0,
+        browserPageObjectStatus: 'compared_snapshot',
+        dynamicAttributeSummaryPresent: true,
+        compactTransitionCount: 0,
+        compactContentStateChanged: false,
+      },
+    },
+    clickSummary: { success: true },
+    cleanupPassed: true,
+    browserWorldAfterClick: {
+      targetTab: { wasFound: true },
+      browserActiveObject: {
+        lastAiOperation: 'click_element',
+      },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+    browserWorldAfterClose: {
+      targetTab: { wasFound: false },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+  });
+
+  assert.equal(proof.clickDispatched, true);
+  assert.equal(proof.contentLifecycleTransitionObserved, false);
+  assert.equal(proof.contentBearingLifecycleTransitionObserved, false);
+  assert.equal(proof.browserPageObjectTransitionObserved, true);
+  assert.equal(proof.proofSatisfied, false);
+});
+
 test('buildReadPageMatrixTargetResult fails when read_page operation target evidence is incomplete', () => {
   const target = buildReadPageMatrixTargetResult(
     {
@@ -3968,6 +4228,13 @@ test('parseArgs supports public menu post-action lifecycle scenario', () => {
   assert.equal(
     parseArgs(['--scenario', 'public-menu-post-action-lifecycle']).scenario,
     'public-menu-post-action-lifecycle',
+  );
+});
+
+test('parseArgs supports public content post-action lifecycle scenario', () => {
+  assert.equal(
+    parseArgs(['--scenario', 'public-content-post-action-lifecycle']).scenario,
+    'public-content-post-action-lifecycle',
   );
 });
 
