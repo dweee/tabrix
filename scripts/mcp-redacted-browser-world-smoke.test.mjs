@@ -26,6 +26,7 @@ import {
   buildPageOpenerChildCloseActiveReturnProof,
   buildPublicSearchEntryMatrixProof,
   buildSearchFormPostActionSummaryProof,
+  buildMenuPostActionLifecycleProof,
   buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
   buildWindowStateMutationProof,
@@ -2295,8 +2296,7 @@ test('buildPageOpenerPostCloseActionReadinessProof proves parent is ready after 
             operationTargetOperabilityReason: 'private operability text',
             shouldReselectBeforeAction: false,
             nextRequiredCheck: 'page_level_content_or_postcondition_check',
-            operationTargetSummary:
-              'Private summary for https://private.example.test/parent.',
+            operationTargetSummary: 'Private summary for https://private.example.test/parent.',
             operationTargetClaimBoundary: 'Private target boundary.',
             actionReadiness: 'ready_for_page_level_check',
             canProceedToPageLevelCheck: true,
@@ -2802,6 +2802,81 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
         ],
         claimBoundary: 'page operation map candidate only',
       },
+      objectLifecycle: {
+        source: 'read_page_regions',
+        status: 'compared_snapshot',
+        objectCount: 1,
+        changedObjectCount: 1,
+        items: [
+          {
+            objectKey: 'private-menu-item',
+            regionId: 'private-region-content',
+            regionType: 'menu',
+            objectFamily: 'menu_item',
+            state: 'private menu item visible',
+            targetability: 'target_ref',
+            actionTypes: ['click'],
+            candidateActionIds: ['private-action-menu'],
+            evidenceRefs: ['private-evidence'],
+            confidence: 0.8,
+            claimBoundary: 'private lifecycle boundary',
+          },
+        ],
+        changes: [
+          {
+            objectKey: 'private-menu-item',
+            objectFamily: 'menu_item',
+            regionType: 'menu',
+            beforeState: 'private hidden',
+            afterState: 'private menu item visible',
+            changeKind: 'appeared',
+            claimBoundary: 'private lifecycle change',
+          },
+        ],
+        claimBoundary: 'private lifecycle summary',
+      },
+      browserPageObject: {
+        source: 'read_page_browser_page_object',
+        rootObjectId: 'private-root',
+        status: 'compared_snapshot',
+        attributeGroups: {
+          menu_state: {
+            status: 'private menu expanded',
+            summary: 'Private Dashboard menu state text',
+            confidence: 0.8,
+            evidenceRefs: ['private-evidence'],
+            claimBoundary: 'private group boundary',
+          },
+        },
+        semanticEvents: [
+          {
+            eventType: 'menu_expanded',
+            summary: 'Private Dashboard menu expanded',
+            targetGroup: 'menu_state',
+            targetObjectFamily: 'menu_surface',
+            confidence: 0.8,
+            evidenceRefs: ['private-evidence'],
+            postconditionStatus: 'candidate_only',
+            claimBoundary: 'private event boundary',
+          },
+        ],
+        dynamicAttributeSummary: {
+          status: 'semantic_transition_candidate',
+          primaryConclusion: 'Private Dashboard transition',
+          summary: 'Private Dashboard dynamic summary',
+          changedGroups: ['menu_state'],
+          transitionCount: 1,
+          confidence: 0.8,
+          evidenceRefs: ['private-evidence'],
+          claimBoundary: 'private dynamic boundary',
+        },
+        rawLifecycleStats: {
+          status: 'compared_snapshot',
+          objectCount: 1,
+          changedObjectCount: 1,
+        },
+        claimBoundary: 'private page object boundary',
+      },
       pageContent: 'confidential visible page text',
       markdown: 'Private Dashboard markdown',
     },
@@ -2856,6 +2931,9 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     searchOperationZoneCount: 0,
     searchFillOperationZoneCount: 0,
     readySearchOperationZoneCount: 0,
+    menuOperationZoneCount: 0,
+    menuClickOperationZoneCount: 0,
+    readyMenuOperationZoneCount: 0,
     valueStateObjectCount: 0,
     emptyValueStateObjectCount: 0,
     nonEmptyValueStateObjectCount: 0,
@@ -2865,6 +2943,33 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     nonEmptyFillableValueStateObjectCount: 0,
     unknownFillableValueStateObjectCount: 0,
     operationClaimBoundaryPresent: true,
+  });
+  assert.deepEqual(summary.pageObjectRuntime, {
+    objectLifecyclePresent: true,
+    objectLifecycleStatus: 'compared_snapshot',
+    objectLifecycleObjectCount: 1,
+    objectLifecycleChangedObjectCount: 1,
+    objectLifecycleChangeCount: 1,
+    menuLifecycleItemCount: 1,
+    menuLifecycleChangeCount: 1,
+    menuAppearedChangeCount: 1,
+    objectLifecycleClaimBoundaryPresent: true,
+    browserPageObjectPresent: true,
+    browserPageObjectStatus: 'compared_snapshot',
+    browserPageObjectClaimBoundaryPresent: true,
+    semanticEventCount: 1,
+    menuExpandedEventCount: 1,
+    menuStateGroupPresent: true,
+    dynamicAttributeSummaryPresent: true,
+    dynamicAttributeStatus: 'semantic_transition_candidate',
+    dynamicTransitionCount: 1,
+    dynamicChangedGroupCount: 1,
+    compactStatus: 'single_snapshot',
+    compactWatchStatus: 'snapshot_only',
+    compactTransitionCount: 0,
+    compactChangedGroupCount: 1,
+    compactMenuStateChanged: false,
+    compactClaimBoundaryPresent: true,
   });
   assert.equal(summary.compact.hasTabPageObjectSummary, true);
   assert.deepEqual(summary.compact.safeTabFacts, {
@@ -3287,6 +3392,134 @@ test('buildSearchFormPostActionSummaryProof fails without post-fill value-state 
   });
 
   assert.equal(proof.afterNonEmptyFillableObserved, false);
+  assert.equal(proof.proofSatisfied, false);
+});
+
+test('buildMenuPostActionLifecycleProof proves post-click menu lifecycle transition', () => {
+  const proof = buildMenuPostActionLifecycleProof({
+    beforeReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      pageRegionRuntime: {
+        operationPurposes: ['open_menu', 'read_content'],
+        menuOperationZoneCount: 1,
+        menuClickOperationZoneCount: 1,
+      },
+      pageObjectRuntime: {
+        objectLifecycleStatus: 'single_snapshot',
+        menuLifecycleItemCount: 1,
+      },
+    },
+    afterReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      pageRegionRuntime: {
+        operationPurposes: ['open_menu', 'read_content'],
+        menuOperationZoneCount: 1,
+        menuClickOperationZoneCount: 1,
+      },
+      pageObjectRuntime: {
+        objectLifecycleStatus: 'compared_snapshot',
+        objectLifecycleChangedObjectCount: 2,
+        menuLifecycleItemCount: 3,
+        menuLifecycleChangeCount: 2,
+        menuExpandedEventCount: 1,
+        browserPageObjectStatus: 'compared_snapshot',
+        dynamicAttributeSummaryPresent: true,
+        compactTransitionCount: 2,
+        compactMenuStateChanged: true,
+      },
+    },
+    clickSummary: {
+      success: true,
+      recommendedNextActionIsReadPage: true,
+      claimBoundaryPresent: true,
+    },
+    cleanupPassed: true,
+    browserWorldAfterClick: {
+      targetTab: { wasFound: true },
+      browserActiveObject: {
+        lastAiOperation: 'click_element',
+      },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+    browserWorldAfterClose: {
+      targetTab: { wasFound: false },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+  });
+
+  assert.equal(proof.beforeMenuPurposePresent, true);
+  assert.equal(proof.afterMenuPurposePresent, true);
+  assert.equal(proof.clickDispatched, true);
+  assert.equal(proof.browserWorldObservedClickOperation, true);
+  assert.equal(proof.afterComparedSnapshot, true);
+  assert.equal(proof.menuLifecycleTransitionObserved, true);
+  assert.equal(proof.browserPageObjectTransitionObserved, true);
+  assert.equal(proof.proofSatisfied, true);
+  assert.doesNotThrow(() => assertRedactedSmokeOutputSafe(proof));
+});
+
+test('buildMenuPostActionLifecycleProof fails without post-click lifecycle transition', () => {
+  const proof = buildMenuPostActionLifecycleProof({
+    beforeReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      pageRegionRuntime: {
+        operationPurposes: ['open_menu'],
+        menuOperationZoneCount: 1,
+        menuClickOperationZoneCount: 1,
+      },
+    },
+    afterReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      pageRegionRuntime: {
+        operationPurposes: ['open_menu'],
+        menuOperationZoneCount: 1,
+        menuClickOperationZoneCount: 1,
+      },
+      pageObjectRuntime: {
+        objectLifecycleStatus: 'compared_snapshot',
+        objectLifecycleChangedObjectCount: 0,
+        menuLifecycleChangeCount: 0,
+        menuExpandedEventCount: 0,
+        browserPageObjectStatus: 'compared_snapshot',
+        dynamicAttributeSummaryPresent: true,
+        compactTransitionCount: 0,
+        compactMenuStateChanged: false,
+      },
+    },
+    clickSummary: { success: true },
+    cleanupPassed: true,
+    browserWorldAfterClick: {
+      targetTab: { wasFound: true },
+      latestAiOperatedObject: {
+        lastAiOperation: 'click_element',
+      },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+    browserWorldAfterClose: {
+      targetTab: { wasFound: false },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+  });
+
+  assert.equal(proof.clickDispatched, true);
+  assert.equal(proof.menuLifecycleTransitionObserved, false);
+  assert.equal(proof.browserPageObjectTransitionObserved, true);
   assert.equal(proof.proofSatisfied, false);
 });
 
@@ -3728,6 +3961,13 @@ test('parseArgs supports public search form post-action scenario', () => {
   assert.equal(
     parseArgs(['--scenario', 'public-search-form-post-action']).scenario,
     'public-search-form-post-action',
+  );
+});
+
+test('parseArgs supports public menu post-action lifecycle scenario', () => {
+  assert.equal(
+    parseArgs(['--scenario', 'public-menu-post-action-lifecycle']).scenario,
+    'public-menu-post-action-lifecycle',
   );
 });
 

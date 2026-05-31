@@ -1002,6 +1002,23 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
   const ownershipRuntime = payload?.ownershipRuntime;
   const compact = payload?.browserPageObjectCompact;
   const fullObject = payload?.browserPageObject;
+  const objectLifecycle = payload?.objectLifecycle;
+  const objectLifecycleItems = Array.isArray(objectLifecycle?.items) ? objectLifecycle.items : [];
+  const objectLifecycleChanges = Array.isArray(objectLifecycle?.changes)
+    ? objectLifecycle.changes
+    : [];
+  const menuLifecycleItems = objectLifecycleItems.filter(
+    (item) => item?.objectFamily === 'menu_surface' || item?.objectFamily === 'menu_item',
+  );
+  const menuLifecycleChanges = objectLifecycleChanges.filter(
+    (change) => change?.objectFamily === 'menu_surface' || change?.objectFamily === 'menu_item',
+  );
+  const menuChangedLifecycleChanges = menuLifecycleChanges.filter(
+    (change) => change?.changeKind !== 'unchanged',
+  );
+  const semanticEvents = Array.isArray(fullObject?.semanticEvents) ? fullObject.semanticEvents : [];
+  const dynamicAttributeSummary = fullObject?.dynamicAttributeSummary;
+  const compactChangedGroups = Array.isArray(compact?.changedGroups) ? compact.changedGroups : [];
   const compactFacts = compact?.facts && typeof compact.facts === 'object' ? compact.facts : {};
   const compactWindowFacts =
     compactFacts.window && typeof compactFacts.window === 'object' ? compactFacts.window : {};
@@ -1049,6 +1066,13 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
     (zone) => zone?.primaryAction?.actionType === 'fill',
   ).length;
   const readySearchOperationZoneCount = searchOperationZones.filter(
+    (zone) => zone?.readiness === 'ready',
+  ).length;
+  const menuOperationZones = operationZones.filter((zone) => zone?.purpose === 'open_menu');
+  const menuClickOperationZoneCount = menuOperationZones.filter(
+    (zone) => zone?.primaryAction?.actionType === 'click',
+  ).length;
+  const readyMenuOperationZoneCount = menuOperationZones.filter(
     (zone) => zone?.readiness === 'ready',
   ).length;
 
@@ -1188,8 +1212,62 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       searchOperationZoneCount: searchOperationZones.length,
       searchFillOperationZoneCount,
       readySearchOperationZoneCount,
+      menuOperationZoneCount: menuOperationZones.length,
+      menuClickOperationZoneCount,
+      readyMenuOperationZoneCount,
       ...valueStateSummary,
       operationClaimBoundaryPresent: typeof operationMap?.claimBoundary === 'string',
+    },
+    pageObjectRuntime: {
+      objectLifecyclePresent: Boolean(objectLifecycle),
+      objectLifecycleStatus:
+        objectLifecycle?.status === 'single_snapshot' ||
+        objectLifecycle?.status === 'compared_snapshot'
+          ? objectLifecycle.status
+          : null,
+      objectLifecycleObjectCount: Number.isInteger(objectLifecycle?.objectCount)
+        ? objectLifecycle.objectCount
+        : objectLifecycleItems.length,
+      objectLifecycleChangedObjectCount: Number.isInteger(objectLifecycle?.changedObjectCount)
+        ? objectLifecycle.changedObjectCount
+        : null,
+      objectLifecycleChangeCount: objectLifecycleChanges.length,
+      menuLifecycleItemCount: menuLifecycleItems.length,
+      menuLifecycleChangeCount: menuChangedLifecycleChanges.length,
+      menuAppearedChangeCount: menuChangedLifecycleChanges.filter(
+        (change) => change?.changeKind === 'appeared',
+      ).length,
+      objectLifecycleClaimBoundaryPresent: typeof objectLifecycle?.claimBoundary === 'string',
+      browserPageObjectPresent: Boolean(fullObject),
+      browserPageObjectStatus:
+        fullObject?.status === 'single_snapshot' || fullObject?.status === 'compared_snapshot'
+          ? fullObject.status
+          : null,
+      browserPageObjectClaimBoundaryPresent: typeof fullObject?.claimBoundary === 'string',
+      semanticEventCount: semanticEvents.length,
+      menuExpandedEventCount: semanticEvents.filter((event) => event?.eventType === 'menu_expanded')
+        .length,
+      menuStateGroupPresent: Boolean(fullObject?.attributeGroups?.menu_state),
+      dynamicAttributeSummaryPresent: Boolean(dynamicAttributeSummary),
+      dynamicAttributeStatus:
+        typeof dynamicAttributeSummary?.status === 'string' ? dynamicAttributeSummary.status : null,
+      dynamicTransitionCount: Number.isInteger(dynamicAttributeSummary?.transitionCount)
+        ? dynamicAttributeSummary.transitionCount
+        : null,
+      dynamicChangedGroupCount: Array.isArray(dynamicAttributeSummary?.changedGroups)
+        ? dynamicAttributeSummary.changedGroups.length
+        : null,
+      compactStatus:
+        compact?.status === 'single_snapshot' || compact?.status === 'compared_snapshot'
+          ? compact.status
+          : null,
+      compactWatchStatus: typeof compact?.watchStatus === 'string' ? compact.watchStatus : null,
+      compactTransitionCount: Number.isInteger(compact?.transitionCount)
+        ? compact.transitionCount
+        : null,
+      compactChangedGroupCount: compactChangedGroups.length,
+      compactMenuStateChanged: compactChangedGroups.includes('menu_state'),
+      compactClaimBoundaryPresent: typeof compact?.claimBoundary === 'string',
     },
     alignment: {
       ownershipRuntimePresent: Boolean(ownershipRuntime),
@@ -1721,17 +1799,14 @@ export function buildOwnershipMixProof(result) {
     (max, step) =>
       Math.max(
         max,
-        Number.isInteger(step?.counts?.userOrPageOpenedTabs)
-          ? step.counts.userOrPageOpenedTabs
-          : 0,
+        Number.isInteger(step?.counts?.userOrPageOpenedTabs) ? step.counts.userOrPageOpenedTabs : 0,
       ),
     0,
   );
   const targetSteps = lifecycleMatrix.filter((step) => step?.targetTab?.wasFound === true);
   const aiTargetsMarked =
     targetSteps.length > 0 && targetSteps.every((step) => step.targetTab?.openedBy === 'ai');
-  const aiOpenedTabsObserved =
-    openedPublicTestTabs > 0 && maxAiOpenedTabs >= openedPublicTestTabs;
+  const aiOpenedTabsObserved = openedPublicTestTabs > 0 && maxAiOpenedTabs >= openedPublicTestTabs;
   const userOrPageOpenedTabsObserved = maxUserOrPageOpenedTabs > 0;
   return {
     publicNoLoginOnly: true,
@@ -1854,8 +1929,7 @@ export function buildPageOpenerReadAlignmentProof({
     ownershipRuntime.currentTabOpenedBy === 'user_or_page' &&
     ownershipRuntime.currentTabOpenedBySource === 'page_opener';
   const compactTabIsPageOpener =
-    compactTabFacts.openedBy === 'user_or_page' &&
-    compactTabFacts.openedBySource === 'page_opener';
+    compactTabFacts.openedBy === 'user_or_page' && compactTabFacts.openedBySource === 'page_opener';
   const readRuntimeSourceIsBrowserWorld =
     ownershipRuntime.currentTabRuntimeStateSource === 'browser_world_inventory';
   const childOperable =
@@ -2213,9 +2287,7 @@ export function buildPageOpenerPostCloseActionReadinessProof({
       ? compactReadTargetTabId === parentTabId
       : null;
   const browserActiveReturnedToParent =
-    parentKnown && Number.isInteger(browserActiveTabId)
-      ? browserActiveTabId === parentTabId
-      : null;
+    parentKnown && Number.isInteger(browserActiveTabId) ? browserActiveTabId === parentTabId : null;
   const browserWorldParentObserved = Boolean(parentTab);
   const browserWorldChildNoLongerObserved = childKnown ? !childTab : null;
   const readRuntimeSourceIsBrowserWorld =
@@ -2592,9 +2664,7 @@ function runLifecycleSmoke(cliPath, smokeUrl, args) {
   const backgroundTabId = extractNavigateTabId(backgroundPayload);
   openedTabIds.push(backgroundTabId);
   const beforeSwitchPayload = callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs);
-  lifecycleMatrix.push(
-    buildStepSummary('background_open', beforeSwitchPayload, backgroundTabId),
-  );
+  lifecycleMatrix.push(buildStepSummary('background_open', beforeSwitchPayload, backgroundTabId));
 
   if (Number.isInteger(backgroundTabId)) {
     callMcpTool(cliPath, 'chrome_switch_tab', { tabId: backgroundTabId }, args.timeoutMs);
@@ -3192,9 +3262,11 @@ export function buildSearchFormPostActionSummaryProof({
     ? afterRuntime.nonEmptyFillableValueStateObjectCount
     : 0;
   const beforeSearchPurposePresent =
-    Array.isArray(beforeRuntime.operationPurposes) && beforeRuntime.operationPurposes.includes('search');
+    Array.isArray(beforeRuntime.operationPurposes) &&
+    beforeRuntime.operationPurposes.includes('search');
   const afterSearchPurposePresent =
-    Array.isArray(afterRuntime.operationPurposes) && afterRuntime.operationPurposes.includes('search');
+    Array.isArray(afterRuntime.operationPurposes) &&
+    afterRuntime.operationPurposes.includes('search');
   const browserWorldObservedFillOperation =
     browserWorldAfterFill?.browserActiveObject?.lastAiOperation === 'fill_or_select' ||
     browserWorldAfterFill?.latestAiOperatedObject?.lastAiOperation === 'fill_or_select' ||
@@ -3244,6 +3316,96 @@ export function buildSearchFormPostActionSummaryProof({
   };
 }
 
+export function buildMenuPostActionLifecycleProof({
+  beforeReadPage,
+  afterReadPage,
+  clickSummary,
+  cleanupPassed,
+  browserWorldAfterClick,
+  browserWorldAfterClose,
+} = {}) {
+  const beforeRegionRuntime = beforeReadPage?.pageRegionRuntime ?? {};
+  const afterRegionRuntime = afterReadPage?.pageRegionRuntime ?? {};
+  const beforePageObjectRuntime = beforeReadPage?.pageObjectRuntime ?? {};
+  const afterPageObjectRuntime = afterReadPage?.pageObjectRuntime ?? {};
+  const beforeMenuPurposePresent =
+    Array.isArray(beforeRegionRuntime.operationPurposes) &&
+    beforeRegionRuntime.operationPurposes.includes('open_menu');
+  const afterMenuPurposePresent =
+    Array.isArray(afterRegionRuntime.operationPurposes) &&
+    afterRegionRuntime.operationPurposes.includes('open_menu');
+  const clickDispatched = clickSummary?.success === true;
+  const browserWorldObservedClickOperation =
+    browserWorldAfterClick?.browserActiveObject?.lastAiOperation === 'click_element' ||
+    browserWorldAfterClick?.latestAiOperatedObject?.lastAiOperation === 'click_element' ||
+    browserWorldAfterClick?.aiOperationState?.latestAiOperation === 'click_element';
+  const afterComparedSnapshot =
+    afterPageObjectRuntime.objectLifecycleStatus === 'compared_snapshot';
+  const menuLifecycleTransitionObserved =
+    (afterPageObjectRuntime.menuLifecycleChangeCount ?? 0) > 0 ||
+    (afterPageObjectRuntime.menuExpandedEventCount ?? 0) > 0 ||
+    afterPageObjectRuntime.compactMenuStateChanged === true;
+  const browserPageObjectTransitionObserved =
+    (afterPageObjectRuntime.browserPageObjectStatus === 'compared_snapshot' &&
+      (afterPageObjectRuntime.dynamicAttributeSummaryPresent === true ||
+        afterPageObjectRuntime.compactTransitionCount > 0 ||
+        afterPageObjectRuntime.compactMenuStateChanged === true)) ||
+    (afterComparedSnapshot === true &&
+      afterPageObjectRuntime.compactWatchStatus === 'semantic_transition_candidate' &&
+      afterPageObjectRuntime.compactTransitionCount > 0);
+
+  const proofSatisfied =
+    beforeReadPage?.alignment?.ownershipRuntimePresent === true &&
+    afterReadPage?.alignment?.ownershipRuntimePresent === true &&
+    beforeReadPage?.alignment?.pageOperationMapPresent === true &&
+    afterReadPage?.alignment?.pageOperationMapPresent === true &&
+    beforeMenuPurposePresent === true &&
+    afterMenuPurposePresent === true &&
+    beforeRegionRuntime.menuClickOperationZoneCount > 0 &&
+    afterRegionRuntime.menuOperationZoneCount > 0 &&
+    clickDispatched === true &&
+    browserWorldObservedClickOperation === true &&
+    afterComparedSnapshot === true &&
+    menuLifecycleTransitionObserved === true &&
+    browserPageObjectTransitionObserved === true &&
+    cleanupPassed === true &&
+    browserWorldAfterClick?.targetTab?.wasFound === true &&
+    browserWorldAfterClose?.targetTab?.wasFound === false &&
+    browserWorldAfterClick?.compactSummaryBounded === true &&
+    browserWorldAfterClick?.retentionWithinLimit === true &&
+    browserWorldAfterClose?.compactSummaryBounded === true &&
+    browserWorldAfterClose?.retentionWithinLimit === true;
+
+  return {
+    publicNoLoginOnly: true,
+    beforeMenuPurposePresent,
+    afterMenuPurposePresent,
+    beforeMenuOperationZoneCount: beforeRegionRuntime.menuOperationZoneCount ?? null,
+    beforeMenuClickOperationZoneCount: beforeRegionRuntime.menuClickOperationZoneCount ?? null,
+    afterMenuOperationZoneCount: afterRegionRuntime.menuOperationZoneCount ?? null,
+    afterMenuClickOperationZoneCount: afterRegionRuntime.menuClickOperationZoneCount ?? null,
+    beforeMenuLifecycleItemCount: beforePageObjectRuntime.menuLifecycleItemCount ?? null,
+    afterMenuLifecycleItemCount: afterPageObjectRuntime.menuLifecycleItemCount ?? null,
+    afterObjectLifecycleStatus: afterPageObjectRuntime.objectLifecycleStatus ?? null,
+    afterObjectLifecycleChangedObjectCount:
+      afterPageObjectRuntime.objectLifecycleChangedObjectCount ?? null,
+    afterMenuLifecycleChangeCount: afterPageObjectRuntime.menuLifecycleChangeCount ?? null,
+    afterMenuExpandedEventCount: afterPageObjectRuntime.menuExpandedEventCount ?? null,
+    afterCompactMenuStateChanged: afterPageObjectRuntime.compactMenuStateChanged === true,
+    clickDispatched,
+    browserWorldObservedClickOperation,
+    afterComparedSnapshot,
+    menuLifecycleTransitionObserved,
+    browserPageObjectTransitionObserved,
+    cleanupPassed: cleanupPassed === true,
+    browserWorldTargetObservedAfterClick: browserWorldAfterClick?.targetTab?.wasFound === true,
+    browserWorldAfterCloseClean: browserWorldAfterClose?.targetTab?.wasFound === false,
+    proofSatisfied,
+    claimBoundary:
+      'Public menu post-action lifecycle proof is redacted boolean/count evidence only. It proves one selected public no-login menu click was dispatched and a follow-up read_page observed menu object lifecycle/PageObject transition evidence with BrowserWorld cleanup. It does not expose URLs, titles, labels, page content, account state, screenshots, cookies, network bodies, private flows, API/CDP reuse, competitor parity, release readiness, or product delivery grade.',
+  };
+}
+
 function runPublicSearchEntryMatrixSmoke(cliPath, smokeUrls, args) {
   const matrix = runReadPageMatrixSmoke(cliPath, smokeUrls, args);
   const publicSearchEntryMatrixProof = buildPublicSearchEntryMatrixProof(matrix.targets);
@@ -3283,6 +3445,30 @@ function selectSearchFillOperation(readPagePayload) {
   );
 }
 
+function selectMenuClickOperation(readPagePayload) {
+  const operationZones = Array.isArray(readPagePayload?.pageOperationMap?.zones)
+    ? readPagePayload.pageOperationMap.zones
+    : [];
+  return (
+    operationZones.find(
+      (zone) =>
+        zone?.purpose === 'open_menu' &&
+        zone?.readiness === 'ready' &&
+        zone?.primaryAction?.actionType === 'click' &&
+        zone?.primaryAction?.toolName === 'chrome_click_element' &&
+        zone?.primaryAction?.toolArgs?.candidateAction,
+    ) ??
+    operationZones.find(
+      (zone) =>
+        zone?.purpose === 'open_menu' &&
+        zone?.primaryAction?.actionType === 'click' &&
+        zone?.primaryAction?.toolName === 'chrome_click_element' &&
+        zone?.primaryAction?.toolArgs?.candidateAction,
+    ) ??
+    null
+  );
+}
+
 function buildRedactedFillSummary(fillPayload) {
   return {
     success: fillPayload?.success === true,
@@ -3295,9 +3481,24 @@ function buildRedactedFillSummary(fillPayload) {
   };
 }
 
+function buildRedactedClickSummary(clickPayload) {
+  return {
+    success: clickPayload?.success === true,
+    clicked: clickPayload?.clicked === true,
+    postconditionVerdict:
+      typeof clickPayload?.postconditionVerdict === 'string'
+        ? clickPayload.postconditionVerdict
+        : null,
+    recommendedNextActionIsReadPage: clickPayload?.recommendedNextAction === 'chrome_read_page',
+    claimBoundaryPresent: typeof clickPayload?.claimBoundary === 'string',
+  };
+}
+
 function runPublicSearchFormPostActionSmoke(cliPath, smokeUrl, args) {
   if (args.skipOpen) {
-    throw new Error('--scenario public-search-form-post-action cannot be combined with --skip-open.');
+    throw new Error(
+      '--scenario public-search-form-post-action cannot be combined with --skip-open.',
+    );
   }
 
   const navigatePayload = callMcpTool(
@@ -3390,6 +3591,103 @@ function runPublicSearchFormPostActionSmoke(cliPath, smokeUrl, args) {
   };
 }
 
+function runPublicMenuPostActionLifecycleSmoke(cliPath, smokeUrl, args) {
+  if (args.skipOpen) {
+    throw new Error(
+      '--scenario public-menu-post-action-lifecycle cannot be combined with --skip-open.',
+    );
+  }
+
+  const navigatePayload = callMcpTool(
+    cliPath,
+    'chrome_navigate',
+    { url: buildPublicSmokeUrl(smokeUrl, 'menu_post_action_lifecycle', String(Date.now())) },
+    args.timeoutMs,
+  );
+  const openedTabId = extractNavigateTabId(navigatePayload);
+  if (Number.isInteger(openedTabId)) {
+    callMcpTool(cliPath, 'chrome_switch_tab', { tabId: openedTabId }, args.timeoutMs);
+  }
+
+  const beforeReadPagePayload = callMcpTool(
+    cliPath,
+    'chrome_read_page',
+    Number.isInteger(openedTabId) ? { tabId: openedTabId, depth: 1 } : { depth: 1 },
+    args.timeoutMs,
+  );
+  const beforeReadPage = buildRedactedReadPageAlignmentSummary(beforeReadPagePayload, openedTabId);
+  const selectedMenuClickOperation = selectMenuClickOperation(beforeReadPagePayload);
+  if (!selectedMenuClickOperation) {
+    throw new Error('No ready public menu click operation was exposed by read_page.');
+  }
+
+  const clickPayload = callMcpTool(
+    cliPath,
+    'chrome_click_element',
+    {
+      tabId: openedTabId,
+      candidateAction: selectedMenuClickOperation.primaryAction.toolArgs.candidateAction,
+    },
+    args.timeoutMs,
+  );
+  const clickSummary = buildRedactedClickSummary(clickPayload);
+  sleepMs(250);
+  const browserWorldAfterClick = buildRedactedBrowserWorldSummary(
+    callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs),
+    openedTabId,
+  );
+  const afterReadPagePayload = callMcpTool(
+    cliPath,
+    'chrome_read_page',
+    Number.isInteger(openedTabId) ? { tabId: openedTabId, depth: 1 } : { depth: 1 },
+    args.timeoutMs,
+  );
+  const afterReadPage = buildRedactedReadPageAlignmentSummary(afterReadPagePayload, openedTabId);
+  const closeResult =
+    Number.isInteger(openedTabId) && !args.keepOpen
+      ? closeRunTabs(cliPath, [openedTabId], args.timeoutMs)
+      : { attempted: false, succeeded: null, requestedCount: 0, closedCount: 0 };
+  const browserWorldAfterClose =
+    closeResult.attempted === true
+      ? buildRedactedBrowserWorldSummary(
+          callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs),
+          openedTabId,
+        )
+      : null;
+  const cleanupPassed =
+    closeResult.attempted === true
+      ? closeResult.succeeded === true &&
+        browserWorldAfterClose?.targetTab?.wasFound === false &&
+        browserWorldAfterClose?.compactSummaryBounded === true &&
+        browserWorldAfterClose?.retentionWithinLimit === true
+      : null;
+  const menuPostActionLifecycleProof = buildMenuPostActionLifecycleProof({
+    beforeReadPage,
+    afterReadPage,
+    clickSummary,
+    cleanupPassed,
+    browserWorldAfterClick,
+    browserWorldAfterClose,
+  });
+
+  return {
+    scenario: 'public-menu-post-action-lifecycle',
+    openedPublicTestTab: Number.isInteger(openedTabId),
+    closeAttempted: closeResult.attempted,
+    closeSucceeded: closeResult.succeeded,
+    cleanupPassed,
+    clickSummary,
+    beforeReadPage,
+    afterReadPage,
+    browserWorldAfterClick,
+    browserWorldAfterClose,
+    menuPostActionLifecycleProof,
+    allTargetsPassed: menuPostActionLifecycleProof.proofSatisfied === true,
+    claimBoundary:
+      'Redacted public no-login menu post-action lifecycle smoke only. It proves one selected public page exposed an open_menu operation and follow-up read_page observed menu object lifecycle/PageObject transition evidence after click, not private login/logout, API/CDP reuse, release readiness, or product delivery grade.',
+  };
+}
+
 function hasReadPageMatrixAlignmentEvidence({
   redactedReadPage,
   redactedBrowserWorldAfterRead,
@@ -3444,8 +3742,9 @@ export function buildBackgroundReadTargetFocusProof(
     browserWorldPayload?.compactSummary?.aiOperationState ??
     browserWorldPayload?.summary?.aiOperationState ??
     {};
-  const browserActiveTabId =
-    Number.isInteger(browserWorld?.browserActiveTabId) ? browserWorld.browserActiveTabId : null;
+  const browserActiveTabId = Number.isInteger(browserWorld?.browserActiveTabId)
+    ? browserWorld.browserActiveTabId
+    : null;
   const latestAiOperatedTabId = Number.isInteger(aiOperationState?.latestAiOperatedTabId)
     ? aiOperationState.latestAiOperatedTabId
     : null;
@@ -3650,12 +3949,7 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
     );
   }
   const openerUrl = buildPublicSmokeUrl(smokeUrl, 'page_opener_parent', runId);
-  const parentPayload = callMcpTool(
-    cliPath,
-    'chrome_navigate',
-    { url: openerUrl },
-    args.timeoutMs,
-  );
+  const parentPayload = callMcpTool(cliPath, 'chrome_navigate', { url: openerUrl }, args.timeoutMs);
   const parentTabId = extractNavigateTabId(parentPayload);
   const clickPayload = Number.isInteger(parentTabId)
     ? callMcpTool(
@@ -4147,7 +4441,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(
-      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|lifecycle-ownership-mix|page-opener-ownership|matrix|window-state|window-state-drift|read-page|read-page-matrix|read-page-background-target|public-search-entry-matrix|public-search-form-post-action|public-window-tab-page-transition-matrix] [--sample-count 3] [--sample-interval-ms 250] [--skip-open] [--keep-open]\n`,
+      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|lifecycle-ownership-mix|page-opener-ownership|matrix|window-state|window-state-drift|read-page|read-page-matrix|read-page-background-target|public-search-entry-matrix|public-search-form-post-action|public-menu-post-action-lifecycle|public-window-tab-page-transition-matrix] [--sample-count 3] [--sample-interval-ms 250] [--skip-open] [--keep-open]\n`,
     );
     return;
   }
@@ -4167,23 +4461,25 @@ async function main() {
             ? runWindowStateDriftSmoke(cliPath, args)
             : args.scenario === 'read-page'
               ? runReadPageSmoke(cliPath, smokeUrl, args)
-            : args.scenario === 'read-page-matrix'
-              ? runReadPageMatrixSmoke(cliPath, smokeUrls, args)
-              : args.scenario === 'public-search-entry-matrix'
-                ? runPublicSearchEntryMatrixSmoke(cliPath, smokeUrls, args)
-              : args.scenario === 'public-search-form-post-action'
-                ? runPublicSearchFormPostActionSmoke(cliPath, smokeUrl, args)
-                : args.scenario === 'public-window-tab-page-transition-matrix'
-                  ? runPublicWindowTabPageTransitionMatrixSmoke(cliPath, smokeUrls, args)
-                  : args.scenario === 'read-page-background-target'
-                    ? runReadPageBackgroundTargetSmoke(cliPath, smokeUrl, args)
-                    : args.scenario === 'lifecycle-ownership-mix'
-                      ? runLifecycleOwnershipMixSmoke(cliPath, smokeUrl, args)
-                      : args.scenario === 'page-opener-ownership'
-                        ? runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args)
-                        : args.scenario === 'lifecycle'
-                          ? runLifecycleSmoke(cliPath, smokeUrl, args)
-                          : runSingleSmoke(cliPath, smokeUrl, args);
+              : args.scenario === 'read-page-matrix'
+                ? runReadPageMatrixSmoke(cliPath, smokeUrls, args)
+                : args.scenario === 'public-search-entry-matrix'
+                  ? runPublicSearchEntryMatrixSmoke(cliPath, smokeUrls, args)
+                  : args.scenario === 'public-search-form-post-action'
+                    ? runPublicSearchFormPostActionSmoke(cliPath, smokeUrl, args)
+                    : args.scenario === 'public-menu-post-action-lifecycle'
+                      ? runPublicMenuPostActionLifecycleSmoke(cliPath, smokeUrl, args)
+                      : args.scenario === 'public-window-tab-page-transition-matrix'
+                        ? runPublicWindowTabPageTransitionMatrixSmoke(cliPath, smokeUrls, args)
+                        : args.scenario === 'read-page-background-target'
+                          ? runReadPageBackgroundTargetSmoke(cliPath, smokeUrl, args)
+                          : args.scenario === 'lifecycle-ownership-mix'
+                            ? runLifecycleOwnershipMixSmoke(cliPath, smokeUrl, args)
+                            : args.scenario === 'page-opener-ownership'
+                              ? runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args)
+                              : args.scenario === 'lifecycle'
+                                ? runLifecycleSmoke(cliPath, smokeUrl, args)
+                                : runSingleSmoke(cliPath, smokeUrl, args);
 
     const smokePassed = isSmokeResultPassing(smokeResult);
     const output = {
