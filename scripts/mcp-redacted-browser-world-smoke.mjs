@@ -1971,6 +1971,107 @@ export function buildPageOpenerPostCloseAiOperationProof({
   };
 }
 
+export function buildPageOpenerPostCloseActionReadinessProof({
+  readPagePayload,
+  browserWorldPayload,
+  parentTabId,
+  childTabId,
+}) {
+  const browserWorld = browserWorldPayload?.browserWorld ?? browserWorldPayload ?? {};
+  const tabs = extractBrowserWorldTabs(browserWorldPayload);
+  const parentTab = Number.isInteger(parentTabId)
+    ? tabs.find((tab) => tab?.tabId === parentTabId)
+    : null;
+  const childTab = Number.isInteger(childTabId)
+    ? tabs.find((tab) => tab?.tabId === childTabId)
+    : null;
+  const ownershipRuntime = readPagePayload?.ownershipRuntime ?? {};
+  const compactFacts =
+    readPagePayload?.browserPageObjectCompact?.facts &&
+    typeof readPagePayload.browserPageObjectCompact.facts === 'object'
+      ? readPagePayload.browserPageObjectCompact.facts
+      : {};
+  const compactTabFacts =
+    compactFacts.tab && typeof compactFacts.tab === 'object' ? compactFacts.tab : {};
+  const compactReadTargetTabId = Number.isInteger(compactTabFacts.readTargetTabId)
+    ? compactTabFacts.readTargetTabId
+    : Number.isInteger(compactTabFacts.currentTabId)
+      ? compactTabFacts.currentTabId
+      : null;
+  const browserActiveTabId = Number.isInteger(browserWorld.browserActiveTabId)
+    ? browserWorld.browserActiveTabId
+    : null;
+  const parentKnown = Number.isInteger(parentTabId);
+  const childKnown = Number.isInteger(childTabId);
+  const readTargetMatchesParent =
+    parentKnown && Number.isInteger(ownershipRuntime.currentTabId)
+      ? ownershipRuntime.currentTabId === parentTabId
+      : null;
+  const compactReadTargetMatchesParent =
+    parentKnown && Number.isInteger(compactReadTargetTabId)
+      ? compactReadTargetTabId === parentTabId
+      : null;
+  const browserActiveReturnedToParent =
+    parentKnown && Number.isInteger(browserActiveTabId)
+      ? browserActiveTabId === parentTabId
+      : null;
+  const browserWorldParentObserved = Boolean(parentTab);
+  const browserWorldChildNoLongerObserved = childKnown ? !childTab : null;
+  const readRuntimeSourceIsBrowserWorld =
+    ownershipRuntime.currentTabRuntimeStateSource === 'browser_world_inventory';
+  const runtimeReadTargetIsBrowserActive = ownershipRuntime.isReadTargetBrowserActiveTab === true;
+  const operationTargetBriefComplete =
+    compactTabFacts.operationTargetRole === 'read_target_browser_active_tab' &&
+    typeof compactTabFacts.operationTargetBasis === 'string' &&
+    compactTabFacts.operationTargetCanTabrixOperate === true &&
+    typeof compactTabFacts.operationTargetOperabilityReason === 'string' &&
+    compactTabFacts.shouldReselectBeforeAction === false &&
+    typeof compactTabFacts.nextRequiredCheck === 'string' &&
+    typeof compactTabFacts.operationTargetSummary === 'string' &&
+    typeof compactTabFacts.operationTargetClaimBoundary === 'string';
+  const actionReadinessBriefComplete =
+    compactTabFacts.actionReadiness === 'ready_for_page_level_check' &&
+    compactTabFacts.canProceedToPageLevelCheck === true &&
+    typeof compactTabFacts.requiredBeforeAction === 'string' &&
+    compactTabFacts.requiredBeforeAction === compactTabFacts.nextRequiredCheck &&
+    typeof compactTabFacts.actionReadinessSummary === 'string' &&
+    typeof compactTabFacts.actionReadinessClaimBoundary === 'string';
+  const parentReadyForPageLevelCheck =
+    operationTargetBriefComplete === true &&
+    actionReadinessBriefComplete === true &&
+    runtimeReadTargetIsBrowserActive === true &&
+    browserActiveReturnedToParent === true;
+
+  return {
+    publicNoLoginOnly: true,
+    parentTabOpened: parentKnown,
+    childTabOpened: childKnown,
+    readTargetMatchesParent,
+    compactReadTargetMatchesParent,
+    browserActiveReturnedToParent,
+    browserWorldParentObserved,
+    browserWorldChildNoLongerObserved,
+    readRuntimeSourceIsBrowserWorld,
+    runtimeReadTargetIsBrowserActive,
+    operationTargetBriefComplete,
+    actionReadinessBriefComplete,
+    parentReadyForPageLevelCheck,
+    proofSatisfied:
+      parentKnown === true &&
+      childKnown === true &&
+      readTargetMatchesParent === true &&
+      compactReadTargetMatchesParent === true &&
+      browserActiveReturnedToParent === true &&
+      browserWorldParentObserved === true &&
+      browserWorldChildNoLongerObserved === true &&
+      readRuntimeSourceIsBrowserWorld === true &&
+      runtimeReadTargetIsBrowserActive === true &&
+      parentReadyForPageLevelCheck === true,
+    claimBoundary:
+      'Page-opener post-close action-readiness proof is redacted boolean evidence only; it proves the parent read_page snapshot still points at the browser-active surviving parent and is ready for page-level checks after the page-opened child closes in one public no-login run. It does not expose tab ids, URLs, titles, page content, account state, task success, API/CDP reuse, or release readiness.',
+  };
+}
+
 export function buildPageOpenerChildCloseActiveReturnProof({
   browserWorldPayload,
   parentTabId,
@@ -3015,6 +3116,15 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
           childTabId,
         })
       : null;
+  const postCloseActionReadinessProof =
+    parentReadPagePayload !== null && browserWorldPayloadAfterParentRead !== null
+      ? buildPageOpenerPostCloseActionReadinessProof({
+          readPagePayload: parentReadPagePayload,
+          browserWorldPayload: browserWorldPayloadAfterParentRead,
+          parentTabId,
+          childTabId,
+        })
+      : null;
   const remainingCloseTargets = uniqueNumbers([
     parentTabId,
     childCloseResult.succeeded === true ? null : childTabId,
@@ -3075,6 +3185,7 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
     parentRereadAfterChildCloseProof,
     postCloseRoutingSummaryProof,
     postCloseAiOperationProof,
+    postCloseActionReadinessProof,
     cleanupTargetsPassed,
     allTargetsPassed:
       proof.proofSatisfied === true &&
@@ -3084,6 +3195,7 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
       parentRereadAfterChildCloseProof?.proofSatisfied === true &&
       postCloseRoutingSummaryProof?.proofSatisfied === true &&
       postCloseAiOperationProof?.proofSatisfied === true &&
+      postCloseActionReadinessProof?.proofSatisfied === true &&
       closeResult.succeeded === true &&
       cleanupTargetsPassed === true,
     claimBoundary:

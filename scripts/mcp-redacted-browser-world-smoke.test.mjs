@@ -19,6 +19,7 @@ import {
   buildPageOpenerParentRereadAfterChildCloseProof,
   buildPageOpenerPostCloseRoutingSummaryProof,
   buildPageOpenerPostCloseAiOperationProof,
+  buildPageOpenerPostCloseActionReadinessProof,
   buildPageOpenerChildCloseActiveReturnProof,
   buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
@@ -2111,6 +2112,130 @@ test('buildPageOpenerPostCloseAiOperationProof fails when parent reread attribut
   assert.equal(proof.compactLastAiOperationConfidencePresent, false);
   assert.equal(proof.compactLastAiOperationReasonPresent, false);
   assert.equal(proof.aiOperationAttributionComplete, false);
+  assert.equal(proof.proofSatisfied, false);
+});
+
+test('buildPageOpenerPostCloseActionReadinessProof proves parent is ready after child closes', () => {
+  const proof = buildPageOpenerPostCloseActionReadinessProof({
+    parentTabId: 100,
+    childTabId: 101,
+    browserWorldPayload: {
+      browserWorld: {
+        browserActiveTabId: 100,
+        tabs: [
+          {
+            tabId: 100,
+            url: 'https://private.example.test/parent',
+            title: 'Private Parent',
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+            active: true,
+            canTabrixOperate: true,
+          },
+        ],
+      },
+    },
+    readPagePayload: {
+      ownershipRuntime: {
+        currentTabId: 100,
+        currentTabCanTabrixOperate: true,
+        currentTabRuntimeStateSource: 'browser_world_inventory',
+        isReadTargetBrowserActiveTab: true,
+      },
+      browserPageObjectCompact: {
+        facts: {
+          tab: {
+            readTargetTabId: 100,
+            operationTargetRole: 'read_target_browser_active_tab',
+            operationTargetBasis: 'private basis text',
+            operationTargetCanTabrixOperate: true,
+            operationTargetOperabilityReason: 'private operability text',
+            shouldReselectBeforeAction: false,
+            nextRequiredCheck: 'page_level_content_or_postcondition_check',
+            operationTargetSummary:
+              'Private summary for https://private.example.test/parent.',
+            operationTargetClaimBoundary: 'Private target boundary.',
+            actionReadiness: 'ready_for_page_level_check',
+            canProceedToPageLevelCheck: true,
+            requiredBeforeAction: 'page_level_content_or_postcondition_check',
+            actionReadinessSummary:
+              'Private readiness summary for https://private.example.test/parent.',
+            actionReadinessClaimBoundary: 'Private readiness boundary.',
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(proof.readTargetMatchesParent, true);
+  assert.equal(proof.compactReadTargetMatchesParent, true);
+  assert.equal(proof.browserActiveReturnedToParent, true);
+  assert.equal(proof.browserWorldParentObserved, true);
+  assert.equal(proof.browserWorldChildNoLongerObserved, true);
+  assert.equal(proof.readRuntimeSourceIsBrowserWorld, true);
+  assert.equal(proof.runtimeReadTargetIsBrowserActive, true);
+  assert.equal(proof.operationTargetBriefComplete, true);
+  assert.equal(proof.actionReadinessBriefComplete, true);
+  assert.equal(proof.parentReadyForPageLevelCheck, true);
+  assert.equal(proof.proofSatisfied, true);
+  assert.doesNotThrow(() => assertRedactedSmokeOutputSafe(proof));
+  assert.equal(JSON.stringify(proof).includes('private.example.test'), false);
+});
+
+test('buildPageOpenerPostCloseActionReadinessProof fails when target needs reselect', () => {
+  const proof = buildPageOpenerPostCloseActionReadinessProof({
+    parentTabId: 100,
+    childTabId: 101,
+    browserWorldPayload: {
+      browserWorld: {
+        browserActiveTabId: 100,
+        tabs: [
+          {
+            tabId: 100,
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+            active: true,
+            canTabrixOperate: true,
+          },
+        ],
+      },
+    },
+    readPagePayload: {
+      ownershipRuntime: {
+        currentTabId: 100,
+        currentTabCanTabrixOperate: true,
+        currentTabRuntimeStateSource: 'browser_world_inventory',
+        isReadTargetBrowserActiveTab: true,
+      },
+      browserPageObjectCompact: {
+        facts: {
+          tab: {
+            readTargetTabId: 100,
+            operationTargetRole: 'read_target_background_tab',
+            operationTargetBasis: 'private basis text',
+            operationTargetCanTabrixOperate: true,
+            operationTargetOperabilityReason: 'private operability text',
+            shouldReselectBeforeAction: true,
+            nextRequiredCheck: 'reselect_or_reread_read_target_before_action',
+            operationTargetSummary: 'Private target summary.',
+            operationTargetClaimBoundary: 'Private target boundary.',
+            actionReadiness: 'reselect_or_reread_required',
+            canProceedToPageLevelCheck: false,
+            requiredBeforeAction: 'reselect_or_reread_read_target_before_action',
+            actionReadinessSummary: 'Private readiness summary.',
+            actionReadinessClaimBoundary: 'Private readiness boundary.',
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(proof.readTargetMatchesParent, true);
+  assert.equal(proof.compactReadTargetMatchesParent, true);
+  assert.equal(proof.browserActiveReturnedToParent, true);
+  assert.equal(proof.operationTargetBriefComplete, false);
+  assert.equal(proof.actionReadinessBriefComplete, false);
+  assert.equal(proof.parentReadyForPageLevelCheck, false);
   assert.equal(proof.proofSatisfied, false);
 });
 
