@@ -28,6 +28,7 @@ import {
   buildSearchFormPostActionSummaryProof,
   buildMenuPostActionLifecycleProof,
   buildContentPostActionLifecycleProof,
+  buildFeedbackPostActionLifecycleProof,
   buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
   buildWindowStateMutationProof,
@@ -2870,6 +2871,19 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
             confidence: 0.8,
             claimBoundary: 'private lifecycle boundary',
           },
+          {
+            objectKey: 'private-feedback-surface',
+            regionId: 'private-region-content',
+            regionType: 'feedback',
+            objectFamily: 'feedback_surface',
+            state: 'private feedback visible',
+            targetability: 'unknown',
+            actionTypes: ['read'],
+            candidateActionIds: [],
+            evidenceRefs: ['private-evidence'],
+            confidence: 0.8,
+            claimBoundary: 'private lifecycle boundary',
+          },
         ],
         changes: [
           {
@@ -2887,6 +2901,15 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
             regionType: 'content',
             beforeState: 'private content stale',
             afterState: 'private content visible',
+            changeKind: 'appeared',
+            claimBoundary: 'private lifecycle change',
+          },
+          {
+            objectKey: 'private-feedback-surface',
+            objectFamily: 'feedback_surface',
+            regionType: 'feedback',
+            beforeState: 'private feedback stale',
+            afterState: 'private feedback visible',
             changeKind: 'appeared',
             claimBoundary: 'private lifecycle change',
           },
@@ -3012,6 +3035,8 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     navigateOperationZoneCount: 1,
     navigateClickOperationZoneCount: 1,
     readyNavigateOperationZoneCount: 1,
+    feedbackOperationZoneCount: 0,
+    readyFeedbackOperationZoneCount: 0,
     valueStateObjectCount: 0,
     emptyValueStateObjectCount: 0,
     nonEmptyValueStateObjectCount: 0,
@@ -3027,13 +3052,16 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     objectLifecycleStatus: 'compared_snapshot',
     objectLifecycleObjectCount: 1,
     objectLifecycleChangedObjectCount: 1,
-    objectLifecycleChangeCount: 2,
+    objectLifecycleChangeCount: 3,
     menuLifecycleItemCount: 1,
     menuLifecycleChangeCount: 1,
     menuAppearedChangeCount: 1,
     contentLifecycleItemCount: 1,
     contentLifecycleChangeCount: 1,
     contentAppearedChangeCount: 1,
+    feedbackLifecycleItemCount: 1,
+    feedbackLifecycleChangeCount: 1,
+    feedbackAppearedChangeCount: 1,
     objectLifecycleClaimBoundaryPresent: true,
     browserPageObjectPresent: true,
     browserPageObjectStatus: 'compared_snapshot',
@@ -3783,6 +3811,178 @@ test('buildContentPostActionLifecycleProof fails without post-click content-bear
   assert.equal(proof.proofSatisfied, false);
 });
 
+test('buildFeedbackPostActionLifecycleProof proves post-click feedback lifecycle transition', () => {
+  const proof = buildFeedbackPostActionLifecycleProof({
+    beforeReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      pageRegionRuntime: {
+        operationPurposes: ['navigate', 'observe_feedback'],
+        feedbackOperationZoneCount: 1,
+        readyFeedbackOperationZoneCount: 1,
+      },
+    },
+    afterReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      pageRegionRuntime: {
+        operationPurposes: ['observe_feedback'],
+        feedbackOperationZoneCount: 1,
+        readyFeedbackOperationZoneCount: 1,
+      },
+      pageObjectRuntime: {
+        objectLifecycleStatus: 'compared_snapshot',
+        objectLifecycleChangedObjectCount: 2,
+        feedbackLifecycleItemCount: 2,
+        feedbackLifecycleChangeCount: 1,
+        browserPageObjectStatus: 'compared_snapshot',
+        dynamicAttributeSummaryPresent: true,
+        compactTransitionCount: 1,
+      },
+    },
+    clickSummary: {
+      success: true,
+      recommendedNextActionIsReadPage: true,
+      claimBoundaryPresent: true,
+    },
+    cleanupPassed: true,
+    browserWorldAfterClick: {
+      targetTab: { wasFound: true },
+      browserActiveObject: {
+        lastAiOperation: 'click_element',
+      },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+    browserWorldAfterClose: {
+      targetTab: { wasFound: false },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+  });
+
+  assert.equal(proof.beforeFeedbackPurposePresent, true);
+  assert.equal(proof.afterFeedbackPurposePresent, true);
+  assert.equal(proof.clickDispatched, true);
+  assert.equal(proof.browserWorldObservedClickOperation, true);
+  assert.equal(proof.afterComparedSnapshot, true);
+  assert.equal(proof.feedbackLifecycleTransitionObserved, true);
+  assert.equal(proof.feedbackBearingLifecycleTransitionObserved, true);
+  assert.equal(proof.browserPageObjectTransitionObserved, true);
+  assert.equal(proof.proofSatisfied, true);
+  assert.doesNotThrow(() => assertRedactedSmokeOutputSafe(proof));
+});
+
+test('buildFeedbackPostActionLifecycleProof accepts generic lifecycle change on feedback-bearing pages', () => {
+  const proof = buildFeedbackPostActionLifecycleProof({
+    beforeReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      pageRegionRuntime: {
+        operationPurposes: ['observe_feedback'],
+        feedbackOperationZoneCount: 1,
+      },
+    },
+    afterReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      pageRegionRuntime: {
+        operationPurposes: ['observe_feedback'],
+        feedbackOperationZoneCount: 1,
+      },
+      pageObjectRuntime: {
+        objectLifecycleStatus: 'compared_snapshot',
+        objectLifecycleChangedObjectCount: 4,
+        feedbackLifecycleItemCount: 1,
+        feedbackLifecycleChangeCount: 0,
+        browserPageObjectStatus: 'compared_snapshot',
+        dynamicAttributeSummaryPresent: false,
+        compactWatchStatus: 'semantic_transition_candidate',
+        compactTransitionCount: 1,
+      },
+    },
+    clickSummary: { success: true },
+    cleanupPassed: true,
+    browserWorldAfterClick: {
+      targetTab: { wasFound: true },
+      aiOperationState: {
+        latestAiOperation: 'click_element',
+      },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+    browserWorldAfterClose: {
+      targetTab: { wasFound: false },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+  });
+
+  assert.equal(proof.feedbackLifecycleTransitionObserved, false);
+  assert.equal(proof.feedbackBearingLifecycleTransitionObserved, true);
+  assert.equal(proof.proofSatisfied, true);
+});
+
+test('buildFeedbackPostActionLifecycleProof fails without feedback purpose after action', () => {
+  const proof = buildFeedbackPostActionLifecycleProof({
+    beforeReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      pageRegionRuntime: {
+        operationPurposes: ['observe_feedback'],
+        feedbackOperationZoneCount: 1,
+      },
+    },
+    afterReadPage: {
+      alignment: {
+        ownershipRuntimePresent: true,
+        pageOperationMapPresent: true,
+      },
+      pageRegionRuntime: {
+        operationPurposes: ['read_content'],
+        feedbackOperationZoneCount: 0,
+      },
+      pageObjectRuntime: {
+        objectLifecycleStatus: 'compared_snapshot',
+        objectLifecycleChangedObjectCount: 4,
+        feedbackLifecycleItemCount: 1,
+        feedbackLifecycleChangeCount: 1,
+        browserPageObjectStatus: 'compared_snapshot',
+        compactTransitionCount: 1,
+      },
+    },
+    clickSummary: { success: true },
+    cleanupPassed: true,
+    browserWorldAfterClick: {
+      targetTab: { wasFound: true },
+      browserActiveObject: {
+        lastAiOperation: 'click_element',
+      },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+    browserWorldAfterClose: {
+      targetTab: { wasFound: false },
+      compactSummaryBounded: true,
+      retentionWithinLimit: true,
+    },
+  });
+
+  assert.equal(proof.afterFeedbackPurposePresent, false);
+  assert.equal(proof.feedbackBearingLifecycleTransitionObserved, true);
+  assert.equal(proof.proofSatisfied, false);
+});
+
 test('buildReadPageMatrixTargetResult fails when read_page operation target evidence is incomplete', () => {
   const target = buildReadPageMatrixTargetResult(
     {
@@ -4235,6 +4435,13 @@ test('parseArgs supports public content post-action lifecycle scenario', () => {
   assert.equal(
     parseArgs(['--scenario', 'public-content-post-action-lifecycle']).scenario,
     'public-content-post-action-lifecycle',
+  );
+});
+
+test('parseArgs supports public feedback post-action lifecycle scenario', () => {
+  assert.equal(
+    parseArgs(['--scenario', 'public-feedback-post-action-lifecycle']).scenario,
+    'public-feedback-post-action-lifecycle',
   );
 });
 

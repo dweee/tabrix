@@ -1035,6 +1035,15 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
   const contentChangedLifecycleChanges = contentLifecycleChanges.filter(
     (change) => change?.changeKind !== 'unchanged',
   );
+  const feedbackLifecycleItems = objectLifecycleItems.filter(
+    (item) => item?.objectFamily === 'feedback_surface',
+  );
+  const feedbackLifecycleChanges = objectLifecycleChanges.filter(
+    (change) => change?.objectFamily === 'feedback_surface',
+  );
+  const feedbackChangedLifecycleChanges = feedbackLifecycleChanges.filter(
+    (change) => change?.changeKind !== 'unchanged',
+  );
   const semanticEvents = Array.isArray(fullObject?.semanticEvents) ? fullObject.semanticEvents : [];
   const dynamicAttributeSummary = fullObject?.dynamicAttributeSummary;
   const compactChangedGroups = Array.isArray(compact?.changedGroups) ? compact.changedGroups : [];
@@ -1099,6 +1108,12 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
     (zone) => zone?.primaryAction?.actionType === 'click',
   ).length;
   const readyNavigateOperationZoneCount = navigateOperationZones.filter(
+    (zone) => zone?.readiness === 'ready',
+  ).length;
+  const feedbackOperationZones = operationZones.filter(
+    (zone) => zone?.purpose === 'observe_feedback',
+  );
+  const readyFeedbackOperationZoneCount = feedbackOperationZones.filter(
     (zone) => zone?.readiness === 'ready',
   ).length;
 
@@ -1244,6 +1259,8 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       navigateOperationZoneCount: navigateOperationZones.length,
       navigateClickOperationZoneCount,
       readyNavigateOperationZoneCount,
+      feedbackOperationZoneCount: feedbackOperationZones.length,
+      readyFeedbackOperationZoneCount,
       ...valueStateSummary,
       operationClaimBoundaryPresent: typeof operationMap?.claimBoundary === 'string',
     },
@@ -1269,6 +1286,11 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       contentLifecycleItemCount: contentLifecycleItems.length,
       contentLifecycleChangeCount: contentChangedLifecycleChanges.length,
       contentAppearedChangeCount: contentChangedLifecycleChanges.filter(
+        (change) => change?.changeKind === 'appeared',
+      ).length,
+      feedbackLifecycleItemCount: feedbackLifecycleItems.length,
+      feedbackLifecycleChangeCount: feedbackChangedLifecycleChanges.length,
+      feedbackAppearedChangeCount: feedbackChangedLifecycleChanges.filter(
         (change) => change?.changeKind === 'appeared',
       ).length,
       objectLifecycleClaimBoundaryPresent: typeof objectLifecycle?.claimBoundary === 'string',
@@ -3541,6 +3563,98 @@ export function buildContentPostActionLifecycleProof({
   };
 }
 
+export function buildFeedbackPostActionLifecycleProof({
+  beforeReadPage,
+  afterReadPage,
+  clickSummary,
+  cleanupPassed,
+  browserWorldAfterClick,
+  browserWorldAfterClose,
+} = {}) {
+  const beforeRegionRuntime = beforeReadPage?.pageRegionRuntime ?? {};
+  const afterRegionRuntime = afterReadPage?.pageRegionRuntime ?? {};
+  const afterPageObjectRuntime = afterReadPage?.pageObjectRuntime ?? {};
+  const beforeFeedbackPurposePresent =
+    Array.isArray(beforeRegionRuntime.operationPurposes) &&
+    beforeRegionRuntime.operationPurposes.includes('observe_feedback');
+  const afterFeedbackPurposePresent =
+    Array.isArray(afterRegionRuntime.operationPurposes) &&
+    afterRegionRuntime.operationPurposes.includes('observe_feedback');
+  const clickDispatched = clickSummary?.success === true;
+  const browserWorldObservedClickOperation =
+    browserWorldAfterClick?.browserActiveObject?.lastAiOperation === 'click_element' ||
+    browserWorldAfterClick?.latestAiOperatedObject?.lastAiOperation === 'click_element' ||
+    browserWorldAfterClick?.aiOperationState?.latestAiOperation === 'click_element';
+  const afterComparedSnapshot =
+    afterPageObjectRuntime.objectLifecycleStatus === 'compared_snapshot';
+  const feedbackSurfaceObserved = (afterPageObjectRuntime.feedbackLifecycleItemCount ?? 0) > 0;
+  const feedbackLifecycleTransitionObserved =
+    (afterPageObjectRuntime.feedbackLifecycleChangeCount ?? 0) > 0;
+  const feedbackBearingLifecycleTransitionObserved =
+    feedbackSurfaceObserved === true &&
+    ((afterPageObjectRuntime.objectLifecycleChangedObjectCount ?? 0) > 0 ||
+      feedbackLifecycleTransitionObserved === true);
+  const browserPageObjectTransitionObserved =
+    (afterPageObjectRuntime.browserPageObjectStatus === 'compared_snapshot' &&
+      (afterPageObjectRuntime.dynamicAttributeSummaryPresent === true ||
+        afterPageObjectRuntime.compactTransitionCount > 0)) ||
+    (afterComparedSnapshot === true &&
+      afterPageObjectRuntime.compactWatchStatus === 'semantic_transition_candidate' &&
+      afterPageObjectRuntime.compactTransitionCount > 0);
+
+  const proofSatisfied =
+    beforeReadPage?.alignment?.ownershipRuntimePresent === true &&
+    afterReadPage?.alignment?.ownershipRuntimePresent === true &&
+    beforeReadPage?.alignment?.pageOperationMapPresent === true &&
+    afterReadPage?.alignment?.pageOperationMapPresent === true &&
+    beforeFeedbackPurposePresent === true &&
+    afterFeedbackPurposePresent === true &&
+    beforeRegionRuntime.feedbackOperationZoneCount > 0 &&
+    afterRegionRuntime.feedbackOperationZoneCount > 0 &&
+    clickDispatched === true &&
+    browserWorldObservedClickOperation === true &&
+    afterComparedSnapshot === true &&
+    feedbackBearingLifecycleTransitionObserved === true &&
+    browserPageObjectTransitionObserved === true &&
+    cleanupPassed === true &&
+    browserWorldAfterClick?.targetTab?.wasFound === true &&
+    browserWorldAfterClose?.targetTab?.wasFound === false &&
+    browserWorldAfterClick?.compactSummaryBounded === true &&
+    browserWorldAfterClick?.retentionWithinLimit === true &&
+    browserWorldAfterClose?.compactSummaryBounded === true &&
+    browserWorldAfterClose?.retentionWithinLimit === true;
+
+  return {
+    publicNoLoginOnly: true,
+    beforeFeedbackPurposePresent,
+    afterFeedbackPurposePresent,
+    beforeFeedbackOperationZoneCount: beforeRegionRuntime.feedbackOperationZoneCount ?? null,
+    beforeReadyFeedbackOperationZoneCount:
+      beforeRegionRuntime.readyFeedbackOperationZoneCount ?? null,
+    afterFeedbackOperationZoneCount: afterRegionRuntime.feedbackOperationZoneCount ?? null,
+    afterReadyFeedbackOperationZoneCount:
+      afterRegionRuntime.readyFeedbackOperationZoneCount ?? null,
+    afterObjectLifecycleStatus: afterPageObjectRuntime.objectLifecycleStatus ?? null,
+    afterObjectLifecycleChangedObjectCount:
+      afterPageObjectRuntime.objectLifecycleChangedObjectCount ?? null,
+    afterFeedbackLifecycleItemCount: afterPageObjectRuntime.feedbackLifecycleItemCount ?? null,
+    afterFeedbackLifecycleChangeCount: afterPageObjectRuntime.feedbackLifecycleChangeCount ?? null,
+    feedbackSurfaceObserved,
+    clickDispatched,
+    browserWorldObservedClickOperation,
+    afterComparedSnapshot,
+    feedbackLifecycleTransitionObserved,
+    feedbackBearingLifecycleTransitionObserved,
+    browserPageObjectTransitionObserved,
+    cleanupPassed: cleanupPassed === true,
+    browserWorldTargetObservedAfterClick: browserWorldAfterClick?.targetTab?.wasFound === true,
+    browserWorldAfterCloseClean: browserWorldAfterClose?.targetTab?.wasFound === false,
+    proofSatisfied,
+    claimBoundary:
+      'Public feedback post-action lifecycle proof is redacted boolean/count evidence only. It proves one selected public no-login click was dispatched and a follow-up read_page observed a feedback-bearing object lifecycle/PageObject transition with BrowserWorld cleanup. Dedicated feedback_surface changes are reported separately when present; this does not expose URLs, titles, labels, page content, account state, screenshots, cookies, network bodies, private flows, API/CDP reuse, competitor parity, release readiness, or product delivery grade.',
+  };
+}
+
 function runPublicSearchEntryMatrixSmoke(cliPath, smokeUrls, args) {
   const matrix = runReadPageMatrixSmoke(cliPath, smokeUrls, args);
   const publicSearchEntryMatrixProof = buildPublicSearchEntryMatrixProof(matrix.targets);
@@ -3959,6 +4073,103 @@ function runPublicContentPostActionLifecycleSmoke(cliPath, smokeUrl, args) {
     allTargetsPassed: contentPostActionLifecycleProof.proofSatisfied === true,
     claimBoundary:
       'Redacted public no-login content post-action lifecycle smoke only. It proves one selected public page exposed a navigate operation and follow-up read_page observed a content-bearing object lifecycle/PageObject transition after click, not private login/logout, API/CDP reuse, release readiness, or product delivery grade.',
+  };
+}
+
+function runPublicFeedbackPostActionLifecycleSmoke(cliPath, smokeUrl, args) {
+  if (args.skipOpen) {
+    throw new Error(
+      '--scenario public-feedback-post-action-lifecycle cannot be combined with --skip-open.',
+    );
+  }
+
+  const navigatePayload = callMcpTool(
+    cliPath,
+    'chrome_navigate',
+    { url: buildPublicSmokeUrl(smokeUrl, 'feedback_post_action_lifecycle', String(Date.now())) },
+    args.timeoutMs,
+  );
+  const openedTabId = extractNavigateTabId(navigatePayload);
+  if (Number.isInteger(openedTabId)) {
+    callMcpTool(cliPath, 'chrome_switch_tab', { tabId: openedTabId }, args.timeoutMs);
+  }
+
+  const beforeReadPagePayload = callMcpTool(
+    cliPath,
+    'chrome_read_page',
+    Number.isInteger(openedTabId) ? { tabId: openedTabId, depth: 1 } : { depth: 1 },
+    args.timeoutMs,
+  );
+  const beforeReadPage = buildRedactedReadPageAlignmentSummary(beforeReadPagePayload, openedTabId);
+  const selectedNavigateClickOperation = selectNavigateClickOperation(beforeReadPagePayload);
+  if (!selectedNavigateClickOperation) {
+    throw new Error('No ready public navigation click operation was exposed by read_page.');
+  }
+
+  const clickPayload = callMcpTool(
+    cliPath,
+    'chrome_click_element',
+    {
+      tabId: openedTabId,
+      candidateAction: selectedNavigateClickOperation.primaryAction.toolArgs.candidateAction,
+    },
+    args.timeoutMs,
+  );
+  const clickSummary = buildRedactedClickSummary(clickPayload);
+  sleepMs(500);
+  const browserWorldAfterClick = buildRedactedBrowserWorldSummary(
+    callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs),
+    openedTabId,
+  );
+  const afterReadPagePayload = callMcpTool(
+    cliPath,
+    'chrome_read_page',
+    Number.isInteger(openedTabId) ? { tabId: openedTabId, depth: 1 } : { depth: 1 },
+    args.timeoutMs,
+  );
+  const afterReadPage = buildRedactedReadPageAlignmentSummary(afterReadPagePayload, openedTabId);
+  const closeResult =
+    Number.isInteger(openedTabId) && !args.keepOpen
+      ? closeRunTabs(cliPath, [openedTabId], args.timeoutMs)
+      : { attempted: false, succeeded: null, requestedCount: 0, closedCount: 0 };
+  const browserWorldAfterClose =
+    closeResult.attempted === true
+      ? buildRedactedBrowserWorldSummary(
+          callMcpTool(cliPath, 'get_windows_and_tabs', {}, args.timeoutMs),
+          openedTabId,
+        )
+      : null;
+  const cleanupPassed =
+    closeResult.attempted === true
+      ? closeResult.succeeded === true &&
+        browserWorldAfterClose?.targetTab?.wasFound === false &&
+        browserWorldAfterClose?.compactSummaryBounded === true &&
+        browserWorldAfterClose?.retentionWithinLimit === true
+      : null;
+  const feedbackPostActionLifecycleProof = buildFeedbackPostActionLifecycleProof({
+    beforeReadPage,
+    afterReadPage,
+    clickSummary,
+    cleanupPassed,
+    browserWorldAfterClick,
+    browserWorldAfterClose,
+  });
+
+  return {
+    scenario: 'public-feedback-post-action-lifecycle',
+    openedPublicTestTab: Number.isInteger(openedTabId),
+    closeAttempted: closeResult.attempted,
+    closeSucceeded: closeResult.succeeded,
+    cleanupPassed,
+    clickSummary,
+    beforeReadPage,
+    afterReadPage,
+    browserWorldAfterClick,
+    browserWorldAfterClose,
+    feedbackPostActionLifecycleProof,
+    allTargetsPassed: feedbackPostActionLifecycleProof.proofSatisfied === true,
+    claimBoundary:
+      'Redacted public no-login feedback post-action lifecycle smoke only. It proves one selected public page exposed an observe_feedback operation and follow-up read_page observed a feedback-bearing object lifecycle/PageObject transition after click, not private login/logout, API/CDP reuse, release readiness, or product delivery grade.',
   };
 }
 
@@ -4715,7 +4926,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(
-      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|lifecycle-ownership-mix|page-opener-ownership|matrix|window-state|window-state-drift|read-page|read-page-matrix|read-page-background-target|public-search-entry-matrix|public-search-form-post-action|public-menu-post-action-lifecycle|public-content-post-action-lifecycle|public-window-tab-page-transition-matrix] [--sample-count 3] [--sample-interval-ms 250] [--skip-open] [--keep-open]\n`,
+      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|lifecycle-ownership-mix|page-opener-ownership|matrix|window-state|window-state-drift|read-page|read-page-matrix|read-page-background-target|public-search-entry-matrix|public-search-form-post-action|public-menu-post-action-lifecycle|public-content-post-action-lifecycle|public-feedback-post-action-lifecycle|public-window-tab-page-transition-matrix] [--sample-count 3] [--sample-interval-ms 250] [--skip-open] [--keep-open]\n`,
     );
     return;
   }
@@ -4745,17 +4956,19 @@ async function main() {
                       ? runPublicMenuPostActionLifecycleSmoke(cliPath, smokeUrl, args)
                       : args.scenario === 'public-content-post-action-lifecycle'
                         ? runPublicContentPostActionLifecycleSmoke(cliPath, smokeUrl, args)
-                        : args.scenario === 'public-window-tab-page-transition-matrix'
-                          ? runPublicWindowTabPageTransitionMatrixSmoke(cliPath, smokeUrls, args)
-                          : args.scenario === 'read-page-background-target'
-                            ? runReadPageBackgroundTargetSmoke(cliPath, smokeUrl, args)
-                            : args.scenario === 'lifecycle-ownership-mix'
-                              ? runLifecycleOwnershipMixSmoke(cliPath, smokeUrl, args)
-                              : args.scenario === 'page-opener-ownership'
-                                ? runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args)
-                                : args.scenario === 'lifecycle'
-                                  ? runLifecycleSmoke(cliPath, smokeUrl, args)
-                                  : runSingleSmoke(cliPath, smokeUrl, args);
+                        : args.scenario === 'public-feedback-post-action-lifecycle'
+                          ? runPublicFeedbackPostActionLifecycleSmoke(cliPath, smokeUrl, args)
+                          : args.scenario === 'public-window-tab-page-transition-matrix'
+                            ? runPublicWindowTabPageTransitionMatrixSmoke(cliPath, smokeUrls, args)
+                            : args.scenario === 'read-page-background-target'
+                              ? runReadPageBackgroundTargetSmoke(cliPath, smokeUrl, args)
+                              : args.scenario === 'lifecycle-ownership-mix'
+                                ? runLifecycleOwnershipMixSmoke(cliPath, smokeUrl, args)
+                                : args.scenario === 'page-opener-ownership'
+                                  ? runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args)
+                                  : args.scenario === 'lifecycle'
+                                    ? runLifecycleSmoke(cliPath, smokeUrl, args)
+                                    : runSingleSmoke(cliPath, smokeUrl, args);
 
     const smokePassed = isSmokeResultPassing(smokeResult);
     const output = {
