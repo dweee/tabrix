@@ -20,6 +20,7 @@ import {
   buildPageOpenerPostCloseRoutingSummaryProof,
   buildPageOpenerPostCloseAiOperationProof,
   buildPageOpenerPostCloseActionReadinessProof,
+  buildPageOpenerPostCloseCompactStateSummaryProof,
   buildPageOpenerChildCloseActiveReturnProof,
   buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
@@ -2236,6 +2237,104 @@ test('buildPageOpenerPostCloseActionReadinessProof fails when target needs resel
   assert.equal(proof.operationTargetBriefComplete, false);
   assert.equal(proof.actionReadinessBriefComplete, false);
   assert.equal(proof.parentReadyForPageLevelCheck, false);
+  assert.equal(proof.proofSatisfied, false);
+});
+
+test('buildPageOpenerPostCloseCompactStateSummaryProof proves parent compact summary after child closes', () => {
+  const proof = buildPageOpenerPostCloseCompactStateSummaryProof({
+    parentTabId: 100,
+    childTabId: 101,
+    browserWorldPayload: {
+      browserWorld: {
+        tabs: [
+          {
+            tabId: 100,
+            url: 'https://private.example.test/parent',
+            title: 'Private Parent',
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+            canTabrixOperate: true,
+          },
+        ],
+      },
+    },
+    readPagePayload: {
+      ownershipRuntime: {
+        currentTabId: 100,
+        currentTabRuntimeStateSource: 'browser_world_inventory',
+      },
+      browserPageObjectCompact: {
+        status: 'single_snapshot',
+        watchStatus: 'snapshot_only',
+        primaryConclusion:
+          'Current BrowserPageObject snapshot mentions https://private.example.test/parent.',
+        changedGroups: ['tab_state'],
+        claimBoundary: 'Private compact state boundary.',
+        facts: {
+          tab: {
+            readTargetTabId: 100,
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(proof.readTargetMatchesParent, true);
+  assert.equal(proof.compactReadTargetMatchesParent, true);
+  assert.equal(proof.browserWorldParentObserved, true);
+  assert.equal(proof.browserWorldChildNoLongerObserved, true);
+  assert.equal(proof.readRuntimeSourceIsBrowserWorld, true);
+  assert.equal(proof.compactPrimaryConclusionPresent, true);
+  assert.equal(proof.compactWatchStatusPresent, true);
+  assert.equal(proof.compactStatusPresent, true);
+  assert.equal(proof.compactChangedGroupsPresent, true);
+  assert.equal(proof.compactChangedGroupCount, 1);
+  assert.equal(proof.compactClaimBoundaryPresent, true);
+  assert.equal(proof.compactStateSummaryComplete, true);
+  assert.equal(proof.proofSatisfied, true);
+  assert.doesNotThrow(() => assertRedactedSmokeOutputSafe(proof));
+  assert.equal(JSON.stringify(proof).includes('private.example.test'), false);
+});
+
+test('buildPageOpenerPostCloseCompactStateSummaryProof fails when compact state summary is missing', () => {
+  const proof = buildPageOpenerPostCloseCompactStateSummaryProof({
+    parentTabId: 100,
+    childTabId: 101,
+    browserWorldPayload: {
+      browserWorld: {
+        tabs: [
+          {
+            tabId: 100,
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+            canTabrixOperate: true,
+          },
+        ],
+      },
+    },
+    readPagePayload: {
+      ownershipRuntime: {
+        currentTabId: 100,
+        currentTabRuntimeStateSource: 'browser_world_inventory',
+      },
+      browserPageObjectCompact: {
+        facts: {
+          tab: {
+            readTargetTabId: 100,
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(proof.readTargetMatchesParent, true);
+  assert.equal(proof.compactReadTargetMatchesParent, true);
+  assert.equal(proof.compactPrimaryConclusionPresent, false);
+  assert.equal(proof.compactWatchStatusPresent, false);
+  assert.equal(proof.compactStatusPresent, false);
+  assert.equal(proof.compactChangedGroupsPresent, false);
+  assert.equal(proof.compactClaimBoundaryPresent, false);
+  assert.equal(proof.compactStateSummaryComplete, false);
   assert.equal(proof.proofSatisfied, false);
 });
 
