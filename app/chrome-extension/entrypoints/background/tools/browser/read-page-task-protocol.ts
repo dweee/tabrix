@@ -350,9 +350,10 @@ function buildPageRegions(
   const authSurfacePresent =
     (byType.get('modal')?.length ?? 0) > 0 ||
     (byType.get('qr_code')?.length ?? 0) > 0 ||
-    /\b(auth modal|login dialog|sign[ -]?in dialog|captcha|verification code)\b|登录弹窗|授权弹窗|扫码|二维码|验证码/i.test(
+    /\b(auth modal|login dialog|sign[ -]?in dialog|captcha|verification code)\b|登录弹窗|授权弹窗/i.test(
       params.visibleTextContent || '',
-    );
+    ) ||
+    String(params.pageRole || '') === 'login_required';
 
   for (const object of buildGlobalMenuRegionObjects({
     interactiveElements: params.interactiveElements,
@@ -412,18 +413,20 @@ function buildPageRegions(
     byType.set(regionType, current);
   }
 
-  for (const { regionType, object } of buildVisualElementRegionObjects(params.visualElements)) {
-    const current = byType.get(regionType) ?? [];
-    const alreadyRepresented = current.some(
-      (item) =>
-        item.objectId === object.objectId ||
-        normalizeLocatorChain(item.locatorChain) === normalizeLocatorChain(object.locatorChain),
-    );
-    if (!alreadyRepresented && current.length < maxObjectsForRegion(regionType)) {
-      current.unshift(object);
-      representedObjectIds.add(object.objectId);
+  if (authSurfacePresent) {
+    for (const { regionType, object } of buildVisualElementRegionObjects(params.visualElements)) {
+      const current = byType.get(regionType) ?? [];
+      const alreadyRepresented = current.some(
+        (item) =>
+          item.objectId === object.objectId ||
+          normalizeLocatorChain(item.locatorChain) === normalizeLocatorChain(object.locatorChain),
+      );
+      if (!alreadyRepresented && current.length < maxObjectsForRegion(regionType)) {
+        current.unshift(object);
+        representedObjectIds.add(object.objectId);
+      }
+      byType.set(regionType, current.slice(0, maxObjectsForRegion(regionType)));
     }
-    byType.set(regionType, current.slice(0, maxObjectsForRegion(regionType)));
   }
 
   for (const object of buildExploratoryActionRegionObjects({
@@ -436,7 +439,10 @@ function buildPageRegions(
     byType.set('unknown', current);
   }
 
-  for (const { regionType, object } of buildTextSignalRegionObjects(params.visibleTextContent)) {
+  for (const { regionType, object } of buildTextSignalRegionObjects(params.visibleTextContent, {
+    currentTitle: params.currentTitle,
+    pageRole: params.pageRole,
+  })) {
     const current = byType.get(regionType) ?? [];
     if (
       current.length < maxObjectsForRegion(regionType) &&

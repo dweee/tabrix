@@ -1973,6 +1973,51 @@ describe('read_page task protocol', () => {
       expect(qrZone?.claimBoundary).toContain('not login success');
     });
 
+    it('does not promote visual QR elements into auth QR without auth-surface evidence', () => {
+      const protocol = buildTaskProtocol(
+        createBaseParams({
+          currentUrl: 'https://example.com/content',
+          currentTitle: 'Public content',
+          pageRole: 'web_page',
+          primaryRegion: 'content_area',
+          interactiveElements: [
+            { ref: 'ref_article', role: 'article', name: 'Campaign article' },
+            { ref: 'ref_link', role: 'link', name: 'Learn more' },
+          ],
+          candidateActions: [
+            {
+              id: 'ca_click_ref_link',
+              actionType: 'click',
+              targetRef: 'ref_link',
+              confidence: 0.72,
+              matchReason: 'primary action inferred from interactive label',
+              locatorChain: [{ type: 'aria', value: 'Learn more' }],
+            },
+          ],
+          visibleTextContent:
+            'Campaign article. Learn more about our event and product updates. No sign in required.',
+          visualElements: [
+            {
+              id: 'qr_visual_marketing',
+              label: 'QR visual element candidate',
+              selector: '[data-testid="promo-qr"]',
+              role: 'img',
+              rect: { x: 220, y: 240, width: 180, height: 180 },
+              qrSignal: true,
+              reason: 'qr_visual_element_signal',
+              confidence: 0.86,
+            },
+          ],
+        }) as any,
+      );
+
+      expect(protocol.pageRegions.some((item) => item.regionType === 'qr_code')).toBe(false);
+      expect(protocol.pageRegions.some((item) => item.regionType === 'modal')).toBe(false);
+      expect(protocol.pageOperationMap.zones.some((item) => item.purpose === 'scan_qr')).toBe(
+        false,
+      );
+    });
+
     it('derives account navigation content and feedback regions from bounded visible text signals', () => {
       const protocol = buildTaskProtocol(
         createBaseParams({
@@ -2033,6 +2078,168 @@ describe('read_page task protocol', () => {
       expect(protocol.pageRegions.find((item) => item.regionType === 'account')?.state).toBe(
         'logged_in_candidate',
       );
+      expect(protocol.pageRegions.some((item) => item.regionType === 'qr_code')).toBe(false);
+      expect(protocol.pageRegions.some((item) => item.regionType === 'modal')).toBe(false);
+      expect(protocol.pageOperationMap.zones.some((item) => item.purpose === 'scan_qr')).toBe(
+        false,
+      );
+    });
+
+    it('does not turn public QR content text into an auth QR region without auth evidence', () => {
+      const protocol = buildTaskProtocol(
+        createBaseParams({
+          currentUrl: 'https://example.com/campaign',
+          currentTitle: 'Campaign article',
+          pageRole: 'web_page',
+          primaryRegion: 'content_area',
+          interactiveElements: [
+            { ref: 'ref_article', role: 'article', name: 'Campaign article' },
+            { ref: 'ref_learn_more', role: 'link', name: 'Learn more' },
+          ],
+          candidateActions: [
+            {
+              id: 'ca_click_ref_learn_more',
+              actionType: 'click',
+              targetRef: 'ref_learn_more',
+              confidence: 0.72,
+              matchReason: 'primary action inferred from interactive label',
+              locatorChain: [{ type: 'aria', value: 'Learn more' }],
+            },
+          ],
+          visibleTextContent:
+            'Campaign article. Scan the QR code to view the event brochure and venue map. Learn more about the speakers and schedule.',
+        }) as any,
+      );
+
+      expect(protocol.pageRegions.some((item) => item.regionType === 'qr_code')).toBe(false);
+      expect(protocol.pageRegions.some((item) => item.regionType === 'modal')).toBe(false);
+      expect(protocol.pageOperationMap.zones.some((item) => item.purpose === 'scan_qr')).toBe(
+        false,
+      );
+    });
+
+    it('keeps QR text and visual capture for an English login page without explicit auth modal text', () => {
+      const protocol = buildTaskProtocol(
+        createBaseParams({
+          currentUrl: 'https://example.com/auth',
+          currentTitle: 'Sign in with QR code',
+          pageRole: 'login_required',
+          primaryRegion: 'login_form',
+          interactiveElements: [{ ref: 'ref_refresh', role: 'button', name: 'Refresh QR code' }],
+          candidateActions: [
+            {
+              id: 'ca_click_ref_refresh',
+              actionType: 'click',
+              targetRef: 'ref_refresh',
+              confidence: 0.72,
+              matchReason: 'refresh qr code candidate from login page',
+              locatorChain: [{ type: 'aria', value: 'Refresh QR code' }],
+            },
+          ],
+          visibleTextContent: 'Use the QR code below to sign in. Refresh QR code if it expires.',
+          visualElements: [
+            {
+              id: 'qr_visual_login_en',
+              label: 'QR visual element candidate',
+              selector: '[data-testid="login-qr"]',
+              role: 'img',
+              rect: { x: 200, y: 160, width: 180, height: 180 },
+              qrSignal: true,
+              reason: 'qr_visual_element_signal',
+              confidence: 0.88,
+            },
+          ],
+        }) as any,
+      );
+
+      const qrRegion = protocol.pageRegions.find((item) => item.regionType === 'qr_code');
+      const qrZone = protocol.pageOperationMap.zones.find((item) => item.purpose === 'scan_qr');
+
+      expect(qrRegion?.objects.some((item) => item.objectType === 'qr_visual')).toBe(true);
+      expect(qrRegion?.state).toBe('waiting_scan_candidate');
+      expect(qrZone?.purpose).toBe('scan_qr');
+    });
+
+    it('keeps title-backed visual QR capture when the page title is auth-like but pageRole is still unknown', () => {
+      const protocol = buildTaskProtocol(
+        createBaseParams({
+          currentUrl: 'https://example.com/auth-fallback',
+          currentTitle: 'Sign in with QR code',
+          pageRole: 'unknown',
+          primaryRegion: null,
+          interactiveElements: [{ ref: 'ref_refresh', role: 'button', name: 'Refresh QR code' }],
+          candidateActions: [
+            {
+              id: 'ca_click_ref_refresh',
+              actionType: 'click',
+              targetRef: 'ref_refresh',
+              confidence: 0.72,
+              matchReason: 'refresh qr code candidate from login page',
+              locatorChain: [{ type: 'aria', value: 'Refresh QR code' }],
+            },
+          ],
+          visibleTextContent: 'Use the QR code below to sign in. Refresh QR code if it expires.',
+          visualElements: [
+            {
+              id: 'qr_visual_login_title_fallback',
+              label: 'QR visual element candidate',
+              selector: '[data-testid="login-qr-fallback"]',
+              role: 'img',
+              rect: { x: 200, y: 160, width: 180, height: 180 },
+              qrSignal: true,
+              reason: 'qr_visual_element_signal',
+              confidence: 0.88,
+            },
+          ],
+        }) as any,
+      );
+
+      const qrRegion = protocol.pageRegions.find((item) => item.regionType === 'qr_code');
+      const qrZone = protocol.pageOperationMap.zones.find((item) => item.purpose === 'scan_qr');
+
+      expect(qrRegion?.objects.some((item) => item.objectType === 'qr_visual')).toBe(true);
+      expect(qrRegion?.state).toBe('waiting_scan_candidate');
+      expect(qrZone?.purpose).toBe('scan_qr');
+      expect(protocol.pageRegions.some((item) => item.regionType === 'modal')).toBe(false);
+    });
+
+    it('does not turn Chinese public QR content text into an auth QR region without auth evidence', () => {
+      const protocol = buildTaskProtocol(
+        createBaseParams({
+          currentUrl: 'https://example.com/campaign-zh',
+          currentTitle: '活动详情',
+          pageRole: 'web_page',
+          primaryRegion: 'content_area',
+          interactiveElements: [
+            { ref: 'ref_article', role: 'article', name: '活动详情' },
+            { ref: 'ref_learn_more', role: 'link', name: '了解更多' },
+          ],
+          candidateActions: [
+            {
+              id: 'ca_click_ref_learn_more',
+              actionType: 'click',
+              targetRef: 'ref_learn_more',
+              confidence: 0.72,
+              matchReason: 'primary action inferred from interactive label',
+              locatorChain: [{ type: 'aria', value: '了解更多' }],
+            },
+          ],
+          visibleTextContent: '扫码查看活动详情与场馆地图，了解更多嘉宾和议程信息。',
+          visualElements: [
+            {
+              id: 'qr_visual_marketing_zh',
+              label: 'QR visual element candidate',
+              selector: '[data-testid="promo-qr-zh"]',
+              role: 'img',
+              rect: { x: 220, y: 240, width: 180, height: 180 },
+              qrSignal: true,
+              reason: 'qr_visual_element_signal',
+              confidence: 0.86,
+            },
+          ],
+        }) as any,
+      );
+
       expect(protocol.pageRegions.some((item) => item.regionType === 'qr_code')).toBe(false);
       expect(protocol.pageRegions.some((item) => item.regionType === 'modal')).toBe(false);
       expect(protocol.pageOperationMap.zones.some((item) => item.purpose === 'scan_qr')).toBe(
@@ -2182,8 +2389,12 @@ describe('read_page task protocol', () => {
       expect(
         protocol.pageOperationMap.zones.find((item) => item.purpose === 'scan_qr'),
       ).toMatchObject({
-        label: 'QR scan area candidate',
+        label: 'QR refresh required candidate',
+        readiness: 'not_targetable',
       });
+      expect(
+        protocol.pageOperationMap.zones.find((item) => item.purpose === 'scan_qr')?.claimBoundary,
+      ).toContain('QR appears expired or refresh-needed');
     });
   });
 });

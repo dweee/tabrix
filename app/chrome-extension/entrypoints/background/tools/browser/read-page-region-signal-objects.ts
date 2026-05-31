@@ -1,5 +1,6 @@
 import type { ReadPageRegionObject, ReadPageRegionType } from '@tabrix/shared';
 import {
+  AUTH_PAGE_TITLE_PATTERN,
   TEXT_AUTHENTICATED_PATTERN,
   TEXT_AUTH_MODAL_HIDDEN_PATTERN,
   TEXT_AUTH_MODAL_PATTERN,
@@ -49,6 +50,7 @@ export function buildVisualElementRegionObjects(
 
 export function buildTextSignalRegionObjects(
   visibleTextContent: string | null | undefined,
+  options: { currentTitle?: string | null; pageRole?: string | null } = {},
 ): Array<{ regionType: ReadPageRegionType; object: ReadPageRegionObject }> {
   const normalized = String(visibleTextContent || '')
     .replace(/\s+/g, ' ')
@@ -57,10 +59,19 @@ export function buildTextSignalRegionObjects(
 
   const signals: Array<{ regionType: ReadPageRegionType; object: ReadPageRegionObject }> = [];
   const authenticated = TEXT_AUTHENTICATED_PATTERN.test(normalized);
-  const loggedOut = !authenticated && TEXT_LOGGED_OUT_PATTERN.test(normalized);
   const authModalVisible = TEXT_AUTH_MODAL_PATTERN.test(normalized);
   const authModalHidden = TEXT_AUTH_MODAL_HIDDEN_PATTERN.test(normalized);
-  const qrVisible = TEXT_QR_PATTERN.test(normalized) && (authModalVisible || !authModalHidden);
+  const hasExplicitLoggedOutState =
+    !authenticated &&
+    (/"?(?:loggedIn|isLoggedIn|authenticated)"?\s*:\s*false/i.test(normalized) ||
+      /请先登录|登录后|未登录|账号登录|手机号登录|扫码登录/i.test(normalized));
+  const hasAuthPageTitle = AUTH_PAGE_TITLE_PATTERN.test(String(options.currentTitle || ''));
+  const loginRequiredPage = String(options.pageRole || '') === 'login_required';
+  const authSurfacePresent =
+    authModalVisible ||
+    ((hasExplicitLoggedOutState || loginRequiredPage || hasAuthPageTitle) && !authModalHidden);
+  const loggedOut = authSurfacePresent && !authenticated;
+  const qrVisible = TEXT_QR_PATTERN.test(normalized) && authSurfacePresent;
   const qrExpired = qrVisible && TEXT_QR_EXPIRED_PATTERN.test(normalized);
   const logoutActionVisible = /\b(?:log[ -]?out|sign[ -]?out)\b|退出|注销/i.test(normalized);
 

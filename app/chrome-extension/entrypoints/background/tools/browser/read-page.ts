@@ -469,7 +469,7 @@ function scoreQrVisualElementHint(
   if (rect.width >= 100 && rect.width <= 360 && rect.height >= 100 && rect.height <= 360)
     score += 36;
   if (String(element?.text || '').trim().length === 0) score += 18;
-  if (/\b(logo|brand|avatar|icon)\b|小红书|微信|apple|google/i.test(scoringSignal)) score -= 80;
+  if (/\b(logo|brand|wordmark|avatar|icon|profile)\b/i.test(scoringSignal)) score -= 80;
   score -= Math.min(20, index * 2);
 
   if (score < 40) return null;

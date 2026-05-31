@@ -50,6 +50,9 @@ export const TEXT_AUTH_MODAL_HIDDEN_PATTERN =
 
 export const TEXT_QR_PATTERN = /\b(?:qr|qrcode|scan code)\b|二维码|扫码|扫一扫/i;
 
+export const AUTH_PAGE_TITLE_PATTERN =
+  /^(?:sign[ -]?in|log[ -]?in|login|auth(?:orization)?|登录|登陆|授权)(?:\b|\s*[-|:·])/i;
+
 export const TEXT_QR_EXPIRED_PATTERN =
   /\b(?:qr|qrcode|scan code)[\s_-]*(?:expired|invalid|timed[ -]?out)\b|\b(?:expired|invalid|timed[ -]?out)[\s_-]*(?:qr|qrcode|scan code)\b|二维码(?:已)?过期|二维码失效/i;
 

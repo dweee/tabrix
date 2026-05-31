@@ -239,6 +239,9 @@ function operationReadinessForRegion(
 ): ReadPageOperationReadiness {
   if (region.state === 'error_candidate') return 'blocked';
   if (region.state === 'profile_route_candidate') return 'unknown';
+  if (purpose === 'scan_qr' && region.state === 'expired_or_refresh_available_candidate') {
+    return region.candidateActionIds.length > 0 ? 'blocked' : 'not_targetable';
+  }
   if (purpose === 'read_content' || purpose === 'observe_feedback') return 'ready';
   if (purpose === 'open_menu' && region.regionType === 'account') return 'needs_expand';
   if (purpose === 'open_menu' && region.regionType === 'unknown') return 'needs_expand';
@@ -301,7 +304,9 @@ function operationLabelForRegion(
         ? 'login/account area candidate'
         : 'auth area candidate';
     case 'scan_qr':
-      return 'QR scan area candidate';
+      return region.state === 'expired_or_refresh_available_candidate'
+        ? 'QR refresh required candidate'
+        : 'QR scan area candidate';
     case 'submit_form':
       return 'form action area';
     case 'observe_feedback':
@@ -323,6 +328,9 @@ function operationClaimBoundaryForRegion(
     return `${base}; raw account identity is intentionally not exposed; auth success requires post-action state evidence`;
   }
   if (purpose === 'scan_qr') {
+    if (region.state === 'expired_or_refresh_available_candidate') {
+      return `${base}; QR appears expired or refresh-needed, so scanning is blocked until a fresh QR is produced; this is not login success`;
+    }
     return `${base}; QR presence means scan collaboration may be needed, not login success`;
   }
   if (purpose === 'navigate' && region.state === 'global_menu_available_candidate') {
