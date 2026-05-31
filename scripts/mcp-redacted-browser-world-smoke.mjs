@@ -2153,6 +2153,105 @@ export function buildPageOpenerPostCloseCompactStateSummaryProof({
   };
 }
 
+export function buildPageOpenerPostCloseCompactFactsProof({
+  readPagePayload,
+  browserWorldPayload,
+  parentTabId,
+  childTabId,
+}) {
+  const tabs = extractBrowserWorldTabs(browserWorldPayload);
+  const parentTab = Number.isInteger(parentTabId)
+    ? tabs.find((tab) => tab?.tabId === parentTabId)
+    : null;
+  const childTab = Number.isInteger(childTabId)
+    ? tabs.find((tab) => tab?.tabId === childTabId)
+    : null;
+  const ownershipRuntime = readPagePayload?.ownershipRuntime ?? {};
+  const compact = readPagePayload?.browserPageObjectCompact ?? {};
+  const compactFacts = compact.facts && typeof compact.facts === 'object' ? compact.facts : {};
+  const compactWindowFacts =
+    compactFacts.window && typeof compactFacts.window === 'object' ? compactFacts.window : {};
+  const compactTabFacts =
+    compactFacts.tab && typeof compactFacts.tab === 'object' ? compactFacts.tab : {};
+  const compactPageFacts =
+    compactFacts.page && typeof compactFacts.page === 'object' ? compactFacts.page : {};
+  const compactReadTargetTabId = Number.isInteger(compactTabFacts.readTargetTabId)
+    ? compactTabFacts.readTargetTabId
+    : Number.isInteger(compactTabFacts.currentTabId)
+      ? compactTabFacts.currentTabId
+      : null;
+  const parentKnown = Number.isInteger(parentTabId);
+  const childKnown = Number.isInteger(childTabId);
+  const readTargetMatchesParent =
+    parentKnown && Number.isInteger(ownershipRuntime.currentTabId)
+      ? ownershipRuntime.currentTabId === parentTabId
+      : null;
+  const compactReadTargetMatchesParent =
+    parentKnown && Number.isInteger(compactReadTargetTabId)
+      ? compactReadTargetTabId === parentTabId
+      : null;
+  const browserWorldParentObserved = Boolean(parentTab);
+  const browserWorldChildNoLongerObserved = childKnown ? !childTab : null;
+  const readRuntimeSourceIsBrowserWorld =
+    ownershipRuntime.currentTabRuntimeStateSource === 'browser_world_inventory';
+  const compactSourceIsExpected = compact.source === 'read_page_browser_page_object_compact';
+  const compactWindowFactsComplete =
+    Number.isInteger(compactWindowFacts.currentWindowId) &&
+    typeof compactWindowFacts.currentWindowState === 'string' &&
+    typeof (compactWindowFacts.isFocused ?? compactWindowFacts.isCurrentWindowFocused) ===
+      'boolean';
+  const compactTabRuntimeSourceIsBrowserWorld =
+    compactTabFacts.runtimeStateSource === 'browser_world_inventory';
+  const compactTabParentIsAi =
+    compactTabFacts.openedBy === 'ai' && compactTabFacts.openedBySource === 'ai_tool';
+  const compactTabOperationFactsComplete =
+    compactTabFacts.operationTargetCanTabrixOperate === true &&
+    compactTabFacts.shouldReselectBeforeAction === false &&
+    compactTabFacts.actionReadiness === 'ready_for_page_level_check' &&
+    compactTabFacts.canProceedToPageLevelCheck === true;
+  const compactPageFactsComplete =
+    compactPageFacts.objectKind === 'BrowserPageObject' &&
+    typeof compactPageFacts.readiness === 'string' &&
+    typeof compactPageFacts.sourceFreshness === 'string' &&
+    typeof compactPageFacts.selectedDataSource === 'string';
+  const compactFactsComplete =
+    compactSourceIsExpected === true &&
+    compactWindowFactsComplete === true &&
+    compactTabRuntimeSourceIsBrowserWorld === true &&
+    compactTabParentIsAi === true &&
+    compactTabOperationFactsComplete === true &&
+    compactPageFactsComplete === true;
+
+  return {
+    publicNoLoginOnly: true,
+    parentTabOpened: parentKnown,
+    childTabOpened: childKnown,
+    readTargetMatchesParent,
+    compactReadTargetMatchesParent,
+    browserWorldParentObserved,
+    browserWorldChildNoLongerObserved,
+    readRuntimeSourceIsBrowserWorld,
+    compactSourceIsExpected,
+    compactWindowFactsComplete,
+    compactTabRuntimeSourceIsBrowserWorld,
+    compactTabParentIsAi,
+    compactTabOperationFactsComplete,
+    compactPageFactsComplete,
+    compactFactsComplete,
+    proofSatisfied:
+      parentKnown === true &&
+      childKnown === true &&
+      readTargetMatchesParent === true &&
+      compactReadTargetMatchesParent === true &&
+      browserWorldParentObserved === true &&
+      browserWorldChildNoLongerObserved === true &&
+      readRuntimeSourceIsBrowserWorld === true &&
+      compactFactsComplete === true,
+    claimBoundary:
+      'Page-opener post-close compact facts proof is redacted boolean evidence only; it proves the surviving parent read_page BrowserPageObject compact facts still expose bounded window, tab, and page runtime facts sourced from BrowserWorld after the page-opened child closes in one public no-login run. It does not expose tab ids, URLs, titles, page content, account state, task success, API/CDP reuse, or release readiness.',
+  };
+}
+
 export function buildPageOpenerChildCloseActiveReturnProof({
   browserWorldPayload,
   parentTabId,
@@ -3215,6 +3314,15 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
           childTabId,
         })
       : null;
+  const postCloseCompactFactsProof =
+    parentReadPagePayload !== null && browserWorldPayloadAfterParentRead !== null
+      ? buildPageOpenerPostCloseCompactFactsProof({
+          readPagePayload: parentReadPagePayload,
+          browserWorldPayload: browserWorldPayloadAfterParentRead,
+          parentTabId,
+          childTabId,
+        })
+      : null;
   const remainingCloseTargets = uniqueNumbers([
     parentTabId,
     childCloseResult.succeeded === true ? null : childTabId,
@@ -3277,6 +3385,7 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
     postCloseAiOperationProof,
     postCloseActionReadinessProof,
     postCloseCompactStateSummaryProof,
+    postCloseCompactFactsProof,
     cleanupTargetsPassed,
     allTargetsPassed:
       proof.proofSatisfied === true &&
@@ -3288,6 +3397,7 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
       postCloseAiOperationProof?.proofSatisfied === true &&
       postCloseActionReadinessProof?.proofSatisfied === true &&
       postCloseCompactStateSummaryProof?.proofSatisfied === true &&
+      postCloseCompactFactsProof?.proofSatisfied === true &&
       closeResult.succeeded === true &&
       cleanupTargetsPassed === true,
     claimBoundary:

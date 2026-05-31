@@ -21,6 +21,7 @@ import {
   buildPageOpenerPostCloseAiOperationProof,
   buildPageOpenerPostCloseActionReadinessProof,
   buildPageOpenerPostCloseCompactStateSummaryProof,
+  buildPageOpenerPostCloseCompactFactsProof,
   buildPageOpenerChildCloseActiveReturnProof,
   buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
@@ -2335,6 +2336,131 @@ test('buildPageOpenerPostCloseCompactStateSummaryProof fails when compact state 
   assert.equal(proof.compactChangedGroupsPresent, false);
   assert.equal(proof.compactClaimBoundaryPresent, false);
   assert.equal(proof.compactStateSummaryComplete, false);
+  assert.equal(proof.proofSatisfied, false);
+});
+
+test('buildPageOpenerPostCloseCompactFactsProof proves parent compact facts after child closes', () => {
+  const proof = buildPageOpenerPostCloseCompactFactsProof({
+    parentTabId: 100,
+    childTabId: 101,
+    browserWorldPayload: {
+      browserWorld: {
+        tabs: [
+          {
+            tabId: 100,
+            url: 'https://private.example.test/parent',
+            title: 'Private Parent',
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+            canTabrixOperate: true,
+          },
+        ],
+      },
+    },
+    readPagePayload: {
+      ownershipRuntime: {
+        currentTabId: 100,
+        currentTabRuntimeStateSource: 'browser_world_inventory',
+      },
+      browserPageObjectCompact: {
+        source: 'read_page_browser_page_object_compact',
+        facts: {
+          window: {
+            currentWindowId: 7,
+            currentWindowState: 'normal',
+            isFocused: true,
+          },
+          tab: {
+            readTargetTabId: 100,
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+            runtimeStateSource: 'browser_world_inventory',
+            operationTargetCanTabrixOperate: true,
+            shouldReselectBeforeAction: false,
+            actionReadiness: 'ready_for_page_level_check',
+            canProceedToPageLevelCheck: true,
+          },
+          page: {
+            objectKind: 'BrowserPageObject',
+            readiness: 'ready',
+            sourceFreshness: 'fresh',
+            selectedDataSource: 'dom_region_rows',
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(proof.readTargetMatchesParent, true);
+  assert.equal(proof.compactReadTargetMatchesParent, true);
+  assert.equal(proof.browserWorldParentObserved, true);
+  assert.equal(proof.browserWorldChildNoLongerObserved, true);
+  assert.equal(proof.readRuntimeSourceIsBrowserWorld, true);
+  assert.equal(proof.compactSourceIsExpected, true);
+  assert.equal(proof.compactWindowFactsComplete, true);
+  assert.equal(proof.compactTabRuntimeSourceIsBrowserWorld, true);
+  assert.equal(proof.compactTabParentIsAi, true);
+  assert.equal(proof.compactTabOperationFactsComplete, true);
+  assert.equal(proof.compactPageFactsComplete, true);
+  assert.equal(proof.compactFactsComplete, true);
+  assert.equal(proof.proofSatisfied, true);
+  assert.doesNotThrow(() => assertRedactedSmokeOutputSafe(proof));
+  assert.equal(JSON.stringify(proof).includes('private.example.test'), false);
+});
+
+test('buildPageOpenerPostCloseCompactFactsProof fails when page facts are missing', () => {
+  const proof = buildPageOpenerPostCloseCompactFactsProof({
+    parentTabId: 100,
+    childTabId: 101,
+    browserWorldPayload: {
+      browserWorld: {
+        tabs: [
+          {
+            tabId: 100,
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+            canTabrixOperate: true,
+          },
+        ],
+      },
+    },
+    readPagePayload: {
+      ownershipRuntime: {
+        currentTabId: 100,
+        currentTabRuntimeStateSource: 'browser_world_inventory',
+      },
+      browserPageObjectCompact: {
+        source: 'read_page_browser_page_object_compact',
+        facts: {
+          window: {
+            currentWindowId: 7,
+            currentWindowState: 'normal',
+            isFocused: true,
+          },
+          tab: {
+            readTargetTabId: 100,
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+            runtimeStateSource: 'browser_world_inventory',
+            operationTargetCanTabrixOperate: true,
+            shouldReselectBeforeAction: false,
+            actionReadiness: 'ready_for_page_level_check',
+            canProceedToPageLevelCheck: true,
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(proof.readTargetMatchesParent, true);
+  assert.equal(proof.compactReadTargetMatchesParent, true);
+  assert.equal(proof.compactSourceIsExpected, true);
+  assert.equal(proof.compactWindowFactsComplete, true);
+  assert.equal(proof.compactTabRuntimeSourceIsBrowserWorld, true);
+  assert.equal(proof.compactTabParentIsAi, true);
+  assert.equal(proof.compactTabOperationFactsComplete, true);
+  assert.equal(proof.compactPageFactsComplete, false);
+  assert.equal(proof.compactFactsComplete, false);
   assert.equal(proof.proofSatisfied, false);
 });
 
