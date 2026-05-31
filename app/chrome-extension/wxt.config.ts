@@ -35,10 +35,6 @@ export default defineConfig({
     //   '--remote-debugging-port=9222',
     // ],
   },
-  server: {
-    port: 3000,
-    strictPort: true,
-  },
   manifest: {
     // Stable by default; override via CHROME_EXTENSION_KEY for custom forks.
     key: CHROME_EXTENSION_KEY,
@@ -103,6 +99,10 @@ export default defineConfig({
         }),
   },
   vite: (env) => ({
+    server: {
+      port: 3000,
+      strictPort: true,
+    },
     esbuild:
       env.mode === 'production'
         ? {
