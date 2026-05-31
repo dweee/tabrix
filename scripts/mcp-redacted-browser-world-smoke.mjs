@@ -2913,6 +2913,74 @@ function runReadPageMatrixSmoke(cliPath, smokeUrls, args) {
   };
 }
 
+export function buildPublicSearchEntryMatrixProof(targets) {
+  const targetResults = (Array.isArray(targets) ? targets : []).map((target) => {
+    const purposes = Array.isArray(target?.pageRegionRuntime?.operationPurposes)
+      ? target.pageRegionRuntime.operationPurposes
+      : [];
+    const regionTypes = Array.isArray(target?.pageRegionRuntime?.regionTypes)
+      ? target.pageRegionRuntime.regionTypes
+      : [];
+    const searchPurposePresent = purposes.includes('search');
+    return {
+      targetIndex: Number.isInteger(target?.targetIndex) ? target.targetIndex : null,
+      targetPassed: target?.passed === true,
+      pageOperationMapPresent: target?.pageRegionRuntime?.pageOperationMapPresent === true,
+      operationZoneCount: Number.isInteger(target?.pageRegionRuntime?.operationZoneCount)
+        ? target.pageRegionRuntime.operationZoneCount
+        : null,
+      operationPurposeCount: purposes.length,
+      regionTypeCount: regionTypes.length,
+      searchPurposePresent,
+      cleanupPassed: target?.cleanupPassed === true,
+      browserWorldTargetObserved: target?.browserWorldAfterRead?.targetTabFound === true,
+      browserWorldAfterCloseClean: target?.browserWorldAfterClose?.targetTabFound === false,
+      compactSummaryBounded: target?.browserWorldAfterRead?.compactSummaryBounded === true,
+      retentionWithinLimit: target?.browserWorldAfterRead?.retentionWithinLimit === true,
+      passed:
+        target?.passed === true &&
+        target?.pageRegionRuntime?.pageOperationMapPresent === true &&
+        searchPurposePresent === true &&
+        target?.cleanupPassed === true &&
+        target?.browserWorldAfterRead?.targetTabFound === true &&
+        target?.browserWorldAfterClose?.targetTabFound === false &&
+        target?.browserWorldAfterRead?.compactSummaryBounded === true &&
+        target?.browserWorldAfterRead?.retentionWithinLimit === true,
+    };
+  });
+  const targetsWithSearchPurpose = targetResults.filter(
+    (target) => target.searchPurposePresent === true,
+  ).length;
+  const allTargetsPassed =
+    targetResults.length > 0 && targetResults.every((target) => target.passed === true);
+  return {
+    publicNoLoginOnly: true,
+    targetCount: targetResults.length,
+    targetsWithSearchPurpose,
+    allTargetsExposeSearchPurpose: targetsWithSearchPurpose === targetResults.length,
+    allTargetsPassed,
+    targets: targetResults,
+    proofSatisfied: allTargetsPassed === true,
+    claimBoundary:
+      'Public search-entry matrix proof is redacted boolean/count evidence only. It proves each selected public no-login read_page target exposed a search operation purpose while BrowserWorld alignment and Browser Hygiene cleanup passed. It does not expose URLs, titles, page content, account state, screenshots, cookies, network bodies, search-result correctness, private flows, API/CDP reuse, competitor parity, release readiness, or product delivery grade.',
+  };
+}
+
+function runPublicSearchEntryMatrixSmoke(cliPath, smokeUrls, args) {
+  const matrix = runReadPageMatrixSmoke(cliPath, smokeUrls, args);
+  const publicSearchEntryMatrixProof = buildPublicSearchEntryMatrixProof(matrix.targets);
+  return {
+    scenario: 'public-search-entry-matrix',
+    targetCount: matrix.targetCount,
+    allTargetsPassed:
+      matrix.allTargetsPassed === true && publicSearchEntryMatrixProof.proofSatisfied === true,
+    targets: matrix.targets,
+    publicSearchEntryMatrixProof,
+    claimBoundary:
+      'Redacted public no-login search-entry matrix only. It proves selected public pages expose a search operation purpose with BrowserWorld/read_page alignment and Browser Hygiene cleanup, not search-result correctness, private login/logout, API/CDP reuse, release readiness, or product delivery grade.',
+  };
+}
+
 function hasReadPageMatrixAlignmentEvidence({
   redactedReadPage,
   redactedBrowserWorldAfterRead,
@@ -3653,7 +3721,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(
-      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|lifecycle-ownership-mix|page-opener-ownership|matrix|window-state|window-state-drift|read-page|read-page-matrix|read-page-background-target] [--sample-count 3] [--sample-interval-ms 250] [--skip-open] [--keep-open]\n`,
+      `Usage: node scripts/mcp-redacted-browser-world-smoke.mjs [--url https://example.com/] [--urls https://example.com/,https://example.org/] [--scenario single|lifecycle|lifecycle-ownership-mix|page-opener-ownership|matrix|window-state|window-state-drift|read-page|read-page-matrix|read-page-background-target|public-search-entry-matrix] [--sample-count 3] [--sample-interval-ms 250] [--skip-open] [--keep-open]\n`,
     );
     return;
   }
@@ -3673,8 +3741,10 @@ async function main() {
             ? runWindowStateDriftSmoke(cliPath, args)
             : args.scenario === 'read-page'
               ? runReadPageSmoke(cliPath, smokeUrl, args)
-              : args.scenario === 'read-page-matrix'
-                ? runReadPageMatrixSmoke(cliPath, smokeUrls, args)
+            : args.scenario === 'read-page-matrix'
+              ? runReadPageMatrixSmoke(cliPath, smokeUrls, args)
+              : args.scenario === 'public-search-entry-matrix'
+                ? runPublicSearchEntryMatrixSmoke(cliPath, smokeUrls, args)
                 : args.scenario === 'read-page-background-target'
                   ? runReadPageBackgroundTargetSmoke(cliPath, smokeUrl, args)
                   : args.scenario === 'lifecycle-ownership-mix'

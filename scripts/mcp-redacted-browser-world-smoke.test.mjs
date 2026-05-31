@@ -23,6 +23,7 @@ import {
   buildPageOpenerPostCloseCompactStateSummaryProof,
   buildPageOpenerPostCloseCompactFactsProof,
   buildPageOpenerChildCloseActiveReturnProof,
+  buildPublicSearchEntryMatrixProof,
   buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
   buildWindowStateMutationProof,
@@ -2931,6 +2932,99 @@ test('buildActiveTabSwitchProof proves active tab changed without exposing ids',
   assert.equal(serialized.includes('20'), false);
 });
 
+test('buildPublicSearchEntryMatrixProof proves every public target exposes search purpose', () => {
+  const proof = buildPublicSearchEntryMatrixProof([
+    {
+      targetIndex: 1,
+      passed: true,
+      cleanupPassed: true,
+      pageRegionRuntime: {
+        pageOperationMapPresent: true,
+        operationZoneCount: 7,
+        operationPurposes: ['navigate', 'read_content', 'search'],
+        regionTypes: ['content', 'navigation', 'unknown'],
+      },
+      browserWorldAfterRead: {
+        targetTabFound: true,
+        compactSummaryBounded: true,
+        retentionWithinLimit: true,
+      },
+      browserWorldAfterClose: {
+        targetTabFound: false,
+      },
+    },
+    {
+      targetIndex: 2,
+      passed: true,
+      cleanupPassed: true,
+      pageRegionRuntime: {
+        pageOperationMapPresent: true,
+        operationZoneCount: 9,
+        operationPurposes: ['navigate', 'open_menu', 'read_content', 'search'],
+        regionTypes: ['account', 'content', 'form', 'navigation'],
+      },
+      browserWorldAfterRead: {
+        targetTabFound: true,
+        compactSummaryBounded: true,
+        retentionWithinLimit: true,
+      },
+      browserWorldAfterClose: {
+        targetTabFound: false,
+      },
+    },
+  ]);
+
+  assert.equal(proof.targetCount, 2);
+  assert.equal(proof.targetsWithSearchPurpose, 2);
+  assert.equal(proof.allTargetsExposeSearchPurpose, true);
+  assert.equal(proof.allTargetsPassed, true);
+  assert.equal(proof.proofSatisfied, true);
+  assert.deepEqual(
+    proof.targets.map((target) => ({
+      targetIndex: target.targetIndex,
+      searchPurposePresent: target.searchPurposePresent,
+      passed: target.passed,
+    })),
+    [
+      { targetIndex: 1, searchPurposePresent: true, passed: true },
+      { targetIndex: 2, searchPurposePresent: true, passed: true },
+    ],
+  );
+  assert.doesNotThrow(() => assertRedactedSmokeOutputSafe(proof));
+});
+
+test('buildPublicSearchEntryMatrixProof fails when a target only exposes submit form', () => {
+  const proof = buildPublicSearchEntryMatrixProof([
+    {
+      targetIndex: 1,
+      passed: true,
+      cleanupPassed: true,
+      pageRegionRuntime: {
+        pageOperationMapPresent: true,
+        operationZoneCount: 4,
+        operationPurposes: ['navigate', 'read_content', 'submit_form'],
+        regionTypes: ['content', 'form', 'navigation'],
+      },
+      browserWorldAfterRead: {
+        targetTabFound: true,
+        compactSummaryBounded: true,
+        retentionWithinLimit: true,
+      },
+      browserWorldAfterClose: {
+        targetTabFound: false,
+      },
+    },
+  ]);
+
+  assert.equal(proof.targetCount, 1);
+  assert.equal(proof.targetsWithSearchPurpose, 0);
+  assert.equal(proof.allTargetsExposeSearchPurpose, false);
+  assert.equal(proof.targets[0].searchPurposePresent, false);
+  assert.equal(proof.targets[0].passed, false);
+  assert.equal(proof.allTargetsPassed, false);
+  assert.equal(proof.proofSatisfied, false);
+});
+
 test('buildReadPageMatrixTargetResult fails when read_page operation target evidence is incomplete', () => {
   const target = buildReadPageMatrixTargetResult(
     {
@@ -3356,6 +3450,13 @@ test('parseArgs supports read-page scenario', () => {
 
 test('parseArgs supports read-page matrix scenario', () => {
   assert.equal(parseArgs(['--scenario', 'read-page-matrix']).scenario, 'read-page-matrix');
+});
+
+test('parseArgs supports public search entry matrix scenario', () => {
+  assert.equal(
+    parseArgs(['--scenario', 'public-search-entry-matrix']).scenario,
+    'public-search-entry-matrix',
+  );
 });
 
 test('parseArgs supports read-page background target scenario', () => {
