@@ -1803,6 +1803,82 @@ export function buildPageOpenerParentRereadAfterChildCloseProof({
   };
 }
 
+export function buildPageOpenerPostCloseRoutingSummaryProof({
+  readPagePayload,
+  browserWorldPayload,
+  parentTabId,
+  childTabId,
+}) {
+  const tabs = extractBrowserWorldTabs(browserWorldPayload);
+  const parentTab = Number.isInteger(parentTabId)
+    ? tabs.find((tab) => tab?.tabId === parentTabId)
+    : null;
+  const childTab = Number.isInteger(childTabId)
+    ? tabs.find((tab) => tab?.tabId === childTabId)
+    : null;
+  const ownershipRuntime = readPagePayload?.ownershipRuntime ?? {};
+  const compactFacts =
+    readPagePayload?.browserPageObjectCompact?.facts &&
+    typeof readPagePayload.browserPageObjectCompact.facts === 'object'
+      ? readPagePayload.browserPageObjectCompact.facts
+      : {};
+  const compactTabFacts =
+    compactFacts.tab && typeof compactFacts.tab === 'object' ? compactFacts.tab : {};
+  const compactReadTargetTabId = Number.isInteger(compactTabFacts.readTargetTabId)
+    ? compactTabFacts.readTargetTabId
+    : Number.isInteger(compactTabFacts.currentTabId)
+      ? compactTabFacts.currentTabId
+      : null;
+  const parentKnown = Number.isInteger(parentTabId);
+  const childKnown = Number.isInteger(childTabId);
+  const readTargetMatchesParent =
+    parentKnown && Number.isInteger(ownershipRuntime.currentTabId)
+      ? ownershipRuntime.currentTabId === parentTabId
+      : null;
+  const compactReadTargetMatchesParent =
+    parentKnown && Number.isInteger(compactReadTargetTabId)
+      ? compactReadTargetTabId === parentTabId
+      : null;
+  const browserWorldParentObserved = Boolean(parentTab);
+  const browserWorldChildNoLongerObserved = childKnown ? !childTab : null;
+  const readRuntimeSourceIsBrowserWorld =
+    ownershipRuntime.currentTabRuntimeStateSource === 'browser_world_inventory';
+  const parentOperable =
+    ownershipRuntime.currentTabCanTabrixOperate === true || parentTab?.canTabrixOperate === true;
+  const runtimeRoutingDecisionSummaryPresent =
+    typeof ownershipRuntime.browserWorldRoutingDecisionSummary === 'string';
+  const compactRoutingDecisionSummaryPresent =
+    typeof compactTabFacts.browserWorldRoutingDecisionSummary === 'string';
+  const routingDecisionSummaryProjectionComplete =
+    runtimeRoutingDecisionSummaryPresent === true && compactRoutingDecisionSummaryPresent === true;
+  return {
+    publicNoLoginOnly: true,
+    parentTabOpened: parentKnown,
+    childTabOpened: childKnown,
+    readTargetMatchesParent,
+    compactReadTargetMatchesParent,
+    browserWorldParentObserved,
+    browserWorldChildNoLongerObserved,
+    readRuntimeSourceIsBrowserWorld,
+    parentOperable,
+    runtimeRoutingDecisionSummaryPresent,
+    compactRoutingDecisionSummaryPresent,
+    routingDecisionSummaryProjectionComplete,
+    proofSatisfied:
+      parentKnown === true &&
+      childKnown === true &&
+      readTargetMatchesParent === true &&
+      compactReadTargetMatchesParent === true &&
+      browserWorldParentObserved === true &&
+      browserWorldChildNoLongerObserved === true &&
+      readRuntimeSourceIsBrowserWorld === true &&
+      parentOperable === true &&
+      routingDecisionSummaryProjectionComplete === true,
+    claimBoundary:
+      'Page-opener post-close routing-summary proof is redacted boolean evidence only; it proves the parent read_page snapshot still projects BrowserWorld routing-summary evidence after the page-opened child closes in one public no-login run. It does not expose tab ids, URLs, titles, page content, account state, task success, API/CDP reuse, or release readiness.',
+  };
+}
+
 export function buildPageOpenerChildCloseActiveReturnProof({
   browserWorldPayload,
   parentTabId,
@@ -2829,6 +2905,15 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
           childTabId,
         })
       : null;
+  const postCloseRoutingSummaryProof =
+    parentReadPagePayload !== null && browserWorldPayloadAfterParentRead !== null
+      ? buildPageOpenerPostCloseRoutingSummaryProof({
+          readPagePayload: parentReadPagePayload,
+          browserWorldPayload: browserWorldPayloadAfterParentRead,
+          parentTabId,
+          childTabId,
+        })
+      : null;
   const remainingCloseTargets = uniqueNumbers([
     parentTabId,
     childCloseResult.succeeded === true ? null : childTabId,
@@ -2887,6 +2972,7 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
     childCloseIsolationProof,
     childCloseActiveReturnProof,
     parentRereadAfterChildCloseProof,
+    postCloseRoutingSummaryProof,
     cleanupTargetsPassed,
     allTargetsPassed:
       proof.proofSatisfied === true &&
@@ -2894,6 +2980,7 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
       childCloseIsolationProof?.proofSatisfied === true &&
       childCloseActiveReturnProof?.proofSatisfied === true &&
       parentRereadAfterChildCloseProof?.proofSatisfied === true &&
+      postCloseRoutingSummaryProof?.proofSatisfied === true &&
       closeResult.succeeded === true &&
       cleanupTargetsPassed === true,
     claimBoundary:

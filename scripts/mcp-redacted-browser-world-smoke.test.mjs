@@ -17,6 +17,7 @@ import {
   buildPageOpenerReadAlignmentProof,
   buildPageOpenerChildCloseIsolationProof,
   buildPageOpenerParentRereadAfterChildCloseProof,
+  buildPageOpenerPostCloseRoutingSummaryProof,
   buildPageOpenerChildCloseActiveReturnProof,
   buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
@@ -1909,6 +1910,99 @@ test('buildPageOpenerParentRereadAfterChildCloseProof fails when reread targets 
   assert.equal(proof.browserWorldChildNoLongerObserved, true);
   assert.equal(proof.readRuntimeParentIsAi, false);
   assert.equal(proof.compactTabParentIsAi, false);
+  assert.equal(proof.proofSatisfied, false);
+});
+
+test('buildPageOpenerPostCloseRoutingSummaryProof proves parent routing summary after child closes', () => {
+  const proof = buildPageOpenerPostCloseRoutingSummaryProof({
+    parentTabId: 100,
+    childTabId: 101,
+    browserWorldPayload: {
+      browserWorld: {
+        tabs: [
+          {
+            tabId: 100,
+            url: 'https://private.example.test/parent',
+            title: 'Private Parent',
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+            canTabrixOperate: true,
+          },
+        ],
+      },
+    },
+    readPagePayload: {
+      ownershipRuntime: {
+        currentTabId: 100,
+        currentTabCanTabrixOperate: true,
+        currentTabRuntimeStateSource: 'browser_world_inventory',
+        browserWorldRoutingDecisionSummary:
+          'Routing summary includes https://private.example.test/parent and Private Parent.',
+      },
+      browserPageObjectCompact: {
+        facts: {
+          tab: {
+            readTargetTabId: 100,
+            browserWorldRoutingDecisionSummary:
+              'Routing summary includes https://private.example.test/parent and Private Parent.',
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(proof.readTargetMatchesParent, true);
+  assert.equal(proof.compactReadTargetMatchesParent, true);
+  assert.equal(proof.browserWorldParentObserved, true);
+  assert.equal(proof.browserWorldChildNoLongerObserved, true);
+  assert.equal(proof.readRuntimeSourceIsBrowserWorld, true);
+  assert.equal(proof.parentOperable, true);
+  assert.equal(proof.runtimeRoutingDecisionSummaryPresent, true);
+  assert.equal(proof.compactRoutingDecisionSummaryPresent, true);
+  assert.equal(proof.routingDecisionSummaryProjectionComplete, true);
+  assert.equal(proof.proofSatisfied, true);
+  assert.doesNotThrow(() => assertRedactedSmokeOutputSafe(proof));
+  assert.equal(JSON.stringify(proof).includes('private.example.test'), false);
+});
+
+test('buildPageOpenerPostCloseRoutingSummaryProof fails when routing summary projection is missing', () => {
+  const proof = buildPageOpenerPostCloseRoutingSummaryProof({
+    parentTabId: 100,
+    childTabId: 101,
+    browserWorldPayload: {
+      browserWorld: {
+        tabs: [
+          {
+            tabId: 100,
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+            canTabrixOperate: true,
+          },
+        ],
+      },
+    },
+    readPagePayload: {
+      ownershipRuntime: {
+        currentTabId: 100,
+        currentTabCanTabrixOperate: true,
+        currentTabRuntimeStateSource: 'browser_world_inventory',
+      },
+      browserPageObjectCompact: {
+        facts: {
+          tab: {
+            readTargetTabId: 100,
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(proof.readTargetMatchesParent, true);
+  assert.equal(proof.compactReadTargetMatchesParent, true);
+  assert.equal(proof.browserWorldChildNoLongerObserved, true);
+  assert.equal(proof.runtimeRoutingDecisionSummaryPresent, false);
+  assert.equal(proof.compactRoutingDecisionSummaryPresent, false);
+  assert.equal(proof.routingDecisionSummaryProjectionComplete, false);
   assert.equal(proof.proofSatisfied, false);
 });
 
