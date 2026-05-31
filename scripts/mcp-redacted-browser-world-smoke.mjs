@@ -1879,6 +1879,98 @@ export function buildPageOpenerPostCloseRoutingSummaryProof({
   };
 }
 
+export function buildPageOpenerPostCloseAiOperationProof({
+  readPagePayload,
+  browserWorldPayload,
+  parentTabId,
+  childTabId,
+}) {
+  const tabs = extractBrowserWorldTabs(browserWorldPayload);
+  const parentTab = Number.isInteger(parentTabId)
+    ? tabs.find((tab) => tab?.tabId === parentTabId)
+    : null;
+  const childTab = Number.isInteger(childTabId)
+    ? tabs.find((tab) => tab?.tabId === childTabId)
+    : null;
+  const ownershipRuntime = readPagePayload?.ownershipRuntime ?? {};
+  const compactFacts =
+    readPagePayload?.browserPageObjectCompact?.facts &&
+    typeof readPagePayload.browserPageObjectCompact.facts === 'object'
+      ? readPagePayload.browserPageObjectCompact.facts
+      : {};
+  const compactTabFacts =
+    compactFacts.tab && typeof compactFacts.tab === 'object' ? compactFacts.tab : {};
+  const compactReadTargetTabId = Number.isInteger(compactTabFacts.readTargetTabId)
+    ? compactTabFacts.readTargetTabId
+    : Number.isInteger(compactTabFacts.currentTabId)
+      ? compactTabFacts.currentTabId
+      : null;
+  const parentKnown = Number.isInteger(parentTabId);
+  const childKnown = Number.isInteger(childTabId);
+  const readTargetMatchesParent =
+    parentKnown && Number.isInteger(ownershipRuntime.currentTabId)
+      ? ownershipRuntime.currentTabId === parentTabId
+      : null;
+  const compactReadTargetMatchesParent =
+    parentKnown && Number.isInteger(compactReadTargetTabId)
+      ? compactReadTargetTabId === parentTabId
+      : null;
+  const browserWorldParentObserved = Boolean(parentTab);
+  const browserWorldChildNoLongerObserved = childKnown ? !childTab : null;
+  const readRuntimeSourceIsBrowserWorld =
+    ownershipRuntime.currentTabRuntimeStateSource === 'browser_world_inventory';
+  const parentOperable =
+    ownershipRuntime.currentTabCanTabrixOperate === true || parentTab?.canTabrixOperate === true;
+  const runtimeLastAiOperationIsReadPage =
+    ownershipRuntime.currentTabLastAiOperation === 'read_page';
+  const runtimeLastAiOperationConfidencePresent =
+    typeof ownershipRuntime.currentTabLastAiOperationConfidence === 'number';
+  const runtimeLastAiOperationReasonPresent =
+    typeof ownershipRuntime.currentTabLastAiOperationReason === 'string';
+  const compactLastAiOperationIsReadPage = compactTabFacts.lastAiOperation === 'read_page';
+  const compactLastAiOperationConfidencePresent =
+    typeof compactTabFacts.lastAiOperationConfidence === 'number';
+  const compactLastAiOperationReasonPresent =
+    typeof compactTabFacts.lastAiOperationReason === 'string';
+  const aiOperationAttributionComplete =
+    runtimeLastAiOperationIsReadPage === true &&
+    runtimeLastAiOperationConfidencePresent === true &&
+    runtimeLastAiOperationReasonPresent === true &&
+    compactLastAiOperationIsReadPage === true &&
+    compactLastAiOperationConfidencePresent === true &&
+    compactLastAiOperationReasonPresent === true;
+  return {
+    publicNoLoginOnly: true,
+    parentTabOpened: parentKnown,
+    childTabOpened: childKnown,
+    readTargetMatchesParent,
+    compactReadTargetMatchesParent,
+    browserWorldParentObserved,
+    browserWorldChildNoLongerObserved,
+    readRuntimeSourceIsBrowserWorld,
+    parentOperable,
+    runtimeLastAiOperationIsReadPage,
+    runtimeLastAiOperationConfidencePresent,
+    runtimeLastAiOperationReasonPresent,
+    compactLastAiOperationIsReadPage,
+    compactLastAiOperationConfidencePresent,
+    compactLastAiOperationReasonPresent,
+    aiOperationAttributionComplete,
+    proofSatisfied:
+      parentKnown === true &&
+      childKnown === true &&
+      readTargetMatchesParent === true &&
+      compactReadTargetMatchesParent === true &&
+      browserWorldParentObserved === true &&
+      browserWorldChildNoLongerObserved === true &&
+      readRuntimeSourceIsBrowserWorld === true &&
+      parentOperable === true &&
+      aiOperationAttributionComplete === true,
+    claimBoundary:
+      'Page-opener post-close AI-operation proof is redacted boolean evidence only; it proves the parent read_page snapshot is attributed as the latest AI read_page operation after the page-opened child closes in one public no-login run. It does not expose tab ids, URLs, titles, page content, account state, task success, API/CDP reuse, or release readiness.',
+  };
+}
+
 export function buildPageOpenerChildCloseActiveReturnProof({
   browserWorldPayload,
   parentTabId,
@@ -2914,6 +3006,15 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
           childTabId,
         })
       : null;
+  const postCloseAiOperationProof =
+    parentReadPagePayload !== null && browserWorldPayloadAfterParentRead !== null
+      ? buildPageOpenerPostCloseAiOperationProof({
+          readPagePayload: parentReadPagePayload,
+          browserWorldPayload: browserWorldPayloadAfterParentRead,
+          parentTabId,
+          childTabId,
+        })
+      : null;
   const remainingCloseTargets = uniqueNumbers([
     parentTabId,
     childCloseResult.succeeded === true ? null : childTabId,
@@ -2973,6 +3074,7 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
     childCloseActiveReturnProof,
     parentRereadAfterChildCloseProof,
     postCloseRoutingSummaryProof,
+    postCloseAiOperationProof,
     cleanupTargetsPassed,
     allTargetsPassed:
       proof.proofSatisfied === true &&
@@ -2981,6 +3083,7 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
       childCloseActiveReturnProof?.proofSatisfied === true &&
       parentRereadAfterChildCloseProof?.proofSatisfied === true &&
       postCloseRoutingSummaryProof?.proofSatisfied === true &&
+      postCloseAiOperationProof?.proofSatisfied === true &&
       closeResult.succeeded === true &&
       cleanupTargetsPassed === true,
     claimBoundary:

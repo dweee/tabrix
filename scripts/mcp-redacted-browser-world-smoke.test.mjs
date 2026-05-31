@@ -18,6 +18,7 @@ import {
   buildPageOpenerChildCloseIsolationProof,
   buildPageOpenerParentRereadAfterChildCloseProof,
   buildPageOpenerPostCloseRoutingSummaryProof,
+  buildPageOpenerPostCloseAiOperationProof,
   buildPageOpenerChildCloseActiveReturnProof,
   buildReadPageMatrixTargetResult,
   buildWindowStateDriftSummary,
@@ -2003,6 +2004,113 @@ test('buildPageOpenerPostCloseRoutingSummaryProof fails when routing summary pro
   assert.equal(proof.runtimeRoutingDecisionSummaryPresent, false);
   assert.equal(proof.compactRoutingDecisionSummaryPresent, false);
   assert.equal(proof.routingDecisionSummaryProjectionComplete, false);
+  assert.equal(proof.proofSatisfied, false);
+});
+
+test('buildPageOpenerPostCloseAiOperationProof proves parent reread attribution after child closes', () => {
+  const proof = buildPageOpenerPostCloseAiOperationProof({
+    parentTabId: 100,
+    childTabId: 101,
+    browserWorldPayload: {
+      browserWorld: {
+        tabs: [
+          {
+            tabId: 100,
+            url: 'https://private.example.test/parent',
+            title: 'Private Parent',
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+            canTabrixOperate: true,
+          },
+        ],
+      },
+    },
+    readPagePayload: {
+      ownershipRuntime: {
+        currentTabId: 100,
+        currentTabCanTabrixOperate: true,
+        currentTabRuntimeStateSource: 'browser_world_inventory',
+        currentTabLastAiOperation: 'read_page',
+        currentTabLastAiOperationConfidence: 0.98,
+        currentTabLastAiOperationReason:
+          'Read page after child close for https://private.example.test/parent.',
+      },
+      browserPageObjectCompact: {
+        facts: {
+          tab: {
+            readTargetTabId: 100,
+            lastAiOperation: 'read_page',
+            lastAiOperationConfidence: 0.98,
+            lastAiOperationReason:
+              'Compact proof for https://private.example.test/parent after child close.',
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(proof.readTargetMatchesParent, true);
+  assert.equal(proof.compactReadTargetMatchesParent, true);
+  assert.equal(proof.browserWorldParentObserved, true);
+  assert.equal(proof.browserWorldChildNoLongerObserved, true);
+  assert.equal(proof.readRuntimeSourceIsBrowserWorld, true);
+  assert.equal(proof.parentOperable, true);
+  assert.equal(proof.runtimeLastAiOperationIsReadPage, true);
+  assert.equal(proof.runtimeLastAiOperationConfidencePresent, true);
+  assert.equal(proof.runtimeLastAiOperationReasonPresent, true);
+  assert.equal(proof.compactLastAiOperationIsReadPage, true);
+  assert.equal(proof.compactLastAiOperationConfidencePresent, true);
+  assert.equal(proof.compactLastAiOperationReasonPresent, true);
+  assert.equal(proof.aiOperationAttributionComplete, true);
+  assert.equal(proof.proofSatisfied, true);
+  assert.doesNotThrow(() => assertRedactedSmokeOutputSafe(proof));
+  assert.equal(JSON.stringify(proof).includes('private.example.test'), false);
+});
+
+test('buildPageOpenerPostCloseAiOperationProof fails when parent reread attribution is missing', () => {
+  const proof = buildPageOpenerPostCloseAiOperationProof({
+    parentTabId: 100,
+    childTabId: 101,
+    browserWorldPayload: {
+      browserWorld: {
+        tabs: [
+          {
+            tabId: 100,
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+            canTabrixOperate: true,
+          },
+        ],
+      },
+    },
+    readPagePayload: {
+      ownershipRuntime: {
+        currentTabId: 100,
+        currentTabCanTabrixOperate: true,
+        currentTabRuntimeStateSource: 'browser_world_inventory',
+        currentTabLastAiOperation: 'navigate_new_tab',
+      },
+      browserPageObjectCompact: {
+        facts: {
+          tab: {
+            readTargetTabId: 100,
+            lastAiOperation: 'navigate_new_tab',
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(proof.readTargetMatchesParent, true);
+  assert.equal(proof.compactReadTargetMatchesParent, true);
+  assert.equal(proof.browserWorldChildNoLongerObserved, true);
+  assert.equal(proof.runtimeLastAiOperationIsReadPage, false);
+  assert.equal(proof.runtimeLastAiOperationConfidencePresent, false);
+  assert.equal(proof.runtimeLastAiOperationReasonPresent, false);
+  assert.equal(proof.compactLastAiOperationIsReadPage, false);
+  assert.equal(proof.compactLastAiOperationConfidencePresent, false);
+  assert.equal(proof.compactLastAiOperationReasonPresent, false);
+  assert.equal(proof.aiOperationAttributionComplete, false);
   assert.equal(proof.proofSatisfied, false);
 });
 
