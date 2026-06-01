@@ -25,6 +25,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { randomUUID } from 'node:crypto';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createMcpServer } from '../mcp/mcp-server';
+import { handleToolCall } from '../mcp/register-tools';
 import { __bridgeLaunchInternals } from '../mcp/bridge-recovery';
 import { sessionManager } from '../execution/session-manager';
 import { SessionRegistry, type ConnectedClient, type TransportsSnapshot } from './session-registry';
@@ -197,6 +198,24 @@ function sendMcpJsonRpcError(
       ...(data ? { data } : {}),
     },
   });
+}
+
+const BROWSER_WORLD_BASELINE_TOOL_NAME = 'get_windows_and_tabs';
+
+function getStaleSessionRecoverableToolCallArgs(body: unknown): Record<string, unknown> | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const requestBody = body as {
+    method?: unknown;
+    params?: {
+      name?: unknown;
+      arguments?: unknown;
+    };
+  };
+  if (requestBody.method !== 'tools/call') return null;
+  if (requestBody.params?.name !== BROWSER_WORLD_BASELINE_TOOL_NAME) return null;
+  const args = requestBody.params.arguments;
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return {};
+  return args as Record<string, unknown>;
 }
 
 function getLocalNetworkAddresses(): string[] {
@@ -738,6 +757,26 @@ export class Server {
       if (transport) {
         // Existing session found, proceed.
       } else if (sessionId && !transport) {
+        const recoverableArgs = getStaleSessionRecoverableToolCallArgs(request.body);
+        if (recoverableArgs) {
+          try {
+            const result = await handleToolCall(BROWSER_WORLD_BASELINE_TOOL_NAME, recoverableArgs);
+            reply.code(HTTP_STATUS.OK).send({
+              jsonrpc: '2.0',
+              id: getJsonRpcRequestId(request.body),
+              result,
+            });
+          } catch {
+            sendMcpJsonRpcError(
+              reply,
+              HTTP_STATUS.INTERNAL_SERVER_ERROR,
+              request.body,
+              -32603,
+              ERROR_MESSAGES.MCP_REQUEST_PROCESSING_ERROR,
+            );
+          }
+          return;
+        }
         sendMcpJsonRpcError(
           reply,
           HTTP_STATUS.BAD_REQUEST,

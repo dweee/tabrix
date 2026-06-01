@@ -7,6 +7,8 @@ import { sessionManager } from '../execution/session-manager';
 import { tokenManager } from './auth';
 import type { TokenData } from './auth';
 import { bridgeRuntimeState } from './bridge-state';
+import { bridgeCommandChannel } from './bridge-command-channel';
+import nativeMessagingHostInstance from '../native-messaging-host';
 import type { BridgeObservationMessage, BridgeObservationMessagePayload } from '@tabrix/shared';
 import { dispatchBridgeObservationToStream } from '../runtime/browser-event-stream';
 import { getLifecycleEvidenceCollectorSnapshot } from '../runtime/lifecycle-evidence-collector';
@@ -629,6 +631,73 @@ describe('服务器测试', () => {
     expect([200, 204]).toContain(del.status);
   });
 
+  test('POST /mcp stale session 仍可读取 BrowserWorld baseline', async () => {
+    jest.spyOn(bridgeRuntimeState, 'syncBrowserProcessIfStale').mockImplementation(() => {
+      bridgeRuntimeState.setBrowserProcessRunning(true);
+      return true;
+    });
+    jest.spyOn(bridgeCommandChannel, 'isConnected').mockReturnValue(false);
+    bridgeRuntimeState.setBrowserProcessRunning(true);
+    bridgeRuntimeState.setCommandChannelConnected(true, {
+      type: 'websocket',
+      connectionId: 'server-test-command-channel',
+    });
+    bridgeRuntimeState.recordHeartbeat({
+      sentAt: Date.now(),
+      nativeConnected: true,
+      extensionId: 'server-test-extension',
+      connectionId: 'server-test-command-channel',
+      tabCount: 2,
+      windowCount: 1,
+    });
+    bridgeRuntimeState.setNativeHostAttached(true);
+    const extensionSpy = jest
+      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+      .mockResolvedValueOnce({
+        status: 'success',
+        items: [],
+      } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: '{"windowCount":1,"tabCount":2}' }],
+          isError: false,
+        },
+      } as never);
+
+    try {
+      const stale = await supertest(Server.getInstance().server)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .set('Content-Type', 'application/json')
+        .set('mcp-session-id', 'stale-session-for-browser-world-baseline-test')
+        .send({
+          jsonrpc: '2.0',
+          id: 98,
+          method: 'tools/call',
+          params: {
+            name: 'get_windows_and_tabs',
+            arguments: {},
+          },
+        })
+        .expect(200);
+
+      expect(stale.body).toMatchObject({
+        jsonrpc: '2.0',
+        id: 98,
+        result: {
+          isError: false,
+          content: [{ type: 'text', text: '{"windowCount":1,"tabCount":2}' }],
+        },
+      });
+      expect(extensionSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.restoreAllMocks();
+      bridgeRuntimeState.reset();
+      sessionManager.reset();
+    }
+  });
+
   test('POST /mcp stale session 返回 JSON-RPC 错误信封', async () => {
     const stale = await supertest(Server.getInstance().server)
       .post('/mcp')
@@ -640,8 +709,8 @@ describe('服务器测试', () => {
         id: 99,
         method: 'tools/call',
         params: {
-          name: 'get_windows_and_tabs',
-          arguments: {},
+          name: 'chrome_read_page',
+          arguments: { tabId: 1 },
         },
       })
       .expect(400);
