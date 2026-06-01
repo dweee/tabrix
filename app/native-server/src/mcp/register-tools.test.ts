@@ -1658,6 +1658,15 @@ describe('handleToolCall execution wrapper', () => {
         actionPreflight: {
           verdict: 'collaboration_required',
           reason: 'auth_resume_verification_required',
+          taskResumeHandoffStatus: 'needs_fresh_read',
+          taskResumeHandoffNextAction: 'run_chrome_read_page_force_refresh',
+          taskResumeCanContinue: false,
+        },
+        taskResumeHandoff: {
+          summaryKind: 'task_resume_handoff_v1',
+          status: 'needs_fresh_read',
+          canContinue: false,
+          nextAction: 'run_chrome_read_page_force_refresh',
         },
         runtimePolicyAudit: {
           verdict: 'collaboration_required',
@@ -1667,10 +1676,17 @@ describe('handleToolCall execution wrapper', () => {
             targetTabId: 1,
             blocksTaskResume: true,
           },
+          taskResumeReadiness: {
+            handoffSummary: {
+              status: 'needs_fresh_read',
+              nextAction: 'run_chrome_read_page_force_refresh',
+            },
+          },
         },
       });
       expect(payload.message).toContain('chrome_read_page');
       expect(payload.message).toContain('forceRefresh=true');
+      expect(payload.message).toBe(payload.taskResumeHandoff.message);
       expect(bridgeSpy).toHaveBeenCalledTimes(1);
     });
 
@@ -4703,6 +4719,121 @@ describe('handleToolCall execution wrapper', () => {
           }),
         ]),
       );
+    });
+
+    it('blocked continuation after an unknown search postcondition returns task resume handoff guidance', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
+      auto.noteRunOwnedTab(1);
+      Object.defineProperty(auto, 'readBudget', { value: 5, writable: false });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_before_failed_search',
+          tabId: 1,
+          pageRegions: [contentListRegion('before')],
+        }),
+      );
+      await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  observedOutcome: 'tool_reported_success_without_business_change',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_search_submit',
+        candidateAction: {
+          id: 'ca_search_submit',
+          actionType: 'click',
+          targetRef: 'ref_search_submit',
+          confidence: 0.91,
+          matchReason: 'search submit candidate',
+          locatorChain: [{ type: 'ref', value: 'ref_search_submit' }],
+          intent: 'search.submit',
+        },
+      });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_after_failed_search',
+          tabId: 1,
+          pageRegions: [contentListRegion('before')],
+        }),
+      );
+      const readback = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+      const readbackPayload = JSON.parse(String(readback.content[0].text));
+      expect(readbackPayload.taskResumeReadiness).toMatchObject({
+        status: 'postcondition_unknown_not_proven',
+        canResumeOriginalTask: false,
+        nextStep: 'verify_postcondition',
+        handoffSummary: {
+          status: 'needs_postcondition_verification',
+          nextAction: 'verify_business_postcondition',
+        },
+      });
+
+      const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
+      bridgeSpy.mockClear();
+      bridgeSpy.mockResolvedValueOnce({ status: 'success', items: [] } as never);
+      const blocked = await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_next_result',
+        userConfirmed: true,
+      });
+      const blockedPayload = JSON.parse(String(blocked.content[0].text));
+
+      expect(blocked.isError).toBe(true);
+      expect(blockedPayload).toMatchObject({
+        ok: false,
+        code: 'TABRIX_ACTION_COLLABORATION_REQUIRED',
+        actionPreflight: {
+          verdict: 'collaboration_required',
+          reason: 'task_resume_readiness_not_proven',
+          taskResumeHandoffStatus: 'needs_postcondition_verification',
+          taskResumeHandoffNextAction: 'verify_business_postcondition',
+          taskResumeCanContinue: false,
+        },
+        taskResumeHandoff: {
+          summaryKind: 'task_resume_handoff_v1',
+          status: 'needs_postcondition_verification',
+          canContinue: false,
+          nextAction: 'verify_business_postcondition',
+        },
+        runtimePolicyAudit: {
+          verdict: 'collaboration_required',
+          reason: 'task_resume_readiness_not_proven',
+          taskResumeReadiness: {
+            status: 'postcondition_unknown_not_proven',
+            handoffSummary: {
+              status: 'needs_postcondition_verification',
+              nextAction: 'verify_business_postcondition',
+            },
+          },
+        },
+      });
+      expect(blockedPayload.message).toBe(blockedPayload.taskResumeHandoff.message);
+      expect(bridgeSpy).toHaveBeenCalledTimes(1);
     });
   });
 });

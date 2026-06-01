@@ -893,6 +893,8 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       taskContext,
     });
     if (!nonInterferenceVerdict.allowed) {
+      const taskResumeHandoff =
+        nonInterferenceVerdict.audit.taskResumeReadiness?.handoffSummary ?? null;
       const payload = {
         ok: false,
         code:
@@ -903,7 +905,15 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         actionPreflight: {
           verdict: nonInterferenceVerdict.audit.verdict,
           reason: nonInterferenceVerdict.audit.reason,
+          ...(taskResumeHandoff
+            ? {
+                taskResumeHandoffStatus: taskResumeHandoff.status,
+                taskResumeHandoffNextAction: taskResumeHandoff.nextAction,
+                taskResumeCanContinue: taskResumeHandoff.canContinue,
+              }
+            : {}),
         },
+        ...(taskResumeHandoff ? { taskResumeHandoff } : {}),
         runtimePolicyAudit: nonInterferenceVerdict.audit,
       };
       const result = attachTaskContextEnvelopeToJsonResult(
@@ -920,6 +930,13 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
             decisionReason: nonInterferenceVerdict.audit.reason,
             actionOutcome: 'blocked',
             executionMode: 'non_interference_policy',
+            ...(taskResumeHandoff
+              ? {
+                  taskResumeHandoffStatus: taskResumeHandoff.status,
+                  taskResumeHandoffNextAction: taskResumeHandoff.nextAction,
+                  taskResumeCanContinue: taskResumeHandoff.canContinue,
+                }
+              : {}),
           },
         },
       });
