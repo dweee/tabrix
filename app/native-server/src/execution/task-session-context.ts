@@ -341,6 +341,8 @@ export type TaskRegionStatePostconditionKind =
   | 'otp_requested'
   | 'qr_waiting';
 
+export const DEFAULT_AUTH_USER_COLLABORATION_STALE_AFTER_MS = 10 * 60 * 1000;
+
 export interface TaskRegionStatePostconditionResultSnapshot {
   actionId: string;
   kind: TaskRegionStatePostconditionKind;
@@ -1280,7 +1282,11 @@ export class TaskSessionContext {
       }));
   }
 
-  public buildTaskResumeReadiness(input?: { tabId?: number | null }): TaskResumeReadinessSnapshot {
+  public buildTaskResumeReadiness(input?: {
+    tabId?: number | null;
+    nowMs?: number | null;
+    authUserCollaborationStaleAfterMs?: number | null;
+  }): TaskResumeReadinessSnapshot {
     const tabId = normalizePositiveTabId(input?.tabId);
     const gate = this.lastAuthResumeGate ? cloneTaskAuthResumeGate(this.lastAuthResumeGate) : null;
 
@@ -1399,6 +1405,27 @@ export class TaskSessionContext {
         });
       }
       if (latestPostcondition.result.kind === 'otp_requested') {
+        const staleReason = staleUserCollaborationPostconditionReason(
+          latestPostcondition.result,
+          input?.nowMs,
+          input?.authUserCollaborationStaleAfterMs,
+        );
+        if (staleReason) {
+          return withTaskResumeHandoffSummary({
+            status: 'postcondition_unknown_not_proven',
+            canResumeOriginalTask: false,
+            nextStep: 'force_fresh_read_same_tab',
+            tabId,
+            evidenceKinds: [
+              'region_state_postcondition',
+              'user_collaboration_required',
+              'stale_user_collaboration',
+            ],
+            reason: `region_state_otp_requested_not_proven:${staleReason}`,
+            claimBoundary:
+              'The OTP/user-collaboration wait evidence is stale. A fresh same-tab read is required before submitting login or resuming the original task.',
+          });
+        }
         return withTaskResumeHandoffSummary({
           status: 'blocked_by_auth_verification',
           canResumeOriginalTask: false,
@@ -2203,6 +2230,26 @@ function hasPriorPassedOtpRequestForTab(
       : Number.NEGATIVE_INFINITY;
     return producedAtMs <= latestProducedAtMs;
   });
+}
+
+function staleUserCollaborationPostconditionReason(
+  result: TaskRegionStatePostconditionResultSnapshot,
+  nowMs: number | null | undefined,
+  staleAfterMs: number | null | undefined,
+): string | null {
+  if (result.kind !== 'otp_requested') return null;
+  if (!Number.isFinite(nowMs)) return null;
+  const normalizedNowMs = Math.floor(nowMs as number);
+  const normalizedProducedAtMs = Number.isFinite(result.producedAtMs)
+    ? Math.floor(result.producedAtMs)
+    : normalizedNowMs;
+  const normalizedStaleAfterMs =
+    Number.isFinite(staleAfterMs) && (staleAfterMs as number) > 0
+      ? Math.floor(staleAfterMs as number)
+      : DEFAULT_AUTH_USER_COLLABORATION_STALE_AFTER_MS;
+  const ageMs = normalizedNowMs - normalizedProducedAtMs;
+  if (ageMs <= normalizedStaleAfterMs) return null;
+  return `otp_user_collaboration_wait_stale:${ageMs}ms>${normalizedStaleAfterMs}ms`;
 }
 
 function buildPendingBusinessVerificationForResume(

@@ -1,5 +1,8 @@
 import { TOOL_NAMES } from '@tabrix/shared';
-import { TaskSessionContext } from '../execution/task-session-context';
+import {
+  DEFAULT_AUTH_USER_COLLABORATION_STALE_AFTER_MS,
+  TaskSessionContext,
+} from '../execution/task-session-context';
 import { evaluateNonInterferencePreflight } from './non-interference-preflight';
 
 describe('evaluateNonInterferencePreflight', () => {
@@ -403,6 +406,7 @@ describe('evaluateNonInterferencePreflight', () => {
   it('blocks impact actions during OTP wait and allows them after fresh login completion proof', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
     ctx.noteRunOwnedTab(42);
+    const producedAtMs = Date.now();
     ctx.noteRegionStatePostconditionsForCloseout({
       tabId: 42,
       regionStatePostconditions: [
@@ -415,7 +419,7 @@ describe('evaluateNonInterferencePreflight', () => {
             reason: 'otp_request_waiting_for_user_evidence_after_action',
             beforeSummary: ['form:ready_to_request_otp'],
             afterSummary: ['form:waiting_for_user_otp'],
-            producedAtMs: 1000,
+            producedAtMs,
             claimBoundary: 'deterministic OTP request fixture only',
           },
         },
@@ -470,7 +474,7 @@ describe('evaluateNonInterferencePreflight', () => {
             reason: 'account_region_appeared_after_auth_prompt',
             beforeSummary: ['auth_surface:visible', 'form:waiting_for_user_otp'],
             afterSummary: ['account:visible', 'auth_surface:absent'],
-            producedAtMs: 2000,
+            producedAtMs: producedAtMs + 1000,
             claimBoundary: 'deterministic login completion fixture only',
           },
         },
@@ -491,6 +495,60 @@ describe('evaluateNonInterferencePreflight', () => {
     expect(ctx.buildTaskResumeReadiness({ tabId: 42 })).toMatchObject({
       status: 'postcondition_passed_ready',
       evidenceKinds: ['region_state_postcondition', 'user_collaboration_resolved'],
+    });
+  });
+
+  it('blocks auth submit when OTP user-collaboration wait evidence is stale', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRunOwnedTab(42);
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 42,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_request_otp',
+            kind: 'otp_requested',
+            verdict: 'passed',
+            reason: 'otp_request_waiting_for_user_evidence_after_action',
+            beforeSummary: ['form:ready_to_request_otp'],
+            afterSummary: ['form:waiting_for_user_otp'],
+            producedAtMs: Date.now() - DEFAULT_AUTH_USER_COLLABORATION_STALE_AFTER_MS - 1,
+            claimBoundary: 'deterministic OTP request fixture only',
+          },
+        },
+      ],
+    });
+
+    const submitVerdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.CLICK,
+      args: {
+        tabId: 42,
+        ref: 'ref_auth_submit',
+        candidateAction: {
+          id: 'ca_auth_submit',
+          actionType: 'click',
+          targetRef: 'ref_auth_submit',
+          intent: 'auth.submit_login',
+        },
+      },
+      taskContext: ctx,
+    });
+
+    expect(submitVerdict.allowed).toBe(false);
+    expect(submitVerdict.message).toContain('Run chrome_read_page with forceRefresh=true');
+    expect(submitVerdict.audit).toMatchObject({
+      verdict: 'collaboration_required',
+      reason: 'task_resume_readiness_not_proven',
+      taskResumeReadiness: {
+        status: 'postcondition_unknown_not_proven',
+        nextStep: 'force_fresh_read_same_tab',
+        evidenceKinds: [
+          'region_state_postcondition',
+          'user_collaboration_required',
+          'stale_user_collaboration',
+        ],
+      },
     });
   });
 

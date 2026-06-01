@@ -7,6 +7,7 @@
  */
 
 import {
+  DEFAULT_AUTH_USER_COLLABORATION_STALE_AFTER_MS,
   DEFAULT_READ_BUDGET_PER_TASK,
   TaskSessionContext,
   resolveReadBudgetFromEnv,
@@ -1206,6 +1207,50 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
         status: 'waiting_for_user',
         canContinue: false,
         nextAction: 'wait_for_user_collaboration',
+      },
+    });
+  });
+
+  it('requires fresh same-tab read when OTP user-collaboration wait evidence is stale', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_request_otp',
+            kind: 'otp_requested',
+            verdict: 'passed',
+            reason: 'otp_request_waiting_for_user_evidence_after_action',
+            beforeSummary: ['form:ready_to_request_otp:target_ref:actions:1'],
+            afterSummary: ['form:waiting_for_user_otp:target_ref:actions:1'],
+            producedAtMs: 1_000,
+            claimBoundary: 'deterministic OTP request fixture only',
+          },
+        },
+      ],
+    });
+
+    expect(
+      ctx.buildTaskResumeReadiness({
+        tabId: 9,
+        nowMs: 1_000 + DEFAULT_AUTH_USER_COLLABORATION_STALE_AFTER_MS + 1,
+      }),
+    ).toMatchObject({
+      status: 'postcondition_unknown_not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'force_fresh_read_same_tab',
+      evidenceKinds: [
+        'region_state_postcondition',
+        'user_collaboration_required',
+        'stale_user_collaboration',
+      ],
+      reason: expect.stringContaining('otp_user_collaboration_wait_stale'),
+      handoffSummary: {
+        status: 'needs_fresh_read',
+        canContinue: false,
+        nextAction: 'run_chrome_read_page_force_refresh',
       },
     });
   });

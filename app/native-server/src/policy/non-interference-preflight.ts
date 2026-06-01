@@ -78,6 +78,7 @@ export function evaluateNonInterferencePreflight(input: {
   const authResumeGate = input.taskContext?.peekLastAuthResumeGate() ?? null;
   const taskResumeReadiness = input.taskContext?.buildTaskResumeReadiness({
     tabId: targetTabId,
+    nowMs: Date.now(),
   });
   if (authResumeGate?.blocksTaskResume) {
     const message = buildTaskResumeReadinessMessage(taskResumeReadiness);
