@@ -1,5 +1,7 @@
 import { initNativeHostListener } from './native-host';
-import { initBrowserWorldInventory } from './browser-world-inventory';
+import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import { buildPopupBrowserWorldOverview } from '@/common/popup-browser-world-overview';
+import { initBrowserWorldInventory, refreshBrowserWorldSnapshot } from './browser-world-inventory';
 
 /**
  * Background script entry point
@@ -12,6 +14,28 @@ import { initBrowserWorldInventory } from './browser-world-inventory';
  */
 export default defineBackground(() => {
   initBrowserWorldInventory();
+
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type !== BACKGROUND_MESSAGE_TYPES.GET_BROWSER_WORLD_OVERVIEW) {
+      return undefined;
+    }
+
+    refreshBrowserWorldSnapshot({ ensureBaselineReady: true })
+      .then((snapshot) => {
+        sendResponse({
+          success: true,
+          overview: buildPopupBrowserWorldOverview(snapshot),
+        });
+      })
+      .catch((error) => {
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+
+    return true;
+  });
 
   chrome.runtime.onInstalled.addListener((details) => {
     if (details.reason === 'install') {
