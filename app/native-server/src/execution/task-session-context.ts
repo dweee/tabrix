@@ -1156,12 +1156,28 @@ export class TaskSessionContext {
           claimBoundary: latestPostcondition.result.claimBoundary,
         });
       }
+      const searchResumeBlockReason = searchPostconditionResumeBlockReason(
+        latestPostcondition.result,
+        this.domRegionRowsReadbackAccumulator,
+        tabId,
+      );
+      if (searchResumeBlockReason) {
+        return withTaskResumeHandoffSummary({
+          status: 'postcondition_unknown_not_proven',
+          canResumeOriginalTask: false,
+          nextStep: 'verify_postcondition',
+          tabId,
+          evidenceKinds: ['region_state_postcondition', 'dom_region_rows_readback'],
+          reason: `region_state_${latestPostcondition.result.kind}_not_proven:${searchResumeBlockReason}`,
+          claimBoundary: latestPostcondition.result.claimBoundary,
+        });
+      }
       return withTaskResumeHandoffSummary({
         status: 'postcondition_passed_ready',
         canResumeOriginalTask: true,
         nextStep: 'continue_original_task',
         tabId,
-        evidenceKinds: ['region_state_postcondition'],
+        evidenceKinds: passedPostconditionEvidenceKindsForResume(latestPostcondition.result.kind),
         reason: `region_state_${latestPostcondition.result.kind}_passed:${latestPostcondition.result.reason}`,
         claimBoundary: latestPostcondition.result.claimBoundary,
       });
@@ -1766,6 +1782,34 @@ function detailPostconditionResumeBlockReason(
     return 'detail_field_readback_not_ready_for_summary';
   }
   return null;
+}
+
+function searchPostconditionResumeBlockReason(
+  result: TaskRegionStatePostconditionResultSnapshot,
+  rows: TaskDomRegionRowsReadbackAccumulator | null,
+  requestedTabId: number | null,
+): string | null {
+  if (result.kind !== 'search_results_updated') return null;
+  if (!rows) return 'dom_region_rows_readback_required_for_resume';
+  if (requestedTabId !== null && rows.sourceTabId !== null && rows.sourceTabId !== requestedTabId) {
+    return 'dom_region_rows_readback_tab_mismatch';
+  }
+  if (requestedTabId !== null && rows.sourceTabId === null) {
+    return 'dom_region_rows_readback_tab_binding_not_proven';
+  }
+  if (rows.uniqueTargetableRowKeys.size < DEFAULT_TOP_N_ACCUMULATION_TARGET) {
+    return 'dom_region_rows_readback_not_ready_for_default_top_n';
+  }
+  return null;
+}
+
+function passedPostconditionEvidenceKindsForResume(
+  kind: TaskRegionStatePostconditionKind,
+): string[] {
+  if (kind === 'search_results_updated') {
+    return ['region_state_postcondition', 'dom_region_rows_readback'];
+  }
+  return ['region_state_postcondition'];
 }
 
 function buildPendingBusinessVerificationForResume(

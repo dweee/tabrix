@@ -1063,8 +1063,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         readPageRecorded = true;
       };
       if (name === 'chrome_read_page' && taskContext && rawResultWithEvidence.isError !== true) {
-        const visibleRows = taskContext.peekVisibleRegionRows();
+        const readPagePayload = readJsonObjectFromCallToolResult(rawResultWithEvidence);
+        const visibleRows =
+          taskContext.peekVisibleRegionRows() ??
+          extractVisibleRegionRowsDataFromPayload(readPagePayload);
         if (visibleRows) {
+          taskContext.noteVisibleRegionRows(visibleRows);
           const requestedLayer =
             forcedReadPageLayer ?? extractRequestedLayer(args) ?? READ_PAGE_DEFAULT_LAYER;
           const readPageRenderMode = extractReadPageRenderMode(args);
@@ -1083,6 +1087,9 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
             readinessVerdict: 'ready',
             domRegionRowsEvidence: taskContext.peekVisibleRegionRowsEvidence(),
           });
+          const topNAccumulationEvidence = shouldRecordDomRegionRowsReadback(visibleRows)
+            ? taskContext.noteDomRegionRowsReadback(visibleRows)
+            : null;
 
           if (
             readPageRenderMode !== 'markdown' &&
@@ -1094,7 +1101,6 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
                 .map((row) => row.targetRef)
                 .filter((ref): ref is string => typeof ref === 'string' && ref.length > 0),
             );
-            const topNAccumulationEvidence = taskContext.noteDomRegionRowsReadback(visibleRows);
             const layerContract = mapDataSourceToLayerContract({
               dataSource: 'dom_region_rows',
               requestedLayer,
@@ -1170,6 +1176,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
                       typeof visibleRows.sourceTabId === 'number' && visibleRows.sourceTabId > 0
                         ? visibleRows.sourceTabId
                         : null,
+                    topNAccumulationEvidence,
                   }
                 : {}),
             });
@@ -1849,6 +1856,13 @@ function shouldPreferVisibleRowsForMarkdownAiContext(
     region.includes('card');
 
   return semanticListRegion || visibleRows.cardRowsCount > 0 || visibleRows.cardExtractorUsed;
+}
+
+function shouldRecordDomRegionRowsReadback(visibleRows: TaskVisibleRegionRowsData): boolean {
+  if (!visibleRows.visibleRegionRowsUsed || visibleRows.rowCount <= 0) return false;
+  const coverage = visibleRows.targetRefCoverageRate ?? 0;
+  const quality = visibleRows.regionQualityScore ?? 0;
+  return visibleRows.rowExtractionConfidence >= 0.7 && coverage >= 0.95 && quality >= 0.7;
 }
 
 function shouldInvalidateReadAfterInteraction(toolName: string, args?: unknown): boolean {
@@ -2614,6 +2628,88 @@ function hasVisibleRowsEvidence(payload: Record<string, unknown>): boolean {
   );
 }
 
+function extractVisibleRegionRowsDataFromPayload(
+  payload: Record<string, unknown> | null,
+): TaskVisibleRegionRowsData | null {
+  if (!payload) return null;
+  const rowsPayload = readObject(payload.visibleRegionRows) ?? payload;
+  const rawRows = Array.isArray(rowsPayload.rows)
+    ? rowsPayload.rows
+    : Array.isArray(payload.rows)
+      ? payload.rows
+      : [];
+  if (rawRows.length === 0) return null;
+
+  const rowCount =
+    readPositiveInteger(payload, 'rowCount') ??
+    readPositiveInteger(payload, 'visibleRegionRowCount') ??
+    readPositiveInteger(rowsPayload, 'rowCount') ??
+    rawRows.length;
+  const sourceRegion =
+    readString(rowsPayload.sourceRegion) ?? readString(payload.sourceRegion) ?? 'unknown';
+  const targetableRows = rawRows
+    .map((row) => readObject(row))
+    .filter((row): row is Record<string, unknown> => row !== null)
+    .map((row, index) => {
+      const n = index + 1;
+      return {
+        rowId: readString(row.rowId) ?? `row_${n}`,
+        title: readString(row.title) ?? readString(row.label) ?? `Result ${n}`,
+        primaryText: readString(row.primaryText),
+        secondaryText: readString(row.secondaryText),
+        metaText: readString(row.metaText),
+        interactionText: readString(row.interactionText),
+        targetRef: readString(row.targetRef),
+        visibleTextFields: readStringArray(row.visibleTextFields),
+        qualityReasons: readStringArray(row.qualityReasons),
+        sourceRegion: readString(row.sourceRegion) ?? sourceRegion,
+        confidence: readNumber(row.confidence) ?? 0.7,
+      };
+    });
+  if (targetableRows.length === 0) return null;
+
+  const targetRefCoverageRate =
+    readNumber(payload.targetRefCoverageRate) ??
+    readNumber(rowsPayload.targetRefCoverageRate) ??
+    targetableRows.filter((row) => row.targetRef).length / targetableRows.length;
+  const rowExtractionConfidence =
+    readNumber(payload.rowExtractionConfidence) ??
+    readNumber(rowsPayload.rowExtractionConfidence) ??
+    readNumber(rowsPayload.confidence) ??
+    0.8;
+  const regionQualityScore =
+    readNumber(payload.regionQualityScore) ?? readNumber(rowsPayload.regionQualityScore) ?? 0.8;
+
+  return {
+    sourceDataSource: 'dom_region_rows',
+    available: true,
+    rowCount,
+    confidence: readNumber(rowsPayload.confidence) ?? rowExtractionConfidence,
+    targetRefCoverageRate,
+    regionQualityScore,
+    sourceTabId:
+      readPositiveInteger(payload, 'sourceTabId') ??
+      readPositiveInteger(rowsPayload, 'sourceTabId') ??
+      readPositiveInteger(readObject(payload.pageProjection) ?? {}, 'tabId'),
+    rows: targetableRows,
+    visibleRegionRowsUsed:
+      payload.visibleRegionRowsUsed === true || rowsPayload.visibleRegionRowsUsed === true,
+    visibleRegionRowsRejectedReason: readString(payload.visibleRegionRowsRejectedReason),
+    sourceRegion,
+    rowExtractionConfidence,
+    cardExtractorUsed: payload.cardExtractorUsed === true || rowsPayload.cardExtractorUsed === true,
+    cardPatternConfidence:
+      readNumber(payload.cardPatternConfidence) ??
+      readNumber(rowsPayload.cardPatternConfidence) ??
+      0,
+    cardRowsCount:
+      readPositiveInteger(payload, 'cardRowsCount') ??
+      readPositiveInteger(rowsPayload, 'cardRowsCount') ??
+      targetableRows.length,
+    rowOrder: 'visual_order',
+  };
+}
+
 function buildAiFacingOwnershipRuntimeSummary(
   taskContext: TaskSessionContext,
   projection: BrowserPageThingProjection,
@@ -3142,6 +3238,11 @@ function readObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
 }
 
 function buildRegionStatePostconditionForPendingInteraction(

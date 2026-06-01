@@ -879,13 +879,14 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
         },
       ],
     });
+    ctx.noteDomRegionRowsReadback(makeVisibleRegionRows(1, 10, { sourceTabId: 9 }));
 
     expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
       status: 'postcondition_passed_ready',
       canResumeOriginalTask: true,
       nextStep: 'continue_original_task',
       tabId: 9,
-      evidenceKinds: ['region_state_postcondition'],
+      evidenceKinds: ['region_state_postcondition', 'dom_region_rows_readback'],
       reason: 'region_state_search_results_updated_passed:result_collection_changed_after_action',
       handoffSummary: {
         summaryKind: 'task_resume_handoff_v1',
@@ -895,7 +896,7 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
         evidenceSummary: {
           readinessStatus: 'postcondition_passed_ready',
           tabId: 9,
-          evidenceKinds: ['region_state_postcondition'],
+          evidenceKinds: ['region_state_postcondition', 'dom_region_rows_readback'],
         },
       },
     });
@@ -903,6 +904,97 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
       status: 'not_proven',
       canResumeOriginalTask: false,
       reason: 'no_resume_or_business_postcondition_evidence',
+    });
+  });
+
+  it('blocks search-task resume until DOM region rows readback can support default top-N', () => {
+    const missingRows = new TaskSessionContext({ readBudget: 6 });
+    missingRows.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_search_submit_missing_rows',
+            kind: 'search_results_updated',
+            verdict: 'passed',
+            reason: 'result_collection_changed_after_action',
+            beforeSummary: ['content_list:loaded:before'],
+            afterSummary: ['content_list:loaded:after'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+
+    expect(missingRows.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_unknown_not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'verify_postcondition',
+      evidenceKinds: ['region_state_postcondition', 'dom_region_rows_readback'],
+      reason:
+        'region_state_search_results_updated_not_proven:dom_region_rows_readback_required_for_resume',
+    });
+
+    const partialRows = new TaskSessionContext({ readBudget: 6 });
+    partialRows.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_search_submit_partial_rows',
+            kind: 'search_results_updated',
+            verdict: 'passed',
+            reason: 'result_collection_changed_after_action',
+            beforeSummary: ['content_list:loaded:before'],
+            afterSummary: ['content_list:loaded:after'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+    partialRows.noteDomRegionRowsReadback(makeVisibleRegionRows(1, 6, { sourceTabId: 9 }));
+
+    expect(partialRows.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_unknown_not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'verify_postcondition',
+      evidenceKinds: ['region_state_postcondition', 'dom_region_rows_readback'],
+      reason:
+        'region_state_search_results_updated_not_proven:dom_region_rows_readback_not_ready_for_default_top_n',
+    });
+  });
+
+  it('blocks search-task resume when top-N row readback belongs to another tab', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_search_submit_wrong_tab_rows',
+            kind: 'search_results_updated',
+            verdict: 'passed',
+            reason: 'result_collection_changed_after_action',
+            beforeSummary: ['content_list:loaded:before'],
+            afterSummary: ['content_list:loaded:after'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+    ctx.noteDomRegionRowsReadback(makeVisibleRegionRows(1, 10, { sourceTabId: 7 }));
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_unknown_not_proven',
+      canResumeOriginalTask: false,
+      reason:
+        'region_state_search_results_updated_not_proven:dom_region_rows_readback_tab_mismatch',
     });
   });
 
@@ -1208,6 +1300,7 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
         },
       ],
     });
+    ctx.noteDomRegionRowsReadback(makeVisibleRegionRows(1, 10, { sourceTabId: 9 }));
 
     expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
       status: 'postcondition_passed_ready',

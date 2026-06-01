@@ -4113,7 +4113,24 @@ describe('handleToolCall execution wrapper', () => {
       tabId: number;
       pageRegions: Array<Record<string, unknown>>;
       pageContext?: Record<string, unknown>;
+      includeTopNRows?: boolean;
     }): string {
+      const topNRows = Array.from({ length: 10 }, (_, index) => {
+        const n = index + 1;
+        return {
+          rowId: `row_${n}`,
+          title: `Result ${n}`,
+          primaryText: `Result ${n} summary`,
+          secondaryText: null,
+          metaText: null,
+          interactionText: 'Open',
+          targetRef: `ref_result_${n}`,
+          visibleTextFields: ['title', 'primaryText'],
+          qualityReasons: [],
+          sourceRegion: 'result_list',
+          confidence: 0.91,
+        };
+      });
       return JSON.stringify({
         kind: 'page',
         mode: 'compact',
@@ -4130,6 +4147,19 @@ describe('handleToolCall execution wrapper', () => {
         currentWindowId: 3,
         isCurrentTabActive: true,
         isCurrentWindowFocused: true,
+        ...(input.includeTopNRows
+          ? {
+              visibleRegionRowsUsed: true,
+              visibleRegionRowCount: topNRows.length,
+              rowCount: topNRows.length,
+              rows: topNRows,
+              targetRefCoverageRate: 1,
+              regionQualityScore: 0.9,
+              rowExtractionConfidence: 0.92,
+              sourceRegion: 'result_list',
+              sourceTabId: input.tabId,
+            }
+          : {}),
         ...(input.pageContext ? { pageContext: input.pageContext } : {}),
         pageRegions: input.pageRegions,
         objectLifecycle: {
@@ -4808,6 +4838,7 @@ describe('handleToolCall execution wrapper', () => {
           projectionId: 'projection_after_search_submit',
           tabId: 1,
           pageRegions: [contentListRegion('after')],
+          includeTopNRows: true,
         }),
       );
       const result = await handleToolCall('chrome_read_page', {
@@ -5120,6 +5151,7 @@ describe('handleToolCall execution wrapper', () => {
           tabId: 1,
           pageRegions: [contentListRegion('after')],
           pageContext: pageContextWithLoadReadiness(),
+          includeTopNRows: true,
         }),
       );
       const stableReadback = await handleToolCall('chrome_read_page', {
@@ -5689,6 +5721,7 @@ describe('handleToolCall execution wrapper', () => {
           projectionId: 'projection_after_recovery_passed',
           tabId: 1,
           pageRegions: [contentListRegion('after')],
+          includeTopNRows: true,
         }),
       );
       const recoveredReadback = await handleToolCall('chrome_read_page', {
