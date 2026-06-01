@@ -2,6 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import {
   TOOL_NAMES,
+  type ClickActionRecoveryGuidance,
   type ClickObservedOutcome,
   type ClickVerification,
   isClickSuccessOutcome,
@@ -478,6 +479,9 @@ export function buildStructuredClickHelperErrorResult(input: {
   elementInfo?: unknown;
   browserSignals: ClickBrowserSignals;
   targetBinding?: ActionTargetBindingEvidence;
+  reason?: string;
+  targetConsistency?: unknown;
+  actionRecovery?: ClickActionRecoveryGuidance;
 }) {
   const verification: ClickVerification = {
     navigationOccurred: false,
@@ -496,9 +500,13 @@ export function buildStructuredClickHelperErrorResult(input: {
     clickDiff: buildClickDiffSummary(null, input.browserSignals),
     navigationOccurred: false,
     lane: TABRIX_OWNED_LANE,
+    error: input.reason ?? 'click_dispatch_not_proven',
+    reason: input.reason ?? 'click_dispatch_not_proven',
     message: `Click helper returned an error; click dispatch and post-action state are not proven (${input.message})`,
     elementInfo: input.elementInfo,
     clickMethod: input.clickMethod,
+    ...(input.targetConsistency ? { targetConsistency: input.targetConsistency } : {}),
+    ...(input.actionRecovery ? { actionRecovery: input.actionRecovery } : {}),
     ...(input.targetBinding ? { targetBinding: input.targetBinding } : {}),
     resultShape: 'structured_click_error',
   };
@@ -510,6 +518,9 @@ function createStructuredClickHelperErrorResponse(input: {
   elementInfo?: unknown;
   browserSignals?: ClickBrowserSignals;
   targetBinding?: ActionTargetBindingEvidence;
+  reason?: string;
+  targetConsistency?: unknown;
+  actionRecovery?: ClickActionRecoveryGuidance;
 }): ToolResult {
   return {
     content: [
@@ -522,6 +533,9 @@ function createStructuredClickHelperErrorResponse(input: {
             elementInfo: input.elementInfo,
             browserSignals: input.browserSignals ?? { newTabOpened: false },
             targetBinding: input.targetBinding,
+            reason: input.reason,
+            targetConsistency: input.targetConsistency,
+            actionRecovery: input.actionRecovery,
           }),
         ),
       },
@@ -1356,12 +1370,25 @@ class ClickTool extends BaseBrowserToolExecutor {
       // shape, which strips useful action diagnostics from AI-facing output.
       if (result && typeof result === 'object' && 'error' in result && result.error) {
         const browserSignals = await browserSignalsPromise;
+        const structuredError = result as {
+          elementInfo?: unknown;
+          reason?: unknown;
+          targetConsistency?: unknown;
+          actionRecovery?: ClickActionRecoveryGuidance;
+        };
+        const reason =
+          typeof structuredError.reason === 'string' && structuredError.reason.trim()
+            ? structuredError.reason.trim()
+            : String(result.error);
         return createStructuredClickHelperErrorResponse({
           message: String(result.error),
           clickMethod,
-          elementInfo: (result as { elementInfo?: unknown }).elementInfo,
+          elementInfo: structuredError.elementInfo,
           browserSignals,
           targetBinding: buildTargetBinding(),
+          reason,
+          targetConsistency: structuredError.targetConsistency,
+          actionRecovery: structuredError.actionRecovery,
         });
       }
 

@@ -274,6 +274,42 @@ describe('buildStructuredClickHelperErrorResult', () => {
     expect(JSON.stringify(result)).not.toContain('legacy_text_error_normalized');
   });
 
+  it('preserves target mismatch recovery guidance in structured click errors', () => {
+    const result = buildStructuredClickHelperErrorResult({
+      message: 'target_mismatch',
+      clickMethod: 'selector',
+      browserSignals: { newTabOpened: false },
+      reason: 'target_mismatch',
+      targetConsistency: {
+        verdict: 'target_mismatch',
+        expectedTarget: { tagName: 'LABEL' },
+        actualTarget: { tagName: 'INPUT' },
+      },
+      actionRecovery: {
+        status: 'not_proven',
+        reason: 'target_mismatch',
+        requiredNextAction: 'fresh_read_page_and_select_actual_target',
+        recommendedTool: 'chrome_read_page',
+        sameTabRequired: true,
+        instruction: 'Read the same tab again and choose a fresher target.',
+        claimBoundary: 'This does not prove the business action happened.',
+      },
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      dispatchSucceeded: false,
+      error: 'target_mismatch',
+      reason: 'target_mismatch',
+      targetConsistency: { verdict: 'target_mismatch' },
+      actionRecovery: {
+        requiredNextAction: 'fresh_read_page_and_select_actual_target',
+        recommendedTool: 'chrome_read_page',
+        sameTabRequired: true,
+      },
+    });
+  });
+
   it('defaults missing browser signals to a non-proven structured error', () => {
     const result = buildStructuredClickHelperErrorResult({
       message: 'Error performing click: Could not establish connection',
@@ -767,6 +803,14 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
 
     expect(response.success).toBe(false);
     expect(response.reason).toBe('blocked_by_overlay');
+    expect(response.dispatchSucceeded).toBe(false);
+    expect(response.actionRecovery).toMatchObject({
+      status: 'blocked',
+      reason: 'blocked_by_overlay',
+      requiredNextAction: 'handle_blocking_surface_then_retry',
+      recommendedTool: 'chrome_read_page',
+      sameTabRequired: true,
+    });
     expect(response.targetConsistency).toMatchObject({
       verdict: 'blocked_by_overlay',
       expectedTarget: { tagName: 'BUTTON' },
@@ -872,8 +916,16 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
 
     expect(response).toMatchObject({
       success: false,
+      dispatchSucceeded: false,
       error: 'target_mismatch',
       targetConsistency: { verdict: 'target_mismatch' },
+      actionRecovery: {
+        status: 'not_proven',
+        reason: 'target_mismatch',
+        requiredNextAction: 'fresh_read_page_and_select_actual_target',
+        recommendedTool: 'chrome_read_page',
+        sameTabRequired: true,
+      },
     });
   });
 });

@@ -329,6 +329,46 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
         return area >= viewportArea * 0.45 && text.length < 20;
       };
 
+      const buildActionRecovery = (verdict) => {
+        if (verdict === 'blocked_by_overlay') {
+          return {
+            status: 'blocked',
+            reason: 'blocked_by_overlay',
+            requiredNextAction: 'handle_blocking_surface_then_retry',
+            recommendedTool: 'chrome_read_page',
+            sameTabRequired: true,
+            instruction:
+              'The intended click target is covered by another visible surface. Read the same tab again, identify the blocking modal/overlay/dialog, handle that surface first, then retry the original action only after the target is clear.',
+            claimBoundary:
+              'This proves only that the intended click point is currently blocked; it does not prove which user-facing action will close the blocking surface.',
+          };
+        }
+        if (verdict === 'target_mismatch') {
+          return {
+            status: 'not_proven',
+            reason: 'target_mismatch',
+            requiredNextAction: 'fresh_read_page_and_select_actual_target',
+            recommendedTool: 'chrome_read_page',
+            sameTabRequired: true,
+            instruction:
+              'The intended click point resolves to a different element. Read the same tab again and choose a fresher, more specific targetRef/candidateAction instead of retrying coordinates or the same broad selector.',
+            claimBoundary:
+              'This proves only a target mismatch at the click point; it does not prove the page changed or that the intended business action happened.',
+          };
+        }
+        return {
+          status: 'not_proven',
+          reason: String(verdict || 'verification_unavailable'),
+          requiredNextAction: 'stop_or_retry_after_fresh_read',
+          recommendedTool: 'chrome_read_page',
+          sameTabRequired: true,
+          instruction:
+            'The click target could not be proven actionable. Read the same tab again before retrying or choosing another action.',
+          claimBoundary:
+            'This is recovery guidance for click execution only; it does not prove business success.',
+        };
+      };
+
       const inspectTargetConsistency = (expected, x, y, clickMethod) => {
         const actual = document.elementFromPoint(x, y);
         const expectedInfo = describeHitTarget(expected);
@@ -512,6 +552,8 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
           if (['blocked_by_overlay', 'target_mismatch'].includes(blockedConsistency.verdict)) {
             return {
               success: false,
+              dispatchSucceeded: false,
+              observedOutcome: 'no_observed_change',
               error: blockedConsistency.verdict,
               reason: blockedConsistency.verdict,
               message:
@@ -520,6 +562,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
                   : 'Click target center resolves to a different element; refresh read_page or choose the blocking target first.',
               elementInfo,
               targetConsistency: blockedConsistency,
+              actionRecovery: buildActionRecovery(blockedConsistency.verdict),
             };
           }
           return {
@@ -547,6 +590,8 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
       ) {
         return {
           success: false,
+          dispatchSucceeded: false,
+          observedOutcome: 'no_observed_change',
           error: targetConsistency.verdict,
           reason: targetConsistency.verdict,
           message:
@@ -555,6 +600,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
               : 'Click target center resolves to a different element; refresh read_page or choose the blocking target first.',
           elementInfo,
           targetConsistency,
+          actionRecovery: buildActionRecovery(targetConsistency.verdict),
         };
       }
 

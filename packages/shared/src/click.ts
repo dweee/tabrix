@@ -80,6 +80,27 @@ export interface ClickVerification {
   focusChanged: boolean;
 }
 
+export interface ClickActionRecoveryGuidance {
+  status: 'blocked' | 'not_proven';
+  reason:
+    | 'blocked_by_overlay'
+    | 'target_mismatch'
+    | 'target_ref_stale'
+    | 'target_not_found'
+    | 'verification_unavailable'
+    | string;
+  requiredNextAction:
+    | 'handle_blocking_surface_then_retry'
+    | 'fresh_read_page_and_select_actual_target'
+    | 'fresh_read_page_for_new_target_ref'
+    | 'stop_or_retry_after_fresh_read'
+    | string;
+  recommendedTool: 'chrome_read_page' | 'chrome_click_element' | string;
+  sameTabRequired: boolean;
+  instruction: string;
+  claimBoundary: string;
+}
+
 /**
  * The JSON shape returned by `chrome_click_element`.
  *
@@ -104,6 +125,8 @@ export interface ClickToolResult {
   clickMethod?: string;
   message?: string;
   elementInfo?: unknown;
+  targetConsistency?: unknown;
+  actionRecovery?: ClickActionRecoveryGuidance;
 }
 
 /**
