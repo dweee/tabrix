@@ -746,4 +746,31 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
     expect(response.signals.waitDiagnostics.verification.reason).toBe('focus_changed');
     expect(response.signals.waitDiagnostics.verification.waitedMs).toBeLessThan(400);
   });
+
+  it('returns blocked_by_overlay when a selector target is covered at its click point', async () => {
+    document.body.innerHTML =
+      '<button id="btn">获取验证码</button><div id="mask" class="modal-mask"></div>';
+    const button = document.getElementById('btn') as HTMLButtonElement;
+    const mask = document.getElementById('mask') as HTMLDivElement;
+    setRect(button, { left: 20, top: 30, width: 120, height: 32 });
+    setRect(mask, { left: 0, top: 0, width: 1000, height: 800 });
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+    document.elementFromPoint = vi.fn(() => mask);
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#btn',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.reason).toBe('blocked_by_overlay');
+    expect(response.targetConsistency).toMatchObject({
+      verdict: 'blocked_by_overlay',
+      expectedTarget: { tagName: 'BUTTON' },
+      actualTarget: { id: 'mask' },
+    });
+  });
 });

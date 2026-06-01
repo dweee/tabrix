@@ -57,6 +57,7 @@ export interface ReadPageInteractiveElement {
    * form/search state changes across read_page snapshots.
    */
   valueState?: 'empty' | 'non_empty' | 'unknown';
+  checked?: boolean | 'mixed' | 'unknown';
   /**
    * Optional raw `href` captured from the DOM snapshot. Present only for
    * link-like elements. Consumers MUST treat this as optional; older
@@ -67,6 +68,21 @@ export interface ReadPageInteractiveElement {
    * vs a workflow run on GitHub `/actions`).
    */
   href?: string;
+  /**
+   * Optional evidence about why a text lookup matched this element. This lets
+   * callers distinguish a real action button from an input whose placeholder
+   * happens to contain action words such as "get code".
+   */
+  matchSource?:
+    | 'visible_text'
+    | 'aria'
+    | 'label'
+    | 'placeholder'
+    | 'value'
+    | 'title'
+    | 'fallback'
+    | string;
+  actionability?: 'actionable' | 'not_actionable' | 'blocked' | 'unknown' | string;
   /**
    * Optional viewport rectangle captured from the current DOM snapshot.
    * Consumers MUST treat this as advisory and snapshot-local. It exists so
@@ -163,11 +179,91 @@ export interface ReadPageAuthCollaborationEvidence {
   claimBoundary: string;
 }
 
+export const READ_PAGE_AUTH_FORM_READINESS_VALUES = [
+  'not_detected',
+  'blocked_by_agreement',
+  'ready_to_request_otp',
+  'otp_requested',
+  'waiting_for_user_otp',
+  'login_succeeded_candidate',
+  'not_proven',
+] as const;
+
+export type ReadPageAuthFormReadiness = (typeof READ_PAGE_AUTH_FORM_READINESS_VALUES)[number];
+
+export const READ_PAGE_AUTH_FORM_NEXT_ACTION_VALUES = [
+  'fill_phone',
+  'accept_terms',
+  'confirm_agreement',
+  'request_otp',
+  'wait_for_user_otp',
+  'verify_login',
+  'manual_user_action',
+  'not_proven',
+] as const;
+
+export type ReadPageAuthFormNextAction = (typeof READ_PAGE_AUTH_FORM_NEXT_ACTION_VALUES)[number];
+
+export type ReadPageAuthFormControlKey =
+  | 'phoneInput'
+  | 'otpInput'
+  | 'requestOtp'
+  | 'agreementCheckbox'
+  | 'agreementConfirm'
+  | 'submit';
+
+export interface ReadPageAuthFormControl {
+  role: string;
+  label: string;
+  targetRef?: string;
+  locatorChain?: ReadPageCandidateActionLocator[];
+  candidateActionId?: string;
+  confidence: number;
+  reason: string;
+  state:
+    | 'empty'
+    | 'non_empty'
+    | 'checked'
+    | 'unchecked'
+    | 'countdown'
+    | 'sent_candidate'
+    | 'visible'
+    | 'not_actionable'
+    | 'unknown'
+    | string;
+  valueState?: 'empty' | 'non_empty' | 'unknown';
+  matchSource?: string;
+  actionability: 'actionable' | 'not_actionable' | 'blocked' | 'unknown' | string;
+}
+
+export interface ReadPageAuthFormBlocker {
+  kind:
+    | 'agreement_required'
+    | 'agreement_modal'
+    | 'missing_phone'
+    | 'target_not_actionable'
+    | 'protected_tab'
+    | 'unknown'
+    | string;
+  message: string;
+  control?: ReadPageAuthFormControlKey;
+}
+
+export interface ReadPageAuthForm {
+  formType: 'otp' | 'unknown';
+  readiness: ReadPageAuthFormReadiness;
+  nextAction: ReadPageAuthFormNextAction;
+  controls: Partial<Record<ReadPageAuthFormControlKey, ReadPageAuthFormControl>>;
+  blockers: ReadPageAuthFormBlocker[];
+  claimBoundary: string;
+}
+
 export interface ReadPageAuthCollaboration {
   status: ReadPageAuthCollaborationStatus;
   challengeType: ReadPageAuthChallengeType;
   userAction: ReadPageAuthCollaborationUserAction;
   evidence: ReadPageAuthCollaborationEvidence;
+  authForm?: ReadPageAuthForm;
   claimBoundary: string;
 }
 

@@ -755,6 +755,8 @@ async function buildModeOutput(params: {
     browserWorldTab,
     authArtifactStatus: sharedPayload.authArtifactStatus,
     artifactRefs,
+    interactiveElements,
+    candidateActions,
   });
 
   return buildReadPageModeResult({

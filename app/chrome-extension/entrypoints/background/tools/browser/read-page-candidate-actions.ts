@@ -40,10 +40,10 @@ export function buildCandidateActions(
   refMap: any[],
 ): CandidateActionSeed[] {
   const selectorMap = buildRefSelectorMap(refMap);
-  const clickRoles = new Set(['button', 'link', 'menuitem', 'tab', 'option']);
+  const clickRoles = new Set(['button', 'link', 'menuitem', 'tab', 'option', 'checkbox', 'switch']);
   const fillRoles = new Set(['textbox', 'searchbox', 'combobox']);
   const primaryKeywords =
-    /(submit|save|continue|next|confirm|login|sign in|search|checkout|提交|保存|继续|下一步|确认|登录|搜索)/i;
+    /(submit|save|continue|next|confirm|login|sign in|search|checkout|send code|get code|request code|提交|保存|继续|下一步|确认|登录|搜索|获取验证码|发送验证码|重新发送|同意|协议)/i;
 
   const seeds: CandidateActionSeed[] = [];
   const prioritizedElements = [...interactiveElements]

@@ -230,6 +230,85 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
         return candidate;
       };
 
+      const describeHitTarget = (candidate) => {
+        if (!(candidate instanceof Element)) return null;
+        const rect = candidate.getBoundingClientRect();
+        return {
+          tagName: candidate.tagName,
+          id: candidate.id || '',
+          className:
+            typeof candidate.className === 'string'
+              ? candidate.className
+              : candidate.className?.baseVal || '',
+          text: (candidate.textContent || '').trim().slice(0, 100),
+          role: candidate.getAttribute('role') || '',
+          rect: {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+          },
+        };
+      };
+
+      const looksLikeOverlay = (candidate) => {
+        if (!(candidate instanceof Element)) return false;
+        const text = (candidate.textContent || '').trim();
+        const signature = [
+          candidate.id,
+          typeof candidate.className === 'string'
+            ? candidate.className
+            : candidate.className?.baseVal,
+          candidate.getAttribute('role'),
+          candidate.getAttribute('aria-modal'),
+        ]
+          .filter(Boolean)
+          .join(' ');
+        if (/\b(mask|modal|overlay|backdrop|drawer|dialog|popup|layer)\b/i.test(signature)) {
+          return true;
+        }
+        const rect = candidate.getBoundingClientRect();
+        const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+        const area = Math.max(1, rect.width * rect.height);
+        return area >= viewportArea * 0.45 && text.length < 20;
+      };
+
+      const inspectTargetConsistency = (expected, x, y, clickMethod) => {
+        const actual = document.elementFromPoint(x, y);
+        const expectedInfo = describeHitTarget(expected);
+        const actualInfo = describeHitTarget(actual);
+        if (!(expected instanceof Element)) {
+          return {
+            verdict: actual ? 'coordinate_target_observed' : 'target_unknown',
+            clickMethod,
+            expectedTarget: expectedInfo,
+            actualTarget: actualInfo,
+          };
+        }
+        if (actual === expected || (actual instanceof Element && expected.contains(actual))) {
+          return {
+            verdict: 'matched',
+            clickMethod,
+            expectedTarget: expectedInfo,
+            actualTarget: actualInfo,
+          };
+        }
+        if (actual instanceof Element && actual.contains(expected)) {
+          return {
+            verdict: 'matched_by_clickable_ancestor',
+            clickMethod,
+            expectedTarget: expectedInfo,
+            actualTarget: actualInfo,
+          };
+        }
+        return {
+          verdict: looksLikeOverlay(actual) ? 'blocked_by_overlay' : 'target_mismatch',
+          clickMethod,
+          expectedTarget: expectedInfo,
+          actualTarget: actualInfo,
+        };
+      };
+
       if (ref && typeof ref === 'string') {
         // Resolve element from weak map
         let target = null;
@@ -350,6 +429,26 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
         elementInfo.isVisible = isElementVisible(element);
         elementInfo.waitDiagnostics = { scroll: scrollWait };
         if (!elementInfo.isVisible) {
+          const blockedConsistency = inspectTargetConsistency(
+            element,
+            rect.left + rect.width / 2,
+            rect.top + rect.height / 2,
+            elementInfo.clickMethod,
+          );
+          elementInfo.targetConsistency = blockedConsistency;
+          if (['blocked_by_overlay', 'target_mismatch'].includes(blockedConsistency.verdict)) {
+            return {
+              success: false,
+              error: blockedConsistency.verdict,
+              reason: blockedConsistency.verdict,
+              message:
+                blockedConsistency.verdict === 'blocked_by_overlay'
+                  ? 'Click target is covered by an overlay or dialog; handle the blocking surface first.'
+                  : 'Click target center resolves to a different element; refresh read_page or choose the blocking target first.',
+              elementInfo,
+              targetConsistency: blockedConsistency,
+            };
+          }
           return {
             error: `Element with selector "${selector}" is not visible`,
             elementInfo,
@@ -359,6 +458,31 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
         const updatedRect = element.getBoundingClientRect();
         clickX = updatedRect.left + updatedRect.width / 2;
         clickY = updatedRect.top + updatedRect.height / 2;
+      }
+
+      const targetConsistency = inspectTargetConsistency(
+        element,
+        clickX,
+        clickY,
+        elementInfo?.clickMethod || 'unknown',
+      );
+      if (elementInfo) elementInfo.targetConsistency = targetConsistency;
+      if (
+        element &&
+        (elementInfo?.clickMethod === 'selector' || elementInfo?.clickMethod === 'ref') &&
+        ['blocked_by_overlay', 'target_mismatch'].includes(targetConsistency.verdict)
+      ) {
+        return {
+          success: false,
+          error: targetConsistency.verdict,
+          reason: targetConsistency.verdict,
+          message:
+            targetConsistency.verdict === 'blocked_by_overlay'
+              ? 'Click target is covered by an overlay or dialog; handle the blocking surface first.'
+              : 'Click target center resolves to a different element; refresh read_page or choose the blocking target first.',
+          elementInfo,
+          targetConsistency,
+        };
       }
 
       const allowDownloadClick = options.allowDownloadClick === true;
@@ -543,6 +667,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
           ? 'Click dispatched; awaiting outcome verification in background layer'
           : 'Click dispatch failed',
         elementInfo,
+        targetConsistency,
         // Compat: background layer will overwrite with verification.navigationOccurred.
         navigationOccurred: beforeUnloadFired,
         signals: {

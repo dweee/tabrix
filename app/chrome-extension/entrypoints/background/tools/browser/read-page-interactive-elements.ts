@@ -7,6 +7,9 @@ interface SnapshotNode {
   depth: number;
   href: string | null;
   valueState: 'empty' | 'non_empty' | 'unknown' | null;
+  checked: boolean | 'mixed' | 'unknown' | null;
+  matchSource: string | null;
+  actionability: string | null;
 }
 
 export type SnapshotInteractiveElement = ReadPageInteractiveElement;
@@ -145,6 +148,10 @@ function parseSnapshotNodesFromPageContent(pageContent: string): SnapshotNode[] 
     const valueStateMatch =
       trimmedLine.match(/\svalueState="(empty|non_empty|unknown)"/i) ??
       trimmedLine.match(/\svalue-state="(empty|non_empty|unknown)"/i);
+    const checkedMatch =
+      trimmedLine.match(/\schecked="(true|false|mixed|unknown)"/i) ??
+      trimmedLine.match(/\saria-checked="(true|false|mixed|unknown)"/i) ??
+      trimmedLine.match(/\schecked:\s*(true|false|mixed|unknown)/i);
     nodes.push({
       role: String(match[1] || 'generic')
         .trim()
@@ -160,6 +167,9 @@ function parseSnapshotNodesFromPageContent(pageContent: string): SnapshotNode[] 
         : valueMatch
           ? valueStateFromRaw(valueMatch[1])
           : null,
+      checked: checkedMatch ? normalizeCheckedState(checkedMatch[1]) : null,
+      matchSource: null,
+      actionability: null,
     });
     if (nodes.length >= 300) break;
   }
@@ -233,6 +243,9 @@ function toInteractiveElement(node: SnapshotNode): SnapshotInteractiveElement {
   const href = typeof node.href === 'string' ? node.href.trim() : '';
   if (href) element.href = href;
   if (node.valueState) element.valueState = node.valueState;
+  if (node.checked !== null) element.checked = node.checked;
+  if (node.matchSource) element.matchSource = node.matchSource;
+  if (node.actionability) element.actionability = node.actionability;
   return element;
 }
 
@@ -245,6 +258,16 @@ function valueStateFromRaw(value: unknown): 'empty' | 'non_empty' | 'unknown' {
 
 function normalizeValueState(value: unknown): 'empty' | 'non_empty' | 'unknown' | null {
   return value === 'empty' || value === 'non_empty' || value === 'unknown' ? value : null;
+}
+
+function normalizeCheckedState(value: unknown): boolean | 'mixed' | 'unknown' {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  if (normalized === 'mixed') return 'mixed';
+  return 'unknown';
 }
 
 function normalizeFallbackRole(item: any): string {
@@ -292,6 +315,11 @@ function buildFallbackNodes(fallbackElements: any[]): SnapshotNode[] {
       (Object.prototype.hasOwnProperty.call(item ?? {}, 'value')
         ? valueStateFromRaw(item.value)
         : null),
+    checked: Object.prototype.hasOwnProperty.call(item ?? {}, 'checked')
+      ? normalizeCheckedState(item.checked)
+      : null,
+    matchSource: typeof item?.matchSource === 'string' ? item.matchSource : null,
+    actionability: typeof item?.actionability === 'string' ? item.actionability : null,
   }));
 }
 

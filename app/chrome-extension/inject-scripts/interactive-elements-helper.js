@@ -247,6 +247,76 @@
     return null;
   }
 
+  function queryTextMatches(text, query) {
+    return getQueryMatchKind(text, query) !== 'none';
+  }
+
+  function inferMatchSource(el, textQuery) {
+    const query = String(textQuery || '').trim();
+    if (!query) return 'none';
+    const visibleText = (el.textContent || '').trim();
+    if (queryTextMatches(visibleText, query)) return 'visible_text';
+    const ariaLabel = el.getAttribute('aria-label') || '';
+    if (queryTextMatches(ariaLabel, query)) return 'aria';
+    const labelledby = el.getAttribute('aria-labelledby');
+    if (labelledby) {
+      const labelElement = document.getElementById(labelledby);
+      if (labelElement && queryTextMatches(labelElement.textContent || '', query)) return 'label';
+    }
+    if (el.id) {
+      const label = document.querySelector(`label[for="${el.id}"]`);
+      if (label && queryTextMatches(label.textContent || '', query)) return 'label';
+    }
+    const parentLabel = el.closest('label');
+    if (parentLabel && queryTextMatches(parentLabel.textContent || '', query)) return 'label';
+    const placeholder = el.getAttribute('placeholder') || '';
+    if (queryTextMatches(placeholder, query)) return 'placeholder';
+    const value = el.getAttribute('value') || '';
+    if (queryTextMatches(value, query)) return 'value';
+    const title = el.getAttribute('title') || '';
+    if (queryTextMatches(title, query)) return 'title';
+    return 'accessible_name';
+  }
+
+  function isActionTextQuery(textQuery) {
+    return /\b(click|submit|continue|confirm|login|sign\s*in|send|get|request|resend)\b|获取验证码|发送验证码|重新发送|同意|继续|确认|登录|提交/i.test(
+      String(textQuery || ''),
+    );
+  }
+
+  function inferActionability(el, type, textQuery, matchSource, isInteractive) {
+    if (!isInteractive) return 'blocked';
+    if (type === 'text') return 'not_actionable';
+    const tag = el.tagName ? el.tagName.toLowerCase() : '';
+    const role = String(el.getAttribute('role') || '').toLowerCase();
+    const inputType = String(el.getAttribute('type') || '').toLowerCase();
+    const isTextEntry =
+      tag === 'textarea' ||
+      role === 'textbox' ||
+      role === 'searchbox' ||
+      role === 'combobox' ||
+      (tag === 'input' && !['button', 'submit', 'reset', 'checkbox', 'radio'].includes(inputType));
+    if (matchSource === 'placeholder' && isTextEntry && isActionTextQuery(textQuery)) {
+      return 'not_actionable';
+    }
+    return 'actionable';
+  }
+
+  function getCheckedState(el) {
+    const tag = el.tagName ? el.tagName.toLowerCase() : '';
+    const role = String(el.getAttribute('role') || '').toLowerCase();
+    if (tag === 'input' && ['checkbox', 'radio'].includes(String(el.getAttribute('type') || ''))) {
+      return Boolean(/** @type {HTMLInputElement} */ (el).checked);
+    }
+    if (role === 'checkbox' || role === 'radio' || role === 'switch') {
+      const ariaChecked = String(el.getAttribute('aria-checked') || '').toLowerCase();
+      if (ariaChecked === 'true') return true;
+      if (ariaChecked === 'false') return false;
+      if (ariaChecked === 'mixed') return 'mixed';
+    }
+    return null;
+  }
+
   /**
    * Simple subsequence matching for fuzzy search.
    * @param {string} text The text to search within.
@@ -272,13 +342,23 @@
    * Creates the standardized info object for an element.
    * Modified to handle the new 'text' type from the final fallback.
    */
-  function createElementInfo(el, type, includeCoordinates, isInteractiveOverride = null) {
+  function createElementInfo(
+    el,
+    type,
+    includeCoordinates,
+    isInteractiveOverride = null,
+    matchContext = {},
+  ) {
     const isActuallyInteractive = isElementInteractive(el);
+    const isInteractive =
+      isInteractiveOverride !== null ? isInteractiveOverride : isActuallyInteractive;
+    const textQuery = matchContext.textQuery || '';
+    const matchSource = matchContext.matchSource || inferMatchSource(el, textQuery);
     const info = {
       type,
       selector: generateSelector(el),
       text: getAccessibleName(el) || el.textContent?.trim(),
-      isInteractive: isInteractiveOverride !== null ? isInteractiveOverride : isActuallyInteractive,
+      isInteractive,
       disabled: el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true',
       tagName: el.tagName ? el.tagName.toLowerCase() : '',
       className:
@@ -290,9 +370,13 @@
       alt: el.getAttribute('alt') || '',
       title: el.getAttribute('title') || '',
       role: el.getAttribute('role') || '',
+      matchSource,
+      actionability: inferActionability(el, type, textQuery, matchSource, isInteractive),
     };
     const valueState = getValueState(el);
     if (valueState) info.valueState = valueState;
+    const checked = getCheckedState(el);
+    if (checked !== null) info.checked = checked;
     const visualSignature = getVisualSignature(el);
     if (visualSignature) info.visualSignature = visualSignature;
     if (includeCoordinates) {
@@ -517,7 +601,7 @@
           break;
         }
       }
-      results.push(createElementInfo(el, elementType, includeCoordinates));
+      results.push(createElementInfo(el, elementType, includeCoordinates, null, { textQuery }));
     }
     if (!textQuery) return results;
     const sorted = sortElementsForQuery(
@@ -536,7 +620,7 @@
           break;
         }
       }
-      return createElementInfo(el, elementType, includeCoordinates);
+      return createElementInfo(el, elementType, includeCoordinates, null, { textQuery });
     });
   }
 
@@ -555,7 +639,15 @@
     // --- Layer 1: High-reliability search for interactive elements matching text ---
     let results = findInteractiveElements({ ...options, types: Object.keys(ELEMENT_CONFIG) });
     if (results.length > 0) {
-      return results;
+      if (
+        !(
+          isActionTextQuery(textQuery) &&
+          results.every((item) => item.actionability === 'not_actionable')
+        )
+      ) {
+        return results;
+      }
+      // If an action query only hit placeholders, keep looking for real text/ancestor buttons.
     }
 
     // --- Layer 2: Find text, then find its interactive ancestor ---
@@ -606,7 +698,7 @@
               break;
             }
           }
-          return createElementInfo(el, elementType, includeCoordinates);
+          return createElementInfo(el, elementType, includeCoordinates, null, { textQuery });
         });
       }
     }
@@ -630,7 +722,10 @@
     });
 
     return sortElementsForQuery(finalElements, textQuery).map((el) =>
-      createElementInfo(el, 'text', includeCoordinates, true),
+      createElementInfo(el, 'text', includeCoordinates, false, {
+        textQuery,
+        matchSource: 'fallback',
+      }),
     );
   }
 
@@ -648,6 +743,7 @@
               'selected',
               request.includeCoordinates !== false,
               isElementInteractive(el),
+              { textQuery: request.textQuery || '' },
             ),
           );
         } else {
