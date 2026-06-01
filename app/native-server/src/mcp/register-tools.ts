@@ -827,6 +827,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       const decision = taskContext.shouldAllowReadPage({
         requestedLayer,
         requestKey: readPageRequestKey,
+        forceRefresh: readBoolean(args, 'forceRefresh') === true,
       });
       if (!decision.allowed || decision.reason === 'read_redundant') {
         const shouldAttachCachedProjection =
@@ -2317,7 +2318,18 @@ function buildReadPageRequestKey(args: unknown, requestedLayer: ReadPageRequeste
   const depth =
     typeof input.depth === 'number' && Number.isFinite(input.depth) ? input.depth : null;
   const refId = typeof input.refId === 'string' ? input.refId : '';
-  return JSON.stringify({ requestedLayer, mode, render, filter, depth, refId });
+  const includeAuthArtifacts = input.includeAuthArtifacts === true;
+  const forceRefresh = input.forceRefresh === true;
+  return JSON.stringify({
+    requestedLayer,
+    mode,
+    render,
+    filter,
+    depth,
+    refId,
+    includeAuthArtifacts,
+    forceRefresh,
+  });
 }
 
 function buildAutoTabTaskContextKey(tabId: number): string {

@@ -121,6 +121,56 @@ export interface ReadPageAuthArtifactStatus {
   claimBoundary: string;
 }
 
+export const READ_PAGE_AUTH_COLLABORATION_STATUS_VALUES = [
+  'not_required',
+  'required',
+  'waiting_for_user',
+  'succeeded_candidate',
+  'not_proven',
+] as const;
+
+export type ReadPageAuthCollaborationStatus =
+  (typeof READ_PAGE_AUTH_COLLABORATION_STATUS_VALUES)[number];
+
+export const READ_PAGE_AUTH_CHALLENGE_TYPES = [
+  'qr',
+  'otp',
+  'password_form',
+  'captcha',
+  'sso_external',
+  'unknown',
+] as const;
+
+export type ReadPageAuthChallengeType = (typeof READ_PAGE_AUTH_CHALLENGE_TYPES)[number];
+
+export interface ReadPageAuthCollaborationUserAction {
+  required: boolean;
+  instruction: string;
+  artifactRef?: string;
+  expiresAtMs?: number;
+  retryRecommendation?: string;
+}
+
+export interface ReadPageAuthCollaborationEvidence {
+  pageFreshness: 'single_snapshot' | 'compared_snapshot' | 'unknown';
+  tabId?: number;
+  ownerType?: import('./browser-task-thing-contract').BrowserPageOwnerType | string | null;
+  canTabrixOperate?: boolean | null;
+  operationBinding: 'ai_operable_tab' | 'protected_or_unknown_tab';
+  artifactStatus?: ReadPageAuthArtifactStatusValue;
+  semanticEventTypes: ReadPageBrowserPageSemanticEventType[];
+  postconditionStatus: 'candidate_only' | 'not_evaluated' | 'not_proven';
+  claimBoundary: string;
+}
+
+export interface ReadPageAuthCollaboration {
+  status: ReadPageAuthCollaborationStatus;
+  challengeType: ReadPageAuthChallengeType;
+  userAction: ReadPageAuthCollaborationUserAction;
+  evidence: ReadPageAuthCollaborationEvidence;
+  claimBoundary: string;
+}
+
 export interface ReadPageCandidateActionLocator {
   type: 'ref' | 'aria' | 'css' | string;
   value: string;
@@ -902,6 +952,15 @@ export interface ReadPageExtensionFields {
    * login success proof or stored in long-term memory.
    */
   authArtifactStatus?: ReadPageAuthArtifactStatus;
+  /**
+   * Additive login-collaboration state for AI planning.
+   *
+   * This tells an upstream assistant whether the current page appears to need
+   * user login help, what kind of help is likely required, and whether the
+   * evidence is only a candidate. It is not a password manager, not proof of
+   * login success, and not permission to operate protected user-owned tabs.
+   */
+  authCollaboration?: ReadPageAuthCollaboration;
   L0?: ReadPageTaskLevel0;
   L1?: ReadPageTaskLevel1;
   L2?: ReadPageTaskLevel2;

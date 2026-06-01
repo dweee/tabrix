@@ -210,6 +210,11 @@ export const BROWSER_SCHEMAS: Tool[] = [
           description:
             'Default false. When true, and only for an auth-scoped QR surface in an AI-operable tab, include a temporary auth_qr_image artifact reference for remote user login collaboration.',
         },
+        forceRefresh: {
+          type: 'boolean',
+          description:
+            'Default false. When true, bypass read_page cached-read reuse and force a fresh browser read. Use after user-side login collaboration, QR scans, OTP/captcha/manual confirmation, or any external browser change that Tabrix did not perform through an MCP action.',
+        },
       },
       required: [],
     },

@@ -13,6 +13,8 @@ import {
   READ_PAGE_OBJECT_LIFECYCLE_CHANGE_KINDS,
   READ_PAGE_OBJECT_LIFECYCLE_FAMILIES,
   READ_PAGE_AUTH_ARTIFACT_STATUS_VALUES,
+  READ_PAGE_AUTH_CHALLENGE_TYPES,
+  READ_PAGE_AUTH_COLLABORATION_STATUS_VALUES,
   READ_PAGE_REQUESTED_LAYER_VALUES,
   READ_PAGE_TASK_PROTOCOL_FIELDS,
   STABLE_TARGET_REF_PREFIX,
@@ -146,6 +148,23 @@ assert.deepEqual(READ_PAGE_AUTH_ARTIFACT_STATUS_VALUES, [
   'blocked',
   'ready',
   'failed',
+]);
+
+assert.deepEqual(READ_PAGE_AUTH_COLLABORATION_STATUS_VALUES, [
+  'not_required',
+  'required',
+  'waiting_for_user',
+  'succeeded_candidate',
+  'not_proven',
+]);
+
+assert.deepEqual(READ_PAGE_AUTH_CHALLENGE_TYPES, [
+  'qr',
+  'otp',
+  'password_form',
+  'captcha',
+  'sso_external',
+  'unknown',
 ]);
 
 assert.deepEqual(READ_PAGE_MODE_MINIMUM_FIELDS, {

@@ -2,6 +2,9 @@ import type {
   BrowserPageOwnerType,
   ReadPageArtifactRef,
   ReadPageAuthArtifactStatus,
+  ReadPageAuthChallengeType,
+  ReadPageAuthCollaboration,
+  ReadPageBrowserPageObjectView,
   ReadPageRegion,
   ReadPageRegionObject,
 } from '@tabrix/shared';
@@ -13,6 +16,8 @@ const AUTH_QR_ARTIFACT_KIND = 'auth_qr_image';
 const AUTH_QR_ARTIFACT_TTL_MS = 120_000;
 const AUTH_QR_CLAIM_BOUNDARY =
   'temporary auth-scoped QR image artifact only; not QR payload proof, not login success proof, and not long-term memory';
+const AUTH_COLLABORATION_CLAIM_BOUNDARY =
+  'login collaboration planning state only; not credential storage, not auth bypass, and not proof of login success without fresh postcondition evidence';
 
 type AuthQrExtractionMethod =
   | 'img_data_url'
@@ -88,6 +93,209 @@ export function canExtractAuthArtifactForTab(tab: BrowserWorldTabObject | null):
     allowed: true,
     ownerType,
     reason: 'ai_owned_tab_auth_artifact_allowed',
+  };
+}
+
+function authScopedRegionText(pageRegions: ReadPageRegion[] | undefined): string {
+  return (Array.isArray(pageRegions) ? pageRegions : [])
+    .filter((region) => region.regionType !== 'content')
+    .flatMap((region) => [
+      region.regionId,
+      region.regionType,
+      region.state,
+      region.label || '',
+      ...(region.objects || []).flatMap((object) => [
+        object.objectId,
+        object.objectType,
+        object.label,
+        object.reason,
+        object.role || '',
+      ]),
+    ])
+    .join(' ');
+}
+
+function hasAuthScopedQrRegion(pageRegions: ReadPageRegion[] | undefined): boolean {
+  return selectAuthQrArtifactCandidate(pageRegions) !== null;
+}
+
+function detectAuthChallengeType(params: {
+  pageRegions: ReadPageRegion[] | undefined;
+  authArtifactStatus: ReadPageAuthArtifactStatus;
+  browserPageObject: ReadPageBrowserPageObjectView | null | undefined;
+}): ReadPageAuthChallengeType {
+  const eventTypes = (params.browserPageObject?.semanticEvents || []).map(
+    (event) => event.eventType,
+  );
+  if (
+    params.authArtifactStatus.status === 'ready' ||
+    eventTypes.some((eventType) => eventType.startsWith('qr_')) ||
+    hasAuthScopedQrRegion(params.pageRegions)
+  ) {
+    return 'qr';
+  }
+
+  const text = authScopedRegionText(params.pageRegions);
+  if (/\b(captcha|human|slider|challenge)\b|人机|滑块|安全验证/i.test(text)) return 'captcha';
+  if (/\b(otp|sms|verification code|one-time code)\b|短信|验证码|动态码/i.test(text)) {
+    return 'otp';
+  }
+  if (/\b(password|passcode|credential)\b|密码|账号/i.test(text)) return 'password_form';
+  if (/\b(sso|oauth|identity provider|third[-\s]?party)\b|单点登录|第三方|授权登录/i.test(text)) {
+    return 'sso_external';
+  }
+  return 'unknown';
+}
+
+function hasAuthRequiredEvidence(params: {
+  pageRole?: string | null;
+  pageRegions: ReadPageRegion[] | undefined;
+  browserPageObject: ReadPageBrowserPageObjectView | null | undefined;
+}): boolean {
+  if (params.pageRole === 'login_required') return true;
+  const eventTypes = (params.browserPageObject?.semanticEvents || []).map(
+    (event) => event.eventType,
+  );
+  if (
+    eventTypes.some((eventType) =>
+      ['auth_required_candidate', 'qr_waiting', 'qr_expired_candidate', 'qr_refreshed'].includes(
+        eventType,
+      ),
+    )
+  ) {
+    return true;
+  }
+  const regions = Array.isArray(params.pageRegions) ? params.pageRegions : [];
+  return regions.some((region) => {
+    if (region.regionType === 'qr_code' && hasAuthScopedQrRegion(regions)) return true;
+    if (region.regionType === 'modal' && /\bauth|login\b|登录|授权/i.test(region.state)) {
+      return true;
+    }
+    if (region.regionType === 'account' && /logged_out|auth|login|登录/i.test(region.state)) {
+      return true;
+    }
+    return false;
+  });
+}
+
+function authArtifactExpiresAt(
+  artifactRefs: ReadPageArtifactRef[],
+  artifactRef: string | undefined,
+): number | undefined {
+  if (!artifactRef) return undefined;
+  return artifactRefs.find((item) => item.ref === artifactRef)?.expiresAtMs;
+}
+
+export function buildAuthCollaborationState(params: {
+  pageRole?: string | null;
+  tabId: number;
+  pageRegions: ReadPageRegion[] | undefined;
+  browserPageObject: ReadPageBrowserPageObjectView | null | undefined;
+  browserWorldTab: BrowserWorldTabObject | null;
+  authArtifactStatus: ReadPageAuthArtifactStatus;
+  artifactRefs: ReadPageArtifactRef[];
+}): ReadPageAuthCollaboration {
+  const browserPageObject = params.browserPageObject ?? null;
+  const semanticEventTypes = (browserPageObject?.semanticEvents || []).map(
+    (event) => event.eventType,
+  );
+  const ownerGate = canExtractAuthArtifactForTab(params.browserWorldTab);
+  const operationBinding = ownerGate.allowed ? 'ai_operable_tab' : 'protected_or_unknown_tab';
+  const challengeType = detectAuthChallengeType({
+    pageRegions: params.pageRegions,
+    authArtifactStatus: params.authArtifactStatus,
+    browserPageObject,
+  });
+  const authRequired = hasAuthRequiredEvidence({
+    pageRole: params.pageRole,
+    pageRegions: params.pageRegions,
+    browserPageObject,
+  });
+  const succeededCandidate = semanticEventTypes.includes('auth_succeeded_candidate');
+  const succeededCandidateHasFreshComparison = browserPageObject?.status === 'compared_snapshot';
+  const expiredCandidate = semanticEventTypes.includes('qr_expired_candidate');
+
+  let status: ReadPageAuthCollaboration['status'] = 'not_required';
+  if (succeededCandidate && succeededCandidateHasFreshComparison) {
+    status = 'succeeded_candidate';
+  } else if (succeededCandidate) {
+    status = 'not_proven';
+  } else if (!authRequired) {
+    status = 'not_required';
+  } else if (
+    expiredCandidate ||
+    params.authArtifactStatus.status === 'failed' ||
+    params.authArtifactStatus.status === 'blocked' ||
+    operationBinding !== 'ai_operable_tab'
+  ) {
+    status = 'not_proven';
+  } else if (params.authArtifactStatus.status === 'ready') {
+    status = 'waiting_for_user';
+  } else {
+    status = 'required';
+  }
+
+  const expiresAtMs = authArtifactExpiresAt(
+    params.artifactRefs,
+    params.authArtifactStatus.artifactRef,
+  );
+  const instruction = (() => {
+    if (status === 'not_required') return '当前页面没有明确的登录协作需求。';
+    if (status === 'succeeded_candidate') {
+      return '已看到登录后状态候选；继续原任务前仍应以 fresh read_page/postcondition 作为证明。';
+    }
+    if (succeededCandidate && !succeededCandidateHasFreshComparison) {
+      return '看到了登录后状态候选，但页面证据不是 fresh/resync 对比结果；请强制重新读取页面后再判断是否登录成功。';
+    }
+    if (operationBinding !== 'ai_operable_tab') {
+      return '当前标签不是 AI 可操作标签；需要用户明确授权该标签，或让 AI 新开受控标签后再继续登录协作。';
+    }
+    if (expiredCandidate) return '登录二维码可能已过期；请刷新二维码或重新触发登录协作。';
+    if (challengeType === 'qr' && params.authArtifactStatus.status === 'ready') {
+      return '请用手机扫描二维码完成登录；扫码后告知 AI，AI 会重新读取页面并验证登录后状态。';
+    }
+    if (challengeType === 'otp') return '请在当前浏览器页面完成验证码或短信验证码输入。';
+    if (challengeType === 'password_form') return '请你在当前页面自行输入账号/密码并完成登录。';
+    if (challengeType === 'captcha') return '请你在当前页面完成人机验证或安全验证。';
+    if (challengeType === 'sso_external') return '请你在当前页面或跳转的授权页完成登录授权。';
+    return '请你在当前页面完成登录要求；完成后 AI 会重新读取页面确认是否可继续。';
+  })();
+
+  return {
+    status,
+    challengeType,
+    userAction: {
+      required: status === 'required' || status === 'waiting_for_user' || status === 'not_proven',
+      instruction,
+      artifactRef:
+        status === 'waiting_for_user' && params.authArtifactStatus.artifactRef
+          ? params.authArtifactStatus.artifactRef
+          : undefined,
+      expiresAtMs,
+      retryRecommendation:
+        status === 'not_proven'
+          ? 'Refresh or repeat read_page with fresh page evidence before claiming login success.'
+          : status === 'required'
+            ? 'Request user collaboration, then verify with a fresh read_page after the user finishes.'
+            : undefined,
+    },
+    evidence: {
+      pageFreshness: browserPageObject?.status ?? 'unknown',
+      tabId: params.tabId,
+      ownerType: ownerGate.ownerType,
+      canTabrixOperate: params.browserWorldTab?.canTabrixOperate ?? null,
+      operationBinding,
+      artifactStatus: params.authArtifactStatus.status,
+      semanticEventTypes,
+      postconditionStatus:
+        status === 'succeeded_candidate'
+          ? 'candidate_only'
+          : status === 'not_proven'
+            ? 'not_proven'
+            : 'not_evaluated',
+      claimBoundary: AUTH_COLLABORATION_CLAIM_BOUNDARY,
+    },
+    claimBoundary: AUTH_COLLABORATION_CLAIM_BOUNDARY,
   };
 }
 

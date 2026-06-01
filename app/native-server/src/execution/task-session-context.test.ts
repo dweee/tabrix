@@ -141,6 +141,31 @@ describe('TaskSessionContext — redundancy + layer demotion', () => {
     expect(decision.suggestedLayer).toBe('L0+L1+L2');
   });
 
+  it('allows a same-shape read when forceRefresh is requested', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteUrlChange('https://example.test/login', 'login_required');
+    ctx.noteReadPage({
+      layer: 'L0+L1+L2',
+      source: 'dom_json',
+      requestKey: 'auth-flow-read',
+    });
+
+    const cachedDecision = ctx.shouldAllowReadPage({
+      requestedLayer: 'L0+L1+L2',
+      requestKey: 'auth-flow-read',
+    });
+    expect(cachedDecision.reason).toBe('read_redundant');
+
+    const freshDecision = ctx.shouldAllowReadPage({
+      requestedLayer: 'L0+L1+L2',
+      requestKey: 'auth-flow-read',
+      forceRefresh: true,
+    });
+    expect(freshDecision.allowed).toBe(true);
+    expect(freshDecision.reason).toBe('');
+    expect(freshDecision.suggestedLayer).toBe('L0+L1+L2');
+  });
+
   it('flags L0+L1+L2 → L0+L1 as layer_demotion (still allowed)', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
     ctx.noteUrlChange('https://github.com/octocat/hello/issues', 'github_issues_list');

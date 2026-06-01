@@ -327,6 +327,12 @@ export interface ShouldAllowReadPageInput {
    * fresh read even when the public layer string is unchanged.
    */
   requestKey?: string | null;
+  /**
+   * Explicitly bypass cached-read reuse while keeping the normal read budget.
+   * Login collaboration uses this after user-side work such as scanning a QR
+   * code because that change is not caused by a Tabrix MCP action.
+   */
+  forceRefresh?: boolean;
 }
 
 /**
@@ -958,6 +964,7 @@ export class TaskSessionContext {
     }
 
     if (
+      input.forceRefresh !== true &&
       !isFirstReadOnPage &&
       this.lastReadLayer === requested &&
       this.lastReadRequestKey === requestKey

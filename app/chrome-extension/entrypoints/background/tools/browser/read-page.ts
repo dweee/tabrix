@@ -16,6 +16,7 @@ import {
   type ReadPageOwnershipRuntimeSummary,
   type ReadPageWindowRuntimeState,
   type ReadPageObjectLifecycleSummary,
+  type ReadPageBrowserPageObjectView,
   type BrowserPageThingProjection,
   type BrowserPageOwnerType,
   READ_PAGE_REQUESTED_LAYER_VALUES,
@@ -39,6 +40,7 @@ import { buildFallbackRefMap, formatElementsAsPageContent } from './read-page-fa
 import { buildExtensionLayer, buildStableSnapshotLayer } from './read-page-snapshot-builders';
 import { buildReadPageModeResult } from './read-page-mode-result';
 import {
+  buildAuthCollaborationState,
   buildAuthQrArtifactRefs,
   buildNotRequestedAuthArtifactStatus,
 } from './read-page-auth-artifacts';
@@ -74,6 +76,7 @@ interface ReadPageParams {
   // chrome_click_element resolution stays deterministic.
   requestedLayer?: ReadPageRequestedLayer;
   includeAuthArtifacts?: boolean;
+  forceRefresh?: boolean;
 }
 
 const READ_PAGE_SPARSE_RETRY_DELAY_MS = 450;
@@ -714,6 +717,7 @@ async function buildModeOutput(params: {
       })
     : buildNotRequestedAuthArtifactStatus();
   sharedPayload.artifactRefs = artifactRefs;
+  let browserPageObjectForAuth: ReadPageBrowserPageObjectView | null = null;
   if (sharedPayload.objectLifecycle) {
     const watchLoopSnapshot = buildBoundedWatchLoopSnapshot({
       tabId: params.tabId,
@@ -735,6 +739,7 @@ async function buildModeOutput(params: {
       selectedDataSource: sharedPayload.selectedDataSource,
       sourceRouteHonestyVerdict: null,
     });
+    browserPageObjectForAuth = browserPageObject;
     sharedPayload.browserPageObjectCompact = browserPageObject.compact;
     if (params.mode === 'compact') {
       delete sharedPayload.browserPageObject;
@@ -742,6 +747,15 @@ async function buildModeOutput(params: {
       sharedPayload.browserPageObject = browserPageObject;
     }
   }
+  sharedPayload.authCollaboration = buildAuthCollaborationState({
+    pageRole: sharedPayload.summary?.pageRole,
+    tabId: params.tabId,
+    pageRegions: sharedPayload.pageRegions,
+    browserPageObject: browserPageObjectForAuth,
+    browserWorldTab,
+    authArtifactStatus: sharedPayload.authArtifactStatus,
+    artifactRefs,
+  });
 
   return buildReadPageModeResult({
     sharedPayload,
