@@ -272,6 +272,13 @@ export interface ReadPageCandidateActionLocator {
   value: string;
 }
 
+export type ReadPageCandidateActionIntent =
+  | 'auth.accept_terms'
+  | 'auth.confirm_agreement'
+  | 'auth.request_otp'
+  | 'auth.submit_login'
+  | (string & {});
+
 export interface ReadPageCandidateAction {
   id: string;
   actionType: 'click' | 'fill' | string;
@@ -279,6 +286,11 @@ export interface ReadPageCandidateAction {
   confidence: number;
   matchReason: string;
   locatorChain: ReadPageCandidateActionLocator[];
+  /**
+   * Optional AI-facing action intent. It lets the executor verify the right
+   * postcondition after a click without adding another public MCP tool.
+   */
+  intent?: ReadPageCandidateActionIntent;
 }
 
 export interface ReadPageExecutableAction {

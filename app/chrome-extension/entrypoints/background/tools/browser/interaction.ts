@@ -1050,6 +1050,8 @@ class ClickTool extends BaseBrowserToolExecutor {
       // the page-local helper has finished its own verification window. This
       // prevents a slow `_blank` click from being downgraded to
       // `no_observed_change` just because the background observer stopped first.
+      const authIntent =
+        typeof args.candidateAction?.intent === 'string' ? args.candidateAction.intent : undefined;
       const resultPromise = this.sendMessageToTab(
         tab.id,
         {
@@ -1065,6 +1067,7 @@ class ClickTool extends BaseBrowserToolExecutor {
           cancelable,
           modifiers,
           allowDownloadClick: args.allowDownloadClick === true,
+          intent: authIntent,
         },
         frameId,
       );
@@ -1179,6 +1182,11 @@ class ClickTool extends BaseBrowserToolExecutor {
           : Boolean(result?.success);
 
       const merged = mergeClickSignals(dispatchSucceeded, pageSignals, browserSignals);
+      const authPostcondition =
+        result && typeof result === 'object' && 'authPostcondition' in result
+          ? (result as { authPostcondition?: { status?: string; reason?: string } })
+              .authPostcondition
+          : null;
 
       // Optional family-aware verifier. Runs at most one compact readback.
       // `success` collapses to false if the verifier was requested and did
@@ -1191,6 +1199,9 @@ class ClickTool extends BaseBrowserToolExecutor {
         verifierReason: string;
       } | null = null;
       let finalSuccess = merged.success;
+      if (authPostcondition && authPostcondition.status !== 'passed') {
+        finalSuccess = false;
+      }
       if (isVerifierContextRequested(args.verifierContext)) {
         let verifierResult: ClickVerifierResult | null = null;
         if (merged.dispatchSucceeded) {
@@ -1243,13 +1254,16 @@ class ClickTool extends BaseBrowserToolExecutor {
               lane: TABRIX_OWNED_LANE,
               message: finalSuccess
                 ? `Click observed outcome: ${merged.observedOutcome}`
-                : merged.observedOutcome === 'no_observed_change'
-                  ? 'Click was dispatched but no observable outcome was detected within the verification window'
-                  : postClickState && !postClickState.verifierPassed
-                    ? `Click dispatched but verifier rejected the outcome (${postClickState.verifierReason})`
-                    : `Click dispatched; outcome unverified (${merged.observedOutcome})`,
+                : authPostcondition && authPostcondition.status !== 'passed'
+                  ? `Click dispatched but auth postcondition was not proven (${authPostcondition.reason || authPostcondition.status})`
+                  : merged.observedOutcome === 'no_observed_change'
+                    ? 'Click was dispatched but no observable outcome was detected within the verification window'
+                    : postClickState && !postClickState.verifierPassed
+                      ? `Click dispatched but verifier rejected the outcome (${postClickState.verifierReason})`
+                      : `Click dispatched; outcome unverified (${merged.observedOutcome})`,
               elementInfo: result?.elementInfo,
               clickMethod,
+              ...(authPostcondition ? { authPostcondition } : {}),
               ...(postClickState ? { postClickState } : {}),
             }),
           },

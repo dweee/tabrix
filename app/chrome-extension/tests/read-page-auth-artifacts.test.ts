@@ -642,6 +642,57 @@ describe('read_page auth artifacts', () => {
     });
   });
 
+  it('maps a custom DOM OTP sender to an actionable request control with locator evidence', () => {
+    const collaboration = buildAuthCollaborationState({
+      pageRole: 'login_required',
+      tabId: 9,
+      pageRegions: otpAuthRegions(),
+      browserPageObject: browserPageObject(['auth_required_candidate']),
+      browserWorldTab: aiOwnedTab(),
+      authArtifactStatus: buildNotRequestedAuthArtifactStatus(),
+      artifactRefs: [],
+      interactiveElements: [
+        ...otpInteractive({
+          ref_phone: { valueState: 'non_empty' },
+          ref_agreement: { checked: true },
+        }).filter((element) => element.ref !== 'ref_request_otp'),
+        {
+          ref: 'ref_custom_request_otp',
+          role: 'button',
+          name: '获取验证码',
+          matchSource: 'visible_text',
+          actionability: 'actionable',
+        },
+      ],
+      candidateActions: [
+        ...otpCandidateActions().filter((action) => action.targetRef !== 'ref_request_otp'),
+        {
+          id: 'ca_click_ref_custom_request_otp',
+          actionType: 'click',
+          targetRef: 'ref_custom_request_otp',
+          confidence: 0.93,
+          matchReason: 'primary action inferred from interactive label',
+          locatorChain: [{ type: 'css', value: '.custom-otp-send' }],
+          intent: 'auth.request_otp',
+        },
+      ],
+    });
+
+    expect(collaboration.authForm).toMatchObject({
+      readiness: 'ready_to_request_otp',
+      nextAction: 'request_otp',
+      controls: {
+        requestOtp: {
+          targetRef: 'ref_custom_request_otp',
+          candidateActionId: 'ca_click_ref_custom_request_otp',
+          locatorChain: [{ type: 'css', value: '.custom-otp-send' }],
+          matchSource: 'visible_text',
+          actionability: 'actionable',
+        },
+      },
+    });
+  });
+
   it('does not treat a placeholder-only OTP action match as a clickable request button', () => {
     const collaboration = buildAuthCollaborationState({
       pageRole: 'login_required',

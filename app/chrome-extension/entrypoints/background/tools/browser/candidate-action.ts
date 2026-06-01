@@ -7,7 +7,7 @@ import {
 export type CandidateActionSelectorType = 'css' | 'xpath';
 
 export type CandidateActionInput = Partial<
-  Pick<ReadPageCandidateAction, 'targetRef' | 'locatorChain'>
+  Pick<ReadPageCandidateAction, 'targetRef' | 'locatorChain' | 'intent'>
 >;
 
 /**

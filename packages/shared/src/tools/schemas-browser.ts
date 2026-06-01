@@ -254,6 +254,11 @@ export const BROWSER_SCHEMAS: Tool[] = [
               type: 'string',
               description: 'Preferred element ref from read_page candidateActions[*].targetRef.',
             },
+            intent: {
+              type: 'string',
+              description:
+                'Optional read_page candidateActions[*].intent, used for auth post-click verification such as auth.request_otp.',
+            },
             locatorChain: {
               type: 'array',
               description:
@@ -1134,6 +1139,11 @@ export const BROWSER_SCHEMAS: Tool[] = [
               type: 'string',
               description: 'Preferred element ref from read_page candidateActions[*].targetRef.',
             },
+            intent: {
+              type: 'string',
+              description:
+                'Optional read_page candidateActions[*].intent, used for auth post-click verification such as auth.request_otp.',
+            },
             locatorChain: {
               type: 'array',
               description:
@@ -1237,6 +1247,11 @@ export const BROWSER_SCHEMAS: Tool[] = [
             targetRef: {
               type: 'string',
               description: 'Preferred element ref from read_page candidateActions[*].targetRef.',
+            },
+            intent: {
+              type: 'string',
+              description:
+                'Optional read_page candidateActions[*].intent, used for auth-aware execution context. Fill ignores it.',
             },
             locatorChain: {
               type: 'array',

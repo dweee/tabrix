@@ -773,4 +773,50 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
       actualTarget: { id: 'mask' },
     });
   });
+
+  it('proves auth.request_otp only after countdown or sent state appears', async () => {
+    document.body.innerHTML = '<button id="btn">获取验证码</button>';
+    const button = document.getElementById('btn') as HTMLButtonElement;
+    setRect(button, { left: 20, top: 30, width: 120, height: 32 });
+    document.elementFromPoint = vi.fn(() => button);
+    button.addEventListener('click', () => {
+      button.textContent = '重新发送 59秒';
+      button.setAttribute('disabled', '');
+    });
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#btn',
+      waitForNavigation: false,
+      timeout: 1000,
+      intent: 'auth.request_otp',
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(response.authPostcondition).toMatchObject({
+      intent: 'auth.request_otp',
+      status: 'passed',
+    });
+  });
+
+  it('returns not_proven when auth.request_otp click has no OTP evidence', async () => {
+    document.body.innerHTML = '<button id="btn">获取验证码</button>';
+    const button = document.getElementById('btn') as HTMLButtonElement;
+    setRect(button, { left: 20, top: 30, width: 120, height: 32 });
+    document.elementFromPoint = vi.fn(() => button);
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#btn',
+      waitForNavigation: false,
+      timeout: 1000,
+      intent: 'auth.request_otp',
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(response.authPostcondition).toMatchObject({
+      intent: 'auth.request_otp',
+      status: 'not_proven',
+    });
+  });
 });

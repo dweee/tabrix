@@ -27,6 +27,8 @@
     if (role) return role;
     const tag = el.tagName.toLowerCase();
     const type = el.getAttribute('type') || '';
+    const authActionRole = inferAuthActionRole(el);
+    if (authActionRole) return authActionRole;
     const map = {
       a: 'link',
       button: 'button',
@@ -126,6 +128,8 @@
       const v = agg.trim();
       return v.length > 50 ? v.substring(0, 50) + '...' : v;
     }
+    const nearbyAuthLabel = inferNearbyAuthLabel(el);
+    if (nearbyAuthLabel) return nearbyAuthLabel;
     return '';
   }
 
@@ -164,6 +168,144 @@
       return 'unknown';
     }
     return null;
+  }
+
+  const AUTH_ACTION_TEXT_PATTERN =
+    /获取验证码|发送验证码|重新发送|重发验证码|阅读并同意|我已阅读|用户协议|隐私政策|同意并继续|确认同意|我同意|登录|get code|send code|request code|resend code|agree and continue|accept and continue|log\s*in|sign\s*in/i;
+  const AGREEMENT_TEXT_PATTERN =
+    /阅读并同意|我已阅读|用户协议|隐私政策|服务协议|terms|privacy|policy|agreement/i;
+  const AGREEMENT_CONFIRM_TEXT_PATTERN =
+    /同意并继续|确认同意|我同意|agree and continue|accept and continue/i;
+  const AUTH_CONTEXT_PATTERN =
+    /登录|手机号|手机号码|验证码|短信|用户协议|隐私政策|login|sign in|phone|mobile|otp|verification code|sms|terms|privacy/i;
+
+  function classNameOf(el) {
+    try {
+      const attr = el.getAttribute && el.getAttribute('class');
+      if (typeof attr === 'string') return attr;
+      const cn = /** @type {any} */ (el).className;
+      if (typeof cn === 'string') return cn;
+      if (cn && typeof cn.baseVal === 'string') return cn.baseVal;
+    } catch (_) {
+      /* ignore */
+    }
+    return '';
+  }
+
+  function ownVisibleText(el) {
+    let text = '';
+    try {
+      for (let i = 0; i < el.childNodes.length; i++) {
+        const node = el.childNodes[i];
+        if (node.nodeType === Node.TEXT_NODE) text += node.textContent || '';
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return text.replace(/\s+/g, ' ').trim();
+  }
+
+  function nearbyText(el) {
+    const pieces = [ownVisibleText(el)];
+    try {
+      const parent = el.parentElement;
+      if (parent) pieces.push((parent.textContent || '').replace(/\s+/g, ' ').trim());
+      const grandparent = parent?.parentElement;
+      if (grandparent) pieces.push((grandparent.textContent || '').replace(/\s+/g, ' ').trim());
+    } catch (_) {
+      /* ignore */
+    }
+    return pieces.filter(Boolean).join(' ').slice(0, 600);
+  }
+
+  function isHugeContainer(el) {
+    try {
+      const rect = /** @type {HTMLElement} */ (el).getBoundingClientRect();
+      const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+      const area = Math.max(1, rect.width * rect.height);
+      return area > viewportArea * 0.35;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function looksLikeAgreementGlyph(el) {
+    const signature = `${/** @type {HTMLElement} */ (el).id || ''} ${classNameOf(el)} ${
+      el.getAttribute('aria-label') || ''
+    }`;
+    if (/\b(check|checkbox|agree|agreement|terms|privacy|select|tick|radio)\b/i.test(signature)) {
+      return AGREEMENT_TEXT_PATTERN.test(nearbyText(el));
+    }
+    return false;
+  }
+
+  function inferAuthActionRole(el) {
+    const tag = el.tagName.toLowerCase();
+    if (['input', 'textarea', 'select', 'button', 'a'].includes(tag)) return null;
+    const labelText =
+      ownVisibleText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || '';
+    const nearby = nearbyText(el);
+    if (looksLikeAgreementGlyph(el)) return 'checkbox';
+    if (!AUTH_CONTEXT_PATTERN.test(nearby)) return null;
+    if (AGREEMENT_TEXT_PATTERN.test(labelText) && !AGREEMENT_CONFIRM_TEXT_PATTERN.test(labelText)) {
+      return 'checkbox';
+    }
+    if (AUTH_ACTION_TEXT_PATTERN.test(labelText)) return 'button';
+    return null;
+  }
+
+  function isAuthActionTextElement(el) {
+    if (!isVisible(el)) return false;
+    const tag = el.tagName.toLowerCase();
+    if (['input', 'textarea', 'select', 'button', 'a'].includes(tag)) return false;
+    if (isHugeContainer(el)) return false;
+    return inferAuthActionRole(el) != null;
+  }
+
+  function inferCheckedState(el) {
+    const tag = el.tagName.toLowerCase();
+    const role = String(el.getAttribute('role') || inferAuthActionRole(el) || '').toLowerCase();
+    if (tag === 'input' && String(el.getAttribute('type') || '').toLowerCase() === 'checkbox') {
+      return /** @type {HTMLInputElement} */ (el).checked ? 'true' : 'false';
+    }
+    const ariaChecked = el.getAttribute('aria-checked');
+    if (ariaChecked === 'true' || ariaChecked === 'false' || ariaChecked === 'mixed') {
+      return ariaChecked;
+    }
+    if (role !== 'checkbox') return null;
+    const signature = `${/** @type {HTMLElement} */ (el).id || ''} ${classNameOf(el)} ${
+      el.getAttribute('data-state') || ''
+    }`;
+    if (/\b(checked|active|selected|is-on|on)\b/i.test(signature)) return 'true';
+    if (/\b(unchecked|inactive|off)\b/i.test(signature)) return 'false';
+    return 'unknown';
+  }
+
+  function inferMatchSource(el) {
+    if (ownVisibleText(el)) return 'visible_text';
+    if (el.getAttribute('aria-label')) return 'aria';
+    if (el.getAttribute('placeholder')) return 'placeholder';
+    if (el.getAttribute('title')) return 'title';
+    if (looksLikeAgreementGlyph(el)) return 'nearby_text';
+    return null;
+  }
+
+  function inferActionability(el) {
+    const tag = el.tagName.toLowerCase();
+    if (
+      ['input', 'textarea', 'select'].includes(tag) &&
+      AUTH_ACTION_TEXT_PATTERN.test(el.getAttribute('placeholder') || '')
+    ) {
+      return 'not_actionable';
+    }
+    if (isInteractive(el)) return 'actionable';
+    return null;
+  }
+
+  function inferNearbyAuthLabel(el) {
+    if (!looksLikeAgreementGlyph(el)) return '';
+    const text = nearbyText(el);
+    return text.length > 50 ? text.substring(0, 50) + '...' : text;
   }
 
   /**
@@ -216,6 +358,7 @@
       'treeitem',
     ]);
     if (role && interactiveRoles.has(role.toLowerCase())) return true;
+    if (isAuthActionTextElement(el)) return true;
 
     // Shadow host case: treat host as interactive if its open shadow root contains
     // an interactive control (textarea/input/select/button/a or contenteditable).
@@ -603,6 +746,12 @@
       if (placeholder) line += ` placeholder="${placeholder}"`;
       const valueState = inferValueState(el);
       if (valueState) line += ` valueState="${valueState}"`;
+      const checkedState = inferCheckedState(el);
+      if (checkedState) line += ` checked="${checkedState}"`;
+      const matchSource = inferMatchSource(el);
+      if (matchSource) line += ` matchSource="${matchSource}"`;
+      const actionability = inferActionability(el);
+      if (actionability) line += ` actionability="${actionability}"`;
       // Surface disabled/pointer-events for better agent judgement
       try {
         const disabled = el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true';
@@ -629,6 +778,9 @@
           },
         };
         if (valueState) refEntry.valueState = valueState;
+        if (checkedState) refEntry.checked = checkedState;
+        if (matchSource) refEntry.matchSource = matchSource;
+        if (actionability) refEntry.actionability = actionability;
         refMap.push(refEntry);
       }
     }

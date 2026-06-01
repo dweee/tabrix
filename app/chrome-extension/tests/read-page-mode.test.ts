@@ -530,6 +530,68 @@ describe('read_page mode', () => {
     });
   });
 
+  it('preserves auth action metadata and emits OTP candidate intents', () => {
+    const elements = buildInteractiveElements(
+      [
+        '- textbox "手机号" [ref=ref_phone] valueState="non_empty" matchSource="placeholder" actionability="actionable"',
+        '- textbox "验证码" [ref=ref_code] valueState="empty" matchSource="placeholder" actionability="actionable"',
+        '- button "获取验证码" [ref=ref_request] matchSource="visible_text" actionability="actionable"',
+        '- checkbox "我已阅读并同意用户协议和隐私政策" [ref=ref_terms] checked="false" matchSource="nearby_text" actionability="actionable"',
+        '- button "登录" [ref=ref_login] matchSource="visible_text" actionability="actionable"',
+      ].join('\n'),
+      [],
+      10,
+      'full',
+      'https://example.test/login',
+    );
+    const actions = buildCandidateActions(elements, [
+      { ref: 'ref_request', selector: '.otp-send' },
+      { ref: 'ref_terms', selector: '.terms-check' },
+      { ref: 'ref_login', selector: '.login-submit' },
+    ]);
+
+    expect(elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ref: 'ref_request',
+          matchSource: 'visible_text',
+          actionability: 'actionable',
+        }),
+        expect.objectContaining({
+          ref: 'ref_terms',
+          checked: false,
+          matchSource: 'nearby_text',
+        }),
+      ]),
+    );
+    expect(actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ targetRef: 'ref_request', intent: 'auth.request_otp' }),
+        expect.objectContaining({ targetRef: 'ref_terms', intent: 'auth.accept_terms' }),
+        expect.objectContaining({ targetRef: 'ref_login', intent: 'auth.submit_login' }),
+      ]),
+    );
+  });
+
+  it('does not assign auth.request_otp intent to placeholder-only textboxes', () => {
+    const elements = buildInteractiveElements(
+      '- textbox "获取验证码" [ref=ref_code] valueState="empty" matchSource="placeholder" actionability="actionable"',
+      [],
+      10,
+      'full',
+      'https://example.test/login',
+    );
+    const actions = buildCandidateActions(elements, []);
+
+    expect(actions).toEqual([
+      expect.objectContaining({
+        targetRef: 'ref_code',
+        actionType: 'fill',
+      }),
+    ]);
+    expect(actions[0]).not.toHaveProperty('intent', 'auth.request_otp');
+  });
+
   it('returns null window focus truth when chrome.windows.get is unavailable', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 5202,

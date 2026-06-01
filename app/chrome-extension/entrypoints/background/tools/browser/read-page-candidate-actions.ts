@@ -35,6 +35,36 @@ function scoreCandidateElementPriority(element: ReadPageInteractiveElement, inde
   return score - Math.min(index, 100) / 1000;
 }
 
+function inferCandidateActionIntent(
+  element: ReadPageInteractiveElement,
+  actionType: 'click' | 'fill',
+): ReadPageCandidateAction['intent'] | undefined {
+  if (actionType !== 'click') return undefined;
+  const role = String(element.role || '').toLowerCase();
+  const name = String(element.name || '').trim();
+  const source = String(element.matchSource || '').toLowerCase();
+
+  if (!name || source === 'placeholder') return undefined;
+  if (/同意并继续|确认同意|我同意|agree and continue|accept and continue/i.test(name)) {
+    return 'auth.confirm_agreement';
+  }
+  if (
+    /获取验证码|发送验证码|重新发送|重发验证码|get code|send code|request code|resend code/i.test(
+      name,
+    )
+  ) {
+    return 'auth.request_otp';
+  }
+  if (
+    role === 'checkbox' ||
+    /我已阅读|阅读并同意|用户协议|隐私政策|服务协议|terms|privacy|policy|agreement/i.test(name)
+  ) {
+    return 'auth.accept_terms';
+  }
+  if (/登录|log\s*in|sign\s*in/i.test(name)) return 'auth.submit_login';
+  return undefined;
+}
+
 export function buildCandidateActions(
   interactiveElements: ReadPageInteractiveElement[],
   refMap: any[],
@@ -81,6 +111,7 @@ export function buildCandidateActions(
       : actionType === 'fill'
         ? 'form input candidate from structured snapshot'
         : 'interactive clickable candidate from structured snapshot';
+    const intent = inferCandidateActionIntent(element, actionType);
 
     const safeRef = element.ref.replace(/[^a-zA-Z0-9_]/g, '_');
     seeds.push({
@@ -90,6 +121,7 @@ export function buildCandidateActions(
       confidence: Number(confidence.toFixed(2)),
       matchReason,
       locatorChain,
+      ...(intent ? { intent } : {}),
     });
     if (seeds.length >= 20) break;
   }

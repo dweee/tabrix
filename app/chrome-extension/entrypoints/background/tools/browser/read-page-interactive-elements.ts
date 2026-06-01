@@ -152,6 +152,10 @@ function parseSnapshotNodesFromPageContent(pageContent: string): SnapshotNode[] 
       trimmedLine.match(/\schecked="(true|false|mixed|unknown)"/i) ??
       trimmedLine.match(/\saria-checked="(true|false|mixed|unknown)"/i) ??
       trimmedLine.match(/\schecked:\s*(true|false|mixed|unknown)/i);
+    const matchSourceMatch =
+      trimmedLine.match(/\smatchSource="([^"]+)"/i) ??
+      trimmedLine.match(/\smatch-source="([^"]+)"/i);
+    const actionabilityMatch = trimmedLine.match(/\sactionability="([^"]+)"/i);
     nodes.push({
       role: String(match[1] || 'generic')
         .trim()
@@ -168,8 +172,8 @@ function parseSnapshotNodesFromPageContent(pageContent: string): SnapshotNode[] 
           ? valueStateFromRaw(valueMatch[1])
           : null,
       checked: checkedMatch ? normalizeCheckedState(checkedMatch[1]) : null,
-      matchSource: null,
-      actionability: null,
+      matchSource: matchSourceMatch ? String(matchSourceMatch[1] || '').trim() : null,
+      actionability: actionabilityMatch ? String(actionabilityMatch[1] || '').trim() : null,
     });
     if (nodes.length >= 300) break;
   }

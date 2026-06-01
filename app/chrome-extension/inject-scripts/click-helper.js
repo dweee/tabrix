@@ -551,6 +551,8 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
       const hashBefore = String(window.location.hash || '');
       const focusBefore = document.activeElement;
       const stateBefore = snapshotTargetState(element);
+      const authIntent = typeof options.intent === 'string' ? options.intent : '';
+      const authTextBefore = authIntent ? readSafeBodyText() : '';
 
       // Raw signals, no verdict.
       let beforeUnloadFired = false;
@@ -654,6 +656,18 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
       const stateAfter = snapshotTargetState(element);
       const focusChanged = document.activeElement !== focusBefore;
       const targetStateDelta = diffTargetState(stateBefore, stateAfter);
+      const authPostcondition = inspectAuthPostcondition(authIntent, element, {
+        stateBefore,
+        stateAfter,
+        targetStateDelta,
+        domChanged,
+        domAddedDialog,
+        beforeUnloadFired,
+        urlBefore,
+        urlAfter,
+        textBefore: authTextBefore,
+        textAfter: authIntent ? readSafeBodyText() : '',
+      });
 
       return {
         // Compat alias for callers that only ever looked at `success`.
@@ -685,6 +699,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
             verification: outcomeWait,
           },
         },
+        ...(authPostcondition ? { authPostcondition } : {}),
       };
     } catch (error) {
       return {
@@ -730,6 +745,91 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
       }
     }
     return anyChanged ? changed : null;
+  }
+
+  function readSafeBodyText() {
+    try {
+      return String(document.body?.innerText || document.body?.textContent || '')
+        .replace(/\s+/g, ' ')
+        .slice(0, 2000);
+    } catch {
+      return '';
+    }
+  }
+
+  function elementLooksChecked(element, stateAfter) {
+    if (!(element instanceof Element)) return false;
+    if (element instanceof HTMLInputElement && element.type === 'checkbox') return element.checked;
+    if (String(stateAfter?.ariaChecked || '').toLowerCase() === 'true') return true;
+    const signature = `${element.id || ''} ${
+      typeof element.className === 'string' ? element.className : element.className?.baseVal || ''
+    } ${element.getAttribute('data-state') || ''}`;
+    return /\b(checked|active|selected|is-on|on)\b/i.test(signature);
+  }
+
+  function inspectAuthPostcondition(intent, element, facts) {
+    if (!intent || !String(intent).startsWith('auth.')) return null;
+    const textAfter = String(facts.textAfter || '');
+    const textBefore = String(facts.textBefore || '');
+    const countdownOrSent =
+      /\b\d{1,3}\s*s\b|\d{1,3}\s*秒|重新发送|重发|已发送|验证码已发送|sent|resend/i;
+    const agreementConfirm = /同意并继续|确认同意|我同意|agree and continue|accept and continue/i;
+    const loginPrompt = /登录|验证码|手机号|获取验证码|sign in|log in|verification code|get code/i;
+
+    if (intent === 'auth.request_otp') {
+      const disabledNow =
+        String(facts.stateAfter?.disabled || '').length > 0 ||
+        element?.getAttribute?.('aria-disabled') === 'true';
+      if (countdownOrSent.test(textAfter) || disabledNow) {
+        return {
+          intent,
+          status: 'passed',
+          reason: 'otp_request_observed_countdown_or_disabled_state',
+        };
+      }
+      return {
+        intent,
+        status: 'not_proven',
+        reason: 'otp_request_click_dispatched_but_no_countdown_disabled_or_sent_hint_observed',
+      };
+    }
+
+    if (intent === 'auth.accept_terms') {
+      if (elementLooksChecked(element, facts.stateAfter)) {
+        return { intent, status: 'passed', reason: 'agreement_checked_after_click' };
+      }
+      if (facts.domAddedDialog || agreementConfirm.test(textAfter)) {
+        return { intent, status: 'user_action_still_required', reason: 'agreement_dialog_opened' };
+      }
+      return { intent, status: 'not_proven', reason: 'agreement_click_did_not_prove_checked' };
+    }
+
+    if (intent === 'auth.confirm_agreement') {
+      if (agreementConfirm.test(textBefore) && !agreementConfirm.test(textAfter)) {
+        return { intent, status: 'passed', reason: 'agreement_confirmation_dialog_disappeared' };
+      }
+      return {
+        intent,
+        status: 'not_proven',
+        reason: 'agreement_confirmation_still_visible_or_not_proven',
+      };
+    }
+
+    if (intent === 'auth.submit_login') {
+      if (facts.beforeUnloadFired || facts.urlBefore !== facts.urlAfter) {
+        return { intent, status: 'passed', reason: 'login_submit_triggered_navigation' };
+      }
+      if (loginPrompt.test(textBefore) && !loginPrompt.test(textAfter)) {
+        return { intent, status: 'passed', reason: 'login_prompt_disappeared_after_submit' };
+      }
+      return {
+        intent,
+        status: 'user_action_still_required',
+        reason: 'login_submit_requires_fresh_read_page_verification',
+      };
+    }
+
+    return { intent, status: 'not_proven', reason: 'unknown_auth_intent' };
   }
 
   function waitForClickOutcomeWindow(ms, earlyExitCheck) {
@@ -948,6 +1048,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
           cancelable: request.cancelable,
           modifiers: request.modifiers,
           allowDownloadClick: request.allowDownloadClick === true,
+          intent: request.intent,
         },
       )
         .then(sendResponse)
