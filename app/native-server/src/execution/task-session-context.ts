@@ -155,17 +155,24 @@ export interface TaskDomRegionRowsReadbackAccumulationEvidence {
   observedReadCount: number;
   currentReadReliableRowCount: number;
   currentReadTargetableRowCount: number;
+  currentReadSummarizableRowCount: number;
   currentReadNewUniqueRowCount: number;
   duplicateReliableRowCount: number;
   uniqueReliableRowCount: number;
   uniqueTargetableRowCount: number;
+  uniqueSummarizableRowCount: number;
   uniqueTargetRefCount: number;
   rowOrder: 'visual_order';
   canSatisfyDefaultTopN: boolean;
   missingRowCountForDefaultTopN: number;
+  canSupportDefaultTopNSummary: boolean;
+  missingSummarizableRowCountForDefaultTopN: number;
   nextRequiredCheck:
     | 'accumulated_rows_ready_for_top_n_summary'
     | 'scroll_or_request_more_rows_before_claiming_top_n_complete';
+  summaryNextRequiredCheck:
+    | 'top_n_summary_ready'
+    | 'more_rows_or_text_fields_required_before_top_n_summary';
   claimBoundary: string;
 }
 
@@ -176,6 +183,7 @@ interface TaskDomRegionRowsReadbackAccumulator {
   observedReadCount: number;
   uniqueRowKeys: Set<string>;
   uniqueTargetableRowKeys: Set<string>;
+  uniqueSummarizableRowKeys: Set<string>;
   uniqueTargetRefs: Set<string>;
   lastEvidence: TaskDomRegionRowsReadbackAccumulationEvidence | null;
 }
@@ -825,6 +833,7 @@ export class TaskSessionContext {
         observedReadCount: 0,
         uniqueRowKeys: new Set<string>(),
         uniqueTargetableRowKeys: new Set<string>(),
+        uniqueSummarizableRowKeys: new Set<string>(),
         uniqueTargetRefs: new Set<string>(),
         lastEvidence: null,
       };
@@ -839,6 +848,7 @@ export class TaskSessionContext {
         : 0;
     const currentReadRowKeys = new Set<string>();
     let currentReadTargetableRowCount = 0;
+    let currentReadSummarizableRowCount = 0;
 
     for (const row of visibleRows.rows.slice(0, availableReliableRowCount)) {
       const key = buildDomRegionRowStableKey(row);
@@ -850,6 +860,10 @@ export class TaskSessionContext {
         currentReadTargetableRowCount += 1;
         accumulator.uniqueTargetableRowKeys.add(key);
         accumulator.uniqueTargetRefs.add(targetRef);
+      }
+      if (isDomRegionRowSummarizable(row)) {
+        currentReadSummarizableRowCount += 1;
+        accumulator.uniqueSummarizableRowKeys.add(key);
       }
     }
 
@@ -864,10 +878,17 @@ export class TaskSessionContext {
       currentReadRowKeys.size - currentReadNewUniqueRowCount,
     );
     const uniqueTargetableRowCount = accumulator.uniqueTargetableRowKeys.size;
+    const uniqueSummarizableRowCount = accumulator.uniqueSummarizableRowKeys.size;
     const canSatisfyDefaultTopN = uniqueTargetableRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET;
+    const canSupportDefaultTopNSummary =
+      uniqueSummarizableRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET;
     const missingRowCountForDefaultTopN = Math.max(
       0,
       DEFAULT_TOP_N_ACCUMULATION_TARGET - uniqueTargetableRowCount,
+    );
+    const missingSummarizableRowCountForDefaultTopN = Math.max(
+      0,
+      DEFAULT_TOP_N_ACCUMULATION_TARGET - uniqueSummarizableRowCount,
     );
 
     const evidence: TaskDomRegionRowsReadbackAccumulationEvidence = {
@@ -879,19 +900,26 @@ export class TaskSessionContext {
       observedReadCount: accumulator.observedReadCount,
       currentReadReliableRowCount: currentReadRowKeys.size,
       currentReadTargetableRowCount,
+      currentReadSummarizableRowCount,
       currentReadNewUniqueRowCount,
       duplicateReliableRowCount,
       uniqueReliableRowCount: accumulator.uniqueRowKeys.size,
       uniqueTargetableRowCount,
+      uniqueSummarizableRowCount,
       uniqueTargetRefCount: accumulator.uniqueTargetRefs.size,
       rowOrder: visibleRows.rowOrder,
       canSatisfyDefaultTopN,
       missingRowCountForDefaultTopN,
+      canSupportDefaultTopNSummary,
+      missingSummarizableRowCountForDefaultTopN,
       nextRequiredCheck: canSatisfyDefaultTopN
         ? 'accumulated_rows_ready_for_top_n_summary'
         : 'scroll_or_request_more_rows_before_claiming_top_n_complete',
+      summaryNextRequiredCheck: canSupportDefaultTopNSummary
+        ? 'top_n_summary_ready'
+        : 'more_rows_or_text_fields_required_before_top_n_summary',
       claimBoundary:
-        'This proves only unique targetable DOM rows observed during this in-memory task/session for the same tab and source region. It does not prove full result-set completeness, exact platform ranking, or rows that were never observed.',
+        'This proves only unique targetable and summarizable DOM rows observed during this in-memory task/session for the same tab and source region. It does not prove full result-set completeness, exact platform ranking, or rows that were never observed.',
     };
     accumulator.lastEvidence = evidence;
     return cloneTaskDomRegionRowsReadbackAccumulationEvidence(evidence);
@@ -1600,14 +1628,7 @@ function normalizePositiveTabId(value: number | null | undefined): number | null
 }
 
 function buildDomRegionRowStableKey(row: TaskVisibleRegionRow): string | null {
-  const textKeyParts = [
-    row.title,
-    row.primaryText,
-    row.secondaryText,
-    row.summary,
-    row.metaText,
-    row.interactionText,
-  ]
+  const textKeyParts = [row.title, row.primaryText, row.secondaryText, row.summary, row.metaText]
     .map(normalizeDomRegionRowKeyPart)
     .filter((part) => part.length > 0);
   if (textKeyParts.length > 0) return `text:${textKeyParts.join('|')}`;
@@ -1616,12 +1637,24 @@ function buildDomRegionRowStableKey(row: TaskVisibleRegionRow): string | null {
   if (rowId) return `row:${rowId}`;
 
   const targetRef = normalizeDomRegionRowKeyPart(row.targetRef);
-  return targetRef ? `target:${targetRef}` : null;
+  if (targetRef) return `target:${targetRef}`;
+
+  const interactionText = normalizeDomRegionRowKeyPart(row.interactionText);
+  return interactionText ? `interaction:${interactionText}` : null;
 }
 
 function normalizeDomRegionRowKeyPart(value: string | null | undefined): string {
   if (typeof value !== 'string') return '';
   return value.trim().replace(/\s+/g, ' ').toLowerCase().slice(0, 240);
+}
+
+function isDomRegionRowSummarizable(row: TaskVisibleRegionRow): boolean {
+  const targetRef =
+    typeof row.targetRef === 'string' && row.targetRef.trim().length > 0 ? row.targetRef : null;
+  if (!targetRef) return false;
+  return [row.title, row.primaryText, row.summary, row.secondaryText, row.metaText].some(
+    (value) => normalizeDomRegionRowKeyPart(value).length > 0,
+  );
 }
 
 function cloneTaskDomRegionRowsReadbackAccumulationEvidence(

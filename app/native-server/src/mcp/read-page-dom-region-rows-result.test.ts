@@ -42,15 +42,18 @@ function makeRouterDecision(): DataSourceDecision {
 function makeVisibleRows(
   sourceRegion: string,
   rowCount = 2,
-  options: { includeTargetRefs?: boolean } = {},
+  options: { includeTargetRefs?: boolean; includeText?: boolean } = {},
 ): TaskVisibleRegionRowsData {
   const includeTargetRefs = options.includeTargetRefs ?? true;
+  const includeText = options.includeText ?? true;
   const rows = Array.from({ length: rowCount }, (_, index) => {
     const rowNumber = index + 1;
     return {
       rowId: `row_${rowNumber}`,
-      title: `${rowNumber === 1 ? 'First' : rowNumber === 2 ? 'Second' : `Result ${rowNumber}`} result`,
-      primaryText: `Result ${rowNumber} summary`,
+      title: includeText
+        ? `${rowNumber === 1 ? 'First' : rowNumber === 2 ? 'Second' : `Result ${rowNumber}`} result`
+        : '',
+      primaryText: includeText ? `Result ${rowNumber} summary` : null,
       secondaryText: null,
       summary: null,
       metaText: null,
@@ -187,9 +190,13 @@ describe('buildDomRegionRowsSuccessResult', () => {
       availableReliableRowCount: 2,
       visibleRowCount: 2,
       targetRefRowCount: 2,
+      summarizableRowCount: 2,
       canSatisfyDefaultTopN: false,
+      canSupportDefaultTopNSummary: false,
       missingRowCountForDefaultTopN: 8,
+      missingSummarizableRowCountForDefaultTopN: 8,
       nextRequiredCheck: 'scroll_or_request_more_rows_before_claiming_top_n_complete',
+      summaryNextRequiredCheck: 'more_rows_or_text_fields_required_before_top_n_summary',
     });
     expect(payload.topNReadbackEvidence.claimBoundary).toContain(
       'not full result-set completeness',
@@ -199,7 +206,10 @@ describe('buildDomRegionRowsSuccessResult', () => {
       topNDefaultN: '10',
       topNAvailableReliableRowCount: '2',
       topNTargetRefRowCount: '2',
+      topNSummarizableRowCount: '2',
       topNCanSatisfyDefault: 'false',
+      topNSummaryReady: 'false',
+      topNMissingSummarizableRowsForDefault: '8',
     });
   });
 
@@ -226,13 +236,53 @@ describe('buildDomRegionRowsSuccessResult', () => {
       availableReliableRowCount: 10,
       visibleRowCount: 10,
       targetRefRowCount: 10,
+      summarizableRowCount: 10,
       canSatisfyDefaultTopN: true,
+      canSupportDefaultTopNSummary: true,
       missingRowCountForDefaultTopN: 0,
+      missingSummarizableRowCountForDefaultTopN: 0,
       nextRequiredCheck: 'rows_ready_for_top_n_summary',
+      summaryNextRequiredCheck: 'top_n_summary_ready',
     });
     expect(operationLog.metadata).toMatchObject({
       topNReadbackStatus: 'ready_for_default_top_n',
       topNCanSatisfyDefault: 'true',
+      topNSummaryReady: 'true',
+    });
+  });
+
+  it('does not mark default top-N summary ready when rows have refs but no readable fields', () => {
+    const { result, operationLog } = buildDomRegionRowsSuccessResult({
+      requestedLayer: 'L0+L1',
+      routerDecision: makeRouterDecision(),
+      layerContract: mapDataSourceToLayerContract({
+        dataSource: 'dom_region_rows',
+        requestedLayer: 'L0+L1',
+        fallbackEntryLayer: 'L0+L1',
+      }),
+      visibleRows: makeVisibleRows('viewport', 10, { includeText: false }),
+      ownerType: 'run_owned',
+      apiRowsUnavailableReason: 'api_rows_unavailable',
+      readCount: 1,
+    });
+
+    const payload = JSON.parse(String(result.content[0].text));
+
+    expect(payload.topNReadbackEvidence).toMatchObject({
+      status: 'ready_for_default_top_n',
+      availableReliableRowCount: 10,
+      targetRefRowCount: 10,
+      summarizableRowCount: 0,
+      canSatisfyDefaultTopN: true,
+      canSupportDefaultTopNSummary: false,
+      missingRowCountForDefaultTopN: 0,
+      missingSummarizableRowCountForDefaultTopN: 10,
+      summaryNextRequiredCheck: 'more_rows_or_text_fields_required_before_top_n_summary',
+    });
+    expect(operationLog.metadata).toMatchObject({
+      topNCanSatisfyDefault: 'true',
+      topNSummaryReady: 'false',
+      topNMissingSummarizableRowsForDefault: '10',
     });
   });
 
@@ -257,9 +307,13 @@ describe('buildDomRegionRowsSuccessResult', () => {
       status: 'partial_rows_only',
       availableReliableRowCount: 10,
       targetRefRowCount: 0,
+      summarizableRowCount: 0,
       canSatisfyDefaultTopN: false,
+      canSupportDefaultTopNSummary: false,
       missingRowCountForDefaultTopN: 10,
+      missingSummarizableRowCountForDefaultTopN: 10,
       nextRequiredCheck: 'scroll_or_request_more_rows_before_claiming_top_n_complete',
+      summaryNextRequiredCheck: 'more_rows_or_text_fields_required_before_top_n_summary',
     });
   });
 
@@ -285,15 +339,20 @@ describe('buildDomRegionRowsSuccessResult', () => {
         observedReadCount: 2,
         currentReadReliableRowCount: 6,
         currentReadTargetableRowCount: 6,
+        currentReadSummarizableRowCount: 6,
         currentReadNewUniqueRowCount: 4,
         duplicateReliableRowCount: 2,
         uniqueReliableRowCount: 10,
         uniqueTargetableRowCount: 10,
+        uniqueSummarizableRowCount: 10,
         uniqueTargetRefCount: 10,
         rowOrder: 'visual_order',
         canSatisfyDefaultTopN: true,
         missingRowCountForDefaultTopN: 0,
+        canSupportDefaultTopNSummary: true,
+        missingSummarizableRowCountForDefaultTopN: 0,
         nextRequiredCheck: 'accumulated_rows_ready_for_top_n_summary',
+        summaryNextRequiredCheck: 'top_n_summary_ready',
         claimBoundary: 'deterministic task/session accumulation fixture only',
       },
     });
@@ -306,13 +365,17 @@ describe('buildDomRegionRowsSuccessResult', () => {
       currentReadNewUniqueRowCount: 4,
       duplicateReliableRowCount: 2,
       uniqueTargetableRowCount: 10,
+      uniqueSummarizableRowCount: 10,
       canSatisfyDefaultTopN: true,
+      canSupportDefaultTopNSummary: true,
     });
     expect(operationLog.metadata).toMatchObject({
       topNAccumulationStatus: 'ready_for_default_top_n',
       topNAccumulatedUniqueTargetableRowCount: '10',
+      topNAccumulatedUniqueSummarizableRowCount: '10',
       topNAccumulatedObservedReadCount: '2',
       topNAccumulationCanSatisfyDefault: 'true',
+      topNAccumulationSummaryReady: 'true',
     });
   });
 });

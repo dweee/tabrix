@@ -151,17 +151,24 @@ export interface CloseoutTopNAccumulationEvidence {
   observedReadCount: number;
   currentReadReliableRowCount: number;
   currentReadTargetableRowCount: number;
+  currentReadSummarizableRowCount: number;
   currentReadNewUniqueRowCount: number;
   duplicateReliableRowCount: number;
   uniqueReliableRowCount: number;
   uniqueTargetableRowCount: number;
+  uniqueSummarizableRowCount: number;
   uniqueTargetRefCount: number;
   rowOrder: 'visual_order';
   canSatisfyDefaultTopN: boolean;
   missingRowCountForDefaultTopN: number;
+  canSupportDefaultTopNSummary: boolean;
+  missingSummarizableRowCountForDefaultTopN: number;
   nextRequiredCheck:
     | 'accumulated_rows_ready_for_top_n_summary'
     | 'scroll_or_request_more_rows_before_claiming_top_n_complete';
+  summaryNextRequiredCheck:
+    | 'top_n_summary_ready'
+    | 'more_rows_or_text_fields_required_before_top_n_summary';
   claimBoundary: string;
 }
 
@@ -756,14 +763,18 @@ function buildTopNAccumulationReason(
   return [
     'top_n_accumulation',
     `status=${evidence.status}`,
-    `summaryReady=${evidence.canSatisfyDefaultTopN}`,
+    `targetableReady=${evidence.canSatisfyDefaultTopN}`,
+    `summaryReady=${evidence.canSupportDefaultTopNSummary}`,
     `defaultN=${evidence.defaultTopN}`,
     `uniqueTargetable=${evidence.uniqueTargetableRowCount}`,
+    `uniqueSummarizable=${evidence.uniqueSummarizableRowCount}`,
     `uniqueReliable=${evidence.uniqueReliableRowCount}`,
     `missing=${evidence.missingRowCountForDefaultTopN}`,
+    `missingSummary=${evidence.missingSummarizableRowCountForDefaultTopN}`,
     `reads=${evidence.observedReadCount}`,
     `sourceTab=${evidence.sourceTabId ?? 'unknown'}`,
     `sourceRegion=${sanitizeIdentifier(evidence.sourceRegion)}`,
+    `summaryNext=${evidence.summaryNextRequiredCheck}`,
     `next=${evidence.nextRequiredCheck}`,
   ].join(':');
 }

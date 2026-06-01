@@ -22,14 +22,15 @@ import type {
 function makeVisibleRegionRows(
   start: number,
   count: number,
-  options: { sourceTabId?: number | null; sourceRegion?: string } = {},
+  options: { sourceTabId?: number | null; sourceRegion?: string; includeText?: boolean } = {},
 ): TaskVisibleRegionRowsData {
+  const includeText = options.includeText ?? true;
   const rows = Array.from({ length: count }, (_, index) => {
     const n = start + index;
     return {
       rowId: `row_${n}`,
-      title: `Result ${n}`,
-      primaryText: `Result ${n} summary`,
+      title: includeText ? `Result ${n}` : '',
+      primaryText: includeText ? `Result ${n} summary` : null,
       secondaryText: null,
       metaText: null,
       interactionText: 'Open',
@@ -453,8 +454,11 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       duplicateReliableRowCount: 0,
       uniqueReliableRowCount: 6,
       uniqueTargetableRowCount: 6,
+      uniqueSummarizableRowCount: 6,
       canSatisfyDefaultTopN: false,
+      canSupportDefaultTopNSummary: false,
       missingRowCountForDefaultTopN: 4,
+      missingSummarizableRowCountForDefaultTopN: 4,
     });
 
     const second = ctx.noteDomRegionRowsReadback(makeVisibleRegionRows(5, 6));
@@ -467,9 +471,32 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       duplicateReliableRowCount: 2,
       uniqueReliableRowCount: 10,
       uniqueTargetableRowCount: 10,
+      uniqueSummarizableRowCount: 10,
       canSatisfyDefaultTopN: true,
+      canSupportDefaultTopNSummary: true,
       missingRowCountForDefaultTopN: 0,
+      missingSummarizableRowCountForDefaultTopN: 0,
       nextRequiredCheck: 'accumulated_rows_ready_for_top_n_summary',
+      summaryNextRequiredCheck: 'top_n_summary_ready',
+    });
+  });
+
+  it('does not mark default top-N summary ready when targetable rows lack readable text', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+
+    const evidence = ctx.noteDomRegionRowsReadback(
+      makeVisibleRegionRows(1, 10, { includeText: false }),
+    );
+
+    expect(evidence).toMatchObject({
+      status: 'ready_for_default_top_n',
+      uniqueTargetableRowCount: 10,
+      uniqueSummarizableRowCount: 0,
+      canSatisfyDefaultTopN: true,
+      canSupportDefaultTopNSummary: false,
+      missingRowCountForDefaultTopN: 0,
+      missingSummarizableRowCountForDefaultTopN: 10,
+      summaryNextRequiredCheck: 'more_rows_or_text_fields_required_before_top_n_summary',
     });
   });
 
@@ -508,8 +535,11 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       sourceRegion: 'result_list',
       observedReadCount: 2,
       uniqueTargetableRowCount: 10,
+      uniqueSummarizableRowCount: 10,
       canSatisfyDefaultTopN: true,
+      canSupportDefaultTopNSummary: true,
       missingRowCountForDefaultTopN: 0,
+      missingSummarizableRowCountForDefaultTopN: 0,
     });
     expect(ctx.peekDomRegionRowsReadbackAccumulationEvidence({ tabId: 8 })).toBeNull();
 

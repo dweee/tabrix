@@ -28,12 +28,18 @@ interface TopNReadbackEvidence {
   availableReliableRowCount: number;
   visibleRowCount: number;
   targetRefRowCount: number;
+  summarizableRowCount: number;
   rowOrder: 'visual_order';
   canSatisfyDefaultTopN: boolean;
   missingRowCountForDefaultTopN: number;
+  canSupportDefaultTopNSummary: boolean;
+  missingSummarizableRowCountForDefaultTopN: number;
   nextRequiredCheck:
     | 'rows_ready_for_top_n_summary'
     | 'scroll_or_request_more_rows_before_claiming_top_n_complete';
+  summaryNextRequiredCheck:
+    | 'top_n_summary_ready'
+    | 'more_rows_or_text_fields_required_before_top_n_summary';
   claimBoundary: string;
 }
 
@@ -130,12 +136,21 @@ function buildTopNReadbackEvidence(visibleRows: TaskVisibleRegionRowsData): TopN
   const visibleRowCount = Math.max(0, Math.floor(visibleRows.rowCount));
   const availableReliableRowCount = Math.min(visibleRows.rows.length, visibleRowCount);
   const targetRefRowCount = visibleRows.rows.filter((row) => Boolean(row.targetRef)).length;
+  const summarizableRowCount = visibleRows.rows
+    .slice(0, availableReliableRowCount)
+    .filter(isVisibleRegionRowSummarizable).length;
   const usableTopNRowCount = Math.min(availableReliableRowCount, targetRefRowCount);
   const canSatisfyDefaultTopN =
     visibleRows.visibleRegionRowsUsed && usableTopNRowCount >= DEFAULT_TOP_N_READBACK_TARGET;
+  const canSupportDefaultTopNSummary =
+    visibleRows.visibleRegionRowsUsed && summarizableRowCount >= DEFAULT_TOP_N_READBACK_TARGET;
   const missingRowCountForDefaultTopN = Math.max(
     0,
     DEFAULT_TOP_N_READBACK_TARGET - usableTopNRowCount,
+  );
+  const missingSummarizableRowCountForDefaultTopN = Math.max(
+    0,
+    DEFAULT_TOP_N_READBACK_TARGET - summarizableRowCount,
   );
 
   return {
@@ -145,15 +160,28 @@ function buildTopNReadbackEvidence(visibleRows: TaskVisibleRegionRowsData): TopN
     availableReliableRowCount,
     visibleRowCount,
     targetRefRowCount,
+    summarizableRowCount,
     rowOrder: visibleRows.rowOrder,
     canSatisfyDefaultTopN,
     missingRowCountForDefaultTopN,
+    canSupportDefaultTopNSummary,
+    missingSummarizableRowCountForDefaultTopN,
     nextRequiredCheck: canSatisfyDefaultTopN
       ? 'rows_ready_for_top_n_summary'
       : 'scroll_or_request_more_rows_before_claiming_top_n_complete',
+    summaryNextRequiredCheck: canSupportDefaultTopNSummary
+      ? 'top_n_summary_ready'
+      : 'more_rows_or_text_fields_required_before_top_n_summary',
     claimBoundary:
-      'No explicit requestedN was provided; this proves only the current reliable visible rows, their visual order, and targetRef coverage, not full result-set completeness or ranking correctness.',
+      'No explicit requestedN was provided; this proves only the current reliable visible rows, their visual order, targetRef coverage, and privacy-safe summary field coverage, not full result-set completeness, summary correctness, or ranking correctness.',
   };
+}
+
+function isVisibleRegionRowSummarizable(row: TaskVisibleRegionRowsData['rows'][number]): boolean {
+  if (typeof row.targetRef !== 'string' || row.targetRef.trim().length === 0) return false;
+  return [row.title, row.primaryText, row.summary, row.secondaryText, row.metaText].some(
+    (value) => typeof value === 'string' && value.trim().length > 0,
+  );
 }
 
 export function buildDomRegionRowsSuccessResult(args: {
@@ -233,16 +261,27 @@ export function buildDomRegionRowsSuccessResult(args: {
         topNDefaultN: String(topNReadbackEvidence.defaultTopN),
         topNAvailableReliableRowCount: String(topNReadbackEvidence.availableReliableRowCount),
         topNTargetRefRowCount: String(topNReadbackEvidence.targetRefRowCount),
+        topNSummarizableRowCount: String(topNReadbackEvidence.summarizableRowCount),
         topNCanSatisfyDefault: String(topNReadbackEvidence.canSatisfyDefaultTopN),
+        topNSummaryReady: String(topNReadbackEvidence.canSupportDefaultTopNSummary),
+        topNMissingSummarizableRowsForDefault: String(
+          topNReadbackEvidence.missingSummarizableRowCountForDefaultTopN,
+        ),
         topNAccumulationStatus: args.topNAccumulationEvidence?.status ?? 'not_available',
         topNAccumulatedUniqueTargetableRowCount: String(
           args.topNAccumulationEvidence?.uniqueTargetableRowCount ?? 'unknown',
+        ),
+        topNAccumulatedUniqueSummarizableRowCount: String(
+          args.topNAccumulationEvidence?.uniqueSummarizableRowCount ?? 'unknown',
         ),
         topNAccumulatedObservedReadCount: String(
           args.topNAccumulationEvidence?.observedReadCount ?? 'unknown',
         ),
         topNAccumulationCanSatisfyDefault: String(
           args.topNAccumulationEvidence?.canSatisfyDefaultTopN ?? false,
+        ),
+        topNAccumulationSummaryReady: String(
+          args.topNAccumulationEvidence?.canSupportDefaultTopNSummary ?? false,
         ),
         rejectedRegionReasonDistribution: JSON.stringify(
           args.visibleRows.rejectedRegionReasonDistribution ?? {},
