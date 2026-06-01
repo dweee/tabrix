@@ -10,6 +10,7 @@ import type {
   ShouldAllowReadPageResult,
   TaskAuthResumeGate,
   TaskPageRuntimeFields as ReadPageWarningRuntimeFields,
+  TaskResumeReadinessSnapshot,
 } from '../execution/task-session-context';
 import type { ReadPageOperationLogHint } from './read-page-dom-region-rows-result';
 
@@ -23,6 +24,7 @@ export function buildReadPageWarningResult(args: {
   lifecycleTimeline?: readonly unknown[] | null;
   runtimeFields?: ReadPageWarningRuntimeFields | null;
   cachedAuthResumeGate?: TaskAuthResumeGate | null;
+  cachedTaskResumeReadiness?: TaskResumeReadinessSnapshot | null;
 }): {
   result: CallToolResult;
   warning: string;
@@ -90,9 +92,15 @@ export function buildReadPageWarningResult(args: {
       deltaContext: args.cachedDeltaContext,
       lifecycleTimeline: args.lifecycleTimeline ? [...args.lifecycleTimeline] : [],
       ...(args.cachedAuthResumeGate ? { authResumeGate: args.cachedAuthResumeGate } : {}),
+      ...(args.cachedTaskResumeReadiness
+        ? { taskResumeReadiness: args.cachedTaskResumeReadiness }
+        : {}),
     };
     if (args.cachedAuthResumeGate) {
       warningPayload.authResumeGate = args.cachedAuthResumeGate;
+    }
+    if (args.cachedTaskResumeReadiness) {
+      warningPayload.taskResumeReadiness = args.cachedTaskResumeReadiness;
     }
   }
 

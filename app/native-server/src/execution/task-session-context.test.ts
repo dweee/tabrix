@@ -277,6 +277,51 @@ describe('TaskSessionContext — auth resume gate', () => {
       reason: 'auth_resume_not_required',
     });
   });
+
+  it('turns a blocking auth gate into a resume-readiness stop signal', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteAuthResumeVerification({
+      status: 'fresh_read_required',
+      nextTool: 'chrome_read_page',
+      forceRefreshRequired: true,
+      sameTabRequired: true,
+      targetTabId: 42,
+      postconditionRequired: true,
+      requiredSignals: ['auth_prompt_absent', 'account_region_present'],
+      claimBoundary: 'deterministic auth resume fixture only',
+    });
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 42 })).toMatchObject({
+      status: 'blocked_by_auth_verification',
+      canResumeOriginalTask: false,
+      nextStep: 'force_fresh_read_same_tab',
+      tabId: 42,
+      evidenceKinds: ['auth_resume_gate'],
+      reason: 'cached_or_candidate_auth_state_cannot_resume_task_without_fresh_read',
+    });
+  });
+
+  it('blocks resume when an auth gate targets a different tab', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteAuthResumeVerification({
+      status: 'not_required',
+      nextTool: 'chrome_read_page',
+      forceRefreshRequired: false,
+      sameTabRequired: true,
+      targetTabId: 7,
+      postconditionRequired: false,
+      requiredSignals: [],
+      claimBoundary: 'deterministic auth resume fixture only',
+    });
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'blocked_by_auth_verification',
+      canResumeOriginalTask: false,
+      nextStep: 'force_fresh_read_same_tab',
+      evidenceKinds: ['auth_resume_gate', 'tab_binding_mismatch'],
+      reason: 'auth_resume_gate_target_tab_mismatch',
+    });
+  });
 });
 
 describe('TaskSessionContext — URL / pageRole invalidation', () => {
@@ -688,6 +733,97 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
     expect(ctx.peekRegionStatePostconditionsForCloseout([9])[0].result.afterSummary).toEqual([
       'content_list:loaded:after',
     ]);
+  });
+
+  it('allows original-task resume only when matching-tab region postcondition passed', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_search_submit',
+            kind: 'search_results_updated',
+            verdict: 'passed',
+            reason: 'result_collection_changed_after_action',
+            beforeSummary: ['content_list:loaded:before'],
+            afterSummary: ['content_list:loaded:after'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_passed_ready',
+      canResumeOriginalTask: true,
+      nextStep: 'continue_original_task',
+      tabId: 9,
+      evidenceKinds: ['region_state_postcondition'],
+      reason: 'region_state_search_results_updated_passed:result_collection_changed_after_action',
+    });
+    expect(ctx.buildTaskResumeReadiness({ tabId: 7 })).toMatchObject({
+      status: 'not_proven',
+      canResumeOriginalTask: false,
+      reason: 'no_resume_or_business_postcondition_evidence',
+    });
+  });
+
+  it('keeps original-task resume blocked when region postcondition is unknown or failed', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_unknown',
+            kind: 'search_results_updated',
+            verdict: 'unknown',
+            reason: 'result_collection_not_comparable',
+            beforeSummary: [],
+            afterSummary: [],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_unknown_not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'verify_postcondition',
+      reason: 'region_state_search_results_updated_not_proven:result_collection_not_comparable',
+    });
+
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_failed',
+            kind: 'search_results_updated',
+            verdict: 'failed',
+            reason: 'result_collection_unchanged_after_action',
+            beforeSummary: [],
+            afterSummary: [],
+            producedAtMs: 1235,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_failed_stop',
+      canResumeOriginalTask: false,
+      nextStep: 'stop_not_proven',
+      reason: 'region_state_search_results_updated_failed:result_collection_unchanged_after_action',
+    });
   });
 
   it('compares read_page object lifecycle snapshots and keeps the stored copy immutable', () => {

@@ -304,6 +304,31 @@ export interface TaskAuthResumeGate {
   claimBoundary: string;
 }
 
+export type TaskResumeReadinessStatus =
+  | 'resume_allowed'
+  | 'blocked_by_auth_verification'
+  | 'postcondition_passed_ready'
+  | 'postcondition_failed_stop'
+  | 'postcondition_unknown_not_proven'
+  | 'not_proven';
+
+export type TaskResumeReadinessNextStep =
+  | 'continue_original_task'
+  | 'force_fresh_read_same_tab'
+  | 'verify_postcondition'
+  | 'wait_for_user_collaboration'
+  | 'stop_not_proven';
+
+export interface TaskResumeReadinessSnapshot {
+  status: TaskResumeReadinessStatus;
+  canResumeOriginalTask: boolean;
+  nextStep: TaskResumeReadinessNextStep;
+  tabId: number | null;
+  evidenceKinds: string[];
+  reason: string;
+  claimBoundary: string;
+}
+
 /**
  * Record a successful skip-read execution. Increments
  * `taskTotals.readPageAvoidedCount` and folds `tokensSavedEstimate` into
@@ -834,6 +859,108 @@ export class TaskSessionContext {
         actionKind: snapshot.actionKind,
         result: cloneTaskRegionStatePostconditionResult(snapshot.result)!,
       }));
+  }
+
+  public buildTaskResumeReadiness(input?: { tabId?: number | null }): TaskResumeReadinessSnapshot {
+    const tabId = normalizePositiveTabId(input?.tabId);
+    const gate = this.lastAuthResumeGate ? cloneTaskAuthResumeGate(this.lastAuthResumeGate) : null;
+
+    if (gate) {
+      const gateTargetTabId = normalizePositiveTabId(gate.targetTabId);
+      if (
+        gate.sameTabRequired &&
+        gateTargetTabId !== null &&
+        tabId !== null &&
+        gateTargetTabId !== tabId
+      ) {
+        return {
+          status: 'blocked_by_auth_verification',
+          canResumeOriginalTask: false,
+          nextStep: 'force_fresh_read_same_tab',
+          tabId,
+          evidenceKinds: ['auth_resume_gate', 'tab_binding_mismatch'],
+          reason: 'auth_resume_gate_target_tab_mismatch',
+          claimBoundary:
+            'Resume is blocked because the latest auth verification gate targets a different tab.',
+        };
+      }
+      if (gate.blocksTaskResume) {
+        return {
+          status: 'blocked_by_auth_verification',
+          canResumeOriginalTask: false,
+          nextStep: inferResumeReadinessNextStepFromAuthGate(gate),
+          tabId: tabId ?? gateTargetTabId,
+          evidenceKinds: ['auth_resume_gate'],
+          reason: gate.reason,
+          claimBoundary: gate.claimBoundary,
+        };
+      }
+    }
+
+    const postconditions = this.peekRegionStatePostconditionsForCloseout(
+      tabId !== null ? [tabId] : null,
+    );
+    const failed = postconditions.find((item) => item.result.verdict === 'failed');
+    if (failed) {
+      return {
+        status: 'postcondition_failed_stop',
+        canResumeOriginalTask: false,
+        nextStep: 'stop_not_proven',
+        tabId,
+        evidenceKinds: ['region_state_postcondition'],
+        reason: `region_state_${failed.result.kind}_failed:${failed.result.reason}`,
+        claimBoundary: failed.result.claimBoundary,
+      };
+    }
+
+    const unknown = postconditions.find((item) => item.result.verdict === 'unknown');
+    if (unknown) {
+      return {
+        status: 'postcondition_unknown_not_proven',
+        canResumeOriginalTask: false,
+        nextStep: 'verify_postcondition',
+        tabId,
+        evidenceKinds: ['region_state_postcondition'],
+        reason: `region_state_${unknown.result.kind}_not_proven:${unknown.result.reason}`,
+        claimBoundary: unknown.result.claimBoundary,
+      };
+    }
+
+    const passed = postconditions.find((item) => item.result.verdict === 'passed');
+    if (passed) {
+      return {
+        status: 'postcondition_passed_ready',
+        canResumeOriginalTask: true,
+        nextStep: 'continue_original_task',
+        tabId,
+        evidenceKinds: ['region_state_postcondition'],
+        reason: `region_state_${passed.result.kind}_passed:${passed.result.reason}`,
+        claimBoundary: passed.result.claimBoundary,
+      };
+    }
+
+    if (gate && !gate.blocksTaskResume) {
+      return {
+        status: 'resume_allowed',
+        canResumeOriginalTask: true,
+        nextStep: 'continue_original_task',
+        tabId: tabId ?? normalizePositiveTabId(gate.targetTabId),
+        evidenceKinds: ['auth_resume_gate'],
+        reason: gate.reason,
+        claimBoundary: gate.claimBoundary,
+      };
+    }
+
+    return {
+      status: 'not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'verify_postcondition',
+      tabId,
+      evidenceKinds: [],
+      reason: 'no_resume_or_business_postcondition_evidence',
+      claimBoundary:
+        'No auth resume gate or business postcondition has proven that the original task can continue.',
+    };
   }
 
   public buildCachedPageProjectionDelta(): BrowserPageProjectionDelta | null {
@@ -1423,6 +1550,15 @@ function inferAuthResumeGateReason(input: ReadPageAuthResumeVerification): strin
     case 'not_proven':
       return 'auth_resume_state_not_proven';
   }
+}
+
+function inferResumeReadinessNextStepFromAuthGate(
+  input: TaskAuthResumeGate,
+): TaskResumeReadinessNextStep {
+  if (input.forceRefreshRequired) return 'force_fresh_read_same_tab';
+  if (input.postconditionRequired) return 'verify_postcondition';
+  if (input.status === 'required_after_user_action') return 'wait_for_user_collaboration';
+  return 'stop_not_proven';
 }
 
 function cloneTaskAuthResumeGate(input: TaskAuthResumeGate): TaskAuthResumeGate {

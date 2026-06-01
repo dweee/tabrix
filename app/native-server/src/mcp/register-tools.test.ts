@@ -1536,9 +1536,20 @@ describe('handleToolCall execution wrapper', () => {
         blocksTaskResume: true,
         nextStepHint: 'fresh_read_same_tab_then_postcondition',
       });
+      expect(firstPayload.taskResumeReadiness).toMatchObject({
+        status: 'blocked_by_auth_verification',
+        canResumeOriginalTask: false,
+        nextStep: 'force_fresh_read_same_tab',
+        tabId: 1,
+        reason: 'cached_or_candidate_auth_state_cannot_resume_task_without_fresh_read',
+      });
       expect(firstPayload.aiContextEnvelope).toMatchObject({
         authResumeGate: {
           reason: 'cached_or_candidate_auth_state_cannot_resume_task_without_fresh_read',
+        },
+        taskResumeReadiness: {
+          status: 'blocked_by_auth_verification',
+          canResumeOriginalTask: false,
         },
         taskState: {
           state: 'login_required',
@@ -1564,9 +1575,18 @@ describe('handleToolCall execution wrapper', () => {
           blocksTaskResume: true,
           nextStepHint: 'fresh_read_same_tab_then_postcondition',
         },
+        taskResumeReadiness: {
+          status: 'blocked_by_auth_verification',
+          canResumeOriginalTask: false,
+          nextStep: 'force_fresh_read_same_tab',
+        },
         aiContextEnvelope: {
           authResumeGate: {
             reason: 'cached_or_candidate_auth_state_cannot_resume_task_without_fresh_read',
+          },
+          taskResumeReadiness: {
+            status: 'blocked_by_auth_verification',
+            canResumeOriginalTask: false,
           },
           taskState: {
             state: 'login_required',
@@ -4605,6 +4625,14 @@ describe('handleToolCall execution wrapper', () => {
       expect(payload.aiContextEnvelope.regionStatePostconditions).toEqual(
         payload.regionStatePostconditions,
       );
+      expect(payload.taskResumeReadiness).toMatchObject({
+        status: 'postcondition_passed_ready',
+        canResumeOriginalTask: true,
+        nextStep: 'continue_original_task',
+        tabId: 1,
+        reason: 'region_state_search_results_updated_passed:result_collection_changed_after_action',
+      });
+      expect(payload.aiContextEnvelope.taskResumeReadiness).toEqual(payload.taskResumeReadiness);
       expect(auto.readPageCount).toBe(2);
 
       jest

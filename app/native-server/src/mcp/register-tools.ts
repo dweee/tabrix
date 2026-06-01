@@ -867,6 +867,10 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           cachedAuthResumeGate: shouldAttachCachedProjection
             ? taskContext.peekLastAuthResumeGate()
             : null,
+          cachedTaskResumeReadiness:
+            shouldAttachCachedProjection && cachedProjection
+              ? taskContext.buildTaskResumeReadiness({ tabId: cachedProjection.tabId })
+              : null,
         });
         const normalizedWarning = normalizeToolCallResult(name, warningResult);
         sessionManager.completeStep(session.sessionId, step.stepId, {
@@ -2328,6 +2332,10 @@ function attachAiFacingDeltaContext(
   if (authResumeGate) {
     payload.authResumeGate = authResumeGate;
   }
+  const taskResumeReadiness = attachment.taskContext.buildTaskResumeReadiness({
+    tabId: projectionWithSourceTruth.tabId,
+  });
+  payload.taskResumeReadiness = taskResumeReadiness;
   payload.deltaContext = deltaContext;
   payload.taskContextEnvelope = buildTaskContextEnvelope(attachment);
   payload.aiContextEnvelope = {
@@ -2341,6 +2349,7 @@ function attachAiFacingDeltaContext(
     apiCdpProofBoundary,
     ...(regionStatePostconditions ? { regionStatePostconditions } : {}),
     ...(authResumeGate ? { authResumeGate } : {}),
+    taskResumeReadiness,
     structuredReadGate,
     ...(objectLifecycle ? { objectLifecycle } : {}),
     ...(pageObjectDetailPolicy ? { pageObjectDetailPolicy } : {}),
