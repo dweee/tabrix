@@ -12,6 +12,7 @@ import {
   READ_PAGE_REGION_MENU_ITEM_ROLES,
   READ_PAGE_OBJECT_LIFECYCLE_CHANGE_KINDS,
   READ_PAGE_OBJECT_LIFECYCLE_FAMILIES,
+  READ_PAGE_AUTH_ARTIFACT_STATUS_VALUES,
   READ_PAGE_REQUESTED_LAYER_VALUES,
   READ_PAGE_TASK_PROTOCOL_FIELDS,
   STABLE_TARGET_REF_PREFIX,
@@ -137,6 +138,14 @@ assert.deepEqual(READ_PAGE_OBJECT_LIFECYCLE_CHANGE_KINDS, [
   'changed',
   'unchanged',
   'unknown',
+]);
+
+assert.deepEqual(READ_PAGE_AUTH_ARTIFACT_STATUS_VALUES, [
+  'not_requested',
+  'not_applicable',
+  'blocked',
+  'ready',
+  'failed',
 ]);
 
 assert.deepEqual(READ_PAGE_MODE_MINIMUM_FIELDS, {

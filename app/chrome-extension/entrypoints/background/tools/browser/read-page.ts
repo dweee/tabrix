@@ -38,6 +38,10 @@ import { buildArtifactRefs } from './read-page-artifact-refs';
 import { buildFallbackRefMap, formatElementsAsPageContent } from './read-page-fallback-format';
 import { buildExtensionLayer, buildStableSnapshotLayer } from './read-page-snapshot-builders';
 import { buildReadPageModeResult } from './read-page-mode-result';
+import {
+  buildAuthQrArtifactRefs,
+  buildNotRequestedAuthArtifactStatus,
+} from './read-page-auth-artifacts';
 import { extractVisibleRegionRows, type VisibleRegionRowsResult } from './visible-region-rows';
 import {
   extractGlobalMenuLabelsForTargetRecovery,
@@ -69,6 +73,7 @@ interface ReadPageParams {
   // The stable HVO targetRef registry is ALWAYS written (even at 'L0') so
   // chrome_click_element resolution stays deterministic.
   requestedLayer?: ReadPageRequestedLayer;
+  includeAuthArtifacts?: boolean;
 }
 
 const READ_PAGE_SPARSE_RETRY_DELAY_MS = 450;
@@ -542,6 +547,7 @@ async function buildModeOutput(params: {
   candidateActions: CandidateActionSeed[];
   visualElements: ReadPageVisualElementHint[];
   visibleRegionRows: VisibleRegionRowsResult;
+  includeAuthArtifacts: boolean;
   /** Layer envelope; defaults to 'L0+L1+L2' for legacy callers. */
   requestedLayer: ReadPageRequestedLayer;
 }): Promise<ReadPageCompactSnapshot | ReadPageNormalSnapshot | ReadPageFullSnapshot> {
@@ -697,6 +703,17 @@ async function buildModeOutput(params: {
     browserWorldCurrentOperationConclusion: browserWorld.summary.currentOperationConclusion,
     browserWorldRoutingDecisionSummary: browserWorld.summary.routingDecisionSummary,
   });
+  sharedPayload.authArtifactStatus = params.includeAuthArtifacts
+    ? await buildAuthQrArtifactRefs({
+        includeAuthArtifacts: true,
+        tabId: params.tabId,
+        windowId: params.currentWindowId,
+        pageRegions: sharedPayload.pageRegions,
+        browserWorldTab,
+        artifactRefs,
+      })
+    : buildNotRequestedAuthArtifactStatus();
+  sharedPayload.artifactRefs = artifactRefs;
   if (sharedPayload.objectLifecycle) {
     const watchLoopSnapshot = buildBoundedWatchLoopSnapshot({
       tabId: params.tabId,
@@ -1112,6 +1129,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
   // Execute read page
   async execute(args: ReadPageParams): Promise<ToolResult> {
     const { filter, depth, refId, mode, render, requestedLayer } = args || {};
+    const includeAuthArtifacts = args?.includeAuthArtifacts === true;
 
     // Validate refId parameter
     const focusRefId = typeof refId === 'string' ? refId.trim() : '';
@@ -1305,6 +1323,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             pageContent: '',
             sourceRegion: 'unsupported_page',
           }),
+          includeAuthArtifacts,
           requestedLayer: selectedLayer,
         });
 
@@ -1577,6 +1596,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           candidateActions: basePayload.candidateActions,
           visualElements: basePayload.visualElements,
           visibleRegionRows: basePayload.visibleRegionRows,
+          includeAuthArtifacts,
           requestedLayer: selectedLayer,
         });
         return {
@@ -1708,6 +1728,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             candidateActions: basePayload.candidateActions,
             visualElements: basePayload.visualElements,
             visibleRegionRows: basePayload.visibleRegionRows,
+            includeAuthArtifacts,
             requestedLayer: selectedLayer,
           });
 

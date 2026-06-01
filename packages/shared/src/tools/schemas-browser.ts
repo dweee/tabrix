@@ -205,6 +205,11 @@ export const BROWSER_SCHEMAS: Tool[] = [
           type: 'number',
           description: 'Target window ID to pick active tab when tabId is omitted.',
         },
+        includeAuthArtifacts: {
+          type: 'boolean',
+          description:
+            'Default false. When true, and only for an auth-scoped QR surface in an AI-operable tab, include a temporary auth_qr_image artifact reference for remote user login collaboration.',
+        },
       },
       required: [],
     },

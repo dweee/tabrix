@@ -87,6 +87,38 @@ export interface ReadPageElementRect {
 export interface ReadPageArtifactRef {
   kind: 'dom_snapshot' | string;
   ref: string;
+  localPath?: string;
+  mimeType?: string;
+  width?: number;
+  height?: number;
+  producedAtMs?: number;
+  expiresAtMs?: number;
+  method?: string;
+  sourceRegionId?: string;
+  sourceObjectId?: string;
+  failureReason?: string;
+  claimBoundary?: string;
+}
+
+export const READ_PAGE_AUTH_ARTIFACT_STATUS_VALUES = [
+  'not_requested',
+  'not_applicable',
+  'blocked',
+  'ready',
+  'failed',
+] as const;
+
+export type ReadPageAuthArtifactStatusValue =
+  (typeof READ_PAGE_AUTH_ARTIFACT_STATUS_VALUES)[number];
+
+export interface ReadPageAuthArtifactStatus {
+  requested: boolean;
+  status: ReadPageAuthArtifactStatusValue;
+  reason: string;
+  artifactRef?: string;
+  ownerType?: import('./browser-task-thing-contract').BrowserPageOwnerType | string | null;
+  failureReason?: string;
+  claimBoundary: string;
 }
 
 export interface ReadPageCandidateActionLocator {
@@ -861,6 +893,15 @@ export interface ReadPageExtensionFields {
    * It is candidate evidence only and never an execution authority.
    */
   browserPageObjectCompact?: ReadPageBrowserPageObjectCompactView;
+  /**
+   * Additive login-collaboration artifact status.
+   *
+   * `chrome_read_page` detects auth/QR state by default, but only attempts to
+   * extract a sendable QR image when the caller sets `includeAuthArtifacts`.
+   * The image artifact is temporary, auth-scoped, and must not be treated as
+   * login success proof or stored in long-term memory.
+   */
+  authArtifactStatus?: ReadPageAuthArtifactStatus;
   L0?: ReadPageTaskLevel0;
   L1?: ReadPageTaskLevel1;
   L2?: ReadPageTaskLevel2;
