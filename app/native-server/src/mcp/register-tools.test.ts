@@ -4631,6 +4631,12 @@ describe('handleToolCall execution wrapper', () => {
         nextStep: 'continue_original_task',
         tabId: 1,
         reason: 'region_state_search_results_updated_passed:result_collection_changed_after_action',
+        handoffSummary: {
+          summaryKind: 'task_resume_handoff_v1',
+          status: 'ready_to_continue',
+          canContinue: true,
+          nextAction: 'continue_original_task',
+        },
       });
       expect(payload.aiContextEnvelope.taskResumeReadiness).toEqual(payload.taskResumeReadiness);
       expect(auto.readPageCount).toBe(2);
@@ -4679,6 +4685,14 @@ describe('handleToolCall execution wrapper', () => {
 
       const artifacts = listLifecycleEvidenceArtifacts();
       expect(artifacts).toHaveLength(1);
+      expect(artifacts[0].browserHygiene.notes).toEqual(
+        expect.arrayContaining([
+          'taskResumeReadinessStatus=postcondition_passed_ready',
+          'taskResumeCanContinue=true',
+          'taskResumeHandoffStatus=ready_to_continue',
+          'taskResumeHandoffNextAction=continue_original_task',
+        ]),
+      );
       expect(artifacts[0].actionLog.entries).toEqual(
         expect.arrayContaining([
           expect.objectContaining({

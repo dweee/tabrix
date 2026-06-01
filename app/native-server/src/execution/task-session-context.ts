@@ -327,6 +327,35 @@ export interface TaskResumeReadinessSnapshot {
   evidenceKinds: string[];
   reason: string;
   claimBoundary: string;
+  handoffSummary: TaskResumeHandoffSummary;
+}
+
+export type TaskResumeHandoffStatus =
+  | 'ready_to_continue'
+  | 'needs_fresh_read'
+  | 'needs_postcondition_verification'
+  | 'waiting_for_user'
+  | 'stop_not_proven';
+
+export type TaskResumeHandoffNextAction =
+  | 'continue_original_task'
+  | 'run_chrome_read_page_force_refresh'
+  | 'verify_business_postcondition'
+  | 'wait_for_user_collaboration'
+  | 'stop_and_report_not_proven';
+
+export interface TaskResumeHandoffSummary {
+  summaryKind: 'task_resume_handoff_v1';
+  status: TaskResumeHandoffStatus;
+  canContinue: boolean;
+  nextAction: TaskResumeHandoffNextAction;
+  message: string;
+  evidenceSummary: {
+    readinessStatus: TaskResumeReadinessStatus;
+    tabId: number | null;
+    evidenceKinds: string[];
+  };
+  claimBoundary: string;
 }
 
 /**
@@ -873,7 +902,7 @@ export class TaskSessionContext {
         tabId !== null &&
         gateTargetTabId !== tabId
       ) {
-        return {
+        return withTaskResumeHandoffSummary({
           status: 'blocked_by_auth_verification',
           canResumeOriginalTask: false,
           nextStep: 'force_fresh_read_same_tab',
@@ -882,10 +911,10 @@ export class TaskSessionContext {
           reason: 'auth_resume_gate_target_tab_mismatch',
           claimBoundary:
             'Resume is blocked because the latest auth verification gate targets a different tab.',
-        };
+        });
       }
       if (gate.blocksTaskResume) {
-        return {
+        return withTaskResumeHandoffSummary({
           status: 'blocked_by_auth_verification',
           canResumeOriginalTask: false,
           nextStep: inferResumeReadinessNextStepFromAuthGate(gate),
@@ -893,7 +922,7 @@ export class TaskSessionContext {
           evidenceKinds: ['auth_resume_gate'],
           reason: gate.reason,
           claimBoundary: gate.claimBoundary,
-        };
+        });
       }
     }
 
@@ -902,7 +931,7 @@ export class TaskSessionContext {
     );
     const latestPostcondition = selectLatestRegionStatePostconditionForResume(postconditions);
     if (latestPostcondition?.result.verdict === 'failed') {
-      return {
+      return withTaskResumeHandoffSummary({
         status: 'postcondition_failed_stop',
         canResumeOriginalTask: false,
         nextStep: 'stop_not_proven',
@@ -910,11 +939,11 @@ export class TaskSessionContext {
         evidenceKinds: ['region_state_postcondition'],
         reason: `region_state_${latestPostcondition.result.kind}_failed:${latestPostcondition.result.reason}`,
         claimBoundary: latestPostcondition.result.claimBoundary,
-      };
+      });
     }
 
     if (latestPostcondition?.result.verdict === 'unknown') {
-      return {
+      return withTaskResumeHandoffSummary({
         status: 'postcondition_unknown_not_proven',
         canResumeOriginalTask: false,
         nextStep: 'verify_postcondition',
@@ -922,11 +951,11 @@ export class TaskSessionContext {
         evidenceKinds: ['region_state_postcondition'],
         reason: `region_state_${latestPostcondition.result.kind}_not_proven:${latestPostcondition.result.reason}`,
         claimBoundary: latestPostcondition.result.claimBoundary,
-      };
+      });
     }
 
     if (latestPostcondition?.result.verdict === 'passed') {
-      return {
+      return withTaskResumeHandoffSummary({
         status: 'postcondition_passed_ready',
         canResumeOriginalTask: true,
         nextStep: 'continue_original_task',
@@ -934,11 +963,11 @@ export class TaskSessionContext {
         evidenceKinds: ['region_state_postcondition'],
         reason: `region_state_${latestPostcondition.result.kind}_passed:${latestPostcondition.result.reason}`,
         claimBoundary: latestPostcondition.result.claimBoundary,
-      };
+      });
     }
 
     if (gate && !gate.blocksTaskResume) {
-      return {
+      return withTaskResumeHandoffSummary({
         status: 'resume_allowed',
         canResumeOriginalTask: true,
         nextStep: 'continue_original_task',
@@ -946,10 +975,10 @@ export class TaskSessionContext {
         evidenceKinds: ['auth_resume_gate'],
         reason: gate.reason,
         claimBoundary: gate.claimBoundary,
-      };
+      });
     }
 
-    return {
+    return withTaskResumeHandoffSummary({
       status: 'not_proven',
       canResumeOriginalTask: false,
       nextStep: 'verify_postcondition',
@@ -958,7 +987,7 @@ export class TaskSessionContext {
       reason: 'no_resume_or_business_postcondition_evidence',
       claimBoundary:
         'No auth resume gate or business postcondition has proven that the original task can continue.',
-    };
+    });
   }
 
   public buildCachedPageProjectionDelta(): BrowserPageProjectionDelta | null {
@@ -1576,6 +1605,84 @@ function inferResumeReadinessNextStepFromAuthGate(
   if (input.postconditionRequired) return 'verify_postcondition';
   if (input.status === 'required_after_user_action') return 'wait_for_user_collaboration';
   return 'stop_not_proven';
+}
+
+function withTaskResumeHandoffSummary(
+  input: Omit<TaskResumeReadinessSnapshot, 'handoffSummary'>,
+): TaskResumeReadinessSnapshot {
+  return {
+    ...input,
+    handoffSummary: buildTaskResumeHandoffSummary(input),
+  };
+}
+
+function buildTaskResumeHandoffSummary(
+  input: Omit<TaskResumeReadinessSnapshot, 'handoffSummary'>,
+): TaskResumeHandoffSummary {
+  const targetTabHint = Number.isInteger(input.tabId) ? ` on tabId ${input.tabId}` : '';
+  const evidenceSummary = {
+    readinessStatus: input.status,
+    tabId: input.tabId,
+    evidenceKinds: [...input.evidenceKinds],
+  };
+
+  if (input.canResumeOriginalTask && input.nextStep === 'continue_original_task') {
+    return {
+      summaryKind: 'task_resume_handoff_v1',
+      status: 'ready_to_continue',
+      canContinue: true,
+      nextAction: 'continue_original_task',
+      message: `The latest same-task evidence says the original task may continue${targetTabHint}. Continue only from the bound tab and preserve Browser Hygiene.`,
+      evidenceSummary,
+      claimBoundary: input.claimBoundary,
+    };
+  }
+
+  if (input.nextStep === 'force_fresh_read_same_tab') {
+    return {
+      summaryKind: 'task_resume_handoff_v1',
+      status: 'needs_fresh_read',
+      canContinue: false,
+      nextAction: 'run_chrome_read_page_force_refresh',
+      message: `Do not continue yet. Run chrome_read_page with forceRefresh=true${targetTabHint}, then re-check the postcondition before resuming the original task.`,
+      evidenceSummary,
+      claimBoundary: input.claimBoundary,
+    };
+  }
+
+  if (input.nextStep === 'wait_for_user_collaboration') {
+    return {
+      summaryKind: 'task_resume_handoff_v1',
+      status: 'waiting_for_user',
+      canContinue: false,
+      nextAction: 'wait_for_user_collaboration',
+      message: `The task is waiting for user collaboration${targetTabHint}. After the user finishes, take a fresh same-tab read and verify the required business state before continuing.`,
+      evidenceSummary,
+      claimBoundary: input.claimBoundary,
+    };
+  }
+
+  if (input.nextStep === 'stop_not_proven') {
+    return {
+      summaryKind: 'task_resume_handoff_v1',
+      status: 'stop_not_proven',
+      canContinue: false,
+      nextAction: 'stop_and_report_not_proven',
+      message: `Stop the original task${targetTabHint}. The latest evidence says the business postcondition failed or is not safe to treat as successful.`,
+      evidenceSummary,
+      claimBoundary: input.claimBoundary,
+    };
+  }
+
+  return {
+    summaryKind: 'task_resume_handoff_v1',
+    status: 'needs_postcondition_verification',
+    canContinue: false,
+    nextAction: 'verify_business_postcondition',
+    message: `Do not continue the original task yet${targetTabHint}. Verify the business postcondition with fresh page evidence first.`,
+    evidenceSummary,
+    claimBoundary: input.claimBoundary,
+  };
 }
 
 function cloneTaskAuthResumeGate(input: TaskAuthResumeGate): TaskAuthResumeGate {

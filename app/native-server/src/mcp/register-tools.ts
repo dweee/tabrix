@@ -1499,6 +1499,9 @@ function maybeRecordCloseTabsSuccessLifecycleArtifact(input: {
   const actionIdTab = typeof tabId === 'number' ? tabId : 'none';
   const browserHygieneEvidence = extractCloseTabsBrowserHygieneEvidence(input.result);
   const sourceRouteHonesty = input.taskContext?.peekLastSourceRouteHonesty() ?? null;
+  const taskResumeReadiness = input.taskContext?.buildTaskResumeReadiness({
+    tabId: typeof tabId === 'number' ? tabId : null,
+  });
   const hygieneChecks = buildCloseTabsSuccessHygieneChecks(input, browserHygieneEvidence);
   const incompleteCheckKinds = hygieneChecks
     .filter((check) => check.verdict === 'unknown')
@@ -1534,6 +1537,14 @@ function maybeRecordCloseTabsSuccessLifecycleArtifact(input: {
         : ['sourceRouteHonestyVerdict=unknown']),
       'sourceRouteHonestyBoundary=runtime_visible_api_cdp_not_proven',
       'apiCdpReuseProven=false',
+      ...(taskResumeReadiness
+        ? [
+            `taskResumeReadinessStatus=${taskResumeReadiness.status}`,
+            `taskResumeCanContinue=${taskResumeReadiness.canResumeOriginalTask}`,
+            `taskResumeHandoffStatus=${taskResumeReadiness.handoffSummary.status}`,
+            `taskResumeHandoffNextAction=${taskResumeReadiness.handoffSummary.nextAction}`,
+          ]
+        : ['taskResumeReadinessStatus=unknown']),
       'v3RequiredAction=close',
     ],
   };

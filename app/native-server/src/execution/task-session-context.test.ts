@@ -763,6 +763,17 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
       tabId: 9,
       evidenceKinds: ['region_state_postcondition'],
       reason: 'region_state_search_results_updated_passed:result_collection_changed_after_action',
+      handoffSummary: {
+        summaryKind: 'task_resume_handoff_v1',
+        status: 'ready_to_continue',
+        canContinue: true,
+        nextAction: 'continue_original_task',
+        evidenceSummary: {
+          readinessStatus: 'postcondition_passed_ready',
+          tabId: 9,
+          evidenceKinds: ['region_state_postcondition'],
+        },
+      },
     });
     expect(ctx.buildTaskResumeReadiness({ tabId: 7 })).toMatchObject({
       status: 'not_proven',
@@ -797,6 +808,11 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
       canResumeOriginalTask: false,
       nextStep: 'verify_postcondition',
       reason: 'region_state_search_results_updated_not_proven:result_collection_not_comparable',
+      handoffSummary: {
+        status: 'needs_postcondition_verification',
+        canContinue: false,
+        nextAction: 'verify_business_postcondition',
+      },
     });
 
     ctx.noteRegionStatePostconditionsForCloseout({
@@ -823,6 +839,11 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
       canResumeOriginalTask: false,
       nextStep: 'stop_not_proven',
       reason: 'region_state_search_results_updated_failed:result_collection_unchanged_after_action',
+      handoffSummary: {
+        status: 'stop_not_proven',
+        canContinue: false,
+        nextAction: 'stop_and_report_not_proven',
+      },
     });
   });
 
