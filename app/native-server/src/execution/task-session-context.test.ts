@@ -11,12 +11,52 @@ import {
   TaskSessionContext,
   resolveReadBudgetFromEnv,
 } from './task-session-context';
+import type { TaskVisibleRegionRowsData } from './task-session-context';
 import type { ChooseContextDecisionSnapshot } from './skip-read-orchestrator';
 import type {
   BrowserPageThingProjection,
   ReadPageObjectLifecycleSummary,
   ReadPageRegion,
 } from '@tabrix/shared';
+
+function makeVisibleRegionRows(
+  start: number,
+  count: number,
+  options: { sourceTabId?: number | null; sourceRegion?: string } = {},
+): TaskVisibleRegionRowsData {
+  const rows = Array.from({ length: count }, (_, index) => {
+    const n = start + index;
+    return {
+      rowId: `row_${n}`,
+      title: `Result ${n}`,
+      primaryText: `Result ${n} summary`,
+      secondaryText: null,
+      metaText: null,
+      interactionText: 'Open',
+      targetRef: `ref_${n}`,
+      sourceRegion: options.sourceRegion ?? 'result_list',
+      confidence: 0.9,
+    };
+  });
+  return {
+    available: true,
+    rowCount: rows.length,
+    confidence: 0.92,
+    targetRefCoverageRate: 1,
+    regionQualityScore: 0.9,
+    sourceDataSource: 'dom_region_rows',
+    sourceTabId: options.sourceTabId ?? 7,
+    rows,
+    visibleRegionRowsUsed: true,
+    visibleRegionRowsRejectedReason: null,
+    sourceRegion: options.sourceRegion ?? 'result_list',
+    rowExtractionConfidence: 0.92,
+    cardExtractorUsed: true,
+    cardPatternConfidence: 0.88,
+    cardRowsCount: rows.length,
+    rowOrder: 'visual_order',
+  };
+}
 
 describe('resolveReadBudgetFromEnv', () => {
   it('returns the default when the env key is unset', () => {
@@ -396,6 +436,62 @@ describe('TaskSessionContext — noteReadPage hygiene', () => {
       ctx.noteReadPage({ layer: 'L0', source: 'dom_json', targetRefs: null, apiFamilies: null }),
     ).not.toThrow();
     expect(ctx.readPageCount).toBe(1);
+  });
+});
+
+describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
+  it('dedupes overlapping reads and only marks default top-N ready after ten targetable unique rows', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+
+    const first = ctx.noteDomRegionRowsReadback(makeVisibleRegionRows(1, 6));
+    expect(first).toMatchObject({
+      status: 'partial_accumulated_rows',
+      observedReadCount: 1,
+      currentReadReliableRowCount: 6,
+      currentReadTargetableRowCount: 6,
+      currentReadNewUniqueRowCount: 6,
+      duplicateReliableRowCount: 0,
+      uniqueReliableRowCount: 6,
+      uniqueTargetableRowCount: 6,
+      canSatisfyDefaultTopN: false,
+      missingRowCountForDefaultTopN: 4,
+    });
+
+    const second = ctx.noteDomRegionRowsReadback(makeVisibleRegionRows(5, 6));
+    expect(second).toMatchObject({
+      status: 'ready_for_default_top_n',
+      observedReadCount: 2,
+      currentReadReliableRowCount: 6,
+      currentReadTargetableRowCount: 6,
+      currentReadNewUniqueRowCount: 4,
+      duplicateReliableRowCount: 2,
+      uniqueReliableRowCount: 10,
+      uniqueTargetableRowCount: 10,
+      canSatisfyDefaultTopN: true,
+      missingRowCountForDefaultTopN: 0,
+      nextRequiredCheck: 'accumulated_rows_ready_for_top_n_summary',
+    });
+  });
+
+  it('resets accumulated DOM rows on navigation and page interactions', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteUrlChange('https://example.test/search?q=one', 'search_results');
+    expect(ctx.noteDomRegionRowsReadback(makeVisibleRegionRows(1, 6))).toMatchObject({
+      uniqueTargetableRowCount: 6,
+      observedReadCount: 1,
+    });
+
+    ctx.noteUrlChange('https://example.test/search?q=two', 'search_results');
+    expect(ctx.noteDomRegionRowsReadback(makeVisibleRegionRows(1, 2))).toMatchObject({
+      uniqueTargetableRowCount: 2,
+      observedReadCount: 1,
+    });
+
+    ctx.notePageInteraction({ action: 'chrome_keyboard', tabId: 7 });
+    expect(ctx.noteDomRegionRowsReadback(makeVisibleRegionRows(8, 2))).toMatchObject({
+      uniqueTargetableRowCount: 2,
+      observedReadCount: 1,
+    });
   });
 });
 

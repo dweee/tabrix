@@ -1179,7 +1179,8 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
   });
 
   it('carries search list and detail region-state postconditions into unified closeout evidence', () => {
-    const resultRows = resultCollection(resultRow('1'), resultRow('2', 'entry'));
+    const detailTarget = { ...resultRow('2', 'entry'), label: 'alpha launch poster' };
+    const resultRows = resultCollection(resultRow('1'), detailTarget);
     const searchState = verifyRegionStatePostcondition({
       kind: 'search_results_updated',
       actionId: 'act-search',
@@ -1191,7 +1192,20 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
       kind: 'detail_opened',
       actionId: 'act-open-detail',
       beforeRegions: resultRows,
-      afterRegions: [region('content', 'detail_open_candidate')],
+      afterRegions: [
+        region('content', 'detail_open_candidate', {
+          label: 'alpha launch poster detail',
+          objects: [
+            {
+              objectId: 'detail-alpha-launch-poster',
+              label: 'alpha launch poster expanded content',
+              objectType: 'article',
+              confidence: 0.8,
+            },
+          ],
+        }),
+      ],
+      targetRefs: [detailTarget.targetRef],
       now: () => T0 + 20,
     });
 

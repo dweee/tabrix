@@ -262,4 +262,57 @@ describe('buildDomRegionRowsSuccessResult', () => {
       nextRequiredCheck: 'scroll_or_request_more_rows_before_claiming_top_n_complete',
     });
   });
+
+  it('attaches multi-read top-N accumulation evidence when provided', () => {
+    const { result, operationLog } = buildDomRegionRowsSuccessResult({
+      requestedLayer: 'L0+L1',
+      routerDecision: makeRouterDecision(),
+      layerContract: mapDataSourceToLayerContract({
+        dataSource: 'dom_region_rows',
+        requestedLayer: 'L0+L1',
+        fallbackEntryLayer: 'L0+L1',
+      }),
+      visibleRows: makeVisibleRows('viewport', 6),
+      ownerType: 'run_owned',
+      apiRowsUnavailableReason: 'api_rows_unavailable',
+      readCount: 2,
+      topNAccumulationEvidence: {
+        status: 'ready_for_default_top_n',
+        defaultTopN: 10,
+        accumulationScope: 'task_tab_source_region',
+        sourceTabId: 123,
+        sourceRegion: 'result_list',
+        observedReadCount: 2,
+        currentReadReliableRowCount: 6,
+        currentReadTargetableRowCount: 6,
+        currentReadNewUniqueRowCount: 4,
+        duplicateReliableRowCount: 2,
+        uniqueReliableRowCount: 10,
+        uniqueTargetableRowCount: 10,
+        uniqueTargetRefCount: 10,
+        rowOrder: 'visual_order',
+        canSatisfyDefaultTopN: true,
+        missingRowCountForDefaultTopN: 0,
+        nextRequiredCheck: 'accumulated_rows_ready_for_top_n_summary',
+        claimBoundary: 'deterministic task/session accumulation fixture only',
+      },
+    });
+
+    const payload = JSON.parse(String(result.content[0].text));
+
+    expect(payload.topNAccumulationEvidence).toMatchObject({
+      status: 'ready_for_default_top_n',
+      observedReadCount: 2,
+      currentReadNewUniqueRowCount: 4,
+      duplicateReliableRowCount: 2,
+      uniqueTargetableRowCount: 10,
+      canSatisfyDefaultTopN: true,
+    });
+    expect(operationLog.metadata).toMatchObject({
+      topNAccumulationStatus: 'ready_for_default_top_n',
+      topNAccumulatedUniqueTargetableRowCount: '10',
+      topNAccumulatedObservedReadCount: '2',
+      topNAccumulationCanSatisfyDefault: 'true',
+    });
+  });
 });

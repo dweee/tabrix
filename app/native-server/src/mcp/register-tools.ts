@@ -1094,6 +1094,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
                 .map((row) => row.targetRef)
                 .filter((ref): ref is string => typeof ref === 'string' && ref.length > 0),
             );
+            const topNAccumulationEvidence = taskContext.noteDomRegionRowsReadback(visibleRows);
             const layerContract = mapDataSourceToLayerContract({
               dataSource: 'dom_region_rows',
               requestedLayer,
@@ -1113,6 +1114,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
               ownerType,
               apiRowsUnavailableReason: apiUnavailableReason,
               readCount: taskContext.readPageCount,
+              topNAccumulationEvidence,
             });
             const compatDomRowsResult = mergeReadPagePayloadMetadata(
               rawResultWithEvidence,

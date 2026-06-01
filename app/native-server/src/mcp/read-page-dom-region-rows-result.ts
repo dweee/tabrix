@@ -7,7 +7,10 @@ import {
 } from '@tabrix/shared';
 import type { DataSourceDecision, TaskIntentClass } from '../execution/data-source-router';
 import type { LayerContractEnvelope } from '../execution/layer-contract';
-import type { TaskVisibleRegionRowsData } from '../execution/task-session-context';
+import type {
+  TaskDomRegionRowsReadbackAccumulationEvidence,
+  TaskVisibleRegionRowsData,
+} from '../execution/task-session-context';
 import type { ChooseContextDecisionSnapshot } from '../execution/skip-read-orchestrator';
 
 const MIN_RELIABLE_DOM_REGION_ROW_COUNT = 2;
@@ -161,6 +164,7 @@ export function buildDomRegionRowsSuccessResult(args: {
   ownerType: BrowserPageOwnerType;
   apiRowsUnavailableReason: string;
   readCount: number;
+  topNAccumulationEvidence?: TaskDomRegionRowsReadbackAccumulationEvidence | null;
 }): { result: CallToolResult; operationLog: ReadPageOperationLogHint } {
   const topNReadbackEvidence = buildTopNReadbackEvidence(args.visibleRows);
   const payload: Record<string, unknown> = {
@@ -199,6 +203,7 @@ export function buildDomRegionRowsSuccessResult(args: {
     fallbackCause: null,
     fallbackUsed: 'none',
     topNReadbackEvidence,
+    topNAccumulationEvidence: args.topNAccumulationEvidence ?? null,
   };
   payload.pageProjection = buildDomRegionRowsPageProjection(payload, args);
 
@@ -229,6 +234,16 @@ export function buildDomRegionRowsSuccessResult(args: {
         topNAvailableReliableRowCount: String(topNReadbackEvidence.availableReliableRowCount),
         topNTargetRefRowCount: String(topNReadbackEvidence.targetRefRowCount),
         topNCanSatisfyDefault: String(topNReadbackEvidence.canSatisfyDefaultTopN),
+        topNAccumulationStatus: args.topNAccumulationEvidence?.status ?? 'not_available',
+        topNAccumulatedUniqueTargetableRowCount: String(
+          args.topNAccumulationEvidence?.uniqueTargetableRowCount ?? 'unknown',
+        ),
+        topNAccumulatedObservedReadCount: String(
+          args.topNAccumulationEvidence?.observedReadCount ?? 'unknown',
+        ),
+        topNAccumulationCanSatisfyDefault: String(
+          args.topNAccumulationEvidence?.canSatisfyDefaultTopN ?? false,
+        ),
         rejectedRegionReasonDistribution: JSON.stringify(
           args.visibleRows.rejectedRegionReasonDistribution ?? {},
         ),

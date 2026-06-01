@@ -68,6 +68,7 @@ const READ_BUDGET_HARD_CAP = 100;
 const MAX_LIVE_OBSERVED_CONTEXT_ENTRIES = 10;
 const MAX_LIFECYCLE_TIMELINE_EVENTS = 50;
 const MAX_REGION_STATE_POSTCONDITIONS_FOR_CLOSEOUT = 8;
+const DEFAULT_TOP_N_ACCUMULATION_TARGET = 10;
 
 function inferProjectionEvidenceBoundary(
   projection: BrowserPageThingProjection,
@@ -141,6 +142,41 @@ export interface TaskVisibleRegionRowsData extends RouterDomRegionRowsEvidence {
   navigationLikeRejectedCount?: number;
   targetRefCoverageRejectedCount?: number;
   rejectedRegionReasonDistribution?: Record<string, number>;
+}
+
+export type TaskTopNAccumulationStatus = 'ready_for_default_top_n' | 'partial_accumulated_rows';
+
+export interface TaskDomRegionRowsReadbackAccumulationEvidence {
+  status: TaskTopNAccumulationStatus;
+  defaultTopN: number;
+  accumulationScope: 'task_tab_source_region';
+  sourceTabId: number | null;
+  sourceRegion: string;
+  observedReadCount: number;
+  currentReadReliableRowCount: number;
+  currentReadTargetableRowCount: number;
+  currentReadNewUniqueRowCount: number;
+  duplicateReliableRowCount: number;
+  uniqueReliableRowCount: number;
+  uniqueTargetableRowCount: number;
+  uniqueTargetRefCount: number;
+  rowOrder: 'visual_order';
+  canSatisfyDefaultTopN: boolean;
+  missingRowCountForDefaultTopN: number;
+  nextRequiredCheck:
+    | 'accumulated_rows_ready_for_top_n_summary'
+    | 'scroll_or_request_more_rows_before_claiming_top_n_complete';
+  claimBoundary: string;
+}
+
+interface TaskDomRegionRowsReadbackAccumulator {
+  scopeKey: string;
+  sourceTabId: number | null;
+  sourceRegion: string;
+  observedReadCount: number;
+  uniqueRowKeys: Set<string>;
+  uniqueTargetableRowKeys: Set<string>;
+  uniqueTargetRefs: Set<string>;
 }
 
 /**
@@ -599,6 +635,7 @@ export class TaskSessionContext {
   private readonly liveObservedApiData: LiveObservedApiData[] = [];
   private readonly liveObservedApiEvidence: LiveObservedApiEvidence[] = [];
   private visibleRegionRows: TaskVisibleRegionRowsData | null = null;
+  private domRegionRowsReadbackAccumulator: TaskDomRegionRowsReadbackAccumulator | null = null;
 
   constructor(options?: TaskSessionContextOptions) {
     if (options?.readBudget !== undefined) {
@@ -651,6 +688,7 @@ export class TaskSessionContext {
       this.liveObservedApiData.length = 0;
       this.liveObservedApiEvidence.length = 0;
       this.visibleRegionRows = null;
+      this.domRegionRowsReadbackAccumulator = null;
     }
   }
 
@@ -729,6 +767,95 @@ export class TaskSessionContext {
       targetRefCoverageRate: this.visibleRegionRows.targetRefCoverageRate ?? null,
       regionQualityScore: this.visibleRegionRows.regionQualityScore ?? null,
       rejectedReason: this.visibleRegionRows.rejectedReason ?? null,
+    };
+  }
+
+  public noteDomRegionRowsReadback(
+    visibleRows: TaskVisibleRegionRowsData,
+  ): TaskDomRegionRowsReadbackAccumulationEvidence {
+    const sourceTabId = normalizePositiveTabId(visibleRows.sourceTabId);
+    const sourceRegion =
+      typeof visibleRows.sourceRegion === 'string' && visibleRows.sourceRegion.length > 0
+        ? visibleRows.sourceRegion
+        : 'unknown';
+    const scopeKey = `${sourceTabId ?? 'unknown'}:${sourceRegion}`;
+    if (
+      !this.domRegionRowsReadbackAccumulator ||
+      this.domRegionRowsReadbackAccumulator.scopeKey !== scopeKey
+    ) {
+      this.domRegionRowsReadbackAccumulator = {
+        scopeKey,
+        sourceTabId,
+        sourceRegion,
+        observedReadCount: 0,
+        uniqueRowKeys: new Set<string>(),
+        uniqueTargetableRowKeys: new Set<string>(),
+        uniqueTargetRefs: new Set<string>(),
+      };
+    }
+
+    const accumulator = this.domRegionRowsReadbackAccumulator;
+    accumulator.observedReadCount += 1;
+
+    const availableReliableRowCount =
+      visibleRows.visibleRegionRowsUsed && visibleRows.rowCount > 0
+        ? Math.min(visibleRows.rows.length, Math.floor(visibleRows.rowCount))
+        : 0;
+    const currentReadRowKeys = new Set<string>();
+    let currentReadTargetableRowCount = 0;
+
+    for (const row of visibleRows.rows.slice(0, availableReliableRowCount)) {
+      const key = buildDomRegionRowStableKey(row);
+      if (!key) continue;
+      currentReadRowKeys.add(key);
+      const targetRef =
+        typeof row.targetRef === 'string' && row.targetRef.length > 0 ? row.targetRef : null;
+      if (targetRef) {
+        currentReadTargetableRowCount += 1;
+        accumulator.uniqueTargetableRowKeys.add(key);
+        accumulator.uniqueTargetRefs.add(targetRef);
+      }
+    }
+
+    let currentReadNewUniqueRowCount = 0;
+    for (const key of currentReadRowKeys) {
+      if (!accumulator.uniqueRowKeys.has(key)) currentReadNewUniqueRowCount += 1;
+      accumulator.uniqueRowKeys.add(key);
+    }
+
+    const duplicateReliableRowCount = Math.max(
+      0,
+      currentReadRowKeys.size - currentReadNewUniqueRowCount,
+    );
+    const uniqueTargetableRowCount = accumulator.uniqueTargetableRowKeys.size;
+    const canSatisfyDefaultTopN = uniqueTargetableRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET;
+    const missingRowCountForDefaultTopN = Math.max(
+      0,
+      DEFAULT_TOP_N_ACCUMULATION_TARGET - uniqueTargetableRowCount,
+    );
+
+    return {
+      status: canSatisfyDefaultTopN ? 'ready_for_default_top_n' : 'partial_accumulated_rows',
+      defaultTopN: DEFAULT_TOP_N_ACCUMULATION_TARGET,
+      accumulationScope: 'task_tab_source_region',
+      sourceTabId,
+      sourceRegion,
+      observedReadCount: accumulator.observedReadCount,
+      currentReadReliableRowCount: currentReadRowKeys.size,
+      currentReadTargetableRowCount,
+      currentReadNewUniqueRowCount,
+      duplicateReliableRowCount,
+      uniqueReliableRowCount: accumulator.uniqueRowKeys.size,
+      uniqueTargetableRowCount,
+      uniqueTargetRefCount: accumulator.uniqueTargetRefs.size,
+      rowOrder: visibleRows.rowOrder,
+      canSatisfyDefaultTopN,
+      missingRowCountForDefaultTopN,
+      nextRequiredCheck: canSatisfyDefaultTopN
+        ? 'accumulated_rows_ready_for_top_n_summary'
+        : 'scroll_or_request_more_rows_before_claiming_top_n_complete',
+      claimBoundary:
+        'This proves only unique targetable DOM rows observed during this in-memory task/session for the same tab and source region. It does not prove full result-set completeness, exact platform ranking, or rows that were never observed.',
     };
   }
 
@@ -1090,6 +1217,7 @@ export class TaskSessionContext {
     this.liveObservedApiData.length = 0;
     this.liveObservedApiEvidence.length = 0;
     this.visibleRegionRows = null;
+    this.domRegionRowsReadbackAccumulator = null;
     const tabId =
       typeof input.tabId === 'number' && Number.isInteger(input.tabId) && input.tabId > 0
         ? input.tabId
@@ -1379,6 +1507,31 @@ function normalizeReadRequestKey(value: string | null | undefined): string | nul
 
 function normalizePositiveTabId(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function buildDomRegionRowStableKey(row: TaskVisibleRegionRow): string | null {
+  const textKeyParts = [
+    row.title,
+    row.primaryText,
+    row.secondaryText,
+    row.summary,
+    row.metaText,
+    row.interactionText,
+  ]
+    .map(normalizeDomRegionRowKeyPart)
+    .filter((part) => part.length > 0);
+  if (textKeyParts.length > 0) return `text:${textKeyParts.join('|')}`;
+
+  const rowId = normalizeDomRegionRowKeyPart(row.rowId);
+  if (rowId) return `row:${rowId}`;
+
+  const targetRef = normalizeDomRegionRowKeyPart(row.targetRef);
+  return targetRef ? `target:${targetRef}` : null;
+}
+
+function normalizeDomRegionRowKeyPart(value: string | null | undefined): string {
+  if (typeof value !== 'string') return '';
+  return value.trim().replace(/\s+/g, ' ').toLowerCase().slice(0, 240);
 }
 
 function isPositiveTabId(value: number | null): value is number {
