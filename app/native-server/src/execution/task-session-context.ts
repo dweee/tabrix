@@ -1142,6 +1142,20 @@ export class TaskSessionContext {
     }
 
     if (latestPostcondition?.result.verdict === 'passed') {
+      const detailResumeBlockReason = detailPostconditionResumeBlockReason(
+        latestPostcondition.result,
+      );
+      if (detailResumeBlockReason) {
+        return withTaskResumeHandoffSummary({
+          status: 'postcondition_unknown_not_proven',
+          canResumeOriginalTask: false,
+          nextStep: 'verify_postcondition',
+          tabId,
+          evidenceKinds: ['region_state_postcondition', 'detail_field_readback'],
+          reason: `region_state_${latestPostcondition.result.kind}_not_proven:${detailResumeBlockReason}`,
+          claimBoundary: latestPostcondition.result.claimBoundary,
+        });
+      }
       return withTaskResumeHandoffSummary({
         status: 'postcondition_passed_ready',
         canResumeOriginalTask: true,
@@ -1734,6 +1748,24 @@ function selectLatestRegionStatePostconditionForResume(
   }
 
   return latest;
+}
+
+function detailPostconditionResumeBlockReason(
+  result: TaskRegionStatePostconditionResultSnapshot,
+): string | null {
+  if (result.kind !== 'detail_opened') return null;
+  const evidence = result.detailFieldReadbackEvidence;
+  if (!evidence) return 'detail_field_readback_required_for_resume';
+  if (
+    evidence.status !== 'structured_fields_present' ||
+    !evidence.targetBindingProven ||
+    evidence.semanticMatch !== 'matched' ||
+    !evidence.canSupportDetailSummary ||
+    evidence.nextRequiredCheck !== 'detail_fields_ready_for_summary'
+  ) {
+    return 'detail_field_readback_not_ready_for_summary';
+  }
+  return null;
 }
 
 function buildPendingBusinessVerificationForResume(

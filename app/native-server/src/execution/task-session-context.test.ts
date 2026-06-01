@@ -906,6 +906,131 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
     });
   });
 
+  it('allows detail-task resume only when detail readback is summary-ready', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_open_detail',
+            kind: 'detail_opened',
+            verdict: 'passed',
+            reason: 'content_detail_region_semantic_match_after_action',
+            beforeSummary: ['content:result_collection_candidate:before'],
+            afterSummary: ['content:detail_open_candidate:after'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic detail resume fixture only',
+            detailFieldReadbackEvidence: {
+              kind: 'detail_field_readback',
+              status: 'structured_fields_present',
+              targetBindingProven: true,
+              semanticMatch: 'matched',
+              canSupportDetailSummary: true,
+              fieldCounts: {
+                totalStructuredObjects: 2,
+                titleLikeObjects: 1,
+                bodyLikeObjects: 1,
+                metadataLikeObjects: 0,
+                actionableObjects: 0,
+              },
+              nextRequiredCheck: 'detail_fields_ready_for_summary',
+              claimBoundary: 'detail field readback fixture only',
+            },
+          },
+        },
+      ],
+    });
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_passed_ready',
+      canResumeOriginalTask: true,
+      nextStep: 'continue_original_task',
+      evidenceKinds: ['region_state_postcondition'],
+      reason: 'region_state_detail_opened_passed:content_detail_region_semantic_match_after_action',
+    });
+  });
+
+  it('blocks detail-task resume when passed detail_opened lacks summary-ready readback evidence', () => {
+    const missingEvidence = new TaskSessionContext({ readBudget: 6 });
+    missingEvidence.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_open_detail_missing_readback',
+            kind: 'detail_opened',
+            verdict: 'passed',
+            reason: 'content_detail_region_semantic_match_after_action',
+            beforeSummary: ['content:result_collection_candidate:before'],
+            afterSummary: ['content:detail_open_candidate:after'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic detail resume fixture only',
+          },
+        },
+      ],
+    });
+
+    expect(missingEvidence.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_unknown_not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'verify_postcondition',
+      evidenceKinds: ['region_state_postcondition', 'detail_field_readback'],
+      reason: 'region_state_detail_opened_not_proven:detail_field_readback_required_for_resume',
+      handoffSummary: {
+        status: 'needs_postcondition_verification',
+        canContinue: false,
+        nextAction: 'verify_business_postcondition',
+      },
+    });
+
+    const metadataOnly = new TaskSessionContext({ readBudget: 6 });
+    metadataOnly.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_open_detail_metadata_only',
+            kind: 'detail_opened',
+            verdict: 'passed',
+            reason: 'content_detail_region_semantic_match_after_action',
+            beforeSummary: ['content:result_collection_candidate:before'],
+            afterSummary: ['content:detail_open_candidate:after'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic detail resume fixture only',
+            detailFieldReadbackEvidence: {
+              kind: 'detail_field_readback',
+              status: 'partial_fields_only',
+              targetBindingProven: true,
+              semanticMatch: 'matched',
+              canSupportDetailSummary: false,
+              fieldCounts: {
+                totalStructuredObjects: 1,
+                titleLikeObjects: 0,
+                bodyLikeObjects: 0,
+                metadataLikeObjects: 1,
+                actionableObjects: 0,
+              },
+              nextRequiredCheck: 'fresh_detail_read_or_more_structured_fields_required',
+              claimBoundary: 'detail field readback fixture only',
+            },
+          },
+        },
+      ],
+    });
+
+    expect(metadataOnly.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_unknown_not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'verify_postcondition',
+      evidenceKinds: ['region_state_postcondition', 'detail_field_readback'],
+      reason: 'region_state_detail_opened_not_proven:detail_field_readback_not_ready_for_summary',
+    });
+  });
+
   it('requires a fresh same-tab read when a newer pending action has not been business-verified', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
     ctx.noteRegionStatePostconditionsForCloseout({
