@@ -645,6 +645,7 @@ export const webFetcherTool = new WebFetcherTool();
 
 interface GetInteractiveElementsToolParams {
   textQuery?: string; // Text to search for within interactive elements (fuzzy search)
+  query?: string; // Backward-compatible alias for textQuery
   selector?: string; // CSS selector to filter interactive elements
   includeCoordinates?: boolean; // Include element coordinates in the response (default: true)
   types?: string[]; // Types of interactive elements to include (default: all types)
@@ -659,7 +660,8 @@ class GetInteractiveElementsTool extends BaseBrowserToolExecutor {
    * Execute get interactive elements operation
    */
   async execute(args: GetInteractiveElementsToolParams): Promise<ToolResult> {
-    const { textQuery, selector, includeCoordinates = true, types, tabId, windowId } = args;
+    const { selector, includeCoordinates = true, types, tabId, windowId } = args;
+    const textQuery = args.textQuery ?? args.query;
 
     console.log(`Starting get interactive elements with options:`, args);
 

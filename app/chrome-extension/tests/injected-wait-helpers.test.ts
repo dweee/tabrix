@@ -185,4 +185,71 @@ describe('injected state-driven waits', () => {
       valueState: 'empty',
     });
   });
+
+  it('interactive element search returns a nested agreement confirmation action', async () => {
+    document.body.innerHTML = `
+      <div id="modal" class="agreement-modal" onclick="void 0">
+        <div class="body">阅读并同意《用户协议》《隐私政策》</div>
+        <div id="confirm" class="modal-action">
+          <span>同意并继续</span>
+        </div>
+        <div class="modal-action">取消</div>
+      </div>
+    `;
+    const modal = document.querySelector('.agreement-modal') as HTMLDivElement;
+    const confirm = document.getElementById('confirm') as HTMLDivElement;
+    const span = confirm.querySelector('span') as HTMLSpanElement;
+    setRect(modal, { left: 320, top: 180, width: 360, height: 240 });
+    setRect(confirm, { left: 500, top: 350, width: 128, height: 40 });
+    setRect(span, { left: 520, top: 360, width: 88, height: 20 });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '同意并继续',
+      includeCoordinates: true,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.elements[0]).toMatchObject({
+      text: '同意并继续',
+      actionability: 'actionable',
+    });
+    expect(response.elements[0].selector).toMatch(/#confirm|span/);
+    expect(response.elements.map((element: any) => element.selector)).not.toContain('#modal');
+  });
+
+  it('interactive element selector search still honors the text query', async () => {
+    document.body.innerHTML = `
+      <div>
+        <span id="phone">输入手机号</span>
+        <span id="confirm">同意并继续</span>
+        <span id="cancel">取消</span>
+      </div>
+    `;
+    Array.from(document.querySelectorAll('span')).forEach((element, index) => {
+      setRect(element, { left: 20, top: 20 + index * 40, width: 120, height: 28 });
+    });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      selector: 'span',
+      textQuery: '同意并继续',
+      includeCoordinates: false,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.elements).toHaveLength(1);
+    expect(response.elements[0]).toMatchObject({
+      selector: '#confirm',
+      text: '同意并继续',
+    });
+  });
 });

@@ -224,19 +224,90 @@
   function looksLikeAuthActionControl(el, textQuery = '') {
     if (!(el instanceof Element)) return false;
     if (isTextEntryElement(el)) return false;
-    const text =
-      ownVisibleText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || '';
-    const query = String(textQuery || '').trim();
-    if (query && getQueryMatchKind(text, query) === 'none') return false;
-    if (!AUTH_ACTION_TEXT_PATTERN.test(text)) return false;
     const rect = el.getBoundingClientRect();
     const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
     const area = Math.max(1, rect.width * rect.height);
     if (area > viewportArea * 0.35) return false;
+    const nestedText = area < viewportArea * 0.08 ? (el.textContent || '').trim() : '';
+    const text =
+      ownVisibleText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || nestedText;
+    const query = String(textQuery || '').trim();
+    if (query && getQueryMatchKind(text, query) === 'none') return false;
+    if (!AUTH_ACTION_TEXT_PATTERN.test(text)) return false;
     const signature = `${el.id || ''} ${classNameOf(el)} ${el.getAttribute('role') || ''} ${
       el.getAttribute('data-testid') || ''
     }`;
     return AUTH_ACTION_SIGNATURE_PATTERN.test(signature) || text.length <= 30;
+  }
+
+  function elementTextForQuery(el) {
+    if (!(el instanceof Element)) return '';
+    return (
+      getAccessibleName(el) ||
+      ownVisibleText(el) ||
+      el.getAttribute('aria-label') ||
+      el.getAttribute('title') ||
+      el.textContent ||
+      ''
+    )
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function elementArea(el) {
+    try {
+      const rect = el.getBoundingClientRect();
+      return Math.max(1, rect.width * rect.height);
+    } catch (_) {
+      return 1;
+    }
+  }
+
+  function hasSmallerMatchingActionDescendant(el, query, containerArea) {
+    try {
+      const descendants = Array.from(el.querySelectorAll('*'));
+      return descendants.some((child) => {
+        if (!(child instanceof Element)) return false;
+        if (!isElementVisible(child) || isTextEntryElement(child)) return false;
+        if (elementArea(child) >= containerArea) return false;
+        return getQueryMatchKind(elementTextForQuery(child), query) !== 'none';
+      });
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function isOverBroadActionTextContainer(el, textQuery) {
+    const query = String(textQuery || '').trim();
+    if (!query || !isActionTextQuery(query) || !(el instanceof Element)) return false;
+    if (isTextEntryElement(el)) return false;
+
+    const containerText = elementTextForQuery(el);
+    if (getQueryMatchKind(containerText, query) === 'none') return false;
+
+    const directText =
+      ownVisibleText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || '';
+    const directMatch = getQueryMatchKind(directText, query) !== 'none';
+    const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+    const area = elementArea(el);
+    const looksCompact = area <= viewportArea * 0.08 && containerText.length <= query.length + 18;
+    if (directMatch && looksCompact) return false;
+
+    return (
+      (area > viewportArea * 0.08 || containerText.length > query.length + 30) &&
+      hasSmallerMatchingActionDescendant(el, query, area)
+    );
+  }
+
+  function elementMatchesTextQuery(el, textQuery) {
+    const query = String(textQuery || '').trim();
+    if (!query) return true;
+    if (!(el instanceof Element)) return false;
+    if (isOverBroadActionTextContainer(el, query)) return false;
+    return (
+      getQueryMatchKind(elementTextForQuery(el), query) !== 'none' ||
+      looksLikeAuthActionControl(el, query)
+    );
   }
 
   /**
@@ -670,8 +741,7 @@
     for (const el of uniqueElements) {
       if (!isElementVisible(el) || !isElementInteractive(el)) continue;
 
-      const accessibleName = getAccessibleName(el);
-      if (textQuery && !fuzzyMatch(accessibleName, textQuery)) continue;
+      if (textQuery && !elementMatchesTextQuery(el, textQuery)) continue;
 
       let elementType = 'unknown';
       for (const [type, typeSelector] of Object.entries(ELEMENT_CONFIG)) {
@@ -686,8 +756,7 @@
     const sorted = sortElementsForQuery(
       Array.from(uniqueElements).filter((el) => {
         if (!isElementVisible(el) || !isElementInteractive(el)) return false;
-        const accessibleName = getAccessibleName(el);
-        return fuzzyMatch(accessibleName, textQuery);
+        return elementMatchesTextQuery(el, textQuery);
       }),
       textQuery,
     );
@@ -749,12 +818,16 @@
           let current = parentElement;
           let depth = 0;
           while (current && current instanceof Element && depth < 8) {
-            if (
+            const isStandardInteractive =
               current.matches &&
               current.matches(ANY_INTERACTIVE_SELECTOR) &&
               isElementVisible(current) &&
-              isElementInteractive(current)
-            ) {
+              isElementInteractive(current);
+            const isAuthAction =
+              isElementVisible(current) &&
+              isElementInteractive(current) &&
+              looksLikeAuthActionControl(current, textQuery);
+            if (isStandardInteractive || isAuthAction) {
               candidates.push(current);
             }
             current = current.parentElement;
@@ -814,15 +887,18 @@
       try {
         let elements;
         if (request.selector) {
-          // If a selector is provided, bypass the text-based logic and use a direct query.
-          const foundEls = querySelectorAllDeep(request.selector);
+          // If a selector is provided, use it as the candidate set but still honor textQuery.
+          const textQuery = request.textQuery || '';
+          const foundEls = querySelectorAllDeep(request.selector).filter((el) =>
+            elementMatchesTextQuery(el, textQuery),
+          );
           elements = sortElementsForQuery(foundEls, request.textQuery || '').map((el) =>
             createElementInfo(
               el,
               'selected',
               request.includeCoordinates !== false,
               isElementInteractive(el),
-              { textQuery: request.textQuery || '' },
+              { textQuery },
             ),
           );
         } else {

@@ -257,11 +257,26 @@
     return OTP_ACTION_SIGNATURE_PATTERN.test(signature) || AUTH_CONTEXT_PATTERN.test(nearby);
   }
 
+  function compactAuthActionText(el) {
+    if (isHugeContainer(el)) return '';
+    const direct =
+      ownVisibleText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || '';
+    if (direct) return direct;
+    try {
+      const rect = /** @type {HTMLElement} */ (el).getBoundingClientRect();
+      const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+      const area = Math.max(1, rect.width * rect.height);
+      if (area > viewportArea * 0.08) return '';
+    } catch (_) {
+      return '';
+    }
+    return (el.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
   function inferAuthActionRole(el) {
     const tag = el.tagName.toLowerCase();
     if (['input', 'textarea', 'select', 'button', 'a'].includes(tag)) return null;
-    const labelText =
-      ownVisibleText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || '';
+    const labelText = compactAuthActionText(el);
     const nearby = nearbyText(el);
     if (looksLikeOtpActionControl(el)) return 'button';
     if (looksLikeAgreementGlyph(el)) return 'checkbox';

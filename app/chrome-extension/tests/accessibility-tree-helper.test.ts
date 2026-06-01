@@ -145,4 +145,40 @@ describe('accessibility-tree auth control map', () => {
       ]),
     );
   });
+
+  it('promotes a nested agreement confirmation control from compact dialog text', () => {
+    document.body.innerHTML = `
+      <div class="agreement-modal">
+        <div>阅读并同意《用户协议》《隐私政策》</div>
+        <div id="confirm" class="modal-action">
+          <span>同意并继续</span>
+        </div>
+        <div class="modal-action">取消</div>
+      </div>
+    `;
+    Array.from(document.querySelectorAll('*')).forEach((element, index) => {
+      makeVisible(element, { left: 20, top: 20 + index * 36, width: 160, height: 28 });
+    });
+
+    const result = (
+      window as Window & {
+        __generateAccessibilityTree: (
+          filter: string,
+          options: { maxDepth: number },
+        ) => { pageContent: string; refMap: Array<Record<string, unknown>> };
+      }
+    ).__generateAccessibilityTree('interactive', { maxDepth: 8 });
+
+    expect(result.pageContent).toMatch(
+      /- button "同意并继续" \[ref=ref_\d+\].*matchSource="visible_text".*actionability="actionable"/,
+    );
+    expect(result.refMap).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          selector: '#confirm',
+          actionability: 'actionable',
+        }),
+      ]),
+    );
+  });
 });

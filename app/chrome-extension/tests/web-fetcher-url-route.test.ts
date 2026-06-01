@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { webFetcherTool } from '@/entrypoints/background/tools/browser/web-fetcher';
+import {
+  getInteractiveElementsTool,
+  webFetcherTool,
+} from '@/entrypoints/background/tools/browser/web-fetcher';
 
 describe('web fetcher URL route', () => {
   beforeEach(() => {
@@ -32,6 +35,33 @@ describe('web fetcher URL route', () => {
       url: 'https://example.test/docs',
       title: 'Docs',
     } as chrome.tabs.Tab);
+  });
+
+  it('accepts query as an alias for interactive element textQuery', async () => {
+    const sendMessageToTab = vi
+      .spyOn(getInteractiveElementsTool as any, 'sendMessageToTab')
+      .mockResolvedValue({
+        success: true,
+        elements: [{ selector: '#confirm', text: '同意并继续' }],
+      });
+    vi.spyOn(getInteractiveElementsTool as any, 'injectContentScript').mockResolvedValue(undefined);
+
+    const result = await getInteractiveElementsTool.execute({
+      tabId: 42,
+      query: '同意并继续',
+      includeCoordinates: false,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(sendMessageToTab).toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({
+        textQuery: '同意并继续',
+        includeCoordinates: false,
+      }),
+    );
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload.query.textQuery).toBe('同意并继续');
   });
 
   it('uses a longer bounded settle budget for URL-created content reads', async () => {
