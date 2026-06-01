@@ -46,6 +46,10 @@
 
   // A combined selector for ANY interactive element, used in the fallback logic.
   const ANY_INTERACTIVE_SELECTOR = Object.values(ELEMENT_CONFIG).join(', ');
+  const AUTH_ACTION_TEXT_PATTERN =
+    /获取验证码|发送验证码|重新发送|重发验证码|同意并继续|确认同意|我同意|登录|get code|send code|request code|resend code|agree and continue|accept and continue|log\s*in|sign\s*in/i;
+  const AUTH_ACTION_SIGNATURE_PATTERN =
+    /\b(code|otp|sms|verify|verification|captcha|send|resend|auth-code|code-button|agree|agreement|terms|privacy|submit|login)\b/i;
 
   // Query helpers that pierce open shadow roots. These are used only in fallback paths or
   // when a selector is explicitly provided, to keep costs bounded.
@@ -178,6 +182,63 @@
     return path ? `body > ${path}` : 'body';
   }
 
+  function classNameOf(el) {
+    try {
+      const attr = el.getAttribute && el.getAttribute('class');
+      if (typeof attr === 'string') return attr;
+      const className = el.className;
+      if (typeof className === 'string') return className;
+      if (className && typeof className.baseVal === 'string') return className.baseVal;
+    } catch (_) {
+      /* ignore */
+    }
+    return '';
+  }
+
+  function ownVisibleText(el) {
+    let text = '';
+    try {
+      for (let i = 0; i < el.childNodes.length; i++) {
+        const node = el.childNodes[i];
+        if (node.nodeType === Node.TEXT_NODE) text += node.textContent || '';
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return text.replace(/\s+/g, ' ').trim();
+  }
+
+  function isTextEntryElement(el) {
+    const tag = el.tagName ? el.tagName.toLowerCase() : '';
+    const role = String(el.getAttribute('role') || '').toLowerCase();
+    const inputType = String(el.getAttribute('type') || '').toLowerCase();
+    return (
+      tag === 'textarea' ||
+      role === 'textbox' ||
+      role === 'searchbox' ||
+      role === 'combobox' ||
+      (tag === 'input' && !['button', 'submit', 'reset', 'checkbox', 'radio'].includes(inputType))
+    );
+  }
+
+  function looksLikeAuthActionControl(el, textQuery = '') {
+    if (!(el instanceof Element)) return false;
+    if (isTextEntryElement(el)) return false;
+    const text =
+      ownVisibleText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || '';
+    const query = String(textQuery || '').trim();
+    if (query && getQueryMatchKind(text, query) === 'none') return false;
+    if (!AUTH_ACTION_TEXT_PATTERN.test(text)) return false;
+    const rect = el.getBoundingClientRect();
+    const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+    const area = Math.max(1, rect.width * rect.height);
+    if (area > viewportArea * 0.35) return false;
+    const signature = `${el.id || ''} ${classNameOf(el)} ${el.getAttribute('role') || ''} ${
+      el.getAttribute('data-testid') || ''
+    }`;
+    return AUTH_ACTION_SIGNATURE_PATTERN.test(signature) || text.length <= 30;
+  }
+
   /**
    * Finds the accessible name for an element (label, aria-label, etc.).
    * @param {Element} el The element.
@@ -196,8 +257,23 @@
       if (label) return label.textContent?.trim() || '';
     }
     const parentLabel = el.closest('label');
-    if (parentLabel) return parentLabel.textContent?.trim() || '';
     const tag = el.tagName ? el.tagName.toLowerCase() : '';
+    const placeholder = el.getAttribute('placeholder') || '';
+    if (tag === 'input' && placeholder && parentLabel) {
+      const labelText = parentLabel.textContent?.trim() || '';
+      const normalizedLabelText = labelText.replace(/\s+/g, '');
+      const labelIsShortOrDecorative =
+        normalizedLabelText.length < placeholder.trim().length ||
+        /^[+\d\-[\]()（）\sA-Za-zIcon图标svgSVG]+$/.test(normalizedLabelText);
+      if (
+        AUTH_ACTION_TEXT_PATTERN.test(labelText) ||
+        labelText.length > placeholder.length + 12 ||
+        labelIsShortOrDecorative
+      ) {
+        return placeholder.trim();
+      }
+    }
+    if (parentLabel) return parentLabel.textContent?.trim() || '';
     if (tag === 'input') {
       const inputType = String(el.getAttribute('type') || '').toLowerCase();
       if (inputType === 'submit' || inputType === 'button' || inputType === 'reset') {
@@ -205,9 +281,7 @@
         if (valueLabel && valueLabel.trim()) return valueLabel.trim();
       }
     }
-    return (
-      el.getAttribute('placeholder') || el.textContent?.trim() || el.getAttribute('title') || ''
-    );
+    return placeholder || el.textContent?.trim() || el.getAttribute('title') || '';
   }
 
   function getValueState(el) {
@@ -290,13 +364,11 @@
     const tag = el.tagName ? el.tagName.toLowerCase() : '';
     const role = String(el.getAttribute('role') || '').toLowerCase();
     const inputType = String(el.getAttribute('type') || '').toLowerCase();
-    const isTextEntry =
-      tag === 'textarea' ||
-      role === 'textbox' ||
-      role === 'searchbox' ||
-      role === 'combobox' ||
-      (tag === 'input' && !['button', 'submit', 'reset', 'checkbox', 'radio'].includes(inputType));
+    const isTextEntry = isTextEntryElement(el);
     if (matchSource === 'placeholder' && isTextEntry && isActionTextQuery(textQuery)) {
+      return 'not_actionable';
+    }
+    if (matchSource === 'label' && isTextEntry && isActionTextQuery(textQuery)) {
       return 'not_actionable';
     }
     return 'actionable';
@@ -585,6 +657,13 @@
     if (!selectorsToFind) return [];
 
     const targetElements = querySelectorAllDeep(selectorsToFind);
+    if (textQuery && isActionTextQuery(textQuery)) {
+      for (const node of walkAllNodesDeep(document.body || document.documentElement)) {
+        if (!(node instanceof Element)) continue;
+        if (!isElementVisible(node) || !isElementInteractive(node)) continue;
+        if (looksLikeAuthActionControl(node, textQuery)) targetElements.push(node);
+      }
+    }
     const uniqueElements = new Set(targetElements);
     const results = [];
 

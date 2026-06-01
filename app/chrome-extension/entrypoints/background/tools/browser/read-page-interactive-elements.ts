@@ -76,6 +76,8 @@ const DEFAULT_COMPACT_SCORING_CONTEXT: CompactScoringContext = {
 
 const MIN_ACTIONABLE_SNAPSHOT_ELEMENTS_FOR_FALLBACK = 3;
 const TEXT_MENU_TARGET_RECOVERY_REF_PREFIX = 'ref_text_menu_';
+const AUTH_FORM_CONTROL_NAME_PATTERN =
+  /手机号|手机号码|电话号码|短信验证码|输入验证码|获取验证码|发送验证码|重新发送|登录|同意并继续|我同意/i;
 
 function isGithubWorkflowRunDetailUrl(url: string): boolean {
   return GITHUB_WORKFLOW_RUN_DETAIL_URL_PATTERN.test(String(url || '').trim());
@@ -383,6 +385,29 @@ function mergeSnapshotWithTextMenuTargetRecovery(
   ].slice(0, limit);
 }
 
+function isAuthFormControlRecoveryNode(node: SnapshotNode): boolean {
+  if (!AUTH_FORM_CONTROL_NAME_PATTERN.test(String(node.name || ''))) return false;
+  if (node.actionability === 'blocked') return false;
+  return (
+    node.role === 'textbox' ||
+    node.role === 'searchbox' ||
+    node.role === 'spinbutton' ||
+    node.role === 'button' ||
+    node.role === 'checkbox' ||
+    node.role === 'switch'
+  );
+}
+
+function mergeSnapshotWithAuthFormControlRecovery(
+  snapshotElements: SnapshotInteractiveElement[],
+  fallbackNodes: SnapshotNode[],
+  limit: number,
+): SnapshotInteractiveElement[] {
+  const authControlNodes = fallbackNodes.filter(isAuthFormControlRecoveryNode);
+  if (authControlNodes.length === 0) return snapshotElements;
+  return mergeSnapshotWithFallback(snapshotElements, authControlNodes, limit);
+}
+
 function prioritizeCompactNodes(
   nodes: SnapshotNode[],
   limit: number,
@@ -436,7 +461,11 @@ export function buildInteractiveElements(
   const fallbackNodes = buildFallbackNodes(fallbackElements);
   if (fromSnapshot.length > 0) {
     if (fromSnapshot.length >= MIN_ACTIONABLE_SNAPSHOT_ELEMENTS_FOR_FALLBACK) {
-      return mergeSnapshotWithTextMenuTargetRecovery(fromSnapshot, fallbackNodes, limit);
+      return mergeSnapshotWithAuthFormControlRecovery(
+        mergeSnapshotWithTextMenuTargetRecovery(fromSnapshot, fallbackNodes, limit),
+        fallbackNodes,
+        limit,
+      );
     }
     return mergeSnapshotWithFallback(fromSnapshot, fallbackNodes, limit);
   }

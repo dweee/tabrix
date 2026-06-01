@@ -162,8 +162,64 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
       let elementInfo = null;
       let clickX, clickY;
 
+      const AUTH_CLICK_TEXT_PATTERN =
+        /获取验证码|发送验证码|重新发送|重发验证码|同意并继续|确认同意|我同意|登录|get code|send code|request code|resend code|agree and continue|accept and continue|log\s*in|sign\s*in/i;
+      const AUTH_CLICK_SIGNATURE_PATTERN =
+        /\b(code|otp|sms|verify|verification|captcha|send|resend|auth-code|code-button|agree|agreement|terms|privacy|submit|login)\b/i;
+
+      const classNameOf = (candidate) => {
+        try {
+          const attr = candidate.getAttribute && candidate.getAttribute('class');
+          if (typeof attr === 'string') return attr;
+          const className = candidate.className;
+          if (typeof className === 'string') return className;
+          if (className && typeof className.baseVal === 'string') return className.baseVal;
+        } catch {
+          // ignore
+        }
+        return '';
+      };
+
+      const ownVisibleText = (candidate) => {
+        let text = '';
+        try {
+          for (let i = 0; i < candidate.childNodes.length; i++) {
+            const node = candidate.childNodes[i];
+            if (node.nodeType === 3) text += node.textContent || '';
+          }
+        } catch {
+          // ignore
+        }
+        return text.replace(/\s+/g, ' ').trim();
+      };
+
+      const isFormControl = (candidate) =>
+        candidate instanceof HTMLInputElement ||
+        candidate instanceof HTMLTextAreaElement ||
+        candidate instanceof HTMLSelectElement;
+
+      const looksLikeAuthActionControl = (candidate) => {
+        if (!(candidate instanceof Element)) return false;
+        if (isFormControl(candidate)) return false;
+        const text =
+          ownVisibleText(candidate) ||
+          candidate.getAttribute('aria-label') ||
+          candidate.getAttribute('title') ||
+          '';
+        if (!AUTH_CLICK_TEXT_PATTERN.test(text)) return false;
+        const rect = candidate.getBoundingClientRect();
+        const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+        const area = Math.max(1, rect.width * rect.height);
+        if (area > viewportArea * 0.35) return false;
+        const signature = `${candidate.id || ''} ${classNameOf(candidate)} ${
+          candidate.getAttribute('role') || ''
+        } ${candidate.getAttribute('data-testid') || ''}`;
+        return AUTH_CLICK_SIGNATURE_PATTERN.test(signature) || text.length <= 30;
+      };
+
       const resolvePreferredClickTarget = (candidate) => {
         if (!(candidate instanceof Element)) return null;
+        if (looksLikeAuthActionControl(candidate)) return candidate;
         const candidateRect = candidate.getBoundingClientRect();
         const candidateArea = Math.max(1, candidateRect.width * candidateRect.height);
         const candidateText = (candidate.innerText || candidate.textContent || '').trim();
@@ -285,7 +341,24 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
             actualTarget: actualInfo,
           };
         }
-        if (actual === expected || (actual instanceof Element && expected.contains(actual))) {
+        if (actual === expected) {
+          return {
+            verdict: 'matched',
+            clickMethod,
+            expectedTarget: expectedInfo,
+            actualTarget: actualInfo,
+          };
+        }
+        if (actual instanceof Element && expected.contains(actual)) {
+          const expectedIsAction = looksLikeAuthActionControl(expected);
+          if (expectedIsAction || (isFormControl(actual) && !isFormControl(expected))) {
+            return {
+              verdict: 'target_mismatch',
+              clickMethod,
+              expectedTarget: expectedInfo,
+              actualTarget: actualInfo,
+            };
+          }
           return {
             verdict: 'matched',
             clickMethod,

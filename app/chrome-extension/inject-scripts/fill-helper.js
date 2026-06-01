@@ -258,6 +258,11 @@ if (window.__FILL_HELPER_INITIALIZED__) {
       const scrollWait = await waitForElementReadyAfterScroll(element);
       elementInfo.waitDiagnostics = { scroll: scrollWait };
 
+      const valueStateFor = (target) => {
+        const value = typeof target?.value === 'string' ? target.value : '';
+        return value.length > 0 ? 'non_empty' : 'empty';
+      };
+
       // Focus the element
       element.focus();
 
@@ -325,8 +330,8 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         element.blur();
         return {
           success: true,
-          message: `Set range to ${element.value} (min: ${element.min}, max: ${element.max})`,
-          elementInfo: { ...elementInfo, value: element.value },
+          message: 'Set range input successfully',
+          elementInfo: { ...elementInfo, valueState: valueStateFor(element) },
         };
       }
 
@@ -342,8 +347,8 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         element.blur();
         return {
           success: true,
-          message: `Set number input to ${element.value} (previous: ${previous})`,
-          elementInfo: { ...elementInfo, value: element.value },
+          message: 'Set number input successfully',
+          elementInfo: { ...elementInfo, valueState: valueStateFor(element) },
         };
       }
 
@@ -388,7 +393,7 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         message: 'Element filled successfully',
         elementInfo: {
           ...elementInfo,
-          value: element.value, // Include the final value in the response
+          valueState: valueStateFor(element),
         },
       };
     } catch (error) {

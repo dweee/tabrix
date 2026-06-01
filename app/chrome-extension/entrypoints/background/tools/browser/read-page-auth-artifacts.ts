@@ -334,11 +334,16 @@ function scoreElement(
   const text = controlText(element);
   if (!pattern.test(text)) return Number.NEGATIVE_INFINITY;
   const role = roleOf(element);
+  if (expected === 'fill' && !isTextboxRole(role)) return Number.NEGATIVE_INFINITY;
   let score = 50;
   if (expected === 'fill' && isTextboxRole(role)) score += 35;
   if (expected === 'click' && isClickableRole(role)) score += 35;
   if (element.matchSource === 'placeholder' && expected === 'click') score -= 70;
   if (element.actionability === 'not_actionable') score -= 80;
+  if (expected === 'click' && element.matchSource === 'visible_text') score += 22;
+  if (expected === 'click' && role === 'link') score -= 18;
+  if (expected === 'click' && String(element.ref || '').startsWith('ref_fallback_')) score += 12;
+  if (expected === 'click' && String(element.ref || '').startsWith('ref_text_menu_')) score -= 8;
   if (element.valueState === 'non_empty') score += 6;
   if (role === 'checkbox') score += 10;
   if (role === 'button') score += 14;
@@ -364,7 +369,11 @@ function findRequestOtpControl(
     .map((element, index) => ({
       element,
       index,
-      score: scoreElement(element, REQUEST_OTP_PATTERN, 'click'),
+      score:
+        scoreElement(element, REQUEST_OTP_PATTERN, 'click') +
+        (findCandidateAction(candidateActions, element.ref, 'click')?.intent === 'auth.request_otp'
+          ? 30
+          : 0),
     }))
     .filter((item) => item.score > Number.NEGATIVE_INFINITY)
     .sort((left, right) => right.score - left.score || left.index - right.index);
@@ -389,6 +398,63 @@ function findRequestOtpControl(
     state,
     'click',
   );
+}
+
+function findAgreementCheckboxControl(
+  elements: ReadPageInteractiveElement[],
+  candidateActions: ReadPageCandidateAction[],
+): AuthFormControlCandidate | undefined {
+  const matching = elements
+    .map((element, index) => {
+      const role = roleOf(element);
+      const text = controlText(element);
+      if (!AGREEMENT_PATTERN.test(text)) {
+        return { element, index, score: Number.NEGATIVE_INFINITY };
+      }
+      let score = scoreElement(element, AGREEMENT_PATTERN, 'click');
+      if (role === 'link') score -= 90;
+      if (role === 'checkbox' || role === 'switch') score += 60;
+      if (element.checked === true || element.checked === false) score += 35;
+      if (element.matchSource === 'nearby_text') score += 18;
+      if (
+        findCandidateAction(candidateActions, element.ref, 'click')?.intent === 'auth.accept_terms'
+      ) {
+        score += 28;
+      }
+      return { element, index, score };
+    })
+    .filter((item) => item.score > Number.NEGATIVE_INFINITY)
+    .sort((left, right) => right.score - left.score || left.index - right.index);
+  const best = matching[0]?.element;
+  if (!best) return undefined;
+  const role = roleOf(best);
+  if (role === 'link' && best.checked !== true && best.checked !== false) {
+    return undefined;
+  }
+  return toControl(
+    'agreementCheckbox',
+    best,
+    candidateActions,
+    'agreement control inferred from checkbox role/state or nearby agreement wording',
+    0.82,
+    checkedState(best),
+    'click',
+  );
+}
+
+function hasVisibleOtpFormEvidence(elements: ReadPageInteractiveElement[] | undefined): boolean {
+  const interactiveElements = Array.isArray(elements) ? elements : [];
+  const hasOtpInput = interactiveElements.some((element) =>
+    OTP_INPUT_PATTERN.test(controlText(element)),
+  );
+  const hasPhoneInput = interactiveElements.some((element) =>
+    PHONE_CONTROL_PATTERN.test(controlText(element)),
+  );
+  const hasRequestOrSubmit = interactiveElements.some(
+    (element) =>
+      REQUEST_OTP_PATTERN.test(controlText(element)) || SUBMIT_PATTERN.test(controlText(element)),
+  );
+  return hasOtpInput && (hasPhoneInput || hasRequestOrSubmit);
 }
 
 function checkedState(
@@ -455,17 +521,9 @@ function buildOtpAuthForm(params: {
   const requestOtp = findRequestOtpControl(interactiveElements, candidateActions);
   if (requestOtp) controls.requestOtp = requestOtp;
 
-  const agreementCheckbox = bestElement(interactiveElements, AGREEMENT_PATTERN, 'click');
+  const agreementCheckbox = findAgreementCheckboxControl(interactiveElements, candidateActions);
   if (agreementCheckbox) {
-    controls.agreementCheckbox = toControl(
-      'agreementCheckbox',
-      agreementCheckbox,
-      candidateActions,
-      'agreement control inferred from terms/privacy wording',
-      0.78,
-      checkedState(agreementCheckbox),
-      'click',
-    );
+    controls.agreementCheckbox = agreementCheckbox;
   }
   const agreementConfirm = bestElement(interactiveElements, AGREEMENT_CONFIRM_PATTERN, 'click');
   if (agreementConfirm) {
@@ -576,7 +634,7 @@ export function buildAuthCollaborationState(params: {
   );
   const ownerGate = canExtractAuthArtifactForTab(params.browserWorldTab);
   const operationBinding = ownerGate.allowed ? 'ai_operable_tab' : 'protected_or_unknown_tab';
-  const challengeType = detectAuthChallengeType({
+  let challengeType = detectAuthChallengeType({
     pageRegions: params.pageRegions,
     authArtifactStatus: params.authArtifactStatus,
     browserPageObject,
@@ -589,13 +647,19 @@ export function buildAuthCollaborationState(params: {
   const succeededCandidate = semanticEventTypes.includes('auth_succeeded_candidate');
   const succeededCandidateHasFreshComparison = browserPageObject?.status === 'compared_snapshot';
   const expiredCandidate = semanticEventTypes.includes('qr_expired_candidate');
+  const visibleOtpFormEvidence = hasVisibleOtpFormEvidence(params.interactiveElements);
+  if (challengeType === 'qr' && visibleOtpFormEvidence) {
+    challengeType = 'otp';
+  }
 
   let status: ReadPageAuthCollaboration['status'] = 'not_required';
-  if (succeededCandidate && succeededCandidateHasFreshComparison) {
+  if (succeededCandidate && visibleOtpFormEvidence) {
+    status = 'not_proven';
+  } else if (succeededCandidate && succeededCandidateHasFreshComparison) {
     status = 'succeeded_candidate';
   } else if (succeededCandidate) {
     status = 'not_proven';
-  } else if (!authRequired) {
+  } else if (!authRequired && !visibleOtpFormEvidence) {
     status = 'not_required';
   } else if (
     expiredCandidate ||

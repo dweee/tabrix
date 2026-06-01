@@ -53,6 +53,9 @@ describe('injected state-driven waits', () => {
     document.body.innerHTML = '';
     Element.prototype.scrollIntoView = vi.fn();
     document.elementFromPoint = vi.fn(() => null);
+    (window as Window & { CSS: { escape: (value: string) => string } }).CSS = {
+      escape: (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, '\\$&'),
+    };
   });
 
   it('fill scroll readiness returns before the 150ms cap when the element is already stable', async () => {
@@ -74,6 +77,9 @@ describe('injected state-driven waits', () => {
     expect(response.success).toBe(true);
     expect(response.elementInfo.waitDiagnostics.scroll.reason).toBe('ready');
     expect(response.elementInfo.waitDiagnostics.scroll.waitedMs).toBeLessThan(150);
+    expect(response.elementInfo.valueState).toBe('non_empty');
+    expect(response.elementInfo).not.toHaveProperty('value');
+    expect(JSON.stringify(response)).not.toContain('Tabrix');
   });
 
   it('keyboard focus readiness returns immediately once focus is observable', async () => {
@@ -95,5 +101,88 @@ describe('injected state-driven waits', () => {
     expect(response.success).toBe(true);
     expect(response.targetElement.waitDiagnostics.focus.ready).toBe(true);
     expect(response.targetElement.waitDiagnostics.focus.waitedMs).toBeLessThan(100);
+  });
+
+  it('interactive element search returns the visible OTP sender span before label-derived input matches', async () => {
+    document.body.innerHTML = `
+      <form>
+        <label class="auth-code">
+          <input id="otp" type="number" placeholder="输入验证码" />
+          <span id="send" class="code-button active">获取验证码</span>
+        </label>
+      </form>
+    `;
+    const form = document.querySelector('form') as HTMLFormElement;
+    const label = document.querySelector('label') as HTMLLabelElement;
+    const input = document.getElementById('otp') as HTMLInputElement;
+    const send = document.getElementById('send') as HTMLSpanElement;
+    setRect(form, { left: 20, top: 20, width: 260, height: 48 });
+    setRect(label, { left: 20, top: 20, width: 260, height: 40 });
+    setRect(input, { left: 20, top: 20, width: 170, height: 40 });
+    setRect(send, { left: 190, top: 20, width: 90, height: 40 });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '获取验证码',
+      includeCoordinates: true,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.elements[0]).toMatchObject({
+      tagName: 'span',
+      selector: '#send',
+      text: '获取验证码',
+      actionability: 'actionable',
+    });
+    expect(
+      response.elements.some(
+        (element: any) =>
+          element.tagName === 'input' &&
+          element.text === '获取验证码' &&
+          element.actionability === 'actionable',
+      ),
+    ).toBe(false);
+  });
+
+  it('interactive element search keeps a phone input reachable when its label only adds country code chrome', async () => {
+    document.body.innerHTML = `
+      <form>
+        <label class="phone">
+          <span class="country-code">+86</span>
+          <input id="phone" type="text" name="phone" placeholder="输入手机号" />
+          <span data-placeholder="svg-icon">[SVG Icon]</span>
+        </label>
+      </form>
+    `;
+    const form = document.querySelector('form') as HTMLFormElement;
+    const label = document.querySelector('label') as HTMLLabelElement;
+    const input = document.getElementById('phone') as HTMLInputElement;
+    setRect(form, { left: 20, top: 20, width: 260, height: 48 });
+    setRect(label, { left: 20, top: 20, width: 260, height: 40 });
+    setRect(input, { left: 62, top: 20, width: 170, height: 40 });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '输入手机号',
+      includeCoordinates: true,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.elements[0]).toMatchObject({
+      tagName: 'input',
+      selector: '#phone',
+      text: '输入手机号',
+      matchSource: 'placeholder',
+      actionability: 'actionable',
+      valueState: 'empty',
+    });
   });
 });

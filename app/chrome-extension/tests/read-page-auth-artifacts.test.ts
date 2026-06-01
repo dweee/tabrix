@@ -693,6 +693,205 @@ describe('read_page auth artifacts', () => {
     });
   });
 
+  it('chooses a visible OTP sender button over a placeholder-only OTP textbox', () => {
+    const collaboration = buildAuthCollaborationState({
+      pageRole: 'login_required',
+      tabId: 9,
+      pageRegions: otpAuthRegions(),
+      browserPageObject: browserPageObject(['auth_required_candidate']),
+      browserWorldTab: aiOwnedTab(),
+      authArtifactStatus: buildNotRequestedAuthArtifactStatus(),
+      artifactRefs: [],
+      interactiveElements: [
+        ...otpInteractive({
+          ref_phone: { valueState: 'non_empty' },
+          ref_agreement: { checked: true },
+        }).filter((element) => element.ref !== 'ref_request_otp' && element.ref !== 'ref_otp'),
+        {
+          ref: 'ref_otp',
+          role: 'textbox',
+          name: '获取验证码',
+          valueState: 'empty',
+          matchSource: 'placeholder',
+          actionability: 'not_actionable',
+        },
+        {
+          ref: 'ref_code_button',
+          role: 'button',
+          name: '获取验证码',
+          matchSource: 'visible_text',
+          actionability: 'actionable',
+        },
+      ],
+      candidateActions: [
+        ...otpCandidateActions().filter((action) => action.targetRef !== 'ref_request_otp'),
+        {
+          id: 'ca_click_ref_code_button',
+          actionType: 'click',
+          targetRef: 'ref_code_button',
+          confidence: 0.93,
+          matchReason: 'primary action inferred from interactive label',
+          locatorChain: [{ type: 'css', value: '.code-button.active' }],
+          intent: 'auth.request_otp',
+        },
+      ],
+    });
+
+    expect(collaboration.authForm).toMatchObject({
+      readiness: 'ready_to_request_otp',
+      nextAction: 'request_otp',
+      controls: {
+        requestOtp: {
+          targetRef: 'ref_code_button',
+          candidateActionId: 'ca_click_ref_code_button',
+          locatorChain: [{ type: 'css', value: '.code-button.active' }],
+          matchSource: 'visible_text',
+          actionability: 'actionable',
+        },
+      },
+    });
+  });
+
+  it('does not map login or OTP request buttons as fillable OTP inputs', () => {
+    const collaboration = buildAuthCollaborationState({
+      pageRole: 'login_required',
+      tabId: 9,
+      pageRegions: otpAuthRegions(),
+      browserPageObject: browserPageObject(['auth_required_candidate']),
+      browserWorldTab: aiOwnedTab(),
+      authArtifactStatus: buildNotRequestedAuthArtifactStatus(),
+      artifactRefs: [],
+      interactiveElements: [
+        {
+          ref: 'ref_phone_tab',
+          role: 'button',
+          name: '手机号登录',
+          matchSource: 'visible_text',
+          actionability: 'actionable',
+        },
+        {
+          ref: 'ref_request_otp',
+          role: 'button',
+          name: '获取验证码',
+          matchSource: 'visible_text',
+          actionability: 'actionable',
+        },
+      ],
+      candidateActions: [
+        {
+          id: 'ca_click_ref_request_otp',
+          actionType: 'click',
+          targetRef: 'ref_request_otp',
+          confidence: 0.93,
+          matchReason: 'primary action inferred from interactive label',
+          locatorChain: [{ type: 'css', value: '.code-button' }],
+          intent: 'auth.request_otp',
+        },
+      ],
+    });
+
+    expect(collaboration.authForm?.controls.phoneInput).toBeUndefined();
+    expect(collaboration.authForm?.controls.otpInput).toBeUndefined();
+    expect(collaboration.authForm?.controls.requestOtp).toMatchObject({
+      targetRef: 'ref_request_otp',
+      candidateActionId: 'ca_click_ref_request_otp',
+      actionability: 'actionable',
+    });
+  });
+
+  it('classifies a visible OTP form as OTP even when QR copy is also present', () => {
+    const collaboration = buildAuthCollaborationState({
+      pageRole: 'login_required',
+      tabId: 9,
+      pageRegions: authQrRegions(),
+      browserPageObject: browserPageObject(['auth_required_candidate']),
+      browserWorldTab: aiOwnedTab(),
+      authArtifactStatus: buildNotRequestedAuthArtifactStatus(),
+      artifactRefs: [],
+      interactiveElements: otpInteractive({
+        ref_phone: { valueState: 'non_empty' },
+        ref_agreement: { checked: true },
+      }),
+      candidateActions: otpCandidateActions(),
+    });
+
+    expect(collaboration.challengeType).toBe('otp');
+    expect(collaboration.authForm).toMatchObject({
+      formType: 'otp',
+      controls: {
+        phoneInput: { targetRef: 'ref_phone' },
+        otpInput: { targetRef: 'ref_otp' },
+        requestOtp: { targetRef: 'ref_request_otp' },
+      },
+    });
+  });
+
+  it('does not map legal agreement links as the agreement checkbox control', () => {
+    const collaboration = buildAuthCollaborationState({
+      pageRole: 'login_required',
+      tabId: 9,
+      pageRegions: otpAuthRegions(),
+      browserPageObject: browserPageObject(['auth_required_candidate']),
+      browserWorldTab: aiOwnedTab(),
+      authArtifactStatus: buildNotRequestedAuthArtifactStatus(),
+      artifactRefs: [],
+      interactiveElements: [
+        ...otpInteractive({
+          ref_phone: { valueState: 'non_empty' },
+          ref_agreement: { checked: true },
+        }).filter((element) => element.ref !== 'ref_agreement'),
+        {
+          ref: 'ref_terms_link',
+          role: 'link',
+          name: '《用户协议》',
+          matchSource: 'visible_text',
+          actionability: 'actionable',
+        },
+        {
+          ref: 'ref_privacy_link',
+          role: 'link',
+          name: '《隐私政策》',
+          matchSource: 'visible_text',
+          actionability: 'actionable',
+        },
+      ],
+      candidateActions: otpCandidateActions().filter(
+        (action) => action.targetRef !== 'ref_agreement',
+      ),
+    });
+
+    expect(collaboration.authForm?.controls.agreementCheckbox).toBeUndefined();
+    expect(collaboration.authForm).toMatchObject({
+      readiness: 'ready_to_request_otp',
+      nextAction: 'request_otp',
+    });
+  });
+
+  it('does not report login success while an OTP login form is still visible', () => {
+    const collaboration = buildAuthCollaborationState({
+      pageRole: null,
+      tabId: 9,
+      pageRegions: otpAuthRegions(),
+      browserPageObject: browserPageObject(['auth_succeeded_candidate'], 'compared_snapshot'),
+      browserWorldTab: aiOwnedTab(),
+      authArtifactStatus: buildNotRequestedAuthArtifactStatus(),
+      artifactRefs: [],
+      interactiveElements: otpInteractive({
+        ref_phone: { valueState: 'non_empty' },
+        ref_agreement: { checked: true },
+      }),
+      candidateActions: otpCandidateActions(),
+    });
+
+    expect(collaboration).toMatchObject({
+      status: 'not_proven',
+      evidence: {
+        postconditionStatus: 'not_proven',
+      },
+    });
+    expect(collaboration.authForm?.readiness).not.toBe('login_succeeded_candidate');
+  });
+
   it('does not treat a placeholder-only OTP action match as a clickable request button', () => {
     const collaboration = buildAuthCollaborationState({
       pageRole: 'login_required',

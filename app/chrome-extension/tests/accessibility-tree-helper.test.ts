@@ -106,4 +106,43 @@ describe('accessibility-tree auth control map', () => {
       ]),
     );
   });
+
+  it('promotes an OTP sender span inside a label instead of the sibling OTP input placeholder', () => {
+    document.body.innerHTML = `
+      <form>
+        <label class="auth-code">
+          <input id="otp" type="number" placeholder="输入验证码" />
+          <span id="send" class="code-button active">获取验证码</span>
+        </label>
+      </form>
+    `;
+    Array.from(document.querySelectorAll('*')).forEach((element, index) => {
+      makeVisible(element, { left: 10, top: 10 + index * 36, width: 180, height: 28 });
+    });
+
+    const result = (
+      window as Window & {
+        __generateAccessibilityTree: (
+          filter: string,
+          options: { maxDepth: number },
+        ) => { pageContent: string; refMap: Array<Record<string, unknown>> };
+      }
+    ).__generateAccessibilityTree('interactive', { maxDepth: 8 });
+
+    expect(result.pageContent).toMatch(
+      /- button "获取验证码" \[ref=ref_\d+\].*matchSource="visible_text".*actionability="actionable"/,
+    );
+    expect(result.pageContent).toMatch(
+      /- textbox "输入验证码" \[ref=ref_\d+\].*placeholder="输入验证码"/,
+    );
+    expect(result.refMap).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          selector: '#send',
+          matchSource: 'visible_text',
+          actionability: 'actionable',
+        }),
+      ]),
+    );
+  });
 });

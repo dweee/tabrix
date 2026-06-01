@@ -178,6 +178,10 @@
     /同意并继续|确认同意|我同意|agree and continue|accept and continue/i;
   const AUTH_CONTEXT_PATTERN =
     /登录|手机号|手机号码|验证码|短信|用户协议|隐私政策|login|sign in|phone|mobile|otp|verification code|sms|terms|privacy/i;
+  const OTP_ACTION_TEXT_PATTERN =
+    /获取验证码|发送验证码|重新发送|重发验证码|get code|send code|request code|resend code/i;
+  const OTP_ACTION_SIGNATURE_PATTERN =
+    /\b(code|otp|sms|verify|verification|captcha|send|resend|auth-code|code-button)\b/i;
 
   function classNameOf(el) {
     try {
@@ -239,12 +243,27 @@
     return false;
   }
 
+  function looksLikeOtpActionControl(el) {
+    const tag = el.tagName.toLowerCase();
+    if (['input', 'textarea', 'select', 'button', 'a'].includes(tag)) return false;
+    if (isHugeContainer(el)) return false;
+    const labelText =
+      ownVisibleText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || '';
+    if (!OTP_ACTION_TEXT_PATTERN.test(labelText)) return false;
+    const signature = `${/** @type {HTMLElement} */ (el).id || ''} ${classNameOf(el)} ${
+      el.getAttribute('role') || ''
+    } ${el.getAttribute('data-testid') || ''}`;
+    const nearby = nearbyText(el);
+    return OTP_ACTION_SIGNATURE_PATTERN.test(signature) || AUTH_CONTEXT_PATTERN.test(nearby);
+  }
+
   function inferAuthActionRole(el) {
     const tag = el.tagName.toLowerCase();
     if (['input', 'textarea', 'select', 'button', 'a'].includes(tag)) return null;
     const labelText =
       ownVisibleText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || '';
     const nearby = nearbyText(el);
+    if (looksLikeOtpActionControl(el)) return 'button';
     if (looksLikeAgreementGlyph(el)) return 'checkbox';
     if (!AUTH_CONTEXT_PATTERN.test(nearby)) return null;
     if (AGREEMENT_TEXT_PATTERN.test(labelText) && !AGREEMENT_CONFIRM_TEXT_PATTERN.test(labelText)) {

@@ -819,4 +819,61 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
       status: 'not_proven',
     });
   });
+
+  it('clicks an OTP sender span inside a label without promoting the click target to the input sibling', async () => {
+    document.body.innerHTML = `
+      <label id="auth-label" class="auth-code">
+        <input id="otp" placeholder="输入验证码" />
+        <span id="send" class="code-button active">获取验证码</span>
+      </label>
+    `;
+    const label = document.getElementById('auth-label') as HTMLLabelElement;
+    const input = document.getElementById('otp') as HTMLInputElement;
+    const send = document.getElementById('send') as HTMLSpanElement;
+    setRect(label, { left: 20, top: 20, width: 260, height: 40 });
+    setRect(input, { left: 20, top: 20, width: 170, height: 40 });
+    setRect(send, { left: 190, top: 20, width: 90, height: 40 });
+    document.elementFromPoint = vi.fn((x: number, _y: number) => (x < 190 ? input : send));
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#send',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(response.elementInfo).toMatchObject({
+      tagName: 'SPAN',
+      id: 'send',
+      targetConsistency: { verdict: 'matched' },
+    });
+  });
+
+  it('rejects a selector click when a label center would actually hit the OTP input', async () => {
+    document.body.innerHTML = `
+      <label id="auth-label" class="auth-code">
+        <input id="otp" placeholder="输入验证码" />
+        <span id="send" class="code-button active">获取验证码</span>
+      </label>
+    `;
+    const label = document.getElementById('auth-label') as HTMLLabelElement;
+    const input = document.getElementById('otp') as HTMLInputElement;
+    setRect(label, { left: 20, top: 20, width: 260, height: 40 });
+    setRect(input, { left: 20, top: 20, width: 170, height: 40 });
+    document.elementFromPoint = vi.fn(() => input);
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#auth-label',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+
+    expect(response).toMatchObject({
+      success: false,
+      error: 'target_mismatch',
+      targetConsistency: { verdict: 'target_mismatch' },
+    });
+  });
 });
