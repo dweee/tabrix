@@ -1948,6 +1948,15 @@ function searchPostconditionResumeBlockReason(
   if (rows.uniqueTargetableRowKeys.size < DEFAULT_TOP_N_ACCUMULATION_TARGET) {
     return 'dom_region_rows_readback_not_ready_for_default_top_n';
   }
+  if (rows.uniqueTitleRowKeys.size < DEFAULT_TOP_N_ACCUMULATION_TARGET) {
+    return 'dom_region_rows_readback_not_enough_titled_rows_for_default_top_n_summary';
+  }
+  if (
+    rows.uniqueSupportingTextRowKeys.size + rows.uniqueMetadataRowKeys.size <
+    DEFAULT_TOP_N_ACCUMULATION_TARGET
+  ) {
+    return 'dom_region_rows_readback_title_only_fields_not_ready_for_structured_top_n_summary';
+  }
   return null;
 }
 
@@ -1955,7 +1964,7 @@ function passedPostconditionEvidenceKindsForResume(
   kind: TaskRegionStatePostconditionKind,
 ): string[] {
   if (kind === 'search_results_updated') {
-    return ['region_state_postcondition', 'dom_region_rows_readback'];
+    return ['region_state_postcondition', 'dom_region_rows_readback', 'top_n_field_coverage'];
   }
   return ['region_state_postcondition'];
 }

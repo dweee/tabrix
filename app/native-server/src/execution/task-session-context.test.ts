@@ -1019,7 +1019,11 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
       canResumeOriginalTask: true,
       nextStep: 'continue_original_task',
       tabId: 9,
-      evidenceKinds: ['region_state_postcondition', 'dom_region_rows_readback'],
+      evidenceKinds: [
+        'region_state_postcondition',
+        'dom_region_rows_readback',
+        'top_n_field_coverage',
+      ],
       reason: 'region_state_search_results_updated_passed:result_collection_changed_after_action',
       handoffSummary: {
         summaryKind: 'task_resume_handoff_v1',
@@ -1029,7 +1033,11 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
         evidenceSummary: {
           readinessStatus: 'postcondition_passed_ready',
           tabId: 9,
-          evidenceKinds: ['region_state_postcondition', 'dom_region_rows_readback'],
+          evidenceKinds: [
+            'region_state_postcondition',
+            'dom_region_rows_readback',
+            'top_n_field_coverage',
+          ],
         },
       },
     });
@@ -1098,6 +1106,79 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
       evidenceKinds: ['region_state_postcondition', 'dom_region_rows_readback'],
       reason:
         'region_state_search_results_updated_not_proven:dom_region_rows_readback_not_ready_for_default_top_n',
+    });
+  });
+
+  it('blocks search-task resume when top-N rows are title-only and not field-summary ready', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_search_submit_title_only_rows',
+            kind: 'search_results_updated',
+            verdict: 'passed',
+            reason: 'result_collection_changed_after_action',
+            beforeSummary: ['content_list:loaded:before'],
+            afterSummary: ['content_list:loaded:after'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+    ctx.noteDomRegionRowsReadback(
+      makeVisibleRegionRows(1, 10, { sourceTabId: 9, includeSupportingText: false }),
+    );
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_unknown_not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'verify_postcondition',
+      evidenceKinds: ['region_state_postcondition', 'dom_region_rows_readback'],
+      reason:
+        'region_state_search_results_updated_not_proven:dom_region_rows_readback_title_only_fields_not_ready_for_structured_top_n_summary',
+      handoffSummary: {
+        status: 'needs_postcondition_verification',
+        canContinue: false,
+        nextAction: 'verify_business_postcondition',
+      },
+    });
+  });
+
+  it('blocks search-task resume when top-N rows do not expose enough titles for summary', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_search_submit_missing_titles',
+            kind: 'search_results_updated',
+            verdict: 'passed',
+            reason: 'result_collection_changed_after_action',
+            beforeSummary: ['content_list:loaded:before'],
+            afterSummary: ['content_list:loaded:after'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+    ctx.noteDomRegionRowsReadback(
+      makeVisibleRegionRows(1, 10, { sourceTabId: 9, includeText: false }),
+    );
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_unknown_not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'verify_postcondition',
+      evidenceKinds: ['region_state_postcondition', 'dom_region_rows_readback'],
+      reason:
+        'region_state_search_results_updated_not_proven:dom_region_rows_readback_not_enough_titled_rows_for_default_top_n_summary',
     });
   });
 
