@@ -633,6 +633,63 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
     });
   });
 
+  it('stores post-action region-state evidence for closeout on the matching tab only', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 7,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_other_tab',
+            kind: 'detail_opened',
+            verdict: 'passed',
+            reason: 'detail_region_appeared',
+            beforeSummary: ['content_list:loaded'],
+            afterSummary: ['detail:loaded'],
+            producedAtMs: 1000,
+            claimBoundary: 'region-state evidence only',
+          },
+        },
+      ],
+    });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_search_submit',
+            kind: 'search_results_updated',
+            verdict: 'passed',
+            reason: 'result_collection_changed_after_action',
+            beforeSummary: ['content_list:loaded:before'],
+            afterSummary: ['content_list:loaded:after'],
+            producedAtMs: 2000,
+            claimBoundary: 'region-state evidence only',
+          },
+        },
+      ],
+    });
+
+    const closeout = ctx.peekRegionStatePostconditionsForCloseout([9]);
+    expect(closeout).toEqual([
+      {
+        actionKind: 'click',
+        result: expect.objectContaining({
+          actionId: 'ca_search_submit',
+          kind: 'search_results_updated',
+          verdict: 'passed',
+        }),
+      },
+    ]);
+
+    closeout[0].result.afterSummary.push('mutated_by_caller');
+    expect(ctx.peekRegionStatePostconditionsForCloseout([9])[0].result.afterSummary).toEqual([
+      'content_list:loaded:after',
+    ]);
+  });
+
   it('compares read_page object lifecycle snapshots and keeps the stored copy immutable', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
     const before = makeObjectLifecycle('collapsed_or_expandable_candidate', []);

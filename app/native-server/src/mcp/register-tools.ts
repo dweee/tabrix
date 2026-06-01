@@ -1547,6 +1547,8 @@ function maybeRecordCloseTabsSuccessLifecycleArtifact(input: {
   if (input.taskContext && taskTimeline.length > 0 && unifiedTabIds.length > 0) {
     const lastProjection = input.taskContext.peekLastPageProjection();
     const hasRead = input.taskContext.readPageCount > 0;
+    const regionStatePostconditions =
+      input.taskContext.peekRegionStatePostconditionsForCloseout(unifiedTabIds);
     produceUnifiedTaskCloseoutLifecycleEvidenceArtifact({
       artifactId: `mcp-unified-closeout-${input.startedAtMs}-${actionIdTab}`,
       evidenceLevel: 'integration',
@@ -1577,6 +1579,7 @@ function maybeRecordCloseTabsSuccessLifecycleArtifact(input: {
       },
       sourceTruthChain: input.taskContext.peekLastSourceTruthChain(),
       browserHygiene,
+      ...(regionStatePostconditions.length > 0 ? { regionStatePostconditions } : {}),
     });
     return;
   }
@@ -2317,6 +2320,10 @@ function attachAiFacingDeltaContext(
   payload.apiCdpProofBoundary = apiCdpProofBoundary;
   if (regionStatePostconditions) {
     payload.regionStatePostconditions = regionStatePostconditions;
+    attachment.taskContext.noteRegionStatePostconditionsForCloseout({
+      tabId: projectionWithSourceTruth.tabId,
+      regionStatePostconditions,
+    });
   }
   if (authResumeGate) {
     payload.authResumeGate = authResumeGate;

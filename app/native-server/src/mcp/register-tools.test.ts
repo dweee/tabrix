@@ -4528,7 +4528,7 @@ describe('handleToolCall execution wrapper', () => {
       expect(auto.readPageCount).toBe(2);
     });
 
-    it('fresh read after a search submit candidate carries region-state postcondition evidence', async () => {
+    it('fresh read after a search submit candidate carries region-state postcondition evidence into closeout', async () => {
       markBridgeReady();
       const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
       auto.noteRunOwnedTab(1);
@@ -4606,6 +4606,61 @@ describe('handleToolCall execution wrapper', () => {
         payload.regionStatePostconditions,
       );
       expect(auto.readPageCount).toBe(2);
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  closedTabIds: [1],
+                  browserHygieneEvidence: {
+                    kind: 'close_tabs_hygiene_v1',
+                    before: {
+                      tabCount: 2,
+                      windowCount: 1,
+                      focusedWindowId: 10,
+                      activeTabId: 1,
+                    },
+                    after: {
+                      tabCount: 1,
+                      windowCount: 1,
+                      focusedWindowId: 10,
+                      activeTabId: 2,
+                    },
+                    closedTabIds: [1],
+                    invalidTabIds: [],
+                    tabWindowBaselineUnchanged: true,
+                    activeTabRestored: true,
+                    activeTabRestoreReason: 'active_tab_restored_to_surviving_tab',
+                  },
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      await handleToolCall('chrome_close_tabs', {
+        tabIds: [1],
+      });
+
+      const artifacts = listLifecycleEvidenceArtifacts();
+      expect(artifacts).toHaveLength(1);
+      expect(artifacts[0].actionLog.entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            actionId: 'ca_search_submit',
+            actionKind: 'click',
+            verdict: 'passed',
+            reason: expect.stringContaining('region_state_search_results_updated'),
+          }),
+        ]),
+      );
     });
   });
 });

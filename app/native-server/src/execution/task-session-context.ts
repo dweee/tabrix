@@ -41,6 +41,7 @@ import {
   type ReadPageObjectLifecycleSummary,
   type ReadPageRegion,
   type ReadPageRequestedLayer,
+  type PostconditionVerdict,
 } from '@tabrix/shared';
 import type {
   LiveObservedApiData,
@@ -66,6 +67,7 @@ export const DEFAULT_READ_BUDGET_PER_TASK = 6;
 const READ_BUDGET_HARD_CAP = 100;
 const MAX_LIVE_OBSERVED_CONTEXT_ENTRIES = 10;
 const MAX_LIFECYCLE_TIMELINE_EVENTS = 50;
+const MAX_REGION_STATE_POSTCONDITIONS_FOR_CLOSEOUT = 8;
 
 function inferProjectionEvidenceBoundary(
   projection: BrowserPageThingProjection,
@@ -245,6 +247,37 @@ export interface TaskPageInteractionSnapshot {
   candidateActionIntent: ReadPageCandidateActionIntent | string | null;
   actionKind: ActionKind | null;
   beforePageRegions: ReadPageRegion[];
+}
+
+export type TaskRegionStatePostconditionKind =
+  | 'menu_opened'
+  | 'menu_closed'
+  | 'search_results_updated'
+  | 'detail_opened'
+  | 'login_completed'
+  | 'logout_completed'
+  | 'qr_waiting';
+
+export interface TaskRegionStatePostconditionResultSnapshot {
+  actionId: string;
+  kind: TaskRegionStatePostconditionKind;
+  verdict: PostconditionVerdict;
+  reason: string;
+  beforeSummary: string[];
+  afterSummary: string[];
+  producedAtMs: number;
+  claimBoundary: string;
+}
+
+export interface TaskRegionStatePostconditionSnapshot {
+  tabId: number | null;
+  actionKind: ActionKind;
+  result: TaskRegionStatePostconditionResultSnapshot;
+}
+
+export interface TaskRegionStatePostconditionForCloseout {
+  actionKind: ActionKind;
+  result: TaskRegionStatePostconditionResultSnapshot;
 }
 
 interface TaskPageRegionSnapshot {
@@ -480,6 +513,8 @@ export class TaskSessionContext {
   private lastPageRegionSnapshot: TaskPageRegionSnapshot | null = null;
   private lastAuthResumeGate: TaskAuthResumeGate | null = null;
   private pendingPageInteraction: TaskPageInteractionSnapshot | null = null;
+  private readonly regionStatePostconditionsForCloseout: TaskRegionStatePostconditionSnapshot[] =
+    [];
   private pageProjectionDeltaCount = 0;
   private lifecycleEventCount = 0;
   private readonly lifecycleTimeline: TaskLifecycleEvent[] = [];
@@ -752,6 +787,53 @@ export class TaskSessionContext {
       tabId,
       pageRegions: cloneReadPageRegions(input.pageRegions ?? []),
     };
+  }
+
+  public noteRegionStatePostconditionsForCloseout(input: {
+    tabId?: number | null;
+    regionStatePostconditions?: ReadonlyArray<{
+      actionKind: ActionKind | null;
+      result: TaskRegionStatePostconditionResultSnapshot;
+    }> | null;
+  }): void {
+    const normalizedTabId = normalizePositiveTabId(input.tabId);
+    for (const item of input.regionStatePostconditions ?? []) {
+      const actionKind = normalizeActionKind(item.actionKind) ?? 'unknown';
+      const result = cloneTaskRegionStatePostconditionResult(item.result);
+      if (!result) continue;
+      this.regionStatePostconditionsForCloseout.push({
+        tabId: normalizedTabId,
+        actionKind,
+        result,
+      });
+    }
+    if (
+      this.regionStatePostconditionsForCloseout.length >
+      MAX_REGION_STATE_POSTCONDITIONS_FOR_CLOSEOUT
+    ) {
+      this.regionStatePostconditionsForCloseout.splice(
+        0,
+        this.regionStatePostconditionsForCloseout.length -
+          MAX_REGION_STATE_POSTCONDITIONS_FOR_CLOSEOUT,
+      );
+    }
+  }
+
+  public peekRegionStatePostconditionsForCloseout(
+    tabIds?: ReadonlyArray<number | null | undefined> | null,
+  ): TaskRegionStatePostconditionForCloseout[] {
+    const allowedTabIds = new Set(
+      (tabIds ?? []).map((tabId) => normalizePositiveTabId(tabId)).filter(isPositiveTabId),
+    );
+    return this.regionStatePostconditionsForCloseout
+      .filter((snapshot) => {
+        if (allowedTabIds.size === 0) return true;
+        return snapshot.tabId !== null && allowedTabIds.has(snapshot.tabId);
+      })
+      .map((snapshot) => ({
+        actionKind: snapshot.actionKind,
+        result: cloneTaskRegionStatePostconditionResult(snapshot.result)!,
+      }));
   }
 
   public buildCachedPageProjectionDelta(): BrowserPageProjectionDelta | null {
@@ -1104,6 +1186,14 @@ function normalizeReadRequestKey(value: string | null | undefined): string | nul
   return normalized.length > 0 ? normalized : null;
 }
 
+function normalizePositiveTabId(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function isPositiveTabId(value: number | null): value is number {
+  return value !== null;
+}
+
 function normalizeTargetRefs(values: ReadonlyArray<string> | null | undefined): string[] {
   if (!values) return [];
   const result: string[] = [];
@@ -1137,6 +1227,65 @@ function normalizeActionKind(value: unknown): ActionKind | null {
     value === 'unknown'
     ? value
     : null;
+}
+
+function normalizeRegionStatePostconditionKind(
+  value: unknown,
+): TaskRegionStatePostconditionKind | null {
+  return value === 'menu_opened' ||
+    value === 'menu_closed' ||
+    value === 'search_results_updated' ||
+    value === 'detail_opened' ||
+    value === 'login_completed' ||
+    value === 'logout_completed' ||
+    value === 'qr_waiting'
+    ? value
+    : null;
+}
+
+function normalizePostconditionVerdict(value: unknown): PostconditionVerdict | null {
+  return value === 'passed' || value === 'failed' || value === 'unknown' ? value : null;
+}
+
+function cloneTaskRegionStatePostconditionResult(
+  input: TaskRegionStatePostconditionResultSnapshot,
+): TaskRegionStatePostconditionResultSnapshot | null {
+  const kind = normalizeRegionStatePostconditionKind(input.kind);
+  const verdict = normalizePostconditionVerdict(input.verdict);
+  if (!kind || !verdict) return null;
+  return {
+    actionId: normalizeIdentifier(input.actionId) ?? 'unknown',
+    kind,
+    verdict,
+    reason: normalizeBoundedString(input.reason, 240) ?? 'unknown',
+    beforeSummary: normalizeSummaryStrings(input.beforeSummary),
+    afterSummary: normalizeSummaryStrings(input.afterSummary),
+    producedAtMs:
+      Number.isFinite(input.producedAtMs) && input.producedAtMs >= 0
+        ? Math.floor(input.producedAtMs)
+        : Date.now(),
+    claimBoundary:
+      normalizeBoundedString(input.claimBoundary, 300) ??
+      'region_state_postcondition_claim_boundary_unknown',
+  };
+}
+
+function normalizeSummaryStrings(values: ReadonlyArray<string> | null | undefined): string[] {
+  const result: string[] = [];
+  for (const value of values ?? []) {
+    const normalized = normalizeBoundedString(value, 160);
+    if (!normalized) continue;
+    result.push(normalized);
+    if (result.length >= 6) break;
+  }
+  return result;
+}
+
+function normalizeBoundedString(value: unknown, maxLength: number): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  return trimmed.slice(0, maxLength);
 }
 
 function cloneLiveObservedApiData(input: LiveObservedApiData): LiveObservedApiData {
