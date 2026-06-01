@@ -6,6 +6,7 @@ import type {
 } from '@tabrix/shared';
 import {
   getActionPostconditionCoverageMatrix,
+  inferRegionStatePostconditionKindForIntent,
   verifyActionPostcondition,
   verifyRegionStatePostcondition,
 } from './action-postcondition-verifier';
@@ -403,6 +404,37 @@ describe('action-postcondition-verifier — output contract', () => {
 });
 
 describe('action-postcondition-verifier — R4A region-state postconditions', () => {
+  it('maps search and detail candidate intents to region-state postconditions', () => {
+    expect(
+      inferRegionStatePostconditionKindForIntent({
+        intent: 'search.submit',
+        actionKind: 'click',
+      }),
+    ).toBe('search_results_updated');
+    expect(
+      inferRegionStatePostconditionKindForIntent({
+        intent: 'content.open_detail',
+        actionKind: 'click',
+      }),
+    ).toBe('detail_opened');
+  });
+
+  it('does not treat query fill or auth-only intents as business success postconditions', () => {
+    expect(
+      inferRegionStatePostconditionKindForIntent({
+        intent: 'search.enter_query',
+        actionKind: 'fill',
+      }),
+    ).toBeNull();
+    expect(
+      inferRegionStatePostconditionKindForIntent({
+        intent: 'auth.request_otp',
+        actionKind: 'click',
+      }),
+    ).toBeNull();
+    expect(inferRegionStatePostconditionKindForIntent({ intent: undefined })).toBeNull();
+  });
+
   it('passes menu_opened only when menu actions appear after the action', () => {
     const result = verifyRegionStatePostcondition({
       kind: 'menu_opened',

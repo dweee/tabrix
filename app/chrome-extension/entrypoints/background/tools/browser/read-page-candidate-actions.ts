@@ -39,12 +39,16 @@ function inferCandidateActionIntent(
   element: ReadPageInteractiveElement,
   actionType: 'click' | 'fill',
 ): ReadPageCandidateAction['intent'] | undefined {
-  if (actionType !== 'click') return undefined;
   const role = String(element.role || '').toLowerCase();
   const name = String(element.name || '').trim();
   const source = String(element.matchSource || '').toLowerCase();
 
-  if (!name || source === 'placeholder') return undefined;
+  if (!name && role !== 'searchbox') return undefined;
+  if (actionType === 'fill') {
+    if (role === 'searchbox' || isSearchActionText(name)) return 'search.enter_query';
+    return undefined;
+  }
+  if (source === 'placeholder') return undefined;
   if (/同意并继续|确认同意|我同意|agree and continue|accept and continue/i.test(name)) {
     return 'auth.confirm_agreement';
   }
@@ -62,7 +66,36 @@ function inferCandidateActionIntent(
     return 'auth.accept_terms';
   }
   if (/登录|log\s*in|sign\s*in/i.test(name)) return 'auth.submit_login';
+  if (isSearchActionText(name)) return 'search.submit';
+  if (isOpenDetailActionText(name)) return 'content.open_detail';
   return undefined;
+}
+
+function isSearchActionText(value: string): boolean {
+  if (!value) return false;
+  if (
+    /\b(log[ -]?in|sign[ -]?in|signin|auth|authorize|password|credential)\b|登录|登陆|授权|验证|密码|账号/i.test(
+      value,
+    )
+  ) {
+    return false;
+  }
+  return /\b(search|find|query)\b|搜索|查找/i.test(value);
+}
+
+function isOpenDetailActionText(value: string): boolean {
+  if (!value) return false;
+  if (isSearchActionText(value)) return false;
+  if (
+    /\b(log[ -]?in|sign[ -]?in|signin|auth|authorize|password|credential)\b|登录|登陆|授权|验证|密码|账号/i.test(
+      value,
+    )
+  ) {
+    return false;
+  }
+  return /\b(details?|view details?|read more|learn more)\b|查看详情|详情|阅读全文|阅读更多/i.test(
+    value,
+  );
 }
 
 function mayContainSensitiveAuthText(value: string): boolean {

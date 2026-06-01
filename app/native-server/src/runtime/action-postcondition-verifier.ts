@@ -12,6 +12,7 @@ import type {
   ActionOutcomeSnapshot,
   PostconditionResult,
   PostconditionVerdict,
+  ReadPageCandidateActionIntent,
   ReadPageRegion,
 } from '@tabrix/shared';
 
@@ -248,6 +249,17 @@ export function verifyRegionStatePostcondition(
     claimBoundary:
       'region-state postconditions require before/after page-region evidence; click success, timeout, or QR presence alone is not business success',
   };
+}
+
+export function inferRegionStatePostconditionKindForIntent(input: {
+  intent?: ReadPageCandidateActionIntent | string | null;
+  actionKind?: ActionKind | null;
+}): RegionStatePostconditionKind | null {
+  const intent = String(input.intent ?? '').trim();
+  if (input.actionKind === 'fill' && intent === 'search.enter_query') return null;
+  if (intent === 'search.submit') return 'search_results_updated';
+  if (intent === 'content.open_detail') return 'detail_opened';
+  return null;
 }
 
 function verdictForRegionState(

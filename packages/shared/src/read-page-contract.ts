@@ -296,6 +296,9 @@ export type ReadPageCandidateActionIntent =
   | 'auth.confirm_agreement'
   | 'auth.request_otp'
   | 'auth.submit_login'
+  | 'search.enter_query'
+  | 'search.submit'
+  | 'content.open_detail'
   | (string & {});
 
 export interface ReadPageCandidateAction {
@@ -306,8 +309,8 @@ export interface ReadPageCandidateAction {
   matchReason: string;
   locatorChain: ReadPageCandidateActionLocator[];
   /**
-   * Optional AI-facing action intent. It lets the executor verify the right
-   * postcondition after a click without adding another public MCP tool.
+   * Optional AI-facing action intent. It lets the executor choose the right
+   * post-action verification path without adding another public MCP tool.
    */
   intent?: ReadPageCandidateActionIntent;
 }

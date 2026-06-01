@@ -257,7 +257,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
             intent: {
               type: 'string',
               description:
-                'Optional read_page candidateActions[*].intent, used for auth post-click verification such as auth.request_otp.',
+                'Optional read_page candidateActions[*].intent, used to choose post-action verification such as auth.request_otp, search.submit, or content.open_detail.',
             },
             locatorChain: {
               type: 'array',
@@ -1142,7 +1142,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
             intent: {
               type: 'string',
               description:
-                'Optional read_page candidateActions[*].intent, used for auth post-click verification such as auth.request_otp.',
+                'Optional read_page candidateActions[*].intent, used to choose post-action verification such as auth.request_otp, search.submit, or content.open_detail.',
             },
             locatorChain: {
               type: 'array',
@@ -1251,7 +1251,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
             intent: {
               type: 'string',
               description:
-                'Optional read_page candidateActions[*].intent, used for auth-aware execution context. Fill ignores it.',
+                'Optional read_page candidateActions[*].intent, used as execution context. Fill can carry search.enter_query, but search success still requires a fresh post-action read.',
             },
             locatorChain: {
               type: 'array',

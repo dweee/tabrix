@@ -199,6 +199,7 @@ function toExecutableAction(action: ReadPageCandidateAction): ReadPageExecutable
         confidence: action.confidence,
         matchReason: action.matchReason,
         locatorChain: action.locatorChain,
+        ...(action.intent ? { intent: action.intent } : {}),
       },
     },
     claimBoundary:
