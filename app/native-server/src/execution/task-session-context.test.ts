@@ -206,6 +206,53 @@ describe('TaskSessionContext — redundancy + layer demotion', () => {
   });
 });
 
+describe('TaskSessionContext — auth resume gate', () => {
+  it('records a blocking gate when auth resume requires a fresh same-tab read', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    const gate = ctx.noteAuthResumeVerification({
+      status: 'fresh_read_required',
+      nextTool: 'chrome_read_page',
+      forceRefreshRequired: true,
+      sameTabRequired: true,
+      targetTabId: 42,
+      postconditionRequired: true,
+      requiredSignals: ['auth_prompt_absent', 'account_region_present'],
+      claimBoundary: 'deterministic auth resume fixture only',
+    });
+
+    expect(gate).toMatchObject({
+      status: 'fresh_read_required',
+      forceRefreshRequired: true,
+      sameTabRequired: true,
+      targetTabId: 42,
+      postconditionRequired: true,
+      blocksTaskResume: true,
+      nextStepHint: 'fresh_read_same_tab_then_postcondition',
+      reason: 'cached_or_candidate_auth_state_cannot_resume_task_without_fresh_read',
+    });
+    expect(ctx.peekLastAuthResumeGate()).toEqual(gate);
+  });
+
+  it('clears the auth resume gate on navigation so stale login gates do not leak pages', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteUrlChange('https://example.test/login', 'auth');
+    ctx.noteAuthResumeVerification({
+      status: 'postcondition_required',
+      nextTool: 'chrome_read_page',
+      forceRefreshRequired: false,
+      sameTabRequired: true,
+      targetTabId: 7,
+      postconditionRequired: true,
+      requiredSignals: ['auth_prompt_absent'],
+      claimBoundary: 'deterministic auth resume fixture only',
+    });
+    expect(ctx.peekLastAuthResumeGate()).not.toBeNull();
+
+    ctx.noteUrlChange('https://example.test/search', 'search_results');
+    expect(ctx.peekLastAuthResumeGate()).toBeNull();
+  });
+});
+
 describe('TaskSessionContext — URL / pageRole invalidation', () => {
   it('URL change resets lastReadLayer + targetRefsSeen so a follow-up read is "first" again', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });

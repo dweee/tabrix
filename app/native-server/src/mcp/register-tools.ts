@@ -24,6 +24,7 @@ import {
 } from '../policy/non-interference-preflight';
 import { sessionManager } from '../execution/session-manager';
 import type {
+  TaskAuthResumeGate,
   TaskPageRuntimeFields,
   TaskSessionContext,
   TaskVisibleRegionRowsData,
@@ -122,6 +123,7 @@ import type {
   BrowserSourceLineage,
   BrowserSourceTruthChain,
   BrowserTaskStateVerdict,
+  ReadPageAuthResumeVerification,
   ReadPageCompactSnapshot,
   ReadPageMode,
   ReadPageRequestedLayer,
@@ -853,6 +855,9 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           lifecycleTimeline: cachedProjection ? taskContext.getLifecycleTimeline() : null,
           runtimeFields: shouldAttachCachedProjection
             ? taskContext.peekLastPageRuntimeFields()
+            : null,
+          cachedAuthResumeGate: shouldAttachCachedProjection
+            ? taskContext.peekLastAuthResumeGate()
             : null,
         });
         const normalizedWarning = normalizeToolCallResult(name, warningResult);
@@ -2190,6 +2195,9 @@ function attachAiFacingDeltaContext(
     selectedReason,
     fallbackReason,
   });
+  const authResumeGate = attachment.taskContext.noteAuthResumeVerification(
+    readAuthResumeVerification(payload),
+  );
   const sourceRouteHonesty = classifySourceRouteHonesty({
     selectedDataSource,
     sourceTruthChain: projectionWithSourceTruth.sourceTruthChain,
@@ -2204,6 +2212,7 @@ function attachAiFacingDeltaContext(
     payload,
     projection: aiFacingProjection,
     fallbackReason,
+    authResumeGate,
   });
   const structuredReadGate = buildStructuredReadGate(payload, projectionWithSourceTruth);
   const previousOwnershipRuntime = previousRuntimeFields
@@ -2256,6 +2265,9 @@ function attachAiFacingDeltaContext(
   payload.structuredReadGate = structuredReadGate;
   payload.sourceRouteHonesty = aiFacingSourceRouteHonesty;
   payload.apiCdpProofBoundary = apiCdpProofBoundary;
+  if (authResumeGate) {
+    payload.authResumeGate = authResumeGate;
+  }
   payload.deltaContext = deltaContext;
   payload.taskContextEnvelope = buildTaskContextEnvelope(attachment);
   payload.aiContextEnvelope = {
@@ -2267,6 +2279,7 @@ function attachAiFacingDeltaContext(
     dataSourceDecision,
     sourceRouteHonesty: aiFacingSourceRouteHonesty,
     apiCdpProofBoundary,
+    ...(authResumeGate ? { authResumeGate } : {}),
     structuredReadGate,
     ...(objectLifecycle ? { objectLifecycle } : {}),
     ...(pageObjectDetailPolicy ? { pageObjectDetailPolicy } : {}),
@@ -2680,8 +2693,13 @@ function buildAiFacingTaskState(args: {
   payload: Record<string, unknown>;
   projection: BrowserPageThingProjection;
   fallbackReason: string | null;
+  authResumeGate?: TaskAuthResumeGate | null;
 }): BrowserTaskStateVerdict {
+  const authResumeReason = args.authResumeGate?.blocksTaskResume
+    ? `auth_or_login_required:${args.authResumeGate.reason}`
+    : null;
   const readinessReason =
+    authResumeReason ??
     readString(args.payload.readinessReason) ??
     readString(args.payload.blockedReadinessReason) ??
     args.fallbackReason;
@@ -2695,6 +2713,49 @@ function buildAiFacingTaskState(args: {
     policyDeniedReason,
     externalBlockedReason,
   });
+}
+
+function readAuthResumeVerification(
+  payload: Record<string, unknown>,
+): ReadPageAuthResumeVerification | null {
+  const authCollaboration = readObject(payload.authCollaboration);
+  const evidence = readObject(authCollaboration?.evidence);
+  const resumeVerification = readObject(evidence?.resumeVerification);
+  if (!resumeVerification) return null;
+
+  const status = readString(resumeVerification.status);
+  if (
+    status !== 'not_required' &&
+    status !== 'required_after_user_action' &&
+    status !== 'fresh_read_required' &&
+    status !== 'postcondition_required' &&
+    status !== 'not_proven'
+  ) {
+    return null;
+  }
+  const nextTool = readString(resumeVerification.nextTool);
+  if (nextTool !== 'chrome_read_page') return null;
+
+  const rawSignals = Array.isArray(resumeVerification.requiredSignals)
+    ? resumeVerification.requiredSignals
+    : [];
+  const requiredSignals = rawSignals
+    .filter((value): value is string => typeof value === 'string')
+    .map((value) => value.trim())
+    .filter((value) => /^[A-Za-z0-9:_-]{1,96}$/.test(value))
+    .slice(0, 12);
+  return {
+    status,
+    nextTool,
+    forceRefreshRequired: readBoolean(resumeVerification, 'forceRefreshRequired') === true,
+    sameTabRequired: readBoolean(resumeVerification, 'sameTabRequired') === true,
+    targetTabId: readPositiveInteger(resumeVerification, 'targetTabId') ?? undefined,
+    postconditionRequired: readBoolean(resumeVerification, 'postconditionRequired') === true,
+    requiredSignals,
+    claimBoundary:
+      readString(resumeVerification.claimBoundary) ??
+      'auth resume verification must be proven by fresh same-tab read and postcondition evidence',
+  };
 }
 
 function buildAiFacingDataSourceDecision(args: {

@@ -35,6 +35,7 @@ import {
   type BrowserPageProjectionDeltaEvidenceBoundary,
   type BrowserPageProjectionDelta,
   type BrowserPageThingProjection,
+  type ReadPageAuthResumeVerification,
   type ReadPageObjectLifecycleSummary,
   type ReadPageRequestedLayer,
 } from '@tabrix/shared';
@@ -234,6 +235,25 @@ export interface TaskPageInteractionSnapshot {
   tabId: number | null;
   changeCause: BrowserPageChangeCause;
   targetRefs: string[];
+}
+
+export interface TaskAuthResumeGate {
+  status: ReadPageAuthResumeVerification['status'];
+  nextTool: ReadPageAuthResumeVerification['nextTool'];
+  forceRefreshRequired: boolean;
+  sameTabRequired: boolean;
+  targetTabId?: number;
+  postconditionRequired: boolean;
+  requiredSignals: string[];
+  blocksTaskResume: boolean;
+  nextStepHint:
+    | 'fresh_read_same_tab_then_postcondition'
+    | 'fresh_read_same_tab'
+    | 'verify_postcondition_before_resume'
+    | 'resume_allowed'
+    | 'not_proven_stop_or_collaborate';
+  reason: string;
+  claimBoundary: string;
 }
 
 /**
@@ -442,6 +462,7 @@ export class TaskSessionContext {
   private lastSourceRouteHonesty: TaskSourceRouteHonestySnapshot | null = null;
   private lastObjectLifecycle: ReadPageObjectLifecycleSummary | null = null;
   private lastPageRuntimeFields: TaskPageRuntimeFields | null = null;
+  private lastAuthResumeGate: TaskAuthResumeGate | null = null;
   private pendingPageInteraction: TaskPageInteractionSnapshot | null = null;
   private pageProjectionDeltaCount = 0;
   private lifecycleEventCount = 0;
@@ -502,6 +523,7 @@ export class TaskSessionContext {
       this.lastReadSource = null;
       this.targetRefsSeen.clear();
       this.lastObjectLifecycle = null;
+      this.lastAuthResumeGate = null;
       this.recordLifecycleEvent({
         kind: 'navigation',
         url: nextUrl,
@@ -663,6 +685,17 @@ export class TaskSessionContext {
     return this.lastPageRuntimeFields
       ? cloneTaskPageRuntimeFields(this.lastPageRuntimeFields)
       : null;
+  }
+
+  public noteAuthResumeVerification(
+    verification: ReadPageAuthResumeVerification | null,
+  ): TaskAuthResumeGate | null {
+    this.lastAuthResumeGate = verification ? buildTaskAuthResumeGate(verification) : null;
+    return this.peekLastAuthResumeGate();
+  }
+
+  public peekLastAuthResumeGate(): TaskAuthResumeGate | null {
+    return this.lastAuthResumeGate ? cloneTaskAuthResumeGate(this.lastAuthResumeGate) : null;
   }
 
   public peekLastSourceTruthChain(): BrowserSourceTruthChain | null {
@@ -1098,6 +1131,62 @@ function cloneTaskPageRuntimeFields(input: TaskPageRuntimeFields): TaskPageRunti
     browserWorldActionableObjectChangeSummary: input.browserWorldActionableObjectChangeSummary,
     browserWorldCurrentOperationConclusion: input.browserWorldCurrentOperationConclusion,
     browserWorldRoutingDecisionSummary: input.browserWorldRoutingDecisionSummary,
+  };
+}
+
+function buildTaskAuthResumeGate(input: ReadPageAuthResumeVerification): TaskAuthResumeGate {
+  const blocksTaskResume =
+    input.status !== 'not_required' ||
+    input.forceRefreshRequired ||
+    input.postconditionRequired ||
+    input.sameTabRequired;
+  return {
+    status: input.status,
+    nextTool: input.nextTool,
+    forceRefreshRequired: input.forceRefreshRequired,
+    sameTabRequired: input.sameTabRequired,
+    targetTabId: input.targetTabId,
+    postconditionRequired: input.postconditionRequired,
+    requiredSignals: [...input.requiredSignals],
+    blocksTaskResume,
+    nextStepHint: inferAuthResumeNextStepHint(input),
+    reason: inferAuthResumeGateReason(input),
+    claimBoundary: input.claimBoundary,
+  };
+}
+
+function inferAuthResumeNextStepHint(
+  input: ReadPageAuthResumeVerification,
+): TaskAuthResumeGate['nextStepHint'] {
+  if (input.status === 'not_required' && !input.postconditionRequired) return 'resume_allowed';
+  if (input.status === 'not_proven') return 'not_proven_stop_or_collaborate';
+  if (input.forceRefreshRequired && input.postconditionRequired) {
+    return 'fresh_read_same_tab_then_postcondition';
+  }
+  if (input.forceRefreshRequired) return 'fresh_read_same_tab';
+  if (input.postconditionRequired) return 'verify_postcondition_before_resume';
+  return 'not_proven_stop_or_collaborate';
+}
+
+function inferAuthResumeGateReason(input: ReadPageAuthResumeVerification): string {
+  switch (input.status) {
+    case 'not_required':
+      return 'auth_resume_not_required';
+    case 'required_after_user_action':
+      return 'user_auth_action_requires_fresh_same_tab_read_before_resume';
+    case 'fresh_read_required':
+      return 'cached_or_candidate_auth_state_cannot_resume_task_without_fresh_read';
+    case 'postcondition_required':
+      return 'auth_candidate_requires_postcondition_before_resume';
+    case 'not_proven':
+      return 'auth_resume_state_not_proven';
+  }
+}
+
+function cloneTaskAuthResumeGate(input: TaskAuthResumeGate): TaskAuthResumeGate {
+  return {
+    ...input,
+    requiredSignals: [...input.requiredSignals],
   };
 }
 

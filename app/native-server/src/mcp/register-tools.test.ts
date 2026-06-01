@@ -1480,6 +1480,103 @@ describe('handleToolCall execution wrapper', () => {
       );
     });
 
+    it('surfaces auth resume gate in AI context and preserves it on cached redundant reads', async () => {
+      markBridgeReady();
+      const ctx = sessionManager.getOrCreateExternalTaskContext('auth-resume-gate-task');
+      Object.defineProperty(ctx, 'readBudget', { value: 4, writable: false });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'auth-resume-before',
+          contextChars: 140,
+          changedRegions: ['auth'],
+          extraPayload: {
+            authCollaboration: {
+              status: 'succeeded_candidate',
+              challengeType: 'otp',
+              userAction: {
+                required: false,
+                instruction: 'User action candidate complete; verify before resume.',
+              },
+              evidence: {
+                pageFreshness: 'single_snapshot',
+                operationBinding: 'ai_operable_tab',
+                semanticEventTypes: ['auth_succeeded_candidate'],
+                postconditionStatus: 'candidate_only',
+                resumeVerification: {
+                  status: 'fresh_read_required',
+                  nextTool: 'chrome_read_page',
+                  forceRefreshRequired: true,
+                  sameTabRequired: true,
+                  targetTabId: 1,
+                  postconditionRequired: true,
+                  requiredSignals: ['auth_prompt_absent', 'account_region_present'],
+                  claimBoundary: 'deterministic auth resume fixture only',
+                },
+                claimBoundary: 'candidate auth evidence only',
+              },
+            },
+          },
+        }),
+      );
+
+      const first = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'auth-resume-gate-task',
+        requestedLayer: 'L0+L1',
+      });
+      expect(first.isError).toBeFalsy();
+      const firstPayload = JSON.parse(String(first.content[0].text));
+      expect(firstPayload.authResumeGate).toMatchObject({
+        status: 'fresh_read_required',
+        forceRefreshRequired: true,
+        sameTabRequired: true,
+        targetTabId: 1,
+        postconditionRequired: true,
+        blocksTaskResume: true,
+        nextStepHint: 'fresh_read_same_tab_then_postcondition',
+      });
+      expect(firstPayload.aiContextEnvelope).toMatchObject({
+        authResumeGate: {
+          reason: 'cached_or_candidate_auth_state_cannot_resume_task_without_fresh_read',
+        },
+        taskState: {
+          state: 'login_required',
+          recommendedNextAction: 'user_collaboration',
+        },
+      });
+
+      const dynamicFlowSpy = jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never);
+      dynamicFlowSpy.mockClear();
+      const cached = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'auth-resume-gate-task',
+        requestedLayer: 'L0+L1',
+      });
+      expect(cached.isError).toBeFalsy();
+      const cachedPayload = JSON.parse(String(cached.content[0].text));
+      expect(cachedPayload).toMatchObject({
+        warning: 'read_redundant',
+        authResumeGate: {
+          status: 'fresh_read_required',
+          blocksTaskResume: true,
+          nextStepHint: 'fresh_read_same_tab_then_postcondition',
+        },
+        aiContextEnvelope: {
+          authResumeGate: {
+            reason: 'cached_or_candidate_auth_state_cannot_resume_task_without_fresh_read',
+          },
+          taskState: {
+            state: 'login_required',
+            recommendedNextAction: 'user_collaboration',
+          },
+        },
+      });
+      expect(dynamicFlowSpy).toHaveBeenCalledTimes(1);
+    });
+
     it('keeps the full browserPageObject in the AI envelope for full-mode chrome_read_page', async () => {
       markBridgeReady();
       const ctx = sessionManager.getOrCreateExternalTaskContext('object-lifecycle-full-task');

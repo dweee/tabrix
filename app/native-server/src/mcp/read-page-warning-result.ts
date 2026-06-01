@@ -8,6 +8,7 @@ import type {
 import { buildBrowserTaskStateVerdict } from '@tabrix/shared';
 import type {
   ShouldAllowReadPageResult,
+  TaskAuthResumeGate,
   TaskPageRuntimeFields as ReadPageWarningRuntimeFields,
 } from '../execution/task-session-context';
 import type { ReadPageOperationLogHint } from './read-page-dom-region-rows-result';
@@ -21,6 +22,7 @@ export function buildReadPageWarningResult(args: {
   cachedDataSourceDecision?: BrowserDataSourceDecisionEvidence | null;
   lifecycleTimeline?: readonly unknown[] | null;
   runtimeFields?: ReadPageWarningRuntimeFields | null;
+  cachedAuthResumeGate?: TaskAuthResumeGate | null;
 }): {
   result: CallToolResult;
   warning: string;
@@ -79,13 +81,19 @@ export function buildReadPageWarningResult(args: {
       contextSource: 'cached_page_projection_delta',
       taskState: buildBrowserTaskStateVerdict({
         projection: args.cachedProjection,
-        readinessReason: warning,
+        readinessReason: args.cachedAuthResumeGate?.blocksTaskResume
+          ? `auth_or_login_required:${args.cachedAuthResumeGate.reason}`
+          : warning,
       }),
       selectedDataSource: args.cachedProjection.chosenDataSource,
       dataSourceDecision: args.cachedDataSourceDecision ?? null,
       deltaContext: args.cachedDeltaContext,
       lifecycleTimeline: args.lifecycleTimeline ? [...args.lifecycleTimeline] : [],
+      ...(args.cachedAuthResumeGate ? { authResumeGate: args.cachedAuthResumeGate } : {}),
     };
+    if (args.cachedAuthResumeGate) {
+      warningPayload.authResumeGate = args.cachedAuthResumeGate;
+    }
   }
 
   return {
