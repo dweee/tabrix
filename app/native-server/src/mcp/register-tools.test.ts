@@ -5278,6 +5278,90 @@ describe('handleToolCall execution wrapper', () => {
       expect(bridgeSpy).toHaveBeenCalledTimes(2);
     });
 
+    it('does not resume after a detail click when the target ref was not in the before result rows', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
+      auto.noteRunOwnedTab(1);
+      Object.defineProperty(auto, 'readBudget', { value: 5, writable: false });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_before_mismatched_detail_open',
+          tabId: 1,
+          pageRegions: [contentListRegion('before_mismatched_detail')],
+        }),
+      );
+      await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  observedOutcome: 'tool_reported_click_dispatched',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_not_in_before_rows',
+        candidateAction: {
+          id: 'ca_open_detail_mismatch',
+          actionType: 'click',
+          targetRef: 'ref_not_in_before_rows',
+          confidence: 0.9,
+          matchReason: 'content result detail candidate',
+          locatorChain: [{ type: 'ref', value: 'ref_not_in_before_rows' }],
+          intent: 'content.open_detail',
+        },
+      });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_after_mismatched_detail_open',
+          tabId: 1,
+          pageRegions: [contentDetailRegion('after_mismatched_detail')],
+        }),
+      );
+      const readback = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+        forceRefresh: true,
+      });
+      const payload = JSON.parse(String(readback.content[0].text));
+
+      expect(payload.regionStatePostconditions).toEqual([
+        {
+          actionKind: 'click',
+          result: expect.objectContaining({
+            actionId: 'ca_open_detail_mismatch',
+            kind: 'detail_opened',
+            verdict: 'unknown',
+            reason: 'before_target_row_identity_not_proven',
+          }),
+        },
+      ]);
+      expect(payload.taskResumeReadiness).toMatchObject({
+        status: 'postcondition_unknown_not_proven',
+        canResumeOriginalTask: false,
+        nextStep: 'force_fresh_read_same_tab',
+        reason:
+          'pending_business_verification_requires_fresh_read:detail_region_or_content_transition:content.open_detail',
+      });
+    });
+
     it('does not resume after a result detail candidate when detail evidence is unstructured', async () => {
       markBridgeReady();
       const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');

@@ -176,6 +176,7 @@ export interface RegionStatePostconditionInput {
   actionId: string;
   beforeRegions: readonly ReadPageRegion[];
   afterRegions: readonly ReadPageRegion[];
+  targetRefs?: readonly string[] | null;
   now?: () => number;
 }
 
@@ -236,7 +237,12 @@ export function verifyRegionStatePostcondition(
   const producedAtMs = input.now ? input.now() : Date.now();
   const beforeSummary = summarizeRegions(input.beforeRegions);
   const afterSummary = summarizeRegions(input.afterRegions);
-  const result = verdictForRegionState(input.kind, input.beforeRegions, input.afterRegions);
+  const result = verdictForRegionState(
+    input.kind,
+    input.beforeRegions,
+    input.afterRegions,
+    input.targetRefs,
+  );
 
   return {
     actionId: input.actionId,
@@ -266,6 +272,7 @@ function verdictForRegionState(
   kind: RegionStatePostconditionKind,
   beforeRegions: readonly ReadPageRegion[],
   afterRegions: readonly ReadPageRegion[],
+  targetRefs?: readonly string[] | null,
 ): { verdict: PostconditionVerdict; reason: string } {
   if (afterRegions.length === 0) {
     return { verdict: 'unknown', reason: 'after_region_evidence_missing' };
@@ -279,7 +286,7 @@ function verdictForRegionState(
     case 'search_results_updated':
       return verdictForSearchResultsUpdated(beforeRegions, afterRegions);
     case 'detail_opened':
-      return verdictForDetailOpened(beforeRegions, afterRegions);
+      return verdictForDetailOpened(beforeRegions, afterRegions, targetRefs);
     case 'login_completed':
       return verdictForLoginCompleted(beforeRegions, afterRegions);
     case 'logout_completed':
@@ -360,6 +367,7 @@ function verdictForSearchResultsUpdated(
 function verdictForDetailOpened(
   beforeRegions: readonly ReadPageRegion[],
   afterRegions: readonly ReadPageRegion[],
+  targetRefs?: readonly string[] | null,
 ): { verdict: PostconditionVerdict; reason: string } {
   const beforeCollections = contentCollectionRegions(beforeRegions);
   if (beforeCollections.length === 0) {
@@ -371,6 +379,14 @@ function verdictForDetailOpened(
   );
   if (beforeTargetableCollections.length === 0) {
     return { verdict: 'unknown', reason: 'before_structured_result_evidence_missing' };
+  }
+
+  const actionTargetRefs = normalizeTargetRefs(targetRefs);
+  if (actionTargetRefs.length === 0) {
+    return { verdict: 'unknown', reason: 'before_target_row_identity_not_proven' };
+  }
+  if (!hasMatchingTargetableResultObject(beforeTargetableCollections, actionTargetRefs)) {
+    return { verdict: 'unknown', reason: 'before_target_row_identity_not_proven' };
   }
 
   const afterDetail = contentDetailRegions(afterRegions);
@@ -396,6 +412,30 @@ function verdictForDetailOpened(
   }
 
   return { verdict: 'unknown', reason: 'detail_region_evidence_missing_after_action' };
+}
+
+function normalizeTargetRefs(targetRefs?: readonly string[] | null): string[] {
+  const refs = new Set<string>();
+  for (const ref of targetRefs ?? []) {
+    if (typeof ref !== 'string') continue;
+    const trimmed = ref.trim();
+    if (trimmed) refs.add(trimmed);
+  }
+  return [...refs];
+}
+
+function hasMatchingTargetableResultObject(
+  regions: readonly ReadPageRegion[],
+  targetRefs: readonly string[],
+): boolean {
+  const expected = new Set(targetRefs);
+  return regions.some((region) =>
+    targetableResultObjects(region).some((object) => {
+      const targetRef = typeof object.targetRef === 'string' ? object.targetRef : '';
+      const objectId = typeof object.objectId === 'string' ? object.objectId : '';
+      return expected.has(targetRef) || expected.has(objectId);
+    }),
+  );
 }
 
 function verdictForLoginCompleted(

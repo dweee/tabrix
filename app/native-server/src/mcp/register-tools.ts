@@ -3195,6 +3195,7 @@ function buildRegionStatePostconditionForPendingInteraction(
     actionId,
     beforeRegions: pendingInteraction.beforePageRegions,
     afterRegions,
+    targetRefs: pendingInteraction.targetRefs,
   });
 }
 

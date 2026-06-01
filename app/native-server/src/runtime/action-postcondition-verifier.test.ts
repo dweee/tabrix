@@ -560,11 +560,39 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
       actionId: 'act-open-detail',
       beforeRegions: resultCollection(resultRow('1'), resultRow('2', 'entry')),
       afterRegions: detailRegion(),
+      targetRefs: ['tgt_row_1'],
       now: () => PRODUCED_AT,
     });
 
     expect(result.verdict).toBe('passed');
     expect(result.reason).toBe('content_detail_region_visible_after_action');
+  });
+
+  it('keeps detail_opened unknown when the clicked target is not bound to a before row', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'detail_opened',
+      actionId: 'act-open-detail',
+      beforeRegions: resultCollection(resultRow('1'), resultRow('2', 'entry')),
+      afterRegions: detailRegion(),
+      targetRefs: ['tgt_missing_row'],
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('unknown');
+    expect(result.reason).toBe('before_target_row_identity_not_proven');
+  });
+
+  it('keeps detail_opened unknown when the action did not carry a target ref', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'detail_opened',
+      actionId: 'act-open-detail',
+      beforeRegions: resultCollection(resultRow('1'), resultRow('2', 'entry')),
+      afterRegions: detailRegion(),
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('unknown');
+    expect(result.reason).toBe('before_target_row_identity_not_proven');
   });
 
   it('keeps detail_opened unknown when the detail region lacks structured content evidence', () => {
@@ -573,6 +601,7 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
       actionId: 'act-open-detail',
       beforeRegions: resultCollection(resultRow('1'), resultRow('2', 'entry')),
       afterRegions: weakDetailRegion(),
+      targetRefs: ['tgt_row_1'],
       now: () => PRODUCED_AT,
     });
 
@@ -586,6 +615,7 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
       actionId: 'act-open-detail',
       beforeRegions: weakResultCollection('before'),
       afterRegions: detailRegion(),
+      targetRefs: ['tgt_row_1'],
       now: () => PRODUCED_AT,
     });
 
@@ -601,6 +631,7 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
       actionId: 'act-open-detail',
       beforeRegions: before,
       afterRegions: before,
+      targetRefs: ['tgt_row_1'],
       now: () => PRODUCED_AT,
     });
 
@@ -617,6 +648,7 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
       actionId: 'act-open-detail',
       beforeRegions: before,
       afterRegions: after,
+      targetRefs: ['tgt_row_1'],
       now: () => PRODUCED_AT,
     });
 
