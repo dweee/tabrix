@@ -4835,5 +4835,167 @@ describe('handleToolCall execution wrapper', () => {
       expect(blockedPayload.message).toBe(blockedPayload.taskResumeHandoff.message);
       expect(bridgeSpy).toHaveBeenCalledTimes(1);
     });
+
+    it('fresh postcondition recovery after a blocked impact action unblocks continuation on the same tab', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
+      auto.noteRunOwnedTab(1);
+      Object.defineProperty(auto, 'readBudget', { value: 6, writable: false });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_before_recovery_search',
+          tabId: 1,
+          pageRegions: [contentListRegion('before')],
+        }),
+      );
+      await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  observedOutcome: 'tool_reported_success_without_business_change',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_search_submit',
+        candidateAction: {
+          id: 'ca_search_submit',
+          actionType: 'click',
+          targetRef: 'ref_search_submit',
+          confidence: 0.91,
+          matchReason: 'search submit candidate',
+          locatorChain: [{ type: 'ref', value: 'ref_search_submit' }],
+          intent: 'search.submit',
+        },
+      });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_after_recovery_unknown',
+          tabId: 1,
+          pageRegions: [contentListRegion('before')],
+        }),
+      );
+      const unknownReadback = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+      const unknownPayload = JSON.parse(String(unknownReadback.content[0].text));
+      expect(unknownPayload.taskResumeReadiness).toMatchObject({
+        status: 'postcondition_unknown_not_proven',
+        canResumeOriginalTask: false,
+        nextStep: 'verify_postcondition',
+        handoffSummary: {
+          status: 'needs_postcondition_verification',
+          nextAction: 'verify_business_postcondition',
+        },
+      });
+
+      const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
+      bridgeSpy.mockClear();
+      bridgeSpy.mockResolvedValueOnce({ status: 'success', items: [] } as never);
+      const blocked = await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_next_result',
+        userConfirmed: true,
+      });
+      const blockedPayload = JSON.parse(String(blocked.content[0].text));
+      expect(blocked.isError).toBe(true);
+      expect(blockedPayload).toMatchObject({
+        code: 'TABRIX_ACTION_COLLABORATION_REQUIRED',
+        actionPreflight: {
+          verdict: 'collaboration_required',
+          reason: 'task_resume_readiness_not_proven',
+          taskResumeHandoffStatus: 'needs_postcondition_verification',
+          taskResumeHandoffNextAction: 'verify_business_postcondition',
+          taskResumeCanContinue: false,
+        },
+      });
+      expect(bridgeSpy).toHaveBeenCalledTimes(1);
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_after_recovery_passed',
+          tabId: 1,
+          pageRegions: [contentListRegion('after')],
+        }),
+      );
+      const recoveredReadback = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+        forceRefresh: true,
+      });
+      const recoveredPayload = JSON.parse(String(recoveredReadback.content[0].text));
+      expect(recoveredPayload.regionStatePostconditions).toEqual([
+        {
+          actionKind: 'click',
+          result: expect.objectContaining({
+            actionId: 'ca_search_submit',
+            kind: 'search_results_updated',
+            verdict: 'passed',
+            reason: 'result_collection_changed_after_action',
+          }),
+        },
+      ]);
+      expect(recoveredPayload.taskResumeReadiness).toMatchObject({
+        status: 'postcondition_passed_ready',
+        canResumeOriginalTask: true,
+        nextStep: 'continue_original_task',
+        handoffSummary: {
+          status: 'ready_to_continue',
+          nextAction: 'continue_original_task',
+          canContinue: true,
+        },
+      });
+
+      bridgeSpy.mockClear();
+      bridgeSpy
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  observedOutcome: 'continued_after_postcondition_recovery',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      const continued = await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_after_1',
+        userConfirmed: true,
+      });
+      const continuedPayload = JSON.parse(String(continued.content[0].text));
+
+      expect(continued.isError).toBe(false);
+      expect(continuedPayload).toMatchObject({
+        success: true,
+        observedOutcome: 'continued_after_postcondition_recovery',
+      });
+      expect(bridgeSpy).toHaveBeenCalledTimes(2);
+    });
   });
 });

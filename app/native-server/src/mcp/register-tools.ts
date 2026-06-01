@@ -2236,6 +2236,9 @@ function attachAiFacingDeltaContext(
   const regionStatePostcondition = pendingInteraction
     ? buildRegionStatePostconditionForPendingInteraction(pendingInteraction, pageRegions)
     : null;
+  if (pendingInteraction && regionStatePostcondition?.verdict === 'unknown') {
+    attachment.taskContext.keepPendingPageInteractionForPostconditionRetry(pendingInteraction);
+  }
   const regionStatePostconditions = regionStatePostcondition
     ? [
         {

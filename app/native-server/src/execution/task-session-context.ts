@@ -1105,6 +1105,16 @@ export class TaskSessionContext {
     };
   }
 
+  public keepPendingPageInteractionForPostconditionRetry(
+    snapshot: TaskPageInteractionSnapshot,
+  ): void {
+    this.pendingPageInteraction = {
+      ...snapshot,
+      targetRefs: [...snapshot.targetRefs],
+      beforePageRegions: cloneReadPageRegions(snapshot.beforePageRegions),
+    };
+  }
+
   public noteCleanup(input: { action: string; targetIds?: ReadonlyArray<number> | null }): void {
     if (input.targetIds) {
       for (const tabId of input.targetIds) {
