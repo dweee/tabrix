@@ -483,7 +483,7 @@ describe('action-postcondition-verifier — output contract', () => {
 });
 
 describe('action-postcondition-verifier — R4A region-state postconditions', () => {
-  it('maps search and detail candidate intents to region-state postconditions', () => {
+  it('maps search, detail, and login-submit candidate intents to region-state postconditions', () => {
     expect(
       inferRegionStatePostconditionKindForIntent({
         intent: 'search.submit',
@@ -496,9 +496,15 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
         actionKind: 'click',
       }),
     ).toBe('detail_opened');
+    expect(
+      inferRegionStatePostconditionKindForIntent({
+        intent: 'auth.submit_login',
+        actionKind: 'click',
+      }),
+    ).toBe('login_completed');
   });
 
-  it('does not treat query fill or auth-only intents as business success postconditions', () => {
+  it('does not treat query fill or auth-prep intents as business success postconditions', () => {
     expect(
       inferRegionStatePostconditionKindForIntent({
         intent: 'search.enter_query',

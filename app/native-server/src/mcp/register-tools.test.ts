@@ -4266,6 +4266,53 @@ describe('handleToolCall execution wrapper', () => {
       };
     }
 
+    function authPromptRegion(): Record<string, unknown> {
+      return {
+        regionId: 'region_auth',
+        regionType: 'modal',
+        state: 'open_candidate',
+        confidence: 0.84,
+        objects: [
+          {
+            objectId: 'auth_submit',
+            label: 'login',
+            objectType: 'button',
+            targetRef: 'ref_auth_submit',
+            actionTypes: ['click'],
+            targetability: 'target_ref',
+            confidence: 0.86,
+            reason: 'test auth submit control',
+          },
+        ],
+        candidateActionIds: ['ca_auth_submit'],
+        targetability: 'target_ref',
+        claimBoundary: 'test auth prompt region',
+      };
+    }
+
+    function accountRegion(): Record<string, unknown> {
+      return {
+        regionId: 'region_account',
+        regionType: 'account',
+        state: 'logged_in_candidate',
+        confidence: 0.88,
+        objects: [
+          {
+            objectId: 'account_state',
+            label: 'account present',
+            objectType: 'status',
+            actionTypes: [],
+            targetability: 'not_clickable',
+            confidence: 0.82,
+            reason: 'test account state',
+          },
+        ],
+        candidateActionIds: [],
+        targetability: 'not_clickable',
+        claimBoundary: 'test account region',
+      };
+    }
+
     function contentDetailRegion(refPrefix: string): Record<string, unknown> {
       return {
         regionId: 'region_detail',
@@ -4950,6 +4997,94 @@ describe('handleToolCall execution wrapper', () => {
           }),
         ]),
       );
+    });
+
+    it('fresh read after an auth submit candidate proves login only when the auth prompt disappears and account state appears', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
+      auto.noteRunOwnedTab(1);
+      Object.defineProperty(auto, 'readBudget', { value: 5, writable: false });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_before_auth_submit',
+          tabId: 1,
+          pageRegions: [authPromptRegion()],
+        }),
+      );
+      await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  observedOutcome: 'modal_closed',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_auth_submit',
+        candidateAction: {
+          id: 'ca_auth_submit',
+          actionType: 'click',
+          targetRef: 'ref_auth_submit',
+          confidence: 0.91,
+          matchReason: 'auth submit candidate',
+          locatorChain: [{ type: 'ref', value: 'ref_auth_submit' }],
+          intent: 'auth.submit_login',
+        },
+      });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_after_auth_submit',
+          tabId: 1,
+          pageRegions: [accountRegion()],
+        }),
+      );
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.regionStatePostconditions).toEqual([
+        {
+          actionKind: 'click',
+          result: expect.objectContaining({
+            actionId: 'ca_auth_submit',
+            kind: 'login_completed',
+            verdict: 'passed',
+            reason: 'account_region_appeared_after_auth_prompt',
+          }),
+        },
+      ]);
+      expect(payload.taskResumeReadiness).toMatchObject({
+        status: 'postcondition_passed_ready',
+        canResumeOriginalTask: true,
+        nextStep: 'continue_original_task',
+        reason: 'region_state_login_completed_passed:account_region_appeared_after_auth_prompt',
+        handoffSummary: {
+          status: 'ready_to_continue',
+          nextAction: 'continue_original_task',
+          canContinue: true,
+        },
+      });
+      expect(JSON.stringify(payload.regionStatePostconditions)).not.toContain('15705171303');
     });
 
     it('does not resume original task when search readback lacks structured result rows', async () => {

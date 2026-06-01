@@ -301,6 +301,7 @@ export function inferRegionStatePostconditionKindForIntent(input: {
   if (input.actionKind === 'fill' && intent === 'search.enter_query') return null;
   if (intent === 'search.submit') return 'search_results_updated';
   if (intent === 'content.open_detail') return 'detail_opened';
+  if (intent === 'auth.submit_login') return 'login_completed';
   return null;
 }
 
