@@ -536,6 +536,15 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       hasSingleReadDefaultTopNDeliveryEvidence: false,
       deliveryNextRequiredCheck: 'collect_more_rows_before_top_n_delivery',
       fieldCoverageStatus: 'insufficient_title_fields',
+      collectionGuidance: {
+        status: 'needs_more_rows',
+        requiredNextAction: 'fresh_read_after_scroll_or_page_advance',
+        recommendedTool: 'chrome_read_page',
+        sameTabRequired: true,
+        forceRefreshRequired: true,
+        requiresNewObservedRows: true,
+        scrollToolSuccessIsNotBusinessSuccess: true,
+      },
     });
 
     const second = ctx.noteDomRegionRowsReadback(makeVisibleRegionRows(5, 6));
@@ -571,6 +580,13 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       nextRequiredCheck: 'accumulated_rows_ready_for_top_n_summary',
       summaryNextRequiredCheck: 'top_n_summary_ready',
       summaryQualityNextRequiredCheck: 'structured_top_n_summary_ready',
+      collectionGuidance: {
+        status: 'needs_stable_single_snapshot',
+        requiredNextAction: 'collect_stable_single_snapshot',
+        forceRefreshRequired: true,
+        requiresNewObservedRows: false,
+        scrollToolSuccessIsNotBusinessSuccess: true,
+      },
     });
   });
 
@@ -594,6 +610,12 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       canSupportDefaultTopNDelivery: true,
       hasSingleReadDefaultTopNDeliveryEvidence: true,
       deliveryNextRequiredCheck: 'top_n_delivery_ready',
+      collectionGuidance: {
+        status: 'ready',
+        requiredNextAction: 'summarize_current_top_n',
+        forceRefreshRequired: false,
+        requiresNewObservedRows: false,
+      },
     });
   });
 
@@ -623,6 +645,10 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       missingDeliverableRowCountForDefaultTopN: 10,
       canSupportDefaultTopNDelivery: false,
       deliveryNextRequiredCheck: 'collect_structured_fields_before_top_n_delivery',
+      collectionGuidance: {
+        status: 'needs_structured_fields',
+        requiredNextAction: 'collect_structured_fields_or_open_detail',
+      },
     });
   });
 
@@ -653,6 +679,10 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       deliveryNextRequiredCheck: 'collect_structured_fields_before_top_n_delivery',
       fieldCoverageStatus: 'title_only_fields',
       summaryQualityNextRequiredCheck: 'collect_supporting_text_or_detail_before_rich_summary',
+      collectionGuidance: {
+        status: 'needs_structured_fields',
+        requiredNextAction: 'collect_structured_fields_or_open_detail',
+      },
     });
   });
 
@@ -685,6 +715,10 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       fieldCoverageStatus: 'insufficient_title_fields',
       summaryNextRequiredCheck: 'more_rows_or_text_fields_required_before_top_n_summary',
       summaryQualityNextRequiredCheck: 'collect_more_titled_rows_before_top_n_summary',
+      collectionGuidance: {
+        status: 'needs_structured_fields',
+        requiredNextAction: 'collect_structured_fields_or_open_detail',
+      },
     });
   });
 
@@ -709,6 +743,10 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       canSupportDefaultTopNDelivery: false,
       missingUniqueTargetRefCountForDefaultTopN: 9,
       deliveryNextRequiredCheck: 'collect_more_unique_target_refs_before_top_n_delivery',
+      collectionGuidance: {
+        status: 'needs_unique_target_refs',
+        requiredNextAction: 'collect_more_unique_target_refs',
+      },
     });
   });
 
@@ -763,12 +801,20 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       missingUniqueTargetRefCountForDefaultTopN: 0,
       hasSingleReadDefaultTopNDeliveryEvidence: false,
       deliveryNextRequiredCheck: 'collect_stable_single_snapshot_before_top_n_delivery',
+      collectionGuidance: {
+        status: 'needs_stable_single_snapshot',
+        requiredNextAction: 'collect_stable_single_snapshot',
+      },
     });
     expect(ctx.peekDomRegionRowsReadbackAccumulationEvidence({ tabId: 8 })).toBeNull();
 
     snapshot!.uniqueTargetableRowCount = 0;
+    snapshot!.collectionGuidance.status = 'ready';
     expect(ctx.peekDomRegionRowsReadbackAccumulationEvidence({ tabId: 7 })).toMatchObject({
       uniqueTargetableRowCount: 10,
+      collectionGuidance: {
+        status: 'needs_stable_single_snapshot',
+      },
     });
   });
 

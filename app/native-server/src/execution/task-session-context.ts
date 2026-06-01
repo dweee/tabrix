@@ -149,6 +149,30 @@ export type TaskTopNFieldCoverageStatus =
   | 'structured_summary_fields_ready'
   | 'title_only_fields'
   | 'insufficient_title_fields';
+export type TaskTopNCollectionGuidanceStatus =
+  | 'ready'
+  | 'needs_more_rows'
+  | 'needs_structured_fields'
+  | 'needs_unique_target_refs'
+  | 'needs_stable_single_snapshot';
+export type TaskTopNCollectionRequiredNextAction =
+  | 'summarize_current_top_n'
+  | 'fresh_read_after_scroll_or_page_advance'
+  | 'collect_structured_fields_or_open_detail'
+  | 'collect_more_unique_target_refs'
+  | 'collect_stable_single_snapshot';
+
+export interface TaskTopNCollectionGuidance {
+  status: TaskTopNCollectionGuidanceStatus;
+  requiredNextAction: TaskTopNCollectionRequiredNextAction;
+  recommendedTool: 'chrome_read_page';
+  sameTabRequired: boolean;
+  forceRefreshRequired: boolean;
+  requiresNewObservedRows: boolean;
+  scrollToolSuccessIsNotBusinessSuccess: boolean;
+  instruction: string;
+  claimBoundary: string;
+}
 
 export interface TaskDomRegionRowsReadbackAccumulationEvidence {
   status: TaskTopNAccumulationStatus;
@@ -204,6 +228,7 @@ export interface TaskDomRegionRowsReadbackAccumulationEvidence {
   summaryNextRequiredCheck:
     | 'top_n_summary_ready'
     | 'more_rows_or_text_fields_required_before_top_n_summary';
+  collectionGuidance: TaskTopNCollectionGuidance;
   claimBoundary: string;
 }
 
@@ -1018,6 +1043,16 @@ export class TaskSessionContext {
       : uniqueTitleRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET
         ? 'title_only_fields'
         : 'insufficient_title_fields';
+    const collectionGuidance = buildTopNAccumulationCollectionGuidance({
+      canSatisfyDefaultTopN,
+      canSupportDefaultTopNFieldSummary,
+      canSupportDefaultTopNDelivery,
+      missingRowCountForDefaultTopN,
+      missingDeliverableRowCountForDefaultTopN,
+      missingUniqueTargetRefCountForDefaultTopN,
+      hasSingleReadDefaultTopNDeliveryEvidence:
+        accumulator.hasSingleReadDefaultTopNDeliveryEvidence,
+    });
 
     const evidence: TaskDomRegionRowsReadbackAccumulationEvidence = {
       status: canSatisfyDefaultTopN ? 'ready_for_default_top_n' : 'partial_accumulated_rows',
@@ -1078,6 +1113,7 @@ export class TaskSessionContext {
       summaryNextRequiredCheck: canSupportDefaultTopNSummary
         ? 'top_n_summary_ready'
         : 'more_rows_or_text_fields_required_before_top_n_summary',
+      collectionGuidance,
       claimBoundary:
         'This proves only unique targetable and summarizable DOM rows observed during this in-memory task/session for the same tab and source region. Default Top-N delivery also requires at least one stable single-read snapshot with enough structured fields and unique targetRefs. It does not prove full result-set completeness, exact platform ranking, or rows that were never observed.',
     };
@@ -1915,7 +1951,88 @@ function getDomRegionRowFieldCoverage(row: TaskVisibleRegionRow): {
 function cloneTaskDomRegionRowsReadbackAccumulationEvidence(
   evidence: TaskDomRegionRowsReadbackAccumulationEvidence,
 ): TaskDomRegionRowsReadbackAccumulationEvidence {
-  return { ...evidence };
+  return { ...evidence, collectionGuidance: { ...evidence.collectionGuidance } };
+}
+
+function buildTopNAccumulationCollectionGuidance(input: {
+  canSatisfyDefaultTopN: boolean;
+  canSupportDefaultTopNFieldSummary: boolean;
+  canSupportDefaultTopNDelivery: boolean;
+  missingRowCountForDefaultTopN: number;
+  missingDeliverableRowCountForDefaultTopN: number;
+  missingUniqueTargetRefCountForDefaultTopN: number;
+  hasSingleReadDefaultTopNDeliveryEvidence: boolean;
+}): TaskTopNCollectionGuidance {
+  const base = {
+    recommendedTool: 'chrome_read_page' as const,
+    sameTabRequired: true,
+    scrollToolSuccessIsNotBusinessSuccess: true,
+  };
+
+  if (!input.canSatisfyDefaultTopN) {
+    return {
+      ...base,
+      status: 'needs_more_rows',
+      requiredNextAction: 'fresh_read_after_scroll_or_page_advance',
+      forceRefreshRequired: true,
+      requiresNewObservedRows: true,
+      instruction: `Need ${input.missingRowCountForDefaultTopN} more unique targetable rows before claiming default Top-N coverage. After a scroll or page advance, run a forced fresh same-tab chrome_read_page and require newly observed rows.`,
+      claimBoundary:
+        'Scroll/page-advance success alone is not business success; Top-N progress is proven only by fresh same-tab readback that observes additional unique rows.',
+    };
+  }
+
+  if (!input.canSupportDefaultTopNFieldSummary) {
+    return {
+      ...base,
+      status: 'needs_structured_fields',
+      requiredNextAction: 'collect_structured_fields_or_open_detail',
+      forceRefreshRequired: true,
+      requiresNewObservedRows: false,
+      instruction: `Rows are enough for count, but ${input.missingDeliverableRowCountForDefaultTopN} more rows need structured title plus supporting or metadata fields before default Top-N delivery.`,
+      claimBoundary:
+        'A targetable row count does not prove summary quality; structured field evidence or detail readback is still required.',
+    };
+  }
+
+  if (input.missingUniqueTargetRefCountForDefaultTopN > 0) {
+    return {
+      ...base,
+      status: 'needs_unique_target_refs',
+      requiredNextAction: 'collect_more_unique_target_refs',
+      forceRefreshRequired: true,
+      requiresNewObservedRows: false,
+      instruction: `Rows have enough structured fields, but ${input.missingUniqueTargetRefCountForDefaultTopN} more unique targetRefs are needed before default Top-N delivery.`,
+      claimBoundary:
+        'Readable rows do not prove executable delivery; each Top-N item needs a stable unique targetRef or equivalent detail target.',
+    };
+  }
+
+  if (!input.canSupportDefaultTopNDelivery || !input.hasSingleReadDefaultTopNDeliveryEvidence) {
+    return {
+      ...base,
+      status: 'needs_stable_single_snapshot',
+      requiredNextAction: 'collect_stable_single_snapshot',
+      forceRefreshRequired: true,
+      requiresNewObservedRows: false,
+      instruction:
+        'Accumulated rows are enough, but default Top-N delivery still needs one stable same-tab snapshot containing enough structured rows and unique targetRefs.',
+      claimBoundary:
+        'Accumulated multi-read coverage can support planning, but final Top-N delivery needs a stable single-read proof to avoid stitching unstable page states.',
+    };
+  }
+
+  return {
+    ...base,
+    status: 'ready',
+    requiredNextAction: 'summarize_current_top_n',
+    forceRefreshRequired: false,
+    requiresNewObservedRows: false,
+    instruction:
+      'Default Top-N delivery is supported by the current same-tab row evidence and stable single-read proof.',
+    claimBoundary:
+      'This supports default Top-N delivery for observed rows only; it still does not prove full platform ranking or unseen results.',
+  };
 }
 
 function isPositiveTabId(value: number | null): value is number {

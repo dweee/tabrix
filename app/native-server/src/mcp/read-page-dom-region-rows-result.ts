@@ -9,6 +9,7 @@ import type { DataSourceDecision, TaskIntentClass } from '../execution/data-sour
 import type { LayerContractEnvelope } from '../execution/layer-contract';
 import type {
   TaskDomRegionRowsReadbackAccumulationEvidence,
+  TaskTopNCollectionGuidance,
   TaskVisibleRegionRowsData,
 } from '../execution/task-session-context';
 import type { ChooseContextDecisionSnapshot } from '../execution/skip-read-orchestrator';
@@ -54,6 +55,7 @@ interface TopNReadbackEvidence {
   summaryNextRequiredCheck:
     | 'top_n_summary_ready'
     | 'more_rows_or_text_fields_required_before_top_n_summary';
+  collectionGuidance: TaskTopNCollectionGuidance;
   claimBoundary: string;
 }
 
@@ -187,6 +189,11 @@ function buildTopNReadbackEvidence(visibleRows: TaskVisibleRegionRowsData): TopN
     : titleRowCount >= DEFAULT_TOP_N_READBACK_TARGET
       ? 'title_only_fields'
       : 'insufficient_title_fields';
+  const collectionGuidance = buildTopNReadbackCollectionGuidance({
+    canSatisfyDefaultTopN,
+    canSupportDefaultTopNFieldSummary,
+    missingRowCountForDefaultTopN,
+  });
 
   return {
     status: canSatisfyDefaultTopN ? 'ready_for_default_top_n' : 'partial_rows_only',
@@ -218,8 +225,60 @@ function buildTopNReadbackEvidence(visibleRows: TaskVisibleRegionRowsData): TopN
     summaryNextRequiredCheck: canSupportDefaultTopNSummary
       ? 'top_n_summary_ready'
       : 'more_rows_or_text_fields_required_before_top_n_summary',
+    collectionGuidance,
     claimBoundary:
       'No explicit requestedN was provided; this proves only the current reliable visible rows, their visual order, targetRef coverage, and privacy-safe title/supporting-field coverage, not full result-set completeness, final summary correctness, or ranking correctness.',
+  };
+}
+
+function buildTopNReadbackCollectionGuidance(input: {
+  canSatisfyDefaultTopN: boolean;
+  canSupportDefaultTopNFieldSummary: boolean;
+  missingRowCountForDefaultTopN: number;
+}): TaskTopNCollectionGuidance {
+  const base = {
+    recommendedTool: 'chrome_read_page' as const,
+    sameTabRequired: true,
+    scrollToolSuccessIsNotBusinessSuccess: true,
+  };
+
+  if (!input.canSatisfyDefaultTopN) {
+    return {
+      ...base,
+      status: 'needs_more_rows',
+      requiredNextAction: 'fresh_read_after_scroll_or_page_advance',
+      forceRefreshRequired: true,
+      requiresNewObservedRows: true,
+      instruction: `Need ${input.missingRowCountForDefaultTopN} more targetable visible rows before claiming default Top-N coverage. After a scroll or page advance, run a forced fresh same-tab chrome_read_page and require more observed rows.`,
+      claimBoundary:
+        'Scroll/page-advance success alone is not business success; Top-N progress is proven only by fresh same-tab readback that observes more rows.',
+    };
+  }
+
+  if (!input.canSupportDefaultTopNFieldSummary) {
+    return {
+      ...base,
+      status: 'needs_structured_fields',
+      requiredNextAction: 'collect_structured_fields_or_open_detail',
+      forceRefreshRequired: true,
+      requiresNewObservedRows: false,
+      instruction:
+        'Rows are enough for count, but structured field evidence or detail readback is still required before a structured Top-N summary.',
+      claimBoundary:
+        'A targetable row count does not prove summary quality; structured field evidence or detail readback is still required.',
+    };
+  }
+
+  return {
+    ...base,
+    status: 'ready',
+    requiredNextAction: 'summarize_current_top_n',
+    forceRefreshRequired: false,
+    requiresNewObservedRows: false,
+    instruction:
+      'Default Top-N summary is supported by the current same-tab visible row readback evidence.',
+    claimBoundary:
+      'This supports default Top-N summary for observed visible rows only; it still does not prove full platform ranking or unseen results.',
   };
 }
 
@@ -333,6 +392,9 @@ export function buildDomRegionRowsSuccessResult(args: {
           topNReadbackEvidence.missingTitleRowCountForDefaultTopN,
         ),
         topNSummaryQualityNextRequiredCheck: topNReadbackEvidence.summaryQualityNextRequiredCheck,
+        topNCollectionGuidanceStatus: topNReadbackEvidence.collectionGuidance.status,
+        topNCollectionRequiredNextAction:
+          topNReadbackEvidence.collectionGuidance.requiredNextAction,
         topNMissingSummarizableRowsForDefault: String(
           topNReadbackEvidence.missingSummarizableRowCountForDefaultTopN,
         ),
@@ -357,6 +419,10 @@ export function buildDomRegionRowsSuccessResult(args: {
         topNAccumulationFieldSummaryReady: String(
           args.topNAccumulationEvidence?.canSupportDefaultTopNFieldSummary ?? false,
         ),
+        topNAccumulationGuidanceStatus:
+          args.topNAccumulationEvidence?.collectionGuidance.status ?? 'not_available',
+        topNAccumulationRequiredNextAction:
+          args.topNAccumulationEvidence?.collectionGuidance.requiredNextAction ?? 'not_available',
         rejectedRegionReasonDistribution: JSON.stringify(
           args.visibleRows.rejectedRegionReasonDistribution ?? {},
         ),

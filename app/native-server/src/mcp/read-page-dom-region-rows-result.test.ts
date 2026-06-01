@@ -211,6 +211,15 @@ describe('buildDomRegionRowsSuccessResult', () => {
       nextRequiredCheck: 'scroll_or_request_more_rows_before_claiming_top_n_complete',
       summaryNextRequiredCheck: 'more_rows_or_text_fields_required_before_top_n_summary',
       summaryQualityNextRequiredCheck: 'collect_more_titled_rows_before_top_n_summary',
+      collectionGuidance: {
+        status: 'needs_more_rows',
+        requiredNextAction: 'fresh_read_after_scroll_or_page_advance',
+        recommendedTool: 'chrome_read_page',
+        sameTabRequired: true,
+        forceRefreshRequired: true,
+        requiresNewObservedRows: true,
+        scrollToolSuccessIsNotBusinessSuccess: true,
+      },
     });
     expect(payload.topNReadbackEvidence.claimBoundary).toContain(
       'not full result-set completeness',
@@ -229,6 +238,8 @@ describe('buildDomRegionRowsSuccessResult', () => {
       topNFieldSummaryReady: 'false',
       topNMissingSummarizableRowsForDefault: '8',
       topNMissingTitleRowsForDefault: '8',
+      topNCollectionGuidanceStatus: 'needs_more_rows',
+      topNCollectionRequiredNextAction: 'fresh_read_after_scroll_or_page_advance',
     });
   });
 
@@ -269,6 +280,13 @@ describe('buildDomRegionRowsSuccessResult', () => {
       nextRequiredCheck: 'rows_ready_for_top_n_summary',
       summaryNextRequiredCheck: 'top_n_summary_ready',
       summaryQualityNextRequiredCheck: 'structured_top_n_summary_ready',
+      collectionGuidance: {
+        status: 'ready',
+        requiredNextAction: 'summarize_current_top_n',
+        forceRefreshRequired: false,
+        requiresNewObservedRows: false,
+        scrollToolSuccessIsNotBusinessSuccess: true,
+      },
     });
     expect(operationLog.metadata).toMatchObject({
       topNReadbackStatus: 'ready_for_default_top_n',
@@ -276,6 +294,8 @@ describe('buildDomRegionRowsSuccessResult', () => {
       topNSummaryReady: 'true',
       topNFieldCoverageStatus: 'structured_summary_fields_ready',
       topNFieldSummaryReady: 'true',
+      topNCollectionGuidanceStatus: 'ready',
+      topNCollectionRequiredNextAction: 'summarize_current_top_n',
     });
   });
 
@@ -308,6 +328,12 @@ describe('buildDomRegionRowsSuccessResult', () => {
       missingTitleRowCountForDefaultTopN: 0,
       fieldCoverageStatus: 'title_only_fields',
       summaryQualityNextRequiredCheck: 'collect_supporting_text_or_detail_before_rich_summary',
+      collectionGuidance: {
+        status: 'needs_structured_fields',
+        requiredNextAction: 'collect_structured_fields_or_open_detail',
+        forceRefreshRequired: true,
+        requiresNewObservedRows: false,
+      },
     });
     expect(operationLog.metadata).toMatchObject({
       topNFieldCoverageStatus: 'title_only_fields',
@@ -444,6 +470,17 @@ describe('buildDomRegionRowsSuccessResult', () => {
         nextRequiredCheck: 'accumulated_rows_ready_for_top_n_summary',
         summaryNextRequiredCheck: 'top_n_summary_ready',
         summaryQualityNextRequiredCheck: 'structured_top_n_summary_ready',
+        collectionGuidance: {
+          status: 'needs_stable_single_snapshot',
+          requiredNextAction: 'collect_stable_single_snapshot',
+          recommendedTool: 'chrome_read_page',
+          sameTabRequired: true,
+          forceRefreshRequired: true,
+          requiresNewObservedRows: false,
+          scrollToolSuccessIsNotBusinessSuccess: true,
+          instruction: 'Collect one stable same-tab snapshot before delivery.',
+          claimBoundary: 'deterministic task/session accumulation fixture only',
+        },
         claimBoundary: 'deterministic task/session accumulation fixture only',
       },
     });
@@ -462,6 +499,10 @@ describe('buildDomRegionRowsSuccessResult', () => {
       canSatisfyDefaultTopN: true,
       canSupportDefaultTopNSummary: true,
       canSupportDefaultTopNFieldSummary: true,
+      collectionGuidance: {
+        status: 'needs_stable_single_snapshot',
+        requiredNextAction: 'collect_stable_single_snapshot',
+      },
     });
     expect(operationLog.metadata).toMatchObject({
       topNAccumulationStatus: 'ready_for_default_top_n',
@@ -472,6 +513,8 @@ describe('buildDomRegionRowsSuccessResult', () => {
       topNAccumulationSummaryReady: 'true',
       topNAccumulationFieldCoverageStatus: 'structured_summary_fields_ready',
       topNAccumulationFieldSummaryReady: 'true',
+      topNAccumulationGuidanceStatus: 'needs_stable_single_snapshot',
+      topNAccumulationRequiredNextAction: 'collect_stable_single_snapshot',
     });
   });
 });

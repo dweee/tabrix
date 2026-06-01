@@ -185,6 +185,27 @@ export interface CloseoutTopNAccumulationEvidence {
   summaryNextRequiredCheck:
     | 'top_n_summary_ready'
     | 'more_rows_or_text_fields_required_before_top_n_summary';
+  collectionGuidance?: {
+    status:
+      | 'ready'
+      | 'needs_more_rows'
+      | 'needs_structured_fields'
+      | 'needs_unique_target_refs'
+      | 'needs_stable_single_snapshot';
+    requiredNextAction:
+      | 'summarize_current_top_n'
+      | 'fresh_read_after_scroll_or_page_advance'
+      | 'collect_structured_fields_or_open_detail'
+      | 'collect_more_unique_target_refs'
+      | 'collect_stable_single_snapshot';
+    recommendedTool: 'chrome_read_page';
+    sameTabRequired: boolean;
+    forceRefreshRequired: boolean;
+    requiresNewObservedRows: boolean;
+    scrollToolSuccessIsNotBusinessSuccess: boolean;
+    instruction: string;
+    claimBoundary: string;
+  };
   claimBoundary: string;
 }
 
@@ -776,7 +797,7 @@ function buildTopNAccumulationReason(
   evidence?: CloseoutTopNAccumulationEvidence | null,
 ): string | null {
   if (!evidence) return null;
-  return [
+  const reasonParts = [
     'top_n_accumulation',
     `status=${evidence.status}`,
     `targetableReady=${evidence.canSatisfyDefaultTopN}`,
@@ -799,7 +820,13 @@ function buildTopNAccumulationReason(
     `summaryNext=${evidence.summaryNextRequiredCheck}`,
     `summaryQualityNext=${evidence.summaryQualityNextRequiredCheck}`,
     `next=${evidence.nextRequiredCheck}`,
-  ].join(':');
+  ];
+  if (evidence.collectionGuidance) {
+    reasonParts.push(
+      `guidance=${evidence.collectionGuidance.status}:${evidence.collectionGuidance.requiredNextAction}:fresh=${evidence.collectionGuidance.forceRefreshRequired}:sameTab=${evidence.collectionGuidance.sameTabRequired}:newRows=${evidence.collectionGuidance.requiresNewObservedRows}`,
+    );
+  }
+  return reasonParts.join(':');
 }
 
 function buildDetailFieldReadbackReason(
