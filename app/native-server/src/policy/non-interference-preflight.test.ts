@@ -343,9 +343,9 @@ describe('evaluateNonInterferencePreflight', () => {
           actionKind: 'click',
           result: {
             actionId: 'ca_unknown_before_refresh',
-            kind: 'search_results_updated',
+            kind: 'login_completed',
             verdict: 'unknown',
-            reason: 'result_collection_not_comparable',
+            reason: 'auth_state_not_comparable',
             beforeSummary: [],
             afterSummary: [],
             producedAtMs: 1000,
@@ -369,12 +369,12 @@ describe('evaluateNonInterferencePreflight', () => {
         {
           actionKind: 'click',
           result: {
-            actionId: 'ca_search_submit_after_refresh',
-            kind: 'search_results_updated',
+            actionId: 'ca_auth_submit_after_refresh',
+            kind: 'login_completed',
             verdict: 'passed',
-            reason: 'result_collection_changed_after_action',
-            beforeSummary: ['content_list:loaded:before'],
-            afterSummary: ['content_list:loaded:after'],
+            reason: 'account_region_appeared_after_auth_prompt',
+            beforeSummary: ['auth_surface:visible'],
+            afterSummary: ['account:visible', 'auth_surface:absent'],
             producedAtMs: 2000,
             claimBoundary: 'deterministic region-state fixture only',
           },
@@ -397,6 +397,100 @@ describe('evaluateNonInterferencePreflight', () => {
       status: 'postcondition_passed_ready',
       canResumeOriginalTask: true,
       nextStep: 'continue_original_task',
+    });
+  });
+
+  it('blocks impact actions during OTP wait and allows them after fresh login completion proof', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRunOwnedTab(42);
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 42,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_request_otp',
+            kind: 'otp_requested',
+            verdict: 'passed',
+            reason: 'otp_request_waiting_for_user_evidence_after_action',
+            beforeSummary: ['form:ready_to_request_otp'],
+            afterSummary: ['form:waiting_for_user_otp'],
+            producedAtMs: 1000,
+            claimBoundary: 'deterministic OTP request fixture only',
+          },
+        },
+      ],
+    });
+
+    const waitingVerdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.FILL,
+      args: { tabId: 42, selector: '#q', value: 'poster', userConfirmed: true },
+      taskContext: ctx,
+    });
+
+    expect(waitingVerdict.allowed).toBe(false);
+    expect(waitingVerdict.audit).toMatchObject({
+      verdict: 'collaboration_required',
+      taskResumeReadiness: {
+        status: 'blocked_by_auth_verification',
+        nextStep: 'wait_for_user_collaboration',
+      },
+    });
+
+    const submitVerdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.CLICK,
+      args: {
+        tabId: 42,
+        ref: 'ref_auth_submit',
+        candidateAction: {
+          id: 'ca_auth_submit',
+          actionType: 'click',
+          targetRef: 'ref_auth_submit',
+          intent: 'auth.submit_login',
+        },
+      },
+      taskContext: ctx,
+    });
+
+    expect(submitVerdict.allowed).toBe(true);
+    expect(submitVerdict.audit).toMatchObject({
+      verdict: 'allow',
+      reason: 'auth_resume_completion_action',
+    });
+
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 42,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_auth_submit',
+            kind: 'login_completed',
+            verdict: 'passed',
+            reason: 'account_region_appeared_after_auth_prompt',
+            beforeSummary: ['auth_surface:visible', 'form:waiting_for_user_otp'],
+            afterSummary: ['account:visible', 'auth_surface:absent'],
+            producedAtMs: 2000,
+            claimBoundary: 'deterministic login completion fixture only',
+          },
+        },
+      ],
+    });
+
+    const resumedVerdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.FILL,
+      args: { tabId: 42, selector: '#q', value: 'poster', userConfirmed: true },
+      taskContext: ctx,
+    });
+
+    expect(resumedVerdict.allowed).toBe(true);
+    expect(resumedVerdict.audit).toMatchObject({
+      verdict: 'allow',
+      reason: 'user_confirmed',
+    });
+    expect(ctx.buildTaskResumeReadiness({ tabId: 42 })).toMatchObject({
+      status: 'postcondition_passed_ready',
+      evidenceKinds: ['region_state_postcondition', 'user_collaboration_resolved'],
     });
   });
 

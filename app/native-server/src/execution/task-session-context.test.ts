@@ -1210,6 +1210,69 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
     });
   });
 
+  it('allows original-task resume after OTP user collaboration is followed by fresh login proof', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_request_otp',
+            kind: 'otp_requested',
+            verdict: 'passed',
+            reason: 'otp_request_waiting_for_user_evidence_after_action',
+            beforeSummary: ['form:ready_to_request_otp:target_ref:actions:1'],
+            afterSummary: ['form:waiting_for_user_otp:target_ref:actions:1'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic OTP request fixture only',
+          },
+        },
+      ],
+    });
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'blocked_by_auth_verification',
+      canResumeOriginalTask: false,
+      nextStep: 'wait_for_user_collaboration',
+    });
+
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_auth_submit',
+            kind: 'login_completed',
+            verdict: 'passed',
+            reason: 'account_region_appeared_after_auth_prompt',
+            beforeSummary: ['auth_surface:visible', 'form:waiting_for_user_otp'],
+            afterSummary: ['account:visible', 'auth_surface:absent'],
+            producedAtMs: 2234,
+            claimBoundary: 'deterministic login completion fixture only',
+          },
+        },
+      ],
+    });
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_passed_ready',
+      canResumeOriginalTask: true,
+      nextStep: 'continue_original_task',
+      evidenceKinds: ['region_state_postcondition', 'user_collaboration_resolved'],
+      reason: 'region_state_login_completed_passed:account_region_appeared_after_auth_prompt',
+      handoffSummary: {
+        status: 'ready_to_continue',
+        canContinue: true,
+        nextAction: 'continue_original_task',
+        evidenceSummary: {
+          evidenceKinds: ['region_state_postcondition', 'user_collaboration_resolved'],
+        },
+      },
+    });
+  });
+
   it('blocks search-task resume until DOM region rows readback can support default top-N', () => {
     const missingRows = new TaskSessionContext({ readBudget: 6 });
     missingRows.noteRegionStatePostconditionsForCloseout({

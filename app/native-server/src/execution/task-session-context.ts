@@ -1414,7 +1414,10 @@ export class TaskSessionContext {
         canResumeOriginalTask: true,
         nextStep: 'continue_original_task',
         tabId,
-        evidenceKinds: passedPostconditionEvidenceKindsForResume(latestPostcondition.result.kind),
+        evidenceKinds: passedPostconditionEvidenceKindsForResume(
+          latestPostcondition.result.kind,
+          hasPriorPassedOtpRequestForTab(postconditions, latestPostcondition),
+        ),
         reason: `region_state_${latestPostcondition.result.kind}_passed:${latestPostcondition.result.reason}`,
         claimBoundary: latestPostcondition.result.claimBoundary,
       });
@@ -2154,10 +2157,15 @@ function searchPostconditionResumeBlockReason(
 
 function passedPostconditionEvidenceKindsForResume(
   kind: TaskRegionStatePostconditionKind,
+  userCollaborationResolved = false,
 ): string[] {
+  const evidenceKinds = ['region_state_postcondition'];
+  if (userCollaborationResolved) {
+    evidenceKinds.push('user_collaboration_resolved');
+  }
   if (kind === 'search_results_updated') {
     return [
-      'region_state_postcondition',
+      ...evidenceKinds,
       'dom_region_rows_readback',
       'top_n_field_coverage',
       'top_n_delivery_readiness',
@@ -2165,9 +2173,36 @@ function passedPostconditionEvidenceKindsForResume(
     ];
   }
   if (kind === 'detail_opened') {
-    return ['region_state_postcondition', 'detail_field_readback', 'detail_action_binding'];
+    return [...evidenceKinds, 'detail_field_readback', 'detail_action_binding'];
   }
-  return ['region_state_postcondition'];
+  return evidenceKinds;
+}
+
+function hasPriorPassedOtpRequestForTab(
+  postconditions: TaskRegionStatePostconditionForCloseout[],
+  latestPostcondition: TaskRegionStatePostconditionForCloseout,
+): boolean {
+  if (latestPostcondition.result.kind !== 'login_completed') return false;
+  const latestProducedAtMs = Number.isFinite(latestPostcondition.result.producedAtMs)
+    ? latestPostcondition.result.producedAtMs
+    : Number.POSITIVE_INFINITY;
+
+  return postconditions.some((postcondition) => {
+    if (postcondition === latestPostcondition) return false;
+    if (postcondition.result.kind !== 'otp_requested') return false;
+    if (postcondition.result.verdict !== 'passed') return false;
+    if (
+      latestPostcondition.tabId !== null &&
+      postcondition.tabId !== null &&
+      postcondition.tabId !== latestPostcondition.tabId
+    ) {
+      return false;
+    }
+    const producedAtMs = Number.isFinite(postcondition.result.producedAtMs)
+      ? postcondition.result.producedAtMs
+      : Number.NEGATIVE_INFINITY;
+    return producedAtMs <= latestProducedAtMs;
+  });
 }
 
 function buildPendingBusinessVerificationForResume(

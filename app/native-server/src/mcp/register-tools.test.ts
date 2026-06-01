@@ -5242,6 +5242,156 @@ describe('handleToolCall execution wrapper', () => {
       expect(JSON.stringify(payload.regionStatePostconditions)).not.toContain('134336');
     });
 
+    it('fresh login proof after OTP user collaboration resolves the wait state and resumes the original task', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
+      auto.noteRunOwnedTab(1);
+      Object.defineProperty(auto, 'readBudget', { value: 6, writable: false });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_before_request_otp_resume',
+          tabId: 1,
+          pageRegions: [],
+          authCollaboration: otpAuthCollaboration({
+            readiness: 'ready_to_request_otp',
+            requestOtpState: 'visible',
+          }),
+        }),
+      );
+      await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  observedOutcome: 'spa_partial_update',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_request_otp',
+        candidateAction: {
+          id: 'ca_request_otp',
+          actionType: 'click',
+          targetRef: 'ref_request_otp',
+          confidence: 0.91,
+          matchReason: 'request OTP candidate',
+          locatorChain: [{ type: 'ref', value: 'ref_request_otp' }],
+          intent: 'auth.request_otp',
+        },
+      });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_after_request_otp_resume',
+          tabId: 1,
+          pageRegions: [authPromptRegion()],
+          authCollaboration: otpAuthCollaboration({
+            readiness: 'waiting_for_user_otp',
+            requestOtpState: 'countdown',
+          }),
+        }),
+      );
+      const waitingResult = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+      const waitingPayload = JSON.parse(String(waitingResult.content[0].text));
+      expect(waitingPayload.taskResumeReadiness).toMatchObject({
+        status: 'blocked_by_auth_verification',
+        canResumeOriginalTask: false,
+        nextStep: 'wait_for_user_collaboration',
+      });
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  observedOutcome: 'modal_closed',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_auth_submit',
+        candidateAction: {
+          id: 'ca_auth_submit',
+          actionType: 'click',
+          targetRef: 'ref_auth_submit',
+          confidence: 0.91,
+          matchReason: 'auth submit candidate',
+          locatorChain: [{ type: 'ref', value: 'ref_auth_submit' }],
+          intent: 'auth.submit_login',
+        },
+      });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_after_auth_submit_resume',
+          tabId: 1,
+          pageRegions: [accountRegion()],
+        }),
+      );
+      const resumedResult = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+      const resumedPayload = JSON.parse(String(resumedResult.content[0].text));
+
+      expect(resumedPayload.regionStatePostconditions).toEqual([
+        {
+          actionKind: 'click',
+          result: expect.objectContaining({
+            actionId: 'ca_auth_submit',
+            kind: 'login_completed',
+            verdict: 'passed',
+            reason: 'account_region_appeared_after_auth_prompt',
+          }),
+        },
+      ]);
+      expect(resumedPayload.taskResumeReadiness).toMatchObject({
+        status: 'postcondition_passed_ready',
+        canResumeOriginalTask: true,
+        nextStep: 'continue_original_task',
+        evidenceKinds: ['region_state_postcondition', 'user_collaboration_resolved'],
+        handoffSummary: {
+          status: 'ready_to_continue',
+          nextAction: 'continue_original_task',
+          canContinue: true,
+          evidenceSummary: {
+            evidenceKinds: ['region_state_postcondition', 'user_collaboration_resolved'],
+          },
+        },
+      });
+      expect(JSON.stringify(resumedPayload.regionStatePostconditions)).not.toContain('15705171303');
+      expect(JSON.stringify(resumedPayload.regionStatePostconditions)).not.toContain('170302');
+    });
+
     it('does not resume original task when search readback lacks structured result rows', async () => {
       markBridgeReady();
       const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');

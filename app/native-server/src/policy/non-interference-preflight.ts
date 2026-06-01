@@ -15,6 +15,7 @@ export type NonInterferenceVerdictReason =
   | 'run_owned_tab'
   | 'legacy_explicit_tab_allowed'
   | 'user_confirmed'
+  | 'auth_resume_completion_action'
   | 'collaboration_requested'
   | 'auth_resume_verification_required'
   | 'task_resume_readiness_not_proven'
@@ -110,6 +111,24 @@ export function evaluateNonInterferencePreflight(input: {
     taskResumeReadiness &&
     shouldGateImpactActionForTaskResumeReadiness(input.toolName, taskResumeReadiness)
   ) {
+    if (
+      shouldAllowAuthResumeCompletionAction({
+        toolName: input.toolName,
+        args: input.args,
+        taskContext: input.taskContext,
+        targetTabId,
+        readiness: taskResumeReadiness,
+      })
+    ) {
+      return allow(
+        input,
+        mode,
+        'auth_resume_completion_action',
+        targetTabId,
+        targetTabIds,
+        runOwnedTabIds,
+      );
+    }
     const message = buildTaskResumeReadinessMessage(taskResumeReadiness);
     if (taskResumeReadiness.nextStep === 'stop_not_proven') {
       return block(
@@ -413,6 +432,21 @@ function shouldGateImpactActionForTaskResumeReadiness(
   );
 }
 
+function shouldAllowAuthResumeCompletionAction(input: {
+  toolName: string;
+  args: unknown;
+  taskContext: TaskSessionContext | null;
+  targetTabId: number | null;
+  readiness: TaskResumeReadinessSnapshot;
+}): boolean {
+  if (input.toolName !== TOOL_NAMES.BROWSER.CLICK) return false;
+  if (input.readiness.status !== 'blocked_by_auth_verification') return false;
+  if (input.readiness.nextStep !== 'wait_for_user_collaboration') return false;
+  if (!input.readiness.evidenceKinds.includes('user_collaboration_required')) return false;
+  if (readCandidateActionIntent(input.args) !== 'auth.submit_login') return false;
+  return input.targetTabId !== null && input.taskContext?.isRunOwnedTab(input.targetTabId) === true;
+}
+
 function buildTaskResumeReadinessMessage(
   readiness: TaskResumeReadinessSnapshot | null | undefined,
 ): string {
@@ -479,6 +513,13 @@ function readString(args: unknown, key: string): string | null {
   if (!args || typeof args !== 'object') return null;
   const value = (args as Record<string, unknown>)[key];
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function readCandidateActionIntent(args: unknown): string | null {
+  if (!args || typeof args !== 'object') return null;
+  const candidateAction = (args as Record<string, unknown>).candidateAction;
+  if (!candidateAction || typeof candidateAction !== 'object') return null;
+  return readString(candidateAction, 'intent');
 }
 
 function readBoolean(args: unknown, key: string): boolean | null {
