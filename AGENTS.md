@@ -55,6 +55,18 @@ Then continue with the smallest relevant task-specific reading set below.
 
 Detailed PRDs, sprint backlogs, owner-lane briefs, and version-internal plans are maintainer-private materials and must stay outside the public Git tree. Public contributors should use `docs/ROADMAP.md`, `docs/PRODUCT_SURFACE_MATRIX.md`, and code-local issues/PRs as the public working contract.
 
+### Public rulebook boundary
+
+`AGENTS.md` governs how AI assistants contribute to the public repository.
+
+It does **not** define:
+- the current maintainer-private version goal,
+- the current private active execution SoT,
+- the current private delivery ledger state,
+- or maintainer-private owner-lane dispatch workflow details.
+
+Those private authorities may exist outside the public repository and must not be recreated here.
+
 ## Task-Specific Reading
 
 ### Product positioning, public docs, and boundary-governance tasks
@@ -151,64 +163,19 @@ If a task seems to require any of these surfaces, stop and ask. The strategic va
 
 ## Role-Based Execution Model (any AI assistant)
 
-This repository splits AI-assisted work into three lanes. The split is based on **task responsibility**, not on which AI product is running. Any AI assistant (Claude, Codex, Cursor Agent, Cline, Windsurf, GPT-5, Gemini, QwenPaw, future entrants) may run any lane, but it must know which lane it is acting in and must not silently cross the boundary.
+This repository recognizes three AI work lanes. The split is based on **task responsibility**, not on which AI product is running. Any AI assistant may operate in any lane, but it must know which lane it is in and must not silently cross the boundary.
 
-| | **Owner-lane** | **Executor-lane** | **Acceptance-lane** |
-| --- | --- | --- | --- |
-| Who runs it | Any AI assistant **acting as the task owner** (or a human maintainer) | Any AI assistant dispatched to execute a pre-authored brief | Any AI assistant or maintainer validating product-level behavior |
-| Typical responsibility | Product manager + technical manager + architect: define user value, scope, architecture, contracts, risks, and task order | Implement a bounded change exactly within the brief | Test manager: verify runtime claims, choose scenario-library coverage, compare competitors, and judge evidence |
-| Allowed to decide | Architecture, public contracts, schema, risk tier, backlog entries, removed-surface questions, task acceptance criteria | Only how to carry out an already-approved decision | Whether the evidence supports the claimed product behavior |
-| Must not do | Pretend implementation-only evidence proves product readiness | Change architecture, public contracts, schema, risk tier, or scope | Hide capability gaps behind fallback success or unit tests |
-| Commit authority | Yes, after verification | No by default — returns a diff / patch for owner review | Usually no — produces acceptance evidence and gaps |
+| Lane | Responsibility | Must not do |
+| --- | --- | --- |
+| **Owner-lane** | Define user value, scope, architecture, contract/risk decisions, and task order | Pretend implementation-only evidence proves product readiness |
+| **Executor-lane** | Implement a bounded approved brief exactly within scope | Change architecture, public contracts, schema, risk tier, or scope silently |
+| **Acceptance-lane** | Validate product behavior, evidence quality, and scenario coverage | Hide capability gaps behind fallback success or unit tests |
 
-The purpose of the split is to keep **decision quality, execution focus, and acceptance evidence** separate. One AI assistant may perform multiple lanes in one session, but it must explicitly switch responsibilities and close each lane with the matching evidence standard.
+One AI assistant may perform multiple lanes in one session, but it must explicitly switch responsibilities and use the matching evidence standard.
 
-### Executor-lane allowlist (mechanical tasks)
+Executor-lane may do mechanical work such as bounded refactors, imports, docs on explicitly listed symbols, test scaffolding on explicitly listed methods, narrow file deletions, and running existing verification commands. Executor-lane must stop and return control to owner-lane when a task requires architectural choice, public contract change, risk-tier change, schema migration, dependency/CI change, or a removed-surface decision.
 
-When running executor-lane, an AI assistant **may** do:
-
-1. Rename a symbol / file repo-wide with explicit search-and-replace rules.
-2. Migrate imports after a module move when source and target paths are both given.
-3. Add JSDoc / TSDoc blocks to an explicit list of functions.
-4. Add `it.todo` test-skeleton scaffolding for an explicit list of methods.
-5. Delete files that are listed by path (dead-code removal after the owner-lane has mapped references).
-6. Run existing lint / format / typecheck / test scripts and report the output verbatim.
-7. Apply a diff that the owner-lane drafted in prose but did not commit yet.
-
-### Executor-lane must not do
-
-When running executor-lane, an AI assistant **must not** do any of the following — stop and return control to the owner-lane:
-
-1. Choose between two architectural approaches. If two designs are on the table, stop.
-2. Change a public contract: MCP tool schema (`packages/shared/src/tools/**`), `read_page` HVO contract (`read-page-contract.ts`), HTTP route shape, or a cross-process message type.
-3. Add a new `TOOL_NAMES` entry, a new risk tier, or a new `requiresExplicitOptIn` flag — these are Policy-layer decisions.
-4. Change the Memory / Knowledge / Experience SQLite schema.
-5. Touch CI (`.github/workflows/**`) or commitlint rules.
-6. Touch dependency versions or the lockfile beyond what a prior owner-lane migration already dictates.
-7. Decide whether a removed surface should come back. Always escalate.
-
-If you are a single AI assistant running multiple lanes within one session, the enforcement is the same: the moment you hit an "executor-lane must not do" item, switch to owner-lane (design → write it down → then execute) rather than silently deciding inside the execution path.
-
-### Hand-off protocol
-
-When owner-lane and executor-lane are two different AI assistants (or two different sessions of the same one):
-
-- **Owner-lane writes** a prose brief pointing at one `B-XXX` backlog item, with: (a) files executor-lane may touch, (b) files executor-lane must not touch, (c) explicit acceptance criteria, (d) the verification commands to run at the end.
-- **Executor-lane runs** the task and returns: exit status of each verification command, the list of files changed, and any decision point it hit where the brief was ambiguous.
-- **Owner-lane reviews** the diff, re-runs the same verification locally, and is the one who commits and pushes.
-
-When owner-lane and executor-lane are the same session, the protocol is the same but executed inline: write the brief as a short plan block in the conversation, then do the mechanical work, then verify, then commit.
-
-### Operational notes: running executor-lane under a restricted CLI sandbox
-
-Some AI CLIs run executor-lane under a filesystem sandbox (e.g. `codex exec --sandbox workspace-write`). Those environments have historically had constraints that are **not bugs in the AI product** — they are the sandbox's security model — so the operational workarounds below apply regardless of which CLI is used:
-
-- On Windows, `workspace-write`-style sandboxes may deny writes to `.git/` (observed 2026-04-20 during B-004 with Codex CLI: `Unable to create .git/index.lock: Permission denied`). Do NOT ask a sandboxed executor-lane to `git add` / `git commit`.
-- Acceptable invocation shapes for any sandboxed executor-lane:
-  1. **Draft-only**: executor-lane edits files in place under `workspace-write`; the owner-lane is responsible for `git add` / `git commit` / `git push`. Make the brief's "finish" step `git diff --stat` (not `git commit`).
-  2. **Full autopilot**: run the CLI's equivalent of "bypass approvals and sandbox" (e.g. `codex exec --dangerously-bypass-approvals-and-sandbox`) inside a throw-away worktree, where the executor-lane may commit; only use when the task is self-contained and the worktree is disposable.
-- If a sandboxed executor-lane stops mid-task with a permission error, revert any whitespace-only / line-ending changes (`git checkout -- <files>`) before the owner-lane resumes manually — otherwise the diff review becomes noisy.
-- **Verification commands inside these sandboxes also surprise**: during B-009, `pnpm -r typecheck` spawned by the sandboxed executor-lane failed with `spawn EPERM`, while `pnpm run docs:check` succeeded. Do not treat a sandbox-side typecheck failure as a real regression. The owner-lane must always re-run the full verification locally before committing.
+Detailed maintainer-private dispatch, hand-off, and restricted-environment workflow rules live in maintainer-private protocols and are not reproduced here.
 
 ## Operational Guardrails
 
@@ -263,7 +230,7 @@ That `.claude/` path is a maintainer-private overlay and may not exist in public
 
 For this public repository, treat `docs/` (English-only) plus the root-level `README.md`, `README_zh.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `AGENTS.md` as the public source of truth. Do not recreate internal PM systems, private review docs, nightly reports, or acceptance evidence inside the public tree.
 
-Project maintainers also keep non-public product-management, governance, audit, and gate-maintenance materials outside this repository. Those materials are not required for contributing against the public surface; external contributors and AI assistants should rely only on the files enumerated above.
+Project maintainers also keep non-public product-management, governance, audit, version goals, active execution SoTs, delivery ledgers, and gate-maintenance materials outside this repository. Those private authorities are not required for contributing against the public surface, and they are intentionally not reproduced here. External contributors and public-only AI assistants should rely only on the files enumerated above.
 
 Default expectations:
 
@@ -281,12 +248,12 @@ Default expectations:
 12. End each task with a clear status summary: what changed, what was verified, what was not verified, and what risks remain.
 13. If a CI or platform failure is caused by a retired upstream endpoint or broken external integration, do not stop at "ignore the error"; restore a real verification path before treating the issue as resolved.
 14. When extension code changes, the default local acceptance loop is: `pnpm -C app/chrome-extension build` -> `pnpm run extension:reload` -> real browser validation. Do not claim browser-side verification if the unpacked extension has not been reloaded.
-15. Architecture-review trigger: after every 3 consecutive `feat:` / `fix:` commits on the same MKEP layer (Memory / Knowledge / Experience / Policy), stop adding more feat/fix and run a short architecture-debt checkpoint before continuing. Deliver: (a) a listing of any site-specific / domain-specific names that leaked into a core layer, (b) a listing of any files that grew past the project's maintainability budget for that subsystem, (c) a listing of any new cross-layer import that violates the MKEP layering in the code-map table above, (d) an explicit decision to either open a `refactor:` task or to record an accepted debt item. Do not silently skip this checkpoint — if no debt is found, state that explicitly in the task summary.
-16. When editing `app/chrome-extension/entrypoints/background/tools/browser/read-page-understanding-core.ts` or any other file that the repository's architectural-review policy tags "core neutral", the change MUST NOT introduce site-specific vocabulary (e.g. Chinese/English anchors belonging to a single product, hostnames, or family-specific role literals). Such logic belongs in a `*-<family>.ts` adapter. The neutrality invariant is protected by `tests/read-page-understanding-core-neutrality.test.ts`; do not weaken or skip that test to unblock a change.
+15. Architecture-debt invariant. Repeated feature/fix work on the same MKEP layer should trigger an architecture-debt check rather than silent accumulation. If no debt is found, state that explicitly in the task summary.
+16. Core-neutral invariant. When editing core-neutral files, do not introduce site-specific vocabulary (e.g. hostnames, family-specific role literals, or product-specific anchor words). Such logic belongs in a `*-<family>.ts` adapter. Preserve the neutrality test instead of weakening it.
 17. Public / private test split. Any test or fixture that reproduces a specific real-world site's URL, DOM content, brand-named accessibility tree, or login-state flow (e.g. Douyin / BOSS / private-console vendors) belongs in the maintainer-private acceptance repository, not in this repo. In this public repo only the declared GA baseline (currently: GitHub) may appear in `app/**/tests/**` as realistic fixture data. Generic login, footer, dashboard, and accessibility-tree fixtures must use neutral wording and MUST NOT embed a specific vendor brand as flavoring. Exception: guardrail tests that list brand words as forbidden tokens (e.g. `tests/read-page-understanding-core-neutrality.test.ts`) may contain those words because their purpose is to assert absence, not reproduce a scenario.
 18. Documentation placement. Public English docs go under `docs/`. Chinese-language public material belongs only in root `README_zh.md` and this file. Internal governance, audit, gate maintenance, PRD, roadmap sequencing, and acceptance evidence are maintained outside this public repository by the project maintainers. Do not reintroduce deleted internal documents into `docs/` without an explicit governance decision.
 19. Removed-surface invariant. Before adding any MCP tool, background listener, popup entry, sidepanel tab, or shared type, check it against the "Removed Surfaces" list above. If the change looks like it would reintroduce a removed surface in any form — including under a different name — stop and surface the question instead of implementing it.
-20. Planning invariant. Every non-trivial feature or refactor commit should reference a public issue, a public roadmap item, or a maintainer-private `B-*` item when one exists. Do not create or update public sprint-backlog files under `docs/`.
+20. Planning invariant. Every non-trivial feature or refactor commit should reference a public issue, a public roadmap item, or a maintainer-private planning item when one exists. Do not create or update public sprint-backlog files under `docs/`.
 21. Product-level acceptance invariant. Source inspection, unit tests, deterministic fixtures, simulated pages, and public CI are necessary but not sufficient for claims about real browser behavior, API/DOM/CDP data-source reuse, Browser Hygiene, same-profile login reuse, competitor superiority, or release readiness. Those claims require acceptance-lane evidence.
 22. Scenario-library invariant. Acceptance-lane validation should choose the most relevant scenario or scenarios from the maintainer-private real-user scenario library for the feature under test. Do not hard-code a small fixed set of sites as the only acceptance path. Real site URLs, account states, screenshots, raw responses, competitor run artifacts, and login-dependent flows belong outside the public repository.
 23. Capability-gap invariant. A successful fallback path does not prove the higher-level capability. For example, DOM fallback success does not prove API reuse, and a browser task finishing does not prove competitor parity unless the same-scenario comparison captured tool path, profile mode, data source, accuracy, latency, token/cost where available, and Browser Hygiene.
