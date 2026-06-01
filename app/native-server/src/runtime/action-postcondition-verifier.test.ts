@@ -498,7 +498,7 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
     expect(result.reason).toBe('result_collection_changed_after_action');
   });
 
-  it('does not pass search_results_updated when the collection is unchanged', () => {
+  it('fails search_results_updated when the collection is unchanged', () => {
     const unchanged = resultCollection(resultRow('a'), resultRow('b'));
 
     const result = verifyRegionStatePostcondition({
@@ -509,8 +509,8 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
       now: () => PRODUCED_AT,
     });
 
-    expect(result.verdict).toBe('unknown');
-    expect(result.reason).toBe('result_collection_state_unchanged');
+    expect(result.verdict).toBe('failed');
+    expect(result.reason).toBe('result_collection_unchanged_after_action');
   });
 
   it('passes detail_opened only when a detail content region replaces a result collection', () => {
@@ -526,7 +526,7 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
     expect(result.reason).toBe('content_detail_region_visible_after_action');
   });
 
-  it('does not pass detail_opened when the result collection is still visible', () => {
+  it('fails detail_opened when the same result collection is still visible', () => {
     const before = resultCollection(resultRow('1'), resultRow('2'));
 
     const result = verifyRegionStatePostcondition({
@@ -537,8 +537,24 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
       now: () => PRODUCED_AT,
     });
 
+    expect(result.verdict).toBe('failed');
+    expect(result.reason).toBe('detail_collection_unchanged_after_action');
+  });
+
+  it('keeps detail_opened unknown when the collection changed but no detail region is visible', () => {
+    const before = resultCollection(resultRow('1'), resultRow('2'));
+    const after = resultCollection(resultRow('3'), resultRow('4'));
+
+    const result = verifyRegionStatePostcondition({
+      kind: 'detail_opened',
+      actionId: 'act-open-detail',
+      beforeRegions: before,
+      afterRegions: after,
+      now: () => PRODUCED_AT,
+    });
+
     expect(result.verdict).toBe('unknown');
-    expect(result.reason).toBe('detail_open_not_proven_collection_still_visible');
+    expect(result.reason).toBe('detail_open_not_proven_collection_changed_without_detail');
   });
 
   it('passes login_completed only when auth prompt disappears and account appears', () => {

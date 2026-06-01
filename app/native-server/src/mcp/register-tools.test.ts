@@ -4929,7 +4929,7 @@ describe('handleToolCall execution wrapper', () => {
       expect(bridgeSpy).toHaveBeenCalledTimes(2);
     });
 
-    it('blocked continuation after an unknown search postcondition returns task resume handoff guidance', async () => {
+    it('blocked continuation after a failed search postcondition returns stop handoff guidance', async () => {
       markBridgeReady();
       const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
       auto.noteRunOwnedTab(1);
@@ -4992,12 +4992,12 @@ describe('handleToolCall execution wrapper', () => {
       });
       const readbackPayload = JSON.parse(String(readback.content[0].text));
       expect(readbackPayload.taskResumeReadiness).toMatchObject({
-        status: 'postcondition_unknown_not_proven',
+        status: 'postcondition_failed_stop',
         canResumeOriginalTask: false,
-        nextStep: 'verify_postcondition',
+        nextStep: 'stop_not_proven',
         handoffSummary: {
-          status: 'needs_postcondition_verification',
-          nextAction: 'verify_business_postcondition',
+          status: 'stop_not_proven',
+          nextAction: 'stop_and_report_not_proven',
         },
       });
 
@@ -5014,28 +5014,28 @@ describe('handleToolCall execution wrapper', () => {
       expect(blocked.isError).toBe(true);
       expect(blockedPayload).toMatchObject({
         ok: false,
-        code: 'TABRIX_ACTION_COLLABORATION_REQUIRED',
+        code: 'TABRIX_NON_INTERFERENCE_BLOCKED',
         actionPreflight: {
-          verdict: 'collaboration_required',
+          verdict: 'block',
           reason: 'task_resume_readiness_not_proven',
-          taskResumeHandoffStatus: 'needs_postcondition_verification',
-          taskResumeHandoffNextAction: 'verify_business_postcondition',
+          taskResumeHandoffStatus: 'stop_not_proven',
+          taskResumeHandoffNextAction: 'stop_and_report_not_proven',
           taskResumeCanContinue: false,
         },
         taskResumeHandoff: {
           summaryKind: 'task_resume_handoff_v1',
-          status: 'needs_postcondition_verification',
+          status: 'stop_not_proven',
           canContinue: false,
-          nextAction: 'verify_business_postcondition',
+          nextAction: 'stop_and_report_not_proven',
         },
         runtimePolicyAudit: {
-          verdict: 'collaboration_required',
+          verdict: 'block',
           reason: 'task_resume_readiness_not_proven',
           taskResumeReadiness: {
-            status: 'postcondition_unknown_not_proven',
+            status: 'postcondition_failed_stop',
             handoffSummary: {
-              status: 'needs_postcondition_verification',
-              nextAction: 'verify_business_postcondition',
+              status: 'stop_not_proven',
+              nextAction: 'stop_and_report_not_proven',
             },
           },
         },
@@ -5098,7 +5098,7 @@ describe('handleToolCall execution wrapper', () => {
         readPagePayloadWithRegions({
           projectionId: 'projection_after_recovery_unknown',
           tabId: 1,
-          pageRegions: [contentListRegion('before')],
+          pageRegions: [],
         }),
       );
       const unknownReadback = await handleToolCall('chrome_read_page', {
@@ -5109,10 +5109,10 @@ describe('handleToolCall execution wrapper', () => {
       expect(unknownPayload.taskResumeReadiness).toMatchObject({
         status: 'postcondition_unknown_not_proven',
         canResumeOriginalTask: false,
-        nextStep: 'verify_postcondition',
+        nextStep: 'force_fresh_read_same_tab',
         handoffSummary: {
-          status: 'needs_postcondition_verification',
-          nextAction: 'verify_business_postcondition',
+          status: 'needs_fresh_read',
+          nextAction: 'run_chrome_read_page_force_refresh',
         },
       });
 
@@ -5131,8 +5131,8 @@ describe('handleToolCall execution wrapper', () => {
         actionPreflight: {
           verdict: 'collaboration_required',
           reason: 'task_resume_readiness_not_proven',
-          taskResumeHandoffStatus: 'needs_postcondition_verification',
-          taskResumeHandoffNextAction: 'verify_business_postcondition',
+          taskResumeHandoffStatus: 'needs_fresh_read',
+          taskResumeHandoffNextAction: 'run_chrome_read_page_force_refresh',
           taskResumeCanContinue: false,
         },
       });

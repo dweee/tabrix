@@ -348,7 +348,7 @@ function verdictForSearchResultsUpdated(
     return { verdict: 'passed', reason: 'result_collection_changed_after_action' };
   }
 
-  return { verdict: 'unknown', reason: 'result_collection_state_unchanged' };
+  return { verdict: 'failed', reason: 'result_collection_unchanged_after_action' };
 }
 
 function verdictForDetailOpened(
@@ -365,8 +365,17 @@ function verdictForDetailOpened(
     return { verdict: 'passed', reason: 'content_detail_region_visible_after_action' };
   }
 
-  if (contentCollectionRegions(afterRegions).length > 0) {
-    return { verdict: 'unknown', reason: 'detail_open_not_proven_collection_still_visible' };
+  const afterCollections = contentCollectionRegions(afterRegions);
+  if (afterCollections.length > 0) {
+    const beforeSignature = collectionSignature(beforeCollections);
+    const afterSignature = collectionSignature(afterCollections);
+    if (beforeSignature === afterSignature) {
+      return { verdict: 'failed', reason: 'detail_collection_unchanged_after_action' };
+    }
+    return {
+      verdict: 'unknown',
+      reason: 'detail_open_not_proven_collection_changed_without_detail',
+    };
   }
 
   return { verdict: 'unknown', reason: 'detail_region_evidence_missing_after_action' };
