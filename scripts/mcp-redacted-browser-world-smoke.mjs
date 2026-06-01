@@ -4920,7 +4920,9 @@ function runReadPageSmoke(cliPath, smokeUrl, args) {
   const readPagePayload = callMcpTool(
     cliPath,
     'chrome_read_page',
-    Number.isInteger(openedTabId) ? { tabId: openedTabId, depth: 1 } : { depth: 1 },
+    Number.isInteger(openedTabId)
+      ? { tabId: openedTabId, depth: 1, requestedLayer: 'L0+L1+L2', forceRefresh: true }
+      : { depth: 1, requestedLayer: 'L0+L1+L2', forceRefresh: true },
     args.timeoutMs,
   );
   const redactedReadPage = buildRedactedReadPageAlignmentSummary(readPagePayload, openedTabId);

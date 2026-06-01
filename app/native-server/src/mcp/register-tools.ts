@@ -1023,7 +1023,10 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         });
       }
       const postProcessorRawResult = ensureStructuredLegacyActionResult(name, response.data);
-      if (taskContext && shouldInvalidateReadAfterInteraction(name, args)) {
+      if (
+        taskContext &&
+        shouldRecordPageInteractionAfterResult(name, args, postProcessorRawResult)
+      ) {
         const candidateActionMetadata = readCandidateActionMetadata(args);
         taskContext.notePageInteraction({
           action: name,
@@ -1892,6 +1895,44 @@ function shouldInvalidateReadAfterInteraction(toolName: string, args?: unknown):
   if (toolName !== TOOL_NAMES.BROWSER.NAVIGATE) return false;
   if (!args || typeof args !== 'object' || Array.isArray(args)) return false;
   return (args as Record<string, unknown>).refresh === true;
+}
+
+function shouldRecordPageInteractionAfterResult(
+  toolName: string,
+  args: unknown,
+  result: CallToolResult,
+): boolean {
+  if (!shouldInvalidateReadAfterInteraction(toolName, args)) return false;
+
+  const payload = readJsonObjectFromCallToolResult(result);
+  if (!payload) return (result as { isError?: boolean }).isError !== true;
+
+  const dispatchSucceeded = readBoolean(payload, 'dispatchSucceeded');
+  if (dispatchSucceeded === true) return true;
+  if (dispatchSucceeded === false) return false;
+
+  const targetConsistency = readObject(payload.targetConsistency);
+  const targetConsistencyVerdict = readString(targetConsistency?.verdict);
+  if (
+    targetConsistencyVerdict === 'blocked_by_overlay' ||
+    targetConsistencyVerdict === 'target_mismatch'
+  ) {
+    return false;
+  }
+
+  const error = readString(payload.error);
+  const reason = readString(payload.reason);
+  if (
+    error === 'blocked_by_overlay' ||
+    error === 'target_mismatch' ||
+    reason === 'blocked_by_overlay' ||
+    reason === 'target_mismatch'
+  ) {
+    return false;
+  }
+
+  if (payload.success === false) return false;
+  return (result as { isError?: boolean }).isError !== true;
 }
 
 function inferPageInteractionChangeCause(

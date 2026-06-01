@@ -4984,6 +4984,98 @@ describe('handleToolCall execution wrapper', () => {
       });
     });
 
+    it('does not record blocked click dispatch as pending page interaction', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
+      auto.noteRunOwnedTab(1);
+      Object.defineProperty(auto, 'readBudget', { value: 5, writable: false });
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: false,
+                  dispatchSucceeded: false,
+                  observedOutcome: 'no_observed_change',
+                  error: 'blocked_by_overlay',
+                  targetConsistency: { verdict: 'blocked_by_overlay' },
+                }),
+              },
+            ],
+            isError: true,
+          },
+        } as never);
+      const blocked = await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_search_submit',
+        candidateAction: {
+          id: 'ca_search_submit',
+          actionType: 'click',
+          targetRef: 'ref_search_submit',
+          confidence: 0.91,
+          matchReason: 'search submit candidate',
+          locatorChain: [{ type: 'ref', value: 'ref_search_submit' }],
+          intent: 'search.submit',
+        },
+      });
+      expect(blocked.isError).toBe(true);
+      expect(auto.buildTaskResumeReadiness({ tabId: 1 }).reason).not.toContain(
+        'pending_business_verification_requires_fresh_read',
+      );
+
+      const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
+      bridgeSpy.mockClear();
+      bridgeSpy
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  observedOutcome: 'corrected_click_after_blocked_target',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      const corrected = await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_search_submit',
+        candidateAction: {
+          id: 'ca_search_submit_retry',
+          actionType: 'click',
+          targetRef: 'ref_search_submit',
+          confidence: 0.91,
+          matchReason: 'search submit retry candidate',
+          locatorChain: [{ type: 'ref', value: 'ref_search_submit' }],
+          intent: 'search.submit',
+        },
+      });
+      const correctedPayload = JSON.parse(String(corrected.content[0].text));
+
+      expect(corrected.isError).toBe(false);
+      expect(correctedPayload).toMatchObject({
+        success: true,
+        observedOutcome: 'corrected_click_after_blocked_target',
+      });
+      expect(correctedPayload.runtimePolicyAudit).toMatchObject({
+        verdict: 'allow',
+        reason: 'run_owned_tab',
+        targetTabId: 1,
+      });
+      expect(bridgeSpy).toHaveBeenCalledTimes(2);
+    });
+
     it('fresh read after a search submit candidate carries region-state postcondition evidence into closeout', async () => {
       markBridgeReady();
       const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
