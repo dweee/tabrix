@@ -338,6 +338,30 @@ export interface ReadPagePageContext {
   fallbackSource: string | null;
   refMapCount: number;
   markedElementsCount: number;
+  /**
+   * Optional runtime load-readiness evidence for this snapshot.
+   *
+   * This is intentionally about whether the browser document was stable
+   * enough to trust the current object map. It is not task success proof and
+   * must not be treated as login/search/form completion evidence.
+   */
+  loadReadiness?: ReadPageLoadReadiness;
+}
+
+export interface ReadPageLoadReadiness {
+  status: 'stable' | 'settled_after_wait' | 'loading_after_wait' | 'stale' | 'unknown' | string;
+  pageStability: 'stable' | 'loading' | 'changing' | 'stale' | 'unknown' | string;
+  initialTabStatus: string | null;
+  finalTabStatus: string | null;
+  waitedForPendingDocument: boolean;
+  settled: boolean | null;
+  timedOut: boolean | null;
+  settleReason: string | null;
+  waitedMs: number | null;
+  readyState: string | null;
+  canUseSnapshotForBusinessAction: boolean;
+  nextStepHint: string;
+  claimBoundary: string;
 }
 
 export interface ReadPageFrameContext {

@@ -1385,12 +1385,113 @@ describe('browser settle guidance', () => {
     expect(payload.pageProjection).toMatchObject({
       ownerType: 'user_owned',
     });
+    expect(payload.pageContext.loadReadiness).toMatchObject({
+      status: 'stable',
+      pageStability: 'stable',
+      waitedForPendingDocument: false,
+      canUseSnapshotForBusinessAction: true,
+      nextStepHint: 'safe_to_use_structured_refs_with_postcondition_verification',
+    });
     expect(payload.ownershipRuntime).toMatchObject({
       currentOwnerType: 'user_owned',
     });
     expect(Array.isArray(payload.interactiveElements)).toBe(true);
     expect(Array.isArray(payload.candidateActions)).toBe(true);
     expect(Array.isArray(payload.artifactRefs)).toBe(true);
+  });
+
+  it('exposes provisional read_page load evidence when a target tab is still loading after wait', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 43,
+      windowId: 1,
+      active: true,
+      status: 'loading',
+      url: 'http://127.0.0.1:62100/loading',
+      title: 'Loading',
+    });
+    vi.spyOn(readPageTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 43,
+        windowId: 1,
+        active: true,
+        status: 'loading',
+        url: 'http://127.0.0.1:62100/loading',
+        title: 'Loading',
+      },
+      settled: false,
+      timedOut: true,
+      reason: 'timeout',
+      waitedMs: 5000,
+      readyState: 'interactive',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows.get as any).mockResolvedValue({
+      id: 1,
+      focused: true,
+      state: 'normal',
+      tabs: [
+        {
+          id: 43,
+          windowId: 1,
+          active: true,
+          status: 'loading',
+          url: 'http://127.0.0.1:62100/loading',
+          title: 'Loading',
+        },
+      ],
+    });
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        'generic "Loading shell one"',
+        'generic "Loading shell two"',
+        'generic "Loading shell three"',
+        'generic "Loading shell four"',
+        'generic "Loading shell five"',
+        'generic "Loading shell six"',
+        'generic "Loading shell seven"',
+        'generic "Loading shell eight"',
+        'generic "Loading shell nine"',
+        'generic "Loading shell ten"',
+      ].join('\n'),
+      refMap: ['ref_1', 'ref_2', 'ref_3'],
+      stats: {
+        processed: 10,
+        included: 10,
+        durationMs: 16,
+      },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ tabId: 43, mode: 'normal' });
+
+    expect((readPageTool as any).waitForTabSettled).toHaveBeenCalledWith(43, {
+      timeoutMs: 5000,
+    });
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload.readinessVerdict).toBe('blocked');
+    expect(payload.readinessReason).toBe('page_load_not_stable');
+    expect(payload.pageProjection).toMatchObject({
+      stability: 'loading',
+    });
+    expect(payload.pageContext.loadReadiness).toMatchObject({
+      status: 'loading_after_wait',
+      pageStability: 'loading',
+      initialTabStatus: 'loading',
+      finalTabStatus: 'loading',
+      waitedForPendingDocument: true,
+      settled: false,
+      timedOut: true,
+      settleReason: 'timeout',
+      waitedMs: 5000,
+      readyState: 'interactive',
+      canUseSnapshotForBusinessAction: false,
+      nextStepHint: 'wait_then_force_fresh_read_page_before_business_actions',
+    });
+    expect(payload.pageContext.loadReadiness.claimBoundary).toContain(
+      'candidate objects as provisional',
+    );
   });
 
   it('classifies github issues_list pages in read_page metadata (public baseline)', async () => {

@@ -164,6 +164,13 @@ export function buildExtensionLayer(params: {
         currentTitle: params.currentTitle,
         visibleTextContent: params.visibleTextContent,
       });
+  const loadReadiness = params.pageContext.loadReadiness;
+  const unstableReadinessReason =
+    !hasVisibleRows && loadReadiness && !loadReadiness.canUseSnapshotForBusinessAction
+      ? loadReadiness.pageStability === 'stale'
+        ? 'page_stale_not_actionable'
+        : 'page_load_not_stable'
+      : null;
   const selectedDataSource = hasVisibleRows
     ? 'dom_region_rows'
     : params.renderMode === 'markdown'
@@ -174,22 +181,28 @@ export function buildExtensionLayer(params: {
       ? 'error'
       : hasVisibleRows
         ? 'ready'
-        : blockedReadinessReason
+        : unstableReadinessReason
           ? 'blocked'
-          : !hasTextSignal
-            ? 'empty'
-            : shellOnlyRows
-              ? 'blocked'
-              : 'ready';
-  const readinessReason = blockedReadinessReason
-    ? blockedReadinessReason
-    : shellOnlyRows
-      ? params.visibleRegionRows.footerLikeRejectedCount +
-          params.visibleRegionRows.navigationLikeRejectedCount >
-        0
+          : blockedReadinessReason
+            ? 'blocked'
+            : !hasTextSignal
+              ? 'empty'
+              : shellOnlyRows
+                ? 'blocked'
+                : 'ready';
+  let readinessReason: string | null = null;
+  if (unstableReadinessReason) {
+    readinessReason = unstableReadinessReason;
+  } else if (blockedReadinessReason) {
+    readinessReason = blockedReadinessReason;
+  } else if (shellOnlyRows) {
+    readinessReason =
+      params.visibleRegionRows.footerLikeRejectedCount +
+        params.visibleRegionRows.navigationLikeRejectedCount >
+      0
         ? 'footer_or_navigation_only'
-        : 'business_rows_unavailable'
-      : null;
+        : 'business_rows_unavailable';
+  }
   const extensionLayer = {
     kind: selectedDataSource,
     selectedDataSource,

@@ -9,6 +9,7 @@ import {
   type ReadPageMode,
   type ReadPageNormalSnapshot,
   type ReadPagePageContext,
+  type ReadPageLoadReadiness,
   type ReadPagePageType,
   type ReadPagePrimaryRegionConfidence,
   type ReadPageRenderMode,
@@ -192,6 +193,105 @@ function inferPageStability(tab: { status?: string; discarded?: boolean }): Brow
   if (tab.status === 'loading') return 'loading';
   if (tab.status === 'unloaded') return 'stale';
   return 'stable';
+}
+
+function buildLoadReadiness(input: {
+  pageStability: BrowserPageStability;
+  initialTabStatus: string | null;
+  finalTabStatus: string | null;
+  waitedForPendingDocument: boolean;
+  settleResult: {
+    settled: boolean;
+    timedOut: boolean;
+    reason: string;
+    waitedMs: number;
+    readyState: string | null;
+  } | null;
+}): ReadPageLoadReadiness {
+  const stableAfterWait =
+    input.waitedForPendingDocument &&
+    input.settleResult?.settled === true &&
+    input.pageStability === 'stable';
+  const stableWithoutWait = !input.waitedForPendingDocument && input.pageStability === 'stable';
+  const stale = input.pageStability === 'stale';
+  const loading =
+    input.pageStability === 'loading' ||
+    input.pageStability === 'changing' ||
+    input.settleResult?.timedOut === true;
+
+  if (stableAfterWait || stableWithoutWait) {
+    return {
+      status: stableAfterWait ? 'settled_after_wait' : 'stable',
+      pageStability: input.pageStability,
+      initialTabStatus: input.initialTabStatus,
+      finalTabStatus: input.finalTabStatus,
+      waitedForPendingDocument: input.waitedForPendingDocument,
+      settled: input.settleResult?.settled ?? null,
+      timedOut: input.settleResult?.timedOut ?? null,
+      settleReason: input.settleResult?.reason ?? null,
+      waitedMs: input.settleResult?.waitedMs ?? null,
+      readyState: input.settleResult?.readyState ?? null,
+      canUseSnapshotForBusinessAction: true,
+      nextStepHint: 'safe_to_use_structured_refs_with_postcondition_verification',
+      claimBoundary:
+        'browser_tab_reports_stable; still verify the business postcondition after any action',
+    };
+  }
+
+  if (stale) {
+    return {
+      status: 'stale',
+      pageStability: input.pageStability,
+      initialTabStatus: input.initialTabStatus,
+      finalTabStatus: input.finalTabStatus,
+      waitedForPendingDocument: input.waitedForPendingDocument,
+      settled: input.settleResult?.settled ?? null,
+      timedOut: input.settleResult?.timedOut ?? null,
+      settleReason: input.settleResult?.reason ?? null,
+      waitedMs: input.settleResult?.waitedMs ?? null,
+      readyState: input.settleResult?.readyState ?? null,
+      canUseSnapshotForBusinessAction: false,
+      nextStepHint: 'reload_or_switch_to_a_live_tab_before_structured_actions',
+      claimBoundary:
+        'browser_tab_is_stale_or_discarded; current page objects are not reliable action proof',
+    };
+  }
+
+  if (loading) {
+    return {
+      status: input.waitedForPendingDocument ? 'loading_after_wait' : 'unknown',
+      pageStability: input.pageStability,
+      initialTabStatus: input.initialTabStatus,
+      finalTabStatus: input.finalTabStatus,
+      waitedForPendingDocument: input.waitedForPendingDocument,
+      settled: input.settleResult?.settled ?? null,
+      timedOut: input.settleResult?.timedOut ?? null,
+      settleReason: input.settleResult?.reason ?? null,
+      waitedMs: input.settleResult?.waitedMs ?? null,
+      readyState: input.settleResult?.readyState ?? null,
+      canUseSnapshotForBusinessAction: false,
+      nextStepHint: 'wait_then_force_fresh_read_page_before_business_actions',
+      claimBoundary:
+        'document_may_still_be_changing; treat candidate objects as provisional until a fresh stable read',
+    };
+  }
+
+  return {
+    status: 'unknown',
+    pageStability: input.pageStability,
+    initialTabStatus: input.initialTabStatus,
+    finalTabStatus: input.finalTabStatus,
+    waitedForPendingDocument: input.waitedForPendingDocument,
+    settled: input.settleResult?.settled ?? null,
+    timedOut: input.settleResult?.timedOut ?? null,
+    settleReason: input.settleResult?.reason ?? null,
+    waitedMs: input.settleResult?.waitedMs ?? null,
+    readyState: input.settleResult?.readyState ?? null,
+    canUseSnapshotForBusinessAction: false,
+    nextStepHint: 'verify_page_stability_before_business_actions',
+    claimBoundary:
+      'browser_runtime_did_not_prove_page_stability; avoid claiming task success from this snapshot alone',
+  };
 }
 
 async function inferUserActivityLevel(input: {
@@ -539,6 +639,7 @@ async function buildModeOutput(params: {
   browserActiveTabIdKnown: boolean;
   isReadTargetBrowserActiveTab: boolean | null;
   pageStability: BrowserPageStability;
+  loadReadiness: ReadPageLoadReadiness;
   currentUrl: string;
   currentTitle: string;
   pageType: PageType;
@@ -618,6 +719,7 @@ async function buildModeOutput(params: {
     fallbackSource: params.fallbackSource,
     refMapCount: params.refMapCount,
     markedElementsCount: params.markedElements.length,
+    loadReadiness: params.loadReadiness,
   };
 
   const stableLayer = buildStableSnapshotLayer({
@@ -1294,14 +1396,31 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       markBrowserWorldTabAiOperated(tabId, 'read_page');
 
       const initialNavigationUrl = getTabNavigationUrl(tab);
+      const initialTabStatus = typeof tab.status === 'string' ? tab.status : null;
+      let pendingDocumentSettleResult: {
+        settled: boolean;
+        timedOut: boolean;
+        reason: string;
+        waitedMs: number;
+        readyState: string | null;
+      } | null = null;
+      let waitedForPendingDocument = false;
       if (
         explicit &&
         /^https?:\/\//i.test(initialNavigationUrl) &&
         (!tab.url || tab.status === 'loading')
       ) {
+        waitedForPendingDocument = true;
         const settleResult = await this.waitForTabSettled(tabId, {
           timeoutMs: READ_PAGE_PENDING_DOCUMENT_WAIT_MS,
         });
+        pendingDocumentSettleResult = {
+          settled: settleResult.settled,
+          timedOut: settleResult.timedOut,
+          reason: settleResult.reason,
+          waitedMs: settleResult.waitedMs,
+          readyState: settleResult.readyState,
+        };
         tab = settleResult.tab;
       }
 
@@ -1353,6 +1472,13 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         }
       }
       const pageStability = inferPageStability(tab);
+      const loadReadiness = buildLoadReadiness({
+        pageStability,
+        initialTabStatus,
+        finalTabStatus: typeof tab.status === 'string' ? tab.status : null,
+        waitedForPendingDocument,
+        settleResult: pendingDocumentSettleResult,
+      });
       const schemeGuard = inferSchemeGuard(currentUrl);
 
       if (!schemeGuard.supportedForContentScript) {
@@ -1383,6 +1509,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           browserActiveTabIdKnown,
           isReadTargetBrowserActiveTab,
           pageStability,
+          loadReadiness,
           currentUrl,
           currentTitle,
           pageType: schemeGuard.pageType,
@@ -1660,6 +1787,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           browserActiveTabIdKnown,
           isReadTargetBrowserActiveTab,
           pageStability,
+          loadReadiness,
           currentUrl,
           currentTitle,
           pageType: schemeGuard.pageType,
@@ -1792,6 +1920,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             browserActiveTabIdKnown,
             isReadTargetBrowserActiveTab,
             pageStability,
+            loadReadiness,
             currentUrl,
             currentTitle,
             pageType: schemeGuard.pageType,
