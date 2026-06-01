@@ -16,6 +16,7 @@ export type NonInterferenceVerdictReason =
   | 'legacy_explicit_tab_allowed'
   | 'user_confirmed'
   | 'auth_resume_completion_action'
+  | 'form_input_continuation_action'
   | 'collaboration_requested'
   | 'auth_resume_verification_required'
   | 'task_resume_readiness_not_proven'
@@ -112,6 +113,24 @@ export function evaluateNonInterferencePreflight(input: {
     taskResumeReadiness &&
     shouldGateImpactActionForTaskResumeReadiness(input.toolName, taskResumeReadiness)
   ) {
+    if (
+      shouldAllowFormInputContinuationAction({
+        toolName: input.toolName,
+        taskContext: input.taskContext,
+        targetTabId,
+        readiness: taskResumeReadiness,
+        userConfirmed: hasUserConfirmation(input.args),
+      })
+    ) {
+      return allow(
+        input,
+        mode,
+        'form_input_continuation_action',
+        targetTabId,
+        targetTabIds,
+        runOwnedTabIds,
+      );
+    }
     if (
       shouldAllowAuthResumeCompletionAction({
         toolName: input.toolName,
@@ -437,6 +456,43 @@ function shouldGateImpactActionForTaskResumeReadiness(
     readiness.status === 'postcondition_unknown_not_proven' ||
     readiness.status === 'postcondition_failed_stop' ||
     readiness.status === 'blocked_by_auth_verification'
+  );
+}
+
+function shouldAllowFormInputContinuationAction(input: {
+  toolName: string;
+  taskContext: TaskSessionContext | null;
+  targetTabId: number | null;
+  readiness: TaskResumeReadinessSnapshot;
+  userConfirmed: boolean;
+}): boolean {
+  if (!isFormContinuationImpactTool(input.toolName)) return false;
+  if (input.readiness.status !== 'postcondition_unknown_not_proven') return false;
+  if (input.readiness.nextStep !== 'force_fresh_read_same_tab') return false;
+  if (!input.readiness.evidenceKinds.includes('pending_page_interaction')) return false;
+  if (!input.readiness.evidenceKinds.includes('business_verification_plan')) return false;
+  if (
+    !input.readiness.reason.startsWith(
+      'pending_business_verification_requires_fresh_read:form_value_state_changed:',
+    )
+  ) {
+    return false;
+  }
+
+  const targetTabId = input.targetTabId;
+  const targetTabMatches =
+    targetTabId !== null &&
+    (input.readiness.tabId === null || input.readiness.tabId === targetTabId);
+  if (!targetTabMatches) return false;
+  if (targetTabId !== null && input.taskContext?.isRunOwnedTab(targetTabId) === true) return true;
+  return input.userConfirmed;
+}
+
+function isFormContinuationImpactTool(toolName: string): boolean {
+  return (
+    toolName === TOOL_NAMES.BROWSER.CLICK ||
+    toolName === TOOL_NAMES.BROWSER.FILL ||
+    toolName === TOOL_NAMES.BROWSER.KEYBOARD
   );
 }
 

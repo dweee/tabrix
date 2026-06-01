@@ -384,6 +384,100 @@ describe('evaluateNonInterferencePreflight', () => {
     expect(verdict.message).toBe(verdict.audit.taskResumeReadiness?.handoffSummary.message);
   });
 
+  it('allows same-tab form continuation after entering a query without claiming business success', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRunOwnedTab(42);
+    ctx.notePageInteraction({
+      action: 'chrome_fill_or_select',
+      tabId: 42,
+      candidateActionId: 'ca_fill_search',
+      candidateActionIntent: 'search.enter_query',
+      actionKind: 'fill',
+    });
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 42 })).toMatchObject({
+      status: 'postcondition_unknown_not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'force_fresh_read_same_tab',
+      reason:
+        'pending_business_verification_requires_fresh_read:form_value_state_changed:search.enter_query',
+      handoffSummary: {
+        status: 'needs_fresh_read',
+        canContinue: false,
+      },
+    });
+
+    const verdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.CLICK,
+      args: {
+        tabId: 42,
+        ref: 'ref_search_submit',
+        candidateAction: {
+          id: 'ca_search_submit',
+          intent: 'search.submit',
+          targetRef: 'ref_search_submit',
+        },
+      },
+      taskContext: ctx,
+    });
+
+    expect(verdict.allowed).toBe(true);
+    expect(verdict.audit).toMatchObject({
+      verdict: 'allow',
+      reason: 'form_input_continuation_action',
+      targetTabId: 42,
+      runOwnedTabIds: [42],
+    });
+  });
+
+  it('does not let form continuation bypass a failed business postcondition', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRunOwnedTab(42);
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 42,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_search_submit',
+            kind: 'search_results_updated',
+            verdict: 'failed',
+            reason: 'result_collection_unchanged_after_action',
+            beforeSummary: ['content_list:loaded:before'],
+            afterSummary: ['content_list:loaded:before'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+
+    const verdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.CLICK,
+      args: {
+        tabId: 42,
+        ref: 'ref_next_result',
+        candidateAction: {
+          id: 'ca_open_detail',
+          intent: 'content.open_detail',
+          targetRef: 'ref_next_result',
+        },
+      },
+      taskContext: ctx,
+    });
+
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.audit).toMatchObject({
+      verdict: 'block',
+      reason: 'task_resume_readiness_not_proven',
+      targetTabId: 42,
+      taskResumeReadiness: {
+        status: 'postcondition_failed_stop',
+        nextStep: 'stop_not_proven',
+      },
+    });
+  });
+
   it('uses the handoff summary when auth resume is waiting for user collaboration', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
     ctx.noteRunOwnedTab(42);

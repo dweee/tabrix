@@ -4898,6 +4898,92 @@ describe('handleToolCall execution wrapper', () => {
       expect(auto.readPageCount).toBe(2);
     });
 
+    it('allows fill-then-click form continuation on a run-owned tab before final readback', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
+      auto.noteRunOwnedTab(1);
+      Object.defineProperty(auto, 'readBudget', { value: 5, writable: false });
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  valueState: 'non_empty',
+                  valueLength: 6,
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      const fill = await handleToolCall('chrome_fill_or_select', {
+        tabId: 1,
+        ref: 'ref_search_input',
+        value: 'poster',
+        candidateAction: {
+          id: 'ca_fill_search',
+          actionType: 'fill',
+          targetRef: 'ref_search_input',
+          confidence: 0.91,
+          matchReason: 'search input candidate',
+          locatorChain: [{ type: 'ref', value: 'ref_search_input' }],
+          intent: 'search.enter_query',
+        },
+      });
+      expect(fill.isError).toBeFalsy();
+      expect(auto.buildTaskResumeReadiness({ tabId: 1 })).toMatchObject({
+        status: 'postcondition_unknown_not_proven',
+        reason:
+          'pending_business_verification_requires_fresh_read:form_value_state_changed:search.enter_query',
+      });
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  observedOutcome: 'spa_partial_update',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      const click = await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_search_submit',
+        candidateAction: {
+          id: 'ca_search_submit',
+          actionType: 'click',
+          targetRef: 'ref_search_submit',
+          confidence: 0.91,
+          matchReason: 'search submit candidate',
+          locatorChain: [{ type: 'ref', value: 'ref_search_submit' }],
+          intent: 'search.submit',
+        },
+      });
+      expect(click.isError).toBeFalsy();
+      const clickPayload = JSON.parse(String(click.content[0].text));
+      expect(clickPayload.runtimePolicyAudit).toMatchObject({
+        verdict: 'allow',
+        reason: 'form_input_continuation_action',
+        targetTabId: 1,
+      });
+    });
+
     it('fresh read after a search submit candidate carries region-state postcondition evidence into closeout', async () => {
       markBridgeReady();
       const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
