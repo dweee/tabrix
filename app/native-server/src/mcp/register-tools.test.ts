@@ -4196,7 +4196,7 @@ describe('handleToolCall execution wrapper', () => {
         confidence: 0.86,
         objects: [1, 2].map((index) => ({
           objectId: `${refPrefix}_${index}`,
-          label: 'result item',
+          label: index === 1 ? 'Alpha shared insight' : 'Beta shared insight',
           objectType: 'record',
           targetRef: `ref_${refPrefix}_${index}`,
           actionTypes: ['click'],
@@ -4242,7 +4242,7 @@ describe('handleToolCall execution wrapper', () => {
         objects: [
           {
             objectId: `${refPrefix}_detail`,
-            label: 'detail item',
+            label: 'Alpha shared insight detail',
             objectType: 'record',
             targetRef: `ref_${refPrefix}_detail`,
             actionTypes: [],
@@ -5223,7 +5223,7 @@ describe('handleToolCall execution wrapper', () => {
             actionId: 'ca_open_detail',
             kind: 'detail_opened',
             verdict: 'passed',
-            reason: 'content_detail_region_visible_after_action',
+            reason: 'content_detail_region_semantic_match_after_action',
           }),
         },
       ]);
@@ -5231,7 +5231,8 @@ describe('handleToolCall execution wrapper', () => {
         status: 'postcondition_passed_ready',
         canResumeOriginalTask: true,
         nextStep: 'continue_original_task',
-        reason: 'region_state_detail_opened_passed:content_detail_region_visible_after_action',
+        reason:
+          'region_state_detail_opened_passed:content_detail_region_semantic_match_after_action',
         handoffSummary: {
           summaryKind: 'task_resume_handoff_v1',
           status: 'ready_to_continue',

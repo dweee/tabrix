@@ -74,10 +74,14 @@ function region(
   };
 }
 
-function resultRow(suffix: string, objectType: 'record' | 'entry' = 'record') {
+function resultRow(
+  suffix: string,
+  objectType: 'record' | 'entry' = 'record',
+  label = `Alpha ${suffix} insight`,
+) {
   return {
     objectId: `row-${suffix}`,
-    label: 'redacted row',
+    label,
     objectType,
     targetRef: `tgt_row_${suffix}`,
     actionTypes: ['open_detail'],
@@ -111,13 +115,13 @@ function weakResultCollection(suffix: string): ReadPageRegion[] {
   ];
 }
 
-function detailRegion(): ReadPageRegion[] {
+function detailRegion(label = 'Alpha 1 insight detail body'): ReadPageRegion[] {
   return [
     region('content', 'detail_open_candidate', {
       objects: [
         {
           objectId: 'detail-body',
-          label: 'redacted detail body',
+          label,
           objectType: 'doc_block',
           actionTypes: [],
           targetability: 'not_clickable',
@@ -554,18 +558,52 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
     expect(result.reason).toBe('result_collection_unchanged_after_action');
   });
 
-  it('passes detail_opened only when a detail content region replaces a result collection', () => {
+  it('passes detail_opened only when a semantically matching detail content region replaces a result collection', () => {
     const result = verifyRegionStatePostcondition({
       kind: 'detail_opened',
       actionId: 'act-open-detail',
-      beforeRegions: resultCollection(resultRow('1'), resultRow('2', 'entry')),
-      afterRegions: detailRegion(),
+      beforeRegions: resultCollection(
+        resultRow('1', 'record', 'Alpha launch checklist'),
+        resultRow('2', 'entry', 'Beta research note'),
+      ),
+      afterRegions: detailRegion('Alpha launch checklist expanded details'),
       targetRefs: ['tgt_row_1'],
       now: () => PRODUCED_AT,
     });
 
     expect(result.verdict).toBe('passed');
-    expect(result.reason).toBe('content_detail_region_visible_after_action');
+    expect(result.reason).toBe('content_detail_region_semantic_match_after_action');
+  });
+
+  it('keeps detail_opened unknown when the detail content does not match the clicked row text', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'detail_opened',
+      actionId: 'act-open-detail',
+      beforeRegions: resultCollection(
+        resultRow('1', 'record', 'Alpha launch checklist'),
+        resultRow('2', 'entry', 'Beta research note'),
+      ),
+      afterRegions: detailRegion('Gamma release memo expanded details'),
+      targetRefs: ['tgt_row_1'],
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('unknown');
+    expect(result.reason).toBe('detail_semantic_match_not_proven_after_action');
+  });
+
+  it('keeps detail_opened unknown when the clicked row lacks usable semantic text', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'detail_opened',
+      actionId: 'act-open-detail',
+      beforeRegions: resultCollection(resultRow('1', 'record', 'redacted row')),
+      afterRegions: detailRegion('Alpha launch checklist expanded details'),
+      targetRefs: ['tgt_row_1'],
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('unknown');
+    expect(result.reason).toBe('before_target_row_semantic_text_missing');
   });
 
   it('keeps detail_opened unknown when the clicked target is not bound to a before row', () => {

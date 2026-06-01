@@ -385,7 +385,11 @@ function verdictForDetailOpened(
   if (actionTargetRefs.length === 0) {
     return { verdict: 'unknown', reason: 'before_target_row_identity_not_proven' };
   }
-  if (!hasMatchingTargetableResultObject(beforeTargetableCollections, actionTargetRefs)) {
+  const matchedTargetObject = findMatchingTargetableResultObject(
+    beforeTargetableCollections,
+    actionTargetRefs,
+  );
+  if (!matchedTargetObject) {
     return { verdict: 'unknown', reason: 'before_target_row_identity_not_proven' };
   }
 
@@ -395,7 +399,17 @@ function verdictForDetailOpened(
     if (afterStructuredDetail.length === 0) {
       return { verdict: 'unknown', reason: 'structured_detail_evidence_missing_after_action' };
     }
-    return { verdict: 'passed', reason: 'content_detail_region_visible_after_action' };
+    const semanticMatch = detailSemanticMatchStatus(matchedTargetObject, afterStructuredDetail);
+    if (semanticMatch === 'before_text_missing') {
+      return { verdict: 'unknown', reason: 'before_target_row_semantic_text_missing' };
+    }
+    if (semanticMatch === 'after_text_missing') {
+      return { verdict: 'unknown', reason: 'detail_semantic_text_missing_after_action' };
+    }
+    if (semanticMatch === 'not_matched') {
+      return { verdict: 'unknown', reason: 'detail_semantic_match_not_proven_after_action' };
+    }
+    return { verdict: 'passed', reason: 'content_detail_region_semantic_match_after_action' };
   }
 
   const afterCollections = contentCollectionRegions(afterRegions);
@@ -424,18 +438,19 @@ function normalizeTargetRefs(targetRefs?: readonly string[] | null): string[] {
   return [...refs];
 }
 
-function hasMatchingTargetableResultObject(
+function findMatchingTargetableResultObject(
   regions: readonly ReadPageRegion[],
   targetRefs: readonly string[],
-): boolean {
+): ReadPageRegion['objects'][number] | null {
   const expected = new Set(targetRefs);
-  return regions.some((region) =>
-    targetableResultObjects(region).some((object) => {
+  for (const region of regions) {
+    for (const object of targetableResultObjects(region)) {
       const targetRef = typeof object.targetRef === 'string' ? object.targetRef : '';
       const objectId = typeof object.objectId === 'string' ? object.objectId : '';
-      return expected.has(targetRef) || expected.has(objectId);
-    }),
-  );
+      if (expected.has(targetRef) || expected.has(objectId)) return object;
+    }
+  }
+  return null;
 }
 
 function verdictForLoginCompleted(
@@ -526,6 +541,65 @@ function hasStructuredContentDetailEvidence(region: ReadPageRegion): boolean {
     const confidence = typeof object.confidence === 'number' ? object.confidence : 0;
     return looksLikeDetailContent && Boolean(object.objectId || object.label) && confidence >= 0.5;
   });
+}
+
+function detailSemanticMatchStatus(
+  beforeTargetObject: ReadPageRegion['objects'][number],
+  afterDetailRegions: readonly ReadPageRegion[],
+): 'matched' | 'not_matched' | 'before_text_missing' | 'after_text_missing' {
+  const beforeTerms = semanticTermsForText(beforeTargetObject.label);
+  if (beforeTerms.length === 0) return 'before_text_missing';
+
+  const afterText = afterDetailRegions
+    .flatMap((region) => [region.label || '', ...region.objects.map((object) => object.label)])
+    .join(' ');
+  const afterTerms = new Set(semanticTermsForText(afterText));
+  if (afterTerms.size === 0) return 'after_text_missing';
+
+  const afterNormalized = normalizeSemanticText(afterText);
+  const matchCount = beforeTerms.filter(
+    (term) => afterTerms.has(term) || afterNormalized.includes(term),
+  ).length;
+  const requiredMatchCount = beforeTerms.length <= 2 ? 1 : 2;
+  return matchCount >= requiredMatchCount ? 'matched' : 'not_matched';
+}
+
+const GENERIC_DETAIL_SEMANTIC_TERMS = new Set([
+  'body',
+  'candidate',
+  'content',
+  'detail',
+  'entry',
+  'item',
+  'record',
+  'redacted',
+  'result',
+  'results',
+  'row',
+  'rows',
+  'visible',
+  'view',
+]);
+
+function semanticTermsForText(text: string | undefined): string[] {
+  const normalized = normalizeSemanticText(text || '');
+  if (!normalized) return [];
+  const terms = [
+    ...(normalized.match(/[a-z0-9][a-z0-9_-]{2,}/g) ?? []),
+    ...(normalized.match(/[\u3400-\u9fff]{2,}/g) ?? []),
+  ];
+  return Array.from(
+    new Set(terms.filter((term) => !GENERIC_DETAIL_SEMANTIC_TERMS.has(term) && term.length >= 2)),
+  ).slice(0, 8);
+}
+
+function normalizeSemanticText(text: string): string {
+  return String(text || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\u3400-\u9fff]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function contentDetailRegions(regions: readonly ReadPageRegion[]): ReadPageRegion[] {
