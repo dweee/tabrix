@@ -24,6 +24,8 @@ const AUTH_COLLABORATION_CLAIM_BOUNDARY =
   'login collaboration planning state only; not credential storage, not auth bypass, and not proof of login success without fresh postcondition evidence';
 const AUTH_FORM_CLAIM_BOUNDARY =
   'privacy-safe OTP auth form map for user collaboration only; raw phone/OTP/password/cookie values are never included';
+const AUTH_RESUME_VERIFICATION_CLAIM_BOUNDARY =
+  'resume guidance only; login success still requires a fresh same-tab read_page and postcondition evidence before the original task continues';
 
 type AuthQrExtractionMethod =
   | 'img_data_url'
@@ -190,6 +192,67 @@ function authArtifactExpiresAt(
 ): number | undefined {
   if (!artifactRef) return undefined;
   return artifactRefs.find((item) => item.ref === artifactRef)?.expiresAtMs;
+}
+
+function buildAuthResumeVerification(params: {
+  status: ReadPageAuthCollaboration['status'];
+  tabId: number;
+  succeededCandidate: boolean;
+  succeededCandidateHasFreshComparison: boolean;
+}) {
+  const common = {
+    nextTool: 'chrome_read_page' as const,
+    sameTabRequired: true,
+    targetTabId: params.tabId,
+    postconditionRequired: true,
+    requiredSignals: [
+      'same_tab_binding_preserved',
+      'auth_surface_disappeared',
+      'logged_in_or_account_state_candidate_visible',
+      'browser_hygiene_not_regressed',
+    ],
+    claimBoundary: AUTH_RESUME_VERIFICATION_CLAIM_BOUNDARY,
+  };
+
+  if (params.status === 'not_required') {
+    return {
+      ...common,
+      status: 'not_required' as const,
+      forceRefreshRequired: false,
+      postconditionRequired: false,
+      requiredSignals: [],
+    };
+  }
+
+  if (params.succeededCandidate && !params.succeededCandidateHasFreshComparison) {
+    return {
+      ...common,
+      status: 'fresh_read_required' as const,
+      forceRefreshRequired: true,
+    };
+  }
+
+  if (params.status === 'succeeded_candidate') {
+    return {
+      ...common,
+      status: 'postcondition_required' as const,
+      forceRefreshRequired: false,
+    };
+  }
+
+  if (params.status === 'required' || params.status === 'waiting_for_user') {
+    return {
+      ...common,
+      status: 'required_after_user_action' as const,
+      forceRefreshRequired: true,
+    };
+  }
+
+  return {
+    ...common,
+    status: 'not_proven' as const,
+    forceRefreshRequired: true,
+  };
 }
 
 type AuthControlKey = keyof ReadPageAuthForm['controls'];
@@ -781,6 +844,12 @@ export function buildAuthCollaborationState(params: {
           : status === 'not_proven'
             ? 'not_proven'
             : 'not_evaluated',
+      resumeVerification: buildAuthResumeVerification({
+        status,
+        tabId: params.tabId,
+        succeededCandidate,
+        succeededCandidateHasFreshComparison,
+      }),
       claimBoundary: AUTH_COLLABORATION_CLAIM_BOUNDARY,
     },
     authForm,

@@ -167,6 +167,22 @@ export interface ReadPageAuthCollaborationUserAction {
   retryRecommendation?: string;
 }
 
+export interface ReadPageAuthResumeVerification {
+  status:
+    | 'not_required'
+    | 'required_after_user_action'
+    | 'fresh_read_required'
+    | 'postcondition_required'
+    | 'not_proven';
+  nextTool: 'chrome_read_page';
+  forceRefreshRequired: boolean;
+  sameTabRequired: boolean;
+  targetTabId?: number;
+  postconditionRequired: boolean;
+  requiredSignals: string[];
+  claimBoundary: string;
+}
+
 export interface ReadPageAuthCollaborationEvidence {
   pageFreshness: 'single_snapshot' | 'compared_snapshot' | 'unknown';
   tabId?: number;
@@ -178,6 +194,7 @@ export interface ReadPageAuthCollaborationEvidence {
   artifactStatus?: ReadPageAuthArtifactStatusValue;
   semanticEventTypes: ReadPageBrowserPageSemanticEventType[];
   postconditionStatus: 'candidate_only' | 'not_evaluated' | 'not_proven';
+  resumeVerification?: ReadPageAuthResumeVerification;
   claimBoundary: string;
 }
 

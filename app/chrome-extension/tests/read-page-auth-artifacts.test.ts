@@ -377,8 +377,23 @@ describe('read_page auth artifacts', () => {
         actionOperability: 'operable',
         artifactStatus: 'ready',
         postconditionStatus: 'not_evaluated',
+        resumeVerification: {
+          status: 'required_after_user_action',
+          nextTool: 'chrome_read_page',
+          forceRefreshRequired: true,
+          sameTabRequired: true,
+          targetTabId: 9,
+          postconditionRequired: true,
+        },
       },
     });
+    expect(collaboration.evidence.resumeVerification?.requiredSignals).toEqual(
+      expect.arrayContaining([
+        'same_tab_binding_preserved',
+        'auth_surface_disappeared',
+        'logged_in_or_account_state_candidate_visible',
+      ]),
+    );
     expect(collaboration.userAction.instruction).toContain('扫码');
   });
 
@@ -533,6 +548,13 @@ describe('read_page auth artifacts', () => {
       evidence: {
         pageFreshness: 'compared_snapshot',
         postconditionStatus: 'candidate_only',
+        resumeVerification: {
+          status: 'postcondition_required',
+          forceRefreshRequired: false,
+          sameTabRequired: true,
+          targetTabId: 9,
+          postconditionRequired: true,
+        },
       },
     });
     expect(collaboration.claimBoundary).toContain('not proof of login success');
@@ -565,6 +587,14 @@ describe('read_page auth artifacts', () => {
       evidence: {
         pageFreshness: 'single_snapshot',
         postconditionStatus: 'not_proven',
+        resumeVerification: {
+          status: 'fresh_read_required',
+          nextTool: 'chrome_read_page',
+          forceRefreshRequired: true,
+          sameTabRequired: true,
+          targetTabId: 9,
+          postconditionRequired: true,
+        },
       },
     });
     expect(collaboration.userAction.instruction).toContain('强制重新读取');
