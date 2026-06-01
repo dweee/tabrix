@@ -2245,8 +2245,13 @@ function attachAiFacingDeltaContext(
     projectionWithSourceTruth.tabId,
   );
   const pageRegions = readPageRegions(payload.pageRegions);
+  const pageLoadReadiness = readPageLoadReadiness(payload.pageContext);
   const regionStatePostcondition = pendingInteraction
-    ? buildRegionStatePostconditionForPendingInteraction(pendingInteraction, pageRegions)
+    ? buildRegionStatePostconditionForPendingInteraction(
+        pendingInteraction,
+        pageRegions,
+        pageLoadReadiness,
+      )
     : null;
   if (pendingInteraction && regionStatePostcondition?.verdict === 'unknown') {
     attachment.taskContext.keepPendingPageInteractionForPostconditionRetry(pendingInteraction);
@@ -3129,6 +3134,7 @@ function readObject(value: unknown): Record<string, unknown> | null {
 function buildRegionStatePostconditionForPendingInteraction(
   pendingInteraction: TaskPageInteractionSnapshot,
   afterRegions: readonly ReadPageRegion[],
+  afterLoadReadiness: PostconditionLoadReadinessGate | null,
 ): RegionStatePostconditionResult | null {
   const kind = inferRegionStatePostconditionKindForIntent({
     intent: pendingInteraction.candidateActionIntent,
@@ -3136,6 +3142,26 @@ function buildRegionStatePostconditionForPendingInteraction(
   });
   if (!kind) return null;
   const actionId = pendingInteraction.candidateActionId ?? pendingInteraction.action;
+  if (afterLoadReadiness?.canUseSnapshotForBusinessAction === false) {
+    const producedAtMs = Date.now();
+    return {
+      actionId,
+      kind,
+      verdict: 'unknown',
+      reason: 'after_snapshot_not_ready_for_business_action',
+      beforeSummary: summarizeRegionsForPostcondition(pendingInteraction.beforePageRegions),
+      afterSummary: summarizeRegionsForPostcondition(afterRegions),
+      producedAtMs,
+      claimBoundary: [
+        'region-state postconditions require a business-usable read_page snapshot;',
+        `loadReadiness=${afterLoadReadiness.status ?? 'unknown'}`,
+        `pageStability=${afterLoadReadiness.pageStability ?? 'unknown'}`,
+        afterLoadReadiness.nextStepHint
+          ? `nextStepHint=${afterLoadReadiness.nextStepHint}`
+          : 'nextStepHint=run_chrome_read_page_force_refresh',
+      ].join(' '),
+    };
+  }
   if (pendingInteraction.beforePageRegions.length === 0 || afterRegions.length === 0) {
     const producedAtMs = Date.now();
     return {
@@ -3171,6 +3197,28 @@ function summarizeRegionsForPostcondition(regions: readonly ReadPageRegion[]): s
 
 function readPageRegions(value: unknown): ReadPageRegion[] {
   return Array.isArray(value) ? (value as ReadPageRegion[]) : [];
+}
+
+interface PostconditionLoadReadinessGate {
+  canUseSnapshotForBusinessAction: boolean | null;
+  status: string | null;
+  pageStability: string | null;
+  nextStepHint: string | null;
+}
+
+function readPageLoadReadiness(value: unknown): PostconditionLoadReadinessGate | null {
+  const pageContext = readObject(value);
+  const loadReadiness = readObject(pageContext?.loadReadiness);
+  if (!loadReadiness) return null;
+  return {
+    canUseSnapshotForBusinessAction:
+      typeof loadReadiness.canUseSnapshotForBusinessAction === 'boolean'
+        ? loadReadiness.canUseSnapshotForBusinessAction
+        : null,
+    status: readString(loadReadiness.status),
+    pageStability: readString(loadReadiness.pageStability),
+    nextStepHint: readString(loadReadiness.nextStepHint),
+  };
 }
 
 function readPageOperationMap(value: unknown): ReadPageOperationMap | null {

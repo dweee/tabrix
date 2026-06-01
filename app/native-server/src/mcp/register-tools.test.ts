@@ -4058,6 +4058,7 @@ describe('handleToolCall execution wrapper', () => {
       projectionId: string;
       tabId: number;
       pageRegions: Array<Record<string, unknown>>;
+      pageContext?: Record<string, unknown>;
     }): string {
       return JSON.stringify({
         kind: 'page',
@@ -4075,6 +4076,7 @@ describe('handleToolCall execution wrapper', () => {
         currentWindowId: 3,
         isCurrentTabActive: true,
         isCurrentWindowFocused: true,
+        ...(input.pageContext ? { pageContext: input.pageContext } : {}),
         pageRegions: input.pageRegions,
         objectLifecycle: {
           source: 'read_page_regions',
@@ -4115,6 +4117,21 @@ describe('handleToolCall execution wrapper', () => {
           interferenceRisk: 'low',
         },
       });
+    }
+
+    function pageContextWithLoadReadiness(
+      overrides: Record<string, unknown> = {},
+    ): Record<string, unknown> {
+      return {
+        loadReadiness: {
+          status: 'stable',
+          pageStability: 'stable',
+          canUseSnapshotForBusinessAction: true,
+          nextStepHint: 'snapshot_ready_for_business_action',
+          claimBoundary: 'test load readiness',
+          ...overrides,
+        },
+      };
     }
 
     function contentListRegion(refPrefix: string): Record<string, unknown> {
@@ -4801,6 +4818,160 @@ describe('handleToolCall execution wrapper', () => {
           }),
         ]),
       );
+    });
+
+    it('does not pass search postconditions from a snapshot that is not ready for business action', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
+      auto.noteRunOwnedTab(1);
+      Object.defineProperty(auto, 'readBudget', { value: 6, writable: false });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_before_unstable_search',
+          tabId: 1,
+          pageRegions: [contentListRegion('before')],
+        }),
+      );
+      await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  observedOutcome: 'spa_partial_update',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_search_submit',
+        candidateAction: {
+          id: 'ca_search_submit',
+          actionType: 'click',
+          targetRef: 'ref_search_submit',
+          confidence: 0.91,
+          matchReason: 'search submit candidate',
+          locatorChain: [{ type: 'ref', value: 'ref_search_submit' }],
+          intent: 'search.submit',
+        },
+      });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_after_unstable_search',
+          tabId: 1,
+          pageRegions: [contentListRegion('after')],
+          pageContext: pageContextWithLoadReadiness({
+            status: 'loading_after_wait',
+            pageStability: 'loading',
+            canUseSnapshotForBusinessAction: false,
+            nextStepHint: 'run_chrome_read_page_force_refresh',
+          }),
+        }),
+      );
+      const unstableReadback = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+      const unstablePayload = JSON.parse(String(unstableReadback.content[0].text));
+
+      expect(unstablePayload.regionStatePostconditions).toEqual([
+        {
+          actionKind: 'click',
+          result: expect.objectContaining({
+            actionId: 'ca_search_submit',
+            kind: 'search_results_updated',
+            verdict: 'unknown',
+            reason: 'after_snapshot_not_ready_for_business_action',
+            claimBoundary: expect.stringContaining('loadReadiness=loading_after_wait'),
+          }),
+        },
+      ]);
+      expect(unstablePayload.taskResumeReadiness).toMatchObject({
+        status: 'postcondition_unknown_not_proven',
+        canResumeOriginalTask: false,
+        nextStep: 'force_fresh_read_same_tab',
+        handoffSummary: {
+          status: 'needs_fresh_read',
+          nextAction: 'run_chrome_read_page_force_refresh',
+        },
+      });
+      expect(unstablePayload.aiContextEnvelope.regionStatePostconditions).toEqual(
+        unstablePayload.regionStatePostconditions,
+      );
+
+      const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
+      bridgeSpy.mockClear();
+      bridgeSpy.mockResolvedValueOnce({ status: 'success', items: [] } as never);
+      const blocked = await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_after_1',
+        userConfirmed: true,
+      });
+      const blockedPayload = JSON.parse(String(blocked.content[0].text));
+      expect(blocked.isError).toBe(true);
+      expect(blockedPayload).toMatchObject({
+        code: 'TABRIX_ACTION_COLLABORATION_REQUIRED',
+        actionPreflight: {
+          verdict: 'collaboration_required',
+          reason: 'task_resume_readiness_not_proven',
+          taskResumeHandoffStatus: 'needs_fresh_read',
+          taskResumeHandoffNextAction: 'run_chrome_read_page_force_refresh',
+          taskResumeCanContinue: false,
+        },
+      });
+      expect(bridgeSpy).toHaveBeenCalledTimes(1);
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_after_stable_search',
+          tabId: 1,
+          pageRegions: [contentListRegion('after')],
+          pageContext: pageContextWithLoadReadiness(),
+        }),
+      );
+      const stableReadback = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+        forceRefresh: true,
+      });
+      const stablePayload = JSON.parse(String(stableReadback.content[0].text));
+
+      expect(stablePayload.regionStatePostconditions).toEqual([
+        {
+          actionKind: 'click',
+          result: expect.objectContaining({
+            actionId: 'ca_search_submit',
+            kind: 'search_results_updated',
+            verdict: 'passed',
+            reason: 'result_collection_changed_after_action',
+          }),
+        },
+      ]);
+      expect(stablePayload.taskResumeReadiness).toMatchObject({
+        status: 'postcondition_passed_ready',
+        canResumeOriginalTask: true,
+        nextStep: 'continue_original_task',
+        handoffSummary: {
+          status: 'ready_to_continue',
+          nextAction: 'continue_original_task',
+          canContinue: true,
+        },
+      });
     });
 
     it('fresh read after a result detail candidate proves detail opened before continuation', async () => {
