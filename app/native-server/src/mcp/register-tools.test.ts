@@ -4356,6 +4356,64 @@ describe('handleToolCall execution wrapper', () => {
       expect(sessionManager.peekExternalTaskContext('mcp:auto:tab:77')).toBeNull();
     });
 
+    it('marks web-fetcher-created tabs as run-owned for explicit close_tabs cleanup', async () => {
+      markBridgeReady();
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  tabId: 78,
+                  createdTabForUrl: true,
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never)
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  closedTabIds: [78],
+                  invalidTabIds: [],
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+
+      await handleToolCall('chrome_get_web_content', { url: 'https://example.test/list' });
+      const closeResult = await handleToolCall('chrome_close_tabs', { tabIds: [78] });
+      const closePayload = JSON.parse(String(closeResult.content[0].text));
+
+      expect(closeResult.isError).toBe(false);
+      expect(closePayload.taskContextEnvelope).toMatchObject({
+        taskContextKey: 'mcp:auto:tab:78',
+        taskContextKeySource: 'external_task_key',
+        toolName: 'chrome_close_tabs',
+      });
+      expect(closePayload.runtimePolicyAudit).toMatchObject({
+        verdict: 'allow',
+        reason: 'run_owned_tab',
+        targetTabIds: [78],
+        runOwnedTabIds: [78],
+      });
+      expect(sessionManager.peekExternalTaskContext('mcp:auto:tab:78')).toBeNull();
+    });
+
     it('page interactions invalidate redundancy state for the next read on the same task', async () => {
       markBridgeReady();
       const ctx = sessionManager.getOrCreateExternalTaskContext('interaction-task');

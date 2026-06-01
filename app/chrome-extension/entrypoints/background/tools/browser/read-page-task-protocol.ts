@@ -455,6 +455,35 @@ function buildPageRegions(
 
   if (params.visibleRegionRows?.visibleRegionRowsUsed) {
     const current = byType.get('content') ?? [];
+    for (const row of params.visibleRegionRows.rows.slice(0, 3)) {
+      const targetRef = String(row.targetRef || '').trim();
+      const label = String(row.title || row.primaryText || '').trim();
+      if (!targetRef || !label) continue;
+      const actions = candidateByTargetRef.get(targetRef) ?? [];
+      const aiFacingActions = aiFacingCandidateByTargetRef.get(targetRef) ?? [];
+      if (actions.length === 0) continue;
+      const rowObject: ReadPageRegionObject = {
+        objectId: targetRef,
+        label,
+        objectType: 'record',
+        role: 'row',
+        targetRef,
+        actionTypes: Array.from(new Set(actions.map((item) => item.actionType).filter(Boolean))),
+        targetability: actions.some((item) => item.locatorChain.length > 0)
+          ? 'locator_chain'
+          : 'target_ref',
+        confidence: clampConfidence(
+          row.confidence || params.visibleRegionRows.rowExtractionConfidence || 0.72,
+        ),
+        reason: 'dom_region_row_target',
+        primaryAction: pickPrimaryExecutableAction(aiFacingActions),
+      };
+      const existingIndex = current.findIndex(
+        (object) => object.objectId === targetRef || object.targetRef === targetRef,
+      );
+      if (existingIndex >= 0) current[existingIndex] = { ...current[existingIndex], ...rowObject };
+      else if (current.length < maxObjectsForRegion('content')) current.push(rowObject);
+    }
     if (current.length < maxObjectsForRegion('content')) {
       current.push({
         objectId: 'visible_region_rows',
@@ -711,6 +740,7 @@ function pickPrimaryExecutableAction(
         confidence: action.confidence,
         matchReason: action.matchReason,
         locatorChain: action.locatorChain,
+        ...(action.intent ? { intent: action.intent } : {}),
       },
     },
     claimBoundary:

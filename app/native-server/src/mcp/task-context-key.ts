@@ -222,6 +222,13 @@ export function extractClosedTabIdsFromCallToolResult(data: unknown): number[] {
   return extractPositiveIntegerArrayFromCallToolResult(data, 'closedTabIds');
 }
 
+export function extractCreatedTabForUrlFromCallToolResult(data: unknown): boolean {
+  for (const payload of extractObjectPayloadsFromCallToolResult(data)) {
+    if (payload.createdTabForUrl === true) return true;
+  }
+  return false;
+}
+
 function extractPositiveIntegerArrayFromCallToolResult(data: unknown, key: string): number[] {
   const payloads = extractObjectPayloadsFromCallToolResult(data);
   const ids = new Set<number>();

@@ -605,7 +605,7 @@ async function buildModeOutput(params: {
   const candidateActions =
     params.candidateActions.length > 0
       ? params.candidateActions
-      : buildCandidateActions(interactiveElements, params.refMap);
+      : buildCandidateActions(interactiveElements, params.refMap, { visibleRegionRows });
   const artifactRefs = buildArtifactRefs(params.tabId, params.renderMode === 'markdown');
   const pageContext: ReadPagePageContext = {
     filter: params.filter,

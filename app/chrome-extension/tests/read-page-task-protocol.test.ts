@@ -6,6 +6,7 @@ import {
 } from '@/entrypoints/background/tools/browser/read-page-task-protocol';
 import { buildVisualElementRegionObjects } from '@/entrypoints/background/tools/browser/read-page-region-signal-objects';
 import { buildPageOperationMap } from '@/entrypoints/background/tools/browser/read-page-operation-map';
+import { buildCandidateActions } from '@/entrypoints/background/tools/browser/read-page-candidate-actions';
 
 function createBaseParams(overrides: Record<string, unknown> = {}) {
   return {
@@ -478,6 +479,107 @@ describe('read_page task protocol', () => {
     expect(protocol.highValueObjects.map((item) => item.label).join(' ')).not.toMatch(
       /Download app/i,
     );
+  });
+
+  it('binds selected visible row target refs to content region primary actions', () => {
+    const interactiveElements = [
+      {
+        ref: 'ref_row_title',
+        role: 'link',
+        name: 'Practical guide to AI poster creation',
+        href: '/items/1',
+      },
+    ];
+    const visibleRegionRows = {
+      sourceDataSource: 'dom_region_rows',
+      rows: [
+        {
+          rowId: 'row_1',
+          title: 'Practical guide to AI poster creation',
+          primaryText: 'Practical guide to AI poster creation',
+          secondaryText: 'Design Lab',
+          metaText: 'today',
+          interactionText: '128 saves',
+          visibleTextFields: ['Practical guide to AI poster creation'],
+          targetRef: 'ref_row_title',
+          targetRefCoverageRate: 1,
+          boundingBox: null,
+          regionId: 'region_row_1',
+          sourceRegion: 'content',
+          confidence: 0.86,
+          qualityReasons: ['target_ref_available'],
+        },
+      ],
+      rowCount: 1,
+      visibleRegionRowsUsed: true,
+      visibleRegionRowsRejectedReason: null,
+      sourceRegion: 'content',
+      rowExtractionConfidence: 0.86,
+      cardExtractorUsed: true,
+      cardPatternConfidence: 0.82,
+      cardRowsCount: 1,
+      rowOrder: 'visual_order',
+      targetRefCoverageRate: 1,
+      regionQualityScore: 0.78,
+      visibleDomRowsCandidateCount: 1,
+      visibleDomRowsSelectedCount: 1,
+      lowValueRegionRejectedCount: 0,
+      footerLikeRejectedCount: 0,
+      navigationLikeRejectedCount: 0,
+      targetRefCoverageRejectedCount: 0,
+      rejectedRegionReasonDistribution: {
+        low_value_region: 0,
+        footer_like_region: 0,
+        navigation_like_region: 0,
+        target_ref_coverage_insufficient: 0,
+        single_isolated_text: 0,
+        empty_shell: 0,
+        broad_page_shell: 0,
+        dom_region_rows_unavailable: 0,
+      },
+      pageInfo: {
+        url: 'https://example.com/search',
+        title: 'Search results',
+        viewport: { width: 1280, height: 720, dpr: 1 },
+        scrollY: 0,
+        pixelsAbove: 0,
+        pixelsBelow: 0,
+        visibleRegionCount: 1,
+        candidateRegionCount: 1,
+      },
+    } as const;
+    const candidateActions = buildCandidateActions(
+      interactiveElements,
+      [{ ref: 'ref_row_title', selector: 'article:nth-of-type(1) a' }],
+      { visibleRegionRows },
+    );
+
+    const protocol = buildTaskProtocol(
+      createBaseParams({
+        currentUrl: 'https://example.com/search',
+        currentTitle: 'Search results',
+        pageRole: 'web_page',
+        primaryRegion: 'visible_results',
+        interactiveElements,
+        candidateActions,
+        visibleRegionRows,
+      }),
+    );
+
+    const contentRegion = protocol.pageRegions.find((region) => region.regionType === 'content');
+    expect(contentRegion?.candidateActionIds).toContain('ca_click_ref_row_title');
+    const rowObject = contentRegion?.objects.find((object) => object.objectId === 'ref_row_title');
+    expect(rowObject?.primaryAction).toMatchObject({
+      candidateActionId: 'ca_click_ref_row_title',
+      actionType: 'click',
+      targetRef: 'ref_row_title',
+      toolName: 'chrome_click_element',
+      toolArgs: {
+        candidateAction: {
+          intent: 'content.open_detail',
+        },
+      },
+    });
   });
 
   it('keeps neutral read pages idle instead of treating read mode as long_content', () => {

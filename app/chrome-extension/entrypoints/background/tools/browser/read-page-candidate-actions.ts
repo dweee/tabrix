@@ -2,6 +2,7 @@ import type {
   ReadPageCandidateAction,
   ReadPageCandidateActionLocator,
   ReadPageInteractiveElement,
+  ReadPageVisibleRegionRows,
 } from '@tabrix/shared';
 
 export type CandidateActionSeed = ReadPageCandidateAction;
@@ -138,6 +139,7 @@ function buildLocatorChain(params: {
 export function buildCandidateActions(
   interactiveElements: ReadPageInteractiveElement[],
   refMap: any[],
+  options: { visibleRegionRows?: ReadPageVisibleRegionRows | null } = {},
 ): CandidateActionSeed[] {
   const selectorMap = buildRefSelectorMap(refMap);
   const clickRoles = new Set(['button', 'link', 'menuitem', 'tab', 'option', 'checkbox', 'switch']);
@@ -189,5 +191,83 @@ export function buildCandidateActions(
     });
     if (seeds.length >= 20) break;
   }
-  return seeds;
+  return bindVisibleRegionRowsToDetailActions(
+    seeds,
+    interactiveElements,
+    selectorMap,
+    options.visibleRegionRows,
+  );
+}
+
+function bindVisibleRegionRowsToDetailActions(
+  seeds: CandidateActionSeed[],
+  interactiveElements: ReadPageInteractiveElement[],
+  selectorMap: Map<string, string>,
+  visibleRegionRows: ReadPageVisibleRegionRows | null | undefined,
+): CandidateActionSeed[] {
+  if (!visibleRegionRows?.visibleRegionRowsUsed || visibleRegionRows.rows.length === 0) {
+    return seeds;
+  }
+
+  const elementByRef = new Map<string, ReadPageInteractiveElement>();
+  for (const element of interactiveElements) {
+    if (element.ref) elementByRef.set(element.ref, element);
+  }
+  const seedByTargetRef = new Map<string, CandidateActionSeed>();
+  for (const seed of seeds) {
+    if (seed.actionType === 'click' && seed.targetRef) {
+      seedByTargetRef.set(seed.targetRef, seed);
+    }
+  }
+
+  const output = [...seeds];
+  for (const row of visibleRegionRows.rows.slice(0, 8)) {
+    const targetRef = String(row.targetRef || '').trim();
+    if (!targetRef) continue;
+    const element = elementByRef.get(targetRef);
+    if (!isClickableContentTarget(element)) continue;
+
+    const existing = seedByTargetRef.get(targetRef);
+    if (existing) {
+      if (!isProtectedIntent(existing.intent)) {
+        existing.intent = 'content.open_detail';
+        existing.confidence = Number(
+          Math.max(existing.confidence || 0, row.confidence || 0, 0.82).toFixed(2),
+        );
+        existing.matchReason = 'content row target inferred from visible region rows';
+      }
+      continue;
+    }
+
+    if (output.length >= 20) continue;
+    const safeRef = targetRef.replace(/[^a-zA-Z0-9_]/g, '_');
+    const selector = selectorMap.get(targetRef);
+    const locatorChain: ReadPageCandidateActionLocator[] = [{ type: 'ref', value: targetRef }];
+    if (selector) locatorChain.push({ type: 'css', value: selector });
+    const action: CandidateActionSeed = {
+      id: `ca_click_${safeRef}`,
+      actionType: 'click',
+      targetRef,
+      confidence: Number(Math.max(row.confidence || 0, 0.78).toFixed(2)),
+      matchReason: 'content row target inferred from visible region rows',
+      locatorChain,
+      intent: 'content.open_detail',
+    };
+    output.push(action);
+    seedByTargetRef.set(targetRef, action);
+  }
+  return output;
+}
+
+function isClickableContentTarget(element: ReadPageInteractiveElement | undefined): boolean {
+  if (!element?.ref) return false;
+  const role = String(element.role || '').toLowerCase();
+  if (!new Set(['link', 'button', 'menuitem']).has(role)) return false;
+  const source = String(element.matchSource || '').toLowerCase();
+  if (source === 'placeholder') return false;
+  return true;
+}
+
+function isProtectedIntent(intent: ReadPageCandidateAction['intent'] | undefined): boolean {
+  return Boolean(intent && (/^auth\./.test(intent) || /^search\./.test(intent)));
 }

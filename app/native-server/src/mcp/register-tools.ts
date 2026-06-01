@@ -56,6 +56,7 @@ import {
 } from './tool-call-results';
 import {
   extractClosedTabIdsFromCallToolResult,
+  extractCreatedTabForUrlFromCallToolResult,
   extractInvalidTabIdsFromCallToolResult,
   extractTabIdFromCallToolResult,
   extractRequestedLayer,
@@ -996,6 +997,17 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         const returnedTabId = extractTabIdFromCallToolResult(response.data);
         const explicitTabId = readPositiveInteger(args, 'tabId');
         if (returnedTabId !== null && explicitTabId === null) {
+          taskContext.noteRunOwnedTab(returnedTabId);
+          sessionManager
+            .getOrCreateExternalTaskContext(`mcp:auto:tab:${returnedTabId}`)
+            .noteRunOwnedTab(returnedTabId);
+        }
+      }
+      if (taskContext && name === TOOL_NAMES.BROWSER.WEB_FETCHER) {
+        const returnedTabId = extractTabIdFromCallToolResult(response.data);
+        const explicitTabId = readPositiveInteger(args, 'tabId');
+        const createdTabForUrl = extractCreatedTabForUrlFromCallToolResult(response.data);
+        if (returnedTabId !== null && explicitTabId === null && createdTabForUrl) {
           taskContext.noteRunOwnedTab(returnedTabId);
           sessionManager
             .getOrCreateExternalTaskContext(`mcp:auto:tab:${returnedTabId}`)

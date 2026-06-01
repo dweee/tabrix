@@ -106,4 +106,182 @@ describe('read_page candidate action intents', () => {
       'search.submit',
     );
   });
+
+  it('binds visible result row targets to detail-opening intent without detail wording', () => {
+    const actions = buildCandidateActions(
+      [
+        element({
+          ref: 'ref_row_title',
+          role: 'link',
+          name: 'Practical guide to AI poster creation',
+        }),
+      ],
+      [{ ref: 'ref_row_title', selector: 'article:nth-of-type(1) a' }],
+      {
+        visibleRegionRows: {
+          sourceDataSource: 'dom_region_rows',
+          rows: [
+            {
+              rowId: 'row_1',
+              title: 'Practical guide to AI poster creation',
+              primaryText: 'Practical guide to AI poster creation',
+              secondaryText: 'Design Lab',
+              metaText: 'today',
+              interactionText: '128 saves',
+              visibleTextFields: ['Practical guide to AI poster creation'],
+              targetRef: 'ref_row_title',
+              targetRefCoverageRate: 1,
+              boundingBox: null,
+              regionId: 'region_row_1',
+              sourceRegion: 'content',
+              confidence: 0.86,
+              qualityReasons: ['target_ref_available'],
+            },
+          ],
+          rowCount: 1,
+          visibleRegionRowsUsed: true,
+          visibleRegionRowsRejectedReason: null,
+          sourceRegion: 'content',
+          rowExtractionConfidence: 0.86,
+          cardExtractorUsed: true,
+          cardPatternConfidence: 0.82,
+          cardRowsCount: 1,
+          rowOrder: 'visual_order',
+          targetRefCoverageRate: 1,
+          regionQualityScore: 0.78,
+          visibleDomRowsCandidateCount: 1,
+          visibleDomRowsSelectedCount: 1,
+          lowValueRegionRejectedCount: 0,
+          footerLikeRejectedCount: 0,
+          navigationLikeRejectedCount: 0,
+          targetRefCoverageRejectedCount: 0,
+          rejectedRegionReasonDistribution: {
+            low_value_region: 0,
+            footer_like_region: 0,
+            navigation_like_region: 0,
+            target_ref_coverage_insufficient: 0,
+            single_isolated_text: 0,
+            empty_shell: 0,
+            broad_page_shell: 0,
+            dom_region_rows_unavailable: 0,
+          },
+          pageInfo: {
+            url: 'https://example.com/search',
+            title: 'Search results',
+            viewport: { width: 1280, height: 720, dpr: 1 },
+            scrollY: 0,
+            pixelsAbove: 0,
+            pixelsBelow: 0,
+            visibleRegionCount: 1,
+            candidateRegionCount: 1,
+          },
+        },
+      },
+    );
+
+    expect(actions[0]).toMatchObject({
+      actionType: 'click',
+      targetRef: 'ref_row_title',
+      intent: 'content.open_detail',
+      matchReason: 'content row target inferred from visible region rows',
+    });
+    expect(actions[0].locatorChain).toEqual([
+      { type: 'ref', value: 'ref_row_title' },
+      { type: 'aria', value: 'Practical guide to AI poster creation' },
+      { type: 'css', value: 'article:nth-of-type(1) a' },
+    ]);
+  });
+
+  it('does not let visible rows override auth or search intent precedence', () => {
+    const actions = buildCandidateActions(
+      [
+        element({ ref: 'ref_search_button', role: 'button', name: 'Search' }),
+        element({ ref: 'ref_login_button', role: 'button', name: 'Login' }),
+      ],
+      [],
+      {
+        visibleRegionRows: {
+          sourceDataSource: 'dom_region_rows',
+          rows: [
+            {
+              rowId: 'row_search',
+              title: 'Search',
+              primaryText: 'Search',
+              secondaryText: '',
+              metaText: '',
+              interactionText: '',
+              visibleTextFields: ['Search'],
+              targetRef: 'ref_search_button',
+              targetRefCoverageRate: 1,
+              boundingBox: null,
+              regionId: 'region_row_search',
+              sourceRegion: 'content',
+              confidence: 0.88,
+              qualityReasons: ['target_ref_available'],
+            },
+            {
+              rowId: 'row_login',
+              title: 'Login',
+              primaryText: 'Login',
+              secondaryText: '',
+              metaText: '',
+              interactionText: '',
+              visibleTextFields: ['Login'],
+              targetRef: 'ref_login_button',
+              targetRefCoverageRate: 1,
+              boundingBox: null,
+              regionId: 'region_row_login',
+              sourceRegion: 'content',
+              confidence: 0.88,
+              qualityReasons: ['target_ref_available'],
+            },
+          ],
+          rowCount: 2,
+          visibleRegionRowsUsed: true,
+          visibleRegionRowsRejectedReason: null,
+          sourceRegion: 'content',
+          rowExtractionConfidence: 0.88,
+          cardExtractorUsed: true,
+          cardPatternConfidence: 0.82,
+          cardRowsCount: 2,
+          rowOrder: 'visual_order',
+          targetRefCoverageRate: 1,
+          regionQualityScore: 0.78,
+          visibleDomRowsCandidateCount: 2,
+          visibleDomRowsSelectedCount: 2,
+          lowValueRegionRejectedCount: 0,
+          footerLikeRejectedCount: 0,
+          navigationLikeRejectedCount: 0,
+          targetRefCoverageRejectedCount: 0,
+          rejectedRegionReasonDistribution: {
+            low_value_region: 0,
+            footer_like_region: 0,
+            navigation_like_region: 0,
+            target_ref_coverage_insufficient: 0,
+            single_isolated_text: 0,
+            empty_shell: 0,
+            broad_page_shell: 0,
+            dom_region_rows_unavailable: 0,
+          },
+          pageInfo: {
+            url: 'https://example.com/search',
+            title: 'Search results',
+            viewport: { width: 1280, height: 720, dpr: 1 },
+            scrollY: 0,
+            pixelsAbove: 0,
+            pixelsBelow: 0,
+            visibleRegionCount: 1,
+            candidateRegionCount: 1,
+          },
+        },
+      },
+    );
+
+    expect(actions.find((action) => action.targetRef === 'ref_search_button')?.intent).toBe(
+      'search.submit',
+    );
+    expect(actions.find((action) => action.targetRef === 'ref_login_button')?.intent).toBe(
+      'auth.submit_login',
+    );
+  });
 });
