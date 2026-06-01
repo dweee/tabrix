@@ -511,6 +511,13 @@ function verdictForDetailOpened(
         detailFieldReadbackEvidence,
       };
     }
+    if (!detailFieldReadbackEvidence.canSupportDetailSummary) {
+      return {
+        verdict: 'unknown',
+        reason: 'detail_field_readback_not_ready_for_summary',
+        detailFieldReadbackEvidence,
+      };
+    }
     return {
       verdict: 'passed',
       reason: 'content_detail_region_semantic_match_after_action',
