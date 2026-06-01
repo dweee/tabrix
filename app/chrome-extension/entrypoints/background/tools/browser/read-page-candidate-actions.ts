@@ -159,6 +159,7 @@ export function buildCandidateActions(
 
   for (const element of prioritizedElements) {
     if (!element.ref) continue;
+    if (!isExecutableCandidateElement(element)) continue;
     const role = String(element.role || '').toLowerCase();
     const name = String(element.name || '').trim();
     let actionType: 'click' | 'fill' | null = null;
@@ -261,10 +262,22 @@ function bindVisibleRegionRowsToDetailActions(
 
 function isClickableContentTarget(element: ReadPageInteractiveElement | undefined): boolean {
   if (!element?.ref) return false;
+  if (!isExecutableCandidateElement(element)) return false;
   const role = String(element.role || '').toLowerCase();
   if (!new Set(['link', 'button', 'menuitem']).has(role)) return false;
   const source = String(element.matchSource || '').toLowerCase();
   if (source === 'placeholder') return false;
+  return true;
+}
+
+function isExecutableCandidateElement(element: ReadPageInteractiveElement): boolean {
+  const actionability = String(element.actionability || '').toLowerCase();
+  if (actionability === 'blocked' || actionability === 'not_actionable') return false;
+  const disabled = Boolean((element as { disabled?: boolean }).disabled);
+  const ariaDisabled = String(
+    (element as { ariaDisabled?: string }).ariaDisabled || '',
+  ).toLowerCase();
+  if (disabled || ariaDisabled === 'true') return false;
   return true;
 }
 

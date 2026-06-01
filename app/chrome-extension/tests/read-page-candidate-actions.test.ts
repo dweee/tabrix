@@ -13,6 +13,67 @@ function element(overrides: Partial<ReadPageInteractiveElement>): ReadPageIntera
   };
 }
 
+function visibleRowsForTarget(targetRef: string) {
+  return {
+    sourceDataSource: 'dom_region_rows',
+    rows: [
+      {
+        rowId: 'row_1',
+        title: 'Practical guide to AI poster creation',
+        primaryText: 'Practical guide to AI poster creation',
+        secondaryText: 'Design Lab',
+        metaText: 'today',
+        interactionText: '128 saves',
+        visibleTextFields: ['Practical guide to AI poster creation'],
+        targetRef,
+        targetRefCoverageRate: 1,
+        boundingBox: null,
+        regionId: 'region_row_1',
+        sourceRegion: 'content',
+        confidence: 0.86,
+        qualityReasons: ['target_ref_available'],
+      },
+    ],
+    rowCount: 1,
+    visibleRegionRowsUsed: true,
+    visibleRegionRowsRejectedReason: null,
+    sourceRegion: 'content',
+    rowExtractionConfidence: 0.86,
+    cardExtractorUsed: true,
+    cardPatternConfidence: 0.82,
+    cardRowsCount: 1,
+    rowOrder: 'visual_order',
+    targetRefCoverageRate: 1,
+    regionQualityScore: 0.78,
+    visibleDomRowsCandidateCount: 1,
+    visibleDomRowsSelectedCount: 1,
+    lowValueRegionRejectedCount: 0,
+    footerLikeRejectedCount: 0,
+    navigationLikeRejectedCount: 0,
+    targetRefCoverageRejectedCount: 0,
+    rejectedRegionReasonDistribution: {
+      low_value_region: 0,
+      footer_like_region: 0,
+      navigation_like_region: 0,
+      target_ref_coverage_insufficient: 0,
+      single_isolated_text: 0,
+      empty_shell: 0,
+      broad_page_shell: 0,
+      dom_region_rows_unavailable: 0,
+    },
+    pageInfo: {
+      url: 'https://example.com/search',
+      title: 'Search results',
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      scrollY: 0,
+      pixelsAbove: 0,
+      pixelsBelow: 0,
+      visibleRegionCount: 1,
+      candidateRegionCount: 1,
+    },
+  } as const;
+}
+
 describe('read_page candidate action intents', () => {
   it('marks search inputs as query entry without leaking their label into locatorChain', () => {
     const actions = buildCandidateActions(
@@ -66,6 +127,39 @@ describe('read_page candidate action intents', () => {
       targetRef: 'ref_placeholder',
     });
     expect(actions[0].intent).toBeUndefined();
+  });
+
+  it('does not emit executable candidates for blocked or not-actionable elements', () => {
+    const actions = buildCandidateActions(
+      [
+        element({
+          ref: 'ref_blocked_request_otp',
+          role: 'button',
+          name: 'Get code',
+          actionability: 'blocked',
+        }),
+        element({
+          ref: 'ref_not_actionable_terms',
+          role: 'button',
+          name: 'Agree and continue',
+          actionability: 'not_actionable',
+        }),
+        element({
+          ref: 'ref_ready_search',
+          role: 'button',
+          name: 'Search',
+          actionability: 'actionable',
+        }),
+      ],
+      [],
+    );
+
+    expect(actions.map((action) => action.targetRef)).toEqual(['ref_ready_search']);
+    expect(actions[0]).toMatchObject({
+      actionType: 'click',
+      intent: 'search.submit',
+      targetRef: 'ref_ready_search',
+    });
   });
 
   it('preserves candidate action intent in derived operation-map executable actions', () => {
@@ -190,6 +284,25 @@ describe('read_page candidate action intents', () => {
       { type: 'aria', value: 'Practical guide to AI poster creation' },
       { type: 'css', value: 'article:nth-of-type(1) a' },
     ]);
+  });
+
+  it('does not bind not-actionable visible row targets to detail actions', () => {
+    const actions = buildCandidateActions(
+      [
+        element({
+          ref: 'ref_row_title',
+          role: 'link',
+          name: 'Practical guide to AI poster creation',
+          actionability: 'not_actionable',
+        }),
+      ],
+      [{ ref: 'ref_row_title', selector: 'article:nth-of-type(1) a' }],
+      {
+        visibleRegionRows: visibleRowsForTarget('ref_row_title'),
+      },
+    );
+
+    expect(actions).toEqual([]);
   });
 
   it('does not let visible rows override auth or search intent precedence', () => {
