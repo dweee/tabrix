@@ -128,6 +128,7 @@ import type {
   BrowserPageThingProjection,
   ReadPageBrowserPageObjectCompactView,
   BrowserSourceLineage,
+  BrowserSourceFreshness,
   BrowserSourceTruthChain,
   BrowserTaskStateVerdict,
   ActionKind,
@@ -1130,6 +1131,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
             const aiFacingDomRowsResult = attachAiFacingDeltaContext(
               compatDomRowsResult,
               taskContextAttachment,
+              { readStartedAtMs: toolCallStartedAtMs },
             );
             sessionManager.completeStep(session.sessionId, step.stepId, {
               status: 'completed',
@@ -1223,7 +1225,9 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       }
       const aiFacingResult =
         name === 'chrome_read_page' && taskContext
-          ? attachAiFacingDeltaContext(rawResultWithEvidence, taskContextAttachment)
+          ? attachAiFacingDeltaContext(rawResultWithEvidence, taskContextAttachment, {
+              readStartedAtMs: toolCallStartedAtMs,
+            })
           : name === 'chrome_close_tabs' && taskContext
             ? attachLifecycleTimelineContext(rawResultWithEvidence, taskContextAttachment)
             : rawResultWithEvidence;
@@ -2229,6 +2233,7 @@ function buildCachedReadPageObjectSummary(args: {
 function attachAiFacingDeltaContext(
   result: CallToolResult,
   attachment: TaskContextAttachment,
+  options?: { readStartedAtMs?: number },
 ): CallToolResult {
   const first = result.content?.[0];
   if (!first || first.type !== 'text' || typeof first.text !== 'string') return result;
@@ -2272,11 +2277,16 @@ function attachAiFacingDeltaContext(
   );
   const pageRegions = readPageRegions(payload.pageRegions);
   const pageLoadReadiness = readPageLoadReadiness(payload.pageContext);
+  const postActionReadback = buildPostActionReadbackEvidence({
+    projection: projectionWithSourceTruth,
+    readStartedAtMs: options?.readStartedAtMs,
+  });
   const regionStatePostcondition = pendingInteraction
     ? buildRegionStatePostconditionForPendingInteraction(
         pendingInteraction,
         pageRegions,
         pageLoadReadiness,
+        postActionReadback,
       )
     : null;
   if (pendingInteraction && regionStatePostcondition?.verdict === 'unknown') {
@@ -3259,6 +3269,7 @@ function buildRegionStatePostconditionForPendingInteraction(
   pendingInteraction: TaskPageInteractionSnapshot,
   afterRegions: readonly ReadPageRegion[],
   afterLoadReadiness: PostconditionLoadReadinessGate | null,
+  postActionReadback: PostActionReadbackEvidence,
 ): RegionStatePostconditionResult | null {
   const kind = inferRegionStatePostconditionKindForIntent({
     intent: pendingInteraction.candidateActionIntent,
@@ -3266,6 +3277,23 @@ function buildRegionStatePostconditionForPendingInteraction(
   });
   if (!kind) return null;
   const actionId = pendingInteraction.candidateActionId ?? pendingInteraction.action;
+  const freshnessFailure = evaluatePostActionReadbackFreshness(
+    pendingInteraction,
+    postActionReadback,
+  );
+  if (freshnessFailure) {
+    const producedAtMs = Date.now();
+    return {
+      actionId,
+      kind,
+      verdict: 'unknown',
+      reason: 'post_action_fresh_read_required',
+      beforeSummary: summarizeRegionsForPostcondition(pendingInteraction.beforePageRegions),
+      afterSummary: summarizeRegionsForPostcondition(afterRegions),
+      producedAtMs,
+      claimBoundary: freshnessFailure,
+    };
+  }
   if (afterLoadReadiness?.canUseSnapshotForBusinessAction === false) {
     const producedAtMs = Date.now();
     return {
@@ -3310,6 +3338,86 @@ function buildRegionStatePostconditionForPendingInteraction(
     afterRegions,
     targetRefs: pendingInteraction.targetRefs,
   });
+}
+
+interface PostActionReadbackEvidence {
+  readStartedAtMs: number | null;
+  projectionSourceObservedAtMs: number | null;
+  sourceFreshness: BrowserSourceFreshness | null;
+  projectionId: string | null;
+}
+
+function buildPostActionReadbackEvidence(input: {
+  projection: BrowserPageThingProjection;
+  readStartedAtMs?: number | null;
+}): PostActionReadbackEvidence {
+  const readStartedAtMs =
+    typeof input.readStartedAtMs === 'number' && Number.isFinite(input.readStartedAtMs)
+      ? Math.floor(input.readStartedAtMs)
+      : null;
+  return {
+    readStartedAtMs,
+    projectionSourceObservedAtMs: parseIsoTimeMs(input.projection.sourceObservedAt),
+    sourceFreshness: input.projection.sourceFreshness ?? null,
+    projectionId:
+      typeof input.projection.projectionId === 'string' && input.projection.projectionId.length > 0
+        ? input.projection.projectionId
+        : null,
+  };
+}
+
+function evaluatePostActionReadbackFreshness(
+  pendingInteraction: TaskPageInteractionSnapshot,
+  evidence: PostActionReadbackEvidence,
+): string | null {
+  const actionProducedAtMs =
+    typeof pendingInteraction.producedAtMs === 'number' &&
+    Number.isFinite(pendingInteraction.producedAtMs)
+      ? Math.floor(pendingInteraction.producedAtMs)
+      : null;
+  if (actionProducedAtMs === null) {
+    return [
+      'Region-state postconditions require a timestamped browser action before post-action readback can prove business success;',
+      `sourceFreshness=${evidence.sourceFreshness ?? 'unknown'}`,
+      `projectionId=${evidence.projectionId ?? 'unknown'}`,
+      'the action timestamp is missing, so the readback/action ordering is not proven.',
+    ].join(' ');
+  }
+  if (evidence.sourceFreshness !== 'fresh') {
+    return [
+      'Region-state postconditions require a fresh post-action readback;',
+      `sourceFreshness=${evidence.sourceFreshness ?? 'unknown'}`,
+      `projectionId=${evidence.projectionId ?? 'unknown'}`,
+      'run chrome_read_page with forceRefresh=true on the same tab before resuming.',
+    ].join(' ');
+  }
+  if (evidence.readStartedAtMs !== null && evidence.readStartedAtMs < actionProducedAtMs) {
+    return [
+      'Region-state postconditions require the readback call to start after the browser action;',
+      `actionProducedAtMs=${actionProducedAtMs}`,
+      `readStartedAtMs=${evidence.readStartedAtMs}`,
+      'run chrome_read_page with forceRefresh=true on the same tab before resuming.',
+    ].join(' ');
+  }
+  if (
+    evidence.projectionSourceObservedAtMs !== null &&
+    evidence.projectionSourceObservedAtMs < actionProducedAtMs
+  ) {
+    return [
+      'Region-state postconditions require page evidence observed after the browser action;',
+      `actionProducedAtMs=${actionProducedAtMs}`,
+      `sourceObservedAtMs=${evidence.projectionSourceObservedAtMs}`,
+      `projectionId=${evidence.projectionId ?? 'unknown'}`,
+      'the snapshot may be stale, so it is not business success proof.',
+    ].join(' ');
+  }
+  return null;
+}
+
+function parseIsoTimeMs(value: unknown): number | null {
+  if (typeof value !== 'string' || value.trim().length === 0) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function summarizeRegionsForPostcondition(regions: readonly ReadPageRegion[]): string[] {

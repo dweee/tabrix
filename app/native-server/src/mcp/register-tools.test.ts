@@ -4114,7 +4114,10 @@ describe('handleToolCall execution wrapper', () => {
       pageRegions: Array<Record<string, unknown>>;
       pageContext?: Record<string, unknown>;
       includeTopNRows?: boolean;
+      sourceFreshness?: 'fresh' | 'stale' | 'unknown';
+      sourceObservedAt?: string;
     }): string {
+      const sourceObservedAt = input.sourceObservedAt ?? new Date(Date.now()).toISOString();
       const topNRows = Array.from({ length: 10 }, (_, index) => {
         const n = index + 1;
         return {
@@ -4177,8 +4180,8 @@ describe('handleToolCall execution wrapper', () => {
           pageId: `tab:${input.tabId}`,
           tabId: input.tabId,
           ownerType: 'run_owned',
-          projectionCreatedAt: '2026-05-18T00:00:00.000Z',
-          sourceObservedAt: '2026-05-18T00:00:00.000Z',
+          projectionCreatedAt: sourceObservedAt,
+          sourceObservedAt,
           sourceLineage: 'dom',
           regionEvidenceRefs: ['region:results'],
           readiness: 'ready',
@@ -4194,7 +4197,7 @@ describe('handleToolCall execution wrapper', () => {
           refreshedRefs: ['ref_result_1', 'ref_result_2'],
           chosenDataSource: 'dom_json',
           sourceConfidence: 0.9,
-          sourceFreshness: 'fresh',
+          sourceFreshness: input.sourceFreshness ?? 'fresh',
           contextChars: 1200,
           contextSavedChars: 0,
           userActivityLevel: 'idle',
@@ -5188,6 +5191,97 @@ describe('handleToolCall execution wrapper', () => {
           status: 'ready_to_continue',
           nextAction: 'continue_original_task',
           canContinue: true,
+        },
+      });
+    });
+
+    it('does not pass search postconditions from source evidence observed before the action', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
+      auto.noteRunOwnedTab(1);
+      Object.defineProperty(auto, 'readBudget', { value: 5, writable: false });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_before_stale_source_search',
+          tabId: 1,
+          pageRegions: [contentListRegion('before_stale_source')],
+        }),
+      );
+      await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  observedOutcome: 'spa_partial_update',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_search_submit',
+        candidateAction: {
+          id: 'ca_search_submit',
+          actionType: 'click',
+          targetRef: 'ref_search_submit',
+          confidence: 0.91,
+          matchReason: 'search submit candidate',
+          locatorChain: [{ type: 'ref', value: 'ref_search_submit' }],
+          intent: 'search.submit',
+        },
+      });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_after_stale_source_search',
+          tabId: 1,
+          pageRegions: [contentListRegion('after_stale_source')],
+          sourceObservedAt: '1970-01-01T00:00:00.000Z',
+        }),
+      );
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+        forceRefresh: true,
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.regionStatePostconditions).toEqual([
+        {
+          actionKind: 'click',
+          result: expect.objectContaining({
+            actionId: 'ca_search_submit',
+            kind: 'search_results_updated',
+            verdict: 'unknown',
+            reason: 'post_action_fresh_read_required',
+            claimBoundary: expect.stringContaining('sourceObservedAtMs=0'),
+          }),
+        },
+      ]);
+      expect(payload.taskResumeReadiness).toMatchObject({
+        status: 'postcondition_unknown_not_proven',
+        canResumeOriginalTask: false,
+        nextStep: 'force_fresh_read_same_tab',
+        reason:
+          'pending_business_verification_requires_fresh_read:search_results_or_url_query_changed:search.submit',
+        handoffSummary: {
+          status: 'needs_fresh_read',
+          nextAction: 'run_chrome_read_page_force_refresh',
+          canContinue: false,
         },
       });
     });

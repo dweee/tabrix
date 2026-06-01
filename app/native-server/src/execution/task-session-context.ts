@@ -327,6 +327,7 @@ export interface TaskPageInteractionSnapshot {
   candidateActionId: string | null;
   candidateActionIntent: ReadPageCandidateActionIntent | string | null;
   actionKind: ActionKind | null;
+  producedAtMs: number;
   beforePageRegions: ReadPageRegion[];
 }
 
@@ -1518,6 +1519,7 @@ export class TaskSessionContext {
       candidateActionId: normalizeIdentifier(input.candidateActionId),
       candidateActionIntent: normalizeIdentifier(input.candidateActionIntent),
       actionKind: normalizeActionKind(input.actionKind),
+      producedAtMs: Date.now(),
       beforePageRegions: this.buildBeforePageRegionsForInteraction(tabId),
     };
     this.recordLifecycleEvent({
