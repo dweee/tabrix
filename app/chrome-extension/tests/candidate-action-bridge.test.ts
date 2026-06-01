@@ -64,11 +64,22 @@ describe('candidateAction bridge', () => {
     const result = await clickTool.execute({
       candidateAction: {
         targetRef: 'ref_summary',
+        intent: 'content.open_detail',
       },
       allowDownloadClick: true,
     });
 
     expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.businessVerification).toMatchObject({
+      status: 'fresh_read_required',
+      candidateActionIntent: 'content.open_detail',
+      expectedEvidence: 'detail_region_or_content_transition',
+      requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
+      sameTabVerificationRequired: true,
+      businessSuccessProven: false,
+    });
+    expect(payload.businessVerification.claimBoundary).toContain('not business success');
     expect(injectSpy).toHaveBeenCalled();
     expect(sendSpy).toHaveBeenCalledWith(
       4101,
@@ -247,6 +258,7 @@ describe('candidateAction bridge', () => {
           { type: 'aria', value: 'Email' },
           { type: 'css', value: 'input[name=email]' },
         ],
+        intent: 'search.enter_query',
       },
     });
 
@@ -257,6 +269,14 @@ describe('candidateAction bridge', () => {
       observedOutcome: null,
       postconditionVerdict: 'unknown',
       postconditionReason: 'form_input_state_change_not_proven_by_tool_closeout',
+      businessVerification: {
+        status: 'fresh_read_required',
+        candidateActionIntent: 'search.enter_query',
+        expectedEvidence: 'form_value_state_changed',
+        requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
+        sameTabVerificationRequired: true,
+        businessSuccessProven: false,
+      },
     });
     expect(payload.claimBoundary).toContain('does not prove form/search result state changed');
     expect(sendSpy).toHaveBeenCalledWith(

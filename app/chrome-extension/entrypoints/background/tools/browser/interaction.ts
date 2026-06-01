@@ -91,6 +91,25 @@ interface ActionTargetBindingEvidence {
   claimBoundary: string;
 }
 
+interface ActionBusinessVerificationPlan {
+  status: 'fresh_read_required' | 'not_proven';
+  candidateActionIntent: string | null;
+  expectedEvidence:
+    | 'agreement_state_changed_or_dialog_present'
+    | 'agreement_dialog_closed_or_terms_accepted'
+    | 'otp_countdown_or_sent_feedback'
+    | 'auth_surface_removed_and_account_state_present'
+    | 'form_value_state_changed'
+    | 'search_results_or_url_query_changed'
+    | 'detail_region_or_content_transition'
+    | 'page_or_object_state_changed';
+  requiredNextAction: 'chrome_read_page_force_refresh_same_tab' | 'stop_or_retry_after_fresh_read';
+  sameTabVerificationRequired: boolean;
+  businessSuccessProven: false;
+  reason: string;
+  claimBoundary: string;
+}
+
 function asFiniteInteger(value: unknown): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   return Math.trunc(value);
@@ -137,6 +156,58 @@ function buildActionTargetBindingEvidence(input: {
     stableTargetRefResolved,
     claimBoundary:
       'Target binding proves only where Tabrix dispatched the action; it does not prove business success, full frame inventory, or postcondition completion.',
+  };
+}
+
+function expectedBusinessEvidenceForIntent(
+  intent: CandidateActionInput['intent'] | undefined,
+): ActionBusinessVerificationPlan['expectedEvidence'] {
+  switch (intent) {
+    case 'auth.accept_terms':
+      return 'agreement_state_changed_or_dialog_present';
+    case 'auth.confirm_agreement':
+      return 'agreement_dialog_closed_or_terms_accepted';
+    case 'auth.request_otp':
+      return 'otp_countdown_or_sent_feedback';
+    case 'auth.submit_login':
+      return 'auth_surface_removed_and_account_state_present';
+    case 'search.enter_query':
+      return 'form_value_state_changed';
+    case 'search.submit':
+      return 'search_results_or_url_query_changed';
+    case 'content.open_detail':
+      return 'detail_region_or_content_transition';
+    default:
+      return 'page_or_object_state_changed';
+  }
+}
+
+function buildActionBusinessVerificationPlan(input: {
+  candidateAction?: CandidateActionInput;
+  dispatchSucceeded: boolean;
+  actionKind: 'click' | 'hover' | 'fill';
+  observedOutcome?: ClickObservedOutcome | 'verification_required' | null;
+}): ActionBusinessVerificationPlan {
+  const intent =
+    typeof input.candidateAction?.intent === 'string' && input.candidateAction.intent.trim()
+      ? input.candidateAction.intent.trim()
+      : null;
+  const expectedEvidence = expectedBusinessEvidenceForIntent(input.candidateAction?.intent);
+  const status = input.dispatchSucceeded ? 'fresh_read_required' : 'not_proven';
+  return {
+    status,
+    candidateActionIntent: intent,
+    expectedEvidence,
+    requiredNextAction: input.dispatchSucceeded
+      ? 'chrome_read_page_force_refresh_same_tab'
+      : 'stop_or_retry_after_fresh_read',
+    sameTabVerificationRequired: true,
+    businessSuccessProven: false,
+    reason: input.dispatchSucceeded
+      ? `${input.actionKind}_dispatch_observed_${input.observedOutcome ?? 'without_business_state'}`
+      : `${input.actionKind}_dispatch_not_proven`,
+    claimBoundary:
+      'Tool dispatch and page-local signals are not business success; verify the expected page/object state with a fresh same-tab chrome_read_page before continuing the user task.',
   };
 }
 
@@ -917,6 +988,16 @@ class ClickTool extends BaseBrowserToolExecutor {
           finalSelector,
           coordinates,
         });
+      const buildBusinessVerification = (
+        dispatchSucceeded: boolean,
+        observedOutcome?: ClickObservedOutcome | 'verification_required' | null,
+      ) =>
+        buildActionBusinessVerificationPlan({
+          candidateAction: args.candidateAction,
+          dispatchSucceeded,
+          actionKind: interaction === 'hover' ? 'hover' : 'click',
+          observedOutcome,
+        });
 
       if (interaction === 'hover' && coordinates && !finalRef && !finalSelector) {
         return createErrorResponse(
@@ -1060,6 +1141,7 @@ class ClickTool extends BaseBrowserToolExecutor {
                 },
                 lane: TABRIX_OWNED_LANE,
                 targetBinding: buildTargetBinding(),
+                businessVerification: buildBusinessVerification(true, 'verification_required'),
                 message:
                   'Hover dispatched to a known element; run chrome_read_page again to verify menu/modal/page-region changes.',
                 elementInfo: hoverResult.target,
@@ -1365,6 +1447,10 @@ class ClickTool extends BaseBrowserToolExecutor {
               // lane drift is visible to lane-integrity metrics.
               lane: TABRIX_OWNED_LANE,
               targetBinding: buildTargetBinding(),
+              businessVerification: buildBusinessVerification(
+                merged.dispatchSucceeded,
+                merged.observedOutcome,
+              ),
               message: finalSuccess
                 ? `Click observed outcome: ${merged.observedOutcome}`
                 : authPostcondition && authPostcondition.status !== 'passed'
@@ -1511,6 +1597,13 @@ class FillTool extends BaseBrowserToolExecutor {
           finalSelector: dispatchedFillTarget?.selector,
           coordinates: null,
         });
+      const buildBusinessVerification = () =>
+        buildActionBusinessVerificationPlan({
+          candidateAction: args.candidateAction,
+          dispatchSucceeded: true,
+          actionKind: 'fill',
+          observedOutcome: null,
+        });
 
       if (!finalRef && !finalSelector) {
         return createErrorResponse(
@@ -1629,6 +1722,7 @@ class FillTool extends BaseBrowserToolExecutor {
               message: result.message || 'Fill operation successful',
               elementInfo: result.elementInfo,
               targetBinding: buildTargetBinding(),
+              businessVerification: buildBusinessVerification(),
               observedOutcome: null,
               postconditionVerdict: 'unknown',
               postconditionReason: 'form_input_state_change_not_proven_by_tool_closeout',
