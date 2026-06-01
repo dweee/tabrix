@@ -169,6 +169,7 @@ export type RegionStatePostconditionKind =
   | 'detail_opened'
   | 'login_completed'
   | 'logout_completed'
+  | 'otp_requested'
   | 'qr_waiting';
 
 export interface RegionStatePostconditionInput {
@@ -286,7 +287,7 @@ export function verifyRegionStatePostcondition(
     afterSummary,
     producedAtMs,
     claimBoundary:
-      'region-state postconditions require before/after page-region evidence; click success, timeout, or QR presence alone is not business success',
+      'region-state postconditions require before/after page-region evidence; click success, timeout, or QR presence alone is not business success; OTP requests require countdown, disabled/sent, or waiting-user evidence',
     ...(result.detailFieldReadbackEvidence
       ? { detailFieldReadbackEvidence: result.detailFieldReadbackEvidence }
       : {}),
@@ -302,6 +303,12 @@ export function inferRegionStatePostconditionKindForIntent(input: {
   if (intent === 'search.submit') return 'search_results_updated';
   if (intent === 'content.open_detail') return 'detail_opened';
   if (intent === 'auth.submit_login') return 'login_completed';
+  if (
+    intent === 'auth.request_otp' &&
+    (input.actionKind === 'click' || input.actionKind === 'submit')
+  ) {
+    return 'otp_requested';
+  }
   return null;
 }
 
@@ -332,6 +339,8 @@ function verdictForRegionState(
       return verdictForLoginCompleted(beforeRegions, afterRegions);
     case 'logout_completed':
       return verdictForLogoutCompleted(beforeRegions, afterRegions);
+    case 'otp_requested':
+      return verdictForOtpRequested(beforeRegions, afterRegions);
     case 'qr_waiting':
       return verdictForQrWaiting(afterRegions);
   }
@@ -707,6 +716,98 @@ function verdictForQrWaiting(afterRegions: readonly ReadPageRegion[]): {
   );
   if (qrRegion) return { verdict: 'passed', reason: 'qr_region_waiting_for_scan' };
   return { verdict: 'unknown', reason: 'qr_waiting_state_not_proven' };
+}
+
+function verdictForOtpRequested(
+  beforeRegions: readonly ReadPageRegion[],
+  afterRegions: readonly ReadPageRegion[],
+): {
+  verdict: PostconditionVerdict;
+  reason: string;
+} {
+  const beforeAuth = hasAuthPrompt(beforeRegions) || hasOtpAuthForm(beforeRegions);
+  if (!beforeAuth) return { verdict: 'unknown', reason: 'before_auth_prompt_evidence_missing' };
+
+  if (hasOtpRequestedEvidence(afterRegions)) {
+    return { verdict: 'passed', reason: 'otp_request_waiting_for_user_evidence_after_action' };
+  }
+
+  const afterLoggedIn = regionsByType(afterRegions, 'account').some(
+    (region) => region.state === 'logged_in_candidate',
+  );
+  if (afterLoggedIn && !hasAuthPrompt(afterRegions)) {
+    return {
+      verdict: 'unknown',
+      reason: 'login_state_changed_but_otp_request_not_proven',
+    };
+  }
+
+  if (!hasAuthPrompt(afterRegions) && !hasOtpAuthForm(afterRegions)) {
+    return { verdict: 'unknown', reason: 'auth_prompt_missing_after_otp_request' };
+  }
+
+  return { verdict: 'unknown', reason: 'otp_request_state_not_proven' };
+}
+
+function hasOtpAuthForm(regions: readonly ReadPageRegion[]): boolean {
+  return regions.some((region) => {
+    if (region.regionType !== 'form' && region.regionType !== 'modal') return false;
+    const state = normalizeEvidenceToken(region.state);
+    return state.includes('otp') || state.includes('auth');
+  });
+}
+
+function hasOtpRequestedEvidence(regions: readonly ReadPageRegion[]): boolean {
+  return regions.some((region) => {
+    const regionState = normalizeEvidenceToken(region.state);
+    if (isOtpRequestedEvidenceState(regionState)) return true;
+    return region.objects.some((object) => {
+      const objectRecord = object as unknown as Record<string, unknown>;
+      const objectType = normalizeEvidenceToken(object.objectType);
+      const objectState = normalizeEvidenceToken(objectRecord.state);
+      const targetability = normalizeEvidenceToken(object.targetability);
+      return (
+        isOtpRequestedEvidenceState(objectState) ||
+        ((objectType.includes('otp') ||
+          objectType.includes('verification') ||
+          objectType.includes('code') ||
+          objectType.includes('request')) &&
+          (objectState.includes('countdown') ||
+            objectState.includes('sent') ||
+            objectState.includes('disabled') ||
+            objectState.includes('waiting'))) ||
+        ((objectType.includes('request') || objectType.includes('otp')) &&
+          targetability.includes('disabled'))
+      );
+    });
+  });
+}
+
+function isOtpRequestedEvidenceState(state: string): boolean {
+  if (!state) return false;
+  if (state === 'otp_requested_candidate') return false;
+  return (
+    state === 'waiting_for_user_otp' ||
+    state === 'otp_requested' ||
+    state === 'otp_sent' ||
+    state === 'sent_candidate' ||
+    state === 'otp_sent_candidate' ||
+    state === 'countdown' ||
+    state === 'otp_countdown' ||
+    state.includes('waiting_for_user_otp') ||
+    state.includes('otp_countdown') ||
+    state.includes('otp_sent') ||
+    state.includes('countdown')
+  );
+}
+
+function normalizeEvidenceToken(value: unknown): string {
+  return String(value || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^a-z0-9_\u3400-\u9fff]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '');
 }
 
 function contentCollectionRegions(regions: readonly ReadPageRegion[]): ReadPageRegion[] {

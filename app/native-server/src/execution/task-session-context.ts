@@ -338,6 +338,7 @@ export type TaskRegionStatePostconditionKind =
   | 'detail_opened'
   | 'login_completed'
   | 'logout_completed'
+  | 'otp_requested'
   | 'qr_waiting';
 
 export interface TaskRegionStatePostconditionResultSnapshot {
@@ -1397,6 +1398,17 @@ export class TaskSessionContext {
           claimBoundary: latestPostcondition.result.claimBoundary,
         });
       }
+      if (latestPostcondition.result.kind === 'otp_requested') {
+        return withTaskResumeHandoffSummary({
+          status: 'blocked_by_auth_verification',
+          canResumeOriginalTask: false,
+          nextStep: 'wait_for_user_collaboration',
+          tabId,
+          evidenceKinds: ['region_state_postcondition', 'user_collaboration_required'],
+          reason: `region_state_otp_requested_waiting_for_user:${latestPostcondition.result.reason}`,
+          claimBoundary: latestPostcondition.result.claimBoundary,
+        });
+      }
       return withTaskResumeHandoffSummary({
         status: 'postcondition_passed_ready',
         canResumeOriginalTask: true,
@@ -1903,6 +1915,7 @@ function normalizeRegionStatePostconditionKind(
     value === 'detail_opened' ||
     value === 'login_completed' ||
     value === 'logout_completed' ||
+    value === 'otp_requested' ||
     value === 'qr_waiting'
     ? value
     : null;

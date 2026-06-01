@@ -1000,6 +1000,7 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
       candidateActionId: 'ca_search_submit',
       candidateActionIntent: 'search.submit',
       actionKind: 'click',
+      producedAtMs: expect.any(Number),
       beforePageRegions: [makeRegion('region_results_before', 'content_list', 'loaded')],
     });
     expect(ctx.consumePendingPageInteraction(9)).toBeNull();
@@ -1170,6 +1171,42 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
       status: 'not_proven',
       canResumeOriginalTask: false,
       reason: 'no_resume_or_business_postcondition_evidence',
+    });
+  });
+
+  it('keeps OTP-request postcondition in user-collaboration wait state instead of resuming the original task', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_request_otp',
+            kind: 'otp_requested',
+            verdict: 'passed',
+            reason: 'otp_request_waiting_for_user_evidence_after_action',
+            beforeSummary: ['form:ready_to_request_otp:target_ref:actions:1'],
+            afterSummary: ['form:waiting_for_user_otp:target_ref:actions:1'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic OTP request fixture only',
+          },
+        },
+      ],
+    });
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'blocked_by_auth_verification',
+      canResumeOriginalTask: false,
+      nextStep: 'wait_for_user_collaboration',
+      evidenceKinds: ['region_state_postcondition', 'user_collaboration_required'],
+      reason:
+        'region_state_otp_requested_waiting_for_user:otp_request_waiting_for_user_evidence_after_action',
+      handoffSummary: {
+        status: 'waiting_for_user',
+        canContinue: false,
+        nextAction: 'wait_for_user_collaboration',
+      },
     });
   });
 

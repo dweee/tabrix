@@ -4116,6 +4116,7 @@ describe('handleToolCall execution wrapper', () => {
       includeTopNRows?: boolean;
       sourceFreshness?: 'fresh' | 'stale' | 'unknown';
       sourceObservedAt?: string;
+      authCollaboration?: Record<string, unknown>;
     }): string {
       const sourceObservedAt = input.sourceObservedAt ?? new Date(Date.now()).toISOString();
       const topNRows = Array.from({ length: 10 }, (_, index) => {
@@ -4164,6 +4165,7 @@ describe('handleToolCall execution wrapper', () => {
             }
           : {}),
         ...(input.pageContext ? { pageContext: input.pageContext } : {}),
+        ...(input.authCollaboration ? { authCollaboration: input.authCollaboration } : {}),
         pageRegions: input.pageRegions,
         objectLifecycle: {
           source: 'read_page_regions',
@@ -4310,6 +4312,61 @@ describe('handleToolCall execution wrapper', () => {
         candidateActionIds: [],
         targetability: 'not_clickable',
         claimBoundary: 'test account region',
+      };
+    }
+
+    function otpAuthCollaboration(input: {
+      readiness: 'ready_to_request_otp' | 'waiting_for_user_otp' | 'not_proven';
+      requestOtpState: 'visible' | 'countdown' | 'unknown';
+    }): Record<string, unknown> {
+      return {
+        status: 'required',
+        challengeType: 'otp',
+        userAction: {
+          message: 'Please complete the OTP login collaboration.',
+          artifactRefs: [],
+        },
+        evidence: {
+          pageFreshness: 'single_snapshot',
+          operationBinding: 'ai_operable_tab',
+          artifactExtractionEligibility: 'unknown',
+          actionOperability: 'operable',
+          semanticEventTypes: [],
+          postconditionStatus: 'not_evaluated',
+          claimBoundary: 'test auth collaboration evidence',
+        },
+        authForm: {
+          formType: 'otp',
+          readiness: input.readiness,
+          nextAction:
+            input.readiness === 'waiting_for_user_otp' ? 'wait_for_user_otp' : 'request_otp',
+          controls: {
+            requestOtp: {
+              role: 'button',
+              label: 'auth request otp control',
+              targetRef: 'ref_request_otp',
+              candidateActionId: 'ca_request_otp',
+              confidence: 0.9,
+              reason: 'test request OTP control',
+              state: input.requestOtpState,
+              actionability:
+                input.requestOtpState === 'countdown' ? 'not_actionable' : 'actionable',
+            },
+            otpInput: {
+              role: 'textbox',
+              label: 'auth otp input',
+              targetRef: 'ref_otp_input',
+              confidence: 0.82,
+              reason: 'test OTP input',
+              state: 'visible',
+              valueState: 'empty',
+              actionability: 'actionable',
+            },
+          },
+          blockers: [],
+          claimBoundary: 'test auth form',
+        },
+        claimBoundary: 'test auth collaboration',
       };
     }
 
@@ -5085,6 +5142,104 @@ describe('handleToolCall execution wrapper', () => {
         },
       });
       expect(JSON.stringify(payload.regionStatePostconditions)).not.toContain('15705171303');
+    });
+
+    it('fresh read after an OTP request candidate proves user-wait state without resuming the original task', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
+      auto.noteRunOwnedTab(1);
+      Object.defineProperty(auto, 'readBudget', { value: 5, writable: false });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_before_request_otp',
+          tabId: 1,
+          pageRegions: [],
+          authCollaboration: otpAuthCollaboration({
+            readiness: 'ready_to_request_otp',
+            requestOtpState: 'visible',
+          }),
+        }),
+      );
+      await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  observedOutcome: 'spa_partial_update',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_request_otp',
+        candidateAction: {
+          id: 'ca_request_otp',
+          actionType: 'click',
+          targetRef: 'ref_request_otp',
+          confidence: 0.91,
+          matchReason: 'request OTP candidate',
+          locatorChain: [{ type: 'ref', value: 'ref_request_otp' }],
+          intent: 'auth.request_otp',
+        },
+      });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_after_request_otp',
+          tabId: 1,
+          pageRegions: [],
+          authCollaboration: otpAuthCollaboration({
+            readiness: 'waiting_for_user_otp',
+            requestOtpState: 'countdown',
+          }),
+        }),
+      );
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.regionStatePostconditions).toEqual([
+        {
+          actionKind: 'click',
+          result: expect.objectContaining({
+            actionId: 'ca_request_otp',
+            kind: 'otp_requested',
+            verdict: 'passed',
+            reason: 'otp_request_waiting_for_user_evidence_after_action',
+          }),
+        },
+      ]);
+      expect(payload.taskResumeReadiness).toMatchObject({
+        status: 'blocked_by_auth_verification',
+        canResumeOriginalTask: false,
+        nextStep: 'wait_for_user_collaboration',
+        reason:
+          'region_state_otp_requested_waiting_for_user:otp_request_waiting_for_user_evidence_after_action',
+        handoffSummary: {
+          status: 'waiting_for_user',
+          nextAction: 'wait_for_user_collaboration',
+          canContinue: false,
+        },
+      });
+      expect(JSON.stringify(payload.regionStatePostconditions)).not.toContain('15705171303');
+      expect(JSON.stringify(payload.regionStatePostconditions)).not.toContain('134336');
     });
 
     it('does not resume original task when search readback lacks structured result rows', async () => {

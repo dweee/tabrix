@@ -95,6 +95,20 @@ function resultCollection(...rows: ReturnType<typeof resultRow>[]): ReadPageRegi
   return [region('content', 'result_collection_candidate', { objects: rows })];
 }
 
+function otpRequestObject(state: string): ReadPageRegion['objects'][number] {
+  return {
+    objectId: 'auth_request_otp',
+    label: 'auth request otp control',
+    objectType: 'request_otp',
+    targetRef: 'ref_request_otp',
+    actionTypes: ['click'],
+    targetability: 'target_ref',
+    confidence: 0.82,
+    reason: 'deterministic OTP request fixture',
+    state,
+  } as ReadPageRegion['objects'][number];
+}
+
 function weakResultCollection(suffix: string): ReadPageRegion[] {
   return [
     region('content', `results_${suffix}`, {
@@ -483,7 +497,7 @@ describe('action-postcondition-verifier — output contract', () => {
 });
 
 describe('action-postcondition-verifier — R4A region-state postconditions', () => {
-  it('maps search, detail, and login-submit candidate intents to region-state postconditions', () => {
+  it('maps search, detail, login-submit, and OTP-request candidate intents to region-state postconditions', () => {
     expect(
       inferRegionStatePostconditionKindForIntent({
         intent: 'search.submit',
@@ -502,9 +516,15 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
         actionKind: 'click',
       }),
     ).toBe('login_completed');
+    expect(
+      inferRegionStatePostconditionKindForIntent({
+        intent: 'auth.request_otp',
+        actionKind: 'click',
+      }),
+    ).toBe('otp_requested');
   });
 
-  it('does not treat query fill or auth-prep intents as business success postconditions', () => {
+  it('does not treat query fill or non-click OTP intents as business success postconditions', () => {
     expect(
       inferRegionStatePostconditionKindForIntent({
         intent: 'search.enter_query',
@@ -514,7 +534,7 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
     expect(
       inferRegionStatePostconditionKindForIntent({
         intent: 'auth.request_otp',
-        actionKind: 'click',
+        actionKind: 'fill',
       }),
     ).toBeNull();
     expect(inferRegionStatePostconditionKindForIntent({ intent: undefined })).toBeNull();
@@ -891,6 +911,50 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
 
     expect(result.verdict).toBe('unknown');
     expect(result.reason).toBe('auth_prompt_still_present');
+  });
+
+  it('passes otp_requested only when the fresh read shows waiting-for-user OTP evidence', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'otp_requested',
+      actionId: 'act-request-otp',
+      beforeRegions: [region('form', 'ready_to_request_otp')],
+      afterRegions: [
+        region('form', 'waiting_for_user_otp', {
+          objects: [otpRequestObject('countdown')],
+        }),
+      ],
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('passed');
+    expect(result.reason).toBe('otp_request_waiting_for_user_evidence_after_action');
+    expect(result.claimBoundary).toContain('OTP requests require countdown');
+  });
+
+  it('does not treat an OTP request candidate-only event as proof that a code was sent', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'otp_requested',
+      actionId: 'act-request-otp',
+      beforeRegions: [region('form', 'ready_to_request_otp')],
+      afterRegions: [region('form', 'otp_requested_candidate')],
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('unknown');
+    expect(result.reason).toBe('otp_request_state_not_proven');
+  });
+
+  it('does not turn a login state change into OTP request proof', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'otp_requested',
+      actionId: 'act-request-otp',
+      beforeRegions: [region('form', 'ready_to_request_otp')],
+      afterRegions: [region('account', 'logged_in_candidate')],
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('unknown');
+    expect(result.reason).toBe('login_state_changed_but_otp_request_not_proven');
   });
 
   it('passes logout_completed only when logged-in account changes to logged-out evidence', () => {
