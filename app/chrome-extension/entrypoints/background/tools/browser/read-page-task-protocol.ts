@@ -733,10 +733,12 @@ function pickPrimaryExecutableAction(
     locatorChain: action.locatorChain,
     toolName: action.actionType === 'fill' ? 'chrome_fill_or_select' : 'chrome_click_element',
     toolArgs: {
+      ...(typeof action.frameId === 'number' ? { frameId: action.frameId } : {}),
       candidateAction: {
         id: action.id,
         actionType: action.actionType,
         targetRef: action.targetRef,
+        ...(typeof action.frameId === 'number' ? { frameId: action.frameId } : {}),
         confidence: action.confidence,
         matchReason: action.matchReason,
         locatorChain: action.locatorChain,

@@ -139,7 +139,7 @@ function buildLocatorChain(params: {
 export function buildCandidateActions(
   interactiveElements: ReadPageInteractiveElement[],
   refMap: any[],
-  options: { visibleRegionRows?: ReadPageVisibleRegionRows | null } = {},
+  options: { visibleRegionRows?: ReadPageVisibleRegionRows | null; frameId?: number } = {},
 ): CandidateActionSeed[] {
   const selectorMap = buildRefSelectorMap(refMap);
   const clickRoles = new Set(['button', 'link', 'menuitem', 'tab', 'option', 'checkbox', 'switch']);
@@ -185,6 +185,7 @@ export function buildCandidateActions(
       id: `ca_${actionType}_${safeRef}`,
       actionType,
       targetRef: element.ref,
+      ...(typeof options.frameId === 'number' ? { frameId: options.frameId } : {}),
       confidence: Number(confidence.toFixed(2)),
       matchReason,
       locatorChain,
@@ -197,6 +198,7 @@ export function buildCandidateActions(
     interactiveElements,
     selectorMap,
     options.visibleRegionRows,
+    options.frameId,
   );
 }
 
@@ -205,6 +207,7 @@ function bindVisibleRegionRowsToDetailActions(
   interactiveElements: ReadPageInteractiveElement[],
   selectorMap: Map<string, string>,
   visibleRegionRows: ReadPageVisibleRegionRows | null | undefined,
+  frameId: number | undefined,
 ): CandidateActionSeed[] {
   if (!visibleRegionRows?.visibleRegionRowsUsed || visibleRegionRows.rows.length === 0) {
     return seeds;
@@ -249,6 +252,7 @@ function bindVisibleRegionRowsToDetailActions(
       id: `ca_click_${safeRef}`,
       actionType: 'click',
       targetRef,
+      ...(typeof frameId === 'number' ? { frameId } : {}),
       confidence: Number(Math.max(row.confidence || 0, 0.78).toFixed(2)),
       matchReason: 'content row target inferred from visible region rows',
       locatorChain,

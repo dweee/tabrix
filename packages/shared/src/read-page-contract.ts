@@ -305,6 +305,14 @@ export interface ReadPageCandidateAction {
   id: string;
   actionType: 'click' | 'fill' | string;
   targetRef: string;
+  /**
+   * Optional Chrome frame id for frame-targeted execution.
+   *
+   * Present only when the source snapshot/action is known to belong to a
+   * specific frame. Callers should pass this through to click/fill tools; when
+   * omitted, execution remains tab-main-frame/default-frame scoped.
+   */
+  frameId?: number;
   confidence: number;
   matchReason: string;
   locatorChain: ReadPageCandidateActionLocator[];

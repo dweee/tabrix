@@ -7,8 +7,13 @@ import {
 export type CandidateActionSelectorType = 'css' | 'xpath';
 
 export type CandidateActionInput = Partial<
-  Pick<ReadPageCandidateAction, 'targetRef' | 'locatorChain' | 'intent'>
+  Pick<ReadPageCandidateAction, 'targetRef' | 'locatorChain' | 'intent' | 'frameId'>
 >;
+
+export interface ResolvedStableTargetRefEntry {
+  ref: string;
+  frameId?: number;
+}
 
 /**
  * Optional stable-targetRef hooks. Kept as a thin functional interface
@@ -30,7 +35,10 @@ export interface ResolveCandidateActionTargetParams {
   /** Tab the click will execute against. Required for stable-targetRef lookup. */
   tabId?: number;
   /** Lookup function injected by the caller. */
-  lookupStableTargetRef?: (tabId: number, targetRef: string) => string | undefined;
+  lookupStableTargetRef?: (
+    tabId: number,
+    targetRef: string,
+  ) => string | ResolvedStableTargetRefEntry | undefined;
 }
 
 export interface ResolvedCandidateActionTarget {
@@ -53,12 +61,18 @@ export interface ResolvedCandidateActionTarget {
    * what to re-read.
    */
   unresolvedStableTargetRef?: string;
+  frameId?: number;
 }
 
 function asNonEmptyString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function asFiniteFrameId(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  return Math.trunc(value);
 }
 
 function firstLocatorValue(
@@ -89,11 +103,21 @@ function isFallbackRef(value: string): boolean {
 function resolveStableTargetRef(params: ResolveCandidateActionTargetParams, targetRef: string) {
   const lookup = params.lookupStableTargetRef;
   const tabId = params.tabId;
+  const candidateFrameId = asFiniteFrameId(params.candidateAction?.frameId);
   if (lookup && typeof tabId === 'number') {
     const resolved = lookup(tabId, targetRef);
     if (resolved) {
+      if (typeof resolved === 'object') {
+        const frameId = typeof resolved.frameId === 'number' ? resolved.frameId : candidateFrameId;
+        return {
+          ref: resolved.ref,
+          ...(typeof frameId === 'number' ? { frameId } : {}),
+          source: 'candidate_stable_target_ref' as const,
+        };
+      }
       return {
         ref: resolved,
+        ...(typeof candidateFrameId === 'number' ? { frameId: candidateFrameId } : {}),
         source: 'candidate_stable_target_ref' as const,
       };
     }
@@ -107,6 +131,7 @@ function resolveStableTargetRef(params: ResolveCandidateActionTargetParams, targ
 export function resolveCandidateActionTarget(
   params: ResolveCandidateActionTargetParams,
 ): ResolvedCandidateActionTarget {
+  const candidateFrameId = asFiniteFrameId(params.candidateAction?.frameId);
   const explicitRef = asNonEmptyString(params.explicitRef);
   if (explicitRef) {
     // AI callers often copy the AI-facing `targetRef` into `ref`. Stable
@@ -117,6 +142,7 @@ export function resolveCandidateActionTarget(
     }
     return {
       ref: explicitRef,
+      ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
       source: 'explicit_ref',
     };
   }
@@ -132,6 +158,7 @@ export function resolveCandidateActionTarget(
       return {
         selector: locatorCss,
         selectorType: 'css',
+        ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
         source: 'candidate_locator_css',
       };
     }
@@ -146,6 +173,7 @@ export function resolveCandidateActionTarget(
     }
     return {
       ref: candidateTargetRef,
+      ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
       source: 'candidate_target_ref',
     };
   }
@@ -155,6 +183,7 @@ export function resolveCandidateActionTarget(
     return {
       selector: explicitSelector,
       selectorType: params.explicitSelectorType || 'css',
+      ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
       source: 'explicit_selector',
     };
   }
@@ -163,6 +192,7 @@ export function resolveCandidateActionTarget(
     return {
       selector: locatorCss,
       selectorType: 'css',
+      ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
       source: 'candidate_locator_css',
     };
   }
@@ -170,6 +200,7 @@ export function resolveCandidateActionTarget(
   if (locatorRef) {
     return {
       ref: locatorRef,
+      ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
       source: 'candidate_locator_ref',
     };
   }
@@ -178,6 +209,7 @@ export function resolveCandidateActionTarget(
     return {
       selector: locatorCss,
       selectorType: 'css',
+      ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
       source: 'candidate_locator_css',
     };
   }

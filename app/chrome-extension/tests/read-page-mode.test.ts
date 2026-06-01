@@ -7,6 +7,7 @@ import {
   formatElementsAsPageContent,
 } from '@/entrypoints/background/tools/browser/read-page-fallback-format';
 import { buildCandidateActions } from '@/entrypoints/background/tools/browser/read-page-candidate-actions';
+import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 
 const MODE_MINIMUM_FIELDS: Record<'compact' | 'normal' | 'full', string[]> = {
   compact: ['mode', 'page', 'summary', 'interactiveElements', 'artifactRefs'],
@@ -171,7 +172,7 @@ describe('read_page mode', () => {
       title: 'Checkout',
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
-    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+    const sendSpy = vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
       success: true,
       pageContent:
         '- form "Checkout" [ref=ref_0] (x=640,y=300)\n  - textbox "Email" [ref=ref_1] (x=600,y=260)\n  - textbox "Card number" [ref=ref_2] (x=600,y=300)\n  - button "Submit order" [ref=ref_3] (x=600,y=340)\n  - link "Back to cart" [ref=ref_4] (x=500,y=340)\n- heading "Checkout" [ref=ref_5] (x=320,y=100)\n- generic "Secure payment" [ref=ref_6] (x=320,y=140)\n- generic "Order summary" [ref=ref_7] (x=900,y=220)\n- generic "Terms" [ref=ref_8] (x=300,y=520)\n- generic "Footer" [ref=ref_9] (x=300,y=560)',
@@ -275,7 +276,7 @@ describe('read_page mode', () => {
       title: 'Embedded App',
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
-    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+    const sendSpy = vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
       success: true,
       pageContent: [
         '- main "Embedded App" [ref=ref_0] (x=320,y=100)',
@@ -308,11 +309,19 @@ describe('read_page mode', () => {
       viewport: { width: 1280, height: 720, dpr: 1 },
     });
 
-    const result = await readPageTool.execute({});
+    const result = await readPageTool.execute({ frameId: 37 });
     const payload = JSON.parse((result.content[0] as { text: string }).text);
 
     expect(result.isError).toBe(false);
+    expect(sendSpy).toHaveBeenCalledWith(
+      5217,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
+      }),
+      37,
+    );
     expect(payload.frameContext).toMatchObject({
+      frameId: 37,
       frameUrl: 'https://example.com/embed/checkout',
       frameName: 'checkout-frame',
       frameScope: 'subframe',
@@ -320,6 +329,11 @@ describe('read_page mode', () => {
       source: 'content_script_runtime',
       coverage: 'responding_frame_only',
       claimBoundary: expect.stringContaining('does not prove every iframe was fully covered'),
+    });
+    expect(
+      payload.candidateActions.find((action: any) => action.targetRef === 'ref_2'),
+    ).toMatchObject({
+      frameId: 37,
     });
   });
 

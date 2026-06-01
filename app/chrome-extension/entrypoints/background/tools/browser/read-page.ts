@@ -79,6 +79,7 @@ interface ReadPageParams {
   requestedLayer?: ReadPageRequestedLayer;
   includeAuthArtifacts?: boolean;
   forceRefresh?: boolean;
+  frameId?: number;
 }
 
 const READ_PAGE_SPARSE_RETRY_DELAY_MS = 450;
@@ -183,13 +184,22 @@ function getTabNavigationUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): 
   return String(tab.url || tab.pendingUrl || '');
 }
 
-function normalizeFrameContext(raw: unknown): ReadPageFrameContext | null {
+function normalizeFrameContext(
+  raw: unknown,
+  requestedFrameId?: number,
+): ReadPageFrameContext | null {
   if (!raw || typeof raw !== 'object') return null;
   const input = raw as Record<string, unknown>;
   const frameScope =
     input.frameScope === 'top' || input.frameScope === 'subframe' ? input.frameScope : 'unknown';
+  const frameId =
+    typeof input.frameId === 'number'
+      ? input.frameId
+      : typeof requestedFrameId === 'number'
+        ? requestedFrameId
+        : undefined;
   return {
-    ...(typeof input.frameId === 'number' ? { frameId: input.frameId } : {}),
+    ...(typeof frameId === 'number' ? { frameId } : {}),
     frameUrl: typeof input.frameUrl === 'string' ? input.frameUrl : '',
     frameName: typeof input.frameName === 'string' ? input.frameName : '',
     frameScope,
@@ -729,7 +739,10 @@ async function buildModeOutput(params: {
   const candidateActions =
     params.candidateActions.length > 0
       ? params.candidateActions
-      : buildCandidateActions(interactiveElements, params.refMap, { visibleRegionRows });
+      : buildCandidateActions(interactiveElements, params.refMap, {
+          visibleRegionRows,
+          frameId: params.frameContext?.frameId,
+        });
   const artifactRefs = buildArtifactRefs(params.tabId, params.renderMode === 'markdown');
   const pageContext: ReadPagePageContext = {
     filter: params.filter,
@@ -786,9 +799,14 @@ async function buildModeOutput(params: {
   // every successful read replaces the previous mapping atomically.
   if (Array.isArray(extensionLayer.highValueObjects)) {
     const entries: StableTargetRefEntry[] = [];
+    const snapshotFrameId = params.frameContext?.frameId;
     for (const highValueObject of extensionLayer.highValueObjects) {
       if (highValueObject.targetRef && highValueObject.ref) {
-        entries.push({ targetRef: highValueObject.targetRef, ref: highValueObject.ref });
+        entries.push({
+          targetRef: highValueObject.targetRef,
+          ref: highValueObject.ref,
+          ...(typeof snapshotFrameId === 'number' ? { frameId: snapshotFrameId } : {}),
+        });
       }
     }
     recordStableTargetRefSnapshot(params.tabId, entries);
@@ -1047,12 +1065,15 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     resetObjectLifecycleCacheForTests();
   }
 
-  private async ensureInteractiveElementsHelper(tabId: number): Promise<void> {
+  private async ensureInteractiveElementsHelper(tabId: number, frameId?: number): Promise<void> {
     try {
+      const pingMessage = {
+        action: `${TOOL_NAMES.BROWSER.GET_INTERACTIVE_ELEMENTS}_ping`,
+      };
       const response = await Promise.race([
-        chrome.tabs.sendMessage(tabId, {
-          action: `${TOOL_NAMES.BROWSER.GET_INTERACTIVE_ELEMENTS}_ping`,
-        }),
+        typeof frameId === 'number'
+          ? chrome.tabs.sendMessage(tabId, pingMessage, { frameId })
+          : chrome.tabs.sendMessage(tabId, pingMessage),
         new Promise((_, reject) =>
           setTimeout(
             () => reject(new Error('interactive elements helper ping timed out')),
@@ -1069,16 +1090,16 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     }
 
     await chrome.scripting.executeScript({
-      target: { tabId },
+      target: { tabId, ...(typeof frameId === 'number' ? { frameIds: [frameId] } : {}) },
       files: [INTERACTIVE_ELEMENTS_HELPER_FILE],
       world: 'ISOLATED',
     } as any);
   }
 
-  private async sampleVisibleTextContent(tabId: number): Promise<string | null> {
+  private async sampleVisibleTextContent(tabId: number, frameId?: number): Promise<string | null> {
     try {
       const result = await chrome.scripting.executeScript({
-        target: { tabId },
+        target: { tabId, ...(typeof frameId === 'number' ? { frameIds: [frameId] } : {}) },
         func: (maxChars: number) => {
           try {
             const text = document.body?.innerText || '';
@@ -1098,18 +1119,27 @@ class ReadPageTool extends BaseBrowserToolExecutor {
 
   private async collectInteractiveElementsFallback(
     tabId: number,
-    options: { textQuery?: string; selector?: string; includeCoordinates?: boolean } = {},
+    options: {
+      textQuery?: string;
+      selector?: string;
+      includeCoordinates?: boolean;
+      frameId?: number;
+    } = {},
   ): Promise<any | null> {
     let fallback: any = null;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       if (attempt > 0) await delay(READ_PAGE_SPARSE_RETRY_DELAY_MS);
-      await this.ensureInteractiveElementsHelper(tabId);
-      fallback = await this.sendMessageToTab(tabId, {
-        action: TOOL_MESSAGE_TYPES.GET_INTERACTIVE_ELEMENTS,
-        includeCoordinates: options.includeCoordinates !== false,
-        ...(options.selector ? { selector: options.selector } : {}),
-        ...(options.textQuery ? { textQuery: options.textQuery } : {}),
-      });
+      await this.ensureInteractiveElementsHelper(tabId, options.frameId);
+      fallback = await this.sendMessageToTab(
+        tabId,
+        {
+          action: TOOL_MESSAGE_TYPES.GET_INTERACTIVE_ELEMENTS,
+          includeCoordinates: options.includeCoordinates !== false,
+          ...(options.selector ? { selector: options.selector } : {}),
+          ...(options.textQuery ? { textQuery: options.textQuery } : {}),
+        },
+        options.frameId,
+      );
       if (fallback && fallback.success && Array.isArray(fallback.elements)) break;
     }
     return fallback && fallback.success && Array.isArray(fallback.elements) ? fallback : null;
@@ -1118,6 +1148,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
   private async supplementAuthFormInteractiveControls(
     tabId: number,
     basePayload: Record<string, any>,
+    frameId?: number,
   ): Promise<void> {
     if (
       !hasAuthFormInteractiveContext(
@@ -1134,6 +1165,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       const targeted = await this.collectInteractiveElementsFallback(tabId, {
         textQuery: query,
         includeCoordinates: true,
+        frameId,
       });
       const first = Array.isArray(targeted?.elements) ? targeted.elements[0] : null;
       if (!first) continue;
@@ -1147,7 +1179,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       targetedElements.push(first);
     }
 
-    const fallback = await this.collectInteractiveElementsFallback(tabId);
+    const fallback = await this.collectInteractiveElementsFallback(tabId, { frameId });
     const broadElements = Array.isArray(fallback?.elements) ? fallback.elements : [];
     const fallbackElements = [...targetedElements, ...broadElements];
     if (fallbackElements.length === 0) return;
@@ -1172,11 +1204,13 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     tabId: number;
     pageContent: string;
     visibleTextContent?: string | null;
+    frameId?: number;
   }): Promise<ReadPageVisualElementHint[]> {
     if (!hasQrVisibleContext(params.pageContent, params.visibleTextContent)) return [];
     const fallback = await this.collectInteractiveElementsFallback(params.tabId, {
       selector: QR_VISUAL_ELEMENT_SELECTOR,
       includeCoordinates: true,
+      frameId: params.frameId,
     });
     const elements = Array.isArray(fallback?.elements) ? fallback.elements : [];
     return elements
@@ -1201,6 +1235,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
   private async recoverGlobalMenuTextTargets(params: {
     tabId: number;
     basePayload: any;
+    frameId?: number;
   }): Promise<boolean> {
     const labels = Array.from(
       new Set([
@@ -1234,6 +1269,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       const fallback = await this.collectInteractiveElementsFallback(params.tabId, {
         textQuery: label,
         includeCoordinates: true,
+        frameId: params.frameId,
       });
       const first = Array.isArray(fallback?.elements) ? fallback.elements[0] : null;
       if (!first?.selector) continue;
@@ -1277,9 +1313,13 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     return true;
   }
 
-  private async generateAccessibilityTreeWithRetry(tabId: number, message: unknown): Promise<any> {
+  private async generateAccessibilityTreeWithRetry(
+    tabId: number,
+    message: unknown,
+    frameId?: number,
+  ): Promise<any> {
     try {
-      return await this.sendMessageToTab(tabId, message);
+      return await this.sendMessageToTab(tabId, message, frameId);
     } catch (error) {
       await delay(READ_PAGE_CONTENT_MESSAGE_RETRY_DELAY_MS);
       await this.injectContentScript(
@@ -1287,9 +1327,10 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         ['inject-scripts/accessibility-tree-helper.js'],
         false,
         'ISOLATED',
-        true,
+        typeof frameId === 'number' ? false : true,
+        typeof frameId === 'number' ? [frameId] : undefined,
       );
-      return await this.sendMessageToTab(tabId, message);
+      return await this.sendMessageToTab(tabId, message, frameId);
     }
   }
 
@@ -1299,10 +1340,13 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     pageUnderstanding: ReturnType<typeof inferPageUnderstanding>;
     currentUrl: string;
     currentTitle: string;
+    frameId?: number;
   }): Promise<boolean> {
     if (!shouldRepairVisibleRowsTargetRefs(params.basePayload.visibleRegionRows)) return false;
 
-    const fallback = await this.collectInteractiveElementsFallback(params.tabId);
+    const fallback = await this.collectInteractiveElementsFallback(params.tabId, {
+      frameId: params.frameId,
+    });
     if (!fallback) return false;
     const merged = fallback.elements.slice(0, 150);
     const fallbackRefMap = buildFallbackRefMap(merged);
@@ -1311,7 +1355,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       typeof params.basePayload.visibleTextContent === 'string' &&
       params.basePayload.visibleTextContent.trim()
         ? params.basePayload.visibleTextContent
-        : await this.sampleVisibleTextContent(params.tabId);
+        : await this.sampleVisibleTextContent(params.tabId, params.frameId);
     if (!visibleTextContent) return false;
 
     const repairedRows = extractVisibleRegionRows({
@@ -1349,6 +1393,8 @@ class ReadPageTool extends BaseBrowserToolExecutor {
   async execute(args: ReadPageParams): Promise<ToolResult> {
     const { filter, depth, refId, mode, render, requestedLayer } = args || {};
     const includeAuthArtifacts = args?.includeAuthArtifacts === true;
+    const requestedFrameId =
+      typeof args?.frameId === 'number' && Number.isFinite(args.frameId) ? args.frameId : undefined;
 
     // Validate refId parameter
     const focusRefId = typeof refId === 'string' ? refId.trim() : '';
@@ -1547,6 +1593,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           visibleTextContent: null,
           contentSummary: summarizePageContent(guardPageContent),
           frameContext: {
+            ...(typeof requestedFrameId === 'number' ? { frameId: requestedFrameId } : {}),
             frameScope: 'unknown',
             isTopFrame: null,
             source: 'unsupported_page',
@@ -1605,16 +1652,21 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         ['inject-scripts/accessibility-tree-helper.js'],
         false,
         'ISOLATED',
-        true,
+        typeof requestedFrameId === 'number' ? false : true,
+        typeof requestedFrameId === 'number' ? [requestedFrameId] : undefined,
       );
 
       // Ask content script to generate accessibility tree
-      let resp = await this.generateAccessibilityTreeWithRetry(tabId, {
-        action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
-        filter: filter || null,
-        depth: requestedDepth,
-        refId: focusRefId || undefined,
-      });
+      let resp = await this.generateAccessibilityTreeWithRetry(
+        tabId,
+        {
+          action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
+          filter: filter || null,
+          depth: requestedDepth,
+          refId: focusRefId || undefined,
+        },
+        requestedFrameId,
+      );
 
       // Evaluate tree result and decide whether to fallback
       const treeOk = resp && resp.success === true;
@@ -1628,12 +1680,16 @@ class ReadPageTool extends BaseBrowserToolExecutor {
 
       if (treeOk && isSparse) {
         await delay(READ_PAGE_SPARSE_RETRY_DELAY_MS);
-        const retryResp = await this.generateAccessibilityTreeWithRetry(tabId, {
-          action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
-          filter: filter || null,
-          depth: requestedDepth,
-          refId: focusRefId || undefined,
-        });
+        const retryResp = await this.generateAccessibilityTreeWithRetry(
+          tabId,
+          {
+            action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
+            filter: filter || null,
+            depth: requestedDepth,
+            refId: focusRefId || undefined,
+          },
+          requestedFrameId,
+        );
         const retryContent =
           retryResp && typeof retryResp.pageContent === 'string' ? retryResp.pageContent : '';
         const retryLines = retryContent
@@ -1721,7 +1777,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           scrollY: typeof resp?.scrollY === 'number' ? resp.scrollY : null,
           pixelsBelow: typeof resp?.pixelsBelow === 'number' ? resp.pixelsBelow : null,
         }),
-        frameContext: treeOk ? normalizeFrameContext(resp?.frameContext) : null,
+        frameContext: treeOk ? normalizeFrameContext(resp?.frameContext, requestedFrameId) : null,
       };
       reconcilePageUnderstandingWithVisibleRows(basePayload);
 
@@ -1736,7 +1792,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         }) &&
         !basePayload.visibleTextContent
       ) {
-        const visibleTextContent = await this.sampleVisibleTextContent(tabId);
+        const visibleTextContent = await this.sampleVisibleTextContent(tabId, requestedFrameId);
         if (visibleTextContent) {
           basePayload.visibleTextContent = visibleTextContent;
           if (!basePayload.visibleRegionRows.visibleRegionRowsUsed) {
@@ -1765,6 +1821,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         pageUnderstanding,
         currentUrl,
         currentTitle,
+        frameId: requestedFrameId,
       });
 
       if (
@@ -1774,7 +1831,9 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         treeInteractiveElements.length < 3 &&
         !basePayload.fallbackUsed
       ) {
-        const fallback = await this.collectInteractiveElementsFallback(tabId);
+        const fallback = await this.collectInteractiveElementsFallback(tabId, {
+          frameId: requestedFrameId,
+        });
         if (fallback && fallback.elements.length > treeInteractiveElements.length) {
           const merged = fallback.elements.slice(0, 150);
           const fallbackRefMap = buildFallbackRefMap(merged);
@@ -1793,12 +1852,13 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         }
       }
 
-      await this.recoverGlobalMenuTextTargets({ tabId, basePayload });
-      await this.supplementAuthFormInteractiveControls(tabId, basePayload);
+      await this.recoverGlobalMenuTextTargets({ tabId, basePayload, frameId: requestedFrameId });
+      await this.supplementAuthFormInteractiveControls(tabId, basePayload, requestedFrameId);
       basePayload.visualElements = await this.collectQrVisualElements({
         tabId,
         pageContent: String(basePayload.pageContent || ''),
         visibleTextContent: basePayload.visibleTextContent,
+        frameId: requestedFrameId,
       });
 
       // Normal path: return tree when the tree is sufficiently rich or the
@@ -1875,7 +1935,9 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       // Newly opened MV3 pages can report document complete before the
       // injected helper is ready to answer its first runtime message.
       try {
-        const fallback = await this.collectInteractiveElementsFallback(tabId);
+        const fallback = await this.collectInteractiveElementsFallback(tabId, {
+          frameId: requestedFrameId,
+        });
 
         if (fallback) {
           const merged = fallback.elements.slice(0, 150);
@@ -1914,7 +1976,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             pixelsBelow: typeof fallback?.pixelsBelow === 'number' ? fallback.pixelsBelow : null,
           });
           if (!basePayload.visibleRegionRows.visibleRegionRowsUsed) {
-            const visibleTextContent = await this.sampleVisibleTextContent(tabId);
+            const visibleTextContent = await this.sampleVisibleTextContent(tabId, requestedFrameId);
             if (visibleTextContent) {
               basePayload.visibleTextContent = visibleTextContent;
               basePayload.visibleRegionRows = extractVisibleRegionRows({
@@ -1936,6 +1998,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             tabId,
             pageContent: String(basePayload.pageContent || ''),
             visibleTextContent: basePayload.visibleTextContent,
+            frameId: requestedFrameId,
           });
 
           const modePayload = await buildModeOutput({

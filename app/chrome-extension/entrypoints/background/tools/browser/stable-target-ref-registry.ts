@@ -23,6 +23,7 @@
 export interface StableTargetRefEntry {
   targetRef: string;
   ref: string;
+  frameId?: number;
 }
 
 export interface StableTargetRefRegistrySnapshot {
@@ -41,7 +42,7 @@ export interface StableTargetRefLookup {
 }
 
 class StableTargetRefRegistry implements StableTargetRefLookup {
-  private byTab = new Map<number, Map<string, string>>();
+  private byTab = new Map<number, Map<string, StableTargetRefEntry>>();
 
   record(tabId: number | undefined | null, entries: readonly StableTargetRefEntry[]): void {
     if (typeof tabId !== 'number' || !Number.isFinite(tabId)) return;
@@ -49,7 +50,7 @@ class StableTargetRefRegistry implements StableTargetRefLookup {
       this.byTab.delete(tabId);
       return;
     }
-    const map = new Map<string, string>();
+    const map = new Map<string, StableTargetRefEntry>();
     for (const entry of entries) {
       if (!entry || typeof entry.targetRef !== 'string' || typeof entry.ref !== 'string') continue;
       if (!entry.targetRef || !entry.ref) continue;
@@ -58,7 +59,13 @@ class StableTargetRefRegistry implements StableTargetRefLookup {
       // resolves to. Visual duplicates with different ordinals already get
       // distinct targetRefs and so do not collide here.
       if (!map.has(entry.targetRef)) {
-        map.set(entry.targetRef, entry.ref);
+        map.set(entry.targetRef, {
+          targetRef: entry.targetRef,
+          ref: entry.ref,
+          ...(typeof entry.frameId === 'number' && Number.isFinite(entry.frameId)
+            ? { frameId: entry.frameId }
+            : {}),
+        });
       }
     }
     if (map.size === 0) {
@@ -73,7 +80,20 @@ class StableTargetRefRegistry implements StableTargetRefLookup {
     if (typeof targetRef !== 'string' || !targetRef) return undefined;
     const map = this.byTab.get(tabId);
     if (!map) return undefined;
-    return map.get(targetRef);
+    return map.get(targetRef)?.ref;
+  }
+
+  lookupEntry(
+    tabId: number | undefined | null,
+    targetRef: string,
+  ): StableTargetRefEntry | undefined {
+    if (typeof tabId !== 'number' || !Number.isFinite(tabId)) return undefined;
+    if (typeof targetRef !== 'string' || !targetRef) return undefined;
+    const map = this.byTab.get(tabId);
+    if (!map) return undefined;
+    const entry = map.get(targetRef);
+    if (!entry) return undefined;
+    return { ...entry };
   }
 
   clearTab(tabId: number | undefined | null): void {
@@ -113,6 +133,13 @@ export function lookupStableTargetRef(
   targetRef: string,
 ): string | undefined {
   return singleton.lookup(tabId, targetRef);
+}
+
+export function lookupStableTargetRefEntry(
+  tabId: number | undefined | null,
+  targetRef: string,
+): StableTargetRefEntry | undefined {
+  return singleton.lookupEntry(tabId, targetRef);
 }
 
 export function clearStableTargetRefTab(tabId: number | undefined | null): void {

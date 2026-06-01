@@ -11,7 +11,7 @@ import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 import { handleDownloadTool, markNextDownloadAsInteractive } from './download';
 import { prearmDialogHandling } from './dialog-prearm';
 import { type CandidateActionInput, resolveCandidateActionTarget } from './candidate-action';
-import { lookupStableTargetRef } from './stable-target-ref-registry';
+import { lookupStableTargetRefEntry } from './stable-target-ref-registry';
 import { armActionOutcome } from '../../observers/action-outcome-singleton';
 import { markBrowserWorldTabAiOperated } from '../../browser-world-inventory';
 import {
@@ -821,7 +821,7 @@ class ClickTool extends BaseBrowserToolExecutor {
         explicitSelectorType: selectorType,
         candidateAction: args.candidateAction,
         tabId: tab.id,
-        lookupStableTargetRef,
+        lookupStableTargetRef: lookupStableTargetRefEntry,
       });
 
       // When a stable targetRef was supplied but the per-tab snapshot
@@ -839,6 +839,7 @@ class ClickTool extends BaseBrowserToolExecutor {
       let finalRef = resolvedTarget.ref;
       let finalSelector = resolvedTarget.selector;
       const finalSelectorType = resolvedTarget.selectorType || selectorType;
+      const finalFrameId = typeof frameId === 'number' ? frameId : resolvedTarget.frameId;
 
       if (interaction === 'hover' && coordinates && !finalRef && !finalSelector) {
         return createErrorResponse(
@@ -856,7 +857,14 @@ class ClickTool extends BaseBrowserToolExecutor {
 
       // If selector is XPath, convert to ref first
       if (finalSelector && finalSelectorType === 'xpath') {
-        await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
+        await this.injectContentScript(
+          tab.id,
+          ['inject-scripts/accessibility-tree-helper.js'],
+          false,
+          'ISOLATED',
+          false,
+          typeof finalFrameId === 'number' ? [finalFrameId] : undefined,
+        );
         try {
           const resolved = await this.sendMessageToTab(
             tab.id,
@@ -866,7 +874,7 @@ class ClickTool extends BaseBrowserToolExecutor {
               isXPath: true,
               allowMultiple: interaction === 'hover',
             },
-            frameId,
+            finalFrameId,
           );
           if (resolved && resolved.success && resolved.ref) {
             finalRef = resolved.ref;
@@ -885,7 +893,14 @@ class ClickTool extends BaseBrowserToolExecutor {
 
       if (interaction === 'hover') {
         if (finalSelector && !finalRef) {
-          await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
+          await this.injectContentScript(
+            tab.id,
+            ['inject-scripts/accessibility-tree-helper.js'],
+            false,
+            'ISOLATED',
+            false,
+            typeof finalFrameId === 'number' ? [finalFrameId] : undefined,
+          );
           try {
             const resolved = await this.sendMessageToTab(
               tab.id,
@@ -895,7 +910,7 @@ class ClickTool extends BaseBrowserToolExecutor {
                 isXPath: false,
                 allowMultiple: true,
               },
-              frameId,
+              finalFrameId,
             );
             if (resolved && resolved.success && resolved.ref) {
               finalRef = resolved.ref;
@@ -923,14 +938,21 @@ class ClickTool extends BaseBrowserToolExecutor {
           });
         }
 
-        await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
+        await this.injectContentScript(
+          tab.id,
+          ['inject-scripts/accessibility-tree-helper.js'],
+          false,
+          'ISOLATED',
+          false,
+          typeof finalFrameId === 'number' ? [finalFrameId] : undefined,
+        );
         const hoverResult = await this.sendMessageToTab(
           tab.id,
           {
             action: TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF,
             ref: finalRef,
           },
-          frameId,
+          finalFrameId,
         );
         if (!hoverResult?.success) {
           return createStructuredClickHelperErrorResponse({
@@ -971,7 +993,7 @@ class ClickTool extends BaseBrowserToolExecutor {
         const preflight = await this.preflightDownloadIntercept(tab.id, {
           selector: finalSelector,
           ref: finalRef,
-          frameId,
+          frameId: finalFrameId,
         });
         if (preflight.interceptedDownload && preflight.downloadUrl) {
           const downloadResult = await handleDownloadTool.execute({
@@ -1018,7 +1040,14 @@ class ClickTool extends BaseBrowserToolExecutor {
         }
       }
 
-      await this.injectContentScript(tab.id, ['inject-scripts/click-helper.js']);
+      await this.injectContentScript(
+        tab.id,
+        ['inject-scripts/click-helper.js'],
+        false,
+        'ISOLATED',
+        false,
+        typeof finalFrameId === 'number' ? [finalFrameId] : undefined,
+      );
       await prearmDialogHandling(tab.id);
       if (args.allowDownloadClick === true) {
         markNextDownloadAsInteractive(tab.id);
@@ -1069,7 +1098,7 @@ class ClickTool extends BaseBrowserToolExecutor {
           allowDownloadClick: args.allowDownloadClick === true,
           intent: authIntent,
         },
-        frameId,
+        finalFrameId,
       );
       const verifierRequested = isVerifierContextRequested(args.verifierContext);
       const newTabObservationMaxMs = verifierRequested
@@ -1309,7 +1338,14 @@ class FillTool extends BaseBrowserToolExecutor {
       return await this.sendMessageToTab(tabId, message, frameId);
     } catch (error) {
       await this.sleep(FILL_CONTENT_MESSAGE_RETRY_DELAY_MS);
-      await this.injectContentScript(tabId, ['inject-scripts/fill-helper.js']);
+      await this.injectContentScript(
+        tabId,
+        ['inject-scripts/fill-helper.js'],
+        false,
+        'ISOLATED',
+        false,
+        typeof frameId === 'number' ? [frameId] : undefined,
+      );
       return await this.sendMessageToTab(tabId, message, frameId);
     }
   }
@@ -1362,7 +1398,7 @@ class FillTool extends BaseBrowserToolExecutor {
         explicitSelectorType: selectorType,
         candidateAction: args.candidateAction,
         tabId,
-        lookupStableTargetRef,
+        lookupStableTargetRef: lookupStableTargetRefEntry,
       });
 
       // Same fail-closed rule as clickTool: if the caller passed a stable
@@ -1379,6 +1415,7 @@ class FillTool extends BaseBrowserToolExecutor {
       let finalRef = resolvedTarget.ref;
       let finalSelector = resolvedTarget.selector;
       const finalSelectorType = resolvedTarget.selectorType || selectorType;
+      const finalFrameId = typeof frameId === 'number' ? frameId : resolvedTarget.frameId;
       const candidateCssFallback = firstCandidateCssLocator(args.candidateAction);
 
       if (!finalRef && !finalSelector) {
@@ -1390,7 +1427,14 @@ class FillTool extends BaseBrowserToolExecutor {
 
       // If selector is XPath, convert to ref first
       if (finalSelector && finalSelectorType === 'xpath') {
-        await this.injectContentScript(tabId, ['inject-scripts/accessibility-tree-helper.js']);
+        await this.injectContentScript(
+          tabId,
+          ['inject-scripts/accessibility-tree-helper.js'],
+          false,
+          'ISOLATED',
+          false,
+          typeof finalFrameId === 'number' ? [finalFrameId] : undefined,
+        );
         try {
           const resolved = await this.sendMessageToTab(
             tabId,
@@ -1399,7 +1443,7 @@ class FillTool extends BaseBrowserToolExecutor {
               selector: finalSelector,
               isXPath: true,
             },
-            frameId,
+            finalFrameId,
           );
           if (resolved && resolved.success && resolved.ref) {
             finalRef = resolved.ref;
@@ -1416,11 +1460,18 @@ class FillTool extends BaseBrowserToolExecutor {
         }
       }
 
-      await this.injectContentScript(tabId, ['inject-scripts/fill-helper.js']);
+      await this.injectContentScript(
+        tabId,
+        ['inject-scripts/fill-helper.js'],
+        false,
+        'ISOLATED',
+        false,
+        typeof finalFrameId === 'number' ? [finalFrameId] : undefined,
+      );
 
       // Send fill message to content script
       const sendFill = (message: Record<string, unknown>) =>
-        this.sendFillMessageWithRetry(tabId, message, frameId);
+        this.sendFillMessageWithRetry(tabId, message, finalFrameId);
       const primaryFillMessage = {
         action: TOOL_MESSAGE_TYPES.FILL_ELEMENT,
         selector: finalSelector,

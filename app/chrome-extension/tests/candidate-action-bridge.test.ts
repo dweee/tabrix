@@ -102,7 +102,14 @@ describe('candidateAction bridge', () => {
     } as any);
 
     expect(result.isError).toBe(false);
-    expect(injectSpy).toHaveBeenCalledWith(4106, ['inject-scripts/accessibility-tree-helper.js']);
+    expect(injectSpy).toHaveBeenCalledWith(
+      4106,
+      ['inject-scripts/accessibility-tree-helper.js'],
+      false,
+      'ISOLATED',
+      false,
+      undefined,
+    );
     expect(sendSpy).toHaveBeenCalledWith(
       4106,
       expect.objectContaining({
@@ -536,6 +543,37 @@ describe('candidateAction bridge', () => {
     );
   });
 
+  it('B-012: preserves registry frameId when resolving stable targetRef for click', async () => {
+    recordStableTargetRefSnapshot(4212, [
+      { targetRef: 'tgt_iframe_btn', ref: 'ref_iframe_button', frameId: 17 },
+    ]);
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4212,
+      title: 'Framed App',
+      url: 'https://example.com/app',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      message: 'Click operation successful',
+    });
+
+    const result = await clickTool.execute({
+      candidateAction: { targetRef: 'tgt_iframe_btn' },
+      allowDownloadClick: true,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(sendSpy).toHaveBeenCalledWith(
+      4212,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+        ref: 'ref_iframe_button',
+      }),
+      17,
+    );
+  });
+
   it('B-011: click fails closed when stable targetRef has no registry mapping', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4202,
@@ -726,8 +764,38 @@ describe('candidateAction bridge', () => {
     );
   });
 
+  it('B-012: preserves candidateAction frameId when filling a frame-local ref', async () => {
+    vi.spyOn(fillTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4213,
+      title: 'Framed Form',
+      url: 'https://example.com/form',
+    });
+    vi.spyOn(fillTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(fillTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      message: 'Fill operation successful',
+    });
+
+    const result = await fillTool.execute({
+      value: 'tabrix',
+      candidateAction: { targetRef: 'ref_inside_frame', frameId: 22 },
+    });
+
+    expect(result.isError).toBe(false);
+    expect(sendSpy).toHaveBeenCalledWith(
+      4213,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.FILL_ELEMENT,
+        ref: 'ref_inside_frame',
+      }),
+      22,
+    );
+  });
+
   it('B-011: computer left_click resolves stable targetRef via registry', async () => {
-    recordStableTargetRefSnapshot(4205, [{ targetRef: 'tgt_runabcd000', ref: 'ref_run_live' }]);
+    recordStableTargetRefSnapshot(4205, [
+      { targetRef: 'tgt_runabcd000', ref: 'ref_run_live', frameId: 23 },
+    ]);
     vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue({
       id: 4205,
       title: 'Actions',
@@ -744,6 +812,8 @@ describe('candidateAction bridge', () => {
     });
 
     expect(result.isError).toBe(false);
-    expect(clickSpy).toHaveBeenCalledWith(expect.objectContaining({ ref: 'ref_run_live' }));
+    expect(clickSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ ref: 'ref_run_live', frameId: 23 }),
+    );
   });
 });

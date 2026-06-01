@@ -92,6 +92,26 @@ describe('read_page candidate action intents', () => {
     ]);
   });
 
+  it('carries frameId from a frame-targeted read into candidate actions', () => {
+    const actions = buildCandidateActions(
+      [
+        element({
+          ref: 'ref_frame_button',
+          role: 'button',
+          name: 'Continue',
+        }),
+      ],
+      [{ ref: 'ref_frame_button', selector: 'iframe button.continue' }],
+      { frameId: 12 },
+    );
+
+    expect(actions[0]).toMatchObject({
+      actionType: 'click',
+      targetRef: 'ref_frame_button',
+      frameId: 12,
+    });
+  });
+
   it('marks search buttons as search submit while preserving auth intent precedence', () => {
     const actions = buildCandidateActions(
       [
@@ -270,6 +290,7 @@ describe('read_page candidate action intents', () => {
             candidateRegionCount: 1,
           },
         },
+        frameId: 33,
       },
     );
 
@@ -278,6 +299,7 @@ describe('read_page candidate action intents', () => {
       targetRef: 'ref_row_title',
       intent: 'content.open_detail',
       matchReason: 'content row target inferred from visible region rows',
+      frameId: 33,
     });
     expect(actions[0].locatorChain).toEqual([
       { type: 'ref', value: 'ref_row_title' },

@@ -205,6 +205,11 @@ export const BROWSER_SCHEMAS: Tool[] = [
           type: 'number',
           description: 'Target window ID to pick active tab when tabId is omitted.',
         },
+        frameId: {
+          type: 'number',
+          description:
+            'Optional Chrome frame ID for a targeted iframe/subframe read. Use only when Tabrix previously surfaced a concrete frameId; omitted means read the default responding frame. Candidate actions and targetRefs returned from a frame-targeted read are bound to that frame for later click/fill execution.',
+        },
         includeAuthArtifacts: {
           type: 'boolean',
           description:
