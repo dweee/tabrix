@@ -10,7 +10,11 @@ import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 import { handleDownloadTool, markNextDownloadAsInteractive } from './download';
 import { prearmDialogHandling } from './dialog-prearm';
-import { type CandidateActionInput, resolveCandidateActionTarget } from './candidate-action';
+import {
+  type CandidateActionInput,
+  type ResolvedCandidateActionTarget,
+  resolveCandidateActionTarget,
+} from './candidate-action';
 import { lookupStableTargetRefEntry } from './stable-target-ref-registry';
 import { armActionOutcome } from '../../observers/action-outcome-singleton';
 import { markBrowserWorldTabAiOperated } from '../../browser-world-inventory';
@@ -74,6 +78,66 @@ function shouldRetryFillWithCandidateCss(params: {
 interface Coordinates {
   x: number;
   y: number;
+}
+
+interface ActionTargetBindingEvidence {
+  resolutionSource: ResolvedCandidateActionTarget['source'];
+  requestedFrameId: number | null;
+  candidateFrameId: number | null;
+  resolvedFrameId: number | null;
+  frameScope: 'explicit_frame' | 'candidate_or_registry_frame' | 'default_frame';
+  dispatchTarget: 'ref' | 'selector' | 'coordinates' | 'none';
+  stableTargetRefResolved: boolean | null;
+  claimBoundary: string;
+}
+
+function asFiniteInteger(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return Math.trunc(value);
+}
+
+function buildActionTargetBindingEvidence(input: {
+  explicitFrameId?: number;
+  candidateAction?: CandidateActionInput;
+  resolvedTarget: ResolvedCandidateActionTarget;
+  finalRef?: string;
+  finalSelector?: string;
+  coordinates?: Coordinates | null;
+}): ActionTargetBindingEvidence {
+  const requestedFrameId = asFiniteInteger(input.explicitFrameId);
+  const candidateFrameId = asFiniteInteger(input.candidateAction?.frameId);
+  const resolvedFrameId =
+    requestedFrameId ?? asFiniteInteger(input.resolvedTarget.frameId) ?? candidateFrameId;
+  const stableTargetRefResolved =
+    input.resolvedTarget.source === 'candidate_stable_target_ref'
+      ? true
+      : input.resolvedTarget.source === 'unresolved_stable_target_ref'
+        ? false
+        : null;
+  const dispatchTarget = input.finalRef
+    ? 'ref'
+    : input.finalSelector
+      ? 'selector'
+      : input.coordinates
+        ? 'coordinates'
+        : 'none';
+
+  return {
+    resolutionSource: input.resolvedTarget.source,
+    requestedFrameId,
+    candidateFrameId,
+    resolvedFrameId,
+    frameScope:
+      requestedFrameId !== null
+        ? 'explicit_frame'
+        : resolvedFrameId !== null
+          ? 'candidate_or_registry_frame'
+          : 'default_frame',
+    dispatchTarget,
+    stableTargetRefResolved,
+    claimBoundary:
+      'Target binding proves only where Tabrix dispatched the action; it does not prove business success, full frame inventory, or postcondition completion.',
+  };
 }
 
 interface ClickToolParams {
@@ -342,6 +406,7 @@ export function buildStructuredClickHelperErrorResult(input: {
   clickMethod: string;
   elementInfo?: unknown;
   browserSignals: ClickBrowserSignals;
+  targetBinding?: ActionTargetBindingEvidence;
 }) {
   const verification: ClickVerification = {
     navigationOccurred: false,
@@ -363,6 +428,7 @@ export function buildStructuredClickHelperErrorResult(input: {
     message: `Click helper returned an error; click dispatch and post-action state are not proven (${input.message})`,
     elementInfo: input.elementInfo,
     clickMethod: input.clickMethod,
+    ...(input.targetBinding ? { targetBinding: input.targetBinding } : {}),
     resultShape: 'structured_click_error',
   };
 }
@@ -372,6 +438,7 @@ function createStructuredClickHelperErrorResponse(input: {
   clickMethod: string;
   elementInfo?: unknown;
   browserSignals?: ClickBrowserSignals;
+  targetBinding?: ActionTargetBindingEvidence;
 }): ToolResult {
   return {
     content: [
@@ -383,6 +450,7 @@ function createStructuredClickHelperErrorResponse(input: {
             clickMethod: input.clickMethod,
             elementInfo: input.elementInfo,
             browserSignals: input.browserSignals ?? { newTabOpened: false },
+            targetBinding: input.targetBinding,
           }),
         ),
       },
@@ -840,6 +908,15 @@ class ClickTool extends BaseBrowserToolExecutor {
       let finalSelector = resolvedTarget.selector;
       const finalSelectorType = resolvedTarget.selectorType || selectorType;
       const finalFrameId = typeof frameId === 'number' ? frameId : resolvedTarget.frameId;
+      const buildTargetBinding = () =>
+        buildActionTargetBindingEvidence({
+          explicitFrameId: frameId,
+          candidateAction: args.candidateAction,
+          resolvedTarget,
+          finalRef,
+          finalSelector,
+          coordinates,
+        });
 
       if (interaction === 'hover' && coordinates && !finalRef && !finalSelector) {
         return createErrorResponse(
@@ -919,12 +996,14 @@ class ClickTool extends BaseBrowserToolExecutor {
               return createStructuredClickHelperErrorResponse({
                 message: `Failed to resolve hover selector: ${resolved?.error || 'unknown error'}`,
                 clickMethod: requestedClickMethod,
+                targetBinding: buildTargetBinding(),
               });
             }
           } catch (error) {
             return createStructuredClickHelperErrorResponse({
               message: `Error resolving hover selector: ${error instanceof Error ? error.message : String(error)}`,
               clickMethod: requestedClickMethod,
+              targetBinding: buildTargetBinding(),
             });
           }
         }
@@ -935,6 +1014,7 @@ class ClickTool extends BaseBrowserToolExecutor {
               ERROR_MESSAGES.INVALID_PARAMETERS +
               ': Safe hover requires a resolvable element ref from chrome_read_page',
             clickMethod: requestedClickMethod,
+            targetBinding: buildTargetBinding(),
           });
         }
 
@@ -959,6 +1039,7 @@ class ClickTool extends BaseBrowserToolExecutor {
             message: hoverResult?.error || 'Hover dispatch failed',
             clickMethod: requestedClickMethod,
             elementInfo: hoverResult?.target,
+            targetBinding: buildTargetBinding(),
           });
         }
 
@@ -978,6 +1059,7 @@ class ClickTool extends BaseBrowserToolExecutor {
                   businessSuccessProven: false,
                 },
                 lane: TABRIX_OWNED_LANE,
+                targetBinding: buildTargetBinding(),
                 message:
                   'Hover dispatched to a known element; run chrome_read_page again to verify menu/modal/page-region changes.',
                 elementInfo: hoverResult.target,
@@ -1197,6 +1279,7 @@ class ClickTool extends BaseBrowserToolExecutor {
           clickMethod,
           elementInfo: (result as { elementInfo?: unknown }).elementInfo,
           browserSignals,
+          targetBinding: buildTargetBinding(),
         });
       }
 
@@ -1281,6 +1364,7 @@ class ClickTool extends BaseBrowserToolExecutor {
               // added, that route MUST emit a different lane value so silent
               // lane drift is visible to lane-integrity metrics.
               lane: TABRIX_OWNED_LANE,
+              targetBinding: buildTargetBinding(),
               message: finalSuccess
                 ? `Click observed outcome: ${merged.observedOutcome}`
                 : authPostcondition && authPostcondition.status !== 'passed'
@@ -1417,6 +1501,16 @@ class FillTool extends BaseBrowserToolExecutor {
       const finalSelectorType = resolvedTarget.selectorType || selectorType;
       const finalFrameId = typeof frameId === 'number' ? frameId : resolvedTarget.frameId;
       const candidateCssFallback = firstCandidateCssLocator(args.candidateAction);
+      let dispatchedFillTarget: { ref?: string; selector?: string } | null = null;
+      const buildTargetBinding = () =>
+        buildActionTargetBindingEvidence({
+          explicitFrameId: frameId,
+          candidateAction: args.candidateAction,
+          resolvedTarget,
+          finalRef: dispatchedFillTarget?.ref,
+          finalSelector: dispatchedFillTarget?.selector,
+          coordinates: null,
+        });
 
       if (!finalRef && !finalSelector) {
         return createErrorResponse(
@@ -1486,6 +1580,7 @@ class FillTool extends BaseBrowserToolExecutor {
       let result;
       try {
         result = await sendFill(primaryFillMessage);
+        dispatchedFillTarget = { ref: finalRef, selector: finalSelector };
       } catch (error) {
         if (
           shouldRetryFillWithCandidateCss({
@@ -1497,6 +1592,7 @@ class FillTool extends BaseBrowserToolExecutor {
           })
         ) {
           result = await sendFill(cssFallbackFillMessage);
+          dispatchedFillTarget = { selector: candidateCssFallback };
         } else {
           throw error;
         }
@@ -1513,10 +1609,14 @@ class FillTool extends BaseBrowserToolExecutor {
         })
       ) {
         result = await sendFill(cssFallbackFillMessage);
+        dispatchedFillTarget = { selector: candidateCssFallback };
       }
 
       if (result && result.error) {
         return createErrorResponse(result.error);
+      }
+      if (!dispatchedFillTarget) {
+        dispatchedFillTarget = { ref: finalRef, selector: finalSelector };
       }
 
       markBrowserWorldTabAiOperated(tabId, 'fill_or_select');
@@ -1528,6 +1628,7 @@ class FillTool extends BaseBrowserToolExecutor {
               success: true,
               message: result.message || 'Fill operation successful',
               elementInfo: result.elementInfo,
+              targetBinding: buildTargetBinding(),
               observedOutcome: null,
               postconditionVerdict: 'unknown',
               postconditionReason: 'form_input_state_change_not_proven_by_tool_closeout',

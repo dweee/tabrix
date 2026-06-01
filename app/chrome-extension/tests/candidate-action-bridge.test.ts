@@ -399,6 +399,13 @@ describe('candidateAction bridge', () => {
     });
 
     expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.targetBinding).toMatchObject({
+      resolutionSource: 'candidate_target_ref',
+      dispatchTarget: 'selector',
+      resolvedFrameId: null,
+      frameScope: 'default_frame',
+    });
     expect(sendSpy).toHaveBeenNthCalledWith(
       1,
       4108,
@@ -564,6 +571,17 @@ describe('candidateAction bridge', () => {
     });
 
     expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.targetBinding).toMatchObject({
+      resolutionSource: 'candidate_stable_target_ref',
+      requestedFrameId: null,
+      candidateFrameId: null,
+      resolvedFrameId: 17,
+      frameScope: 'candidate_or_registry_frame',
+      dispatchTarget: 'ref',
+      stableTargetRefResolved: true,
+    });
+    expect(payload.targetBinding.claimBoundary).toContain('does not prove business success');
     expect(sendSpy).toHaveBeenCalledWith(
       4212,
       expect.objectContaining({
@@ -782,6 +800,16 @@ describe('candidateAction bridge', () => {
     });
 
     expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.targetBinding).toMatchObject({
+      resolutionSource: 'candidate_target_ref',
+      requestedFrameId: null,
+      candidateFrameId: 22,
+      resolvedFrameId: 22,
+      frameScope: 'candidate_or_registry_frame',
+      dispatchTarget: 'ref',
+      stableTargetRefResolved: null,
+    });
     expect(sendSpy).toHaveBeenCalledWith(
       4213,
       expect.objectContaining({
