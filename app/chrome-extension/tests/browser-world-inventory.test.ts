@@ -179,7 +179,9 @@ describe('browser world inventory', () => {
     expect(snapshot.retentionPolicy.recentEventsRetained).toBeLessThanOrEqual(
       snapshot.retentionPolicy.recentEventLimit,
     );
-    expect(snapshot.retentionPolicy.eventPrivacyBoundary).toContain('do not retain tab URLs');
+    expect(snapshot.retentionPolicy.eventPrivacyBoundary).toContain(
+      'recent activity ledger may retain last-known tab URL/title',
+    );
     expect(snapshot.retentionPolicy.detailBoundary).toContain('live tab URLs and titles');
     expect(snapshot.focusedWindowId).toBe(1);
     expect(snapshot.browserActiveTabId).toBe(10);
@@ -428,6 +430,19 @@ describe('browser world inventory', () => {
       retainedTabCount: 3,
       activeTabId: 10,
     });
+    expect(snapshot.summary.recentActivityLedger.latestPageOpened).toMatchObject({
+      kind: 'page_opened',
+      tabId: 20,
+      windowId: 1,
+      url: 'https://ai-opened.test/',
+      title: 'AI opened',
+      pageDescription: 'AI opened on ai-opened.test',
+      evidence: 'browser_world_event_with_live_tab',
+      confidence: 'high',
+    });
+    expect(snapshot.summary.recentActivityLedger.answerHints.lastOpenedPage).toContain(
+      'https://ai-opened.test/',
+    );
 
     listeners.tabUpdated[0]?.(
       20,
@@ -459,6 +474,16 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.recentChangeSummary).toContain(
       'tab 20 was updated; changed=url,title,status,audible,muted,pinned,discarded, openedBy=ai, status=complete',
     );
+    expect(snapshot.summary.recentActivityLedger.latestPageUpdated).toMatchObject({
+      kind: 'page_updated',
+      tabId: 20,
+      windowId: 1,
+      url: 'https://ai-opened.test/done',
+      title: 'AI opened done',
+      pageDescription: 'AI opened done on ai-opened.test',
+      evidence: 'browser_world_event_with_live_tab',
+      confidence: 'high',
+    });
     expect(snapshot.summary.tabLifecycleState).toMatchObject({
       latestEventKind: 'tab_updated',
       latestEventTabId: 20,
@@ -567,6 +592,15 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.dynamicObjectUpdateSummary).toBe(
       'Dynamic object update: current page object switched to tab 20; owner=ai, status=complete, operable=yes, focusedWindow=1.',
     );
+    expect(snapshot.summary.recentActivityLedger.latestPageActivated).toMatchObject({
+      kind: 'page_activated',
+      tabId: 20,
+      windowId: 1,
+      url: 'https://ai-opened.test/done',
+      title: 'AI opened done',
+      evidence: 'browser_world_event_with_live_tab',
+      confidence: 'high',
+    });
     expect(snapshot.summary.objectChangeConclusion).toContain('runtime=status complete');
     expect(snapshot.summary.objectChangeConclusion).toContain('ownership=ai');
     expect(snapshot.summary.currentTabObject).toMatchObject({
@@ -695,6 +729,22 @@ describe('browser world inventory', () => {
       tabId: 20,
       openedBy: 'ai',
     });
+    expect(snapshot.summary.recentActivityLedger.latestPageClosed).toMatchObject({
+      kind: 'page_closed',
+      tabId: 20,
+      windowId: 1,
+      url: 'https://ai-opened.test/done',
+      title: 'AI opened done',
+      pageDescription: 'AI opened done on ai-opened.test',
+      evidence: 'browser_world_closed_tab_snapshot',
+      confidence: 'high',
+    });
+    expect(snapshot.summary.recentActivityLedger.answerHints.lastClosedPage).toContain(
+      'https://ai-opened.test/done',
+    );
+    expect(snapshot.summary.recentActivityLedger.historyFallback.limitation).toContain(
+      'not that a specific tab was just closed or opened',
+    );
     expectRecentEventsPublicSafe(snapshot.recentEvents);
   });
 
@@ -834,6 +884,59 @@ describe('browser world inventory', () => {
       aiOperationReason: 'marked_by_tabrix_tool_execution:close_tabs_requested',
     });
     expect(JSON.stringify(snapshot.recentEvents)).not.toContain('example.test');
+  });
+
+  it('keeps the latest closed page answer even when a later window event happens', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    listeners.tabRemoved[0]?.(10, { windowId: 1, isWindowClosing: false });
+    listeners.windowBoundsChanged[0]?.({
+      id: 1,
+      focused: false,
+      state: 'minimized',
+      type: 'normal',
+      width: 1280,
+      height: 720,
+      left: 0,
+      top: 0,
+      tabs: [
+        {
+          id: 11,
+          windowId: 1,
+          url: 'chrome://extensions',
+          title: 'Extensions',
+          active: true,
+          status: 'complete',
+          discarded: false,
+          audible: false,
+          mutedInfo: { muted: false },
+          pinned: true,
+        },
+      ],
+    });
+
+    const snapshot = await getBrowserWorldSnapshot();
+
+    expect(snapshot.summary.recentChangeSummary).toContain('window 1 bounds or state changed');
+    expect(snapshot.summary.recentActivityLedger.latestPageClosed).toMatchObject({
+      kind: 'page_closed',
+      tabId: 10,
+      windowId: 1,
+      url: 'https://example.test/a',
+      title: 'A',
+      pageDescription: 'A on example.test',
+      evidence: 'browser_world_closed_tab_snapshot',
+      confidence: 'high',
+    });
+    expect(snapshot.summary.recentActivityLedger.answerHints.lastClosedPage).toContain(
+      'https://example.test/a',
+    );
+    expect(snapshot.summary.recentActivityLedger.latestPageActivity).toMatchObject({
+      kind: 'page_closed',
+      tabId: 10,
+    });
+    expectRecentEventsPublicSafe(snapshot.recentEvents);
   });
 
   it('applies pending AI operation evidence when a tab is observed after the tool call', async () => {

@@ -209,6 +209,7 @@ export interface BrowserWorldSummary {
   objectChangeSummary: string;
   dynamicObjectUpdateSummary: string;
   objectChangeConclusion: string;
+  recentActivityLedger: BrowserWorldRecentActivityLedger;
 }
 
 export interface BrowserWorldWindowStateMatrix {
@@ -439,6 +440,54 @@ export interface BrowserWorldTabStateSummary {
   cleanupEligibilityReason: string;
 }
 
+export type BrowserWorldPageActivityKind =
+  | 'page_opened'
+  | 'page_closed'
+  | 'page_activated'
+  | 'page_updated';
+
+export type BrowserWorldPageActivityEvidence =
+  | 'browser_world_event_with_live_tab'
+  | 'browser_world_closed_tab_snapshot'
+  | 'browser_world_event_without_page_snapshot'
+  | 'not_observed';
+
+export interface BrowserWorldPageActivity {
+  kind: BrowserWorldPageActivityKind;
+  tabId: number | null;
+  windowId: number | null;
+  url: string | null;
+  title: string | null;
+  pageDescription: string;
+  openedBy: BrowserWorldTabOpenedBy | null;
+  openedBySource: BrowserWorldTabOpenedBySource | null;
+  occurredAtMs: number | null;
+  evidence: BrowserWorldPageActivityEvidence;
+  confidence: 'high' | 'medium' | 'low' | 'unknown';
+  answerHint: string;
+  claimBoundary: string;
+}
+
+export interface BrowserWorldRecentActivityLedger {
+  latestPageOpened: BrowserWorldPageActivity | null;
+  latestPageClosed: BrowserWorldPageActivity | null;
+  latestPageActivated: BrowserWorldPageActivity | null;
+  latestPageUpdated: BrowserWorldPageActivity | null;
+  latestPageActivity: BrowserWorldPageActivity | null;
+  answerHints: {
+    lastClosedPage: string;
+    lastOpenedPage: string;
+    lastActivatedPage: string;
+    lastUpdatedPage: string;
+  };
+  historyFallback: {
+    availableTool: 'chrome_history';
+    recommendedWhen: string;
+    limitation: string;
+  };
+  claimBoundary: string;
+}
+
 export interface BrowserWorldEvent {
   eventKind:
     | 'inventory_seeded'
@@ -485,11 +534,13 @@ type EventHook = {
 };
 
 const MAX_RECENT_BROWSER_WORLD_EVENTS = 50;
+const MAX_RECENT_CLOSED_TAB_SNAPSHOTS = 20;
 const MIN_FULL_CHROME_RESYNC_INTERVAL_MS = 250;
 const BASELINE_READY_STALE_AFTER_MS = 5_000;
 
 const tabsById = new Map<number, BrowserWorldTabObject>();
 const windowsById = new Map<number, BrowserWorldWindowObject>();
+const closedTabSnapshotsById = new Map<number, BrowserWorldPageActivity>();
 const pendingAiCreatedTabIds = new Set<number>();
 const pendingAiOperatedTabs = new Map<
   number,
@@ -535,6 +586,106 @@ function safeAiOperationLabel(operation: string): string {
 
 function tabUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {
   return String(tab.url || tab.pendingUrl || '');
+}
+
+function describePage(url: string | null, title: string | null): string {
+  const cleanTitle = String(title || '').trim();
+  const cleanUrl = String(url || '').trim();
+  if (!cleanUrl && !cleanTitle) return 'unknown page';
+  let host = '';
+  try {
+    host = cleanUrl ? new URL(cleanUrl).hostname : '';
+  } catch {
+    host = '';
+  }
+  if (cleanTitle && host) return `${cleanTitle} on ${host}`;
+  if (cleanTitle) return cleanTitle;
+  if (host) return `page on ${host}`;
+  return cleanUrl || 'unknown page';
+}
+
+function buildActivityAnswerHint(args: {
+  kind: BrowserWorldPageActivityKind;
+  url: string | null;
+  title: string | null;
+  evidence: BrowserWorldPageActivityEvidence;
+  confidence: BrowserWorldPageActivity['confidence'];
+}): string {
+  const action =
+    args.kind === 'page_closed'
+      ? 'closed'
+      : args.kind === 'page_opened'
+        ? 'opened'
+        : args.kind === 'page_activated'
+          ? 'switched to'
+          : 'updated or navigated';
+  if (args.url) {
+    const titlePart = args.title ? `, title "${args.title}"` : '';
+    return `The latest observed page ${action} is ${args.url}${titlePart}. Evidence=${args.evidence}, confidence=${args.confidence}.`;
+  }
+  return `A page was ${action}, but BrowserWorld does not have its URL/title snapshot. Evidence=${args.evidence}, confidence=${args.confidence}; use chrome_history only as a fallback candidate source.`;
+}
+
+function pageActivityFromTab(args: {
+  kind: BrowserWorldPageActivityKind;
+  tab: BrowserWorldTabObject | null;
+  event: BrowserWorldEvent;
+  evidence: BrowserWorldPageActivityEvidence;
+  confidence: BrowserWorldPageActivity['confidence'];
+}): BrowserWorldPageActivity {
+  const url = args.tab?.url || null;
+  const title = args.tab?.title || null;
+  return {
+    kind: args.kind,
+    tabId: args.event.tabId ?? args.tab?.tabId ?? null,
+    windowId: args.event.windowId ?? args.tab?.windowId ?? null,
+    url,
+    title,
+    pageDescription: describePage(url, title),
+    openedBy: args.tab?.openedBy ?? args.event.openedBy ?? null,
+    openedBySource: args.tab?.openedBySource ?? args.event.openedBySource ?? null,
+    occurredAtMs: args.event.observedAtMs ?? null,
+    evidence: args.evidence,
+    confidence: args.confidence,
+    answerHint: buildActivityAnswerHint({
+      kind: args.kind,
+      url,
+      title,
+      evidence: args.evidence,
+      confidence: args.confidence,
+    }),
+    claimBoundary:
+      'Recent page activity uses BrowserWorld tab/window lifecycle state and last-known URL/title only; it does not prove page content, account state, login success, or user intent.',
+  };
+}
+
+function rememberClosedTabSnapshot(tab: BrowserWorldTabObject, windowId: number | null): void {
+  const closedAtMs = nowMs();
+  const event: BrowserWorldEvent = {
+    eventKind: 'tab_removed',
+    tabId: tab.tabId,
+    windowId,
+    observedAtMs: closedAtMs,
+    openedBy: tab.openedBy,
+    openedBySource: tab.openedBySource,
+    aiOperation: tab.lastAiOperation,
+    aiOperationReason: tab.lastAiOperationReason,
+  };
+  closedTabSnapshotsById.set(
+    tab.tabId,
+    pageActivityFromTab({
+      kind: 'page_closed',
+      tab: { ...tab, windowId },
+      event,
+      evidence: 'browser_world_closed_tab_snapshot',
+      confidence: tab.url ? 'high' : 'low',
+    }),
+  );
+  while (closedTabSnapshotsById.size > MAX_RECENT_CLOSED_TAB_SNAPSHOTS) {
+    const firstKey = closedTabSnapshotsById.keys().next().value;
+    if (typeof firstKey !== 'number') break;
+    closedTabSnapshotsById.delete(firstKey);
+  }
 }
 
 function isOperableUrl(url: string): { canOperate: boolean | null; reason: string } {
@@ -838,6 +989,103 @@ function pushEvent(event: Omit<BrowserWorldEvent, 'observedAtMs'>): void {
   recordObserved();
 }
 
+function findLatestPageActivity(args: {
+  kind: BrowserWorldPageActivityKind;
+  events: readonly BrowserWorldEvent[];
+  tabs: readonly BrowserWorldTabObject[];
+}): BrowserWorldPageActivity | null {
+  const eventKind =
+    args.kind === 'page_opened'
+      ? 'tab_created'
+      : args.kind === 'page_closed'
+        ? 'tab_removed'
+        : args.kind === 'page_activated'
+          ? 'tab_activated'
+          : 'tab_updated';
+  const event = [...args.events]
+    .reverse()
+    .find(
+      (candidate) =>
+        candidate.eventKind === eventKind &&
+        (eventKind !== 'tab_updated' ||
+          candidate.urlChanged === true ||
+          candidate.titleChanged === true),
+    );
+  if (!event) return null;
+
+  if (args.kind === 'page_closed') {
+    const closed = typeof event.tabId === 'number' ? closedTabSnapshotsById.get(event.tabId) : null;
+    if (closed) return closed;
+    return pageActivityFromTab({
+      kind: args.kind,
+      tab: null,
+      event,
+      evidence: 'browser_world_event_without_page_snapshot',
+      confidence: 'low',
+    });
+  }
+
+  const tab = args.tabs.find((candidate) => candidate.tabId === event.tabId) ?? null;
+  return pageActivityFromTab({
+    kind: args.kind,
+    tab,
+    event,
+    evidence: tab
+      ? 'browser_world_event_with_live_tab'
+      : 'browser_world_event_without_page_snapshot',
+    confidence: tab?.url ? 'high' : 'low',
+  });
+}
+
+function missingActivityHint(kind: BrowserWorldPageActivityKind): string {
+  const action =
+    kind === 'page_closed'
+      ? 'closed'
+      : kind === 'page_opened'
+        ? 'opened'
+        : kind === 'page_activated'
+          ? 'switched to'
+          : 'updated or navigated';
+  return `No recent page ${action} event is currently retained in BrowserWorld.`;
+}
+
+function buildRecentActivityLedger(
+  events: readonly BrowserWorldEvent[],
+  tabs: readonly BrowserWorldTabObject[],
+): BrowserWorldRecentActivityLedger {
+  const latestPageOpened = findLatestPageActivity({ kind: 'page_opened', events, tabs });
+  const latestPageClosed = findLatestPageActivity({ kind: 'page_closed', events, tabs });
+  const latestPageActivated = findLatestPageActivity({ kind: 'page_activated', events, tabs });
+  const latestPageUpdated = findLatestPageActivity({ kind: 'page_updated', events, tabs });
+  const latestPageActivity =
+    [latestPageOpened, latestPageClosed, latestPageActivated, latestPageUpdated]
+      .filter((activity): activity is BrowserWorldPageActivity => activity !== null)
+      .sort((a, b) => (b.occurredAtMs ?? 0) - (a.occurredAtMs ?? 0))[0] ?? null;
+
+  return {
+    latestPageOpened,
+    latestPageClosed,
+    latestPageActivated,
+    latestPageUpdated,
+    latestPageActivity,
+    answerHints: {
+      lastClosedPage: latestPageClosed?.answerHint ?? missingActivityHint('page_closed'),
+      lastOpenedPage: latestPageOpened?.answerHint ?? missingActivityHint('page_opened'),
+      lastActivatedPage: latestPageActivated?.answerHint ?? missingActivityHint('page_activated'),
+      lastUpdatedPage: latestPageUpdated?.answerHint ?? missingActivityHint('page_updated'),
+    },
+    historyFallback: {
+      availableTool: 'chrome_history',
+      recommendedWhen:
+        'Use only when BrowserWorld lacks a closed/opened page URL snapshot and the user accepts a best-effort candidate.',
+      limitation:
+        'Browser history proves a page was visited, not that a specific tab was just closed or opened.',
+    },
+    claimBoundary:
+      'Recent activity ledger is an in-memory BrowserWorld aid for user-facing answers; it is not persisted history and does not replace explicit browser-history search.',
+  };
+}
+
 function snapshotAgeAt(checkedAtMs: number): number | null {
   return lastObservedAtMs === null ? null : Math.max(0, checkedAtMs - lastObservedAtMs);
 }
@@ -1045,6 +1293,7 @@ export function initBrowserWorldInventory(): void {
     const windowId =
       typeof info?.windowId === 'number' ? info.windowId : (previous?.windowId ?? null);
     if (previous) {
+      rememberClosedTabSnapshot(previous, windowId);
       tabsById.set(tabId, {
         ...previous,
         windowId,
@@ -1161,6 +1410,7 @@ export function initBrowserWorldInventory(): void {
       if (tab.windowId === windowId) {
         removedTabCount += 1;
         if (tab.openedBy === 'ai') removedAiOpenedTabCount += 1;
+        rememberClosedTabSnapshot(tab, windowId);
         tabsById.delete(tabId);
       }
     }
@@ -1395,6 +1645,7 @@ function buildSnapshot(): BrowserWorldSnapshot {
   );
   const tabStateMatrix = buildTabStateMatrix(tabs);
   const tabLifecycleState = buildTabLifecycleState(recentEvents, tabs, activeTab);
+  const recentActivityLedger = buildRecentActivityLedger(recentEvents, tabs);
   const lastAiOperatedTab =
     tabs
       .filter((tab) => tab.lastAiOperationAtMs !== null)
@@ -1536,6 +1787,7 @@ function buildSnapshot(): BrowserWorldSnapshot {
         lastAiOperatedTab,
         focusedWindow ?? null,
       ),
+      recentActivityLedger,
     },
     retentionPolicy: {
       recentEventLimit: MAX_RECENT_BROWSER_WORLD_EVENTS,
@@ -1545,7 +1797,7 @@ function buildSnapshot(): BrowserWorldSnapshot {
       refreshMode: 'event_driven_with_on_demand_chrome_resync',
       minFullChromeResyncIntervalMs: MIN_FULL_CHROME_RESYNC_INTERVAL_MS,
       eventPrivacyBoundary:
-        'Recent browser lifecycle events retain ids, status, ownership, and timestamps only; they do not retain tab URLs, titles, page text, screenshots, cookies, account state, QR payloads, or network bodies.',
+        'Recent browser lifecycle events retain ids, status, ownership, and timestamps only. The separate in-memory recent activity ledger may retain last-known tab URL/title for user-facing recent-page answers; neither retains page text, screenshots, cookies, account state, QR payloads, or network bodies.',
       detailBoundary:
         'Current BrowserWindowObject and BrowserTabObject details may include live tab URLs and titles for AI operation routing; do not copy raw details into public evidence.',
     },
@@ -1560,6 +1812,7 @@ export function resetBrowserWorldInventoryForTests(): void {
   detachCallbacks = [];
   tabsById.clear();
   windowsById.clear();
+  closedTabSnapshotsById.clear();
   pendingAiCreatedTabIds.clear();
   pendingAiOperatedTabs.clear();
   recentEvents.length = 0;
