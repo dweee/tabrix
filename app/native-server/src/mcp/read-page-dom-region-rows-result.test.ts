@@ -39,50 +39,41 @@ function makeRouterDecision(): DataSourceDecision {
   };
 }
 
-function makeVisibleRows(sourceRegion: string): TaskVisibleRegionRowsData {
+function makeVisibleRows(
+  sourceRegion: string,
+  rowCount = 2,
+  options: { includeTargetRefs?: boolean } = {},
+): TaskVisibleRegionRowsData {
+  const includeTargetRefs = options.includeTargetRefs ?? true;
+  const rows = Array.from({ length: rowCount }, (_, index) => {
+    const rowNumber = index + 1;
+    return {
+      rowId: `row_${rowNumber}`,
+      title: `${rowNumber === 1 ? 'First' : rowNumber === 2 ? 'Second' : `Result ${rowNumber}`} result`,
+      primaryText: `Result ${rowNumber} summary`,
+      secondaryText: null,
+      summary: null,
+      metaText: null,
+      interactionText: null,
+      targetRef: includeTargetRefs ? `ref_${rowNumber}` : null,
+      visibleTextFields: ['title', 'primaryText'],
+      targetRefCoverageRate: includeTargetRefs ? 1 : 0,
+      boundingBox: null,
+      regionId: 'region_1',
+      sourceRegion,
+      confidence: 0.91,
+      qualityReasons: ['visible_result_row'],
+    };
+  });
+
   return {
     sourceDataSource: 'dom_region_rows',
     sourceTabId: 101,
     available: true,
-    rowCount: 2,
+    rowCount,
     confidence: 0.91,
-    rows: [
-      {
-        rowId: 'row_1',
-        title: 'First result',
-        primaryText: 'First result summary',
-        secondaryText: null,
-        summary: null,
-        metaText: null,
-        interactionText: null,
-        targetRef: 'ref_1',
-        visibleTextFields: ['title', 'primaryText'],
-        targetRefCoverageRate: 1,
-        boundingBox: null,
-        regionId: 'region_1',
-        sourceRegion,
-        confidence: 0.91,
-        qualityReasons: ['visible_result_row'],
-      },
-      {
-        rowId: 'row_2',
-        title: 'Second result',
-        primaryText: 'Second result summary',
-        secondaryText: null,
-        summary: null,
-        metaText: null,
-        interactionText: null,
-        targetRef: 'ref_2',
-        visibleTextFields: ['title', 'primaryText'],
-        targetRefCoverageRate: 1,
-        boundingBox: null,
-        regionId: 'region_1',
-        sourceRegion,
-        confidence: 0.91,
-        qualityReasons: ['visible_result_row'],
-      },
-    ],
-    targetRefCoverageRate: 1,
+    rows,
+    targetRefCoverageRate: includeTargetRefs ? 1 : 0,
     regionQualityScore: 0.9,
     visibleRegionRowsUsed: true,
     visibleRegionRowsRejectedReason: null,
@@ -90,7 +81,7 @@ function makeVisibleRows(sourceRegion: string): TaskVisibleRegionRowsData {
     rowExtractionConfidence: 0.91,
     cardExtractorUsed: true,
     cardPatternConfidence: 0.88,
-    cardRowsCount: 2,
+    cardRowsCount: rowCount,
     rowOrder: 'visual_order',
   };
 }
@@ -169,6 +160,106 @@ describe('buildDomRegionRowsSuccessResult', () => {
 
     expect(payload.pageProjection).toMatchObject({
       ownerType: 'unknown',
+    });
+  });
+
+  it('marks two reliable visible rows as partial top-N evidence', () => {
+    const { result, operationLog } = buildDomRegionRowsSuccessResult({
+      requestedLayer: 'L0+L1',
+      routerDecision: makeRouterDecision(),
+      layerContract: mapDataSourceToLayerContract({
+        dataSource: 'dom_region_rows',
+        requestedLayer: 'L0+L1',
+        fallbackEntryLayer: 'L0+L1',
+      }),
+      visibleRows: makeVisibleRows('viewport', 2),
+      ownerType: 'run_owned',
+      apiRowsUnavailableReason: 'api_rows_unavailable',
+      readCount: 1,
+    });
+
+    const payload = JSON.parse(String(result.content[0].text));
+
+    expect(payload.topNReadbackEvidence).toMatchObject({
+      status: 'partial_rows_only',
+      requestedN: null,
+      defaultTopN: 10,
+      availableReliableRowCount: 2,
+      visibleRowCount: 2,
+      targetRefRowCount: 2,
+      canSatisfyDefaultTopN: false,
+      missingRowCountForDefaultTopN: 8,
+      nextRequiredCheck: 'scroll_or_request_more_rows_before_claiming_top_n_complete',
+    });
+    expect(payload.topNReadbackEvidence.claimBoundary).toContain(
+      'not full result-set completeness',
+    );
+    expect(operationLog.metadata).toMatchObject({
+      topNReadbackStatus: 'partial_rows_only',
+      topNDefaultN: '10',
+      topNAvailableReliableRowCount: '2',
+      topNTargetRefRowCount: '2',
+      topNCanSatisfyDefault: 'false',
+    });
+  });
+
+  it('marks ten reliable targetable visible rows as ready for default top-N summary', () => {
+    const { result, operationLog } = buildDomRegionRowsSuccessResult({
+      requestedLayer: 'L0+L1',
+      routerDecision: makeRouterDecision(),
+      layerContract: mapDataSourceToLayerContract({
+        dataSource: 'dom_region_rows',
+        requestedLayer: 'L0+L1',
+        fallbackEntryLayer: 'L0+L1',
+      }),
+      visibleRows: makeVisibleRows('viewport', 10),
+      ownerType: 'run_owned',
+      apiRowsUnavailableReason: 'api_rows_unavailable',
+      readCount: 1,
+    });
+
+    const payload = JSON.parse(String(result.content[0].text));
+
+    expect(payload.topNReadbackEvidence).toMatchObject({
+      status: 'ready_for_default_top_n',
+      defaultTopN: 10,
+      availableReliableRowCount: 10,
+      visibleRowCount: 10,
+      targetRefRowCount: 10,
+      canSatisfyDefaultTopN: true,
+      missingRowCountForDefaultTopN: 0,
+      nextRequiredCheck: 'rows_ready_for_top_n_summary',
+    });
+    expect(operationLog.metadata).toMatchObject({
+      topNReadbackStatus: 'ready_for_default_top_n',
+      topNCanSatisfyDefault: 'true',
+    });
+  });
+
+  it('does not mark top-N ready when reliable rows lack targetRefs', () => {
+    const { result } = buildDomRegionRowsSuccessResult({
+      requestedLayer: 'L0+L1',
+      routerDecision: makeRouterDecision(),
+      layerContract: mapDataSourceToLayerContract({
+        dataSource: 'dom_region_rows',
+        requestedLayer: 'L0+L1',
+        fallbackEntryLayer: 'L0+L1',
+      }),
+      visibleRows: makeVisibleRows('viewport', 10, { includeTargetRefs: false }),
+      ownerType: 'run_owned',
+      apiRowsUnavailableReason: 'api_rows_unavailable',
+      readCount: 1,
+    });
+
+    const payload = JSON.parse(String(result.content[0].text));
+
+    expect(payload.topNReadbackEvidence).toMatchObject({
+      status: 'partial_rows_only',
+      availableReliableRowCount: 10,
+      targetRefRowCount: 0,
+      canSatisfyDefaultTopN: false,
+      missingRowCountForDefaultTopN: 10,
+      nextRequiredCheck: 'scroll_or_request_more_rows_before_claiming_top_n_complete',
     });
   });
 });

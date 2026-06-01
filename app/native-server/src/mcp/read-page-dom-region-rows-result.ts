@@ -14,6 +14,25 @@ const MIN_RELIABLE_DOM_REGION_ROW_COUNT = 2;
 const MIN_RELIABLE_DOM_REGION_ROW_CONFIDENCE = 0.7;
 const MIN_RELIABLE_DOM_REGION_TARGET_REF_COVERAGE = 0.95;
 const MIN_RELIABLE_DOM_REGION_QUALITY = 0.7;
+const DEFAULT_TOP_N_READBACK_TARGET = 10;
+
+type TopNReadbackStatus = 'ready_for_default_top_n' | 'partial_rows_only';
+
+interface TopNReadbackEvidence {
+  status: TopNReadbackStatus;
+  requestedN: number | null;
+  defaultTopN: number;
+  availableReliableRowCount: number;
+  visibleRowCount: number;
+  targetRefRowCount: number;
+  rowOrder: 'visual_order';
+  canSatisfyDefaultTopN: boolean;
+  missingRowCountForDefaultTopN: number;
+  nextRequiredCheck:
+    | 'rows_ready_for_top_n_summary'
+    | 'scroll_or_request_more_rows_before_claiming_top_n_complete';
+  claimBoundary: string;
+}
 
 export interface ReadPageOperationLogHint {
   requestedLayer?: string | null;
@@ -104,6 +123,36 @@ function inferDomRegionRowsSemanticRegion(
   return sourceRegion;
 }
 
+function buildTopNReadbackEvidence(visibleRows: TaskVisibleRegionRowsData): TopNReadbackEvidence {
+  const visibleRowCount = Math.max(0, Math.floor(visibleRows.rowCount));
+  const availableReliableRowCount = Math.min(visibleRows.rows.length, visibleRowCount);
+  const targetRefRowCount = visibleRows.rows.filter((row) => Boolean(row.targetRef)).length;
+  const usableTopNRowCount = Math.min(availableReliableRowCount, targetRefRowCount);
+  const canSatisfyDefaultTopN =
+    visibleRows.visibleRegionRowsUsed && usableTopNRowCount >= DEFAULT_TOP_N_READBACK_TARGET;
+  const missingRowCountForDefaultTopN = Math.max(
+    0,
+    DEFAULT_TOP_N_READBACK_TARGET - usableTopNRowCount,
+  );
+
+  return {
+    status: canSatisfyDefaultTopN ? 'ready_for_default_top_n' : 'partial_rows_only',
+    requestedN: null,
+    defaultTopN: DEFAULT_TOP_N_READBACK_TARGET,
+    availableReliableRowCount,
+    visibleRowCount,
+    targetRefRowCount,
+    rowOrder: visibleRows.rowOrder,
+    canSatisfyDefaultTopN,
+    missingRowCountForDefaultTopN,
+    nextRequiredCheck: canSatisfyDefaultTopN
+      ? 'rows_ready_for_top_n_summary'
+      : 'scroll_or_request_more_rows_before_claiming_top_n_complete',
+    claimBoundary:
+      'No explicit requestedN was provided; this proves only the current reliable visible rows, their visual order, and targetRef coverage, not full result-set completeness or ranking correctness.',
+  };
+}
+
 export function buildDomRegionRowsSuccessResult(args: {
   requestedLayer: ReadPageRequestedLayer;
   routerDecision: DataSourceDecision;
@@ -113,6 +162,7 @@ export function buildDomRegionRowsSuccessResult(args: {
   apiRowsUnavailableReason: string;
   readCount: number;
 }): { result: CallToolResult; operationLog: ReadPageOperationLogHint } {
+  const topNReadbackEvidence = buildTopNReadbackEvidence(args.visibleRows);
   const payload: Record<string, unknown> = {
     kind: 'dom_region_rows',
     readPageAvoided: false,
@@ -148,6 +198,7 @@ export function buildDomRegionRowsSuccessResult(args: {
     apiRowsUnavailableReason: args.apiRowsUnavailableReason,
     fallbackCause: null,
     fallbackUsed: 'none',
+    topNReadbackEvidence,
   };
   payload.pageProjection = buildDomRegionRowsPageProjection(payload, args);
 
@@ -173,6 +224,11 @@ export function buildDomRegionRowsSuccessResult(args: {
         dataSourceDecisionReason: args.routerDecision.decisionReason,
         targetRefCoverageRate: String(args.visibleRows.targetRefCoverageRate ?? 'unknown'),
         regionQualityScore: String(args.visibleRows.regionQualityScore ?? 'unknown'),
+        topNReadbackStatus: topNReadbackEvidence.status,
+        topNDefaultN: String(topNReadbackEvidence.defaultTopN),
+        topNAvailableReliableRowCount: String(topNReadbackEvidence.availableReliableRowCount),
+        topNTargetRefRowCount: String(topNReadbackEvidence.targetRefRowCount),
+        topNCanSatisfyDefault: String(topNReadbackEvidence.canSatisfyDefaultTopN),
         rejectedRegionReasonDistribution: JSON.stringify(
           args.visibleRows.rejectedRegionReasonDistribution ?? {},
         ),
