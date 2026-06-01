@@ -280,6 +280,16 @@ export interface TaskRegionStatePostconditionForCloseout {
   result: TaskRegionStatePostconditionResultSnapshot;
 }
 
+type TaskBusinessVerificationExpectedEvidence =
+  | 'agreement_state_changed_or_dialog_present'
+  | 'agreement_dialog_closed_or_terms_accepted'
+  | 'otp_countdown_or_sent_feedback'
+  | 'auth_surface_removed_and_account_state_present'
+  | 'form_value_state_changed'
+  | 'search_results_or_url_query_changed'
+  | 'detail_region_or_content_transition'
+  | 'page_or_object_state_changed';
+
 interface TaskPageRegionSnapshot {
   tabId: number | null;
   pageRegions: ReadPageRegion[];
@@ -926,6 +936,23 @@ export class TaskSessionContext {
       }
     }
 
+    const pendingBusinessVerification = buildPendingBusinessVerificationForResume(
+      this.pendingPageInteraction,
+      tabId,
+    );
+    if (pendingBusinessVerification) {
+      return withTaskResumeHandoffSummary({
+        status: 'postcondition_unknown_not_proven',
+        canResumeOriginalTask: false,
+        nextStep: 'force_fresh_read_same_tab',
+        tabId: pendingBusinessVerification.tabId,
+        evidenceKinds: ['pending_page_interaction', 'business_verification_plan'],
+        reason: `pending_business_verification_requires_fresh_read:${pendingBusinessVerification.expectedEvidence}:${pendingBusinessVerification.intent}`,
+        claimBoundary:
+          'The latest browser action only proves dispatch plus a business-verification plan. A fresh same-tab read and matching postcondition evidence are required before resuming the original task.',
+      });
+    }
+
     const postconditions = this.peekRegionStatePostconditionsForCloseout(
       tabId !== null ? [tabId] : null,
     );
@@ -1451,6 +1478,53 @@ function selectLatestRegionStatePostconditionForResume(
   }
 
   return latest;
+}
+
+function buildPendingBusinessVerificationForResume(
+  pending: TaskPageInteractionSnapshot | null,
+  requestedTabId: number | null,
+): {
+  tabId: number | null;
+  intent: string;
+  expectedEvidence: TaskBusinessVerificationExpectedEvidence;
+} | null {
+  if (!pending) return null;
+  if (pending.tabId !== null && requestedTabId !== null && pending.tabId !== requestedTabId) {
+    return null;
+  }
+
+  const intent =
+    normalizeIdentifier(pending.candidateActionIntent) ??
+    normalizeIdentifier(pending.action) ??
+    'unknown';
+  return {
+    tabId: requestedTabId ?? pending.tabId,
+    intent,
+    expectedEvidence: inferBusinessVerificationExpectedEvidence(intent),
+  };
+}
+
+function inferBusinessVerificationExpectedEvidence(
+  intent: string,
+): TaskBusinessVerificationExpectedEvidence {
+  switch (intent) {
+    case 'auth.accept_terms':
+      return 'agreement_state_changed_or_dialog_present';
+    case 'auth.confirm_agreement':
+      return 'agreement_dialog_closed_or_terms_accepted';
+    case 'auth.request_otp':
+      return 'otp_countdown_or_sent_feedback';
+    case 'auth.submit_login':
+      return 'auth_surface_removed_and_account_state_present';
+    case 'search.enter_query':
+      return 'form_value_state_changed';
+    case 'search.submit':
+      return 'search_results_or_url_query_changed';
+    case 'content.open_detail':
+      return 'detail_region_or_content_transition';
+    default:
+      return 'page_or_object_state_changed';
+  }
 }
 
 function normalizeSummaryStrings(values: ReadonlyArray<string> | null | undefined): string[] {

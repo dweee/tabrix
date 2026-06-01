@@ -782,6 +782,73 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
     });
   });
 
+  it('requires a fresh same-tab read when a newer pending action has not been business-verified', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_search_submit_passed',
+            kind: 'search_results_updated',
+            verdict: 'passed',
+            reason: 'result_collection_changed_after_action',
+            beforeSummary: ['content_list:loaded:before'],
+            afterSummary: ['content_list:loaded:after'],
+            producedAtMs: 1000,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+    ctx.notePageInteraction({
+      action: 'chrome_click_element',
+      tabId: 9,
+      candidateActionId: 'ca_open_detail',
+      candidateActionIntent: 'content.open_detail',
+      actionKind: 'click',
+    });
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_unknown_not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'force_fresh_read_same_tab',
+      tabId: 9,
+      evidenceKinds: ['pending_page_interaction', 'business_verification_plan'],
+      reason:
+        'pending_business_verification_requires_fresh_read:detail_region_or_content_transition:content.open_detail',
+      handoffSummary: {
+        status: 'needs_fresh_read',
+        canContinue: false,
+        nextAction: 'run_chrome_read_page_force_refresh',
+        evidenceSummary: {
+          readinessStatus: 'postcondition_unknown_not_proven',
+          tabId: 9,
+          evidenceKinds: ['pending_page_interaction', 'business_verification_plan'],
+        },
+      },
+    });
+  });
+
+  it('does not let a pending action on another tab block the current tab readiness', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.notePageInteraction({
+      action: 'chrome_click_element',
+      tabId: 9,
+      candidateActionId: 'ca_open_detail',
+      candidateActionIntent: 'content.open_detail',
+      actionKind: 'click',
+    });
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 7 })).toMatchObject({
+      status: 'not_proven',
+      canResumeOriginalTask: false,
+      reason: 'no_resume_or_business_postcondition_evidence',
+      evidenceKinds: [],
+    });
+  });
+
   it('keeps original-task resume blocked when region postcondition is unknown or failed', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
     ctx.noteRegionStatePostconditionsForCloseout({
