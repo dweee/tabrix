@@ -142,6 +142,29 @@ export interface TaskLifecycleTimelineEventInput {
   pageRole?: string | null;
 }
 
+export interface CloseoutTopNAccumulationEvidence {
+  status: 'ready_for_default_top_n' | 'partial_accumulated_rows';
+  defaultTopN: number;
+  accumulationScope: 'task_tab_source_region';
+  sourceTabId: number | null;
+  sourceRegion: string;
+  observedReadCount: number;
+  currentReadReliableRowCount: number;
+  currentReadTargetableRowCount: number;
+  currentReadNewUniqueRowCount: number;
+  duplicateReliableRowCount: number;
+  uniqueReliableRowCount: number;
+  uniqueTargetableRowCount: number;
+  uniqueTargetRefCount: number;
+  rowOrder: 'visual_order';
+  canSatisfyDefaultTopN: boolean;
+  missingRowCountForDefaultTopN: number;
+  nextRequiredCheck:
+    | 'accumulated_rows_ready_for_top_n_summary'
+    | 'scroll_or_request_more_rows_before_claiming_top_n_complete';
+  claimBoundary: string;
+}
+
 export interface UnifiedTaskCloseoutLifecycleEvidenceArtifactInput {
   artifactId: string;
   evidenceLevel: RuntimeEvidenceLevel;
@@ -170,6 +193,7 @@ export interface UnifiedTaskCloseoutLifecycleEvidenceArtifactInput {
     tabId?: number | null;
     actionKind: ActionKind;
     result: RegionStatePostconditionResult;
+    topNAccumulationEvidence?: CloseoutTopNAccumulationEvidence | null;
   }[];
   sourceTruthChain?: BrowserSourceTruthChain | null;
   browserHygiene: Partial<LifecycleEvidenceBrowserHygiene>;
@@ -672,7 +696,10 @@ function buildUnifiedTaskPostconditionResults(
       tabId: regionStateTabId ?? (input.tabIds.length === 1 ? (input.tabIds[0] ?? null) : null),
       urlPattern: null,
       verdict: regionState.result.verdict,
-      reason: buildRegionStatePostconditionReason(regionState.result),
+      reason: buildRegionStatePostconditionReason(
+        regionState.result,
+        regionState.topNAccumulationEvidence,
+      ),
       observedOutcome: 'unknown',
       observedOutcomeConfidence: regionState.result.verdict === 'unknown' ? 0.5 : 0.75,
       sourceEventRefs: [
@@ -702,7 +729,10 @@ function buildUnifiedTaskPostconditionResults(
   return results;
 }
 
-function buildRegionStatePostconditionReason(result: RegionStatePostconditionResult): string {
+function buildRegionStatePostconditionReason(
+  result: RegionStatePostconditionResult,
+  topNAccumulationEvidence?: CloseoutTopNAccumulationEvidence | null,
+): string {
   const before = result.beforeSummary.join('|') || 'none';
   const after = result.afterSummary.join('|') || 'none';
   return [
@@ -710,12 +740,32 @@ function buildRegionStatePostconditionReason(result: RegionStatePostconditionRes
     result.reason,
     `before=${before}`,
     `after=${after}`,
+    buildTopNAccumulationReason(topNAccumulationEvidence),
     buildDetailFieldReadbackReason(result.detailFieldReadbackEvidence),
     result.claimBoundary,
   ]
     .filter(Boolean)
     .join(';')
-    .slice(0, 600);
+    .slice(0, 900);
+}
+
+function buildTopNAccumulationReason(
+  evidence?: CloseoutTopNAccumulationEvidence | null,
+): string | null {
+  if (!evidence) return null;
+  return [
+    'top_n_accumulation',
+    `status=${evidence.status}`,
+    `summaryReady=${evidence.canSatisfyDefaultTopN}`,
+    `defaultN=${evidence.defaultTopN}`,
+    `uniqueTargetable=${evidence.uniqueTargetableRowCount}`,
+    `uniqueReliable=${evidence.uniqueReliableRowCount}`,
+    `missing=${evidence.missingRowCountForDefaultTopN}`,
+    `reads=${evidence.observedReadCount}`,
+    `sourceTab=${evidence.sourceTabId ?? 'unknown'}`,
+    `sourceRegion=${sanitizeIdentifier(evidence.sourceRegion)}`,
+    `next=${evidence.nextRequiredCheck}`,
+  ].join(':');
 }
 
 function buildDetailFieldReadbackReason(

@@ -1600,8 +1600,18 @@ function maybeRecordCloseTabsSuccessLifecycleArtifact(input: {
   if (input.taskContext && taskTimeline.length > 0 && unifiedTabIds.length > 0) {
     const lastProjection = input.taskContext.peekLastPageProjection();
     const hasRead = input.taskContext.readPageCount > 0;
-    const regionStatePostconditions =
-      input.taskContext.peekRegionStatePostconditionsForCloseout(unifiedTabIds);
+    const regionStatePostconditions = input.taskContext
+      .peekRegionStatePostconditionsForCloseout(unifiedTabIds)
+      .map((postcondition) => {
+        if (postcondition.result.kind !== 'search_results_updated') return postcondition;
+        const topNAccumulationEvidence =
+          input.taskContext?.peekDomRegionRowsReadbackAccumulationEvidence({
+            tabId: postcondition.tabId,
+          }) ?? null;
+        return topNAccumulationEvidence
+          ? { ...postcondition, topNAccumulationEvidence }
+          : postcondition;
+      });
     produceUnifiedTaskCloseoutLifecycleEvidenceArtifact({
       artifactId: `mcp-unified-closeout-${input.startedAtMs}-${actionIdTab}`,
       evidenceLevel: 'integration',

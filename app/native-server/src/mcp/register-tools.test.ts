@@ -4935,7 +4935,7 @@ describe('handleToolCall execution wrapper', () => {
             actionId: 'ca_search_submit',
             actionKind: 'click',
             verdict: 'passed',
-            reason: expect.stringContaining('region_state_search_results_updated'),
+            reason: expect.stringContaining('top_n_accumulation:status=ready_for_default_top_n'),
           }),
         ]),
       );

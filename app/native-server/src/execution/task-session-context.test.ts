@@ -493,6 +493,54 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       observedReadCount: 1,
     });
   });
+
+  it('exposes a cloned same-tab top-N readback snapshot for closeout evidence', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+
+    expect(ctx.peekDomRegionRowsReadbackAccumulationEvidence()).toBeNull();
+    ctx.noteDomRegionRowsReadback(makeVisibleRegionRows(1, 6, { sourceTabId: 7 }));
+    ctx.noteDomRegionRowsReadback(makeVisibleRegionRows(7, 4, { sourceTabId: 7 }));
+
+    const snapshot = ctx.peekDomRegionRowsReadbackAccumulationEvidence({ tabId: 7 });
+    expect(snapshot).toMatchObject({
+      status: 'ready_for_default_top_n',
+      sourceTabId: 7,
+      sourceRegion: 'result_list',
+      observedReadCount: 2,
+      uniqueTargetableRowCount: 10,
+      canSatisfyDefaultTopN: true,
+      missingRowCountForDefaultTopN: 0,
+    });
+    expect(ctx.peekDomRegionRowsReadbackAccumulationEvidence({ tabId: 8 })).toBeNull();
+
+    snapshot!.uniqueTargetableRowCount = 0;
+    expect(ctx.peekDomRegionRowsReadbackAccumulationEvidence({ tabId: 7 })).toMatchObject({
+      uniqueTargetableRowCount: 10,
+    });
+  });
+
+  it('filters top-N readback snapshots by source region and clears them after navigation', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteDomRegionRowsReadback(
+      makeVisibleRegionRows(1, 3, { sourceTabId: 7, sourceRegion: 'result_list' }),
+    );
+
+    expect(
+      ctx.peekDomRegionRowsReadbackAccumulationEvidence({
+        tabId: 7,
+        sourceRegion: 'result_list',
+      }),
+    ).toMatchObject({ uniqueTargetableRowCount: 3 });
+    expect(
+      ctx.peekDomRegionRowsReadbackAccumulationEvidence({
+        tabId: 7,
+        sourceRegion: 'sidebar',
+      }),
+    ).toBeNull();
+
+    ctx.noteUrlChange('https://example.test/search?q=changed', 'search_results');
+    expect(ctx.peekDomRegionRowsReadbackAccumulationEvidence({ tabId: 7 })).toBeNull();
+  });
 });
 
 const REPLAY_DECISION_FOR_CTX: ChooseContextDecisionSnapshot = Object.freeze({

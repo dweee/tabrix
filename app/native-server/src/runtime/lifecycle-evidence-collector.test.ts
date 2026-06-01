@@ -1235,7 +1235,31 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
         },
       ],
       regionStatePostconditions: [
-        { actionKind: 'submit', result: searchState },
+        {
+          actionKind: 'submit',
+          result: searchState,
+          topNAccumulationEvidence: {
+            status: 'ready_for_default_top_n',
+            defaultTopN: 10,
+            accumulationScope: 'task_tab_source_region',
+            sourceTabId: 42,
+            sourceRegion: 'result_list',
+            observedReadCount: 2,
+            currentReadReliableRowCount: 6,
+            currentReadTargetableRowCount: 6,
+            currentReadNewUniqueRowCount: 4,
+            duplicateReliableRowCount: 2,
+            uniqueReliableRowCount: 10,
+            uniqueTargetableRowCount: 10,
+            uniqueTargetRefCount: 10,
+            rowOrder: 'visual_order',
+            canSatisfyDefaultTopN: true,
+            missingRowCountForDefaultTopN: 0,
+            nextRequiredCheck: 'accumulated_rows_ready_for_top_n_summary',
+            claimBoundary:
+              'Only unique targetable DOM rows observed in this task/session are proven.',
+          },
+        },
         { actionKind: 'click', result: detailState },
       ],
       closeAction: {
@@ -1276,9 +1300,16 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     const serialized = JSON.stringify(artifact);
     expect(serialized).toContain('after=content:result_collection_candidate:unknown:actions:0');
     expect(serialized).toContain('after=content:detail_open_candidate:unknown:actions:0');
+    expect(serialized).toContain('top_n_accumulation:status=ready_for_default_top_n');
+    expect(serialized).toContain('summaryReady=true');
+    expect(serialized).toContain('defaultN=10');
+    expect(serialized).toContain('uniqueTargetable=10');
+    expect(serialized).toContain('missing=0');
     expect(serialized).toContain('detail_field_readback:status=structured_fields_present');
     expect(serialized).toContain('summaryReady=true');
     expect(serialized).toContain('semantic=matched');
+    const searchEntry = artifact.actionLog.entries.find((entry) => entry.actionId === 'act-search');
+    expect(searchEntry?.reason).not.toContain('alpha launch poster');
     expect(serialized).not.toContain('cookie');
     expect(serialized).not.toContain('Authorization');
   });

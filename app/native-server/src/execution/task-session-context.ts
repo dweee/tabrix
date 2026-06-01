@@ -177,6 +177,7 @@ interface TaskDomRegionRowsReadbackAccumulator {
   uniqueRowKeys: Set<string>;
   uniqueTargetableRowKeys: Set<string>;
   uniqueTargetRefs: Set<string>;
+  lastEvidence: TaskDomRegionRowsReadbackAccumulationEvidence | null;
 }
 
 /**
@@ -825,6 +826,7 @@ export class TaskSessionContext {
         uniqueRowKeys: new Set<string>(),
         uniqueTargetableRowKeys: new Set<string>(),
         uniqueTargetRefs: new Set<string>(),
+        lastEvidence: null,
       };
     }
 
@@ -868,7 +870,7 @@ export class TaskSessionContext {
       DEFAULT_TOP_N_ACCUMULATION_TARGET - uniqueTargetableRowCount,
     );
 
-    return {
+    const evidence: TaskDomRegionRowsReadbackAccumulationEvidence = {
       status: canSatisfyDefaultTopN ? 'ready_for_default_top_n' : 'partial_accumulated_rows',
       defaultTopN: DEFAULT_TOP_N_ACCUMULATION_TARGET,
       accumulationScope: 'task_tab_source_region',
@@ -891,6 +893,29 @@ export class TaskSessionContext {
       claimBoundary:
         'This proves only unique targetable DOM rows observed during this in-memory task/session for the same tab and source region. It does not prove full result-set completeness, exact platform ranking, or rows that were never observed.',
     };
+    accumulator.lastEvidence = evidence;
+    return cloneTaskDomRegionRowsReadbackAccumulationEvidence(evidence);
+  }
+
+  public peekDomRegionRowsReadbackAccumulationEvidence(input?: {
+    tabId?: number | null;
+    sourceRegion?: string | null;
+  }): TaskDomRegionRowsReadbackAccumulationEvidence | null {
+    const accumulator = this.domRegionRowsReadbackAccumulator;
+    if (!accumulator?.lastEvidence) return null;
+
+    const tabId = normalizePositiveTabId(input?.tabId);
+    if (tabId !== null && (accumulator.sourceTabId === null || accumulator.sourceTabId !== tabId)) {
+      return null;
+    }
+
+    const sourceRegion =
+      typeof input?.sourceRegion === 'string' && input.sourceRegion.length > 0
+        ? input.sourceRegion
+        : null;
+    if (sourceRegion !== null && accumulator.sourceRegion !== sourceRegion) return null;
+
+    return cloneTaskDomRegionRowsReadbackAccumulationEvidence(accumulator.lastEvidence);
   }
 
   /**
@@ -1597,6 +1622,12 @@ function buildDomRegionRowStableKey(row: TaskVisibleRegionRow): string | null {
 function normalizeDomRegionRowKeyPart(value: string | null | undefined): string {
   if (typeof value !== 'string') return '';
   return value.trim().replace(/\s+/g, ' ').toLowerCase().slice(0, 240);
+}
+
+function cloneTaskDomRegionRowsReadbackAccumulationEvidence(
+  evidence: TaskDomRegionRowsReadbackAccumulationEvidence,
+): TaskDomRegionRowsReadbackAccumulationEvidence {
+  return { ...evidence };
 }
 
 function isPositiveTabId(value: number | null): value is number {
