@@ -240,20 +240,37 @@ const mappedProjection = buildBrowserPageThingProjectionFromReadPage({
           confidence: 0.91,
           qualityReasons: ['title_and_target_ref'],
         },
+        {
+          rowId: 'row_002',
+          title: 'Repository B',
+          primaryText: 'Another useful repository',
+          secondaryText: null,
+          summary: null,
+          metaText: '8 stars',
+          interactionText: null,
+          visibleTextFields: ['title', 'primaryText', 'metaText'],
+          targetRef: 'tgt_repo_b',
+          targetRefCoverageRate: 1,
+          boundingBox: null,
+          regionId: 'search_results',
+          sourceRegion: 'search_results',
+          confidence: 0.9,
+          qualityReasons: ['title_and_target_ref'],
+        },
       ],
-      rowCount: 1,
+      rowCount: 2,
       visibleRegionRowsUsed: true,
       visibleRegionRowsRejectedReason: null,
       sourceRegion: 'search_results',
       rowExtractionConfidence: 0.91,
       cardExtractorUsed: true,
       cardPatternConfidence: 0.86,
-      cardRowsCount: 1,
+      cardRowsCount: 2,
       rowOrder: 'visual_order',
       targetRefCoverageRate: 1,
       regionQualityScore: 0.88,
-      visibleDomRowsCandidateCount: 1,
-      visibleDomRowsSelectedCount: 1,
+      visibleDomRowsCandidateCount: 2,
+      visibleDomRowsSelectedCount: 2,
       lowValueRegionRejectedCount: 0,
       footerLikeRejectedCount: 0,
       navigationLikeRejectedCount: 0,
@@ -289,12 +306,16 @@ const mappedProjection = buildBrowserPageThingProjectionFromReadPage({
 assert.equal(mappedProjection.readiness, 'ready');
 assert.equal(mappedProjection.activeRegion, 'search_results');
 assert.equal(mappedProjection.chosenDataSource, 'dom_region_rows');
-assert.deepEqual(mappedProjection.refreshedRefs, ['tgt_repo_a']);
+assert.deepEqual(mappedProjection.refreshedRefs, ['tgt_repo_a', 'tgt_repo_b']);
 assert.equal(mappedProjection.projectionKind, 'read_snapshot_projection');
 assert.equal(mappedProjection.projectionCreatedAt, '2026-05-18T00:00:02.000Z');
 assert.equal(mappedProjection.sourceObservedAt, '2026-05-18T00:00:02.000Z');
 assert.equal(mappedProjection.sourceLineage, 'dom');
-assert.deepEqual(mappedProjection.regionEvidenceRefs, ['region:search_results', 'row:row_001']);
+assert.deepEqual(mappedProjection.regionEvidenceRefs, [
+  'region:search_results',
+  'row:row_001',
+  'row:row_002',
+]);
 assert.ok(mappedProjection.contextSavedChars > 0);
 
 const longContentProjection = buildBrowserPageThingProjectionFromReadPage({
@@ -651,8 +672,8 @@ const selectedRowsWithCompleteTextProjection = buildBrowserPageThingProjectionFr
   contextVersion: 'ctx_004c',
 });
 
-assert.equal(selectedRowsWithCompleteTextProjection.chosenDataSource, 'dom_region_rows');
-assert.equal(selectedRowsWithCompleteTextProjection.sourceLineage, 'dom');
+assert.equal(selectedRowsWithCompleteTextProjection.chosenDataSource, 'markdown');
+assert.equal(selectedRowsWithCompleteTextProjection.sourceLineage, 'text');
 
 const readyTaskState = buildBrowserTaskStateVerdict({ projection });
 assert.deepEqual(readyTaskState, {

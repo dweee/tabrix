@@ -3096,6 +3096,11 @@ function readSelectedDataSource(
     return projection.chosenDataSource;
   }
   const selected = readString(payload.selectedDataSource) ?? readString(payload.dataSource);
+  if (selected === 'dom_region_rows') {
+    return projection.chosenDataSource === 'dom_region_rows'
+      ? 'dom_json'
+      : projection.chosenDataSource;
+  }
   return (selected ?? projection.chosenDataSource) as ReadPageSelectedDataSource;
 }
 
@@ -3116,11 +3121,17 @@ function hasReliableVisibleRows(payload: Record<string, unknown>): boolean {
     readNumber(payload.targetRefCoverageRate) ?? readNumber(rowsPayload.targetRefCoverageRate);
   const quality =
     readNumber(payload.regionQualityScore) ?? readNumber(rowsPayload.regionQualityScore);
+  const confidence =
+    readNumber(payload.rowExtractionConfidence) ??
+    readNumber(rowsPayload.rowExtractionConfidence) ??
+    readNumber(payload.confidence) ??
+    readNumber(rowsPayload.confidence);
   return (
     (payload.visibleRegionRowsUsed === true || rowsPayload.visibleRegionRowsUsed === true) &&
     rowCount !== null &&
-    rowCount > 0 &&
-    (coverage === null || coverage >= 0.8) &&
+    rowCount >= 2 &&
+    (confidence === null || confidence >= 0.7) &&
+    (coverage === null || coverage >= 0.95) &&
     (quality === null || quality >= 0.7)
   );
 }

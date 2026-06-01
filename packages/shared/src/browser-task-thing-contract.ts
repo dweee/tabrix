@@ -584,17 +584,17 @@ export function buildBrowserPageThingProjectionFromReadPage(
   input: BuildBrowserPageThingProjectionInput,
 ): BrowserPageThingProjection {
   const { snapshot } = input;
-  const visibleRegionRows = snapshot.visibleRegionRows;
   const activeRegion = inferProjectionActiveRegion(snapshot);
   const contextChars = estimateSnapshotContextChars(snapshot);
   const previousContextChars = input.previousContextChars ?? null;
+  const chosenDataSource = chooseProjectionDataSource(snapshot);
 
   return {
     projectionId: input.projectionId,
     projectionKind: 'read_snapshot_projection',
     projectionCreatedAt: input.observedAt,
     sourceObservedAt: input.observedAt,
-    sourceLineage: inferSourceLineage(chooseProjectionDataSource(snapshot)),
+    sourceLineage: inferSourceLineage(chosenDataSource),
     regionEvidenceRefs: buildRegionEvidenceRefs(snapshot),
     pageId: input.pageId,
     tabId: input.tabId,
@@ -610,18 +610,14 @@ export function buildBrowserPageThingProjectionFromReadPage(
     reusedRegions: input.reusedRegions ?? [],
     invalidatedRefs: input.invalidatedRefs ?? [],
     refreshedRefs: input.refreshedRefs ?? collectVisibleRowTargetRefs(snapshot),
-    chosenDataSource: chooseProjectionDataSource(snapshot),
-    sourceConfidence: visibleRegionRows?.rowExtractionConfidence ?? 0,
+    chosenDataSource,
+    sourceConfidence: estimateProjectionSourceConfidence(chosenDataSource, snapshot),
     sourceFreshness: 'fresh',
     contextChars,
     contextSavedChars: Math.max(0, (previousContextChars ?? contextChars) - contextChars),
     userActivityLevel: input.userActivityLevel ?? 'unknown',
     interferenceRisk: input.interferenceRisk ?? 'medium',
-    sourceTruthChain: buildSourceTruthChain(
-      chooseProjectionDataSource(snapshot),
-      snapshot,
-      input.observedAt,
-    ),
+    sourceTruthChain: buildSourceTruthChain(chosenDataSource, snapshot, input.observedAt),
   };
 }
 
@@ -819,21 +815,68 @@ function hasStrongVisibleResultRows(snapshot: ReadPageCompactSnapshot): boolean 
   );
 }
 
+const MIN_RELIABLE_VISIBLE_ROW_COUNT = 2;
+const MIN_RELIABLE_VISIBLE_ROW_CONFIDENCE = 0.7;
+const MIN_RELIABLE_VISIBLE_ROW_TARGET_REF_COVERAGE = 0.95;
+const MIN_RELIABLE_VISIBLE_ROW_REGION_QUALITY = 0.7;
+
 function chooseProjectionDataSource(snapshot: ReadPageCompactSnapshot): ReadPageSelectedDataSource {
-  if (snapshot.selectedDataSource === 'dom_region_rows' && hasReliableVisibleRows(snapshot)) {
-    return 'dom_region_rows';
+  if (snapshot.selectedDataSource === 'dom_region_rows') {
+    return hasReliableVisibleRows(snapshot)
+      ? 'dom_region_rows'
+      : chooseNonDomProjectionFallback(snapshot);
   }
   if (shouldPreferCompleteTextRegion(snapshot)) return 'markdown';
   if (snapshot.selectedDataSource) return snapshot.selectedDataSource;
+  if (snapshot.kind === 'dom_region_rows') {
+    return hasReliableVisibleRows(snapshot)
+      ? 'dom_region_rows'
+      : chooseNonDomProjectionFallback(snapshot);
+  }
   if (snapshot.kind) return snapshot.kind;
-  if (snapshot.visibleRegionRows?.visibleRegionRowsUsed) return 'dom_region_rows';
+  if (hasReliableVisibleRows(snapshot)) return 'dom_region_rows';
   if (snapshot.renderMode === 'markdown' && snapshot.markdown) return 'markdown';
   return 'dom_json';
 }
 
 function hasReliableVisibleRows(snapshot: ReadPageCompactSnapshot): boolean {
   const rows = snapshot.visibleRegionRows;
-  return Boolean(rows?.visibleRegionRowsUsed && rows.rowCount > 0);
+  if (!rows?.visibleRegionRowsUsed) return false;
+  const actualRows = rows.rows.length;
+  return (
+    rows.rowCount >= MIN_RELIABLE_VISIBLE_ROW_COUNT &&
+    actualRows >= MIN_RELIABLE_VISIBLE_ROW_COUNT &&
+    rows.rowExtractionConfidence >= MIN_RELIABLE_VISIBLE_ROW_CONFIDENCE &&
+    rows.targetRefCoverageRate >= MIN_RELIABLE_VISIBLE_ROW_TARGET_REF_COVERAGE &&
+    rows.regionQualityScore >= MIN_RELIABLE_VISIBLE_ROW_REGION_QUALITY
+  );
+}
+
+function chooseNonDomProjectionFallback(
+  snapshot: ReadPageCompactSnapshot,
+): ReadPageSelectedDataSource {
+  if (shouldPreferCompleteTextRegion(snapshot)) return 'markdown';
+  if (snapshot.renderMode === 'markdown' && snapshot.markdown) return 'markdown';
+  if (snapshot.selectedDataSource && snapshot.selectedDataSource !== 'dom_region_rows') {
+    return snapshot.selectedDataSource;
+  }
+  if (snapshot.kind && snapshot.kind !== 'dom_region_rows') return snapshot.kind;
+  return 'dom_json';
+}
+
+function estimateProjectionSourceConfidence(
+  source: ReadPageSelectedDataSource,
+  snapshot: ReadPageCompactSnapshot,
+): number {
+  if (source === 'dom_region_rows') return snapshot.visibleRegionRows?.rowExtractionConfidence ?? 0;
+  if (source === 'markdown') {
+    if (shouldPreferCompleteTextRegion(snapshot)) return 0.8;
+    return snapshot.markdown ? 0.6 : 0;
+  }
+  if (source === 'dom_json') {
+    return snapshot.readinessVerdict === 'ready' ? 0.5 : 0;
+  }
+  return 0;
 }
 
 function estimateSnapshotContextChars(snapshot: ReadPageCompactSnapshot): number {

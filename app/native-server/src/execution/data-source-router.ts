@@ -313,6 +313,11 @@ const RECENT_FAILURE_BLOCKS_API_GATE: ReadonlySet<EndpointLastFailureReason> =
     'unknown',
   ]);
 
+const MIN_RELIABLE_DOM_REGION_ROW_COUNT = 2;
+const MIN_RELIABLE_DOM_REGION_ROW_CONFIDENCE = 0.7;
+const MIN_RELIABLE_DOM_REGION_TARGET_REF_COVERAGE = 0.95;
+const MIN_RELIABLE_DOM_REGION_QUALITY = 0.7;
+
 function endpointPassesApiGate(ev: RouterEndpointEvidence | null): boolean {
   if (!ev) return false;
   if (!ev.usableForTask) return false;
@@ -345,15 +350,15 @@ function endpointSemanticIsEmpty(ev: RouterEndpointEvidence | null): boolean {
 function domRegionRowsPassGate(ev: RouterDomRegionRowsEvidence | null): boolean {
   if (!ev) return false;
   if (!ev.available) return false;
-  if (ev.rowCount <= 0) return false;
-  if (ev.confidence < 0.7) return false;
+  if (ev.rowCount < MIN_RELIABLE_DOM_REGION_ROW_COUNT) return false;
+  if (ev.confidence < MIN_RELIABLE_DOM_REGION_ROW_CONFIDENCE) return false;
   if (ev.regionQualityScore !== undefined && ev.regionQualityScore !== null) {
-    if (ev.regionQualityScore < 0.7) return false;
+    if (ev.regionQualityScore < MIN_RELIABLE_DOM_REGION_QUALITY) return false;
   }
   if (
     ev.targetRefCoverageRate !== undefined &&
     ev.targetRefCoverageRate !== null &&
-    ev.targetRefCoverageRate < 0.95
+    ev.targetRefCoverageRate < MIN_RELIABLE_DOM_REGION_TARGET_REF_COVERAGE
   ) {
     return false;
   }

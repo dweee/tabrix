@@ -3017,6 +3017,42 @@ describe('handleToolCall execution wrapper', () => {
       });
     });
 
+    it('does not surface single-row visible DOM evidence as selected dom_region_rows', async () => {
+      markBridgeReady();
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'projection_weak_dom_rows',
+          contextChars: 2400,
+          changedRegions: ['result_list'],
+          refreshedRefs: ['ref_result_1'],
+          selectedDataSource: 'dom_region_rows',
+          extraPayload: {
+            kind: 'dom_region_rows',
+            rowCount: 1,
+            visibleRegionRowsUsed: true,
+            visibleRegionRowCount: 1,
+            rowExtractionConfidence: 0.9,
+            targetRefCoverageRate: 1,
+            regionQualityScore: 0.9,
+            apiRowsUnavailableReason: 'observed_api_rows_not_available',
+            decisionReason: 'visible_dom_rows_selected',
+          },
+        }),
+      );
+
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'weak-dom-rows-truthfulness-task',
+        requestedLayer: 'L0+L1+L2',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.aiContextEnvelope.dataSourceDecision.selectedSource).toBe('dom_json');
+      expect(payload.aiContextEnvelope.dataSourceDecision.selectedSource).not.toBe(
+        'dom_region_rows',
+      );
+    });
+
     it('surfaces data source decision truthfulness for live observed API rows', async () => {
       markBridgeReady();
       mockReadPageRoundTrip(
@@ -3305,7 +3341,7 @@ describe('handleToolCall execution wrapper', () => {
         sourceDataSource: 'dom_region_rows',
         sourceTabId: 0,
         available: true,
-        rowCount: 1,
+        rowCount: 2,
         confidence: 0.9,
         rows: [
           {
@@ -3492,6 +3528,15 @@ describe('handleToolCall execution wrapper', () => {
             sourceRegion: 'visible_results',
             confidence: 0.88,
           },
+          {
+            title: 'User-owned result 2',
+            primaryText: 'Second user-owned row',
+            secondaryText: null,
+            metaText: null,
+            targetRef: 'ref_user_owned_2',
+            sourceRegion: 'visible_results',
+            confidence: 0.88,
+          },
         ],
         visibleRegionRowsUsed: true,
         visibleRegionRowsRejectedReason: null,
@@ -3527,8 +3572,17 @@ describe('handleToolCall execution wrapper', () => {
                   sourceRegion: 'visible_results',
                   confidence: 0.88,
                 },
+                {
+                  title: 'User-owned result 2',
+                  primaryText: 'Second user-owned row',
+                  secondaryText: null,
+                  metaText: null,
+                  targetRef: 'ref_user_owned_2',
+                  sourceRegion: 'visible_results',
+                  confidence: 0.88,
+                },
               ],
-              rowCount: 1,
+              rowCount: 2,
               visibleRegionRowsUsed: true,
               visibleRegionRowsRejectedReason: null,
               sourceRegion: 'visible_results',

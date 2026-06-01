@@ -10,6 +10,11 @@ import type { LayerContractEnvelope } from '../execution/layer-contract';
 import type { TaskVisibleRegionRowsData } from '../execution/task-session-context';
 import type { ChooseContextDecisionSnapshot } from '../execution/skip-read-orchestrator';
 
+const MIN_RELIABLE_DOM_REGION_ROW_COUNT = 2;
+const MIN_RELIABLE_DOM_REGION_ROW_CONFIDENCE = 0.7;
+const MIN_RELIABLE_DOM_REGION_TARGET_REF_COVERAGE = 0.95;
+const MIN_RELIABLE_DOM_REGION_QUALITY = 0.7;
+
 export interface ReadPageOperationLogHint {
   requestedLayer?: string | null;
   selectedDataSource?: string | null;
@@ -32,29 +37,55 @@ export function inferDomRegionRowsTaskIntent(
     return 'search_list';
   }
   if (decision?.sourceRoute === 'knowledge_supported_read') return 'search_list';
-  if (visibleRows.visibleRegionRowsUsed && visibleRows.rowCount > 0) return 'search_list';
+  if (visibleRowsAreReliableListEvidence(visibleRows)) return 'search_list';
   return undefined;
 }
 
 export function buildVisibleRowsRejectionReason(visibleRows: TaskVisibleRegionRowsData): string {
   if (visibleRows.rejectedReason) return visibleRows.rejectedReason;
   if (!visibleRows.available || visibleRows.rowCount <= 0) return 'dom_region_rows_unavailable';
-  if (visibleRows.confidence < 0.7) return 'dom_region_rows_low_confidence';
+  if (visibleRows.rowCount < MIN_RELIABLE_DOM_REGION_ROW_COUNT) {
+    return 'dom_region_rows_insufficient_row_count';
+  }
+  if (visibleRows.confidence < MIN_RELIABLE_DOM_REGION_ROW_CONFIDENCE) {
+    return 'dom_region_rows_low_confidence';
+  }
   if (
     visibleRows.regionQualityScore !== undefined &&
     visibleRows.regionQualityScore !== null &&
-    visibleRows.regionQualityScore < 0.7
+    visibleRows.regionQualityScore < MIN_RELIABLE_DOM_REGION_QUALITY
   ) {
     return 'dom_region_rows_low_region_quality';
   }
   if (
     visibleRows.targetRefCoverageRate !== undefined &&
     visibleRows.targetRefCoverageRate !== null &&
-    visibleRows.targetRefCoverageRate < 0.95
+    visibleRows.targetRefCoverageRate < MIN_RELIABLE_DOM_REGION_TARGET_REF_COVERAGE
   ) {
     return 'dom_region_rows_target_ref_coverage_insufficient';
   }
   return 'dom_region_rows_not_selected';
+}
+
+function visibleRowsAreReliableListEvidence(visibleRows: TaskVisibleRegionRowsData): boolean {
+  if (!visibleRows.visibleRegionRowsUsed) return false;
+  if (visibleRows.rowCount < MIN_RELIABLE_DOM_REGION_ROW_COUNT) return false;
+  if (visibleRows.confidence < MIN_RELIABLE_DOM_REGION_ROW_CONFIDENCE) return false;
+  if (
+    visibleRows.regionQualityScore !== undefined &&
+    visibleRows.regionQualityScore !== null &&
+    visibleRows.regionQualityScore < MIN_RELIABLE_DOM_REGION_QUALITY
+  ) {
+    return false;
+  }
+  if (
+    visibleRows.targetRefCoverageRate !== undefined &&
+    visibleRows.targetRefCoverageRate !== null &&
+    visibleRows.targetRefCoverageRate < MIN_RELIABLE_DOM_REGION_TARGET_REF_COVERAGE
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function inferDomRegionRowsSemanticRegion(

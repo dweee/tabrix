@@ -503,6 +503,31 @@ describe('DataSourceRouter — V27-09 truth table', () => {
     expect(decision.dataSource).toBe('dom_json');
   });
 
+  it('rejects DOM region rows when only one visible row is available', () => {
+    const decision = routeDataSource({
+      sourceRoute: 'knowledge_supported_read',
+      chosenLayer: 'L0+L1',
+      taskIntent: 'search_list',
+      factSnapshotVerdict: 'fresh',
+      readinessVerdict: 'ready',
+      complexityClass: 'list',
+      endpointEvidence: evidence({
+        inferredSemanticType: 'search',
+        lastFailureReason: 'semantic_mismatch',
+      }),
+      domRegionRowsEvidence: {
+        available: true,
+        rowCount: 1,
+        confidence: 0.86,
+        targetRefCoverageRate: 0.99,
+        regionQualityScore: 0.82,
+      },
+    });
+
+    expect(decision.decisionRuleId).not.toBe('R_DOM_REGION_ROWS_HIGH_CONFIDENCE');
+    expect(decision.dataSource).toBe('dom_json');
+  });
+
   it('keeps API rows ahead of DOM region rows when API evidence is high-confidence', () => {
     const decision = routeDataSource({
       sourceRoute: 'knowledge_supported_read',
