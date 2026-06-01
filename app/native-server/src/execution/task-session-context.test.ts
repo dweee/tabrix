@@ -826,6 +826,108 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
     });
   });
 
+  it('uses the latest matching-tab region postcondition for resume while preserving closeout history', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_unknown_before_refresh',
+            kind: 'search_results_updated',
+            verdict: 'unknown',
+            reason: 'result_collection_not_comparable',
+            beforeSummary: [],
+            afterSummary: [],
+            producedAtMs: 1000,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_unknown_not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'verify_postcondition',
+    });
+
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_search_submit_after_refresh',
+            kind: 'search_results_updated',
+            verdict: 'passed',
+            reason: 'result_collection_changed_after_action',
+            beforeSummary: ['content_list:loaded:before'],
+            afterSummary: ['content_list:loaded:after'],
+            producedAtMs: 2000,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_passed_ready',
+      canResumeOriginalTask: true,
+      nextStep: 'continue_original_task',
+      reason: 'region_state_search_results_updated_passed:result_collection_changed_after_action',
+    });
+    expect(ctx.peekRegionStatePostconditionsForCloseout([9])).toHaveLength(2);
+  });
+
+  it('lets a later failed postcondition block resume again after a prior pass', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_search_submit_passed',
+            kind: 'search_results_updated',
+            verdict: 'passed',
+            reason: 'result_collection_changed_after_action',
+            beforeSummary: ['content_list:loaded:before'],
+            afterSummary: ['content_list:loaded:after'],
+            producedAtMs: 1000,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_search_submit_failed_after_retry',
+            kind: 'search_results_updated',
+            verdict: 'failed',
+            reason: 'result_collection_unchanged_after_action',
+            beforeSummary: ['content_list:loaded:after'],
+            afterSummary: ['content_list:loaded:after'],
+            producedAtMs: 2000,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_failed_stop',
+      canResumeOriginalTask: false,
+      nextStep: 'stop_not_proven',
+      reason: 'region_state_search_results_updated_failed:result_collection_unchanged_after_action',
+    });
+  });
+
   it('compares read_page object lifecycle snapshots and keeps the stored copy immutable', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
     const before = makeObjectLifecycle('collapsed_or_expandable_candidate', []);

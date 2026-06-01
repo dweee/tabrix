@@ -900,42 +900,40 @@ export class TaskSessionContext {
     const postconditions = this.peekRegionStatePostconditionsForCloseout(
       tabId !== null ? [tabId] : null,
     );
-    const failed = postconditions.find((item) => item.result.verdict === 'failed');
-    if (failed) {
+    const latestPostcondition = selectLatestRegionStatePostconditionForResume(postconditions);
+    if (latestPostcondition?.result.verdict === 'failed') {
       return {
         status: 'postcondition_failed_stop',
         canResumeOriginalTask: false,
         nextStep: 'stop_not_proven',
         tabId,
         evidenceKinds: ['region_state_postcondition'],
-        reason: `region_state_${failed.result.kind}_failed:${failed.result.reason}`,
-        claimBoundary: failed.result.claimBoundary,
+        reason: `region_state_${latestPostcondition.result.kind}_failed:${latestPostcondition.result.reason}`,
+        claimBoundary: latestPostcondition.result.claimBoundary,
       };
     }
 
-    const unknown = postconditions.find((item) => item.result.verdict === 'unknown');
-    if (unknown) {
+    if (latestPostcondition?.result.verdict === 'unknown') {
       return {
         status: 'postcondition_unknown_not_proven',
         canResumeOriginalTask: false,
         nextStep: 'verify_postcondition',
         tabId,
         evidenceKinds: ['region_state_postcondition'],
-        reason: `region_state_${unknown.result.kind}_not_proven:${unknown.result.reason}`,
-        claimBoundary: unknown.result.claimBoundary,
+        reason: `region_state_${latestPostcondition.result.kind}_not_proven:${latestPostcondition.result.reason}`,
+        claimBoundary: latestPostcondition.result.claimBoundary,
       };
     }
 
-    const passed = postconditions.find((item) => item.result.verdict === 'passed');
-    if (passed) {
+    if (latestPostcondition?.result.verdict === 'passed') {
       return {
         status: 'postcondition_passed_ready',
         canResumeOriginalTask: true,
         nextStep: 'continue_original_task',
         tabId,
         evidenceKinds: ['region_state_postcondition'],
-        reason: `region_state_${passed.result.kind}_passed:${passed.result.reason}`,
-        claimBoundary: passed.result.claimBoundary,
+        reason: `region_state_${latestPostcondition.result.kind}_passed:${latestPostcondition.result.reason}`,
+        claimBoundary: latestPostcondition.result.claimBoundary,
       };
     }
 
@@ -1395,6 +1393,25 @@ function cloneTaskRegionStatePostconditionResult(
       normalizeBoundedString(input.claimBoundary, 300) ??
       'region_state_postcondition_claim_boundary_unknown',
   };
+}
+
+function selectLatestRegionStatePostconditionForResume(
+  postconditions: TaskRegionStatePostconditionForCloseout[],
+): TaskRegionStatePostconditionForCloseout | null {
+  let latest: TaskRegionStatePostconditionForCloseout | null = null;
+  let latestProducedAtMs = Number.NEGATIVE_INFINITY;
+
+  for (const postcondition of postconditions) {
+    const producedAtMs = Number.isFinite(postcondition.result.producedAtMs)
+      ? postcondition.result.producedAtMs
+      : Number.NEGATIVE_INFINITY;
+    if (!latest || producedAtMs >= latestProducedAtMs) {
+      latest = postcondition;
+      latestProducedAtMs = producedAtMs;
+    }
+  }
+
+  return latest;
 }
 
 function normalizeSummaryStrings(values: ReadonlyArray<string> | null | undefined): string[] {

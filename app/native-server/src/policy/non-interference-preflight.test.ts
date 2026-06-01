@@ -223,6 +223,73 @@ describe('evaluateNonInterferencePreflight', () => {
     });
   });
 
+  it('allows continuation after a fresh matching-tab postcondition proves the original task can resume', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRunOwnedTab(42);
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 42,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_unknown_before_refresh',
+            kind: 'search_results_updated',
+            verdict: 'unknown',
+            reason: 'result_collection_not_comparable',
+            beforeSummary: [],
+            afterSummary: [],
+            producedAtMs: 1000,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+
+    expect(
+      evaluateNonInterferencePreflight({
+        toolName: TOOL_NAMES.BROWSER.FILL,
+        args: { tabId: 42, selector: '#q', value: 'poster', userConfirmed: true },
+        taskContext: ctx,
+      }).allowed,
+    ).toBe(false);
+
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 42,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_search_submit_after_refresh',
+            kind: 'search_results_updated',
+            verdict: 'passed',
+            reason: 'result_collection_changed_after_action',
+            beforeSummary: ['content_list:loaded:before'],
+            afterSummary: ['content_list:loaded:after'],
+            producedAtMs: 2000,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+
+    const verdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.FILL,
+      args: { tabId: 42, selector: '#q', value: 'poster', userConfirmed: true },
+      taskContext: ctx,
+    });
+
+    expect(verdict.allowed).toBe(true);
+    expect(verdict.audit).toMatchObject({
+      verdict: 'allow',
+      reason: 'user_confirmed',
+    });
+    expect(ctx.buildTaskResumeReadiness({ tabId: 42 })).toMatchObject({
+      status: 'postcondition_passed_ready',
+      canResumeOriginalTask: true,
+      nextStep: 'continue_original_task',
+    });
+  });
+
   it('does not block cleanup or unrelated tabs with empty resume evidence', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
     ctx.noteRunOwnedTab(42);
