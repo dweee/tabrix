@@ -173,6 +173,8 @@ export interface ReadPageAuthCollaborationEvidence {
   ownerType?: import('./browser-task-thing-contract').BrowserPageOwnerType | string | null;
   canTabrixOperate?: boolean | null;
   operationBinding: 'ai_operable_tab' | 'protected_or_unknown_tab';
+  artifactExtractionEligibility?: 'eligible' | 'blocked' | 'unknown';
+  actionOperability?: 'operable' | 'protected_or_unknown' | 'unknown' | 'not_proven';
   artifactStatus?: ReadPageAuthArtifactStatusValue;
   semanticEventTypes: ReadPageBrowserPageSemanticEventType[];
   postconditionStatus: 'candidate_only' | 'not_evaluated' | 'not_proven';

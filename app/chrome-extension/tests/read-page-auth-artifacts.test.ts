@@ -305,6 +305,40 @@ describe('read_page auth artifacts', () => {
     ]);
   });
 
+  it('fails QR screenshot fallback when the target tab is not the active visible tab', async () => {
+    vi.mocked(chrome.scripting.executeScript).mockResolvedValueOnce([
+      {
+        result: {
+          method: 'element_screenshot',
+          width: 180,
+          height: 180,
+          rect: { x: 10, y: 20, width: 180, height: 180 },
+          devicePixelRatio: 1,
+        },
+      },
+    ] as any);
+    vi.mocked(chrome.tabs.query).mockResolvedValueOnce([{ id: 10 }] as any);
+
+    const artifactRefs: any[] = [];
+    const status = await buildAuthQrArtifactRefs({
+      includeAuthArtifacts: true,
+      tabId: 9,
+      windowId: 1,
+      pageRegions: authQrRegions(),
+      browserWorldTab: aiOwnedTab(),
+      artifactRefs,
+      nowMs: 1000,
+      prepareFile: vi.fn(),
+    });
+
+    expect(status).toMatchObject({
+      requested: true,
+      status: 'failed',
+      failureReason: 'auth_qr_screenshot_fallback_target_tab_not_active',
+    });
+    expect(artifactRefs).toEqual([]);
+  });
+
   it('builds waiting_for_user collaboration state for a ready QR artifact', () => {
     const collaboration = buildAuthCollaborationState({
       pageRole: 'login_required',
@@ -339,6 +373,8 @@ describe('read_page auth artifacts', () => {
       },
       evidence: {
         operationBinding: 'ai_operable_tab',
+        artifactExtractionEligibility: 'eligible',
+        actionOperability: 'operable',
         artifactStatus: 'ready',
         postconditionStatus: 'not_evaluated',
       },
@@ -430,6 +466,8 @@ describe('read_page auth artifacts', () => {
       status: 'not_proven',
       evidence: {
         operationBinding: 'protected_or_unknown_tab',
+        artifactExtractionEligibility: 'blocked',
+        actionOperability: 'protected_or_unknown',
         ownerType: 'user_owned',
       },
     });
@@ -577,6 +615,59 @@ describe('read_page auth artifacts', () => {
     expect(collaboration.authForm?.blockers[0]).toMatchObject({
       kind: 'agreement_required',
       control: 'agreementCheckbox',
+    });
+  });
+
+  it('keeps auth form controls privacy-safe and strips raw aria labels from locator chains', () => {
+    const collaboration = buildAuthCollaborationState({
+      pageRole: 'login_required',
+      tabId: 9,
+      pageRegions: otpAuthRegions(),
+      browserPageObject: browserPageObject(['auth_required_candidate']),
+      browserWorldTab: aiOwnedTab(),
+      authArtifactStatus: buildNotRequestedAuthArtifactStatus(),
+      artifactRefs: [],
+      interactiveElements: otpInteractive({
+        ref_phone: { name: '手机号 15705171303', valueState: 'non_empty' },
+        ref_otp: { name: '验证码 134336' },
+        ref_agreement: { checked: true },
+      }),
+      candidateActions: [
+        {
+          id: 'ca_fill_ref_phone',
+          actionType: 'fill',
+          targetRef: 'ref_phone',
+          confidence: 0.68,
+          matchReason: 'form input candidate from structured snapshot',
+          locatorChain: [
+            { type: 'aria', value: '手机号 15705171303' },
+            { type: 'ref', value: 'ref_phone' },
+          ],
+        },
+        {
+          id: 'ca_fill_ref_otp',
+          actionType: 'fill',
+          targetRef: 'ref_otp',
+          confidence: 0.68,
+          matchReason: 'form input candidate from structured snapshot',
+          locatorChain: [
+            { type: 'aria', value: '验证码 134336' },
+            { type: 'ref', value: 'ref_otp' },
+          ],
+        },
+      ],
+    });
+
+    const payload = JSON.stringify(collaboration.authForm);
+    expect(payload).not.toContain('15705171303');
+    expect(payload).not.toContain('134336');
+    expect(collaboration.authForm?.controls.phoneInput).toMatchObject({
+      label: 'phone_input',
+      locatorChain: [{ type: 'ref', value: 'ref_phone' }],
+    });
+    expect(collaboration.authForm?.controls.otpInput).toMatchObject({
+      label: 'otp_input',
+      locatorChain: [{ type: 'ref', value: 'ref_otp' }],
     });
   });
 
@@ -963,6 +1054,35 @@ describe('read_page auth artifacts', () => {
         },
       },
     });
+  });
+
+  it('does not turn otp_requested_candidate into proof that an OTP was sent', () => {
+    const collaboration = buildAuthCollaborationState({
+      pageRole: 'login_required',
+      tabId: 9,
+      pageRegions: otpAuthRegions(),
+      browserPageObject: browserPageObject(['auth_required_candidate', 'otp_requested_candidate']),
+      browserWorldTab: aiOwnedTab(),
+      authArtifactStatus: buildNotRequestedAuthArtifactStatus(),
+      artifactRefs: [],
+      interactiveElements: otpInteractive({
+        ref_phone: { valueState: 'non_empty' },
+        ref_agreement: { checked: true },
+      }),
+      candidateActions: otpCandidateActions(),
+    });
+
+    expect(collaboration.authForm?.readiness).toBe('not_proven');
+    expect(collaboration.authForm?.nextAction).toBe('not_proven');
+    expect(collaboration.authForm?.readiness).not.toBe('otp_requested');
+    expect(collaboration.authForm?.blockers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'otp_request_candidate_only',
+          control: 'requestOtp',
+        }),
+      ]),
+    );
   });
 
   it('does not allow OTP collaboration actions on protected user-owned tabs', () => {

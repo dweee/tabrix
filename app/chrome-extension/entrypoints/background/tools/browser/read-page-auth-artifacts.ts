@@ -226,6 +226,27 @@ function textOf(value: unknown): string {
   return String(value ?? '').trim();
 }
 
+function safeAuthControlLabel(key: AuthControlKey): string {
+  return {
+    phoneInput: 'phone_input',
+    otpInput: 'otp_input',
+    requestOtp: 'request_otp',
+    agreementCheckbox: 'agreement_checkbox',
+    agreementConfirm: 'agreement_confirm',
+    submit: 'submit_login',
+  }[key];
+}
+
+function safeAuthLocatorChain(
+  locatorChain: ReadPageAuthFormControl['locatorChain'] | undefined,
+): ReadPageAuthFormControl['locatorChain'] | undefined {
+  const safe = (Array.isArray(locatorChain) ? locatorChain : []).filter((locator) => {
+    const type = String(locator?.type || '').toLowerCase();
+    return type === 'ref' || type === 'css';
+  });
+  return safe.length > 0 ? safe : undefined;
+}
+
 function controlText(
   item:
     | ReadPageInteractiveElement
@@ -311,10 +332,10 @@ function toControl(
   return {
     key,
     role,
-    label: textOf(element.name),
+    label: safeAuthControlLabel(key),
     targetRef: element.ref,
     candidateActionId: candidate?.id,
-    locatorChain: candidate?.locatorChain,
+    locatorChain: safeAuthLocatorChain(candidate?.locatorChain),
     confidence,
     reason,
     state,
@@ -472,7 +493,7 @@ function checkedState(
 function buildOtpAuthForm(params: {
   challengeType: ReadPageAuthChallengeType;
   status: ReadPageAuthCollaboration['status'];
-  operationBinding: ReadPageAuthCollaboration['evidence']['operationBinding'];
+  actionOperability: NonNullable<ReadPageAuthCollaboration['evidence']['actionOperability']>;
   semanticEventTypes: string[];
   interactiveElements?: ReadPageInteractiveElement[];
   candidateActions?: ReadPageCandidateAction[];
@@ -557,10 +578,10 @@ function buildOtpAuthForm(params: {
   if (params.status === 'succeeded_candidate') {
     readiness = 'login_succeeded_candidate';
     nextAction = 'verify_login';
-  } else if (params.operationBinding !== 'ai_operable_tab') {
+  } else if (params.actionOperability !== 'operable') {
     blockers.push({
       kind: 'protected_tab',
-      message: '当前标签不是 AI 可操作标签，不能继续自动登录协作。',
+      message: '当前标签的登录操作权限未证明，不能继续自动登录协作。',
     });
     nextAction = 'manual_user_action';
   } else if (controls.agreementConfirm) {
@@ -602,9 +623,17 @@ function buildOtpAuthForm(params: {
     nextAction = 'manual_user_action';
   }
 
-  if (params.semanticEventTypes.includes('otp_requested_candidate')) {
-    readiness = 'otp_requested';
-    nextAction = 'wait_for_user_otp';
+  if (
+    params.semanticEventTypes.includes('otp_requested_candidate') &&
+    readiness !== 'waiting_for_user_otp'
+  ) {
+    readiness = 'not_proven';
+    nextAction = 'not_proven';
+    blockers.push({
+      kind: 'otp_request_candidate_only',
+      message: '只看到获取验证码候选事件，尚未看到倒计时、禁用按钮或发送提示，不能证明短信已发送。',
+      control: controls.requestOtp ? 'requestOtp' : undefined,
+    });
   }
 
   return {
@@ -634,6 +663,12 @@ export function buildAuthCollaborationState(params: {
   );
   const ownerGate = canExtractAuthArtifactForTab(params.browserWorldTab);
   const operationBinding = ownerGate.allowed ? 'ai_operable_tab' : 'protected_or_unknown_tab';
+  const actionOperability: NonNullable<ReadPageAuthCollaboration['evidence']['actionOperability']> =
+    params.browserWorldTab?.openedBy === 'ai' && params.browserWorldTab?.canTabrixOperate === true
+      ? 'operable'
+      : params.browserWorldTab
+        ? 'protected_or_unknown'
+        : 'unknown';
   let challengeType = detectAuthChallengeType({
     pageRegions: params.pageRegions,
     authArtifactStatus: params.authArtifactStatus,
@@ -665,7 +700,7 @@ export function buildAuthCollaborationState(params: {
     expiredCandidate ||
     params.authArtifactStatus.status === 'failed' ||
     params.authArtifactStatus.status === 'blocked' ||
-    operationBinding !== 'ai_operable_tab'
+    actionOperability !== 'operable'
   ) {
     status = 'not_proven';
   } else if (params.authArtifactStatus.status === 'ready') {
@@ -686,7 +721,7 @@ export function buildAuthCollaborationState(params: {
     if (succeededCandidate && !succeededCandidateHasFreshComparison) {
       return '看到了登录后状态候选，但页面证据不是 fresh/resync 对比结果；请强制重新读取页面后再判断是否登录成功。';
     }
-    if (operationBinding !== 'ai_operable_tab') {
+    if (actionOperability !== 'operable') {
       return '当前标签不是 AI 可操作标签；需要用户明确授权该标签，或让 AI 新开受控标签后再继续登录协作。';
     }
     if (expiredCandidate) return '登录二维码可能已过期；请刷新二维码或重新触发登录协作。';
@@ -705,7 +740,7 @@ export function buildAuthCollaborationState(params: {
   const authForm = buildOtpAuthForm({
     challengeType,
     status,
-    operationBinding,
+    actionOperability,
     semanticEventTypes,
     interactiveElements: params.interactiveElements,
     candidateActions: params.candidateActions,
@@ -736,6 +771,8 @@ export function buildAuthCollaborationState(params: {
       ownerType: ownerGate.ownerType,
       canTabrixOperate: params.browserWorldTab?.canTabrixOperate ?? null,
       operationBinding,
+      artifactExtractionEligibility: ownerGate.allowed ? 'eligible' : 'blocked',
+      actionOperability,
       artifactStatus: params.authArtifactStatus.status,
       semanticEventTypes,
       postconditionStatus:
@@ -936,18 +973,29 @@ async function extractAuthQrImageFromDom(
 }
 
 async function captureElementScreenshot(
+  tabId: number,
   windowId: number | null,
   extraction: ExtractedAuthQrImage,
 ): Promise<{ dataUrl: string; width: number; height: number }> {
   if (!extraction.rect) throw new Error('missing QR element rect for screenshot fallback');
+  if (typeof windowId !== 'number') {
+    throw new Error('auth_qr_screenshot_fallback_target_tab_not_proven');
+  }
+  let activeTabId: number | undefined;
+  try {
+    const activeTabs = await chrome.tabs.query({ windowId, active: true });
+    activeTabId = activeTabs[0]?.id;
+  } catch {
+    throw new Error('auth_qr_screenshot_fallback_active_tab_unknown');
+  }
+  if (activeTabId !== tabId) {
+    throw new Error('auth_qr_screenshot_fallback_target_tab_not_active');
+  }
   const dpr =
     typeof extraction.devicePixelRatio === 'number' && extraction.devicePixelRatio > 0
       ? extraction.devicePixelRatio
       : 1;
-  const visibleCaptureDataUrl =
-    typeof windowId === 'number'
-      ? await chrome.tabs.captureVisibleTab(windowId, { format: 'png' })
-      : await chrome.tabs.captureVisibleTab({ format: 'png' } as any);
+  const visibleCaptureDataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
   if (!visibleCaptureDataUrl) throw new Error('captureVisibleTab returned empty QR screenshot');
 
   const cropped = await cropAndResizeImage(
@@ -1009,7 +1057,7 @@ export async function buildAuthQrArtifactRefs(params: {
     let height = extracted.height || candidate.height || null;
 
     if (!dataUrl && extracted.method === 'element_screenshot') {
-      const screenshot = await captureElementScreenshot(params.windowId, extracted);
+      const screenshot = await captureElementScreenshot(params.tabId, params.windowId, extracted);
       dataUrl = screenshot.dataUrl;
       method = 'element_screenshot';
       width = screenshot.width;

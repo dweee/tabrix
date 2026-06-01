@@ -65,6 +65,43 @@ function inferCandidateActionIntent(
   return undefined;
 }
 
+function mayContainSensitiveAuthText(value: string): boolean {
+  return (
+    /\b(password|passcode|credential|cookie|token|authorization|secret|otp|sms|verification\s*code|one[-\s]?time\s*code)\b/i.test(
+      value,
+    ) ||
+    /密码|验证码|动态码|短信|授权码|手机号|手机号码|电话号码|账号|账户|身份证|令牌/i.test(value) ||
+    /(?:\+?\d[\s-]?){6,}/.test(value)
+  );
+}
+
+function buildLocatorChain(params: {
+  element: ReadPageInteractiveElement;
+  selector: string | undefined;
+  actionType: 'click' | 'fill';
+  intent: ReadPageCandidateAction['intent'] | undefined;
+}): ReadPageCandidateActionLocator[] {
+  const locatorChain: ReadPageCandidateActionLocator[] = [
+    { type: 'ref', value: params.element.ref },
+  ];
+  const name = String(params.element.name || '').trim();
+  const source = String(params.element.matchSource || '').toLowerCase();
+  const isAuthIntent = typeof params.intent === 'string' && params.intent.startsWith('auth.');
+  const shouldRedactName =
+    params.actionType === 'fill' ||
+    isAuthIntent ||
+    source === 'placeholder' ||
+    mayContainSensitiveAuthText(name);
+
+  if (name && !shouldRedactName) {
+    locatorChain.push({ type: 'aria', value: name });
+  }
+  if (params.selector) {
+    locatorChain.push({ type: 'css', value: params.selector });
+  }
+  return locatorChain;
+}
+
 export function buildCandidateActions(
   interactiveElements: ReadPageInteractiveElement[],
   refMap: any[],
@@ -95,14 +132,7 @@ export function buildCandidateActions(
     else if (fillRoles.has(role)) actionType = 'fill';
     if (!actionType) continue;
 
-    const locatorChain: ReadPageCandidateActionLocator[] = [];
-    if (name) {
-      locatorChain.push({ type: 'aria', value: name });
-    }
     const selector = selectorMap.get(element.ref);
-    if (selector) {
-      locatorChain.push({ type: 'css', value: selector });
-    }
 
     const isPrimary = primaryKeywords.test(name);
     const confidence = isPrimary ? 0.93 : actionType === 'fill' ? 0.68 : 0.72;
@@ -112,6 +142,7 @@ export function buildCandidateActions(
         ? 'form input candidate from structured snapshot'
         : 'interactive clickable candidate from structured snapshot';
     const intent = inferCandidateActionIntent(element, actionType);
+    const locatorChain = buildLocatorChain({ element, selector, actionType, intent });
 
     const safeRef = element.ref.replace(/[^a-zA-Z0-9_]/g, '_');
     seeds.push({

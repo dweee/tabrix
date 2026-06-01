@@ -571,6 +571,15 @@ describe('read_page mode', () => {
         expect.objectContaining({ targetRef: 'ref_login', intent: 'auth.submit_login' }),
       ]),
     );
+    const serializedActions = JSON.stringify(actions);
+    expect(serializedActions).not.toContain('手机号');
+    expect(serializedActions).not.toContain('验证码');
+    expect(actions.find((action) => action.targetRef === 'ref_request')).toMatchObject({
+      locatorChain: expect.arrayContaining([
+        { type: 'ref', value: 'ref_request' },
+        { type: 'css', value: '.otp-send' },
+      ]),
+    });
   });
 
   it('does not assign auth.request_otp intent to placeholder-only textboxes', () => {
@@ -590,6 +599,7 @@ describe('read_page mode', () => {
       }),
     ]);
     expect(actions[0]).not.toHaveProperty('intent', 'auth.request_otp');
+    expect(JSON.stringify(actions[0].locatorChain)).not.toContain('获取验证码');
   });
 
   it('returns null window focus truth when chrome.windows.get is unavailable', async () => {
@@ -1495,6 +1505,7 @@ describe('read_page mode', () => {
       title: 'Sign in',
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'collectInteractiveElementsFallback').mockResolvedValue(null);
     vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
       success: true,
       pageContent:
@@ -1532,7 +1543,10 @@ describe('read_page mode', () => {
           actionType: 'click',
           targetRef: 'ref_login',
           matchReason: 'redacted_auth_action_signal',
-          locatorChain: [{ type: 'css', value: 'button[type=submit]' }],
+          locatorChain: expect.arrayContaining([
+            { type: 'ref', value: 'ref_login' },
+            { type: 'css', value: 'button[type=submit]' },
+          ]),
         }),
       ]),
     );
@@ -1551,6 +1565,7 @@ describe('read_page mode', () => {
     vi.spyOn(readPageTool as any, 'sampleVisibleTextContent').mockResolvedValue(
       '请先登录后继续访问此页面。手机号登录 扫码登录',
     );
+    vi.spyOn(readPageTool as any, 'collectInteractiveElementsFallback').mockResolvedValue(null);
     vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
       success: true,
       pageContent: [
