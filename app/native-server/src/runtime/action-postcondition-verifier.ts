@@ -338,12 +338,18 @@ function verdictForSearchResultsUpdated(
     return { verdict: 'failed', reason: 'result_collection_not_visible_after' };
   }
 
-  if (beforeCollections.length === 0) {
+  const beforeStructuredCollections = beforeCollections.filter(hasStructuredSearchResultEvidence);
+  const afterStructuredCollections = afterCollections.filter(hasStructuredSearchResultEvidence);
+  if (afterStructuredCollections.length === 0) {
+    return { verdict: 'unknown', reason: 'structured_result_evidence_missing_after_action' };
+  }
+
+  if (beforeStructuredCollections.length === 0) {
     return { verdict: 'passed', reason: 'result_collection_appeared_after_action' };
   }
 
-  const beforeSignature = collectionSignature(beforeCollections);
-  const afterSignature = collectionSignature(afterCollections);
+  const beforeSignature = collectionSignature(beforeStructuredCollections);
+  const afterSignature = collectionSignature(afterStructuredCollections);
   if (beforeSignature !== afterSignature) {
     return { verdict: 'passed', reason: 'result_collection_changed_after_action' };
   }
@@ -432,13 +438,7 @@ function contentCollectionRegions(regions: readonly ReadPageRegion[]): ReadPageR
 
 function isContentCollectionRegion(region: ReadPageRegion): boolean {
   if (region.regionType !== 'content') return false;
-  const targetableRecords = region.objects.filter((object) => {
-    const objectType = String(object.objectType || '').toLowerCase();
-    return (
-      (objectType === 'record' || objectType === 'entry' || objectType === 'content_collection') &&
-      (object.targetability === 'target_ref' || Boolean(object.targetRef))
-    );
-  });
+  const targetableRecords = targetableResultObjects(region);
   if (targetableRecords.length >= 2) return true;
 
   const state = region.state.toLowerCase();
@@ -446,6 +446,20 @@ function isContentCollectionRegion(region: ReadPageRegion): boolean {
     /(?:result|list|collection|results)_/.test(`${state}_`) &&
     (region.candidateActionIds.length >= 2 || targetableRecords.length >= 1)
   );
+}
+
+function hasStructuredSearchResultEvidence(region: ReadPageRegion): boolean {
+  return targetableResultObjects(region).length >= 2;
+}
+
+function targetableResultObjects(region: ReadPageRegion): ReadPageRegion['objects'] {
+  return region.objects.filter((object) => {
+    const objectType = String(object.objectType || '').toLowerCase();
+    const looksLikeResultObject =
+      objectType === 'record' || objectType === 'entry' || objectType === 'content_collection';
+    if (!looksLikeResultObject) return false;
+    return object.targetability === 'target_ref' || Boolean(object.targetRef);
+  });
 }
 
 function contentDetailRegions(regions: readonly ReadPageRegion[]): ReadPageRegion[] {

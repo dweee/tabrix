@@ -4156,6 +4156,29 @@ describe('handleToolCall execution wrapper', () => {
       };
     }
 
+    function weakContentListRegion(refPrefix: string): Record<string, unknown> {
+      return {
+        regionId: 'region_results',
+        regionType: 'content',
+        state: `results_${refPrefix}`,
+        confidence: 0.78,
+        objects: [
+          {
+            objectId: `${refPrefix}_text_only`,
+            label: 'result text only',
+            objectType: 'doc_block',
+            actionTypes: [],
+            targetability: 'not_clickable',
+            confidence: 0.72,
+            reason: 'test weak result row without target ref',
+          },
+        ],
+        candidateActionIds: [`ca_${refPrefix}_1`, `ca_${refPrefix}_2`],
+        targetability: 'locator_chain',
+        claimBoundary: 'test weak content-list region',
+      };
+    }
+
     function contentDetailRegion(refPrefix: string): Record<string, unknown> {
       return {
         regionId: 'region_detail',
@@ -4818,6 +4841,94 @@ describe('handleToolCall execution wrapper', () => {
           }),
         ]),
       );
+    });
+
+    it('does not resume original task when search readback lacks structured result rows', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
+      auto.noteRunOwnedTab(1);
+      Object.defineProperty(auto, 'readBudget', { value: 5, writable: false });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_before_weak_search',
+          tabId: 1,
+          pageRegions: [contentListRegion('before')],
+        }),
+      );
+      await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  observedOutcome: 'spa_partial_update',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_search_submit',
+        candidateAction: {
+          id: 'ca_search_submit',
+          actionType: 'click',
+          targetRef: 'ref_search_submit',
+          confidence: 0.91,
+          matchReason: 'search submit candidate',
+          locatorChain: [{ type: 'ref', value: 'ref_search_submit' }],
+          intent: 'search.submit',
+        },
+      });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_after_weak_search',
+          tabId: 1,
+          pageRegions: [weakContentListRegion('after')],
+        }),
+      );
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.regionStatePostconditions).toEqual([
+        {
+          actionKind: 'click',
+          result: expect.objectContaining({
+            actionId: 'ca_search_submit',
+            kind: 'search_results_updated',
+            verdict: 'unknown',
+            reason: 'structured_result_evidence_missing_after_action',
+          }),
+        },
+      ]);
+      expect(payload.taskResumeReadiness).toMatchObject({
+        status: 'postcondition_unknown_not_proven',
+        canResumeOriginalTask: false,
+        nextStep: 'force_fresh_read_same_tab',
+        reason:
+          'pending_business_verification_requires_fresh_read:search_results_or_url_query_changed:search.submit',
+        handoffSummary: {
+          status: 'needs_fresh_read',
+          nextAction: 'run_chrome_read_page_force_refresh',
+          canContinue: false,
+        },
+      });
     });
 
     it('does not pass search postconditions from a snapshot that is not ready for business action', async () => {

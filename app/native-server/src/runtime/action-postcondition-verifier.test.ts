@@ -91,6 +91,26 @@ function resultCollection(...rows: ReturnType<typeof resultRow>[]): ReadPageRegi
   return [region('content', 'result_collection_candidate', { objects: rows })];
 }
 
+function weakResultCollection(suffix: string): ReadPageRegion[] {
+  return [
+    region('content', `results_${suffix}`, {
+      objects: [
+        {
+          objectId: `weak-row-${suffix}`,
+          label: 'redacted weak row',
+          objectType: 'doc_block',
+          actionTypes: [],
+          targetability: 'not_clickable',
+          confidence: 0.7,
+          reason: 'deterministic weak result fixture',
+        },
+      ],
+      candidateActionIds: [`ca_${suffix}_1`, `ca_${suffix}_2`],
+      targetability: 'locator_chain',
+    }),
+  ];
+}
+
 function detailRegion(): ReadPageRegion[] {
   return [
     region('content', 'detail_open_candidate', {
@@ -496,6 +516,19 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
 
     expect(result.verdict).toBe('passed');
     expect(result.reason).toBe('result_collection_changed_after_action');
+  });
+
+  it('keeps search_results_updated unknown when changed collection lacks structured result rows', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'search_results_updated',
+      actionId: 'act-search',
+      beforeRegions: weakResultCollection('before'),
+      afterRegions: weakResultCollection('after'),
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('unknown');
+    expect(result.reason).toBe('structured_result_evidence_missing_after_action');
   });
 
   it('fails search_results_updated when the collection is unchanged', () => {
