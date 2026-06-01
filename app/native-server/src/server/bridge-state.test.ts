@@ -26,6 +26,19 @@ describe('BridgeStateManager', () => {
     });
   });
 
+  test('reuses recent browser process detection for hot-path snapshots', () => {
+    const detect = jest.fn(() => true);
+    const manager = new BridgeStateManager(detect);
+
+    expect(manager.syncBrowserProcessIfStale()).toBe(true);
+    expect(manager.syncBrowserProcessIfStale()).toBe(true);
+
+    expect(detect).toHaveBeenCalledTimes(1);
+    expect(manager.getSnapshot()).toMatchObject({
+      browserProcessRunning: true,
+    });
+  });
+
   test('reports ready when native host is attached', () => {
     const manager = new BridgeStateManager(() => true);
 

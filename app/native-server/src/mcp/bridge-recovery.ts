@@ -106,7 +106,7 @@ async function wait(ms: number): Promise<void> {
 }
 
 export function getBridgeSnapshot(): BridgeRuntimeSnapshot {
-  bridgeRuntimeState.syncBrowserProcessNow();
+  bridgeRuntimeState.syncBrowserProcessIfStale();
   return bridgeRuntimeState.getSnapshot();
 }
 
