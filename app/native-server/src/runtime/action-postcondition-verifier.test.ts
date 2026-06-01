@@ -73,6 +73,41 @@ function region(
   };
 }
 
+function resultRow(suffix: string, objectType: 'record' | 'entry' = 'record') {
+  return {
+    objectId: `row-${suffix}`,
+    label: 'redacted row',
+    objectType,
+    targetRef: `tgt_row_${suffix}`,
+    actionTypes: ['open_detail'],
+    targetability: 'target_ref' as const,
+    confidence: 0.8,
+    reason: 'deterministic row fixture',
+  };
+}
+
+function resultCollection(...rows: ReturnType<typeof resultRow>[]): ReadPageRegion[] {
+  return [region('content', 'result_collection_candidate', { objects: rows })];
+}
+
+function detailRegion(): ReadPageRegion[] {
+  return [
+    region('content', 'detail_open_candidate', {
+      objects: [
+        {
+          objectId: 'detail-body',
+          label: 'redacted detail body',
+          objectType: 'doc_block',
+          actionTypes: [],
+          targetability: 'not_clickable',
+          confidence: 0.8,
+          reason: 'deterministic detail fixture',
+        },
+      ],
+    }),
+  ];
+}
+
 describe('action-postcondition-verifier — coverage matrix', () => {
   it('lists every V3 required action exactly once', () => {
     const requiredRows = getActionPostconditionCoverageMatrix().filter((row) => row.requiredByV3);
@@ -400,6 +435,78 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
 
     expect(result.verdict).toBe('unknown');
     expect(result.reason).toBe('menu_state_change_not_proven');
+  });
+
+  it('passes search_results_updated when a targetable content collection appears', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'search_results_updated',
+      actionId: 'act-search',
+      beforeRegions: [region('form', 'search_ready_candidate')],
+      afterRegions: resultCollection(resultRow('1'), resultRow('2', 'entry')),
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('passed');
+    expect(result.reason).toBe('result_collection_appeared_after_action');
+  });
+
+  it('passes search_results_updated when the existing collection changes target refs', () => {
+    const before = resultCollection(resultRow('before_a'), resultRow('before_b'));
+    const after = resultCollection(resultRow('after_c'), resultRow('after_d'));
+
+    const result = verifyRegionStatePostcondition({
+      kind: 'search_results_updated',
+      actionId: 'act-search',
+      beforeRegions: before,
+      afterRegions: after,
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('passed');
+    expect(result.reason).toBe('result_collection_changed_after_action');
+  });
+
+  it('does not pass search_results_updated when the collection is unchanged', () => {
+    const unchanged = resultCollection(resultRow('a'), resultRow('b'));
+
+    const result = verifyRegionStatePostcondition({
+      kind: 'search_results_updated',
+      actionId: 'act-search',
+      beforeRegions: unchanged,
+      afterRegions: unchanged,
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('unknown');
+    expect(result.reason).toBe('result_collection_state_unchanged');
+  });
+
+  it('passes detail_opened only when a detail content region replaces a result collection', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'detail_opened',
+      actionId: 'act-open-detail',
+      beforeRegions: resultCollection(resultRow('1'), resultRow('2', 'entry')),
+      afterRegions: detailRegion(),
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('passed');
+    expect(result.reason).toBe('content_detail_region_visible_after_action');
+  });
+
+  it('does not pass detail_opened when the result collection is still visible', () => {
+    const before = resultCollection(resultRow('1'), resultRow('2'));
+
+    const result = verifyRegionStatePostcondition({
+      kind: 'detail_opened',
+      actionId: 'act-open-detail',
+      beforeRegions: before,
+      afterRegions: before,
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('unknown');
+    expect(result.reason).toBe('detail_open_not_proven_collection_still_visible');
   });
 
   it('passes login_completed only when auth prompt disappears and account appears', () => {

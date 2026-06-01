@@ -115,6 +115,23 @@ function region(
   };
 }
 
+function resultRow(suffix: string, objectType: 'record' | 'entry' = 'record') {
+  return {
+    objectId: `row-${suffix}`,
+    label: 'redacted row',
+    objectType,
+    targetRef: `tgt_row_${suffix}`,
+    actionTypes: ['open_detail'],
+    targetability: 'target_ref' as const,
+    confidence: 0.8,
+    reason: 'deterministic row fixture',
+  };
+}
+
+function resultCollection(...rows: ReturnType<typeof resultRow>[]): ReadPageRegion[] {
+  return [region('content', 'result_collection_candidate', { objects: rows })];
+}
+
 beforeEach(() => {
   resetEventStream();
   resetLifecycleEvidenceCollectorForTests();
@@ -1157,6 +1174,94 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     const serialized = JSON.stringify(artifact);
     expect(serialized).toContain('before=account:logged_in_candidate:unknown:actions:0');
     expect(serialized).toContain('after=account:logged_out_candidate:unknown:actions:0');
+    expect(serialized).not.toContain('cookie');
+    expect(serialized).not.toContain('Authorization');
+  });
+
+  it('carries search list and detail region-state postconditions into unified closeout evidence', () => {
+    const resultRows = resultCollection(resultRow('1'), resultRow('2', 'entry'));
+    const searchState = verifyRegionStatePostcondition({
+      kind: 'search_results_updated',
+      actionId: 'act-search',
+      beforeRegions: [region('form', 'search_ready_candidate')],
+      afterRegions: resultRows,
+      now: () => T0 + 15,
+    });
+    const detailState = verifyRegionStatePostcondition({
+      kind: 'detail_opened',
+      actionId: 'act-open-detail',
+      beforeRegions: resultRows,
+      afterRegions: [region('content', 'detail_open_candidate')],
+      now: () => T0 + 20,
+    });
+
+    const artifact = produceUnifiedTaskCloseoutLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-search-detail-region-state-closeout',
+      evidenceLevel: 'integration',
+      scenarioId: 'tool-search-detail-region-state-closeout',
+      scenarioClass: 'search_result_delta_v1',
+      startedAtMs: T0,
+      endedAtMs: T0 + 30,
+      tabIds: [42],
+      taskTimeline: [
+        {
+          eventId: 'lifecycle:1',
+          index: 1,
+          at: new Date(T0).toISOString(),
+          kind: 'projection_created',
+          tabId: 42,
+          pageRole: 'search_list',
+        },
+        {
+          eventId: 'lifecycle:2',
+          index: 2,
+          at: new Date(T0 + 20).toISOString(),
+          kind: 'region_changed',
+          tabId: 42,
+        },
+      ],
+      regionStatePostconditions: [
+        { actionKind: 'submit', result: searchState },
+        { actionKind: 'click', result: detailState },
+      ],
+      closeAction: {
+        actionId: 'mcp:chrome_close_tabs:42',
+        tabId: 42,
+        reason: 'close_tabs_cleanup_succeeded',
+      },
+      browserHygiene: {
+        available: true,
+        baselineTabs: null,
+        runOwnedTabsClosed: 1,
+        baselineChanged: false,
+        checks: makeCleanHygieneChecks(),
+      },
+    });
+
+    expect(artifact.actionLog).toMatchObject({
+      available: true,
+      totalActions: 3,
+      passed: 3,
+    });
+    expect(artifact.actionLog.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionId: 'act-search',
+          actionKind: 'submit',
+          verdict: 'passed',
+          reason: expect.stringContaining('region_state_search_results_updated'),
+        }),
+        expect.objectContaining({
+          actionId: 'act-open-detail',
+          actionKind: 'click',
+          verdict: 'passed',
+          reason: expect.stringContaining('region_state_detail_opened'),
+        }),
+      ]),
+    );
+    const serialized = JSON.stringify(artifact);
+    expect(serialized).toContain('after=content:result_collection_candidate:unknown:actions:0');
+    expect(serialized).toContain('after=content:detail_open_candidate:unknown:actions:0');
     expect(serialized).not.toContain('cookie');
     expect(serialized).not.toContain('Authorization');
   });

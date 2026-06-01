@@ -164,6 +164,8 @@ export interface VerifyActionPostconditionOptions {
 export type RegionStatePostconditionKind =
   | 'menu_opened'
   | 'menu_closed'
+  | 'search_results_updated'
+  | 'detail_opened'
   | 'login_completed'
   | 'logout_completed'
   | 'qr_waiting';
@@ -262,6 +264,10 @@ function verdictForRegionState(
       return verdictForMenuOpened(beforeRegions, afterRegions);
     case 'menu_closed':
       return verdictForMenuClosed(beforeRegions, afterRegions);
+    case 'search_results_updated':
+      return verdictForSearchResultsUpdated(beforeRegions, afterRegions);
+    case 'detail_opened':
+      return verdictForDetailOpened(beforeRegions, afterRegions);
     case 'login_completed':
       return verdictForLoginCompleted(beforeRegions, afterRegions);
     case 'logout_completed':
@@ -310,6 +316,50 @@ function verdictForMenuClosed(
   return { verdict: 'unknown', reason: 'menu_close_state_change_not_proven' };
 }
 
+function verdictForSearchResultsUpdated(
+  beforeRegions: readonly ReadPageRegion[],
+  afterRegions: readonly ReadPageRegion[],
+): { verdict: PostconditionVerdict; reason: string } {
+  const beforeCollections = contentCollectionRegions(beforeRegions);
+  const afterCollections = contentCollectionRegions(afterRegions);
+  if (afterCollections.length === 0) {
+    return { verdict: 'failed', reason: 'result_collection_not_visible_after' };
+  }
+
+  if (beforeCollections.length === 0) {
+    return { verdict: 'passed', reason: 'result_collection_appeared_after_action' };
+  }
+
+  const beforeSignature = collectionSignature(beforeCollections);
+  const afterSignature = collectionSignature(afterCollections);
+  if (beforeSignature !== afterSignature) {
+    return { verdict: 'passed', reason: 'result_collection_changed_after_action' };
+  }
+
+  return { verdict: 'unknown', reason: 'result_collection_state_unchanged' };
+}
+
+function verdictForDetailOpened(
+  beforeRegions: readonly ReadPageRegion[],
+  afterRegions: readonly ReadPageRegion[],
+): { verdict: PostconditionVerdict; reason: string } {
+  const beforeCollections = contentCollectionRegions(beforeRegions);
+  if (beforeCollections.length === 0) {
+    return { verdict: 'unknown', reason: 'before_result_collection_evidence_missing' };
+  }
+
+  const afterDetail = contentDetailRegions(afterRegions);
+  if (afterDetail.length > 0) {
+    return { verdict: 'passed', reason: 'content_detail_region_visible_after_action' };
+  }
+
+  if (contentCollectionRegions(afterRegions).length > 0) {
+    return { verdict: 'unknown', reason: 'detail_open_not_proven_collection_still_visible' };
+  }
+
+  return { verdict: 'unknown', reason: 'detail_region_evidence_missing_after_action' };
+}
+
 function verdictForLoginCompleted(
   beforeRegions: readonly ReadPageRegion[],
   afterRegions: readonly ReadPageRegion[],
@@ -353,6 +403,59 @@ function verdictForQrWaiting(afterRegions: readonly ReadPageRegion[]): {
   );
   if (qrRegion) return { verdict: 'passed', reason: 'qr_region_waiting_for_scan' };
   return { verdict: 'unknown', reason: 'qr_waiting_state_not_proven' };
+}
+
+function contentCollectionRegions(regions: readonly ReadPageRegion[]): ReadPageRegion[] {
+  return regions.filter(isContentCollectionRegion);
+}
+
+function isContentCollectionRegion(region: ReadPageRegion): boolean {
+  if (region.regionType !== 'content') return false;
+  const targetableRecords = region.objects.filter((object) => {
+    const objectType = String(object.objectType || '').toLowerCase();
+    return (
+      (objectType === 'record' || objectType === 'entry' || objectType === 'content_collection') &&
+      (object.targetability === 'target_ref' || Boolean(object.targetRef))
+    );
+  });
+  if (targetableRecords.length >= 2) return true;
+
+  const state = region.state.toLowerCase();
+  return (
+    /(?:result|list|collection|results)_/.test(`${state}_`) &&
+    (region.candidateActionIds.length >= 2 || targetableRecords.length >= 1)
+  );
+}
+
+function contentDetailRegions(regions: readonly ReadPageRegion[]): ReadPageRegion[] {
+  return regions.filter((region) => {
+    if (region.regionType !== 'content') return false;
+    const state = region.state.toLowerCase();
+    const id = region.regionId.toLowerCase();
+    const label = String(region.label || '').toLowerCase();
+    const hasDetailState = [state, id, label].some((value) =>
+      /(?:^|[_\W])(?:detail|article|record_view|item_view|content_body)(?:$|[_\W])/.test(value),
+    );
+    if (!hasDetailState) return false;
+
+    const stillLooksLikeCollection = isContentCollectionRegion(region);
+    return !stillLooksLikeCollection;
+  });
+}
+
+function collectionSignature(regions: readonly ReadPageRegion[]): string {
+  return regions
+    .map((region) => {
+      const objectRefs = region.objects
+        .map((object) => object.targetRef || object.objectId)
+        .filter(Boolean)
+        .sort()
+        .join(',');
+      const actions = region.candidateActionIds.slice().sort().join(',');
+      return `${region.regionId}:${region.state}:${objectRefs}:${actions}`;
+    })
+    .sort()
+    .join('|');
 }
 
 function regionsByType(
