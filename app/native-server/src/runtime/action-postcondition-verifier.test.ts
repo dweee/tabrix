@@ -129,6 +129,14 @@ function detailRegion(): ReadPageRegion[] {
   ];
 }
 
+function weakDetailRegion(): ReadPageRegion[] {
+  return [
+    region('content', 'detail_open_candidate', {
+      objects: [],
+    }),
+  ];
+}
+
 describe('action-postcondition-verifier — coverage matrix', () => {
   it('lists every V3 required action exactly once', () => {
     const requiredRows = getActionPostconditionCoverageMatrix().filter((row) => row.requiredByV3);
@@ -557,6 +565,32 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
 
     expect(result.verdict).toBe('passed');
     expect(result.reason).toBe('content_detail_region_visible_after_action');
+  });
+
+  it('keeps detail_opened unknown when the detail region lacks structured content evidence', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'detail_opened',
+      actionId: 'act-open-detail',
+      beforeRegions: resultCollection(resultRow('1'), resultRow('2', 'entry')),
+      afterRegions: weakDetailRegion(),
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('unknown');
+    expect(result.reason).toBe('structured_detail_evidence_missing_after_action');
+  });
+
+  it('keeps detail_opened unknown when the before collection has no targetable result row', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'detail_opened',
+      actionId: 'act-open-detail',
+      beforeRegions: weakResultCollection('before'),
+      afterRegions: detailRegion(),
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('unknown');
+    expect(result.reason).toBe('before_structured_result_evidence_missing');
   });
 
   it('fails detail_opened when the same result collection is still visible', () => {

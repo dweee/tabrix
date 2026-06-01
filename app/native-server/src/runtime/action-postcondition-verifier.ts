@@ -366,14 +366,25 @@ function verdictForDetailOpened(
     return { verdict: 'unknown', reason: 'before_result_collection_evidence_missing' };
   }
 
+  const beforeTargetableCollections = beforeCollections.filter(
+    (region) => targetableResultObjects(region).length >= 1,
+  );
+  if (beforeTargetableCollections.length === 0) {
+    return { verdict: 'unknown', reason: 'before_structured_result_evidence_missing' };
+  }
+
   const afterDetail = contentDetailRegions(afterRegions);
   if (afterDetail.length > 0) {
+    const afterStructuredDetail = afterDetail.filter(hasStructuredContentDetailEvidence);
+    if (afterStructuredDetail.length === 0) {
+      return { verdict: 'unknown', reason: 'structured_detail_evidence_missing_after_action' };
+    }
     return { verdict: 'passed', reason: 'content_detail_region_visible_after_action' };
   }
 
   const afterCollections = contentCollectionRegions(afterRegions);
   if (afterCollections.length > 0) {
-    const beforeSignature = collectionSignature(beforeCollections);
+    const beforeSignature = collectionSignature(beforeTargetableCollections);
     const afterSignature = collectionSignature(afterCollections);
     if (beforeSignature === afterSignature) {
       return { verdict: 'failed', reason: 'detail_collection_unchanged_after_action' };
@@ -459,6 +470,21 @@ function targetableResultObjects(region: ReadPageRegion): ReadPageRegion['object
       objectType === 'record' || objectType === 'entry' || objectType === 'content_collection';
     if (!looksLikeResultObject) return false;
     return object.targetability === 'target_ref' || Boolean(object.targetRef);
+  });
+}
+
+function hasStructuredContentDetailEvidence(region: ReadPageRegion): boolean {
+  return region.objects.some((object) => {
+    const objectType = String(object.objectType || '').toLowerCase();
+    const looksLikeDetailContent =
+      objectType === 'doc_block' ||
+      objectType === 'record' ||
+      objectType === 'entry' ||
+      objectType === 'content_body' ||
+      objectType === 'article' ||
+      objectType === 'paragraph';
+    const confidence = typeof object.confidence === 'number' ? object.confidence : 0;
+    return looksLikeDetailContent && Boolean(object.objectId || object.label) && confidence >= 0.5;
   });
 }
 
