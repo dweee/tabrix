@@ -57,6 +57,28 @@ describe('browser settle guidance', () => {
     } as chrome.tabs.Tab);
   });
 
+  it('retries content script injection once when Chrome swaps away the main frame', async () => {
+    vi.mocked(chrome.tabs.sendMessage).mockRejectedValue(new Error('receiver missing'));
+    vi.mocked(chrome.scripting.executeScript)
+      .mockRejectedValueOnce(new Error('Frame with ID 0 was removed.'))
+      .mockResolvedValueOnce([]);
+
+    await expect(
+      (readPageTool as any).injectContentScript(20, [
+        '/inject-scripts/accessibility-tree-helper.js',
+      ]),
+    ).resolves.toBeUndefined();
+
+    expect(chrome.scripting.executeScript).toHaveBeenCalledTimes(2);
+    expect(chrome.scripting.executeScript).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        target: { tabId: 20 },
+        files: ['/inject-scripts/accessibility-tree-helper.js'],
+      }),
+    );
+  });
+
   it('returns settle metadata after navigating a newly created tab', async () => {
     vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
     vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({

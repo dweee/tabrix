@@ -7,6 +7,8 @@ const DOCUMENT_READY_STATE_TIMEOUT_MS = 500;
 const TAB_SETTLE_TIMEOUT_MS = 8000;
 const TAB_ACTIVATION_TIMEOUT_MS = 1500;
 const TAB_POLL_INTERVAL_MS = 100;
+const TRANSIENT_FRAME_REMOVED_RETRY_DELAY_MS = 150;
+const TRANSIENT_FRAME_REMOVED_RETRY_LIMIT = 1;
 
 interface WaitForTabSettledOptions {
   timeoutMs?: number;
@@ -49,6 +51,10 @@ interface ContentScriptInjectionTiming {
   executeScriptMs: number | null;
   injected: boolean;
   totalMs: number;
+}
+
+function isTransientFrameRemovedError(message: string): boolean {
+  return /Frame with ID \d+ was removed/i.test(message);
 }
 
 /**
@@ -133,33 +139,43 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
       // Ping failure is expected when the script hasn't been injected yet.
     }
 
-    try {
-      const executeScriptStartedAt = Date.now();
-      const target: { tabId: number; allFrames?: boolean; frameIds?: number[] } = { tabId };
-      if (frameIds && frameIds.length > 0) {
-        target.frameIds = frameIds;
-      } else if (allFrames) {
-        target.allFrames = true;
+    for (let attempt = 0; attempt <= TRANSIENT_FRAME_REMOVED_RETRY_LIMIT; attempt += 1) {
+      try {
+        const executeScriptStartedAt = Date.now();
+        const target: { tabId: number; allFrames?: boolean; frameIds?: number[] } = { tabId };
+        if (frameIds && frameIds.length > 0) {
+          target.frameIds = frameIds;
+        } else if (allFrames) {
+          target.allFrames = true;
+        }
+        await chrome.scripting.executeScript({
+          target,
+          files,
+          injectImmediately,
+          world,
+        } as any);
+        onTiming?.({
+          pingMs,
+          pingStatus: 'failed_or_timeout',
+          executeScriptMs: Date.now() - executeScriptStartedAt,
+          injected: true,
+          totalMs: Date.now() - startedAt,
+        });
+        return;
+      } catch (injectionError) {
+        const errorMessage =
+          injectionError instanceof Error ? injectionError.message : String(injectionError);
+        const canRetry =
+          attempt < TRANSIENT_FRAME_REMOVED_RETRY_LIMIT &&
+          isTransientFrameRemovedError(errorMessage);
+        if (canRetry) {
+          await this.sleep(TRANSIENT_FRAME_REMOVED_RETRY_DELAY_MS);
+          continue;
+        }
+        throw new Error(
+          `${ERROR_MESSAGES.TOOL_EXECUTION_FAILED}: Failed to inject content script in tab ${tabId}: ${errorMessage}`,
+        );
       }
-      await chrome.scripting.executeScript({
-        target,
-        files,
-        injectImmediately,
-        world,
-      } as any);
-      onTiming?.({
-        pingMs,
-        pingStatus: 'failed_or_timeout',
-        executeScriptMs: Date.now() - executeScriptStartedAt,
-        injected: true,
-        totalMs: Date.now() - startedAt,
-      });
-    } catch (injectionError) {
-      const errorMessage =
-        injectionError instanceof Error ? injectionError.message : String(injectionError);
-      throw new Error(
-        `${ERROR_MESSAGES.TOOL_EXECUTION_FAILED}: Failed to inject content script in tab ${tabId}: ${errorMessage}`,
-      );
     }
   }
 

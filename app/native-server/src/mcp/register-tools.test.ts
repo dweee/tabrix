@@ -1577,6 +1577,83 @@ describe('handleToolCall execution wrapper', () => {
       expect(dynamicFlowSpy).toHaveBeenCalledTimes(1);
     });
 
+    it('blocks impact tools until auth resume gate is freshly verified', async () => {
+      markBridgeReady();
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'auth-resume-preflight-before',
+          contextChars: 140,
+          changedRegions: ['auth'],
+          extraPayload: {
+            authCollaboration: {
+              status: 'succeeded_candidate',
+              challengeType: 'otp',
+              userAction: {
+                required: false,
+                instruction: 'User action candidate complete; verify before resume.',
+              },
+              evidence: {
+                pageFreshness: 'single_snapshot',
+                operationBinding: 'ai_operable_tab',
+                semanticEventTypes: ['auth_succeeded_candidate'],
+                postconditionStatus: 'candidate_only',
+                resumeVerification: {
+                  status: 'fresh_read_required',
+                  nextTool: 'chrome_read_page',
+                  forceRefreshRequired: true,
+                  sameTabRequired: true,
+                  targetTabId: 1,
+                  postconditionRequired: true,
+                  requiredSignals: ['auth_prompt_absent', 'account_region_present'],
+                  claimBoundary: 'deterministic auth resume fixture only',
+                },
+                claimBoundary: 'candidate auth evidence only',
+              },
+            },
+          },
+        }),
+      );
+
+      const first = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        taskSessionId: 'auth-resume-preflight-task',
+        requestedLayer: 'L0+L1',
+      });
+      expect(first.isError).toBeFalsy();
+
+      const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
+      bridgeSpy.mockClear();
+      const blocked = await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_after_login',
+        taskSessionId: 'auth-resume-preflight-task',
+        userConfirmed: true,
+      });
+
+      expect(blocked.isError).toBe(true);
+      const payload = JSON.parse(String(blocked.content[0].text));
+      expect(payload).toMatchObject({
+        ok: false,
+        code: 'TABRIX_ACTION_COLLABORATION_REQUIRED',
+        actionPreflight: {
+          verdict: 'collaboration_required',
+          reason: 'auth_resume_verification_required',
+        },
+        runtimePolicyAudit: {
+          verdict: 'collaboration_required',
+          reason: 'auth_resume_verification_required',
+          authResumeGate: {
+            status: 'fresh_read_required',
+            targetTabId: 1,
+            blocksTaskResume: true,
+          },
+        },
+      });
+      expect(payload.message).toContain('chrome_read_page');
+      expect(payload.message).toContain('forceRefresh=true');
+      expect(bridgeSpy).toHaveBeenCalledTimes(1);
+    });
+
     it('keeps the full browserPageObject in the AI envelope for full-mode chrome_read_page', async () => {
       markBridgeReady();
       const ctx = sessionManager.getOrCreateExternalTaskContext('object-lifecycle-full-task');

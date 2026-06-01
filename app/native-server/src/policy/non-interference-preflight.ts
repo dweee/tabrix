@@ -3,7 +3,7 @@ import {
   type BrowserPolicyAuditEvent,
   type BrowserRuntimePolicy,
 } from '@tabrix/shared';
-import type { TaskSessionContext } from '../execution/task-session-context';
+import type { TaskAuthResumeGate, TaskSessionContext } from '../execution/task-session-context';
 
 export type NonInterferenceVerdictReason =
   | 'not_impact_tool'
@@ -12,6 +12,7 @@ export type NonInterferenceVerdictReason =
   | 'legacy_explicit_tab_allowed'
   | 'user_confirmed'
   | 'collaboration_requested'
+  | 'auth_resume_verification_required'
   | 'active_user_tab_unprotected'
   | 'non_run_owned_tab'
   | 'close_non_run_owned_tab';
@@ -27,6 +28,7 @@ export interface RuntimePolicyAudit {
   targetTabId: number | null;
   targetTabIds: number[];
   runOwnedTabIds: number[];
+  authResumeGate?: TaskAuthResumeGate;
   browserPolicyAudit: BrowserPolicyAuditEvent[];
 }
 
@@ -59,15 +61,32 @@ export function evaluateNonInterferencePreflight(input: {
     return allow(input, mode, 'not_impact_tool', targetTabId, targetTabIds, runOwnedTabIds);
   }
 
-  if (hasUserConfirmation(input.args)) {
-    return allow(input, mode, 'user_confirmed', targetTabId, targetTabIds, runOwnedTabIds);
-  }
-
   if (input.toolName === TOOL_NAMES.BROWSER.NAVIGATE) {
     const url = readString(input.args, 'url');
     if (targetTabId === null && url !== null) {
       return allow(input, mode, 'new_run_owned_tab', targetTabId, targetTabIds, runOwnedTabIds);
     }
+  }
+
+  const authResumeGate = input.taskContext?.peekLastAuthResumeGate() ?? null;
+  if (authResumeGate?.blocksTaskResume) {
+    return collaborationRequired(
+      input,
+      mode,
+      'auth_resume_verification_required',
+      buildAuthResumeGateMessage(authResumeGate),
+      targetTabId,
+      targetTabIds,
+      runOwnedTabIds,
+      authResumeGate,
+    );
+  }
+
+  if (hasUserConfirmation(input.args)) {
+    return allow(input, mode, 'user_confirmed', targetTabId, targetTabIds, runOwnedTabIds);
+  }
+
+  if (input.toolName === TOOL_NAMES.BROWSER.NAVIGATE) {
     if (targetTabId !== null && input.taskContext?.isRunOwnedTab(targetTabId)) {
       return allow(input, mode, 'run_owned_tab', targetTabId, targetTabIds, runOwnedTabIds);
     }
@@ -296,6 +315,7 @@ function collaborationRequired(
   targetTabId: number | null,
   targetTabIds: number[],
   runOwnedTabIds: number[],
+  authResumeGate?: TaskAuthResumeGate,
 ): NonInterferencePreflightVerdict {
   return {
     allowed: false,
@@ -309,6 +329,7 @@ function collaborationRequired(
       targetTabId,
       targetTabIds,
       runOwnedTabIds,
+      ...(authResumeGate ? { authResumeGate } : {}),
       browserPolicyAudit: buildBrowserPolicyAudit({
         reason,
         verdict: 'collaboration_required',
@@ -316,6 +337,11 @@ function collaborationRequired(
       }),
     },
   };
+}
+
+function buildAuthResumeGateMessage(gate: TaskAuthResumeGate): string {
+  const targetTabHint = Number.isInteger(gate.targetTabId) ? ` on tabId ${gate.targetTabId}` : '';
+  return `Blocked impact action because auth/user collaboration resume is not proven. Call chrome_read_page with forceRefresh=true${targetTabHint}, then verify the required postcondition before continuing the task.`;
 }
 
 function buildBrowserPolicyAudit(input: {

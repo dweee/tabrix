@@ -251,6 +251,28 @@ describe('TaskSessionContext — auth resume gate', () => {
     ctx.noteUrlChange('https://example.test/search', 'search_results');
     expect(ctx.peekLastAuthResumeGate()).toBeNull();
   });
+
+  it('does not block task resume when auth resume verification is explicitly not required', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    const gate = ctx.noteAuthResumeVerification({
+      status: 'not_required',
+      nextTool: 'chrome_read_page',
+      forceRefreshRequired: false,
+      sameTabRequired: true,
+      targetTabId: 42,
+      postconditionRequired: false,
+      requiredSignals: [],
+      claimBoundary: 'deterministic auth resume fixture only',
+    });
+
+    expect(gate).toMatchObject({
+      status: 'not_required',
+      sameTabRequired: true,
+      blocksTaskResume: false,
+      nextStepHint: 'resume_allowed',
+      reason: 'auth_resume_not_required',
+    });
+  });
 });
 
 describe('TaskSessionContext — URL / pageRole invalidation', () => {

@@ -1136,10 +1136,7 @@ function cloneTaskPageRuntimeFields(input: TaskPageRuntimeFields): TaskPageRunti
 
 function buildTaskAuthResumeGate(input: ReadPageAuthResumeVerification): TaskAuthResumeGate {
   const blocksTaskResume =
-    input.status !== 'not_required' ||
-    input.forceRefreshRequired ||
-    input.postconditionRequired ||
-    input.sameTabRequired;
+    input.status !== 'not_required' || input.forceRefreshRequired || input.postconditionRequired;
   return {
     status: input.status,
     nextTool: input.nextTool,
