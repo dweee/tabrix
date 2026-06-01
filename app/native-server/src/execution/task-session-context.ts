@@ -291,6 +291,10 @@ export interface TaskPageRuntimeFields {
   browserWorldActionableObjectChangeSummary?: string | null;
   browserWorldCurrentOperationConclusion?: string | null;
   browserWorldRoutingDecisionSummary?: string | null;
+  currentPageLoadReadinessStatus?: string | null;
+  currentPageStability?: string | null;
+  currentPageSnapshotUsableForBusinessAction?: boolean | null;
+  currentPageLoadReadinessNextStepHint?: string | null;
 }
 
 export interface NoteReadPageInput {
@@ -1339,6 +1343,23 @@ export class TaskSessionContext {
       });
     }
 
+    const pageStabilityBlock = buildPageStabilityResumeBlockReason({
+      runtimeFields: this.lastPageRuntimeFields,
+      projection: this.lastPageProjection,
+      tabId,
+    });
+    if (pageStabilityBlock) {
+      return withTaskResumeHandoffSummary({
+        status: 'postcondition_unknown_not_proven',
+        canResumeOriginalTask: false,
+        nextStep: 'force_fresh_read_same_tab',
+        tabId: pageStabilityBlock.tabId,
+        evidenceKinds: ['page_load_readiness', 'page_stability'],
+        reason: pageStabilityBlock.reason,
+        claimBoundary: pageStabilityBlock.claimBoundary,
+      });
+    }
+
     const postconditions = this.peekRegionStatePostconditionsForCloseout(
       tabId !== null ? [tabId] : null,
     );
@@ -2182,6 +2203,42 @@ function searchPostconditionResumeBlockReason(
   return null;
 }
 
+function buildPageStabilityResumeBlockReason(input: {
+  runtimeFields: TaskPageRuntimeFields | null;
+  projection: BrowserPageThingProjection | null;
+  tabId: number | null;
+}): { tabId: number | null; reason: string; claimBoundary: string } | null {
+  const runtimeFields = input.runtimeFields;
+  if (!runtimeFields) return null;
+  const projectionTabId = normalizePositiveTabId(input.projection?.tabId);
+  if (input.tabId !== null && projectionTabId !== null && input.tabId !== projectionTabId) {
+    return null;
+  }
+  const status = normalizeIdentifier(runtimeFields.currentPageLoadReadinessStatus);
+  const pageStability = normalizeIdentifier(runtimeFields.currentPageStability);
+  const explicitlyNotUsable = runtimeFields.currentPageSnapshotUsableForBusinessAction === false;
+  const notReadyStatus = status === 'loading_after_wait' || status === 'stale';
+  const unstablePage =
+    pageStability === 'loading' || pageStability === 'changing' || pageStability === 'stale';
+  if (!explicitlyNotUsable && !notReadyStatus && !unstablePage) return null;
+
+  const blockTabId = input.tabId ?? projectionTabId;
+  const nextStepHint =
+    normalizeIdentifier(runtimeFields.currentPageLoadReadinessNextStepHint) ??
+    'run_chrome_read_page_force_refresh';
+  return {
+    tabId: blockTabId,
+    reason: [
+      'page_load_readiness_not_ready',
+      `status:${status ?? 'unknown'}`,
+      `pageStability:${pageStability ?? 'unknown'}`,
+      `nextStepHint:${nextStepHint}`,
+    ].join(':'),
+    claimBoundary:
+      'The latest same-tab read_page snapshot was not proven stable enough for business action. Run a fresh same-tab read after the page settles before clicking, typing, or resuming task work.',
+  };
+}
+
 function passedPostconditionEvidenceKindsForResume(
   kind: TaskRegionStatePostconditionKind,
   userCollaborationResolved = false,
@@ -2405,6 +2462,10 @@ function cloneTaskPageRuntimeFields(input: TaskPageRuntimeFields): TaskPageRunti
     browserWorldActionableObjectChangeSummary: input.browserWorldActionableObjectChangeSummary,
     browserWorldCurrentOperationConclusion: input.browserWorldCurrentOperationConclusion,
     browserWorldRoutingDecisionSummary: input.browserWorldRoutingDecisionSummary,
+    currentPageLoadReadinessStatus: input.currentPageLoadReadinessStatus,
+    currentPageStability: input.currentPageStability,
+    currentPageSnapshotUsableForBusinessAction: input.currentPageSnapshotUsableForBusinessAction,
+    currentPageLoadReadinessNextStepHint: input.currentPageLoadReadinessNextStepHint,
   };
 }
 

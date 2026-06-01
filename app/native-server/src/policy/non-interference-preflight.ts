@@ -426,6 +426,13 @@ function shouldGateImpactActionForTaskResumeReadiness(
   if (toolName === TOOL_NAMES.BROWSER.CLOSE_TABS) return false;
   if (readiness.canResumeOriginalTask) return false;
   if (readiness.evidenceKinds.length === 0) return false;
+  if (readiness.evidenceKinds.includes('page_load_readiness')) {
+    return (
+      toolName === TOOL_NAMES.BROWSER.CLICK ||
+      toolName === TOOL_NAMES.BROWSER.FILL ||
+      toolName === TOOL_NAMES.BROWSER.KEYBOARD
+    );
+  }
   return (
     readiness.status === 'postcondition_unknown_not_proven' ||
     readiness.status === 'postcondition_failed_stop' ||

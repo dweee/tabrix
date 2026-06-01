@@ -5635,6 +5635,48 @@ describe('handleToolCall execution wrapper', () => {
       });
     });
 
+    it('carries read_page load-readiness into task resume before the next impact action', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
+      auto.noteRunOwnedTab(1);
+      Object.defineProperty(auto, 'readBudget', { value: 5, writable: false });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_unstable_before_action',
+          tabId: 1,
+          pageRegions: [contentListRegion('unstable_before_action')],
+          pageContext: pageContextWithLoadReadiness({
+            status: 'loading_after_wait',
+            pageStability: 'changing',
+            canUseSnapshotForBusinessAction: false,
+            nextStepHint: 'wait_for_page_stability',
+          }),
+        }),
+      );
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.taskResumeReadiness).toMatchObject({
+        status: 'postcondition_unknown_not_proven',
+        canResumeOriginalTask: false,
+        nextStep: 'force_fresh_read_same_tab',
+        tabId: 1,
+        evidenceKinds: ['page_load_readiness', 'page_stability'],
+        reason:
+          'page_load_readiness_not_ready:status:loading_after_wait:pageStability:changing:nextStepHint:wait_for_page_stability',
+        handoffSummary: {
+          status: 'needs_fresh_read',
+          nextAction: 'run_chrome_read_page_force_refresh',
+          canContinue: false,
+        },
+      });
+      expect(payload.aiContextEnvelope.taskResumeReadiness).toEqual(payload.taskResumeReadiness);
+    });
+
     it('does not pass search postconditions from source evidence observed before the action', async () => {
       markBridgeReady();
       const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');

@@ -1,9 +1,92 @@
 import { TOOL_NAMES } from '@tabrix/shared';
+import type { BrowserPageThingProjection } from '@tabrix/shared';
 import {
   DEFAULT_AUTH_USER_COLLABORATION_STALE_AFTER_MS,
   TaskSessionContext,
 } from '../execution/task-session-context';
+import type { TaskPageRuntimeFields } from '../execution/task-session-context';
 import { evaluateNonInterferencePreflight } from './non-interference-preflight';
+
+function makeProjection(
+  overrides: Partial<BrowserPageThingProjection> = {},
+): BrowserPageThingProjection {
+  return {
+    projectionId: 'projection_initial',
+    projectionKind: 'read_snapshot_projection',
+    projectionCreatedAt: '2026-05-18T00:00:00.000Z',
+    sourceObservedAt: '2026-05-18T00:00:00.000Z',
+    sourceLineage: 'dom',
+    regionEvidenceRefs: ['region:viewport'],
+    pageId: 'page_test',
+    tabId: 42,
+    ownerType: 'run_owned',
+    readiness: 'ready',
+    stability: 'stable',
+    contextVersion: 'projection_initial',
+    previousContextVersion: null,
+    changedByActionId: null,
+    changeCause: 'unknown',
+    activeRegion: 'viewport',
+    changedRegions: ['viewport'],
+    reusedRegions: [],
+    invalidatedRefs: [],
+    refreshedRefs: ['ref_1'],
+    chosenDataSource: 'dom_json',
+    sourceConfidence: 0.9,
+    sourceFreshness: 'fresh',
+    contextChars: 1000,
+    contextSavedChars: 0,
+    userActivityLevel: 'idle',
+    interferenceRisk: 'low',
+    ...overrides,
+  };
+}
+
+function makeRuntimeFields(overrides: Partial<TaskPageRuntimeFields> = {}): TaskPageRuntimeFields {
+  return {
+    currentWindowId: null,
+    currentWindowState: null,
+    currentWindowWidth: null,
+    currentWindowHeight: null,
+    currentWindowLeft: null,
+    currentWindowTop: null,
+    isCurrentTabActive: null,
+    isCurrentWindowFocused: null,
+    browserActiveTabId: null,
+    browserActiveTabIdKnown: false,
+    isReadTargetBrowserActiveTab: null,
+    currentTabUrl: null,
+    currentTabPendingUrl: null,
+    currentTabTitle: null,
+    currentTabStatus: null,
+    currentTabDiscarded: null,
+    currentTabAudible: null,
+    currentTabMuted: null,
+    currentTabPinned: null,
+    currentTabOpenerTabId: null,
+    currentTabOpenedBy: null,
+    currentTabOpenedBySource: null,
+    currentTabOpenedByConfidence: null,
+    currentTabOpenedByReason: null,
+    currentTabAiOperationState: null,
+    currentTabLastAiOperation: null,
+    currentTabLastAiOperationAtMs: null,
+    currentTabLastAiOperationConfidence: null,
+    currentTabLastAiOperationReason: null,
+    currentTabCanTabrixOperate: null,
+    currentTabOperabilityReason: null,
+    currentTabRuntimeStateSource: 'unknown',
+    browserWorldObjectChangeSummary: null,
+    browserWorldActionableObjectChangeSummary: null,
+    browserWorldCurrentOperationConclusion: null,
+    browserWorldRoutingDecisionSummary: null,
+    currentPageLoadReadinessStatus: null,
+    currentPageStability: null,
+    currentPageSnapshotUsableForBusinessAction: null,
+    currentPageLoadReadinessNextStepHint: null,
+    ...overrides,
+  };
+}
 
 describe('evaluateNonInterferencePreflight', () => {
   it('blocks current active-tab impact actions without explicit target', () => {
@@ -35,6 +118,59 @@ describe('evaluateNonInterferencePreflight', () => {
     expect(verdict.allowed).toBe(true);
     expect(verdict.audit.reason).toBe('run_owned_tab');
     expect(verdict.audit.runOwnedTabIds).toEqual([42]);
+  });
+
+  it('gates click/fill/keyboard when the latest same-tab page snapshot is not stable', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRunOwnedTab(42);
+    ctx.notePageProjectionAndBuildDelta(
+      makeProjection({ tabId: 42 }),
+      makeRuntimeFields({
+        currentPageLoadReadinessStatus: 'loading_after_wait',
+        currentPageStability: 'loading',
+        currentPageSnapshotUsableForBusinessAction: false,
+      }),
+    );
+
+    const verdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.CLICK,
+      args: { tabId: 42, ref: 'ref_search_submit' },
+      taskContext: ctx,
+    });
+
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.message).toContain('Run chrome_read_page with forceRefresh=true on tabId 42');
+    expect(verdict.audit).toMatchObject({
+      verdict: 'collaboration_required',
+      reason: 'task_resume_readiness_not_proven',
+      targetTabId: 42,
+      taskResumeReadiness: {
+        status: 'postcondition_unknown_not_proven',
+        nextStep: 'force_fresh_read_same_tab',
+        evidenceKinds: ['page_load_readiness', 'page_stability'],
+      },
+    });
+  });
+
+  it('does not use page-stability readiness to block new-tab navigation', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.notePageProjectionAndBuildDelta(
+      makeProjection({ tabId: 42 }),
+      makeRuntimeFields({
+        currentPageLoadReadinessStatus: 'stale',
+        currentPageStability: 'stale',
+        currentPageSnapshotUsableForBusinessAction: false,
+      }),
+    );
+
+    const verdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.NAVIGATE,
+      args: { url: 'https://example.com' },
+      taskContext: ctx,
+    });
+
+    expect(verdict.allowed).toBe(true);
+    expect(verdict.audit.reason).toBe('new_run_owned_tab');
   });
 
   it('blocks impact actions while auth resume still requires fresh verification', () => {

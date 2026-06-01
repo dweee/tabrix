@@ -1967,6 +1967,7 @@ function shouldInvalidateReadAfterWindowFocusChange(toolName: string, args: unkn
 
 function readTaskPageRuntimeFields(payload: Record<string, unknown>): TaskPageRuntimeFields {
   const ownershipRuntime = readObject(payload.ownershipRuntime);
+  const pageLoadReadiness = readPageLoadReadiness(payload.pageContext);
   const compactTabFacts = readObject(
     readObject(readObject(payload.browserPageObjectCompact)?.facts)?.tab,
   );
@@ -2110,6 +2111,11 @@ function readTaskPageRuntimeFields(payload: Record<string, unknown>): TaskPageRu
     browserWorldRoutingDecisionSummary:
       readNestedString('browserWorldRoutingDecisionSummary') ??
       readCompactString('browserWorldRoutingDecisionSummary'),
+    currentPageLoadReadinessStatus: pageLoadReadiness?.status ?? null,
+    currentPageStability: pageLoadReadiness?.pageStability ?? null,
+    currentPageSnapshotUsableForBusinessAction:
+      pageLoadReadiness?.canUseSnapshotForBusinessAction ?? null,
+    currentPageLoadReadinessNextStepHint: pageLoadReadiness?.nextStepHint ?? null,
   };
 }
 

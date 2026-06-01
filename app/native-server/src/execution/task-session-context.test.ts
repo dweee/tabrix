@@ -12,7 +12,7 @@ import {
   TaskSessionContext,
   resolveReadBudgetFromEnv,
 } from './task-session-context';
-import type { TaskVisibleRegionRowsData } from './task-session-context';
+import type { TaskPageRuntimeFields, TaskVisibleRegionRowsData } from './task-session-context';
 import type { ChooseContextDecisionSnapshot } from './skip-read-orchestrator';
 import type {
   BrowserPageThingProjection,
@@ -376,6 +376,53 @@ describe('TaskSessionContext — auth resume gate', () => {
       nextStep: 'force_fresh_read_same_tab',
       evidenceKinds: ['auth_resume_gate', 'tab_binding_mismatch'],
       reason: 'auth_resume_gate_target_tab_mismatch',
+    });
+  });
+
+  it('blocks original-task resume when the latest same-tab read_page snapshot is not stable', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.notePageProjectionAndBuildDelta(
+      makeProjection({ tabId: 42 }),
+      makeRuntimeFields({
+        currentPageLoadReadinessStatus: 'loading_after_wait',
+        currentPageStability: 'changing',
+        currentPageSnapshotUsableForBusinessAction: false,
+        currentPageLoadReadinessNextStepHint: 'wait_for_page_stability',
+      }),
+    );
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 42 })).toMatchObject({
+      status: 'postcondition_unknown_not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'force_fresh_read_same_tab',
+      tabId: 42,
+      evidenceKinds: ['page_load_readiness', 'page_stability'],
+      reason:
+        'page_load_readiness_not_ready:status:loading_after_wait:pageStability:changing:nextStepHint:wait_for_page_stability',
+      handoffSummary: {
+        status: 'needs_fresh_read',
+        canContinue: false,
+        nextAction: 'run_chrome_read_page_force_refresh',
+      },
+    });
+  });
+
+  it('does not let a stale snapshot from another tab block the requested tab', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.notePageProjectionAndBuildDelta(
+      makeProjection({ tabId: 42 }),
+      makeRuntimeFields({
+        currentPageLoadReadinessStatus: 'stale',
+        currentPageStability: 'stale',
+        currentPageSnapshotUsableForBusinessAction: false,
+      }),
+    );
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 7 })).toMatchObject({
+      status: 'not_proven',
+      canResumeOriginalTask: false,
+      reason: 'no_resume_or_business_postcondition_evidence',
+      evidenceKinds: [],
     });
   });
 });
@@ -899,6 +946,52 @@ function makeProjection(
     contextSavedChars: 0,
     userActivityLevel: 'idle',
     interferenceRisk: 'low',
+    ...overrides,
+  };
+}
+
+function makeRuntimeFields(overrides: Partial<TaskPageRuntimeFields> = {}): TaskPageRuntimeFields {
+  return {
+    currentWindowId: null,
+    currentWindowState: null,
+    currentWindowWidth: null,
+    currentWindowHeight: null,
+    currentWindowLeft: null,
+    currentWindowTop: null,
+    isCurrentTabActive: null,
+    isCurrentWindowFocused: null,
+    browserActiveTabId: null,
+    browserActiveTabIdKnown: false,
+    isReadTargetBrowserActiveTab: null,
+    currentTabUrl: null,
+    currentTabPendingUrl: null,
+    currentTabTitle: null,
+    currentTabStatus: null,
+    currentTabDiscarded: null,
+    currentTabAudible: null,
+    currentTabMuted: null,
+    currentTabPinned: null,
+    currentTabOpenerTabId: null,
+    currentTabOpenedBy: null,
+    currentTabOpenedBySource: null,
+    currentTabOpenedByConfidence: null,
+    currentTabOpenedByReason: null,
+    currentTabAiOperationState: null,
+    currentTabLastAiOperation: null,
+    currentTabLastAiOperationAtMs: null,
+    currentTabLastAiOperationConfidence: null,
+    currentTabLastAiOperationReason: null,
+    currentTabCanTabrixOperate: null,
+    currentTabOperabilityReason: null,
+    currentTabRuntimeStateSource: 'unknown',
+    browserWorldObjectChangeSummary: null,
+    browserWorldActionableObjectChangeSummary: null,
+    browserWorldCurrentOperationConclusion: null,
+    browserWorldRoutingDecisionSummary: null,
+    currentPageLoadReadinessStatus: null,
+    currentPageStability: null,
+    currentPageSnapshotUsableForBusinessAction: null,
+    currentPageLoadReadinessNextStepHint: null,
     ...overrides,
   };
 }
