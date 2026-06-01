@@ -459,6 +459,8 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       observedReadCount: 1,
       currentReadReliableRowCount: 6,
       currentReadTargetableRowCount: 6,
+      currentReadUniqueTargetRefCount: 6,
+      currentReadCanSupportDefaultTopNDelivery: false,
       currentReadNewUniqueRowCount: 6,
       duplicateReliableRowCount: 0,
       uniqueReliableRowCount: 6,
@@ -475,6 +477,7 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       missingTitleRowCountForDefaultTopN: 4,
       canSupportDefaultTopNDelivery: false,
       missingUniqueTargetRefCountForDefaultTopN: 4,
+      hasSingleReadDefaultTopNDeliveryEvidence: false,
       deliveryNextRequiredCheck: 'collect_more_rows_before_top_n_delivery',
       fieldCoverageStatus: 'insufficient_title_fields',
     });
@@ -485,6 +488,8 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       observedReadCount: 2,
       currentReadReliableRowCount: 6,
       currentReadTargetableRowCount: 6,
+      currentReadUniqueTargetRefCount: 6,
+      currentReadCanSupportDefaultTopNDelivery: false,
       currentReadNewUniqueRowCount: 4,
       duplicateReliableRowCount: 2,
       uniqueReliableRowCount: 10,
@@ -499,13 +504,35 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       missingRowCountForDefaultTopN: 0,
       missingSummarizableRowCountForDefaultTopN: 0,
       missingTitleRowCountForDefaultTopN: 0,
-      canSupportDefaultTopNDelivery: true,
+      canSupportDefaultTopNDelivery: false,
       missingUniqueTargetRefCountForDefaultTopN: 0,
-      deliveryNextRequiredCheck: 'top_n_delivery_ready',
+      hasSingleReadDefaultTopNDeliveryEvidence: false,
+      deliveryNextRequiredCheck: 'collect_stable_single_snapshot_before_top_n_delivery',
       fieldCoverageStatus: 'structured_summary_fields_ready',
       nextRequiredCheck: 'accumulated_rows_ready_for_top_n_summary',
       summaryNextRequiredCheck: 'top_n_summary_ready',
       summaryQualityNextRequiredCheck: 'structured_top_n_summary_ready',
+    });
+  });
+
+  it('marks delivery ready when one stable read exposes ten structured targetable rows', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+
+    const evidence = ctx.noteDomRegionRowsReadback(makeVisibleRegionRows(1, 10));
+
+    expect(evidence).toMatchObject({
+      status: 'ready_for_default_top_n',
+      observedReadCount: 1,
+      currentReadReliableRowCount: 10,
+      currentReadTargetableRowCount: 10,
+      currentReadUniqueTargetRefCount: 10,
+      currentReadCanSupportDefaultTopNDelivery: true,
+      canSatisfyDefaultTopN: true,
+      canSupportDefaultTopNFieldSummary: true,
+      uniqueTargetRefCount: 10,
+      canSupportDefaultTopNDelivery: true,
+      hasSingleReadDefaultTopNDeliveryEvidence: true,
+      deliveryNextRequiredCheck: 'top_n_delivery_ready',
     });
   });
 
@@ -523,6 +550,7 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       uniqueTitleRowCount: 10,
       uniqueSupportingTextRowCount: 0,
       uniqueMetadataRowCount: 0,
+      currentReadCanSupportDefaultTopNDelivery: false,
       canSatisfyDefaultTopN: true,
       canSupportDefaultTopNSummary: true,
       canSupportDefaultTopNFieldSummary: false,
@@ -548,6 +576,7 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       uniqueSummarizableRowCount: 0,
       uniqueTitleRowCount: 0,
       uniqueSupportingTextRowCount: 0,
+      currentReadCanSupportDefaultTopNDelivery: false,
       canSatisfyDefaultTopN: true,
       canSupportDefaultTopNSummary: false,
       canSupportDefaultTopNFieldSummary: false,
@@ -576,6 +605,8 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       uniqueTitleRowCount: 10,
       uniqueSupportingTextRowCount: 10,
       uniqueTargetRefCount: 1,
+      currentReadUniqueTargetRefCount: 1,
+      currentReadCanSupportDefaultTopNDelivery: false,
       canSupportDefaultTopNFieldSummary: true,
       canSupportDefaultTopNDelivery: false,
       missingUniqueTargetRefCountForDefaultTopN: 9,
@@ -621,15 +652,17 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       uniqueSummarizableRowCount: 10,
       uniqueTitleRowCount: 10,
       uniqueSupportingTextRowCount: 10,
+      currentReadCanSupportDefaultTopNDelivery: false,
       canSatisfyDefaultTopN: true,
       canSupportDefaultTopNSummary: true,
       canSupportDefaultTopNFieldSummary: true,
       missingRowCountForDefaultTopN: 0,
       missingSummarizableRowCountForDefaultTopN: 0,
       missingTitleRowCountForDefaultTopN: 0,
-      canSupportDefaultTopNDelivery: true,
+      canSupportDefaultTopNDelivery: false,
       missingUniqueTargetRefCountForDefaultTopN: 0,
-      deliveryNextRequiredCheck: 'top_n_delivery_ready',
+      hasSingleReadDefaultTopNDeliveryEvidence: false,
+      deliveryNextRequiredCheck: 'collect_stable_single_snapshot_before_top_n_delivery',
     });
     expect(ctx.peekDomRegionRowsReadbackAccumulationEvidence({ tabId: 8 })).toBeNull();
 
@@ -1060,6 +1093,7 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
         'dom_region_rows_readback',
         'top_n_field_coverage',
         'top_n_delivery_readiness',
+        'top_n_single_snapshot_delivery',
       ],
       reason: 'region_state_search_results_updated_passed:result_collection_changed_after_action',
       handoffSummary: {
@@ -1075,6 +1109,7 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
             'dom_region_rows_readback',
             'top_n_field_coverage',
             'top_n_delivery_readiness',
+            'top_n_single_snapshot_delivery',
           ],
         },
       },
@@ -1251,6 +1286,50 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
       evidenceKinds: ['region_state_postcondition', 'dom_region_rows_readback'],
       reason:
         'region_state_search_results_updated_not_proven:dom_region_rows_readback_not_enough_unique_target_refs_for_default_top_n_delivery',
+    });
+  });
+
+  it('blocks search-task resume when default top-N delivery is only proven by scattered multi-read rows', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_search_submit_scattered_rows',
+            kind: 'search_results_updated',
+            verdict: 'passed',
+            reason: 'result_collection_changed_after_action',
+            beforeSummary: ['content_list:loaded:before'],
+            afterSummary: ['content_list:loaded:after'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+    ctx.noteDomRegionRowsReadback(makeVisibleRegionRows(1, 6, { sourceTabId: 9 }));
+    ctx.noteDomRegionRowsReadback(makeVisibleRegionRows(20, 4, { sourceTabId: 9 }));
+
+    expect(ctx.peekDomRegionRowsReadbackAccumulationEvidence({ tabId: 9 })).toMatchObject({
+      uniqueTargetableRowCount: 10,
+      uniqueTitleRowCount: 10,
+      uniqueSupportingTextRowCount: 10,
+      uniqueTargetRefCount: 10,
+      canSatisfyDefaultTopN: true,
+      canSupportDefaultTopNFieldSummary: true,
+      canSupportDefaultTopNDelivery: false,
+      hasSingleReadDefaultTopNDeliveryEvidence: false,
+      deliveryNextRequiredCheck: 'collect_stable_single_snapshot_before_top_n_delivery',
+    });
+    expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_unknown_not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'verify_postcondition',
+      evidenceKinds: ['region_state_postcondition', 'dom_region_rows_readback'],
+      reason:
+        'region_state_search_results_updated_not_proven:dom_region_rows_readback_no_single_snapshot_default_top_n_delivery_proof',
     });
   });
 
