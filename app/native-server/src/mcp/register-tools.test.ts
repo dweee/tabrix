@@ -4018,6 +4018,91 @@ describe('handleToolCall execution wrapper', () => {
         } as never);
     }
 
+    function readPagePayloadWithRegions(input: {
+      projectionId: string;
+      tabId: number;
+      pageRegions: Array<Record<string, unknown>>;
+    }): string {
+      return JSON.stringify({
+        kind: 'page',
+        mode: 'compact',
+        page: {
+          url: 'https://example.test/search',
+          title: 'Search',
+          pageType: 'web_page',
+        },
+        summary: {
+          pageRole: 'search_results',
+          primaryRegion: 'results',
+        },
+        interactiveElements: [],
+        currentWindowId: 3,
+        isCurrentTabActive: true,
+        isCurrentWindowFocused: true,
+        pageRegions: input.pageRegions,
+        objectLifecycle: {
+          source: 'read_page_regions',
+          status: 'single_snapshot',
+          objectCount: 0,
+          changedObjectCount: 0,
+          items: [],
+          changes: [],
+          claimBoundary: 'test lifecycle',
+        },
+        pageProjection: {
+          projectionId: input.projectionId,
+          projectionKind: 'read_snapshot_projection',
+          pageId: `tab:${input.tabId}`,
+          tabId: input.tabId,
+          ownerType: 'run_owned',
+          projectionCreatedAt: '2026-05-18T00:00:00.000Z',
+          sourceObservedAt: '2026-05-18T00:00:00.000Z',
+          sourceLineage: 'dom',
+          regionEvidenceRefs: ['region:results'],
+          readiness: 'ready',
+          stability: 'stable',
+          contextVersion: input.projectionId,
+          previousContextVersion: null,
+          changedByActionId: null,
+          changeCause: 'unknown',
+          activeRegion: 'results',
+          changedRegions: ['results'],
+          reusedRegions: [],
+          invalidatedRefs: [],
+          refreshedRefs: ['ref_result_1', 'ref_result_2'],
+          chosenDataSource: 'dom_json',
+          sourceConfidence: 0.9,
+          sourceFreshness: 'fresh',
+          contextChars: 1200,
+          contextSavedChars: 0,
+          userActivityLevel: 'idle',
+          interferenceRisk: 'low',
+        },
+      });
+    }
+
+    function contentListRegion(refPrefix: string): Record<string, unknown> {
+      return {
+        regionId: 'region_results',
+        regionType: 'content',
+        state: `results_${refPrefix}`,
+        confidence: 0.86,
+        objects: [1, 2].map((index) => ({
+          objectId: `${refPrefix}_${index}`,
+          label: 'result item',
+          objectType: 'record',
+          targetRef: `ref_${refPrefix}_${index}`,
+          actionTypes: ['click'],
+          targetability: 'target_ref',
+          confidence: 0.82,
+          reason: 'test result row',
+        })),
+        candidateActionIds: [`ca_${refPrefix}_1`, `ca_${refPrefix}_2`],
+        targetability: 'target_ref',
+        claimBoundary: 'test content-list region',
+      };
+    }
+
     it('accumulates read budget across consecutive default-shape chrome_read_page calls on the same tab', async () => {
       markBridgeReady();
       // Pre-create the auto-key context with a tight budget so the
@@ -4440,6 +4525,86 @@ describe('handleToolCall execution wrapper', () => {
         requestedLayer: 'L0+L1',
       });
       expect(String(result.content[0].text)).toBe('after-click');
+      expect(auto.readPageCount).toBe(2);
+    });
+
+    it('fresh read after a search submit candidate carries region-state postcondition evidence', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
+      auto.noteRunOwnedTab(1);
+      Object.defineProperty(auto, 'readBudget', { value: 5, writable: false });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_before_search_submit',
+          tabId: 1,
+          pageRegions: [contentListRegion('before')],
+        }),
+      );
+      await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  observedOutcome: 'spa_partial_update',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_search_submit',
+        candidateAction: {
+          id: 'ca_search_submit',
+          actionType: 'click',
+          targetRef: 'ref_search_submit',
+          confidence: 0.91,
+          matchReason: 'search submit candidate',
+          locatorChain: [{ type: 'ref', value: 'ref_search_submit' }],
+          intent: 'search.submit',
+        },
+      });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_after_search_submit',
+          tabId: 1,
+          pageRegions: [contentListRegion('after')],
+        }),
+      );
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.regionStatePostconditions).toEqual([
+        {
+          actionKind: 'click',
+          result: expect.objectContaining({
+            actionId: 'ca_search_submit',
+            kind: 'search_results_updated',
+            verdict: 'passed',
+            reason: 'result_collection_changed_after_action',
+          }),
+        },
+      ]);
+      expect(payload.aiContextEnvelope.regionStatePostconditions).toEqual(
+        payload.regionStatePostconditions,
+      );
       expect(auto.readPageCount).toBe(2);
     });
   });

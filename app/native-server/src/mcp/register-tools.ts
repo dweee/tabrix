@@ -25,6 +25,7 @@ import {
 import { sessionManager } from '../execution/session-manager';
 import type {
   TaskAuthResumeGate,
+  TaskPageInteractionSnapshot,
   TaskPageRuntimeFields,
   TaskSessionContext,
   TaskVisibleRegionRowsData,
@@ -106,6 +107,11 @@ import {
   type StructuredReadGateResult,
 } from '../runtime/structured-read-gate';
 import {
+  inferRegionStatePostconditionKindForIntent,
+  verifyRegionStatePostcondition,
+  type RegionStatePostconditionResult,
+} from '../runtime/action-postcondition-verifier';
+import {
   produceToolCloseoutLifecycleEvidenceArtifact,
   produceToolFailureLifecycleEvidenceArtifact,
   produceUnifiedTaskCloseoutLifecycleEvidenceArtifact,
@@ -123,7 +129,9 @@ import type {
   BrowserSourceLineage,
   BrowserSourceTruthChain,
   BrowserTaskStateVerdict,
+  ActionKind,
   ReadPageAuthResumeVerification,
+  ReadPageCandidateActionIntent,
   ReadPageCompactSnapshot,
   ReadPageMode,
   ReadPageRequestedLayer,
@@ -982,11 +990,15 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       }
       const postProcessorRawResult = ensureStructuredLegacyActionResult(name, response.data);
       if (taskContext && shouldInvalidateReadAfterInteraction(name, args)) {
+        const candidateActionMetadata = readCandidateActionMetadata(args);
         taskContext.notePageInteraction({
           action: name,
           tabId: readPositiveInteger(args, 'tabId'),
           changeCause: inferPageInteractionChangeCause(name, postProcessorRawResult),
           targetRefs: readInteractionTargetRefs(args),
+          candidateActionId: candidateActionMetadata.candidateActionId,
+          candidateActionIntent: candidateActionMetadata.candidateActionIntent,
+          actionKind: inferActionKindForToolName(name),
         });
       }
       const postResult = runPostProcessor({
@@ -1823,6 +1835,14 @@ function inferPageInteractionChangeCause(
   return 'click';
 }
 
+function inferActionKindForToolName(toolName: string): ActionKind {
+  if (toolName === TOOL_NAMES.BROWSER.CLICK) return 'click';
+  if (toolName === TOOL_NAMES.BROWSER.FILL) return 'fill';
+  if (toolName === TOOL_NAMES.BROWSER.KEYBOARD) return 'keyboard';
+  if (toolName === TOOL_NAMES.BROWSER.NAVIGATE) return 'navigate';
+  return 'unknown';
+}
+
 function readInteractionTargetRefs(args: unknown): string[] {
   const input = readObject(args);
   if (!input) return [];
@@ -1833,10 +1853,28 @@ function readInteractionTargetRefs(args: unknown): string[] {
   return refs.filter((ref, index) => refs.indexOf(ref) === index).slice(0, 3);
 }
 
+function readCandidateActionMetadata(args: unknown): {
+  candidateActionId: string | null;
+  candidateActionIntent: ReadPageCandidateActionIntent | string | null;
+} {
+  const input = readObject(args);
+  const candidateAction = readObject(input?.candidateAction);
+  return {
+    candidateActionId: readSafeIdentifier(candidateAction?.id),
+    candidateActionIntent: readSafeIdentifier(candidateAction?.intent),
+  };
+}
+
 function readSafeTargetRef(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return /^[A-Za-z0-9:_-]{1,96}$/.test(trimmed) ? trimmed : null;
+}
+
+function readSafeIdentifier(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return /^[A-Za-z0-9:._-]{1,160}$/.test(trimmed) ? trimmed : null;
 }
 
 function shouldInvalidateReadAfterWindowFocusChange(toolName: string, args: unknown): boolean {
@@ -2159,6 +2197,18 @@ function attachAiFacingDeltaContext(
   const pendingInteraction = attachment.taskContext.consumePendingPageInteraction(
     projectionWithSourceTruth.tabId,
   );
+  const pageRegions = readPageRegions(payload.pageRegions);
+  const regionStatePostcondition = pendingInteraction
+    ? buildRegionStatePostconditionForPendingInteraction(pendingInteraction, pageRegions)
+    : null;
+  const regionStatePostconditions = regionStatePostcondition
+    ? [
+        {
+          actionKind: pendingInteraction?.actionKind ?? 'unknown',
+          result: regionStatePostcondition,
+        },
+      ]
+    : null;
   if (pendingInteraction) {
     projectionWithSourceTruth = {
       ...projectionWithSourceTruth,
@@ -2232,7 +2282,7 @@ function attachAiFacingDeltaContext(
     : null;
   const browserPageObject = objectLifecycle
     ? buildReadPageBrowserPageObjectView({
-        pageRegions: readPageRegions(payload.pageRegions),
+        pageRegions,
         pageOperationMap: readPageOperationMap(payload.pageOperationMap),
         objectLifecycle,
         previousPageProjection,
@@ -2265,6 +2315,9 @@ function attachAiFacingDeltaContext(
   payload.structuredReadGate = structuredReadGate;
   payload.sourceRouteHonesty = aiFacingSourceRouteHonesty;
   payload.apiCdpProofBoundary = apiCdpProofBoundary;
+  if (regionStatePostconditions) {
+    payload.regionStatePostconditions = regionStatePostconditions;
+  }
   if (authResumeGate) {
     payload.authResumeGate = authResumeGate;
   }
@@ -2279,6 +2332,7 @@ function attachAiFacingDeltaContext(
     dataSourceDecision,
     sourceRouteHonesty: aiFacingSourceRouteHonesty,
     apiCdpProofBoundary,
+    ...(regionStatePostconditions ? { regionStatePostconditions } : {}),
     ...(authResumeGate ? { authResumeGate } : {}),
     structuredReadGate,
     ...(objectLifecycle ? { objectLifecycle } : {}),
@@ -2295,6 +2349,10 @@ function attachAiFacingDeltaContext(
     deltaContext,
     lifecycleTimeline: attachment.taskContext.getLifecycleTimeline(),
   };
+  attachment.taskContext.notePageRegionsForPostcondition({
+    tabId: projectionWithSourceTruth.tabId,
+    pageRegions,
+  });
 
   return {
     ...result,
@@ -3007,6 +3065,49 @@ function readObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function buildRegionStatePostconditionForPendingInteraction(
+  pendingInteraction: TaskPageInteractionSnapshot,
+  afterRegions: readonly ReadPageRegion[],
+): RegionStatePostconditionResult | null {
+  const kind = inferRegionStatePostconditionKindForIntent({
+    intent: pendingInteraction.candidateActionIntent,
+    actionKind: pendingInteraction.actionKind,
+  });
+  if (!kind) return null;
+  const actionId = pendingInteraction.candidateActionId ?? pendingInteraction.action;
+  if (pendingInteraction.beforePageRegions.length === 0 || afterRegions.length === 0) {
+    const producedAtMs = Date.now();
+    return {
+      actionId,
+      kind,
+      verdict: 'unknown',
+      reason:
+        pendingInteraction.beforePageRegions.length === 0
+          ? 'before_region_evidence_missing'
+          : 'after_region_evidence_missing',
+      beforeSummary: summarizeRegionsForPostcondition(pendingInteraction.beforePageRegions),
+      afterSummary: summarizeRegionsForPostcondition(afterRegions),
+      producedAtMs,
+      claimBoundary:
+        'region-state postconditions require before/after page-region evidence; missing evidence is not business success',
+    };
+  }
+  return verifyRegionStatePostcondition({
+    kind,
+    actionId,
+    beforeRegions: pendingInteraction.beforePageRegions,
+    afterRegions,
+  });
+}
+
+function summarizeRegionsForPostcondition(regions: readonly ReadPageRegion[]): string[] {
+  return regions.slice(0, 8).map((region) => {
+    const state =
+      typeof region.state === 'string' && region.state.length > 0 ? region.state : 'unknown';
+    return `${region.regionId}:${region.regionType}:${state}:${region.objects.length}`;
+  });
 }
 
 function readPageRegions(value: unknown): ReadPageRegion[] {

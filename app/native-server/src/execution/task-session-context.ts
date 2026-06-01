@@ -27,6 +27,7 @@
  */
 
 import {
+  type ActionKind,
   type BrowserSourceTruthChain,
   buildBrowserPageProjectionDelta,
   compareReadPageObjectLifecycleSummaries,
@@ -35,8 +36,10 @@ import {
   type BrowserPageProjectionDeltaEvidenceBoundary,
   type BrowserPageProjectionDelta,
   type BrowserPageThingProjection,
+  type ReadPageCandidateActionIntent,
   type ReadPageAuthResumeVerification,
   type ReadPageObjectLifecycleSummary,
+  type ReadPageRegion,
   type ReadPageRequestedLayer,
 } from '@tabrix/shared';
 import type {
@@ -228,6 +231,9 @@ export interface NotePageInteractionInput {
   tabId?: number | null;
   changeCause?: BrowserPageChangeCause | null;
   targetRefs?: ReadonlyArray<string> | null;
+  candidateActionId?: string | null;
+  candidateActionIntent?: ReadPageCandidateActionIntent | string | null;
+  actionKind?: ActionKind | null;
 }
 
 export interface TaskPageInteractionSnapshot {
@@ -235,6 +241,15 @@ export interface TaskPageInteractionSnapshot {
   tabId: number | null;
   changeCause: BrowserPageChangeCause;
   targetRefs: string[];
+  candidateActionId: string | null;
+  candidateActionIntent: ReadPageCandidateActionIntent | string | null;
+  actionKind: ActionKind | null;
+  beforePageRegions: ReadPageRegion[];
+}
+
+interface TaskPageRegionSnapshot {
+  tabId: number | null;
+  pageRegions: ReadPageRegion[];
 }
 
 export interface TaskAuthResumeGate {
@@ -462,6 +477,7 @@ export class TaskSessionContext {
   private lastSourceRouteHonesty: TaskSourceRouteHonestySnapshot | null = null;
   private lastObjectLifecycle: ReadPageObjectLifecycleSummary | null = null;
   private lastPageRuntimeFields: TaskPageRuntimeFields | null = null;
+  private lastPageRegionSnapshot: TaskPageRegionSnapshot | null = null;
   private lastAuthResumeGate: TaskAuthResumeGate | null = null;
   private pendingPageInteraction: TaskPageInteractionSnapshot | null = null;
   private pageProjectionDeltaCount = 0;
@@ -724,6 +740,20 @@ export class TaskSessionContext {
     return this.lastObjectLifecycle ? cloneObjectLifecycleSummary(this.lastObjectLifecycle) : null;
   }
 
+  public notePageRegionsForPostcondition(input: {
+    tabId?: number | null;
+    pageRegions?: ReadonlyArray<ReadPageRegion> | null;
+  }): void {
+    const tabId =
+      typeof input.tabId === 'number' && Number.isInteger(input.tabId) && input.tabId > 0
+        ? input.tabId
+        : null;
+    this.lastPageRegionSnapshot = {
+      tabId,
+      pageRegions: cloneReadPageRegions(input.pageRegions ?? []),
+    };
+  }
+
   public buildCachedPageProjectionDelta(): BrowserPageProjectionDelta | null {
     if (!this.lastPageProjection) return null;
     const reusedRegions = this.lastPageProjection.activeRegion
@@ -806,6 +836,10 @@ export class TaskSessionContext {
       tabId,
       changeCause: input.changeCause ?? 'unknown',
       targetRefs: normalizeTargetRefs(input.targetRefs),
+      candidateActionId: normalizeIdentifier(input.candidateActionId),
+      candidateActionIntent: normalizeIdentifier(input.candidateActionIntent),
+      actionKind: normalizeActionKind(input.actionKind),
+      beforePageRegions: this.buildBeforePageRegionsForInteraction(tabId),
     };
     this.recordLifecycleEvent({
       kind: 'refs_invalidated',
@@ -828,7 +862,11 @@ export class TaskSessionContext {
       return null;
     }
     this.pendingPageInteraction = null;
-    return { ...pending };
+    return {
+      ...pending,
+      targetRefs: [...pending.targetRefs],
+      beforePageRegions: cloneReadPageRegions(pending.beforePageRegions),
+    };
   }
 
   public noteCleanup(input: { action: string; targetIds?: ReadonlyArray<number> | null }): void {
@@ -875,6 +913,18 @@ export class TaskSessionContext {
 
   public getRunOwnedTabIds(): readonly number[] {
     return Array.from(this.runOwnedTabIds).sort((left, right) => left - right);
+  }
+
+  private buildBeforePageRegionsForInteraction(tabId: number | null): ReadPageRegion[] {
+    if (!this.lastPageRegionSnapshot) return [];
+    if (
+      this.lastPageRegionSnapshot.tabId !== null &&
+      tabId !== null &&
+      this.lastPageRegionSnapshot.tabId !== tabId
+    ) {
+      return [];
+    }
+    return cloneReadPageRegions(this.lastPageRegionSnapshot.pageRegions);
   }
 
   private recordProjectionLifecycleEvents(
@@ -1070,6 +1120,25 @@ function normalizeTargetRefs(values: ReadonlyArray<string> | null | undefined): 
   return result;
 }
 
+function normalizeIdentifier(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return /^[A-Za-z0-9:._-]{1,160}$/.test(trimmed) ? trimmed : null;
+}
+
+function normalizeActionKind(value: unknown): ActionKind | null {
+  return value === 'click' ||
+    value === 'fill' ||
+    value === 'submit' ||
+    value === 'navigate' ||
+    value === 'read' ||
+    value === 'close' ||
+    value === 'keyboard' ||
+    value === 'unknown'
+    ? value
+    : null;
+}
+
 function cloneLiveObservedApiData(input: LiveObservedApiData): LiveObservedApiData {
   return {
     ...input,
@@ -1091,6 +1160,33 @@ function cloneVisibleRegionRowsData(input: TaskVisibleRegionRowsData): TaskVisib
       ? { ...input.rejectedRegionReasonDistribution }
       : undefined,
   };
+}
+
+function cloneReadPageRegions(input: ReadonlyArray<ReadPageRegion>): ReadPageRegion[] {
+  return input.map((region) => ({
+    ...region,
+    candidateActionIds: [...region.candidateActionIds],
+    objects: region.objects.map((object) => ({
+      ...object,
+      actionTypes: [...object.actionTypes],
+      locatorChain: object.locatorChain?.map((locator) => ({ ...locator })),
+      primaryAction: object.primaryAction
+        ? {
+            ...object.primaryAction,
+            locatorChain: object.primaryAction.locatorChain.map((locator) => ({ ...locator })),
+            toolArgs: {
+              ...object.primaryAction.toolArgs,
+              candidateAction: {
+                ...object.primaryAction.toolArgs.candidateAction,
+                locatorChain: object.primaryAction.toolArgs.candidateAction.locatorChain.map(
+                  (locator) => ({ ...locator }),
+                ),
+              },
+            },
+          }
+        : undefined,
+    })),
+  }));
 }
 
 function cloneTaskPageRuntimeFields(input: TaskPageRuntimeFields): TaskPageRuntimeFields {

@@ -12,7 +12,11 @@ import {
   resolveReadBudgetFromEnv,
 } from './task-session-context';
 import type { ChooseContextDecisionSnapshot } from './skip-read-orchestrator';
-import type { BrowserPageThingProjection, ReadPageObjectLifecycleSummary } from '@tabrix/shared';
+import type {
+  BrowserPageThingProjection,
+  ReadPageObjectLifecycleSummary,
+  ReadPageRegion,
+} from '@tabrix/shared';
 
 describe('resolveReadBudgetFromEnv', () => {
   it('returns the default when the env key is unset', () => {
@@ -577,12 +581,21 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
 
   it('carries pending interaction metadata once for the matching tab', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
+    const beforeRegion = makeRegion('region_results_before', 'content_list', 'loaded');
+    ctx.notePageRegionsForPostcondition({
+      tabId: 9,
+      pageRegions: [beforeRegion],
+    });
     ctx.notePageInteraction({
       action: 'chrome_click_element',
       tabId: 9,
       changeCause: 'click',
       targetRefs: ['ref_menu', 'button.primary', 'ref_menu', 'bad ref with spaces'],
+      candidateActionId: 'ca_search_submit',
+      candidateActionIntent: 'search.submit',
+      actionKind: 'click',
     });
+    beforeRegion.state = 'mutated_by_caller';
 
     expect(ctx.consumePendingPageInteraction(8)).toBeNull();
     expect(ctx.consumePendingPageInteraction(9)).toEqual({
@@ -590,8 +603,34 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
       tabId: 9,
       changeCause: 'click',
       targetRefs: ['ref_menu'],
+      candidateActionId: 'ca_search_submit',
+      candidateActionIntent: 'search.submit',
+      actionKind: 'click',
+      beforePageRegions: [makeRegion('region_results_before', 'content_list', 'loaded')],
     });
     expect(ctx.consumePendingPageInteraction(9)).toBeNull();
+  });
+
+  it('does not attach before-page regions from a different tab to a pending interaction', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.notePageRegionsForPostcondition({
+      tabId: 7,
+      pageRegions: [makeRegion('region_other_tab', 'content_list', 'loaded')],
+    });
+    ctx.notePageInteraction({
+      action: 'chrome_click_element',
+      tabId: 9,
+      candidateActionId: 'ca_open_detail',
+      candidateActionIntent: 'content.open_detail',
+      actionKind: 'click',
+    });
+
+    expect(ctx.consumePendingPageInteraction(9)).toMatchObject({
+      candidateActionId: 'ca_open_detail',
+      candidateActionIntent: 'content.open_detail',
+      actionKind: 'click',
+      beforePageRegions: [],
+    });
   });
 
   it('compares read_page object lifecycle snapshots and keeps the stored copy immutable', () => {
@@ -645,6 +684,23 @@ function makeObjectLifecycle(
     ],
     changes: [],
     claimBoundary: 'single snapshot only',
+  };
+}
+
+function makeRegion(
+  regionId: string,
+  regionType: ReadPageRegion['regionType'],
+  state: string,
+): ReadPageRegion {
+  return {
+    regionId,
+    regionType,
+    state,
+    confidence: 0.85,
+    objects: [],
+    candidateActionIds: [],
+    targetability: 'not_clickable',
+    claimBoundary: 'test region',
   };
 }
 
