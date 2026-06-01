@@ -136,81 +136,6 @@
               <p class="connected-clients-label">{{ getMessage('popupNoActiveClients') }}</p>
             </div>
 
-            <div class="browser-world-section">
-              <div class="browser-world-header">
-                <div class="browser-world-heading">
-                  <p class="browser-world-label">BrowserWorld</p>
-                  <p class="browser-world-summary">
-                    {{
-                      browserWorldOverview?.summaryText ||
-                      (browserWorldLoading ? '正在读取浏览器状态...' : '等待浏览器状态')
-                    }}
-                  </p>
-                </div>
-                <button
-                  class="refresh-status-button"
-                  @click="refreshBrowserWorldOverview"
-                  title="刷新浏览器状态"
-                >
-                  <RefreshIcon className="icon-small" />
-                </button>
-              </div>
-              <div v-if="browserWorldError" class="browser-world-error">
-                {{ browserWorldError }}
-              </div>
-              <template v-else-if="browserWorldOverview">
-                <div class="browser-world-metrics">
-                  <span>{{ browserWorldOverview.windowCount }} 窗口</span>
-                  <span>{{ browserWorldOverview.tabCount }} 标签</span>
-                  <span>活动页 {{ browserWorldOverview.activeTabId ?? '未知' }}</span>
-                  <span>{{ browserWorldOverview.baselineStatus }}</span>
-                </div>
-                <div
-                  v-if="browserWorldOverview.recentActivities.length > 0"
-                  class="browser-world-activities"
-                >
-                  <div
-                    v-for="activity in browserWorldOverview.recentActivities"
-                    :key="`${activity.kind}-${activity.occurredAtMs ?? 0}`"
-                    class="browser-world-activity"
-                  >
-                    <span class="browser-world-activity-label">{{ activity.label }}</span>
-                    <span class="browser-world-activity-title" :title="activity.title">{{
-                      activity.title
-                    }}</span>
-                    <span v-if="activity.displayUrl" class="browser-world-url">{{
-                      activity.displayUrl
-                    }}</span>
-                  </div>
-                </div>
-                <div v-if="browserWorldOverview.visibleTabs.length > 0" class="browser-world-tabs">
-                  <div
-                    v-for="tab in browserWorldOverview.visibleTabs"
-                    :key="tab.tabId"
-                    :class="['browser-world-tab', `browser-world-tab-${tab.tone}`]"
-                  >
-                    <div class="browser-world-tab-main">
-                      <span class="browser-world-tab-title" :title="tab.title">{{
-                        tab.title
-                      }}</span>
-                      <span v-if="tab.active" class="browser-world-badge">当前</span>
-                      <span class="browser-world-badge muted">{{ tab.ownerLabel }}</span>
-                      <span class="browser-world-badge muted">{{ tab.safetyLabel }}</span>
-                    </div>
-                    <div v-if="tab.displayUrl" class="browser-world-url">
-                      {{ tab.displayUrl }}
-                    </div>
-                  </div>
-                </div>
-                <div v-if="browserWorldOverview.omittedTabCount > 0" class="browser-world-more">
-                  还有 {{ browserWorldOverview.omittedTabCount }} 个标签未展开
-                </div>
-                <div class="browser-world-boundary">
-                  这里只证明“浏览器窗口和标签状态”，不证明网页内容理解、登录状态或任务完成。
-                </div>
-              </template>
-            </div>
-
             <div v-if="showMcpConfig" class="mcp-config-section">
               <div class="mcp-config-header">
                 <p class="mcp-config-label">{{ getMessage('popupMcpConfigLabel') }}</p>
@@ -498,7 +423,6 @@ import {
   summarizePopupConnectedClients,
   type PopupConnectedClient,
 } from '@/common/popup-connected-clients';
-import type { PopupBrowserWorldOverview } from '@/common/popup-browser-world-overview';
 import { createDisconnectedPopupSnapshot } from '@/common/popup-connection-state';
 import { resolvePopupPortUpdate } from '@/common/popup-port-input';
 import { shouldApplyPopupServerStatusMessage } from '@/common/popup-server-status-message';
@@ -585,17 +509,6 @@ const connectedClients = ref<PopupConnectedClient[]>([]);
 const connectedClientsSummary = computed(() =>
   summarizePopupConnectedClients(connectedClients.value),
 );
-const browserWorldOverview = ref<PopupBrowserWorldOverview | null>(null);
-const browserWorldLoading = ref(false);
-const browserWorldError = ref('');
-let browserWorldRefreshTimer: ReturnType<typeof setInterval> | null = null;
-let browserWorldRefreshInFlight = false;
-
-interface PopupBrowserWorldResponse {
-  success?: boolean;
-  overview?: PopupBrowserWorldOverview;
-  error?: string;
-}
 
 function formatClientOriginLabel(client: PopupConnectedClient): string {
   const origin = describePopupClientOrigin(client);
@@ -712,35 +625,6 @@ async function fetchConnectedClients(): Promise<void> {
     connectedClients.value = normalizePopupConnectedClients(json?.data?.transports?.clients);
   } catch {
     connectedClients.value = [];
-  }
-}
-
-async function refreshBrowserWorldOverview(): Promise<void> {
-  if (browserWorldRefreshInFlight) return;
-  browserWorldRefreshInFlight = true;
-  browserWorldLoading.value = true;
-  try {
-    const response = await sendRuntimeMessageWithNoSwRetry<PopupBrowserWorldResponse>(
-      {
-        type: BACKGROUND_MESSAGE_TYPES.GET_BROWSER_WORLD_OVERVIEW,
-      },
-      2,
-      120,
-    );
-    if (response?.success && response.overview) {
-      browserWorldOverview.value = response.overview;
-      browserWorldError.value = '';
-    } else {
-      browserWorldError.value = response?.error || '暂时读不到浏览器状态';
-    }
-  } catch (error) {
-    if (!isNoServiceWorkerError(error)) {
-      console.error('Failed to refresh BrowserWorld overview:', error);
-    }
-    browserWorldError.value = '暂时读不到浏览器状态';
-  } finally {
-    browserWorldLoading.value = false;
-    browserWorldRefreshInFlight = false;
   }
 }
 
@@ -1299,7 +1183,7 @@ const refreshServerStatus = async () => {
 };
 
 const refreshOverview = async () => {
-  await Promise.all([refreshServerStatus(), refreshBrowserWorldOverview()]);
+  await refreshServerStatus();
   if (activeConfigTab.value === 'remote') {
     await fetchTokenInfo({ autoCreateWhenMissing: true });
   }
@@ -1542,11 +1426,7 @@ onMounted(async () => {
     await loadPortPreference();
     await checkNativeConnection();
     await checkServerStatus();
-    await refreshBrowserWorldOverview();
     setupServerStatusListener();
-    browserWorldRefreshTimer = setInterval(() => {
-      void refreshBrowserWorldOverview();
-    }, 2000);
 
     // Popup defaults to a read-only status view.
     // Only enable auto-connect when explicitly requested via `?autoconnect=1`.
@@ -1565,10 +1445,6 @@ onUnmounted(() => {
     const msgFn = (window as any).__tabrix_popup_onMessage;
     if (msgFn && chrome?.runtime?.onMessage?.removeListener) {
       chrome.runtime.onMessage.removeListener(msgFn);
-    }
-    if (browserWorldRefreshTimer) {
-      clearInterval(browserWorldRefreshTimer);
-      browserWorldRefreshTimer = null;
     }
   } catch {}
 });
@@ -2647,167 +2523,6 @@ onUnmounted(() => {
 .client-disconnect-btn:hover {
   background: #fef2f2;
   border-color: #fca5a5;
-}
-
-.browser-world-section {
-  border-top: 1px solid #f1f5f9;
-  padding-top: 8px;
-}
-
-.browser-world-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 7px;
-}
-
-.browser-world-heading {
-  min-width: 0;
-}
-
-.browser-world-label {
-  margin: 0 0 2px;
-  font-size: 12px;
-  font-weight: 700;
-  color: #334155;
-}
-
-.browser-world-summary {
-  margin: 0;
-  color: #64748b;
-  font-size: 11px;
-  line-height: 1.35;
-}
-
-.browser-world-error {
-  padding: 7px 8px;
-  border-radius: 7px;
-  background: #fef2f2;
-  color: #b91c1c;
-  font-size: 12px;
-}
-
-.browser-world-metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 4px;
-  margin-bottom: 6px;
-}
-
-.browser-world-metrics span {
-  min-width: 0;
-  padding: 5px 6px;
-  border-radius: 6px;
-  background: #f8fafc;
-  color: #475569;
-  font-size: 11px;
-  font-weight: 650;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.browser-world-activities,
-.browser-world-tabs {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.browser-world-activities {
-  margin-bottom: 6px;
-}
-
-.browser-world-activity,
-.browser-world-tab {
-  padding: 6px 8px;
-  border-radius: 7px;
-  background: #f8fafc;
-  border: 1px solid #eef2f7;
-}
-
-.browser-world-activity {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 2px 6px;
-  align-items: center;
-}
-
-.browser-world-activity-label {
-  color: #2563eb;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.browser-world-activity-title,
-.browser-world-tab-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #1e293b;
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.browser-world-activity .browser-world-url {
-  grid-column: 2;
-}
-
-.browser-world-tab-active {
-  border-color: #bfdbfe;
-  background: #eff6ff;
-}
-
-.browser-world-tab-ai {
-  border-color: #ddd6fe;
-  background: #f5f3ff;
-}
-
-.browser-world-tab-protected {
-  border-color: #e2e8f0;
-  background: #f8fafc;
-}
-
-.browser-world-tab-main {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-}
-
-.browser-world-badge {
-  flex-shrink: 0;
-  padding: 1px 5px;
-  border-radius: 999px;
-  background: #dbeafe;
-  color: #1d4ed8;
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.browser-world-badge.muted {
-  background: #e2e8f0;
-  color: #475569;
-}
-
-.browser-world-url {
-  min-width: 0;
-  color: #94a3b8;
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.browser-world-more,
-.browser-world-boundary {
-  margin-top: 5px;
-  color: #94a3b8;
-  font-size: 11px;
-  line-height: 1.35;
 }
 
 .mcp-config-section {
@@ -3902,16 +3617,12 @@ onUnmounted(() => {
 
 .popup-container[data-agent-theme='dark-console'] .status-updated,
 .popup-container[data-agent-theme='dark-console'] .connected-clients-label,
-.popup-container[data-agent-theme='dark-console'] .browser-world-label,
 .popup-container[data-agent-theme='dark-console'] .mcp-config-label,
 .popup-container[data-agent-theme='dark-console'] .port-label {
   color: #9ec3e7;
 }
 
 .popup-container[data-agent-theme='dark-console'] .connected-clients-empty .connected-clients-label,
-.popup-container[data-agent-theme='dark-console'] .browser-world-summary,
-.popup-container[data-agent-theme='dark-console'] .browser-world-boundary,
-.popup-container[data-agent-theme='dark-console'] .browser-world-more,
 .popup-container[data-agent-theme='dark-console'] .entry-desc,
 .popup-container[data-agent-theme='dark-console'] .remote-toggle-desc {
   color: #9ab8d8;
@@ -3937,36 +3648,8 @@ onUnmounted(() => {
 }
 
 .popup-container[data-agent-theme='dark-console'] .connected-clients-section,
-.popup-container[data-agent-theme='dark-console'] .browser-world-section,
 .popup-container[data-agent-theme='dark-console'] .mcp-config-section {
   border-top-color: rgba(56, 189, 248, 0.2);
-}
-
-.popup-container[data-agent-theme='dark-console'] .browser-world-metrics span,
-.popup-container[data-agent-theme='dark-console'] .browser-world-activity,
-.popup-container[data-agent-theme='dark-console'] .browser-world-tab {
-  background: rgba(8, 25, 46, 0.72);
-  border-color: rgba(56, 189, 248, 0.18);
-  color: #dbeafe;
-}
-
-.popup-container[data-agent-theme='dark-console'] .browser-world-tab-active {
-  border-color: rgba(56, 189, 248, 0.45);
-  background: rgba(12, 48, 82, 0.78);
-}
-
-.popup-container[data-agent-theme='dark-console'] .browser-world-tab-ai {
-  border-color: rgba(167, 139, 250, 0.44);
-  background: rgba(42, 31, 80, 0.72);
-}
-
-.popup-container[data-agent-theme='dark-console'] .browser-world-activity-title,
-.popup-container[data-agent-theme='dark-console'] .browser-world-tab-title {
-  color: #e0f2fe;
-}
-
-.popup-container[data-agent-theme='dark-console'] .browser-world-url {
-  color: #7dd3fc;
 }
 
 .popup-container[data-agent-theme='dark-console'] .mcp-config-tabs {

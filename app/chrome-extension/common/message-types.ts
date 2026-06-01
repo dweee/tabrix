@@ -14,7 +14,6 @@ export enum MessageTarget {
 export const BACKGROUND_MESSAGE_TYPES = {
   GET_SERVER_STATUS: 'get_server_status',
   REFRESH_SERVER_STATUS: 'refresh_server_status',
-  GET_BROWSER_WORLD_OVERVIEW: 'get_browser_world_overview',
   SERVER_STATUS_CHANGED: 'server_status_changed',
 } as const;
 
