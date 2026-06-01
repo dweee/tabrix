@@ -72,6 +72,17 @@ describe('get_windows_and_tabs state inventory', () => {
     expect(result.isError).toBe(false);
     expect(payload.windowCount).toBe(2);
     expect(payload.tabCount).toBe(2);
+    expect(payload.baselineReadiness).toMatchObject({
+      ready: true,
+      status: 'resynced',
+      continuity: 'resynced_current_state_history_not_proven',
+      resyncAttempted: true,
+      resyncSucceeded: true,
+    });
+    expect(payload.compactSummary.baselineReadiness).toMatchObject({
+      ready: true,
+      status: 'resynced',
+    });
 
     expect(payload.compactSummary.activeObject).toMatchObject({
       windowId: 10,
@@ -132,6 +143,8 @@ describe('get_windows_and_tabs state inventory', () => {
       lastAiOperationReason: null,
       canTabrixOperate: true,
       operabilityReason: 'regular_web_page',
+      cleanupEligibility: 'not_eligible',
+      cleanupEligibilityReason: 'user_or_page_owned_tab_protected_from_cleanup',
     });
     expect(payload.compactSummary.routingDecisionSummary).toBe(
       'routing=target_selection_required, blockingReason=no_ai_operated_tab_observed, next=read_or_select_intended_target',
@@ -142,6 +155,8 @@ describe('get_windows_and_tabs state inventory', () => {
       tabId: null,
       windowId: null,
       operabilityReason: 'tab_not_observed',
+      cleanupEligibility: 'unknown',
+      cleanupEligibilityReason: 'tab_not_observed',
     });
     expect(payload.compactSummary.operationRouting).toMatchObject({
       browserActiveTabId: 102,
@@ -209,6 +224,7 @@ describe('get_windows_and_tabs state inventory', () => {
             active: false,
             openedBy: 'user_or_page',
             canTabrixOperate: true,
+            cleanupEligibility: 'not_eligible',
           },
           {
             tabId: 102,
@@ -216,6 +232,7 @@ describe('get_windows_and_tabs state inventory', () => {
             active: true,
             openedBy: 'user_or_page',
             canTabrixOperate: true,
+            cleanupEligibility: 'not_eligible',
           },
         ],
       },
@@ -388,6 +405,8 @@ describe('get_windows_and_tabs state inventory', () => {
             openedByReason: 'observed_by_chrome_inventory_without_ai_marker_or_opener',
             canTabrixOperate: true,
             operabilityReason: 'regular_web_page',
+            cleanupEligibility: 'not_eligible',
+            cleanupEligibilityReason: 'user_or_page_owned_tab_protected_from_cleanup',
             aiOperationState: 'idle',
             lastAiOperation: null,
             lastAiOperationConfidence: null,
@@ -411,6 +430,8 @@ describe('get_windows_and_tabs state inventory', () => {
             openedByReason: 'chrome_tabs_openerTabId_present',
             canTabrixOperate: true,
             operabilityReason: 'regular_web_page',
+            cleanupEligibility: 'not_eligible',
+            cleanupEligibilityReason: 'user_or_page_owned_tab_protected_from_cleanup',
             aiOperationState: 'idle',
             lastAiOperation: null,
             lastAiOperationConfidence: null,
@@ -467,10 +488,14 @@ describe('get_windows_and_tabs state inventory', () => {
         canTabrixOperate: true,
         reason: 'regular_web_page',
       },
+      cleanup: {
+        cleanupEligibility: 'not_eligible',
+        reason: 'user_or_page_owned_tab_protected_from_cleanup',
+      },
     });
     expect(payload.compactSummary.lastAiOperatedTabAttributeGroups).toBeNull();
     expect(payload.compactSummary.tabAttributeGroupClaimBoundary).toContain(
-      'browser object identity/runtime/ownership/operability only',
+      'browser object identity/runtime/ownership/operability/cleanup only',
     );
   });
 

@@ -185,6 +185,14 @@ describe('browser world inventory', () => {
     expect(snapshot.browserActiveTabId).toBe(10);
     expect(snapshot.userOrPageOpenedTabIds).toEqual([10, 11]);
     expect(snapshot.operableTabIds).toEqual([10]);
+    expect(snapshot.baselineReadiness).toMatchObject({
+      ready: true,
+      status: 'resynced',
+      continuity: 'resynced_current_state_history_not_proven',
+      staleAfterMs: 5_000,
+      resyncAttempted: true,
+      resyncSucceeded: true,
+    });
     expect(snapshot.summary.primaryConclusion).toBe(
       'Browser object snapshot: focusedWindow=1, visibility=visible, operable=yes; activeTab=10, status=complete, owner=user_or_page, source=user_or_unknown, operable=yes; latestAiTab=none, relation=no_ai_operation_observed; routing=target_selection_required, blockingReason=no_ai_operated_tab_observed, next=read_or_select_intended_target; inventory=windows:1, tabs:2, ai:0, page:0, userOrUnknown:2, userOrPage:2, operable:1; recent=Last change: browser world inventory was refreshed from Chrome.',
     );
@@ -194,6 +202,19 @@ describe('browser world inventory', () => {
       visibilityState: 'visible',
       focused: true,
       canTabrixOperate: true,
+    });
+    expect(snapshot.summary.currentTabObject).toMatchObject({
+      tabId: 10,
+      openedBy: 'user_or_page',
+      canTabrixOperate: true,
+      cleanupEligibility: 'not_eligible',
+      cleanupEligibilityReason: 'user_or_page_owned_tab_protected_from_cleanup',
+    });
+    expect(snapshot.summary.currentTabAttributeGroups).toMatchObject({
+      cleanup: {
+        cleanupEligibility: 'not_eligible',
+        reason: 'user_or_page_owned_tab_protected_from_cleanup',
+      },
     });
     expect(snapshot.summary.windowStateMatrix).toMatchObject({
       total: 1,
@@ -556,6 +577,8 @@ describe('browser world inventory', () => {
       muted: true,
       pinned: true,
       openerTabId: 10,
+      cleanupEligibility: 'eligible',
+      cleanupEligibilityReason: 'ai_opened_operable_tab_cleanup_candidate',
     });
     expect(snapshot.summary.currentTabAttributeGroups).toMatchObject({
       identity: {
@@ -580,6 +603,10 @@ describe('browser world inventory', () => {
       operability: {
         canTabrixOperate: true,
         reason: 'regular_web_page',
+      },
+      cleanup: {
+        cleanupEligibility: 'eligible',
+        reason: 'ai_opened_operable_tab_cleanup_candidate',
       },
     });
     expect(snapshot.summary.tabStateMatrix).toMatchObject({
@@ -629,6 +656,8 @@ describe('browser world inventory', () => {
       openerTabId: 10,
       openedBy: 'ai',
       openedByReason: 'marked_by_tabrix_navigation_before_tabs_onCreated',
+      cleanupEligibility: 'eligible',
+      cleanupEligibilityReason: 'ai_opened_operable_tab_cleanup_candidate',
       active: true,
     });
 
@@ -1392,6 +1421,120 @@ describe('browser world inventory', () => {
       fullChromeResyncCount: 2,
       skippedChromeResyncCount: 2,
       lastRefreshDecision: 'skipped_recent_resync',
+    });
+  });
+
+  it('returns a fresh baseline directly when get_windows_and_tabs reads soon after resync', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+
+    const first = await refreshBrowserWorldSnapshot({ ensureBaselineReady: true });
+    expect(chrome.windows.getAll).toHaveBeenCalledTimes(1);
+    expect(first.baselineReadiness).toMatchObject({
+      ready: true,
+      status: 'resynced',
+      resyncAttempted: true,
+      resyncSucceeded: true,
+    });
+
+    vi.setSystemTime(1_200);
+    const fresh = await refreshBrowserWorldSnapshot({ ensureBaselineReady: true });
+    expect(chrome.windows.getAll).toHaveBeenCalledTimes(1);
+    expect(fresh.baselineReadiness).toMatchObject({
+      ready: true,
+      status: 'fresh',
+      continuity: 'continuous',
+      resyncAttempted: false,
+      resyncSucceeded: null,
+      snapshotAgeMs: 200,
+    });
+  });
+
+  it('resyncs a stale baseline before returning browser window and tab state', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+
+    await refreshBrowserWorldSnapshot({ ensureBaselineReady: true });
+    expect(chrome.windows.getAll).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(7_001);
+    const resynced = await refreshBrowserWorldSnapshot({ ensureBaselineReady: true });
+    expect(chrome.windows.getAll).toHaveBeenCalledTimes(2);
+    expect(resynced.baselineReadiness).toMatchObject({
+      ready: true,
+      status: 'resynced',
+      continuity: 'resynced_current_state_history_not_proven',
+      resyncAttempted: true,
+      resyncSucceeded: true,
+      snapshotAgeMs: 0,
+    });
+    expect(resynced.baselineReadiness.reason).toContain('missed events before this resync');
+  });
+
+  it('marks an old local snapshot as stale when no baseline-ready read is requested', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+
+    await refreshBrowserWorldSnapshot({ ensureBaselineReady: true });
+
+    vi.setSystemTime(7_001);
+    const stale = await getBrowserWorldSnapshot();
+
+    expect(chrome.windows.getAll).toHaveBeenCalledTimes(1);
+    expect(stale.baselineReadiness).toMatchObject({
+      ready: false,
+      status: 'stale',
+      continuity: 'not_proven',
+      resyncAttempted: false,
+      snapshotAgeMs: 6_001,
+    });
+    expect(stale.baselineReadiness.reason).toContain('local baseline is stale');
+  });
+
+  it('reports unknown readiness when Chrome inventory is unavailable', async () => {
+    (chrome as any).windows = {
+      getAll: undefined,
+      onCreated: hook(listeners.windowCreated),
+      onRemoved: hook(listeners.windowRemoved),
+      onFocusChanged: hook(listeners.windowFocusChanged),
+      onBoundsChanged: hook(listeners.windowBoundsChanged),
+    };
+
+    const snapshot = await refreshBrowserWorldSnapshot({ ensureBaselineReady: true });
+
+    expect(snapshot.windowCount).toBe(0);
+    expect(snapshot.tabCount).toBe(0);
+    expect(snapshot.baselineReadiness).toMatchObject({
+      ready: false,
+      status: 'unknown',
+      continuity: 'unknown',
+      resyncAttempted: true,
+      resyncSucceeded: false,
+      nextRequiredCheck: 'restore_extension_chrome_inventory_then_retry_get_windows_and_tabs',
+    });
+    expect(snapshot.refreshHealth.lastRefreshDecision).toBe('chrome_inventory_unavailable');
+  });
+
+  it('reports not_proven readiness when the first Chrome resync fails', async () => {
+    (chrome.windows.getAll as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('chrome unavailable'),
+    );
+
+    const snapshot = await refreshBrowserWorldSnapshot({ ensureBaselineReady: true });
+
+    expect(snapshot.windowCount).toBe(0);
+    expect(snapshot.tabCount).toBe(0);
+    expect(snapshot.baselineReadiness).toMatchObject({
+      ready: false,
+      status: 'not_proven',
+      continuity: 'unknown',
+      resyncAttempted: true,
+      resyncSucceeded: false,
+      nextRequiredCheck: 'retry_chrome_inventory_resync_before_action',
+    });
+    expect(snapshot.refreshHealth).toMatchObject({
+      lastFullChromeResyncStatus: 'failed',
+      lastRefreshDecision: 'failed',
     });
   });
 

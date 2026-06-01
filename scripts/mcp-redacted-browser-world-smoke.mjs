@@ -332,6 +332,17 @@ function redactTabAttributeGroups(groups) {
           reason: typeof groups.operability.reason === 'string' ? groups.operability.reason : null,
         }
       : null,
+    ...(groups.cleanup
+      ? {
+          cleanup: {
+            cleanupEligibility:
+              typeof groups.cleanup.cleanupEligibility === 'string'
+                ? groups.cleanup.cleanupEligibility
+                : null,
+            reason: typeof groups.cleanup.reason === 'string' ? groups.cleanup.reason : null,
+          },
+        }
+      : {}),
   };
 }
 
@@ -376,6 +387,10 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     payload?.compactSummary?.refreshHealth ??
     payload?.browserWorld?.refreshHealth ??
     payload?.refreshHealth;
+  const baselineReadiness =
+    payload?.compactSummary?.baselineReadiness ??
+    payload?.browserWorld?.baselineReadiness ??
+    payload?.baselineReadiness;
   const retentionWithinLimit =
     Number.isInteger(retentionPolicy?.recentEventLimit) &&
     Number.isInteger(retentionPolicy?.recentEventsRetained)
@@ -435,6 +450,12 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
             typeof object.canTabrixOperate === 'boolean' ? object.canTabrixOperate : null,
           operabilityReason:
             typeof object.operabilityReason === 'string' ? object.operabilityReason : null,
+          ...(typeof object.cleanupEligibility === 'string'
+            ? { cleanupEligibility: object.cleanupEligibility }
+            : {}),
+          ...(typeof object.cleanupEligibilityReason === 'string'
+            ? { cleanupEligibilityReasonPresent: true }
+            : {}),
         }
       : { objectPresent: false };
 
@@ -449,6 +470,40 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
     omittedTabCount,
     compactTabsShown: compactTabs.length,
     retentionWithinLimit,
+    baselineReadiness: baselineReadiness
+      ? {
+          ready: typeof baselineReadiness.ready === 'boolean' ? baselineReadiness.ready : null,
+          status:
+            typeof baselineReadiness.status === 'string' ? baselineReadiness.status : null,
+          continuity:
+            typeof baselineReadiness.continuity === 'string'
+              ? baselineReadiness.continuity
+              : null,
+          checkedAtMsPresent: Number.isInteger(baselineReadiness.checkedAtMs),
+          snapshotAgeMs: Number.isInteger(baselineReadiness.snapshotAgeMs)
+            ? baselineReadiness.snapshotAgeMs
+            : null,
+          staleAfterMs: Number.isInteger(baselineReadiness.staleAfterMs)
+            ? baselineReadiness.staleAfterMs
+            : null,
+          resyncAttempted:
+            typeof baselineReadiness.resyncAttempted === 'boolean'
+              ? baselineReadiness.resyncAttempted
+              : null,
+          resyncSucceeded:
+            typeof baselineReadiness.resyncSucceeded === 'boolean'
+              ? baselineReadiness.resyncSucceeded
+              : baselineReadiness.resyncSucceeded === null
+                ? null
+                : 'unknown',
+          reasonPresent: typeof baselineReadiness.reason === 'string',
+          nextRequiredCheck:
+            typeof baselineReadiness.nextRequiredCheck === 'string'
+              ? baselineReadiness.nextRequiredCheck
+              : null,
+          claimBoundaryPresent: typeof baselineReadiness.claimBoundary === 'string',
+        }
+      : null,
     retentionPolicy: retentionPolicy
       ? {
           recentEventLimit: Number.isInteger(retentionPolicy.recentEventLimit)
@@ -4819,6 +4874,7 @@ export function isSmokeResultPassing(result) {
   if (result.scenario === 'single') {
     return (
       result.redacted?.callSucceeded === true &&
+      result.redacted?.baselineReadiness?.ready === true &&
       result.redacted?.compactSummaryBounded === true &&
       result.redacted?.retentionWithinLimit === true &&
       (result.closeAttempted !== true || result.closeSucceeded === true)

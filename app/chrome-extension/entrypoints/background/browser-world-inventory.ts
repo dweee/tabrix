@@ -29,6 +29,18 @@ export type BrowserWorldTabOpenedBySource =
   | 'page_opener'
   | 'user_or_unknown'
   | 'unknown';
+export type BrowserWorldCleanupEligibility = 'eligible' | 'not_eligible' | 'unknown';
+export type BrowserWorldBaselineReadinessStatus =
+  | 'fresh'
+  | 'resynced'
+  | 'stale'
+  | 'unknown'
+  | 'not_proven';
+export type BrowserWorldBaselineContinuity =
+  | 'continuous'
+  | 'resynced_current_state_history_not_proven'
+  | 'unknown'
+  | 'not_proven';
 
 export interface BrowserWorldTabObject {
   objectKind: 'BrowserTabObject';
@@ -58,6 +70,8 @@ export interface BrowserWorldTabObject {
   closedAtMs: number | null;
   canTabrixOperate: boolean | null;
   operabilityReason: string;
+  cleanupEligibility: BrowserWorldCleanupEligibility;
+  cleanupEligibilityReason: string;
 }
 
 export interface BrowserWorldWindowObject {
@@ -88,6 +102,7 @@ export interface BrowserWorldSnapshot {
   initialized: boolean;
   observedAtMs: number;
   snapshotAgeMs: number | null;
+  baselineReadiness: BrowserWorldBaselineReadiness;
   refreshHealth: BrowserWorldRefreshHealth;
   windowCount: number;
   tabCount: number;
@@ -101,6 +116,20 @@ export interface BrowserWorldSnapshot {
   recentEvents: BrowserWorldEvent[];
   windows: BrowserWorldWindowObject[];
   tabs: BrowserWorldTabObject[];
+}
+
+export interface BrowserWorldBaselineReadiness {
+  ready: boolean;
+  status: BrowserWorldBaselineReadinessStatus;
+  continuity: BrowserWorldBaselineContinuity;
+  checkedAtMs: number | null;
+  snapshotAgeMs: number | null;
+  staleAfterMs: number;
+  resyncAttempted: boolean;
+  resyncSucceeded: boolean | null;
+  reason: string;
+  nextRequiredCheck: string;
+  claimBoundary: string;
 }
 
 export interface BrowserWorldRetentionPolicy {
@@ -375,6 +404,10 @@ export interface BrowserWorldTabAttributeGroups {
     canTabrixOperate: boolean | null;
     reason: string;
   };
+  cleanup: {
+    cleanupEligibility: BrowserWorldCleanupEligibility;
+    reason: string;
+  };
 }
 
 export interface BrowserWorldTabStateSummary {
@@ -402,6 +435,8 @@ export interface BrowserWorldTabStateSummary {
   lastAiOperationReason: string | null;
   canTabrixOperate: boolean | null;
   operabilityReason: string;
+  cleanupEligibility: BrowserWorldCleanupEligibility;
+  cleanupEligibilityReason: string;
 }
 
 export interface BrowserWorldEvent {
@@ -451,6 +486,7 @@ type EventHook = {
 
 const MAX_RECENT_BROWSER_WORLD_EVENTS = 50;
 const MIN_FULL_CHROME_RESYNC_INTERVAL_MS = 250;
+const BASELINE_READY_STALE_AFTER_MS = 5_000;
 
 const tabsById = new Map<number, BrowserWorldTabObject>();
 const windowsById = new Map<number, BrowserWorldWindowObject>();
@@ -474,6 +510,13 @@ let lastFullChromeResyncReason: BrowserWorldRefreshHealth['lastFullChromeResyncR
 let lastRefreshDecision: BrowserWorldRefreshHealth['lastRefreshDecision'] =
   'chrome_inventory_unavailable';
 let lastRefreshDecisionReason = 'Chrome window inventory has not been requested yet.';
+let lastBaselineReadinessStatus: BrowserWorldBaselineReadinessStatus = 'unknown';
+let lastBaselineContinuity: BrowserWorldBaselineContinuity = 'unknown';
+let lastBaselineCheckedAtMs: number | null = null;
+let lastBaselineResyncAttempted = false;
+let lastBaselineResyncSucceeded: boolean | null = null;
+let lastBaselineReadinessReason = 'BrowserWorld baseline readiness has not been checked yet.';
+let lastBaselineNextRequiredCheck = 'get_windows_and_tabs';
 
 function nowMs(): number {
   return Date.now();
@@ -501,6 +544,34 @@ function isOperableUrl(url: string): { canOperate: boolean | null; reason: strin
     return { canOperate: false, reason: 'browser_internal_page' };
   }
   return { canOperate: null, reason: 'unknown_scheme' };
+}
+
+function deriveCleanupEligibility(args: {
+  openedBy: BrowserWorldTabOpenedBy;
+  canOperate: boolean | null;
+}): { cleanupEligibility: BrowserWorldCleanupEligibility; cleanupEligibilityReason: string } {
+  if (args.openedBy === 'ai' && args.canOperate === true) {
+    return {
+      cleanupEligibility: 'eligible',
+      cleanupEligibilityReason: 'ai_opened_operable_tab_cleanup_candidate',
+    };
+  }
+  if (args.openedBy === 'ai' && args.canOperate === false) {
+    return {
+      cleanupEligibility: 'unknown',
+      cleanupEligibilityReason: 'ai_opened_tab_not_currently_operable_cleanup_not_proven',
+    };
+  }
+  if (args.openedBy === 'user_or_page') {
+    return {
+      cleanupEligibility: 'not_eligible',
+      cleanupEligibilityReason: 'user_or_page_owned_tab_protected_from_cleanup',
+    };
+  }
+  return {
+    cleanupEligibility: 'unknown',
+    cleanupEligibilityReason: 'ownership_unknown_cleanup_not_proven',
+  };
 }
 
 function isOperableWindow(
@@ -592,6 +663,10 @@ function normalizeTab(
     previous,
   });
   const openedBy = openSource.openedBy;
+  const cleanup = deriveCleanupEligibility({
+    openedBy,
+    canOperate: operability.canOperate,
+  });
   return {
     objectKind: 'BrowserTabObject',
     tabId: tab.id,
@@ -645,6 +720,8 @@ function normalizeTab(
     closedAtMs: null,
     canTabrixOperate: operability.canOperate,
     operabilityReason: operability.reason,
+    cleanupEligibility: cleanup.cleanupEligibility,
+    cleanupEligibilityReason: cleanup.cleanupEligibilityReason,
   };
 }
 
@@ -759,6 +836,64 @@ function pushEvent(event: Omit<BrowserWorldEvent, 'observedAtMs'>): void {
   recentEvents.push({ ...event, observedAtMs: nowMs() });
   while (recentEvents.length > MAX_RECENT_BROWSER_WORLD_EVENTS) recentEvents.shift();
   recordObserved();
+}
+
+function snapshotAgeAt(checkedAtMs: number): number | null {
+  return lastObservedAtMs === null ? null : Math.max(0, checkedAtMs - lastObservedAtMs);
+}
+
+function isFreshBaselineAge(snapshotAgeMs: number | null): boolean {
+  return initialized && snapshotAgeMs !== null && snapshotAgeMs <= BASELINE_READY_STALE_AFTER_MS;
+}
+
+function setBaselineReadiness(args: {
+  status: BrowserWorldBaselineReadinessStatus;
+  continuity: BrowserWorldBaselineContinuity;
+  checkedAtMs: number;
+  resyncAttempted: boolean;
+  resyncSucceeded: boolean | null;
+  reason: string;
+  nextRequiredCheck?: string;
+}): void {
+  lastBaselineReadinessStatus = args.status;
+  lastBaselineContinuity = args.continuity;
+  lastBaselineCheckedAtMs = args.checkedAtMs;
+  lastBaselineResyncAttempted = args.resyncAttempted;
+  lastBaselineResyncSucceeded = args.resyncSucceeded;
+  lastBaselineReadinessReason = args.reason;
+  lastBaselineNextRequiredCheck = args.nextRequiredCheck ?? 'get_windows_and_tabs';
+}
+
+function markBaselineReadinessFromCurrentState(reasonPrefix: string): void {
+  const checkedAt = nowMs();
+  const age = snapshotAgeAt(checkedAt);
+  if (isFreshBaselineAge(age)) {
+    setBaselineReadiness({
+      status: lastRefreshDecision === 'full_chrome_resync' ? 'resynced' : 'fresh',
+      continuity:
+        lastRefreshDecision === 'full_chrome_resync'
+          ? 'resynced_current_state_history_not_proven'
+          : 'continuous',
+      checkedAtMs: checkedAt,
+      resyncAttempted: lastRefreshDecision === 'full_chrome_resync',
+      resyncSucceeded: lastRefreshDecision === 'full_chrome_resync' ? true : null,
+      reason:
+        lastRefreshDecision === 'full_chrome_resync'
+          ? `${reasonPrefix}; BrowserWorld current state was rebuilt from Chrome, but missed events before this resync are not proven.`
+          : `${reasonPrefix}; BrowserWorld local baseline is fresh enough to use without a full Chrome resync.`,
+    });
+    return;
+  }
+  setBaselineReadiness({
+    status: initialized ? 'stale' : 'unknown',
+    continuity: initialized ? 'not_proven' : 'unknown',
+    checkedAtMs: checkedAt,
+    resyncAttempted: false,
+    resyncSucceeded: null,
+    reason: initialized
+      ? `${reasonPrefix}; BrowserWorld local baseline is stale and needs a Chrome resync before action routing.`
+      : `${reasonPrefix}; BrowserWorld baseline has not been initialized from Chrome.`,
+  });
 }
 
 async function seedFromChrome(
@@ -1073,6 +1208,10 @@ export function markBrowserWorldTabAiCreated(tabId: number | null | undefined): 
     pendingAiCreatedTabIds.add(tabId);
   }
   if (previous) {
+    const cleanup = deriveCleanupEligibility({
+      openedBy: 'ai',
+      canOperate: previous.canTabrixOperate,
+    });
     tabsById.set(tabId, {
       ...previous,
       openedBy: 'ai',
@@ -1084,6 +1223,8 @@ export function markBrowserWorldTabAiCreated(tabId: number | null | undefined): 
       lastAiOperationAtMs: nowMs(),
       lastAiOperationConfidence: 0.95,
       lastAiOperationReason: 'marked_by_tabrix_navigation_result',
+      cleanupEligibility: cleanup.cleanupEligibility,
+      cleanupEligibilityReason: cleanup.cleanupEligibilityReason,
       updatedAtMs: nowMs(),
     });
   }
@@ -1138,22 +1279,91 @@ export async function getBrowserWorldSnapshot(): Promise<BrowserWorldSnapshot> {
   if (!initialized) {
     await seedFromChrome('initial_seed').catch(() => undefined);
   }
+  markBaselineReadinessFromCurrentState('getBrowserWorldSnapshot checked BrowserWorld baseline');
   return buildSnapshot();
+}
+
+async function ensureBrowserWorldBaselineReady(): Promise<void> {
+  const checkedAt = nowMs();
+  const age = snapshotAgeAt(checkedAt);
+  if (isFreshBaselineAge(age)) {
+    setBaselineReadiness({
+      status: 'fresh',
+      continuity: 'continuous',
+      checkedAtMs: checkedAt,
+      resyncAttempted: false,
+      resyncSucceeded: null,
+      reason:
+        'BrowserWorld baseline is fresh; get_windows_and_tabs can return the maintained local snapshot directly.',
+    });
+    return;
+  }
+
+  if (typeof chrome?.windows?.getAll !== 'function') {
+    setBaselineReadiness({
+      status: initialized ? 'stale' : 'unknown',
+      continuity: initialized ? 'not_proven' : 'unknown',
+      checkedAtMs: nowMs(),
+      resyncAttempted: true,
+      resyncSucceeded: false,
+      reason:
+        'BrowserWorld baseline could not be proven ready because chrome.windows.getAll is unavailable.',
+      nextRequiredCheck: 'restore_extension_chrome_inventory_then_retry_get_windows_and_tabs',
+    });
+    return;
+  }
+
+  await seedFromChrome('on_demand_refresh', { allowThrottle: false }).catch(() => undefined);
+  const afterResync = nowMs();
+  const refreshedAge = snapshotAgeAt(afterResync);
+  if (isFreshBaselineAge(refreshedAge)) {
+    setBaselineReadiness({
+      status: 'resynced',
+      continuity: 'resynced_current_state_history_not_proven',
+      checkedAtMs: afterResync,
+      resyncAttempted: true,
+      resyncSucceeded: lastFullChromeResyncStatus === 'success',
+      reason:
+        'BrowserWorld baseline was rebuilt from Chrome on first MCP/window inventory read; current state is usable, but missed events before this resync are not proven.',
+    });
+    return;
+  }
+
+  setBaselineReadiness({
+    status: initialized ? 'stale' : 'not_proven',
+    continuity: initialized ? 'not_proven' : 'unknown',
+    checkedAtMs: afterResync,
+    resyncAttempted: true,
+    resyncSucceeded: false,
+    reason:
+      'BrowserWorld baseline is still not fresh after an attempted Chrome resync; action routing must treat browser state as not proven.',
+    nextRequiredCheck: 'retry_chrome_inventory_resync_before_action',
+  });
 }
 
 export async function refreshBrowserWorldSnapshot(
   options: {
     forceFullChromeResync?: boolean;
+    ensureBaselineReady?: boolean;
   } = {},
 ): Promise<BrowserWorldSnapshot> {
+  if (options.ensureBaselineReady === true) {
+    await ensureBrowserWorldBaselineReady();
+    return buildSnapshot();
+  }
+
   await seedFromChrome('on_demand_refresh', {
     allowThrottle: initialized && options.forceFullChromeResync !== true,
   }).catch(() => undefined);
+  markBaselineReadinessFromCurrentState(
+    'refreshBrowserWorldSnapshot checked BrowserWorld baseline',
+  );
   return buildSnapshot();
 }
 
 function buildSnapshot(): BrowserWorldSnapshot {
   const observedAtMs = nowMs();
+  const snapshotAgeMs = snapshotAgeAt(observedAtMs);
   const tabs = Array.from(tabsById.values()).sort((a, b) => a.tabId - b.tabId);
   const windows = Array.from(windowsById.values()).sort((a, b) => a.windowId - b.windowId);
   const focusedWindow = windows.find((window) => window.focused === true);
@@ -1206,7 +1416,23 @@ function buildSnapshot(): BrowserWorldSnapshot {
     version: 1,
     initialized,
     observedAtMs,
-    snapshotAgeMs: lastObservedAtMs === null ? null : Math.max(0, observedAtMs - lastObservedAtMs),
+    snapshotAgeMs,
+    baselineReadiness: {
+      ready:
+        (lastBaselineReadinessStatus === 'fresh' || lastBaselineReadinessStatus === 'resynced') &&
+        isFreshBaselineAge(snapshotAgeMs),
+      status: lastBaselineReadinessStatus,
+      continuity: lastBaselineContinuity,
+      checkedAtMs: lastBaselineCheckedAtMs,
+      snapshotAgeMs,
+      staleAfterMs: BASELINE_READY_STALE_AFTER_MS,
+      resyncAttempted: lastBaselineResyncAttempted,
+      resyncSucceeded: lastBaselineResyncSucceeded,
+      reason: lastBaselineReadinessReason,
+      nextRequiredCheck: lastBaselineNextRequiredCheck,
+      claimBoundary:
+        'Baseline readiness proves the extension has a fresh browser window/tab inventory only; it does not prove page content, account state, login success, action success, API/CDP reuse, or uninterrupted history before a resync.',
+    },
     refreshHealth: {
       fullChromeResyncCount,
       skippedChromeResyncCount,
@@ -1349,4 +1575,11 @@ export function resetBrowserWorldInventoryForTests(): void {
   lastFullChromeResyncReason = null;
   lastRefreshDecision = 'chrome_inventory_unavailable';
   lastRefreshDecisionReason = 'Chrome window inventory has not been requested yet.';
+  lastBaselineReadinessStatus = 'unknown';
+  lastBaselineContinuity = 'unknown';
+  lastBaselineCheckedAtMs = null;
+  lastBaselineResyncAttempted = false;
+  lastBaselineResyncSucceeded = null;
+  lastBaselineReadinessReason = 'BrowserWorld baseline readiness has not been checked yet.';
+  lastBaselineNextRequiredCheck = 'get_windows_and_tabs';
 }

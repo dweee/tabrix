@@ -18,6 +18,8 @@ type StructuredTabForWindowSummary = {
   openedBy: string;
   canTabrixOperate: boolean | null;
   operabilityReason: string;
+  cleanupEligibility: string;
+  cleanupEligibilityReason: string;
 };
 
 function selectCompactTabsForWindow(
@@ -60,6 +62,8 @@ function buildCompactTabObject(tab: BrowserWorldTabObject | null, role: string) 
       lastAiOperationReason: null,
       canTabrixOperate: null,
       operabilityReason: 'tab_not_observed',
+      cleanupEligibility: 'unknown',
+      cleanupEligibilityReason: 'tab_not_observed',
     };
   }
   return {
@@ -81,6 +85,8 @@ function buildCompactTabObject(tab: BrowserWorldTabObject | null, role: string) 
     lastAiOperationReason: tab.lastAiOperationReason,
     canTabrixOperate: tab.canTabrixOperate,
     operabilityReason: tab.operabilityReason,
+    cleanupEligibility: tab.cleanupEligibility,
+    cleanupEligibilityReason: tab.cleanupEligibilityReason,
   };
 }
 
@@ -355,7 +361,7 @@ class WindowTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS;
   async execute(): Promise<ToolResult> {
     try {
-      const browserWorld = await refreshBrowserWorldSnapshot({ forceFullChromeResync: true });
+      const browserWorld = await refreshBrowserWorldSnapshot({ ensureBaselineReady: true });
       const browserActiveTab =
         browserWorld.tabs.find((tab) => tab.tabId === browserWorld.browserActiveTabId) ?? null;
       const latestAiOperatedTab =
@@ -408,6 +414,8 @@ class WindowTool extends BaseBrowserToolExecutor {
               openedByReason: tab.openedByReason,
               canTabrixOperate: tab.canTabrixOperate,
               operabilityReason: tab.operabilityReason,
+              cleanupEligibility: tab.cleanupEligibility,
+              cleanupEligibilityReason: tab.cleanupEligibilityReason,
               aiOperationState: tab.aiOperationState,
               lastAiOperation: tab.lastAiOperation,
               lastAiOperationAtMs: tab.lastAiOperationAtMs,
@@ -443,7 +451,9 @@ class WindowTool extends BaseBrowserToolExecutor {
         source: 'chrome_windows_get_all_with_browser_world_inventory',
         windowCount: browserWorld.windowCount,
         tabCount: browserWorld.tabCount,
+        baselineReadiness: browserWorld.baselineReadiness,
         compactSummary: {
+          baselineReadiness: browserWorld.baselineReadiness,
           primaryConclusion: browserWorld.summary.primaryConclusion,
           activeObject: {
             windowId: browserWorld.summary.activeWindow.windowId,
@@ -523,7 +533,7 @@ class WindowTool extends BaseBrowserToolExecutor {
           currentTabAttributeGroups: browserWorld.summary.currentTabAttributeGroups,
           lastAiOperatedTabAttributeGroups: browserWorld.summary.lastAiOperatedTabAttributeGroups,
           tabAttributeGroupClaimBoundary:
-            'Tab attribute groups describe browser object identity/runtime/ownership/operability only; they do not prove page content, account state, login success, task success, or API/CDP reuse.',
+            'Tab attribute groups describe browser object identity/runtime/ownership/operability/cleanup only; they do not prove page content, account state, login success, task success, or API/CDP reuse.',
           operationRouting: {
             browserActiveTabId: browserWorld.browserActiveTabId,
             latestAiOperatedTabId: browserWorld.summary.aiOperationState.latestAiOperatedTabId,
@@ -566,6 +576,8 @@ class WindowTool extends BaseBrowserToolExecutor {
                 openedBySource: tab.openedBySource,
                 canTabrixOperate: tab.canTabrixOperate,
                 operabilityReason: tab.operabilityReason,
+                cleanupEligibility: tab.cleanupEligibility,
+                cleanupEligibilityReason: tab.cleanupEligibilityReason,
               })),
             ),
           })),

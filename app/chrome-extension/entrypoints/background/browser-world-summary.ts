@@ -526,6 +526,10 @@ export function buildTabAttributeGroups(
       canTabrixOperate: tab.canTabrixOperate,
       reason: tab.operabilityReason,
     },
+    cleanup: {
+      cleanupEligibility: tab.cleanupEligibility,
+      reason: tab.cleanupEligibilityReason,
+    },
   };
 }
 
@@ -555,6 +559,8 @@ export function summarizeTabState(tab: BrowserWorldTabObject): BrowserWorldTabSt
     lastAiOperationReason: tab.lastAiOperationReason,
     canTabrixOperate: tab.canTabrixOperate,
     operabilityReason: tab.operabilityReason,
+    cleanupEligibility: tab.cleanupEligibility,
+    cleanupEligibilityReason: tab.cleanupEligibilityReason,
   };
 }
 
