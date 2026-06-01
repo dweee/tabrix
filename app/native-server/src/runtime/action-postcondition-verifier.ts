@@ -189,6 +189,39 @@ export interface RegionStatePostconditionResult {
   afterSummary: string[];
   producedAtMs: number;
   claimBoundary: string;
+  detailFieldReadbackEvidence?: RegionStateDetailFieldReadbackEvidence | null;
+}
+
+export type RegionStateDetailFieldReadbackStatus =
+  | 'structured_fields_present'
+  | 'partial_fields_only'
+  | 'not_available';
+
+export type RegionStateDetailSemanticMatchStatus =
+  | 'matched'
+  | 'not_matched'
+  | 'before_text_missing'
+  | 'after_text_missing'
+  | 'not_applicable';
+
+export interface RegionStateDetailFieldReadbackEvidence {
+  kind: 'detail_field_readback';
+  status: RegionStateDetailFieldReadbackStatus;
+  targetBindingProven: boolean;
+  semanticMatch: RegionStateDetailSemanticMatchStatus;
+  canSupportDetailSummary: boolean;
+  fieldCounts: {
+    totalStructuredObjects: number;
+    titleLikeObjects: number;
+    bodyLikeObjects: number;
+    metadataLikeObjects: number;
+    actionableObjects: number;
+  };
+  nextRequiredCheck:
+    | 'detail_fields_ready_for_summary'
+    | 'fresh_detail_read_or_more_structured_fields_required'
+    | 'target_binding_required_before_detail_summary';
+  claimBoundary: string;
 }
 
 export function getActionPostconditionCoverageMatrix(): readonly ActionPostconditionCoverageRow[] {
@@ -254,6 +287,9 @@ export function verifyRegionStatePostcondition(
     producedAtMs,
     claimBoundary:
       'region-state postconditions require before/after page-region evidence; click success, timeout, or QR presence alone is not business success',
+    ...(result.detailFieldReadbackEvidence
+      ? { detailFieldReadbackEvidence: result.detailFieldReadbackEvidence }
+      : {}),
   };
 }
 
@@ -273,7 +309,11 @@ function verdictForRegionState(
   beforeRegions: readonly ReadPageRegion[],
   afterRegions: readonly ReadPageRegion[],
   targetRefs?: readonly string[] | null,
-): { verdict: PostconditionVerdict; reason: string } {
+): {
+  verdict: PostconditionVerdict;
+  reason: string;
+  detailFieldReadbackEvidence?: RegionStateDetailFieldReadbackEvidence | null;
+} {
   if (afterRegions.length === 0) {
     return { verdict: 'unknown', reason: 'after_region_evidence_missing' };
   }
@@ -368,48 +408,114 @@ function verdictForDetailOpened(
   beforeRegions: readonly ReadPageRegion[],
   afterRegions: readonly ReadPageRegion[],
   targetRefs?: readonly string[] | null,
-): { verdict: PostconditionVerdict; reason: string } {
+): {
+  verdict: PostconditionVerdict;
+  reason: string;
+  detailFieldReadbackEvidence?: RegionStateDetailFieldReadbackEvidence | null;
+} {
   const beforeCollections = contentCollectionRegions(beforeRegions);
   if (beforeCollections.length === 0) {
-    return { verdict: 'unknown', reason: 'before_result_collection_evidence_missing' };
+    return {
+      verdict: 'unknown',
+      reason: 'before_result_collection_evidence_missing',
+      detailFieldReadbackEvidence: buildDetailFieldReadbackEvidence({
+        targetBindingProven: false,
+        semanticMatch: 'not_applicable',
+        afterDetailRegions: [],
+      }),
+    };
   }
 
   const beforeTargetableCollections = beforeCollections.filter(
     (region) => targetableResultObjects(region).length >= 1,
   );
   if (beforeTargetableCollections.length === 0) {
-    return { verdict: 'unknown', reason: 'before_structured_result_evidence_missing' };
+    return {
+      verdict: 'unknown',
+      reason: 'before_structured_result_evidence_missing',
+      detailFieldReadbackEvidence: buildDetailFieldReadbackEvidence({
+        targetBindingProven: false,
+        semanticMatch: 'not_applicable',
+        afterDetailRegions: [],
+      }),
+    };
   }
 
   const actionTargetRefs = normalizeTargetRefs(targetRefs);
   if (actionTargetRefs.length === 0) {
-    return { verdict: 'unknown', reason: 'before_target_row_identity_not_proven' };
+    return {
+      verdict: 'unknown',
+      reason: 'before_target_row_identity_not_proven',
+      detailFieldReadbackEvidence: buildDetailFieldReadbackEvidence({
+        targetBindingProven: false,
+        semanticMatch: 'not_applicable',
+        afterDetailRegions: [],
+      }),
+    };
   }
   const matchedTargetObject = findMatchingTargetableResultObject(
     beforeTargetableCollections,
     actionTargetRefs,
   );
   if (!matchedTargetObject) {
-    return { verdict: 'unknown', reason: 'before_target_row_identity_not_proven' };
+    return {
+      verdict: 'unknown',
+      reason: 'before_target_row_identity_not_proven',
+      detailFieldReadbackEvidence: buildDetailFieldReadbackEvidence({
+        targetBindingProven: false,
+        semanticMatch: 'not_applicable',
+        afterDetailRegions: [],
+      }),
+    };
   }
 
   const afterDetail = contentDetailRegions(afterRegions);
   if (afterDetail.length > 0) {
     const afterStructuredDetail = afterDetail.filter(hasStructuredContentDetailEvidence);
+    const targetBindingProven = true;
     if (afterStructuredDetail.length === 0) {
-      return { verdict: 'unknown', reason: 'structured_detail_evidence_missing_after_action' };
+      return {
+        verdict: 'unknown',
+        reason: 'structured_detail_evidence_missing_after_action',
+        detailFieldReadbackEvidence: buildDetailFieldReadbackEvidence({
+          targetBindingProven,
+          semanticMatch: 'after_text_missing',
+          afterDetailRegions: afterStructuredDetail,
+        }),
+      };
     }
     const semanticMatch = detailSemanticMatchStatus(matchedTargetObject, afterStructuredDetail);
+    const detailFieldReadbackEvidence = buildDetailFieldReadbackEvidence({
+      targetBindingProven,
+      semanticMatch,
+      afterDetailRegions: afterStructuredDetail,
+    });
     if (semanticMatch === 'before_text_missing') {
-      return { verdict: 'unknown', reason: 'before_target_row_semantic_text_missing' };
+      return {
+        verdict: 'unknown',
+        reason: 'before_target_row_semantic_text_missing',
+        detailFieldReadbackEvidence,
+      };
     }
     if (semanticMatch === 'after_text_missing') {
-      return { verdict: 'unknown', reason: 'detail_semantic_text_missing_after_action' };
+      return {
+        verdict: 'unknown',
+        reason: 'detail_semantic_text_missing_after_action',
+        detailFieldReadbackEvidence,
+      };
     }
     if (semanticMatch === 'not_matched') {
-      return { verdict: 'unknown', reason: 'detail_semantic_match_not_proven_after_action' };
+      return {
+        verdict: 'unknown',
+        reason: 'detail_semantic_match_not_proven_after_action',
+        detailFieldReadbackEvidence,
+      };
     }
-    return { verdict: 'passed', reason: 'content_detail_region_semantic_match_after_action' };
+    return {
+      verdict: 'passed',
+      reason: 'content_detail_region_semantic_match_after_action',
+      detailFieldReadbackEvidence,
+    };
   }
 
   const afterCollections = contentCollectionRegions(afterRegions);
@@ -417,15 +523,105 @@ function verdictForDetailOpened(
     const beforeSignature = collectionSignature(beforeTargetableCollections);
     const afterSignature = collectionSignature(afterCollections);
     if (beforeSignature === afterSignature) {
-      return { verdict: 'failed', reason: 'detail_collection_unchanged_after_action' };
+      return {
+        verdict: 'failed',
+        reason: 'detail_collection_unchanged_after_action',
+        detailFieldReadbackEvidence: buildDetailFieldReadbackEvidence({
+          targetBindingProven: true,
+          semanticMatch: 'not_applicable',
+          afterDetailRegions: [],
+        }),
+      };
     }
     return {
       verdict: 'unknown',
       reason: 'detail_open_not_proven_collection_changed_without_detail',
+      detailFieldReadbackEvidence: buildDetailFieldReadbackEvidence({
+        targetBindingProven: true,
+        semanticMatch: 'not_applicable',
+        afterDetailRegions: [],
+      }),
     };
   }
 
-  return { verdict: 'unknown', reason: 'detail_region_evidence_missing_after_action' };
+  return {
+    verdict: 'unknown',
+    reason: 'detail_region_evidence_missing_after_action',
+    detailFieldReadbackEvidence: buildDetailFieldReadbackEvidence({
+      targetBindingProven: true,
+      semanticMatch: 'not_applicable',
+      afterDetailRegions: [],
+    }),
+  };
+}
+
+function buildDetailFieldReadbackEvidence(input: {
+  targetBindingProven: boolean;
+  semanticMatch: RegionStateDetailSemanticMatchStatus;
+  afterDetailRegions: readonly ReadPageRegion[];
+}): RegionStateDetailFieldReadbackEvidence {
+  const counts = countStructuredDetailFields(input.afterDetailRegions);
+  const canSupportDetailSummary =
+    input.targetBindingProven &&
+    input.semanticMatch === 'matched' &&
+    (counts.bodyLikeObjects > 0 || counts.titleLikeObjects > 0) &&
+    counts.totalStructuredObjects > 0;
+  const status: RegionStateDetailFieldReadbackStatus =
+    counts.totalStructuredObjects === 0
+      ? 'not_available'
+      : canSupportDetailSummary
+        ? 'structured_fields_present'
+        : 'partial_fields_only';
+  const nextRequiredCheck = input.targetBindingProven
+    ? canSupportDetailSummary
+      ? 'detail_fields_ready_for_summary'
+      : 'fresh_detail_read_or_more_structured_fields_required'
+    : 'target_binding_required_before_detail_summary';
+
+  return {
+    kind: 'detail_field_readback',
+    status,
+    targetBindingProven: input.targetBindingProven,
+    semanticMatch: input.semanticMatch,
+    canSupportDetailSummary,
+    fieldCounts: counts,
+    nextRequiredCheck,
+    claimBoundary:
+      'detail field readback proves only structured visible detail objects and target semantic match; it does not prove full article completeness, ranking accuracy, or private live-site acceptance',
+  };
+}
+
+function countStructuredDetailFields(
+  regions: readonly ReadPageRegion[],
+): RegionStateDetailFieldReadbackEvidence['fieldCounts'] {
+  const counts = {
+    totalStructuredObjects: 0,
+    titleLikeObjects: 0,
+    bodyLikeObjects: 0,
+    metadataLikeObjects: 0,
+    actionableObjects: 0,
+  };
+  for (const region of regions) {
+    for (const object of region.objects) {
+      if (!isStructuredContentDetailObject(object)) continue;
+      counts.totalStructuredObjects += 1;
+      const objectType = String(object.objectType || '').toLowerCase();
+      if (/^(title|heading|header)$/.test(objectType)) counts.titleLikeObjects += 1;
+      if (
+        /^(doc_block|record|entry|content_body|article|paragraph|body|description|summary)$/.test(
+          objectType,
+        )
+      ) {
+        counts.bodyLikeObjects += 1;
+      }
+      if (/^(meta|metadata|author|time|date|tag|stat|metric)$/.test(objectType)) {
+        counts.metadataLikeObjects += 1;
+      }
+      const actionTypes = Array.isArray(object.actionTypes) ? object.actionTypes : [];
+      if (object.targetRef || actionTypes.length > 0) counts.actionableObjects += 1;
+    }
+  }
+  return counts;
 }
 
 function normalizeTargetRefs(targetRefs?: readonly string[] | null): string[] {
@@ -529,18 +725,38 @@ function targetableResultObjects(region: ReadPageRegion): ReadPageRegion['object
 }
 
 function hasStructuredContentDetailEvidence(region: ReadPageRegion): boolean {
-  return region.objects.some((object) => {
-    const objectType = String(object.objectType || '').toLowerCase();
-    const looksLikeDetailContent =
-      objectType === 'doc_block' ||
-      objectType === 'record' ||
-      objectType === 'entry' ||
-      objectType === 'content_body' ||
-      objectType === 'article' ||
-      objectType === 'paragraph';
-    const confidence = typeof object.confidence === 'number' ? object.confidence : 0;
-    return looksLikeDetailContent && Boolean(object.objectId || object.label) && confidence >= 0.5;
-  });
+  return region.objects.some(isStructuredContentDetailObject);
+}
+
+function isStructuredContentDetailObject(regionObject: ReadPageRegion['objects'][number]): boolean {
+  const objectType = String(regionObject.objectType || '').toLowerCase();
+  const looksLikeDetailContent =
+    objectType === 'doc_block' ||
+    objectType === 'record' ||
+    objectType === 'entry' ||
+    objectType === 'content_body' ||
+    objectType === 'article' ||
+    objectType === 'paragraph' ||
+    objectType === 'title' ||
+    objectType === 'heading' ||
+    objectType === 'header' ||
+    objectType === 'body' ||
+    objectType === 'description' ||
+    objectType === 'summary' ||
+    objectType === 'meta' ||
+    objectType === 'metadata' ||
+    objectType === 'author' ||
+    objectType === 'time' ||
+    objectType === 'date' ||
+    objectType === 'tag' ||
+    objectType === 'stat' ||
+    objectType === 'metric';
+  const confidence = typeof regionObject.confidence === 'number' ? regionObject.confidence : 0;
+  return (
+    looksLikeDetailContent &&
+    Boolean(regionObject.objectId || regionObject.label) &&
+    confidence >= 0.5
+  );
 }
 
 function detailSemanticMatchStatus(

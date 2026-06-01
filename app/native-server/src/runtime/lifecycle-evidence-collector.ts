@@ -708,10 +708,31 @@ function buildRegionStatePostconditionReason(result: RegionStatePostconditionRes
     result.reason,
     `before=${before}`,
     `after=${after}`,
+    buildDetailFieldReadbackReason(result.detailFieldReadbackEvidence),
     result.claimBoundary,
   ]
+    .filter(Boolean)
     .join(';')
     .slice(0, 600);
+}
+
+function buildDetailFieldReadbackReason(
+  evidence: RegionStatePostconditionResult['detailFieldReadbackEvidence'],
+): string | null {
+  if (!evidence) return null;
+  const counts = evidence.fieldCounts;
+  return [
+    'detail_field_readback',
+    `status=${evidence.status}`,
+    `summaryReady=${evidence.canSupportDetailSummary}`,
+    `targetBinding=${evidence.targetBindingProven}`,
+    `semantic=${evidence.semanticMatch}`,
+    `structured=${counts.totalStructuredObjects}`,
+    `title=${counts.titleLikeObjects}`,
+    `body=${counts.bodyLikeObjects}`,
+    `metadata=${counts.metadataLikeObjects}`,
+    `next=${evidence.nextRequiredCheck}`,
+  ].join(':');
 }
 
 function buildUnifiedTaskScopeTransitions(

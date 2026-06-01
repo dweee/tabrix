@@ -303,6 +303,39 @@ export interface TaskRegionStatePostconditionResultSnapshot {
   afterSummary: string[];
   producedAtMs: number;
   claimBoundary: string;
+  detailFieldReadbackEvidence?: TaskDetailFieldReadbackEvidence | null;
+}
+
+export type TaskDetailFieldReadbackStatus =
+  | 'structured_fields_present'
+  | 'partial_fields_only'
+  | 'not_available';
+
+export type TaskDetailSemanticMatchStatus =
+  | 'matched'
+  | 'not_matched'
+  | 'before_text_missing'
+  | 'after_text_missing'
+  | 'not_applicable';
+
+export interface TaskDetailFieldReadbackEvidence {
+  kind: 'detail_field_readback';
+  status: TaskDetailFieldReadbackStatus;
+  targetBindingProven: boolean;
+  semanticMatch: TaskDetailSemanticMatchStatus;
+  canSupportDetailSummary: boolean;
+  fieldCounts: {
+    totalStructuredObjects: number;
+    titleLikeObjects: number;
+    bodyLikeObjects: number;
+    metadataLikeObjects: number;
+    actionableObjects: number;
+  };
+  nextRequiredCheck:
+    | 'detail_fields_ready_for_summary'
+    | 'fresh_detail_read_or_more_structured_fields_required'
+    | 'target_binding_required_before_detail_summary';
+  claimBoundary: string;
 }
 
 export interface TaskRegionStatePostconditionSnapshot {
@@ -1611,7 +1644,77 @@ function cloneTaskRegionStatePostconditionResult(
     claimBoundary:
       normalizeBoundedString(input.claimBoundary, 300) ??
       'region_state_postcondition_claim_boundary_unknown',
+    ...(input.detailFieldReadbackEvidence
+      ? {
+          detailFieldReadbackEvidence: cloneTaskDetailFieldReadbackEvidence(
+            input.detailFieldReadbackEvidence,
+          ),
+        }
+      : {}),
   };
+}
+
+function cloneTaskDetailFieldReadbackEvidence(
+  input: TaskDetailFieldReadbackEvidence,
+): TaskDetailFieldReadbackEvidence | null {
+  if (input.kind !== 'detail_field_readback') return null;
+  const status = normalizeDetailFieldReadbackStatus(input.status);
+  const semanticMatch = normalizeDetailSemanticMatchStatus(input.semanticMatch);
+  if (!status || !semanticMatch) return null;
+  return {
+    kind: 'detail_field_readback',
+    status,
+    targetBindingProven: Boolean(input.targetBindingProven),
+    semanticMatch,
+    canSupportDetailSummary: Boolean(input.canSupportDetailSummary),
+    fieldCounts: {
+      totalStructuredObjects: normalizeNonNegativeInteger(
+        input.fieldCounts?.totalStructuredObjects,
+      ),
+      titleLikeObjects: normalizeNonNegativeInteger(input.fieldCounts?.titleLikeObjects),
+      bodyLikeObjects: normalizeNonNegativeInteger(input.fieldCounts?.bodyLikeObjects),
+      metadataLikeObjects: normalizeNonNegativeInteger(input.fieldCounts?.metadataLikeObjects),
+      actionableObjects: normalizeNonNegativeInteger(input.fieldCounts?.actionableObjects),
+    },
+    nextRequiredCheck:
+      normalizeDetailFieldNextRequiredCheck(input.nextRequiredCheck) ??
+      'fresh_detail_read_or_more_structured_fields_required',
+    claimBoundary:
+      normalizeBoundedString(input.claimBoundary, 300) ??
+      'detail_field_readback_claim_boundary_unknown',
+  };
+}
+
+function normalizeDetailFieldReadbackStatus(value: unknown): TaskDetailFieldReadbackStatus | null {
+  return value === 'structured_fields_present' ||
+    value === 'partial_fields_only' ||
+    value === 'not_available'
+    ? value
+    : null;
+}
+
+function normalizeDetailSemanticMatchStatus(value: unknown): TaskDetailSemanticMatchStatus | null {
+  return value === 'matched' ||
+    value === 'not_matched' ||
+    value === 'before_text_missing' ||
+    value === 'after_text_missing' ||
+    value === 'not_applicable'
+    ? value
+    : null;
+}
+
+function normalizeDetailFieldNextRequiredCheck(
+  value: unknown,
+): TaskDetailFieldReadbackEvidence['nextRequiredCheck'] | null {
+  return value === 'detail_fields_ready_for_summary' ||
+    value === 'fresh_detail_read_or_more_structured_fields_required' ||
+    value === 'target_binding_required_before_detail_summary'
+    ? value
+    : null;
+}
+
+function normalizeNonNegativeInteger(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
 }
 
 function selectLatestRegionStatePostconditionForResume(

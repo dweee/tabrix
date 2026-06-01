@@ -790,6 +790,22 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
             afterSummary: ['detail:loaded'],
             producedAtMs: 1000,
             claimBoundary: 'region-state evidence only',
+            detailFieldReadbackEvidence: {
+              kind: 'detail_field_readback',
+              status: 'structured_fields_present',
+              targetBindingProven: true,
+              semanticMatch: 'matched',
+              canSupportDetailSummary: true,
+              fieldCounts: {
+                totalStructuredObjects: 2,
+                titleLikeObjects: 1,
+                bodyLikeObjects: 1,
+                metadataLikeObjects: 0,
+                actionableObjects: 0,
+              },
+              nextRequiredCheck: 'detail_fields_ready_for_summary',
+              claimBoundary: 'detail field readback fixture only',
+            },
           },
         },
       ],
@@ -829,6 +845,18 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
     expect(ctx.peekRegionStatePostconditionsForCloseout([9])[0].result.afterSummary).toEqual([
       'content_list:loaded:after',
     ]);
+    const detailCloseout = ctx.peekRegionStatePostconditionsForCloseout([7]);
+    detailCloseout[0].result.detailFieldReadbackEvidence!.fieldCounts.totalStructuredObjects = 99;
+    expect(
+      ctx.peekRegionStatePostconditionsForCloseout([7])[0].result.detailFieldReadbackEvidence,
+    ).toMatchObject({
+      status: 'structured_fields_present',
+      fieldCounts: {
+        totalStructuredObjects: 2,
+        titleLikeObjects: 1,
+        bodyLikeObjects: 1,
+      },
+    });
   });
 
   it('allows original-task resume only when matching-tab region postcondition passed', () => {

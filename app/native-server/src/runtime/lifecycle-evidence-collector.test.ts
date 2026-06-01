@@ -1276,6 +1276,9 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     const serialized = JSON.stringify(artifact);
     expect(serialized).toContain('after=content:result_collection_candidate:unknown:actions:0');
     expect(serialized).toContain('after=content:detail_open_candidate:unknown:actions:0');
+    expect(serialized).toContain('detail_field_readback:status=structured_fields_present');
+    expect(serialized).toContain('summaryReady=true');
+    expect(serialized).toContain('semantic=matched');
     expect(serialized).not.toContain('cookie');
     expect(serialized).not.toContain('Authorization');
   });

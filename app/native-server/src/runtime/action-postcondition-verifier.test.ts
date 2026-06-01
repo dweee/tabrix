@@ -573,6 +573,21 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
 
     expect(result.verdict).toBe('passed');
     expect(result.reason).toBe('content_detail_region_semantic_match_after_action');
+    expect(result.detailFieldReadbackEvidence).toMatchObject({
+      kind: 'detail_field_readback',
+      status: 'structured_fields_present',
+      targetBindingProven: true,
+      semanticMatch: 'matched',
+      canSupportDetailSummary: true,
+      fieldCounts: {
+        totalStructuredObjects: 1,
+        bodyLikeObjects: 1,
+      },
+      nextRequiredCheck: 'detail_fields_ready_for_summary',
+    });
+    expect(JSON.stringify(result.detailFieldReadbackEvidence)).not.toContain(
+      'Alpha launch checklist',
+    );
   });
 
   it('keeps detail_opened unknown when the detail content does not match the clicked row text', () => {
@@ -590,6 +605,13 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
 
     expect(result.verdict).toBe('unknown');
     expect(result.reason).toBe('detail_semantic_match_not_proven_after_action');
+    expect(result.detailFieldReadbackEvidence).toMatchObject({
+      status: 'partial_fields_only',
+      targetBindingProven: true,
+      semanticMatch: 'not_matched',
+      canSupportDetailSummary: false,
+      nextRequiredCheck: 'fresh_detail_read_or_more_structured_fields_required',
+    });
   });
 
   it('keeps detail_opened unknown when the clicked row lacks usable semantic text', () => {
@@ -631,6 +653,13 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
 
     expect(result.verdict).toBe('unknown');
     expect(result.reason).toBe('before_target_row_identity_not_proven');
+    expect(result.detailFieldReadbackEvidence).toMatchObject({
+      status: 'not_available',
+      targetBindingProven: false,
+      semanticMatch: 'not_applicable',
+      canSupportDetailSummary: false,
+      nextRequiredCheck: 'target_binding_required_before_detail_summary',
+    });
   });
 
   it('keeps detail_opened unknown when the detail region lacks structured content evidence', () => {
