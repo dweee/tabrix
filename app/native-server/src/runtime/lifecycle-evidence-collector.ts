@@ -167,6 +167,7 @@ export interface UnifiedTaskCloseoutLifecycleEvidenceArtifactInput {
     observedOutcomeConfidence?: number;
   };
   regionStatePostconditions?: readonly {
+    tabId?: number | null;
     actionKind: ActionKind;
     result: RegionStatePostconditionResult;
   }[];
@@ -664,10 +665,11 @@ function buildUnifiedTaskPostconditionResults(
     });
   }
   for (const regionState of input.regionStatePostconditions ?? []) {
+    const regionStateTabId = normalizeRegionStatePostconditionTabId(regionState.tabId);
     results.push({
       actionId: regionState.result.actionId,
       actionKind: regionState.actionKind,
-      tabId: input.tabIds[0] ?? null,
+      tabId: regionStateTabId ?? (input.tabIds.length === 1 ? (input.tabIds[0] ?? null) : null),
       urlPattern: null,
       verdict: regionState.result.verdict,
       reason: buildRegionStatePostconditionReason(regionState.result),
@@ -733,6 +735,11 @@ function buildDetailFieldReadbackReason(
     `metadata=${counts.metadataLikeObjects}`,
     `next=${evidence.nextRequiredCheck}`,
   ].join(':');
+}
+
+function normalizeRegionStatePostconditionTabId(tabId: unknown): number | null {
+  if (typeof tabId === 'number' && Number.isInteger(tabId) && tabId > 0) return tabId;
+  return null;
 }
 
 function buildUnifiedTaskScopeTransitions(

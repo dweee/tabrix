@@ -345,6 +345,7 @@ export interface TaskRegionStatePostconditionSnapshot {
 }
 
 export interface TaskRegionStatePostconditionForCloseout {
+  tabId: number | null;
   actionKind: ActionKind;
   result: TaskRegionStatePostconditionResultSnapshot;
 }
@@ -1055,6 +1056,7 @@ export class TaskSessionContext {
         return snapshot.tabId !== null && allowedTabIds.has(snapshot.tabId);
       })
       .map((snapshot) => ({
+        tabId: snapshot.tabId,
         actionKind: snapshot.actionKind,
         result: cloneTaskRegionStatePostconditionResult(snapshot.result)!,
       }));

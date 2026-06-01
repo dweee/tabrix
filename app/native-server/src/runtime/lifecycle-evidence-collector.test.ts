@@ -1283,6 +1283,94 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     expect(serialized).not.toContain('Authorization');
   });
 
+  it('keeps each region-state postcondition bound to its source tab in multi-tab closeout', () => {
+    const searchState = verifyRegionStatePostcondition({
+      kind: 'search_results_updated',
+      actionId: 'act-search-tab-7',
+      beforeRegions: [region('form', 'search_ready_candidate')],
+      afterRegions: resultCollection(resultRow('1'), resultRow('2')),
+      now: () => T0 + 15,
+    });
+    const detailState = verifyRegionStatePostcondition({
+      kind: 'detail_opened',
+      actionId: 'act-detail-tab-9',
+      beforeRegions: resultCollection(resultRow('1'), resultRow('2', 'entry')),
+      afterRegions: [
+        region('content', 'detail_open_candidate', {
+          label: 'second result detail',
+          objects: [
+            {
+              objectId: 'detail-second-result',
+              label: 'second result detail body',
+              objectType: 'article',
+              confidence: 0.82,
+            },
+          ],
+        }),
+      ],
+      targetRefs: ['tgt_row_2'],
+      now: () => T0 + 20,
+    });
+
+    const artifact = produceUnifiedTaskCloseoutLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-multitab-region-state-closeout',
+      evidenceLevel: 'integration',
+      scenarioId: 'tool-multitab-region-state-closeout',
+      scenarioClass: 'search_result_delta_v1',
+      startedAtMs: T0,
+      endedAtMs: T0 + 30,
+      tabIds: [9, 7],
+      taskTimeline: [
+        {
+          eventId: 'lifecycle:tab7',
+          index: 1,
+          at: new Date(T0).toISOString(),
+          kind: 'projection_created',
+          tabId: 7,
+          pageRole: 'search_list',
+        },
+        {
+          eventId: 'lifecycle:tab9',
+          index: 2,
+          at: new Date(T0 + 20).toISOString(),
+          kind: 'region_changed',
+          tabId: 9,
+        },
+      ],
+      regionStatePostconditions: [
+        { tabId: 7, actionKind: 'submit', result: searchState },
+        { tabId: 9, actionKind: 'click', result: detailState },
+      ],
+      closeAction: {
+        actionId: 'mcp:chrome_close_tabs:9',
+        tabId: 9,
+        reason: 'close_tabs_cleanup_succeeded',
+      },
+      browserHygiene: {
+        available: true,
+        baselineTabs: null,
+        runOwnedTabsClosed: 1,
+        baselineChanged: false,
+        checks: makeCleanHygieneChecks(),
+      },
+    });
+
+    expect(artifact.actionLog.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionId: 'act-search-tab-7',
+          actionKind: 'submit',
+          tabId: 7,
+        }),
+        expect.objectContaining({
+          actionId: 'act-detail-tab-9',
+          actionKind: 'click',
+          tabId: 9,
+        }),
+      ]),
+    );
+  });
+
   it('downgrades closeout postconditions for unsupported action kinds instead of claiming success', () => {
     const baseInput = {
       artifactId: 'runtime-artifact-tool-closeout-unsupported',

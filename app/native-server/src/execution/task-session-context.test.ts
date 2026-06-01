@@ -832,6 +832,7 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
     const closeout = ctx.peekRegionStatePostconditionsForCloseout([9]);
     expect(closeout).toEqual([
       {
+        tabId: 9,
         actionKind: 'click',
         result: expect.objectContaining({
           actionId: 'ca_search_submit',
