@@ -75,22 +75,37 @@ export function evaluateNonInterferencePreflight(input: {
   }
 
   const authResumeGate = input.taskContext?.peekLastAuthResumeGate() ?? null;
+  const taskResumeReadiness = input.taskContext?.buildTaskResumeReadiness({
+    tabId: targetTabId,
+  });
   if (authResumeGate?.blocksTaskResume) {
+    const message = buildTaskResumeReadinessMessage(taskResumeReadiness);
+    if (taskResumeReadiness?.nextStep === 'stop_not_proven') {
+      return block(
+        input,
+        mode,
+        'auth_resume_verification_required',
+        message,
+        targetTabId,
+        targetTabIds,
+        runOwnedTabIds,
+        taskResumeReadiness,
+        authResumeGate,
+      );
+    }
     return collaborationRequired(
       input,
       mode,
       'auth_resume_verification_required',
-      buildAuthResumeGateMessage(authResumeGate),
+      message,
       targetTabId,
       targetTabIds,
       runOwnedTabIds,
       authResumeGate,
+      taskResumeReadiness,
     );
   }
 
-  const taskResumeReadiness = input.taskContext?.buildTaskResumeReadiness({
-    tabId: targetTabId,
-  });
   if (
     taskResumeReadiness &&
     shouldGateImpactActionForTaskResumeReadiness(input.toolName, taskResumeReadiness)
@@ -325,6 +340,7 @@ function block(
   targetTabIds: number[],
   runOwnedTabIds: number[],
   taskResumeReadiness?: TaskResumeReadinessSnapshot,
+  authResumeGate?: TaskAuthResumeGate,
 ): NonInterferencePreflightVerdict {
   return {
     allowed: false,
@@ -338,6 +354,7 @@ function block(
       targetTabId,
       targetTabIds,
       runOwnedTabIds,
+      ...(authResumeGate ? { authResumeGate } : {}),
       ...(taskResumeReadiness ? { taskResumeReadiness } : {}),
       browserPolicyAudit: buildBrowserPolicyAudit({
         reason,
@@ -396,17 +413,13 @@ function shouldGateImpactActionForTaskResumeReadiness(
   );
 }
 
-function buildAuthResumeGateMessage(gate: TaskAuthResumeGate): string {
-  const targetTabHint = Number.isInteger(gate.targetTabId) ? ` on tabId ${gate.targetTabId}` : '';
-  return `Blocked impact action because auth/user collaboration resume is not proven. Call chrome_read_page with forceRefresh=true${targetTabHint}, then verify the required postcondition before continuing the task.`;
-}
-
-function buildTaskResumeReadinessMessage(readiness: TaskResumeReadinessSnapshot): string {
-  const targetTabHint = Number.isInteger(readiness.tabId) ? ` on tabId ${readiness.tabId}` : '';
-  if (readiness.nextStep === 'stop_not_proven') {
-    return `Blocked impact action because the previous business postcondition failed${targetTabHint}. Stop or run chrome_read_page with forceRefresh=true to collect new evidence before continuing the task.`;
-  }
-  return `Impact action requires task-resume verification${targetTabHint}. Run chrome_read_page with forceRefresh=true and verify the business postcondition before continuing the task.`;
+function buildTaskResumeReadinessMessage(
+  readiness: TaskResumeReadinessSnapshot | null | undefined,
+): string {
+  return (
+    readiness?.handoffSummary.message ??
+    'Do not continue the original task yet. Verify the business postcondition with fresh page evidence first.'
+  );
 }
 
 function buildBrowserPolicyAudit(input: {

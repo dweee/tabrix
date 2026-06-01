@@ -55,7 +55,7 @@ describe('evaluateNonInterferencePreflight', () => {
     });
 
     expect(verdict.allowed).toBe(false);
-    expect(verdict.message).toContain('forceRefresh=true');
+    expect(verdict.message).toContain('Run chrome_read_page with forceRefresh=true on tabId 42');
     expect(verdict.audit).toMatchObject({
       verdict: 'collaboration_required',
       reason: 'auth_resume_verification_required',
@@ -65,7 +65,17 @@ describe('evaluateNonInterferencePreflight', () => {
         targetTabId: 42,
         blocksTaskResume: true,
       },
+      taskResumeReadiness: {
+        status: 'blocked_by_auth_verification',
+        canResumeOriginalTask: false,
+        nextStep: 'force_fresh_read_same_tab',
+        handoffSummary: {
+          status: 'needs_fresh_read',
+          nextAction: 'run_chrome_read_page_force_refresh',
+        },
+      },
     });
+    expect(verdict.message).toBe(verdict.audit.taskResumeReadiness?.handoffSummary.message);
   });
 
   it('does not block chrome_read_page when auth resume verification is required', () => {
@@ -168,7 +178,7 @@ describe('evaluateNonInterferencePreflight', () => {
     });
 
     expect(verdict.allowed).toBe(false);
-    expect(verdict.message).toContain('previous business postcondition failed');
+    expect(verdict.message).toContain('Stop the original task on tabId 42');
     expect(verdict.audit).toMatchObject({
       verdict: 'block',
       reason: 'task_resume_readiness_not_proven',
@@ -177,8 +187,13 @@ describe('evaluateNonInterferencePreflight', () => {
         status: 'postcondition_failed_stop',
         canResumeOriginalTask: false,
         nextStep: 'stop_not_proven',
+        handoffSummary: {
+          status: 'stop_not_proven',
+          nextAction: 'stop_and_report_not_proven',
+        },
       },
     });
+    expect(verdict.message).toBe(verdict.audit.taskResumeReadiness?.handoffSummary.message);
   });
 
   it('requires fresh verification when the matching-tab business postcondition is unknown', () => {
@@ -210,7 +225,9 @@ describe('evaluateNonInterferencePreflight', () => {
     });
 
     expect(verdict.allowed).toBe(false);
-    expect(verdict.message).toContain('forceRefresh=true');
+    expect(verdict.message).toContain(
+      'Verify the business postcondition with fresh page evidence first',
+    );
     expect(verdict.audit).toMatchObject({
       verdict: 'collaboration_required',
       reason: 'task_resume_readiness_not_proven',
@@ -219,8 +236,101 @@ describe('evaluateNonInterferencePreflight', () => {
         status: 'postcondition_unknown_not_proven',
         canResumeOriginalTask: false,
         nextStep: 'verify_postcondition',
+        handoffSummary: {
+          status: 'needs_postcondition_verification',
+          nextAction: 'verify_business_postcondition',
+        },
       },
     });
+    expect(verdict.message).toBe(verdict.audit.taskResumeReadiness?.handoffSummary.message);
+  });
+
+  it('uses the handoff summary when auth resume is waiting for user collaboration', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRunOwnedTab(42);
+    ctx.noteAuthResumeVerification({
+      status: 'required_after_user_action',
+      nextTool: 'chrome_read_page',
+      forceRefreshRequired: false,
+      sameTabRequired: true,
+      targetTabId: 42,
+      postconditionRequired: false,
+      requiredSignals: ['user_action_completed'],
+      claimBoundary: 'deterministic auth resume fixture only',
+    });
+
+    const verdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.FILL,
+      args: { tabId: 42, selector: '#q', value: 'poster', userConfirmed: true },
+      taskContext: ctx,
+    });
+
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.message).toContain('waiting for user collaboration on tabId 42');
+    expect(verdict.audit).toMatchObject({
+      verdict: 'collaboration_required',
+      reason: 'auth_resume_verification_required',
+      targetTabId: 42,
+      authResumeGate: {
+        status: 'required_after_user_action',
+        targetTabId: 42,
+        blocksTaskResume: true,
+      },
+      taskResumeReadiness: {
+        status: 'blocked_by_auth_verification',
+        canResumeOriginalTask: false,
+        nextStep: 'wait_for_user_collaboration',
+        handoffSummary: {
+          status: 'waiting_for_user',
+          nextAction: 'wait_for_user_collaboration',
+        },
+      },
+    });
+    expect(verdict.message).toBe(verdict.audit.taskResumeReadiness?.handoffSummary.message);
+  });
+
+  it('blocks impact actions when auth resume handoff says stop_not_proven', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRunOwnedTab(42);
+    ctx.noteAuthResumeVerification({
+      status: 'not_proven',
+      nextTool: 'chrome_read_page',
+      forceRefreshRequired: false,
+      sameTabRequired: true,
+      targetTabId: 42,
+      postconditionRequired: false,
+      requiredSignals: ['auth_prompt_absent'],
+      claimBoundary: 'deterministic auth resume fixture only',
+    });
+
+    const verdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.CLICK,
+      args: { tabId: 42, ref: 'ref_continue', userConfirmed: true },
+      taskContext: ctx,
+    });
+
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.message).toContain('Stop the original task on tabId 42');
+    expect(verdict.audit).toMatchObject({
+      verdict: 'block',
+      reason: 'auth_resume_verification_required',
+      targetTabId: 42,
+      authResumeGate: {
+        status: 'not_proven',
+        targetTabId: 42,
+        blocksTaskResume: true,
+      },
+      taskResumeReadiness: {
+        status: 'blocked_by_auth_verification',
+        canResumeOriginalTask: false,
+        nextStep: 'stop_not_proven',
+        handoffSummary: {
+          status: 'stop_not_proven',
+          nextAction: 'stop_and_report_not_proven',
+        },
+      },
+    });
+    expect(verdict.message).toBe(verdict.audit.taskResumeReadiness?.handoffSummary.message);
   });
 
   it('allows continuation after a fresh matching-tab postcondition proves the original task can resume', () => {
