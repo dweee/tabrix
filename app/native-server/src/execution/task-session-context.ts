@@ -180,6 +180,13 @@ export interface TaskDomRegionRowsReadbackAccumulationEvidence {
   fieldCoverageStatus: TaskTopNFieldCoverageStatus;
   canSupportDefaultTopNFieldSummary: boolean;
   missingTitleRowCountForDefaultTopN: number;
+  canSupportDefaultTopNDelivery: boolean;
+  missingUniqueTargetRefCountForDefaultTopN: number;
+  deliveryNextRequiredCheck:
+    | 'top_n_delivery_ready'
+    | 'collect_more_rows_before_top_n_delivery'
+    | 'collect_structured_fields_before_top_n_delivery'
+    | 'collect_more_unique_target_refs_before_top_n_delivery';
   summaryQualityNextRequiredCheck:
     | 'structured_top_n_summary_ready'
     | 'collect_supporting_text_or_detail_before_rich_summary'
@@ -921,12 +928,17 @@ export class TaskSessionContext {
     const uniqueTitleRowCount = accumulator.uniqueTitleRowKeys.size;
     const uniqueSupportingTextRowCount = accumulator.uniqueSupportingTextRowKeys.size;
     const uniqueMetadataRowCount = accumulator.uniqueMetadataRowKeys.size;
+    const uniqueTargetRefCount = accumulator.uniqueTargetRefs.size;
     const canSatisfyDefaultTopN = uniqueTargetableRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET;
     const canSupportDefaultTopNSummary =
       uniqueSummarizableRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET;
     const canSupportDefaultTopNFieldSummary =
       uniqueTitleRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET &&
       uniqueSupportingTextRowCount + uniqueMetadataRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET;
+    const canSupportDefaultTopNDelivery =
+      canSatisfyDefaultTopN &&
+      canSupportDefaultTopNFieldSummary &&
+      uniqueTargetRefCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET;
     const missingRowCountForDefaultTopN = Math.max(
       0,
       DEFAULT_TOP_N_ACCUMULATION_TARGET - uniqueTargetableRowCount,
@@ -938,6 +950,10 @@ export class TaskSessionContext {
     const missingTitleRowCountForDefaultTopN = Math.max(
       0,
       DEFAULT_TOP_N_ACCUMULATION_TARGET - uniqueTitleRowCount,
+    );
+    const missingUniqueTargetRefCountForDefaultTopN = Math.max(
+      0,
+      DEFAULT_TOP_N_ACCUMULATION_TARGET - uniqueTargetRefCount,
     );
     const fieldCoverageStatus: TaskTopNFieldCoverageStatus = canSupportDefaultTopNFieldSummary
       ? 'structured_summary_fields_ready'
@@ -966,7 +982,7 @@ export class TaskSessionContext {
       uniqueTitleRowCount,
       uniqueSupportingTextRowCount,
       uniqueMetadataRowCount,
-      uniqueTargetRefCount: accumulator.uniqueTargetRefs.size,
+      uniqueTargetRefCount,
       rowOrder: visibleRows.rowOrder,
       canSatisfyDefaultTopN,
       missingRowCountForDefaultTopN,
@@ -975,6 +991,15 @@ export class TaskSessionContext {
       fieldCoverageStatus,
       canSupportDefaultTopNFieldSummary,
       missingTitleRowCountForDefaultTopN,
+      canSupportDefaultTopNDelivery,
+      missingUniqueTargetRefCountForDefaultTopN,
+      deliveryNextRequiredCheck: canSupportDefaultTopNDelivery
+        ? 'top_n_delivery_ready'
+        : !canSatisfyDefaultTopN
+          ? 'collect_more_rows_before_top_n_delivery'
+          : !canSupportDefaultTopNFieldSummary
+            ? 'collect_structured_fields_before_top_n_delivery'
+            : 'collect_more_unique_target_refs_before_top_n_delivery',
       summaryQualityNextRequiredCheck: canSupportDefaultTopNFieldSummary
         ? 'structured_top_n_summary_ready'
         : uniqueTitleRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET
@@ -1957,6 +1982,9 @@ function searchPostconditionResumeBlockReason(
   ) {
     return 'dom_region_rows_readback_title_only_fields_not_ready_for_structured_top_n_summary';
   }
+  if (rows.uniqueTargetRefs.size < DEFAULT_TOP_N_ACCUMULATION_TARGET) {
+    return 'dom_region_rows_readback_not_enough_unique_target_refs_for_default_top_n_delivery';
+  }
   return null;
 }
 
@@ -1964,7 +1992,12 @@ function passedPostconditionEvidenceKindsForResume(
   kind: TaskRegionStatePostconditionKind,
 ): string[] {
   if (kind === 'search_results_updated') {
-    return ['region_state_postcondition', 'dom_region_rows_readback', 'top_n_field_coverage'];
+    return [
+      'region_state_postcondition',
+      'dom_region_rows_readback',
+      'top_n_field_coverage',
+      'top_n_delivery_readiness',
+    ];
   }
   return ['region_state_postcondition'];
 }

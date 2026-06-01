@@ -28,6 +28,7 @@ function makeVisibleRegionRows(
     includeText?: boolean;
     includeSupportingText?: boolean;
     includeMetaText?: boolean;
+    duplicateTargetRefs?: boolean;
   } = {},
 ): TaskVisibleRegionRowsData {
   const includeText = options.includeText ?? true;
@@ -42,7 +43,7 @@ function makeVisibleRegionRows(
       secondaryText: null,
       metaText: includeMetaText ? `Result ${n} metadata` : null,
       interactionText: 'Open',
-      targetRef: `ref_${n}`,
+      targetRef: options.duplicateTargetRefs ? 'ref_duplicate' : `ref_${n}`,
       sourceRegion: options.sourceRegion ?? 'result_list',
       confidence: 0.9,
     };
@@ -472,6 +473,9 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       missingRowCountForDefaultTopN: 4,
       missingSummarizableRowCountForDefaultTopN: 4,
       missingTitleRowCountForDefaultTopN: 4,
+      canSupportDefaultTopNDelivery: false,
+      missingUniqueTargetRefCountForDefaultTopN: 4,
+      deliveryNextRequiredCheck: 'collect_more_rows_before_top_n_delivery',
       fieldCoverageStatus: 'insufficient_title_fields',
     });
 
@@ -495,6 +499,9 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       missingRowCountForDefaultTopN: 0,
       missingSummarizableRowCountForDefaultTopN: 0,
       missingTitleRowCountForDefaultTopN: 0,
+      canSupportDefaultTopNDelivery: true,
+      missingUniqueTargetRefCountForDefaultTopN: 0,
+      deliveryNextRequiredCheck: 'top_n_delivery_ready',
       fieldCoverageStatus: 'structured_summary_fields_ready',
       nextRequiredCheck: 'accumulated_rows_ready_for_top_n_summary',
       summaryNextRequiredCheck: 'top_n_summary_ready',
@@ -520,6 +527,9 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       canSupportDefaultTopNSummary: true,
       canSupportDefaultTopNFieldSummary: false,
       missingTitleRowCountForDefaultTopN: 0,
+      canSupportDefaultTopNDelivery: false,
+      missingUniqueTargetRefCountForDefaultTopN: 0,
+      deliveryNextRequiredCheck: 'collect_structured_fields_before_top_n_delivery',
       fieldCoverageStatus: 'title_only_fields',
       summaryQualityNextRequiredCheck: 'collect_supporting_text_or_detail_before_rich_summary',
     });
@@ -544,9 +554,32 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       missingRowCountForDefaultTopN: 0,
       missingSummarizableRowCountForDefaultTopN: 10,
       missingTitleRowCountForDefaultTopN: 10,
+      canSupportDefaultTopNDelivery: false,
+      missingUniqueTargetRefCountForDefaultTopN: 0,
+      deliveryNextRequiredCheck: 'collect_structured_fields_before_top_n_delivery',
       fieldCoverageStatus: 'insufficient_title_fields',
       summaryNextRequiredCheck: 'more_rows_or_text_fields_required_before_top_n_summary',
       summaryQualityNextRequiredCheck: 'collect_more_titled_rows_before_top_n_summary',
+    });
+  });
+
+  it('does not mark default top-N delivery ready when rows share too few targetRefs', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+
+    const evidence = ctx.noteDomRegionRowsReadback(
+      makeVisibleRegionRows(1, 10, { duplicateTargetRefs: true }),
+    );
+
+    expect(evidence).toMatchObject({
+      status: 'ready_for_default_top_n',
+      uniqueTargetableRowCount: 10,
+      uniqueTitleRowCount: 10,
+      uniqueSupportingTextRowCount: 10,
+      uniqueTargetRefCount: 1,
+      canSupportDefaultTopNFieldSummary: true,
+      canSupportDefaultTopNDelivery: false,
+      missingUniqueTargetRefCountForDefaultTopN: 9,
+      deliveryNextRequiredCheck: 'collect_more_unique_target_refs_before_top_n_delivery',
     });
   });
 
@@ -594,6 +627,9 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       missingRowCountForDefaultTopN: 0,
       missingSummarizableRowCountForDefaultTopN: 0,
       missingTitleRowCountForDefaultTopN: 0,
+      canSupportDefaultTopNDelivery: true,
+      missingUniqueTargetRefCountForDefaultTopN: 0,
+      deliveryNextRequiredCheck: 'top_n_delivery_ready',
     });
     expect(ctx.peekDomRegionRowsReadbackAccumulationEvidence({ tabId: 8 })).toBeNull();
 
@@ -1023,6 +1059,7 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
         'region_state_postcondition',
         'dom_region_rows_readback',
         'top_n_field_coverage',
+        'top_n_delivery_readiness',
       ],
       reason: 'region_state_search_results_updated_passed:result_collection_changed_after_action',
       handoffSummary: {
@@ -1037,6 +1074,7 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
             'region_state_postcondition',
             'dom_region_rows_readback',
             'top_n_field_coverage',
+            'top_n_delivery_readiness',
           ],
         },
       },
@@ -1179,6 +1217,40 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
       evidenceKinds: ['region_state_postcondition', 'dom_region_rows_readback'],
       reason:
         'region_state_search_results_updated_not_proven:dom_region_rows_readback_not_enough_titled_rows_for_default_top_n_summary',
+    });
+  });
+
+  it('blocks search-task resume when top-N rows do not expose enough unique targetRefs', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_search_submit_duplicate_target_refs',
+            kind: 'search_results_updated',
+            verdict: 'passed',
+            reason: 'result_collection_changed_after_action',
+            beforeSummary: ['content_list:loaded:before'],
+            afterSummary: ['content_list:loaded:after'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+    ctx.noteDomRegionRowsReadback(
+      makeVisibleRegionRows(1, 10, { sourceTabId: 9, duplicateTargetRefs: true }),
+    );
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_unknown_not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'verify_postcondition',
+      evidenceKinds: ['region_state_postcondition', 'dom_region_rows_readback'],
+      reason:
+        'region_state_search_results_updated_not_proven:dom_region_rows_readback_not_enough_unique_target_refs_for_default_top_n_delivery',
     });
   });
 
