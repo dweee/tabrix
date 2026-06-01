@@ -133,6 +133,33 @@ function detailRegion(label = 'Alpha 1 insight detail body'): ReadPageRegion[] {
   ];
 }
 
+function summaryReadyDetailRegion(label = 'Alpha 1 insight detail body'): ReadPageRegion[] {
+  return [
+    region('content', 'detail_open_candidate', {
+      objects: [
+        {
+          objectId: 'detail-title',
+          label: 'Alpha launch checklist',
+          objectType: 'title',
+          actionTypes: [],
+          targetability: 'not_clickable',
+          confidence: 0.8,
+          reason: 'deterministic detail title fixture',
+        },
+        {
+          objectId: 'detail-body',
+          label,
+          objectType: 'doc_block',
+          actionTypes: [],
+          targetability: 'not_clickable',
+          confidence: 0.8,
+          reason: 'deterministic detail body fixture',
+        },
+      ],
+    }),
+  ];
+}
+
 function metadataOnlyDetailRegion(
   label = 'Alpha launch checklist saved by 12 users',
 ): ReadPageRegion[] {
@@ -578,7 +605,7 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
     expect(result.reason).toBe('result_collection_unchanged_after_action');
   });
 
-  it('passes detail_opened only when a semantically matching summary-ready detail content region replaces a result collection', () => {
+  it('keeps detail_opened unknown when the matching detail readback has only one body object', () => {
     const result = verifyRegionStatePostcondition({
       kind: 'detail_opened',
       actionId: 'act-open-detail',
@@ -587,6 +614,40 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
         resultRow('2', 'entry', 'Beta research note'),
       ),
       afterRegions: detailRegion('Alpha launch checklist expanded details'),
+      targetRefs: ['tgt_row_1'],
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('unknown');
+    expect(result.reason).toBe('detail_field_readback_not_ready_for_summary');
+    expect(result.detailFieldReadbackEvidence).toMatchObject({
+      kind: 'detail_field_readback',
+      status: 'partial_fields_only',
+      targetBindingProven: true,
+      semanticMatch: 'matched',
+      canSupportDetailSummary: false,
+      fieldCounts: {
+        totalStructuredObjects: 1,
+        bodyLikeObjects: 1,
+        titleLikeObjects: 0,
+        metadataLikeObjects: 0,
+      },
+      nextRequiredCheck: 'fresh_detail_read_or_more_structured_fields_required',
+    });
+    expect(JSON.stringify(result.detailFieldReadbackEvidence)).not.toContain(
+      'Alpha launch checklist',
+    );
+  });
+
+  it('passes detail_opened only when a semantically matching summary-ready detail content region replaces a result collection', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'detail_opened',
+      actionId: 'act-open-detail',
+      beforeRegions: resultCollection(
+        resultRow('1', 'record', 'Alpha launch checklist'),
+        resultRow('2', 'entry', 'Beta research note'),
+      ),
+      afterRegions: summaryReadyDetailRegion('Alpha launch checklist expanded details'),
       targetRefs: ['tgt_row_1'],
       now: () => PRODUCED_AT,
     });
@@ -600,7 +661,8 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
       semanticMatch: 'matched',
       canSupportDetailSummary: true,
       fieldCounts: {
-        totalStructuredObjects: 1,
+        totalStructuredObjects: 2,
+        titleLikeObjects: 1,
         bodyLikeObjects: 1,
       },
       nextRequiredCheck: 'detail_fields_ready_for_summary',

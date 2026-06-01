@@ -4271,10 +4271,18 @@ describe('handleToolCall execution wrapper', () => {
         confidence: 0.88,
         objects: [
           {
-            objectId: `${refPrefix}_detail`,
+            objectId: `${refPrefix}_detail_title`,
+            label: 'Alpha shared insight',
+            objectType: 'title',
+            actionTypes: [],
+            targetability: 'not_targetable',
+            confidence: 0.84,
+            reason: 'test detail title',
+          },
+          {
+            objectId: `${refPrefix}_detail_body`,
             label: 'Alpha shared insight detail',
             objectType: 'record',
-            targetRef: `ref_${refPrefix}_detail`,
             actionTypes: [],
             targetability: 'not_targetable',
             confidence: 0.84,

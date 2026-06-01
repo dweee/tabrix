@@ -1197,7 +1197,13 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
           label: 'alpha launch poster detail',
           objects: [
             {
-              objectId: 'detail-alpha-launch-poster',
+              objectId: 'detail-alpha-launch-poster-title',
+              label: 'alpha launch poster',
+              objectType: 'title',
+              confidence: 0.8,
+            },
+            {
+              objectId: 'detail-alpha-launch-poster-body',
               label: 'alpha launch poster expanded content',
               objectType: 'article',
               confidence: 0.8,

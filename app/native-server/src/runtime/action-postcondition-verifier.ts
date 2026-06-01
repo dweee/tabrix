@@ -568,11 +568,9 @@ function buildDetailFieldReadbackEvidence(input: {
   afterDetailRegions: readonly ReadPageRegion[];
 }): RegionStateDetailFieldReadbackEvidence {
   const counts = countStructuredDetailFields(input.afterDetailRegions);
+  const hasSummaryReadyFieldShape = hasSummaryReadyDetailFieldShape(counts);
   const canSupportDetailSummary =
-    input.targetBindingProven &&
-    input.semanticMatch === 'matched' &&
-    (counts.bodyLikeObjects > 0 || counts.titleLikeObjects > 0) &&
-    counts.totalStructuredObjects > 0;
+    input.targetBindingProven && input.semanticMatch === 'matched' && hasSummaryReadyFieldShape;
   const status: RegionStateDetailFieldReadbackStatus =
     counts.totalStructuredObjects === 0
       ? 'not_available'
@@ -594,8 +592,17 @@ function buildDetailFieldReadbackEvidence(input: {
     fieldCounts: counts,
     nextRequiredCheck,
     claimBoundary:
-      'detail field readback proves only structured visible detail objects and target semantic match; it does not prove full article completeness, ranking accuracy, or private live-site acceptance',
+      'detail field readback proves only minimum structured visible detail fields and target semantic match; it does not prove full article completeness, ranking accuracy, or private live-site acceptance',
   };
+}
+
+function hasSummaryReadyDetailFieldShape(
+  counts: RegionStateDetailFieldReadbackEvidence['fieldCounts'],
+): boolean {
+  if (counts.bodyLikeObjects <= 0) return false;
+  return (
+    counts.titleLikeObjects > 0 || counts.metadataLikeObjects > 0 || counts.bodyLikeObjects >= 2
+  );
 }
 
 function countStructuredDetailFields(
