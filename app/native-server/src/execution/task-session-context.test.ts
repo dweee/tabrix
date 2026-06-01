@@ -1417,6 +1417,19 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
 
   it('allows detail-task resume only when detail readback is summary-ready', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.notePageInteraction({
+      action: 'chrome_click_element',
+      tabId: 9,
+      candidateActionId: 'ca_open_detail',
+      candidateActionIntent: 'content.open_detail',
+      actionKind: 'click',
+      targetRefs: ['tgt_result_1'],
+    });
+    expect(ctx.consumePendingPageInteraction(9)).toMatchObject({
+      candidateActionId: 'ca_open_detail',
+      candidateActionIntent: 'content.open_detail',
+      targetRefs: ['tgt_result_1'],
+    });
     ctx.noteRegionStatePostconditionsForCloseout({
       tabId: 9,
       regionStatePostconditions: [
@@ -1456,8 +1469,62 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
       status: 'postcondition_passed_ready',
       canResumeOriginalTask: true,
       nextStep: 'continue_original_task',
-      evidenceKinds: ['region_state_postcondition'],
+      evidenceKinds: [
+        'region_state_postcondition',
+        'detail_field_readback',
+        'detail_action_binding',
+      ],
       reason: 'region_state_detail_opened_passed:content_detail_region_semantic_match_after_action',
+    });
+  });
+
+  it('blocks detail-task resume when detail_opened is not bound to the open-detail action', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 9,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_open_detail_unbound',
+            kind: 'detail_opened',
+            verdict: 'passed',
+            reason: 'content_detail_region_semantic_match_after_action',
+            beforeSummary: ['content:result_collection_candidate:before'],
+            afterSummary: ['content:detail_open_candidate:after'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic detail resume fixture only',
+            detailFieldReadbackEvidence: {
+              kind: 'detail_field_readback',
+              status: 'structured_fields_present',
+              targetBindingProven: true,
+              semanticMatch: 'matched',
+              canSupportDetailSummary: true,
+              fieldCounts: {
+                totalStructuredObjects: 2,
+                titleLikeObjects: 1,
+                bodyLikeObjects: 1,
+                metadataLikeObjects: 0,
+                actionableObjects: 0,
+              },
+              nextRequiredCheck: 'detail_fields_ready_for_summary',
+              claimBoundary: 'detail field readback fixture only',
+            },
+          },
+        },
+      ],
+    });
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 9 })).toMatchObject({
+      status: 'postcondition_unknown_not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'verify_postcondition',
+      evidenceKinds: [
+        'region_state_postcondition',
+        'detail_field_readback',
+        'detail_action_binding',
+      ],
+      reason: 'region_state_detail_opened_not_proven:detail_opened_action_binding_not_proven',
     });
   });
 

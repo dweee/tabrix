@@ -410,6 +410,16 @@ interface TaskPageRegionSnapshot {
   pageRegions: ReadPageRegion[];
 }
 
+interface TaskVerifiedBusinessInteractionBinding {
+  tabId: number | null;
+  actionId: string;
+  actionKind: ActionKind;
+  candidateActionIntent: string | null;
+  targetRefs: string[];
+  postconditionKind: TaskRegionStatePostconditionKind;
+  producedAtMs: number;
+}
+
 export interface TaskAuthResumeGate {
   status: ReadPageAuthResumeVerification['status'];
   nextTool: ReadPageAuthResumeVerification['nextTool'];
@@ -692,6 +702,9 @@ export class TaskSessionContext {
   private lastPageRegionSnapshot: TaskPageRegionSnapshot | null = null;
   private lastAuthResumeGate: TaskAuthResumeGate | null = null;
   private pendingPageInteraction: TaskPageInteractionSnapshot | null = null;
+  private lastConsumedPageInteractionForPostcondition: TaskPageInteractionSnapshot | null = null;
+  private lastVerifiedBusinessInteractionBinding: TaskVerifiedBusinessInteractionBinding | null =
+    null;
   private readonly regionStatePostconditionsForCloseout: TaskRegionStatePostconditionSnapshot[] =
     [];
   private pageProjectionDeltaCount = 0;
@@ -1214,6 +1227,7 @@ export class TaskSessionContext {
     }> | null;
   }): void {
     const normalizedTabId = normalizePositiveTabId(input.tabId);
+    const consumedInteraction = this.lastConsumedPageInteractionForPostcondition;
     for (const item of input.regionStatePostconditions ?? []) {
       const actionKind = normalizeActionKind(item.actionKind) ?? 'unknown';
       const result = cloneTaskRegionStatePostconditionResult(item.result);
@@ -1223,7 +1237,17 @@ export class TaskSessionContext {
         actionKind,
         result,
       });
+      const verifiedBinding = buildVerifiedBusinessInteractionBinding({
+        consumedInteraction,
+        tabId: normalizedTabId,
+        actionKind,
+        result,
+      });
+      if (verifiedBinding) {
+        this.lastVerifiedBusinessInteractionBinding = verifiedBinding;
+      }
     }
+    this.lastConsumedPageInteractionForPostcondition = null;
     if (
       this.regionStatePostconditionsForCloseout.length >
       MAX_REGION_STATE_POSTCONDITIONS_FOR_CLOSEOUT
@@ -1338,6 +1362,9 @@ export class TaskSessionContext {
     if (latestPostcondition?.result.verdict === 'passed') {
       const detailResumeBlockReason = detailPostconditionResumeBlockReason(
         latestPostcondition.result,
+        latestPostcondition.tabId,
+        tabId,
+        this.lastVerifiedBusinessInteractionBinding,
       );
       if (detailResumeBlockReason) {
         return withTaskResumeHandoffSummary({
@@ -1345,7 +1372,10 @@ export class TaskSessionContext {
           canResumeOriginalTask: false,
           nextStep: 'verify_postcondition',
           tabId,
-          evidenceKinds: ['region_state_postcondition', 'detail_field_readback'],
+          evidenceKinds:
+            detailResumeBlockReason === 'detail_opened_action_binding_not_proven'
+              ? ['region_state_postcondition', 'detail_field_readback', 'detail_action_binding']
+              : ['region_state_postcondition', 'detail_field_readback'],
           reason: `region_state_${latestPostcondition.result.kind}_not_proven:${detailResumeBlockReason}`,
           claimBoundary: latestPostcondition.result.claimBoundary,
         });
@@ -1475,6 +1505,7 @@ export class TaskSessionContext {
     this.liveObservedApiEvidence.length = 0;
     this.visibleRegionRows = null;
     this.domRegionRowsReadbackAccumulator = null;
+    this.lastVerifiedBusinessInteractionBinding = null;
     const tabId =
       typeof input.tabId === 'number' && Number.isInteger(input.tabId) && input.tabId > 0
         ? input.tabId
@@ -1510,10 +1541,16 @@ export class TaskSessionContext {
       return null;
     }
     this.pendingPageInteraction = null;
-    return {
+    const snapshot = {
       ...pending,
       targetRefs: [...pending.targetRefs],
       beforePageRegions: cloneReadPageRegions(pending.beforePageRegions),
+    };
+    this.lastConsumedPageInteractionForPostcondition = snapshot;
+    return {
+      ...snapshot,
+      targetRefs: [...snapshot.targetRefs],
+      beforePageRegions: cloneReadPageRegions(snapshot.beforePageRegions),
     };
   }
 
@@ -1987,6 +2024,9 @@ function selectLatestRegionStatePostconditionForResume(
 
 function detailPostconditionResumeBlockReason(
   result: TaskRegionStatePostconditionResultSnapshot,
+  postconditionTabId: number | null,
+  requestedTabId: number | null,
+  verifiedBinding: TaskVerifiedBusinessInteractionBinding | null,
 ): string | null {
   if (result.kind !== 'detail_opened') return null;
   const evidence = result.detailFieldReadbackEvidence;
@@ -2000,7 +2040,70 @@ function detailPostconditionResumeBlockReason(
   ) {
     return 'detail_field_readback_not_ready_for_summary';
   }
+  if (
+    !isDetailPostconditionBoundToVerifiedInteraction(
+      result,
+      postconditionTabId,
+      requestedTabId,
+      verifiedBinding,
+    )
+  ) {
+    return 'detail_opened_action_binding_not_proven';
+  }
   return null;
+}
+
+function buildVerifiedBusinessInteractionBinding(input: {
+  consumedInteraction: TaskPageInteractionSnapshot | null;
+  tabId: number | null;
+  actionKind: ActionKind;
+  result: TaskRegionStatePostconditionResultSnapshot;
+}): TaskVerifiedBusinessInteractionBinding | null {
+  if (input.result.verdict !== 'passed') return null;
+  const consumed = input.consumedInteraction;
+  if (!consumed) return null;
+  const consumedActionId = normalizeIdentifier(consumed.candidateActionId) ?? consumed.action;
+  if (consumedActionId !== input.result.actionId) return null;
+  if (consumed.tabId !== null && input.tabId !== null && consumed.tabId !== input.tabId) {
+    return null;
+  }
+  return {
+    tabId: input.tabId ?? consumed.tabId,
+    actionId: input.result.actionId,
+    actionKind: input.actionKind,
+    candidateActionIntent: normalizeIdentifier(consumed.candidateActionIntent),
+    targetRefs: [...consumed.targetRefs],
+    postconditionKind: input.result.kind,
+    producedAtMs: input.result.producedAtMs,
+  };
+}
+
+function isDetailPostconditionBoundToVerifiedInteraction(
+  result: TaskRegionStatePostconditionResultSnapshot,
+  postconditionTabId: number | null,
+  requestedTabId: number | null,
+  verifiedBinding: TaskVerifiedBusinessInteractionBinding | null,
+): boolean {
+  if (!verifiedBinding) return false;
+  if (verifiedBinding.postconditionKind !== 'detail_opened') return false;
+  if (verifiedBinding.actionId !== result.actionId) return false;
+  if (verifiedBinding.candidateActionIntent !== 'content.open_detail') return false;
+  if (verifiedBinding.targetRefs.length === 0) return false;
+  if (
+    requestedTabId !== null &&
+    verifiedBinding.tabId !== null &&
+    requestedTabId !== verifiedBinding.tabId
+  ) {
+    return false;
+  }
+  if (
+    postconditionTabId !== null &&
+    verifiedBinding.tabId !== null &&
+    postconditionTabId !== verifiedBinding.tabId
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function searchPostconditionResumeBlockReason(
@@ -2045,6 +2148,9 @@ function passedPostconditionEvidenceKindsForResume(
       'top_n_delivery_readiness',
       'top_n_single_snapshot_delivery',
     ];
+  }
+  if (kind === 'detail_opened') {
+    return ['region_state_postcondition', 'detail_field_readback', 'detail_action_binding'];
   }
   return ['region_state_postcondition'];
 }
