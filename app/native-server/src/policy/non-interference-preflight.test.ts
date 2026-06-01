@@ -139,6 +139,130 @@ describe('evaluateNonInterferencePreflight', () => {
     expect(verdict.audit.reason).toBe('run_owned_tab');
   });
 
+  it('blocks continuation actions when the matching-tab business postcondition failed', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRunOwnedTab(42);
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 42,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_search_submit',
+            kind: 'search_results_updated',
+            verdict: 'failed',
+            reason: 'result_collection_unchanged_after_action',
+            beforeSummary: ['content_list:loaded:before'],
+            afterSummary: ['content_list:loaded:before'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+
+    const verdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.CLICK,
+      args: { tabId: 42, ref: 'ref_next_result', userConfirmed: true },
+      taskContext: ctx,
+    });
+
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.message).toContain('previous business postcondition failed');
+    expect(verdict.audit).toMatchObject({
+      verdict: 'block',
+      reason: 'task_resume_readiness_not_proven',
+      targetTabId: 42,
+      taskResumeReadiness: {
+        status: 'postcondition_failed_stop',
+        canResumeOriginalTask: false,
+        nextStep: 'stop_not_proven',
+      },
+    });
+  });
+
+  it('requires fresh verification when the matching-tab business postcondition is unknown', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRunOwnedTab(42);
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 42,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_search_submit',
+            kind: 'search_results_updated',
+            verdict: 'unknown',
+            reason: 'result_collection_not_comparable',
+            beforeSummary: [],
+            afterSummary: [],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+
+    const verdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.FILL,
+      args: { tabId: 42, selector: '#q', value: 'poster', userConfirmed: true },
+      taskContext: ctx,
+    });
+
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.message).toContain('forceRefresh=true');
+    expect(verdict.audit).toMatchObject({
+      verdict: 'collaboration_required',
+      reason: 'task_resume_readiness_not_proven',
+      targetTabId: 42,
+      taskResumeReadiness: {
+        status: 'postcondition_unknown_not_proven',
+        canResumeOriginalTask: false,
+        nextStep: 'verify_postcondition',
+      },
+    });
+  });
+
+  it('does not block cleanup or unrelated tabs with empty resume evidence', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRunOwnedTab(42);
+    ctx.noteRunOwnedTab(99);
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 42,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_unknown',
+            kind: 'search_results_updated',
+            verdict: 'unknown',
+            reason: 'result_collection_not_comparable',
+            beforeSummary: [],
+            afterSummary: [],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+
+    const cleanup = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.CLOSE_TABS,
+      args: { tabIds: [42] },
+      taskContext: ctx,
+    });
+    const unrelated = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.CLICK,
+      args: { tabId: 99, ref: 'ref_unrelated' },
+      taskContext: ctx,
+    });
+
+    expect(cleanup.allowed).toBe(true);
+    expect(cleanup.audit.reason).toBe('run_owned_tab');
+    expect(unrelated.allowed).toBe(true);
+    expect(unrelated.audit.reason).toBe('run_owned_tab');
+  });
+
   it('allows new-tab navigation so the caller can create a run-owned tab', () => {
     const verdict = evaluateNonInterferencePreflight({
       toolName: TOOL_NAMES.BROWSER.NAVIGATE,

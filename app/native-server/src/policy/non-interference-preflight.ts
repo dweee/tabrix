@@ -3,7 +3,11 @@ import {
   type BrowserPolicyAuditEvent,
   type BrowserRuntimePolicy,
 } from '@tabrix/shared';
-import type { TaskAuthResumeGate, TaskSessionContext } from '../execution/task-session-context';
+import type {
+  TaskAuthResumeGate,
+  TaskResumeReadinessSnapshot,
+  TaskSessionContext,
+} from '../execution/task-session-context';
 
 export type NonInterferenceVerdictReason =
   | 'not_impact_tool'
@@ -13,6 +17,7 @@ export type NonInterferenceVerdictReason =
   | 'user_confirmed'
   | 'collaboration_requested'
   | 'auth_resume_verification_required'
+  | 'task_resume_readiness_not_proven'
   | 'active_user_tab_unprotected'
   | 'non_run_owned_tab'
   | 'close_non_run_owned_tab';
@@ -29,6 +34,7 @@ export interface RuntimePolicyAudit {
   targetTabIds: number[];
   runOwnedTabIds: number[];
   authResumeGate?: TaskAuthResumeGate;
+  taskResumeReadiness?: TaskResumeReadinessSnapshot;
   browserPolicyAudit: BrowserPolicyAuditEvent[];
 }
 
@@ -79,6 +85,39 @@ export function evaluateNonInterferencePreflight(input: {
       targetTabIds,
       runOwnedTabIds,
       authResumeGate,
+    );
+  }
+
+  const taskResumeReadiness = input.taskContext?.buildTaskResumeReadiness({
+    tabId: targetTabId,
+  });
+  if (
+    taskResumeReadiness &&
+    shouldGateImpactActionForTaskResumeReadiness(input.toolName, taskResumeReadiness)
+  ) {
+    const message = buildTaskResumeReadinessMessage(taskResumeReadiness);
+    if (taskResumeReadiness.nextStep === 'stop_not_proven') {
+      return block(
+        input,
+        mode,
+        'task_resume_readiness_not_proven',
+        message,
+        targetTabId,
+        targetTabIds,
+        runOwnedTabIds,
+        taskResumeReadiness,
+      );
+    }
+    return collaborationRequired(
+      input,
+      mode,
+      'task_resume_readiness_not_proven',
+      message,
+      targetTabId,
+      targetTabIds,
+      runOwnedTabIds,
+      undefined,
+      taskResumeReadiness,
     );
   }
 
@@ -285,6 +324,7 @@ function block(
   targetTabId: number | null,
   targetTabIds: number[],
   runOwnedTabIds: number[],
+  taskResumeReadiness?: TaskResumeReadinessSnapshot,
 ): NonInterferencePreflightVerdict {
   return {
     allowed: false,
@@ -298,6 +338,7 @@ function block(
       targetTabId,
       targetTabIds,
       runOwnedTabIds,
+      ...(taskResumeReadiness ? { taskResumeReadiness } : {}),
       browserPolicyAudit: buildBrowserPolicyAudit({
         reason,
         verdict: 'block',
@@ -316,6 +357,7 @@ function collaborationRequired(
   targetTabIds: number[],
   runOwnedTabIds: number[],
   authResumeGate?: TaskAuthResumeGate,
+  taskResumeReadiness?: TaskResumeReadinessSnapshot,
 ): NonInterferencePreflightVerdict {
   return {
     allowed: false,
@@ -330,6 +372,7 @@ function collaborationRequired(
       targetTabIds,
       runOwnedTabIds,
       ...(authResumeGate ? { authResumeGate } : {}),
+      ...(taskResumeReadiness ? { taskResumeReadiness } : {}),
       browserPolicyAudit: buildBrowserPolicyAudit({
         reason,
         verdict: 'collaboration_required',
@@ -339,9 +382,31 @@ function collaborationRequired(
   };
 }
 
+function shouldGateImpactActionForTaskResumeReadiness(
+  toolName: string,
+  readiness: TaskResumeReadinessSnapshot,
+): boolean {
+  if (toolName === TOOL_NAMES.BROWSER.CLOSE_TABS) return false;
+  if (readiness.canResumeOriginalTask) return false;
+  if (readiness.evidenceKinds.length === 0) return false;
+  return (
+    readiness.status === 'postcondition_unknown_not_proven' ||
+    readiness.status === 'postcondition_failed_stop' ||
+    readiness.status === 'blocked_by_auth_verification'
+  );
+}
+
 function buildAuthResumeGateMessage(gate: TaskAuthResumeGate): string {
   const targetTabHint = Number.isInteger(gate.targetTabId) ? ` on tabId ${gate.targetTabId}` : '';
   return `Blocked impact action because auth/user collaboration resume is not proven. Call chrome_read_page with forceRefresh=true${targetTabHint}, then verify the required postcondition before continuing the task.`;
+}
+
+function buildTaskResumeReadinessMessage(readiness: TaskResumeReadinessSnapshot): string {
+  const targetTabHint = Number.isInteger(readiness.tabId) ? ` on tabId ${readiness.tabId}` : '';
+  if (readiness.nextStep === 'stop_not_proven') {
+    return `Blocked impact action because the previous business postcondition failed${targetTabHint}. Stop or run chrome_read_page with forceRefresh=true to collect new evidence before continuing the task.`;
+  }
+  return `Impact action requires task-resume verification${targetTabHint}. Run chrome_read_page with forceRefresh=true and verify the business postcondition before continuing the task.`;
 }
 
 function buildBrowserPolicyAudit(input: {
