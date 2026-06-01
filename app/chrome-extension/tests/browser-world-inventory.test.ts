@@ -1574,6 +1574,30 @@ describe('browser world inventory', () => {
     expect(resynced.baselineReadiness.reason).toContain('missed events before this resync');
   });
 
+  it('uses the maintained event-listener baseline without a time-only resync', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+
+    initBrowserWorldInventory();
+    await refreshBrowserWorldSnapshot({ ensureBaselineReady: true });
+    const callsAfterInitialRead = (chrome.windows.getAll as ReturnType<typeof vi.fn>).mock.calls
+      .length;
+
+    vi.setSystemTime(7_001);
+    const snapshot = await refreshBrowserWorldSnapshot({ ensureBaselineReady: true });
+
+    expect(chrome.windows.getAll).toHaveBeenCalledTimes(callsAfterInitialRead);
+    expect(snapshot.baselineReadiness).toMatchObject({
+      ready: true,
+      status: 'fresh',
+      continuity: 'continuous',
+      resyncAttempted: false,
+      resyncSucceeded: null,
+      snapshotAgeMs: 6_001,
+    });
+    expect(snapshot.baselineReadiness.reason).toContain('active browser event listeners');
+  });
+
   it('marks an old local snapshot as stale when no baseline-ready read is requested', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
@@ -1592,6 +1616,29 @@ describe('browser world inventory', () => {
       snapshotAgeMs: 6_001,
     });
     expect(stale.baselineReadiness.reason).toContain('local baseline is stale');
+  });
+
+  it('keeps an old local snapshot ready when browser event listeners are attached', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+
+    initBrowserWorldInventory();
+    await refreshBrowserWorldSnapshot({ ensureBaselineReady: true });
+    const callsAfterInitialRead = (chrome.windows.getAll as ReturnType<typeof vi.fn>).mock.calls
+      .length;
+
+    vi.setSystemTime(7_001);
+    const snapshot = await getBrowserWorldSnapshot();
+
+    expect(chrome.windows.getAll).toHaveBeenCalledTimes(callsAfterInitialRead);
+    expect(snapshot.baselineReadiness).toMatchObject({
+      ready: true,
+      status: 'fresh',
+      continuity: 'continuous',
+      resyncAttempted: false,
+      snapshotAgeMs: 6_001,
+    });
+    expect(snapshot.baselineReadiness.reason).toContain('active browser event listeners');
   });
 
   it('reports unknown readiness when Chrome inventory is unavailable', async () => {

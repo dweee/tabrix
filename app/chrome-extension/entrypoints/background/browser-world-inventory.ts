@@ -1094,6 +1094,14 @@ function isFreshBaselineAge(snapshotAgeMs: number | null): boolean {
   return initialized && snapshotAgeMs !== null && snapshotAgeMs <= BASELINE_READY_STALE_AFTER_MS;
 }
 
+function isContinuousBaselineMaintained(snapshotAgeMs: number | null): boolean {
+  return initialized && attached && snapshotAgeMs !== null && lastObservedAtMs !== null;
+}
+
+function isBaselineReadyForUse(snapshotAgeMs: number | null): boolean {
+  return isFreshBaselineAge(snapshotAgeMs) || isContinuousBaselineMaintained(snapshotAgeMs);
+}
+
 function setBaselineReadiness(args: {
   status: BrowserWorldBaselineReadinessStatus;
   continuity: BrowserWorldBaselineContinuity;
@@ -1129,6 +1137,17 @@ function markBaselineReadinessFromCurrentState(reasonPrefix: string): void {
         lastRefreshDecision === 'full_chrome_resync'
           ? `${reasonPrefix}; BrowserWorld current state was rebuilt from Chrome, but missed events before this resync are not proven.`
           : `${reasonPrefix}; BrowserWorld local baseline is fresh enough to use without a full Chrome resync.`,
+    });
+    return;
+  }
+  if (isContinuousBaselineMaintained(age)) {
+    setBaselineReadiness({
+      status: 'fresh',
+      continuity: 'continuous',
+      checkedAtMs: checkedAt,
+      resyncAttempted: false,
+      resyncSucceeded: null,
+      reason: `${reasonPrefix}; BrowserWorld local baseline is maintained by active browser event listeners, so a time-only resync is not required before reading window/tab state.`,
     });
     return;
   }
@@ -1548,6 +1567,18 @@ async function ensureBrowserWorldBaselineReady(): Promise<void> {
     });
     return;
   }
+  if (isContinuousBaselineMaintained(age)) {
+    setBaselineReadiness({
+      status: 'fresh',
+      continuity: 'continuous',
+      checkedAtMs: checkedAt,
+      resyncAttempted: false,
+      resyncSucceeded: null,
+      reason:
+        'BrowserWorld baseline is maintained by active browser event listeners; get_windows_and_tabs can return the local snapshot without a time-only Chrome resync.',
+    });
+    return;
+  }
 
   if (typeof chrome?.windows?.getAll !== 'function') {
     setBaselineReadiness({
@@ -1671,7 +1702,7 @@ function buildSnapshot(): BrowserWorldSnapshot {
     baselineReadiness: {
       ready:
         (lastBaselineReadinessStatus === 'fresh' || lastBaselineReadinessStatus === 'resynced') &&
-        isFreshBaselineAge(snapshotAgeMs),
+        isBaselineReadyForUse(snapshotAgeMs),
       status: lastBaselineReadinessStatus,
       continuity: lastBaselineContinuity,
       checkedAtMs: lastBaselineCheckedAtMs,
