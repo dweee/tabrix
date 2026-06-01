@@ -22,17 +22,25 @@ import type {
 function makeVisibleRegionRows(
   start: number,
   count: number,
-  options: { sourceTabId?: number | null; sourceRegion?: string; includeText?: boolean } = {},
+  options: {
+    sourceTabId?: number | null;
+    sourceRegion?: string;
+    includeText?: boolean;
+    includeSupportingText?: boolean;
+    includeMetaText?: boolean;
+  } = {},
 ): TaskVisibleRegionRowsData {
   const includeText = options.includeText ?? true;
+  const includeSupportingText = options.includeSupportingText ?? includeText;
+  const includeMetaText = options.includeMetaText ?? false;
   const rows = Array.from({ length: count }, (_, index) => {
     const n = start + index;
     return {
       rowId: `row_${n}`,
       title: includeText ? `Result ${n}` : '',
-      primaryText: includeText ? `Result ${n} summary` : null,
+      primaryText: includeSupportingText ? `Result ${n} summary` : null,
       secondaryText: null,
-      metaText: null,
+      metaText: includeMetaText ? `Result ${n} metadata` : null,
       interactionText: 'Open',
       targetRef: `ref_${n}`,
       sourceRegion: options.sourceRegion ?? 'result_list',
@@ -455,10 +463,16 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       uniqueReliableRowCount: 6,
       uniqueTargetableRowCount: 6,
       uniqueSummarizableRowCount: 6,
+      uniqueTitleRowCount: 6,
+      uniqueSupportingTextRowCount: 6,
+      uniqueMetadataRowCount: 0,
       canSatisfyDefaultTopN: false,
       canSupportDefaultTopNSummary: false,
+      canSupportDefaultTopNFieldSummary: false,
       missingRowCountForDefaultTopN: 4,
       missingSummarizableRowCountForDefaultTopN: 4,
+      missingTitleRowCountForDefaultTopN: 4,
+      fieldCoverageStatus: 'insufficient_title_fields',
     });
 
     const second = ctx.noteDomRegionRowsReadback(makeVisibleRegionRows(5, 6));
@@ -472,12 +486,42 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       uniqueReliableRowCount: 10,
       uniqueTargetableRowCount: 10,
       uniqueSummarizableRowCount: 10,
+      uniqueTitleRowCount: 10,
+      uniqueSupportingTextRowCount: 10,
+      uniqueMetadataRowCount: 0,
       canSatisfyDefaultTopN: true,
       canSupportDefaultTopNSummary: true,
+      canSupportDefaultTopNFieldSummary: true,
       missingRowCountForDefaultTopN: 0,
       missingSummarizableRowCountForDefaultTopN: 0,
+      missingTitleRowCountForDefaultTopN: 0,
+      fieldCoverageStatus: 'structured_summary_fields_ready',
       nextRequiredCheck: 'accumulated_rows_ready_for_top_n_summary',
       summaryNextRequiredCheck: 'top_n_summary_ready',
+      summaryQualityNextRequiredCheck: 'structured_top_n_summary_ready',
+    });
+  });
+
+  it('marks title-only top-N rows as not rich enough for structured field summary', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+
+    const evidence = ctx.noteDomRegionRowsReadback(
+      makeVisibleRegionRows(1, 10, { includeSupportingText: false }),
+    );
+
+    expect(evidence).toMatchObject({
+      status: 'ready_for_default_top_n',
+      uniqueTargetableRowCount: 10,
+      uniqueSummarizableRowCount: 10,
+      uniqueTitleRowCount: 10,
+      uniqueSupportingTextRowCount: 0,
+      uniqueMetadataRowCount: 0,
+      canSatisfyDefaultTopN: true,
+      canSupportDefaultTopNSummary: true,
+      canSupportDefaultTopNFieldSummary: false,
+      missingTitleRowCountForDefaultTopN: 0,
+      fieldCoverageStatus: 'title_only_fields',
+      summaryQualityNextRequiredCheck: 'collect_supporting_text_or_detail_before_rich_summary',
     });
   });
 
@@ -492,11 +536,17 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       status: 'ready_for_default_top_n',
       uniqueTargetableRowCount: 10,
       uniqueSummarizableRowCount: 0,
+      uniqueTitleRowCount: 0,
+      uniqueSupportingTextRowCount: 0,
       canSatisfyDefaultTopN: true,
       canSupportDefaultTopNSummary: false,
+      canSupportDefaultTopNFieldSummary: false,
       missingRowCountForDefaultTopN: 0,
       missingSummarizableRowCountForDefaultTopN: 10,
+      missingTitleRowCountForDefaultTopN: 10,
+      fieldCoverageStatus: 'insufficient_title_fields',
       summaryNextRequiredCheck: 'more_rows_or_text_fields_required_before_top_n_summary',
+      summaryQualityNextRequiredCheck: 'collect_more_titled_rows_before_top_n_summary',
     });
   });
 
@@ -536,10 +586,14 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       observedReadCount: 2,
       uniqueTargetableRowCount: 10,
       uniqueSummarizableRowCount: 10,
+      uniqueTitleRowCount: 10,
+      uniqueSupportingTextRowCount: 10,
       canSatisfyDefaultTopN: true,
       canSupportDefaultTopNSummary: true,
+      canSupportDefaultTopNFieldSummary: true,
       missingRowCountForDefaultTopN: 0,
       missingSummarizableRowCountForDefaultTopN: 0,
+      missingTitleRowCountForDefaultTopN: 0,
     });
     expect(ctx.peekDomRegionRowsReadbackAccumulationEvidence({ tabId: 8 })).toBeNull();
 

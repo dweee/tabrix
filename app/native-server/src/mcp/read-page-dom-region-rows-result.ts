@@ -20,6 +20,10 @@ const MIN_RELIABLE_DOM_REGION_QUALITY = 0.7;
 const DEFAULT_TOP_N_READBACK_TARGET = 10;
 
 type TopNReadbackStatus = 'ready_for_default_top_n' | 'partial_rows_only';
+type TopNFieldCoverageStatus =
+  | 'structured_summary_fields_ready'
+  | 'title_only_fields'
+  | 'insufficient_title_fields';
 
 interface TopNReadbackEvidence {
   status: TopNReadbackStatus;
@@ -29,11 +33,21 @@ interface TopNReadbackEvidence {
   visibleRowCount: number;
   targetRefRowCount: number;
   summarizableRowCount: number;
+  titleRowCount: number;
+  supportingTextRowCount: number;
+  metadataRowCount: number;
   rowOrder: 'visual_order';
   canSatisfyDefaultTopN: boolean;
   missingRowCountForDefaultTopN: number;
   canSupportDefaultTopNSummary: boolean;
   missingSummarizableRowCountForDefaultTopN: number;
+  fieldCoverageStatus: TopNFieldCoverageStatus;
+  canSupportDefaultTopNFieldSummary: boolean;
+  missingTitleRowCountForDefaultTopN: number;
+  summaryQualityNextRequiredCheck:
+    | 'structured_top_n_summary_ready'
+    | 'collect_supporting_text_or_detail_before_rich_summary'
+    | 'collect_more_titled_rows_before_top_n_summary';
   nextRequiredCheck:
     | 'rows_ready_for_top_n_summary'
     | 'scroll_or_request_more_rows_before_claiming_top_n_complete';
@@ -136,14 +150,26 @@ function buildTopNReadbackEvidence(visibleRows: TaskVisibleRegionRowsData): TopN
   const visibleRowCount = Math.max(0, Math.floor(visibleRows.rowCount));
   const availableReliableRowCount = Math.min(visibleRows.rows.length, visibleRowCount);
   const targetRefRowCount = visibleRows.rows.filter((row) => Boolean(row.targetRef)).length;
-  const summarizableRowCount = visibleRows.rows
-    .slice(0, availableReliableRowCount)
-    .filter(isVisibleRegionRowSummarizable).length;
+  const reliableRows = visibleRows.rows.slice(0, availableReliableRowCount);
+  const summarizableRowCount = reliableRows.filter(isVisibleRegionRowSummarizable).length;
+  const titleRowCount = reliableRows.filter(
+    (row) => getVisibleRegionRowFieldCoverage(row).hasTitle,
+  ).length;
+  const supportingTextRowCount = reliableRows.filter(
+    (row) => getVisibleRegionRowFieldCoverage(row).hasSupportingText,
+  ).length;
+  const metadataRowCount = reliableRows.filter(
+    (row) => getVisibleRegionRowFieldCoverage(row).hasMetadata,
+  ).length;
   const usableTopNRowCount = Math.min(availableReliableRowCount, targetRefRowCount);
   const canSatisfyDefaultTopN =
     visibleRows.visibleRegionRowsUsed && usableTopNRowCount >= DEFAULT_TOP_N_READBACK_TARGET;
   const canSupportDefaultTopNSummary =
     visibleRows.visibleRegionRowsUsed && summarizableRowCount >= DEFAULT_TOP_N_READBACK_TARGET;
+  const canSupportDefaultTopNFieldSummary =
+    visibleRows.visibleRegionRowsUsed &&
+    titleRowCount >= DEFAULT_TOP_N_READBACK_TARGET &&
+    supportingTextRowCount + metadataRowCount >= DEFAULT_TOP_N_READBACK_TARGET;
   const missingRowCountForDefaultTopN = Math.max(
     0,
     DEFAULT_TOP_N_READBACK_TARGET - usableTopNRowCount,
@@ -152,6 +178,15 @@ function buildTopNReadbackEvidence(visibleRows: TaskVisibleRegionRowsData): TopN
     0,
     DEFAULT_TOP_N_READBACK_TARGET - summarizableRowCount,
   );
+  const missingTitleRowCountForDefaultTopN = Math.max(
+    0,
+    DEFAULT_TOP_N_READBACK_TARGET - titleRowCount,
+  );
+  const fieldCoverageStatus: TopNFieldCoverageStatus = canSupportDefaultTopNFieldSummary
+    ? 'structured_summary_fields_ready'
+    : titleRowCount >= DEFAULT_TOP_N_READBACK_TARGET
+      ? 'title_only_fields'
+      : 'insufficient_title_fields';
 
   return {
     status: canSatisfyDefaultTopN ? 'ready_for_default_top_n' : 'partial_rows_only',
@@ -161,11 +196,22 @@ function buildTopNReadbackEvidence(visibleRows: TaskVisibleRegionRowsData): TopN
     visibleRowCount,
     targetRefRowCount,
     summarizableRowCount,
+    titleRowCount,
+    supportingTextRowCount,
+    metadataRowCount,
     rowOrder: visibleRows.rowOrder,
     canSatisfyDefaultTopN,
     missingRowCountForDefaultTopN,
     canSupportDefaultTopNSummary,
     missingSummarizableRowCountForDefaultTopN,
+    fieldCoverageStatus,
+    canSupportDefaultTopNFieldSummary,
+    missingTitleRowCountForDefaultTopN,
+    summaryQualityNextRequiredCheck: canSupportDefaultTopNFieldSummary
+      ? 'structured_top_n_summary_ready'
+      : titleRowCount >= DEFAULT_TOP_N_READBACK_TARGET
+        ? 'collect_supporting_text_or_detail_before_rich_summary'
+        : 'collect_more_titled_rows_before_top_n_summary',
     nextRequiredCheck: canSatisfyDefaultTopN
       ? 'rows_ready_for_top_n_summary'
       : 'scroll_or_request_more_rows_before_claiming_top_n_complete',
@@ -173,7 +219,7 @@ function buildTopNReadbackEvidence(visibleRows: TaskVisibleRegionRowsData): TopN
       ? 'top_n_summary_ready'
       : 'more_rows_or_text_fields_required_before_top_n_summary',
     claimBoundary:
-      'No explicit requestedN was provided; this proves only the current reliable visible rows, their visual order, targetRef coverage, and privacy-safe summary field coverage, not full result-set completeness, summary correctness, or ranking correctness.',
+      'No explicit requestedN was provided; this proves only the current reliable visible rows, their visual order, targetRef coverage, and privacy-safe title/supporting-field coverage, not full result-set completeness, final summary correctness, or ranking correctness.',
   };
 }
 
@@ -182,6 +228,20 @@ function isVisibleRegionRowSummarizable(row: TaskVisibleRegionRowsData['rows'][n
   return [row.title, row.primaryText, row.summary, row.secondaryText, row.metaText].some(
     (value) => typeof value === 'string' && value.trim().length > 0,
   );
+}
+
+function getVisibleRegionRowFieldCoverage(row: TaskVisibleRegionRowsData['rows'][number]): {
+  hasTitle: boolean;
+  hasSupportingText: boolean;
+  hasMetadata: boolean;
+} {
+  return {
+    hasTitle: typeof row.title === 'string' && row.title.trim().length > 0,
+    hasSupportingText: [row.primaryText, row.summary, row.secondaryText].some(
+      (value) => typeof value === 'string' && value.trim().length > 0,
+    ),
+    hasMetadata: typeof row.metaText === 'string' && row.metaText.trim().length > 0,
+  };
 }
 
 export function buildDomRegionRowsSuccessResult(args: {
@@ -262,8 +322,17 @@ export function buildDomRegionRowsSuccessResult(args: {
         topNAvailableReliableRowCount: String(topNReadbackEvidence.availableReliableRowCount),
         topNTargetRefRowCount: String(topNReadbackEvidence.targetRefRowCount),
         topNSummarizableRowCount: String(topNReadbackEvidence.summarizableRowCount),
+        topNTitleRowCount: String(topNReadbackEvidence.titleRowCount),
+        topNSupportingTextRowCount: String(topNReadbackEvidence.supportingTextRowCount),
+        topNMetadataRowCount: String(topNReadbackEvidence.metadataRowCount),
         topNCanSatisfyDefault: String(topNReadbackEvidence.canSatisfyDefaultTopN),
         topNSummaryReady: String(topNReadbackEvidence.canSupportDefaultTopNSummary),
+        topNFieldCoverageStatus: topNReadbackEvidence.fieldCoverageStatus,
+        topNFieldSummaryReady: String(topNReadbackEvidence.canSupportDefaultTopNFieldSummary),
+        topNMissingTitleRowsForDefault: String(
+          topNReadbackEvidence.missingTitleRowCountForDefaultTopN,
+        ),
+        topNSummaryQualityNextRequiredCheck: topNReadbackEvidence.summaryQualityNextRequiredCheck,
         topNMissingSummarizableRowsForDefault: String(
           topNReadbackEvidence.missingSummarizableRowCountForDefaultTopN,
         ),
@@ -282,6 +351,11 @@ export function buildDomRegionRowsSuccessResult(args: {
         ),
         topNAccumulationSummaryReady: String(
           args.topNAccumulationEvidence?.canSupportDefaultTopNSummary ?? false,
+        ),
+        topNAccumulationFieldCoverageStatus:
+          args.topNAccumulationEvidence?.fieldCoverageStatus ?? 'not_available',
+        topNAccumulationFieldSummaryReady: String(
+          args.topNAccumulationEvidence?.canSupportDefaultTopNFieldSummary ?? false,
         ),
         rejectedRegionReasonDistribution: JSON.stringify(
           args.visibleRows.rejectedRegionReasonDistribution ?? {},

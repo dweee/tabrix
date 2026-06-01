@@ -145,6 +145,10 @@ export interface TaskVisibleRegionRowsData extends RouterDomRegionRowsEvidence {
 }
 
 export type TaskTopNAccumulationStatus = 'ready_for_default_top_n' | 'partial_accumulated_rows';
+export type TaskTopNFieldCoverageStatus =
+  | 'structured_summary_fields_ready'
+  | 'title_only_fields'
+  | 'insufficient_title_fields';
 
 export interface TaskDomRegionRowsReadbackAccumulationEvidence {
   status: TaskTopNAccumulationStatus;
@@ -156,17 +160,30 @@ export interface TaskDomRegionRowsReadbackAccumulationEvidence {
   currentReadReliableRowCount: number;
   currentReadTargetableRowCount: number;
   currentReadSummarizableRowCount: number;
+  currentReadTitleRowCount: number;
+  currentReadSupportingTextRowCount: number;
+  currentReadMetadataRowCount: number;
   currentReadNewUniqueRowCount: number;
   duplicateReliableRowCount: number;
   uniqueReliableRowCount: number;
   uniqueTargetableRowCount: number;
   uniqueSummarizableRowCount: number;
+  uniqueTitleRowCount: number;
+  uniqueSupportingTextRowCount: number;
+  uniqueMetadataRowCount: number;
   uniqueTargetRefCount: number;
   rowOrder: 'visual_order';
   canSatisfyDefaultTopN: boolean;
   missingRowCountForDefaultTopN: number;
   canSupportDefaultTopNSummary: boolean;
   missingSummarizableRowCountForDefaultTopN: number;
+  fieldCoverageStatus: TaskTopNFieldCoverageStatus;
+  canSupportDefaultTopNFieldSummary: boolean;
+  missingTitleRowCountForDefaultTopN: number;
+  summaryQualityNextRequiredCheck:
+    | 'structured_top_n_summary_ready'
+    | 'collect_supporting_text_or_detail_before_rich_summary'
+    | 'collect_more_titled_rows_before_top_n_summary';
   nextRequiredCheck:
     | 'accumulated_rows_ready_for_top_n_summary'
     | 'scroll_or_request_more_rows_before_claiming_top_n_complete';
@@ -184,6 +201,9 @@ interface TaskDomRegionRowsReadbackAccumulator {
   uniqueRowKeys: Set<string>;
   uniqueTargetableRowKeys: Set<string>;
   uniqueSummarizableRowKeys: Set<string>;
+  uniqueTitleRowKeys: Set<string>;
+  uniqueSupportingTextRowKeys: Set<string>;
+  uniqueMetadataRowKeys: Set<string>;
   uniqueTargetRefs: Set<string>;
   lastEvidence: TaskDomRegionRowsReadbackAccumulationEvidence | null;
 }
@@ -834,6 +854,9 @@ export class TaskSessionContext {
         uniqueRowKeys: new Set<string>(),
         uniqueTargetableRowKeys: new Set<string>(),
         uniqueSummarizableRowKeys: new Set<string>(),
+        uniqueTitleRowKeys: new Set<string>(),
+        uniqueSupportingTextRowKeys: new Set<string>(),
+        uniqueMetadataRowKeys: new Set<string>(),
         uniqueTargetRefs: new Set<string>(),
         lastEvidence: null,
       };
@@ -849,6 +872,9 @@ export class TaskSessionContext {
     const currentReadRowKeys = new Set<string>();
     let currentReadTargetableRowCount = 0;
     let currentReadSummarizableRowCount = 0;
+    let currentReadTitleRowCount = 0;
+    let currentReadSupportingTextRowCount = 0;
+    let currentReadMetadataRowCount = 0;
 
     for (const row of visibleRows.rows.slice(0, availableReliableRowCount)) {
       const key = buildDomRegionRowStableKey(row);
@@ -865,6 +891,19 @@ export class TaskSessionContext {
         currentReadSummarizableRowCount += 1;
         accumulator.uniqueSummarizableRowKeys.add(key);
       }
+      const fieldCoverage = getDomRegionRowFieldCoverage(row);
+      if (fieldCoverage.hasTitle) {
+        currentReadTitleRowCount += 1;
+        accumulator.uniqueTitleRowKeys.add(key);
+      }
+      if (fieldCoverage.hasSupportingText) {
+        currentReadSupportingTextRowCount += 1;
+        accumulator.uniqueSupportingTextRowKeys.add(key);
+      }
+      if (fieldCoverage.hasMetadata) {
+        currentReadMetadataRowCount += 1;
+        accumulator.uniqueMetadataRowKeys.add(key);
+      }
     }
 
     let currentReadNewUniqueRowCount = 0;
@@ -879,9 +918,15 @@ export class TaskSessionContext {
     );
     const uniqueTargetableRowCount = accumulator.uniqueTargetableRowKeys.size;
     const uniqueSummarizableRowCount = accumulator.uniqueSummarizableRowKeys.size;
+    const uniqueTitleRowCount = accumulator.uniqueTitleRowKeys.size;
+    const uniqueSupportingTextRowCount = accumulator.uniqueSupportingTextRowKeys.size;
+    const uniqueMetadataRowCount = accumulator.uniqueMetadataRowKeys.size;
     const canSatisfyDefaultTopN = uniqueTargetableRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET;
     const canSupportDefaultTopNSummary =
       uniqueSummarizableRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET;
+    const canSupportDefaultTopNFieldSummary =
+      uniqueTitleRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET &&
+      uniqueSupportingTextRowCount + uniqueMetadataRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET;
     const missingRowCountForDefaultTopN = Math.max(
       0,
       DEFAULT_TOP_N_ACCUMULATION_TARGET - uniqueTargetableRowCount,
@@ -890,6 +935,15 @@ export class TaskSessionContext {
       0,
       DEFAULT_TOP_N_ACCUMULATION_TARGET - uniqueSummarizableRowCount,
     );
+    const missingTitleRowCountForDefaultTopN = Math.max(
+      0,
+      DEFAULT_TOP_N_ACCUMULATION_TARGET - uniqueTitleRowCount,
+    );
+    const fieldCoverageStatus: TaskTopNFieldCoverageStatus = canSupportDefaultTopNFieldSummary
+      ? 'structured_summary_fields_ready'
+      : uniqueTitleRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET
+        ? 'title_only_fields'
+        : 'insufficient_title_fields';
 
     const evidence: TaskDomRegionRowsReadbackAccumulationEvidence = {
       status: canSatisfyDefaultTopN ? 'ready_for_default_top_n' : 'partial_accumulated_rows',
@@ -901,17 +955,31 @@ export class TaskSessionContext {
       currentReadReliableRowCount: currentReadRowKeys.size,
       currentReadTargetableRowCount,
       currentReadSummarizableRowCount,
+      currentReadTitleRowCount,
+      currentReadSupportingTextRowCount,
+      currentReadMetadataRowCount,
       currentReadNewUniqueRowCount,
       duplicateReliableRowCount,
       uniqueReliableRowCount: accumulator.uniqueRowKeys.size,
       uniqueTargetableRowCount,
       uniqueSummarizableRowCount,
+      uniqueTitleRowCount,
+      uniqueSupportingTextRowCount,
+      uniqueMetadataRowCount,
       uniqueTargetRefCount: accumulator.uniqueTargetRefs.size,
       rowOrder: visibleRows.rowOrder,
       canSatisfyDefaultTopN,
       missingRowCountForDefaultTopN,
       canSupportDefaultTopNSummary,
       missingSummarizableRowCountForDefaultTopN,
+      fieldCoverageStatus,
+      canSupportDefaultTopNFieldSummary,
+      missingTitleRowCountForDefaultTopN,
+      summaryQualityNextRequiredCheck: canSupportDefaultTopNFieldSummary
+        ? 'structured_top_n_summary_ready'
+        : uniqueTitleRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET
+          ? 'collect_supporting_text_or_detail_before_rich_summary'
+          : 'collect_more_titled_rows_before_top_n_summary',
       nextRequiredCheck: canSatisfyDefaultTopN
         ? 'accumulated_rows_ready_for_top_n_summary'
         : 'scroll_or_request_more_rows_before_claiming_top_n_complete',
@@ -1655,6 +1723,20 @@ function isDomRegionRowSummarizable(row: TaskVisibleRegionRow): boolean {
   return [row.title, row.primaryText, row.summary, row.secondaryText, row.metaText].some(
     (value) => normalizeDomRegionRowKeyPart(value).length > 0,
   );
+}
+
+function getDomRegionRowFieldCoverage(row: TaskVisibleRegionRow): {
+  hasTitle: boolean;
+  hasSupportingText: boolean;
+  hasMetadata: boolean;
+} {
+  return {
+    hasTitle: normalizeDomRegionRowKeyPart(row.title).length > 0,
+    hasSupportingText: [row.primaryText, row.summary, row.secondaryText].some(
+      (value) => normalizeDomRegionRowKeyPart(value).length > 0,
+    ),
+    hasMetadata: normalizeDomRegionRowKeyPart(row.metaText).length > 0,
+  };
 }
 
 function cloneTaskDomRegionRowsReadbackAccumulationEvidence(

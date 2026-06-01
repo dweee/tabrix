@@ -1248,19 +1248,29 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
             currentReadReliableRowCount: 6,
             currentReadTargetableRowCount: 6,
             currentReadSummarizableRowCount: 6,
+            currentReadTitleRowCount: 6,
+            currentReadSupportingTextRowCount: 6,
+            currentReadMetadataRowCount: 0,
             currentReadNewUniqueRowCount: 4,
             duplicateReliableRowCount: 2,
             uniqueReliableRowCount: 10,
             uniqueTargetableRowCount: 10,
             uniqueSummarizableRowCount: 10,
+            uniqueTitleRowCount: 10,
+            uniqueSupportingTextRowCount: 10,
+            uniqueMetadataRowCount: 0,
             uniqueTargetRefCount: 10,
             rowOrder: 'visual_order',
             canSatisfyDefaultTopN: true,
             missingRowCountForDefaultTopN: 0,
             canSupportDefaultTopNSummary: true,
             missingSummarizableRowCountForDefaultTopN: 0,
+            fieldCoverageStatus: 'structured_summary_fields_ready',
+            canSupportDefaultTopNFieldSummary: true,
+            missingTitleRowCountForDefaultTopN: 0,
             nextRequiredCheck: 'accumulated_rows_ready_for_top_n_summary',
             summaryNextRequiredCheck: 'top_n_summary_ready',
+            summaryQualityNextRequiredCheck: 'structured_top_n_summary_ready',
             claimBoundary:
               'Only unique targetable and summarizable DOM rows observed in this task/session are proven.',
           },
@@ -1307,8 +1317,12 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     expect(serialized).toContain('after=content:detail_open_candidate:unknown:actions:0');
     expect(serialized).toContain('top_n_accumulation:status=ready_for_default_top_n');
     expect(serialized).toContain('summaryReady=true');
+    expect(serialized).toContain('fieldSummaryReady=true');
+    expect(serialized).toContain('fieldCoverage=structured_summary_fields_ready');
     expect(serialized).toContain('defaultN=10');
     expect(serialized).toContain('uniqueTargetable=10');
+    expect(serialized).toContain('uniqueTitle=10');
+    expect(serialized).toContain('uniqueSupporting=10');
     expect(serialized).toContain('missing=0');
     expect(serialized).toContain('detail_field_readback:status=structured_fields_present');
     expect(serialized).toContain('summaryReady=true');

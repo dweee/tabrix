@@ -152,17 +152,33 @@ export interface CloseoutTopNAccumulationEvidence {
   currentReadReliableRowCount: number;
   currentReadTargetableRowCount: number;
   currentReadSummarizableRowCount: number;
+  currentReadTitleRowCount: number;
+  currentReadSupportingTextRowCount: number;
+  currentReadMetadataRowCount: number;
   currentReadNewUniqueRowCount: number;
   duplicateReliableRowCount: number;
   uniqueReliableRowCount: number;
   uniqueTargetableRowCount: number;
   uniqueSummarizableRowCount: number;
+  uniqueTitleRowCount: number;
+  uniqueSupportingTextRowCount: number;
+  uniqueMetadataRowCount: number;
   uniqueTargetRefCount: number;
   rowOrder: 'visual_order';
   canSatisfyDefaultTopN: boolean;
   missingRowCountForDefaultTopN: number;
   canSupportDefaultTopNSummary: boolean;
   missingSummarizableRowCountForDefaultTopN: number;
+  fieldCoverageStatus:
+    | 'structured_summary_fields_ready'
+    | 'title_only_fields'
+    | 'insufficient_title_fields';
+  canSupportDefaultTopNFieldSummary: boolean;
+  missingTitleRowCountForDefaultTopN: number;
+  summaryQualityNextRequiredCheck:
+    | 'structured_top_n_summary_ready'
+    | 'collect_supporting_text_or_detail_before_rich_summary'
+    | 'collect_more_titled_rows_before_top_n_summary';
   nextRequiredCheck:
     | 'accumulated_rows_ready_for_top_n_summary'
     | 'scroll_or_request_more_rows_before_claiming_top_n_complete';
@@ -765,16 +781,23 @@ function buildTopNAccumulationReason(
     `status=${evidence.status}`,
     `targetableReady=${evidence.canSatisfyDefaultTopN}`,
     `summaryReady=${evidence.canSupportDefaultTopNSummary}`,
+    `fieldSummaryReady=${evidence.canSupportDefaultTopNFieldSummary}`,
+    `fieldCoverage=${evidence.fieldCoverageStatus}`,
     `defaultN=${evidence.defaultTopN}`,
     `uniqueTargetable=${evidence.uniqueTargetableRowCount}`,
     `uniqueSummarizable=${evidence.uniqueSummarizableRowCount}`,
+    `uniqueTitle=${evidence.uniqueTitleRowCount}`,
+    `uniqueSupporting=${evidence.uniqueSupportingTextRowCount}`,
+    `uniqueMetadata=${evidence.uniqueMetadataRowCount}`,
     `uniqueReliable=${evidence.uniqueReliableRowCount}`,
     `missing=${evidence.missingRowCountForDefaultTopN}`,
     `missingSummary=${evidence.missingSummarizableRowCountForDefaultTopN}`,
+    `missingTitle=${evidence.missingTitleRowCountForDefaultTopN}`,
     `reads=${evidence.observedReadCount}`,
     `sourceTab=${evidence.sourceTabId ?? 'unknown'}`,
     `sourceRegion=${sanitizeIdentifier(evidence.sourceRegion)}`,
     `summaryNext=${evidence.summaryNextRequiredCheck}`,
+    `summaryQualityNext=${evidence.summaryQualityNextRequiredCheck}`,
     `next=${evidence.nextRequiredCheck}`,
   ].join(':');
 }
