@@ -4139,6 +4139,30 @@ describe('handleToolCall execution wrapper', () => {
       };
     }
 
+    function contentDetailRegion(refPrefix: string): Record<string, unknown> {
+      return {
+        regionId: 'region_detail',
+        regionType: 'content',
+        state: `detail_${refPrefix}`,
+        confidence: 0.88,
+        objects: [
+          {
+            objectId: `${refPrefix}_detail`,
+            label: 'detail item',
+            objectType: 'record',
+            targetRef: `ref_${refPrefix}_detail`,
+            actionTypes: [],
+            targetability: 'not_targetable',
+            confidence: 0.84,
+            reason: 'test detail body',
+          },
+        ],
+        candidateActionIds: [],
+        targetability: 'not_targetable',
+        claimBoundary: 'test content-detail region',
+      };
+    }
+
     it('accumulates read budget across consecutive default-shape chrome_read_page calls on the same tab', async () => {
       markBridgeReady();
       // Pre-create the auto-key context with a tight budget so the
@@ -4719,6 +4743,132 @@ describe('handleToolCall execution wrapper', () => {
           }),
         ]),
       );
+    });
+
+    it('fresh read after a result detail candidate proves detail opened before continuation', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
+      auto.noteRunOwnedTab(1);
+      Object.defineProperty(auto, 'readBudget', { value: 5, writable: false });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_before_detail_open',
+          tabId: 1,
+          pageRegions: [contentListRegion('before_detail')],
+        }),
+      );
+      await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  observedOutcome: 'tool_reported_click_dispatched',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_before_detail_1',
+        candidateAction: {
+          id: 'ca_open_detail',
+          actionType: 'click',
+          targetRef: 'ref_before_detail_1',
+          confidence: 0.9,
+          matchReason: 'content result detail candidate',
+          locatorChain: [{ type: 'ref', value: 'ref_before_detail_1' }],
+          intent: 'content.open_detail',
+        },
+      });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_after_detail_open',
+          tabId: 1,
+          pageRegions: [contentDetailRegion('after_detail')],
+        }),
+      );
+      const readback = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+        forceRefresh: true,
+      });
+      const payload = JSON.parse(String(readback.content[0].text));
+
+      expect(payload.regionStatePostconditions).toEqual([
+        {
+          actionKind: 'click',
+          result: expect.objectContaining({
+            actionId: 'ca_open_detail',
+            kind: 'detail_opened',
+            verdict: 'passed',
+            reason: 'content_detail_region_visible_after_action',
+          }),
+        },
+      ]);
+      expect(payload.taskResumeReadiness).toMatchObject({
+        status: 'postcondition_passed_ready',
+        canResumeOriginalTask: true,
+        nextStep: 'continue_original_task',
+        reason: 'region_state_detail_opened_passed:content_detail_region_visible_after_action',
+        handoffSummary: {
+          summaryKind: 'task_resume_handoff_v1',
+          status: 'ready_to_continue',
+          canContinue: true,
+          nextAction: 'continue_original_task',
+        },
+      });
+      expect(payload.aiContextEnvelope.regionStatePostconditions).toEqual(
+        payload.regionStatePostconditions,
+      );
+      expect(payload.aiContextEnvelope.taskResumeReadiness).toEqual(payload.taskResumeReadiness);
+
+      const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
+      bridgeSpy.mockClear();
+      bridgeSpy
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  observedOutcome: 'continued_after_detail_open_postcondition',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      const continued = await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_after_detail',
+        userConfirmed: true,
+      });
+      const continuedPayload = JSON.parse(String(continued.content[0].text));
+
+      expect(continued.isError).toBe(false);
+      expect(continuedPayload).toMatchObject({
+        success: true,
+        observedOutcome: 'continued_after_detail_open_postcondition',
+      });
+      expect(bridgeSpy).toHaveBeenCalledTimes(2);
     });
 
     it('blocked continuation after an unknown search postcondition returns task resume handoff guidance', async () => {
