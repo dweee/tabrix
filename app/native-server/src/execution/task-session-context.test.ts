@@ -29,6 +29,7 @@ function makeVisibleRegionRows(
     includeSupportingText?: boolean;
     includeMetaText?: boolean;
     duplicateTargetRefs?: boolean;
+    splitTitleAndSupportingText?: boolean;
   } = {},
 ): TaskVisibleRegionRowsData {
   const includeText = options.includeText ?? true;
@@ -36,10 +37,14 @@ function makeVisibleRegionRows(
   const includeMetaText = options.includeMetaText ?? false;
   const rows = Array.from({ length: count }, (_, index) => {
     const n = start + index;
+    const splitTitleAndSupportingText = options.splitTitleAndSupportingText ?? false;
+    const hasSplitTitle = index < Math.floor(count / 2);
+    const rowHasTitle = !splitTitleAndSupportingText || hasSplitTitle;
+    const rowHasSupportingText = !splitTitleAndSupportingText || !hasSplitTitle;
     return {
       rowId: `row_${n}`,
-      title: includeText ? `Result ${n}` : '',
-      primaryText: includeSupportingText ? `Result ${n} summary` : null,
+      title: includeText && rowHasTitle ? `Result ${n}` : '',
+      primaryText: includeSupportingText && rowHasSupportingText ? `Result ${n} summary` : null,
       secondaryText: null,
       metaText: includeMetaText ? `Result ${n} metadata` : null,
       interactionText: 'Open',
@@ -469,12 +474,15 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       uniqueTitleRowCount: 6,
       uniqueSupportingTextRowCount: 6,
       uniqueMetadataRowCount: 0,
+      uniqueDeliverableRowCount: 6,
+      currentReadDeliverableRowCount: 6,
       canSatisfyDefaultTopN: false,
       canSupportDefaultTopNSummary: false,
       canSupportDefaultTopNFieldSummary: false,
       missingRowCountForDefaultTopN: 4,
       missingSummarizableRowCountForDefaultTopN: 4,
       missingTitleRowCountForDefaultTopN: 4,
+      missingDeliverableRowCountForDefaultTopN: 4,
       canSupportDefaultTopNDelivery: false,
       missingUniqueTargetRefCountForDefaultTopN: 4,
       hasSingleReadDefaultTopNDeliveryEvidence: false,
@@ -498,12 +506,15 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       uniqueTitleRowCount: 10,
       uniqueSupportingTextRowCount: 10,
       uniqueMetadataRowCount: 0,
+      uniqueDeliverableRowCount: 10,
+      currentReadDeliverableRowCount: 6,
       canSatisfyDefaultTopN: true,
       canSupportDefaultTopNSummary: true,
       canSupportDefaultTopNFieldSummary: true,
       missingRowCountForDefaultTopN: 0,
       missingSummarizableRowCountForDefaultTopN: 0,
       missingTitleRowCountForDefaultTopN: 0,
+      missingDeliverableRowCountForDefaultTopN: 0,
       canSupportDefaultTopNDelivery: false,
       missingUniqueTargetRefCountForDefaultTopN: 0,
       hasSingleReadDefaultTopNDeliveryEvidence: false,
@@ -525,14 +536,45 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       observedReadCount: 1,
       currentReadReliableRowCount: 10,
       currentReadTargetableRowCount: 10,
+      currentReadDeliverableRowCount: 10,
       currentReadUniqueTargetRefCount: 10,
       currentReadCanSupportDefaultTopNDelivery: true,
       canSatisfyDefaultTopN: true,
       canSupportDefaultTopNFieldSummary: true,
+      uniqueDeliverableRowCount: 10,
       uniqueTargetRefCount: 10,
       canSupportDefaultTopNDelivery: true,
       hasSingleReadDefaultTopNDeliveryEvidence: true,
       deliveryNextRequiredCheck: 'top_n_delivery_ready',
+    });
+  });
+
+  it('does not mark delivery ready when titles and supporting fields belong to different rows', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+
+    const evidence = ctx.noteDomRegionRowsReadback(
+      makeVisibleRegionRows(1, 20, { splitTitleAndSupportingText: true }),
+    );
+
+    expect(evidence).toMatchObject({
+      status: 'ready_for_default_top_n',
+      currentReadReliableRowCount: 20,
+      currentReadTargetableRowCount: 20,
+      currentReadTitleRowCount: 10,
+      currentReadSupportingTextRowCount: 10,
+      currentReadDeliverableRowCount: 0,
+      currentReadUniqueTargetRefCount: 20,
+      currentReadCanSupportDefaultTopNDelivery: false,
+      uniqueTargetableRowCount: 20,
+      uniqueTitleRowCount: 10,
+      uniqueSupportingTextRowCount: 10,
+      uniqueDeliverableRowCount: 0,
+      uniqueTargetRefCount: 20,
+      canSatisfyDefaultTopN: true,
+      canSupportDefaultTopNFieldSummary: false,
+      missingDeliverableRowCountForDefaultTopN: 10,
+      canSupportDefaultTopNDelivery: false,
+      deliveryNextRequiredCheck: 'collect_structured_fields_before_top_n_delivery',
     });
   });
 
@@ -550,11 +592,14 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       uniqueTitleRowCount: 10,
       uniqueSupportingTextRowCount: 0,
       uniqueMetadataRowCount: 0,
+      uniqueDeliverableRowCount: 0,
+      currentReadDeliverableRowCount: 0,
       currentReadCanSupportDefaultTopNDelivery: false,
       canSatisfyDefaultTopN: true,
       canSupportDefaultTopNSummary: true,
       canSupportDefaultTopNFieldSummary: false,
       missingTitleRowCountForDefaultTopN: 0,
+      missingDeliverableRowCountForDefaultTopN: 10,
       canSupportDefaultTopNDelivery: false,
       missingUniqueTargetRefCountForDefaultTopN: 0,
       deliveryNextRequiredCheck: 'collect_structured_fields_before_top_n_delivery',
@@ -576,6 +621,8 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       uniqueSummarizableRowCount: 0,
       uniqueTitleRowCount: 0,
       uniqueSupportingTextRowCount: 0,
+      uniqueDeliverableRowCount: 0,
+      currentReadDeliverableRowCount: 0,
       currentReadCanSupportDefaultTopNDelivery: false,
       canSatisfyDefaultTopN: true,
       canSupportDefaultTopNSummary: false,
@@ -583,6 +630,7 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       missingRowCountForDefaultTopN: 0,
       missingSummarizableRowCountForDefaultTopN: 10,
       missingTitleRowCountForDefaultTopN: 10,
+      missingDeliverableRowCountForDefaultTopN: 10,
       canSupportDefaultTopNDelivery: false,
       missingUniqueTargetRefCountForDefaultTopN: 0,
       deliveryNextRequiredCheck: 'collect_structured_fields_before_top_n_delivery',
@@ -604,6 +652,8 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       uniqueTargetableRowCount: 10,
       uniqueTitleRowCount: 10,
       uniqueSupportingTextRowCount: 10,
+      uniqueDeliverableRowCount: 10,
+      currentReadDeliverableRowCount: 10,
       uniqueTargetRefCount: 1,
       currentReadUniqueTargetRefCount: 1,
       currentReadCanSupportDefaultTopNDelivery: false,
@@ -652,6 +702,7 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       uniqueSummarizableRowCount: 10,
       uniqueTitleRowCount: 10,
       uniqueSupportingTextRowCount: 10,
+      uniqueDeliverableRowCount: 10,
       currentReadCanSupportDefaultTopNDelivery: false,
       canSatisfyDefaultTopN: true,
       canSupportDefaultTopNSummary: true,
@@ -659,6 +710,7 @@ describe('TaskSessionContext — DOM region rows top-N accumulation', () => {
       missingRowCountForDefaultTopN: 0,
       missingSummarizableRowCountForDefaultTopN: 0,
       missingTitleRowCountForDefaultTopN: 0,
+      missingDeliverableRowCountForDefaultTopN: 0,
       canSupportDefaultTopNDelivery: false,
       missingUniqueTargetRefCountForDefaultTopN: 0,
       hasSingleReadDefaultTopNDeliveryEvidence: false,
@@ -1212,7 +1264,7 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
       nextStep: 'verify_postcondition',
       evidenceKinds: ['region_state_postcondition', 'dom_region_rows_readback'],
       reason:
-        'region_state_search_results_updated_not_proven:dom_region_rows_readback_title_only_fields_not_ready_for_structured_top_n_summary',
+        'region_state_search_results_updated_not_proven:dom_region_rows_readback_per_row_fields_not_ready_for_structured_top_n_delivery',
       handoffSummary: {
         status: 'needs_postcondition_verification',
         canContinue: false,

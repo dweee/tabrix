@@ -163,6 +163,7 @@ export interface TaskDomRegionRowsReadbackAccumulationEvidence {
   currentReadTitleRowCount: number;
   currentReadSupportingTextRowCount: number;
   currentReadMetadataRowCount: number;
+  currentReadDeliverableRowCount: number;
   currentReadUniqueTargetRefCount: number;
   currentReadCanSupportDefaultTopNDelivery: boolean;
   currentReadNewUniqueRowCount: number;
@@ -173,6 +174,7 @@ export interface TaskDomRegionRowsReadbackAccumulationEvidence {
   uniqueTitleRowCount: number;
   uniqueSupportingTextRowCount: number;
   uniqueMetadataRowCount: number;
+  uniqueDeliverableRowCount: number;
   uniqueTargetRefCount: number;
   rowOrder: 'visual_order';
   canSatisfyDefaultTopN: boolean;
@@ -182,6 +184,7 @@ export interface TaskDomRegionRowsReadbackAccumulationEvidence {
   fieldCoverageStatus: TaskTopNFieldCoverageStatus;
   canSupportDefaultTopNFieldSummary: boolean;
   missingTitleRowCountForDefaultTopN: number;
+  missingDeliverableRowCountForDefaultTopN: number;
   canSupportDefaultTopNDelivery: boolean;
   missingUniqueTargetRefCountForDefaultTopN: number;
   hasSingleReadDefaultTopNDeliveryEvidence: boolean;
@@ -215,6 +218,7 @@ interface TaskDomRegionRowsReadbackAccumulator {
   uniqueTitleRowKeys: Set<string>;
   uniqueSupportingTextRowKeys: Set<string>;
   uniqueMetadataRowKeys: Set<string>;
+  uniqueDeliverableRowKeys: Set<string>;
   uniqueTargetRefs: Set<string>;
   hasSingleReadDefaultTopNDeliveryEvidence: boolean;
   lastEvidence: TaskDomRegionRowsReadbackAccumulationEvidence | null;
@@ -869,6 +873,7 @@ export class TaskSessionContext {
         uniqueTitleRowKeys: new Set<string>(),
         uniqueSupportingTextRowKeys: new Set<string>(),
         uniqueMetadataRowKeys: new Set<string>(),
+        uniqueDeliverableRowKeys: new Set<string>(),
         uniqueTargetRefs: new Set<string>(),
         hasSingleReadDefaultTopNDeliveryEvidence: false,
         lastEvidence: null,
@@ -888,7 +893,9 @@ export class TaskSessionContext {
     let currentReadTitleRowCount = 0;
     let currentReadSupportingTextRowCount = 0;
     let currentReadMetadataRowCount = 0;
+    let currentReadDeliverableRowCount = 0;
     const currentReadTargetRefs = new Set<string>();
+    const currentReadDeliverableTargetRefs = new Set<string>();
 
     for (const row of visibleRows.rows.slice(0, availableReliableRowCount)) {
       const key = buildDomRegionRowStableKey(row);
@@ -919,6 +926,15 @@ export class TaskSessionContext {
         currentReadMetadataRowCount += 1;
         accumulator.uniqueMetadataRowKeys.add(key);
       }
+      if (
+        targetRef &&
+        fieldCoverage.hasTitle &&
+        (fieldCoverage.hasSupportingText || fieldCoverage.hasMetadata)
+      ) {
+        currentReadDeliverableRowCount += 1;
+        currentReadDeliverableTargetRefs.add(targetRef);
+        accumulator.uniqueDeliverableRowKeys.add(key);
+      }
     }
 
     let currentReadNewUniqueRowCount = 0;
@@ -936,14 +952,13 @@ export class TaskSessionContext {
     const uniqueTitleRowCount = accumulator.uniqueTitleRowKeys.size;
     const uniqueSupportingTextRowCount = accumulator.uniqueSupportingTextRowKeys.size;
     const uniqueMetadataRowCount = accumulator.uniqueMetadataRowKeys.size;
+    const uniqueDeliverableRowCount = accumulator.uniqueDeliverableRowKeys.size;
     const uniqueTargetRefCount = accumulator.uniqueTargetRefs.size;
     const currentReadUniqueTargetRefCount = currentReadTargetRefs.size;
+    const currentReadUniqueDeliverableTargetRefCount = currentReadDeliverableTargetRefs.size;
     const currentReadCanSupportDefaultTopNDelivery =
-      currentReadTargetableRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET &&
-      currentReadTitleRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET &&
-      currentReadSupportingTextRowCount + currentReadMetadataRowCount >=
-        DEFAULT_TOP_N_ACCUMULATION_TARGET &&
-      currentReadUniqueTargetRefCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET;
+      currentReadDeliverableRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET &&
+      currentReadUniqueDeliverableTargetRefCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET;
     accumulator.hasSingleReadDefaultTopNDeliveryEvidence =
       accumulator.hasSingleReadDefaultTopNDeliveryEvidence ||
       currentReadCanSupportDefaultTopNDelivery;
@@ -951,8 +966,7 @@ export class TaskSessionContext {
     const canSupportDefaultTopNSummary =
       uniqueSummarizableRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET;
     const canSupportDefaultTopNFieldSummary =
-      uniqueTitleRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET &&
-      uniqueSupportingTextRowCount + uniqueMetadataRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET;
+      uniqueDeliverableRowCount >= DEFAULT_TOP_N_ACCUMULATION_TARGET;
     const canSupportDefaultTopNDelivery =
       canSatisfyDefaultTopN &&
       canSupportDefaultTopNFieldSummary &&
@@ -969,6 +983,10 @@ export class TaskSessionContext {
     const missingTitleRowCountForDefaultTopN = Math.max(
       0,
       DEFAULT_TOP_N_ACCUMULATION_TARGET - uniqueTitleRowCount,
+    );
+    const missingDeliverableRowCountForDefaultTopN = Math.max(
+      0,
+      DEFAULT_TOP_N_ACCUMULATION_TARGET - uniqueDeliverableRowCount,
     );
     const missingUniqueTargetRefCountForDefaultTopN = Math.max(
       0,
@@ -993,6 +1011,7 @@ export class TaskSessionContext {
       currentReadTitleRowCount,
       currentReadSupportingTextRowCount,
       currentReadMetadataRowCount,
+      currentReadDeliverableRowCount,
       currentReadUniqueTargetRefCount,
       currentReadCanSupportDefaultTopNDelivery,
       currentReadNewUniqueRowCount,
@@ -1003,6 +1022,7 @@ export class TaskSessionContext {
       uniqueTitleRowCount,
       uniqueSupportingTextRowCount,
       uniqueMetadataRowCount,
+      uniqueDeliverableRowCount,
       uniqueTargetRefCount,
       rowOrder: visibleRows.rowOrder,
       canSatisfyDefaultTopN,
@@ -1012,6 +1032,7 @@ export class TaskSessionContext {
       fieldCoverageStatus,
       canSupportDefaultTopNFieldSummary,
       missingTitleRowCountForDefaultTopN,
+      missingDeliverableRowCountForDefaultTopN,
       canSupportDefaultTopNDelivery,
       missingUniqueTargetRefCountForDefaultTopN,
       hasSingleReadDefaultTopNDeliveryEvidence:
@@ -2001,11 +2022,8 @@ function searchPostconditionResumeBlockReason(
   if (rows.uniqueTitleRowKeys.size < DEFAULT_TOP_N_ACCUMULATION_TARGET) {
     return 'dom_region_rows_readback_not_enough_titled_rows_for_default_top_n_summary';
   }
-  if (
-    rows.uniqueSupportingTextRowKeys.size + rows.uniqueMetadataRowKeys.size <
-    DEFAULT_TOP_N_ACCUMULATION_TARGET
-  ) {
-    return 'dom_region_rows_readback_title_only_fields_not_ready_for_structured_top_n_summary';
+  if (rows.uniqueDeliverableRowKeys.size < DEFAULT_TOP_N_ACCUMULATION_TARGET) {
+    return 'dom_region_rows_readback_per_row_fields_not_ready_for_structured_top_n_delivery';
   }
   if (rows.uniqueTargetRefs.size < DEFAULT_TOP_N_ACCUMULATION_TARGET) {
     return 'dom_region_rows_readback_not_enough_unique_target_refs_for_default_top_n_delivery';
