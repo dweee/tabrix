@@ -368,6 +368,11 @@ export interface ReadPageFrameContext {
   frameId?: number;
   frameUrl?: string;
   frameName?: string;
+  frameScope?: 'top' | 'subframe' | 'unknown';
+  isTopFrame?: boolean | null;
+  source?: 'content_script_runtime' | 'unsupported_page' | 'not_available';
+  coverage?: 'responding_frame_only' | 'not_available';
+  claimBoundary?: string;
 }
 
 export interface ReadPageMemoryHint {

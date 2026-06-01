@@ -60,7 +60,7 @@ function expectCommonSnapshotShape(payload: any, mode: 'compact' | 'normal' | 'f
     fallbackUsed: expect.any(Boolean),
     refMapCount: expect.any(Number),
   });
-  expect(payload.frameContext).toBeNull();
+  expect(payload.frameContext === null || typeof payload.frameContext === 'object').toBe(true);
   expect(payload.pageProjection).toMatchObject({
     projectionId: expect.any(String),
     projectionKind: 'read_snapshot_projection',
@@ -251,6 +251,76 @@ describe('read_page mode', () => {
     expect(payload.pageProjection.userActivityLevel).toBe('active');
     expect(payload.diagnostics).toBeUndefined();
     expect(payload.fullSnapshot).toBeUndefined();
+  });
+
+  it('surfaces the responding frame context from the accessibility-tree snapshot', async () => {
+    vi.spyOn(browserWorldInventory, 'getBrowserWorldSnapshot').mockResolvedValue({
+      summary: {
+        routingDecisionSummary:
+          'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
+        objectChangeSummary: 'Object change summary: no relevant browser object change observed.',
+        actionableObjectChangeSummary:
+          'Actionable object change: no actionable browser object transition observed.',
+        currentOperationConclusion:
+          'Current operation conclusion: browser object state is stable enough for page-level inspection.',
+      },
+      tabs: [],
+    } as any);
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5217,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.com/embedded',
+      title: 'Embedded App',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Embedded App" [ref=ref_0] (x=320,y=100)',
+        '  - heading "Inner checkout" [ref=ref_1] (x=320,y=140)',
+        '  - button "Continue" [ref=ref_2] (x=320,y=180)',
+        '  - link "Help" [ref=ref_3] (x=320,y=220)',
+        '  - generic "Summary" [ref=ref_4] (x=320,y=260)',
+        '  - generic "Footer" [ref=ref_5] (x=320,y=300)',
+        '  - generic "Status" [ref=ref_6] (x=320,y=340)',
+        '  - generic "Total" [ref=ref_7] (x=320,y=380)',
+        '  - generic "Notice" [ref=ref_8] (x=320,y=420)',
+        '  - generic "Controls" [ref=ref_9] (x=320,y=460)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_2', selector: '#continue' },
+        { ref: 'ref_3', selector: '#help' },
+        { ref: 'ref_9', selector: '#controls' },
+      ],
+      frameContext: {
+        frameUrl: 'https://example.com/embed/checkout',
+        frameName: 'checkout-frame',
+        frameScope: 'subframe',
+        isTopFrame: false,
+        source: 'content_script_runtime',
+        coverage: 'responding_frame_only',
+        claimBoundary:
+          'this read_page snapshot describes the frame that answered the content-script request; it does not prove every iframe was fully covered',
+      },
+      stats: { processed: 8, included: 6, durationMs: 10 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({});
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.frameContext).toMatchObject({
+      frameUrl: 'https://example.com/embed/checkout',
+      frameName: 'checkout-frame',
+      frameScope: 'subframe',
+      isTopFrame: false,
+      source: 'content_script_runtime',
+      coverage: 'responding_frame_only',
+      claimBoundary: expect.stringContaining('does not prove every iframe was fully covered'),
+    });
   });
 
   it.each(['normal', 'full'] as const)(

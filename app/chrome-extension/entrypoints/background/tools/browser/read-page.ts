@@ -5,6 +5,7 @@ import {
   type BrowserPageStability,
   type BrowserUserActivityLevel,
   type ReadPageCompactSnapshot,
+  type ReadPageFrameContext,
   type ReadPageFullSnapshot,
   type ReadPageMode,
   type ReadPageNormalSnapshot,
@@ -180,6 +181,27 @@ function resetObjectLifecycleCacheForTests(): void {
 
 function getTabNavigationUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {
   return String(tab.url || tab.pendingUrl || '');
+}
+
+function normalizeFrameContext(raw: unknown): ReadPageFrameContext | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const input = raw as Record<string, unknown>;
+  const frameScope =
+    input.frameScope === 'top' || input.frameScope === 'subframe' ? input.frameScope : 'unknown';
+  return {
+    ...(typeof input.frameId === 'number' ? { frameId: input.frameId } : {}),
+    frameUrl: typeof input.frameUrl === 'string' ? input.frameUrl : '',
+    frameName: typeof input.frameName === 'string' ? input.frameName : '',
+    frameScope,
+    isTopFrame: typeof input.isTopFrame === 'boolean' ? input.isTopFrame : null,
+    source: input.source === 'content_script_runtime' ? 'content_script_runtime' : 'not_available',
+    coverage:
+      input.coverage === 'responding_frame_only' ? 'responding_frame_only' : 'not_available',
+    claimBoundary:
+      typeof input.claimBoundary === 'string'
+        ? input.claimBoundary
+        : 'read_page frame context was unavailable; do not assume iframe coverage',
+  };
 }
 
 /**
@@ -657,6 +679,7 @@ async function buildModeOutput(params: {
     lineCount: number;
     quality: string;
   };
+  frameContext: ReadPageFrameContext | null;
   stats: ReadPageStats | { processed: number; included: number; durationMs: number };
   viewport: { width: number | null; height: number | null; dpr: number | null };
   filter: string;
@@ -749,6 +772,7 @@ async function buildModeOutput(params: {
     candidateActions,
     interactiveElements,
     pageContext,
+    frameContext: params.frameContext,
     visibleRegionRows,
     visibleTextContent: params.visibleTextContent,
     visualElements: params.visualElements,
@@ -1522,6 +1546,14 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           pageContent: guardPageContent,
           visibleTextContent: null,
           contentSummary: summarizePageContent(guardPageContent),
+          frameContext: {
+            frameScope: 'unknown',
+            isTopFrame: null,
+            source: 'unsupported_page',
+            coverage: 'not_available',
+            claimBoundary:
+              'content scripts cannot inspect frame context on this unsupported browser page',
+          },
           stats: { processed: 0, included: 0, durationMs: 0 },
           viewport: { width: null, height: null, dpr: null },
           filter: filter || 'all',
@@ -1689,6 +1721,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           scrollY: typeof resp?.scrollY === 'number' ? resp.scrollY : null,
           pixelsBelow: typeof resp?.pixelsBelow === 'number' ? resp.pixelsBelow : null,
         }),
+        frameContext: treeOk ? normalizeFrameContext(resp?.frameContext) : null,
       };
       reconcilePageUnderstandingWithVisibleRows(basePayload);
 
@@ -1800,6 +1833,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           pageContent: basePayload.pageContent,
           visibleTextContent: basePayload.visibleTextContent,
           contentSummary: basePayload.contentSummary,
+          frameContext: basePayload.frameContext,
           stats: basePayload.stats,
           viewport: basePayload.viewport,
           filter: basePayload.filter,
@@ -1933,6 +1967,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             pageContent: basePayload.pageContent,
             visibleTextContent: basePayload.visibleTextContent,
             contentSummary: summarizePageContent(String(basePayload.pageContent || '')),
+            frameContext: basePayload.frameContext,
             stats: basePayload.stats,
             viewport: basePayload.viewport,
             filter: basePayload.filter,

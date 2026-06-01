@@ -852,6 +852,7 @@
       const start = performance && performance.now ? performance.now() : Date.now();
       const out = [];
       const cfg = { filter: filter || undefined };
+      const isTopFrame = window.self === window.top;
 
       // Clamp maxDepth to MAX_DEPTH to keep costs bounded
       if (options && Number.isFinite(options.maxDepth)) {
@@ -888,6 +889,16 @@
       const end = performance && performance.now ? performance.now() : Date.now();
       return {
         pageContent,
+        frameContext: {
+          frameUrl: window.location && window.location.href ? String(window.location.href) : '',
+          frameName: window.name ? String(window.name) : '',
+          frameScope: isTopFrame ? 'top' : 'subframe',
+          isTopFrame,
+          source: 'content_script_runtime',
+          coverage: 'responding_frame_only',
+          claimBoundary:
+            'this read_page snapshot describes the frame that answered the content-script request; it does not prove every iframe was fully covered',
+        },
         focus,
         viewport: {
           width: window.innerWidth,

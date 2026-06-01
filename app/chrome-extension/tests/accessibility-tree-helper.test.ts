@@ -181,4 +181,30 @@ describe('accessibility-tree auth control map', () => {
       ]),
     );
   });
+
+  it('reports frame context for the content-script frame that produced the snapshot', () => {
+    document.body.innerHTML = `<main><button id="save">Save</button></main>`;
+    Array.from(document.querySelectorAll('*')).forEach((element, index) => {
+      makeVisible(element, { left: 10, top: 10 + index * 36, width: 120, height: 28 });
+    });
+
+    const result = (
+      window as Window & {
+        __generateAccessibilityTree: (
+          filter: string,
+          options: { maxDepth: number },
+        ) => { frameContext: Record<string, unknown> };
+      }
+    ).__generateAccessibilityTree('interactive', { maxDepth: 8 });
+
+    expect(result.frameContext).toMatchObject({
+      frameUrl: expect.any(String),
+      frameName: expect.any(String),
+      frameScope: 'top',
+      isTopFrame: true,
+      source: 'content_script_runtime',
+      coverage: 'responding_frame_only',
+      claimBoundary: expect.stringContaining('does not prove every iframe was fully covered'),
+    });
+  });
 });

@@ -1,6 +1,7 @@
 import type {
   ReadPageCompactSnapshot,
   ReadPageExtensionFields,
+  ReadPageFrameContext,
   ReadPageMode,
   ReadPagePageContext,
   ReadPagePageType,
@@ -74,6 +75,7 @@ export function buildExtensionLayer(params: {
   candidateActions: CandidateActionSeed[];
   interactiveElements: SnapshotInteractiveElement[];
   pageContext: ReadPagePageContext;
+  frameContext: ReadPageFrameContext | null;
   visibleRegionRows: VisibleRegionRowsResult;
   visibleTextContent?: string | null;
   visualElements?: ReadPageVisualElementHint[];
@@ -220,8 +222,7 @@ export function buildExtensionLayer(params: {
     rejectedRegionReasonDistribution: params.visibleRegionRows.rejectedRegionReasonDistribution,
     candidateActions: includeL1 ? aiFacingCandidateActions : [],
     pageContext: params.pageContext,
-    // T3.2: reserved extension fields (not locked as long-term schema yet).
-    frameContext: null,
+    frameContext: params.frameContext,
     historyRef,
     memoryHints: [],
     taskMode: taskProtocol.taskMode,

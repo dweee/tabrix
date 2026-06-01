@@ -1119,6 +1119,8 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
   const interactiveElements = Array.isArray(payload?.interactiveElements)
     ? payload.interactiveElements
     : [];
+  const frameContext =
+    payload?.frameContext && typeof payload.frameContext === 'object' ? payload.frameContext : null;
   const operationMap = payload?.pageOperationMap;
   const operationZones = Array.isArray(operationMap?.zones) ? operationMap.zones : [];
   const regionTypes = [
@@ -1294,6 +1296,23 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
         actionReadinessClaimBoundaryPresent:
           typeof compactTabFacts.actionReadinessClaimBoundary === 'string',
       },
+    },
+    frameRuntime: {
+      frameContextPresent: Boolean(frameContext),
+      frameScopeKnown:
+        frameContext?.frameScope === 'top' || frameContext?.frameScope === 'subframe',
+      frameScope:
+        frameContext?.frameScope === 'top' || frameContext?.frameScope === 'subframe'
+          ? frameContext.frameScope
+          : frameContext?.frameScope === 'unknown'
+            ? 'unknown'
+            : null,
+      isTopFrameKnown: typeof frameContext?.isTopFrame === 'boolean',
+      source:
+        frameContext?.source === 'content_script_runtime' ? 'content_script_runtime' : null,
+      coverage:
+        frameContext?.coverage === 'responding_frame_only' ? 'responding_frame_only' : null,
+      claimBoundaryPresent: typeof frameContext?.claimBoundary === 'string',
     },
     pageRegionRuntime: {
       pageRegionsPresent: pageRegions.length > 0,
