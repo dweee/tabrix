@@ -537,10 +537,22 @@ const MAX_RECENT_BROWSER_WORLD_EVENTS = 50;
 const MAX_RECENT_CLOSED_TAB_SNAPSHOTS = 20;
 const MIN_FULL_CHROME_RESYNC_INTERVAL_MS = 250;
 const BASELINE_READY_STALE_AFTER_MS = 5_000;
+const AI_TAB_OWNERSHIP_STORAGE_KEY = 'tabrix.browserWorld.aiTabOwnership.v1';
+const MAX_PERSISTED_AI_TAB_OWNERSHIP_RECORDS = 200;
+
+interface BrowserWorldPersistedAiTabOwnership {
+  tabId: number;
+  markedAtMs: number;
+  reason: string;
+  lastAiOperation: string | null;
+  lastAiOperationAtMs: number | null;
+  lastAiOperationReason: string | null;
+}
 
 const tabsById = new Map<number, BrowserWorldTabObject>();
 const windowsById = new Map<number, BrowserWorldWindowObject>();
 const closedTabSnapshotsById = new Map<number, BrowserWorldPageActivity>();
+const persistedAiTabOwnershipById = new Map<number, BrowserWorldPersistedAiTabOwnership>();
 const pendingAiCreatedTabIds = new Set<number>();
 const pendingAiOperatedTabs = new Map<
   number,
@@ -568,9 +580,117 @@ let lastBaselineResyncAttempted = false;
 let lastBaselineResyncSucceeded: boolean | null = null;
 let lastBaselineReadinessReason = 'BrowserWorld baseline readiness has not been checked yet.';
 let lastBaselineNextRequiredCheck = 'get_windows_and_tabs';
+let aiTabOwnershipStorageLoaded = false;
 
 function nowMs(): number {
   return Date.now();
+}
+
+function getAiTabOwnershipStorageArea(): Pick<
+  chrome.storage.StorageArea,
+  'get' | 'set' | 'remove'
+> | null {
+  return (chrome?.storage as any)?.session ?? null;
+}
+
+function normalizePersistedAiTabOwnership(
+  value: unknown,
+): BrowserWorldPersistedAiTabOwnership | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const tabId = readInteger(record.tabId);
+  const markedAtMs = readInteger(record.markedAtMs);
+  if (tabId === null || tabId < 0 || markedAtMs === null) return null;
+  const lastAiOperation =
+    typeof record.lastAiOperation === 'string'
+      ? safeAiOperationLabel(record.lastAiOperation)
+      : null;
+  const lastAiOperationAtMs = readInteger(record.lastAiOperationAtMs);
+  const lastAiOperationReason =
+    typeof record.lastAiOperationReason === 'string'
+      ? record.lastAiOperationReason.slice(0, 120)
+      : null;
+  return {
+    tabId,
+    markedAtMs,
+    reason:
+      typeof record.reason === 'string' && record.reason.length <= 120
+        ? record.reason
+        : 'restored_from_browser_world_ai_ownership_session_store',
+    lastAiOperation,
+    lastAiOperationAtMs,
+    lastAiOperationReason,
+  };
+}
+
+async function loadPersistedAiTabOwnership(): Promise<void> {
+  if (aiTabOwnershipStorageLoaded) return;
+  const storage = getAiTabOwnershipStorageArea();
+  if (!storage || typeof storage.get !== 'function') {
+    aiTabOwnershipStorageLoaded = true;
+    return;
+  }
+  try {
+    const result = await storage.get([AI_TAB_OWNERSHIP_STORAGE_KEY]);
+    const rawRecords = (result as Record<string, unknown> | undefined)?.[
+      AI_TAB_OWNERSHIP_STORAGE_KEY
+    ];
+    if (Array.isArray(rawRecords)) {
+      for (const raw of rawRecords) {
+        const record = normalizePersistedAiTabOwnership(raw);
+        if (record) persistedAiTabOwnershipById.set(record.tabId, record);
+      }
+    }
+    aiTabOwnershipStorageLoaded = true;
+  } catch {
+    aiTabOwnershipStorageLoaded = false;
+  }
+}
+
+async function savePersistedAiTabOwnership(): Promise<void> {
+  const storage = getAiTabOwnershipStorageArea();
+  if (!storage || typeof storage.set !== 'function') return;
+  const records = Array.from(persistedAiTabOwnershipById.values())
+    .sort((a, b) => b.markedAtMs - a.markedAtMs)
+    .slice(0, MAX_PERSISTED_AI_TAB_OWNERSHIP_RECORDS);
+  try {
+    await storage.set({ [AI_TAB_OWNERSHIP_STORAGE_KEY]: records });
+  } catch {
+    // BrowserWorld must keep running even if session storage is temporarily unavailable.
+  }
+}
+
+function rememberPersistedAiTabOwnership(
+  tabId: number,
+  patch: Partial<BrowserWorldPersistedAiTabOwnership>,
+): void {
+  const previous = persistedAiTabOwnershipById.get(tabId);
+  persistedAiTabOwnershipById.set(tabId, {
+    tabId,
+    markedAtMs: previous?.markedAtMs ?? nowMs(),
+    reason: previous?.reason ?? 'marked_by_tabrix_navigation_result',
+    lastAiOperation: previous?.lastAiOperation ?? null,
+    lastAiOperationAtMs: previous?.lastAiOperationAtMs ?? null,
+    lastAiOperationReason: previous?.lastAiOperationReason ?? null,
+    ...patch,
+  });
+  void savePersistedAiTabOwnership();
+}
+
+function forgetPersistedAiTabOwnership(tabId: number): void {
+  if (!persistedAiTabOwnershipById.delete(tabId)) return;
+  void savePersistedAiTabOwnership();
+}
+
+function prunePersistedAiTabOwnershipToLiveTabs(liveTabIds: Set<number>): void {
+  let changed = false;
+  for (const tabId of persistedAiTabOwnershipById.keys()) {
+    if (!liveTabIds.has(tabId)) {
+      persistedAiTabOwnershipById.delete(tabId);
+      changed = true;
+    }
+  }
+  if (changed) void savePersistedAiTabOwnership();
 }
 
 function readInteger(value: unknown): number | null {
@@ -754,6 +874,7 @@ function visibilityStateFromChromeWindow(window: {
 
 function inferTabOpenSource(args: {
   wasAiPending: boolean;
+  persistedAiOwnership?: BrowserWorldPersistedAiTabOwnership | null;
   openerTabId: number | null;
   previous?: BrowserWorldTabObject;
 }): {
@@ -768,6 +889,22 @@ function inferTabOpenSource(args: {
       openedBySource: 'ai_tool',
       openedByConfidence: 0.95,
       openedByReason: 'marked_by_tabrix_navigation_before_tabs_onCreated',
+    };
+  }
+  if (args.previous?.openedBy === 'ai') {
+    return {
+      openedBy: args.previous.openedBy,
+      openedBySource: args.previous.openedBySource,
+      openedByConfidence: args.previous.openedByConfidence,
+      openedByReason: args.previous.openedByReason,
+    };
+  }
+  if (args.persistedAiOwnership) {
+    return {
+      openedBy: 'ai',
+      openedBySource: 'ai_tool',
+      openedByConfidence: 0.9,
+      openedByReason: 'restored_from_browser_world_ai_ownership_session_store',
     };
   }
   if (args.previous) {
@@ -806,10 +943,12 @@ function normalizeTab(
   const wasAiPending = pendingAiCreatedTabIds.delete(tab.id);
   const pendingAiOperation = pendingAiOperatedTabs.get(tab.id) ?? null;
   if (pendingAiOperation) pendingAiOperatedTabs.delete(tab.id);
+  const persistedAiOwnership = persistedAiTabOwnershipById.get(tab.id) ?? null;
   const openerTabId =
     typeof tab.openerTabId === 'number' ? tab.openerTabId : (previous?.openerTabId ?? null);
   const openSource = inferTabOpenSource({
     wasAiPending,
+    persistedAiOwnership,
     openerTabId,
     previous,
   });
@@ -849,22 +988,30 @@ function normalizeTab(
     lastAiOperation:
       pendingAiOperation?.operation ??
       previous?.lastAiOperation ??
+      persistedAiOwnership?.lastAiOperation ??
       (openedBy === 'ai' ? 'tab_created' : null),
     lastAiOperationAtMs:
       pendingAiOperation?.operatedAtMs ??
       previous?.lastAiOperationAtMs ??
+      persistedAiOwnership?.lastAiOperationAtMs ??
       (openedBy === 'ai' ? observedAt : null),
     lastAiOperationConfidence:
       pendingAiOperation !== null
         ? 0.95
-        : typeof previous?.lastAiOperationConfidence === 'number'
-          ? previous.lastAiOperationConfidence
-          : openedBy === 'ai'
-            ? 0.95
-            : null,
+        : wasAiPending
+          ? 0.95
+          : typeof previous?.lastAiOperationConfidence === 'number'
+            ? previous.lastAiOperationConfidence
+            : persistedAiOwnership
+              ? 0.9
+              : openedBy === 'ai'
+                ? 0.95
+                : null,
     lastAiOperationReason:
       pendingAiOperation?.reason ??
+      (wasAiPending ? openSource.openedByReason : null) ??
       previous?.lastAiOperationReason ??
+      persistedAiOwnership?.lastAiOperationReason ??
       (openedBy === 'ai' ? 'marked_by_tabrix_navigation_before_tabs_onCreated' : null),
     createdAtMs: previous?.createdAtMs ?? observedAt,
     updatedAtMs: observedAt,
@@ -1168,6 +1315,7 @@ async function seedFromChrome(
   options: { allowThrottle?: boolean } = {},
 ): Promise<void> {
   const startedAt = nowMs();
+  await loadPersistedAiTabOwnership();
   if (
     options.allowThrottle === true &&
     lastFullChromeResyncAtMs !== null &&
@@ -1200,17 +1348,20 @@ async function seedFromChrome(
     throw error;
   }
   const previousTabs = new Map(tabsById);
+  const liveTabIds = new Set<number>();
   windowsById.clear();
   tabsById.clear();
   for (const window of windows) {
     const normalizedWindow = normalizeWindow(window);
     if (normalizedWindow) windowsById.set(normalizedWindow.windowId, normalizedWindow);
     for (const tab of window.tabs ?? []) {
+      if (typeof tab.id === 'number') liveTabIds.add(tab.id);
       const previous = typeof tab.id === 'number' ? previousTabs.get(tab.id) : undefined;
       const normalizedTab = normalizeTab(tab, previous, normalizedWindow?.windowId ?? null);
       if (normalizedTab) tabsById.set(normalizedTab.tabId, normalizedTab);
     }
   }
+  prunePersistedAiTabOwnershipToLiveTabs(liveTabIds);
   fullChromeResyncCount += 1;
   lastFullChromeResyncAtMs = nowMs();
   lastFullChromeResyncDurationMs = Math.max(0, lastFullChromeResyncAtMs - startedAt);
@@ -1325,6 +1476,7 @@ export function initBrowserWorldInventory(): void {
     }
     if (windowId !== null) refreshWindowDerivedTabState(windowId);
     pendingAiCreatedTabIds.delete(tabId);
+    forgetPersistedAiTabOwnership(tabId);
     pushEvent({
       eventKind: 'tab_removed',
       tabId,
@@ -1347,6 +1499,15 @@ export function initBrowserWorldInventory(): void {
     const previous = tabsById.get(removedTabId);
     tabsById.delete(removedTabId);
     if (previous) {
+      const persistedAiOwnership = persistedAiTabOwnershipById.get(removedTabId) ?? null;
+      if (persistedAiOwnership) {
+        persistedAiTabOwnershipById.delete(removedTabId);
+        persistedAiTabOwnershipById.set(addedTabId, {
+          ...persistedAiOwnership,
+          tabId: addedTabId,
+        });
+        void savePersistedAiTabOwnership();
+      }
       tabsById.set(addedTabId, {
         ...previous,
         tabId: addedTabId,
@@ -1431,6 +1592,7 @@ export function initBrowserWorldInventory(): void {
         if (tab.openedBy === 'ai') removedAiOpenedTabCount += 1;
         rememberClosedTabSnapshot(tab, windowId);
         tabsById.delete(tabId);
+        forgetPersistedAiTabOwnership(tabId);
       }
     }
     pushEvent({
@@ -1472,6 +1634,14 @@ export function initBrowserWorldInventory(): void {
 
 export function markBrowserWorldTabAiCreated(tabId: number | null | undefined): void {
   if (typeof tabId !== 'number' || tabId < 0) return;
+  const markedAtMs = nowMs();
+  rememberPersistedAiTabOwnership(tabId, {
+    markedAtMs,
+    reason: 'marked_by_tabrix_navigation_result',
+    lastAiOperation: 'tab_created',
+    lastAiOperationAtMs: markedAtMs,
+    lastAiOperationReason: 'marked_by_tabrix_navigation_result',
+  });
   const previous = tabsById.get(tabId);
   if (!previous) {
     pendingAiCreatedTabIds.add(tabId);
@@ -1489,12 +1659,12 @@ export function markBrowserWorldTabAiCreated(tabId: number | null | undefined): 
       openedByReason: 'marked_by_tabrix_navigation_result',
       aiOperationState: 'recently_operated',
       lastAiOperation: 'tab_created',
-      lastAiOperationAtMs: nowMs(),
+      lastAiOperationAtMs: markedAtMs,
       lastAiOperationConfidence: 0.95,
       lastAiOperationReason: 'marked_by_tabrix_navigation_result',
       cleanupEligibility: cleanup.cleanupEligibility,
       cleanupEligibilityReason: cleanup.cleanupEligibilityReason,
-      updatedAtMs: nowMs(),
+      updatedAtMs: markedAtMs,
     });
   }
   pushEvent({
@@ -1515,21 +1685,29 @@ export function markBrowserWorldTabAiOperated(
   if (typeof tabId !== 'number' || tabId < 0) return;
   const safeOperation = safeAiOperationLabel(operation);
   const safeReason = `marked_by_tabrix_tool_execution:${safeOperation}`;
+  const operatedAtMs = nowMs();
   const previous = tabsById.get(tabId);
+  if (previous?.openedBy === 'ai' || persistedAiTabOwnershipById.has(tabId)) {
+    rememberPersistedAiTabOwnership(tabId, {
+      lastAiOperation: safeOperation,
+      lastAiOperationAtMs: operatedAtMs,
+      lastAiOperationReason: safeReason,
+    });
+  }
   if (previous) {
     tabsById.set(tabId, {
       ...previous,
       aiOperationState: 'recently_operated',
       lastAiOperation: safeOperation,
-      lastAiOperationAtMs: nowMs(),
+      lastAiOperationAtMs: operatedAtMs,
       lastAiOperationConfidence: 0.95,
       lastAiOperationReason: safeReason,
-      updatedAtMs: nowMs(),
+      updatedAtMs: operatedAtMs,
     });
   } else {
     pendingAiOperatedTabs.set(tabId, {
       operation: safeOperation,
-      operatedAtMs: nowMs(),
+      operatedAtMs,
       reason: safeReason,
     });
   }
@@ -1844,6 +2022,7 @@ export function resetBrowserWorldInventoryForTests(): void {
   tabsById.clear();
   windowsById.clear();
   closedTabSnapshotsById.clear();
+  persistedAiTabOwnershipById.clear();
   pendingAiCreatedTabIds.clear();
   pendingAiOperatedTabs.clear();
   recentEvents.length = 0;
@@ -1866,4 +2045,5 @@ export function resetBrowserWorldInventoryForTests(): void {
   lastBaselineResyncSucceeded = null;
   lastBaselineReadinessReason = 'BrowserWorld baseline readiness has not been checked yet.';
   lastBaselineNextRequiredCheck = 'get_windows_and_tabs';
+  aiTabOwnershipStorageLoaded = false;
 }

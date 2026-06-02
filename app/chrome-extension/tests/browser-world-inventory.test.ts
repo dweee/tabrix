@@ -93,6 +93,7 @@ describe('browser world inventory', () => {
   beforeEach(() => {
     resetBrowserWorldInventoryForTests();
     for (const bucket of Object.values(listeners)) bucket.length = 0;
+    (chrome.storage as any).session = undefined;
     (chrome.tabs as any).onCreated = hook(listeners.tabCreated);
     (chrome.tabs as any).onUpdated = hook(listeners.tabUpdated);
     (chrome.tabs as any).onRemoved = hook(listeners.tabRemoved);
@@ -746,6 +747,75 @@ describe('browser world inventory', () => {
       'not that a specific tab was just closed or opened',
     );
     expectRecentEventsPublicSafe(snapshot.recentEvents);
+  });
+
+  it('restores AI tab ownership from extension session storage after BrowserWorld memory resets', async () => {
+    const sessionStore: Record<string, unknown> = {};
+    (chrome.storage as any).session = {
+      get: vi.fn(async (keys: string[]) => {
+        const result: Record<string, unknown> = {};
+        for (const key of keys) result[key] = sessionStore[key];
+        return result;
+      }),
+      set: vi.fn(async (items: Record<string, unknown>) => {
+        Object.assign(sessionStore, items);
+      }),
+      remove: vi.fn(async (keys: string | string[]) => {
+        for (const key of Array.isArray(keys) ? keys : [keys]) delete sessionStore[key];
+      }),
+    };
+    vi.mocked(chrome.windows.getAll).mockResolvedValue([
+      {
+        id: 7,
+        focused: true,
+        state: 'normal',
+        type: 'normal',
+        tabs: [
+          {
+            id: 77,
+            windowId: 7,
+            url: 'https://ai-restored.test/',
+            title: 'AI restored',
+            active: true,
+            status: 'complete',
+            discarded: false,
+            audible: false,
+            mutedInfo: { muted: false },
+            pinned: false,
+          },
+        ],
+      },
+    ] as chrome.windows.Window[]);
+
+    markBrowserWorldTabAiCreated(77);
+    await vi.waitFor(() => {
+      const records = sessionStore['tabrix.browserWorld.aiTabOwnership.v1'];
+      expect(records).toEqual([
+        expect.objectContaining({
+          tabId: 77,
+          lastAiOperation: 'tab_created',
+        }),
+      ]);
+    });
+
+    resetBrowserWorldInventoryForTests();
+
+    const snapshot = await getBrowserWorldSnapshot();
+
+    expect(snapshot.aiOpenedTabIds).toEqual([77]);
+    expect(snapshot.userOrPageOpenedTabIds).toEqual([]);
+    expect(snapshot.summary.currentTabObject).toMatchObject({
+      tabId: 77,
+      openedBy: 'ai',
+      openedBySource: 'ai_tool',
+      openedByReason: 'restored_from_browser_world_ai_ownership_session_store',
+      cleanupEligibility: 'eligible',
+      cleanupEligibilityReason: 'ai_opened_operable_tab_cleanup_candidate',
+    });
+    expect(snapshot.summary.counts).toMatchObject({
+      aiOpenedTabs: 1,
+      userOrPageOpenedTabs: 0,
+    });
   });
 
   it('resyncs the window active tab immediately when a new active tab is created', async () => {
