@@ -215,6 +215,65 @@ export const BROWSER_SCHEMAS: Tool[] = [
           description:
             'Default false. When true, and only for an auth-scoped QR surface in an AI-operable tab, include a temporary auth_qr_image artifact reference for remote user login collaboration.',
         },
+        assistantGuidance: {
+          type: 'object',
+          description:
+            'Optional AI-provided observation guidance for chrome_read_page. Tabrix uses it only to prioritize/filter what it observes (for example QR login over OTP controls); it is not Tabrix-side planning, not a success claim, and not permission to operate protected tabs.',
+          properties: {
+            taskKind: {
+              type: 'string',
+              enum: ['auth', 'search', 'extract_content', 'unknown'],
+              description: 'High-level task kind used only as an observation hint.',
+            },
+            authPreference: {
+              type: 'string',
+              enum: ['qr', 'otp', 'manual', 'auto'],
+              description:
+                "Preferred auth challenge to observe first. For example, use 'qr' when the user explicitly asked for扫码/scan login so OTP controls remain alternatives instead of the main path.",
+            },
+            requestedObjects: {
+              type: 'array',
+              items: {
+                type: 'string',
+                enum: [
+                  'auth_surface',
+                  'qr_image',
+                  'phone_input',
+                  'otp_input',
+                  'search_input',
+                  'result_cards',
+                  'detail_metrics',
+                ],
+              },
+              description:
+                'Observation targets the AI wants Tabrix to surface. These are filters/priorities only, not execution instructions.',
+            },
+            assistantProvidedTarget: {
+              type: 'object',
+              description:
+                'Optional target chosen by the AI after inspecting prior candidates. Tabrix may use selector/targetRef/frameId to retry observation or artifact extraction, then report evidence.',
+              properties: {
+                purpose: {
+                  type: 'string',
+                  enum: ['auth_qr_image', 'click', 'fill', 'observe'],
+                },
+                targetRef: {
+                  type: 'string',
+                  description: 'Target ref from a recent read_page response in the same tab.',
+                },
+                selector: {
+                  type: 'string',
+                  description:
+                    'CSS selector selected by the AI from Tabrix-provided candidates; used only for scoped observation/extraction.',
+                },
+                frameId: {
+                  type: 'number',
+                  description: 'Optional frame id when the chosen target belongs to a subframe.',
+                },
+              },
+            },
+          },
+        },
         forceRefresh: {
           type: 'boolean',
           description:
@@ -1072,7 +1131,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.JAVASCRIPT,
     description:
-      'Execute JavaScript code in a browser tab and return the result. This is a high-risk debugger/fallback capability: do not use it for routine tab discovery, normal navigation waits, or simple content extraction when chrome_read_page, chrome_get_web_content, chrome_get_interactive_elements, chrome_click_element, or chrome_fill_or_select can do the job. Uses CDP Runtime.evaluate with awaitPromise and returnByValue; automatically falls back to chrome.scripting.executeScript if the debugger is busy. Output is sanitized (sensitive data redacted) and truncated by default.',
+      'Execute JavaScript code in a browser tab and return the result. This is a high-risk debugger/fallback capability: do not use it for routine tab discovery, normal navigation waits, or simple content extraction when chrome_read_page, chrome_get_web_content, chrome_get_interactive_elements, chrome_click_element, or chrome_fill_or_select can do the job. Caller responsibility: the calling AI/client must review the script intent, data access, and side effects before sending it; Tabrix executes the supplied script and does not statically analyze, sanitize, or certify arbitrary JavaScript safety. Uses CDP Runtime.evaluate with awaitPromise and returnByValue; automatically falls back to chrome.scripting.executeScript if the debugger is busy. Output is sanitized (sensitive data redacted) and truncated by default.',
     annotations: {
       destructiveHint: true,
     },
@@ -1082,7 +1141,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
         code: {
           type: 'string',
           description:
-            'JavaScript code to execute. Runs inside an async function body, so top-level await and "return ..." are supported.',
+            'JavaScript code to execute. Runs inside an async function body, so top-level await and "return ..." are supported. Before passing this code to Tabrix, the calling AI/client is responsible for checking whether the script reads sensitive data, changes page state, navigates, submits forms, deletes data, or has other user-visible side effects; Tabrix is the executor and does not guarantee the script is safe.',
         },
         tabId: {
           type: 'number',

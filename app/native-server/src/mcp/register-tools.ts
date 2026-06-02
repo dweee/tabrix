@@ -2539,6 +2539,7 @@ function buildReadPageRequestKey(args: unknown, requestedLayer: ReadPageRequeste
   const refId = typeof input.refId === 'string' ? input.refId : '';
   const includeAuthArtifacts = input.includeAuthArtifacts === true;
   const forceRefresh = input.forceRefresh === true;
+  const assistantGuidance = normalizeReadPageAssistantGuidanceForCacheKey(input.assistantGuidance);
   return JSON.stringify({
     requestedLayer,
     mode,
@@ -2547,8 +2548,82 @@ function buildReadPageRequestKey(args: unknown, requestedLayer: ReadPageRequeste
     depth,
     refId,
     includeAuthArtifacts,
+    assistantGuidance,
     forceRefresh,
   });
+}
+
+function normalizeReadPageAssistantGuidanceForCacheKey(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  const output: Record<string, unknown> = {};
+  if (
+    typeof input.taskKind === 'string' &&
+    ['auth', 'search', 'extract_content', 'unknown'].includes(input.taskKind)
+  ) {
+    output.taskKind = input.taskKind;
+  }
+  if (
+    typeof input.authPreference === 'string' &&
+    ['qr', 'otp', 'manual', 'auto'].includes(input.authPreference)
+  ) {
+    output.authPreference = input.authPreference;
+  }
+  if (Array.isArray(input.requestedObjects)) {
+    const requestedObjects = input.requestedObjects
+      .filter(
+        (item): item is string =>
+          typeof item === 'string' &&
+          [
+            'auth_surface',
+            'qr_image',
+            'phone_input',
+            'otp_input',
+            'search_input',
+            'result_cards',
+            'detail_metrics',
+          ].includes(item),
+      )
+      .slice(0, 8);
+    if (requestedObjects.length > 0) output.requestedObjects = [...new Set(requestedObjects)];
+  }
+  const target =
+    input.assistantProvidedTarget &&
+    typeof input.assistantProvidedTarget === 'object' &&
+    !Array.isArray(input.assistantProvidedTarget)
+      ? (input.assistantProvidedTarget as Record<string, unknown>)
+      : null;
+  if (target) {
+    const assistantProvidedTarget: Record<string, unknown> = {};
+    if (
+      typeof target.purpose === 'string' &&
+      ['auth_qr_image', 'click', 'fill', 'observe'].includes(target.purpose)
+    ) {
+      assistantProvidedTarget.purpose = target.purpose;
+    }
+    if (
+      typeof target.targetRef === 'string' &&
+      /^ref_[A-Za-z0-9:_-]{1,80}$/.test(target.targetRef)
+    ) {
+      assistantProvidedTarget.targetRef = target.targetRef;
+    }
+    if (typeof target.selector === 'string' && target.selector.trim().length > 0) {
+      assistantProvidedTarget.selector = target.selector.trim().slice(0, 500);
+    }
+    if (
+      typeof target.frameId === 'number' &&
+      Number.isInteger(target.frameId) &&
+      target.frameId >= 0
+    ) {
+      assistantProvidedTarget.frameId = target.frameId;
+    }
+    if (Object.keys(assistantProvidedTarget).length > 0) {
+      output.assistantProvidedTarget = assistantProvidedTarget;
+    }
+  }
+  return Object.keys(output).length > 0 ? output : null;
 }
 
 function buildAutoTabTaskContextKey(tabId: number): string {

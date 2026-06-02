@@ -72,6 +72,21 @@ describe('TOOL_RISK_TIERS coverage invariants', () => {
     expect(TOOL_RISK_TIERS[TOOL_NAMES.BROWSER.USERSCRIPT]).toBe('P3');
   });
 
+  it('chrome_javascript schema makes caller-side script review responsibility explicit', () => {
+    const javascriptTool = TOOL_SCHEMAS.find((tool) => tool.name === TOOL_NAMES.BROWSER.JAVASCRIPT);
+    expect(javascriptTool).toBeDefined();
+    expect(javascriptTool?.description).toContain('Caller responsibility');
+    expect(javascriptTool?.description).toContain('does not statically analyze');
+
+    const inputSchema = javascriptTool?.inputSchema as
+      | { properties?: Record<string, { description?: string }> }
+      | undefined;
+    expect(inputSchema?.properties?.code?.description).toContain(
+      'calling AI/client is responsible',
+    );
+    expect(inputSchema?.properties?.code?.description).toContain('Tabrix is the executor');
+  });
+
   it('every capability-gated tool maps to a known TabrixCapability', () => {
     const allCaps = new Set<string>(ALL_TABRIX_CAPABILITIES);
     const offenders: string[] = [];

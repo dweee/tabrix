@@ -156,9 +156,27 @@ function browserPageObject(eventTypes: string[], status = 'single_snapshot') {
   } as any;
 }
 
+function setElementRect(
+  element: Element,
+  rect: { x: number; y: number; width: number; height: number },
+) {
+  Object.defineProperty(element, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => ({
+      ...rect,
+      top: rect.y,
+      left: rect.x,
+      right: rect.x + rect.width,
+      bottom: rect.y + rect.height,
+      toJSON: () => rect,
+    }),
+  });
+}
+
 describe('read_page auth artifacts', () => {
   beforeEach(() => {
     vi.mocked(chrome.scripting.executeScript).mockReset();
+    document.body.innerHTML = '';
   });
 
   it('keeps includeAuthArtifacts=false as status-only and artifact-free', () => {
@@ -305,6 +323,209 @@ describe('read_page auth artifacts', () => {
     ]);
   });
 
+  it('extracts QR artifact from a targetable auth QR container descendant', async () => {
+    document.body.innerHTML = `
+      <main>
+        <section aria-label="login dialog">
+          <div data-testid="login-qr">
+            <div class="qr-bitmap" style="background-image: url('data:image/png;base64,BBBB'); width: 180px; height: 180px;"></div>
+          </div>
+        </section>
+      </main>
+    `;
+    const wrapper = document.querySelector('[data-testid="login-qr"]');
+    const bitmap = document.querySelector('.qr-bitmap');
+    expect(wrapper).not.toBeNull();
+    expect(bitmap).not.toBeNull();
+    setElementRect(wrapper as Element, { x: 10, y: 20, width: 190, height: 190 });
+    setElementRect(bitmap as Element, { x: 15, y: 25, width: 180, height: 180 });
+
+    vi.mocked(chrome.scripting.executeScript).mockImplementationOnce(async (options: any) => [
+      { result: await options.func(...options.args) },
+    ]);
+    const artifactRefs: any[] = [];
+    const prepareFile = vi.fn().mockResolvedValue({
+      filename: 'tabrix_auth_qr.png',
+      fullPath: 'C:\\Users\\gsy\\AppData\\Local\\Temp\\tabrix_auth_qr.png',
+      size: 512,
+    });
+
+    const regions = authQrRegions();
+    regions[1].objects[0].locatorChain = [{ type: 'css', value: '[data-testid="login-qr"]' }];
+    const status = await buildAuthQrArtifactRefs({
+      includeAuthArtifacts: true,
+      tabId: 9,
+      windowId: 1,
+      pageRegions: regions,
+      browserWorldTab: aiOwnedTab(),
+      artifactRefs,
+      nowMs: 1000,
+      prepareFile,
+    });
+
+    expect(status).toMatchObject({
+      requested: true,
+      status: 'ready',
+      artifactRef: 'artifact://read_page/tab-9/auth-qr/visual_qr',
+    });
+    expect(prepareFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        base64Data: 'data:image/png;base64,BBBB',
+        requestPrefix: 'auth-qr-artifact',
+      }),
+    );
+    expect(artifactRefs[0]).toMatchObject({
+      kind: 'auth_qr_image',
+      method: 'css_background_data_url',
+      width: 180,
+      height: 180,
+    });
+  });
+
+  it('extracts QR artifact from an auth DOM surface when pageRegions lack a QR object', async () => {
+    document.body.innerHTML = `
+      <section role="dialog" aria-label="Login dialog">
+        <h1>Sign in</h1>
+        <p>Scan QR code to continue</p>
+        <img data-testid="auth-qr-img" alt="QR code" src="data:image/png;base64,CCCC" />
+      </section>
+    `;
+    const dialog = document.querySelector('[role="dialog"]');
+    const image = document.querySelector('[data-testid="auth-qr-img"]');
+    expect(dialog).not.toBeNull();
+    expect(image).not.toBeNull();
+    setElementRect(dialog as Element, { x: 30, y: 40, width: 340, height: 420 });
+    setElementRect(image as Element, { x: 80, y: 120, width: 180, height: 180 });
+
+    vi.mocked(chrome.scripting.executeScript).mockImplementationOnce(async (options: any) => [
+      { result: await options.func(...options.args) },
+    ]);
+    const artifactRefs: any[] = [];
+    const prepareFile = vi.fn().mockResolvedValue({
+      filename: 'tabrix_auth_qr.png',
+      fullPath: 'C:\\Users\\gsy\\AppData\\Local\\Temp\\tabrix_auth_qr.png',
+      size: 512,
+    });
+
+    const status = await buildAuthQrArtifactRefs({
+      includeAuthArtifacts: true,
+      tabId: 9,
+      windowId: 1,
+      pageRegions: otpAuthRegions(),
+      browserWorldTab: aiOwnedTab(),
+      artifactRefs,
+      nowMs: 1000,
+      prepareFile,
+    });
+
+    expect(status).toMatchObject({
+      requested: true,
+      status: 'ready',
+      artifactRef: 'artifact://read_page/tab-9/auth-qr/dom_qr_visual',
+    });
+    expect(artifactRefs[0]).toMatchObject({
+      kind: 'auth_qr_image',
+      method: 'img_data_url',
+      sourceRegionId: 'auth_surface_dom_probe',
+      sourceObjectId: 'dom_qr_visual',
+      width: 180,
+      height: 180,
+    });
+  });
+
+  it('uses an assistant-provided QR selector as a scoped extraction target', async () => {
+    document.body.innerHTML = `
+      <section role="dialog" aria-label="Login dialog">
+        <h1>Sign in</h1>
+        <img data-testid="assistant-picked-qr" alt="QR code" src="data:image/png;base64,EEEE" />
+      </section>
+    `;
+    const image = document.querySelector('[data-testid="assistant-picked-qr"]');
+    expect(image).not.toBeNull();
+    setElementRect(image as Element, { x: 80, y: 120, width: 180, height: 180 });
+
+    vi.mocked(chrome.scripting.executeScript).mockImplementationOnce(async (options: any) => [
+      { result: await options.func(...options.args) },
+    ]);
+    const artifactRefs: any[] = [];
+    const prepareFile = vi.fn().mockResolvedValue({
+      filename: 'tabrix_auth_qr.png',
+      fullPath: 'C:\\Users\\gsy\\AppData\\Local\\Temp\\tabrix_auth_qr.png',
+      size: 512,
+    });
+
+    const status = await buildAuthQrArtifactRefs({
+      includeAuthArtifacts: true,
+      tabId: 9,
+      windowId: 1,
+      pageRegions: [],
+      browserWorldTab: aiOwnedTab(),
+      artifactRefs,
+      assistantGuidance: {
+        taskKind: 'auth',
+        authPreference: 'qr',
+        requestedObjects: ['qr_image'],
+        assistantProvidedTarget: {
+          purpose: 'auth_qr_image',
+          selector: '[data-testid="assistant-picked-qr"]',
+        },
+      },
+      nowMs: 1000,
+      prepareFile,
+    });
+
+    expect(status).toMatchObject({
+      requested: true,
+      status: 'ready',
+      artifactRef: 'artifact://read_page/tab-9/auth-qr/assistant_provided_qr_target',
+    });
+    expect(artifactRefs[0]).toMatchObject({
+      sourceRegionId: 'assistant_guided_auth_surface',
+      sourceObjectId: 'assistant_provided_qr_target',
+      method: 'img_data_url',
+    });
+  });
+
+  it('does not extract ordinary content QR images as auth QR artifacts', async () => {
+    document.body.innerHTML = `
+      <article>
+        <h1>Article with a QR image</h1>
+        <img data-testid="content-qr" alt="QR code" src="data:image/png;base64,DDDD" />
+      </article>
+    `;
+    const article = document.querySelector('article');
+    const image = document.querySelector('[data-testid="content-qr"]');
+    expect(article).not.toBeNull();
+    expect(image).not.toBeNull();
+    setElementRect(article as Element, { x: 10, y: 10, width: 500, height: 600 });
+    setElementRect(image as Element, { x: 60, y: 120, width: 180, height: 180 });
+
+    vi.mocked(chrome.scripting.executeScript).mockImplementationOnce(async (options: any) => [
+      { result: await options.func(...options.args) },
+    ]);
+    const prepareFile = vi.fn();
+    const artifactRefs: any[] = [];
+
+    const status = await buildAuthQrArtifactRefs({
+      includeAuthArtifacts: true,
+      tabId: 9,
+      windowId: 1,
+      pageRegions: [],
+      browserWorldTab: aiOwnedTab(),
+      artifactRefs,
+      nowMs: 1000,
+      prepareFile,
+    });
+
+    expect(status).toMatchObject({
+      requested: true,
+      status: 'not_applicable',
+      reason: 'auth_scoped_qr_visual_not_found',
+    });
+    expect(prepareFile).not.toHaveBeenCalled();
+    expect(artifactRefs).toEqual([]);
+  });
+
   it('fails QR screenshot fallback when the target tab is not the active visible tab', async () => {
     vi.mocked(chrome.scripting.executeScript).mockResolvedValueOnce([
       {
@@ -397,6 +618,156 @@ describe('read_page auth artifacts', () => {
     expect(collaboration.userAction.instruction).toContain('扫码');
   });
 
+  it('keeps QR collaboration when a ready QR artifact appears beside OTP controls', () => {
+    const collaboration = buildAuthCollaborationState({
+      pageRole: 'login_required',
+      tabId: 9,
+      pageRegions: authQrRegions(),
+      browserPageObject: browserPageObject(['auth_required_candidate', 'qr_waiting']),
+      browserWorldTab: aiOwnedTab(),
+      authArtifactStatus: {
+        requested: true,
+        status: 'ready',
+        reason: 'auth_qr_image_artifact_ready',
+        artifactRef: 'artifact://read_page/tab-9/auth-qr/visual_qr',
+        ownerType: 'run_owned',
+        claimBoundary: 'artifact boundary',
+      },
+      artifactRefs: [
+        {
+          kind: 'auth_qr_image',
+          ref: 'artifact://read_page/tab-9/auth-qr/visual_qr',
+          expiresAtMs: 121000,
+        },
+      ],
+      interactiveElements: [
+        {
+          ref: 'ref_phone',
+          type: 'input',
+          text: '手机号',
+          label: '手机号',
+          placeholder: '手机号',
+          valueState: 'empty',
+          actionability: 'actionable',
+        } as any,
+        {
+          ref: 'ref_otp',
+          type: 'input',
+          text: '验证码',
+          label: '验证码',
+          placeholder: '验证码',
+          valueState: 'empty',
+          actionability: 'actionable',
+        } as any,
+        {
+          ref: 'ref_request_otp',
+          type: 'button',
+          text: '获取验证码',
+          label: '获取验证码',
+          actionability: 'actionable',
+        } as any,
+      ],
+    });
+
+    expect(collaboration).toMatchObject({
+      status: 'waiting_for_user',
+      challengeType: 'qr',
+      userAction: {
+        artifactRef: 'artifact://read_page/tab-9/auth-qr/visual_qr',
+      },
+    });
+    expect(collaboration.userAction.instruction).toContain('扫描二维码');
+    expect(collaboration.authForm).toBeUndefined();
+  });
+
+  it('honors assistant QR guidance and keeps OTP controls as alternatives only', () => {
+    const collaboration = buildAuthCollaborationState({
+      pageRole: 'login_required',
+      tabId: 9,
+      pageRegions: authQrRegions(),
+      browserPageObject: browserPageObject(['auth_required_candidate']),
+      browserWorldTab: aiOwnedTab(),
+      authArtifactStatus: buildNotRequestedAuthArtifactStatus(),
+      artifactRefs: [],
+      interactiveElements: otpInteractive({
+        ref_phone: { valueState: 'non_empty' },
+        ref_agreement: { checked: true },
+      }),
+      candidateActions: otpCandidateActions(),
+      assistantGuidance: {
+        taskKind: 'auth',
+        authPreference: 'qr',
+        requestedObjects: ['auth_surface', 'qr_image'],
+      },
+    });
+
+    expect(collaboration).toMatchObject({
+      status: 'required',
+      challengeType: 'qr',
+      preferredChallengeType: 'qr',
+      alternativeChallengeTypes: ['otp'],
+      observedAuthSurface: {
+        status: 'detected',
+        preferredChallengeType: 'qr',
+        guidanceApplied: true,
+      },
+      assistantHandoff: {
+        status: 'needed',
+        requestedAssistantAction: 'choose_auth_qr_target',
+      },
+    });
+    expect(collaboration.authForm).toBeUndefined();
+    expect(collaboration.observedAuthSurface?.candidateObjectRefs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'qr_image' }),
+        expect.objectContaining({ kind: 'phone_input', targetRef: 'ref_phone' }),
+        expect.objectContaining({ kind: 'otp_input', targetRef: 'ref_otp' }),
+      ]),
+    );
+    expect(collaboration.userAction.instruction).toContain('AI 要求扫码登录');
+  });
+
+  it('returns an assistant handoff when QR guidance cannot find a QR target', () => {
+    const collaboration = buildAuthCollaborationState({
+      pageRole: 'login_required',
+      tabId: 9,
+      pageRegions: otpAuthRegions(),
+      browserPageObject: browserPageObject(['auth_required_candidate']),
+      browserWorldTab: aiOwnedTab(),
+      authArtifactStatus: {
+        requested: true,
+        status: 'not_applicable',
+        reason: 'auth_scoped_qr_visual_not_found',
+        ownerType: 'run_owned',
+        claimBoundary: 'artifact boundary',
+      },
+      artifactRefs: [],
+      interactiveElements: otpInteractive(),
+      candidateActions: otpCandidateActions(),
+      assistantGuidance: {
+        taskKind: 'auth',
+        authPreference: 'qr',
+        requestedObjects: ['auth_surface', 'qr_image'],
+      },
+    });
+
+    expect(collaboration).toMatchObject({
+      challengeType: 'qr',
+      preferredChallengeType: 'qr',
+      alternativeChallengeTypes: ['otp'],
+      observedAuthSurface: {
+        status: 'ambiguous',
+        guidanceApplied: true,
+      },
+      assistantHandoff: {
+        status: 'needed',
+        reason: 'target_not_found',
+        requestedAssistantAction: 'provide_selector_or_target_ref',
+      },
+    });
+    expect(collaboration.authForm).toBeUndefined();
+  });
+
   it('keeps content QR pages out of login collaboration', () => {
     const collaboration = buildAuthCollaborationState({
       pageRole: 'web_page',
@@ -452,6 +823,8 @@ describe('read_page auth artifacts', () => {
         claimBoundary: 'artifact boundary',
       },
       artifactRefs: [],
+      interactiveElements: otpInteractive(),
+      candidateActions: otpCandidateActions(),
     });
 
     expect(collaboration).toMatchObject({
@@ -460,6 +833,7 @@ describe('read_page auth artifacts', () => {
       userAction: { required: true },
       evidence: { postconditionStatus: 'not_proven' },
     });
+    expect(collaboration.authForm).toBeUndefined();
     expect(collaboration.userAction.instruction).toContain('过期');
   });
 
@@ -475,6 +849,11 @@ describe('read_page auth artifacts', () => {
       } as any,
       authArtifactStatus: buildNotRequestedAuthArtifactStatus(),
       artifactRefs: [],
+      assistantGuidance: {
+        taskKind: 'auth',
+        authPreference: 'qr',
+        requestedObjects: ['auth_surface', 'qr_image'],
+      },
     });
 
     expect(collaboration).toMatchObject({
@@ -484,6 +863,11 @@ describe('read_page auth artifacts', () => {
         artifactExtractionEligibility: 'blocked',
         actionOperability: 'protected_or_unknown',
         ownerType: 'user_owned',
+      },
+      assistantHandoff: {
+        status: 'needed',
+        reason: 'protected_tab',
+        requestedAssistantAction: 'manual_user_action',
       },
     });
     expect(collaboration.userAction.instruction).toContain('明确授权');

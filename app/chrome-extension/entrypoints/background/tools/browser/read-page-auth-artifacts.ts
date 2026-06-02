@@ -1,6 +1,8 @@
 import type {
   BrowserPageOwnerType,
   ReadPageArtifactRef,
+  ReadPageAssistantGuidance,
+  ReadPageAssistantHandoff,
   ReadPageAuthArtifactStatus,
   ReadPageAuthChallengeType,
   ReadPageAuthCollaboration,
@@ -9,6 +11,8 @@ import type {
   ReadPageCandidateAction,
   ReadPageBrowserPageObjectView,
   ReadPageInteractiveElement,
+  ReadPageObservedAuthSurface,
+  ReadPageObservedAuthSurfaceCandidate,
   ReadPageRegion,
   ReadPageRegionObject,
 } from '@tabrix/shared';
@@ -26,6 +30,8 @@ const AUTH_FORM_CLAIM_BOUNDARY =
   'privacy-safe OTP auth form map for user collaboration only; raw phone/OTP/password/cookie values are never included';
 const AUTH_RESUME_VERIFICATION_CLAIM_BOUNDARY =
   'resume guidance only; login success still requires a fresh same-tab read_page and postcondition evidence before the original task continues';
+const AUTH_ASSISTANT_HANDOFF_CLAIM_BOUNDARY =
+  'assistant handoff is observation evidence for the upstream AI; Tabrix is not choosing the business path or proving login success';
 
 type AuthQrExtractionMethod =
   | 'img_data_url'
@@ -567,6 +573,7 @@ function buildOtpAuthForm(params: {
     : [];
   const candidateActions = Array.isArray(params.candidateActions) ? params.candidateActions : [];
   const scopedText = authScopedRegionText(params.pageRegions);
+  if (params.challengeType === 'qr') return undefined;
   const hasOtpSignal =
     params.challengeType === 'otp' ||
     interactiveElements.some((element) => OTP_INPUT_PATTERN.test(controlText(element))) ||
@@ -709,6 +716,282 @@ function buildOtpAuthForm(params: {
   };
 }
 
+function uniqueChallengeTypes(
+  values: Array<ReadPageAuthChallengeType | undefined>,
+): ReadPageAuthChallengeType[] {
+  const seen = new Set<ReadPageAuthChallengeType>();
+  const result: ReadPageAuthChallengeType[] = [];
+  for (const value of values) {
+    if (!value || value === 'unknown' || seen.has(value)) continue;
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
+}
+
+function controlToObservedCandidate(
+  kind: ReadPageObservedAuthSurfaceCandidate['kind'],
+  control: AuthFormControlCandidate | undefined,
+  fallbackReason: string,
+): ReadPageObservedAuthSurfaceCandidate | null {
+  if (!control?.targetRef && !control?.candidateActionId) return null;
+  return {
+    kind,
+    targetRef: control.targetRef,
+    candidateActionId: control.candidateActionId,
+    confidence: control.confidence,
+    actionability: control.actionability,
+    reason: control.reason || fallbackReason,
+  };
+}
+
+function buildAuthSurfaceCandidates(params: {
+  pageRegions?: ReadPageRegion[];
+  authArtifactStatus: ReadPageAuthArtifactStatus;
+  semanticEventTypes: string[];
+  interactiveElements?: ReadPageInteractiveElement[];
+  candidateActions?: ReadPageCandidateAction[];
+}): ReadPageObservedAuthSurfaceCandidate[] {
+  const result: ReadPageObservedAuthSurfaceCandidate[] = [];
+  const regions = Array.isArray(params.pageRegions) ? params.pageRegions : [];
+  const interactiveElements = Array.isArray(params.interactiveElements)
+    ? params.interactiveElements
+    : [];
+  const candidateActions = Array.isArray(params.candidateActions) ? params.candidateActions : [];
+
+  const surfaceRegion = regions.find((region) => {
+    if (region.regionType === 'modal' || region.regionType === 'form') return true;
+    if (region.regionType === 'account' && /logged_out|auth|login|登录/i.test(region.state)) {
+      return true;
+    }
+    return false;
+  });
+  if (surfaceRegion) {
+    result.push({
+      kind: 'auth_surface',
+      targetRef: surfaceRegion.objects.find((object) => object.targetRef)?.targetRef,
+      confidence: surfaceRegion.confidence ?? 0.6,
+      reason: 'auth surface region observed in read_page snapshot',
+    });
+  }
+
+  for (const candidate of selectAuthQrArtifactCandidates(params.pageRegions, 3)) {
+    result.push({
+      kind: 'qr_image',
+      selector: candidate.selector,
+      confidence: 0.82,
+      actionability: 'inspectable',
+      reason: 'auth-scoped QR visual candidate from pageRegions',
+    });
+  }
+  if (params.authArtifactStatus.status === 'ready') {
+    result.push({
+      kind: 'qr_image',
+      confidence: 0.92,
+      actionability: 'artifact_ready',
+      reason: 'auth QR image artifact is ready for user collaboration',
+    });
+  }
+
+  const phone = bestElement(interactiveElements, PHONE_CONTROL_PATTERN, 'fill');
+  const phoneCandidate = controlToObservedCandidate(
+    'phone_input',
+    phone
+      ? toControl(
+          'phoneInput',
+          phone,
+          candidateActions,
+          'phone input observed as alternate auth control',
+          0.74,
+          phone.valueState || 'unknown',
+          'fill',
+        )
+      : undefined,
+    'phone input observed as alternate auth control',
+  );
+  if (phoneCandidate) result.push(phoneCandidate);
+
+  const otp = bestElement(
+    interactiveElements.filter((element) => element.ref !== phone?.ref),
+    OTP_INPUT_PATTERN,
+    'fill',
+  );
+  const otpCandidate = controlToObservedCandidate(
+    'otp_input',
+    otp
+      ? toControl(
+          'otpInput',
+          otp,
+          candidateActions,
+          'otp input observed as alternate auth control',
+          0.76,
+          otp.valueState || 'unknown',
+          'fill',
+        )
+      : undefined,
+    'otp input observed as alternate auth control',
+  );
+  if (otpCandidate) result.push(otpCandidate);
+
+  const requestOtp = controlToObservedCandidate(
+    'request_otp',
+    findRequestOtpControl(interactiveElements, candidateActions),
+    'otp request control observed as alternate auth action',
+  );
+  if (requestOtp) result.push(requestOtp);
+
+  const submit = bestElement(interactiveElements, SUBMIT_PATTERN, 'click');
+  const submitCandidate = controlToObservedCandidate(
+    'submit',
+    submit
+      ? toControl(
+          'submit',
+          submit,
+          candidateActions,
+          'submit control observed as auth action',
+          0.68,
+          'unknown',
+          'click',
+        )
+      : undefined,
+    'submit control observed as auth action',
+  );
+  if (submitCandidate) result.push(submitCandidate);
+
+  if (params.semanticEventTypes.includes('qr_expired_candidate')) {
+    const refresh = bestElement(
+      interactiveElements,
+      /refresh|reload|retry|重新|刷新|换一张/i,
+      'click',
+    );
+    const refreshCandidate = controlToObservedCandidate(
+      'refresh_qr',
+      refresh
+        ? toControl(
+            'requestOtp',
+            refresh,
+            candidateActions,
+            'QR refresh-like control observed after expired QR candidate',
+            0.62,
+            'unknown',
+            'click',
+          )
+        : undefined,
+      'QR refresh-like control observed after expired QR candidate',
+    );
+    if (refreshCandidate) {
+      result.push({
+        ...refreshCandidate,
+        kind: 'refresh_qr',
+      });
+    }
+  }
+
+  return result.slice(0, 12);
+}
+
+function buildObservedAuthSurface(params: {
+  authRequired: boolean;
+  challengeType: ReadPageAuthChallengeType;
+  preferredChallengeType: ReadPageAuthChallengeType;
+  alternativeChallengeTypes: ReadPageAuthChallengeType[];
+  assistantGuidance?: ReadPageAssistantGuidance;
+  authArtifactStatus: ReadPageAuthArtifactStatus;
+  semanticEventTypes: string[];
+  pageRegions?: ReadPageRegion[];
+  interactiveElements?: ReadPageInteractiveElement[];
+  candidateActions?: ReadPageCandidateAction[];
+}): ReadPageObservedAuthSurface {
+  const candidates = buildAuthSurfaceCandidates({
+    pageRegions: params.pageRegions,
+    authArtifactStatus: params.authArtifactStatus,
+    semanticEventTypes: params.semanticEventTypes,
+    interactiveElements: params.interactiveElements,
+    candidateActions: params.candidateActions,
+  });
+  const surfaceRegion = (Array.isArray(params.pageRegions) ? params.pageRegions : []).find(
+    (region) =>
+      region.regionType === 'modal' ||
+      region.regionType === 'form' ||
+      (region.regionType === 'account' && /logged_out|auth|login|登录/i.test(region.state)),
+  );
+  const guidanceApplied = Boolean(
+    params.assistantGuidance?.authPreference ||
+    (params.assistantGuidance?.requestedObjects || []).length > 0 ||
+    params.assistantGuidance?.assistantProvidedTarget,
+  );
+  const qrRequested =
+    params.assistantGuidance?.authPreference === 'qr' ||
+    (params.assistantGuidance?.requestedObjects || []).includes('qr_image');
+  const hasQrCandidate =
+    params.authArtifactStatus.status === 'ready' ||
+    candidates.some((candidate) => candidate.kind === 'qr_image');
+  const status =
+    params.authRequired || candidates.length > 0
+      ? qrRequested && !hasQrCandidate
+        ? 'ambiguous'
+        : 'detected'
+      : 'not_detected';
+  return {
+    status,
+    surfaceRef: surfaceRegion?.regionId,
+    surfaceRole: surfaceRegion?.regionType || (params.authRequired ? 'auth_surface' : 'unknown'),
+    preferredChallengeType: params.preferredChallengeType,
+    alternativeChallengeTypes: params.alternativeChallengeTypes,
+    candidateObjectRefs: candidates,
+    guidanceApplied,
+    claimBoundary: AUTH_ASSISTANT_HANDOFF_CLAIM_BOUNDARY,
+  };
+}
+
+function buildAssistantHandoff(params: {
+  authRequired: boolean;
+  status: ReadPageAuthCollaboration['status'];
+  actionOperability: NonNullable<ReadPageAuthCollaboration['evidence']['actionOperability']>;
+  authArtifactStatus: ReadPageAuthArtifactStatus;
+  assistantGuidance?: ReadPageAssistantGuidance;
+  observedAuthSurface: ReadPageObservedAuthSurface;
+}): ReadPageAssistantHandoff {
+  const qrRequested =
+    params.assistantGuidance?.authPreference === 'qr' ||
+    (params.assistantGuidance?.requestedObjects || []).includes('qr_image');
+  if (!qrRequested) {
+    return { status: 'not_needed', claimBoundary: AUTH_ASSISTANT_HANDOFF_CLAIM_BOUNDARY };
+  }
+  if (params.actionOperability !== 'operable') {
+    return {
+      status: 'needed',
+      reason: 'protected_tab',
+      requestedAssistantAction: 'manual_user_action',
+      surfaceRef: params.observedAuthSurface.surfaceRef,
+      claimBoundary: AUTH_ASSISTANT_HANDOFF_CLAIM_BOUNDARY,
+    };
+  }
+  if (params.authArtifactStatus.status === 'ready' || params.status === 'waiting_for_user') {
+    return { status: 'not_needed', claimBoundary: AUTH_ASSISTANT_HANDOFF_CLAIM_BOUNDARY };
+  }
+  if (!params.authRequired && params.observedAuthSurface.status === 'not_detected') {
+    return { status: 'not_needed', claimBoundary: AUTH_ASSISTANT_HANDOFF_CLAIM_BOUNDARY };
+  }
+
+  const candidateRefs = params.observedAuthSurface.candidateObjectRefs
+    .map((candidate) => candidate.targetRef || candidate.selector || candidate.candidateActionId)
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .slice(0, 8);
+  const qrCandidates = params.observedAuthSurface.candidateObjectRefs.filter(
+    (candidate) => candidate.kind === 'qr_image',
+  );
+  return {
+    status: 'needed',
+    reason: qrCandidates.length > 1 ? 'qr_target_ambiguous' : 'target_not_found',
+    requestedAssistantAction:
+      qrCandidates.length > 0 ? 'choose_auth_qr_target' : 'provide_selector_or_target_ref',
+    candidateRefs,
+    surfaceRef: params.observedAuthSurface.surfaceRef,
+    claimBoundary: AUTH_ASSISTANT_HANDOFF_CLAIM_BOUNDARY,
+  };
+}
+
 export function buildAuthCollaborationState(params: {
   pageRole?: string | null;
   tabId: number;
@@ -719,6 +1002,7 @@ export function buildAuthCollaborationState(params: {
   artifactRefs: ReadPageArtifactRef[];
   interactiveElements?: ReadPageInteractiveElement[];
   candidateActions?: ReadPageCandidateAction[];
+  assistantGuidance?: ReadPageAssistantGuidance;
 }): ReadPageAuthCollaboration {
   const browserPageObject = params.browserPageObject ?? null;
   const semanticEventTypes = (browserPageObject?.semanticEvents || []).map(
@@ -746,9 +1030,35 @@ export function buildAuthCollaborationState(params: {
   const succeededCandidateHasFreshComparison = browserPageObject?.status === 'compared_snapshot';
   const expiredCandidate = semanticEventTypes.includes('qr_expired_candidate');
   const visibleOtpFormEvidence = hasVisibleOtpFormEvidence(params.interactiveElements);
-  if (challengeType === 'qr' && visibleOtpFormEvidence) {
+  const hasReadyQrArtifact = params.authArtifactStatus.status === 'ready';
+  const guidanceAuthPreference = params.assistantGuidance?.authPreference;
+  if (
+    guidanceAuthPreference === 'qr' &&
+    (authRequired ||
+      hasReadyQrArtifact ||
+      expiredCandidate ||
+      hasAuthScopedQrRegion(params.pageRegions) ||
+      params.authArtifactStatus.requested)
+  ) {
+    challengeType = 'qr';
+  } else if (guidanceAuthPreference === 'otp' && visibleOtpFormEvidence) {
+    challengeType = 'otp';
+  } else if (
+    challengeType === 'qr' &&
+    visibleOtpFormEvidence &&
+    !hasReadyQrArtifact &&
+    !expiredCandidate
+  ) {
     challengeType = 'otp';
   }
+  const preferredChallengeType = challengeType;
+  const alternativeChallengeTypes = uniqueChallengeTypes([
+    preferredChallengeType !== 'qr' &&
+    (hasReadyQrArtifact || expiredCandidate || hasAuthScopedQrRegion(params.pageRegions))
+      ? 'qr'
+      : undefined,
+    preferredChallengeType !== 'otp' && visibleOtpFormEvidence ? 'otp' : undefined,
+  ]);
 
   let status: ReadPageAuthCollaboration['status'] = 'not_required';
   if (succeededCandidate && visibleOtpFormEvidence) {
@@ -791,6 +1101,13 @@ export function buildAuthCollaborationState(params: {
     if (challengeType === 'qr' && params.authArtifactStatus.status === 'ready') {
       return '请用手机扫描二维码完成登录；扫码后告知 AI，AI 会重新读取页面并验证登录后状态。';
     }
+    if (
+      challengeType === 'qr' &&
+      guidanceAuthPreference === 'qr' &&
+      params.authArtifactStatus.status !== 'ready'
+    ) {
+      return 'AI 要求扫码登录；Tabrix 已按二维码优先观察，但还没有拿到可发送的二维码图片。请 AI 根据 observedAuthSurface/assistantHandoff 选择二维码目标、刷新二维码，或改用其它登录方式。';
+    }
     if (challengeType === 'otp') {
       return '当前页面需要手机号验证码协作：AI 只能识别和操作表单步骤，验证码由用户本人在浏览器输入，Tabrix 不接触也不保存验证码。';
     }
@@ -809,10 +1126,32 @@ export function buildAuthCollaborationState(params: {
     candidateActions: params.candidateActions,
     pageRegions: params.pageRegions,
   });
+  const observedAuthSurface = buildObservedAuthSurface({
+    authRequired,
+    challengeType,
+    preferredChallengeType,
+    alternativeChallengeTypes,
+    assistantGuidance: params.assistantGuidance,
+    authArtifactStatus: params.authArtifactStatus,
+    semanticEventTypes,
+    pageRegions: params.pageRegions,
+    interactiveElements: params.interactiveElements,
+    candidateActions: params.candidateActions,
+  });
+  const assistantHandoff = buildAssistantHandoff({
+    authRequired,
+    status,
+    actionOperability,
+    authArtifactStatus: params.authArtifactStatus,
+    assistantGuidance: params.assistantGuidance,
+    observedAuthSurface,
+  });
 
   return {
     status,
     challengeType,
+    preferredChallengeType,
+    alternativeChallengeTypes,
     userAction: {
       required: status === 'required' || status === 'waiting_for_user' || status === 'not_proven',
       instruction,
@@ -853,6 +1192,8 @@ export function buildAuthCollaborationState(params: {
       claimBoundary: AUTH_COLLABORATION_CLAIM_BOUNDARY,
     },
     authForm,
+    observedAuthSurface,
+    assistantHandoff,
     claimBoundary: AUTH_COLLABORATION_CLAIM_BOUNDARY,
   };
 }
@@ -868,6 +1209,13 @@ function selectCssLocator(object: ReadPageRegionObject): string | null {
 export function selectAuthQrArtifactCandidate(
   pageRegions: ReadPageRegion[] | undefined,
 ): AuthQrArtifactCandidate | null {
+  return selectAuthQrArtifactCandidates(pageRegions, 1)[0] ?? null;
+}
+
+function selectAuthQrArtifactCandidates(
+  pageRegions: ReadPageRegion[] | undefined,
+  limit = 3,
+): AuthQrArtifactCandidate[] {
   const regions = Array.isArray(pageRegions) ? pageRegions : [];
   const hasAuthSurface = regions.some((region) => {
     if (region.regionType === 'modal') return true;
@@ -878,24 +1226,26 @@ export function selectAuthQrArtifactCandidate(
       `${region.regionId} ${region.state} ${region.label || ''}`,
     );
   });
-  if (!hasAuthSurface) return null;
+  if (!hasAuthSurface) return [];
 
+  const candidates: AuthQrArtifactCandidate[] = [];
   for (const region of regions) {
     if (region.regionType !== 'qr_code') continue;
     for (const object of region.objects || []) {
       const selector = selectCssLocator(object);
       const typeSignal = `${object.objectType || ''} ${object.label || ''} ${object.reason || ''}`;
       if (!selector || !/\bqr|qrcode|scan\b|二维码|扫码/i.test(typeSignal)) continue;
-      return {
+      candidates.push({
         regionId: region.regionId,
         objectId: object.objectId,
         selector,
         width: null,
         height: null,
-      };
+      });
+      if (candidates.length >= limit) return candidates;
     }
   }
-  return null;
+  return candidates;
 }
 
 function normalizeDataUrl(input: unknown): string | null {
@@ -907,9 +1257,10 @@ function normalizeDataUrl(input: unknown): string | null {
 async function extractAuthQrImageFromDom(
   tabId: number,
   selectors: string[],
+  frameId?: number,
 ): Promise<ExtractedAuthQrImage> {
   const [injectionResult] = await chrome.scripting.executeScript({
-    target: { tabId },
+    target: { tabId, ...(typeof frameId === 'number' ? { frameIds: [frameId] } : {}) },
     world: 'MAIN',
     func: (candidateSelectors: string[]) => {
       function visibleRect(element: Element) {
@@ -955,15 +1306,162 @@ async function extractAuthQrImageFromDom(
         }
       }
 
-      async function inspectElement(selector: string) {
-        let element: Element | null = null;
+      function collectQrSourceElements(root: Element): Element[] {
+        const sourceSelector = [
+          'img',
+          'canvas',
+          'svg',
+          '[style]',
+          '[class*="qr"]',
+          '[class*="QR"]',
+          '[class*="qrcode"]',
+          '[class*="QRCode"]',
+          '[aria-label*="qr"]',
+          '[aria-label*="QR"]',
+          '[aria-label*="二维码"]',
+          '[alt*="qr"]',
+          '[alt*="QR"]',
+          '[alt*="二维码"]',
+          '[title*="qr"]',
+          '[title*="QR"]',
+          '[title*="二维码"]',
+        ].join(', ');
+        const seen = new Set<Element>();
+        const result: Element[] = [];
+        const add = (element: Element | null) => {
+          if (!element || seen.has(element)) return;
+          seen.add(element);
+          result.push(element);
+        };
+        add(root);
         try {
-          element = document.querySelector(selector);
+          for (const element of Array.from(root.querySelectorAll(sourceSelector))) add(element);
         } catch {
-          return { failureReason: 'invalid_qr_selector' };
+          /* keep root-only inspection */
         }
-        if (!element) return { failureReason: 'qr_element_not_found' };
+        return result;
+      }
 
+      function elementTextSignal(element: Element): string {
+        const attrs = [
+          element.getAttribute('role') || '',
+          element.getAttribute('aria-label') || '',
+          element.getAttribute('aria-labelledby') || '',
+          element.getAttribute('title') || '',
+          element.getAttribute('class') || '',
+          element.getAttribute('id') || '',
+        ].join(' ');
+        return `${attrs} ${(element.textContent || '').slice(0, 1600)}`;
+      }
+
+      function hasAuthSignal(element: Element): boolean {
+        return /\b(auth|login|log in|sign in|signin|account)\b|登录|授权|账号/i.test(
+          elementTextSignal(element),
+        );
+      }
+
+      function isReasonableAuthRoot(element: Element): boolean {
+        const rect = visibleRect(element);
+        if (!rect) return false;
+        const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+        const area = rect.width * rect.height;
+        if (area > viewportArea * 0.92 && element !== document.body) return false;
+        return hasAuthSignal(element);
+      }
+
+      function cssSelectorForElement(element: Element): string {
+        const testId = element.getAttribute('data-testid') || element.getAttribute('data-test-id');
+        if (testId) return `[data-testid="${String(testId).replace(/"/g, '\\"')}"]`;
+        const id = element.getAttribute('id');
+        if (id && !/\s/.test(id)) return `#${String(id).replace(/"/g, '\\"')}`;
+        const tagName = element.tagName ? element.tagName.toLowerCase() : 'element';
+        const className = String(element.getAttribute('class') || '')
+          .split(/\s+/)
+          .filter(Boolean)
+          .slice(0, 2)
+          .map((item) => `.${item.replace(/[^a-zA-Z0-9_-]/g, '')}`)
+          .join('');
+        return `${tagName}${className || ''}`;
+      }
+
+      function collectAuthRoots(): Element[] {
+        const rootSelector = [
+          '[role="dialog"]',
+          '[aria-modal="true"]',
+          'dialog',
+          'form',
+          '[class*="auth" i]',
+          '[class*="login" i]',
+          '[class*="signin" i]',
+          '[class*="modal" i]',
+          '[id*="auth" i]',
+          '[id*="login" i]',
+          '[id*="signin" i]',
+        ].join(', ');
+        const seen = new Set<Element>();
+        const result: Element[] = [];
+        const add = (element: Element | null) => {
+          if (!element || seen.has(element) || !isReasonableAuthRoot(element)) return;
+          seen.add(element);
+          result.push(element);
+        };
+        try {
+          for (const element of Array.from(document.querySelectorAll(rootSelector))) add(element);
+        } catch {
+          /* keep ancestor-based discovery below */
+        }
+        try {
+          for (const source of collectQrSourceElements(document.body)) {
+            let current: Element | null = source;
+            for (let depth = 0; current && depth < 6; depth += 1) {
+              if (isReasonableAuthRoot(current)) {
+                add(current);
+                break;
+              }
+              current = current.parentElement;
+            }
+          }
+        } catch {
+          /* no direct DOM probe */
+        }
+        return result;
+      }
+
+      function scoreQrSourceElement(element: Element, root: Element, index: number): number {
+        const rect = visibleRect(element);
+        if (!rect) return -1;
+        const area = rect.width * rect.height;
+        if (area < 900 || area > 220000) return -1;
+        const aspectRatio = rect.width / Math.max(1, rect.height);
+        if (aspectRatio < 0.55 || aspectRatio > 1.75) return -1;
+        const tagName = element.tagName ? element.tagName.toLowerCase() : '';
+        const style = window.getComputedStyle(element);
+        const signal = [
+          tagName,
+          element.getAttribute('class') || '',
+          element.getAttribute('aria-label') || '',
+          element.getAttribute('alt') || '',
+          element.getAttribute('title') || '',
+          element.getAttribute('src') || '',
+          element.getAttribute('currentSrc') || '',
+          style.backgroundImage || '',
+        ].join(' ');
+        let score = 0;
+        if (element !== root) score += 16;
+        if (/^(img|canvas|svg)$/.test(tagName)) score += 40;
+        if (style.backgroundImage && style.backgroundImage !== 'none') score += 32;
+        if (/\bqr|qrcode|scan\b|二维码|扫码|扫一扫/i.test(signal)) score += 34;
+        if (rect.width >= 90 && rect.width <= 420 && rect.height >= 90 && rect.height <= 420) {
+          score += 24;
+        }
+        score -= Math.min(12, index * 2);
+        return score;
+      }
+
+      async function inspectRenderableElement(
+        element: Element,
+        selector: string,
+      ): Promise<ExtractedAuthQrImage> {
         const rect = visibleRect(element);
         if (!rect) return { failureReason: 'qr_element_not_visible' };
 
@@ -1025,7 +1523,73 @@ async function extractAuthQrImageFromDom(
         };
       }
 
+      async function inspectElement(selector: string): Promise<ExtractedAuthQrImage> {
+        let element: Element | null = null;
+        try {
+          element = document.querySelector(selector);
+        } catch {
+          return { failureReason: 'invalid_qr_selector' };
+        }
+        if (!element) return { failureReason: 'qr_element_not_found' };
+
+        const rect = visibleRect(element);
+        if (!rect) return { failureReason: 'qr_element_not_visible' };
+
+        const sourceElements = collectQrSourceElements(element)
+          .map((source, index) => ({
+            source,
+            score: scoreQrSourceElement(source, element, index),
+            index,
+          }))
+          .filter((item) => item.score >= 0)
+          .sort((left, right) => {
+            if (right.score !== left.score) return right.score - left.score;
+            return left.index - right.index;
+          });
+
+        let screenshotFallback: ExtractedAuthQrImage | null = null;
+        for (const { source } of sourceElements) {
+          const extracted = await inspectRenderableElement(source, selector);
+          if (extracted.dataUrl) return extracted;
+          if (extracted.method === 'element_screenshot' && !screenshotFallback) {
+            screenshotFallback = extracted;
+          }
+        }
+        return screenshotFallback || { failureReason: 'auth_qr_image_unavailable' };
+      }
+
+      async function inspectDiscoveredAuthQr(): Promise<ExtractedAuthQrImage> {
+        const roots = collectAuthRoots();
+        for (const root of roots) {
+          const sourceElements = collectQrSourceElements(root)
+            .map((source, index) => ({
+              source,
+              score: scoreQrSourceElement(source, root, index),
+              index,
+            }))
+            .filter((item) => item.score >= 0)
+            .sort((left, right) => {
+              if (right.score !== left.score) return right.score - left.score;
+              return left.index - right.index;
+            });
+          let screenshotFallback: ExtractedAuthQrImage | null = null;
+          for (const { source } of sourceElements) {
+            const selector = cssSelectorForElement(source);
+            const extracted = await inspectRenderableElement(source, selector);
+            if (extracted.dataUrl) return extracted;
+            if (extracted.method === 'element_screenshot' && !screenshotFallback) {
+              screenshotFallback = extracted;
+            }
+          }
+          if (screenshotFallback) return screenshotFallback;
+        }
+        return { failureReason: 'auth_qr_dom_auth_surface_not_found' };
+      }
+
       return (async () => {
+        if (candidateSelectors.length === 0) {
+          return inspectDiscoveredAuthQr();
+        }
         for (const selector of candidateSelectors) {
           const result = await inspectElement(selector);
           if (result.dataUrl || result.method === 'element_screenshot') return result;
@@ -1091,6 +1655,7 @@ export async function buildAuthQrArtifactRefs(params: {
   pageRegions: ReadPageRegion[] | undefined;
   browserWorldTab: BrowserWorldTabObject | null;
   artifactRefs: ReadPageArtifactRef[];
+  assistantGuidance?: ReadPageAssistantGuidance;
   nowMs?: number;
   prepareFile?: typeof prepareFileViaNative;
 }): Promise<ReadPageAuthArtifactStatus> {
@@ -1107,19 +1672,52 @@ export async function buildAuthQrArtifactRefs(params: {
     };
   }
 
-  const candidate = selectAuthQrArtifactCandidate(params.pageRegions);
-  if (!candidate) {
-    return {
-      requested: true,
-      status: 'not_applicable',
-      reason: 'auth_scoped_qr_visual_not_found',
-      ownerType: gate.ownerType,
-      claimBoundary: AUTH_QR_CLAIM_BOUNDARY,
-    };
-  }
-
   try {
-    const extracted = await extractAuthQrImageFromDom(params.tabId, [candidate.selector]);
+    const candidates = selectAuthQrArtifactCandidates(params.pageRegions, 3);
+    const assistantTarget = params.assistantGuidance?.assistantProvidedTarget;
+    const assistantSelector =
+      assistantTarget?.purpose === 'auth_qr_image' &&
+      typeof assistantTarget.selector === 'string' &&
+      assistantTarget.selector.trim().length > 0
+        ? assistantTarget.selector.trim()
+        : null;
+    const assistantFrameId =
+      assistantTarget?.purpose === 'auth_qr_image' && typeof assistantTarget.frameId === 'number'
+        ? assistantTarget.frameId
+        : undefined;
+    const selectors = [
+      ...(assistantSelector ? [assistantSelector] : []),
+      ...candidates.map((item) => item.selector),
+    ];
+    const extracted = await extractAuthQrImageFromDom(params.tabId, selectors, assistantFrameId);
+    if (selectors.length === 0 && !extracted.dataUrl && extracted.method !== 'element_screenshot') {
+      return {
+        requested: true,
+        status: 'not_applicable',
+        reason: 'auth_scoped_qr_visual_not_found',
+        ownerType: gate.ownerType,
+        failureReason: extracted.failureReason,
+        claimBoundary: AUTH_QR_CLAIM_BOUNDARY,
+      };
+    }
+    const candidate =
+      (assistantSelector && extracted.selector === assistantSelector
+        ? ({
+            regionId: 'assistant_guided_auth_surface',
+            objectId: 'assistant_provided_qr_target',
+            selector: assistantSelector,
+            width: extracted.width ?? null,
+            height: extracted.height ?? null,
+          } satisfies AuthQrArtifactCandidate)
+        : null) ??
+      candidates[0] ??
+      ({
+        regionId: 'auth_surface_dom_probe',
+        objectId: 'dom_qr_visual',
+        selector: extracted.selector || 'dom_auth_qr_probe',
+        width: extracted.width ?? null,
+        height: extracted.height ?? null,
+      } satisfies AuthQrArtifactCandidate);
     let dataUrl = normalizeDataUrl(extracted.dataUrl);
     let method = extracted.method;
     let width = extracted.width || candidate.width || null;

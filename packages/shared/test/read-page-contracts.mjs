@@ -15,6 +15,9 @@ import {
   READ_PAGE_AUTH_ARTIFACT_STATUS_VALUES,
   READ_PAGE_AUTH_CHALLENGE_TYPES,
   READ_PAGE_AUTH_COLLABORATION_STATUS_VALUES,
+  READ_PAGE_ASSISTANT_GUIDANCE_AUTH_PREFERENCE_VALUES,
+  READ_PAGE_ASSISTANT_GUIDANCE_REQUESTED_OBJECT_VALUES,
+  READ_PAGE_ASSISTANT_GUIDANCE_TASK_KIND_VALUES,
   READ_PAGE_REQUESTED_LAYER_VALUES,
   READ_PAGE_TASK_PROTOCOL_FIELDS,
   STABLE_TARGET_REF_PREFIX,
@@ -165,6 +168,30 @@ assert.deepEqual(READ_PAGE_AUTH_CHALLENGE_TYPES, [
   'captcha',
   'sso_external',
   'unknown',
+]);
+
+assert.deepEqual(READ_PAGE_ASSISTANT_GUIDANCE_TASK_KIND_VALUES, [
+  'auth',
+  'search',
+  'extract_content',
+  'unknown',
+]);
+
+assert.deepEqual(READ_PAGE_ASSISTANT_GUIDANCE_AUTH_PREFERENCE_VALUES, [
+  'qr',
+  'otp',
+  'manual',
+  'auto',
+]);
+
+assert.deepEqual(READ_PAGE_ASSISTANT_GUIDANCE_REQUESTED_OBJECT_VALUES, [
+  'auth_surface',
+  'qr_image',
+  'phone_input',
+  'otp_input',
+  'search_input',
+  'result_cards',
+  'detail_metrics',
 ]);
 
 assert.deepEqual(READ_PAGE_MODE_MINIMUM_FIELDS, {

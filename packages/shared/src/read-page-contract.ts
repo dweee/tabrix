@@ -159,6 +159,109 @@ export const READ_PAGE_AUTH_CHALLENGE_TYPES = [
 
 export type ReadPageAuthChallengeType = (typeof READ_PAGE_AUTH_CHALLENGE_TYPES)[number];
 
+export const READ_PAGE_ASSISTANT_GUIDANCE_TASK_KIND_VALUES = [
+  'auth',
+  'search',
+  'extract_content',
+  'unknown',
+] as const;
+
+export type ReadPageAssistantGuidanceTaskKind =
+  (typeof READ_PAGE_ASSISTANT_GUIDANCE_TASK_KIND_VALUES)[number];
+
+export const READ_PAGE_ASSISTANT_GUIDANCE_AUTH_PREFERENCE_VALUES = [
+  'qr',
+  'otp',
+  'manual',
+  'auto',
+] as const;
+
+export type ReadPageAssistantGuidanceAuthPreference =
+  (typeof READ_PAGE_ASSISTANT_GUIDANCE_AUTH_PREFERENCE_VALUES)[number];
+
+export const READ_PAGE_ASSISTANT_GUIDANCE_REQUESTED_OBJECT_VALUES = [
+  'auth_surface',
+  'qr_image',
+  'phone_input',
+  'otp_input',
+  'search_input',
+  'result_cards',
+  'detail_metrics',
+] as const;
+
+export type ReadPageAssistantGuidanceRequestedObject =
+  (typeof READ_PAGE_ASSISTANT_GUIDANCE_REQUESTED_OBJECT_VALUES)[number];
+
+export interface ReadPageAssistantProvidedTarget {
+  purpose?: 'auth_qr_image' | 'click' | 'fill' | 'observe' | string;
+  targetRef?: string;
+  selector?: string;
+  frameId?: number;
+  reason?: string;
+}
+
+export interface ReadPageAssistantGuidance {
+  /**
+   * AI-provided observation guidance. This is only a filter/priority hint for
+   * Tabrix-as-eyes, not Tabrix-side task planning or business-success proof.
+   */
+  taskKind?: ReadPageAssistantGuidanceTaskKind;
+  authPreference?: ReadPageAssistantGuidanceAuthPreference;
+  requestedObjects?: ReadPageAssistantGuidanceRequestedObject[];
+  assistantProvidedTarget?: ReadPageAssistantProvidedTarget;
+  claimBoundary?: string;
+}
+
+export interface ReadPageObservedAuthSurfaceCandidate {
+  kind:
+    | 'auth_surface'
+    | 'qr_image'
+    | 'phone_input'
+    | 'otp_input'
+    | 'request_otp'
+    | 'refresh_qr'
+    | 'submit'
+    | 'unknown'
+    | string;
+  targetRef?: string;
+  selector?: string;
+  candidateActionId?: string;
+  confidence: number;
+  actionability?: string;
+  reason: string;
+}
+
+export interface ReadPageObservedAuthSurface {
+  status: 'not_detected' | 'detected' | 'ambiguous';
+  surfaceRef?: string;
+  surfaceRole?: 'auth_surface' | 'modal' | 'form' | 'unknown' | string;
+  preferredChallengeType?: ReadPageAuthChallengeType;
+  alternativeChallengeTypes?: ReadPageAuthChallengeType[];
+  candidateObjectRefs: ReadPageObservedAuthSurfaceCandidate[];
+  guidanceApplied: boolean;
+  claimBoundary: string;
+}
+
+export interface ReadPageAssistantHandoff {
+  status: 'not_needed' | 'needed';
+  reason?:
+    | 'qr_target_ambiguous'
+    | 'auth_surface_ambiguous'
+    | 'target_not_found'
+    | 'protected_tab'
+    | 'not_proven'
+    | string;
+  requestedAssistantAction?:
+    | 'choose_auth_qr_target'
+    | 'choose_click_target'
+    | 'provide_selector_or_target_ref'
+    | 'manual_user_action'
+    | string;
+  candidateRefs?: string[];
+  surfaceRef?: string;
+  claimBoundary: string;
+}
+
 export interface ReadPageAuthCollaborationUserAction {
   required: boolean;
   instruction: string;
@@ -280,9 +383,13 @@ export interface ReadPageAuthForm {
 export interface ReadPageAuthCollaboration {
   status: ReadPageAuthCollaborationStatus;
   challengeType: ReadPageAuthChallengeType;
+  preferredChallengeType?: ReadPageAuthChallengeType;
+  alternativeChallengeTypes?: ReadPageAuthChallengeType[];
   userAction: ReadPageAuthCollaborationUserAction;
   evidence: ReadPageAuthCollaborationEvidence;
   authForm?: ReadPageAuthForm;
+  observedAuthSurface?: ReadPageObservedAuthSurface;
+  assistantHandoff?: ReadPageAssistantHandoff;
   claimBoundary: string;
 }
 
@@ -1128,6 +1235,14 @@ export interface ReadPageExtensionFields {
    * login success, and not permission to operate protected user-owned tabs.
    */
   authCollaboration?: ReadPageAuthCollaboration;
+  /**
+   * Additive echo of closed-enum AI guidance used to prioritize this read.
+   *
+   * This does not carry the user's raw task text and is not proof that Tabrix
+   * understood the task. It only tells downstream agents which observation
+   * filter was applied for this snapshot.
+   */
+  assistantGuidanceEcho?: ReadPageAssistantGuidance;
   L0?: ReadPageTaskLevel0;
   L1?: ReadPageTaskLevel1;
   L2?: ReadPageTaskLevel2;
