@@ -26,6 +26,10 @@ import {
   isVerifierContextRequested,
   runClickVerifier,
 } from './click-verifier';
+import {
+  buildActionBusinessVerificationPlan,
+  buildPostActionReadbackEvidence,
+} from './post-action-readback';
 
 /**
  * Explicit lane label on every click response. The Tabrix extension-first
@@ -92,25 +96,6 @@ interface ActionTargetBindingEvidence {
   claimBoundary: string;
 }
 
-interface ActionBusinessVerificationPlan {
-  status: 'fresh_read_required' | 'not_proven';
-  candidateActionIntent: string | null;
-  expectedEvidence:
-    | 'agreement_state_changed_or_dialog_present'
-    | 'agreement_dialog_closed_or_terms_accepted'
-    | 'otp_countdown_or_sent_feedback'
-    | 'auth_surface_removed_and_account_state_present'
-    | 'form_value_state_changed'
-    | 'search_results_or_url_query_changed'
-    | 'detail_region_or_content_transition'
-    | 'page_or_object_state_changed';
-  requiredNextAction: 'chrome_read_page_force_refresh_same_tab' | 'stop_or_retry_after_fresh_read';
-  sameTabVerificationRequired: boolean;
-  businessSuccessProven: false;
-  reason: string;
-  claimBoundary: string;
-}
-
 function asFiniteInteger(value: unknown): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   return Math.trunc(value);
@@ -160,58 +145,6 @@ function buildActionTargetBindingEvidence(input: {
   };
 }
 
-function expectedBusinessEvidenceForIntent(
-  intent: CandidateActionInput['intent'] | undefined,
-): ActionBusinessVerificationPlan['expectedEvidence'] {
-  switch (intent) {
-    case 'auth.accept_terms':
-      return 'agreement_state_changed_or_dialog_present';
-    case 'auth.confirm_agreement':
-      return 'agreement_dialog_closed_or_terms_accepted';
-    case 'auth.request_otp':
-      return 'otp_countdown_or_sent_feedback';
-    case 'auth.submit_login':
-      return 'auth_surface_removed_and_account_state_present';
-    case 'search.enter_query':
-      return 'form_value_state_changed';
-    case 'search.submit':
-      return 'search_results_or_url_query_changed';
-    case 'content.open_detail':
-      return 'detail_region_or_content_transition';
-    default:
-      return 'page_or_object_state_changed';
-  }
-}
-
-function buildActionBusinessVerificationPlan(input: {
-  candidateAction?: CandidateActionInput;
-  dispatchSucceeded: boolean;
-  actionKind: 'click' | 'hover' | 'fill';
-  observedOutcome?: ClickObservedOutcome | 'verification_required' | null;
-}): ActionBusinessVerificationPlan {
-  const intent =
-    typeof input.candidateAction?.intent === 'string' && input.candidateAction.intent.trim()
-      ? input.candidateAction.intent.trim()
-      : null;
-  const expectedEvidence = expectedBusinessEvidenceForIntent(input.candidateAction?.intent);
-  const status = input.dispatchSucceeded ? 'fresh_read_required' : 'not_proven';
-  return {
-    status,
-    candidateActionIntent: intent,
-    expectedEvidence,
-    requiredNextAction: input.dispatchSucceeded
-      ? 'chrome_read_page_force_refresh_same_tab'
-      : 'stop_or_retry_after_fresh_read',
-    sameTabVerificationRequired: true,
-    businessSuccessProven: false,
-    reason: input.dispatchSucceeded
-      ? `${input.actionKind}_dispatch_observed_${input.observedOutcome ?? 'without_business_state'}`
-      : `${input.actionKind}_dispatch_not_proven`,
-    claimBoundary:
-      'Tool dispatch and page-local signals are not business success; verify the expected page/object state with a fresh same-tab chrome_read_page before continuing the user task.',
-  };
-}
-
 interface ClickToolParams {
   selector?: string; // CSS selector or XPath for the element to click
   selectorType?: 'css' | 'xpath'; // Type of selector (default: 'css')
@@ -234,6 +167,24 @@ interface ClickToolParams {
   // exposed on the public MCP input schema; intended to be wired from
   // internal helpers / tests until a public contract is settled.
   verifierContext?: ClickVerifierContext;
+}
+
+function buildClickLogSummary(args: ClickToolParams): Record<string, unknown> {
+  return {
+    interaction: args.interaction ?? 'click',
+    hasSelector: typeof args.selector === 'string' && args.selector.length > 0,
+    selectorType: args.selectorType ?? 'css',
+    hasRef: typeof args.ref === 'string' && args.ref.length > 0,
+    hasCandidateAction: args.candidateAction != null,
+    candidateActionIntent:
+      typeof args.candidateAction?.intent === 'string' ? args.candidateAction.intent : null,
+    usesCoordinates: args.coordinates != null,
+    waitForNavigation: args.waitForNavigation === true,
+    hasVerifierContext: args.verifierContext != null,
+    tabId: typeof args.tabId === 'number' ? args.tabId : null,
+    windowId: typeof args.windowId === 'number' ? args.windowId : null,
+    frameId: typeof args.frameId === 'number' ? args.frameId : null,
+  };
 }
 
 interface InteractionSchemeGuard {
@@ -927,7 +878,7 @@ class ClickTool extends BaseBrowserToolExecutor {
       modifiers,
     } = args;
 
-    console.log(`Starting ${interaction} operation with options:`, args);
+    console.log(`Starting ${interaction} operation with options:`, buildClickLogSummary(args));
 
     if (interaction !== 'click' && interaction !== 'hover') {
       return createErrorResponse(
@@ -1156,6 +1107,12 @@ class ClickTool extends BaseBrowserToolExecutor {
                 lane: TABRIX_OWNED_LANE,
                 targetBinding: buildTargetBinding(),
                 businessVerification: buildBusinessVerification(true, 'verification_required'),
+                postActionReadback: buildPostActionReadbackEvidence({
+                  candidateAction: args.candidateAction,
+                  dispatchSucceeded: true,
+                  actionKind: 'hover',
+                  observedOutcome: 'verification_required',
+                }),
                 message:
                   'Hover dispatched to a known element; run chrome_read_page again to verify menu/modal/page-region changes.',
                 elementInfo: hoverResult.target,
@@ -1451,6 +1408,14 @@ class ClickTool extends BaseBrowserToolExecutor {
         merged.dispatchSucceeded,
         merged.observedOutcome,
       );
+      const postActionReadback = buildPostActionReadbackEvidence({
+        candidateAction: args.candidateAction,
+        dispatchSucceeded: merged.dispatchSucceeded,
+        actionKind: 'click',
+        observedOutcome: merged.observedOutcome,
+        verifierPassed: postClickState?.verifierPassed ?? null,
+        verifierReason: postClickState?.verifierReason ?? null,
+      });
       return {
         content: [
           {
@@ -1471,6 +1436,7 @@ class ClickTool extends BaseBrowserToolExecutor {
               targetBinding: buildTargetBinding(),
               businessVerification,
               postconditionStatus: businessVerification,
+              postActionReadback,
               message: finalSuccess
                 ? `Click observed outcome: ${merged.observedOutcome}`
                 : merged.observedOutcome === 'no_observed_change'
@@ -1510,6 +1476,36 @@ interface FillToolParams {
   windowId?: number; // when no tabId, pick active tab from this window
 }
 
+interface FillHelperResult {
+  success?: boolean;
+  error?: string;
+  message?: string;
+  elementInfo?: {
+    tagName?: string;
+    type?: string;
+    valueState?: 'empty' | 'non_empty' | 'unknown';
+    checked?: boolean;
+    selectedOptionCount?: number;
+    textContent?: string;
+  };
+}
+
+function buildFillLogSummary(args: FillToolParams): Record<string, unknown> {
+  return {
+    hasSelector: typeof args.selector === 'string' && args.selector.length > 0,
+    selectorType: args.selectorType ?? 'css',
+    hasRef: typeof args.ref === 'string' && args.ref.length > 0,
+    hasCandidateAction: args.candidateAction != null,
+    candidateActionIntent:
+      typeof args.candidateAction?.intent === 'string' ? args.candidateAction.intent : null,
+    valueState: args.value === undefined || args.value === null ? 'missing' : 'provided',
+    valueType: typeof args.value,
+    tabId: typeof args.tabId === 'number' ? args.tabId : null,
+    windowId: typeof args.windowId === 'number' ? args.windowId : null,
+    frameId: typeof args.frameId === 'number' ? args.frameId : null,
+  };
+}
+
 /**
  * Tool for filling form elements on web pages
  */
@@ -1520,7 +1516,7 @@ class FillTool extends BaseBrowserToolExecutor {
     tabId: number,
     message: Record<string, unknown>,
     frameId?: number,
-  ): Promise<any> {
+  ): Promise<FillHelperResult> {
     try {
       return await this.sendMessageToTab(tabId, message, frameId);
     } catch (error) {
@@ -1543,7 +1539,7 @@ class FillTool extends BaseBrowserToolExecutor {
   async execute(args: FillToolParams): Promise<ToolResult> {
     const { selector, selectorType = 'css', ref, value, frameId } = args;
 
-    console.log(`Starting fill operation with options:`, args);
+    console.log(`Starting fill operation with options:`, buildFillLogSummary(args));
 
     if (!selector && !ref && !args.candidateAction) {
       return createErrorResponse(
@@ -1687,7 +1683,7 @@ class FillTool extends BaseBrowserToolExecutor {
         selector: candidateCssFallback,
         value,
       };
-      let result;
+      let result: FillHelperResult;
       try {
         result = await sendFill(primaryFillMessage);
         dispatchedFillTarget = { ref: finalRef, selector: finalSelector };
@@ -1730,6 +1726,12 @@ class FillTool extends BaseBrowserToolExecutor {
       }
 
       markBrowserWorldTabAiOperated(tabId, 'fill_or_select');
+      const postActionReadback = buildPostActionReadbackEvidence({
+        candidateAction: args.candidateAction,
+        dispatchSucceeded: true,
+        actionKind: 'fill',
+        observedOutcome: 'input_value_written',
+      });
       return {
         content: [
           {
@@ -1740,6 +1742,22 @@ class FillTool extends BaseBrowserToolExecutor {
               elementInfo: result.elementInfo,
               targetBinding: buildTargetBinding(),
               businessVerification: buildBusinessVerification(),
+              postActionReadback,
+              inputWriteEvidence: {
+                valueState: result.elementInfo?.valueState ?? 'unknown',
+                checked:
+                  typeof result.elementInfo?.checked === 'boolean'
+                    ? result.elementInfo.checked
+                    : null,
+                proofStatus:
+                  result.elementInfo?.valueState === 'non_empty' ||
+                  result.elementInfo?.valueState === 'empty' ||
+                  typeof result.elementInfo?.checked === 'boolean'
+                    ? 'input_state_observed'
+                    : 'not_proven',
+                claimBoundary:
+                  'This evidence never returns the raw input value; it only reports whether the target state is empty/non-empty or checked.',
+              },
               observedOutcome: null,
               postconditionVerdict: 'unknown',
               postconditionReason: 'form_input_state_change_not_proven_by_tool_closeout',

@@ -9,6 +9,7 @@ import {
   observeNewTabUntil,
   type ClickPageSignals,
 } from '@/entrypoints/background/tools/browser/interaction';
+import { buildPostActionReadbackEvidence } from '@/entrypoints/background/tools/browser/post-action-readback';
 
 const clickHelperSource = readFileSync(
   resolve(process.cwd(), 'inject-scripts/click-helper.js'),
@@ -242,6 +243,64 @@ describe('mergeClickSignals (pure function)', () => {
     );
     expect(merged.observedOutcome).toBe('focus_changed');
     expect(merged.success).toBe(true);
+  });
+});
+
+describe('buildPostActionReadbackEvidence', () => {
+  it('marks a dispatched click with no observed change as not proven', () => {
+    const evidence = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'click',
+      observedOutcome: 'no_observed_change',
+      candidateAction: { intent: 'search.submit' },
+    });
+
+    expect(evidence).toMatchObject({
+      kind: 'post_action_readback_v1',
+      status: 'not_proven',
+      freshReadRequired: true,
+      businessSuccessProven: false,
+      requiredNextAction: 'stop_or_retry_after_fresh_read',
+      expectedEvidence: 'search_results_or_url_query_changed',
+    });
+  });
+
+  it('promotes only scoped verifier pass evidence to proven_by_fresh_readback', () => {
+    const evidence = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'click',
+      observedOutcome: 'spa_route_change',
+      verifierPassed: true,
+      verifierReason: 'expected_page_role_observed',
+      candidateAction: { intent: 'content.open_detail' },
+    });
+
+    expect(evidence).toMatchObject({
+      status: 'proven_by_fresh_readback',
+      freshReadRequired: false,
+      businessSuccessProven: true,
+      readbackSource: 'click_verifier',
+      requiredNextAction: 'none',
+      expectedEvidence: 'detail_region_or_content_transition',
+    });
+  });
+
+  it('keeps fill success as dispatch evidence that still needs fresh readback', () => {
+    const evidence = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'fill',
+      observedOutcome: 'input_value_written',
+      candidateAction: { intent: 'search.enter_query' },
+    });
+
+    expect(evidence).toMatchObject({
+      status: 'fresh_read_required',
+      observedOutcome: 'input_value_written',
+      freshReadRequired: true,
+      businessSuccessProven: false,
+      readbackSource: 'tool_dispatch_only',
+      expectedEvidence: 'form_value_state_changed',
+    });
   });
 });
 

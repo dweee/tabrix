@@ -6,6 +6,7 @@ import {
   markBrowserWorldTabAiCreated,
   markBrowserWorldTabAiOperated,
 } from '../../browser-world-inventory';
+import { preflightCloseTabs, type CloseTabsPreflightEvidence } from './close-tabs-preflight';
 
 // Default window dimensions
 const DEFAULT_WINDOW_WIDTH = 1280;
@@ -826,6 +827,14 @@ interface CloseTabsToolParams {
   windowId?: number;
 }
 
+function buildCloseTabsLogSummary(args: CloseTabsToolParams): Record<string, unknown> {
+  return {
+    hasUrl: typeof args.url === 'string' && args.url.length > 0,
+    tabIdCount: Array.isArray(args.tabIds) ? args.tabIds.length : 0,
+    windowId: typeof args.windowId === 'number' ? args.windowId : null,
+  };
+}
+
 interface CloseTabsBrowserSnapshot {
   tabCount: number;
   windowCount: number;
@@ -844,6 +853,12 @@ interface CloseTabsBrowserHygieneEvidence {
   activeTabRestoreReason: string;
 }
 
+interface CloseTabsPreflightBlockedResponseInput {
+  tabIds: number[];
+  preflight: CloseTabsPreflightEvidence;
+  invalidTabIds?: number[];
+}
+
 /**
  * Tool for closing browser tabs
  */
@@ -853,12 +868,12 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
   async execute(args: CloseTabsToolParams): Promise<ToolResult> {
     const { tabIds, url, windowId } = args;
     let urlPattern = url;
-    console.log(`Attempting to close tabs with options:`, args);
+    console.log(`Attempting to close tabs with options:`, buildCloseTabsLogSummary(args));
 
     try {
       // If URL is provided, close all tabs matching that URL
       if (urlPattern) {
-        console.log(`Searching for tabs with URL: ${url}`);
+        console.log('Searching for tabs with provided URL pattern');
         try {
           // Build a proper Chrome match pattern from a concrete URL.
           // If caller already provided a match pattern with '*', use as-is.
@@ -884,17 +899,20 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
               : `${urlPattern}/*`;
         }
 
-        const tabs = await chrome.tabs.query({ url: urlPattern });
+        const tabs = await chrome.tabs.query({
+          url: urlPattern,
+          ...(typeof windowId === 'number' ? { windowId } : {}),
+        });
 
         if (!tabs || tabs.length === 0) {
-          console.log(`No tabs found with URL pattern: ${urlPattern}`);
+          console.log('No tabs found with provided URL pattern');
           return {
             content: [
               {
                 type: 'text',
                 text: JSON.stringify({
                   success: false,
-                  message: `No tabs found with URL pattern: ${urlPattern}`,
+                  message: 'No tabs found with provided URL pattern',
                   closedCount: 0,
                 }),
               },
@@ -903,13 +921,21 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
           };
         }
 
-        console.log(`Found ${tabs.length} tabs with URL pattern: ${urlPattern}`);
+        console.log(`Found ${tabs.length} tabs with provided URL pattern`);
         const tabIdsToClose = tabs
           .map((tab) => tab.id)
           .filter((id): id is number => id !== undefined);
 
         if (tabIdsToClose.length === 0) {
           return createErrorResponse('Found tabs but could not get their IDs');
+        }
+
+        const preflight = await preflightCloseTabs(tabIdsToClose);
+        if (preflight.verdict !== 'allowed') {
+          return buildCloseTabsPreflightBlockedResponse({
+            tabIds: tabIdsToClose,
+            preflight,
+          });
         }
 
         const hygieneBefore = await captureCloseTabsBrowserSnapshot();
@@ -925,9 +951,10 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
               type: 'text',
               text: JSON.stringify({
                 success: true,
-                message: `Closed ${tabIdsToClose.length} tabs with URL: ${url}`,
+                message: `Closed ${tabIdsToClose.length} tabs matching provided URL pattern`,
                 closedCount: tabIdsToClose.length,
                 closedTabIds: tabIdsToClose,
+                closePreflightEvidence: preflight,
                 browserHygieneEvidence: buildCloseTabsBrowserHygieneEvidence({
                   before: hygieneBefore,
                   after: hygieneAfter,
@@ -978,13 +1005,22 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
           };
         }
 
+        const preflight = await preflightCloseTabs(validTabIds);
+        const invalidTabIds = tabIds.filter((id) => !validTabIds.includes(id));
+        if (preflight.verdict !== 'allowed') {
+          return buildCloseTabsPreflightBlockedResponse({
+            tabIds: validTabIds,
+            preflight,
+            invalidTabIds,
+          });
+        }
+
         const hygieneBefore = await captureCloseTabsBrowserSnapshot();
         for (const tabId of validTabIds) {
           markBrowserWorldTabAiOperated(tabId, 'close_tabs_requested');
         }
         await chrome.tabs.remove(validTabIds);
         const hygieneAfter = await captureCloseTabsBrowserSnapshot();
-        const invalidTabIds = tabIds.filter((id) => !validTabIds.includes(id));
 
         return {
           content: [
@@ -996,6 +1032,7 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
                 closedCount: validTabIds.length,
                 closedTabIds: validTabIds,
                 invalidTabIds,
+                closePreflightEvidence: preflight,
                 browserHygieneEvidence: buildCloseTabsBrowserHygieneEvidence({
                   before: hygieneBefore,
                   after: hygieneAfter,
@@ -1019,6 +1056,30 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
       );
     }
   }
+}
+
+function buildCloseTabsPreflightBlockedResponse(
+  input: CloseTabsPreflightBlockedResponseInput,
+): ToolResult {
+  return {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({
+          success: false,
+          blockedByPolicy: true,
+          message:
+            'Refusing to close tabs before BrowserWorld proves they are AI-owned and cleanup-eligible.',
+          closedCount: 0,
+          closedTabIds: [],
+          requestedTabIds: input.tabIds,
+          invalidTabIds: input.invalidTabIds ?? [],
+          closePreflightEvidence: input.preflight,
+        }),
+      },
+    ],
+    isError: true,
+  };
 }
 
 async function captureCloseTabsBrowserSnapshot(): Promise<CloseTabsBrowserSnapshot> {
