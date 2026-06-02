@@ -162,70 +162,57 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
       let elementInfo = null;
       let clickX, clickY;
 
-      const AUTH_CLICK_TEXT_PATTERN =
-        /获取验证码|发送验证码|重新发送|重发验证码|同意并继续|确认同意|我同意|登录|get code|send code|request code|resend code|agree and continue|accept and continue|log\s*in|sign\s*in/i;
-      const AUTH_CLICK_SIGNATURE_PATTERN =
-        /\b(code|otp|sms|verify|verification|captcha|send|resend|auth-code|code-button|agree|agreement|terms|privacy|submit|login)\b/i;
-
-      const classNameOf = (candidate) => {
-        try {
-          const attr = candidate.getAttribute && candidate.getAttribute('class');
-          if (typeof attr === 'string') return attr;
-          const className = candidate.className;
-          if (typeof className === 'string') return className;
-          if (className && typeof className.baseVal === 'string') return className.baseVal;
-        } catch {
-          // ignore
-        }
-        return '';
-      };
-
-      const ownVisibleText = (candidate) => {
-        let text = '';
-        try {
-          for (let i = 0; i < candidate.childNodes.length; i++) {
-            const node = candidate.childNodes[i];
-            if (node.nodeType === 3) text += node.textContent || '';
-          }
-        } catch {
-          // ignore
-        }
-        return text.replace(/\s+/g, ' ').trim();
-      };
-
       const isFormControl = (candidate) =>
         candidate instanceof HTMLInputElement ||
         candidate instanceof HTMLTextAreaElement ||
         candidate instanceof HTMLSelectElement;
 
-      const looksLikeAuthActionControl = (candidate) => {
+      const compactVisibleText = (candidate) => {
+        try {
+          return String(candidate.innerText || candidate.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 80);
+        } catch {
+          return '';
+        }
+      };
+
+      const GENERIC_ACTION_SELECTOR =
+        'button, a[href], label, summary, option, input, textarea, select, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"], [onclick], [tabindex]:not([tabindex^="-"])';
+
+      const isGenericActionControl = (candidate) => {
         if (!(candidate instanceof Element)) return false;
-        if (isFormControl(candidate)) return false;
-        const text =
-          ownVisibleText(candidate) ||
-          candidate.getAttribute('aria-label') ||
-          candidate.getAttribute('title') ||
-          '';
-        if (!AUTH_CLICK_TEXT_PATTERN.test(text)) return false;
+        if (!candidate.matches?.(GENERIC_ACTION_SELECTOR)) return false;
         const rect = candidate.getBoundingClientRect();
         const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
         const area = Math.max(1, rect.width * rect.height);
+        if (rect.width <= 0 || rect.height <= 0) return false;
         if (area > viewportArea * 0.35) return false;
-        const signature = `${candidate.id || ''} ${classNameOf(candidate)} ${
-          candidate.getAttribute('role') || ''
-        } ${candidate.getAttribute('data-testid') || ''}`;
-        return AUTH_CLICK_SIGNATURE_PATTERN.test(signature) || text.length <= 30;
+        return true;
+      };
+
+      const isCompactLeafClickTarget = (candidate) => {
+        if (!(candidate instanceof Element)) return false;
+        if (isFormControl(candidate)) return false;
+        if (candidate.querySelector?.(GENERIC_ACTION_SELECTOR)) return false;
+        const text = compactVisibleText(candidate);
+        if (!text || text.length > 40) return false;
+        const rect = candidate.getBoundingClientRect();
+        const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+        const area = Math.max(1, rect.width * rect.height);
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        return area <= viewportArea * 0.1;
       };
 
       const resolvePreferredClickTarget = (candidate) => {
         if (!(candidate instanceof Element)) return null;
-        if (looksLikeAuthActionControl(candidate)) return candidate;
+        if (isGenericActionControl(candidate)) return candidate;
+        if (isCompactLeafClickTarget(candidate)) return candidate;
         const candidateRect = candidate.getBoundingClientRect();
         const candidateArea = Math.max(1, candidateRect.width * candidateRect.height);
         const candidateText = (candidate.innerText || candidate.textContent || '').trim();
-        const ancestorSelector =
-          'button, a[href], label, summary, option, input, textarea, select, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"], [onclick], [tabindex]:not([tabindex^="-"])';
-        const candidateIsActionable = candidate.matches?.(ancestorSelector) === true;
+        const candidateIsActionable = candidate.matches?.(GENERIC_ACTION_SELECTOR) === true;
         const comboAncestor = !candidateIsActionable
           ? candidate.closest?.(
               '[role="combobox"], .arco-cascader, .arco-select-view, .arco-picker, .arco-input-tag',
@@ -238,7 +225,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
         let current = candidate;
         let depth = 0;
         while (current && current instanceof Element && depth < 8) {
-          if (current.matches?.(ancestorSelector)) {
+          if (current.matches?.(GENERIC_ACTION_SELECTOR)) {
             ancestors.push(current);
           }
           current = current.parentElement;
@@ -267,7 +254,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
             if (
               el.tagName === 'DIV' &&
               area > 30000 &&
-              el.querySelectorAll?.(ancestorSelector).length > 3
+              el.querySelectorAll?.(GENERIC_ACTION_SELECTOR).length > 3
             ) {
               score -= 40;
             }
@@ -390,8 +377,10 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
           };
         }
         if (actual instanceof Element && expected.contains(actual)) {
-          const expectedIsAction = looksLikeAuthActionControl(expected);
-          if (expectedIsAction || (isFormControl(actual) && !isFormControl(expected))) {
+          if (
+            isGenericActionControl(expected) ||
+            (isFormControl(actual) && !isFormControl(expected))
+          ) {
             return {
               verdict: 'target_mismatch',
               clickMethod,
@@ -670,8 +659,6 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
       const hashBefore = String(window.location.hash || '');
       const focusBefore = document.activeElement;
       const stateBefore = snapshotTargetState(element);
-      const authIntent = typeof options.intent === 'string' ? options.intent : '';
-      const authTextBefore = authIntent ? readSafeBodyText() : '';
 
       // Raw signals, no verdict.
       let beforeUnloadFired = false;
@@ -775,18 +762,6 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
       const stateAfter = snapshotTargetState(element);
       const focusChanged = document.activeElement !== focusBefore;
       const targetStateDelta = diffTargetState(stateBefore, stateAfter);
-      const authPostcondition = inspectAuthPostcondition(authIntent, element, {
-        stateBefore,
-        stateAfter,
-        targetStateDelta,
-        domChanged,
-        domAddedDialog,
-        beforeUnloadFired,
-        urlBefore,
-        urlAfter,
-        textBefore: authTextBefore,
-        textAfter: authIntent ? readSafeBodyText() : '',
-      });
 
       return {
         // Compat alias for callers that only ever looked at `success`.
@@ -818,7 +793,6 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
             verification: outcomeWait,
           },
         },
-        ...(authPostcondition ? { authPostcondition } : {}),
       };
     } catch (error) {
       return {
@@ -864,91 +838,6 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
       }
     }
     return anyChanged ? changed : null;
-  }
-
-  function readSafeBodyText() {
-    try {
-      return String(document.body?.innerText || document.body?.textContent || '')
-        .replace(/\s+/g, ' ')
-        .slice(0, 2000);
-    } catch {
-      return '';
-    }
-  }
-
-  function elementLooksChecked(element, stateAfter) {
-    if (!(element instanceof Element)) return false;
-    if (element instanceof HTMLInputElement && element.type === 'checkbox') return element.checked;
-    if (String(stateAfter?.ariaChecked || '').toLowerCase() === 'true') return true;
-    const signature = `${element.id || ''} ${
-      typeof element.className === 'string' ? element.className : element.className?.baseVal || ''
-    } ${element.getAttribute('data-state') || ''}`;
-    return /\b(checked|active|selected|is-on|on)\b/i.test(signature);
-  }
-
-  function inspectAuthPostcondition(intent, element, facts) {
-    if (!intent || !String(intent).startsWith('auth.')) return null;
-    const textAfter = String(facts.textAfter || '');
-    const textBefore = String(facts.textBefore || '');
-    const countdownOrSent =
-      /\b\d{1,3}\s*s\b|\d{1,3}\s*秒|重新发送|重发|已发送|验证码已发送|sent|resend/i;
-    const agreementConfirm = /同意并继续|确认同意|我同意|agree and continue|accept and continue/i;
-    const loginPrompt = /登录|验证码|手机号|获取验证码|sign in|log in|verification code|get code/i;
-
-    if (intent === 'auth.request_otp') {
-      const disabledNow =
-        String(facts.stateAfter?.disabled || '').length > 0 ||
-        element?.getAttribute?.('aria-disabled') === 'true';
-      if (countdownOrSent.test(textAfter) || disabledNow) {
-        return {
-          intent,
-          status: 'passed',
-          reason: 'otp_request_observed_countdown_or_disabled_state',
-        };
-      }
-      return {
-        intent,
-        status: 'not_proven',
-        reason: 'otp_request_click_dispatched_but_no_countdown_disabled_or_sent_hint_observed',
-      };
-    }
-
-    if (intent === 'auth.accept_terms') {
-      if (elementLooksChecked(element, facts.stateAfter)) {
-        return { intent, status: 'passed', reason: 'agreement_checked_after_click' };
-      }
-      if (facts.domAddedDialog || agreementConfirm.test(textAfter)) {
-        return { intent, status: 'user_action_still_required', reason: 'agreement_dialog_opened' };
-      }
-      return { intent, status: 'not_proven', reason: 'agreement_click_did_not_prove_checked' };
-    }
-
-    if (intent === 'auth.confirm_agreement') {
-      if (agreementConfirm.test(textBefore) && !agreementConfirm.test(textAfter)) {
-        return { intent, status: 'passed', reason: 'agreement_confirmation_dialog_disappeared' };
-      }
-      return {
-        intent,
-        status: 'not_proven',
-        reason: 'agreement_confirmation_still_visible_or_not_proven',
-      };
-    }
-
-    if (intent === 'auth.submit_login') {
-      if (facts.beforeUnloadFired || facts.urlBefore !== facts.urlAfter) {
-        return { intent, status: 'passed', reason: 'login_submit_triggered_navigation' };
-      }
-      if (loginPrompt.test(textBefore) && !loginPrompt.test(textAfter)) {
-        return { intent, status: 'passed', reason: 'login_prompt_disappeared_after_submit' };
-      }
-      return {
-        intent,
-        status: 'user_action_still_required',
-        reason: 'login_submit_requires_fresh_read_page_verification',
-      };
-    }
-
-    return { intent, status: 'not_proven', reason: 'unknown_auth_intent' };
   }
 
   function waitForClickOutcomeWindow(ms, earlyExitCheck) {

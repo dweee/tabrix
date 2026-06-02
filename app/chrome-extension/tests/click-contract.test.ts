@@ -818,7 +818,7 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
     });
   });
 
-  it('proves auth.request_otp only after countdown or sent state appears', async () => {
+  it('does not prove auth.request_otp in the injected click helper', async () => {
     document.body.innerHTML = '<button id="btn">获取验证码</button>';
     const button = document.getElementById('btn') as HTMLButtonElement;
     setRect(button, { left: 20, top: 30, width: 120, height: 32 });
@@ -837,13 +837,13 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
     });
 
     expect(response.dispatchSucceeded).toBe(true);
-    expect(response.authPostcondition).toMatchObject({
-      intent: 'auth.request_otp',
-      status: 'passed',
+    expect(response.authPostcondition).toBeUndefined();
+    expect(response.signals.targetStateDelta).toMatchObject({
+      disabled: { before: null, after: '' },
     });
   });
 
-  it('returns not_proven when auth.request_otp click has no OTP evidence', async () => {
+  it('keeps auth.request_otp as generic click facts when no page change is observed', async () => {
     document.body.innerHTML = '<button id="btn">获取验证码</button>';
     const button = document.getElementById('btn') as HTMLButtonElement;
     setRect(button, { left: 20, top: 30, width: 120, height: 32 });
@@ -858,10 +858,8 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
     });
 
     expect(response.dispatchSucceeded).toBe(true);
-    expect(response.authPostcondition).toMatchObject({
-      intent: 'auth.request_otp',
-      status: 'not_proven',
-    });
+    expect(response.authPostcondition).toBeUndefined();
+    expect(response.signals.targetStateDelta).toBeNull();
   });
 
   it('clicks an OTP sender span inside a label without promoting the click target to the input sibling', async () => {
