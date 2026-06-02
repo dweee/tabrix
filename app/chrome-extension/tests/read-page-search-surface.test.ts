@@ -18,6 +18,7 @@ function interactive(overrides: Partial<ReadPageInteractiveElement>): ReadPageIn
     matchSource: overrides.matchSource ?? 'visible_text',
     actionability: overrides.actionability ?? 'actionable',
     valueState: overrides.valueState,
+    checked: overrides.checked,
   };
 }
 
@@ -165,7 +166,57 @@ describe('buildSearchSurface', () => {
       targetRef: 'ref_card_1',
     });
     expect(surface?.resultCards?.[1]?.collectionCountCandidate).toBe(18000);
+    expect(surface?.sortEvidence).toMatchObject({
+      requestedSort: 'most_collected',
+      appliedCandidate: false,
+    });
+    expect(surface?.topNCompleteness).toMatchObject({
+      requestedMinResults: 10,
+      observedResultCount: 2,
+      status: 'insufficient',
+    });
     expect(surface?.claimBoundary).toContain('observation');
+  });
+
+  it('marks most-collected sort as an applied candidate only when the fresh control state says so', () => {
+    const rows = visibleRows();
+    rows.rows = Array.from({ length: 10 }, (_, index) => ({
+      ...rows.rows[index % 2],
+      rowId: `row_${index + 1}`,
+      title: `Result ${index + 1}`,
+      primaryText: `Result ${index + 1}`,
+      targetRef: `ref_card_${index + 1}`,
+    }));
+    rows.rowCount = rows.rows.length;
+    rows.cardRowsCount = rows.rows.length;
+    rows.visibleDomRowsCandidateCount = rows.rows.length;
+    rows.visibleDomRowsSelectedCount = rows.rows.length;
+
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({ ref: 'ref_filter', role: 'button', name: '筛选' }),
+        interactive({ ref: 'ref_sort', role: 'option', name: '最多收藏 已选', checked: true }),
+      ],
+      candidateActions: [
+        candidate({ id: 'ca_filter', targetRef: 'ref_filter', intent: 'filter.open' }),
+        candidate({
+          id: 'ca_sort',
+          targetRef: 'ref_sort',
+          intent: 'filter.sort_most_collected',
+        }),
+      ],
+      visibleRegionRows: rows,
+    });
+
+    expect(surface?.sortEvidence).toMatchObject({
+      requestedSort: 'most_collected',
+      appliedCandidate: true,
+    });
+    expect(surface?.topNCompleteness).toMatchObject({
+      observedResultCount: 10,
+      status: 'sufficient',
+    });
   });
 
   it('does not run the search projection when the caller did not ask for search work', () => {

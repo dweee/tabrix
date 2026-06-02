@@ -82,6 +82,15 @@ function findControlAction(
   return candidateActions.find((action) => action.intent === intent);
 }
 
+function isSortAppliedCandidate(element: ReadPageInteractiveElement | undefined): boolean {
+  if (!element) return false;
+  if (element.checked === true) return true;
+  const text = normalizeText(
+    [element.name, element.role, element.matchSource, element.actionability].join(' '),
+  );
+  return /\b(selected|active|checked|current)\b|已选|选中|当前排序|已应用/i.test(text);
+}
+
 function controlForElement(params: {
   kind: ReadPageSearchSurface['controls'][number]['kind'];
   element: ReadPageInteractiveElement;
@@ -159,6 +168,7 @@ export function buildSearchSurface(params: {
       }),
     );
   }
+  const sortAppliedCandidate = isSortAppliedCandidate(sortElement);
 
   const submitAction = findControlAction(params.candidateActions, 'search.submit');
   if (submitAction) {
@@ -204,11 +214,28 @@ export function buildSearchSurface(params: {
     resultCards,
     sortEvidence: {
       requestedSort: sortElement || sortAction ? 'most_collected' : 'unknown',
-      appliedCandidate: false,
-      reason:
-        sortElement || sortAction
+      appliedCandidate: sortAppliedCandidate,
+      reason: sortAppliedCandidate
+        ? 'most-collected sort control appears selected in this fresh snapshot; business ranking still needs result evidence'
+        : sortElement || sortAction
           ? 'most-collected sort control is observable; applied state still requires fresh readback after click'
           : 'no most-collected sort control observed in this snapshot',
+    },
+    topNCompleteness: {
+      requestedMinResults: 10,
+      observedResultCount: resultCards.length,
+      status:
+        resultCards.length >= 10
+          ? 'sufficient'
+          : resultCards.length > 0
+            ? 'insufficient'
+            : 'not_proven',
+      reason:
+        resultCards.length >= 10
+          ? 'at least 10 structured result cards are visible for AI-side Top-N ranking'
+          : resultCards.length > 0
+            ? 'fewer than 10 structured result cards are visible; scroll or detail readback is required before claiming Top 10 completeness'
+            : 'no structured result cards observed; search/list completion is not proven',
     },
     claimBoundary:
       'searchSurface is an observation map only. It does not prove search completion, sort application, or Top-N correctness without fresh same-tab readback and AI-side ranking.',

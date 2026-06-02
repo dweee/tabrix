@@ -249,6 +249,12 @@ export interface ReadPageSearchSurface {
     appliedCandidate: boolean;
     reason: string;
   };
+  topNCompleteness?: {
+    requestedMinResults?: number;
+    observedResultCount: number;
+    status: 'not_requested' | 'sufficient' | 'insufficient' | 'not_proven' | string;
+    reason: string;
+  };
   claimBoundary: string;
 }
 

@@ -1036,6 +1036,70 @@ describe('read_page auth artifacts', () => {
     expect(collaboration.userAction.instruction).toContain('过期');
   });
 
+  it('surfaces refresh QR candidate when expired text is only present in page regions', () => {
+    const expiredRegions = authQrRegions().map((region) =>
+      region.regionType === 'qr_code'
+        ? {
+            ...region,
+            state: 'waiting_scan_candidate 二维码已过期 点击刷新',
+          }
+        : region,
+    );
+    const collaboration = buildAuthCollaborationState({
+      pageRole: 'login_required',
+      tabId: 9,
+      pageRegions: expiredRegions,
+      browserPageObject: browserPageObject(['auth_required_candidate']),
+      browserWorldTab: aiOwnedTab(),
+      authArtifactStatus: {
+        requested: true,
+        status: 'not_applicable',
+        reason: 'auth_scoped_qr_visual_not_found',
+        ownerType: 'run_owned',
+        claimBoundary: 'artifact boundary',
+      },
+      artifactRefs: [],
+      interactiveElements: [
+        ...otpInteractive(),
+        {
+          ref: 'ref_refresh_qr',
+          role: 'button',
+          name: '点击刷新',
+          matchSource: 'visible_text',
+          actionability: 'actionable',
+        },
+      ],
+      candidateActions: [
+        ...otpCandidateActions(),
+        {
+          id: 'ca_refresh_qr',
+          actionType: 'click',
+          targetRef: 'ref_refresh_qr',
+          confidence: 0.91,
+          matchReason: 'refresh QR action',
+          locatorChain: [{ type: 'ref', value: 'ref_refresh_qr' }],
+        },
+      ],
+      assistantGuidance: {
+        taskKind: 'auth',
+        authPreference: 'qr',
+        requestedObjects: ['auth_surface', 'qr_image'],
+      },
+    });
+
+    expect(collaboration).toMatchObject({
+      status: 'not_proven',
+      challengeType: 'qr',
+      userAction: { required: true },
+    });
+    expect(collaboration.observedAuthSurface?.candidateObjectRefs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'refresh_qr', targetRef: 'ref_refresh_qr' }),
+      ]),
+    );
+    expect(collaboration.authForm).toBeUndefined();
+  });
+
   it('blocks login collaboration on protected user-owned tabs', () => {
     const collaboration = buildAuthCollaborationState({
       pageRole: 'login_required',
