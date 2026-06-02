@@ -56,6 +56,13 @@ function makeVisible(element: Element, rect = { left: 0, top: 0, width: 120, hei
   });
 }
 
+async function sendRequest(request: Record<string, unknown>) {
+  if (!messageListener) throw new Error('accessibility helper listener did not register');
+  return await new Promise<any>((resolve) => {
+    messageListener!(request, {}, resolve);
+  });
+}
+
 describe('accessibility-tree auth control map', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -180,6 +187,36 @@ describe('accessibility-tree auth control map', () => {
         }),
       ]),
     );
+  });
+
+  it('resolves an XPath selector to the only visible match when hidden duplicates exist', async () => {
+    document.body.innerHTML = `
+      <div style="display: none">
+        <span id="hidden-sort">最多收藏</span>
+      </div>
+      <div>
+        <span id="visible-sort">最多收藏</span>
+      </div>
+    `;
+    const hidden = document.getElementById('hidden-sort') as HTMLSpanElement;
+    const visible = document.getElementById('visible-sort') as HTMLSpanElement;
+    makeVisible(hidden, { left: 10, top: 10, width: 72, height: 24 });
+    makeVisible(visible, { left: 20, top: 80, width: 72, height: 24 });
+
+    const response = await sendRequest({
+      action: 'ensureRefForSelector',
+      selector: "//span[contains(normalize-space(.), '最多收藏')]",
+      isXPath: true,
+      allowMultiple: false,
+    });
+
+    expect(response).toMatchObject({
+      success: true,
+    });
+    const ref = String(response.ref);
+    const refMap = (window as Window & { __claudeElementMap: Record<string, WeakRef<Element>> })
+      .__claudeElementMap;
+    expect(refMap[ref]?.deref()).toBe(visible);
   });
 
   it('reports frame context for the content-script frame that produced the snapshot', () => {

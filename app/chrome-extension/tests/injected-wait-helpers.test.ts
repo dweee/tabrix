@@ -252,4 +252,88 @@ describe('injected state-driven waits', () => {
       text: '同意并继续',
     });
   });
+
+  it('interactive element search promotes compact visible filter chips as actionable targets', async () => {
+    document.body.innerHTML = `
+      <div id="toolbar">
+        <span id="filter-chip">筛选</span>
+      </div>
+      <div id="menu">
+        <span id="most-saved">最多收藏</span>
+      </div>
+    `;
+    const toolbar = document.getElementById('toolbar') as HTMLDivElement;
+    const filterChip = document.getElementById('filter-chip') as HTMLSpanElement;
+    const menu = document.getElementById('menu') as HTMLDivElement;
+    const mostSaved = document.getElementById('most-saved') as HTMLSpanElement;
+    setRect(toolbar, { left: 20, top: 20, width: 140, height: 36 });
+    setRect(filterChip, { left: 36, top: 26, width: 44, height: 22 });
+    setRect(menu, { left: 20, top: 64, width: 220, height: 180 });
+    setRect(mostSaved, { left: 40, top: 150, width: 72, height: 24 });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const filterResponse = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '筛选',
+      includeCoordinates: true,
+    });
+    const sortResponse = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '最多收藏',
+      includeCoordinates: true,
+    });
+
+    expect(filterResponse.success).toBe(true);
+    expect(filterResponse.elements[0]).toMatchObject({
+      selector: '#filter-chip',
+      text: '筛选',
+      type: 'text_action',
+      actionability: 'actionable',
+    });
+    expect(sortResponse.success).toBe(true);
+    expect(sortResponse.elements[0]).toMatchObject({
+      selector: '#most-saved',
+      text: '最多收藏',
+      type: 'text_action',
+      actionability: 'actionable',
+    });
+  });
+
+  it('interactive element search does not promote an oversized option container', async () => {
+    document.body.innerHTML = `
+      <div id="panel">
+        <span id="latest">最新</span>
+        <span id="most-saved">最多收藏</span>
+        <span id="comments">最多评论</span>
+      </div>
+    `;
+    const panel = document.getElementById('panel') as HTMLDivElement;
+    const latest = document.getElementById('latest') as HTMLSpanElement;
+    const mostSaved = document.getElementById('most-saved') as HTMLSpanElement;
+    const comments = document.getElementById('comments') as HTMLSpanElement;
+    setRect(panel, { left: 0, top: 0, width: 900, height: 500 });
+    setRect(latest, { left: 20, top: 20, width: 40, height: 24 });
+    setRect(mostSaved, { left: 20, top: 64, width: 72, height: 24 });
+    setRect(comments, { left: 20, top: 108, width: 72, height: 24 });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '最多收藏',
+      includeCoordinates: true,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.elements[0]).toMatchObject({
+      selector: '#most-saved',
+      actionability: 'actionable',
+    });
+    expect(response.elements.map((element: any) => element.selector)).not.toContain('#panel');
+  });
 });

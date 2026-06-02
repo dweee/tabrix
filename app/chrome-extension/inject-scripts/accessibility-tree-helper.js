@@ -616,6 +616,24 @@
     return { element: firstMatch, matchCount: Math.min(matchCount, 2) };
   }
 
+  function isVisibleSelectorMatch(el) {
+    if (!(el instanceof Element) || !isVisible(el)) return false;
+    let current = el;
+    while (current && current instanceof Element) {
+      if (current.getAttribute('aria-hidden') === 'true') return false;
+      try {
+        const style = window.getComputedStyle(/** @type {HTMLElement} */ (current));
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+          return false;
+        }
+      } catch (_) {
+        /* ignore */
+      }
+      current = current.parentElement;
+    }
+    return true;
+  }
+
   /**
    * Query XPath selector and return match info including uniqueness check.
    * @param {string} selector - XPath selector to query
@@ -654,6 +672,16 @@
           null,
         );
         const totalMatches = snapshot.snapshotLength;
+        const visibleMatches = [];
+        const visibleLimit = Math.min(totalMatches, 20);
+        for (let i = 0; i < visibleLimit; i += 1) {
+          const node = snapshot.snapshotItem(i);
+          if (node instanceof Element && isVisibleSelectorMatch(node)) visibleMatches.push(node);
+          if (visibleMatches.length > 1) break;
+        }
+        if (totalMatches > 1 && visibleMatches.length === 1) {
+          return { element: visibleMatches[0], matchCount: 1 };
+        }
         // Cap at 2 for performance (2 means "2 or more")
         const matchCount = Math.min(totalMatches, 2);
         const firstMatch =

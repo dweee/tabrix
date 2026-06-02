@@ -299,6 +299,53 @@
     );
   }
 
+  function looksLikeCompactTextActionControl(el, textQuery = '') {
+    const query = String(textQuery || '').trim();
+    if (!query || !(el instanceof Element)) return false;
+    if (!isElementVisible(el) || isTextEntryElement(el)) return false;
+
+    const tag = el.tagName ? el.tagName.toLowerCase() : '';
+    if (['html', 'body', 'main', 'section', 'article', 'form', 'table', 'ul', 'ol'].includes(tag)) {
+      return false;
+    }
+
+    const directText = ownVisibleText(el);
+    const text = (
+      directText ||
+      el.getAttribute('aria-label') ||
+      el.getAttribute('title') ||
+      el.textContent ||
+      ''
+    )
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!text || getQueryMatchKind(text, query) === 'none') return false;
+
+    const maxTextLength = Math.max(32, query.length + 18);
+    if (text.length > maxTextLength) return false;
+
+    try {
+      const rect = el.getBoundingClientRect();
+      const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+      const area = Math.max(1, rect.width * rect.height);
+      if (area > viewportArea * 0.08) return false;
+      if (rect.width > window.innerWidth * 0.6 || rect.height > window.innerHeight * 0.25) {
+        return false;
+      }
+      if (hasSmallerMatchingActionDescendant(el, query, area)) return false;
+    } catch (_) {
+      return false;
+    }
+
+    if (!directText) {
+      const childCount = el.children ? el.children.length : 0;
+      if (childCount > 1) return false;
+    }
+
+    if (countInteractiveDescendants(el, 1) > 0) return false;
+    return true;
+  }
+
   function elementMatchesTextQuery(el, textQuery) {
     const query = String(textQuery || '').trim();
     if (!query) return true;
@@ -306,7 +353,8 @@
     if (isOverBroadActionTextContainer(el, query)) return false;
     return (
       getQueryMatchKind(elementTextForQuery(el), query) !== 'none' ||
-      looksLikeAuthActionControl(el, query)
+      looksLikeAuthActionControl(el, query) ||
+      looksLikeCompactTextActionControl(el, query)
     );
   }
 
@@ -728,18 +776,26 @@
     if (!selectorsToFind) return [];
 
     const targetElements = querySelectorAllDeep(selectorsToFind);
-    if (textQuery && isActionTextQuery(textQuery)) {
+    if (textQuery) {
       for (const node of walkAllNodesDeep(document.body || document.documentElement)) {
         if (!(node instanceof Element)) continue;
-        if (!isElementVisible(node) || !isElementInteractive(node)) continue;
-        if (looksLikeAuthActionControl(node, textQuery)) targetElements.push(node);
+        if (!isElementVisible(node)) continue;
+        if (
+          (isActionTextQuery(textQuery) &&
+            isElementInteractive(node) &&
+            looksLikeAuthActionControl(node, textQuery)) ||
+          looksLikeCompactTextActionControl(node, textQuery)
+        ) {
+          targetElements.push(node);
+        }
       }
     }
     const uniqueElements = new Set(targetElements);
     const results = [];
 
     for (const el of uniqueElements) {
-      if (!isElementVisible(el) || !isElementInteractive(el)) continue;
+      const isCompactTextAction = looksLikeCompactTextActionControl(el, textQuery);
+      if (!isElementVisible(el) || (!isElementInteractive(el) && !isCompactTextAction)) continue;
 
       if (textQuery && !elementMatchesTextQuery(el, textQuery)) continue;
 
@@ -750,17 +806,26 @@
           break;
         }
       }
-      results.push(createElementInfo(el, elementType, includeCoordinates, null, { textQuery }));
+      if (elementType === 'unknown' && isCompactTextAction) elementType = 'text_action';
+      results.push(
+        createElementInfo(el, elementType, includeCoordinates, isCompactTextAction || null, {
+          textQuery,
+        }),
+      );
     }
     if (!textQuery) return results;
     const sorted = sortElementsForQuery(
       Array.from(uniqueElements).filter((el) => {
-        if (!isElementVisible(el) || !isElementInteractive(el)) return false;
+        const isCompactTextAction = looksLikeCompactTextActionControl(el, textQuery);
+        if (!isElementVisible(el) || (!isElementInteractive(el) && !isCompactTextAction)) {
+          return false;
+        }
         return elementMatchesTextQuery(el, textQuery);
       }),
       textQuery,
     );
     return sorted.map((el) => {
+      const isCompactTextAction = looksLikeCompactTextActionControl(el, textQuery);
       let elementType = 'unknown';
       for (const [type, typeSelector] of Object.entries(ELEMENT_CONFIG)) {
         if (el.matches(typeSelector)) {
@@ -768,7 +833,10 @@
           break;
         }
       }
-      return createElementInfo(el, elementType, includeCoordinates, null, { textQuery });
+      if (elementType === 'unknown' && isCompactTextAction) elementType = 'text_action';
+      return createElementInfo(el, elementType, includeCoordinates, isCompactTextAction || null, {
+        textQuery,
+      });
     });
   }
 
@@ -827,7 +895,8 @@
               isElementVisible(current) &&
               isElementInteractive(current) &&
               looksLikeAuthActionControl(current, textQuery);
-            if (isStandardInteractive || isAuthAction) {
+            const isCompactTextAction = looksLikeCompactTextActionControl(current, textQuery);
+            if (isStandardInteractive || isAuthAction || isCompactTextAction) {
               candidates.push(current);
             }
             current = current.parentElement;
