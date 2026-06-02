@@ -3,6 +3,7 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { consoleBuffer, BufferedConsoleMessage, BufferedConsoleException } from './console-buffer';
+import { markBrowserWorldTabAiCreated } from '../../browser-world-inventory';
 
 const DEFAULT_MAX_MESSAGES = 100;
 
@@ -325,6 +326,7 @@ class ConsoleTool extends BaseBrowserToolExecutor {
       const createInfo: chrome.tabs.CreateProperties = { url, active: background ? false : true };
       if (typeof windowId === 'number') createInfo.windowId = windowId;
       const newTab = await chrome.tabs.create(createInfo);
+      markBrowserWorldTabAiCreated(newTab.id);
       // Wait for tab to be ready
       await this.waitForTabReady(newTab.id!);
       return newTab;

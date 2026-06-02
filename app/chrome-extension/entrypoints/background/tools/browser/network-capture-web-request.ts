@@ -7,6 +7,7 @@ import {
   type BrowserContextSafeResponseSummary,
   type ResponseSummarySamplerArmResult,
 } from './response-summary-sampler';
+import { markBrowserWorldTabAiCreated } from '../../browser-world-inventory';
 
 // Static resource file extensions
 const STATIC_RESOURCE_EXTENSIONS = [
@@ -1125,6 +1126,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
           // Create new tab
           console.log(`NetworkCapture: Creating new tab with URL: ${targetUrl}`);
           tabToOperateOn = await chrome.tabs.create({ url: targetUrl, active: true });
+          markBrowserWorldTabAiCreated(tabToOperateOn.id);
 
           // Wait for page to load
           await new Promise((resolve) => setTimeout(resolve, 1000));

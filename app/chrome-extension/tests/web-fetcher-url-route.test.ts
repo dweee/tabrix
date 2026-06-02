@@ -3,10 +3,15 @@ import {
   getInteractiveElementsTool,
   webFetcherTool,
 } from '@/entrypoints/background/tools/browser/web-fetcher';
+import {
+  getBrowserWorldSnapshot,
+  resetBrowserWorldInventoryForTests,
+} from '@/entrypoints/background/browser-world-inventory';
 
 describe('web fetcher URL route', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    resetBrowserWorldInventoryForTests();
     (chrome as unknown as { windows: typeof chrome.windows }).windows ??=
       {} as typeof chrome.windows;
     vi.mocked(chrome.tabs.query).mockResolvedValue([]);
@@ -26,6 +31,24 @@ describe('web fetcher URL route', () => {
       url: 'https://example.test/docs',
       title: 'Docs',
     } as chrome.tabs.Tab);
+    (chrome.windows as any).getAll = vi.fn().mockResolvedValue([
+      {
+        id: 7,
+        focused: true,
+        state: 'normal',
+        type: 'normal',
+        tabs: [
+          {
+            id: 42,
+            windowId: 7,
+            active: true,
+            status: 'complete',
+            url: 'https://example.test/docs',
+            title: 'Docs',
+          },
+        ],
+      },
+    ]);
     (chrome.windows as any).update = vi.fn().mockResolvedValue({ id: 7, focused: true });
     vi.mocked(chrome.tabs.update).mockResolvedValue({
       id: 42,
@@ -146,6 +169,15 @@ describe('web fetcher URL route', () => {
         totalMs: expect.any(Number),
       }),
     );
+
+    const browserWorld = await getBrowserWorldSnapshot();
+    expect(browserWorld.aiOpenedTabIds).toContain(42);
+    expect(browserWorld.summary.currentTabObject).toMatchObject({
+      tabId: 42,
+      openedBy: 'ai',
+      openedBySource: 'ai_tool',
+      cleanupEligibility: 'eligible',
+    });
   });
 
   it('still honors an explicit URL settle budget', async () => {

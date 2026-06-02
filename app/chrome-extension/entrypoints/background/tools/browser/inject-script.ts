@@ -2,6 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
 import { ExecutionWorld } from '@/common/constants';
+import { markBrowserWorldTabAiCreated } from '../../browser-world-inventory';
 
 interface InjectScriptParam {
   url?: string;
@@ -60,6 +61,7 @@ class InjectScriptTool extends BaseBrowserToolExecutor {
             active: background === true ? false : true,
             windowId,
           });
+          markBrowserWorldTabAiCreated(tab.id);
 
           // Wait for page to load
           console.log('Waiting for page to load...');

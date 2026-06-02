@@ -7,6 +7,7 @@ import {
   buildSafeResponseSummaryFromJsonText,
   type BrowserContextSafeResponseSummary,
 } from './response-summary-sampler';
+import { markBrowserWorldTabAiCreated } from '../../browser-world-inventory';
 
 interface NetworkDebuggerStartToolParams {
   url?: string; // URL to navigate to or focus. If not provided, uses active tab.
@@ -896,6 +897,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
           await chrome.tabs.update(tabToOperateOn.id!, { active: true });
         } else {
           tabToOperateOn = await chrome.tabs.create({ url: targetUrl, active: true });
+          markBrowserWorldTabAiCreated(tabToOperateOn.id);
           // Wait for tab to be somewhat ready. A better way is to listen to tabs.onUpdated status='complete'
           // but for debugger attachment, it just needs the tabId.
           await new Promise((resolve) => setTimeout(resolve, 500)); // Short delay

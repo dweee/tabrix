@@ -2,6 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
+import { markBrowserWorldTabAiCreated } from '../../browser-world-inventory';
 
 interface WebFetcherToolParams {
   htmlContent?: boolean; // get the visible HTML content of the current page. default: false
@@ -400,6 +401,7 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
               WEB_FETCHER_CREATE_TAB_TIMEOUT_MS,
               `Web fetcher tab creation timed out after ${WEB_FETCHER_CREATE_TAB_TIMEOUT_MS}ms`,
             );
+            markBrowserWorldTabAiCreated(tab.id);
           } catch (createError) {
             const recoveredTab = await findCreatedTabAfterTimeout({
               url,
@@ -410,6 +412,7 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
               throw createError;
             }
             tab = recoveredTab;
+            markBrowserWorldTabAiCreated(tab.id);
             createTimedOutRecovered = true;
           }
           createdTabForUrl = true;
