@@ -36,6 +36,7 @@ function authQrRegions(): ReadPageRegion[] {
           objectType: 'qr_visual:visual_22222222',
           label: 'QR visual element candidate',
           role: 'img',
+          targetRef: 'tgt_login_qr',
           actionTypes: ['capture_element'],
           targetability: 'locator_chain',
           locatorChain: [{ type: 'css', value: '[data-testid="login-qr"] img' }],
@@ -484,6 +485,104 @@ describe('read_page auth artifacts', () => {
       sourceObjectId: 'assistant_provided_qr_target',
       method: 'img_data_url',
     });
+  });
+
+  it('resolves an assistant-provided QR targetRef to the auth-scoped QR selector', async () => {
+    document.body.innerHTML = `
+      <section role="dialog" aria-label="Login dialog">
+        <h1>Sign in</h1>
+        <div data-testid="login-qr">
+          <img alt="QR code" src="data:image/png;base64,FFFF" />
+        </div>
+      </section>
+    `;
+    const image = document.querySelector('[data-testid="login-qr"] img');
+    expect(image).not.toBeNull();
+    setElementRect(image as Element, { x: 80, y: 120, width: 180, height: 180 });
+
+    vi.mocked(chrome.scripting.executeScript).mockImplementationOnce(async (options: any) => [
+      { result: await options.func(...options.args) },
+    ]);
+    const artifactRefs: any[] = [];
+    const prepareFile = vi.fn().mockResolvedValue({
+      filename: 'tabrix_auth_qr.png',
+      fullPath: 'C:\\Users\\gsy\\AppData\\Local\\Temp\\tabrix_auth_qr.png',
+      size: 512,
+    });
+
+    const status = await buildAuthQrArtifactRefs({
+      includeAuthArtifacts: true,
+      tabId: 9,
+      windowId: 1,
+      pageRegions: authQrRegions(),
+      browserWorldTab: aiOwnedTab(),
+      artifactRefs,
+      assistantGuidance: {
+        taskKind: 'auth',
+        authPreference: 'qr',
+        requestedObjects: ['qr_image'],
+        assistantProvidedTarget: {
+          purpose: 'auth_qr_image',
+          targetRef: 'tgt_login_qr',
+        },
+      },
+      nowMs: 1000,
+      prepareFile,
+    });
+
+    expect(status).toMatchObject({
+      requested: true,
+      status: 'ready',
+      artifactRef: 'artifact://read_page/tab-9/auth-qr/visual_qr',
+    });
+    expect(artifactRefs[0]).toMatchObject({
+      sourceRegionId: 'region_qr_code',
+      sourceObjectId: 'visual_qr',
+      method: 'img_data_url',
+    });
+  });
+
+  it('fails closed when an assistant-provided QR targetRef is not in auth-scoped candidates', async () => {
+    document.body.innerHTML = `
+      <section role="dialog" aria-label="Login dialog">
+        <h1>Sign in</h1>
+        <div data-testid="login-qr">
+          <img alt="QR code" src="data:image/png;base64,GGGG" />
+        </div>
+      </section>
+    `;
+    const artifactRefs: any[] = [];
+    const prepareFile = vi.fn();
+
+    const status = await buildAuthQrArtifactRefs({
+      includeAuthArtifacts: true,
+      tabId: 9,
+      windowId: 1,
+      pageRegions: authQrRegions(),
+      browserWorldTab: aiOwnedTab(),
+      artifactRefs,
+      assistantGuidance: {
+        taskKind: 'auth',
+        authPreference: 'qr',
+        requestedObjects: ['qr_image'],
+        assistantProvidedTarget: {
+          purpose: 'auth_qr_image',
+          targetRef: 'tgt_missing_qr',
+        },
+      },
+      nowMs: 1000,
+      prepareFile,
+    });
+
+    expect(status).toMatchObject({
+      requested: true,
+      status: 'not_applicable',
+      reason: 'auth_scoped_qr_visual_not_found',
+      failureReason: 'assistant_target_ref_not_resolved',
+    });
+    expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+    expect(prepareFile).not.toHaveBeenCalled();
+    expect(artifactRefs).toEqual([]);
   });
 
   it('does not extract ordinary content QR images as auth QR artifacts', async () => {

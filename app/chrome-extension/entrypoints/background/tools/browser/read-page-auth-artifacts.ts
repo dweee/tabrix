@@ -43,6 +43,7 @@ type AuthQrExtractionMethod =
 export interface AuthQrArtifactCandidate {
   regionId: string;
   objectId: string;
+  targetRef?: string;
   selector: string;
   width: number | null;
   height: number | null;
@@ -778,6 +779,7 @@ function buildAuthSurfaceCandidates(params: {
   for (const candidate of selectAuthQrArtifactCandidates(params.pageRegions, 3)) {
     result.push({
       kind: 'qr_image',
+      targetRef: candidate.targetRef,
       selector: candidate.selector,
       confidence: 0.82,
       actionability: 'inspectable',
@@ -1238,6 +1240,7 @@ function selectAuthQrArtifactCandidates(
       candidates.push({
         regionId: region.regionId,
         objectId: object.objectId,
+        targetRef: object.targetRef,
         selector,
         width: null,
         height: null,
@@ -1246,6 +1249,26 @@ function selectAuthQrArtifactCandidates(
     }
   }
   return candidates;
+}
+
+function findAuthQrCandidateByTargetRef(
+  candidates: AuthQrArtifactCandidate[],
+  targetRef: string | undefined,
+): AuthQrArtifactCandidate | null {
+  if (!targetRef) return null;
+  return candidates.find((candidate) => candidate.targetRef === targetRef) ?? null;
+}
+
+function uniqueSelectors(selectors: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const selector of selectors) {
+    const value = typeof selector === 'string' ? selector.trim() : '';
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
 }
 
 function normalizeDataUrl(input: unknown): string | null {
@@ -1675,20 +1698,37 @@ export async function buildAuthQrArtifactRefs(params: {
   try {
     const candidates = selectAuthQrArtifactCandidates(params.pageRegions, 3);
     const assistantTarget = params.assistantGuidance?.assistantProvidedTarget;
+    const assistantTargetRef =
+      assistantTarget?.purpose === 'auth_qr_image' &&
+      typeof assistantTarget.targetRef === 'string' &&
+      assistantTarget.targetRef.trim().length > 0
+        ? assistantTarget.targetRef.trim()
+        : undefined;
+    const assistantTargetCandidate = findAuthQrCandidateByTargetRef(candidates, assistantTargetRef);
     const assistantSelector =
       assistantTarget?.purpose === 'auth_qr_image' &&
       typeof assistantTarget.selector === 'string' &&
       assistantTarget.selector.trim().length > 0
         ? assistantTarget.selector.trim()
-        : null;
+        : assistantTargetCandidate?.selector || null;
     const assistantFrameId =
       assistantTarget?.purpose === 'auth_qr_image' && typeof assistantTarget.frameId === 'number'
         ? assistantTarget.frameId
         : undefined;
-    const selectors = [
-      ...(assistantSelector ? [assistantSelector] : []),
+    if (assistantTargetRef && !assistantTargetCandidate && !assistantTarget?.selector) {
+      return {
+        requested: true,
+        status: 'not_applicable',
+        reason: 'auth_scoped_qr_visual_not_found',
+        ownerType: gate.ownerType,
+        failureReason: 'assistant_target_ref_not_resolved',
+        claimBoundary: AUTH_QR_CLAIM_BOUNDARY,
+      };
+    }
+    const selectors = uniqueSelectors([
+      assistantSelector,
       ...candidates.map((item) => item.selector),
-    ];
+    ]);
     const extracted = await extractAuthQrImageFromDom(params.tabId, selectors, assistantFrameId);
     if (selectors.length === 0 && !extracted.dataUrl && extracted.method !== 'element_screenshot') {
       return {
@@ -1702,13 +1742,15 @@ export async function buildAuthQrArtifactRefs(params: {
     }
     const candidate =
       (assistantSelector && extracted.selector === assistantSelector
-        ? ({
+        ? (assistantTargetCandidate ??
+          ({
             regionId: 'assistant_guided_auth_surface',
             objectId: 'assistant_provided_qr_target',
+            targetRef: assistantTargetRef,
             selector: assistantSelector,
             width: extracted.width ?? null,
             height: extracted.height ?? null,
-          } satisfies AuthQrArtifactCandidate)
+          } satisfies AuthQrArtifactCandidate))
         : null) ??
       candidates[0] ??
       ({

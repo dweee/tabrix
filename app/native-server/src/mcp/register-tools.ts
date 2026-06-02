@@ -2605,7 +2605,7 @@ function normalizeReadPageAssistantGuidanceForCacheKey(
     }
     if (
       typeof target.targetRef === 'string' &&
-      /^ref_[A-Za-z0-9:_-]{1,80}$/.test(target.targetRef)
+      /^(?:ref|tgt)_[A-Za-z0-9:_-]{1,80}$/.test(target.targetRef)
     ) {
       assistantProvidedTarget.targetRef = target.targetRef;
     }

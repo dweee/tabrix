@@ -265,7 +265,8 @@ function normalizeAssistantGuidance(raw: unknown): ReadPageAssistantGuidance | u
         ? target.purpose
         : undefined;
     const targetRef =
-      typeof target.targetRef === 'string' && /^ref_[A-Za-z0-9:_-]{1,80}$/.test(target.targetRef)
+      typeof target.targetRef === 'string' &&
+      /^(?:ref|tgt)_[A-Za-z0-9:_-]{1,80}$/.test(target.targetRef)
         ? target.targetRef
         : undefined;
     const selector =
