@@ -89,6 +89,61 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
     });
   }
 
+  function dispatchMouseLikeEvent(element, type) {
+    if (!element || typeof element.dispatchEvent !== 'function') return false;
+    try {
+      return element.dispatchEvent(
+        new window.MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+        }),
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  async function prepareKeyboardTarget(element) {
+    if (!element || document.activeElement === element || typeof element.focus !== 'function') {
+      return { waitedMs: 0, reason: 'already_focused', ready: document.activeElement === element };
+    }
+
+    if (typeof element.scrollIntoView === 'function') {
+      try {
+        element.scrollIntoView({ block: 'center', inline: 'nearest' });
+      } catch {
+        element.scrollIntoView();
+      }
+    }
+
+    dispatchMouseLikeEvent(element, 'pointerdown');
+    dispatchMouseLikeEvent(element, 'mousedown');
+    try {
+      element.focus({ preventScroll: true });
+    } catch {
+      element.focus();
+    }
+    dispatchMouseLikeEvent(element, 'mouseup');
+    dispatchMouseLikeEvent(element, 'click');
+
+    let focusWait = await waitForFocusReady(element, { maxMs: 250 });
+    if (!focusWait.ready) {
+      try {
+        element.focus();
+      } catch {
+        // Keep the original focus wait diagnostics below.
+      }
+      const retry = await waitForFocusReady(element, { maxMs: 250 });
+      focusWait = {
+        waitedMs: focusWait.waitedMs + retry.waitedMs,
+        reason: retry.ready ? 'focused_after_retry' : retry.reason,
+        ready: retry.ready,
+      };
+    }
+    return focusWait;
+  }
+
   function getScrollDiagnostics() {
     const scrollingElement = document.scrollingElement || document.documentElement || document.body;
     const activeElement = document.activeElement || document.body;
@@ -376,8 +431,7 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
       let focusWait = null;
 
       if (element !== document.activeElement && typeof element.focus === 'function') {
-        element.focus();
-        focusWait = await waitForFocusReady(element);
+        focusWait = await prepareKeyboardTarget(element);
       }
 
       const keyCombinations = keysSequenceString

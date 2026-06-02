@@ -17,6 +17,7 @@ export type NonInterferenceVerdictReason =
   | 'user_confirmed'
   | 'auth_resume_completion_action'
   | 'form_input_continuation_action'
+  | 'corrective_search_continuation_action'
   | 'auth_collaboration_continuation_action'
   | 'collaboration_requested'
   | 'auth_resume_verification_required'
@@ -169,6 +170,26 @@ export function evaluateNonInterferencePreflight(input: {
         input,
         mode,
         'auth_resume_completion_action',
+        targetTabId,
+        targetTabIds,
+        runOwnedTabIds,
+      );
+    }
+    if (
+      shouldAllowCorrectiveSearchContinuationAction({
+        toolName: input.toolName,
+        args: input.args,
+        taskContext: input.taskContext,
+        targetTabId,
+        readiness: taskResumeReadiness,
+        userConfirmed: hasUserConfirmation(input.args),
+        strictMode: mode === 'strict',
+      })
+    ) {
+      return allow(
+        input,
+        mode,
+        'corrective_search_continuation_action',
         targetTabId,
         targetTabIds,
         runOwnedTabIds,
@@ -536,6 +557,40 @@ function shouldAllowAuthResumeCompletionAction(input: {
   return input.targetTabId !== null && input.taskContext?.isRunOwnedTab(input.targetTabId) === true;
 }
 
+function shouldAllowCorrectiveSearchContinuationAction(input: {
+  toolName: string;
+  args: unknown;
+  taskContext: TaskSessionContext | null;
+  targetTabId: number | null;
+  readiness: TaskResumeReadinessSnapshot;
+  userConfirmed: boolean;
+  strictMode: boolean;
+}): boolean {
+  if (!isFormContinuationImpactTool(input.toolName)) return false;
+  if (input.readiness.status !== 'postcondition_failed_stop') return false;
+  if (input.readiness.nextStep !== 'stop_not_proven') return false;
+  if (!input.readiness.evidenceKinds.includes('region_state_postcondition')) return false;
+  if (!input.readiness.reason.includes('search_results_updated_failed:')) return false;
+
+  const intent = readCandidateActionIntent(input.args);
+  if (
+    intent !== 'search.focus_input' &&
+    intent !== 'search.enter_query' &&
+    intent !== 'search.submit'
+  ) {
+    return false;
+  }
+
+  const targetTabId = input.targetTabId;
+  const targetTabMatches =
+    targetTabId !== null &&
+    (input.readiness.tabId === null || input.readiness.tabId === targetTabId);
+  if (!targetTabMatches) return false;
+  if (targetTabId !== null && input.taskContext?.isRunOwnedTab(targetTabId) === true) return true;
+  if (input.strictMode) return false;
+  return input.userConfirmed || hasExplicitLegacyTabTarget(input.args);
+}
+
 function shouldAllowAuthCollaborationContinuationAction(input: {
   toolName: string;
   args: unknown;
@@ -620,6 +675,10 @@ function readCandidateActionIntent(args: unknown): string | null {
   const candidateAction = (args as Record<string, unknown>).candidateAction;
   if (!candidateAction || typeof candidateAction !== 'object') return null;
   return readString(candidateAction, 'intent');
+}
+
+function hasExplicitLegacyTabTarget(args: unknown): boolean {
+  return readPositiveInteger(args, 'tabId') !== null;
 }
 
 function readBoolean(args: unknown, key: string): boolean | null {

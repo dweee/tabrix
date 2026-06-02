@@ -2741,7 +2741,7 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
             throw new Error(`No element found matching selector: ${request.selector}`);
           }
         } else if (request.textMode === 'full-visible') {
-          const fallback = extractFastBodyTextContent('body_textContent');
+          const fallback = extractVisibleBodyTextContent('visible_text_nodes');
           const textContent = fallback.textContent;
           sendResponse({
             success: true,
@@ -2936,6 +2936,73 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
       textContent: cleanContent(document.body?.textContent || ''),
       source,
     };
+  }
+
+  function extractVisibleBodyTextContent(source) {
+    if (!document.body) {
+      return {
+        textContent: '',
+        source,
+      };
+    }
+
+    const texts = [];
+    const textNodeFlag =
+      typeof NodeFilter !== 'undefined' && NodeFilter.SHOW_TEXT ? NodeFilter.SHOW_TEXT : 4;
+    const acceptNodeFlag =
+      typeof NodeFilter !== 'undefined' && NodeFilter.FILTER_ACCEPT ? NodeFilter.FILTER_ACCEPT : 1;
+    const rejectNodeFlag =
+      typeof NodeFilter !== 'undefined' && NodeFilter.FILTER_REJECT ? NodeFilter.FILTER_REJECT : 2;
+    const walker = document.createTreeWalker(document.body, textNodeFlag, {
+      acceptNode(node) {
+        const rawText = node.textContent || '';
+        if (!rawText.trim()) return rejectNodeFlag;
+        const parent = node.parentElement;
+        if (!isVisibleTextParent(parent)) return rejectNodeFlag;
+        return acceptNodeFlag;
+      },
+    });
+
+    let node = walker.nextNode();
+    let totalLength = 0;
+    while (node) {
+      const text = node.textContent || '';
+      texts.push(text);
+      totalLength += text.length + 1;
+      if (totalLength > config.maxTotalLength) break;
+      node = walker.nextNode();
+    }
+
+    return {
+      textContent: cleanContent(texts.join(' ')),
+      source,
+    };
+  }
+
+  function isVisibleTextParent(element) {
+    if (!element) return false;
+    if (
+      element.closest(
+        'script, style, noscript, template, svg, canvas, [hidden], [aria-hidden="true"]',
+      )
+    ) {
+      return false;
+    }
+
+    let current = element;
+    while (current && current !== document.body) {
+      const style = window.getComputedStyle(current);
+      if (
+        style.display === 'none' ||
+        style.visibility === 'hidden' ||
+        style.visibility === 'collapse'
+      ) {
+        return false;
+      }
+      current = current.parentElement;
+    }
+
+    return true;
   }
 
   function extractFallbackTextContent(options = {}) {

@@ -1422,6 +1422,11 @@ export const BROWSER_SCHEMAS: Tool[] = [
           description:
             'Keys or key combinations to simulate. Examples: "Enter", "Tab", "Ctrl+C", "Shift+Tab", "Ctrl+A, Backspace". For plain text typing, use chrome_fill_or_select instead.',
         },
+        key: {
+          type: 'string',
+          description:
+            'Alias for keys when sending a single key such as "Enter". Prefer keys for chords or multiple key events.',
+        },
         selector: {
           type: 'string',
           description: 'CSS selector or XPath for target element to receive keyboard events.',
@@ -1448,7 +1453,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
           description: 'Target frame ID for iframe support.',
         },
       },
-      required: ['keys'],
+      anyOf: [{ required: ['keys'] }, { required: ['key'] }],
     },
   },
   {

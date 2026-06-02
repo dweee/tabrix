@@ -320,6 +320,35 @@ describe('candidateAction bridge', () => {
     );
   });
 
+  it('accepts key as a single-key alias for chrome_keyboard', async () => {
+    vi.spyOn(keyboardTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4111,
+      title: 'Search',
+      url: 'https://example.com/search',
+    });
+    vi.spyOn(keyboardTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(keyboardTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      message: 'Keyboard operation successful',
+    });
+
+    const result = await keyboardTool.execute({
+      key: 'Enter',
+      selector: 'input[type=search]',
+    });
+
+    expect(result.isError).toBe(false);
+    expect(sendSpy).toHaveBeenCalledWith(
+      4111,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.SIMULATE_KEYBOARD,
+        keys: 'Enter',
+        selector: 'input[type=search]',
+      }),
+      undefined,
+    );
+  });
+
   it('updates Browser World latest AI operation after click, fill, and keyboard dispatches', async () => {
     mockBrowserWorldTab(4120);
     await getBrowserWorldSnapshot();

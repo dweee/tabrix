@@ -543,6 +543,60 @@ describe('evaluateNonInterferencePreflight', () => {
     });
   });
 
+  it('allows corrective search actions after a failed search postcondition on the same explicit tab', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 42,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_search_submit',
+            kind: 'search_results_updated',
+            verdict: 'failed',
+            reason: 'result_collection_not_visible_after',
+            beforeSummary: ['content_list:loaded:before'],
+            afterSummary: ['content_list:absent'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+
+    const focusVerdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.CLICK,
+      args: {
+        tabId: 42,
+        selector: '#q',
+        candidateAction: { intent: 'search.focus_input' },
+      },
+      taskContext: ctx,
+    });
+    const submitVerdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.KEYBOARD,
+      args: {
+        tabId: 42,
+        key: 'Enter',
+        candidateAction: { intent: 'search.submit' },
+      },
+      taskContext: ctx,
+    });
+
+    expect(focusVerdict.allowed).toBe(true);
+    expect(focusVerdict.audit).toMatchObject({
+      verdict: 'allow',
+      reason: 'corrective_search_continuation_action',
+      targetTabId: 42,
+    });
+    expect(submitVerdict.allowed).toBe(true);
+    expect(submitVerdict.audit).toMatchObject({
+      verdict: 'allow',
+      reason: 'corrective_search_continuation_action',
+      targetTabId: 42,
+    });
+  });
+
   it('uses the handoff summary when auth resume is waiting for user collaboration', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
     ctx.noteRunOwnedTab(42);

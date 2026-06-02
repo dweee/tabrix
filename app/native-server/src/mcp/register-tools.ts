@@ -1463,9 +1463,15 @@ function getAutoFreshReadbackTabId(input: {
   if (input.verdict.allowed) return null;
   if (input.taskContext === null) return null;
   if (hasExplicitTaskContextKey(input.args)) return null;
+  if (hasImpactUserConfirmation(input.args)) return null;
   if (!isAutoFreshReadbackInteractionTool(input.toolName)) return null;
   if (input.verdict.audit.verdict !== 'collaboration_required') return null;
-  if (input.verdict.audit.reason !== 'auth_resume_verification_required') return null;
+  if (
+    input.verdict.audit.reason !== 'auth_resume_verification_required' &&
+    input.verdict.audit.reason !== 'task_resume_readiness_not_proven'
+  ) {
+    return null;
+  }
 
   const readiness = input.verdict.audit.taskResumeReadiness;
   const handoff = readiness?.handoffSummary;
@@ -1497,6 +1503,16 @@ function hasExplicitTaskContextKey(args: unknown): boolean {
     const value = record[key];
     return typeof value === 'string' && value.trim().length > 0;
   });
+}
+
+function hasImpactUserConfirmation(args: unknown): boolean {
+  if (!args || typeof args !== 'object') return false;
+  const record = args as Record<string, unknown>;
+  return (
+    record.userConfirmed === true ||
+    record.allowUserTabImpact === true ||
+    record.riskAccepted === true
+  );
 }
 
 function attachReadPagePayloadMetadata(

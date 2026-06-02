@@ -6584,6 +6584,115 @@ describe('handleToolCall execution wrapper', () => {
       expect(bridgeSpy).toHaveBeenCalledTimes(1);
     });
 
+    it('auto-runs a fresh readback for implicit post-action readiness before page interaction', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
+      auto.noteRunOwnedTab(1);
+      Object.defineProperty(auto, 'readBudget', { value: 6, writable: false });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_before_auto_readback_search',
+          tabId: 1,
+          pageRegions: [contentListRegion('before')],
+        }),
+      );
+      await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  observedOutcome: 'tool_reported_success_without_business_change',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_search_submit',
+        candidateAction: {
+          id: 'ca_search_submit',
+          actionType: 'click',
+          targetRef: 'ref_search_submit',
+          confidence: 0.91,
+          matchReason: 'search submit candidate',
+          locatorChain: [{ type: 'ref', value: 'ref_search_submit' }],
+          intent: 'search.submit',
+        },
+      });
+
+      const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
+      bridgeSpy.mockClear();
+      bridgeSpy
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: readPagePayloadWithRegions({
+                  projectionId: 'projection_after_auto_readback_search',
+                  tabId: 1,
+                  pageRegions: [contentListRegion('after')],
+                  includeTopNRows: true,
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  dispatchSucceeded: true,
+                  observedOutcome: 'continued_after_auto_readback',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+
+      const continued = await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_after_1',
+      });
+      const continuedPayload = JSON.parse(String(continued.content[0].text));
+
+      expect(continued.isError).toBe(false);
+      expect(continuedPayload).toMatchObject({
+        success: true,
+        observedOutcome: 'continued_after_auto_readback',
+        actionPreflight: {
+          verdict: 'allow',
+        },
+        runtimePolicyAudit: {
+          verdict: 'allow',
+        },
+      });
+      expect(bridgeSpy).toHaveBeenCalledTimes(4);
+    });
+
     it('fresh postcondition recovery after a blocked impact action unblocks continuation on the same tab', async () => {
       markBridgeReady();
       const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');

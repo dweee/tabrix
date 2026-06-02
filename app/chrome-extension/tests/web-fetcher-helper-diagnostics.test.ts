@@ -148,9 +148,9 @@ describe('web fetcher content diagnostics', () => {
     expect(querySpy).not.toHaveBeenCalled();
     expect(response).toMatchObject({
       fallback: true,
-      fallbackSource: 'body_textContent',
+      fallbackSource: 'visible_text_nodes',
       textMode: 'full-visible',
-      textContentSource: 'fallback_body_textContent',
+      textContentSource: 'fallback_visible_text_nodes',
     });
     expect(String(response.textContent)).toContain('Full visible mode');
     expect(response.contentDiagnostics).toMatchObject({
@@ -191,8 +191,36 @@ describe('web fetcher content diagnostics', () => {
     expect(bodyResponse.textContentSource).toBe('readability_body_text');
     expect(String(bodyResponse.textContent)).not.toContain('API Reference');
     expect(fullVisibleResponse.textMode).toBe('full-visible');
-    expect(fullVisibleResponse.textContentSource).toBe('fallback_body_textContent');
+    expect(fullVisibleResponse.textContentSource).toBe('fallback_visible_text_nodes');
     expect(String(fullVisibleResponse.textContent)).toContain('API Reference');
     expect(String(fullVisibleResponse.textContent)).toContain('Manual installation');
+  });
+
+  it('keeps script state out of full-visible text extraction', async () => {
+    document.body.innerHTML = `
+      <main>
+        <h1>Search results</h1>
+        <p>Visible result card title</p>
+      </main>
+      <script>
+        window.__INITIAL_STATE__ = {
+          user: { user_id: 'private-user-id', phone: '15705171303' },
+          auth: { token: 'private-token' }
+        };
+      </script>
+    `;
+
+    const response = await dispatchWebFetcher({
+      action: 'getTextContent',
+      textMode: 'full-visible',
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.textContentSource).toBe('fallback_visible_text_nodes');
+    expect(String(response.textContent)).toContain('Visible result card title');
+    expect(String(response.textContent)).not.toContain('__INITIAL_STATE__');
+    expect(String(response.textContent)).not.toContain('private-user-id');
+    expect(String(response.textContent)).not.toContain('15705171303');
+    expect(String(response.textContent)).not.toContain('private-token');
   });
 });

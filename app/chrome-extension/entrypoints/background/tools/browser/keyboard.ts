@@ -6,7 +6,8 @@ import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 import { markBrowserWorldTabAiOperated } from '../../browser-world-inventory';
 
 interface KeyboardToolParams {
-  keys: string; // Required: string representing keys or key combinations to simulate (e.g., "Enter", "Ctrl+C")
+  keys?: string; // Required: string representing keys or key combinations to simulate (e.g., "Enter", "Ctrl+C")
+  key?: string; // Backwards-compatible alias for a single key.
   selector?: string; // Optional: CSS selector or XPath for target element to send keyboard events to
   selectorType?: 'css' | 'xpath'; // Type of selector (default: 'css')
   delay?: number; // Optional: delay between keystrokes in milliseconds
@@ -25,7 +26,14 @@ class KeyboardTool extends BaseBrowserToolExecutor {
    * Execute keyboard operation
    */
   async execute(args: KeyboardToolParams): Promise<ToolResult> {
-    const { keys, selector, selectorType = 'css', delay = TIMEOUTS.KEYBOARD_DELAY } = args;
+    const {
+      keys: rawKeys,
+      key,
+      selector,
+      selectorType = 'css',
+      delay = TIMEOUTS.KEYBOARD_DELAY,
+    } = args;
+    const keys = rawKeys || key;
 
     console.log(`Starting keyboard operation with options:`, args);
 
