@@ -750,6 +750,19 @@ describe('browser settle guidance', () => {
       waitedMs: 380,
       readyState: 'complete',
     });
+    vi.spyOn(switchTabTool as any, 'waitForTabForegroundProof').mockResolvedValue({
+      kind: 'tab_foreground_proof_v1',
+      verdict: 'proven_foreground',
+      tabId: 30,
+      chromeWindowFocused: true,
+      chromeTabActive: true,
+      documentVisibilityState: 'visible',
+      documentHasFocus: true,
+      documentHidden: false,
+      waitedMs: 40,
+      timedOut: false,
+      reason: 'document is visible and focused after tab/window activation',
+    });
 
     const result = await switchTabTool.execute({ tabId: 30 });
 
@@ -760,10 +773,75 @@ describe('browser settle guidance', () => {
       activated: true,
       activationTimedOut: false,
       activationWaitedMs: 120,
+      foregroundActivationVerdict: 'proven_foreground',
+      documentVisibilityState: 'visible',
+      documentHasFocus: true,
       settled: true,
       settleReason: 'complete',
       settleWaitedMs: 380,
       readyState: 'complete',
+    });
+    expect(payload.foregroundActivation).toMatchObject({
+      kind: 'tab_foreground_proof_v1',
+      verdict: 'proven_foreground',
+      tabId: 30,
+      chromeWindowFocused: true,
+      chromeTabActive: true,
+      documentVisibilityState: 'visible',
+      documentHasFocus: true,
+    });
+  });
+
+  it('surfaces when Chrome activation is not enough to prove page foreground focus', async () => {
+    vi.mocked(chrome.tabs.get).mockResolvedValue({
+      id: 31,
+      windowId: 2,
+      active: false,
+      status: 'complete',
+      url: 'http://127.0.0.1:62100/page4',
+      title: 'Page 4',
+    } as chrome.tabs.Tab);
+    vi.spyOn(switchTabTool as any, 'waitForTabActivated').mockResolvedValue({
+      tab: {
+        id: 31,
+        windowId: 2,
+        active: true,
+        status: 'complete',
+        url: 'http://127.0.0.1:62100/page4',
+        title: 'Page 4',
+      },
+      activated: true,
+      timedOut: false,
+      waitedMs: 100,
+      windowFocused: true,
+    });
+    vi.spyOn(switchTabTool as any, 'waitForTabForegroundProof').mockResolvedValue({
+      kind: 'tab_foreground_proof_v1',
+      verdict: 'needs_os_foreground_activation',
+      tabId: 31,
+      chromeWindowFocused: true,
+      chromeTabActive: true,
+      documentVisibilityState: 'visible',
+      documentHasFocus: false,
+      documentHidden: false,
+      waitedMs: 1500,
+      timedOut: true,
+      reason: 'Chrome reports the tab/window active, but the page document is not focused',
+    });
+
+    const result = await switchTabTool.execute({ tabId: 31 });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      activated: true,
+      windowFocused: true,
+      foregroundActivationVerdict: 'needs_os_foreground_activation',
+      documentVisibilityState: 'visible',
+      documentHasFocus: false,
+      settled: true,
+      settleReason: 'already_complete',
     });
   });
 

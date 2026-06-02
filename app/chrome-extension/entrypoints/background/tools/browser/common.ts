@@ -1185,6 +1185,10 @@ class SwitchTabTool extends BaseBrowserToolExecutor {
           ? null
           : await this.waitForTabSettled(tabId, { timeoutMs: 5000 });
       const updatedTab = settleResult?.tab || activationResult.tab;
+      const foregroundProof = await this.waitForTabForegroundProof(tabId, {
+        chromeWindowFocused: activationResult.windowFocused,
+        chromeTabActive: activationResult.activated,
+      });
       markBrowserWorldTabAiOperated(updatedTab.id, 'switch_tab');
 
       return {
@@ -1202,6 +1206,10 @@ class SwitchTabTool extends BaseBrowserToolExecutor {
               activationTimedOut: activationResult.timedOut,
               activationWaitedMs: activationResult.waitedMs,
               windowFocused: activationResult.windowFocused,
+              foregroundActivation: foregroundProof,
+              foregroundActivationVerdict: foregroundProof.verdict,
+              documentVisibilityState: foregroundProof.documentVisibilityState,
+              documentHasFocus: foregroundProof.documentHasFocus,
               settled: settleResult ? settleResult.settled : updatedTab.status === 'complete',
               settleReason: settleResult?.reason || 'already_complete',
               settleWaitedMs: settleResult?.waitedMs || 0,

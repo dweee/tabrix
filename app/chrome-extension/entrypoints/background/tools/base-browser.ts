@@ -6,6 +6,7 @@ const PING_TIMEOUT_MS = 300;
 const DOCUMENT_READY_STATE_TIMEOUT_MS = 500;
 const TAB_SETTLE_TIMEOUT_MS = 8000;
 const TAB_ACTIVATION_TIMEOUT_MS = 1500;
+const TAB_FOREGROUND_PROOF_TIMEOUT_MS = 1500;
 const TAB_POLL_INTERVAL_MS = 100;
 const TRANSIENT_FRAME_REMOVED_RETRY_DELAY_MS = 150;
 const TRANSIENT_FRAME_REMOVED_RETRY_LIMIT = 1;
@@ -43,6 +44,26 @@ interface WaitForTabActivatedResult {
   timedOut: boolean;
   waitedMs: number;
   windowFocused: boolean | null;
+}
+
+interface WaitForTabForegroundProofOptions {
+  timeoutMs?: number;
+  chromeWindowFocused?: boolean | null;
+  chromeTabActive?: boolean | null;
+}
+
+export interface TabForegroundProof {
+  kind: 'tab_foreground_proof_v1';
+  verdict: 'proven_foreground' | 'needs_os_foreground_activation' | 'not_proven';
+  tabId: number;
+  chromeWindowFocused: boolean | null;
+  chromeTabActive: boolean | null;
+  documentVisibilityState: string | null;
+  documentHasFocus: boolean | null;
+  documentHidden: boolean | null;
+  waitedMs: number;
+  timedOut: boolean;
+  reason: string;
 }
 
 interface ContentScriptInjectionTiming {
@@ -234,6 +255,92 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
 
   protected async sleep(ms: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  protected async waitForTabForegroundProof(
+    tabId: number,
+    options: WaitForTabForegroundProofOptions = {},
+  ): Promise<TabForegroundProof> {
+    const timeoutMs = options.timeoutMs ?? TAB_FOREGROUND_PROOF_TIMEOUT_MS;
+    const startedAt = Date.now();
+    let lastProbe: {
+      visibilityState: string | null;
+      hasFocus: boolean | null;
+      hidden: boolean | null;
+    } | null = null;
+    let probeFailed = false;
+
+    while (Date.now() - startedAt < timeoutMs) {
+      try {
+        const [injection] = await Promise.race([
+          chrome.scripting.executeScript({
+            target: { tabId },
+            func: () => ({
+              visibilityState:
+                typeof document.visibilityState === 'string' ? document.visibilityState : null,
+              hasFocus: typeof document.hasFocus === 'function' ? document.hasFocus() : null,
+              hidden: typeof document.hidden === 'boolean' ? document.hidden : null,
+            }),
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('foreground proof timed out')), 500),
+          ),
+        ]);
+        const result = injection?.result as
+          | { visibilityState?: unknown; hasFocus?: unknown; hidden?: unknown }
+          | undefined;
+        lastProbe = {
+          visibilityState:
+            typeof result?.visibilityState === 'string' ? result.visibilityState : null,
+          hasFocus: typeof result?.hasFocus === 'boolean' ? result.hasFocus : null,
+          hidden: typeof result?.hidden === 'boolean' ? result.hidden : null,
+        };
+        if (lastProbe.visibilityState === 'visible' && lastProbe.hasFocus === true) {
+          return {
+            kind: 'tab_foreground_proof_v1',
+            verdict: 'proven_foreground',
+            tabId,
+            chromeWindowFocused: options.chromeWindowFocused ?? null,
+            chromeTabActive: options.chromeTabActive ?? null,
+            documentVisibilityState: lastProbe.visibilityState,
+            documentHasFocus: lastProbe.hasFocus,
+            documentHidden: lastProbe.hidden,
+            waitedMs: Date.now() - startedAt,
+            timedOut: false,
+            reason: 'document is visible and focused after tab/window activation',
+          };
+        }
+      } catch {
+        probeFailed = true;
+      }
+      await this.sleep(TAB_POLL_INTERVAL_MS);
+    }
+
+    const documentVisibilityState = lastProbe?.visibilityState ?? null;
+    const documentHasFocus = lastProbe?.hasFocus ?? null;
+    const documentHidden = lastProbe?.hidden ?? null;
+    const canDiagnoseOsForeground =
+      options.chromeWindowFocused === true &&
+      options.chromeTabActive === true &&
+      documentVisibilityState === 'visible' &&
+      documentHasFocus === false;
+    return {
+      kind: 'tab_foreground_proof_v1',
+      verdict: canDiagnoseOsForeground ? 'needs_os_foreground_activation' : 'not_proven',
+      tabId,
+      chromeWindowFocused: options.chromeWindowFocused ?? null,
+      chromeTabActive: options.chromeTabActive ?? null,
+      documentVisibilityState,
+      documentHasFocus,
+      documentHidden,
+      waitedMs: Date.now() - startedAt,
+      timedOut: true,
+      reason: canDiagnoseOsForeground
+        ? 'Chrome reports the tab/window active, but the page document is not focused'
+        : probeFailed
+          ? 'document foreground proof could not be read from the tab'
+          : 'document foreground proof did not reach visible+focused before timeout',
+    };
   }
 
   private normalizeComparableUrl(url?: string): string {
