@@ -189,6 +189,54 @@ describe('handleToolCall execution wrapper', () => {
     expect(step.artifactRefs![0]).toBe(body.historyRef);
   });
 
+  it('fails chrome_read_page when returned tab-bound evidence mismatches explicit tabId', async () => {
+    markBridgeReady();
+    const readPageBody = {
+      mode: 'compact',
+      tabId: 2,
+      page: {
+        url: 'https://example.com/wrong-tab',
+        title: 'Wrong tab',
+        pageType: 'web_page',
+      },
+      pageProjection: {
+        tabId: 2,
+      },
+      ownershipRuntime: {
+        currentTabId: 2,
+      },
+      artifactRefs: [{ kind: 'dom_snapshot', ref: 'artifact://read_page/tab-2/normal' }],
+    };
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      items: [],
+    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      data: {
+        content: [{ type: 'text', text: JSON.stringify(readPageBody) }],
+        isError: false,
+      },
+    } as never);
+
+    const result = await handleToolCall('chrome_read_page', { tabId: 1 });
+
+    expect(result.isError).toBe(true);
+    const body = JSON.parse(String((result.content as any[])[0].text));
+    expect(body).toMatchObject({
+      code: 'TABRIX_READ_PAGE_TARGET_MISMATCH',
+      targetBinding: {
+        verdict: 'mismatch',
+        requestedTabId: 1,
+        observedTabIds: [2],
+      },
+    });
+    expect(sessionManager.listSessions()[0].steps[0]).toMatchObject({
+      status: 'failed',
+      errorCode: 'read_page_target_mismatch',
+    });
+  });
+
   it('emits a lifecycle artifact for a failed page-unreadable read result', async () => {
     markBridgeReady();
     const failedReadBody = {

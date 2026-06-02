@@ -1540,7 +1540,27 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       const standardTips =
         "Stay on the safe path first: prefer ref-based actions from chrome_read_page or chrome_get_interactive_elements. If the specific element you need is still missing, use chrome_screenshot for visual confirmation and coordinates. Reserve chrome_computer or chrome_javascript for explicit fallback/debug cases only. Also note: 'markedElements' are user-marked elements and have the highest priority when choosing targets.";
 
-      const explicit = await this.tryGetTab(args?.tabId);
+      const hasExplicitTabId =
+        args !== null &&
+        typeof args === 'object' &&
+        Object.prototype.hasOwnProperty.call(args, 'tabId') &&
+        (args as ReadPageParams).tabId !== undefined &&
+        (args as ReadPageParams).tabId !== null;
+      const requestedTabId =
+        hasExplicitTabId && Number.isInteger((args as ReadPageParams).tabId)
+          ? ((args as ReadPageParams).tabId as number)
+          : null;
+      if (hasExplicitTabId && (requestedTabId === null || requestedTabId <= 0)) {
+        return createErrorResponse(
+          `${ERROR_MESSAGES.INVALID_PARAMETERS}: tabId must be a positive integer when provided`,
+        );
+      }
+      const explicit = await this.tryGetTab(requestedTabId ?? undefined);
+      if (requestedTabId !== null && explicit === null) {
+        return createErrorResponse(
+          `${ERROR_MESSAGES.TAB_NOT_FOUND}: requested tabId ${requestedTabId} was not found; read_page will not fall back to the active tab`,
+        );
+      }
       let tab = explicit || (await this.getActiveTabOrThrowInWindow(args?.windowId));
       if (!tab.id)
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');

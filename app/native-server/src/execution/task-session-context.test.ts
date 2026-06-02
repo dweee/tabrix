@@ -226,6 +226,32 @@ describe('TaskSessionContext — redundancy + layer demotion', () => {
     expect(freshDecision.suggestedLayer).toBe('L0+L1+L2');
   });
 
+  it('allows a forceRefresh verification read even after the normal read budget is exhausted', () => {
+    const ctx = new TaskSessionContext({ readBudget: 1 });
+    ctx.noteUrlChange('https://example.test/login', 'login_required');
+    ctx.noteReadPage({
+      layer: 'L0+L1+L2',
+      source: 'dom_json',
+      requestKey: 'auth-flow-read',
+    });
+
+    const normalDecision = ctx.shouldAllowReadPage({
+      requestedLayer: 'L0+L1+L2',
+      requestKey: 'auth-flow-read',
+    });
+    expect(normalDecision.allowed).toBe(false);
+    expect(normalDecision.reason).toBe('read_budget_exceeded');
+
+    const verificationDecision = ctx.shouldAllowReadPage({
+      requestedLayer: 'L0+L1+L2',
+      requestKey: 'auth-flow-read',
+      forceRefresh: true,
+    });
+    expect(verificationDecision.allowed).toBe(true);
+    expect(verificationDecision.reason).toBe('');
+    expect(verificationDecision.suggestedLayer).toBe('L0+L1+L2');
+  });
+
   it('flags L0+L1+L2 → L0+L1 as layer_demotion (still allowed)', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
     ctx.noteUrlChange('https://github.com/octocat/hello/issues', 'github_issues_list');

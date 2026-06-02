@@ -1049,6 +1049,44 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       });
       let rawResultWithEvidence = withFallbackEvidence(postResult.rawResult, apiFallbackEvidence);
       let readPageRecorded = false;
+      if (
+        name === 'chrome_read_page' &&
+        rawResultWithEvidence.isError !== true &&
+        readPositiveInteger(args, 'tabId') !== null
+      ) {
+        const requestedTabId = readPositiveInteger(args, 'tabId')!;
+        const targetBinding = evaluateReadPageTargetBinding(rawResultWithEvidence, requestedTabId);
+        if (targetBinding.verdict === 'mismatch') {
+          const payload = {
+            ok: false,
+            code: 'TABRIX_READ_PAGE_TARGET_MISMATCH',
+            message:
+              'chrome_read_page returned evidence for a different tab than the explicit requested tabId; refusing to treat this as a valid page read.',
+            targetBinding,
+          };
+          const mismatchResult = attachTaskContextEnvelopeToJsonResult(
+            createErrorResult(JSON.stringify(payload)),
+            taskContextAttachment,
+          );
+          sessionManager.completeStep(session.sessionId, step.stepId, {
+            status: 'failed',
+            errorCode: 'read_page_target_mismatch',
+            resultSummary: 'chrome_read_page blocked because returned target did not match tabId',
+            operationLog: {
+              decisionReason: 'read_page_target_mismatch',
+              metadata: {
+                actionOutcome: 'blocked',
+                executionMode: 'runtime_truth_target_binding',
+              },
+            },
+          });
+          sessionManager.finishSession(session.sessionId, {
+            status: 'failed',
+            summary: 'chrome_read_page blocked because returned target did not match tabId',
+          });
+          return mismatchResult;
+        }
+      }
       const recordSuccessfulReadPage = (
         source: 'unknown' | 'dom_region_rows',
         targetRefs?: ReadonlyArray<string> | null,
@@ -1835,6 +1873,88 @@ function readJsonObjectFromCallToolResult(result: CallToolResult): Record<string
   } catch {
     return null;
   }
+}
+
+function evaluateReadPageTargetBinding(
+  result: CallToolResult,
+  requestedTabId: number,
+): {
+  verdict: 'matched' | 'unknown' | 'mismatch';
+  requestedTabId: number;
+  observedTabIds: number[];
+  matchedTabId: number | null;
+  reason: string;
+} {
+  const payload = readJsonObjectFromCallToolResult(result);
+  const observedTabIds = payload ? collectReadPageObservedTabIds(payload) : [];
+  const uniqueObserved = Array.from(new Set(observedTabIds));
+  if (uniqueObserved.length === 0) {
+    return {
+      verdict: 'unknown',
+      requestedTabId,
+      observedTabIds: [],
+      matchedTabId: null,
+      reason: 'read_page response did not expose a target tab id; legacy response tolerated',
+    };
+  }
+  if (uniqueObserved.some((tabId) => tabId !== requestedTabId)) {
+    return {
+      verdict: 'mismatch',
+      requestedTabId,
+      observedTabIds: uniqueObserved,
+      matchedTabId: uniqueObserved.includes(requestedTabId) ? requestedTabId : null,
+      reason:
+        'read_page response included tab-bound evidence that did not match the explicit requested tabId',
+    };
+  }
+  return {
+    verdict: 'matched',
+    requestedTabId,
+    observedTabIds: uniqueObserved,
+    matchedTabId: requestedTabId,
+    reason: 'all observed read_page tab-bound evidence matched the explicit requested tabId',
+  };
+}
+
+function collectReadPageObservedTabIds(payload: Record<string, unknown>): number[] {
+  const ids: number[] = [];
+  const push = (value: number | null) => {
+    if (value !== null) ids.push(value);
+  };
+
+  push(readPositiveInteger(payload, 'tabId'));
+  push(readPositiveInteger(payload, 'currentTabId'));
+  push(readPositiveInteger(payload, 'readTargetTabId'));
+
+  const pageProjection = readObject(payload.pageProjection);
+  push(readPositiveInteger(pageProjection, 'tabId'));
+
+  const ownershipRuntime = readObject(payload.ownershipRuntime);
+  push(readPositiveInteger(ownershipRuntime, 'currentTabId'));
+
+  const compactTab = readObject(
+    readObject(readObject(payload.browserPageObjectCompact)?.facts)?.tab,
+  );
+  push(readPositiveInteger(compactTab, 'tabId'));
+  push(readPositiveInteger(compactTab, 'readTargetTabId'));
+  push(readPositiveInteger(compactTab, 'currentActiveTabId'));
+
+  const artifacts = payload.artifactRefs;
+  if (Array.isArray(artifacts)) {
+    for (const artifact of artifacts) {
+      const ref = readString(readObject(artifact)?.ref);
+      if (!ref) continue;
+      for (const pattern of [/\/tab-(\d+)\//g, /read_page\/(\d+)\//g]) {
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(ref)) !== null) {
+          const parsed = Number(match[1]);
+          if (Number.isInteger(parsed) && parsed > 0) ids.push(parsed);
+        }
+      }
+    }
+  }
+
+  return ids;
 }
 
 function mergeReadPagePayloadMetadata(

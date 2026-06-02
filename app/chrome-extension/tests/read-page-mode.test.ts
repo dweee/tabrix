@@ -149,6 +149,28 @@ describe('read_page mode', () => {
     );
   });
 
+  it('does not fall back to the active tab when an explicit tabId is missing', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue(null);
+    const activeSpy = vi
+      .spyOn(readPageTool as any, 'getActiveTabOrThrowInWindow')
+      .mockResolvedValue({
+        id: 5209,
+        windowId: 1,
+        active: true,
+        status: 'complete',
+        url: 'https://example.com/active-tab',
+        title: 'Wrong active tab',
+      });
+
+    const result = await readPageTool.execute({ tabId: 5208, mode: 'compact' });
+
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain(
+      'requested tabId 5208 was not found',
+    );
+    expect(activeSpy).not.toHaveBeenCalled();
+  });
+
   it('defaults mode to compact', async () => {
     vi.spyOn(browserWorldInventory, 'getBrowserWorldSnapshot').mockResolvedValue({
       summary: {

@@ -618,9 +618,9 @@ export interface ShouldAllowReadPageInput {
    */
   requestKey?: string | null;
   /**
-   * Explicitly bypass cached-read reuse while keeping the normal read budget.
-   * Login collaboration uses this after user-side work such as scanning a QR
-   * code because that change is not caused by a Tabrix MCP action.
+   * Explicitly request a real read instead of reusing cached evidence. Login
+   * collaboration uses this after user-side work such as scanning a QR code
+   * because that change is not caused by a Tabrix MCP action.
    */
   forceRefresh?: boolean;
 }
@@ -1813,7 +1813,8 @@ export class TaskSessionContext {
    * call or a structured warning `CallToolResult`.
    *
    * Decision tree:
-   *   1. Budget exceeded → `allowed=false`, `reason='read_budget_exceeded'`.
+   *   1. Budget exceeded without `forceRefresh` → `allowed=false`,
+   *      `reason='read_budget_exceeded'`.
    *   2. Same URL, same requested layer and same request shape as last read
    *      → allowed but flagged `reason='read_redundant'` (caller may choose
    *      to short-circuit and reuse the cached projection).
@@ -1832,7 +1833,7 @@ export class TaskSessionContext {
     const isFirstReadOnPage = this.lastReadLayer === null;
     const suggestedLayer: ReadPageRequestedLayer = isFirstReadOnPage ? 'L0+L1' : requested;
 
-    if (this.readPageCount >= this.readBudget) {
+    if (this.readPageCount >= this.readBudget && input.forceRefresh !== true) {
       return {
         allowed: false,
         reason: 'read_budget_exceeded',
