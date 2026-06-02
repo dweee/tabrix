@@ -147,6 +147,7 @@ function aiOwnedTab() {
   return {
     openedBy: 'ai',
     canTabrixOperate: true,
+    active: true,
   } as any;
 }
 
@@ -297,6 +298,7 @@ describe('read_page auth artifacts', () => {
       browserWorldTab: {
         openedBy: 'ai',
         canTabrixOperate: true,
+        active: true,
       } as any,
       artifactRefs,
       nowMs: 1000,
@@ -322,6 +324,104 @@ describe('read_page auth artifacts', () => {
         sourceObjectId: 'visual_qr',
       }),
     ]);
+  });
+
+  it('does not return a QR artifact when the auth QR is already expired', async () => {
+    const artifactRefs: any[] = [];
+    const prepareFile = vi.fn();
+    const expiredRegions = authQrRegions().map((region) =>
+      region.regionType === 'qr_code'
+        ? {
+            ...region,
+            state: 'waiting_scan_candidate 二维码已过期 点击刷新',
+          }
+        : region,
+    );
+
+    const status = await buildAuthQrArtifactRefs({
+      includeAuthArtifacts: true,
+      tabId: 9,
+      windowId: 1,
+      pageRegions: expiredRegions,
+      browserWorldTab: {
+        openedBy: 'ai',
+        canTabrixOperate: true,
+        active: true,
+      } as any,
+      artifactRefs,
+      nowMs: 1000,
+      prepareFile,
+    });
+
+    expect(status).toMatchObject({
+      requested: true,
+      status: 'failed',
+      failureReason: 'auth_qr_expired_refresh_required',
+    });
+    expect(artifactRefs).toEqual([]);
+    expect(prepareFile).not.toHaveBeenCalled();
+    expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
+  it('blocks QR artifact extraction until the target tab is active for scan login continuation', async () => {
+    const artifactRefs: any[] = [];
+    const prepareFile = vi.fn();
+
+    const status = await buildAuthQrArtifactRefs({
+      includeAuthArtifacts: true,
+      tabId: 9,
+      windowId: 1,
+      pageRegions: authQrRegions(),
+      browserWorldTab: {
+        openedBy: 'ai',
+        canTabrixOperate: true,
+        active: false,
+      } as any,
+      artifactRefs,
+      nowMs: 1000,
+      prepareFile,
+    });
+
+    expect(status).toMatchObject({
+      requested: true,
+      status: 'blocked',
+      reason: 'target_tab_not_active_for_auth_qr',
+      failureReason: 'switch_target_tab_active_before_qr_login',
+    });
+    expect(artifactRefs).toEqual([]);
+    expect(prepareFile).not.toHaveBeenCalled();
+    expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
+  it('does not run DOM QR probing when no auth surface is observed', async () => {
+    const artifactRefs: any[] = [];
+    const prepareFile = vi.fn();
+
+    const status = await buildAuthQrArtifactRefs({
+      includeAuthArtifacts: true,
+      tabId: 9,
+      windowId: 1,
+      pageRegions: [],
+      browserWorldTab: aiOwnedTab(),
+      artifactRefs,
+      assistantGuidance: {
+        taskKind: 'auth',
+        authPreference: 'qr',
+        requestedObjects: ['qr_image'],
+      },
+      nowMs: 1000,
+      prepareFile,
+    });
+
+    expect(status).toMatchObject({
+      requested: true,
+      status: 'not_applicable',
+      reason: 'auth_scoped_qr_visual_not_found',
+      failureReason: 'auth_qr_auth_surface_not_observed',
+    });
+    expect(artifactRefs).toEqual([]);
+    expect(prepareFile).not.toHaveBeenCalled();
+    expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
   });
 
   it('extracts QR artifact from a targetable auth QR container descendant', async () => {

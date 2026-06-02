@@ -17,6 +17,7 @@ export type NonInterferenceVerdictReason =
   | 'user_confirmed'
   | 'auth_resume_completion_action'
   | 'form_input_continuation_action'
+  | 'auth_collaboration_continuation_action'
   | 'collaboration_requested'
   | 'auth_resume_verification_required'
   | 'task_resume_readiness_not_proven'
@@ -89,6 +90,23 @@ export function evaluateNonInterferencePreflight(input: {
     return allow(input, mode, 'run_owned_tab', targetTabId, targetTabIds, runOwnedTabIds);
   }
   if (authResumeGate?.blocksTaskResume) {
+    if (
+      shouldAllowAuthCollaborationContinuationAction({
+        toolName: input.toolName,
+        args: input.args,
+        taskContext: input.taskContext,
+        targetTabId,
+      })
+    ) {
+      return allow(
+        input,
+        mode,
+        'auth_collaboration_continuation_action',
+        targetTabId,
+        targetTabIds,
+        runOwnedTabIds,
+      );
+    }
     const message = buildTaskResumeReadinessMessage(taskResumeReadiness);
     if (taskResumeReadiness?.nextStep === 'stop_not_proven') {
       return block(
@@ -515,6 +533,17 @@ function shouldAllowAuthResumeCompletionAction(input: {
   if (input.readiness.nextStep !== 'wait_for_user_collaboration') return false;
   if (!input.readiness.evidenceKinds.includes('user_collaboration_required')) return false;
   if (readCandidateActionIntent(input.args) !== 'auth.submit_login') return false;
+  return input.targetTabId !== null && input.taskContext?.isRunOwnedTab(input.targetTabId) === true;
+}
+
+function shouldAllowAuthCollaborationContinuationAction(input: {
+  toolName: string;
+  args: unknown;
+  taskContext: TaskSessionContext | null;
+  targetTabId: number | null;
+}): boolean {
+  if (input.toolName !== TOOL_NAMES.BROWSER.CLICK) return false;
+  if (readCandidateActionIntent(input.args) !== 'auth.refresh_qr') return false;
   return input.targetTabId !== null && input.taskContext?.isRunOwnedTab(input.targetTabId) === true;
 }
 

@@ -32,6 +32,8 @@ const AUTH_RESUME_VERIFICATION_CLAIM_BOUNDARY =
   'resume guidance only; login success still requires a fresh same-tab read_page and postcondition evidence before the original task continues';
 const AUTH_ASSISTANT_HANDOFF_CLAIM_BOUNDARY =
   'assistant handoff is observation evidence for the upstream AI; Tabrix is not choosing the business path or proving login success';
+const AUTH_QR_EXPIRED_PATTERN =
+  /qr[_\s-]*(expired|invalid|refresh|reload)|expired|invalid|timed[ -]?out|refresh_available|refreshable|二维码已过期|二维码过期|已过期|点击刷新|刷新二维码|重新加载|换一张/i;
 
 type AuthQrExtractionMethod =
   | 'img_data_url'
@@ -1271,6 +1273,62 @@ function uniqueSelectors(selectors: Array<string | null | undefined>): string[] 
   return result;
 }
 
+function regionContainsExpiredQrSignal(region: ReadPageRegion): boolean {
+  const haystack = [
+    region.regionType,
+    region.state,
+    region.label,
+    ...region.objects.flatMap((object) => [
+      object.objectType,
+      object.label,
+      object.role,
+      object.reason,
+      object.primaryAction?.actionType,
+      object.primaryAction?.toolArgs?.candidateAction?.intent,
+      object.primaryAction?.toolArgs?.candidateAction?.matchReason,
+    ]),
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .join(' ');
+  return AUTH_QR_EXPIRED_PATTERN.test(haystack);
+}
+
+function hasExpiredAuthQrSignal(pageRegions: ReadPageRegion[] | undefined): boolean {
+  if (!Array.isArray(pageRegions)) return false;
+  return pageRegions.some((region) => {
+    const authScoped =
+      region.regionType === 'qr_code' ||
+      region.regionType === 'modal' ||
+      region.regionType === 'form' ||
+      /auth|login|logged_out|扫码|二维码|登录/i.test(`${region.state} ${region.label ?? ''}`);
+    return authScoped && regionContainsExpiredQrSignal(region);
+  });
+}
+
+function hasObservedAuthSurfaceForQrExtraction(pageRegions: ReadPageRegion[] | undefined): boolean {
+  if (!Array.isArray(pageRegions)) return false;
+  return pageRegions.some((region) => {
+    if (region.regionType === 'modal' || region.regionType === 'form') {
+      return /\bauth|login|sign[ -]?in\b|登录|授权|扫码|二维码/i.test(
+        `${region.regionId} ${region.state} ${region.label ?? ''}`,
+      );
+    }
+    if (region.regionType === 'account') {
+      return /logged_out|auth|login|sign[ -]?in|登录|授权/i.test(
+        `${region.state} ${region.label ?? ''}`,
+      );
+    }
+    if (region.regionType === 'qr_code') {
+      return region.objects.some((object) =>
+        /\bqr|qrcode|scan\b|二维码|扫码/i.test(
+          `${object.objectType ?? ''} ${object.label ?? ''} ${object.reason ?? ''}`,
+        ),
+      );
+    }
+    return false;
+  });
+}
+
 function normalizeDataUrl(input: unknown): string | null {
   const value = typeof input === 'string' ? input.trim() : '';
   if (/^data:image\/(?:png|jpeg|jpg|webp);base64,/i.test(value)) return value;
@@ -1696,8 +1754,48 @@ export async function buildAuthQrArtifactRefs(params: {
   }
 
   try {
-    const candidates = selectAuthQrArtifactCandidates(params.pageRegions, 3);
     const assistantTarget = params.assistantGuidance?.assistantProvidedTarget;
+    const assistantTargetHasSelector =
+      assistantTarget?.purpose === 'auth_qr_image' &&
+      typeof assistantTarget.selector === 'string' &&
+      assistantTarget.selector.trim().length > 0;
+    const candidates = selectAuthQrArtifactCandidates(params.pageRegions, 3);
+    const hasAuthSurface =
+      candidates.length > 0 || hasObservedAuthSurfaceForQrExtraction(params.pageRegions);
+
+    if (!hasAuthSurface && !assistantTargetHasSelector) {
+      return {
+        requested: true,
+        status: 'not_applicable',
+        reason: 'auth_scoped_qr_visual_not_found',
+        ownerType: gate.ownerType,
+        failureReason: 'auth_qr_auth_surface_not_observed',
+        claimBoundary: AUTH_QR_CLAIM_BOUNDARY,
+      };
+    }
+
+    if (hasExpiredAuthQrSignal(params.pageRegions)) {
+      return {
+        requested: true,
+        status: 'failed',
+        reason: 'auth_qr_image_artifact_failed',
+        ownerType: gate.ownerType,
+        failureReason: 'auth_qr_expired_refresh_required',
+        claimBoundary: AUTH_QR_CLAIM_BOUNDARY,
+      };
+    }
+
+    if (params.browserWorldTab?.active !== true) {
+      return {
+        requested: true,
+        status: 'blocked',
+        reason: 'target_tab_not_active_for_auth_qr',
+        ownerType: gate.ownerType,
+        failureReason: 'switch_target_tab_active_before_qr_login',
+        claimBoundary: AUTH_QR_CLAIM_BOUNDARY,
+      };
+    }
+
     const assistantTargetRef =
       assistantTarget?.purpose === 'auth_qr_image' &&
       typeof assistantTarget.targetRef === 'string' &&

@@ -217,6 +217,42 @@ describe('evaluateNonInterferencePreflight', () => {
     expect(verdict.message).toBe(verdict.audit.taskResumeReadiness?.handoffSummary.message);
   });
 
+  it('allows an explicit QR refresh collaboration action while auth resume is blocked', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRunOwnedTab(42);
+    ctx.noteAuthResumeVerification({
+      status: 'fresh_read_required',
+      nextTool: 'chrome_read_page',
+      forceRefreshRequired: true,
+      sameTabRequired: true,
+      targetTabId: 42,
+      postconditionRequired: true,
+      requiredSignals: ['auth_prompt_absent', 'account_region_present'],
+      claimBoundary: 'deterministic auth resume fixture only',
+    });
+
+    const verdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.CLICK,
+      args: {
+        tabId: 42,
+        ref: 'ref_refresh_qr',
+        candidateAction: {
+          actionType: 'click',
+          targetRef: 'ref_refresh_qr',
+          intent: 'auth.refresh_qr',
+        },
+      },
+      taskContext: ctx,
+    });
+
+    expect(verdict.allowed).toBe(true);
+    expect(verdict.audit).toMatchObject({
+      verdict: 'allow',
+      reason: 'auth_collaboration_continuation_action',
+      targetTabId: 42,
+    });
+  });
+
   it('allows explicit cleanup of run-owned tabs while auth resume still requires fresh verification', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
     ctx.noteRunOwnedTab(42);
