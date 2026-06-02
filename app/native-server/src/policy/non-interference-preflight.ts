@@ -81,6 +81,13 @@ export function evaluateNonInterferencePreflight(input: {
     tabId: targetTabId,
     nowMs: Date.now(),
   });
+  if (
+    input.toolName === TOOL_NAMES.BROWSER.CLOSE_TABS &&
+    targetTabIds.length > 0 &&
+    targetTabIds.every((tabId) => input.taskContext?.isRunOwnedTab(tabId))
+  ) {
+    return allow(input, mode, 'run_owned_tab', targetTabId, targetTabIds, runOwnedTabIds);
+  }
   if (authResumeGate?.blocksTaskResume) {
     const message = buildTaskResumeReadinessMessage(taskResumeReadiness);
     if (taskResumeReadiness?.nextStep === 'stop_not_proven') {
