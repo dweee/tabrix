@@ -212,6 +212,46 @@ export interface ReadPageAssistantGuidance {
   claimBoundary?: string;
 }
 
+export interface ReadPageSearchSurfaceControl {
+  kind:
+    | 'search_input'
+    | 'filter_trigger'
+    | 'sort_most_collected'
+    | 'submit_search'
+    | 'unknown'
+    | string;
+  targetRef?: string;
+  candidateActionId?: string;
+  label?: string;
+  confidence: number;
+  actionability?: string;
+  reason: string;
+}
+
+export interface ReadPageSearchResultCard {
+  id: string;
+  title: string;
+  targetRef?: string;
+  candidateActionId?: string;
+  metricText?: string;
+  collectionCountCandidate?: number;
+  confidence: number;
+  reason: string;
+}
+
+export interface ReadPageSearchSurface {
+  status: 'not_detected' | 'detected' | 'ambiguous';
+  queryState?: 'unknown' | 'empty' | 'non_empty';
+  controls: ReadPageSearchSurfaceControl[];
+  resultCards: ReadPageSearchResultCard[];
+  sortEvidence?: {
+    requestedSort?: 'most_collected' | 'unknown' | string;
+    appliedCandidate: boolean;
+    reason: string;
+  };
+  claimBoundary: string;
+}
+
 export interface ReadPageObservedAuthSurfaceCandidate {
   kind:
     | 'auth_surface'
@@ -1235,6 +1275,14 @@ export interface ReadPageExtensionFields {
    * login success, and not permission to operate protected user-owned tabs.
    */
   authCollaboration?: ReadPageAuthCollaboration;
+  /**
+   * Additive search-page observation map for Tabrix-as-eyes.
+   *
+   * This is a privacy-safe summary of visible search controls and candidate
+   * result cards. It is not a business-success proof: sorting and Top-N
+   * selection still require a fresh same-tab readback and AI-side reasoning.
+   */
+  searchSurface?: ReadPageSearchSurface;
   /**
    * Additive echo of closed-enum AI guidance used to prioritize this read.
    *

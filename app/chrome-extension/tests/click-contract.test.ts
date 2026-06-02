@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  buildClickHelperDispatchTimingPolicy,
   buildStructuredClickHelperErrorResult,
   mergeClickSignals,
   observeNewTabUntil,
@@ -247,6 +248,34 @@ describe('mergeClickSignals (pure function)', () => {
 });
 
 describe('buildPostActionReadbackEvidence', () => {
+  it('treats lightweight filter clicks as dispatched actions that still need readback proof', () => {
+    const evidence = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'click',
+      observedOutcome: 'menu_opened',
+      candidateAction: { intent: 'filter.open' },
+    });
+
+    expect(evidence).toMatchObject({
+      status: 'fresh_read_required',
+      expectedEvidence: 'page_or_object_state_changed',
+    });
+  });
+
+  it('does not claim most-collected sorting when the click produced no observable change', () => {
+    const evidence = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'click',
+      observedOutcome: 'no_observed_change',
+      candidateAction: { intent: 'filter.sort_most_collected' },
+    });
+
+    expect(evidence).toMatchObject({
+      status: 'not_proven',
+      expectedEvidence: 'search_results_or_url_query_changed',
+    });
+  });
+
   it('marks a dispatched click with no observed change as not proven', () => {
     const evidence = buildPostActionReadbackEvidence({
       dispatchSucceeded: true,
@@ -300,6 +329,47 @@ describe('buildPostActionReadbackEvidence', () => {
       businessSuccessProven: false,
       readbackSource: 'tool_dispatch_only',
       expectedEvidence: 'form_value_state_changed',
+    });
+  });
+});
+
+describe('buildClickHelperDispatchTimingPolicy', () => {
+  it('caps lightweight filter and QR-refresh clicks so they do not wait for full navigation', () => {
+    expect(
+      buildClickHelperDispatchTimingPolicy({
+        waitForNavigation: true,
+        timeout: 15000,
+        intent: 'filter.sort_most_collected',
+      }),
+    ).toEqual({
+      waitForNavigation: false,
+      timeout: 1000,
+      reason: 'lightweight_post_action_intent',
+    });
+
+    expect(
+      buildClickHelperDispatchTimingPolicy({
+        waitForNavigation: true,
+        timeout: 15000,
+        intent: 'auth.refresh_qr',
+      }),
+    ).toMatchObject({
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+  });
+
+  it('keeps caller timing policy for navigation-like clicks', () => {
+    expect(
+      buildClickHelperDispatchTimingPolicy({
+        waitForNavigation: true,
+        timeout: 15000,
+        intent: 'content.open_detail',
+      }),
+    ).toEqual({
+      waitForNavigation: true,
+      timeout: 15000,
+      reason: 'caller_requested',
     });
   });
 });

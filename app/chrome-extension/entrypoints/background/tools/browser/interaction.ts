@@ -46,6 +46,35 @@ export const NEW_TAB_OBSERVE_DRAIN_VERIFIER_MS =
   CLICK_VERIFIER_READBACK_MAX_MS + NEW_TAB_OBSERVE_VERIFIER_CAP_BUFFER_MS;
 const FILL_PENDING_DOCUMENT_WAIT_MS = 5000;
 const FILL_CONTENT_MESSAGE_RETRY_DELAY_MS = 450;
+const LIGHTWEIGHT_POST_ACTION_TIMEOUT_MS = 1000;
+const LIGHTWEIGHT_POST_ACTION_INTENTS = new Set([
+  'filter.open',
+  'filter.sort_most_collected',
+  'auth.refresh_qr',
+]);
+
+export function buildClickHelperDispatchTimingPolicy(params: {
+  waitForNavigation: boolean;
+  timeout: number;
+  intent?: string | null;
+}): {
+  waitForNavigation: boolean;
+  timeout: number;
+  reason: 'caller_requested' | 'lightweight_post_action_intent';
+} {
+  if (params.intent && LIGHTWEIGHT_POST_ACTION_INTENTS.has(params.intent)) {
+    return {
+      waitForNavigation: false,
+      timeout: Math.min(params.timeout, LIGHTWEIGHT_POST_ACTION_TIMEOUT_MS),
+      reason: 'lightweight_post_action_intent',
+    };
+  }
+  return {
+    waitForNavigation: params.waitForNavigation,
+    timeout: params.timeout,
+    reason: 'caller_requested',
+  };
+}
 
 function firstCandidateCssLocator(
   candidateAction: CandidateActionInput | undefined,
@@ -1214,8 +1243,13 @@ class ClickTool extends BaseBrowserToolExecutor {
       // the page-local helper has finished its own verification window. This
       // prevents a slow `_blank` click from being downgraded to
       // `no_observed_change` just because the background observer stopped first.
-      const authIntent =
+      const candidateIntent =
         typeof args.candidateAction?.intent === 'string' ? args.candidateAction.intent : undefined;
+      const dispatchTiming = buildClickHelperDispatchTimingPolicy({
+        waitForNavigation,
+        timeout,
+        intent: candidateIntent,
+      });
       const resultPromise = this.sendMessageToTab(
         tab.id,
         {
@@ -1223,15 +1257,15 @@ class ClickTool extends BaseBrowserToolExecutor {
           selector: finalSelector,
           coordinates,
           ref: finalRef,
-          waitForNavigation,
-          timeout,
+          waitForNavigation: dispatchTiming.waitForNavigation,
+          timeout: dispatchTiming.timeout,
           double: args.double === true,
           button,
           bubbles,
           cancelable,
           modifiers,
           allowDownloadClick: args.allowDownloadClick === true,
-          intent: authIntent,
+          intent: candidateIntent,
         },
         finalFrameId,
       );

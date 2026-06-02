@@ -67,6 +67,17 @@ function inferCandidateActionIntent(
     return 'auth.accept_terms';
   }
   if (/登录|log\s*in|sign\s*in/i.test(name)) return 'auth.submit_login';
+  if (
+    /二维码.*(刷新|重新)|刷新.*二维码|点击刷新|refresh\s*(qr|code)?|reload\s*(qr|code)?/i.test(name)
+  ) {
+    return 'auth.refresh_qr';
+  }
+  if (/^(筛选|过滤|filter|filters)$/i.test(name)) return 'filter.open';
+  if (
+    /最多收藏|收藏最多|按收藏|收藏数|most\s*(collected|saved|favorited)|top\s*saves/i.test(name)
+  ) {
+    return 'filter.sort_most_collected';
+  }
   if (isSearchActionText(name)) return 'search.submit';
   if (isOpenDetailActionText(name)) return 'content.open_detail';
   return undefined;
@@ -145,7 +156,7 @@ export function buildCandidateActions(
   const clickRoles = new Set(['button', 'link', 'menuitem', 'tab', 'option', 'checkbox', 'switch']);
   const fillRoles = new Set(['textbox', 'searchbox', 'combobox']);
   const primaryKeywords =
-    /(submit|save|continue|next|confirm|login|sign in|search|checkout|send code|get code|request code|提交|保存|继续|下一步|确认|登录|搜索|获取验证码|发送验证码|重新发送|同意|协议)/i;
+    /(submit|save|continue|next|confirm|login|sign in|search|checkout|send code|get code|request code|filter|refresh|reload|提交|保存|继续|下一步|确认|登录|搜索|筛选|过滤|最多收藏|收藏最多|刷新|获取验证码|发送验证码|重新发送|同意|协议)/i;
 
   const seeds: CandidateActionSeed[] = [];
   const prioritizedElements = [...interactiveElements]

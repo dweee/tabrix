@@ -129,6 +129,38 @@ describe('read_page candidate action intents', () => {
     );
   });
 
+  it('marks filter and most-collected controls with lightweight filter intents', () => {
+    const actions = buildCandidateActions(
+      [
+        element({ ref: 'ref_filter', role: 'button', name: '筛选' }),
+        element({ ref: 'ref_sort_saves', role: 'option', name: '最多收藏' }),
+      ],
+      [],
+    );
+
+    expect(actions.find((action) => action.targetRef === 'ref_filter')).toMatchObject({
+      actionType: 'click',
+      intent: 'filter.open',
+    });
+    expect(actions.find((action) => action.targetRef === 'ref_sort_saves')).toMatchObject({
+      actionType: 'click',
+      intent: 'filter.sort_most_collected',
+    });
+  });
+
+  it('marks QR refresh controls without treating them as OTP or login submit', () => {
+    const actions = buildCandidateActions(
+      [element({ ref: 'ref_qr_refresh', role: 'button', name: '二维码已过期 点击刷新' })],
+      [],
+    );
+
+    expect(actions[0]).toMatchObject({
+      actionType: 'click',
+      intent: 'auth.refresh_qr',
+      targetRef: 'ref_qr_refresh',
+    });
+  });
+
   it('does not turn placeholder-only action words into clickable search submit intent', () => {
     const actions = buildCandidateActions(
       [

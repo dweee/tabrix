@@ -62,6 +62,10 @@ function expectedBusinessEvidenceForIntent(
       return 'form_value_state_changed';
     case 'search.submit':
       return 'search_results_or_url_query_changed';
+    case 'filter.open':
+      return 'page_or_object_state_changed';
+    case 'filter.sort_most_collected':
+      return 'search_results_or_url_query_changed';
     case 'content.open_detail':
       return 'detail_region_or_content_transition';
     default:

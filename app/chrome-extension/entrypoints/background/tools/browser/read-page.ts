@@ -41,6 +41,7 @@ import { inferSchemeGuard } from './read-page-scheme-guard';
 import { summarizePageContent } from './read-page-content-summary';
 import { buildInteractiveElements } from './read-page-interactive-elements';
 import { buildCandidateActions, type CandidateActionSeed } from './read-page-candidate-actions';
+import { buildSearchSurface } from './read-page-search-surface';
 import { buildArtifactRefs } from './read-page-artifact-refs';
 import { buildFallbackRefMap, formatElementsAsPageContent } from './read-page-fallback-format';
 import { buildExtensionLayer, buildStableSnapshotLayer } from './read-page-snapshot-builders';
@@ -1006,6 +1007,12 @@ async function buildModeOutput(params: {
     interactiveElements,
     candidateActions,
     assistantGuidance: params.assistantGuidance,
+  });
+  sharedPayload.searchSurface = buildSearchSurface({
+    assistantGuidance: params.assistantGuidance,
+    interactiveElements,
+    candidateActions,
+    visibleRegionRows,
   });
 
   return buildReadPageModeResult({
