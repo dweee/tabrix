@@ -773,6 +773,11 @@ describe('read_page mode', () => {
       currentTabId: 5203,
       isActive: false,
     });
+    expect(payload.browserPageObjectCompact.facts.window).toMatchObject({
+      objectKind: 'BrowserWindowObject',
+      isFocused: true,
+      isCurrentWindowFocused: true,
+    });
     expect(payload.browserPageObjectCompact.facts.visualReliability).toMatchObject({
       objectKind: 'BrowserVisualReliability',
       isCurrentWindowFocused: true,
@@ -835,6 +840,7 @@ describe('read_page mode', () => {
       currentWindowId: 77,
       currentWindowState: 'minimized',
       isFocused: false,
+      isCurrentWindowFocused: false,
       isMinimized: true,
       width: 900,
       height: 640,
