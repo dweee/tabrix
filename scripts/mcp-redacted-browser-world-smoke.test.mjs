@@ -30,6 +30,7 @@ import {
   buildContentPostActionLifecycleProof,
   buildFeedbackPostActionLifecycleProof,
   buildReadPageMatrixTargetResult,
+  buildRuntimeTruthContractAlignmentSummary,
   buildWindowStateDriftSummary,
   buildWindowStateMutationProof,
   extractJsonObject,
@@ -2707,6 +2708,8 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
         currentTabLastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
         currentTabCanTabrixOperate: true,
         currentTabRuntimeStateSource: 'browser_world_inventory',
+        protectedScopeVerdict: 'not_protected',
+        cleanupEligibility: 'eligible',
         browserWorldObjectChangeSummary:
           'Object change summary includes https://private.example.test/dashboard and Private Dashboard.',
         browserWorldActionableObjectChangeSummary:
@@ -2728,6 +2731,14 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
         facts: {
           window: {
             currentWindowId: 7,
+            readTargetTabId: 42,
+            currentActiveTabId: 42,
+            currentActiveTabIdAliasOf: 'readTargetTabId',
+            currentActiveTabIdClaimBoundary:
+              'currentActiveTabId is a legacy compatibility alias of readTargetTabId.',
+            browserActiveTabId: 42,
+            browserActiveTabIdKnown: true,
+            isReadTargetBrowserActiveTab: true,
             currentWindowState: 'normal',
             isCurrentWindowFocused: true,
           },
@@ -2737,8 +2748,12 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
             browserActiveTabId: 42,
             currentTabUrl: 'https://private.example.test/dashboard',
             currentTabTitle: 'Private Dashboard',
+            ownerType: 'run_owned',
             openedBy: 'ai',
             openedBySource: 'ai_tool',
+            canTabrixOperate: true,
+            cleanupEligibility: 'eligible',
+            protectedScopeVerdict: 'not_protected',
             lastAiOperation: 'read_page',
             lastAiOperationConfidence: 0.95,
             lastAiOperationReason: 'marked_by_tabrix_tool_execution:read_page',
@@ -2997,6 +3012,10 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     currentWindowStateKnown: true,
     currentTabStatusKnown: true,
     currentTabOperabilityKnown: true,
+    currentActiveTabIdCompatibilityBoundaryPresent: true,
+    currentActiveTabIdAliasMatchesReadTarget: true,
+    runtimeTruthMinimumFactsPresent: true,
+    runtimeTruthProofStatus: 'proven',
     ownershipRuntimeAiOperationEvidencePresent: true,
     compactAiOperationEvidencePresent: true,
     currentTabAiOperationEvidencePresent: true,
@@ -3087,9 +3106,16 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
   assert.deepEqual(summary.compact.safeTabFacts, {
     readTargetTabId: 42,
     currentActiveTabId: 42,
+    currentActiveTabIdAliasOf: 'readTargetTabId',
+    currentActiveTabIdClaimBoundaryPresent: true,
     browserActiveTabId: 42,
+    isReadTargetBrowserActiveTab: true,
+    ownerType: 'run_owned',
     openedBy: 'ai',
     openedBySource: 'ai_tool',
+    canTabrixOperate: true,
+    cleanupEligibility: 'eligible',
+    protectedScopeVerdict: 'not_protected',
     lastAiOperation: 'read_page',
     lastAiOperationConfidence: 0.95,
     lastAiOperationReasonPresent: true,
@@ -3113,6 +3139,45 @@ test('buildRedactedReadPageAlignmentSummary omits URL, title, and page text fiel
     actionReadinessSummaryPresent: true,
     actionReadinessClaimBoundaryPresent: true,
   });
+  assert.deepEqual(summary.runtimeTruth, {
+    proofStatus: 'proven',
+    missingFacts: [],
+    identity: {
+      readTargetTabId: 42,
+      browserActiveTabId: 42,
+      currentActiveTabId: 42,
+      currentActiveTabIdAliasOf: 'readTargetTabId',
+      currentActiveTabIdClaimBoundaryPresent: true,
+      currentActiveTabIdAliasMatchesReadTarget: true,
+      currentActiveTabIdIsBrowserActiveProof: false,
+      isReadTargetBrowserActiveTab: true,
+      targetTabMatchesReadPage: true,
+      claimBoundary:
+        'readTargetTabId is the tab read by this read_page call; browserActiveTabId is the browser foreground tab when known; currentActiveTabId is only a legacy alias of readTargetTabId.',
+    },
+    windowFocus: {
+      currentWindowId: 7,
+      isCurrentWindowFocused: true,
+      currentWindowState: 'normal',
+    },
+    ownershipOperabilityCleanup: {
+      ownerType: 'run_owned',
+      openedBy: 'ai',
+      openedBySource: 'ai_tool',
+      canTabrixOperate: true,
+      cleanupEligibility: 'eligible',
+      protectedScopeVerdict: 'not_protected',
+      runtimeStateSource: 'browser_world_inventory',
+      minimumFactsPresent: true,
+    },
+    operationTarget: {
+      role: 'read_target_browser_active_tab',
+      readiness: 'ready_for_page_level_check',
+      canProceedToPageLevelCheck: true,
+      operationTargetBriefPresent: true,
+      actionReadinessBriefPresent: true,
+    },
+  });
 });
 
 test('buildReadPageMatrixTargetResult accepts background read targets when object evidence is complete', () => {
@@ -3130,6 +3195,19 @@ test('buildReadPageMatrixTargetResult accepts background read targets when objec
         },
         compact: {
           safeTabFacts: {
+            readTargetTabId: 20,
+            currentActiveTabId: 20,
+            currentActiveTabIdAliasOf: 'readTargetTabId',
+            currentActiveTabIdClaimBoundaryPresent: true,
+            browserActiveTabId: 10,
+            isReadTargetBrowserActiveTab: false,
+            ownerType: 'run_owned',
+            openedBy: 'ai',
+            openedBySource: 'ai_tool',
+            canTabrixOperate: true,
+            cleanupEligibility: 'eligible',
+            protectedScopeVerdict: 'not_protected',
+            runtimeStateSource: 'browser_world_inventory',
             operationTargetRole: 'read_target_background_tab',
             operationTargetBasis: 'read_target_differs_from_browser_active_tab',
             operationTargetCanTabrixOperate: true,
@@ -3157,6 +3235,16 @@ test('buildReadPageMatrixTargetResult accepts background read targets when objec
           currentTabCanTabrixOperate: true,
           currentTabLastAiOperation: 'read_page',
         },
+        runtimeTruth: {
+          proofStatus: 'proven',
+          identity: {
+            currentActiveTabIdAliasMatchesReadTarget: true,
+            currentActiveTabIdClaimBoundaryPresent: true,
+          },
+          ownershipOperabilityCleanup: {
+            minimumFactsPresent: true,
+          },
+        },
       },
       redactedBrowserWorldAfterRead: {
         targetTab: { wasFound: true },
@@ -3183,6 +3271,18 @@ test('buildReadPageMatrixTargetResult accepts background read targets when objec
     target.browserWorldAfterRead.relationToBrowserActiveTab,
     'latest_ai_operated_background_tab',
   );
+  assert.deepEqual(target.runtimeTruthContract, {
+    proofStatus: 'proven',
+    operationTargetBriefPresent: true,
+    actionReadinessBriefPresent: true,
+    operationTargetRelationConsistent: true,
+    ownershipOperabilityCleanupPresent: true,
+    currentActiveTabIdAliasBoundaryPresent: true,
+    currentActiveTabIdAliasMatchesReadTarget: true,
+    browserWorldRelation: 'latest_ai_operated_background_tab',
+    claimBoundary:
+      'Runtime truth contract alignment is redacted proof that read_page compact, BrowserWorld relation, ownership, operability, cleanup, and legacy active-tab alias boundaries are mutually present. It is not proof of page content correctness, task success, login state, API/CDP reuse, or release readiness.',
+  });
   assert.deepEqual(target.readPageOperationTarget, {
     role: 'read_target_background_tab',
     basis: 'read_target_differs_from_browser_active_tab',
@@ -3201,6 +3301,63 @@ test('buildReadPageMatrixTargetResult accepts background read targets when objec
     actionReadinessBriefPresent: true,
   });
   assert.equal(target.passed, true);
+});
+
+test('buildRuntimeTruthContractAlignmentSummary fails when ownership or alias facts are missing', () => {
+  const summary = buildRuntimeTruthContractAlignmentSummary(
+    {
+      alignment: {
+        operationTargetBriefPresent: true,
+        actionReadinessBriefPresent: true,
+      },
+      compact: {
+        safeTabFacts: {
+          operationTargetRole: 'read_target_browser_active_tab',
+          operationTargetBasis: 'read_target_matches_browser_active_tab',
+          operationTargetCanTabrixOperate: true,
+          operationTargetOperabilityReason: 'regular_web_page',
+          shouldReselectBeforeAction: false,
+          nextRequiredCheck: 'page_level_content_or_postcondition_check',
+          operationTargetSummaryPresent: true,
+          operationTargetClaimBoundaryPresent: true,
+          actionReadiness: 'ready_for_page_level_check',
+          canProceedToPageLevelCheck: true,
+          requiredBeforeAction: 'page_level_content_or_postcondition_check',
+          actionReadinessSummaryPresent: true,
+          actionReadinessClaimBoundaryPresent: true,
+          openedBy: 'ai',
+          openedBySource: 'ai_tool',
+          canTabrixOperate: true,
+          runtimeStateSource: 'browser_world_inventory',
+        },
+      },
+      runtimeTruth: {
+        identity: {
+          currentActiveTabIdAliasMatchesReadTarget: null,
+          currentActiveTabIdClaimBoundaryPresent: false,
+        },
+        ownershipOperabilityCleanup: {
+          minimumFactsPresent: false,
+        },
+      },
+    },
+    {
+      aiOperationState: { relationToBrowserActiveTab: 'same_as_browser_active' },
+    },
+  );
+
+  assert.deepEqual(summary, {
+    proofStatus: 'not_proven',
+    operationTargetBriefPresent: true,
+    actionReadinessBriefPresent: true,
+    operationTargetRelationConsistent: true,
+    ownershipOperabilityCleanupPresent: false,
+    currentActiveTabIdAliasBoundaryPresent: false,
+    currentActiveTabIdAliasMatchesReadTarget: false,
+    browserWorldRelation: 'same_as_browser_active',
+    claimBoundary:
+      'Runtime truth contract alignment is redacted proof that read_page compact, BrowserWorld relation, ownership, operability, cleanup, and legacy active-tab alias boundaries are mutually present. It is not proof of page content correctness, task success, login state, API/CDP reuse, or release readiness.',
+  });
 });
 
 test('buildBackgroundReadTargetFocusProof proves foreground remains active without exposing ids', () => {

@@ -1107,6 +1107,12 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
     compactFacts.window && typeof compactFacts.window === 'object' ? compactFacts.window : {};
   const compactTabFacts =
     compactFacts.tab && typeof compactFacts.tab === 'object' ? compactFacts.tab : {};
+  const runtimeTruth = buildReadPageRuntimeTruthRedaction({
+    ownershipRuntime,
+    compactWindowFacts,
+    compactTabFacts,
+    targetTabId,
+  });
   const ownershipRuntimeAiOperationEvidencePresent =
     typeof ownershipRuntime?.currentTabLastAiOperation === 'string' &&
     typeof ownershipRuntime?.currentTabLastAiOperationConfidence === 'number' &&
@@ -1231,15 +1237,31 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       ),
       safeWindowFacts: {
         currentWindowId: compactWindowFacts.currentWindowId ?? null,
+        readTargetTabId: runtimeTruth.identity.readTargetTabId,
+        currentActiveTabId: runtimeTruth.identity.currentActiveTabId,
+        currentActiveTabIdAliasOf: runtimeTruth.identity.currentActiveTabIdAliasOf,
+        currentActiveTabIdClaimBoundaryPresent:
+          runtimeTruth.identity.currentActiveTabIdClaimBoundaryPresent,
+        browserActiveTabId: runtimeTruth.identity.browserActiveTabId,
+        browserActiveTabIdKnown: compactWindowFacts.browserActiveTabIdKnown ?? null,
+        isReadTargetBrowserActiveTab: runtimeTruth.identity.isReadTargetBrowserActiveTab,
         currentWindowState: compactWindowFacts.currentWindowState ?? null,
         isCurrentWindowFocused: compactWindowFacts.isCurrentWindowFocused ?? null,
       },
       safeTabFacts: {
-        readTargetTabId: compactTabFacts.readTargetTabId ?? compactTabFacts.currentTabId ?? null,
-        currentActiveTabId: compactTabFacts.currentActiveTabId ?? null,
-        browserActiveTabId: compactTabFacts.browserActiveTabId ?? null,
-        openedBy: compactTabFacts.openedBy ?? null,
-        openedBySource: compactTabFacts.openedBySource ?? null,
+        readTargetTabId: runtimeTruth.identity.readTargetTabId,
+        currentActiveTabId: runtimeTruth.identity.currentActiveTabId,
+        currentActiveTabIdAliasOf: runtimeTruth.identity.currentActiveTabIdAliasOf,
+        currentActiveTabIdClaimBoundaryPresent:
+          runtimeTruth.identity.currentActiveTabIdClaimBoundaryPresent,
+        browserActiveTabId: runtimeTruth.identity.browserActiveTabId,
+        isReadTargetBrowserActiveTab: runtimeTruth.identity.isReadTargetBrowserActiveTab,
+        ownerType: runtimeTruth.ownershipOperabilityCleanup.ownerType,
+        openedBy: runtimeTruth.ownershipOperabilityCleanup.openedBy,
+        openedBySource: runtimeTruth.ownershipOperabilityCleanup.openedBySource,
+        canTabrixOperate: runtimeTruth.ownershipOperabilityCleanup.canTabrixOperate,
+        cleanupEligibility: runtimeTruth.ownershipOperabilityCleanup.cleanupEligibility,
+        protectedScopeVerdict: runtimeTruth.ownershipOperabilityCleanup.protectedScopeVerdict,
         lastAiOperation: compactTabFacts.lastAiOperation ?? null,
         lastAiOperationConfidence: compactTabFacts.lastAiOperationConfidence ?? null,
         lastAiOperationReasonPresent: typeof compactTabFacts.lastAiOperationReason === 'string',
@@ -1252,7 +1274,7 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
         browserWorldRoutingDecisionSummaryPresent:
           typeof compactTabFacts.browserWorldRoutingDecisionSummary === 'string',
         isRunOwnedByTask: compactTabFacts.isRunOwnedByTask ?? null,
-        runtimeStateSource: compactTabFacts.runtimeStateSource ?? null,
+        runtimeStateSource: runtimeTruth.ownershipOperabilityCleanup.runtimeStateSource,
         operationTargetRole:
           typeof compactTabFacts.operationTargetRole === 'string'
             ? compactTabFacts.operationTargetRole
@@ -1297,6 +1319,7 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
           typeof compactTabFacts.actionReadinessClaimBoundary === 'string',
       },
     },
+    runtimeTruth,
     frameRuntime: {
       frameContextPresent: Boolean(frameContext),
       frameScopeKnown:
@@ -1421,6 +1444,13 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
       currentWindowStateKnown: typeof ownershipRuntime?.currentWindowState === 'string',
       currentTabStatusKnown: typeof ownershipRuntime?.currentTabStatus === 'string',
       currentTabOperabilityKnown: typeof ownershipRuntime?.currentTabCanTabrixOperate === 'boolean',
+      currentActiveTabIdCompatibilityBoundaryPresent:
+        runtimeTruth.identity.currentActiveTabIdClaimBoundaryPresent === true,
+      currentActiveTabIdAliasMatchesReadTarget:
+        runtimeTruth.identity.currentActiveTabIdAliasMatchesReadTarget,
+      runtimeTruthMinimumFactsPresent:
+        runtimeTruth.ownershipOperabilityCleanup.minimumFactsPresent === true,
+      runtimeTruthProofStatus: runtimeTruth.proofStatus,
       ownershipRuntimeAiOperationEvidencePresent,
       compactAiOperationEvidencePresent,
       currentTabAiOperationEvidencePresent:
@@ -1470,6 +1500,153 @@ export function buildRedactedReadPageAlignmentSummary(payload, targetTabId = nul
     claimBoundary:
       'Redacted read_page alignment summary only. It proves candidate BrowserPageObject/runtime alignment for this public read snapshot, not page understanding correctness, login/logout completion, API/CDP reuse, release readiness, or product delivery grade.',
   };
+}
+
+export function buildReadPageRuntimeTruthRedaction({
+  ownershipRuntime,
+  compactWindowFacts,
+  compactTabFacts,
+  targetTabId = null,
+}) {
+  const readTargetTabId =
+    readNumber(compactTabFacts?.readTargetTabId) ??
+    readNumber(compactTabFacts?.currentTabId) ??
+    readNumber(compactWindowFacts?.readTargetTabId) ??
+    readNumber(ownershipRuntime?.currentTabId);
+  const currentActiveTabId =
+    readNumber(compactWindowFacts?.currentActiveTabId) ??
+    readNumber(compactTabFacts?.currentActiveTabId);
+  const browserActiveTabId =
+    readNumber(compactWindowFacts?.browserActiveTabId) ??
+    readNumber(compactTabFacts?.browserActiveTabId) ??
+    readNumber(ownershipRuntime?.browserActiveTabId);
+  const currentActiveTabIdAliasOf =
+    typeof compactWindowFacts?.currentActiveTabIdAliasOf === 'string'
+      ? compactWindowFacts.currentActiveTabIdAliasOf
+      : null;
+  const currentActiveTabIdClaimBoundaryPresent =
+    typeof compactWindowFacts?.currentActiveTabIdClaimBoundary === 'string';
+  const ownerType =
+    readString(compactTabFacts?.ownerType) ?? readString(ownershipRuntime?.currentOwnerType);
+  const openedBy =
+    readString(compactTabFacts?.openedBy) ?? readString(ownershipRuntime?.currentTabOpenedBy);
+  const openedBySource =
+    readString(compactTabFacts?.openedBySource) ??
+    readString(ownershipRuntime?.currentTabOpenedBySource);
+  const canTabrixOperate =
+    readBoolean(compactTabFacts?.canTabrixOperate) ??
+    readBoolean(ownershipRuntime?.currentTabCanTabrixOperate);
+  const cleanupEligibility =
+    readString(compactTabFacts?.cleanupEligibility) ??
+    readString(ownershipRuntime?.cleanupEligibility);
+  const protectedScopeVerdict =
+    readString(compactTabFacts?.protectedScopeVerdict) ??
+    readString(ownershipRuntime?.protectedScopeVerdict);
+  const runtimeStateSource =
+    readString(compactTabFacts?.runtimeStateSource) ??
+    readString(ownershipRuntime?.currentTabRuntimeStateSource);
+  const requiredFacts = {
+    ownerType,
+    openedBy,
+    openedBySource,
+    canTabrixOperate,
+    cleanupEligibility,
+    protectedScopeVerdict,
+    runtimeStateSource,
+  };
+  const missingFacts = Object.entries(requiredFacts)
+    .filter(([, value]) => value === null || value === undefined)
+    .map(([key]) => key);
+  const operationTargetBriefPresent =
+    typeof compactTabFacts?.operationTargetRole === 'string' &&
+    typeof compactTabFacts?.operationTargetBasis === 'string' &&
+    typeof compactTabFacts?.operationTargetCanTabrixOperate === 'boolean' &&
+    typeof compactTabFacts?.operationTargetOperabilityReason === 'string' &&
+    typeof compactTabFacts?.shouldReselectBeforeAction === 'boolean' &&
+    typeof compactTabFacts?.nextRequiredCheck === 'string' &&
+    typeof compactTabFacts?.operationTargetSummary === 'string' &&
+    typeof compactTabFacts?.operationTargetClaimBoundary === 'string';
+  const actionReadinessBriefPresent =
+    typeof compactTabFacts?.actionReadiness === 'string' &&
+    typeof compactTabFacts?.canProceedToPageLevelCheck === 'boolean' &&
+    typeof compactTabFacts?.requiredBeforeAction === 'string' &&
+    typeof compactTabFacts?.actionReadinessSummary === 'string' &&
+    typeof compactTabFacts?.actionReadinessClaimBoundary === 'string';
+  const currentActiveTabIdAliasMatchesReadTarget =
+    Number.isInteger(currentActiveTabId) && Number.isInteger(readTargetTabId)
+      ? currentActiveTabId === readTargetTabId
+      : null;
+  const targetTabMatchesReadPage =
+    Number.isInteger(targetTabId) && Number.isInteger(readTargetTabId)
+      ? readTargetTabId === targetTabId
+      : null;
+  const proofSatisfied =
+    Number.isInteger(readTargetTabId) &&
+    currentActiveTabIdAliasMatchesReadTarget === true &&
+    currentActiveTabIdAliasOf === 'readTargetTabId' &&
+    currentActiveTabIdClaimBoundaryPresent === true &&
+    missingFacts.length === 0 &&
+    operationTargetBriefPresent === true &&
+    actionReadinessBriefPresent === true;
+
+  return {
+    proofStatus: proofSatisfied ? 'proven' : 'not_proven',
+    missingFacts,
+    identity: {
+      readTargetTabId,
+      browserActiveTabId,
+      currentActiveTabId,
+      currentActiveTabIdAliasOf,
+      currentActiveTabIdClaimBoundaryPresent,
+      currentActiveTabIdAliasMatchesReadTarget,
+      currentActiveTabIdIsBrowserActiveProof: false,
+      isReadTargetBrowserActiveTab:
+        readBoolean(compactWindowFacts?.isReadTargetBrowserActiveTab) ??
+        readBoolean(compactTabFacts?.isReadTargetBrowserActiveTab) ??
+        readBoolean(ownershipRuntime?.isReadTargetBrowserActiveTab),
+      targetTabMatchesReadPage,
+      claimBoundary:
+        'readTargetTabId is the tab read by this read_page call; browserActiveTabId is the browser foreground tab when known; currentActiveTabId is only a legacy alias of readTargetTabId.',
+    },
+    windowFocus: {
+      currentWindowId: readNumber(compactWindowFacts?.currentWindowId),
+      isCurrentWindowFocused:
+        readBoolean(compactWindowFacts?.isCurrentWindowFocused) ??
+        readBoolean(ownershipRuntime?.isCurrentWindowFocused),
+      currentWindowState:
+        readString(compactWindowFacts?.currentWindowState) ??
+        readString(ownershipRuntime?.currentWindowState),
+    },
+    ownershipOperabilityCleanup: {
+      ownerType,
+      openedBy,
+      openedBySource,
+      canTabrixOperate,
+      cleanupEligibility,
+      protectedScopeVerdict,
+      runtimeStateSource,
+      minimumFactsPresent: missingFacts.length === 0,
+    },
+    operationTarget: {
+      role: readString(compactTabFacts?.operationTargetRole),
+      readiness: readString(compactTabFacts?.actionReadiness),
+      canProceedToPageLevelCheck: readBoolean(compactTabFacts?.canProceedToPageLevelCheck),
+      operationTargetBriefPresent,
+      actionReadinessBriefPresent,
+    },
+  };
+}
+
+function readNumber(value) {
+  return Number.isInteger(value) ? value : null;
+}
+
+function readString(value) {
+  return typeof value === 'string' ? value : null;
+}
+
+function readBoolean(value) {
+  return typeof value === 'boolean' ? value : null;
 }
 
 function callCliJson(cliPath, args, timeoutMs) {
@@ -4737,31 +4914,10 @@ function runPageOpenerOwnershipSmoke(cliPath, smokeUrl, args) {
 
 export function buildReadPageMatrixTargetResult(result, targetIndex) {
   const readPageOperationTarget = result.redactedReadPage?.compact?.safeTabFacts ?? {};
-  const browserWorldRelation =
-    result.redactedBrowserWorldAfterRead?.aiOperationState?.relationToBrowserActiveTab ?? null;
-  const readPageOperationTargetBriefPresent =
-    result.redactedReadPage?.alignment?.operationTargetBriefPresent === true &&
-    typeof readPageOperationTarget.operationTargetRole === 'string' &&
-    typeof readPageOperationTarget.operationTargetBasis === 'string' &&
-    typeof readPageOperationTarget.operationTargetCanTabrixOperate === 'boolean' &&
-    typeof readPageOperationTarget.operationTargetOperabilityReason === 'string' &&
-    typeof readPageOperationTarget.shouldReselectBeforeAction === 'boolean' &&
-    typeof readPageOperationTarget.nextRequiredCheck === 'string' &&
-    readPageOperationTarget.operationTargetSummaryPresent === true &&
-    readPageOperationTarget.operationTargetClaimBoundaryPresent === true;
-  const readPageActionReadinessBriefPresent =
-    result.redactedReadPage?.alignment?.actionReadinessBriefPresent === true &&
-    typeof readPageOperationTarget.actionReadiness === 'string' &&
-    typeof readPageOperationTarget.canProceedToPageLevelCheck === 'boolean' &&
-    typeof readPageOperationTarget.requiredBeforeAction === 'string' &&
-    readPageOperationTarget.actionReadinessSummaryPresent === true &&
-    readPageOperationTarget.actionReadinessClaimBoundaryPresent === true;
-  const operationTargetRelationConsistent =
-    readPageOperationTarget.operationTargetRole === 'read_target_browser_active_tab'
-      ? browserWorldRelation === 'same_as_browser_active'
-      : readPageOperationTarget.operationTargetRole === 'read_target_background_tab'
-        ? browserWorldRelation === 'latest_ai_operated_background_tab'
-        : false;
+  const runtimeTruthContract = buildRuntimeTruthContractAlignmentSummary(
+    result.redactedReadPage,
+    result.redactedBrowserWorldAfterRead,
+  );
   return {
     targetIndex,
     openedPublicTestTab: result.openedPublicTestTab,
@@ -4779,15 +4935,17 @@ export function buildReadPageMatrixTargetResult(result, targetIndex) {
       nextRequiredCheck: readPageOperationTarget.nextRequiredCheck ?? null,
       summaryPresent: readPageOperationTarget.operationTargetSummaryPresent === true,
       claimBoundaryPresent: readPageOperationTarget.operationTargetClaimBoundaryPresent === true,
-      relationConsistentWithBrowserWorld: operationTargetRelationConsistent,
+      relationConsistentWithBrowserWorld:
+        runtimeTruthContract.operationTargetRelationConsistent,
       actionReadiness: readPageOperationTarget.actionReadiness ?? null,
       canProceedToPageLevelCheck: readPageOperationTarget.canProceedToPageLevelCheck ?? null,
       requiredBeforeAction: readPageOperationTarget.requiredBeforeAction ?? null,
       actionReadinessSummaryPresent: readPageOperationTarget.actionReadinessSummaryPresent === true,
       actionReadinessClaimBoundaryPresent:
         readPageOperationTarget.actionReadinessClaimBoundaryPresent === true,
-      actionReadinessBriefPresent: readPageActionReadinessBriefPresent,
+      actionReadinessBriefPresent: runtimeTruthContract.actionReadinessBriefPresent,
     },
+    runtimeTruthContract,
     browserWorldAfterRead: {
       targetTabFound: result.redactedBrowserWorldAfterRead.targetTab?.wasFound ?? false,
       latestAiOperation:
@@ -4810,12 +4968,80 @@ export function buildReadPageMatrixTargetResult(result, targetIndex) {
       result.closeSucceeded === true &&
       result.cleanupPassed === true &&
       result.matrixAlignmentPassed === true &&
-      readPageOperationTargetBriefPresent === true &&
-      readPageActionReadinessBriefPresent === true &&
-      operationTargetRelationConsistent === true &&
+      runtimeTruthContract.operationTargetBriefPresent === true &&
+      runtimeTruthContract.actionReadinessBriefPresent === true &&
+      runtimeTruthContract.operationTargetRelationConsistent === true &&
+      runtimeTruthContract.ownershipOperabilityCleanupPresent === true &&
+      runtimeTruthContract.currentActiveTabIdAliasBoundaryPresent === true &&
+      runtimeTruthContract.currentActiveTabIdAliasMatchesReadTarget === true &&
       result.redactedBrowserWorldAfterRead.targetTab?.wasFound === true &&
       result.redactedBrowserWorldAfterRead.compactSummaryBounded === true &&
       result.redactedBrowserWorldAfterRead.retentionWithinLimit === true,
+  };
+}
+
+export function buildRuntimeTruthContractAlignmentSummary(redactedReadPage, redactedBrowserWorld) {
+  const safeTabFacts = redactedReadPage?.compact?.safeTabFacts ?? {};
+  const runtimeTruth = redactedReadPage?.runtimeTruth ?? null;
+  const browserWorldRelation =
+    redactedBrowserWorld?.aiOperationState?.relationToBrowserActiveTab ?? null;
+  const operationTargetBriefPresent =
+    redactedReadPage?.alignment?.operationTargetBriefPresent === true &&
+    typeof safeTabFacts.operationTargetRole === 'string' &&
+    typeof safeTabFacts.operationTargetBasis === 'string' &&
+    typeof safeTabFacts.operationTargetCanTabrixOperate === 'boolean' &&
+    typeof safeTabFacts.operationTargetOperabilityReason === 'string' &&
+    typeof safeTabFacts.shouldReselectBeforeAction === 'boolean' &&
+    typeof safeTabFacts.nextRequiredCheck === 'string' &&
+    safeTabFacts.operationTargetSummaryPresent === true &&
+    safeTabFacts.operationTargetClaimBoundaryPresent === true;
+  const actionReadinessBriefPresent =
+    redactedReadPage?.alignment?.actionReadinessBriefPresent === true &&
+    typeof safeTabFacts.actionReadiness === 'string' &&
+    typeof safeTabFacts.canProceedToPageLevelCheck === 'boolean' &&
+    typeof safeTabFacts.requiredBeforeAction === 'string' &&
+    safeTabFacts.actionReadinessSummaryPresent === true &&
+    safeTabFacts.actionReadinessClaimBoundaryPresent === true;
+  const operationTargetRelationConsistent =
+    safeTabFacts.operationTargetRole === 'read_target_browser_active_tab'
+      ? browserWorldRelation === 'same_as_browser_active'
+      : safeTabFacts.operationTargetRole === 'read_target_background_tab'
+        ? browserWorldRelation === 'latest_ai_operated_background_tab'
+        : false;
+  const ownershipOperabilityCleanupPresent =
+    runtimeTruth?.ownershipOperabilityCleanup?.minimumFactsPresent === true &&
+    typeof safeTabFacts.ownerType === 'string' &&
+    typeof safeTabFacts.openedBy === 'string' &&
+    typeof safeTabFacts.openedBySource === 'string' &&
+    typeof safeTabFacts.canTabrixOperate === 'boolean' &&
+    typeof safeTabFacts.cleanupEligibility === 'string' &&
+    typeof safeTabFacts.protectedScopeVerdict === 'string' &&
+    typeof safeTabFacts.runtimeStateSource === 'string';
+  const currentActiveTabIdAliasBoundaryPresent =
+    runtimeTruth?.identity?.currentActiveTabIdClaimBoundaryPresent === true &&
+    safeTabFacts.currentActiveTabIdClaimBoundaryPresent === true;
+  const currentActiveTabIdAliasMatchesReadTarget =
+    runtimeTruth?.identity?.currentActiveTabIdAliasMatchesReadTarget === true;
+
+  return {
+    proofStatus:
+      operationTargetBriefPresent === true &&
+      actionReadinessBriefPresent === true &&
+      operationTargetRelationConsistent === true &&
+      ownershipOperabilityCleanupPresent === true &&
+      currentActiveTabIdAliasBoundaryPresent === true &&
+      currentActiveTabIdAliasMatchesReadTarget === true
+        ? 'proven'
+        : 'not_proven',
+    operationTargetBriefPresent,
+    actionReadinessBriefPresent,
+    operationTargetRelationConsistent,
+    ownershipOperabilityCleanupPresent,
+    currentActiveTabIdAliasBoundaryPresent,
+    currentActiveTabIdAliasMatchesReadTarget,
+    browserWorldRelation,
+    claimBoundary:
+      'Runtime truth contract alignment is redacted proof that read_page compact, BrowserWorld relation, ownership, operability, cleanup, and legacy active-tab alias boundaries are mutually present. It is not proof of page content correctness, task success, login state, API/CDP reuse, or release readiness.',
   };
 }
 

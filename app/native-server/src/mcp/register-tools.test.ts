@@ -2272,6 +2272,9 @@ describe('handleToolCall execution wrapper', () => {
             window: {
               objectKind: 'BrowserWindowObject',
               currentWindowId: 3,
+              readTargetTabId: 7,
+              currentActiveTabId: 7,
+              currentActiveTabIdAliasOf: 'readTargetTabId',
               currentWindowState: null,
               isFocused: true,
               isCurrentWindowFocused: true,
@@ -2280,9 +2283,15 @@ describe('handleToolCall execution wrapper', () => {
             },
             tab: {
               objectKind: 'BrowserTabObject',
+              readTargetTabId: 7,
               currentTabId: 7,
               isActive: true,
               ownerType: 'user_owned',
+              openedBy: null,
+              openedBySource: null,
+              cleanupEligibility: 'not_eligible',
+              protectedScopeVerdict: 'protected',
+              runtimeStateSource: 'unknown',
               runOwnedTabCount: 0,
             },
             page: {
@@ -2411,6 +2420,14 @@ describe('handleToolCall execution wrapper', () => {
       expect(payload.aiContextEnvelope.pageObjectSummary.primaryConclusion).toContain(
         'current runtime is visually degraded',
       );
+      expect(payload.aiContextEnvelope.pageObjectSummary.facts.window).toMatchObject({
+        readTargetTabId: 17,
+        currentActiveTabId: 17,
+        currentActiveTabIdAliasOf: 'readTargetTabId',
+      });
+      expect(
+        payload.aiContextEnvelope.pageObjectSummary.facts.window.currentActiveTabIdClaimBoundary,
+      ).toContain('not browser-active-tab proof');
       expect(flowSpy).toHaveBeenCalledTimes(1);
     });
 

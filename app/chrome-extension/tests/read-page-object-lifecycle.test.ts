@@ -737,6 +737,33 @@ describe('read_page object lifecycle', () => {
     expect(backgroundView.compact?.facts.tab?.actionReadinessClaimBoundary).toContain(
       'browser object state only',
     );
+
+    const protectedUserOwnedView = buildReadPageBrowserPageObjectView({
+      objectLifecycle: buildReadPageObjectLifecycle([]),
+      pageProjection: pageProjection({ ownerType: 'user_owned' }),
+      ownershipRuntime: ownershipRuntime({
+        currentOwnerType: 'user_owned',
+        currentTabOpenedBy: 'user_or_page',
+        currentTabOpenedBySource: 'user_or_unknown',
+        currentTabCanTabrixOperate: false,
+        currentTabOperabilityReason: 'user_owned_tab_protected',
+        protectedScopeVerdict: 'protected',
+        cleanupEligibility: 'not_eligible',
+      }),
+    });
+
+    expect(protectedUserOwnedView.compact?.facts.tab).toMatchObject({
+      ownerType: 'user_owned',
+      openedBy: 'user_or_page',
+      openedBySource: 'user_or_unknown',
+      canTabrixOperate: false,
+      protectedScopeVerdict: 'protected',
+      cleanupEligibility: 'not_eligible',
+      operationTargetRole: 'read_target_browser_active_tab',
+      actionReadiness: 'target_not_operable_or_unknown',
+      canProceedToPageLevelCheck: false,
+      requiredBeforeAction: 'refresh_or_select_operable_target',
+    });
   });
 
   it('keeps account-like handles and numeric stats out of visible menu entry summaries', () => {
@@ -1317,6 +1344,7 @@ describe('read_page object lifecycle', () => {
       currentWindowId: 7,
       readTargetTabId: 42,
       currentActiveTabId: 42,
+      currentActiveTabIdAliasOf: 'readTargetTabId',
       browserActiveTabId: 42,
       browserActiveTabIdKnown: true,
       isReadTargetBrowserActiveTab: true,
@@ -1613,10 +1641,14 @@ describe('read_page object lifecycle', () => {
     expect(view.attributeGroups.window_state.facts).toMatchObject({
       readTargetTabId: 84,
       currentActiveTabId: 84,
+      currentActiveTabIdAliasOf: 'readTargetTabId',
       browserActiveTabId: 42,
       browserActiveTabIdKnown: true,
       isReadTargetBrowserActiveTab: false,
     });
+    expect(view.attributeGroups.window_state.facts?.currentActiveTabIdClaimBoundary).toContain(
+      'legacy compatibility alias',
+    );
     expect(view.attributeGroups.tab_state.status).toBe('background');
     expect(view.attributeGroups.tab_state.summary).toContain('readTargetTab=84');
     expect(view.attributeGroups.tab_state.summary).toContain('background/not active in its window');
@@ -1648,10 +1680,15 @@ describe('read_page object lifecycle', () => {
     });
     expect(view.compact?.facts.window).toMatchObject({
       readTargetTabId: 84,
+      currentActiveTabId: 84,
+      currentActiveTabIdAliasOf: 'readTargetTabId',
       browserActiveTabId: 42,
       browserActiveTabIdKnown: true,
       isReadTargetBrowserActiveTab: false,
     });
+    expect(view.compact?.facts.window?.currentActiveTabIdClaimBoundary).toContain(
+      'not browser-active-tab proof',
+    );
     expect(view.compact?.facts.tab).toMatchObject({
       readTargetTabId: 84,
       primaryRunTabId: 42,
