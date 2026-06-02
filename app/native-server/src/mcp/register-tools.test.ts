@@ -1738,6 +1738,139 @@ describe('handleToolCall execution wrapper', () => {
       expect(bridgeSpy).toHaveBeenCalledTimes(1);
     });
 
+    it('auto-runs a fresh readback for implicit task context before page interaction', async () => {
+      markBridgeReady();
+      mockReadPageRoundTrip(
+        readPagePayloadWithProjection({
+          projectionId: 'auth-resume-auto-before',
+          contextChars: 140,
+          changedRegions: ['auth'],
+          extraPayload: {
+            authCollaboration: {
+              status: 'succeeded_candidate',
+              challengeType: 'qr',
+              userAction: {
+                required: false,
+                instruction: 'User scanned; verify before continuing.',
+              },
+              evidence: {
+                pageFreshness: 'single_snapshot',
+                operationBinding: 'ai_operable_tab',
+                semanticEventTypes: ['auth_succeeded_candidate'],
+                postconditionStatus: 'candidate_only',
+                resumeVerification: {
+                  status: 'fresh_read_required',
+                  nextTool: 'chrome_read_page',
+                  forceRefreshRequired: true,
+                  sameTabRequired: true,
+                  targetTabId: 1,
+                  postconditionRequired: true,
+                  requiredSignals: ['auth_prompt_absent', 'account_region_present'],
+                  claimBoundary: 'deterministic auth resume fixture only',
+                },
+                claimBoundary: 'candidate auth evidence only',
+              },
+            },
+          },
+        }),
+      );
+
+      const first = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+      expect(first.isError).toBeFalsy();
+
+      const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
+      bridgeSpy.mockClear();
+      bridgeSpy
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: readPagePayloadWithProjection({
+                  projectionId: 'auth-resume-auto-after',
+                  contextChars: 180,
+                  changedRegions: ['results'],
+                  extraPayload: {
+                    authCollaboration: {
+                      status: 'not_required',
+                      evidence: {
+                        resumeVerification: {
+                          status: 'not_required',
+                          nextTool: 'chrome_read_page',
+                          forceRefreshRequired: false,
+                          sameTabRequired: true,
+                          targetTabId: 1,
+                          postconditionRequired: false,
+                          requiredSignals: [],
+                          claimBoundary: 'deterministic auth resume fixture cleared',
+                        },
+                      },
+                    },
+                  },
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never)
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  dispatchSucceeded: true,
+                  observedOutcome: 'dom_changed',
+                  verification: {
+                    navigationOccurred: false,
+                    urlChanged: false,
+                    newTabOpened: false,
+                    domChanged: true,
+                    stateChanged: true,
+                    focusChanged: false,
+                  },
+                  clickDiff: { kind: 'dom_changed' },
+                  navigationOccurred: false,
+                  lane: 'tabrix_owned',
+                  message: 'Click observed outcome: dom_changed',
+                  clickMethod: 'selector',
+                  resultShape: 'structured_click_result',
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+
+      const result = await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        selector: '#filter',
+      });
+
+      expect(result.isError).toBe(false);
+      const payload = JSON.parse(String(result.content[0].text));
+      expect(payload).toMatchObject({
+        success: true,
+        dispatchSucceeded: true,
+        observedOutcome: 'dom_changed',
+        actionPreflight: {
+          verdict: 'allow',
+        },
+        runtimePolicyAudit: {
+          verdict: 'allow',
+        },
+      });
+      expect(bridgeSpy).toHaveBeenCalledTimes(4);
+    });
+
     it('keeps the full browserPageObject in the AI envelope for full-mode chrome_read_page', async () => {
       markBridgeReady();
       const ctx = sessionManager.getOrCreateExternalTaskContext('object-lifecycle-full-task');
