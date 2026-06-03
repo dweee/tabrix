@@ -29,6 +29,7 @@ const allToolNames = flattenToolNames(TOOL_NAMES);
 const schemaNames = TOOL_SCHEMAS.map((schema) => schema.name);
 const schemaNameSet = new Set(schemaNames);
 const riskTierNames = Object.keys(TOOL_RISK_TIERS);
+const prohibitedTopLevelInputSchemaKeywords = ['oneOf', 'anyOf', 'allOf', 'enum', 'not'];
 
 assert.ok(schemaNames.length > 0, 'TOOL_SCHEMAS must expose at least one tool schema');
 assert.equal(schemaNameSet.size, schemaNames.length, 'TOOL_SCHEMAS must not contain duplicate names');
@@ -36,6 +37,15 @@ assert.equal(schemaNameSet.size, schemaNames.length, 'TOOL_SCHEMAS must not cont
 for (const name of schemaNames) {
   assert.ok(allToolNames.has(name), `schema tool "${name}" must be declared in TOOL_NAMES`);
   assert.ok(getToolRiskTier(name), `schema tool "${name}" must have a risk tier`);
+  const inputSchema = TOOL_SCHEMAS.find((schema) => schema.name === name)?.inputSchema;
+  assert.equal(inputSchema?.type, 'object', `schema tool "${name}" inputSchema must be an object`);
+  for (const keyword of prohibitedTopLevelInputSchemaKeywords) {
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(inputSchema, keyword),
+      false,
+      `schema tool "${name}" inputSchema must not use top-level ${keyword}`,
+    );
+  }
 }
 
 for (const name of riskTierNames) {

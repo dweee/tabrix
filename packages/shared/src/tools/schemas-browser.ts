@@ -1425,7 +1425,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
         key: {
           type: 'string',
           description:
-            'Alias for keys when sending a single key such as "Enter". Prefer keys for chords or multiple key events.',
+            'Alias for keys when sending a single key such as "Enter". Prefer keys for chords or multiple key events. Either keys or key must be provided.',
         },
         selector: {
           type: 'string',
@@ -1453,7 +1453,6 @@ export const BROWSER_SCHEMAS: Tool[] = [
           description: 'Target frame ID for iframe support.',
         },
       },
-      anyOf: [{ required: ['keys'] }, { required: ['key'] }],
     },
   },
   {
