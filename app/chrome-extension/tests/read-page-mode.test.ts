@@ -603,6 +603,9 @@ describe('read_page mode', () => {
   });
 
   it('recovers target refs for visible search toolbar labels in neutral search pages', async () => {
+    const bindScript = vi
+      .spyOn(chrome.scripting, 'executeScript')
+      .mockResolvedValue([{ result: { bound: 5 } }] as any);
     const collectInteractiveElementsFallback = vi
       .spyOn(readPageTool as any, 'collectInteractiveElementsFallback')
       .mockImplementation(async (_tabId: number, options: { textQuery?: string }) => {
@@ -673,6 +676,20 @@ describe('read_page mode', () => {
       ]),
     );
     expect(basePayload.fallbackSource).toBe('search_toolbar_target_recovery');
+    expect(bindScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 5220, frameIds: [7] },
+        world: 'ISOLATED',
+        args: [
+          expect.arrayContaining([
+            expect.objectContaining({
+              ref: expect.stringMatching(/^ref_text_search_toolbar_/),
+              selector: 'body > main > div.toolbar > span:nth-of-type(5)',
+            }),
+          ]),
+        ],
+      }),
+    );
 
     const interactiveElements = buildInteractiveElements(
       formatElementsAsPageContent(basePayload.elements, basePayload.refMap),
@@ -697,6 +714,225 @@ describe('read_page mode', () => {
       actions.find((action) => action.locatorChain.some((item) => item.value === '图文')),
     ).toMatchObject({
       intent: 'search.category_select',
+      frameId: 7,
+    });
+  });
+
+  it('prefers compact search toolbar matches over broad text-query matches', async () => {
+    vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
+      { result: { bound: 1 } },
+    ] as any);
+    vi.spyOn(readPageTool as any, 'collectInteractiveElementsFallback').mockResolvedValue({
+      success: true,
+      elements: [
+        {
+          type: 'text',
+          role: 'generic',
+          selector: 'body > main > section.results > article:nth-of-type(1)',
+          text: '如何筛选高价值搜索结果',
+          isInteractive: false,
+          coordinates: {
+            x: 500,
+            y: 420,
+            rect: { x: 240, y: 360, width: 620, height: 180 },
+          },
+        },
+        {
+          type: 'text_action',
+          role: 'button',
+          selector: 'body > main > div.toolbar > span:nth-of-type(5)',
+          text: '筛选',
+          isInteractive: true,
+          coordinates: {
+            x: 100,
+            y: 88,
+            rect: { x: 80, y: 72, width: 48, height: 32 },
+          },
+        },
+      ],
+    });
+    const basePayload: any = {
+      visibleTextContent:
+        'Home Explore Messages Notifications neutral navigation words 全部 图文 视频 用户 筛选',
+      elements: [],
+      refMap: [],
+      count: 0,
+    };
+
+    const recovered = await (readPageTool as any).recoverSearchToolbarTextTargets({
+      tabId: 5221,
+      basePayload,
+      assistantGuidance: {
+        taskKind: 'search',
+        requestedObjects: ['result_cards'],
+      },
+    });
+
+    expect(recovered).toBe(true);
+    expect(basePayload.elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          selector: 'body > main > div.toolbar > span:nth-of-type(5)',
+          text: '筛选',
+          role: 'button',
+        }),
+      ]),
+    );
+    expect(basePayload.elements).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          selector: 'body > main > section.results > article:nth-of-type(1)',
+        }),
+      ]),
+    );
+  });
+
+  it('recovers locator-backed target refs for dynamic filter panel labels', async () => {
+    const bindScript = vi
+      .spyOn(chrome.scripting, 'executeScript')
+      .mockResolvedValue([{ result: { bound: 3 } }] as any);
+    const collectInteractiveElementsFallback = vi
+      .spyOn(readPageTool as any, 'collectInteractiveElementsFallback')
+      .mockImplementation(async (_tabId: number, options: { textQuery?: string }) => {
+        const selectors: Record<string, string> = {
+          最多收藏: 'body > main > div.filter-panel > div:nth-of-type(1) > div.tags:nth-of-type(5)',
+          一天内: 'body > main > div.filter-panel > div:nth-of-type(2) > div.tags:nth-of-type(2)',
+          未看过: 'body > main > div.filter-panel > div:nth-of-type(3) > div.tags:nth-of-type(3)',
+        };
+        const selector = options.textQuery ? selectors[options.textQuery] : undefined;
+        if (!selector) return { success: true, elements: [] };
+        return {
+          success: true,
+          elements: [
+            {
+              type: 'text',
+              role: 'generic',
+              selector: 'body > main > section.results > article:nth-of-type(1)',
+              text: `结果正文也提到了${options.textQuery}`,
+              isInteractive: false,
+              actionability: 'not_actionable',
+              coordinates: {
+                x: 500,
+                y: 520,
+                rect: { x: 240, y: 480, width: 620, height: 180 },
+              },
+            },
+            {
+              type: 'text_action',
+              role: 'button',
+              selector,
+              text: options.textQuery,
+              isInteractive: true,
+              actionability: 'actionable',
+              coordinates: {
+                x: 980,
+                y: 320,
+                rect: { x: 940, y: 304, width: 72, height: 32 },
+              },
+            },
+          ],
+        };
+      });
+    const basePayload: any = {
+      visibleTextContent:
+        '排序依据 综合 最新 最多点赞 最多评论 最多收藏 发布时间 不限 一天内 一周内 半年内 搜索范围 不限 已看过 未看过 已关注 位置距离 不限 同城 附近 重置 收起',
+      elements: [],
+      refMap: [],
+      count: 0,
+    };
+
+    const recovered = await (readPageTool as any).recoverFilterPanelTextTargets({
+      tabId: 5222,
+      basePayload,
+      assistantGuidance: {
+        taskKind: 'search',
+        requestedObjects: ['search_input', 'result_cards'],
+      },
+      frameId: 7,
+    });
+
+    expect(recovered).toBe(true);
+    expect(collectInteractiveElementsFallback).toHaveBeenCalledWith(
+      5222,
+      expect.objectContaining({ textQuery: '最多收藏', includeCoordinates: true, frameId: 7 }),
+    );
+    expect(basePayload.elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ref: expect.stringMatching(/^ref_text_filter_panel_/),
+          role: 'button',
+          selector: 'body > main > div.filter-panel > div:nth-of-type(1) > div.tags:nth-of-type(5)',
+          text: '最多收藏',
+        }),
+        expect.objectContaining({
+          ref: expect.stringMatching(/^ref_text_filter_panel_/),
+          selector: 'body > main > div.filter-panel > div:nth-of-type(2) > div.tags:nth-of-type(2)',
+          text: '一天内',
+        }),
+        expect.objectContaining({
+          ref: expect.stringMatching(/^ref_text_filter_panel_/),
+          selector: 'body > main > div.filter-panel > div:nth-of-type(3) > div.tags:nth-of-type(3)',
+          text: '未看过',
+        }),
+      ]),
+    );
+    expect(basePayload.elements).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          selector: 'body > main > section.results > article:nth-of-type(1)',
+        }),
+      ]),
+    );
+    expect(basePayload.fallbackSource).toBe('filter_panel_target_recovery');
+    expect(bindScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 5222, frameIds: [7] },
+        world: 'ISOLATED',
+        args: [
+          expect.arrayContaining([
+            expect.objectContaining({
+              ref: expect.stringMatching(/^ref_text_filter_panel_/),
+              selector:
+                'body > main > div.filter-panel > div:nth-of-type(1) > div.tags:nth-of-type(5)',
+            }),
+          ]),
+        ],
+      }),
+    );
+
+    const interactiveElements = buildInteractiveElements(
+      formatElementsAsPageContent(basePayload.elements, basePayload.refMap),
+      basePayload.elements,
+      20,
+      'normal',
+      'https://example.com/search?q=neutral',
+    );
+    const actions = buildCandidateActions(interactiveElements, basePayload.refMap, {
+      frameId: 7,
+    });
+
+    expect(
+      actions.find((action) => action.locatorChain.some((item) => item.value === '最多收藏')),
+    ).toMatchObject({
+      intent: 'filter.sort_most_collected',
+      frameId: 7,
+      locatorChain: expect.arrayContaining([
+        {
+          type: 'css',
+          value: 'body > main > div.filter-panel > div:nth-of-type(1) > div.tags:nth-of-type(5)',
+        },
+      ]),
+    });
+    expect(
+      actions.find((action) => action.locatorChain.some((item) => item.value === '一天内')),
+    ).toMatchObject({
+      actionType: 'click',
+      frameId: 7,
+    });
+    expect(
+      actions.find((action) => action.locatorChain.some((item) => item.value === '未看过')),
+    ).toMatchObject({
+      actionType: 'click',
       frameId: 7,
     });
   });

@@ -334,7 +334,7 @@ describe('buildPostActionReadbackEvidence', () => {
 });
 
 describe('buildClickHelperDispatchTimingPolicy', () => {
-  it('caps lightweight filter and QR-refresh clicks so they do not wait for full navigation', () => {
+  it('caps lightweight filter clicks with a dynamic-panel window without waiting for navigation', () => {
     expect(
       buildClickHelperDispatchTimingPolicy({
         waitForNavigation: true,
@@ -343,10 +343,12 @@ describe('buildClickHelperDispatchTimingPolicy', () => {
       }),
     ).toEqual({
       waitForNavigation: false,
-      timeout: 1000,
+      timeout: 13000,
       reason: 'lightweight_post_action_intent',
     });
+  });
 
+  it('keeps non-filter lightweight clicks on the short post-action window', () => {
     expect(
       buildClickHelperDispatchTimingPolicy({
         waitForNavigation: true,
@@ -355,7 +357,7 @@ describe('buildClickHelperDispatchTimingPolicy', () => {
       }),
     ).toMatchObject({
       waitForNavigation: false,
-      timeout: 1000,
+      timeout: 2000,
     });
   });
 

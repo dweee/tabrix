@@ -1723,6 +1723,37 @@ describe('read_page task protocol', () => {
       expect(JSON.stringify(aiFacingActions)).not.toContain('Sign out');
     });
 
+    it('drops search category intent from redacted account candidate actions', () => {
+      const aiFacingActions = redactSensitiveCandidateActionsForAi(
+        [
+          {
+            id: 'ca_click_ref_account',
+            actionType: 'click',
+            targetRef: 'ref_account',
+            confidence: 0.76,
+            matchReason: 'interactive clickable candidate from structured snapshot',
+            locatorChain: [
+              { type: 'ref', value: 'ref_account' },
+              { type: 'aria', value: 'account profile button' },
+              { type: 'css', value: '#account' },
+            ],
+            intent: 'search.category_select',
+          },
+        ],
+        [{ ref: 'ref_account', role: 'button', name: 'account profile button' }],
+      );
+
+      expect(aiFacingActions[0]).toMatchObject({
+        id: 'ca_click_ref_account',
+        matchReason: 'redacted_account_action_signal',
+        locatorChain: [
+          { type: 'ref', value: 'ref_account' },
+          { type: 'css', value: '#account' },
+        ],
+      });
+      expect(aiFacingActions[0]?.intent).toBeUndefined();
+    });
+
     it('surfaces unlabeled clickable controls as exploratory operation entries, not account facts', () => {
       const protocol = buildTaskProtocol(
         createBaseParams({

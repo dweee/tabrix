@@ -9,19 +9,22 @@ import type {
 import type { VisibleRegionRowsResult } from './visible-region-rows';
 
 const SEARCH_INPUT_ROLE_PATTERN = /^(searchbox|textbox|combobox)$/i;
-const FILTER_LABEL_PATTERN = /^(筛选|过滤|filter|filters)$/i;
+const FILTER_LABEL_PATTERN = /^(筛选|已筛选|过滤|filter|filters|filtered)$/i;
 const SORT_MENU_LABEL_PATTERN = /^(排序|sort)$/i;
 const CATEGORY_LABEL_PATTERN = /^(全部|图文|视频|用户|all|images?|photos?|videos?|users?)$/i;
 const SEARCH_TOOLBAR_LABEL_PATTERN =
-  /^(筛选|过滤|filter|filters|排序|sort|全部|图文|视频|用户|all|images?|photos?|videos?|users?)$/i;
+  /^(筛选|已筛选|过滤|filter|filters|filtered|排序|sort|全部|图文|视频|用户|all|images?|photos?|videos?|users?)$/i;
 const FILTER_PANEL_OPTION_PATTERN =
-  /^(综合|最新|最热|最多点赞|最多收藏|不限|已关注|未看过|all|latest|popular|most\s*(liked|saved|collected)|any)$/i;
-const FILTER_PANEL_ACTION_PATTERN = /^(清除|重置|确认|应用|clear|reset|confirm|apply)$/i;
+  /^(综合|最新|最热|最多点赞|最多评论|最多收藏|不限|一天内|一周内|半年内|已看过|未看过|已关注|同城|附近|all|latest|popular|most\s*(liked|commented|saved|collected)|any)$/i;
+const FILTER_PANEL_ACTION_PATTERN =
+  /^(清除|重置|确认|应用|收起|clear|reset|confirm|apply|collapse)$/i;
 const SELECTED_STATE_PATTERN =
   /\b(selected|active|checked|current|applied)\b|已选|选中|当前|已应用/i;
 const EXPANDED_STATE_PATTERN = /\bexpanded\b|展开/i;
 const LOAD_MORE_PATTERN = /^(加载更多|更多|load\s*more|show\s*more)$/i;
 const TEXT_SEARCH_TOOLBAR_REF_PATTERN = /^ref_text_search_toolbar_/;
+const TEXT_FILTER_PANEL_REF_PATTERN = /^ref_text_filter_panel_/;
+const SEARCH_TOOLBAR_VERTICAL_BAND_PX = 180;
 const MOST_COLLECTED_PATTERN =
   /最多收藏|收藏最多|按收藏|收藏数|most\s*(collected|saved|favorited)|top\s*saves/i;
 const SEARCH_SUBMIT_PATTERN = /\b(search|find|query)\b|搜索|查找/i;
@@ -68,11 +71,55 @@ function isCategoryLabel(value: unknown): boolean {
   return CATEGORY_LABEL_PATTERN.test(normalizeText(value));
 }
 
+function rectTop(element: ReadPageInteractiveElement | undefined): number | undefined {
+  const y = element?.rect?.y;
+  return typeof y === 'number' && Number.isFinite(y) ? y : undefined;
+}
+
+function isSearchToolbarAnchor(element: ReadPageInteractiveElement): boolean {
+  const role = normalizeText(element.role).toLowerCase();
+  const name = normalizeText(element.name);
+  return (
+    (SEARCH_INPUT_ROLE_PATTERN.test(role) && SEARCH_SUBMIT_PATTERN.test(name || role)) ||
+    isFilterLabel(name) ||
+    isSortMenuLabel(name) ||
+    isCategoryLabel(name)
+  );
+}
+
+function isSearchToolbarBandElement(
+  element: ReadPageInteractiveElement | undefined,
+  interactiveElements: readonly ReadPageInteractiveElement[],
+): boolean {
+  const currentTop = rectTop(element);
+  if (currentTop === undefined) return true;
+
+  const anchorTops = interactiveElements
+    .filter(isSearchToolbarAnchor)
+    .map(rectTop)
+    .filter((top): top is number => top !== undefined)
+    .sort((left, right) => left - right);
+  const topAnchor = anchorTops[0];
+  if (topAnchor === undefined) return true;
+
+  return currentTop - topAnchor <= SEARCH_TOOLBAR_VERTICAL_BAND_PX;
+}
+
 function controlKindForToolbarLabel(label: string): SearchSurfaceControl['kind'] {
   if (isCategoryLabel(label)) return 'category_tab';
   if (isSortMenuLabel(label)) return 'sort_menu';
   if (isFilterLabel(label)) return 'filter_trigger';
   return 'unknown';
+}
+
+function isTextRecoveredRef(value: string): boolean {
+  return TEXT_SEARCH_TOOLBAR_REF_PATTERN.test(value) || TEXT_FILTER_PANEL_REF_PATTERN.test(value);
+}
+
+function controlKindForFilterPanelLabel(label: string): SearchSurfaceControl['kind'] {
+  if (MOST_COLLECTED_PATTERN.test(label)) return 'sort_most_collected';
+  if (FILTER_PANEL_ACTION_PATTERN.test(label)) return 'filter_panel_action';
+  return 'filter_panel_option';
 }
 
 export function extractSearchToolbarLabelsFromVisibleText(
@@ -87,8 +134,7 @@ export function extractSearchToolbarLabelsFromVisibleText(
     .slice(0, SEARCH_TOOLBAR_TEXT_SCAN_LINE_LIMIT);
 
   for (const line of lines) {
-    if (line.length > 80) continue;
-    const candidates = [line, ...line.split(/[\s|｜/、,，]+/)]
+    const candidates = [...(line.length <= 80 ? [line] : []), ...line.split(/[\s|｜/、,，]+/)]
       .map((item) => normalizeText(item))
       .filter(Boolean);
     for (const candidate of candidates) {
@@ -146,15 +192,33 @@ function actionForRef(
 function actionForToolbarLabel(
   candidateActions: readonly ReadPageCandidateAction[],
   label: string,
+  interactiveElements: readonly ReadPageInteractiveElement[],
 ): ReadPageCandidateAction | undefined {
   const key = normalizedKey(label);
   return candidateActions.find((action) => {
+    if (isCategoryLabel(label)) {
+      const element = interactiveElements.find((item) => item.ref === action.targetRef);
+      if (!isSearchToolbarBandElement(element, interactiveElements)) return false;
+    }
     const locatorLabel = action.locatorChain.find((item) => item.type === 'aria')?.value;
     if (normalizedKey(locatorLabel) === key) return true;
     if (TEXT_SEARCH_TOOLBAR_REF_PATTERN.test(action.targetRef)) {
       return action.locatorChain.some((item) => normalizedKey(item.value) === key);
     }
     return false;
+  });
+}
+
+function actionForFilterPanelLabel(
+  candidateActions: readonly ReadPageCandidateAction[],
+  label: string,
+): ReadPageCandidateAction | undefined {
+  const key = normalizedKey(label);
+  return candidateActions.find((action) => {
+    if (!TEXT_FILTER_PANEL_REF_PATTERN.test(action.targetRef)) return false;
+    const locatorLabel = action.locatorChain.find((item) => item.type === 'aria')?.value;
+    if (normalizedKey(locatorLabel) === key) return true;
+    return action.locatorChain.some((item) => normalizedKey(item.value) === key);
   });
 }
 
@@ -215,9 +279,7 @@ function controlForElement(params: {
     label: safeLabel(params.element.name),
     confidence: params.confidence,
     actionability: params.element.actionability,
-    source: TEXT_SEARCH_TOOLBAR_REF_PATTERN.test(params.element.ref)
-      ? 'text_recovery'
-      : 'interactive_elements',
+    source: isTextRecoveredRef(params.element.ref) ? 'text_recovery' : 'interactive_elements',
     rect: params.element.rect,
     ...(state ? { state } : {}),
     reason: params.reason,
@@ -261,6 +323,21 @@ function hasControlWithLabel(controls: readonly SearchSurfaceControl[], label: s
   return controls.some((control) => normalizedKey(control.label) === key);
 }
 
+function hasOnlyOutOfBandCategoryElements(
+  label: string,
+  interactiveElements: readonly ReadPageInteractiveElement[],
+): boolean {
+  if (!isCategoryLabel(label)) return false;
+  const key = normalizedKey(label);
+  const matchingElements = interactiveElements.filter(
+    (element) => isCategoryLabel(element.name) && normalizedKey(element.name) === key,
+  );
+  if (matchingElements.length === 0) return false;
+  return matchingElements.every(
+    (element) => !isSearchToolbarBandElement(element, interactiveElements),
+  );
+}
+
 function pushUniqueControl(target: SearchSurfaceControl[], control: SearchSurfaceControl): void {
   const key = `${control.kind}:${normalizedKey(control.label)}:${control.targetRef || ''}`;
   if (
@@ -286,8 +363,7 @@ function extractShortLabels(
     .filter(Boolean)
     .slice(0, SEARCH_TOOLBAR_TEXT_SCAN_LINE_LIMIT);
   for (const line of lines) {
-    if (line.length > 80) continue;
-    const candidates = [line, ...line.split(/[\s|｜/、,，]+/)]
+    const candidates = [...(line.length <= 80 ? [line] : []), ...line.split(/[\s|｜/、,，]+/)]
       .map((item) => normalizeText(item))
       .filter(Boolean);
     for (const candidate of candidates) {
@@ -302,12 +378,54 @@ function extractShortLabels(
   return labels;
 }
 
+export function extractFilterPanelLabelsFromVisibleText(
+  visibleTextContent: string | null | undefined,
+): string[] {
+  const labels: string[] = [];
+  const seen = new Set<string>();
+  for (const label of [
+    ...extractShortLabels(visibleTextContent, FILTER_PANEL_OPTION_PATTERN, 16),
+    ...extractShortLabels(visibleTextContent, FILTER_PANEL_ACTION_PATTERN, 8),
+  ]) {
+    const key = normalizedKey(label);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    labels.push(label);
+  }
+  return labels;
+}
+
 function filterPanelFromVisibleText(
   visibleTextContent: string | null | undefined,
+  candidateActions: readonly ReadPageCandidateAction[],
+  interactiveElements: readonly ReadPageInteractiveElement[],
 ): SearchSurfaceFilterPanel {
   const optionLabels = extractShortLabels(visibleTextContent, FILTER_PANEL_OPTION_PATTERN, 16);
   const actionLabels = extractShortLabels(visibleTextContent, FILTER_PANEL_ACTION_PATTERN, 8);
-  const appliedFilterLabels = optionLabels.filter((label) => SELECTED_STATE_PATTERN.test(label));
+  const targetableOptions: SearchSurfaceControl[] = [];
+  for (const label of [...optionLabels, ...actionLabels]) {
+    const action = actionForFilterPanelLabel(candidateActions, label);
+    if (!action?.locatorChain?.length) continue;
+    pushUniqueControl(
+      targetableOptions,
+      controlForRecoveredAction({
+        kind: controlKindForFilterPanelLabel(label),
+        label,
+        action,
+        interactiveElements,
+        reason:
+          'filter panel label was recovered from visible text and resolved to a locator-backed candidate action',
+        confidence: MOST_COLLECTED_PATTERN.test(label) ? 0.82 : 0.76,
+      }),
+    );
+  }
+  const appliedFilterLabels = [
+    ...optionLabels.filter((label) => SELECTED_STATE_PATTERN.test(label)),
+    ...targetableOptions
+      .filter((control) => control.state?.selected)
+      .map((control) => control.label)
+      .filter((label): label is string => Boolean(label)),
+  ];
   const clearActionObserved = actionLabels.some((label) => /清除|重置|clear|reset/i.test(label));
   const confirmActionObserved = actionLabels.some((label) =>
     /确认|应用|confirm|apply/i.test(label),
@@ -316,6 +434,7 @@ function filterPanelFromVisibleText(
   return {
     status: openCandidate ? 'open_candidate' : 'closed_or_not_observed',
     optionLabels,
+    ...(targetableOptions.length > 0 ? { targetableOptions } : {}),
     appliedFilterLabels,
     clearActionObserved,
     confirmActionObserved,
@@ -479,8 +598,10 @@ export function buildSearchSurface(params: {
     );
   }
 
-  const categoryElements = params.interactiveElements.filter((element) =>
-    isCategoryLabel(element.name),
+  const categoryElements = params.interactiveElements.filter(
+    (element) =>
+      isCategoryLabel(element.name) &&
+      isSearchToolbarBandElement(element, params.interactiveElements),
   );
   for (const element of categoryElements) {
     pushUniqueControl(
@@ -521,9 +642,7 @@ export function buildSearchSurface(params: {
       targetRef: submitAction.targetRef,
       candidateActionId: submitAction.id,
       confidence: submitAction.confidence,
-      source: TEXT_SEARCH_TOOLBAR_REF_PATTERN.test(submitAction.targetRef)
-        ? 'text_recovery'
-        : 'interactive_elements',
+      source: isTextRecoveredRef(submitAction.targetRef) ? 'text_recovery' : 'interactive_elements',
       reason: 'search submit action surfaced from candidate actions',
     });
   }
@@ -533,7 +652,11 @@ export function buildSearchSurface(params: {
     const kind = controlKindForToolbarLabel(label);
     const targetList = kind === 'category_tab' ? categoryTabs : controls;
     if (hasControlWithLabel(targetList, label)) continue;
-    const recoveredAction = actionForToolbarLabel(params.candidateActions, label);
+    const recoveredAction = actionForToolbarLabel(
+      params.candidateActions,
+      label,
+      params.interactiveElements,
+    );
     if (recoveredAction?.locatorChain?.length) {
       pushUniqueControl(
         targetList,
@@ -547,6 +670,12 @@ export function buildSearchSurface(params: {
           confidence: kind === 'category_tab' ? 0.76 : 0.78,
         }),
       );
+      continue;
+    }
+    if (
+      kind === 'category_tab' &&
+      hasOnlyOutOfBandCategoryElements(label, params.interactiveElements)
+    ) {
       continue;
     }
     const unresolved = unresolvedControlForLabel(label);
@@ -577,7 +706,11 @@ export function buildSearchSurface(params: {
         : 'visible result row surfaced for AI-side ranking',
     });
   }
-  const filterPanel = filterPanelFromVisibleText(params.visibleTextContent);
+  const filterPanel = filterPanelFromVisibleText(
+    params.visibleTextContent,
+    params.candidateActions,
+    params.interactiveElements,
+  );
   const categoryState = categoryStateForControls(categoryTabs);
   const sortMenuAction = findControlAction(params.candidateActions, 'filter.open');
   const sortMenuObserved =

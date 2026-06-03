@@ -43,6 +43,7 @@ import { buildInteractiveElements } from './read-page-interactive-elements';
 import { buildCandidateActions, type CandidateActionSeed } from './read-page-candidate-actions';
 import {
   buildSearchSurface,
+  extractFilterPanelLabelsFromVisibleText,
   extractSearchToolbarLabelsFromVisibleText,
 } from './read-page-search-surface';
 import { buildArtifactRefs } from './read-page-artifact-refs';
@@ -544,6 +545,23 @@ function promoteSearchToolbarSelector(selector: unknown): string | undefined {
   return raw;
 }
 
+function promoteFilterPanelSelector(selector: unknown): string | undefined {
+  const raw = typeof selector === 'string' ? selector.trim() : '';
+  if (!raw) return undefined;
+  const parts = raw
+    .split(/\s*>\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length < 3) return raw;
+  const last = parts[parts.length - 1]?.toLowerCase() || '';
+  if (!/^(span|svg|path|img|i|em|strong)(?::|\[|\.|#|$)/.test(last)) return raw;
+  const parent = parts[parts.length - 2]?.toLowerCase() || '';
+  if (/^(button|a|li|div)(?::|\[role=|\[aria-|\.|#)/.test(parent)) {
+    return parts.slice(0, -1).join(' > ');
+  }
+  return raw;
+}
+
 function isCompactSearchToolbarFallbackElement(element: any): boolean {
   const text = String(element?.text || element?.name || '')
     .replace(/\s+/g, ' ')
@@ -555,6 +573,32 @@ function isCompactSearchToolbarFallbackElement(element: any): boolean {
   const height = Number(rect.height);
   if (!Number.isFinite(width) || !Number.isFinite(height)) return true;
   return width > 0 && height > 0 && width <= 260 && height <= 120;
+}
+
+function isCompactFilterPanelFallbackElement(element: any): boolean {
+  const text = String(element?.text || element?.name || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text || text.length > 24) return false;
+  const actionability = String(element?.actionability || '').toLowerCase();
+  if (actionability === 'blocked' || actionability === 'not_actionable') return false;
+  const rect = element?.coordinates?.rect;
+  if (!rect) return true;
+  const width = Number(rect.width);
+  const height = Number(rect.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return true;
+  return width > 0 && height > 0 && width <= 320 && height <= 120;
+}
+
+function shouldRecoverFilterPanelTargets(
+  assistantGuidance: ReadPageAssistantGuidance | undefined,
+  visibleTextContent: unknown,
+): boolean {
+  if (!shouldRecoverSearchToolbarTargets(assistantGuidance)) return false;
+  const text = String(visibleTextContent || '').replace(/\s+/g, ' ');
+  return /排序依据|发布时间|搜索范围|位置距离|综合\s+最新|最多收藏.*一天内|一天内.*未看过/.test(
+    text,
+  );
 }
 
 function extractVisibleMenuActionLabelsForTargetRecovery(visibleTextContent: unknown): string[] {
@@ -1245,6 +1289,55 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     } as any);
   }
 
+  private async bindSyntheticRefsToSelectors(
+    tabId: number,
+    refMap: Array<{ ref?: unknown; selector?: unknown } | null>,
+    frameId?: number,
+  ): Promise<number> {
+    const entries = refMap
+      .map((entry) => ({
+        ref: typeof entry?.ref === 'string' ? entry.ref.trim() : '',
+        selector: typeof entry?.selector === 'string' ? entry.selector.trim() : '',
+      }))
+      .filter(
+        (entry) =>
+          (entry.ref.startsWith('ref_text_search_toolbar_') ||
+            entry.ref.startsWith('ref_text_filter_panel_')) &&
+          entry.selector,
+      );
+    if (entries.length === 0) return 0;
+
+    try {
+      const result = await chrome.scripting.executeScript({
+        target: { tabId, ...(typeof frameId === 'number' ? { frameIds: [frameId] } : {}) },
+        world: 'ISOLATED',
+        func: (bindings: Array<{ ref: string; selector: string }>) => {
+          try {
+            const pageWindow = window as any;
+            if (!pageWindow.__claudeElementMap) pageWindow.__claudeElementMap = {};
+            let bound = 0;
+            for (const binding of bindings) {
+              if (!binding?.ref || !binding?.selector) continue;
+              const element = document.querySelector(binding.selector);
+              if (!(element instanceof Element)) continue;
+              pageWindow.__claudeElementMap[binding.ref] = new WeakRef(element);
+              bound += 1;
+            }
+            return { bound };
+          } catch {
+            return { bound: 0 };
+          }
+        },
+        args: [entries],
+      } as any);
+      const resultValue = result?.[0]?.result as { bound?: unknown } | undefined;
+      const bound = resultValue?.bound;
+      return typeof bound === 'number' && Number.isFinite(bound) ? bound : 0;
+    } catch {
+      return 0;
+    }
+  }
+
   private async sampleVisibleTextContent(tabId: number, frameId?: number): Promise<string | null> {
     try {
       const result = await chrome.scripting.executeScript({
@@ -1504,9 +1597,12 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         includeCoordinates: true,
         frameId: params.frameId,
       });
-      const first = Array.isArray(fallback?.elements) ? fallback.elements[0] : null;
+      const first = Array.isArray(fallback?.elements)
+        ? fallback.elements.find(
+            (element: any) => element?.selector && isCompactSearchToolbarFallbackElement(element),
+          )
+        : null;
       if (!first?.selector) continue;
-      if (!isCompactSearchToolbarFallbackElement(first)) continue;
       const recoveredElement = {
         ...first,
         selector: promoteSearchToolbarSelector(first.selector) || first.selector,
@@ -1533,6 +1629,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     const recoveredRefMap = buildFallbackRefMap(recovered).map((entry, index) =>
       entry ? { ...entry, ref: `ref_text_search_toolbar_${offset + index + 1}` } : null,
     );
+    await this.bindSyntheticRefsToSelectors(params.tabId, recoveredRefMap, params.frameId);
     const recoveredWithRefs = attachFallbackRefs(recovered, recoveredRefMap);
 
     params.basePayload.elements = [...recoveredWithRefs, ...existingElements].slice(0, 150);
@@ -1548,6 +1645,107 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     params.basePayload.fallbackSource = params.basePayload.fallbackSource
       ? `${params.basePayload.fallbackSource}+search_toolbar_target_recovery`
       : 'search_toolbar_target_recovery';
+    return true;
+  }
+
+  private async recoverFilterPanelTextTargets(params: {
+    tabId: number;
+    basePayload: any;
+    assistantGuidance?: ReadPageAssistantGuidance;
+    frameId?: number;
+  }): Promise<boolean> {
+    if (
+      !shouldRecoverFilterPanelTargets(
+        params.assistantGuidance,
+        params.basePayload.visibleTextContent,
+      )
+    ) {
+      return false;
+    }
+    const labels = extractFilterPanelLabelsFromVisibleText(params.basePayload.visibleTextContent)
+      .filter((label) => label.length <= 18)
+      .slice(0, 16);
+    if (labels.length === 0) return false;
+
+    const existingTargetKeys = new Set(
+      (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
+        .filter((element: any) => {
+          const selector = typeof element?.selector === 'string' ? element.selector.trim() : '';
+          const href = typeof element?.href === 'string' ? element.href.trim() : '';
+          return Boolean(selector || href);
+        })
+        .map((element: any) => searchToolbarElementKey(element))
+        .filter(Boolean),
+    );
+    const existingRecoveredLabels = new Set(
+      (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
+        .filter((element: any) => String(element?.ref || '').startsWith('ref_text_filter_panel_'))
+        .map((element: any) =>
+          String(element?.name || element?.text || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase(),
+        )
+        .filter(Boolean),
+    );
+
+    const recovered: any[] = [];
+    for (const label of labels) {
+      const normalizedLabel = label.replace(/\s+/g, ' ').trim().toLowerCase();
+      if (!normalizedLabel || existingRecoveredLabels.has(normalizedLabel)) continue;
+      const fallback = await this.collectInteractiveElementsFallback(params.tabId, {
+        textQuery: label,
+        includeCoordinates: true,
+        frameId: params.frameId,
+      });
+      const first = Array.isArray(fallback?.elements)
+        ? fallback.elements.find(
+            (element: any) => element?.selector && isCompactFilterPanelFallbackElement(element),
+          )
+        : null;
+      if (!first?.selector) continue;
+      const recoveredElement = {
+        ...first,
+        selector: promoteFilterPanelSelector(first.selector) || first.selector,
+        text: label,
+        name: label,
+        role: first.role === 'generic' ? 'button' : first.role || 'button',
+        type: first.type === 'text' ? 'button' : first.type || 'button',
+      };
+      const key = searchToolbarElementKey(recoveredElement);
+      if (!key || existingTargetKeys.has(key)) continue;
+      recovered.push(recoveredElement);
+      existingTargetKeys.add(key);
+      existingRecoveredLabels.add(normalizedLabel);
+    }
+    if (recovered.length === 0) return false;
+
+    const existingElements = Array.isArray(params.basePayload.elements)
+      ? params.basePayload.elements
+      : [];
+    const existingRefMap = Array.isArray(params.basePayload.refMap)
+      ? params.basePayload.refMap
+      : [];
+    const offset = existingRefMap.filter((entry: unknown) => entry != null).length;
+    const recoveredRefMap = buildFallbackRefMap(recovered).map((entry, index) =>
+      entry ? { ...entry, ref: `ref_text_filter_panel_${offset + index + 1}` } : null,
+    );
+    await this.bindSyntheticRefsToSelectors(params.tabId, recoveredRefMap, params.frameId);
+    const recoveredWithRefs = attachFallbackRefs(recovered, recoveredRefMap);
+
+    params.basePayload.elements = [...recoveredWithRefs, ...existingElements].slice(0, 150);
+    params.basePayload.refMap = [...recoveredRefMap, ...existingRefMap].slice(0, 150);
+    params.basePayload.refMapCount = params.basePayload.refMap.filter(
+      (entry: unknown) => entry != null,
+    ).length;
+    params.basePayload.count = Math.max(
+      Number(params.basePayload.count || 0),
+      params.basePayload.elements.length,
+    );
+    params.basePayload.fallbackUsed = true;
+    params.basePayload.fallbackSource = params.basePayload.fallbackSource
+      ? `${params.basePayload.fallbackSource}+filter_panel_target_recovery`
+      : 'filter_panel_target_recovery';
     return true;
   }
 
@@ -2120,6 +2318,12 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         assistantGuidance,
         frameId: requestedFrameId,
       });
+      await this.recoverFilterPanelTextTargets({
+        tabId,
+        basePayload,
+        assistantGuidance,
+        frameId: requestedFrameId,
+      });
       await this.supplementAuthFormInteractiveControls(tabId, basePayload, requestedFrameId);
       basePayload.visualElements = await this.collectQrVisualElements({
         tabId,
@@ -2263,6 +2467,12 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           }
           reconcilePageUnderstandingWithVisibleRows(basePayload);
           await this.recoverSearchToolbarTextTargets({
+            tabId,
+            basePayload,
+            assistantGuidance,
+            frameId: requestedFrameId,
+          });
+          await this.recoverFilterPanelTextTargets({
             tabId,
             basePayload,
             assistantGuidance,

@@ -698,7 +698,77 @@ describe('服务器测试', () => {
     }
   });
 
-  test('POST /mcp stale session 返回 JSON-RPC 错误信封', async () => {
+  test('POST /mcp stale session 可恢复执行普通 tools/call', async () => {
+    jest.spyOn(bridgeRuntimeState, 'syncBrowserProcessIfStale').mockImplementation(() => {
+      bridgeRuntimeState.setBrowserProcessRunning(true);
+      return true;
+    });
+    jest.spyOn(bridgeCommandChannel, 'isConnected').mockReturnValue(false);
+    bridgeRuntimeState.setBrowserProcessRunning(true);
+    bridgeRuntimeState.setCommandChannelConnected(true, {
+      type: 'websocket',
+      connectionId: 'server-test-command-channel',
+    });
+    bridgeRuntimeState.recordHeartbeat({
+      sentAt: Date.now(),
+      nativeConnected: true,
+      extensionId: 'server-test-extension',
+      connectionId: 'server-test-command-channel',
+      tabCount: 2,
+      windowCount: 1,
+    });
+    bridgeRuntimeState.setNativeHostAttached(true);
+    const extensionSpy = jest
+      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+      .mockResolvedValueOnce({
+        status: 'success',
+        items: [],
+      } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: '{"page":{"title":"Recovered"}}' }],
+          isError: false,
+        },
+      } as never);
+
+    try {
+      const stale = await supertest(Server.getInstance().server)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .set('Content-Type', 'application/json')
+        .set('mcp-session-id', 'stale-session-for-read-page-recovery-test')
+        .send({
+          jsonrpc: '2.0',
+          id: 99,
+          method: 'tools/call',
+          params: {
+            name: 'chrome_read_page',
+            arguments: { tabId: 1 },
+          },
+        })
+        .expect(200);
+
+      expect(stale.body).toMatchObject({
+        jsonrpc: '2.0',
+        id: 99,
+        result: {
+          isError: false,
+          content: [{ type: 'text' }],
+        },
+      });
+      const text = String(stale.body.result.content[0].text ?? '');
+      expect(JSON.parse(text)).toMatchObject({ page: { title: 'Recovered' } });
+      expect(stale.body.error).toBeUndefined();
+      expect(extensionSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.restoreAllMocks();
+      bridgeRuntimeState.reset();
+      sessionManager.reset();
+    }
+  });
+
+  test('POST /mcp stale session 对非 tools/call 仍返回 JSON-RPC 错误信封', async () => {
     const stale = await supertest(Server.getInstance().server)
       .post('/mcp')
       .set('Accept', 'application/json, text/event-stream')
@@ -707,11 +777,8 @@ describe('服务器测试', () => {
       .send({
         jsonrpc: '2.0',
         id: 99,
-        method: 'tools/call',
-        params: {
-          name: 'chrome_read_page',
-          arguments: { tabId: 1 },
-        },
+        method: 'tools/list',
+        params: {},
       })
       .expect(400);
 

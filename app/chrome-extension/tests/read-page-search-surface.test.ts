@@ -19,6 +19,7 @@ function interactive(overrides: Partial<ReadPageInteractiveElement>): ReadPageIn
     actionability: overrides.actionability ?? 'actionable',
     valueState: overrides.valueState,
     checked: overrides.checked,
+    rect: overrides.rect,
   };
 }
 
@@ -259,6 +260,44 @@ describe('buildSearchSurface', () => {
     expect(surface?.visibleButUnresolved).toEqual([]);
   });
 
+  it('treats applied-filter toolbar state text as the filter trigger', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_text_search_toolbar_9',
+          role: 'button',
+          name: '已筛选',
+        }),
+      ],
+      candidateActions: [
+        candidate({
+          id: 'ca_click_ref_text_search_toolbar_9',
+          targetRef: 'ref_text_search_toolbar_9',
+          intent: 'filter.open',
+          locatorChain: [
+            { type: 'ref', value: 'ref_text_search_toolbar_9' },
+            { type: 'aria', value: '已筛选' },
+            { type: 'css', value: '.toolbar-filter-applied' },
+          ],
+        }),
+      ],
+      visibleTextContent: '全部 图文 视频 用户 已筛选',
+    });
+
+    expect(surface?.controls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'filter_trigger',
+          label: '已筛选',
+          targetRef: 'ref_text_search_toolbar_9',
+          candidateActionId: 'ca_click_ref_text_search_toolbar_9',
+          source: 'text_recovery',
+        }),
+      ]),
+    );
+  });
+
   it('keeps category tabs out of result cards when toolbar refs are recovered', () => {
     const surface = buildSearchSurface({
       assistantGuidance: guidance,
@@ -329,6 +368,73 @@ describe('buildSearchSurface', () => {
     ]);
   });
 
+  it('does not classify lower filter-panel options as top search category tabs', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_text_search_toolbar_1',
+          role: 'tab',
+          name: '全部',
+          rect: { x: 220, y: 88, width: 40, height: 32 },
+        }),
+        interactive({
+          ref: 'ref_text_search_toolbar_2',
+          role: 'button',
+          name: '筛选',
+          rect: { x: 1040, y: 96, width: 56, height: 32 },
+        }),
+        interactive({
+          ref: 'ref_text_search_toolbar_3',
+          role: 'button',
+          name: '图文',
+          rect: { x: 960, y: 335, width: 48, height: 32 },
+        }),
+        interactive({
+          ref: 'ref_text_search_toolbar_4',
+          role: 'button',
+          name: '视频',
+          rect: { x: 1030, y: 335, width: 48, height: 32 },
+        }),
+      ],
+      candidateActions: [
+        candidate({
+          id: 'ca_tab_all',
+          targetRef: 'ref_text_search_toolbar_1',
+          intent: 'search.category_select',
+        }),
+        candidate({
+          id: 'ca_filter',
+          targetRef: 'ref_text_search_toolbar_2',
+          intent: 'filter.open',
+        }),
+        candidate({
+          id: 'ca_panel_images',
+          targetRef: 'ref_text_search_toolbar_3',
+        }),
+        candidate({
+          id: 'ca_panel_videos',
+          targetRef: 'ref_text_search_toolbar_4',
+        }),
+      ],
+      visibleTextContent: ['全部 筛选', '图文 视频'].join('\n'),
+    });
+
+    expect(surface?.categoryTabs?.map((control) => control.label)).toEqual(['全部']);
+    expect(surface?.controls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'filter_trigger',
+          label: '筛选',
+        }),
+      ]),
+    );
+    expect(surface?.categoryState).toMatchObject({
+      selectedLabels: [],
+      unresolvedLabels: [],
+    });
+  });
+
   it('does not classify result-card prose that merely contains toolbar words as controls', () => {
     const surface = buildSearchSurface({
       assistantGuidance: guidance,
@@ -342,6 +448,32 @@ describe('buildSearchSurface', () => {
     expect(surface?.visibleButUnresolved).toEqual([]);
     expect(surface?.controls).toEqual([]);
     expect(surface?.resultCards).toHaveLength(2);
+  });
+
+  it('extracts short toolbar labels from a long visible header line', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [],
+      candidateActions: [],
+      visibleTextContent: [
+        'Home Explore Messages Notifications Profile Search query text neutral navigation words 全部 图文 视频 用户 筛选',
+        'Result card text stays below the toolbar projection',
+      ].join('\n'),
+      visibleRegionRows: visibleRows(),
+    });
+
+    expect(surface?.categoryTabs?.map((control) => control.label)).toEqual([
+      '全部',
+      '图文',
+      '视频',
+      '用户',
+    ]);
+    expect(
+      surface?.visibleButUnresolved?.find((control) => control.label === '筛选'),
+    ).toMatchObject({
+      kind: 'filter_trigger',
+      source: 'visible_text_unresolved',
+    });
   });
 
   it('marks most-collected sort as an applied candidate only when the fresh control state says so', () => {
@@ -449,6 +581,80 @@ describe('buildSearchSurface', () => {
       menuOpenCandidate: true,
       optionLabels: ['综合', '最新', '最多收藏'],
     });
+  });
+
+  it('reports targetable recovered filter panel options from long visible text', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({ ref: 'ref_text_filter_panel_1', role: 'button', name: '最多收藏' }),
+        interactive({ ref: 'ref_text_filter_panel_2', role: 'button', name: '一天内' }),
+        interactive({ ref: 'ref_text_filter_panel_3', role: 'button', name: '未看过' }),
+      ],
+      candidateActions: [
+        candidate({
+          id: 'ca_click_ref_text_filter_panel_1',
+          targetRef: 'ref_text_filter_panel_1',
+          intent: 'filter.sort_most_collected',
+          locatorChain: [
+            { type: 'ref', value: 'ref_text_filter_panel_1' },
+            { type: 'aria', value: '最多收藏' },
+            { type: 'css', value: '.filter-panel .tag-most-saved' },
+          ],
+        }),
+        candidate({
+          id: 'ca_click_ref_text_filter_panel_2',
+          targetRef: 'ref_text_filter_panel_2',
+          locatorChain: [
+            { type: 'ref', value: 'ref_text_filter_panel_2' },
+            { type: 'aria', value: '一天内' },
+            { type: 'css', value: '.filter-panel .tag-one-day' },
+          ],
+        }),
+        candidate({
+          id: 'ca_click_ref_text_filter_panel_3',
+          targetRef: 'ref_text_filter_panel_3',
+          locatorChain: [
+            { type: 'ref', value: 'ref_text_filter_panel_3' },
+            { type: 'aria', value: '未看过' },
+            { type: 'css', value: '.filter-panel .tag-unseen' },
+          ],
+        }),
+      ],
+      visibleTextContent:
+        '排序依据 综合 最新 最多点赞 最多评论 最多收藏 发布时间 不限 一天内 一周内 半年内 搜索范围 不限 已看过 未看过 已关注 位置距离 不限 同城 附近 重置 收起',
+    });
+
+    expect(surface?.filterPanel).toMatchObject({
+      status: 'open_candidate',
+      optionLabels: expect.arrayContaining(['最多收藏', '一天内', '未看过']),
+      clearActionObserved: true,
+    });
+    expect(surface?.filterPanel?.targetableOptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'sort_most_collected',
+          label: '最多收藏',
+          targetRef: 'ref_text_filter_panel_1',
+          candidateActionId: 'ca_click_ref_text_filter_panel_1',
+          source: 'text_recovery',
+        }),
+        expect.objectContaining({
+          kind: 'filter_panel_option',
+          label: '一天内',
+          targetRef: 'ref_text_filter_panel_2',
+          candidateActionId: 'ca_click_ref_text_filter_panel_2',
+          source: 'text_recovery',
+        }),
+        expect.objectContaining({
+          kind: 'filter_panel_option',
+          label: '未看过',
+          targetRef: 'ref_text_filter_panel_3',
+          candidateActionId: 'ca_click_ref_text_filter_panel_3',
+          source: 'text_recovery',
+        }),
+      ]),
+    );
   });
 
   it('reports result coverage as incomplete when more content or load-more is visible', () => {

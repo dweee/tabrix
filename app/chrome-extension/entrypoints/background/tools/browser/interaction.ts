@@ -46,12 +46,30 @@ export const NEW_TAB_OBSERVE_DRAIN_VERIFIER_MS =
   CLICK_VERIFIER_READBACK_MAX_MS + NEW_TAB_OBSERVE_VERIFIER_CAP_BUFFER_MS;
 const FILL_PENDING_DOCUMENT_WAIT_MS = 5000;
 const FILL_CONTENT_MESSAGE_RETRY_DELAY_MS = 450;
-const LIGHTWEIGHT_POST_ACTION_TIMEOUT_MS = 1000;
+// Lightweight actions still need enough room for real SPA components to
+// run their event handlers and DOM verification window. Keep this far below
+// the legacy 15s bridge hang, but avoid false timeouts for toolbar menus.
+const LIGHTWEIGHT_POST_ACTION_TIMEOUT_MS = 2000;
+const DYNAMIC_FILTER_POST_ACTION_TIMEOUT_MS = 13000;
+const CLICK_HELPER_RESPONSE_TIMEOUT_BUFFER_MS = 1500;
+const CLICK_HELPER_FAST_RESPONSE_TIMEOUT_CAP_MS = 15000;
+const CLICK_HELPER_NAVIGATION_RESPONSE_TIMEOUT_CAP_MS = 14000;
 const LIGHTWEIGHT_POST_ACTION_INTENTS = new Set([
   'filter.open',
   'filter.sort_most_collected',
+  'search.category_select',
   'auth.refresh_qr',
 ]);
+
+class ClickHelperResponseTimeoutError extends Error {
+  readonly timeoutMs: number;
+
+  constructor(timeoutMs: number) {
+    super(`click helper response timed out after ${timeoutMs}ms`);
+    this.name = 'ClickHelperResponseTimeoutError';
+    this.timeoutMs = timeoutMs;
+  }
+}
 
 export function buildClickHelperDispatchTimingPolicy(params: {
   waitForNavigation: boolean;
@@ -63,9 +81,12 @@ export function buildClickHelperDispatchTimingPolicy(params: {
   reason: 'caller_requested' | 'lightweight_post_action_intent';
 } {
   if (params.intent && LIGHTWEIGHT_POST_ACTION_INTENTS.has(params.intent)) {
+    const timeoutCap = params.intent.startsWith('filter.')
+      ? DYNAMIC_FILTER_POST_ACTION_TIMEOUT_MS
+      : LIGHTWEIGHT_POST_ACTION_TIMEOUT_MS;
     return {
       waitForNavigation: false,
-      timeout: Math.min(params.timeout, LIGHTWEIGHT_POST_ACTION_TIMEOUT_MS),
+      timeout: Math.min(params.timeout, timeoutCap),
       reason: 'lightweight_post_action_intent',
     };
   }
@@ -74,6 +95,39 @@ export function buildClickHelperDispatchTimingPolicy(params: {
     timeout: params.timeout,
     reason: 'caller_requested',
   };
+}
+
+function buildClickHelperResponseTimeoutMs(policy: {
+  waitForNavigation: boolean;
+  timeout: number;
+}): number {
+  const requested = Math.max(0, Number(policy.timeout) || 0);
+  if (!policy.waitForNavigation) {
+    return Math.max(
+      CLICK_HELPER_RESPONSE_TIMEOUT_BUFFER_MS,
+      Math.min(
+        requested + CLICK_HELPER_RESPONSE_TIMEOUT_BUFFER_MS,
+        CLICK_HELPER_FAST_RESPONSE_TIMEOUT_CAP_MS,
+      ),
+    );
+  }
+  return Math.max(
+    CLICK_HELPER_RESPONSE_TIMEOUT_BUFFER_MS,
+    Math.min(
+      requested + CLICK_HELPER_RESPONSE_TIMEOUT_BUFFER_MS,
+      CLICK_HELPER_NAVIGATION_RESPONSE_TIMEOUT_CAP_MS,
+    ),
+  );
+}
+
+function withClickHelperResponseTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new ClickHelperResponseTimeoutError(timeoutMs)), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeoutId != null) clearTimeout(timeoutId);
+  }) as Promise<T>;
 }
 
 function firstCandidateCssLocator(
@@ -501,23 +555,33 @@ function createStructuredClickHelperErrorResponse(input: {
   reason?: string;
   targetConsistency?: unknown;
   actionRecovery?: ClickActionRecoveryGuidance;
+  businessVerification?: unknown;
+  postActionReadback?: unknown;
 }): ToolResult {
+  const payload = buildStructuredClickHelperErrorResult({
+    message: input.message,
+    clickMethod: input.clickMethod,
+    elementInfo: input.elementInfo,
+    browserSignals: input.browserSignals ?? { newTabOpened: false },
+    targetBinding: input.targetBinding,
+    reason: input.reason,
+    targetConsistency: input.targetConsistency,
+    actionRecovery: input.actionRecovery,
+  });
   return {
     content: [
       {
         type: 'text',
-        text: JSON.stringify(
-          buildStructuredClickHelperErrorResult({
-            message: input.message,
-            clickMethod: input.clickMethod,
-            elementInfo: input.elementInfo,
-            browserSignals: input.browserSignals ?? { newTabOpened: false },
-            targetBinding: input.targetBinding,
-            reason: input.reason,
-            targetConsistency: input.targetConsistency,
-            actionRecovery: input.actionRecovery,
-          }),
-        ),
+        text: JSON.stringify({
+          ...payload,
+          ...(input.businessVerification
+            ? {
+                businessVerification: input.businessVerification,
+                postconditionStatus: input.businessVerification,
+              }
+            : {}),
+          ...(input.postActionReadback ? { postActionReadback: input.postActionReadback } : {}),
+        }),
       },
     ],
     isError: true,
@@ -1250,7 +1314,7 @@ class ClickTool extends BaseBrowserToolExecutor {
         timeout,
         intent: candidateIntent,
       });
-      const resultPromise = this.sendMessageToTab(
+      const rawResultPromise = this.sendMessageToTab(
         tab.id,
         {
           action: TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
@@ -1269,6 +1333,10 @@ class ClickTool extends BaseBrowserToolExecutor {
         },
         finalFrameId,
       );
+      const resultPromise = withClickHelperResponseTimeout(
+        rawResultPromise,
+        buildClickHelperResponseTimeoutMs(dispatchTiming),
+      );
       const verifierRequested = isVerifierContextRequested(args.verifierContext);
       const newTabObservationMaxMs = verifierRequested
         ? NEW_TAB_OBSERVE_DRAIN_VERIFIER_MS
@@ -1279,7 +1347,34 @@ class ClickTool extends BaseBrowserToolExecutor {
       });
 
       // Send click message to content script
-      const result = await resultPromise;
+      let result: any;
+      try {
+        result = await resultPromise;
+      } catch (error) {
+        const browserSignals = await browserSignalsPromise;
+        const isResponseTimeout = error instanceof ClickHelperResponseTimeoutError;
+        const reason = isResponseTimeout ? 'click_helper_response_timeout' : 'click_dispatch_error';
+        const businessVerification = buildBusinessVerification(false, 'no_observed_change');
+        const postActionReadback = buildPostActionReadbackEvidence({
+          candidateAction: args.candidateAction,
+          dispatchSucceeded: false,
+          actionKind: 'click',
+          observedOutcome: 'no_observed_change',
+        });
+        return createStructuredClickHelperErrorResponse({
+          message: isResponseTimeout
+            ? `Click helper did not return before the background response deadline (${error.timeoutMs}ms)`
+            : `Click helper dispatch failed: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+          clickMethod: requestedClickMethod,
+          browserSignals,
+          targetBinding: buildTargetBinding(),
+          reason,
+          businessVerification,
+          postActionReadback,
+        });
+      }
 
       // Surface page-local DOM-region changes to the action-outcome observer
       // (best-effort). The observer also folds in background-derived signals

@@ -234,6 +234,103 @@ describe('candidateAction bridge', () => {
     expect(clickMessage.ref).toBeUndefined();
   });
 
+  it('returns structured failure when recovered search toolbar click helper does not respond', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4114,
+      title: 'Search',
+      url: 'https://example.com/search?q=neutral',
+      windowId: 1,
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi
+      .spyOn(clickTool as any, 'sendMessageToTab')
+      .mockReturnValue(new Promise(() => {}));
+
+    const result = await clickTool.execute({
+      timeout: 1,
+      candidateAction: {
+        targetRef: 'ref_text_search_toolbar_4',
+        intent: 'search.category_select',
+        locatorChain: [
+          { type: 'ref', value: 'ref_text_search_toolbar_4' },
+          { type: 'css', value: '.search-toolbar [data-category="video"]' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload).toMatchObject({
+      success: false,
+      dispatchSucceeded: false,
+      observedOutcome: 'no_observed_change',
+      reason: 'click_helper_response_timeout',
+      resultShape: 'structured_click_error',
+      targetBinding: {
+        resolutionSource: 'candidate_locator_css',
+        dispatchTarget: 'selector',
+      },
+      businessVerification: {
+        status: 'not_proven',
+        candidateActionIntent: 'search.category_select',
+        businessSuccessProven: false,
+      },
+    });
+    expect(payload.postActionReadback).toMatchObject({
+      dispatchSucceeded: false,
+      requiredNextAction: 'stop_or_retry_after_fresh_read',
+    });
+    const clickMessage = sendSpy.mock.calls.find(
+      ([, message]) => (message as any)?.action === TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+    )?.[1] as any;
+    expect(clickMessage).toMatchObject({
+      selector: '.search-toolbar [data-category="video"]',
+      waitForNavigation: false,
+      timeout: 1,
+    });
+    expect(clickMessage.ref).toBeUndefined();
+  });
+
+  it('routes recovered filter panel targetRef through candidateAction locator css', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4115,
+      title: 'Search',
+      url: 'https://example.com/search?q=neutral',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      dispatchSucceeded: true,
+      signals: { domChanged: true },
+    });
+
+    const result = await clickTool.execute({
+      candidateAction: {
+        targetRef: 'ref_text_filter_panel_7',
+        intent: 'filter.sort_most_collected',
+        locatorChain: [
+          { type: 'ref', value: 'ref_text_filter_panel_7' },
+          { type: 'aria', value: '最多收藏' },
+          { type: 'css', value: '.filter-panel .tags[data-filter="most-saved"]' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.targetBinding).toMatchObject({
+      resolutionSource: 'candidate_locator_css',
+      dispatchTarget: 'selector',
+    });
+    const clickMessage = sendSpy.mock.calls.find(
+      ([, message]) => (message as any)?.action === TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+    )?.[1] as any;
+    expect(clickMessage).toMatchObject({
+      selector: '.filter-panel .tags[data-filter="most-saved"]',
+    });
+    expect(clickMessage.ref).toBeUndefined();
+  });
+
   it('does not dispatch recovered search toolbar targetRef without a css locator', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4113,

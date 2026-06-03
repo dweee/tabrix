@@ -100,8 +100,16 @@ function isSyntheticSearchToolbarRef(value: string): boolean {
   return value.startsWith('ref_text_search_toolbar_');
 }
 
+function isSyntheticFilterPanelRef(value: string): boolean {
+  return value.startsWith('ref_text_filter_panel_');
+}
+
 function isLocatorBackedSyntheticRef(value: string): boolean {
-  return isSyntheticTextMenuRef(value) || isSyntheticSearchToolbarRef(value);
+  return (
+    isSyntheticTextMenuRef(value) ||
+    isSyntheticSearchToolbarRef(value) ||
+    isSyntheticFilterPanelRef(value)
+  );
 }
 
 function isFallbackRef(value: string): boolean {
@@ -171,7 +179,10 @@ export function resolveCandidateActionTarget(
       };
     }
 
-    if (isSyntheticSearchToolbarRef(candidateTargetRef)) {
+    if (
+      isSyntheticSearchToolbarRef(candidateTargetRef) ||
+      isSyntheticFilterPanelRef(candidateTargetRef)
+    ) {
       return {
         ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
         source: 'none',
@@ -212,7 +223,10 @@ export function resolveCandidateActionTarget(
     };
   }
 
-  if (locatorRef && isSyntheticSearchToolbarRef(locatorRef)) {
+  if (
+    locatorRef &&
+    (isSyntheticSearchToolbarRef(locatorRef) || isSyntheticFilterPanelRef(locatorRef))
+  ) {
     return {
       ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
       source: 'none',

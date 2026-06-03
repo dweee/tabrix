@@ -10,6 +10,7 @@ function element(overrides: Partial<ReadPageInteractiveElement>): ReadPageIntera
     name: overrides.name ?? 'Search',
     matchSource: overrides.matchSource ?? 'visible_text',
     actionability: overrides.actionability ?? 'actionable',
+    rect: overrides.rect,
   };
 }
 
@@ -133,6 +134,7 @@ describe('read_page candidate action intents', () => {
     const actions = buildCandidateActions(
       [
         element({ ref: 'ref_filter', role: 'button', name: '筛选' }),
+        element({ ref: 'ref_filter_applied', role: 'button', name: '已筛选' }),
         element({ ref: 'ref_sort', role: 'button', name: '排序' }),
         element({ ref: 'ref_category', role: 'tab', name: '图文' }),
         element({ ref: 'ref_sort_saves', role: 'option', name: '最多收藏' }),
@@ -141,6 +143,10 @@ describe('read_page candidate action intents', () => {
     );
 
     expect(actions.find((action) => action.targetRef === 'ref_filter')).toMatchObject({
+      actionType: 'click',
+      intent: 'filter.open',
+    });
+    expect(actions.find((action) => action.targetRef === 'ref_filter_applied')).toMatchObject({
       actionType: 'click',
       intent: 'filter.open',
     });
@@ -156,6 +162,108 @@ describe('read_page candidate action intents', () => {
       actionType: 'click',
       intent: 'filter.sort_most_collected',
     });
+  });
+
+  it('keeps recovered filter-panel options executable and prioritized', () => {
+    const actions = buildCandidateActions(
+      [
+        ...Array.from({ length: 24 }, (_, index) =>
+          element({
+            ref: `ref_result_${index + 1}`,
+            role: 'link',
+            name: `Neutral result ${index + 1}`,
+          }),
+        ),
+        element({
+          ref: 'ref_text_filter_panel_1',
+          role: 'button',
+          name: '最多收藏',
+        }),
+        element({
+          ref: 'ref_text_filter_panel_2',
+          role: 'button',
+          name: '一天内',
+        }),
+        element({
+          ref: 'ref_text_filter_panel_3',
+          role: 'button',
+          name: '未看过',
+        }),
+      ],
+      [
+        { ref: 'ref_text_filter_panel_1', selector: '.filter-panel .tag-most-saved' },
+        { ref: 'ref_text_filter_panel_2', selector: '.filter-panel .tag-one-day' },
+        { ref: 'ref_text_filter_panel_3', selector: '.filter-panel .tag-unseen' },
+      ],
+    );
+
+    expect(actions.slice(0, 3).map((action) => action.targetRef)).toEqual([
+      'ref_text_filter_panel_1',
+      'ref_text_filter_panel_2',
+      'ref_text_filter_panel_3',
+    ]);
+    expect(actions.find((action) => action.targetRef === 'ref_text_filter_panel_1')).toMatchObject({
+      actionType: 'click',
+      intent: 'filter.sort_most_collected',
+      locatorChain: expect.arrayContaining([
+        { type: 'css', value: '.filter-panel .tag-most-saved' },
+      ]),
+    });
+    expect(actions.find((action) => action.targetRef === 'ref_text_filter_panel_2')).toMatchObject({
+      actionType: 'click',
+      intent: 'filter.open',
+      locatorChain: expect.arrayContaining([{ type: 'css', value: '.filter-panel .tag-one-day' }]),
+    });
+    expect(actions.find((action) => action.targetRef === 'ref_text_filter_panel_3')).toMatchObject({
+      actionType: 'click',
+      intent: 'filter.open',
+      locatorChain: expect.arrayContaining([{ type: 'css', value: '.filter-panel .tag-unseen' }]),
+    });
+  });
+
+  it('does not mark lower filter-panel category-like options as search category selects', () => {
+    const actions = buildCandidateActions(
+      [
+        element({
+          ref: 'ref_tab_all',
+          role: 'tab',
+          name: '全部',
+          rect: { x: 220, y: 88, width: 40, height: 32 },
+        }),
+        element({
+          ref: 'ref_filter',
+          role: 'button',
+          name: '筛选',
+          rect: { x: 1040, y: 96, width: 56, height: 32 },
+        }),
+        element({
+          ref: 'ref_panel_images',
+          role: 'button',
+          name: '图文',
+          rect: { x: 960, y: 335, width: 48, height: 32 },
+        }),
+        element({
+          ref: 'ref_panel_videos',
+          role: 'button',
+          name: '视频',
+          rect: { x: 1030, y: 335, width: 48, height: 32 },
+        }),
+      ],
+      [],
+    );
+
+    expect(actions.find((action) => action.targetRef === 'ref_tab_all')).toMatchObject({
+      intent: 'search.category_select',
+    });
+    expect(actions.find((action) => action.targetRef === 'ref_filter')).toMatchObject({
+      intent: 'filter.open',
+    });
+    expect(
+      actions.find((action) => action.targetRef === 'ref_panel_images')?.intent,
+    ).toBeUndefined();
+    expect(
+      actions.find((action) => action.targetRef === 'ref_panel_videos')?.intent,
+    ).toBeUndefined();
   });
 
   it('marks QR refresh controls without treating them as OTP or login submit', () => {

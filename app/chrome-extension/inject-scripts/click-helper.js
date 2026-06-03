@@ -3,10 +3,16 @@
 // click-helper.js
 // This script is injected into the page to handle click operations
 
-if (window.__CLICK_HELPER_INITIALIZED__) {
+const TABRIX_CLICK_HELPER_VERSION = 'click-helper-v2-message-listener-reinstall';
+
+if (
+  window.__CLICK_HELPER_INITIALIZED__ &&
+  window.__TABRIX_CLICK_HELPER_VERSION__ === TABRIX_CLICK_HELPER_VERSION
+) {
   // Already initialized, skip
 } else {
   window.__CLICK_HELPER_INITIALIZED__ = true;
+  window.__TABRIX_CLICK_HELPER_VERSION__ = TABRIX_CLICK_HELPER_VERSION;
 
   const SCROLL_READY_MAX_MS = 150;
   const RECT_STABLE_EPSILON_PX = 1;
@@ -65,6 +71,16 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
       element.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
     } catch {
       return Promise.resolve({ waitedMs: 0, reason: 'scroll_failed', ready: false });
+    }
+
+    if (document.visibilityState === 'hidden') {
+      const rect = element instanceof Element ? element.getBoundingClientRect() : null;
+      return Promise.resolve({
+        waitedMs: Math.max(0, Math.round(nowMs() - startedAt)),
+        reason: 'hidden_document_fast_path',
+        ready: !!rect && rect.width > 0 && rect.height > 0,
+        stableFrames: 0,
+      });
     }
 
     return new Promise((resolve) => {
@@ -861,6 +877,10 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
         finish(initialReason);
         return;
       }
+      if (document.visibilityState === 'hidden') {
+        finish('hidden_document_fast_path');
+        return;
+      }
       const deadline = startedAt + Math.max(0, ms);
       const tick = () => {
         if (done) return;
@@ -932,16 +952,25 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
     };
   }
 
-  function dispatchClickSequence(element, x, y, options = {}, isDouble = false) {
-    const base = normalizeMouseOpts(x, y, options);
-    const nativeClickable =
-      element instanceof HTMLElement ||
-      element instanceof SVGElement ||
+  function shouldUseNativeClick(element, button) {
+    if (button !== 0 || typeof element.click !== 'function') return false;
+    if (
       element instanceof HTMLInputElement ||
       element instanceof HTMLButtonElement ||
       element instanceof HTMLAnchorElement ||
-      element instanceof HTMLLabelElement;
-    const useNativeClick = nativeClickable && base.button === 0;
+      element instanceof HTMLLabelElement ||
+      element instanceof HTMLTextAreaElement ||
+      element instanceof HTMLSelectElement
+    ) {
+      return true;
+    }
+    const tagName = String(element.tagName || '').toUpperCase();
+    return tagName === 'OPTION' || tagName === 'SUMMARY';
+  }
+
+  function dispatchClickSequence(element, x, y, options = {}, isDouble = false) {
+    const base = normalizeMouseOpts(x, y, options);
+    const useNativeClick = shouldUseNativeClick(element, base.button);
     const pointerBase = {
       ...base,
       pointerId: 1,
@@ -1040,8 +1069,17 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
     return element === elementAtPoint || element.contains(elementAtPoint);
   }
 
+  try {
+    if (
+      window.__TABRIX_CLICK_HELPER_MESSAGE_HANDLER__ &&
+      typeof chrome?.runtime?.onMessage?.removeListener === 'function'
+    ) {
+      chrome.runtime.onMessage.removeListener(window.__TABRIX_CLICK_HELPER_MESSAGE_HANDLER__);
+    }
+  } catch {}
+
   // Listen for messages from the extension
-  chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+  const tabrixClickHelperMessageHandler = (request, _sender, sendResponse) => {
     if (request.action === 'clickElement') {
       clickElement(
         request.selector,
@@ -1070,5 +1108,8 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
       sendResponse({ status: 'pong' });
       return false;
     }
-  });
+  };
+
+  window.__TABRIX_CLICK_HELPER_MESSAGE_HANDLER__ = tabrixClickHelperMessageHandler;
+  chrome.runtime.onMessage.addListener(tabrixClickHelperMessageHandler);
 }

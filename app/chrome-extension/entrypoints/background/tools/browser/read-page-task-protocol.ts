@@ -268,7 +268,7 @@ export function redactSensitiveCandidateActionsForAi(
     const safeLocatorChain = action.locatorChain.filter(
       (item) => item.type === 'ref' || item.type === 'css',
     );
-    return {
+    const redactedAction: ReadPageCandidateAction = {
       ...action,
       matchReason: isLogoutOperationText(sensitiveText)
         ? 'redacted_logout_action_signal'
@@ -276,6 +276,10 @@ export function redactSensitiveCandidateActionsForAi(
       locatorChain:
         safeLocatorChain.length > 0 ? safeLocatorChain : [{ type: 'ref', value: action.targetRef }],
     };
+    if (redactedAction.intent === 'search.category_select') {
+      delete redactedAction.intent;
+    }
+    return redactedAction;
   });
 }
 

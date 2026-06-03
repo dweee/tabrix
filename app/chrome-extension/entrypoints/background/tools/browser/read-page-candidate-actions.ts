@@ -7,8 +7,11 @@ import type {
 
 export type CandidateActionSeed = ReadPageCandidateAction;
 
-const FILTER_OPEN_LABEL_PATTERN = /^(筛选|过滤|filter|filters|排序|sort)$/i;
+const FILTER_OPEN_LABEL_PATTERN = /^(筛选|已筛选|过滤|filter|filters|filtered|排序|sort)$/i;
 const SEARCH_CATEGORY_LABEL_PATTERN = /^(全部|图文|视频|用户|all|images?|photos?|videos?|users?)$/i;
+const FILTER_PANEL_LABEL_PATTERN =
+  /^(综合|最新|最热|最多点赞|最多评论|最多收藏|不限|一天内|一周内|半年内|已看过|未看过|已关注|同城|附近|重置|收起|清除|确认|应用|all|latest|popular|any|most\s*(liked|commented|saved|collected)|reset|clear|confirm|apply)$/i;
+const SEARCH_TOOLBAR_VERTICAL_BAND_PX = 180;
 
 function buildRefSelectorMap(refMap: any[]): Map<string, string> {
   const map = new Map<string, string>();
@@ -26,6 +29,9 @@ function scoreCandidateElementPriority(element: ReadPageInteractiveElement, inde
   const name = String(element.name || '').trim();
   let score = 0;
   if (ref.startsWith('ref_text_menu_')) score += 120;
+  if (ref.startsWith('ref_text_filter_panel_')) score += 116;
+  if (ref.startsWith('ref_text_search_toolbar_')) score += 112;
+  if (FILTER_PANEL_LABEL_PATTERN.test(name)) score += 64;
   if (/\b(menu|more|settings?|logout|sign out|log out)\b|菜单|更多|设置|退出|注销/i.test(name)) {
     score += 80;
   }
@@ -42,6 +48,7 @@ function scoreCandidateElementPriority(element: ReadPageInteractiveElement, inde
 function inferCandidateActionIntent(
   element: ReadPageInteractiveElement,
   actionType: 'click' | 'fill',
+  context: { interactiveElements: readonly ReadPageInteractiveElement[] },
 ): ReadPageCandidateAction['intent'] | undefined {
   const role = String(element.role || '').toLowerCase();
   const name = String(element.name || '').trim();
@@ -76,15 +83,58 @@ function inferCandidateActionIntent(
     return 'auth.refresh_qr';
   }
   if (FILTER_OPEN_LABEL_PATTERN.test(name)) return 'filter.open';
-  if (SEARCH_CATEGORY_LABEL_PATTERN.test(name)) return 'search.category_select';
+  if (SEARCH_CATEGORY_LABEL_PATTERN.test(name)) {
+    return isSearchToolbarCategoryElement(element, context.interactiveElements)
+      ? 'search.category_select'
+      : undefined;
+  }
   if (
     /最多收藏|收藏最多|按收藏|收藏数|most\s*(collected|saved|favorited)|top\s*saves/i.test(name)
   ) {
     return 'filter.sort_most_collected';
   }
+  if (
+    String(element.ref || '').startsWith('ref_text_filter_panel_') &&
+    FILTER_PANEL_LABEL_PATTERN.test(name)
+  ) {
+    return 'filter.open';
+  }
   if (isSearchActionText(name)) return 'search.submit';
   if (isOpenDetailActionText(name)) return 'content.open_detail';
   return undefined;
+}
+
+function rectTop(element: ReadPageInteractiveElement): number | undefined {
+  const y = element.rect?.y;
+  return typeof y === 'number' && Number.isFinite(y) ? y : undefined;
+}
+
+function isSearchToolbarAnchor(element: ReadPageInteractiveElement): boolean {
+  const role = String(element.role || '').toLowerCase();
+  const name = String(element.name || '').trim();
+  return (
+    (role === 'searchbox' && isSearchActionText(name || role)) ||
+    FILTER_OPEN_LABEL_PATTERN.test(name) ||
+    SEARCH_CATEGORY_LABEL_PATTERN.test(name)
+  );
+}
+
+function isSearchToolbarCategoryElement(
+  element: ReadPageInteractiveElement,
+  interactiveElements: readonly ReadPageInteractiveElement[],
+): boolean {
+  const currentTop = rectTop(element);
+  if (currentTop === undefined) return true;
+
+  const anchorTops = interactiveElements
+    .filter(isSearchToolbarAnchor)
+    .map(rectTop)
+    .filter((top): top is number => top !== undefined)
+    .sort((left, right) => left - right);
+  const topAnchor = anchorTops[0];
+  if (topAnchor === undefined) return true;
+
+  return currentTop - topAnchor <= SEARCH_TOOLBAR_VERTICAL_BAND_PX;
 }
 
 function isSearchActionText(value: string): boolean {
@@ -160,7 +210,7 @@ export function buildCandidateActions(
   const clickRoles = new Set(['button', 'link', 'menuitem', 'tab', 'option', 'checkbox', 'switch']);
   const fillRoles = new Set(['textbox', 'searchbox', 'combobox']);
   const primaryKeywords =
-    /(submit|save|continue|next|confirm|login|sign in|search|checkout|send code|get code|request code|filter|filters|sort|refresh|reload|all|images?|videos?|users?|提交|保存|继续|下一步|确认|登录|搜索|筛选|过滤|排序|全部|图文|视频|用户|最多收藏|收藏最多|刷新|获取验证码|发送验证码|重新发送|同意|协议)/i;
+    /(submit|save|continue|next|confirm|login|sign in|search|checkout|send code|get code|request code|filter|filters|filtered|sort|refresh|reload|all|images?|videos?|users?|latest|popular|reset|clear|apply|提交|保存|继续|下一步|确认|登录|搜索|筛选|已筛选|过滤|排序|全部|图文|视频|用户|综合|最新|最多点赞|最多评论|最多收藏|收藏最多|不限|一天内|一周内|半年内|已看过|未看过|已关注|同城|附近|重置|收起|刷新|获取验证码|发送验证码|重新发送|同意|协议)/i;
 
   const seeds: CandidateActionSeed[] = [];
   const prioritizedElements = [...interactiveElements]
@@ -192,7 +242,9 @@ export function buildCandidateActions(
       : actionType === 'fill'
         ? 'form input candidate from structured snapshot'
         : 'interactive clickable candidate from structured snapshot';
-    const intent = inferCandidateActionIntent(element, actionType);
+    const intent = inferCandidateActionIntent(element, actionType, {
+      interactiveElements: prioritizedElements,
+    });
     const locatorChain = buildLocatorChain({ element, selector, actionType, intent });
 
     const safeRef = element.ref.replace(/[^a-zA-Z0-9_]/g, '_');

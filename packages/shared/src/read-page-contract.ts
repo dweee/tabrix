@@ -265,6 +265,7 @@ export interface ReadPageSearchSurface {
   filterPanel?: {
     status: 'open_candidate' | 'closed_or_not_observed' | 'ambiguous' | string;
     optionLabels: string[];
+    targetableOptions?: ReadPageSearchSurfaceControl[];
     appliedFilterLabels: string[];
     clearActionObserved: boolean;
     confirmActionObserved: boolean;

@@ -200,9 +200,12 @@ function sendMcpJsonRpcError(
   });
 }
 
-const BROWSER_WORLD_BASELINE_TOOL_NAME = 'get_windows_and_tabs';
+type StaleSessionRecoverableToolCall = {
+  name: string;
+  args: Record<string, unknown>;
+};
 
-function getStaleSessionRecoverableToolCallArgs(body: unknown): Record<string, unknown> | null {
+function getStaleSessionRecoverableToolCall(body: unknown): StaleSessionRecoverableToolCall | null {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
   const requestBody = body as {
     method?: unknown;
@@ -212,10 +215,15 @@ function getStaleSessionRecoverableToolCallArgs(body: unknown): Record<string, u
     };
   };
   if (requestBody.method !== 'tools/call') return null;
-  if (requestBody.params?.name !== BROWSER_WORLD_BASELINE_TOOL_NAME) return null;
+  if (typeof requestBody.params?.name !== 'string' || !requestBody.params.name) return null;
   const args = requestBody.params.arguments;
-  if (!args || typeof args !== 'object' || Array.isArray(args)) return {};
-  return args as Record<string, unknown>;
+  return {
+    name: requestBody.params.name,
+    args:
+      !args || typeof args !== 'object' || Array.isArray(args)
+        ? {}
+        : (args as Record<string, unknown>),
+  };
 }
 
 function getLocalNetworkAddresses(): string[] {
@@ -757,10 +765,10 @@ export class Server {
       if (transport) {
         // Existing session found, proceed.
       } else if (sessionId && !transport) {
-        const recoverableArgs = getStaleSessionRecoverableToolCallArgs(request.body);
-        if (recoverableArgs) {
+        const recoverableToolCall = getStaleSessionRecoverableToolCall(request.body);
+        if (recoverableToolCall) {
           try {
-            const result = await handleToolCall(BROWSER_WORLD_BASELINE_TOOL_NAME, recoverableArgs);
+            const result = await handleToolCall(recoverableToolCall.name, recoverableToolCall.args);
             reply.code(HTTP_STATUS.OK).send({
               jsonrpc: '2.0',
               id: getJsonRpcRequestId(request.body),
