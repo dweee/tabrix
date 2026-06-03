@@ -212,6 +212,11 @@ describe('buildSearchSurface', () => {
       kind: 'filter_trigger',
       source: 'visible_text_unresolved',
     });
+    expect(surface?.categoryState).toMatchObject({
+      selectedLabels: [],
+      unresolvedLabels: ['全部', '图文', '视频', '用户'],
+    });
+    expect(surface?.observationCoverage?.capabilityGaps).toContain('visible_text_without_locator');
     expect(surface?.resultCards).toEqual([]);
   });
 
@@ -378,6 +383,120 @@ describe('buildSearchSurface', () => {
       observedResultCount: 10,
       status: 'sufficient',
     });
+  });
+
+  it('reports selected category tab state from structured interactive evidence', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({ ref: 'ref_tab_all', role: 'tab', name: '全部' }),
+        interactive({ ref: 'ref_tab_image', role: 'tab', name: '图文', checked: true }),
+        interactive({ ref: 'ref_tab_video', role: 'tab', name: '视频' }),
+        interactive({ ref: 'ref_tab_user', role: 'tab', name: '用户' }),
+      ],
+      candidateActions: [
+        candidate({
+          id: 'ca_tab_image',
+          targetRef: 'ref_tab_image',
+          intent: 'search.category_select',
+        }),
+      ],
+      visibleTextContent: '全部 图文 视频 用户',
+    });
+
+    expect(surface?.categoryTabs?.find((control) => control.label === '图文')).toMatchObject({
+      kind: 'category_tab',
+      state: expect.objectContaining({ selected: true, current: true }),
+    });
+    expect(surface?.categoryState).toMatchObject({
+      selectedLabels: ['图文'],
+      ambiguousLabels: [],
+      unresolvedLabels: [],
+    });
+  });
+
+  it('reports filter panel and sort menu options from short visible toolbar text', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [interactive({ ref: 'ref_sort_menu', role: 'button', name: '排序' })],
+      candidateActions: [
+        candidate({ id: 'ca_sort_menu', targetRef: 'ref_sort_menu', intent: 'filter.open' }),
+      ],
+      visibleTextContent: [
+        '全部 图文 视频 用户',
+        '排序',
+        '综合 最新 最多收藏 不限',
+        '清除 确认',
+      ].join('\n'),
+    });
+
+    expect(surface?.controls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'sort_menu',
+          label: '排序',
+        }),
+      ]),
+    );
+    expect(surface?.filterPanel).toMatchObject({
+      status: 'open_candidate',
+      optionLabels: ['综合', '最新', '最多收藏', '不限'],
+      clearActionObserved: true,
+      confirmActionObserved: true,
+    });
+    expect(surface?.sortEvidence).toMatchObject({
+      requestedSort: 'sort_menu',
+      menuOpenCandidate: true,
+      optionLabels: ['综合', '最新', '最多收藏'],
+    });
+  });
+
+  it('reports result coverage as incomplete when more content or load-more is visible', () => {
+    const rows = visibleRows();
+    rows.pageInfo.pixelsBelow = 1600;
+    rows.rowCount = 20;
+
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [],
+      candidateActions: [],
+      visibleRegionRows: rows,
+      visibleTextContent: '加载更多',
+    });
+
+    expect(surface?.resultCoverage).toMatchObject({
+      observedResultCount: 2,
+      pixelsBelow: 1600,
+      loadMoreCandidateObserved: true,
+      virtualizedListCandidate: true,
+      status: 'scroll_or_load_more_required',
+    });
+    expect(surface?.observationCoverage?.capabilityGaps).toContain(
+      'top_n_result_completeness_not_proven',
+    );
+  });
+
+  it('reports frame and shadow coverage boundaries instead of hiding them', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [],
+      candidateActions: [],
+      visibleTextContent: '筛选',
+      frameContext: {
+        frameScope: 'subframe',
+        coverage: 'responding_frame_only',
+        source: 'content_script_runtime',
+      },
+    });
+
+    expect(surface?.observationCoverage).toMatchObject({
+      frameCoverage: 'responding_frame_only',
+      iframeCoverage: 'explicit_frame_read',
+      shadowDomCoverage: 'not_inspected',
+    });
+    expect(surface?.observationCoverage?.capabilityGaps).toContain(
+      'shadow_dom_coverage_not_inspected',
+    );
   });
 
   it('does not run the search projection when the caller did not ask for search work', () => {

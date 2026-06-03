@@ -1073,6 +1073,7 @@ async function buildModeOutput(params: {
     candidateActions,
     visibleRegionRows,
     visibleTextContent: params.visibleTextContent,
+    frameContext: params.frameContext,
   });
 
   return buildReadPageModeResult({

@@ -228,6 +228,13 @@ export interface ReadPageSearchSurfaceControl {
   actionability?: string;
   source?: 'interactive_elements' | 'text_recovery' | 'visible_text_unresolved' | string;
   rect?: ReadPageElementRect;
+  state?: {
+    selected?: boolean;
+    expanded?: boolean;
+    current?: boolean;
+    ambiguous?: boolean;
+    reason?: string;
+  };
   reason: string;
 }
 
@@ -247,10 +254,27 @@ export interface ReadPageSearchSurface {
   queryState?: 'unknown' | 'empty' | 'non_empty';
   controls: ReadPageSearchSurfaceControl[];
   categoryTabs?: ReadPageSearchSurfaceControl[];
+  categoryState?: {
+    selectedLabels: string[];
+    ambiguousLabels: string[];
+    unresolvedLabels: string[];
+    reason: string;
+  };
   visibleButUnresolved?: ReadPageSearchSurfaceControl[];
   resultCards: ReadPageSearchResultCard[];
+  filterPanel?: {
+    status: 'open_candidate' | 'closed_or_not_observed' | 'ambiguous' | string;
+    optionLabels: string[];
+    appliedFilterLabels: string[];
+    clearActionObserved: boolean;
+    confirmActionObserved: boolean;
+    reason: string;
+  };
   sortEvidence?: {
-    requestedSort?: 'most_collected' | 'unknown' | string;
+    requestedSort?: 'most_collected' | 'sort_menu' | 'unknown' | string;
+    currentSortLabel?: string;
+    menuOpenCandidate?: boolean;
+    optionLabels?: string[];
     appliedCandidate: boolean;
     reason: string;
   };
@@ -258,6 +282,22 @@ export interface ReadPageSearchSurface {
     requestedMinResults?: number;
     observedResultCount: number;
     status: 'not_requested' | 'sufficient' | 'insufficient' | 'not_proven' | string;
+    reason: string;
+  };
+  resultCoverage?: {
+    observedResultCount: number;
+    visibleRowsUsed: boolean;
+    pixelsBelow?: number | null;
+    loadMoreCandidateObserved: boolean;
+    virtualizedListCandidate: boolean;
+    status: 'complete_enough' | 'scroll_or_load_more_required' | 'not_proven' | string;
+    reason: string;
+  };
+  observationCoverage?: {
+    frameCoverage: 'responding_frame_only' | 'not_available' | string;
+    iframeCoverage: 'explicit_frame_read' | 'not_proven' | string;
+    shadowDomCoverage: 'not_inspected' | 'not_proven' | string;
+    capabilityGaps: string[];
     reason: string;
   };
   claimBoundary: string;

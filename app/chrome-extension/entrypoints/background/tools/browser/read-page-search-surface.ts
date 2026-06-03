@@ -1,6 +1,7 @@
 import type {
   ReadPageAssistantGuidance,
   ReadPageCandidateAction,
+  ReadPageFrameContext,
   ReadPageInteractiveElement,
   ReadPageSearchResultCard,
   ReadPageSearchSurface,
@@ -13,6 +14,13 @@ const SORT_MENU_LABEL_PATTERN = /^(排序|sort)$/i;
 const CATEGORY_LABEL_PATTERN = /^(全部|图文|视频|用户|all|images?|photos?|videos?|users?)$/i;
 const SEARCH_TOOLBAR_LABEL_PATTERN =
   /^(筛选|过滤|filter|filters|排序|sort|全部|图文|视频|用户|all|images?|photos?|videos?|users?)$/i;
+const FILTER_PANEL_OPTION_PATTERN =
+  /^(综合|最新|最热|最多点赞|最多收藏|不限|已关注|未看过|all|latest|popular|most\s*(liked|saved|collected)|any)$/i;
+const FILTER_PANEL_ACTION_PATTERN = /^(清除|重置|确认|应用|clear|reset|confirm|apply)$/i;
+const SELECTED_STATE_PATTERN =
+  /\b(selected|active|checked|current|applied)\b|已选|选中|当前|已应用/i;
+const EXPANDED_STATE_PATTERN = /\bexpanded\b|展开/i;
+const LOAD_MORE_PATTERN = /^(加载更多|更多|load\s*more|show\s*more)$/i;
 const TEXT_SEARCH_TOOLBAR_REF_PATTERN = /^ref_text_search_toolbar_/;
 const MOST_COLLECTED_PATTERN =
   /最多收藏|收藏最多|按收藏|收藏数|most\s*(collected|saved|favorited)|top\s*saves/i;
@@ -23,6 +31,7 @@ const COMPACT_COUNT_PATTERN = /([0-9][0-9,.]*\s*(?:万|千|k|m)?)/i;
 const SEARCH_TOOLBAR_TEXT_SCAN_LINE_LIMIT = 80;
 
 type SearchSurfaceControl = ReadPageSearchSurface['controls'][number];
+type SearchSurfaceFilterPanel = NonNullable<ReadPageSearchSurface['filterPanel']>;
 
 function guidanceRequestsSearch(guidance: ReadPageAssistantGuidance | undefined): boolean {
   if (guidance?.taskKind === 'search') return true;
@@ -61,8 +70,8 @@ function isCategoryLabel(value: unknown): boolean {
 
 function controlKindForToolbarLabel(label: string): SearchSurfaceControl['kind'] {
   if (isCategoryLabel(label)) return 'category_tab';
+  if (isSortMenuLabel(label)) return 'sort_menu';
   if (isFilterLabel(label)) return 'filter_trigger';
-  if (isSortMenuLabel(label)) return 'filter_trigger';
   return 'unknown';
 }
 
@@ -165,6 +174,31 @@ function isSortAppliedCandidate(element: ReadPageInteractiveElement | undefined)
   return /\b(selected|active|checked|current)\b|已选|选中|当前排序|已应用/i.test(text);
 }
 
+function controlStateForElement(
+  element: ReadPageInteractiveElement,
+): SearchSurfaceControl['state'] | undefined {
+  const text = normalizeText(
+    [element.name, element.role, element.matchSource, element.actionability].join(' '),
+  );
+  const selected = element.checked === true || SELECTED_STATE_PATTERN.test(text);
+  const expanded = EXPANDED_STATE_PATTERN.test(text);
+  if (!selected && !expanded) return undefined;
+  return {
+    ...(selected ? { selected: true, current: true } : {}),
+    ...(expanded ? { expanded: true } : {}),
+    reason: 'state inferred from structured interactive element text or checked flag',
+  };
+}
+
+function stateForRecoveredLabel(
+  label: string,
+  interactiveElements: readonly ReadPageInteractiveElement[],
+): SearchSurfaceControl['state'] | undefined {
+  const key = normalizedKey(label);
+  const element = interactiveElements.find((item) => normalizedKey(item.name) === key);
+  return element ? controlStateForElement(element) : undefined;
+}
+
 function controlForElement(params: {
   kind: SearchSurfaceControl['kind'];
   element: ReadPageInteractiveElement;
@@ -173,6 +207,7 @@ function controlForElement(params: {
   confidence: number;
 }): SearchSurfaceControl {
   const action = actionForRef(params.candidateActions, params.element.ref);
+  const state = controlStateForElement(params.element);
   return {
     kind: params.kind,
     targetRef: params.element.ref,
@@ -184,6 +219,7 @@ function controlForElement(params: {
       ? 'text_recovery'
       : 'interactive_elements',
     rect: params.element.rect,
+    ...(state ? { state } : {}),
     reason: params.reason,
   };
 }
@@ -192,9 +228,11 @@ function controlForRecoveredAction(params: {
   kind: SearchSurfaceControl['kind'];
   label: string;
   action: ReadPageCandidateAction;
+  interactiveElements: readonly ReadPageInteractiveElement[];
   reason: string;
   confidence: number;
 }): SearchSurfaceControl {
+  const state = stateForRecoveredLabel(params.label, params.interactiveElements);
   return {
     kind: params.kind,
     targetRef: params.action.targetRef,
@@ -202,6 +240,7 @@ function controlForRecoveredAction(params: {
     label: safeLabel(params.label),
     confidence: params.confidence,
     source: 'text_recovery',
+    ...(state ? { state } : {}),
     reason: params.reason,
   };
 }
@@ -234,12 +273,161 @@ function pushUniqueControl(target: SearchSurfaceControl[], control: SearchSurfac
   target.push(control);
 }
 
+function extractShortLabels(
+  visibleTextContent: string | null | undefined,
+  pattern: RegExp,
+  limit = 16,
+): string[] {
+  const labels: string[] = [];
+  const seen = new Set<string>();
+  const lines = String(visibleTextContent || '')
+    .split(/\r?\n+/)
+    .map((line) => normalizeText(line))
+    .filter(Boolean)
+    .slice(0, SEARCH_TOOLBAR_TEXT_SCAN_LINE_LIMIT);
+  for (const line of lines) {
+    if (line.length > 80) continue;
+    const candidates = [line, ...line.split(/[\s|｜/、,，]+/)]
+      .map((item) => normalizeText(item))
+      .filter(Boolean);
+    for (const candidate of candidates) {
+      if (!pattern.test(candidate)) continue;
+      const key = normalizedKey(candidate);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      labels.push(candidate);
+      if (labels.length >= limit) return labels;
+    }
+  }
+  return labels;
+}
+
+function filterPanelFromVisibleText(
+  visibleTextContent: string | null | undefined,
+): SearchSurfaceFilterPanel {
+  const optionLabels = extractShortLabels(visibleTextContent, FILTER_PANEL_OPTION_PATTERN, 16);
+  const actionLabels = extractShortLabels(visibleTextContent, FILTER_PANEL_ACTION_PATTERN, 8);
+  const appliedFilterLabels = optionLabels.filter((label) => SELECTED_STATE_PATTERN.test(label));
+  const clearActionObserved = actionLabels.some((label) => /清除|重置|clear|reset/i.test(label));
+  const confirmActionObserved = actionLabels.some((label) =>
+    /确认|应用|confirm|apply/i.test(label),
+  );
+  const openCandidate = optionLabels.length > 0 || clearActionObserved || confirmActionObserved;
+  return {
+    status: openCandidate ? 'open_candidate' : 'closed_or_not_observed',
+    optionLabels,
+    appliedFilterLabels,
+    clearActionObserved,
+    confirmActionObserved,
+    reason: openCandidate
+      ? 'filter-like short option labels or panel actions are visible in the fresh snapshot'
+      : 'no filter panel options or apply/reset actions were visible in this snapshot',
+  };
+}
+
+function categoryStateForControls(
+  categoryTabs: readonly SearchSurfaceControl[],
+): ReadPageSearchSurface['categoryState'] {
+  const selectedLabels = categoryTabs
+    .filter((control) => control.state?.selected)
+    .map((control) => control.label)
+    .filter((label): label is string => Boolean(label));
+  const ambiguousLabels = categoryTabs
+    .filter((control) => control.state?.ambiguous)
+    .map((control) => control.label)
+    .filter((label): label is string => Boolean(label));
+  const unresolvedLabels = categoryTabs
+    .filter((control) => control.source === 'visible_text_unresolved')
+    .map((control) => control.label)
+    .filter((label): label is string => Boolean(label));
+  return {
+    selectedLabels,
+    ambiguousLabels,
+    unresolvedLabels,
+    reason:
+      selectedLabels.length > 0
+        ? 'selected category inferred from structured state in the fresh snapshot'
+        : unresolvedLabels.length > 0
+          ? 'some category labels are visible but not locator-backed; treat them as capability gaps'
+          : 'no selected category state was observable in this snapshot',
+  };
+}
+
+function resultCoverageForRows(params: {
+  rows: VisibleRegionRowsResult | undefined;
+  observedResultCount: number;
+  visibleTextContent?: string | null;
+}): ReadPageSearchSurface['resultCoverage'] {
+  const rows = params.rows;
+  const pixelsBelow = rows?.pageInfo?.pixelsBelow ?? null;
+  const loadMoreCandidateObserved =
+    extractShortLabels(params.visibleTextContent, LOAD_MORE_PATTERN, 4).length > 0;
+  const virtualizedListCandidate =
+    Boolean(rows?.visibleRegionRowsUsed) &&
+    typeof pixelsBelow === 'number' &&
+    pixelsBelow > 0 &&
+    params.observedResultCount > 0 &&
+    params.observedResultCount < Math.max(rows?.rowCount || 0, 10);
+  const completeEnough = params.observedResultCount >= 10;
+  return {
+    observedResultCount: params.observedResultCount,
+    visibleRowsUsed: Boolean(rows?.visibleRegionRowsUsed),
+    pixelsBelow,
+    loadMoreCandidateObserved,
+    virtualizedListCandidate,
+    status: completeEnough
+      ? 'complete_enough'
+      : params.observedResultCount > 0
+        ? 'scroll_or_load_more_required'
+        : 'not_proven',
+    reason: completeEnough
+      ? 'at least 10 structured result cards are visible in this snapshot'
+      : params.observedResultCount > 0
+        ? 'visible result cards are present, but more scrolling or load-more evidence is required before claiming result completeness'
+        : 'no structured result cards are visible in this snapshot',
+  };
+}
+
+function observationCoverageForSearch(params: {
+  frameContext?: ReadPageFrameContext | null;
+  visibleButUnresolved: readonly SearchSurfaceControl[];
+  resultCards: readonly ReadPageSearchResultCard[];
+  filterPanel: SearchSurfaceFilterPanel;
+}): ReadPageSearchSurface['observationCoverage'] {
+  const frameCoverage = params.frameContext?.coverage ?? 'not_available';
+  const iframeCoverage =
+    params.frameContext?.frameScope === 'subframe' ? 'explicit_frame_read' : 'not_proven';
+  const capabilityGaps: string[] = [];
+  if (params.visibleButUnresolved.length > 0) {
+    capabilityGaps.push('visible_text_without_locator');
+  }
+  if (params.filterPanel.status !== 'open_candidate') {
+    capabilityGaps.push('filter_panel_state_not_observed');
+  }
+  if (params.resultCards.length < 10) {
+    capabilityGaps.push('top_n_result_completeness_not_proven');
+  }
+  if (iframeCoverage === 'not_proven') {
+    capabilityGaps.push('iframe_full_coverage_not_proven');
+  }
+  capabilityGaps.push('shadow_dom_coverage_not_inspected');
+  return {
+    frameCoverage,
+    iframeCoverage,
+    shadowDomCoverage: 'not_inspected',
+    capabilityGaps,
+    reason:
+      'coverage reports what this read_page snapshot proves; missing iframe/shadow evidence is reported as a capability gap instead of treating controls as absent',
+  };
+}
+
 export function buildSearchSurface(params: {
   assistantGuidance?: ReadPageAssistantGuidance;
   interactiveElements: ReadPageInteractiveElement[];
   candidateActions: ReadPageCandidateAction[];
   visibleRegionRows?: VisibleRegionRowsResult;
   visibleTextContent?: string | null;
+  frameContext?: ReadPageFrameContext | null;
 }): ReadPageSearchSurface | undefined {
   const requested = guidanceRequestsSearch(params.assistantGuidance);
   if (!requested) return undefined;
@@ -272,6 +460,21 @@ export function buildSearchSurface(params: {
         candidateActions: params.candidateActions,
         reason: 'filter trigger surfaced from structured interactive elements',
         confidence: 0.84,
+      }),
+    );
+  }
+
+  const sortMenuElement = params.interactiveElements.find((element) =>
+    isSortMenuLabel(element.name),
+  );
+  if (sortMenuElement) {
+    controls.push(
+      controlForElement({
+        kind: 'sort_menu',
+        element: sortMenuElement,
+        candidateActions: params.candidateActions,
+        reason: 'sort menu trigger surfaced from structured interactive elements',
+        confidence: 0.8,
       }),
     );
   }
@@ -338,6 +541,7 @@ export function buildSearchSurface(params: {
           kind,
           label,
           action: recoveredAction,
+          interactiveElements: params.interactiveElements,
           reason:
             'toolbar label was recovered from visible text and resolved to a locator-backed candidate action',
           confidence: kind === 'category_tab' ? 0.76 : 0.78,
@@ -373,6 +577,29 @@ export function buildSearchSurface(params: {
         : 'visible result row surfaced for AI-side ranking',
     });
   }
+  const filterPanel = filterPanelFromVisibleText(params.visibleTextContent);
+  const categoryState = categoryStateForControls(categoryTabs);
+  const sortMenuAction = findControlAction(params.candidateActions, 'filter.open');
+  const sortMenuObserved =
+    controls.some((control) => control.kind === 'sort_menu') ||
+    params.interactiveElements.some((element) => isSortMenuLabel(element.name));
+  const sortOptionLabels = extractShortLabels(
+    params.visibleTextContent,
+    /^(综合|最新|最热|最多收藏|most\s*(saved|collected)|latest|popular)$/i,
+    8,
+  );
+  const resultCoverage = resultCoverageForRows({
+    rows: params.visibleRegionRows,
+    observedResultCount: resultCards.length,
+    visibleTextContent: params.visibleTextContent,
+  });
+  const observationCoverage = observationCoverageForSearch({
+    frameContext: params.frameContext,
+    visibleButUnresolved,
+    resultCards,
+    filterPanel,
+  });
+  const currentSortLabel = sortAppliedCandidate ? safeLabel(sortElement?.name) : undefined;
 
   if (
     !requested &&
@@ -395,16 +622,24 @@ export function buildSearchSurface(params: {
     queryState: searchInput?.valueState ?? 'unknown',
     controls,
     categoryTabs,
+    categoryState,
     visibleButUnresolved,
     resultCards,
+    filterPanel,
     sortEvidence: {
-      requestedSort: sortElement || sortAction ? 'most_collected' : 'unknown',
+      requestedSort:
+        sortElement || sortAction ? 'most_collected' : sortMenuObserved ? 'sort_menu' : 'unknown',
+      ...(currentSortLabel ? { currentSortLabel } : {}),
+      menuOpenCandidate: sortOptionLabels.length > 0 || Boolean(sortMenuAction && sortMenuObserved),
+      ...(sortOptionLabels.length > 0 ? { optionLabels: sortOptionLabels } : {}),
       appliedCandidate: sortAppliedCandidate,
       reason: sortAppliedCandidate
         ? 'most-collected sort control appears selected in this fresh snapshot; business ranking still needs result evidence'
         : sortElement || sortAction
           ? 'most-collected sort control is observable; applied state still requires fresh readback after click'
-          : 'no most-collected sort control observed in this snapshot',
+          : sortMenuObserved
+            ? 'sort menu trigger is observable; current sort value still requires menu/readback evidence'
+            : 'no sort control observed in this snapshot',
     },
     topNCompleteness: {
       requestedMinResults: 10,
@@ -422,7 +657,9 @@ export function buildSearchSurface(params: {
             ? 'fewer than 10 structured result cards are visible; scroll or detail readback is required before claiming Top 10 completeness'
             : 'no structured result cards observed; search/list completion is not proven',
     },
+    resultCoverage,
+    observationCoverage,
     claimBoundary:
-      'searchSurface is an observation map only. It does not prove search completion, sort application, or Top-N correctness without fresh same-tab readback and AI-side ranking.',
+      'searchSurface is an observation map only. It does not prove search completion, filter application, sort application, iframe/shadow coverage, or Top-N correctness without fresh same-tab readback and AI-side ranking.',
   };
 }
