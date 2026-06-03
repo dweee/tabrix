@@ -9,12 +9,16 @@ import {
   type ReadPageFullSnapshot,
   type ReadPageMode,
   type ReadPageNormalSnapshot,
+  type ReadPageEvidenceSource,
+  type ReadPageObservationCoverage,
+  type ReadPageObservationProfile,
   type ReadPagePageContext,
   type ReadPageLoadReadiness,
   type ReadPagePageType,
   type ReadPagePrimaryRegionConfidence,
   type ReadPageRenderMode,
   type ReadPageRequestedLayer,
+  type ReadPageSearchSurface,
   type ReadPageOwnershipRuntimeSummary,
   type ReadPageWindowRuntimeState,
   type ReadPageObjectLifecycleSummary,
@@ -834,6 +838,125 @@ function scoreQrVisualElementHint(
   };
 }
 
+function buildObservationProfile(params: {
+  mode: ReadPageMode;
+  requestedLayer: ReadPageRequestedLayer;
+}): ReadPageObservationProfile {
+  if (params.mode === 'full') return 'full';
+  if (params.mode === 'normal') return 'debug';
+  if (params.requestedLayer !== 'L0+L1+L2') return 'task';
+  return 'compact';
+}
+
+function mergeCoverageStatus(
+  statuses: ReadonlyArray<ReadPageObservationCoverage['overall']>,
+): ReadPageObservationCoverage['overall'] {
+  if (statuses.includes('unsupported')) return 'unsupported';
+  if (statuses.includes('visible_unresolved')) return 'visible_unresolved';
+  if (statuses.includes('degraded')) return 'degraded';
+  return 'covered';
+}
+
+function pushCapabilityGap(target: string[], gap: string) {
+  if (!target.includes(gap)) target.push(gap);
+}
+
+function buildObservationCoverage(params: {
+  pageType: PageType;
+  frameContext: ReadPageFrameContext | null;
+  visibleRegionRows: VisibleRegionRowsResult;
+  searchSurface?: ReadPageSearchSurface;
+}): ReadPageObservationCoverage {
+  const capabilityGaps: string[] = [];
+  const unsupported = params.pageType === 'unsupported_page';
+  const unresolvedVisibleTextCount = params.searchSurface?.visibleButUnresolved?.length ?? 0;
+  for (const gap of params.searchSurface?.observationCoverage?.capabilityGaps ?? []) {
+    pushCapabilityGap(capabilityGaps, gap);
+  }
+
+  const iframe = unsupported
+    ? 'unsupported'
+    : params.frameContext?.frameScope === 'subframe'
+      ? 'covered'
+      : 'degraded';
+  if (iframe === 'degraded') pushCapabilityGap(capabilityGaps, 'iframe_full_coverage_not_proven');
+
+  const shadowDom = unsupported ? 'unsupported' : 'degraded';
+  if (shadowDom === 'degraded') {
+    pushCapabilityGap(capabilityGaps, 'shadow_dom_coverage_not_inspected');
+  }
+
+  const resultCoverage = params.searchSurface?.resultCoverage;
+  const virtualList = unsupported
+    ? 'unsupported'
+    : resultCoverage?.virtualizedListCandidate || resultCoverage?.loadMoreCandidateObserved
+      ? 'visible_unresolved'
+      : params.visibleRegionRows.visibleRegionRowsUsed
+        ? 'covered'
+        : 'degraded';
+  if (virtualList === 'visible_unresolved') {
+    pushCapabilityGap(capabilityGaps, 'virtual_list_or_load_more_boundary_not_exhausted');
+  } else if (virtualList === 'degraded') {
+    pushCapabilityGap(capabilityGaps, 'virtual_list_coverage_not_proven');
+  }
+
+  const filterPanelStatus = params.searchSurface?.filterPanel?.status;
+  const dynamicPanel = unsupported
+    ? 'unsupported'
+    : unresolvedVisibleTextCount > 0
+      ? 'visible_unresolved'
+      : filterPanelStatus === 'open_candidate'
+        ? 'covered'
+        : 'degraded';
+  if (dynamicPanel === 'visible_unresolved') {
+    pushCapabilityGap(capabilityGaps, 'dynamic_panel_visible_text_without_locator');
+  } else if (dynamicPanel === 'degraded') {
+    pushCapabilityGap(capabilityGaps, 'dynamic_panel_state_not_observed');
+  }
+
+  return {
+    overall: mergeCoverageStatus([iframe, shadowDom, virtualList, dynamicPanel]),
+    iframe,
+    shadowDom,
+    virtualList,
+    dynamicPanel,
+    unresolvedVisibleTextCount,
+    capabilityGaps,
+    claimBoundary:
+      'coverage describes what this read_page snapshot proves; action success still requires targetRef/candidateAction/locatorChain and business success requires postcondition verification',
+  };
+}
+
+function buildEvidenceSources(params: {
+  pageContent: string;
+  visibleTextContent?: string | null;
+  refMapCount: number;
+  elementsCount: number;
+  visibleRegionRows: VisibleRegionRowsResult;
+  selectedDataSource?: string;
+  objectLifecycle?: ReadPageObjectLifecycleSummary;
+}): ReadPageEvidenceSource[] {
+  const sources = new Set<ReadPageEvidenceSource>();
+  const hasPageText = params.pageContent.trim().length > 0;
+  if (hasPageText || params.refMapCount > 0 || params.elementsCount > 0) sources.add('ax');
+  if (params.refMapCount > 0 || params.visibleRegionRows.visibleRegionRowsUsed) sources.add('dom');
+  if ((params.visibleTextContent ?? '').trim().length > 0) sources.add('visible_text');
+  if (
+    params.selectedDataSource === 'api_rows' ||
+    params.selectedDataSource === 'cdp_enhanced_api_rows'
+  ) {
+    sources.add('api');
+  }
+  if (
+    params.objectLifecycle?.status === 'compared_snapshot' &&
+    params.objectLifecycle.changedObjectCount > 0
+  ) {
+    sources.add('watch_delta');
+  }
+  if (sources.size === 0) sources.add('ax');
+  return [...sources];
+}
+
 async function buildModeOutput(params: {
   mode: ReadPageMode;
   renderMode: ReadPageRenderMode;
@@ -1118,6 +1241,25 @@ async function buildModeOutput(params: {
     visibleRegionRows,
     visibleTextContent: params.visibleTextContent,
     frameContext: params.frameContext,
+  });
+  sharedPayload.observationProfile = buildObservationProfile({
+    mode: params.mode,
+    requestedLayer: params.requestedLayer,
+  });
+  sharedPayload.coverage = buildObservationCoverage({
+    pageType: params.pageType,
+    frameContext: params.frameContext,
+    visibleRegionRows,
+    searchSurface: sharedPayload.searchSurface,
+  });
+  sharedPayload.evidenceSource = buildEvidenceSources({
+    pageContent: params.pageContent,
+    visibleTextContent: params.visibleTextContent,
+    refMapCount: params.refMapCount,
+    elementsCount: params.elements.length,
+    visibleRegionRows,
+    selectedDataSource: sharedPayload.selectedDataSource,
+    objectLifecycle: sharedPayload.objectLifecycle,
   });
 
   return buildReadPageModeResult({

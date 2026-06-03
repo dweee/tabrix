@@ -8,6 +8,49 @@
 
 export type ReadPageMode = 'compact' | 'normal' | 'full';
 
+export const READ_PAGE_OBSERVATION_PROFILE_VALUES = [
+  'compact',
+  'task',
+  'delta',
+  'full',
+  'debug',
+] as const;
+
+export type ReadPageObservationProfile = (typeof READ_PAGE_OBSERVATION_PROFILE_VALUES)[number];
+
+export const READ_PAGE_COVERAGE_STATUS_VALUES = [
+  'covered',
+  'degraded',
+  'unsupported',
+  'visible_unresolved',
+] as const;
+
+export type ReadPageCoverageStatus = (typeof READ_PAGE_COVERAGE_STATUS_VALUES)[number];
+
+export const READ_PAGE_EVIDENCE_SOURCE_VALUES = [
+  'dom',
+  'ax',
+  'visible_text',
+  'network',
+  'api',
+  'watch_delta',
+  'screenshot_fallback',
+  'experience',
+] as const;
+
+export type ReadPageEvidenceSource = (typeof READ_PAGE_EVIDENCE_SOURCE_VALUES)[number];
+
+export interface ReadPageObservationCoverage {
+  overall: ReadPageCoverageStatus;
+  iframe: ReadPageCoverageStatus;
+  shadowDom: ReadPageCoverageStatus;
+  virtualList: ReadPageCoverageStatus;
+  dynamicPanel: ReadPageCoverageStatus;
+  unresolvedVisibleTextCount?: number;
+  capabilityGaps?: string[];
+  claimBoundary: string;
+}
+
 /**
  * Render mode for `read_page`.
  *
@@ -1242,6 +1285,31 @@ export interface ReadPageOwnershipRuntimeSummary {
 }
 
 export interface ReadPageExtensionFields {
+  /**
+   * Additive observation-kernel profile for the snapshot.
+   *
+   * `mode` remains the backward-compatible verbosity selector. This field tells
+   * upstream agents how the snapshot should be interpreted in the Observe ->
+   * Act -> Verify -> Learn loop: compact execution view, task-cropped view,
+   * delta/change view, full detail, or debug diagnostics.
+   */
+  observationProfile?: ReadPageObservationProfile;
+  /**
+   * Additive coverage boundary for browser-state observation.
+   *
+   * This field reports whether important dynamic browser surfaces were
+   * structurally covered, degraded, unsupported, or visible but unresolved. It
+   * is not click evidence and not business-success proof.
+   */
+  coverage?: ReadPageObservationCoverage;
+  /**
+   * Additive evidence-source tags used to build this snapshot.
+   *
+   * The tags are evidence provenance only. They do not grant actionability:
+   * execution still requires targetRef, candidateAction, or locatorChain and
+   * business success still requires postcondition verification.
+   */
+  evidenceSource?: ReadPageEvidenceSource[];
   currentWindowId?: number | null;
   currentWindowState?: ReadPageWindowRuntimeState | null;
   currentWindowWidth?: number | null;

@@ -38,6 +38,30 @@ function expectCommonSnapshotShape(payload: any, mode: 'compact' | 'normal' | 'f
     expect(payload).toHaveProperty(field);
   }
   expect(payload.mode).toBe(mode);
+  expect(['compact', 'task', 'delta', 'full', 'debug']).toContain(payload.observationProfile);
+  expect(payload.coverage).toMatchObject({
+    overall: expect.stringMatching(/^(covered|degraded|unsupported|visible_unresolved)$/),
+    iframe: expect.stringMatching(/^(covered|degraded|unsupported|visible_unresolved)$/),
+    shadowDom: expect.stringMatching(/^(covered|degraded|unsupported|visible_unresolved)$/),
+    virtualList: expect.stringMatching(/^(covered|degraded|unsupported|visible_unresolved)$/),
+    dynamicPanel: expect.stringMatching(/^(covered|degraded|unsupported|visible_unresolved)$/),
+    claimBoundary: expect.stringContaining('postcondition verification'),
+  });
+  expect(Array.isArray(payload.coverage.capabilityGaps)).toBe(true);
+  expect(Array.isArray(payload.evidenceSource)).toBe(true);
+  expect(payload.evidenceSource.length).toBeGreaterThan(0);
+  for (const source of payload.evidenceSource) {
+    expect([
+      'dom',
+      'ax',
+      'visible_text',
+      'network',
+      'api',
+      'watch_delta',
+      'screenshot_fallback',
+      'experience',
+    ]).toContain(source);
+  }
   expect(payload.page).toMatchObject({
     url: expect.any(String),
     title: expect.any(String),
@@ -211,6 +235,9 @@ describe('read_page mode', () => {
     const payload = JSON.parse((result.content[0] as { text: string }).text);
     expect(result.isError).toBe(false);
     expectCommonSnapshotShape(payload, 'compact');
+    expect(payload.observationProfile).toBe('compact');
+    expect(payload.coverage.overall).toMatch(/^(degraded|visible_unresolved|covered)$/);
+    expect(payload.evidenceSource).toEqual(expect.arrayContaining(['ax', 'dom']));
     expect(payload.page).toMatchObject({
       url: 'https://example.com/checkout',
       title: 'Checkout',
@@ -357,6 +384,61 @@ describe('read_page mode', () => {
     ).toMatchObject({
       frameId: 37,
     });
+    expect(payload.coverage.iframe).toBe('covered');
+  });
+
+  it('marks task-cropped requested layers with the task observation profile', async () => {
+    vi.spyOn(browserWorldInventory, 'getBrowserWorldSnapshot').mockResolvedValue({
+      summary: {
+        routingDecisionSummary:
+          'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
+        objectChangeSummary: 'Object change summary: no relevant browser object change observed.',
+        actionableObjectChangeSummary:
+          'Actionable object change: no actionable browser object transition observed.',
+        currentOperationConclusion:
+          'Current operation conclusion: browser object state is stable enough for page-level inspection.',
+      },
+      tabs: [],
+    } as any);
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5226,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.com/task-view',
+      title: 'Task View',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Task View" [ref=ref_main] (x=320,y=100)',
+        '  - heading "Task View" [ref=ref_heading] (x=320,y=140)',
+        '  - button "Open filters" [ref=ref_filter] (x=320,y=180)',
+        '  - link "First item" [ref=ref_item] (x=320,y=220)',
+        '  - article "Result card" [ref=ref_card] (x=320,y=260)',
+        '    - link "Second item" [ref=ref_second] (x=320,y=300)',
+        '    - generic "Updated today" [ref=ref_meta] (x=320,y=340)',
+        '  - generic "Status ready" [ref=ref_status] (x=320,y=380)',
+        '  - generic "Footer" [ref=ref_footer] (x=320,y=700)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_filter', selector: 'button.filters' },
+        { ref: 'ref_item', selector: 'a.item' },
+        { ref: 'ref_second', selector: 'a.second-item' },
+      ],
+      stats: { processed: 9, included: 9, durationMs: 6 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ requestedLayer: 'L0' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.observationProfile).toBe('task');
+    expect(payload.L0).toBeDefined();
+    expect(payload.L1).toBeUndefined();
+    expect(payload.L2).toBeUndefined();
   });
 
   it.each(['normal', 'full'] as const)(
@@ -402,6 +484,7 @@ describe('read_page mode', () => {
 
       expect(result.isError).toBe(false);
       expectCommonSnapshotShape(payload, mode);
+      expect(payload.observationProfile).toBe(mode === 'normal' ? 'debug' : 'full');
       expect(payload.ownershipRuntime.browserWorldRoutingDecisionSummary).toBe(
         'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
       );

@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import {
   LAYER_DISPATCH_REASON_VALUES,
   LAYER_SOURCE_ROUTE_VALUES,
+  READ_PAGE_COVERAGE_STATUS_VALUES,
+  READ_PAGE_EVIDENCE_SOURCE_VALUES,
   READ_PAGE_MODE_MINIMUM_FIELDS,
+  READ_PAGE_OBSERVATION_PROFILE_VALUES,
   READ_PAGE_REGION_TARGETABILITY_VALUES,
   READ_PAGE_REGION_TYPES,
   READ_PAGE_OPERATION_PURPOSES,
@@ -26,6 +29,32 @@ import {
 } from '../dist/index.mjs';
 
 assert.deepEqual(READ_PAGE_REQUESTED_LAYER_VALUES, ['L0', 'L0+L1', 'L0+L1+L2']);
+
+assert.deepEqual(READ_PAGE_OBSERVATION_PROFILE_VALUES, [
+  'compact',
+  'task',
+  'delta',
+  'full',
+  'debug',
+]);
+
+assert.deepEqual(READ_PAGE_COVERAGE_STATUS_VALUES, [
+  'covered',
+  'degraded',
+  'unsupported',
+  'visible_unresolved',
+]);
+
+assert.deepEqual(READ_PAGE_EVIDENCE_SOURCE_VALUES, [
+  'dom',
+  'ax',
+  'visible_text',
+  'network',
+  'api',
+  'watch_delta',
+  'screenshot_fallback',
+  'experience',
+]);
 
 assert.deepEqual(LAYER_SOURCE_ROUTE_VALUES, [
   'read_page_required',
