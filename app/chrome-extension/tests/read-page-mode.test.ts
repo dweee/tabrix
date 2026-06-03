@@ -602,6 +602,105 @@ describe('read_page mode', () => {
     });
   });
 
+  it('recovers target refs for visible search toolbar labels in neutral search pages', async () => {
+    const collectInteractiveElementsFallback = vi
+      .spyOn(readPageTool as any, 'collectInteractiveElementsFallback')
+      .mockImplementation(async (_tabId: number, options: { textQuery?: string }) => {
+        const selectors: Record<string, string> = {
+          全部: 'body > main > div.toolbar > span:nth-of-type(1)',
+          图文: 'body > main > div.toolbar > span:nth-of-type(2)',
+          视频: 'body > main > div.toolbar > span:nth-of-type(3)',
+          用户: 'body > main > div.toolbar > span:nth-of-type(4)',
+          筛选: 'body > main > div.toolbar > span:nth-of-type(5)',
+        };
+        const selector = options.textQuery ? selectors[options.textQuery] : undefined;
+        if (!selector) return { success: true, elements: [] };
+        return {
+          success: true,
+          elements: [
+            {
+              type: 'text',
+              role: options.textQuery === '筛选' ? 'button' : 'tab',
+              selector,
+              text: options.textQuery,
+              isInteractive: true,
+              coordinates: {
+                x: 100,
+                y: 88,
+                rect: { x: 80, y: 72, width: 48, height: 32 },
+              },
+            },
+          ],
+        };
+      });
+    const basePayload: any = {
+      visibleTextContent: ['全部 图文 视频 用户', '筛选'].join('\n'),
+      elements: [],
+      refMap: [],
+      count: 0,
+    };
+
+    const recovered = await (readPageTool as any).recoverSearchToolbarTextTargets({
+      tabId: 5220,
+      basePayload,
+      assistantGuidance: {
+        taskKind: 'search',
+        requestedObjects: ['search_input', 'result_cards'],
+      },
+      frameId: 7,
+    });
+
+    expect(recovered).toBe(true);
+    expect(collectInteractiveElementsFallback).toHaveBeenCalledWith(
+      5220,
+      expect.objectContaining({ textQuery: '筛选', includeCoordinates: true, frameId: 7 }),
+    );
+    expect(basePayload.elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ref: expect.stringMatching(/^ref_text_search_toolbar_/),
+          role: 'button',
+          type: 'button',
+          selector: 'body > main > div.toolbar > span:nth-of-type(5)',
+          text: '筛选',
+        }),
+        expect.objectContaining({
+          ref: expect.stringMatching(/^ref_text_search_toolbar_/),
+          role: 'tab',
+          type: 'button',
+          text: '图文',
+        }),
+      ]),
+    );
+    expect(basePayload.fallbackSource).toBe('search_toolbar_target_recovery');
+
+    const interactiveElements = buildInteractiveElements(
+      formatElementsAsPageContent(basePayload.elements, basePayload.refMap),
+      basePayload.elements,
+      20,
+      'normal',
+      'https://example.com/search?q=neutral',
+    );
+    const actions = buildCandidateActions(interactiveElements, basePayload.refMap, {
+      frameId: 7,
+    });
+
+    expect(actions.find((action) => action.targetRef.endsWith('_5'))).toMatchObject({
+      intent: 'filter.open',
+      frameId: 7,
+      locatorChain: expect.arrayContaining([
+        { type: 'aria', value: '筛选' },
+        { type: 'css', value: 'body > main > div.toolbar > span:nth-of-type(5)' },
+      ]),
+    });
+    expect(
+      actions.find((action) => action.locatorChain.some((item) => item.value === '图文')),
+    ).toMatchObject({
+      intent: 'search.category_select',
+      frameId: 7,
+    });
+  });
+
   it('keeps recovered text menu actions ahead of long content lists', () => {
     const contentElements = Array.from({ length: 40 }, (_item, index) => ({
       ref: `ref_content_${index}`,

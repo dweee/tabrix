@@ -178,6 +178,167 @@ describe('buildSearchSurface', () => {
     expect(surface?.claimBoundary).toContain('observation');
   });
 
+  it('surfaces visible toolbar labels as unresolved when no target refs are available', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [],
+      candidateActions: [],
+      visibleTextContent: ['全部 图文 视频 用户', '筛选'].join('\n'),
+    });
+
+    expect(surface?.status).toBe('detected');
+    expect(surface?.categoryTabs?.map((control) => control.label)).toEqual([
+      '全部',
+      '图文',
+      '视频',
+      '用户',
+    ]);
+    expect(surface?.categoryTabs?.map((control) => control.source)).toEqual([
+      'visible_text_unresolved',
+      'visible_text_unresolved',
+      'visible_text_unresolved',
+      'visible_text_unresolved',
+    ]);
+    expect(surface?.visibleButUnresolved?.map((control) => control.label)).toEqual([
+      '全部',
+      '图文',
+      '视频',
+      '用户',
+      '筛选',
+    ]);
+    expect(
+      surface?.visibleButUnresolved?.find((control) => control.label === '筛选'),
+    ).toMatchObject({
+      kind: 'filter_trigger',
+      source: 'visible_text_unresolved',
+    });
+    expect(surface?.resultCards).toEqual([]);
+  });
+
+  it('promotes recovered search toolbar candidate actions to text-recovery controls', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_text_search_toolbar_1',
+          role: 'button',
+          name: '筛选',
+        }),
+      ],
+      candidateActions: [
+        candidate({
+          id: 'ca_click_ref_text_search_toolbar_1',
+          targetRef: 'ref_text_search_toolbar_1',
+          intent: 'filter.open',
+          locatorChain: [
+            { type: 'ref', value: 'ref_text_search_toolbar_1' },
+            { type: 'aria', value: '筛选' },
+            { type: 'css', value: '.toolbar-filter' },
+          ],
+        }),
+      ],
+      visibleTextContent: '筛选',
+    });
+
+    expect(surface?.controls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'filter_trigger',
+          label: '筛选',
+          targetRef: 'ref_text_search_toolbar_1',
+          candidateActionId: 'ca_click_ref_text_search_toolbar_1',
+          source: 'text_recovery',
+        }),
+      ]),
+    );
+    expect(surface?.visibleButUnresolved).toEqual([]);
+  });
+
+  it('keeps category tabs out of result cards when toolbar refs are recovered', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({ ref: 'ref_text_search_toolbar_1', role: 'tab', name: '全部' }),
+        interactive({ ref: 'ref_text_search_toolbar_2', role: 'tab', name: '图文' }),
+        interactive({ ref: 'ref_text_search_toolbar_3', role: 'tab', name: '视频' }),
+        interactive({ ref: 'ref_text_search_toolbar_4', role: 'tab', name: '用户' }),
+      ],
+      candidateActions: [
+        candidate({
+          id: 'ca_click_ref_text_search_toolbar_1',
+          targetRef: 'ref_text_search_toolbar_1',
+          intent: 'search.category_select',
+          locatorChain: [
+            { type: 'ref', value: 'ref_text_search_toolbar_1' },
+            { type: 'aria', value: '全部' },
+            { type: 'css', value: '.tab-all' },
+          ],
+        }),
+        candidate({
+          id: 'ca_click_ref_text_search_toolbar_2',
+          targetRef: 'ref_text_search_toolbar_2',
+          intent: 'search.category_select',
+          locatorChain: [
+            { type: 'ref', value: 'ref_text_search_toolbar_2' },
+            { type: 'aria', value: '图文' },
+            { type: 'css', value: '.tab-image' },
+          ],
+        }),
+        candidate({
+          id: 'ca_click_ref_text_search_toolbar_3',
+          targetRef: 'ref_text_search_toolbar_3',
+          intent: 'search.category_select',
+          locatorChain: [
+            { type: 'ref', value: 'ref_text_search_toolbar_3' },
+            { type: 'aria', value: '视频' },
+            { type: 'css', value: '.tab-video' },
+          ],
+        }),
+        candidate({
+          id: 'ca_click_ref_text_search_toolbar_4',
+          targetRef: 'ref_text_search_toolbar_4',
+          intent: 'search.category_select',
+          locatorChain: [
+            { type: 'ref', value: 'ref_text_search_toolbar_4' },
+            { type: 'aria', value: '用户' },
+            { type: 'css', value: '.tab-user' },
+          ],
+        }),
+      ],
+      visibleTextContent: '全部 图文 视频 用户',
+      visibleRegionRows: visibleRows(),
+    });
+
+    expect(surface?.categoryTabs?.map((control) => control.label)).toEqual([
+      '全部',
+      '图文',
+      '视频',
+      '用户',
+    ]);
+    expect(surface?.categoryTabs?.every((control) => control.source === 'text_recovery')).toBe(
+      true,
+    );
+    expect(surface?.resultCards?.map((card) => card.title)).toEqual([
+      'AI poster workflow for shopping season',
+      'Prompt patterns for poster variants',
+    ]);
+  });
+
+  it('does not classify result-card prose that merely contains toolbar words as controls', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [],
+      candidateActions: [],
+      visibleTextContent: ['如何筛选高价值结果', '排序不是这个卡片的按钮'].join('\n'),
+      visibleRegionRows: visibleRows(),
+    });
+
+    expect(surface?.categoryTabs).toEqual([]);
+    expect(surface?.visibleButUnresolved).toEqual([]);
+    expect(surface?.controls).toEqual([]);
+    expect(surface?.resultCards).toHaveLength(2);
+  });
+
   it('marks most-collected sort as an applied candidate only when the fresh control state says so', () => {
     const rows = visibleRows();
     rows.rows = Array.from({ length: 10 }, (_, index) => ({

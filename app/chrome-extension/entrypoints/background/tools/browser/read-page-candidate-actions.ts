@@ -7,6 +7,9 @@ import type {
 
 export type CandidateActionSeed = ReadPageCandidateAction;
 
+const FILTER_OPEN_LABEL_PATTERN = /^(筛选|过滤|filter|filters|排序|sort)$/i;
+const SEARCH_CATEGORY_LABEL_PATTERN = /^(全部|图文|视频|用户|all|images?|photos?|videos?|users?)$/i;
+
 function buildRefSelectorMap(refMap: any[]): Map<string, string> {
   const map = new Map<string, string>();
   for (const item of Array.isArray(refMap) ? refMap : []) {
@@ -72,7 +75,8 @@ function inferCandidateActionIntent(
   ) {
     return 'auth.refresh_qr';
   }
-  if (/^(筛选|过滤|filter|filters)$/i.test(name)) return 'filter.open';
+  if (FILTER_OPEN_LABEL_PATTERN.test(name)) return 'filter.open';
+  if (SEARCH_CATEGORY_LABEL_PATTERN.test(name)) return 'search.category_select';
   if (
     /最多收藏|收藏最多|按收藏|收藏数|most\s*(collected|saved|favorited)|top\s*saves/i.test(name)
   ) {
@@ -156,7 +160,7 @@ export function buildCandidateActions(
   const clickRoles = new Set(['button', 'link', 'menuitem', 'tab', 'option', 'checkbox', 'switch']);
   const fillRoles = new Set(['textbox', 'searchbox', 'combobox']);
   const primaryKeywords =
-    /(submit|save|continue|next|confirm|login|sign in|search|checkout|send code|get code|request code|filter|refresh|reload|提交|保存|继续|下一步|确认|登录|搜索|筛选|过滤|最多收藏|收藏最多|刷新|获取验证码|发送验证码|重新发送|同意|协议)/i;
+    /(submit|save|continue|next|confirm|login|sign in|search|checkout|send code|get code|request code|filter|filters|sort|refresh|reload|all|images?|videos?|users?|提交|保存|继续|下一步|确认|登录|搜索|筛选|过滤|排序|全部|图文|视频|用户|最多收藏|收藏最多|刷新|获取验证码|发送验证码|重新发送|同意|协议)/i;
 
   const seeds: CandidateActionSeed[] = [];
   const prioritizedElements = [...interactiveElements]

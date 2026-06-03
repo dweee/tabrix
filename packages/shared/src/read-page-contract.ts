@@ -218,6 +218,7 @@ export interface ReadPageSearchSurfaceControl {
     | 'filter_trigger'
     | 'sort_most_collected'
     | 'submit_search'
+    | 'category_tab'
     | 'unknown'
     | string;
   targetRef?: string;
@@ -225,6 +226,8 @@ export interface ReadPageSearchSurfaceControl {
   label?: string;
   confidence: number;
   actionability?: string;
+  source?: 'interactive_elements' | 'text_recovery' | 'visible_text_unresolved' | string;
+  rect?: ReadPageElementRect;
   reason: string;
 }
 
@@ -243,6 +246,8 @@ export interface ReadPageSearchSurface {
   status: 'not_detected' | 'detected' | 'ambiguous';
   queryState?: 'unknown' | 'empty' | 'non_empty';
   controls: ReadPageSearchSurfaceControl[];
+  categoryTabs?: ReadPageSearchSurfaceControl[];
+  visibleButUnresolved?: ReadPageSearchSurfaceControl[];
   resultCards: ReadPageSearchResultCard[];
   sortEvidence?: {
     requestedSort?: 'most_collected' | 'unknown' | string;
@@ -451,6 +456,7 @@ export type ReadPageCandidateActionIntent =
   | 'auth.submit_login'
   | 'search.enter_query'
   | 'search.submit'
+  | 'search.category_select'
   | 'content.open_detail'
   | (string & {});
 

@@ -41,7 +41,10 @@ import { inferSchemeGuard } from './read-page-scheme-guard';
 import { summarizePageContent } from './read-page-content-summary';
 import { buildInteractiveElements } from './read-page-interactive-elements';
 import { buildCandidateActions, type CandidateActionSeed } from './read-page-candidate-actions';
-import { buildSearchSurface } from './read-page-search-surface';
+import {
+  buildSearchSurface,
+  extractSearchToolbarLabelsFromVisibleText,
+} from './read-page-search-surface';
 import { buildArtifactRefs } from './read-page-artifact-refs';
 import { buildFallbackRefMap, formatElementsAsPageContent } from './read-page-fallback-format';
 import { buildExtensionLayer, buildStableSnapshotLayer } from './read-page-snapshot-builders';
@@ -477,10 +480,12 @@ function shouldSampleVisibleText(input: {
   requestedDepth: number | undefined;
   focusRefId: string | undefined;
   rows: VisibleRegionRowsResult;
+  assistantGuidance?: ReadPageAssistantGuidance;
 }): boolean {
   if (!input.treeOk) return false;
   if (input.focusRefId) return false;
   if (input.mode === 'full') return true;
+  if (shouldRecoverSearchToolbarTargets(input.assistantGuidance)) return true;
   if (!input.userControlled) return true;
   if (input.rows.visibleRegionRowsUsed) return false;
   return input.requestedDepth !== undefined && input.requestedDepth <= 3;
@@ -519,6 +524,39 @@ function promoteTextMenuTriggerSelector(selector: unknown): string | undefined {
   return raw;
 }
 
+function promoteSearchToolbarSelector(selector: unknown): string | undefined {
+  const raw = typeof selector === 'string' ? selector.trim() : '';
+  if (!raw) return undefined;
+  const parts = raw
+    .split(/\s*>\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length < 3) return raw;
+  const last = parts[parts.length - 1]?.toLowerCase() || '';
+  if (!/^(span|svg|path|img|i|em|strong)(?::|\[|\.|#|$)/.test(last)) return raw;
+  const parent = parts[parts.length - 2]?.toLowerCase() || '';
+  if (/^(button|a|li)(?::|\[role=|\[aria-|\.|#)/.test(parent)) {
+    return parts.slice(0, -1).join(' > ');
+  }
+  if (/^div(?::|\[role=|\[aria-)/.test(parent)) {
+    return parts.slice(0, -1).join(' > ');
+  }
+  return raw;
+}
+
+function isCompactSearchToolbarFallbackElement(element: any): boolean {
+  const text = String(element?.text || element?.name || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (text.length > 30) return false;
+  const rect = element?.coordinates?.rect;
+  if (!rect) return true;
+  const width = Number(rect.width);
+  const height = Number(rect.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return true;
+  return width > 0 && height > 0 && width <= 260 && height <= 120;
+}
+
 function extractVisibleMenuActionLabelsForTargetRecovery(visibleTextContent: unknown): string[] {
   const seen = new Set<string>();
   const labels: string[] = [];
@@ -542,6 +580,27 @@ function extractVisibleMenuActionLabelsForTargetRecovery(visibleTextContent: unk
     if (labels.length >= 8) break;
   }
   return labels;
+}
+
+function shouldRecoverSearchToolbarTargets(
+  assistantGuidance: ReadPageAssistantGuidance | undefined,
+): boolean {
+  if (assistantGuidance?.taskKind === 'search') return true;
+  return (assistantGuidance?.requestedObjects ?? []).some((item) =>
+    ['search_input', 'result_cards', 'detail_metrics'].includes(item),
+  );
+}
+
+function searchToolbarElementKey(element: any): string {
+  return [
+    typeof element?.selector === 'string' ? element.selector.trim() : '',
+    typeof element?.href === 'string' ? element.href.trim() : '',
+    typeof element?.text === 'string' ? element.text.trim() : '',
+    typeof element?.name === 'string' ? element.name.trim() : '',
+  ]
+    .filter(Boolean)
+    .join('|')
+    .toLowerCase();
 }
 
 function attachInteractiveRects<T extends { ref?: string; rect?: unknown }>(
@@ -1013,6 +1072,7 @@ async function buildModeOutput(params: {
     interactiveElements,
     candidateActions,
     visibleRegionRows,
+    visibleTextContent: params.visibleTextContent,
   });
 
   return buildReadPageModeResult({
@@ -1398,6 +1458,95 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     params.basePayload.fallbackSource = params.basePayload.fallbackSource
       ? `${params.basePayload.fallbackSource}+text_menu_target_recovery`
       : 'text_menu_target_recovery';
+    return true;
+  }
+
+  private async recoverSearchToolbarTextTargets(params: {
+    tabId: number;
+    basePayload: any;
+    assistantGuidance?: ReadPageAssistantGuidance;
+    frameId?: number;
+  }): Promise<boolean> {
+    if (!shouldRecoverSearchToolbarTargets(params.assistantGuidance)) return false;
+    const labels = extractSearchToolbarLabelsFromVisibleText(params.basePayload.visibleTextContent)
+      .filter((label) => label.length <= 18)
+      .slice(0, 12);
+    if (labels.length === 0) return false;
+
+    const existingTargetKeys = new Set(
+      (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
+        .filter((element: any) => {
+          const selector = typeof element?.selector === 'string' ? element.selector.trim() : '';
+          const href = typeof element?.href === 'string' ? element.href.trim() : '';
+          return Boolean(selector || href);
+        })
+        .map((element: any) => searchToolbarElementKey(element))
+        .filter(Boolean),
+    );
+    const existingLabels = new Set(
+      (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
+        .map((element: any) =>
+          String(element?.name || element?.text || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase(),
+        )
+        .filter(Boolean),
+    );
+
+    const recovered: any[] = [];
+    for (const label of labels) {
+      const normalizedLabel = label.replace(/\s+/g, ' ').trim().toLowerCase();
+      if (!normalizedLabel || existingLabels.has(normalizedLabel)) continue;
+      const fallback = await this.collectInteractiveElementsFallback(params.tabId, {
+        textQuery: label,
+        includeCoordinates: true,
+        frameId: params.frameId,
+      });
+      const first = Array.isArray(fallback?.elements) ? fallback.elements[0] : null;
+      if (!first?.selector) continue;
+      if (!isCompactSearchToolbarFallbackElement(first)) continue;
+      const recoveredElement = {
+        ...first,
+        selector: promoteSearchToolbarSelector(first.selector) || first.selector,
+        text: label,
+        name: label,
+        role: first.role || 'button',
+        type: first.type === 'text' ? 'button' : first.type || 'button',
+      };
+      const key = searchToolbarElementKey(recoveredElement);
+      if (!key || existingTargetKeys.has(key)) continue;
+      recovered.push(recoveredElement);
+      existingTargetKeys.add(key);
+      existingLabels.add(normalizedLabel);
+    }
+    if (recovered.length === 0) return false;
+
+    const existingElements = Array.isArray(params.basePayload.elements)
+      ? params.basePayload.elements
+      : [];
+    const existingRefMap = Array.isArray(params.basePayload.refMap)
+      ? params.basePayload.refMap
+      : [];
+    const offset = existingRefMap.filter((entry: unknown) => entry != null).length;
+    const recoveredRefMap = buildFallbackRefMap(recovered).map((entry, index) =>
+      entry ? { ...entry, ref: `ref_text_search_toolbar_${offset + index + 1}` } : null,
+    );
+    const recoveredWithRefs = attachFallbackRefs(recovered, recoveredRefMap);
+
+    params.basePayload.elements = [...recoveredWithRefs, ...existingElements].slice(0, 150);
+    params.basePayload.refMap = [...recoveredRefMap, ...existingRefMap].slice(0, 150);
+    params.basePayload.refMapCount = params.basePayload.refMap.filter(
+      (entry: unknown) => entry != null,
+    ).length;
+    params.basePayload.count = Math.max(
+      Number(params.basePayload.count || 0),
+      params.basePayload.elements.length,
+    );
+    params.basePayload.fallbackUsed = true;
+    params.basePayload.fallbackSource = params.basePayload.fallbackSource
+      ? `${params.basePayload.fallbackSource}+search_toolbar_target_recovery`
+      : 'search_toolbar_target_recovery';
     return true;
   }
 
@@ -1899,6 +2048,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           requestedDepth,
           focusRefId,
           rows: basePayload.visibleRegionRows,
+          assistantGuidance,
         }) &&
         !basePayload.visibleTextContent
       ) {
@@ -1963,6 +2113,12 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       }
 
       await this.recoverGlobalMenuTextTargets({ tabId, basePayload, frameId: requestedFrameId });
+      await this.recoverSearchToolbarTextTargets({
+        tabId,
+        basePayload,
+        assistantGuidance,
+        frameId: requestedFrameId,
+      });
       await this.supplementAuthFormInteractiveControls(tabId, basePayload, requestedFrameId);
       basePayload.visualElements = await this.collectQrVisualElements({
         tabId,
@@ -2105,6 +2261,12 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             }
           }
           reconcilePageUnderstandingWithVisibleRows(basePayload);
+          await this.recoverSearchToolbarTextTargets({
+            tabId,
+            basePayload,
+            assistantGuidance,
+            frameId: requestedFrameId,
+          });
           basePayload.visualElements = await this.collectQrVisualElements({
             tabId,
             pageContent: String(basePayload.pageContent || ''),

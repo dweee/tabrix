@@ -9,12 +9,20 @@ import type { VisibleRegionRowsResult } from './visible-region-rows';
 
 const SEARCH_INPUT_ROLE_PATTERN = /^(searchbox|textbox|combobox)$/i;
 const FILTER_LABEL_PATTERN = /^(筛选|过滤|filter|filters)$/i;
+const SORT_MENU_LABEL_PATTERN = /^(排序|sort)$/i;
+const CATEGORY_LABEL_PATTERN = /^(全部|图文|视频|用户|all|images?|photos?|videos?|users?)$/i;
+const SEARCH_TOOLBAR_LABEL_PATTERN =
+  /^(筛选|过滤|filter|filters|排序|sort|全部|图文|视频|用户|all|images?|photos?|videos?|users?)$/i;
+const TEXT_SEARCH_TOOLBAR_REF_PATTERN = /^ref_text_search_toolbar_/;
 const MOST_COLLECTED_PATTERN =
   /最多收藏|收藏最多|按收藏|收藏数|most\s*(collected|saved|favorited)|top\s*saves/i;
 const SEARCH_SUBMIT_PATTERN = /\b(search|find|query)\b|搜索|查找/i;
 const COLLECTION_METRIC_PATTERN =
   /(?:收藏|saves?|saved|favorites?|favourites?|collected)\s*[:：]?\s*([0-9][0-9,.]*\s*(?:万|千|k|m)?)/i;
 const COMPACT_COUNT_PATTERN = /([0-9][0-9,.]*\s*(?:万|千|k|m)?)/i;
+const SEARCH_TOOLBAR_TEXT_SCAN_LINE_LIMIT = 80;
+
+type SearchSurfaceControl = ReadPageSearchSurface['controls'][number];
 
 function guidanceRequestsSearch(guidance: ReadPageAssistantGuidance | undefined): boolean {
   if (guidance?.taskKind === 'search') return true;
@@ -33,6 +41,57 @@ function safeLabel(value: unknown): string | undefined {
   const text = normalizeText(value);
   if (!text) return undefined;
   return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+}
+
+function normalizedKey(value: unknown): string {
+  return normalizeText(value).toLowerCase();
+}
+
+function isFilterLabel(value: unknown): boolean {
+  return FILTER_LABEL_PATTERN.test(normalizeText(value));
+}
+
+function isSortMenuLabel(value: unknown): boolean {
+  return SORT_MENU_LABEL_PATTERN.test(normalizeText(value));
+}
+
+function isCategoryLabel(value: unknown): boolean {
+  return CATEGORY_LABEL_PATTERN.test(normalizeText(value));
+}
+
+function controlKindForToolbarLabel(label: string): SearchSurfaceControl['kind'] {
+  if (isCategoryLabel(label)) return 'category_tab';
+  if (isFilterLabel(label)) return 'filter_trigger';
+  if (isSortMenuLabel(label)) return 'filter_trigger';
+  return 'unknown';
+}
+
+export function extractSearchToolbarLabelsFromVisibleText(
+  visibleTextContent: string | null | undefined,
+): string[] {
+  const labels: string[] = [];
+  const seen = new Set<string>();
+  const lines = String(visibleTextContent || '')
+    .split(/\r?\n+/)
+    .map((line) => normalizeText(line))
+    .filter(Boolean)
+    .slice(0, SEARCH_TOOLBAR_TEXT_SCAN_LINE_LIMIT);
+
+  for (const line of lines) {
+    if (line.length > 80) continue;
+    const candidates = [line, ...line.split(/[\s|｜/、,，]+/)]
+      .map((item) => normalizeText(item))
+      .filter(Boolean);
+    for (const candidate of candidates) {
+      if (!SEARCH_TOOLBAR_LABEL_PATTERN.test(candidate)) continue;
+      const key = normalizedKey(candidate);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      labels.push(candidate);
+      if (labels.length >= 12) return labels;
+    }
+  }
+  return labels;
 }
 
 function metricTextForRow(row: VisibleRegionRowsResult['rows'][number]): string {
@@ -75,6 +134,21 @@ function actionForRef(
   return candidateActions.find((action) => action.targetRef === targetRef);
 }
 
+function actionForToolbarLabel(
+  candidateActions: readonly ReadPageCandidateAction[],
+  label: string,
+): ReadPageCandidateAction | undefined {
+  const key = normalizedKey(label);
+  return candidateActions.find((action) => {
+    const locatorLabel = action.locatorChain.find((item) => item.type === 'aria')?.value;
+    if (normalizedKey(locatorLabel) === key) return true;
+    if (TEXT_SEARCH_TOOLBAR_REF_PATTERN.test(action.targetRef)) {
+      return action.locatorChain.some((item) => normalizedKey(item.value) === key);
+    }
+    return false;
+  });
+}
+
 function findControlAction(
   candidateActions: readonly ReadPageCandidateAction[],
   intent: string,
@@ -92,12 +166,12 @@ function isSortAppliedCandidate(element: ReadPageInteractiveElement | undefined)
 }
 
 function controlForElement(params: {
-  kind: ReadPageSearchSurface['controls'][number]['kind'];
+  kind: SearchSurfaceControl['kind'];
   element: ReadPageInteractiveElement;
   candidateActions: readonly ReadPageCandidateAction[];
   reason: string;
   confidence: number;
-}): ReadPageSearchSurface['controls'][number] {
+}): SearchSurfaceControl {
   const action = actionForRef(params.candidateActions, params.element.ref);
   return {
     kind: params.kind,
@@ -106,8 +180,58 @@ function controlForElement(params: {
     label: safeLabel(params.element.name),
     confidence: params.confidence,
     actionability: params.element.actionability,
+    source: TEXT_SEARCH_TOOLBAR_REF_PATTERN.test(params.element.ref)
+      ? 'text_recovery'
+      : 'interactive_elements',
+    rect: params.element.rect,
     reason: params.reason,
   };
+}
+
+function controlForRecoveredAction(params: {
+  kind: SearchSurfaceControl['kind'];
+  label: string;
+  action: ReadPageCandidateAction;
+  reason: string;
+  confidence: number;
+}): SearchSurfaceControl {
+  return {
+    kind: params.kind,
+    targetRef: params.action.targetRef,
+    candidateActionId: params.action.id,
+    label: safeLabel(params.label),
+    confidence: params.confidence,
+    source: 'text_recovery',
+    reason: params.reason,
+  };
+}
+
+function unresolvedControlForLabel(label: string): SearchSurfaceControl {
+  return {
+    kind: controlKindForToolbarLabel(label),
+    label: safeLabel(label),
+    confidence: 0.52,
+    source: 'visible_text_unresolved',
+    reason:
+      'toolbar label is visible in page text, but no reliable targetRef or locatorChain was recovered in this snapshot',
+  };
+}
+
+function hasControlWithLabel(controls: readonly SearchSurfaceControl[], label: string): boolean {
+  const key = normalizedKey(label);
+  return controls.some((control) => normalizedKey(control.label) === key);
+}
+
+function pushUniqueControl(target: SearchSurfaceControl[], control: SearchSurfaceControl): void {
+  const key = `${control.kind}:${normalizedKey(control.label)}:${control.targetRef || ''}`;
+  if (
+    target.some(
+      (item) => `${item.kind}:${normalizedKey(item.label)}:${item.targetRef || ''}` === key,
+    )
+  ) {
+    return;
+  }
+  target.push(control);
 }
 
 export function buildSearchSurface(params: {
@@ -115,10 +239,13 @@ export function buildSearchSurface(params: {
   interactiveElements: ReadPageInteractiveElement[];
   candidateActions: ReadPageCandidateAction[];
   visibleRegionRows?: VisibleRegionRowsResult;
+  visibleTextContent?: string | null;
 }): ReadPageSearchSurface | undefined {
   const requested = guidanceRequestsSearch(params.assistantGuidance);
   if (!requested) return undefined;
-  const controls: ReadPageSearchSurface['controls'] = [];
+  const controls: SearchSurfaceControl[] = [];
+  const categoryTabs: SearchSurfaceControl[] = [];
+  const visibleButUnresolved: SearchSurfaceControl[] = [];
   const searchInput = params.interactiveElements.find((element) => {
     const role = normalizeText(element.role).toLowerCase();
     const name = normalizeText(element.name);
@@ -136,9 +263,7 @@ export function buildSearchSurface(params: {
     );
   }
 
-  const filterElement = params.interactiveElements.find((element) =>
-    FILTER_LABEL_PATTERN.test(normalizeText(element.name)),
-  );
+  const filterElement = params.interactiveElements.find((element) => isFilterLabel(element.name));
   if (filterElement) {
     controls.push(
       controlForElement({
@@ -147,6 +272,22 @@ export function buildSearchSurface(params: {
         candidateActions: params.candidateActions,
         reason: 'filter trigger surfaced from structured interactive elements',
         confidence: 0.84,
+      }),
+    );
+  }
+
+  const categoryElements = params.interactiveElements.filter((element) =>
+    isCategoryLabel(element.name),
+  );
+  for (const element of categoryElements) {
+    pushUniqueControl(
+      categoryTabs,
+      controlForElement({
+        kind: 'category_tab',
+        element,
+        candidateActions: params.candidateActions,
+        reason: 'category tab surfaced from structured interactive elements',
+        confidence: 0.8,
       }),
     );
   }
@@ -177,8 +318,36 @@ export function buildSearchSurface(params: {
       targetRef: submitAction.targetRef,
       candidateActionId: submitAction.id,
       confidence: submitAction.confidence,
+      source: TEXT_SEARCH_TOOLBAR_REF_PATTERN.test(submitAction.targetRef)
+        ? 'text_recovery'
+        : 'interactive_elements',
       reason: 'search submit action surfaced from candidate actions',
     });
+  }
+
+  const toolbarLabels = extractSearchToolbarLabelsFromVisibleText(params.visibleTextContent);
+  for (const label of toolbarLabels) {
+    const kind = controlKindForToolbarLabel(label);
+    const targetList = kind === 'category_tab' ? categoryTabs : controls;
+    if (hasControlWithLabel(targetList, label)) continue;
+    const recoveredAction = actionForToolbarLabel(params.candidateActions, label);
+    if (recoveredAction?.locatorChain?.length) {
+      pushUniqueControl(
+        targetList,
+        controlForRecoveredAction({
+          kind,
+          label,
+          action: recoveredAction,
+          reason:
+            'toolbar label was recovered from visible text and resolved to a locator-backed candidate action',
+          confidence: kind === 'category_tab' ? 0.76 : 0.78,
+        }),
+      );
+      continue;
+    }
+    const unresolved = unresolvedControlForLabel(label);
+    pushUniqueControl(visibleButUnresolved, unresolved);
+    if (kind === 'category_tab') pushUniqueControl(categoryTabs, unresolved);
   }
 
   const resultCards: ReadPageSearchResultCard[] = [];
@@ -205,12 +374,28 @@ export function buildSearchSurface(params: {
     });
   }
 
-  if (!requested && controls.length === 0 && resultCards.length === 0) return undefined;
+  if (
+    !requested &&
+    controls.length === 0 &&
+    categoryTabs.length === 0 &&
+    visibleButUnresolved.length === 0 &&
+    resultCards.length === 0
+  ) {
+    return undefined;
+  }
 
   return {
-    status: controls.length > 0 || resultCards.length > 0 ? 'detected' : 'not_detected',
+    status:
+      controls.length > 0 ||
+      categoryTabs.length > 0 ||
+      visibleButUnresolved.length > 0 ||
+      resultCards.length > 0
+        ? 'detected'
+        : 'not_detected',
     queryState: searchInput?.valueState ?? 'unknown',
     controls,
+    categoryTabs,
+    visibleButUnresolved,
     resultCards,
     sortEvidence: {
       requestedSort: sortElement || sortAction ? 'most_collected' : 'unknown',

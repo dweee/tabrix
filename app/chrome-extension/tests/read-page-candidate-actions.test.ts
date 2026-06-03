@@ -133,6 +133,8 @@ describe('read_page candidate action intents', () => {
     const actions = buildCandidateActions(
       [
         element({ ref: 'ref_filter', role: 'button', name: '筛选' }),
+        element({ ref: 'ref_sort', role: 'button', name: '排序' }),
+        element({ ref: 'ref_category', role: 'tab', name: '图文' }),
         element({ ref: 'ref_sort_saves', role: 'option', name: '最多收藏' }),
       ],
       [],
@@ -141,6 +143,14 @@ describe('read_page candidate action intents', () => {
     expect(actions.find((action) => action.targetRef === 'ref_filter')).toMatchObject({
       actionType: 'click',
       intent: 'filter.open',
+    });
+    expect(actions.find((action) => action.targetRef === 'ref_sort')).toMatchObject({
+      actionType: 'click',
+      intent: 'filter.open',
+    });
+    expect(actions.find((action) => action.targetRef === 'ref_category')).toMatchObject({
+      actionType: 'click',
+      intent: 'search.category_select',
     });
     expect(actions.find((action) => action.targetRef === 'ref_sort_saves')).toMatchObject({
       actionType: 'click',
