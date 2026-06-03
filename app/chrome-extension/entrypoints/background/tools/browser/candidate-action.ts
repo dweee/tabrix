@@ -148,13 +148,32 @@ export function resolveCandidateActionTarget(
   params: ResolveCandidateActionTargetParams,
 ): ResolvedCandidateActionTarget {
   const candidateFrameId = asFiniteFrameId(params.candidateAction?.frameId);
+  const locatorRef = firstLocatorValue(params.candidateAction?.locatorChain, 'ref');
+  const locatorCss = firstLocatorValue(params.candidateAction?.locatorChain, 'css');
+  const candidateTargetRef = asNonEmptyString(params.candidateAction?.targetRef);
   const explicitRef = asNonEmptyString(params.explicitRef);
   if (explicitRef) {
     // AI callers often copy the AI-facing `targetRef` into `ref`. Stable
     // `tgt_*` values are not page-local refs, so route them through the same
     // live snapshot registry instead of forwarding a guaranteed-miss handle.
+    // Synthetic text refs are also AI-facing handles; use their locatorChain
+    // selector when available and fail closed when it is not.
     if (isStableTargetRef(explicitRef)) {
       return resolveStableTargetRef(params, explicitRef);
+    }
+    if (isLocatorBackedSyntheticRef(explicitRef)) {
+      if (locatorCss) {
+        return {
+          selector: locatorCss,
+          selectorType: 'css',
+          ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
+          source: 'candidate_locator_css',
+        };
+      }
+      return {
+        ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
+        source: 'none',
+      };
     }
     return {
       ref: explicitRef,
@@ -163,9 +182,6 @@ export function resolveCandidateActionTarget(
     };
   }
 
-  const locatorRef = firstLocatorValue(params.candidateAction?.locatorChain, 'ref');
-  const locatorCss = firstLocatorValue(params.candidateAction?.locatorChain, 'css');
-  const candidateTargetRef = asNonEmptyString(params.candidateAction?.targetRef);
   if (candidateTargetRef) {
     if (
       (isLocatorBackedSyntheticRef(candidateTargetRef) || isFallbackRef(candidateTargetRef)) &&

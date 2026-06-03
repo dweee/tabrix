@@ -234,6 +234,47 @@ describe('candidateAction bridge', () => {
     expect(clickMessage.ref).toBeUndefined();
   });
 
+  it('routes copied recovered search toolbar ref through candidateAction locator css', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4116,
+      title: 'Search',
+      url: 'https://example.com/search?q=neutral',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      dispatchSucceeded: true,
+      signals: { domChanged: true },
+    });
+
+    const result = await clickTool.execute({
+      ref: 'ref_text_search_toolbar_2',
+      candidateAction: {
+        targetRef: 'ref_text_search_toolbar_2',
+        intent: 'search.category_select',
+        locatorChain: [
+          { type: 'ref', value: 'ref_text_search_toolbar_2' },
+          { type: 'aria', value: '图文' },
+          { type: 'css', value: '.search-toolbar [data-category="images"]' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.targetBinding).toMatchObject({
+      resolutionSource: 'candidate_locator_css',
+      dispatchTarget: 'selector',
+    });
+    const clickMessage = sendSpy.mock.calls.find(
+      ([, message]) => (message as any)?.action === TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+    )?.[1] as any;
+    expect(clickMessage).toMatchObject({
+      selector: '.search-toolbar [data-category="images"]',
+    });
+    expect(clickMessage.ref).toBeUndefined();
+  });
+
   it('returns structured failure when recovered search toolbar click helper does not respond', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4114,
@@ -342,6 +383,35 @@ describe('candidateAction bridge', () => {
       .mockResolvedValue({ success: true });
 
     const result = await clickTool.execute({
+      candidateAction: {
+        targetRef: 'ref_text_search_toolbar_3',
+        intent: 'filter.open',
+        locatorChain: [
+          { type: 'ref', value: 'ref_text_search_toolbar_3' },
+          { type: 'aria', value: '筛选' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content?.[0] as any)?.text || '')).toContain(
+      'candidateAction did not resolve target',
+    );
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not dispatch copied recovered search toolbar ref without a css locator', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4117,
+      title: 'Search',
+      url: 'https://example.com/search?q=neutral',
+    });
+    const sendSpy = vi
+      .spyOn(clickTool as any, 'sendMessageToTab')
+      .mockResolvedValue({ success: true });
+
+    const result = await clickTool.execute({
+      ref: 'ref_text_search_toolbar_3',
       candidateAction: {
         targetRef: 'ref_text_search_toolbar_3',
         intent: 'filter.open',

@@ -205,6 +205,8 @@ type StaleSessionRecoverableToolCall = {
   args: Record<string, unknown>;
 };
 
+const STALE_SESSION_RECOVERABLE_TOOL_NAMES = new Set(['get_windows_and_tabs']);
+
 function getStaleSessionRecoverableToolCall(body: unknown): StaleSessionRecoverableToolCall | null {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
   const requestBody = body as {
@@ -216,6 +218,7 @@ function getStaleSessionRecoverableToolCall(body: unknown): StaleSessionRecovera
   };
   if (requestBody.method !== 'tools/call') return null;
   if (typeof requestBody.params?.name !== 'string' || !requestBody.params.name) return null;
+  if (!STALE_SESSION_RECOVERABLE_TOOL_NAMES.has(requestBody.params.name)) return null;
   const args = requestBody.params.arguments;
   return {
     name: requestBody.params.name,
