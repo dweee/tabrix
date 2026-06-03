@@ -96,6 +96,14 @@ function isSyntheticTextMenuRef(value: string): boolean {
   return value.startsWith('ref_text_menu_');
 }
 
+function isSyntheticSearchToolbarRef(value: string): boolean {
+  return value.startsWith('ref_text_search_toolbar_');
+}
+
+function isLocatorBackedSyntheticRef(value: string): boolean {
+  return isSyntheticTextMenuRef(value) || isSyntheticSearchToolbarRef(value);
+}
+
 function isFallbackRef(value: string): boolean {
   return value.startsWith('ref_fallback_');
 }
@@ -152,7 +160,7 @@ export function resolveCandidateActionTarget(
   const candidateTargetRef = asNonEmptyString(params.candidateAction?.targetRef);
   if (candidateTargetRef) {
     if (
-      (isSyntheticTextMenuRef(candidateTargetRef) || isFallbackRef(candidateTargetRef)) &&
+      (isLocatorBackedSyntheticRef(candidateTargetRef) || isFallbackRef(candidateTargetRef)) &&
       locatorCss
     ) {
       return {
@@ -160,6 +168,13 @@ export function resolveCandidateActionTarget(
         selectorType: 'css',
         ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
         source: 'candidate_locator_css',
+      };
+    }
+
+    if (isSyntheticSearchToolbarRef(candidateTargetRef)) {
+      return {
+        ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
+        source: 'none',
       };
     }
 
@@ -188,12 +203,19 @@ export function resolveCandidateActionTarget(
     };
   }
 
-  if (locatorRef && isSyntheticTextMenuRef(locatorRef) && locatorCss) {
+  if (locatorRef && isLocatorBackedSyntheticRef(locatorRef) && locatorCss) {
     return {
       selector: locatorCss,
       selectorType: 'css',
       ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
       source: 'candidate_locator_css',
+    };
+  }
+
+  if (locatorRef && isSyntheticSearchToolbarRef(locatorRef)) {
+    return {
+      ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
+      source: 'none',
     };
   }
 

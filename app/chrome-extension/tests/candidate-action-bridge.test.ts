@@ -187,6 +187,81 @@ describe('candidateAction bridge', () => {
     );
   });
 
+  it('routes recovered search toolbar targetRef through candidateAction locator css', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4112,
+      title: 'Search',
+      url: 'https://example.com/search?q=neutral',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      dispatchSucceeded: true,
+      signals: { domChanged: true },
+    });
+
+    const result = await clickTool.execute({
+      candidateAction: {
+        targetRef: 'ref_text_search_toolbar_2',
+        intent: 'search.category_select',
+        locatorChain: [
+          { type: 'ref', value: 'ref_text_search_toolbar_2' },
+          { type: 'aria', value: '图文' },
+          { type: 'css', value: '.search-toolbar [data-category="images"]' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.targetBinding).toMatchObject({
+      resolutionSource: 'candidate_locator_css',
+      dispatchTarget: 'selector',
+    });
+    expect(payload.businessVerification).toMatchObject({
+      status: 'fresh_read_required',
+      candidateActionIntent: 'search.category_select',
+      expectedEvidence: 'search_results_or_url_query_changed',
+      requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
+      businessSuccessProven: false,
+    });
+    const clickMessage = sendSpy.mock.calls.find(
+      ([, message]) => (message as any)?.action === TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+    )?.[1] as any;
+    expect(clickMessage).toMatchObject({
+      selector: '.search-toolbar [data-category="images"]',
+    });
+    expect(clickMessage.ref).toBeUndefined();
+  });
+
+  it('does not dispatch recovered search toolbar targetRef without a css locator', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4113,
+      title: 'Search',
+      url: 'https://example.com/search?q=neutral',
+    });
+    const sendSpy = vi
+      .spyOn(clickTool as any, 'sendMessageToTab')
+      .mockResolvedValue({ success: true });
+
+    const result = await clickTool.execute({
+      candidateAction: {
+        targetRef: 'ref_text_search_toolbar_3',
+        intent: 'filter.open',
+        locatorChain: [
+          { type: 'ref', value: 'ref_text_search_toolbar_3' },
+          { type: 'aria', value: '筛选' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content?.[0] as any)?.text || '')).toContain(
+      'candidateAction did not resolve target',
+    );
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
   it('returns structured diagnostics when safe hover selector cannot be resolved', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4109,

@@ -61,6 +61,7 @@ function expectedBusinessEvidenceForIntent(
     case 'search.enter_query':
       return 'form_value_state_changed';
     case 'search.submit':
+    case 'search.category_select':
       return 'search_results_or_url_query_changed';
     case 'filter.open':
       return 'page_or_object_state_changed';
