@@ -4,7 +4,7 @@
  * These types describe the JSON shapes returned by the native-server's
  * read-only `GET /memory/*` routes (see `app/native-server/src/server/memory-routes.ts`).
  * They are shared between the native-server (canonical emitter) and the
- * Chrome extension's sidepanel (sole consumer) so the contract stays pinned
+ * Chrome extension read surfaces so the contract stays pinned
  * in a single place.
  *
  * Conventions:
@@ -104,6 +104,139 @@ export interface MemorySessionStepsResponseData {
 /** `GET /memory/tasks/:taskId` response envelope body. */
 export interface MemoryTaskResponseData {
   task: MemoryTaskRow;
+  persistenceMode: MemoryPersistenceMode;
+}
+
+/**
+ * Sanitized projection of `tabrix_memory_traces`.
+ *
+ * This intentionally omits raw request/response blobs, perception objects,
+ * post-observation payloads, and AI feedback bodies. The popup management UI
+ * only needs query/status metadata; raw evidence stays inside the native DB.
+ */
+export interface MkeMemoryTraceSummary {
+  traceId: string;
+  taskId: string;
+  taskIntent?: string | null;
+  aiClient?: string | null;
+  toolName: string;
+  toolCallId?: string | null;
+  sequenceIndex?: number | null;
+  requestAt: string;
+  responseAt: string;
+  durationMs?: number | null;
+  toolSuccess?: boolean | null;
+  businessSuccess?: string | null;
+  resultSummary?: string | null;
+  errorCode?: string | null;
+  tabId?: number | null;
+  windowId?: number | null;
+  siteFamily?: string | null;
+  pageUrlPattern?: string | null;
+  pageRole?: string | null;
+  pageState?: string | null;
+  pageModelKey?: string | null;
+  sourceRoute?: string | null;
+  selectedDataSource?: string | null;
+  freshness?: string | null;
+  fallbackUsed?: string | null;
+  tokenTotal?: number | null;
+  redactionState: string;
+  createdAt: string;
+}
+
+/**
+ * Sanitized projection of `tabrix_knowledge_models`.
+ *
+ * Large model blobs are collapsed to counts/quality metadata so UI listing
+ * does not become a raw page-knowledge dump.
+ */
+export interface MkeKnowledgeModelSummary {
+  knowledgeId: string;
+  siteFamily: string;
+  pageUrlPattern?: string | null;
+  pageRole: string;
+  pageModelKey: string;
+  modelVersion: number;
+  observationCount: number;
+  successfulUseCount: number;
+  failedUseCount: number;
+  confidenceScore: number;
+  driftScore?: number | null;
+  sourceTraceCount: number;
+  sourceExperienceCount: number;
+  archivedAt?: string | null;
+  lastObservedAt?: string | null;
+  lastValidatedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Sanitized projection of `tabrix_experience_recipes`.
+ *
+ * Template steps, variables, and preconditions are intentionally not exposed
+ * by the list endpoint; users can inspect lifecycle and quality metadata
+ * without leaking concrete operational content.
+ */
+export interface MkeExperienceRecipeSummary {
+  experienceId: string;
+  recipeName: string;
+  scenarioKey: string;
+  taskSignature: string;
+  recipeFingerprint: string;
+  recipeVersion: number;
+  siteFamily?: string | null;
+  pageModelKey?: string | null;
+  pageRole?: string | null;
+  successCount: number;
+  failureCount: number;
+  adoptionCount: number;
+  avgDurationMs?: number | null;
+  avgTokenTotal?: number | null;
+  reliabilityScore?: number | null;
+  speedScore?: number | null;
+  tokenSavingScore?: number | null;
+  usefulnessScore?: number | null;
+  driftState?: string | null;
+  portabilityScope: string;
+  originKind: string;
+  exportState: string;
+  importState: string;
+  redactionState: string;
+  sourceTraceCount: number;
+  linkedKnowledgeCount: number;
+  archivedAt?: string | null;
+  lastUsedAt?: string | null;
+  lastVerifiedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** `GET /memory/mke/traces` response envelope body. */
+export interface MkeMemoryTracesResponseData {
+  traces: MkeMemoryTraceSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+  persistenceMode: MemoryPersistenceMode;
+}
+
+/** `GET /memory/mke/knowledge` response envelope body. */
+export interface MkeKnowledgeModelsResponseData {
+  knowledgeModels: MkeKnowledgeModelSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+  persistenceMode: MemoryPersistenceMode;
+}
+
+/** `GET /memory/mke/experience` response envelope body. */
+export interface MkeExperienceRecipesResponseData {
+  experienceRecipes: MkeExperienceRecipeSummary[];
+  total: number;
+  limit: number;
+  offset: number;
   persistenceMode: MemoryPersistenceMode;
 }
 

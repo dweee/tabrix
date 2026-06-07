@@ -1,84 +1,34 @@
 <template>
-  <div class="sidepanel-root">
-    <nav class="mkep-nav" role="tablist" aria-label="MKEP sidepanel">
-      <button
-        v-for="tab in tabs"
-        :key="tab.id"
-        class="mkep-nav__item"
-        :class="{ 'mkep-nav__item--active': activeTab === tab.id }"
-        role="tab"
-        :aria-selected="activeTab === tab.id"
-        @click="setActiveTab(tab.id)"
-      >
-        {{ tab.label }}
-      </button>
-    </nav>
-
+  <div class="sidepanel-root" :data-agent-theme="agentTheme">
     <div class="sidepanel-body">
-      <MemoryTab v-if="activeTab === 'memory'" />
-      <KnowledgeTab v-else-if="activeTab === 'knowledge'" />
-      <ExperienceTab v-else-if="activeTab === 'experience'" />
-      <ExecutionTab v-else-if="activeTab === 'execution'" />
+      <MkeDataTab />
     </div>
   </div>
 </template>
 
 <script lang="ts" setup>
-import { onMounted, ref } from 'vue';
-import MemoryTab from './tabs/MemoryTab.vue';
-import KnowledgeTab from './tabs/KnowledgeTab.vue';
-import ExperienceTab from './tabs/ExperienceTab.vue';
-import ExecutionTab from './tabs/ExecutionTab.vue';
+import { defineAsyncComponent, onMounted } from 'vue';
+import { useAgentTheme } from '../shared/composables/usePopupTheme';
 
-type SidepanelTab = 'memory' | 'knowledge' | 'experience' | 'execution';
-
-const tabs: ReadonlyArray<{ id: SidepanelTab; label: string }> = [
-  { id: 'memory', label: 'Memory' },
-  { id: 'knowledge', label: 'Knowledge' },
-  { id: 'experience', label: 'Experience' },
-  { id: 'execution', label: 'Execution' },
-];
-
-const DEFAULT_TAB: SidepanelTab = 'memory';
-
-const activeTab = ref<SidepanelTab>(DEFAULT_TAB);
-
-function parseTabFromUrl(): SidepanelTab {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const raw = params.get('tab');
-    if (raw === 'memory' || raw === 'knowledge' || raw === 'experience' || raw === 'execution') {
-      return raw;
-    }
-  } catch {
-    // noop
-  }
-  return DEFAULT_TAB;
-}
-
-function setActiveTab(tab: SidepanelTab): void {
-  activeTab.value = tab;
-  try {
-    const url = new URL(window.location.href);
-    url.searchParams.set('tab', tab);
-    history.replaceState(null, '', url.toString());
-  } catch {
-    // noop — sidepanel may run in restricted contexts where history is unavailable
-  }
-}
+const MkeDataTab = defineAsyncComponent(() => import('./tabs/MkeDataTab.vue'));
+const { theme: agentTheme, initTheme } = useAgentTheme();
 
 onMounted(() => {
-  activeTab.value = parseTabFromUrl();
+  void initTheme();
 });
 </script>
 
 <style scoped>
 .sidepanel-root {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   height: 100%;
+  max-width: 100vw;
+  min-width: 0;
+  overflow: hidden;
   width: 100%;
-  background: #f9fafb;
+  background: #f5f7fb;
   color: #1f2937;
   font-family:
     'Inter',
@@ -88,67 +38,36 @@ onMounted(() => {
     sans-serif;
 }
 
-.mkep-nav {
-  display: flex;
-  flex: 0 0 auto;
-  background: #ffffff;
-  border-bottom: 1px solid #e5e7eb;
-  padding: 6px 8px;
-  gap: 4px;
+.sidepanel-root *,
+.sidepanel-root *::before,
+.sidepanel-root *::after {
+  box-sizing: border-box;
 }
 
-.mkep-nav__item {
-  flex: 1;
-  padding: 8px 10px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: #6b7280;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition:
-    background 150ms ease,
-    color 150ms ease;
-}
-
-.mkep-nav__item:hover {
-  background: #f3f4f6;
-  color: #111827;
-}
-
-.mkep-nav__item--active {
-  background: #eff6ff;
-  color: #1d4ed8;
-  font-weight: 600;
+.sidepanel-root[data-agent-theme='dark-console'] {
+  background:
+    radial-gradient(circle at 12% -12%, rgba(34, 211, 238, 0.22), transparent 42%),
+    radial-gradient(circle at 92% -20%, rgba(168, 85, 247, 0.14), transparent 40%),
+    linear-gradient(160deg, #020817 0%, #051226 56%, #040b18 100%);
+  color: #dbeafe;
 }
 
 .sidepanel-body {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
+  max-width: 100vw;
   overflow: hidden;
   background: transparent;
 }
 
-@media (prefers-color-scheme: dark) {
-  .sidepanel-root {
-    background: #111827;
-    color: #e5e7eb;
-  }
-  .mkep-nav {
-    background: #1f2937;
-    border-bottom-color: #374151;
-  }
-  .mkep-nav__item {
-    color: #9ca3af;
-  }
-  .mkep-nav__item:hover {
-    background: #374151;
-    color: #f9fafb;
-  }
-  .mkep-nav__item--active {
-    background: #1e3a8a;
-    color: #bfdbfe;
-  }
+:global(html),
+:global(body),
+:global(#app) {
+  margin: 0;
+  max-width: 100vw;
+  min-width: 0;
+  overflow: hidden;
+  width: 100%;
 }
 </style>

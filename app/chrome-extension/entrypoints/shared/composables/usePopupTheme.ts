@@ -12,7 +12,7 @@
  * popup restores the user's last choice across sessions. Falls back to
  * `localStorage` when running outside an extension (tests, local dev).
  */
-import { ref, type Ref } from 'vue';
+import { onUnmounted, ref, type Ref } from 'vue';
 
 export type AgentThemeId = 'warm-editorial' | 'dark-console';
 
@@ -88,6 +88,19 @@ interface UseAgentThemeResult {
  */
 export function useAgentTheme(): UseAgentThemeResult {
   const theme = ref<AgentThemeId>(preloadedTheme ?? DEFAULT_THEME);
+  const storageChangeListener =
+    hasChromeStorage() && chrome.storage.onChanged
+      ? (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
+          if (areaName !== 'local') return;
+          const next = changes[STORAGE_KEY]?.newValue;
+          theme.value = next === 'dark-console' ? 'dark-console' : DEFAULT_THEME;
+        }
+      : null;
+
+  if (storageChangeListener) {
+    chrome.storage.onChanged.addListener(storageChangeListener);
+    onUnmounted(() => chrome.storage.onChanged.removeListener(storageChangeListener));
+  }
 
   const initTheme = async () => {
     theme.value = await readStoredTheme();

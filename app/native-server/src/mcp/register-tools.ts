@@ -385,6 +385,38 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     stepType: name.startsWith('flow.') ? 'flow_call' : 'tool_call',
     inputSummary: JSON.stringify(args ?? {}),
   });
+  const recordMkeMemoryTrace = (
+    result: CallToolResult,
+    input?: {
+      requestParams?: unknown;
+      resultSummary?: string | null;
+      errorCode?: string | null;
+      browserContextKey?: string | null;
+    },
+  ): void => {
+    const traceWriter = sessionManager.memoryTraces;
+    if (!traceWriter) return;
+    try {
+      traceWriter.recordToolCall({
+        taskId: task.taskId,
+        taskIntent: task.intent,
+        aiClient: session.clientName,
+        toolName: name,
+        stepId: step.stepId,
+        sequenceIndex: step.index,
+        requestParams: input?.requestParams ?? args,
+        requestAtMs: toolCallStartedAtMs,
+        responseAtMs: Date.now(),
+        result,
+        resultSummary: input?.resultSummary ?? null,
+        errorCode: input?.errorCode ?? null,
+        browserContextKey: input?.browserContextKey ?? null,
+      });
+    } catch (traceError) {
+      const message = traceError instanceof Error ? traceError.message : String(traceError);
+      console.warn(`[tabrix/mke-memory-trace] write failed: ${message}`);
+    }
+  };
 
   try {
     const dynamicTools = await listDynamicFlowTools(invokeExtensionCommand);
@@ -968,6 +1000,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         status: 'failed',
         summary: `${name} blocked by non-interference policy`,
       });
+      recordMkeMemoryTrace(result, {
+        requestParams: outgoingArgs,
+        resultSummary: `${name} blocked by non-interference policy`,
+        errorCode: 'non_interference_blocked',
+        browserContextKey: taskContextAttachment.taskContextKey,
+      });
       return result;
     }
 
@@ -1106,6 +1144,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
             status: 'failed',
             summary: 'chrome_read_page blocked because returned target did not match tabId',
           });
+          recordMkeMemoryTrace(mismatchResult, {
+            requestParams: outgoingArgs,
+            resultSummary: 'chrome_read_page blocked because returned target did not match tabId',
+            errorCode: 'read_page_target_mismatch',
+            browserContextKey: taskContextAttachment.taskContextKey,
+          });
           return mismatchResult;
         }
       }
@@ -1206,6 +1250,11 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
             sessionManager.finishSession(session.sessionId, {
               status: 'completed',
               summary: 'chrome_read_page fulfilled via visible DOM region rows',
+            });
+            recordMkeMemoryTrace(aiFacingDomRowsResult, {
+              requestParams: outgoingArgs,
+              resultSummary: 'chrome_read_page fulfilled via visible DOM region rows',
+              browserContextKey: taskContextAttachment.taskContextKey,
             });
             return aiFacingDomRowsResult;
           }
@@ -1341,6 +1390,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         status: 'completed',
         summary: normalized.executionResult.summary,
       });
+      recordMkeMemoryTrace(resultWithPolicyAudit, {
+        requestParams: outgoingArgs,
+        resultSummary: normalized.stepSummary,
+        errorCode: toolResultFailed ? 'tool_result_error' : null,
+        browserContextKey: taskContextAttachment.taskContextKey,
+      });
       return resultWithPolicyAudit;
     } else {
       const responseError = String(response.error || 'Unknown tool error');
@@ -1386,6 +1441,16 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         status: 'failed',
         summary: `Tool ${name} failed`,
       });
+      recordMkeMemoryTrace(result, {
+        requestParams: outgoingArgs,
+        resultSummary: `Tool ${name} failed`,
+        errorCode: bridgeFailure
+          ? bridgeFailure.code.toLowerCase()
+          : isBridgeError
+            ? 'browser_bridge_not_ready'
+            : 'tool_call_error',
+        browserContextKey: taskContextAttachment.taskContextKey,
+      });
       return result;
     }
   } catch (error: any) {
@@ -1407,6 +1472,10 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     sessionManager.finishSession(session.sessionId, {
       status: 'failed',
       summary: `Tool ${name} threw an exception`,
+    });
+    recordMkeMemoryTrace(result, {
+      resultSummary: `Tool ${name} threw an exception`,
+      errorCode: 'tool_call_exception',
     });
     return result;
   }

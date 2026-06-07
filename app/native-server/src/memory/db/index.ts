@@ -6,7 +6,11 @@ export {
   type OpenMemoryDbResult,
   type SqliteDatabase,
 } from './client';
-export { MEMORY_CREATE_TABLES_SQL, OPERATION_MEMORY_LOG_CREATE_TABLES_SQL } from './schema';
+export {
+  MKE_CORE_CREATE_TABLES_SQL,
+  MEMORY_CREATE_TABLES_SQL,
+  OPERATION_MEMORY_LOG_CREATE_TABLES_SQL,
+} from './schema';
 export { TaskRepository } from './task-repository';
 export {
   SessionRepository,
@@ -28,6 +32,19 @@ export {
   type OperationMemoryLog,
   type OperationMemoryLogInsert,
 } from './operation-memory-log-repository';
+export {
+  ExperienceRecipeRepository,
+  KnowledgeModelRepository,
+  MemoryTraceRepository,
+  type BusinessSuccessVerdict,
+  type ExperienceRecipe,
+  type ExperienceRecipeExport,
+  type ExperienceRecipeInput,
+  type KnowledgeModel,
+  type KnowledgeModelInput,
+  type MemoryTrace,
+  type MemoryTraceInsert,
+} from './mke-core-repository';
 export {
   NOT_APPLICABLE,
   OPERATION_LOG_BLOB_SCHEMA_VERSION,

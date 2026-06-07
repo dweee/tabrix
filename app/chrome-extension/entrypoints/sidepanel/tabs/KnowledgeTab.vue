@@ -1,5 +1,5 @@
 <template>
-  <section class="mkep-tab">
+  <section class="mkep-tab" :data-agent-theme="agentTheme">
     <header class="mkep-tab__header">
       <h2 class="mkep-tab__title">Knowledge</h2>
       <p class="mkep-tab__subtitle">
@@ -28,7 +28,16 @@
   </section>
 </template>
 
-<script lang="ts" setup></script>
+<script lang="ts" setup>
+import { onMounted } from 'vue';
+import { useAgentTheme } from '../../shared/composables/usePopupTheme';
+
+const { theme: agentTheme, initTheme } = useAgentTheme();
+
+onMounted(() => {
+  void initTheme();
+});
+</script>
 
 <style scoped>
 @import './mkep-tab.css';

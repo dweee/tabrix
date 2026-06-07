@@ -67,6 +67,17 @@ describe('handleToolCall execution wrapper', () => {
     expect(sessions[0].steps[0].toolName).toBe('chrome_read_page');
     expect(sessions[0].steps[0].status).toBe('completed');
     expect(sessionManager.listTasks()[0].status).toBe('completed');
+    const traces = sessionManager.memoryTraces!.listByTask(sessions[0].taskId);
+    expect(traces).toHaveLength(1);
+    expect(traces[0]).toMatchObject({
+      toolName: 'chrome_read_page',
+      toolCallId: sessions[0].steps[0].stepId,
+      sequenceIndex: 1,
+      tabId: 1,
+      toolSuccess: true,
+      businessSuccess: 'unknown',
+      redactionState: 'redacted',
+    });
   });
 
   it('returns structured error payload when extension returns a non-recoverable error', async () => {
@@ -599,6 +610,22 @@ describe('handleToolCall execution wrapper', () => {
     const summary = JSON.parse(actions[0].valueSummary!);
     expect(summary.kind).toBe('redacted');
     expect(summary.length).toBe('hunter2'.length);
+    const traces = sessionManager.memoryTraces!.listByTask(sessions[0].taskId);
+    expect(traces).toHaveLength(1);
+    expect(traces[0].requestParams).toMatchObject({
+      tabId: 1,
+      ref: 'e-1',
+      value: '[redacted]',
+    });
+    expect(JSON.stringify(traces[0].requestParams)).not.toContain('hunter2');
+    expect(JSON.stringify(traces[0].response)).not.toContain('hunter2');
+    expect(traces[0]).toMatchObject({
+      toolName: 'chrome_fill_or_select',
+      tabId: 1,
+      toolSuccess: true,
+      businessSuccess: 'unknown',
+      redactionState: 'redacted',
+    });
   });
 
   it('blocks active user tab impact actions before the extension call', async () => {

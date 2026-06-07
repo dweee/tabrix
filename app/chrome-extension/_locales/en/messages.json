@@ -805,6 +805,14 @@
     "message": "Management",
     "description": "Auto-synced key: popupManagementEntrancesTitle"
   },
+  "popupMkeDataManagementDesc": {
+    "message": "Query Memory, Knowledge and Experience rows",
+    "description": "Management entry description for MKE data query page"
+  },
+  "popupMkeDataManagementTitle": {
+    "message": "MKE Data",
+    "description": "Management entry title for MKE data query page"
+  },
   "popupMcpConfigLabel": {
     "message": "MCP Configuration",
     "description": "Auto-synced key: popupMcpConfigLabel"

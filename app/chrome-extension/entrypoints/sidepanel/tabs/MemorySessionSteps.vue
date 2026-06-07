@@ -337,59 +337,45 @@ function formatDuration(step: MemoryExecutionStep): string | null {
   cursor: default;
 }
 
-@media (prefers-color-scheme: dark) {
-  .memory-steps {
-    background: #111827;
-    border-color: #374151;
-  }
-  .memory-steps__state {
-    color: #d1d5db;
-  }
-  .memory-steps__state--error strong {
-    color: #fca5a5;
-  }
-  .memory-steps__detail {
-    color: #9ca3af;
-  }
-  .memory-step {
-    background: #1f2937;
-    border-color: #374151;
-  }
-  .memory-step__tool {
-    color: #f9fafb;
-  }
-  .memory-step__badge {
-    background: #374151;
-    color: #d1d5db;
-  }
-  .memory-step__badge--retry {
-    background: #78350f;
-    color: #fef3c7;
-  }
-  .memory-step__summary {
-    color: #d1d5db;
-  }
-  .memory-step__summary--input,
-  .memory-step__duration,
-  .memory-step__index {
-    color: #9ca3af;
-  }
-  .memory-step__error {
-    color: #fca5a5;
-  }
-  .memory-step__error-code {
-    background: #7f1d1d;
-    color: #fecaca;
-  }
-  .memory-step__copy,
-  .memory-steps__retry {
-    background: #1f2937;
-    color: #e5e7eb;
-    border-color: #374151;
-  }
-  .memory-step__copy:hover:not(:disabled),
-  .memory-steps__retry:hover {
-    background: #374151;
-  }
+:global(.sidepanel-root[data-agent-theme='dark-console']) .memory-steps {
+  background: rgba(5, 18, 36, 0.74);
+  border-color: rgba(56, 189, 248, 0.2);
+}
+
+:global(.sidepanel-root[data-agent-theme='dark-console']) .memory-step {
+  background: rgba(8, 22, 44, 0.78);
+  border-color: rgba(56, 189, 248, 0.18);
+}
+
+:global(.sidepanel-root[data-agent-theme='dark-console']) .memory-step__tool {
+  color: #dbeafe;
+}
+
+:global(.sidepanel-root[data-agent-theme='dark-console']) .memory-step__summary {
+  color: #c7e6ff;
+}
+
+:global(.sidepanel-root[data-agent-theme='dark-console']) .memory-step__summary--input,
+:global(.sidepanel-root[data-agent-theme='dark-console']) .memory-step__duration,
+:global(.sidepanel-root[data-agent-theme='dark-console']) .memory-step__index,
+:global(.sidepanel-root[data-agent-theme='dark-console']) .memory-steps__state,
+:global(.sidepanel-root[data-agent-theme='dark-console']) .memory-steps__detail {
+  color: #9ab8d8;
+}
+
+:global(.sidepanel-root[data-agent-theme='dark-console']) .memory-step__badge,
+:global(.sidepanel-root[data-agent-theme='dark-console']) .memory-step__copy {
+  background: rgba(8, 22, 44, 0.82);
+  border-color: rgba(56, 189, 248, 0.24);
+  color: #dbeafe;
+}
+
+:global(.sidepanel-root[data-agent-theme='dark-console']) .memory-step__badge--retry {
+  background: rgba(251, 191, 36, 0.16);
+  color: #fde68a;
+}
+
+:global(.sidepanel-root[data-agent-theme='dark-console']) .memory-step__copy:hover:not(:disabled) {
+  background: rgba(12, 34, 64, 0.9);
 }
 </style>

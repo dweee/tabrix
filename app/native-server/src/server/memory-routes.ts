@@ -18,6 +18,9 @@
  * - `GET /memory/sessions?limit=&offset=` → recent sessions, newest first
  * - `GET /memory/sessions/:sessionId/steps` → steps for one session
  * - `GET /memory/tasks/:taskId` → single task + its sessions
+ * - `GET /memory/mke/traces?limit=&offset=` → sanitized MKE Memory trace summaries
+ * - `GET /memory/mke/knowledge?limit=&offset=` → sanitized MKE Knowledge summaries
+ * - `GET /memory/mke/experience?limit=&offset=` → sanitized MKE Experience summaries
  *
  * Write verbs (POST/PUT/PATCH/DELETE) are not registered; Fastify
  * will respond 404 for them, which is the intended "read-only"
@@ -25,8 +28,14 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type {
+  MkeExperienceRecipeSummary,
+  MkeKnowledgeModelSummary,
+  MkeMemoryTraceSummary,
+} from '@tabrix/shared';
 import { HTTP_STATUS } from '../constant';
 import type { SessionManager } from '../execution/session-manager';
+import type { ExperienceRecipe, KnowledgeModel, MemoryTrace } from '../memory/db';
 import { sessionManager as defaultSessionManager } from '../execution/session-manager';
 import { SESSION_SUMMARY_LIMIT_MAX } from '../memory/db';
 
@@ -41,11 +50,105 @@ interface SessionsQuery {
   offset?: string;
 }
 
+type MkeListQuery = SessionsQuery;
+
 function parsePositiveInt(raw: unknown, fallback: number, max: number): number {
   if (raw === undefined || raw === null || raw === '') return fallback;
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) return fallback;
   return Math.min(max, Math.max(0, Math.floor(n)));
+}
+
+function toTraceSummary(trace: MemoryTrace): MkeMemoryTraceSummary {
+  return {
+    traceId: trace.traceId,
+    taskId: trace.taskId,
+    taskIntent: trace.taskIntent,
+    aiClient: trace.aiClient,
+    toolName: trace.toolName,
+    toolCallId: trace.toolCallId,
+    sequenceIndex: trace.sequenceIndex,
+    requestAt: trace.requestAt,
+    responseAt: trace.responseAt,
+    durationMs: trace.durationMs,
+    toolSuccess: trace.toolSuccess,
+    businessSuccess: trace.businessSuccess,
+    resultSummary: trace.resultSummary,
+    errorCode: trace.errorCode,
+    tabId: trace.tabId,
+    windowId: trace.windowId,
+    siteFamily: trace.siteFamily,
+    pageUrlPattern: trace.pageUrlPattern,
+    pageRole: trace.pageRole,
+    pageState: trace.pageState,
+    pageModelKey: trace.pageModelKey,
+    sourceRoute: trace.sourceRoute,
+    selectedDataSource: trace.selectedDataSource,
+    freshness: trace.freshness,
+    fallbackUsed: trace.fallbackUsed,
+    tokenTotal: trace.tokenTotal,
+    redactionState: trace.redactionState,
+    createdAt: trace.createdAt,
+  };
+}
+
+function toKnowledgeSummary(model: KnowledgeModel): MkeKnowledgeModelSummary {
+  return {
+    knowledgeId: model.knowledgeId,
+    siteFamily: model.siteFamily,
+    pageUrlPattern: model.pageUrlPattern,
+    pageRole: model.pageRole,
+    pageModelKey: model.pageModelKey,
+    modelVersion: model.modelVersion,
+    observationCount: model.observationCount,
+    successfulUseCount: model.successfulUseCount,
+    failedUseCount: model.failedUseCount,
+    confidenceScore: model.confidenceScore,
+    driftScore: model.driftScore,
+    sourceTraceCount: model.sourceTraceIds.length,
+    sourceExperienceCount: model.sourceExperienceIds.length,
+    archivedAt: model.archivedAt,
+    lastObservedAt: model.lastObservedAt,
+    lastValidatedAt: model.lastValidatedAt,
+    createdAt: model.createdAt,
+    updatedAt: model.updatedAt,
+  };
+}
+
+function toExperienceSummary(recipe: ExperienceRecipe): MkeExperienceRecipeSummary {
+  return {
+    experienceId: recipe.experienceId,
+    recipeName: recipe.recipeName,
+    scenarioKey: recipe.scenarioKey,
+    taskSignature: recipe.taskSignature,
+    recipeFingerprint: recipe.recipeFingerprint,
+    recipeVersion: recipe.recipeVersion,
+    siteFamily: recipe.siteFamily,
+    pageModelKey: recipe.pageModelKey,
+    pageRole: recipe.pageRole,
+    successCount: recipe.successCount,
+    failureCount: recipe.failureCount,
+    adoptionCount: recipe.adoptionCount,
+    avgDurationMs: recipe.avgDurationMs,
+    avgTokenTotal: recipe.avgTokenTotal,
+    reliabilityScore: recipe.reliabilityScore,
+    speedScore: recipe.speedScore,
+    tokenSavingScore: recipe.tokenSavingScore,
+    usefulnessScore: recipe.usefulnessScore,
+    driftState: recipe.driftState,
+    portabilityScope: recipe.portabilityScope,
+    originKind: recipe.originKind,
+    exportState: recipe.exportState,
+    importState: recipe.importState,
+    redactionState: recipe.redactionState,
+    sourceTraceCount: recipe.sourceTraceIds.length,
+    linkedKnowledgeCount: recipe.linkedKnowledgeIds.length,
+    archivedAt: recipe.archivedAt,
+    lastUsedAt: recipe.lastUsedAt,
+    lastVerifiedAt: recipe.lastVerifiedAt,
+    createdAt: recipe.createdAt,
+    updatedAt: recipe.updatedAt,
+  };
 }
 
 /**
@@ -135,6 +238,76 @@ export function registerMemoryRoutes(
         status: 'ok',
         data: {
           task,
+          persistenceMode: persistence.mode,
+        },
+      });
+    },
+  );
+
+  fastify.get(
+    '/memory/mke/traces',
+    async (request: FastifyRequest<{ Querystring: MkeListQuery }>, reply: FastifyReply) => {
+      const limit = parsePositiveInt(request.query.limit, 20, SESSION_SUMMARY_LIMIT_MAX);
+      const offset = parsePositiveInt(request.query.offset, 0, Number.MAX_SAFE_INTEGER);
+      const traces = sessionManager.listRecentMkeMemoryTraces(limit, offset).map(toTraceSummary);
+      const total = sessionManager.countMkeMemoryTraces();
+      const persistence = sessionManager.getPersistenceStatus();
+
+      return reply.status(HTTP_STATUS.OK).send({
+        status: 'ok',
+        data: {
+          traces,
+          total,
+          limit,
+          offset,
+          persistenceMode: persistence.mode,
+        },
+      });
+    },
+  );
+
+  fastify.get(
+    '/memory/mke/knowledge',
+    async (request: FastifyRequest<{ Querystring: MkeListQuery }>, reply: FastifyReply) => {
+      const limit = parsePositiveInt(request.query.limit, 20, SESSION_SUMMARY_LIMIT_MAX);
+      const offset = parsePositiveInt(request.query.offset, 0, Number.MAX_SAFE_INTEGER);
+      const knowledgeModels = sessionManager
+        .listRecentMkeKnowledgeModels(limit, offset)
+        .map(toKnowledgeSummary);
+      const total = sessionManager.countMkeKnowledgeModels();
+      const persistence = sessionManager.getPersistenceStatus();
+
+      return reply.status(HTTP_STATUS.OK).send({
+        status: 'ok',
+        data: {
+          knowledgeModels,
+          total,
+          limit,
+          offset,
+          persistenceMode: persistence.mode,
+        },
+      });
+    },
+  );
+
+  fastify.get(
+    '/memory/mke/experience',
+    async (request: FastifyRequest<{ Querystring: MkeListQuery }>, reply: FastifyReply) => {
+      const limit = parsePositiveInt(request.query.limit, 20, SESSION_SUMMARY_LIMIT_MAX);
+      const offset = parsePositiveInt(request.query.offset, 0, Number.MAX_SAFE_INTEGER);
+      const experienceRecipes = sessionManager
+        .listRecentMkeExperienceRecipes(limit, offset)
+        .map(toExperienceSummary);
+      const total = sessionManager.countMkeExperienceRecipes();
+      const persistence = sessionManager.getPersistenceStatus();
+
+      return reply.status(HTTP_STATUS.OK).send({
+        status: 'ok',
+        data: {
+          experienceRecipes,
+          total,
+          limit,
+          offset,
           persistenceMode: persistence.mode,
         },
       });

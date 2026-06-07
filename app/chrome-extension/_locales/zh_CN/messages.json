@@ -805,6 +805,14 @@
     "message": "管理入口",
     "description": "自动同步键: popupManagementEntrancesTitle"
   },
+  "popupMkeDataManagementDesc": {
+    "message": "查询记忆库、知识库、经验库数据",
+    "description": "MKE 数据查询页管理入口说明"
+  },
+  "popupMkeDataManagementTitle": {
+    "message": "MKE 数据管理",
+    "description": "MKE 数据查询页管理入口标题"
+  },
   "popupMcpConfigLabel": {
     "message": "MCP 配置",
     "description": "自动同步键: popupMcpConfigLabel"
