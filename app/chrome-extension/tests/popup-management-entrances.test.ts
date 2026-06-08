@@ -24,11 +24,13 @@ describe('popup management entrances layout', () => {
     expect(managementIndex).toBeGreaterThan(connectIndex);
   });
 
-  it('keeps the document locked and home content as the only scroll path', () => {
-    expect(popupStyleSource).toContain('html {\n  width: 408px;\n  height: 760px;');
+  it('keeps the document inside Chrome action popup bounds with one content scroll path', () => {
+    expect(popupStyleSource).toContain('html {\n  width: 408px;\n  height: 600px;');
     expect(popupStyleSource).toContain('body {\n  margin: 0;\n  padding: 0;');
-    expect(popupStyleSource).toContain('height: 760px;');
-    expect(popupStyleSource).toContain('max-height: 760px;');
+    expect(popupStyleSource).toContain('height: 600px;');
+    expect(popupStyleSource).toContain('max-height: 600px;');
+    expect(popupStyleSource).not.toContain('height: 760px;');
+    expect(popupStyleSource).not.toContain('max-height: 760px;');
     expect(popupStyleSource).not.toContain('height: min(760px, 100vh);');
     expect(popupStyleSource).not.toContain('max-height: 100vh;');
     expect(popupStyleSource).toContain('overscroll-behavior: none;');
