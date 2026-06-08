@@ -2,7 +2,7 @@
   <section class="mkep-tab mke-data-tab" :class="`mke-data-tab--${agentTheme}`">
     <div class="mke-shell">
       <div class="mke-controls" role="status" aria-live="polite">
-        <h2 class="mke-visually-hidden">{{ activeSummary.label }}</h2>
+        <h2 class="mke-visually-hidden">{{ activeTableInfo.label }}</h2>
         <div class="mke-tabs" role="tablist" aria-label="MKE data tables">
           <button
             v-for="tab in tabs"
@@ -39,7 +39,7 @@
               v-model.trim="searchQuery"
               type="search"
               aria-label="Search loaded MKE rows"
-              placeholder="搜索主题、工具、页面、状态"
+              placeholder="搜索主题、方法、网址、状态"
             />
           </label>
           <button
@@ -47,7 +47,7 @@
             class="mke-button mke-refresh-button"
             :disabled="loading"
             title="刷新当前数据"
-            @click="refreshAll"
+            @click="refreshAll()"
           >
             {{ loading ? '刷新中' : '刷新' }}
           </button>
@@ -69,23 +69,35 @@
           {{ searchQuery ? '没有匹配当前搜索的记录。' : activeEmptyText }}
         </div>
 
-        <ol v-else class="mke-records" :aria-label="`${activeSummary.kicker} rows`">
+        <ol v-else class="mke-records" :aria-label="`${activeTableInfo.kicker} rows`">
           <li v-for="row in filteredRows" :key="row.id" class="mke-record">
             <div class="mke-record__top">
               <div>
-                <h3 :title="row.title">{{ row.title }}</h3>
-                <p v-if="row.subtitle" class="mke-record__summary" :title="row.subtitle">
-                  {{ row.subtitle }}
-                </p>
+                <div class="mke-record__title-row">
+                  <h3 :title="row.title">{{ row.title }}</h3>
+                  <span v-if="row.duration" class="mke-duration">{{ row.duration }}</span>
+                </div>
                 <p v-if="row.metaLine" class="mke-record__meta-line" :title="row.metaLine">
                   {{ row.metaLine }}
                 </p>
-                <p v-if="row.feedbackLine" class="mke-record__feedback" :title="row.feedbackLine">
-                  {{ row.feedbackLine }}
-                </p>
               </div>
-              <span class="mke-status" :class="`mke-status--${row.statusTone}`">
-                {{ row.status }}
+              <div class="mke-record__headline-facts">
+                <span class="mke-status" :class="`mke-status--${row.statusTone}`">
+                  {{ row.status }}
+                </span>
+              </div>
+            </div>
+
+            <div v-if="row.feedbackLine || row.feedbackScoreLabel" class="mke-record__feedback-row">
+              <p v-if="row.feedbackLine" class="mke-record__feedback" :title="row.feedbackLine">
+                {{ row.feedbackLine }}
+              </p>
+              <span
+                v-if="row.feedbackScoreLabel"
+                class="mke-feedback-score"
+                title="AI 根据页面证据对上一任务完成度的自评，不代表真实平台验收。"
+              >
+                {{ row.feedbackScoreLabel }}
               </span>
             </div>
 
@@ -97,10 +109,18 @@
             </div>
 
             <div class="mke-record-actions">
-              <details class="mke-json">
-                <summary>详情</summary>
-                <pre>{{ row.detailJson }}</pre>
-              </details>
+              <button
+                type="button"
+                class="mke-detail-button"
+                :aria-expanded="isRecordExpanded(row.id)"
+                :aria-controls="jsonPanelId(row.id)"
+                @click="toggleRecordJson(row.id)"
+              >
+                {{ isRecordExpanded(row.id) ? '收起' : '详情' }}
+              </button>
+              <time v-if="row.createdAtLabel" class="mke-record-time">{{
+                row.createdAtLabel
+              }}</time>
               <button
                 type="button"
                 class="mke-copy-button"
@@ -110,6 +130,9 @@
                 {{ copiedRecordId === row.id ? '已复制' : '复制' }}
               </button>
             </div>
+            <pre v-if="isRecordExpanded(row.id)" :id="jsonPanelId(row.id)" class="mke-json-block">{{
+              row.detailJson
+            }}</pre>
           </li>
         </ol>
 
@@ -143,6 +166,8 @@ import {
 } from '../../../common/memory-api-client';
 import { useAgentTheme } from '../../shared/composables/usePopupTheme';
 
+const MKE_AUTO_REFRESH_MS = 5000;
+
 type ActiveTab = 'memory' | 'knowledge' | 'experience';
 type StatusTone = 'good' | 'warn' | 'neutral';
 
@@ -156,8 +181,10 @@ interface ViewRecord {
   kicker: string;
   title: string;
   metaLine: string;
-  subtitle: string;
   feedbackLine: string;
+  feedbackScoreLabel: string;
+  duration: string;
+  createdAtLabel: string;
   status: string;
   statusTone: StatusTone;
   facts: RecordFact[];
@@ -172,8 +199,11 @@ const loading = ref(false);
 const loadError = ref('');
 const loadErrorDetail = ref('');
 const copiedRecordId = ref('');
+const expandedRecordIds = ref<Set<string>>(new Set());
 const { theme: agentTheme, initTheme } = useAgentTheme();
 let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
+let autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
+let refreshInFlight = false;
 
 const traces = ref<MkeMemoryTraceSummary[]>([]);
 const knowledgeModels = ref<MkeKnowledgeModelSummary[]>([]);
@@ -205,12 +235,12 @@ const canLoadMore = computed(() => activeRows.value.length < activeTotal.value);
 
 const loadMoreLabel = computed(() => `加载更多 (${activeRows.value.length}/${activeTotal.value})`);
 
-const activeSummary = computed(() => {
+const activeTableInfo = computed(() => {
   if (activeTab.value === 'memory') {
     return {
       kicker: 'Memory traces / 工具调用记忆',
       label: '记忆库',
-      description: '查看最近工具调用、结果状态、耗时和页面上下文。',
+      description: '查看最近工具调用、结果状态、耗时和网址。',
     };
   }
   if (activeTab.value === 'knowledge') {
@@ -236,21 +266,31 @@ const activeEmptyText = computed(() => {
 onMounted(() => {
   void initTheme();
   void refreshAll();
+  autoRefreshTimer = setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    void refreshAll({ silent: true });
+  }, MKE_AUTO_REFRESH_MS);
 });
 
 onUnmounted(() => {
   if (copyResetTimer) clearTimeout(copyResetTimer);
+  if (autoRefreshTimer) clearInterval(autoRefreshTimer);
 });
 
-async function refreshAll(): Promise<void> {
-  loading.value = true;
+async function refreshAll(options: { silent?: boolean } = {}): Promise<void> {
+  if (refreshInFlight) return;
+  refreshInFlight = true;
+  if (!options.silent) loading.value = true;
   loadError.value = '';
   loadErrorDetail.value = '';
   try {
+    const memoryLimit = Math.max(offsets.value.memory, DEFAULT_MKE_PAGE_SIZE);
+    const knowledgeLimit = Math.max(offsets.value.knowledge, DEFAULT_MKE_PAGE_SIZE);
+    const experienceLimit = Math.max(offsets.value.experience, DEFAULT_MKE_PAGE_SIZE);
     const [memoryData, knowledgeData, experienceData] = await Promise.all([
-      fetchMkeMemoryTraces({ limit: DEFAULT_MKE_PAGE_SIZE, offset: 0 }),
-      fetchMkeKnowledgeModels({ limit: DEFAULT_MKE_PAGE_SIZE, offset: 0 }),
-      fetchMkeExperienceRecipes({ limit: DEFAULT_MKE_PAGE_SIZE, offset: 0 }),
+      fetchMkeMemoryTraces({ limit: memoryLimit, offset: 0 }),
+      fetchMkeKnowledgeModels({ limit: knowledgeLimit, offset: 0 }),
+      fetchMkeExperienceRecipes({ limit: experienceLimit, offset: 0 }),
     ]);
     traces.value = memoryData.traces;
     knowledgeModels.value = knowledgeData.knowledgeModels;
@@ -270,7 +310,8 @@ async function refreshAll(): Promise<void> {
     loadError.value = formatted.title;
     loadErrorDetail.value = formatted.detail;
   } finally {
-    loading.value = false;
+    if (!options.silent) loading.value = false;
+    refreshInFlight = false;
   }
 }
 
@@ -328,6 +369,24 @@ async function copyRecordJson(row: ViewRecord): Promise<void> {
   }
 }
 
+function toggleRecordJson(id: string): void {
+  const next = new Set(expandedRecordIds.value);
+  if (next.has(id)) {
+    next.delete(id);
+  } else {
+    next.add(id);
+  }
+  expandedRecordIds.value = next;
+}
+
+function isRecordExpanded(id: string): boolean {
+  return expandedRecordIds.value.has(id);
+}
+
+function jsonPanelId(id: string): string {
+  return `mke-json-${id.replace(/[^a-z0-9_-]/gi, '-')}`;
+}
+
 async function writeClipboard(value: string): Promise<void> {
   if (globalThis.navigator?.clipboard?.writeText) {
     await globalThis.navigator.clipboard.writeText(value);
@@ -350,23 +409,22 @@ async function writeClipboard(value: string): Promise<void> {
 function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
   const status = formatBusinessStatus(trace.businessSuccess);
   const title = formatTraceTitle(trace);
-  const subtitle = formatTraceSummary(trace);
-  const feedbackLine = formatAiFeedbackSummary(trace);
+  const feedbackLine = formatAiFeedbackLine(trace);
   const row: Omit<ViewRecord, 'searchText'> = {
     id: trace.traceId,
     kicker: '记忆轨迹',
     title,
     metaLine: '',
-    subtitle,
     feedbackLine,
+    feedbackScoreLabel: formatAiFeedbackScoreLabel(trace),
+    duration: formatDuration(trace.durationMs) ?? '',
+    createdAtLabel: formatDate(trace.createdAt),
     status,
     statusTone: formatBusinessStatusTone(trace.businessSuccess, trace.toolSuccess),
     facts: compactFacts([
       ['方法', trace.toolName],
-      ['工具结果', formatToolStatus(trace.toolSuccess)],
-      ['耗时', formatDuration(trace.durationMs)],
-      ['时间', formatDate(trace.createdAt)],
-      ['页面', formatTraceContext(trace)],
+      ['工具执行', formatToolStatus(trace.toolSuccess)],
+      formatTraceLocationFact(trace),
     ]),
     detailJson: formatJsonDetail(trace),
     searchTokens: [
@@ -388,8 +446,10 @@ function knowledgeToRecord(model: MkeKnowledgeModelSummary): ViewRecord {
     kicker: 'Knowledge Model / 页面理解',
     title: `${model.pageRole} · ${model.siteFamily}`,
     metaLine: `${model.pageModelKey} · ${formatDate(model.updatedAt)}`,
-    subtitle: model.pageUrlPattern || model.pageModelKey,
     feedbackLine: '',
+    feedbackScoreLabel: '',
+    duration: '',
+    createdAtLabel: formatDate(model.updatedAt),
     status: `置信 ${formatScore(model.confidenceScore)}`,
     statusTone:
       model.confidenceScore >= 0.7 ? 'good' : model.confidenceScore > 0 ? 'neutral' : 'warn',
@@ -410,8 +470,10 @@ function experienceToRecord(recipe: MkeExperienceRecipeSummary): ViewRecord {
     kicker: 'Experience Recipe / 脱敏复用',
     title: recipe.recipeName,
     metaLine: `${recipe.scenarioKey} · ${formatDate(recipe.updatedAt)}`,
-    subtitle: `${recipe.scenarioKey} · ${recipe.taskSignature}`,
     feedbackLine: '',
+    feedbackScoreLabel: '',
+    duration: '',
+    createdAtLabel: formatDate(recipe.updatedAt),
     status: recipe.redactionState === 'template_only' ? '模板 / Template' : recipe.redactionState,
     statusTone: recipe.redactionState === 'template_only' ? 'good' : 'warn',
     facts: compactFacts([
@@ -430,7 +492,6 @@ function withSearchText(row: Omit<ViewRecord, 'searchText'>): ViewRecord {
     row.kicker,
     row.title,
     row.metaLine,
-    row.subtitle,
     row.status,
     ...(row.searchTokens ?? []),
     ...row.facts.flatMap((item) => [item.label, item.value]),
@@ -458,48 +519,6 @@ function formatTraceTitle(trace: MkeMemoryTraceSummary): string {
   return compactText(intent, 36);
 }
 
-function formatTraceSummary(trace: MkeMemoryTraceSummary): string {
-  const parsed = parseJsonObject(trace.resultSummary);
-  const message = readStringField(parsed, 'message');
-  const reason = readStringField(parsed, 'reason');
-  const pageType = readStringField(parsed, 'pageType');
-  const translated = translateTraceMessage(message || reason);
-  if (translated) {
-    return `${pageType ? `${pageType} · ` : ''}${compactText(translated, 110)}`;
-  }
-  const windowCount = readNumberField(parsed, 'windowCount');
-  const tabCount = readNumberField(parsed, 'tabCount');
-  if (windowCount !== null || tabCount !== null) {
-    return `窗口/标签清单已读取：${windowCount ?? '-'} 个窗口，${tabCount ?? '-'} 个标签`;
-  }
-  const items = parsed?.items;
-  if (Array.isArray(items)) {
-    return `已读取 ${items.length} 条记录，可展开查看详情`;
-  }
-  const rawSummary = trace.resultSummary?.trim();
-  const summary =
-    rawSummary && !rawSummary.startsWith('{') && !rawSummary.startsWith('[')
-      ? formatCollapsedTraceValue(rawSummary)
-      : formatCollapsedTraceValue(trace.pageUrlPattern) ||
-        trace.siteFamily ||
-        '结果已记录，可展开查看完整 JSON';
-  if (!summary) return '暂无结果摘要';
-  return `${pageType ? `${pageType} · ` : ''}${compactText(summary, 110)}`;
-}
-
-function translateTraceMessage(value: string | null): string | null {
-  if (!value) return null;
-  if (value === 'Opened URL in new tab in existing window')
-    return '已在现有窗口打开新标签页 / Opened in existing window';
-  if (value.includes('Current tab is not a regular web page for click')) {
-    return '当前标签不是可点击的普通网页 / Current tab is not a clickable web page';
-  }
-  if (value.includes('captured successfully')) {
-    return '截图已保存，可在完整 JSON 中查看文件路径 / Screenshot saved';
-  }
-  return value;
-}
-
 function parseJsonObject(value: string | null | undefined): Record<string, unknown> | null {
   if (!value) return null;
   try {
@@ -517,9 +536,14 @@ function readStringField(record: Record<string, unknown> | null, field: string):
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
-function readNumberField(record: Record<string, unknown> | null, field: string): number | null {
+function readRecordField(
+  record: Record<string, unknown> | null,
+  field: string,
+): Record<string, unknown> | null {
   const value = record?.[field];
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function formatJsonDetail(value: unknown): string {
@@ -546,9 +570,9 @@ function formatBusinessStatus(value: string | null | undefined): string {
   if (value === 'achieved') return '业务通过';
   if (value === 'partial') return '部分完成';
   if (value === 'not_achieved') return '未完成';
-  if (value === 'true') return '通过';
-  if (value === 'false') return '失败';
-  return '待AI反馈';
+  if (value === 'true') return '业务通过';
+  if (value === 'false') return '未完成';
+  return '待判断';
 }
 
 function formatBusinessStatusTone(
@@ -568,26 +592,48 @@ function formatToolStatus(value: boolean | null | undefined): string {
 }
 
 function formatDuration(value: number | null | undefined): string | null {
-  return value === null || value === undefined ? null : `${value} ms`;
+  if (value === null || value === undefined) return null;
+  if (value >= 1000) return `耗时 ${(value / 1000).toFixed(1)} 秒`;
+  return `耗时 ${value}ms`;
 }
 
-function formatAiFeedbackSummary(trace: MkeMemoryTraceSummary): string {
+function formatAiFeedbackLine(trace: MkeMemoryTraceSummary): string {
   const feedback = trace.aiFeedback;
-  if (!feedback?.summary && !feedback?.reasonCode && trace.aiFeedbackScore == null) return '';
-  const parts = [
-    feedback?.summary ? `AI反馈：${compactText(feedback.summary, 96)}` : '',
-    feedback?.reasonCode ? `原因 ${feedback.reasonCode}` : '',
-    typeof trace.aiFeedbackScore === 'number'
-      ? `置信 ${Math.round(trace.aiFeedbackScore * 100)}%`
-      : '',
-  ].filter(isPresentString);
-  return parts.join(' · ');
+  return feedback?.summary
+    ? `AI评价：${compactText(formatReadableFeedbackLine(feedback.summary), 88)}`
+    : 'AI评价：待回写';
+}
+
+function formatAiFeedbackScoreLabel(trace: MkeMemoryTraceSummary): string {
+  return typeof trace.aiFeedbackScore === 'number'
+    ? `AI评分 ${Math.round(trace.aiFeedbackScore * 100)}%`
+    : '';
+}
+
+function formatReadableFeedbackLine(value: string): string {
+  return value
+    .replace(/DOM变化/g, '页面变化')
+    .replace(/被浏览器接受/g, '已执行')
+    .replace(/targetRef/g, '可点击目标')
+    .replace(/post_action_delta|page_projection_delta|data=markdown/gi, '')
+    .replace(/\s+/g, ' ')
+    .replace(/[，,。；;]\s*$/u, '')
+    .trim();
+}
+
+function formatTraceLocationFact(trace: MkeMemoryTraceSummary): [string, string | null] {
+  const context = formatTraceContext(trace);
+  if (isSystemPageContext(context)) return ['系统页', context];
+  if (context === LOCAL_CONTENT_CONTEXT || context === LOCAL_CONTENT_SUMMARY)
+    return ['文件', context];
+  return ['网址', context];
 }
 
 function formatTraceContext(trace: MkeMemoryTraceSummary): string | null {
+  const resultContext = readTraceResultPageContext(trace.resultSummary);
+  if (isSystemPageContext(resultContext)) return resultContext;
   const pageContext = formatCollapsedTraceValue(trace.pageUrlPattern);
   if (pageContext && pageContext !== LOCAL_CONTENT_SUMMARY) return compactText(pageContext, 64);
-  const resultContext = readTraceResultPageContext(trace.resultSummary);
   if (resultContext) {
     return resultContext === LOCAL_CONTENT_SUMMARY
       ? LOCAL_CONTENT_CONTEXT
@@ -618,8 +664,9 @@ function formatCollapsedTraceValue(value: string | null | undefined): string | n
   if (!value) return null;
   const text = stripNullPathPrefix(value);
   if (isLocalFileReference(text)) return LOCAL_CONTENT_SUMMARY;
+  if (isExtensionPageReference(text)) return formatExtensionPageContext(text);
   const host = readUrlHost(text);
-  if (host) return `页面 ${host}`;
+  if (host) return host;
   return text;
 }
 
@@ -634,6 +681,30 @@ function isLocalFileReference(value: string): boolean {
     value.startsWith('/') ||
     value.startsWith('\\\\')
   );
+}
+
+function isExtensionPageReference(value: string): boolean {
+  return value.startsWith('chrome-extension://') || value.startsWith('extension://');
+}
+
+function isSystemPageContext(value: string | null): boolean {
+  return (
+    typeof value === 'string' &&
+    (value.startsWith(SYSTEM_PAGE_CONTEXT) || value.startsWith('Tabrix '))
+  );
+}
+
+function formatExtensionPageContext(value: string): string {
+  try {
+    const url = new URL(value);
+    const pageName = url.pathname.split('/').filter(Boolean).pop();
+    if (pageName === 'sidepanel.html') return 'Tabrix 侧栏';
+    if (pageName === 'popup.html') return 'Tabrix 弹窗';
+    if (pageName === 'options.html') return 'Tabrix 设置';
+    return pageName ? `${SYSTEM_PAGE_CONTEXT} ${pageName}` : SYSTEM_PAGE_CONTEXT;
+  } catch {
+    return SYSTEM_PAGE_CONTEXT;
+  }
 }
 
 function readUrlHost(value: string): string | null {
@@ -684,6 +755,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
 
 const LOCAL_CONTENT_SUMMARY = '本地内容已读取，路径见详情';
 const LOCAL_CONTENT_CONTEXT = '本地文件';
+const SYSTEM_PAGE_CONTEXT = '系统页';
 </script>
 
 <style scoped>
@@ -750,9 +822,10 @@ const LOCAL_CONTENT_CONTEXT = '本地文件';
 }
 
 .mke-record__top {
-  display: flex;
+  display: grid;
   gap: 10px;
-  justify-content: space-between;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
 }
 
 .mke-button {
@@ -984,15 +1057,33 @@ const LOCAL_CONTENT_CONTEXT = '本地文件';
   min-width: 0;
 }
 
-.mke-record__top {
-  align-items: flex-start;
+.mke-record__headline-facts {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 6px;
+  justify-content: flex-end;
+  max-width: 100%;
+}
+
+.mke-record__title-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+  min-width: 0;
 }
 
 .mke-record h3 {
   color: var(--mke-text);
+  flex: 0 1 auto;
   font-size: 14px;
   line-height: 1.35;
-  margin: 0 0 4px;
+  margin: 0;
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
@@ -1005,22 +1096,43 @@ const LOCAL_CONTENT_CONTEXT = '本地文件';
   overflow-wrap: anywhere;
 }
 
-.mke-record__summary {
-  color: var(--mke-soft);
-  font-size: 12px;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-
 .mke-record__feedback {
   border-left: 2px solid var(--mke-accent);
   color: var(--mke-soft);
+  flex: 1 1 220px;
   font-size: 12px;
   line-height: 1.4;
-  margin-top: 5px;
+  margin-top: 0;
   max-width: 100%;
   overflow-wrap: anywhere;
   padding-left: 8px;
+}
+
+.mke-record__feedback-row {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  max-width: 100%;
+}
+
+.mke-feedback-score,
+.mke-duration {
+  border: 1px solid var(--mke-border);
+  border-radius: 999px;
+  background: var(--mke-surface-2);
+  color: var(--mke-soft);
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.2;
+  padding: 4px 7px;
+  white-space: nowrap;
+}
+
+.mke-feedback-score {
+  color: var(--mke-accent);
 }
 
 .mke-status {
@@ -1110,28 +1222,27 @@ const LOCAL_CONTENT_CONTEXT = '本地文件';
   white-space: normal;
 }
 
-.mke-json {
-  min-width: 0;
-  width: 100%;
-}
-
-.mke-json summary {
-  color: var(--mke-accent);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 850;
-  line-height: 1.35;
-  padding-right: 56px;
-}
-
 .mke-record-actions {
   border-top: 1px solid var(--mke-border);
-  display: block;
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   margin-top: 9px;
   padding-top: 8px;
-  position: relative;
 }
 
+.mke-record-time {
+  color: var(--mke-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mke-detail-button,
 .mke-copy-button {
   border: 1px solid var(--mke-border);
   border-radius: 999px;
@@ -1142,17 +1253,20 @@ const LOCAL_CONTENT_CONTEXT = '本地文件';
   font-weight: 850;
   line-height: 1.2;
   padding: 4px 9px;
-  position: absolute;
-  right: 0;
-  top: 7px;
+  white-space: nowrap;
 }
 
+.mke-detail-button {
+  color: var(--mke-accent);
+}
+
+.mke-detail-button:hover,
 .mke-copy-button:hover {
   border-color: var(--mke-border-strong);
   color: var(--mke-text);
 }
 
-.mke-json pre {
+.mke-json-block {
   background: #08111f;
   border: 1px solid var(--mke-border);
   border-radius: 8px;
@@ -1160,7 +1274,7 @@ const LOCAL_CONTENT_CONTEXT = '本地文件';
   font-size: 11px;
   margin: 8px 0 0;
   max-width: 100%;
-  overflow: visible;
+  overflow-x: auto;
   overflow-wrap: anywhere;
   padding: 10px;
   white-space: pre-wrap;
@@ -1183,12 +1297,17 @@ const LOCAL_CONTENT_CONTEXT = '本地文件';
   }
 
   .mke-record__top {
-    flex-wrap: wrap;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .mke-record__top > div {
-    flex: 1 1 100%;
     max-width: 100%;
+  }
+
+  .mke-record__headline-facts {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 
   .mke-button {
@@ -1200,10 +1319,17 @@ const LOCAL_CONTENT_CONTEXT = '本地文件';
     white-space: normal;
   }
 
-  .mke-record h3,
-  .mke-record__summary {
+  .mke-record h3 {
     overflow-wrap: anywhere;
     white-space: normal;
+  }
+
+  .mke-record-actions {
+    grid-template-columns: auto auto;
+  }
+
+  .mke-record-time {
+    grid-column: 1 / -1;
   }
 
   .mke-facts strong {

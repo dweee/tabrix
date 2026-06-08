@@ -386,22 +386,20 @@ function formatTimestamp(iso: string): string {
     sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  .exec-tab {
-    --exec-bg: #1f2937;
-    --exec-bg-soft: #111827;
-    --exec-bg-soft2: #374151;
-    --exec-border: #374151;
-    --exec-border-soft: #374151;
-    --exec-text: #f9fafb;
-    --exec-text-2: #d1d5db;
-    --exec-text-3: #9ca3af;
-    --exec-text-mute: #6b7280;
-    --exec-warn: #fcd34d;
-    --exec-warn-bg: #422006;
-    --exec-error: #fca5a5;
-    --exec-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  }
+.sidepanel-root[data-agent-theme='dark-console'] .exec-tab {
+  --exec-bg: rgba(8, 22, 44, 0.82);
+  --exec-bg-soft: rgba(5, 18, 36, 0.72);
+  --exec-bg-soft2: rgba(12, 34, 64, 0.9);
+  --exec-border: rgba(56, 189, 248, 0.28);
+  --exec-border-soft: rgba(56, 189, 248, 0.18);
+  --exec-text: #dbeafe;
+  --exec-text-2: #c7e6ff;
+  --exec-text-3: #9ab8d8;
+  --exec-text-mute: #64748b;
+  --exec-warn: #fcd34d;
+  --exec-warn-bg: rgba(70, 37, 6, 0.76);
+  --exec-error: #fca5a5;
+  --exec-shadow: 0 1px 0 rgba(56, 189, 248, 0.16) inset, 0 12px 20px -24px rgba(2, 132, 199, 0.42);
 }
 
 .exec-tab__header {
