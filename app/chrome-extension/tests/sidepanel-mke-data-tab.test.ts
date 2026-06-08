@@ -68,6 +68,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain("chrome_navigate: '打开页面 / Navigate'");
     expect(tabSource).toContain("chrome_click_element: '点击页面元素 / Click'");
     expect(tabSource).toContain("chrome_history: '读取历史记录 / History'");
+    expect(tabSource).toContain("chrome_get_web_content: '读取内容 / Web content'");
     expect(tabSource).toContain(
       "return '当前标签不是可点击的普通网页 / Current tab is not a clickable web page'",
     );
@@ -82,6 +83,12 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('{{ row.metaLine }}');
     expect(tabSource).toContain('<span class="mke-status"');
     expect(tabSource).toContain('const status = formatToolStatus(trace.toolSuccess)');
+    expect(tabSource).toContain(
+      'metaLine: [`方法 ${trace.toolName}`, formatDate(trace.createdAt)]',
+    );
+    expect(tabSource).not.toContain(
+      'metaLine: [`方法 ${trace.toolName}`, toolLabel, formatDate(trace.createdAt)]',
+    );
     expect(tabSource).toContain("['AI反馈', formatBusinessStatus(trace.businessSuccess)]");
     expect(tabSource).toContain("['耗时', formatDuration(trace.durationMs)]");
     expect(tabSource).toContain("['上下文', formatTraceContext(trace)]");
@@ -96,6 +103,12 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('parseJsonObject(trace.resultSummary)');
     expect(tabSource).toContain("readNumberField(parsed, 'windowCount')");
     expect(tabSource).toContain("readNumberField(parsed, 'tabCount')");
+    expect(tabSource).toContain('formatCollapsedTraceValue(rawSummary)');
+    expect(tabSource).toContain('formatCollapsedTraceValue(trace.pageUrlPattern)');
+    expect(tabSource).toContain("return value.replace(/^null[\\\\/]+/i, '').trim()");
+    expect(tabSource).toContain("const LOCAL_CONTENT_SUMMARY = '本地内容已读取，路径见详情'");
+    expect(tabSource).toContain('if (isLocalFileReference(text)) return LOCAL_CONTENT_SUMMARY');
+    expect(tabSource).toContain('if (pageContext && pageContext !== LOCAL_CONTENT_SUMMARY)');
     expect(tabSource).toContain('窗口/标签清单已读取');
     expect(tabSource).toContain('已读取 ${items.length} 条记录');
     expect(tabSource).toContain("!rawSummary.startsWith('{') && !rawSummary.startsWith('[')");
@@ -131,6 +144,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('overflow-y: auto;');
     expect(tabSource).toContain('overflow-wrap: anywhere;');
     expect(tabSource).toContain('white-space: normal;');
+    expect(tabSource).toContain('padding: 8px 2px 0 0;');
   });
 
   it('has dark theme coverage for the new sidepanel surface', () => {

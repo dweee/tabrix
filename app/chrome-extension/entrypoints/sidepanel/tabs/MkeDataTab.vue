@@ -438,7 +438,7 @@ function isPresentString(value: string | null | undefined): value is string {
 }
 
 function formatTraceTitle(trace: MkeMemoryTraceSummary): string {
-  const toolLabel = TOOL_DISPLAY_NAMES[trace.toolName] ?? trace.toolName;
+  const toolLabel = formatToolLabel(trace.toolName);
   const intent = trace.taskIntent?.trim();
   if (!intent) return toolLabel || '未命名任务';
   const toolIntent = intent.match(/^Run MCP tool\s+(.+)$/i)?.[1]?.trim();
@@ -468,8 +468,10 @@ function formatTraceSummary(trace: MkeMemoryTraceSummary): string {
   const rawSummary = trace.resultSummary?.trim();
   const summary =
     rawSummary && !rawSummary.startsWith('{') && !rawSummary.startsWith('[')
-      ? rawSummary
-      : trace.pageUrlPattern || trace.siteFamily || '结果已记录，可展开查看完整 JSON';
+      ? formatCollapsedTraceValue(rawSummary)
+      : formatCollapsedTraceValue(trace.pageUrlPattern) ||
+        trace.siteFamily ||
+        '结果已记录，可展开查看完整 JSON';
   if (!summary) return '暂无结果摘要';
   return `${pageType ? `${pageType} · ` : ''}${compactText(summary, 110)}`;
 }
@@ -546,10 +548,41 @@ function formatDuration(value: number | null | undefined): string | null {
 }
 
 function formatTraceContext(trace: MkeMemoryTraceSummary): string | null {
-  if (trace.pageUrlPattern) return compactText(trace.pageUrlPattern, 64);
+  const pageContext = formatCollapsedTraceValue(trace.pageUrlPattern);
+  if (pageContext && pageContext !== LOCAL_CONTENT_SUMMARY) return compactText(pageContext, 64);
   if (trace.siteFamily) return compactText(trace.siteFamily, 64);
   if (trace.tabId !== null && trace.tabId !== undefined) return `Tab ${trace.tabId}`;
   return null;
+}
+
+function formatCollapsedTraceValue(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const text = stripNullPathPrefix(value);
+  if (isLocalFileReference(text)) return LOCAL_CONTENT_SUMMARY;
+  const host = readUrlHost(text);
+  if (host) return `页面 ${host}`;
+  return text;
+}
+
+function stripNullPathPrefix(value: string): string {
+  return value.replace(/^null[\\/]+/i, '').trim();
+}
+
+function isLocalFileReference(value: string): boolean {
+  return /^[a-z]:[\\/]/i.test(value) || value.startsWith('/') || value.startsWith('\\\\');
+}
+
+function readUrlHost(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+function formatToolLabel(toolName: string): string {
+  return TOOL_DISPLAY_NAMES[toolName] ?? toolName;
 }
 
 function compactText(value: string, maxLength: number): string {
@@ -579,10 +612,13 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   chrome_click_element: '点击页面元素 / Click',
   chrome_screenshot: '截图留证 / Screenshot',
   chrome_history: '读取历史记录 / History',
+  chrome_get_web_content: '读取内容 / Web content',
   chrome_read_page: '读取页面 / Read page',
   read_page: '读取页面 / Read page',
   get_windows_and_tabs: '读取窗口和标签 / Browser inventory',
 };
+
+const LOCAL_CONTENT_SUMMARY = '本地内容已读取，路径见详情';
 </script>
 
 <style scoped>
@@ -712,7 +748,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   gap: 8px;
   min-height: 0;
   overflow-y: auto;
-  padding-right: 2px;
+  padding: 8px 2px 0 0;
 }
 
 .mke-record__kicker {
