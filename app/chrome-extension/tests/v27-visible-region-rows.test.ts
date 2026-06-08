@@ -1347,6 +1347,34 @@ describe('V27-P0-REAL-01 visible region rows', () => {
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
     vi.spyOn(readPageTool as any, 'ensureInteractiveElementsHelper').mockResolvedValue(undefined);
+    const fallbackElements = [
+      {
+        type: 'button',
+        text: '登录',
+        selector: 'button.login',
+        coordinates: { x: 980, y: 48 },
+      },
+      {
+        type: 'button',
+        text: '手机号',
+        selector: 'button.phone-login',
+        coordinates: { x: 1010, y: 88 },
+      },
+      {
+        type: 'link',
+        text: 'Neutral product guide for AI workflows',
+        selector: 'section:nth-of-type(1) a.result-title',
+        href: '/items/1',
+        coordinates: { x: 300, y: 210 },
+      },
+      {
+        type: 'link',
+        text: 'Practical tool checklist for small teams',
+        selector: 'section:nth-of-type(2) a.result-title',
+        href: '/items/2',
+        coordinates: { x: 700, y: 220 },
+      },
+    ];
     const sendMessage = vi.spyOn(readPageTool as any, 'sendMessageToTab');
     sendMessage
       .mockResolvedValueOnce({
@@ -1365,34 +1393,13 @@ describe('V27-P0-REAL-01 visible region rows', () => {
       })
       .mockResolvedValueOnce({
         success: true,
-        elements: [
-          {
-            type: 'button',
-            text: '登录',
-            selector: 'button.login',
-            coordinates: { x: 980, y: 48 },
-          },
-          {
-            type: 'button',
-            text: '手机号',
-            selector: 'button.phone-login',
-            coordinates: { x: 1010, y: 88 },
-          },
-          {
-            type: 'link',
-            text: 'Neutral product guide for AI workflows',
-            selector: 'section:nth-of-type(1) a.result-title',
-            href: '/items/1',
-            coordinates: { x: 300, y: 210 },
-          },
-          {
-            type: 'link',
-            text: 'Practical tool checklist for small teams',
-            selector: 'section:nth-of-type(2) a.result-title',
-            href: '/items/2',
-            coordinates: { x: 700, y: 220 },
-          },
-        ],
+        elements: fallbackElements,
+        scrollY: 0,
+        pixelsBelow: 900,
+      })
+      .mockResolvedValue({
+        success: true,
+        elements: fallbackElements,
         scrollY: 0,
         pixelsBelow: 900,
       });
