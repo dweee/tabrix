@@ -39,7 +39,7 @@
               v-model.trim="searchQuery"
               type="search"
               aria-label="Search loaded MKE rows"
-              placeholder="搜索任务、工具、页面、状态"
+              placeholder="搜索主题、工具、页面、状态"
             />
           </label>
           <button
@@ -73,10 +73,12 @@
           <li v-for="row in filteredRows" :key="row.id" class="mke-record">
             <div class="mke-record__top">
               <div>
-                <p class="mke-record__kicker">{{ row.kicker }}</p>
-                <h3>{{ row.title }}</h3>
-                <p class="mke-record__meta-line">{{ row.metaLine }}</p>
-                <p>{{ row.subtitle }}</p>
+                <p v-if="row.kicker" class="mke-record__kicker">{{ row.kicker }}</p>
+                <h3 :title="row.title">{{ row.title }}</h3>
+                <p class="mke-record__meta-line" :title="row.metaLine">{{ row.metaLine }}</p>
+                <p v-if="row.subtitle" class="mke-record__summary" :title="row.subtitle">
+                  {{ row.subtitle }}
+                </p>
               </div>
               <span class="mke-status" :class="`mke-status--${row.statusTone}`">
                 {{ row.status }}
@@ -92,7 +94,7 @@
 
             <div class="mke-record-actions">
               <details class="mke-json">
-                <summary>详情 / JSON</summary>
+                <summary>详情</summary>
                 <pre>{{ row.detailJson }}</pre>
               </details>
               <button
@@ -101,7 +103,7 @@
                 :title="`复制 ${row.title} 的 JSON 数据`"
                 @click="copyRecordJson(row)"
               >
-                {{ copiedRecordId === row.id ? '已复制' : '复制' }}
+                {{ copiedRecordId === row.id ? '已复制' : '复制 JSON' }}
               </button>
             </div>
           </li>
@@ -114,7 +116,7 @@
           :disabled="loading"
           @click="loadMore"
         >
-          {{ loading ? '加载中' : '加载更多' }}
+          {{ loading ? '加载中' : loadMoreLabel }}
         </button>
       </main>
     </div>
@@ -195,6 +197,8 @@ const filteredRows = computed<ViewRecord[]>(() => {
 const activeTotal = computed(() => totals.value[activeTab.value]);
 
 const canLoadMore = computed(() => activeRows.value.length < activeTotal.value);
+
+const loadMoreLabel = computed(() => `加载更多 (${activeRows.value.length}/${activeTotal.value})`);
 
 const activeSummary = computed(() => {
   if (activeTab.value === 'memory') {
@@ -339,23 +343,24 @@ async function writeClipboard(value: string): Promise<void> {
 }
 
 function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
-  const status =
-    trace.toolSuccess === false ? '失败 / Failed' : formatBusinessStatus(trace.businessSuccess);
+  const status = formatToolStatus(trace.toolSuccess);
   const title = formatTraceTitle(trace);
   const subtitle = formatTraceSummary(trace);
   const row: Omit<ViewRecord, 'searchText'> = {
     id: trace.traceId,
-    kicker: 'Memory Trace / 真实工具调用',
+    kicker: '记忆轨迹',
     title,
-    metaLine: [trace.toolName, formatDate(trace.createdAt)].filter(isPresentString).join(' · '),
+    metaLine: [`方法 ${trace.toolName}`, formatDate(trace.createdAt)]
+      .filter(isPresentString)
+      .join(' · '),
     subtitle,
     status,
     statusTone:
-      trace.toolSuccess === false ? 'warn' : trace.businessSuccess === 'true' ? 'good' : 'neutral',
+      trace.toolSuccess === false ? 'warn' : trace.toolSuccess === true ? 'good' : 'neutral',
     facts: compactFacts([
-      ['Tool result / 工具结果', formatBoolean(trace.toolSuccess) ?? '待验证'],
-      ['Latency / 耗时', formatDuration(trace.durationMs)],
-      ['Context / 上下文', formatTraceContext(trace)],
+      ['AI反馈', formatBusinessStatus(trace.businessSuccess)],
+      ['耗时', formatDuration(trace.durationMs)],
+      ['上下文', formatTraceContext(trace)],
     ]),
     detailJson: formatJsonDetail(trace),
     searchTokens: [
@@ -439,7 +444,7 @@ function formatTraceTitle(trace: MkeMemoryTraceSummary): string {
   const toolIntent = intent.match(/^Run MCP tool\s+(.+)$/i)?.[1]?.trim();
   if (toolIntent && toolIntent === trace.toolName) return toolLabel;
   if (toolIntent && TOOL_DISPLAY_NAMES[toolIntent]) return TOOL_DISPLAY_NAMES[toolIntent];
-  return compactText(intent, 64);
+  return compactText(intent, 36);
 }
 
 function formatTraceSummary(trace: MkeMemoryTraceSummary): string {
@@ -524,16 +529,16 @@ function formatDate(value: string | null | undefined): string {
   return date.toLocaleString();
 }
 
-function formatBoolean(value: boolean | null | undefined): string | null {
-  if (value === true) return '是 / Yes';
-  if (value === false) return '否 / No';
-  return null;
-}
-
 function formatBusinessStatus(value: string | null | undefined): string {
   if (value === 'true') return '通过 / Pass';
   if (value === 'false') return '未通过 / Fail';
-  return '待验证 / Pending';
+  return '待回写';
+}
+
+function formatToolStatus(value: boolean | null | undefined): string {
+  if (value === true) return '工具成功';
+  if (value === false) return '工具失败';
+  return '工具待确认';
 }
 
 function formatDuration(value: number | null | undefined): string | null {
@@ -899,7 +904,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   overflow-wrap: anywhere;
 }
 
-.mke-record__top p:last-child {
+.mke-record__summary {
   color: var(--mke-soft);
   font-size: 12px;
   line-height: 1.45;
@@ -1004,15 +1009,16 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   font-size: 12px;
   font-weight: 850;
   line-height: 1.35;
-  padding-right: 58px;
 }
 
 .mke-record-actions {
   border-top: 1px solid var(--mke-border);
-  display: block;
+  align-items: flex-start;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
   margin-top: 9px;
   padding-top: 8px;
-  position: relative;
 }
 
 .mke-copy-button {
@@ -1021,13 +1027,11 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   background: var(--mke-surface-2);
   color: var(--mke-soft);
   cursor: pointer;
+  flex: 0 0 auto;
   font-size: 11px;
   font-weight: 850;
   line-height: 1.2;
   padding: 4px 9px;
-  position: absolute;
-  right: 0;
-  top: 8px;
 }
 
 .mke-copy-button:hover {
@@ -1042,31 +1046,13 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   color: #dbeafe;
   font-size: 11px;
   margin: 8px 0 0;
-  max-height: 260px;
   max-width: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: visible;
   overflow-wrap: anywhere;
   padding: 10px;
-  scrollbar-color: rgba(148, 163, 184, 0.72) #08111f;
   white-space: pre-wrap;
   width: 100%;
   word-break: break-word;
-}
-
-.mke-json pre::-webkit-scrollbar {
-  height: 10px;
-  width: 10px;
-}
-
-.mke-json pre::-webkit-scrollbar-track {
-  background: #08111f;
-}
-
-.mke-json pre::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.72);
-  border: 2px solid #08111f;
-  border-radius: 999px;
 }
 
 .mke-load-more {
@@ -1102,7 +1088,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   }
 
   .mke-record h3,
-  .mke-record__top p:last-child {
+  .mke-record__summary {
     overflow-wrap: anywhere;
     white-space: normal;
   }

@@ -21,15 +21,16 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('mke-data-body');
     expect(source).toContain('搜索当前列表');
     expect(source).toContain('mke-search-icon');
-    expect(source).toContain('搜索任务、工具、页面、状态');
+    expect(source).toContain('搜索主题、工具、页面、状态');
     expect(source).toContain('mke-refresh-button');
     expect(source).toContain('mke-record__meta-line');
     expect(source).not.toContain('{{ filteredRows.length }}');
     expect(source).not.toContain('{{ activeTotal }} 条');
-    expect(source).toContain('<summary>详情 / JSON</summary>');
+    expect(source).toContain('<summary>详情</summary>');
     expect(source).not.toContain('查看详情和完整 JSON');
     expect(source).toContain('mke-copy-button');
-    expect(source).toContain('加载更多');
+    expect(source).toContain('loadMoreLabel');
+    expect(source).toContain('加载更多 (${activeRows.value.length}/${activeTotal.value})');
   });
 
   it('keeps sidepanel chrome compact enough for a browser right rail', () => {
@@ -58,8 +59,10 @@ describe('MkeDataTab render smoke', () => {
     expect(source).not.toContain("['Task ID / 任务', trace.taskId]");
     expect(source).not.toContain("['Call ID / 调用', trace.toolCallId]");
     expect(source).toContain('formatBusinessStatus(trace.businessSuccess)');
+    expect(source).toContain('formatToolStatus(trace.toolSuccess)');
     expect(source).toContain('function isPresentString');
     expect(source).not.toContain("['Tool / 工具', trace.toolName]");
+    expect(source).not.toContain("['Tool result / 工具结果'");
     expect(source).not.toContain('v-for="item in row.meta"');
     expect(source).not.toContain('compactMeta');
     expect(source).not.toContain('mke-meta');

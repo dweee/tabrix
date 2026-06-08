@@ -45,18 +45,19 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('type="search"');
     expect(tabSource).toContain('搜索当前列表');
     expect(tabSource).toContain('mke-search-icon');
-    expect(tabSource).toContain('搜索任务、工具、页面、状态');
+    expect(tabSource).toContain('搜索主题、工具、页面、状态');
     expect(tabSource).toContain('mke-refresh-button');
     expect(tabSource).toContain('mke-record__meta-line');
     expect(tabSource).not.toContain('{{ filteredRows.length }}');
     expect(tabSource).not.toContain('{{ activeTotal }} 条');
     expect(tabSource).not.toContain('mke-list-status');
     expect(tabSource).toContain('搜索仅覆盖已加载记录');
-    expect(tabSource).toContain('<summary>详情 / JSON</summary>');
+    expect(tabSource).toContain('<summary>详情</summary>');
     expect(tabSource).not.toContain('查看详情和完整 JSON');
     expect(tabSource).toContain('mke-copy-button');
-    expect(tabSource).toContain("{{ copiedRecordId === row.id ? '已复制' : '复制' }}");
-    expect(tabSource).toContain('加载更多');
+    expect(tabSource).toContain("{{ copiedRecordId === row.id ? '已复制' : '复制 JSON' }}");
+    expect(tabSource).toContain('loadMoreLabel');
+    expect(tabSource).toContain('加载更多 (${activeRows.value.length}/${activeTotal.value})');
     expect(tabSource).toContain('grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));');
     expect(tabSource).toContain('grid-template-columns: minmax(180px, 1fr) auto;');
     expect(tabSource).not.toContain('mke-meta');
@@ -71,22 +72,23 @@ describe('Sidepanel MKE data tab', () => {
       "return '当前标签不是可点击的普通网页 / Current tab is not a clickable web page'",
     );
     expect(tabSource).toContain("return '通过 / Pass'");
-    expect(tabSource).toContain("return '待验证 / Pending'");
+    expect(tabSource).toContain("return '待回写'");
+    expect(tabSource).toContain("return '工具成功'");
+    expect(tabSource).toContain("return '工具失败'");
   });
 
-  it('keeps one primary status and avoids duplicated status/time fields in the fact strip', () => {
-    expect(tabSource).toContain('<h3>{{ row.title }}</h3>');
+  it('makes tool status primary and labels AI business feedback separately', () => {
+    expect(tabSource).toContain('<h3 :title="row.title">{{ row.title }}</h3>');
     expect(tabSource).toContain('{{ row.metaLine }}');
     expect(tabSource).toContain('<span class="mke-status"');
-    expect(tabSource).toContain(
-      "['Tool result / 工具结果', formatBoolean(trace.toolSuccess) ?? '待验证']",
-    );
-    expect(tabSource).toContain("['Latency / 耗时', formatDuration(trace.durationMs)]");
-    expect(tabSource).toContain("['Context / 上下文', formatTraceContext(trace)]");
-    expect(tabSource).not.toContain(
-      "['Business / 业务结果', formatBusinessStatus(trace.businessSuccess)]",
-    );
+    expect(tabSource).toContain('const status = formatToolStatus(trace.toolSuccess)');
+    expect(tabSource).toContain("['AI反馈', formatBusinessStatus(trace.businessSuccess)]");
+    expect(tabSource).toContain("['耗时', formatDuration(trace.durationMs)]");
+    expect(tabSource).toContain("['上下文', formatTraceContext(trace)]");
+    expect(tabSource).not.toContain("['Tool result / 工具结果'");
+    expect(tabSource).not.toContain('formatBoolean(trace.toolSuccess)');
     expect(tabSource).not.toContain("['Time / 时间', formatDate(trace.createdAt)]");
+    expect(tabSource).toContain('function formatToolStatus');
     expect(tabSource).toContain('function formatTraceContext');
   });
 
@@ -107,6 +109,10 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('await writeClipboard(row.detailJson)');
     expect(tabSource).toContain('globalThis.navigator?.clipboard?.writeText');
     expect(tabSource).toContain("document.execCommand('copy')");
+    expect(tabSource).toContain('display: flex;');
+    expect(tabSource).toContain('justify-content: space-between;');
+    expect(tabSource).not.toContain('right: 0;\n  top: 8px;');
+    expect(tabSource).toContain('overflow: visible;');
     expect(tabSource).toContain('onUnmounted');
   });
 
