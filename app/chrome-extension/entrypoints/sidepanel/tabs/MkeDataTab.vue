@@ -170,6 +170,8 @@ const MKE_AUTO_REFRESH_MS = 5000;
 
 type ActiveTab = 'memory' | 'knowledge' | 'experience';
 type StatusTone = 'good' | 'warn' | 'neutral';
+type TraceBusinessStatus = NonNullable<MkeMemoryTraceSummary['statusView']>['businessStatus'];
+type TraceExecutionStatus = NonNullable<MkeMemoryTraceSummary['statusView']>['executionStatus'];
 
 interface RecordFact {
   label: string;
@@ -407,8 +409,8 @@ async function writeClipboard(value: string): Promise<void> {
 }
 
 function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
-  const status = formatBusinessStatus(trace.businessSuccess);
-  const title = formatTraceTitle(trace);
+  const status = formatBusinessStatus(trace.statusView?.businessStatus, trace.businessSuccess);
+  const title = trace.display?.title || formatTraceTitle(trace);
   const feedbackLine = formatAiFeedbackLine(trace);
   const row: Omit<ViewRecord, 'searchText'> = {
     id: trace.traceId,
@@ -420,10 +422,10 @@ function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
     duration: formatDuration(trace.durationMs) ?? '',
     createdAtLabel: formatDate(trace.createdAt),
     status,
-    statusTone: formatBusinessStatusTone(trace.businessSuccess, trace.toolSuccess),
+    statusTone: formatBusinessStatusTone(trace.statusView?.businessStatus, trace.toolSuccess),
     facts: compactFacts([
       ['方法', trace.toolName],
-      ['工具执行', formatToolStatus(trace.toolSuccess)],
+      ['工具执行', formatToolStatus(trace.statusView?.executionStatus, trace.toolSuccess)],
       formatTraceLocationFact(trace),
     ]),
     detailJson: formatJsonDetail(trace),
@@ -431,7 +433,11 @@ function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
       trace.toolName,
       trace.taskId,
       trace.toolCallId,
-      formatBusinessStatus(trace.businessSuccess),
+      formatBusinessStatus(trace.statusView?.businessStatus, trace.businessSuccess),
+      trace.display?.title,
+      trace.display?.locationLabel,
+      trace.pageIdentity?.label,
+      trace.pageIdentity?.host,
       trace.aiFeedback?.summary,
       trace.aiFeedback?.reasonCode,
       trace.aiFeedback?.businessStatus,
@@ -450,12 +456,11 @@ function knowledgeToRecord(model: MkeKnowledgeModelSummary): ViewRecord {
     feedbackScoreLabel: '',
     duration: '',
     createdAtLabel: formatDate(model.updatedAt),
-    status: `置信 ${formatScore(model.confidenceScore)}`,
+    status: formatKnowledgeStatus(model.confidenceScore),
     statusTone:
       model.confidenceScore >= 0.7 ? 'good' : model.confidenceScore > 0 ? 'neutral' : 'warn',
     facts: compactFacts([
       ['Model / 模型', model.pageModelKey],
-      ['Confidence / 置信度', formatScore(model.confidenceScore)],
       ['Observations / 观测', String(model.observationCount)],
       ['Drift / 漂移', formatScore(model.driftScore)],
     ]),
@@ -519,33 +524,6 @@ function formatTraceTitle(trace: MkeMemoryTraceSummary): string {
   return compactText(intent, 36);
 }
 
-function parseJsonObject(value: string | null | undefined): Record<string, unknown> | null {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function readStringField(record: Record<string, unknown> | null, field: string): string | null {
-  const value = record?.[field];
-  return typeof value === 'string' && value.trim() ? value : null;
-}
-
-function readRecordField(
-  record: Record<string, unknown> | null,
-  field: string,
-): Record<string, unknown> | null {
-  const value = record?.[field];
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 function formatJsonDetail(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
@@ -559,6 +537,13 @@ function formatScore(value: number | null | undefined): string {
   return value.toFixed(2);
 }
 
+function formatKnowledgeStatus(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '待观察';
+  if (value >= 0.7) return '可信';
+  if (value > 0) return '需复核';
+  return '待观察';
+}
+
 function formatDate(value: string | null | undefined): string {
   if (!value) return '';
   const date = new Date(value);
@@ -566,7 +551,11 @@ function formatDate(value: string | null | undefined): string {
   return date.toLocaleString();
 }
 
-function formatBusinessStatus(value: string | null | undefined): string {
+function formatBusinessStatus(
+  viewValue: TraceBusinessStatus | undefined,
+  legacyValue?: string | null,
+): string {
+  const value = viewValue ?? legacyValue;
   if (value === 'achieved') return '业务通过';
   if (value === 'partial') return '部分完成';
   if (value === 'not_achieved') return '未完成';
@@ -576,7 +565,7 @@ function formatBusinessStatus(value: string | null | undefined): string {
 }
 
 function formatBusinessStatusTone(
-  businessValue: string | null | undefined,
+  businessValue: TraceBusinessStatus | string | null | undefined,
   toolSuccess: boolean | null | undefined,
 ): StatusTone {
   if (businessValue === 'achieved' || businessValue === 'true') return 'good';
@@ -585,9 +574,12 @@ function formatBusinessStatusTone(
   return 'neutral';
 }
 
-function formatToolStatus(value: boolean | null | undefined): string {
-  if (value === true) return '通过';
-  if (value === false) return '失败';
+function formatToolStatus(
+  executionStatus: TraceExecutionStatus | null | undefined,
+  legacyValue: boolean | null | undefined,
+): string {
+  if (executionStatus === 'succeeded' || legacyValue === true) return '通过';
+  if (executionStatus === 'failed' || legacyValue === false) return '失败';
   return '待验证';
 }
 
@@ -601,13 +593,12 @@ function formatAiFeedbackLine(trace: MkeMemoryTraceSummary): string {
   const feedback = trace.aiFeedback;
   return feedback?.summary
     ? `AI评价：${compactText(formatReadableFeedbackLine(feedback.summary), 88)}`
-    : 'AI评价：待回写';
+    : '';
 }
 
 function formatAiFeedbackScoreLabel(trace: MkeMemoryTraceSummary): string {
-  return typeof trace.aiFeedbackScore === 'number'
-    ? `AI评分 ${Math.round(trace.aiFeedbackScore * 100)}%`
-    : '';
+  const score = trace.statusView?.aiScore ?? trace.aiFeedbackScore ?? trace.aiFeedback?.confidence;
+  return typeof score === 'number' ? `AI评分 ${Math.round(score * 100)}%` : '';
 }
 
 function formatReadableFeedbackLine(value: string): string {
@@ -622,42 +613,19 @@ function formatReadableFeedbackLine(value: string): string {
 }
 
 function formatTraceLocationFact(trace: MkeMemoryTraceSummary): [string, string | null] {
-  const context = formatTraceContext(trace);
-  if (isSystemPageContext(context)) return ['系统页', context];
-  if (context === LOCAL_CONTENT_CONTEXT || context === LOCAL_CONTENT_SUMMARY)
+  const identity = trace.pageIdentity;
+  const context =
+    trace.display?.locationLabel ||
+    identity?.label ||
+    formatCollapsedTraceValue(trace.pageUrlPattern);
+  if (identity?.kind === 'extension' || isSystemPageContext(context)) return ['系统页', context];
+  if (
+    identity?.kind === 'local_file' ||
+    context === LOCAL_CONTENT_CONTEXT ||
+    context === LOCAL_CONTENT_SUMMARY
+  )
     return ['文件', context];
-  return ['网址', context];
-}
-
-function formatTraceContext(trace: MkeMemoryTraceSummary): string | null {
-  const resultContext = readTraceResultPageContext(trace.resultSummary);
-  if (isSystemPageContext(resultContext)) return resultContext;
-  const pageContext = formatCollapsedTraceValue(trace.pageUrlPattern);
-  if (pageContext && pageContext !== LOCAL_CONTENT_SUMMARY) return compactText(pageContext, 64);
-  if (resultContext) {
-    return resultContext === LOCAL_CONTENT_SUMMARY
-      ? LOCAL_CONTENT_CONTEXT
-      : compactText(resultContext, 64);
-  }
-  if (trace.siteFamily) return compactText(trace.siteFamily, 64);
-  return null;
-}
-
-function readTraceResultPageContext(resultSummary: string | null | undefined): string | null {
-  const parsed = parseJsonObject(resultSummary);
-  if (!parsed) return null;
-  const url =
-    readStringField(parsed, 'url') ||
-    readStringField(parsed, 'pageUrl') ||
-    readStringField(parsed, 'finalUrl') ||
-    readStringField(parsed, 'currentUrl');
-  const collapsedUrl = formatCollapsedTraceValue(url);
-  if (collapsedUrl) return collapsedUrl;
-  return (
-    readStringField(parsed, 'title') ||
-    readStringField(parsed, 'pageTitle') ||
-    readStringField(parsed, 'documentTitle')
-  );
+  return ['网址', context ?? trace.siteFamily ?? null];
 }
 
 function formatCollapsedTraceValue(value: string | null | undefined): string | null {

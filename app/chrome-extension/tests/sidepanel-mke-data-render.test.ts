@@ -70,14 +70,20 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('.mke-visually-hidden');
     expect(source).not.toContain("['Task ID / 任务', trace.taskId]");
     expect(source).not.toContain("['Call ID / 调用', trace.toolCallId]");
-    expect(source).toContain('formatBusinessStatus(trace.businessSuccess)');
-    expect(source).toContain('formatToolStatus(trace.toolSuccess)');
+    expect(source).toContain(
+      'formatBusinessStatus(trace.statusView?.businessStatus, trace.businessSuccess)',
+    );
+    expect(source).toContain(
+      'formatToolStatus(trace.statusView?.executionStatus, trace.toolSuccess)',
+    );
     expect(source).toContain('formatAiFeedbackLine(trace)');
     expect(source).toContain('formatAiFeedbackScoreLabel(trace)');
     expect(source).toContain("duration: formatDuration(trace.durationMs) ?? ''");
     expect(source).toContain('createdAtLabel: formatDate(trace.createdAt)');
     expect(source).toContain("['方法', trace.toolName]");
-    expect(source).toContain("['工具执行', formatToolStatus(trace.toolSuccess)]");
+    expect(source).toContain(
+      "['工具执行', formatToolStatus(trace.statusView?.executionStatus, trace.toolSuccess)]",
+    );
     expect(source).toContain('formatTraceLocationFact(trace)');
     expect(source).not.toContain("['工具', trace.toolName]");
     expect(source).not.toContain("['执行', formatToolStatus(trace.toolSuccess)]");
@@ -90,16 +96,19 @@ describe('MkeDataTab render smoke', () => {
     expect(source).not.toContain('formatCollapsedTraceValue(rawSummary)');
     expect(source).toContain('function formatReadableFeedbackLine');
     expect(source).toContain('function formatAiFeedbackScoreLabel');
-    expect(source).toContain("if (isSystemPageContext(context)) return ['系统页', context]");
-    expect(source).toContain("return ['网址', context]");
+    expect(source).toContain(
+      "if (identity?.kind === 'extension' || isSystemPageContext(context)) return ['系统页', context]",
+    );
+    expect(source).toContain("return ['网址', context ?? trace.siteFamily ?? null]");
     expect(source).not.toContain("return ['文件路径', context]");
-    expect(source).toContain("'AI评价：待回写'");
+    expect(source).not.toContain("'AI评价：待回写'");
     expect(source).not.toContain("'AI评分 待回写'");
     expect(source).toContain('formatExtensionPageContext(text)');
     expect(source).toContain('function isPresentString');
     expect(source).not.toContain("['Tool / 工具', trace.toolName]");
     expect(source).not.toContain('return `Tab ${trace.tabId}`');
-    expect(source).toContain('readTraceResultPageContext(trace.resultSummary)');
+    expect(source).not.toContain('readTraceResultPageContext(trace.resultSummary)');
+    expect(source).not.toContain('function readTraceResultPageContext');
     expect(source).not.toContain("['Tool result / 工具结果'");
     expect(source).not.toContain('v-for="item in row.meta"');
     expect(source).not.toContain('compactMeta');

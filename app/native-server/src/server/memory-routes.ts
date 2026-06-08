@@ -91,7 +91,124 @@ function toAiFeedbackSummary(value: unknown): MkeMemoryAiFeedbackSummary | null 
   return Object.values(summary).some((item) => item !== null) ? summary : null;
 }
 
+const TOOL_DISPLAY_NAMES: Record<string, string> = {
+  get_windows_and_tabs: '读取窗口和标签',
+  chrome_get_web_content: '读取内容',
+  chrome_read_page: '读取页面',
+  chrome_navigate: '打开页面',
+  chrome_click_element: '点击元素',
+  chrome_fill_or_select: '填写内容',
+  chrome_close_tabs: '关闭标签页',
+  chrome_screenshot: '截图',
+  chrome_history: '读取历史记录',
+};
+
+function formatToolLabel(toolName: string): string {
+  return TOOL_DISPLAY_NAMES[toolName] ?? toolName;
+}
+
+function formatTraceTitle(trace: MemoryTrace): string {
+  const intent = trace.taskIntent?.trim();
+  const toolLabel = formatToolLabel(trace.toolName);
+  if (!intent) return toolLabel;
+  const toolIntent = intent.match(/^Run MCP tool\s+(.+)$/i)?.[1]?.trim();
+  if (!toolIntent) return intent.length > 36 ? `${intent.slice(0, 36)}...` : intent;
+  return TOOL_DISPLAY_NAMES[toolIntent] ?? toolLabel;
+}
+
+function classifyPageIdentity(
+  trace: MemoryTrace,
+): NonNullable<MkeMemoryTraceSummary['pageIdentity']> {
+  const url = trace.pageUrlPattern;
+  const source = trace.pageUrlPattern ? 'page_url_pattern' : 'site_family';
+
+  if (url) {
+    if (url.startsWith('chrome-extension://')) {
+      const label = url.includes('/sidepanel.html')
+        ? 'Tabrix 侧栏'
+        : url.includes('/popup.html')
+          ? 'Tabrix 弹窗'
+          : '扩展页面';
+      return { kind: 'extension', label, url, host: null, source };
+    }
+    if (/^(file:|[a-z]:[\\/]|\/)/i.test(url) || url.startsWith('null/')) {
+      return { kind: 'local_file', label: '本地文件', url, host: null, source };
+    }
+    try {
+      const parsed = new URL(url);
+      const isBrowserInternal = ['chrome:', 'edge:', 'about:'].includes(parsed.protocol);
+      return {
+        kind: isBrowserInternal ? 'browser_internal' : 'web',
+        label: isBrowserInternal ? parsed.href : parsed.hostname,
+        url,
+        host: parsed.hostname || null,
+        source,
+      };
+    } catch {
+      return {
+        kind: 'unknown',
+        label: trace.siteFamily ?? url,
+        url,
+        host: trace.siteFamily,
+        source,
+      };
+    }
+  }
+
+  return {
+    kind: trace.siteFamily ? 'web' : 'unknown',
+    label: trace.siteFamily,
+    url: null,
+    host: trace.siteFamily,
+    source: trace.siteFamily ? 'site_family' : 'none',
+  };
+}
+
+function normalizeBusinessStatus(
+  value: string | null | undefined,
+): NonNullable<MkeMemoryTraceSummary['statusView']>['businessStatus'] {
+  if (value === 'achieved' || value === 'proven' || value === 'true') return 'achieved';
+  if (value === 'partial') return 'partial';
+  if (
+    value === 'not_achieved' ||
+    value === 'not_proven' ||
+    value === 'failed' ||
+    value === 'false'
+  ) {
+    return 'not_achieved';
+  }
+  return 'unknown';
+}
+
+function buildStatusView(
+  trace: MemoryTrace,
+  aiFeedback: MkeMemoryTraceSummary['aiFeedback'],
+): NonNullable<MkeMemoryTraceSummary['statusView']> {
+  const evidenceStatus = normalizeBusinessStatus(trace.businessSuccess);
+  const aiFeedbackStatus = normalizeBusinessStatus(aiFeedback?.businessStatus);
+  const businessStatus = evidenceStatus === 'unknown' ? aiFeedbackStatus : evidenceStatus;
+  const executionStatus =
+    trace.toolSuccess === true ? 'succeeded' : trace.toolSuccess === false ? 'failed' : 'unknown';
+  const businessStatusSource =
+    evidenceStatus === 'unknown' && aiFeedbackStatus !== 'unknown'
+      ? 'ai_feedback'
+      : evidenceStatus === 'unknown'
+        ? 'unknown'
+        : 'tabrix_evidence';
+  return {
+    executionStatus,
+    businessStatus,
+    businessStatusSource,
+    aiScore: trace.aiFeedbackScore ?? aiFeedback?.confidence ?? null,
+    feedbackRequired: businessStatus === 'unknown' || businessStatus === 'partial',
+  };
+}
+
 function toTraceSummary(trace: MemoryTrace): MkeMemoryTraceSummary {
+  const aiFeedback = toAiFeedbackSummary(trace.aiFeedback);
+  const pageIdentity = classifyPageIdentity(trace);
+  const statusView = buildStatusView(trace, aiFeedback);
+  const methodLabel = formatToolLabel(trace.toolName);
   return {
     traceId: trace.traceId,
     taskId: trace.taskId,
@@ -106,7 +223,7 @@ function toTraceSummary(trace: MemoryTrace): MkeMemoryTraceSummary {
     toolSuccess: trace.toolSuccess,
     businessSuccess: trace.businessSuccess,
     aiFeedbackScore: trace.aiFeedbackScore,
-    aiFeedback: toAiFeedbackSummary(trace.aiFeedback),
+    aiFeedback,
     resultSummary: trace.resultSummary,
     errorCode: trace.errorCode,
     tabId: trace.tabId,
@@ -123,6 +240,14 @@ function toTraceSummary(trace: MemoryTrace): MkeMemoryTraceSummary {
     tokenTotal: trace.tokenTotal,
     redactionState: trace.redactionState,
     createdAt: trace.createdAt,
+    display: {
+      title: formatTraceTitle(trace),
+      subtitle: pageIdentity.label ? `${pageIdentity.label} · ${methodLabel}` : methodLabel,
+      methodLabel,
+      locationLabel: pageIdentity.label,
+    },
+    pageIdentity,
+    statusView,
   };
 }
 

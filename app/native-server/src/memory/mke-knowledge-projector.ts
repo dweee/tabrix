@@ -60,6 +60,23 @@ function ratio(part: number, total: number): number {
   return part / total;
 }
 
+function isBusinessAchieved(trace: MemoryTrace): boolean {
+  return (
+    trace.businessSuccess === 'achieved' ||
+    trace.businessSuccess === 'proven' ||
+    trace.businessSuccess === 'true'
+  );
+}
+
+function isBusinessFailed(trace: MemoryTrace): boolean {
+  return (
+    trace.businessSuccess === 'not_achieved' ||
+    trace.businessSuccess === 'not_proven' ||
+    trace.businessSuccess === 'failed' ||
+    trace.businessSuccess === 'false'
+  );
+}
+
 function roundedScore(value: number): number {
   return Math.max(0, Math.min(1, Math.round(value * 1000) / 1000));
 }
@@ -135,8 +152,8 @@ function buildKnowledgeInput(
     incrementCounter(freshnessCounts, trace.freshness);
     incrementCounter(fallbackCounts, trace.fallbackUsed);
     incrementCounter(errorCounts, trace.errorCode);
-    if (trace.toolSuccess === true) successful += 1;
-    if (trace.toolSuccess === false) failed += 1;
+    if (isBusinessAchieved(trace)) successful += 1;
+    if (isBusinessFailed(trace) || trace.toolSuccess === false) failed += 1;
     if (typeof trace.durationMs === 'number') {
       totalDurationMs += trace.durationMs;
       durationCount += 1;

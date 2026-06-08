@@ -107,7 +107,9 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('v-if="row.duration"');
     expect(tabSource).toContain('v-if="row.createdAtLabel"');
     expect(tabSource).toContain('<span class="mke-status"');
-    expect(tabSource).toContain('const status = formatBusinessStatus(trace.businessSuccess)');
+    expect(tabSource).toContain(
+      'const status = formatBusinessStatus(trace.statusView?.businessStatus, trace.businessSuccess)',
+    );
     expect(tabSource).toContain('const feedbackLine = formatAiFeedbackLine(trace)');
     expect(tabSource).not.toContain('feedback?.reasonCode ? `原因');
     expect(tabSource).toContain("metaLine: ''");
@@ -117,7 +119,9 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain("duration: formatDuration(trace.durationMs) ?? ''");
     expect(tabSource).toContain('createdAtLabel: formatDate(trace.createdAt)');
     expect(tabSource).toContain("['方法', trace.toolName]");
-    expect(tabSource).toContain("['工具执行', formatToolStatus(trace.toolSuccess)]");
+    expect(tabSource).toContain(
+      "['工具执行', formatToolStatus(trace.statusView?.executionStatus, trace.toolSuccess)]",
+    );
     expect(tabSource).toContain('formatTraceLocationFact(trace)');
     expect(tabSource).not.toContain("['工具', trace.toolName]");
     expect(tabSource).not.toContain("['执行', formatToolStatus(trace.toolSuccess)]");
@@ -135,7 +139,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('function formatAiFeedbackScoreLabel');
     expect(tabSource).toContain('function formatTraceLocationFact');
     expect(tabSource).toContain('function formatReadableFeedbackLine');
-    expect(tabSource).toContain('function formatTraceContext');
+    expect(tabSource).not.toContain('function formatTraceContext');
   });
 
   it('does not derive default card copy from raw tool results', () => {
@@ -147,7 +151,8 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain("readNumberField(parsed, 'tabCount')");
     expect(tabSource).not.toContain('translateTraceMessage(rawSummary)');
     expect(tabSource).not.toContain('formatCollapsedTraceValue(rawSummary)');
-    expect(tabSource).toContain('readTraceResultPageContext(trace.resultSummary)');
+    expect(tabSource).not.toContain('readTraceResultPageContext(trace.resultSummary)');
+    expect(tabSource).not.toContain('function readTraceResultPageContext');
     expect(tabSource).toContain("return value.replace(/^null[\\\\/]+/i, '').trim()");
     expect(tabSource).toContain("const LOCAL_CONTENT_SUMMARY = '本地内容已读取，路径见详情'");
     expect(tabSource).toContain("const LOCAL_CONTENT_CONTEXT = '本地文件'");
@@ -158,13 +163,15 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('function formatExtensionPageContext');
     expect(tabSource).toContain('if (host) return host');
     expect(tabSource).not.toContain('return `页面 ${host}`');
-    expect(tabSource).toContain('if (pageContext && pageContext !== LOCAL_CONTENT_SUMMARY)');
+    expect(tabSource).not.toContain('if (pageContext && pageContext !== LOCAL_CONTENT_SUMMARY)');
     expect(tabSource).toContain("value.startsWith('file://')");
-    expect(tabSource).toContain("if (isSystemPageContext(context)) return ['系统页', context]");
-    expect(tabSource).toContain("return ['网址', context]");
+    expect(tabSource).toContain(
+      "if (identity?.kind === 'extension' || isSystemPageContext(context)) return ['系统页', context]",
+    );
+    expect(tabSource).toContain("return ['网址', context ?? trace.siteFamily ?? null]");
     expect(tabSource).not.toContain("return ['文件路径', context]");
     expect(tabSource).toContain('const SYSTEM_PAGE_CONTEXT = ');
-    expect(tabSource).toContain('if (isSystemPageContext(resultContext)) return resultContext');
+    expect(tabSource).not.toContain('if (isSystemPageContext(resultContext)) return resultContext');
     expect(tabSource).not.toContain('return `Tab ${trace.tabId}`');
     expect(tabSource).not.toContain('窗口/标签清单已读取');
     expect(tabSource).not.toContain('已读取 ${items.length} 条记录');
@@ -199,11 +206,14 @@ describe('Sidepanel MKE data tab', () => {
   it('keeps long identifiers in JSON instead of the default human detail fields', () => {
     expect(tabSource).not.toContain("['Task ID / 任务', trace.taskId]");
     expect(tabSource).not.toContain("['Call ID / 调用', trace.toolCallId]");
-    expect(tabSource).toContain('formatBusinessStatus(trace.businessSuccess)');
+    expect(tabSource).toContain(
+      'formatBusinessStatus(trace.statusView?.businessStatus, trace.businessSuccess)',
+    );
     expect(tabSource).toContain('trace.aiFeedback?.summary');
     expect(tabSource).toContain('trace.aiFeedback?.reasonCode');
-    expect(tabSource).toContain("'AI评价：待回写'");
-    expect(tabSource).toContain('AI评分 ${Math.round(trace.aiFeedbackScore * 100)}%');
+    expect(tabSource).not.toContain("'AI评价：待回写'");
+    expect(tabSource).toContain('trace.statusView?.aiScore');
+    expect(tabSource).toContain('AI评分 ${Math.round(score * 100)}%');
     expect(tabSource).not.toContain("'AI评分 待回写'");
     expect(tabSource).not.toContain('`置信 ${Math.round(trace.aiFeedbackScore * 100)}%`');
     expect(tabSource).not.toContain('AI反馈：');

@@ -145,7 +145,6 @@ describe('MKE core repositories', () => {
 
       const updated = traceRepo.updateAiFeedback({
         traceId: 'trace-feedback-1',
-        businessSuccess: 'achieved',
         aiFeedbackScore: 0.85,
         aiFeedback: {
           reasonCode: 'target_page_opened',
@@ -155,7 +154,7 @@ describe('MKE core repositories', () => {
 
       expect(updated).toMatchObject({
         traceId: 'trace-feedback-1',
-        businessSuccess: 'achieved',
+        businessSuccess: 'unknown',
         aiFeedbackScore: 0.85,
         aiFeedback: {
           reasonCode: 'target_page_opened',

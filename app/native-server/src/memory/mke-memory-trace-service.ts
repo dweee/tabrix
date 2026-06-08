@@ -180,6 +180,25 @@ function readBoolean(...values: unknown[]): boolean | null {
   return null;
 }
 
+function readBusinessVerdictString(...values: unknown[]): BusinessSuccessVerdict | null {
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    if (value === 'proven') return 'achieved';
+    if (value === 'not_proven') return 'unknown';
+    if (
+      value === 'achieved' ||
+      value === 'partial' ||
+      value === 'not_achieved' ||
+      value === 'true' ||
+      value === 'false' ||
+      value === 'unknown'
+    ) {
+      return value;
+    }
+  }
+  return null;
+}
+
 function normalizeUrlPattern(url: string | null): {
   siteFamily: string | null;
   pattern: string | null;
@@ -206,13 +225,19 @@ function readBusinessSuccess(
   result: CallToolResult,
   payload: Record<string, unknown> | null,
 ): BusinessSuccessVerdict {
-  const explicit = readBoolean(
+  const actionEvidenceResult = readNestedObject(payload, 'actionEvidenceResult');
+  const actionBusiness = readNestedObject(actionEvidenceResult, 'business');
+  const tabrixMetadata = readNestedObject(payload, '_tabrix');
+  const explicitVerdict = readBusinessVerdictString(
     payload?.businessSuccess,
-    payload?.success,
-    payload?.ok,
-    readNestedObject(payload, 'actionEvidenceResult')?.businessSuccess,
+    tabrixMetadata?.businessStatus,
+    actionBusiness?.businessSuccessVerdict,
   );
+  if (explicitVerdict) return explicitVerdict;
+
+  const explicit = readBoolean(payload?.businessSuccess);
   if (explicit !== null) return explicit ? 'true' : 'false';
+  if (readBoolean(actionBusiness?.businessSuccessProven) === true) return 'true';
   if (result.isError === true) return 'false';
   return 'unknown';
 }
@@ -320,7 +345,6 @@ export class MkeMemoryTraceService {
 
     return this.repo.updateAiFeedback({
       traceId: input.traceId,
-      businessSuccess: input.businessStatus,
       aiFeedbackScore: normalizeConfidence(input.confidence),
       aiFeedback: feedback,
     });

@@ -127,7 +127,6 @@ export interface MemoryTrace {
 
 export interface MemoryTraceAiFeedbackUpdate {
   traceId: string;
-  businessSuccess: BusinessSuccessVerdict;
   aiFeedbackScore?: number | null;
   aiFeedback?: unknown;
 }
@@ -266,8 +265,7 @@ export class MemoryTraceRepository {
     );
     this.updateAiFeedbackStmt = db.prepare(
       `UPDATE tabrix_memory_traces
-       SET business_success = @business_success,
-           ai_feedback_score = @ai_feedback_score,
+       SET ai_feedback_score = @ai_feedback_score,
            ai_feedback_blob = @ai_feedback_blob
        WHERE trace_id = @trace_id`,
     );
@@ -355,7 +353,6 @@ export class MemoryTraceRepository {
   public updateAiFeedback(input: MemoryTraceAiFeedbackUpdate): MemoryTrace | undefined {
     this.updateAiFeedbackStmt.run({
       trace_id: input.traceId,
-      business_success: input.businessSuccess,
       ai_feedback_score: optionalNumber(input.aiFeedbackScore),
       ai_feedback_blob: blob(input.aiFeedback),
     });

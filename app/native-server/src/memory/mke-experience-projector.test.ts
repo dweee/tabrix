@@ -175,4 +175,64 @@ describe('MkeExperienceProjector', () => {
     });
     expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
   });
+
+  it('does not mine a recipe when actions only have tool success without business proof', () => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const traces = new MemoryTraceRepository(opened.db);
+    const knowledge = new KnowledgeModelRepository(opened.db);
+    const experience = new ExperienceRecipeRepository(opened.db);
+    const projector = new MkeExperienceProjector(traces, knowledge, experience);
+
+    const readTrace = traces.append({
+      traceId: 'trace-read-unproven',
+      taskId: 'task-unproven',
+      toolName: 'chrome_read_page',
+      requestParams: { tabId: 9 },
+      requestAt: '2026-06-06T06:00:01.000Z',
+      response: { payloadDigest: { summary: { quality: 'usable' } } },
+      responseAt: '2026-06-06T06:00:02.000Z',
+      toolSuccess: true,
+      tabId: 9,
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/editor',
+      pageRole: 'content_editor',
+      pageState: 'ready',
+      createdAt: '2026-06-06T06:00:02.000Z',
+    });
+    const pageModelKey = buildMkePageModelKey(readTrace)!;
+    addKnowledge({
+      knowledge,
+      siteFamily: 'example.test',
+      pageModelKey,
+      pageRole: 'content_editor',
+      pageUrlPattern: 'https://example.test/editor',
+    });
+    traces.append({
+      traceId: 'trace-click-unproven',
+      taskId: 'task-unproven',
+      toolName: 'chrome_click_element',
+      requestParams: { tabId: 9, ref: 'submit-button' },
+      requestAt: '2026-06-06T06:00:03.000Z',
+      response: { payloadDigest: { success: true } },
+      responseAt: '2026-06-06T06:00:04.000Z',
+      toolSuccess: true,
+      businessSuccess: 'unknown',
+      tabId: 9,
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/editor',
+      pageRole: 'content_editor',
+      pageState: 'ready',
+      createdAt: '2026-06-06T06:00:04.000Z',
+    });
+
+    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T06:00:05.000Z' });
+
+    expect(result).toMatchObject({
+      processedTraceCount: 2,
+      skippedTraceCount: 2,
+      savedExperienceCount: 0,
+      experienceIds: [],
+    });
+    expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
+  });
 });

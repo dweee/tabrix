@@ -125,6 +125,39 @@ export interface MkeMemoryAiFeedbackSummary {
   sourceToolCallId?: string | null;
 }
 
+export type MkePageIdentityKind =
+  | 'web'
+  | 'extension'
+  | 'local_file'
+  | 'browser_internal'
+  | 'unknown';
+
+export interface MkePageIdentitySummary {
+  kind: MkePageIdentityKind;
+  label: string | null;
+  url?: string | null;
+  host?: string | null;
+  source: 'result_payload' | 'page_url_pattern' | 'site_family' | 'none';
+}
+
+export interface MkeTraceDisplaySummary {
+  title: string;
+  subtitle?: string | null;
+  methodLabel: string;
+  locationLabel?: string | null;
+}
+
+export type MkeTraceExecutionStatus = 'succeeded' | 'failed' | 'unknown';
+export type MkeTraceBusinessStatus = 'achieved' | 'partial' | 'not_achieved' | 'unknown';
+
+export interface MkeTraceStatusViewSummary {
+  executionStatus: MkeTraceExecutionStatus;
+  businessStatus: MkeTraceBusinessStatus;
+  businessStatusSource: 'tabrix_evidence' | 'ai_feedback' | 'unknown';
+  aiScore?: number | null;
+  feedbackRequired: boolean;
+}
+
 export interface MkeMemoryTraceSummary {
   traceId: string;
   taskId: string;
@@ -156,6 +189,9 @@ export interface MkeMemoryTraceSummary {
   tokenTotal?: number | null;
   redactionState: string;
   createdAt: string;
+  display?: MkeTraceDisplaySummary;
+  pageIdentity?: MkePageIdentitySummary;
+  statusView?: MkeTraceStatusViewSummary;
 }
 
 /**

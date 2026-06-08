@@ -64,7 +64,7 @@ describe('MkeKnowledgeProjector', () => {
       pageUrlPattern: 'https://example.test/search',
       pageRole: 'search_results',
       observationCount: 2,
-      successfulUseCount: 2,
+      successfulUseCount: 1,
       failedUseCount: 0,
       driftScore: 0,
     });
@@ -139,6 +139,55 @@ describe('MkeKnowledgeProjector', () => {
     expect(model.failureSignal).toMatchObject({
       failedTraceCount: 1,
       errorCounts: { page_not_ready: 1 },
+    });
+  });
+
+  it('does not count tool success as successful knowledge use without business proof', () => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const traces = new MemoryTraceRepository(opened.db);
+    const knowledge = new KnowledgeModelRepository(opened.db);
+    const projector = new MkeKnowledgeProjector(traces, knowledge);
+
+    traces.append({
+      traceId: 'trace-unknown-business',
+      taskId: 'task-unknown-business',
+      toolName: 'chrome_click_element',
+      requestParams: { tabId: 7, ref: 'filter' },
+      requestAt: '2026-06-06T05:00:00.000Z',
+      response: { payloadDigest: { success: true } },
+      responseAt: '2026-06-06T05:00:01.000Z',
+      toolSuccess: true,
+      businessSuccess: 'unknown',
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageState: 'ready',
+      createdAt: '2026-06-06T05:00:01.000Z',
+    });
+    traces.append({
+      traceId: 'trace-business-failed',
+      taskId: 'task-business-failed',
+      toolName: 'chrome_click_element',
+      requestParams: { tabId: 7, ref: 'filter' },
+      requestAt: '2026-06-06T05:00:02.000Z',
+      response: { payloadDigest: { success: true } },
+      responseAt: '2026-06-06T05:00:03.000Z',
+      toolSuccess: true,
+      businessSuccess: 'not_achieved',
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageState: 'ready',
+      createdAt: '2026-06-06T05:00:03.000Z',
+    });
+
+    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T05:00:04.000Z' });
+    const model = knowledge.get(result.knowledgeIds[0])!;
+
+    expect(model).toMatchObject({
+      observationCount: 2,
+      successfulUseCount: 0,
+      failedUseCount: 1,
     });
   });
 });

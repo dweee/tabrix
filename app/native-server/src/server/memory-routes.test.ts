@@ -104,6 +104,14 @@ async function seedMkeRows(): Promise<void> {
     result: textResult({
       ok: true,
       tabId: 7,
+      pageUrl: 'https://example.test/workspaces/123',
+      summary: { pageRole: 'workspace', quality: 'fresh' },
+      actionEvidenceResult: {
+        business: {
+          businessSuccessVerdict: 'proven',
+          businessSuccessProven: true,
+        },
+      },
     }),
     resultSummary: 'clicked button',
   });
@@ -266,17 +274,32 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.traces[0]).toMatchObject({
       toolName: 'chrome_click_element',
       toolSuccess: true,
-      businessSuccess: 'true',
+      businessSuccess: 'achieved',
       tabId: 7,
       redactionState: 'redacted',
+      display: {
+        title: 'inspect page and click action',
+        methodLabel: '点击元素',
+      },
+      statusView: {
+        executionStatus: 'succeeded',
+        businessStatus: 'achieved',
+        businessStatusSource: 'tabrix_evidence',
+      },
     });
+    expect(res.body.data.traces[0].pageIdentity.label).toBe('example.test');
     expect(res.body.data.traces[0]).not.toHaveProperty('requestParams');
     expect(res.body.data.traces[0]).not.toHaveProperty('response');
     expect(res.body.data.traces[0]).not.toHaveProperty('postObservation');
     expect(res.body.data.traces[1]).toMatchObject({
       toolName: 'chrome_read_page',
-      businessSuccess: 'achieved',
+      businessSuccess: 'unknown',
       aiFeedbackScore: 0.82,
+      statusView: {
+        businessStatus: 'achieved',
+        businessStatusSource: 'ai_feedback',
+        aiScore: 0.82,
+      },
       aiFeedback: {
         businessStatus: 'achieved',
         confidence: 0.82,
@@ -301,8 +324,8 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.knowledgeModels[0]).toMatchObject({
       siteFamily: 'example.test',
       pageRole: 'workspace',
-      observationCount: 1,
-      sourceTraceCount: 1,
+      observationCount: 2,
+      sourceTraceCount: 2,
     });
     expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('pageStateModel');
     expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('objectGraph');

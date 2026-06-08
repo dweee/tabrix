@@ -190,7 +190,7 @@ describe('handleToolCall execution wrapper', () => {
     const updated = sessionManager.memoryTraces!.get(traceId);
     expect(updated).toMatchObject({
       traceId,
-      businessSuccess: 'achieved',
+      businessSuccess: 'unknown',
       aiFeedbackScore: 0.85,
       aiFeedback: {
         businessStatus: 'achieved',

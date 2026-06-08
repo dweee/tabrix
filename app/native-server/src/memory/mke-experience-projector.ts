@@ -101,6 +101,14 @@ function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
+function isBusinessAchieved(trace: MemoryTrace): boolean {
+  return (
+    trace.businessSuccess === 'achieved' ||
+    trace.businessSuccess === 'proven' ||
+    trace.businessSuccess === 'true'
+  );
+}
+
 function groupByTask(traces: MemoryTrace[]): TaskTraceGroup[] {
   const groups = new Map<string, MemoryTrace[]>();
   for (const trace of traces) {
@@ -151,7 +159,7 @@ function buildTargetTemplate(trace: MemoryTrace): Record<string, unknown> {
 
 function buildStepTemplate(trace: MemoryTrace, order: number): Record<string, unknown> | null {
   if (!REPLAYABLE_ACTION_TOOLS.has(trace.toolName)) return null;
-  if (trace.toolSuccess !== true) return null;
+  if (trace.toolSuccess !== true || !isBusinessAchieved(trace)) return null;
 
   if (trace.toolName === 'chrome_fill_or_select') {
     return {
@@ -198,7 +206,9 @@ function buildStepTemplate(trace: MemoryTrace, order: number): Record<string, un
 
 function scoreReliability(actionTraces: MemoryTrace[]): number {
   if (actionTraces.length === 0) return 0;
-  const successful = actionTraces.filter((trace) => trace.toolSuccess === true).length;
+  const successful = actionTraces.filter(
+    (trace) => trace.toolSuccess === true && isBusinessAchieved(trace),
+  ).length;
   return Math.round((successful / actionTraces.length) * 1000) / 1000;
 }
 
@@ -215,7 +225,10 @@ function buildRecipeBasis(
   knowledgeRepo: KnowledgeModelRepository,
 ): RecipeBasis | null {
   const actionTraces = group.traces.filter(
-    (trace) => REPLAYABLE_ACTION_TOOLS.has(trace.toolName) && trace.toolSuccess === true,
+    (trace) =>
+      REPLAYABLE_ACTION_TOOLS.has(trace.toolName) &&
+      trace.toolSuccess === true &&
+      isBusinessAchieved(trace),
   );
   if (actionTraces.length === 0) return null;
 
