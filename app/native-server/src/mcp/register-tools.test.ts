@@ -115,7 +115,15 @@ describe('handleToolCall execution wrapper', () => {
       toolSuccess: true,
       businessStatus: 'unknown',
       businessFeedbackRequired: true,
+      businessFeedbackGuideVersion: 'tabrix-ai-business-feedback-v1',
     });
+    expect(payload._tabrix.businessFeedbackScoreGuide).toContain('0.90-1.00');
+    expect(payload._tabrix.businessFeedbackScoreGuide).toContain(
+      'clear page evidence and intent achieved',
+    );
+    expect(payload._tabrix.businessFeedbackScoreGuide).toContain(
+      'partial progress, needs follow-up read/confirmation',
+    );
     expect(payload._tabrix.traceId).toEqual(expect.any(String));
     expect((bridgeSpy.mock.calls[1][0] as any).args).toEqual({ tabId: 1 });
 

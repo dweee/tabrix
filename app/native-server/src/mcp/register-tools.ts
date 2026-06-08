@@ -156,6 +156,9 @@ const TOOL_CLOSEOUT_ARTIFACT_SCENARIO_ID = 'mcp:chrome_close_tabs:cleanup_succes
 const STRUCTURED_READ_GATE_ARTIFACT_SCENARIO_ID = 'mcp:chrome_read_page:structured_read_gate';
 const TABRIX_TOOL_METADATA_KEY = '_tabrix';
 const AI_BUSINESS_STATUS_VALUES = new Set(['achieved', 'partial', 'not_achieved', 'unknown']);
+const AI_BUSINESS_FEEDBACK_GUIDE_VERSION = 'tabrix-ai-business-feedback-v1';
+const AI_BUSINESS_FEEDBACK_SCORE_GUIDE =
+  'When sending _tabrix.previousFeedback[].confidence for a previous trace: 0.90-1.00 = clear page evidence and intent achieved; 0.70-0.89 = likely achieved with one uncertainty; 0.40-0.69 = partial progress, needs follow-up read/confirmation; 0.01-0.39 = action ran but insufficient evidence; 0.00 = clearly not achieved.';
 
 interface TabrixPreviousFeedback {
   traceId: string;
@@ -191,6 +194,8 @@ const TABRIX_TOOL_METADATA_SCHEMA = {
     },
     previousFeedback: {
       type: 'array',
+      description:
+        'Optional business feedback for earlier Tabrix Memory traces. Use the confidence scoring guide returned in each tool result _tabrix envelope.',
       items: {
         type: 'object',
         properties: {
@@ -199,7 +204,12 @@ const TABRIX_TOOL_METADATA_SCHEMA = {
             type: 'string',
             enum: ['achieved', 'partial', 'not_achieved', 'unknown'],
           },
-          confidence: { type: 'number', minimum: 0, maximum: 1 },
+          confidence: {
+            type: 'number',
+            minimum: 0,
+            maximum: 1,
+            description: AI_BUSINESS_FEEDBACK_SCORE_GUIDE,
+          },
           reasonCode: { type: 'string' },
           summary: { type: 'string' },
         },
@@ -507,6 +517,8 @@ function attachTabrixMemoryTraceEnvelope(
       toolSuccess: trace.toolSuccess,
       businessStatus: trace.businessSuccess ?? 'unknown',
       businessFeedbackRequired: true,
+      businessFeedbackGuideVersion: AI_BUSINESS_FEEDBACK_GUIDE_VERSION,
+      businessFeedbackScoreGuide: AI_BUSINESS_FEEDBACK_SCORE_GUIDE,
     },
   };
 

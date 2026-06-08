@@ -687,9 +687,22 @@ describe('服务器测试', () => {
         id: 98,
         result: {
           isError: false,
-          content: [{ type: 'text', text: '{"windowCount":1,"tabCount":2}' }],
+          content: [{ type: 'text' }],
         },
       });
+      const payload = JSON.parse(stale.body.result.content[0].text);
+      expect(payload).toMatchObject({
+        windowCount: 1,
+        tabCount: 2,
+        _tabrix: {
+          toolName: 'get_windows_and_tabs',
+          toolSuccess: true,
+          businessStatus: 'unknown',
+          businessFeedbackRequired: true,
+          businessFeedbackGuideVersion: 'tabrix-ai-business-feedback-v1',
+        },
+      });
+      expect(payload._tabrix.traceId).toEqual(expect.any(String));
       expect(extensionSpy).toHaveBeenCalledTimes(2);
     } finally {
       jest.restoreAllMocks();

@@ -123,6 +123,44 @@ describe('mcp inspect script', () => {
     });
   });
 
+  test('keeps tools output successful when session cleanup fails during shutdown', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        createResponse({
+          headers: { 'mcp-session-id': 'session-cleanup-race' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: { protocolVersion: '2025-03-26' },
+          }),
+        }),
+      )
+      .mockResolvedValueOnce(createResponse({ body: '' }))
+      .mockResolvedValueOnce(
+        createResponse({
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 2,
+            result: {
+              tools: [{ name: 'get_windows_and_tabs', description: 'List current tabs' }],
+            },
+          }),
+        }),
+      )
+      .mockRejectedValueOnce(new Error('session already closing'));
+    globalThis.fetch = fetchMock as unknown as FetchMock;
+
+    const code = await runMcpTools();
+
+    expect(code).toBe(0);
+    const output = stdoutSpy.mock.calls.map(([chunk]) => String(chunk)).join('');
+    expect(output).toContain('Available tools: 1');
+    expect(output).toContain('get_windows_and_tabs');
+    expect(stderrSpy).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
   test('calls chrome_read_page with GitHub repo style args and prints parsed result', async () => {
     const fetchMock = jest
       .fn()

@@ -1184,7 +1184,12 @@ export class TaskSessionContext {
     runtimeFields: TaskPageRuntimeFields | null = null,
   ): BrowserPageProjectionDelta {
     const previousProjection = this.lastPageProjection;
-    const deltaKind = previousProjection === null ? 'initial_overview' : 'post_action_delta';
+    const deltaKind =
+      previousProjection === null
+        ? 'initial_overview'
+        : projection.changedByActionId
+          ? 'post_action_delta'
+          : 'read_refresh_delta';
     this.pageProjectionDeltaCount += 1;
     const delta = buildBrowserPageProjectionDelta({
       previousProjection,
@@ -1539,7 +1544,7 @@ export class TaskSessionContext {
     const previousContextChars = Math.max(0, this.lastPageProjection.contextChars);
     return {
       deltaId: `delta:cached:${this.lastPageProjection.projectionId}`,
-      deltaKind: 'post_action_delta',
+      deltaKind: 'read_refresh_delta',
       fromProjectionId: this.lastPageProjection.projectionId,
       toProjectionId: this.lastPageProjection.projectionId,
       changedRegions: [],

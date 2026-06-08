@@ -199,17 +199,25 @@ class StreamableHttpMcpClient {
   }
 
   async close(): Promise<void> {
-    if (!this.sessionId) return;
+    const sessionId = this.sessionId;
+    if (!sessionId) return;
+    this.sessionId = null;
+
     try {
-      await this.fetchFn(this.baseUrl, {
+      const response = await this.fetchFn(this.baseUrl, {
         method: 'DELETE',
         headers: {
           ...this.defaultHeaders,
-          'mcp-session-id': this.sessionId,
+          'mcp-session-id': sessionId,
         },
       });
-    } finally {
-      this.sessionId = null;
+      try {
+        await response.text();
+      } catch {
+        // Session cleanup is best-effort after the command result has been produced.
+      }
+    } catch {
+      // Session cleanup is best-effort after the command result has been produced.
     }
   }
 
