@@ -62,6 +62,8 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('formatToolStatus(trace.toolSuccess)');
     expect(source).toContain('function isPresentString');
     expect(source).not.toContain("['Tool / 工具', trace.toolName]");
+    expect(source).not.toContain('return `Tab ${trace.tabId}`');
+    expect(source).toContain('readTraceResultPageContext(trace.resultSummary)');
     expect(source).not.toContain("['Tool result / 工具结果'");
     expect(source).not.toContain('v-for="item in row.meta"');
     expect(source).not.toContain('compactMeta');
@@ -71,5 +73,8 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('overflow-y: auto;');
     expect(source).toContain('overflow-wrap: anywhere');
     expect(source).toContain('white-space: normal;');
+    expect(source).toContain('.mke-json pre');
+    expect(source).toContain('width: 100%;');
+    expect(source).toContain('top: 7px;');
   });
 });

@@ -104,7 +104,7 @@
                 :title="`复制 ${row.title} 的 JSON 数据`"
                 @click="copyRecordJson(row)"
               >
-                {{ copiedRecordId === row.id ? '已复制' : '复制 JSON' }}
+                {{ copiedRecordId === row.id ? '已复制' : '复制' }}
               </button>
             </div>
           </li>
@@ -551,9 +551,31 @@ function formatDuration(value: number | null | undefined): string | null {
 function formatTraceContext(trace: MkeMemoryTraceSummary): string | null {
   const pageContext = formatCollapsedTraceValue(trace.pageUrlPattern);
   if (pageContext && pageContext !== LOCAL_CONTENT_SUMMARY) return compactText(pageContext, 64);
+  const resultContext = readTraceResultPageContext(trace.resultSummary);
+  if (resultContext) {
+    return resultContext === LOCAL_CONTENT_SUMMARY
+      ? LOCAL_CONTENT_CONTEXT
+      : compactText(resultContext, 64);
+  }
   if (trace.siteFamily) return compactText(trace.siteFamily, 64);
-  if (trace.tabId !== null && trace.tabId !== undefined) return `Tab ${trace.tabId}`;
   return null;
+}
+
+function readTraceResultPageContext(resultSummary: string | null | undefined): string | null {
+  const parsed = parseJsonObject(resultSummary);
+  if (!parsed) return null;
+  const url =
+    readStringField(parsed, 'url') ||
+    readStringField(parsed, 'pageUrl') ||
+    readStringField(parsed, 'finalUrl') ||
+    readStringField(parsed, 'currentUrl');
+  const collapsedUrl = formatCollapsedTraceValue(url);
+  if (collapsedUrl) return collapsedUrl;
+  return (
+    readStringField(parsed, 'title') ||
+    readStringField(parsed, 'pageTitle') ||
+    readStringField(parsed, 'documentTitle')
+  );
 }
 
 function formatCollapsedTraceValue(value: string | null | undefined): string | null {
@@ -570,7 +592,12 @@ function stripNullPathPrefix(value: string): string {
 }
 
 function isLocalFileReference(value: string): boolean {
-  return /^[a-z]:[\\/]/i.test(value) || value.startsWith('/') || value.startsWith('\\\\');
+  return (
+    value.startsWith('file://') ||
+    /^[a-z]:[\\/]/i.test(value) ||
+    value.startsWith('/') ||
+    value.startsWith('\\\\')
+  );
 }
 
 function readUrlHost(value: string): string | null {
@@ -620,6 +647,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
 };
 
 const LOCAL_CONTENT_SUMMARY = '本地内容已读取，路径见详情';
+const LOCAL_CONTENT_CONTEXT = '本地文件';
 </script>
 
 <style scoped>
@@ -1036,8 +1064,8 @@ const LOCAL_CONTENT_SUMMARY = '本地内容已读取，路径见详情';
 }
 
 .mke-json {
-  flex: 1 1 auto;
   min-width: 0;
+  width: 100%;
 }
 
 .mke-json summary {
@@ -1046,16 +1074,15 @@ const LOCAL_CONTENT_SUMMARY = '本地内容已读取，路径见详情';
   font-size: 12px;
   font-weight: 850;
   line-height: 1.35;
+  padding-right: 56px;
 }
 
 .mke-record-actions {
   border-top: 1px solid var(--mke-border);
-  align-items: flex-start;
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
+  display: block;
   margin-top: 9px;
   padding-top: 8px;
+  position: relative;
 }
 
 .mke-copy-button {
@@ -1064,11 +1091,13 @@ const LOCAL_CONTENT_SUMMARY = '本地内容已读取，路径见详情';
   background: var(--mke-surface-2);
   color: var(--mke-soft);
   cursor: pointer;
-  flex: 0 0 auto;
   font-size: 11px;
   font-weight: 850;
   line-height: 1.2;
   padding: 4px 9px;
+  position: absolute;
+  right: 0;
+  top: 7px;
 }
 
 .mke-copy-button:hover {
