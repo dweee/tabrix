@@ -73,11 +73,12 @@
           <li v-for="row in filteredRows" :key="row.id" class="mke-record">
             <div class="mke-record__top">
               <div>
-                <p v-if="row.kicker" class="mke-record__kicker">{{ row.kicker }}</p>
                 <h3 :title="row.title">{{ row.title }}</h3>
-                <p class="mke-record__meta-line" :title="row.metaLine">{{ row.metaLine }}</p>
                 <p v-if="row.subtitle" class="mke-record__summary" :title="row.subtitle">
                   {{ row.subtitle }}
+                </p>
+                <p v-if="row.metaLine" class="mke-record__meta-line" :title="row.metaLine">
+                  {{ row.metaLine }}
                 </p>
               </div>
               <span class="mke-status" :class="`mke-status--${row.statusTone}`">
@@ -350,17 +351,17 @@ function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
     id: trace.traceId,
     kicker: '记忆轨迹',
     title,
-    metaLine: [`方法 ${trace.toolName}`, formatDate(trace.createdAt)]
-      .filter(isPresentString)
-      .join(' · '),
+    metaLine: '',
     subtitle,
     status,
     statusTone:
       trace.toolSuccess === false ? 'warn' : trace.toolSuccess === true ? 'good' : 'neutral',
     facts: compactFacts([
-      ['AI反馈', formatBusinessStatus(trace.businessSuccess)],
+      ['工具', trace.toolName],
+      ['业务', formatBusinessStatus(trace.businessSuccess)],
       ['耗时', formatDuration(trace.durationMs)],
-      ['上下文', formatTraceContext(trace)],
+      ['时间', formatDate(trace.createdAt)],
+      ['页面', formatTraceContext(trace)],
     ]),
     detailJson: formatJsonDetail(trace),
     searchTokens: [
@@ -532,15 +533,15 @@ function formatDate(value: string | null | undefined): string {
 }
 
 function formatBusinessStatus(value: string | null | undefined): string {
-  if (value === 'true') return '通过 / Pass';
-  if (value === 'false') return '未通过 / Fail';
-  return '待回写';
+  if (value === 'true') return '通过';
+  if (value === 'false') return '失败';
+  return '待验证';
 }
 
 function formatToolStatus(value: boolean | null | undefined): string {
-  if (value === true) return '工具成功';
-  if (value === false) return '工具失败';
-  return '工具待确认';
+  if (value === true) return '通过';
+  if (value === false) return '失败';
+  return '待验证';
 }
 
 function formatDuration(value: number | null | undefined): string | null {

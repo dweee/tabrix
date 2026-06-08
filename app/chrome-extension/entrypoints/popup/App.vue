@@ -3407,25 +3407,30 @@ onUnmounted(() => {
   border: 1px solid rgba(226, 232, 240, 0.95);
   border-radius: 14px;
   box-shadow: 0 10px 22px -20px rgba(15, 23, 42, 0.65);
-  overflow: hidden;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: visible;
+  padding: 8px;
 }
 
 .entry-item {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 13px 14px;
+  gap: 8px;
+  min-height: 66px;
+  padding: 10px;
   background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--ac-border, #e7e5e4);
+  border: 1px solid var(--ac-border, #e7e5e4);
+  border-radius: 10px;
   cursor: pointer;
   transition: all var(--ac-motion-fast, 120ms) ease;
   text-align: left;
 }
 
 .entry-item:last-child {
-  border-bottom: none;
+  border-bottom: 1px solid var(--ac-border, #e7e5e4);
 }
 
 .entry-item:hover {
@@ -3433,8 +3438,8 @@ onUnmounted(() => {
 }
 
 .entry-icon {
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3479,7 +3484,7 @@ onUnmounted(() => {
 
 .entry-title {
   display: block;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--ac-text, #1a1a1a);
   line-height: 1.3;
@@ -3487,7 +3492,7 @@ onUnmounted(() => {
 
 .entry-desc {
   display: block;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--ac-text-subtle, #a8a29e);
   line-height: 1.3;
   margin-top: 2px;
@@ -3496,6 +3501,10 @@ onUnmounted(() => {
 .entry-arrow {
   color: var(--ac-text-subtle, #a8a29e);
   flex-shrink: 0;
+}
+
+.management-entry-block .entry-arrow {
+  display: none;
 }
 
 /* Coming Soon Badge */

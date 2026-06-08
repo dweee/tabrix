@@ -74,9 +74,9 @@ body {
   margin: 0;
   padding: 0;
   width: 408px;
-  height: 760px;
+  height: min(760px, 100vh);
   min-height: 0;
-  max-height: 760px;
+  max-height: 100vh;
   overflow: hidden;
   overscroll-behavior: none;
   font-family: inherit;
@@ -86,9 +86,9 @@ body {
 
 html {
   width: 408px;
-  height: 760px;
+  height: min(760px, 100vh);
   min-height: 0;
-  max-height: 760px;
+  max-height: 100vh;
   overflow: hidden;
 }
 

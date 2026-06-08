@@ -25,9 +25,9 @@ describe('popup management entrances layout', () => {
   });
 
   it('keeps the document locked and home content as the only scroll path', () => {
-    expect(popupStyleSource).toContain('html {\n  width: 408px;\n  height: 760px;');
+    expect(popupStyleSource).toContain('html {\n  width: 408px;\n  height: min(760px, 100vh);');
     expect(popupStyleSource).toContain('body {\n  margin: 0;\n  padding: 0;');
-    expect(popupStyleSource).toContain('max-height: 760px;');
+    expect(popupStyleSource).toContain('max-height: 100vh;');
     expect(popupStyleSource).toContain('overscroll-behavior: none;');
     expect(popupStyleSource).toContain('#app {\n  width: 100%;\n  height: 100%;');
     expect(popupStyleSource).toContain('min-height: 0;');
@@ -55,5 +55,14 @@ describe('popup management entrances layout', () => {
     expect(popupSource).toContain("getMessage('popupMkeDataManagementTitle')");
     expect(popupSource).not.toContain('MkeDataManagementPage');
     expect(popupSource).not.toContain('mke-data-management');
+  });
+
+  it('shows Token and MKE as sibling management entries instead of stacking MKE below the fold', () => {
+    expect(popupSource).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
+    expect(popupSource).toContain('min-height: 66px;');
+    expect(popupSource).toContain('.management-entry-block .entry-arrow');
+    expect(popupSource).toContain('display: none;');
+    expect(popupSource).toContain('overflow: visible;');
+    expect(popupSource).toContain('padding: 8px;');
   });
 });

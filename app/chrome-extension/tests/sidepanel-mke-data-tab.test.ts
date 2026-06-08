@@ -48,6 +48,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('搜索主题、工具、页面、状态');
     expect(tabSource).toContain('mke-refresh-button');
     expect(tabSource).toContain('mke-record__meta-line');
+    expect(tabSource).not.toContain('{{ row.kicker }}');
     expect(tabSource).not.toContain('{{ filteredRows.length }}');
     expect(tabSource).not.toContain('{{ activeTotal }} 条');
     expect(tabSource).not.toContain('mke-list-status');
@@ -72,29 +73,29 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain(
       "return '当前标签不是可点击的普通网页 / Current tab is not a clickable web page'",
     );
-    expect(tabSource).toContain("return '通过 / Pass'");
-    expect(tabSource).toContain("return '待回写'");
-    expect(tabSource).toContain("return '工具成功'");
-    expect(tabSource).toContain("return '工具失败'");
+    expect(tabSource).toContain("if (value === 'true') return '通过'");
+    expect(tabSource).toContain("if (value === 'false') return '失败'");
+    expect(tabSource).toContain("return '待验证'");
   });
 
   it('makes tool status primary and labels AI business feedback separately', () => {
     expect(tabSource).toContain('<h3 :title="row.title">{{ row.title }}</h3>');
-    expect(tabSource).toContain('{{ row.metaLine }}');
+    expect(tabSource).toContain('v-if="row.metaLine"');
     expect(tabSource).toContain('<span class="mke-status"');
     expect(tabSource).toContain('const status = formatToolStatus(trace.toolSuccess)');
-    expect(tabSource).toContain(
-      'metaLine: [`方法 ${trace.toolName}`, formatDate(trace.createdAt)]',
-    );
+    expect(tabSource).toContain("metaLine: ''");
     expect(tabSource).not.toContain(
       'metaLine: [`方法 ${trace.toolName}`, toolLabel, formatDate(trace.createdAt)]',
     );
-    expect(tabSource).toContain("['AI反馈', formatBusinessStatus(trace.businessSuccess)]");
+    expect(tabSource).toContain("['工具', trace.toolName]");
+    expect(tabSource).toContain("['业务', formatBusinessStatus(trace.businessSuccess)]");
     expect(tabSource).toContain("['耗时', formatDuration(trace.durationMs)]");
-    expect(tabSource).toContain("['上下文', formatTraceContext(trace)]");
+    expect(tabSource).toContain("['时间', formatDate(trace.createdAt)]");
+    expect(tabSource).toContain("['页面', formatTraceContext(trace)]");
     expect(tabSource).not.toContain("['Tool result / 工具结果'");
     expect(tabSource).not.toContain('formatBoolean(trace.toolSuccess)');
-    expect(tabSource).not.toContain("['Time / 时间', formatDate(trace.createdAt)]");
+    expect(tabSource).not.toContain("['AI反馈', formatBusinessStatus(trace.businessSuccess)]");
+    expect(tabSource).not.toContain("['上下文', formatTraceContext(trace)]");
     expect(tabSource).toContain('function formatToolStatus');
     expect(tabSource).toContain('function formatTraceContext');
   });
