@@ -75,6 +75,38 @@ function expectRecentEventsPublicSafe(events: Array<Record<string, unknown>>) {
   }
 }
 
+function makeStorageArea(store: Record<string, unknown>) {
+  return {
+    get: vi.fn(async (keys: string[]) => {
+      const result: Record<string, unknown> = {};
+      for (const key of keys) result[key] = store[key];
+      return result;
+    }),
+    set: vi.fn(async (items: Record<string, unknown>) => {
+      Object.assign(store, items);
+    }),
+    remove: vi.fn(async (keys: string | string[]) => {
+      for (const key of Array.isArray(keys) ? keys : [keys]) delete store[key];
+    }),
+  };
+}
+
+function expectPersistedAiOwnershipPublicSafe(records: unknown) {
+  expect(Array.isArray(records)).toBe(true);
+  for (const record of records as Array<Record<string, unknown>>) {
+    expect(record).not.toHaveProperty('url');
+    expect(record).not.toHaveProperty('pendingUrl');
+    expect(record).not.toHaveProperty('title');
+    expect(record).not.toHaveProperty('pageText');
+    expect(record).not.toHaveProperty('screenshot');
+    expect(record).not.toHaveProperty('account');
+  }
+  const serialized = JSON.stringify(records);
+  for (const pattern of FORBIDDEN_EVENT_STRING_PATTERNS) {
+    expect(serialized).not.toMatch(pattern);
+  }
+}
+
 describe('browser world inventory', () => {
   const listeners = {
     tabCreated: [] as Listener[],
@@ -94,6 +126,7 @@ describe('browser world inventory', () => {
     resetBrowserWorldInventoryForTests();
     for (const bucket of Object.values(listeners)) bucket.length = 0;
     (chrome.storage as any).session = undefined;
+    (chrome.storage as any).local = undefined;
     (chrome.tabs as any).onCreated = hook(listeners.tabCreated);
     (chrome.tabs as any).onUpdated = hook(listeners.tabUpdated);
     (chrome.tabs as any).onRemoved = hook(listeners.tabRemoved);
@@ -749,21 +782,77 @@ describe('browser world inventory', () => {
     expectRecentEventsPublicSafe(snapshot.recentEvents);
   });
 
+  it('keeps the latest opened-page answer clear after an AI-owned tab closes', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    markBrowserWorldTabAiCreated(30);
+    listeners.tabCreated[0]?.({
+      id: 30,
+      windowId: 1,
+      url: 'about:blank',
+      title: '',
+      active: false,
+      status: 'loading',
+      discarded: false,
+      audible: false,
+      mutedInfo: { muted: false },
+      pinned: false,
+    });
+
+    listeners.tabUpdated[0]?.(
+      30,
+      {
+        url: 'https://creator.example.test/publish',
+        title: 'Creator Publish',
+        status: 'complete',
+      },
+      {
+        id: 30,
+        windowId: 1,
+        url: 'https://creator.example.test/publish',
+        title: 'Creator Publish',
+        active: false,
+        status: 'complete',
+        discarded: false,
+        audible: false,
+        mutedInfo: { muted: false },
+        pinned: false,
+      },
+    );
+
+    listeners.tabRemoved[0]?.(30, { windowId: 1, isWindowClosing: false });
+
+    const snapshot = await getBrowserWorldSnapshot();
+
+    expect(snapshot.tabs.some((tab) => tab.tabId === 30)).toBe(false);
+    expect(snapshot.summary.recentActivityLedger.latestPageOpened).toMatchObject({
+      kind: 'page_opened',
+      tabId: 30,
+      windowId: 1,
+      url: 'https://creator.example.test/publish',
+      title: 'Creator Publish',
+      openedBy: 'ai',
+      openedBySource: 'ai_tool',
+      evidence: 'browser_world_closed_tab_snapshot',
+      confidence: 'high',
+    });
+    expect(snapshot.summary.recentActivityLedger.answerHints.lastOpenedPage).toContain(
+      'https://creator.example.test/publish',
+    );
+    expect(snapshot.summary.recentActivityLedger.latestPageClosed).toMatchObject({
+      kind: 'page_closed',
+      tabId: 30,
+      url: 'https://creator.example.test/publish',
+      openedBy: 'ai',
+      evidence: 'browser_world_closed_tab_snapshot',
+    });
+    expectRecentEventsPublicSafe(snapshot.recentEvents);
+  });
+
   it('restores AI tab ownership from extension session storage after BrowserWorld memory resets', async () => {
     const sessionStore: Record<string, unknown> = {};
-    (chrome.storage as any).session = {
-      get: vi.fn(async (keys: string[]) => {
-        const result: Record<string, unknown> = {};
-        for (const key of keys) result[key] = sessionStore[key];
-        return result;
-      }),
-      set: vi.fn(async (items: Record<string, unknown>) => {
-        Object.assign(sessionStore, items);
-      }),
-      remove: vi.fn(async (keys: string | string[]) => {
-        for (const key of Array.isArray(keys) ? keys : [keys]) delete sessionStore[key];
-      }),
-    };
+    (chrome.storage as any).session = makeStorageArea(sessionStore);
     vi.mocked(chrome.windows.getAll).mockResolvedValue([
       {
         id: 7,
@@ -797,6 +886,7 @@ describe('browser world inventory', () => {
         }),
       ]);
     });
+    expectPersistedAiOwnershipPublicSafe(sessionStore['tabrix.browserWorld.aiTabOwnership.v1']);
 
     resetBrowserWorldInventoryForTests();
 
@@ -808,7 +898,7 @@ describe('browser world inventory', () => {
       tabId: 77,
       openedBy: 'ai',
       openedBySource: 'ai_tool',
-      openedByReason: 'restored_from_browser_world_ai_ownership_session_store',
+      openedByReason: 'restored_from_browser_world_ai_ownership_store',
       cleanupEligibility: 'eligible',
       cleanupEligibilityReason: 'ai_opened_operable_tab_cleanup_candidate',
     });
@@ -816,6 +906,69 @@ describe('browser world inventory', () => {
       aiOpenedTabs: 1,
       userOrPageOpenedTabs: 0,
     });
+  });
+
+  it('restores AI tab ownership from extension local storage when session storage is empty after reload', async () => {
+    const sessionStore: Record<string, unknown> = {};
+    const localStore: Record<string, unknown> = {};
+    (chrome.storage as any).session = makeStorageArea(sessionStore);
+    (chrome.storage as any).local = makeStorageArea(localStore);
+    vi.mocked(chrome.windows.getAll).mockResolvedValue([
+      {
+        id: 7,
+        focused: true,
+        state: 'normal',
+        type: 'normal',
+        tabs: [
+          {
+            id: 78,
+            windowId: 7,
+            url: 'https://ai-restored-after-extension-reload.test/',
+            title: 'AI restored after reload',
+            active: true,
+            status: 'complete',
+            discarded: false,
+            audible: false,
+            mutedInfo: { muted: false },
+            pinned: false,
+          },
+        ],
+      },
+    ] as chrome.windows.Window[]);
+
+    markBrowserWorldTabAiCreated(78);
+    await vi.waitFor(() => {
+      expect(sessionStore['tabrix.browserWorld.aiTabOwnership.v1']).toEqual([
+        expect.objectContaining({
+          tabId: 78,
+          lastAiOperation: 'tab_created',
+        }),
+      ]);
+      expect(localStore['tabrix.browserWorld.aiTabOwnership.v1']).toEqual([
+        expect.objectContaining({
+          tabId: 78,
+          lastAiOperation: 'tab_created',
+        }),
+      ]);
+    });
+    expectPersistedAiOwnershipPublicSafe(localStore['tabrix.browserWorld.aiTabOwnership.v1']);
+
+    delete sessionStore['tabrix.browserWorld.aiTabOwnership.v1'];
+    resetBrowserWorldInventoryForTests();
+
+    const snapshot = await getBrowserWorldSnapshot();
+
+    expect(snapshot.aiOpenedTabIds).toEqual([78]);
+    expect(snapshot.userOrPageOpenedTabIds).toEqual([]);
+    expect(snapshot.summary.currentTabObject).toMatchObject({
+      tabId: 78,
+      openedBy: 'ai',
+      openedBySource: 'ai_tool',
+      openedByReason: 'restored_from_browser_world_ai_ownership_store',
+      cleanupEligibility: 'eligible',
+      cleanupEligibilityReason: 'ai_opened_operable_tab_cleanup_candidate',
+    });
+    expect(snapshot.summary.currentOperationConclusion).toContain('latest AI-operated tab 78');
   });
 
   it('resyncs the window active tab immediately when a new active tab is created', async () => {
@@ -1063,6 +1216,32 @@ describe('browser world inventory', () => {
     expect(JSON.stringify(snapshot.recentEvents)).not.toContain('late-observed.test');
   });
 
+  it('does not report ready routing for a low-confidence same-tab AI operation', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    markBrowserWorldTabAiOperated(10, 'switch_tab', {
+      confidence: 0.45,
+      evidenceLabel: 'not_proven',
+    });
+
+    const snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.summary.aiOperationState).toMatchObject({
+      browserActiveTabId: 10,
+      latestAiOperatedTabId: 10,
+      latestAiOperation: 'switch_tab',
+      latestAiOperationConfidence: 0.45,
+      latestAiOperationReason: 'marked_by_tabrix_tool_execution:switch_tab:not_proven',
+      relationToBrowserActiveTab: 'same_as_browser_active',
+      canContinueOnLatestAiOperatedTab: false,
+    });
+    expect(snapshot.summary.routingDecisionSummary).toBe(
+      'routing=operation_evidence_not_proven, blockingReason=latest_ai_operation_low_confidence_or_tab_not_operable, next=prove_foreground_or_refresh_browser_snapshot',
+    );
+    expect(snapshot.summary.currentOperationConclusion).toContain('operable=no_or_unknown');
+    expectRecentEventsPublicSafe(snapshot.recentEvents);
+  });
+
   it('summarizes multi-tab cleanup as one dynamic object-state conclusion', async () => {
     initBrowserWorldInventory();
     await getBrowserWorldSnapshot();
@@ -1191,6 +1370,210 @@ describe('browser world inventory', () => {
     expect(snapshot.summary.windowLifecycleConclusion).toContain(
       'latest=window_removed, window=2, removedTabs=1',
     );
+  });
+
+  it('counts tabs removed immediately before their parent window removal', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    listeners.windowCreated[0]?.({
+      id: 2,
+      focused: false,
+      state: 'normal',
+      type: 'normal',
+      width: 900,
+      height: 700,
+      left: 20,
+      top: 30,
+      tabs: [
+        {
+          id: 21,
+          windowId: 2,
+          url: 'https://new-window.test/',
+          title: 'New window',
+          active: true,
+          status: 'complete',
+          discarded: false,
+          audible: false,
+          mutedInfo: { muted: false },
+          pinned: false,
+        },
+      ],
+    } as chrome.windows.Window);
+
+    listeners.tabRemoved[0]?.(21, { windowId: 2, isWindowClosing: true });
+    listeners.windowRemoved[0]?.(2);
+
+    const snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.windowCount).toBe(1);
+    expect(snapshot.tabs.some((tab) => tab.windowId === 2)).toBe(false);
+    expect(snapshot.recentEvents.at(-1)).toMatchObject({
+      eventKind: 'window_removed',
+      windowId: 2,
+      removedTabCount: 1,
+      removedAiOpenedTabCount: 0,
+    });
+    expect(snapshot.summary.recentChangeSummary).toContain(
+      'window 2 was removed; removedTabs=1, removedAiOpenedTabs=0',
+    );
+    expect(snapshot.summary.windowLifecycleConclusion).toContain(
+      'latest=window_removed, window=2, removedTabs=1',
+    );
+    expectRecentEventsPublicSafe(snapshot.recentEvents as Array<Record<string, unknown>>);
+  });
+
+  it('counts recently removed window tabs even when focus events are interleaved', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    listeners.windowCreated[0]?.({
+      id: 2,
+      focused: false,
+      state: 'normal',
+      type: 'normal',
+      width: 900,
+      height: 700,
+      left: 20,
+      top: 30,
+      tabs: [
+        {
+          id: 21,
+          windowId: 2,
+          url: 'https://new-window.test/',
+          title: 'New window',
+          active: true,
+          status: 'complete',
+          discarded: false,
+          audible: false,
+          mutedInfo: { muted: false },
+          pinned: false,
+        },
+      ],
+    } as chrome.windows.Window);
+
+    listeners.tabRemoved[0]?.(21, { windowId: 2, isWindowClosing: true });
+    listeners.windowFocusChanged[0]?.(1);
+    listeners.windowRemoved[0]?.(2);
+
+    const snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.recentEvents.at(-1)).toMatchObject({
+      eventKind: 'window_removed',
+      windowId: 2,
+      removedTabCount: 1,
+      removedAiOpenedTabCount: 0,
+    });
+    expect(snapshot.summary.recentChangeSummary).toContain(
+      'window 2 was removed; removedTabs=1, removedAiOpenedTabs=0',
+    );
+    expect(snapshot.summary.windowLifecycleConclusion).toContain(
+      'latest=window_removed, window=2, removedTabs=1',
+    );
+    expectRecentEventsPublicSafe(snapshot.recentEvents as Array<Record<string, unknown>>);
+  });
+
+  it('backfills a window removal when its tab removal event arrives later', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    listeners.windowCreated[0]?.({
+      id: 2,
+      focused: false,
+      state: 'normal',
+      type: 'normal',
+      width: 900,
+      height: 700,
+      left: 20,
+      top: 30,
+      tabs: [
+        {
+          id: 21,
+          windowId: 2,
+          url: 'https://new-window.test/',
+          title: 'New window',
+          active: true,
+          status: 'complete',
+          discarded: false,
+          audible: false,
+          mutedInfo: { muted: false },
+          pinned: false,
+        },
+      ],
+    } as chrome.windows.Window);
+
+    listeners.tabDetached[0]?.(21, { oldWindowId: 2, oldPosition: 0 });
+    listeners.windowRemoved[0]?.(2);
+    listeners.tabRemoved[0]?.(21, { windowId: 2, isWindowClosing: true });
+
+    const snapshot = await getBrowserWorldSnapshot();
+    const windowRemovedEvent = [...snapshot.recentEvents]
+      .reverse()
+      .find((event) => event.eventKind === 'window_removed' && event.windowId === 2);
+    expect(windowRemovedEvent).toMatchObject({
+      eventKind: 'window_removed',
+      windowId: 2,
+      removedTabCount: 1,
+      removedAiOpenedTabCount: 0,
+    });
+    expect(snapshot.summary.windowLifecycleState).toMatchObject({
+      latestEventKind: 'window_removed',
+      latestEventWindowId: 2,
+      latestRemovedTabCount: 1,
+      latestRemovedAiOpenedTabCount: 0,
+    });
+    expectRecentEventsPublicSafe(snapshot.recentEvents as Array<Record<string, unknown>>);
+  });
+
+  it('retains latest window removal counts when a later focus event becomes latest', async () => {
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    listeners.windowCreated[0]?.({
+      id: 2,
+      focused: true,
+      state: 'normal',
+      type: 'normal',
+      width: 900,
+      height: 700,
+      left: 20,
+      top: 30,
+      tabs: [
+        {
+          id: 21,
+          windowId: 2,
+          url: 'https://new-window.test/',
+          title: 'New window',
+          active: true,
+          status: 'complete',
+          discarded: false,
+          audible: false,
+          mutedInfo: { muted: false },
+          pinned: false,
+        },
+      ],
+    } as chrome.windows.Window);
+
+    listeners.tabRemoved[0]?.(21, { windowId: 2, isWindowClosing: true });
+    listeners.windowRemoved[0]?.(2);
+    listeners.windowFocusChanged[0]?.(1);
+
+    const snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.summary.recentChangeSummary).toContain('focused window is 1');
+    expect(snapshot.summary.windowLifecycleState).toMatchObject({
+      latestEventKind: 'window_focus_changed',
+      latestEventWindowId: 1,
+      latestRemovedTabCount: null,
+      latestRemovedAiOpenedTabCount: null,
+      latestWindowRemovedId: 2,
+      latestWindowRemovedTabCount: 1,
+      latestWindowRemovedAiOpenedTabCount: 0,
+      recentRemovedCount: 1,
+      retainedWindowCount: 1,
+      focusedWindowId: 1,
+    });
+    expect(snapshot.summary.windowLifecycleConclusion).toContain(
+      'lastRemovedWindow=2, lastRemovedTabs=1, lastRemovedAiOpenedTabs=0',
+    );
+    expectRecentEventsPublicSafe(snapshot.recentEvents as Array<Record<string, unknown>>);
   });
 
   it('keeps only the newly created focused BrowserWindowObject focused', async () => {

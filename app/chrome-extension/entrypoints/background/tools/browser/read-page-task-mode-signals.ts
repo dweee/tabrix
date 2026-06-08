@@ -11,7 +11,10 @@ const COMPARE_HINT_PATTERN = /\b(compare|diff|review changes)\b/i;
 const EXTRACT_HINT_PATTERN = /\b(export|download|copy|artifact|csv|json)\b/i;
 const MONITOR_HINT_PATTERN = /\b(summary|jobs?|logs?|annotations?|workflow run|runs?)\b/i;
 const SEARCH_HINT_PATTERN =
-  /\b(search(?: issues?)?|filter(?: issues?)?|find|labels?|milestone|assignee|query|new issue|issue entries)\b/i;
+  /\b(search(?: issues?)?|filter(?: issues?)?|find|labels?|milestone|assignee|query|new issue|issue entries)\b|搜索|筛选|查询/i;
+const FORM_WORKFLOW_HINT_PATTERN =
+  /\b(upload|submit|publish|save|create|generate|attach|choose file|select file)\b|上传|提交|发布|保存|生成|选择文件|添加(?:图片|文件)|配图/i;
+const SEARCH_CONTROL_HINT_PATTERN = /\b(search|filter|query)\b|搜索|筛选|查询/i;
 const COMMIT_SHA_PATTERN = /\b[0-9a-f]{7,40}\b/i;
 
 type RankedTaskMode = Exclude<ReadPageTaskMode, 'read'>;
@@ -46,7 +49,10 @@ interface RouteTaskModeHint {
 
 const PAGE_ROLE_TASK_MODE_HINTS: Partial<Record<string, ReadPageTaskMode>> = {
   repo_home: 'read',
+  content_detail: 'read',
+  publish_form: 'read',
   issues_list: 'search',
+  search_results: 'search',
   actions_list: 'monitor',
   workflow_run_detail: 'monitor',
   workflow_run_shell: 'monitor',
@@ -55,7 +61,10 @@ const PAGE_ROLE_TASK_MODE_HINTS: Partial<Record<string, ReadPageTaskMode>> = {
 
 const PRIMARY_REGION_TASK_MODE_HINTS: Partial<Record<string, ReadPageTaskMode>> = {
   repo_primary_nav: 'read',
+  content_detail: 'read',
+  form: 'read',
   issues_results: 'search',
+  search_results: 'search',
   workflow_runs_list: 'monitor',
   workflow_run_summary: 'monitor',
   workflow_run_shell: 'monitor',
@@ -228,7 +237,28 @@ function scoreTaskMode(mode: RankedTaskMode, context: TaskModeSignalContext): nu
   ) {
     return Math.min(score, 4);
   }
+  if (
+    mode === 'search' &&
+    hasFormWorkflowSignal(context) &&
+    !hasSearchControlSignal(context) &&
+    !hasRoleOrRegionHint &&
+    routeHintScore(mode, context) === 0
+  ) {
+    return Math.min(score, 4);
+  }
   return score;
+}
+
+function hasFormWorkflowSignal(context: TaskModeSignalContext): boolean {
+  return [...context.signalText, ...context.highValueText].some((item) =>
+    FORM_WORKFLOW_HINT_PATTERN.test(item),
+  );
+}
+
+function hasSearchControlSignal(context: TaskModeSignalContext): boolean {
+  return [...context.signalText, ...context.highValueText, context.title].some((item) =>
+    SEARCH_CONTROL_HINT_PATTERN.test(item),
+  );
 }
 
 function scoreReadTaskMode(context: TaskModeSignalContext): number {

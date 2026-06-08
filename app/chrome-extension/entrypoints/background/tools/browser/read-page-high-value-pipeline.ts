@@ -27,6 +27,7 @@ const COMMIT_SHA_PATTERN = /\b[0-9a-f]{7,40}\b/i;
 
 const MAX_HIGH_VALUE_OBJECTS = 6;
 const MAX_VISIBLE_TEXT_ROW_FACTS = 3;
+const MAX_CONTENT_DETAIL_READ_FACTS = 3;
 
 interface HighValuePipelineParams {
   currentUrl: string;
@@ -75,9 +76,9 @@ export function buildHighValueObjects(
   const ranked = rankScoredObjects(finalScored)
     .slice(0, MAX_HIGH_VALUE_OBJECTS)
     .map((item) => toHighValueObject(item, params));
-  const merged = mergeVisibleTextRowFacts(ranked, params);
-  const clickableRanked = merged.filter((item) => item.kind !== 'visible_region_row');
-  const readOnlyFacts = merged.filter((item) => item.kind === 'visible_region_row');
+  const merged = mergeContentDetailReadFacts(mergeVisibleTextRowFacts(ranked, params), params);
+  const clickableRanked = merged.filter((item) => !isReadOnlyHighValueFact(item));
+  const readOnlyFacts = merged.filter((item) => isReadOnlyHighValueFact(item));
 
   // Annotate stable targetRefs after ranking + dedup so ordinals are
   // computed against the *final* HVO order (visible to upstream callers).
@@ -85,7 +86,7 @@ export function buildHighValueObjects(
   // reads of the same page produce the same ordinals per identity tuple.
   const annotatedClickableObjects = annotateStableTargetRefs(clickableRanked, params.pageRole);
   const highValueObjects = merged.map((item) => {
-    if (item.kind === 'visible_region_row') {
+    if (isReadOnlyHighValueFact(item)) {
       return readOnlyFacts.shift() ?? item;
     }
     return annotatedClickableObjects.shift() ?? item;
@@ -231,6 +232,71 @@ function mergeVisibleTextRowFacts(
     return normalized && !seenLabels.has(normalized);
   });
   return [...rowFacts, ...remaining].slice(0, MAX_HIGH_VALUE_OBJECTS);
+}
+
+function isReadOnlyHighValueFact(item: ReadPageHighValueObject): boolean {
+  return item.kind === 'visible_region_row' || item.kind === 'page_role_seed';
+}
+
+function buildContentDetailReadFacts(params: HighValuePipelineParams): ReadPageHighValueObject[] {
+  if (params.pageRole !== 'content_detail') return [];
+  const region = params.primaryRegion || 'content_detail';
+  const facts: ReadPageHighValueObject[] = [
+    {
+      id: 'hvo_content_detail_seed_body',
+      kind: 'page_role_seed',
+      label: 'Content detail body',
+      reason: 'page role seed for readable content detail body',
+      objectType: 'doc_block',
+      region,
+      importance: 0.96,
+      confidence: 0.78,
+      sourceKind: 'dom_semantic',
+      reasons: ['page_role=content_detail', 'read_fact', 'non_actionable_seed'],
+    },
+    {
+      id: 'hvo_content_detail_seed_author',
+      kind: 'page_role_seed',
+      label: 'Author or account area',
+      reason: 'page role seed for author/account context on a content detail page',
+      objectType: 'entry',
+      region: 'account',
+      importance: 0.9,
+      confidence: 0.66,
+      sourceKind: 'dom_semantic',
+      reasons: ['page_role=content_detail', 'account_context_candidate', 'non_actionable_seed'],
+    },
+    {
+      id: 'hvo_content_detail_seed_feedback',
+      kind: 'page_role_seed',
+      label: 'Status or comments area',
+      reason: 'page role seed for status/comments context on a content detail page',
+      objectType: 'status_item',
+      region: 'feedback',
+      importance: 0.88,
+      confidence: 0.64,
+      sourceKind: 'dom_semantic',
+      reasons: ['page_role=content_detail', 'feedback_context_candidate', 'non_actionable_seed'],
+    },
+  ];
+  return facts.slice(0, MAX_CONTENT_DETAIL_READ_FACTS);
+}
+
+function mergeContentDetailReadFacts(
+  rankedObjects: ReadPageHighValueObject[],
+  params: HighValuePipelineParams,
+): ReadPageHighValueObject[] {
+  const readFacts = buildContentDetailReadFacts(params);
+  if (readFacts.length === 0) return rankedObjects;
+
+  const seenIds = new Set(readFacts.map((item) => item.id));
+  const seenLabels = new Set(readFacts.map((item) => normalizeHighValueLabel(item.label)));
+  const remaining = rankedObjects.filter((item) => {
+    if (seenIds.has(item.id)) return false;
+    const normalized = normalizeHighValueLabel(item.label);
+    return normalized && !seenLabels.has(normalized);
+  });
+  return [...readFacts, ...remaining].slice(0, MAX_HIGH_VALUE_OBJECTS);
 }
 
 function runObjectPipeline(

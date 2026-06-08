@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   __resetStableTargetRefRegistryForTests,
   getStableTargetRefRegistrySnapshot,
+  lookupCandidateActionTargetLocatorEntry,
   lookupStableTargetRef,
+  recordCandidateActionTargetLocatorsSnapshot,
   recordStableTargetRefSnapshot,
   clearStableTargetRefTab,
 } from '@/entrypoints/background/tools/browser/stable-target-ref-registry';
@@ -75,5 +77,48 @@ describe('B-011 stable-targetRef registry', () => {
     expect(snap.tabIds).toEqual([7, 8]);
     expect(snap.entryCounts[7]).toBe(1);
     expect(snap.entryCounts[8]).toBe(2);
+  });
+
+  it('records and looks up candidate action locators by tab', () => {
+    recordCandidateActionTargetLocatorsSnapshot(9, [
+      { targetRef: 'ref_fallback_1', selector: 'nav a[href="/live"]' },
+      { targetRef: 'ref_fallback_2', selector: 'button[data-action="publish"]', frameId: 3 },
+    ]);
+
+    expect(lookupCandidateActionTargetLocatorEntry(9, 'ref_fallback_1')).toMatchObject({
+      targetRef: 'ref_fallback_1',
+      selector: 'nav a[href="/live"]',
+      selectorType: 'css',
+    });
+    expect(lookupCandidateActionTargetLocatorEntry(9, 'ref_fallback_2')).toMatchObject({
+      targetRef: 'ref_fallback_2',
+      selector: 'button[data-action="publish"]',
+      selectorType: 'css',
+      frameId: 3,
+    });
+  });
+
+  it('replaces candidate action locator snapshot independently from stable refs', () => {
+    recordStableTargetRefSnapshot(9, [{ targetRef: 'tgt_aaaaaaaaaa', ref: 'ref_a' }]);
+    recordCandidateActionTargetLocatorsSnapshot(9, [
+      { targetRef: 'ref_fallback_1', selector: 'nav a[href="/live"]' },
+    ]);
+    recordCandidateActionTargetLocatorsSnapshot(9, [
+      { targetRef: 'ref_fallback_2', selector: 'button[data-action="publish"]' },
+    ]);
+
+    expect(lookupStableTargetRef(9, 'tgt_aaaaaaaaaa')).toBe('ref_a');
+    expect(lookupCandidateActionTargetLocatorEntry(9, 'ref_fallback_1')).toBeUndefined();
+    expect(lookupCandidateActionTargetLocatorEntry(9, 'ref_fallback_2')).toMatchObject({
+      selector: 'button[data-action="publish"]',
+    });
+  });
+
+  it('clearTab removes candidate action locators too', () => {
+    recordCandidateActionTargetLocatorsSnapshot(9, [
+      { targetRef: 'ref_fallback_1', selector: 'nav a[href="/live"]' },
+    ]);
+    clearStableTargetRefTab(9);
+    expect(lookupCandidateActionTargetLocatorEntry(9, 'ref_fallback_1')).toBeUndefined();
   });
 });

@@ -460,7 +460,13 @@ function toExecutableAction(
         targetRef: action.targetRef,
         confidence: action.confidence,
         matchReason: action.matchReason,
+        ...(action.actionability ? { actionability: action.actionability } : {}),
+        ...(action.actionabilityReason ? { actionabilityReason: action.actionabilityReason } : {}),
+        ...(action.intentBoundary ? { intentBoundary: action.intentBoundary } : {}),
+        ...(action.nextRequiredTool ? { nextRequiredTool: action.nextRequiredTool } : {}),
+        ...(action.nextRequiredCheck ? { nextRequiredCheck: action.nextRequiredCheck } : {}),
         locatorChain: action.locatorChain,
+        ...(action.intent ? { intent: action.intent } : {}),
       },
     },
     claimBoundary:

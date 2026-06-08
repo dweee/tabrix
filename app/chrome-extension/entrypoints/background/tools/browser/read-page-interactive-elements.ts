@@ -6,6 +6,7 @@ interface SnapshotNode {
   ref: string;
   depth: number;
   href: string | null;
+  selector?: string | null;
   valueState: 'empty' | 'non_empty' | 'unknown' | null;
   checked: boolean | 'mixed' | 'unknown' | null;
   matchSource: string | null;
@@ -77,6 +78,7 @@ const DEFAULT_COMPACT_SCORING_CONTEXT: CompactScoringContext = {
 const MIN_ACTIONABLE_SNAPSHOT_ELEMENTS_FOR_FALLBACK = 3;
 const TEXT_MENU_TARGET_RECOVERY_REF_PREFIX = 'ref_text_menu_';
 const TEXT_FILTER_PANEL_TARGET_RECOVERY_REF_PREFIX = 'ref_text_filter_panel_';
+const TEXT_CONTROL_TARGET_RECOVERY_REF_PREFIX = 'ref_text_control_';
 const AUTH_FORM_CONTROL_NAME_PATTERN =
   /手机号|手机号码|电话号码|短信验证码|输入验证码|获取验证码|发送验证码|重新发送|登录|同意并继续|我同意/i;
 
@@ -249,6 +251,8 @@ function toInteractiveElement(node: SnapshotNode): SnapshotInteractiveElement {
   };
   const href = typeof node.href === 'string' ? node.href.trim() : '';
   if (href) element.href = href;
+  const selector = typeof node.selector === 'string' ? node.selector.trim() : '';
+  if (selector) element.selector = selector;
   if (node.valueState) element.valueState = node.valueState;
   if (node.checked !== null) element.checked = node.checked;
   if (node.matchSource) element.matchSource = node.matchSource;
@@ -317,6 +321,7 @@ function buildFallbackNodes(fallbackElements: any[]): SnapshotNode[] {
     name: String(item?.text || item?.name || item?.ariaLabel || '').trim(),
     depth: 0,
     href: typeof item?.href === 'string' ? item.href : null,
+    selector: typeof item?.selector === 'string' ? item.selector : null,
     valueState:
       normalizeValueState(item?.valueState) ??
       (Object.prototype.hasOwnProperty.call(item ?? {}, 'value')
@@ -358,7 +363,8 @@ function isTextMenuTargetRecoveryNode(node: SnapshotNode): boolean {
   const ref = String(node.ref || '');
   return (
     ref.startsWith(TEXT_MENU_TARGET_RECOVERY_REF_PREFIX) ||
-    ref.startsWith(TEXT_FILTER_PANEL_TARGET_RECOVERY_REF_PREFIX)
+    ref.startsWith(TEXT_FILTER_PANEL_TARGET_RECOVERY_REF_PREFIX) ||
+    ref.startsWith(TEXT_CONTROL_TARGET_RECOVERY_REF_PREFIX)
   );
 }
 

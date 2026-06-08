@@ -26,8 +26,8 @@ export const REGION_MATCHERS: Record<ReadPageRegionType, readonly RegExp[]> = {
   ],
   qr_code: [/\b(qr|qrcode|scan|scan code)\b/i, /二维码|扫码|扫一扫/i],
   form: [
-    /\b(form|input|textbox|searchbox|submit|password|credential)\b/i,
-    /表单|输入|提交|密码|验证码|搜索/i,
+    /\b(form|input|textbox|searchbox|submit|publish|post|create|upload|save|generate|choose file|select file|password|credential)\b/i,
+    /表单|输入|提交|发布|创建|新建|上传|保存|生成|选择文件|密码|验证码|搜索/i,
   ],
   feedback: [
     /\b(status|alert|toast|error|success|loading|progress|warning)\b/i,

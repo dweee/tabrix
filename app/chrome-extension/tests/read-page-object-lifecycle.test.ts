@@ -572,6 +572,7 @@ describe('read_page object lifecycle', () => {
         pageId: 'tab:42',
         ownerType: 'run_owned',
         stability: 'loading',
+        chosenDataSource: 'markdown',
       }),
       ownershipRuntime: ownershipRuntime({
         currentTabUrl: 'https://example.test/runtime',
@@ -647,6 +648,10 @@ describe('read_page object lifecycle', () => {
     expect(view.compact?.primaryConclusion).toContain('window=normal');
     expect(view.compact?.primaryConclusion).toContain('runtime=browser_world_inventory');
     expect(view.compact?.primaryConclusion).toContain('source=dom_region_rows');
+    expect(view.compact?.primaryConclusion).not.toContain('source=markdown');
+    expect(view.compact?.facts.page).toMatchObject({
+      selectedDataSource: 'dom_region_rows',
+    });
     expect(view.compact?.primaryConclusion).toContain(
       'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
     );
@@ -714,6 +719,37 @@ describe('read_page object lifecycle', () => {
     expect(minimizedView.attributeGroups.tab_state.summary).toContain(
       'actionReadiness=blocked_window_minimized',
     );
+    expect(minimizedView.compact?.primaryConclusion).toContain(
+      'Action readiness: blocked_window_minimized; requiredBeforeAction=restore_window_then_refresh_browser_snapshot.',
+    );
+    expect(minimizedView.compact?.operationSummary).toContain(
+      'Action readiness: blocked_window_minimized; requiredBeforeAction=restore_window_then_refresh_browser_snapshot.',
+    );
+
+    const browserWorldReadyWithStaleFocusView = buildReadPageBrowserPageObjectView({
+      objectLifecycle: buildReadPageObjectLifecycle([]),
+      pageProjection: pageProjection(),
+      ownershipRuntime: ownershipRuntime({
+        isCurrentWindowFocused: false,
+        isCurrentTabActive: true,
+        isReadTargetBrowserActiveTab: true,
+        currentTabCanTabrixOperate: true,
+        currentTabOperabilityReason: 'regular_web_page',
+        currentTabRuntimeStateSource: 'browser_world_inventory',
+        browserWorldRoutingDecisionSummary:
+          'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
+      }),
+    });
+
+    expect(browserWorldReadyWithStaleFocusView.compact?.facts.tab).toMatchObject({
+      operationTargetRole: 'read_target_browser_active_tab',
+      actionReadiness: 'ready_for_page_level_check',
+      canProceedToPageLevelCheck: true,
+      requiredBeforeAction: 'page_level_content_or_postcondition_check',
+    });
+    expect(browserWorldReadyWithStaleFocusView.compact?.primaryConclusion).not.toContain(
+      'Action readiness: blocked_no_focused_window',
+    );
 
     const backgroundView = buildReadPageBrowserPageObjectView({
       objectLifecycle: buildReadPageObjectLifecycle([]),
@@ -736,6 +772,9 @@ describe('read_page object lifecycle', () => {
     });
     expect(backgroundView.compact?.facts.tab?.actionReadinessClaimBoundary).toContain(
       'browser object state only',
+    );
+    expect(backgroundView.compact?.primaryConclusion).toContain(
+      'Action readiness: reselect_or_reread_required; requiredBeforeAction=reselect_or_reread_read_target_before_action.',
     );
 
     const protectedUserOwnedView = buildReadPageBrowserPageObjectView({
@@ -2016,10 +2055,11 @@ describe('read_page object lifecycle', () => {
     expect(view.dynamicAttributeSummary).toMatchObject({
       status: 'page_transition_candidate',
       primaryConclusion:
-        'Same-document content area changed candidate: visible page content or DOM state changed after the action; postcondition verification is still required.',
+        'Same-document content area changed candidate: visible page content or DOM state changed between fresh reads; postcondition verification is still required.',
       changedGroups: expect.arrayContaining(['page_state', 'content_state']),
     });
     expect(view.dynamicAttributeSummary?.summary).toContain('context chars 10839 -> 10841');
+    expect(view.dynamicAttributeSummary?.primaryConclusion).not.toContain('after the action');
     expect(view.dynamicAttributeSummary?.primaryConclusion).not.toContain(
       'Page state changed: context chars',
     );

@@ -393,8 +393,12 @@ if (
           };
         }
         if (actual instanceof Element && expected.contains(actual)) {
+          const actualIsNestedIndependentAction =
+            actual !== expected && typeof actual.matches === 'function'
+              ? actual.matches(GENERIC_ACTION_SELECTOR)
+              : false;
           if (
-            isGenericActionControl(expected) ||
+            actualIsNestedIndependentAction ||
             (isFormControl(actual) && !isFormControl(expected))
           ) {
             return {

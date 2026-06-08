@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { navigateTool, switchTabTool } from '@/entrypoints/background/tools/browser/common';
 import { webFetcherTool } from '@/entrypoints/background/tools/browser/web-fetcher';
 import { readPageTool } from '@/entrypoints/background/tools/browser/read-page';
-import { resetBrowserWorldInventoryForTests } from '@/entrypoints/background/browser-world-inventory';
+import {
+  getBrowserWorldSnapshot,
+  initBrowserWorldInventory,
+  resetBrowserWorldInventoryForTests,
+} from '@/entrypoints/background/browser-world-inventory';
 
 describe('browser settle guidance', () => {
   beforeEach(() => {
@@ -793,6 +797,27 @@ describe('browser settle guidance', () => {
   });
 
   it('surfaces when Chrome activation is not enough to prove page foreground focus', async () => {
+    vi.mocked(chrome.windows.getAll).mockResolvedValue([
+      {
+        id: 2,
+        focused: true,
+        state: 'normal',
+        type: 'normal',
+        tabs: [
+          {
+            id: 31,
+            windowId: 2,
+            active: true,
+            status: 'complete',
+            url: 'http://127.0.0.1:62100/page4',
+            title: 'Page 4',
+          },
+        ],
+      },
+    ] as chrome.windows.Window[]);
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
     vi.mocked(chrome.tabs.get).mockResolvedValue({
       id: 31,
       windowId: 2,
@@ -843,6 +868,20 @@ describe('browser settle guidance', () => {
       settled: true,
       settleReason: 'already_complete',
     });
+
+    const snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.summary.aiOperationState).toMatchObject({
+      latestAiOperatedTabId: 31,
+      latestAiOperation: 'switch_tab',
+      latestAiOperationConfidence: 0.45,
+      latestAiOperationReason:
+        'marked_by_tabrix_tool_execution:switch_tab:needs_os_foreground_activation',
+      relationToBrowserActiveTab: 'same_as_browser_active',
+      canContinueOnLatestAiOperatedTab: false,
+    });
+    expect(snapshot.summary.routingDecisionSummary).toBe(
+      'routing=operation_evidence_not_proven, blockingReason=latest_ai_operation_low_confidence_or_tab_not_operable, next=prove_foreground_or_refresh_browser_snapshot',
+    );
   });
 
   it('waits for a new tab to settle before extracting visible text', async () => {

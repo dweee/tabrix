@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { ReadPageCandidateAction, ReadPageInteractiveElement } from '@tabrix/shared';
+import type {
+  ReadPageCandidateAction,
+  ReadPageFileInputBinding,
+  ReadPageInteractiveElement,
+} from '@tabrix/shared';
 import { buildCandidateActions } from '@/entrypoints/background/tools/browser/read-page-candidate-actions';
 import { buildPageOperationMap } from '@/entrypoints/background/tools/browser/read-page-operation-map';
 
@@ -76,6 +80,19 @@ function visibleRowsForTarget(targetRef: string) {
 }
 
 describe('read_page candidate action intents', () => {
+  const fileInputBinding: ReadPageFileInputBinding = {
+    selector: 'input[type="file"]:nth-of-type(1)',
+    accept: '.jpg,.jpeg,.png,.webp',
+    multiple: true,
+    disabled: false,
+    visible: false,
+    bindingSource: 'dom_input_type_file',
+    nextRequiredTool: 'chrome_upload_file',
+    nextRequiredCheck: 'run_chrome_upload_file_then_run_fresh_same_tab_read_to_prove_upload_state',
+    claimBoundary:
+      'file input selector is snapshot-local and does not prove upload success before chrome_upload_file and fresh readback',
+  };
+
   it('marks search inputs as query entry without leaking their label into locatorChain', () => {
     const actions = buildCandidateActions(
       [element({ ref: 'ref_search_input', role: 'searchbox', name: 'Search projects' })],
@@ -128,6 +145,116 @@ describe('read_page candidate action intents', () => {
     expect(actions.find((action) => action.targetRef === 'ref_login_button')?.intent).toBe(
       'auth.submit_login',
     );
+  });
+
+  it('labels and prioritizes publish workflow controls without treating them as search', () => {
+    const actions = buildCandidateActions(
+      [
+        element({ ref: 'ref_nav_home', role: 'button', name: '首页' }),
+        element({ ref: 'ref_nav_notes', role: 'button', name: '笔记管理' }),
+        element({ ref: 'ref_upload_video', role: 'button', name: '上传视频' }),
+        element({ ref: 'ref_upload_image_text', role: 'button', name: '上传图文' }),
+        element({ ref: 'ref_upload_dropzone', role: 'button', name: '拖拽视频到此或点击上传' }),
+        element({ ref: 'ref_upload_image', role: 'button', name: '上传图片' }),
+        element({ ref: 'ref_decorative_image', role: 'button', name: 'Image: jpg' }),
+        element({ ref: 'ref_publish_note', role: 'button', name: '发布笔记' }),
+      ],
+      [
+        { ref: 'ref_upload_image_text', selector: '.creator-tabs .image-text' },
+        { ref: 'ref_publish_note', selector: 'button.publish' },
+      ],
+      { fileInputBindings: [fileInputBinding] },
+    );
+
+    expect(actions.slice(0, 5).map((action) => action.targetRef)).toEqual([
+      'ref_upload_video',
+      'ref_upload_image_text',
+      'ref_upload_dropzone',
+      'ref_upload_image',
+      'ref_publish_note',
+    ]);
+    expect(actions.find((action) => action.targetRef === 'ref_upload_image_text')).toMatchObject({
+      label: '上传图文',
+      intent: 'publish.select_media_type',
+      actionability: 'actionable',
+      actionabilityReason: expect.stringContaining(
+        'business_success_not_proven_by_candidate_action',
+      ),
+      locatorChain: expect.arrayContaining([
+        { type: 'aria', value: '上传图文' },
+        { type: 'css', value: '.creator-tabs .image-text' },
+      ]),
+    });
+    expect(actions.find((action) => action.targetRef === 'ref_upload_dropzone')).toMatchObject({
+      label: '拖拽视频到此或点击上传',
+      intent: 'publish.upload_media',
+      actionabilityReason: expect.stringContaining(
+        'media_upload_requires_file_selection_or_upload_tool_evidence',
+      ),
+      intentBoundary: expect.stringContaining('upload-entry candidate only'),
+      nextRequiredTool: 'chrome_upload_file',
+      nextRequiredSelector: 'input[type="file"]:nth-of-type(1)',
+      nextRequiredSelectorSource: 'dom_input_type_file',
+      nextRequiredCheck: 'prove_file_input_or_file_picker_binding_then_run_fresh_same_tab_read',
+    });
+    expect(actions.find((action) => action.targetRef === 'ref_upload_image')).toMatchObject({
+      label: '上传图片',
+      intent: 'publish.upload_media',
+      nextRequiredTool: 'chrome_upload_file',
+      nextRequiredSelector: 'input[type="file"]:nth-of-type(1)',
+      nextRequiredSelectorSource: 'dom_input_type_file',
+      nextRequiredCheck: 'prove_file_input_or_file_picker_binding_then_run_fresh_same_tab_read',
+    });
+    expect(actions.find((action) => action.targetRef === 'ref_decorative_image')?.intent).toBe(
+      undefined,
+    );
+    expect(actions.find((action) => action.targetRef === 'ref_publish_note')).toMatchObject({
+      label: '发布笔记',
+      intent: 'publish.open_entry',
+      intentBoundary: expect.stringContaining('not final publish submission'),
+    });
+    expect(
+      actions.find((action) => action.targetRef === 'ref_publish_note')?.actionabilityReason,
+    ).toContain('publish_entry_not_final_submit');
+    expect(actions.map((action) => action.intent)).not.toContain('search.submit');
+    expect(actions.map((action) => action.intent)).not.toContain('search.category_select');
+  });
+
+  it('keeps final publish wording separate from publish-entry wording', () => {
+    const actions = buildCandidateActions(
+      [
+        element({ ref: 'ref_publish_entry', role: 'button', name: '发布笔记' }),
+        element({ ref: 'ref_publish_submit', role: 'button', name: '立即发布' }),
+      ],
+      [],
+    );
+
+    expect(actions.find((action) => action.targetRef === 'ref_publish_entry')).toMatchObject({
+      intent: 'publish.open_entry',
+      intentBoundary: expect.stringContaining('not final publish submission'),
+    });
+    expect(actions.find((action) => action.targetRef === 'ref_publish_submit')).toMatchObject({
+      intent: 'publish.submit',
+      actionability: 'actionable',
+      actionabilityReason: expect.stringContaining(
+        'business_success_requires_required_fields_and_post_action_readback',
+      ),
+      intentBoundary: expect.stringContaining('publish success requires'),
+    });
+  });
+
+  it('does not expose account-like mixed identifiers as candidate action labels or aria locators', () => {
+    const actions = buildCandidateActions(
+      [element({ ref: 'ref_account', role: 'button', name: 'Creator640C1D3B' })],
+      [],
+    );
+
+    expect(actions[0]).toMatchObject({
+      actionType: 'click',
+      targetRef: 'ref_account',
+    });
+    expect(actions[0].label).toBeUndefined();
+    expect(actions[0].locatorChain).toEqual([{ type: 'ref', value: 'ref_account' }]);
   });
 
   it('marks filter and most-collected controls with lightweight filter intents', () => {
@@ -340,6 +467,7 @@ describe('read_page candidate action intents', () => {
       confidence: 0.93,
       matchReason: 'primary action inferred from interactive label',
       locatorChain: [{ type: 'ref', value: 'ref_search' }],
+      label: 'Search',
       intent: 'search.submit',
     };
 
@@ -352,6 +480,206 @@ describe('read_page candidate action intents', () => {
       (item) => item.zoneId === 'zone_search_entry_ca_click_ref_search',
     );
     expect(zone?.primaryAction?.toolArgs.candidateAction.intent).toBe('search.submit');
+    expect(zone?.primaryAction?.toolArgs.candidateAction.label).toBe('Search');
+  });
+
+  it('maps publish upload and entry form regions to preparation instead of final submit', () => {
+    const actions = buildCandidateActions(
+      [
+        element({ ref: 'ref_upload_image_text', role: 'button', name: '上传图文' }),
+        element({ ref: 'ref_upload_image', role: 'button', name: '上传图片' }),
+        element({ ref: 'ref_publish_entry', role: 'button', name: '发布笔记' }),
+      ],
+      [
+        { ref: 'ref_upload_image_text', selector: '.creator-tabs .image-text' },
+        { ref: 'ref_upload_image', selector: '.upload-area input[type="file"]' },
+      ],
+      { fileInputBindings: [fileInputBinding] },
+    );
+    const mediaTypeAction = actions.find((action) => action.targetRef === 'ref_upload_image_text')!;
+    const uploadAction = actions.find((action) => action.targetRef === 'ref_upload_image')!;
+    const entryAction = actions.find((action) => action.targetRef === 'ref_publish_entry')!;
+
+    const operationMap = buildPageOperationMap([
+      {
+        regionId: 'region_form',
+        regionType: 'form',
+        state: 'input_available_candidate',
+        confidence: 0.84,
+        label: 'form: upload/publish entry',
+        objects: [
+          {
+            objectId: 'media_type_object',
+            label: '上传图文',
+            objectType: 'control',
+            role: 'button',
+            targetRef: mediaTypeAction.targetRef,
+            actionTypes: ['click'],
+            targetability: 'target_ref',
+            confidence: mediaTypeAction.confidence,
+            reason: mediaTypeAction.matchReason,
+            primaryAction: {
+              candidateActionId: mediaTypeAction.id,
+              actionType: mediaTypeAction.actionType,
+              targetRef: mediaTypeAction.targetRef,
+              locatorChain: mediaTypeAction.locatorChain,
+              toolName: 'chrome_click_element',
+              toolArgs: { candidateAction: mediaTypeAction },
+              claimBoundary: 'test action boundary',
+            },
+          },
+          {
+            objectId: 'upload_object',
+            label: '上传图片',
+            objectType: 'control',
+            role: 'button',
+            targetRef: uploadAction.targetRef,
+            actionTypes: ['click'],
+            targetability: 'target_ref',
+            confidence: uploadAction.confidence,
+            reason: uploadAction.matchReason,
+            primaryAction: {
+              candidateActionId: uploadAction.id,
+              actionType: uploadAction.actionType,
+              targetRef: uploadAction.targetRef,
+              locatorChain: uploadAction.locatorChain,
+              toolName: 'chrome_click_element',
+              toolArgs: { candidateAction: uploadAction },
+              claimBoundary: 'test action boundary',
+            },
+          },
+          {
+            objectId: 'entry_object',
+            label: '发布笔记',
+            objectType: 'control',
+            role: 'button',
+            targetRef: entryAction.targetRef,
+            actionTypes: ['click'],
+            targetability: 'target_ref',
+            confidence: entryAction.confidence,
+            reason: entryAction.matchReason,
+            primaryAction: {
+              candidateActionId: entryAction.id,
+              actionType: entryAction.actionType,
+              targetRef: entryAction.targetRef,
+              locatorChain: entryAction.locatorChain,
+              toolName: 'chrome_click_element',
+              toolArgs: { candidateAction: entryAction },
+              claimBoundary: 'test action boundary',
+            },
+          },
+        ],
+        candidateActionIds: [mediaTypeAction.id, uploadAction.id, entryAction.id],
+        targetability: 'target_ref',
+        claimBoundary: 'test region boundary',
+      },
+    ]);
+
+    expect(operationMap.zones[0]).toMatchObject({
+      purpose: 'prepare_publish',
+      label: 'publish preparation area',
+      readiness: 'ready',
+    });
+    expect(operationMap.zones[0].primaryAction?.toolArgs.candidateAction).toMatchObject({
+      intent: 'publish.upload_media',
+      nextRequiredTool: 'chrome_upload_file',
+      nextRequiredSelector: 'input[type="file"]:nth-of-type(1)',
+      nextRequiredSelectorSource: 'dom_input_type_file',
+      nextRequiredCheck: 'prove_file_input_or_file_picker_binding_then_run_fresh_same_tab_read',
+    });
+    expect(operationMap.zones[0].claimBoundary).toContain('final publish submission is not proven');
+  });
+
+  it('selects upload media as publish preparation primary action from candidate ids when region objects omit it', () => {
+    const actions = buildCandidateActions(
+      [
+        element({ ref: 'ref_upload_video', role: 'button', name: '上传视频' }),
+        element({ ref: 'ref_upload_image_text', role: 'button', name: '上传图文' }),
+        element({
+          ref: 'ref_upload_image_prompt',
+          role: 'button',
+          name: '上传图片，或写文字生成图片',
+        }),
+      ],
+      [
+        { ref: 'ref_upload_video', selector: '.tabs .video' },
+        { ref: 'ref_upload_image_text', selector: '.tabs .image-text' },
+        { ref: 'ref_upload_image_prompt', selector: '.upload-panel .upload-prompt' },
+      ],
+      { fileInputBindings: [fileInputBinding] },
+    );
+    const videoAction = actions.find((action) => action.targetRef === 'ref_upload_video')!;
+    const imageTextAction = actions.find((action) => action.targetRef === 'ref_upload_image_text')!;
+    const uploadPromptAction = actions.find(
+      (action) => action.targetRef === 'ref_upload_image_prompt',
+    )!;
+
+    const operationMap = buildPageOperationMap(
+      [
+        {
+          regionId: 'region_form',
+          regionType: 'form',
+          state: 'input_available_candidate',
+          confidence: 0.84,
+          label: 'form: image-text upload prompt',
+          objects: [
+            {
+              objectId: 'video_tab_object',
+              label: '上传视频',
+              objectType: 'control',
+              role: 'button',
+              targetRef: videoAction.targetRef,
+              actionTypes: ['click'],
+              targetability: 'target_ref',
+              confidence: videoAction.confidence,
+              reason: videoAction.matchReason,
+              primaryAction: {
+                candidateActionId: videoAction.id,
+                actionType: videoAction.actionType,
+                targetRef: videoAction.targetRef,
+                locatorChain: videoAction.locatorChain,
+                toolName: 'chrome_click_element',
+                toolArgs: { candidateAction: videoAction },
+                claimBoundary: 'test action boundary',
+              },
+            },
+            {
+              objectId: 'image_text_tab_object',
+              label: '上传图文',
+              objectType: 'control',
+              role: 'button',
+              targetRef: imageTextAction.targetRef,
+              actionTypes: ['click'],
+              targetability: 'target_ref',
+              confidence: imageTextAction.confidence,
+              reason: imageTextAction.matchReason,
+              primaryAction: {
+                candidateActionId: imageTextAction.id,
+                actionType: imageTextAction.actionType,
+                targetRef: imageTextAction.targetRef,
+                locatorChain: imageTextAction.locatorChain,
+                toolName: 'chrome_click_element',
+                toolArgs: { candidateAction: imageTextAction },
+                claimBoundary: 'test action boundary',
+              },
+            },
+          ],
+          candidateActionIds: [videoAction.id, imageTextAction.id, uploadPromptAction.id],
+          targetability: 'target_ref',
+          claimBoundary: 'test region boundary',
+        },
+      ],
+      { candidateActions: actions },
+    );
+
+    expect(operationMap.zones[0].primaryAction?.toolArgs.candidateAction).toMatchObject({
+      intent: 'publish.upload_media',
+      label: '上传图片，或写文字生成图片',
+      nextRequiredTool: 'chrome_upload_file',
+      nextRequiredSelector: 'input[type="file"]:nth-of-type(1)',
+      nextRequiredSelectorSource: 'dom_input_type_file',
+      nextRequiredCheck: 'prove_file_input_or_file_picker_binding_then_run_fresh_same_tab_read',
+    });
   });
 
   it('marks explicit detail links as detail-opening intent without treating search links as detail', () => {
@@ -475,6 +803,56 @@ describe('read_page candidate action intents', () => {
     );
 
     expect(actions).toEqual([]);
+  });
+
+  it('does not expose content row candidates behind a broad blocked overlay', () => {
+    const visibleRegionRows = visibleRowsForTarget('ref_row_title');
+    const actions = buildCandidateActions(
+      [
+        element({
+          ref: 'ref_overlay',
+          role: 'button',
+          name: 'assistant overlay',
+          actionability: 'blocked',
+          rect: { x: 160, y: 0, width: 1500, height: 3000 },
+        }),
+        element({
+          ref: 'ref_row_title',
+          role: 'link',
+          name: 'Practical guide to AI poster creation',
+          actionability: 'actionable',
+        }),
+        element({
+          ref: 'ref_publish',
+          role: 'link',
+          name: '发布',
+          actionability: 'actionable',
+        }),
+      ],
+      [{ ref: 'ref_row_title', selector: 'article:nth-of-type(1) a' }],
+      {
+        visibleRegionRows: {
+          ...visibleRegionRows,
+          sourceRegion: 'visible_text',
+          rows: visibleRegionRows.rows.map((row) => ({
+            ...row,
+            sourceRegion: 'visible_text',
+            qualityReasons: ['visible_text_fallback', 'target_ref_available'],
+          })),
+        },
+      },
+    );
+
+    expect(actions.find((action) => action.targetRef === 'ref_row_title')).toBeUndefined();
+    expect(actions.find((action) => action.targetRef === 'ref_publish')?.intent).toBe(
+      'publish.open_entry',
+    );
+    expect(actions.find((action) => action.targetRef === 'ref_publish')?.intentBoundary).toContain(
+      'not final publish submission',
+    );
+    expect(actions.find((action) => action.targetRef === 'ref_publish')?.actionability).toBe(
+      'actionable',
+    );
   });
 
   it('does not let visible rows override auth or search intent precedence', () => {

@@ -1189,7 +1189,11 @@ class SwitchTabTool extends BaseBrowserToolExecutor {
         chromeWindowFocused: activationResult.windowFocused,
         chromeTabActive: activationResult.activated,
       });
-      markBrowserWorldTabAiOperated(updatedTab.id, 'switch_tab');
+      markBrowserWorldTabAiOperated(updatedTab.id, 'switch_tab', {
+        confidence: foregroundProof.verdict === 'proven_foreground' ? 0.95 : 0.45,
+        evidenceLabel:
+          foregroundProof.verdict === 'proven_foreground' ? undefined : foregroundProof.verdict,
+      });
 
       return {
         content: [

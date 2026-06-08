@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  buildClickActionEvidenceResult,
   buildClickHelperDispatchTimingPolicy,
   buildStructuredClickHelperErrorResult,
   mergeClickSignals,
@@ -329,6 +330,78 @@ describe('buildPostActionReadbackEvidence', () => {
       businessSuccessProven: false,
       readbackSource: 'tool_dispatch_only',
       expectedEvidence: 'form_value_state_changed',
+    });
+  });
+
+  it('builds ActionEvidenceResult without upgrading dispatch success to business success', () => {
+    const postActionReadback = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'click',
+      observedOutcome: 'menu_opened',
+      candidateAction: {
+        targetRef: 'tgt_filter',
+        intent: 'filter.open',
+        locatorChain: [{ type: 'ref', value: 'ref_filter_button' }],
+      },
+    });
+    const evidence = buildClickActionEvidenceResult({
+      actionId: 'click-7-test',
+      actionKind: 'click',
+      tabId: 7,
+      targetBinding: {
+        resolutionSource: 'candidate_stable_target_ref',
+        requestedFrameId: null,
+        candidateFrameId: null,
+        resolvedFrameId: null,
+        frameScope: 'default_frame',
+        dispatchTarget: 'ref',
+        stableTargetRefResolved: true,
+        claimBoundary: 'Target binding only proves where the click dispatched.',
+      },
+      candidateAction: {
+        targetRef: 'tgt_filter',
+        intent: 'filter.open',
+        locatorChain: [{ type: 'ref', value: 'ref_filter_button' }],
+      },
+      finalRef: 'ref_filter_button',
+      dispatchSucceeded: true,
+      postActionReadback,
+    });
+
+    expect(evidence).toMatchObject({
+      actionId: 'click-7-test',
+      actionKind: 'click',
+      tabId: 7,
+      toolSuccess: true,
+      dispatch: {
+        dispatched: true,
+        acceptedByBrowser: true,
+        errorCode: null,
+      },
+      targetBinding: {
+        requestedTargetRef: 'tgt_filter',
+        resolvedTargetRef: 'ref_filter_button',
+        dispatchTarget: 'ref',
+        targetBindingProven: true,
+      },
+      source: {
+        selectedDataSource: 'unknown',
+        sourceRouteHonestyVerdict: 'not_checked',
+      },
+      postAction: {
+        postActionReadbackStatus: 'fresh_read_required',
+        freshReadRequired: true,
+        readbackSource: 'tool_dispatch_only',
+      },
+      business: {
+        businessSuccessVerdict: 'not_proven',
+        businessSuccessProven: false,
+        nextRequiredCheck: 'chrome_read_page_force_refresh_same_tab',
+      },
+      browserHygiene: {
+        required: false,
+        status: 'not_checked',
+      },
     });
   });
 });
@@ -947,6 +1020,31 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
       expectedTarget: { tagName: 'BUTTON' },
       actualTarget: { id: 'mask' },
     });
+  });
+
+  it('allows a selector click when a link center hits its non-interactive text child', async () => {
+    document.body.innerHTML =
+      '<a id="live-link" href="#live"><span id="live-label">直播</span></a>';
+    const link = document.getElementById('live-link') as HTMLAnchorElement;
+    const label = document.getElementById('live-label') as HTMLSpanElement;
+    setRect(link, { left: 20, top: 30, width: 120, height: 32 });
+    setRect(label, { left: 28, top: 36, width: 40, height: 20 });
+    document.elementFromPoint = vi.fn(() => label);
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#live-link',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(response.elementInfo).toMatchObject({
+      tagName: 'A',
+      id: 'live-link',
+      targetConsistency: { verdict: 'matched' },
+    });
+    expect(response.signals.hashAfter).toBe('#live');
   });
 
   it('does not prove auth.request_otp in the injected click helper', async () => {

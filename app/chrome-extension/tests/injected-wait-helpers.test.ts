@@ -336,4 +336,32 @@ describe('injected state-driven waits', () => {
     });
     expect(response.elements.map((element: any) => element.selector)).not.toContain('#panel');
   });
+
+  it('interactive element search escapes quoted text before XPath fallback', async () => {
+    document.body.innerHTML = `
+      <main>
+        <p id="method-text">form uses method='post' for this example</p>
+      </main>
+    `;
+    const paragraph = document.getElementById('method-text') as HTMLParagraphElement;
+    setRect(paragraph, { left: 20, top: 20, width: 360, height: 28 });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: "method='post'",
+      includeCoordinates: true,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.error).toBeUndefined();
+    expect(response.elements[0]).toMatchObject({
+      selector: '#method-text',
+      text: "form uses method='post' for this example",
+      actionability: 'blocked',
+    });
+  });
 });

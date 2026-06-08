@@ -1,12 +1,14 @@
 import type {
   ReadPageCandidateAction,
   ReadPageCandidateActionLocator,
+  ReadPageFileInputBinding,
   ReadPageInteractiveElement,
   ReadPageVisibleRegionRows,
 } from '@tabrix/shared';
 
 export type CandidateActionSeed = ReadPageCandidateAction;
 
+const MAX_CANDIDATE_ACTIONS = 20;
 const FILTER_OPEN_LABEL_PATTERN = /^(筛选|已筛选|过滤|filter|filters|filtered|排序|sort)$/i;
 const SEARCH_CATEGORY_LABEL_PATTERN = /^(全部|图文|视频|用户|all|images?|photos?|videos?|users?)$/i;
 const FILTER_PANEL_LABEL_PATTERN =
@@ -28,9 +30,12 @@ function scoreCandidateElementPriority(element: ReadPageInteractiveElement, inde
   const ref = String(element.ref || '');
   const name = String(element.name || '').trim();
   let score = 0;
+  if (isPublishActionText(name)) score += 136;
+  if (isPublishMediaTypeText(name)) score += 132;
   if (ref.startsWith('ref_text_menu_')) score += 120;
   if (ref.startsWith('ref_text_filter_panel_')) score += 116;
   if (ref.startsWith('ref_text_search_toolbar_')) score += 112;
+  if (ref.startsWith('ref_text_control_')) score += 110;
   if (FILTER_PANEL_LABEL_PATTERN.test(name)) score += 64;
   if (/\b(menu|more|settings?|logout|sign out|log out)\b|菜单|更多|设置|退出|注销/i.test(name)) {
     score += 80;
@@ -100,6 +105,11 @@ function inferCandidateActionIntent(
     return 'filter.open';
   }
   if (isSearchActionText(name)) return 'search.submit';
+  if (isPublishEntryActionText(name)) return 'publish.open_entry';
+  if (isPublishUploadDropzoneText(name)) return 'publish.upload_media';
+  if (isPublishMediaTypeText(name)) return 'publish.select_media_type';
+  if (isPublishUploadActionText(name)) return 'publish.upload_media';
+  if (isPublishSubmitActionText(name)) return 'publish.submit';
   if (isOpenDetailActionText(name)) return 'content.open_detail';
   return undefined;
 }
@@ -149,6 +159,46 @@ function isSearchActionText(value: string): boolean {
   return /\b(search|find|query)\b|搜索|查找/i.test(value);
 }
 
+function isPublishActionText(value: string): boolean {
+  return (
+    isPublishEntryActionText(value) ||
+    isPublishMediaTypeText(value) ||
+    isPublishUploadActionText(value) ||
+    isPublishSubmitActionText(value)
+  );
+}
+
+function isPublishMediaTypeText(value: string): boolean {
+  if (!value) return false;
+  return /\b(image\s*text|video|videos?)\b|上传图文|图文|上传视频|视频/i.test(value);
+}
+
+function isPublishUploadActionText(value: string): boolean {
+  if (!value) return false;
+  return /\b(upload|choose\s*file|select\s*file|drag)\b|点击上传|拖拽.*上传|选择文件|上传素材|上传图片|上传视频/i.test(
+    value,
+  );
+}
+
+function isPublishUploadDropzoneText(value: string): boolean {
+  if (!value) return false;
+  return /\b(choose\s*file|select\s*file|drag)\b|点击上传|拖拽.*上传|选择文件|上传素材/i.test(
+    value,
+  );
+}
+
+function isPublishSubmitActionText(value: string): boolean {
+  if (!value) return false;
+  return /\b(publish|post|submit)\b|立即发布|发布作品/i.test(value);
+}
+
+function isPublishEntryActionText(value: string): boolean {
+  if (!value) return false;
+  return /\b(create\s*(post|note)|new\s*(post|note))\b|发布笔记|写笔记|创建笔记|^发布$/i.test(
+    value,
+  );
+}
+
 function isOpenDetailActionText(value: string): boolean {
   if (!value) return false;
   if (isSearchActionText(value)) return false;
@@ -165,7 +215,11 @@ function isOpenDetailActionText(value: string): boolean {
 }
 
 function mayContainSensitiveAuthText(value: string): boolean {
+  const compact = String(value || '').replace(/\s+/g, '');
+  const hasMixedAccountLikeToken =
+    /[A-Za-z]/.test(compact) && /\d/.test(compact) && /[A-Za-z0-9]{6,}/.test(compact);
   return (
+    hasMixedAccountLikeToken ||
     /\b(password|passcode|credential|cookie|token|authorization|secret|otp|sms|verification\s*code|one[-\s]?time\s*code)\b/i.test(
       value,
     ) ||
@@ -201,10 +255,127 @@ function buildLocatorChain(params: {
   return locatorChain;
 }
 
+function getElementSelector(
+  element: ReadPageInteractiveElement | undefined,
+  selectorMap: Map<string, string>,
+): string | undefined {
+  if (!element?.ref) return undefined;
+  const mapped = selectorMap.get(element.ref);
+  if (mapped) return mapped;
+  const selector = typeof element.selector === 'string' ? element.selector.trim() : '';
+  return selector || undefined;
+}
+
+function normalizeActionability(value: unknown): string {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase();
+  if (!normalized) return 'unknown';
+  if (normalized === 'actionable') return 'actionable';
+  if (normalized === 'not_actionable') return 'not_actionable';
+  if (normalized === 'blocked') return 'blocked';
+  return normalized;
+}
+
+function buildActionabilityReason(params: {
+  element: ReadPageInteractiveElement;
+  actionability: string;
+  intent: ReadPageCandidateAction['intent'] | undefined;
+}): string {
+  const source =
+    String(params.element.matchSource || 'structured_snapshot').trim() || 'structured_snapshot';
+  const parts = [`source_element_actionability=${params.actionability}`, `source=${source}`];
+  if (params.intent === 'publish.submit') {
+    parts.push('business_success_requires_required_fields_and_post_action_readback');
+  } else if (params.intent === 'publish.open_entry') {
+    parts.push('publish_entry_not_final_submit');
+  } else if (params.intent === 'publish.upload_media') {
+    parts.push('media_upload_requires_file_selection_or_upload_tool_evidence');
+  } else {
+    parts.push('business_success_not_proven_by_candidate_action');
+  }
+  return parts.join('; ');
+}
+
+function buildIntentBoundary(
+  intent: ReadPageCandidateAction['intent'] | undefined,
+): string | undefined {
+  if (intent === 'publish.open_entry') {
+    return 'This is a publish-entry or publish-section candidate, not final publish submission.';
+  }
+  if (intent === 'publish.upload_media') {
+    return 'This is an upload-entry candidate only; media upload success requires file-selection/upload evidence and a fresh post-action readback.';
+  }
+  if (intent === 'publish.submit') {
+    return 'This is only a browser-action candidate; publish success requires required-field evidence and a fresh post-action readback.';
+  }
+  return undefined;
+}
+
+function buildNextRequiredTool(
+  intent: ReadPageCandidateAction['intent'] | undefined,
+): string | undefined {
+  if (intent === 'publish.upload_media') return 'chrome_upload_file';
+  return undefined;
+}
+
+function buildNextRequiredCheck(
+  intent: ReadPageCandidateAction['intent'] | undefined,
+): string | undefined {
+  if (intent === 'publish.upload_media') {
+    return 'prove_file_input_or_file_picker_binding_then_run_fresh_same_tab_read';
+  }
+  return undefined;
+}
+
+function selectNextFileInputBinding(
+  bindings: readonly ReadPageFileInputBinding[] | null | undefined,
+): ReadPageFileInputBinding | null {
+  if (!bindings || bindings.length === 0) return null;
+  const usable = bindings.find(
+    (binding) => Boolean(String(binding.selector || '').trim()) && binding.disabled !== true,
+  );
+  if (usable) return usable;
+  return bindings.find((binding) => Boolean(String(binding.selector || '').trim())) ?? null;
+}
+
+function isBroadBlockingOverlayElement(element: ReadPageInteractiveElement): boolean {
+  if (String(element.actionability || '').toLowerCase() !== 'blocked') return false;
+  const rect = element.rect;
+  if (!rect) return false;
+  const width = typeof rect.width === 'number' && Number.isFinite(rect.width) ? rect.width : 0;
+  const height = typeof rect.height === 'number' && Number.isFinite(rect.height) ? rect.height : 0;
+  const y = typeof rect.y === 'number' && Number.isFinite(rect.y) ? rect.y : 0;
+  const area = width * height;
+  return width >= 300 && height >= 300 && area >= 250_000 && y <= 180;
+}
+
+function hasBroadBlockingOverlay(
+  interactiveElements: readonly ReadPageInteractiveElement[],
+): boolean {
+  return interactiveElements.some(isBroadBlockingOverlayElement);
+}
+
+function visibleRegionRowTargetRefs(
+  visibleRegionRows: ReadPageVisibleRegionRows | null | undefined,
+): Set<string> {
+  const refs = new Set<string>();
+  if (!visibleRegionRows?.visibleRegionRowsUsed) return refs;
+  for (const row of visibleRegionRows.rows) {
+    const targetRef = String(row.targetRef || '').trim();
+    if (targetRef) refs.add(targetRef);
+  }
+  return refs;
+}
+
 export function buildCandidateActions(
   interactiveElements: ReadPageInteractiveElement[],
   refMap: any[],
-  options: { visibleRegionRows?: ReadPageVisibleRegionRows | null; frameId?: number } = {},
+  options: {
+    visibleRegionRows?: ReadPageVisibleRegionRows | null;
+    frameId?: number;
+    fileInputBindings?: readonly ReadPageFileInputBinding[] | null;
+  } = {},
 ): CandidateActionSeed[] {
   const selectorMap = buildRefSelectorMap(refMap);
   const clickRoles = new Set(['button', 'link', 'menuitem', 'tab', 'option', 'checkbox', 'switch']);
@@ -233,7 +404,7 @@ export function buildCandidateActions(
     else if (fillRoles.has(role)) actionType = 'fill';
     if (!actionType) continue;
 
-    const selector = selectorMap.get(element.ref);
+    const selector = getElementSelector(element, selectorMap);
 
     const isPrimary = primaryKeywords.test(name);
     const confidence = isPrimary ? 0.93 : actionType === 'fill' ? 0.68 : 0.72;
@@ -246,19 +417,41 @@ export function buildCandidateActions(
       interactiveElements: prioritizedElements,
     });
     const locatorChain = buildLocatorChain({ element, selector, actionType, intent });
+    const label = shouldExposeCandidateActionLabel({ actionType, intent, name, element })
+      ? name
+      : '';
+    const actionability = normalizeActionability(element.actionability);
+    const actionabilityReason = buildActionabilityReason({ element, actionability, intent });
+    const intentBoundary = buildIntentBoundary(intent);
+    const nextRequiredTool = buildNextRequiredTool(intent);
+    const nextRequiredCheck = buildNextRequiredCheck(intent);
+    const nextFileInputBinding =
+      intent === 'publish.upload_media'
+        ? selectNextFileInputBinding(options.fileInputBindings)
+        : null;
+    const nextRequiredSelector = nextFileInputBinding?.selector?.trim() || undefined;
+    const nextRequiredSelectorSource = nextFileInputBinding?.bindingSource || undefined;
 
     const safeRef = element.ref.replace(/[^a-zA-Z0-9_]/g, '_');
     seeds.push({
       id: `ca_${actionType}_${safeRef}`,
       actionType,
       targetRef: element.ref,
+      ...(label ? { label } : {}),
       ...(typeof options.frameId === 'number' ? { frameId: options.frameId } : {}),
       confidence: Number(confidence.toFixed(2)),
       matchReason,
+      actionability,
+      actionabilityReason,
+      ...(intentBoundary ? { intentBoundary } : {}),
+      ...(nextRequiredTool ? { nextRequiredTool } : {}),
+      ...(nextRequiredSelector ? { nextRequiredSelector } : {}),
+      ...(nextRequiredSelectorSource ? { nextRequiredSelectorSource } : {}),
+      ...(nextRequiredCheck ? { nextRequiredCheck } : {}),
       locatorChain,
       ...(intent ? { intent } : {}),
     });
-    if (seeds.length >= 20) break;
+    if (seeds.length >= MAX_CANDIDATE_ACTIONS) break;
   }
   return bindVisibleRegionRowsToDetailActions(
     seeds,
@@ -280,6 +473,15 @@ function bindVisibleRegionRowsToDetailActions(
     return seeds;
   }
 
+  if (hasBroadBlockingOverlay(interactiveElements)) {
+    const blockedContentTargets = visibleRegionRowTargetRefs(visibleRegionRows);
+    if (blockedContentTargets.size > 0) {
+      return seeds.filter(
+        (seed) => !blockedContentTargets.has(seed.targetRef) || isProtectedIntent(seed.intent),
+      );
+    }
+  }
+
   const elementByRef = new Map<string, ReadPageInteractiveElement>();
   for (const element of interactiveElements) {
     if (element.ref) elementByRef.set(element.ref, element);
@@ -296,7 +498,11 @@ function bindVisibleRegionRowsToDetailActions(
     const targetRef = String(row.targetRef || '').trim();
     if (!targetRef) continue;
     const element = elementByRef.get(targetRef);
-    if (!isClickableContentTarget(element)) continue;
+    if (element) {
+      if (!isClickableContentTarget(element, row)) continue;
+    } else if (!isTrustedVisibleRowTargetRef(row)) {
+      continue;
+    }
 
     const existing = seedByTargetRef.get(targetRef);
     if (existing) {
@@ -310,20 +516,39 @@ function bindVisibleRegionRowsToDetailActions(
       continue;
     }
 
-    if (output.length >= 20) continue;
+    if (output.length >= MAX_CANDIDATE_ACTIONS) {
+      const replaceIndex = [...output]
+        .map((action, index) => ({ action, index }))
+        .reverse()
+        .find(
+          ({ action }) =>
+            action.intent !== 'content.open_detail' && !isProtectedIntent(action.intent),
+        )?.index;
+      if (replaceIndex === undefined) continue;
+      output.splice(replaceIndex, 1);
+    }
     const safeRef = targetRef.replace(/[^a-zA-Z0-9_]/g, '_');
-    const selector = selectorMap.get(targetRef);
+    const selector = getElementSelector(element, selectorMap) || selectorMap.get(targetRef);
     const locatorChain: ReadPageCandidateActionLocator[] = [{ type: 'ref', value: targetRef }];
     if (selector) locatorChain.push({ type: 'css', value: selector });
+    const actionability = element ? normalizeActionability(element.actionability) : 'unknown';
+    const intent: ReadPageCandidateAction['intent'] = 'content.open_detail';
     const action: CandidateActionSeed = {
       id: `ca_click_${safeRef}`,
       actionType: 'click',
       targetRef,
+      ...(element?.name && !mayContainSensitiveAuthText(element.name)
+        ? { label: element.name }
+        : {}),
       ...(typeof frameId === 'number' ? { frameId } : {}),
       confidence: Number(Math.max(row.confidence || 0, 0.78).toFixed(2)),
       matchReason: 'content row target inferred from visible region rows',
+      actionability,
+      actionabilityReason: element
+        ? buildActionabilityReason({ element, actionability, intent })
+        : 'source_element_actionability=unknown; source=visible_region_rows; business_success_not_proven_by_candidate_action',
       locatorChain,
-      intent: 'content.open_detail',
+      intent,
     };
     output.push(action);
     seedByTargetRef.set(targetRef, action);
@@ -331,14 +556,43 @@ function bindVisibleRegionRowsToDetailActions(
   return output;
 }
 
-function isClickableContentTarget(element: ReadPageInteractiveElement | undefined): boolean {
+function isTrustedVisibleRowTargetRef(row: ReadPageVisibleRegionRows['rows'][number]): boolean {
+  const targetRef = String(row.targetRef || '').trim();
+  if (!targetRef.startsWith('ref_fallback_')) return false;
+  if (Number(row.targetRefCoverageRate || 0) < 0.95) return false;
+  return Boolean(row.qualityReasons?.includes('target_ref_available'));
+}
+
+function isClickableContentTarget(
+  element: ReadPageInteractiveElement | undefined,
+  row: ReadPageVisibleRegionRows['rows'][number],
+): boolean {
   if (!element?.ref) return false;
   if (!isExecutableCandidateElement(element)) return false;
   const role = String(element.role || '').toLowerCase();
-  if (!new Set(['link', 'button', 'menuitem']).has(role)) return false;
+  const textLikeFallbackTarget =
+    String(element.ref || '').startsWith('ref_fallback_') &&
+    new Set(['generic', 'text', '']).has(role) &&
+    row.qualityReasons?.includes('target_ref_available') &&
+    Number(row.targetRefCoverageRate || 0) >= 0.95;
+  if (!new Set(['link', 'button', 'menuitem']).has(role) && !textLikeFallbackTarget) return false;
   const source = String(element.matchSource || '').toLowerCase();
   if (source === 'placeholder') return false;
   return true;
+}
+
+function shouldExposeCandidateActionLabel(params: {
+  actionType: 'click' | 'fill';
+  intent: ReadPageCandidateAction['intent'] | undefined;
+  name: string;
+  element: ReadPageInteractiveElement;
+}): boolean {
+  if (!params.name) return false;
+  if (params.actionType === 'fill') return false;
+  const source = String(params.element.matchSource || '').toLowerCase();
+  if (source === 'placeholder') return false;
+  if (typeof params.intent === 'string' && params.intent.startsWith('auth.')) return false;
+  return !mayContainSensitiveAuthText(params.name);
 }
 
 function isExecutableCandidateElement(element: ReadPageInteractiveElement): boolean {

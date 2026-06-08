@@ -125,6 +125,10 @@ const PAGE_OBJECT_FAMILY_ADAPTERS: readonly PageObjectFamilyAdapter[] = [
 ];
 const MAX_REGION_OBJECTS = 5;
 const MAX_NAVIGATION_REGION_OBJECTS = 12;
+const FORM_WORKFLOW_CONTROL_PATTERN =
+  /\b(upload|submit|publish|save|create|generate|attach|choose file|select file)\b|上传|提交|发布|保存|生成|选择文件|添加(?:图片|文件)|配图/i;
+const WEAK_GLOBAL_WORKFLOW_CONTROL_PATTERN = /^(publish|发布)$/i;
+const SEARCH_CONTROL_PATTERN = /\b(search|filter|query)\b|搜索|筛选|查询/i;
 
 function buildInteractiveMap(elements: readonly ReadPageInteractiveElement[]) {
   const map = new Map<string, ReadPageInteractiveElement>();
@@ -258,6 +262,7 @@ export function redactSensitiveCandidateActionsForAi(
       element?.role,
       element?.name,
       element?.href,
+      action.label,
       action.matchReason,
       ...action.locatorChain.map((item) => item.value),
     ]
@@ -268,8 +273,12 @@ export function redactSensitiveCandidateActionsForAi(
     const safeLocatorChain = action.locatorChain.filter(
       (item) => item.type === 'ref' || item.type === 'css',
     );
+    const safeLabel = isLogoutOperationText(sensitiveText)
+      ? 'logout action candidate'
+      : safeAiOperationLabel(sensitiveKind);
     const redactedAction: ReadPageCandidateAction = {
       ...action,
+      label: safeLabel,
       matchReason: isLogoutOperationText(sensitiveText)
         ? 'redacted_logout_action_signal'
         : `redacted_${sensitiveKind}_action_signal`,
@@ -745,6 +754,11 @@ function pickPrimaryExecutableAction(
         ...(typeof action.frameId === 'number' ? { frameId: action.frameId } : {}),
         confidence: action.confidence,
         matchReason: action.matchReason,
+        ...(action.actionability ? { actionability: action.actionability } : {}),
+        ...(action.actionabilityReason ? { actionabilityReason: action.actionabilityReason } : {}),
+        ...(action.intentBoundary ? { intentBoundary: action.intentBoundary } : {}),
+        ...(action.nextRequiredTool ? { nextRequiredTool: action.nextRequiredTool } : {}),
+        ...(action.nextRequiredCheck ? { nextRequiredCheck: action.nextRequiredCheck } : {}),
         locatorChain: action.locatorChain,
         ...(action.intent ? { intent: action.intent } : {}),
       },
@@ -826,10 +840,14 @@ function buildWatchScope(
   params: TaskProtocolParams,
   taskMode: ReadPageTaskMode,
 ): DynamicWatchScope {
+  const hasFormWorkflowControl = hasFormLikeWorkflowControl(params);
+  const hasSearchControl = hasSearchLikeControl(params);
   const watchIntent =
-    taskMode === 'read'
-      ? [params.primaryRegion, params.pageRole].filter(Boolean).join(' ')
-      : taskMode;
+    hasFormWorkflowControl && !hasSearchControl
+      ? [params.pageRole, params.primaryRegion, 'form'].filter(Boolean).join(' ')
+      : taskMode === 'read'
+        ? [params.primaryRegion, params.pageRole].filter(Boolean).join(' ')
+        : taskMode;
   const nowMs = Date.now();
 
   return deriveDynamicWatchScope({
@@ -850,6 +868,33 @@ function buildWatchScope(
     },
     nowMs,
   });
+}
+
+function hasFormLikeWorkflowControl(params: TaskProtocolParams): boolean {
+  return collectWatchControlLabels(params).some(
+    (label) =>
+      FORM_WORKFLOW_CONTROL_PATTERN.test(label) &&
+      !WEAK_GLOBAL_WORKFLOW_CONTROL_PATTERN.test(label.trim()),
+  );
+}
+
+function hasSearchLikeControl(params: TaskProtocolParams): boolean {
+  return collectWatchControlLabels(params).some((label) => SEARCH_CONTROL_PATTERN.test(label));
+}
+
+function collectWatchControlLabels(params: TaskProtocolParams): string[] {
+  const interactiveByRef = buildInteractiveMap(params.interactiveElements);
+  const labels: string[] = [];
+  for (const element of params.interactiveElements) {
+    if (element?.name) labels.push(String(element.name));
+  }
+  for (const action of params.candidateActions) {
+    const target = interactiveByRef.get(action.targetRef);
+    const ariaLabel = action.locatorChain.find((item) => item.type === 'aria')?.value;
+    const label = target?.name || ariaLabel || action.matchReason || action.id;
+    if (label) labels.push(String(label));
+  }
+  return labels;
 }
 
 export function buildTaskProtocol(params: TaskProtocolParams): TaskProtocolResult {
