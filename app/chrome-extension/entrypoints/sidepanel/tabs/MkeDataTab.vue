@@ -80,6 +80,9 @@
                 <p v-if="row.metaLine" class="mke-record__meta-line" :title="row.metaLine">
                   {{ row.metaLine }}
                 </p>
+                <p v-if="row.feedbackLine" class="mke-record__feedback" :title="row.feedbackLine">
+                  {{ row.feedbackLine }}
+                </p>
               </div>
               <span class="mke-status" :class="`mke-status--${row.statusTone}`">
                 {{ row.status }}
@@ -154,6 +157,7 @@ interface ViewRecord {
   title: string;
   metaLine: string;
   subtitle: string;
+  feedbackLine: string;
   status: string;
   statusTone: StatusTone;
   facts: RecordFact[];
@@ -344,21 +348,22 @@ async function writeClipboard(value: string): Promise<void> {
 }
 
 function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
-  const status = formatToolStatus(trace.toolSuccess);
+  const status = formatBusinessStatus(trace.businessSuccess);
   const title = formatTraceTitle(trace);
   const subtitle = formatTraceSummary(trace);
+  const feedbackLine = formatAiFeedbackSummary(trace);
   const row: Omit<ViewRecord, 'searchText'> = {
     id: trace.traceId,
     kicker: '记忆轨迹',
     title,
     metaLine: '',
     subtitle,
+    feedbackLine,
     status,
-    statusTone:
-      trace.toolSuccess === false ? 'warn' : trace.toolSuccess === true ? 'good' : 'neutral',
+    statusTone: formatBusinessStatusTone(trace.businessSuccess, trace.toolSuccess),
     facts: compactFacts([
-      ['工具', trace.toolName],
-      ['业务', formatBusinessStatus(trace.businessSuccess)],
+      ['方法', trace.toolName],
+      ['工具结果', formatToolStatus(trace.toolSuccess)],
       ['耗时', formatDuration(trace.durationMs)],
       ['时间', formatDate(trace.createdAt)],
       ['页面', formatTraceContext(trace)],
@@ -369,6 +374,9 @@ function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
       trace.taskId,
       trace.toolCallId,
       formatBusinessStatus(trace.businessSuccess),
+      trace.aiFeedback?.summary,
+      trace.aiFeedback?.reasonCode,
+      trace.aiFeedback?.businessStatus,
     ].filter(isPresentString),
   };
   return withSearchText(row);
@@ -381,6 +389,7 @@ function knowledgeToRecord(model: MkeKnowledgeModelSummary): ViewRecord {
     title: `${model.pageRole} · ${model.siteFamily}`,
     metaLine: `${model.pageModelKey} · ${formatDate(model.updatedAt)}`,
     subtitle: model.pageUrlPattern || model.pageModelKey,
+    feedbackLine: '',
     status: `置信 ${formatScore(model.confidenceScore)}`,
     statusTone:
       model.confidenceScore >= 0.7 ? 'good' : model.confidenceScore > 0 ? 'neutral' : 'warn',
@@ -402,6 +411,7 @@ function experienceToRecord(recipe: MkeExperienceRecipeSummary): ViewRecord {
     title: recipe.recipeName,
     metaLine: `${recipe.scenarioKey} · ${formatDate(recipe.updatedAt)}`,
     subtitle: `${recipe.scenarioKey} · ${recipe.taskSignature}`,
+    feedbackLine: '',
     status: recipe.redactionState === 'template_only' ? '模板 / Template' : recipe.redactionState,
     statusTone: recipe.redactionState === 'template_only' ? 'good' : 'warn',
     facts: compactFacts([
@@ -533,9 +543,22 @@ function formatDate(value: string | null | undefined): string {
 }
 
 function formatBusinessStatus(value: string | null | undefined): string {
+  if (value === 'achieved') return '业务通过';
+  if (value === 'partial') return '部分完成';
+  if (value === 'not_achieved') return '未完成';
   if (value === 'true') return '通过';
   if (value === 'false') return '失败';
-  return '待验证';
+  return '待AI反馈';
+}
+
+function formatBusinessStatusTone(
+  businessValue: string | null | undefined,
+  toolSuccess: boolean | null | undefined,
+): StatusTone {
+  if (businessValue === 'achieved' || businessValue === 'true') return 'good';
+  if (businessValue === 'not_achieved' || businessValue === 'false') return 'warn';
+  if (toolSuccess === false) return 'warn';
+  return 'neutral';
 }
 
 function formatToolStatus(value: boolean | null | undefined): string {
@@ -546,6 +569,19 @@ function formatToolStatus(value: boolean | null | undefined): string {
 
 function formatDuration(value: number | null | undefined): string | null {
   return value === null || value === undefined ? null : `${value} ms`;
+}
+
+function formatAiFeedbackSummary(trace: MkeMemoryTraceSummary): string {
+  const feedback = trace.aiFeedback;
+  if (!feedback?.summary && !feedback?.reasonCode && trace.aiFeedbackScore == null) return '';
+  const parts = [
+    feedback?.summary ? `AI反馈：${compactText(feedback.summary, 96)}` : '',
+    feedback?.reasonCode ? `原因 ${feedback.reasonCode}` : '',
+    typeof trace.aiFeedbackScore === 'number'
+      ? `置信 ${Math.round(trace.aiFeedbackScore * 100)}%`
+      : '',
+  ].filter(isPresentString);
+  return parts.join(' · ');
 }
 
 function formatTraceContext(trace: MkeMemoryTraceSummary): string | null {
@@ -976,6 +1012,17 @@ const LOCAL_CONTENT_CONTEXT = '本地文件';
   overflow-wrap: anywhere;
 }
 
+.mke-record__feedback {
+  border-left: 2px solid var(--mke-accent);
+  color: var(--mke-soft);
+  font-size: 12px;
+  line-height: 1.4;
+  margin-top: 5px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding-left: 8px;
+}
+
 .mke-status {
   align-self: flex-start;
   border: 1px solid transparent;
@@ -1057,7 +1104,7 @@ const LOCAL_CONTENT_CONTEXT = '本地文件';
 }
 
 .mke-facts strong {
-  max-width: 150px;
+  max-width: min(420px, 100%);
   min-width: 0;
   overflow-wrap: anywhere;
   white-space: normal;

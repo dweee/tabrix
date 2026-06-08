@@ -31,6 +31,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type {
   MkeExperienceRecipeSummary,
   MkeKnowledgeModelSummary,
+  MkeMemoryAiFeedbackSummary,
   MkeMemoryTraceSummary,
 } from '@tabrix/shared';
 import { HTTP_STATUS } from '../constant';
@@ -59,6 +60,37 @@ function parsePositiveInt(raw: unknown, fallback: number, max: number): number {
   return Math.min(max, Math.max(0, Math.floor(n)));
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readString(record: Record<string, unknown>, field: string): string | null {
+  const value = record[field];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readNumber(record: Record<string, unknown>, field: string): number | null {
+  const value = record[field];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function toAiFeedbackSummary(value: unknown): MkeMemoryAiFeedbackSummary | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const summary = {
+    businessStatus: readString(record, 'businessStatus'),
+    confidence: readNumber(record, 'confidence'),
+    reasonCode: readString(record, 'reasonCode'),
+    summary: readString(record, 'summary'),
+    receivedAt: readString(record, 'receivedAt'),
+    sourceToolName: readString(record, 'sourceToolName'),
+    sourceToolCallId: readString(record, 'sourceToolCallId'),
+  };
+  return Object.values(summary).some((item) => item !== null) ? summary : null;
+}
+
 function toTraceSummary(trace: MemoryTrace): MkeMemoryTraceSummary {
   return {
     traceId: trace.traceId,
@@ -73,6 +105,8 @@ function toTraceSummary(trace: MemoryTrace): MkeMemoryTraceSummary {
     durationMs: trace.durationMs,
     toolSuccess: trace.toolSuccess,
     businessSuccess: trace.businessSuccess,
+    aiFeedbackScore: trace.aiFeedbackScore,
+    aiFeedback: toAiFeedbackSummary(trace.aiFeedback),
     resultSummary: trace.resultSummary,
     errorCode: trace.errorCode,
     tabId: trace.tabId,

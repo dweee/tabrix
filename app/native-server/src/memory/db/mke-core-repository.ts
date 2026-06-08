@@ -125,6 +125,13 @@ export interface MemoryTrace {
   createdAt: string;
 }
 
+export interface MemoryTraceAiFeedbackUpdate {
+  traceId: string;
+  businessSuccess: BusinessSuccessVerdict;
+  aiFeedbackScore?: number | null;
+  aiFeedback?: unknown;
+}
+
 interface MemoryTraceRow {
   trace_id: string;
   task_id: string;
@@ -223,6 +230,7 @@ function rowToMemoryTrace(row: MemoryTraceRow): MemoryTrace {
 
 export class MemoryTraceRepository {
   private readonly insertStmt;
+  private readonly updateAiFeedbackStmt;
   private readonly getStmt;
   private readonly listRecentStmt;
   private readonly listByTaskStmt;
@@ -255,6 +263,13 @@ export class MemoryTraceRepository {
          @source_route, @selected_data_source, @freshness, @fallback_used,
          @next_required_check, @token_prompt, @token_completion, @token_total,
          @ai_feedback_score, @ai_feedback_blob, @redaction_state, @created_at)`,
+    );
+    this.updateAiFeedbackStmt = db.prepare(
+      `UPDATE tabrix_memory_traces
+       SET business_success = @business_success,
+           ai_feedback_score = @ai_feedback_score,
+           ai_feedback_blob = @ai_feedback_blob
+       WHERE trace_id = @trace_id`,
     );
     this.getStmt = db.prepare('SELECT * FROM tabrix_memory_traces WHERE trace_id = ?');
     this.listRecentStmt = db.prepare(
@@ -335,6 +350,16 @@ export class MemoryTraceRepository {
     };
     this.insertStmt.run(row);
     return rowToMemoryTrace(row);
+  }
+
+  public updateAiFeedback(input: MemoryTraceAiFeedbackUpdate): MemoryTrace | undefined {
+    this.updateAiFeedbackStmt.run({
+      trace_id: input.traceId,
+      business_success: input.businessSuccess,
+      ai_feedback_score: optionalNumber(input.aiFeedbackScore),
+      ai_feedback_blob: blob(input.aiFeedback),
+    });
+    return this.get(input.traceId);
   }
 
   public get(traceId: string): MemoryTrace | undefined {

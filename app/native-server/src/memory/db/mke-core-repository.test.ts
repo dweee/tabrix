@@ -123,6 +123,51 @@ describe('MKE core repositories', () => {
     }
   });
 
+  it('updates Memory trace AI business feedback by traceId', () => {
+    const { traceRepo, close } = bootstrap();
+    try {
+      traceRepo.append({
+        traceId: 'trace-feedback-1',
+        taskId: 'task-feedback-1',
+        taskIntent: 'open creator page',
+        aiClient: 'jest',
+        toolName: 'chrome_navigate',
+        toolCallId: 'call-feedback-1',
+        sequenceIndex: 1,
+        requestParams: { url: 'https://example.test/creator' },
+        requestAt: NOW,
+        response: { success: true },
+        responseAt: '2026-06-06T10:00:01.000Z',
+        toolSuccess: true,
+        businessSuccess: 'unknown',
+        createdAt: NOW,
+      });
+
+      const updated = traceRepo.updateAiFeedback({
+        traceId: 'trace-feedback-1',
+        businessSuccess: 'achieved',
+        aiFeedbackScore: 0.85,
+        aiFeedback: {
+          reasonCode: 'target_page_opened',
+          summary: '目标页面已打开',
+        },
+      });
+
+      expect(updated).toMatchObject({
+        traceId: 'trace-feedback-1',
+        businessSuccess: 'achieved',
+        aiFeedbackScore: 0.85,
+        aiFeedback: {
+          reasonCode: 'target_page_opened',
+          summary: '目标页面已打开',
+        },
+      });
+      expect(traceRepo.get('missing-trace')).toBeUndefined();
+    } finally {
+      close();
+    }
+  });
+
   it('upserts Knowledge page models and records validation outcomes', () => {
     const { knowledgeRepo, close } = bootstrap();
     try {

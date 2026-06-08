@@ -59,7 +59,7 @@ async function seedMkeRows(): Promise<void> {
   const requestAt = Date.parse('2026-06-06T10:00:00.000Z');
   const taskId = 'mke-route-task-1';
 
-  traceService.recordToolCall({
+  const readTrace = traceService.recordToolCall({
     taskId,
     taskIntent: 'inspect page and click action',
     aiClient: 'jest',
@@ -78,6 +78,17 @@ async function seedMkeRows(): Promise<void> {
       tabId: 7,
     }),
     resultSummary: 'fresh page read',
+  });
+
+  traceService.recordAiBusinessFeedback({
+    traceId: readTrace.traceId,
+    businessStatus: 'achieved',
+    confidence: 0.82,
+    reasonCode: 'page_inventory_read',
+    summary: 'AI judged the page inventory read as useful for the next action',
+    sourceToolName: 'chrome_click_element',
+    sourceToolCallId: 'feedback-call-1',
+    receivedAt: '2026-06-06T10:00:00.080Z',
   });
 
   traceService.recordToolCall({
@@ -262,6 +273,21 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.traces[0]).not.toHaveProperty('requestParams');
     expect(res.body.data.traces[0]).not.toHaveProperty('response');
     expect(res.body.data.traces[0]).not.toHaveProperty('postObservation');
+    expect(res.body.data.traces[1]).toMatchObject({
+      toolName: 'chrome_read_page',
+      businessSuccess: 'achieved',
+      aiFeedbackScore: 0.82,
+      aiFeedback: {
+        businessStatus: 'achieved',
+        confidence: 0.82,
+        reasonCode: 'page_inventory_read',
+        summary: 'AI judged the page inventory read as useful for the next action',
+        sourceToolName: 'chrome_click_element',
+        sourceToolCallId: 'feedback-call-1',
+      },
+    });
+    expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('rawInput');
+    expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('response');
   });
 
   test('GET /memory/mke/knowledge returns sanitized knowledge summaries', async () => {

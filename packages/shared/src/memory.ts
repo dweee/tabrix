@@ -111,9 +111,20 @@ export interface MemoryTaskResponseData {
  * Sanitized projection of `tabrix_memory_traces`.
  *
  * This intentionally omits raw request/response blobs, perception objects,
- * post-observation payloads, and AI feedback bodies. The popup management UI
- * only needs query/status metadata; raw evidence stays inside the native DB.
+ * post-observation payloads, and raw AI feedback bodies. The popup management
+ * UI only receives whitelisted feedback summary fields; raw evidence stays
+ * inside the native DB.
  */
+export interface MkeMemoryAiFeedbackSummary {
+  businessStatus?: string | null;
+  confidence?: number | null;
+  reasonCode?: string | null;
+  summary?: string | null;
+  receivedAt?: string | null;
+  sourceToolName?: string | null;
+  sourceToolCallId?: string | null;
+}
+
 export interface MkeMemoryTraceSummary {
   traceId: string;
   taskId: string;
@@ -127,6 +138,8 @@ export interface MkeMemoryTraceSummary {
   durationMs?: number | null;
   toolSuccess?: boolean | null;
   businessSuccess?: string | null;
+  aiFeedbackScore?: number | null;
+  aiFeedback?: MkeMemoryAiFeedbackSummary | null;
   resultSummary?: string | null;
   errorCode?: string | null;
   tabId?: number | null;

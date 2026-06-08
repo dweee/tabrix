@@ -62,6 +62,17 @@ export interface RecordMkeToolCallTraceInput {
   browserContextKey?: string | null;
 }
 
+export interface RecordMkeAiBusinessFeedbackInput {
+  traceId: string;
+  businessStatus: BusinessSuccessVerdict;
+  confidence?: number | null;
+  reasonCode?: string | null;
+  summary?: string | null;
+  receivedAt?: string;
+  sourceToolName?: string | null;
+  sourceToolCallId?: string | null;
+}
+
 interface ParsedResultDigest {
   response: unknown;
   businessSuccess: BusinessSuccessVerdict;
@@ -244,6 +255,11 @@ function readRequestNumber(request: Record<string, unknown> | null, key: string)
   return readNumber(request?.[key]);
 }
 
+function normalizeConfidence(value: number | null | undefined): number | null {
+  if (!Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(1, value as number));
+}
+
 export class MkeMemoryTraceService {
   constructor(private readonly repo: MemoryTraceRepository) {}
 
@@ -284,6 +300,34 @@ export class MkeMemoryTraceService {
       redactionState: 'redacted',
       createdAt: new Date(responseAtMs).toISOString(),
     });
+  }
+
+  public recordAiBusinessFeedback(
+    input: RecordMkeAiBusinessFeedbackInput,
+  ): MemoryTrace | undefined {
+    const feedback = sanitizeValue(
+      {
+        businessStatus: input.businessStatus,
+        confidence: normalizeConfidence(input.confidence),
+        reasonCode: input.reasonCode ?? null,
+        summary: input.summary ?? null,
+        receivedAt: input.receivedAt ?? new Date().toISOString(),
+        sourceToolName: input.sourceToolName ?? null,
+        sourceToolCallId: input.sourceToolCallId ?? null,
+      },
+      'tabrix_ai_business_feedback',
+    );
+
+    return this.repo.updateAiFeedback({
+      traceId: input.traceId,
+      businessSuccess: input.businessStatus,
+      aiFeedbackScore: normalizeConfidence(input.confidence),
+      aiFeedback: feedback,
+    });
+  }
+
+  public get(traceId: string): MemoryTrace | undefined {
+    return this.repo.get(traceId);
   }
 
   public listByTask(taskId: string): MemoryTrace[] {

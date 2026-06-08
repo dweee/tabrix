@@ -24,6 +24,7 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('搜索主题、工具、页面、状态');
     expect(source).toContain('mke-refresh-button');
     expect(source).toContain('mke-record__meta-line');
+    expect(source).toContain('mke-record__feedback');
     expect(source).not.toContain('{{ filteredRows.length }}');
     expect(source).not.toContain('{{ activeTotal }} 条');
     expect(source).toContain('<summary>详情</summary>');
@@ -60,6 +61,8 @@ describe('MkeDataTab render smoke', () => {
     expect(source).not.toContain("['Call ID / 调用', trace.toolCallId]");
     expect(source).toContain('formatBusinessStatus(trace.businessSuccess)');
     expect(source).toContain('formatToolStatus(trace.toolSuccess)');
+    expect(source).toContain('formatAiFeedbackSummary(trace)');
+    expect(source).toContain("['工具结果', formatToolStatus(trace.toolSuccess)]");
     expect(source).toContain('function isPresentString');
     expect(source).not.toContain("['Tool / 工具', trace.toolName]");
     expect(source).not.toContain('return `Tab ${trace.tabId}`');
@@ -76,5 +79,6 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('.mke-json pre');
     expect(source).toContain('width: 100%;');
     expect(source).toContain('top: 7px;');
+    expect(source).toContain('max-width: min(420px, 100%);');
   });
 });

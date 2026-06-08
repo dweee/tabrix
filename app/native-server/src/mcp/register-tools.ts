@@ -9,6 +9,8 @@ import {
   NativeMessageType,
   TOOL_NAMES,
   TOOL_SCHEMAS,
+  buildActionEvidenceResult,
+  buildPostActionDeltaEvidence,
   buildReadPageBrowserPageObjectView,
   getRequiredCapability,
 } from '@tabrix/shared';
@@ -146,11 +148,67 @@ import type {
   SourceTruthOrigin,
 } from '@tabrix/shared';
 import { buildBrowserTaskStateVerdict } from '@tabrix/shared';
+import type { MemoryTrace } from '../memory/db';
 
 const DEFAULT_AUTO_TASK_CONTEXT_KEY = 'mcp:auto:tab:default';
 const TOOL_FAILURE_ARTIFACT_SCENARIO_ID = 'mcp:chrome_read_page:page_unreadable';
 const TOOL_CLOSEOUT_ARTIFACT_SCENARIO_ID = 'mcp:chrome_close_tabs:cleanup_success';
 const STRUCTURED_READ_GATE_ARTIFACT_SCENARIO_ID = 'mcp:chrome_read_page:structured_read_gate';
+const TABRIX_TOOL_METADATA_KEY = '_tabrix';
+const AI_BUSINESS_STATUS_VALUES = new Set(['achieved', 'partial', 'not_achieved', 'unknown']);
+
+interface TabrixPreviousFeedback {
+  traceId: string;
+  businessStatus: 'achieved' | 'partial' | 'not_achieved' | 'unknown';
+  confidence: number | null;
+  reasonCode: string | null;
+  summary: string | null;
+}
+
+interface TabrixToolMetadata {
+  intentTitle: string | null;
+  intentSummary: string | null;
+  nextIntent: string | null;
+  previousFeedback: TabrixPreviousFeedback[];
+}
+
+const TABRIX_TOOL_METADATA_SCHEMA = {
+  type: 'object',
+  description:
+    'Optional Tabrix runtime metadata for intent titles and previous Memory trace business feedback.',
+  properties: {
+    intentTitle: {
+      type: 'string',
+      description: 'Short user-facing task title for this tool call.',
+    },
+    intentSummary: {
+      type: 'string',
+      description: 'Brief task purpose summary.',
+    },
+    nextIntent: {
+      type: 'string',
+      description: 'Optional next planned task intent.',
+    },
+    previousFeedback: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          traceId: { type: 'string' },
+          businessStatus: {
+            type: 'string',
+            enum: ['achieved', 'partial', 'not_achieved', 'unknown'],
+          },
+          confidence: { type: 'number', minimum: 0, maximum: 1 },
+          reasonCode: { type: 'string' },
+          summary: { type: 'string' },
+        },
+        required: ['traceId', 'businessStatus'],
+      },
+    },
+  },
+  additionalProperties: true,
+};
 
 type TaskContextKeySource = 'external_task_key' | 'internal_task_id';
 
@@ -350,13 +408,125 @@ async function invokeExtensionCommand(
   );
 }
 
+function withTabrixMetadataSchema(tool: any): any {
+  const inputSchema = tool?.inputSchema;
+  if (!inputSchema || typeof inputSchema !== 'object' || Array.isArray(inputSchema)) return tool;
+  const properties =
+    inputSchema.properties && typeof inputSchema.properties === 'object'
+      ? inputSchema.properties
+      : {};
+  return {
+    ...tool,
+    inputSchema: {
+      ...inputSchema,
+      properties: {
+        ...properties,
+        [TABRIX_TOOL_METADATA_KEY]: TABRIX_TOOL_METADATA_SCHEMA,
+      },
+    },
+  };
+}
+
+function readOptionalString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readOptionalConfidence(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(1, value));
+}
+
+function readPreviousFeedback(value: unknown): TabrixPreviousFeedback[] {
+  if (!Array.isArray(value)) return [];
+  const feedback: TabrixPreviousFeedback[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const object = item as Record<string, unknown>;
+    const traceId = readOptionalString(object.traceId);
+    const status = readOptionalString(object.businessStatus);
+    if (!traceId || !status || !AI_BUSINESS_STATUS_VALUES.has(status)) continue;
+    feedback.push({
+      traceId,
+      businessStatus: status as TabrixPreviousFeedback['businessStatus'],
+      confidence: readOptionalConfidence(object.confidence),
+      reasonCode: readOptionalString(object.reasonCode),
+      summary: readOptionalString(object.summary),
+    });
+  }
+  return feedback;
+}
+
+function readTabrixToolMetadata(args: unknown): TabrixToolMetadata {
+  const object = readObject(args);
+  const metadata = readObject(object?.[TABRIX_TOOL_METADATA_KEY]);
+  return {
+    intentTitle: readOptionalString(metadata?.intentTitle),
+    intentSummary: readOptionalString(metadata?.intentSummary),
+    nextIntent: readOptionalString(metadata?.nextIntent),
+    previousFeedback: readPreviousFeedback(metadata?.previousFeedback),
+  };
+}
+
+function stripTabrixToolMetadata(args: unknown): unknown {
+  const object = readObject(args);
+  if (!object || !(TABRIX_TOOL_METADATA_KEY in object)) return args;
+  const { [TABRIX_TOOL_METADATA_KEY]: _tabrix, ...stripped } = object;
+  void _tabrix;
+  return stripped;
+}
+
+function attachTabrixMemoryTraceEnvelope(
+  result: CallToolResult,
+  trace: MemoryTrace | null,
+  metadata: TabrixToolMetadata,
+  toolName: string,
+): CallToolResult {
+  if (!trace) return result;
+  const first = result.content?.[0];
+  if (!first || first.type !== 'text' || typeof first.text !== 'string') return result;
+
+  let payload: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(first.text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return result;
+    payload = parsed as Record<string, unknown>;
+  } catch {
+    return result;
+  }
+
+  const existingTabrix = readObject(payload[TABRIX_TOOL_METADATA_KEY]) ?? {};
+  const nextPayload = {
+    ...payload,
+    [TABRIX_TOOL_METADATA_KEY]: {
+      ...existingTabrix,
+      traceId: trace.traceId,
+      intentTitle: metadata.intentTitle ?? trace.taskIntent ?? null,
+      intentSummary: metadata.intentSummary,
+      nextIntent: metadata.nextIntent,
+      toolName,
+      toolSuccess: trace.toolSuccess,
+      businessStatus: trace.businessSuccess ?? 'unknown',
+      businessFeedbackRequired: true,
+    },
+  };
+
+  return {
+    ...result,
+    content: [{ ...first, text: JSON.stringify(nextPayload) }, ...(result.content?.slice(1) ?? [])],
+  };
+}
+
 export const setupTools = (server: McpServer) => {
   // List tools handler
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const dynamicTools = await listDynamicFlowTools(invokeExtensionCommand);
     const byEnv = filterToolsByEnvironment([...TOOL_SCHEMAS, ...dynamicTools]);
     const byPolicy = filterToolsByPolicy(byEnv);
-    return { tools: filterToolsByCapability(byPolicy, getCurrentCapabilityEnv()) };
+    return {
+      tools: filterToolsByCapability(byPolicy, getCurrentCapabilityEnv()).map(
+        withTabrixMetadataSchema,
+      ),
+    };
   });
 
   // Call tool handler
@@ -367,10 +537,16 @@ export const setupTools = (server: McpServer) => {
 
 export const handleToolCall = async (name: string, args: any): Promise<CallToolResult> => {
   const toolCallStartedAtMs = Date.now();
+  const tabrixMetadata = readTabrixToolMetadata(args);
+  const toolArgs = stripTabrixToolMetadata(args);
+  args = toolArgs;
+  const taskIntent = tabrixMetadata.intentTitle ?? `Run MCP tool ${name}`;
   const task = sessionManager.createTask({
     taskType: name.startsWith('flow.') ? 'flow-call' : 'tool-call',
-    title: `Execute ${name}`,
-    intent: `Run MCP tool ${name}`,
+    title: tabrixMetadata.intentTitle
+      ? `Execute ${name}: ${tabrixMetadata.intentTitle}`
+      : `Execute ${name}`,
+    intent: taskIntent,
     origin: 'mcp',
     labels: ['mcp', name.startsWith('flow.') ? 'flow' : 'tool'],
   });
@@ -385,6 +561,29 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     stepType: name.startsWith('flow.') ? 'flow_call' : 'tool_call',
     inputSummary: JSON.stringify(args ?? {}),
   });
+  const applyPreviousBusinessFeedback = (): void => {
+    if (tabrixMetadata.previousFeedback.length === 0) return;
+    const traceWriter = sessionManager.memoryTraces;
+    if (!traceWriter) return;
+    for (const feedback of tabrixMetadata.previousFeedback) {
+      try {
+        traceWriter.recordAiBusinessFeedback({
+          traceId: feedback.traceId,
+          businessStatus: feedback.businessStatus,
+          confidence: feedback.confidence,
+          reasonCode: feedback.reasonCode,
+          summary: feedback.summary,
+          receivedAt: new Date(toolCallStartedAtMs).toISOString(),
+          sourceToolName: name,
+          sourceToolCallId: step.stepId,
+        });
+      } catch (feedbackError) {
+        const message =
+          feedbackError instanceof Error ? feedbackError.message : String(feedbackError);
+        console.warn(`[tabrix/mke-memory-trace] ai feedback update failed: ${message}`);
+      }
+    }
+  };
   const recordMkeMemoryTrace = (
     result: CallToolResult,
     input?: {
@@ -393,13 +592,13 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       errorCode?: string | null;
       browserContextKey?: string | null;
     },
-  ): void => {
+  ): MemoryTrace | null => {
     const traceWriter = sessionManager.memoryTraces;
-    if (!traceWriter) return;
+    if (!traceWriter) return null;
     try {
       traceWriter.recordToolCall({
         taskId: task.taskId,
-        taskIntent: task.intent,
+        taskIntent,
         aiClient: session.clientName,
         toolName: name,
         stepId: step.stepId,
@@ -412,13 +611,28 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         errorCode: input?.errorCode ?? null,
         browserContextKey: input?.browserContextKey ?? null,
       });
+      return traceWriter.listByTask(task.taskId).at(-1) ?? null;
     } catch (traceError) {
       const message = traceError instanceof Error ? traceError.message : String(traceError);
       console.warn(`[tabrix/mke-memory-trace] write failed: ${message}`);
     }
+    return null;
+  };
+  const recordAndAttachMkeMemoryTrace = (
+    result: CallToolResult,
+    input?: {
+      requestParams?: unknown;
+      resultSummary?: string | null;
+      errorCode?: string | null;
+      browserContextKey?: string | null;
+    },
+  ): CallToolResult => {
+    const trace = recordMkeMemoryTrace(result, input);
+    return attachTabrixMemoryTraceEnvelope(result, trace, tabrixMetadata, name);
   };
 
   try {
+    applyPreviousBusinessFeedback();
     const dynamicTools = await listDynamicFlowTools(invokeExtensionCommand);
     const allowedTools = filterToolsByEnvironment([...TOOL_SCHEMAS, ...dynamicTools]);
 
@@ -1000,13 +1214,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         status: 'failed',
         summary: `${name} blocked by non-interference policy`,
       });
-      recordMkeMemoryTrace(result, {
+      return recordAndAttachMkeMemoryTrace(result, {
         requestParams: outgoingArgs,
         resultSummary: `${name} blocked by non-interference policy`,
         errorCode: 'non_interference_blocked',
         browserContextKey: taskContextAttachment.taskContextKey,
       });
-      return result;
     }
 
     if (taskContext && name === 'chrome_navigate') {
@@ -1082,7 +1295,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           tabId: readPositiveInteger(outgoingArgs, 'tabId'),
         });
       }
-      const postProcessorRawResult = ensureStructuredLegacyActionResult(name, response.data);
+      const postProcessorRawResult = ensureStructuredLegacyActionResult(name, response.data, args);
       if (
         taskContext &&
         shouldRecordPageInteractionAfterResult(name, args, postProcessorRawResult)
@@ -1144,13 +1357,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
             status: 'failed',
             summary: 'chrome_read_page blocked because returned target did not match tabId',
           });
-          recordMkeMemoryTrace(mismatchResult, {
+          return recordAndAttachMkeMemoryTrace(mismatchResult, {
             requestParams: outgoingArgs,
             resultSummary: 'chrome_read_page blocked because returned target did not match tabId',
             errorCode: 'read_page_target_mismatch',
             browserContextKey: taskContextAttachment.taskContextKey,
           });
-          return mismatchResult;
         }
       }
       const recordSuccessfulReadPage = (
@@ -1251,12 +1463,11 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
               status: 'completed',
               summary: 'chrome_read_page fulfilled via visible DOM region rows',
             });
-            recordMkeMemoryTrace(aiFacingDomRowsResult, {
+            return recordAndAttachMkeMemoryTrace(aiFacingDomRowsResult, {
               requestParams: outgoingArgs,
               resultSummary: 'chrome_read_page fulfilled via visible DOM region rows',
               browserContextKey: taskContextAttachment.taskContextKey,
             });
-            return aiFacingDomRowsResult;
           }
 
           const rejectedReason =
@@ -1360,8 +1571,13 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       const resultWithPolicyAudit = isImpactToolName(name)
         ? attachRuntimePolicyAuditToResult(aiFacingResult, nonInterferenceVerdict.audit)
         : aiFacingResult;
-      const normalized = normalizeToolCallResult(name, resultWithPolicyAudit);
-      const toolResultFailed = resultWithPolicyAudit.isError === true;
+      const resultWithPolicyAndActionEvidence = ensureStructuredLegacyActionResult(
+        name,
+        resultWithPolicyAudit,
+        args,
+      );
+      const normalized = normalizeToolCallResult(name, resultWithPolicyAndActionEvidence);
+      const toolResultFailed = resultWithPolicyAndActionEvidence.isError === true;
       sessionManager.completeStep(session.sessionId, step.stepId, {
         status: 'completed',
         resultSummary: normalized.stepSummary,
@@ -1390,13 +1606,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         status: 'completed',
         summary: normalized.executionResult.summary,
       });
-      recordMkeMemoryTrace(resultWithPolicyAudit, {
+      return recordAndAttachMkeMemoryTrace(resultWithPolicyAndActionEvidence, {
         requestParams: outgoingArgs,
         resultSummary: normalized.stepSummary,
         errorCode: toolResultFailed ? 'tool_result_error' : null,
         browserContextKey: taskContextAttachment.taskContextKey,
       });
-      return resultWithPolicyAudit;
     } else {
       const responseError = String(response.error || 'Unknown tool error');
       const isBridgeError =
@@ -1441,7 +1656,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         status: 'failed',
         summary: `Tool ${name} failed`,
       });
-      recordMkeMemoryTrace(result, {
+      return recordAndAttachMkeMemoryTrace(result, {
         requestParams: outgoingArgs,
         resultSummary: `Tool ${name} failed`,
         errorCode: bridgeFailure
@@ -1451,7 +1666,6 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
             : 'tool_call_error',
         browserContextKey: taskContextAttachment.taskContextKey,
       });
-      return result;
     }
   } catch (error: any) {
     const result = createErrorResult(
@@ -1473,11 +1687,10 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       status: 'failed',
       summary: `Tool ${name} threw an exception`,
     });
-    recordMkeMemoryTrace(result, {
+    return recordAndAttachMkeMemoryTrace(result, {
       resultSummary: `Tool ${name} threw an exception`,
       errorCode: 'tool_call_exception',
     });
-    return result;
   }
 };
 
@@ -1619,40 +1832,117 @@ function attachReadPagePayloadMetadata(
 function ensureStructuredLegacyActionResult(
   toolName: string,
   result: CallToolResult,
+  args?: unknown,
 ): CallToolResult {
   if (toolName !== TOOL_NAMES.BROWSER.CLICK) return result;
   const first = result.content?.[0];
   if (!first || first.type !== 'text' || typeof first.text !== 'string') return result;
+  let structuredPayload: Record<string, unknown> | null = null;
   try {
     const parsed = JSON.parse(first.text);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return result;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      structuredPayload = parsed as Record<string, unknown>;
+    }
   } catch {
     // Fall through and wrap the legacy text result.
   }
+  if (structuredPayload) {
+    if (readObject(structuredPayload.actionEvidenceResult)) return result;
+    const resultShape = readString(structuredPayload.resultShape);
+    if (
+      resultShape !== 'legacy_text_error_normalized' &&
+      resultShape !== 'legacy_text_normalized'
+    ) {
+      return result;
+    }
+  }
 
-  const legacyWasError = (result as { isError?: boolean }).isError === true;
-  const payload = {
-    success: false,
-    dispatchSucceeded: !legacyWasError,
-    observedOutcome: legacyWasError ? 'no_observed_change' : 'verification_unavailable',
-    verification: {
-      navigationOccurred: false,
-      urlChanged: false,
-      newTabOpened: false,
-      domChanged: false,
-      stateChanged: false,
-      focusChanged: false,
+  const legacyWasError =
+    readString(structuredPayload?.resultShape) === 'legacy_text_error_normalized' ||
+    (result as { isError?: boolean }).isError === true;
+  const input = readObject(args);
+  const requestedTargetRef =
+    readSafeTargetRef(input?.ref) ??
+    readSafeTargetRef(readObject(input?.candidateAction)?.targetRef);
+  const dispatchTarget =
+    requestedTargetRef !== null
+      ? 'ref'
+      : readString(input?.selector) !== null
+        ? 'selector'
+        : readObject(input?.coordinates)
+          ? 'coordinates'
+          : 'unknown';
+  const actionKind = readString(input?.interaction) === 'hover' ? 'hover' : 'click';
+  const actionEvidenceResult = buildActionEvidenceResult({
+    actionId: legacyWasError
+      ? 'mcp:chrome_click_element:legacy_text_error_normalized'
+      : 'mcp:chrome_click_element:legacy_text_normalized',
+    actionKind,
+    tabId: readPositiveInteger(input, 'tabId'),
+    toolSuccess: !legacyWasError,
+    targetBinding: {
+      requestedTargetRef,
+      resolvedTargetRef: null,
+      dispatchTarget,
+      targetBindingProven: false,
+      claimBoundary:
+        'Legacy text click normalization cannot prove final target binding; use structured click output or fresh readback.',
     },
-    clickDiff: { kind: 'unknown' },
-    navigationOccurred: false,
-    lane: 'tabrix_owned',
-    message: legacyWasError
-      ? 'Legacy text click error was normalized; click dispatch and post-action state are not proven'
-      : 'Legacy text click result was normalized; post-action state is not proven without structured click signals or a follow-up read',
-    clickMethod: 'unknown',
-    resultShape: legacyWasError ? 'legacy_text_error_normalized' : 'legacy_text_normalized',
-    rawTextLength: first.text.length,
-  };
+    dispatch: {
+      dispatched: !legacyWasError,
+      acceptedByBrowser: !legacyWasError,
+      errorCode: legacyWasError ? 'legacy_text_error_normalized' : null,
+    },
+    source: {
+      selectedDataSource: 'unknown',
+      sourceRouteHonestyVerdict: 'not_checked',
+      fallbackUsed: null,
+    },
+    postAction: {
+      postActionReadbackStatus: legacyWasError ? 'not_available' : 'required',
+      postconditionVerdict: 'unknown',
+      freshReadRequired: !legacyWasError,
+      readbackSource: null,
+    },
+    business: {
+      businessSuccessVerdict: 'not_proven',
+      businessSuccessProven: false,
+      negativeEvidence: legacyWasError
+        ? ['legacy_text_error_without_structured_dispatch']
+        : ['legacy_text_result_without_structured_postcondition'],
+      nextRequiredCheck: legacyWasError ? 'fix_target_or_retry_with_fresh_refs' : 'fresh_read_page',
+    },
+    browserHygiene: {
+      required: false,
+      status: 'not_checked',
+      leakedTabsOrWindows: null,
+    },
+  });
+  const payload = structuredPayload
+    ? { ...structuredPayload, actionEvidenceResult }
+    : {
+        success: false,
+        dispatchSucceeded: !legacyWasError,
+        observedOutcome: legacyWasError ? 'no_observed_change' : 'verification_unavailable',
+        verification: {
+          navigationOccurred: false,
+          urlChanged: false,
+          newTabOpened: false,
+          domChanged: false,
+          stateChanged: false,
+          focusChanged: false,
+        },
+        clickDiff: { kind: 'unknown' },
+        navigationOccurred: false,
+        lane: 'tabrix_owned',
+        message: legacyWasError
+          ? 'Legacy text click error was normalized; click dispatch and post-action state are not proven'
+          : 'Legacy text click result was normalized; post-action state is not proven without structured click signals or a follow-up read',
+        clickMethod: 'unknown',
+        resultShape: legacyWasError ? 'legacy_text_error_normalized' : 'legacy_text_normalized',
+        rawTextLength: first.text.length,
+        actionEvidenceResult,
+      };
 
   return {
     ...result,
@@ -2523,6 +2813,7 @@ function attachAiFacingOwnershipRuntime(
     runtimeFields,
   );
   payload.pageProjection = projectionWithSourceTruth;
+  payload.tabId = projectionWithSourceTruth.tabId;
   payload.ownershipRuntime = ownershipRuntime;
   payload.taskContextEnvelope = buildTaskContextEnvelope(attachment);
   const aiContextEnvelope = readObject(payload.aiContextEnvelope);
@@ -2680,6 +2971,18 @@ function attachAiFacingDeltaContext(
     projectionWithSourceTruth,
     runtimeFields,
   );
+  const postActionDeltaEvidence =
+    deltaContext.deltaKind === 'post_action_delta'
+      ? buildPostActionDeltaEvidence({
+          delta: deltaContext,
+          tabId: projectionWithSourceTruth.tabId,
+          actionId: projectionWithSourceTruth.changedByActionId ?? null,
+          sourceTruthChain: projectionWithSourceTruth.sourceTruthChain,
+          recommendedNextAction: regionStatePostconditions
+            ? 'inspect_region_state_postconditions'
+            : 'continue_with_post_action_delta_context',
+        })
+      : null;
   const selectedReason =
     selectedDataSource === readString(payload.aiPreferredDataSource)
       ? (readString(payload.aiPreferredDataSourceReason) ?? 'ai_context_prefers_visible_rows')
@@ -2761,6 +3064,7 @@ function attachAiFacingDeltaContext(
     : null;
 
   payload.pageProjection = projectionWithSourceTruth;
+  payload.tabId = projectionWithSourceTruth.tabId;
   if (objectLifecycle) {
     payload.objectLifecycle = objectLifecycle;
   }
@@ -2783,6 +3087,9 @@ function attachAiFacingDeltaContext(
   });
   payload.taskResumeReadiness = taskResumeReadiness;
   payload.deltaContext = deltaContext;
+  if (postActionDeltaEvidence) {
+    payload.postActionDeltaEvidence = postActionDeltaEvidence;
+  }
   payload.taskContextEnvelope = buildTaskContextEnvelope(attachment);
   payload.aiContextEnvelope = {
     envelopeKind: 'delta_context',
@@ -2797,6 +3104,7 @@ function attachAiFacingDeltaContext(
     ...(authResumeGate ? { authResumeGate } : {}),
     taskResumeReadiness,
     structuredReadGate,
+    ...(postActionDeltaEvidence ? { postActionDeltaEvidence } : {}),
     ...(objectLifecycle ? { objectLifecycle } : {}),
     ...(pageObjectDetailPolicy ? { pageObjectDetailPolicy } : {}),
     ...(browserPageObject && includeFullBrowserPageObjectInAiEnvelope ? { browserPageObject } : {}),
@@ -3617,12 +3925,115 @@ function attachLifecycleTimelineContext(
 
   payload.taskContextEnvelope = buildTaskContextEnvelope(attachment);
   payload.lifecycleTimeline = attachment.taskContext?.getLifecycleTimeline() ?? [];
+  payload.actionEvidenceResult = buildCloseTabsActionEvidenceResult(payload, attachment);
 
   return {
     ...result,
     content: result.content.map((block, index) =>
       index === 0 && block.type === 'text' ? { ...block, text: JSON.stringify(payload) } : block,
     ) as CallToolResult['content'],
+  };
+}
+
+function buildCloseTabsActionEvidenceResult(
+  payload: Record<string, unknown>,
+  attachment: TaskContextAttachment,
+) {
+  const closedTabIds = readNumericArray(payload, 'closedTabIds') ?? [];
+  const invalidTabIds = readNumericArray(payload, 'invalidTabIds') ?? [];
+  const closePreflightEvidence = readObject(payload.closePreflightEvidence);
+  const browserHygieneEvidence = readCloseTabsBrowserHygieneEvidenceFromPayload(payload);
+  const targetTabIds = readNumericArray(closePreflightEvidence, 'requestedTabIds') ?? [
+    ...closedTabIds,
+    ...invalidTabIds,
+  ];
+  const primaryTabId = closedTabIds[0] ?? invalidTabIds[0] ?? targetTabIds[0] ?? null;
+  const hygieneStatus =
+    browserHygieneEvidence?.tabWindowBaselineUnchanged === false ||
+    browserHygieneEvidence?.activeTabRestored === false
+      ? 'fail'
+      : browserHygieneEvidence
+        ? 'pass'
+        : 'not_checked';
+  const toolSuccess = payload.success === true && closedTabIds.length > 0;
+  const negativeEvidence = [
+    ...(toolSuccess ? [] : ['close_tabs_not_confirmed']),
+    ...(hygieneStatus === 'fail' ? ['browser_hygiene_failed'] : []),
+    ...(browserHygieneEvidence ? [] : ['browser_hygiene_evidence_missing']),
+  ];
+
+  return buildActionEvidenceResult({
+    actionId: `close_tabs-${primaryTabId ?? 'none'}-${Date.now()}`,
+    actionKind: 'close_tabs',
+    taskSessionId: attachment.taskContextKey,
+    tabId: primaryTabId,
+    toolSuccess,
+    targetBinding: {
+      requestedTargetRef: null,
+      resolvedTargetRef: null,
+      locatorChainSummary: targetTabIds.map((tabId) => `tabId:${tabId}`),
+      dispatchTarget: targetTabIds.length > 0 ? 'tab_ids' : 'none',
+      frameScope: null,
+      targetBindingProven: targetTabIds.length > 0,
+      claimBoundary:
+        'Close-tabs target binding proves only which tab IDs were requested/closed; it does not prove user task completion.',
+    },
+    dispatch: {
+      dispatched: toolSuccess,
+      acceptedByBrowser: toolSuccess,
+      errorCode: toolSuccess ? null : 'close_tabs_not_confirmed',
+    },
+    source: {
+      selectedDataSource: 'unknown',
+      sourceRouteHonestyVerdict: 'not_checked',
+      fallbackUsed: null,
+    },
+    postAction: {
+      postActionReadbackStatus: browserHygieneEvidence ? 'browser_hygiene_observed' : 'not_proven',
+      postconditionVerdict: toolSuccess && hygieneStatus !== 'fail' ? 'passed' : 'not_proven',
+      freshReadRequired: false,
+      readbackSource: browserHygieneEvidence ? 'browser_hygiene_evidence' : 'none',
+    },
+    business: {
+      businessSuccessVerdict: toolSuccess && hygieneStatus !== 'fail' ? 'proven' : 'not_proven',
+      businessSuccessProven: toolSuccess && hygieneStatus !== 'fail',
+      negativeEvidence,
+      nextRequiredCheck:
+        toolSuccess && hygieneStatus !== 'fail' ? 'none' : 'inspect_close_tabs_hygiene',
+    },
+    browserHygiene: {
+      required: true,
+      status: hygieneStatus,
+      leakedTabsOrWindows:
+        browserHygieneEvidence && browserHygieneEvidence.after.tabCount > 0
+          ? Math.max(
+              0,
+              browserHygieneEvidence.after.tabCount - browserHygieneEvidence.before.tabCount,
+            )
+          : null,
+    },
+    claimBoundary: [
+      'Close-tabs tool success proves cleanup of requested tab IDs only.',
+      'Browser hygiene evidence does not prove the original business task succeeded.',
+      'No API/CDP reuse, release readiness, or competitor parity is proven by this close result.',
+    ],
+  });
+}
+
+function readCloseTabsBrowserHygieneEvidenceFromPayload(
+  payload: Record<string, unknown>,
+): CloseTabsBrowserHygieneEvidence | null {
+  const rawEvidence = readObject(payload.browserHygieneEvidence);
+  if (!rawEvidence) return null;
+  const before = readCloseTabsBrowserSnapshot(rawEvidence.before);
+  const after = readCloseTabsBrowserSnapshot(rawEvidence.after);
+  if (!before || !after) return null;
+  return {
+    before,
+    after,
+    tabWindowBaselineUnchanged: readNullableBoolean(rawEvidence, 'tabWindowBaselineUnchanged'),
+    activeTabRestored: readNullableBoolean(rawEvidence, 'activeTabRestored'),
+    activeTabRestoreReason: readString(rawEvidence.activeTabRestoreReason),
   };
 }
 

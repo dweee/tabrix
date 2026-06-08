@@ -48,6 +48,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('搜索主题、工具、页面、状态');
     expect(tabSource).toContain('mke-refresh-button');
     expect(tabSource).toContain('mke-record__meta-line');
+    expect(tabSource).toContain('mke-record__feedback');
     expect(tabSource).not.toContain('{{ row.kicker }}');
     expect(tabSource).not.toContain('{{ filteredRows.length }}');
     expect(tabSource).not.toContain('{{ activeTotal }} 条');
@@ -73,30 +74,37 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain(
       "return '当前标签不是可点击的普通网页 / Current tab is not a clickable web page'",
     );
+    expect(tabSource).toContain("if (value === 'achieved') return '业务通过'");
+    expect(tabSource).toContain("if (value === 'partial') return '部分完成'");
+    expect(tabSource).toContain("if (value === 'not_achieved') return '未完成'");
     expect(tabSource).toContain("if (value === 'true') return '通过'");
     expect(tabSource).toContain("if (value === 'false') return '失败'");
-    expect(tabSource).toContain("return '待验证'");
+    expect(tabSource).toContain("return '待AI反馈'");
   });
 
-  it('makes tool status primary and labels AI business feedback separately', () => {
+  it('makes business feedback primary and keeps tool execution as supporting facts', () => {
     expect(tabSource).toContain('<h3 :title="row.title">{{ row.title }}</h3>');
     expect(tabSource).toContain('v-if="row.metaLine"');
+    expect(tabSource).toContain('v-if="row.feedbackLine"');
     expect(tabSource).toContain('<span class="mke-status"');
-    expect(tabSource).toContain('const status = formatToolStatus(trace.toolSuccess)');
+    expect(tabSource).toContain('const status = formatBusinessStatus(trace.businessSuccess)');
+    expect(tabSource).toContain('const feedbackLine = formatAiFeedbackSummary(trace)');
     expect(tabSource).toContain("metaLine: ''");
     expect(tabSource).not.toContain(
       'metaLine: [`方法 ${trace.toolName}`, toolLabel, formatDate(trace.createdAt)]',
     );
-    expect(tabSource).toContain("['工具', trace.toolName]");
-    expect(tabSource).toContain("['业务', formatBusinessStatus(trace.businessSuccess)]");
+    expect(tabSource).toContain("['方法', trace.toolName]");
+    expect(tabSource).toContain("['工具结果', formatToolStatus(trace.toolSuccess)]");
     expect(tabSource).toContain("['耗时', formatDuration(trace.durationMs)]");
     expect(tabSource).toContain("['时间', formatDate(trace.createdAt)]");
     expect(tabSource).toContain("['页面', formatTraceContext(trace)]");
-    expect(tabSource).not.toContain("['Tool result / 工具结果'");
+    expect(tabSource).not.toContain("['业务', formatBusinessStatus(trace.businessSuccess)]");
     expect(tabSource).not.toContain('formatBoolean(trace.toolSuccess)');
     expect(tabSource).not.toContain("['AI反馈', formatBusinessStatus(trace.businessSuccess)]");
     expect(tabSource).not.toContain("['上下文', formatTraceContext(trace)]");
     expect(tabSource).toContain('function formatToolStatus');
+    expect(tabSource).toContain('function formatBusinessStatusTone');
+    expect(tabSource).toContain('function formatAiFeedbackSummary');
     expect(tabSource).toContain('function formatTraceContext');
   });
 
@@ -141,6 +149,8 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain("['Task ID / 任务', trace.taskId]");
     expect(tabSource).not.toContain("['Call ID / 调用', trace.toolCallId]");
     expect(tabSource).toContain('formatBusinessStatus(trace.businessSuccess)');
+    expect(tabSource).toContain('trace.aiFeedback?.summary');
+    expect(tabSource).toContain('trace.aiFeedback?.reasonCode');
     expect(tabSource).toContain('function isPresentString');
     expect(tabSource).not.toContain("['Tool / 工具', trace.toolName]");
     expect(tabSource).toContain('detailJson: formatJsonDetail(trace)');
@@ -183,6 +193,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('@media (max-width: 520px)');
     expect(tabSource).toContain('overflow-wrap: anywhere');
     expect(tabSource).toContain('max-width: 100%');
+    expect(tabSource).toContain('max-width: min(420px, 100%);');
     expect(tabSource).toContain('grid-template-columns: minmax(180px, 1fr) auto;');
     expect(tabSource).toContain('.mke-tab-button--active');
   });

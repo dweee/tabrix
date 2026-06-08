@@ -43,6 +43,7 @@ export {
   type KnowledgeModel,
   type KnowledgeModelInput,
   type MemoryTrace,
+  type MemoryTraceAiFeedbackUpdate,
   type MemoryTraceInsert,
 } from './mke-core-repository';
 export {
