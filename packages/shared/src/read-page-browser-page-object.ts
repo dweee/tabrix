@@ -12,6 +12,7 @@ import type {
   ReadPageObjectLifecycleSummary,
   ReadPageOperationMap,
   ReadPageOwnershipRuntimeSummary,
+  ReadPagePublishFormReadiness,
   ReadPageRegion,
   ReadPageRegionType,
   ReadPageSelectedDataSource,
@@ -37,6 +38,7 @@ export interface BuildReadPageBrowserPageObjectViewInput {
   previousOwnershipRuntime?: ReadPageOwnershipRuntimeSummary | null;
   ownershipRuntime?: ReadPageOwnershipRuntimeSummary | null;
   selectedDataSource?: ReadPageSelectedDataSource | null;
+  publishFormReadiness?: ReadPagePublishFormReadiness | null;
   sourceRouteHonestyVerdict?: string | null;
 }
 
@@ -53,7 +55,7 @@ export function buildReadPageBrowserPageObjectView(
     identity: buildIdentityGroup(input.pageProjection),
     window_state: buildWindowStateGroup(input.ownershipRuntime),
     tab_state: buildTabStateGroup(input.pageProjection, input.ownershipRuntime),
-    page_state: buildPageStateGroup(input.pageProjection),
+    page_state: buildPageStateGroup(input.pageProjection, input.selectedDataSource),
     visual_reliability: buildVisualReliabilityGroup(input.ownershipRuntime),
     runtime_state: buildRuntimeStateGroup(input),
     layout_regions: buildLayoutRegionsGroup(pageRegions),
@@ -61,7 +63,12 @@ export function buildReadPageBrowserPageObjectView(
     auth_state: buildFamilyGroup('auth_state', lifecycle, ['auth_surface', 'account_identity']),
     qr_state: buildQrStateGroup(lifecycle),
     content_state: buildContentStateGroup(lifecycle),
-    action_state: buildActionStateGroup(input.pageOperationMap, input.pageProjection, pageRegions),
+    action_state: buildActionStateGroup(
+      input.pageOperationMap,
+      input.pageProjection,
+      pageRegions,
+      input.publishFormReadiness,
+    ),
     evidence_state: buildEvidenceStateGroup(input),
     task_relation: buildTaskRelationGroup(lifecycle, semanticEvents),
   };
@@ -98,22 +105,64 @@ export function buildReadPageBrowserPageObjectCompactView(
   view: ReadPageBrowserPageObjectView,
 ): ReadPageBrowserPageObjectCompactView {
   const watch = view.dynamicAttributeSummary;
+  const actionReadinessSummary = buildCompactActionReadinessSummary(view);
+  const primaryConclusion =
+    watch?.primaryConclusion ??
+    view.attributeGroups.task_relation?.summary ??
+    'No BrowserPageObject conclusion is available.';
+  const conclusionWithActionReadiness = prependActionReadinessToConclusion(
+    primaryConclusion,
+    actionReadinessSummary,
+  );
+  const operationSummary = view.attributeGroups.action_state?.summary
+    ? prependActionReadinessToConclusion(
+        view.attributeGroups.action_state.summary,
+        actionReadinessSummary,
+      )
+    : undefined;
   return {
     source: 'read_page_browser_page_object_compact',
     rootObjectId: view.rootObjectId,
     status: view.status,
     watchStatus: watch?.status ?? 'stable_or_unknown',
-    primaryConclusion:
-      watch?.primaryConclusion ??
-      view.attributeGroups.task_relation?.summary ??
-      'No BrowserPageObject conclusion is available.',
+    primaryConclusion: appendPublishReadinessToConclusion(
+      conclusionWithActionReadiness,
+      readStringFact(view.attributeGroups.action_state?.facts, 'publishFormReadinessSummary'),
+    ),
     changedGroups: watch?.changedGroups ?? [],
     transitionCount: watch?.transitionCount ?? 0,
     facts: buildCompactRuntimeTruthFacts(view),
-    operationSummary: view.attributeGroups.action_state?.summary,
+    operationSummary,
     evidenceSummary: view.attributeGroups.evidence_state?.summary,
     claimBoundary: DYNAMIC_ATTRIBUTE_BOUNDARY,
   };
+}
+
+function buildCompactActionReadinessSummary(view: ReadPageBrowserPageObjectView): string | null {
+  const tabFacts = view.attributeGroups.tab_state?.facts;
+  const actionReadiness = readStringFact(tabFacts, 'actionReadiness');
+  const requiredBeforeAction = readStringFact(tabFacts, 'requiredBeforeAction');
+  const canProceed = readBooleanFact(tabFacts, 'canProceedToPageLevelCheck');
+  if (!actionReadiness || canProceed !== false) return null;
+  return `Action readiness: ${actionReadiness}; requiredBeforeAction=${requiredBeforeAction ?? 'refresh_browser_object_snapshot'}.`;
+}
+
+function prependActionReadinessToConclusion(
+  conclusion: string,
+  actionReadinessSummary: string | null,
+): string {
+  if (!conclusion || !actionReadinessSummary || conclusion.includes('Action readiness:')) {
+    return conclusion;
+  }
+  return `${actionReadinessSummary} ${conclusion}`;
+}
+
+function appendPublishReadinessToConclusion(
+  conclusion: string,
+  readinessSummary: string | null,
+): string {
+  if (!readinessSummary || conclusion.includes('Publish readiness:')) return conclusion;
+  return `${conclusion} ${readinessSummary}`;
 }
 
 const COMPACT_WINDOW_RUNTIME_TRUTH_FACT_KEYS = [
@@ -547,10 +596,10 @@ function summarizeContentCollectionChange(
   const changed = changes.filter((change) => change.changeKind === 'changed').length;
 
   if (appeared > 0 && disappeared === 0 && changed === 0) {
-    return 'Content/panel reveal candidate: a visible content area appeared after the action; postcondition verification is still required.';
+    return 'Content/panel reveal candidate: a visible content area appeared between snapshots; postcondition verification is still required.';
   }
   if (disappeared > 0 && appeared === 0 && changed === 0) {
-    return 'Content/panel hide candidate: a visible content area disappeared after the action; postcondition verification is still required.';
+    return 'Content/panel hide candidate: a visible content area disappeared between snapshots; postcondition verification is still required.';
   }
   if (appeared > 0 || disappeared > 0) {
     const parts = [
@@ -558,12 +607,12 @@ function summarizeContentCollectionChange(
       disappeared > 0 ? 'disappeared' : null,
       changed > 0 ? 'changed' : null,
     ].filter((part): part is string => Boolean(part));
-    return `Content/panel visibility changed candidate: visible content areas ${parts.join('/')} after the action; postcondition verification is still required.`;
+    return `Content/panel visibility changed candidate: visible content areas ${parts.join('/')} between snapshots; postcondition verification is still required.`;
   }
   if (changed > 0) {
-    return 'Content area changed candidate: visible content area state changed after the action; postcondition verification is still required.';
+    return 'Content area changed candidate: visible content area state changed between snapshots; postcondition verification is still required.';
   }
-  return 'Content area changed candidate: content lifecycle changed after the action; postcondition verification is still required.';
+  return 'Content area changed candidate: content lifecycle changed between snapshots; postcondition verification is still required.';
 }
 
 function buildIdentityGroup(
@@ -882,7 +931,7 @@ function buildReadTargetActionReadiness(input: {
   const targetText = target.operationTargetRole;
   const targetOperabilityText = formatTriState(target.operationTargetCanTabrixOperate);
 
-  if (!input.ownershipRuntime || input.ownershipRuntime.isCurrentWindowFocused !== true) {
+  if (!input.ownershipRuntime) {
     return {
       actionReadiness: 'blocked_no_focused_window',
       canProceedToPageLevelCheck: false,
@@ -900,6 +949,31 @@ function buildReadTargetActionReadiness(input: {
       requiredBeforeAction: 'restore_window_then_refresh_browser_snapshot',
       actionReadinessSummary:
         'Read-page action readiness: the read target window is minimized; restore the window and refresh browser object state before acting.',
+      actionReadinessClaimBoundary: boundary,
+    };
+  }
+
+  const browserWorldRoutingReady =
+    input.ownershipRuntime.browserWorldRoutingDecisionSummary?.includes(
+      'routing=ready_for_page_level_check',
+    ) === true &&
+    input.ownershipRuntime.browserWorldRoutingDecisionSummary?.includes('blockingReason=none') ===
+      true;
+
+  if (
+    input.ownershipRuntime.isCurrentWindowFocused !== true &&
+    !(
+      browserWorldRoutingReady &&
+      target.shouldReselectBeforeAction !== true &&
+      target.operationTargetCanTabrixOperate === true
+    )
+  ) {
+    return {
+      actionReadiness: 'blocked_no_focused_window',
+      canProceedToPageLevelCheck: false,
+      requiredBeforeAction: 'restore_or_focus_browser_window',
+      actionReadinessSummary:
+        'Read-page action readiness: no focused browser window is proven for the read target; restore or focus a window before acting.',
       actionReadinessClaimBoundary: boundary,
     };
   }
@@ -935,10 +1009,12 @@ function buildReadTargetActionReadiness(input: {
 
 function buildPageStateGroup(
   projection: BrowserPageThingProjection | null | undefined,
+  selectedDataSource: ReadPageSelectedDataSource | null | undefined,
 ): ReadPageBrowserPageObjectGroupState {
   const readiness = projection?.readiness ?? 'unknown';
   const stability = projection?.stability ?? 'unknown';
   const freshness = projection?.sourceFreshness ?? 'unknown';
+  const pageSelectedDataSource = selectedDataSource ?? projection?.chosenDataSource ?? null;
   return groupState({
     status: readiness,
     summary: `Page state: readiness=${readiness}; stability=${stability}; sourceFreshness=${freshness}; contextVersion=${projection?.contextVersion ?? 'unknown'}.`,
@@ -953,7 +1029,7 @@ function buildPageStateGroup(
       contextVersion: projection?.contextVersion ?? null,
       contextChars: projection?.contextChars ?? null,
       contextSavedChars: projection?.contextSavedChars ?? null,
-      selectedDataSource: projection?.chosenDataSource ?? null,
+      selectedDataSource: pageSelectedDataSource,
       sourceConfidence: projection?.sourceConfidence ?? null,
       userActivityLevel: projection?.userActivityLevel ?? null,
       interferenceRisk: projection?.interferenceRisk ?? null,
@@ -1257,6 +1333,7 @@ function buildActionStateGroup(
   operationMap: ReadPageOperationMap | null | undefined,
   pageProjection: BrowserPageThingProjection | null | undefined,
   pageRegions: readonly ReadPageRegion[] = [],
+  publishFormReadiness: ReadPagePublishFormReadiness | null | undefined,
 ): ReadPageBrowserPageObjectGroupState {
   const zones = operationMap?.zones ?? [];
   const readyZones = zones.filter((zone) => zone.readiness === 'ready');
@@ -1283,14 +1360,17 @@ function buildActionStateGroup(
     linkedActionId || linkedChangeCause
       ? formatActionLinkSummary(linkedActionId, linkedChangeCause, linkedTargetSummary)
       : '';
-  const summary = `${operationSummary}${actionLinkSummary}`;
+  const publishReadinessSummary = formatPublishFormReadinessSummary(publishFormReadiness);
+  const summary = `${operationSummary}${publishReadinessSummary ? ` ${publishReadinessSummary}` : ''}${actionLinkSummary}`;
   return groupState({
     status:
       linkedActionId || linkedChangeCause
         ? 'action_linkage_candidate'
-        : zones.length > 0
-          ? 'operation_zones_available'
-          : 'unknown',
+        : publishFormReadiness
+          ? 'publish_readiness_candidate'
+          : zones.length > 0
+            ? 'operation_zones_available'
+            : 'unknown',
     summary,
     facts: {
       lastActionId: linkedActionId,
@@ -1300,14 +1380,43 @@ function buildActionStateGroup(
       readyZoneCount: readyZones.length,
       needsExpandZoneCount: needsExpandZones.length,
       blockedZoneCount: blockedZones.length,
+      publishFormReadinessStatus: publishFormReadiness?.status ?? null,
+      publishFormBusinessSuccessProven: publishFormReadiness?.businessSuccessProven ?? null,
+      publishFormBlockingReasons: publishFormReadiness?.blockingReasons ?? [],
+      publishFormNextRequiredTool: publishFormReadiness?.nextRequiredTool ?? null,
+      publishFormNextRequiredSelector: publishFormReadiness?.nextRequiredSelector ?? null,
+      publishFormNextRequiredCheck: publishFormReadiness?.nextRequiredCheck ?? null,
+      publishFormReadinessSummary: publishReadinessSummary,
     },
-    confidence: zones.length > 0 ? 0.7 : 0.25,
+    confidence: publishFormReadiness ? 0.72 : zones.length > 0 ? 0.7 : 0.25,
     evidenceRefs: [
       ...zones.map((zone) => zone.zoneId),
+      ...(publishFormReadiness ? ['publishFormReadiness'] : []),
       ...(linkedActionId || linkedChangeCause ? ['pageProjection.changedByActionId'] : []),
       ...linkedTargetRefs,
     ],
   });
+}
+
+function formatPublishFormReadinessSummary(
+  readiness: ReadPagePublishFormReadiness | null | undefined,
+): string | null {
+  if (!readiness) return null;
+  const blockers = readiness.blockingReasons.slice(0, 5);
+  const blockerText =
+    blockers.length > 0 ? ` blockers=${blockers.join(',')};` : ' blockers=none_observed;';
+  const nextTool = readiness.nextRequiredTool ? ` nextTool=${readiness.nextRequiredTool};` : '';
+  const nextSelector = readiness.nextRequiredSelector
+    ? ` nextSelector=${readiness.nextRequiredSelector};`
+    : '';
+  return (
+    `Publish readiness: ${readiness.status};` +
+    blockerText +
+    ` businessSuccessProven=${readiness.businessSuccessProven};` +
+    nextTool +
+    nextSelector +
+    ` nextCheck=${readiness.nextRequiredCheck}.`
+  );
 }
 
 function normalizeActionId(value: string | null | undefined): string | null {
@@ -1771,7 +1880,7 @@ function buildPageTransitionPrimaryConclusion(
     return 'Only viewport or target-reference state changed; no result/content transition is proven.';
   }
   if (isSameDocumentUiContentTransition(transitions)) {
-    return 'Same-document content area changed candidate: visible page content or DOM state changed after the action; postcondition verification is still required.';
+    return 'Same-document content area changed candidate: visible page content or DOM state changed between fresh reads; postcondition verification is still required.';
   }
   return `Page state changed: ${transitions[0]?.summary ?? 'state changed'}.`;
 }

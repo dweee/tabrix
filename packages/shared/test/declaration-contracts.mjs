@@ -28,6 +28,13 @@ const expectedDeclarationFragments = [
   'interface BrowserDataSourceDecisionEvidence',
   'interface BuildBrowserPageThingProjectionInput',
   'function buildBrowserPageThingProjectionFromReadPage',
+  'type ActionEvidenceResultActionKind',
+  'interface ActionEvidenceResult',
+  'interface BuildActionEvidenceResultInput',
+  'function buildActionEvidenceResult',
+  'interface PostActionDeltaEvidence',
+  'interface BuildPostActionDeltaEvidenceInput',
+  'function buildPostActionDeltaEvidence',
   'pageProjection?:',
 ];
 

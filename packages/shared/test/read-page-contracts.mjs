@@ -141,6 +141,7 @@ assert.deepEqual(READ_PAGE_OPERATION_PURPOSES, [
   'account',
   'auth',
   'scan_qr',
+  'prepare_publish',
   'submit_form',
   'observe_feedback',
   'unknown',
