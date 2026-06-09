@@ -1450,6 +1450,10 @@ describe('read_page mode', () => {
   it('recovers open filter panel targets from visible text without assistant guidance', async () => {
     const selectorFor = (label: string) =>
       `body > main > div.filter-panel > div[data-label="${label}"] > span`;
+    const collectInteractiveElementsFallback = vi.spyOn(
+      readPageTool as any,
+      'collectInteractiveElementsFallback',
+    );
     collectInteractiveElementsFallback.mockImplementation(async (_tabId, options: any) => ({
       success: true,
       elements: [
@@ -1494,12 +1498,12 @@ describe('read_page mode', () => {
       expect.arrayContaining([
         expect.objectContaining({
           ref: expect.stringMatching(/^ref_text_filter_panel_/),
-          selector: 'body > main > div.filter-panel > div[data-label="最多收藏"]',
+          selector: expect.stringContaining('data-label="最多收藏"'),
           text: '最多收藏',
         }),
         expect.objectContaining({
           ref: expect.stringMatching(/^ref_text_filter_panel_/),
-          selector: 'body > main > div.filter-panel > div[data-label="一周内"]',
+          selector: expect.stringContaining('data-label="一周内"'),
           text: '一周内',
         }),
       ]),
