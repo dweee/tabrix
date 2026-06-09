@@ -244,4 +244,197 @@ describe('accessibility-tree auth control map', () => {
       claimBoundary: expect.stringContaining('does not prove every iframe was fully covered'),
     });
   });
+
+  it('recovers generic dynamic surface text targets as actionable refs', () => {
+    document.body.innerHTML = `
+      <main>
+        <button id="open-filter">Filter</button>
+        <button id="export">Export</button>
+        <button id="refresh">Refresh</button>
+        <div id="panel" style="position: fixed; z-index: 1200;">
+          <div class="surface-row"><span id="surface-alpha" role="option">Most saved</span></div>
+          <div class="surface-row"><span id="surface-beta" role="option">Past week</span></div>
+        </div>
+      </main>
+    `;
+    Array.from(document.querySelectorAll('*')).forEach((element, index) => {
+      makeVisible(element, { left: 20, top: 20 + index * 34, width: 140, height: 26 });
+    });
+    makeVisible(document.getElementById('panel') as HTMLDivElement, {
+      left: 40,
+      top: 90,
+      width: 260,
+      height: 180,
+    });
+
+    const result = (
+      window as Window & {
+        __generateAccessibilityTree: (
+          filter: string,
+          options: { maxDepth: number },
+        ) => { pageContent: string; refMap: Array<Record<string, unknown>> };
+      }
+    ).__generateAccessibilityTree('interactive', { maxDepth: 8 });
+
+    expect(result.pageContent).toMatch(
+      /- button "Most saved" \[ref=ref_dynamic_surface_\d+\].*matchSource="dynamic_surface_visible_text".*actionability="actionable"/,
+    );
+    expect(result.pageContent).toMatch(
+      /- button "Past week" \[ref=ref_dynamic_surface_\d+\].*matchSource="dynamic_surface_visible_text".*actionability="actionable"/,
+    );
+    expect(result.refMap).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          selector: '#surface-alpha',
+          matchSource: 'dynamic_surface_visible_text',
+          actionability: 'actionable',
+        }),
+        expect.objectContaining({
+          selector: '#surface-beta',
+          matchSource: 'dynamic_surface_visible_text',
+          actionability: 'actionable',
+        }),
+      ]),
+    );
+  });
+
+  it('does not promote static footer links as dynamic surface targets', () => {
+    document.body.innerHTML = `
+      <main>
+        <button id="open-filter">Filter</button>
+      </main>
+      <footer id="legal-footer" role="contentinfo" style="position: fixed; z-index: 1200;">
+        <a id="license">Business license</a>
+        <a id="terms">Terms</a>
+      </footer>
+    `;
+    Array.from(document.querySelectorAll('*')).forEach((element, index) => {
+      makeVisible(element, { left: 20, top: 20 + index * 34, width: 160, height: 26 });
+    });
+    makeVisible(document.getElementById('legal-footer') as HTMLElement, {
+      left: 20,
+      top: 240,
+      width: 300,
+      height: 90,
+    });
+
+    const result = (
+      window as Window & {
+        __generateAccessibilityTree: (
+          filter: string,
+          options: { maxDepth: number },
+        ) => { pageContent: string; refMap: Array<Record<string, unknown>> };
+      }
+    ).__generateAccessibilityTree('interactive', { maxDepth: 8 });
+
+    expect(result.pageContent).not.toContain('dynamic_surface_visible_text');
+    expect(result.refMap).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          selector: '#license',
+          matchSource: 'dynamic_surface_visible_text',
+        }),
+        expect.objectContaining({
+          selector: '#terms',
+          matchSource: 'dynamic_surface_visible_text',
+        }),
+      ]),
+    );
+  });
+
+  it('does not duplicate native links or link text through dynamic surface recovery', () => {
+    document.body.innerHTML = `
+      <main>
+        <button id="open-filter">Filter</button>
+        <div id="side-nav" style="position: fixed; z-index: 1200;">
+          <a id="home-link" href="/home"><span id="home-label">Home</span></a>
+          <a id="license-link" href="/license">Business license</a>
+        </div>
+      </main>
+    `;
+    Array.from(document.querySelectorAll('*')).forEach((element, index) => {
+      makeVisible(element, { left: 20, top: 20 + index * 34, width: 180, height: 26 });
+    });
+    makeVisible(document.getElementById('side-nav') as HTMLElement, {
+      left: 20,
+      top: 80,
+      width: 260,
+      height: 140,
+    });
+
+    const result = (
+      window as Window & {
+        __generateAccessibilityTree: (
+          filter: string,
+          options: { maxDepth: number },
+        ) => { pageContent: string; refMap: Array<Record<string, unknown>> };
+      }
+    ).__generateAccessibilityTree('interactive', { maxDepth: 8 });
+
+    expect(result.pageContent).not.toContain('dynamic_surface_visible_text');
+    expect(result.refMap).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          selector: '#home-label',
+          matchSource: 'dynamic_surface_visible_text',
+        }),
+        expect.objectContaining({
+          selector: '#license-link',
+          matchSource: 'dynamic_surface_visible_text',
+        }),
+      ]),
+    );
+  });
+
+  it('does not promote tooltip or non-interactive fixed text as dynamic surface targets', () => {
+    document.body.innerHTML = `
+      <main>
+        <button id="open-filter">Filter</button>
+        <div id="tooltip" role="tooltip" style="position: fixed; z-index: 1200;">
+          <span id="hint">Selection updates after refresh</span>
+        </div>
+        <div id="notice" style="position: fixed; z-index: 1200;">
+          <span id="notice-copy">Data may take a moment</span>
+        </div>
+      </main>
+    `;
+    Array.from(document.querySelectorAll('*')).forEach((element, index) => {
+      makeVisible(element, { left: 20, top: 20 + index * 34, width: 180, height: 26 });
+    });
+    makeVisible(document.getElementById('tooltip') as HTMLElement, {
+      left: 40,
+      top: 90,
+      width: 260,
+      height: 80,
+    });
+    makeVisible(document.getElementById('notice') as HTMLElement, {
+      left: 40,
+      top: 190,
+      width: 260,
+      height: 80,
+    });
+
+    const result = (
+      window as Window & {
+        __generateAccessibilityTree: (
+          filter: string,
+          options: { maxDepth: number },
+        ) => { pageContent: string; refMap: Array<Record<string, unknown>> };
+      }
+    ).__generateAccessibilityTree('interactive', { maxDepth: 8 });
+
+    expect(result.pageContent).not.toContain('dynamic_surface_visible_text');
+    expect(result.refMap).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          selector: '#hint',
+          matchSource: 'dynamic_surface_visible_text',
+        }),
+        expect.objectContaining({
+          selector: '#notice-copy',
+          matchSource: 'dynamic_surface_visible_text',
+        }),
+      ]),
+    );
+  });
 });

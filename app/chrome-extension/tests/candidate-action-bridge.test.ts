@@ -373,6 +373,45 @@ describe('candidateAction bridge', () => {
     expect(clickMessage.ref).toBeUndefined();
   });
 
+  it('routes recovered dynamic surface targetRef through candidateAction locator css', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4121,
+      title: 'Search',
+      url: 'https://example.com/search?q=neutral',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      dispatchSucceeded: true,
+      signals: { domChanged: true },
+    });
+
+    const result = await clickTool.execute({
+      candidateAction: {
+        targetRef: 'ref_dynamic_surface_3',
+        intent: 'click',
+        locatorChain: [
+          { type: 'ref', value: 'ref_dynamic_surface_3' },
+          { type: 'css', value: '[data-surface-option="week"]' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.targetBinding).toMatchObject({
+      resolutionSource: 'candidate_locator_css',
+      dispatchTarget: 'selector',
+    });
+    const clickMessage = sendSpy.mock.calls.find(
+      ([, message]) => (message as any)?.action === TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+    )?.[1] as any;
+    expect(clickMessage).toMatchObject({
+      selector: '[data-surface-option="week"]',
+    });
+    expect(clickMessage.ref).toBeUndefined();
+  });
+
   it('does not dispatch recovered search toolbar targetRef without a css locator', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4113,

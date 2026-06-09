@@ -190,11 +190,11 @@ function buildStatusView(
   const executionStatus =
     trace.toolSuccess === true ? 'succeeded' : trace.toolSuccess === false ? 'failed' : 'unknown';
   const businessStatusSource =
-    evidenceStatus === 'unknown' && aiFeedbackStatus !== 'unknown'
-      ? 'ai_feedback'
-      : evidenceStatus === 'unknown'
-        ? 'unknown'
-        : 'tabrix_evidence';
+    evidenceStatus !== 'unknown'
+      ? 'tabrix_evidence'
+      : aiFeedbackStatus !== 'unknown'
+        ? 'ai_feedback'
+        : 'unknown';
   return {
     executionStatus,
     businessStatus,

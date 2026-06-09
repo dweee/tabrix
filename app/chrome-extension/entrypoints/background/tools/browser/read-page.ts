@@ -697,6 +697,7 @@ function shouldSampleVisibleText(input: {
   if (shouldRecoverSearchToolbarTargets(input.assistantGuidance)) return true;
   if (!input.userControlled) return true;
   if (input.rows.visibleRegionRowsUsed) return false;
+  if (input.pageRole === 'search_results') return true;
   return input.requestedDepth !== undefined && input.requestedDepth <= 3;
 }
 
@@ -802,10 +803,13 @@ function shouldRecoverFilterPanelTargets(
   assistantGuidance: ReadPageAssistantGuidance | undefined,
   visibleTextContent: unknown,
 ): boolean {
-  if (!shouldRecoverSearchToolbarTargets(assistantGuidance)) return false;
   const text = String(visibleTextContent || '').replace(/\s+/g, ' ');
-  return /排序依据|发布时间|搜索范围|位置距离|综合\s+最新|最多收藏.*一天内|一天内.*未看过/.test(
-    text,
+  const filterPanelLabels = extractFilterPanelLabelsFromVisibleText(text);
+  if (filterPanelLabels.length < 2) return false;
+  if (shouldRecoverSearchToolbarTargets(assistantGuidance)) return true;
+  const toolbarLabels = extractSearchToolbarLabelsFromVisibleText(text);
+  return toolbarLabels.some((label) =>
+    /^(筛选|已筛选|过滤|filter|filters|filtered|排序|sort)$/i.test(label),
   );
 }
 

@@ -12,6 +12,8 @@
   const MAX_NODES = 4000; // hard limit to avoid long blocking on huge DOMs
   const MAX_LINE_LABEL = 100; // max characters for a single label in output
   const REF_MAP_LIMIT = 1000; // limit size of the ref map to keep payload small
+  const DYNAMIC_SURFACE_REF_PREFIX = 'ref_dynamic_surface_';
+  const DYNAMIC_SURFACE_TARGET_LIMIT = 32;
 
   // Keep a weak map from ref id to elements
   if (!window.__claudeElementMap) window.__claudeElementMap = {};
@@ -230,6 +232,212 @@
       return area > viewportArea * 0.35;
     } catch (_) {
       return false;
+    }
+  }
+
+  function isViewportVisibleRect(rect) {
+    return (
+      rect &&
+      rect.top < window.innerHeight &&
+      rect.bottom > 0 &&
+      rect.left < window.innerWidth &&
+      rect.right > 0 &&
+      rect.width > 0 &&
+      rect.height > 0
+    );
+  }
+
+  function isStaticPageLandmark(el) {
+    try {
+      let current = el;
+      while (current && current !== document.body) {
+        const tag = String(current.tagName || '').toLowerCase();
+        const role = String(current.getAttribute?.('role') || '').toLowerCase();
+        if (
+          ['footer', 'header', 'nav'].includes(tag) ||
+          ['contentinfo', 'banner', 'navigation'].includes(role)
+        ) {
+          return true;
+        }
+        current = current.parentElement;
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return false;
+  }
+
+  function isDynamicSurfaceRoot(el) {
+    if (!isVisible(el) || isStaticPageLandmark(el)) return false;
+    const role = String(el.getAttribute('role') || '').toLowerCase();
+    if (['dialog', 'menu', 'listbox'].includes(role)) return true;
+    try {
+      if (el.matches && el.matches(':popover-open, dialog[open], [popover][open]')) return true;
+    } catch (_) {
+      if (
+        (el.tagName.toLowerCase() === 'dialog' && el.hasAttribute('open')) ||
+        (el.hasAttribute('popover') && el.hasAttribute('open'))
+      ) {
+        return true;
+      }
+    }
+    try {
+      const rect = /** @type {HTMLElement} */ (el).getBoundingClientRect();
+      if (!isViewportVisibleRect(rect) || isHugeContainer(el)) return false;
+      const cs = window.getComputedStyle(/** @type {HTMLElement} */ (el));
+      const position = String(cs.position || '').toLowerCase();
+      const zIndex = Number.parseInt(String(cs.zIndex || ''), 10);
+      const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+      const area = Math.max(1, rect.width * rect.height);
+      return (
+        (position === 'absolute' || position === 'fixed') &&
+        Number.isFinite(zIndex) &&
+        zIndex >= 10 &&
+        area <= viewportArea * 0.2
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function hasDynamicSurfaceActionEvidence(el) {
+    const tag = el.tagName.toLowerCase();
+    if (['button', 'summary'].includes(tag)) return true;
+    if (tag === 'a' && el.getAttribute('href')) return true;
+    const role = String(el.getAttribute('role') || '').toLowerCase();
+    if (
+      [
+        'button',
+        'link',
+        'option',
+        'menuitem',
+        'menuitemcheckbox',
+        'menuitemradio',
+        'tab',
+        'checkbox',
+        'radio',
+        'switch',
+      ].includes(role)
+    ) {
+      return true;
+    }
+    const tabindex = String(el.getAttribute('tabindex') || '').trim();
+    if (tabindex && !tabindex.startsWith('-')) return true;
+    if (el.getAttribute('onclick') != null) return true;
+    if (
+      el.hasAttribute('aria-selected') ||
+      el.hasAttribute('aria-checked') ||
+      el.hasAttribute('aria-pressed')
+    ) {
+      return true;
+    }
+    try {
+      const cs = window.getComputedStyle(/** @type {HTMLElement} */ (el));
+      if (String(cs.cursor || '').toLowerCase() === 'pointer') return true;
+      const parent = el.parentElement;
+      if (parent) {
+        const parentCursor = String(
+          window.getComputedStyle(/** @type {HTMLElement} */ (parent)).cursor || '',
+        ).toLowerCase();
+        if (parentCursor === 'pointer') return true;
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return false;
+  }
+
+  function hasNativeInteractiveAncestorBeforeRoot(el, root) {
+    let current = el;
+    while (current && current !== root) {
+      const tag = current.tagName?.toLowerCase?.() || '';
+      if (['a', 'button', 'summary', 'input', 'textarea', 'select'].includes(tag)) return true;
+      current = current.parentElement;
+    }
+    return false;
+  }
+
+  function isDynamicSurfaceLeafTarget(el, root) {
+    if (!isVisible(el) || el === root) return false;
+    const tag = el.tagName.toLowerCase();
+    if (
+      [
+        'script',
+        'style',
+        'meta',
+        'link',
+        'title',
+        'noscript',
+        'a',
+        'button',
+        'summary',
+        'input',
+        'textarea',
+        'select',
+        'svg',
+        'img',
+      ].includes(tag)
+    )
+      return false;
+    if (el.getAttribute('aria-hidden') === 'true') return false;
+    if (hasNativeInteractiveAncestorBeforeRoot(el, root)) return false;
+    if (!hasDynamicSurfaceActionEvidence(el)) return false;
+    const text = ownVisibleText(el);
+    if (!text || text.length > 48) return false;
+    try {
+      const rect = /** @type {HTMLElement} */ (el).getBoundingClientRect();
+      if (!isViewportVisibleRect(rect)) return false;
+      const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+      if (rect.width * rect.height > viewportArea * 0.08) return false;
+      const children = Array.from(el.children || []);
+      if (children.some((child) => isVisible(child) && ownVisibleText(child))) return false;
+    } catch (_) {
+      return false;
+    }
+    return true;
+  }
+
+  function appendDynamicSurfaceTargets(out, refMap, state) {
+    const roots = Array.from(document.querySelectorAll('body *')).filter(isDynamicSurfaceRoot);
+    if (roots.length === 0) return;
+    const seenTextAndSelector = new Set();
+    let added = 0;
+    for (const root of roots) {
+      const candidates = Array.from(root.querySelectorAll('*')).filter((el) =>
+        isDynamicSurfaceLeafTarget(el, root),
+      );
+      for (const el of candidates) {
+        if (added >= DYNAMIC_SURFACE_TARGET_LIMIT || refMap.length >= REF_MAP_LIMIT) return;
+        const selector = generateSelector(el);
+        const text = ownVisibleText(el).replace(/\s+/g, ' ').trim();
+        const key = `${text.toLowerCase()}|${selector}`;
+        if (!text || seenTextAndSelector.has(key)) continue;
+        seenTextAndSelector.add(key);
+        const refId = `${DYNAMIC_SURFACE_REF_PREFIX}${++window.__claudeRefCounter}`;
+        window.__claudeElementMap[refId] = new WeakRef(el);
+        const rect = /** @type {HTMLElement} */ (el).getBoundingClientRect();
+        const cx = Math.round(rect.left + rect.width / 2);
+        const cy = Math.round(rect.top + rect.height / 2);
+        const label = text.substring(0, MAX_LINE_LABEL).replace(/"/g, '\\"');
+        out.push(
+          `- button "${label}" [ref=${refId}] (x=${cx},y=${cy}) matchSource="dynamic_surface_visible_text" actionability="actionable"`,
+        );
+        refMap.push({
+          ref: refId,
+          selector,
+          rect: {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+          },
+          matchSource: 'dynamic_surface_visible_text',
+          actionability: 'actionable',
+        });
+        state.included++;
+        state.processed++;
+        added++;
+      }
     }
   }
 
@@ -907,6 +1115,9 @@
       }
 
       if (root) traverse(root, 0, cfg, out, refMap, state);
+      if (root === document.body && cfg.filter === 'interactive') {
+        appendDynamicSurfaceTargets(out, refMap, state);
+      }
       for (const k in window.__claudeElementMap) {
         if (!window.__claudeElementMap[k].deref || !window.__claudeElementMap[k].deref())
           delete window.__claudeElementMap[k];

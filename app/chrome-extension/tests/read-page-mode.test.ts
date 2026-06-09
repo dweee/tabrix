@@ -687,6 +687,40 @@ describe('read_page mode', () => {
     expect(elements.map((element) => element.ref)).toContain('ref_text_menu_more');
   });
 
+  it('preserves recovered dynamic surface targets when compact actions are already dense', () => {
+    const elements = buildInteractiveElements(
+      Array.from(
+        { length: 24 },
+        (_item, index) => `- button "Toolbar ${index}" [ref=ref_toolbar_${index}] (x=40,y=40)`,
+      ).join('\n'),
+      [
+        {
+          ref: 'ref_dynamic_surface_9',
+          text: 'Past week',
+          role: 'button',
+          selector: '[data-surface-option="week"]',
+          isInteractive: true,
+          matchSource: 'dynamic_surface_visible_text',
+          actionability: 'actionable',
+        },
+      ],
+      8,
+      'compact',
+      'https://example.com/app',
+    );
+
+    expect(elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ref: 'ref_dynamic_surface_9',
+          name: 'Past week',
+          matchSource: 'dynamic_surface_visible_text',
+          actionability: 'actionable',
+        }),
+      ]),
+    );
+  });
+
   it('preserves privacy-safe input value state without exposing raw values', () => {
     const elements = buildInteractiveElements(
       [
@@ -1411,6 +1445,66 @@ describe('read_page mode', () => {
       actionType: 'click',
       frameId: 7,
     });
+  });
+
+  it('recovers open filter panel targets from visible text without assistant guidance', async () => {
+    const selectorFor = (label: string) =>
+      `body > main > div.filter-panel > div[data-label="${label}"] > span`;
+    collectInteractiveElementsFallback.mockImplementation(async (_tabId, options: any) => ({
+      success: true,
+      elements: [
+        {
+          type: 'text_action',
+          role: 'button',
+          selector: selectorFor(options.textQuery),
+          text: options.textQuery,
+          isInteractive: true,
+          actionability: 'actionable',
+          coordinates: {
+            x: 960,
+            y: 320,
+            rect: { x: 930, y: 304, width: 88, height: 32 },
+          },
+        },
+      ],
+    }));
+    const basePayload: any = {
+      visibleTextContent:
+        '全部 图文 视频 用户 筛选 排序依据 综合 最新 最多收藏 发布时间 不限 一周内 清除 确认',
+      elements: [],
+      refMap: [],
+      count: 0,
+    };
+
+    const recovered = await (readPageTool as any).recoverFilterPanelTextTargets({
+      tabId: 5223,
+      basePayload,
+    });
+
+    expect(recovered).toBe(true);
+    expect(collectInteractiveElementsFallback).toHaveBeenCalledWith(
+      5223,
+      expect.objectContaining({ textQuery: '最多收藏', includeCoordinates: true }),
+    );
+    expect(collectInteractiveElementsFallback).toHaveBeenCalledWith(
+      5223,
+      expect.objectContaining({ textQuery: '一周内', includeCoordinates: true }),
+    );
+    expect(basePayload.elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ref: expect.stringMatching(/^ref_text_filter_panel_/),
+          selector: 'body > main > div.filter-panel > div[data-label="最多收藏"]',
+          text: '最多收藏',
+        }),
+        expect.objectContaining({
+          ref: expect.stringMatching(/^ref_text_filter_panel_/),
+          selector: 'body > main > div.filter-panel > div[data-label="一周内"]',
+          text: '一周内',
+        }),
+      ]),
+    );
+    expect(basePayload.fallbackSource).toBe('filter_panel_target_recovery');
   });
 
   it('keeps recovered text menu actions ahead of long content lists', () => {

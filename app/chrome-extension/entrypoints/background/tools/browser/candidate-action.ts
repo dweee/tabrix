@@ -121,11 +121,16 @@ function isSyntheticFilterPanelRef(value: string): boolean {
   return value.startsWith('ref_text_filter_panel_');
 }
 
+function isSyntheticDynamicSurfaceRef(value: string): boolean {
+  return value.startsWith('ref_dynamic_surface_');
+}
+
 function isLocatorBackedSyntheticRef(value: string): boolean {
   return (
     isSyntheticTextMenuRef(value) ||
     isSyntheticSearchToolbarRef(value) ||
-    isSyntheticFilterPanelRef(value)
+    isSyntheticFilterPanelRef(value) ||
+    isSyntheticDynamicSurfaceRef(value)
   );
 }
 
@@ -255,7 +260,8 @@ export function resolveCandidateActionTarget(
 
     if (
       isSyntheticSearchToolbarRef(candidateTargetRef) ||
-      isSyntheticFilterPanelRef(candidateTargetRef)
+      isSyntheticFilterPanelRef(candidateTargetRef) ||
+      isSyntheticDynamicSurfaceRef(candidateTargetRef)
     ) {
       return {
         ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
@@ -299,7 +305,9 @@ export function resolveCandidateActionTarget(
 
   if (
     locatorRef &&
-    (isSyntheticSearchToolbarRef(locatorRef) || isSyntheticFilterPanelRef(locatorRef))
+    (isSyntheticSearchToolbarRef(locatorRef) ||
+      isSyntheticFilterPanelRef(locatorRef) ||
+      isSyntheticDynamicSurfaceRef(locatorRef))
   ) {
     return {
       ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),

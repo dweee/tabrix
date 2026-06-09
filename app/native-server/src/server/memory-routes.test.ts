@@ -313,6 +313,60 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('response');
   });
 
+  test('GET /memory/mke/traces keeps Tabrix business evidence above conflicting AI feedback', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T11:00:00.000Z');
+
+    const trace = traceService.recordToolCall({
+      taskId: 'mke-route-task-conflict',
+      taskIntent: 'apply a filter and verify the results',
+      aiClient: 'jest',
+      toolName: 'chrome_click_element',
+      stepId: 'mke-step-conflict',
+      sequenceIndex: 1,
+      requestParams: { tabId: 9, selector: '[data-filter]' },
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 40,
+      result: textResult({
+        success: true,
+        pageUrl: 'https://example.test/search',
+        businessSuccess: 'not_achieved',
+      }),
+      resultSummary: 'click dispatched but filter state was not verified',
+    });
+
+    traceService.recordAiBusinessFeedback({
+      traceId: trace.traceId,
+      businessStatus: 'achieved',
+      confidence: 0.91,
+      reasonCode: 'ai_overstated_completion',
+      summary: 'AI thought the filter was applied',
+      receivedAt: '2026-06-06T11:00:00.090Z',
+    });
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/traces?limit=10&offset=0')
+      .expect(200);
+
+    expect(res.body.data.traces[0]).toMatchObject({
+      traceId: trace.traceId,
+      businessSuccess: 'not_achieved',
+      aiFeedbackScore: 0.91,
+      statusView: {
+        businessStatus: 'not_achieved',
+        businessStatusSource: 'tabrix_evidence',
+        aiScore: 0.91,
+      },
+      aiFeedback: {
+        businessStatus: 'achieved',
+        confidence: 0.91,
+        reasonCode: 'ai_overstated_completion',
+        summary: 'AI thought the filter was applied',
+      },
+    });
+  });
+
   test('GET /memory/mke/knowledge returns sanitized knowledge summaries', async () => {
     await seedMkeRows();
 
