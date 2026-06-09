@@ -112,6 +112,12 @@ export interface ReadPageInteractiveElement {
    */
   href?: string;
   /**
+   * Optional snapshot-local CSS selector for fallback-discovered elements.
+   * This is additive and advisory: callers should prefer stable refs when
+   * available, and must treat selectors as current-snapshot only.
+   */
+  selector?: string;
+  /**
    * Optional evidence about why a text lookup matched this element. This lets
    * callers distinguish a real action button from an input whose placeholder
    * happens to contain action words such as "get code".
@@ -542,12 +548,22 @@ export type ReadPageCandidateActionIntent =
   | 'search.submit'
   | 'search.category_select'
   | 'content.open_detail'
+  | 'publish.open_entry'
+  | 'publish.select_media_type'
+  | 'publish.upload_media'
+  | 'publish.submit'
   | (string & {});
 
 export interface ReadPageCandidateAction {
   id: string;
   actionType: 'click' | 'fill' | string;
   targetRef: string;
+  /**
+   * Optional AI-facing action label copied from the source interactive element
+   * after redaction. This is planning/evidence text only; execution still uses
+   * targetRef / locatorChain.
+   */
+  label?: string;
   /**
    * Optional Chrome frame id for frame-targeted execution.
    *
@@ -558,12 +574,103 @@ export interface ReadPageCandidateAction {
   frameId?: number;
   confidence: number;
   matchReason: string;
+  /**
+   * Optional source-element actionability copied from the current structured
+   * snapshot. This is browser-action readiness only; it does not prove that a
+   * business workflow such as publishing, login, checkout, or form submission
+   * has enough completed fields to succeed.
+   */
+  actionability?: 'actionable' | 'not_actionable' | 'blocked' | 'unknown' | string;
+  /**
+   * Short AI-facing explanation for the actionability/intent boundary. It is
+   * intentionally generic and must not carry raw private form values.
+   */
+  actionabilityReason?: string;
+  /**
+   * Optional boundary for high-level intent labels, especially where a visible
+   * label may be an entry/navigation affordance rather than final business
+   * success.
+   */
+  intentBoundary?: string;
+  /**
+   * Optional AI-facing follow-up tool hint for actions that are only workflow
+   * entry points. This is planning/evidence text only; it does not grant a new
+   * MCP capability or prove business success.
+   */
+  nextRequiredTool?: string;
+  /**
+   * Optional selector for the next required tool when the current candidate is
+   * only a visible workflow affordance. For example, a visible upload button can
+   * point at the snapshot-local file input selector that chrome_upload_file
+   * should use next. This is a tool-argument hint only; it does not prove that
+   * the follow-up tool is authorized or that the business workflow succeeded.
+   */
+  nextRequiredSelector?: string;
+  /**
+   * Optional provenance for nextRequiredSelector. Consumers must treat it as
+   * snapshot-local evidence and re-read after actions.
+   */
+  nextRequiredSelectorSource?: string;
+  /**
+   * Optional AI-facing verification boundary for the next step after this
+   * action candidate. Must stay privacy-safe and must not include raw form
+   * values or account data.
+   */
+  nextRequiredCheck?: string;
   locatorChain: ReadPageCandidateActionLocator[];
   /**
    * Optional AI-facing action intent. It lets the executor choose the right
    * post-action verification path without adding another public MCP tool.
    */
   intent?: ReadPageCandidateActionIntent;
+}
+
+export interface ReadPageFileInputBinding {
+  selector: string;
+  accept?: string;
+  multiple?: boolean;
+  disabled?: boolean;
+  visible?: boolean;
+  bindingSource: 'dom_input_type_file' | string;
+  nextRequiredTool: 'chrome_upload_file' | string;
+  nextRequiredCheck: string;
+  claimBoundary: string;
+}
+
+export type ReadPagePublishFormRequiredField =
+  | 'media'
+  | 'title'
+  | 'body_or_description'
+  | (string & {});
+
+export type ReadPagePublishFormRequiredFieldStatus =
+  | 'present_candidate'
+  | 'not_proven'
+  | 'not_observed'
+  | 'unknown'
+  | (string & {});
+
+export interface ReadPagePublishFormRequiredFieldEvidence {
+  field: ReadPagePublishFormRequiredField;
+  status: ReadPagePublishFormRequiredFieldStatus;
+  evidenceSource: 'dom' | 'candidate_action' | 'file_input_binding' | string;
+  evidence: string;
+  targetRef?: string;
+  selector?: string;
+  nextRequiredTool?: string;
+  nextRequiredSelector?: string;
+  nextRequiredCheck?: string;
+}
+
+export interface ReadPagePublishFormReadiness {
+  status: 'not_ready_candidate' | 'ready_candidate' | 'unknown' | (string & {});
+  businessSuccessProven: boolean;
+  requiredFields: ReadPagePublishFormRequiredFieldEvidence[];
+  blockingReasons: string[];
+  nextRequiredTool?: string;
+  nextRequiredSelector?: string;
+  nextRequiredCheck: string;
+  claimBoundary: string;
 }
 
 export interface ReadPageExecutableAction {
@@ -749,6 +856,16 @@ export interface ReadPageRegion {
   state: string;
   confidence: number;
   label?: string;
+  /**
+   * Optional AI-facing readiness projection for the region. This is a
+   * condensed view of already-emitted read_page evidence and is not execution
+   * authority, business-success proof, or platform-rule proof.
+   */
+  readiness?: string;
+  readinessBlockingReasons?: string[];
+  nextRequiredTool?: string;
+  nextRequiredSelector?: string;
+  nextRequiredCheck?: string;
   objects: ReadPageRegionObject[];
   candidateActionIds: string[];
   targetability: ReadPageRegionTargetability;
@@ -764,6 +881,7 @@ export const READ_PAGE_OPERATION_PURPOSES = [
   'account',
   'auth',
   'scan_qr',
+  'prepare_publish',
   'submit_form',
   'observe_feedback',
   'unknown',
@@ -789,6 +907,17 @@ export interface ReadPageOperationZone {
   label: string;
   state: string;
   readiness: ReadPageOperationReadiness;
+  /**
+   * Optional region/business readiness details carried from pageRegions.
+   * This is intentionally separate from the operation readiness enum:
+   * a zone can expose a targetable next action while the business form is
+   * still not ready.
+   */
+  regionReadiness?: string;
+  readinessBlockingReasons?: string[];
+  nextRequiredTool?: string;
+  nextRequiredSelector?: string;
+  nextRequiredCheck?: string;
   targetability: ReadPageRegionTargetability;
   candidateActionIds: string[];
   primaryAction?: ReadPageExecutableAction;
@@ -1321,7 +1450,31 @@ export interface ReadPageExtensionFields {
   browserActiveTabId?: number | null;
   browserActiveTabIdKnown?: boolean;
   isReadTargetBrowserActiveTab?: boolean | null;
+  /**
+   * Resolved Chrome tab id for this read target.
+   *
+   * Runtime routing evidence only. This lets AI callers bind DOM/readback
+   * evidence to a concrete browser tab without inferring from screenshots,
+   * active-tab state, or nested diagnostics. It is not business-success proof.
+   */
+  tabId?: number | null;
   candidateActions?: ReadPageCandidateAction[];
+  /**
+   * Additive read-only evidence for file-upload inputs present in the current
+   * DOM snapshot. This is a selector-binding candidate for `chrome_upload_file`,
+   * not proof that upload is authorized, attempted, completed, or accepted by
+   * the website.
+   */
+  fileInputBindings?: ReadPageFileInputBinding[];
+  /**
+   * Additive read-only publish-form readiness evidence.
+   *
+   * This summarizes current DOM/candidate-action/file-input evidence into the
+   * required-field boundary an AI executor needs before attempting publish-like
+   * business actions. It is not upload proof, not platform-rule compliance
+   * proof, and not final publish success proof.
+   */
+  publishFormReadiness?: ReadPagePublishFormReadiness;
   pageContext?: ReadPagePageContext;
   frameContext?: ReadPageFrameContext | null;
   historyRef?: string | null;

@@ -16,11 +16,28 @@ import {
   SessionRepository,
   StepRepository,
   TaskRepository,
+  MemoryTraceRepository,
+  KnowledgeModelRepository,
+  ExperienceRecipeRepository,
+  type ExperienceRecipe,
+  type KnowledgeModel,
+  type MemoryTrace,
   type SessionSummary,
   type SqliteDatabase,
 } from '../memory/db';
 import { PageSnapshotService } from '../memory/page-snapshot-service';
 import { ActionService } from '../memory/action-service';
+import { MkeMemoryTraceService } from '../memory/mke-memory-trace-service';
+import {
+  MkeKnowledgeProjector,
+  type MkeKnowledgeProjectionInput,
+  type MkeKnowledgeProjectionResult,
+} from '../memory/mke-knowledge-projector';
+import {
+  MkeExperienceProjector,
+  type MkeExperienceProjectionInput,
+  type MkeExperienceProjectionResult,
+} from '../memory/mke-experience-projector';
 import {
   ExperienceAggregator,
   ExperienceQueryService,
@@ -84,6 +101,9 @@ interface Repos {
   pageSnapshot: PageSnapshotRepository;
   action: ActionRepository;
   operationLog: OperationMemoryLogRepository;
+  memoryTrace: MemoryTraceRepository;
+  knowledgeModel: KnowledgeModelRepository;
+  experienceRecipe: ExperienceRecipeRepository;
   experience: ExperienceRepository;
   knowledgeApi: KnowledgeApiRepository;
   chooseContextTelemetry: ChooseContextTelemetryRepository;
@@ -96,6 +116,9 @@ interface StorageInit {
   pageSnapshots: PageSnapshotService | null;
   actions: ActionService | null;
   operationLog: OperationMemoryLogRepository | null;
+  memoryTrace: MkeMemoryTraceService | null;
+  knowledgeProjector: MkeKnowledgeProjector | null;
+  experienceProjector: MkeExperienceProjector | null;
   experienceAggregator: ExperienceAggregator | null;
   experienceQuery: ExperienceQueryService | null;
   knowledgeApi: KnowledgeApiRepository | null;
@@ -132,6 +155,9 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
       pageSnapshots: null,
       actions: null,
       operationLog: null,
+      memoryTrace: null,
+      knowledgeProjector: null,
+      experienceProjector: null,
       experienceAggregator: null,
       experienceQuery: null,
       knowledgeApi: null,
@@ -145,6 +171,9 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
     const pageSnapshotRepo = new PageSnapshotRepository(opened.db);
     const actionRepo = new ActionRepository(opened.db);
     const operationLogRepo = new OperationMemoryLogRepository(opened.db);
+    const memoryTraceRepo = new MemoryTraceRepository(opened.db);
+    const knowledgeModelRepo = new KnowledgeModelRepository(opened.db);
+    const experienceRecipeRepo = new ExperienceRecipeRepository(opened.db);
     const experienceRepo = new ExperienceRepository(opened.db);
     const knowledgeApiRepo = new KnowledgeApiRepository(opened.db);
     const chooseContextTelemetryRepo = new ChooseContextTelemetryRepository(opened.db);
@@ -155,6 +184,9 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
       pageSnapshot: pageSnapshotRepo,
       action: actionRepo,
       operationLog: operationLogRepo,
+      memoryTrace: memoryTraceRepo,
+      knowledgeModel: knowledgeModelRepo,
+      experienceRecipe: experienceRecipeRepo,
       experience: experienceRepo,
       knowledgeApi: knowledgeApiRepo,
       chooseContextTelemetry: chooseContextTelemetryRepo,
@@ -166,6 +198,13 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
       pageSnapshots: new PageSnapshotService(pageSnapshotRepo),
       actions: new ActionService(actionRepo, pageSnapshotRepo),
       operationLog: operationLogRepo,
+      memoryTrace: new MkeMemoryTraceService(memoryTraceRepo),
+      knowledgeProjector: new MkeKnowledgeProjector(memoryTraceRepo, knowledgeModelRepo),
+      experienceProjector: new MkeExperienceProjector(
+        memoryTraceRepo,
+        knowledgeModelRepo,
+        experienceRecipeRepo,
+      ),
       experienceAggregator: new ExperienceAggregator(
         opened.db,
         repos.session,
@@ -188,6 +227,9 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
       pageSnapshots: null,
       actions: null,
       operationLog: null,
+      memoryTrace: null,
+      knowledgeProjector: null,
+      experienceProjector: null,
       experienceAggregator: null,
       experienceQuery: null,
       knowledgeApi: null,
@@ -229,6 +271,9 @@ export class SessionManager {
   private readonly pageSnapshotService: PageSnapshotService | null;
   private readonly actionService: ActionService | null;
   private readonly operationLogRepo: OperationMemoryLogRepository | null;
+  private readonly memoryTraceService: MkeMemoryTraceService | null;
+  private readonly mkeKnowledgeProjector: MkeKnowledgeProjector | null;
+  private readonly mkeExperienceProjector: MkeExperienceProjector | null;
   private readonly experienceAggregator: ExperienceAggregator | null;
   private readonly experienceQueryService: ExperienceQueryService | null;
   private readonly knowledgeApiRepo: KnowledgeApiRepository | null;
@@ -242,6 +287,9 @@ export class SessionManager {
     this.pageSnapshotService = storage.pageSnapshots;
     this.actionService = storage.actions;
     this.operationLogRepo = storage.operationLog;
+    this.memoryTraceService = storage.memoryTrace;
+    this.mkeKnowledgeProjector = storage.knowledgeProjector;
+    this.mkeExperienceProjector = storage.experienceProjector;
     this.experienceAggregator = storage.experienceAggregator;
     this.experienceQueryService = storage.experienceQuery;
     this.knowledgeApiRepo = storage.knowledgeApi;
@@ -282,6 +330,27 @@ export class SessionManager {
    */
   public get operationLogs(): OperationMemoryLogRepository | null {
     return this.operationLogRepo;
+  }
+
+  /**
+   * MKE Memory trace writer. `null` when persistence is off. MCP tool-call
+   * handlers must treat writes as best-effort evidence capture and never as
+   * part of the browser action success path.
+   */
+  public get memoryTraces(): MkeMemoryTraceService | null {
+    return this.memoryTraceService;
+  }
+
+  public projectMkeKnowledgeIdle(
+    input?: MkeKnowledgeProjectionInput,
+  ): MkeKnowledgeProjectionResult | null {
+    return this.mkeKnowledgeProjector?.projectIdleBatch(input) ?? null;
+  }
+
+  public projectMkeExperienceIdle(
+    input?: MkeExperienceProjectionInput,
+  ): MkeExperienceProjectionResult | null {
+    return this.mkeExperienceProjector?.projectIdleBatch(input) ?? null;
   }
 
   /**
@@ -692,6 +761,36 @@ export class SessionManager {
     return this.repos.session.countAll();
   }
 
+  public listRecentMkeMemoryTraces(limit: number, offset: number): MemoryTrace[] {
+    if (!this.repos) return [];
+    return this.repos.memoryTrace.listRecent({ limit, offset });
+  }
+
+  public countMkeMemoryTraces(): number {
+    if (!this.repos) return 0;
+    return this.repos.memoryTrace.count();
+  }
+
+  public listRecentMkeKnowledgeModels(limit: number, offset: number): KnowledgeModel[] {
+    if (!this.repos) return [];
+    return this.repos.knowledgeModel.listRecent({ limit, offset });
+  }
+
+  public countMkeKnowledgeModels(): number {
+    if (!this.repos) return 0;
+    return this.repos.knowledgeModel.count();
+  }
+
+  public listRecentMkeExperienceRecipes(limit: number, offset: number): ExperienceRecipe[] {
+    if (!this.repos) return [];
+    return this.repos.experienceRecipe.listRecent({ limit, offset });
+  }
+
+  public countMkeExperienceRecipes(): number {
+    if (!this.repos) return 0;
+    return this.repos.experienceRecipe.count();
+  }
+
   /**
    * Returns chronologically-ordered steps for the given session, read from
    * SQLite. Empty array when the session does not exist or persistence is off.
@@ -724,6 +823,9 @@ export class SessionManager {
       // sessions and steps, but we clear all five explicitly so
       // behavior stays identical whether persistence is on or off.
       this.repos.operationLog.clear();
+      this.repos.memoryTrace.clear();
+      this.repos.knowledgeModel.clear();
+      this.repos.experienceRecipe.clear();
       this.repos.action.clear();
       this.repos.pageSnapshot.clear();
       this.repos.step.clear();

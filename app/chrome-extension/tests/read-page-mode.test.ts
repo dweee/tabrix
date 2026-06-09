@@ -7,6 +7,8 @@ import {
   formatElementsAsPageContent,
 } from '@/entrypoints/background/tools/browser/read-page-fallback-format';
 import { buildCandidateActions } from '@/entrypoints/background/tools/browser/read-page-candidate-actions';
+import { extractVisibleRegionRows } from '@/entrypoints/background/tools/browser/visible-region-rows';
+import { inferPageUnderstanding } from '@/entrypoints/background/tools/browser/read-page-understanding';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 
 const MODE_MINIMUM_FIELDS: Record<'compact' | 'normal' | 'full', string[]> = {
@@ -102,6 +104,7 @@ function expectCommonSnapshotShape(payload: any, mode: 'compact' | 'normal' | 'f
     sourceFreshness: 'fresh',
     interferenceRisk: 'medium',
   });
+  expect(payload.tabId).toBe(payload.pageProjection.tabId);
   expect(['none', 'active', 'recent_input', 'unknown']).toContain(
     payload.pageProjection.userActivityLevel,
   );
@@ -387,6 +390,167 @@ describe('read_page mode', () => {
     expect(payload.coverage.iframe).toBe('covered');
   });
 
+  it('surfaces read-only file input bindings without claiming upload success', async () => {
+    vi.spyOn(browserWorldInventory, 'getBrowserWorldSnapshot').mockResolvedValue({
+      summary: {
+        routingDecisionSummary:
+          'routing=ready_for_page_level_check, blockingReason=none, next=page_level_content_or_postcondition_check',
+        objectChangeSummary: 'Object change summary: no relevant browser object change observed.',
+        actionableObjectChangeSummary:
+          'Actionable object change: no actionable browser object transition observed.',
+        currentOperationConclusion:
+          'Current operation conclusion: browser object state is stable enough for page-level inspection.',
+      },
+      tabs: [],
+    } as any);
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5237,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.com/publish',
+      title: 'Publish',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- form "Publish" [ref=ref_0] (x=640,y=300)',
+        '  - button "Upload image" [ref=ref_1] (x=600,y=260)',
+        '  - textbox "Title" [ref=ref_2] (x=600,y=300)',
+        '  - textbox "Body" [ref=ref_3] (x=600,y=340)',
+        '  - button "Save draft" [ref=ref_4] (x=600,y=380)',
+        '  - link "Back" [ref=ref_5] (x=500,y=420)',
+        '- heading "Publish" [ref=ref_6] (x=320,y=100)',
+        '- generic "Upload requirements" [ref=ref_7] (x=320,y=140)',
+        '- generic "Preview" [ref=ref_8] (x=900,y=220)',
+        '- generic "Footer" [ref=ref_9] (x=300,y=560)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_1', selector: '.upload-trigger' },
+        { ref: 'ref_2', selector: 'input[name=title]' },
+        { ref: 'ref_3', selector: 'textarea[name=body]' },
+      ],
+      stats: { processed: 10, included: 10, durationMs: 7 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+    vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
+      {
+        result: [
+          {
+            selector: 'input[type="file"][name="images"]',
+            accept: 'image/png,image/jpeg',
+            multiple: true,
+            disabled: false,
+            visible: false,
+          },
+        ],
+      },
+    ] as any);
+
+    const result = await readPageTool.execute({});
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expectCommonSnapshotShape(payload, 'compact');
+    expect(payload.fileInputBindings).toEqual([
+      expect.objectContaining({
+        selector: 'input[type="file"][name="images"]',
+        accept: 'image/png,image/jpeg',
+        multiple: true,
+        disabled: false,
+        visible: false,
+        bindingSource: 'dom_input_type_file',
+        nextRequiredTool: 'chrome_upload_file',
+        nextRequiredCheck:
+          'run_chrome_upload_file_then_run_fresh_same_tab_read_to_prove_upload_state',
+        claimBoundary: expect.stringContaining('does not prove upload authorization'),
+      }),
+    ]);
+    expect(payload.publishFormReadiness).toMatchObject({
+      status: 'not_ready_candidate',
+      businessSuccessProven: false,
+      nextRequiredTool: 'chrome_upload_file',
+      nextRequiredSelector: 'input[type="file"][name="images"]',
+      nextRequiredCheck:
+        'complete_required_fields_then_run_fresh_same_tab_read_before_publish_submit',
+      claimBoundary: expect.stringContaining('does not prove upload execution'),
+    });
+    expect(payload.publishFormReadiness.requiredFields).toEqual([
+      expect.objectContaining({
+        field: 'media',
+        status: 'not_proven',
+        evidenceSource: 'file_input_binding',
+        selector: 'input[type="file"][name="images"]',
+        nextRequiredTool: 'chrome_upload_file',
+      }),
+      expect.objectContaining({
+        field: 'title',
+        status: 'not_proven',
+        targetRef: 'ref_2',
+      }),
+      expect.objectContaining({
+        field: 'body_or_description',
+        status: 'not_proven',
+        targetRef: 'ref_3',
+      }),
+    ]);
+    expect(payload.publishFormReadiness.blockingReasons).toEqual(
+      expect.arrayContaining([
+        'media:not_proven',
+        'title:not_proven',
+        'body_or_description:not_proven',
+      ]),
+    );
+    expect(payload.pageRegions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          regionType: 'form',
+          state: 'publish_not_ready_candidate',
+          readiness: 'not_ready_candidate',
+          readinessBlockingReasons: expect.arrayContaining([
+            'media:not_proven',
+            'title:not_proven',
+            'body_or_description:not_proven',
+          ]),
+          nextRequiredTool: 'chrome_upload_file',
+          nextRequiredSelector: 'input[type="file"][name="images"]',
+          nextRequiredCheck:
+            'complete_required_fields_then_run_fresh_same_tab_read_before_publish_submit',
+        }),
+      ]),
+    );
+    expect(payload.pageOperationMap.zones).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          zoneId: 'zone_form',
+          regionType: 'form',
+          state: 'publish_not_ready_candidate',
+          readiness: 'needs_expand',
+          regionReadiness: 'not_ready_candidate',
+          readinessBlockingReasons: expect.arrayContaining([
+            'media:not_proven',
+            'title:not_proven',
+            'body_or_description:not_proven',
+          ]),
+          nextRequiredTool: 'chrome_upload_file',
+          nextRequiredSelector: 'input[type="file"][name="images"]',
+          nextRequiredCheck:
+            'complete_required_fields_then_run_fresh_same_tab_read_before_publish_submit',
+        }),
+      ]),
+    );
+    expect(payload.browserPageObjectCompact.operationSummary).toContain(
+      'Publish readiness: not_ready_candidate',
+    );
+    expect(payload.browserPageObjectCompact.operationSummary).toContain(
+      'businessSuccessProven=false',
+    );
+    expect(payload.browserPageObjectCompact.primaryConclusion).toContain(
+      'Publish readiness: not_ready_candidate',
+    );
+  });
+
   it('marks task-cropped requested layers with the task observation profile', async () => {
     vi.spyOn(browserWorldInventory, 'getBrowserWorldSnapshot').mockResolvedValue({
       summary: {
@@ -521,6 +685,40 @@ describe('read_page mode', () => {
     );
 
     expect(elements.map((element) => element.ref)).toContain('ref_text_menu_more');
+  });
+
+  it('preserves recovered dynamic surface targets when compact actions are already dense', () => {
+    const elements = buildInteractiveElements(
+      Array.from(
+        { length: 24 },
+        (_item, index) => `- button "Toolbar ${index}" [ref=ref_toolbar_${index}] (x=40,y=40)`,
+      ).join('\n'),
+      [
+        {
+          ref: 'ref_dynamic_surface_9',
+          text: 'Past week',
+          role: 'button',
+          selector: '[data-surface-option="week"]',
+          isInteractive: true,
+          matchSource: 'dynamic_surface_visible_text',
+          actionability: 'actionable',
+        },
+      ],
+      8,
+      'compact',
+      'https://example.com/app',
+    );
+
+    expect(elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ref: 'ref_dynamic_surface_9',
+          name: 'Past week',
+          matchSource: 'dynamic_surface_visible_text',
+          actionability: 'actionable',
+        }),
+      ]),
+    );
   });
 
   it('preserves privacy-safe input value state without exposing raw values', () => {
@@ -801,6 +999,235 @@ describe('read_page mode', () => {
     });
   });
 
+  it('recovers short visible text controls without requiring screenshots or coordinates first', async () => {
+    const bindScript = vi
+      .spyOn(chrome.scripting, 'executeScript')
+      .mockResolvedValue([{ result: { bound: 1 } }] as any);
+    const collectInteractiveElementsFallback = vi
+      .spyOn(readPageTool as any, 'collectInteractiveElementsFallback')
+      .mockImplementation(async (_tabId: number, options: { textQuery?: string }) => {
+        if (options.textQuery !== '上传图文') return { success: true, elements: [] };
+        return {
+          success: true,
+          elements: [
+            {
+              type: 'text',
+              role: 'tab',
+              selector: 'body > main > div.creator-tabs > span.title',
+              text: '上传图文',
+              isInteractive: true,
+              coordinates: {
+                x: 188,
+                y: 92,
+                rect: { x: 148, y: 72, width: 80, height: 32 },
+              },
+            },
+          ],
+        };
+      });
+    const basePayload: any = {
+      visibleTextContent: ['上传视频', '上传图文', '支持上传的图片大小，', '发布笔记'].join('\n'),
+      elements: [],
+      refMap: [],
+      count: 0,
+    };
+
+    const recovered = await (readPageTool as any).recoverVisibleTextControlTargets({
+      tabId: 5331,
+      basePayload,
+      frameId: 11,
+    });
+
+    expect(recovered).toBe(true);
+    expect(collectInteractiveElementsFallback).toHaveBeenCalledWith(
+      5331,
+      expect.objectContaining({ textQuery: '上传图文', includeCoordinates: true, frameId: 11 }),
+    );
+    expect(collectInteractiveElementsFallback).not.toHaveBeenCalledWith(
+      5331,
+      expect.objectContaining({ textQuery: '支持上传的图片大小，' }),
+    );
+    expect(basePayload.elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ref: expect.stringMatching(/^ref_text_control_/),
+          role: 'tab',
+          type: 'button',
+          selector: 'body > main > div.creator-tabs > span.title',
+          text: '上传图文',
+        }),
+      ]),
+    );
+    expect(basePayload.fallbackSource).toBe('visible_text_control_recovery');
+    expect(bindScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 5331, frameIds: [11] },
+        world: 'ISOLATED',
+        args: [
+          expect.arrayContaining([
+            expect.objectContaining({
+              ref: expect.stringMatching(/^ref_text_control_/),
+              selector: 'body > main > div.creator-tabs > span.title',
+            }),
+          ]),
+        ],
+      }),
+    );
+
+    const interactiveElements = buildInteractiveElements(
+      formatElementsAsPageContent(basePayload.elements, basePayload.refMap),
+      basePayload.elements,
+      20,
+      'normal',
+      'https://example.com/create',
+    );
+    const actions = buildCandidateActions(interactiveElements, basePayload.refMap, {
+      frameId: 11,
+    });
+
+    expect(
+      actions.find((action) => action.targetRef.startsWith('ref_text_control_')),
+    ).toMatchObject({
+      actionType: 'click',
+      frameId: 11,
+      locatorChain: expect.arrayContaining([
+        { type: 'aria', value: '上传图文' },
+        { type: 'css', value: 'body > main > div.creator-tabs > span.title' },
+      ]),
+    });
+  });
+
+  it('keeps recovered visible text controls actionable when the page already has navigation controls', () => {
+    const pageContent = [
+      '- button "首页" [ref=ref_1]',
+      '- button "笔记管理" [ref=ref_2]',
+      '- button "数据看板" [ref=ref_3]',
+      '- button "上传视频" [ref=ref_4]',
+    ].join('\n');
+    const fallbackElements = [
+      {
+        ref: 'ref_text_control_5',
+        role: 'tab',
+        type: 'button',
+        selector: 'body > main > div.creator-tabs > span:nth-of-type(2)',
+        text: '上传图文',
+        name: '上传图文',
+        isInteractive: true,
+        actionability: 'actionable',
+      },
+    ];
+    const refMap = [
+      {
+        ref: 'ref_text_control_5',
+        selector: 'body > main > div.creator-tabs > span:nth-of-type(2)',
+      },
+    ];
+
+    const interactiveElements = buildInteractiveElements(
+      pageContent,
+      fallbackElements,
+      20,
+      'normal',
+      'https://creator.example/publish',
+    );
+    const actions = buildCandidateActions(interactiveElements, refMap);
+
+    expect(interactiveElements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ref: 'ref_text_control_5',
+          role: 'tab',
+          name: '上传图文',
+        }),
+      ]),
+    );
+    expect(actions.find((action) => action.targetRef === 'ref_text_control_5')).toMatchObject({
+      actionType: 'click',
+      confidence: 0.93,
+      locatorChain: expect.arrayContaining([
+        { type: 'aria', value: '上传图文' },
+        { type: 'css', value: 'body > main > div.creator-tabs > span:nth-of-type(2)' },
+      ]),
+    });
+  });
+
+  it('does not treat creator upload and publish controls as a search task', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5290,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://creator.example/publish',
+      title: 'Creator Workspace',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Creator workspace" [ref=ref_main] (x=640,y=360)',
+        '  - navigation "Creator menu" [ref=ref_nav] (x=120,y=360)',
+        '    - button "Home" [ref=ref_home] (x=80,y=160)',
+        '    - button "Posts" [ref=ref_posts] (x=80,y=210)',
+        '    - button "Analytics" [ref=ref_analytics] (x=80,y=260)',
+        '  - tablist "Creation type" [ref=ref_tabs] (x=520,y=96)',
+        '    - tab "上传视频" [ref=ref_video] (x=300,y=96)',
+        '    - tab "上传图文" [ref=ref_image_text] (x=410,y=96)',
+        '  - region "Draft media" [ref=ref_upload_region] (x=820,y=420)',
+        '    - button "上传图片，或写文字生成图片" [ref=ref_upload_prompt] (x=860,y=420)',
+        '    - button "上传图片" [ref=ref_upload_image] (x=840,y=470)',
+        '    - button "文字配图" [ref=ref_generate_image] (x=980,y=470)',
+        '  - button "发布笔记" [ref=ref_publish] (x=88,y=90)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_video', selector: '[data-tab="video"]' },
+        { ref: 'ref_image_text', selector: '[data-tab="image-text"]' },
+        { ref: 'ref_upload_prompt', selector: '[data-upload-prompt]' },
+        { ref: 'ref_upload_image', selector: 'button.upload-image' },
+        { ref: 'ref_generate_image', selector: 'button.generate-image' },
+        { ref: 'ref_publish', selector: 'button.publish' },
+      ],
+      stats: { processed: 13, included: 13, durationMs: 8 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'normal' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expectCommonSnapshotShape(payload, 'normal');
+    expect(payload.summary).toMatchObject({
+      pageRole: 'publish_form',
+      primaryRegion: 'form',
+    });
+    expect(payload.interactiveElements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: '上传图文' }),
+        expect.objectContaining({ name: '上传图片' }),
+        expect.objectContaining({ name: '发布笔记' }),
+      ]),
+    );
+    expect(payload.taskMode).toBe('read');
+    expect(payload.watchScope.scopeKind).toBe('form');
+    expect(payload.watchScope.reason).toBe('generic_form_category_match');
+  });
+
+  it('classifies sparse generic publish routes as form workflow pages', () => {
+    const summary = inferPageUnderstanding(
+      'https://creator.example/publish/publish?source=official',
+      'Creator publishing platform',
+      [
+        '- main "Creator publishing platform" [ref=ref_main] (x=640,y=360)',
+        '  - button "上传视频" [ref=ref_upload_video] (x=600,y=180)',
+      ].join('\n'),
+    );
+
+    expect(summary).toMatchObject({
+      pageRole: 'publish_form',
+      primaryRegion: 'form',
+      primaryRegionConfidence: 'medium',
+    });
+  });
+
   it('prefers compact search toolbar matches over broad text-query matches', async () => {
     vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
       { result: { bound: 1 } },
@@ -1020,6 +1447,66 @@ describe('read_page mode', () => {
     });
   });
 
+  it('recovers open filter panel targets from visible text without assistant guidance', async () => {
+    const selectorFor = (label: string) =>
+      `body > main > div.filter-panel > div[data-label="${label}"] > span`;
+    collectInteractiveElementsFallback.mockImplementation(async (_tabId, options: any) => ({
+      success: true,
+      elements: [
+        {
+          type: 'text_action',
+          role: 'button',
+          selector: selectorFor(options.textQuery),
+          text: options.textQuery,
+          isInteractive: true,
+          actionability: 'actionable',
+          coordinates: {
+            x: 960,
+            y: 320,
+            rect: { x: 930, y: 304, width: 88, height: 32 },
+          },
+        },
+      ],
+    }));
+    const basePayload: any = {
+      visibleTextContent:
+        '全部 图文 视频 用户 筛选 排序依据 综合 最新 最多收藏 发布时间 不限 一周内 清除 确认',
+      elements: [],
+      refMap: [],
+      count: 0,
+    };
+
+    const recovered = await (readPageTool as any).recoverFilterPanelTextTargets({
+      tabId: 5223,
+      basePayload,
+    });
+
+    expect(recovered).toBe(true);
+    expect(collectInteractiveElementsFallback).toHaveBeenCalledWith(
+      5223,
+      expect.objectContaining({ textQuery: '最多收藏', includeCoordinates: true }),
+    );
+    expect(collectInteractiveElementsFallback).toHaveBeenCalledWith(
+      5223,
+      expect.objectContaining({ textQuery: '一周内', includeCoordinates: true }),
+    );
+    expect(basePayload.elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ref: expect.stringMatching(/^ref_text_filter_panel_/),
+          selector: 'body > main > div.filter-panel > div[data-label="最多收藏"]',
+          text: '最多收藏',
+        }),
+        expect.objectContaining({
+          ref: expect.stringMatching(/^ref_text_filter_panel_/),
+          selector: 'body > main > div.filter-panel > div[data-label="一周内"]',
+          text: '一周内',
+        }),
+      ]),
+    );
+    expect(basePayload.fallbackSource).toBe('filter_panel_target_recovery');
+  });
+
   it('keeps recovered text menu actions ahead of long content lists', () => {
     const contentElements = Array.from({ length: 40 }, (_item, index) => ({
       ref: `ref_content_${index}`,
@@ -1051,6 +1538,182 @@ describe('read_page mode', () => {
     expect(actions.find((action) => action.targetRef === 'ref_text_menu_more')).toMatchObject({
       actionType: 'click',
       locatorChain: expect.arrayContaining([{ type: 'css', value: '[data-menu-more]' }]),
+    });
+  });
+
+  it('keeps visible result-row detail actions when generic candidates hit the cap', () => {
+    const shellElements = Array.from({ length: 24 }, (_item, index) => ({
+      ref: `ref_shell_${index}`,
+      role: 'button',
+      name: `Confirm ${index}`,
+    }));
+    const resultElements = [
+      {
+        ref: 'ref_fallback_25',
+        role: 'link',
+        name: 'Case study one',
+        selector: '[data-result="one"]',
+      },
+      {
+        ref: 'ref_fallback_26',
+        role: 'link',
+        name: 'Case study two',
+        selector: '[data-result="two"]',
+      },
+    ];
+
+    const actions = buildCandidateActions([...shellElements, ...resultElements], [], {
+      visibleRegionRows: {
+        visibleRegionRowsUsed: true,
+        rowCount: 2,
+        targetRefCoverageRate: 0.99,
+        extractionSource: 'visible_text',
+        quality: 'usable',
+        qualityReasons: ['target_ref_available'],
+        rows: [
+          {
+            rowId: 'viewport_visible_text_row_1',
+            title: 'Case study one',
+            targetRef: 'ref_fallback_25',
+            targetRefCoverageRate: 0.99,
+            confidence: 0.82,
+            qualityReasons: ['target_ref_available'],
+          },
+          {
+            rowId: 'viewport_visible_text_row_2',
+            title: 'Case study two',
+            targetRef: 'ref_fallback_26',
+            targetRefCoverageRate: 0.99,
+            confidence: 0.82,
+            qualityReasons: ['target_ref_available'],
+          },
+        ],
+      },
+    });
+
+    expect(actions).toHaveLength(20);
+    expect(actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          targetRef: 'ref_fallback_25',
+          intent: 'content.open_detail',
+          locatorChain: expect.arrayContaining([
+            expect.objectContaining({ type: 'css', value: '[data-result="one"]' }),
+          ]),
+        }),
+        expect.objectContaining({
+          targetRef: 'ref_fallback_26',
+          intent: 'content.open_detail',
+          locatorChain: expect.arrayContaining([
+            expect.objectContaining({ type: 'css', value: '[data-result="two"]' }),
+          ]),
+        }),
+      ]),
+    );
+  });
+
+  it('binds visible result-row detail actions from fallback text targets', () => {
+    const elements = [
+      {
+        ref: 'ref_fallback_1',
+        role: 'generic',
+        name: 'Case study one',
+        selector: '[data-result="one"]',
+      },
+      {
+        ref: 'ref_search',
+        role: 'searchbox',
+        name: 'Search',
+        selector: '[data-search]',
+      },
+    ];
+
+    const actions = buildCandidateActions(elements, [], {
+      visibleRegionRows: {
+        visibleRegionRowsUsed: true,
+        rowCount: 1,
+        targetRefCoverageRate: 0.99,
+        extractionSource: 'visible_text',
+        quality: 'usable',
+        qualityReasons: ['target_ref_available'],
+        rows: [
+          {
+            rowId: 'viewport_visible_text_row_1',
+            title: 'Case study one',
+            targetRef: 'ref_fallback_1',
+            targetRefCoverageRate: 0.99,
+            confidence: 0.82,
+            qualityReasons: ['target_ref_available'],
+          },
+        ],
+      },
+    });
+
+    expect(actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          targetRef: 'ref_fallback_1',
+          actionType: 'click',
+          intent: 'content.open_detail',
+          locatorChain: expect.arrayContaining([
+            expect.objectContaining({ type: 'css', value: '[data-result="one"]' }),
+          ]),
+        }),
+      ]),
+    );
+    expect(actions.find((action) => action.targetRef === 'ref_search')).toMatchObject({
+      intent: 'search.enter_query',
+    });
+  });
+
+  it('binds visible result-row detail actions from trusted row refs missing from interactive elements', () => {
+    const actions = buildCandidateActions(
+      [
+        {
+          ref: 'ref_search',
+          role: 'searchbox',
+          name: 'Search',
+          selector: '[data-search]',
+        },
+      ],
+      [{ ref: 'ref_fallback_53', selector: '[data-result="one"]' }],
+      {
+        visibleRegionRows: {
+          visibleRegionRowsUsed: true,
+          rowCount: 1,
+          targetRefCoverageRate: 0.99,
+          extractionSource: 'visible_text',
+          quality: 'usable',
+          qualityReasons: ['target_ref_available'],
+          rows: [
+            {
+              rowId: 'viewport_visible_text_row_1',
+              title: 'Case study one',
+              targetRef: 'ref_fallback_53',
+              targetRefCoverageRate: 0.99,
+              confidence: 0.82,
+              qualityReasons: ['target_ref_available'],
+            },
+          ],
+        },
+      },
+    );
+
+    expect(actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          targetRef: 'ref_fallback_53',
+          actionType: 'click',
+          intent: 'content.open_detail',
+          locatorChain: [
+            { type: 'ref', value: 'ref_fallback_53' },
+            { type: 'css', value: '[data-result="one"]' },
+          ],
+        }),
+      ]),
+    );
+    expect(actions.find((action) => action.targetRef === 'ref_search')).toMatchObject({
+      intent: 'search.enter_query',
     });
   });
 
@@ -1473,6 +2136,381 @@ describe('read_page mode', () => {
     expect(payload.visibleRegionRows.rows.map((row: { title: string }) => row.title)).toEqual([
       'Workflow planning guide for distributed teams',
       'Operations checklist for reliable browser handoffs',
+    ]);
+  });
+
+  it('keeps search scope when result pages include a global publish navigation control', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5209,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/search_result?keyword=AIGC',
+      title: 'AIGC - 搜索',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "AIGC 搜索结果" [ref=ref_main] (x=640,y=370)',
+        '  - navigation "Global navigation" [ref=ref_nav] (x=80,y=300)',
+        '    - link "首页" [ref=ref_home] (x=80,y=140) href="/home"',
+        '    - link "发布" [ref=ref_publish_nav] (x=80,y=196) href="/publish"',
+        '  - listitem "Result" [ref=ref_result_1] (x=420,y=180)',
+        '    - link "AIGC prompt workflow examples" [ref=ref_result_1_link] (x=420,y=170) href="/items/aigc-prompt-workflow"',
+        '    - generic "Concrete before and after examples for creator workflows." [ref=ref_result_1_desc] (x=420,y=206)',
+        '  - listitem "Result" [ref=ref_result_2] (x=420,y=300)',
+        '    - link "Creator image generation checklist" [ref=ref_result_2_link] (x=420,y=290) href="/items/image-generation-checklist"',
+        '    - generic "A reusable checklist for evaluating generated images." [ref=ref_result_2_desc] (x=420,y=326)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_home', selector: 'a[href="/home"]' },
+        { ref: 'ref_publish_nav', selector: 'a[href="/publish"]' },
+        { ref: 'ref_result_1_link', selector: 'a[href="/items/aigc-prompt-workflow"]' },
+        { ref: 'ref_result_2_link', selector: 'a[href="/items/image-generation-checklist"]' },
+      ],
+      stats: { processed: 10, included: 10, durationMs: 7 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expectCommonSnapshotShape(payload, 'compact');
+    expect(payload).toMatchObject({
+      taskMode: 'search',
+      rowCount: 2,
+      visibleRegionRowsUsed: true,
+      readinessVerdict: 'ready',
+    });
+    expect(payload.watchScope.scopeKind).toBe('search');
+    expect(payload.summary).toMatchObject({
+      pageRole: 'search_results',
+      primaryRegion: 'search_results',
+    });
+    expect(payload.pageRegions.map((item: any) => item.regionType)).toEqual(
+      expect.arrayContaining(['navigation', 'form', 'content']),
+    );
+    expect(payload.pageRegions.find((item: any) => item.regionType === 'form')).toMatchObject({
+      state: 'input_available_candidate',
+      candidateActionIds: expect.arrayContaining([expect.any(String)]),
+    });
+    const publishNavAction = payload.candidateActions.find(
+      (action: any) => action.targetRef === 'ref_publish_nav',
+    );
+    expect(publishNavAction).toMatchObject({
+      label: '发布',
+      intent: 'publish.open_entry',
+    });
+    expect(publishNavAction.intentBoundary).toContain('not final publish submission');
+  });
+
+  it('derives a conservative summary from page regions when URL/title understanding stays unknown', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5217,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/explore',
+      title: 'Interest Community',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Interest Community" [ref=ref_main] (x=640,y=370)',
+        '  - navigation "Global navigation" [ref=ref_nav] (x=80,y=300)',
+        '    - link "Home" [ref=ref_home] (x=80,y=140) href="/home"',
+        '    - link "Publish" [ref=ref_publish_nav] (x=80,y=196) href="/publish"',
+        '  - listitem "Recommended creator workflow" [ref=ref_result_1] (x=420,y=180)',
+        '    - link "Recommended creator workflow" [ref=ref_result_1_link] (x=420,y=170) href="/items/workflow"',
+        '  - button "Messages" [ref=ref_messages] (x=80,y=252)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_home', selector: 'a[href="/home"]' },
+        { ref: 'ref_publish_nav', selector: 'a[href="/publish"]' },
+        { ref: 'ref_result_1_link', selector: 'a[href="/items/workflow"]' },
+        { ref: 'ref_messages', selector: 'button.messages' },
+      ],
+      stats: { processed: 8, included: 8, durationMs: 7 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expectCommonSnapshotShape(payload, 'compact');
+    expect(payload.pageRegions.map((item: any) => item.regionType)).toEqual(
+      expect.arrayContaining(['navigation', 'form', 'content']),
+    );
+    expect(payload.summary).toMatchObject({
+      pageRole: 'multi_region_page',
+      primaryRegion: 'content',
+    });
+    expect(payload.pageProjection).toMatchObject({
+      pageRole: 'multi_region_page',
+      activeRegion: 'content',
+    });
+  });
+
+  it('keeps sparse exact search_result routes in search scope instead of content detail scope', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5212,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/search_result?query=neutral',
+      title: 'Neutral topic - 搜索',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Neutral topic 搜索结果" [ref=ref_main] (x=640,y=370)',
+        '  - searchbox "搜索" [ref=ref_search] (x=520,y=40)',
+        '  - navigation "Global navigation" [ref=ref_nav] (x=80,y=300)',
+        '    - link "Home" [ref=ref_home] (x=80,y=140) href="/home"',
+        '    - link "Publish" [ref=ref_publish_nav] (x=80,y=196) href="/publish"',
+        '  - generic "Content creator prompt examples" [ref=ref_content_hint] (x=520,y=220)',
+        '  - button "Follow" [ref=ref_follow] (x=760,y=260)',
+        '  - button "Like" [ref=ref_like] (x=420,y=320)',
+        '  - button "Collect" [ref=ref_collect] (x=520,y=320)',
+        '  - button "Share" [ref=ref_share] (x=620,y=320)',
+        '  - generic "Comments" [ref=ref_comments] (x=520,y=380)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_search', selector: '#search-input' },
+        { ref: 'ref_home', selector: 'a[href="/home"]' },
+        { ref: 'ref_publish_nav', selector: 'a[href="/publish"]' },
+        { ref: 'ref_follow', selector: 'button.follow' },
+        { ref: 'ref_like', selector: 'button.like' },
+        { ref: 'ref_collect', selector: 'button.collect' },
+        { ref: 'ref_share', selector: 'button.share' },
+      ],
+      stats: { processed: 11, included: 11, durationMs: 7 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expectCommonSnapshotShape(payload, 'compact');
+    expect(payload.summary).toMatchObject({
+      pageRole: 'search_results',
+      primaryRegion: 'search_results',
+    });
+    expect(payload.taskMode).toBe('search');
+    expect(payload.watchScope.scopeKind).toBe('search');
+    expect(payload.pageProjection.pageRole).toBe('search_results');
+    expect(payload.visibleRegionRowsUsed).toBe(false);
+    expect(
+      payload.highValueObjects.some(
+        (item: { id?: string; kind?: string }) =>
+          item.kind === 'page_role_seed' && String(item.id || '').startsWith('hvo_content_detail'),
+      ),
+    ).toBe(false);
+  });
+
+  it('maps generic content detail pages to read scope without promoting related cards as result rows', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5210,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/item/aigc-creator-workflow',
+      title: 'AIGC creator workflow case study',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "AIGC creator workflow case study" [ref=ref_main] (x=640,y=370)',
+        '  - article "AIGC creator workflow case study" [ref=ref_article] (x=520,y=260)',
+        '    - heading "AIGC creator workflow case study" [ref=ref_heading] (x=520,y=140)',
+        '    - link "Author profile" [ref=ref_author] (x=360,y=190) href="/creator/aigc-owner"',
+        '    - button "Follow" [ref=ref_follow] (x=760,y=190)',
+        '    - generic "Image and prompt example for one repeatable creator workflow." [ref=ref_body] (x=520,y=250)',
+        '    - button "Like 1200" [ref=ref_like] (x=420,y=360)',
+        '    - button "Collect 860" [ref=ref_collect] (x=520,y=360)',
+        '    - button "Share" [ref=ref_share] (x=620,y=360)',
+        '    - textbox "Add a comment" [ref=ref_comment] (x=520,y=460)',
+        '    - generic "Comments 128" [ref=ref_comments] (x=520,y=520)',
+        '  - complementary "Related content" [ref=ref_related] (x=980,y=320)',
+        '    - article "Related" [ref=ref_related_1] (x=980,y=180)',
+        '      - link "Modern content workflow example" [ref=ref_related_1_link] (x=980,y=170) href="/item/modern-workflow"',
+        '      - generic "A short example for adapting prompts into assets." [ref=ref_related_1_desc] (x=980,y=206)',
+        '    - article "Related" [ref=ref_related_2] (x=980,y=300)',
+        '      - link "Creator image review checklist" [ref=ref_related_2_link] (x=980,y=290) href="/item/image-review"',
+        '      - generic "A checklist for deciding whether an image is publishable." [ref=ref_related_2_desc] (x=980,y=326)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_author', selector: 'a[href="/creator/aigc-owner"]' },
+        { ref: 'ref_follow', selector: 'button.follow' },
+        { ref: 'ref_like', selector: 'button.like' },
+        { ref: 'ref_collect', selector: 'button.collect' },
+        { ref: 'ref_share', selector: 'button.share' },
+        { ref: 'ref_comment', selector: 'textarea.comment' },
+        { ref: 'ref_related_1_link', selector: 'a[href="/item/modern-workflow"]' },
+        { ref: 'ref_related_2_link', selector: 'a[href="/item/image-review"]' },
+      ],
+      stats: { processed: 18, included: 18, durationMs: 8 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expectCommonSnapshotShape(payload, 'compact');
+    expect(payload.summary).toMatchObject({
+      pageRole: 'content_detail',
+      primaryRegion: 'content_detail',
+    });
+    expect(payload).toMatchObject({
+      taskMode: 'read',
+      selectedDataSource: 'dom_json',
+      rowCount: 0,
+      visibleRegionRowsUsed: false,
+    });
+    expect(payload.watchScope.scopeKind).toBe('long_content');
+    expect(payload.pageProjection.pageRole).toBe('content_detail');
+    const expectedContentDetailSeedIds = new Set([
+      'hvo_content_detail_seed_body',
+      'hvo_content_detail_seed_author',
+      'hvo_content_detail_seed_feedback',
+    ]);
+    const contentDetailSeeds = payload.highValueObjects.filter(
+      (item: { kind?: string; id?: string }) =>
+        item.kind === 'page_role_seed' && expectedContentDetailSeedIds.has(String(item.id || '')),
+    );
+    expect(contentDetailSeeds).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'hvo_content_detail_seed_body',
+          objectType: 'doc_block',
+          region: 'content_detail',
+        }),
+        expect.objectContaining({
+          id: 'hvo_content_detail_seed_author',
+          objectType: 'entry',
+          region: 'account',
+        }),
+        expect.objectContaining({
+          id: 'hvo_content_detail_seed_feedback',
+          objectType: 'status_item',
+          region: 'feedback',
+        }),
+      ]),
+    );
+    expect(contentDetailSeeds).toHaveLength(3);
+    expect(
+      contentDetailSeeds.some((item: { actions?: unknown[]; targetRef?: string }) => {
+        return Boolean(item.targetRef) || Boolean(item.actions?.length);
+      }),
+    ).toBe(false);
+    expect(payload.pageRegions.map((item: any) => item.regionType)).toEqual(
+      expect.arrayContaining(['account', 'content', 'feedback']),
+    );
+    expect(payload.objectLifecycle.items.map((item: any) => item.objectFamily)).toEqual(
+      expect.arrayContaining(['account_identity', 'content_collection', 'feedback_surface']),
+    );
+    expect(
+      payload.candidateActions.map((action: { intent?: string }) => action.intent),
+    ).not.toContain('content.open_detail');
+  });
+
+  it('keeps sparse generic content detail routes in read scope when the routed title is specific', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5211,
+      windowId: 1,
+      active: false,
+      status: 'complete',
+      url: 'https://example.test/explore/6a02dfb70000000007024c8a',
+      title: 'Creator workflow lessons after two months',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sampleVisibleTextContent').mockResolvedValue(
+      [
+        'Creator workflow lessons after two months',
+        'A practical detail page body with examples, author notes, and comments visible in the viewport.',
+      ].join('\n'),
+    );
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- generic "Application shell" [ref=ref_shell] (x=640,y=360)',
+        '  - textbox "Search or enter any question" [ref=ref_search] (x=520,y=40)',
+        '  - link "Home" [ref=ref_home] (x=80,y=120) href="/home"',
+        '  - link "Publish" [ref=ref_publish] (x=80,y=180) href="/publish"',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_search', selector: '#search-input' },
+        { ref: 'ref_home', selector: 'a[href="/home"]' },
+        { ref: 'ref_publish', selector: 'a[href="/publish"]' },
+      ],
+      stats: { processed: 4, included: 4, durationMs: 6 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expectCommonSnapshotShape(payload, 'compact');
+    expect(payload.summary).toMatchObject({
+      pageRole: 'content_detail',
+      primaryRegion: 'content_detail',
+    });
+    expect(payload.taskMode).toBe('read');
+    expect(payload.watchScope.scopeKind).toBe('long_content');
+    expect(payload.selectedDataSource).toBe('dom_json');
+    expect(payload.readinessVerdict).toBe('ready');
+    expect(payload.evidenceSource).toContain('visible_text');
+    expect(payload.pageProjection.pageRole).toBe('content_detail');
+  });
+
+  it('links visible-text result rows when fallback links expose type but empty role', () => {
+    const rows = extractVisibleRegionRows({
+      pageContent: '- generic "Search shell" [ref=ref_shell] (x=640,y=300)',
+      visibleTextContent: [
+        'AIGC prompt workflow examples',
+        'Concrete before and after examples for creator workflows.',
+        'Creator image generation checklist',
+        'A reusable checklist for evaluating generated images.',
+      ].join('\n'),
+      sourceRegion: 'viewport',
+      url: 'https://example.test/search_result?keyword=AIGC',
+      title: 'AIGC - 搜索',
+      fallbackInteractiveElements: [
+        {
+          ref: 'ref_result_1_link',
+          role: '',
+          type: 'link',
+          text: 'AIGC prompt workflow examples',
+          href: '/items/aigc-prompt-workflow',
+        },
+        {
+          ref: 'ref_result_2_link',
+          role: '',
+          type: 'link',
+          text: 'Creator image generation checklist',
+          href: '/items/image-generation-checklist',
+        },
+      ],
+    });
+
+    expect(rows.visibleRegionRowsUsed).toBe(true);
+    expect(rows.targetRefCoverageRate).toBe(0.99);
+    expect(rows.rows.map((row) => row.targetRef)).toEqual([
+      'ref_result_1_link',
+      'ref_result_2_link',
+    ]);
+    expect(rows.rows.map((row) => row.qualityReasons)).toEqual([
+      expect.arrayContaining(['target_ref_available']),
+      expect.arrayContaining(['target_ref_available']),
     ]);
   });
 
@@ -3214,7 +4252,7 @@ describe('read_page mode', () => {
     }
   });
 
-  it('marks inferred fields (activeRegion) as non-fact in sourceTruthChain', async () => {
+  it('marks inferred fields (pageRole and activeRegion) as non-fact in sourceTruthChain', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 6502,
       windowId: 1,
@@ -3253,13 +4291,18 @@ describe('read_page mode', () => {
 
     expect(result.isError).toBe(false);
     const { fieldProvenances } = payload.pageProjection.sourceTruthChain;
+    const pageRoleProv = fieldProvenances.find(
+      (fp: { field: string; origin: string; isFact: boolean }) =>
+        fp.field === 'pageProjection.pageRole',
+    );
     const activeRegionProv = fieldProvenances.find(
       (fp: { field: string; origin: string; isFact: boolean }) =>
         fp.field === 'pageProjection.activeRegion',
     );
-    expect(
-      fieldProvenances.some((fp: { field: string }) => fp.field === 'pageProjection.pageRole'),
-    ).toBe(false);
+    expect(payload.pageProjection.pageRole).toBe('unknown');
+    expect(pageRoleProv).toBeDefined();
+    expect(pageRoleProv.origin).toBe('inference');
+    expect(pageRoleProv.isFact).toBe(false);
     expect(activeRegionProv).toBeDefined();
     expect(activeRegionProv.origin).toBe('inference');
     expect(activeRegionProv.isFact).toBe(false);

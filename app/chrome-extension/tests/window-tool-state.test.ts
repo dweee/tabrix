@@ -661,6 +661,69 @@ describe('get_windows_and_tabs state inventory', () => {
     );
   });
 
+  it('does not report page-level readiness for a low-confidence same active AI operation', async () => {
+    (
+      chrome as unknown as { windows: { getAll: ReturnType<typeof vi.fn> } }
+    ).windows.getAll.mockResolvedValueOnce([
+      {
+        id: 10,
+        state: 'normal',
+        focused: true,
+        type: 'normal',
+        tabs: [
+          {
+            id: 301,
+            url: 'https://example.test/active',
+            pendingUrl: '',
+            title: 'Active Target',
+            active: true,
+            status: 'complete',
+          },
+        ],
+      },
+    ] as chrome.windows.Window[]);
+
+    markBrowserWorldTabAiOperated(301, 'switch_tab', {
+      confidence: 0.45,
+      evidenceLabel: 'not_proven',
+    });
+
+    const result = await windowTool.execute();
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.compactSummary.routingDecisionSummary).toBe(
+      'routing=operation_evidence_not_proven, blockingReason=latest_ai_operation_low_confidence_or_tab_not_operable, next=prove_foreground_or_refresh_browser_snapshot',
+    );
+    expect(payload.compactSummary.operationRouting).toMatchObject({
+      browserActiveTabId: 301,
+      latestAiOperatedTabId: 301,
+      relationToBrowserActiveTab: 'same_as_browser_active',
+      canContinueOnLatestAiOperatedTab: false,
+      latestAiOperation: 'switch_tab',
+      latestAiOperationConfidence: 0.45,
+      latestAiOperationReason: 'marked_by_tabrix_tool_execution:switch_tab:not_proven',
+    });
+    expect(payload.compactSummary.operationTargetBrief).toMatchObject({
+      targetTabId: 301,
+      targetRole: 'latest_ai_operated_active_tab',
+      relationToBrowserActiveTab: 'same_as_browser_active',
+      shouldReselectBeforeAction: false,
+      nextRequiredCheck: 'prove_foreground_or_refresh_browser_snapshot',
+    });
+    expect(payload.compactSummary.aiActionReadiness).toMatchObject({
+      readiness: 'operation_evidence_not_proven',
+      targetRole: 'latest_ai_operated_active_tab',
+      targetTabId: 301,
+      browserActiveTabId: 301,
+      latestAiOperatedTabId: 301,
+      canProceedToPageLevelCheck: false,
+      requiredBeforeAction: 'prove_foreground_or_refresh_browser_snapshot',
+      summary:
+        'AI action readiness: targetRole=latest_ai_operated_active_tab, targetTab=301 is browser-active but the latest AI operation is not proven safe to continue; prove_foreground_or_refresh_browser_snapshot is required before page-level checks.',
+    });
+  });
+
   it('keeps compactSummary bounded while preserving full window tab detail', async () => {
     const tabs = Array.from({ length: 20 }, (_, index) => {
       const tabId = 101 + index;

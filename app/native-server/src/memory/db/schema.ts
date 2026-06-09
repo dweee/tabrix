@@ -209,6 +209,164 @@ CREATE INDEX IF NOT EXISTS operation_memory_logs_created_at_idx   ON operation_m
 `;
 
 /**
+ * MKE Core Storage v1.
+ *
+ * These three additive tables are the next-generation product-level
+ * projection over the existing Memory / Knowledge / Experience tables:
+ *
+ * - `tabrix_memory_traces` is append-only factual trace storage for each
+ *   AI -> Tabrix tool call and Tabrix -> AI result.
+ * - `tabrix_knowledge_models` is a page-object model store. It is NOT a
+ *   keyword dictionary; object/data-source models must distinguish stable
+ *   structural signals from weak text signals inside their JSON blobs.
+ * - `tabrix_experience_recipes` is a redacted, import/export-capable recipe
+ *   store derived from successful traces.
+ *
+ * No old tables are dropped here. The old storage remains available until the
+ * new flow has repository, integration, and migration evidence.
+ */
+export const MKE_CORE_CREATE_TABLES_SQL = `
+CREATE TABLE IF NOT EXISTS tabrix_memory_traces (
+  trace_id                 TEXT PRIMARY KEY,
+  task_id                  TEXT NOT NULL,
+  task_theme               TEXT,
+  task_intent              TEXT,
+  task_signature           TEXT,
+  ai_client                TEXT,
+  tool_name                TEXT NOT NULL,
+  tool_call_id             TEXT,
+  sequence_index           INTEGER,
+  request_params_blob      TEXT NOT NULL,
+  request_at               TEXT NOT NULL,
+  response_blob            TEXT NOT NULL,
+  response_at              TEXT NOT NULL,
+  duration_ms              INTEGER,
+  tool_success             INTEGER,
+  business_success         TEXT,
+  result_summary           TEXT,
+  error_code               TEXT,
+  tab_id                   INTEGER,
+  window_id                INTEGER,
+  browser_context_key      TEXT,
+  tab_lifecycle_blob       TEXT,
+  site_family              TEXT,
+  page_url_pattern         TEXT,
+  page_role                TEXT,
+  page_state               TEXT,
+  page_model_key           TEXT,
+  perception_objects_blob  TEXT,
+  action_target_blob       TEXT,
+  pre_observation_blob     TEXT,
+  post_observation_blob    TEXT,
+  post_action_delta_blob   TEXT,
+  source_route             TEXT,
+  selected_data_source     TEXT,
+  freshness                TEXT,
+  fallback_used            TEXT,
+  next_required_check      TEXT,
+  token_prompt             INTEGER,
+  token_completion         INTEGER,
+  token_total              INTEGER,
+  ai_feedback_score        REAL,
+  ai_feedback_blob         TEXT,
+  redaction_state          TEXT NOT NULL DEFAULT 'redacted',
+  created_at               TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS tabrix_memory_traces_task_idx
+  ON tabrix_memory_traces(task_id, created_at);
+CREATE INDEX IF NOT EXISTS tabrix_memory_traces_tool_idx
+  ON tabrix_memory_traces(tool_name, created_at);
+CREATE INDEX IF NOT EXISTS tabrix_memory_traces_page_idx
+  ON tabrix_memory_traces(site_family, page_model_key, page_role, created_at);
+CREATE INDEX IF NOT EXISTS tabrix_memory_traces_success_idx
+  ON tabrix_memory_traces(tool_success, business_success, created_at);
+
+CREATE TABLE IF NOT EXISTS tabrix_knowledge_models (
+  knowledge_id                 TEXT PRIMARY KEY,
+  site_family                  TEXT NOT NULL,
+  page_url_pattern             TEXT,
+  page_role                    TEXT NOT NULL,
+  page_model_key               TEXT NOT NULL,
+  model_version                INTEGER NOT NULL DEFAULT 1,
+  page_state_model_blob        TEXT NOT NULL,
+  object_graph_blob            TEXT NOT NULL,
+  action_surface_blob          TEXT NOT NULL,
+  data_source_model_blob       TEXT,
+  navigation_model_blob        TEXT,
+  failure_signal_blob          TEXT,
+  source_trace_ids_blob        TEXT,
+  source_experience_ids_blob   TEXT,
+  observation_count            INTEGER NOT NULL DEFAULT 0,
+  successful_use_count         INTEGER NOT NULL DEFAULT 0,
+  failed_use_count             INTEGER NOT NULL DEFAULT 0,
+  confidence_score             REAL NOT NULL DEFAULT 0,
+  drift_score                  REAL,
+  archived_at                  TEXT,
+  last_observed_at             TEXT,
+  last_validated_at            TEXT,
+  created_at                   TEXT NOT NULL,
+  updated_at                   TEXT NOT NULL,
+  UNIQUE(site_family, page_model_key, model_version)
+);
+
+CREATE INDEX IF NOT EXISTS tabrix_knowledge_models_lookup_idx
+  ON tabrix_knowledge_models(site_family, page_role, page_model_key);
+CREATE INDEX IF NOT EXISTS tabrix_knowledge_models_confidence_idx
+  ON tabrix_knowledge_models(confidence_score, last_validated_at);
+
+CREATE TABLE IF NOT EXISTS tabrix_experience_recipes (
+  experience_id              TEXT PRIMARY KEY,
+  recipe_name                TEXT NOT NULL,
+  scenario_key               TEXT NOT NULL,
+  task_signature             TEXT NOT NULL,
+  recipe_fingerprint         TEXT NOT NULL,
+  recipe_version             INTEGER NOT NULL DEFAULT 1,
+  site_family                TEXT,
+  page_model_key             TEXT,
+  page_role                  TEXT,
+  preconditions_blob         TEXT NOT NULL,
+  variable_schema_blob       TEXT NOT NULL,
+  steps_blob                 TEXT NOT NULL,
+  success_check_blob         TEXT NOT NULL,
+  recovery_blob              TEXT,
+  source_trace_ids_blob      TEXT NOT NULL DEFAULT '[]',
+  linked_knowledge_ids_blob  TEXT,
+  success_count              INTEGER NOT NULL DEFAULT 0,
+  failure_count              INTEGER NOT NULL DEFAULT 0,
+  adoption_count             INTEGER NOT NULL DEFAULT 0,
+  avg_duration_ms            INTEGER,
+  avg_token_total            INTEGER,
+  reliability_score          REAL,
+  speed_score                REAL,
+  token_saving_score         REAL,
+  usefulness_score           REAL,
+  drift_state                TEXT,
+  portability_scope          TEXT NOT NULL DEFAULT 'local',
+  origin_kind                TEXT NOT NULL DEFAULT 'local_mined',
+  origin_package_id          TEXT,
+  compatibility_blob         TEXT,
+  export_state               TEXT NOT NULL DEFAULT 'not_exportable',
+  import_state               TEXT NOT NULL DEFAULT 'native',
+  redaction_state            TEXT NOT NULL DEFAULT 'template_only'
+                             CHECK (redaction_state = 'template_only'),
+  archived_at                TEXT,
+  last_used_at               TEXT,
+  last_verified_at           TEXT,
+  created_at                 TEXT NOT NULL,
+  updated_at                 TEXT NOT NULL,
+  UNIQUE(recipe_fingerprint, recipe_version)
+);
+
+CREATE INDEX IF NOT EXISTS tabrix_experience_recipes_lookup_idx
+  ON tabrix_experience_recipes(site_family, page_model_key, page_role, task_signature);
+CREATE INDEX IF NOT EXISTS tabrix_experience_recipes_score_idx
+  ON tabrix_experience_recipes(reliability_score, usefulness_score);
+CREATE INDEX IF NOT EXISTS tabrix_experience_recipes_import_export_idx
+  ON tabrix_experience_recipes(export_state, import_state, updated_at);
+`;
+
+/**
  * Experience schema.
  *
  * Co-located in the same `memory.db` file as Memory: Experience is a

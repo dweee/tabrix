@@ -141,6 +141,22 @@ describe('read_page understanding', () => {
     expect(summary.primaryRegionConfidence).toBe('high');
   });
 
+  it('treats exact generic search_result routes as search results before content-detail inference', () => {
+    const summary = inferPageUnderstanding(
+      'https://example.test/search_result?query=neutral',
+      'Neutral topic - 搜索',
+      [
+        'Neutral topic 搜索结果',
+        'Content creator prompt examples',
+        'Author profile Follow Like Collect Share Comment',
+      ].join('\n'),
+    );
+
+    expect(summary.pageRole).toBe('search_results');
+    expect(summary.primaryRegion).toBe('search_results');
+    expect(summary.primaryRegionConfidence).toBe('medium');
+  });
+
   it('detects English sign-in forms from credential fields', () => {
     const summary = inferPageUnderstanding(
       'https://example.com/sign-in',

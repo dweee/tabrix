@@ -22,6 +22,7 @@ import { readPageTool } from '@/entrypoints/background/tools/browser/read-page';
 import {
   __resetStableTargetRefRegistryForTests,
   getStableTargetRefRegistrySnapshot,
+  lookupCandidateActionTargetLocatorEntry,
   lookupStableTargetRef,
 } from '@/entrypoints/background/tools/browser/stable-target-ref-registry';
 import { resolveCandidateActionTarget } from '@/entrypoints/background/tools/browser/candidate-action';
@@ -105,6 +106,19 @@ describe('V25-04 click-resolution L0 contract', () => {
     const snap = getStableTargetRefRegistrySnapshot();
     expect(snap.tabIds).toContain(FIXTURE_TAB.id);
     expect(snap.entryCounts[FIXTURE_TAB.id]).toBeGreaterThan(0);
+  });
+
+  it('read_page(L0) also records candidate action locators for same-tab fallback recovery', async () => {
+    setupExecutorMocks();
+    await runReadPage('L0');
+
+    const snap = getStableTargetRefRegistrySnapshot();
+    expect(snap.tabIds).toContain(FIXTURE_TAB.id);
+    expect(snap.candidateLocatorCounts[FIXTURE_TAB.id]).toBeGreaterThan(0);
+    expect(lookupCandidateActionTargetLocatorEntry(FIXTURE_TAB.id, 'ref_5')).toMatchObject({
+      selector: '[data-ref="5"]',
+      selectorType: 'css',
+    });
   });
 
   it('chrome_click_element resolves the same tgt_* (L0 read) to a live ref', async () => {

@@ -229,46 +229,84 @@
                     : getMessage('connectButton')
               }}</span>
             </button>
-          </div>
-        </div>
 
-        <!-- 管理入口卡片 -->
-        <div class="section">
-          <h2 class="section-title">{{ getMessage('popupManagementEntrancesTitle') }}</h2>
-          <div class="entry-card">
-            <button class="entry-item" @click="currentView = 'token-management'">
-              <div class="entry-icon token">
-                <svg
-                  viewBox="0 0 24 24"
-                  width="20"
-                  height="20"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
-                  />
-                </svg>
+            <!-- 管理入口卡片 -->
+            <div class="management-entry-block">
+              <h2 class="section-title">{{ getMessage('popupManagementEntrancesTitle') }}</h2>
+              <div class="entry-card">
+                <button class="entry-item" @click="currentView = 'token-management'">
+                  <div class="entry-icon token">
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="20"
+                      height="20"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
+                      />
+                    </svg>
+                  </div>
+                  <div class="entry-content">
+                    <span class="entry-title">{{ getMessage('popupTokenManagementTitle') }}</span>
+                    <span class="entry-desc">{{ getMessage('popupTokenManagementDesc') }}</span>
+                  </div>
+                  <svg
+                    class="entry-arrow"
+                    viewBox="0 0 24 24"
+                    width="16"
+                    height="16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+                <button class="entry-item" @click="openSidepanelAndClose('mke-data')">
+                  <div class="entry-icon mke-data">
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="20"
+                      height="20"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M4 7c0 1.1 3.58 2 8 2s8-.9 8-2-3.58-2-8-2-8 .9-8 2z"
+                      />
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M4 7v5c0 1.1 3.58 2 8 2s8-.9 8-2V7M4 12v5c0 1.1 3.58 2 8 2s8-.9 8-2v-5"
+                      />
+                    </svg>
+                  </div>
+                  <div class="entry-content">
+                    <span class="entry-title">{{ getMessage('popupMkeDataManagementTitle') }}</span>
+                    <span class="entry-desc">{{ getMessage('popupMkeDataManagementDesc') }}</span>
+                  </div>
+                  <svg
+                    class="entry-arrow"
+                    viewBox="0 0 24 24"
+                    width="16"
+                    height="16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
               </div>
-              <div class="entry-content">
-                <span class="entry-title">{{ getMessage('popupTokenManagementTitle') }}</span>
-                <span class="entry-desc">{{ getMessage('popupTokenManagementDesc') }}</span>
-              </div>
-              <svg
-                class="entry-arrow"
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1461,8 +1499,9 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   width: 100%;
-  min-height: 100%;
   height: 100%;
+  min-height: 0;
+  max-height: 100%;
   overflow: hidden;
   font-family:
     'Segoe UI Variable', 'SF Pro Text', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
@@ -1717,15 +1756,26 @@ onUnmounted(() => {
 }
 
 .content {
-  flex-grow: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 8px 14px 12px;
   overflow-y: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.65) transparent;
 }
 
 .content::-webkit-scrollbar {
-  display: none;
+  width: 6px;
+}
+
+.content::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.58);
+  border-radius: 999px;
+}
+
+.content::-webkit-scrollbar-track {
+  background: transparent;
 }
 .status-card {
   background: white;
@@ -2530,6 +2580,19 @@ onUnmounted(() => {
   padding-top: 8px;
 }
 
+.management-entry-block {
+  border-top: 1px solid #f1f5f9;
+  padding-top: 10px;
+}
+
+.management-entry-block .section-title {
+  margin-bottom: 8px;
+}
+
+.management-entry-block .entry-card {
+  box-shadow: none;
+}
+
 .mcp-config-header {
   display: flex;
   justify-content: space-between;
@@ -2777,7 +2840,7 @@ onUnmounted(() => {
   border: 1px solid #c6d3e5;
   border-radius: 11px;
   padding: 12px;
-  overflow: auto;
+  overflow: visible;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88);
 }
 
@@ -2790,8 +2853,8 @@ onUnmounted(() => {
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
-  max-height: 198px;
-  overflow: auto;
+  max-height: none;
+  overflow: visible;
 }
 
 .port-section {
@@ -3000,6 +3063,7 @@ onUnmounted(() => {
   height: 24px;
 }
 .footer {
+  flex-shrink: 0;
   padding: 10px 16px 14px;
   margin-top: 2px;
 }
@@ -3050,9 +3114,9 @@ onUnmounted(() => {
 @media (max-width: 320px) {
   .popup-container {
     width: 100%;
-    height: auto;
-    min-height: 100%;
-    max-height: 1080px;
+    height: 100%;
+    min-height: 0;
+    max-height: 100%;
     border-radius: 0;
   }
 
@@ -3333,34 +3397,40 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   flex: 1;
+  height: 100%;
   min-height: 0;
+  overflow: hidden;
 }
 
-/* 管理入口卡片样式 */
 .entry-card {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, #ffffff 100%);
   border: 1px solid rgba(226, 232, 240, 0.95);
   border-radius: 14px;
   box-shadow: 0 10px 22px -20px rgba(15, 23, 42, 0.65);
-  overflow: hidden;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: visible;
+  padding: 8px;
 }
 
 .entry-item {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 13px 14px;
+  gap: 8px;
+  min-height: 66px;
+  padding: 10px;
   background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--ac-border, #e7e5e4);
+  border: 1px solid var(--ac-border, #e7e5e4);
+  border-radius: 10px;
   cursor: pointer;
   transition: all var(--ac-motion-fast, 120ms) ease;
   text-align: left;
 }
 
 .entry-item:last-child {
-  border-bottom: none;
+  border-bottom: 1px solid var(--ac-border, #e7e5e4);
 }
 
 .entry-item:hover {
@@ -3368,8 +3438,8 @@ onUnmounted(() => {
 }
 
 .entry-icon {
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3402,6 +3472,11 @@ onUnmounted(() => {
   color: #ea580c;
 }
 
+.entry-icon.mke-data {
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563eb;
+}
+
 .entry-content {
   flex: 1;
   min-width: 0;
@@ -3409,7 +3484,7 @@ onUnmounted(() => {
 
 .entry-title {
   display: block;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--ac-text, #1a1a1a);
   line-height: 1.3;
@@ -3417,7 +3492,7 @@ onUnmounted(() => {
 
 .entry-desc {
   display: block;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--ac-text-subtle, #a8a29e);
   line-height: 1.3;
   margin-top: 2px;
@@ -3426,6 +3501,10 @@ onUnmounted(() => {
 .entry-arrow {
   color: var(--ac-text-subtle, #a8a29e);
   flex-shrink: 0;
+}
+
+.management-entry-block .entry-arrow {
+  display: none;
 }
 
 /* Coming Soon Badge */
@@ -3648,6 +3727,7 @@ onUnmounted(() => {
 }
 
 .popup-container[data-agent-theme='dark-console'] .connected-clients-section,
+.popup-container[data-agent-theme='dark-console'] .management-entry-block,
 .popup-container[data-agent-theme='dark-console'] .mcp-config-section {
   border-top-color: rgba(56, 189, 248, 0.2);
 }

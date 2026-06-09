@@ -10,10 +10,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  DEFAULT_MKE_PAGE_SIZE,
   DEFAULT_NATIVE_SERVER_PORT,
   DEFAULT_SESSIONS_PAGE_SIZE,
   MemoryApiError,
   fetchMemoryTask,
+  fetchMkeExperienceRecipes,
+  fetchMkeKnowledgeModels,
+  fetchMkeMemoryTraces,
   fetchRecentSessions,
   fetchSessionSteps,
   resolveMemoryApiBaseUrl,
@@ -240,5 +244,81 @@ describe('fetchMemoryTask', () => {
       httpStatus: 404,
       message: 'Task not found',
     });
+  });
+});
+
+describe('MKE data query helpers', () => {
+  it('fetches Memory trace summaries from the MKE endpoint', async () => {
+    const payload = {
+      traces: [
+        {
+          traceId: 'trace-1',
+          taskId: 'task-1',
+          toolName: 'chrome_read_page',
+          requestAt: '2026-06-06T10:00:00Z',
+          responseAt: '2026-06-06T10:00:01Z',
+          toolSuccess: true,
+          businessSuccess: 'unknown',
+          redactionState: 'redacted',
+          createdAt: '2026-06-06T10:00:01Z',
+        },
+      ],
+      total: 1,
+      limit: DEFAULT_MKE_PAGE_SIZE,
+      offset: 0,
+      persistenceMode: 'disk' as const,
+    };
+    fetchMock.mockResolvedValue(okResponse(payload));
+
+    const data = await fetchMkeMemoryTraces({ baseUrl: 'http://127.0.0.1:12306' });
+
+    expect(data).toEqual(payload);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      `http://127.0.0.1:12306/memory/mke/traces?limit=${DEFAULT_MKE_PAGE_SIZE}&offset=0`,
+    );
+  });
+
+  it('fetches Knowledge model summaries with explicit pagination', async () => {
+    fetchMock.mockResolvedValue(
+      okResponse({
+        knowledgeModels: [],
+        total: 0,
+        limit: 5,
+        offset: 10,
+        persistenceMode: 'disk',
+      }),
+    );
+
+    await fetchMkeKnowledgeModels({
+      baseUrl: 'http://127.0.0.1:12306',
+      limit: 5,
+      offset: 10,
+    });
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      'http://127.0.0.1:12306/memory/mke/knowledge?limit=5&offset=10',
+    );
+  });
+
+  it('fetches Experience recipe summaries and clamps invalid pagination', async () => {
+    fetchMock.mockResolvedValue(
+      okResponse({
+        experienceRecipes: [],
+        total: 0,
+        limit: 500,
+        offset: 0,
+        persistenceMode: 'disk',
+      }),
+    );
+
+    await fetchMkeExperienceRecipes({
+      baseUrl: 'http://127.0.0.1:12306',
+      limit: 9999,
+      offset: -20,
+    });
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      'http://127.0.0.1:12306/memory/mke/experience?limit=500&offset=0',
+    );
   });
 });

@@ -90,6 +90,17 @@
     return results;
   }
 
+  function toXPathStringLiteral(value) {
+    const text = String(value || '');
+    if (!text.includes("'")) return `'${text}'`;
+
+    const singleQuoteLiteral = `"'"`;
+    return `concat(${text
+      .split("'")
+      .map((part) => `'${part}'`)
+      .join(`, ${singleQuoteLiteral}, `)})`;
+  }
+
   // --- Core Helper Functions ---
 
   /**
@@ -868,7 +879,8 @@
 
     // --- Layer 2: Find text, then find its interactive ancestor ---
     const lowerCaseText = textQuery.toLowerCase();
-    const xPath = `//text()[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '${lowerCaseText}')]`;
+    const xPathQuery = toXPathStringLiteral(lowerCaseText);
+    const xPath = `//text()[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), ${xPathQuery})]`;
     const textNodes = document.evaluate(
       xPath,
       document,

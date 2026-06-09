@@ -211,7 +211,7 @@ function buildOperationTargetBrief(args: {
       nextRequiredCheck:
         args.canContinueOnLatestAiOperatedTab === true
           ? 'page_level_read_or_postcondition_check'
-          : 'refresh_target_state',
+          : 'prove_foreground_or_refresh_browser_snapshot',
       summary: `Operation target brief: latest AI-operated tab ${latestAiTabId ?? 'unknown'} is also browser-active; continue only after page-level evidence is refreshed.`,
       claimBoundary:
         'Target brief proves routing alignment only; page action completion still needs read/postcondition evidence.',
@@ -280,6 +280,7 @@ function buildOperationTargetBrief(args: {
 function buildAiActionReadiness(args: {
   operationTargetBrief: ReturnType<typeof buildOperationTargetBrief>;
   currentWindowRelation: string;
+  canContinueOnLatestAiOperatedTab: boolean | null;
 }) {
   const target = args.operationTargetBrief;
   if (
@@ -327,6 +328,23 @@ function buildAiActionReadiness(args: {
       summary: `AI action readiness: targetRole=${target.targetRole}, targetTab=${target.targetTabId ?? 'unknown'}, browserActiveTab=${target.browserActiveTabId ?? 'unknown'}; ${target.nextRequiredCheck} is required before acting.`,
       claimBoundary:
         'Action readiness uses browser object state only; it does not prove page content, task intent, action postconditions, or task success.',
+    };
+  }
+  if (
+    target.relationToBrowserActiveTab === 'same_as_browser_active' &&
+    args.canContinueOnLatestAiOperatedTab !== true
+  ) {
+    return {
+      readiness: 'operation_evidence_not_proven',
+      targetRole: target.targetRole,
+      targetTabId: target.targetTabId,
+      browserActiveTabId: target.browserActiveTabId,
+      latestAiOperatedTabId: target.latestAiOperatedTabId,
+      canProceedToPageLevelCheck: false,
+      requiredBeforeAction: target.nextRequiredCheck,
+      summary: `AI action readiness: targetRole=${target.targetRole}, targetTab=${target.targetTabId ?? 'unknown'} is browser-active but the latest AI operation is not proven safe to continue; ${target.nextRequiredCheck} is required before page-level checks.`,
+      claimBoundary:
+        'Action readiness uses browser object and operation evidence only; it does not prove page content, task intent, action postconditions, or task success.',
     };
   }
   if (target.targetCanTabrixOperate === true) {
@@ -390,6 +408,8 @@ class WindowTool extends BaseBrowserToolExecutor {
         operationTargetBrief,
         currentWindowRelation:
           browserWorld.summary.windowOperationState.relationToCurrentOperableWindow,
+        canContinueOnLatestAiOperatedTab:
+          browserWorld.summary.aiOperationState.canContinueOnLatestAiOperatedTab,
       });
 
       const structuredWindows = browserWorld.windows.map((window) => {

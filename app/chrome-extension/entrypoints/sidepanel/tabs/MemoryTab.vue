@@ -1,5 +1,5 @@
 <template>
-  <section class="mkep-tab">
+  <section class="mkep-tab memory-tab" :data-agent-theme="agentTheme">
     <header class="mkep-tab__header">
       <div class="mkep-tab__title-row">
         <h2 class="mkep-tab__title">Memory</h2>
@@ -227,10 +227,12 @@ import {
   MEMORY_STATUS_CHIPS,
   type MemoryStatusChip,
 } from '../../shared/composables/useMemoryTimeline';
+import { useAgentTheme } from '../../shared/composables/usePopupTheme';
 import MemorySessionSteps from './MemorySessionSteps.vue';
 
 const timeline = useMemoryTimeline();
 const listEl = ref<HTMLElement | null>(null);
+const { theme: agentTheme, initTheme } = useAgentTheme();
 
 const searchModel = computed<string>({
   get: () => timeline.searchQuery.value,
@@ -238,6 +240,7 @@ const searchModel = computed<string>({
 });
 
 onMounted(() => {
+  void initTheme();
   void timeline.load();
 });
 
@@ -337,10 +340,10 @@ function formatDuration(row: MemorySessionSummary): string | null {
   border: 1px solid #d1d5db;
   background: #ffffff;
   color: #1f2937;
-  padding: 6px 12px;
+  padding: 6px 11px;
   border-radius: 8px;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 700;
   cursor: pointer;
   transition:
     background 120ms ease,
@@ -397,27 +400,34 @@ function formatDuration(row: MemorySessionSummary): string | null {
 }
 
 .memory-filters {
-  display: flex;
-  align-items: center;
+  display: grid;
   gap: 8px;
-  flex-wrap: wrap;
-  margin: 8px 0 10px;
+  grid-template-columns: minmax(0, 1fr);
+  margin: 8px 0 12px;
 }
 
 .memory-chips {
-  display: inline-flex;
-  gap: 4px;
-  flex-wrap: wrap;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 1px;
+  scrollbar-width: none;
+}
+
+.memory-chips::-webkit-scrollbar {
+  display: none;
 }
 
 .memory-chip {
+  flex: 0 0 auto;
   border: 1px solid #d1d5db;
   background: #ffffff;
   color: #374151;
-  padding: 4px 10px;
+  padding: 5px 10px;
   border-radius: 999px;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 700;
+  line-height: 1.2;
   cursor: pointer;
   transition:
     background 120ms ease,
@@ -451,11 +461,11 @@ function formatDuration(row: MemorySessionSummary): string | null {
 }
 
 .memory-search {
-  flex: 1 1 180px;
-  min-width: 140px;
+  width: 100%;
+  box-sizing: border-box;
   border: 1px solid #d1d5db;
   border-radius: 8px;
-  padding: 6px 10px;
+  padding: 8px 10px;
   font-size: 12px;
   color: #1f2937;
   background: #ffffff;
@@ -492,7 +502,7 @@ function formatDuration(row: MemorySessionSummary): string | null {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
 }
 
 @keyframes memory-row-flash {
@@ -511,8 +521,8 @@ function formatDuration(row: MemorySessionSummary): string | null {
 }
 
 .memory-row {
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
   overflow: hidden;
@@ -524,7 +534,7 @@ function formatDuration(row: MemorySessionSummary): string | null {
   flex-direction: column;
   gap: 4px;
   width: 100%;
-  padding: 12px 14px;
+  padding: 11px 12px;
   box-sizing: border-box;
   cursor: pointer;
   text-align: left;
@@ -565,7 +575,7 @@ function formatDuration(row: MemorySessionSummary): string | null {
 .memory-row__title {
   margin: 0;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 750;
   color: #111827;
   flex: 1 1 auto;
   min-width: 0;
@@ -599,7 +609,7 @@ function formatDuration(row: MemorySessionSummary): string | null {
 .memory-row__steps {
   font-size: 11px;
   color: #6b7280;
-  padding: 2px 8px;
+  padding: 3px 8px;
   background: #f3f4f6;
   border-radius: 999px;
   flex: 0 0 auto;
@@ -609,7 +619,7 @@ function formatDuration(row: MemorySessionSummary): string | null {
   margin: 0;
   font-size: 12px;
   color: #4b5563;
-  line-height: 1.5;
+  line-height: 1.45;
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
@@ -643,81 +653,80 @@ function formatDuration(row: MemorySessionSummary): string | null {
   color: #6b7280;
 }
 
-@media (prefers-color-scheme: dark) {
-  .memory-meta {
-    color: #9ca3af;
-  }
-  .memory-refresh {
-    background: #1f2937;
-    border-color: #374151;
-    color: #e5e7eb;
-  }
-  .memory-refresh:hover:not(:disabled) {
-    background: #374151;
-  }
-  .memory-state,
-  .memory-row {
-    background: #1f2937;
-    border-color: #374151;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  }
-  .memory-row__toggle:hover {
-    background: #111827;
-  }
-  .memory-row__caret {
-    color: #6b7280;
-  }
-  .memory-row__caret--open {
-    color: #60a5fa;
-  }
-  .memory-state__heading,
-  .memory-row__title {
-    color: #f9fafb;
-  }
-  .memory-state__detail {
-    color: #d1d5db;
-  }
-  .memory-state__hint,
-  .memory-pager__range,
-  .memory-row__intent,
-  .memory-row__meta,
-  .memory-state--loading {
-    color: #9ca3af;
-  }
-  .memory-row__dot {
-    color: #4b5563;
-  }
-  .memory-row__steps {
-    background: #374151;
-    color: #d1d5db;
-  }
-  .memory-state--error strong {
-    color: #fca5a5;
-  }
-  .memory-chip {
-    background: #1f2937;
-    border-color: #374151;
-    color: #d1d5db;
-  }
-  .memory-chip:hover {
-    background: #374151;
-  }
-  .memory-search {
-    background: #111827;
-    border-color: #374151;
-    color: #e5e7eb;
-  }
-  .memory-search:focus {
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
-  }
-  .memory-jump {
-    background: #3f1d1d;
-    border-color: #7f1d1d;
-    color: #fca5a5;
-  }
-  .memory-jump:hover {
-    background: #4c1d1d;
-  }
+.memory-tab[data-agent-theme='dark-console'] .memory-meta {
+  color: #9ab8d8;
+}
+
+.memory-tab[data-agent-theme='dark-console'] .memory-refresh,
+.memory-tab[data-agent-theme='dark-console'] .memory-chip {
+  background: rgba(8, 22, 44, 0.82);
+  border-color: rgba(56, 189, 248, 0.32);
+  color: #dbeafe;
+}
+
+.memory-tab[data-agent-theme='dark-console'] .memory-refresh:hover:not(:disabled),
+.memory-tab[data-agent-theme='dark-console'] .memory-chip:hover {
+  background: rgba(12, 34, 64, 0.9);
+  border-color: rgba(34, 211, 238, 0.5);
+}
+
+.memory-tab[data-agent-theme='dark-console'] .memory-chip--active {
+  background: rgba(34, 211, 238, 0.2);
+  border-color: rgba(34, 211, 238, 0.68);
+  color: #a5f3fc;
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.18) inset;
+}
+
+.memory-tab[data-agent-theme='dark-console'] .memory-search {
+  background: rgba(5, 18, 36, 0.86);
+  border-color: rgba(56, 189, 248, 0.3);
+  color: #dbeafe;
+}
+
+.memory-tab[data-agent-theme='dark-console'] .memory-search::placeholder {
+  color: #64748b;
+}
+
+.memory-tab[data-agent-theme='dark-console'] .memory-state,
+.memory-tab[data-agent-theme='dark-console'] .memory-row {
+  background: linear-gradient(180deg, rgba(5, 18, 36, 0.86) 0%, rgba(7, 20, 40, 0.92) 100%);
+  border-color: rgba(56, 189, 248, 0.24);
+  box-shadow:
+    0 1px 0 rgba(56, 189, 248, 0.16) inset,
+    0 12px 20px -24px rgba(2, 132, 199, 0.42);
+}
+
+.memory-tab[data-agent-theme='dark-console'] .memory-row__toggle:hover {
+  background: rgba(8, 22, 44, 0.62);
+}
+
+.memory-tab[data-agent-theme='dark-console'] .memory-state__heading,
+.memory-tab[data-agent-theme='dark-console'] .memory-row__title {
+  color: #dbeafe;
+}
+
+.memory-tab[data-agent-theme='dark-console'] .memory-state__detail,
+.memory-tab[data-agent-theme='dark-console'] .memory-row__intent {
+  color: #c7e6ff;
+}
+
+.memory-tab[data-agent-theme='dark-console'] .memory-state__hint,
+.memory-tab[data-agent-theme='dark-console'] .memory-pager__range,
+.memory-tab[data-agent-theme='dark-console'] .memory-row__meta,
+.memory-tab[data-agent-theme='dark-console'] .memory-state--loading {
+  color: #9ab8d8;
+}
+
+.memory-tab[data-agent-theme='dark-console'] .memory-row__caret {
+  color: #64748b;
+}
+
+.memory-tab[data-agent-theme='dark-console'] .memory-row__caret--open {
+  color: #7dd3fc;
+}
+
+.memory-tab[data-agent-theme='dark-console'] .memory-row__steps {
+  background: rgba(8, 22, 44, 0.82);
+  color: #9ec3e7;
 }
 </style>

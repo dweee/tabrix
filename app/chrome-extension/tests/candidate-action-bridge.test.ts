@@ -9,6 +9,7 @@ import {
 } from '@/entrypoints/background/browser-world-inventory';
 import {
   __resetStableTargetRefRegistryForTests,
+  recordCandidateActionTargetLocatorsSnapshot,
   recordStableTargetRefSnapshot,
 } from '@/entrypoints/background/tools/browser/stable-target-ref-registry';
 
@@ -368,6 +369,45 @@ describe('candidateAction bridge', () => {
     )?.[1] as any;
     expect(clickMessage).toMatchObject({
       selector: '.filter-panel .tags[data-filter="most-saved"]',
+    });
+    expect(clickMessage.ref).toBeUndefined();
+  });
+
+  it('routes recovered dynamic surface targetRef through candidateAction locator css', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4121,
+      title: 'Search',
+      url: 'https://example.com/search?q=neutral',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      dispatchSucceeded: true,
+      signals: { domChanged: true },
+    });
+
+    const result = await clickTool.execute({
+      candidateAction: {
+        targetRef: 'ref_dynamic_surface_3',
+        intent: 'click',
+        locatorChain: [
+          { type: 'ref', value: 'ref_dynamic_surface_3' },
+          { type: 'css', value: '[data-surface-option="week"]' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.targetBinding).toMatchObject({
+      resolutionSource: 'candidate_locator_css',
+      dispatchTarget: 'selector',
+    });
+    const clickMessage = sendSpy.mock.calls.find(
+      ([, message]) => (message as any)?.action === TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+    )?.[1] as any;
+    expect(clickMessage).toMatchObject({
+      selector: '[data-surface-option="week"]',
     });
     expect(clickMessage.ref).toBeUndefined();
   });
@@ -839,6 +879,80 @@ describe('candidateAction bridge', () => {
       }),
       undefined,
     );
+  });
+
+  it('S142: resolves bare fallback targetRef from the latest read_page candidate locator snapshot', async () => {
+    recordCandidateActionTargetLocatorsSnapshot(4203, [
+      {
+        targetRef: 'ref_fallback_6',
+        selector: 'nav a[href="/livelist"]',
+      },
+    ]);
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4203,
+      title: 'Explore',
+      url: 'https://example.com/explore',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      dispatchSucceeded: true,
+      signals: { urlBefore: 'https://example.com/explore', urlAfter: 'https://example.com/live' },
+    });
+
+    const result = await clickTool.execute({
+      candidateAction: {
+        targetRef: 'ref_fallback_6',
+        label: 'Live',
+        intent: 'content.open_detail',
+      },
+      allowDownloadClick: true,
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.targetBinding).toMatchObject({
+      resolutionSource: 'candidate_snapshot_locator_css',
+      dispatchTarget: 'selector',
+    });
+    expect(sendSpy).toHaveBeenCalledWith(
+      4203,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+        selector: 'nav a[href="/livelist"]',
+      }),
+      undefined,
+    );
+    const clickMessage = sendSpy.mock.calls.find(
+      ([, message]) => (message as any)?.action === TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+    )?.[1] as any;
+    expect(clickMessage.ref).toBeUndefined();
+  });
+
+  it('S142: bare fallback targetRef without a read_page locator snapshot still fails closed', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4206,
+      title: 'Explore',
+      url: 'https://example.com/explore',
+    });
+    const sendSpy = vi
+      .spyOn(clickTool as any, 'sendMessageToTab')
+      .mockResolvedValue({ success: true });
+
+    const result = await clickTool.execute({
+      candidateAction: {
+        targetRef: 'ref_fallback_6',
+        label: 'Live',
+        intent: 'content.open_detail',
+      },
+      allowDownloadClick: true,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content?.[0] as any)?.text || '')).toContain(
+      'candidateAction did not resolve target',
+    );
+    expect(sendSpy).not.toHaveBeenCalled();
   });
 
   it('B-012: preserves registry frameId when resolving stable targetRef for click', async () => {

@@ -400,10 +400,10 @@ mcpCommand
         authToken: options.authToken,
         timeoutMs: options.timeout ? parseInt(options.timeout, 10) : undefined,
       });
-      process.exit(exitCode);
+      process.exitCode = exitCode;
     } catch (error: any) {
       console.error(colorText(`MCP tools failed: ${error.message}`, 'red'));
-      process.exit(1);
+      process.exitCode = 1;
     }
   });
 
@@ -433,10 +433,10 @@ mcpCommand
         authToken: options.authToken,
         timeoutMs: options.timeout ? parseInt(options.timeout, 10) : undefined,
       });
-      process.exit(exitCode);
+      process.exitCode = exitCode;
     } catch (error: any) {
       console.error(colorText(`MCP call failed: ${error.message}`, 'red'));
-      process.exit(1);
+      process.exitCode = 1;
     }
   });
 

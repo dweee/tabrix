@@ -67,6 +67,139 @@ describe('handleToolCall execution wrapper', () => {
     expect(sessions[0].steps[0].toolName).toBe('chrome_read_page');
     expect(sessions[0].steps[0].status).toBe('completed');
     expect(sessionManager.listTasks()[0].status).toBe('completed');
+    const traces = sessionManager.memoryTraces!.listByTask(sessions[0].taskId);
+    expect(traces).toHaveLength(1);
+    expect(traces[0]).toMatchObject({
+      toolName: 'chrome_read_page',
+      toolCallId: sessions[0].steps[0].stepId,
+      sequenceIndex: 1,
+      tabId: 1,
+      toolSuccess: true,
+      businessSuccess: 'unknown',
+      redactionState: 'redacted',
+    });
+  });
+
+  it('uses _tabrix intent metadata for Memory trace titles and result trace envelopes', async () => {
+    markBridgeReady();
+    const bridgeSpy = jest
+      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+      .mockResolvedValueOnce({
+        status: 'success',
+        items: [],
+      } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ message: 'page read' }) }],
+          isError: false,
+        },
+      } as never);
+
+    const result = await handleToolCall('chrome_read_page', {
+      tabId: 1,
+      _tabrix: {
+        intentTitle: '读取搜索结果',
+        intentSummary: '读取当前页面内容用于汇总',
+        nextIntent: '筛选收藏最多内容',
+        ignoredFutureField: 'kept additive',
+      },
+    });
+    const payload = JSON.parse(String(result.content[0].text));
+
+    expect(payload._tabrix).toMatchObject({
+      intentTitle: '读取搜索结果',
+      intentSummary: '读取当前页面内容用于汇总',
+      nextIntent: '筛选收藏最多内容',
+      toolName: 'chrome_read_page',
+      toolSuccess: true,
+      businessStatus: 'unknown',
+      businessFeedbackRequired: true,
+      businessFeedbackGuideVersion: 'tabrix-ai-business-feedback-v1',
+    });
+    expect(payload._tabrix.businessFeedbackScoreGuide).toContain('0.90-1.00');
+    expect(payload._tabrix.businessFeedbackScoreGuide).toContain(
+      'clear page evidence and intent achieved',
+    );
+    expect(payload._tabrix.businessFeedbackScoreGuide).toContain(
+      'partial progress, needs follow-up read/confirmation',
+    );
+    expect(payload._tabrix.traceId).toEqual(expect.any(String));
+    expect((bridgeSpy.mock.calls[1][0] as any).args).toEqual({ tabId: 1 });
+
+    const sessions = sessionManager.listSessions();
+    const traces = sessionManager.memoryTraces!.listByTask(sessions[0].taskId);
+    expect(traces[0]).toMatchObject({
+      taskIntent: '读取搜索结果',
+      toolName: 'chrome_read_page',
+      requestParams: { tabId: 1 },
+    });
+  });
+
+  it('applies _tabrix previousFeedback to an earlier Memory trace on the next tool call', async () => {
+    markBridgeReady();
+    jest
+      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+      .mockResolvedValueOnce({
+        status: 'success',
+        items: [],
+      } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ message: 'opened' }) }],
+          isError: false,
+        },
+      } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        items: [],
+      } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ message: 'next read' }) }],
+          isError: false,
+        },
+      } as never);
+
+    const first = await handleToolCall('chrome_read_page', {
+      tabId: 1,
+      _tabrix: { intentTitle: '打开发布页' },
+    });
+    const firstPayload = JSON.parse(String(first.content[0].text));
+    const traceId = firstPayload._tabrix.traceId as string;
+
+    await handleToolCall('chrome_read_page', {
+      tabId: 1,
+      _tabrix: {
+        intentTitle: '读取发布状态',
+        previousFeedback: [
+          {
+            traceId,
+            businessStatus: 'achieved',
+            confidence: 0.85,
+            reasonCode: 'target_page_opened',
+            summary: '目标页面已打开',
+            ignoredFutureField: 'safe additive',
+          },
+        ],
+      },
+    });
+
+    const updated = sessionManager.memoryTraces!.get(traceId);
+    expect(updated).toMatchObject({
+      traceId,
+      businessSuccess: 'unknown',
+      aiFeedbackScore: 0.85,
+      aiFeedback: {
+        businessStatus: 'achieved',
+        confidence: 0.85,
+        reasonCode: 'target_page_opened',
+        summary: '目标页面已打开',
+        sourceToolName: 'chrome_read_page',
+      },
+    });
   });
 
   it('returns structured error payload when extension returns a non-recoverable error', async () => {
@@ -465,6 +598,28 @@ describe('handleToolCall execution wrapper', () => {
       resultShape: 'legacy_text_normalized',
       rawTextLength: 7,
       historyRef: expect.stringMatching(/^memory:\/\/action\/[0-9a-f-]+$/),
+      actionEvidenceResult: {
+        actionKind: 'click',
+        tabId: 1,
+        toolSuccess: true,
+        targetBinding: {
+          requestedTargetRef: 'e-1',
+          targetBindingProven: false,
+        },
+        dispatch: {
+          dispatched: true,
+          acceptedByBrowser: true,
+        },
+        business: {
+          businessSuccessVerdict: 'not_proven',
+          businessSuccessProven: false,
+          nextRequiredCheck: 'fresh_read_page',
+        },
+        postAction: {
+          postActionReadbackStatus: 'required',
+          freshReadRequired: true,
+        },
+      },
     });
     expect(body.message).toContain('post-action state is not proven');
     expect(JSON.stringify(body)).not.toContain('clicked');
@@ -495,9 +650,111 @@ describe('handleToolCall execution wrapper', () => {
       resultShape: 'legacy_text_error_normalized',
       rawTextLength: 21,
       historyRef: expect.stringMatching(/^memory:\/\/action\/[0-9a-f-]+$/),
+      actionEvidenceResult: {
+        actionKind: 'click',
+        tabId: 1,
+        toolSuccess: false,
+        targetBinding: {
+          requestedTargetRef: 'missing-ref',
+          targetBindingProven: false,
+        },
+        dispatch: {
+          dispatched: false,
+          acceptedByBrowser: false,
+          errorCode: 'legacy_text_error_normalized',
+        },
+        business: {
+          businessSuccessVerdict: 'not_proven',
+          businessSuccessProven: false,
+          nextRequiredCheck: 'fix_target_or_retry_with_fresh_refs',
+        },
+        postAction: {
+          postActionReadbackStatus: 'not_available',
+          freshReadRequired: false,
+        },
+      },
     });
     expect(body.message).toContain('click dispatch and post-action state are not proven');
     expect(JSON.stringify(body)).not.toContain('Element ref not found');
+  });
+
+  it('enriches structured legacy chrome_click_element errors with action evidence', async () => {
+    markBridgeReady();
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      items: [],
+    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      data: {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              dispatchSucceeded: false,
+              observedOutcome: 'no_observed_change',
+              verification: {
+                navigationOccurred: false,
+                urlChanged: false,
+                newTabOpened: false,
+                domChanged: false,
+                stateChanged: false,
+                focusChanged: false,
+              },
+              clickDiff: { kind: 'unknown' },
+              navigationOccurred: false,
+              lane: 'tabrix_owned',
+              message:
+                'Legacy text click error was normalized; click dispatch and post-action state are not proven',
+              clickMethod: 'unknown',
+              resultShape: 'legacy_text_error_normalized',
+              rawTextLength: 108,
+            }),
+          },
+        ],
+        isError: true,
+      },
+    } as never);
+
+    const result = await handleToolCall('chrome_click_element', {
+      tabId: 1,
+      ref: 'stale-ref',
+      interaction: 'hover',
+    });
+
+    expect(result.isError).toBe(true);
+    const body = JSON.parse(String((result.content as any[])[0].text));
+    expect(body).toMatchObject({
+      success: false,
+      dispatchSucceeded: false,
+      resultShape: 'legacy_text_error_normalized',
+      rawTextLength: 108,
+      historyRef: expect.stringMatching(/^memory:\/\/action\/[0-9a-f-]+$/),
+      actionEvidenceResult: {
+        actionKind: 'hover',
+        tabId: 1,
+        toolSuccess: false,
+        targetBinding: {
+          requestedTargetRef: 'stale-ref',
+          targetBindingProven: false,
+        },
+        dispatch: {
+          dispatched: false,
+          acceptedByBrowser: false,
+          errorCode: 'legacy_text_error_normalized',
+        },
+        business: {
+          businessSuccessVerdict: 'not_proven',
+          businessSuccessProven: false,
+          nextRequiredCheck: 'fix_target_or_retry_with_fresh_refs',
+        },
+        postAction: {
+          postActionReadbackStatus: 'not_available',
+          freshReadRequired: false,
+        },
+      },
+    });
   });
 
   it('attaches runtime preflight evidence to structured chrome_click_element errors', async () => {
@@ -599,6 +856,22 @@ describe('handleToolCall execution wrapper', () => {
     const summary = JSON.parse(actions[0].valueSummary!);
     expect(summary.kind).toBe('redacted');
     expect(summary.length).toBe('hunter2'.length);
+    const traces = sessionManager.memoryTraces!.listByTask(sessions[0].taskId);
+    expect(traces).toHaveLength(1);
+    expect(traces[0].requestParams).toMatchObject({
+      tabId: 1,
+      ref: 'e-1',
+      value: '[redacted]',
+    });
+    expect(JSON.stringify(traces[0].requestParams)).not.toContain('hunter2');
+    expect(JSON.stringify(traces[0].response)).not.toContain('hunter2');
+    expect(traces[0]).toMatchObject({
+      toolName: 'chrome_fill_or_select',
+      tabId: 1,
+      toolSuccess: true,
+      businessSuccess: 'unknown',
+      redactionState: 'redacted',
+    });
   });
 
   it('blocks active user tab impact actions before the extension call', async () => {
@@ -1177,6 +1450,7 @@ describe('handleToolCall execution wrapper', () => {
         tabId: 1,
         ownerType: 'user_owned',
       });
+      expect(payload.tabId).toBe(1);
       expect(payload.cachedPageStateSummary).toMatchObject({
         summaryKind: 'cached_page_state',
         freshness: 'cached_not_fresh',
@@ -1191,7 +1465,7 @@ describe('handleToolCall execution wrapper', () => {
         nextStepHint: 'cached_state_only_start_new_task_or_navigate_for_fresh_read',
       });
       expect(payload.deltaContext).toMatchObject({
-        deltaKind: 'post_action_delta',
+        deltaKind: 'read_refresh_delta',
         contextSavedRatio: 1,
       });
       expect(payload.aiContextEnvelope).toMatchObject({
@@ -2135,7 +2409,7 @@ describe('handleToolCall execution wrapper', () => {
       });
       const secondPayload = JSON.parse(String(r2.content[0].text));
       expect(secondPayload.deltaContext).toMatchObject({
-        deltaKind: 'post_action_delta',
+        deltaKind: 'read_refresh_delta',
         fromProjectionId: 'projection_initial',
         toProjectionId: 'projection_post',
         changedRegions: ['search_results'],
@@ -2145,6 +2419,7 @@ describe('handleToolCall execution wrapper', () => {
         previousContextChars: 12000,
         contextSavedChars: 8800,
       });
+      expect(secondPayload.postActionDeltaEvidence ?? null).toBeNull();
       expect(secondPayload.aiContextEnvelope).toMatchObject({
         contextSource: 'page_projection_delta',
         taskState: {
@@ -2261,6 +2536,40 @@ describe('handleToolCall execution wrapper', () => {
         cleanupAction: 'chrome_close_tabs',
         cleanupTargetIds: [1],
       });
+      expect(closePayload.actionEvidenceResult).toMatchObject({
+        actionKind: 'close_tabs',
+        tabId: 1,
+        toolSuccess: true,
+        dispatch: {
+          dispatched: true,
+          acceptedByBrowser: true,
+          errorCode: null,
+        },
+        targetBinding: {
+          locatorChainSummary: ['tabId:1'],
+          dispatchTarget: 'tab_ids',
+          targetBindingProven: true,
+        },
+        postAction: {
+          postActionReadbackStatus: 'browser_hygiene_observed',
+          postconditionVerdict: 'passed',
+          freshReadRequired: false,
+          readbackSource: 'browser_hygiene_evidence',
+        },
+        business: {
+          businessSuccessVerdict: 'proven',
+          businessSuccessProven: true,
+          nextRequiredCheck: 'none',
+        },
+        browserHygiene: {
+          required: true,
+          status: 'pass',
+          leakedTabsOrWindows: 0,
+        },
+      });
+      expect(closePayload.actionEvidenceResult.claimBoundary).toContain(
+        'Browser hygiene evidence does not prove the original business task succeeded.',
+      );
       expect(getLifecycleEvidenceArtifactStoreSnapshot()).toMatchObject({
         bufferedArtifacts: 1,
         lastFinalVerdict: 'task_success',
@@ -2425,7 +2734,7 @@ describe('handleToolCall execution wrapper', () => {
         defaultProtection: 'protect_unknown_and_user_owned',
       });
       expect(secondPayload.deltaContext).toMatchObject({
-        deltaKind: 'post_action_delta',
+        deltaKind: 'read_refresh_delta',
         fromProjectionId: 'projection_cached',
         toProjectionId: 'projection_cached',
         changedRegions: [],
@@ -2440,6 +2749,7 @@ describe('handleToolCall execution wrapper', () => {
           realBrowserClaim: true,
         },
       });
+      expect(secondPayload.postActionDeltaEvidence ?? null).toBeNull();
       expect(secondPayload.aiContextEnvelope).toMatchObject({
         contextSource: 'cached_page_projection_delta',
         pageObjectSummary: {
@@ -2522,7 +2832,7 @@ describe('handleToolCall execution wrapper', () => {
       expect(flowSpy).toHaveBeenCalledTimes(1);
       const persisted = sessionManager.listSessions().at(-1);
       expect(persisted?.summary).toBe(
-        'AI context: post_action_delta; state=ready; next=continue_read; source=cached_page_projection_delta; data=dom_json; reason=cached_projection_reused_for_redundant_read; fallback=none; rejected=none; metadata=1; confidence=0.9; changed=none; reused=viewport; savedChars=3600',
+        'AI context: read_refresh_delta; state=ready; next=continue_read; source=cached_page_projection_delta; data=dom_json; reason=cached_projection_reused_for_redundant_read; fallback=none; rejected=none; metadata=1; confidence=0.9; changed=none; reused=viewport; savedChars=3600',
       );
     });
 

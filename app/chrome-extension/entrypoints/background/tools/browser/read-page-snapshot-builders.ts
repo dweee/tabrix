@@ -150,13 +150,15 @@ export function buildExtensionLayer(params: {
   const includeL1 = params.requestedLayer !== 'L0';
   const includeL2 = params.requestedLayer === 'L0+L1+L2';
   const hasVisibleRows = params.visibleRegionRows.visibleRegionRowsUsed;
-  const hasTextSignal = hasMeaningfulReadPageText(params.contentSummary);
+  const hasVisibleTextSignal = hasMeaningfulVisibleText(params.visibleTextContent);
+  const hasTextSignal = hasMeaningfulReadPageText(params.contentSummary) || hasVisibleTextSignal;
   const shellRejectedCount =
     params.visibleRegionRows.footerLikeRejectedCount +
     params.visibleRegionRows.navigationLikeRejectedCount +
     params.visibleRegionRows.lowValueRegionRejectedCount;
   const shellOnlyRows =
     !hasVisibleRows &&
+    !hasVisibleTextSignal &&
     params.visibleRegionRows.visibleDomRowsCandidateCount === 0 &&
     shellRejectedCount > 0;
   const blockedReadinessReason = hasVisibleRows
@@ -206,6 +208,7 @@ export function buildExtensionLayer(params: {
         : 'business_rows_unavailable';
   }
   const extensionLayer = {
+    tabId: params.tabId,
     kind: selectedDataSource,
     selectedDataSource,
     readinessVerdict,
@@ -319,4 +322,14 @@ function buildCompleteTextRegion(
       ? 'complete_visible_text_available_but_structurally_sparse'
       : 'complete_visible_text_available',
   };
+}
+
+function hasMeaningfulVisibleText(text: string | null | undefined): boolean {
+  if (!text) return false;
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  const lineCount = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean).length;
+  return normalized.length >= 80 || lineCount >= 2;
 }

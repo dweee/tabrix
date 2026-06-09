@@ -168,11 +168,15 @@ export function buildAiOperationState(
   lastAiOperatedTab: BrowserWorldTabObject | null,
 ): BrowserWorldAiOperationState {
   const relationToBrowserActiveTab = classifyAiOperationRelation(activeTab, lastAiOperatedTab);
+  const latestAiOperationHighConfidence =
+    typeof lastAiOperatedTab?.lastAiOperationConfidence === 'number' &&
+    lastAiOperatedTab.lastAiOperationConfidence >= 0.9;
   const canContinueOnLatestAiOperatedTab =
     lastAiOperatedTab === null
       ? null
       : relationToBrowserActiveTab === 'same_as_browser_active' &&
-        lastAiOperatedTab.canTabrixOperate === true;
+        lastAiOperatedTab.canTabrixOperate === true &&
+        latestAiOperationHighConfidence;
 
   return {
     browserActiveTabId: activeTab?.tabId ?? null,
@@ -320,6 +324,8 @@ export function buildWindowLifecycleState(
 ): BrowserWorldWindowLifecycleState {
   const windowEvents = events.filter(isWindowLifecycleEvent);
   const latest = windowEvents.at(-1) ?? null;
+  const latestWindowRemoved =
+    [...windowEvents].reverse().find((event) => event.eventKind === 'window_removed') ?? null;
   return {
     latestEventKind: latest?.eventKind ?? null,
     latestEventWindowId: latest?.windowId ?? null,
@@ -328,6 +334,9 @@ export function buildWindowLifecycleState(
     latestEventCanTabrixOperate: latest?.canTabrixOperate ?? null,
     latestRemovedTabCount: latest?.removedTabCount ?? null,
     latestRemovedAiOpenedTabCount: latest?.removedAiOpenedTabCount ?? null,
+    latestWindowRemovedId: latestWindowRemoved?.windowId ?? null,
+    latestWindowRemovedTabCount: latestWindowRemoved?.removedTabCount ?? null,
+    latestWindowRemovedAiOpenedTabCount: latestWindowRemoved?.removedAiOpenedTabCount ?? null,
     recentCreatedCount: windowEvents.filter((event) => event.eventKind === 'window_created').length,
     recentRemovedCount: windowEvents.filter((event) => event.eventKind === 'window_removed').length,
     recentFocusChangedCount: windowEvents.filter(
@@ -352,7 +361,11 @@ export function summarizeWindowLifecycle(state: BrowserWorldWindowLifecycleState
   if (state.latestEventKind === 'window_removed') {
     return `Window object lifecycle: latest=${state.latestEventKind}, window=${state.latestEventWindowId ?? 'unknown'}, removedTabs=${state.latestRemovedTabCount ?? 'unknown'}, removedAiOpenedTabs=${state.latestRemovedAiOpenedTabCount ?? 'unknown'}, retainedWindows=${state.retainedWindowCount}, focusedWindow=${state.focusedWindowId ?? 'unknown'}, created=${state.recentCreatedCount}, focusChanged=${state.recentFocusChangedCount}, boundsChanged=${state.recentBoundsChangedCount}, removed=${state.recentRemovedCount}.`;
   }
-  return `Window object lifecycle: latest=${state.latestEventKind}, window=${state.latestEventWindowId ?? 'unknown'}, state=${state.latestEventState ?? 'unknown'}, visibility=${state.latestEventVisibilityState ?? 'unknown'}, operable=${state.latestEventCanTabrixOperate === true ? 'yes' : 'no_or_unknown'}, retainedWindows=${state.retainedWindowCount}, focusedWindow=${state.focusedWindowId ?? 'unknown'}, created=${state.recentCreatedCount}, focusChanged=${state.recentFocusChangedCount}, boundsChanged=${state.recentBoundsChangedCount}, removed=${state.recentRemovedCount}.`;
+  const latestRemovedWindowText =
+    typeof state.latestWindowRemovedId === 'number'
+      ? `, lastRemovedWindow=${state.latestWindowRemovedId}, lastRemovedTabs=${state.latestWindowRemovedTabCount ?? 'unknown'}, lastRemovedAiOpenedTabs=${state.latestWindowRemovedAiOpenedTabCount ?? 'unknown'}`
+      : '';
+  return `Window object lifecycle: latest=${state.latestEventKind}, window=${state.latestEventWindowId ?? 'unknown'}, state=${state.latestEventState ?? 'unknown'}, visibility=${state.latestEventVisibilityState ?? 'unknown'}, operable=${state.latestEventCanTabrixOperate === true ? 'yes' : 'no_or_unknown'}, retainedWindows=${state.retainedWindowCount}, focusedWindow=${state.focusedWindowId ?? 'unknown'}, created=${state.recentCreatedCount}, focusChanged=${state.recentFocusChangedCount}, boundsChanged=${state.recentBoundsChangedCount}, removed=${state.recentRemovedCount}${latestRemovedWindowText}.`;
 }
 
 export function summarizeCurrentWindow(state: BrowserWorldWindowOperationState): string {
@@ -414,6 +427,9 @@ function summarizeSnapshotNextCheck(
     return 'reselect_or_reread_latest_ai_operated_tab';
   }
   if (aiOperationState.relationToBrowserActiveTab === 'same_as_browser_active') {
+    if (aiOperationState.canContinueOnLatestAiOperatedTab !== true) {
+      return 'prove_foreground_or_refresh_browser_snapshot';
+    }
     return 'page_level_read_or_postcondition_check';
   }
   return 'read_or_select_intended_target';
@@ -445,6 +461,9 @@ export function summarizeRoutingDecision(
   }
 
   if (aiOperationState.relationToBrowserActiveTab === 'same_as_browser_active') {
+    if (aiOperationState.canContinueOnLatestAiOperatedTab !== true) {
+      return `routing=operation_evidence_not_proven, blockingReason=latest_ai_operation_low_confidence_or_tab_not_operable, next=${nextRequiredCheck}`;
+    }
     return `routing=ready_for_page_level_check, blockingReason=none, next=${nextRequiredCheck}`;
   }
 

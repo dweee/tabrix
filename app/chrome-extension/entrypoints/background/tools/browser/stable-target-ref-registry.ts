@@ -26,11 +26,20 @@ export interface StableTargetRefEntry {
   frameId?: number;
 }
 
+export interface CandidateActionTargetLocatorEntry {
+  targetRef: string;
+  selector: string;
+  selectorType?: 'css';
+  frameId?: number;
+}
+
 export interface StableTargetRefRegistrySnapshot {
   /** Tabs currently tracked (for diagnostics / tests). */
   tabIds: number[];
   /** Per-tab entry counts (for diagnostics / tests). */
   entryCounts: Record<number, number>;
+  /** Per-tab candidate locator counts (for diagnostics / tests). */
+  candidateLocatorCounts: Record<number, number>;
 }
 
 /**
@@ -43,6 +52,10 @@ export interface StableTargetRefLookup {
 
 class StableTargetRefRegistry implements StableTargetRefLookup {
   private byTab = new Map<number, Map<string, StableTargetRefEntry>>();
+  private candidateLocatorsByTab = new Map<
+    number,
+    Map<string, CandidateActionTargetLocatorEntry>
+  >();
 
   record(tabId: number | undefined | null, entries: readonly StableTargetRefEntry[]): void {
     if (typeof tabId !== 'number' || !Number.isFinite(tabId)) return;
@@ -75,6 +88,41 @@ class StableTargetRefRegistry implements StableTargetRefLookup {
     this.byTab.set(tabId, map);
   }
 
+  recordCandidateLocators(
+    tabId: number | undefined | null,
+    entries: readonly CandidateActionTargetLocatorEntry[],
+  ): void {
+    if (typeof tabId !== 'number' || !Number.isFinite(tabId)) return;
+    if (!Array.isArray(entries) || entries.length === 0) {
+      this.candidateLocatorsByTab.delete(tabId);
+      return;
+    }
+    const map = new Map<string, CandidateActionTargetLocatorEntry>();
+    for (const entry of entries) {
+      if (!entry || typeof entry.targetRef !== 'string' || typeof entry.selector !== 'string') {
+        continue;
+      }
+      const targetRef = entry.targetRef.trim();
+      const selector = entry.selector.trim();
+      if (!targetRef || !selector) continue;
+      if (!map.has(targetRef)) {
+        map.set(targetRef, {
+          targetRef,
+          selector,
+          selectorType: 'css',
+          ...(typeof entry.frameId === 'number' && Number.isFinite(entry.frameId)
+            ? { frameId: entry.frameId }
+            : {}),
+        });
+      }
+    }
+    if (map.size === 0) {
+      this.candidateLocatorsByTab.delete(tabId);
+      return;
+    }
+    this.candidateLocatorsByTab.set(tabId, map);
+  }
+
   lookup(tabId: number | undefined | null, targetRef: string): string | undefined {
     if (typeof tabId !== 'number' || !Number.isFinite(tabId)) return undefined;
     if (typeof targetRef !== 'string' || !targetRef) return undefined;
@@ -96,26 +144,46 @@ class StableTargetRefRegistry implements StableTargetRefLookup {
     return { ...entry };
   }
 
+  lookupCandidateLocator(
+    tabId: number | undefined | null,
+    targetRef: string,
+  ): CandidateActionTargetLocatorEntry | undefined {
+    if (typeof tabId !== 'number' || !Number.isFinite(tabId)) return undefined;
+    if (typeof targetRef !== 'string' || !targetRef) return undefined;
+    const map = this.candidateLocatorsByTab.get(tabId);
+    if (!map) return undefined;
+    const entry = map.get(targetRef);
+    if (!entry) return undefined;
+    return { ...entry };
+  }
+
   clearTab(tabId: number | undefined | null): void {
     if (typeof tabId !== 'number' || !Number.isFinite(tabId)) return;
     this.byTab.delete(tabId);
+    this.candidateLocatorsByTab.delete(tabId);
   }
 
   /** For diagnostics + unit tests; not part of the production hot path. */
   snapshot(): StableTargetRefRegistrySnapshot {
     const tabIds: number[] = [];
     const entryCounts: Record<number, number> = {};
+    const candidateLocatorCounts: Record<number, number> = {};
     for (const [tabId, map] of this.byTab.entries()) {
       tabIds.push(tabId);
       entryCounts[tabId] = map.size;
     }
+    for (const [tabId, map] of this.candidateLocatorsByTab.entries()) {
+      if (!tabIds.includes(tabId)) tabIds.push(tabId);
+      candidateLocatorCounts[tabId] = map.size;
+    }
     tabIds.sort((a, b) => a - b);
-    return { tabIds, entryCounts };
+    return { tabIds, entryCounts, candidateLocatorCounts };
   }
 
   /** Test-only: drop everything. Not exported on the singleton path. */
   __resetForTests(): void {
     this.byTab.clear();
+    this.candidateLocatorsByTab.clear();
   }
 }
 
@@ -126,6 +194,13 @@ export function recordStableTargetRefSnapshot(
   entries: readonly StableTargetRefEntry[],
 ): void {
   singleton.record(tabId, entries);
+}
+
+export function recordCandidateActionTargetLocatorsSnapshot(
+  tabId: number | undefined | null,
+  entries: readonly CandidateActionTargetLocatorEntry[],
+): void {
+  singleton.recordCandidateLocators(tabId, entries);
 }
 
 export function lookupStableTargetRef(
@@ -140,6 +215,13 @@ export function lookupStableTargetRefEntry(
   targetRef: string,
 ): StableTargetRefEntry | undefined {
   return singleton.lookupEntry(tabId, targetRef);
+}
+
+export function lookupCandidateActionTargetLocatorEntry(
+  tabId: number | undefined | null,
+  targetRef: string,
+): CandidateActionTargetLocatorEntry | undefined {
+  return singleton.lookupCandidateLocator(tabId, targetRef);
 }
 
 export function clearStableTargetRefTab(tabId: number | undefined | null): void {

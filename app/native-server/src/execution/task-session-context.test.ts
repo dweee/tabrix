@@ -19,6 +19,7 @@ import type {
   ReadPageObjectLifecycleSummary,
   ReadPageRegion,
 } from '@tabrix/shared';
+import { buildPostActionDeltaEvidence } from '@tabrix/shared';
 
 function makeVisibleRegionRows(
   start: number,
@@ -1115,6 +1116,27 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
     });
   });
 
+  it('marks a same-tab fresh read without an action as read_refresh_delta', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.notePageProjectionAndBuildDelta(makeProjection());
+
+    const delta = ctx.notePageProjectionAndBuildDelta(
+      makeProjection({
+        projectionId: 'projection_refresh',
+        contextVersion: 'projection_refresh',
+        previousContextVersion: 'projection_initial',
+        changedByActionId: null,
+        changeCause: 'background_refresh',
+        changedRegions: [],
+        reusedRegions: ['viewport'],
+      }),
+    );
+
+    expect(delta.deltaKind).toBe('read_refresh_delta');
+    expect(delta.fromProjectionId).toBe('projection_initial');
+    expect(delta.toProjectionId).toBe('projection_refresh');
+  });
+
   it('records interaction invalidation without discarding delta baseline', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
     ctx.noteUrlChange('https://example.test/search', 'search_page');
@@ -1137,6 +1159,53 @@ describe('TaskSessionContext — V28 lifecycle timeline', () => {
     expect(delta.fromProjectionId).toBe('projection_initial');
     expect(delta.toProjectionId).toBe('projection_after_scroll');
     expect(ctx.getLifecycleTimeline().map((event) => event.kind)).toContain('refs_invalidated');
+  });
+
+  it('wraps a same-tab post-action projection delta as watch delta evidence', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.notePageProjectionAndBuildDelta(makeProjection());
+    ctx.notePageInteraction({
+      action: 'chrome_click_element',
+      tabId: 9,
+      changeCause: 'click',
+      targetRefs: ['ref_result'],
+      candidateActionId: 'ca_open_detail',
+      candidateActionIntent: 'content.open_detail',
+      actionKind: 'click',
+    });
+
+    const afterProjection = makeProjection({
+      projectionId: 'projection_after_click',
+      contextVersion: 'projection_after_click',
+      previousContextVersion: 'projection_initial',
+      changedByActionId: 'chrome_click_element',
+      changeCause: 'click',
+      changedRegions: ['content_detail'],
+      invalidatedRefs: ['ref_result'],
+      refreshedRefs: ['ref_detail'],
+    });
+    const delta = ctx.notePageProjectionAndBuildDelta(afterProjection);
+    const evidence = buildPostActionDeltaEvidence({
+      delta,
+      tabId: afterProjection.tabId,
+      actionId: afterProjection.changedByActionId,
+      producedAt: '2026-05-18T00:00:04.500Z',
+    });
+
+    expect(evidence).toMatchObject({
+      watchId: `watch:${delta.deltaId}`,
+      actionId: 'chrome_click_element',
+      tabId: 9,
+      deltaKind: 'post_action_delta',
+      beforeProjectionId: 'projection_initial',
+      afterProjectionId: 'projection_after_click',
+      changedRegions: ['content_detail'],
+      invalidatedRefs: ['ref_result'],
+      refreshedRefs: ['ref_detail'],
+      navigationDelta: { status: 'unknown' },
+      networkSignalSummary: { status: 'not_checked' },
+      recommendedNextAction: 'continue_with_post_action_delta_context',
+    });
   });
 
   it('carries pending interaction metadata once for the matching tab', () => {

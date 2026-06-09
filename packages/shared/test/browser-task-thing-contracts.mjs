@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 
 import {
+  ACTION_EVIDENCE_BROWSER_HYGIENE_STATUS_VALUES,
+  ACTION_EVIDENCE_BUSINESS_SUCCESS_VERDICT_VALUES,
+  ACTION_EVIDENCE_RESULT_ACTION_KIND_VALUES,
+  POST_ACTION_DELTA_SIGNAL_STATUS_VALUES,
   BROWSER_CLEANUP_POLICY_VALUES,
   BROWSER_COMPARISON_MODE_VALUES,
   BROWSER_COMPETITOR_LANE_VALUES,
@@ -33,15 +37,21 @@ import {
   BROWSER_USER_BOUNDARY_MODE_VALUES,
   BROWSER_USER_ACTIVITY_LEVEL_VALUES,
   TOOL_SCHEMAS,
+  buildActionEvidenceResult,
   buildBrowserPageProjectionDelta,
   buildBrowserPageThingProjectionFromReadPage,
   buildBrowserTaskStateVerdict,
+  buildPostActionDeltaEvidence,
   isBrowserPageProjectionDeltaArtifact,
   isBrowserTaskDeterministicFixtureArtifact,
   isBrowserTaskPrivacyRedactionSafe,
 } from '../dist/index.mjs';
 
 assert.equal(BROWSER_TASK_THING_CONTRACT_VERSION, 'v1');
+assert.ok(ACTION_EVIDENCE_RESULT_ACTION_KIND_VALUES.includes('click'));
+assert.ok(ACTION_EVIDENCE_BUSINESS_SUCCESS_VERDICT_VALUES.includes('not_proven'));
+assert.ok(ACTION_EVIDENCE_BROWSER_HYGIENE_STATUS_VALUES.includes('not_checked'));
+assert.ok(POST_ACTION_DELTA_SIGNAL_STATUS_VALUES.includes('not_checked'));
 assert.ok(BROWSER_TASK_STATUS_VALUES.includes('pass_with_gaps'));
 assert.ok(BROWSER_TASK_STATE_VALUES.includes('login_required'));
 assert.ok(BROWSER_TASK_NEXT_ACTION_VALUES.includes('user_collaboration'));
@@ -94,6 +104,7 @@ assert.ok(BROWSER_PAGE_STABILITY_VALUES.includes('stale'));
 assert.ok(BROWSER_PAGE_CHANGE_CAUSE_VALUES.includes('background_refresh'));
 assert.ok(BROWSER_PROJECTION_KIND_VALUES.includes('read_snapshot_projection'));
 assert.ok(BROWSER_PAGE_PROJECTION_DELTA_KIND_VALUES.includes('initial_overview'));
+assert.ok(BROWSER_PAGE_PROJECTION_DELTA_KIND_VALUES.includes('read_refresh_delta'));
 assert.ok(BROWSER_PAGE_PROJECTION_DELTA_KIND_VALUES.includes('post_action_delta'));
 assert.ok(BROWSER_SOURCE_LINEAGE_VALUES.includes('dom'));
 assert.ok(BROWSER_SOURCE_FRESHNESS_VALUES.includes('fresh'));
@@ -103,19 +114,14 @@ assert.ok(BROWSER_TASK_EVIDENCE_LEVEL_VALUES.includes('real_browser'));
 assert.ok(BROWSER_TASK_EVIDENCE_LEVEL_VALUES.includes('private_scenario'));
 assert.ok(BROWSER_TASK_EVIDENCE_LEVEL_VALUES.includes('same_scenario_competitor'));
 assert.ok(BROWSER_TASK_EVIDENCE_LEVEL_VALUES.includes('release_gate'));
-assert.deepEqual([...BROWSER_TASK_LOCAL_EVIDENCE_LEVEL_VALUES], [
-  'source',
-  'unit',
-  'integration',
-  'local_runner',
-]);
-assert.deepEqual([...BROWSER_TASK_REAL_ACCEPTANCE_EVIDENCE_LEVEL_VALUES], [
-  'real_browser',
-  'private_scenario',
-  'competitor',
-  'same_scenario_competitor',
-  'release_gate',
-]);
+assert.deepEqual(
+  [...BROWSER_TASK_LOCAL_EVIDENCE_LEVEL_VALUES],
+  ['source', 'unit', 'integration', 'local_runner'],
+);
+assert.deepEqual(
+  [...BROWSER_TASK_REAL_ACCEPTANCE_EVIDENCE_LEVEL_VALUES],
+  ['real_browser', 'private_scenario', 'competitor', 'same_scenario_competitor', 'release_gate'],
+);
 assert.ok(BROWSER_EVIDENCE_FRESHNESS_VALUES.includes('expired'));
 assert.ok(BROWSER_COMPETITOR_LANE_VALUES.includes('same_profile_extension'));
 assert.equal(BROWSER_TASK_FIXTURE_ARTIFACT_KIND, 'deterministic_fixture');
@@ -123,7 +129,10 @@ assert.ok(BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES.includes('unit'));
 assert.equal(BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES.includes('real_browser'), false);
 assert.equal(BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES.includes('private_scenario'), false);
 assert.equal(BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES.includes('competitor'), false);
-assert.equal(BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES.includes('same_scenario_competitor'), false);
+assert.equal(
+  BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES.includes('same_scenario_competitor'),
+  false,
+);
 assert.equal(BROWSER_TASK_FIXTURE_EVIDENCE_LEVEL_VALUES.includes('release_gate'), false);
 
 const summary = {
@@ -166,6 +175,47 @@ const summary = {
 assert.equal(summary.runtimePolicy.focusPolicy, 'no_steal');
 assert.equal(summary.browserHygieneSummary.runOwnedTabsLeft, 0);
 assert.equal(summary.profileMode, 'same_profile');
+
+const dispatchOnlyActionEvidence = buildActionEvidenceResult({
+  actionId: 'action_click_001',
+  actionKind: 'click',
+  tabId: 123,
+  toolSuccess: true,
+  targetBinding: {
+    requestedTargetRef: 'tgt_repo_a',
+    resolvedTargetRef: 'ref_live_a',
+    locatorChainSummary: ['ref:ref_live_a'],
+    dispatchTarget: 'ref',
+    frameScope: 'default_frame',
+    targetBindingProven: true,
+    claimBoundary: 'Target binding only proves dispatch route.',
+  },
+  dispatch: {
+    dispatched: true,
+    acceptedByBrowser: true,
+    errorCode: null,
+  },
+  postAction: {
+    postActionReadbackStatus: 'fresh_read_required',
+    postconditionVerdict: 'not_proven',
+    freshReadRequired: true,
+    readbackSource: 'tool_dispatch_only',
+  },
+  business: {
+    businessSuccessVerdict: 'not_proven',
+    businessSuccessProven: false,
+    negativeEvidence: ['post_action_readback_fresh_read_required'],
+    nextRequiredCheck: 'fresh_read_page',
+  },
+  producedAt: '2026-05-18T00:00:00.500Z',
+});
+
+assert.equal(dispatchOnlyActionEvidence.toolSuccess, true);
+assert.equal(dispatchOnlyActionEvidence.dispatch.acceptedByBrowser, true);
+assert.equal(dispatchOnlyActionEvidence.business.businessSuccessVerdict, 'not_proven');
+assert.equal(dispatchOnlyActionEvidence.business.businessSuccessProven, false);
+assert.equal(dispatchOnlyActionEvidence.source.sourceRouteHonestyVerdict, 'not_checked');
+assert.equal(dispatchOnlyActionEvidence.browserHygiene.status, 'not_checked');
 
 const projection = {
   projectionId: 'projection_001',
@@ -304,6 +354,7 @@ const mappedProjection = buildBrowserPageThingProjectionFromReadPage({
 });
 
 assert.equal(mappedProjection.readiness, 'ready');
+assert.equal(mappedProjection.pageRole, 'search_results_page');
 assert.equal(mappedProjection.activeRegion, 'search_results');
 assert.equal(mappedProjection.chosenDataSource, 'dom_region_rows');
 assert.deepEqual(mappedProjection.refreshedRefs, ['tgt_repo_a', 'tgt_repo_b']);
@@ -394,6 +445,7 @@ const longContentProjection = buildBrowserPageThingProjectionFromReadPage({
 
 assert.equal(longContentProjection.chosenDataSource, 'markdown');
 assert.equal(longContentProjection.sourceLineage, 'text');
+assert.equal(longContentProjection.pageRole, 'unknown');
 assert.equal(longContentProjection.contextChars, 11644);
 assert.equal(longContentProjection.contextSavedChars, 4356);
 
@@ -479,6 +531,79 @@ assert.deepEqual(viewportSearchProjection.changedRegions, ['result_list']);
 assert.deepEqual(viewportSearchProjection.regionEvidenceRefs, [
   'region:result_list',
   'row:row_viewport_001',
+]);
+
+const multiRegionVisibleTextProjection = buildBrowserPageThingProjectionFromReadPage({
+  snapshot: {
+    mode: 'compact',
+    page: {
+      url: 'https://example.test/explore',
+      title: 'Interest Community',
+      pageType: 'web_page',
+    },
+    summary: {
+      pageRole: 'multi_region_page',
+      primaryRegion: 'content',
+      quality: 'sparse',
+    },
+    interactiveElements: [],
+    artifactRefs: [],
+    selectedDataSource: 'dom_region_rows',
+    readinessVerdict: 'ready',
+    visibleRegionRows: {
+      sourceDataSource: 'dom_region_rows',
+      rows: [
+        {
+          rowId: 'row_visible_text_001',
+          title: 'Recommended creator workflow',
+          primaryText: 'A visible text content row',
+          secondaryText: null,
+          summary: null,
+          metaText: null,
+          interactionText: null,
+          visibleTextFields: ['title', 'primaryText'],
+          targetRef: null,
+          targetRefCoverageRate: 0,
+          boundingBox: null,
+          regionId: 'visible_text',
+          sourceRegion: 'visible_text',
+          confidence: 0.8,
+          qualityReasons: ['visible_text_fallback'],
+        },
+      ],
+      rowCount: 1,
+      visibleRegionRowsUsed: true,
+      visibleRegionRowsRejectedReason: null,
+      sourceRegion: 'visible_text',
+      rowExtractionConfidence: 0.8,
+      cardExtractorUsed: false,
+      cardPatternConfidence: 0,
+      cardRowsCount: 0,
+      rowOrder: 'visual_order',
+      targetRefCoverageRate: 0,
+      regionQualityScore: 0.7,
+      visibleDomRowsCandidateCount: 1,
+      visibleDomRowsSelectedCount: 1,
+      lowValueRegionRejectedCount: 0,
+      footerLikeRejectedCount: 0,
+      navigationLikeRejectedCount: 0,
+      targetRefCoverageRejectedCount: 0,
+      rejectedRegionReasonDistribution: {},
+    },
+  },
+  projectionId: 'projection_from_visible_text_multi_region',
+  observedAt: '2026-05-18T00:00:03.500Z',
+  pageId: 'page_multi_region',
+  tabId: 790,
+  ownerType: 'run_owned',
+  contextVersion: 'ctx_005',
+});
+
+assert.equal(multiRegionVisibleTextProjection.activeRegion, 'content');
+assert.deepEqual(multiRegionVisibleTextProjection.changedRegions, ['content']);
+assert.deepEqual(multiRegionVisibleTextProjection.regionEvidenceRefs, [
+  'region:content',
+  'row:row_visible_text_001',
 ]);
 
 const viewportStrongRowsProjection = buildBrowserPageThingProjectionFromReadPage({
@@ -755,6 +880,21 @@ const currentProjection = {
   invalidatedRefs: ['tgt_old'],
   refreshedRefs: ['tgt_new'],
 };
+const readRefreshDelta = buildBrowserPageProjectionDelta({
+  previousProjection,
+  currentProjection: {
+    ...currentProjection,
+    changedByActionId: null,
+    changeCause: 'background_refresh',
+  },
+  deltaId: 'delta_read_refresh_001',
+  deltaKind: 'read_refresh_delta',
+});
+
+assert.equal(readRefreshDelta.deltaKind, 'read_refresh_delta');
+assert.equal(readRefreshDelta.fromProjectionId, 'projection_previous_001');
+assert.equal(readRefreshDelta.toProjectionId, 'projection_current_001');
+
 const postActionDelta = buildBrowserPageProjectionDelta({
   previousProjection,
   currentProjection,
@@ -774,6 +914,27 @@ assert.equal(postActionDelta.previousContextChars, 12000);
 assert.equal(postActionDelta.contextChars, 8000);
 assert.ok(postActionDelta.contextSavedChars > 0);
 assert.ok(postActionDelta.contextSavedRatio >= 0 && postActionDelta.contextSavedRatio <= 1);
+
+const postActionDeltaEvidence = buildPostActionDeltaEvidence({
+  delta: postActionDelta,
+  actionEvidenceResult: dispatchOnlyActionEvidence,
+  sourceTruthChain: currentProjection.sourceTruthChain,
+  producedAt: '2026-05-18T00:00:04.500Z',
+});
+assert.equal(postActionDeltaEvidence.watchId, 'watch:delta_post_action_001');
+assert.equal(postActionDeltaEvidence.actionId, 'action_click_001');
+assert.equal(postActionDeltaEvidence.actionEvidenceId, 'action_click_001');
+assert.equal(postActionDeltaEvidence.tabId, 123);
+assert.equal(postActionDeltaEvidence.deltaKind, 'post_action_delta');
+assert.equal(postActionDeltaEvidence.beforeProjectionId, 'projection_previous_001');
+assert.equal(postActionDeltaEvidence.afterProjectionId, 'projection_current_001');
+assert.deepEqual(postActionDeltaEvidence.changedRegions, ['search_results']);
+assert.deepEqual(postActionDeltaEvidence.invalidatedRefs, ['tgt_old']);
+assert.deepEqual(postActionDeltaEvidence.refreshedRefs, ['tgt_new']);
+assert.equal(postActionDeltaEvidence.navigationDelta.status, 'unknown');
+assert.equal(postActionDeltaEvidence.networkSignalSummary.status, 'not_checked');
+assert.equal(postActionDeltaEvidence.evidenceBoundary.evidenceLevel, 'integration');
+assert.equal(postActionDeltaEvidence.evidenceBoundary.realBrowserClaim, false);
 
 const realBrowserDelta = buildBrowserPageProjectionDelta({
   previousProjection,

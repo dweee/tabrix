@@ -23,9 +23,13 @@ import {
   type ReadPageWindowRuntimeState,
   type ReadPageObjectLifecycleSummary,
   type ReadPageBrowserPageObjectView,
+  type ReadPageRegion,
   type BrowserPageThingProjection,
   type BrowserPageOwnerType,
   type ReadPageAssistantGuidance,
+  type ReadPageFileInputBinding,
+  type ReadPagePublishFormReadiness,
+  type ReadPagePublishFormRequiredFieldEvidence,
   READ_PAGE_ASSISTANT_GUIDANCE_AUTH_PREFERENCE_VALUES,
   READ_PAGE_ASSISTANT_GUIDANCE_REQUESTED_OBJECT_VALUES,
   READ_PAGE_ASSISTANT_GUIDANCE_TASK_KIND_VALUES,
@@ -38,7 +42,9 @@ import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { ERROR_MESSAGES } from '@/common/constants';
 import { inferPageUnderstanding, type PageRole } from './read-page-understanding';
 import {
+  recordCandidateActionTargetLocatorsSnapshot,
   recordStableTargetRefSnapshot,
+  type CandidateActionTargetLocatorEntry,
   type StableTargetRefEntry,
 } from './stable-target-ref-registry';
 import { inferSchemeGuard } from './read-page-scheme-guard';
@@ -52,6 +58,7 @@ import {
 } from './read-page-search-surface';
 import { buildArtifactRefs } from './read-page-artifact-refs';
 import { buildFallbackRefMap, formatElementsAsPageContent } from './read-page-fallback-format';
+import { buildPageOperationMap } from './read-page-operation-map';
 import { buildExtensionLayer, buildStableSnapshotLayer } from './read-page-snapshot-builders';
 import { buildReadPageModeResult } from './read-page-mode-result';
 import {
@@ -77,6 +84,12 @@ interface ReadPageStats {
 }
 type PageType = ReadPagePageType;
 type PrimaryRegionConfidence = ReadPagePrimaryRegionConfidence;
+
+interface RegionAlignedPageUnderstanding {
+  pageRole: PageRole;
+  primaryRegion: string | null;
+  primaryRegionConfidence: PrimaryRegionConfidence;
+}
 
 interface ReadPageParams {
   filter?: 'interactive'; // when omitted, return all visible elements
@@ -478,6 +491,195 @@ function completeVisibleRegionRows(params: {
   });
 }
 
+function isContentDetailPageRole(pageRole: unknown): boolean {
+  return String(pageRole || '') === 'content_detail';
+}
+
+function suppressVisibleRowsForContentDetail(
+  rows: VisibleRegionRowsResult,
+  pageRole: unknown,
+): VisibleRegionRowsResult {
+  if (!isContentDetailPageRole(pageRole) || !rows.visibleRegionRowsUsed) {
+    return rows;
+  }
+  const rejectedRegionReasonDistribution = { ...rows.rejectedRegionReasonDistribution };
+  rejectedRegionReasonDistribution.broad_page_shell =
+    (rejectedRegionReasonDistribution.broad_page_shell ?? 0) + rows.rows.length;
+
+  return {
+    ...rows,
+    rows: [],
+    rowCount: 0,
+    visibleRegionRowsUsed: false,
+    visibleRegionRowsRejectedReason: 'broad_page_shell',
+    sourceRegion: 'content_detail',
+    rowExtractionConfidence: 0,
+    cardExtractorUsed: false,
+    cardPatternConfidence: 0,
+    cardRowsCount: 0,
+    targetRefCoverageRate: 0,
+    regionQualityScore: 0,
+    visibleDomRowsSelectedCount: 0,
+    lowValueRegionRejectedCount: rows.lowValueRegionRejectedCount + rows.rows.length,
+    rejectedRegionReasonDistribution,
+  };
+}
+
+function isPublishIntent(intent: unknown): boolean {
+  return typeof intent === 'string' && intent.startsWith('publish.');
+}
+
+function normalizePublishReadinessText(value: unknown): string {
+  return String(value ?? '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function matchesPublishTitleField(name: unknown): boolean {
+  return /(^|[\s:：_-])(title|headline|caption|标题|题目)([\s:：_-]|$)/i.test(
+    normalizePublishReadinessText(name),
+  );
+}
+
+function matchesPublishBodyField(name: unknown): boolean {
+  return /(body|description|desc|content|正文|文案|描述|内容)/i.test(
+    normalizePublishReadinessText(name),
+  );
+}
+
+function isFillableInteractiveElement(element: { role?: unknown }): boolean {
+  const role = normalizePublishReadinessText(element.role);
+  return role === 'textbox' || role === 'textarea' || role === 'input' || role === 'combobox';
+}
+
+function buildPublishTextFieldEvidence(
+  field: 'title' | 'body_or_description',
+  interactiveElements: Array<{ ref: string; role: string; name: string; valueState?: string }>,
+): ReadPagePublishFormRequiredFieldEvidence {
+  const matcher = field === 'title' ? matchesPublishTitleField : matchesPublishBodyField;
+  const element = interactiveElements.find(
+    (candidate) => isFillableInteractiveElement(candidate) && matcher(candidate.name),
+  );
+  if (!element) {
+    return {
+      field,
+      status: 'not_observed',
+      evidenceSource: 'dom',
+      evidence: `${field}_field_not_observed_in_current_snapshot`,
+      nextRequiredCheck: 'run_fresh_same_tab_read_after_media_or_form_state_changes',
+    };
+  }
+  const status = element.valueState === 'non_empty' ? 'present_candidate' : 'not_proven';
+  return {
+    field,
+    status,
+    evidenceSource: 'dom',
+    evidence:
+      status === 'present_candidate'
+        ? `${field}_field_present_with_non_empty_value_state`
+        : `${field}_field_observed_but_non_empty_value_not_proven`,
+    targetRef: element.ref,
+    nextRequiredCheck: 'fill_required_text_field_then_run_fresh_same_tab_read',
+  };
+}
+
+function buildPublishFormReadiness(params: {
+  pageRole: PageRole;
+  primaryRegion: string | null;
+  candidateActions: CandidateActionSeed[];
+  fileInputBindings: ReadPageFileInputBinding[];
+  interactiveElements: Array<{ ref: string; role: string; name: string; valueState?: string }>;
+}): ReadPagePublishFormReadiness | undefined {
+  const hasPublishSignal =
+    params.pageRole === 'publish_form' ||
+    (params.primaryRegion === 'form' &&
+      params.candidateActions.some((action) => isPublishIntent(action.intent)));
+  if (!hasPublishSignal) return undefined;
+
+  const uploadCandidate = params.candidateActions.find(
+    (action) => action.intent === 'publish.upload_media',
+  );
+  const firstFileInput = params.fileInputBindings.find((binding) => !binding.disabled);
+  const mediaField: ReadPagePublishFormRequiredFieldEvidence =
+    uploadCandidate || firstFileInput
+      ? {
+          field: 'media',
+          status: 'not_proven',
+          evidenceSource: firstFileInput ? 'file_input_binding' : 'candidate_action',
+          evidence:
+            'media_upload_control_observed_but_uploaded_media_state_not_proven_by_read_only_snapshot',
+          ...(uploadCandidate?.targetRef ? { targetRef: uploadCandidate.targetRef } : {}),
+          ...(firstFileInput?.selector ? { selector: firstFileInput.selector } : {}),
+          nextRequiredTool: 'chrome_upload_file',
+          ...(firstFileInput?.selector ? { nextRequiredSelector: firstFileInput.selector } : {}),
+          nextRequiredCheck:
+            'run_chrome_upload_file_then_run_fresh_same_tab_read_to_prove_upload_state',
+        }
+      : {
+          field: 'media',
+          status: 'not_observed',
+          evidenceSource: 'dom',
+          evidence: 'media_upload_control_not_observed_in_current_snapshot',
+          nextRequiredCheck: 'run_fresh_same_tab_read_after_mode_or_route_change',
+        };
+  const requiredFields = [
+    mediaField,
+    buildPublishTextFieldEvidence('title', params.interactiveElements),
+    buildPublishTextFieldEvidence('body_or_description', params.interactiveElements),
+  ];
+  const blockingReasons = requiredFields
+    .filter((field) => field.status !== 'present_candidate')
+    .map((field) => `${field.field}:${field.status}`);
+  const nextUploadField = requiredFields.find((field) => field.nextRequiredTool);
+
+  return {
+    status: blockingReasons.length === 0 ? 'ready_candidate' : 'not_ready_candidate',
+    businessSuccessProven: false,
+    requiredFields,
+    blockingReasons,
+    ...(nextUploadField?.nextRequiredTool
+      ? { nextRequiredTool: nextUploadField.nextRequiredTool }
+      : {}),
+    ...(nextUploadField?.nextRequiredSelector
+      ? { nextRequiredSelector: nextUploadField.nextRequiredSelector }
+      : {}),
+    nextRequiredCheck:
+      blockingReasons.length === 0
+        ? 'run_fresh_same_tab_read_and_postcondition_check_before_publish_submit'
+        : 'complete_required_fields_then_run_fresh_same_tab_read_before_publish_submit',
+    claimBoundary:
+      'Read-only DOM/candidate-action evidence can explain publish-form readiness gaps; it does not prove upload execution, website acceptance, platform-rule compliance, final publish success, or business success.',
+  };
+}
+
+function applyPublishFormReadinessToPageRegions(
+  pageRegions: ReadPageRegion[] | undefined,
+  readiness: ReadPagePublishFormReadiness | undefined,
+): ReadPageRegion[] | undefined {
+  if (!pageRegions || !readiness) return pageRegions;
+  const formState =
+    readiness.status === 'not_ready_candidate'
+      ? 'publish_not_ready_candidate'
+      : readiness.status === 'ready_candidate'
+        ? 'publish_ready_candidate'
+        : null;
+  return pageRegions.map((region) => {
+    if (region.regionType !== 'form') return region;
+    return {
+      ...region,
+      ...(formState ? { state: formState } : {}),
+      readiness: readiness.status,
+      readinessBlockingReasons: readiness.blockingReasons,
+      ...(readiness.nextRequiredTool ? { nextRequiredTool: readiness.nextRequiredTool } : {}),
+      ...(readiness.nextRequiredSelector
+        ? { nextRequiredSelector: readiness.nextRequiredSelector }
+        : {}),
+      nextRequiredCheck: readiness.nextRequiredCheck,
+    };
+  });
+}
+
 function shouldSampleVisibleText(input: {
   treeOk: boolean;
   userControlled: boolean;
@@ -485,14 +687,17 @@ function shouldSampleVisibleText(input: {
   requestedDepth: number | undefined;
   focusRefId: string | undefined;
   rows: VisibleRegionRowsResult;
+  pageRole?: string;
   assistantGuidance?: ReadPageAssistantGuidance;
 }): boolean {
   if (!input.treeOk) return false;
   if (input.focusRefId) return false;
   if (input.mode === 'full') return true;
+  if (input.pageRole === 'publish_form') return true;
   if (shouldRecoverSearchToolbarTargets(input.assistantGuidance)) return true;
   if (!input.userControlled) return true;
   if (input.rows.visibleRegionRowsUsed) return false;
+  if (input.pageRole === 'search_results') return true;
   return input.requestedDepth !== undefined && input.requestedDepth <= 3;
 }
 
@@ -598,10 +803,13 @@ function shouldRecoverFilterPanelTargets(
   assistantGuidance: ReadPageAssistantGuidance | undefined,
   visibleTextContent: unknown,
 ): boolean {
-  if (!shouldRecoverSearchToolbarTargets(assistantGuidance)) return false;
   const text = String(visibleTextContent || '').replace(/\s+/g, ' ');
-  return /排序依据|发布时间|搜索范围|位置距离|综合\s+最新|最多收藏.*一天内|一天内.*未看过/.test(
-    text,
+  const filterPanelLabels = extractFilterPanelLabelsFromVisibleText(text);
+  if (filterPanelLabels.length < 2) return false;
+  if (shouldRecoverSearchToolbarTargets(assistantGuidance)) return true;
+  const toolbarLabels = extractSearchToolbarLabelsFromVisibleText(text);
+  return toolbarLabels.some((label) =>
+    /^(筛选|已筛选|过滤|filter|filters|filtered|排序|sort)$/i.test(label),
   );
 }
 
@@ -649,6 +857,71 @@ function searchToolbarElementKey(element: any): string {
     .filter(Boolean)
     .join('|')
     .toLowerCase();
+}
+
+function extractVisibleTextControlLabelsForTargetRecovery(visibleTextContent: unknown): string[] {
+  const seen = new Set<string>();
+  const labels: string[] = [];
+  const text = String(visibleTextContent || '').replace(/\r/g, '\n');
+  const candidates = text
+    .split(/\n+|[|｜•·]/)
+    .flatMap((line) => line.split(/\s{2,}/))
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (candidate.length > 18) continue;
+    if (isDescriptiveVisibleTextControlLabel(candidate)) continue;
+    if (
+      !/\b(upload|publish|post|create|add|new|edit|save|next|continue|confirm|submit)\b|上传|发布|创建|新建|新增|添加|编辑|保存|下一步|继续|确定|提交/i.test(
+        candidate,
+      )
+    ) {
+      continue;
+    }
+    const key = candidate.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    labels.push(candidate);
+    if (labels.length >= 10) break;
+  }
+
+  return labels;
+}
+
+function isDescriptiveVisibleTextControlLabel(label: string): boolean {
+  const normalized = String(label || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return true;
+  if (/^(支持|最大|推荐|建议|超过|不超过|仅支持|可上传|允许上传)/.test(normalized)) return true;
+  if (/(大小|尺寸|格式|分辨率|时长|以内|文件|画质|要求|限制)/.test(normalized)) return true;
+  if (/^(supports?|maximum|max|recommended|recommend|allowed|only supports?)\b/i.test(normalized)) {
+    return true;
+  }
+  if (/\b(size|format|resolution|duration|limit|limits?|requirements?|file)\b/i.test(normalized)) {
+    return true;
+  }
+  return false;
+}
+
+function isCompactVisibleTextControlFallbackElement(element: any): boolean {
+  const selector = typeof element?.selector === 'string' ? element.selector.trim() : '';
+  if (!selector) return false;
+  const text = String(element?.text || element?.name || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text || text.length > 30) return false;
+  const actionability = String(element?.actionability || '').toLowerCase();
+  if (actionability === 'blocked' || actionability === 'not_actionable') return false;
+  const role = String(element?.role || element?.type || '').toLowerCase();
+  if (element?.isInteractive === false && /^(text|generic|statictext)$/.test(role)) return false;
+  const rect = element?.coordinates?.rect;
+  if (!rect) return true;
+  const width = Number(rect.width);
+  const height = Number(rect.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return true;
+  return width > 0 && height > 0 && width <= 360 && height <= 160;
 }
 
 function attachInteractiveRects<T extends { ref?: string; rect?: unknown }>(
@@ -848,6 +1121,63 @@ function buildObservationProfile(params: {
   return 'compact';
 }
 
+function deriveRegionAlignedPageUnderstanding(params: {
+  pageRole: PageRole;
+  primaryRegion: string | null;
+  primaryRegionConfidence: PrimaryRegionConfidence;
+  pageRegions: readonly ReadPageRegion[] | null | undefined;
+  visibleRegionRows: VisibleRegionRowsResult;
+}): RegionAlignedPageUnderstanding {
+  if (params.pageRole !== 'unknown' || params.primaryRegion) {
+    return {
+      pageRole: params.pageRole,
+      primaryRegion: params.primaryRegion,
+      primaryRegionConfidence: params.primaryRegionConfidence,
+    };
+  }
+
+  const regions = (params.pageRegions ?? []).filter(
+    (region) => region.regionType && region.regionType !== 'unknown',
+  );
+  if (regions.length < 2) {
+    return {
+      pageRole: params.pageRole,
+      primaryRegion: params.primaryRegion,
+      primaryRegionConfidence: params.primaryRegionConfidence,
+    };
+  }
+
+  const hasActionableRegion = regions.some(
+    (region) =>
+      (Array.isArray(region.candidateActionIds) && region.candidateActionIds.length > 0) ||
+      (region.targetability && region.targetability !== 'not_clickable'),
+  );
+  if (!hasActionableRegion) {
+    return {
+      pageRole: params.pageRole,
+      primaryRegion: params.primaryRegion,
+      primaryRegionConfidence: params.primaryRegionConfidence,
+    };
+  }
+
+  const regionTypes = new Set(regions.map((region) => region.regionType));
+  const primaryRegion = params.visibleRegionRows.visibleRegionRowsUsed
+    ? 'content'
+    : regionTypes.has('form')
+      ? 'form'
+      : regionTypes.has('content')
+        ? 'content'
+        : regionTypes.has('navigation')
+          ? 'navigation'
+          : (regions[0]?.regionType ?? null);
+
+  return {
+    pageRole: 'multi_region_page',
+    primaryRegion,
+    primaryRegionConfidence: 'low',
+  };
+}
+
 function mergeCoverageStatus(
   statuses: ReadonlyArray<ReadPageObservationCoverage['overall']>,
 ): ReadPageObservationCoverage['overall'] {
@@ -1008,6 +1338,7 @@ async function buildModeOutput(params: {
   tips: string;
   refMap: any[];
   candidateActions: CandidateActionSeed[];
+  fileInputBindings: ReadPageFileInputBinding[];
   visualElements: ReadPageVisualElementHint[];
   visibleRegionRows: VisibleRegionRowsResult;
   includeAuthArtifacts: boolean;
@@ -1029,22 +1360,26 @@ async function buildModeOutput(params: {
     ),
     params.refMap,
   );
-  const visibleRegionRows = completeVisibleRegionRows({
-    rows: params.visibleRegionRows,
-    pageContent: params.pageContent,
-    visibleTextContent: params.visibleTextContent,
-    primaryRegion: params.primaryRegion,
-    interactiveElements,
-    currentUrl: params.currentUrl,
-    currentTitle: params.currentTitle,
-    viewport: params.viewport,
-  });
+  const visibleRegionRows = suppressVisibleRowsForContentDetail(
+    completeVisibleRegionRows({
+      rows: params.visibleRegionRows,
+      pageContent: params.pageContent,
+      visibleTextContent: params.visibleTextContent,
+      primaryRegion: params.primaryRegion,
+      interactiveElements,
+      currentUrl: params.currentUrl,
+      currentTitle: params.currentTitle,
+      viewport: params.viewport,
+    }),
+    params.pageRole,
+  );
   const candidateActions =
     params.candidateActions.length > 0
       ? params.candidateActions
       : buildCandidateActions(interactiveElements, params.refMap, {
           visibleRegionRows,
           frameId: params.frameContext?.frameId,
+          fileInputBindings: params.fileInputBindings,
         });
   const artifactRefs = buildArtifactRefs(params.tabId, params.renderMode === 'markdown');
   const pageContext: ReadPagePageContext = {
@@ -1060,18 +1395,6 @@ async function buildModeOutput(params: {
     markedElementsCount: params.markedElements.length,
     loadReadiness: params.loadReadiness,
   };
-
-  const stableLayer = buildStableSnapshotLayer({
-    mode: params.mode,
-    currentUrl: params.currentUrl,
-    currentTitle: params.currentTitle,
-    pageType: params.pageType,
-    pageRole: params.pageRole,
-    primaryRegion: params.primaryRegion,
-    quality: params.contentSummary.quality,
-    interactiveElements,
-    artifactRefs,
-  });
 
   const extensionLayer = buildExtensionLayer({
     mode: params.mode,
@@ -1094,6 +1417,25 @@ async function buildModeOutput(params: {
     visualElements: params.visualElements,
     requestedLayer: params.requestedLayer,
   });
+  const regionAlignedUnderstanding = deriveRegionAlignedPageUnderstanding({
+    pageRole: params.pageRole,
+    primaryRegion: params.primaryRegion,
+    primaryRegionConfidence: params.primaryRegionConfidence,
+    pageRegions: extensionLayer.pageRegions,
+    visibleRegionRows,
+  });
+
+  const stableLayer = buildStableSnapshotLayer({
+    mode: params.mode,
+    currentUrl: params.currentUrl,
+    currentTitle: params.currentTitle,
+    pageType: params.pageType,
+    pageRole: regionAlignedUnderstanding.pageRole,
+    primaryRegion: regionAlignedUnderstanding.primaryRegion,
+    quality: params.contentSummary.quality,
+    interactiveElements,
+    artifactRefs,
+  });
 
   // Feed the per-tab stable-targetRef registry so the click bridge can
   // translate `tgt_*` from prior turns back into the live per-snapshot
@@ -1114,10 +1456,55 @@ async function buildModeOutput(params: {
     }
     recordStableTargetRefSnapshot(params.tabId, entries);
   }
+  if (Array.isArray(candidateActions)) {
+    const entries: CandidateActionTargetLocatorEntry[] = [];
+    const snapshotFrameId = params.frameContext?.frameId;
+    for (const candidateAction of candidateActions) {
+      const targetRef =
+        typeof candidateAction?.targetRef === 'string' ? candidateAction.targetRef.trim() : '';
+      if (!targetRef) continue;
+      const cssLocator = Array.isArray(candidateAction.locatorChain)
+        ? candidateAction.locatorChain.find((locator) => locator?.type === 'css')
+        : undefined;
+      const selector = typeof cssLocator?.value === 'string' ? cssLocator.value.trim() : '';
+      if (!selector) continue;
+      entries.push({
+        targetRef,
+        selector,
+        selectorType: 'css',
+        ...(typeof candidateAction.frameId === 'number'
+          ? { frameId: candidateAction.frameId }
+          : typeof snapshotFrameId === 'number'
+            ? { frameId: snapshotFrameId }
+            : {}),
+      });
+    }
+    recordCandidateActionTargetLocatorsSnapshot(params.tabId, entries);
+  }
+
+  const publishFormReadiness = buildPublishFormReadiness({
+    pageRole: regionAlignedUnderstanding.pageRole,
+    primaryRegion: regionAlignedUnderstanding.primaryRegion,
+    candidateActions,
+    fileInputBindings: params.fileInputBindings,
+    interactiveElements,
+  });
+  const pageRegionsWithReadiness = applyPublishFormReadinessToPageRegions(
+    extensionLayer.pageRegions,
+    publishFormReadiness,
+  );
+  const pageOperationMapWithReadiness = buildPageOperationMap(pageRegionsWithReadiness ?? [], {
+    candidateActions,
+    interactiveElements,
+  });
 
   const sharedPayload: ReadPageCompactSnapshot = {
     ...stableLayer,
     ...extensionLayer,
+    pageRegions: pageRegionsWithReadiness,
+    pageOperationMap: pageOperationMapWithReadiness,
+    fileInputBindings: params.fileInputBindings,
+    publishFormReadiness,
     currentWindowId: params.currentWindowId,
     currentWindowState: params.currentWindowState,
     currentWindowWidth: params.currentWindowWidth,
@@ -1212,6 +1599,7 @@ async function buildModeOutput(params: {
       previousOwnershipRuntime: watchLoopSnapshot.previousOwnershipRuntime,
       ownershipRuntime: sharedPayload.ownershipRuntime,
       selectedDataSource: sharedPayload.selectedDataSource,
+      publishFormReadiness: sharedPayload.publishFormReadiness,
       sourceRouteHonestyVerdict: null,
     });
     browserPageObjectForAuth = browserPageObject;
@@ -1444,7 +1832,8 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       .filter(
         (entry) =>
           (entry.ref.startsWith('ref_text_search_toolbar_') ||
-            entry.ref.startsWith('ref_text_filter_panel_')) &&
+            entry.ref.startsWith('ref_text_filter_panel_') ||
+            entry.ref.startsWith('ref_text_control_')) &&
           entry.selector,
       );
     if (entries.length === 0) return 0;
@@ -1498,6 +1887,88 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       return typeof text === 'string' && text.trim() ? text : null;
     } catch {
       return null;
+    }
+  }
+
+  private async collectFileInputBindings(
+    tabId: number,
+    frameId?: number,
+  ): Promise<ReadPageFileInputBinding[]> {
+    try {
+      const result = await chrome.scripting.executeScript({
+        target: { tabId, ...(typeof frameId === 'number' ? { frameIds: [frameId] } : {}) },
+        world: 'ISOLATED',
+        func: () => {
+          function cssEscape(value: string): string {
+            const escapeFn = (window as any).CSS?.escape;
+            return typeof escapeFn === 'function'
+              ? escapeFn(value)
+              : value.replace(/["\\]/g, '\\$&');
+          }
+
+          function selectorForInput(input: HTMLInputElement): string {
+            const id = input.getAttribute('id');
+            if (id) return `#${cssEscape(id)}`;
+            const name = input.getAttribute('name');
+            if (name) return `input[type="file"][name="${cssEscape(name)}"]`;
+            const inputs = Array.from(document.querySelectorAll('input[type="file"]'));
+            const index = inputs.indexOf(input);
+            if (index >= 0) return `input[type="file"]:nth-of-type(${index + 1})`;
+            return 'input[type="file"]';
+          }
+
+          return Array.from(document.querySelectorAll('input[type="file"]'))
+            .filter((input): input is HTMLInputElement => input instanceof HTMLInputElement)
+            .slice(0, 5)
+            .map((input) => {
+              const rect = input.getBoundingClientRect();
+              const style = window.getComputedStyle(input);
+              const visible =
+                rect.width > 0 &&
+                rect.height > 0 &&
+                style.visibility !== 'hidden' &&
+                style.display !== 'none';
+              return {
+                selector: selectorForInput(input),
+                accept: input.getAttribute('accept') || undefined,
+                multiple: input.multiple,
+                disabled: input.disabled,
+                visible,
+                bindingSource: 'dom_input_type_file',
+                nextRequiredTool: 'chrome_upload_file',
+                nextRequiredCheck:
+                  'run_chrome_upload_file_then_run_fresh_same_tab_read_to_prove_upload_state',
+                claimBoundary:
+                  'Read-only DOM evidence proves only that a file input binding candidate exists in this snapshot; it does not prove upload authorization, upload execution, website acceptance, final publish readiness, or business success.',
+              };
+            });
+        },
+      } as any);
+      const bindings = result?.[0]?.result;
+      if (!Array.isArray(bindings)) return [];
+      return bindings
+        .map((binding: any): ReadPageFileInputBinding | null => {
+          const selector = typeof binding?.selector === 'string' ? binding.selector.trim() : '';
+          if (!selector) return null;
+          return {
+            selector,
+            ...(typeof binding.accept === 'string' && binding.accept.trim()
+              ? { accept: binding.accept.trim() }
+              : {}),
+            ...(typeof binding.multiple === 'boolean' ? { multiple: binding.multiple } : {}),
+            ...(typeof binding.disabled === 'boolean' ? { disabled: binding.disabled } : {}),
+            ...(typeof binding.visible === 'boolean' ? { visible: binding.visible } : {}),
+            bindingSource: 'dom_input_type_file',
+            nextRequiredTool: 'chrome_upload_file',
+            nextRequiredCheck:
+              'run_chrome_upload_file_then_run_fresh_same_tab_read_to_prove_upload_state',
+            claimBoundary:
+              'Read-only DOM evidence proves only that a file input binding candidate exists in this snapshot; it does not prove upload authorization, upload execution, website acceptance, final publish readiness, or business success.',
+          };
+        })
+        .filter((binding): binding is ReadPageFileInputBinding => binding !== null);
+    } catch {
+      return [];
     }
   }
 
@@ -1694,6 +2165,97 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     params.basePayload.fallbackSource = params.basePayload.fallbackSource
       ? `${params.basePayload.fallbackSource}+text_menu_target_recovery`
       : 'text_menu_target_recovery';
+    return true;
+  }
+
+  private async recoverVisibleTextControlTargets(params: {
+    tabId: number;
+    basePayload: any;
+    frameId?: number;
+  }): Promise<boolean> {
+    const labels = extractVisibleTextControlLabelsForTargetRecovery(
+      params.basePayload.visibleTextContent,
+    );
+    if (labels.length === 0) return false;
+
+    const existingTargetKeys = new Set(
+      (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
+        .filter((element: any) => {
+          const selector = typeof element?.selector === 'string' ? element.selector.trim() : '';
+          const href = typeof element?.href === 'string' ? element.href.trim() : '';
+          return Boolean(selector || href);
+        })
+        .map((element: any) => searchToolbarElementKey(element))
+        .filter(Boolean),
+    );
+    const existingLabels = new Set(
+      (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
+        .map((element: any) =>
+          String(element?.name || element?.text || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase(),
+        )
+        .filter(Boolean),
+    );
+
+    const recovered: any[] = [];
+    for (const label of labels) {
+      const normalizedLabel = label.replace(/\s+/g, ' ').trim().toLowerCase();
+      if (!normalizedLabel || existingLabels.has(normalizedLabel)) continue;
+      const fallback = await this.collectInteractiveElementsFallback(params.tabId, {
+        textQuery: label,
+        includeCoordinates: true,
+        frameId: params.frameId,
+      });
+      const first = Array.isArray(fallback?.elements)
+        ? fallback.elements.find((element: any) =>
+            isCompactVisibleTextControlFallbackElement(element),
+          )
+        : null;
+      if (!first?.selector) continue;
+      const recoveredElement = {
+        ...first,
+        selector: first.selector,
+        text: label,
+        name: label,
+        role: first.role === 'generic' ? 'button' : first.role || 'button',
+        type: first.type === 'text' ? 'button' : first.type || 'button',
+      };
+      const key = searchToolbarElementKey(recoveredElement);
+      if (!key || existingTargetKeys.has(key)) continue;
+      recovered.push(recoveredElement);
+      existingTargetKeys.add(key);
+      existingLabels.add(normalizedLabel);
+    }
+    if (recovered.length === 0) return false;
+
+    const existingElements = Array.isArray(params.basePayload.elements)
+      ? params.basePayload.elements
+      : [];
+    const existingRefMap = Array.isArray(params.basePayload.refMap)
+      ? params.basePayload.refMap
+      : [];
+    const offset = existingRefMap.filter((entry: unknown) => entry != null).length;
+    const recoveredRefMap = buildFallbackRefMap(recovered).map((entry, index) =>
+      entry ? { ...entry, ref: `ref_text_control_${offset + index + 1}` } : null,
+    );
+    await this.bindSyntheticRefsToSelectors(params.tabId, recoveredRefMap, params.frameId);
+    const recoveredWithRefs = attachFallbackRefs(recovered, recoveredRefMap);
+
+    params.basePayload.elements = [...recoveredWithRefs, ...existingElements].slice(0, 150);
+    params.basePayload.refMap = [...recoveredRefMap, ...existingRefMap].slice(0, 150);
+    params.basePayload.refMapCount = params.basePayload.refMap.filter(
+      (entry: unknown) => entry != null,
+    ).length;
+    params.basePayload.count = Math.max(
+      Number(params.basePayload.count || 0),
+      params.basePayload.elements.length,
+    );
+    params.basePayload.fallbackUsed = true;
+    params.basePayload.fallbackSource = params.basePayload.fallbackSource
+      ? `${params.basePayload.fallbackSource}+visible_text_control_recovery`
+      : 'visible_text_control_recovery';
     return true;
   }
 
@@ -2216,6 +2778,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           tips: standardTips,
           refMap: [],
           candidateActions: [],
+          fileInputBindings: [],
           visualElements: [],
           visibleRegionRows: extractVisibleRegionRows({
             pageContent: '',
@@ -2389,6 +2952,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           requestedDepth,
           focusRefId,
           rows: basePayload.visibleRegionRows,
+          pageRole: pageUnderstanding.pageRole,
           assistantGuidance,
         }) &&
         !basePayload.visibleTextContent
@@ -2454,6 +3018,11 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       }
 
       await this.recoverGlobalMenuTextTargets({ tabId, basePayload, frameId: requestedFrameId });
+      await this.recoverVisibleTextControlTargets({
+        tabId,
+        basePayload,
+        frameId: requestedFrameId,
+      });
       await this.recoverSearchToolbarTextTargets({
         tabId,
         basePayload,
@@ -2473,6 +3042,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         visibleTextContent: basePayload.visibleTextContent,
         frameId: requestedFrameId,
       });
+      basePayload.fileInputBindings = await this.collectFileInputBindings(tabId, requestedFrameId);
 
       // Normal path: return tree when the tree is sufficiently rich or the
       // visible-text fallback has already recovered business rows.
@@ -2523,6 +3093,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           tips: basePayload.tips,
           refMap: basePayload.refMap,
           candidateActions: basePayload.candidateActions,
+          fileInputBindings: basePayload.fileInputBindings,
           visualElements: basePayload.visualElements,
           visibleRegionRows: basePayload.visibleRegionRows,
           includeAuthArtifacts,
@@ -2608,6 +3179,16 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             }
           }
           reconcilePageUnderstandingWithVisibleRows(basePayload);
+          await this.recoverGlobalMenuTextTargets({
+            tabId,
+            basePayload,
+            frameId: requestedFrameId,
+          });
+          await this.recoverVisibleTextControlTargets({
+            tabId,
+            basePayload,
+            frameId: requestedFrameId,
+          });
           await this.recoverSearchToolbarTextTargets({
             tabId,
             basePayload,
@@ -2626,6 +3207,10 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             visibleTextContent: basePayload.visibleTextContent,
             frameId: requestedFrameId,
           });
+          basePayload.fileInputBindings = await this.collectFileInputBindings(
+            tabId,
+            requestedFrameId,
+          );
 
           const modePayload = await buildModeOutput({
             mode: selectedMode,
@@ -2673,6 +3258,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             tips: basePayload.tips,
             refMap: basePayload.refMap,
             candidateActions: basePayload.candidateActions,
+            fileInputBindings: basePayload.fileInputBindings,
             visualElements: basePayload.visualElements,
             visibleRegionRows: basePayload.visibleRegionRows,
             includeAuthArtifacts,

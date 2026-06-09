@@ -15,6 +15,12 @@ export interface ResolvedStableTargetRefEntry {
   frameId?: number;
 }
 
+export interface ResolvedCandidateActionTargetLocatorEntry {
+  selector: string;
+  selectorType?: CandidateActionSelectorType;
+  frameId?: number;
+}
+
 /**
  * Optional stable-targetRef hooks. Kept as a thin functional interface
  * so the click bridge can pass in a real registry while unit tests pass
@@ -39,6 +45,16 @@ export interface ResolveCandidateActionTargetParams {
     tabId: number,
     targetRef: string,
   ) => string | ResolvedStableTargetRefEntry | undefined;
+  /**
+   * Optional lookup for AI-facing fallback/synthetic refs that came from the
+   * most recent read_page candidateAction list. This lets a caller pass only
+   * `candidateAction.targetRef` while still dispatching through the recorded
+   * CSS locator for the same tab snapshot.
+   */
+  lookupCandidateActionTargetLocator?: (
+    tabId: number,
+    targetRef: string,
+  ) => ResolvedCandidateActionTargetLocatorEntry | undefined;
 }
 
 export interface ResolvedCandidateActionTarget {
@@ -52,6 +68,7 @@ export interface ResolvedCandidateActionTarget {
     | 'explicit_selector'
     | 'candidate_locator_ref'
     | 'candidate_locator_css'
+    | 'candidate_snapshot_locator_css'
     | 'none'
     | 'unresolved_stable_target_ref';
   /**
@@ -104,11 +121,16 @@ function isSyntheticFilterPanelRef(value: string): boolean {
   return value.startsWith('ref_text_filter_panel_');
 }
 
+function isSyntheticDynamicSurfaceRef(value: string): boolean {
+  return value.startsWith('ref_dynamic_surface_');
+}
+
 function isLocatorBackedSyntheticRef(value: string): boolean {
   return (
     isSyntheticTextMenuRef(value) ||
     isSyntheticSearchToolbarRef(value) ||
-    isSyntheticFilterPanelRef(value)
+    isSyntheticFilterPanelRef(value) ||
+    isSyntheticDynamicSurfaceRef(value)
   );
 }
 
@@ -144,6 +166,26 @@ function resolveStableTargetRef(params: ResolveCandidateActionTargetParams, targ
   };
 }
 
+function resolveCandidateActionTargetLocator(
+  params: ResolveCandidateActionTargetParams,
+  targetRef: string,
+) {
+  const lookup = params.lookupCandidateActionTargetLocator;
+  const tabId = params.tabId;
+  const candidateFrameId = asFiniteFrameId(params.candidateAction?.frameId);
+  if (!lookup || typeof tabId !== 'number') return undefined;
+  const resolved = lookup(tabId, targetRef);
+  const selector = asNonEmptyString(resolved?.selector);
+  if (!selector) return undefined;
+  const frameId = typeof resolved?.frameId === 'number' ? resolved.frameId : candidateFrameId;
+  return {
+    selector,
+    selectorType: resolved?.selectorType || ('css' as const),
+    ...(typeof frameId === 'number' ? { frameId } : {}),
+    source: 'candidate_snapshot_locator_css' as const,
+  };
+}
+
 export function resolveCandidateActionTarget(
   params: ResolveCandidateActionTargetParams,
 ): ResolvedCandidateActionTarget {
@@ -170,6 +212,16 @@ export function resolveCandidateActionTarget(
           source: 'candidate_locator_css',
         };
       }
+      const resolvedLocator = resolveCandidateActionTargetLocator(params, explicitRef);
+      if (resolvedLocator) return resolvedLocator;
+      return {
+        ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
+        source: 'none',
+      };
+    }
+    if (isFallbackRef(explicitRef)) {
+      const resolvedLocator = resolveCandidateActionTargetLocator(params, explicitRef);
+      if (resolvedLocator) return resolvedLocator;
       return {
         ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
         source: 'none',
@@ -195,9 +247,21 @@ export function resolveCandidateActionTarget(
       };
     }
 
+    if (isLocatorBackedSyntheticRef(candidateTargetRef) || isFallbackRef(candidateTargetRef)) {
+      const resolvedLocator = resolveCandidateActionTargetLocator(params, candidateTargetRef);
+      if (resolvedLocator) return resolvedLocator;
+      if (isFallbackRef(candidateTargetRef)) {
+        return {
+          ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
+          source: 'none',
+        };
+      }
+    }
+
     if (
       isSyntheticSearchToolbarRef(candidateTargetRef) ||
-      isSyntheticFilterPanelRef(candidateTargetRef)
+      isSyntheticFilterPanelRef(candidateTargetRef) ||
+      isSyntheticDynamicSurfaceRef(candidateTargetRef)
     ) {
       return {
         ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
@@ -241,7 +305,9 @@ export function resolveCandidateActionTarget(
 
   if (
     locatorRef &&
-    (isSyntheticSearchToolbarRef(locatorRef) || isSyntheticFilterPanelRef(locatorRef))
+    (isSyntheticSearchToolbarRef(locatorRef) ||
+      isSyntheticFilterPanelRef(locatorRef) ||
+      isSyntheticDynamicSurfaceRef(locatorRef))
   ) {
     return {
       ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),

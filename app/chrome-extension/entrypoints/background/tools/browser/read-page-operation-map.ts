@@ -17,11 +17,14 @@ export function buildPageOperationMap(
     interactiveElements?: readonly ReadPageInteractiveElement[];
   } = {},
 ): ReadPageOperationMap {
+  const candidateActionById = new Map<string, ReadPageCandidateAction>(
+    (params.candidateActions ?? []).map((action) => [action.id, action]),
+  );
   const zones = pageRegions.map((region) => {
-    const purpose = operationPurposeForRegion(region);
-    return buildOperationZone(region, purpose);
+    const purpose = operationPurposeForRegion(region, candidateActionById);
+    return buildOperationZone(region, purpose, candidateActionById);
   });
-  zones.push(...buildDerivedSearchEntryZones(pageRegions, params));
+  zones.push(...buildDerivedSearchEntryZones(pageRegions, params, candidateActionById));
   const readyCount = zones.filter((zone) => zone.readiness === 'ready').length;
   const candidateCount = zones.filter((zone) => isCandidateState(zone.state)).length;
   const purposeList = Array.from(new Set(zones.map((zone) => zone.purpose))).join(', ');
@@ -39,6 +42,7 @@ export function buildPageOperationMap(
 function buildOperationZone(
   region: ReadPageRegion,
   purpose: ReadPageOperationPurpose,
+  candidateActionById: ReadonlyMap<string, ReadPageCandidateAction>,
 ): ReadPageOperationZone {
   return {
     zoneId: `zone_${region.regionType}`,
@@ -48,9 +52,16 @@ function buildOperationZone(
     label: operationLabelForRegion(region, purpose),
     state: region.state,
     readiness: operationReadinessForRegion(region, purpose),
+    ...(region.readiness ? { regionReadiness: region.readiness } : {}),
+    ...(region.readinessBlockingReasons?.length
+      ? { readinessBlockingReasons: region.readinessBlockingReasons }
+      : {}),
+    ...(region.nextRequiredTool ? { nextRequiredTool: region.nextRequiredTool } : {}),
+    ...(region.nextRequiredSelector ? { nextRequiredSelector: region.nextRequiredSelector } : {}),
+    ...(region.nextRequiredCheck ? { nextRequiredCheck: region.nextRequiredCheck } : {}),
     targetability: region.targetability,
     candidateActionIds: region.candidateActionIds,
-    primaryAction: selectPrimaryActionForRegion(region),
+    primaryAction: selectPrimaryActionForRegion(region, purpose, candidateActionById),
     evidenceLevel: operationEvidenceLevel(region),
     claimBoundary: operationClaimBoundaryForRegion(region, purpose),
   };
@@ -62,12 +73,15 @@ function buildDerivedSearchEntryZones(
     candidateActions?: readonly ReadPageCandidateAction[];
     interactiveElements?: readonly ReadPageInteractiveElement[];
   },
+  candidateActionById: ReadonlyMap<string, ReadPageCandidateAction>,
 ): ReadPageOperationZone[] {
   const zones: ReadPageOperationZone[] = [];
   const representedCandidateIds = new Set<string>(
     pageRegions
       .filter(
-        (region) => region.regionType === 'form' && operationPurposeForRegion(region) === 'search',
+        (region) =>
+          region.regionType === 'form' &&
+          operationPurposeForRegion(region, candidateActionById) === 'search',
       )
       .flatMap((region) => region.candidateActionIds),
   );
@@ -124,8 +138,28 @@ function buildDerivedSearchEntryZones(
   return zones;
 }
 
-function selectPrimaryActionForRegion(region: ReadPageRegion) {
+function selectPrimaryActionForRegion(
+  region: ReadPageRegion,
+  purpose: ReadPageOperationPurpose,
+  candidateActionById: ReadonlyMap<string, ReadPageCandidateAction>,
+) {
   const actionableObjects = region.objects.filter((object) => object.primaryAction);
+  if (purpose === 'prepare_publish') {
+    const uploadCandidateAction = region.candidateActionIds
+      .map((candidateActionId) => candidateActionById.get(candidateActionId))
+      .find(
+        (action): action is ReadPageCandidateAction =>
+          action?.intent === 'publish.upload_media' &&
+          (action.actionType === 'click' || action.actionType === 'fill'),
+      );
+    if (uploadCandidateAction) return toExecutableAction(uploadCandidateAction);
+    return (
+      actionableObjects.find(
+        (object) =>
+          object.primaryAction?.toolArgs.candidateAction?.intent === 'publish.upload_media',
+      )?.primaryAction ?? actionableObjects[0]?.primaryAction
+    );
+  }
   if (region.regionType === 'menu') {
     return (
       actionableObjects.find(
@@ -196,8 +230,20 @@ function toExecutableAction(action: ReadPageCandidateAction): ReadPageExecutable
         id: action.id,
         actionType: action.actionType,
         targetRef: action.targetRef,
+        ...(action.label ? { label: action.label } : {}),
         confidence: action.confidence,
         matchReason: action.matchReason,
+        ...(action.actionability ? { actionability: action.actionability } : {}),
+        ...(action.actionabilityReason ? { actionabilityReason: action.actionabilityReason } : {}),
+        ...(action.intentBoundary ? { intentBoundary: action.intentBoundary } : {}),
+        ...(action.nextRequiredTool ? { nextRequiredTool: action.nextRequiredTool } : {}),
+        ...(action.nextRequiredSelector
+          ? { nextRequiredSelector: action.nextRequiredSelector }
+          : {}),
+        ...(action.nextRequiredSelectorSource
+          ? { nextRequiredSelectorSource: action.nextRequiredSelectorSource }
+          : {}),
+        ...(action.nextRequiredCheck ? { nextRequiredCheck: action.nextRequiredCheck } : {}),
         locatorChain: action.locatorChain,
         ...(action.intent ? { intent: action.intent } : {}),
       },
@@ -207,7 +253,10 @@ function toExecutableAction(action: ReadPageCandidateAction): ReadPageExecutable
   };
 }
 
-function operationPurposeForRegion(region: ReadPageRegion): ReadPageOperationPurpose {
+function operationPurposeForRegion(
+  region: ReadPageRegion,
+  candidateActionById: ReadonlyMap<string, ReadPageCandidateAction>,
+): ReadPageOperationPurpose {
   switch (region.regionType) {
     case 'navigation':
       return 'navigate';
@@ -223,6 +272,7 @@ function operationPurposeForRegion(region: ReadPageRegion): ReadPageOperationPur
     case 'qr_code':
       return 'scan_qr';
     case 'form':
+      if (hasPublishPreparationOnlyIntent(region, candidateActionById)) return 'prepare_publish';
       return /search|query|搜索/i.test(`${region.label ?? ''} ${region.state}`)
         ? 'search'
         : 'submit_form';
@@ -240,6 +290,12 @@ function operationReadinessForRegion(
 ): ReadPageOperationReadiness {
   if (region.state === 'error_candidate') return 'blocked';
   if (region.state === 'profile_route_candidate') return 'unknown';
+  if (
+    region.readiness === 'not_ready_candidate' ||
+    region.state === 'publish_not_ready_candidate'
+  ) {
+    return 'needs_expand';
+  }
   if (purpose === 'scan_qr' && region.state === 'expired_or_refresh_available_candidate') {
     return region.candidateActionIds.length > 0 ? 'blocked' : 'not_targetable';
   }
@@ -308,6 +364,8 @@ function operationLabelForRegion(
       return region.state === 'expired_or_refresh_available_candidate'
         ? 'QR refresh required candidate'
         : 'QR scan area candidate';
+    case 'prepare_publish':
+      return 'publish preparation area';
     case 'submit_form':
       return 'form action area';
     case 'observe_feedback':
@@ -334,6 +392,9 @@ function operationClaimBoundaryForRegion(
     }
     return `${base}; QR presence means scan collaboration may be needed, not login success`;
   }
+  if (purpose === 'prepare_publish') {
+    return `${base}; publish preparation/upload controls are visible, but final publish submission is not proven available`;
+  }
   if (purpose === 'navigate' && region.state === 'global_menu_available_candidate') {
     return `${base}; menu map shows visible navigation entries but not selected-page success or expanded submenu state`;
   }
@@ -350,6 +411,26 @@ function operationClaimBoundaryForRegion(
     return `${base}; region is not currently targetable`;
   }
   return base;
+}
+
+function hasPublishPreparationOnlyIntent(
+  region: ReadPageRegion,
+  candidateActionById: ReadonlyMap<string, ReadPageCandidateAction>,
+): boolean {
+  const intents = [
+    ...region.objects.map((object) => object.primaryAction?.toolArgs?.candidateAction?.intent),
+    ...region.candidateActionIds.map(
+      (candidateActionId) => candidateActionById.get(candidateActionId)?.intent,
+    ),
+  ].filter((intent): intent is string => typeof intent === 'string' && intent.length > 0);
+  if (intents.length === 0) return false;
+  if (intents.some((intent) => intent === 'publish.submit')) return false;
+  return intents.some(
+    (intent) =>
+      intent === 'publish.open_entry' ||
+      intent === 'publish.select_media_type' ||
+      intent === 'publish.upload_media',
+  );
 }
 
 function isExploratoryActionRegion(region: ReadPageRegion): boolean {

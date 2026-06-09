@@ -318,6 +318,11 @@ export const BROWSER_SCHEMAS: Tool[] = [
               type: 'string',
               description: 'Preferred element ref from read_page candidateActions[*].targetRef.',
             },
+            label: {
+              type: 'string',
+              description:
+                'Optional AI-facing read_page candidateActions[*].label. Planning/evidence text only; execution still uses targetRef or locatorChain.',
+            },
             intent: {
               type: 'string',
               description:
@@ -1203,6 +1208,11 @@ export const BROWSER_SCHEMAS: Tool[] = [
               type: 'string',
               description: 'Preferred element ref from read_page candidateActions[*].targetRef.',
             },
+            label: {
+              type: 'string',
+              description:
+                'Optional AI-facing read_page candidateActions[*].label. Planning/evidence text only; execution still uses targetRef or locatorChain.',
+            },
             intent: {
               type: 'string',
               description:
@@ -1311,6 +1321,11 @@ export const BROWSER_SCHEMAS: Tool[] = [
             targetRef: {
               type: 'string',
               description: 'Preferred element ref from read_page candidateActions[*].targetRef.',
+            },
+            label: {
+              type: 'string',
+              description:
+                'Optional AI-facing read_page candidateActions[*].label. Planning/evidence text only; execution still uses targetRef or locatorChain.',
             },
             intent: {
               type: 'string',

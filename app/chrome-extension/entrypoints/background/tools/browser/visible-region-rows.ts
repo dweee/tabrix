@@ -337,7 +337,7 @@ function attachTargetRefsToVisibleTextRows(
   }
   const candidates = fallbackInteractiveElements
     .map((item, index): ParsedVisibleNode => {
-      const role = normalizeText(item?.role ?? item?.type).toLowerCase() || 'generic';
+      const role = normalizeFallbackInteractiveRole(item);
       const name = normalizeText(item?.name ?? item?.text);
       const ref = normalizeText(item?.ref) || null;
       const href = normalizeText(item?.href) || null;
@@ -526,7 +526,7 @@ function supplementGroupsFromInteractiveElements(
   const fallbackNodes: ParsedVisibleNode[] = [];
   fallbackInteractiveElements
     .map((item, index): ParsedVisibleNode => {
-      const role = normalizeText(item?.role ?? item?.type).toLowerCase() || 'generic';
+      const role = normalizeFallbackInteractiveRole(item);
       const name = normalizeText(item?.name ?? item?.text);
       const ref = normalizeText(item?.ref) || null;
       const href = normalizeText(item?.href) || null;
@@ -552,6 +552,10 @@ function supplementGroupsFromInteractiveElements(
       regionId: node.ref || `${sourceRegion}_interactive_${index + 1}`,
     })),
   ];
+}
+
+function normalizeFallbackInteractiveRole(item: FallbackInteractiveElement): string {
+  return normalizeText(item?.role || item?.type).toLowerCase() || 'generic';
 }
 
 function parseVisibleNodes(pageContent: string): ParsedVisibleNode[] {

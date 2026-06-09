@@ -24,6 +24,9 @@ import type {
   MemorySessionStepsResponseData,
   MemorySessionsResponseData,
   MemoryTaskResponseData,
+  MkeExperienceRecipesResponseData,
+  MkeKnowledgeModelsResponseData,
+  MkeMemoryTracesResponseData,
 } from '@tabrix/shared';
 import { STORAGE_KEYS } from './constants';
 
@@ -32,6 +35,7 @@ export const DEFAULT_NATIVE_SERVER_PORT = 12306;
 
 /** Default page size for `/memory/sessions`; mirrors server-side default. */
 export const DEFAULT_SESSIONS_PAGE_SIZE = 20;
+export const DEFAULT_MKE_PAGE_SIZE = 20;
 
 /**
  * Strongly-typed failure modes produced by this client. Callers use
@@ -149,6 +153,52 @@ export async function fetchMemoryTask(
   const base = options.baseUrl ?? (await resolveMemoryApiBaseUrl());
   const url = `${base}/memory/tasks/${encodeURIComponent(taskId)}`;
   return readEnvelope<MemoryTaskResponseData>(url, options.signal);
+}
+
+export interface FetchMkeListOptions {
+  limit?: number;
+  offset?: number;
+  signal?: AbortSignal;
+  baseUrl?: string;
+}
+
+/** `GET /memory/mke/traces?limit=&offset=` */
+export async function fetchMkeMemoryTraces(
+  options: FetchMkeListOptions = {},
+): Promise<MkeMemoryTracesResponseData> {
+  const { base, limit, offset } = await buildMkeListRequest(options);
+  const url = `${base}/memory/mke/traces?limit=${limit}&offset=${offset}`;
+  return readEnvelope<MkeMemoryTracesResponseData>(url, options.signal);
+}
+
+/** `GET /memory/mke/knowledge?limit=&offset=` */
+export async function fetchMkeKnowledgeModels(
+  options: FetchMkeListOptions = {},
+): Promise<MkeKnowledgeModelsResponseData> {
+  const { base, limit, offset } = await buildMkeListRequest(options);
+  const url = `${base}/memory/mke/knowledge?limit=${limit}&offset=${offset}`;
+  return readEnvelope<MkeKnowledgeModelsResponseData>(url, options.signal);
+}
+
+/** `GET /memory/mke/experience?limit=&offset=` */
+export async function fetchMkeExperienceRecipes(
+  options: FetchMkeListOptions = {},
+): Promise<MkeExperienceRecipesResponseData> {
+  const { base, limit, offset } = await buildMkeListRequest(options);
+  const url = `${base}/memory/mke/experience?limit=${limit}&offset=${offset}`;
+  return readEnvelope<MkeExperienceRecipesResponseData>(url, options.signal);
+}
+
+async function buildMkeListRequest(options: FetchMkeListOptions): Promise<{
+  base: string;
+  limit: number;
+  offset: number;
+}> {
+  return {
+    base: options.baseUrl ?? (await resolveMemoryApiBaseUrl()),
+    limit: clampInt(options.limit ?? DEFAULT_MKE_PAGE_SIZE, 1, 500),
+    offset: clampInt(options.offset ?? 0, 0, Number.MAX_SAFE_INTEGER),
+  };
 }
 
 async function readEnvelope<TData>(url: string, signal?: AbortSignal): Promise<TData> {

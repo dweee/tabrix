@@ -69,6 +69,21 @@ interface ScreenshotPageDetails {
   currentScrollY: number;
 }
 
+interface VisibleCaptureTargetProof {
+  kind: 'screenshot_visible_capture_target_v1';
+  tabId: number;
+  windowId: number;
+  activated: boolean;
+  activationTimedOut: boolean;
+  activationWaitedMs: number;
+  windowFocused: boolean | null;
+  foregroundActivationVerdict: string;
+  documentVisibilityState: string | null;
+  documentHasFocus: boolean | null;
+  captureTargetProven: boolean;
+  reason: string;
+}
+
 const PAGE_DETAILS_REQUIRED_FIELDS: Array<keyof ScreenshotPageDetails> = [
   'totalWidth',
   'totalHeight',
@@ -78,6 +93,16 @@ const PAGE_DETAILS_REQUIRED_FIELDS: Array<keyof ScreenshotPageDetails> = [
   'currentScrollX',
   'currentScrollY',
 ];
+
+function isOwnExtensionPageUrl(url: string | undefined): boolean {
+  const runtimeId = chrome.runtime?.id;
+  return (
+    typeof url === 'string' &&
+    typeof runtimeId === 'string' &&
+    runtimeId.length > 0 &&
+    url.startsWith(`chrome-extension://${runtimeId}/`)
+  );
+}
 
 /**
  * Validates and asserts that the response from content script contains valid page details
@@ -108,6 +133,50 @@ function assertValidPageDetails(details: unknown): ScreenshotPageDetails {
  */
 class ScreenshotTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.SCREENSHOT;
+
+  private async proveVisibleCaptureTarget(
+    tab: chrome.tabs.Tab,
+  ): Promise<VisibleCaptureTargetProof> {
+    if (typeof tab.id !== 'number' || typeof tab.windowId !== 'number') {
+      throw new Error('Screenshot target tab is missing tab/window identity');
+    }
+
+    await this.ensureFocus(tab, { activate: true, focusWindow: true });
+    const activationResult = await this.waitForTabActivated(tab.id, {
+      expectedWindowId: tab.windowId,
+      requireFocusedWindow: true,
+    });
+    const foregroundProof = await this.waitForTabForegroundProof(tab.id, {
+      chromeWindowFocused: activationResult.windowFocused,
+      chromeTabActive: activationResult.activated,
+    });
+    const captureTargetProven =
+      activationResult.activated === true && activationResult.windowFocused === true;
+    const proof: VisibleCaptureTargetProof = {
+      kind: 'screenshot_visible_capture_target_v1',
+      tabId: tab.id,
+      windowId: tab.windowId,
+      activated: activationResult.activated,
+      activationTimedOut: activationResult.timedOut,
+      activationWaitedMs: activationResult.waitedMs,
+      windowFocused: activationResult.windowFocused,
+      foregroundActivationVerdict: foregroundProof.verdict,
+      documentVisibilityState: foregroundProof.documentVisibilityState,
+      documentHasFocus: foregroundProof.documentHasFocus,
+      captureTargetProven,
+      reason: captureTargetProven
+        ? 'target tab is active in the focused Chrome window before captureVisibleTab'
+        : 'captureVisibleTab can only capture the active visible tab; target tab/window was not proven active',
+    };
+
+    if (!captureTargetProven) {
+      throw new Error(
+        `Screenshot target tab not proven visible for captureVisibleTab: ${JSON.stringify(proof)}`,
+      );
+    }
+
+    return proof;
+  }
 
   /**
    * Execute screenshot operation
@@ -146,11 +215,14 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     let originalScroll: { x: number; y: number } | null = null;
     let didPreparePage = false;
     let pageDetails: ScreenshotPageDetails | undefined;
+    let visibleCaptureTargetProof: VisibleCaptureTargetProof | undefined;
 
     try {
       const background = args.background === true;
       // CDP path: background=true with simple viewport capture (no fullPage, no selector)
       const canUseCdpCapture = background && !fullPage && !selector;
+      const canUseVisibleOnlyCaptureWithoutHelper =
+        isOwnExtensionPageUrl(tab.url) && !fullPage && !selector;
 
       // === Path 1: CDP viewport capture (no content script needed) ===
       if (canUseCdpCapture) {
@@ -186,8 +258,18 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         }
       }
 
-      // === Path 2: Helper-assisted capture (requires content script) ===
+      // === Path 2: Own extension page visible capture (content scripts cannot inject there) ===
+      if (!finalImageDataUrl && canUseVisibleOnlyCaptureWithoutHelper) {
+        visibleCaptureTargetProof = await this.proveVisibleCaptureTarget(tab);
+        finalImageDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+        finalImageWidthCss = args.width ?? tab.width ?? 800;
+        finalImageHeightCss = args.height ?? tab.height ?? 600;
+      }
+
+      // === Path 3: Helper-assisted capture (requires content script) ===
       if (!finalImageDataUrl) {
+        visibleCaptureTargetProof = await this.proveVisibleCaptureTarget(tab);
+
         // Always inject helper when we need pageDetails
         await this.injectContentScript(tab.id!, ['inject-scripts/screenshot-helper.js']);
         await new Promise((resolve) => setTimeout(resolve, SCREENSHOT_CONSTANTS.SCRIPT_INIT_DELAY));
@@ -213,7 +295,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
 
         if (fullPage) {
           this.logInfo('Capturing full page...');
-          finalImageDataUrl = await this._captureFullPage(tab.id!, args, pageDetails);
+          finalImageDataUrl = await this._captureFullPage(tab.id!, args, pageDetails, tab.windowId);
           // Compute final CSS size
           if (args.width && args.height) {
             finalImageWidthCss = args.width;
@@ -236,6 +318,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
             tab.id!,
             args,
             pageDetails.devicePixelRatio,
+            tab.windowId,
           );
           if (args.width && args.height) {
             finalImageWidthCss = args.width;
@@ -361,6 +444,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
             tabId: tab.id,
             url: tab.url,
             name: name,
+            visibleCaptureTargetProof,
             ...results,
           }),
         },
@@ -383,6 +467,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     tabId: number,
     options: ScreenshotToolParams,
     pageDpr: number,
+    windowId: number,
   ): Promise<string> {
     const elementDetails = await this.sendMessageToTab(tabId, {
       action: TOOL_MESSAGE_TYPES.SCREENSHOT_GET_ELEMENT_DETAILS,
@@ -403,7 +488,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     // Small delay to ensure element is fully rendered after scrollIntoView
     await new Promise((resolve) => setTimeout(resolve, SCREENSHOT_CONSTANTS.SCRIPT_INIT_DELAY));
 
-    const visibleCaptureDataUrl = await chrome.tabs.captureVisibleTab({ format: 'png' });
+    const visibleCaptureDataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
     if (!visibleCaptureDataUrl) {
       throw new Error('Failed to capture visible tab for element cropping');
     }
@@ -425,6 +510,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     tabId: number,
     options: ScreenshotToolParams,
     initialPageDetails: any,
+    windowId: number,
   ): Promise<string> {
     const dpr = initialPageDetails.devicePixelRatio;
     const totalWidthCss = options.width || initialPageDetails.totalWidth; // Use option width if provided
@@ -474,7 +560,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         setTimeout(resolve, SCREENSHOT_CONSTANTS.CAPTURE_STITCH_DELAY_MS),
       );
 
-      const dataUrl = await chrome.tabs.captureVisibleTab({ format: 'png' });
+      const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
       if (!dataUrl) throw new Error('captureVisibleTab returned empty during full page capture');
 
       const yOffsetPx = currentScrollYCss * dpr;

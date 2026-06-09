@@ -2,6 +2,8 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import {
   TOOL_NAMES,
+  buildActionEvidenceResult,
+  type ActionEvidenceResult,
   type ClickActionRecoveryGuidance,
   type ClickObservedOutcome,
   type ClickVerification,
@@ -16,7 +18,10 @@ import {
   type ResolvedCandidateActionTarget,
   resolveCandidateActionTarget,
 } from './candidate-action';
-import { lookupStableTargetRefEntry } from './stable-target-ref-registry';
+import {
+  lookupCandidateActionTargetLocatorEntry,
+  lookupStableTargetRefEntry,
+} from './stable-target-ref-registry';
 import { armActionOutcome } from '../../observers/action-outcome-singleton';
 import { markBrowserWorldTabAiOperated } from '../../browser-world-inventory';
 import {
@@ -29,6 +34,7 @@ import {
 import {
   buildActionBusinessVerificationPlan,
   buildPostActionReadbackEvidence,
+  type PostActionReadbackEvidence,
 } from './post-action-readback';
 
 /**
@@ -226,6 +232,95 @@ function buildActionTargetBindingEvidence(input: {
     claimBoundary:
       'Target binding proves only where Tabrix dispatched the action; it does not prove business success, full frame inventory, or postcondition completion.',
   };
+}
+
+function summarizeLocatorChain(candidateAction: CandidateActionInput | undefined): string[] {
+  if (!Array.isArray(candidateAction?.locatorChain)) return [];
+  return candidateAction.locatorChain
+    .map((locator) => {
+      const type = typeof locator?.type === 'string' ? locator.type : 'unknown';
+      const value = typeof locator?.value === 'string' ? locator.value.trim() : '';
+      return value ? `${type}:${value.slice(0, 120)}` : type;
+    })
+    .filter((entry) => entry.length > 0)
+    .slice(0, 8);
+}
+
+export function buildClickActionEvidenceResult(input: {
+  actionId: string;
+  actionKind: 'click' | 'hover';
+  tabId: number | null;
+  targetBinding: ActionTargetBindingEvidence;
+  candidateAction?: CandidateActionInput;
+  finalRef?: string;
+  finalSelector?: string;
+  coordinates?: Coordinates | null;
+  dispatchSucceeded: boolean;
+  postActionReadback: PostActionReadbackEvidence;
+  errorCode?: string | null;
+}): ActionEvidenceResult {
+  const requestedTargetRef =
+    typeof input.candidateAction?.targetRef === 'string' ? input.candidateAction.targetRef : null;
+  const resolvedTargetRef = input.finalRef ?? requestedTargetRef;
+  const targetBindingProven =
+    input.targetBinding.dispatchTarget === 'none'
+      ? false
+      : input.targetBinding.stableTargetRefResolved === false
+        ? false
+        : input.dispatchSucceeded;
+  const negativeEvidence = [
+    ...(input.dispatchSucceeded ? [] : ['dispatch_not_accepted_by_browser']),
+    ...(input.postActionReadback.businessSuccessProven
+      ? []
+      : [`post_action_readback_${input.postActionReadback.status}`]),
+  ];
+
+  return buildActionEvidenceResult({
+    actionId: input.actionId,
+    actionKind: input.actionKind,
+    tabId: input.tabId,
+    toolSuccess: input.dispatchSucceeded,
+    targetBinding: {
+      requestedTargetRef,
+      resolvedTargetRef,
+      locatorChainSummary: summarizeLocatorChain(input.candidateAction),
+      dispatchTarget: input.targetBinding.dispatchTarget,
+      frameScope: input.targetBinding.frameScope,
+      targetBindingProven,
+      claimBoundary: input.targetBinding.claimBoundary,
+    },
+    dispatch: {
+      dispatched: input.dispatchSucceeded,
+      acceptedByBrowser: input.dispatchSucceeded,
+      errorCode: input.errorCode ?? null,
+    },
+    source: {
+      selectedDataSource: 'unknown',
+      sourceRouteHonestyVerdict: 'not_checked',
+      fallbackUsed: null,
+    },
+    postAction: {
+      postActionReadbackStatus: input.postActionReadback.status,
+      postconditionVerdict: input.postActionReadback.businessSuccessProven
+        ? 'proven_by_readback'
+        : 'not_proven',
+      freshReadRequired: input.postActionReadback.freshReadRequired,
+      readbackSource: input.postActionReadback.readbackSource,
+    },
+    business: {
+      businessSuccessVerdict: input.postActionReadback.businessSuccessProven
+        ? 'proven'
+        : 'not_proven',
+      businessSuccessProven: input.postActionReadback.businessSuccessProven,
+      negativeEvidence,
+      nextRequiredCheck: input.postActionReadback.requiredNextAction,
+    },
+    browserHygiene: {
+      required: false,
+      status: 'not_checked',
+      leakedTabsOrWindows: null,
+    },
+  });
 }
 
 interface ClickToolParams {
@@ -516,6 +611,7 @@ export function buildStructuredClickHelperErrorResult(input: {
   reason?: string;
   targetConsistency?: unknown;
   actionRecovery?: ClickActionRecoveryGuidance;
+  actionEvidenceResult?: ActionEvidenceResult;
 }) {
   const verification: ClickVerification = {
     navigationOccurred: false,
@@ -542,6 +638,7 @@ export function buildStructuredClickHelperErrorResult(input: {
     ...(input.targetConsistency ? { targetConsistency: input.targetConsistency } : {}),
     ...(input.actionRecovery ? { actionRecovery: input.actionRecovery } : {}),
     ...(input.targetBinding ? { targetBinding: input.targetBinding } : {}),
+    ...(input.actionEvidenceResult ? { actionEvidenceResult: input.actionEvidenceResult } : {}),
     resultShape: 'structured_click_error',
   };
 }
@@ -557,6 +654,7 @@ function createStructuredClickHelperErrorResponse(input: {
   actionRecovery?: ClickActionRecoveryGuidance;
   businessVerification?: unknown;
   postActionReadback?: unknown;
+  actionEvidenceResult?: ActionEvidenceResult;
 }): ToolResult {
   const payload = buildStructuredClickHelperErrorResult({
     message: input.message,
@@ -567,6 +665,7 @@ function createStructuredClickHelperErrorResponse(input: {
     reason: input.reason,
     targetConsistency: input.targetConsistency,
     actionRecovery: input.actionRecovery,
+    actionEvidenceResult: input.actionEvidenceResult,
   });
   return {
     content: [
@@ -581,6 +680,9 @@ function createStructuredClickHelperErrorResponse(input: {
               }
             : {}),
           ...(input.postActionReadback ? { postActionReadback: input.postActionReadback } : {}),
+          ...(input.actionEvidenceResult
+            ? { actionEvidenceResult: input.actionEvidenceResult }
+            : {}),
         }),
       },
     ],
@@ -1019,6 +1121,7 @@ class ClickTool extends BaseBrowserToolExecutor {
         candidateAction: args.candidateAction,
         tabId: tab.id,
         lookupStableTargetRef: lookupStableTargetRefEntry,
+        lookupCandidateActionTargetLocator: lookupCandidateActionTargetLocatorEntry,
       });
 
       // When a stable targetRef was supplied but the per-tab snapshot
@@ -1296,8 +1399,9 @@ class ClickTool extends BaseBrowserToolExecutor {
           return null;
         }
       })();
+      const clickActionId = `click-${tab.id}-${Date.now()}`;
       const actionOutcomeHandle = armActionOutcome({
-        actionId: `click-${tab.id}-${Date.now()}`,
+        actionId: clickActionId,
         actionKind: 'click',
         tabId: tab.id,
         urlPattern: actionUrlPattern,
@@ -1361,6 +1465,20 @@ class ClickTool extends BaseBrowserToolExecutor {
           actionKind: 'click',
           observedOutcome: 'no_observed_change',
         });
+        const targetBinding = buildTargetBinding();
+        const actionEvidenceResult = buildClickActionEvidenceResult({
+          actionId: clickActionId,
+          actionKind: 'click',
+          tabId: tab.id,
+          targetBinding,
+          candidateAction: args.candidateAction,
+          finalRef,
+          finalSelector,
+          coordinates,
+          dispatchSucceeded: false,
+          postActionReadback,
+          errorCode: reason,
+        });
         return createStructuredClickHelperErrorResponse({
           message: isResponseTimeout
             ? `Click helper did not return before the background response deadline (${error.timeoutMs}ms)`
@@ -1369,10 +1487,11 @@ class ClickTool extends BaseBrowserToolExecutor {
               }`,
           clickMethod: requestedClickMethod,
           browserSignals,
-          targetBinding: buildTargetBinding(),
+          targetBinding,
           reason,
           businessVerification,
           postActionReadback,
+          actionEvidenceResult,
         });
       }
 
@@ -1466,15 +1585,38 @@ class ClickTool extends BaseBrowserToolExecutor {
           typeof structuredError.reason === 'string' && structuredError.reason.trim()
             ? structuredError.reason.trim()
             : String(result.error);
+        const postActionReadback = buildPostActionReadbackEvidence({
+          candidateAction: args.candidateAction,
+          dispatchSucceeded: false,
+          actionKind: 'click',
+          observedOutcome: 'no_observed_change',
+        });
+        const targetBinding = buildTargetBinding();
+        const actionEvidenceResult = buildClickActionEvidenceResult({
+          actionId: clickActionId,
+          actionKind: 'click',
+          tabId: tab.id,
+          targetBinding,
+          candidateAction: args.candidateAction,
+          finalRef,
+          finalSelector,
+          coordinates,
+          dispatchSucceeded: false,
+          postActionReadback,
+          errorCode: reason,
+        });
         return createStructuredClickHelperErrorResponse({
           message: String(result.error),
           clickMethod,
           elementInfo: structuredError.elementInfo,
           browserSignals,
-          targetBinding: buildTargetBinding(),
+          targetBinding,
           reason,
           targetConsistency: structuredError.targetConsistency,
           actionRecovery: structuredError.actionRecovery,
+          businessVerification: buildBusinessVerification(false, 'no_observed_change'),
+          postActionReadback,
+          actionEvidenceResult,
         });
       }
 
@@ -1545,6 +1687,20 @@ class ClickTool extends BaseBrowserToolExecutor {
         verifierPassed: postClickState?.verifierPassed ?? null,
         verifierReason: postClickState?.verifierReason ?? null,
       });
+      const targetBinding = buildTargetBinding();
+      const actionEvidenceResult = buildClickActionEvidenceResult({
+        actionId: clickActionId,
+        actionKind: 'click',
+        tabId: tab.id,
+        targetBinding,
+        candidateAction: args.candidateAction,
+        finalRef,
+        finalSelector,
+        coordinates,
+        dispatchSucceeded: merged.dispatchSucceeded,
+        postActionReadback,
+        errorCode: merged.dispatchSucceeded ? null : merged.observedOutcome,
+      });
       return {
         content: [
           {
@@ -1562,10 +1718,11 @@ class ClickTool extends BaseBrowserToolExecutor {
               // added, that route MUST emit a different lane value so silent
               // lane drift is visible to lane-integrity metrics.
               lane: TABRIX_OWNED_LANE,
-              targetBinding: buildTargetBinding(),
+              targetBinding,
               businessVerification,
               postconditionStatus: businessVerification,
               postActionReadback,
+              actionEvidenceResult,
               message: finalSuccess
                 ? `Click observed outcome: ${merged.observedOutcome}`
                 : merged.observedOutcome === 'no_observed_change'
@@ -1711,6 +1868,7 @@ class FillTool extends BaseBrowserToolExecutor {
         candidateAction: args.candidateAction,
         tabId,
         lookupStableTargetRef: lookupStableTargetRefEntry,
+        lookupCandidateActionTargetLocator: lookupCandidateActionTargetLocatorEntry,
       });
 
       // Same fail-closed rule as clickTool: if the caller passed a stable
