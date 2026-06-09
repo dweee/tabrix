@@ -22,16 +22,37 @@ describe('Sidepanel MKE data tab', () => {
     expect(appSource).not.toContain("activeTab === 'execution'");
   });
 
-  it('queries all three MKE tables through the existing read-only memory API client', () => {
+  it('queries the four MKE/Object tables and Object Library preferences through the memory API client', () => {
     expect(tabSource).toContain('fetchMkeMemoryTraces');
+    expect(tabSource).toContain('fetchMkeBrowserObjects');
     expect(tabSource).toContain('fetchMkeKnowledgeModels');
     expect(tabSource).toContain('fetchMkeExperienceRecipes');
-    expect(tabSource).toContain("type ActiveTab = 'memory' | 'knowledge' | 'experience'");
+    expect(tabSource).toContain('fetchMkeObjectStoragePreferences');
+    expect(tabSource).toContain('updateMkeObjectStoragePreferences');
+    expect(tabSource).toContain('clearMkeBrowserObjects');
+    expect(tabSource).toContain('type ActiveTab = MkeDataTabId');
     expect(tabSource).toContain("label: '记忆库'");
+    expect(tabSource).toContain("label: '对象库'");
     expect(tabSource).toContain("label: '知识库'");
     expect(tabSource).toContain("label: '经验库'");
     expect(tabSource).not.toContain('MKE Workspace');
     expect(tabSource).not.toContain('数据控制台 / Data Console');
+  });
+
+  it('supports a non-P3 extension-internal URL entry for opening a specific data tab', () => {
+    expect(tabSource).toContain('import {');
+    expect(tabSource).toContain('resolveInitialMkeDataTabFromLocation');
+    expect(tabSource).toContain('type MkeDataTabId');
+    expect(tabSource).toContain('type ActiveTab = MkeDataTabId');
+    expect(tabSource).toContain(
+      'const activeTab = ref<ActiveTab>(resolveInitialMkeDataTabFromLocation())',
+    );
+    expect(tabSource).toContain('@click="setActiveTab(tab.id)"');
+    expect(tabSource).toContain('function setActiveTab(tab: ActiveTab): void');
+    expect(tabSource).toContain('function syncMkeDataTabUrl(tab: ActiveTab): void');
+    expect(tabSource).toContain("url.searchParams.set('mkeTab', tab)");
+    expect(tabSource).not.toContain("const activeTab = ref<ActiveTab>('memory')");
+    expect(tabSource).not.toContain('@click="activeTab = tab.id"');
   });
 
   it('keeps the user task focused on three compact data lists', () => {
@@ -45,14 +66,19 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('type="search"');
     expect(tabSource).toContain('搜索当前列表');
     expect(tabSource).toContain('mke-search-icon');
-    expect(tabSource).toContain('搜索主题、方法、网址、状态');
+    expect(tabSource).toContain('搜索主题、对象、方法、网址、状态');
     expect(tabSource).toContain('mke-refresh-button');
+    expect(tabSource).toContain('存储个人浏览状态');
+    expect(tabSource).toContain('清除对象库');
+    expect(tabSource).toContain('personalBrowserStateStorageEnabled');
+    expect(tabSource).toContain('mke-object-storage');
+    expect(tabSource).toContain('mke-switch');
     expect(tabSource).toContain('mke-record__title-row');
     expect(tabSource).toContain('mke-record__meta-line');
     expect(tabSource).toContain('mke-record__feedback');
     expect(tabSource).toContain('mke-record__feedback-row');
     expect(tabSource).toContain('mke-feedback-score');
-    expect(tabSource).toContain('mke-record__headline-facts');
+    expect(tabSource).not.toContain('mke-record__headline-facts');
     expect(tabSource).toContain('mke-duration');
     expect(tabSource).toContain('mke-record-time');
     expect(tabSource).toContain('MKE_AUTO_REFRESH_MS');
@@ -72,13 +98,16 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('jsonPanelId(row.id)');
     expect(tabSource).not.toContain('<summary>详情</summary>');
     expect(tabSource).not.toContain('查看详情和完整 JSON');
-    expect(tabSource).toContain('mke-copy-button');
-    expect(tabSource).toContain("{{ copiedRecordId === row.id ? '已复制' : '复制' }}");
+    expect(tabSource).toContain('mke-json-panel');
+    expect(tabSource).toContain('mke-json-copy-button');
+    expect(tabSource).toContain('i-lucide-copy');
+    expect(tabSource).toContain("'mke-json-copy-button--copied': copiedRecordId === row.id");
+    expect(tabSource).toContain("'mke-json-copy-button--failed': copyFailedRecordId === row.id");
     expect(tabSource).toContain('loadMoreLabel');
     expect(tabSource).toContain('加载更多 (${activeRows.value.length}/${activeTotal.value})');
-    expect(tabSource).toContain('grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));');
+    expect(tabSource).toContain('grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));');
     expect(tabSource).toContain('grid-template-columns: minmax(180px, 1fr) auto;');
-    expect(tabSource).toContain('grid-template-columns: auto minmax(0, 1fr) auto;');
+    expect(tabSource).toContain('grid-template-columns: auto minmax(118px, 1fr) auto;');
     expect(tabSource).not.toContain('mke-meta');
   });
 
@@ -96,7 +125,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain("if (value === 'not_achieved') return '未完成'");
     expect(tabSource).toContain("if (value === 'true') return '业务通过'");
     expect(tabSource).toContain("if (value === 'false') return '未完成'");
-    expect(tabSource).toContain("return '待判断'");
+    expect(tabSource).toContain("return '待AI回写'");
   });
 
   it('makes business feedback primary and keeps tool execution as supporting facts', () => {
@@ -120,7 +149,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('createdAtLabel: formatDate(trace.createdAt)');
     expect(tabSource).toContain("['方法', trace.toolName]");
     expect(tabSource).toContain(
-      "['工具执行', formatToolStatus(trace.statusView?.executionStatus, trace.toolSuccess)]",
+      "['执行', formatToolStatus(trace.statusView?.executionStatus, trace.toolSuccess)]",
     );
     expect(tabSource).toContain('formatTraceLocationFact(trace)');
     expect(tabSource).not.toContain("['工具', trace.toolName]");
@@ -140,6 +169,54 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('function formatTraceLocationFact');
     expect(tabSource).toContain('function formatReadableFeedbackLine');
     expect(tabSource).not.toContain('function formatTraceContext');
+  });
+
+  it('adds Object Library as a real data view without showing Tab IDs as primary fields', () => {
+    expect(tabSource).toContain('const browserObjects = ref<MkeBrowserObjectSummary[]>([])');
+    expect(tabSource).toContain('fetchMkeBrowserObjects({ limit: objectLimit');
+    expect(tabSource).toContain(
+      "if (activeTab.value === 'object') return browserObjects.value.map(objectToRecord)",
+    );
+    expect(tabSource).toContain('function objectToRecord(object: MkeBrowserObjectSummary)');
+    expect(tabSource).toContain('object.currentRoute ||');
+    expect(tabSource).toContain('object.rootRoute,');
+    expect(tabSource).toContain('object.currentRoute,');
+    expect(tabSource).toContain('object.pageUrlPattern,');
+    expect(tabSource).toContain('object.pageIdentity?.url');
+    expect(tabSource).toContain('function formatObjectCardTitle(object: MkeBrowserObjectSummary)');
+    expect(tabSource).toContain('function formatObjectFacts(');
+    expect(tabSource).toContain("const tabTitle = readObjectFactString(object, 'titleSummary')");
+    expect(tabSource).toContain('if (tabTitle) return compactText(tabTitle, 42)');
+    expect(tabSource).toContain('const locationLabel = formatObjectLocation');
+    expect(tabSource).toContain('metaLine: formatObjectMetaLine(object, locationLabel)');
+    expect(tabSource).toContain("if (object.objectType === 'window')");
+    expect(tabSource).toContain("if (object.objectType === 'tab')");
+    expect(tabSource).toContain("['标签', formatObjectTabCount(object)]");
+    expect(tabSource).toContain("object.isActive === true ? ['标记', '当前窗口'] : null");
+    expect(tabSource).toContain("object.isActive === true ? ['标记', '当前页'] : null");
+    expect(tabSource).toContain(
+      "['窗口状态', formatWindowState(readObjectFactString(object, 'state'))]",
+    );
+    expect(tabSource).toContain("['状态', formatObjectRuntimeState(object)]");
+    expect(tabSource).toContain("['打开方', formatObjectOwner(object.ownerType)]");
+    expect(tabSource).toContain('function formatObjectOwner');
+    expect(tabSource).toContain("ai: 'AI打开'");
+    expect(tabSource).toContain("user_or_page: '用户打开'");
+    expect(tabSource).toContain("if (object.canTabrixOperate === true) return '可继续处理'");
+    expect(tabSource).toContain("if (object.canTabrixOperate === false) return '不可处理'");
+    expect(tabSource).toContain("if (object.tabStatus === 'loading') return '加载中'");
+    expect(tabSource).not.toContain("if (object.tabStatus === 'complete') return '已加载'");
+    expect(tabSource).toContain('function formatOperabilityReason');
+    expect(tabSource).toContain("active_tab_not_operable: '当前标签不可操作'");
+    expect(tabSource).toContain("browser_internal_page: '浏览器内部页'");
+    expect(tabSource).not.toContain("['操作', formatOperability(object)]");
+    expect(tabSource).not.toContain('function formatOperability(object');
+    expect(tabSource).not.toContain(
+      'return `${object.pageIdentity.label} 网页`;\\n  }\\n  if (object.display?.title)',
+    );
+    expect(tabSource).not.toContain("object.operabilityReason || '否'");
+    expect(tabSource).not.toContain("['Tab ID', object.tabId]");
+    expect(tabSource).not.toContain("['标签页', object.tabId]");
   });
 
   it('does not derive default card copy from raw tool results', () => {
@@ -185,6 +262,7 @@ describe('Sidepanel MKE data tab', () => {
 
   it('supports copying a row JSON payload from the compact details area', () => {
     expect(tabSource).toContain('const copiedRecordId = ref');
+    expect(tabSource).toContain('const copyFailedRecordId = ref');
     expect(tabSource).toContain('function copyRecordJson(row: ViewRecord)');
     expect(tabSource).toContain('const expandedRecordIds = ref<Set<string>>(new Set())');
     expect(tabSource).toContain('function toggleRecordJson(id: string)');
@@ -194,12 +272,25 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('globalThis.navigator?.clipboard?.writeText');
     expect(tabSource).toContain("document.execCommand('copy')");
     expect(tabSource).toContain('display: grid;');
-    expect(tabSource).toContain('grid-template-columns: auto minmax(0, 1fr) auto;');
+    expect(tabSource).toContain('grid-template-columns: auto minmax(118px, 1fr) auto;');
+    expect(tabSource).toContain('justify-self: start;');
+    expect(tabSource).toContain('justify-self: end;');
     expect(tabSource).not.toContain('right: 0;');
     expect(tabSource).not.toContain('top: 7px;');
+    expect(tabSource).toContain('right: 20px;');
+    expect(tabSource).toContain('top: 10px;');
+    expect(tabSource).toContain('height: 30px;');
+    expect(tabSource).toContain('width: 30px;');
     expect(tabSource).toContain('.mke-json-block');
+    expect(tabSource).toContain('class="mke-json-panel"');
+    expect(tabSource).toContain('class="mke-json-copy-button"');
+    expect(tabSource).toContain('.mke-json-copy-button--copied');
+    expect(tabSource).toContain('.mke-json-copy-button--failed');
+    expect(tabSource).toContain('@keyframes mke-copy-pop');
+    expect(tabSource).toContain('<i-lucide-copy aria-hidden="true" />');
     expect(tabSource).toContain('width: 100%;');
-    expect(tabSource).toContain('overflow-x: auto;');
+    expect(tabSource).toContain('overflow: auto;');
+    expect(tabSource).toContain('padding: 12px 58px 12px 12px;');
     expect(tabSource).toContain('onUnmounted');
   });
 
@@ -229,7 +320,8 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('overflow-x: hidden;');
     expect(tabSource).toContain('overflow-y: auto;');
     expect(tabSource).toContain('overflow-wrap: anywhere;');
-    expect(tabSource).toContain('white-space: normal;');
+    expect(tabSource).toContain('text-overflow: ellipsis;');
+    expect(tabSource).toContain('white-space: nowrap;');
     expect(tabSource).toContain('padding: 8px 2px 0 0;');
   });
 
@@ -252,16 +344,18 @@ describe('Sidepanel MKE data tab', () => {
     expect(appSource).toContain(':global(html)');
     expect(tabSource).toContain('max-width: min(860px, 100vw);');
     expect(tabSource).toContain('width: min(100%, 100vw);');
-    expect(tabSource).toContain('repeat(auto-fit, minmax(136px, 1fr))');
+    expect(tabSource).toContain('repeat(auto-fit, minmax(74px, 1fr))');
     expect(tabSource).toContain('flex-wrap: wrap;');
+    expect(tabSource).toContain('flex-wrap: nowrap;');
+    expect(tabSource).toContain('align-items: baseline;');
     expect(tabSource).toContain('max-width: 100%;');
     expect(tabSource).toContain('.mke-record');
-    expect(tabSource).toContain('.mke-record__top');
+    expect(tabSource).toContain('.mke-record__title-row');
     expect(tabSource).toContain('white-space: nowrap');
     expect(tabSource).toContain('@media (max-width: 520px)');
     expect(tabSource).toContain('overflow-wrap: anywhere');
     expect(tabSource).toContain('max-width: 100%');
-    expect(tabSource).toContain('max-width: min(420px, 100%);');
+    expect(tabSource).toContain('max-width: min(360px, calc(100vw - 180px));');
     expect(tabSource).toContain('grid-template-columns: minmax(180px, 1fr) auto;');
     expect(tabSource).toContain('.mke-tab-button--active');
   });

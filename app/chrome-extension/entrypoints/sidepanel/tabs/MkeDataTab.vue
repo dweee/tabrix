@@ -2,7 +2,6 @@
   <section class="mkep-tab mke-data-tab" :class="`mke-data-tab--${agentTheme}`">
     <div class="mke-shell">
       <div class="mke-controls" role="status" aria-live="polite">
-        <h2 class="mke-visually-hidden">{{ activeTableInfo.label }}</h2>
         <div class="mke-tabs" role="tablist" aria-label="MKE data tables">
           <button
             v-for="tab in tabs"
@@ -12,11 +11,43 @@
             :class="{ 'mke-tab-button--active': activeTab === tab.id }"
             role="tab"
             :aria-selected="activeTab === tab.id"
-            @click="activeTab = tab.id"
+            @click="setActiveTab(tab.id)"
           >
             <span>{{ tab.label }}</span>
             <strong>{{ tab.total }}</strong>
           </button>
+        </div>
+
+        <div v-if="activeTab === 'object'" class="mke-object-storage">
+          <div class="mke-object-storage__copy">
+            <strong>存储个人浏览状态</strong>
+            <span>{{
+              personalBrowserStateStorageEnabled
+                ? '已开启，保存完整当前路由'
+                : '已关闭，仅保存最小页面身份'
+            }}</span>
+          </div>
+          <div class="mke-object-storage__actions">
+            <button
+              type="button"
+              class="mke-button mke-clear-button"
+              :disabled="loading || preferenceLoading || totals.object === 0"
+              title="只清除对象库，不影响记忆库、知识库、经验库"
+              @click="clearObjectLibrary"
+            >
+              清除对象库
+            </button>
+            <button
+              type="button"
+              class="mke-switch"
+              :class="{ 'mke-switch--on': personalBrowserStateStorageEnabled }"
+              :aria-pressed="personalBrowserStateStorageEnabled"
+              :disabled="preferenceLoading"
+              @click="togglePersonalBrowserStateStorage"
+            >
+              <span>{{ personalBrowserStateStorageEnabled ? '开' : '关' }}</span>
+            </button>
+          </div>
         </div>
 
         <div class="mke-toolbar">
@@ -39,7 +70,7 @@
               v-model.trim="searchQuery"
               type="search"
               aria-label="Search loaded MKE rows"
-              placeholder="搜索主题、方法、网址、状态"
+              placeholder="搜索主题、对象、方法、网址、状态"
             />
           </label>
           <button
@@ -81,11 +112,6 @@
                   {{ row.metaLine }}
                 </p>
               </div>
-              <div class="mke-record__headline-facts">
-                <span class="mke-status" :class="`mke-status--${row.statusTone}`">
-                  {{ row.status }}
-                </span>
-              </div>
             </div>
 
             <div v-if="row.feedbackLine || row.feedbackScoreLabel" class="mke-record__feedback-row">
@@ -121,18 +147,39 @@
               <time v-if="row.createdAtLabel" class="mke-record-time">{{
                 row.createdAtLabel
               }}</time>
+              <span class="mke-status" :class="`mke-status--${row.statusTone}`">
+                {{ row.status }}
+              </span>
+            </div>
+            <div v-if="isRecordExpanded(row.id)" class="mke-json-panel">
               <button
                 type="button"
-                class="mke-copy-button"
-                :title="`复制 ${row.title} 的 JSON 数据`"
+                class="mke-json-copy-button"
+                :class="{
+                  'mke-json-copy-button--copied': copiedRecordId === row.id,
+                  'mke-json-copy-button--failed': copyFailedRecordId === row.id,
+                }"
+                :aria-label="`复制 ${row.title} 的 JSON 数据`"
+                :title="
+                  copiedRecordId === row.id
+                    ? '已复制'
+                    : copyFailedRecordId === row.id
+                      ? '复制失败'
+                      : '复制 JSON'
+                "
                 @click="copyRecordJson(row)"
               >
-                {{ copiedRecordId === row.id ? '已复制' : '复制' }}
+                <i-lucide-copy aria-hidden="true" />
+                <span class="mke-visually-hidden">{{
+                  copiedRecordId === row.id
+                    ? '已复制'
+                    : copyFailedRecordId === row.id
+                      ? '复制失败'
+                      : '复制 JSON'
+                }}</span>
               </button>
+              <pre :id="jsonPanelId(row.id)" class="mke-json-block">{{ row.detailJson }}</pre>
             </div>
-            <pre v-if="isRecordExpanded(row.id)" :id="jsonPanelId(row.id)" class="mke-json-block">{{
-              row.detailJson
-            }}</pre>
           </li>
         </ol>
 
@@ -153,22 +200,28 @@
 <script lang="ts" setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import type {
+  MkeBrowserObjectSummary,
   MkeExperienceRecipeSummary,
   MkeKnowledgeModelSummary,
   MkeMemoryTraceSummary,
 } from '@tabrix/shared';
 import {
   DEFAULT_MKE_PAGE_SIZE,
+  clearMkeBrowserObjects,
+  fetchMkeBrowserObjects,
   fetchMkeExperienceRecipes,
   fetchMkeKnowledgeModels,
   fetchMkeMemoryTraces,
+  fetchMkeObjectStoragePreferences,
   MemoryApiError,
+  updateMkeObjectStoragePreferences,
 } from '../../../common/memory-api-client';
 import { useAgentTheme } from '../../shared/composables/usePopupTheme';
+import { resolveInitialMkeDataTabFromLocation, type MkeDataTabId } from './mke-data-tab-url';
 
 const MKE_AUTO_REFRESH_MS = 5000;
 
-type ActiveTab = 'memory' | 'knowledge' | 'experience';
+type ActiveTab = MkeDataTabId;
 type StatusTone = 'good' | 'warn' | 'neutral';
 type TraceBusinessStatus = NonNullable<MkeMemoryTraceSummary['statusView']>['businessStatus'];
 type TraceExecutionStatus = NonNullable<MkeMemoryTraceSummary['statusView']>['executionStatus'];
@@ -195,12 +248,15 @@ interface ViewRecord {
   searchText: string;
 }
 
-const activeTab = ref<ActiveTab>('memory');
+const activeTab = ref<ActiveTab>(resolveInitialMkeDataTabFromLocation());
 const searchQuery = ref('');
 const loading = ref(false);
 const loadError = ref('');
 const loadErrorDetail = ref('');
+const preferenceLoading = ref(false);
+const personalBrowserStateStorageEnabled = ref(false);
 const copiedRecordId = ref('');
+const copyFailedRecordId = ref('');
 const expandedRecordIds = ref<Set<string>>(new Set());
 const { theme: agentTheme, initTheme } = useAgentTheme();
 let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
@@ -208,19 +264,32 @@ let autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let refreshInFlight = false;
 
 const traces = ref<MkeMemoryTraceSummary[]>([]);
+const browserObjects = ref<MkeBrowserObjectSummary[]>([]);
 const knowledgeModels = ref<MkeKnowledgeModelSummary[]>([]);
 const experienceRecipes = ref<MkeExperienceRecipeSummary[]>([]);
-const totals = ref<Record<ActiveTab, number>>({ memory: 0, knowledge: 0, experience: 0 });
-const offsets = ref<Record<ActiveTab, number>>({ memory: 0, knowledge: 0, experience: 0 });
+const totals = ref<Record<ActiveTab, number>>({
+  memory: 0,
+  object: 0,
+  knowledge: 0,
+  experience: 0,
+});
+const offsets = ref<Record<ActiveTab, number>>({
+  memory: 0,
+  object: 0,
+  knowledge: 0,
+  experience: 0,
+});
 
 const tabs = computed(() => [
   { id: 'memory' as const, label: '记忆库', total: totals.value.memory },
+  { id: 'object' as const, label: '对象库', total: totals.value.object },
   { id: 'knowledge' as const, label: '知识库', total: totals.value.knowledge },
   { id: 'experience' as const, label: '经验库', total: totals.value.experience },
 ]);
 
 const activeRows = computed<ViewRecord[]>(() => {
   if (activeTab.value === 'memory') return traces.value.map(traceToRecord);
+  if (activeTab.value === 'object') return browserObjects.value.map(objectToRecord);
   if (activeTab.value === 'knowledge') return knowledgeModels.value.map(knowledgeToRecord);
   return experienceRecipes.value.map(experienceToRecord);
 });
@@ -245,6 +314,13 @@ const activeTableInfo = computed(() => {
       description: '查看最近工具调用、结果状态、耗时和网址。',
     };
   }
+  if (activeTab.value === 'object') {
+    return {
+      kicker: 'Browser objects / 浏览器对象',
+      label: '对象库',
+      description: '查看当前浏览器窗口、标签、页面对象和处理状态。',
+    };
+  }
   if (activeTab.value === 'knowledge') {
     return {
       kicker: 'Knowledge models / 页面知识模型',
@@ -261,9 +337,32 @@ const activeTableInfo = computed(() => {
 
 const activeEmptyText = computed(() => {
   if (activeTab.value === 'memory') return '记忆库暂无工具调用记录 / No memory traces yet.';
+  if (activeTab.value === 'object') return '对象库暂无浏览器对象 / No browser objects yet.';
   if (activeTab.value === 'knowledge') return '知识库暂无页面模型 / No knowledge models yet.';
   return '经验库暂无复用经验 / No experience recipes yet.';
 });
+
+function setActiveTab(tab: ActiveTab): void {
+  activeTab.value = tab;
+  syncMkeDataTabUrl(tab);
+}
+
+function syncMkeDataTabUrl(tab: ActiveTab): void {
+  try {
+    const location = globalThis.location;
+    const history = globalThis.history;
+    if (!location?.href || !history?.replaceState) return;
+    const url = new URL(location.href);
+    if (tab === 'memory') {
+      url.searchParams.delete('mkeTab');
+    } else {
+      url.searchParams.set('mkeTab', tab);
+    }
+    history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  } catch {
+    // URL state is a test/deep-link convenience; UI tab state remains authoritative.
+  }
+}
 
 onMounted(() => {
   void initTheme();
@@ -287,23 +386,31 @@ async function refreshAll(options: { silent?: boolean } = {}): Promise<void> {
   loadErrorDetail.value = '';
   try {
     const memoryLimit = Math.max(offsets.value.memory, DEFAULT_MKE_PAGE_SIZE);
+    const objectLimit = Math.max(offsets.value.object, DEFAULT_MKE_PAGE_SIZE);
     const knowledgeLimit = Math.max(offsets.value.knowledge, DEFAULT_MKE_PAGE_SIZE);
     const experienceLimit = Math.max(offsets.value.experience, DEFAULT_MKE_PAGE_SIZE);
-    const [memoryData, knowledgeData, experienceData] = await Promise.all([
-      fetchMkeMemoryTraces({ limit: memoryLimit, offset: 0 }),
-      fetchMkeKnowledgeModels({ limit: knowledgeLimit, offset: 0 }),
-      fetchMkeExperienceRecipes({ limit: experienceLimit, offset: 0 }),
-    ]);
+    const [memoryData, objectData, knowledgeData, experienceData, preferenceData] =
+      await Promise.all([
+        fetchMkeMemoryTraces({ limit: memoryLimit, offset: 0 }),
+        fetchMkeBrowserObjects({ limit: objectLimit, offset: 0 }),
+        fetchMkeKnowledgeModels({ limit: knowledgeLimit, offset: 0 }),
+        fetchMkeExperienceRecipes({ limit: experienceLimit, offset: 0 }),
+        fetchMkeObjectStoragePreferences(),
+      ]);
     traces.value = memoryData.traces;
+    browserObjects.value = objectData.browserObjects;
     knowledgeModels.value = knowledgeData.knowledgeModels;
     experienceRecipes.value = experienceData.experienceRecipes;
+    personalBrowserStateStorageEnabled.value = preferenceData.personalBrowserStateStorageEnabled;
     totals.value = {
       memory: memoryData.total,
+      object: objectData.total,
       knowledge: knowledgeData.total,
       experience: experienceData.total,
     };
     offsets.value = {
       memory: memoryData.traces.length,
+      object: objectData.browserObjects.length,
       knowledge: knowledgeData.knowledgeModels.length,
       experience: experienceData.experienceRecipes.length,
     };
@@ -314,6 +421,52 @@ async function refreshAll(options: { silent?: boolean } = {}): Promise<void> {
   } finally {
     if (!options.silent) loading.value = false;
     refreshInFlight = false;
+  }
+}
+
+async function togglePersonalBrowserStateStorage(): Promise<void> {
+  if (preferenceLoading.value) return;
+  preferenceLoading.value = true;
+  loadError.value = '';
+  loadErrorDetail.value = '';
+  const nextEnabled = !personalBrowserStateStorageEnabled.value;
+  try {
+    const data = await updateMkeObjectStoragePreferences({
+      personalBrowserStateStorageEnabled: nextEnabled,
+    });
+    personalBrowserStateStorageEnabled.value = data.personalBrowserStateStorageEnabled;
+    await refreshAll({ silent: true });
+  } catch (error) {
+    const formatted = formatError(error);
+    loadError.value = formatted.title;
+    loadErrorDetail.value = formatted.detail;
+  } finally {
+    preferenceLoading.value = false;
+  }
+}
+
+async function clearObjectLibrary(): Promise<void> {
+  const confirmed = globalThis.confirm
+    ? globalThis.confirm('只清除对象库当前记录，不影响记忆库、知识库、经验库。继续？')
+    : true;
+  if (!confirmed) return;
+
+  preferenceLoading.value = true;
+  loadError.value = '';
+  loadErrorDetail.value = '';
+  try {
+    const data = await clearMkeBrowserObjects();
+    browserObjects.value = [];
+    totals.value.object = data.total;
+    offsets.value.object = 0;
+    expandedRecordIds.value = new Set();
+    await refreshAll({ silent: true });
+  } catch (error) {
+    const formatted = formatError(error);
+    loadError.value = formatted.title;
+    loadErrorDetail.value = formatted.detail;
+  } finally {
+    preferenceLoading.value = false;
   }
 }
 
@@ -330,6 +483,16 @@ async function loadMore(): Promise<void> {
       traces.value = [...traces.value, ...data.traces];
       totals.value.memory = data.total;
       offsets.value.memory = traces.value.length;
+      return;
+    }
+    if (activeTab.value === 'object') {
+      const data = await fetchMkeBrowserObjects({
+        limit: DEFAULT_MKE_PAGE_SIZE,
+        offset: offsets.value.object,
+      });
+      browserObjects.value = [...browserObjects.value, ...data.browserObjects];
+      totals.value.object = data.total;
+      offsets.value.object = browserObjects.value.length;
       return;
     }
     if (activeTab.value === 'knowledge') {
@@ -362,12 +525,18 @@ async function copyRecordJson(row: ViewRecord): Promise<void> {
   try {
     await writeClipboard(row.detailJson);
     copiedRecordId.value = row.id;
+    copyFailedRecordId.value = '';
     if (copyResetTimer) clearTimeout(copyResetTimer);
     copyResetTimer = setTimeout(() => {
       if (copiedRecordId.value === row.id) copiedRecordId.value = '';
     }, 1200);
   } catch {
     copiedRecordId.value = '';
+    copyFailedRecordId.value = row.id;
+    if (copyResetTimer) clearTimeout(copyResetTimer);
+    copyResetTimer = setTimeout(() => {
+      if (copyFailedRecordId.value === row.id) copyFailedRecordId.value = '';
+    }, 1400);
   }
 }
 
@@ -425,7 +594,7 @@ function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
     statusTone: formatBusinessStatusTone(trace.statusView?.businessStatus, trace.toolSuccess),
     facts: compactFacts([
       ['方法', trace.toolName],
-      ['工具执行', formatToolStatus(trace.statusView?.executionStatus, trace.toolSuccess)],
+      ['执行', formatToolStatus(trace.statusView?.executionStatus, trace.toolSuccess)],
       formatTraceLocationFact(trace),
     ]),
     detailJson: formatJsonDetail(trace),
@@ -441,6 +610,57 @@ function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
       trace.aiFeedback?.summary,
       trace.aiFeedback?.reasonCode,
       trace.aiFeedback?.businessStatus,
+    ].filter(isPresentString),
+  };
+  return withSearchText(row);
+}
+
+function objectToRecord(object: MkeBrowserObjectSummary): ViewRecord {
+  const status = formatObjectStatus(object);
+  const location =
+    object.currentRoute ||
+    object.pageIdentity?.url ||
+    object.display?.locationLabel ||
+    object.pageIdentity?.label ||
+    object.siteFamily;
+  const locationLabel = formatObjectLocation(
+    compactText(location ?? '', 96),
+    object.pageIdentity?.kind,
+  );
+  const row: Omit<ViewRecord, 'searchText'> = {
+    id: object.browserObjectId,
+    kicker: '对象事实',
+    title: formatObjectCardTitle(object),
+    metaLine: formatObjectMetaLine(object, locationLabel),
+    feedbackLine: object.claimBoundary ? `边界：${compactText(object.claimBoundary, 88)}` : '',
+    feedbackScoreLabel: formatObjectConfidenceLabel(object.confidenceScore),
+    duration: '',
+    createdAtLabel: formatDate(object.updatedAt),
+    status,
+    statusTone: formatObjectStatusTone(object),
+    facts: formatObjectFacts(object),
+    detailJson: formatJsonDetail(object),
+    searchTokens: [
+      object.objectType,
+      object.siteFamily,
+      object.rootRoute,
+      object.currentRoute,
+      object.pageUrlPattern,
+      object.pageRole,
+      object.pageModelKey,
+      object.sourceRoute,
+      object.selectedDataSource,
+      object.sourceFreshness,
+      object.lifecycleState,
+      object.tabStatus,
+      object.ownerType,
+      readObjectFactString(object, 'titleSummary'),
+      object.display?.title,
+      object.display?.subtitle,
+      object.display?.locationLabel,
+      object.pageIdentity?.url,
+      object.primaryConclusion,
+      object.claimBoundary,
     ].filter(isPresentString),
   };
   return withSearchText(row);
@@ -504,8 +724,9 @@ function withSearchText(row: Omit<ViewRecord, 'searchText'>): ViewRecord {
   return { ...row, searchText: haystack.join(' ').toLowerCase() };
 }
 
-function compactFacts(entries: Array<[string, string | null | undefined]>): RecordFact[] {
+function compactFacts(entries: Array<[string, string | null | undefined] | null>): RecordFact[] {
   return entries
+    .filter((entry): entry is [string, string | null | undefined] => entry !== null)
     .filter(([, value]) => value !== null && value !== undefined && value !== '')
     .map(([label, value]) => ({ label, value: String(value) }));
 }
@@ -544,6 +765,193 @@ function formatKnowledgeStatus(value: number | null | undefined): string {
   return '待观察';
 }
 
+const OBJECT_TYPE_NAMES: Record<string, string> = {
+  window: '窗口',
+  tab: '网页',
+  page: '页面',
+  region: '区域',
+  action_target: '操作对象',
+  data_source: '数据源',
+};
+
+function formatObjectType(value: string): string {
+  return OBJECT_TYPE_NAMES[value] ?? value;
+}
+
+function formatObjectCardTitle(object: MkeBrowserObjectSummary): string {
+  if (object.objectType === 'window') return formatWindowObjectTitle(object);
+  const type = formatObjectType(object.objectType);
+  if (object.objectType === 'tab') {
+    const tabTitle = readObjectFactString(object, 'titleSummary');
+    if (tabTitle) return compactText(tabTitle, 42);
+    if (object.display?.title) return compactText(object.display.title, 42);
+    if (object.pageIdentity?.label) return `${object.pageIdentity.label} 网页`;
+  }
+  if (object.display?.title) return object.display.title;
+  if (object.pageRole) return `${type} · ${object.pageRole}`;
+  return type;
+}
+
+function formatWindowObjectTitle(object: MkeBrowserObjectSummary): string {
+  const tabCount = readObjectFactNumber(object, 'tabCount');
+  const state = formatWindowState(readObjectFactString(object, 'state'));
+  const parts = [
+    object.isActive ? '当前浏览器窗口' : '浏览器窗口',
+    tabCount === null ? null : `${tabCount} 个标签`,
+    state,
+  ].filter(isPresentString);
+  return parts.join(' · ');
+}
+
+function formatObjectMetaLine(
+  object: MkeBrowserObjectSummary,
+  locationLabel: string | null,
+): string {
+  if (object.objectType === 'tab' && locationLabel) return locationLabel;
+  if (object.objectType === 'window') {
+    const activeTabId = readObjectFactNumber(object, 'activeTabId');
+    const reason = formatOperabilityReason(object.operabilityReason);
+    const parts = [
+      object.isActive ? '当前聚焦窗口' : null,
+      activeTabId === null ? null : `当前标签已识别`,
+      object.canTabrixOperate === false && reason ? reason : null,
+    ].filter(isPresentString);
+    return parts.join(' · ');
+  }
+  if (object.primaryConclusion) return compactText(object.primaryConclusion, 72);
+  if (locationLabel) return locationLabel;
+  return '';
+}
+
+function formatObjectFacts(object: MkeBrowserObjectSummary): RecordFact[] {
+  if (object.objectType === 'window') {
+    return compactFacts([
+      ['标签', formatObjectTabCount(object)],
+      object.isActive === true ? ['标记', '当前窗口'] : null,
+      ['窗口状态', formatWindowState(readObjectFactString(object, 'state'))],
+    ]);
+  }
+  if (object.objectType === 'tab') {
+    return compactFacts([
+      object.isActive === true ? ['标记', '当前页'] : null,
+      ['状态', formatObjectRuntimeState(object)],
+      ['打开方', formatObjectOwner(object.ownerType)],
+    ]);
+  }
+  return compactFacts([
+    ['类型', formatObjectType(object.objectType)],
+    ['状态', formatObjectRuntimeState(object)],
+  ]);
+}
+
+function formatObjectStatus(object: MkeBrowserObjectSummary): string {
+  if (object.lifecycleState === 'closed' || object.lifecycleState === 'removed') return '已关闭';
+  if (object.sourceFreshness === 'stale') return '需刷新';
+  if (object.canTabrixOperate === true) return '可继续处理';
+  if (object.canTabrixOperate === false) return '不可处理';
+  return '待观察';
+}
+
+function formatObjectStatusTone(object: MkeBrowserObjectSummary): StatusTone {
+  if (object.canTabrixOperate === true && object.sourceFreshness !== 'stale') return 'good';
+  if (
+    object.canTabrixOperate === false ||
+    object.lifecycleState === 'closed' ||
+    object.lifecycleState === 'removed' ||
+    object.sourceFreshness === 'stale'
+  ) {
+    return 'warn';
+  }
+  return 'neutral';
+}
+
+function formatObjectFreshness(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (value === 'fresh') return '新鲜';
+  if (value === 'stale') return '过期';
+  if (value === 'unknown') return '未知';
+  return value;
+}
+
+function readObjectFacts(object: MkeBrowserObjectSummary): Record<string, unknown> {
+  return object.facts && typeof object.facts === 'object' && !Array.isArray(object.facts)
+    ? object.facts
+    : {};
+}
+
+function readObjectFactString(object: MkeBrowserObjectSummary, key: string): string | null {
+  const value = readObjectFacts(object)[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readObjectFactNumber(object: MkeBrowserObjectSummary, key: string): number | null {
+  const value = readObjectFacts(object)[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function formatWindowState(value: string | null): string | null {
+  if (!value) return null;
+  if (value === 'maximized' || value === 'normal') return null;
+  if (value === 'minimized') return '最小化';
+  if (value === 'fullscreen') return '全屏';
+  return value;
+}
+
+function formatObjectRuntimeState(object: MkeBrowserObjectSummary): string | null {
+  if (object.lifecycleState === 'closed' || object.lifecycleState === 'removed') return '已关闭';
+  if (object.sourceFreshness === 'stale') return '需刷新';
+  if (object.tabStatus === 'loading') return '加载中';
+  return null;
+}
+
+function formatObjectTabCount(object: MkeBrowserObjectSummary): string | null {
+  const tabCount = readObjectFactNumber(object, 'tabCount');
+  return tabCount === null ? null : `${tabCount} 个`;
+}
+
+function formatObjectOwner(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const owners: Record<string, string> = {
+    ai: 'AI打开',
+    ai_or_page: 'AI打开',
+    page: '用户打开',
+    user: '用户打开',
+    user_or_page: '用户打开',
+    unknown: '未知来源',
+  };
+  return owners[value] ?? value.replace(/_/g, '/');
+}
+
+function formatOperabilityReason(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const reasons: Record<string, string> = {
+    active_tab_not_operable: '当前标签不可操作',
+    active_tab_not_observed: '未识别当前标签',
+    active_window_not_observed: '未识别当前窗口',
+    browser_internal_page: '浏览器内部页',
+    regular_web_page: '普通网页',
+    tab_not_observed: '未观察到标签',
+    window_minimized: '窗口已最小化',
+  };
+  return reasons[value] ?? value.replace(/_/g, ' ');
+}
+
+function formatObjectConfidenceLabel(value: number | null | undefined): string {
+  return typeof value === 'number' ? `可信度 ${Math.round(value * 100)}%` : '';
+}
+
+function formatObjectLocation(
+  value: string | null | undefined,
+  kind: string | null | undefined,
+): string | null {
+  if (!value) return null;
+  if (kind === 'extension') return value;
+  if (kind === 'browser_internal') return value;
+  if (value === 'browser') return '浏览器';
+  if (value === 'unknown') return null;
+  return value;
+}
+
 function formatDate(value: string | null | undefined): string {
   if (!value) return '';
   const date = new Date(value);
@@ -561,7 +969,7 @@ function formatBusinessStatus(
   if (value === 'not_achieved') return '未完成';
   if (value === 'true') return '业务通过';
   if (value === 'false') return '未完成';
-  return '待判断';
+  return '待AI回写';
 }
 
 function formatBusinessStatusTone(
@@ -741,6 +1149,20 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   --mke-accent-bg: #eef2ff;
   --mke-active-ring: rgba(48, 79, 226, 0.28);
   --mke-shadow: 0 8px 22px -20px rgba(15, 23, 42, 0.38);
+  --mke-font-xs: 11px;
+  --mke-font-sm: 12px;
+  --mke-font-md: 14px;
+  --mke-weight-label: 600;
+  --mke-weight-title: 650;
+  --mke-weight-strong: 700;
+  --mke-success-bg: #dcfce7;
+  --mke-success-text: #166534;
+  --mke-warn-bg: #fee2e2;
+  --mke-warn-text: #991b1b;
+  --mke-neutral-bg: #f1f5f9;
+  --mke-neutral-text: #475569;
+  --mke-json-bg: #08111f;
+  --mke-json-text: #dbeafe;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -762,7 +1184,7 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
   margin: 0 auto;
   max-width: min(860px, 100vw);
   min-height: 0;
@@ -787,13 +1209,14 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   --mke-accent-bg: rgba(34, 211, 238, 0.12);
   --mke-active-ring: rgba(34, 211, 238, 0.24);
   --mke-shadow: 0 14px 28px -24px rgba(34, 211, 238, 0.58);
-}
-
-.mke-record__top {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
+  --mke-success-bg: rgba(22, 101, 52, 0.34);
+  --mke-success-text: #86efac;
+  --mke-warn-bg: rgba(127, 29, 29, 0.36);
+  --mke-warn-text: #fca5a5;
+  --mke-neutral-bg: rgba(51, 65, 85, 0.5);
+  --mke-neutral-text: #cbd5e1;
+  --mke-json-bg: rgba(3, 10, 24, 0.96);
+  --mke-json-text: #dbeafe;
 }
 
 .mke-button {
@@ -803,8 +1226,8 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   color: var(--mke-text);
   cursor: pointer;
   flex: 0 0 auto;
-  font-size: 12px;
-  font-weight: 800;
+  font-size: var(--mke-font-sm);
+  font-weight: var(--mke-weight-strong);
   line-height: 1.2;
   padding: 8px 10px;
 }
@@ -860,8 +1283,8 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 .mke-record__kicker {
   margin: 0 0 3px;
   color: var(--mke-muted);
-  font-size: 11px;
-  font-weight: 800;
+  font-size: var(--mke-font-xs);
+  font-weight: var(--mke-weight-label);
 }
 
 .mke-toolbar {
@@ -876,8 +1299,8 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   flex-direction: column;
   gap: 4px;
   color: var(--mke-muted);
-  font-size: 11px;
-  font-weight: 800;
+  font-size: var(--mke-font-xs);
+  font-weight: var(--mke-weight-label);
   position: relative;
 }
 
@@ -926,10 +1349,82 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   margin: -2px 0 0;
 }
 
+.mke-object-storage {
+  align-items: center;
+  background: var(--mke-surface-2);
+  border: 1px solid var(--mke-border);
+  border-radius: 8px;
+  color: var(--mke-muted);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.mke-object-storage__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mke-object-storage__actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.mke-object-storage strong {
+  color: var(--mke-text);
+  font-size: var(--mke-font-sm);
+  font-weight: var(--mke-weight-title);
+}
+
+.mke-object-storage span {
+  font-size: var(--mke-font-xs);
+  line-height: 1.35;
+}
+
+.mke-switch {
+  align-items: center;
+  background: var(--mke-neutral-bg);
+  border: 1px solid var(--mke-border-strong);
+  border-radius: 999px;
+  color: var(--mke-neutral-text);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: var(--mke-font-xs);
+  font-weight: var(--mke-weight-strong);
+  height: 28px;
+  justify-content: center;
+  min-width: 46px;
+  padding: 0 10px;
+}
+
+.mke-switch--on {
+  background: var(--mke-accent-bg);
+  border-color: var(--mke-border-strong);
+  color: var(--mke-accent);
+}
+
+.mke-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.mke-clear-button {
+  min-height: 28px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
 .mke-tabs {
   display: grid;
   gap: 7px;
-  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));
 }
 
 .mke-tab-button {
@@ -945,13 +1440,13 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   width: 100%;
   min-width: 0;
   min-height: 36px;
-  padding: 7px 10px;
+  padding: 7px 8px;
 }
 
 .mke-tab-button span {
   display: block;
-  font-size: 12px;
-  font-weight: 850;
+  font-size: var(--mke-font-sm);
+  font-weight: var(--mke-weight-title);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1025,21 +1520,10 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   min-width: 0;
 }
 
-.mke-record__headline-facts {
-  align-items: center;
-  display: flex;
-  flex: 0 0 auto;
-  flex-direction: row;
-  flex-wrap: nowrap;
-  gap: 6px;
-  justify-content: flex-end;
-  max-width: 100%;
-}
-
 .mke-record__title-row {
   align-items: center;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   margin-bottom: 4px;
   min-width: 0;
@@ -1047,18 +1531,20 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 
 .mke-record h3 {
   color: var(--mke-text);
-  flex: 0 1 auto;
-  font-size: 14px;
+  flex: 1 1 auto;
+  font-size: var(--mke-font-md);
   line-height: 1.35;
   margin: 0;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mke-record__meta-line {
   color: var(--mke-muted);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: var(--mke-font-xs);
+  font-weight: var(--mke-weight-label);
   line-height: 1.35;
   margin-bottom: 4px;
   overflow-wrap: anywhere;
@@ -1068,7 +1554,7 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   border-left: 2px solid var(--mke-accent);
   color: var(--mke-soft);
   flex: 1 1 220px;
-  font-size: 12px;
+  font-size: var(--mke-font-sm);
   line-height: 1.4;
   margin-top: 0;
   max-width: 100%;
@@ -1092,8 +1578,8 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   background: var(--mke-surface-2);
   color: var(--mke-soft);
   flex: 0 0 auto;
-  font-size: 11px;
-  font-weight: 850;
+  font-size: var(--mke-font-xs);
+  font-weight: var(--mke-weight-label);
   line-height: 1.2;
   padding: 4px 7px;
   white-space: nowrap;
@@ -1104,49 +1590,48 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 }
 
 .mke-status {
-  align-self: flex-start;
   border: 1px solid transparent;
   border-radius: 999px;
   flex: 0 0 auto;
   max-width: 100%;
-  font-size: 11px;
-  font-weight: 850;
+  font-size: var(--mke-font-xs);
+  font-weight: var(--mke-weight-strong);
   line-height: 1.2;
   padding: 4px 7px;
   white-space: nowrap;
 }
 
 .mke-status--good {
-  background: #dcfce7;
-  color: #166534;
+  background: var(--mke-success-bg);
+  color: var(--mke-success-text);
 }
 
 .mke-status--warn {
-  background: #fee2e2;
-  color: #991b1b;
+  background: var(--mke-warn-bg);
+  color: var(--mke-warn-text);
 }
 
 .mke-status--neutral {
-  background: #eef2ff;
-  color: #3730a3;
+  background: var(--mke-neutral-bg);
+  color: var(--mke-neutral-text);
 }
 
 .mke-data-tab--dark-console .mke-status--good {
   border-color: rgba(74, 222, 128, 0.28);
-  background: rgba(22, 101, 52, 0.34);
-  color: #86efac;
+  background: var(--mke-success-bg);
+  color: var(--mke-success-text);
 }
 
 .mke-data-tab--dark-console .mke-status--warn {
   border-color: rgba(248, 113, 113, 0.3);
-  background: rgba(127, 29, 29, 0.36);
-  color: #fca5a5;
+  background: var(--mke-warn-bg);
+  color: var(--mke-warn-text);
 }
 
 .mke-data-tab--dark-console .mke-status--neutral {
-  border-color: rgba(129, 140, 248, 0.28);
-  background: rgba(49, 46, 129, 0.36);
-  color: #c4b5fd;
+  border-color: rgba(148, 163, 184, 0.3);
+  background: var(--mke-neutral-bg);
+  color: var(--mke-neutral-text);
 }
 
 .mke-facts {
@@ -1157,14 +1642,14 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 }
 
 .mke-facts > div {
-  align-items: center;
+  align-items: baseline;
   background: var(--mke-surface-2);
   border: 1px solid var(--mke-border);
   border-radius: 999px;
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 5px;
-  min-height: 28px;
+  min-height: 26px;
   min-width: 0;
   max-width: 100%;
   padding: 4px 8px;
@@ -1172,22 +1657,26 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 
 .mke-facts span {
   color: var(--mke-muted);
-  display: block;
-  font-size: 11px;
+  display: inline-block;
+  font-size: var(--mke-font-xs);
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .mke-facts strong {
   color: var(--mke-text);
-  font-size: 12px;
-  font-weight: 780;
+  font-size: var(--mke-font-sm);
+  font-weight: var(--mke-weight-label);
+  line-height: 1.2;
   margin: 0;
 }
 
 .mke-facts strong {
-  max-width: min(420px, 100%);
+  max-width: min(360px, calc(100vw - 180px));
   min-width: 0;
-  overflow-wrap: anywhere;
-  white-space: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mke-record-actions {
@@ -1195,7 +1684,7 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   align-items: center;
   display: grid;
   gap: 8px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(118px, 1fr) auto;
   margin-top: 9px;
   padding-top: 8px;
 }
@@ -1211,14 +1700,14 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 }
 
 .mke-detail-button,
-.mke-copy-button {
+.mke-json-copy-button {
   border: 1px solid var(--mke-border);
   border-radius: 999px;
   background: var(--mke-surface-2);
   color: var(--mke-soft);
   cursor: pointer;
-  font-size: 11px;
-  font-weight: 850;
+  font-size: var(--mke-font-xs);
+  font-weight: var(--mke-weight-strong);
   line-height: 1.2;
   padding: 4px 9px;
   white-space: nowrap;
@@ -1226,28 +1715,119 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 
 .mke-detail-button {
   color: var(--mke-accent);
+  justify-self: start;
+  min-width: 54px;
+}
+
+.mke-status {
+  justify-self: end;
 }
 
 .mke-detail-button:hover,
-.mke-copy-button:hover {
+.mke-json-copy-button:hover {
   border-color: var(--mke-border-strong);
   color: var(--mke-text);
 }
 
+.mke-json-panel {
+  margin-top: 8px;
+  position: relative;
+}
+
+.mke-json-copy-button {
+  align-items: center;
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: 20px;
+  top: 10px;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
+  width: 30px;
+  z-index: 1;
+}
+
+.mke-json-copy-button svg {
+  height: 13px;
+  width: 13px;
+}
+
+.mke-json-copy-button--copied {
+  animation: mke-copy-pop 180ms ease-out;
+  background: var(--mke-good-bg);
+  border-color: var(--mke-good-border);
+  color: var(--mke-good-text);
+}
+
+.mke-json-copy-button--failed {
+  background: var(--mke-warn-bg);
+  border-color: var(--mke-warn-border);
+  color: var(--mke-warn-text);
+}
+
+.mke-json-copy-button--copied::after,
+.mke-json-copy-button--failed::after {
+  background: var(--mke-surface);
+  border: 1px solid var(--mke-border);
+  border-radius: 999px;
+  color: var(--mke-text);
+  content: '已复制';
+  font-size: var(--mke-font-xs);
+  font-weight: var(--mke-weight-strong);
+  line-height: 1;
+  padding: 5px 8px;
+  position: absolute;
+  right: 36px;
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+
+.mke-json-copy-button--failed::after {
+  content: '复制失败';
+}
+
+@keyframes mke-copy-pop {
+  0% {
+    transform: scale(1);
+  }
+  55% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
 .mke-json-block {
-  background: #08111f;
+  background: var(--mke-json-bg);
   border: 1px solid var(--mke-border);
   border-radius: 8px;
-  color: #dbeafe;
-  font-size: 11px;
-  margin: 8px 0 0;
+  color: var(--mke-json-text);
+  font-size: var(--mke-font-xs);
+  margin: 0;
+  max-height: 380px;
   max-width: 100%;
-  overflow-x: auto;
+  overflow: auto;
   overflow-wrap: anywhere;
-  padding: 10px;
+  padding: 12px 58px 12px 12px;
   white-space: pre-wrap;
   width: 100%;
   word-break: break-word;
+}
+
+.mke-button:focus-visible,
+.mke-tab-button:focus-visible,
+.mke-search input:focus-visible,
+.mke-detail-button:focus-visible,
+.mke-json-copy-button:focus-visible {
+  outline: 2px solid var(--mke-accent);
+  outline-offset: 2px;
 }
 
 .mke-load-more {
@@ -1260,22 +1840,12 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   }
 
   .mke-shell {
-    gap: 10px;
+    gap: 0;
     padding: 10px;
-  }
-
-  .mke-record__top {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .mke-record__top > div {
     max-width: 100%;
-  }
-
-  .mke-record__headline-facts {
-    align-items: flex-start;
-    flex-wrap: wrap;
-    justify-content: flex-start;
   }
 
   .mke-button {
@@ -1284,25 +1854,32 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 
   .mke-status {
     max-width: 100%;
-    white-space: normal;
+    white-space: nowrap;
   }
 
   .mke-record h3 {
-    overflow-wrap: anywhere;
-    white-space: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .mke-record-actions {
-    grid-template-columns: auto auto;
-  }
-
-  .mke-record-time {
-    grid-column: 1 / -1;
+    grid-template-columns: auto minmax(108px, 1fr) auto;
   }
 
   .mke-facts strong {
     max-width: 100%;
     overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 340px) {
+  .mke-record-actions {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .mke-record-time {
+    font-size: 10px;
   }
 }
 </style>

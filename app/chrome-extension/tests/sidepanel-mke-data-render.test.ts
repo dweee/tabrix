@@ -9,7 +9,7 @@ describe('MkeDataTab render smoke', () => {
   );
   const appSource = readFileSync(resolve(process.cwd(), 'entrypoints/sidepanel/App.vue'), 'utf8');
 
-  it('keeps the user-visible three-table query controls in the template', () => {
+  it('keeps the user-visible MKE/Object query controls in the template', () => {
     expect(source).toContain('mke-shell');
     expect(source).toContain('mke-controls');
     expect(source).not.toContain('mke-sticky-tools');
@@ -21,14 +21,37 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('mke-data-body');
     expect(source).toContain('搜索当前列表');
     expect(source).toContain('mke-search-icon');
-    expect(source).toContain('搜索主题、方法、网址、状态');
+    expect(source).toContain('搜索主题、对象、方法、网址、状态');
+    expect(source).toContain("label: '对象库'");
+    expect(source).toContain('fetchMkeBrowserObjects');
+    expect(source).toContain('fetchMkeObjectStoragePreferences');
+    expect(source).toContain('updateMkeObjectStoragePreferences');
+    expect(source).toContain('clearMkeBrowserObjects');
+    expect(source).toContain('存储个人浏览状态');
+    expect(source).toContain('清除对象库');
+    expect(source).toContain('mke-switch');
+    expect(source).toContain('function objectToRecord(object: MkeBrowserObjectSummary)');
+    expect(source).toContain('object.currentRoute ||');
+    expect(source).toContain('object.rootRoute,');
+    expect(source).toContain('object.pageUrlPattern,');
+    expect(source).toContain('object.pageIdentity?.url');
+    expect(source).toContain('function formatObjectCardTitle(object: MkeBrowserObjectSummary)');
+    expect(source).toContain('function formatObjectFacts(');
+    expect(source).toContain("if (object.objectType === 'window')");
+    expect(source).toContain("['标签', formatObjectTabCount(object)]");
+    expect(source).toContain('const locationLabel = formatObjectLocation');
+    expect(source).toContain('metaLine: formatObjectMetaLine(object, locationLabel)');
+    expect(source).not.toContain(
+      "['网址', formatObjectLocation(compactText(location ?? '', 96), object.pageIdentity?.kind)]",
+    );
+    expect(source).toContain("active_tab_not_operable: '当前标签不可操作'");
     expect(source).toContain('mke-record__title-row');
     expect(source).toContain('mke-refresh-button');
     expect(source).toContain('mke-record__meta-line');
     expect(source).toContain('mke-record__feedback');
     expect(source).toContain('mke-record__feedback-row');
     expect(source).toContain('mke-feedback-score');
-    expect(source).toContain('mke-record__headline-facts');
+    expect(source).not.toContain('mke-record__headline-facts');
     expect(source).toContain('mke-duration');
     expect(source).toContain('mke-record-time');
     expect(source).not.toContain('mke-record__summary');
@@ -40,7 +63,9 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('jsonPanelId(row.id)');
     expect(source).not.toContain('<summary>详情</summary>');
     expect(source).not.toContain('查看详情和完整 JSON');
-    expect(source).toContain('mke-copy-button');
+    expect(source).toContain('mke-json-panel');
+    expect(source).toContain('mke-json-copy-button');
+    expect(source).toContain('i-lucide-copy');
     expect(source).toContain('loadMoreLabel');
     expect(source).toContain('加载更多 (${activeRows.value.length}/${activeTotal.value})');
   });
@@ -60,7 +85,7 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('margin: 0 auto');
     expect(source).toContain('.mke-data-tab *');
     expect(source).toContain('box-sizing: border-box');
-    expect(source).toContain('repeat(auto-fit, minmax(136px, 1fr))');
+    expect(source).toContain('repeat(auto-fit, minmax(74px, 1fr))');
     expect(source).toContain(':class="`mke-data-tab--${agentTheme}`"');
     expect(source).toContain('.mke-data-tab--dark-console');
     expect(source).toContain(
@@ -82,8 +107,20 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('createdAtLabel: formatDate(trace.createdAt)');
     expect(source).toContain("['方法', trace.toolName]");
     expect(source).toContain(
-      "['工具执行', formatToolStatus(trace.statusView?.executionStatus, trace.toolSuccess)]",
+      "['执行', formatToolStatus(trace.statusView?.executionStatus, trace.toolSuccess)]",
     );
+    expect(source).toContain("const tabTitle = readObjectFactString(object, 'titleSummary')");
+    expect(source).toContain('if (tabTitle) return compactText(tabTitle, 42)');
+    expect(source).toContain('const locationLabel = formatObjectLocation');
+    expect(source).toContain('metaLine: formatObjectMetaLine(object, locationLabel)');
+    expect(source).toContain("['打开方', formatObjectOwner(object.ownerType)]");
+    expect(source).toContain('function formatObjectOwner');
+    expect(source).toContain("ai: 'AI打开'");
+    expect(source).toContain("user_or_page: '用户打开'");
+    expect(source).toContain("if (object.canTabrixOperate === true) return '可继续处理'");
+    expect(source).toContain("if (object.canTabrixOperate === false) return '不可处理'");
+    expect(source).toContain("if (object.tabStatus === 'loading') return '加载中'");
+    expect(source).not.toContain("if (object.tabStatus === 'complete') return '已加载'");
     expect(source).toContain('formatTraceLocationFact(trace)');
     expect(source).not.toContain("['工具', trace.toolName]");
     expect(source).not.toContain("['执行', formatToolStatus(trace.toolSuccess)]");
@@ -117,11 +154,20 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('overflow-x: hidden;');
     expect(source).toContain('overflow-y: auto;');
     expect(source).toContain('overflow-wrap: anywhere');
-    expect(source).toContain('white-space: normal;');
+    expect(source).toContain('text-overflow: ellipsis;');
+    expect(source).toContain('white-space: nowrap;');
     expect(source).toContain('.mke-json-block');
     expect(source).toContain('width: 100%;');
-    expect(source).toContain('grid-template-columns: auto minmax(0, 1fr) auto;');
+    expect(source).toContain('grid-template-columns: auto minmax(118px, 1fr) auto;');
+    expect(source).toContain('grid-template-columns: auto minmax(108px, 1fr) auto;');
+    expect(source).toContain('right: 20px;');
+    expect(source).toContain('top: 10px;');
+    expect(source).toContain('height: 30px;');
+    expect(source).toContain('width: 30px;');
+    expect(source).toContain('padding: 12px 58px 12px 12px;');
+    expect(source).toContain('justify-self: start;');
+    expect(source).toContain('justify-self: end;');
     expect(source).not.toContain('top: 7px;');
-    expect(source).toContain('max-width: min(420px, 100%);');
+    expect(source).toContain('max-width: min(360px, calc(100vw - 180px));');
   });
 });
