@@ -16,10 +16,12 @@ import {
   SessionRepository,
   StepRepository,
   TaskRepository,
+  BrowserObjectRepository,
   MemoryTraceRepository,
   KnowledgeModelRepository,
   ExperienceRecipeRepository,
   type ExperienceRecipe,
+  type BrowserObject,
   type KnowledgeModel,
   type MemoryTrace,
   type SessionSummary,
@@ -47,6 +49,7 @@ import { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-reposi
 import { ChooseContextTelemetryRepository } from '../memory/telemetry/choose-context-telemetry';
 import type { OperationLogMetadata } from '../memory/db/operation-log-metadata';
 import { TaskSessionContext } from './task-session-context';
+import { getPersonalBrowserStateStorageEnabled } from '../host-config';
 
 export interface CreateTaskInput {
   taskType: string;
@@ -101,6 +104,7 @@ interface Repos {
   pageSnapshot: PageSnapshotRepository;
   action: ActionRepository;
   operationLog: OperationMemoryLogRepository;
+  browserObject: BrowserObjectRepository;
   memoryTrace: MemoryTraceRepository;
   knowledgeModel: KnowledgeModelRepository;
   experienceRecipe: ExperienceRecipeRepository;
@@ -116,6 +120,7 @@ interface StorageInit {
   pageSnapshots: PageSnapshotService | null;
   actions: ActionService | null;
   operationLog: OperationMemoryLogRepository | null;
+  browserObject: BrowserObjectRepository | null;
   memoryTrace: MkeMemoryTraceService | null;
   knowledgeProjector: MkeKnowledgeProjector | null;
   experienceProjector: MkeExperienceProjector | null;
@@ -155,6 +160,7 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
       pageSnapshots: null,
       actions: null,
       operationLog: null,
+      browserObject: null,
       memoryTrace: null,
       knowledgeProjector: null,
       experienceProjector: null,
@@ -171,6 +177,7 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
     const pageSnapshotRepo = new PageSnapshotRepository(opened.db);
     const actionRepo = new ActionRepository(opened.db);
     const operationLogRepo = new OperationMemoryLogRepository(opened.db);
+    const browserObjectRepo = new BrowserObjectRepository(opened.db);
     const memoryTraceRepo = new MemoryTraceRepository(opened.db);
     const knowledgeModelRepo = new KnowledgeModelRepository(opened.db);
     const experienceRecipeRepo = new ExperienceRecipeRepository(opened.db);
@@ -184,6 +191,7 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
       pageSnapshot: pageSnapshotRepo,
       action: actionRepo,
       operationLog: operationLogRepo,
+      browserObject: browserObjectRepo,
       memoryTrace: memoryTraceRepo,
       knowledgeModel: knowledgeModelRepo,
       experienceRecipe: experienceRecipeRepo,
@@ -198,7 +206,10 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
       pageSnapshots: new PageSnapshotService(pageSnapshotRepo),
       actions: new ActionService(actionRepo, pageSnapshotRepo),
       operationLog: operationLogRepo,
-      memoryTrace: new MkeMemoryTraceService(memoryTraceRepo),
+      browserObject: browserObjectRepo,
+      memoryTrace: new MkeMemoryTraceService(memoryTraceRepo, browserObjectRepo, {
+        allowPersonalBrowserStateStorage: getPersonalBrowserStateStorageEnabled,
+      }),
       knowledgeProjector: new MkeKnowledgeProjector(memoryTraceRepo, knowledgeModelRepo),
       experienceProjector: new MkeExperienceProjector(
         memoryTraceRepo,
@@ -227,6 +238,7 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
       pageSnapshots: null,
       actions: null,
       operationLog: null,
+      browserObject: null,
       memoryTrace: null,
       knowledgeProjector: null,
       experienceProjector: null,
@@ -771,6 +783,20 @@ export class SessionManager {
     return this.repos.memoryTrace.count();
   }
 
+  public listRecentMkeBrowserObjects(limit: number, offset: number): BrowserObject[] {
+    if (!this.repos) return [];
+    return this.repos.browserObject.listCurrentBrowserSurface({ limit, offset });
+  }
+
+  public countMkeBrowserObjects(): number {
+    if (!this.repos) return 0;
+    return this.repos.browserObject.countCurrentBrowserSurface();
+  }
+
+  public clearMkeBrowserObjects(): void {
+    this.repos?.browserObject.clear();
+  }
+
   public listRecentMkeKnowledgeModels(limit: number, offset: number): KnowledgeModel[] {
     if (!this.repos) return [];
     return this.repos.knowledgeModel.listRecent({ limit, offset });
@@ -823,6 +849,7 @@ export class SessionManager {
       // sessions and steps, but we clear all five explicitly so
       // behavior stays identical whether persistence is on or off.
       this.repos.operationLog.clear();
+      this.repos.browserObject.clear();
       this.repos.memoryTrace.clear();
       this.repos.knowledgeModel.clear();
       this.repos.experienceRecipe.clear();

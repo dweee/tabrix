@@ -1,9 +1,16 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
-import { MemoryTraceRepository, type BusinessSuccessVerdict, type MemoryTrace } from './db';
+import {
+  BrowserObjectRepository,
+  MemoryTraceRepository,
+  type BrowserObjectInput,
+  type BusinessSuccessVerdict,
+  type MemoryTrace,
+} from './db';
 
 const REDACTED = '[redacted]';
 const MAX_STRING_LENGTH = 512;
+const MAX_ROUTE_LENGTH = 2048;
 const MAX_ARRAY_ITEMS = 40;
 const MAX_DEPTH = 5;
 
@@ -80,12 +87,18 @@ interface ParsedResultDigest {
   windowId: number | null;
   siteFamily: string | null;
   pageUrlPattern: string | null;
+  rootRoute: string | null;
+  currentRoute: string | null;
   pageRole: string | null;
   pageState: string | null;
   sourceRoute: string | null;
   selectedDataSource: string | null;
   freshness: string | null;
   fallbackUsed: string | null;
+}
+
+export interface MkeMemoryTraceServiceOptions {
+  allowPersonalBrowserStateStorage?: () => boolean;
 }
 
 function normalizeKey(key: string): string {
@@ -105,6 +118,11 @@ function shouldDropRawContentKey(key: string): boolean {
 function truncateString(value: string): string {
   if (value.length <= MAX_STRING_LENGTH) return value;
   return `${value.slice(0, MAX_STRING_LENGTH)}...[truncated:${value.length}]`;
+}
+
+function truncateRouteString(value: string): string {
+  if (value.length <= MAX_ROUTE_LENGTH) return value;
+  return `${value.slice(0, MAX_ROUTE_LENGTH)}...[truncated:${value.length}]`;
 }
 
 function sanitizeValue(value: unknown, toolName: string, depth = 0, keyHint = ''): unknown {
@@ -129,6 +147,29 @@ function sanitizeValue(value: unknown, toolName: string, depth = 0, keyHint = ''
       continue;
     }
     output[key] = sanitizeValue(entry, toolName, depth + 1, key);
+  }
+  return output;
+}
+
+function preservePersonalObjectValue(value: unknown, depth = 0): unknown {
+  if (depth > MAX_DEPTH) return '[max_depth]';
+  if (value === null || value === undefined) return value ?? null;
+  if (typeof value === 'string') return truncateString(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, MAX_ARRAY_ITEMS)
+      .map((item) => preservePersonalObjectValue(item, depth + 1));
+  }
+  if (typeof value !== 'object') return String(value);
+
+  const output: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (shouldDropRawContentKey(key)) {
+      output[key] = '[omitted_raw_content]';
+      continue;
+    }
+    output[key] = preservePersonalObjectValue(entry, depth + 1);
   }
   return output;
 }
@@ -173,11 +214,22 @@ function readNumber(...values: unknown[]): number | null {
   return null;
 }
 
+function readFiniteNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
 function readBoolean(...values: unknown[]): boolean | null {
   for (const value of values) {
     if (typeof value === 'boolean') return value;
   }
   return null;
+}
+
+function readArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 function readBusinessVerdictString(...values: unknown[]): BusinessSuccessVerdict | null {
@@ -199,26 +251,79 @@ function readBusinessVerdictString(...values: unknown[]): BusinessSuccessVerdict
   return null;
 }
 
-function normalizeUrlPattern(url: string | null): {
+function normalizeUrlPattern(
+  url: string | null,
+  options: { allowPersonalBrowserStateStorage?: boolean } = {},
+): {
   siteFamily: string | null;
   pattern: string | null;
+  rootRoute: string | null;
+  currentRoute: string | null;
 } {
-  if (!url) return { siteFamily: null, pattern: null };
+  if (!url) return { siteFamily: null, pattern: null, rootRoute: null, currentRoute: null };
   try {
     const parsed = new URL(url);
+    if (['chrome:', 'edge:', 'about:'].includes(parsed.protocol)) {
+      return {
+        siteFamily: 'browser',
+        pattern: parsed.href,
+        rootRoute: parsed.href,
+        currentRoute: parsed.href,
+      };
+    }
     const pathname = parsed.pathname
       .split('/')
       .map((segment) =>
         /^[0-9a-f-]{8,}$/i.test(segment) || /^\d+$/.test(segment) ? ':id' : segment,
       )
       .join('/');
+    const rootRoute = `${parsed.origin}${pathname}`;
     return {
       siteFamily: parsed.hostname,
-      pattern: `${parsed.origin}${pathname}`,
+      pattern: rootRoute,
+      rootRoute,
+      currentRoute: sanitizeCurrentRoute(parsed, options.allowPersonalBrowserStateStorage === true),
     };
   } catch {
-    return { siteFamily: null, pattern: truncateString(url) };
+    const fallback = truncateRouteString(url);
+    return { siteFamily: null, pattern: fallback, rootRoute: fallback, currentRoute: fallback };
   }
+}
+
+const SENSITIVE_QUERY_KEYS = new Set([
+  'code',
+  'ticket',
+  'api_key',
+  'apikey',
+  'access_key',
+  'secret_key',
+  'client_secret',
+]);
+
+function shouldRedactQueryParam(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return SENSITIVE_QUERY_KEYS.has(normalized) || shouldRedactKey(key, 'browser_object_route');
+}
+
+function sanitizeSearchParams(
+  searchParams: URLSearchParams,
+  allowPersonalBrowserStateStorage: boolean,
+): string {
+  if (allowPersonalBrowserStateStorage) {
+    const serialized = searchParams.toString();
+    return serialized ? `?${serialized}` : '';
+  }
+  const sanitized = new URLSearchParams();
+  for (const [key, value] of searchParams.entries()) {
+    sanitized.append(key, shouldRedactQueryParam(key) ? REDACTED : value);
+  }
+  const serialized = sanitized.toString();
+  return serialized ? `?${serialized}` : '';
+}
+
+function sanitizeCurrentRoute(parsed: URL, allowPersonalBrowserStateStorage: boolean): string {
+  const search = sanitizeSearchParams(parsed.searchParams, allowPersonalBrowserStateStorage);
+  return truncateRouteString(`${parsed.origin}${parsed.pathname}${search}${parsed.hash}`);
 }
 
 function readBusinessSuccess(
@@ -263,6 +368,8 @@ function digestResult(result: CallToolResult, toolName: string): ParsedResultDig
     windowId: readNumber(object?.windowId),
     siteFamily: urlFields.siteFamily,
     pageUrlPattern: urlFields.pattern,
+    rootRoute: urlFields.rootRoute,
+    currentRoute: urlFields.currentRoute,
     pageRole: readString(summary?.pageRole, object?.pageRole),
     pageState: readString(summary?.quality, object?.pageState),
     sourceRoute: readString(object?.sourceRoute, pageContext?.sourceRoute),
@@ -280,13 +387,54 @@ function readRequestNumber(request: Record<string, unknown> | null, key: string)
   return readNumber(request?.[key]);
 }
 
+function objectFingerprint(...parts: Array<string | number | null | undefined>): string {
+  return parts
+    .map((part) => (part === null || part === undefined || part === '' ? 'unknown' : String(part)))
+    .join(':');
+}
+
+function normalizeOwnerType(value: string | null): string | null {
+  if (!value) return null;
+  if (value === 'ai' || value === 'run_owned') return 'ai';
+  if (value === 'user_or_page' || value === 'user_owned' || value === 'page_opener') {
+    return 'user_or_page';
+  }
+  return 'unknown';
+}
+
+function sourceTraceIds(trace: MemoryTrace): string[] {
+  return [trace.traceId];
+}
+
 function normalizeConfidence(value: number | null | undefined): number | null {
   if (!Number.isFinite(value)) return null;
   return Math.max(0, Math.min(1, value as number));
 }
 
 export class MkeMemoryTraceService {
-  constructor(private readonly repo: MemoryTraceRepository) {}
+  constructor(
+    private readonly repo: MemoryTraceRepository,
+    private readonly browserObjects?: BrowserObjectRepository,
+    private readonly options: MkeMemoryTraceServiceOptions = {},
+  ) {}
+
+  private allowsPersonalBrowserStateStorage(): boolean {
+    try {
+      return this.options.allowPersonalBrowserStateStorage?.() === true;
+    } catch {
+      return false;
+    }
+  }
+
+  private sanitizeBrowserObjectValue(value: unknown): unknown {
+    return this.allowsPersonalBrowserStateStorage()
+      ? preservePersonalObjectValue(value)
+      : sanitizeValue(value, 'browser_object');
+  }
+
+  private browserObjectRedactionState(): string {
+    return this.allowsPersonalBrowserStateStorage() ? 'user_authorized' : 'redacted';
+  }
 
   public recordToolCall(input: RecordMkeToolCallTraceInput): MemoryTrace {
     const requestObject = readObject(input.requestParams);
@@ -295,7 +443,7 @@ export class MkeMemoryTraceService {
     const tabId = digest.tabId ?? readRequestNumber(requestObject, 'tabId');
     const windowId = digest.windowId ?? readRequestNumber(requestObject, 'windowId');
 
-    return this.repo.append({
+    const trace = this.repo.append({
       taskId: input.taskId,
       taskIntent: input.taskIntent ?? null,
       aiClient: input.aiClient ?? null,
@@ -325,6 +473,340 @@ export class MkeMemoryTraceService {
       redactionState: 'redacted',
       createdAt: new Date(responseAtMs).toISOString(),
     });
+    this.recordBrowserObjectsFromToolResult({
+      trace,
+      payload: parseFirstTextPayload(input.result),
+      toolName: input.toolName,
+      observedAt: new Date(responseAtMs).toISOString(),
+      browserContextKey: input.browserContextKey ?? null,
+    });
+    return trace;
+  }
+
+  private recordBrowserObjectsFromToolResult(input: {
+    trace: MemoryTrace;
+    payload: unknown;
+    toolName: string;
+    observedAt: string;
+    browserContextKey: string | null;
+  }): void {
+    if (!this.browserObjects) return;
+    const payload = readObject(input.payload);
+    if (!payload) return;
+    try {
+      if (input.toolName === 'get_windows_and_tabs') {
+        this.recordBrowserWorldObjects(
+          input.trace,
+          payload,
+          input.observedAt,
+          input.browserContextKey,
+        );
+        return;
+      }
+      if (input.toolName === 'chrome_read_page') {
+        this.recordReadPageObjects(input.trace, payload, input.observedAt, input.browserContextKey);
+      }
+    } catch {
+      // Object Memory is observational. It must not block tool result delivery.
+    }
+  }
+
+  private upsertBrowserObject(input: BrowserObjectInput): void {
+    this.browserObjects?.upsert(input);
+  }
+
+  private recordBrowserWorldObjects(
+    trace: MemoryTrace,
+    payload: Record<string, unknown>,
+    observedAt: string,
+    browserContextKey: string | null,
+  ): void {
+    const browserWorld = readNestedObject(payload, 'browserWorld') ?? payload;
+    const contextKey = browserContextKey ?? trace.browserContextKey ?? 'default';
+    for (const rawWindow of readArray(browserWorld.windows)) {
+      const win = readObject(rawWindow);
+      if (!win) continue;
+      const id = readNumber(win.windowId, win.id);
+      if (id === null) continue;
+      this.upsertBrowserObject({
+        siteFamily: 'browser',
+        pageModelKey: 'browser-window',
+        objectFingerprint: objectFingerprint('window', id),
+        objectType: 'window',
+        browserContextKey: contextKey,
+        windowId: id,
+        sourceRoute: readString(payload.source, trace.sourceRoute, 'browser_world_inventory'),
+        sourceFreshness: readString(browserWorld.status, browserWorld.freshness, trace.freshness),
+        lifecycleState: readString(win.lifecycleState, 'updated'),
+        isActive: readBoolean(win.focused, win.isFocused, win.active),
+        canTabrixOperate: readBoolean(win.canTabrixOperate),
+        operabilityReason: readString(win.operabilityReason),
+        facts: {
+          tabCount: readNumber(win.tabCount),
+          activeTabId: readNumber(win.activeTabId),
+          state: readString(win.state, win.visibilityState),
+        },
+        firstTraceId: trace.traceId,
+        lastTraceId: trace.traceId,
+        sourceTraceIds: sourceTraceIds(trace),
+        currentState: sanitizeValue(
+          {
+            focused: readBoolean(win.focused, win.isFocused),
+            state: readString(win.state, win.visibilityState),
+            tabCount: readNumber(win.tabCount),
+          },
+          'browser_object',
+        ),
+        redactionState: this.browserObjectRedactionState(),
+        updatedAt: observedAt,
+      });
+    }
+    for (const rawTab of readArray(browserWorld.tabs)) {
+      const tab = readObject(rawTab);
+      if (!tab) continue;
+      const tabId = readNumber(tab.tabId, tab.id);
+      if (tabId === null) continue;
+      const urlFields = normalizeUrlPattern(readString(tab.url, tab.pendingUrl), {
+        allowPersonalBrowserStateStorage: this.allowsPersonalBrowserStateStorage(),
+      });
+      const tabWindowId = readNumber(tab.windowId) ?? trace.windowId;
+      this.upsertBrowserObject({
+        siteFamily: urlFields.siteFamily ?? trace.siteFamily ?? 'browser',
+        pageUrlPattern: urlFields.pattern ?? trace.pageUrlPattern,
+        rootRoute: urlFields.rootRoute ?? trace.pageUrlPattern,
+        currentRoute: urlFields.currentRoute,
+        pageRole: 'browser_tab',
+        pageModelKey: urlFields.siteFamily ? `tab:${urlFields.siteFamily}` : 'browser-tab',
+        objectFingerprint: objectFingerprint('tab', tabWindowId, tabId),
+        objectType: 'tab',
+        browserContextKey: contextKey,
+        tabId,
+        windowId: tabWindowId,
+        ownerType: normalizeOwnerType(readString(tab.ownerType, tab.openedBy, tab.owner)),
+        sourceRoute: readString(payload.source, trace.sourceRoute, 'browser_world_inventory'),
+        sourceFreshness: readString(browserWorld.status, browserWorld.freshness, trace.freshness),
+        tabStatus: readString(tab.status),
+        lifecycleState: readString(tab.lifecycleState, tab.closedAtMs ? 'closed' : 'updated'),
+        isActive: readBoolean(tab.active),
+        canTabrixOperate: readBoolean(tab.canTabrixOperate),
+        operabilityReason: readString(tab.operabilityReason),
+        facts: this.sanitizeBrowserObjectValue({
+          titleSummary: readString(tab.title),
+          host: urlFields.siteFamily,
+          rootRoute: urlFields.rootRoute,
+          currentRoute: urlFields.currentRoute,
+          pinned: readBoolean(tab.pinned),
+          discarded: readBoolean(tab.discarded),
+          openerTabId: readNumber(tab.openerTabId),
+        }),
+        firstTraceId: trace.traceId,
+        lastTraceId: trace.traceId,
+        sourceTraceIds: sourceTraceIds(trace),
+        currentState: this.sanitizeBrowserObjectValue({
+          active: readBoolean(tab.active),
+          status: readString(tab.status),
+          pinned: readBoolean(tab.pinned),
+          discarded: readBoolean(tab.discarded),
+          titleSummary: readString(tab.title),
+          host: urlFields.siteFamily,
+          rootRoute: urlFields.rootRoute,
+          currentRoute: urlFields.currentRoute,
+        }),
+        redactionState: this.browserObjectRedactionState(),
+        updatedAt: observedAt,
+        closedAt: readNumber(tab.closedAtMs) ? observedAt : null,
+        archivedAt: readNumber(tab.closedAtMs) ? observedAt : null,
+      });
+    }
+  }
+
+  private recordReadPageObjects(
+    trace: MemoryTrace,
+    payload: Record<string, unknown>,
+    observedAt: string,
+    browserContextKey: string | null,
+  ): void {
+    const projection = readNestedObject(payload, 'pageProjection');
+    const compact = readNestedObject(payload, 'browserPageObjectCompact');
+    const page = readNestedObject(payload, 'page');
+    const summary = readNestedObject(payload, 'summary');
+    const urlFields = normalizeUrlPattern(readString(page?.url, payload.url, payload.pageUrl), {
+      allowPersonalBrowserStateStorage: this.allowsPersonalBrowserStateStorage(),
+    });
+    const siteFamily = urlFields.siteFamily ?? trace.siteFamily ?? 'unknown';
+    const pageRole = readString(projection?.pageRole, summary?.pageRole, trace.pageRole) ?? 'page';
+    const pageModelKey =
+      readString(projection?.pageModelKey, trace.pageModelKey) ?? `page:${siteFamily}:${pageRole}`;
+    const tabId = readNumber(projection?.tabId, payload.tabId, trace.tabId);
+
+    this.upsertBrowserObject({
+      siteFamily,
+      pageUrlPattern: urlFields.pattern ?? trace.pageUrlPattern,
+      rootRoute: urlFields.rootRoute ?? trace.pageUrlPattern,
+      currentRoute: urlFields.currentRoute,
+      pageRole,
+      pageModelKey,
+      objectFingerprint: objectFingerprint('page', siteFamily, pageModelKey, tabId),
+      objectType: 'page',
+      browserContextKey: browserContextKey ?? trace.browserContextKey ?? null,
+      tabId,
+      windowId: readNumber(payload.windowId, trace.windowId),
+      ownerType: normalizeOwnerType(readString(projection?.ownerType)),
+      sourceRoute: readString(payload.sourceRoute, trace.sourceRoute),
+      selectedDataSource: readString(projection?.chosenDataSource, payload.selectedDataSource),
+      sourceLineage: sanitizeValue(
+        {
+          sourceTruthChain: projection?.sourceTruthChain,
+          sourceRouteHonesty: payload.sourceRouteHonesty,
+        },
+        'browser_object',
+      ),
+      sourceFreshness: readString(projection?.sourceFreshness, payload.freshness, trace.freshness),
+      lifecycleState: readString(compact?.status, 'updated'),
+      canTabrixOperate: true,
+      facts: sanitizeValue(
+        {
+          readiness: projection?.readiness,
+          stability: projection?.stability,
+          watchStatus: compact?.watchStatus,
+          operationSummary: readNestedObject(compact, 'operationSummary'),
+          evidenceSummary: readNestedObject(compact, 'evidenceSummary'),
+        },
+        'browser_object',
+      ),
+      changedGroups: sanitizeValue(compact?.changedGroups, 'browser_object'),
+      primaryConclusion: readString(compact?.primaryConclusion),
+      claimBoundary: readString(compact?.claimBoundary, payload.apiCdpProofBoundary),
+      confidenceScore: readFiniteNumber(projection?.sourceConfidence),
+      firstTraceId: trace.traceId,
+      lastTraceId: trace.traceId,
+      sourceTraceIds: sourceTraceIds(trace),
+      redactionState: this.browserObjectRedactionState(),
+      updatedAt: observedAt,
+    });
+
+    this.recordReadPageChildObjects({
+      trace,
+      payload,
+      observedAt,
+      browserContextKey,
+      siteFamily,
+      rootRoute: urlFields.rootRoute ?? trace.pageUrlPattern,
+      currentRoute: urlFields.currentRoute,
+      pageModelKey,
+      pageRole,
+      tabId,
+    });
+  }
+
+  private recordReadPageChildObjects(input: {
+    trace: MemoryTrace;
+    payload: Record<string, unknown>;
+    observedAt: string;
+    browserContextKey: string | null;
+    siteFamily: string;
+    rootRoute: string | null;
+    currentRoute: string | null;
+    pageModelKey: string;
+    pageRole: string;
+    tabId: number | null;
+  }): void {
+    for (const [index, rawRegion] of readArray(input.payload.pageRegions).slice(0, 40).entries()) {
+      const region = readObject(rawRegion);
+      if (!region) continue;
+      const regionId = readString(region.regionId, region.id) ?? `region-${index}`;
+      this.upsertBrowserObject({
+        siteFamily: input.siteFamily,
+        pageUrlPattern: input.rootRoute,
+        rootRoute: input.rootRoute,
+        currentRoute: input.currentRoute,
+        pageRole: input.pageRole,
+        pageModelKey: input.pageModelKey,
+        objectFingerprint: objectFingerprint('region', input.pageModelKey, regionId),
+        objectType: 'region',
+        browserContextKey: input.browserContextKey ?? input.trace.browserContextKey ?? null,
+        tabId: input.tabId,
+        sourceRoute: readString(input.payload.sourceRoute, input.trace.sourceRoute),
+        sourceFreshness: readString(input.payload.freshness, input.trace.freshness),
+        lifecycleState: readString(region.state, 'observed'),
+        canTabrixOperate: readBoolean(region.targetability),
+        targetability: sanitizeValue(
+          {
+            state: readString(region.state),
+            readiness: readString(region.readiness),
+            nextRequiredTool: readString(region.nextRequiredTool),
+            nextRequiredCheck: readString(region.nextRequiredCheck),
+          },
+          'browser_object',
+        ),
+        facts: sanitizeValue(
+          {
+            regionType: readString(region.regionType),
+            layoutHint: readString(region.layoutHint),
+            candidateActionCount: readArray(region.candidateActionIds).length,
+          },
+          'browser_object',
+        ),
+        claimBoundary: readString(region.claimBoundary),
+        confidenceScore: readFiniteNumber(region.confidence),
+        firstTraceId: input.trace.traceId,
+        lastTraceId: input.trace.traceId,
+        sourceTraceIds: sourceTraceIds(input.trace),
+        redactionState: this.browserObjectRedactionState(),
+        updatedAt: input.observedAt,
+      });
+    }
+    for (const [index, rawAction] of readArray(input.payload.candidateActions)
+      .slice(0, 80)
+      .entries()) {
+      const action = readObject(rawAction);
+      if (!action) continue;
+      const targetRef = readString(action.targetRef, action.id) ?? `target-${index}`;
+      this.upsertBrowserObject({
+        siteFamily: input.siteFamily,
+        pageUrlPattern: input.rootRoute,
+        rootRoute: input.rootRoute,
+        currentRoute: input.currentRoute,
+        pageRole: input.pageRole,
+        pageModelKey: input.pageModelKey,
+        objectFingerprint: objectFingerprint('action_target', input.pageModelKey, targetRef),
+        objectType: 'action_target',
+        browserContextKey: input.browserContextKey ?? input.trace.browserContextKey ?? null,
+        tabId: input.tabId,
+        sourceRoute: readString(input.payload.sourceRoute, input.trace.sourceRoute),
+        sourceFreshness: readString(input.payload.freshness, input.trace.freshness),
+        lifecycleState: 'observed',
+        canTabrixOperate: readBoolean(action.actionability),
+        operabilityReason: readString(action.actionabilityReason),
+        targetability: sanitizeValue(
+          {
+            targetRef,
+            frameId: readString(action.frameId),
+            nextRequiredTool: readString(action.nextRequiredTool),
+            nextRequiredCheck: readString(action.nextRequiredCheck),
+          },
+          'browser_object',
+        ),
+        actionTypes: sanitizeValue(
+          [readString(action.actionType)].filter((item): item is string => Boolean(item)),
+          'browser_object',
+        ),
+        facts: sanitizeValue(
+          {
+            intentBoundary: readString(action.intentBoundary),
+            matchReason: readString(action.matchReason),
+          },
+          'browser_object',
+        ),
+        claimBoundary: readString(action.intentBoundary, action.claimBoundary),
+        confidenceScore: readFiniteNumber(action.confidence),
+        firstTraceId: input.trace.traceId,
+        lastTraceId: input.trace.traceId,
+        sourceTraceIds: sourceTraceIds(input.trace),
+        redactionState: this.browserObjectRedactionState(),
+        updatedAt: input.observedAt,
+      });
+    }
   }
 
   public recordAiBusinessFeedback(

@@ -19,6 +19,7 @@ const ALLOWED_HOSTS = ['127.0.0.1', '0.0.0.0', 'localhost', '::'];
 interface HostConfig {
   host?: string;
   policyCapabilities?: string;
+  personalBrowserStateStorageEnabled?: boolean;
 }
 
 function getConfigFile(): string {
@@ -72,6 +73,15 @@ export function getPersistedPolicyCapabilities(): string | undefined {
 
 export function setPersistedPolicyCapabilities(policyCapabilities: string): void {
   writeConfig({ policyCapabilities });
+}
+
+export function getPersonalBrowserStateStorageEnabled(): boolean {
+  const cfg = readConfig();
+  return cfg.personalBrowserStateStorageEnabled === true;
+}
+
+export function setPersonalBrowserStateStorageEnabled(enabled: boolean): void {
+  writeConfig({ personalBrowserStateStorageEnabled: enabled });
 }
 
 export const __hostConfigInternals = {
