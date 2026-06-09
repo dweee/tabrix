@@ -367,6 +367,77 @@ CREATE INDEX IF NOT EXISTS tabrix_experience_recipes_import_export_idx
 `;
 
 /**
+ * Browser Object schema.
+ *
+ * `tabrix_browser_objects` is the current browser/page object fact layer. It
+ * is additive to MKE: Memory remains the tool-call trace log, Knowledge can
+ * later project from object facts, and Experience still mines validated Memory
+ * paths. The table stores redacted object summaries, not raw DOM/text/body
+ * evidence.
+ */
+export const BROWSER_OBJECT_CREATE_TABLES_SQL = `
+CREATE TABLE IF NOT EXISTS tabrix_browser_objects (
+  browser_object_id      TEXT PRIMARY KEY,
+  schema_version         INTEGER NOT NULL DEFAULT 1,
+  site_family            TEXT NOT NULL DEFAULT 'unknown',
+  page_url_pattern       TEXT,
+  root_route             TEXT,
+  current_route          TEXT,
+  page_role              TEXT,
+  page_model_key         TEXT NOT NULL DEFAULT 'unknown',
+  object_fingerprint     TEXT NOT NULL,
+  object_type            TEXT NOT NULL,
+  parent_object_id       TEXT,
+  model_version          INTEGER NOT NULL DEFAULT 1,
+  browser_context_key    TEXT,
+  tab_id                 INTEGER,
+  window_id              INTEGER,
+  owner_type             TEXT,
+  source_route           TEXT,
+  selected_data_source   TEXT,
+  source_lineage_blob    TEXT,
+  source_freshness       TEXT,
+  tab_status             TEXT,
+  lifecycle_state        TEXT,
+  is_active              INTEGER,
+  can_tabrix_operate     INTEGER,
+  operability_reason     TEXT,
+  targetability_blob     TEXT,
+  facts_blob             TEXT,
+  action_types_blob      TEXT,
+  changed_groups_blob    TEXT,
+  primary_conclusion     TEXT,
+  claim_boundary         TEXT,
+  observation_count      INTEGER NOT NULL DEFAULT 0,
+  confidence_score       REAL,
+  drift_score            REAL,
+  last_observed_at       TEXT,
+  last_validated_at      TEXT,
+  first_trace_id         TEXT,
+  last_trace_id          TEXT,
+  source_trace_ids_blob  TEXT,
+  evidence_refs_blob     TEXT,
+  redaction_state        TEXT NOT NULL DEFAULT 'redacted',
+  current_state_blob     TEXT,
+  recent_events_blob     TEXT,
+  created_at             TEXT NOT NULL,
+  updated_at             TEXT NOT NULL,
+  closed_at              TEXT,
+  archived_at            TEXT,
+  UNIQUE(site_family, page_model_key, object_fingerprint, schema_version)
+);
+
+CREATE INDEX IF NOT EXISTS tabrix_browser_objects_lookup_idx
+  ON tabrix_browser_objects(site_family, page_model_key, object_type, updated_at);
+CREATE INDEX IF NOT EXISTS tabrix_browser_objects_lifecycle_idx
+  ON tabrix_browser_objects(lifecycle_state, source_freshness, updated_at);
+CREATE INDEX IF NOT EXISTS tabrix_browser_objects_tab_idx
+  ON tabrix_browser_objects(browser_context_key, window_id, tab_id, updated_at);
+CREATE INDEX IF NOT EXISTS tabrix_browser_objects_operability_idx
+  ON tabrix_browser_objects(can_tabrix_operate, owner_type, updated_at);
+`;
+
+/**
  * Experience schema.
  *
  * Co-located in the same `memory.db` file as Memory: Experience is a

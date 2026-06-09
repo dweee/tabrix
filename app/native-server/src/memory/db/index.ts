@@ -7,10 +7,16 @@ export {
   type SqliteDatabase,
 } from './client';
 export {
+  BROWSER_OBJECT_CREATE_TABLES_SQL,
   MKE_CORE_CREATE_TABLES_SQL,
   MEMORY_CREATE_TABLES_SQL,
   OPERATION_MEMORY_LOG_CREATE_TABLES_SQL,
 } from './schema';
+export {
+  BrowserObjectRepository,
+  type BrowserObject,
+  type BrowserObjectInput,
+} from './browser-object-repository';
 export { TaskRepository } from './task-repository';
 export {
   SessionRepository,

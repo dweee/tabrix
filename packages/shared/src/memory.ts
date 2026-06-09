@@ -137,7 +137,13 @@ export interface MkePageIdentitySummary {
   label: string | null;
   url?: string | null;
   host?: string | null;
-  source: 'result_payload' | 'page_url_pattern' | 'site_family' | 'none';
+  source:
+    | 'result_payload'
+    | 'current_route'
+    | 'root_route'
+    | 'page_url_pattern'
+    | 'site_family'
+    | 'none';
 }
 
 export interface MkeTraceDisplaySummary {
@@ -192,6 +198,68 @@ export interface MkeMemoryTraceSummary {
   display?: MkeTraceDisplaySummary;
   pageIdentity?: MkePageIdentitySummary;
   statusView?: MkeTraceStatusViewSummary;
+}
+
+export type MkeBrowserObjectType =
+  | 'window'
+  | 'tab'
+  | 'page'
+  | 'region'
+  | 'action_target'
+  | 'data_source'
+  | 'unknown'
+  | string;
+
+export interface MkeBrowserObjectDisplaySummary {
+  title: string;
+  subtitle?: string | null;
+  locationLabel?: string | null;
+}
+
+/**
+ * Sanitized projection of `tabrix_browser_objects`.
+ *
+ * The Object Library is a current browser/page-object fact layer. List views
+ * receive only user-readable fields and small allowlisted facts; raw DOM,
+ * page text, request/response payloads, and sensitive values stay out of the
+ * API contract.
+ */
+export interface MkeBrowserObjectSummary {
+  browserObjectId: string;
+  objectType: MkeBrowserObjectType;
+  siteFamily: string;
+  pageUrlPattern?: string | null;
+  rootRoute?: string | null;
+  currentRoute?: string | null;
+  pageRole?: string | null;
+  pageModelKey: string;
+  objectFingerprint: string;
+  browserContextKey?: string | null;
+  ownerType?: string | null;
+  sourceRoute?: string | null;
+  selectedDataSource?: string | null;
+  sourceFreshness?: string | null;
+  lifecycleState?: string | null;
+  tabStatus?: string | null;
+  isActive?: boolean | null;
+  canTabrixOperate?: boolean | null;
+  operabilityReason?: string | null;
+  primaryConclusion?: string | null;
+  claimBoundary?: string | null;
+  observationCount: number;
+  confidenceScore?: number | null;
+  driftScore?: number | null;
+  facts?: Record<string, unknown> | null;
+  actionTypes?: string[];
+  changedGroups?: unknown;
+  firstTraceId?: string | null;
+  lastTraceId?: string | null;
+  redactionState: string;
+  lastObservedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  pageIdentity?: MkePageIdentitySummary;
+  display?: MkeBrowserObjectDisplaySummary;
 }
 
 /**
@@ -268,6 +336,27 @@ export interface MkeMemoryTracesResponseData {
   total: number;
   limit: number;
   offset: number;
+  persistenceMode: MemoryPersistenceMode;
+}
+
+/** `GET /memory/mke/browser-objects` response envelope body. */
+export interface MkeBrowserObjectsResponseData {
+  browserObjects: MkeBrowserObjectSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+  persistenceMode: MemoryPersistenceMode;
+}
+
+export interface MkeObjectStoragePreferencesResponseData {
+  personalBrowserStateStorageEnabled: boolean;
+  persistenceMode: MemoryPersistenceMode;
+}
+
+/** `DELETE /memory/mke/browser-objects` response envelope body. */
+export interface MkeBrowserObjectsClearResponseData {
+  cleared: boolean;
+  total: number;
   persistenceMode: MemoryPersistenceMode;
 }
 

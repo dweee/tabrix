@@ -4,11 +4,13 @@ import {
   KnowledgeModelRepository,
   MemoryTraceRepository,
 } from './mke-core-repository';
+import { BrowserObjectRepository } from './browser-object-repository';
 
 const NOW = '2026-06-06T10:00:00.000Z';
 
 function bootstrap(): {
   traceRepo: MemoryTraceRepository;
+  browserObjectRepo: BrowserObjectRepository;
   knowledgeRepo: KnowledgeModelRepository;
   experienceRepo: ExperienceRecipeRepository;
   close: () => void;
@@ -16,6 +18,7 @@ function bootstrap(): {
   const { db } = openMemoryDb({ dbPath: ':memory:' });
   return {
     traceRepo: new MemoryTraceRepository(db),
+    browserObjectRepo: new BrowserObjectRepository(db),
     knowledgeRepo: new KnowledgeModelRepository(db),
     experienceRepo: new ExperienceRecipeRepository(db),
     close: () => db.close(),
@@ -53,9 +56,160 @@ function templateRecipe(overrides = {}) {
 
 describe('MKE core repositories', () => {
   it('initializes the additive Memory, Knowledge, and Experience tables', () => {
-    const { traceRepo, close } = bootstrap();
+    const { traceRepo, browserObjectRepo, close } = bootstrap();
     try {
       expect(traceRepo.count()).toBe(0);
+      expect(browserObjectRepo.count()).toBe(0);
+    } finally {
+      close();
+    }
+  });
+
+  it('upserts Browser Object facts without exposing raw object payloads as identity', () => {
+    const { browserObjectRepo, close } = bootstrap();
+    try {
+      const first = browserObjectRepo.upsert({
+        siteFamily: 'example.test',
+        pageUrlPattern: 'https://example.test/search',
+        rootRoute: 'https://example.test/search',
+        currentRoute: 'https://example.test/search?tab=results#/week',
+        pageRole: 'search_results',
+        pageModelKey: 'search-results',
+        objectFingerprint: 'page:example.test:search-results:7',
+        objectType: 'page',
+        tabId: 7,
+        windowId: 1,
+        ownerType: 'ai',
+        sourceRoute: 'dom_snapshot',
+        sourceFreshness: 'fresh',
+        canTabrixOperate: true,
+        facts: { regionCount: 3 },
+        firstTraceId: 'trace-object-1',
+        lastTraceId: 'trace-object-1',
+        sourceTraceIds: ['trace-object-1'],
+        redactionState: 'redacted',
+        updatedAt: NOW,
+      });
+      const second = browserObjectRepo.upsert({
+        siteFamily: 'example.test',
+        pageUrlPattern: 'https://example.test/search',
+        rootRoute: 'https://example.test/search',
+        currentRoute: 'https://example.test/search?tab=results#/week',
+        pageRole: 'search_results',
+        pageModelKey: 'search-results',
+        objectFingerprint: 'page:example.test:search-results:7',
+        objectType: 'page',
+        tabId: 7,
+        windowId: 1,
+        ownerType: 'ai',
+        sourceRoute: 'dom_snapshot',
+        sourceFreshness: 'fresh',
+        canTabrixOperate: true,
+        facts: { regionCount: 4 },
+        firstTraceId: 'trace-object-1',
+        lastTraceId: 'trace-object-2',
+        sourceTraceIds: ['trace-object-1', 'trace-object-2'],
+        redactionState: 'redacted',
+        updatedAt: '2026-06-06T10:00:01.000Z',
+      });
+
+      expect(first.browserObjectId).toBe(second.browserObjectId);
+      expect(second.observationCount).toBe(2);
+      expect(second.rootRoute).toBe('https://example.test/search');
+      expect(second.currentRoute).toBe('https://example.test/search?tab=results#/week');
+      expect(second.facts).toEqual({ regionCount: 4 });
+      expect(browserObjectRepo.count()).toBe(1);
+
+      browserObjectRepo.archive({
+        browserObjectId: second.browserObjectId,
+        archivedAt: '2026-06-06T10:00:02.000Z',
+      });
+      expect(browserObjectRepo.count()).toBe(0);
+    } finally {
+      close();
+    }
+  });
+
+  it('lists Object Library surface as current browser windows and tabs only', () => {
+    const { browserObjectRepo, close } = bootstrap();
+    try {
+      const common = {
+        siteFamily: 'example.test',
+        pageUrlPattern: 'https://example.test/',
+        rootRoute: 'https://example.test/',
+        currentRoute: 'https://example.test/',
+        ownerType: 'user',
+        sourceRoute: 'chrome_windows_get_all_with_browser_world_inventory',
+        sourceFreshness: 'fresh',
+        canTabrixOperate: true,
+        updatedAt: NOW,
+      };
+      browserObjectRepo.upsert({
+        ...common,
+        pageModelKey: 'window:1',
+        objectFingerprint: 'window:1',
+        objectType: 'window',
+        windowId: 1,
+        facts: { tabCount: 1 },
+      });
+      browserObjectRepo.upsert({
+        ...common,
+        pageModelKey: 'tab:example.test',
+        objectFingerprint: 'tab:1:2',
+        objectType: 'tab',
+        tabId: 2,
+        windowId: 1,
+        facts: { titleSummary: 'Example' },
+      });
+      browserObjectRepo.upsert({
+        ...common,
+        pageModelKey: 'tab:old.example.test',
+        objectFingerprint: 'tab:old:1',
+        objectType: 'tab',
+        tabId: 1,
+        windowId: 1,
+        updatedAt: '2026-06-06T09:59:59.000Z',
+      });
+      browserObjectRepo.upsert({
+        ...common,
+        pageModelKey: 'tab:closed.example.test',
+        objectFingerprint: 'tab:1:3',
+        objectType: 'tab',
+        tabId: 3,
+        windowId: 1,
+        lifecycleState: 'closed',
+        closedAt: NOW,
+      });
+      browserObjectRepo.upsert({
+        ...common,
+        pageModelKey: 'page:example.test',
+        objectFingerprint: 'page:example.test',
+        objectType: 'page',
+      });
+      browserObjectRepo.upsert({
+        ...common,
+        pageModelKey: 'region:example.test',
+        objectFingerprint: 'region:example.test:content',
+        objectType: 'region',
+      });
+      browserObjectRepo.upsert({
+        ...common,
+        pageModelKey: 'target:example.test',
+        objectFingerprint: 'target:example.test:button',
+        objectType: 'action_target',
+      });
+
+      expect(browserObjectRepo.count()).toBe(7);
+      expect(browserObjectRepo.countCurrentBrowserSurface()).toBe(2);
+      expect(
+        browserObjectRepo.listCurrentBrowserSurface({ limit: 10, offset: 0 }).map((object) => ({
+          objectType: object.objectType,
+          lifecycleState: object.lifecycleState,
+        })),
+      ).toEqual([
+        { objectType: 'window', lifecycleState: null },
+        { objectType: 'tab', lifecycleState: null },
+      ]);
     } finally {
       close();
     }

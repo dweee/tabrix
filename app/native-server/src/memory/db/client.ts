@@ -20,6 +20,7 @@ import type Database from 'better-sqlite3';
 
 import { getTabrixDataDir } from '../../shared/data-dirs';
 import {
+  BROWSER_OBJECT_CREATE_TABLES_SQL,
   CHOOSE_CONTEXT_TELEMETRY_CREATE_TABLES_SQL,
   EXPERIENCE_CREATE_TABLES_SQL,
   EXPERIENCE_WRITEBACK_WARNINGS_CREATE_TABLES_SQL,
@@ -326,6 +327,29 @@ function ensureChooseContextDecisionLayerColumns(db: SqliteDatabase): void {
 }
 
 /**
+ * Additive migration for Browser Object route separation. Older DBs only had
+ * `page_url_pattern`, which mixed stable grouping route and current browser
+ * route. The new columns keep the concepts separate:
+ * root_route = stable grouping route, current_route = sanitized current URL.
+ */
+function ensureBrowserObjectRouteColumns(db: SqliteDatabase): void {
+  if (!hasTable(db, 'tabrix_browser_objects')) return;
+  const additions: Array<[string, string]> = [
+    ['root_route', 'TEXT'],
+    ['current_route', 'TEXT'],
+  ];
+  for (const [name, type] of additions) {
+    if (!hasColumn(db, 'tabrix_browser_objects', name)) {
+      execMigration(db, {
+        table: 'tabrix_browser_objects',
+        column: name,
+        sql: `ALTER TABLE tabrix_browser_objects ADD COLUMN ${name} ${type}`,
+      });
+    }
+  }
+}
+
+/**
  * Open (or create) the Memory DB. Caller owns the returned handle and
  * must call `.close()` when done. Re-throws a
  * `TabrixMemoryDbBindingError` if the native binding is missing.
@@ -343,6 +367,8 @@ export function openMemoryDb(options?: MemoryDbOptions): OpenMemoryDbResult {
   db.exec(MEMORY_CREATE_TABLES_SQL);
   db.exec(OPERATION_MEMORY_LOG_CREATE_TABLES_SQL);
   db.exec(MKE_CORE_CREATE_TABLES_SQL);
+  db.exec(BROWSER_OBJECT_CREATE_TABLES_SQL);
+  ensureBrowserObjectRouteColumns(db);
   ensureSessionAggregatedAtColumn(db);
   // Legacy DBs may already have `experience_action_paths` without the
   // replay scoring columns. Add them before running the current schema,
