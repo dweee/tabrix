@@ -24,9 +24,12 @@ import type {
   MemorySessionStepsResponseData,
   MemorySessionsResponseData,
   MemoryTaskResponseData,
+  MkeBrowserObjectsClearResponseData,
+  MkeBrowserObjectsResponseData,
   MkeExperienceRecipesResponseData,
   MkeKnowledgeModelsResponseData,
   MkeMemoryTracesResponseData,
+  MkeObjectStoragePreferencesResponseData,
 } from '@tabrix/shared';
 import { STORAGE_KEYS } from './constants';
 
@@ -171,6 +174,62 @@ export async function fetchMkeMemoryTraces(
   return readEnvelope<MkeMemoryTracesResponseData>(url, options.signal);
 }
 
+/** `GET /memory/mke/browser-objects?limit=&offset=` */
+export async function fetchMkeBrowserObjects(
+  options: FetchMkeListOptions = {},
+): Promise<MkeBrowserObjectsResponseData> {
+  const { base, limit, offset } = await buildMkeListRequest(options);
+  const url = `${base}/memory/mke/browser-objects?limit=${limit}&offset=${offset}`;
+  return readEnvelope<MkeBrowserObjectsResponseData>(url, options.signal);
+}
+
+/** `DELETE /memory/mke/browser-objects` */
+export async function clearMkeBrowserObjects(
+  options: { signal?: AbortSignal; baseUrl?: string } = {},
+): Promise<MkeBrowserObjectsClearResponseData> {
+  const base = options.baseUrl ?? (await resolveMemoryApiBaseUrl());
+  return readEnvelope<MkeBrowserObjectsClearResponseData>(
+    `${base}/memory/mke/browser-objects`,
+    options.signal,
+    { method: 'DELETE' },
+  );
+}
+
+export interface UpdateMkeObjectStoragePreferencesOptions {
+  personalBrowserStateStorageEnabled: boolean;
+  signal?: AbortSignal;
+  baseUrl?: string;
+}
+
+/** `GET /memory/mke/object-storage-preferences` */
+export async function fetchMkeObjectStoragePreferences(
+  options: { signal?: AbortSignal; baseUrl?: string } = {},
+): Promise<MkeObjectStoragePreferencesResponseData> {
+  const base = options.baseUrl ?? (await resolveMemoryApiBaseUrl());
+  return readEnvelope<MkeObjectStoragePreferencesResponseData>(
+    `${base}/memory/mke/object-storage-preferences`,
+    options.signal,
+  );
+}
+
+/** `PATCH /memory/mke/object-storage-preferences` */
+export async function updateMkeObjectStoragePreferences(
+  options: UpdateMkeObjectStoragePreferencesOptions,
+): Promise<MkeObjectStoragePreferencesResponseData> {
+  const base = options.baseUrl ?? (await resolveMemoryApiBaseUrl());
+  return readEnvelope<MkeObjectStoragePreferencesResponseData>(
+    `${base}/memory/mke/object-storage-preferences`,
+    options.signal,
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        personalBrowserStateStorageEnabled: options.personalBrowserStateStorageEnabled,
+      }),
+    },
+  );
+}
+
 /** `GET /memory/mke/knowledge?limit=&offset=` */
 export async function fetchMkeKnowledgeModels(
   options: FetchMkeListOptions = {},
@@ -201,10 +260,14 @@ async function buildMkeListRequest(options: FetchMkeListOptions): Promise<{
   };
 }
 
-async function readEnvelope<TData>(url: string, signal?: AbortSignal): Promise<TData> {
+async function readEnvelope<TData>(
+  url: string,
+  signal?: AbortSignal,
+  init: RequestInit = {},
+): Promise<TData> {
   let response: Response;
   try {
-    response = await fetch(url, { signal });
+    response = await fetch(url, { ...init, signal });
   } catch (cause) {
     throw new MemoryApiError('network', `Network error contacting ${url}`, { cause });
   }

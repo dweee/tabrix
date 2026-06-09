@@ -1,7 +1,11 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from '@jest/globals';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from '@jest/globals';
 import supertest from 'supertest';
 import Server from './index';
 import { sessionManager } from '../execution/session-manager';
+import { __hostConfigInternals } from '../host-config';
 
 async function seedOneSession(): Promise<{
   taskId: string;
@@ -125,16 +129,26 @@ async function seedMkeRows(): Promise<void> {
 }
 
 describe('memory read routes (B-001 · Stage 3e)', () => {
+  const configFile = path.join(os.tmpdir(), 'tabrix-memory-routes-test-config.json');
+
   beforeAll(async () => {
+    __hostConfigInternals.setConfigFileForTesting(configFile);
     await Server.getInstance().ready();
   });
 
   beforeEach(() => {
     sessionManager.reset();
+    fs.rmSync(configFile, { force: true });
   });
 
   afterEach(() => {
     sessionManager.reset();
+    fs.rmSync(configFile, { force: true });
+  });
+
+  afterAll(() => {
+    __hostConfigInternals.setConfigFileForTesting(null);
+    fs.rmSync(configFile, { force: true });
   });
 
   test('GET /memory/sessions returns an empty list on a virgin DB', async () => {
@@ -254,12 +268,37 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
   });
 
   test('write verbs are not registered (read-only invariant)', async () => {
-    // POST / PUT / PATCH / DELETE against the memory namespace must 404.
+    // Row writes are still not registered. Object Library preferences
+    // use a separate PATCH route and do not insert Memory rows.
     await supertest(Server.getInstance().server).post('/memory/sessions').expect(404);
     await supertest(Server.getInstance().server)
       .delete('/memory/sessions/anything/steps')
       .expect(404);
     await supertest(Server.getInstance().server).put('/memory/tasks/any').expect(404);
+  });
+
+  test('GET/PATCH /memory/mke/object-storage-preferences manages Object Library storage preference', async () => {
+    const initial = await supertest(Server.getInstance().server)
+      .get('/memory/mke/object-storage-preferences')
+      .expect(200);
+
+    expect(initial.body.data).toMatchObject({
+      personalBrowserStateStorageEnabled: false,
+    });
+
+    const updated = await supertest(Server.getInstance().server)
+      .patch('/memory/mke/object-storage-preferences')
+      .send({ personalBrowserStateStorageEnabled: true })
+      .expect(200);
+
+    expect(updated.body.data).toMatchObject({
+      personalBrowserStateStorageEnabled: true,
+    });
+
+    await supertest(Server.getInstance().server)
+      .patch('/memory/mke/object-storage-preferences')
+      .send({ personalBrowserStateStorageEnabled: 'yes' })
+      .expect(400);
   });
 
   test('GET /memory/mke/traces returns sanitized trace summaries', async () => {
@@ -384,6 +423,409 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('pageStateModel');
     expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('objectGraph');
     expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('sourceTraceIds');
+  });
+
+  test('GET /memory/mke/browser-objects does not expose read_page internals as browser tabs', async () => {
+    await seedMkeRows();
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects')
+      .expect(200);
+
+    expect(res.body.data.total).toBe(0);
+    expect(res.body.data.browserObjects).toEqual([]);
+  });
+
+  test('GET /memory/mke/browser-objects lists BrowserWorld window and tab objects', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T12:00:00.000Z');
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-route-task',
+      taskIntent: 'inspect browser context',
+      aiClient: 'jest',
+      toolName: 'get_windows_and_tabs',
+      stepId: 'browser-object-step',
+      sequenceIndex: 1,
+      requestParams: {},
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 18,
+      result: textResult({
+        source: 'chrome_windows_get_all_with_browser_world_inventory',
+        browserWorld: {
+          status: 'fresh',
+          windows: [
+            { windowId: 10, focused: true, state: 'maximized', tabCount: 1, activeTabId: 21 },
+          ],
+          tabs: [
+            {
+              tabId: 21,
+              windowId: 10,
+              active: true,
+              status: 'complete',
+              ownerType: 'ai',
+              canTabrixOperate: true,
+              url: 'https://example.test/search?spm=tracking&q=private-token&tab=demohouse&access_token=real-secret#/experience/llm',
+              title: 'Search results - Example',
+            },
+            {
+              tabId: 22,
+              windowId: 10,
+              active: false,
+              status: 'complete',
+              ownerType: 'user_or_page',
+              canTabrixOperate: false,
+              operabilityReason: 'browser_internal_page',
+              url: 'chrome://newtab/',
+              title: 'New Tab',
+            },
+          ],
+        },
+      }),
+      resultSummary: 'browser inventory read',
+    });
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=10&offset=0')
+      .expect(200);
+
+    expect(res.body.data.total).toBe(3);
+    const objects = res.body.data.browserObjects as Array<Record<string, unknown>>;
+    expect(objects.map((object) => object.objectType).sort()).toEqual(['tab', 'tab', 'window']);
+    const windowObject = objects.find((object) => object.objectType === 'window');
+    expect(windowObject).toMatchObject({
+      display: {
+        title: '当前浏览器窗口 · 1 个标签 · 可见',
+        locationLabel: '浏览器',
+      },
+    });
+    const tab = objects.find((object) => object.pageUrlPattern === 'https://example.test/search');
+    expect(tab).toMatchObject({
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      rootRoute: 'https://example.test/search',
+      currentRoute:
+        'https://example.test/search?spm=tracking&q=private-token&tab=demohouse&access_token=%5Bredacted%5D#/experience/llm',
+      ownerType: 'ai',
+      canTabrixOperate: true,
+      facts: {
+        titleSummary: 'Search results - Example',
+        host: 'example.test',
+      },
+      pageIdentity: {
+        label: 'example.test',
+        host: 'example.test',
+        url: 'https://example.test/search?spm=tracking&q=private-token&tab=demohouse&access_token=%5Bredacted%5D#/experience/llm',
+        source: 'current_route',
+      },
+      display: {
+        title: 'Search results - Example',
+      },
+    });
+    expect(JSON.stringify(tab)).toContain('private-token');
+    expect(JSON.stringify(tab)).toContain('spm');
+    expect(JSON.stringify(tab)).toContain('tab=demohouse');
+    expect(JSON.stringify(tab)).toContain('access_token');
+    expect(JSON.stringify(tab)).not.toContain('real-secret');
+    expect(JSON.stringify(tab)).toContain('#/experience/llm');
+    expect(tab).not.toHaveProperty('currentState');
+    expect(tab).not.toHaveProperty('recentEvents');
+    expect(tab).not.toHaveProperty('sourceTraceIds');
+    const browserTab = objects.find((object) => object.pageUrlPattern === 'chrome://newtab/');
+    expect(browserTab).toMatchObject({
+      siteFamily: 'browser',
+      rootRoute: 'chrome://newtab/',
+      currentRoute: 'chrome://newtab/',
+      pageIdentity: {
+        kind: 'browser_internal',
+        label: 'chrome://newtab/',
+        url: 'chrome://newtab/',
+      },
+      display: {
+        title: 'New Tab',
+        locationLabel: 'chrome://newtab/',
+      },
+    });
+  });
+
+  test('Object Library upserts the same BrowserWorld window and tab across context refreshes', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T12:10:00.000Z');
+    const browserWorldPayload = {
+      source: 'chrome_windows_get_all_with_browser_world_inventory',
+      browserWorld: {
+        status: 'fresh',
+        windows: [{ windowId: 10, focused: true, state: 'normal', tabCount: 1, activeTabId: 21 }],
+        tabs: [
+          {
+            tabId: 21,
+            windowId: 10,
+            active: true,
+            status: 'complete',
+            ownerType: 'user_or_page',
+            canTabrixOperate: true,
+            url: 'https://example.test/search',
+            title: 'Search results - Example',
+          },
+        ],
+      },
+    };
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-stable-key-task',
+      taskIntent: 'inspect browser context',
+      aiClient: 'jest',
+      toolName: 'get_windows_and_tabs',
+      stepId: 'browser-object-stable-key-step-1',
+      sequenceIndex: 1,
+      requestParams: {},
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 18,
+      browserContextKey: 'ctx-before-reload',
+      result: textResult(browserWorldPayload),
+      resultSummary: 'browser inventory read',
+    });
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-stable-key-task',
+      taskIntent: 'inspect browser context',
+      aiClient: 'jest',
+      toolName: 'get_windows_and_tabs',
+      stepId: 'browser-object-stable-key-step-2',
+      sequenceIndex: 2,
+      requestParams: {},
+      requestAtMs: requestAt + 100,
+      responseAtMs: requestAt + 118,
+      browserContextKey: 'ctx-after-reload',
+      result: textResult(browserWorldPayload),
+      resultSummary: 'browser inventory read again',
+    });
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=10&offset=0')
+      .expect(200);
+
+    expect(res.body.data.total).toBe(2);
+    const objects = res.body.data.browserObjects as Array<Record<string, unknown>>;
+    const tab = objects.find((object) => object.objectType === 'tab');
+    const windowObject = objects.find((object) => object.objectType === 'window');
+    expect(tab).toMatchObject({
+      objectType: 'tab',
+      browserContextKey: 'ctx-after-reload',
+      observationCount: 2,
+    });
+    expect(windowObject).toMatchObject({
+      objectType: 'window',
+      browserContextKey: 'ctx-after-reload',
+      observationCount: 2,
+    });
+  });
+
+  test('Object Library list defaults to current browser windows and tabs, not read_page internals', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T12:15:00.000Z');
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-surface-task',
+      taskIntent: 'inspect browser context',
+      aiClient: 'jest',
+      toolName: 'get_windows_and_tabs',
+      stepId: 'browser-object-surface-step-1',
+      sequenceIndex: 1,
+      requestParams: {},
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 18,
+      browserContextKey: 'ctx-surface',
+      result: textResult({
+        source: 'chrome_windows_get_all_with_browser_world_inventory',
+        browserWorld: {
+          status: 'fresh',
+          windows: [{ windowId: 10, focused: true, state: 'normal', tabCount: 1, activeTabId: 21 }],
+          tabs: [
+            {
+              tabId: 21,
+              windowId: 10,
+              active: true,
+              status: 'complete',
+              ownerType: 'user',
+              canTabrixOperate: true,
+              url: 'https://example.test/search',
+              title: 'Search results - Example',
+            },
+          ],
+        },
+      }),
+      resultSummary: 'browser inventory read',
+    });
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-surface-task',
+      taskIntent: 'read current page',
+      aiClient: 'jest',
+      toolName: 'chrome_read_page',
+      stepId: 'browser-object-surface-step-2',
+      sequenceIndex: 2,
+      requestParams: { tabId: 21 },
+      requestAtMs: requestAt + 100,
+      responseAtMs: requestAt + 118,
+      browserContextKey: 'ctx-surface',
+      result: textResult({
+        page: { url: 'https://example.test/search', title: 'Search results - Example' },
+        summary: { pageRole: 'multi_region_page' },
+        pageProjection: {
+          tabId: 21,
+          pageRole: 'multi_region_page',
+          pageModelKey: 'read://example.test/search',
+          sourceFreshness: 'fresh',
+          sourceConfidence: 0.72,
+        },
+        pageRegions: [{ regionId: 'content', regionType: 'content', confidence: 0.8 }],
+        candidateActions: [{ targetRef: 'open-result', actionType: 'click', confidence: 0.8 }],
+      }),
+      resultSummary: 'read page',
+    });
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=20&offset=0')
+      .expect(200);
+
+    expect(res.body.data.total).toBe(2);
+    expect(
+      (res.body.data.browserObjects as Array<Record<string, unknown>>).map(
+        (object) => object.objectType,
+      ),
+    ).toEqual(expect.arrayContaining(['window', 'tab']));
+    expect(
+      (res.body.data.browserObjects as Array<Record<string, unknown>>).some((object) =>
+        ['page', 'region', 'action_target'].includes(String(object.objectType)),
+      ),
+    ).toBe(false);
+  });
+
+  test('DELETE /memory/mke/browser-objects clears Object Library without deleting Memory traces', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T12:20:00.000Z');
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-clear-task',
+      taskIntent: 'inspect browser context',
+      aiClient: 'jest',
+      toolName: 'get_windows_and_tabs',
+      stepId: 'browser-object-clear-step',
+      sequenceIndex: 1,
+      requestParams: {},
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 18,
+      result: textResult({
+        source: 'chrome_windows_get_all_with_browser_world_inventory',
+        browserWorld: {
+          status: 'fresh',
+          windows: [{ windowId: 10, focused: true, state: 'normal', tabCount: 1, activeTabId: 21 }],
+          tabs: [
+            {
+              tabId: 21,
+              windowId: 10,
+              active: true,
+              status: 'complete',
+              ownerType: 'ai',
+              canTabrixOperate: true,
+              url: 'https://example.test/search',
+              title: 'Search results - Example',
+            },
+          ],
+        },
+      }),
+      resultSummary: 'browser inventory read',
+    });
+
+    const before = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=10&offset=0')
+      .expect(200);
+    expect(before.body.data.total).toBeGreaterThan(0);
+
+    const deleted = await supertest(Server.getInstance().server)
+      .delete('/memory/mke/browser-objects')
+      .expect(200);
+    expect(deleted.body.data).toMatchObject({
+      cleared: true,
+      total: 0,
+      persistenceMode: 'memory',
+    });
+
+    const afterObjects = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=10&offset=0')
+      .expect(200);
+    expect(afterObjects.body.data.total).toBe(0);
+
+    const afterTraces = await supertest(Server.getInstance().server)
+      .get('/memory/mke/traces?limit=10&offset=0')
+      .expect(200);
+    expect(afterTraces.body.data.total).toBe(1);
+  });
+
+  test('Object Library stores full current routes when personal browser state storage is enabled', async () => {
+    await supertest(Server.getInstance().server)
+      .patch('/memory/mke/object-storage-preferences')
+      .send({ personalBrowserStateStorageEnabled: true })
+      .expect(200);
+
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T12:30:00.000Z');
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-full-route-task',
+      taskIntent: 'inspect browser context',
+      aiClient: 'jest',
+      toolName: 'get_windows_and_tabs',
+      stepId: 'browser-object-full-route-step',
+      sequenceIndex: 1,
+      requestParams: {},
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 18,
+      result: textResult({
+        source: 'chrome_windows_get_all_with_browser_world_inventory',
+        browserWorld: {
+          status: 'fresh',
+          windows: [
+            { windowId: 10, focused: true, state: 'maximized', tabCount: 1, activeTabId: 21 },
+          ],
+          tabs: [
+            {
+              tabId: 21,
+              windowId: 10,
+              active: true,
+              status: 'complete',
+              ownerType: 'ai',
+              canTabrixOperate: true,
+              url: 'https://example.test/search?access_token=real-secret&tab=demohouse#/experience/llm',
+              title: 'Search results - Example',
+            },
+          ],
+        },
+      }),
+      resultSummary: 'browser inventory read',
+    });
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=10&offset=0')
+      .expect(200);
+
+    const tab = (res.body.data.browserObjects as Array<Record<string, unknown>>).find(
+      (object) => object.objectType === 'tab',
+    );
+    expect(tab).toMatchObject({
+      redactionState: 'user_authorized',
+      currentRoute:
+        'https://example.test/search?access_token=real-secret&tab=demohouse#/experience/llm',
+      pageIdentity: {
+        url: 'https://example.test/search?access_token=real-secret&tab=demohouse#/experience/llm',
+      },
+    });
   });
 
   test('GET /memory/mke/experience returns sanitized template summaries', async () => {

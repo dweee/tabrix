@@ -14,13 +14,17 @@ import {
   DEFAULT_NATIVE_SERVER_PORT,
   DEFAULT_SESSIONS_PAGE_SIZE,
   MemoryApiError,
+  clearMkeBrowserObjects,
   fetchMemoryTask,
+  fetchMkeBrowserObjects,
   fetchMkeExperienceRecipes,
   fetchMkeKnowledgeModels,
   fetchMkeMemoryTraces,
+  fetchMkeObjectStoragePreferences,
   fetchRecentSessions,
   fetchSessionSteps,
   resolveMemoryApiBaseUrl,
+  updateMkeObjectStoragePreferences,
 } from '@/common/memory-api-client';
 
 type FetchMock = ReturnType<typeof vi.fn>;
@@ -298,6 +302,104 @@ describe('MKE data query helpers', () => {
     expect(String(fetchMock.mock.calls[0][0])).toBe(
       'http://127.0.0.1:12306/memory/mke/knowledge?limit=5&offset=10',
     );
+  });
+
+  it('fetches Browser Object summaries with explicit pagination', async () => {
+    const payload = {
+      browserObjects: [
+        {
+          browserObjectId: 'object-1',
+          objectType: 'page',
+          siteFamily: 'example.test',
+          pageModelKey: 'page:example.test:search',
+          objectFingerprint: 'page:example.test:search:7',
+          observationCount: 1,
+          redactionState: 'redacted',
+          createdAt: '2026-06-06T10:00:00Z',
+          updatedAt: '2026-06-06T10:00:01Z',
+        },
+      ],
+      total: 1,
+      limit: 10,
+      offset: 20,
+      persistenceMode: 'disk' as const,
+    };
+    fetchMock.mockResolvedValue(okResponse(payload));
+
+    const data = await fetchMkeBrowserObjects({
+      baseUrl: 'http://127.0.0.1:12306',
+      limit: 10,
+      offset: 20,
+    });
+
+    expect(data).toEqual(payload);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      'http://127.0.0.1:12306/memory/mke/browser-objects?limit=10&offset=20',
+    );
+  });
+
+  it('fetches and updates Object Library storage preferences', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        okResponse({
+          personalBrowserStateStorageEnabled: false,
+          persistenceMode: 'disk',
+        }),
+      )
+      .mockResolvedValueOnce(
+        okResponse({
+          personalBrowserStateStorageEnabled: true,
+          persistenceMode: 'disk',
+        }),
+      );
+
+    await expect(
+      fetchMkeObjectStoragePreferences({ baseUrl: 'http://127.0.0.1:12306' }),
+    ).resolves.toEqual({
+      personalBrowserStateStorageEnabled: false,
+      persistenceMode: 'disk',
+    });
+
+    await expect(
+      updateMkeObjectStoragePreferences({
+        baseUrl: 'http://127.0.0.1:12306',
+        personalBrowserStateStorageEnabled: true,
+      }),
+    ).resolves.toEqual({
+      personalBrowserStateStorageEnabled: true,
+      persistenceMode: 'disk',
+    });
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      'http://127.0.0.1:12306/memory/mke/object-storage-preferences',
+    );
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      'http://127.0.0.1:12306/memory/mke/object-storage-preferences',
+    );
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ personalBrowserStateStorageEnabled: true }),
+    });
+  });
+
+  it('clears Object Library rows', async () => {
+    fetchMock.mockResolvedValue(
+      okResponse({
+        cleared: true,
+        total: 0,
+        persistenceMode: 'disk',
+      }),
+    );
+
+    await expect(clearMkeBrowserObjects({ baseUrl: 'http://127.0.0.1:12306' })).resolves.toEqual({
+      cleared: true,
+      total: 0,
+      persistenceMode: 'disk',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:12306/memory/mke/browser-objects');
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'DELETE' });
   });
 
   it('fetches Experience recipe summaries and clamps invalid pagination', async () => {

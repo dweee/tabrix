@@ -19,26 +19,37 @@
  * - `GET /memory/sessions/:sessionId/steps` → steps for one session
  * - `GET /memory/tasks/:taskId` → single task + its sessions
  * - `GET /memory/mke/traces?limit=&offset=` → sanitized MKE Memory trace summaries
+ * - `GET /memory/mke/browser-objects?limit=&offset=` → sanitized browser object summaries
+ * - `DELETE /memory/mke/browser-objects` → clear Object Library rows only
+ * - `GET /memory/mke/object-storage-preferences` → Object Library storage preferences
+ * - `PATCH /memory/mke/object-storage-preferences` → update Object Library storage preferences
  * - `GET /memory/mke/knowledge?limit=&offset=` → sanitized MKE Knowledge summaries
  * - `GET /memory/mke/experience?limit=&offset=` → sanitized MKE Experience summaries
  *
- * Write verbs (POST/PUT/PATCH/DELETE) are not registered; Fastify
- * will respond 404 for them, which is the intended "read-only"
- * signal.
+ * Memory row writes are not exposed here. Object Library write routes are
+ * intentionally scoped to user settings and clearing current browser-object
+ * facts; they do not insert Memory / Knowledge / Experience rows.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type {
+  MkeBrowserObjectSummary,
+  MkeBrowserObjectsClearResponseData,
   MkeExperienceRecipeSummary,
   MkeKnowledgeModelSummary,
   MkeMemoryAiFeedbackSummary,
   MkeMemoryTraceSummary,
+  MkeObjectStoragePreferencesResponseData,
 } from '@tabrix/shared';
 import { HTTP_STATUS } from '../constant';
 import type { SessionManager } from '../execution/session-manager';
-import type { ExperienceRecipe, KnowledgeModel, MemoryTrace } from '../memory/db';
+import type { BrowserObject, ExperienceRecipe, KnowledgeModel, MemoryTrace } from '../memory/db';
 import { sessionManager as defaultSessionManager } from '../execution/session-manager';
 import { SESSION_SUMMARY_LIMIT_MAX } from '../memory/db';
+import {
+  getPersonalBrowserStateStorageEnabled,
+  setPersonalBrowserStateStorageEnabled,
+} from '../host-config';
 
 /**
  * Default page size for `GET /memory/sessions`. Matches the sidepanel
@@ -52,6 +63,10 @@ interface SessionsQuery {
 }
 
 type MkeListQuery = SessionsQuery;
+
+interface ObjectStoragePreferencesBody {
+  personalBrowserStateStorageEnabled?: boolean;
+}
 
 function parsePositiveInt(raw: unknown, fallback: number, max: number): number {
   if (raw === undefined || raw === null || raw === '') return fallback;
@@ -164,6 +179,58 @@ function classifyPageIdentity(
   };
 }
 
+function classifyObjectPageIdentity(
+  object: BrowserObject,
+): NonNullable<MkeBrowserObjectSummary['pageIdentity']> {
+  const url = object.currentRoute ?? object.rootRoute ?? object.pageUrlPattern;
+  const source = object.currentRoute
+    ? 'current_route'
+    : object.rootRoute
+      ? 'root_route'
+      : object.pageUrlPattern
+        ? 'page_url_pattern'
+        : 'site_family';
+  if (url) {
+    if (url.startsWith('chrome-extension://')) {
+      const label = url.includes('/sidepanel.html')
+        ? 'Tabrix 侧栏'
+        : url.includes('/popup.html')
+          ? 'Tabrix 弹窗'
+          : '扩展页面';
+      return { kind: 'extension', label, url, host: null, source };
+    }
+    if (/^(file:|[a-z]:[\\/]|\/)/i.test(url) || url.startsWith('null/')) {
+      return { kind: 'local_file', label: '本地文件', url, host: null, source };
+    }
+    try {
+      const parsed = new URL(url);
+      const isBrowserInternal = ['chrome:', 'edge:', 'about:'].includes(parsed.protocol);
+      return {
+        kind: isBrowserInternal ? 'browser_internal' : 'web',
+        label: isBrowserInternal ? parsed.href : parsed.hostname,
+        url,
+        host: parsed.hostname || null,
+        source,
+      };
+    } catch {
+      return {
+        kind: 'unknown',
+        label: object.siteFamily === 'unknown' ? null : object.siteFamily,
+        url,
+        host: object.siteFamily === 'unknown' ? null : object.siteFamily,
+        source,
+      };
+    }
+  }
+  return {
+    kind: object.siteFamily === 'browser' ? 'browser_internal' : 'unknown',
+    label: object.siteFamily === 'browser' ? '浏览器' : object.siteFamily,
+    url: null,
+    host: object.siteFamily === 'unknown' ? null : object.siteFamily,
+    source: object.siteFamily === 'unknown' ? 'none' : 'site_family',
+  };
+}
+
 function normalizeBusinessStatus(
   value: string | null | undefined,
 ): NonNullable<MkeMemoryTraceSummary['statusView']>['businessStatus'] {
@@ -251,6 +318,106 @@ function toTraceSummary(trace: MemoryTrace): MkeMemoryTraceSummary {
   };
 }
 
+const OBJECT_TYPE_LABELS: Record<string, string> = {
+  window: '浏览器窗口',
+  tab: '网页标签',
+  page: '页面对象',
+  region: '页面区域',
+  action_target: '可操作对象',
+  data_source: '数据源',
+};
+
+function objectFactString(facts: Record<string, unknown>, key: string): string | null {
+  const value = facts[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function objectFactNumber(facts: Record<string, unknown>, key: string): number | null {
+  const value = facts[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function windowStateLabel(value: string | null): string | null {
+  if (!value) return null;
+  if (value === 'maximized' || value === 'normal') return '可见';
+  if (value === 'minimized') return '最小化';
+  if (value === 'fullscreen') return '全屏';
+  return value;
+}
+
+function objectTitle(object: BrowserObject, pageIdentity: MkeBrowserObjectSummary['pageIdentity']) {
+  const typeLabel = OBJECT_TYPE_LABELS[object.objectType] ?? object.objectType;
+  const facts = asRecord(object.facts) ?? {};
+  if (object.primaryConclusion) return object.primaryConclusion;
+  if (object.objectType === 'window') {
+    const tabCount = objectFactNumber(facts, 'tabCount');
+    const state = windowStateLabel(objectFactString(facts, 'state'));
+    const parts = [
+      object.isActive ? '当前浏览器窗口' : '浏览器窗口',
+      tabCount === null ? null : `${tabCount} 个标签`,
+      state,
+    ].filter(Boolean);
+    return parts.join(' · ');
+  }
+  if (object.objectType === 'tab') {
+    const titleSummary = objectFactString(facts, 'titleSummary');
+    if (titleSummary) return titleSummary;
+  }
+  if (object.objectType === 'tab' && pageIdentity?.label) return `${pageIdentity.label} 标签页`;
+  return object.pageRole ? `${typeLabel} · ${object.pageRole}` : typeLabel;
+}
+
+function toObjectSummary(object: BrowserObject): MkeBrowserObjectSummary {
+  const pageIdentity = classifyObjectPageIdentity(object);
+  const facts = asRecord(object.facts);
+  const actionTypes = Array.isArray(object.actionTypes)
+    ? object.actionTypes.filter((item): item is string => typeof item === 'string')
+    : [];
+  return {
+    browserObjectId: object.browserObjectId,
+    objectType: object.objectType,
+    siteFamily: object.siteFamily,
+    pageUrlPattern: object.pageUrlPattern,
+    rootRoute: object.rootRoute,
+    currentRoute: object.currentRoute,
+    pageRole: object.pageRole,
+    pageModelKey: object.pageModelKey,
+    objectFingerprint: object.objectFingerprint,
+    browserContextKey: object.browserContextKey,
+    ownerType: object.ownerType,
+    sourceRoute: object.sourceRoute,
+    selectedDataSource: object.selectedDataSource,
+    sourceFreshness: object.sourceFreshness,
+    lifecycleState: object.lifecycleState,
+    tabStatus: object.tabStatus,
+    isActive: object.isActive,
+    canTabrixOperate: object.canTabrixOperate,
+    operabilityReason: object.operabilityReason,
+    primaryConclusion: object.primaryConclusion,
+    claimBoundary: object.claimBoundary,
+    observationCount: object.observationCount,
+    confidenceScore: object.confidenceScore,
+    driftScore: object.driftScore,
+    facts,
+    actionTypes,
+    changedGroups: object.changedGroups,
+    firstTraceId: object.firstTraceId,
+    lastTraceId: object.lastTraceId,
+    redactionState: object.redactionState,
+    lastObservedAt: object.lastObservedAt,
+    createdAt: object.createdAt,
+    updatedAt: object.updatedAt,
+    pageIdentity,
+    display: {
+      title: objectTitle(object, pageIdentity),
+      subtitle: pageIdentity.label
+        ? `${pageIdentity.label} · ${object.objectType}`
+        : object.objectType,
+      locationLabel: pageIdentity.label,
+    },
+  };
+}
+
 function toKnowledgeSummary(model: KnowledgeModel): MkeKnowledgeModelSummary {
   return {
     knowledgeId: model.knowledgeId,
@@ -307,6 +474,27 @@ function toExperienceSummary(recipe: ExperienceRecipe): MkeExperienceRecipeSumma
     lastVerifiedAt: recipe.lastVerifiedAt,
     createdAt: recipe.createdAt,
     updatedAt: recipe.updatedAt,
+  };
+}
+
+function toObjectStoragePreferences(
+  sessionManager: SessionManager,
+): MkeObjectStoragePreferencesResponseData {
+  const persistence = sessionManager.getPersistenceStatus();
+  return {
+    personalBrowserStateStorageEnabled: getPersonalBrowserStateStorageEnabled(),
+    persistenceMode: persistence.mode,
+  };
+}
+
+function toBrowserObjectsClearResponse(
+  sessionManager: SessionManager,
+): MkeBrowserObjectsClearResponseData {
+  const persistence = sessionManager.getPersistenceStatus();
+  return {
+    cleared: true,
+    total: sessionManager.countMkeBrowserObjects(),
+    persistenceMode: persistence.mode,
   };
 }
 
@@ -421,6 +609,65 @@ export function registerMemoryRoutes(
           offset,
           persistenceMode: persistence.mode,
         },
+      });
+    },
+  );
+
+  fastify.get(
+    '/memory/mke/browser-objects',
+    async (request: FastifyRequest<{ Querystring: MkeListQuery }>, reply: FastifyReply) => {
+      const limit = parsePositiveInt(request.query.limit, 20, SESSION_SUMMARY_LIMIT_MAX);
+      const offset = parsePositiveInt(request.query.offset, 0, Number.MAX_SAFE_INTEGER);
+      const browserObjects = sessionManager
+        .listRecentMkeBrowserObjects(limit, offset)
+        .map(toObjectSummary);
+      const total = sessionManager.countMkeBrowserObjects();
+      const persistence = sessionManager.getPersistenceStatus();
+
+      return reply.status(HTTP_STATUS.OK).send({
+        status: 'ok',
+        data: {
+          browserObjects,
+          total,
+          limit,
+          offset,
+          persistenceMode: persistence.mode,
+        },
+      });
+    },
+  );
+
+  fastify.delete('/memory/mke/browser-objects', async (_request, reply: FastifyReply) => {
+    sessionManager.clearMkeBrowserObjects();
+    return reply.status(HTTP_STATUS.OK).send({
+      status: 'ok',
+      data: toBrowserObjectsClearResponse(sessionManager),
+    });
+  });
+
+  fastify.get('/memory/mke/object-storage-preferences', async (_request, reply: FastifyReply) => {
+    return reply.status(HTTP_STATUS.OK).send({
+      status: 'ok',
+      data: toObjectStoragePreferences(sessionManager),
+    });
+  });
+
+  fastify.patch(
+    '/memory/mke/object-storage-preferences',
+    async (
+      request: FastifyRequest<{ Body: ObjectStoragePreferencesBody }>,
+      reply: FastifyReply,
+    ) => {
+      if (typeof request.body?.personalBrowserStateStorageEnabled !== 'boolean') {
+        return reply.status(HTTP_STATUS.BAD_REQUEST).send({
+          status: 'error',
+          message: 'personalBrowserStateStorageEnabled must be a boolean',
+        });
+      }
+      setPersonalBrowserStateStorageEnabled(request.body.personalBrowserStateStorageEnabled);
+      return reply.status(HTTP_STATUS.OK).send({
+        status: 'ok',
+        data: toObjectStoragePreferences(sessionManager),
       });
     },
   );
