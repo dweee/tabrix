@@ -711,11 +711,41 @@ describe('服务器测试', () => {
     }
   });
 
-  test('POST /mcp stale session 不恢复执行非 allowlist tools/call', async () => {
-    const extensionSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
+  test('POST /mcp stale session 可恢复执行只读观察类 tools/call', async () => {
+    jest.spyOn(bridgeRuntimeState, 'syncBrowserProcessIfStale').mockImplementation(() => {
+      bridgeRuntimeState.setBrowserProcessRunning(true);
+      return true;
+    });
+    jest.spyOn(bridgeCommandChannel, 'isConnected').mockReturnValue(false);
+    bridgeRuntimeState.setBrowserProcessRunning(true);
+    bridgeRuntimeState.recordHeartbeat({
+      sentAt: Date.now(),
+      nativeConnected: true,
+      extensionId: 'server-test-extension',
+      connectionId: 'server-test-command-channel',
+      tabCount: 1,
+      windowCount: 1,
+    });
+    bridgeRuntimeState.setNativeHostAttached(true);
+    const extensionSpy = jest
+      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: '{"page":{"url":"https://example.test/"}}' }],
+          isError: false,
+        },
+      } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: '{"success":true,"name":"stale-session-shot"}' }],
+          isError: false,
+        },
+      } as never);
 
     try {
-      const stale = await supertest(Server.getInstance().server)
+      const readPage = await supertest(Server.getInstance().server)
         .post('/mcp')
         .set('Accept', 'application/json, text/event-stream')
         .set('Content-Type', 'application/json')
@@ -729,23 +759,50 @@ describe('服务器测试', () => {
             arguments: { tabId: 1 },
           },
         })
-        .expect(400);
+        .expect(200);
 
-      expect(stale.body).toMatchObject({
+      expect(readPage.body).toMatchObject({
         jsonrpc: '2.0',
         id: 99,
-        error: {
-          code: -32001,
-          data: {
-            recoveryAction: 'reinitialize_without_session_id',
-            staleSessionIdReceived: true,
-          },
+        result: {
+          isError: false,
+          content: [{ type: 'text' }],
         },
       });
-      expect(stale.body.error.message).toContain('initialize');
-      expect(extensionSpy).not.toHaveBeenCalled();
+
+      const screenshot = await supertest(Server.getInstance().server)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .set('Content-Type', 'application/json')
+        .set('mcp-session-id', 'stale-session-for-screenshot-recovery-test')
+        .send({
+          jsonrpc: '2.0',
+          id: 100,
+          method: 'tools/call',
+          params: {
+            name: 'chrome_screenshot',
+            arguments: { width: 800, height: 600, savePng: false },
+          },
+        })
+        .expect(200);
+
+      expect(screenshot.body).toMatchObject({
+        jsonrpc: '2.0',
+        id: 100,
+        result: {
+          content: [{ type: 'text' }],
+        },
+      });
+      expect(screenshot.body.error?.code).not.toBe(-32001);
+      const bridgedToolNames = extensionSpy.mock.calls
+        .map(([request]) => JSON.stringify(request))
+        .join('\n');
+      expect(bridgedToolNames).toContain('chrome_read_page');
+      expect(bridgedToolNames).toContain('chrome_screenshot');
     } finally {
-      extensionSpy.mockRestore();
+      jest.restoreAllMocks();
+      bridgeRuntimeState.reset();
+      sessionManager.reset();
     }
   });
 

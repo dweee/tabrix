@@ -205,7 +205,11 @@ type StaleSessionRecoverableToolCall = {
   args: Record<string, unknown>;
 };
 
-const STALE_SESSION_RECOVERABLE_TOOL_NAMES = new Set(['get_windows_and_tabs']);
+const STALE_SESSION_RECOVERABLE_TOOL_NAMES = new Set([
+  'get_windows_and_tabs',
+  'chrome_read_page',
+  'chrome_screenshot',
+]);
 
 function getStaleSessionRecoverableToolCall(body: unknown): StaleSessionRecoverableToolCall | null {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
