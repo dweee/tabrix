@@ -670,7 +670,7 @@ describe('clickTool integration', () => {
 /**
  * V23-01: window-alignment guard. Before V23-01, the post-dispatch
  * new-tab observation drained 75 ms after the click-helper resolved,
- * but the verifier waited another 250 ms on top — leaving a window
+ * but the verifier waited on top — leaving a window
  * where a `_blank` click that opened its tab during the verifier
  * settle delay would be missed by `verification.newTabOpened` even
  * though the verifier itself saw the URL change. The fix exposes one
@@ -688,5 +688,9 @@ describe('V23-01 window alignment', () => {
   it('CLICK_VERIFIER_SETTLE_DELAY_MS is a positive number', () => {
     expect(typeof CLICK_VERIFIER_SETTLE_DELAY_MS).toBe('number');
     expect(CLICK_VERIFIER_SETTLE_DELAY_MS).toBeGreaterThan(0);
+  });
+
+  it('CLICK_VERIFIER_SETTLE_DELAY_MS covers the action-outcome settle window', () => {
+    expect(CLICK_VERIFIER_SETTLE_DELAY_MS).toBeGreaterThanOrEqual(1500);
   });
 });

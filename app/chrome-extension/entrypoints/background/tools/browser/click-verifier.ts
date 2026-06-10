@@ -265,7 +265,7 @@ const BODY_SAMPLE_MAX_CHARS = 20_000;
  * condition. This is a cap, not a fixed settle delay: URL changes and
  * complete tab status return immediately.
  */
-export const CLICK_VERIFIER_READBACK_MAX_MS = 250;
+export const CLICK_VERIFIER_READBACK_MAX_MS = 1_500;
 export const CLICK_VERIFIER_SETTLE_DELAY_MS = CLICK_VERIFIER_READBACK_MAX_MS;
 
 function nowMs(): number {
