@@ -41,14 +41,14 @@ describe('popup management entrances layout', () => {
     expect(popupSource).toContain('.home-view {\n  display: flex;\n  flex-direction: column;');
     expect(popupSource).toContain('height: 100%;\n  min-height: 0;\n  overflow: hidden;');
     expect(popupSource).toContain('flex: 1 1 auto;');
-    expect(popupSource).toContain('min-height: 0;\n  padding: 8px 14px 12px;');
+    expect(popupSource).toContain('min-height: 0;\n  padding: 8px 14px 14px;');
     expect(popupSource).toContain('scrollbar-width: thin');
     expect(popupSource).toContain('overflow-x: hidden');
     expect(popupSource).toContain('.content::-webkit-scrollbar-thumb');
     expect(popupSource).not.toContain('.content::-webkit-scrollbar {\n  display: none;');
     expect(popupSource).toContain('.mcp-config-content');
-    expect(popupSource).toContain('overflow: visible;');
-    expect(popupSource).toContain('max-height: none;');
+    expect(popupSource).toContain('max-height: 128px;');
+    expect(popupSource).toContain('overflow: auto;');
     expect(popupSource).toContain('.footer {\n  flex-shrink: 0;');
   });
 
@@ -64,10 +64,27 @@ describe('popup management entrances layout', () => {
 
   it('shows Token and MKE as sibling management entries instead of stacking MKE below the fold', () => {
     expect(popupSource).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
-    expect(popupSource).toContain('min-height: 66px;');
+    expect(popupSource).toContain('min-height: 62px;');
     expect(popupSource).toContain('.management-entry-block .entry-arrow');
     expect(popupSource).toContain('display: none;');
     expect(popupSource).toContain('overflow: visible;');
-    expect(popupSource).toContain('padding: 8px;');
+    expect(popupSource).toContain('background: transparent;');
+    expect(popupSource).toContain('border: 0;');
+    expect(popupSource).toContain('padding: 0;');
+  });
+
+  it('keeps the config preview bounded and masks bearer tokens on screen', () => {
+    expect(popupSource).toContain('{{ displayConfigJson }}');
+    expect(popupSource).toContain('const displayConfigJson = computed(() => {');
+    expect(popupSource).toContain('maskTokenForDisplay');
+    expect(popupSource).toContain('activeConfigJson.value.replace(`Bearer ${token}`');
+  });
+
+  it('treats disconnect as a subdued dangerous action instead of the dominant CTA', () => {
+    expect(popupSource).toContain('PowerIcon');
+    expect(popupSource).toContain('.connect-button.is-disconnect');
+    expect(popupSource).toContain('background: #fff1f2;');
+    expect(popupSource).toContain('box-shadow: none;');
+    expect(popupSource).not.toContain('background: linear-gradient(180deg, #fb7185');
   });
 });
