@@ -143,15 +143,20 @@ function rowToPlan(row: ExperienceActionPathRow): ExperienceActionPathPlan {
   };
 }
 
+function hasPositiveSuccessEvidence(row: ExperienceActionPathRow): boolean {
+  return row.successCount > 0;
+}
+
 /**
  * Pure projection: rows → `ExperienceSuggestPlanResult`. Unit-tested
- * directly. Empty `rows` always yields `status: 'no_match'`.
+ * directly. Rows without any successful observation are filtered out;
+ * empty surviving rows always yield `status: 'no_match'`.
  */
 export function buildSuggestPlanResult(
   rows: ExperienceActionPathRow[],
   persistenceMode: MemoryPersistenceMode,
 ): ExperienceSuggestPlanResult {
-  const plans = rows.map(rowToPlan);
+  const plans = rows.filter(hasPositiveSuccessEvidence).map(rowToPlan);
   return {
     status: plans.length > 0 ? 'ok' : 'no_match',
     plans,

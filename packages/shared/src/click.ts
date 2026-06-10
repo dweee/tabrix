@@ -16,10 +16,10 @@
  *
  * "Success-like" outcomes: `cross_document_navigation`, `spa_route_change`,
  * `hash_change`, `new_tab_opened`, `dialog_opened`, `menu_opened`,
- * `state_toggled`, `selection_changed`, `dom_changed`, `focus_changed`,
- * `download_intercepted`.
+ * `state_toggled`, `selection_changed`, `dom_changed`, `download_intercepted`.
  *
- * "Not-a-success" outcomes: `no_observed_change`, `verification_unavailable`.
+ * "Not-a-success" outcomes: `focus_changed`, `no_observed_change`,
+ * `verification_unavailable`.
  */
 export type ClickObservedOutcome =
   | 'cross_document_navigation'
@@ -144,7 +144,6 @@ export const CLICK_SUCCESS_OUTCOMES: readonly ClickObservedOutcome[] = [
   'state_toggled',
   'selection_changed',
   'dom_changed',
-  'focus_changed',
   'download_intercepted',
 ];
 

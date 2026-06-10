@@ -1779,7 +1779,9 @@ export const LAYER_DISPATCH_REASON_VALUES: readonly LayerDispatchReason[] = [
  * - `knowledge_supported_read` — caller should call `chrome_read_page`
  *   but the chooser surfaced API Knowledge shape evidence as well.
  * - `dispatcher_fallback_safe` — dispatcher could not classify the
- *   input; fall back to `L0+L1` and call `chrome_read_page`.
+ *   input and returns the full safe layer; execution fallback plans
+ *   may clamp this back to compact DOM reads before calling
+ *   `chrome_read_page`.
  *
  * Adding a fifth value requires a full enum migration in
  * the release gate library, the telemetry column allow-list, and the

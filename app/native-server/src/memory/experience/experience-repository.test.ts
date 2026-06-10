@@ -181,6 +181,30 @@ describe('ExperienceRepository#recordReplayStepOutcome (V24-02)', () => {
     }
   });
 
+  it('treats focus_changed as diagnostic evidence, not replay success', () => {
+    const fx = fresh();
+    try {
+      seedRow(fx.repo, VALID_ID_A, '2026-04-22T00:00:00.000Z');
+      const result = fx.repo.recordReplayStepOutcome({
+        actionPathId: VALID_ID_A,
+        stepIndex: 0,
+        observedOutcome: 'focus_changed',
+        nowIso: '2026-04-23T01:02:03.000Z',
+      });
+      expect(result.status).toBe('ok');
+      expect(result.successDelta).toBe(0);
+      expect(result.failureDelta).toBe(1);
+      expect(result.lastReplayStatus).toBe('failed');
+      const row = fx.repo.findActionPathById(VALID_ID_A);
+      expect(row?.successCount).toBe(3);
+      expect(row?.failureCount).toBe(2);
+      expect(row?.lastReplayOutcome).toBe('focus_changed');
+      expect(row?.lastReplayStatus).toBe('failed');
+    } finally {
+      fx.close();
+    }
+  });
+
   it('returns no_match without touching counters when the row is missing', () => {
     const fx = fresh();
     try {

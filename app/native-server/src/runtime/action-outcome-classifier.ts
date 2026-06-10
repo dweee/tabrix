@@ -39,8 +39,9 @@
  *   - A signal kind that does not match any verdict bucket lowers the
  *     verdict confidence by 0.1 per stray signal, floored at 0.6 so
  *     `'ambiguous'` never collapses below the ambiguity confidence floor.
- *   - `no_observed_change` (empty timeline) returns 1.0 — the absence
- *     of signals is itself a strong claim.
+ *   - `no_observed_change` (empty effective timeline) returns a low
+ *     confidence value because no signal is not the same as strong
+ *     proof that nothing happened.
  *   - Anything outside the allowlist falls through to `'unknown'`
  *     with confidence 0.0.
  */
@@ -64,6 +65,9 @@ export const ACTION_OUTCOME_DEFAULT_SETTLE_WINDOW_MS = 1_500;
  *  this floor would conflict with the lifecycle confidence
  *  expectations elsewhere in the runtime. */
 export const ACTION_OUTCOME_MIN_AMBIGUOUS_CONFIDENCE = 0.6;
+
+/** Empty effective timelines carry weak evidence only. */
+export const ACTION_OUTCOME_NO_SIGNAL_CONFIDENCE = 0.5;
 
 export interface ClassifyOptions {
   /** Override the settle window in ms. Defaults to
@@ -96,7 +100,7 @@ export function classifyActionOutcome(
     return {
       actionId: envelope.actionId,
       outcome: 'no_observed_change',
-      outcomeConfidence: 1.0,
+      outcomeConfidence: ACTION_OUTCOME_NO_SIGNAL_CONFIDENCE,
       observedSignalKinds,
       producedAtMs: now,
     };

@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { isClickSuccessOutcome } from '@tabrix/shared';
 import {
   buildClickActionEvidenceResult,
   buildClickHelperDispatchTimingPolicy,
@@ -237,14 +238,15 @@ describe('mergeClickSignals (pure function)', () => {
     expect(merged.success).toBe(true);
   });
 
-  it('focus-only change → focus_changed', () => {
+  it('focus-only change → focus_changed but not success', () => {
     const merged = mergeClickSignals(
       true,
       { ...zeroPage, focusChanged: true },
       { newTabOpened: false },
     );
     expect(merged.observedOutcome).toBe('focus_changed');
-    expect(merged.success).toBe(true);
+    expect(merged.success).toBe(false);
+    expect(isClickSuccessOutcome('focus_changed')).toBe(false);
   });
 });
 

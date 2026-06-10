@@ -300,6 +300,21 @@ describe('dispatchLayer — invariants', () => {
     expect(out.fullReadTokenEstimate).toBe(Math.ceil(100_000 / 4));
   });
 
+  test('token estimate respects per-layer fraction (L0+L1 ≤ 60% of full read)', () => {
+    const out = dispatchLayer({
+      pageRole: 'repo_home',
+      userIntent: 'open_or_select',
+      taskType: 'action',
+      candidateActionsCount: 10,
+      hvoCount: 5,
+      fullReadByteLength: 100_000,
+    });
+    expect(out.chosenLayer).toBe('L0+L1');
+    // L0+L1 fraction is 0.6 by design; allow +/- 1 for ceil rounding.
+    expect(out.tokenEstimate).toBeLessThanOrEqual(Math.ceil((100_000 * 0.6) / 4) + 1);
+    expect(out.fullReadTokenEstimate).toBe(Math.ceil(100_000 / 4));
+  });
+
   test('readPageAvoided is true ONLY for experience_replay_skip_read', () => {
     for (const rule of getLayerDispatchRulesForTesting()) {
       if (rule.sourceRoute === 'experience_replay_skip_read') {

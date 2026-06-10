@@ -17,6 +17,7 @@ import type {
 } from '@tabrix/shared';
 import {
   ACTION_OUTCOME_MIN_AMBIGUOUS_CONFIDENCE,
+  ACTION_OUTCOME_NO_SIGNAL_CONFIDENCE,
   classifyActionOutcome,
   describeDomRegionSelectionRule,
   isKnownActionSignalKind,
@@ -52,11 +53,12 @@ function makeEnvelope(
 describe('action-outcome-classifier — classifyActionOutcome', () => {
   const now = () => T0 + 9_999;
 
-  it('returns no_observed_change with confidence 1.0 for an empty timeline', () => {
+  it('returns no_observed_change with low confidence for an empty timeline', () => {
     const env = makeEnvelope({ signals: [] });
     const out = classifyActionOutcome(env, { now });
     expect(out.outcome).toBe('no_observed_change');
-    expect(out.outcomeConfidence).toBe(1);
+    expect(out.outcomeConfidence).toBe(ACTION_OUTCOME_NO_SIGNAL_CONFIDENCE);
+    expect(out.outcomeConfidence).toBeLessThan(1);
     expect(out.observedSignalKinds).toEqual([]);
     expect(out.actionId).toBe('act-1');
     expect(out.producedAtMs).toBe(T0 + 9_999);
@@ -187,7 +189,8 @@ describe('action-outcome-classifier — classifyActionOutcome', () => {
     const out = classifyActionOutcome(env, { now, settleWindowMs: 1_500 });
     // Late signal => empty effective timeline => no_observed_change.
     expect(out.outcome).toBe('no_observed_change');
-    expect(out.outcomeConfidence).toBe(1);
+    expect(out.outcomeConfidence).toBe(ACTION_OUTCOME_NO_SIGNAL_CONFIDENCE);
+    expect(out.outcomeConfidence).toBeLessThan(1);
   });
 
   it('drops signals dated before the action observedAtMs (clock skew guard)', () => {
@@ -196,6 +199,8 @@ describe('action-outcome-classifier — classifyActionOutcome', () => {
     });
     const out = classifyActionOutcome(env, { now });
     expect(out.outcome).toBe('no_observed_change');
+    expect(out.outcomeConfidence).toBe(ACTION_OUTCOME_NO_SIGNAL_CONFIDENCE);
+    expect(out.outcomeConfidence).toBeLessThan(1);
   });
 
   it('clamps producer confidence to the [0, 1] interval', () => {

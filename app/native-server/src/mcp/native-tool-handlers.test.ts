@@ -141,6 +141,38 @@ describe('native-tool-handlers · experience_suggest_plan', () => {
       persistenceMode: 'memory',
     });
   });
+
+  it('does not surface zero-success rows as suggested plans', async () => {
+    const handler = getHandler();
+    const suggestActionPaths = jest.fn().mockReturnValue([
+      {
+        actionPathId: 'ap-zero',
+        pageRole: 'repo_home',
+        intentSignature: 'open issues',
+        stepSequence: [
+          { toolName: 'chrome_click_element', status: 'completed', historyRef: 'h://a' },
+        ],
+        successCount: 0,
+        failureCount: 4,
+        lastUsedAt: '2026-04-21T10:00:00.000Z',
+        createdAt: '2026-04-20T00:00:00.000Z',
+        updatedAt: '2026-04-21T10:00:00.000Z',
+      },
+    ]);
+    const fakeExperience = { suggestActionPaths } as unknown as ExperienceQueryService;
+
+    const result = await handler(
+      { intent: 'open issues' },
+      makeDeps({ experience: fakeExperience }),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(callTextPayload(result)).toEqual({
+      status: 'no_match',
+      plans: [],
+      persistenceMode: 'disk',
+    });
+  });
 });
 
 describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {

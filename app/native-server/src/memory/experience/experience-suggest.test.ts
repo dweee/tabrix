@@ -135,7 +135,7 @@ describe('buildSuggestPlanResult (B-013, pure)', () => {
     expect(result.plans[0].successRate).toBeCloseTo(0.75, 5);
   });
 
-  it('reports successRate=0 (not NaN) when both counters are zero', () => {
+  it('filters rows with zero successful observations', () => {
     const result = buildSuggestPlanResult(
       [
         {
@@ -151,8 +151,40 @@ describe('buildSuggestPlanResult (B-013, pure)', () => {
       ],
       'memory',
     );
-    expect(result.plans[0].successRate).toBe(0);
+    expect(result.status).toBe('no_match');
+    expect(result.plans).toEqual([]);
     expect(result.persistenceMode).toBe('memory');
+  });
+
+  it('keeps rows with positive successful observations and filters zero-success rows', () => {
+    const result = buildSuggestPlanResult(
+      [
+        {
+          actionPathId: 'ap-zero',
+          pageRole: 'repo_home',
+          intentSignature: 'open issues',
+          stepSequence: [],
+          successCount: 0,
+          failureCount: 4,
+          createdAt: '2026-04-20T00:00:00.000Z',
+          updatedAt: '2026-04-20T00:00:00.000Z',
+        },
+        {
+          actionPathId: 'ap-positive',
+          pageRole: 'repo_home',
+          intentSignature: 'open issues',
+          stepSequence: [],
+          successCount: 1,
+          failureCount: 4,
+          createdAt: '2026-04-20T00:00:00.000Z',
+          updatedAt: '2026-04-20T00:00:00.000Z',
+        },
+      ],
+      'disk',
+    );
+    expect(result.status).toBe('ok');
+    expect(result.plans.map((p) => p.actionPathId)).toEqual(['ap-positive']);
+    expect(result.plans[0].successRate).toBeCloseTo(0.2, 5);
   });
 });
 
