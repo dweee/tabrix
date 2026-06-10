@@ -63,23 +63,45 @@ describe('injected state-driven waits', () => {
     const input = document.getElementById('name') as HTMLInputElement;
     setRect(input, { left: 20, top: 30, width: 180, height: 28 });
     document.elementFromPoint = vi.fn(() => input);
+    const nativeValueDescriptor = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value',
+    );
+    const ownValueSetter = vi.fn((nextValue: string) => {
+      nativeValueDescriptor?.set?.call(input, nextValue);
+    });
+    Object.defineProperty(input, 'value', {
+      configurable: true,
+      get: () => nativeValueDescriptor?.get?.call(input),
+      set: ownValueSetter,
+    });
+    const inputTypes: Array<string | undefined> = [];
+    input.addEventListener('input', (event) => {
+      inputTypes.push((event as InputEvent).inputType);
+    });
 
     const listener = installInjectedHelper(
       'inject-scripts/fill-helper.js',
       '__FILL_HELPER_INITIALIZED__',
     );
-    const response = await sendRequest(listener, {
-      action: 'fillElement',
-      selector: '#name',
-      value: 'Tabrix',
-    });
+    try {
+      const response = await sendRequest(listener, {
+        action: 'fillElement',
+        selector: '#name',
+        value: 'Tabrix',
+      });
 
-    expect(response.success).toBe(true);
-    expect(response.elementInfo.waitDiagnostics.scroll.reason).toBe('ready');
-    expect(response.elementInfo.waitDiagnostics.scroll.waitedMs).toBeLessThan(150);
-    expect(response.elementInfo.valueState).toBe('non_empty');
-    expect(response.elementInfo).not.toHaveProperty('value');
-    expect(JSON.stringify(response)).not.toContain('Tabrix');
+      expect(response.success).toBe(true);
+      expect(response.elementInfo.waitDiagnostics.scroll.reason).toBe('ready');
+      expect(response.elementInfo.waitDiagnostics.scroll.waitedMs).toBeLessThan(150);
+      expect(response.elementInfo.valueState).toBe('non_empty');
+      expect(response.elementInfo).not.toHaveProperty('value');
+      expect(JSON.stringify(response)).not.toContain('Tabrix');
+      expect(ownValueSetter).not.toHaveBeenCalled();
+      expect(inputTypes).toEqual(['deleteContentBackward', 'insertText']);
+    } finally {
+      delete (input as HTMLInputElement & { value?: string }).value;
+    }
   });
 
   it('keyboard focus readiness returns immediately once focus is observable', async () => {

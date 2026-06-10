@@ -1,4 +1,4 @@
-/* global chrome, window, document, Element, HTMLInputElement, HTMLTextAreaElement, HTMLSelectElement */
+/* global chrome, window, document, Element, InputEvent, HTMLInputElement, HTMLTextAreaElement, HTMLSelectElement */
 
 // fill-helper.js
 // This script is injected into the page to handle form filling operations
@@ -263,6 +263,42 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         return value.length > 0 ? 'non_empty' : 'empty';
       };
 
+      const setNativeValue = (target, nextValue) => {
+        const prototype = Object.getPrototypeOf(target);
+        const ownSetter = Object.getOwnPropertyDescriptor(target, 'value')?.set;
+        const prototypeSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+        try {
+          if (prototypeSetter && ownSetter !== prototypeSetter) {
+            prototypeSetter.call(target, nextValue);
+            return 'native_prototype';
+          }
+          if (ownSetter) {
+            ownSetter.call(target, nextValue);
+            return 'native_own';
+          }
+        } catch (_) {}
+        target.value = nextValue;
+        return 'direct_fallback';
+      };
+
+      const createInputEvent = (inputType, data = null) => {
+        try {
+          if (typeof InputEvent === 'function') {
+            return new InputEvent('input', {
+              bubbles: true,
+              cancelable: true,
+              inputType,
+              data,
+            });
+          }
+        } catch (_) {}
+        return new Event('input', { bubbles: true });
+      };
+
+      const dispatchInput = (inputType, data = null) => {
+        element.dispatchEvent(createInputEvent(inputType, data));
+      };
+
       // Focus the element
       element.focus();
 
@@ -323,9 +359,9 @@ if (window.__FILL_HELPER_INITIALIZED__) {
           return { error: 'Range input requires a numeric value', elementInfo };
         }
         const previous = element.value;
-        element.value = String(numericValue);
+        setNativeValue(element, String(numericValue));
         element.focus();
-        element.dispatchEvent(new Event('input', { bubbles: true }));
+        dispatchInput('insertReplacementText', String(numericValue));
         element.dispatchEvent(new Event('change', { bubbles: true }));
         element.blur();
         return {
@@ -340,9 +376,9 @@ if (window.__FILL_HELPER_INITIALIZED__) {
           return { error: 'Number input requires a numeric value', elementInfo };
         }
         const previous = element.value;
-        element.value = String(value ?? '');
+        setNativeValue(element, String(value ?? ''));
         element.focus();
-        element.dispatchEvent(new Event('input', { bubbles: true }));
+        dispatchInput('insertReplacementText', String(value ?? ''));
         element.dispatchEvent(new Event('change', { bubbles: true }));
         element.blur();
         return {
@@ -358,7 +394,7 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         let optionFound = false;
         for (const option of element.options) {
           if (option.value === value || option.text === value) {
-            element.value = option.value;
+            setNativeValue(element, option.value);
             optionFound = true;
             break;
           }
@@ -376,12 +412,12 @@ if (window.__FILL_HELPER_INITIALIZED__) {
       } else {
         // For input and textarea elements
         // Clear the current value then set new value
-        element.value = '';
-        element.dispatchEvent(new Event('input', { bubbles: true }));
+        setNativeValue(element, '');
+        dispatchInput('deleteContentBackward');
 
-        element.value = String(value);
+        setNativeValue(element, String(value));
 
-        element.dispatchEvent(new Event('input', { bubbles: true }));
+        dispatchInput('insertText', String(value));
         element.dispatchEvent(new Event('change', { bubbles: true }));
       }
 

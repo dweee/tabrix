@@ -22,6 +22,8 @@ interface SendCommandToInjectScriptToolParam {
   payload?: string;
 }
 
+const CREATED_TAB_READY_TIMEOUT_MS = 3000;
+
 const injectedTabs = new Map();
 class InjectScriptTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.INJECT_SCRIPT;
@@ -63,9 +65,11 @@ class InjectScriptTool extends BaseBrowserToolExecutor {
           });
           markBrowserWorldTabAiCreated(tab.id);
 
-          // Wait for page to load
+          // Wait for a load signal instead of sleeping unconditionally.
           console.log('Waiting for page to load...');
-          await new Promise((resolve) => setTimeout(resolve, 3000));
+          if (typeof tab.id === 'number') {
+            tab = (await waitForCreatedTabReady(tab.id, CREATED_TAB_READY_TIMEOUT_MS)) ?? tab;
+          }
         }
       } else {
         const active = await this.getActiveTabInWindow(windowId);
@@ -171,6 +175,47 @@ async function isTabExists(tabId: number) {
     // An error is thrown if the tab doesn't exist.
     return false;
   }
+}
+
+async function waitForCreatedTabReady(
+  tabId: number,
+  timeoutMs: number,
+): Promise<chrome.tabs.Tab | undefined> {
+  const current = await chrome.tabs.get(tabId).catch(() => undefined);
+  if (current?.status === 'complete') {
+    return current;
+  }
+
+  return await new Promise((resolve) => {
+    let settled = false;
+    const finish = (tab?: chrome.tabs.Tab) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve(tab);
+    };
+    const listener = (
+      updatedTabId: number,
+      changeInfo: chrome.tabs.TabChangeInfo,
+      updatedTab: chrome.tabs.Tab,
+    ) => {
+      if (updatedTabId !== tabId) return;
+      if (changeInfo.status === 'complete' || updatedTab.status === 'complete') {
+        finish(updatedTab);
+      }
+    };
+    const timeoutId = setTimeout(() => finish(current), Math.max(0, timeoutMs));
+    chrome.tabs.onUpdated.addListener(listener);
+    void chrome.tabs
+      .get(tabId)
+      .then((tab) => {
+        if (tab?.status === 'complete') {
+          finish(tab);
+        }
+      })
+      .catch(() => undefined);
+  });
 }
 
 /**

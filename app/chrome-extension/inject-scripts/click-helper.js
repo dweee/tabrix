@@ -991,10 +991,10 @@ if (
       element.dispatchEvent(down);
     } catch {}
     try {
-      element.dispatchEvent(up);
+      element.dispatchEvent(new PointerEvent('pointerup', pointerBase));
     } catch {}
     try {
-      element.dispatchEvent(new PointerEvent('pointerup', pointerBase));
+      element.dispatchEvent(up);
     } catch {}
     if (useNativeClick && typeof element.click === 'function') {
       try {

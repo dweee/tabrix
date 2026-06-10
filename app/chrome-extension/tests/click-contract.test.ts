@@ -745,6 +745,27 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
       OriginalPointerEvent;
   });
 
+  it('dispatches pointerup before mouseup to match browser click order', async () => {
+    document.body.innerHTML = '<button id="btn">Order</button>';
+    const button = document.getElementById('btn') as HTMLButtonElement;
+    setRect(button, { left: 20, top: 30, width: 120, height: 32 });
+    document.elementFromPoint = vi.fn(() => button);
+    const eventOrder: string[] = [];
+    for (const eventName of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      button.addEventListener(eventName, () => eventOrder.push(eventName));
+    }
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#btn',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(eventOrder).toEqual(['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']);
+  });
+
   it('no-op click emits zero page-local signals (raw)', async () => {
     document.body.innerHTML = '<button id="btn">No-op</button>';
     const button = document.getElementById('btn') as HTMLButtonElement;
