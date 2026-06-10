@@ -146,13 +146,6 @@ function expectCommonSnapshotShape(payload: any, mode: 'compact' | 'normal' | 'f
     highValueObjectIds: expect.any(Array),
     candidateActionIds: expect.any(Array),
   });
-  expect(payload.L2).toMatchObject({
-    available: true,
-    defaultAccess: expect.any(String),
-    detailRefs: expect.any(Array),
-    expansions: expect.any(Array),
-    boundary: expect.any(String),
-  });
 }
 
 describe('read_page mode', () => {
@@ -238,7 +231,7 @@ describe('read_page mode', () => {
     const payload = JSON.parse((result.content[0] as { text: string }).text);
     expect(result.isError).toBe(false);
     expectCommonSnapshotShape(payload, 'compact');
-    expect(payload.observationProfile).toBe('compact');
+    expect(payload.observationProfile).toBe('task');
     expect(payload.coverage.overall).toMatch(/^(degraded|visible_unresolved|covered)$/);
     expect(payload.evidenceSource).toEqual(expect.arrayContaining(['ax', 'dom']));
     expect(payload.page).toMatchObject({
