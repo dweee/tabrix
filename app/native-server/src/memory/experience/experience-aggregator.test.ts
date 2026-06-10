@@ -99,11 +99,18 @@ function insertStep(repo: StepRepository, overrides: Partial<ExecutionStep> = {}
 
 function insertSnapshot(
   repo: PageSnapshotRepository,
-  params: { snapshotId: string; stepId: string; pageRole: string; capturedAt: string },
+  params: {
+    snapshotId: string;
+    stepId: string;
+    pageRole: string;
+    capturedAt: string;
+    url?: string;
+  },
 ): void {
   repo.insert({
     snapshotId: params.snapshotId,
     stepId: params.stepId,
+    url: params.url,
     pageRole: params.pageRole,
     fallbackUsed: false,
     interactiveCount: 0,
@@ -167,6 +174,82 @@ describe('ExperienceAggregator (B-012 v1)', () => {
         { toolName: 'chrome_click_element', status: 'completed', historyRef: 'history://a' },
         { toolName: 'chrome_read_page', status: 'completed', historyRef: null },
       ]);
+    } finally {
+      close();
+    }
+  });
+
+  it('B2: same pageRole and intent stay isolated across site families', () => {
+    const { taskRepo, sessionRepo, stepRepo, snapshotRepo, aggregator, experienceRepo, close } =
+      bootstrap();
+    try {
+      insertTask(taskRepo, { taskId: 'task-gh', intent: 'Open Issues' });
+      insertSession(sessionRepo, {
+        sessionId: 's-gh',
+        taskId: 'task-gh',
+        status: 'completed',
+      });
+      insertStep(stepRepo, {
+        stepId: 's-gh-step',
+        sessionId: 's-gh',
+        index: 1,
+        toolName: 'chrome_read_page',
+      });
+      insertSnapshot(snapshotRepo, {
+        snapshotId: 'snap-gh',
+        stepId: 's-gh-step',
+        url: 'https://github.com/example/repo/issues',
+        pageRole: 'repo_home',
+        capturedAt: '2026-04-20T00:00:01.500Z',
+      });
+
+      insertTask(taskRepo, { taskId: 'task-example', intent: 'Open Issues' });
+      insertSession(sessionRepo, {
+        sessionId: 's-example',
+        taskId: 'task-example',
+        status: 'completed',
+      });
+      insertStep(stepRepo, {
+        stepId: 's-example-step',
+        sessionId: 's-example',
+        index: 1,
+        toolName: 'chrome_read_page',
+      });
+      insertSnapshot(snapshotRepo, {
+        snapshotId: 'snap-example',
+        stepId: 's-example-step',
+        url: 'https://example.com/projects/alpha/issues',
+        pageRole: 'repo_home',
+        capturedAt: '2026-04-20T00:00:02.500Z',
+      });
+
+      aggregator.projectPendingSessions('2026-04-21T00:00:00.000Z');
+
+      const rows = experienceRepo.listActionPaths();
+      expect(rows).toHaveLength(2);
+      expect(rows.map((row) => row.siteFamily).sort()).toEqual(['example.com', 'github']);
+      expect(new Set(rows.map((row) => row.actionPathId)).size).toBe(2);
+
+      expect(
+        experienceRepo
+          .suggestActionPaths({
+            intentSignature: 'open issues',
+            siteFamily: 'github',
+            pageRole: 'repo_home',
+            limit: 5,
+          })
+          .map((row) => row.siteFamily),
+      ).toEqual(['github']);
+      expect(
+        experienceRepo
+          .suggestActionPaths({
+            intentSignature: 'open issues',
+            siteFamily: 'example.com',
+            pageRole: 'repo_home',
+            limit: 5,
+          })
+          .map((row) => row.siteFamily),
+      ).toEqual(['example.com']);
     } finally {
       close();
     }

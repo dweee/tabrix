@@ -173,6 +173,16 @@ function ensureSessionAggregatedAtColumn(db: SqliteDatabase): void {
  */
 function ensureExperienceReplayWritebackColumns(db: SqliteDatabase): void {
   if (!hasTable(db, 'experience_action_paths')) return;
+  if (!hasColumn(db, 'experience_action_paths', 'site_family')) {
+    execMigration(db, {
+      table: 'experience_action_paths',
+      column: 'site_family',
+      // Legacy Experience rows were produced by the GitHub-first chooser.
+      // Preserve their old actionPathId values while keeping future queries
+      // scoped by explicit site_family.
+      sql: "ALTER TABLE experience_action_paths ADD COLUMN site_family TEXT NOT NULL DEFAULT 'github'",
+    });
+  }
   if (!hasColumn(db, 'experience_action_paths', 'last_replay_at')) {
     execMigration(db, {
       table: 'experience_action_paths',
@@ -203,6 +213,11 @@ function ensureExperienceReplayWritebackColumns(db: SqliteDatabase): void {
   }
   // Replay scoring partial index — created idempotently so legacy DBs pick it
   // up after the column exists.
+  execMigration(db, {
+    table: 'experience_action_paths',
+    sql: `CREATE INDEX IF NOT EXISTS experience_action_paths_site_role_intent_idx
+       ON experience_action_paths(site_family, page_role, intent_signature)`,
+  });
   execMigration(db, {
     table: 'experience_action_paths',
     sql: `CREATE INDEX IF NOT EXISTS experience_action_paths_composite_score_idx

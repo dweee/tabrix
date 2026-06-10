@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExecutionWorld } from '@/common/constants';
-import { injectScriptTool } from '@/entrypoints/background/tools/browser/inject-script';
+import {
+  CREATED_TAB_READY_TIMEOUT_MS,
+  injectScriptTool,
+} from '@/entrypoints/background/tools/browser/inject-script';
 
 describe('inject script tool', () => {
   let updatedListeners: Array<
@@ -14,6 +17,7 @@ describe('inject script tool', () => {
       updatedListeners.push(listener);
     }) as typeof chrome.tabs.onUpdated.addListener;
     chrome.tabs.onUpdated.removeListener = vi.fn() as typeof chrome.tabs.onUpdated.removeListener;
+    vi.mocked(chrome.tabs.sendMessage).mockResolvedValue({});
     vi.mocked(chrome.tabs.query).mockResolvedValue([]);
     vi.mocked(chrome.tabs.create).mockResolvedValue({
       id: 88,
@@ -75,5 +79,35 @@ describe('inject script tool', () => {
         world: ExecutionWorld.ISOLATED,
       }),
     );
+  });
+
+  it('falls back after a bounded ready timeout when the created tab never reports complete', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = injectScriptTool.execute({
+        url: 'https://example.test/slow-app',
+        type: ExecutionWorld.ISOLATED,
+        jsScript: 'window.__tabrixInjected = true;',
+      });
+
+      await vi.waitFor(() => {
+        expect(chrome.tabs.onUpdated.addListener).toHaveBeenCalledTimes(1);
+      });
+      expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(CREATED_TAB_READY_TIMEOUT_MS);
+      const result = await pending;
+
+      expect(result.isError).toBe(false);
+      expect(chrome.tabs.onUpdated.removeListener).toHaveBeenCalledWith(updatedListeners[0]);
+      expect(chrome.scripting.executeScript).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: { tabId: 88 },
+          world: ExecutionWorld.ISOLATED,
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -354,6 +354,7 @@ describe('native-tool-handlers · experience_replay (V24-01)', () => {
   function buildReplayableRow(): ExperienceActionPathRow {
     return {
       actionPathId: VALID_ID,
+      siteFamily: 'github',
       pageRole: 'issues_list',
       intentSignature: 'open repo issues tab',
       stepSequence: [

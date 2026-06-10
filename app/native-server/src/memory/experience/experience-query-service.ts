@@ -41,9 +41,12 @@ export class ExperienceQueryService {
    * so the call site can later add caching, telemetry, or ACL hooks
    * without touching the repository contract.
    */
-  public suggestActionPaths(input: ExperienceSuggestPlanInput): ExperienceActionPathRow[] {
+  public suggestActionPaths(
+    input: ExperienceSuggestPlanInput & { siteFamily?: string },
+  ): ExperienceActionPathRow[] {
     return this.repository.suggestActionPaths({
       intentSignature: input.intentSignature,
+      siteFamily: input.siteFamily,
       pageRole: input.pageRole,
       limit: input.limit,
     });

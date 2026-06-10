@@ -17,7 +17,63 @@ function textResult(payload: Record<string, unknown>) {
 }
 
 describe('MkeMemoryTraceService', () => {
-  it('rolls back read_page Browser Object writes when a child object write fails', () => {
+  it('returns the trace before queued Browser Object writes run, then flushes them', async () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const browserObjectRepo = new BrowserObjectRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo, browserObjectRepo);
+    const originalUpsert = browserObjectRepo.upsert.bind(browserObjectRepo);
+    let recordReturned = false;
+    let upsertRanBeforeRecordReturned = false;
+    const upsertSpy = jest
+      .spyOn(browserObjectRepo, 'upsert')
+      .mockImplementation((input: BrowserObjectInput) => {
+        if (!recordReturned) upsertRanBeforeRecordReturned = true;
+        return originalUpsert(input);
+      });
+
+    try {
+      const trace = traceService.recordToolCall({
+        taskId: 'trace-async-task',
+        taskIntent: 'read page object surface',
+        aiClient: 'jest',
+        toolName: 'chrome_read_page',
+        stepId: 'trace-async-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 7 },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 25,
+        result: textResult({
+          page: { url: 'https://example.test/workspaces/123?tab=overview' },
+          summary: { pageRole: 'workspace', quality: 'fresh' },
+          sourceRoute: 'dom_snapshot',
+          selectedDataSource: 'dom',
+          freshness: 'fresh',
+          tabId: 7,
+          pageRegions: [{ regionId: 'main', regionType: 'content', confidence: 0.9 }],
+        }),
+        resultSummary: 'fresh page read',
+      });
+      recordReturned = true;
+
+      expect(trace.traceId).toBeDefined();
+      expect(traceRepo.count()).toBe(1);
+      expect(browserObjectRepo.count()).toBe(0);
+      expect(upsertSpy).not.toHaveBeenCalled();
+
+      await traceService.flushAsyncWrites();
+
+      expect(upsertRanBeforeRecordReturned).toBe(false);
+      expect(upsertSpy).toHaveBeenCalled();
+      expect(browserObjectRepo.count()).toBe(2);
+    } finally {
+      upsertSpy.mockRestore();
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('rolls back read_page Browser Object writes when a child object write fails', async () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const traceRepo = new MemoryTraceRepository(db);
     const browserObjectRepo = new BrowserObjectRepository(db);
@@ -59,10 +115,114 @@ describe('MkeMemoryTraceService', () => {
 
       expect(trace.traceId).toBeDefined();
       expect(traceRepo.count()).toBe(1);
+      expect(upsertCalls).toBe(0);
+      expect(browserObjectRepo.count()).toBe(0);
+
+      await traceService.flushAsyncWrites();
+
       expect(upsertCalls).toBe(2);
       expect(browserObjectRepo.count()).toBe(0);
     } finally {
       upsertSpy.mockRestore();
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('flushes async Browser Object write failures without throwing to callers', async () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const browserObjectRepo = new BrowserObjectRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo, browserObjectRepo);
+    const transactionSpy = jest.spyOn(browserObjectRepo, 'transaction').mockImplementation(() => {
+      throw new Error('forced async projection failure');
+    });
+
+    try {
+      const trace = traceService.recordToolCall({
+        taskId: 'trace-failure-task',
+        taskIntent: 'read page object surface',
+        aiClient: 'jest',
+        toolName: 'chrome_read_page',
+        stepId: 'trace-failure-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 8 },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 25,
+        result: textResult({
+          page: { url: 'https://example.test/failure' },
+          summary: { pageRole: 'workspace' },
+        }),
+        resultSummary: 'fresh page read',
+      });
+
+      await expect(traceService.flushAsyncWrites()).resolves.toBeUndefined();
+      expect(traceRepo.get(trace.traceId)).toMatchObject({ traceId: trace.traceId });
+      expect(browserObjectRepo.count()).toBe(0);
+    } finally {
+      transactionSpy.mockRestore();
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('bounds queued Browser Object writes and keeps the newest job', async () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const browserObjectRepo = new BrowserObjectRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo, browserObjectRepo, {
+      asyncBrowserObjectWriteQueueLimit: 1,
+    });
+
+    try {
+      traceService.recordToolCall({
+        taskId: 'bounded-queue-task',
+        taskIntent: 'inspect browser context',
+        aiClient: 'jest',
+        toolName: 'get_windows_and_tabs',
+        stepId: 'bounded-queue-step-1',
+        sequenceIndex: 1,
+        requestParams: {},
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 10,
+        result: textResult({
+          browserWorld: {
+            status: 'fresh',
+            windows: [{ windowId: 1, focused: true }],
+            tabs: [{ tabId: 11, windowId: 1, active: true, url: 'https://first.example.test' }],
+          },
+        }),
+        resultSummary: 'first browser inventory read',
+      });
+      traceService.recordToolCall({
+        taskId: 'bounded-queue-task',
+        taskIntent: 'inspect browser context',
+        aiClient: 'jest',
+        toolName: 'get_windows_and_tabs',
+        stepId: 'bounded-queue-step-2',
+        sequenceIndex: 2,
+        requestParams: {},
+        requestAtMs: NOW_MS + 20,
+        responseAtMs: NOW_MS + 30,
+        result: textResult({
+          browserWorld: {
+            status: 'fresh',
+            windows: [{ windowId: 2, focused: true }],
+            tabs: [{ tabId: 22, windowId: 2, active: true, url: 'https://second.example.test' }],
+          },
+        }),
+        resultSummary: 'second browser inventory read',
+      });
+
+      expect(traceRepo.count()).toBe(2);
+      await traceService.flushAsyncWrites();
+
+      expect(browserObjectRepo.count()).toBe(2);
+      const objects = browserObjectRepo.listRecent({ limit: 10, offset: 0 });
+      expect(objects.map((object) => object.windowId)).toEqual(expect.arrayContaining([2]));
+      expect(objects.map((object) => object.windowId)).not.toContain(1);
+    } finally {
+      traceService.discardPendingAsyncWrites();
       db.close();
     }
   });

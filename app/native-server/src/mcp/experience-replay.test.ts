@@ -14,7 +14,8 @@
  *   - `unknown_action_path`           ✓ (rowMissing)
  *   - `step_budget_exceeded`          ✓ (overBudget)
  *   - `unsupported_step_kind`         ✓ (badStepKind, emptyPlan, missingArgs)
- *   - `non_github_pageRole`           ✓ (nonGithubRole)
+ *   - `site_replay_policy_missing`    ✓ (missingSitePolicy)
+ *   - `page_role_not_allowed`         ✓ (disallowedPageRole)
  *   - `template_field_missing`        ✓ (missingTemplateValue, missingArgsKey)
  *   - `step_target_not_found`         ✓ (bridgeThrows, bridgeIsErrorDefault)
  *   - `step_verifier_red`             ✓ (bridgeIsErrorVerifier)
@@ -61,6 +62,7 @@ const VALID_ID_B = 'action_path_' + 'b'.repeat(64);
 function buildRow(overrides: Partial<ExperienceActionPathRow> = {}): ExperienceActionPathRow {
   return {
     actionPathId: VALID_ID_A,
+    siteFamily: 'github',
     pageRole: 'issues_list',
     intentSignature: 'open repo issues tab',
     stepSequence: [
@@ -290,7 +292,7 @@ describe('ReplayEngine — failed-precondition branches (no recorder writes)', (
     expect(recorder.startCalls).toHaveLength(0);
   });
 
-  it('returns `non_github_pageRole` when pageRole is not in the v1 GitHub allowlist', async () => {
+  it('returns `page_role_not_allowed` when the site policy rejects the pageRole', async () => {
     const row = buildRow({ pageRole: 'youtube_watch' });
     const recorder = makeRecorder();
     const { dispatch, callCount } = makeDispatch([alwaysOk()]);
@@ -305,7 +307,26 @@ describe('ReplayEngine — failed-precondition branches (no recorder writes)', (
       maxSteps: 16,
     });
     expect(out.status).toBe('failed-precondition');
-    expect(out.error?.code).toBe('non_github_pageRole');
+    expect(out.error?.code).toBe('page_role_not_allowed');
+    expect(callCount()).toBe(0);
+  });
+
+  it('returns `site_replay_policy_missing` when no site replay policy is registered', async () => {
+    const row = buildRow({ siteFamily: 'example.com' });
+    const recorder = makeRecorder();
+    const { dispatch, callCount } = makeDispatch([alwaysOk()]);
+    const engine = new ReplayEngine({
+      experience: { findActionPathById: () => row },
+      dispatch,
+      recorder,
+    });
+    const out = await engine.execute({
+      actionPathId: VALID_ID_A,
+      variableSubstitutions: { queryText: 'q' },
+      maxSteps: 16,
+    });
+    expect(out.status).toBe('failed-precondition');
+    expect(out.error?.code).toBe('site_replay_policy_missing');
     expect(callCount()).toBe(0);
   });
 
@@ -906,8 +927,10 @@ describe('strategy-set guards', () => {
       'capability_off',
       'non_github_pageRole',
       'page_role_mismatch',
+      'page_role_not_allowed',
       'policy_denied',
       'replay_aborted_by_caller',
+      'site_replay_policy_missing',
       'step_budget_exceeded',
       'step_dialog_intercepted',
       'step_navigation_drift',

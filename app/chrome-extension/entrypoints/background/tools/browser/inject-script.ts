@@ -22,7 +22,7 @@ interface SendCommandToInjectScriptToolParam {
   payload?: string;
 }
 
-const CREATED_TAB_READY_TIMEOUT_MS = 3000;
+export const CREATED_TAB_READY_TIMEOUT_MS = 10000;
 
 const injectedTabs = new Map();
 class InjectScriptTool extends BaseBrowserToolExecutor {

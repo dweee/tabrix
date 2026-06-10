@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import supertest from 'supertest';
 import Server from './index';
 import { sessionManager } from '../execution/session-manager';
-import { __hostConfigInternals } from '../host-config';
+import { __hostConfigInternals, setPersonalBrowserStateStorageEnabled } from '../host-config';
 
 async function seedOneSession(): Promise<{
   taskId: string;
@@ -485,6 +485,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       }),
       resultSummary: 'browser inventory read',
     });
+    await traceService.flushAsyncWrites();
 
     const res = await supertest(Server.getInstance().server)
       .get('/memory/mke/browser-objects?limit=10&offset=0')
@@ -505,30 +506,30 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       siteFamily: 'example.test',
       pageUrlPattern: 'https://example.test/search',
       rootRoute: 'https://example.test/search',
-      currentRoute:
-        'https://example.test/search?spm=tracking&q=private-token&tab=demohouse&access_token=%5Bredacted%5D#/experience/llm',
+      currentRoute: 'https://example.test/search',
       ownerType: 'ai',
       canTabrixOperate: true,
       facts: {
         titleSummary: 'Search results - Example',
         host: 'example.test',
+        currentRoute: 'https://example.test/search',
       },
       pageIdentity: {
         label: 'example.test',
         host: 'example.test',
-        url: 'https://example.test/search?spm=tracking&q=private-token&tab=demohouse&access_token=%5Bredacted%5D#/experience/llm',
+        url: 'https://example.test/search',
         source: 'current_route',
       },
       display: {
         title: 'Search results - Example',
       },
     });
-    expect(JSON.stringify(tab)).toContain('private-token');
-    expect(JSON.stringify(tab)).toContain('spm');
-    expect(JSON.stringify(tab)).toContain('tab=demohouse');
-    expect(JSON.stringify(tab)).toContain('access_token');
+    expect(JSON.stringify(tab)).not.toContain('private-token');
+    expect(JSON.stringify(tab)).not.toContain('spm');
+    expect(JSON.stringify(tab)).not.toContain('tab=demohouse');
+    expect(JSON.stringify(tab)).not.toContain('access_token');
     expect(JSON.stringify(tab)).not.toContain('real-secret');
-    expect(JSON.stringify(tab)).toContain('#/experience/llm');
+    expect(JSON.stringify(tab)).not.toContain('#/experience/llm');
     expect(tab).not.toHaveProperty('currentState');
     expect(tab).not.toHaveProperty('recentEvents');
     expect(tab).not.toHaveProperty('sourceTraceIds');
@@ -602,6 +603,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       result: textResult(browserWorldPayload),
       resultSummary: 'browser inventory read again',
     });
+    await traceService.flushAsyncWrites();
 
     const res = await supertest(Server.getInstance().server)
       .get('/memory/mke/browser-objects?limit=10&offset=0')
@@ -687,6 +689,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       }),
       resultSummary: 'read page',
     });
+    await traceService.flushAsyncWrites();
 
     const res = await supertest(Server.getInstance().server)
       .get('/memory/mke/browser-objects?limit=20&offset=0')
@@ -741,6 +744,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       }),
       resultSummary: 'browser inventory read',
     });
+    await traceService.flushAsyncWrites();
 
     const before = await supertest(Server.getInstance().server)
       .get('/memory/mke/browser-objects?limit=10&offset=0')
@@ -810,6 +814,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       }),
       resultSummary: 'browser inventory read',
     });
+    await traceService.flushAsyncWrites();
 
     const res = await supertest(Server.getInstance().server)
       .get('/memory/mke/browser-objects?limit=10&offset=0')
@@ -826,6 +831,141 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
         url: 'https://example.test/search?access_token=real-secret&tab=demohouse#/experience/llm',
       },
     });
+  });
+
+  test('Object Library does not return old full routes after current preference is disabled', async () => {
+    await supertest(Server.getInstance().server)
+      .patch('/memory/mke/object-storage-preferences')
+      .send({ personalBrowserStateStorageEnabled: true })
+      .expect(200);
+
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T12:35:00.000Z');
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-old-authorized-route-task',
+      taskIntent: 'inspect browser context',
+      aiClient: 'jest',
+      toolName: 'get_windows_and_tabs',
+      stepId: 'browser-object-old-authorized-route-step',
+      sequenceIndex: 1,
+      requestParams: {},
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 18,
+      result: textResult({
+        source: 'chrome_windows_get_all_with_browser_world_inventory',
+        browserWorld: {
+          status: 'fresh',
+          windows: [
+            { windowId: 10, focused: true, state: 'maximized', tabCount: 1, activeTabId: 21 },
+          ],
+          tabs: [
+            {
+              tabId: 21,
+              windowId: 10,
+              active: true,
+              status: 'complete',
+              ownerType: 'ai',
+              canTabrixOperate: true,
+              url: 'https://example.test/search?access_token=real-secret&tab=demohouse#/experience/llm',
+              title: 'Search results - Example',
+            },
+          ],
+        },
+      }),
+      resultSummary: 'browser inventory read',
+    });
+    await traceService.flushAsyncWrites();
+
+    const before = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=10&offset=0')
+      .expect(200);
+    const beforeSerialized = JSON.stringify(before.body.data.browserObjects);
+    expect(beforeSerialized).toContain('real-secret');
+    expect(beforeSerialized).toContain('tab=demohouse');
+
+    setPersonalBrowserStateStorageEnabled(false);
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=10&offset=0')
+      .expect(200);
+
+    const serialized = JSON.stringify(res.body.data.browserObjects);
+    expect(serialized).not.toContain('real-secret');
+    expect(serialized).not.toContain('tab=demohouse');
+    const tab = (res.body.data.browserObjects as Array<Record<string, unknown>>).find(
+      (object) => object.objectType === 'tab',
+    );
+    expect(tab).toMatchObject({
+      redactionState: 'redacted',
+      currentRoute: 'https://example.test/search',
+      pageIdentity: {
+        url: 'https://example.test/search',
+      },
+    });
+  });
+
+  test('disabling personal browser state storage clears previously authorized browser objects', async () => {
+    await supertest(Server.getInstance().server)
+      .patch('/memory/mke/object-storage-preferences')
+      .send({ personalBrowserStateStorageEnabled: true })
+      .expect(200);
+
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T12:40:00.000Z');
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-disable-full-route-task',
+      taskIntent: 'inspect browser context',
+      aiClient: 'jest',
+      toolName: 'get_windows_and_tabs',
+      stepId: 'browser-object-disable-full-route-step',
+      sequenceIndex: 1,
+      requestParams: {},
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 18,
+      result: textResult({
+        source: 'chrome_windows_get_all_with_browser_world_inventory',
+        browserWorld: {
+          status: 'fresh',
+          windows: [
+            { windowId: 10, focused: true, state: 'maximized', tabCount: 1, activeTabId: 21 },
+          ],
+          tabs: [
+            {
+              tabId: 21,
+              windowId: 10,
+              active: true,
+              status: 'complete',
+              ownerType: 'ai',
+              canTabrixOperate: true,
+              url: 'https://example.test/search?access_token=real-secret&tab=demohouse#/experience/llm',
+              title: 'Search results - Example',
+            },
+          ],
+        },
+      }),
+      resultSummary: 'browser inventory read',
+    });
+    await traceService.flushAsyncWrites();
+
+    const before = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=10&offset=0')
+      .expect(200);
+    expect(JSON.stringify(before.body.data.browserObjects)).toContain('real-secret');
+
+    await supertest(Server.getInstance().server)
+      .patch('/memory/mke/object-storage-preferences')
+      .send({ personalBrowserStateStorageEnabled: false })
+      .expect(200);
+
+    const after = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=10&offset=0')
+      .expect(200);
+    expect(after.body.data.total).toBe(0);
+    expect(JSON.stringify(after.body.data.browserObjects)).not.toContain('real-secret');
   });
 
   test('GET /memory/mke/experience returns sanitized template summaries', async () => {

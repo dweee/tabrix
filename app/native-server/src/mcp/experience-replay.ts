@@ -32,10 +32,10 @@ import {
   MAX_TABRIX_EXPERIENCE_REPLAY_STEP_BUDGET,
   MAX_TABRIX_EXPERIENCE_REPLAY_SUBSTITUTION_VALUE_CHARS,
   TABRIX_EXPERIENCE_REPLAY_ACTION_PATH_ID_PATTERN,
-  TABRIX_EXPERIENCE_REPLAY_GITHUB_PAGE_ROLES,
   TABRIX_EXPERIENCE_REPLAY_SUPPORTED_STEP_KINDS,
   TABRIX_REPLAY_PLACEHOLDERS,
   TOOL_NAMES,
+  checkTabrixExperienceReplayPolicy,
   type ClickObservedOutcome,
   type TabrixExperienceReplayErrorBody,
   type TabrixExperienceReplayResolved,
@@ -444,11 +444,18 @@ function checkRowPreconditions(
   row: ExperienceActionPathRow,
   ctx: ReplayEngineExecutionContext,
 ): TabrixExperienceReplayResult | null {
-  // GitHub-only page role.
-  if (!TABRIX_EXPERIENCE_REPLAY_GITHUB_PAGE_ROLES.has(row.pageRole)) {
+  const replayPolicy = checkTabrixExperienceReplayPolicy({
+    siteFamily: row.siteFamily,
+    pageRole: row.pageRole,
+  });
+  if (!replayPolicy.allowed) {
+    const code = replayPolicy.blockedBy ?? 'site_replay_policy_missing';
+    const siteFamily = row.siteFamily ?? 'unknown';
     return failedPrecondition(
-      'non_github_pageRole',
-      `experience_replay v1 supports GitHub pageRoles only; got '${row.pageRole}'`,
+      code,
+      code === 'site_replay_policy_missing'
+        ? `experience_replay has no replay policy for siteFamily '${siteFamily}'`
+        : `experience_replay policy for siteFamily '${siteFamily}' does not allow pageRole '${row.pageRole}'`,
     );
   }
 

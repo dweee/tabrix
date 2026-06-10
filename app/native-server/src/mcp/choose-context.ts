@@ -42,6 +42,7 @@ import {
   type TabrixContextSiteFamily,
   type TabrixObserveMode,
   type TabrixObserveReason,
+  normalizeTabrixSiteId,
 } from '@tabrix/shared';
 import { isCapabilityEnabled } from '../policy/capabilities';
 import type { CapabilityEnv } from '../policy/capabilities';
@@ -122,7 +123,7 @@ export interface ParsedChooseContextInput {
  * so a `(intent, pageRole)` pair lands in the same bucket here as it
  * does for `experience_suggest_plan`. v1 deliberately silently drops:
  *   - unparseable `url` (treated as omitted),
- *   - unrecognised `siteId` (treated as omitted),
+ *   - unsafe `siteId` tokens (treated as omitted),
  *   - empty-after-trim `pageRole` (treated as omitted).
  *
  * It does NOT silently drop bad `intent`: empty / non-string intent is
@@ -178,11 +179,7 @@ export function parseTabrixChooseContextInput(rawArgs: unknown): ParsedChooseCon
   let siteId: TabrixContextSiteFamily | undefined;
   const rawSiteId = readString(args, 'siteId');
   if (rawSiteId !== undefined) {
-    const trimmedSite = rawSiteId.trim().toLowerCase();
-    if (trimmedSite === 'github') {
-      siteId = 'github';
-    }
-    // Any other token is ignored on purpose (see doc §3.1).
+    siteId = normalizeTabrixSiteId(rawSiteId);
   }
 
   return {
@@ -231,12 +228,12 @@ function deriveRequestedRowLimit(intent: string): number | undefined {
 }
 
 /**
- * Derive a `siteFamily` from an explicit `siteId` (highest precedence)
- * or, failing that, from the URL host. Returns `undefined` for any
- * unrecognised host so the chooser can fall through to
- * `read_page_required`.
+ * Derive a `siteFamily` from an explicit safe `siteId` (highest
+ * precedence) or, failing that, from the URL host. Non-GitHub hosts are
+ * represented by their normalized host token and still fail closed unless
+ * a matching Knowledge / Replay policy exists.
  *
- * v1 GitHub-first rules:
+ * GitHub GA adapter compatibility:
  *   - exact host `github.com` → `'github'`
  *   - any subdomain ending in `.github.com` (`api`, `gist`, `raw`,
  *     etc.) → `'github'`
@@ -245,7 +242,8 @@ function deriveRequestedRowLimit(intent: string): number | undefined {
 export function resolveSiteFamily(
   input: TabrixChooseContextInput,
 ): TabrixContextSiteFamily | undefined {
-  if (input.siteId === 'github') return 'github';
+  const explicitSite = normalizeTabrixSiteId(input.siteId);
+  if (explicitSite) return explicitSite;
   if (!input.url) return undefined;
   let host: string;
   try {
@@ -254,7 +252,7 @@ export function resolveSiteFamily(
     return undefined;
   }
   if (host === 'github.com' || host.endsWith('.github.com')) return 'github';
-  return undefined;
+  return normalizeTabrixSiteId(host);
 }
 
 /**
@@ -282,8 +280,8 @@ export interface ChooseContextFacts {
      * `experience_replay` strategy
      * instead of `experience_reuse`. Eligibility is the AND of:
      *   - the `experience_replay` capability is enabled,
-     *   - the row's `pageRole` is in
-     *     `TABRIX_EXPERIENCE_REPLAY_GITHUB_PAGE_ROLES`,
+     *   - the row's `siteFamily` has a registered replay policy,
+     *   - the row's `pageRole` is allowed by that site policy,
      *   - every step's `toolName` is in
      *     `TABRIX_EXPERIENCE_REPLAY_SUPPORTED_STEP_KINDS`,
      *   - the row's `successRate >= EXPERIENCE_HIT_MIN_SUCCESS_RATE`
@@ -715,6 +713,7 @@ export function runTabrixChooseContext(
     const rows = deps.experience.suggestActionPaths({
       intent: input.intent,
       intentSignature,
+      siteFamily,
       pageRole: input.pageRole,
       limit: EXPERIENCE_LOOKUP_LIMIT,
     });

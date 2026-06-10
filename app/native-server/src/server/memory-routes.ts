@@ -7,12 +7,12 @@
  * `SessionManager` via the MCP post-processor and must not be exposed
  * over HTTP.
  *
- * Auth: relies on the global `onRequest` hook in `server/index.ts`
- * (localhost is allowed through; non-localhost must present a Bearer
- * token when `tokenManager.enabled` is true). The routes themselves
- * add no extra auth. Public paths (`/ping`, `/status`, `/auth/token`,
- * `/auth/refresh`) are intentionally **not** extended — these routes
- * are protected by the same token as `/mcp`.
+ * Auth: relies on the global `onRequest` hook in `server/index.ts`.
+ * Protected routes require Bearer auth when the server is remote-exposed;
+ * localhost bypass is only allowed for a local-only listen host. The routes
+ * themselves add no extra auth. Public paths (`/ping`, `/status`,
+ * `/auth/token`, `/auth/refresh`) are intentionally **not** extended — these
+ * routes are protected by the same token as `/mcp`.
  *
  * Contract:
  * - `GET /memory/sessions?limit=&offset=` → recent sessions, newest first
@@ -50,6 +50,11 @@ import {
   getPersonalBrowserStateStorageEnabled,
   setPersonalBrowserStateStorageEnabled,
 } from '../host-config';
+import {
+  allowsPersonalBrowserStateStorage,
+  summarizeBrowserObjectFactsForPrivacy,
+  summarizeBrowserRouteForPrivacy,
+} from '../policy/browser-state-privacy';
 
 /**
  * Default page size for `GET /memory/sessions`. Matches the sidepanel
@@ -181,13 +186,22 @@ function classifyPageIdentity(
 
 function classifyObjectPageIdentity(
   object: BrowserObject,
+  routeView: {
+    pageUrlPattern: string | null;
+    rootRoute: string | null;
+    currentRoute: string | null;
+  } = {
+    pageUrlPattern: object.pageUrlPattern,
+    rootRoute: object.rootRoute,
+    currentRoute: object.currentRoute,
+  },
 ): NonNullable<MkeBrowserObjectSummary['pageIdentity']> {
-  const url = object.currentRoute ?? object.rootRoute ?? object.pageUrlPattern;
-  const source = object.currentRoute
+  const url = routeView.currentRoute ?? routeView.rootRoute ?? routeView.pageUrlPattern;
+  const source = routeView.currentRoute
     ? 'current_route'
-    : object.rootRoute
+    : routeView.rootRoute
       ? 'root_route'
-      : object.pageUrlPattern
+      : routeView.pageUrlPattern
         ? 'page_url_pattern'
         : 'site_family';
   if (url) {
@@ -368,8 +382,27 @@ function objectTitle(object: BrowserObject, pageIdentity: MkeBrowserObjectSummar
 }
 
 function toObjectSummary(object: BrowserObject): MkeBrowserObjectSummary {
-  const pageIdentity = classifyObjectPageIdentity(object);
-  const facts = asRecord(object.facts);
+  const allowPersonalBrowserStateStorage =
+    getPersonalBrowserStateStorageEnabled() &&
+    allowsPersonalBrowserStateStorage(object.redactionState);
+  const effectiveRedactionState = allowPersonalBrowserStateStorage
+    ? object.redactionState
+    : 'redacted';
+  const routeView = {
+    pageUrlPattern: summarizeBrowserRouteForPrivacy(object.pageUrlPattern, {
+      allowPersonalBrowserStateStorage,
+    }),
+    rootRoute: summarizeBrowserRouteForPrivacy(object.rootRoute, {
+      allowPersonalBrowserStateStorage,
+    }),
+    currentRoute: summarizeBrowserRouteForPrivacy(object.currentRoute, {
+      allowPersonalBrowserStateStorage,
+    }),
+  };
+  const pageIdentity = classifyObjectPageIdentity(object, routeView);
+  const facts = summarizeBrowserObjectFactsForPrivacy(asRecord(object.facts), {
+    allowPersonalBrowserStateStorage,
+  });
   const actionTypes = Array.isArray(object.actionTypes)
     ? object.actionTypes.filter((item): item is string => typeof item === 'string')
     : [];
@@ -377,9 +410,9 @@ function toObjectSummary(object: BrowserObject): MkeBrowserObjectSummary {
     browserObjectId: object.browserObjectId,
     objectType: object.objectType,
     siteFamily: object.siteFamily,
-    pageUrlPattern: object.pageUrlPattern,
-    rootRoute: object.rootRoute,
-    currentRoute: object.currentRoute,
+    pageUrlPattern: routeView.pageUrlPattern,
+    rootRoute: routeView.rootRoute,
+    currentRoute: routeView.currentRoute,
     pageRole: object.pageRole,
     pageModelKey: object.pageModelKey,
     objectFingerprint: object.objectFingerprint,
@@ -403,7 +436,7 @@ function toObjectSummary(object: BrowserObject): MkeBrowserObjectSummary {
     changedGroups: object.changedGroups,
     firstTraceId: object.firstTraceId,
     lastTraceId: object.lastTraceId,
-    redactionState: object.redactionState,
+    redactionState: effectiveRedactionState,
     lastObservedAt: object.lastObservedAt,
     createdAt: object.createdAt,
     updatedAt: object.updatedAt,
@@ -665,6 +698,9 @@ export function registerMemoryRoutes(
         });
       }
       setPersonalBrowserStateStorageEnabled(request.body.personalBrowserStateStorageEnabled);
+      if (request.body.personalBrowserStateStorageEnabled === false) {
+        sessionManager.clearMkeBrowserObjects();
+      }
       return reply.status(HTTP_STATUS.OK).send({
         status: 'ok',
         data: toObjectStoragePreferences(sessionManager),

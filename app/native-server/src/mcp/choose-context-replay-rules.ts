@@ -33,8 +33,8 @@ import {
   EXPERIENCE_RANKED_TOP_N,
   EXPERIENCE_REPLAY_MIN_SUCCESS_COUNT,
   EXPERIENCE_REPLAY_MIN_SUCCESS_RATE,
-  TABRIX_EXPERIENCE_REPLAY_GITHUB_PAGE_ROLES,
   TABRIX_EXPERIENCE_REPLAY_SUPPORTED_STEP_KINDS,
+  checkTabrixExperienceReplayPolicy,
   getTaskWeightsFor,
   type ReplayEligibilityBlockReason,
   type TabrixChooseContextRankedCandidate,
@@ -62,7 +62,8 @@ export interface ReplayEligibilityResult {
  *   1. `capability_off`     — operator never opted in
  *   2. `unsupported_step_kind` — row has a tool outside v1's allowlist
  *   3. `non_portable_args`  — args carry only session-local handles
- *   4. `non_github_pageRole`— pageRole outside the GitHub v1 allowlist
+ *   4. `site_replay_policy_missing` / `page_role_not_allowed`
+ *      — site-aware replay policy fails closed
  *   5. `below_threshold`    — successRate / successCount under the bar
  *   6. `stale_locator`      — reserved for step-outcome write-back
  *      signals; the chooser does NOT fire this on its own.
@@ -89,8 +90,15 @@ export function isReplayEligible(
       return { eligible: false, blockedBy: 'non_portable_args' };
     }
   }
-  if (!TABRIX_EXPERIENCE_REPLAY_GITHUB_PAGE_ROLES.has(row.pageRole)) {
-    return { eligible: false, blockedBy: 'non_github_pageRole' };
+  const sitePolicy = checkTabrixExperienceReplayPolicy({
+    siteFamily: row.siteFamily,
+    pageRole: row.pageRole,
+  });
+  if (!sitePolicy.allowed) {
+    return {
+      eligible: false,
+      blockedBy: sitePolicy.blockedBy ?? 'site_replay_policy_missing',
+    };
   }
 
   const total = row.successCount + row.failureCount;

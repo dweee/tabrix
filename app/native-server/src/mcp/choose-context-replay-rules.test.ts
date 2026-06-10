@@ -25,6 +25,7 @@ import type { ExperienceActionPathRow } from '../memory/experience/experience-re
 function row(overrides: Partial<ExperienceActionPathRow> = {}): ExperienceActionPathRow {
   return {
     actionPathId: 'action_path_' + 'a'.repeat(64),
+    siteFamily: 'github',
     pageRole: 'issues_list',
     intentSignature: 'open issues',
     stepSequence: [
@@ -87,10 +88,17 @@ describe('isReplayEligible (V24-03)', () => {
     });
   });
 
-  it('first blocker is non_github_pageRole when the row pageRole is outside the allowlist', () => {
+  it('first blocker is page_role_not_allowed when the site policy rejects the pageRole', () => {
     expect(isReplayEligible(row({ pageRole: 'mystery_role' }), true)).toEqual({
       eligible: false,
-      blockedBy: 'non_github_pageRole',
+      blockedBy: 'page_role_not_allowed',
+    });
+  });
+
+  it('first blocker is site_replay_policy_missing when no site policy is registered', () => {
+    expect(isReplayEligible(row({ siteFamily: 'example.com' }), true)).toEqual({
+      eligible: false,
+      blockedBy: 'site_replay_policy_missing',
     });
   });
 
@@ -253,11 +261,11 @@ describe('rankExperienceCandidates (V24-03)', () => {
     });
     expect(result.ranked[0]?.ref).toBe(blocked.actionPathId);
     expect(result.ranked[0]?.replayEligible).toBe(false);
-    expect(result.ranked[0]?.blockedBy).toBe('non_github_pageRole');
+    expect(result.ranked[0]?.blockedBy).toBe('page_role_not_allowed');
     expect(result.ranked[1]?.replayEligible).toBe(true);
     expect(result.ranked[1]?.blockedBy).toBe('none');
     expect(result.topReplayEligible).toBe(false);
-    expect(result.topBlockedBy).toBe('non_github_pageRole');
+    expect(result.topBlockedBy).toBe('page_role_not_allowed');
   });
 
   it('reports topReplayEligible=true and topBlockedBy=none when the top-1 is eligible', () => {

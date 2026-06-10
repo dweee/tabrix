@@ -26,6 +26,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { loadBetterSqlite3 } from './lib/load-better-sqlite3.mjs';
 
 function parseArgs(argv) {
   const options = { dbPath: null, since: null, json: false };
@@ -85,12 +86,9 @@ async function main() {
     process.exit(1);
   }
 
-  // We deliberately import better-sqlite3 lazily so this script can be
-  // listed in `package.json#scripts` without making the binding a hard
-  // root-install dependency for environments that never call it.
   let DatabaseCtor;
   try {
-    ({ default: DatabaseCtor } = await import('better-sqlite3'));
+    DatabaseCtor = await loadBetterSqlite3(process.cwd());
   } catch (error) {
     process.stderr.write(
       '[release-choose-context-stats] better-sqlite3 binding missing.\n' +

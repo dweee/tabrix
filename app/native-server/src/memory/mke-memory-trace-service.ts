@@ -7,12 +7,15 @@ import {
   type BusinessSuccessVerdict,
   type MemoryTrace,
 } from './db';
+import { logger } from '../logging/logger';
 
 const REDACTED = '[redacted]';
 const MAX_STRING_LENGTH = 512;
 const MAX_ROUTE_LENGTH = 2048;
 const MAX_ARRAY_ITEMS = 40;
 const MAX_DEPTH = 5;
+const DEFAULT_ASYNC_BROWSER_OBJECT_WRITE_QUEUE_LIMIT = 128;
+const mkeMemoryTraceLogger = logger.child('mke-memory-trace');
 
 const SENSITIVE_KEY_FRAGMENTS = [
   'account',
@@ -99,6 +102,97 @@ interface ParsedResultDigest {
 
 export interface MkeMemoryTraceServiceOptions {
   allowPersonalBrowserStateStorage?: () => boolean;
+  asyncBrowserObjectWriteQueueLimit?: number;
+}
+
+interface AsyncBrowserObjectWriteJob {
+  traceId: string;
+  toolName: string;
+  run(): void;
+}
+
+class BoundedAsyncBrowserObjectWriteQueue {
+  private queue: AsyncBrowserObjectWriteJob[] = [];
+  private scheduled = false;
+  private running = false;
+  private flushResolvers: Array<() => void> = [];
+
+  constructor(private readonly limit: number) {}
+
+  public enqueue(job: AsyncBrowserObjectWriteJob): void {
+    if (this.limit <= 0) {
+      mkeMemoryTraceLogger.warn('async browser object write dropped because queue is disabled', {
+        traceId: job.traceId,
+        toolName: job.toolName,
+      });
+      return;
+    }
+    if (this.queue.length >= this.limit) {
+      const dropped = this.queue.shift();
+      mkeMemoryTraceLogger.warn('async browser object write queue full; dropping oldest job', {
+        droppedTraceId: dropped?.traceId ?? null,
+        droppedToolName: dropped?.toolName ?? null,
+        traceId: job.traceId,
+        toolName: job.toolName,
+        queueLimit: this.limit,
+      });
+    }
+    this.queue.push(job);
+    this.schedule();
+  }
+
+  public flush(): Promise<void> {
+    if (this.isIdle()) return Promise.resolve();
+    return new Promise((resolve) => {
+      this.flushResolvers.push(resolve);
+    });
+  }
+
+  public discardPending(): void {
+    this.queue = [];
+    this.resolveFlushersIfIdle();
+  }
+
+  private schedule(): void {
+    if (this.scheduled || this.running) return;
+    this.scheduled = true;
+    setImmediate(() => this.runQueuedJobs());
+  }
+
+  private runQueuedJobs(): void {
+    this.scheduled = false;
+    this.running = true;
+    try {
+      while (this.queue.length > 0) {
+        const job = this.queue.shift();
+        if (!job) continue;
+        try {
+          job.run();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          mkeMemoryTraceLogger.warn('async browser object write failed', {
+            traceId: job.traceId,
+            toolName: job.toolName,
+            errorMessage: message,
+          });
+        }
+      }
+    } finally {
+      this.running = false;
+      this.resolveFlushersIfIdle();
+      if (this.queue.length > 0) this.schedule();
+    }
+  }
+
+  private isIdle(): boolean {
+    return this.queue.length === 0 && !this.scheduled && !this.running;
+  }
+
+  private resolveFlushersIfIdle(): void {
+    if (!this.isIdle()) return;
+    const resolvers = this.flushResolvers.splice(0);
+    for (const resolve of resolvers) resolve();
+  }
 }
 
 function normalizeKey(key: string): string {
@@ -415,11 +509,17 @@ function normalizeConfidence(value: number | null | undefined): number | null {
 }
 
 export class MkeMemoryTraceService {
+  private readonly asyncBrowserObjectWrites: BoundedAsyncBrowserObjectWriteQueue;
+
   constructor(
     private readonly repo: MemoryTraceRepository,
     private readonly browserObjects?: BrowserObjectRepository,
     private readonly options: MkeMemoryTraceServiceOptions = {},
-  ) {}
+  ) {
+    this.asyncBrowserObjectWrites = new BoundedAsyncBrowserObjectWriteQueue(
+      options.asyncBrowserObjectWriteQueueLimit ?? DEFAULT_ASYNC_BROWSER_OBJECT_WRITE_QUEUE_LIMIT,
+    );
+  }
 
   private allowsPersonalBrowserStateStorage(): boolean {
     try {
@@ -477,14 +577,27 @@ export class MkeMemoryTraceService {
       redactionState: 'redacted',
       createdAt: new Date(responseAtMs).toISOString(),
     });
-    this.recordBrowserObjectsFromToolResult({
-      trace,
-      payload,
+    this.asyncBrowserObjectWrites.enqueue({
+      traceId: trace.traceId,
       toolName: input.toolName,
-      observedAt: new Date(responseAtMs).toISOString(),
-      browserContextKey: input.browserContextKey ?? null,
+      run: () =>
+        this.recordBrowserObjectsFromToolResult({
+          trace,
+          payload,
+          toolName: input.toolName,
+          observedAt: new Date(responseAtMs).toISOString(),
+          browserContextKey: input.browserContextKey ?? null,
+        }),
     });
     return trace;
+  }
+
+  public flushAsyncWrites(): Promise<void> {
+    return this.asyncBrowserObjectWrites.flush();
+  }
+
+  public discardPendingAsyncWrites(): void {
+    this.asyncBrowserObjectWrites.discardPending();
   }
 
   private recordBrowserObjectsFromToolResult(input: {
@@ -517,8 +630,13 @@ export class MkeMemoryTraceService {
           );
         }
       });
-    } catch {
-      // Object Memory is observational. It must not block tool result delivery.
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      mkeMemoryTraceLogger.warn('browser object projection failed', {
+        traceId: input.trace.traceId,
+        toolName: input.toolName,
+        errorMessage: message,
+      });
     }
   }
 

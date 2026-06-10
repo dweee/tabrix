@@ -26,9 +26,30 @@ export function normalizeIntentSignature(intent: string): string {
   );
 }
 
-export function buildActionPathId(pageRole: string, intentSignature: string): string {
-  const digest = createHash('sha256').update(`${pageRole}\n${intentSignature}`).digest('hex');
+export function buildActionPathId(
+  pageRole: string,
+  intentSignature: string,
+  siteFamily?: string,
+): string {
+  const siteScope = typeof siteFamily === 'string' ? siteFamily.trim().toLowerCase() : '';
+  const identity =
+    siteScope.length > 0
+      ? `${siteScope}\n${pageRole}\n${intentSignature}`
+      : `${pageRole}\n${intentSignature}`;
+  const digest = createHash('sha256').update(identity).digest('hex');
   return `action_path_${digest}`;
+}
+
+function deriveSiteFamilyFromUrl(url: string | null | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (!host) return undefined;
+    if (host === 'github.com' || host.endsWith('.github.com')) return 'github';
+    return host;
+  } catch {
+    return undefined;
+  }
 }
 
 function pickFirstHistoryRef(artifactRefs: string[]): string | null {
@@ -188,6 +209,7 @@ function toCounterDelta(status: PendingAggregationSession['status']): {
 
 export class ExperienceAggregator {
   private readonly upsertAndMarkTxn;
+  private readonly latestSnapshotUrlForSessionStmt;
   // Session-end composite score writer. Isolation-aware:
   // a SQLite failure during composite write does NOT prevent
   // `aggregated_at` from being marked (that lock belongs to idempotent
@@ -205,9 +227,20 @@ export class ExperienceAggregator {
     this.compositeScoreWriter = new SessionCompositeScoreWriter({
       repository: this.experience,
     });
+    this.latestSnapshotUrlForSessionStmt = db.prepare(
+      `SELECT s.url
+         FROM memory_page_snapshots s
+         JOIN memory_steps st ON st.step_id = s.step_id
+        WHERE st.session_id = @session_id
+          AND s.url IS NOT NULL
+          AND s.url <> ''
+        ORDER BY s.captured_at DESC, s.snapshot_id DESC
+        LIMIT 1`,
+    );
     this.upsertAndMarkTxn = this.db.transaction(
       (input: {
         actionPathId: string;
+        siteFamily: string;
         pageRole: string;
         intentSignature: string;
         stepSequence: ExperienceActionPathStep[];
@@ -219,6 +252,7 @@ export class ExperienceAggregator {
       }) => {
         this.experience.upsertActionPath({
           actionPathId: input.actionPathId,
+          siteFamily: input.siteFamily,
           pageRole: input.pageRole,
           intentSignature: input.intentSignature,
           stepSequence: input.stepSequence,
@@ -286,6 +320,7 @@ export class ExperienceAggregator {
         const replayLastUsedAt = session.endedAt ?? session.startedAt;
         this.upsertAndMarkTxn({
           actionPathId: replayedActionPathId,
+          siteFamily: original.siteFamily ?? 'unknown',
           pageRole: original.pageRole,
           intentSignature: original.intentSignature,
           stepSequence: original.stepSequence,
@@ -326,13 +361,16 @@ export class ExperienceAggregator {
 
       const intentSignature = normalizeIntentSignature(session.taskIntent);
       const pageRole = this.snapshots.findLatestPageRoleForSession(session.sessionId) ?? 'unknown';
+      const latestSnapshotUrl = this.findLatestSnapshotUrlForSession(session.sessionId);
+      const siteFamily = deriveSiteFamilyFromUrl(latestSnapshotUrl) ?? 'unknown';
       const stepSequence = toStepSequence(sessionSteps);
       const { successDelta, failureDelta } = toCounterDelta(session.status);
-      const actionPathId = buildActionPathId(pageRole, intentSignature);
+      const actionPathId = buildActionPathId(pageRole, intentSignature, siteFamily);
       const sessionLastUsedAt = session.endedAt ?? session.startedAt;
 
       this.upsertAndMarkTxn({
         actionPathId,
+        siteFamily,
         pageRole,
         intentSignature,
         stepSequence,
@@ -346,5 +384,12 @@ export class ExperienceAggregator {
     }
 
     return { scanned: pending.length, projected };
+  }
+
+  private findLatestSnapshotUrlForSession(sessionId: string): string | undefined {
+    const row = this.latestSnapshotUrlForSessionStmt.get({ session_id: sessionId }) as
+      | { url: string | null }
+      | undefined;
+    return row?.url ?? undefined;
   }
 }

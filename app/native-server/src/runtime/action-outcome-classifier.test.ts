@@ -105,7 +105,18 @@ describe('action-outcome-classifier — classifyActionOutcome', () => {
     expect(out.outcomeConfidence).toBeCloseTo(0.85, 5);
   });
 
-  it('classifies dom_region_changed without navigation as spa_partial_update', () => {
+  it('returns ambiguous for unscoped dom_region_changed without corroboration', () => {
+    const env = makeEnvelope({
+      signals: [makeSignal({ kind: 'dom_region_changed' })],
+    });
+    const out = classifyActionOutcome(env, { now });
+    expect(out.outcome).toBe('ambiguous');
+    expect(out.outcomeConfidence).toBeGreaterThanOrEqual(ACTION_OUTCOME_MIN_AMBIGUOUS_CONFIDENCE);
+    expect(out.outcomeConfidence).toBeLessThan(0.85);
+    expect(out.observedSignalKinds).toEqual(['dom_region_changed']);
+  });
+
+  it('classifies scoped dom_region_changed without navigation as spa_partial_update', () => {
     const env = makeEnvelope({
       signals: [makeSignal({ kind: 'dom_region_changed', regionTag: 'main_list' })],
     });
@@ -117,7 +128,7 @@ describe('action-outcome-classifier — classifyActionOutcome', () => {
   it('boosts spa_partial_update confidence to 0.95 with corroborating network signal', () => {
     const env = makeEnvelope({
       signals: [
-        makeSignal({ kind: 'dom_region_changed', regionTag: 'main_list' }),
+        makeSignal({ kind: 'dom_region_changed' }),
         makeSignal({
           kind: 'network_completed',
           host: 'example.test',

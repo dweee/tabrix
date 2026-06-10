@@ -42,6 +42,7 @@ import {
 } from '../scripts/bridge-recovery-guidance';
 import { registerMemoryRoutes } from './memory-routes';
 import { registerExecutionRoutes } from './execution-routes';
+import { allowsLocalhostTokenBypass, isLoopbackClientIp } from '../policy/http-auth-boundary';
 import { getCapabilityDiagnostics, type CapabilitySourceKind } from '../policy/capabilities';
 import { getDefaultContextManager } from '../runtime/browser-context-manager';
 import { getDefaultFactCollector } from '../runtime/browser-fact-collector';
@@ -341,13 +342,14 @@ export class Server {
   }
 
   private setupRoutes(): void {
-    const LOCALHOST_IPS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
     const AUTH_PUBLIC_PATHS = new Set(['/ping', '/status', '/auth/token', '/auth/refresh']);
 
     this.fastify.addHook('onRequest', async (request, reply) => {
       if (!tokenManager.enabled) return;
       if (AUTH_PUBLIC_PATHS.has(request.url.split('?')[0])) return;
-      if (LOCALHOST_IPS.has(request.ip)) return;
+      if (allowsLocalhostTokenBypass({ clientIp: request.ip, listenHost: SERVER_CONFIG.HOST })) {
+        return;
+      }
 
       const authHeader = request.headers.authorization;
       const bearer = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : '';
@@ -445,10 +447,8 @@ export class Server {
   // ============================================================
 
   private setupAuthRoutes(): void {
-    const LOCALHOST_IPS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-
     this.fastify.get('/auth/token', async (request: FastifyRequest, reply: FastifyReply) => {
-      if (!LOCALHOST_IPS.has(request.ip)) {
+      if (!isLoopbackClientIp(request.ip)) {
         return reply.status(403).send({
           status: 'error',
           message: 'Forbidden – auth management is only available from localhost.',
@@ -468,7 +468,7 @@ export class Server {
     });
 
     this.fastify.post('/auth/refresh', async (request: FastifyRequest, reply: FastifyReply) => {
-      if (!LOCALHOST_IPS.has(request.ip)) {
+      if (!isLoopbackClientIp(request.ip)) {
         return reply.status(403).send({
           status: 'error',
           message: 'Forbidden – auth management is only available from localhost.',
@@ -511,8 +511,6 @@ export class Server {
   // ============================================================
 
   private setupExtensionRoutes(): void {
-    const LOCALHOST_IPS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-
     this.fastify.get(
       '/ask-extension',
       async (request: FastifyRequest<{ Body: ExtensionRequestPayload }>, reply: FastifyReply) => {
@@ -553,7 +551,7 @@ export class Server {
     this.fastify.post(
       '/bridge/heartbeat',
       async (request: FastifyRequest<{ Body: BridgeHeartbeatPayload }>, reply: FastifyReply) => {
-        if (!LOCALHOST_IPS.has(request.ip)) {
+        if (!isLoopbackClientIp(request.ip)) {
           return reply.status(403).send({
             status: 'error',
             message: 'Forbidden – bridge heartbeat is only available from localhost.',
@@ -590,7 +588,7 @@ export class Server {
         request: FastifyRequest<{ Body: BridgeFileOperationPayload }>,
         reply: FastifyReply,
       ) => {
-        if (!LOCALHOST_IPS.has(request.ip)) {
+        if (!isLoopbackClientIp(request.ip)) {
           return reply.status(403).send({
             status: 'error',
             message: 'Forbidden – bridge file operations are only available from localhost.',
@@ -623,7 +621,7 @@ export class Server {
         request: FastifyRequest<{ Body: BridgeRecoveryStartPayload }>,
         reply: FastifyReply,
       ) => {
-        if (!LOCALHOST_IPS.has(request.ip)) {
+        if (!isLoopbackClientIp(request.ip)) {
           return reply.status(403).send({
             status: 'error',
             message: 'Forbidden – bridge recovery is only available from localhost.',
@@ -653,7 +651,7 @@ export class Server {
         request: FastifyRequest<{ Body: BridgeRecoveryFinishPayload }>,
         reply: FastifyReply,
       ) => {
-        if (!LOCALHOST_IPS.has(request.ip)) {
+        if (!isLoopbackClientIp(request.ip)) {
           return reply.status(403).send({
             status: 'error',
             message: 'Forbidden – bridge recovery is only available from localhost.',
@@ -682,7 +680,7 @@ export class Server {
         request: FastifyRequest<{ Body: BridgeTestingBrowserLaunchOverridePayload }>,
         reply: FastifyReply,
       ) => {
-        if (!LOCALHOST_IPS.has(request.ip)) {
+        if (!isLoopbackClientIp(request.ip)) {
           return reply.status(403).send({
             status: 'error',
             message: 'Forbidden – bridge testing overrides are only available from localhost.',
@@ -717,7 +715,7 @@ export class Server {
         request: FastifyRequest<{ Body: BridgeTestingCommandChannelPayload }>,
         reply: FastifyReply,
       ) => {
-        if (!LOCALHOST_IPS.has(request.ip)) {
+        if (!isLoopbackClientIp(request.ip)) {
           return reply.status(403).send({
             status: 'error',
             message: 'Forbidden – command channel testing is only available from localhost.',

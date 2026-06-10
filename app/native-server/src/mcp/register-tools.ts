@@ -441,7 +441,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     const traceWriter = sessionManager.memoryTraces;
     if (!traceWriter) return null;
     try {
-      traceWriter.recordToolCall({
+      return traceWriter.recordToolCall({
         taskId: task.taskId,
         taskIntent,
         aiClient: session.clientName,
@@ -456,7 +456,6 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         errorCode: input?.errorCode ?? null,
         browserContextKey: input?.browserContextKey ?? null,
       });
-      return traceWriter.listByTask(task.taskId).at(-1) ?? null;
     } catch (traceError) {
       const message = traceError instanceof Error ? traceError.message : String(traceError);
       mkeMemoryTraceLogger.warn('write failed', { errorMessage: message });

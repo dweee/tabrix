@@ -136,6 +136,54 @@ describe('handleToolCall execution wrapper', () => {
     });
   });
 
+  it('returns the tool result before async Browser Object trace projection runs', async () => {
+    markBridgeReady();
+    jest
+      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+      .mockResolvedValueOnce({
+        status: 'success',
+        items: [],
+      } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                page: { url: 'https://example.test/workspaces/123' },
+                summary: { pageRole: 'workspace' },
+                tabId: 1,
+                pageRegions: [{ regionId: 'main', regionType: 'content' }],
+              }),
+            },
+          ],
+          isError: false,
+        },
+      } as never);
+    const traceWriter = sessionManager.memoryTraces;
+    if (!traceWriter) throw new Error('MKE trace service is not available in tests');
+    const objectProjectionSpy = jest.spyOn(
+      traceWriter as unknown as {
+        recordBrowserObjectsFromToolResult(input: unknown): void;
+      },
+      'recordBrowserObjectsFromToolResult',
+    );
+
+    const result = await handleToolCall('chrome_read_page', {
+      tabId: 1,
+      _tabrix: { intentTitle: '读取页面对象' },
+    });
+    const payload = JSON.parse(String(result.content[0].text));
+
+    expect(payload._tabrix.traceId).toEqual(expect.any(String));
+    expect(objectProjectionSpy).not.toHaveBeenCalled();
+
+    await traceWriter.flushAsyncWrites();
+
+    expect(objectProjectionSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('applies _tabrix previousFeedback to an earlier Memory trace on the next tool call', async () => {
     markBridgeReady();
     jest

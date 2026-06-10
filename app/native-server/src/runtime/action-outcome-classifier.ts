@@ -32,10 +32,11 @@
  * Confidence model (calibrated against deterministic action-outcome
  * acceptance scenarios, not against real-browser Gate evidence):
  *
- *   - A single corroborating signal in the closed allowlist scores
- *     0.85.
- *   - Two corroborating signals (e.g. navigation + dom region change)
- *     score 0.95.
+ *   - A single strong signal in the closed allowlist scores 0.85.
+ *   - Unscoped DOM-only change is ambiguous; DOM partial updates need
+ *     either a scoped region tag or a network/readback corroborator.
+ *   - Two corroborating signals (e.g. navigation + dom region change,
+ *     or DOM partial update + network) score 0.95.
  *   - A signal kind that does not match any verdict bucket lowers the
  *     verdict confidence by 0.1 per stray signal, floored at 0.6 so
  *     `'ambiguous'` never collapses below the ambiguity confidence floor.
@@ -147,6 +148,7 @@ function chooseVerdict(_actionKind: ActionKind, signals: ActionSignal[]): Verdic
   let hasNavigation = false;
   let hasNewTab = false;
   let hasDomRegion = false;
+  let hasScopedDomRegion = false;
   let hasNetwork = false;
   let hasDialog = false;
   let unknownCount = 0;
@@ -165,6 +167,7 @@ function chooseVerdict(_actionKind: ActionKind, signals: ActionSignal[]): Verdic
         break;
       case 'dom_region_changed':
         hasDomRegion = true;
+        if (hasNonEmptyString(s.regionTag)) hasScopedDomRegion = true;
         break;
       case 'network_completed':
         hasNetwork = true;
@@ -179,7 +182,13 @@ function chooseVerdict(_actionKind: ActionKind, signals: ActionSignal[]): Verdic
   if (hasNavigation && !hasNewTab) verdictBuckets.push('navigated_same_tab');
   if (hasNewTab) verdictBuckets.push('navigated_new_tab');
   if (hasDialog) verdictBuckets.push('modal_opened');
-  if (hasDomRegion && !hasNavigation && !hasNewTab && !hasDialog)
+  if (
+    hasDomRegion &&
+    (hasScopedDomRegion || hasNetwork) &&
+    !hasNavigation &&
+    !hasNewTab &&
+    !hasDialog
+  )
     verdictBuckets.push('spa_partial_update');
 
   // Network on its own is too weak to call a verdict — every page
@@ -187,8 +196,16 @@ function chooseVerdict(_actionKind: ActionKind, signals: ActionSignal[]): Verdic
   // SPA-partial-update reinforcer (handled below by the confidence
   // boost) and otherwise as an ambiguity signal.
   const hasOnlyNetwork = hasNetwork && verdictBuckets.length === 0;
+  const hasOnlyUnscopedDomRegion =
+    hasDomRegion && !hasScopedDomRegion && !hasNetwork && verdictBuckets.length === 0;
 
   if (verdictBuckets.length === 0) {
+    if (hasOnlyUnscopedDomRegion) {
+      return {
+        outcome: 'ambiguous',
+        confidence: Math.max(ACTION_OUTCOME_MIN_AMBIGUOUS_CONFIDENCE, 0.65 - 0.1 * unknownCount),
+      };
+    }
     if (hasOnlyNetwork) {
       return {
         outcome: 'ambiguous',
@@ -235,6 +252,10 @@ function clamp01(value: number): number {
   if (value < 0) return 0;
   if (value > 1) return 1;
   return value;
+}
+
+function hasNonEmptyString(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 function dedupeSorted<T extends string>(values: T[]): T[] {

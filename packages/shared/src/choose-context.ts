@@ -3,15 +3,17 @@ import type {
   LayerSourceRoute,
   ReadPageRequestedLayer,
 } from './read-page-contract';
+import type { SiteFamily, SiteId } from './site';
 
 /**
  * Tabrix MKEP `tabrix_choose_context` public contract.
  *
  * Current public contract:
- *  - 3 strategies (no `api_only`, no `experience_replay`, no `read_page_markdown`).
+ *  - Closed strategy set (no unreviewed `api_only` / auto-execute branch).
  *  - No `tokenEstimate` (we have no calibration data; an invented number
  *    would mislead upstream planners).
- *  - GitHub-first; non-GitHub URLs fall through to `read_page_required`.
+ *  - Site-neutral `siteId` / `siteFamily` tokens. Unknown or unsupported
+ *    site policies fall through to safe read paths.
  *
  * This module is types + constants only — pure data, no IO. The runtime
  * lives in the native-server (`mcp/choose-context.ts`).
@@ -102,6 +104,9 @@ export type ReplayEligibilityBlockReason =
   | 'capability_off'
   | 'unsupported_step_kind'
   | 'non_portable_args'
+  | 'site_replay_policy_missing'
+  | 'page_role_not_allowed'
+  /** @deprecated Use `site_replay_policy_missing` or `page_role_not_allowed`. */
   | 'non_github_pageRole'
   | 'below_threshold'
   | 'stale_locator'
@@ -115,10 +120,14 @@ export type ReplayEligibilityBlockReason =
 export const KNOWLEDGE_LIGHT_SAMPLE_LIMIT = 5;
 
 /**
- * Site families recognised by v1. Anything else resolves to
- * `siteFamily: undefined` and falls through to `read_page_required`.
+ * Site family token resolved from `siteId` or URL-derived knowledge.
+ * `github` remains the GA-compatible value; non-GitHub tokens are allowed
+ * when they pass the shared safe-token contract.
  */
-export type TabrixContextSiteFamily = 'github';
+export type TabrixContextSiteFamily = SiteFamily;
+
+/** Public `siteId` input token for the chooser. */
+export type TabrixContextSiteId = SiteId;
 
 /**
  * Closed v1 strategy set. Adding a new value here is itself a v2 design
@@ -180,11 +189,12 @@ export interface TabrixChooseContextInput {
   /** Optional `pageRole` filter, mirroring the chooser contract. */
   pageRole?: string;
   /**
-   * Optional explicit site-family override. v1 only honours `'github'`;
-   * any other value is dropped on the floor and the URL-derived family
-   * (if any) is used instead.
+   * Optional explicit site-family override. Must be a shared safe token.
+   * `github` remains the GA seed; other values are accepted by the public
+   * contract and then fail closed when no matching Knowledge / Replay policy
+   * is configured.
    */
-  siteId?: TabrixContextSiteFamily;
+  siteId?: TabrixContextSiteId;
 }
 
 /**

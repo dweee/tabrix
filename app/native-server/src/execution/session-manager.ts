@@ -353,6 +353,10 @@ export class SessionManager {
     return this.memoryTraceService;
   }
 
+  public flushMkeMemoryTraceWrites(): Promise<void> {
+    return this.memoryTraceService?.flushAsyncWrites() ?? Promise.resolve();
+  }
+
   public projectMkeKnowledgeIdle(
     input?: MkeKnowledgeProjectionInput,
   ): MkeKnowledgeProjectionResult | null {
@@ -794,6 +798,7 @@ export class SessionManager {
   }
 
   public clearMkeBrowserObjects(): void {
+    this.memoryTraceService?.discardPendingAsyncWrites();
     this.repos?.browserObject.clear();
   }
 
@@ -844,6 +849,7 @@ export class SessionManager {
   }
 
   public reset(): void {
+    this.memoryTraceService?.discardPendingAsyncWrites();
     if (this.repos) {
       // Order matters due to FK cascade: clearing tasks cascades to
       // sessions and steps, but we clear all five explicitly so
@@ -876,6 +882,7 @@ export class SessionManager {
    * and test teardown. Safe to call when persistence is off.
    */
   public close(): void {
+    this.memoryTraceService?.discardPendingAsyncWrites();
     this.dbHandle?.close();
   }
 

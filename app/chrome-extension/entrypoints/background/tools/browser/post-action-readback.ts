@@ -132,7 +132,7 @@ export function buildPostActionReadbackEvidence(input: {
     };
   }
 
-  if (!input.dispatchSucceeded || observedOutcome === 'no_observed_change') {
+  if (!input.dispatchSucceeded || isNonProvingObservedOutcome(observedOutcome)) {
     return {
       kind: 'post_action_readback_v1',
       actionKind: input.actionKind,
@@ -148,9 +148,9 @@ export function buildPostActionReadbackEvidence(input: {
       requiredNextAction: 'stop_or_retry_after_fresh_read',
       reason: !input.dispatchSucceeded
         ? `${input.actionKind}_dispatch_not_proven`
-        : `${input.actionKind}_no_observed_change`,
+        : `${input.actionKind}_${observedOutcome}`,
       claimBoundary:
-        'No observable post-action change was proven; do not claim the user task advanced without a fresh same-tab readback or retry evidence.',
+        'No task-advancing post-action change was proven; focus-only, empty, or unavailable signals must not be treated as success without fresh same-tab readback or retry evidence.',
     };
   }
 
@@ -171,4 +171,14 @@ export function buildPostActionReadbackEvidence(input: {
     claimBoundary:
       'The action produced local evidence, but task success still requires a fresh same-tab chrome_read_page or a scoped verifier result.',
   };
+}
+
+function isNonProvingObservedOutcome(
+  outcome: ClickObservedOutcome | 'verification_required' | 'input_value_written' | null,
+): boolean {
+  return (
+    outcome === 'no_observed_change' ||
+    outcome === 'focus_changed' ||
+    outcome === 'verification_unavailable'
+  );
 }

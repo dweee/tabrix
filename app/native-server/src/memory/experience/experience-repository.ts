@@ -63,6 +63,7 @@ export interface ExperienceActionPathStep {
 
 export interface ExperienceActionPathRow {
   actionPathId: string;
+  siteFamily?: string;
   pageRole: string;
   intentSignature: string;
   stepSequence: ExperienceActionPathStep[];
@@ -83,6 +84,7 @@ export interface ExperienceActionPathRow {
 
 interface ExperienceActionPathDbRow {
   action_path_id: string;
+  site_family: string | null;
   page_role: string;
   intent_signature: string;
   step_sequence: string;
@@ -99,6 +101,7 @@ interface ExperienceActionPathDbRow {
 
 export interface UpsertActionPathInput {
   actionPathId: string;
+  siteFamily?: string;
   pageRole: string;
   intentSignature: string;
   stepSequence: ExperienceActionPathStep[];
@@ -160,8 +163,21 @@ function parseStepSequence(raw: string): ExperienceActionPathStep[] {
 
 export interface SuggestActionPathsInput {
   intentSignature: string;
+  siteFamily?: string;
   pageRole?: string;
   limit: number;
+}
+
+const UNKNOWN_SITE_FAMILY = 'unknown';
+
+function normalizeStoredSiteFamily(value: string | null | undefined): string {
+  const trimmed = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return trimmed.length > 0 ? trimmed : UNKNOWN_SITE_FAMILY;
+}
+
+function normalizeQueryableSiteFamily(value: string | null | undefined): string | undefined {
+  const normalized = normalizeStoredSiteFamily(value);
+  return normalized === UNKNOWN_SITE_FAMILY ? undefined : normalized;
 }
 
 /**
@@ -231,10 +247,14 @@ export class ExperienceRepository {
   constructor(private readonly db: SqliteDatabase) {
     this.upsertStmt = db.prepare(
       `INSERT INTO experience_action_paths
-        (action_path_id, page_role, intent_signature, step_sequence, success_count, failure_count, last_used_at, created_at, updated_at)
+        (action_path_id, site_family, page_role, intent_signature, step_sequence, success_count, failure_count, last_used_at, created_at, updated_at)
        VALUES
-        (@action_path_id, @page_role, @intent_signature, @step_sequence, @success_count, @failure_count, @last_used_at, @created_at, @updated_at)
+        (@action_path_id, @site_family, @page_role, @intent_signature, @step_sequence, @success_count, @failure_count, @last_used_at, @created_at, @updated_at)
        ON CONFLICT(action_path_id) DO UPDATE SET
+         site_family = CASE
+           WHEN excluded.site_family = 'unknown' THEN experience_action_paths.site_family
+           ELSE excluded.site_family
+         END,
          page_role = excluded.page_role,
          intent_signature = excluded.intent_signature,
          success_count = experience_action_paths.success_count + excluded.success_count,
@@ -260,6 +280,7 @@ export class ExperienceRepository {
     );
     this.listStmt = db.prepare(
       `SELECT action_path_id,
+              site_family,
               page_role,
               intent_signature,
               step_sequence,
@@ -273,7 +294,7 @@ export class ExperienceRepository {
               created_at,
               updated_at
          FROM experience_action_paths
-        ORDER BY page_role ASC, intent_signature ASC`,
+        ORDER BY site_family ASC, page_role ASC, intent_signature ASC`,
     );
     // Targeted point-lookup used by:
     //   1. The aggregator's replay-session special-case
@@ -285,6 +306,7 @@ export class ExperienceRepository {
     //      replay before opening the Memory session.
     this.findByIdStmt = db.prepare(
       `SELECT action_path_id,
+              site_family,
               page_role,
               intent_signature,
               step_sequence,
@@ -315,6 +337,7 @@ export class ExperienceRepository {
     // when none was requested.
     this.suggestStmt = db.prepare(
       `SELECT action_path_id,
+              site_family,
               page_role,
               intent_signature,
               step_sequence,
@@ -328,7 +351,8 @@ export class ExperienceRepository {
               created_at,
               updated_at
          FROM experience_action_paths
-        WHERE intent_signature = ?
+        WHERE site_family = ?
+          AND intent_signature = ?
         ORDER BY success_count DESC,
                  (failure_count - success_count) ASC,
                  (last_used_at IS NULL) ASC,
@@ -339,6 +363,7 @@ export class ExperienceRepository {
     );
     this.suggestForRoleStmt = db.prepare(
       `SELECT action_path_id,
+              site_family,
               page_role,
               intent_signature,
               step_sequence,
@@ -352,7 +377,8 @@ export class ExperienceRepository {
               created_at,
               updated_at
          FROM experience_action_paths
-        WHERE intent_signature = ?
+        WHERE site_family = ?
+          AND intent_signature = ?
           AND page_role = ?
         ORDER BY success_count DESC,
                  (failure_count - success_count) ASC,
@@ -409,6 +435,7 @@ export class ExperienceRepository {
   public upsertActionPath(input: UpsertActionPathInput): void {
     this.upsertStmt.run({
       action_path_id: input.actionPathId,
+      site_family: normalizeStoredSiteFamily(input.siteFamily),
       page_role: input.pageRole,
       intent_signature: input.intentSignature,
       step_sequence: JSON.stringify(input.stepSequence),
@@ -456,15 +483,22 @@ export class ExperienceRepository {
    * (`MAX_EXPERIENCE_SUGGEST_PLAN_LIMIT`) before calling.
    */
   public suggestActionPaths(input: SuggestActionPathsInput): ExperienceActionPathRow[] {
+    const siteFamily = normalizeQueryableSiteFamily(input.siteFamily);
+    if (!siteFamily) return [];
     const safeLimit = Math.max(1, Math.floor(input.limit));
     const rows =
       input.pageRole !== undefined
         ? (this.suggestForRoleStmt.all(
+            siteFamily,
             input.intentSignature,
             input.pageRole,
             safeLimit,
           ) as ExperienceActionPathDbRow[])
-        : (this.suggestStmt.all(input.intentSignature, safeLimit) as ExperienceActionPathDbRow[]);
+        : (this.suggestStmt.all(
+            siteFamily,
+            input.intentSignature,
+            safeLimit,
+          ) as ExperienceActionPathDbRow[]);
     return rows.map(rowToActionPath);
   }
 
@@ -619,6 +653,7 @@ interface WritebackWarningDbRow {
 function rowToActionPath(row: ExperienceActionPathDbRow): ExperienceActionPathRow {
   const out: ExperienceActionPathRow = {
     actionPathId: row.action_path_id,
+    siteFamily: row.site_family ?? undefined,
     pageRole: row.page_role,
     intentSignature: row.intent_signature,
     stepSequence: parseStepSequence(row.step_sequence),

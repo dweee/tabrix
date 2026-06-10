@@ -2,6 +2,30 @@
 
 > Tabrix gives AI assistants access to your **real, logged-in browser**. This is the core value proposition — and also the primary risk surface.
 
+## Local and Remote MCP Authentication
+
+Tabrix is local-first by default. The native server listens on `127.0.0.1` unless remote access is explicitly enabled through the extension popup or `MCP_HTTP_HOST=0.0.0.0` / `::`.
+
+Security boundary:
+
+- Local-only mode may bypass Bearer auth for protected routes only from loopback clients (`127.0.0.1`, `::1`, `::ffff:127.0.0.1`). This is a same-machine trust model, not a defense against malware, another local user, or a compromised local process.
+- Remote-exposed mode requires `Authorization: Bearer <token>` for protected routes such as `/mcp` and `/memory/*`, including requests that arrive from loopback while the server is bound to `0.0.0.0` or `::`.
+- `/ping` and `/status` are public diagnostics. `/auth/token` and `/auth/refresh` are local-management routes and are rejected for non-loopback clients.
+
+Do not expose the native server to the public internet. If remote access is needed, keep it on a trusted LAN/VPN, use a short token TTL when possible, rotate the token after sharing it, and remove unexpected clients from the popup's active-client list.
+
+## Personal Browser State Storage
+
+Object Library browser-state storage is privacy-sensitive because it can include the pages, routes, and tab state from a real logged-in browser profile.
+
+Default boundary:
+
+- `personalBrowserStateStorageEnabled` is off by default.
+- Memory read routes return browser-object route summaries by default: web routes are reduced to `origin + path`, query strings and fragments are omitted, and local file paths are not exposed.
+- Full current routes and personal browser-state fields are only returned when the user explicitly enables personal browser state storage. Disabling the setting clears existing Object Library browser objects so previously authorized full routes are not kept in the server read surface.
+
+Users handling high-sensitivity accounts should keep using a dedicated Chrome profile for AI automation and avoid enabling personal browser state storage unless the diagnostic value outweighs the privacy cost.
+
 ## Indirect Prompt Injection
 
 When an AI assistant reads web page content via `chrome_read_page` or `chrome_get_web_content`, it processes text that may contain adversarial instructions crafted by the page author (or injected by a third party). This is known as **indirect prompt injection**.

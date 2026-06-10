@@ -20,6 +20,7 @@
  */
 
 import type { ClickObservedOutcome } from './click';
+import type { SiteFamily } from './site';
 
 /** Strict format for `actionPathId` — matches the shape from `experience-replay.ts`. */
 export const TABRIX_EXPERIENCE_SCORE_STEP_ACTION_PATH_ID_PATTERN = /^action_path_[0-9a-f]{64}$/;
@@ -172,8 +173,8 @@ export interface TabrixTaskWeights {
 }
 
 /**
- * Baseline / fallback weights. Used when no GitHub-seeded
- * task weight matches (or `siteFamily !== 'github'`). Numbers are
+ * Baseline / fallback weights. Used when no site-seeded
+ * task weight matches. Numbers are
  * the MKEP §3.2 default mix; do NOT tweak without updating MKEP +
  * `composite-score.test.ts` fixtures together.
  */
@@ -215,10 +216,11 @@ export const EXPERIENCE_SCORE_STEP_GITHUB_TASK_WEIGHTS: Readonly<
 });
 
 /**
- * Recognized site families. v1 only honours `'github'`; everything
- * else short-circuits to {@link EXPERIENCE_SCORE_STEP_BASELINE_TASK_WEIGHTS}.
+ * Recognized site-family token. `github` keeps its seeded weights;
+ * unconfigured sites short-circuit to
+ * {@link EXPERIENCE_SCORE_STEP_BASELINE_TASK_WEIGHTS}.
  */
-export type TabrixTaskWeightsSiteFamily = 'github';
+export type TabrixTaskWeightsSiteFamily = SiteFamily;
 
 /**
  * Pure read-side resolver. Returns the baseline mix when no override

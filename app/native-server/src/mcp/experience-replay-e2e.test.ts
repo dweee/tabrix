@@ -136,11 +136,12 @@ function insertStep(
 
 function insertSnapshot(
   repo: PageSnapshotRepository,
-  params: { snapshotId: string; stepId: string; pageRole: string },
+  params: { snapshotId: string; stepId: string; pageRole: string; url?: string },
 ): void {
   repo.insert({
     snapshotId: params.snapshotId,
     stepId: params.stepId,
+    url: params.url,
     pageRole: params.pageRole,
     fallbackUsed: false,
     interactiveCount: 0,
@@ -271,6 +272,7 @@ describe('V24-01 closeout: real-aggregated-row → chooser → replay handler', 
       insertSnapshot(snapshotRepo, {
         snapshotId: 'e2e-snap',
         stepId: 'e2e-step-click',
+        url: 'https://github.com/octocat/hello-world/issues',
         pageRole: 'issues_list',
       });
 
@@ -284,6 +286,7 @@ describe('V24-01 closeout: real-aggregated-row → chooser → replay handler', 
       expect(rows).toHaveLength(1);
       const aggregatedRow = rows[0];
       expect(aggregatedRow.pageRole).toBe('issues_list');
+      expect(aggregatedRow.siteFamily).toBe('github');
       expect(aggregatedRow.stepSequence).toEqual([
         {
           toolName: 'chrome_click_element',
@@ -308,6 +311,7 @@ describe('V24-01 closeout: real-aggregated-row → chooser → replay handler', 
       // routed to experience_replay") under V24-03's stricter gate.
       experienceRepo.upsertActionPath({
         actionPathId: aggregatedRow.actionPathId,
+        siteFamily: aggregatedRow.siteFamily,
         pageRole: aggregatedRow.pageRole,
         intentSignature: aggregatedRow.intentSignature,
         stepSequence: aggregatedRow.stepSequence,
@@ -318,7 +322,7 @@ describe('V24-01 closeout: real-aggregated-row → chooser → replay handler', 
         updatedAt: '2026-04-22T00:00:11.000Z',
       });
       const decision = runTabrixChooseContext(
-        { intent: 'open repo issues tab', pageRole: 'issues_list' },
+        { intent: 'open repo issues tab', pageRole: 'issues_list', siteId: 'github' },
         {
           experience: experienceQuery,
           knowledgeApi: null,
@@ -421,6 +425,7 @@ describe('V24-01 closeout: real-aggregated-row → chooser → replay handler', 
       insertSnapshot(snapshotRepo, {
         snapshotId: 'e2e-snap-ref',
         stepId: 'e2e-step-ref',
+        url: 'https://github.com/octocat/hello-world/issues',
         pageRole: 'issues_list',
       });
 
@@ -432,7 +437,7 @@ describe('V24-01 closeout: real-aggregated-row → chooser → replay handler', 
       expect(rows[0].stepSequence[0]).not.toHaveProperty('args');
 
       const decision = runTabrixChooseContext(
-        { intent: 'click via ref only', pageRole: 'issues_list' },
+        { intent: 'click via ref only', pageRole: 'issues_list', siteId: 'github' },
         {
           experience: experienceQuery,
           knowledgeApi: null,
@@ -491,6 +496,7 @@ describe('V24-01 closeout: real-aggregated-row → chooser → replay handler', 
       insertSnapshot(snapshotRepo, {
         snapshotId: 'e2e-snap-mixed',
         stepId: 'e2e-step-mixed',
+        url: 'https://github.com/octocat/hello-world/issues',
         pageRole: 'issues_list',
       });
 
@@ -512,6 +518,7 @@ describe('V24-01 closeout: real-aggregated-row → chooser → replay handler', 
       // (see the analogous note in the previous test for context).
       experienceRepo.upsertActionPath({
         actionPathId: aggregatedRow.actionPathId,
+        siteFamily: aggregatedRow.siteFamily,
         pageRole: aggregatedRow.pageRole,
         intentSignature: aggregatedRow.intentSignature,
         stepSequence: aggregatedRow.stepSequence,
@@ -522,7 +529,7 @@ describe('V24-01 closeout: real-aggregated-row → chooser → replay handler', 
         updatedAt: '2026-04-22T00:00:11.000Z',
       });
       const decision = runTabrixChooseContext(
-        { intent: 'click with mixed ref+selector', pageRole: 'issues_list' },
+        { intent: 'click with mixed ref+selector', pageRole: 'issues_list', siteId: 'github' },
         {
           experience: experienceQuery,
           knowledgeApi: null,

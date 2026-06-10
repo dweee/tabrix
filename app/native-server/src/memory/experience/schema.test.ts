@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { openMemoryDb } from '../db/client';
 import { SessionManager } from '../../execution/session-manager';
 import { EXPERIENCE_ACTION_PATHS_TABLE, EXPERIENCE_LOCATOR_PREFS_TABLE } from './index';
+import { ExperienceRepository } from './experience-repository';
 
 function fresh(): { db: ReturnType<typeof openMemoryDb>['db']; close: () => void } {
   const { db } = openMemoryDb({ dbPath: ':memory:' });
@@ -47,6 +48,7 @@ describe('Experience schema seed (B-005)', () => {
       expect(names).toEqual(
         expect.arrayContaining([
           'experience_action_paths_role_intent_idx',
+          'experience_action_paths_site_role_intent_idx',
           'experience_action_paths_last_used_at_idx',
           'experience_locator_prefs_role_purpose_idx',
           'experience_locator_prefs_last_hit_at_idx',
@@ -176,6 +178,7 @@ describe('Experience schema seed (B-005)', () => {
   it('V26-S2 migration: upgrades legacy experience_action_paths scoring columns before indexes are created', () => {
     const dir = mkdtempSync(join(tmpdir(), 'tabrix-memory-legacy-experience-'));
     const dbPath = join(dir, 'memory.db');
+    const legacyActionPathId = `action_path_${'1'.repeat(64)}`;
     try {
       const openLegacy = require('better-sqlite3') as (filename: string) => {
         exec: (sql: string) => void;
@@ -194,6 +197,14 @@ describe('Experience schema seed (B-005)', () => {
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
+        INSERT INTO experience_action_paths
+          (action_path_id, page_role, intent_signature, step_sequence,
+           success_count, failure_count, last_used_at, created_at, updated_at)
+        VALUES
+          ('${legacyActionPathId}', 'repo_home', 'open issues',
+           '[{"toolName":"chrome_click_element","status":"completed","historyRef":null}]',
+           3, 0, '2026-04-20T00:00:00.000Z',
+           '2026-04-20T00:00:00.000Z', '2026-04-20T00:00:00.000Z');
       `);
       legacyDb.close();
 
@@ -211,14 +222,39 @@ describe('Experience schema seed (B-005)', () => {
             'last_replay_outcome',
             'last_replay_status',
             'composite_score_decayed',
+            'site_family',
           ]),
         );
+        const legacyRow = firstOpen.db
+          .prepare('SELECT action_path_id, site_family FROM experience_action_paths')
+          .get() as { action_path_id: string; site_family: string } | undefined;
+        expect(legacyRow).toEqual({
+          action_path_id: legacyActionPathId,
+          site_family: 'github',
+        });
         const index = firstOpen.db
           .prepare(
             "SELECT name FROM sqlite_master WHERE type='index' AND name='experience_action_paths_composite_score_idx'",
           )
           .get() as { name: string } | undefined;
         expect(index?.name).toBe('experience_action_paths_composite_score_idx');
+        const siteIndex = firstOpen.db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='experience_action_paths_site_role_intent_idx'",
+          )
+          .get() as { name: string } | undefined;
+        expect(siteIndex?.name).toBe('experience_action_paths_site_role_intent_idx');
+        const repo = new ExperienceRepository(firstOpen.db);
+        expect(
+          repo
+            .suggestActionPaths({
+              intentSignature: 'open issues',
+              siteFamily: 'github',
+              pageRole: 'repo_home',
+              limit: 5,
+            })
+            .map((row) => row.actionPathId),
+        ).toEqual([legacyActionPathId]);
       } finally {
         firstOpen.db.close();
       }

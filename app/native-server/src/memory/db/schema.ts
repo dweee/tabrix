@@ -449,6 +449,7 @@ CREATE INDEX IF NOT EXISTS tabrix_browser_objects_operability_idx
 export const EXPERIENCE_CREATE_TABLES_SQL = `
 CREATE TABLE IF NOT EXISTS experience_action_paths (
   action_path_id           TEXT PRIMARY KEY,
+  site_family              TEXT NOT NULL DEFAULT 'unknown',
   page_role                TEXT NOT NULL,
   intent_signature         TEXT NOT NULL,
   step_sequence            TEXT NOT NULL,    -- JSON: ordered [{ toolName, status, historyRef }]
@@ -475,6 +476,8 @@ CREATE TABLE IF NOT EXISTS experience_action_paths (
 
 CREATE INDEX IF NOT EXISTS experience_action_paths_role_intent_idx
   ON experience_action_paths(page_role, intent_signature);
+CREATE INDEX IF NOT EXISTS experience_action_paths_site_role_intent_idx
+  ON experience_action_paths(site_family, page_role, intent_signature);
 CREATE INDEX IF NOT EXISTS experience_action_paths_last_used_at_idx
   ON experience_action_paths(last_used_at);
 -- Lets the chooser ORDER BY composite_score_decayed
@@ -654,7 +657,7 @@ CREATE INDEX IF NOT EXISTS knowledge_api_endpoints_last_seen_at_idx
  *
  * No personally identifying info: `intent_signature` is normalized
  * and already pre-redacted, `page_role` is a structural label, and
- * `site_family` is a closed enum. We do NOT
+ * `site_family` is a safe routing token. We do NOT
  * store the raw `intent` string to avoid leaking session content into
  * a long-horizon table.
  */

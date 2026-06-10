@@ -113,6 +113,9 @@ export type BenchmarkReplayBlockReason =
   | 'capability_off'
   | 'unsupported_step_kind'
   | 'non_portable_args'
+  | 'site_replay_policy_missing'
+  | 'page_role_not_allowed'
+  /** @deprecated Legacy runs before site-aware replay policies. */
   | 'non_github_pageRole'
   | 'below_threshold'
   | 'stale_locator'
@@ -240,6 +243,9 @@ export interface BenchmarkReplayBlockedByCounters {
   capability_off: number;
   unsupported_step_kind: number;
   non_portable_args: number;
+  site_replay_policy_missing: number;
+  page_role_not_allowed: number;
+  /** Legacy bucket kept so older benchmark artifacts still parse. */
   non_github_pageRole: number;
   below_threshold: number;
   stale_locator: number;
@@ -527,6 +533,8 @@ function emptyBlockedByCounters(): BenchmarkReplayBlockedByCounters {
     capability_off: 0,
     unsupported_step_kind: 0,
     non_portable_args: 0,
+    site_replay_policy_missing: 0,
+    page_role_not_allowed: 0,
     non_github_pageRole: 0,
     below_threshold: 0,
     stale_locator: 0,
@@ -551,6 +559,8 @@ function isBlockReason(v: unknown): v is BenchmarkReplayBlockReason {
     v === 'capability_off' ||
     v === 'unsupported_step_kind' ||
     v === 'non_portable_args' ||
+    v === 'site_replay_policy_missing' ||
+    v === 'page_role_not_allowed' ||
     v === 'non_github_pageRole' ||
     v === 'below_threshold' ||
     v === 'stale_locator' ||

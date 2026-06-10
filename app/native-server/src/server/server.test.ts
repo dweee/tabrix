@@ -904,6 +904,90 @@ describe('服务器测试', () => {
       expect(body.message).toContain('Unauthorized');
     });
 
+    test('本机 IP 只有在 local-only listen host 下才绕过 Bearer', async () => {
+      const app = Server.getInstance();
+      const previousHost = process.env.MCP_HTTP_HOST;
+      process.env.MCP_HTTP_HOST = '127.0.0.1';
+      try {
+        const initializeRequest = {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2025-03-26',
+            capabilities: {},
+            clientInfo: { name: 'loopback-local-only-bypass', version: '1.0.0' },
+          },
+        };
+        const res = await app.inject({
+          method: 'POST',
+          url: '/mcp',
+          remoteAddress: '127.0.0.1',
+          headers: {
+            accept: 'application/json, text/event-stream',
+            'content-type': 'application/json',
+          },
+          payload: initializeRequest,
+        });
+        expect(res.statusCode).toBe(200);
+        expect(res.headers['mcp-session-id']).toBeTruthy();
+      } finally {
+        if (previousHost === undefined) {
+          delete process.env.MCP_HTTP_HOST;
+        } else {
+          process.env.MCP_HTTP_HOST = previousHost;
+        }
+      }
+    });
+
+    test('wildcard listen host 下本机 IP 访问受保护路由也必须携带 Bearer', async () => {
+      const app = Server.getInstance();
+      const previousHost = process.env.MCP_HTTP_HOST;
+      process.env.MCP_HTTP_HOST = '0.0.0.0';
+      try {
+        const initializeRequest = {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2025-03-26',
+            capabilities: {},
+            clientInfo: { name: 'loopback-wildcard-auth-required', version: '1.0.0' },
+          },
+        };
+        const unauthenticated = await app.inject({
+          method: 'POST',
+          url: '/mcp',
+          remoteAddress: '127.0.0.1',
+          headers: {
+            accept: 'application/json, text/event-stream',
+            'content-type': 'application/json',
+          },
+          payload: initializeRequest,
+        });
+        expect(unauthenticated.statusCode).toBe(401);
+
+        const authenticated = await app.inject({
+          method: 'POST',
+          url: '/mcp',
+          remoteAddress: '127.0.0.1',
+          headers: {
+            authorization: `Bearer ${REMOTE_BEARER_TOKEN}`,
+            accept: 'application/json, text/event-stream',
+            'content-type': 'application/json',
+          },
+          payload: initializeRequest,
+        });
+        expect(authenticated.statusCode).toBe(200);
+      } finally {
+        if (previousHost === undefined) {
+          delete process.env.MCP_HTTP_HOST;
+        } else {
+          process.env.MCP_HTTP_HOST = previousHost;
+        }
+      }
+    });
+
     test('远程 IP Bearer 错误时返回 401', async () => {
       const app = Server.getInstance();
       const res = await app.inject({

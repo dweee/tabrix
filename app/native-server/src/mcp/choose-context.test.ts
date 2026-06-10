@@ -31,6 +31,7 @@ import { logger } from '../logging/logger';
 function fakeRow(overrides: Partial<ExperienceActionPathRow> = {}): ExperienceActionPathRow {
   return {
     actionPathId: 'ap-default',
+    siteFamily: 'github',
     pageRole: 'repo_home',
     intentSignature: 'open issues',
     stepSequence: [{ toolName: 'chrome_click_element', status: 'completed', historyRef: null }],
@@ -143,8 +144,16 @@ describe('parseTabrixChooseContextInput', () => {
     expect(resolveSiteFamily(parsed.input)).toBeUndefined();
   });
 
-  it('drops unrecognised siteId silently', () => {
+  it('keeps safe non-GitHub siteId tokens as site-neutral routing scope', () => {
     const parsed = parseTabrixChooseContextInput({ intent: 'open issues', siteId: 'douyin' });
+    expect(parsed.input.siteId).toBe('douyin');
+  });
+
+  it('drops unsafe siteId tokens silently', () => {
+    const parsed = parseTabrixChooseContextInput({
+      intent: 'open issues',
+      siteId: 'https://douyin.com/path',
+    });
     expect(parsed.input.siteId).toBeUndefined();
   });
 
@@ -160,6 +169,10 @@ describe('resolveSiteFamily', () => {
     expect(resolveSiteFamily({ intent: 'x', siteId: 'github' })).toBe('github');
   });
 
+  it('honours explicit non-GitHub siteId without requiring a hard-coded policy', () => {
+    expect(resolveSiteFamily({ intent: 'x', siteId: 'douyin' })).toBe('douyin');
+  });
+
   it('derives github from github.com host', () => {
     expect(resolveSiteFamily({ intent: 'x', url: 'https://github.com/octocat/hello-world' })).toBe(
       'github',
@@ -173,8 +186,10 @@ describe('resolveSiteFamily', () => {
     expect(resolveSiteFamily({ intent: 'x', url: 'https://gist.github.com/x' })).toBe('github');
   });
 
-  it('returns undefined for unknown host', () => {
-    expect(resolveSiteFamily({ intent: 'x', url: 'https://www.douyin.com/foo' })).toBeUndefined();
+  it('derives a safe site family token for non-GitHub hosts', () => {
+    expect(resolveSiteFamily({ intent: 'x', url: 'https://www.douyin.com/foo' })).toBe(
+      'www.douyin.com',
+    );
   });
 
   it('returns undefined for unparseable url', () => {
@@ -563,7 +578,7 @@ describe('runTabrixChooseContext (orchestrator)', () => {
     expect(result.strategy).toBe('experience_reuse');
   });
 
-  it('stays on experience_reuse when the row pageRole is outside the GitHub v1 allowlist', () => {
+  it('stays on experience_reuse when the site replay policy rejects the row pageRole', () => {
     const { service } = fakeExperience([
       fakeRow({
         actionPathId: 'ap-replay-bad-role',
@@ -809,9 +824,29 @@ describe('runTabrixChooseContext (orchestrator)', () => {
     expect(spy).toHaveBeenCalledWith({
       intent: expect.any(String),
       intentSignature: expect.any(String),
+      siteFamily: undefined,
       pageRole: 'repo_home',
       limit: expect.any(Number),
     });
+  });
+
+  it('passes resolved siteFamily into the Experience lookup', () => {
+    const { service, spy } = fakeExperience([]);
+    runTabrixChooseContext(
+      {
+        intent: 'open issues',
+        url: 'https://github.com/example/repo/issues',
+        pageRole: 'repo_home',
+      },
+      { experience: service, knowledgeApi: null, capabilityEnv: {} },
+    );
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intentSignature: 'open issues',
+        siteFamily: 'github',
+        pageRole: 'repo_home',
+      }),
+    );
   });
 
   it('echoes resolved bucket fields back to the caller', () => {
@@ -1071,7 +1106,7 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
     expect(routerFields.decisionReason).toBe('api_knowledge_candidate_available');
   });
 
-  it('routes npmjs Chinese package search through internal API knowledge without adding a public site family', () => {
+  it('routes npmjs Chinese package search through internal API knowledge with a generic site token', () => {
     const { service } = fakeExperience([]);
     const result = runTabrixChooseContext(
       {
@@ -1097,7 +1132,7 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
     expect(result.status).toBe('ok');
     expect(result.strategy).toBe('knowledge_light');
     expect(result.sourceRoute).toBe('knowledge_supported_read');
-    expect(result.resolved?.siteFamily).toBeUndefined();
+    expect(result.resolved?.siteFamily).toBe('www.npmjs.com');
     const routerFields = result as Record<string, unknown>;
     expect(routerFields.chosenSource).toBe('api_list');
     expect(routerFields.dispatcherInputSource).toBe('api_knowledge');

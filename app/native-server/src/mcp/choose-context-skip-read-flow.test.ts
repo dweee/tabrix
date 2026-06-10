@@ -2032,12 +2032,13 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
     try {
       // Replay-eligible Experience row: a single
       // `chrome_click_element` step whose args extract to a portable
-      // shape, on a GitHub pageRole the v1 allowlist accepts, with
+      // shape, under a registered GitHub replay policy, with
       // success counters above
       // {EXPERIENCE_REPLAY_MIN_SUCCESS_COUNT, _RATE}.
       const ACTION_PATH_ID = 'action_path_' + 'a'.repeat(64);
       const replayableRow: ExperienceActionPathRow = {
         actionPathId: ACTION_PATH_ID,
+        siteFamily: 'github',
         pageRole: 'issues_list',
         intentSignature: 'browse repository issues',
         stepSequence: [
@@ -2081,9 +2082,10 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
       // `pageRole.length > 0`; with the chooser's own pageRole left
       // unset the dispatcher falls through to the priority-5 MKEP
       // rule and emits `'experience_replay_skip_read'`. The mocked
-      // row's `pageRole='issues_list'` is what gates ROW-side
-      // replay eligibility (`TABRIX_EXPERIENCE_REPLAY_GITHUB_PAGE_ROLES`),
-      // and that path is independent of the chooser-input pageRole.
+      // row's `siteFamily='github'` + `pageRole='issues_list'`
+      // gate ROW-side replay eligibility through the site-aware
+      // replay policy, and that path is independent of the
+      // chooser-input pageRole.
       // Pick an `intent` whose `classifyIntentForLayerDispatch`
       // bucket is `'unknown'` — `inspect` / `details` / `summary`
       // / `open` / `click` / `fill` / `search` etc. all collapse

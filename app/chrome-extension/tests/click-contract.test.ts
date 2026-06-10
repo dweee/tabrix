@@ -317,6 +317,45 @@ describe('buildPostActionReadbackEvidence', () => {
     });
   });
 
+  it('promotes dom_changed only when a scoped verifier readback passes', () => {
+    const evidence = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'click',
+      observedOutcome: 'dom_changed',
+      verifierPassed: true,
+      verifierReason: 'scoped_region_state_observed',
+      candidateAction: { intent: 'filter.sort_most_collected' },
+    });
+
+    expect(evidence).toMatchObject({
+      status: 'proven_by_fresh_readback',
+      observedOutcome: 'dom_changed',
+      freshReadRequired: false,
+      businessSuccessProven: true,
+      readbackSource: 'click_verifier',
+      requiredNextAction: 'none',
+      expectedEvidence: 'search_results_or_url_query_changed',
+    });
+  });
+
+  it('treats focus-only click evidence as not proven for replay/business scoring', () => {
+    const evidence = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'click',
+      observedOutcome: 'focus_changed',
+      candidateAction: { intent: 'search.submit' },
+    });
+
+    expect(evidence).toMatchObject({
+      status: 'not_proven',
+      freshReadRequired: true,
+      businessSuccessProven: false,
+      readbackSource: 'none',
+      requiredNextAction: 'stop_or_retry_after_fresh_read',
+      expectedEvidence: 'search_results_or_url_query_changed',
+    });
+  });
+
   it('keeps fill success as dispatch evidence that still needs fresh readback', () => {
     const evidence = buildPostActionReadbackEvidence({
       dispatchSucceeded: true,

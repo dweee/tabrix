@@ -1,4 +1,5 @@
 import { type Tool } from '@modelcontextprotocol/sdk/types.js';
+import { MAX_TABRIX_SITE_ID_CHARS, TABRIX_SITE_ID_PATTERN } from '../site';
 import { TOOL_NAMES } from './names';
 
 export const CONTEXT_SCHEMAS: Tool[] = [
@@ -34,8 +35,9 @@ export const CONTEXT_SCHEMAS: Tool[] = [
         siteId: {
           type: 'string',
           description:
-            'Optional explicit site-family override. Currently only honours `"github"`; other values are ignored (URL-derived family is used instead).',
-          enum: ['github'],
+            'Optional explicit site-family token. Must match the shared safe-token contract (lowercase letters/digits plus dot, underscore, or hyphen). `"github"` remains the GA-compatible seed value; unsupported sites resolve through safe fallback paths.',
+          maxLength: MAX_TABRIX_SITE_ID_CHARS,
+          pattern: TABRIX_SITE_ID_PATTERN.source,
         },
       },
       required: ['intent'],

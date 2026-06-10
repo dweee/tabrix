@@ -282,13 +282,17 @@ Advanced (daemon mode) — environment variable override (higher priority than t
 
 ### 6.2 Confirm token auth
 
-Requests from `127.0.0.1` / `::1` bypass the token. Remote IPs must carry `Authorization: Bearer <token>`, otherwise the server returns `401`.
+Protected routes use a strict local/remote boundary:
+
+- Local-only listen mode (`127.0.0.1` / `localhost`) allows loopback clients (`127.0.0.1`, `::1`, `::ffff:127.0.0.1`) to call protected routes without a token. This assumes same-machine trust and is not a defense against malicious local processes.
+- Remote listen mode (`0.0.0.0` / `::`) requires `Authorization: Bearer <token>` for protected routes such as `/mcp` and `/memory/*`, including requests that arrive from loopback while remote listening is enabled.
+- Remote IPs always require `Authorization: Bearer <token>`, otherwise the server returns `401`.
 
 - Open popup → `Token Management` → copy the current token. You can customize TTL when regenerating (`0` = never expire).
 - Default TTL is 7 days. Override with `MCP_AUTH_TOKEN_TTL`.
 - Setting `MCP_AUTH_TOKEN` forces that token value and disables automatic rotation.
 
-Public endpoints (no token required): `/ping`, `/status`, `/auth/token`, `/auth/refresh`.
+Public diagnostics (no token required): `/ping`, `/status`.
 
 Local-only token management endpoints (not reachable from remote IPs):
 
@@ -348,11 +352,13 @@ Check the popup's `active clients` list. You should see the remote IP and client
 
 ## 6.5 Memory read routes (internal, sidepanel-only)
 
-The native server exposes three HTTP read routes under `/memory/*` for the Chrome extension's sidepanel Memory tab. These are **not** MCP tools — they're internal HTTP-only endpoints protected by the same Bearer token as `/mcp`, intended for an already-authenticated local viewer, and are intentionally read-only (POST/PUT/PATCH/DELETE respond 404 by design).
+The native server exposes HTTP read routes under `/memory/*` for the Chrome extension's sidepanel Memory tab. These are **not** MCP tools — they're internal HTTP-only endpoints protected by the same Bearer token boundary as `/mcp`, intended for an already-authenticated viewer, and regular Memory row writes remain unavailable over HTTP.
 
 - `GET /memory/sessions?limit=&offset=` — recent sessions with task title + intent + `stepCount` joined in; default `limit=20`, max `500`.
 - `GET /memory/sessions/:sessionId/steps` — chronological steps for one session.
 - `GET /memory/tasks/:taskId` — single task row; 404 when unknown.
+- `GET /memory/mke/browser-objects?limit=&offset=` — Object Library summaries. By default web routes are reduced to `origin + path`, query strings and fragments are omitted, and local file paths are not exposed.
+- `GET /memory/mke/object-storage-preferences` / `PATCH /memory/mke/object-storage-preferences` — inspect or update `personalBrowserStateStorageEnabled`. Full current routes are returned only after this setting is explicitly enabled; disabling it clears existing Object Library browser objects.
 
 ## 7. `/status` semantics
 

@@ -93,7 +93,7 @@ describe('V27-05R observation diagnostics', () => {
           tabId: 101,
           urlPattern: 'example.com/list',
           observedAtMs: base + 2,
-          signals: [{ kind: 'dom_region_changed', observedAtMs: base + 10 }],
+          signals: [{ kind: 'dom_region_changed', observedAtMs: base + 10, regionTag: 'main' }],
         },
       },
     } satisfies BridgeObservationMessage);

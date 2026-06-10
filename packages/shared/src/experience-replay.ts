@@ -19,6 +19,8 @@
  * - Current substitution whitelist is `'queryText' | 'targetLabel'`.
  */
 
+import { TABRIX_GITHUB_SITE_ID, type SiteFamily } from './site';
+
 /**
  * Whitelist of legal substitution keys.
  *
@@ -78,11 +80,14 @@ export const TABRIX_EXPERIENCE_REPLAY_SUPPORTED_STEP_KINDS: ReadonlySet<string> 
 ]);
 
 /**
- * `pageRole` values accepted on the row being replayed. A row whose `pageRole` is not in this set
- * resolves to `non_github_pageRole` `failed-precondition`.
+ * `pageRole` values accepted by the GitHub replay policy.
  *
  * Forward-compatible additions are deliberately conservative: we list
  * only roles `read-page-understanding-github.ts` actually emits today.
+ *
+ * @deprecated Prefer `checkTabrixExperienceReplayPolicy`, which also checks
+ * the row's `siteFamily` so non-GitHub rows cannot reuse GitHub pageRole
+ * tokens by accident.
  */
 export const TABRIX_EXPERIENCE_REPLAY_GITHUB_PAGE_ROLES: ReadonlySet<string> = new Set<string>([
   'repo_home',
@@ -98,6 +103,22 @@ export const TABRIX_EXPERIENCE_REPLAY_GITHUB_PAGE_ROLES: ReadonlySet<string> = n
   'search',
 ]);
 
+export interface TabrixExperienceReplayPolicy {
+  siteFamily: SiteFamily;
+  allowedPageRoles: ReadonlySet<string>;
+}
+
+export const TABRIX_EXPERIENCE_REPLAY_GITHUB_POLICY: Readonly<TabrixExperienceReplayPolicy> =
+  Object.freeze({
+    siteFamily: TABRIX_GITHUB_SITE_ID,
+    allowedPageRoles: TABRIX_EXPERIENCE_REPLAY_GITHUB_PAGE_ROLES,
+  });
+
+export const TABRIX_EXPERIENCE_REPLAY_POLICIES: ReadonlyMap<
+  SiteFamily,
+  Readonly<TabrixExperienceReplayPolicy>
+> = new Map([[TABRIX_GITHUB_SITE_ID, TABRIX_EXPERIENCE_REPLAY_GITHUB_POLICY]]);
+
 /**
  * Closed failure-code enum.
  *
@@ -111,6 +132,9 @@ export type TabrixReplayFailureCode =
   | 'step_budget_exceeded'
   | 'unsupported_step_kind'
   | 'page_role_mismatch'
+  | 'site_replay_policy_missing'
+  | 'page_role_not_allowed'
+  /** @deprecated Kept only for legacy result consumers. New code emits site-aware policy reasons. */
   | 'non_github_pageRole'
   | 'template_field_missing'
   // per-step
@@ -132,6 +156,8 @@ export const TABRIX_REPLAY_FAILURE_CODES: ReadonlySet<TabrixReplayFailureCode> =
     'step_budget_exceeded',
     'unsupported_step_kind',
     'page_role_mismatch',
+    'site_replay_policy_missing',
+    'page_role_not_allowed',
     'non_github_pageRole',
     'template_field_missing',
     'substitution_invalid',
@@ -143,6 +169,56 @@ export const TABRIX_REPLAY_FAILURE_CODES: ReadonlySet<TabrixReplayFailureCode> =
     'policy_denied',
     'capability_off',
   ]);
+
+export type TabrixExperienceReplayPolicyBlockReason =
+  | 'site_replay_policy_missing'
+  | 'page_role_not_allowed';
+
+export interface TabrixExperienceReplayPolicyDecision {
+  allowed: boolean;
+  siteFamily: SiteFamily | null;
+  pageRole: string;
+  policy?: Readonly<TabrixExperienceReplayPolicy>;
+  blockedBy?: TabrixExperienceReplayPolicyBlockReason;
+}
+
+export function getTabrixExperienceReplayPolicyForSite(
+  siteFamily: SiteFamily | undefined | null,
+): Readonly<TabrixExperienceReplayPolicy> | undefined {
+  if (!siteFamily) return undefined;
+  return TABRIX_EXPERIENCE_REPLAY_POLICIES.get(siteFamily);
+}
+
+export function checkTabrixExperienceReplayPolicy(input: {
+  siteFamily?: SiteFamily | null;
+  pageRole: string;
+}): TabrixExperienceReplayPolicyDecision {
+  const siteFamily = input.siteFamily ?? null;
+  const policy = getTabrixExperienceReplayPolicyForSite(siteFamily);
+  if (!policy) {
+    return {
+      allowed: false,
+      siteFamily,
+      pageRole: input.pageRole,
+      blockedBy: 'site_replay_policy_missing',
+    };
+  }
+  if (!policy.allowedPageRoles.has(input.pageRole)) {
+    return {
+      allowed: false,
+      siteFamily,
+      pageRole: input.pageRole,
+      policy,
+      blockedBy: 'page_role_not_allowed',
+    };
+  }
+  return {
+    allowed: true,
+    siteFamily,
+    pageRole: input.pageRole,
+    policy,
+  };
+}
 
 /**
  * Public input for `experience_replay`.
@@ -201,6 +277,8 @@ export interface TabrixExperienceReplayStepOutcome {
 /** Echo block returned alongside per-step outcomes. */
 export interface TabrixExperienceReplayResolved {
   actionPathId: string;
+  /** Site policy used for replay. Optional until native-server rows backfill it. */
+  siteFamily?: SiteFamily;
   pageRole: string;
   intentSignature: string;
   /** Keys actually substituted into the replay. NEVER echoes the values. */

@@ -474,7 +474,7 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
         data: {
           actionId: 'act-click-1',
           actionKind: 'click',
-          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 + 10 }],
+          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 + 10, regionTag: 'main' }],
         },
       }),
     );
@@ -523,7 +523,7 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
         data: {
           actionId: 'act-click-clean-hygiene',
           actionKind: 'click',
-          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 }],
+          signals: [{ kind: 'dom_region_changed', observedAtMs: T0, regionTag: 'main' }],
         },
       }),
     );
@@ -600,7 +600,7 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
         data: {
           actionId: 'act-click-hygiene-violation',
           actionKind: 'click',
-          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 }],
+          signals: [{ kind: 'dom_region_changed', observedAtMs: T0, regionTag: 'main' }],
         },
       }),
     );
@@ -654,7 +654,7 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     });
   });
 
-  it('turns no-observed-change action outcomes into failed postconditions', () => {
+  it('keeps no-observed-change action outcomes as unproven postconditions', () => {
     ensureLifecycleEvidenceCollectorRegistered();
     dispatchBridgeObservationToStream(
       makeBridgeMessage('action_outcome', {
@@ -682,29 +682,23 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
       available: true,
       totalActions: 1,
       passed: 0,
-      failed: 1,
-      unknown: 0,
+      failed: 0,
+      unknown: 1,
     });
     expect(artifact.actionLog.entries[0]).toMatchObject({
       actionId: 'act-click-noop',
-      verdict: 'failed',
+      verdict: 'unknown',
       observedOutcome: 'no_observed_change',
-      reason: 'no_relevant_effect_observed',
+      reason: 'low_confidence',
     });
-    expect(artifact.signalSequence).toMatchObject({
-      available: true,
-      totalSignals: 1,
-      signalsByKind: { postcondition_failed: 1 },
-    });
-    expect(artifact.signalSequence.signals[0]).toMatchObject({
-      kind: 'postcondition_failed',
-      confidence: 0.85,
-      sourceOrigins: ['browser_stream'],
+    expect(artifact.signalSequence).toEqual({
+      available: false,
+      reason: 'bns_02_not_available',
     });
     expect(artifact.finalVerdict).toEqual({
-      verdict: 'task_failed',
-      confidence: 0.85,
-      reason: 'postcondition_failed',
+      verdict: 'unknown',
+      confidence: 0.2,
+      reason: 'postconditions_unknown',
     });
   });
 
@@ -717,7 +711,7 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
         data: {
           actionId: 'act-before-window',
           actionKind: 'click',
-          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 }],
+          signals: [{ kind: 'dom_region_changed', observedAtMs: T0, regionTag: 'main' }],
         },
       }),
     );
@@ -728,7 +722,7 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
         data: {
           actionId: 'act-other-tab',
           actionKind: 'click',
-          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 + 10 }],
+          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 + 10, regionTag: 'main' }],
         },
       }),
     );
@@ -739,7 +733,7 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
         data: {
           actionId: 'act-in-scope',
           actionKind: 'click',
-          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 + 20 }],
+          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 + 20, regionTag: 'main' }],
         },
       }),
     );
@@ -771,7 +765,7 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
         data: {
           actionId: 'act-malformed',
           actionKind: 'scroll',
-          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 }],
+          signals: [{ kind: 'dom_region_changed', observedAtMs: T0, regionTag: 'main' }],
         },
       }),
     );
@@ -799,7 +793,7 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
         data: {
           actionId: 'act-private',
           actionKind: 'click',
-          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 }],
+          signals: [{ kind: 'dom_region_changed', observedAtMs: T0, regionTag: 'main' }],
           rawText: 'PRIVATE_TEXT_SHOULD_NOT_APPEAR',
           Authorization: 'secret-token',
         },
@@ -832,7 +826,7 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
         data: {
           actionId: 'act-store',
           actionKind: 'click',
-          signals: [{ kind: 'dom_region_changed', observedAtMs: T0 }],
+          signals: [{ kind: 'dom_region_changed', observedAtMs: T0, regionTag: 'main' }],
         },
       }),
     );

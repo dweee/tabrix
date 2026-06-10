@@ -223,6 +223,7 @@ describe('ExperienceRepository.suggestActionPaths (B-013, SQL)', () => {
     repo: ExperienceRepository,
     overrides: Partial<{
       actionPathId: string;
+      siteFamily: string;
       pageRole: string;
       intentSignature: string;
       successDelta: number;
@@ -233,6 +234,7 @@ describe('ExperienceRepository.suggestActionPaths (B-013, SQL)', () => {
   ) {
     repo.upsertActionPath({
       actionPathId: overrides.actionPathId ?? 'ap-x',
+      siteFamily: overrides.siteFamily ?? 'github',
       pageRole: overrides.pageRole ?? 'repo_home',
       intentSignature: overrides.intentSignature ?? 'open issues',
       stepSequence: overrides.stepSequence ?? [
@@ -252,6 +254,7 @@ describe('ExperienceRepository.suggestActionPaths (B-013, SQL)', () => {
       seed(repo, { intentSignature: 'open issues' });
       const rows = repo.suggestActionPaths({
         intentSignature: 'something else',
+        siteFamily: 'github',
         limit: 1,
       });
       expect(rows).toEqual([]);
@@ -280,6 +283,7 @@ describe('ExperienceRepository.suggestActionPaths (B-013, SQL)', () => {
 
       const rows = repo.suggestActionPaths({
         intentSignature: 'open issues',
+        siteFamily: 'github',
         limit: 5,
       });
       expect(rows.map((r) => r.actionPathId)).toEqual(['ap-high', 'ap-low']);
@@ -304,6 +308,7 @@ describe('ExperienceRepository.suggestActionPaths (B-013, SQL)', () => {
 
       const onlyIssues = repo.suggestActionPaths({
         intentSignature: 'open issues',
+        siteFamily: 'github',
         pageRole: 'issues_list',
         limit: 5,
       });
@@ -319,11 +324,13 @@ describe('ExperienceRepository.suggestActionPaths (B-013, SQL)', () => {
       seed(repo, { actionPathId: 'ap-only', successDelta: 1 });
       const zero = repo.suggestActionPaths({
         intentSignature: 'open issues',
+        siteFamily: 'github',
         limit: 0,
       });
       expect(zero).toHaveLength(1);
       const negative = repo.suggestActionPaths({
         intentSignature: 'open issues',
+        siteFamily: 'github',
         limit: -10,
       });
       expect(negative).toHaveLength(1);
@@ -349,9 +356,119 @@ describe('ExperienceRepository.suggestActionPaths (B-013, SQL)', () => {
       });
       const rows = repo.suggestActionPaths({
         intentSignature: 'open issues',
+        siteFamily: 'github',
         limit: 5,
       });
       expect(rows.map((r) => r.actionPathId)).toEqual(['ap-new', 'ap-old']);
+    } finally {
+      close();
+    }
+  });
+
+  it('fails closed when the caller does not provide a known siteFamily', () => {
+    const { repo, close } = bootstrap();
+    try {
+      seed(repo, { actionPathId: 'ap-github', siteFamily: 'github', successDelta: 5 });
+      expect(
+        repo.suggestActionPaths({
+          intentSignature: 'open issues',
+          limit: 5,
+        }),
+      ).toEqual([]);
+      expect(
+        repo.suggestActionPaths({
+          intentSignature: 'open issues',
+          siteFamily: 'unknown',
+          limit: 5,
+        }),
+      ).toEqual([]);
+    } finally {
+      close();
+    }
+  });
+
+  it('keeps identical pageRole and intent isolated by siteFamily', () => {
+    const { repo, close } = bootstrap();
+    try {
+      seed(repo, {
+        actionPathId: 'ap-github',
+        siteFamily: 'github',
+        pageRole: 'repo_home',
+        intentSignature: 'open issues',
+        successDelta: 10,
+      });
+      seed(repo, {
+        actionPathId: 'ap-example',
+        siteFamily: 'example.com',
+        pageRole: 'repo_home',
+        intentSignature: 'open issues',
+        successDelta: 1,
+      });
+
+      const githubRows = repo.suggestActionPaths({
+        intentSignature: 'open issues',
+        siteFamily: 'github',
+        pageRole: 'repo_home',
+        limit: 5,
+      });
+      expect(githubRows.map((r) => r.actionPathId)).toEqual(['ap-github']);
+
+      const exampleRows = repo.suggestActionPaths({
+        intentSignature: 'open issues',
+        siteFamily: 'example.com',
+        pageRole: 'repo_home',
+        limit: 5,
+      });
+      expect(exampleRows.map((r) => r.actionPathId)).toEqual(['ap-example']);
+    } finally {
+      close();
+    }
+  });
+
+  it('preserves the existing siteFamily when a same-id upsert omits siteFamily', () => {
+    const { repo, close } = bootstrap();
+    try {
+      seed(repo, {
+        actionPathId: 'ap-site-preserve',
+        siteFamily: 'example.com',
+        pageRole: 'repo_home',
+        intentSignature: 'open issues',
+        successDelta: 1,
+      });
+      repo.upsertActionPath({
+        actionPathId: 'ap-site-preserve',
+        pageRole: 'repo_home',
+        intentSignature: 'open issues',
+        stepSequence: [
+          { toolName: 'chrome_click_element', status: 'completed', historyRef: 'h://later' },
+        ],
+        successDelta: 2,
+        failureDelta: 0,
+        lastUsedAt: '2026-04-21T00:00:00.000Z',
+        createdAt: '2026-04-21T00:00:00.000Z',
+        updatedAt: '2026-04-21T00:00:00.000Z',
+      });
+
+      const rows = repo.suggestActionPaths({
+        intentSignature: 'open issues',
+        siteFamily: 'example.com',
+        pageRole: 'repo_home',
+        limit: 5,
+      });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        actionPathId: 'ap-site-preserve',
+        siteFamily: 'example.com',
+        successCount: 3,
+      });
+      expect(
+        repo.suggestActionPaths({
+          intentSignature: 'open issues',
+          siteFamily: 'unknown',
+          pageRole: 'repo_home',
+          limit: 5,
+        }),
+      ).toEqual([]);
     } finally {
       close();
     }
@@ -438,6 +555,7 @@ describe('ExperienceRepository.suggestActionPaths · V24-01 replay-session sanit
       snapshotRepo.insert({
         snapshotId: 'orig-snap',
         stepId: 'orig-1',
+        url: 'https://github.com/example/repo/issues',
         pageRole: 'issues_list',
         fallbackUsed: false,
         interactiveCount: 0,
@@ -449,6 +567,7 @@ describe('ExperienceRepository.suggestActionPaths · V24-01 replay-session sanit
 
       const initial = experienceRepo.suggestActionPaths({
         intentSignature: 'open issues',
+        siteFamily: 'github',
         pageRole: 'issues_list',
         limit: 1,
       });
@@ -473,6 +592,7 @@ describe('ExperienceRepository.suggestActionPaths · V24-01 replay-session sanit
 
       const after = experienceRepo.suggestActionPaths({
         intentSignature: 'open issues',
+        siteFamily: 'github',
         pageRole: 'issues_list',
         limit: 1,
       });

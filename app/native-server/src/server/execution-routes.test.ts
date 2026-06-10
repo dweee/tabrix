@@ -80,6 +80,8 @@ function seedDecision(opts: {
     | 'capability_off'
     | 'unsupported_step_kind'
     | 'non_portable_args'
+    | 'site_replay_policy_missing'
+    | 'page_role_not_allowed'
     | 'non_github_pageRole'
     | 'below_threshold'
     | 'stale_locator'
