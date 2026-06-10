@@ -198,9 +198,17 @@ describe('MKE core repositories', () => {
         objectFingerprint: 'target:example.test:button',
         objectType: 'action_target',
       });
+      browserObjectRepo.upsert({
+        ...common,
+        pageModelKey: 'data-source:example.test',
+        objectFingerprint: 'data-source:example.test:api',
+        objectType: 'data_source',
+        selectedDataSource: 'api_rows',
+      });
 
-      expect(browserObjectRepo.count()).toBe(7);
+      expect(browserObjectRepo.count()).toBe(8);
       expect(browserObjectRepo.countCurrentBrowserSurface()).toBe(3);
+      expect(browserObjectRepo.countObjectLibraryGraphSurface()).toBe(7);
       expect(
         browserObjectRepo.listCurrentBrowserSurface({ limit: 10, offset: 0 }).map((object) => ({
           objectType: object.objectType,
@@ -210,6 +218,20 @@ describe('MKE core repositories', () => {
         { objectType: 'window', lifecycleState: null },
         { objectType: 'tab', lifecycleState: null },
         { objectType: 'tab', lifecycleState: 'closed' },
+      ]);
+      expect(
+        browserObjectRepo.listObjectLibraryGraphSurface({ limit: 10, offset: 0 }).map((object) => ({
+          objectType: object.objectType,
+          lifecycleState: object.lifecycleState,
+        })),
+      ).toEqual([
+        { objectType: 'window', lifecycleState: null },
+        { objectType: 'tab', lifecycleState: null },
+        { objectType: 'tab', lifecycleState: 'closed' },
+        { objectType: 'page', lifecycleState: null },
+        { objectType: 'region', lifecycleState: null },
+        { objectType: 'action_target', lifecycleState: null },
+        { objectType: 'data_source', lifecycleState: null },
       ]);
     } finally {
       close();

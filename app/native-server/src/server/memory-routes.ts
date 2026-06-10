@@ -19,7 +19,7 @@
  * - `GET /memory/sessions/:sessionId/steps` → steps for one session
  * - `GET /memory/tasks/:taskId` → single task + its sessions
  * - `GET /memory/mke/traces?limit=&offset=` → sanitized MKE Memory trace summaries
- * - `GET /memory/mke/browser-objects?limit=&offset=` → sanitized browser object summaries
+ * - `GET /memory/mke/browser-objects?limit=&offset=&scope=` → sanitized browser object summaries
  * - `DELETE /memory/mke/browser-objects` → clear Object Library rows only
  * - `GET /memory/mke/object-storage-preferences` → Object Library storage preferences
  * - `PATCH /memory/mke/object-storage-preferences` → update Object Library storage preferences
@@ -67,7 +67,11 @@ interface SessionsQuery {
   offset?: string;
 }
 
-type MkeListQuery = SessionsQuery;
+interface MkeListQuery extends SessionsQuery {
+  scope?: string;
+}
+
+type BrowserObjectsScope = 'browser-surface' | 'object-graph';
 
 interface ObjectStoragePreferencesBody {
   personalBrowserStateStorageEnabled?: boolean;
@@ -78,6 +82,10 @@ function parsePositiveInt(raw: unknown, fallback: number, max: number): number {
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) return fallback;
   return Math.min(max, Math.max(0, Math.floor(n)));
+}
+
+function parseBrowserObjectsScope(raw: unknown): BrowserObjectsScope {
+  return raw === 'object-graph' ? 'object-graph' : 'browser-surface';
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -651,10 +659,15 @@ export function registerMemoryRoutes(
     async (request: FastifyRequest<{ Querystring: MkeListQuery }>, reply: FastifyReply) => {
       const limit = parsePositiveInt(request.query.limit, 20, SESSION_SUMMARY_LIMIT_MAX);
       const offset = parsePositiveInt(request.query.offset, 0, Number.MAX_SAFE_INTEGER);
-      const browserObjects = sessionManager
-        .listRecentMkeBrowserObjects(limit, offset)
-        .map(toObjectSummary);
-      const total = sessionManager.countMkeBrowserObjects();
+      const scope = parseBrowserObjectsScope(request.query.scope);
+      const browserObjects =
+        scope === 'object-graph'
+          ? sessionManager.listMkeObjectLibraryGraph(limit, offset).map(toObjectSummary)
+          : sessionManager.listRecentMkeBrowserObjects(limit, offset).map(toObjectSummary);
+      const total =
+        scope === 'object-graph'
+          ? sessionManager.countMkeObjectLibraryGraph()
+          : sessionManager.countMkeBrowserObjects();
       const persistence = sessionManager.getPersistenceStatus();
 
       return reply.status(HTTP_STATUS.OK).send({

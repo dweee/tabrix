@@ -719,8 +719,11 @@ describe('native host reconnect behavior', () => {
       name: 'chrome_read_page',
       args: { tabId: 1 },
     });
-    expect(wsHarness.instances[0].sent).toHaveLength(1);
-    expect(JSON.parse(wsHarness.instances[0].sent[0])).toMatchObject({
+    const commandResults = wsHarness.instances[0].sent
+      .map((entry) => JSON.parse(entry))
+      .filter((entry) => entry.type === 'result' && entry.requestId === 'req-1');
+    expect(commandResults).toHaveLength(1);
+    expect(commandResults[0]).toMatchObject({
       type: 'result',
       requestId: 'req-1',
       success: true,

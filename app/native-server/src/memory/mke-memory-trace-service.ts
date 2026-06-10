@@ -506,6 +506,16 @@ function objectFingerprint(...parts: Array<string | number | null | undefined>):
     .join(':');
 }
 
+function isApiLikeDataSource(...values: Array<string | null | undefined>): boolean {
+  const text = values.filter(Boolean).join(' ').toLowerCase();
+  return (
+    text.includes('api') ||
+    text.includes('cdp') ||
+    text.includes('endpoint') ||
+    text.includes('knowledge')
+  );
+}
+
 function normalizeOwnerType(value: string | null): string | null {
   if (!value) return null;
   if (value === 'ai' || value === 'run_owned') return 'ai';
@@ -952,6 +962,74 @@ export class MkeMemoryTraceService {
     });
   }
 
+  private recordReadPageDataSourceObject(input: {
+    trace: MemoryTrace;
+    payload: Record<string, unknown>;
+    observedAt: string;
+    browserContextKey: string | null;
+    siteFamily: string;
+    rootRoute: string | null;
+    currentRoute: string | null;
+    pageModelKey: string;
+    pageRole: string;
+    tabId: number | null;
+  }): void {
+    const projection = readNestedObject(input.payload, 'pageProjection');
+    const selectedDataSource = readString(
+      projection?.chosenDataSource,
+      projection?.selectedDataSource,
+      input.payload.selectedDataSource,
+      input.payload.kind,
+    );
+    const sourceRoute = readString(input.payload.sourceRoute, input.trace.sourceRoute);
+    const endpointFamily = readString(
+      input.payload.endpointFamily,
+      input.payload.endpointPattern,
+      readNestedObject(input.payload, 'source')?.endpointFamily,
+    );
+    if (!isApiLikeDataSource(selectedDataSource, sourceRoute, endpointFamily)) return;
+
+    const sourceKey = selectedDataSource ?? endpointFamily ?? sourceRoute ?? 'api';
+    this.upsertBrowserObject({
+      siteFamily: input.siteFamily,
+      pageUrlPattern: input.rootRoute,
+      rootRoute: input.rootRoute,
+      currentRoute: input.currentRoute,
+      pageRole: input.pageRole,
+      pageModelKey: input.pageModelKey,
+      objectFingerprint: objectFingerprint(
+        'data_source',
+        input.pageModelKey,
+        sourceKey,
+        input.tabId,
+      ),
+      objectType: 'data_source',
+      browserContextKey: input.browserContextKey ?? input.trace.browserContextKey ?? null,
+      tabId: input.tabId,
+      sourceRoute,
+      selectedDataSource,
+      sourceFreshness: readString(input.payload.freshness, input.trace.freshness),
+      lifecycleState: 'observed',
+      canTabrixOperate: true,
+      facts: this.sanitizeBrowserObjectValue({
+        selectedDataSource,
+        sourceRoute,
+        endpointFamily,
+        payloadKind: readString(input.payload.kind),
+        sourcePrimaryOrigin: readString(
+          readNestedObject(projection, 'sourceTruthChain')?.primaryOrigin,
+        ),
+      }),
+      claimBoundary: readString(input.payload.apiCdpProofBoundary),
+      confidenceScore: readFiniteNumber(projection?.sourceConfidence),
+      firstTraceId: input.trace.traceId,
+      lastTraceId: input.trace.traceId,
+      sourceTraceIds: sourceTraceIds(input.trace),
+      redactionState: this.browserObjectRedactionState(),
+      updatedAt: input.observedAt,
+    });
+  }
+
   private recordReadPageChildObjects(input: {
     trace: MemoryTrace;
     payload: Record<string, unknown>;
@@ -964,6 +1042,8 @@ export class MkeMemoryTraceService {
     pageRole: string;
     tabId: number | null;
   }): void {
+    this.recordReadPageDataSourceObject(input);
+
     for (const [index, rawRegion] of readArray(input.payload.pageRegions).slice(0, 40).entries()) {
       const region = readObject(rawRegion);
       if (!region) continue;

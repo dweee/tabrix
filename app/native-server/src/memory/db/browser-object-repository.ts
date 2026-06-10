@@ -266,9 +266,11 @@ export class BrowserObjectRepository {
   private readonly getByIdentityStmt;
   private readonly listRecentStmt;
   private readonly listCurrentBrowserSurfaceStmt;
+  private readonly listObjectLibraryGraphSurfaceStmt;
   private readonly archiveStmt;
   private readonly countStmt;
   private readonly countCurrentBrowserSurfaceStmt;
+  private readonly countObjectLibraryGraphSurfaceStmt;
   private readonly clearStmt;
 
   constructor(private readonly db: SqliteDatabase) {
@@ -375,6 +377,47 @@ export class BrowserObjectRepository {
                  is_active DESC, updated_at DESC, created_at DESC
         LIMIT ? OFFSET ?`,
     );
+    this.listObjectLibraryGraphSurfaceStmt = db.prepare(
+      `SELECT * FROM tabrix_browser_objects
+        WHERE archived_at IS NULL
+          AND (
+            (
+              object_type IN ('window', 'tab')
+              AND source_route = 'chrome_windows_get_all_with_browser_world_inventory'
+              AND (
+                (
+                  closed_at IS NULL
+                  AND COALESCE(lifecycle_state, '') NOT IN ('closed', 'removed')
+                  AND updated_at = (
+                    SELECT MAX(updated_at) FROM tabrix_browser_objects
+                      WHERE archived_at IS NULL
+                        AND closed_at IS NULL
+                        AND object_type IN ('window', 'tab')
+                        AND COALESCE(lifecycle_state, '') NOT IN ('closed', 'removed')
+                        AND source_route = 'chrome_windows_get_all_with_browser_world_inventory'
+                  )
+                )
+                OR (
+                  closed_at IS NOT NULL
+                  AND COALESCE(lifecycle_state, '') = 'closed'
+                )
+              )
+            )
+            OR object_type IN ('page', 'region', 'action_target', 'data_source')
+          )
+        ORDER BY CASE object_type
+                   WHEN 'window' THEN 0
+                   WHEN 'tab' THEN 1
+                   WHEN 'page' THEN 2
+                   WHEN 'region' THEN 3
+                   WHEN 'action_target' THEN 4
+                   WHEN 'data_source' THEN 5
+                   ELSE 6
+                 END,
+                 CASE WHEN closed_at IS NULL THEN 0 ELSE 1 END,
+                 is_active DESC, updated_at DESC, created_at DESC
+        LIMIT ? OFFSET ?`,
+    );
     this.archiveStmt = db.prepare(
       'UPDATE tabrix_browser_objects SET archived_at = ?, updated_at = ? WHERE browser_object_id = ?',
     );
@@ -403,6 +446,35 @@ export class BrowserObjectRepository {
               closed_at IS NOT NULL
               AND COALESCE(lifecycle_state, '') = 'closed'
             )
+          )`,
+    );
+    this.countObjectLibraryGraphSurfaceStmt = db.prepare(
+      `SELECT COUNT(*) AS count FROM tabrix_browser_objects
+        WHERE archived_at IS NULL
+          AND (
+            (
+              object_type IN ('window', 'tab')
+              AND source_route = 'chrome_windows_get_all_with_browser_world_inventory'
+              AND (
+                (
+                  closed_at IS NULL
+                  AND COALESCE(lifecycle_state, '') NOT IN ('closed', 'removed')
+                  AND updated_at = (
+                    SELECT MAX(updated_at) FROM tabrix_browser_objects
+                      WHERE archived_at IS NULL
+                        AND closed_at IS NULL
+                        AND object_type IN ('window', 'tab')
+                        AND COALESCE(lifecycle_state, '') NOT IN ('closed', 'removed')
+                        AND source_route = 'chrome_windows_get_all_with_browser_world_inventory'
+                  )
+                )
+                OR (
+                  closed_at IS NOT NULL
+                  AND COALESCE(lifecycle_state, '') = 'closed'
+                )
+              )
+            )
+            OR object_type IN ('page', 'region', 'action_target', 'data_source')
           )`,
     );
     this.clearStmt = db.prepare('DELETE FROM tabrix_browser_objects');
@@ -511,6 +583,18 @@ export class BrowserObjectRepository {
     ).map(rowToBrowserObject);
   }
 
+  public listObjectLibraryGraphSurface(input?: {
+    limit?: number;
+    offset?: number;
+  }): BrowserObject[] {
+    return (
+      this.listObjectLibraryGraphSurfaceStmt.all(
+        input?.limit ?? 20,
+        input?.offset ?? 0,
+      ) as BrowserObjectRow[]
+    ).map(rowToBrowserObject);
+  }
+
   public archive(input: { browserObjectId: string; archivedAt: string }): void {
     this.archiveStmt.run(input.archivedAt, input.archivedAt, input.browserObjectId);
   }
@@ -522,6 +606,11 @@ export class BrowserObjectRepository {
 
   public countCurrentBrowserSurface(): number {
     const row = this.countCurrentBrowserSurfaceStmt.get() as { count: number } | undefined;
+    return row?.count ?? 0;
+  }
+
+  public countObjectLibraryGraphSurface(): number {
+    const row = this.countObjectLibraryGraphSurfaceStmt.get() as { count: number } | undefined;
     return row?.count ?? 0;
   }
 

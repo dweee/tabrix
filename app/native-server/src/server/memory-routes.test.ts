@@ -681,9 +681,13 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
           tabId: 21,
           pageRole: 'multi_region_page',
           pageModelKey: 'read://example.test/search',
+          chosenDataSource: 'api_rows',
           sourceFreshness: 'fresh',
           sourceConfidence: 0.72,
         },
+        sourceRoute: 'knowledge_api_endpoints',
+        selectedDataSource: 'api_rows',
+        endpointFamily: 'example_search',
         pageRegions: [{ regionId: 'content', regionType: 'content', confidence: 0.8 }],
         candidateActions: [{ targetRef: 'open-result', actionType: 'click', confidence: 0.8 }],
       }),
@@ -706,6 +710,26 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
         ['page', 'region', 'action_target'].includes(String(object.objectType)),
       ),
     ).toBe(false);
+
+    const graph = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=20&offset=0&scope=object-graph')
+      .expect(200);
+
+    expect(graph.body.data.total).toBe(6);
+    const graphObjects = graph.body.data.browserObjects as Array<Record<string, unknown>>;
+    expect(graphObjects.map((object) => object.objectType)).toEqual(
+      expect.arrayContaining(['window', 'tab', 'page', 'region', 'action_target', 'data_source']),
+    );
+    expect(graphObjects.find((object) => object.objectType === 'data_source')).toMatchObject({
+      selectedDataSource: 'api_rows',
+      sourceRoute: 'knowledge_api_endpoints',
+    });
+    expect(graphObjects.find((object) => object.objectType === 'action_target')).toMatchObject({
+      actionTypes: ['click'],
+      redactionState: 'redacted',
+    });
+    expect(JSON.stringify(graphObjects)).not.toContain('currentState');
+    expect(JSON.stringify(graphObjects)).not.toContain('sourceTraceIds');
   });
 
   test('DELETE /memory/mke/browser-objects clears Object Library without deleting Memory traces', async () => {

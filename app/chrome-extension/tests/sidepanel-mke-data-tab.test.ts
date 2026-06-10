@@ -9,6 +9,7 @@ function readSource(relativePath: string): string {
 describe('Sidepanel MKE data tab', () => {
   const appSource = readSource('entrypoints/sidepanel/App.vue');
   const tabSource = readSource('entrypoints/sidepanel/tabs/MkeDataTab.vue');
+  const objectViewSource = readSource('entrypoints/sidepanel/tabs/mke-object-library-view.ts');
 
   it('exposes one user-facing sidepanel data console instead of engineering module tabs', () => {
     expect(appSource).toContain(
@@ -25,11 +26,13 @@ describe('Sidepanel MKE data tab', () => {
   it('queries the four MKE/Object tables and Object Library preferences through the memory API client', () => {
     expect(tabSource).toContain('fetchMkeMemoryTraces');
     expect(tabSource).toContain('fetchMkeBrowserObjects');
+    expect(tabSource).toContain('buildMkeObjectLibraryView');
     expect(tabSource).toContain('fetchMkeKnowledgeModels');
     expect(tabSource).toContain('fetchMkeExperienceRecipes');
     expect(tabSource).toContain('fetchMkeObjectStoragePreferences');
     expect(tabSource).toContain('updateMkeObjectStoragePreferences');
     expect(tabSource).toContain('clearMkeBrowserObjects');
+    expect(tabSource).toContain("scope: 'object-graph'");
     expect(tabSource).toContain('type ActiveTab = MkeDataTabId');
     expect(tabSource).toContain("label: '记忆库'");
     expect(tabSource).toContain("label: '对象库'");
@@ -63,6 +66,14 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain('mkep-tab__header');
     expect(tabSource).not.toContain('mkep-tab__subtitle');
     expect(tabSource).toContain('mke-data-body');
+    expect(tabSource).toContain('mke-object-workspace');
+    expect(tabSource).toContain('当前网页现场');
+    expect(tabSource).toContain('filteredObjectWebPages');
+    expect(tabSource).toContain('selectedObjectWebPage');
+    expect(objectViewSource).toContain('页面对象');
+    expect(objectViewSource).toContain('可操作功能');
+    expect(objectViewSource).toContain('数据/API');
+    expect(objectViewSource).toContain('生命周期');
     expect(tabSource).toContain('type="search"');
     expect(tabSource).toContain('搜索当前列表');
     expect(tabSource).toContain('mke-search-icon');
@@ -177,6 +188,9 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain(
       "if (activeTab.value === 'object') return browserObjects.value.map(objectToRecord)",
     );
+    expect(tabSource).toContain('objectLibraryView');
+    expect(tabSource).toContain('formatObjectWebPageJson');
+    expect(tabSource).toContain('copyObjectWebPageJson');
     expect(tabSource).toContain('function objectToRecord(object: MkeBrowserObjectSummary)');
     expect(tabSource).toContain('object.currentRoute ||');
     expect(tabSource).toContain('object.rootRoute,');

@@ -19,6 +19,11 @@ describe('MkeDataTab render smoke', () => {
     expect(source).not.toContain('mkep-tab__header');
     expect(source).not.toContain('mkep-tab__subtitle');
     expect(source).toContain('mke-data-body');
+    expect(source).toContain('mke-object-workspace');
+    expect(source).toContain('mke-webpage-list');
+    expect(source).toContain('mke-webpage-detail');
+    expect(source).toContain('当前网页现场');
+    expect(source).toContain("scope: 'object-graph'");
     expect(source).toContain('搜索当前列表');
     expect(source).toContain('mke-search-icon');
     expect(source).toContain('搜索主题、对象、方法、网址、状态');
@@ -37,6 +42,8 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('object.pageIdentity?.url');
     expect(source).toContain('function formatObjectCardTitle(object: MkeBrowserObjectSummary)');
     expect(source).toContain('function formatObjectFacts(');
+    expect(source).toContain('buildMkeObjectLibraryView');
+    expect(source).toContain('formatObjectWebPageJson');
     expect(source).toContain("if (object.objectType === 'window')");
     expect(source).toContain("['标签', formatObjectTabCount(object)]");
     expect(source).toContain('const locationLabel = formatObjectLocation');
@@ -160,6 +167,8 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('width: 100%;');
     expect(source).toContain('grid-template-columns: auto minmax(118px, 1fr) auto;');
     expect(source).toContain('grid-template-columns: auto minmax(108px, 1fr) auto;');
+    expect(source).toContain('grid-template-columns: minmax(156px, 0.9fr) minmax(190px, 1.1fr);');
+    expect(source).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
     expect(source).toContain('right: 20px;');
     expect(source).toContain('top: 10px;');
     expect(source).toContain('height: 30px;');

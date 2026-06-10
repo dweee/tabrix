@@ -73,6 +73,61 @@ describe('MkeMemoryTraceService', () => {
     }
   });
 
+  it('projects API-backed read_page results as data_source Browser Objects', async () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const browserObjectRepo = new BrowserObjectRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo, browserObjectRepo);
+
+    try {
+      traceService.recordToolCall({
+        taskId: 'trace-api-source-task',
+        taskIntent: 'read list through observed API',
+        aiClient: 'jest',
+        toolName: 'chrome_read_page',
+        stepId: 'trace-api-source-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 9 },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 25,
+        result: textResult({
+          kind: 'api_rows',
+          page: { url: 'https://example.test/items?q=alpha' },
+          summary: { pageRole: 'search_results', quality: 'fresh' },
+          sourceRoute: 'knowledge_api_endpoints',
+          selectedDataSource: 'api_rows',
+          endpointFamily: 'example_items_search',
+          freshness: 'fresh',
+          tabId: 9,
+          pageProjection: {
+            pageRole: 'search_results',
+            pageModelKey: 'page:example.test:search_results',
+            chosenDataSource: 'api_rows',
+            sourceConfidence: 0.92,
+            sourceTruthChain: {
+              primaryOrigin: 'api',
+            },
+          },
+        }),
+        resultSummary: 'fresh API-backed page read',
+      });
+
+      await traceService.flushAsyncWrites();
+
+      const objects = browserObjectRepo.listRecent({ limit: 10, offset: 0 });
+      expect(objects.map((object) => object.objectType).sort()).toEqual(['data_source', 'page']);
+      expect(objects.find((object) => object.objectType === 'data_source')).toMatchObject({
+        selectedDataSource: 'api_rows',
+        sourceRoute: 'knowledge_api_endpoints',
+        lifecycleState: 'observed',
+        canTabrixOperate: true,
+      });
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
   it('rolls back read_page Browser Object writes when a child object write fails', async () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const traceRepo = new MemoryTraceRepository(db);

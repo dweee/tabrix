@@ -792,9 +792,19 @@ export class SessionManager {
     return this.repos.browserObject.listCurrentBrowserSurface({ limit, offset });
   }
 
+  public listMkeObjectLibraryGraph(limit: number, offset: number): BrowserObject[] {
+    if (!this.repos) return [];
+    return this.repos.browserObject.listObjectLibraryGraphSurface({ limit, offset });
+  }
+
   public countMkeBrowserObjects(): number {
     if (!this.repos) return 0;
     return this.repos.browserObject.countCurrentBrowserSurface();
+  }
+
+  public countMkeObjectLibraryGraph(): number {
+    if (!this.repos) return 0;
+    return this.repos.browserObject.countObjectLibraryGraphSurface();
   }
 
   public clearMkeBrowserObjects(): void {

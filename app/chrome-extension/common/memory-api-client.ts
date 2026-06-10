@@ -165,6 +165,12 @@ export interface FetchMkeListOptions {
   baseUrl?: string;
 }
 
+export type MkeBrowserObjectsScope = 'browser-surface' | 'object-graph';
+
+export interface FetchMkeBrowserObjectsOptions extends FetchMkeListOptions {
+  scope?: MkeBrowserObjectsScope;
+}
+
 /** `GET /memory/mke/traces?limit=&offset=` */
 export async function fetchMkeMemoryTraces(
   options: FetchMkeListOptions = {},
@@ -176,10 +182,11 @@ export async function fetchMkeMemoryTraces(
 
 /** `GET /memory/mke/browser-objects?limit=&offset=` */
 export async function fetchMkeBrowserObjects(
-  options: FetchMkeListOptions = {},
+  options: FetchMkeBrowserObjectsOptions = {},
 ): Promise<MkeBrowserObjectsResponseData> {
   const { base, limit, offset } = await buildMkeListRequest(options);
-  const url = `${base}/memory/mke/browser-objects?limit=${limit}&offset=${offset}`;
+  const scope = options.scope ? `&scope=${encodeURIComponent(options.scope)}` : '';
+  const url = `${base}/memory/mke/browser-objects?limit=${limit}&offset=${offset}${scope}`;
   return readEnvelope<MkeBrowserObjectsResponseData>(url, options.signal);
 }
 

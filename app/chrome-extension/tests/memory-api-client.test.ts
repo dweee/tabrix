@@ -397,6 +397,27 @@ describe('MKE data query helpers', () => {
     );
   });
 
+  it('fetches Object Library graph scope when requested by the sidepanel', async () => {
+    fetchMock.mockResolvedValue(
+      okResponse({
+        browserObjects: [],
+        total: 0,
+        limit: 20,
+        offset: 0,
+        persistenceMode: 'disk',
+      }),
+    );
+
+    await fetchMkeBrowserObjects({
+      baseUrl: 'http://127.0.0.1:12306',
+      scope: 'object-graph',
+    });
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      'http://127.0.0.1:12306/memory/mke/browser-objects?limit=20&offset=0&scope=object-graph',
+    );
+  });
+
   it('fetches and updates Object Library storage preferences', async () => {
     fetchMock
       .mockResolvedValueOnce(
