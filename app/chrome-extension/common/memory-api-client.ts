@@ -10,9 +10,9 @@
  *   background/popup consumer.
  * - Base URL is derived from `chrome.storage.local.nativeServerPort`
  *   with the 12306 fallback used elsewhere in the extension (see
- *   `popup/App.vue → getServerBaseUrl`). Localhost reaches the server
- *   without a bearer token because the server's `onRequest` hook
- *   allows loopback IPs (see `app/native-server/src/server/index.ts`).
+ *   `popup/App.vue → getServerBaseUrl`). Protected routes may require a
+ *   bearer token when the native server is exposed beyond loopback, so
+ *   this client retries 401 responses with the current local `/auth/token`.
  * - Errors always surface as `MemoryApiError` so callers can branch on
  *   `.kind` ∈ `{network, http, shape}` instead of pattern-matching
  *   message strings.
@@ -265,12 +265,7 @@ async function readEnvelope<TData>(
   signal?: AbortSignal,
   init: RequestInit = {},
 ): Promise<TData> {
-  let response: Response;
-  try {
-    response = await fetch(url, { ...init, signal });
-  } catch (cause) {
-    throw new MemoryApiError('network', `Network error contacting ${url}`, { cause });
-  }
+  const response = await fetchWithNativeServerAuthRetry(url, init, signal);
 
   let parsed: unknown;
   try {
@@ -297,6 +292,80 @@ async function readEnvelope<TData>(
   }
 
   return parsed.data;
+}
+
+export async function fetchWithNativeServerAuthRetry(
+  url: string,
+  init: RequestInit = {},
+  signal?: AbortSignal,
+): Promise<Response> {
+  const response = await fetchNativeServer(url, init, signal);
+  if (response.status !== 401 || hasAuthorizationHeader(init.headers)) {
+    return response;
+  }
+
+  const token = await readNativeServerBearerToken(url, signal);
+  if (!token) {
+    return response;
+  }
+
+  return fetchNativeServer(
+    url,
+    {
+      ...init,
+      headers: withBearerHeader(init.headers, token),
+    },
+    signal,
+  );
+}
+
+async function fetchNativeServer(
+  url: string,
+  init: RequestInit,
+  signal?: AbortSignal,
+): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal });
+  } catch (cause) {
+    throw new MemoryApiError('network', `Network error contacting ${url}`, { cause });
+  }
+}
+
+async function readNativeServerBearerToken(
+  protectedUrl: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  let tokenUrl: string;
+  try {
+    tokenUrl = new URL('/auth/token', protectedUrl).toString();
+  } catch {
+    return null;
+  }
+
+  try {
+    const response = await fetch(tokenUrl, { signal });
+    if (!response.ok) return null;
+    const parsed: unknown = await response.json();
+    if (!isMemorySuccessEnvelope<unknown>(parsed)) return null;
+    const token = (parsed.data as { token?: unknown } | null)?.token;
+    return typeof token === 'string' && token.length > 0 ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasAuthorizationHeader(headers: HeadersInit | undefined): boolean {
+  try {
+    return new Headers(headers).has('authorization');
+  } catch {
+    return false;
+  }
+}
+
+function withBearerHeader(headers: HeadersInit | undefined, token: string): Headers {
+  const next = new Headers(headers);
+  next.set('authorization', `Bearer ${token}`);
+  return next;
 }
 
 function isMemorySuccessEnvelope<TData>(value: unknown): value is MemoryReadSuccess<TData> {

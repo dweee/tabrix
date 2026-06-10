@@ -304,6 +304,65 @@ describe('MKE data query helpers', () => {
     );
   });
 
+  it('retries protected MKE reads with the current bearer token after 401', async () => {
+    const payload = {
+      knowledgeModels: [],
+      total: 0,
+      limit: 5,
+      offset: 0,
+      persistenceMode: 'disk' as const,
+    };
+    fetchMock
+      .mockResolvedValueOnce(
+        errResponse(
+          401,
+          'Unauthorized - provide a valid Bearer token via the Authorization header.',
+        ),
+      )
+      .mockResolvedValueOnce(okResponse({ token: 'test-token' }))
+      .mockResolvedValueOnce(okResponse(payload));
+
+    const data = await fetchMkeKnowledgeModels({
+      baseUrl: 'http://127.0.0.1:12306',
+      limit: 5,
+      offset: 0,
+    });
+
+    expect(data).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'http://127.0.0.1:12306/memory/mke/knowledge?limit=5&offset=0',
+    );
+    expect(fetchMock.mock.calls[1][0]).toBe('http://127.0.0.1:12306/auth/token');
+    expect(fetchMock.mock.calls[2][0]).toBe(
+      'http://127.0.0.1:12306/memory/mke/knowledge?limit=5&offset=0',
+    );
+    const retryInit = fetchMock.mock.calls[2][1] as RequestInit;
+    expect(new Headers(retryInit.headers).get('authorization')).toBe('Bearer test-token');
+  });
+
+  it('preserves the original 401 when the local auth endpoint has no token', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        errResponse(
+          401,
+          'Unauthorized - provide a valid Bearer token via the Authorization header.',
+        ),
+      )
+      .mockResolvedValueOnce(okResponse(null));
+
+    await expect(
+      fetchMkeExperienceRecipes({ baseUrl: 'http://127.0.0.1:12306' }),
+    ).rejects.toMatchObject({
+      kind: 'http',
+      httpStatus: 401,
+      message: 'Unauthorized - provide a valid Bearer token via the Authorization header.',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe('http://127.0.0.1:12306/auth/token');
+  });
+
   it('fetches Browser Object summaries with explicit pagination', async () => {
     const payload = {
       browserObjects: [
