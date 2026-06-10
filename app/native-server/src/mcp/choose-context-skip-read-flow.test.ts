@@ -1967,7 +1967,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
     );
 
     const result = await handleToolCall('chrome_read_page', {
-      // Caller asks for the schema default — full layered read.
+      // Caller explicitly asks for the full layered read.
       requestedLayer: 'L0+L1+L2',
       // Unrelated args MUST survive verbatim through the fallback
       // path so caller contracts that key off `tabId` / `windowId` /

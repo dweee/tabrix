@@ -232,6 +232,7 @@ describe('read_page mode', () => {
     expect(result.isError).toBe(false);
     expectCommonSnapshotShape(payload, 'compact');
     expect(payload.observationProfile).toBe('task');
+    expect(payload.L2 ?? null).toBeNull();
     expect(payload.coverage.overall).toMatch(/^(degraded|visible_unresolved|covered)$/);
     expect(payload.evidenceSource).toEqual(expect.arrayContaining(['ax', 'dom']));
     expect(payload.page).toMatchObject({
@@ -446,6 +447,7 @@ describe('read_page mode', () => {
 
     expect(result.isError).toBe(false);
     expectCommonSnapshotShape(payload, 'compact');
+    expect(payload.L2 ?? null).toBeNull();
     expect(payload.fileInputBindings).toEqual([
       expect.objectContaining({
         selector: 'input[type="file"][name="images"]',
