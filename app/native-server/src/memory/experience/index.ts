@@ -28,6 +28,8 @@ export {
   type WritebackWarningRow,
 } from './experience-repository';
 export {
+  EXPERIENCE_SUGGEST_MIN_SUCCESS_COUNT,
+  EXPERIENCE_SUGGEST_MIN_SUCCESS_RATE,
   ExperienceSuggestPlanInputError,
   buildSuggestPlanResult,
   parseExperienceSuggestPlanInput,

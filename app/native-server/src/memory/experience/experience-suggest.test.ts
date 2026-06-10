@@ -4,6 +4,8 @@ import type { ExecutionSession, ExecutionStep, Task } from '../../execution/type
 import {
   ExperienceAggregator,
   ExperienceRepository,
+  EXPERIENCE_SUGGEST_MIN_SUCCESS_COUNT,
+  EXPERIENCE_SUGGEST_MIN_SUCCESS_RATE,
   ExperienceSuggestPlanInputError,
   buildSuggestPlanResult,
   parseExperienceSuggestPlanInput,
@@ -156,7 +158,7 @@ describe('buildSuggestPlanResult (B-013, pure)', () => {
     expect(result.persistenceMode).toBe('memory');
   });
 
-  it('keeps rows with positive successful observations and filters zero-success rows', () => {
+  it('filters rows below the suggestion evidence gate', () => {
     const result = buildSuggestPlanResult(
       [
         {
@@ -170,12 +172,34 @@ describe('buildSuggestPlanResult (B-013, pure)', () => {
           updatedAt: '2026-04-20T00:00:00.000Z',
         },
         {
-          actionPathId: 'ap-positive',
+          actionPathId: 'ap-low-sample',
           pageRole: 'repo_home',
           intentSignature: 'open issues',
           stepSequence: [],
           successCount: 1,
-          failureCount: 4,
+          failureCount: 0,
+          createdAt: '2026-04-20T00:00:00.000Z',
+          updatedAt: '2026-04-20T00:00:00.000Z',
+        },
+      ],
+      'disk',
+    );
+    expect(result.status).toBe('no_match');
+    expect(result.plans).toEqual([]);
+    expect(EXPERIENCE_SUGGEST_MIN_SUCCESS_COUNT).toBe(3);
+    expect(EXPERIENCE_SUGGEST_MIN_SUCCESS_RATE).toBe(0.7);
+  });
+
+  it('keeps rows that clear the suggestion evidence gate', () => {
+    const result = buildSuggestPlanResult(
+      [
+        {
+          actionPathId: 'ap-good',
+          pageRole: 'repo_home',
+          intentSignature: 'open issues',
+          stepSequence: [],
+          successCount: 3,
+          failureCount: 1,
           createdAt: '2026-04-20T00:00:00.000Z',
           updatedAt: '2026-04-20T00:00:00.000Z',
         },
@@ -183,8 +207,8 @@ describe('buildSuggestPlanResult (B-013, pure)', () => {
       'disk',
     );
     expect(result.status).toBe('ok');
-    expect(result.plans.map((p) => p.actionPathId)).toEqual(['ap-positive']);
-    expect(result.plans[0].successRate).toBeCloseTo(0.2, 5);
+    expect(result.plans.map((p) => p.actionPathId)).toEqual(['ap-good']);
+    expect(result.plans[0].successRate).toBeCloseTo(0.75, 5);
   });
 });
 

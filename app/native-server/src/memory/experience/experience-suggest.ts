@@ -24,6 +24,9 @@ import {
 import { normalizeIntentSignature } from './experience-aggregator';
 import type { ExperienceActionPathRow } from './experience-repository';
 
+export const EXPERIENCE_SUGGEST_MIN_SUCCESS_COUNT = 3;
+export const EXPERIENCE_SUGGEST_MIN_SUCCESS_RATE = 0.7;
+
 export class ExperienceSuggestPlanInputError extends Error {
   public readonly code: 'TABRIX_EXPERIENCE_SUGGEST_PLAN_BAD_INPUT';
   constructor(message: string) {
@@ -143,20 +146,23 @@ function rowToPlan(row: ExperienceActionPathRow): ExperienceActionPathPlan {
   };
 }
 
-function hasPositiveSuccessEvidence(row: ExperienceActionPathRow): boolean {
-  return row.successCount > 0;
+function isSuggestableExperience(row: ExperienceActionPathRow): boolean {
+  return (
+    row.successCount >= EXPERIENCE_SUGGEST_MIN_SUCCESS_COUNT &&
+    computeSuccessRate(row.successCount, row.failureCount) >= EXPERIENCE_SUGGEST_MIN_SUCCESS_RATE
+  );
 }
 
 /**
  * Pure projection: rows → `ExperienceSuggestPlanResult`. Unit-tested
- * directly. Rows without any successful observation are filtered out;
- * empty surviving rows always yield `status: 'no_match'`.
+ * directly. Rows below the Experience suggestion evidence gate are
+ * filtered out; empty surviving rows always yield `status: 'no_match'`.
  */
 export function buildSuggestPlanResult(
   rows: ExperienceActionPathRow[],
   persistenceMode: MemoryPersistenceMode,
 ): ExperienceSuggestPlanResult {
-  const plans = rows.filter(hasPositiveSuccessEvidence).map(rowToPlan);
+  const plans = rows.filter(isSuggestableExperience).map(rowToPlan);
   return {
     status: plans.length > 0 ? 'ok' : 'no_match',
     plans,
