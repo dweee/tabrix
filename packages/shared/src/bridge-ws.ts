@@ -28,6 +28,12 @@ export interface BridgeHeartbeatMessage {
   tabCount?: number | null;
   windowCount?: number | null;
   autoConnectEnabled?: boolean | null;
+  /**
+   * Internal current browser window/tab snapshot. The native server
+   * projects this into the Object Library; it is not a public MCP
+   * response shape.
+   */
+  browserWorld?: unknown;
 }
 
 export interface BridgeCommandMessage {

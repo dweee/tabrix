@@ -101,6 +101,7 @@ interface BridgeHeartbeatPayload {
   tabCount?: unknown;
   windowCount?: unknown;
   autoConnectEnabled?: unknown;
+  browserWorld?: unknown;
 }
 
 interface BridgeFileOperationPayload {
@@ -559,6 +560,13 @@ export class Server {
         }
 
         const body = (request.body || {}) as BridgeHeartbeatPayload;
+        if (body.browserWorld && typeof body.browserWorld === 'object') {
+          sessionManager.recordMkeBrowserWorldSnapshot({
+            browserWorld: body.browserWorld,
+            observedAtMs: Number.isFinite(body.sentAt) ? Number(body.sentAt) : Date.now(),
+            browserContextKey: typeof body.connectionId === 'string' ? body.connectionId : null,
+          });
+        }
         const snapshot = this.recordBridgeHeartbeat({
           sentAt: Number.isFinite(body.sentAt) ? Number(body.sentAt) : Date.now(),
           nativeConnected: body.nativeConnected === true,

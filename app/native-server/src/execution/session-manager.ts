@@ -802,6 +802,14 @@ export class SessionManager {
     this.repos?.browserObject.clear();
   }
 
+  public recordMkeBrowserWorldSnapshot(input: {
+    browserWorld: unknown;
+    observedAtMs?: number;
+    browserContextKey?: string | null;
+  }): void {
+    this.memoryTraceService?.recordBrowserWorldSnapshot(input);
+  }
+
   public listRecentMkeKnowledgeModels(limit: number, offset: number): KnowledgeModel[] {
     if (!this.repos) return [];
     return this.repos.knowledgeModel.listRecent({ limit, offset });

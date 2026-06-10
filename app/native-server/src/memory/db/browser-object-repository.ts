@@ -351,19 +351,28 @@ export class BrowserObjectRepository {
     this.listCurrentBrowserSurfaceStmt = db.prepare(
       `SELECT * FROM tabrix_browser_objects
         WHERE archived_at IS NULL
-          AND closed_at IS NULL
           AND object_type IN ('window', 'tab')
-          AND COALESCE(lifecycle_state, '') NOT IN ('closed', 'removed')
           AND source_route = 'chrome_windows_get_all_with_browser_world_inventory'
-          AND updated_at = (
-            SELECT MAX(updated_at) FROM tabrix_browser_objects
-              WHERE archived_at IS NULL
-                AND closed_at IS NULL
-                AND object_type IN ('window', 'tab')
-                AND COALESCE(lifecycle_state, '') NOT IN ('closed', 'removed')
-                AND source_route = 'chrome_windows_get_all_with_browser_world_inventory'
+          AND (
+            (
+              closed_at IS NULL
+              AND COALESCE(lifecycle_state, '') NOT IN ('closed', 'removed')
+              AND updated_at = (
+                SELECT MAX(updated_at) FROM tabrix_browser_objects
+                  WHERE archived_at IS NULL
+                    AND closed_at IS NULL
+                    AND object_type IN ('window', 'tab')
+                    AND COALESCE(lifecycle_state, '') NOT IN ('closed', 'removed')
+                    AND source_route = 'chrome_windows_get_all_with_browser_world_inventory'
+              )
+            )
+            OR (
+              closed_at IS NOT NULL
+              AND COALESCE(lifecycle_state, '') = 'closed'
+            )
           )
-        ORDER BY is_active DESC, updated_at DESC, created_at DESC
+        ORDER BY CASE WHEN closed_at IS NULL THEN 0 ELSE 1 END,
+                 is_active DESC, updated_at DESC, created_at DESC
         LIMIT ? OFFSET ?`,
     );
     this.archiveStmt = db.prepare(
@@ -375,17 +384,25 @@ export class BrowserObjectRepository {
     this.countCurrentBrowserSurfaceStmt = db.prepare(
       `SELECT COUNT(*) AS count FROM tabrix_browser_objects
         WHERE archived_at IS NULL
-          AND closed_at IS NULL
           AND object_type IN ('window', 'tab')
-          AND COALESCE(lifecycle_state, '') NOT IN ('closed', 'removed')
           AND source_route = 'chrome_windows_get_all_with_browser_world_inventory'
-          AND updated_at = (
-            SELECT MAX(updated_at) FROM tabrix_browser_objects
-              WHERE archived_at IS NULL
-                AND closed_at IS NULL
-                AND object_type IN ('window', 'tab')
-                AND COALESCE(lifecycle_state, '') NOT IN ('closed', 'removed')
-                AND source_route = 'chrome_windows_get_all_with_browser_world_inventory'
+          AND (
+            (
+              closed_at IS NULL
+              AND COALESCE(lifecycle_state, '') NOT IN ('closed', 'removed')
+              AND updated_at = (
+                SELECT MAX(updated_at) FROM tabrix_browser_objects
+                  WHERE archived_at IS NULL
+                    AND closed_at IS NULL
+                    AND object_type IN ('window', 'tab')
+                    AND COALESCE(lifecycle_state, '') NOT IN ('closed', 'removed')
+                    AND source_route = 'chrome_windows_get_all_with_browser_world_inventory'
+              )
+            )
+            OR (
+              closed_at IS NOT NULL
+              AND COALESCE(lifecycle_state, '') = 'closed'
+            )
           )`,
     );
     this.clearStmt = db.prepare('DELETE FROM tabrix_browser_objects');

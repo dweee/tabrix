@@ -226,4 +226,72 @@ describe('MkeMemoryTraceService', () => {
       db.close();
     }
   });
+
+  it('records BrowserWorld snapshots into Object Library without appending Memory traces', () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const browserObjectRepo = new BrowserObjectRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo, browserObjectRepo);
+
+    try {
+      traceService.recordBrowserWorldSnapshot({
+        observedAtMs: NOW_MS,
+        browserContextKey: 'heartbeat-conn',
+        browserWorld: {
+          status: 'fresh',
+          recentActivityLedger: {
+            latestPageClosed: {
+              kind: 'page_closed',
+              tabId: 22,
+              windowId: 10,
+              url: 'https://example.test/closed?token=secret',
+              title: 'Closed Dashboard',
+              openedBy: 'user_or_page',
+              occurredAtMs: NOW_MS - 1000,
+              evidence: 'browser_world_closed_tab_snapshot',
+            },
+          },
+          windows: [{ windowId: 10, focused: true, state: 'normal', tabCount: 1 }],
+          tabs: [
+            {
+              tabId: 21,
+              windowId: 10,
+              active: true,
+              status: 'complete',
+              openedBy: 'user_or_page',
+              canTabrixOperate: true,
+              url: 'https://example.test/dashboard?token=secret',
+              title: 'Dashboard',
+            },
+          ],
+        },
+      });
+
+      expect(traceRepo.count()).toBe(0);
+      expect(browserObjectRepo.countCurrentBrowserSurface()).toBe(3);
+      const objects = browserObjectRepo.listCurrentBrowserSurface({ limit: 10, offset: 0 });
+      const tab = objects.find((object) => object.objectType === 'tab' && object.tabId === 21);
+      const closedTab = objects.find(
+        (object) => object.objectType === 'tab' && object.tabId === 22,
+      );
+      expect(tab).toMatchObject({
+        browserContextKey: 'heartbeat-conn',
+        objectType: 'tab',
+        tabId: 21,
+        lifecycleState: 'updated',
+        sourceRoute: 'chrome_windows_get_all_with_browser_world_inventory',
+      });
+      expect(closedTab).toMatchObject({
+        objectType: 'tab',
+        tabId: 22,
+        lifecycleState: 'closed',
+        closedAt: new Date(NOW_MS - 1000).toISOString(),
+        archivedAt: null,
+      });
+      expect(JSON.stringify(tab)).not.toContain('secret');
+      expect(JSON.stringify(closedTab)).not.toContain('secret');
+    } finally {
+      db.close();
+    }
+  });
 });

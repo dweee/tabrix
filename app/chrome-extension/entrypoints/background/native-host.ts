@@ -21,6 +21,7 @@ import {
   classifyStableRefRevalidation,
 } from './observers/tab-window-context';
 import { getStableTargetRefRegistrySnapshot } from './tools/browser/stable-target-ref-registry';
+import { getBrowserWorldSnapshot } from './browser-world-inventory';
 
 const LOG_PREFIX = '[NativeHost]';
 
@@ -508,6 +509,7 @@ async function probeRunningServerStatus(port: number): Promise<ServerStatus | nu
 async function collectHeartbeatSnapshot() {
   let tabCount: number | null = null;
   let windowCount: number | null = null;
+  let browserWorld: unknown = null;
 
   try {
     const tabs = await chrome.tabs.query({});
@@ -523,6 +525,19 @@ async function collectHeartbeatSnapshot() {
     windowCount = null;
   }
 
+  try {
+    const snapshot = await getBrowserWorldSnapshot();
+    browserWorld = {
+      status: snapshot.baselineReadiness.status,
+      observedAtMs: snapshot.observedAtMs,
+      recentActivityLedger: snapshot.summary.recentActivityLedger,
+      windows: snapshot.windows,
+      tabs: snapshot.tabs,
+    };
+  } catch {
+    browserWorld = null;
+  }
+
   return {
     extensionId: chrome.runtime.id,
     connectionId:
@@ -534,7 +549,27 @@ async function collectHeartbeatSnapshot() {
     tabCount,
     windowCount,
     autoConnectEnabled,
+    browserWorld,
   };
+}
+
+async function readNativeServerAuthHeaders(port: number): Promise<Record<string, string>> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/auth/token`, {
+      cache: 'no-store',
+    });
+    if (!response.ok) return {};
+    const body = (await response.json()) as
+      | {
+          status?: string;
+          data?: { token?: unknown } | null;
+        }
+      | undefined;
+    const token = body?.status === 'ok' ? body.data?.token : null;
+    return typeof token === 'string' && token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
 }
 
 function clearBridgeSocketReconnectTimer(): void {
@@ -754,6 +789,7 @@ async function postBridgeHeartbeat(reason: string): Promise<void> {
       tabCount: payload.tabCount,
       windowCount: payload.windowCount,
       autoConnectEnabled: payload.autoConnectEnabled,
+      browserWorld: payload.browserWorld,
     };
     try {
       await sendBridgeSocketMessage(heartbeatMessage);
@@ -766,9 +802,10 @@ async function postBridgeHeartbeat(reason: string): Promise<void> {
   if (!port) return;
 
   try {
+    const authHeaders = await readNativeServerAuthHeaders(port);
     const response = await fetch(`http://127.0.0.1:${port}/bridge/heartbeat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify(payload),
       cache: 'no-store',
     });

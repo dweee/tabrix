@@ -14,6 +14,7 @@ import type {
 } from '@tabrix/shared';
 import { bridgeRuntimeState } from './bridge-state';
 import { ingestBridgeObservation } from '../runtime/observation-ingest';
+import { sessionManager } from '../execution/session-manager';
 
 interface PendingCommand {
   resolve: (value: any) => void;
@@ -290,6 +291,13 @@ export class BridgeCommandChannelManager {
       connectionId: message.connectionId,
       seenAt: message.sentAt,
     });
+    if (message.browserWorld && typeof message.browserWorld === 'object') {
+      sessionManager.recordMkeBrowserWorldSnapshot({
+        browserWorld: message.browserWorld,
+        observedAtMs: message.sentAt,
+        browserContextKey: message.connectionId,
+      });
+    }
     bridgeRuntimeState.recordHeartbeat({
       sentAt: message.sentAt,
       nativeConnected: message.nativeConnected,

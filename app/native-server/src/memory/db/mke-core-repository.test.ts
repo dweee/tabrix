@@ -130,7 +130,7 @@ describe('MKE core repositories', () => {
     }
   });
 
-  it('lists Object Library surface as current browser windows and tabs only', () => {
+  it('lists Object Library surface as current browser windows, tabs, and unarchived closed tabs', () => {
     const { browserObjectRepo, close } = bootstrap();
     try {
       const common = {
@@ -200,7 +200,7 @@ describe('MKE core repositories', () => {
       });
 
       expect(browserObjectRepo.count()).toBe(7);
-      expect(browserObjectRepo.countCurrentBrowserSurface()).toBe(2);
+      expect(browserObjectRepo.countCurrentBrowserSurface()).toBe(3);
       expect(
         browserObjectRepo.listCurrentBrowserSurface({ limit: 10, offset: 0 }).map((object) => ({
           objectType: object.objectType,
@@ -209,6 +209,7 @@ describe('MKE core repositories', () => {
       ).toEqual([
         { objectType: 'window', lifecycleState: null },
         { objectType: 'tab', lifecycleState: null },
+        { objectType: 'tab', lifecycleState: 'closed' },
       ]);
     } finally {
       close();

@@ -83,6 +83,12 @@ export interface RecordMkeAiBusinessFeedbackInput {
   sourceToolCallId?: string | null;
 }
 
+export interface RecordBrowserWorldSnapshotInput {
+  browserWorld: unknown;
+  observedAtMs?: number;
+  browserContextKey?: string | null;
+}
+
 interface ParsedResultDigest {
   response: unknown;
   businessSuccess: BusinessSuccessVerdict;
@@ -109,6 +115,16 @@ interface AsyncBrowserObjectWriteJob {
   traceId: string;
   toolName: string;
   run(): void;
+}
+
+interface BrowserObjectProjectionTrace {
+  traceId?: string | null;
+  browserContextKey?: string | null;
+  sourceRoute?: string | null;
+  freshness?: string | null;
+  windowId?: number | null;
+  siteFamily?: string | null;
+  pageUrlPattern?: string | null;
 }
 
 class BoundedAsyncBrowserObjectWriteQueue {
@@ -499,8 +515,8 @@ function normalizeOwnerType(value: string | null): string | null {
   return 'unknown';
 }
 
-function sourceTraceIds(trace: MemoryTrace): string[] {
-  return [trace.traceId];
+function sourceTraceIds(trace: BrowserObjectProjectionTrace): string[] {
+  return trace.traceId ? [trace.traceId] : [];
 }
 
 function normalizeConfidence(value: number | null | undefined): number | null {
@@ -592,6 +608,46 @@ export class MkeMemoryTraceService {
     return trace;
   }
 
+  public recordBrowserWorldSnapshot(input: RecordBrowserWorldSnapshotInput): void {
+    if (!this.browserObjects) return;
+    const browserWorld = readObject(input.browserWorld);
+    if (!browserWorld) return;
+    const observedAtMs =
+      typeof input.observedAtMs === 'number' && Number.isFinite(input.observedAtMs)
+        ? input.observedAtMs
+        : Date.now();
+    const observedAt = new Date(observedAtMs).toISOString();
+    const payload = {
+      source: 'chrome_windows_get_all_with_browser_world_inventory',
+      browserWorld,
+    };
+    const projectionTrace: BrowserObjectProjectionTrace = {
+      traceId: null,
+      browserContextKey: input.browserContextKey ?? 'extension_browser_world_inventory',
+      sourceRoute: 'chrome_windows_get_all_with_browser_world_inventory',
+      freshness: readString(browserWorld.status, browserWorld.freshness),
+      windowId: null,
+      siteFamily: null,
+      pageUrlPattern: null,
+    };
+
+    try {
+      this.browserObjects.transaction(() => {
+        this.recordBrowserWorldObjects(
+          projectionTrace,
+          payload,
+          observedAt,
+          projectionTrace.browserContextKey ?? null,
+        );
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      mkeMemoryTraceLogger.warn('browser world snapshot projection failed', {
+        errorMessage: message,
+      });
+    }
+  }
+
   public flushAsyncWrites(): Promise<void> {
     return this.asyncBrowserObjectWrites.flush();
   }
@@ -645,7 +701,7 @@ export class MkeMemoryTraceService {
   }
 
   private recordBrowserWorldObjects(
-    trace: MemoryTrace,
+    trace: BrowserObjectProjectionTrace,
     payload: Record<string, unknown>,
     observedAt: string,
     browserContextKey: string | null,
@@ -744,9 +800,77 @@ export class MkeMemoryTraceService {
         redactionState: this.browserObjectRedactionState(),
         updatedAt: observedAt,
         closedAt: readNumber(tab.closedAtMs) ? observedAt : null,
-        archivedAt: readNumber(tab.closedAtMs) ? observedAt : null,
+        archivedAt: null,
       });
     }
+    this.recordClosedBrowserWorldPage(trace, browserWorld, observedAt, contextKey, payload);
+  }
+
+  private recordClosedBrowserWorldPage(
+    trace: BrowserObjectProjectionTrace,
+    browserWorld: Record<string, unknown>,
+    observedAt: string,
+    browserContextKey: string,
+    payload: Record<string, unknown>,
+  ): void {
+    const summary = readNestedObject(browserWorld, 'summary');
+    const recentActivityLedger =
+      readObject(browserWorld.recentActivityLedger) ??
+      readNestedObject(summary, 'recentActivityLedger');
+    const latestPageClosed = readNestedObject(recentActivityLedger, 'latestPageClosed');
+    if (!latestPageClosed) return;
+    const tabId = readNumber(latestPageClosed.tabId);
+    if (tabId === null) return;
+    const closedAtMs = readNumber(latestPageClosed.occurredAtMs);
+    const closedAt =
+      closedAtMs !== null && Number.isFinite(closedAtMs)
+        ? new Date(closedAtMs).toISOString()
+        : observedAt;
+    const urlFields = normalizeUrlPattern(readString(latestPageClosed.url), {
+      allowPersonalBrowserStateStorage: this.allowsPersonalBrowserStateStorage(),
+    });
+    const tabWindowId = readNumber(latestPageClosed.windowId) ?? trace.windowId;
+    this.upsertBrowserObject({
+      siteFamily: urlFields.siteFamily ?? trace.siteFamily ?? 'browser',
+      pageUrlPattern: urlFields.pattern ?? trace.pageUrlPattern,
+      rootRoute: urlFields.rootRoute ?? trace.pageUrlPattern,
+      currentRoute: urlFields.currentRoute,
+      pageRole: 'browser_tab',
+      pageModelKey: urlFields.siteFamily ? `tab:${urlFields.siteFamily}` : 'browser-tab',
+      objectFingerprint: objectFingerprint('tab', tabWindowId, tabId),
+      objectType: 'tab',
+      browserContextKey,
+      tabId,
+      windowId: tabWindowId,
+      ownerType: normalizeOwnerType(readString(latestPageClosed.openedBy)),
+      sourceRoute: readString(payload.source, trace.sourceRoute, 'browser_world_inventory'),
+      sourceFreshness: readString(browserWorld.status, browserWorld.freshness, trace.freshness),
+      lifecycleState: 'closed',
+      isActive: false,
+      canTabrixOperate: false,
+      operabilityReason: 'tab_closed',
+      facts: this.sanitizeBrowserObjectValue({
+        titleSummary: readString(latestPageClosed.title),
+        host: urlFields.siteFamily,
+        rootRoute: urlFields.rootRoute,
+        currentRoute: urlFields.currentRoute,
+        evidence: readString(latestPageClosed.evidence),
+      }),
+      firstTraceId: trace.traceId,
+      lastTraceId: trace.traceId,
+      sourceTraceIds: sourceTraceIds(trace),
+      currentState: this.sanitizeBrowserObjectValue({
+        status: 'closed',
+        titleSummary: readString(latestPageClosed.title),
+        host: urlFields.siteFamily,
+        rootRoute: urlFields.rootRoute,
+        currentRoute: urlFields.currentRoute,
+      }),
+      redactionState: this.browserObjectRedactionState(),
+      updatedAt: observedAt,
+      closedAt,
+      archivedAt: null,
+    });
   }
 
   private recordReadPageObjects(

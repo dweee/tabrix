@@ -233,6 +233,7 @@ describe('服务器测试', () => {
   });
 
   test('POST /bridge/heartbeat 应记录扩展心跳并更新 bridge 快照', async () => {
+    sessionManager.reset();
     const syncBrowserSpy = jest
       .spyOn(bridgeRuntimeState, 'syncBrowserProcessNow')
       .mockImplementation(() => {
@@ -252,6 +253,34 @@ describe('服务器测试', () => {
         tabCount: 3,
         windowCount: 1,
         autoConnectEnabled: true,
+        browserWorld: {
+          status: 'fresh',
+          recentActivityLedger: {
+            latestPageClosed: {
+              kind: 'page_closed',
+              tabId: 201,
+              windowId: 100,
+              url: 'https://example.test/closed?token=secret',
+              title: 'Closed Dashboard',
+              openedBy: 'user_or_page',
+              occurredAtMs: sentAt - 1000,
+              evidence: 'browser_world_closed_tab_snapshot',
+            },
+          },
+          windows: [{ windowId: 100, focused: true, state: 'normal', tabCount: 1 }],
+          tabs: [
+            {
+              tabId: 200,
+              windowId: 100,
+              active: true,
+              status: 'complete',
+              openedBy: 'user_or_page',
+              canTabrixOperate: true,
+              url: 'https://example.test/dashboard?token=secret',
+              title: 'Dashboard',
+            },
+          ],
+        },
       })
       .expect(200)
       .expect('Content-Type', /json/);
@@ -277,8 +306,29 @@ describe('服务器测试', () => {
         autoConnectEnabled: true,
       },
     });
+    const objects = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects')
+      .expect(200);
+    expect(objects.body.data.total).toBe(3);
+    expect(objects.body.data.browserObjects).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          objectType: 'tab',
+          objectFingerprint: 'tab:100:200',
+          sourceRoute: 'chrome_windows_get_all_with_browser_world_inventory',
+        }),
+        expect.objectContaining({
+          objectType: 'tab',
+          objectFingerprint: 'tab:100:201',
+          lifecycleState: 'closed',
+          sourceRoute: 'chrome_windows_get_all_with_browser_world_inventory',
+        }),
+      ]),
+    );
+    expect(sessionManager.countMkeMemoryTraces()).toBe(0);
     syncBrowserSpy.mockRestore();
     bridgeRuntimeState.reset();
+    sessionManager.reset();
   });
 
   test('GET /status 应暴露 execution 快照', async () => {
