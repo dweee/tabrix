@@ -1087,7 +1087,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       }
       // Read the public `requestedLayer` field (with legacy `layer`
       // fallback) instead of `(args as any).layer`, and default to the
-      // MCP-schema default `'L0+L1+L2'` when nothing is supplied. When
+      // MCP-schema default `'L0+L1'` when nothing is supplied. When
       // the orchestrator demanded a fallback, override the
       // caller-supplied layer with the clamped fallback entry layer so
       // the gate decision matches what we are about to forward to the
@@ -1246,7 +1246,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     }
     // When the orchestrator demanded a fallback for `chrome_read_page`,
     // replace the caller's `requestedLayer` (which may be the schema
-    // default `'L0+L1+L2'`) with the clamped fallback entry layer (`L0`
+    // default `'L0+L1'`) with the clamped fallback entry layer (`L0`
     // / `L0+L1`). Every other field on `args` (`tabId` / `windowId` /
     // `refId` / …) is preserved verbatim so call-site contracts that
     // rely on them are unaffected.

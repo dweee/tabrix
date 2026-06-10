@@ -185,7 +185,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
           type: 'string',
           enum: ['L0', 'L0+L1', 'L0+L1+L2'],
           description:
-            "Optional layer envelope. When omitted, preserves the legacy full L0+L1+L2 payload. 'L0' returns only the summary task layer (taskMode/pageRole/primaryRegion/focusObjectIds plus stable HVO targetRef registry); L1 and L2 task fields are dropped from the response. 'L0+L1' returns the L0 + L1 overview (highValueObjectIds + candidateActionIds) but suppresses L2 detail refs. 'L0+L1+L2' returns the full controlled expansion (current default behaviour). Stable HVO targetRef registry is ALWAYS written even at 'L0' so chrome_click_element resolution stays deterministic.",
+            "Optional layer envelope. When omitted, defaults to 'L0+L1'. 'L0' returns only the summary task layer (taskMode/pageRole/primaryRegion/focusObjectIds plus stable HVO targetRef registry); L1 and L2 task fields are dropped from the response. 'L0+L1' returns the L0 + L1 overview (highValueObjectIds + candidateActionIds) but suppresses L2 detail refs. 'L0+L1+L2' returns the full controlled expansion and must be requested explicitly. Stable HVO targetRef registry is ALWAYS written even at 'L0' so chrome_click_element resolution stays deterministic.",
         },
         depth: {
           type: 'number',

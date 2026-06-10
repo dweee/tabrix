@@ -1711,9 +1711,8 @@ export const READ_PAGE_TASK_PROTOCOL_FIELDS = [
 
 /**
  * Which layer envelope the caller wants
- * `chrome_read_page` to materialize. `L0+L1+L2` is the legacy default
- * shape that callers see when this field is omitted; the two narrower
- * shapes are opt-in by the chooser through the layer dispatcher.
+ * `chrome_read_page` to materialize. `L0+L1` is the default shape when
+ * this field is omitted; `L0+L1+L2` is the explicit full expansion.
  *
  * The values are intentionally serialization-stable strings (not bit
  * flags) so they can land in the MCP schema and the SQLite telemetry
@@ -1780,7 +1779,7 @@ export const LAYER_DISPATCH_REASON_VALUES: readonly LayerDispatchReason[] = [
  * - `knowledge_supported_read` — caller should call `chrome_read_page`
  *   but the chooser surfaced API Knowledge shape evidence as well.
  * - `dispatcher_fallback_safe` — dispatcher could not classify the
- *   input; fall back to `L0+L1+L2` and call `chrome_read_page`.
+ *   input; fall back to `L0+L1` and call `chrome_read_page`.
  *
  * Adding a fifth value requires a full enum migration in
  * the release gate library, the telemetry column allow-list, and the

@@ -4551,7 +4551,7 @@ describe('handleToolCall execution wrapper', () => {
       expect(ctx.lastReadLayer).toBe('L0+L1');
     });
 
-    it('omitting both fields defaults to L0+L1+L2 (matches MCP schema)', async () => {
+    it('omitting both fields defaults to L0+L1 (matches MCP schema)', async () => {
       markBridgeReady();
       const ctx = sessionManager.getOrCreateExternalTaskContext('default-layer');
       Object.defineProperty(ctx, 'readBudget', { value: 4, writable: false });
@@ -4561,7 +4561,7 @@ describe('handleToolCall execution wrapper', () => {
         tabId: 1,
         taskSessionId: 'default-layer',
       });
-      expect(ctx.lastReadLayer).toBe('L0+L1+L2');
+      expect(ctx.lastReadLayer).toBe('L0+L1');
     });
 
     it('invalid layer string is ignored and falls back to the schema default', async () => {
@@ -4575,7 +4575,7 @@ describe('handleToolCall execution wrapper', () => {
         taskSessionId: 'invalid-layer',
         requestedLayer: 'NOT_A_REAL_LAYER',
       });
-      expect(ctx.lastReadLayer).toBe('L0+L1+L2');
+      expect(ctx.lastReadLayer).toBe('L0+L1');
     });
   });
 

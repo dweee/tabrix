@@ -40,7 +40,7 @@ function extractStableTaskKey(args: unknown): string | null {
  * field as a graceful fallback for any historical client. Returns
  * `null` when neither field carries a value belonging to the closed
  * {@link READ_PAGE_REQUESTED_LAYER_VALUES} enum, which the caller
- * turns into the MCP-schema default (`'L0+L1+L2'`).
+ * turns into the MCP-schema default (`'L0+L1'`).
  *
  * The pre-fix code read `(args as any).layer` exclusively, which
  * silently downgraded every real client request to the gate's
@@ -63,11 +63,10 @@ export function extractRequestedLayer(args: unknown): ReadPageRequestedLayer | n
 
 /**
  * MCP schema default per `packages/shared/src/tools.ts`:
- * "Optional; when omitted preserves the legacy full L0+L1+L2
- * payload." Centralised so the pre-gate and post-success sites
- * cannot drift apart on the default again.
+ * omitted `requestedLayer` means `L0+L1`. Centralised so the pre-gate
+ * and post-success sites cannot drift apart on the default again.
  */
-export const READ_PAGE_DEFAULT_LAYER: ReadPageRequestedLayer = 'L0+L1+L2';
+export const READ_PAGE_DEFAULT_LAYER: ReadPageRequestedLayer = 'L0+L1';
 
 /**
  * Make the read-budget task key visible to schema-following MCP clients

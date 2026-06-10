@@ -99,7 +99,8 @@ interface ReadPageParams {
   refId?: string; // focus on subtree rooted at this refId
   tabId?: number; // target existing tab id
   windowId?: number; // when no tabId, pick active tab from this window
-  // Layer envelope. When omitted preserves the legacy full L0+L1+L2 payload.
+  // Layer envelope. When omitted, default to L0+L1; callers must explicitly
+  // request L0+L1+L2 for the full controlled expansion.
   // The stable HVO targetRef registry is ALWAYS written (even at 'L0') so
   // chrome_click_element resolution stays deterministic.
   requestedLayer?: ReadPageRequestedLayer;
@@ -1343,7 +1344,7 @@ async function buildModeOutput(params: {
   visibleRegionRows: VisibleRegionRowsResult;
   includeAuthArtifacts: boolean;
   assistantGuidance?: ReadPageAssistantGuidance;
-  /** Layer envelope; defaults to 'L0+L1+L2' for legacy callers. */
+  /** Layer envelope; defaults to 'L0+L1'. */
   requestedLayer: ReadPageRequestedLayer;
 }): Promise<ReadPageCompactSnapshot | ReadPageNormalSnapshot | ReadPageFullSnapshot> {
   const interactiveLimit = params.mode === 'compact' ? 24 : 80;
@@ -2574,11 +2575,11 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     }
     const selectedRender = selectedRenderRaw as ReadPageRenderMode;
 
-    // Validate requestedLayer. Default to the legacy `'L0+L1+L2'` envelope
-    // so older callers see byte-identical payloads. Unknown values fail
-    // closed for the same reason `render` does: the upstream client almost
-    // certainly speaks a newer contract than this extension can satisfy.
-    let selectedLayer: ReadPageRequestedLayer = 'L0+L1+L2';
+    // Validate requestedLayer. Default to `L0+L1`; callers must explicitly
+    // request `L0+L1+L2` for full detail expansion. Unknown values fail closed
+    // for the same reason `render` does: the upstream client almost certainly
+    // speaks a newer contract than this extension can satisfy.
+    let selectedLayer: ReadPageRequestedLayer = 'L0+L1';
     if (requestedLayer !== undefined) {
       if (
         typeof requestedLayer !== 'string' ||
