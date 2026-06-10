@@ -58,6 +58,9 @@ jobs:
       - name: Docs check
         run: pnpm run docs:check
 
+      - name: Native production console governance
+        run: pnpm run governance:console
+
       - name: Typecheck
         run: pnpm run typecheck
 

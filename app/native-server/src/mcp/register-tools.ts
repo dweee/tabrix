@@ -57,6 +57,7 @@ import {
   createErrorResult,
   createPolicyDeniedResult,
 } from './tool-call-results';
+import { logger } from '../logging/logger';
 import {
   extractClosedTabIdsFromCallToolResult,
   extractCreatedTabForUrlFromCallToolResult,
@@ -160,6 +161,7 @@ const DEFAULT_AUTO_TASK_CONTEXT_KEY = 'mcp:auto:tab:default';
 const TOOL_FAILURE_ARTIFACT_SCENARIO_ID = 'mcp:chrome_read_page:page_unreadable';
 const TOOL_CLOSEOUT_ARTIFACT_SCENARIO_ID = 'mcp:chrome_close_tabs:cleanup_success';
 const STRUCTURED_READ_GATE_ARTIFACT_SCENARIO_ID = 'mcp:chrome_read_page:structured_read_gate';
+const mkeMemoryTraceLogger = logger.child('mke-memory-trace');
 
 type TaskContextKeySource = 'external_task_key' | 'internal_task_id';
 
@@ -423,7 +425,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       } catch (feedbackError) {
         const message =
           feedbackError instanceof Error ? feedbackError.message : String(feedbackError);
-        console.warn(`[tabrix/mke-memory-trace] ai feedback update failed: ${message}`);
+        mkeMemoryTraceLogger.warn('ai feedback update failed', { errorMessage: message });
       }
     }
   };
@@ -457,7 +459,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       return traceWriter.listByTask(task.taskId).at(-1) ?? null;
     } catch (traceError) {
       const message = traceError instanceof Error ? traceError.message : String(traceError);
-      console.warn(`[tabrix/mke-memory-trace] write failed: ${message}`);
+      mkeMemoryTraceLogger.warn('write failed', { errorMessage: message });
     }
     return null;
   };
