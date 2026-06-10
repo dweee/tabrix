@@ -347,8 +347,11 @@ function readBusinessSuccess(
   return 'unknown';
 }
 
-function digestResult(result: CallToolResult, toolName: string): ParsedResultDigest {
-  const payload = parseFirstTextPayload(result);
+function digestResult(
+  result: CallToolResult,
+  toolName: string,
+  payload = parseFirstTextPayload(result),
+): ParsedResultDigest {
   const object = readObject(payload);
   const page = readNestedObject(object, 'page');
   const summary = readNestedObject(object, 'summary');
@@ -439,7 +442,8 @@ export class MkeMemoryTraceService {
   public recordToolCall(input: RecordMkeToolCallTraceInput): MemoryTrace {
     const requestObject = readObject(input.requestParams);
     const responseAtMs = input.responseAtMs ?? Date.now();
-    const digest = digestResult(input.result, input.toolName);
+    const payload = parseFirstTextPayload(input.result);
+    const digest = digestResult(input.result, input.toolName, payload);
     const tabId = digest.tabId ?? readRequestNumber(requestObject, 'tabId');
     const windowId = digest.windowId ?? readRequestNumber(requestObject, 'windowId');
 
@@ -475,7 +479,7 @@ export class MkeMemoryTraceService {
     });
     this.recordBrowserObjectsFromToolResult({
       trace,
-      payload: parseFirstTextPayload(input.result),
+      payload,
       toolName: input.toolName,
       observedAt: new Date(responseAtMs).toISOString(),
       browserContextKey: input.browserContextKey ?? null,
@@ -494,18 +498,25 @@ export class MkeMemoryTraceService {
     const payload = readObject(input.payload);
     if (!payload) return;
     try {
-      if (input.toolName === 'get_windows_and_tabs') {
-        this.recordBrowserWorldObjects(
-          input.trace,
-          payload,
-          input.observedAt,
-          input.browserContextKey,
-        );
-        return;
-      }
-      if (input.toolName === 'chrome_read_page') {
-        this.recordReadPageObjects(input.trace, payload, input.observedAt, input.browserContextKey);
-      }
+      this.browserObjects.transaction(() => {
+        if (input.toolName === 'get_windows_and_tabs') {
+          this.recordBrowserWorldObjects(
+            input.trace,
+            payload,
+            input.observedAt,
+            input.browserContextKey,
+          );
+          return;
+        }
+        if (input.toolName === 'chrome_read_page') {
+          this.recordReadPageObjects(
+            input.trace,
+            payload,
+            input.observedAt,
+            input.browserContextKey,
+          );
+        }
+      });
     } catch {
       // Object Memory is observational. It must not block tool result delivery.
     }

@@ -455,6 +455,10 @@ export class BrowserObjectRepository {
     );
   }
 
+  public transaction<T>(operation: () => T): T {
+    return this.db.transaction(operation)();
+  }
+
   public get(browserObjectId: string): BrowserObject | undefined {
     const row = this.getStmt.get(browserObjectId) as BrowserObjectRow | undefined;
     return row ? rowToBrowserObject(row) : undefined;
