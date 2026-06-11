@@ -100,11 +100,6 @@ function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
-function readStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
-}
-
 function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
   const feedback = readObject(trace.aiFeedback);
   const sourceKind = readString(feedback?.sourceKind);
@@ -118,8 +113,7 @@ function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
     businessStatus === 'achieved' &&
     typeof confidence === 'number' &&
     confidence >= 0.9 &&
-    feedback?.experienceCandidate === true &&
-    readStringArray(feedback?.evidenceRefs).length > 0
+    feedback?.experienceCandidate === true
   );
 }
 

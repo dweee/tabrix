@@ -622,27 +622,20 @@ function ensureFeedbackBinding(
   return expectedHash;
 }
 
-function validateAiFeedbackEvidence(input: {
+function validateAiFeedbackQuality(input: {
   businessStatus: BusinessSuccessVerdict;
   confidence: number | null;
   summary: string | null | undefined;
-  evidenceRefs: string[];
   experienceCandidate: boolean;
 }): void {
   const highConfidenceSuccess =
     input.businessStatus === 'achieved' &&
     typeof input.confidence === 'number' &&
     input.confidence >= 0.9;
-  if (highConfidenceSuccess && input.evidenceRefs.length === 0) {
-    throw new MkeAiFeedbackValidationError(
-      'evidence_required',
-      'High-confidence achieved feedback must cite at least one evidence ref.',
-    );
-  }
   if (highConfidenceSuccess && (!input.summary || input.summary.trim().length < 8)) {
     throw new MkeAiFeedbackValidationError(
       'summary_required',
-      'High-confidence achieved feedback must include a concise evidence summary.',
+      'High-confidence achieved feedback must include a concise AI evaluation summary.',
     );
   }
   if (!input.experienceCandidate) return;
@@ -1276,11 +1269,10 @@ export class MkeMemoryTraceService {
     const rubricVersion = input.rubricVersion ?? DEFAULT_AI_FEEDBACK_RUBRIC_VERSION;
     const experienceCandidate = input.experienceCandidate === true;
     const receivedAt = input.receivedAt ?? new Date().toISOString();
-    validateAiFeedbackEvidence({
+    validateAiFeedbackQuality({
       businessStatus: input.businessStatus,
       confidence,
       summary: input.summary,
-      evidenceRefs,
       experienceCandidate,
     });
 

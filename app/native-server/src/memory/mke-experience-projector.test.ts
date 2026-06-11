@@ -35,7 +35,7 @@ function verifiedExperienceFeedback(input: {
   confidence: number;
   reasonCode: string;
   summary: string;
-  evidenceRef: string;
+  evidenceRef?: string;
 }) {
   return {
     sourceKind: 'ai_feedback',
@@ -43,7 +43,7 @@ function verifiedExperienceFeedback(input: {
     confidence: input.confidence,
     reasonCode: input.reasonCode,
     summary: input.summary,
-    evidenceRefs: [input.evidenceRef],
+    evidenceRefs: input.evidenceRef ? [input.evidenceRef] : [],
     experienceCandidate: true,
   };
 }
@@ -263,7 +263,7 @@ describe('MkeExperienceProjector', () => {
     expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
   });
 
-  it('mines a recipe when high-confidence AI feedback proves an otherwise unknown action', () => {
+  it('mines a recipe when high-confidence AI feedback approves an otherwise unknown action', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
     const traces = new MemoryTraceRepository(opened.db);
     const knowledge = new KnowledgeModelRepository(opened.db);
@@ -308,7 +308,6 @@ describe('MkeExperienceProjector', () => {
         confidence: 0.94,
         reasonCode: 'ai_verified_result',
         summary: 'AI verified that the expected result appeared.',
-        evidenceRef: 'trace-click-ai-feedback',
       }),
       tabId: 9,
       siteFamily: 'example.test',

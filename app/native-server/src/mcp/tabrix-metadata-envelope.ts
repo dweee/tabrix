@@ -83,6 +83,7 @@ const TABRIX_TOOL_METADATA_SCHEMA = {
           summary: { type: 'string' },
           evidenceRefs: {
             type: 'array',
+            description: 'Optional result references for traceability; not required for scoring.',
             items: { type: 'string' },
           },
           userGoalSnapshot: { type: 'string' },

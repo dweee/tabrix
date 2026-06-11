@@ -226,7 +226,7 @@ describe('MkeMemoryTraceService', () => {
     }
   });
 
-  it('rejects high-confidence achieved feedback without evidence refs', () => {
+  it('accepts high-confidence achieved feedback without evidence refs', () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const traceRepo = new MemoryTraceRepository(db);
     const traceService = new MkeMemoryTraceService(traceRepo);
@@ -244,19 +244,29 @@ describe('MkeMemoryTraceService', () => {
         result: textResult({ success: true }),
       });
 
-      expect(() =>
-        traceService.recordAiBusinessFeedback({
-          traceId: trace.traceId,
-          taskId: trace.taskId,
-          toolName: trace.toolName,
-          sequenceIndex: trace.sequenceIndex,
-          traceBindingHash: buildMemoryTraceBindingHash(trace),
-          businessStatus: 'achieved',
-          confidence: 0.95,
-          summary: 'AI verified the result.',
-        }),
-      ).toThrow(MkeAiFeedbackValidationError);
-      expect(traceRepo.get(trace.traceId)?.aiFeedback).toBeNull();
+      const updated = traceService.recordAiBusinessFeedback({
+        traceId: trace.traceId,
+        taskId: trace.taskId,
+        toolName: trace.toolName,
+        sequenceIndex: trace.sequenceIndex,
+        traceBindingHash: buildMemoryTraceBindingHash(trace),
+        businessStatus: 'achieved',
+        confidence: 0.95,
+        summary: 'AI verified the result.',
+        experienceCandidate: true,
+      });
+      expect(updated?.aiFeedback).toMatchObject({
+        businessStatus: 'achieved',
+        confidence: 0.95,
+        evidenceRefs: [],
+        experienceCandidate: true,
+      });
+      expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)[0]).toMatchObject({
+        businessStatus: 'achieved',
+        evidenceRefs: [],
+        experienceCandidate: true,
+        accepted: true,
+      });
     } finally {
       traceService.discardPendingAsyncWrites();
       db.close();

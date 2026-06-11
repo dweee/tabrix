@@ -96,7 +96,7 @@ export const MEMORY_SCHEMAS: Tool[] = [
         evidenceRefs: {
           type: 'array',
           description:
-            'References that support the AI evaluation, such as trace ids, tool call ids, observation ids, or result paths. Do not include raw page text, secrets, or screenshots.',
+            'Optional result references for traceability, such as trace ids, tool call ids, observation ids, or result paths. Do not include raw page text, secrets, or screenshots.',
           items: { type: 'string', minLength: 1, maxLength: 160 },
           maxItems: 12,
         },
