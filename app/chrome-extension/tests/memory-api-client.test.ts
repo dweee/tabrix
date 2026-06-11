@@ -93,13 +93,10 @@ describe('MKE data query helpers', () => {
       traces: [
         {
           traceId: 'trace-1',
-          taskId: 'task-1',
           toolName: 'chrome_read_page',
           requestAt: '2026-06-06T10:00:00Z',
           responseAt: '2026-06-06T10:00:01Z',
-          toolSuccess: true,
-          businessSuccess: 'unknown',
-          redactionState: 'redacted',
+          aiFeedback: null,
           createdAt: '2026-06-06T10:00:01Z',
         },
       ],

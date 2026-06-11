@@ -188,15 +188,11 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.traces).toHaveLength(2);
     expect(res.body.data.traces[0]).toMatchObject({
       toolName: 'chrome_click_element',
-      toolSuccess: true,
-      tabId: 7,
-      redactionState: 'redacted',
       display: {
         title: 'inspect page and click action',
         methodLabel: '点击元素',
       },
       aiFeedback: {
-        sourceKind: 'ai_feedback',
         businessStatus: 'achieved',
         confidence: 0.93,
         reasonCode: 'clicked_expected_control',
@@ -210,6 +206,16 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.traces[0]).not.toHaveProperty('businessSuccess');
     expect(res.body.data.traces[0]).not.toHaveProperty('aiFeedbackScore');
     expect(res.body.data.traces[0]).not.toHaveProperty('statusView');
+    expect(res.body.data.traces[0]).not.toHaveProperty('taskId');
+    expect(res.body.data.traces[0]).not.toHaveProperty('toolCallId');
+    expect(res.body.data.traces[0]).not.toHaveProperty('sequenceIndex');
+    expect(res.body.data.traces[0]).not.toHaveProperty('toolSuccess');
+    expect(res.body.data.traces[0]).not.toHaveProperty('tabId');
+    expect(res.body.data.traces[0]).not.toHaveProperty('windowId');
+    expect(res.body.data.traces[0]).not.toHaveProperty('redactionState');
+    expect(res.body.data.traces[0]).not.toHaveProperty('sourceRoute');
+    expect(res.body.data.traces[0]).not.toHaveProperty('selectedDataSource');
+    expect(res.body.data.traces[0]).not.toHaveProperty('tokenTotal');
     expect(res.body.data.traces[0].pageIdentity.label).toBe('example.test');
     expect(res.body.data.traces[0]).not.toHaveProperty('requestParams');
     expect(res.body.data.traces[0]).not.toHaveProperty('response');
@@ -217,13 +223,10 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.traces[1]).toMatchObject({
       toolName: 'chrome_read_page',
       aiFeedback: {
-        sourceKind: 'ai_feedback',
         businessStatus: 'achieved',
         confidence: 0.82,
         reasonCode: 'page_inventory_read',
         summary: 'AI judged the page inventory read as useful for the next action',
-        sourceToolName: 'chrome_click_element',
-        sourceToolCallId: 'feedback-call-1',
       },
     });
     expect(res.body.data.traces[1]).not.toHaveProperty(removedSyntheticScoreKey);
@@ -233,6 +236,10 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.traces[1]).not.toHaveProperty('statusView');
     expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('rawInput');
     expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('response');
+    expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('sourceKind');
+    expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('sourceToolName');
+    expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('sourceToolCallId');
+    expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('traceBindingHash');
   });
 
   test('GET /memory/mke/traces does not expose orphan legacy score as AI score', async () => {
@@ -317,7 +324,6 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.traces[0]).toMatchObject({
       traceId: trace.traceId,
       aiFeedback: {
-        sourceKind: 'ai_feedback',
         businessStatus: 'achieved',
         confidence: 0.91,
         reasonCode: 'ai_overstated_completion',

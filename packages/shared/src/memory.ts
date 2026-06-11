@@ -26,30 +26,11 @@ export type MemoryPersistenceMode = 'disk' | 'memory' | 'off';
  */
 export type MkeMemoryAiFeedbackScope = 'step' | 'task';
 
-export interface MkeMemoryAiFeedbackBindingSummary {
-  taskId?: string | null;
-  toolName?: string | null;
-  toolCallId?: string | null;
-  sequenceIndex?: number | null;
-  traceBindingHash?: string | null;
-}
-
 export interface MkeMemoryAiFeedbackSummary {
-  sourceKind?: 'ai_feedback' | string | null;
-  evaluationScope?: MkeMemoryAiFeedbackScope | string | null;
-  evaluationVersion?: string | null;
-  rubricVersion?: string | null;
-  evaluatorModel?: string | null;
   businessStatus?: string | null;
   confidence?: number | null;
   reasonCode?: string | null;
   summary?: string | null;
-  userGoalSnapshot?: string | null;
-  experienceCandidate?: boolean | null;
-  binding?: MkeMemoryAiFeedbackBindingSummary | null;
-  receivedAt?: string | null;
-  sourceToolName?: string | null;
-  sourceToolCallId?: string | null;
 }
 
 export type MkePageIdentityKind =
@@ -82,32 +63,16 @@ export interface MkeTraceDisplaySummary {
 
 export interface MkeMemoryTraceSummary {
   traceId: string;
-  taskId: string;
   taskIntent?: string | null;
-  aiClient?: string | null;
   toolName: string;
-  toolCallId?: string | null;
-  sequenceIndex?: number | null;
   requestAt: string;
   responseAt: string;
   durationMs?: number | null;
-  toolSuccess?: boolean | null;
   aiFeedback?: MkeMemoryAiFeedbackSummary | null;
   resultSummary?: string | null;
-  errorCode?: string | null;
-  tabId?: number | null;
-  windowId?: number | null;
   siteFamily?: string | null;
   pageUrlPattern?: string | null;
   pageRole?: string | null;
-  pageState?: string | null;
-  pageModelKey?: string | null;
-  sourceRoute?: string | null;
-  selectedDataSource?: string | null;
-  freshness?: string | null;
-  fallbackUsed?: string | null;
-  tokenTotal?: number | null;
-  redactionState: string;
   createdAt: string;
   display?: MkeTraceDisplaySummary;
   pageIdentity?: MkePageIdentitySummary;

@@ -105,7 +105,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('mke-record__meta-line');
     expect(tabSource).toContain('mke-record__feedback');
     expect(tabSource).toContain('mke-record__feedback-row');
-    expect(tabSource).not.toContain('mke-feedback-score');
+    expect(tabSource).toContain('mke-feedback-score');
     expect(tabSource).not.toContain('mke-record__headline-facts');
     expect(tabSource).toContain('mke-duration');
     expect(tabSource).toContain('mke-record-time');
@@ -171,7 +171,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('<h3 :title="row.title">{{ row.title }}</h3>');
     expect(tabSource).toContain('v-if="row.metaLine"');
     expect(tabSource).toContain('v-if="row.feedbackLine"');
-    expect(tabSource).not.toContain('feedbackScoreLabel');
+    expect(tabSource).toContain('v-if="row.feedbackScoreLabel"');
     expect(tabSource).toContain('v-if="row.duration"');
     expect(tabSource).toContain('v-if="row.createdAtLabel"');
     expect(tabSource).toContain('class="mke-status"');
@@ -209,7 +209,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('function formatAiBusinessStatus');
     expect(tabSource).not.toContain('function formatBusinessStatus');
     expect(tabSource).toContain('function formatAiFeedbackLine');
-    expect(tabSource).not.toContain('function formatAiFeedbackScoreLabel');
+    expect(tabSource).toContain('function formatAiFeedbackScoreLabel');
     expect(tabSource).toContain('function formatTraceLocationFact');
     expect(tabSource).toContain('function formatReadableFeedbackLine');
     expect(tabSource).not.toContain('function formatTraceContext');
@@ -344,7 +344,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('onUnmounted');
   });
 
-  it('keeps Memory detail JSON user-readable without internal trace identifiers or scores', () => {
+  it('keeps Memory detail JSON user-readable without internal trace identifiers or evidence scores', () => {
     expect(tabSource).not.toContain("['Task ID / 任务', trace.taskId]");
     expect(tabSource).not.toContain("['Call ID / 调用', trace.toolCallId]");
     expect(tabSource).toContain('formatAiBusinessStatus(trace.aiFeedback?.businessStatus)');
@@ -352,9 +352,9 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('trace.aiFeedback?.reasonCode');
     expect(tabSource).toContain("'AI评价：待AI评价'");
     expect(tabSource).not.toContain('trace.statusView?.aiScore');
-    expect(tabSource).not.toContain('trace.aiFeedback?.confidence');
+    expect(tabSource).toContain('trace.aiFeedback?.confidence');
     expect(tabSource).toContain('AI评价：${compactText');
-    expect(tabSource).not.toContain('AI评分 ${Math.round(score * 100)}%');
+    expect(tabSource).toContain('AI评分 ${Math.round(score * 100)}%');
     const removedSyntheticFeedbackPattern = new RegExp(
       `${['system', 'Evidence'].join('')}|${['tabrix', 'auto', 'evidence'].join('_')}`,
     );

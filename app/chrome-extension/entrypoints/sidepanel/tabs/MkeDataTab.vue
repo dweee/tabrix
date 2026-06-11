@@ -86,10 +86,17 @@
               </div>
             </div>
 
-            <div v-if="row.feedbackLine" class="mke-record__feedback-row">
+            <div v-if="row.feedbackLine || row.feedbackScoreLabel" class="mke-record__feedback-row">
               <p v-if="row.feedbackLine" class="mke-record__feedback" :title="row.feedbackLine">
                 {{ row.feedbackLine }}
               </p>
+              <span
+                v-if="row.feedbackScoreLabel"
+                class="mke-feedback-score"
+                title="AI 对这一步是否推进目标的评分。"
+              >
+                {{ row.feedbackScoreLabel }}
+              </span>
             </div>
 
             <div class="mke-facts">
@@ -208,6 +215,7 @@ interface ViewRecord {
   title: string;
   metaLine: string;
   feedbackLine: string;
+  feedbackScoreLabel: string;
   duration: string;
   createdAtLabel: string;
   status: string;
@@ -536,6 +544,7 @@ function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
     title,
     metaLine: '',
     feedbackLine,
+    feedbackScoreLabel: formatAiFeedbackScoreLabel(trace),
     duration: formatDuration(trace.durationMs) ?? '',
     createdAtLabel: formatDate(trace.createdAt),
     status,
@@ -564,6 +573,7 @@ function objectWebPageToRecord(webPage: MkeObjectWebPageView): ViewRecord {
     title: webPage.title,
     metaLine: webPage.location,
     feedbackLine: '',
+    feedbackScoreLabel: '',
     duration: '',
     createdAtLabel: formatDate(webPage.updatedAt),
     status: webPage.lifecycleLabel,
@@ -584,6 +594,7 @@ function knowledgeToRecord(model: MkeKnowledgeModelSummary): ViewRecord {
     title: `${model.pageRole} · ${model.siteFamily}`,
     metaLine: `${model.pageModelKey} · ${lastUpdatedAt}`,
     feedbackLine: '',
+    feedbackScoreLabel: '',
     duration: '',
     createdAtLabel: formatDate(model.updatedAt),
     status: model.observationCount > 0 ? '已沉淀' : '待沉淀',
@@ -602,6 +613,7 @@ function experienceToRecord(recipe: MkeExperienceRecipeSummary): ViewRecord {
     title: recipe.recipeName,
     metaLine: `${recipe.scenarioKey} · ${lastUpdatedAt}`,
     feedbackLine: '',
+    feedbackScoreLabel: '',
     duration: '',
     createdAtLabel: formatDate(recipe.updatedAt),
     status: '可复用',
@@ -662,6 +674,10 @@ function formatMemoryTraceJson(trace: MkeMemoryTraceSummary): string {
     aiEvaluation: feedback
       ? {
           status: formatAiBusinessStatus(feedback.businessStatus),
+          score:
+            typeof feedback.confidence === 'number'
+              ? `${Math.round(feedback.confidence * 100)}%`
+              : null,
           summary: feedback.summary ?? null,
         }
       : null,
@@ -751,6 +767,11 @@ function formatAiFeedbackLine(trace: MkeMemoryTraceSummary): string {
   return feedback?.summary
     ? `AI评价：${compactText(formatReadableFeedbackLine(feedback.summary), 88)}`
     : 'AI评价：待AI评价';
+}
+
+function formatAiFeedbackScoreLabel(trace: MkeMemoryTraceSummary): string {
+  const score = trace.aiFeedback?.confidence;
+  return typeof score === 'number' ? `AI评分 ${Math.round(score * 100)}%` : '';
 }
 
 function formatReadableFeedbackLine(value: string): string {
@@ -1247,6 +1268,7 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   max-width: 100%;
 }
 
+.mke-feedback-score,
 .mke-duration {
   border: 1px solid var(--mke-border);
   border-radius: 999px;
@@ -1258,6 +1280,10 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   line-height: 1.2;
   padding: 4px 7px;
   white-space: nowrap;
+}
+
+.mke-feedback-score {
+  color: var(--mke-accent);
 }
 
 .mke-status {

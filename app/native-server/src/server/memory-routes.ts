@@ -94,44 +94,16 @@ function readNumber(record: Record<string, unknown>, field: string): number | nu
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function readBoolean(record: Record<string, unknown>, field: string): boolean | null {
-  const value = record[field];
-  return typeof value === 'boolean' ? value : null;
-}
-
 function toAiFeedbackSummary(value: unknown): MkeMemoryAiFeedbackSummary | null {
   const record = asRecord(value);
   if (!record) return null;
-  const binding = asRecord(record.binding);
   const summary = {
-    sourceKind: readString(record, 'sourceKind'),
-    evaluationScope: readString(record, 'evaluationScope'),
-    evaluationVersion: readString(record, 'evaluationVersion'),
-    rubricVersion: readString(record, 'rubricVersion'),
-    evaluatorModel: readString(record, 'evaluatorModel'),
     businessStatus: readString(record, 'businessStatus'),
     confidence: readNumber(record, 'confidence'),
     reasonCode: readString(record, 'reasonCode'),
     summary: readString(record, 'summary'),
-    userGoalSnapshot: readString(record, 'userGoalSnapshot'),
-    experienceCandidate: readBoolean(record, 'experienceCandidate'),
-    binding: binding
-      ? {
-          taskId: readString(binding, 'taskId'),
-          toolName: readString(binding, 'toolName'),
-          toolCallId: readString(binding, 'toolCallId'),
-          sequenceIndex: readNumber(binding, 'sequenceIndex'),
-          traceBindingHash: readString(binding, 'traceBindingHash'),
-        }
-      : null,
-    receivedAt: readString(record, 'receivedAt'),
-    sourceToolName: readString(record, 'sourceToolName'),
-    sourceToolCallId: readString(record, 'sourceToolCallId'),
   };
-  const hasSignal = Object.entries(summary).some(([key, item]) => {
-    if (key === 'binding') return item !== null;
-    return item !== null;
-  });
+  const hasSignal = Object.values(summary).some((item) => item !== null);
   return hasSignal ? summary : null;
 }
 
@@ -275,32 +247,16 @@ function toTraceSummary(trace: MemoryTrace): MkeMemoryTraceSummary {
   const methodLabel = formatToolLabel(trace.toolName);
   return {
     traceId: trace.traceId,
-    taskId: trace.taskId,
     taskIntent: trace.taskIntent,
-    aiClient: trace.aiClient,
     toolName: trace.toolName,
-    toolCallId: trace.toolCallId,
-    sequenceIndex: trace.sequenceIndex,
     requestAt: trace.requestAt,
     responseAt: trace.responseAt,
     durationMs: trace.durationMs,
-    toolSuccess: trace.toolSuccess,
     aiFeedback,
     resultSummary: trace.resultSummary,
-    errorCode: trace.errorCode,
-    tabId: trace.tabId,
-    windowId: trace.windowId,
     siteFamily: trace.siteFamily,
     pageUrlPattern: trace.pageUrlPattern,
     pageRole: trace.pageRole,
-    pageState: trace.pageState,
-    pageModelKey: trace.pageModelKey,
-    sourceRoute: trace.sourceRoute,
-    selectedDataSource: trace.selectedDataSource,
-    freshness: trace.freshness,
-    fallbackUsed: trace.fallbackUsed,
-    tokenTotal: trace.tokenTotal,
-    redactionState: trace.redactionState,
     createdAt: trace.createdAt,
     display: {
       title: formatTraceTitle(trace),
