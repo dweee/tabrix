@@ -61,11 +61,7 @@ function readAcceptanceApiFault(args: unknown): AcceptanceApiFault | null {
 export interface NativeToolHandlerDeps {
   sessionManager: Pick<
     SessionManager,
-    | 'experience'
-    | 'getPersistenceStatus'
-    | 'knowledgeApi'
-    | 'chooseContextTelemetry'
-    | 'pageSnapshots'
+    'experience' | 'getPersistenceStatus' | 'knowledgeApi' | 'chooseContextTelemetry'
   >;
   /**
    * Capability allowlist source. Optional so existing handler tests
@@ -81,15 +77,11 @@ export interface NativeToolHandlerDeps {
    * handlers themselves) stay source-compatible.
    */
   dispatchBridged?: DispatchBridgedFn;
-  /**
-   * Per-step `memory_steps` recorder bound to the wrapper's current
-   * session. Required for `experience_replay`.
-   */
+  /** Runtime wrapper-step recorder required for `experience_replay`. */
   recorder?: ReplayStepRecorder;
   /**
    * Callback to re-tag the wrapper-owned session's `task.intent` with
-   * the `experience_replay:<id>` prefix. Required for
-   * `experience_replay` so the aggregator special-case triggers.
+   * the `experience_replay:<id>` prefix. Required for replay audit labelling.
    */
   updateTaskIntent?: UpdateTaskIntentFn;
   /**
@@ -176,12 +168,10 @@ const handleExperienceSuggestPlan: NativeToolHandler = (args, deps) => {
 };
 
 const handleTabrixChooseContext: NativeToolHandler = async (args, deps) => {
-  // Wire the live page context provider so the dispatcher receives real
-  // candidateActions / HVO counts instead of legacy hard-coded zeros.
-  // When persistence is off `pageSnapshots` is `null` and the provider
-  // returns `fallback_zero` with cause `persistence_off` — honest
-  // telemetry, same numerical dispatcher input the chooser used to ship.
-  const pageContext = createLivePageContextProvider(deps.sessionManager.pageSnapshots ?? null);
+  // The old `memory_page_snapshots` table is retired. Until chooser context is
+  // backed by Object Library live facts, surface an explicit fallback-zero
+  // input instead of reading stale snapshot rows.
+  const pageContext = createLivePageContextProvider(null);
   // Wrap the synchronous chooser with the direct-api-executor so a
   // high-confidence read-only `knowledge_supported_read` route may
   // execute the API inline (compact rows arrive on

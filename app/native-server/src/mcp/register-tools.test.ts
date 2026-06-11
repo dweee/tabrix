@@ -328,7 +328,7 @@ describe('handleToolCall execution wrapper', () => {
     });
   });
 
-  it('persists a page snapshot and injects historyRef for chrome_read_page', async () => {
+  it('does not expose retired historyRef artifacts for chrome_read_page', async () => {
     markBridgeReady();
     const readPageBody = {
       mode: 'compact',
@@ -362,12 +362,11 @@ describe('handleToolCall execution wrapper', () => {
 
     expect(result.isError).toBe(false);
     const body = JSON.parse(String((result.content as any[])[0].text));
-    expect(body.historyRef).toMatch(/^memory:\/\/snapshot\/[0-9a-f-]+$/);
+    expect(body.historyRef).toBeUndefined();
 
     const sessions = sessionManager.listSessions();
     const step = sessions[0].steps[0];
-    expect(step.artifactRefs).toHaveLength(1);
-    expect(step.artifactRefs![0]).toBe(body.historyRef);
+    expect(step.artifactRefs).toEqual([]);
   });
 
   it('fails chrome_read_page when returned tab-bound evidence mismatches explicit tabId', async () => {
@@ -513,7 +512,7 @@ describe('handleToolCall execution wrapper', () => {
       pageType: 'browser_error_page',
       pageContent: 'PRIVATE_PAGE_BODY_SHOULD_NOT_APPEAR',
     });
-    expect(returnedBody.historyRef).toMatch(/^memory:\/\/snapshot\/[0-9a-f-]+$/);
+    expect(returnedBody.historyRef).toBeUndefined();
     expect(returnedBody.lifecycleEvidenceArtifacts).toBeUndefined();
     expect(getLifecycleEvidenceArtifactStoreSnapshot()).toMatchObject({
       bufferedArtifacts: 1,
@@ -578,7 +577,7 @@ describe('handleToolCall execution wrapper', () => {
     expect(listLifecycleEvidenceArtifacts()).toHaveLength(0);
   });
 
-  it('persists a memory_actions row and injects historyRef for chrome_click_element', async () => {
+  it('does not expose retired memory_actions historyRef for chrome_click_element', async () => {
     markBridgeReady();
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
       status: 'success',
@@ -606,19 +605,11 @@ describe('handleToolCall execution wrapper', () => {
 
     expect(result.isError).toBe(false);
     const body = JSON.parse(String((result.content as any[])[0].text));
-    expect(body.historyRef).toMatch(/^memory:\/\/action\/[0-9a-f-]+$/);
+    expect(body.historyRef).toBeUndefined();
 
     const sessions = sessionManager.listSessions();
     const step = sessions[0].steps[0];
-    expect(step.artifactRefs).toHaveLength(1);
-    expect(step.artifactRefs![0]).toBe(body.historyRef);
-
-    const actions = sessionManager.actions!.listByStep(step.stepId);
-    expect(actions).toHaveLength(1);
-    expect(actions[0].actionKind).toBe('click');
-    expect(actions[0].tabId).toBe(1);
-    expect(actions[0].targetRef).toBe('e-1');
-    expect(actions[0].status).toBe('success');
+    expect(step.artifactRefs).toEqual([]);
   });
 
   it('normalizes legacy text chrome_click_element results as unproven structured outcomes', async () => {
@@ -645,7 +636,6 @@ describe('handleToolCall execution wrapper', () => {
       observedOutcome: 'verification_unavailable',
       resultShape: 'legacy_text_normalized',
       rawTextLength: 7,
-      historyRef: expect.stringMatching(/^memory:\/\/action\/[0-9a-f-]+$/),
       actionEvidenceResult: {
         actionKind: 'click',
         tabId: 1,
@@ -697,7 +687,6 @@ describe('handleToolCall execution wrapper', () => {
       observedOutcome: 'no_observed_change',
       resultShape: 'legacy_text_error_normalized',
       rawTextLength: 21,
-      historyRef: expect.stringMatching(/^memory:\/\/action\/[0-9a-f-]+$/),
       actionEvidenceResult: {
         actionKind: 'click',
         tabId: 1,
@@ -778,7 +767,6 @@ describe('handleToolCall execution wrapper', () => {
       dispatchSucceeded: false,
       resultShape: 'legacy_text_error_normalized',
       rawTextLength: 108,
-      historyRef: expect.stringMatching(/^memory:\/\/action\/[0-9a-f-]+$/),
       actionEvidenceResult: {
         actionKind: 'hover',
         tabId: 1,
@@ -864,7 +852,7 @@ describe('handleToolCall execution wrapper', () => {
         verdict: 'allow',
       },
     });
-    expect(body.historyRef).toMatch(/^memory:\/\/action\/[0-9a-f-]+$/);
+    expect(body.historyRef).toBeUndefined();
   });
 
   it('redacts fill value and omits result_blob for chrome_fill_or_select', async () => {
@@ -894,16 +882,6 @@ describe('handleToolCall execution wrapper', () => {
 
     expect(result.isError).toBe(false);
     const sessions = sessionManager.listSessions();
-    const step = sessions[0].steps[0];
-    const actions = sessionManager.actions!.listByStep(step.stepId);
-    expect(actions).toHaveLength(1);
-    expect(actions[0].actionKind).toBe('fill');
-    expect(actions[0].resultBlob).toBeNull();
-    expect(actions[0].argsBlob).not.toContain('hunter2');
-    expect(actions[0].argsBlob).toContain('[redacted]');
-    const summary = JSON.parse(actions[0].valueSummary!);
-    expect(summary.kind).toBe('redacted');
-    expect(summary.length).toBe('hunter2'.length);
     const traces = sessionManager.memoryTraces!.listByTask(sessions[0].taskId);
     expect(traces).toHaveLength(1);
     expect(traces[0].requestParams).toMatchObject({

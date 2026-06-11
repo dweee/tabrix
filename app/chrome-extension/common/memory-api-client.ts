@@ -19,11 +19,7 @@
  */
 
 import type {
-  MemoryExecutionStep,
   MemoryReadSuccess,
-  MemorySessionStepsResponseData,
-  MemorySessionsResponseData,
-  MemoryTaskResponseData,
   MkeBrowserObjectsClearResponseData,
   MkeBrowserObjectsResponseData,
   MkeExperienceRecipesResponseData,
@@ -36,8 +32,6 @@ import { STORAGE_KEYS } from './constants';
 /** Fallback port matches the native-server default. */
 export const DEFAULT_NATIVE_SERVER_PORT = 12306;
 
-/** Default page size for `/memory/sessions`; mirrors server-side default. */
-export const DEFAULT_SESSIONS_PAGE_SIZE = 20;
 export const DEFAULT_MKE_PAGE_SIZE = 20;
 
 /**
@@ -101,61 +95,6 @@ async function readConfiguredPort(): Promise<number> {
   });
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 && n < 65536 ? Math.floor(n) : DEFAULT_NATIVE_SERVER_PORT;
-}
-
-export interface FetchRecentSessionsOptions {
-  limit?: number;
-  offset?: number;
-  signal?: AbortSignal;
-  /** Override the base URL. Useful for integration tests. */
-  baseUrl?: string;
-}
-
-/** `GET /memory/sessions?limit=&offset=` */
-export async function fetchRecentSessions(
-  options: FetchRecentSessionsOptions = {},
-): Promise<MemorySessionsResponseData> {
-  const limit = clampInt(options.limit ?? DEFAULT_SESSIONS_PAGE_SIZE, 1, 500);
-  const offset = clampInt(options.offset ?? 0, 0, Number.MAX_SAFE_INTEGER);
-  const base = options.baseUrl ?? (await resolveMemoryApiBaseUrl());
-  const url = `${base}/memory/sessions?limit=${limit}&offset=${offset}`;
-  return readEnvelope<MemorySessionsResponseData>(url, options.signal);
-}
-
-export interface FetchSessionStepsOptions {
-  signal?: AbortSignal;
-  baseUrl?: string;
-}
-
-/** `GET /memory/sessions/:sessionId/steps` */
-export async function fetchSessionSteps(
-  sessionId: string,
-  options: FetchSessionStepsOptions = {},
-): Promise<MemorySessionStepsResponseData> {
-  if (!sessionId) {
-    throw new MemoryApiError('shape', 'sessionId is required');
-  }
-  const base = options.baseUrl ?? (await resolveMemoryApiBaseUrl());
-  const url = `${base}/memory/sessions/${encodeURIComponent(sessionId)}/steps`;
-  return readEnvelope<MemorySessionStepsResponseData>(url, options.signal);
-}
-
-export interface FetchTaskOptions {
-  signal?: AbortSignal;
-  baseUrl?: string;
-}
-
-/** `GET /memory/tasks/:taskId` */
-export async function fetchMemoryTask(
-  taskId: string,
-  options: FetchTaskOptions = {},
-): Promise<MemoryTaskResponseData> {
-  if (!taskId) {
-    throw new MemoryApiError('shape', 'taskId is required');
-  }
-  const base = options.baseUrl ?? (await resolveMemoryApiBaseUrl());
-  const url = `${base}/memory/tasks/${encodeURIComponent(taskId)}`;
-  return readEnvelope<MemoryTaskResponseData>(url, options.signal);
 }
 
 export interface FetchMkeListOptions {
@@ -401,35 +340,6 @@ function isThenable(value: unknown): value is Promise<Record<string, unknown>> {
     value !== null &&
     typeof (value as { then?: unknown }).then === 'function'
   );
-}
-
-/**
- * Prefix that identifies a Memory "historyRef" inside the `artifactRefs`
- * array of a step. See `app/native-server/src/memory/page-snapshot-service.ts`
- * (`buildHistoryRef`) for the canonical producer.
- */
-export const MEMORY_HISTORY_REF_PREFIX = 'memory://';
-
-/**
- * Return the first `memory://…` entry from a step's `artifactRefs`.
- *
- * A step can carry multiple artifacts (e.g. `artifact://read_page/...`
- * alongside a `memory://snapshot/<uuid>`). The sidepanel only exposes
- * the *memory*-scheme ref because that's what re-resolves through the
- * MCP `getPageSnapshot` lookup — the `artifact://` kind is internal.
- *
- * Returns `null` when no memory ref is present; callers use that to
- * disable the "Copy historyRef" button rather than silently copying
- * an empty string.
- */
-export function extractHistoryRef(step: Pick<MemoryExecutionStep, 'artifactRefs'>): string | null {
-  if (!step?.artifactRefs || !Array.isArray(step.artifactRefs)) return null;
-  for (const ref of step.artifactRefs) {
-    if (typeof ref === 'string' && ref.startsWith(MEMORY_HISTORY_REF_PREFIX)) {
-      return ref;
-    }
-  }
-  return null;
 }
 
 /**

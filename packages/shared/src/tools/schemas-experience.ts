@@ -145,13 +145,12 @@ export const EXPERIENCE_SCHEMAS: Tool[] = [
         historyRef: {
           type: 'string',
           description:
-            'Optional Memory `historyRef` (e.g. the per-step ref returned by the Chrome extension). Persisted on the warning row when isolation fires so an operator can grep correlated logs.',
+            'Optional runtime evidence reference. Persisted on the warning row when isolation fires so an operator can grep correlated logs.',
           maxLength: 256,
         },
         replayId: {
           type: 'string',
-          description:
-            'Optional Memory replay session id (`memory_sessions.session_id`). Same audit purpose as `historyRef`.',
+          description: 'Optional runtime replay id. Same audit purpose as historyRef.',
           maxLength: 256,
         },
         evidence: {

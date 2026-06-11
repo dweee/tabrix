@@ -8,11 +8,7 @@ function readSource(relativePath: string): string {
 
 describe('Sidepanel theme consistency', () => {
   const appSource = readSource('entrypoints/sidepanel/App.vue');
-  const memorySource = readSource('entrypoints/sidepanel/tabs/MemoryTab.vue');
-  const memoryStepsSource = readSource('entrypoints/sidepanel/tabs/MemorySessionSteps.vue');
-  const knowledgeSource = readSource('entrypoints/sidepanel/tabs/KnowledgeTab.vue');
-  const experienceSource = readSource('entrypoints/sidepanel/tabs/ExperienceTab.vue');
-  const sharedTabCss = readSource('entrypoints/sidepanel/tabs/mkep-tab.css');
+  const mkeDataSource = readSource('entrypoints/sidepanel/tabs/MkeDataTab.vue');
 
   it('propagates the saved extension theme through the sidepanel shell', () => {
     expect(appSource).toContain(':data-agent-theme="agentTheme"');
@@ -23,37 +19,13 @@ describe('Sidepanel theme consistency', () => {
     expect(appSource).not.toContain('SidepanelTab');
   });
 
-  it('keeps legacy MKE tabs from falling back to white cards in dark mode', () => {
-    for (const source of [memorySource, knowledgeSource, experienceSource]) {
-      expect(source).toContain(':data-agent-theme="agentTheme"');
-      expect(source).toContain('useAgentTheme');
-      expect(source).toContain('void initTheme()');
-    }
-
-    expect(sharedTabCss).toContain(".mkep-tab[data-agent-theme='dark-console']");
-    expect(sharedTabCss).toContain(".mkep-tab[data-agent-theme='dark-console'] .mkep-placeholder");
-    expect(sharedTabCss).toContain(".mkep-tab[data-agent-theme='dark-console'] .mkep-tab__title");
-    expect(sharedTabCss).not.toContain(
-      ":global(.sidepanel-root[data-agent-theme='dark-console']) .mkep-placeholder",
-    );
-  });
-
-  it('covers Memory rows and expanded step details with the same dark surface', () => {
-    expect(memorySource).toContain('class="mkep-tab memory-tab"');
-    expect(memorySource).toContain(".memory-tab[data-agent-theme='dark-console'] .memory-row");
-    expect(memorySource).toContain(".memory-tab[data-agent-theme='dark-console'] .memory-search");
-    expect(memorySource).toContain(
-      ".memory-tab[data-agent-theme='dark-console'] .memory-row__title",
-    );
-
-    expect(memoryStepsSource).toContain(
-      ":global(.sidepanel-root[data-agent-theme='dark-console']) .memory-steps",
-    );
-    expect(memoryStepsSource).toContain(
-      ":global(.sidepanel-root[data-agent-theme='dark-console']) .memory-step",
-    );
-    expect(memoryStepsSource).toContain(
-      ":global(.sidepanel-root[data-agent-theme='dark-console']) .memory-step__tool",
+  it('keeps the active MKE data surface theme-scoped', () => {
+    expect(mkeDataSource).toContain(':class="`mke-data-tab--${agentTheme}`"');
+    expect(mkeDataSource).toContain('useAgentTheme');
+    expect(mkeDataSource).toContain('void initTheme()');
+    expect(mkeDataSource).toContain('.mke-data-tab--dark-console');
+    expect(mkeDataSource).toContain(
+      ":global(.sidepanel-root[data-agent-theme='dark-console']) .mke-data-tab",
     );
   });
 });

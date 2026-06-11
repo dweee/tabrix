@@ -9,8 +9,8 @@
  *
  * Privacy contract:
  *   - response bodies MUST NOT echo full URLs (no query strings, no fragments)
- *   - response bodies MUST NOT include any field from
- *     `memory_sessions.user_input`
+ *   - response bodies MUST NOT include raw user free text captured during
+ *     tool execution
  *   - response bodies MUST NOT include cookie or auth header values
  *   - intent is exposed only as the structural `intent_signature`
  *     (already lower-cased + redacted upstream)

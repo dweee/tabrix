@@ -14,8 +14,8 @@
  * Privacy contract (enforced by negative tests in
  * `execution-routes.test.ts`):
  *   - response bodies MUST NOT contain full URLs / query strings
- *   - response bodies MUST NOT include any field from
- *     `memory_sessions.user_input`
+ *   - response bodies MUST NOT include raw user free text captured during
+ *     tool execution
  *   - response bodies MUST NOT include cookie or auth header values
  *   - intent is only echoed as the structural `intent_signature`
  *     (lower-cased + redacted upstream)

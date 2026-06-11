@@ -9,7 +9,7 @@
  *   2. Privacy / M4 negative: the response body is statically scanned
  *      for secrets that MUST NOT leak through these routes:
  *        - full URLs with query strings
- *        - any field from `memory_sessions.user_input`
+ *        - raw user free text captured during tool execution
  *        - cookie or auth header values
  *
  *      Negative tests both seed the upstream tables with poisoned
@@ -343,7 +343,7 @@ describe('execution read routes (V25-03)', () => {
       // Full URLs with query strings — never echoed by these routes.
       expect(serialized.includes('?')).toBe(false);
       expect(serialized.includes('://')).toBe(false);
-      // user_input from memory_sessions — never joined or echoed.
+      // Runtime user free text — never joined or echoed.
       expect(serialized.includes(POISON.userInput)).toBe(false);
       // Cookie / auth header sentinels — never persisted by chooser
       // telemetry, must therefore never appear in any response body.
@@ -421,9 +421,9 @@ describe('execution read routes (V25-03)', () => {
       expect(JSON.stringify(reliability.body).includes(sentinel)).toBe(false);
     });
 
-    test('memory_sessions.user_input is never readable through /execution/*', async () => {
-      // Seed memory data with the poison; the /execution routes must
-      // not touch memory_sessions and therefore must not echo it.
+    test('runtime task text is never readable through /execution/*', async () => {
+      // Seed runtime task data with the poison; the /execution routes must
+      // not touch runtime task text and therefore must not echo it.
       const task = sessionManager.createTask({
         taskType: 'browser-action',
         title: 'task with user_input poison',

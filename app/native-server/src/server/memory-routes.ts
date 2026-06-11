@@ -1,11 +1,9 @@
 /**
  * MKEP Memory read routes.
  *
- * These routes expose the persisted Memory tables (`memory_sessions`
- * + `memory_tasks` + `memory_steps`) to the sidepanel Memory tab. They
- * are intentionally **read-only** — the Memory write path is owned by
- * `SessionManager` via the MCP post-processor and must not be exposed
- * over HTTP.
+ * These routes expose the new MKE storage surfaces to the sidepanel. They are
+ * intentionally read-focused; Memory writes are produced by MCP execution
+ * traces and Object Library lifecycle capture, not by HTTP inserts.
  *
  * Auth: relies on the global `onRequest` hook in `server/index.ts`.
  * Protected routes require Bearer auth when the server is remote-exposed;
@@ -15,9 +13,6 @@
  * routes are protected by the same token as `/mcp`.
  *
  * Contract:
- * - `GET /memory/sessions?limit=&offset=` → recent sessions, newest first
- * - `GET /memory/sessions/:sessionId/steps` → steps for one session
- * - `GET /memory/tasks/:taskId` → single task + its sessions
  * - `GET /memory/mke/traces?limit=&offset=` → sanitized MKE Memory trace summaries
  * - `GET /memory/mke/browser-objects?limit=&offset=&scope=` → sanitized browser object summaries
  * - `DELETE /memory/mke/browser-objects` → clear Object Library rows only
@@ -45,7 +40,6 @@ import { HTTP_STATUS } from '../constant';
 import type { SessionManager } from '../execution/session-manager';
 import type { BrowserObject, ExperienceRecipe, KnowledgeModel, MemoryTrace } from '../memory/db';
 import { sessionManager as defaultSessionManager } from '../execution/session-manager';
-import { SESSION_SUMMARY_LIMIT_MAX } from '../memory/db';
 import {
   getPersonalBrowserStateStorageEnabled,
   setPersonalBrowserStateStorageEnabled,
@@ -56,18 +50,14 @@ import {
   summarizeBrowserRouteForPrivacy,
 } from '../policy/browser-state-privacy';
 
-/**
- * Default page size for `GET /memory/sessions`. Matches the sidepanel
- * Memory tab's initial render budget (20 rows).
- */
-export const MEMORY_SESSIONS_DEFAULT_LIMIT = 20;
+const MKE_LIST_LIMIT_MAX = 100;
 
-interface SessionsQuery {
+interface MkeListQuery {
   limit?: string;
   offset?: string;
 }
 
-interface MkeListQuery extends SessionsQuery {
+interface BrowserObjectsQuery extends MkeListQuery {
   scope?: string;
 }
 
@@ -552,90 +542,9 @@ export function registerMemoryRoutes(
   sessionManager: SessionManager = defaultSessionManager,
 ): void {
   fastify.get(
-    '/memory/sessions',
-    async (request: FastifyRequest<{ Querystring: SessionsQuery }>, reply: FastifyReply) => {
-      const limit = parsePositiveInt(
-        request.query.limit,
-        MEMORY_SESSIONS_DEFAULT_LIMIT,
-        SESSION_SUMMARY_LIMIT_MAX,
-      );
-      const offset = parsePositiveInt(request.query.offset, 0, Number.MAX_SAFE_INTEGER);
-      const sessions = sessionManager.listRecentSessionSummaries(limit, offset);
-      const total = sessionManager.countAllSessions();
-      const persistence = sessionManager.getPersistenceStatus();
-
-      return reply.status(HTTP_STATUS.OK).send({
-        status: 'ok',
-        data: {
-          sessions,
-          total,
-          limit,
-          offset,
-          persistenceMode: persistence.mode,
-        },
-      });
-    },
-  );
-
-  fastify.get(
-    '/memory/sessions/:sessionId/steps',
-    async (request: FastifyRequest<{ Params: { sessionId: string } }>, reply: FastifyReply) => {
-      const { sessionId } = request.params;
-      if (!sessionId || typeof sessionId !== 'string') {
-        return reply.status(HTTP_STATUS.BAD_REQUEST).send({
-          status: 'error',
-          message: 'sessionId is required',
-        });
-      }
-      const steps = sessionManager.getStepsForSession(sessionId);
-      const persistence = sessionManager.getPersistenceStatus();
-
-      return reply.status(HTTP_STATUS.OK).send({
-        status: 'ok',
-        data: {
-          sessionId,
-          steps,
-          persistenceMode: persistence.mode,
-        },
-      });
-    },
-  );
-
-  fastify.get(
-    '/memory/tasks/:taskId',
-    async (request: FastifyRequest<{ Params: { taskId: string } }>, reply: FastifyReply) => {
-      const { taskId } = request.params;
-      if (!taskId || typeof taskId !== 'string') {
-        return reply.status(HTTP_STATUS.BAD_REQUEST).send({
-          status: 'error',
-          message: 'taskId is required',
-        });
-      }
-      const task = sessionManager.getTaskOrNull(taskId);
-      const persistence = sessionManager.getPersistenceStatus();
-
-      if (!task) {
-        return reply.status(HTTP_STATUS.NOT_FOUND).send({
-          status: 'error',
-          message: 'Task not found',
-          data: { persistenceMode: persistence.mode },
-        });
-      }
-
-      return reply.status(HTTP_STATUS.OK).send({
-        status: 'ok',
-        data: {
-          task,
-          persistenceMode: persistence.mode,
-        },
-      });
-    },
-  );
-
-  fastify.get(
     '/memory/mke/traces',
     async (request: FastifyRequest<{ Querystring: MkeListQuery }>, reply: FastifyReply) => {
-      const limit = parsePositiveInt(request.query.limit, 20, SESSION_SUMMARY_LIMIT_MAX);
+      const limit = parsePositiveInt(request.query.limit, 20, MKE_LIST_LIMIT_MAX);
       const offset = parsePositiveInt(request.query.offset, 0, Number.MAX_SAFE_INTEGER);
       const traces = sessionManager.listRecentMkeMemoryTraces(limit, offset).map(toTraceSummary);
       const total = sessionManager.countMkeMemoryTraces();
@@ -656,8 +565,8 @@ export function registerMemoryRoutes(
 
   fastify.get(
     '/memory/mke/browser-objects',
-    async (request: FastifyRequest<{ Querystring: MkeListQuery }>, reply: FastifyReply) => {
-      const limit = parsePositiveInt(request.query.limit, 20, SESSION_SUMMARY_LIMIT_MAX);
+    async (request: FastifyRequest<{ Querystring: BrowserObjectsQuery }>, reply: FastifyReply) => {
+      const limit = parsePositiveInt(request.query.limit, 20, MKE_LIST_LIMIT_MAX);
       const offset = parsePositiveInt(request.query.offset, 0, Number.MAX_SAFE_INTEGER);
       const scope = parseBrowserObjectsScope(request.query.scope);
       const browserObjects =
@@ -724,7 +633,7 @@ export function registerMemoryRoutes(
   fastify.get(
     '/memory/mke/knowledge',
     async (request: FastifyRequest<{ Querystring: MkeListQuery }>, reply: FastifyReply) => {
-      const limit = parsePositiveInt(request.query.limit, 20, SESSION_SUMMARY_LIMIT_MAX);
+      const limit = parsePositiveInt(request.query.limit, 20, MKE_LIST_LIMIT_MAX);
       const offset = parsePositiveInt(request.query.offset, 0, Number.MAX_SAFE_INTEGER);
       const knowledgeModels = sessionManager
         .listRecentMkeKnowledgeModels(limit, offset)
@@ -748,7 +657,7 @@ export function registerMemoryRoutes(
   fastify.get(
     '/memory/mke/experience',
     async (request: FastifyRequest<{ Querystring: MkeListQuery }>, reply: FastifyReply) => {
-      const limit = parsePositiveInt(request.query.limit, 20, SESSION_SUMMARY_LIMIT_MAX);
+      const limit = parsePositiveInt(request.query.limit, 20, MKE_LIST_LIMIT_MAX);
       const offset = parsePositiveInt(request.query.offset, 0, Number.MAX_SAFE_INTEGER);
       const experienceRecipes = sessionManager
         .listRecentMkeExperienceRecipes(limit, offset)

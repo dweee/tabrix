@@ -97,6 +97,7 @@ describe('native-tool-handlers · experience_suggest_plan', () => {
         ],
         successCount: 4,
         failureCount: 1,
+        compositeScoreDecayed: 0.86,
         lastUsedAt: '2026-04-21T10:00:00.000Z',
         createdAt: '2026-04-20T00:00:00.000Z',
         updatedAt: '2026-04-21T10:00:00.000Z',

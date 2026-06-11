@@ -46,7 +46,7 @@ import {
 } from '@tabrix/shared';
 import { isCapabilityEnabled } from '../policy/capabilities';
 import type { CapabilityEnv } from '../policy/capabilities';
-import { normalizeIntentSignature } from '../memory/experience/experience-aggregator';
+import { normalizeIntentSignature } from '../memory/experience/experience-signature';
 import type { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
 import type { ExperienceQueryService } from '../memory/experience';
 import type { ExperienceActionPathRow } from '../memory/experience/experience-repository';
@@ -794,12 +794,11 @@ export function runTabrixChooseContext(
   //
   // Honest dispatcher inputs. When the caller wired a
   // `PageContextProvider`, the dispatcher receives real
-  // candidateActions / HVO counts + fullReadByteLength drawn from the
-  // most recent matching `memory_page_snapshots` row instead of
-  // hard-coded zeros. The provider call itself is read-only and never
-  // throws (it returns a `fallback_zero` shape on any error) so the
+  // candidateActions / HVO counts + fullReadByteLength from that provider
+  // instead of hard-coded zeros. The provider call itself is read-only and
+  // never throws (it returns a `fallback_zero` shape on any error) so the
   // chooser hot-path stays safe. When the provider is absent (test stubs
-  // / persistence off / legacy callers) we keep the historical
+  // / no live context) we keep the historical
   // zero-input behaviour bit-for-bit and leave `dispatcherInputSource` /
   // `fallbackCauseV26` `null` in telemetry.
   const intentHint = classifyIntentForLayerDispatch(input.intent);
@@ -929,10 +928,7 @@ export function runTabrixChooseContext(
       });
       decisionId = candidateId;
     } catch (error) {
-      // Same swallow-and-warn pattern as other Memory writes
-      // (`PageSnapshotService` etc.). The chooser surface is
-      // user-facing; telemetry breakage must not break the user-facing
-      // call.
+      // Telemetry breakage must not break the user-facing chooser call.
       const message = error instanceof Error ? error.message : String(error);
       chooseContextLogger.warn('telemetry recordDecision failed', { errorMessage: message });
     }

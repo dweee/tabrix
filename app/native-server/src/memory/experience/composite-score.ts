@@ -1,23 +1,18 @@
 /**
- * Pure session-end composite score module.
+ * Pure Experience composite-score module.
  *
  * Deterministic, side-effect-free maths used by:
- *   - the aggregator at session aggregation time (writes the
- *     decayed composite onto `experience_action_paths` via
- *     `SessionCompositeScoreWriter`);
- *   - chooser ranking (reads `composite_score_decayed`
- *     directly — does NOT recompute on the hot path).
+ *   - replay score write-back (`experience_score_step`);
+ *   - chooser ranking when a stored `composite_score_decayed`
+ *     is absent.
  *
  * The four component axes (`accuracy`, `speed`, `token`, `stability`)
  * and the recency half-life live in
  * `@tabrix/shared/experience-score-step` so any consumer (extension,
  * benchmark scripts, reports) reads the same constants.
  *
- * Failure handling: every public function returns either a number or
- * a typed result; nothing throws. The persistence path
- * (`SessionCompositeScoreWriter`) is the layer that swallows SQLite
- * exceptions and emits structured warnings — see
- * `experience-repository.ts::recordWritebackWarning`.
+ * Failure handling: every public function returns a finite number and
+ * does not perform IO.
  */
 
 import {
@@ -25,8 +20,6 @@ import {
   EXPERIENCE_SCORE_STEP_RECENCY_HALF_LIFE_DAYS,
   type TabrixTaskWeights,
 } from '@tabrix/shared';
-import type { ExperienceRepository } from './experience-repository';
-
 /** The four composite-score axes; values are clamped to `[0, 1]`. */
 export interface CompositeScoreComponents {
   accuracy: number;
@@ -164,98 +157,4 @@ export function computeDecayedComposite(input: {
 }): number {
   const raw = computeRawComposite(input.components, input.weights);
   return applyRecencyDecay(raw, input.lastReplayAt, input.nowIso);
-}
-
-/**
- * Persistence shim. Writes the (raw, decayed) pair on a single
- * SQLite transaction-equivalent path. Failure is ISOLATED:
- *   - we never throw out of `write()`;
- *   - the underlying SQLite error is reported through the injected
- *     warning sink so the caller can continue replay aggregation.
- *
- * The class is a deliberate thin seam. Tests inject a fake
- * `repository` to assert the `record()` / `recordWritebackWarning()`
- * call shape; production wires it to {@link ExperienceRepository}.
- */
-export interface SessionCompositeScoreWriterDeps {
-  repository: Pick<
-    ExperienceRepository,
-    | 'updateCompositeScoreForActionPath'
-    | 'updateMemorySessionCompositeScore'
-    | 'recordWritebackWarning'
-  >;
-  /**
-   * Optional structured-log sink. Defaults to a no-op; tests pass a
-   * spy. Production wires it to the same logger used by other
-   * write-back paths so an operator can see the warning even before
-   * SQLite opens.
-   */
-  onWarning?: (warning: { code: string; message: string; warningId: string }) => void;
-}
-
-export interface SessionCompositeScoreWriteInput {
-  sessionId: string;
-  actionPathId: string;
-  components: CompositeScoreComponents;
-  weights?: TabrixTaskWeights;
-  /** Used for both `last_replay_at` and `applyRecencyDecay`. */
-  lastReplayAt: string;
-  nowIso: string;
-}
-
-export interface SessionCompositeScoreWriteResult {
-  status: 'ok' | 'isolated';
-  raw: number;
-  decayed: number;
-  warningId?: string;
-}
-
-export class SessionCompositeScoreWriter {
-  constructor(private readonly deps: SessionCompositeScoreWriterDeps) {}
-
-  public write(input: SessionCompositeScoreWriteInput): SessionCompositeScoreWriteResult {
-    const raw = computeRawComposite(input.components, input.weights);
-    const decayed = applyRecencyDecay(raw, input.lastReplayAt, input.nowIso);
-    try {
-      this.deps.repository.updateMemorySessionCompositeScore({
-        sessionId: input.sessionId,
-        compositeScoreRaw: raw,
-        components: { ...input.components },
-      });
-      this.deps.repository.updateCompositeScoreForActionPath({
-        actionPathId: input.actionPathId,
-        compositeScoreDecayed: decayed,
-        nowIso: input.nowIso,
-      });
-      return { status: 'ok', raw, decayed };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const warningId = `warn_composite_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
-      try {
-        this.deps.repository.recordWritebackWarning({
-          warningId,
-          source: 'session_composite_score',
-          actionPathId: input.actionPathId,
-          stepIndex: null,
-          sessionId: input.sessionId,
-          replayId: null,
-          observedOutcome: null,
-          errorCode: 'composite_score_write_failed',
-          errorMessage: message.slice(0, 512),
-          payloadBlob: JSON.stringify({ components: input.components, raw, decayed }),
-          createdAt: input.nowIso,
-        });
-      } catch {
-        // Even the warning row failed to land — by design we still
-        // do not throw; the aggregator must keep moving so the user
-        // path stays alive.
-      }
-      this.deps.onWarning?.({
-        code: 'composite_score_write_failed',
-        message,
-        warningId,
-      });
-      return { status: 'isolated', raw, decayed, warningId };
-    }
-  }
 }

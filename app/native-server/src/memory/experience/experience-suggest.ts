@@ -21,7 +21,7 @@ import {
   type ExperienceSuggestPlanResult,
   type MemoryPersistenceMode,
 } from '@tabrix/shared';
-import { normalizeIntentSignature } from './experience-aggregator';
+import { normalizeIntentSignature } from './experience-signature';
 import {
   EXPERIENCE_SUGGEST_MIN_COMPOSITE_SCORE,
   EXPERIENCE_SUGGEST_MIN_SUCCESS_COUNT,
@@ -99,8 +99,8 @@ export function parseExperienceSuggestPlanInput(rawArgs: unknown): ExperienceSug
   if (trimmedIntent.length === 0) {
     throw new ExperienceSuggestPlanInputError("'intent' must be a non-empty string");
   }
-  // Truncate before normalization so the bucket stays identical to what
-  // the aggregator wrote from `memory_tasks.intent`.
+  // Truncate before normalization so the lookup bucket stays stable across
+  // callers and trace-derived projectors.
   const cappedIntent = trimmedIntent.slice(0, MAX_EXPERIENCE_SUGGEST_PLAN_INTENT_CHARS);
   const intentSignature = normalizeIntentSignature(cappedIntent);
   if (intentSignature.length === 0) {

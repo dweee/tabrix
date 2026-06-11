@@ -8,8 +8,6 @@
  *   3. applyRecencyDecay — no decay before half-life, half decay AT
  *      half-life, monotonic, missing/future timestamp short-circuit.
  *   4. computeDecayedComposite — full pipeline.
- *   5. SessionCompositeScoreWriter — happy path + isolation on
- *      repository failure + isolation when warning-row write also throws.
  */
 
 import {
@@ -18,7 +16,6 @@ import {
   EXPERIENCE_SCORE_STEP_RECENCY_HALF_LIFE_DAYS,
 } from '@tabrix/shared';
 import {
-  SessionCompositeScoreWriter,
   applyRecencyDecay,
   computeDecayedComposite,
   computeRawComposite,
@@ -141,92 +138,5 @@ describe('computeDecayedComposite', () => {
       nowIso: now.toISOString(),
     });
     expect(decayed).toBeCloseTo(0.5, 5);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// SessionCompositeScoreWriter
-// ---------------------------------------------------------------------------
-
-describe('SessionCompositeScoreWriter', () => {
-  const writeInput = {
-    sessionId: 'sess_1',
-    actionPathId: 'action_path_' + 'a'.repeat(64),
-    components: {
-      accuracy: 1,
-      speed: 1,
-      token: 1,
-      stability: 1,
-    } satisfies CompositeScoreComponents,
-    lastReplayAt: '2026-04-22T00:00:00.000Z',
-    nowIso: '2026-04-23T00:00:00.000Z',
-  };
-
-  it('writes raw + decayed score on the happy path', () => {
-    const updateMemory = jest.fn();
-    const updateActionPath = jest.fn();
-    const recordWarning = jest.fn();
-    const writer = new SessionCompositeScoreWriter({
-      repository: {
-        updateMemorySessionCompositeScore: updateMemory,
-        updateCompositeScoreForActionPath: updateActionPath,
-        recordWritebackWarning: recordWarning,
-      },
-    });
-    const result = writer.write(writeInput);
-    expect(result.status).toBe('ok');
-    expect(updateMemory).toHaveBeenCalledTimes(1);
-    expect(updateActionPath).toHaveBeenCalledTimes(1);
-    expect(recordWarning).not.toHaveBeenCalled();
-    expect(updateActionPath.mock.calls[0][0]).toMatchObject({
-      actionPathId: writeInput.actionPathId,
-      nowIso: writeInput.nowIso,
-    });
-  });
-
-  it('isolates a SQLite failure into a structured warning row', () => {
-    const updateMemory = jest.fn(() => {
-      throw new Error('SQLITE_BUSY');
-    });
-    const updateActionPath = jest.fn();
-    const recordWarning = jest.fn();
-    const onWarning = jest.fn();
-    const writer = new SessionCompositeScoreWriter({
-      repository: {
-        updateMemorySessionCompositeScore: updateMemory,
-        updateCompositeScoreForActionPath: updateActionPath,
-        recordWritebackWarning: recordWarning,
-      },
-      onWarning,
-    });
-    const result = writer.write(writeInput);
-    expect(result.status).toBe('isolated');
-    expect(result.warningId).toMatch(/^warn_composite_/);
-    expect(updateActionPath).not.toHaveBeenCalled();
-    expect(recordWarning).toHaveBeenCalledTimes(1);
-    expect(recordWarning.mock.calls[0][0]).toMatchObject({
-      source: 'session_composite_score',
-      sessionId: writeInput.sessionId,
-      actionPathId: writeInput.actionPathId,
-      errorCode: 'composite_score_write_failed',
-    });
-    expect(onWarning).toHaveBeenCalledTimes(1);
-  });
-
-  it('still returns isolated when even the warning row throws', () => {
-    const writer = new SessionCompositeScoreWriter({
-      repository: {
-        updateMemorySessionCompositeScore: () => {
-          throw new Error('SQLITE_BUSY');
-        },
-        updateCompositeScoreForActionPath: jest.fn(),
-        recordWritebackWarning: () => {
-          throw new Error('SQLITE_LOCKED');
-        },
-      },
-    });
-    const result = writer.write(writeInput);
-    expect(result.status).toBe('isolated');
-    expect(result.warningId).toMatch(/^warn_composite_/);
   });
 });

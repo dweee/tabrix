@@ -6,38 +6,12 @@ export {
   type OpenMemoryDbResult,
   type SqliteDatabase,
 } from './client';
-export {
-  BROWSER_OBJECT_CREATE_TABLES_SQL,
-  MKE_CORE_CREATE_TABLES_SQL,
-  MEMORY_CREATE_TABLES_SQL,
-  OPERATION_MEMORY_LOG_CREATE_TABLES_SQL,
-} from './schema';
+export { BROWSER_OBJECT_CREATE_TABLES_SQL, MKE_CORE_CREATE_TABLES_SQL } from './schema';
 export {
   BrowserObjectRepository,
   type BrowserObject,
   type BrowserObjectInput,
 } from './browser-object-repository';
-export { TaskRepository } from './task-repository';
-export {
-  SessionRepository,
-  SESSION_SUMMARY_LIMIT_MAX,
-  type SessionUpdate,
-  type SessionSummary,
-} from './session-repository';
-export { StepRepository, type StepCompletion } from './step-repository';
-export { PageSnapshotRepository, type PageSnapshot } from './page-snapshot-repository';
-export {
-  ActionRepository,
-  type MemoryAction,
-  type MemoryActionKind,
-  type MemoryActionStatus,
-  type MemoryNavigateMode,
-} from './action-repository';
-export {
-  OperationMemoryLogRepository,
-  type OperationMemoryLog,
-  type OperationMemoryLogInsert,
-} from './operation-memory-log-repository';
 export {
   ExperienceRecipeRepository,
   KnowledgeModelRepository,
@@ -52,24 +26,3 @@ export {
   type MemoryTraceAiFeedbackUpdate,
   type MemoryTraceInsert,
 } from './mke-core-repository';
-export {
-  NOT_APPLICABLE,
-  OPERATION_LOG_BLOB_SCHEMA_VERSION,
-  buildOperationLogBlobV2,
-  buildOperationLogMetadata,
-  makeOperationLogMetadataDefaults,
-  parseOperationLogBlob,
-  type OperationLogBlobV2,
-  type OperationLogMetadata,
-} from './operation-log-metadata';
-export {
-  rowToTask,
-  taskToRow,
-  rowToSession,
-  sessionToRow,
-  rowToStep,
-  stepToRow,
-  type TaskRow,
-  type SessionRow,
-  type StepRow,
-} from './row-mappers';

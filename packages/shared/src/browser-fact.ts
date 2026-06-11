@@ -120,12 +120,10 @@ export const NAVIGATION_INTENTS = [
 
 /**
  * Snapshot of the lifecycle state machine. Producer:
- * `lifecycle-state-machine.ts`. Consumers: `browser-context-manager.ts`
- * and the operation-log writer.
+ * `lifecycle-state-machine.ts`. Consumer: `browser-context-manager.ts`.
  *
  * Privacy: this snapshot carries NO raw URL. The `urlPattern` field is
- * the path-only, query-stripped, brand-neutral form already used by
- * the operation log (`OperationMemoryLog.urlPattern`).
+ * the path-only, query-stripped, brand-neutral form used for browser facts.
  */
 export interface LifecycleStateSnapshot {
   /** Current state (closed enum, always includes `'unknown'`). */
@@ -137,8 +135,7 @@ export interface LifecycleStateSnapshot {
   /**
    * Confidence in the state, formatted as a clamped float in `[0, 1]`.
    * Higher when more independent signals corroborate the state. The
-   * lifecycle writer stamps the formatted `'0.00'..'1.00'` string into
-   * `OperationLogMetadata.lifecycleConfidence`.
+   * lifecycle writer exposes the same confidence through browser facts.
    */
   lifecycleConfidence: number;
   /**
@@ -851,9 +848,7 @@ export const TAB_WINDOW_EVENT_KINDS = [
 
 /**
  * Closed-enum reason the ContextManager bumps a tab's context
- * version. Mirrors `OperationLogMetadata.contextInvalidationReason`
- * (already declared in operation-log metadata — do not bump that allowlist
- * here; this enum just pins the wire-side closed set).
+ * version. This enum pins the wire-side closed set.
  *
  * Always includes `'unknown'` per the shared invariant.
  */

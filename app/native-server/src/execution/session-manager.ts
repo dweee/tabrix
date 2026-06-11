@@ -8,14 +8,8 @@ import {
   Task,
 } from './types';
 import {
-  ActionRepository,
   openMemoryDb,
-  OperationMemoryLogRepository,
-  PageSnapshotRepository,
   resolveMemoryDbPath,
-  SessionRepository,
-  StepRepository,
-  TaskRepository,
   BrowserObjectRepository,
   MemoryTraceRepository,
   KnowledgeModelRepository,
@@ -24,11 +18,8 @@ import {
   type BrowserObject,
   type KnowledgeModel,
   type MemoryTrace,
-  type SessionSummary,
   type SqliteDatabase,
 } from '../memory/db';
-import { PageSnapshotService } from '../memory/page-snapshot-service';
-import { ActionService } from '../memory/action-service';
 import { MkeMemoryTraceService } from '../memory/mke-memory-trace-service';
 import {
   MkeKnowledgeProjector,
@@ -40,14 +31,9 @@ import {
   type MkeExperienceProjectionInput,
   type MkeExperienceProjectionResult,
 } from '../memory/mke-experience-projector';
-import {
-  ExperienceAggregator,
-  ExperienceQueryService,
-  ExperienceRepository,
-} from '../memory/experience';
+import { ExperienceQueryService, ExperienceRepository } from '../memory/experience';
 import { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
 import { ChooseContextTelemetryRepository } from '../memory/telemetry/choose-context-telemetry';
-import type { OperationLogMetadata } from '../memory/db/operation-log-metadata';
 import { TaskSessionContext } from './task-session-context';
 import { getPersonalBrowserStateStorageEnabled } from '../host-config';
 
@@ -98,12 +84,6 @@ export interface SessionManagerOptions {
 export type SessionPersistenceMode = 'disk' | 'memory' | 'off';
 
 interface Repos {
-  task: TaskRepository;
-  session: SessionRepository;
-  step: StepRepository;
-  pageSnapshot: PageSnapshotRepository;
-  action: ActionRepository;
-  operationLog: OperationMemoryLogRepository;
   browserObject: BrowserObjectRepository;
   memoryTrace: MemoryTraceRepository;
   knowledgeModel: KnowledgeModelRepository;
@@ -117,14 +97,10 @@ interface StorageInit {
   repos: Repos | null;
   dbHandle: SqliteDatabase | null;
   persistenceMode: SessionPersistenceMode;
-  pageSnapshots: PageSnapshotService | null;
-  actions: ActionService | null;
-  operationLog: OperationMemoryLogRepository | null;
   browserObject: BrowserObjectRepository | null;
   memoryTrace: MkeMemoryTraceService | null;
   knowledgeProjector: MkeKnowledgeProjector | null;
   experienceProjector: MkeExperienceProjector | null;
-  experienceAggregator: ExperienceAggregator | null;
   experienceQuery: ExperienceQueryService | null;
   knowledgeApi: KnowledgeApiRepository | null;
   chooseContextTelemetry: ChooseContextTelemetryRepository | null;
@@ -157,14 +133,10 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
       repos: null,
       dbHandle: null,
       persistenceMode: 'off',
-      pageSnapshots: null,
-      actions: null,
-      operationLog: null,
       browserObject: null,
       memoryTrace: null,
       knowledgeProjector: null,
       experienceProjector: null,
-      experienceAggregator: null,
       experienceQuery: null,
       knowledgeApi: null,
       chooseContextTelemetry: null,
@@ -174,9 +146,6 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
   try {
     const dbPath = resolveRuntimeDbPath(options);
     const opened = openMemoryDb({ dbPath });
-    const pageSnapshotRepo = new PageSnapshotRepository(opened.db);
-    const actionRepo = new ActionRepository(opened.db);
-    const operationLogRepo = new OperationMemoryLogRepository(opened.db);
     const browserObjectRepo = new BrowserObjectRepository(opened.db);
     const memoryTraceRepo = new MemoryTraceRepository(opened.db);
     const knowledgeModelRepo = new KnowledgeModelRepository(opened.db);
@@ -185,12 +154,6 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
     const knowledgeApiRepo = new KnowledgeApiRepository(opened.db);
     const chooseContextTelemetryRepo = new ChooseContextTelemetryRepository(opened.db);
     const repos: Repos = {
-      task: new TaskRepository(opened.db),
-      session: new SessionRepository(opened.db),
-      step: new StepRepository(opened.db),
-      pageSnapshot: pageSnapshotRepo,
-      action: actionRepo,
-      operationLog: operationLogRepo,
       browserObject: browserObjectRepo,
       memoryTrace: memoryTraceRepo,
       knowledgeModel: knowledgeModelRepo,
@@ -203,9 +166,6 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
       repos,
       dbHandle: opened.db,
       persistenceMode: opened.persistenceMode,
-      pageSnapshots: new PageSnapshotService(pageSnapshotRepo),
-      actions: new ActionService(actionRepo, pageSnapshotRepo),
-      operationLog: operationLogRepo,
       browserObject: browserObjectRepo,
       memoryTrace: new MkeMemoryTraceService(memoryTraceRepo, browserObjectRepo, {
         allowPersonalBrowserStateStorage: getPersonalBrowserStateStorageEnabled,
@@ -215,13 +175,6 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
         memoryTraceRepo,
         knowledgeModelRepo,
         experienceRecipeRepo,
-      ),
-      experienceAggregator: new ExperienceAggregator(
-        opened.db,
-        repos.session,
-        repos.step,
-        pageSnapshotRepo,
-        experienceRepo,
       ),
       experienceQuery: new ExperienceQueryService(experienceRepo),
       knowledgeApi: knowledgeApiRepo,
@@ -235,14 +188,10 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
       repos: null,
       dbHandle: null,
       persistenceMode: 'off',
-      pageSnapshots: null,
-      actions: null,
-      operationLog: null,
       browserObject: null,
       memoryTrace: null,
       knowledgeProjector: null,
       experienceProjector: null,
-      experienceAggregator: null,
       experienceQuery: null,
       knowledgeApi: null,
       chooseContextTelemetry: null,
@@ -280,13 +229,9 @@ export class SessionManager {
   private readonly repos: Repos | null;
   private readonly dbHandle: SqliteDatabase | null;
   private readonly persistenceMode: SessionPersistenceMode;
-  private readonly pageSnapshotService: PageSnapshotService | null;
-  private readonly actionService: ActionService | null;
-  private readonly operationLogRepo: OperationMemoryLogRepository | null;
   private readonly memoryTraceService: MkeMemoryTraceService | null;
   private readonly mkeKnowledgeProjector: MkeKnowledgeProjector | null;
   private readonly mkeExperienceProjector: MkeExperienceProjector | null;
-  private readonly experienceAggregator: ExperienceAggregator | null;
   private readonly experienceQueryService: ExperienceQueryService | null;
   private readonly knowledgeApiRepo: KnowledgeApiRepository | null;
   private readonly chooseContextTelemetryRepo: ChooseContextTelemetryRepository | null;
@@ -296,17 +241,12 @@ export class SessionManager {
     this.repos = storage.repos;
     this.dbHandle = storage.dbHandle;
     this.persistenceMode = storage.persistenceMode;
-    this.pageSnapshotService = storage.pageSnapshots;
-    this.actionService = storage.actions;
-    this.operationLogRepo = storage.operationLog;
     this.memoryTraceService = storage.memoryTrace;
     this.mkeKnowledgeProjector = storage.knowledgeProjector;
     this.mkeExperienceProjector = storage.experienceProjector;
-    this.experienceAggregator = storage.experienceAggregator;
     this.experienceQueryService = storage.experienceQuery;
     this.knowledgeApiRepo = storage.knowledgeApi;
     this.chooseContextTelemetryRepo = storage.chooseContextTelemetry;
-    if (this.repos) this.hydrateFromDb(this.repos);
   }
 
   /**
@@ -316,32 +256,6 @@ export class SessionManager {
    */
   public get experience(): ExperienceQueryService | null {
     return this.experienceQueryService;
-  }
-
-  /**
-   * Memory Phase 0.2 — page snapshot façade. `null` when persistence
-   * is off (or DB init failed). Callers must treat `null` as
-   * "Memory unavailable, proceed without a historyRef".
-   */
-  public get pageSnapshots(): PageSnapshotService | null {
-    return this.pageSnapshotService;
-  }
-
-  /**
-   * Memory Phase 0.3 — DOM action façade (click / fill / navigate /
-   * keyboard). `null` when persistence is off.
-   */
-  public get actions(): ActionService | null {
-    return this.actionService;
-  }
-
-  /**
-   * Factual operation log repository. `null` when persistence is off. Tool
-   * calls must treat it as best-effort evidence storage, never as part of the
-   * browser-tool success path.
-   */
-  public get operationLogs(): OperationMemoryLogRepository | null {
-    return this.operationLogRepo;
   }
 
   /**
@@ -389,16 +303,6 @@ export class SessionManager {
     return this.chooseContextTelemetryRepo;
   }
 
-  private hydrateFromDb(repos: Repos): void {
-    for (const task of repos.task.list()) {
-      this.tasks.set(task.taskId, task);
-    }
-    for (const session of repos.session.list()) {
-      const steps = repos.step.listBySession(session.sessionId);
-      this.sessions.set(session.sessionId, { ...session, steps });
-    }
-  }
-
   public createTask(input: CreateTaskInput): Task {
     const timestamp = nowIso();
     const task: Task = {
@@ -415,7 +319,6 @@ export class SessionManager {
       labels: input.labels ?? [],
     };
 
-    this.repos?.task.insert(task);
     this.tasks.set(task.taskId, task);
     return task;
   }
@@ -434,7 +337,6 @@ export class SessionManager {
       steps: [],
     };
 
-    this.repos?.session.insert(session);
     this.sessions.set(session.sessionId, session);
     this.updateTaskStatus(task.taskId, 'running');
     // Attach a fresh per-task read-budget gate. Idempotent: `startSession`
@@ -462,7 +364,6 @@ export class SessionManager {
       artifactRefs: [],
     };
 
-    this.repos?.step.insert(step);
     session.steps.push(step);
     return step;
   }
@@ -496,7 +397,7 @@ export class SessionManager {
          * knows (decisionReason, sourceRoute, fallbackPlan, etc.) — do NOT
          * invent values.
          */
-        metadata?: Partial<OperationLogMetadata>;
+        metadata?: Record<string, unknown>;
       };
     },
   ): ExecutionStep {
@@ -510,84 +411,7 @@ export class SessionManager {
     step.artifactRefs = updates?.artifactRefs ?? step.artifactRefs;
     step.endedAt = nowIso();
 
-    this.repos?.step.complete({
-      stepId: step.stepId,
-      status: step.status,
-      resultSummary: step.resultSummary,
-      errorCode: step.errorCode,
-      errorSummary: step.errorSummary,
-      artifactRefs: step.artifactRefs,
-      endedAt: step.endedAt,
-    });
-
-    this.recordOperationLog(session, step, updates?.operationLog);
-
     return step;
-  }
-
-  private recordOperationLog(
-    session: ExecutionSession,
-    step: ExecutionStep,
-    extras?: {
-      urlPattern?: string | null;
-      pageRole?: string | null;
-      requestedLayer?: string | null;
-      selectedDataSource?: string | null;
-      sourceRoute?: string | null;
-      decisionReason?: string | null;
-      resultKind?: string | null;
-      fallbackUsed?: string | null;
-      readCount?: number | null;
-      tokensSaved?: number | null;
-      success?: boolean;
-      tabHygiene?: unknown;
-      metadata?: Partial<OperationLogMetadata>;
-    },
-  ): void {
-    if (!this.operationLogRepo) return;
-    try {
-      const started = Date.parse(step.startedAt);
-      const ended = step.endedAt ? Date.parse(step.endedAt) : NaN;
-      const durationMs =
-        Number.isFinite(started) && Number.isFinite(ended) && ended >= started
-          ? ended - started
-          : null;
-      this.operationLogRepo.insert({
-        taskId: session.taskId,
-        sessionId: session.sessionId,
-        stepId: step.stepId,
-        toolName: step.toolName,
-        urlPattern: extras?.urlPattern ?? null,
-        pageRole: extras?.pageRole ?? null,
-        requestedLayer: extras?.requestedLayer ?? null,
-        selectedDataSource: extras?.selectedDataSource ?? null,
-        sourceRoute: extras?.sourceRoute ?? null,
-        decisionReason: extras?.decisionReason ?? null,
-        resultKind: extras?.resultKind ?? null,
-        durationMs,
-        success: extras?.success ?? step.status === 'completed',
-        fallbackUsed: extras?.fallbackUsed ?? null,
-        errorCode: step.errorCode ?? null,
-        readCount: extras?.readCount ?? null,
-        tokensSaved: extras?.tokensSaved ?? null,
-        tabHygiene: extras?.tabHygiene,
-        // Auto-derive a metadata floor from the already-known operationLog
-        // fields so every step lands a structured "why" record even when the
-        // caller did not pass an explicit `metadata` block. Caller-provided
-        // fields win.
-        metadata: {
-          decisionReason: extras?.decisionReason ?? undefined,
-          routerDecision: extras?.selectedDataSource ?? undefined,
-          fallbackPlan: extras?.fallbackUsed ?? undefined,
-          ...(extras?.metadata ?? {}),
-        },
-        createdAt: step.endedAt ?? nowIso(),
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-
-      console.warn(`[tabrix/operation-log] write failed: ${message}`);
-    }
   }
 
   public finishSession(
@@ -602,13 +426,6 @@ export class SessionManager {
     session.summary = updates?.summary;
     session.endedAt = nowIso();
 
-    this.repos?.session.finish({
-      sessionId: session.sessionId,
-      status: session.status,
-      summary: session.summary,
-      endedAt: session.endedAt,
-    });
-
     const taskStatusMap: Record<
       Extract<ExecutionSessionStatus, 'completed' | 'failed' | 'aborted'>,
       Task['status']
@@ -619,13 +436,7 @@ export class SessionManager {
     };
 
     this.updateTaskStatus(session.taskId, taskStatusMap[session.status]);
-    try {
-      this.experienceAggregator?.projectPendingSessions();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-
-      console.warn(`[tabrix/experience] aggregation failed: ${message}`);
-    }
+    this.projectMkeExperienceIdle();
     // Release the per-task read-budget gate. The task is logically finished
     // (completed / failed / aborted) so any future tool call against the same
     // taskId should start a fresh budget. Detach is best-effort: if
@@ -757,26 +568,6 @@ export class SessionManager {
     return Array.from(this.sessions.values());
   }
 
-  /**
-   * Returns the most recent sessions with task title + intent + step count
-   * pre-joined, for the sidepanel Memory tab. Returns `[]` when persistence is
-   * off (the UI treats an empty response the same way as "no sessions yet"
-   * and surfaces a neutral message).
-   */
-  public listRecentSessionSummaries(limit: number, offset: number): SessionSummary[] {
-    if (!this.repos) return [];
-    return this.repos.session.listRecent(limit, offset);
-  }
-
-  /**
-   * Returns total session count to drive pagination. Returns 0 when
-   * persistence is off.
-   */
-  public countAllSessions(): number {
-    if (!this.repos) return 0;
-    return this.repos.session.countAll();
-  }
-
   public listRecentMkeMemoryTraces(limit: number, offset: number): MemoryTrace[] {
     if (!this.repos) return [];
     return this.repos.memoryTrace.listRecent({ limit, offset });
@@ -840,25 +631,6 @@ export class SessionManager {
     return this.repos.experienceRecipe.count();
   }
 
-  /**
-   * Returns chronologically-ordered steps for the given session, read from
-   * SQLite. Empty array when the session does not exist or persistence is off.
-   */
-  public getStepsForSession(sessionId: string): ExecutionStep[] {
-    if (!this.repos) return [];
-    return this.repos.step.listBySession(sessionId);
-  }
-
-  /**
-   * Returns a Task row by id, or `null` when the task is unknown or
-   * persistence is off. Intentionally non-throwing so the HTTP route can
-   * surface a clean 404.
-   */
-  public getTaskOrNull(taskId: string): Task | null {
-    if (!this.repos) return null;
-    return this.repos.task.get(taskId) ?? null;
-  }
-
   public getPersistenceStatus(): {
     mode: SessionPersistenceMode;
     enabled: boolean;
@@ -869,19 +641,10 @@ export class SessionManager {
   public reset(): void {
     this.memoryTraceService?.discardPendingAsyncWrites();
     if (this.repos) {
-      // Order matters due to FK cascade: clearing tasks cascades to
-      // sessions and steps, but we clear all five explicitly so
-      // behavior stays identical whether persistence is on or off.
-      this.repos.operationLog.clear();
       this.repos.browserObject.clear();
       this.repos.memoryTrace.clear();
       this.repos.knowledgeModel.clear();
       this.repos.experienceRecipe.clear();
-      this.repos.action.clear();
-      this.repos.pageSnapshot.clear();
-      this.repos.step.clear();
-      this.repos.session.clear();
-      this.repos.task.clear();
       this.repos.experience.clear();
     }
     this.tasks.clear();
@@ -920,7 +683,6 @@ export class SessionManager {
     if (!task) return;
     task.intent = intent;
     task.updatedAt = nowIso();
-    this.repos?.task.updateIntent(taskId, intent, task.updatedAt);
   }
 
   private getStep(session: ExecutionSession, stepId: string): ExecutionStep {
@@ -935,7 +697,6 @@ export class SessionManager {
     const task = this.getTask(taskId);
     task.status = status;
     task.updatedAt = nowIso();
-    this.repos?.task.updateStatus(taskId, status, task.updatedAt);
   }
 }
 

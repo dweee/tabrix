@@ -4,12 +4,7 @@
 
 export const EXPERIENCE_ACTION_PATHS_TABLE = 'experience_action_paths';
 
-export {
-  ExperienceAggregator,
-  buildActionPathId,
-  normalizeIntentSignature,
-  type ExperienceAggregationResult,
-} from './experience-aggregator';
+export { buildActionPathId, normalizeIntentSignature } from './experience-signature';
 export {
   ExperienceRepository,
   type ExperienceActionPathRow,
@@ -19,7 +14,6 @@ export {
   type RecordWritebackWarningInput,
   type SuggestActionPathsInput,
   type UpdateActionPathCompositeScoreInput,
-  type UpdateMemorySessionCompositeScoreInput,
   type UpsertActionPathInput,
   type WritebackWarningRow,
 } from './experience-repository';
@@ -33,13 +27,9 @@ export {
 } from './experience-suggest';
 export { ExperienceQueryService } from './experience-query-service';
 export {
-  SessionCompositeScoreWriter,
   applyRecencyDecay,
   computeDecayedComposite,
   computeRawComposite,
   projectCompositeComponents,
   type CompositeScoreComponents,
-  type SessionCompositeScoreWriteInput,
-  type SessionCompositeScoreWriteResult,
-  type SessionCompositeScoreWriterDeps,
 } from './composite-score';

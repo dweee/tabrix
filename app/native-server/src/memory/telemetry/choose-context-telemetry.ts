@@ -318,9 +318,9 @@ export class ChooseContextTelemetryRepository {
   // All methods below return UI-shaped DTOs that the
   // `/execution/**` HTTP routes echo verbatim. They are pure reads
   // off the existing `tabrix_choose_context_decisions` and
-  // `tabrix_choose_context_outcomes` tables — no joins to
-  // `memory_sessions`, no pulls from `memory_steps.tool_input`,
-  // and no exposure of raw `intent` text. The intent_signature is
+  // `tabrix_choose_context_outcomes` tables — no joins to retired
+  // runtime-history tables and no exposure of raw `intent` text.
+  // The intent_signature is
   // already structurally normalized before persistence so
   // it is safe to expose as a UI chip.
   // ============================================================

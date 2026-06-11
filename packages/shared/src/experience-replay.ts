@@ -303,9 +303,8 @@ export interface TabrixExperienceReplayErrorBody {
 export interface TabrixExperienceReplayResult {
   status: 'ok' | 'partial' | 'failed' | 'failed-precondition' | 'invalid_input' | 'denied';
   /**
-   * Memory session id (`memory_sessions.session_id`) the replay
-   * opened. ALWAYS present for `ok | partial | failed`; absent for
-   * the three pre-execution statuses.
+   * Runtime replay id opened by the replay engine. ALWAYS present for
+   * `ok | partial | failed`; absent for the three pre-execution statuses.
    */
   replayId?: string;
   /**

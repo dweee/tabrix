@@ -56,7 +56,7 @@ describe('SessionManager', () => {
     }
   });
 
-  it('persistence round-trip: second manager on same DB file sees prior state', () => {
+  it('does not persist runtime task/session/step wrappers across manager instances', () => {
     const dir = mkdtempSync(join(tmpdir(), 'tabrix-memory-'));
     const dbPath = join(dir, 'memory.db');
     try {
@@ -87,144 +87,14 @@ describe('SessionManager', () => {
       const reader = new SessionManager({ dbPath });
       try {
         expect(reader.getPersistenceStatus().mode).toBe('disk');
-        expect(reader.listTasks()).toHaveLength(1);
-        expect(reader.getTask(task.taskId).status).toBe('completed');
-        const restored = reader.getSession(session.sessionId);
-        expect(restored.status).toBe('completed');
-        expect(restored.summary).toBe('ok');
-        expect(restored.steps).toHaveLength(1);
-        expect(restored.steps[0].resultSummary).toBe('clicked');
-        expect(restored.steps[0].artifactRefs).toEqual(['artifact://screenshot-1']);
+        expect(reader.listTasks()).toEqual([]);
+        expect(reader.listSessions()).toEqual([]);
+        expect(() => reader.getTask(task.taskId)).toThrow(`Unknown task: ${task.taskId}`);
       } finally {
         reader.close();
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('writes a fail-open operation log when a step completes', () => {
-    const manager = new SessionManager({ dbPath: ':memory:' });
-    try {
-      const task = manager.createTask({
-        taskType: 'browser-action',
-        title: 'operation log task',
-        intent: 'read list',
-        origin: 'jest',
-      });
-      const session = manager.startSession({
-        taskId: task.taskId,
-        transport: 'stdio',
-        clientName: 'jest',
-      });
-      const step = manager.startStep({
-        sessionId: session.sessionId,
-        toolName: 'chrome_read_page',
-      });
-
-      manager.completeStep(session.sessionId, step.stepId, {
-        operationLog: {
-          requestedLayer: 'L0+L1',
-          selectedDataSource: 'api_rows',
-          sourceRoute: 'knowledge_supported_read',
-          tokensSaved: 128,
-        },
-      });
-
-      const logs = manager.operationLogs?.listBySession(session.sessionId);
-      expect(logs).toHaveLength(1);
-      expect(logs?.[0]).toEqual(
-        expect.objectContaining({
-          taskId: task.taskId,
-          stepId: step.stepId,
-          toolName: 'chrome_read_page',
-          success: true,
-          selectedDataSource: 'api_rows',
-          sourceRoute: 'knowledge_supported_read',
-          tokensSaved: 128,
-        }),
-      );
-    } finally {
-      manager.close();
-    }
-  });
-
-  it('allows operation log success=false for completed tool envelopes that are failures', () => {
-    const manager = new SessionManager({ dbPath: ':memory:' });
-    try {
-      const task = manager.createTask({
-        taskType: 'browser-action',
-        title: 'operation log failed envelope task',
-        intent: 'read list',
-        origin: 'jest',
-      });
-      const session = manager.startSession({
-        taskId: task.taskId,
-        transport: 'stdio',
-        clientName: 'jest',
-      });
-      const step = manager.startStep({
-        sessionId: session.sessionId,
-        toolName: 'chrome_read_page',
-      });
-
-      manager.completeStep(session.sessionId, step.stepId, {
-        status: 'completed',
-        operationLog: {
-          requestedLayer: 'L0+L1',
-          selectedDataSource: 'dom_json',
-          resultKind: 'read_page_failed',
-          success: false,
-        },
-      });
-
-      const logs = manager.operationLogs?.listBySession(session.sessionId);
-      expect(logs?.[0]).toEqual(
-        expect.objectContaining({
-          success: false,
-          selectedDataSource: 'dom_json',
-          resultKind: 'read_page_failed',
-        }),
-      );
-    } finally {
-      manager.close();
-    }
-  });
-
-  it('does not fail the tool lifecycle when operation-log persistence throws', () => {
-    const manager = new SessionManager({ dbPath: ':memory:' });
-    try {
-      const task = manager.createTask({
-        taskType: 'browser-action',
-        title: 'operation log fail open task',
-        intent: 'click',
-        origin: 'jest',
-      });
-      const session = manager.startSession({
-        taskId: task.taskId,
-        transport: 'stdio',
-        clientName: 'jest',
-      });
-      const step = manager.startStep({
-        sessionId: session.sessionId,
-        toolName: 'chrome_click_element',
-      });
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-      try {
-        const repo = manager.operationLogs as unknown as { insert: () => never };
-        repo.insert = () => {
-          throw new Error('simulated operation-log failure');
-        };
-
-        expect(() => manager.completeStep(session.sessionId, step.stepId)).not.toThrow();
-        expect(warnSpy).toHaveBeenCalledWith(
-          expect.stringContaining('[tabrix/operation-log] write failed:'),
-        );
-      } finally {
-        warnSpy.mockRestore();
-      }
-    } finally {
-      manager.close();
     }
   });
 

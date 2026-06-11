@@ -76,9 +76,9 @@ export interface TabrixExperienceScoreStepInput {
   stepIndex: number;
   /** Re-uses {@link ClickObservedOutcome} — no parallel outcome enum. */
   observedOutcome: ClickObservedOutcome;
-  /** Optional Memory `historyRef` for audit correlation. */
+  /** Optional runtime evidence ref for audit correlation. */
   historyRef?: string;
-  /** Optional Memory replay session id (`memory_sessions.session_id`). */
+  /** Optional runtime replay id. */
   replayId?: string;
   /** Optional structured evidence (failure code + short message). */
   evidence?: {

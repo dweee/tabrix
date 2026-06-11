@@ -16,13 +16,10 @@ export interface ExperienceActionPathStep {
   status: string;
   historyRef: string | null;
   /**
-   * Captured tool-call args lifted from
-   * `memory_steps.input_summary` for the v1 replay-supported step
-   * kinds (`chrome_click_element` / `chrome_fill_or_select`).
+   * Captured portable tool-call args for the v1 replay-supported
+   * step kinds (`chrome_click_element` / `chrome_fill_or_select`).
    *
-   * Population is performed by the aggregator
-   * (`experience-aggregator.ts::extractReplayArgs`) and is gated by
-   * the per-tool **portable allowlist** in
+   * Population is gated by the per-tool **portable allowlist** in
    * `mcp/experience-replay-args.ts::extractPortableReplayArgs`:
    * - only the v1 supported step kinds get args populated; every
    *   other step kind keeps the historical `{toolName,status,historyRef}`
@@ -213,12 +210,6 @@ export interface UpdateActionPathCompositeScoreInput {
   nowIso: string;
 }
 
-export interface UpdateMemorySessionCompositeScoreInput {
-  sessionId: string;
-  compositeScoreRaw: number;
-  components: Record<string, number>;
-}
-
 /** Isolation-warning writer (append-only). */
 export interface RecordWritebackWarningInput {
   warningId: string;
@@ -246,7 +237,6 @@ export class ExperienceRepository {
   // touching the legacy aggregator path.
   private readonly recordReplayStepOutcomeStmt;
   private readonly updateActionPathCompositeStmt;
-  private readonly updateMemorySessionCompositeStmt;
   private readonly insertWritebackWarningStmt;
 
   constructor(private readonly db: SqliteDatabase) {
@@ -441,12 +431,6 @@ export class ExperienceRepository {
               updated_at              = @now_iso
         WHERE action_path_id = @action_path_id`,
     );
-    this.updateMemorySessionCompositeStmt = db.prepare(
-      `UPDATE memory_sessions
-          SET composite_score_raw = @composite_score_raw,
-              components_blob     = @components_blob
-        WHERE session_id = @session_id`,
-    );
     this.insertWritebackWarningStmt = db.prepare(
       `INSERT INTO experience_writeback_warnings
         (warning_id, source, action_path_id, step_index, session_id, replay_id,
@@ -589,22 +573,8 @@ export class ExperienceRepository {
   }
 
   /**
-   * Write the raw composite score and its component
-   * breakdown onto the originating Memory session row.
-   */
-  public updateMemorySessionCompositeScore(input: UpdateMemorySessionCompositeScoreInput): void {
-    this.updateMemorySessionCompositeStmt.run({
-      session_id: input.sessionId,
-      composite_score_raw: input.compositeScoreRaw,
-      components_blob: JSON.stringify(input.components),
-    });
-  }
-
-  /**
    * Append-only isolation telemetry. Used by the
-   * `experience_score_step` handler when the per-step UPDATE throws,
-   * and by `SessionCompositeScoreWriter` when the session-end write
-   * throws.
+   * `experience_score_step` handler when the per-step UPDATE throws.
    */
   public recordWritebackWarning(input: RecordWritebackWarningInput): void {
     this.insertWritebackWarningStmt.run({

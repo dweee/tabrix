@@ -18,7 +18,6 @@ const expectedDeclarationFragments = [
   'interface ReadPageCompactSnapshot',
   'interface ReadPageVisibleRegionRows',
   'type MemoryPersistenceMode',
-  'interface MemorySessionSummary',
   'interface MemoryReadSuccess',
   'interface MemoryReadError',
   'interface BrowserTaskThingSummary',

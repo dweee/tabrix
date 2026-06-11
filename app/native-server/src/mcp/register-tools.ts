@@ -195,8 +195,7 @@ interface CloseTabsBrowserHygieneEvidence {
  *     ordinary tool calls).
  *   - `recorder` to `sessionManager.startStep` / `completeStep`
  *     against the wrapper-owned session, so each replayed sub-step
- *     gets its own `memory_steps` row carrying the underlying
- *     tool name.
+ *     gets its own runtime wrapper step carrying the underlying tool name.
  *   - `updateTaskIntent` to `sessionManager.updateTaskIntent` so the
  *     wrapper-owned session is re-tagged with
  *     `experience_replay:<actionPathId>`.

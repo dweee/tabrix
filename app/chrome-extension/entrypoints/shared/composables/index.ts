@@ -10,5 +10,4 @@
  * exported from here in Stage 3+.
  */
 
-export * from './useMemoryTimeline';
 export * from './useExecutionInsights';

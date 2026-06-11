@@ -1,218 +1,10 @@
 /**
- * Memory Phase 0 SQL schema.
- *
- * Three tables, one-to-one with the in-memory TS types in
- * `src/execution/types.ts`:
- * - memory_tasks      <-> Task
- * - memory_sessions   <-> ExecutionSession (minus `steps`)
- * - memory_steps      <-> ExecutionStep
- *
- * Columns use TEXT for ids/enums/timestamps to match the existing
- * TypeScript DTOs exactly (no int encoding). `labels` and
- * `artifact_refs` are stored as JSON-serialized TEXT.
- *
- * Design choices (see docs/MEMORY_PHASE_0.md):
- * - Independent SQLite file (`memory.db`) to avoid coupling with
- *   the agent db's hand-rolled migration surface.
- * - `CREATE TABLE IF NOT EXISTS` for idempotent initialization.
- * - Foreign keys enforced via `PRAGMA foreign_keys=ON`.
- * - WAL journal for concurrent-read safety.
- * - Compound uniqueness `(session_id, step_index)` preserves
- *   ordering invariants from `SessionManager.startStep`.
- */
-
-export const MEMORY_CREATE_TABLES_SQL = `
-CREATE TABLE IF NOT EXISTS memory_tasks (
-  task_id     TEXT PRIMARY KEY,
-  task_type   TEXT NOT NULL,
-  title       TEXT NOT NULL,
-  intent      TEXT NOT NULL,
-  origin      TEXT NOT NULL,
-  owner       TEXT,
-  project_id  TEXT,
-  labels      TEXT NOT NULL DEFAULT '[]',
-  status      TEXT NOT NULL,
-  created_at  TEXT NOT NULL,
-  updated_at  TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS memory_tasks_created_at_idx ON memory_tasks(created_at);
-CREATE INDEX IF NOT EXISTS memory_tasks_status_idx     ON memory_tasks(status);
-
-CREATE TABLE IF NOT EXISTS memory_sessions (
-  session_id          TEXT PRIMARY KEY,
-  task_id             TEXT NOT NULL REFERENCES memory_tasks(task_id) ON DELETE CASCADE,
-  transport           TEXT NOT NULL,
-  client_name         TEXT NOT NULL,
-  workspace_context   TEXT,
-  browser_context     TEXT,
-  summary             TEXT,
-  status              TEXT NOT NULL,
-  started_at          TEXT NOT NULL,
-  ended_at            TEXT,
-  aggregated_at       TEXT,
-  -- Deterministic session-end composite score (raw, before
-  -- recency decay) and the JSON breakdown of its component values
-  -- ({accuracy, speed, token, stability}). Both nullable because
-  -- the aggregator only fills them on replay sessions; non-replay
-  -- sessions keep them NULL so reads can short-circuit.
-  composite_score_raw REAL,
-  components_blob     TEXT
-);
-
-CREATE INDEX IF NOT EXISTS memory_sessions_task_id_idx    ON memory_sessions(task_id);
-CREATE INDEX IF NOT EXISTS memory_sessions_started_at_idx ON memory_sessions(started_at);
-
-CREATE TABLE IF NOT EXISTS memory_steps (
-  step_id        TEXT PRIMARY KEY,
-  session_id     TEXT NOT NULL REFERENCES memory_sessions(session_id) ON DELETE CASCADE,
-  step_index     INTEGER NOT NULL,
-  tool_name      TEXT NOT NULL,
-  step_type      TEXT NOT NULL,
-  status         TEXT NOT NULL,
-  input_summary  TEXT,
-  result_summary TEXT,
-  error_code     TEXT,
-  error_summary  TEXT,
-  artifact_refs  TEXT NOT NULL DEFAULT '[]',
-  started_at     TEXT NOT NULL,
-  ended_at       TEXT,
-  UNIQUE (session_id, step_index)
-);
-
-CREATE INDEX IF NOT EXISTS memory_steps_session_id_idx ON memory_steps(session_id);
-CREATE INDEX IF NOT EXISTS memory_steps_tool_name_idx  ON memory_steps(tool_name);
-
--- Phase 0.2: structured page snapshots produced by chrome_read_page.
--- Stable columns are kept narrow (query-friendly, low volatility).
--- Blob columns hold JSON-serialized slices of the original response,
--- intentionally trimmed (e.g. top-24 interactive elements) so the
--- table stays lightweight enough for long-horizon retention.
-CREATE TABLE IF NOT EXISTS memory_page_snapshots (
-  snapshot_id               TEXT PRIMARY KEY,
-  step_id                   TEXT NOT NULL REFERENCES memory_steps(step_id) ON DELETE CASCADE,
-  tab_id                    INTEGER,
-  url                       TEXT,
-  title                     TEXT,
-  page_type                 TEXT,
-  mode                      TEXT,
-  page_role                 TEXT,
-  primary_region            TEXT,
-  quality                   TEXT,
-  task_mode                 TEXT,
-  complexity_level          TEXT,
-  source_kind               TEXT,
-  fallback_used             INTEGER DEFAULT 0,
-  interactive_count         INTEGER DEFAULT 0,
-  candidate_action_count    INTEGER DEFAULT 0,
-  high_value_object_count   INTEGER DEFAULT 0,
-  summary_blob              TEXT,
-  page_context_blob         TEXT,
-  high_value_objects_blob   TEXT,
-  interactive_elements_blob TEXT,
-  candidate_actions_blob    TEXT,
-  protocol_l0_blob          TEXT,
-  protocol_l1_blob          TEXT,
-  protocol_l2_blob          TEXT,
-  captured_at               TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS memory_page_snapshots_step_id_idx      ON memory_page_snapshots(step_id);
-CREATE INDEX IF NOT EXISTS memory_page_snapshots_url_idx          ON memory_page_snapshots(url);
-CREATE INDEX IF NOT EXISTS memory_page_snapshots_page_role_idx    ON memory_page_snapshots(page_role);
-CREATE INDEX IF NOT EXISTS memory_page_snapshots_captured_at_idx  ON memory_page_snapshots(captured_at);
--- Added in Phase 0.3 to support "latest snapshot for this tab in the
--- current session" lookup from the action post-processor.
-CREATE INDEX IF NOT EXISTS memory_page_snapshots_tab_captured_idx ON memory_page_snapshots(tab_id, captured_at);
-
--- Phase 0.3: structured trail of DOM-interaction actions produced by
--- click / fill / navigate / keyboard tools. Each row links back to
--- the owning execution step, the session, and (when available) the
--- most recent page snapshot for the same tab in the same session.
--- Sensitive values (notably chrome_fill_or_select.value) are never
--- stored in plaintext; only a redacted {kind,type,length,sha256}
--- summary lands in value_summary. result_blob is omitted for fill
--- because the extension response may echo the submitted value.
-CREATE TABLE IF NOT EXISTS memory_actions (
-  action_id         TEXT PRIMARY KEY,
-  step_id           TEXT NOT NULL REFERENCES memory_steps(step_id) ON DELETE CASCADE,
-  session_id        TEXT NOT NULL REFERENCES memory_sessions(session_id) ON DELETE CASCADE,
-  tool_name         TEXT NOT NULL,
-  action_kind       TEXT NOT NULL,       -- 'click' | 'fill' | 'navigate' | 'keyboard'
-  navigate_mode     TEXT,                -- 'url' | 'refresh' | 'back' | 'forward' | 'new_tab' | null
-  tab_id            INTEGER,
-  window_id         INTEGER,
-  target_ref        TEXT,
-  target_selector   TEXT,
-  target_frame_id   INTEGER,
-  url_requested     TEXT,
-  url_before        TEXT,
-  url_after         TEXT,
-  key_spec          TEXT,
-  value_summary     TEXT,                -- JSON redaction record; null unless action_kind='fill'
-  status            TEXT NOT NULL,       -- 'success' | 'failed' | 'soft_failure'
-  error_code        TEXT,
-  pre_snapshot_ref  TEXT,                -- memory://snapshot/<uuid> | null
-  args_blob         TEXT,                -- JSON; sensitive fields replaced with '[redacted]'
-  result_blob       TEXT,                -- JSON; null for fill (see above)
-  captured_at       TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS memory_actions_step_id_idx     ON memory_actions(step_id);
-CREATE INDEX IF NOT EXISTS memory_actions_session_id_idx  ON memory_actions(session_id);
-CREATE INDEX IF NOT EXISTS memory_actions_action_kind_idx ON memory_actions(action_kind);
-CREATE INDEX IF NOT EXISTS memory_actions_captured_at_idx ON memory_actions(captured_at);
-`;
-
-/**
- * Operation memory log.
- *
- * This is a factual operation trail, not Experience. It records the
- * tool-level decision/outcome metadata needed to explain routing,
- * fallback, timing, token savings, and tab hygiene for benchmark
- * reports. It deliberately avoids raw URL query values, request/response
- * bodies, cookies, Authorization values, and API result payloads.
- *
- * Idempotent CREATE: old DBs pick up the table on the next
- * `openMemoryDb()` call. No ALTER is needed for the first version.
- */
-export const OPERATION_MEMORY_LOG_CREATE_TABLES_SQL = `
-CREATE TABLE IF NOT EXISTS operation_memory_logs (
-  operation_log_id      TEXT PRIMARY KEY,
-  task_id               TEXT NOT NULL REFERENCES memory_tasks(task_id) ON DELETE CASCADE,
-  session_id            TEXT NOT NULL REFERENCES memory_sessions(session_id) ON DELETE CASCADE,
-  step_id               TEXT NOT NULL REFERENCES memory_steps(step_id) ON DELETE CASCADE,
-  tool_name             TEXT NOT NULL,
-  url_pattern           TEXT,
-  page_role             TEXT,
-  requested_layer       TEXT,
-  selected_data_source  TEXT,
-  source_route          TEXT,
-  decision_reason       TEXT,
-  result_kind           TEXT,
-  duration_ms           INTEGER,
-  success               INTEGER NOT NULL,
-  fallback_used         TEXT,
-  error_code            TEXT,
-  read_count            INTEGER,
-  tokens_saved          INTEGER,
-  tab_hygiene_blob      TEXT,
-  created_at            TEXT NOT NULL,
-  UNIQUE(step_id)
-);
-
-CREATE INDEX IF NOT EXISTS operation_memory_logs_task_id_idx      ON operation_memory_logs(task_id);
-CREATE INDEX IF NOT EXISTS operation_memory_logs_session_id_idx   ON operation_memory_logs(session_id);
-CREATE INDEX IF NOT EXISTS operation_memory_logs_tool_name_idx    ON operation_memory_logs(tool_name);
-CREATE INDEX IF NOT EXISTS operation_memory_logs_source_route_idx ON operation_memory_logs(source_route);
-CREATE INDEX IF NOT EXISTS operation_memory_logs_created_at_idx   ON operation_memory_logs(created_at);
-`;
-
-/**
  * MKE Core Storage v1.
  *
- * These three additive tables are the next-generation product-level
- * projection over the existing Memory / Knowledge / Experience tables:
+ * Product memory now starts here. The pre-launch Memory Phase 0 tables
+ * (`memory_tasks`, `memory_sessions`, `memory_steps`, page snapshots,
+ * action rows, and operation logs) are retired; tool-call facts must enter
+ * through `tabrix_memory_traces`.
  *
  * - `tabrix_memory_traces` is append-only factual trace storage for each
  *   AI -> Tabrix tool call and Tabrix -> AI result.
@@ -221,9 +13,6 @@ CREATE INDEX IF NOT EXISTS operation_memory_logs_created_at_idx   ON operation_m
  *   structural signals from weak text signals inside their JSON blobs.
  * - `tabrix_experience_recipes` is a redacted, import/export-capable recipe
  *   store derived from successful traces.
- *
- * No old tables are dropped here. The old storage remains available until the
- * new flow has repository, integration, and migration evidence.
  */
 export const MKE_CORE_CREATE_TABLES_SQL = `
 CREATE TABLE IF NOT EXISTS tabrix_memory_traces (
@@ -508,11 +297,11 @@ CREATE INDEX IF NOT EXISTS experience_action_paths_composite_score_idx
  *    *keys* / shape, response content-type / size, and at most a small
  *    deterministic excerpt of the response shape. No raw header values,
  *    no Authorization, no Cookie, no body payloads.
- *  - `source_*` columns are informational pointers back into Memory; they
- *    are nullable on purpose so older rows survive Memory rotation.
+ *  - `source_*` columns are informational pointers back into the current
+ *    trace/object evidence surfaces.
  *
- * Idempotent CREATE: same pattern as `MEMORY_CREATE_TABLES_SQL` and
- * `EXPERIENCE_CREATE_TABLES_SQL`. Old DBs that pre-date this table simply
+ * Idempotent CREATE: same pattern as `EXPERIENCE_CREATE_TABLES_SQL`.
+ * Old DBs that pre-date this table simply
  * pick up the new table on next `openMemoryDb()`; no ALTER needed.
  */
 export const KNOWLEDGE_CREATE_TABLES_SQL = `
@@ -707,18 +496,15 @@ CREATE INDEX IF NOT EXISTS tabrix_choose_context_outcomes_recorded_at_idx
  * Isolation telemetry — `experience_score_step` write-back warnings.
  *
  * Every row represents one Experience write-back attempt that the
- * runtime caught and isolated. Two callers write here:
- *  - per-step `experience_score_step` MCP handler (when the per-step
- *    counter delta SQL throws),
- *  - session-end `SessionCompositeScoreWriter` (when the composite
- *    score / aggregated-at update fails).
+ * runtime caught and isolated. The active writer is the per-step
+ * `experience_score_step` MCP handler when counter-delta SQL throws.
  *
  * Hard rules baked into the schema:
  *  - Append-only — no UPDATE / DELETE in the writer; auditors rely on
  *    full row history.
  *  - `payload_blob` is small JSON (cap enforced at write time) so the
  *    table stays bounded even under bridge-flap conditions.
- *  - No FK to `memory_sessions` / `experience_action_paths` because
+ *  - No FK to `experience_action_paths` because
  *    the warning has to outlive an aggressive Memory rotation.
  *  - The table exists regardless of capability state (idempotent
  *    CREATE) so a write that races a freshly-disabled persistence
@@ -727,7 +513,7 @@ CREATE INDEX IF NOT EXISTS tabrix_choose_context_outcomes_recorded_at_idx
 export const EXPERIENCE_WRITEBACK_WARNINGS_CREATE_TABLES_SQL = `
 CREATE TABLE IF NOT EXISTS experience_writeback_warnings (
   warning_id        TEXT PRIMARY KEY,
-  source            TEXT NOT NULL,            -- 'experience_score_step' | 'session_composite_score'
+  source            TEXT NOT NULL,            -- 'experience_score_step'
   action_path_id    TEXT,
   step_index        INTEGER,
   session_id        TEXT,
@@ -748,48 +534,6 @@ CREATE INDEX IF NOT EXISTS experience_writeback_warnings_created_at_idx
 `;
 
 export const MEMORY_DB_ACTIVE_TABLE_MANIFEST = [
-  {
-    name: 'memory_tasks',
-    layer: 'memory',
-    surface: 'session_history',
-    purpose: 'Task envelope for persisted MCP tool sessions.',
-    retention: 'active',
-  },
-  {
-    name: 'memory_sessions',
-    layer: 'memory',
-    surface: 'session_history',
-    purpose: 'Run/session header and Experience aggregation cursor.',
-    retention: 'active',
-  },
-  {
-    name: 'memory_steps',
-    layer: 'memory',
-    surface: 'session_history',
-    purpose: 'Ordered MCP tool-call steps for run replay and explainability.',
-    retention: 'active',
-  },
-  {
-    name: 'memory_page_snapshots',
-    layer: 'memory',
-    surface: 'internal_evidence',
-    purpose: 'Compact page-read evidence used by chooser context and action correlation.',
-    retention: 'migration_candidate',
-  },
-  {
-    name: 'memory_actions',
-    layer: 'memory',
-    surface: 'internal_evidence',
-    purpose: 'Structured click/fill/navigate/keyboard action evidence used by Experience mining.',
-    retention: 'migration_candidate',
-  },
-  {
-    name: 'operation_memory_logs',
-    layer: 'memory',
-    surface: 'internal_telemetry',
-    purpose: 'Tool-level routing, fallback, timing, token, and tab-hygiene audit trail.',
-    retention: 'visibility_gap',
-  },
   {
     name: 'tabrix_memory_traces',
     layer: 'mke_memory',
@@ -859,9 +603,43 @@ export const MEMORY_DB_ACTIVE_TABLES = MEMORY_DB_ACTIVE_TABLE_MANIFEST.map((tabl
 
 export const MEMORY_DB_RETIRED_TABLES = [
   {
+    name: 'memory_tasks',
+    retiredAt: '2026-06-11',
+    reason:
+      'Pre-launch task envelope table replaced by in-process execution context plus tabrix_memory_traces.',
+  },
+  {
+    name: 'memory_sessions',
+    retiredAt: '2026-06-11',
+    reason:
+      'Pre-launch session-history table replaced by tabrix_memory_traces; no legacy-user migration required before launch.',
+  },
+  {
+    name: 'memory_steps',
+    retiredAt: '2026-06-11',
+    reason: 'Pre-launch ordered-step table replaced by append-only tabrix_memory_traces records.',
+  },
+  {
+    name: 'memory_page_snapshots',
+    retiredAt: '2026-06-11',
+    reason:
+      'Pre-launch page snapshot table replaced by Object Library facts and memory trace observation blobs.',
+  },
+  {
+    name: 'memory_actions',
+    retiredAt: '2026-06-11',
+    reason:
+      'Pre-launch action evidence table replaced by memory trace request/result evidence and future trace-derived experience mining.',
+  },
+  {
+    name: 'operation_memory_logs',
+    retiredAt: '2026-06-11',
+    reason: 'Pre-launch operation-log table replaced by the richer tabrix_memory_traces schema.',
+  },
+  {
     name: 'experience_locator_prefs',
     retiredAt: '2026-06-11',
     reason:
-      'Reserved locator-preference table had no production reader, writer, MCP API, or sidepanel surface. Legacy user DBs are left untouched; new DBs no longer create it.',
+      'Reserved locator-preference table had no production reader, writer, MCP API, or sidepanel surface.',
   },
 ] as const;

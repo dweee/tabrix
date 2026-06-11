@@ -25,9 +25,8 @@ import {
   EXPERIENCE_CREATE_TABLES_SQL,
   EXPERIENCE_WRITEBACK_WARNINGS_CREATE_TABLES_SQL,
   KNOWLEDGE_CREATE_TABLES_SQL,
+  MEMORY_DB_RETIRED_TABLES,
   MKE_CORE_CREATE_TABLES_SQL,
-  MEMORY_CREATE_TABLES_SQL,
-  OPERATION_MEMORY_LOG_CREATE_TABLES_SQL,
 } from './schema';
 
 export type SqliteDatabase = Database.Database;
@@ -145,17 +144,12 @@ function execMigration(
   }
 }
 
-/**
- * Guarded migration for legacy session aggregation:
- * old DBs created before session aggregation existed lack `memory_sessions.aggregated_at`.
- * SQLite does not support `ADD COLUMN IF NOT EXISTS`, so we probe first.
- */
-function ensureSessionAggregatedAtColumn(db: SqliteDatabase): void {
-  if (!hasColumn(db, 'memory_sessions', 'aggregated_at')) {
+function dropRetiredPrelaunchTables(db: SqliteDatabase): void {
+  const retiredTables = MEMORY_DB_RETIRED_TABLES.map((table) => table.name).reverse();
+  for (const table of retiredTables) {
     execMigration(db, {
-      table: 'memory_sessions',
-      column: 'aggregated_at',
-      sql: 'ALTER TABLE memory_sessions ADD COLUMN aggregated_at TEXT',
+      table,
+      sql: `DROP TABLE IF EXISTS ${table}`,
     });
   }
 }
@@ -224,20 +218,6 @@ function ensureExperienceReplayWritebackColumns(db: SqliteDatabase): void {
        ON experience_action_paths(composite_score_decayed)
        WHERE composite_score_decayed IS NOT NULL`,
   });
-  if (!hasColumn(db, 'memory_sessions', 'composite_score_raw')) {
-    execMigration(db, {
-      table: 'memory_sessions',
-      column: 'composite_score_raw',
-      sql: 'ALTER TABLE memory_sessions ADD COLUMN composite_score_raw REAL',
-    });
-  }
-  if (!hasColumn(db, 'memory_sessions', 'components_blob')) {
-    execMigration(db, {
-      table: 'memory_sessions',
-      column: 'components_blob',
-      sql: 'ALTER TABLE memory_sessions ADD COLUMN components_blob TEXT',
-    });
-  }
 }
 
 /**
@@ -379,12 +359,10 @@ export function openMemoryDb(options?: MemoryDbOptions): OpenMemoryDbResult {
     db.pragma('journal_mode = WAL');
   }
   db.pragma('foreign_keys = ON');
-  db.exec(MEMORY_CREATE_TABLES_SQL);
-  db.exec(OPERATION_MEMORY_LOG_CREATE_TABLES_SQL);
+  dropRetiredPrelaunchTables(db);
   db.exec(MKE_CORE_CREATE_TABLES_SQL);
   db.exec(BROWSER_OBJECT_CREATE_TABLES_SQL);
   ensureBrowserObjectRouteColumns(db);
-  ensureSessionAggregatedAtColumn(db);
   // Legacy DBs may already have `experience_action_paths` without the
   // replay scoring columns. Add them before running the current schema,
   // because the schema includes an index on `composite_score_decayed`.

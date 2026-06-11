@@ -68,12 +68,12 @@ export type DispatchBridgedFn = (
 ) => Promise<CallToolResult>;
 
 /**
- * Per-step recorder hooks the engine uses to write `memory_steps`
- * rows on the wrapper-owned session. Production binding maps to
- * `SessionManager.startStep` / `completeStep`; tests inject a spy.
+ * Per-step recorder hooks the engine uses to track runtime wrapper steps.
+ * Production binding maps to `SessionManager.startStep` / `completeStep`;
+ * tests inject a spy.
  *
  * The engine never opens a session — that is the wrapper's job. Each
- * replay gets one Memory session with a prefixed task intent.
+ * replay gets one runtime wrapper session with a prefixed task intent.
  */
 export interface ReplayStepRecorder {
   /** Record the start of a replayed step. Returns the implementation-defined step id. */
@@ -803,9 +803,8 @@ export async function handleExperienceReplay(
     };
   }
 
-  // 2. Persistence required: replay's audit trail lives in
-  //    memory_sessions / memory_steps. With persistence off we
-  //    cannot write the per-step rows the brief mandates.
+  // 2. Persistence required: replay needs an Experience repository row to
+  //    read and score. With persistence off no action paths are available.
   if (deps.persistenceMode === 'off' || !deps.experience) {
     return {
       status: 'failed-precondition',

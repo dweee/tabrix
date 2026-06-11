@@ -1,5 +1,5 @@
 /**
- * MKEP Memory read-side DTOs.
+ * MKEP storage read-side DTOs.
  *
  * These types describe the JSON shapes returned by the native-server's
  * read-only `GET /memory/*` routes (see `app/native-server/src/server/memory-routes.ts`).
@@ -7,105 +7,13 @@
  * Chrome extension read surfaces so the contract stays pinned
  * in a single place.
  *
- * Conventions:
- * - All timestamps are ISO-8601 strings in UTC.
- * - Fields marked optional mirror nullable columns in the Memory SQLite tables.
- * - No field is ever renamed across layers: the server emits the same keys
- *   the client consumes, and the extension never reshapes before display.
- * - This module intentionally does not include any writer-side types. Write
- *   paths live inside the native-server and must not leak onto the wire.
+ * These are the public browser-extension contracts for the four storage
+ * surfaces: Memory traces, Object Library, Knowledge models, and Experience
+ * recipes. Pre-launch `/memory/sessions` task/session/step DTOs were retired;
+ * execution session objects are now internal runtime wrappers only.
  */
 
 export type MemoryPersistenceMode = 'disk' | 'memory' | 'off';
-
-export type MemorySessionStatus = 'starting' | 'running' | 'completed' | 'failed' | 'aborted';
-
-export type MemoryTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
-
-export type MemoryStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
-
-export type MemoryStepType = 'tool_call' | 'flow_call' | 'verification' | 'retry' | 'recovery';
-
-/**
- * Flattened projection of `memory_sessions` joined with `memory_tasks` and
- * a `COUNT(memory_steps)` subquery. Backs the Sidepanel Memory tab list.
- */
-export interface MemorySessionSummary {
-  sessionId: string;
-  taskId: string;
-  /** Task title (copied from `memory_tasks.title`). */
-  taskTitle: string;
-  /** Task intent (copied from `memory_tasks.intent`). */
-  taskIntent: string;
-  transport: string;
-  clientName: string;
-  status: MemorySessionStatus;
-  startedAt: string;
-  endedAt?: string;
-  summary?: string;
-  workspaceContext?: string;
-  browserContext?: string;
-  /** Number of `memory_steps` rows whose `session_id` equals `sessionId`. */
-  stepCount: number;
-}
-
-/**
- * Raw `memory_steps` row, emitted in index order ascending.
- */
-export interface MemoryExecutionStep {
-  stepId: string;
-  sessionId: string;
-  index: number;
-  toolName: string;
-  stepType: MemoryStepType;
-  status: MemoryStepStatus;
-  inputSummary?: string;
-  resultSummary?: string;
-  startedAt: string;
-  endedAt?: string;
-  errorCode?: string;
-  errorSummary?: string;
-  artifactRefs: string[];
-}
-
-/**
- * Raw `memory_tasks` row. Returned by `GET /memory/tasks/:taskId`.
- */
-export interface MemoryTaskRow {
-  taskId: string;
-  taskType: string;
-  title: string;
-  intent: string;
-  origin: string;
-  createdAt: string;
-  updatedAt: string;
-  status: MemoryTaskStatus;
-  owner?: string;
-  projectId?: string;
-  labels: string[];
-}
-
-/** `GET /memory/sessions` response envelope body. */
-export interface MemorySessionsResponseData {
-  sessions: MemorySessionSummary[];
-  total: number;
-  limit: number;
-  offset: number;
-  persistenceMode: MemoryPersistenceMode;
-}
-
-/** `GET /memory/sessions/:sessionId/steps` response envelope body. */
-export interface MemorySessionStepsResponseData {
-  sessionId: string;
-  steps: MemoryExecutionStep[];
-  persistenceMode: MemoryPersistenceMode;
-}
-
-/** `GET /memory/tasks/:taskId` response envelope body. */
-export interface MemoryTaskResponseData {
-  task: MemoryTaskRow;
-  persistenceMode: MemoryPersistenceMode;
-}
 
 /**
  * Sanitized projection of `tabrix_memory_traces`.

@@ -38,8 +38,6 @@ export const BENCHMARK_REPORT_VERSION = 1 as const;
 
 /**
  * Closed enum of tool-call statuses the v2.3.0 benchmark cares about.
- * Mirrors the existing `memory_steps.status` shape so the runner does
- * not need a translation layer.
  */
 export type BenchmarkToolCallStatus = 'ok' | 'failed' | 'aborted';
 

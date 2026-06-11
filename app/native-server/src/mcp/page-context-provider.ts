@@ -1,10 +1,10 @@
 /**
  * Page Context Provider.
  *
- * Replaces hard-coded dispatcher counters with real counters drawn from the
- * most recent `memory_page_snapshots` row that matches the chooser call. The
- * chooser still runs as a pure function over already-resolved facts; this
- * provider is the only IO-touching adapter that surfaces those facts.
+ * Supplies dispatcher counters to the chooser. The old
+ * `memory_page_snapshots` adapter is retired; callers currently pass `null`
+ * so the chooser records an explicit fallback-zero input until Object Library
+ * live facts become the backing source.
  *
  * Lookup order:
  *   1. `live_snapshot` — newest snapshot whose `url` exactly matches
@@ -30,8 +30,7 @@
  * so telemetry stays trustworthy.
  *
  * Hard rules:
- *   - This module is read-only. It NEVER writes to
- *     `memory_page_snapshots`. It NEVER mutates the chooser input.
+ *   - This module is read-only. It NEVER mutates the chooser input.
  *   - All errors below SQLite layer become `fallback_zero` with
  *     cause `provider_error` — the chooser hot path must not throw
  *     on a corrupt DB row.
@@ -39,8 +38,6 @@
  *     at the caller (the provider receives a `null` repo when
  *     persistence is `off`).
  */
-
-import type { PageSnapshot } from '../memory/db/page-snapshot-repository';
 
 export type DispatcherInputSource = 'live_snapshot' | 'memory_snapshot' | 'fallback_zero';
 
@@ -72,16 +69,24 @@ export interface PageContextProvider {
   getContext(input: PageContextLookupInput): PageContextLookupResult;
 }
 
+export interface PageSnapshotLike {
+  protocolL0Blob?: string | null;
+  protocolL1Blob?: string | null;
+  protocolL2Blob?: string | null;
+  candidateActionCount?: number | null;
+  highValueObjectCount?: number | null;
+  pageRole?: string | null;
+}
+
 /**
  * Narrow read surface the live provider needs from
- * `PageSnapshotRepository`. Intentionally does NOT include
- * `findLatestGlobal`: an unrelated newest snapshot is not honest dispatcher
- * input. The repository still exposes the global accessor for other callers
- * (e.g. operator tooling), but the provider must not consume it.
+ * a future Object Library-backed snapshot reader. Intentionally does NOT
+ * include a global "newest anywhere" accessor: unrelated pages are not honest
+ * dispatcher input.
  */
 export interface PageSnapshotReader {
-  findLatestForUrl(url: string): PageSnapshot | undefined;
-  findLatestForPageRole(pageRole: string): PageSnapshot | undefined;
+  findLatestForUrl(url: string): PageSnapshotLike | undefined;
+  findLatestForPageRole(pageRole: string): PageSnapshotLike | undefined;
 }
 
 export interface LivePageContextProviderOptions {
@@ -114,7 +119,7 @@ const FALLBACK_ZERO = (
  * the dispatcher treats 0 as "no estimate" and falls back to its
  * own heuristic.
  */
-function estimateFullReadByteLength(snap: PageSnapshot): number {
+function estimateFullReadByteLength(snap: PageSnapshotLike): number {
   let total = 0;
   for (const blob of [snap.protocolL0Blob, snap.protocolL1Blob, snap.protocolL2Blob]) {
     if (typeof blob === 'string') total += blob.length;
@@ -123,15 +128,19 @@ function estimateFullReadByteLength(snap: PageSnapshot): number {
 }
 
 function projectSnapshot(
-  snap: PageSnapshot,
+  snap: PageSnapshotLike,
   source: 'live_snapshot' | 'memory_snapshot',
 ): PageContextLookupResult {
   return {
     source,
-    candidateActionsCount: Number.isFinite(snap.candidateActionCount)
-      ? snap.candidateActionCount
-      : 0,
-    hvoCount: Number.isFinite(snap.highValueObjectCount) ? snap.highValueObjectCount : 0,
+    candidateActionsCount:
+      typeof snap.candidateActionCount === 'number' && Number.isFinite(snap.candidateActionCount)
+        ? snap.candidateActionCount
+        : 0,
+    hvoCount:
+      typeof snap.highValueObjectCount === 'number' && Number.isFinite(snap.highValueObjectCount)
+        ? snap.highValueObjectCount
+        : 0,
     fullReadByteLength: estimateFullReadByteLength(snap),
     pageRole: typeof snap.pageRole === 'string' && snap.pageRole.length > 0 ? snap.pageRole : null,
   };
