@@ -25,6 +25,17 @@ describe('MKE Object Library view model', () => {
   it('groups a browser tab with page objects, actions, data API hints, and lifecycle state', () => {
     const view = buildMkeObjectLibraryView([
       object({
+        browserObjectId: 'window-focused',
+        objectType: 'window',
+        siteFamily: 'browser',
+        currentRoute: 'browser',
+        rootRoute: 'browser',
+        pageModelKey: 'browser-window',
+        objectFingerprint: 'window:10',
+        isActive: true,
+        facts: { activeTabId: 20, focused: true },
+      }),
+      object({
         browserObjectId: 'tab-active',
         objectType: 'tab',
         browserContextKey: 'bridge-connection-1',
@@ -144,5 +155,54 @@ describe('MKE Object Library view model', () => {
     expect(page.sections[3].items).toContainEqual(
       expect.objectContaining({ label: '浏览器加载', value: '已完成' }),
     );
+  });
+
+  it('labels only the focused window active tab as currently active', () => {
+    const view = buildMkeObjectLibraryView([
+      object({
+        browserObjectId: 'window-focused',
+        objectType: 'window',
+        siteFamily: 'browser',
+        currentRoute: 'browser',
+        rootRoute: 'browser',
+        pageModelKey: 'browser-window',
+        objectFingerprint: 'window:10',
+        isActive: true,
+        facts: { activeTabId: 21, focused: true },
+      }),
+      object({
+        browserObjectId: 'window-background',
+        objectType: 'window',
+        siteFamily: 'browser',
+        currentRoute: 'browser',
+        rootRoute: 'browser',
+        pageModelKey: 'browser-window',
+        objectFingerprint: 'window:11',
+        isActive: false,
+        facts: { activeTabId: 22, focused: false },
+      }),
+      object({
+        browserObjectId: 'tab-focused',
+        objectType: 'tab',
+        objectFingerprint: 'tab:10:21',
+        isActive: true,
+        canTabrixOperate: true,
+        display: { title: 'Focused tab', locationLabel: 'focused.example' },
+      }),
+      object({
+        browserObjectId: 'tab-background-window-active',
+        objectType: 'tab',
+        objectFingerprint: 'tab:11:22',
+        isActive: true,
+        canTabrixOperate: true,
+        display: { title: 'Background window selected tab', locationLabel: 'background.example' },
+      }),
+    ]);
+
+    expect(view.webPages.map((page) => [page.id, page.lifecycleLabel])).toEqual([
+      ['tab-focused', '当前激活'],
+      ['tab-background-window-active', '窗口内激活'],
+    ]);
+    expect(view.webPages.filter((page) => page.lifecycleLabel === '当前激活')).toHaveLength(1);
   });
 });
