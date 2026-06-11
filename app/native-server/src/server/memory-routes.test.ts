@@ -181,6 +181,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
         aiScore: 0.82,
       },
       aiFeedback: {
+        sourceKind: 'ai_feedback',
         businessStatus: 'achieved',
         confidence: 0.82,
         reasonCode: 'page_inventory_read',
@@ -239,6 +240,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
         aiScore: 0.91,
       },
       aiFeedback: {
+        sourceKind: 'ai_feedback',
         businessStatus: 'achieved',
         confidence: 0.91,
         reasonCode: 'ai_overstated_completion',

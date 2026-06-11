@@ -102,10 +102,33 @@ function readString(value: unknown): string | null {
 }
 
 function isBusinessAchieved(trace: MemoryTrace): boolean {
-  return (
+  if (
     trace.businessSuccess === 'achieved' ||
     trace.businessSuccess === 'proven' ||
     trace.businessSuccess === 'true'
+  ) {
+    return true;
+  }
+  if (
+    trace.businessSuccess === 'not_achieved' ||
+    trace.businessSuccess === 'failed' ||
+    trace.businessSuccess === 'false' ||
+    trace.businessSuccess === 'partial'
+  ) {
+    return false;
+  }
+  const feedback = readObject(trace.aiFeedback);
+  const sourceKind = readString(feedback?.sourceKind);
+  const businessStatus = readString(feedback?.businessStatus);
+  const confidence =
+    typeof feedback?.confidence === 'number' && Number.isFinite(feedback.confidence)
+      ? feedback.confidence
+      : trace.aiFeedbackScore;
+  return (
+    (sourceKind === 'ai_feedback' || sourceKind === null) &&
+    businessStatus === 'achieved' &&
+    typeof confidence === 'number' &&
+    confidence >= 0.9
   );
 }
 

@@ -98,6 +98,7 @@ function toAiFeedbackSummary(value: unknown): MkeMemoryAiFeedbackSummary | null 
   const record = asRecord(value);
   if (!record) return null;
   const summary = {
+    sourceKind: readString(record, 'sourceKind'),
     businessStatus: readString(record, 'businessStatus'),
     confidence: readNumber(record, 'confidence'),
     reasonCode: readString(record, 'reasonCode'),

@@ -344,6 +344,48 @@ describe('MKE core repositories', () => {
     }
   });
 
+  it('derives system evidence feedback for legacy Memory traces without stored AI feedback', () => {
+    const { traceRepo, close } = bootstrap();
+    try {
+      traceRepo.append({
+        traceId: 'trace-legacy-unscored',
+        taskId: 'task-legacy-unscored',
+        taskIntent: 'read page before action',
+        aiClient: 'jest',
+        toolName: 'chrome_read_page',
+        toolCallId: 'call-legacy-unscored',
+        sequenceIndex: 1,
+        requestParams: { tabId: 7 },
+        requestAt: NOW,
+        response: { success: true },
+        responseAt: '2026-06-06T10:00:01.000Z',
+        toolSuccess: true,
+        businessSuccess: 'unknown',
+        resultSummary: 'page read completed',
+        createdAt: NOW,
+      });
+
+      const trace = traceRepo.get('trace-legacy-unscored');
+
+      expect(trace).toMatchObject({
+        traceId: 'trace-legacy-unscored',
+        aiFeedbackScore: 0.45,
+        aiFeedback: {
+          sourceKind: 'tabrix_auto_evidence',
+          businessStatus: 'unknown',
+          confidence: 0.45,
+          reasonCode: 'tool_completed_business_unknown',
+          summary: '工具调用已记录，但当前结果没有足够业务成功证据，需后续读取或AI评价确认。',
+          resultSummary: 'page read completed',
+          sourceToolName: 'chrome_read_page',
+          sourceToolCallId: 'call-legacy-unscored',
+        },
+      });
+    } finally {
+      close();
+    }
+  });
+
   it('upserts Knowledge page models and records validation outcomes', () => {
     const { knowledgeRepo, close } = bootstrap();
     try {

@@ -534,6 +534,63 @@ function normalizeConfidence(value: number | null | undefined): number | null {
   return Math.max(0, Math.min(1, value as number));
 }
 
+function buildAutomaticEvidenceFeedback(input: {
+  toolName: string;
+  toolSuccess: boolean;
+  businessSuccess: BusinessSuccessVerdict;
+  resultSummary?: string | null;
+  errorCode?: string | null;
+}): { score: number; feedback: Record<string, unknown> } {
+  let score = 0.45;
+  let businessStatus: 'achieved' | 'partial' | 'not_achieved' | 'unknown' = 'unknown';
+  let reasonCode = 'tool_completed_business_unknown';
+  let summary = '工具调用已记录，但当前结果没有足够业务成功证据，需后续读取或AI评价确认。';
+
+  if (!input.toolSuccess) {
+    score = 0;
+    businessStatus = 'not_achieved';
+    reasonCode = input.errorCode ? 'tool_error' : 'tool_failed';
+    summary = '工具调用失败，不能沉淀为成功经验。';
+  } else if (
+    input.businessSuccess === 'achieved' ||
+    input.businessSuccess === 'proven' ||
+    input.businessSuccess === 'true'
+  ) {
+    score = 0.9;
+    businessStatus = 'achieved';
+    reasonCode = 'tabrix_business_success_evidence';
+    summary = 'Tabrix结果中已有业务成功证据，可作为经验候选。';
+  } else if (input.businessSuccess === 'partial') {
+    score = 0.6;
+    businessStatus = 'partial';
+    reasonCode = 'tabrix_partial_business_evidence';
+    summary = 'Tabrix结果只证明部分进展，需要后续确认后才可沉淀为经验。';
+  } else if (input.businessSuccess === 'not_achieved' || input.businessSuccess === 'false') {
+    score = 0.15;
+    businessStatus = 'not_achieved';
+    reasonCode = 'tabrix_business_not_achieved';
+    summary = 'Tabrix结果显示业务目标未达成，不能沉淀为成功经验。';
+  }
+
+  return {
+    score,
+    feedback: sanitizeValue(
+      {
+        sourceKind: 'tabrix_auto_evidence',
+        businessStatus,
+        confidence: score,
+        reasonCode,
+        summary,
+        resultSummary: input.resultSummary ?? null,
+        receivedAt: new Date().toISOString(),
+        sourceToolName: input.toolName,
+        sourceToolCallId: null,
+      },
+      'tabrix_auto_evidence_feedback',
+    ) as Record<string, unknown>,
+  };
+}
+
 export class MkeMemoryTraceService {
   private readonly asyncBrowserObjectWrites: BoundedAsyncBrowserObjectWriteQueue;
 
@@ -572,6 +629,14 @@ export class MkeMemoryTraceService {
     const digest = digestResult(input.result, input.toolName, payload);
     const tabId = digest.tabId ?? readRequestNumber(requestObject, 'tabId');
     const windowId = digest.windowId ?? readRequestNumber(requestObject, 'windowId');
+    const toolSuccess = input.result.isError !== true;
+    const automaticFeedback = buildAutomaticEvidenceFeedback({
+      toolName: input.toolName,
+      toolSuccess,
+      businessSuccess: digest.businessSuccess,
+      resultSummary: input.resultSummary ?? null,
+      errorCode: input.errorCode ?? null,
+    });
 
     const trace = this.repo.append({
       taskId: input.taskId,
@@ -585,7 +650,7 @@ export class MkeMemoryTraceService {
       response: digest.response,
       responseAt: new Date(responseAtMs).toISOString(),
       durationMs: Math.max(0, responseAtMs - input.requestAtMs),
-      toolSuccess: input.result.isError !== true,
+      toolSuccess,
       businessSuccess: digest.businessSuccess,
       resultSummary: input.resultSummary ?? null,
       errorCode: input.errorCode ?? null,
@@ -600,6 +665,8 @@ export class MkeMemoryTraceService {
       selectedDataSource: digest.selectedDataSource,
       freshness: digest.freshness,
       fallbackUsed: digest.fallbackUsed,
+      aiFeedbackScore: automaticFeedback.score,
+      aiFeedback: automaticFeedback.feedback,
       redactionState: 'redacted',
       createdAt: new Date(responseAtMs).toISOString(),
     });
@@ -1147,6 +1214,7 @@ export class MkeMemoryTraceService {
   ): MemoryTrace | undefined {
     const feedback = sanitizeValue(
       {
+        sourceKind: 'ai_feedback',
         businessStatus: input.businessStatus,
         confidence: normalizeConfidence(input.confidence),
         reasonCode: input.reasonCode ?? null,

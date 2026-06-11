@@ -178,7 +178,75 @@ interface MemoryTraceRow {
   created_at: string;
 }
 
+interface AutomaticEvidenceFeedback {
+  score: number;
+  feedback: Record<string, unknown>;
+}
+
+function buildAutomaticEvidenceFeedback(row: MemoryTraceRow): AutomaticEvidenceFeedback | null {
+  if (row.ai_feedback_score !== null || row.ai_feedback_blob !== null) return null;
+
+  const toolSuccess = row.tool_success === null ? null : row.tool_success === 1;
+  let score: number | null = null;
+  let businessStatus = row.business_success ?? 'unknown';
+  let reasonCode = 'tool_result_unscored';
+  let summary = '历史工具调用缺少AI评分，系统按已有执行证据补充了低置信评价。';
+
+  if (toolSuccess === false) {
+    score = 0;
+    businessStatus = 'not_achieved';
+    reasonCode = row.error_code ?? 'tool_failed';
+    summary = '工具调用失败，不能沉淀为成功经验。';
+  } else if (
+    row.business_success === 'achieved' ||
+    row.business_success === 'proven' ||
+    row.business_success === 'true'
+  ) {
+    score = 0.9;
+    businessStatus = 'achieved';
+    reasonCode = 'tabrix_business_success_evidence';
+    summary = 'Tabrix结果中已有业务成功证据，可作为经验候选。';
+  } else if (row.business_success === 'partial') {
+    score = 0.6;
+    businessStatus = 'partial';
+    reasonCode = 'tabrix_partial_business_evidence';
+    summary = 'Tabrix结果只证明部分进展，需要后续确认后才可沉淀为经验。';
+  } else if (
+    row.business_success === 'not_achieved' ||
+    row.business_success === 'failed' ||
+    row.business_success === 'false'
+  ) {
+    score = 0.15;
+    businessStatus = 'not_achieved';
+    reasonCode = 'tabrix_business_not_achieved';
+    summary = 'Tabrix结果显示业务目标未达成，不能沉淀为成功经验。';
+  } else if (toolSuccess === true) {
+    score = 0.45;
+    businessStatus = 'unknown';
+    reasonCode = 'tool_completed_business_unknown';
+    summary = '工具调用已记录，但当前结果没有足够业务成功证据，需后续读取或AI评价确认。';
+  }
+
+  if (score === null) return null;
+
+  return {
+    score,
+    feedback: {
+      sourceKind: 'tabrix_auto_evidence',
+      businessStatus,
+      confidence: score,
+      reasonCode,
+      summary,
+      resultSummary: row.result_summary,
+      receivedAt: row.response_at || row.created_at,
+      sourceToolName: row.tool_name,
+      sourceToolCallId: row.tool_call_id,
+    },
+  };
+}
+
 function rowToMemoryTrace(row: MemoryTraceRow): MemoryTrace {
+  const automaticFeedback = buildAutomaticEvidenceFeedback(row);
   return {
     traceId: row.trace_id,
     taskId: row.task_id,
@@ -220,8 +288,8 @@ function rowToMemoryTrace(row: MemoryTraceRow): MemoryTrace {
     tokenPrompt: row.token_prompt,
     tokenCompletion: row.token_completion,
     tokenTotal: row.token_total,
-    aiFeedbackScore: row.ai_feedback_score,
-    aiFeedback: parseBlob(row.ai_feedback_blob),
+    aiFeedbackScore: row.ai_feedback_score ?? automaticFeedback?.score ?? null,
+    aiFeedback: parseBlob(row.ai_feedback_blob) ?? automaticFeedback?.feedback ?? null,
     redactionState: row.redaction_state,
     createdAt: row.created_at,
   };

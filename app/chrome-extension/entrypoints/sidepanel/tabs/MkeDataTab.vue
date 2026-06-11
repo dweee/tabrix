@@ -796,14 +796,16 @@ function formatDuration(value: number | null | undefined): string | null {
 
 function formatAiFeedbackLine(trace: MkeMemoryTraceSummary): string {
   const feedback = trace.aiFeedback;
+  const label = feedback?.sourceKind === 'tabrix_auto_evidence' ? '系统评价' : 'AI评价';
   return feedback?.summary
-    ? `AI评价：${compactText(formatReadableFeedbackLine(feedback.summary), 88)}`
+    ? `${label}：${compactText(formatReadableFeedbackLine(feedback.summary), 88)}`
     : '';
 }
 
 function formatAiFeedbackScoreLabel(trace: MkeMemoryTraceSummary): string {
   const score = trace.statusView?.aiScore ?? trace.aiFeedbackScore ?? trace.aiFeedback?.confidence;
-  return typeof score === 'number' ? `AI评分 ${Math.round(score * 100)}%` : '';
+  const label = trace.aiFeedback?.sourceKind === 'tabrix_auto_evidence' ? '系统评分' : 'AI评分';
+  return typeof score === 'number' ? `${label} ${Math.round(score * 100)}%` : '';
 }
 
 function formatReadableFeedbackLine(value: string): string {

@@ -57,6 +57,13 @@ describe('MkeMemoryTraceService', () => {
       recordReturned = true;
 
       expect(trace.traceId).toBeDefined();
+      expect(trace.aiFeedbackScore).toBe(0.45);
+      expect(trace.aiFeedback).toMatchObject({
+        sourceKind: 'tabrix_auto_evidence',
+        businessStatus: 'unknown',
+        confidence: 0.45,
+        reasonCode: 'tool_completed_business_unknown',
+      });
       expect(traceRepo.count()).toBe(1);
       expect(browserObjectRepo.count()).toBe(0);
       expect(upsertSpy).not.toHaveBeenCalled();
@@ -68,6 +75,48 @@ describe('MkeMemoryTraceService', () => {
       expect(browserObjectRepo.count()).toBe(2);
     } finally {
       upsertSpy.mockRestore();
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('records automatic evidence feedback from proven business success', () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo);
+
+    try {
+      const trace = traceService.recordToolCall({
+        taskId: 'trace-auto-feedback-task',
+        taskIntent: 'click and verify page result',
+        aiClient: 'jest',
+        toolName: 'chrome_click_element',
+        stepId: 'trace-auto-feedback-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 7, ref: 'ref_button' },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 30,
+        result: textResult({
+          success: true,
+          actionEvidenceResult: {
+            business: {
+              businessSuccessVerdict: 'proven',
+              businessSuccessProven: true,
+            },
+          },
+        }),
+        resultSummary: 'verified result appeared',
+      });
+
+      expect(trace.businessSuccess).toBe('achieved');
+      expect(trace.aiFeedbackScore).toBe(0.9);
+      expect(trace.aiFeedback).toMatchObject({
+        sourceKind: 'tabrix_auto_evidence',
+        businessStatus: 'achieved',
+        confidence: 0.9,
+        reasonCode: 'tabrix_business_success_evidence',
+      });
+    } finally {
       traceService.discardPendingAsyncWrites();
       db.close();
     }

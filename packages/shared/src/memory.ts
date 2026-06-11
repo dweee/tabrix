@@ -24,6 +24,7 @@ export type MemoryPersistenceMode = 'disk' | 'memory' | 'off';
  * inside the native DB.
  */
 export interface MkeMemoryAiFeedbackSummary {
+  sourceKind?: 'tabrix_auto_evidence' | 'ai_feedback' | string | null;
   businessStatus?: string | null;
   confidence?: number | null;
   reasonCode?: string | null;
