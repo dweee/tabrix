@@ -14,6 +14,8 @@ const SEARCH_CATEGORY_LABEL_PATTERN = /^(全部|图文|视频|用户|all|images?
 const FILTER_PANEL_LABEL_PATTERN =
   /^(综合|最新|最热|最多点赞|最多评论|最多收藏|不限|一天内|一周内|半年内|已看过|未看过|已关注|同城|附近|重置|收起|清除|确认|应用|all|latest|popular|any|most\s*(liked|commented|saved|collected)|reset|clear|confirm|apply)$/i;
 const SEARCH_TOOLBAR_VERTICAL_BAND_PX = 180;
+const LOW_VALUE_NAV_LINK_PATTERN =
+  /^(关于我们|关于|营业执照|备案|沪ICP备|京ICP备|粤ICP备|隐私政策|隐私|用户协议|服务协议|使用条款|社区规范|帮助中心|联系我们|加入我们|广告合作|举报|投诉|copyright|privacy|terms|agreement|license|licenses?|legal|about|help|contact|careers?)$/i;
 
 function buildRefSelectorMap(refMap: any[]): Map<string, string> {
   const map = new Map<string, string>();
@@ -55,6 +57,31 @@ function scoreCandidateElementPriority(
   return score - Math.min(index, 100) / 1000;
 }
 
+function isLowValueNavigationLink(element: ReadPageInteractiveElement): boolean {
+  const role = String(element.role || '').toLowerCase();
+  if (role !== 'link') return false;
+  const ref = String(element.ref || '');
+  if (ref && ref.startsWith('ref_text_')) return false;
+  const name = String(element.name || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const href = String((element as { href?: unknown }).href || '').toLowerCase();
+  const selector = String((element as { selector?: unknown }).selector || '').toLowerCase();
+  const className = String((element as { className?: unknown }).className || '').toLowerCase();
+  const locationHint = `${href} ${selector} ${className}`;
+
+  if (LOW_VALUE_NAV_LINK_PATTERN.test(name)) return true;
+  if (
+    /(privacy|terms|agreement|legal|license|copyright|beian|icp|about|contact|help|footer)/i.test(
+      locationHint,
+    )
+  ) {
+    return true;
+  }
+  if (/备案|ICP备|营业执照|隐私|协议|条款|版权|关于我们|联系我们|帮助中心/.test(name)) return true;
+  return false;
+}
+
 function inferCandidateActionIntent(
   element: ReadPageInteractiveElement,
   actionType: 'click' | 'fill',
@@ -69,6 +96,7 @@ function inferCandidateActionIntent(
     if (role === 'searchbox' || isSearchActionText(name)) return 'search.enter_query';
     return undefined;
   }
+  if (isLowValueNavigationLink(element)) return undefined;
   if (source === 'placeholder') return undefined;
   if (/同意并继续|确认同意|我同意|agree and continue|accept and continue/i.test(name)) {
     return 'auth.confirm_agreement';
@@ -396,7 +424,7 @@ export function buildCandidateActions(
   const clickRoles = new Set(['button', 'link', 'menuitem', 'tab', 'option', 'checkbox', 'switch']);
   const fillRoles = new Set(['textbox', 'searchbox', 'combobox']);
   const primaryKeywords =
-    /(submit|save|continue|next|confirm|login|sign in|search|checkout|send code|get code|request code|filter|filters|filtered|sort|refresh|reload|all|images?|videos?|users?|latest|popular|reset|clear|apply|提交|保存|继续|下一步|确认|登录|搜索|筛选|已筛选|过滤|排序|全部|图文|视频|用户|综合|最新|最多点赞|最多评论|最多收藏|收藏最多|不限|一天内|一周内|半年内|已看过|未看过|已关注|同城|附近|重置|收起|刷新|获取验证码|发送验证码|重新发送|同意|协议)/i;
+    /(submit|save|continue|next|confirm|login|sign in|search|checkout|send code|get code|request code|filter|filters|filtered|sort|refresh|reload|all|images?|videos?|users?|latest|popular|reset|clear|apply|提交|保存|继续|下一步|确认|登录|搜索|筛选|已筛选|过滤|排序|全部|图文|视频|用户|综合|最新|最多点赞|最多评论|最多收藏|收藏最多|不限|一天内|一周内|半年内|已看过|未看过|已关注|同城|附近|重置|收起|刷新|获取验证码|发送验证码|重新发送|同意)/i;
 
   const seeds: CandidateActionSeed[] = [];
   const prioritizedElements = [...interactiveElements]
@@ -411,6 +439,7 @@ export function buildCandidateActions(
   for (const element of prioritizedElements) {
     if (!element.ref) continue;
     if (!isExecutableCandidateElement(element)) continue;
+    if (isLowValueNavigationLink(element)) continue;
     const role = String(element.role || '').toLowerCase();
     const name = String(element.name || '').trim();
     let actionType: 'click' | 'fill' | null = null;

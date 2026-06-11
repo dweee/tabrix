@@ -3109,7 +3109,7 @@ describe('read_page mode', () => {
         expect.objectContaining({
           actionType: 'click',
           targetRef: 'ref_login',
-          matchReason: 'redacted_auth_action_signal',
+          intent: 'auth.submit_login',
           locatorChain: expect.arrayContaining([
             { type: 'ref', value: 'ref_login' },
             { type: 'css', value: 'button[type=submit]' },

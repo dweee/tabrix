@@ -149,6 +149,50 @@ describe('read_page candidate action intents', () => {
     );
   });
 
+  it('does not promote footer legal links into AI candidate actions on result pages', () => {
+    const actions = buildCandidateActions(
+      [
+        element({ ref: 'ref_search_input', role: 'searchbox', name: '搜索或输入任何问题' }),
+        element({ ref: 'ref_result_card', role: 'link', name: 'AI 图片创作提示词合集' }),
+        element({
+          ref: 'ref_footer_icp',
+          role: 'link',
+          name: 'ICP备案',
+          href: 'https://beian.miit.gov.cn',
+        } as Partial<ReadPageInteractiveElement>),
+        element({
+          ref: 'ref_footer_privacy',
+          role: 'link',
+          name: '隐私政策',
+          href: '/privacy',
+        } as Partial<ReadPageInteractiveElement>),
+        element({
+          ref: 'ref_footer_terms',
+          role: 'link',
+          name: '用户协议',
+          href: '/terms',
+        } as Partial<ReadPageInteractiveElement>),
+      ],
+      [
+        { ref: 'ref_search_input', selector: 'input[type="search"]' },
+        { ref: 'ref_result_card', selector: '.result-card a' },
+        { ref: 'ref_footer_icp', selector: 'footer a.icp' },
+        { ref: 'ref_footer_privacy', selector: 'footer a.privacy' },
+        { ref: 'ref_footer_terms', selector: 'footer a.terms' },
+      ],
+      { visibleRegionRows: visibleRowsForTarget('ref_result_card') },
+    );
+
+    expect(actions.map((action) => action.targetRef)).toContain('ref_search_input');
+    expect(actions.find((action) => action.targetRef === 'ref_result_card')).toMatchObject({
+      intent: 'content.open_detail',
+      label: 'Practical guide to AI poster creation',
+    });
+    expect(actions.map((action) => action.targetRef)).not.toEqual(
+      expect.arrayContaining(['ref_footer_icp', 'ref_footer_privacy', 'ref_footer_terms']),
+    );
+  });
+
   it('labels and prioritizes publish workflow controls without treating them as search', () => {
     const actions = buildCandidateActions(
       [
