@@ -450,6 +450,31 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
         .split(',')
         .map((k) => k.trim())
         .filter((k) => k.length > 0);
+      const hasSubmitKey = keyCombinations.some((combo) =>
+        combo
+          .toLowerCase()
+          .split('+')
+          .some((token) => token.trim() === 'enter'),
+      );
+      const tagName = element && element.tagName ? element.tagName.toUpperCase() : '';
+      if (!targetElement && hasSubmitKey && (tagName === 'BODY' || tagName === 'HTML')) {
+        return {
+          success: false,
+          error:
+            'Refusing to send Enter to BODY/HTML. Provide a selector or read_page target ref for the input/control that should receive the submit key.',
+          results: [],
+          targetElement: {
+            tagName: element.tagName,
+            id: element.id,
+            className: element.className,
+            type: element.type,
+            scrollDiagnostics: getScrollDiagnostics(),
+            waitDiagnostics: {
+              focus: { waitedMs: 0, reason: 'body_html_submit_guard', ready: false },
+            },
+          },
+        };
+      }
       const operationResults = [];
 
       for (let i = 0; i < keyCombinations.length; i++) {

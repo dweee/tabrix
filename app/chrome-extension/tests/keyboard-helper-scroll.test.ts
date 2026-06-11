@@ -140,6 +140,28 @@ describe('keyboard helper scroll diagnostics', () => {
     expect(targetElement.waitDiagnostics?.focus?.ready).toBe(true);
   });
 
+  it('refuses untargeted Enter when focus is BODY', async () => {
+    document.body.innerHTML = '<main>Search page shell</main>';
+    document.body.focus();
+
+    const response = await dispatchKeyboard({
+      action: 'simulateKeyboard',
+      keys: 'Enter',
+    });
+
+    expect(response.success).toBe(false);
+    expect(String(response.error)).toContain('Refusing to send Enter to BODY/HTML');
+    const targetElement = response.targetElement as {
+      tagName?: string;
+      waitDiagnostics?: { focus?: { reason?: string; ready?: boolean } };
+    };
+    expect(targetElement.tagName).toBe('BODY');
+    expect(targetElement.waitDiagnostics?.focus).toMatchObject({
+      reason: 'body_html_submit_guard',
+      ready: false,
+    });
+  });
+
   it('focuses a read_page ref target before dispatching keyboard events', async () => {
     document.body.innerHTML = `
       <input id="search" value="tabrix" />

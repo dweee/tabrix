@@ -30,6 +30,13 @@ function firstCandidateCssLocator(
   return typeof css === 'string' ? css.trim() : undefined;
 }
 
+function isSubmitKeySequence(keys: string): boolean {
+  return keys
+    .split(',')
+    .map((part) => part.trim().toLowerCase())
+    .some((part) => part.split('+').some((token) => token.trim() === 'enter'));
+}
+
 /**
  * Tool for simulating keyboard input on web pages
  */
@@ -50,13 +57,6 @@ class KeyboardTool extends BaseBrowserToolExecutor {
       delay = TIMEOUTS.KEYBOARD_DELAY,
     } = args;
     const keys = rawKeys || key;
-    const targetRef =
-      typeof ref === 'string' && ref.trim()
-        ? ref.trim()
-        : typeof candidateAction?.targetRef === 'string' && candidateAction.targetRef.trim()
-          ? candidateAction.targetRef.trim()
-          : undefined;
-    const candidateCssSelector = firstCandidateCssLocator(candidateAction);
 
     console.log(`Starting keyboard operation with options:`, args);
 
@@ -65,6 +65,15 @@ class KeyboardTool extends BaseBrowserToolExecutor {
         ERROR_MESSAGES.INVALID_PARAMETERS + ': Keys parameter must be provided',
       );
     }
+
+    const targetRef =
+      typeof ref === 'string' && ref.trim()
+        ? ref.trim()
+        : typeof candidateAction?.targetRef === 'string' && candidateAction.targetRef.trim()
+          ? candidateAction.targetRef.trim()
+          : undefined;
+    const candidateCssSelector = firstCandidateCssLocator(candidateAction);
+    const submitLikeKey = isSubmitKeySequence(keys);
 
     try {
       const explicit = await this.tryGetTab(args.tabId);
@@ -75,6 +84,12 @@ class KeyboardTool extends BaseBrowserToolExecutor {
 
       let finalSelector = selector || candidateCssSelector;
       let refForFocus: string | undefined = finalSelector ? undefined : targetRef;
+
+      if (submitLikeKey && !finalSelector && !refForFocus) {
+        return createErrorResponse(
+          'Refusing to send Enter without a target. Pass the latest read_page search input candidateAction, target ref, or selector so Tabrix does not submit against BODY/HTML focus.',
+        );
+      }
 
       // Ensure helper is loaded for XPath or potential focus operations
       await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
@@ -152,8 +167,6 @@ class KeyboardTool extends BaseBrowserToolExecutor {
       if (result.error) {
         return createErrorResponse(result.error);
       }
-      const submitLikeKey = keys.trim().toLowerCase() === 'enter';
-
       markBrowserWorldTabAiOperated(tab.id, 'keyboard');
       return {
         content: [

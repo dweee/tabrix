@@ -602,6 +602,26 @@ describe('candidateAction bridge', () => {
     );
   });
 
+  it('refuses Enter without a selector/ref/candidateAction target', async () => {
+    vi.spyOn(keyboardTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4114,
+      title: 'Search',
+      url: 'https://example.com/search',
+    });
+    vi.spyOn(keyboardTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(keyboardTool as any, 'sendMessageToTab');
+
+    const result = await keyboardTool.execute({
+      keys: 'Enter',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content?.[0] as any)?.text || '')).toContain(
+      'Refusing to send Enter without a target',
+    );
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
   it('accepts key as a single-key alias for chrome_keyboard', async () => {
     vi.spyOn(keyboardTool as any, 'tryGetTab').mockResolvedValue({
       id: 4111,
