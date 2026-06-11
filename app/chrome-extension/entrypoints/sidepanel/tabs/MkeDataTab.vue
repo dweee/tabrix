@@ -629,7 +629,7 @@ function objectWebPageToRecord(webPage: MkeObjectWebPageView): ViewRecord {
     feedbackScoreLabel: '',
     duration: '',
     createdAtLabel: formatDate(webPage.updatedAt),
-    status: `网页状态：${webPage.lifecycleLabel}`,
+    status: webPage.lifecycleLabel,
     statusTone: webPage.lifecycleTone,
     isForeground: webPage.lifecycleLabel === '前台页',
     facts: [],
@@ -1369,7 +1369,9 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 }
 
 .mke-status--foreground {
+  background: #bbf7d0;
   border-color: rgba(16, 185, 129, 0.34);
+  color: #047857;
 }
 
 .mke-status__pulse {
@@ -1412,7 +1414,9 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 }
 
 .mke-data-tab--dark-console .mke-status--foreground {
+  background: rgba(16, 185, 129, 0.22);
   border-color: rgba(74, 222, 128, 0.36);
+  color: #86efac;
 }
 
 .mke-data-tab--dark-console .mke-status--warn {

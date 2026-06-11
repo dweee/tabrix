@@ -44,7 +44,7 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('function objectWebPageToRecord(webPage: MkeObjectWebPageView)');
     expect(source).toContain('title: webPage.title');
     expect(source).toContain('metaLine: webPage.location');
-    expect(source).toContain('status: `网页状态：${webPage.lifecycleLabel}`');
+    expect(source).toContain('status: webPage.lifecycleLabel');
     expect(source).toContain('statusTone: webPage.lifecycleTone');
     expect(source).toContain("isForeground: webPage.lifecycleLabel === '前台页'");
     expect(source).toContain('detailJson: formatObjectWebPageJson(webPage)');

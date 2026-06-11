@@ -210,7 +210,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('function objectWebPageToRecord(webPage: MkeObjectWebPageView)');
     expect(tabSource).toContain('title: webPage.title');
     expect(tabSource).toContain('metaLine: webPage.location');
-    expect(tabSource).toContain('status: `网页状态：${webPage.lifecycleLabel}`');
+    expect(tabSource).toContain('status: webPage.lifecycleLabel');
     expect(tabSource).toContain('statusTone: webPage.lifecycleTone');
     expect(tabSource).toContain("isForeground: webPage.lifecycleLabel === '前台页'");
     expect(tabSource).toContain('createdAtLabel: formatDate(webPage.updatedAt)');
