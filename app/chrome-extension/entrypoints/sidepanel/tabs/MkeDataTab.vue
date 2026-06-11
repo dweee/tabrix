@@ -607,11 +607,7 @@ function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
     createdAtLabel: formatDate(trace.createdAt),
     status,
     statusTone: formatAiBusinessStatusTone(trace.aiFeedback?.businessStatus),
-    facts: compactFacts([
-      ['方法', trace.toolName],
-      ['执行', formatToolStatus(trace.statusView?.executionStatus, trace.toolSuccess)],
-      formatTraceLocationFact(trace),
-    ]),
+    facts: compactFacts([['方法', trace.toolName], formatTraceLocationFact(trace)]),
     detailJson: formatMemoryTraceJson(trace),
     searchTokens: [
       trace.toolName,

@@ -88,7 +88,6 @@ export interface RecordMkeAiBusinessFeedbackInput {
   confidence?: number | null;
   reasonCode?: string | null;
   summary?: string | null;
-  evidenceRefs?: string[];
   userGoalSnapshot?: string | null;
   experienceCandidate?: boolean | null;
   receivedAt?: string;
@@ -562,14 +561,6 @@ const DEFAULT_AI_FEEDBACK_RUBRIC_VERSION = 'tabrix_ai_business_feedback_v1';
 
 function normalizeAiFeedbackScope(value: string | null | undefined): 'step' | 'task' {
   return value === 'task' ? 'task' : 'step';
-}
-
-function normalizeEvidenceRefs(values: string[] | null | undefined): string[] {
-  if (!Array.isArray(values)) return [];
-  return values
-    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    .map((value) => truncateString(value.trim()))
-    .slice(0, 12);
 }
 
 function ensureFeedbackBinding(
@@ -1263,7 +1254,6 @@ export class MkeMemoryTraceService {
     if (!trace) return undefined;
     const traceBindingHash = ensureFeedbackBinding(input, trace);
     const confidence = normalizeConfidence(input.confidence);
-    const evidenceRefs = normalizeEvidenceRefs(input.evidenceRefs);
     const evaluationScope = normalizeAiFeedbackScope(input.evaluationScope);
     const evaluationVersion = input.evaluationVersion ?? DEFAULT_AI_FEEDBACK_EVALUATION_VERSION;
     const rubricVersion = input.rubricVersion ?? DEFAULT_AI_FEEDBACK_RUBRIC_VERSION;
@@ -1287,7 +1277,6 @@ export class MkeMemoryTraceService {
         confidence,
         reasonCode: input.reasonCode ?? null,
         summary: input.summary ?? null,
-        evidenceRefs,
         userGoalSnapshot: input.userGoalSnapshot ?? null,
         experienceCandidate,
         binding: {
@@ -1324,7 +1313,7 @@ export class MkeMemoryTraceService {
         confidence,
         reasonCode: input.reasonCode ?? null,
         summary: input.summary ?? null,
-        evidenceRefs,
+        evidenceRefs: [],
         userGoalSnapshot: input.userGoalSnapshot ?? null,
         experienceCandidate,
         sourceToolName: input.sourceToolName ?? null,

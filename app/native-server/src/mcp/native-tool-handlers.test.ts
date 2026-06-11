@@ -81,7 +81,6 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
         confidence: 0.94,
         reasonCode: 'ai_verified_result',
         summary: 'AI verified the expected page result.',
-        evidenceRefs: ['trace-1'],
         experienceCandidate: true,
         sourceToolName: TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK,
       }),
@@ -142,7 +141,6 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
         traceBindingHash: 'wrong-binding',
         businessStatus: 'achieved',
         confidence: 0.94,
-        evidenceRefs: ['trace-1'],
       },
       makeDeps({
         memoryTraces: {

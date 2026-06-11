@@ -266,7 +266,6 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           confidence: feedback.confidence,
           reasonCode: feedback.reasonCode,
           summary: feedback.summary,
-          evidenceRefs: feedback.evidenceRefs,
           userGoalSnapshot: feedback.userGoalSnapshot,
           experienceCandidate: feedback.experienceCandidate,
           receivedAt: new Date(toolCallStartedAtMs).toISOString(),

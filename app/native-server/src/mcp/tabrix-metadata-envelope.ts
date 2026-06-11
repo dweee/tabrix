@@ -23,7 +23,6 @@ interface TabrixPreviousFeedback {
   confidence: number | null;
   reasonCode: string | null;
   summary: string | null;
-  evidenceRefs: string[];
   userGoalSnapshot: string | null;
   experienceCandidate: boolean | null;
 }
@@ -81,11 +80,6 @@ const TABRIX_TOOL_METADATA_SCHEMA = {
           },
           reasonCode: { type: 'string' },
           summary: { type: 'string' },
-          evidenceRefs: {
-            type: 'array',
-            description: 'Optional result references for traceability; not required for scoring.',
-            items: { type: 'string' },
-          },
           userGoalSnapshot: { type: 'string' },
           experienceCandidate: { type: 'boolean' },
         },
@@ -208,14 +202,6 @@ function readOptionalBoolean(value: unknown): boolean | null {
   return typeof value === 'boolean' ? value : null;
 }
 
-function readOptionalStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-    .map((item) => item.trim())
-    .slice(0, 12);
-}
-
 function readPreviousFeedback(value: unknown): TabrixPreviousFeedback[] {
   if (!Array.isArray(value)) return [];
   const feedback: TabrixPreviousFeedback[] = [];
@@ -243,7 +229,6 @@ function readPreviousFeedback(value: unknown): TabrixPreviousFeedback[] {
       confidence: readOptionalConfidence(object.confidence),
       reasonCode: readOptionalString(object.reasonCode),
       summary: readOptionalString(object.summary),
-      evidenceRefs: readOptionalStringArray(object.evidenceRefs),
       userGoalSnapshot: readOptionalString(object.userGoalSnapshot),
       experienceCandidate: readOptionalBoolean(object.experienceCandidate),
     });

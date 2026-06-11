@@ -118,15 +118,6 @@ function readBooleanArg(args: Record<string, unknown>, field: string): boolean |
   return typeof value === 'boolean' ? value : null;
 }
 
-function readStringArrayArg(args: Record<string, unknown>, field: string): string[] {
-  const value = args[field];
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-    .map((item) => item.trim())
-    .slice(0, 12);
-}
-
 const handleMemoryRecordAiFeedback: NativeToolHandler = (args, deps) => {
   const persistenceMode = deps.sessionManager.getPersistenceStatus().mode;
   if (persistenceMode === 'off' || !deps.sessionManager.memoryTraces) {
@@ -185,7 +176,6 @@ const handleMemoryRecordAiFeedback: NativeToolHandler = (args, deps) => {
       confidence: readConfidenceArg(object),
       reasonCode: readStringArg(object, 'reasonCode'),
       summary: readStringArg(object, 'summary'),
-      evidenceRefs: readStringArrayArg(object, 'evidenceRefs'),
       userGoalSnapshot: readStringArg(object, 'userGoalSnapshot'),
       experienceCandidate: readBooleanArg(object, 'experienceCandidate'),
       receivedAt: new Date().toISOString(),

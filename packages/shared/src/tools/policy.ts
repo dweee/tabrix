@@ -95,7 +95,7 @@ export const TOOL_RISK_TIERS: Readonly<Record<string, TabrixRiskTier>> = Object.
   [TOOL_NAMES.CONTEXT.RECORD_OUTCOME]: 'P0',
 
   // ---- MKEP Memory write-back ----
-  // AI feedback write-back. Bounded by trace binding and evidence validation;
+  // AI feedback write-back. Bounded by trace binding and AI rating validation;
   // it is available by default so AI can close the Memory -> Experience loop.
   [TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK]: 'P0',
 });

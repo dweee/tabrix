@@ -93,13 +93,6 @@ export const MEMORY_SCHEMAS: Tool[] = [
             'One concise human-readable sentence explaining the AI judgment. Do not include secrets or raw page data.',
           maxLength: 512,
         },
-        evidenceRefs: {
-          type: 'array',
-          description:
-            'Optional result references for traceability, such as trace ids, tool call ids, observation ids, or result paths. Do not include raw page text, secrets, or screenshots.',
-          items: { type: 'string', minLength: 1, maxLength: 160 },
-          maxItems: 12,
-        },
         userGoalSnapshot: {
           type: 'string',
           description: 'Short redacted snapshot of the user goal this feedback is judging.',

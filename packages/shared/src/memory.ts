@@ -20,8 +20,9 @@ export type MemoryPersistenceMode = 'disk' | 'memory' | 'off';
  *
  * This intentionally omits raw request/response blobs, perception objects,
  * post-observation payloads, and raw AI feedback bodies. The popup management
- * UI only receives whitelisted feedback summary fields; raw evidence stays
- * inside the native DB.
+ * UI only receives whitelisted AI feedback fields. Internal execution
+ * provenance stays inside the native DB and is not part of the product-facing
+ * Memory list contract.
  */
 export type MkeMemoryAiFeedbackScope = 'step' | 'task';
 
@@ -43,7 +44,6 @@ export interface MkeMemoryAiFeedbackSummary {
   confidence?: number | null;
   reasonCode?: string | null;
   summary?: string | null;
-  evidenceRefs?: string[];
   userGoalSnapshot?: string | null;
   experienceCandidate?: boolean | null;
   binding?: MkeMemoryAiFeedbackBindingSummary | null;

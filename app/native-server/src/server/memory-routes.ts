@@ -99,14 +99,6 @@ function readBoolean(record: Record<string, unknown>, field: string): boolean | 
   return typeof value === 'boolean' ? value : null;
 }
 
-function readStringArray(record: Record<string, unknown>, field: string): string[] {
-  const value = record[field];
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-    .map((item) => item.trim());
-}
-
 function toAiFeedbackSummary(value: unknown): MkeMemoryAiFeedbackSummary | null {
   const record = asRecord(value);
   if (!record) return null;
@@ -121,7 +113,6 @@ function toAiFeedbackSummary(value: unknown): MkeMemoryAiFeedbackSummary | null 
     confidence: readNumber(record, 'confidence'),
     reasonCode: readString(record, 'reasonCode'),
     summary: readString(record, 'summary'),
-    evidenceRefs: readStringArray(record, 'evidenceRefs'),
     userGoalSnapshot: readString(record, 'userGoalSnapshot'),
     experienceCandidate: readBoolean(record, 'experienceCandidate'),
     binding: binding
@@ -138,7 +129,6 @@ function toAiFeedbackSummary(value: unknown): MkeMemoryAiFeedbackSummary | null 
     sourceToolCallId: readString(record, 'sourceToolCallId'),
   };
   const hasSignal = Object.entries(summary).some(([key, item]) => {
-    if (key === 'evidenceRefs') return (item as string[]).length > 0;
     if (key === 'binding') return item !== null;
     return item !== null;
   });

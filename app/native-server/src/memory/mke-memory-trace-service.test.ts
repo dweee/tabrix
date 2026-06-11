@@ -152,7 +152,6 @@ describe('MkeMemoryTraceService', () => {
         confidence: 0.94,
         reasonCode: 'ai_verified_result',
         summary: 'AI verified the expected page result appeared.',
-        evidenceRefs: [trace.traceId],
         userGoalSnapshot: 'click and verify page result',
         experienceCandidate: true,
         evaluatorModel: 'jest-evaluator',
@@ -166,7 +165,6 @@ describe('MkeMemoryTraceService', () => {
           sourceKind: 'ai_feedback',
           businessStatus: 'achieved',
           confidence: 0.94,
-          evidenceRefs: [trace.traceId],
           experienceCandidate: true,
           evaluatorModel: 'jest-evaluator',
           binding: expect.objectContaining({
@@ -179,7 +177,7 @@ describe('MkeMemoryTraceService', () => {
       expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)[0]).toMatchObject({
         traceId: trace.traceId,
         businessStatus: 'achieved',
-        evidenceRefs: [trace.traceId],
+        evidenceRefs: [],
         experienceCandidate: true,
         accepted: true,
       });
@@ -226,17 +224,17 @@ describe('MkeMemoryTraceService', () => {
     }
   });
 
-  it('accepts high-confidence achieved feedback without evidence refs', () => {
+  it('records high-confidence achieved AI feedback without product evidence refs', () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const traceRepo = new MemoryTraceRepository(db);
     const traceService = new MkeMemoryTraceService(traceRepo);
 
     try {
       const trace = traceService.recordToolCall({
-        taskId: 'trace-evidence-task',
+        taskId: 'trace-ai-feedback-task',
         aiClient: 'jest',
         toolName: 'chrome_click_element',
-        stepId: 'trace-evidence-step',
+        stepId: 'trace-ai-feedback-step',
         sequenceIndex: 1,
         requestParams: { tabId: 7 },
         requestAtMs: NOW_MS,
@@ -258,9 +256,9 @@ describe('MkeMemoryTraceService', () => {
       expect(updated?.aiFeedback).toMatchObject({
         businessStatus: 'achieved',
         confidence: 0.95,
-        evidenceRefs: [],
         experienceCandidate: true,
       });
+      expect(updated?.aiFeedback).not.toHaveProperty('evidenceRefs');
       expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)[0]).toMatchObject({
         businessStatus: 'achieved',
         evidenceRefs: [],
