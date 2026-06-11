@@ -324,37 +324,37 @@ const loadMoreLabel = computed(() => `加载更多 (${activeLoadedCount.value}/$
 const activeTableInfo = computed(() => {
   if (activeTab.value === 'memory') {
     return {
-      kicker: 'Memory traces / 工具调用记忆',
+      kicker: '工具调用记忆',
       label: '记忆库',
-      description: '查看最近工具调用、结果状态、耗时和网址。',
+      description: '查看 AI 浏览器操作记录、AI评价、耗时和网址。',
     };
   }
   if (activeTab.value === 'object') {
     return {
-      kicker: 'Browser objects / 浏览器对象',
+      kicker: '浏览器网页对象',
       label: '对象库',
-      description: '查看当前浏览器窗口、标签、页面对象和处理状态。',
+      description: '查看浏览器网页生命周期、网址和页面对象。',
     };
   }
   if (activeTab.value === 'knowledge') {
     return {
-      kicker: 'Knowledge models / 页面知识模型',
+      kicker: '页面知识',
       label: '知识库',
       description: '查看从对象库沉淀出的页面知识。',
     };
   }
   return {
-    kicker: 'Experience recipes / 可复用经验',
+    kicker: '可复用经验',
     label: '经验库',
     description: '查看由 AI 评价沉淀出的可复用经验。',
   };
 });
 
 const activeEmptyText = computed(() => {
-  if (activeTab.value === 'memory') return '记忆库暂无工具调用记录 / No memory traces yet.';
-  if (activeTab.value === 'object') return '对象库暂无浏览器对象 / No browser objects yet.';
-  if (activeTab.value === 'knowledge') return '知识库暂无页面模型 / No knowledge models yet.';
-  return '经验库暂无复用经验 / No experience recipes yet.';
+  if (activeTab.value === 'memory') return '记忆库暂无工具调用记录。';
+  if (activeTab.value === 'object') return '对象库暂无浏览器网页记录。';
+  if (activeTab.value === 'knowledge') return '知识库暂无页面知识。';
+  return '经验库暂无可复用经验。';
 });
 
 function setActiveTab(tab: ActiveTab): void {
@@ -645,7 +645,7 @@ function objectWebPageToRecord(webPage: MkeObjectWebPageView): ViewRecord {
 function knowledgeToRecord(model: MkeKnowledgeModelSummary): ViewRecord {
   const row: Omit<ViewRecord, 'searchText'> = {
     id: model.knowledgeId,
-    kicker: 'Knowledge Model / 页面理解',
+    kicker: '页面知识',
     title: `${model.pageRole} · ${model.siteFamily}`,
     metaLine: `${model.pageModelKey} · ${formatDate(model.updatedAt)}`,
     feedbackLine: '',
@@ -663,14 +663,14 @@ function knowledgeToRecord(model: MkeKnowledgeModelSummary): ViewRecord {
 function experienceToRecord(recipe: MkeExperienceRecipeSummary): ViewRecord {
   const row: Omit<ViewRecord, 'searchText'> = {
     id: recipe.experienceId,
-    kicker: 'Experience Recipe / 脱敏复用',
+    kicker: '可复用经验',
     title: recipe.recipeName,
     metaLine: `${recipe.scenarioKey} · ${formatDate(recipe.updatedAt)}`,
     feedbackLine: '',
     feedbackScoreLabel: '',
     duration: '',
     createdAtLabel: formatDate(recipe.updatedAt),
-    status: recipe.redactionState === 'template_only' ? '模板 / Template' : recipe.redactionState,
+    status: recipe.redactionState === 'template_only' ? '可复用' : recipe.redactionState,
     statusTone: recipe.redactionState === 'template_only' ? 'good' : 'warn',
     facts: compactFacts([['适用范围', recipe.portabilityScope]]),
     detailJson: formatJsonDetail(recipe),

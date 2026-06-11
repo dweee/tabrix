@@ -216,6 +216,19 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain('function formatTraceContext');
   });
 
+  it('uses product labels for Knowledge and Experience instead of internal engineering names', () => {
+    expect(tabSource).toContain("kicker: '页面知识'");
+    expect(tabSource).toContain("kicker: '可复用经验'");
+    expect(tabSource).toContain("status: recipe.redactionState === 'template_only' ? '可复用'");
+    expect(tabSource).toContain("return '知识库暂无页面知识。'");
+    expect(tabSource).toContain("return '经验库暂无可复用经验。'");
+    expect(tabSource).not.toContain('Knowledge Model / 页面理解');
+    expect(tabSource).not.toContain('Experience Recipe / 脱敏复用');
+    expect(tabSource).not.toContain('模板 / Template');
+    expect(tabSource).not.toContain('No knowledge models yet');
+    expect(tabSource).not.toContain('No experience recipes yet');
+  });
+
   it('adds Object Library as a real data view without showing Tab IDs as primary fields', () => {
     expect(tabSource).toContain('const browserObjects = ref<MkeBrowserObjectSummary[]>([])');
     expect(tabSource).toContain('fetchMkeBrowserObjects({ limit: objectLimit');
