@@ -113,12 +113,9 @@ function buildWebPageView(
     root.pageRole,
     root.pageModelKey,
     root.ownerType,
-    root.sourceFreshness,
     ...relatedObjects.flatMap((object) => [
       object.objectType,
       object.pageRole,
-      object.selectedDataSource,
-      object.sourceRoute,
       ...(object.actionTypes ?? []),
     ]),
     ...sections.flatMap((section) => [
@@ -259,7 +256,8 @@ function buildDataApiSection(
   root: MkeBrowserObjectSummary,
 ): MkeObjectViewSection {
   const dataSourceLabels = objects
-    .map((object) => object.selectedDataSource || object.sourceRoute || object.pageRole)
+    .filter((object) => DATA_API_OBJECT_TYPES.has(object.objectType))
+    .map((object) => object.selectedDataSource || object.pageRole)
     .filter((item): item is string => typeof item === 'string' && item.length > 0);
   const labels =
     dataSourceLabels.length > 0
@@ -285,9 +283,7 @@ function buildLifecycleSection(
   root: MkeBrowserObjectSummary,
   lifecycle: { label: string; tone: MkeObjectViewTone },
 ): MkeObjectViewSection {
-  const sourceFreshness = formatFreshness(root.sourceFreshness);
   const tabStatus = formatTabStatus(root.tabStatus);
-  const operability = formatOperability(root);
   return {
     id: 'lifecycle',
     title: '生命周期',
@@ -295,11 +291,7 @@ function buildLifecycleSection(
     emptyText: '暂无生命周期状态。',
     items: [
       { label: '当前状态', value: lifecycle.label, tone: lifecycle.tone },
-      sourceFreshness ? { label: '数据状态', value: sourceFreshness } : null,
       tabStatus ? { label: '浏览器加载', value: tabStatus } : null,
-      operability
-        ? { label: '操作能力', value: operability, tone: formatOperabilityTone(root) }
-        : null,
     ].filter((item): item is MkeObjectViewItem => item !== null),
   };
 }
@@ -386,7 +378,8 @@ function formatDataSourceLabel(value: string): string {
   if (text.includes('search')) return '搜索接口';
   if (text.includes('list')) return '列表接口';
   if (text.includes('detail')) return '详情接口';
-  return translateKnownLabel(value);
+  if (DATA_API_OBJECT_TYPES.has(value)) return '数据线索';
+  return '数据线索';
 }
 
 function translateKnownLabel(value: string): string {
@@ -416,31 +409,11 @@ function translateKnownLabel(value: string): string {
   return labels[value.toLowerCase()] ?? compactText(value.replace(/_/g, ' '), 18);
 }
 
-function formatFreshness(value: string | null | undefined): string | null {
-  if (!value) return null;
-  if (value === 'fresh') return '刚同步';
-  if (value === 'stale') return '数据待同步';
-  if (value === 'unknown') return '未知';
-  return value;
-}
-
 function formatTabStatus(value: string | null | undefined): string | null {
   if (!value) return null;
   if (value === 'complete') return '已完成';
   if (value === 'loading') return '加载中';
   return value;
-}
-
-function formatOperability(object: MkeBrowserObjectSummary): string | null {
-  if (object.canTabrixOperate === true) return '可访问';
-  if (object.canTabrixOperate === false) return '受限';
-  return '未知';
-}
-
-function formatOperabilityTone(object: MkeBrowserObjectSummary): MkeObjectViewTone {
-  if (object.canTabrixOperate === true) return 'good';
-  if (object.canTabrixOperate === false) return 'warn';
-  return 'neutral';
 }
 
 function readObjectFacts(object: MkeBrowserObjectSummary): Record<string, unknown> {

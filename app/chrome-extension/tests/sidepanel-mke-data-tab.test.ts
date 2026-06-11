@@ -23,14 +23,14 @@ describe('Sidepanel MKE data tab', () => {
     expect(appSource).not.toContain("activeTab === 'execution'");
   });
 
-  it('queries the four MKE/Object tables and Object Library preferences through the memory API client', () => {
+  it('queries the four MKE/Object tables without exposing Object Library storage controls', () => {
     expect(tabSource).toContain('fetchMkeMemoryTraces');
     expect(tabSource).toContain('fetchMkeBrowserObjects');
     expect(tabSource).toContain('buildMkeObjectLibraryView');
     expect(tabSource).toContain('fetchMkeKnowledgeModels');
     expect(tabSource).toContain('fetchMkeExperienceRecipes');
-    expect(tabSource).toContain('fetchMkeObjectStoragePreferences');
-    expect(tabSource).toContain('updateMkeObjectStoragePreferences');
+    expect(tabSource).not.toContain('fetchMkeObjectStoragePreferences');
+    expect(tabSource).not.toContain('updateMkeObjectStoragePreferences');
     expect(tabSource).not.toContain('clearMkeBrowserObjects');
     expect(tabSource).toContain("scope: 'object-graph'");
     expect(tabSource).toContain('type ActiveTab = MkeDataTabId');
@@ -71,7 +71,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain('Tabrix · 对象库');
     expect(tabSource).not.toContain('mke-object-summary-bar');
     expect(tabSource).toContain('mke-toolbar--object');
-    expect(tabSource).toContain('mke-object-storage-toggle');
+    expect(tabSource).not.toContain('mke-object-storage-toggle');
     expect(tabSource).not.toContain('filteredObjectWebPages');
     expect(tabSource).not.toContain('selectedObjectWebPage');
     expect(tabSource).not.toContain('mke-webpage-row');
@@ -89,23 +89,23 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('搜索主题、对象、方法、网址、状态');
     expect(tabSource).toContain('搜索网页、对象、功能、网址、状态');
     expect(tabSource).toContain('mke-refresh-button');
-    expect(tabSource).toContain('保存浏览状态：开');
-    expect(tabSource).toContain('保存浏览状态：关');
+    expect(tabSource).not.toContain('保存浏览状态：开');
+    expect(tabSource).not.toContain('保存浏览状态：关');
     expect(tabSource).not.toContain('清除对象库');
-    expect(tabSource).toContain('personalBrowserStateStorageEnabled');
-    expect(tabSource).toContain('mke-icon-button--active');
-    expect(tabSource).toContain('mke-icon-button--off');
-    expect(tabSource).toContain('mke-icon-button--confirmed');
-    expect(tabSource).toContain('preferenceToggleConfirmed');
-    expect(tabSource).toContain('i-lucide-shield-check');
-    expect(tabSource).toContain('i-lucide-shield-off');
-    expect(tabSource).toContain('@keyframes mke-toggle-confirm');
+    expect(tabSource).not.toContain('personalBrowserStateStorageEnabled');
+    expect(tabSource).not.toContain('mke-icon-button--active');
+    expect(tabSource).not.toContain('mke-icon-button--off');
+    expect(tabSource).not.toContain('mke-icon-button--confirmed');
+    expect(tabSource).not.toContain('preferenceToggleConfirmed');
+    expect(tabSource).not.toContain('i-lucide-shield-check');
+    expect(tabSource).not.toContain('i-lucide-shield-off');
+    expect(tabSource).not.toContain('@keyframes mke-toggle-confirm');
     expect(tabSource).not.toContain('mke-object-footer-button');
     expect(tabSource).toContain('mke-record__title-row');
     expect(tabSource).toContain('mke-record__meta-line');
     expect(tabSource).toContain('mke-record__feedback');
     expect(tabSource).toContain('mke-record__feedback-row');
-    expect(tabSource).toContain('mke-feedback-score');
+    expect(tabSource).not.toContain('mke-feedback-score');
     expect(tabSource).not.toContain('mke-record__headline-facts');
     expect(tabSource).toContain('mke-duration');
     expect(tabSource).toContain('mke-record-time');
@@ -143,7 +143,6 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('加载更多 (${activeLoadedCount.value}/${activeTotal.value})');
     expect(tabSource).toContain('grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));');
     expect(tabSource).toContain('grid-template-columns: minmax(180px, 1fr) auto;');
-    expect(tabSource).toContain('grid-template-columns: minmax(160px, 1fr) 34px auto;');
     expect(tabSource).toContain('grid-template-columns: auto minmax(118px, 1fr) auto;');
     expect(tabSource).not.toContain('grid-template-columns: 34px minmax(110px, 1fr)');
     expect(tabSource).not.toContain('mke-meta');
@@ -172,7 +171,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('<h3 :title="row.title">{{ row.title }}</h3>');
     expect(tabSource).toContain('v-if="row.metaLine"');
     expect(tabSource).toContain('v-if="row.feedbackLine"');
-    expect(tabSource).toContain('v-if="row.feedbackScoreLabel"');
+    expect(tabSource).not.toContain('feedbackScoreLabel');
     expect(tabSource).toContain('v-if="row.duration"');
     expect(tabSource).toContain('v-if="row.createdAtLabel"');
     expect(tabSource).toContain('class="mke-status"');
@@ -210,16 +209,18 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('function formatAiBusinessStatus');
     expect(tabSource).not.toContain('function formatBusinessStatus');
     expect(tabSource).toContain('function formatAiFeedbackLine');
-    expect(tabSource).toContain('function formatAiFeedbackScoreLabel');
+    expect(tabSource).not.toContain('function formatAiFeedbackScoreLabel');
     expect(tabSource).toContain('function formatTraceLocationFact');
     expect(tabSource).toContain('function formatReadableFeedbackLine');
     expect(tabSource).not.toContain('function formatTraceContext');
+    expect(tabSource).not.toContain('trace.taskId,');
+    expect(tabSource).not.toContain('trace.toolCallId,');
   });
 
   it('uses product labels for Knowledge and Experience instead of internal engineering names', () => {
     expect(tabSource).toContain("kicker: '页面知识'");
     expect(tabSource).toContain("kicker: '可复用经验'");
-    expect(tabSource).toContain("status: recipe.redactionState === 'template_only' ? '可复用'");
+    expect(tabSource).toContain("status: '可复用'");
     expect(tabSource).toContain("return '知识库暂无页面知识。'");
     expect(tabSource).toContain("return '经验库暂无可复用经验。'");
     expect(tabSource).not.toContain('Knowledge Model / 页面理解');
@@ -241,6 +242,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('objectLibraryView.value.webPages.map(objectWebPageToRecord)');
     expect(tabSource).toContain('objectLibraryView');
     expect(tabSource).toContain('formatObjectWebPageJson');
+    expect(tabSource).not.toContain('objects: webPage.objects');
     expect(tabSource).not.toContain('copyObjectWebPageJson');
     expect(tabSource).toContain('function objectWebPageToRecord(webPage: MkeObjectWebPageView)');
     expect(tabSource).toContain('title: webPage.title');
@@ -342,7 +344,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('onUnmounted');
   });
 
-  it('keeps long identifiers in JSON instead of the default human detail fields', () => {
+  it('keeps Memory detail JSON user-readable without internal trace identifiers or scores', () => {
     expect(tabSource).not.toContain("['Task ID / 任务', trace.taskId]");
     expect(tabSource).not.toContain("['Call ID / 调用', trace.toolCallId]");
     expect(tabSource).toContain('formatAiBusinessStatus(trace.aiFeedback?.businessStatus)');
@@ -350,9 +352,9 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('trace.aiFeedback?.reasonCode');
     expect(tabSource).toContain("'AI评价：待AI评价'");
     expect(tabSource).not.toContain('trace.statusView?.aiScore');
-    expect(tabSource).toContain('trace.aiFeedback?.confidence');
+    expect(tabSource).not.toContain('trace.aiFeedback?.confidence');
     expect(tabSource).toContain('AI评价：${compactText');
-    expect(tabSource).toContain('AI评分 ${Math.round(score * 100)}%');
+    expect(tabSource).not.toContain('AI评分 ${Math.round(score * 100)}%');
     const removedSyntheticFeedbackPattern = new RegExp(
       `${['system', 'Evidence'].join('')}|${['tabrix', 'auto', 'evidence'].join('_')}`,
     );
@@ -367,7 +369,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain("['Tool / 工具', trace.toolName]");
     expect(tabSource).toContain('detailJson: formatMemoryTraceJson(trace)');
     expect(tabSource).toContain('function formatMemoryTraceJson');
-    expect(tabSource).toContain('aiEvaluation: trace.aiFeedback ?? null');
+    expect(tabSource).toContain('aiEvaluation: feedback');
     expect(tabSource).not.toContain('traceId: trace.traceId');
     expect(tabSource).not.toContain('taskId: trace.taskId');
     expect(tabSource).not.toContain('toolCallId: trace.toolCallId');

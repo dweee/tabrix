@@ -22,7 +22,7 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain("label: '知识库'");
     expect(source).toContain("label: '经验库'");
     expect(source).toContain('mke-toolbar--object');
-    expect(source).toContain('mke-object-storage-toggle');
+    expect(source).not.toContain('mke-object-storage-toggle');
     expect(source).not.toContain('mke-object-summary-bar');
     expect(source).toContain('搜索网页、对象、功能、网址、状态');
     expect(source).toContain('fetchMkeBrowserObjects({ limit: objectLimit');

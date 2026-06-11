@@ -46,24 +46,6 @@
             />
           </label>
           <button
-            v-if="activeTab === 'object'"
-            type="button"
-            class="mke-icon-button mke-object-storage-toggle"
-            :class="{
-              'mke-icon-button--active': personalBrowserStateStorageEnabled,
-              'mke-icon-button--off': !personalBrowserStateStorageEnabled,
-              'mke-icon-button--confirmed': preferenceToggleConfirmed,
-            }"
-            :aria-pressed="personalBrowserStateStorageEnabled"
-            :disabled="preferenceLoading"
-            :title="personalBrowserStateStorageEnabled ? '保存浏览状态：开' : '保存浏览状态：关'"
-            @click="togglePersonalBrowserStateStorage"
-          >
-            <i-lucide-shield-check v-if="personalBrowserStateStorageEnabled" aria-hidden="true" />
-            <i-lucide-shield-off v-else aria-hidden="true" />
-            <span class="mke-visually-hidden">切换个人浏览状态存储</span>
-          </button>
-          <button
             type="button"
             class="mke-button mke-refresh-button"
             :disabled="loading"
@@ -104,17 +86,10 @@
               </div>
             </div>
 
-            <div v-if="row.feedbackLine || row.feedbackScoreLabel" class="mke-record__feedback-row">
+            <div v-if="row.feedbackLine" class="mke-record__feedback-row">
               <p v-if="row.feedbackLine" class="mke-record__feedback" :title="row.feedbackLine">
                 {{ row.feedbackLine }}
               </p>
-              <span
-                v-if="row.feedbackScoreLabel"
-                class="mke-feedback-score"
-                title="AI 根据页面结果对上一任务完成度的自评，不代表真实平台验收。"
-              >
-                {{ row.feedbackScoreLabel }}
-              </span>
             </div>
 
             <div class="mke-facts">
@@ -208,9 +183,7 @@ import {
   fetchMkeExperienceRecipes,
   fetchMkeKnowledgeModels,
   fetchMkeMemoryTraces,
-  fetchMkeObjectStoragePreferences,
   MemoryApiError,
-  updateMkeObjectStoragePreferences,
 } from '../../../common/memory-api-client';
 import { useAgentTheme } from '../../shared/composables/usePopupTheme';
 import {
@@ -235,7 +208,6 @@ interface ViewRecord {
   title: string;
   metaLine: string;
   feedbackLine: string;
-  feedbackScoreLabel: string;
   duration: string;
   createdAtLabel: string;
   status: string;
@@ -252,15 +224,11 @@ const searchQuery = ref('');
 const loading = ref(false);
 const loadError = ref('');
 const loadErrorDetail = ref('');
-const preferenceLoading = ref(false);
-const preferenceToggleConfirmed = ref(false);
-const personalBrowserStateStorageEnabled = ref(false);
 const copiedRecordId = ref('');
 const copyFailedRecordId = ref('');
 const expandedRecordIds = ref<Set<string>>(new Set());
 const { theme: agentTheme, initTheme } = useAgentTheme();
 let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
-let preferenceFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
 let autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let refreshInFlight = false;
 
@@ -390,7 +358,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (copyResetTimer) clearTimeout(copyResetTimer);
-  if (preferenceFeedbackTimer) clearTimeout(preferenceFeedbackTimer);
   if (autoRefreshTimer) clearInterval(autoRefreshTimer);
 });
 
@@ -405,13 +372,12 @@ async function refreshAll(options: { silent?: boolean } = {}): Promise<void> {
     const objectLimit = Math.max(offsets.value.object, DEFAULT_MKE_PAGE_SIZE);
     const knowledgeLimit = Math.max(offsets.value.knowledge, DEFAULT_MKE_PAGE_SIZE);
     const experienceLimit = Math.max(offsets.value.experience, DEFAULT_MKE_PAGE_SIZE);
-    const [memoryData, objectData, knowledgeData, experienceData, preferenceData, foregroundTabId] =
+    const [memoryData, objectData, knowledgeData, experienceData, foregroundTabId] =
       await Promise.all([
         fetchMkeMemoryTraces({ limit: memoryLimit, offset: 0 }),
         fetchMkeBrowserObjects({ limit: objectLimit, offset: 0, scope: 'object-graph' }),
         fetchMkeKnowledgeModels({ limit: knowledgeLimit, offset: 0 }),
         fetchMkeExperienceRecipes({ limit: experienceLimit, offset: 0 }),
-        fetchMkeObjectStoragePreferences(),
         readLiveForegroundTabId(),
       ]);
     traces.value = memoryData.traces;
@@ -419,7 +385,6 @@ async function refreshAll(options: { silent?: boolean } = {}): Promise<void> {
     liveForegroundTabId.value = foregroundTabId;
     knowledgeModels.value = knowledgeData.knowledgeModels;
     experienceRecipes.value = experienceData.experienceRecipes;
-    personalBrowserStateStorageEnabled.value = preferenceData.personalBrowserStateStorageEnabled;
     totals.value = {
       memory: memoryData.total,
       object: objectData.total,
@@ -450,33 +415,6 @@ async function readLiveForegroundTabId(): Promise<string | null> {
     return typeof tab?.id === 'number' ? String(tab.id) : null;
   } catch {
     return null;
-  }
-}
-
-async function togglePersonalBrowserStateStorage(): Promise<void> {
-  if (preferenceLoading.value) return;
-  preferenceLoading.value = true;
-  loadError.value = '';
-  loadErrorDetail.value = '';
-  const nextEnabled = !personalBrowserStateStorageEnabled.value;
-  try {
-    const data = await updateMkeObjectStoragePreferences({
-      personalBrowserStateStorageEnabled: nextEnabled,
-    });
-    personalBrowserStateStorageEnabled.value = data.personalBrowserStateStorageEnabled;
-    preferenceToggleConfirmed.value = true;
-    if (preferenceFeedbackTimer) clearTimeout(preferenceFeedbackTimer);
-    preferenceFeedbackTimer = setTimeout(() => {
-      preferenceToggleConfirmed.value = false;
-      preferenceFeedbackTimer = null;
-    }, 650);
-    await refreshAll({ silent: true });
-  } catch (error) {
-    const formatted = formatError(error);
-    loadError.value = formatted.title;
-    loadErrorDetail.value = formatted.detail;
-  } finally {
-    preferenceLoading.value = false;
   }
 }
 
@@ -598,7 +536,6 @@ function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
     title,
     metaLine: '',
     feedbackLine,
-    feedbackScoreLabel: formatAiFeedbackScoreLabel(trace),
     duration: formatDuration(trace.durationMs) ?? '',
     createdAtLabel: formatDate(trace.createdAt),
     status,
@@ -607,8 +544,6 @@ function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
     detailJson: formatMemoryTraceJson(trace),
     searchTokens: [
       trace.toolName,
-      trace.taskId,
-      trace.toolCallId,
       formatAiBusinessStatus(trace.aiFeedback?.businessStatus),
       trace.display?.title,
       trace.display?.locationLabel,
@@ -629,7 +564,6 @@ function objectWebPageToRecord(webPage: MkeObjectWebPageView): ViewRecord {
     title: webPage.title,
     metaLine: webPage.location,
     feedbackLine: '',
-    feedbackScoreLabel: '',
     duration: '',
     createdAtLabel: formatDate(webPage.updatedAt),
     status: webPage.lifecycleLabel,
@@ -643,37 +577,37 @@ function objectWebPageToRecord(webPage: MkeObjectWebPageView): ViewRecord {
 }
 
 function knowledgeToRecord(model: MkeKnowledgeModelSummary): ViewRecord {
+  const lastUpdatedAt = formatDate(model.updatedAt);
   const row: Omit<ViewRecord, 'searchText'> = {
     id: model.knowledgeId,
     kicker: '页面知识',
     title: `${model.pageRole} · ${model.siteFamily}`,
-    metaLine: `${model.pageModelKey} · ${formatDate(model.updatedAt)}`,
+    metaLine: `${model.pageModelKey} · ${lastUpdatedAt}`,
     feedbackLine: '',
-    feedbackScoreLabel: '',
     duration: '',
     createdAtLabel: formatDate(model.updatedAt),
     status: model.observationCount > 0 ? '已沉淀' : '待沉淀',
     statusTone: model.observationCount > 0 ? 'good' : 'neutral',
     facts: compactFacts([['页面模型', model.pageModelKey]]),
-    detailJson: formatJsonDetail(model),
+    detailJson: formatKnowledgeDetailJson(model),
   };
   return withSearchText(row);
 }
 
 function experienceToRecord(recipe: MkeExperienceRecipeSummary): ViewRecord {
+  const lastUpdatedAt = formatDate(recipe.updatedAt);
   const row: Omit<ViewRecord, 'searchText'> = {
     id: recipe.experienceId,
     kicker: '可复用经验',
     title: recipe.recipeName,
-    metaLine: `${recipe.scenarioKey} · ${formatDate(recipe.updatedAt)}`,
+    metaLine: `${recipe.scenarioKey} · ${lastUpdatedAt}`,
     feedbackLine: '',
-    feedbackScoreLabel: '',
     duration: '',
     createdAtLabel: formatDate(recipe.updatedAt),
-    status: recipe.redactionState === 'template_only' ? '可复用' : recipe.redactionState,
-    statusTone: recipe.redactionState === 'template_only' ? 'good' : 'warn',
+    status: '可复用',
+    statusTone: 'good',
     facts: compactFacts([['适用范围', recipe.portabilityScope]]),
-    detailJson: formatJsonDetail(recipe),
+    detailJson: formatExperienceDetailJson(recipe),
   };
   return withSearchText(row);
 }
@@ -716,6 +650,7 @@ function formatJsonDetail(value: unknown): string {
 }
 
 function formatMemoryTraceJson(trace: MkeMemoryTraceSummary): string {
+  const feedback = trace.aiFeedback;
   return formatJsonDetail({
     title: trace.display?.title || formatTraceTitle(trace),
     method: trace.toolName,
@@ -724,14 +659,16 @@ function formatMemoryTraceJson(trace: MkeMemoryTraceSummary): string {
     requestAt: trace.requestAt,
     responseAt: trace.responseAt,
     durationMs: trace.durationMs,
-    aiEvaluation: trace.aiFeedback ?? null,
+    aiEvaluation: feedback
+      ? {
+          status: formatAiBusinessStatus(feedback.businessStatus),
+          summary: feedback.summary ?? null,
+        }
+      : null,
     page: {
-      tabId: trace.tabId,
-      windowId: trace.windowId,
       siteFamily: trace.siteFamily,
       pageUrlPattern: trace.pageUrlPattern,
       pageRole: trace.pageRole,
-      pageState: trace.pageState,
     },
     resultSummary: trace.resultSummary,
     createdAt: trace.createdAt,
@@ -740,12 +677,46 @@ function formatMemoryTraceJson(trace: MkeMemoryTraceSummary): string {
 
 function formatObjectWebPageJson(webPage: MkeObjectWebPageView): string {
   return formatJsonDetail({
-    id: webPage.id,
     title: webPage.title,
     location: webPage.location,
-    lifecycleLabel: webPage.lifecycleLabel,
+    status: webPage.lifecycleLabel,
     sections: webPage.sections,
-    objects: webPage.objects,
+    updatedAt: webPage.updatedAt,
+  });
+}
+
+function formatKnowledgeDetailJson(model: MkeKnowledgeModelSummary): string {
+  return formatJsonDetail({
+    title: `${model.pageRole} · ${model.siteFamily}`,
+    siteFamily: model.siteFamily,
+    pageRole: model.pageRole,
+    pageModel: model.pageModelKey,
+    status: model.observationCount > 0 ? '已沉淀' : '待沉淀',
+    observed: model.observationCount,
+    successfulUse: model.successfulUseCount,
+    failedUse: model.failedUseCount,
+    lastObservedAt: model.lastObservedAt,
+    lastValidatedAt: model.lastValidatedAt,
+    updatedAt: model.updatedAt,
+  });
+}
+
+function formatExperienceDetailJson(recipe: MkeExperienceRecipeSummary): string {
+  return formatJsonDetail({
+    title: recipe.recipeName,
+    scenario: recipe.scenarioKey,
+    siteFamily: recipe.siteFamily,
+    pageRole: recipe.pageRole,
+    pageModel: recipe.pageModelKey,
+    status: '可复用',
+    successCount: recipe.successCount,
+    failureCount: recipe.failureCount,
+    adoptionCount: recipe.adoptionCount,
+    averageDurationMs: recipe.avgDurationMs,
+    portabilityScope: recipe.portabilityScope,
+    lastUsedAt: recipe.lastUsedAt,
+    lastVerifiedAt: recipe.lastVerifiedAt,
+    updatedAt: recipe.updatedAt,
   });
 }
 
@@ -780,11 +751,6 @@ function formatAiFeedbackLine(trace: MkeMemoryTraceSummary): string {
   return feedback?.summary
     ? `AI评价：${compactText(formatReadableFeedbackLine(feedback.summary), 88)}`
     : 'AI评价：待AI评价';
-}
-
-function formatAiFeedbackScoreLabel(trace: MkeMemoryTraceSummary): string {
-  const score = trace.aiFeedback?.confidence;
-  return typeof score === 'number' ? `AI评分 ${Math.round(score * 100)}%` : '';
 }
 
 function formatReadableFeedbackLine(value: string): string {
@@ -1073,7 +1039,7 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 }
 
 .mke-toolbar--object {
-  grid-template-columns: minmax(160px, 1fr) 34px auto;
+  grid-template-columns: minmax(180px, 1fr) auto;
 }
 
 .mke-search {
@@ -1129,84 +1095,6 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   font-size: 11px;
   line-height: 1.35;
   margin: -2px 0 0;
-}
-
-.mke-icon-button svg {
-  height: 16px;
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease;
-  width: 16px;
-}
-
-.mke-icon-button {
-  align-items: center;
-  background: var(--mke-surface);
-  border: 1px solid var(--mke-border);
-  border-radius: 8px;
-  color: var(--mke-soft);
-  cursor: pointer;
-  display: inline-flex;
-  height: 34px;
-  justify-content: center;
-  padding: 0;
-  position: relative;
-  transition:
-    background-color 160ms ease,
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    color 160ms ease,
-    transform 120ms ease;
-  width: 34px;
-}
-
-.mke-icon-button--active {
-  background: var(--mke-accent-bg);
-  border-color: var(--mke-border-strong);
-  color: var(--mke-accent);
-}
-
-.mke-icon-button--off {
-  background: var(--mke-surface-2);
-  border-color: var(--mke-border);
-  color: var(--mke-muted);
-}
-
-.mke-icon-button:hover {
-  border-color: var(--mke-border-strong);
-  box-shadow: var(--mke-shadow);
-  color: var(--mke-accent);
-}
-
-.mke-icon-button:active {
-  transform: scale(0.94);
-}
-
-.mke-icon-button--confirmed {
-  animation: mke-toggle-confirm 650ms ease;
-}
-
-.mke-icon-button--confirmed svg {
-  transform: scale(1.1);
-}
-
-.mke-icon-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-@keyframes mke-toggle-confirm {
-  0% {
-    box-shadow: 0 0 0 0 var(--mke-active-ring);
-  }
-
-  55% {
-    box-shadow: 0 0 0 5px var(--mke-active-ring);
-  }
-
-  100% {
-    box-shadow: 0 0 0 0 transparent;
-  }
 }
 
 .mke-tabs {
@@ -1359,7 +1247,6 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   max-width: 100%;
 }
 
-.mke-feedback-score,
 .mke-duration {
   border: 1px solid var(--mke-border);
   border-radius: 999px;
@@ -1371,10 +1258,6 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   line-height: 1.2;
   padding: 4px 7px;
   white-space: nowrap;
-}
-
-.mke-feedback-score {
-  color: var(--mke-accent);
 }
 
 .mke-status {
@@ -1655,7 +1538,6 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 
 .mke-button:focus-visible,
 .mke-tab-button:focus-visible,
-.mke-icon-button:focus-visible,
 .mke-search input:focus-visible,
 .mke-detail-button:focus-visible,
 .mke-json-copy-button:focus-visible {
@@ -1708,7 +1590,7 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 
 @media (max-width: 390px) {
   .mke-toolbar--object {
-    grid-template-columns: minmax(0, 1fr) 34px auto;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 }
 

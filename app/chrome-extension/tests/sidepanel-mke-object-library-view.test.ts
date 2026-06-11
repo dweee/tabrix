@@ -121,7 +121,7 @@ describe('MKE Object Library view model', () => {
     });
   });
 
-  it('keeps stale object data separate from tab lifecycle', () => {
+  it('keeps object freshness out of the user-facing tab lifecycle', () => {
     const view = buildMkeObjectLibraryView([
       object({
         browserObjectId: 'tab-stale',
@@ -138,8 +138,8 @@ describe('MKE Object Library view model', () => {
 
     const page = view.webPages[0];
     expect(page.lifecycleLabel).toBe('运行中');
-    expect(page.sections[3].items).toContainEqual(
-      expect.objectContaining({ label: '数据状态', value: '数据待同步' }),
+    expect(page.sections[3].items).not.toContainEqual(
+      expect.objectContaining({ label: '数据状态' }),
     );
     expect(page.sections[3].items).toContainEqual(
       expect.objectContaining({ label: '浏览器加载', value: '已完成' }),
@@ -382,8 +382,8 @@ describe('MKE Object Library view model', () => {
       lifecycleLabel: '受限页',
       lifecycleTone: 'warn',
     });
-    expect(view.webPages[0].sections[3].items).toContainEqual(
-      expect.objectContaining({ label: '操作能力', value: '受限', tone: 'warn' }),
+    expect(view.webPages[0].sections[3].items).not.toContainEqual(
+      expect.objectContaining({ label: '操作能力' }),
     );
   });
 });
