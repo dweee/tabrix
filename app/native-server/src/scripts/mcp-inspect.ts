@@ -27,6 +27,16 @@ interface RpcResult {
   parsed: any;
 }
 
+class McpHttpError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = 'McpHttpError';
+  }
+}
+
 function resolveFetch(): FetchFn | null {
   if (typeof globalThis.fetch === 'function') {
     return globalThis.fetch.bind(globalThis) as FetchFn;
@@ -69,6 +79,45 @@ function parseStreamableJson(text: string): any {
 
 function buildDefaultHeaders(authToken?: string): Record<string, string> {
   return authToken ? { Authorization: `Bearer ${authToken}` } : {};
+}
+
+function isLocalMcpUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    return (
+      url.hostname === '127.0.0.1' ||
+      url.hostname === 'localhost' ||
+      url.hostname === '::1' ||
+      url.hostname === '[::1]'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function authTokenUrlForMcp(rawUrl: string): string {
+  const url = new URL(rawUrl);
+  url.pathname = '/auth/token';
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+}
+
+async function fetchLocalAuthToken(rawMcpUrl: string, fetchFn: FetchFn): Promise<string | null> {
+  if (!isLocalMcpUrl(rawMcpUrl)) return null;
+  try {
+    const response = await fetchFn(authTokenUrlForMcp(rawMcpUrl), {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+    });
+    if (!response.ok) return null;
+    const text = await response.text();
+    const parsed = text.trim() ? JSON.parse(text) : null;
+    const token = parsed?.data?.token;
+    return typeof token === 'string' && token.length > 0 ? token : null;
+  } catch {
+    return null;
+  }
 }
 
 function parseToolResult(result: any): any {
@@ -253,8 +302,9 @@ class StreamableHttpMcpClient {
       const parsed = text.trim() ? parseStreamableJson(text) : null;
 
       if (!response.ok || parsed?.error) {
-        throw new Error(
+        throw new McpHttpError(
           `MCP ${method} failed: HTTP ${response.status} ${parsed?.error?.message || text.slice(0, 200)}`,
+          response.status,
         );
       }
 
@@ -309,19 +359,38 @@ export async function runMcpTools(options: McpInspectOptions = {}): Promise<numb
     return 1;
   }
 
-  const client = new StreamableHttpMcpClient(
-    options.url || getChromeMcpUrl(),
-    buildDefaultHeaders(options.authToken),
-    options.timeoutMs ?? DEFAULT_MCP_TOOLS_TIMEOUT_MS,
-    fetchFn,
-  );
+  const baseUrl = options.url || getChromeMcpUrl();
+  const timeoutMs = options.timeoutMs ?? DEFAULT_MCP_TOOLS_TIMEOUT_MS;
+
+  const runOnce = async (authToken?: string): Promise<void> => {
+    const client = new StreamableHttpMcpClient(
+      baseUrl,
+      buildDefaultHeaders(authToken),
+      timeoutMs,
+      fetchFn,
+    );
+    try {
+      await client.initialize();
+      await client.notifyInitialized();
+      const tools = await client.listTools();
+      const output = options.json ? JSON.stringify(tools, null, 2) : renderToolsPretty(tools);
+      process.stdout.write(output + '\n');
+    } finally {
+      await client.close();
+    }
+  };
 
   try {
-    await client.initialize();
-    await client.notifyInitialized();
-    const tools = await client.listTools();
-    const output = options.json ? JSON.stringify(tools, null, 2) : renderToolsPretty(tools);
-    process.stdout.write(output + '\n');
+    try {
+      await runOnce(options.authToken);
+    } catch (error) {
+      if (options.authToken || !(error instanceof McpHttpError) || error.status !== 401) {
+        throw error;
+      }
+      const token = await fetchLocalAuthToken(baseUrl, fetchFn);
+      if (!token) throw error;
+      await runOnce(token);
+    }
     return 0;
   } catch (error) {
     process.stderr.write(`MCP tools failed: ${stringifyError(error)}\n`);
@@ -329,8 +398,6 @@ export async function runMcpTools(options: McpInspectOptions = {}): Promise<numb
       `Hint: verify the runtime with "${COMMAND_NAME} status" and "${COMMAND_NAME} doctor --fix"\n`,
     );
     return 1;
-  } finally {
-    await client.close();
   }
 }
 
@@ -351,17 +418,37 @@ export async function runMcpCall(toolName: string, options: McpCallOptions = {})
     return 1;
   }
 
-  const client = new StreamableHttpMcpClient(
-    options.url || getChromeMcpUrl(),
-    buildDefaultHeaders(options.authToken),
-    options.timeoutMs ?? DEFAULT_MCP_CALL_TIMEOUT_MS,
-    fetchFn,
-  );
+  const baseUrl = options.url || getChromeMcpUrl();
+  const timeoutMs = options.timeoutMs ?? DEFAULT_MCP_CALL_TIMEOUT_MS;
+
+  const runOnce = async (authToken?: string): Promise<any> => {
+    const client = new StreamableHttpMcpClient(
+      baseUrl,
+      buildDefaultHeaders(authToken),
+      timeoutMs,
+      fetchFn,
+    );
+    try {
+      await client.initialize();
+      await client.notifyInitialized();
+      return await client.callTool(toolName, args);
+    } finally {
+      await client.close();
+    }
+  };
 
   try {
-    await client.initialize();
-    await client.notifyInitialized();
-    const result = await client.callTool(toolName, args);
+    let result: any;
+    try {
+      result = await runOnce(options.authToken);
+    } catch (error) {
+      if (options.authToken || !(error instanceof McpHttpError) || error.status !== 401) {
+        throw error;
+      }
+      const token = await fetchLocalAuthToken(baseUrl, fetchFn);
+      if (!token) throw error;
+      result = await runOnce(token);
+    }
     const parsed = parseToolResult(result);
 
     const output = options.json
@@ -378,7 +465,5 @@ export async function runMcpCall(toolName: string, options: McpCallOptions = {})
       `Hint: verify the runtime with "${COMMAND_NAME} status" and "${COMMAND_NAME} doctor --fix"\n`,
     );
     return 1;
-  } finally {
-    await client.close();
   }
 }

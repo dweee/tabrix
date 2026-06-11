@@ -161,6 +161,69 @@ describe('mcp inspect script', () => {
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
+  test('auto-retries local tools list with the current auth token after HTTP 401', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        createResponse({
+          status: 401,
+          body: JSON.stringify({
+            status: 'error',
+            message: 'Unauthorized',
+          }),
+        }),
+      )
+      .mockResolvedValueOnce(
+        createResponse({
+          body: JSON.stringify({
+            status: 'ok',
+            data: { token: 'local-current-token' },
+          }),
+        }),
+      )
+      .mockResolvedValueOnce(
+        createResponse({
+          headers: { 'mcp-session-id': 'session-auto-token' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: { protocolVersion: '2025-03-26' },
+          }),
+        }),
+      )
+      .mockResolvedValueOnce(createResponse({ body: '' }))
+      .mockResolvedValueOnce(
+        createResponse({
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 2,
+            result: {
+              tools: [{ name: 'chrome_read_page', description: 'Read current page' }],
+            },
+          }),
+        }),
+      )
+      .mockResolvedValueOnce(createResponse({ status: 204 }));
+    globalThis.fetch = fetchMock as unknown as FetchMock;
+
+    const code = await runMcpTools();
+
+    expect(code).toBe(0);
+    expect(stdoutSpy.mock.calls.map(([chunk]) => String(chunk)).join('')).toContain(
+      'chrome_read_page',
+    );
+    expect(stderrSpy).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect((fetchMock as unknown as jest.Mock).mock.calls[1][0]).toBe(
+      `http://127.0.0.1:${NATIVE_SERVER_PORT}/auth/token`,
+    );
+    expect(
+      ((fetchMock as unknown as jest.Mock).mock.calls[2] as [string, RequestInit])[1].headers,
+    ).toMatchObject({
+      Authorization: 'Bearer local-current-token',
+    });
+  });
+
   test('calls chrome_read_page with GitHub repo style args and prints parsed result', async () => {
     const fetchMock = jest
       .fn()
