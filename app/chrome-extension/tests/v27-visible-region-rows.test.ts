@@ -811,6 +811,32 @@ describe('V27-P0-REAL-01 visible region rows', () => {
     );
   });
 
+  it('keeps compact menu actions out of search result rows', () => {
+    const rows = extractVisibleRegionRows({
+      sourceRegion: 'search_results',
+      url: 'https://example.test/search_result?keyword=AI%20image',
+      title: 'AI image - Search',
+      pageContent: [
+        '- main "AI image search results" [ref=ref_main] (x=640,y=370)',
+        '  - button "更多" [ref=ref_more] (x=80,y=520)',
+        '  - button "我" [ref=ref_me] (x=80,y=580)',
+        '  - article "Result card" [ref=ref_card_1] (x=420,y=180)',
+        '    - link "AI image prompt workflow examples" [ref=ref_result_1_link] (x=420,y=170) href="/items/image-prompt-workflow"',
+        '    - generic "Saved 2,945" [ref=ref_result_1_saved] (x=420,y=206)',
+        '  - article "Result card" [ref=ref_card_2] (x=420,y=300)',
+        '    - link "Reusable visual generation checklist" [ref=ref_result_2_link] (x=420,y=290) href="/items/visual-generation-checklist"',
+        '    - generic "Saved 1.8k" [ref=ref_result_2_saved] (x=420,y=326)',
+      ].join('\n'),
+    });
+
+    expect(rows.visibleRegionRowsUsed).toBe(true);
+    expect(rows.rows.map((row) => row.title)).toEqual([
+      'AI image prompt workflow examples',
+      'Reusable visual generation checklist',
+    ]);
+    expect(rows.rows.map((row) => row.title).join(' ')).not.toMatch(/更多|我/);
+  });
+
   it('rejects standalone short topic chips without dropping repo-like labels', () => {
     const rows = extractVisibleRegionRows({
       pageContent: [

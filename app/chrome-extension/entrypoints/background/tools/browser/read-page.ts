@@ -1739,6 +1739,7 @@ async function buildModeOutput(params: {
   });
   sharedPayload.searchSurface = buildSearchSurface({
     assistantGuidance: params.assistantGuidance,
+    pageRole: sharedPayload.summary?.pageRole,
     interactiveElements,
     candidateActions,
     visibleRegionRows,

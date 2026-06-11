@@ -2205,6 +2205,58 @@ describe('read_page mode', () => {
     expect(publishNavAction.intentBoundary).toContain('not final publish submission');
   });
 
+  it('builds search surface automatically for search result pages without explicit guidance', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5210,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/search_result?keyword=AI%20image',
+      title: 'AI image - Search',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "AI image search results" [ref=ref_main] (x=640,y=370)',
+        '  - textbox "Search or ask anything" [ref=ref_search] (x=420,y=42)',
+        '  - button "All" [ref=ref_all] (x=280,y=112)',
+        '  - button "Images" [ref=ref_images] (x=340,y=112)',
+        '  - article "Result card" [ref=ref_result_1] (x=420,y=180)',
+        '    - link "AI image prompt workflow examples" [ref=ref_result_1_link] (x=420,y=170) href="/items/image-prompt-workflow"',
+        '    - generic "Saved 2,945" [ref=ref_result_1_saved] (x=420,y=206)',
+        '  - article "Result card" [ref=ref_result_2] (x=420,y=300)',
+        '    - link "Reusable visual generation checklist" [ref=ref_result_2_link] (x=420,y=290) href="/items/visual-generation-checklist"',
+        '    - generic "Saved 1.8k" [ref=ref_result_2_saved] (x=420,y=326)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_search', selector: '#search-input' },
+        { ref: 'ref_all', selector: 'button[data-tab="all"]' },
+        { ref: 'ref_images', selector: 'button[data-tab="images"]' },
+        { ref: 'ref_result_1_link', selector: 'a[href="/items/image-prompt-workflow"]' },
+        { ref: 'ref_result_2_link', selector: 'a[href="/items/visual-generation-checklist"]' },
+      ],
+      stats: { processed: 12, included: 12, durationMs: 7 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.summary.pageRole).toBe('search_results');
+    expect(payload.searchSurface).toMatchObject({
+      status: 'detected',
+      resultCards: expect.arrayContaining([
+        expect.objectContaining({ title: 'AI image prompt workflow examples' }),
+        expect.objectContaining({ title: 'Reusable visual generation checklist' }),
+      ]),
+    });
+    expect(payload.searchSurface.controls).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'search_input' })]),
+    );
+  });
+
   it('derives a conservative summary from page regions when URL/title understanding stays unknown', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 5217,

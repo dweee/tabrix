@@ -36,7 +36,12 @@ const SEARCH_TOOLBAR_TEXT_SCAN_LINE_LIMIT = 80;
 type SearchSurfaceControl = ReadPageSearchSurface['controls'][number];
 type SearchSurfaceFilterPanel = NonNullable<ReadPageSearchSurface['filterPanel']>;
 
-function guidanceRequestsSearch(guidance: ReadPageAssistantGuidance | undefined): boolean {
+function guidanceRequestsSearch(params: {
+  guidance: ReadPageAssistantGuidance | undefined;
+  pageRole?: string | null;
+}): boolean {
+  if (params.pageRole === 'search_results') return true;
+  const guidance = params.guidance;
   if (guidance?.taskKind === 'search') return true;
   return (guidance?.requestedObjects ?? []).some((item) =>
     ['search_input', 'result_cards', 'detail_metrics'].includes(item),
@@ -542,13 +547,17 @@ function observationCoverageForSearch(params: {
 
 export function buildSearchSurface(params: {
   assistantGuidance?: ReadPageAssistantGuidance;
+  pageRole?: string | null;
   interactiveElements: ReadPageInteractiveElement[];
   candidateActions: ReadPageCandidateAction[];
   visibleRegionRows?: VisibleRegionRowsResult;
   visibleTextContent?: string | null;
   frameContext?: ReadPageFrameContext | null;
 }): ReadPageSearchSurface | undefined {
-  const requested = guidanceRequestsSearch(params.assistantGuidance);
+  const requested = guidanceRequestsSearch({
+    guidance: params.assistantGuidance,
+    pageRole: params.pageRole,
+  });
   if (!requested) return undefined;
   const controls: SearchSurfaceControl[] = [];
   const categoryTabs: SearchSurfaceControl[] = [];

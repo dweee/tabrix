@@ -94,7 +94,7 @@ const CONTROL_ROLES = new Set([
 ]);
 
 const SHELL_TEXT_PATTERN =
-  /\b(filter|filters?|sort|footer|navigation|menu|home|login|sign in|submit|search|all|more|settings|privacy|terms|help|sponsor|sponsors?|sponsorable|skip to content|copyright|feedback|sidebar|topics?)\b|筛选|过滤|排序|首页|登录|搜索|赞助|隐私|协议|帮助|创作中心|放映厅|小游戏|业务合作|营业执照|公网安备|网文|ICP备|备案|许可证|许可|网络交易服务|医疗器械/i;
+  /\b(filter|filters?|sort|footer|navigation|menu|home|login|sign in|submit|search|all|more|settings|privacy|terms|help|sponsor|sponsors?|sponsorable|skip to content|copyright|feedback|sidebar|topics?)\b|筛选|过滤|排序|首页|登录|搜索|更多|赞助|隐私|协议|帮助|创作中心|放映厅|小游戏|业务合作|营业执照|公网安备|网文|ICP备|备案|许可证|许可|网络交易服务|医疗器械/i;
 const FOOTER_LEGAL_REPORT_PATTERN =
   /\b(footer|privacy|terms|copyright|certificate|license|permit|legal|compliance|sponsors?|sponsorable|report (?:abuse|harmful|center)|harmful information report|rumou?r exposure|exposure desk|internet report center|business license|internet drug information service)\b|隐私|协议|版权|赞助|举报|有害信息|互联网举报|网络谣言|谣言曝光|资格证书|许可证|备案|公网安备|网文|营业执照|违法不良|网信算备|增值电信|ICP备?/i;
 const SEARCH_CONTROL_TEXT_PATTERN =
@@ -102,7 +102,7 @@ const SEARCH_CONTROL_TEXT_PATTERN =
 const COMPANY_FOOTER_TEXT_PATTERN =
   /\b(?:company|co\.,?\s*ltd|limited|inc\.?|llc|address|registered office)\b|公司|有限公司|地址：|地址:/i;
 const UTILITY_LINK_TEXT_PATTERN =
-  /\b(creator center|creator learning center|upload|upload video|video management|works? data|live data|ads?|advertising|advertisements?|account recovery|contact us|join us|site map|sitemap|friend links|business license|about us|download app)\b|发布视频(?:\/图文)?|发布图文|视频管理|作品数据|直播数据|创作者学习中心|创作中心|广告投放|账号找回|联系我们|加入我们|站点地图|友情链接|业务合作|营业执照|^下载(?:app|应用|客户端)?$/i;
+  /\b(creator center|creator learning center|upload|upload video|video management|works? data|live data|ads?|advertising|advertisements?|account recovery|contact us|join us|site map|sitemap|friend links|business license|about us|download app)\b|发布视频(?:\/图文)?|发布图文|视频管理|作品数据|直播数据|创作者学习中心|创作中心|广告投放|账号找回|联系我们|加入我们|站点地图|友情链接|业务合作|营业执照|关于我们|^下载(?:app|应用|客户端)?$/i;
 const UTILITY_LINK_HREF_PATTERN =
   /(?:^|\/)(?:creator(?:-center)?|creator-center|upload|video-management|ads?|advertising|account(?:-recovery)?|recover|recovery|contact(?:-us)?|about(?:-us)?|sitemap|site-map|friend-links?|download(?:-app)?|legal|privacy|terms|certificate|license|permit|compliance|icp|record|report|feedback|sponsors?)(?:\/|$|\?)/i;
 const META_PATTERN =
