@@ -314,7 +314,7 @@ function buildStatusView(
     executionStatus,
     businessStatus,
     businessStatusSource,
-    aiScore: aiFeedback?.confidence ?? trace.aiFeedbackScore ?? null,
+    aiScore: aiFeedback?.confidence ?? null,
     feedbackRequired: !aiFeedback || businessStatus === 'unknown' || businessStatus === 'partial',
   };
 }

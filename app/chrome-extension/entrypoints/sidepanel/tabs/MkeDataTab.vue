@@ -814,7 +814,7 @@ function formatAiFeedbackLine(trace: MkeMemoryTraceSummary): string {
 }
 
 function formatAiFeedbackScoreLabel(trace: MkeMemoryTraceSummary): string {
-  const score = trace.aiFeedback?.confidence ?? trace.aiFeedbackScore ?? trace.statusView?.aiScore;
+  const score = trace.aiFeedback?.confidence;
   return typeof score === 'number' ? `AI评分 ${Math.round(score * 100)}%` : '';
 }
 

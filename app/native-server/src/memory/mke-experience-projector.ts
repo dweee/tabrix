@@ -120,7 +120,7 @@ function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
   const confidence =
     typeof feedback?.confidence === 'number' && Number.isFinite(feedback.confidence)
       ? feedback.confidence
-      : trace.aiFeedbackScore;
+      : null;
   return (
     sourceKind === 'ai_feedback' &&
     businessStatus === 'achieved' &&

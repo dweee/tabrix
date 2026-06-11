@@ -323,7 +323,8 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('trace.aiFeedback?.summary');
     expect(tabSource).toContain('trace.aiFeedback?.reasonCode');
     expect(tabSource).toContain("'AI评价：待AI评价'");
-    expect(tabSource).toContain('trace.statusView?.aiScore');
+    expect(tabSource).not.toContain('trace.statusView?.aiScore');
+    expect(tabSource).toContain('trace.aiFeedback?.confidence');
     expect(tabSource).toContain('AI评价：${compactText');
     expect(tabSource).toContain('AI评分 ${Math.round(score * 100)}%');
     const removedSyntheticFeedbackPattern = new RegExp(
@@ -331,6 +332,7 @@ describe('Sidepanel MKE data tab', () => {
     );
     expect(tabSource).not.toMatch(removedSyntheticFeedbackPattern);
     expect(tabSource).not.toContain("'AI评分 待回写'");
+    expect(tabSource).not.toContain('trace.aiFeedbackScore ??');
     expect(tabSource).not.toContain('`置信 ${Math.round(trace.aiFeedbackScore * 100)}%`');
     expect(tabSource).not.toContain('AI反馈：');
     expect(tabSource).toContain("replace(/DOM变化/g, '页面变化')");

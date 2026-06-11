@@ -500,4 +500,68 @@ describe('MkeExperienceProjector', () => {
     expect(result.savedExperienceCount).toBe(0);
     expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
   });
+
+  it('does not mine recipes from orphan AI score without feedback confidence', () => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const traces = new MemoryTraceRepository(opened.db);
+    const knowledge = new KnowledgeModelRepository(opened.db);
+    const experience = new ExperienceRecipeRepository(opened.db);
+    const projector = new MkeExperienceProjector(traces, knowledge, experience);
+
+    const readTrace = traces.append({
+      traceId: 'trace-read-orphan-score',
+      taskId: 'task-orphan-score',
+      toolName: 'chrome_read_page',
+      requestParams: { tabId: 10 },
+      requestAt: '2026-06-06T09:10:01.000Z',
+      response: { payloadDigest: { summary: { quality: 'usable' } } },
+      responseAt: '2026-06-06T09:10:02.000Z',
+      toolSuccess: true,
+      tabId: 10,
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageState: 'ready',
+      createdAt: '2026-06-06T09:10:02.000Z',
+    });
+    const pageModelKey = buildMkePageModelKey(readTrace)!;
+    addKnowledge({
+      knowledge,
+      siteFamily: 'example.test',
+      pageModelKey,
+      pageRole: 'search_results',
+      pageUrlPattern: 'https://example.test/search',
+    });
+    traces.append({
+      traceId: 'trace-click-orphan-score',
+      taskId: 'task-orphan-score',
+      toolName: 'chrome_click_element',
+      requestParams: { tabId: 10, ref: 'result-card' },
+      requestAt: '2026-06-06T09:10:03.000Z',
+      response: { payloadDigest: { success: true } },
+      responseAt: '2026-06-06T09:10:04.000Z',
+      toolSuccess: true,
+      businessSuccess: 'achieved',
+      aiFeedbackScore: 0.99,
+      aiFeedback: {
+        sourceKind: 'ai_feedback',
+        businessStatus: 'achieved',
+        reasonCode: 'missing_confidence',
+        summary: 'AI evaluation is incomplete.',
+        experienceCandidate: true,
+        evidenceRefs: ['trace-click-orphan-score'],
+      },
+      tabId: 10,
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageState: 'ready',
+      createdAt: '2026-06-06T09:10:04.000Z',
+    });
+
+    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T09:10:05.000Z' });
+
+    expect(result.savedExperienceCount).toBe(0);
+    expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
+  });
 });

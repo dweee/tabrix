@@ -234,6 +234,46 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('response');
   });
 
+  test('GET /memory/mke/traces does not expose orphan legacy score as AI score', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const trace = traceService.recordToolCall({
+      taskId: 'mke-route-task-orphan-score',
+      taskIntent: 'read a page before AI evaluation',
+      aiClient: 'jest',
+      toolName: 'chrome_read_page',
+      stepId: 'mke-step-orphan-score',
+      sequenceIndex: 1,
+      requestParams: { tabId: 11 },
+      requestAtMs: Date.parse('2026-06-06T12:00:00.000Z'),
+      responseAtMs: Date.parse('2026-06-06T12:00:00.050Z'),
+      result: textResult({
+        page: { url: 'https://example.test/search' },
+        summary: { pageRole: 'search_results', quality: 'usable' },
+      }),
+      resultSummary: 'read page without AI evaluation',
+    });
+    (traceService as any).repo.updateAiFeedback({
+      traceId: trace.traceId,
+      aiFeedbackScore: 0.99,
+      aiFeedback: null,
+    });
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/traces?limit=10&offset=0')
+      .expect(200);
+
+    expect(res.body.data.traces[0]).toMatchObject({
+      traceId: trace.traceId,
+      aiFeedbackScore: 0.99,
+      aiFeedback: null,
+      statusView: {
+        aiScore: null,
+        feedbackRequired: true,
+      },
+    });
+  });
+
   test('GET /memory/mke/traces keeps Tabrix business evidence above conflicting AI feedback', async () => {
     const traceService = sessionManager.memoryTraces;
     if (!traceService) throw new Error('MKE trace service is not available in tests');
