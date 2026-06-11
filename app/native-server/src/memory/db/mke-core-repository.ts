@@ -29,12 +29,6 @@ function parseBlob<T = unknown>(value: string | null): T | null {
   }
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 export type BusinessSuccessVerdict = 'true' | 'false' | 'unknown' | string;
 
 export interface MemoryTraceInsert {
@@ -80,8 +74,6 @@ export interface MemoryTraceInsert {
   tokenTotal?: number | null;
   aiFeedbackScore?: number | null;
   aiFeedback?: unknown;
-  systemEvidenceScore?: number | null;
-  systemEvidence?: unknown;
   redactionState?: string;
   createdAt: string;
 }
@@ -129,8 +121,6 @@ export interface MemoryTrace {
   tokenTotal: number | null;
   aiFeedbackScore: number | null;
   aiFeedback: unknown | null;
-  systemEvidenceScore: number | null;
-  systemEvidence: unknown | null;
   redactionState: string;
   createdAt: string;
 }
@@ -240,8 +230,6 @@ interface MemoryTraceRow {
   token_total: number | null;
   ai_feedback_score: number | null;
   ai_feedback_blob: string | null;
-  system_evidence_score: number | null;
-  system_evidence_blob: string | null;
   redaction_state: string;
   created_at: string;
 }
@@ -274,91 +262,8 @@ interface MemoryFeedbackEventRow {
   created_at: string;
 }
 
-interface AutomaticEvidenceFeedback {
-  score: number;
-  feedback: Record<string, unknown>;
-}
-
-function buildAutomaticEvidenceFeedback(row: MemoryTraceRow): AutomaticEvidenceFeedback | null {
-  if (row.ai_feedback_score !== null || row.ai_feedback_blob !== null) return null;
-
-  const toolSuccess = row.tool_success === null ? null : row.tool_success === 1;
-  let score: number | null = null;
-  let businessStatus = row.business_success ?? 'unknown';
-  let reasonCode = 'tool_result_unscored';
-  let summary = '历史工具调用缺少AI评分，系统按已有执行证据补充了低置信评价。';
-
-  if (toolSuccess === false) {
-    score = 0;
-    businessStatus = 'not_achieved';
-    reasonCode = row.error_code ?? 'tool_failed';
-    summary = '工具调用失败，不能沉淀为成功经验。';
-  } else if (
-    row.business_success === 'achieved' ||
-    row.business_success === 'proven' ||
-    row.business_success === 'true'
-  ) {
-    score = 0.9;
-    businessStatus = 'achieved';
-    reasonCode = 'tabrix_business_success_evidence';
-    summary = 'Tabrix结果中已有业务成功证据，可作为经验候选。';
-  } else if (row.business_success === 'partial') {
-    score = 0.6;
-    businessStatus = 'partial';
-    reasonCode = 'tabrix_partial_business_evidence';
-    summary = 'Tabrix结果只证明部分进展，需要后续确认后才可沉淀为经验。';
-  } else if (
-    row.business_success === 'not_achieved' ||
-    row.business_success === 'failed' ||
-    row.business_success === 'false'
-  ) {
-    score = 0.15;
-    businessStatus = 'not_achieved';
-    reasonCode = 'tabrix_business_not_achieved';
-    summary = 'Tabrix结果显示业务目标未达成，不能沉淀为成功经验。';
-  } else if (toolSuccess === true) {
-    score = 0.45;
-    businessStatus = 'unknown';
-    reasonCode = 'tool_completed_business_unknown';
-    summary = '工具调用已记录，但当前结果没有足够业务成功证据，需后续读取或AI评价确认。';
-  }
-
-  if (score === null) return null;
-
-  return {
-    score,
-    feedback: {
-      sourceKind: 'tabrix_auto_evidence',
-      businessStatus,
-      confidence: score,
-      reasonCode,
-      summary,
-      resultSummary: row.result_summary,
-      receivedAt: row.response_at || row.created_at,
-      sourceToolName: row.tool_name,
-      sourceToolCallId: row.tool_call_id,
-    },
-  };
-}
-
 function rowToMemoryTrace(row: MemoryTraceRow): MemoryTrace {
   const storedAiFeedback = parseBlob(row.ai_feedback_blob);
-  const storedAiFeedbackRecord = asRecord(storedAiFeedback);
-  const legacyAutomaticFeedback =
-    storedAiFeedbackRecord?.sourceKind === 'tabrix_auto_evidence'
-      ? {
-          score: row.ai_feedback_score,
-          feedback: storedAiFeedback,
-        }
-      : null;
-  const automaticFeedback = buildAutomaticEvidenceFeedback(row);
-  const systemEvidence =
-    parseBlob(row.system_evidence_blob) ??
-    legacyAutomaticFeedback?.feedback ??
-    automaticFeedback?.feedback ??
-    null;
-  const systemEvidenceScore =
-    row.system_evidence_score ?? legacyAutomaticFeedback?.score ?? automaticFeedback?.score ?? null;
   return {
     traceId: row.trace_id,
     taskId: row.task_id,
@@ -400,10 +305,8 @@ function rowToMemoryTrace(row: MemoryTraceRow): MemoryTrace {
     tokenPrompt: row.token_prompt,
     tokenCompletion: row.token_completion,
     tokenTotal: row.token_total,
-    aiFeedbackScore: legacyAutomaticFeedback ? null : row.ai_feedback_score,
-    aiFeedback: legacyAutomaticFeedback ? null : storedAiFeedback,
-    systemEvidenceScore,
-    systemEvidence,
+    aiFeedbackScore: row.ai_feedback_score,
+    aiFeedback: storedAiFeedback,
     redactionState: row.redaction_state,
     createdAt: row.created_at,
   };
@@ -471,8 +374,7 @@ export class MemoryTraceRepository {
          pre_observation_blob, post_observation_blob, post_action_delta_blob,
           source_route, selected_data_source, freshness, fallback_used,
           next_required_check, token_prompt, token_completion, token_total,
-          ai_feedback_score, ai_feedback_blob, system_evidence_score, system_evidence_blob,
-          redaction_state, created_at)
+          ai_feedback_score, ai_feedback_blob, redaction_state, created_at)
        VALUES
         (@trace_id, @task_id, @task_theme, @task_intent, @task_signature, @ai_client,
          @tool_name, @tool_call_id, @sequence_index, @request_params_blob, @request_at,
@@ -483,8 +385,7 @@ export class MemoryTraceRepository {
          @pre_observation_blob, @post_observation_blob, @post_action_delta_blob,
           @source_route, @selected_data_source, @freshness, @fallback_used,
           @next_required_check, @token_prompt, @token_completion, @token_total,
-          @ai_feedback_score, @ai_feedback_blob, @system_evidence_score, @system_evidence_blob,
-          @redaction_state, @created_at)`,
+          @ai_feedback_score, @ai_feedback_blob, @redaction_state, @created_at)`,
     );
     this.updateAiFeedbackStmt = db.prepare(
       `UPDATE tabrix_memory_traces
@@ -587,8 +488,6 @@ export class MemoryTraceRepository {
       token_total: optionalInteger(input.tokenTotal),
       ai_feedback_score: optionalNumber(input.aiFeedbackScore),
       ai_feedback_blob: blob(input.aiFeedback),
-      system_evidence_score: optionalNumber(input.systemEvidenceScore),
-      system_evidence_blob: blob(input.systemEvidence),
       redaction_state: input.redactionState ?? 'redacted',
       created_at: input.createdAt,
     };

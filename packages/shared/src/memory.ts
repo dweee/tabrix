@@ -52,17 +52,6 @@ export interface MkeMemoryAiFeedbackSummary {
   sourceToolCallId?: string | null;
 }
 
-export interface MkeMemorySystemEvidenceSummary {
-  sourceKind: 'tabrix_auto_evidence';
-  businessStatus?: string | null;
-  confidence?: number | null;
-  reasonCode?: string | null;
-  summary?: string | null;
-  receivedAt?: string | null;
-  sourceToolName?: string | null;
-  sourceToolCallId?: string | null;
-}
-
 export type MkePageIdentityKind =
   | 'web'
   | 'extension'
@@ -117,8 +106,6 @@ export interface MkeMemoryTraceSummary {
   businessSuccess?: string | null;
   aiFeedbackScore?: number | null;
   aiFeedback?: MkeMemoryAiFeedbackSummary | null;
-  systemEvidenceScore?: number | null;
-  systemEvidence?: MkeMemorySystemEvidenceSummary | null;
   resultSummary?: string | null;
   errorCode?: string | null;
   tabId?: number | null;

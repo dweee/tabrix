@@ -199,12 +199,11 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
         reasonCode: 'clicked_expected_control',
         summary: 'AI verified the click completed the intended page action',
       },
-      systemEvidenceScore: 0.9,
-      systemEvidence: {
-        sourceKind: 'tabrix_auto_evidence',
-        businessStatus: 'achieved',
-      },
     });
+    const removedSyntheticScoreKey = ['system', 'Evidence', 'Score'].join('');
+    const removedSyntheticPayloadKey = ['system', 'Evidence'].join('');
+    expect(res.body.data.traces[0]).not.toHaveProperty(removedSyntheticScoreKey);
+    expect(res.body.data.traces[0]).not.toHaveProperty(removedSyntheticPayloadKey);
     expect(res.body.data.traces[0].pageIdentity.label).toBe('example.test');
     expect(res.body.data.traces[0]).not.toHaveProperty('requestParams');
     expect(res.body.data.traces[0]).not.toHaveProperty('response');
@@ -213,7 +212,6 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       toolName: 'chrome_read_page',
       businessSuccess: 'unknown',
       aiFeedbackScore: 0.82,
-      systemEvidenceScore: 0.45,
       statusView: {
         businessStatus: 'achieved',
         businessStatusSource: 'ai_feedback',
@@ -229,11 +227,9 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
         sourceToolName: 'chrome_click_element',
         sourceToolCallId: 'feedback-call-1',
       },
-      systemEvidence: {
-        sourceKind: 'tabrix_auto_evidence',
-        businessStatus: 'unknown',
-      },
     });
+    expect(res.body.data.traces[1]).not.toHaveProperty(removedSyntheticScoreKey);
+    expect(res.body.data.traces[1]).not.toHaveProperty(removedSyntheticPayloadKey);
     expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('rawInput');
     expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('response');
   });

@@ -344,7 +344,7 @@ describe('MKE core repositories', () => {
     }
   });
 
-  it('derives system evidence separately for legacy Memory traces without stored AI feedback', () => {
+  it('keeps legacy Memory traces unscored until AI feedback is recorded', () => {
     const { traceRepo, close } = bootstrap();
     try {
       traceRepo.append({
@@ -371,17 +371,6 @@ describe('MKE core repositories', () => {
         traceId: 'trace-legacy-unscored',
         aiFeedbackScore: null,
         aiFeedback: null,
-        systemEvidenceScore: 0.45,
-        systemEvidence: {
-          sourceKind: 'tabrix_auto_evidence',
-          businessStatus: 'unknown',
-          confidence: 0.45,
-          reasonCode: 'tool_completed_business_unknown',
-          summary: '工具调用已记录，但当前结果没有足够业务成功证据，需后续读取或AI评价确认。',
-          resultSummary: 'page read completed',
-          sourceToolName: 'chrome_read_page',
-          sourceToolCallId: 'call-legacy-unscored',
-        },
       });
     } finally {
       close();

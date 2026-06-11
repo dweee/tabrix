@@ -33,7 +33,6 @@ import type {
   MkeExperienceRecipeSummary,
   MkeKnowledgeModelSummary,
   MkeMemoryAiFeedbackSummary,
-  MkeMemorySystemEvidenceSummary,
   MkeMemoryTraceSummary,
   MkeObjectStoragePreferencesResponseData,
 } from '@tabrix/shared';
@@ -111,7 +110,6 @@ function readStringArray(record: Record<string, unknown>, field: string): string
 function toAiFeedbackSummary(value: unknown): MkeMemoryAiFeedbackSummary | null {
   const record = asRecord(value);
   if (!record) return null;
-  if (readString(record, 'sourceKind') === 'tabrix_auto_evidence') return null;
   const binding = asRecord(record.binding);
   const summary = {
     sourceKind: readString(record, 'sourceKind'),
@@ -145,75 +143,6 @@ function toAiFeedbackSummary(value: unknown): MkeMemoryAiFeedbackSummary | null 
     return item !== null;
   });
   return hasSignal ? summary : null;
-}
-
-function buildSystemEvidenceSummary(trace: MemoryTrace): MkeMemorySystemEvidenceSummary | null {
-  const feedbackRecord = asRecord(trace.systemEvidence);
-  if (readString(feedbackRecord ?? {}, 'sourceKind') === 'tabrix_auto_evidence') {
-    return {
-      sourceKind: 'tabrix_auto_evidence',
-      businessStatus: readString(feedbackRecord!, 'businessStatus'),
-      confidence: readNumber(feedbackRecord!, 'confidence') ?? trace.systemEvidenceScore,
-      reasonCode: readString(feedbackRecord!, 'reasonCode'),
-      summary: readString(feedbackRecord!, 'summary'),
-      receivedAt: readString(feedbackRecord!, 'receivedAt'),
-      sourceToolName: readString(feedbackRecord!, 'sourceToolName'),
-      sourceToolCallId: readString(feedbackRecord!, 'sourceToolCallId'),
-    };
-  }
-
-  const toolSuccess = trace.toolSuccess;
-  let confidence: number | null = null;
-  let businessStatus = trace.businessSuccess ?? 'unknown';
-  let reasonCode = 'tool_result_unscored';
-  let summary = '工具调用已记录，等待AI评价确认业务结果。';
-
-  if (toolSuccess === false) {
-    confidence = 0;
-    businessStatus = 'not_achieved';
-    reasonCode = trace.errorCode ?? 'tool_failed';
-    summary = '工具调用失败，不能作为成功经验。';
-  } else if (
-    trace.businessSuccess === 'achieved' ||
-    trace.businessSuccess === 'proven' ||
-    trace.businessSuccess === 'true'
-  ) {
-    confidence = 0.9;
-    businessStatus = 'achieved';
-    reasonCode = 'tabrix_business_success_evidence';
-    summary = 'Tabrix结果中已有业务成功证据，仍需AI评价决定是否沉淀经验。';
-  } else if (trace.businessSuccess === 'partial') {
-    confidence = 0.6;
-    businessStatus = 'partial';
-    reasonCode = 'tabrix_partial_business_evidence';
-    summary = 'Tabrix结果只证明部分进展，需要AI评价或后续确认。';
-  } else if (
-    trace.businessSuccess === 'not_achieved' ||
-    trace.businessSuccess === 'failed' ||
-    trace.businessSuccess === 'false'
-  ) {
-    confidence = 0.15;
-    businessStatus = 'not_achieved';
-    reasonCode = 'tabrix_business_not_achieved';
-    summary = 'Tabrix结果显示业务目标未达成，不能作为成功经验。';
-  } else if (toolSuccess === true) {
-    confidence = 0.45;
-    businessStatus = 'unknown';
-    reasonCode = 'tool_completed_business_unknown';
-    summary = '工具调用已执行，但没有足够业务成功证据，等待AI评价。';
-  }
-
-  if (confidence === null) return null;
-  return {
-    sourceKind: 'tabrix_auto_evidence',
-    businessStatus,
-    confidence,
-    reasonCode,
-    summary,
-    receivedAt: trace.responseAt || trace.createdAt,
-    sourceToolName: trace.toolName,
-    sourceToolCallId: trace.toolCallId,
-  };
 }
 
 const TOOL_DISPLAY_NAMES: Record<string, string> = {
@@ -392,7 +321,6 @@ function buildStatusView(
 
 function toTraceSummary(trace: MemoryTrace): MkeMemoryTraceSummary {
   const aiFeedback = toAiFeedbackSummary(trace.aiFeedback);
-  const systemEvidence = buildSystemEvidenceSummary(trace);
   const pageIdentity = classifyPageIdentity(trace);
   const statusView = buildStatusView(trace, aiFeedback);
   const methodLabel = formatToolLabel(trace.toolName);
@@ -411,8 +339,6 @@ function toTraceSummary(trace: MemoryTrace): MkeMemoryTraceSummary {
     businessSuccess: trace.businessSuccess,
     aiFeedbackScore: trace.aiFeedbackScore,
     aiFeedback,
-    systemEvidenceScore: systemEvidence?.confidence ?? trace.systemEvidenceScore,
-    systemEvidence,
     resultSummary: trace.resultSummary,
     errorCode: trace.errorCode,
     tabId: trace.tabId,

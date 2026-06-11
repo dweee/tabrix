@@ -60,13 +60,6 @@ describe('MkeMemoryTraceService', () => {
       expect(trace.traceId).toBeDefined();
       expect(trace.aiFeedbackScore).toBeNull();
       expect(trace.aiFeedback).toBeNull();
-      expect(trace.systemEvidenceScore).toBe(0.45);
-      expect(trace.systemEvidence).toMatchObject({
-        sourceKind: 'tabrix_auto_evidence',
-        businessStatus: 'unknown',
-        confidence: 0.45,
-        reasonCode: 'tool_completed_business_unknown',
-      });
       expect(traceRepo.count()).toBe(1);
       expect(browserObjectRepo.count()).toBe(0);
       expect(upsertSpy).not.toHaveBeenCalled();
@@ -83,7 +76,7 @@ describe('MkeMemoryTraceService', () => {
     }
   });
 
-  it('records automatic system evidence separately from AI feedback', () => {
+  it('does not synthesize AI feedback from tool execution facts', () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const traceRepo = new MemoryTraceRepository(db);
     const traceService = new MkeMemoryTraceService(traceRepo);
@@ -114,13 +107,6 @@ describe('MkeMemoryTraceService', () => {
       expect(trace.businessSuccess).toBe('achieved');
       expect(trace.aiFeedbackScore).toBeNull();
       expect(trace.aiFeedback).toBeNull();
-      expect(trace.systemEvidenceScore).toBe(0.9);
-      expect(trace.systemEvidence).toMatchObject({
-        sourceKind: 'tabrix_auto_evidence',
-        businessStatus: 'achieved',
-        confidence: 0.9,
-        reasonCode: 'tabrix_business_success_evidence',
-      });
     } finally {
       traceService.discardPendingAsyncWrites();
       db.close();

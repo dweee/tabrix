@@ -326,10 +326,10 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('trace.statusView?.aiScore');
     expect(tabSource).toContain('AI评价：${compactText');
     expect(tabSource).toContain('AI评分 ${Math.round(score * 100)}%');
-    expect(tabSource).not.toContain('执行证据：${compactText');
-    expect(tabSource).not.toContain('证据 ${Math.round(score * 100)}%');
-    expect(tabSource).not.toContain("sourceKind === 'tabrix_auto_evidence' ? '系统评价'");
-    expect(tabSource).not.toContain("sourceKind === 'tabrix_auto_evidence' ? '系统评分'");
+    const removedSyntheticFeedbackPattern = new RegExp(
+      `${['system', 'Evidence'].join('')}|${['tabrix', 'auto', 'evidence'].join('_')}`,
+    );
+    expect(tabSource).not.toMatch(removedSyntheticFeedbackPattern);
     expect(tabSource).not.toContain("'AI评分 待回写'");
     expect(tabSource).not.toContain('`置信 ${Math.round(trace.aiFeedbackScore * 100)}%`');
     expect(tabSource).not.toContain('AI反馈：');

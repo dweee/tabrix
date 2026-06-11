@@ -855,7 +855,7 @@ Delete a bookmark by id or URL.
 
 ### `memory_record_ai_feedback`
 
-Record AI business feedback for one Memory trace. Use this after the AI has judged whether a recorded browser step actually completed the user's goal. Tabrix system evidence remains separate and must not be treated as AI feedback.
+Record AI business feedback for one Memory trace. Use this after the AI has judged whether a recorded browser step actually completed the user's goal.
 
 This tool is available by default for the local AI control loop. Use the binding fields returned in the previous tool result under `_tabrix.feedbackTarget`; `traceId` alone is not accepted.
 
