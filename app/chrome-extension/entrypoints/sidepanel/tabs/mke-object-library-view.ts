@@ -33,6 +33,10 @@ export interface MkeObjectLibraryView {
   webPages: MkeObjectWebPageView[];
 }
 
+export interface MkeObjectLibraryRuntimeContext {
+  foregroundTabId?: string | null;
+}
+
 const PAGE_OBJECT_TYPES = new Set(['page', 'region', 'action_target']);
 const ACTION_OBJECT_TYPES = new Set(['action_target']);
 const DATA_API_OBJECT_TYPES = new Set(['data_source']);
@@ -43,8 +47,9 @@ interface ActiveTabContext {
 
 export function buildMkeObjectLibraryView(
   objects: MkeBrowserObjectSummary[],
+  runtimeContext: MkeObjectLibraryRuntimeContext = {},
 ): MkeObjectLibraryView {
-  const activeTabContext = buildActiveTabContext(objects);
+  const activeTabContext = buildActiveTabContext(objects, runtimeContext);
   const webPageRoots = selectWebPageRoots(objects, activeTabContext);
   const webPages = webPageRoots.map((root) =>
     buildWebPageView(root, findRelatedObjects(root, objects), activeTabContext),
@@ -70,8 +75,8 @@ function sortWebPageRoots(
   activeTabContext: ActiveTabContext,
 ): MkeBrowserObjectSummary[] {
   return [...objects].sort((a, b) => {
-    const aIsCurrent = isFocusedWindowActiveTab(a, activeTabContext);
-    const bIsCurrent = isFocusedWindowActiveTab(b, activeTabContext);
+    const aIsCurrent = isForegroundTab(a, activeTabContext);
+    const bIsCurrent = isForegroundTab(b, activeTabContext);
     if (aIsCurrent !== bIsCurrent) return aIsCurrent ? -1 : 1;
     if (isClosedObject(a) !== isClosedObject(b)) return isClosedObject(a) ? 1 : -1;
     return readTime(b.updatedAt) - readTime(a.updatedAt);
@@ -179,7 +184,13 @@ function extractTabId(object: MkeBrowserObjectSummary): string | null {
   return trailingTabIdMatch ? trailingTabIdMatch[1] : null;
 }
 
-function buildActiveTabContext(objects: MkeBrowserObjectSummary[]): ActiveTabContext {
+function buildActiveTabContext(
+  objects: MkeBrowserObjectSummary[],
+  runtimeContext: MkeObjectLibraryRuntimeContext,
+): ActiveTabContext {
+  const foregroundTabId = normalizeTabId(runtimeContext.foregroundTabId);
+  if (foregroundTabId) return { foregroundTabIds: new Set([foregroundTabId]) };
+
   const focusedWindowActiveTabIds = new Set<string>();
 
   for (const object of objects) {
@@ -202,11 +213,11 @@ function buildActiveTabContext(objects: MkeBrowserObjectSummary[]): ActiveTabCon
   return { foregroundTabIds: activeTabIds.size === 1 ? activeTabIds : new Set() };
 }
 
-function isFocusedWindowActiveTab(
+function isForegroundTab(
   object: MkeBrowserObjectSummary,
   activeTabContext: ActiveTabContext,
 ): boolean {
-  if (object.objectType !== 'tab' || object.isActive !== true) return false;
+  if (object.objectType !== 'tab') return false;
   const tabId = extractTabId(object);
   return tabId !== null && activeTabContext.foregroundTabIds.has(tabId);
 }
@@ -345,7 +356,7 @@ function formatLifecycle(
   if (isClosedObject(object)) return { label: '已关闭', tone: 'warn' };
   if (object.tabStatus === 'loading') return { label: '加载中', tone: 'neutral' };
   if (object.canTabrixOperate === false) return { label: '受限页', tone: 'warn' };
-  if (isFocusedWindowActiveTab(object, activeTabContext)) {
+  if (isForegroundTab(object, activeTabContext)) {
     return { label: '前台页', tone: 'good' };
   }
   if (object.canTabrixOperate === true) return { label: '已打开', tone: 'good' };
@@ -451,6 +462,13 @@ function readObjectFactBoolean(object: MkeBrowserObjectSummary, key: string): bo
 function readObjectFactNumber(object: MkeBrowserObjectSummary, key: string): number | null {
   const value = readObjectFacts(object)[key];
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function normalizeTabId(value: string | number | null | undefined): string | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : null;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function isClosedObject(object: MkeBrowserObjectSummary): boolean {

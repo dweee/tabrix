@@ -136,7 +136,14 @@
               <time v-if="row.createdAtLabel" class="mke-record-time">{{
                 row.createdAtLabel
               }}</time>
-              <span class="mke-status" :class="`mke-status--${row.statusTone}`">
+              <span
+                class="mke-status"
+                :class="[
+                  `mke-status--${row.statusTone}`,
+                  { 'mke-status--foreground': row.isForeground },
+                ]"
+              >
+                <span v-if="row.isForeground" class="mke-status__pulse" aria-hidden="true"></span>
                 {{ row.status }}
               </span>
             </div>
@@ -205,7 +212,11 @@ import {
   updateMkeObjectStoragePreferences,
 } from '../../../common/memory-api-client';
 import { useAgentTheme } from '../../shared/composables/usePopupTheme';
-import { buildMkeObjectLibraryView, type MkeObjectWebPageView } from './mke-object-library-view';
+import {
+  buildMkeObjectLibraryView,
+  type MkeObjectLibraryRuntimeContext,
+  type MkeObjectWebPageView,
+} from './mke-object-library-view';
 import { resolveInitialMkeDataTabFromLocation, type MkeDataTabId } from './mke-data-tab-url';
 
 const MKE_AUTO_REFRESH_MS = 5000;
@@ -231,6 +242,7 @@ interface ViewRecord {
   createdAtLabel: string;
   status: string;
   statusTone: StatusTone;
+  isForeground?: boolean;
   facts: RecordFact[];
   detailJson: string;
   searchTokens?: string[];
@@ -254,6 +266,7 @@ let refreshInFlight = false;
 
 const traces = ref<MkeMemoryTraceSummary[]>([]);
 const browserObjects = ref<MkeBrowserObjectSummary[]>([]);
+const liveForegroundTabId = ref<string | null>(null);
 const knowledgeModels = ref<MkeKnowledgeModelSummary[]>([]);
 const experienceRecipes = ref<MkeExperienceRecipeSummary[]>([]);
 const totals = ref<Record<ActiveTab, number>>({
@@ -276,7 +289,13 @@ const tabs = computed(() => [
   { id: 'experience' as const, label: '经验库', total: totals.value.experience },
 ]);
 
-const objectLibraryView = computed(() => buildMkeObjectLibraryView(browserObjects.value));
+const currentObjectLibraryRuntimeContext = computed<MkeObjectLibraryRuntimeContext>(() => ({
+  foregroundTabId: liveForegroundTabId.value,
+}));
+
+const objectLibraryView = computed(() =>
+  buildMkeObjectLibraryView(browserObjects.value, currentObjectLibraryRuntimeContext.value),
+);
 
 const activeRows = computed<ViewRecord[]>(() => {
   if (activeTab.value === 'memory') return traces.value.map(traceToRecord);
@@ -385,16 +404,18 @@ async function refreshAll(options: { silent?: boolean } = {}): Promise<void> {
     const objectLimit = Math.max(offsets.value.object, DEFAULT_MKE_PAGE_SIZE);
     const knowledgeLimit = Math.max(offsets.value.knowledge, DEFAULT_MKE_PAGE_SIZE);
     const experienceLimit = Math.max(offsets.value.experience, DEFAULT_MKE_PAGE_SIZE);
-    const [memoryData, objectData, knowledgeData, experienceData, preferenceData] =
+    const [memoryData, objectData, knowledgeData, experienceData, preferenceData, foregroundTabId] =
       await Promise.all([
         fetchMkeMemoryTraces({ limit: memoryLimit, offset: 0 }),
         fetchMkeBrowserObjects({ limit: objectLimit, offset: 0, scope: 'object-graph' }),
         fetchMkeKnowledgeModels({ limit: knowledgeLimit, offset: 0 }),
         fetchMkeExperienceRecipes({ limit: experienceLimit, offset: 0 }),
         fetchMkeObjectStoragePreferences(),
+        readLiveForegroundTabId(),
       ]);
     traces.value = memoryData.traces;
     browserObjects.value = objectData.browserObjects;
+    liveForegroundTabId.value = foregroundTabId;
     knowledgeModels.value = knowledgeData.knowledgeModels;
     experienceRecipes.value = experienceData.experienceRecipes;
     personalBrowserStateStorageEnabled.value = preferenceData.personalBrowserStateStorageEnabled;
@@ -417,6 +438,17 @@ async function refreshAll(options: { silent?: boolean } = {}): Promise<void> {
   } finally {
     if (!options.silent) loading.value = false;
     refreshInFlight = false;
+  }
+}
+
+async function readLiveForegroundTabId(): Promise<string | null> {
+  const tabsApi = globalThis.chrome?.tabs;
+  if (!tabsApi?.query) return null;
+  try {
+    const [tab] = await tabsApi.query({ active: true, lastFocusedWindow: true });
+    return typeof tab?.id === 'number' ? String(tab.id) : null;
+  } catch {
+    return null;
   }
 }
 
@@ -599,6 +631,7 @@ function objectWebPageToRecord(webPage: MkeObjectWebPageView): ViewRecord {
     createdAtLabel: formatDate(webPage.updatedAt),
     status: `网页状态：${webPage.lifecycleLabel}`,
     statusTone: webPage.lifecycleTone,
+    isForeground: webPage.lifecycleLabel === '前台页',
     facts: [],
     detailJson: formatObjectWebPageJson(webPage),
     searchTokens: [webPage.searchText],
@@ -1316,9 +1349,12 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 }
 
 .mke-status {
+  align-items: center;
   border: 1px solid transparent;
   border-radius: 999px;
+  display: inline-flex;
   flex: 0 0 auto;
+  gap: 5px;
   max-width: 100%;
   font-size: var(--mke-font-xs);
   font-weight: var(--mke-weight-strong);
@@ -1330,6 +1366,33 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 .mke-status--good {
   background: var(--mke-success-bg);
   color: var(--mke-success-text);
+}
+
+.mke-status--foreground {
+  border-color: rgba(16, 185, 129, 0.34);
+}
+
+.mke-status__pulse {
+  animation: mke-foreground-pulse 1.45s ease-in-out infinite;
+  background: #10b981;
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.42);
+  flex: 0 0 auto;
+  height: 7px;
+  width: 7px;
+}
+
+@keyframes mke-foreground-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.38);
+    opacity: 1;
+  }
+
+  50% {
+    box-shadow: 0 0 0 5px rgba(16, 185, 129, 0);
+    opacity: 0.68;
+  }
 }
 
 .mke-status--warn {
@@ -1348,6 +1411,10 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   color: var(--mke-success-text);
 }
 
+.mke-data-tab--dark-console .mke-status--foreground {
+  border-color: rgba(74, 222, 128, 0.36);
+}
+
 .mke-data-tab--dark-console .mke-status--warn {
   border-color: rgba(248, 113, 113, 0.3);
   background: var(--mke-warn-bg);
@@ -1358,6 +1425,12 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   border-color: rgba(148, 163, 184, 0.3);
   background: var(--mke-neutral-bg);
   color: var(--mke-neutral-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mke-status__pulse {
+    animation: none;
+  }
 }
 
 .mke-facts {

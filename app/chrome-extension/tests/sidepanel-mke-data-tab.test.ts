@@ -158,7 +158,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('v-if="row.feedbackScoreLabel"');
     expect(tabSource).toContain('v-if="row.duration"');
     expect(tabSource).toContain('v-if="row.createdAtLabel"');
-    expect(tabSource).toContain('<span class="mke-status"');
+    expect(tabSource).toContain('class="mke-status"');
     expect(tabSource).toContain(
       'const status = formatBusinessStatus(trace.statusView?.businessStatus, trace.businessSuccess)',
     );
@@ -197,7 +197,12 @@ describe('Sidepanel MKE data tab', () => {
   it('adds Object Library as a real data view without showing Tab IDs as primary fields', () => {
     expect(tabSource).toContain('const browserObjects = ref<MkeBrowserObjectSummary[]>([])');
     expect(tabSource).toContain('fetchMkeBrowserObjects({ limit: objectLimit');
+    expect(tabSource).toContain('readLiveForegroundTabId');
+    expect(tabSource).toContain('foregroundTabId: liveForegroundTabId.value');
     expect(tabSource).toContain("if (activeTab.value === 'object')");
+    expect(tabSource).toContain(
+      'buildMkeObjectLibraryView(browserObjects.value, currentObjectLibraryRuntimeContext.value)',
+    );
     expect(tabSource).toContain('objectLibraryView.value.webPages.map(objectWebPageToRecord)');
     expect(tabSource).toContain('objectLibraryView');
     expect(tabSource).toContain('formatObjectWebPageJson');
@@ -207,6 +212,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('metaLine: webPage.location');
     expect(tabSource).toContain('status: `网页状态：${webPage.lifecycleLabel}`');
     expect(tabSource).toContain('statusTone: webPage.lifecycleTone');
+    expect(tabSource).toContain("isForeground: webPage.lifecycleLabel === '前台页'");
     expect(tabSource).toContain('createdAtLabel: formatDate(webPage.updatedAt)');
     expect(tabSource).toContain('facts: []');
     expect(tabSource).toContain('detailJson: formatObjectWebPageJson(webPage)');

@@ -248,6 +248,35 @@ describe('MKE Object Library view model', () => {
     expect(view.webPages.filter((page) => page.lifecycleLabel === '前台页')).toHaveLength(0);
   });
 
+  it('uses the live Chrome foreground tab id before stale object-library active flags', () => {
+    const view = buildMkeObjectLibraryView(
+      [
+        object({
+          browserObjectId: 'tab-stale-open',
+          objectType: 'tab',
+          objectFingerprint: 'tab:10:71',
+          isActive: false,
+          canTabrixOperate: true,
+          display: { title: 'Stale open tab', locationLabel: 'stale.example' },
+        }),
+        object({
+          browserObjectId: 'tab-stale-active',
+          objectType: 'tab',
+          objectFingerprint: 'tab:10:72',
+          isActive: true,
+          canTabrixOperate: true,
+          display: { title: 'Old active tab', locationLabel: 'old-active.example' },
+        }),
+      ],
+      { foregroundTabId: '71' },
+    );
+
+    expect(view.webPages.map((page) => [page.id, page.lifecycleLabel])).toEqual([
+      ['tab-stale-open', '前台页'],
+      ['tab-stale-active', '已打开'],
+    ]);
+  });
+
   it('keeps the webpage status vocabulary to five user-facing states', () => {
     const view = buildMkeObjectLibraryView([
       object({

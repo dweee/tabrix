@@ -38,12 +38,15 @@ describe('MkeDataTab render smoke', () => {
 
   it('renders object-library rows from the product view model only', () => {
     expect(source).toContain('buildMkeObjectLibraryView');
+    expect(source).toContain('currentObjectLibraryRuntimeContext');
+    expect(source).toContain('readLiveForegroundTabId');
     expect(source).toContain('objectLibraryView.value.webPages.map(objectWebPageToRecord)');
     expect(source).toContain('function objectWebPageToRecord(webPage: MkeObjectWebPageView)');
     expect(source).toContain('title: webPage.title');
     expect(source).toContain('metaLine: webPage.location');
     expect(source).toContain('status: `网页状态：${webPage.lifecycleLabel}`');
     expect(source).toContain('statusTone: webPage.lifecycleTone');
+    expect(source).toContain("isForeground: webPage.lifecycleLabel === '前台页'");
     expect(source).toContain('detailJson: formatObjectWebPageJson(webPage)');
 
     expect(source).not.toContain('webPage.activityLabel');
@@ -69,6 +72,8 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('.mke-json-block');
     expect(source).toContain('grid-template-columns: minmax(180px, 1fr) auto');
     expect(source).not.toContain('mke-object-summary-card');
+    expect(source).toContain('mke-status__pulse');
+    expect(source).toContain('@keyframes mke-foreground-pulse');
     expect(source).toContain('@media (max-width: 520px)');
   });
 });
