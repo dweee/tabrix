@@ -531,7 +531,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           status: 'completed',
           summary: 'chrome_read_page fulfilled via current-task observed API data',
         });
-        return apiCallResult;
+        return shouldIncludeVerboseReadPageContext(
+          args,
+          extractRequestedLayer(args) ?? READ_PAGE_DEFAULT_LAYER,
+        )
+          ? apiCallResult
+          : stripReadPageDiagnosticNoiseFromJsonResult(apiCallResult);
       }
       const liveObservedEvidence = taskContext.peekLiveObservedApiEvidence();
       if (liveObservedEvidence.length > 0) {
@@ -789,8 +794,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           summary: normalizedWarning.executionResult.summary,
         });
         return cachedProjection
-          ? attachAiFacingOwnershipRuntime(warningResult, taskContextAttachment)
-          : attachTaskContextEnvelopeToJsonResult(warningResult, taskContextAttachment);
+          ? attachAiFacingOwnershipRuntime(warningResult, taskContextAttachment, {
+              includeAiContextEnvelope: shouldIncludeVerboseReadPageContext(args, requestedLayer),
+            })
+          : attachTaskContextEnvelopeToJsonResult(warningResult, taskContextAttachment, {
+              stripReadPageDiagnostics: !shouldIncludeVerboseReadPageContext(args, requestedLayer),
+            });
       }
     }
     let nonInterferenceVerdict = evaluateNonInterferencePreflight({
@@ -997,6 +1006,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           const mismatchResult = attachTaskContextEnvelopeToJsonResult(
             createErrorResult(JSON.stringify(payload)),
             taskContextAttachment,
+            {
+              stripReadPageDiagnostics: !shouldIncludeVerboseReadPageContext(
+                args,
+                extractRequestedLayer(args) ?? READ_PAGE_DEFAULT_LAYER,
+              ),
+            },
           );
           sessionManager.completeStep(session.sessionId, step.stepId, {
             status: 'failed',
@@ -1107,7 +1122,13 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
             const aiFacingDomRowsResult = attachAiFacingDeltaContext(
               compatDomRowsResult,
               taskContextAttachment,
-              { readStartedAtMs: toolCallStartedAtMs },
+              {
+                readStartedAtMs: toolCallStartedAtMs,
+                includeAiContextEnvelope: shouldIncludeVerboseReadPageContext(
+                  outgoingArgs,
+                  requestedLayer,
+                ),
+              },
             );
             sessionManager.completeStep(session.sessionId, step.stepId, {
               status: 'completed',
@@ -1207,10 +1228,20 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         name === 'chrome_read_page' && taskContext
           ? attachAiFacingDeltaContext(rawResultWithEvidence, taskContextAttachment, {
               readStartedAtMs: toolCallStartedAtMs,
+              includeAiContextEnvelope: shouldIncludeVerboseReadPageContext(
+                outgoingArgs,
+                extractRequestedLayer(outgoingArgs) ?? READ_PAGE_DEFAULT_LAYER,
+              ),
             })
-          : name === 'chrome_close_tabs' && taskContext
-            ? attachLifecycleTimelineContext(rawResultWithEvidence, taskContextAttachment)
-            : rawResultWithEvidence;
+          : name === 'chrome_read_page' &&
+              !shouldIncludeVerboseReadPageContext(
+                outgoingArgs,
+                extractRequestedLayer(outgoingArgs) ?? READ_PAGE_DEFAULT_LAYER,
+              )
+            ? stripReadPageDiagnosticNoiseFromJsonResult(rawResultWithEvidence)
+            : name === 'chrome_close_tabs' && taskContext
+              ? attachLifecycleTimelineContext(rawResultWithEvidence, taskContextAttachment)
+              : rawResultWithEvidence;
       maybeRecordReadPageFailureLifecycleArtifact({
         name,
         args,
@@ -1263,7 +1294,15 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         status: 'completed',
         summary: normalized.executionResult.summary,
       });
-      return recordAndAttachMkeMemoryTrace(resultWithPolicyAndActionEvidence, {
+      const finalToolResult =
+        name === 'chrome_read_page' &&
+        !shouldIncludeVerboseReadPageContext(
+          outgoingArgs,
+          extractRequestedLayer(outgoingArgs) ?? READ_PAGE_DEFAULT_LAYER,
+        )
+          ? stripReadPageDiagnosticNoiseFromJsonResult(resultWithPolicyAndActionEvidence)
+          : resultWithPolicyAndActionEvidence;
+      return recordAndAttachMkeMemoryTrace(finalToolResult, {
         requestParams: outgoingArgs,
         resultSummary: normalized.stepSummary,
         errorCode: toolResultFailed ? 'tool_result_error' : null,
@@ -2424,6 +2463,7 @@ function readTaskPageRuntimeFields(payload: Record<string, unknown>): TaskPageRu
 function attachAiFacingOwnershipRuntime(
   result: CallToolResult,
   attachment: TaskContextAttachment,
+  options?: { includeAiContextEnvelope?: boolean },
 ): CallToolResult {
   const first = result.content?.[0];
   if (!first || first.type !== 'text' || typeof first.text !== 'string') return result;
@@ -2439,10 +2479,14 @@ function attachAiFacingOwnershipRuntime(
 
   const projection = payload.pageProjection;
   if (!isBrowserPageThingProjectionLike(projection)) {
-    return attachTaskContextEnvelopeToJsonResult(result, attachment);
+    return attachTaskContextEnvelopeToJsonResult(result, attachment, {
+      stripReadPageDiagnostics: options?.includeAiContextEnvelope !== true,
+    });
   }
   if (!attachment.taskContext) {
-    return attachTaskContextEnvelopeToJsonResult(result, attachment);
+    return attachTaskContextEnvelopeToJsonResult(result, attachment, {
+      stripReadPageDiagnostics: options?.includeAiContextEnvelope !== true,
+    });
   }
 
   const payloadSelectedDataSource = readPayloadSelectedDataSource(payload);
@@ -2474,7 +2518,7 @@ function attachAiFacingOwnershipRuntime(
   payload.ownershipRuntime = ownershipRuntime;
   payload.taskContextEnvelope = buildTaskContextEnvelope(attachment);
   const aiContextEnvelope = readObject(payload.aiContextEnvelope);
-  if (aiContextEnvelope) {
+  if (aiContextEnvelope && options?.includeAiContextEnvelope === true) {
     payload.aiContextEnvelope = {
       ...aiContextEnvelope,
       taskContext: buildTaskContextEnvelope(attachment),
@@ -2485,12 +2529,20 @@ function attachAiFacingOwnershipRuntime(
         selectedDataSource,
       }),
     };
+  } else {
+    delete payload.aiContextEnvelope;
   }
+  const responsePayload =
+    options?.includeAiContextEnvelope === true
+      ? payload
+      : stripReadPageDiagnosticNoiseForOutput(payload);
 
   return {
     ...result,
     content: result.content.map((block, index) =>
-      index === 0 && block.type === 'text' ? { ...block, text: JSON.stringify(payload) } : block,
+      index === 0 && block.type === 'text'
+        ? { ...block, text: JSON.stringify(responsePayload) }
+        : block,
     ) as CallToolResult['content'],
   };
 }
@@ -2542,7 +2594,7 @@ function buildCachedReadPageObjectSummary(args: {
 function attachAiFacingDeltaContext(
   result: CallToolResult,
   attachment: TaskContextAttachment,
-  options?: { readStartedAtMs?: number },
+  options?: { readStartedAtMs?: number; includeAiContextEnvelope?: boolean },
 ): CallToolResult {
   const first = result.content?.[0];
   if (!first || first.type !== 'text' || typeof first.text !== 'string') return result;
@@ -2558,10 +2610,14 @@ function attachAiFacingDeltaContext(
 
   const projection = payload.pageProjection;
   if (!isBrowserPageThingProjectionLike(projection)) {
-    return attachTaskContextEnvelopeToJsonResult(result, attachment);
+    return attachTaskContextEnvelopeToJsonResult(result, attachment, {
+      stripReadPageDiagnostics: options?.includeAiContextEnvelope !== true,
+    });
   }
   if (!attachment.taskContext) {
-    return attachTaskContextEnvelopeToJsonResult(result, attachment);
+    return attachTaskContextEnvelopeToJsonResult(result, attachment, {
+      stripReadPageDiagnostics: options?.includeAiContextEnvelope !== true,
+    });
   }
 
   const payloadSelectedDataSource = readPayloadSelectedDataSource(payload);
@@ -2748,7 +2804,7 @@ function attachAiFacingDeltaContext(
     payload.postActionDeltaEvidence = postActionDeltaEvidence;
   }
   payload.taskContextEnvelope = buildTaskContextEnvelope(attachment);
-  payload.aiContextEnvelope = {
+  const aiContextEnvelope = {
     envelopeKind: 'delta_context',
     contextSource: 'page_projection_delta',
     taskContext: buildTaskContextEnvelope(attachment),
@@ -2776,15 +2832,86 @@ function attachAiFacingDeltaContext(
     deltaContext,
     lifecycleTimeline: attachment.taskContext.getLifecycleTimeline(),
   };
+  if (options?.includeAiContextEnvelope === true) {
+    payload.aiContextEnvelope = aiContextEnvelope;
+  } else {
+    delete payload.aiContextEnvelope;
+  }
   attachment.taskContext.notePageRegionsForPostcondition({
     tabId: projectionWithSourceTruth.tabId,
     pageRegions: postconditionPageRegions,
   });
+  const responsePayload =
+    options?.includeAiContextEnvelope === true
+      ? payload
+      : stripReadPageDiagnosticNoiseForOutput(payload);
 
   return {
     ...result,
     content: result.content.map((block, index) =>
-      index === 0 && block.type === 'text' ? { ...block, text: JSON.stringify(payload) } : block,
+      index === 0 && block.type === 'text'
+        ? { ...block, text: JSON.stringify(responsePayload) }
+        : block,
+    ) as CallToolResult['content'],
+  };
+}
+
+function shouldIncludeVerboseReadPageContext(
+  args: unknown,
+  requestedLayer: ReadPageRequestedLayer,
+): boolean {
+  const input = readObject(args);
+  return requestedLayer === 'L0+L1+L2' || readReadPageMode(input?.mode) === 'full';
+}
+
+function stripReadPageDiagnosticNoise(value: unknown, seen = new Set<object>()): void {
+  if (!value || typeof value !== 'object') return;
+  const object = value as Record<string, unknown>;
+  if (seen.has(object)) return;
+  seen.add(object);
+
+  delete object.claimBoundary;
+  delete object.evidenceBoundary;
+  delete object.evidenceSummary;
+
+  for (const item of Object.values(object)) {
+    if (Array.isArray(item)) {
+      for (const child of item) stripReadPageDiagnosticNoise(child, seen);
+    } else if (item && typeof item === 'object') {
+      stripReadPageDiagnosticNoise(item, seen);
+    }
+  }
+}
+
+function stripReadPageDiagnosticNoiseForOutput(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  const clone = JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
+  stripReadPageDiagnosticNoise(clone);
+  return clone;
+}
+
+function stripReadPageDiagnosticNoiseFromJsonResult(result: CallToolResult): CallToolResult {
+  const first = result.content?.[0];
+  if (!first || first.type !== 'text' || typeof first.text !== 'string') return result;
+
+  let payload: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(first.text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return result;
+    payload = parsed as Record<string, unknown>;
+  } catch {
+    return result;
+  }
+
+  delete payload.aiContextEnvelope;
+  const responsePayload = stripReadPageDiagnosticNoiseForOutput(payload);
+  return {
+    ...result,
+    content: result.content.map((block, index) =>
+      index === 0 && block.type === 'text'
+        ? { ...block, text: JSON.stringify(responsePayload) }
+        : block,
     ) as CallToolResult['content'],
   };
 }
@@ -3309,6 +3436,7 @@ function buildTaskContextEnvelope(attachment: TaskContextAttachment): Record<str
 function attachTaskContextEnvelopeToJsonResult(
   result: CallToolResult,
   attachment: TaskContextAttachment,
+  options?: { stripReadPageDiagnostics?: boolean },
 ): CallToolResult {
   const first = result.content?.[0];
   if (!first || first.type !== 'text' || typeof first.text !== 'string') return result;
@@ -3323,10 +3451,17 @@ function attachTaskContextEnvelopeToJsonResult(
   }
 
   payload.taskContextEnvelope = buildTaskContextEnvelope(attachment);
+  let responsePayload = payload;
+  if (options?.stripReadPageDiagnostics === true) {
+    delete payload.aiContextEnvelope;
+    responsePayload = stripReadPageDiagnosticNoiseForOutput(payload);
+  }
   return {
     ...result,
     content: result.content.map((block, index) =>
-      index === 0 && block.type === 'text' ? { ...block, text: JSON.stringify(payload) } : block,
+      index === 0 && block.type === 'text'
+        ? { ...block, text: JSON.stringify(responsePayload) }
+        : block,
     ) as CallToolResult['content'],
   };
 }

@@ -113,13 +113,12 @@ describe('handleToolCall execution wrapper', () => {
       nextIntent: '筛选收藏最多内容',
       toolName: 'chrome_read_page',
       toolSuccess: true,
-      businessStatus: 'unknown',
       businessFeedbackRequired: true,
       businessFeedbackGuideVersion: 'tabrix-ai-business-feedback-v1',
     });
     expect(payload._tabrix.businessFeedbackScoreGuide).toContain('0.90-1.00');
     expect(payload._tabrix.businessFeedbackScoreGuide).toContain(
-      'clear page evidence and intent achieved',
+      'clear page result and intent achieved',
     );
     expect(payload._tabrix.businessFeedbackScoreGuide).toContain(
       'partial progress, needs follow-up read/confirmation',
@@ -1393,13 +1392,9 @@ describe('handleToolCall execution wrapper', () => {
           taskContextKeySource: 'external_task_key',
           toolName: 'chrome_read_page',
           readPageRemainingBudget: 0,
-          evidenceBoundary: {
-            deterministicOnly: true,
-            realBrowserProven: false,
-            commercialDeliveryProven: false,
-          },
         },
       });
+      expect(payload.taskContextEnvelope).not.toHaveProperty('evidenceBoundary');
       expect(payload.pageProjection).toMatchObject({
         projectionId: 'projection_before_budget',
         pageId: 'page_before_budget',
@@ -1424,11 +1419,7 @@ describe('handleToolCall execution wrapper', () => {
         deltaKind: 'read_refresh_delta',
         contextSavedRatio: 1,
       });
-      expect(payload.aiContextEnvelope).toMatchObject({
-        envelopeKind: 'delta_context',
-        contextSource: 'cached_page_projection_delta',
-        selectedDataSource: 'dom_json',
-      });
+      expect(payload).not.toHaveProperty('aiContextEnvelope');
       expect(payload.ownershipRuntime).toMatchObject({
         currentTabId: 1,
         currentOwnerType: 'user_owned',
@@ -1801,7 +1792,7 @@ describe('handleToolCall execution wrapper', () => {
       const first = await handleToolCall('chrome_read_page', {
         tabId: 1,
         taskSessionId: 'auth-resume-gate-task',
-        requestedLayer: 'L0+L1',
+        requestedLayer: 'L0+L1+L2',
       });
       expect(first.isError).toBeFalsy();
       const firstPayload = JSON.parse(String(first.content[0].text));
@@ -1842,7 +1833,7 @@ describe('handleToolCall execution wrapper', () => {
       const cached = await handleToolCall('chrome_read_page', {
         tabId: 1,
         taskSessionId: 'auth-resume-gate-task',
-        requestedLayer: 'L0+L1',
+        requestedLayer: 'L0+L1+L2',
       });
       expect(cached.isError).toBeFalsy();
       const cachedPayload = JSON.parse(String(cached.content[0].text));
@@ -2285,7 +2276,7 @@ describe('handleToolCall execution wrapper', () => {
       const r1 = await handleToolCall('chrome_read_page', {
         tabId: 1,
         taskSessionId: 'delta-task',
-        requestedLayer: 'L0+L1',
+        requestedLayer: 'L0+L1+L2',
       });
       const firstPayload = JSON.parse(String(r1.content[0].text));
       expect(firstPayload.deltaContext).toMatchObject({
@@ -2362,6 +2353,7 @@ describe('handleToolCall execution wrapper', () => {
         tabId: 1,
         taskSessionId: 'delta-task',
         requestedLayer: 'L0+L1+L2',
+        forceRefresh: true,
       });
       const secondPayload = JSON.parse(String(r2.content[0].text));
       expect(secondPayload.deltaContext).toMatchObject({
@@ -2650,7 +2642,7 @@ describe('handleToolCall execution wrapper', () => {
       const first = await handleToolCall('chrome_read_page', {
         tabId: 7,
         taskSessionId: 'redundant-delta-task',
-        requestedLayer: 'L0+L1',
+        requestedLayer: 'L0+L1+L2',
       });
       const firstPayload = JSON.parse(String(first.content[0].text));
       expect(firstPayload.deltaContext).toMatchObject({
@@ -2666,7 +2658,7 @@ describe('handleToolCall execution wrapper', () => {
       const second = await handleToolCall('chrome_read_page', {
         tabId: 7,
         taskSessionId: 'redundant-delta-task',
-        requestedLayer: 'L0+L1',
+        requestedLayer: 'L0+L1+L2',
       });
       const secondPayload = JSON.parse(String(second.content[0].text));
 
@@ -2817,7 +2809,7 @@ describe('handleToolCall execution wrapper', () => {
       await handleToolCall('chrome_read_page', {
         tabId: 17,
         taskSessionId: 'redundant-minimized-window-task',
-        requestedLayer: 'L0+L1',
+        requestedLayer: 'L0+L1+L2',
       });
 
       const flowSpy = jest
@@ -2828,7 +2820,7 @@ describe('handleToolCall execution wrapper', () => {
       const second = await handleToolCall('chrome_read_page', {
         tabId: 17,
         taskSessionId: 'redundant-minimized-window-task',
-        requestedLayer: 'L0+L1',
+        requestedLayer: 'L0+L1+L2',
       });
       const payload = JSON.parse(String(second.content[0].text));
 
@@ -3402,7 +3394,7 @@ describe('handleToolCall execution wrapper', () => {
       const result = await handleToolCall('chrome_read_page', {
         tabId: 42,
         taskSessionId: 'real-browser-evidence-task',
-        requestedLayer: 'L0+L1',
+        requestedLayer: 'L0+L1+L2',
       });
       const payload = JSON.parse(String(result.content[0].text));
 
@@ -3539,7 +3531,7 @@ describe('handleToolCall execution wrapper', () => {
       const result = await handleToolCall('chrome_read_page', {
         tabId: 1,
         taskSessionId: 'api-rows-truthfulness-task',
-        requestedLayer: 'L0+L1',
+        requestedLayer: 'L0+L1+L2',
       });
       const payload = JSON.parse(String(result.content[0].text));
 
@@ -5617,9 +5609,6 @@ describe('handleToolCall execution wrapper', () => {
           }),
         },
       ]);
-      expect(payload.aiContextEnvelope.regionStatePostconditions).toEqual(
-        payload.regionStatePostconditions,
-      );
       expect(payload.taskResumeReadiness).toMatchObject({
         status: 'postcondition_passed_ready',
         canResumeOriginalTask: true,
@@ -5633,7 +5622,7 @@ describe('handleToolCall execution wrapper', () => {
           nextAction: 'continue_original_task',
         },
       });
-      expect(payload.aiContextEnvelope.taskResumeReadiness).toEqual(payload.taskResumeReadiness);
+      expect(payload).not.toHaveProperty('aiContextEnvelope');
       expect(auto.readPageCount).toBe(2);
 
       jest
@@ -6027,11 +6016,11 @@ describe('handleToolCall execution wrapper', () => {
           status: 'ready_to_continue',
           nextAction: 'continue_original_task',
           canContinue: true,
-          evidenceSummary: {
-            evidenceKinds: ['region_state_postcondition', 'user_collaboration_resolved'],
-          },
         },
       });
+      expect(resumedPayload.taskResumeReadiness.handoffSummary).not.toHaveProperty(
+        'evidenceSummary',
+      );
       expect(JSON.stringify(resumedPayload.regionStatePostconditions)).not.toContain('15705171303');
       expect(JSON.stringify(resumedPayload.regionStatePostconditions)).not.toContain('170302');
     });
@@ -6201,7 +6190,6 @@ describe('handleToolCall execution wrapper', () => {
             kind: 'search_results_updated',
             verdict: 'unknown',
             reason: 'after_snapshot_not_ready_for_business_action',
-            claimBoundary: expect.stringContaining('loadReadiness=loading_after_wait'),
           }),
         },
       ]);
@@ -6214,9 +6202,7 @@ describe('handleToolCall execution wrapper', () => {
           nextAction: 'run_chrome_read_page_force_refresh',
         },
       });
-      expect(unstablePayload.aiContextEnvelope.regionStatePostconditions).toEqual(
-        unstablePayload.regionStatePostconditions,
-      );
+      expect(unstablePayload).not.toHaveProperty('aiContextEnvelope');
 
       const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
       bridgeSpy.mockClear();
@@ -6318,7 +6304,7 @@ describe('handleToolCall execution wrapper', () => {
           canContinue: false,
         },
       });
-      expect(payload.aiContextEnvelope.taskResumeReadiness).toEqual(payload.taskResumeReadiness);
+      expect(payload).not.toHaveProperty('aiContextEnvelope');
     });
 
     it('does not pass search postconditions from source evidence observed before the action', async () => {
@@ -6394,7 +6380,6 @@ describe('handleToolCall execution wrapper', () => {
             kind: 'search_results_updated',
             verdict: 'unknown',
             reason: 'post_action_fresh_read_required',
-            claimBoundary: expect.stringContaining('sourceObservedAtMs=0'),
           }),
         },
       ]);
@@ -6500,10 +6485,7 @@ describe('handleToolCall execution wrapper', () => {
           nextAction: 'continue_original_task',
         },
       });
-      expect(payload.aiContextEnvelope.regionStatePostconditions).toEqual(
-        payload.regionStatePostconditions,
-      );
-      expect(payload.aiContextEnvelope.taskResumeReadiness).toEqual(payload.taskResumeReadiness);
+      expect(payload).not.toHaveProperty('aiContextEnvelope');
 
       const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
       bridgeSpy.mockClear();

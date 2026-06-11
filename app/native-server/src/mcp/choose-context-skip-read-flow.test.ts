@@ -414,16 +414,6 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
         metadataCompleteness: 1,
         sourceFreshness: 'fresh',
       },
-      aiContextEnvelope: {
-        envelopeKind: 'live_observed_api_context',
-        contextSource: 'live_observed_current_task_api_data',
-        selectedDataSource: 'cdp_enhanced_api_rows',
-        dataSourceDecision: {
-          selectedSource: 'cdp_enhanced_api_rows',
-          selectedReason: 'live_observed_current_task_api_data',
-          privacySafety: 'redacted',
-        },
-      },
       observationMode: 'cdp_enhanced',
       cdpUsed: true,
       cdpReason: 'need_response_body',
@@ -437,6 +427,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
       fallbackUsed: 'none',
       operationLogSuccess: true,
     });
+    expect(payload).not.toHaveProperty('aiContextEnvelope');
     expect(payload).not.toHaveProperty('rawBody');
     expect(payload).not.toHaveProperty('responseBody');
     expect(JSON.stringify(payload)).not.toContain('keyword=desk');
@@ -1050,15 +1041,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
       changedRegions: ['main_results'],
       refreshedRefs: ['ref_result_1', 'ref_result_2'],
     });
-    expect(payload.aiContextEnvelope).toMatchObject({
-      envelopeKind: 'delta_context',
-      contextSource: 'page_projection_delta',
-      selectedDataSource: 'dom_region_rows',
-      dataSourceDecision: {
-        selectedSource: 'dom_region_rows',
-        fallbackReason: 'api_unavailable',
-      },
-    });
+    expect(payload).not.toHaveProperty('aiContextEnvelope');
     const operationLog = takeLatestReadPageOperationLog(completeSpy);
     expect(operationLog).toMatchObject({
       selectedDataSource: 'dom_region_rows',
@@ -1211,7 +1194,8 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
       tabId: 43,
     });
     expect(payload.deltaContext).toMatchObject({
-      evidenceBoundary: { evidenceLevel: 'real_browser', realBrowserClaim: true },
+      deltaKind: 'initial_overview',
+      refreshedRefs: ['ref_repo_1_link', 'ref_repo_2_link'],
     });
     const rows = payload.rows as Array<Record<string, unknown>>;
     expect(rows).toHaveLength(2);
