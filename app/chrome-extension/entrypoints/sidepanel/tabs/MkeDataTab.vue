@@ -594,7 +594,7 @@ async function writeClipboard(value: string): Promise<void> {
 }
 
 function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
-  const status = formatBusinessStatus(trace.statusView?.businessStatus, trace.businessSuccess);
+  const status = formatAiBusinessStatus(trace.aiFeedback?.businessStatus);
   const title = trace.display?.title || formatTraceTitle(trace);
   const feedbackLine = formatAiFeedbackLine(trace);
   const row: Omit<ViewRecord, 'searchText'> = {
@@ -607,18 +607,18 @@ function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
     duration: formatDuration(trace.durationMs) ?? '',
     createdAtLabel: formatDate(trace.createdAt),
     status,
-    statusTone: formatBusinessStatusTone(trace.statusView?.businessStatus, trace.toolSuccess),
+    statusTone: formatAiBusinessStatusTone(trace.aiFeedback?.businessStatus),
     facts: compactFacts([
       ['方法', trace.toolName],
       ['执行', formatToolStatus(trace.statusView?.executionStatus, trace.toolSuccess)],
       formatTraceLocationFact(trace),
     ]),
-    detailJson: formatJsonDetail(trace),
+    detailJson: formatMemoryTraceJson(trace),
     searchTokens: [
       trace.toolName,
       trace.taskId,
       trace.toolCallId,
-      formatBusinessStatus(trace.statusView?.businessStatus, trace.businessSuccess),
+      formatAiBusinessStatus(trace.aiFeedback?.businessStatus),
       trace.display?.title,
       trace.display?.locationLabel,
       trace.pageIdentity?.label,
@@ -734,6 +734,41 @@ function formatJsonDetail(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+function formatMemoryTraceJson(trace: MkeMemoryTraceSummary): string {
+  return formatJsonDetail({
+    traceId: trace.traceId,
+    taskId: trace.taskId,
+    taskIntent: trace.taskIntent,
+    toolName: trace.toolName,
+    toolCallId: trace.toolCallId,
+    sequenceIndex: trace.sequenceIndex,
+    requestAt: trace.requestAt,
+    responseAt: trace.responseAt,
+    durationMs: trace.durationMs,
+    execution: {
+      status: formatToolStatus(trace.statusView?.executionStatus, trace.toolSuccess),
+      toolSuccess: trace.toolSuccess,
+      errorCode: trace.errorCode,
+    },
+    aiEvaluation: trace.aiFeedback ?? null,
+    page: {
+      tabId: trace.tabId,
+      windowId: trace.windowId,
+      siteFamily: trace.siteFamily,
+      pageUrlPattern: trace.pageUrlPattern,
+      pageRole: trace.pageRole,
+      pageState: trace.pageState,
+      pageModelKey: trace.pageModelKey,
+      sourceRoute: trace.sourceRoute,
+      selectedDataSource: trace.selectedDataSource,
+      freshness: trace.freshness,
+    },
+    resultSummary: trace.resultSummary,
+    redactionState: trace.redactionState,
+    createdAt: trace.createdAt,
+  });
+}
+
 function formatObjectWebPageJson(webPage: MkeObjectWebPageView): string {
   return formatJsonDetail({
     id: webPage.id,
@@ -768,26 +803,18 @@ function formatDate(value: string | null | undefined): string {
   return date.toLocaleString();
 }
 
-function formatBusinessStatus(
-  viewValue: TraceBusinessStatus | undefined,
-  legacyValue?: string | null,
-): string {
-  const value = viewValue ?? legacyValue;
-  if (value === 'achieved') return '业务通过';
-  if (value === 'partial') return '部分完成';
-  if (value === 'not_achieved') return '未完成';
-  if (value === 'true') return '业务通过';
-  if (value === 'false') return '未完成';
-  return '待AI回写';
+function formatAiBusinessStatus(value: TraceBusinessStatus | string | null | undefined): string {
+  if (value === 'achieved' || value === 'true') return 'AI通过';
+  if (value === 'partial') return 'AI部分完成';
+  if (value === 'not_achieved' || value === 'false') return 'AI未通过';
+  return '待AI评价';
 }
 
-function formatBusinessStatusTone(
+function formatAiBusinessStatusTone(
   businessValue: TraceBusinessStatus | string | null | undefined,
-  toolSuccess: boolean | null | undefined,
 ): StatusTone {
   if (businessValue === 'achieved' || businessValue === 'true') return 'good';
   if (businessValue === 'not_achieved' || businessValue === 'false') return 'warn';
-  if (toolSuccess === false) return 'warn';
   return 'neutral';
 }
 

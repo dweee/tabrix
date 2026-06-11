@@ -150,12 +150,14 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain('Current tab is not a clickable web page');
     expect(tabSource).not.toContain('Page changed, read to confirm');
     expect(tabSource).not.toContain('isInternalTraceText(value)');
-    expect(tabSource).toContain("if (value === 'achieved') return '业务通过'");
-    expect(tabSource).toContain("if (value === 'partial') return '部分完成'");
-    expect(tabSource).toContain("if (value === 'not_achieved') return '未完成'");
-    expect(tabSource).toContain("if (value === 'true') return '业务通过'");
-    expect(tabSource).toContain("if (value === 'false') return '未完成'");
-    expect(tabSource).toContain("return '待AI回写'");
+    expect(tabSource).toContain("if (value === 'achieved' || value === 'true') return 'AI通过'");
+    expect(tabSource).toContain("if (value === 'partial') return 'AI部分完成'");
+    expect(tabSource).toContain(
+      "if (value === 'not_achieved' || value === 'false') return 'AI未通过'",
+    );
+    expect(tabSource).toContain("return '待AI评价'");
+    expect(tabSource).not.toContain("return '业务通过'");
+    expect(tabSource).not.toContain("return '待AI回写'");
   });
 
   it('makes business feedback primary and keeps tool execution as supporting facts', () => {
@@ -167,8 +169,10 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('v-if="row.createdAtLabel"');
     expect(tabSource).toContain('class="mke-status"');
     expect(tabSource).toContain(
-      'const status = formatBusinessStatus(trace.statusView?.businessStatus, trace.businessSuccess)',
+      'const status = formatAiBusinessStatus(trace.aiFeedback?.businessStatus)',
     );
+    expect(tabSource).not.toContain('formatBusinessStatus(trace.statusView?.businessStatus');
+    expect(tabSource).not.toContain('trace.businessSuccess');
     expect(tabSource).toContain('const feedbackLine = formatAiFeedbackLine(trace)');
     expect(tabSource).not.toContain('feedback?.reasonCode ? `原因');
     expect(tabSource).toContain("metaLine: ''");
@@ -193,7 +197,10 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain("['AI反馈', formatBusinessStatus(trace.businessSuccess)]");
     expect(tabSource).not.toContain("['上下文', formatTraceContext(trace)]");
     expect(tabSource).toContain('function formatToolStatus');
-    expect(tabSource).toContain('function formatBusinessStatusTone');
+    expect(tabSource).toContain('function formatAiBusinessStatusTone');
+    expect(tabSource).not.toContain('function formatBusinessStatusTone');
+    expect(tabSource).toContain('function formatAiBusinessStatus');
+    expect(tabSource).not.toContain('function formatBusinessStatus');
     expect(tabSource).toContain('function formatAiFeedbackLine');
     expect(tabSource).toContain('function formatAiFeedbackScoreLabel');
     expect(tabSource).toContain('function formatTraceLocationFact');
@@ -317,9 +324,7 @@ describe('Sidepanel MKE data tab', () => {
   it('keeps long identifiers in JSON instead of the default human detail fields', () => {
     expect(tabSource).not.toContain("['Task ID / 任务', trace.taskId]");
     expect(tabSource).not.toContain("['Call ID / 调用', trace.toolCallId]");
-    expect(tabSource).toContain(
-      'formatBusinessStatus(trace.statusView?.businessStatus, trace.businessSuccess)',
-    );
+    expect(tabSource).toContain('formatAiBusinessStatus(trace.aiFeedback?.businessStatus)');
     expect(tabSource).toContain('trace.aiFeedback?.summary');
     expect(tabSource).toContain('trace.aiFeedback?.reasonCode');
     expect(tabSource).toContain("'AI评价：待AI评价'");
@@ -339,7 +344,10 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain("replace(/被浏览器接受/g, '已执行')");
     expect(tabSource).toContain('function isPresentString');
     expect(tabSource).not.toContain("['Tool / 工具', trace.toolName]");
-    expect(tabSource).toContain('detailJson: formatJsonDetail(trace)');
+    expect(tabSource).toContain('detailJson: formatMemoryTraceJson(trace)');
+    expect(tabSource).toContain('function formatMemoryTraceJson');
+    expect(tabSource).toContain('aiEvaluation: trace.aiFeedback ?? null');
+    expect(tabSource).not.toContain('detailJson: formatJsonDetail(trace)');
     expect(tabSource).not.toContain('v-for="item in row.meta"');
     expect(tabSource).not.toContain('compactMeta');
     expect(tabSource).not.toContain('mke-meta');
