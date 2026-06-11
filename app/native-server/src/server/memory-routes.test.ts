@@ -177,7 +177,6 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.traces[0]).toMatchObject({
       toolName: 'chrome_click_element',
       toolSuccess: true,
-      businessSuccess: 'achieved',
       tabId: 7,
       redactionState: 'redacted',
       display: {
@@ -186,12 +185,8 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       },
       statusView: {
         executionStatus: 'succeeded',
-        businessStatus: 'achieved',
-        businessStatusSource: 'tabrix_evidence',
-        aiScore: 0.93,
         feedbackRequired: false,
       },
-      aiFeedbackScore: 0.93,
       aiFeedback: {
         sourceKind: 'ai_feedback',
         businessStatus: 'achieved',
@@ -204,18 +199,19 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     const removedSyntheticPayloadKey = ['system', 'Evidence'].join('');
     expect(res.body.data.traces[0]).not.toHaveProperty(removedSyntheticScoreKey);
     expect(res.body.data.traces[0]).not.toHaveProperty(removedSyntheticPayloadKey);
+    expect(res.body.data.traces[0]).not.toHaveProperty('businessSuccess');
+    expect(res.body.data.traces[0]).not.toHaveProperty('aiFeedbackScore');
+    expect(res.body.data.traces[0].statusView).not.toHaveProperty('businessStatus');
+    expect(res.body.data.traces[0].statusView).not.toHaveProperty('businessStatusSource');
+    expect(res.body.data.traces[0].statusView).not.toHaveProperty('aiScore');
     expect(res.body.data.traces[0].pageIdentity.label).toBe('example.test');
     expect(res.body.data.traces[0]).not.toHaveProperty('requestParams');
     expect(res.body.data.traces[0]).not.toHaveProperty('response');
     expect(res.body.data.traces[0]).not.toHaveProperty('postObservation');
     expect(res.body.data.traces[1]).toMatchObject({
       toolName: 'chrome_read_page',
-      businessSuccess: 'unknown',
-      aiFeedbackScore: 0.82,
       statusView: {
-        businessStatus: 'achieved',
-        businessStatusSource: 'ai_feedback',
-        aiScore: 0.82,
+        executionStatus: 'succeeded',
         feedbackRequired: false,
       },
       aiFeedback: {
@@ -230,6 +226,11 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     });
     expect(res.body.data.traces[1]).not.toHaveProperty(removedSyntheticScoreKey);
     expect(res.body.data.traces[1]).not.toHaveProperty(removedSyntheticPayloadKey);
+    expect(res.body.data.traces[1]).not.toHaveProperty('businessSuccess');
+    expect(res.body.data.traces[1]).not.toHaveProperty('aiFeedbackScore');
+    expect(res.body.data.traces[1].statusView).not.toHaveProperty('businessStatus');
+    expect(res.body.data.traces[1].statusView).not.toHaveProperty('businessStatusSource');
+    expect(res.body.data.traces[1].statusView).not.toHaveProperty('aiScore');
     expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('rawInput');
     expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('response');
   });
@@ -265,16 +266,16 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
 
     expect(res.body.data.traces[0]).toMatchObject({
       traceId: trace.traceId,
-      aiFeedbackScore: 0.99,
       aiFeedback: null,
       statusView: {
-        aiScore: null,
         feedbackRequired: true,
       },
     });
+    expect(res.body.data.traces[0]).not.toHaveProperty('aiFeedbackScore');
+    expect(res.body.data.traces[0].statusView).not.toHaveProperty('aiScore');
   });
 
-  test('GET /memory/mke/traces keeps Tabrix business evidence above conflicting AI feedback', async () => {
+  test('GET /memory/mke/traces exposes AI feedback without legacy business status', async () => {
     const traceService = sessionManager.memoryTraces;
     if (!traceService) throw new Error('MKE trace service is not available in tests');
     const requestAt = Date.parse('2026-06-06T11:00:00.000Z');
@@ -318,12 +319,8 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
 
     expect(res.body.data.traces[0]).toMatchObject({
       traceId: trace.traceId,
-      businessSuccess: 'not_achieved',
-      aiFeedbackScore: 0.91,
       statusView: {
-        businessStatus: 'not_achieved',
-        businessStatusSource: 'tabrix_evidence',
-        aiScore: 0.91,
+        executionStatus: 'succeeded',
         feedbackRequired: false,
       },
       aiFeedback: {
@@ -334,6 +331,11 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
         summary: 'AI thought the filter was applied',
       },
     });
+    expect(res.body.data.traces[0]).not.toHaveProperty('businessSuccess');
+    expect(res.body.data.traces[0]).not.toHaveProperty('aiFeedbackScore');
+    expect(res.body.data.traces[0].statusView).not.toHaveProperty('businessStatus');
+    expect(res.body.data.traces[0].statusView).not.toHaveProperty('businessStatusSource');
+    expect(res.body.data.traces[0].statusView).not.toHaveProperty('aiScore');
   });
 
   test('GET /memory/mke/knowledge returns sanitized knowledge summaries', async () => {

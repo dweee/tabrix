@@ -226,7 +226,6 @@ const MKE_AUTO_REFRESH_MS = 5000;
 
 type ActiveTab = MkeDataTabId;
 type StatusTone = 'good' | 'warn' | 'neutral';
-type TraceBusinessStatus = NonNullable<MkeMemoryTraceSummary['statusView']>['businessStatus'];
 type TraceExecutionStatus = NonNullable<MkeMemoryTraceSummary['statusView']>['executionStatus'];
 
 interface RecordFact {
@@ -803,16 +802,14 @@ function formatDate(value: string | null | undefined): string {
   return date.toLocaleString();
 }
 
-function formatAiBusinessStatus(value: TraceBusinessStatus | string | null | undefined): string {
+function formatAiBusinessStatus(value: string | null | undefined): string {
   if (value === 'achieved' || value === 'true') return 'AI通过';
   if (value === 'partial') return 'AI部分完成';
   if (value === 'not_achieved' || value === 'false') return 'AI未通过';
   return '待AI评价';
 }
 
-function formatAiBusinessStatusTone(
-  businessValue: TraceBusinessStatus | string | null | undefined,
-): StatusTone {
+function formatAiBusinessStatusTone(businessValue: string | null | undefined): StatusTone {
   if (businessValue === 'achieved' || businessValue === 'true') return 'good';
   if (businessValue === 'not_achieved' || businessValue === 'false') return 'warn';
   return 'neutral';

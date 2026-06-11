@@ -279,43 +279,15 @@ function classifyObjectPageIdentity(
   };
 }
 
-function normalizeBusinessStatus(
-  value: string | null | undefined,
-): NonNullable<MkeMemoryTraceSummary['statusView']>['businessStatus'] {
-  if (value === 'achieved' || value === 'proven' || value === 'true') return 'achieved';
-  if (value === 'partial') return 'partial';
-  if (
-    value === 'not_achieved' ||
-    value === 'not_proven' ||
-    value === 'failed' ||
-    value === 'false'
-  ) {
-    return 'not_achieved';
-  }
-  return 'unknown';
-}
-
 function buildStatusView(
   trace: MemoryTrace,
   aiFeedback: MkeMemoryTraceSummary['aiFeedback'],
 ): NonNullable<MkeMemoryTraceSummary['statusView']> {
-  const evidenceStatus = normalizeBusinessStatus(trace.businessSuccess);
-  const aiFeedbackStatus = normalizeBusinessStatus(aiFeedback?.businessStatus);
-  const businessStatus = evidenceStatus === 'unknown' ? aiFeedbackStatus : evidenceStatus;
   const executionStatus =
     trace.toolSuccess === true ? 'succeeded' : trace.toolSuccess === false ? 'failed' : 'unknown';
-  const businessStatusSource =
-    evidenceStatus !== 'unknown'
-      ? 'tabrix_evidence'
-      : aiFeedbackStatus !== 'unknown'
-        ? 'ai_feedback'
-        : 'unknown';
   return {
     executionStatus,
-    businessStatus,
-    businessStatusSource,
-    aiScore: aiFeedback?.confidence ?? null,
-    feedbackRequired: !aiFeedback || businessStatus === 'unknown' || businessStatus === 'partial',
+    feedbackRequired: !aiFeedback,
   };
 }
 
@@ -336,8 +308,6 @@ function toTraceSummary(trace: MemoryTrace): MkeMemoryTraceSummary {
     responseAt: trace.responseAt,
     durationMs: trace.durationMs,
     toolSuccess: trace.toolSuccess,
-    businessSuccess: trace.businessSuccess,
-    aiFeedbackScore: trace.aiFeedbackScore,
     aiFeedback,
     resultSummary: trace.resultSummary,
     errorCode: trace.errorCode,

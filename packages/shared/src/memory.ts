@@ -81,13 +81,9 @@ export interface MkeTraceDisplaySummary {
 }
 
 export type MkeTraceExecutionStatus = 'succeeded' | 'failed' | 'unknown';
-export type MkeTraceBusinessStatus = 'achieved' | 'partial' | 'not_achieved' | 'unknown';
 
 export interface MkeTraceStatusViewSummary {
   executionStatus: MkeTraceExecutionStatus;
-  businessStatus: MkeTraceBusinessStatus;
-  businessStatusSource: 'tabrix_evidence' | 'ai_feedback' | 'unknown';
-  aiScore?: number | null;
   feedbackRequired: boolean;
 }
 
@@ -103,8 +99,6 @@ export interface MkeMemoryTraceSummary {
   responseAt: string;
   durationMs?: number | null;
   toolSuccess?: boolean | null;
-  businessSuccess?: string | null;
-  aiFeedbackScore?: number | null;
   aiFeedback?: MkeMemoryAiFeedbackSummary | null;
   resultSummary?: string | null;
   errorCode?: string | null;
