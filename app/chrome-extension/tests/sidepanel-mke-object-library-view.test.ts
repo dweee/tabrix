@@ -99,8 +99,7 @@ describe('MKE Object Library view model', () => {
     expect(activePage).toMatchObject({
       id: 'tab-active',
       title: 'Search results - Example',
-      lifecycleLabel: '当前激活',
-      activityLabel: '当前激活',
+      lifecycleLabel: '前台页',
     });
     expect(activePage.sections.map((section) => section.title)).toEqual([
       '页面对象',
@@ -127,7 +126,6 @@ describe('MKE Object Library view model', () => {
     const closedPage = view.webPages.find((page) => page.id === 'tab-closed');
     expect(closedPage).toMatchObject({
       lifecycleLabel: '已关闭',
-      activityLabel: '最近关闭',
       isClosed: true,
     });
   });
@@ -157,7 +155,7 @@ describe('MKE Object Library view model', () => {
     );
   });
 
-  it('labels only the focused window active tab as currently active', () => {
+  it('labels only the focused window active tab as the foreground page', () => {
     const view = buildMkeObjectLibraryView([
       object({
         browserObjectId: 'window-focused',
@@ -200,9 +198,119 @@ describe('MKE Object Library view model', () => {
     ]);
 
     expect(view.webPages.map((page) => [page.id, page.lifecycleLabel])).toEqual([
-      ['tab-focused', '当前激活'],
-      ['tab-background-window-active', '窗口内激活'],
+      ['tab-focused', '前台页'],
+      ['tab-background-window-active', '已打开'],
     ]);
-    expect(view.webPages.filter((page) => page.lifecycleLabel === '当前激活')).toHaveLength(1);
+    expect(view.webPages.filter((page) => page.lifecycleLabel === '前台页')).toHaveLength(1);
+  });
+
+  it('keeps the webpage status vocabulary to five user-facing states', () => {
+    const view = buildMkeObjectLibraryView([
+      object({
+        browserObjectId: 'window-focused',
+        objectType: 'window',
+        siteFamily: 'browser',
+        currentRoute: 'browser',
+        rootRoute: 'browser',
+        pageModelKey: 'browser-window',
+        objectFingerprint: 'window:10',
+        isActive: true,
+        facts: { activeTabId: 31, focused: true },
+      }),
+      object({
+        browserObjectId: 'tab-foreground',
+        objectType: 'tab',
+        objectFingerprint: 'tab:10:31',
+        isActive: true,
+        canTabrixOperate: true,
+        tabStatus: 'complete',
+        display: { title: 'Foreground', locationLabel: 'foreground.example' },
+      }),
+      object({
+        browserObjectId: 'tab-open',
+        objectType: 'tab',
+        objectFingerprint: 'tab:10:32',
+        isActive: false,
+        canTabrixOperate: true,
+        tabStatus: 'complete',
+        updatedAt: '2026-06-10T09:59:00.000Z',
+        display: { title: 'Open', locationLabel: 'open.example' },
+      }),
+      object({
+        browserObjectId: 'tab-loading',
+        objectType: 'tab',
+        objectFingerprint: 'tab:10:33',
+        isActive: false,
+        canTabrixOperate: true,
+        tabStatus: 'loading',
+        updatedAt: '2026-06-10T09:58:00.000Z',
+        display: { title: 'Loading', locationLabel: 'loading.example' },
+      }),
+      object({
+        browserObjectId: 'tab-limited',
+        objectType: 'tab',
+        objectFingerprint: 'tab:10:34',
+        isActive: false,
+        canTabrixOperate: false,
+        tabStatus: 'complete',
+        updatedAt: '2026-06-10T09:57:00.000Z',
+        display: { title: 'Limited', locationLabel: 'chrome://newtab/' },
+      }),
+      object({
+        browserObjectId: 'tab-closed',
+        objectType: 'tab',
+        objectFingerprint: 'tab:10:35',
+        lifecycleState: 'closed',
+        canTabrixOperate: false,
+        updatedAt: '2026-06-10T09:56:00.000Z',
+        display: { title: 'Closed', locationLabel: 'closed.example' },
+      }),
+    ]);
+
+    expect(view.webPages.map((page) => [page.id, page.lifecycleLabel])).toEqual([
+      ['tab-foreground', '前台页'],
+      ['tab-open', '已打开'],
+      ['tab-loading', '加载中'],
+      ['tab-limited', '受限页'],
+      ['tab-closed', '已关闭'],
+    ]);
+    expect(new Set(view.webPages.map((page) => page.lifecycleLabel))).toEqual(
+      new Set(['前台页', '已打开', '加载中', '受限页', '已关闭']),
+    );
+  });
+
+  it('shows a foreground tab as limited when Tabrix cannot operate it', () => {
+    const view = buildMkeObjectLibraryView([
+      object({
+        browserObjectId: 'window-focused',
+        objectType: 'window',
+        siteFamily: 'browser',
+        currentRoute: 'browser',
+        rootRoute: 'browser',
+        pageModelKey: 'browser-window',
+        objectFingerprint: 'window:10',
+        isActive: true,
+        facts: { activeTabId: 41, focused: true },
+      }),
+      object({
+        browserObjectId: 'tab-foreground-limited',
+        objectType: 'tab',
+        objectFingerprint: 'tab:10:41',
+        isActive: true,
+        canTabrixOperate: false,
+        operabilityReason: 'browser_internal_page',
+        tabStatus: 'complete',
+        display: { title: 'Extensions', locationLabel: 'chrome://extensions/' },
+      }),
+    ]);
+
+    expect(view.webPages[0]).toMatchObject({
+      id: 'tab-foreground-limited',
+      lifecycleLabel: '受限页',
+      lifecycleTone: 'warn',
+    });
+    expect(view.webPages[0].sections[3].items).toContainEqual(
+      expect.objectContaining({ label: '操作能力', value: '受限', tone: 'warn' }),
+    );
   });
 });

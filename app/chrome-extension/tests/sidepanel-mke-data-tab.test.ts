@@ -210,6 +210,8 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('createdAtLabel: formatDate(webPage.updatedAt)');
     expect(tabSource).toContain('facts: []');
     expect(tabSource).toContain('detailJson: formatObjectWebPageJson(webPage)');
+    expect(tabSource).not.toContain('webPage.activityLabel');
+    expect(tabSource).not.toContain('activityLabel: webPage.activityLabel');
     expect(tabSource).not.toContain('function objectToRecord(object: MkeBrowserObjectSummary)');
     expect(tabSource).not.toContain('function formatObjectCardTitle');
     expect(tabSource).not.toContain('function formatObjectFacts');

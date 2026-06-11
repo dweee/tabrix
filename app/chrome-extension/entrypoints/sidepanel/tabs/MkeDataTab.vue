@@ -85,7 +85,7 @@
           </div>
           <div class="mke-object-summary-card">
             <i-lucide-clock-3 aria-hidden="true" />
-            <span>最近关闭</span>
+            <span>已关闭</span>
             <strong>{{ objectLibraryView.summary.closedWebPages }}</strong>
           </div>
           <div class="mke-object-summary-card">
@@ -623,7 +623,7 @@ function objectWebPageToRecord(webPage: MkeObjectWebPageView): ViewRecord {
     statusTone: webPage.lifecycleTone,
     facts: [],
     detailJson: formatObjectWebPageJson(webPage),
-    searchTokens: [webPage.activityLabel, webPage.searchText],
+    searchTokens: [webPage.searchText],
   };
   return withSearchText(row);
 }
@@ -717,7 +717,6 @@ function formatObjectWebPageJson(webPage: MkeObjectWebPageView): string {
     title: webPage.title,
     location: webPage.location,
     lifecycleLabel: webPage.lifecycleLabel,
-    activityLabel: webPage.activityLabel,
     metrics: webPage.metrics,
     sections: webPage.sections,
     objects: webPage.objects,

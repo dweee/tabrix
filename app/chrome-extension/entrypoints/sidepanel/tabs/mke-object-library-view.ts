@@ -27,8 +27,6 @@ export interface MkeObjectWebPageView {
   location: string;
   lifecycleLabel: string;
   lifecycleTone: MkeObjectViewTone;
-  activityLabel: string;
-  isActive: boolean;
   isClosed: boolean;
   updatedAt: string;
   metrics: MkeObjectViewMetric[];
@@ -104,7 +102,6 @@ function sortWebPageRoots(
     const aIsCurrent = isFocusedWindowActiveTab(a, activeTabContext);
     const bIsCurrent = isFocusedWindowActiveTab(b, activeTabContext);
     if (aIsCurrent !== bIsCurrent) return aIsCurrent ? -1 : 1;
-    if (Boolean(a.isActive) !== Boolean(b.isActive)) return a.isActive ? -1 : 1;
     if (isClosedObject(a) !== isClosedObject(b)) return isClosedObject(a) ? 1 : -1;
     return readTime(b.updatedAt) - readTime(a.updatedAt);
   });
@@ -123,7 +120,6 @@ function buildWebPageView(
     DATA_API_OBJECT_TYPES.has(object.objectType),
   );
   const lifecycle = formatLifecycle(root, activeTabContext);
-  const activityLabel = formatActivityLabel(root, activeTabContext);
   const title = formatWebPageTitle(root);
   const location = formatWebPageLocation(root);
   const metrics = compactMetrics([
@@ -142,7 +138,6 @@ function buildWebPageView(
     title,
     location,
     lifecycle.label,
-    activityLabel,
     root.siteFamily,
     root.pageRole,
     root.pageModelKey,
@@ -171,8 +166,6 @@ function buildWebPageView(
     location,
     lifecycleLabel: lifecycle.label,
     lifecycleTone: lifecycle.tone,
-    activityLabel,
-    isActive: isFocusedWindowActiveTab(root, activeTabContext),
     isClosed: isClosedObject(root),
     updatedAt: root.updatedAt,
     metrics,
@@ -242,16 +235,6 @@ function isFocusedWindowActiveTab(
   if (object.objectType !== 'tab' || object.isActive !== true) return false;
   const tabId = extractTabId(object);
   return tabId !== null && activeTabContext.focusedWindowActiveTabIds.has(tabId);
-}
-
-function formatActivityLabel(
-  object: MkeBrowserObjectSummary,
-  activeTabContext: ActiveTabContext,
-): string {
-  if (isClosedObject(object)) return '最近关闭';
-  if (isFocusedWindowActiveTab(object, activeTabContext)) return '当前激活';
-  if (object.objectType === 'tab' && object.isActive === true) return '窗口内激活';
-  return '后台打开';
 }
 
 function buildPageObjectsSection(
@@ -330,7 +313,7 @@ function buildLifecycleSection(
       sourceFreshness ? { label: '证据新鲜度', value: sourceFreshness } : null,
       tabStatus ? { label: '浏览器加载', value: tabStatus } : null,
       operability
-        ? { label: '操作能力', value: operability, tone: root.canTabrixOperate ? 'good' : 'warn' }
+        ? { label: '操作能力', value: operability, tone: formatOperabilityTone(root) }
         : null,
     ].filter((item): item is MkeObjectViewItem => item !== null),
   };
@@ -395,15 +378,12 @@ function formatLifecycle(
 } {
   if (isClosedObject(object)) return { label: '已关闭', tone: 'warn' };
   if (object.tabStatus === 'loading') return { label: '加载中', tone: 'neutral' };
+  if (object.canTabrixOperate === false) return { label: '受限页', tone: 'warn' };
   if (isFocusedWindowActiveTab(object, activeTabContext)) {
-    return { label: '当前激活', tone: 'good' };
-  }
-  if (object.objectType === 'tab' && object.isActive === true) {
-    return { label: '窗口内激活', tone: 'neutral' };
+    return { label: '前台页', tone: 'good' };
   }
   if (object.canTabrixOperate === true) return { label: '已打开', tone: 'good' };
-  if (object.canTabrixOperate === false) return { label: '不可操作', tone: 'warn' };
-  return { label: '观察中', tone: 'neutral' };
+  return { label: '已打开', tone: 'good' };
 }
 
 function formatPageObjectKind(object: MkeBrowserObjectSummary): string {
@@ -476,8 +456,14 @@ function formatTabStatus(value: string | null | undefined): string | null {
 
 function formatOperability(object: MkeBrowserObjectSummary): string | null {
   if (object.canTabrixOperate === true) return '可操作';
-  if (object.canTabrixOperate === false) return '不可操作';
-  return null;
+  if (object.canTabrixOperate === false) return '受限';
+  return '未知';
+}
+
+function formatOperabilityTone(object: MkeBrowserObjectSummary): MkeObjectViewTone {
+  if (object.canTabrixOperate === true) return 'good';
+  if (object.canTabrixOperate === false) return 'warn';
+  return 'neutral';
 }
 
 function readObjectFacts(object: MkeBrowserObjectSummary): Record<string, unknown> {
