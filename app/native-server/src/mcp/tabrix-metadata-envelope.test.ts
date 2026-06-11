@@ -183,9 +183,10 @@ describe('tabrix metadata envelope', () => {
         },
         toolSuccess: true,
         businessFeedbackRequired: true,
-        businessFeedbackGuideVersion: 'tabrix-ai-business-feedback-v1',
       },
     });
+    expect(parseFirstText(result)._tabrix).not.toHaveProperty('businessFeedbackGuide');
+    expect(parseFirstText(result)._tabrix).not.toHaveProperty('businessFeedbackGuideVersion');
     expect(parseFirstText(result)._tabrix).not.toHaveProperty('businessStatus');
   });
 

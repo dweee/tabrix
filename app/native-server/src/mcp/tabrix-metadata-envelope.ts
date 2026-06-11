@@ -4,9 +4,6 @@ import { buildMemoryTraceBindingHash } from '../memory/feedback-binding';
 
 const TABRIX_TOOL_METADATA_KEY = '_tabrix';
 const AI_BUSINESS_STATUS_VALUES = new Set(['achieved', 'partial', 'not_achieved', 'unknown']);
-const AI_BUSINESS_FEEDBACK_GUIDE_VERSION = 'tabrix-ai-business-feedback-v1';
-const AI_BUSINESS_FEEDBACK_GUIDE =
-  'Rate the previous Tabrix step with memory_record_ai_feedback: businessStatus, confidence 0..1, and a short summary.';
 
 interface TabrixPreviousFeedback {
   traceId: string;
@@ -153,8 +150,6 @@ export function attachTabrixMemoryTraceEnvelope(
       feedbackTarget,
       toolSuccess: trace.toolSuccess,
       businessFeedbackRequired: true,
-      businessFeedbackGuideVersion: AI_BUSINESS_FEEDBACK_GUIDE_VERSION,
-      businessFeedbackGuide: AI_BUSINESS_FEEDBACK_GUIDE,
     },
   };
 

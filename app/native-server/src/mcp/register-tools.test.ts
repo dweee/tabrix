@@ -114,10 +114,13 @@ describe('handleToolCall execution wrapper', () => {
       toolName: 'chrome_read_page',
       toolSuccess: true,
       businessFeedbackRequired: true,
-      businessFeedbackGuideVersion: 'tabrix-ai-business-feedback-v1',
     });
-    expect(payload._tabrix.businessFeedbackGuide).toContain('memory_record_ai_feedback');
-    expect(payload._tabrix.businessFeedbackGuide).toContain('confidence 0..1');
+    expect(payload._tabrix.feedbackTarget).toMatchObject({
+      traceId: expect.any(String),
+      feedbackToken: expect.any(String),
+    });
+    expect(payload._tabrix.businessFeedbackGuide).toBeUndefined();
+    expect(payload._tabrix.businessFeedbackGuideVersion).toBeUndefined();
     expect(payload._tabrix.businessFeedbackScoreGuide).toBeUndefined();
     expect(payload._tabrix.traceId).toEqual(expect.any(String));
     expect((bridgeSpy.mock.calls[1][0] as any).args).toEqual({ tabId: 1 });
