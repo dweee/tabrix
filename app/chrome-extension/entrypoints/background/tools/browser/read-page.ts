@@ -1768,6 +1768,7 @@ async function buildModeOutput(params: {
   return buildReadPageModeResult({
     sharedPayload,
     mode: params.mode,
+    requestedLayer: params.requestedLayer,
     primaryRegionConfidence: params.primaryRegionConfidence,
     footerOnly: params.footerOnly,
     anchorTexts: params.anchorTexts,
