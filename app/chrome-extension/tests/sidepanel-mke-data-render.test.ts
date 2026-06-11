@@ -23,15 +23,20 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('mke-webpage-list');
     expect(source).toContain('mke-webpage-row');
     expect(source).toContain('mke-webpage-detail');
-    expect(source).toContain('Tabrix · 对象库');
+    expect(source).toContain('<div class="mke-tabs"');
+    expect(source).not.toContain('<template v-if="activeTab === \'object\'">');
+    expect(source).not.toContain('Tabrix · 对象库');
     expect(source).toContain('mke-object-summary-bar');
-    expect(source).toContain('mke-object-detail-tabs');
+    expect(source).toContain('mke-toolbar--object');
+    expect(source).toContain('mke-object-storage-toggle');
+    expect(source).not.toContain('mke-object-detail-tabs');
     expect(source).toContain('mke-object-count-grid');
     expect(source).toContain('mke-object-footer-actions');
     expect(source).toContain("scope: 'object-graph'");
     expect(source).toContain('搜索当前列表');
     expect(source).toContain('mke-search-icon');
     expect(source).toContain('搜索主题、对象、方法、网址、状态');
+    expect(source).toContain('搜索网页、对象、功能、网址、状态');
     expect(source).toContain("label: '对象库'");
     expect(source).toContain('fetchMkeBrowserObjects');
     expect(source).toContain('fetchMkeObjectStoragePreferences');
@@ -93,6 +98,7 @@ describe('MkeDataTab render smoke', () => {
     expect(appSource).toContain('box-sizing: border-box');
     expect(appSource).toContain(".sidepanel-root[data-agent-theme='dark-console']");
     expect(source).toContain('grid-template-columns: minmax(180px, 1fr) auto');
+    expect(source).toContain('grid-template-columns: minmax(160px, 1fr) 34px auto');
     expect(appSource).toContain('max-width: 100vw');
     expect(source).toContain('max-width: min(860px, 100vw)');
     expect(source).toContain('margin: 0 auto');
@@ -173,6 +179,7 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('width: 100%;');
     expect(source).toContain('grid-template-columns: auto minmax(118px, 1fr) auto;');
     expect(source).toContain('grid-template-columns: auto minmax(108px, 1fr) auto;');
+    expect(source).toContain('grid-template-columns: 40px minmax(0, 1fr);');
     expect(source).toContain(
       'grid-template-columns: 34px minmax(110px, 1fr) minmax(92px, auto) auto 18px;',
     );

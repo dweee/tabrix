@@ -58,7 +58,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain('@click="activeTab = tab.id"');
   });
 
-  it('keeps the user task focused on three compact data lists', () => {
+  it('keeps all four libraries visible while object details stay compact', () => {
     expect(tabSource).toContain('mke-shell');
     expect(tabSource).toContain('mke-controls');
     expect(tabSource).not.toContain('mke-sticky-tools');
@@ -67,13 +67,16 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain('mkep-tab__subtitle');
     expect(tabSource).toContain('mke-data-body');
     expect(tabSource).toContain('mke-object-workspace');
-    expect(tabSource).toContain('Tabrix · 对象库');
+    expect(tabSource).toContain('<div class="mke-tabs"');
+    expect(tabSource).not.toContain('<template v-if="activeTab === \'object\'">');
+    expect(tabSource).not.toContain('Tabrix · 对象库');
     expect(tabSource).toContain('mke-object-summary-bar');
-    expect(tabSource).toContain('mke-object-toolbar');
+    expect(tabSource).toContain('mke-toolbar--object');
+    expect(tabSource).toContain('mke-object-storage-toggle');
     expect(tabSource).toContain('filteredObjectWebPages');
     expect(tabSource).toContain('selectedObjectWebPage');
     expect(tabSource).toContain('mke-webpage-row');
-    expect(tabSource).toContain('mke-object-detail-tabs');
+    expect(tabSource).not.toContain('mke-object-detail-tabs');
     expect(tabSource).toContain('mke-object-count-grid');
     expect(tabSource).toContain('mke-object-footer-actions');
     expect(objectViewSource).toContain('页面对象');
@@ -84,6 +87,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('搜索当前列表');
     expect(tabSource).toContain('mke-search-icon');
     expect(tabSource).toContain('搜索主题、对象、方法、网址、状态');
+    expect(tabSource).toContain('搜索网页、对象、功能、网址、状态');
     expect(tabSource).toContain('mke-refresh-button');
     expect(tabSource).toContain('个人浏览状态存储已开启');
     expect(tabSource).toContain('清除对象库');
@@ -124,6 +128,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('加载更多 (${activeRows.value.length}/${activeTotal.value})');
     expect(tabSource).toContain('grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));');
     expect(tabSource).toContain('grid-template-columns: minmax(180px, 1fr) auto;');
+    expect(tabSource).toContain('grid-template-columns: minmax(160px, 1fr) 34px auto;');
     expect(tabSource).toContain('grid-template-columns: auto minmax(118px, 1fr) auto;');
     expect(tabSource).toContain(
       'grid-template-columns: 34px minmax(110px, 1fr) minmax(92px, auto) auto 18px;',

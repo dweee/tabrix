@@ -2,164 +2,98 @@
   <section class="mkep-tab mke-data-tab" :class="`mke-data-tab--${agentTheme}`">
     <div class="mke-shell">
       <div class="mke-controls" role="status" aria-live="polite">
-        <template v-if="activeTab === 'object'">
-          <header class="mke-object-header">
-            <div class="mke-object-title">
-              <span class="mke-object-logo" aria-hidden="true">
-                <i-lucide-database />
-              </span>
-              <div>
-                <h2>Tabrix · 对象库</h2>
-                <p>浏览器标签页、页面对象、可操作目标和生命周期现场</p>
-              </div>
-            </div>
-            <div class="mke-object-header__actions">
-              <button
-                type="button"
-                class="mke-icon-button"
-                :disabled="loading"
-                title="刷新对象库"
-                @click="refreshAll()"
-              >
-                <i-lucide-refresh-cw aria-hidden="true" />
-                <span class="mke-visually-hidden">刷新对象库</span>
-              </button>
-              <button
-                type="button"
-                class="mke-icon-button"
-                :class="{ 'mke-icon-button--active': personalBrowserStateStorageEnabled }"
-                :aria-pressed="personalBrowserStateStorageEnabled"
-                :disabled="preferenceLoading"
-                :title="
-                  personalBrowserStateStorageEnabled
-                    ? '个人浏览状态存储已开启'
-                    : '个人浏览状态存储已关闭'
-                "
-                @click="togglePersonalBrowserStateStorage"
-              >
-                <i-lucide-shield-check aria-hidden="true" />
-                <span class="mke-visually-hidden">切换个人浏览状态存储</span>
-              </button>
-            </div>
-          </header>
+        <div class="mke-tabs" role="tablist" aria-label="MKE data tables">
+          <button
+            v-for="tab in tabs"
+            :key="tab.id"
+            type="button"
+            class="mke-tab-button"
+            :class="{ 'mke-tab-button--active': activeTab === tab.id }"
+            role="tab"
+            :aria-selected="activeTab === tab.id"
+            @click="setActiveTab(tab.id)"
+          >
+            <span>{{ tab.label }}</span>
+            <strong>{{ tab.total }}</strong>
+          </button>
+        </div>
 
-          <div class="mke-object-summary-bar" role="status" aria-live="polite">
-            <div class="mke-object-summary-card mke-object-summary-card--live">
-              <span class="mke-object-summary-card__dot" aria-hidden="true"></span>
-              <strong>{{ objectLibraryView.summary.liveLabel }}</strong>
-            </div>
-            <div class="mke-object-summary-card">
-              <i-lucide-panel-top aria-hidden="true" />
-              <span>已打开</span>
-              <strong>{{ objectLibraryView.summary.openWebPages }}</strong>
-            </div>
-            <div class="mke-object-summary-card">
-              <i-lucide-clock-3 aria-hidden="true" />
-              <span>最近关闭</span>
-              <strong>{{ objectLibraryView.summary.closedWebPages }}</strong>
-            </div>
-            <div class="mke-object-summary-card">
-              <i-lucide-mouse-pointer-click aria-hidden="true" />
-              <span>可操作</span>
-              <strong>{{ objectLibraryView.summary.actions }}</strong>
-            </div>
-          </div>
-
-          <div class="mke-object-toolbar">
-            <div class="mke-object-toolbar__title">
-              <h3>当前网页</h3>
-              <span
-                :title="
-                  personalBrowserStateStorageEnabled
-                    ? '已开启，保存完整当前路由'
-                    : '已关闭，仅保存最小页面身份'
-                "
-              >
-                {{
-                  personalBrowserStateStorageEnabled ? '个人状态存储已开启' : '个人状态存储已关闭'
-                }}
-              </span>
-            </div>
-            <label class="mke-search mke-object-search">
-              <span class="mke-visually-hidden">搜索当前网页对象</span>
-              <svg
-                class="mke-search-icon"
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <circle cx="11" cy="11" r="8" />
-                <path d="m21 21-4.3-4.3" />
-              </svg>
-              <input
-                v-model.trim="searchQuery"
-                type="search"
-                aria-label="搜索对象库网页"
-                placeholder="搜索网页、对象、功能、网址、状态"
-              />
-            </label>
-            <button type="button" class="mke-filter-button" title="当前按最近活跃排序">
-              <i-lucide-arrow-down-wide-narrow aria-hidden="true" />
-              <span>最近活跃</span>
-            </button>
-          </div>
-        </template>
-
-        <template v-else>
-          <div class="mke-tabs" role="tablist" aria-label="MKE data tables">
-            <button
-              v-for="tab in tabs"
-              :key="tab.id"
-              type="button"
-              class="mke-tab-button"
-              :class="{ 'mke-tab-button--active': activeTab === tab.id }"
-              role="tab"
-              :aria-selected="activeTab === tab.id"
-              @click="setActiveTab(tab.id)"
+        <div class="mke-toolbar" :class="{ 'mke-toolbar--object': activeTab === 'object' }">
+          <label class="mke-search">
+            <span class="mke-visually-hidden">搜索当前列表</span>
+            <svg
+              class="mke-search-icon"
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
             >
-              <span>{{ tab.label }}</span>
-              <strong>{{ tab.total }}</strong>
-            </button>
-          </div>
+              <circle cx="11" cy="11" r="8" />
+              <path d="m21 21-4.3-4.3" />
+            </svg>
+            <input
+              v-model.trim="searchQuery"
+              type="search"
+              :aria-label="activeTab === 'object' ? '搜索对象库网页' : 'Search loaded MKE rows'"
+              :placeholder="
+                activeTab === 'object'
+                  ? '搜索网页、对象、功能、网址、状态'
+                  : '搜索主题、对象、方法、网址、状态'
+              "
+            />
+          </label>
+          <button
+            v-if="activeTab === 'object'"
+            type="button"
+            class="mke-icon-button mke-object-storage-toggle"
+            :class="{ 'mke-icon-button--active': personalBrowserStateStorageEnabled }"
+            :aria-pressed="personalBrowserStateStorageEnabled"
+            :disabled="preferenceLoading"
+            :title="
+              personalBrowserStateStorageEnabled
+                ? '个人浏览状态存储已开启'
+                : '个人浏览状态存储已关闭'
+            "
+            @click="togglePersonalBrowserStateStorage"
+          >
+            <i-lucide-shield-check aria-hidden="true" />
+            <span class="mke-visually-hidden">切换个人浏览状态存储</span>
+          </button>
+          <button
+            type="button"
+            class="mke-button mke-refresh-button"
+            :disabled="loading"
+            title="刷新当前数据"
+            @click="refreshAll()"
+          >
+            {{ loading ? '刷新中' : '刷新' }}
+          </button>
+        </div>
 
-          <div class="mke-toolbar">
-            <label class="mke-search">
-              <span class="mke-visually-hidden">搜索当前列表</span>
-              <svg
-                class="mke-search-icon"
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <circle cx="11" cy="11" r="8" />
-                <path d="m21 21-4.3-4.3" />
-              </svg>
-              <input
-                v-model.trim="searchQuery"
-                type="search"
-                aria-label="Search loaded MKE rows"
-                placeholder="搜索主题、对象、方法、网址、状态"
-              />
-            </label>
-            <button
-              type="button"
-              class="mke-button mke-refresh-button"
-              :disabled="loading"
-              title="刷新当前数据"
-              @click="refreshAll()"
-            >
-              {{ loading ? '刷新中' : '刷新' }}
-            </button>
+        <div v-if="activeTab === 'object'" class="mke-object-summary-bar" role="status">
+          <div class="mke-object-summary-card mke-object-summary-card--live">
+            <span class="mke-object-summary-card__dot" aria-hidden="true"></span>
+            <strong>{{ objectLibraryView.summary.liveLabel }}</strong>
           </div>
-        </template>
+          <div class="mke-object-summary-card">
+            <i-lucide-panel-top aria-hidden="true" />
+            <span>已打开</span>
+            <strong>{{ objectLibraryView.summary.openWebPages }}</strong>
+          </div>
+          <div class="mke-object-summary-card">
+            <i-lucide-clock-3 aria-hidden="true" />
+            <span>最近关闭</span>
+            <strong>{{ objectLibraryView.summary.closedWebPages }}</strong>
+          </div>
+          <div class="mke-object-summary-card">
+            <i-lucide-mouse-pointer-click aria-hidden="true" />
+            <span>可操作</span>
+            <strong>{{ objectLibraryView.summary.actions }}</strong>
+          </div>
+        </div>
 
         <p v-if="searchQuery" class="mke-filter-note">搜索仅覆盖已加载记录，列表按最新时间倒序。</p>
       </div>
@@ -206,7 +140,7 @@
                   <span :title="webPage.location">{{ webPage.location }}</span>
                 </span>
                 <span class="mke-webpage-row__metrics" aria-label="网页对象统计">
-                  <small v-for="metric in webPage.metrics" :key="metric.label">
+                  <small v-for="metric in objectRowMetrics(webPage)" :key="metric.label">
                     {{ metric.label }} {{ metric.value }}
                   </small>
                 </span>
@@ -231,35 +165,7 @@
                 <h3 :title="selectedObjectWebPage.title">{{ selectedObjectWebPage.title }}</h3>
                 <p :title="selectedObjectWebPage.location">{{ selectedObjectWebPage.location }}</p>
               </div>
-              <button
-                type="button"
-                class="mke-icon-button mke-webpage-detail__close"
-                title="回到 MKE 总览"
-                @click="setActiveTab('memory')"
-              >
-                <i-lucide-x aria-hidden="true" />
-                <span class="mke-visually-hidden">回到 MKE 总览</span>
-              </button>
             </header>
-
-            <nav class="mke-object-detail-tabs" aria-label="对象库详情分组">
-              <button
-                v-for="section in selectedObjectWebPage.sections"
-                :key="section.id"
-                type="button"
-                :class="{ 'mke-object-detail-tab--active': section.id === 'pageObjects' }"
-              >
-                <i-lucide-layout-grid v-if="section.id === 'pageObjects'" aria-hidden="true" />
-                <i-lucide-mouse-pointer-click
-                  v-else-if="section.id === 'actions'"
-                  aria-hidden="true"
-                />
-                <i-lucide-database v-else-if="section.id === 'dataApi'" aria-hidden="true" />
-                <i-lucide-history v-else aria-hidden="true" />
-                <span>{{ section.title }}</span>
-                <strong>{{ section.badge }}</strong>
-              </button>
-            </nav>
 
             <section class="mke-object-count-grid" aria-label="页面对象">
               <div
@@ -362,14 +268,6 @@
               >
                 <i-lucide-trash-2 aria-hidden="true" />
                 清除对象库
-              </button>
-              <button
-                type="button"
-                class="mke-object-footer-button mke-object-footer-button--primary"
-                @click="setActiveTab('memory')"
-              >
-                <i-lucide-database aria-hidden="true" />
-                打开 MKE
               </button>
             </footer>
 
@@ -686,6 +584,10 @@ function objectSectionPreview(
   limit: number,
 ): MkeObjectViewSection['items'] {
   return objectSection(webPage, sectionId)?.items.slice(0, limit) ?? [];
+}
+
+function objectRowMetrics(webPage: MkeObjectWebPageView): MkeObjectWebPageView['metrics'] {
+  return webPage.metrics.filter((metric) => metric.label !== '数据/API').slice(0, 2);
 }
 
 function syncMkeDataTabUrl(tab: ActiveTab): void {
@@ -1668,6 +1570,10 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   grid-template-columns: minmax(180px, 1fr) auto;
 }
 
+.mke-toolbar--object {
+  grid-template-columns: minmax(160px, 1fr) 34px auto;
+}
+
 .mke-search {
   display: flex;
   flex-direction: column;
@@ -1723,66 +1629,10 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   margin: -2px 0 0;
 }
 
-.mke-object-header {
-  align-items: center;
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-  min-width: 0;
-  padding: 2px 0 0;
-}
-
-.mke-object-title {
-  align-items: center;
-  display: flex;
-  gap: 10px;
-  min-width: 0;
-}
-
-.mke-object-logo {
-  align-items: center;
-  background: #f7d7ca;
-  border-radius: 8px;
-  color: #c65d3d;
-  display: inline-flex;
-  flex: 0 0 auto;
-  height: 32px;
-  justify-content: center;
-  width: 32px;
-}
-
-.mke-object-logo svg,
 .mke-icon-button svg,
-.mke-filter-button svg,
 .mke-object-footer-button svg {
   height: 16px;
   width: 16px;
-}
-
-.mke-object-title h2 {
-  color: var(--mke-text);
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1.15;
-  margin: 0;
-}
-
-.mke-object-title p {
-  color: var(--mke-muted);
-  font-size: 11px;
-  line-height: 1.35;
-  margin: 3px 0 0;
-  max-width: 260px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mke-object-header__actions {
-  align-items: center;
-  display: flex;
-  flex: 0 0 auto;
-  gap: 8px;
 }
 
 .mke-icon-button {
@@ -1869,53 +1719,6 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   flex: 0 0 auto;
   height: 8px;
   width: 8px;
-}
-
-.mke-object-toolbar {
-  align-items: center;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(96px, auto) minmax(160px, 1fr) auto;
-  min-width: 0;
-}
-
-.mke-object-toolbar__title {
-  min-width: 0;
-}
-
-.mke-object-toolbar__title h3 {
-  color: var(--mke-text);
-  font-size: 14px;
-  line-height: 1.2;
-  margin: 0;
-}
-
-.mke-object-toolbar__title span {
-  color: var(--mke-muted);
-  display: block;
-  font-size: 10px;
-  line-height: 1.25;
-  margin-top: 3px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mke-filter-button {
-  align-items: center;
-  background: var(--mke-surface);
-  border: 1px solid var(--mke-border);
-  border-radius: 8px;
-  color: var(--mke-soft);
-  cursor: default;
-  display: inline-flex;
-  flex: 0 0 auto;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 650;
-  height: 34px;
-  padding: 0 10px;
-  white-space: nowrap;
 }
 
 .mke-tabs {
@@ -2142,7 +1945,7 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   border-bottom: 1px solid var(--mke-border);
   display: grid;
   gap: 10px;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
+  grid-template-columns: 40px minmax(0, 1fr);
   min-width: 0;
   padding-bottom: 11px;
 }
@@ -2191,57 +1994,6 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   line-height: 1.3;
   margin: 4px 0 0;
   overflow-wrap: anywhere;
-}
-
-.mke-webpage-detail__close {
-  color: var(--mke-muted);
-}
-
-.mke-object-detail-tabs {
-  border-bottom: 1px solid var(--mke-border);
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin: 0 -12px;
-}
-
-.mke-object-detail-tabs button {
-  align-items: center;
-  background: var(--mke-surface-2);
-  border: 0;
-  border-bottom: 2px solid transparent;
-  color: var(--mke-soft);
-  cursor: default;
-  display: flex;
-  gap: 6px;
-  justify-content: center;
-  min-width: 0;
-  padding: 10px 6px 9px;
-}
-
-.mke-object-detail-tabs button + button {
-  border-left: 1px solid var(--mke-border);
-}
-
-.mke-object-detail-tabs svg {
-  height: 15px;
-  width: 15px;
-}
-
-.mke-object-detail-tabs span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mke-object-detail-tabs strong {
-  color: var(--mke-muted);
-  font-size: 10px;
-  font-weight: 650;
-}
-
-.mke-object-detail-tab--active {
-  border-bottom-color: var(--mke-accent) !important;
-  color: var(--mke-accent) !important;
 }
 
 .mke-object-count-grid {
@@ -2465,7 +2217,7 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 .mke-object-footer-actions {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-top: 12px;
 }
 
@@ -2483,12 +2235,6 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   min-width: 0;
   padding: 0 10px;
   white-space: nowrap;
-}
-
-.mke-object-footer-button--primary {
-  background: #2563eb;
-  border-color: #2563eb;
-  color: #ffffff;
 }
 
 .mke-object-footer-button:disabled {
@@ -2809,7 +2555,6 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 .mke-tab-button:focus-visible,
 .mke-webpage-row:focus-visible,
 .mke-icon-button:focus-visible,
-.mke-filter-button:focus-visible,
 .mke-object-footer-button:focus-visible,
 .mke-search input:focus-visible,
 .mke-detail-button:focus-visible,
@@ -2862,16 +2607,7 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 }
 
 @media (max-width: 390px) {
-  .mke-object-header {
-    align-items: flex-start;
-  }
-
-  .mke-object-title p {
-    max-width: min(260px, calc(100vw - 124px));
-  }
-
   .mke-object-summary-bar,
-  .mke-object-toolbar,
   .mke-object-count-grid,
   .mke-object-footer-actions {
     grid-template-columns: minmax(0, 1fr);
@@ -2882,12 +2618,8 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
     border-top: 1px solid var(--mke-border);
   }
 
-  .mke-object-toolbar {
-    align-items: stretch;
-  }
-
-  .mke-filter-button {
-    justify-content: center;
+  .mke-toolbar--object {
+    grid-template-columns: minmax(0, 1fr) 34px auto;
   }
 
   .mke-webpage-row {
@@ -2901,14 +2633,6 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 
   .mke-webpage-row__status {
     justify-self: end;
-  }
-
-  .mke-object-detail-tabs {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .mke-object-detail-tabs button:nth-child(odd) {
-    border-left: 0;
   }
 
   .mke-object-api-row {
