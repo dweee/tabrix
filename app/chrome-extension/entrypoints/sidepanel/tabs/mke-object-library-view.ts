@@ -359,8 +359,8 @@ function formatLifecycle(
   if (isForegroundTab(object, activeTabContext)) {
     return { label: '前台页', tone: 'good' };
   }
-  if (object.canTabrixOperate === true) return { label: '已打开', tone: 'good' };
-  return { label: '已打开', tone: 'good' };
+  if (object.canTabrixOperate === true) return { label: '运行中', tone: 'good' };
+  return { label: '运行中', tone: 'good' };
 }
 
 function formatPageObjectKind(object: MkeBrowserObjectSummary): string {

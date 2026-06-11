@@ -137,7 +137,7 @@ describe('MKE Object Library view model', () => {
     ]);
 
     const page = view.webPages[0];
-    expect(page.lifecycleLabel).toBe('已打开');
+    expect(page.lifecycleLabel).toBe('运行中');
     expect(page.sections[3].items).toContainEqual(
       expect.objectContaining({ label: '证据新鲜度', value: '快照待同步' }),
     );
@@ -190,7 +190,7 @@ describe('MKE Object Library view model', () => {
 
     expect(view.webPages.map((page) => [page.id, page.lifecycleLabel])).toEqual([
       ['tab-focused', '前台页'],
-      ['tab-background-window-active', '已打开'],
+      ['tab-background-window-active', '运行中'],
     ]);
     expect(view.webPages.filter((page) => page.lifecycleLabel === '前台页')).toHaveLength(1);
   });
@@ -217,7 +217,7 @@ describe('MKE Object Library view model', () => {
 
     expect(view.webPages.map((page) => [page.id, page.lifecycleLabel])).toEqual([
       ['tab-only-active', '前台页'],
-      ['tab-open', '已打开'],
+      ['tab-open', '运行中'],
     ]);
   });
 
@@ -242,8 +242,8 @@ describe('MKE Object Library view model', () => {
     ]);
 
     expect(view.webPages.map((page) => [page.id, page.lifecycleLabel])).toEqual([
-      ['tab-window-1-active', '已打开'],
-      ['tab-window-2-active', '已打开'],
+      ['tab-window-1-active', '运行中'],
+      ['tab-window-2-active', '运行中'],
     ]);
     expect(view.webPages.filter((page) => page.lifecycleLabel === '前台页')).toHaveLength(0);
   });
@@ -273,7 +273,7 @@ describe('MKE Object Library view model', () => {
 
     expect(view.webPages.map((page) => [page.id, page.lifecycleLabel])).toEqual([
       ['tab-stale-open', '前台页'],
-      ['tab-stale-active', '已打开'],
+      ['tab-stale-active', '运行中'],
     ]);
   });
 
@@ -342,13 +342,13 @@ describe('MKE Object Library view model', () => {
 
     expect(view.webPages.map((page) => [page.id, page.lifecycleLabel])).toEqual([
       ['tab-foreground', '前台页'],
-      ['tab-open', '已打开'],
+      ['tab-open', '运行中'],
       ['tab-loading', '加载中'],
       ['tab-limited', '受限页'],
       ['tab-closed', '已关闭'],
     ]);
     expect(new Set(view.webPages.map((page) => page.lifecycleLabel))).toEqual(
-      new Set(['前台页', '已打开', '加载中', '受限页', '已关闭']),
+      new Set(['前台页', '运行中', '加载中', '受限页', '已关闭']),
     );
   });
 
