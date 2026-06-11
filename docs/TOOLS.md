@@ -857,39 +857,27 @@ Delete a bookmark by id or URL.
 
 Record AI business feedback for one Memory trace. Use this after the AI has judged whether a recorded browser step actually completed the user's goal.
 
-This tool is available by default for the local AI control loop. Use the binding fields returned in the previous tool result under `_tabrix.feedbackTarget`; `traceId` alone is not accepted.
+This tool is available by default for the local AI control loop. Use the `traceId` and `feedbackToken` returned in the previous tool result under `_tabrix.feedbackTarget` so the rating is written to the correct Memory record.
 
 **Parameters**:
 
 - `traceId` (string, required): Memory trace ID to update.
-- `taskId` (string, required): Task ID from `_tabrix.feedbackTarget.taskId`.
-- `toolName` (string, required): Tool name from `_tabrix.feedbackTarget.toolName`.
-- `toolCallId` (string, optional): Tool call ID from `_tabrix.feedbackTarget.toolCallId`.
-- `sequenceIndex` (number, required): Sequence index from `_tabrix.feedbackTarget.sequenceIndex`.
-- `traceBindingHash` (string, required): Binding hash from `_tabrix.feedbackTarget.traceBindingHash`.
+- `feedbackToken` (string, required): Feedback token from `_tabrix.feedbackTarget.feedbackToken`.
 - `businessStatus` (string, required): One of `achieved`, `partial`, `not_achieved`, or `unknown`.
-- `confidence` (number, optional): AI confidence from `0` to `1`.
+- `confidence` (number, optional): AI score from `0` to `1`; use `>= 0.90` only when the step clearly advanced the user goal.
 - `reasonCode` (string, optional): Short machine-readable reason.
 - `summary` (string, optional): Short human-readable judgment.
-- `evidenceRefs` (array, optional): Evidence references only. Required for `achieved` feedback with confidence `>= 0.90`.
-- `experienceCandidate` (boolean, optional): True only when this feedback may be considered for Experience mining.
 
 **Example**:
 
 ```json
 {
   "traceId": "trace-123",
-  "taskId": "task-123",
-  "toolName": "chrome_click_element",
-  "toolCallId": "step-2",
-  "sequenceIndex": 2,
-  "traceBindingHash": "d9a2...",
+  "feedbackToken": "d9a2...",
   "businessStatus": "achieved",
   "confidence": 0.93,
   "reasonCode": "expected_result_visible",
-  "summary": "The page showed the expected search results after the action.",
-  "evidenceRefs": ["trace-123"],
-  "experienceCandidate": true
+  "summary": "The page showed the expected search results after the action."
 }
 ```
 

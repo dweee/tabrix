@@ -19,54 +19,10 @@ export const MEMORY_SCHEMAS: Tool[] = [
           minLength: 1,
           maxLength: 128,
         },
-        taskId: {
+        feedbackToken: {
           type: 'string',
-          description: 'Task id returned in `_tabrix.feedbackTarget.taskId`.',
-          minLength: 1,
-          maxLength: 128,
-        },
-        toolName: {
-          type: 'string',
-          description: 'Tool name returned in `_tabrix.feedbackTarget.toolName`.',
-          minLength: 1,
-          maxLength: 128,
-        },
-        toolCallId: {
-          type: 'string',
-          description:
-            'Tool call id returned in `_tabrix.feedbackTarget.toolCallId`, when present.',
-          minLength: 1,
-          maxLength: 128,
-        },
-        sequenceIndex: {
-          type: 'integer',
-          description: 'Sequence index returned in `_tabrix.feedbackTarget.sequenceIndex`.',
-          minimum: 0,
-        },
-        traceBindingHash: {
-          type: 'string',
-          description: 'Stable binding hash returned in `_tabrix.feedbackTarget.traceBindingHash`.',
+          description: 'Feedback token returned in `_tabrix.feedbackTarget.feedbackToken`.',
           minLength: 32,
-          maxLength: 128,
-        },
-        evaluationScope: {
-          type: 'string',
-          description: 'Whether this evaluates one tool step or the whole task.',
-          enum: ['step', 'task'],
-        },
-        evaluationVersion: {
-          type: 'string',
-          description: 'AI feedback schema/evaluator version.',
-          maxLength: 64,
-        },
-        rubricVersion: {
-          type: 'string',
-          description: 'Scoring rubric version used by the AI evaluator.',
-          maxLength: 64,
-        },
-        evaluatorModel: {
-          type: 'string',
-          description: 'Model or evaluator identity that produced the business judgment.',
           maxLength: 128,
         },
         businessStatus: {
@@ -93,25 +49,8 @@ export const MEMORY_SCHEMAS: Tool[] = [
             'One concise human-readable sentence explaining the AI judgment. Do not include secrets or raw page data.',
           maxLength: 512,
         },
-        userGoalSnapshot: {
-          type: 'string',
-          description: 'Short redacted snapshot of the user goal this feedback is judging.',
-          maxLength: 512,
-        },
-        experienceCandidate: {
-          type: 'boolean',
-          description:
-            'True only when this AI-rated step is worth considering for future Experience mining.',
-        },
       },
-      required: [
-        'traceId',
-        'taskId',
-        'toolName',
-        'sequenceIndex',
-        'traceBindingHash',
-        'businessStatus',
-      ],
+      required: ['traceId', 'feedbackToken', 'businessStatus'],
       additionalProperties: false,
     },
   },

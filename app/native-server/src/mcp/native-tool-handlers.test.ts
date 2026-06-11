@@ -55,16 +55,11 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
     const result = await handler(
       {
         traceId: 'trace-1',
-        taskId: 'task-1',
-        toolName: 'chrome_click_element',
-        sequenceIndex: 1,
-        traceBindingHash: 'binding-hash-1',
+        feedbackToken: 'binding-hash-1',
         businessStatus: 'achieved',
         confidence: 0.94,
         reasonCode: 'ai_verified_result',
         summary: 'AI verified the expected page result.',
-        evidenceRefs: ['trace-1'],
-        experienceCandidate: true,
       },
       makeDeps({ memoryTraces: { recordAiBusinessFeedback } }),
     );
@@ -73,15 +68,11 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
     expect(recordAiBusinessFeedback).toHaveBeenCalledWith(
       expect.objectContaining({
         traceId: 'trace-1',
-        taskId: 'task-1',
-        toolName: 'chrome_click_element',
-        sequenceIndex: 1,
         traceBindingHash: 'binding-hash-1',
         businessStatus: 'achieved',
         confidence: 0.94,
         reasonCode: 'ai_verified_result',
         summary: 'AI verified the expected page result.',
-        experienceCandidate: true,
         sourceToolName: TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK,
       }),
     );
@@ -112,10 +103,7 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
     const result = await handler(
       {
         traceId: 'missing',
-        taskId: 'task-1',
-        toolName: 'chrome_click_element',
-        sequenceIndex: 1,
-        traceBindingHash: 'binding-hash-1',
+        feedbackToken: 'binding-hash-1',
         businessStatus: 'unknown',
       },
       makeDeps({
@@ -135,10 +123,7 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
     const result = await handler(
       {
         traceId: 'trace-1',
-        taskId: 'task-1',
-        toolName: 'chrome_click_element',
-        sequenceIndex: 1,
-        traceBindingHash: 'wrong-binding',
+        feedbackToken: 'wrong-binding',
         businessStatus: 'achieved',
         confidence: 0.94,
       },

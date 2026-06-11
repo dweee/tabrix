@@ -81,15 +81,10 @@ export interface RecordMkeAiBusinessFeedbackInput {
   sequenceIndex?: number | null;
   traceBindingHash?: string | null;
   evaluationScope?: 'step' | 'task' | null;
-  evaluationVersion?: string | null;
-  rubricVersion?: string | null;
-  evaluatorModel?: string | null;
   businessStatus: BusinessSuccessVerdict;
   confidence?: number | null;
   reasonCode?: string | null;
   summary?: string | null;
-  userGoalSnapshot?: string | null;
-  experienceCandidate?: boolean | null;
   receivedAt?: string;
   sourceToolName?: string | null;
   sourceToolCallId?: string | null;
@@ -558,7 +553,6 @@ function normalizeConfidence(value: number | null | undefined): number | null {
 
 const DEFAULT_AI_FEEDBACK_EVALUATION_VERSION = 'ai_feedback_v1';
 const DEFAULT_AI_FEEDBACK_RUBRIC_VERSION = 'tabrix_ai_business_feedback_v1';
-const UNTRUSTED_EVALUATOR_NAMES = new Set(['', 'unknown', 'default', 'system', 'tabrix']);
 
 function normalizeAiFeedbackScope(value: string | null | undefined): 'step' | 'task' {
   return value === 'task' ? 'task' : 'step';
@@ -618,11 +612,6 @@ function validateAiFeedbackQuality(input: {
   businessStatus: BusinessSuccessVerdict;
   confidence: number | null;
   summary: string | null | undefined;
-  experienceCandidate: boolean;
-  evaluationVersion: string | null | undefined;
-  rubricVersion: string | null | undefined;
-  evaluatorModel: string | null | undefined;
-  userGoalSnapshot: string | null | undefined;
 }): void {
   const highConfidenceSuccess =
     input.businessStatus === 'achieved' &&
@@ -632,30 +621,6 @@ function validateAiFeedbackQuality(input: {
     throw new MkeAiFeedbackValidationError(
       'summary_required',
       'High-confidence achieved feedback must include a concise AI evaluation summary.',
-    );
-  }
-  if (!input.experienceCandidate) return;
-  if (!highConfidenceSuccess) {
-    throw new MkeAiFeedbackValidationError(
-      'experience_candidate_rejected',
-      'Experience candidates require achieved feedback with confidence >= 0.90.',
-    );
-  }
-  const summary = input.summary?.trim() ?? '';
-  const evaluationVersion = input.evaluationVersion?.trim() ?? '';
-  const rubricVersion = input.rubricVersion?.trim() ?? '';
-  const evaluatorModel = input.evaluatorModel?.trim() ?? '';
-  const userGoalSnapshot = input.userGoalSnapshot?.trim() ?? '';
-  if (
-    summary.length < 20 ||
-    evaluationVersion.length < 3 ||
-    rubricVersion.length < 3 ||
-    userGoalSnapshot.length < 8 ||
-    UNTRUSTED_EVALUATOR_NAMES.has(evaluatorModel.toLowerCase())
-  ) {
-    throw new MkeAiFeedbackValidationError(
-      'experience_candidate_rejected',
-      'Experience candidates require a complete AI evaluation: evaluatorModel, evaluationVersion, rubricVersion, userGoalSnapshot, and a clear summary.',
     );
   }
 }
@@ -1276,34 +1241,27 @@ export class MkeMemoryTraceService {
     const traceBindingHash = ensureFeedbackBinding(input, trace);
     const confidence = normalizeConfidence(input.confidence);
     const evaluationScope = normalizeAiFeedbackScope(input.evaluationScope);
-    const evaluationVersion = input.evaluationVersion ?? DEFAULT_AI_FEEDBACK_EVALUATION_VERSION;
-    const rubricVersion = input.rubricVersion ?? DEFAULT_AI_FEEDBACK_RUBRIC_VERSION;
-    const experienceCandidate = input.experienceCandidate === true;
+    const experienceReady =
+      input.businessStatus === 'achieved' &&
+      typeof confidence === 'number' &&
+      confidence >= 0.9 &&
+      typeof input.summary === 'string' &&
+      input.summary.trim().length >= 8;
     const receivedAt = input.receivedAt ?? new Date().toISOString();
     validateAiFeedbackQuality({
       businessStatus: input.businessStatus,
       confidence,
       summary: input.summary,
-      experienceCandidate,
-      evaluationVersion: input.evaluationVersion,
-      rubricVersion: input.rubricVersion,
-      evaluatorModel: input.evaluatorModel,
-      userGoalSnapshot: input.userGoalSnapshot,
     });
 
     const feedback = sanitizeValue(
       {
         sourceKind: 'ai_feedback',
         evaluationScope,
-        evaluationVersion,
-        rubricVersion,
-        evaluatorModel: input.evaluatorModel ?? null,
         businessStatus: input.businessStatus,
         confidence,
         reasonCode: input.reasonCode ?? null,
         summary: input.summary ?? null,
-        userGoalSnapshot: input.userGoalSnapshot ?? null,
-        experienceCandidate,
         binding: {
           traceId: trace.traceId,
           taskId: trace.taskId,
@@ -1331,16 +1289,16 @@ export class MkeMemoryTraceService {
         sequenceIndex: trace.sequenceIndex,
         traceBindingHash,
         evaluationScope,
-        evaluationVersion,
-        rubricVersion,
-        evaluatorModel: input.evaluatorModel ?? null,
+        evaluationVersion: DEFAULT_AI_FEEDBACK_EVALUATION_VERSION,
+        rubricVersion: DEFAULT_AI_FEEDBACK_RUBRIC_VERSION,
+        evaluatorModel: null,
         businessStatus: input.businessStatus,
         confidence,
         reasonCode: input.reasonCode ?? null,
         summary: input.summary ?? null,
         evidenceRefs: [],
-        userGoalSnapshot: input.userGoalSnapshot ?? null,
-        experienceCandidate,
+        userGoalSnapshot: null,
+        experienceCandidate: experienceReady,
         sourceToolName: input.sourceToolName ?? null,
         sourceToolCallId: input.sourceToolCallId ?? null,
         accepted: true,

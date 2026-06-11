@@ -106,11 +106,7 @@ function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
   const feedback = readObject(trace.aiFeedback);
   const sourceKind = readString(feedback?.sourceKind);
   const businessStatus = readString(feedback?.businessStatus);
-  const evaluationVersion = readString(feedback?.evaluationVersion);
-  const rubricVersion = readString(feedback?.rubricVersion);
-  const evaluatorModel = readString(feedback?.evaluatorModel);
   const summary = readString(feedback?.summary);
-  const userGoalSnapshot = readString(feedback?.userGoalSnapshot);
   const confidence =
     typeof feedback?.confidence === 'number' && Number.isFinite(feedback.confidence)
       ? feedback.confidence
@@ -120,18 +116,8 @@ function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
     businessStatus === 'achieved' &&
     typeof confidence === 'number' &&
     confidence >= 0.9 &&
-    feedback?.experienceCandidate === true &&
-    typeof evaluationVersion === 'string' &&
-    evaluationVersion.length >= 3 &&
-    typeof rubricVersion === 'string' &&
-    rubricVersion.length >= 3 &&
-    typeof evaluatorModel === 'string' &&
-    evaluatorModel.trim().length >= 3 &&
-    !UNTRUSTED_EVALUATOR_NAMES.has(evaluatorModel.trim().toLowerCase()) &&
     typeof summary === 'string' &&
-    summary.trim().length >= 20 &&
-    typeof userGoalSnapshot === 'string' &&
-    userGoalSnapshot.trim().length >= 8
+    summary.trim().length >= 8
   );
 }
 

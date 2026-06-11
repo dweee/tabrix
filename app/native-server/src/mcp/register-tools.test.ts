@@ -116,13 +116,9 @@ describe('handleToolCall execution wrapper', () => {
       businessFeedbackRequired: true,
       businessFeedbackGuideVersion: 'tabrix-ai-business-feedback-v1',
     });
-    expect(payload._tabrix.businessFeedbackScoreGuide).toContain('0.90-1.00');
-    expect(payload._tabrix.businessFeedbackScoreGuide).toContain(
-      'clear page result and intent achieved',
-    );
-    expect(payload._tabrix.businessFeedbackScoreGuide).toContain(
-      'partial progress, needs follow-up read/confirmation',
-    );
+    expect(payload._tabrix.businessFeedbackGuide).toContain('memory_record_ai_feedback');
+    expect(payload._tabrix.businessFeedbackGuide).toContain('confidence 0..1');
+    expect(payload._tabrix.businessFeedbackScoreGuide).toBeUndefined();
     expect(payload._tabrix.traceId).toEqual(expect.any(String));
     expect((bridgeSpy.mock.calls[1][0] as any).args).toEqual({ tabId: 1 });
 
@@ -225,11 +221,7 @@ describe('handleToolCall execution wrapper', () => {
         previousFeedback: [
           {
             traceId,
-            taskId: feedbackTarget.taskId,
-            toolName: feedbackTarget.toolName,
-            toolCallId: feedbackTarget.toolCallId,
-            sequenceIndex: feedbackTarget.sequenceIndex,
-            traceBindingHash: feedbackTarget.traceBindingHash,
+            feedbackToken: feedbackTarget.feedbackToken,
             businessStatus: 'achieved',
             confidence: 0.85,
             reasonCode: 'target_page_opened',

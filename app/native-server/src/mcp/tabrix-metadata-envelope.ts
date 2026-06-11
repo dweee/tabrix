@@ -5,8 +5,8 @@ import { buildMemoryTraceBindingHash } from '../memory/feedback-binding';
 const TABRIX_TOOL_METADATA_KEY = '_tabrix';
 const AI_BUSINESS_STATUS_VALUES = new Set(['achieved', 'partial', 'not_achieved', 'unknown']);
 const AI_BUSINESS_FEEDBACK_GUIDE_VERSION = 'tabrix-ai-business-feedback-v1';
-const AI_BUSINESS_FEEDBACK_SCORE_GUIDE =
-  'When sending _tabrix.previousFeedback[].confidence for a previous trace: 0.90-1.00 = clear page result and intent achieved; 0.70-0.89 = likely achieved with one uncertainty; 0.40-0.69 = partial progress, needs follow-up read/confirmation; 0.01-0.39 = action ran but the result is unclear; 0.00 = clearly not achieved.';
+const AI_BUSINESS_FEEDBACK_GUIDE =
+  'Rate the previous Tabrix step with memory_record_ai_feedback: businessStatus, confidence 0..1, and a short summary.';
 
 interface TabrixPreviousFeedback {
   traceId: string;
@@ -14,17 +14,12 @@ interface TabrixPreviousFeedback {
   toolName: string | null;
   toolCallId: string | null;
   sequenceIndex: number | null;
-  traceBindingHash: string | null;
+  feedbackToken: string | null;
   evaluationScope: 'step' | 'task' | null;
-  evaluationVersion: string | null;
-  rubricVersion: string | null;
-  evaluatorModel: string | null;
   businessStatus: 'achieved' | 'partial' | 'not_achieved' | 'unknown';
   confidence: number | null;
   reasonCode: string | null;
   summary: string | null;
-  userGoalSnapshot: string | null;
-  experienceCandidate: boolean | null;
 }
 
 export interface TabrixToolMetadata {
@@ -53,8 +48,7 @@ const TABRIX_TOOL_METADATA_SCHEMA = {
     },
     previousFeedback: {
       type: 'array',
-      description:
-        'Optional AI feedback for earlier Tabrix Memory traces. Use the confidence scoring guide returned in each tool result _tabrix envelope.',
+      description: 'Optional AI feedback for earlier Tabrix Memory traces.',
       items: {
         type: 'object',
         properties: {
@@ -63,11 +57,8 @@ const TABRIX_TOOL_METADATA_SCHEMA = {
           toolName: { type: 'string' },
           toolCallId: { type: 'string' },
           sequenceIndex: { type: 'integer', minimum: 0 },
-          traceBindingHash: { type: 'string' },
+          feedbackToken: { type: 'string' },
           evaluationScope: { type: 'string', enum: ['step', 'task'] },
-          evaluationVersion: { type: 'string' },
-          rubricVersion: { type: 'string' },
-          evaluatorModel: { type: 'string' },
           businessStatus: {
             type: 'string',
             enum: ['achieved', 'partial', 'not_achieved', 'unknown'],
@@ -76,12 +67,9 @@ const TABRIX_TOOL_METADATA_SCHEMA = {
             type: 'number',
             minimum: 0,
             maximum: 1,
-            description: AI_BUSINESS_FEEDBACK_SCORE_GUIDE,
           },
           reasonCode: { type: 'string' },
           summary: { type: 'string' },
-          userGoalSnapshot: { type: 'string' },
-          experienceCandidate: { type: 'boolean' },
         },
         required: ['traceId', 'businessStatus'],
       },
@@ -151,30 +139,22 @@ export function attachTabrixMemoryTraceEnvelope(
   const traceBindingHash = buildMemoryTraceBindingHash(trace);
   const feedbackTarget = {
     traceId: trace.traceId,
-    taskId: trace.taskId,
-    toolName: trace.toolName,
-    toolCallId: trace.toolCallId,
-    sequenceIndex: trace.sequenceIndex,
-    traceBindingHash,
+    feedbackToken: traceBindingHash,
   };
   const nextPayload = {
     ...payload,
     [TABRIX_TOOL_METADATA_KEY]: {
       ...existingTabrix,
       traceId: trace.traceId,
-      taskId: trace.taskId,
       intentTitle: metadata.intentTitle ?? trace.taskIntent ?? null,
       intentSummary: metadata.intentSummary,
       nextIntent: metadata.nextIntent,
       toolName,
-      toolCallId: trace.toolCallId,
-      sequenceIndex: trace.sequenceIndex,
-      traceBindingHash,
       feedbackTarget,
       toolSuccess: trace.toolSuccess,
       businessFeedbackRequired: true,
       businessFeedbackGuideVersion: AI_BUSINESS_FEEDBACK_GUIDE_VERSION,
-      businessFeedbackScoreGuide: AI_BUSINESS_FEEDBACK_SCORE_GUIDE,
+      businessFeedbackGuide: AI_BUSINESS_FEEDBACK_GUIDE,
     },
   };
 
@@ -198,10 +178,6 @@ function readOptionalInteger(value: unknown): number | null {
   return Math.max(0, Math.floor(value));
 }
 
-function readOptionalBoolean(value: unknown): boolean | null {
-  return typeof value === 'boolean' ? value : null;
-}
-
 function readPreviousFeedback(value: unknown): TabrixPreviousFeedback[] {
   if (!Array.isArray(value)) return [];
   const feedback: TabrixPreviousFeedback[] = [];
@@ -217,20 +193,16 @@ function readPreviousFeedback(value: unknown): TabrixPreviousFeedback[] {
       toolName: readOptionalString(object.toolName),
       toolCallId: readOptionalString(object.toolCallId),
       sequenceIndex: readOptionalInteger(object.sequenceIndex),
-      traceBindingHash: readOptionalString(object.traceBindingHash),
+      feedbackToken:
+        readOptionalString(object.feedbackToken) ?? readOptionalString(object.traceBindingHash),
       evaluationScope:
         object.evaluationScope === 'step' || object.evaluationScope === 'task'
           ? object.evaluationScope
           : null,
-      evaluationVersion: readOptionalString(object.evaluationVersion),
-      rubricVersion: readOptionalString(object.rubricVersion),
-      evaluatorModel: readOptionalString(object.evaluatorModel),
       businessStatus: status as TabrixPreviousFeedback['businessStatus'],
       confidence: readOptionalConfidence(object.confidence),
       reasonCode: readOptionalString(object.reasonCode),
       summary: readOptionalString(object.summary),
-      userGoalSnapshot: readOptionalString(object.userGoalSnapshot),
-      experienceCandidate: readOptionalBoolean(object.experienceCandidate),
     });
   }
   return feedback;

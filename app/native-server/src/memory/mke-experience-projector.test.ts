@@ -35,21 +35,14 @@ function verifiedExperienceFeedback(input: {
   confidence: number;
   reasonCode: string;
   summary: string;
-  evidenceRef?: string;
 }) {
   return {
     sourceKind: 'ai_feedback',
     evaluationScope: 'step',
-    evaluationVersion: 'ai_feedback_v1',
-    rubricVersion: 'tabrix_ai_business_feedback_v1',
-    evaluatorModel: 'jest-ai-evaluator',
     businessStatus: 'achieved',
     confidence: input.confidence,
     reasonCode: input.reasonCode,
     summary: input.summary,
-    userGoalSnapshot: 'complete the requested browser task',
-    evidenceRefs: input.evidenceRef ? [input.evidenceRef] : [],
-    experienceCandidate: true,
   };
 }
 
@@ -483,7 +476,6 @@ describe('MkeExperienceProjector', () => {
         confidence: 0.98,
         reasonCode: 'ai_verified_result',
         summary: 'AI verified the result despite stale legacy business status.',
-        evidenceRef: 'trace-click-failed-business',
       }),
       tabId: 9,
       siteFamily: 'example.test',
@@ -546,8 +538,6 @@ describe('MkeExperienceProjector', () => {
         businessStatus: 'achieved',
         reasonCode: 'missing_confidence',
         summary: 'AI evaluation is incomplete.',
-        experienceCandidate: true,
-        evidenceRefs: ['trace-click-orphan-score'],
       },
       tabId: 10,
       siteFamily: 'example.test',

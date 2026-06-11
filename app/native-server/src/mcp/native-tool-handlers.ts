@@ -113,11 +113,6 @@ function readIntegerArg(args: Record<string, unknown>, field: string): number | 
     : null;
 }
 
-function readBooleanArg(args: Record<string, unknown>, field: string): boolean | null {
-  const value = args[field];
-  return typeof value === 'boolean' ? value : null;
-}
-
 const handleMemoryRecordAiFeedback: NativeToolHandler = (args, deps) => {
   const persistenceMode = deps.sessionManager.getPersistenceStatus().mode;
   if (persistenceMode === 'off' || !deps.sessionManager.memoryTraces) {
@@ -132,25 +127,19 @@ const handleMemoryRecordAiFeedback: NativeToolHandler = (args, deps) => {
 
   const object = readObjectArg(args);
   const traceId = readStringArg(object, 'traceId');
-  const taskId = readStringArg(object, 'taskId');
-  const toolName = readStringArg(object, 'toolName');
-  const sequenceIndex = readIntegerArg(object, 'sequenceIndex');
-  const traceBindingHash = readStringArg(object, 'traceBindingHash');
+  const feedbackToken =
+    readStringArg(object, 'feedbackToken') ?? readStringArg(object, 'traceBindingHash');
   const businessStatus = readStringArg(object, 'businessStatus');
   if (
     !traceId ||
-    !taskId ||
-    !toolName ||
-    sequenceIndex === null ||
-    !traceBindingHash ||
+    !feedbackToken ||
     !businessStatus ||
     !MEMORY_FEEDBACK_STATUSES.has(businessStatus)
   ) {
     return jsonResult(
       {
         status: 'invalid_input',
-        message:
-          'traceId, taskId, toolName, sequenceIndex, traceBindingHash, and a valid businessStatus are required.',
+        message: 'traceId, feedbackToken, and a valid businessStatus are required.',
       },
       true,
     );
@@ -160,24 +149,19 @@ const handleMemoryRecordAiFeedback: NativeToolHandler = (args, deps) => {
   try {
     updated = deps.sessionManager.memoryTraces.recordAiBusinessFeedback({
       traceId,
-      taskId,
-      toolName,
+      taskId: readStringArg(object, 'taskId'),
+      toolName: readStringArg(object, 'toolName'),
       toolCallId: readStringArg(object, 'toolCallId'),
-      sequenceIndex,
-      traceBindingHash,
+      sequenceIndex: readIntegerArg(object, 'sequenceIndex'),
+      traceBindingHash: feedbackToken,
       evaluationScope:
         object.evaluationScope === 'task' || object.evaluationScope === 'step'
           ? object.evaluationScope
           : undefined,
-      evaluationVersion: readStringArg(object, 'evaluationVersion'),
-      rubricVersion: readStringArg(object, 'rubricVersion'),
-      evaluatorModel: readStringArg(object, 'evaluatorModel'),
       businessStatus,
       confidence: readConfidenceArg(object),
       reasonCode: readStringArg(object, 'reasonCode'),
       summary: readStringArg(object, 'summary'),
-      userGoalSnapshot: readStringArg(object, 'userGoalSnapshot'),
-      experienceCandidate: readBooleanArg(object, 'experienceCandidate'),
       receivedAt: new Date().toISOString(),
       sourceToolName: TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK,
       sourceToolCallId: null,

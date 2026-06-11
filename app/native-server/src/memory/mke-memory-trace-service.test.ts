@@ -152,11 +152,6 @@ describe('MkeMemoryTraceService', () => {
         confidence: 0.94,
         reasonCode: 'ai_verified_result',
         summary: 'AI verified the expected page result appeared.',
-        userGoalSnapshot: 'click and verify page result',
-        experienceCandidate: true,
-        evaluationVersion: 'ai_feedback_v1',
-        rubricVersion: 'tabrix_ai_business_feedback_v1',
-        evaluatorModel: 'jest-evaluator',
         receivedAt: '2026-06-10T10:00:01.000Z',
       });
 
@@ -167,8 +162,6 @@ describe('MkeMemoryTraceService', () => {
           sourceKind: 'ai_feedback',
           businessStatus: 'achieved',
           confidence: 0.94,
-          experienceCandidate: true,
-          evaluatorModel: 'jest-evaluator',
           binding: expect.objectContaining({
             traceId: trace.traceId,
             traceBindingHash: buildMemoryTraceBindingHash(trace),
@@ -253,18 +246,14 @@ describe('MkeMemoryTraceService', () => {
         businessStatus: 'achieved',
         confidence: 0.95,
         summary: 'AI verified the result.',
-        userGoalSnapshot: 'click and verify page result',
-        experienceCandidate: true,
-        evaluationVersion: 'ai_feedback_v1',
-        rubricVersion: 'tabrix_ai_business_feedback_v1',
-        evaluatorModel: 'jest-evaluator',
       });
       expect(updated?.aiFeedback).toMatchObject({
         businessStatus: 'achieved',
         confidence: 0.95,
-        experienceCandidate: true,
       });
       expect(updated?.aiFeedback).not.toHaveProperty('evidenceRefs');
+      expect(updated?.aiFeedback).not.toHaveProperty('evaluatorModel');
+      expect(updated?.aiFeedback).not.toHaveProperty('userGoalSnapshot');
       expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)[0]).toMatchObject({
         businessStatus: 'achieved',
         evidenceRefs: [],
@@ -277,7 +266,7 @@ describe('MkeMemoryTraceService', () => {
     }
   });
 
-  it('rejects experience candidates without complete AI evaluator metadata', () => {
+  it('accepts experience-ready AI feedback without evaluator metadata', () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const traceRepo = new MemoryTraceRepository(db);
     const traceService = new MkeMemoryTraceService(traceRepo);
@@ -295,21 +284,24 @@ describe('MkeMemoryTraceService', () => {
         result: textResult({ success: true }),
       });
 
-      expect(() =>
-        traceService.recordAiBusinessFeedback({
-          traceId: trace.traceId,
-          taskId: trace.taskId,
-          toolName: trace.toolName,
-          sequenceIndex: trace.sequenceIndex,
-          traceBindingHash: buildMemoryTraceBindingHash(trace),
-          businessStatus: 'achieved',
-          confidence: 0.95,
-          summary: 'AI verified the result.',
-          experienceCandidate: true,
-        }),
-      ).toThrow(MkeAiFeedbackValidationError);
-      expect(traceRepo.get(trace.traceId)?.aiFeedback).toBeNull();
-      expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)).toEqual([]);
+      const updated = traceService.recordAiBusinessFeedback({
+        traceId: trace.traceId,
+        taskId: trace.taskId,
+        toolName: trace.toolName,
+        sequenceIndex: trace.sequenceIndex,
+        traceBindingHash: buildMemoryTraceBindingHash(trace),
+        businessStatus: 'achieved',
+        confidence: 0.95,
+        summary: 'AI verified the result.',
+      });
+      expect(updated?.aiFeedback).toMatchObject({
+        businessStatus: 'achieved',
+        confidence: 0.95,
+      });
+      expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)[0]).toMatchObject({
+        businessStatus: 'achieved',
+        experienceCandidate: true,
+      });
     } finally {
       traceService.discardPendingAsyncWrites();
       db.close();
