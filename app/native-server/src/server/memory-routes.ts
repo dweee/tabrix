@@ -621,9 +621,6 @@ export function registerMemoryRoutes(
         });
       }
       setPersonalBrowserStateStorageEnabled(request.body.personalBrowserStateStorageEnabled);
-      if (request.body.personalBrowserStateStorageEnabled === false) {
-        sessionManager.clearMkeBrowserObjects();
-      }
       return reply.status(HTTP_STATUS.OK).send({
         status: 'ok',
         data: toObjectStoragePreferences(sessionManager),

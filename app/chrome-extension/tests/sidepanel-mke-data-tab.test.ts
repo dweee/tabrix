@@ -89,7 +89,8 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('搜索主题、对象、方法、网址、状态');
     expect(tabSource).toContain('搜索网页、对象、功能、网址、状态');
     expect(tabSource).toContain('mke-refresh-button');
-    expect(tabSource).toContain('个人浏览状态存储已开启');
+    expect(tabSource).toContain('浏览状态缓存已开启，点击关闭；不会清空对象库');
+    expect(tabSource).toContain('浏览状态缓存已关闭，点击开启；对象库保留脱敏记录');
     expect(tabSource).not.toContain('清除对象库');
     expect(tabSource).toContain('personalBrowserStateStorageEnabled');
     expect(tabSource).toContain('mke-icon-button--active');

@@ -54,8 +54,8 @@
             :disabled="preferenceLoading"
             :title="
               personalBrowserStateStorageEnabled
-                ? '个人浏览状态存储已开启'
-                : '个人浏览状态存储已关闭'
+                ? '浏览状态缓存已开启，点击关闭；不会清空对象库'
+                : '浏览状态缓存已关闭，点击开启；对象库保留脱敏记录'
             "
             @click="togglePersonalBrowserStateStorage"
           >

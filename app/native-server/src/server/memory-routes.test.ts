@@ -773,7 +773,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     });
   });
 
-  test('disabling personal browser state storage clears previously authorized browser objects', async () => {
+  test('disabling personal browser state storage keeps Object Library rows and redacts authorized routes', async () => {
     await supertest(Server.getInstance().server)
       .patch('/memory/mke/object-storage-preferences')
       .send({ personalBrowserStateStorageEnabled: true })
@@ -831,8 +831,19 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     const after = await supertest(Server.getInstance().server)
       .get('/memory/mke/browser-objects?limit=10&offset=0')
       .expect(200);
-    expect(after.body.data.total).toBe(0);
+    expect(after.body.data.total).toBeGreaterThan(0);
     expect(JSON.stringify(after.body.data.browserObjects)).not.toContain('real-secret');
+    expect(JSON.stringify(after.body.data.browserObjects)).not.toContain('tab=demohouse');
+    const tab = (after.body.data.browserObjects as Array<Record<string, unknown>>).find(
+      (object) => object.objectType === 'tab',
+    );
+    expect(tab).toMatchObject({
+      redactionState: 'redacted',
+      currentRoute: 'https://example.test/search',
+      pageIdentity: {
+        url: 'https://example.test/search',
+      },
+    });
   });
 
   test('GET /memory/mke/experience returns sanitized template summaries', async () => {
