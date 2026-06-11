@@ -51,7 +51,7 @@ async function seedMkeRows(): Promise<void> {
     receivedAt: '2026-06-06T10:00:00.080Z',
   });
 
-  traceService.recordToolCall({
+  const clickTrace = traceService.recordToolCall({
     taskId,
     taskIntent: 'inspect page and click action',
     aiClient: 'jest',
@@ -74,6 +74,16 @@ async function seedMkeRows(): Promise<void> {
       },
     }),
     resultSummary: 'clicked button',
+  });
+  traceService.recordAiBusinessFeedback({
+    traceId: clickTrace.traceId,
+    businessStatus: 'achieved',
+    confidence: 0.93,
+    reasonCode: 'clicked_expected_control',
+    summary: 'AI verified the click completed the intended page action',
+    sourceToolName: 'chrome_click_element',
+    sourceToolCallId: 'feedback-call-2',
+    receivedAt: '2026-06-06T10:00:00.090Z',
   });
 
   sessionManager.projectMkeKnowledgeIdle({
@@ -165,6 +175,21 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
         executionStatus: 'succeeded',
         businessStatus: 'achieved',
         businessStatusSource: 'tabrix_evidence',
+        aiScore: 0.93,
+        feedbackRequired: false,
+      },
+      aiFeedbackScore: 0.93,
+      aiFeedback: {
+        sourceKind: 'ai_feedback',
+        businessStatus: 'achieved',
+        confidence: 0.93,
+        reasonCode: 'clicked_expected_control',
+        summary: 'AI verified the click completed the intended page action',
+      },
+      systemEvidenceScore: 0.9,
+      systemEvidence: {
+        sourceKind: 'tabrix_auto_evidence',
+        businessStatus: 'achieved',
       },
     });
     expect(res.body.data.traces[0].pageIdentity.label).toBe('example.test');
@@ -175,10 +200,12 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       toolName: 'chrome_read_page',
       businessSuccess: 'unknown',
       aiFeedbackScore: 0.82,
+      systemEvidenceScore: 0.45,
       statusView: {
         businessStatus: 'achieved',
         businessStatusSource: 'ai_feedback',
         aiScore: 0.82,
+        feedbackRequired: false,
       },
       aiFeedback: {
         sourceKind: 'ai_feedback',
@@ -188,6 +215,10 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
         summary: 'AI judged the page inventory read as useful for the next action',
         sourceToolName: 'chrome_click_element',
         sourceToolCallId: 'feedback-call-1',
+      },
+      systemEvidence: {
+        sourceKind: 'tabrix_auto_evidence',
+        businessStatus: 'unknown',
       },
     });
     expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('rawInput');
@@ -238,6 +269,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
         businessStatus: 'not_achieved',
         businessStatusSource: 'tabrix_evidence',
         aiScore: 0.91,
+        feedbackRequired: false,
       },
       aiFeedback: {
         sourceKind: 'ai_feedback',

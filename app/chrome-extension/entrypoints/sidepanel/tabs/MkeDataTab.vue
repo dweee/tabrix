@@ -106,7 +106,15 @@
               </div>
             </div>
 
-            <div v-if="row.feedbackLine || row.feedbackScoreLabel" class="mke-record__feedback-row">
+            <div
+              v-if="
+                row.feedbackLine ||
+                row.feedbackScoreLabel ||
+                row.systemEvidenceLine ||
+                row.systemEvidenceScoreLabel
+              "
+              class="mke-record__feedback-row"
+            >
               <p v-if="row.feedbackLine" class="mke-record__feedback" :title="row.feedbackLine">
                 {{ row.feedbackLine }}
               </p>
@@ -116,6 +124,20 @@
                 title="AI 根据页面证据对上一任务完成度的自评，不代表真实平台验收。"
               >
                 {{ row.feedbackScoreLabel }}
+              </span>
+              <p
+                v-if="row.systemEvidenceLine"
+                class="mke-record__feedback mke-record__feedback--evidence"
+                :title="row.systemEvidenceLine"
+              >
+                {{ row.systemEvidenceLine }}
+              </p>
+              <span
+                v-if="row.systemEvidenceScoreLabel"
+                class="mke-feedback-score mke-feedback-score--evidence"
+                title="Tabrix 根据工具执行结果生成的系统证据，不等于AI业务评价。"
+              >
+                {{ row.systemEvidenceScoreLabel }}
               </span>
             </div>
 
@@ -241,6 +263,8 @@ interface ViewRecord {
   metaLine: string;
   feedbackLine: string;
   feedbackScoreLabel: string;
+  systemEvidenceLine: string;
+  systemEvidenceScoreLabel: string;
   duration: string;
   createdAtLabel: string;
   status: string;
@@ -604,6 +628,8 @@ function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
     metaLine: '',
     feedbackLine,
     feedbackScoreLabel: formatAiFeedbackScoreLabel(trace),
+    systemEvidenceLine: formatSystemEvidenceLine(trace),
+    systemEvidenceScoreLabel: formatSystemEvidenceScoreLabel(trace),
     duration: formatDuration(trace.durationMs) ?? '',
     createdAtLabel: formatDate(trace.createdAt),
     status,
@@ -639,6 +665,8 @@ function objectWebPageToRecord(webPage: MkeObjectWebPageView): ViewRecord {
     metaLine: webPage.location,
     feedbackLine: '',
     feedbackScoreLabel: '',
+    systemEvidenceLine: '',
+    systemEvidenceScoreLabel: '',
     duration: '',
     createdAtLabel: formatDate(webPage.updatedAt),
     status: webPage.lifecycleLabel,
@@ -659,6 +687,8 @@ function knowledgeToRecord(model: MkeKnowledgeModelSummary): ViewRecord {
     metaLine: `${model.pageModelKey} · ${formatDate(model.updatedAt)}`,
     feedbackLine: '',
     feedbackScoreLabel: '',
+    systemEvidenceLine: '',
+    systemEvidenceScoreLabel: '',
     duration: '',
     createdAtLabel: formatDate(model.updatedAt),
     status: formatKnowledgeStatus(model.confidenceScore),
@@ -682,6 +712,8 @@ function experienceToRecord(recipe: MkeExperienceRecipeSummary): ViewRecord {
     metaLine: `${recipe.scenarioKey} · ${formatDate(recipe.updatedAt)}`,
     feedbackLine: '',
     feedbackScoreLabel: '',
+    systemEvidenceLine: '',
+    systemEvidenceScoreLabel: '',
     duration: '',
     createdAtLabel: formatDate(recipe.updatedAt),
     status: recipe.redactionState === 'template_only' ? '模板 / Template' : recipe.redactionState,
@@ -808,16 +840,26 @@ function formatDuration(value: number | null | undefined): string | null {
 
 function formatAiFeedbackLine(trace: MkeMemoryTraceSummary): string {
   const feedback = trace.aiFeedback;
-  const label = feedback?.sourceKind === 'tabrix_auto_evidence' ? '系统评价' : 'AI评价';
   return feedback?.summary
-    ? `${label}：${compactText(formatReadableFeedbackLine(feedback.summary), 88)}`
-    : '';
+    ? `AI评价：${compactText(formatReadableFeedbackLine(feedback.summary), 88)}`
+    : 'AI评价：待AI评价';
 }
 
 function formatAiFeedbackScoreLabel(trace: MkeMemoryTraceSummary): string {
-  const score = trace.statusView?.aiScore ?? trace.aiFeedbackScore ?? trace.aiFeedback?.confidence;
-  const label = trace.aiFeedback?.sourceKind === 'tabrix_auto_evidence' ? '系统评分' : 'AI评分';
-  return typeof score === 'number' ? `${label} ${Math.round(score * 100)}%` : '';
+  const score = trace.aiFeedback?.confidence ?? trace.aiFeedbackScore ?? trace.statusView?.aiScore;
+  return typeof score === 'number' ? `AI评分 ${Math.round(score * 100)}%` : '';
+}
+
+function formatSystemEvidenceLine(trace: MkeMemoryTraceSummary): string {
+  const evidence = trace.systemEvidence;
+  return evidence?.summary
+    ? `执行证据：${compactText(formatReadableFeedbackLine(evidence.summary), 88)}`
+    : '';
+}
+
+function formatSystemEvidenceScoreLabel(trace: MkeMemoryTraceSummary): string {
+  const score = trace.systemEvidence?.confidence ?? trace.systemEvidenceScore;
+  return typeof score === 'number' ? `证据 ${Math.round(score * 100)}%` : '';
 }
 
 function formatReadableFeedbackLine(value: string): string {

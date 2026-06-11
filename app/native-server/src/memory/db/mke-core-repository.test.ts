@@ -344,7 +344,7 @@ describe('MKE core repositories', () => {
     }
   });
 
-  it('derives system evidence feedback for legacy Memory traces without stored AI feedback', () => {
+  it('derives system evidence separately for legacy Memory traces without stored AI feedback', () => {
     const { traceRepo, close } = bootstrap();
     try {
       traceRepo.append({
@@ -369,8 +369,10 @@ describe('MKE core repositories', () => {
 
       expect(trace).toMatchObject({
         traceId: 'trace-legacy-unscored',
-        aiFeedbackScore: 0.45,
-        aiFeedback: {
+        aiFeedbackScore: null,
+        aiFeedback: null,
+        systemEvidenceScore: 0.45,
+        systemEvidence: {
           sourceKind: 'tabrix_auto_evidence',
           businessStatus: 'unknown',
           confidence: 0.45,

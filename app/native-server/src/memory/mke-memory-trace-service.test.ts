@@ -57,8 +57,10 @@ describe('MkeMemoryTraceService', () => {
       recordReturned = true;
 
       expect(trace.traceId).toBeDefined();
-      expect(trace.aiFeedbackScore).toBe(0.45);
-      expect(trace.aiFeedback).toMatchObject({
+      expect(trace.aiFeedbackScore).toBeNull();
+      expect(trace.aiFeedback).toBeNull();
+      expect(trace.systemEvidenceScore).toBe(0.45);
+      expect(trace.systemEvidence).toMatchObject({
         sourceKind: 'tabrix_auto_evidence',
         businessStatus: 'unknown',
         confidence: 0.45,
@@ -80,7 +82,7 @@ describe('MkeMemoryTraceService', () => {
     }
   });
 
-  it('records automatic evidence feedback from proven business success', () => {
+  it('records automatic system evidence separately from AI feedback', () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const traceRepo = new MemoryTraceRepository(db);
     const traceService = new MkeMemoryTraceService(traceRepo);
@@ -109,8 +111,10 @@ describe('MkeMemoryTraceService', () => {
       });
 
       expect(trace.businessSuccess).toBe('achieved');
-      expect(trace.aiFeedbackScore).toBe(0.9);
-      expect(trace.aiFeedback).toMatchObject({
+      expect(trace.aiFeedbackScore).toBeNull();
+      expect(trace.aiFeedback).toBeNull();
+      expect(trace.systemEvidenceScore).toBe(0.9);
+      expect(trace.systemEvidence).toMatchObject({
         sourceKind: 'tabrix_auto_evidence',
         businessStatus: 'achieved',
         confidence: 0.9,

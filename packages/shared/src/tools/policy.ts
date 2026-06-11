@@ -108,6 +108,11 @@ export const TOOL_RISK_TIERS: Readonly<Record<string, TabrixRiskTier>> = Object.
   // it appends one telemetry row keyed by `decisionId`, never replays,
   // and is gated by the same Memory persistence check the chooser uses.
   [TOOL_NAMES.CONTEXT.RECORD_OUTCOME]: 'P0',
+
+  // ---- MKEP Memory write-back ----
+  // Pure Memory annotation write-back. It updates only AI feedback fields
+  // on an existing trace id; it does not drive the browser or replay actions.
+  [TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK]: 'P0',
 });
 
 /**

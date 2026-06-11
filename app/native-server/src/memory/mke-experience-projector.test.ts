@@ -75,6 +75,14 @@ describe('MkeExperienceProjector', () => {
       durationMs: 1000,
       toolSuccess: true,
       businessSuccess: 'true',
+      aiFeedbackScore: 0.94,
+      aiFeedback: {
+        sourceKind: 'ai_feedback',
+        businessStatus: 'achieved',
+        confidence: 0.94,
+        reasonCode: 'ai_verified_fill',
+        summary: 'AI verified the fill step completed the intended task.',
+      },
       tabId: 9,
       siteFamily: 'example.test',
       pageUrlPattern: 'https://example.test/editor',
@@ -93,6 +101,14 @@ describe('MkeExperienceProjector', () => {
       durationMs: 1000,
       toolSuccess: true,
       businessSuccess: 'true',
+      aiFeedbackScore: 0.95,
+      aiFeedback: {
+        sourceKind: 'ai_feedback',
+        businessStatus: 'achieved',
+        confidence: 0.95,
+        reasonCode: 'ai_verified_submit',
+        summary: 'AI verified the submit step completed the intended task.',
+      },
       tabId: 9,
       siteFamily: 'example.test',
       pageUrlPattern: 'https://example.test/editor',
@@ -276,7 +292,7 @@ describe('MkeExperienceProjector', () => {
       response: { payloadDigest: { success: true } },
       responseAt: '2026-06-06T07:00:04.000Z',
       toolSuccess: true,
-      businessSuccess: 'unknown',
+      businessSuccess: 'achieved',
       aiFeedbackScore: 0.94,
       aiFeedback: {
         sourceKind: 'ai_feedback',
@@ -340,8 +356,8 @@ describe('MkeExperienceProjector', () => {
       responseAt: '2026-06-06T08:00:04.000Z',
       toolSuccess: true,
       businessSuccess: 'unknown',
-      aiFeedbackScore: 0.95,
-      aiFeedback: {
+      systemEvidenceScore: 0.95,
+      systemEvidence: {
         sourceKind: 'tabrix_auto_evidence',
         businessStatus: 'achieved',
         confidence: 0.95,
@@ -357,6 +373,69 @@ describe('MkeExperienceProjector', () => {
     });
 
     const result = projector.projectIdleBatch({ nowIso: '2026-06-06T08:00:05.000Z' });
+
+    expect(result.savedExperienceCount).toBe(0);
+    expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
+  });
+
+  it('does not mine a recipe from Tabrix success evidence without real AI feedback', () => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const traces = new MemoryTraceRepository(opened.db);
+    const knowledge = new KnowledgeModelRepository(opened.db);
+    const experience = new ExperienceRecipeRepository(opened.db);
+    const projector = new MkeExperienceProjector(traces, knowledge, experience);
+
+    const readTrace = traces.append({
+      traceId: 'trace-read-system-only-success',
+      taskId: 'task-system-only-success',
+      toolName: 'chrome_read_page',
+      requestParams: { tabId: 9 },
+      requestAt: '2026-06-06T08:30:01.000Z',
+      response: { payloadDigest: { summary: { quality: 'usable' } } },
+      responseAt: '2026-06-06T08:30:02.000Z',
+      toolSuccess: true,
+      tabId: 9,
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/editor',
+      pageRole: 'content_editor',
+      pageState: 'ready',
+      createdAt: '2026-06-06T08:30:02.000Z',
+    });
+    const pageModelKey = buildMkePageModelKey(readTrace)!;
+    addKnowledge({
+      knowledge,
+      siteFamily: 'example.test',
+      pageModelKey,
+      pageRole: 'content_editor',
+      pageUrlPattern: 'https://example.test/editor',
+    });
+    traces.append({
+      traceId: 'trace-click-system-only-success',
+      taskId: 'task-system-only-success',
+      toolName: 'chrome_click_element',
+      requestParams: { tabId: 9, ref: 'submit-button' },
+      requestAt: '2026-06-06T08:30:03.000Z',
+      response: { payloadDigest: { success: true } },
+      responseAt: '2026-06-06T08:30:04.000Z',
+      toolSuccess: true,
+      businessSuccess: 'achieved',
+      systemEvidenceScore: 0.95,
+      systemEvidence: {
+        sourceKind: 'tabrix_auto_evidence',
+        businessStatus: 'achieved',
+        confidence: 0.95,
+        reasonCode: 'tabrix_business_success_evidence',
+        summary: 'System evidence alone is not enough to mine experience.',
+      },
+      tabId: 9,
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/editor',
+      pageRole: 'content_editor',
+      pageState: 'ready',
+      createdAt: '2026-06-06T08:30:04.000Z',
+    });
+
+    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T08:30:05.000Z' });
 
     expect(result.savedExperienceCount).toBe(0);
     expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);

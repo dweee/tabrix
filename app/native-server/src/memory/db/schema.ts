@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS tabrix_memory_traces (
   token_total              INTEGER,
   ai_feedback_score        REAL,
   ai_feedback_blob         TEXT,
+  system_evidence_score    REAL,
+  system_evidence_blob     TEXT,
   redaction_state          TEXT NOT NULL DEFAULT 'redacted',
   created_at               TEXT NOT NULL
 );

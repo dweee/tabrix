@@ -29,6 +29,12 @@ function parseBlob<T = unknown>(value: string | null): T | null {
   }
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
 export type BusinessSuccessVerdict = 'true' | 'false' | 'unknown' | string;
 
 export interface MemoryTraceInsert {
@@ -74,6 +80,8 @@ export interface MemoryTraceInsert {
   tokenTotal?: number | null;
   aiFeedbackScore?: number | null;
   aiFeedback?: unknown;
+  systemEvidenceScore?: number | null;
+  systemEvidence?: unknown;
   redactionState?: string;
   createdAt: string;
 }
@@ -121,6 +129,8 @@ export interface MemoryTrace {
   tokenTotal: number | null;
   aiFeedbackScore: number | null;
   aiFeedback: unknown | null;
+  systemEvidenceScore: number | null;
+  systemEvidence: unknown | null;
   redactionState: string;
   createdAt: string;
 }
@@ -174,6 +184,8 @@ interface MemoryTraceRow {
   token_total: number | null;
   ai_feedback_score: number | null;
   ai_feedback_blob: string | null;
+  system_evidence_score: number | null;
+  system_evidence_blob: string | null;
   redaction_state: string;
   created_at: string;
 }
@@ -246,7 +258,23 @@ function buildAutomaticEvidenceFeedback(row: MemoryTraceRow): AutomaticEvidenceF
 }
 
 function rowToMemoryTrace(row: MemoryTraceRow): MemoryTrace {
+  const storedAiFeedback = parseBlob(row.ai_feedback_blob);
+  const storedAiFeedbackRecord = asRecord(storedAiFeedback);
+  const legacyAutomaticFeedback =
+    storedAiFeedbackRecord?.sourceKind === 'tabrix_auto_evidence'
+      ? {
+          score: row.ai_feedback_score,
+          feedback: storedAiFeedback,
+        }
+      : null;
   const automaticFeedback = buildAutomaticEvidenceFeedback(row);
+  const systemEvidence =
+    parseBlob(row.system_evidence_blob) ??
+    legacyAutomaticFeedback?.feedback ??
+    automaticFeedback?.feedback ??
+    null;
+  const systemEvidenceScore =
+    row.system_evidence_score ?? legacyAutomaticFeedback?.score ?? automaticFeedback?.score ?? null;
   return {
     traceId: row.trace_id,
     taskId: row.task_id,
@@ -288,8 +316,10 @@ function rowToMemoryTrace(row: MemoryTraceRow): MemoryTrace {
     tokenPrompt: row.token_prompt,
     tokenCompletion: row.token_completion,
     tokenTotal: row.token_total,
-    aiFeedbackScore: row.ai_feedback_score ?? automaticFeedback?.score ?? null,
-    aiFeedback: parseBlob(row.ai_feedback_blob) ?? automaticFeedback?.feedback ?? null,
+    aiFeedbackScore: legacyAutomaticFeedback ? null : row.ai_feedback_score,
+    aiFeedback: legacyAutomaticFeedback ? null : storedAiFeedback,
+    systemEvidenceScore,
+    systemEvidence,
     redactionState: row.redaction_state,
     createdAt: row.created_at,
   };
@@ -316,9 +346,10 @@ export class MemoryTraceRepository {
          tab_lifecycle_blob, site_family, page_url_pattern, page_role, page_state,
          page_model_key, perception_objects_blob, action_target_blob,
          pre_observation_blob, post_observation_blob, post_action_delta_blob,
-         source_route, selected_data_source, freshness, fallback_used,
-         next_required_check, token_prompt, token_completion, token_total,
-         ai_feedback_score, ai_feedback_blob, redaction_state, created_at)
+          source_route, selected_data_source, freshness, fallback_used,
+          next_required_check, token_prompt, token_completion, token_total,
+          ai_feedback_score, ai_feedback_blob, system_evidence_score, system_evidence_blob,
+          redaction_state, created_at)
        VALUES
         (@trace_id, @task_id, @task_theme, @task_intent, @task_signature, @ai_client,
          @tool_name, @tool_call_id, @sequence_index, @request_params_blob, @request_at,
@@ -327,9 +358,10 @@ export class MemoryTraceRepository {
          @tab_lifecycle_blob, @site_family, @page_url_pattern, @page_role, @page_state,
          @page_model_key, @perception_objects_blob, @action_target_blob,
          @pre_observation_blob, @post_observation_blob, @post_action_delta_blob,
-         @source_route, @selected_data_source, @freshness, @fallback_used,
-         @next_required_check, @token_prompt, @token_completion, @token_total,
-         @ai_feedback_score, @ai_feedback_blob, @redaction_state, @created_at)`,
+          @source_route, @selected_data_source, @freshness, @fallback_used,
+          @next_required_check, @token_prompt, @token_completion, @token_total,
+          @ai_feedback_score, @ai_feedback_blob, @system_evidence_score, @system_evidence_blob,
+          @redaction_state, @created_at)`,
     );
     this.updateAiFeedbackStmt = db.prepare(
       `UPDATE tabrix_memory_traces
@@ -411,6 +443,8 @@ export class MemoryTraceRepository {
       token_total: optionalInteger(input.tokenTotal),
       ai_feedback_score: optionalNumber(input.aiFeedbackScore),
       ai_feedback_blob: blob(input.aiFeedback),
+      system_evidence_score: optionalNumber(input.systemEvidenceScore),
+      system_evidence_blob: blob(input.systemEvidence),
       redaction_state: input.redactionState ?? 'redacted',
       created_at: input.createdAt,
     };

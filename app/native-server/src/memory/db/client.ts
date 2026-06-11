@@ -154,6 +154,24 @@ function dropRetiredPrelaunchTables(db: SqliteDatabase): void {
   }
 }
 
+function ensureMemoryTraceSystemEvidenceColumns(db: SqliteDatabase): void {
+  if (!hasTable(db, 'tabrix_memory_traces')) return;
+  if (!hasColumn(db, 'tabrix_memory_traces', 'system_evidence_score')) {
+    execMigration(db, {
+      table: 'tabrix_memory_traces',
+      column: 'system_evidence_score',
+      sql: 'ALTER TABLE tabrix_memory_traces ADD COLUMN system_evidence_score REAL',
+    });
+  }
+  if (!hasColumn(db, 'tabrix_memory_traces', 'system_evidence_blob')) {
+    execMigration(db, {
+      table: 'tabrix_memory_traces',
+      column: 'system_evidence_blob',
+      sql: 'ALTER TABLE tabrix_memory_traces ADD COLUMN system_evidence_blob TEXT',
+    });
+  }
+}
+
 /**
  * Additive migration for legacy DBs that pre-date the
  * replay-outcome write-back columns. Each ALTER is guarded by a
@@ -361,6 +379,7 @@ export function openMemoryDb(options?: MemoryDbOptions): OpenMemoryDbResult {
   db.pragma('foreign_keys = ON');
   dropRetiredPrelaunchTables(db);
   db.exec(MKE_CORE_CREATE_TABLES_SQL);
+  ensureMemoryTraceSystemEvidenceColumns(db);
   db.exec(BROWSER_OBJECT_CREATE_TABLES_SQL);
   ensureBrowserObjectRouteColumns(db);
   // Legacy DBs may already have `experience_action_paths` without the

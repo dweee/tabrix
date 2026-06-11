@@ -62,7 +62,9 @@ export interface NativeToolHandlerDeps {
   sessionManager: Pick<
     SessionManager,
     'experience' | 'getPersistenceStatus' | 'knowledgeApi' | 'chooseContextTelemetry'
-  >;
+  > & {
+    memoryTraces?: SessionManager['memoryTraces'];
+  };
   /**
    * Capability allowlist source. Optional so existing handler tests
    * (which only need `sessionManager`) keep compiling; missing means
@@ -145,6 +147,86 @@ function experienceUnavailableResult(): CallToolResult {
   };
   return jsonResult(result, false);
 }
+
+const MEMORY_FEEDBACK_STATUSES = new Set(['achieved', 'partial', 'not_achieved', 'unknown']);
+
+function readObjectArg(args: unknown): Record<string, unknown> {
+  return args && typeof args === 'object' && !Array.isArray(args)
+    ? (args as Record<string, unknown>)
+    : {};
+}
+
+function readStringArg(args: Record<string, unknown>, field: string): string | null {
+  const value = args[field];
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readConfidenceArg(args: Record<string, unknown>): number | null {
+  const value = args.confidence;
+  if (value === undefined || value === null) return null;
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(0, Math.min(1, value))
+    : null;
+}
+
+const handleMemoryRecordAiFeedback: NativeToolHandler = (args, deps) => {
+  const persistenceMode = deps.sessionManager.getPersistenceStatus().mode;
+  if (persistenceMode === 'off' || !deps.sessionManager.memoryTraces) {
+    return jsonResult(
+      {
+        status: 'memory_unavailable',
+        persistenceMode,
+      },
+      false,
+    );
+  }
+
+  const object = readObjectArg(args);
+  const traceId = readStringArg(object, 'traceId');
+  const businessStatus = readStringArg(object, 'businessStatus');
+  if (!traceId || !businessStatus || !MEMORY_FEEDBACK_STATUSES.has(businessStatus)) {
+    return jsonResult(
+      {
+        status: 'invalid_input',
+        message: 'traceId and a valid businessStatus are required.',
+      },
+      true,
+    );
+  }
+
+  const updated = deps.sessionManager.memoryTraces.recordAiBusinessFeedback({
+    traceId,
+    businessStatus,
+    confidence: readConfidenceArg(object),
+    reasonCode: readStringArg(object, 'reasonCode'),
+    summary: readStringArg(object, 'summary'),
+    receivedAt: new Date().toISOString(),
+    sourceToolName: TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK,
+    sourceToolCallId: null,
+  });
+
+  if (!updated) {
+    return jsonResult(
+      {
+        status: 'unknown_trace',
+        traceId,
+        persistenceMode,
+      },
+      false,
+    );
+  }
+
+  return jsonResult(
+    {
+      status: 'recorded',
+      traceId,
+      businessStatus,
+      confidence: updated.aiFeedbackScore,
+      persistenceMode,
+    },
+    false,
+  );
+};
 
 const handleExperienceSuggestPlan: NativeToolHandler = (args, deps) => {
   let parsed;
@@ -410,6 +492,7 @@ const NATIVE_HANDLERS: ReadonlyMap<string, NativeToolHandler> = new Map([
   [TOOL_NAMES.EXPERIENCE.SCORE_STEP, handleExperienceScoreStepBridged],
   [TOOL_NAMES.CONTEXT.CHOOSE, handleTabrixChooseContext],
   [TOOL_NAMES.CONTEXT.RECORD_OUTCOME, handleTabrixChooseContextRecordOutcome],
+  [TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK, handleMemoryRecordAiFeedback],
 ]);
 
 export function getNativeToolHandler(toolName: string): NativeToolHandler | undefined {

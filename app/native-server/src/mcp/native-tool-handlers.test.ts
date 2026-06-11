@@ -23,6 +23,9 @@ function makeDeps(
     enabled: boolean;
     experience: ExperienceQueryService | null;
     knowledgeApi: KnowledgeApiRepository | null;
+    memoryTraces: {
+      recordAiBusinessFeedback: jest.Mock;
+    } | null;
     capabilityEnv: CapabilityEnv;
     dispatchBridged: DispatchBridgedFn;
     recorder: ReplayStepRecorder;
@@ -36,6 +39,9 @@ function makeDeps(
       },
       get knowledgeApi() {
         return overrides.knowledgeApi ?? null;
+      },
+      get memoryTraces() {
+        return overrides.memoryTraces ?? null;
       },
       getPersistenceStatus() {
         return {
@@ -172,6 +178,81 @@ describe('native-tool-handlers · experience_suggest_plan', () => {
       status: 'no_match',
       plans: [],
       persistenceMode: 'disk',
+    });
+  });
+});
+
+describe('native-tool-handlers · memory_record_ai_feedback', () => {
+  function getMemoryFeedbackHandler(): NativeToolHandler {
+    const handler = getNativeToolHandler(TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK);
+    if (!handler) throw new Error('memory_record_ai_feedback handler missing');
+    return handler;
+  }
+
+  it('records AI business feedback against an existing trace', async () => {
+    const handler = getMemoryFeedbackHandler();
+    const recordAiBusinessFeedback = jest.fn().mockReturnValue({
+      traceId: 'trace-1',
+      aiFeedbackScore: 0.94,
+    });
+
+    const result = await handler(
+      {
+        traceId: 'trace-1',
+        businessStatus: 'achieved',
+        confidence: 0.94,
+        reasonCode: 'ai_verified_result',
+        summary: 'AI verified the expected page result.',
+      },
+      makeDeps({ memoryTraces: { recordAiBusinessFeedback } }),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(recordAiBusinessFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceId: 'trace-1',
+        businessStatus: 'achieved',
+        confidence: 0.94,
+        reasonCode: 'ai_verified_result',
+        summary: 'AI verified the expected page result.',
+        sourceToolName: TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK,
+      }),
+    );
+    expect(callTextPayload(result)).toMatchObject({
+      status: 'recorded',
+      traceId: 'trace-1',
+      businessStatus: 'achieved',
+      confidence: 0.94,
+      persistenceMode: 'disk',
+    });
+  });
+
+  it('rejects missing traceId or invalid businessStatus', async () => {
+    const handler = getMemoryFeedbackHandler();
+    const result = await handler(
+      { businessStatus: 'done' },
+      makeDeps({ memoryTraces: { recordAiBusinessFeedback: jest.fn() } }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(callTextPayload(result)).toMatchObject({
+      status: 'invalid_input',
+    });
+  });
+
+  it('returns unknown_trace when the trace id is not in Memory', async () => {
+    const handler = getMemoryFeedbackHandler();
+    const result = await handler(
+      { traceId: 'missing', businessStatus: 'unknown' },
+      makeDeps({
+        memoryTraces: { recordAiBusinessFeedback: jest.fn().mockReturnValue(undefined) },
+      }),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(callTextPayload(result)).toMatchObject({
+      status: 'unknown_trace',
+      traceId: 'missing',
     });
   });
 });

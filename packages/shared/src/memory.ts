@@ -24,7 +24,18 @@ export type MemoryPersistenceMode = 'disk' | 'memory' | 'off';
  * inside the native DB.
  */
 export interface MkeMemoryAiFeedbackSummary {
-  sourceKind?: 'tabrix_auto_evidence' | 'ai_feedback' | string | null;
+  sourceKind?: 'ai_feedback' | string | null;
+  businessStatus?: string | null;
+  confidence?: number | null;
+  reasonCode?: string | null;
+  summary?: string | null;
+  receivedAt?: string | null;
+  sourceToolName?: string | null;
+  sourceToolCallId?: string | null;
+}
+
+export interface MkeMemorySystemEvidenceSummary {
+  sourceKind: 'tabrix_auto_evidence';
   businessStatus?: string | null;
   confidence?: number | null;
   reasonCode?: string | null;
@@ -88,6 +99,8 @@ export interface MkeMemoryTraceSummary {
   businessSuccess?: string | null;
   aiFeedbackScore?: number | null;
   aiFeedback?: MkeMemoryAiFeedbackSummary | null;
+  systemEvidenceScore?: number | null;
+  systemEvidence?: MkeMemorySystemEvidenceSummary | null;
   resultSummary?: string | null;
   errorCode?: string | null;
   tabId?: number | null;

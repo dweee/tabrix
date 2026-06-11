@@ -853,6 +853,30 @@ Delete a bookmark by id or URL.
 }
 ```
 
+### `memory_record_ai_feedback`
+
+Record AI business feedback for one Memory trace. Use this after the AI has judged whether a recorded browser step actually completed the user's goal. Tabrix system evidence remains separate and must not be treated as AI feedback.
+
+**Parameters**:
+
+- `traceId` (string, required): Memory trace ID to update.
+- `businessStatus` (string, required): One of `achieved`, `partial`, `not_achieved`, or `unknown`.
+- `confidence` (number, optional): AI confidence from `0` to `1`.
+- `reasonCode` (string, optional): Short machine-readable reason.
+- `summary` (string, optional): Short human-readable judgment.
+
+**Example**:
+
+```json
+{
+  "traceId": "trace-123",
+  "businessStatus": "achieved",
+  "confidence": 0.93,
+  "reasonCode": "expected_result_visible",
+  "summary": "The page showed the expected search results after the action."
+}
+```
+
 ## 🧪 Advanced / JavaScript
 
 ### `chrome_javascript`

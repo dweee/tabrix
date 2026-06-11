@@ -101,22 +101,15 @@ function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
-function isBusinessAchieved(trace: MemoryTrace): boolean {
-  if (
+function hasTabrixSuccessEvidence(trace: MemoryTrace): boolean {
+  return (
     trace.businessSuccess === 'achieved' ||
     trace.businessSuccess === 'proven' ||
     trace.businessSuccess === 'true'
-  ) {
-    return true;
-  }
-  if (
-    trace.businessSuccess === 'not_achieved' ||
-    trace.businessSuccess === 'failed' ||
-    trace.businessSuccess === 'false' ||
-    trace.businessSuccess === 'partial'
-  ) {
-    return false;
-  }
+  );
+}
+
+function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
   const feedback = readObject(trace.aiFeedback);
   const sourceKind = readString(feedback?.sourceKind);
   const businessStatus = readString(feedback?.businessStatus);
@@ -125,11 +118,23 @@ function isBusinessAchieved(trace: MemoryTrace): boolean {
       ? feedback.confidence
       : trace.aiFeedbackScore;
   return (
-    (sourceKind === 'ai_feedback' || sourceKind === null) &&
+    sourceKind === 'ai_feedback' &&
     businessStatus === 'achieved' &&
     typeof confidence === 'number' &&
     confidence >= 0.9
   );
+}
+
+function isBusinessAchieved(trace: MemoryTrace): boolean {
+  if (
+    trace.businessSuccess === 'not_achieved' ||
+    trace.businessSuccess === 'failed' ||
+    trace.businessSuccess === 'false' ||
+    trace.businessSuccess === 'partial'
+  ) {
+    return false;
+  }
+  return hasTabrixSuccessEvidence(trace) && hasVerifiedAiSuccessFeedback(trace);
 }
 
 function groupByTask(traces: MemoryTrace[]): TaskTraceGroup[] {

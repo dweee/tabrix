@@ -665,8 +665,8 @@ export class MkeMemoryTraceService {
       selectedDataSource: digest.selectedDataSource,
       freshness: digest.freshness,
       fallbackUsed: digest.fallbackUsed,
-      aiFeedbackScore: automaticFeedback.score,
-      aiFeedback: automaticFeedback.feedback,
+      systemEvidenceScore: automaticFeedback.score,
+      systemEvidence: automaticFeedback.feedback,
       redactionState: 'redacted',
       createdAt: new Date(responseAtMs).toISOString(),
     });

@@ -79,4 +79,13 @@ export const TOOL_NAMES = {
      */
     RECORD_OUTCOME: 'tabrix_choose_context_record_outcome',
   },
+  /**
+   * MKEP Memory write-back layer.
+   * Native-handled. Lets the upstream AI attach business feedback to
+   * a concrete Memory trace id returned in the `_tabrix.traceId`
+   * envelope, without waiting for a later browser tool call.
+   */
+  MEMORY: {
+    RECORD_AI_FEEDBACK: 'memory_record_ai_feedback',
+  },
 };
