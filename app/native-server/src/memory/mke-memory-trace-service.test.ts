@@ -296,6 +296,7 @@ describe('MkeMemoryTraceService', () => {
           selectedDataSource: 'api_rows',
           endpointFamily: 'example_items_search',
           freshness: 'fresh',
+          apiCdpProofBoundary: 'diagnostic boundary should not be persisted',
           tabId: 9,
           pageProjection: {
             pageRole: 'search_results',
@@ -314,6 +315,11 @@ describe('MkeMemoryTraceService', () => {
 
       const objects = browserObjectRepo.listRecent({ limit: 10, offset: 0 });
       expect(objects.map((object) => object.objectType).sort()).toEqual(['data_source', 'page']);
+      for (const object of objects) {
+        expect(object.claimBoundary).toBeNull();
+        expect(object.confidenceScore).toBeNull();
+        expect(JSON.stringify(object.facts)).not.toContain('evidenceSummary');
+      }
       expect(objects.find((object) => object.objectType === 'data_source')).toMatchObject({
         selectedDataSource: 'api_rows',
         sourceRoute: 'knowledge_api_endpoints',
