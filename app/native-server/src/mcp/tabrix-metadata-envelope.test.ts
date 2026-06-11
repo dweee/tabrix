@@ -202,11 +202,11 @@ describe('tabrix metadata envelope', () => {
           traceBindingHash: expect.any(String),
         },
         toolSuccess: true,
-        businessStatus: 'partial',
         businessFeedbackRequired: true,
         businessFeedbackGuideVersion: 'tabrix-ai-business-feedback-v1',
       },
     });
+    expect(parseFirstText(result)._tabrix).not.toHaveProperty('businessStatus');
   });
 
   it('leaves non-JSON text results unchanged', () => {

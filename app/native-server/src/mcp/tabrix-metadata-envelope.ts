@@ -6,7 +6,7 @@ const TABRIX_TOOL_METADATA_KEY = '_tabrix';
 const AI_BUSINESS_STATUS_VALUES = new Set(['achieved', 'partial', 'not_achieved', 'unknown']);
 const AI_BUSINESS_FEEDBACK_GUIDE_VERSION = 'tabrix-ai-business-feedback-v1';
 const AI_BUSINESS_FEEDBACK_SCORE_GUIDE =
-  'When sending _tabrix.previousFeedback[].confidence for a previous trace: 0.90-1.00 = clear page evidence and intent achieved; 0.70-0.89 = likely achieved with one uncertainty; 0.40-0.69 = partial progress, needs follow-up read/confirmation; 0.01-0.39 = action ran but insufficient evidence; 0.00 = clearly not achieved.';
+  'When sending _tabrix.previousFeedback[].confidence for a previous trace: 0.90-1.00 = clear page result and intent achieved; 0.70-0.89 = likely achieved with one uncertainty; 0.40-0.69 = partial progress, needs follow-up read/confirmation; 0.01-0.39 = action ran but the result is unclear; 0.00 = clearly not achieved.';
 
 interface TabrixPreviousFeedback {
   traceId: string;
@@ -38,7 +38,7 @@ export interface TabrixToolMetadata {
 const TABRIX_TOOL_METADATA_SCHEMA = {
   type: 'object',
   description:
-    'Optional Tabrix runtime metadata for intent titles and previous Memory trace business feedback.',
+    'Optional Tabrix runtime metadata for intent titles and previous Memory trace AI feedback.',
   properties: {
     intentTitle: {
       type: 'string',
@@ -55,7 +55,7 @@ const TABRIX_TOOL_METADATA_SCHEMA = {
     previousFeedback: {
       type: 'array',
       description:
-        'Optional business feedback for earlier Tabrix Memory traces. Use the confidence scoring guide returned in each tool result _tabrix envelope.',
+        'Optional AI feedback for earlier Tabrix Memory traces. Use the confidence scoring guide returned in each tool result _tabrix envelope.',
       items: {
         type: 'object',
         properties: {
@@ -177,7 +177,6 @@ export function attachTabrixMemoryTraceEnvelope(
       traceBindingHash,
       feedbackTarget,
       toolSuccess: trace.toolSuccess,
-      businessStatus: trace.businessSuccess ?? 'unknown',
       businessFeedbackRequired: true,
       businessFeedbackGuideVersion: AI_BUSINESS_FEEDBACK_GUIDE_VERSION,
       businessFeedbackScoreGuide: AI_BUSINESS_FEEDBACK_SCORE_GUIDE,
