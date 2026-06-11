@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openMemoryDb } from '../db/client';
 import { SessionManager } from '../../execution/session-manager';
-import { EXPERIENCE_ACTION_PATHS_TABLE, EXPERIENCE_LOCATOR_PREFS_TABLE } from './index';
+import { EXPERIENCE_ACTION_PATHS_TABLE } from './index';
 import { ExperienceRepository } from './experience-repository';
 
 function fresh(): { db: ReturnType<typeof openMemoryDb>['db']; close: () => void } {
@@ -25,33 +25,43 @@ interface CountRow {
 }
 
 describe('Experience schema seed (B-005)', () => {
-  it('creates both experience tables on a virgin DB', () => {
+  it('creates the active experience table on a virgin DB', () => {
     const { db, close } = fresh();
     try {
       const rows = db
-        .prepare("SELECT name, type FROM sqlite_master WHERE type='table' AND name IN (?, ?)")
-        .all(EXPERIENCE_ACTION_PATHS_TABLE, EXPERIENCE_LOCATOR_PREFS_TABLE) as TableInfoRow[];
+        .prepare("SELECT name, type FROM sqlite_master WHERE type='table' AND name = ?")
+        .all(EXPERIENCE_ACTION_PATHS_TABLE) as TableInfoRow[];
       const names = rows.map((r) => r.name).sort();
-      expect(names).toEqual([EXPERIENCE_ACTION_PATHS_TABLE, EXPERIENCE_LOCATOR_PREFS_TABLE]);
+      expect(names).toEqual([EXPERIENCE_ACTION_PATHS_TABLE]);
     } finally {
       close();
     }
   });
 
-  it('creates the expected indexes on both tables', () => {
+  it('does not create the retired locator prefs table on a virgin DB', () => {
+    const { db, close } = fresh();
+    try {
+      const row = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?")
+        .get('experience_locator_prefs') as TableInfoRow | undefined;
+      expect(row).toBeUndefined();
+    } finally {
+      close();
+    }
+  });
+
+  it('creates the expected indexes on the active experience table', () => {
     const { db, close } = fresh();
     try {
       const rows = db
-        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name IN (?, ?)")
-        .all(EXPERIENCE_ACTION_PATHS_TABLE, EXPERIENCE_LOCATOR_PREFS_TABLE) as IndexRow[];
+        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name = ?")
+        .all(EXPERIENCE_ACTION_PATHS_TABLE) as IndexRow[];
       const names = rows.map((r) => r.name);
       expect(names).toEqual(
         expect.arrayContaining([
           'experience_action_paths_role_intent_idx',
           'experience_action_paths_site_role_intent_idx',
           'experience_action_paths_last_used_at_idx',
-          'experience_locator_prefs_role_purpose_idx',
-          'experience_locator_prefs_last_hit_at_idx',
         ]),
       );
     } finally {
@@ -102,17 +112,13 @@ describe('Experience schema seed (B-005)', () => {
     }
   });
 
-  it('seeds both tables as empty on a fresh DB', () => {
+  it('seeds the active experience table as empty on a fresh DB', () => {
     const { db, close } = fresh();
     try {
       const actionPaths = db
         .prepare(`SELECT COUNT(*) AS total FROM ${EXPERIENCE_ACTION_PATHS_TABLE}`)
         .get() as CountRow;
-      const locatorPrefs = db
-        .prepare(`SELECT COUNT(*) AS total FROM ${EXPERIENCE_LOCATOR_PREFS_TABLE}`)
-        .get() as CountRow;
       expect(actionPaths.total).toBe(0);
-      expect(locatorPrefs.total).toBe(0);
     } finally {
       close();
     }
@@ -245,16 +251,15 @@ describe('Experience schema seed (B-005)', () => {
           .get() as { name: string } | undefined;
         expect(siteIndex?.name).toBe('experience_action_paths_site_role_intent_idx');
         const repo = new ExperienceRepository(firstOpen.db);
+        expect(repo.findActionPathById(legacyActionPathId)?.siteFamily).toBe('github');
         expect(
-          repo
-            .suggestActionPaths({
-              intentSignature: 'open issues',
-              siteFamily: 'github',
-              pageRole: 'repo_home',
-              limit: 5,
-            })
-            .map((row) => row.actionPathId),
-        ).toEqual([legacyActionPathId]);
+          repo.suggestActionPaths({
+            intentSignature: 'open issues',
+            siteFamily: 'github',
+            pageRole: 'repo_home',
+            limit: 5,
+          }),
+        ).toEqual([]);
       } finally {
         firstOpen.db.close();
       }

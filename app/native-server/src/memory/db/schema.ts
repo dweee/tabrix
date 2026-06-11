@@ -486,23 +486,6 @@ CREATE INDEX IF NOT EXISTS experience_action_paths_last_used_at_idx
 CREATE INDEX IF NOT EXISTS experience_action_paths_composite_score_idx
   ON experience_action_paths(composite_score_decayed)
   WHERE composite_score_decayed IS NOT NULL;
-
-CREATE TABLE IF NOT EXISTS experience_locator_prefs (
-  locator_pref_id          TEXT PRIMARY KEY,
-  page_role                TEXT NOT NULL,
-  element_purpose          TEXT NOT NULL,
-  preferred_selector_kind  TEXT NOT NULL,    -- 'role' | 'text' | 'data-testid' | 'css'
-  preferred_selector       TEXT NOT NULL,
-  hit_count                INTEGER NOT NULL DEFAULT 0,
-  last_hit_at              TEXT,
-  created_at               TEXT NOT NULL,
-  updated_at               TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS experience_locator_prefs_role_purpose_idx
-  ON experience_locator_prefs(page_role, element_purpose);
-CREATE INDEX IF NOT EXISTS experience_locator_prefs_last_hit_at_idx
-  ON experience_locator_prefs(last_hit_at);
 `;
 
 /**
@@ -763,3 +746,122 @@ CREATE INDEX IF NOT EXISTS experience_writeback_warnings_action_path_idx
 CREATE INDEX IF NOT EXISTS experience_writeback_warnings_created_at_idx
   ON experience_writeback_warnings(created_at);
 `;
+
+export const MEMORY_DB_ACTIVE_TABLE_MANIFEST = [
+  {
+    name: 'memory_tasks',
+    layer: 'memory',
+    surface: 'session_history',
+    purpose: 'Task envelope for persisted MCP tool sessions.',
+    retention: 'active',
+  },
+  {
+    name: 'memory_sessions',
+    layer: 'memory',
+    surface: 'session_history',
+    purpose: 'Run/session header and Experience aggregation cursor.',
+    retention: 'active',
+  },
+  {
+    name: 'memory_steps',
+    layer: 'memory',
+    surface: 'session_history',
+    purpose: 'Ordered MCP tool-call steps for run replay and explainability.',
+    retention: 'active',
+  },
+  {
+    name: 'memory_page_snapshots',
+    layer: 'memory',
+    surface: 'internal_evidence',
+    purpose: 'Compact page-read evidence used by chooser context and action correlation.',
+    retention: 'migration_candidate',
+  },
+  {
+    name: 'memory_actions',
+    layer: 'memory',
+    surface: 'internal_evidence',
+    purpose: 'Structured click/fill/navigate/keyboard action evidence used by Experience mining.',
+    retention: 'migration_candidate',
+  },
+  {
+    name: 'operation_memory_logs',
+    layer: 'memory',
+    surface: 'internal_telemetry',
+    purpose: 'Tool-level routing, fallback, timing, token, and tab-hygiene audit trail.',
+    retention: 'visibility_gap',
+  },
+  {
+    name: 'tabrix_memory_traces',
+    layer: 'mke_memory',
+    surface: 'mke_sidepanel',
+    purpose: 'Redacted AI-to-Tabrix tool-call trace source for MKE projections.',
+    retention: 'active',
+  },
+  {
+    name: 'tabrix_knowledge_models',
+    layer: 'mke_knowledge',
+    surface: 'mke_sidepanel',
+    purpose: 'Projected page/object knowledge model derived from validated memory traces.',
+    retention: 'projection_gap',
+  },
+  {
+    name: 'tabrix_experience_recipes',
+    layer: 'mke_experience',
+    surface: 'mke_sidepanel',
+    purpose: 'Template-only reusable recipe store derived from successful traces.',
+    retention: 'projection_gap',
+  },
+  {
+    name: 'tabrix_browser_objects',
+    layer: 'object_library',
+    surface: 'mke_sidepanel',
+    purpose: 'Current browser window/tab/page-object fact layer for lifecycle-aware operation.',
+    retention: 'active',
+  },
+  {
+    name: 'experience_action_paths',
+    layer: 'experience',
+    surface: 'mcp_tools',
+    purpose: 'Executable reusable action paths for suggest/replay/score tools.',
+    retention: 'active',
+  },
+  {
+    name: 'knowledge_api_endpoints',
+    layer: 'knowledge',
+    surface: 'mcp_routing',
+    purpose: 'Redacted API endpoint catalogue for data-source routing decisions.',
+    retention: 'active',
+  },
+  {
+    name: 'tabrix_choose_context_decisions',
+    layer: 'policy',
+    surface: 'execution_insights',
+    purpose: 'Chooser strategy decision telemetry for token-savings and routing audits.',
+    retention: 'active',
+  },
+  {
+    name: 'tabrix_choose_context_outcomes',
+    layer: 'policy',
+    surface: 'execution_insights',
+    purpose: 'Chooser decision outcome write-back for reuse/fallback quality metrics.',
+    retention: 'active',
+  },
+  {
+    name: 'experience_writeback_warnings',
+    layer: 'experience',
+    surface: 'internal_diagnostics',
+    purpose: 'Append-only isolation warnings for replay/composite-score write-back failures.',
+    retention: 'visibility_gap',
+  },
+] as const;
+
+export const MEMORY_DB_ACTIVE_TABLES = MEMORY_DB_ACTIVE_TABLE_MANIFEST.map((table) => table.name);
+
+export const MEMORY_DB_RETIRED_TABLES = [
+  {
+    name: 'experience_locator_prefs',
+    retiredAt: '2026-06-11',
+    reason:
+      'Reserved locator-preference table had no production reader, writer, MCP API, or sidepanel surface. Legacy user DBs are left untouched; new DBs no longer create it.',
+  },
+] as const;
