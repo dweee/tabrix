@@ -5,7 +5,7 @@ export const MEMORY_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK,
     description:
-      'Write back the AI business evaluation for a prior Tabrix Memory trace. Requires the trace binding fields returned in `_tabrix.feedbackTarget`; high-confidence success and Experience candidates must cite evidence refs. This records AI feedback only; Tabrix execution evidence remains separate.',
+      'Write the AI evaluation and score for a prior Tabrix Memory trace. Use this after the AI decides whether a Tabrix browser step helped complete the user goal. These AI ratings are the input for future Experience mining.',
     annotations: {
       readOnlyHint: false,
       idempotentHint: false,
@@ -78,14 +78,13 @@ export const MEMORY_SCHEMAS: Tool[] = [
         confidence: {
           type: 'number',
           description:
-            'AI confidence from 0 to 1. Use >=0.90 only when clear page/result evidence proves the intent was achieved.',
+            'AI confidence from 0 to 1. Use >=0.90 only when the page/result clearly shows the user goal advanced.',
           minimum: 0,
           maximum: 1,
         },
         reasonCode: {
           type: 'string',
-          description:
-            'Short machine-readable reason, e.g. ai_verified_result or insufficient_evidence.',
+          description: 'Short machine-readable reason, e.g. ai_verified_result or needs_retry.',
           maxLength: 128,
         },
         summary: {
@@ -97,7 +96,7 @@ export const MEMORY_SCHEMAS: Tool[] = [
         evidenceRefs: {
           type: 'array',
           description:
-            'Evidence references only, such as trace ids, tool call ids, observation ids, or result paths. Do not include raw page text, secrets, or screenshots.',
+            'References that support the AI evaluation, such as trace ids, tool call ids, observation ids, or result paths. Do not include raw page text, secrets, or screenshots.',
           items: { type: 'string', minLength: 1, maxLength: 160 },
           maxItems: 12,
         },
@@ -109,7 +108,7 @@ export const MEMORY_SCHEMAS: Tool[] = [
         experienceCandidate: {
           type: 'boolean',
           description:
-            'True only when this step is worth considering for Experience mining after evidence checks.',
+            'True only when this AI-rated step is worth considering for future Experience mining.',
         },
       },
       required: [

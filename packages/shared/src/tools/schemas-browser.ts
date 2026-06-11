@@ -157,7 +157,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.READ_PAGE,
     description:
-      'Get an accessibility-tree representation of visible page elements. Only returns elements visible in the viewport, and can optionally focus on interactive elements only.\nT3.2 contract: stable fields are mode/page/summary/interactiveElements/artifactRefs; candidateActions/pageContext/frameContext/historyRef/memoryHints are evolvable extensions.\nObservation-kernel evidence: observationProfile explains the snapshot profile (compact/task/delta/full/debug), coverage reports iframe/shadow/virtual-list/dynamic-panel boundaries, and evidenceSource tags DOM/AX/visible_text/watch_delta/API provenance. These fields are evidence boundaries, not click proof.\nT5.0 task-view skeleton: taskMode/complexityLevel/sourceKind/highValueObjects/L0/L1/L2 provide a task-oriented view on top of the existing snapshot without replacing the T3.2 contract.\nSafe-first guidance: prefer this tool before screenshots, coordinate clicks, or javascript. If the element you need is still missing, use chrome_screenshot for visual confirmation. Reserve chrome_computer and chrome_javascript for explicit fallback/debug cases. Dispatch success is not business PASS; use fresh readback or verifier evidence after actions.\nLimitation: Does not work on chrome:// or browser-internal pages; may return degraded output on sparse localhost pages.',
+      'Read the current web page so the AI can decide what to do next. Returns the page summary, important page objects, and executable candidateActions with targetRef values for click/fill tools.\nDefault output is L0+L1 to keep token use low; request L0+L1+L2 only when the AI needs detailed object refs. Use candidateActions/targetRef for browser control, not markdown text.\nAfter any click/fill/navigation, call chrome_read_page again when the AI needs to verify the page result before continuing.\nLimitation: Does not work on chrome:// or browser-internal pages; sparse or highly dynamic pages may need a screenshot fallback.',
     annotations: {
       readOnlyHint: true,
     },
@@ -251,7 +251,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
             assistantProvidedTarget: {
               type: 'object',
               description:
-                'Optional target chosen by the AI after inspecting prior candidates. Tabrix may use selector/targetRef/frameId to retry observation or artifact extraction, then report evidence.',
+                'Optional target chosen by the AI after inspecting prior candidates. Tabrix may use selector/targetRef/frameId to retry scoped observation or artifact extraction, then return the updated page result.',
               properties: {
                 purpose: {
                   type: 'string',
@@ -321,7 +321,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
             label: {
               type: 'string',
               description:
-                'Optional AI-facing read_page candidateActions[*].label. Planning/evidence text only; execution still uses targetRef or locatorChain.',
+                'Optional AI-facing read_page candidateActions[*].label. It is descriptive text only; execution still uses targetRef or locatorChain.',
             },
             intent: {
               type: 'string',
@@ -589,7 +589,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.SCREENSHOT,
     description:
-      'Take a screenshot of the current page or a specific element. Prefer chrome_read_page before using screenshots for routine discovery, and use this tool for visual evidence or coordinate confirmation when the DOM/ref path is insufficient.\nLimitation: Full-page or large-viewport captures may time out on complex pages. If capture fails, try a smaller viewport before escalating to chrome_computer.',
+      'Take a screenshot of the current page or a specific element. Prefer chrome_read_page before using screenshots for routine discovery, and use this tool for visual confirmation or coordinate fallback when the DOM/ref path is insufficient.\nLimitation: Full-page or large-viewport captures may time out on complex pages. If capture fails, try a smaller viewport before escalating to chrome_computer.',
     annotations: {
       readOnlyHint: true,
     },
@@ -1136,7 +1136,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.JAVASCRIPT,
     description:
-      'Execute JavaScript code in a browser tab and return the result. This is a high-risk debugger/fallback capability: do not use it for routine tab discovery, normal navigation waits, or simple content extraction when chrome_read_page, chrome_get_web_content, chrome_get_interactive_elements, chrome_click_element, or chrome_fill_or_select can do the job. Caller responsibility: the calling AI/client must review the script intent, data access, and side effects before sending it; Tabrix executes the supplied script and does not statically analyze, sanitize, or certify arbitrary JavaScript safety. Uses CDP Runtime.evaluate with awaitPromise and returnByValue; automatically falls back to chrome.scripting.executeScript if the debugger is busy. Output is sanitized (sensitive data redacted) and truncated by default.',
+      'Execute JavaScript code in a browser tab and return the result. This is an advanced fallback for cases where normal Tabrix tools cannot read or operate the page. Do not use it for routine tab discovery, navigation waits, or simple content extraction when chrome_read_page, chrome_get_web_content, chrome_get_interactive_elements, chrome_click_element, or chrome_fill_or_select can do the job. The calling AI/client must review the script intent, data access, and side effects before sending it. Uses CDP Runtime.evaluate with awaitPromise and returnByValue; automatically falls back to chrome.scripting.executeScript if the debugger is busy. Output is redacted and truncated by default.',
     annotations: {
       destructiveHint: true,
     },
@@ -1146,7 +1146,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
         code: {
           type: 'string',
           description:
-            'JavaScript code to execute. Runs inside an async function body, so top-level await and "return ..." are supported. Before passing this code to Tabrix, the calling AI/client is responsible for checking whether the script reads sensitive data, changes page state, navigates, submits forms, deletes data, or has other user-visible side effects; Tabrix is the executor and does not guarantee the script is safe.',
+            'JavaScript code to execute. Runs inside an async function body, so top-level await and "return ..." are supported. Before passing this code to Tabrix, the calling AI/client is responsible for checking whether the script reads sensitive data, changes page state, navigates, submits forms, deletes data, or has other user-visible side effects.',
         },
         tabId: {
           type: 'number',
@@ -1211,7 +1211,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
             label: {
               type: 'string',
               description:
-                'Optional AI-facing read_page candidateActions[*].label. Planning/evidence text only; execution still uses targetRef or locatorChain.',
+                'Optional AI-facing read_page candidateActions[*].label. It is descriptive text only; execution still uses targetRef or locatorChain.',
             },
             intent: {
               type: 'string',
@@ -1325,7 +1325,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
             label: {
               type: 'string',
               description:
-                'Optional AI-facing read_page candidateActions[*].label. Planning/evidence text only; execution still uses targetRef or locatorChain.',
+                'Optional AI-facing read_page candidateActions[*].label. It is descriptive text only; execution still uses targetRef or locatorChain.',
             },
             intent: {
               type: 'string',

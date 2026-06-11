@@ -6,8 +6,6 @@
  * strings through `normalizeTabrixSiteId` before persisting or comparing them.
  */
 
-export const TABRIX_GITHUB_SITE_ID = 'github';
-
 export const MAX_TABRIX_SITE_ID_CHARS = 128;
 
 export const TABRIX_SITE_ID_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/;

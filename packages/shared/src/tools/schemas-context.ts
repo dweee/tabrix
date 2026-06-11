@@ -6,7 +6,7 @@ export const CONTEXT_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.CONTEXT.CHOOSE,
     description:
-      'Tabrix MKEP context selector. Given an `intent` (free text) and optional `url` / `pageRole` / `siteId`, deterministically pick which existing native asset to use as context: `knowledge_light` (captured site API catalog / endpoint evidence) or `read_page_required` (fallback: caller should issue `chrome_read_page`). Pure SELECT against local SQLite. Unsupported or uncertain inputs resolve to `read_page_required`.',
+      'Choose the cheapest useful context for an AI browser task. Given an intent and optional page identity, Tabrix returns either reusable local Knowledge (`knowledge_light`) or tells the caller to read the page (`read_page_required`). Unsupported or uncertain inputs resolve to `read_page_required`.',
     annotations: {
       readOnlyHint: true,
       idempotentHint: true,
@@ -46,7 +46,7 @@ export const CONTEXT_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.CONTEXT.RECORD_OUTCOME,
     description:
-      "Outcome write-back for `tabrix_choose_context`. Closes the loop on whether the suggested strategy actually saved a `chrome_read_page` round-trip. Pure-INSERT P0: appends one telemetry row keyed by `decisionId` and never reads, mutates, or replays anything else. `outcome` is one of `'reuse'` (acted on the suggestion), `'fallback'` (had to fall back to `chrome_read_page` anyway), `'completed'` (the whole task completed on top of the suggestion), `'retried'` (re-issued `tabrix_choose_context`). Returns `{ status: 'unknown_decision' }` when the id has no matching row so the caller can distinguish a lost decision from a permission / transport error.",
+      "Record whether the previous `tabrix_choose_context` suggestion helped the AI avoid an unnecessary page read. `outcome` is one of `'reuse'`, `'fallback'`, `'completed'`, or `'retried'`. Unknown decision ids return `{ status: 'unknown_decision' }`.",
     annotations: {
       readOnlyHint: false,
       idempotentHint: false,
