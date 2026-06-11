@@ -717,12 +717,10 @@ function formatJsonDetail(value: unknown): string {
 
 function formatMemoryTraceJson(trace: MkeMemoryTraceSummary): string {
   return formatJsonDetail({
-    traceId: trace.traceId,
-    taskId: trace.taskId,
-    taskIntent: trace.taskIntent,
-    toolName: trace.toolName,
-    toolCallId: trace.toolCallId,
-    sequenceIndex: trace.sequenceIndex,
+    title: trace.display?.title || formatTraceTitle(trace),
+    method: trace.toolName,
+    methodLabel: trace.display?.methodLabel || formatToolLabel(trace.toolName),
+    intent: trace.taskIntent,
     requestAt: trace.requestAt,
     responseAt: trace.responseAt,
     durationMs: trace.durationMs,
@@ -734,13 +732,8 @@ function formatMemoryTraceJson(trace: MkeMemoryTraceSummary): string {
       pageUrlPattern: trace.pageUrlPattern,
       pageRole: trace.pageRole,
       pageState: trace.pageState,
-      pageModelKey: trace.pageModelKey,
-      sourceRoute: trace.sourceRoute,
-      selectedDataSource: trace.selectedDataSource,
-      freshness: trace.freshness,
     },
     resultSummary: trace.resultSummary,
-    redactionState: trace.redactionState,
     createdAt: trace.createdAt,
   });
 }

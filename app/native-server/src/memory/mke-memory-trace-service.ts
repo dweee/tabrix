@@ -558,6 +558,7 @@ function normalizeConfidence(value: number | null | undefined): number | null {
 
 const DEFAULT_AI_FEEDBACK_EVALUATION_VERSION = 'ai_feedback_v1';
 const DEFAULT_AI_FEEDBACK_RUBRIC_VERSION = 'tabrix_ai_business_feedback_v1';
+const UNTRUSTED_EVALUATOR_NAMES = new Set(['', 'unknown', 'default', 'system', 'tabrix']);
 
 function normalizeAiFeedbackScope(value: string | null | undefined): 'step' | 'task' {
   return value === 'task' ? 'task' : 'step';
@@ -618,6 +619,10 @@ function validateAiFeedbackQuality(input: {
   confidence: number | null;
   summary: string | null | undefined;
   experienceCandidate: boolean;
+  evaluationVersion: string | null | undefined;
+  rubricVersion: string | null | undefined;
+  evaluatorModel: string | null | undefined;
+  userGoalSnapshot: string | null | undefined;
 }): void {
   const highConfidenceSuccess =
     input.businessStatus === 'achieved' &&
@@ -634,6 +639,23 @@ function validateAiFeedbackQuality(input: {
     throw new MkeAiFeedbackValidationError(
       'experience_candidate_rejected',
       'Experience candidates require achieved feedback with confidence >= 0.90.',
+    );
+  }
+  const summary = input.summary?.trim() ?? '';
+  const evaluationVersion = input.evaluationVersion?.trim() ?? '';
+  const rubricVersion = input.rubricVersion?.trim() ?? '';
+  const evaluatorModel = input.evaluatorModel?.trim() ?? '';
+  const userGoalSnapshot = input.userGoalSnapshot?.trim() ?? '';
+  if (
+    summary.length < 20 ||
+    evaluationVersion.length < 3 ||
+    rubricVersion.length < 3 ||
+    userGoalSnapshot.length < 8 ||
+    UNTRUSTED_EVALUATOR_NAMES.has(evaluatorModel.toLowerCase())
+  ) {
+    throw new MkeAiFeedbackValidationError(
+      'experience_candidate_rejected',
+      'Experience candidates require a complete AI evaluation: evaluatorModel, evaluationVersion, rubricVersion, userGoalSnapshot, and a clear summary.',
     );
   }
 }
@@ -1263,6 +1285,10 @@ export class MkeMemoryTraceService {
       confidence,
       summary: input.summary,
       experienceCandidate,
+      evaluationVersion: input.evaluationVersion,
+      rubricVersion: input.rubricVersion,
+      evaluatorModel: input.evaluatorModel,
+      userGoalSnapshot: input.userGoalSnapshot,
     });
 
     const feedback = sanitizeValue(

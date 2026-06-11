@@ -39,10 +39,15 @@ function verifiedExperienceFeedback(input: {
 }) {
   return {
     sourceKind: 'ai_feedback',
+    evaluationScope: 'step',
+    evaluationVersion: 'ai_feedback_v1',
+    rubricVersion: 'tabrix_ai_business_feedback_v1',
+    evaluatorModel: 'jest-ai-evaluator',
     businessStatus: 'achieved',
     confidence: input.confidence,
     reasonCode: input.reasonCode,
     summary: input.summary,
+    userGoalSnapshot: 'complete the requested browser task',
     evidenceRefs: input.evidenceRef ? [input.evidenceRef] : [],
     experienceCandidate: true,
   };

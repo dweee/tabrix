@@ -154,6 +154,8 @@ describe('MkeMemoryTraceService', () => {
         summary: 'AI verified the expected page result appeared.',
         userGoalSnapshot: 'click and verify page result',
         experienceCandidate: true,
+        evaluationVersion: 'ai_feedback_v1',
+        rubricVersion: 'tabrix_ai_business_feedback_v1',
         evaluatorModel: 'jest-evaluator',
         receivedAt: '2026-06-10T10:00:01.000Z',
       });
@@ -251,7 +253,11 @@ describe('MkeMemoryTraceService', () => {
         businessStatus: 'achieved',
         confidence: 0.95,
         summary: 'AI verified the result.',
+        userGoalSnapshot: 'click and verify page result',
         experienceCandidate: true,
+        evaluationVersion: 'ai_feedback_v1',
+        rubricVersion: 'tabrix_ai_business_feedback_v1',
+        evaluatorModel: 'jest-evaluator',
       });
       expect(updated?.aiFeedback).toMatchObject({
         businessStatus: 'achieved',
@@ -265,6 +271,45 @@ describe('MkeMemoryTraceService', () => {
         experienceCandidate: true,
         accepted: true,
       });
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('rejects experience candidates without complete AI evaluator metadata', () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo);
+
+    try {
+      const trace = traceService.recordToolCall({
+        taskId: 'trace-ai-feedback-task',
+        aiClient: 'jest',
+        toolName: 'chrome_click_element',
+        stepId: 'trace-ai-feedback-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 7 },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 30,
+        result: textResult({ success: true }),
+      });
+
+      expect(() =>
+        traceService.recordAiBusinessFeedback({
+          traceId: trace.traceId,
+          taskId: trace.taskId,
+          toolName: trace.toolName,
+          sequenceIndex: trace.sequenceIndex,
+          traceBindingHash: buildMemoryTraceBindingHash(trace),
+          businessStatus: 'achieved',
+          confidence: 0.95,
+          summary: 'AI verified the result.',
+          experienceCandidate: true,
+        }),
+      ).toThrow(MkeAiFeedbackValidationError);
+      expect(traceRepo.get(trace.traceId)?.aiFeedback).toBeNull();
+      expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)).toEqual([]);
     } finally {
       traceService.discardPendingAsyncWrites();
       db.close();
