@@ -619,7 +619,7 @@ function objectWebPageToRecord(webPage: MkeObjectWebPageView): ViewRecord {
     feedbackScoreLabel: '',
     duration: '',
     createdAtLabel: formatDate(webPage.updatedAt),
-    status: webPage.lifecycleLabel,
+    status: `网页状态：${webPage.lifecycleLabel}`,
     statusTone: webPage.lifecycleTone,
     facts: [],
     detailJson: formatObjectWebPageJson(webPage),
