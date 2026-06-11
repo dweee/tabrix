@@ -295,7 +295,7 @@ function buildLifecycleSection(
     emptyText: '暂无生命周期状态。',
     items: [
       { label: '当前状态', value: lifecycle.label, tone: lifecycle.tone },
-      sourceFreshness ? { label: '证据新鲜度', value: sourceFreshness } : null,
+      sourceFreshness ? { label: '数据状态', value: sourceFreshness } : null,
       tabStatus ? { label: '浏览器加载', value: tabStatus } : null,
       operability
         ? { label: '操作能力', value: operability, tone: formatOperabilityTone(root) }

@@ -105,7 +105,6 @@ export function buildLiveObservedApiRowsSuccessResult(args: {
     fallbackCause: null,
     fallbackEntryLayer: 'L0+L1',
     requiresApiCall: false,
-    requiresExperienceReplay: false,
     apiFamily: liveObserved.endpointFamily,
     dataPurpose: liveObserved.dataPurpose,
     rows: liveObserved.rows,

@@ -57,12 +57,9 @@ export function isToolAllowed(toolName: string, tools: Tool[]): boolean {
  * Phase 0 Policy view of the tools list. Removes P3 opt-in tools that have not been opted-in
  * and injects the Tabrix-private `riskTier` annotation so clients that choose to render it can.
  *
- * Also injects `requiresExplicitOptIn: true` for tools listed
- * in {@link CAPABILITY_GATED_TOOLS} (e.g. `experience_replay`), even
- * though they are NOT in `P3_EXPLICIT_OPT_IN_TOOLS`. This is the
- * first non-P3 use of that annotation; the actual filtering happens
- * in {@link filterToolsByCapability} below, downstream of this
- * function.
+ * Also injects `requiresExplicitOptIn: true` for capability-gated tools.
+ * The actual filtering happens in {@link filterToolsByCapability} below,
+ * downstream of this function.
  *
  * Never mutates the input tool objects.
  */
@@ -96,8 +93,7 @@ export function filterToolsByPolicy(tools: Tool[]): Tool[] {
  * — see {@link isCapabilityEnabled}).
  *
  * This is orthogonal to the P3 opt-in path: a tool can be capability-
- * gated without being P3 (e.g. `experience_replay` is P1 + capability
- * `experience_replay`). The gate runs AFTER `filterToolsByPolicy` so
+ * gated without being P3. The gate runs AFTER `filterToolsByPolicy` so
  * the annotation injection above is always honoured for clients that
  * render the gate explanation.
  *

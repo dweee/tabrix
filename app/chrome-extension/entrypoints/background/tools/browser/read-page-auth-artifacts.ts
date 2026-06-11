@@ -284,7 +284,7 @@ export function buildAuthCollaborationState(params: {
       return '已看到登录后状态候选；继续原任务前仍应以 fresh read_page/postcondition 作为证明。';
     }
     if (succeededCandidate && !succeededCandidateHasFreshComparison) {
-      return '看到了登录后状态候选，但页面证据不是 fresh/resync 对比结果；请强制重新读取页面后再判断是否登录成功。';
+      return '看到了登录后状态候选，但页面结果还不是 fresh/resync 对比结果；请强制重新读取页面后再判断是否登录成功。';
     }
     if (actionOperability !== 'operable') {
       return '当前标签不是 AI 可操作标签；需要用户明确授权该标签，或让 AI 新开受控标签后再继续登录协作。';

@@ -95,15 +95,9 @@ export interface LayerDispatchInput {
    */
   searchListIntent?: boolean;
   /**
-   * Whether the chooser has a replay-eligible Experience candidate
-   * for this `(intent, pageRole)` bucket (i.e.
-   * `experience_replay` would actually run). Drives priority-5.
-   */
-  experienceReplayAvailable?: boolean;
-  /**
    * Set by upstream callers when stability invariants would lose
-   * required fields at a shallower layer (e.g. portable replay args,
-   * stable targetRef registry, click verifier inputs). When `true`,
+   * required fields at a shallower layer (e.g. stable targetRef registry,
+   * click verifier inputs). When `true`,
    * the dispatcher MUST stay at `L0+L1+L2` regardless of any other
    * row. This is the priority-1 safety override.
    */
@@ -143,12 +137,7 @@ export interface LayerDispatchResult {
    * eligible"). Never includes the row that won.
    */
   alternatives: LayerDispatchAlternative[];
-  /**
-   * `true` ONLY when the dispatcher selected the
-   * `experience_replay_skip_read` source route (Strategy Table row 8
-   * → kickoff binding). The caller is expected to skip
-   * `chrome_read_page` entirely on this branch.
-   */
+  /** Reserved for future non-DOM read paths. Currently false. */
   readPageAvoided: boolean;
   /** Populated only on the fail-safe branch; `''` otherwise. */
   fallbackCause: string;
@@ -195,7 +184,6 @@ interface NormalizedInput {
   hvoCount: number;
   knowledgeAvailable: boolean;
   searchListIntent: boolean;
-  experienceReplayAvailable: boolean;
   safetyRequiresFullLayers: boolean;
   safetyReason: string;
   fullReadByteLength: number;
@@ -287,20 +275,6 @@ const RULES: readonly DispatchRule[] = Object.freeze([
   },
 
   // ---------- priority 5 — MKEP support ----------
-  // Replay kickoff binding:
-  //   `experience_replay` available + safe → chosenLayer='L0',
-  //   sourceRoute='experience_replay_skip_read'. The caller decides
-  //   whether to skip `chrome_read_page` based on `sourceRoute`.
-  // NOTE: this rule is intentionally placed AFTER user-intent and
-  // task-type so an explicit "details" override is honoured even
-  // when replay is technically available — the stability contract takes
-  // precedence over token savings.
-  {
-    layer: 'L0',
-    reason: 'experience_replay_executable',
-    sourceRoute: 'experience_replay_skip_read',
-    matches: (i) => i.experienceReplayAvailable,
-  },
   {
     layer: 'L0',
     reason: 'knowledge_supports_summary',
@@ -362,7 +336,6 @@ function normalizeInput(input: LayerDispatchInput): NormalizedInput | { error: s
     hvoCount: normalizeCount(input.hvoCount),
     knowledgeAvailable: normalizeBool(input.knowledgeAvailable),
     searchListIntent: normalizeBool(input.searchListIntent),
-    experienceReplayAvailable: normalizeBool(input.experienceReplayAvailable),
     safetyRequiresFullLayers: normalizeBool(input.safetyRequiresFullLayers),
     safetyReason: normalizeString(input.safetyReason),
     fullReadByteLength: normalizeCount(input.fullReadByteLength),
@@ -452,7 +425,7 @@ export function dispatchLayer(input: LayerDispatchInput): LayerDispatchResult {
     tokenEstimate,
     fullReadTokenEstimate,
     alternatives,
-    readPageAvoided: chosen.sourceRoute === 'experience_replay_skip_read',
+    readPageAvoided: false,
     fallbackCause: '',
   };
 }

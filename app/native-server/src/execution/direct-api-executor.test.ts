@@ -124,7 +124,7 @@ describe('V26-FIX-01 tryDirectApiExecute — short-circuit branches', () => {
   it('non-knowledge sourceRoute → skipped_route_mismatch (no fetch call)', async () => {
     const fetchFn = jest.fn();
     const result = await tryDirectApiExecute(
-      inputWith({ sourceRoute: 'experience_replay_skip_read', fetchFn }),
+      inputWith({ sourceRoute: 'read_page_required', fetchFn }),
     );
     expect(result.executionMode).toBe('skipped_route_mismatch');
     expect(result.decisionReason).toBe('route_mismatch_not_knowledge_supported');

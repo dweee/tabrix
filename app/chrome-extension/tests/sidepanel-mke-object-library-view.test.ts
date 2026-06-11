@@ -139,7 +139,7 @@ describe('MKE Object Library view model', () => {
     const page = view.webPages[0];
     expect(page.lifecycleLabel).toBe('运行中');
     expect(page.sections[3].items).toContainEqual(
-      expect.objectContaining({ label: '证据新鲜度', value: '快照待同步' }),
+      expect.objectContaining({ label: '数据状态', value: '快照待同步' }),
     );
     expect(page.sections[3].items).toContainEqual(
       expect.objectContaining({ label: '浏览器加载', value: '已完成' }),

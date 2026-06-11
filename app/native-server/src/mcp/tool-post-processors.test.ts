@@ -378,7 +378,7 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
 
   it('gives shell env priority over persisted config when deciding capture enablement', () => {
     setPersistedPolicyCapabilities('api_knowledge');
-    process.env[ENV_KEY] = 'experience_replay';
+    process.env[ENV_KEY] = 'disabled_for_test';
     const { manager, session, step } = bootstrap();
     try {
       const raw = wrap(SAMPLE_BUNDLE);

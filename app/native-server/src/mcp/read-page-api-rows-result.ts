@@ -53,7 +53,6 @@ export function buildKnowledgeApiRowsSuccessResult(args: {
     fallbackUsed: 'none',
     fallbackEntryLayer: args.skipPlan.fallbackEntryLayer,
     requiresApiCall: true,
-    requiresExperienceReplay: false,
     apiFamily: args.apiResult.endpointFamily,
     dataPurpose: args.apiResult.dataPurpose,
     rows: args.apiResult.rows,

@@ -87,21 +87,6 @@ export const TOOL_RISK_TIERS: Readonly<Record<string, TabrixRiskTier>> = Object.
   [TOOL_NAMES.RECORD_REPLAY.FLOW_RUN]: 'P2',
   [TOOL_NAMES.RECORD_REPLAY.LIST_PUBLISHED]: 'P0',
 
-  // ---- MKEP Experience layer (read-only SELECT against native SQLite) ----
-  [TOOL_NAMES.EXPERIENCE.SUGGEST_PLAN]: 'P0',
-  // Experience write/execute path. P1 (per-step P2 actions are still gated
-  // by their own dispatch); first non-P3 use of `requiresExplicitOptIn`,
-  // additionally guarded by the `experience_replay` capability gate
-  // (CAPABILITY_GATED_TOOLS below) so listing + dispatch require an
-  // explicit operator opt-in independent of `TABRIX_POLICY_ALLOW_P3`.
-  [TOOL_NAMES.EXPERIENCE.REPLAY]: 'P1',
-  // Experience write-back tool. P1 because it persists outcome facts
-  // (counter delta + audit warning row) that influence subsequent
-  // chooser ranking; capability-gated via the same
-  // `experience_replay` gate so the score-step channel is governed
-  // by exactly the capability that controls the replay it serves.
-  [TOOL_NAMES.EXPERIENCE.SCORE_STEP]: 'P1',
-
   // ---- MKEP Context selector (read-only SELECT against native SQLite) ----
   [TOOL_NAMES.CONTEXT.CHOOSE]: 'P0',
   // Pure-INSERT outcome write-back. P0 because

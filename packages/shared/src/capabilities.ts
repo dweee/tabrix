@@ -17,10 +17,6 @@
  *
  * Scope of v1 (intentionally minimal):
  *  - `api_knowledge`: unblocks API Knowledge capture.
- *  - `experience_replay`: unblocks the autonomous replay of a
- *    named historical `experience_action_paths` row. This is the FIRST
- *    use of a capability gate as the operational opt-in for a non-P3
- *    tool — see `docs/B_EXPERIENCE_REPLAY_BRIEF_V1.md` §4.1 / §10.
  *
  *  Additional capability names from the original design
  *  (`vision | elevated_js | download | devtools | testing | cross_origin_nav`)
@@ -36,7 +32,7 @@
  *    startup without making a typo a hard failure.
  */
 
-export type TabrixCapability = 'api_knowledge' | 'experience_replay';
+export type TabrixCapability = 'api_knowledge';
 
 /**
  * Canonical set of every capability the codebase recognises today.
@@ -44,7 +40,6 @@ export type TabrixCapability = 'api_knowledge' | 'experience_replay';
  */
 export const ALL_TABRIX_CAPABILITIES: ReadonlySet<TabrixCapability> = new Set<TabrixCapability>([
   'api_knowledge',
-  'experience_replay',
 ]);
 
 const CAPABILITY_VALUES = ALL_TABRIX_CAPABILITIES as ReadonlySet<string>;

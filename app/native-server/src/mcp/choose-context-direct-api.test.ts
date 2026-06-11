@@ -21,13 +21,6 @@
 
 import { runTabrixChooseContext, runTabrixChooseContextWithDirectApi } from './choose-context';
 import type { ApiKnowledgeFetch } from '../api/api-knowledge';
-import type { ExperienceQueryService } from '../memory/experience';
-
-function emptyExperience(): ExperienceQueryService {
-  return {
-    suggestActionPaths: jest.fn().mockReturnValue([]),
-  } as unknown as ExperienceQueryService;
-}
 
 function jsonFetch(status: number, body: unknown): ApiKnowledgeFetch {
   return jest.fn().mockResolvedValue({
@@ -64,14 +57,13 @@ describe('runTabrixChooseContextWithDirectApi', () => {
   it('non-knowledge_supported_read route is bit-identical to the synchronous chooser', async () => {
     const sync = runTabrixChooseContext(
       { intent: 'do something' },
-      { experience: emptyExperience(), knowledgeApi: null, capabilityEnv: {} },
+      { knowledgeApi: null, capabilityEnv: {} },
     );
 
     const fetchSpy = jsonFetch(200, GITHUB_SEARCH_BODY);
     const wrapped = await runTabrixChooseContextWithDirectApi(
       { intent: 'do something' },
       {
-        experience: emptyExperience(),
         knowledgeApi: null,
         capabilityEnv: {},
         directApiFetchFn: fetchSpy,
@@ -88,7 +80,6 @@ describe('runTabrixChooseContextWithDirectApi', () => {
     const wrapped = await runTabrixChooseContextWithDirectApi(
       { intent: GITHUB_SEARCH_INTENT, url: 'https://github.com/search' },
       {
-        experience: emptyExperience(),
         knowledgeApi: null,
         capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
         directApiFetchFn: fetchSpy,
@@ -107,7 +98,6 @@ describe('runTabrixChooseContextWithDirectApi', () => {
     const wrapped = await runTabrixChooseContextWithDirectApi(
       { intent: GITHUB_SEARCH_INTENT, url: 'https://github.com/search' },
       {
-        experience: emptyExperience(),
         knowledgeApi: null,
         capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
         directApiFetchFn: fetchSpy,
@@ -138,7 +128,6 @@ describe('runTabrixChooseContextWithDirectApi', () => {
         pageRole: 'actions_detail',
       },
       {
-        experience: emptyExperience(),
         knowledgeApi: null,
         capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
         directApiFetchFn: fetchSpy,
@@ -161,7 +150,6 @@ describe('runTabrixChooseContextWithDirectApi', () => {
         pageRole: 'issues_list',
       },
       {
-        experience: emptyExperience(),
         knowledgeApi: null,
         capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
         directApiFetchFn: fetchSpy,
@@ -190,7 +178,6 @@ describe('runTabrixChooseContextWithDirectApi', () => {
     const wrapped = await runTabrixChooseContextWithDirectApi(
       { intent: GITHUB_SEARCH_INTENT, url: 'https://github.com/search' },
       {
-        experience: emptyExperience(),
         knowledgeApi: null,
         capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
         directApiFetchFn: fetchSpy,
@@ -214,7 +201,6 @@ describe('runTabrixChooseContextWithDirectApi', () => {
     const wrapped = await runTabrixChooseContextWithDirectApi(
       { intent: '查看页面摘要', url: 'https://www.example.com/some-article' },
       {
-        experience: emptyExperience(),
         knowledgeApi: null,
         capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
         directApiFetchFn: fetchSpy,
@@ -247,7 +233,6 @@ describe('runTabrixChooseContextWithDirectApi', () => {
         pageRole: 'issues_list',
       },
       {
-        experience: emptyExperience(),
         knowledgeApi: null,
         capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
         pageContext: {

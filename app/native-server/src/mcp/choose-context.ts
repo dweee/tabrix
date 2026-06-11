@@ -6,7 +6,7 @@
  *
  *  - `parseTabrixChooseContextInput` validates raw MCP args.
  *  - `chooseContextStrategy` is a pure function over already-resolved
- *    facts (`hasExperienceHit`, `hasUsableKnowledge`, `siteFamily`).
+ *    facts (`knowledgeCatalog`, `pageRole`, `siteFamily`).
  *  - `runTabrixChooseContext` is the IO orchestrator, kept tiny so it
  *    is easy to wire from `native-tool-handlers.ts` without crowding
  *    the dispatcher with chooser logic.
@@ -25,18 +25,14 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  EXPERIENCE_HIT_MIN_SUCCESS_RATE,
-  EXPERIENCE_LOOKUP_LIMIT,
   KNOWLEDGE_LIGHT_SAMPLE_LIMIT,
   MARKDOWN_FRIENDLY_PAGE_ROLES,
   MAX_TABRIX_CHOOSE_CONTEXT_INTENT_CHARS,
   MAX_TABRIX_CHOOSE_CONTEXT_PAGE_ROLE_CHARS,
   type ContextStrategyName,
-  type ReplayEligibilityBlockReason,
   type TabrixChooseContextArtifact,
   type TabrixChooseContextInput,
   type TabrixChooseContextOutcome,
-  type TabrixChooseContextRankedCandidate,
   type TabrixChooseContextRecordOutcomeResult,
   type TabrixChooseContextResult,
   type TabrixContextSiteFamily,
@@ -48,10 +44,7 @@ import { isCapabilityEnabled } from '../policy/capabilities';
 import type { CapabilityEnv } from '../policy/capabilities';
 import { normalizeIntentSignature } from '../memory/experience/experience-signature';
 import type { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
-import type { ExperienceQueryService } from '../memory/experience';
-import type { ExperienceActionPathRow } from '../memory/experience/experience-repository';
 import type { ChooseContextTelemetryRepository } from '../memory/telemetry/choose-context-telemetry';
-import { rankExperienceCandidates } from './choose-context-replay-rules';
 import {
   dispatchLayer,
   type LayerDispatchTaskType,
@@ -119,9 +112,7 @@ export interface ParsedChooseContextInput {
 }
 
 /**
- * Validate raw MCP arguments. Mirrors `parseExperienceSuggestPlanInput`
- * so a `(intent, pageRole)` pair lands in the same bucket here as it
- * does for `experience_suggest_plan`. v1 deliberately silently drops:
+ * Validate raw MCP arguments. v1 deliberately silently drops:
  *   - unparseable `url` (treated as omitted),
  *   - unsafe `siteId` tokens (treated as omitted),
  *   - empty-after-trim `pageRole` (treated as omitted).
@@ -231,7 +222,7 @@ function deriveRequestedRowLimit(intent: string): number | undefined {
  * Derive a `siteFamily` from an explicit safe `siteId` (highest
  * precedence) or, failing that, from the URL host. Non-GitHub hosts are
  * represented by their normalized host token and still fail closed unless
- * a matching Knowledge / Replay policy exists.
+ * a matching Knowledge policy exists.
  *
  * GitHub GA adapter compatibility:
  *   - exact host `github.com` → `'github'`
@@ -257,56 +248,12 @@ export function resolveSiteFamily(
 
 /**
  * Pure facts the chooser routes over. Keeps `chooseContextStrategy`
- * trivially testable without standing up an `ExperienceQueryService`
- * or a SQLite handle.
+ * trivially testable without standing up a SQLite handle.
  */
 export interface ChooseContextFacts {
   intentSignature: string;
   pageRole?: string;
   siteFamily?: TabrixContextSiteFamily;
-  /**
-   * Best surviving Experience plan (i.e. one whose computed
-   * `successRate >= EXPERIENCE_HIT_MIN_SUCCESS_RATE`). `undefined` when
-   * either no plan was returned or all returned plans were below the
-   * threshold.
-   */
-  experienceHit?: {
-    actionPathId: string;
-    successRate: number;
-    successCount: number;
-    failureCount: number;
-    /**
-     * When true the chooser routes the experience hit through the
-     * `experience_replay` strategy
-     * instead of `experience_reuse`. Eligibility is the AND of:
-     *   - the `experience_replay` capability is enabled,
-     *   - the row's `siteFamily` has a registered replay policy,
-     *   - the row's `pageRole` is allowed by that site policy,
-     *   - every step's `toolName` is in
-     *     `TABRIX_EXPERIENCE_REPLAY_SUPPORTED_STEP_KINDS`,
-     *   - the row's `successRate >= EXPERIENCE_HIT_MIN_SUCCESS_RATE`
-     *     (already true if `experienceHit` exists).
-     * Replay also uses stricter success-rate and success-count
-     * thresholds; the legacy `experience_reuse` gate
-     * (`EXPERIENCE_HIT_MIN_SUCCESS_RATE`) is unchanged.
-     */
-    replayEligible?: boolean;
-  };
-  /**
-   * Ranked replay candidates surfaced as a single `experience_ranked`
-   * artifact. Populated whenever the chooser has Experience rows in
-   * scope (regardless of which strategy it ultimately picks); empty
-   * when no rows came back. The ordering is the deterministic ranking
-   * from `rankExperienceCandidates`.
-   */
-  rankedReplayCandidates?: TabrixChooseContextRankedCandidate[];
-  /**
-   * First reason the top-1 ranked candidate was refused routing to
-   * `experience_replay`. `'none'` when the chooser actually picked
-   * `experience_replay`; absent when the chooser never had a candidate
-   * to consider.
-   */
-  rankedTopBlockedBy?: ReplayEligibilityBlockReason;
   /**
    * Knowledge catalog summary, populated only when the capability gate
    * is on AND there is at least one captured endpoint for the resolved
@@ -325,12 +272,6 @@ interface StrategyDecision {
   fallbackStrategy?: ContextStrategyName;
   reasoning: string;
   artifacts: TabrixChooseContextArtifact[];
-  /** First eligibility blocker for the top-1 candidate (if any). */
-  replayEligibleBlockedBy?: ReplayEligibilityBlockReason;
-  /** Chooser-side fallback depth (`0` when a candidate surfaced; `'cold'` otherwise). */
-  replayFallbackDepth: 0 | 'cold';
-  /** Number of candidates in the ranked artifact. */
-  rankedCandidateCount: number;
 }
 
 /**
@@ -339,105 +280,6 @@ interface StrategyDecision {
  * without updating the doc + the strategy-set guard test.
  */
 export function chooseContextStrategy(facts: ChooseContextFacts): StrategyDecision {
-  // When the chooser has ranked replay candidates available we ALWAYS
-  // surface them as a single `experience_ranked` artifact, even on the
-  // `experience_reuse` downgrade branch. This keeps post-mortem
-  // analysis grouped by `rankedCandidateCount` regardless of which
-  // strategy we pick. `rankedCandidateCount === 0` when no candidates
-  // surfaced (no Experience rows OR the legacy `experienceHit` path was
-  // taken with no ranking input).
-  const rankedCandidates = facts.rankedReplayCandidates ?? [];
-  const rankedCandidateCount = rankedCandidates.length;
-  const replayFallbackDepth: 0 | 'cold' = rankedCandidateCount > 0 ? 0 : 'cold';
-
-  if (facts.experienceHit) {
-    const hit = facts.experienceHit;
-    // Route the hit to `experience_replay` only when the capability,
-    // step-kind allowlist, and GitHub pageRole gates all pass. The
-    // fallback chain is `experience_reuse → read_page_required` (NOT
-    // directly to `read_page_required`); replay's failure mode is a
-    // per-step abort, after which the reusing branch can still try the
-    // recorded plan as plain advice instead of dispatched steps.
-    if (hit.replayEligible) {
-      const top = rankedCandidates[0];
-      const topScoreLabel = top !== undefined ? ` topScore=${top.score.toFixed(3)}` : '';
-      const reasoning =
-        `experience replay: actionPath=${hit.actionPathId}, ` +
-        `successRate=${hit.successRate.toFixed(2)} ` +
-        `(>= ${EXPERIENCE_HIT_MIN_SUCCESS_RATE.toFixed(2)});` +
-        `${topScoreLabel} ranked=${rankedCandidateCount}; ` +
-        `experience_replay capability enabled; all step kinds + pageRole supported in v1`;
-      return {
-        strategy: 'experience_replay',
-        fallbackStrategy: 'experience_reuse',
-        reasoning,
-        artifacts:
-          rankedCandidateCount > 0
-            ? [
-                {
-                  kind: 'experience_ranked',
-                  ref: hit.actionPathId,
-                  summary:
-                    `Experience action path ${hit.actionPathId} ` +
-                    `(${hit.successCount} ok / ${hit.failureCount} fail) — replay-eligible; ` +
-                    `${rankedCandidateCount} ranked candidate(s)`,
-                  ranked: rankedCandidates,
-                },
-              ]
-            : [
-                {
-                  kind: 'experience',
-                  ref: hit.actionPathId,
-                  summary:
-                    `Experience action path ${hit.actionPathId} ` +
-                    `(${hit.successCount} ok / ${hit.failureCount} fail) — replay-eligible`,
-                },
-              ],
-        replayEligibleBlockedBy: 'none',
-        replayFallbackDepth,
-        rankedCandidateCount,
-      };
-    }
-
-    const reasoning =
-      `experience hit: actionPath=${hit.actionPathId}, ` +
-      `successRate=${hit.successRate.toFixed(2)} ` +
-      `(>= ${EXPERIENCE_HIT_MIN_SUCCESS_RATE.toFixed(2)})` +
-      (rankedCandidateCount > 0
-        ? `; ranked=${rankedCandidateCount} (top blocked by ${facts.rankedTopBlockedBy ?? 'unknown'})`
-        : '');
-    return {
-      strategy: 'experience_reuse',
-      fallbackStrategy: 'read_page_required',
-      reasoning,
-      artifacts:
-        rankedCandidateCount > 0
-          ? [
-              {
-                kind: 'experience_ranked',
-                ref: hit.actionPathId,
-                summary:
-                  `Experience action path ${hit.actionPathId} ` +
-                  `(${hit.successCount} ok / ${hit.failureCount} fail); ` +
-                  `${rankedCandidateCount} ranked candidate(s)`,
-                ranked: rankedCandidates,
-              },
-            ]
-          : [
-              {
-                kind: 'experience',
-                ref: hit.actionPathId,
-                summary:
-                  `Experience action path ${hit.actionPathId} ` +
-                  `(${hit.successCount} ok / ${hit.failureCount} fail)`,
-              },
-            ],
-      replayEligibleBlockedBy: facts.rankedTopBlockedBy,
-      replayFallbackDepth,
-      rankedCandidateCount,
-    };
-  }
-
   if (facts.knowledgeCatalog && facts.knowledgeCatalog.totalEndpoints > 0) {
     const cat = facts.knowledgeCatalog;
     const sample = cat.sampleSignatures.slice(0, KNOWLEDGE_LIGHT_SAMPLE_LIMIT);
@@ -448,7 +290,7 @@ export function chooseContextStrategy(facts: ChooseContextFacts): StrategyDecisi
       strategy: 'knowledge_light',
       fallbackStrategy: 'read_page_required',
       reasoning:
-        `no experience match; api_knowledge gate on; ` +
+        `api_knowledge gate on; ` +
         `${cat.totalEndpoints} captured endpoint(s) on ${cat.site}. ` +
         `Tabrix v1 does NOT call site APIs — use the catalog as shape evidence only.`,
       artifacts: [
@@ -458,15 +300,13 @@ export function chooseContextStrategy(facts: ChooseContextFacts): StrategyDecisi
           summary,
         },
       ],
-      replayFallbackDepth,
-      rankedCandidateCount,
     };
   }
 
   // Text-heavy GitHub reading branch.
   //
-  // When (a) no experience hit, (b) no usable api_knowledge match,
-  // (c) the resolved siteFamily is `'github'`, and (d) the pageRole
+  // When (a) no usable api_knowledge match, (b) the resolved siteFamily
+  // is `'github'`, and (c) the pageRole
   // is on the hand-curated `MARKDOWN_FRIENDLY_PAGE_ROLES` whitelist,
   // we route to `read_page_markdown`. This is a *reading* surface — the
   // JSON HVOs / candidateActions / `targetRef` stay the execution truth.
@@ -490,7 +330,7 @@ export function chooseContextStrategy(facts: ChooseContextFacts): StrategyDecisi
       strategy: 'read_page_markdown',
       fallbackStrategy: 'read_page_required',
       reasoning:
-        `no experience match and no usable api_knowledge; ` +
+        `no usable api_knowledge; ` +
         `pageRole='${facts.pageRole}' is on the markdown-friendly GitHub whitelist — ` +
         `prefer read_page(render='markdown') as a reading surface, fall back to read_page (json) for execution.`,
       artifacts: [
@@ -500,17 +340,13 @@ export function chooseContextStrategy(facts: ChooseContextFacts): StrategyDecisi
           summary: `Use chrome_read_page(render='markdown') for this ${facts.pageRole} page.`,
         },
       ],
-      replayFallbackDepth,
-      rankedCandidateCount,
     };
   }
 
   return {
     strategy: 'read_page_required',
-    reasoning: 'no experience match and no usable api_knowledge — fall back to read_page (json)',
+    reasoning: 'no usable api_knowledge — fall back to read_page (json)',
     artifacts: [],
-    replayFallbackDepth,
-    rankedCandidateCount,
   };
 }
 
@@ -549,10 +385,10 @@ export function classifyIntentForLayerDispatch(intent: string): LayerDispatchUse
   ) {
     return 'details';
   }
-  // priority 2.3 — fill / search / submit / replay / form-like
+  // priority 2.3 — fill / search / submit / form-like
   if (
-    /(填写|提交|搜索|查询|表单|回放|重放|重播)/.test(intent) ||
-    /\b(fill|search|submit|replay|form|input)\b/.test(normalized)
+    /(填写|提交|搜索|查询|表单)/.test(intent) ||
+    /\b(fill|search|submit|form|input)\b/.test(normalized)
   ) {
     return 'form_or_submit';
   }
@@ -589,35 +425,7 @@ export function deriveTaskTypeForLayerDispatch(
   }
 }
 
-/**
- * Pick the legacy `experienceHit` shape from the top-1 ranked
- * candidate, applying the legacy `EXPERIENCE_HIT_MIN_SUCCESS_RATE` gate
- * so the existing `experience_reuse` branch keeps its threshold
- * behaviour. Replay eligibility is the stricter AND gate already
- * reflected in `topReplayEligible`.
- *
- * Returns `undefined` when no row is above the legacy threshold; the
- * chooser then falls through to `knowledge_light` / markdown / read.
- */
-function projectExperienceHit(
-  topRow: ExperienceActionPathRow | undefined,
-  topReplayEligible: boolean,
-): ChooseContextFacts['experienceHit'] {
-  if (!topRow) return undefined;
-  const total = topRow.successCount + topRow.failureCount;
-  const rate = total > 0 ? topRow.successCount / total : 0;
-  if (rate < EXPERIENCE_HIT_MIN_SUCCESS_RATE) return undefined;
-  return {
-    actionPathId: topRow.actionPathId,
-    successRate: rate,
-    successCount: topRow.successCount,
-    failureCount: topRow.failureCount,
-    replayEligible: topReplayEligible,
-  };
-}
-
 export interface RunTabrixChooseContextDeps {
-  experience: Pick<ExperienceQueryService, 'suggestActionPaths'> | null;
   knowledgeApi:
     | (Pick<KnowledgeApiRepository, 'listBySite' | 'countAll'> &
         Partial<Pick<KnowledgeApiRepository, 'listScoredBySite'>>)
@@ -670,7 +478,7 @@ export interface RunTabrixChooseContextDeps {
 
 /**
  * IO orchestrator: validates the args, fetches the two facts (best
- * Experience plan + knowledge catalog snapshot), and routes through
+ * Knowledge catalog snapshot), and routes through
  * the pure chooser. Always returns a `TabrixChooseContextResult` — the
  * caller wraps it into the MCP `CallToolResult` envelope.
  *
@@ -699,36 +507,7 @@ export function runTabrixChooseContext(
   const { input, intentSignature } = parsed;
   const siteFamily = resolveSiteFamily(input);
 
-  // Chooser-side ranking. We always do the single
-  // `experience.suggestActionPaths` read (the Memory-not-read invariant
-  // applies to per-step Memory tables, NOT to this aggregator-only
-  // query). The ranked list, eligibility blocker and top-1 row all come
-  // from the pure ranking module so tests can pin the matrix without
-  // standing up the full IO orchestrator.
   const nowIso = (deps.now ?? (() => new Date().toISOString()))();
-  let experienceHit: ChooseContextFacts['experienceHit'];
-  let rankedReplayCandidates: TabrixChooseContextRankedCandidate[] | undefined;
-  let rankedTopBlockedBy: ReplayEligibilityBlockReason | undefined;
-  if (deps.experience) {
-    const rows = deps.experience.suggestActionPaths({
-      intent: input.intent,
-      intentSignature,
-      siteFamily,
-      pageRole: input.pageRole,
-      limit: EXPERIENCE_LOOKUP_LIMIT,
-    });
-    const ranking = rankExperienceCandidates({
-      rows,
-      capabilityEnabled: isCapabilityEnabled('experience_replay', deps.capabilityEnv),
-      nowIso,
-      pageRole: input.pageRole,
-    });
-    if (ranking.ranked.length > 0) {
-      rankedReplayCandidates = ranking.ranked;
-      rankedTopBlockedBy = ranking.topBlockedBy;
-    }
-    experienceHit = projectExperienceHit(ranking.topRow, ranking.topReplayEligible);
-  }
 
   let knowledgeCatalog: ChooseContextFacts['knowledgeCatalog'];
   const apiCandidate = isCapabilityEnabled('api_knowledge', deps.capabilityEnv)
@@ -738,11 +517,11 @@ export function runTabrixChooseContext(
         pageRole: input.pageRole,
       })
     : null;
-  // Only consult Knowledge when (a) no experience hit, (b) a recognised
-  // site family is in scope, (c) the api_knowledge capability is on,
-  // and (d) the repo handle exists. Each of these gates is a real
+  // Only consult Knowledge when (a) a recognised site family is in scope,
+  // (b) the api_knowledge capability is on, and (c) the repo handle exists.
+  // Each of these gates is a real
   // failure mode of the v1 surface, not a paranoia check.
-  if (!experienceHit && siteFamily === 'github' && deps.knowledgeApi) {
+  if (siteFamily === 'github' && deps.knowledgeApi) {
     if (isCapabilityEnabled('api_knowledge', deps.capabilityEnv)) {
       // Site-family → site mapping is exact: the GitHub capture seed
       // uses `api.github.com`. Widening this requires touching the
@@ -769,7 +548,7 @@ export function runTabrixChooseContext(
       }
     }
   }
-  if (!experienceHit && !knowledgeCatalog && apiCandidate) {
+  if (!knowledgeCatalog && apiCandidate) {
     knowledgeCatalog = {
       site: apiCandidate.endpointFamily,
       totalEndpoints: 1,
@@ -781,10 +560,7 @@ export function runTabrixChooseContext(
     intentSignature,
     pageRole: input.pageRole,
     siteFamily,
-    experienceHit,
     knowledgeCatalog,
-    rankedReplayCandidates,
-    rankedTopBlockedBy,
   });
 
   // Layer dispatcher — runs once per chooser decision after the
@@ -816,7 +592,6 @@ export function runTabrixChooseContext(
     hvoCount: dispatcherInputs?.hvoCount ?? 0,
     knowledgeAvailable: !!knowledgeCatalog && knowledgeCatalog.totalEndpoints > 0,
     searchListIntent: !!apiCandidate,
-    experienceReplayAvailable: decision.strategy === 'experience_replay',
     safetyRequiresFullLayers: false,
     fullReadByteLength: dispatcherInputs?.fullReadByteLength ?? 0,
   });
@@ -911,10 +686,6 @@ export function runTabrixChooseContext(
         tokenEstimateFullRead: layerDispatch.fullReadTokenEstimate,
         tokensSavedEstimate,
         knowledgeEndpointFamily,
-        // Ranked-replay audit fields
-        rankedCandidateCount: decision.rankedCandidateCount ?? null,
-        replayEligibleBlockedBy: decision.replayEligibleBlockedBy ?? null,
-        replayFallbackDepth: decision.replayFallbackDepth ?? null,
         // Honest dispatcher input source. `null` when no `pageContext`
         // provider was wired (preserves the legacy null-everywhere
         // telemetry shape for callers and tests). Otherwise records the
@@ -946,9 +717,6 @@ export function runTabrixChooseContext(
       siteFamily,
     },
     decisionId,
-    rankedCandidateCount: decision.rankedCandidateCount,
-    replayEligibleBlockedBy: decision.replayEligibleBlockedBy,
-    replayFallbackDepth: decision.replayFallbackDepth,
     // Layer-dispatch fields. Always present; safe defaults so older
     // callers still type-check.
     chosenLayer: layerDispatch.chosenLayer,
@@ -958,7 +726,6 @@ export function runTabrixChooseContext(
     tokenEstimateChosen: layerDispatch.tokenEstimate,
     tokenEstimateFullRead: layerDispatch.fullReadTokenEstimate,
     tokensSavedEstimate,
-    readPageAvoided: layerDispatch.sourceRoute === 'experience_replay_skip_read',
     // Observe-mode advisory (closed enum). Always present on
     // `status: 'ok'` so post-mortems can tally
     // `foregroundNetworkCaptureCount` deterministically.

@@ -3,9 +3,6 @@ import { buildPolicyDeniedPayload } from '../policy/phase0-opt-in';
 import { getBridgeSnapshot, type GenericFailurePayload } from './bridge-recovery';
 
 export function createCapabilityDeniedResult(toolName: string, capability: string): CallToolResult {
-  // Mirrors the experience_replay handler's `denied / capability_off`
-  // payload so callers do not have to branch on whether the gate
-  // fired pre- or post-handler.
   return {
     content: [
       {

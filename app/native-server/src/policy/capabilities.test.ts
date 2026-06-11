@@ -66,7 +66,7 @@ describe('B-016 capability gate parser', () => {
       const result = parseCapabilityAllowlist({ TABRIX_POLICY_CAPABILITIES: 'all' });
       // Assertion stays intentionally
       // explicit so adding new capabilities forces an update here.
-      expect(Array.from(result.enabled).sort()).toEqual(['api_knowledge', 'experience_replay']);
+      expect(Array.from(result.enabled).sort()).toEqual(['api_knowledge']);
       expect(result.unknown).toEqual([]);
     });
 
@@ -74,16 +74,16 @@ describe('B-016 capability gate parser', () => {
       const result = parseCapabilityAllowlist({
         TABRIX_POLICY_CAPABILITIES: 'all, api_knowlege', // intentional typo
       });
-      expect(Array.from(result.enabled).sort()).toEqual(['api_knowledge', 'experience_replay']);
+      expect(Array.from(result.enabled).sort()).toEqual(['api_knowledge']);
       expect(result.unknown).toEqual(['api_knowlege']);
     });
 
-    it('enables `experience_replay` (V24-01) on its own without affecting `api_knowledge`', () => {
+    it('surfaces unknown capability tokens', () => {
       const result = parseCapabilityAllowlist({
-        TABRIX_POLICY_CAPABILITIES: 'experience_replay',
+        TABRIX_POLICY_CAPABILITIES: 'legacy_capability',
       });
-      expect(Array.from(result.enabled)).toEqual(['experience_replay']);
-      expect(result.unknown).toEqual([]);
+      expect(Array.from(result.enabled)).toEqual([]);
+      expect(result.unknown).toEqual(['legacy_capability']);
     });
 
     it('is idempotent for repeated tokens', () => {
@@ -118,16 +118,10 @@ describe('B-016 capability gate parser', () => {
       ).toBe(false);
     });
 
-    it('treats `experience_replay` independently from `api_knowledge`', () => {
-      // Single-capability opt-in must not leak across.
-      expect(
-        isCapabilityEnabled('experience_replay', {
-          TABRIX_POLICY_CAPABILITIES: 'api_knowledge',
-        }),
-      ).toBe(false);
+    it('returns false when only other recognised capabilities are listed', () => {
       expect(
         isCapabilityEnabled('api_knowledge', {
-          TABRIX_POLICY_CAPABILITIES: 'experience_replay',
+          TABRIX_POLICY_CAPABILITIES: 'legacy_capability',
         }),
       ).toBe(false);
     });
@@ -156,11 +150,11 @@ describe('B-016 capability gate parser', () => {
     it('gives explicit env priority over persisted config', () => {
       expect(
         resolveCapabilityEnv({
-          env: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
+          env: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
           persistedPolicyCapabilities: 'api_knowledge',
         }),
       ).toEqual({
-        env: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
+        env: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
         source: 'env',
       });
     });

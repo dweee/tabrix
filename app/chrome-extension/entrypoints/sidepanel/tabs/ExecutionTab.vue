@@ -13,7 +13,7 @@
         </button>
       </div>
       <p class="exec-tab__subtitle">
-        Layer-dispatch and replay telemetry from
+        Layer-dispatch telemetry from
         <code>tabrix_choose_context</code>.
         <span v-if="persistenceMode" class="exec-meta">
           · persistence: <code>{{ persistenceMode }}</code>
@@ -93,15 +93,6 @@
             <span class="exec-bar__count">{{ insights.savings.value.layerCounts[layer] }}</span>
           </div>
         </div>
-        <p v-if="insights.savings.value.lastReplay" class="exec-card__footer">
-          Last replay <code>{{ insights.savings.value.lastReplay.outcome ?? 'pending' }}</code> ·
-          <time :datetime="insights.savings.value.lastReplay.createdAt">{{
-            formatTimestamp(insights.savings.value.lastReplay.createdAt)
-          }}</time>
-        </p>
-        <p v-else class="exec-card__footer exec-card__footer--muted">
-          No experience replay recorded yet.
-        </p>
       </article>
 
       <!-- Reliability signals -->
@@ -129,15 +120,6 @@
             <span class="exec-list__count">{{ route.count }}</span>
           </li>
         </ul>
-        <div v-if="replayBlockedRows.length > 0" class="exec-card__sublist">
-          <h4>Replay blocked by</h4>
-          <ul class="exec-list">
-            <li v-for="row in replayBlockedRows" :key="row.reason" class="exec-list__row">
-              <span class="exec-list__reason">{{ row.reason }}</span>
-              <span class="exec-list__count">{{ row.count }}</span>
-            </li>
-          </ul>
-        </div>
       </article>
 
       <!-- Top action paths -->
@@ -252,7 +234,6 @@ const LAYER_ORDER: ReadonlyArray<ReadPageRequestedLayer | 'unknown'> = [
 
 const ROUTE_LABELS: Record<LayerSourceRoute | 'unknown', string> = {
   read_page_required: 'read_page required',
-  experience_replay_skip_read: 'replay (skip read_page)',
   knowledge_supported_read: 'knowledge-supported read',
   dispatcher_fallback_safe: 'dispatcher fail-safe',
   unknown: 'unknown / legacy',
@@ -288,7 +269,6 @@ const sourceRouteRows = computed(() => {
   if (!reliability) return [];
   const order: ReadonlyArray<LayerSourceRoute | 'unknown'> = [
     'read_page_required',
-    'experience_replay_skip_read',
     'knowledge_supported_read',
     'dispatcher_fallback_safe',
     'unknown',
@@ -298,14 +278,6 @@ const sourceRouteRows = computed(() => {
     label: ROUTE_LABELS[key],
     count: reliability.sourceRouteCounts[key] ?? 0,
   }));
-});
-
-const replayBlockedRows = computed(() => {
-  const reliability = insights.reliability.value;
-  if (!reliability) return [];
-  return Object.entries(reliability.replayBlockedByCounts)
-    .map(([reason, count]) => ({ reason, count }))
-    .sort((a, b) => b.count - a.count);
 });
 
 function actionPathKey(path: ExecutionTopActionPathSummary): string {

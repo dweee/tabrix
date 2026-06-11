@@ -31,7 +31,6 @@ import {
   type MkeExperienceProjectionInput,
   type MkeExperienceProjectionResult,
 } from '../memory/mke-experience-projector';
-import { ExperienceQueryService, ExperienceRepository } from '../memory/experience';
 import { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
 import { ChooseContextTelemetryRepository } from '../memory/telemetry/choose-context-telemetry';
 import { TaskSessionContext } from './task-session-context';
@@ -88,7 +87,6 @@ interface Repos {
   memoryTrace: MemoryTraceRepository;
   knowledgeModel: KnowledgeModelRepository;
   experienceRecipe: ExperienceRecipeRepository;
-  experience: ExperienceRepository;
   knowledgeApi: KnowledgeApiRepository;
   chooseContextTelemetry: ChooseContextTelemetryRepository;
 }
@@ -101,7 +99,6 @@ interface StorageInit {
   memoryTrace: MkeMemoryTraceService | null;
   knowledgeProjector: MkeKnowledgeProjector | null;
   experienceProjector: MkeExperienceProjector | null;
-  experienceQuery: ExperienceQueryService | null;
   knowledgeApi: KnowledgeApiRepository | null;
   chooseContextTelemetry: ChooseContextTelemetryRepository | null;
 }
@@ -137,7 +134,6 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
       memoryTrace: null,
       knowledgeProjector: null,
       experienceProjector: null,
-      experienceQuery: null,
       knowledgeApi: null,
       chooseContextTelemetry: null,
     };
@@ -150,7 +146,6 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
     const memoryTraceRepo = new MemoryTraceRepository(opened.db);
     const knowledgeModelRepo = new KnowledgeModelRepository(opened.db);
     const experienceRecipeRepo = new ExperienceRecipeRepository(opened.db);
-    const experienceRepo = new ExperienceRepository(opened.db);
     const knowledgeApiRepo = new KnowledgeApiRepository(opened.db);
     const chooseContextTelemetryRepo = new ChooseContextTelemetryRepository(opened.db);
     const repos: Repos = {
@@ -158,7 +153,6 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
       memoryTrace: memoryTraceRepo,
       knowledgeModel: knowledgeModelRepo,
       experienceRecipe: experienceRecipeRepo,
-      experience: experienceRepo,
       knowledgeApi: knowledgeApiRepo,
       chooseContextTelemetry: chooseContextTelemetryRepo,
     };
@@ -176,7 +170,6 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
         knowledgeModelRepo,
         experienceRecipeRepo,
       ),
-      experienceQuery: new ExperienceQueryService(experienceRepo),
       knowledgeApi: knowledgeApiRepo,
       chooseContextTelemetry: chooseContextTelemetryRepo,
     };
@@ -192,7 +185,6 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
       memoryTrace: null,
       knowledgeProjector: null,
       experienceProjector: null,
-      experienceQuery: null,
       knowledgeApi: null,
       chooseContextTelemetry: null,
     };
@@ -232,7 +224,6 @@ export class SessionManager {
   private readonly memoryTraceService: MkeMemoryTraceService | null;
   private readonly mkeKnowledgeProjector: MkeKnowledgeProjector | null;
   private readonly mkeExperienceProjector: MkeExperienceProjector | null;
-  private readonly experienceQueryService: ExperienceQueryService | null;
   private readonly knowledgeApiRepo: KnowledgeApiRepository | null;
   private readonly chooseContextTelemetryRepo: ChooseContextTelemetryRepository | null;
 
@@ -244,18 +235,8 @@ export class SessionManager {
     this.memoryTraceService = storage.memoryTrace;
     this.mkeKnowledgeProjector = storage.knowledgeProjector;
     this.mkeExperienceProjector = storage.experienceProjector;
-    this.experienceQueryService = storage.experienceQuery;
     this.knowledgeApiRepo = storage.knowledgeApi;
     this.chooseContextTelemetryRepo = storage.chooseContextTelemetry;
-  }
-
-  /**
-   * Read-only Experience layer queries. `null` when persistence is off (or DB
-   * init failed). Callers must treat `null` as "Memory unavailable" and
-   * surface `persistenceMode: 'off'` to the upstream agent.
-   */
-  public get experience(): ExperienceQueryService | null {
-    return this.experienceQueryService;
   }
 
   /**
@@ -645,7 +626,6 @@ export class SessionManager {
       this.repos.memoryTrace.clear();
       this.repos.knowledgeModel.clear();
       this.repos.experienceRecipe.clear();
-      this.repos.experience.clear();
     }
     this.tasks.clear();
     this.sessions.clear();
@@ -668,15 +648,10 @@ export class SessionManager {
   }
 
   /**
-   * Re-tag a task's intent column. The `experience_replay` MCP handler uses
-   * this to mark its wrapper-owned session with the
-   * `experience_replay:<actionPathId>` prefix the aggregator's special-case
-   * keys off. Intentionally narrow: only intent + updated_at are mutated,
-   * never task status / title.
-   *
-   * No-op when the task is unknown OR persistence is disabled — the
-   * handler invokes this best-effort and never lets a tagging failure
-   * mask the real outcome.
+   * Re-tag a task's intent column as best-effort audit decoration.
+   * Intentionally narrow: only intent + updated_at are mutated, never
+   * task status / title. No-op when the task is unknown or persistence
+   * is disabled.
    */
   public updateTaskIntent(taskId: string, intent: string): void {
     const task = this.tasks.get(taskId);

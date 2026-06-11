@@ -261,57 +261,6 @@ CREATE INDEX IF NOT EXISTS tabrix_browser_objects_operability_idx
 `;
 
 /**
- * Experience schema.
- *
- * Co-located in the same `memory.db` file as Memory: Experience is a
- * derived view of Memory data, and keeping them in one DB keeps
- * projection reads/writes local to one SQLite handle.
- *
- * Same idempotency rules as Memory: every `CREATE … IF NOT EXISTS`.
- */
-export const EXPERIENCE_CREATE_TABLES_SQL = `
-CREATE TABLE IF NOT EXISTS experience_action_paths (
-  action_path_id           TEXT PRIMARY KEY,
-  site_family              TEXT NOT NULL DEFAULT 'unknown',
-  page_role                TEXT NOT NULL,
-  intent_signature         TEXT NOT NULL,
-  step_sequence            TEXT NOT NULL,    -- JSON: ordered [{ toolName, status, historyRef }]
-  success_count            INTEGER NOT NULL DEFAULT 0,
-  failure_count            INTEGER NOT NULL DEFAULT 0,
-  last_used_at             TEXT,
-  -- Replay-outcome write-back fields. All nullable because
-  -- they are only populated once a replay (or a direct
-  -- experience_score_step call) has run against the row.
-  --   last_replay_at        : ISO 8601 timestamp the writer used.
-  --   last_replay_outcome   : last ClickObservedOutcome recorded.
-  --   last_replay_status    : projected {ok|failed} the writer
-  --                           chose via isClickSuccessOutcome.
-  --   composite_score_decayed : deterministic recency-decayed
-  --                             composite score (see
-  --                             composite-score.ts).
-  last_replay_at           TEXT,
-  last_replay_outcome      TEXT,
-  last_replay_status       TEXT,
-  composite_score_decayed  REAL,
-  created_at               TEXT NOT NULL,
-  updated_at               TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS experience_action_paths_role_intent_idx
-  ON experience_action_paths(page_role, intent_signature);
-CREATE INDEX IF NOT EXISTS experience_action_paths_site_role_intent_idx
-  ON experience_action_paths(site_family, page_role, intent_signature);
-CREATE INDEX IF NOT EXISTS experience_action_paths_last_used_at_idx
-  ON experience_action_paths(last_used_at);
--- Lets the chooser ORDER BY composite_score_decayed
--- without a full table scan. Partial index condition is safe under
--- SQLite; rows that have not been scored yet drop out of the index.
-CREATE INDEX IF NOT EXISTS experience_action_paths_composite_score_idx
-  ON experience_action_paths(composite_score_decayed)
-  WHERE composite_score_decayed IS NOT NULL;
-`;
-
-/**
  * Knowledge schema (opt-in via TABRIX_POLICY_CAPABILITIES=api_knowledge).
  *
  * `knowledge_api_endpoints` is the storage side of "API Knowledge capture
@@ -526,47 +475,6 @@ CREATE INDEX IF NOT EXISTS tabrix_choose_context_outcomes_recorded_at_idx
   ON tabrix_choose_context_outcomes(recorded_at);
 `;
 
-/**
- * Isolation telemetry — `experience_score_step` write-back warnings.
- *
- * Every row represents one Experience write-back attempt that the
- * runtime caught and isolated. The active writer is the per-step
- * `experience_score_step` MCP handler when counter-delta SQL throws.
- *
- * Hard rules baked into the schema:
- *  - Append-only — no UPDATE / DELETE in the writer; auditors rely on
- *    full row history.
- *  - `payload_blob` is small JSON (cap enforced at write time) so the
- *    table stays bounded even under bridge-flap conditions.
- *  - No FK to `experience_action_paths` because
- *    the warning has to outlive an aggressive Memory rotation.
- *  - The table exists regardless of capability state (idempotent
- *    CREATE) so a write that races a freshly-disabled persistence
- *    knob still has somewhere to land.
- */
-export const EXPERIENCE_WRITEBACK_WARNINGS_CREATE_TABLES_SQL = `
-CREATE TABLE IF NOT EXISTS experience_writeback_warnings (
-  warning_id        TEXT PRIMARY KEY,
-  source            TEXT NOT NULL,            -- 'experience_score_step'
-  action_path_id    TEXT,
-  step_index        INTEGER,
-  session_id        TEXT,
-  replay_id         TEXT,
-  observed_outcome  TEXT,
-  error_code        TEXT,
-  error_message     TEXT,
-  payload_blob      TEXT,                     -- JSON: { historyRef?, evidence?, components? } — bounded
-  created_at        TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS experience_writeback_warnings_source_idx
-  ON experience_writeback_warnings(source);
-CREATE INDEX IF NOT EXISTS experience_writeback_warnings_action_path_idx
-  ON experience_writeback_warnings(action_path_id);
-CREATE INDEX IF NOT EXISTS experience_writeback_warnings_created_at_idx
-  ON experience_writeback_warnings(created_at);
-`;
-
 export const MEMORY_DB_ACTIVE_TABLE_MANIFEST = [
   {
     name: 'tabrix_memory_traces',
@@ -604,13 +512,6 @@ export const MEMORY_DB_ACTIVE_TABLE_MANIFEST = [
     retention: 'active',
   },
   {
-    name: 'experience_action_paths',
-    layer: 'experience',
-    surface: 'mcp_tools',
-    purpose: 'Executable reusable action paths for suggest/replay/score tools.',
-    retention: 'active',
-  },
-  {
     name: 'knowledge_api_endpoints',
     layer: 'knowledge',
     surface: 'mcp_routing',
@@ -630,13 +531,6 @@ export const MEMORY_DB_ACTIVE_TABLE_MANIFEST = [
     surface: 'execution_insights',
     purpose: 'Chooser decision outcome write-back for reuse/fallback quality metrics.',
     retention: 'active',
-  },
-  {
-    name: 'experience_writeback_warnings',
-    layer: 'experience',
-    surface: 'internal_diagnostics',
-    purpose: 'Append-only isolation warnings for replay/composite-score write-back failures.',
-    retention: 'visibility_gap',
   },
 ] as const;
 
@@ -682,5 +576,17 @@ export const MEMORY_DB_RETIRED_TABLES = [
     retiredAt: '2026-06-11',
     reason:
       'Reserved locator-preference table had no production reader, writer, MCP API, or sidepanel surface.',
+  },
+  {
+    name: 'experience_action_paths',
+    retiredAt: '2026-06-11',
+    reason:
+      'Pre-launch action-path cache used system counters instead of real AI evaluation; replaced by AI-feedback-derived tabrix_experience_recipes.',
+  },
+  {
+    name: 'experience_writeback_warnings',
+    retiredAt: '2026-06-11',
+    reason:
+      'Pre-launch replay write-back diagnostics served retired experience_action_paths and experience_score_step.',
   },
 ] as const;

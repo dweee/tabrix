@@ -58,7 +58,6 @@ assert.deepEqual(READ_PAGE_EVIDENCE_SOURCE_VALUES, [
 
 assert.deepEqual(LAYER_SOURCE_ROUTE_VALUES, [
   'read_page_required',
-  'experience_replay_skip_read',
   'knowledge_supported_read',
   'dispatcher_fallback_safe',
 ]);
@@ -74,7 +73,6 @@ assert.deepEqual(LAYER_DISPATCH_REASON_VALUES, [
   'simple_page_low_density',
   'medium_page_overview',
   'complex_page_detail_required',
-  'experience_replay_executable',
   'knowledge_supports_summary',
   'knowledge_with_action',
   'dispatcher_fallback_safe',

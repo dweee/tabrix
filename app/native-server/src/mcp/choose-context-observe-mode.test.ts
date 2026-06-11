@@ -18,19 +18,12 @@
  *      foreground capture is the only way to seed the catalog.
  *
  * No SQLite, no MCP server: the chooser is run in-process with a
- * synthetic experience stub and a tiny in-memory `KnowledgeApi` to
+ * tiny in-memory `KnowledgeApi` to
  * exercise the four-state matrix without standing up persistence.
  */
 
 import { runTabrixChooseContext } from './choose-context';
-import type { ExperienceQueryService } from '../memory/experience';
 import type { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
-
-function emptyExperience(): ExperienceQueryService {
-  return {
-    suggestActionPaths: jest.fn().mockReturnValue([]),
-  } as unknown as ExperienceQueryService;
-}
 
 function emptyKnowledgeApi(): Pick<KnowledgeApiRepository, 'listBySite' | 'countAll'> &
   Partial<Pick<KnowledgeApiRepository, 'listScoredBySite'>> {
@@ -59,7 +52,6 @@ describe('runTabrixChooseContext — V26-FIX-02 observe-mode advisory', () => {
     const result = runTabrixChooseContext(
       { intent: '搜索 GitHub 上 AI助手 相关热门项目', url: 'https://github.com/search' },
       {
-        experience: emptyExperience(),
         // No knowledgeApi rows needed — the api_knowledge candidate
         // resolver fires on the URL alone for the GitHub search
         // family, and that is what populates `apiCandidate`.
@@ -80,7 +72,6 @@ describe('runTabrixChooseContext — V26-FIX-02 observe-mode advisory', () => {
       // `knowledgeCatalog` is populated.
       { intent: 'read this file', url: 'https://github.com/tabrix/tabrix/blob/main/README.md' },
       {
-        experience: emptyExperience(),
         knowledgeApi: knowledgeApiWithRows([
           { endpointSignature: 'GET api.github.com/repos/{owner}/{repo}', usableForTask: true },
         ]),
@@ -96,7 +87,6 @@ describe('runTabrixChooseContext — V26-FIX-02 observe-mode advisory', () => {
     const result = runTabrixChooseContext(
       { intent: 'read article', url: 'https://news.ycombinator.com/item?id=1' },
       {
-        experience: emptyExperience(),
         knowledgeApi: emptyKnowledgeApi(),
         capabilityEnv: CAPS_API_KNOWLEDGE,
       },
@@ -112,7 +102,6 @@ describe('runTabrixChooseContext — V26-FIX-02 observe-mode advisory', () => {
       // learning override must still flip the advisory to foreground.
       { intent: '搜索 GitHub 上 AI助手 相关热门项目', url: 'https://github.com/search' },
       {
-        experience: emptyExperience(),
         knowledgeApi: emptyKnowledgeApi(),
         capabilityEnv: CAPS_API_KNOWLEDGE,
         learningModeRequested: true,
@@ -127,7 +116,6 @@ describe('runTabrixChooseContext — V26-FIX-02 observe-mode advisory', () => {
     const result = runTabrixChooseContext(
       { intent: '' },
       {
-        experience: emptyExperience(),
         knowledgeApi: null,
         capabilityEnv: {},
       },

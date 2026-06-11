@@ -113,7 +113,7 @@
               <span
                 v-if="row.feedbackScoreLabel"
                 class="mke-feedback-score"
-                title="AI 根据页面证据对上一任务完成度的自评，不代表真实平台验收。"
+                title="AI 根据页面结果对上一任务完成度的自评，不代表真实平台验收。"
               >
                 {{ row.feedbackScoreLabel }}
               </span>

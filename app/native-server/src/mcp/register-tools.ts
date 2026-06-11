@@ -40,12 +40,6 @@ import { mapDataSourceToLayerContract } from '../execution/layer-contract';
 import { routeDataSource, type DataSourceDecision } from '../execution/data-source-router';
 import { runPostProcessor } from './tool-post-processors';
 import { getNativeToolHandler } from './native-tool-handlers';
-import type {
-  DispatchBridgedFn,
-  ReplayOutcomeWriter,
-  ReplayStepRecorder,
-  SupportedReplayToolName,
-} from './experience-replay';
 import {
   callWithBridgeRecovery,
   getBridgeSnapshot,
@@ -185,154 +179,6 @@ interface CloseTabsBrowserHygieneEvidence {
   tabWindowBaselineUnchanged: boolean | null;
   activeTabRestored: boolean | null;
   activeTabRestoreReason: string | null;
-}
-
-/**
- * Production wiring for the `experience_replay` handler.
- * Binds:
- *   - `dispatchBridged` to the existing `invokeExtensionCommand`
- *     round-trip (with the same recovery-aware wrapper used for
- *     ordinary tool calls).
- *   - `recorder` to `sessionManager.startStep` / `completeStep`
- *     against the wrapper-owned session, so each replayed sub-step
- *     gets its own runtime wrapper step carrying the underlying tool name.
- *   - `updateTaskIntent` to `sessionManager.updateTaskIntent` so the
- *     wrapper-owned session is re-tagged with
- *     `experience_replay:<actionPathId>`.
- *
- * Lookup of the wrapper-owned session/task happens inside the
- * recorder closure (instead of capturing the live `ExecutionSession`
- * object) so the production code path stays compatible with future
- * persistence-mode changes (`'off'` does not produce a real session,
- * but the handler short-circuits before we reach that branch).
- */
-function buildReplayDeps(wrapperSessionId: string): {
-  dispatchBridged: DispatchBridgedFn;
-  recorder: ReplayStepRecorder;
-  updateTaskIntent: (intent: string) => void;
-  outcomeWriter: ReplayOutcomeWriter;
-} {
-  const dispatchBridged: DispatchBridgedFn = async (toolName, toolArgs) => {
-    const { response, bridgeFailure } = await callWithBridgeRecovery(
-      () => invokeExtensionCommand('call_tool', { name: toolName, args: toolArgs }, 120000),
-      `tool:${toolName}`,
-    );
-    if (response?.status === 'success') {
-      const normalized = normalizeToolCallResult(toolName, response.data);
-      // Pass through the underlying tool's CallToolResult shape so
-      // the ReplayEngine can extract `historyRef` from its content.
-      return (
-        response.data ?? {
-          content: [{ type: 'text' as const, text: normalized.stepSummary ?? '' }],
-          isError: false,
-        }
-      );
-    }
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: bridgeFailure
-            ? JSON.stringify(bridgeFailure)
-            : JSON.stringify({
-                code: 'TABRIX_TOOL_CALL_FAILED',
-                message: String(response?.error ?? 'Unknown tool error'),
-              }),
-        },
-      ],
-      isError: true,
-    };
-  };
-
-  const recorder: ReplayStepRecorder = {
-    startStep(input) {
-      const child = sessionManager.startStep({
-        sessionId: wrapperSessionId,
-        toolName: input.toolName,
-        stepType: 'tool_call',
-        inputSummary: input.inputSummary,
-      });
-      return child.stepId;
-    },
-    completeStep(stepId, update) {
-      sessionManager.completeStep(wrapperSessionId, stepId, {
-        status: 'completed',
-        resultSummary: update.resultSummary,
-        artifactRefs: update.artifactRefs,
-      });
-    },
-    failStep(stepId, update) {
-      sessionManager.completeStep(wrapperSessionId, stepId, {
-        status: 'failed',
-        errorCode: update.failureCode,
-        errorSummary: update.errorSummary,
-      });
-    },
-  };
-
-  const updateTaskIntent = (intent: string) => {
-    // Resolve the live wrapper session → its taskId and forward to
-    // the SessionManager. Wrapped in try/catch because tagging is
-    // best-effort: a missing session must never mask the real
-    // experience_replay outcome.
-    try {
-      const wrapperSession = sessionManager.getSession(wrapperSessionId);
-      sessionManager.updateTaskIntent(wrapperSession.taskId, intent);
-    } catch {
-      // Session no longer present (e.g. test fixture reset between
-      // invocation and tagging) — ignore.
-    }
-  };
-
-  // Per-step write-back hook. Isolation is enforced TWICE:
-  //   1. here, where any thrown SQLite error is caught and downgraded
-  //      to a structured warning row (so the user's replay path stays
-  //      alive); and
-  //   2. inside `ReplayEngine.tryWriteOutcome`, which already wraps
-  //      the call in its own try/catch as defense-in-depth.
-  // We deliberately swallow the inner `recordWritebackWarning` failure
-  // for the same reason the score-step handler does — at that point even
-  // the warning row could not land, but throwing would defeat the
-  // isolation contract.
-  const outcomeWriter: ReplayOutcomeWriter = {
-    recordReplayStepOutcome(input) {
-      const experience = sessionManager.experience;
-      if (!experience) return;
-      const nowIso = new Date().toISOString();
-      try {
-        experience.recordReplayStepOutcome({
-          actionPathId: input.actionPathId,
-          stepIndex: input.stepIndex,
-          observedOutcome: input.observedOutcome,
-          nowIso,
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        const warningId = `warn_replay_outcome_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
-        try {
-          experience.recordWritebackWarning({
-            warningId,
-            source: 'experience_score_step',
-            actionPathId: input.actionPathId,
-            stepIndex: input.stepIndex,
-            sessionId: wrapperSessionId,
-            replayId: null,
-            observedOutcome: input.observedOutcome,
-            errorCode: 'replay_outcome_write_failed',
-            errorMessage: message.slice(0, 512),
-            payloadBlob: null,
-            createdAt: nowIso,
-          });
-        } catch {
-          // Warning row also failed — stay silent by isolation
-          // contract. Operator-side telemetry will surface the
-          // underlying SQLite issue separately.
-        }
-      }
-    },
-  };
-
-  return { dispatchBridged, recorder, updateTaskIntent, outcomeWriter };
 }
 
 async function invokeExtensionCommand(
@@ -525,10 +371,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
 
     // Capability gate (defense-in-depth — `filterToolsByCapability`
     // already removed disabled tools from `listTools`, but a curious
-    // client may still try to call one directly). Returns the same
-    // `denied / capability_off` payload shape the experience_replay
-    // handler would produce, so callers branch on `error.code` not on
-    // the source of the denial.
+    // client may still try to call one directly).
     const requiredCapability = getRequiredCapability(name);
     if (requiredCapability && !isCapabilityEnabled(requiredCapability, getCurrentCapabilityEnv())) {
       const result = createCapabilityDeniedResult(name, requiredCapability);
@@ -563,28 +406,17 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       : sessionManager.getTaskContext(task.taskId);
 
     // Native-handled tools short-circuit the extension round-trip — see
-    // `mcp/native-tool-handlers.ts`. Currently Experience read-side
-    // queries, the context selector, and the `experience_replay`
-    // write-side tool qualify; everything else still goes through the
-    // Chrome extension via `invokeExtensionCommand`.
+    // `mcp/native-tool-handlers.ts`.
     const nativeHandler = getNativeToolHandler(name);
     if (nativeHandler) {
-      // Only the experience_replay handler needs the bridge adapter +
-      // per-step recorder + intent re-tagger. The other native handlers
-      // ignore them, but always passing them keeps the deps shape
-      // uniform.
-      const replayDeps =
-        name === TOOL_NAMES.EXPERIENCE.REPLAY ? buildReplayDeps(session.sessionId) : {};
       const nativeResult = await nativeHandler(args, {
         sessionManager,
         capabilityEnv: getCurrentCapabilityEnv(),
         // Carries the `TaskSessionContext` the `tabrix_choose_context`
         // handler writes into via `noteChooseContextDecision`. `null`
         // for tools outside the auto-key set when there is no live
-        // external context; handlers that do not need it (e.g.
-        // experience suggest / record-outcome) ignore the field.
+        // external context.
         taskContext: taskContextEarly,
-        ...replayDeps,
       });
       if (nativeResult.isError) {
         let errorSummary = `Native tool ${name} failed`;
@@ -710,7 +542,6 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           source: liveObserved.selectedDataSource === 'api_detail' ? 'api_detail' : 'api_list',
           layer: 'L0+L1',
           tokensSavedEstimate: 0,
-          actionPathId: null,
           apiFamily: liveObserved.endpointFamily,
         });
         const totals = taskContext.getTaskTotals();
@@ -818,7 +649,6 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
                 source: skipPlan.sourceKind,
                 layer: recordedDecision.chosenLayer,
                 tokensSavedEstimate: tokenSavings.tokensSavedEstimate,
-                actionPathId: null,
                 apiFamily: apiResult.endpointFamily,
               });
               const totals = taskContext.getTaskTotals();
@@ -867,7 +697,6 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
               source: skipPlan.sourceKind,
               layer: recordedDecision.chosenLayer,
               tokensSavedEstimate: skipPlan.tokensSavedEstimate,
-              actionPathId: recordedDecision.replayCandidate?.actionPathId ?? null,
               apiFamily: recordedDecision.apiCapability?.family ?? null,
             });
             const totals = taskContext.getTaskTotals();

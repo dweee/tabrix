@@ -27,7 +27,6 @@ describe('dispatchLayer — V25-02 kickoff bindings', () => {
       candidateActionsCount: 50,
       hvoCount: 12,
       knowledgeAvailable: false,
-      experienceReplayAvailable: false,
       fullReadByteLength: 40_000,
     });
     expect(out.chosenLayer).toBe('L0');
@@ -46,7 +45,6 @@ describe('dispatchLayer — V25-02 kickoff bindings', () => {
       candidateActionsCount: 3,
       hvoCount: 2,
       knowledgeAvailable: false,
-      experienceReplayAvailable: false,
       fullReadByteLength: 8_000,
     });
     expect(out.chosenLayer).toBe('L0+L1+L2');
@@ -67,7 +65,6 @@ describe('dispatchLayer — priority 1 safety override', () => {
       candidateActionsCount: 2,
       hvoCount: 1,
       knowledgeAvailable: false,
-      experienceReplayAvailable: true,
       safetyRequiresFullLayers: true,
       safetyReason: 'click verifier needs L2',
       fullReadByteLength: 20_000,
@@ -179,22 +176,6 @@ describe('dispatchLayer — priority 4 page complexity', () => {
 });
 
 describe('dispatchLayer — priority 5 MKEP support', () => {
-  test('experience_replay_executable → L0 + experience_replay_skip_read + readPageAvoided', () => {
-    const out = dispatchLayer({
-      pageRole: '', // empty so page-complexity rules cannot match
-      taskType: 'unknown',
-      userIntent: 'unknown',
-      experienceReplayAvailable: true,
-      knowledgeAvailable: false,
-      candidateActionsCount: 0,
-      hvoCount: 0,
-    });
-    expect(out.chosenLayer).toBe('L0');
-    expect(out.reason).toBe('experience_replay_executable');
-    expect(out.sourceRoute).toBe('experience_replay_skip_read');
-    expect(out.readPageAvoided).toBe(true);
-  });
-
   test('knowledge_supports_summary fires only when task is reading_only', () => {
     const reading = dispatchLayer({
       pageRole: '',
@@ -217,7 +198,6 @@ describe('dispatchLayer — priority 5 MKEP support', () => {
       taskType: 'unknown',
       userIntent: 'unknown',
       knowledgeAvailable: true,
-      experienceReplayAvailable: false,
       candidateActionsCount: 0,
       hvoCount: 0,
     });
@@ -234,7 +214,6 @@ describe('dispatchLayer — fail-safe', () => {
       taskType: 'unknown',
       userIntent: 'unknown',
       knowledgeAvailable: false,
-      experienceReplayAvailable: false,
       candidateActionsCount: 0,
       hvoCount: 0,
     });
@@ -273,7 +252,6 @@ describe('dispatchLayer — invariants', () => {
       candidateActionsCount: 4,
       hvoCount: 2,
       knowledgeAvailable: true,
-      experienceReplayAvailable: true,
       fullReadByteLength: 1_000,
     });
     expect(out.chosenLayer).toBe('L0');
@@ -315,11 +293,16 @@ describe('dispatchLayer — invariants', () => {
     expect(out.fullReadTokenEstimate).toBe(Math.ceil(100_000 / 4));
   });
 
-  test('readPageAvoided is true ONLY for experience_replay_skip_read', () => {
+  test('readPageAvoided stays false for every rule', () => {
     for (const rule of getLayerDispatchRulesForTesting()) {
-      if (rule.sourceRoute === 'experience_replay_skip_read') {
-        expect(rule.layer).toBe('L0');
-      }
+      const out = dispatchLayer({
+        pageRole: '',
+        taskType: 'unknown',
+        userIntent: 'unknown',
+        knowledgeAvailable: rule.sourceRoute === 'knowledge_supported_read',
+        safetyRequiresFullLayers: rule.reason === 'safety_required_full_layers',
+      });
+      expect(out.readPageAvoided).toBe(false);
     }
   });
 });

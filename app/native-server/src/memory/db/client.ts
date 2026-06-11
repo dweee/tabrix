@@ -22,8 +22,6 @@ import { getTabrixDataDir } from '../../shared/data-dirs';
 import {
   BROWSER_OBJECT_CREATE_TABLES_SQL,
   CHOOSE_CONTEXT_TELEMETRY_CREATE_TABLES_SQL,
-  EXPERIENCE_CREATE_TABLES_SQL,
-  EXPERIENCE_WRITEBACK_WARNINGS_CREATE_TABLES_SQL,
   KNOWLEDGE_CREATE_TABLES_SQL,
   MEMORY_DB_RETIRED_TABLES,
   MKE_CORE_CREATE_TABLES_SQL,
@@ -152,72 +150,6 @@ function dropRetiredPrelaunchTables(db: SqliteDatabase): void {
       sql: `DROP TABLE IF EXISTS ${table}`,
     });
   }
-}
-
-/**
- * Additive migration for legacy DBs that pre-date the
- * replay-outcome write-back columns. Each ALTER is guarded by a
- * `hasColumn` probe so re-opening a fresh DB (where the columns are
- * already present from `EXPERIENCE_CREATE_TABLES_SQL`) is a no-op.
- *
- * Splitting per-column keeps the migration shape uniform with the
- * session aggregation helper above; it also means a partial-failure mid-migration
- * (e.g. disk full between two ALTERs) leaves the DB in a recoverable
- * state — the next `openMemoryDb()` resumes from where it stopped.
- */
-function ensureExperienceReplayWritebackColumns(db: SqliteDatabase): void {
-  if (!hasTable(db, 'experience_action_paths')) return;
-  if (!hasColumn(db, 'experience_action_paths', 'site_family')) {
-    execMigration(db, {
-      table: 'experience_action_paths',
-      column: 'site_family',
-      // Legacy Experience rows were produced by the GitHub-first chooser.
-      // Preserve their old actionPathId values while keeping future queries
-      // scoped by explicit site_family.
-      sql: "ALTER TABLE experience_action_paths ADD COLUMN site_family TEXT NOT NULL DEFAULT 'github'",
-    });
-  }
-  if (!hasColumn(db, 'experience_action_paths', 'last_replay_at')) {
-    execMigration(db, {
-      table: 'experience_action_paths',
-      column: 'last_replay_at',
-      sql: 'ALTER TABLE experience_action_paths ADD COLUMN last_replay_at TEXT',
-    });
-  }
-  if (!hasColumn(db, 'experience_action_paths', 'last_replay_outcome')) {
-    execMigration(db, {
-      table: 'experience_action_paths',
-      column: 'last_replay_outcome',
-      sql: 'ALTER TABLE experience_action_paths ADD COLUMN last_replay_outcome TEXT',
-    });
-  }
-  if (!hasColumn(db, 'experience_action_paths', 'last_replay_status')) {
-    execMigration(db, {
-      table: 'experience_action_paths',
-      column: 'last_replay_status',
-      sql: 'ALTER TABLE experience_action_paths ADD COLUMN last_replay_status TEXT',
-    });
-  }
-  if (!hasColumn(db, 'experience_action_paths', 'composite_score_decayed')) {
-    execMigration(db, {
-      table: 'experience_action_paths',
-      column: 'composite_score_decayed',
-      sql: 'ALTER TABLE experience_action_paths ADD COLUMN composite_score_decayed REAL',
-    });
-  }
-  // Replay scoring partial index — created idempotently so legacy DBs pick it
-  // up after the column exists.
-  execMigration(db, {
-    table: 'experience_action_paths',
-    sql: `CREATE INDEX IF NOT EXISTS experience_action_paths_site_role_intent_idx
-       ON experience_action_paths(site_family, page_role, intent_signature)`,
-  });
-  execMigration(db, {
-    table: 'experience_action_paths',
-    sql: `CREATE INDEX IF NOT EXISTS experience_action_paths_composite_score_idx
-       ON experience_action_paths(composite_score_decayed)
-       WHERE composite_score_decayed IS NOT NULL`,
-  });
 }
 
 /**
@@ -363,16 +295,6 @@ export function openMemoryDb(options?: MemoryDbOptions): OpenMemoryDbResult {
   db.exec(MKE_CORE_CREATE_TABLES_SQL);
   db.exec(BROWSER_OBJECT_CREATE_TABLES_SQL);
   ensureBrowserObjectRouteColumns(db);
-  // Legacy DBs may already have `experience_action_paths` without the
-  // replay scoring columns. Add them before running the current schema,
-  // because the schema includes an index on `composite_score_decayed`.
-  ensureExperienceReplayWritebackColumns(db);
-  db.exec(EXPERIENCE_CREATE_TABLES_SQL);
-  // Legacy-DB additive migration for replay-outcome write-back
-  // columns. Runs after `EXPERIENCE_CREATE_TABLES_SQL` so a virgin DB
-  // sees the columns from the CREATE statement and the helper is a
-  // pure no-op; legacy DBs pick up the columns via the guarded ALTERs.
-  ensureExperienceReplayWritebackColumns(db);
   // Knowledge tables. Idempotent CREATE IF NOT EXISTS — same
   // contract as Memory / Experience. The table exists regardless of
   // capability state so writes from a freshly-enabled capability do
@@ -401,13 +323,6 @@ export function openMemoryDb(options?: MemoryDbOptions): OpenMemoryDbResult {
   // the columns from the CREATE statement and the helper is a pure
   // no-op; legacy DBs pick up the columns via the guarded ALTERs.
   ensureChooseContextDecisionLayerColumns(db);
-  // Isolation telemetry table. Same idempotent CREATE IF NOT
-  // EXISTS pattern. Lives outside `EXPERIENCE_CREATE_TABLES_SQL` so
-  // the legacy-migration probe order stays stable (Experience first,
-  // then warnings — a warning row that references `action_path_id`
-  // is meaningful even if the FK target row was never created).
-  db.exec(EXPERIENCE_WRITEBACK_WARNINGS_CREATE_TABLES_SQL);
-
   return {
     db,
     dbPath,

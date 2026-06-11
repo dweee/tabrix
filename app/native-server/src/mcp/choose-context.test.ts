@@ -7,12 +7,7 @@
  * and risk tier presence.
  */
 
-import {
-  EXPERIENCE_HIT_MIN_SUCCESS_RATE,
-  TOOL_NAMES,
-  TOOL_RISK_TIERS,
-  type ContextStrategyName,
-} from '@tabrix/shared';
+import { TOOL_NAMES, TOOL_RISK_TIERS, type ContextStrategyName } from '@tabrix/shared';
 import {
   TabrixChooseContextInputError,
   chooseContextStrategy,
@@ -22,47 +17,9 @@ import {
   runTabrixChooseContextRecordOutcome,
 } from './choose-context';
 import type { ChooseContextTelemetryRepository } from '../memory/telemetry/choose-context-telemetry';
-import type { ExperienceQueryService } from '../memory/experience';
 import type { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
-import type { ExperienceActionPathRow } from '../memory/experience/experience-repository';
 import type { KnowledgeApiEndpoint } from '../memory/knowledge/knowledge-api-repository';
 import { logger } from '../logging/logger';
-
-function fakeRow(overrides: Partial<ExperienceActionPathRow> = {}): ExperienceActionPathRow {
-  return {
-    actionPathId: 'ap-default',
-    siteFamily: 'github',
-    pageRole: 'repo_home',
-    intentSignature: 'open issues',
-    stepSequence: [{ toolName: 'chrome_click_element', status: 'completed', historyRef: null }],
-    successCount: 4,
-    failureCount: 1,
-    lastUsedAt: '2026-04-22T00:00:00.000Z',
-    createdAt: '2026-04-21T00:00:00.000Z',
-    updatedAt: '2026-04-22T00:00:00.000Z',
-    ...overrides,
-  };
-}
-
-/**
- * V24-01 isReplayEligible() requires every step to carry non-empty
- * `args`. Tests that intend to assert "routes to experience_replay"
- * must use steps minted via this helper (or supply args inline);
- * tests that assert "stays on experience_reuse because args are
- * missing" should keep using the bare `{toolName,status,historyRef}`
- * shape.
- */
-function replayableStep(toolName: 'chrome_click_element' | 'chrome_fill_or_select') {
-  return {
-    toolName,
-    status: 'completed',
-    historyRef: null,
-    args:
-      toolName === 'chrome_fill_or_select'
-        ? { selector: '#search', value: 'tabrix' }
-        : { selector: '#issues-tab' },
-  };
-}
 
 function fakeEndpoint(overrides: Partial<KnowledgeApiEndpoint> = {}): KnowledgeApiEndpoint {
   return {
@@ -89,17 +46,6 @@ function fakeEndpoint(overrides: Partial<KnowledgeApiEndpoint> = {}): KnowledgeA
     firstSeenAt: '2026-04-22T00:00:00.000Z',
     lastSeenAt: '2026-04-22T00:00:00.000Z',
     ...overrides,
-  };
-}
-
-function fakeExperience(rows: ExperienceActionPathRow[]): {
-  service: ExperienceQueryService;
-  spy: jest.Mock;
-} {
-  const spy = jest.fn().mockReturnValue(rows);
-  return {
-    service: { suggestActionPaths: spy } as unknown as ExperienceQueryService,
-    spy,
   };
 }
 
@@ -204,79 +150,14 @@ describe('chooseContextStrategy (pure)', () => {
     // this guard test (and, by extension, the design doc).
     //
     // V23-04 / B-018 v1.5: `read_page_markdown` joined the set as the
-    // GitHub text-heavy reading branch (B-015 / V23-03).
-    // V24-01 / B-EXP-REPLAY-V1: `experience_replay` joined the set as
-    // the dispatched-execution branch for replay-eligible Experience
-    // hits.
+    // text-heavy reading branch (B-015 / V23-03). Legacy Experience
+    // action-path replay is retired and must not re-enter this set.
     const allowed: ContextStrategyName[] = [
-      'experience_replay',
-      'experience_reuse',
       'knowledge_light',
       'read_page_markdown',
       'read_page_required',
     ];
-    expect(allowed.sort()).toEqual([
-      'experience_replay',
-      'experience_reuse',
-      'knowledge_light',
-      'read_page_markdown',
-      'read_page_required',
-    ]);
-  });
-
-  it('returns experience_reuse when an experience hit is provided (no replay-eligibility)', () => {
-    const decision = chooseContextStrategy({
-      intentSignature: 'open issues',
-      experienceHit: {
-        actionPathId: 'ap-1',
-        successRate: 0.83,
-        successCount: 5,
-        failureCount: 1,
-      },
-    });
-    expect(decision.strategy).toBe('experience_reuse');
-    expect(decision.fallbackStrategy).toBe('read_page_required');
-    expect(decision.artifacts).toEqual([
-      expect.objectContaining({ kind: 'experience', ref: 'ap-1' }),
-    ]);
-    expect(decision.reasoning).toMatch(/experience hit/);
-  });
-
-  // -------------------------------------------------------------------------
-  // V24-01 / B-EXP-REPLAY-V1 — experience_replay routing branch (pure)
-  // -------------------------------------------------------------------------
-
-  it('routes to experience_replay when the hit is replayEligible', () => {
-    const decision = chooseContextStrategy({
-      intentSignature: 'open issues',
-      experienceHit: {
-        actionPathId: 'ap-replay',
-        successRate: 0.9,
-        successCount: 9,
-        failureCount: 1,
-        replayEligible: true,
-      },
-    });
-    expect(decision.strategy).toBe('experience_replay');
-    expect(decision.fallbackStrategy).toBe('experience_reuse');
-    expect(decision.artifacts).toEqual([
-      expect.objectContaining({ kind: 'experience', ref: 'ap-replay' }),
-    ]);
-    expect(decision.reasoning).toMatch(/experience replay/);
-  });
-
-  it('falls back to experience_reuse when the hit is not replay-eligible', () => {
-    const decision = chooseContextStrategy({
-      intentSignature: 'open issues',
-      experienceHit: {
-        actionPathId: 'ap-not-replay',
-        successRate: 0.9,
-        successCount: 9,
-        failureCount: 1,
-        replayEligible: false,
-      },
-    });
-    expect(decision.strategy).toBe('experience_reuse');
+    expect(allowed.sort()).toEqual(['knowledge_light', 'read_page_markdown', 'read_page_required']);
   });
 
   it('returns knowledge_light when no experience hit and catalog is non-empty', () => {
@@ -352,21 +233,6 @@ describe('chooseContextStrategy (pure)', () => {
     expect(decision.strategy).toBe('read_page_required');
   });
 
-  it('experience_reuse still wins over the markdown branch', () => {
-    const decision = chooseContextStrategy({
-      intentSignature: 'open issues',
-      siteFamily: 'github',
-      pageRole: 'issue_detail',
-      experienceHit: {
-        actionPathId: 'ap-1',
-        successRate: 0.9,
-        successCount: 9,
-        failureCount: 1,
-      },
-    });
-    expect(decision.strategy).toBe('experience_reuse');
-  });
-
   it('knowledge_light still wins over the markdown branch', () => {
     const decision = chooseContextStrategy({
       intentSignature: 'list issues',
@@ -387,7 +253,6 @@ describe('runTabrixChooseContext (orchestrator)', () => {
     const result = runTabrixChooseContext(
       {},
       {
-        experience: null,
         knowledgeApi: null,
         capabilityEnv: {},
       },
@@ -397,48 +262,13 @@ describe('runTabrixChooseContext (orchestrator)', () => {
     expect(result.strategy).toBeUndefined();
   });
 
-  it('picks the highest-success-rate plan above the threshold', () => {
-    const { service } = fakeExperience([
-      fakeRow({ actionPathId: 'ap-low', successCount: 1, failureCount: 9 }), // 0.10
-      fakeRow({ actionPathId: 'ap-mid', successCount: 6, failureCount: 4 }), // 0.60
-      fakeRow({ actionPathId: 'ap-high', successCount: 9, failureCount: 1 }), // 0.90
-    ]);
-    const result = runTabrixChooseContext(
-      { intent: 'open issues', pageRole: 'repo_home' },
-      { experience: service, knowledgeApi: null, capabilityEnv: {} },
-    );
-    expect(result.status).toBe('ok');
-    expect(result.strategy).toBe('experience_reuse');
-    expect(result.artifacts?.[0]?.ref).toBe('ap-high');
-  });
-
-  it('rejects below-threshold plans even when knowledge would otherwise hit', () => {
-    const { service } = fakeExperience([
-      fakeRow({ actionPathId: 'ap-low', successCount: 1, failureCount: 9 }), // 0.10
-    ]);
-    const { repo } = fakeKnowledgeRepo([fakeEndpoint()]);
-    const result = runTabrixChooseContext(
-      { intent: 'open issues', url: 'https://github.com/octocat/hello' },
-      {
-        experience: service,
-        knowledgeApi: repo,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
-      },
-    );
-    // Below-threshold plan filtered out → no experience hit → falls
-    // through to knowledge_light because gate is on.
-    expect(result.strategy).toBe('knowledge_light');
-  });
-
-  it('returns knowledge_light when capability is on, repo non-empty, no experience match', () => {
-    const { service } = fakeExperience([]);
+  it('returns knowledge_light when capability is on and repo is non-empty', () => {
     const { repo, spy } = fakeKnowledgeRepo([
       fakeEndpoint({ endpointSignature: 'GET api.github.com/repos/:owner/:repo/pulls' }),
     ]);
     const result = runTabrixChooseContext(
       { intent: 'list prs', url: 'https://github.com/x/y/pulls' },
       {
-        experience: service,
         knowledgeApi: repo,
         capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
       },
@@ -451,12 +281,10 @@ describe('runTabrixChooseContext (orchestrator)', () => {
 
   it('falls back to read_page_required when capability is OFF even with rows present', () => {
     // Doc §8 success criterion #4: gate must be respected.
-    const { service } = fakeExperience([]);
     const { repo, spy } = fakeKnowledgeRepo([fakeEndpoint()]);
     const result = runTabrixChooseContext(
       { intent: 'list prs', url: 'https://github.com/x/y/pulls' },
       {
-        experience: service,
         knowledgeApi: repo,
         capabilityEnv: {}, // not enabled
       },
@@ -470,12 +298,10 @@ describe('runTabrixChooseContext (orchestrator)', () => {
   });
 
   it('falls back to read_page_required for non-GitHub URLs even with capability on', () => {
-    const { service } = fakeExperience([]);
     const { repo, spy } = fakeKnowledgeRepo([fakeEndpoint()]);
     const result = runTabrixChooseContext(
       { intent: 'open something', url: 'https://www.douyin.com/x/y' },
       {
-        experience: service,
         knowledgeApi: repo,
         capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
       },
@@ -484,376 +310,18 @@ describe('runTabrixChooseContext (orchestrator)', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it('falls back to read_page_required when no URL and no experience', () => {
-    const { service } = fakeExperience([]);
+  it('falls back to read_page_required when no URL is available', () => {
     const result = runTabrixChooseContext(
       { intent: 'do something' },
-      { experience: service, knowledgeApi: null, capabilityEnv: {} },
+      { knowledgeApi: null, capabilityEnv: {} },
     );
     expect(result.strategy).toBe('read_page_required');
   });
 
-  // -------------------------------------------------------------------------
-  // V24-01 / B-EXP-REPLAY-V1 — chooser routes replay-eligible hits to
-  // `experience_replay` only when the capability is on AND the row's
-  // pageRole + step-kinds are all in the v1 supported sets.
-  // -------------------------------------------------------------------------
-
-  it('routes to experience_replay when capability + pageRole + step kinds all qualify', () => {
-    const { service } = fakeExperience([
-      fakeRow({
-        actionPathId: 'ap-replay-ok',
-        pageRole: 'issues_list',
-        stepSequence: [
-          replayableStep('chrome_click_element'),
-          replayableStep('chrome_fill_or_select'),
-        ],
-        successCount: 9,
-        failureCount: 1,
-      }),
-    ]);
-    const result = runTabrixChooseContext(
-      { intent: 'open issues', pageRole: 'issues_list' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
-      },
-    );
-    expect(result.status).toBe('ok');
-    expect(result.strategy).toBe('experience_replay');
-    expect(result.fallbackStrategy).toBe('experience_reuse');
-    expect(result.artifacts?.[0]?.ref).toBe('ap-replay-ok');
-  });
-
-  it('stays on experience_reuse when the experience_replay capability is OFF', () => {
-    const { service } = fakeExperience([
-      fakeRow({
-        actionPathId: 'ap-replay-cap-off',
-        pageRole: 'issues_list',
-        stepSequence: [replayableStep('chrome_click_element')],
-        successCount: 9,
-        failureCount: 1,
-      }),
-    ]);
-    const result = runTabrixChooseContext(
-      { intent: 'open issues', pageRole: 'issues_list' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: {}, // capability not enabled
-      },
-    );
-    expect(result.strategy).toBe('experience_reuse');
-    expect(result.fallbackStrategy).toBe('read_page_required');
-  });
-
-  it('stays on experience_reuse when any step kind is outside the v1 supported set', () => {
-    const { service } = fakeExperience([
-      fakeRow({
-        actionPathId: 'ap-replay-bad-step',
-        pageRole: 'issues_list',
-        stepSequence: [
-          replayableStep('chrome_click_element'),
-          // Out of replay's v1 supported set:
-          {
-            toolName: 'chrome_navigate',
-            status: 'completed',
-            historyRef: null,
-            args: { url: 'x' },
-          },
-        ],
-        successCount: 9,
-        failureCount: 1,
-      }),
-    ]);
-    const result = runTabrixChooseContext(
-      { intent: 'open issues', pageRole: 'issues_list' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
-      },
-    );
-    expect(result.strategy).toBe('experience_reuse');
-  });
-
-  it('stays on experience_reuse when the site replay policy rejects the row pageRole', () => {
-    const { service } = fakeExperience([
-      fakeRow({
-        actionPathId: 'ap-replay-bad-role',
-        pageRole: 'mystery_role',
-        stepSequence: [replayableStep('chrome_click_element')],
-        successCount: 9,
-        failureCount: 1,
-      }),
-    ]);
-    const result = runTabrixChooseContext(
-      { intent: 'open issues' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
-      },
-    );
-    expect(result.strategy).toBe('experience_reuse');
-  });
-
-  // V24-01 closeout: the chooser MUST NOT route to `experience_replay`
-  // when any step is missing replay args. This is the "stop the
-  // bleeding" guard for rows aggregated before V24-01 (or for any row
-  // a future regression silently strips `args` from). Without this
-  // check the chooser would happily pick `experience_replay`, the
-  // engine would immediately fail-closed inside `applySubstitutions`
-  // (`!step.args`), and the user would see a deterministic
-  // `unsupported_step_kind` while the more reliable `experience_reuse`
-  // branch went unused. See `experience-replay.ts::applySubstitutions`.
-  it('stays on experience_reuse when a step has no replay args (V24-01 closeout)', () => {
-    const { service } = fakeExperience([
-      fakeRow({
-        actionPathId: 'ap-replay-no-args',
-        pageRole: 'issues_list',
-        // Bare step shape: in-bounds toolName, but no args populated -
-        // this is the historical aggregator output that V24-01 must
-        // refuse to route to dispatch-side replay.
-        stepSequence: [{ toolName: 'chrome_click_element', status: 'completed', historyRef: null }],
-        successCount: 9,
-        failureCount: 1,
-      }),
-    ]);
-    const result = runTabrixChooseContext(
-      { intent: 'open issues', pageRole: 'issues_list' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
-      },
-    );
-    expect(result.strategy).toBe('experience_reuse');
-    expect(result.fallbackStrategy).toBe('read_page_required');
-  });
-
-  it('stays on experience_reuse when a step has empty {} args (V24-01 closeout)', () => {
-    const { service } = fakeExperience([
-      fakeRow({
-        actionPathId: 'ap-replay-empty-args',
-        pageRole: 'issues_list',
-        stepSequence: [
-          { toolName: 'chrome_click_element', status: 'completed', historyRef: null, args: {} },
-        ],
-        successCount: 9,
-        failureCount: 1,
-      }),
-    ]);
-    const result = runTabrixChooseContext(
-      { intent: 'open issues', pageRole: 'issues_list' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
-      },
-    );
-    expect(result.strategy).toBe('experience_reuse');
-  });
-
-  // V24-01 portability follow-up: the eligibility gate is no longer
-  // "args is non-empty" - it is the per-tool portable allowlist in
-  // `experience-replay-args.ts`. These tests pin the chooser-side
-  // behaviour for rows whose persisted args are well-formed JSON
-  // but carry only session-local handles (a common shape for rows
-  // aggregated by an older code path or smuggled in via manual
-  // SQL). The chooser must downgrade them to `experience_reuse`
-  // rather than route them to a dispatch path that would either
-  // misclick or hit a dead ref.
-
-  it('stays on experience_reuse when a step args carry only a per-snapshot ref', () => {
-    const { service } = fakeExperience([
-      fakeRow({
-        actionPathId: 'ap-replay-ref-only',
-        pageRole: 'issues_list',
-        stepSequence: [
-          {
-            toolName: 'chrome_click_element',
-            status: 'completed',
-            historyRef: null,
-            // Top-level `ref` is per-snapshot session-local; the
-            // portable allowlist drops it. Without `selector`,
-            // `candidateAction.targetRef`, or a css `locatorChain`,
-            // the row has no portable target.
-            args: { ref: 'ref_per_snapshot_xyz' },
-          },
-        ],
-        successCount: 9,
-        failureCount: 1,
-      }),
-    ]);
-    const result = runTabrixChooseContext(
-      { intent: 'open issues', pageRole: 'issues_list' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
-      },
-    );
-    expect(result.strategy).toBe('experience_reuse');
-    expect(result.fallbackStrategy).toBe('read_page_required');
-  });
-
-  it('stays on experience_reuse when candidateAction.targetRef is the legacy ref_* form', () => {
-    const { service } = fakeExperience([
-      fakeRow({
-        actionPathId: 'ap-replay-legacy-targetref',
-        pageRole: 'issues_list',
-        stepSequence: [
-          {
-            toolName: 'chrome_click_element',
-            status: 'completed',
-            historyRef: null,
-            // Only `tgt_*` survives portability filtering;
-            // legacy `ref_*` targetRef is per-snapshot.
-            args: { candidateAction: { targetRef: 'ref_legacy_session_local' } },
-          },
-        ],
-        successCount: 9,
-        failureCount: 1,
-      }),
-    ]);
-    const result = runTabrixChooseContext(
-      { intent: 'open issues', pageRole: 'issues_list' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
-      },
-    );
-    expect(result.strategy).toBe('experience_reuse');
-  });
-
-  it('routes to experience_replay when candidateAction.targetRef is the stable tgt_* form', () => {
-    const { service } = fakeExperience([
-      fakeRow({
-        actionPathId: 'ap-replay-stable-targetref',
-        pageRole: 'issues_list',
-        stepSequence: [
-          {
-            toolName: 'chrome_click_element',
-            status: 'completed',
-            historyRef: null,
-            // Companion to the previous test: B-011 stable refs are
-            // explicitly portable, so this row IS replay-eligible
-            // even without a top-level selector.
-            args: { candidateAction: { targetRef: 'tgt_0123456789' } },
-          },
-        ],
-        successCount: 9,
-        failureCount: 1,
-      }),
-    ]);
-    const result = runTabrixChooseContext(
-      { intent: 'open issues', pageRole: 'issues_list' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
-      },
-    );
-    expect(result.strategy).toBe('experience_replay');
-    expect(result.fallbackStrategy).toBe('experience_reuse');
-  });
-
-  it('stays on experience_reuse when chrome_fill_or_select args are missing the value', () => {
-    const { service } = fakeExperience([
-      fakeRow({
-        actionPathId: 'ap-replay-fill-noval',
-        pageRole: 'issues_list',
-        stepSequence: [
-          {
-            toolName: 'chrome_fill_or_select',
-            status: 'completed',
-            historyRef: null,
-            // chrome_fill_or_select schema requires `value`; without
-            // it the bridge would reject the call at dispatch.
-            args: { selector: '#search' },
-          },
-        ],
-        successCount: 9,
-        failureCount: 1,
-      }),
-    ]);
-    const result = runTabrixChooseContext(
-      { intent: 'search', pageRole: 'issues_list' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
-      },
-    );
-    expect(result.strategy).toBe('experience_reuse');
-  });
-
-  it('the "all" capability token enables experience_replay routing', () => {
-    const { service } = fakeExperience([
-      fakeRow({
-        actionPathId: 'ap-replay-all',
-        pageRole: 'issues_list',
-        stepSequence: [replayableStep('chrome_click_element')],
-        successCount: 9,
-        failureCount: 1,
-      }),
-    ]);
-    const result = runTabrixChooseContext(
-      { intent: 'open issues', pageRole: 'issues_list' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'all' },
-      },
-    );
-    expect(result.strategy).toBe('experience_replay');
-  });
-
-  it('reads the experience repo at most once (no write-path side-effect)', () => {
-    // Doc §8 success criterion #5: the chooser is read-only and
-    // idempotent — it must not loop or double-read.
-    const { service, spy } = fakeExperience([]);
-    runTabrixChooseContext(
-      { intent: 'open issues', pageRole: 'repo_home' },
-      { experience: service, knowledgeApi: null, capabilityEnv: {} },
-    );
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(spy).toHaveBeenCalledWith({
-      intent: expect.any(String),
-      intentSignature: expect.any(String),
-      siteFamily: undefined,
-      pageRole: 'repo_home',
-      limit: expect.any(Number),
-    });
-  });
-
-  it('passes resolved siteFamily into the Experience lookup', () => {
-    const { service, spy } = fakeExperience([]);
-    runTabrixChooseContext(
-      {
-        intent: 'open issues',
-        url: 'https://github.com/example/repo/issues',
-        pageRole: 'repo_home',
-      },
-      { experience: service, knowledgeApi: null, capabilityEnv: {} },
-    );
-    expect(spy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        intentSignature: 'open issues',
-        siteFamily: 'github',
-        pageRole: 'repo_home',
-      }),
-    );
-  });
-
   it('echoes resolved bucket fields back to the caller', () => {
-    const { service } = fakeExperience([]);
     const result = runTabrixChooseContext(
       { intent: '  Open Issues  ', pageRole: 'repo_home', siteId: 'github' },
-      { experience: service, knowledgeApi: null, capabilityEnv: {} },
+      { knowledgeApi: null, capabilityEnv: {} },
     );
     expect(result.resolved).toEqual({
       intentSignature: 'open issues',
@@ -867,12 +335,6 @@ describe('B-018 v1 risk tier wiring', () => {
   it('tabrix_choose_context is registered as P0 (read-only)', () => {
     // Doc §8 success criterion #6.
     expect(TOOL_RISK_TIERS[TOOL_NAMES.CONTEXT.CHOOSE]).toBe('P0');
-  });
-
-  it('threshold constant matches the documented v1 number', () => {
-    // Sanity: doc §6 lists the only knob; if someone bumps it in code
-    // they must also bump the doc + the success-rate test fixture.
-    expect(EXPERIENCE_HIT_MIN_SUCCESS_RATE).toBe(0.5);
   });
 
   it('tabrix_choose_context_record_outcome is registered as P0 (pure-INSERT)', () => {
@@ -920,12 +382,10 @@ function fakeTelemetry(initialDecisionIds: string[] = []): FakeTelemetry {
 
 describe('runTabrixChooseContext telemetry (V23-04)', () => {
   it('records a decision row and surfaces decisionId when telemetry is wired', () => {
-    const { service } = fakeExperience([]);
     const tele = fakeTelemetry();
     const result = runTabrixChooseContext(
       { intent: 'open issues', pageRole: 'repo_home', siteId: 'github' },
       {
-        experience: service,
         knowledgeApi: null,
         capabilityEnv: {},
         telemetry: tele.repo,
@@ -941,8 +401,8 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
         intentSignature: 'open issues',
         pageRole: 'repo_home',
         siteFamily: 'github',
-        // No experience hit, no knowledge, but pageRole=repo_home is
-        // on the markdown whitelist for siteFamily=github.
+        // No knowledge, but pageRole=repo_home is on the markdown
+        // whitelist for siteFamily=github.
         strategy: 'read_page_markdown',
         fallbackStrategy: 'read_page_required',
         createdAt: '2026-04-22T10:00:00.000Z',
@@ -957,10 +417,6 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
         tokenEstimateFullRead: 0,
         tokensSavedEstimate: 0,
         knowledgeEndpointFamily: null,
-        // V25-02 (M2 binding) — V24-03 ranked-replay audit fields.
-        rankedCandidateCount: 0,
-        replayEligibleBlockedBy: null,
-        replayFallbackDepth: 'cold',
         // V26-04 (B-027) — no `pageContext` provider was wired, so the
         // dispatcher still got the v25 zero-input behaviour and these
         // telemetry slots stay `null`. Honest "we did not measure".
@@ -971,10 +427,9 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
   });
 
   it('omits decisionId when telemetry is not wired', () => {
-    const { service } = fakeExperience([]);
     const result = runTabrixChooseContext(
       { intent: 'do something' },
-      { experience: service, knowledgeApi: null, capabilityEnv: {} },
+      { knowledgeApi: null, capabilityEnv: {} },
     );
     expect(result.status).toBe('ok');
     expect(result.decisionId).toBeUndefined();
@@ -985,7 +440,6 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
     const result = runTabrixChooseContext(
       {},
       {
-        experience: null,
         knowledgeApi: null,
         capabilityEnv: {},
         telemetry: tele.repo,
@@ -999,13 +453,11 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
   // V26-04 (B-027) — honest dispatcher inputs.
   // ---------------------------------------------------------------
   it('records dispatcherInputSource=live_snapshot when the page context provider returns a live row', () => {
-    const { service } = fakeExperience([]);
     const tele = fakeTelemetry();
     const baselineFullRead = 'a'.repeat(120);
     const result = runTabrixChooseContext(
       { intent: 'open issues', url: 'https://github.com/octocat/hello/issues' },
       {
-        experience: service,
         knowledgeApi: null,
         capabilityEnv: {},
         telemetry: tele.repo,
@@ -1036,12 +488,10 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
   });
 
   it('records dispatcherInputSource=fallback_zero with cause when no snapshot is available', () => {
-    const { service } = fakeExperience([]);
     const tele = fakeTelemetry();
     const result = runTabrixChooseContext(
       { intent: 'open issues' },
       {
-        experience: service,
         knowledgeApi: null,
         capabilityEnv: {},
         telemetry: tele.repo,
@@ -1072,14 +522,12 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
   });
 
   it('routes Chinese search/list API candidates to knowledge_supported_read without shared site-family changes', () => {
-    const { service } = fakeExperience([]);
     const result = runTabrixChooseContext(
       {
         intent: '搜索 GitHub 上 AI助手 相关热门项目，列出前10个',
         url: 'https://github.com/search',
       },
       {
-        experience: service,
         knowledgeApi: null,
         capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
         pageContext: {
@@ -1107,14 +555,12 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
   });
 
   it('routes npmjs Chinese package search through internal API knowledge with a generic site token', () => {
-    const { service } = fakeExperience([]);
     const result = runTabrixChooseContext(
       {
         intent: '搜索 npm 上 browser automation 相关包，列出前10个',
         url: 'https://www.npmjs.com/search',
       },
       {
-        experience: service,
         knowledgeApi: null,
         capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
         pageContext: {
@@ -1139,7 +585,6 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
   });
 
   it('telemetry write failure must not break the chooser (decisionId omitted)', () => {
-    const { service } = fakeExperience([]);
     const tele = fakeTelemetry();
     // Simulate disk-full / locked-DB by making recordDecision throw.
     (tele.repo.recordDecision as unknown as jest.Mock) = jest.fn(() => {
@@ -1150,7 +595,6 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
       const result = runTabrixChooseContext(
         { intent: 'do something' },
         {
-          experience: service,
           knowledgeApi: null,
           capabilityEnv: {},
           telemetry: tele.repo,
@@ -1251,443 +695,5 @@ describe('runTabrixChooseContextRecordOutcome (V23-04)', () => {
     } finally {
       warn.mockRestore();
     }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// V24-03 — `tabrix_choose_context` v2 ranked replay-aware fields
-// ---------------------------------------------------------------------------
-
-describe('runTabrixChooseContext ranked replay (V24-03)', () => {
-  const NOW = '2026-04-22T12:00:00.000Z';
-
-  it('emits an experience_ranked artifact with top-N when capability + thresholds pass', () => {
-    const replayable = (id: string, score: number) =>
-      fakeRow({
-        actionPathId: id,
-        pageRole: 'issues_list',
-        stepSequence: [replayableStep('chrome_click_element')],
-        successCount: 9,
-        failureCount: 1,
-        lastReplayAt: NOW,
-        compositeScoreDecayed: score,
-      });
-    const { service } = fakeExperience([
-      replayable('action_path_' + 'a'.repeat(64), 0.6),
-      replayable('action_path_' + 'b'.repeat(64), 0.9),
-      replayable('action_path_' + 'c'.repeat(64), 0.8),
-    ]);
-    const result = runTabrixChooseContext(
-      { intent: 'open issues', pageRole: 'issues_list' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
-        now: () => NOW,
-      },
-    );
-    expect(result.status).toBe('ok');
-    expect(result.strategy).toBe('experience_replay');
-    expect(result.fallbackStrategy).toBe('experience_reuse');
-    expect(result.replayEligibleBlockedBy).toBe('none');
-    expect(result.replayFallbackDepth).toBe(0);
-    expect(result.rankedCandidateCount).toBe(3);
-    const artifact = result.artifacts?.[0];
-    expect(artifact?.kind).toBe('experience_ranked');
-    expect(artifact?.ranked?.map((c) => c.ref)).toEqual([
-      'action_path_' + 'b'.repeat(64),
-      'action_path_' + 'c'.repeat(64),
-      'action_path_' + 'a'.repeat(64),
-    ]);
-    expect(artifact?.ranked?.every((c) => c.replayEligible)).toBe(true);
-  });
-
-  it('downgrades to experience_reuse with capability_off blocker when capability is off', () => {
-    const { service } = fakeExperience([
-      fakeRow({
-        actionPathId: 'action_path_' + 'd'.repeat(64),
-        pageRole: 'issues_list',
-        stepSequence: [replayableStep('chrome_click_element')],
-        successCount: 9,
-        failureCount: 1,
-        compositeScoreDecayed: 0.9,
-      }),
-    ]);
-    const result = runTabrixChooseContext(
-      { intent: 'open issues', pageRole: 'issues_list' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: {},
-        now: () => NOW,
-      },
-    );
-    expect(result.strategy).toBe('experience_reuse');
-    expect(result.replayEligibleBlockedBy).toBe('capability_off');
-    expect(result.rankedCandidateCount).toBe(1);
-    expect(result.replayFallbackDepth).toBe(0);
-    const artifact = result.artifacts?.[0];
-    expect(artifact?.kind).toBe('experience_ranked');
-    expect(artifact?.ranked?.[0]?.replayEligible).toBe(false);
-    expect(artifact?.ranked?.[0]?.blockedBy).toBe('capability_off');
-  });
-
-  it('downgrades with non_portable_args when args carry only session-local handles', () => {
-    const { service } = fakeExperience([
-      fakeRow({
-        actionPathId: 'action_path_' + 'e'.repeat(64),
-        pageRole: 'issues_list',
-        stepSequence: [
-          {
-            toolName: 'chrome_click_element',
-            status: 'completed',
-            historyRef: null,
-            args: { ref: 'ref_per_snapshot' },
-          },
-        ],
-        successCount: 9,
-        failureCount: 1,
-      }),
-    ]);
-    const result = runTabrixChooseContext(
-      { intent: 'open issues', pageRole: 'issues_list' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
-        now: () => NOW,
-      },
-    );
-    expect(result.strategy).toBe('experience_reuse');
-    expect(result.replayEligibleBlockedBy).toBe('non_portable_args');
-  });
-
-  it('downgrades with below_threshold blocker when successCount is too small', () => {
-    const { service } = fakeExperience([
-      fakeRow({
-        actionPathId: 'action_path_' + 'f'.repeat(64),
-        pageRole: 'issues_list',
-        stepSequence: [replayableStep('chrome_click_element')],
-        successCount: 2,
-        failureCount: 0,
-        compositeScoreDecayed: 0.99,
-      }),
-    ]);
-    const result = runTabrixChooseContext(
-      { intent: 'open issues', pageRole: 'issues_list' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
-        now: () => NOW,
-      },
-    );
-    // successRate = 1 ≥ 0.5 (legacy gate) so reuse still surfaces;
-    // V24-03 below_threshold blocker pins the reason for telemetry.
-    expect(result.strategy).toBe('experience_reuse');
-    expect(result.replayEligibleBlockedBy).toBe('below_threshold');
-  });
-
-  it('reports rankedCandidateCount=0 when no Experience rows are returned', () => {
-    const { service } = fakeExperience([]);
-    const result = runTabrixChooseContext(
-      { intent: 'do something' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: {},
-        now: () => NOW,
-      },
-    );
-    expect(result.rankedCandidateCount).toBe(0);
-    expect(result.replayFallbackDepth).toBe('cold');
-    expect(result.replayEligibleBlockedBy).toBeUndefined();
-  });
-
-  it('does NOT touch step-repository / session-repository (Memory-not-read invariant)', () => {
-    // The chooser must only call `experience.suggestActionPaths`. Any
-    // import or call into per-step Memory tables would cross the
-    // chooser-hot-path boundary documented in the V24-03 plan.
-    // Inspect the actual import graph of `choose-context.ts` so a
-    // future refactor that adds an unintended Memory dependency is
-    // caught by this test instead of by a downstream regression.
-
-    const fs = require('node:fs');
-
-    const path = require('node:path');
-    const source = fs.readFileSync(path.join(__dirname, 'choose-context.ts'), 'utf-8') as string;
-    expect(source).not.toMatch(/step-repository/);
-    expect(source).not.toMatch(/session-repository/);
-    const rules = fs.readFileSync(
-      path.join(__dirname, 'choose-context-replay-rules.ts'),
-      'utf-8',
-    ) as string;
-    expect(rules).not.toMatch(/step-repository/);
-    expect(rules).not.toMatch(/session-repository/);
-  });
-
-  it('V25-02 persists V24-03 ranked fields + layer-dispatch telemetry', () => {
-    // V24-03 plan §2.3 deferred persisting ranked fields to v2.5; the
-    // V25-02 M2 binding lands them on `tabrix_choose_context_decisions`
-    // alongside the new layer-dispatch telemetry. The recordDecision
-    // payload must carry every field — strict shape check guards
-    // against silent additions slipping past the v25 release gate.
-    const tele = fakeTelemetry();
-    const { service } = fakeExperience([
-      fakeRow({
-        actionPathId: 'action_path_' + 'g'.repeat(64),
-        pageRole: 'issues_list',
-        stepSequence: [replayableStep('chrome_click_element')],
-        successCount: 9,
-        failureCount: 1,
-        compositeScoreDecayed: 0.9,
-      }),
-    ]);
-    runTabrixChooseContext(
-      { intent: 'open issues', pageRole: 'issues_list' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
-        telemetry: tele.repo,
-        newDecisionId: () => 'dc-v24-3',
-        now: () => NOW,
-      },
-    );
-    expect(tele.decisions).toHaveLength(1);
-    const recorded = tele.decisions[0];
-    expect(Object.keys(recorded ?? {}).sort()).toEqual(
-      [
-        'chosenLayer',
-        'createdAt',
-        'decisionId',
-        // V26-04 (B-027): strict-shape gate must include the two
-        // new honest-dispatcher-input columns. Both are `null` here
-        // because no `pageContext` provider is wired in this test.
-        'dispatcherInputSource',
-        'fallbackCause',
-        'fallbackCauseV26',
-        'fallbackStrategy',
-        'intentSignature',
-        'knowledgeEndpointFamily',
-        'layerDispatchReason',
-        'pageRole',
-        'rankedCandidateCount',
-        'replayEligibleBlockedBy',
-        'replayFallbackDepth',
-        'siteFamily',
-        'sourceRoute',
-        'strategy',
-        'tokenEstimateChosen',
-        'tokenEstimateFullRead',
-        'tokensSavedEstimate',
-      ].sort(),
-    );
-    // Spot-check ranked + layer values lined up with the strategy.
-    expect(recorded?.rankedCandidateCount).toBeGreaterThan(0);
-    expect(recorded?.chosenLayer).toBeDefined();
-    expect(recorded?.layerDispatchReason).toBeDefined();
-    expect(recorded?.sourceRoute).toBeDefined();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// V25 closeout — P2 (Codex review)
-//
-// Pin the *chooser-level* invariant that `runTabrixChooseContext` emits a
-// stable, deterministic layer-dispatch policy SIGNAL when the dispatcher's
-// priority order actually selects the `experience_replay_executable` rule.
-// This complements the dispatcher unit tests in
-// `choose-context-layer-dispatch.test.ts` by going through the real chooser
-// entry point — proving the wiring inside `choose-context.ts`
-// (`experienceReplayAvailable: decision.strategy === 'experience_replay'`)
-// reliably reaches priority 5 of the strategy table.
-//
-// Honest accounting (V25 closeout P2 finding): the dispatcher places the
-// `experience_replay_executable` rule at priority 5, AFTER user-intent
-// overrides (priority 2), task-type overrides (priority 3), and page-
-// complexity overrides (priority 4). Because `runTabrixChooseContext`
-// hard-codes `candidateActionsCount = 0` and `hvoCount = 0` when calling
-// `dispatchLayer` (it does not yet feed real per-page facts), priority 4's
-// `simple_page_low_density` rule fires for ANY non-empty `pageRole`. So
-// `experience_replay_skip_read` only actually surfaces through the chooser
-// when BOTH of the following hold:
-//
-//   1. `intent` classifies to the `'unknown'` user-intent bucket
-//      (i.e. it does NOT contain summary / details / form / open
-//      keywords from `classifyIntentForLayerDispatch`), AND
-//   2. `pageRole` is empty / absent (so priority-4 page-complexity
-//      rules cannot match).
-//
-// This is the configuration this test exercises. The signal contract
-// itself remains: when those two conditions hold and an
-// experience_replay strategy is available, the dispatcher MUST emit
-// `chosenLayer='L0'` + `sourceRoute='experience_replay_skip_read'` +
-// `readPageAvoided=true`. The signal is advisory — the chooser never
-// calls or skips `chrome_read_page` itself; the upstream caller decides
-// whether to honour it.
-// ---------------------------------------------------------------------------
-
-describe('runTabrixChooseContext layer-dispatch signal stability (V25 closeout P2)', () => {
-  // Inputs that satisfy both conditions above (vague intent + no
-  // pageRole) so priority 5 is reached. The intent string here must
-  // NOT classify to summary / details / open_or_select /
-  // form_or_submit per `classifyIntentForLayerDispatch`, otherwise
-  // priority 2 wins.
-  const REPLAY_ELIGIBLE_VAGUE_INPUTS = [
-    { intent: 'do work', sourceRowPageRole: 'issues_list' },
-    { intent: 'general task', sourceRowPageRole: 'repo_home' },
-    { intent: 'general task', sourceRowPageRole: 'pull_requests_list' },
-  ] as const;
-
-  it.each(REPLAY_ELIGIBLE_VAGUE_INPUTS)(
-    'vague intent="$intent" with replay-eligible row (sourceRow.pageRole=$sourceRowPageRole) → experience_replay_skip_read',
-    ({ intent, sourceRowPageRole }) => {
-      const { service } = fakeExperience([
-        fakeRow({
-          actionPathId: `ap-${sourceRowPageRole}`,
-          pageRole: sourceRowPageRole,
-          intentSignature: intent,
-          stepSequence: [
-            replayableStep('chrome_click_element'),
-            replayableStep('chrome_fill_or_select'),
-          ],
-          successCount: 9,
-          failureCount: 1,
-        }),
-      ]);
-      // NOTE: caller-side `pageRole` is intentionally omitted —
-      // see the describe-block comment for why.
-      const result = runTabrixChooseContext(
-        { intent },
-        {
-          experience: service,
-          knowledgeApi: null,
-          capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
-        },
-      );
-
-      expect(result.status).toBe('ok');
-      // Sanity: the replay strategy itself must actually fire for
-      // this row. If the chooser starts downgrading these rows the
-      // signal contract changes and this test should fail loudly.
-      expect(result.strategy).toBe('experience_replay');
-
-      // The actual V25 closeout P2 invariant.
-      expect(result.chosenLayer).toBe('L0');
-      expect(result.layerDispatchReason).toBe('experience_replay_executable');
-      expect(result.sourceRoute).toBe('experience_replay_skip_read');
-      expect(result.readPageAvoided).toBe(true);
-    },
-  );
-
-  it('emits the SAME signal across 5 repeated invocations of the same replay-eligible vague input', () => {
-    // Stability across calls: the chooser is deterministic and
-    // side-effect-free for a fixed input set. Five back-to-back calls
-    // must yield bit-identical layer-dispatch signals (no internal
-    // counter / RNG / timestamp leak).
-    const { service } = fakeExperience([
-      fakeRow({
-        actionPathId: 'ap-replay-stability',
-        pageRole: 'issues_list',
-        intentSignature: 'do work',
-        stepSequence: [replayableStep('chrome_click_element')],
-        successCount: 9,
-        failureCount: 1,
-      }),
-    ]);
-
-    const signals = Array.from({ length: 5 }, () =>
-      runTabrixChooseContext(
-        { intent: 'do work' },
-        {
-          experience: service,
-          knowledgeApi: null,
-          capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
-        },
-      ),
-    ).map((r) => ({
-      strategy: r.strategy,
-      chosenLayer: r.chosenLayer,
-      layerDispatchReason: r.layerDispatchReason,
-      sourceRoute: r.sourceRoute,
-      readPageAvoided: r.readPageAvoided,
-    }));
-
-    const expected = {
-      strategy: 'experience_replay',
-      chosenLayer: 'L0',
-      layerDispatchReason: 'experience_replay_executable',
-      sourceRoute: 'experience_replay_skip_read',
-      readPageAvoided: true,
-    } as const;
-    for (const s of signals) {
-      expect(s).toEqual(expected);
-    }
-  });
-
-  it('explicit user-intent override wins over experience_replay_skip_read (priority order pin)', () => {
-    // Honest-accounting pin: even when the strategy resolves to
-    // `experience_replay`, an explicit user-intent override
-    // (`intent='open issues'` → `open_or_select`) takes priority 2 and
-    // emits `read_page_required`, NOT `experience_replay_skip_read`.
-    // This is the V25-04 stability binding (caller wanted explicit
-    // detail / open semantics, so the chooser respects it). Locking
-    // this in test form prevents a future "optimization" that
-    // promotes priority 5 above priority 2 and silently changes the
-    // signal in the most common production input shape.
-    const { service } = fakeExperience([
-      fakeRow({
-        actionPathId: 'ap-replay-priority-pin',
-        pageRole: 'issues_list',
-        intentSignature: 'open issues',
-        stepSequence: [replayableStep('chrome_click_element')],
-        successCount: 9,
-        failureCount: 1,
-      }),
-    ]);
-    const result = runTabrixChooseContext(
-      { intent: 'open issues', pageRole: 'issues_list' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
-      },
-    );
-    expect(result.strategy).toBe('experience_replay');
-    expect(result.layerDispatchReason).toBe('user_intent_open_or_select');
-    expect(result.sourceRoute).toBe('read_page_required');
-    expect(result.chosenLayer).toBe('L0+L1');
-    expect(result.readPageAvoided).toBe(false);
-  });
-
-  it('downgrade to experience_reuse drops the skip-read signal (negative control)', () => {
-    // Negative control: when the chooser cannot route to
-    // `experience_replay` (capability env is empty), the dispatcher
-    // MUST NOT emit `experience_replay_skip_read`. This pins the
-    // chooser-side wiring
-    // (`experienceReplayAvailable: decision.strategy === 'experience_replay'`)
-    // so a regression that hard-codes that flag to `true` fails loudly.
-    const { service } = fakeExperience([
-      fakeRow({
-        actionPathId: 'ap-replay-cap-off',
-        pageRole: 'issues_list',
-        intentSignature: 'do work',
-        stepSequence: [replayableStep('chrome_click_element')],
-        successCount: 9,
-        failureCount: 1,
-      }),
-    ]);
-    const result = runTabrixChooseContext(
-      { intent: 'do work' },
-      {
-        experience: service,
-        knowledgeApi: null,
-        capabilityEnv: {}, // capability OFF → strategy=experience_reuse
-      },
-    );
-    expect(result.strategy).toBe('experience_reuse');
-    expect(result.sourceRoute).not.toBe('experience_replay_skip_read');
-    expect(result.readPageAvoided).toBe(false);
   });
 });

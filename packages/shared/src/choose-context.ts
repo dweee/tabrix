@@ -26,93 +26,6 @@ export const MAX_TABRIX_CHOOSE_CONTEXT_INTENT_CHARS = 1024;
 export const MAX_TABRIX_CHOOSE_CONTEXT_PAGE_ROLE_CHARS = 128;
 
 /**
- * Single threshold v1 uses to decide an Experience hit is good enough.
- * Strict `>=`. Plans below this rate are treated as "no match" so the
- * caller does not get a low-quality replay candidate dressed up as
- * `experience_reuse`.
- *
- * Kept conservative on purpose: a second knob (e.g. minimum sample
- * count) is exactly what v1 forbids — adding one is a v2 design call,
- * informed by run-history data.
- */
-export const EXPERIENCE_HIT_MIN_SUCCESS_RATE = 0.5;
-
-/**
- * Number of plans we ask `experience_suggest_plan` for. The best
- * surviving plan drives the strategy; the rest become artifacts.
- */
-export const EXPERIENCE_LOOKUP_LIMIT = 3;
-
-// ---------------------------------------------------------------------------
-// Ranked replay constants
-// ---------------------------------------------------------------------------
-
-/**
- * Number of replay candidates the
- * chooser surfaces in the `experience_ranked` artifact. Three is large
- * enough to give a real ladder (top-1 + two backups) and small enough
- * that the upstream LLM will actually attempt them all before giving
- * up. Treat as a closed knob: bumping requires a brief amendment +
- * re-checking the per-tool token budget.
- */
-export const EXPERIENCE_RANKED_TOP_N = 3;
-
-/**
- * Minimum `successRate` (success / (success+failure)) a row
- * must clear to be considered replay-eligible. This is STRICTER than
- * {@link EXPERIENCE_HIT_MIN_SUCCESS_RATE} (which is the v1 reuse
- * gate): replay actually dispatches the recorded steps against the
- * live page, so the bar to take that risk is higher than the bar to
- * surface a recorded plan as advice.
- */
-export const EXPERIENCE_REPLAY_MIN_SUCCESS_RATE = 0.8;
-
-/**
- * Minimum absolute success count. Pairs with
- * {@link EXPERIENCE_REPLAY_MIN_SUCCESS_RATE}: 1 success / 0 failures
- * is a perfect rate but a single sample, which is not enough evidence
- * to dispatch a recorded plan. Three matches MKEP §3.2's "min sample
- * count for ranked surfacing".
- */
-export const EXPERIENCE_REPLAY_MIN_SUCCESS_COUNT = 3;
-
-/**
- * Recency-decay half-life in days for chooser-side ranking.
- * Mirrors `EXPERIENCE_SCORE_STEP_RECENCY_HALF_LIFE_DAYS` so the
- * read-side ranking and the write-side `compositeScoreDecayed` cache
- * use the same time constant; if these ever drift, the chooser's
- * ordering will not match the persisted score.
- */
-export const EXPERIENCE_RECENCY_DECAY_DAYS = 30;
-
-/**
- * Closed enum for `TabrixChooseContextResult.replayEligibleBlockedBy`.
- *
- * Each value is a single, deterministic reason the chooser can give
- * for refusing to route a candidate to `experience_replay`. The
- * `'none'` value is reserved for the success branch (i.e. the chooser
- * actually emitted `experience_replay`); a downgraded result must
- * always carry a non-`'none'` reason so a post-mortem can say
- * "Codex's MCP saw N decisions, X% were blocked by reason Y".
- *
- * Order is: capability gate → step kind → portability → page role →
- * threshold → stale locator. Multiple reasons may apply; the chooser
- * reports the FIRST one in this order so the post-mortem signal is
- * stable across runs.
- */
-export type ReplayEligibilityBlockReason =
-  | 'capability_off'
-  | 'unsupported_step_kind'
-  | 'non_portable_args'
-  | 'site_replay_policy_missing'
-  | 'page_role_not_allowed'
-  /** @deprecated Use `site_replay_policy_missing` or `page_role_not_allowed`. */
-  | 'non_github_pageRole'
-  | 'below_threshold'
-  | 'stale_locator'
-  | 'none';
-
-/**
  * Maximum number of endpoint signatures echoed in the `knowledge_light`
  * artifact summary. Keeps payload bounded even when a site has many
  * captured endpoints.
@@ -144,12 +57,7 @@ export type TabrixContextSiteId = SiteId;
  * still returns `read_page_required` so JSON-only callers see no
  * behavior change.
  */
-export type ContextStrategyName =
-  | 'experience_replay'
-  | 'experience_reuse'
-  | 'knowledge_light'
-  | 'read_page_markdown'
-  | 'read_page_required';
+export type ContextStrategyName = 'knowledge_light' | 'read_page_markdown' | 'read_page_required';
 
 /**
  * Small, hand-curated set of `pageRole` values
@@ -191,60 +99,25 @@ export interface TabrixChooseContextInput {
   /**
    * Optional explicit site-family override. Must be a shared safe token.
    * `github` remains the GA seed; other values are accepted by the public
-   * contract and then fail closed when no matching Knowledge / Replay policy
-   * is configured.
+   * contract and then fail closed when no matching Knowledge policy is configured.
    */
   siteId?: TabrixContextSiteId;
 }
 
 /**
- * Single ranked replay candidate inside the
- * `experience_ranked` artifact. `score` is the deterministic composite
- * (accuracy / speed / token / stability with recency decay; see
- * `composite-score.ts`); `replayEligible` is the AND of every
- * eligibility gate (capability, step kinds, portable args, pageRole,
- * thresholds). A non-eligible candidate stays in the ranked list with
- * `replayEligible: false` + a `blockedBy` reason so the post-mortem
- * stays grouped per actionPathId; the chooser still picks
- * `experience_reuse` if the top-ranked is non-eligible.
- */
-export interface TabrixChooseContextRankedCandidate {
-  ref: string;
-  score: number;
-  replayEligible: boolean;
-  blockedBy?: ReplayEligibilityBlockReason;
-}
-
-/**
  * One reusable artifact reference returned alongside the chosen
- * strategy. `ref` is opaque to the caller — it is owned by whichever
- * native subsystem produced it (Experience action-path id; site name
- * for the Knowledge catalog; etc.).
- *
- * The chooser emits a single `'experience_ranked'` artifact
- * artifact of this kind whenever it surfaces a ranked candidate list
- * (whether or not it ultimately routes to `experience_replay`). The
- * top-1 is `ref`; the full list (top-N up to {@link EXPERIENCE_RANKED_TOP_N})
- * is in `ranked`. `summary` echoes a short description of the top-1.
+ * strategy. `ref` is opaque to the caller and owned by whichever native
+ * subsystem produced it.
  */
 export interface TabrixChooseContextArtifact {
-  kind: 'experience' | 'experience_ranked' | 'knowledge_api' | 'read_page';
+  kind: 'knowledge_api' | 'read_page';
   ref: string;
   /** Compact human-readable label, ≤ 200 chars. Not a UI string. */
   summary: string;
-  /**
-   * Populated only on `kind === 'experience_ranked'`. List
-   * length is in `[1, EXPERIENCE_RANKED_TOP_N]`; ordering is the
-   * deterministic ranking from `rankExperienceCandidates`
-   * (composite score DESC, then `successCount` DESC, then
-   * `lastReplayAt` DESC NULLS LAST, then `actionPathId` ASC).
-   */
-  ranked?: TabrixChooseContextRankedCandidate[];
 }
 
 /**
- * Echo of what the tool resolved from input — useful for debugging
- * bucket alignment with `experience_suggest_plan`.
+ * Echo of what the tool resolved from input.
  */
 export interface TabrixChooseContextResolved {
   intentSignature: string;
@@ -291,39 +164,6 @@ export interface TabrixChooseContextResult {
    */
   decisionId?: string;
   /**
-   * Number of replay candidates in the
-   * `experience_ranked` artifact (0 when none surfaced). Present on
-   * any ok result, regardless of strategy: a non-replay strategy
-   * still sets this to `0` so post-hoc analysis can cleanly group
-   * "we had ranked candidates but went elsewhere" vs "we never had
-   * any". A non-zero value implies one artifact of kind
-   * `'experience_ranked'`.
-   */
-  rankedCandidateCount?: number;
-  /**
-   * First reason the chooser refused to route the top-1
-   * candidate to `experience_replay`. `'none'` is set on the
-   * success branch (chooser actually emitted `experience_replay`);
-   * any other value is the FIRST blocker in the closed
-   * {@link ReplayEligibilityBlockReason} order so the post-mortem
-   * signal is stable. Absent on result branches that never even
-   * looked at Experience (e.g. `read_page_required` when no
-   * candidate row existed at all).
-   */
-  replayEligibleBlockedBy?: ReplayEligibilityBlockReason;
-  /**
-   * Replay-engine fallback depth the chooser THINKS the
-   * caller will hit. The chooser itself can only declare `0` (we
-   * surfaced a candidate) or `'cold'` (no candidates surfaced, so
-   * the caller will pay full read-page cost). The actual `1 | 2 | 3`
-   * values are written by the replay engine on outcome write-back
-   * and surface in telemetry; the chooser never claims to
-   * know the post-execution depth. Numeric encoding intentionally
-   * matches the per-pair fallback metric so analysis joins
-   * across surfaces without translation.
-   */
-  replayFallbackDepth?: 0 | 1 | 2 | 3 | 'cold';
-  /**
    * Chosen layer envelope the dispatcher selected for this
    * decision. Optional so older callers / tests that mock the result
    * stay valid; populated whenever `status === 'ok'` and the v25
@@ -337,11 +177,9 @@ export interface TabrixChooseContextResult {
    */
   layerDispatchReason?: LayerDispatchReason;
   /**
-   * Closed-enum routing instruction telling the caller
-   * whether `chrome_read_page` is required, the experience replay
-   * skip-read shortcut applies, knowledge supports the read, or the
-   * dispatcher fell back. See {@link
-   * ./read-page-contract.LayerSourceRoute}.
+   * Closed-enum routing instruction telling the caller whether
+   * `chrome_read_page` is required, Knowledge supports the read, or the
+   * dispatcher fell back. See {@link ./read-page-contract.LayerSourceRoute}.
    */
   sourceRoute?: LayerSourceRoute;
   /**
@@ -368,13 +206,6 @@ export interface TabrixChooseContextResult {
    * is unknown.
    */
   tokensSavedEstimate?: number;
-  /**
-   * When the dispatcher routes the caller through
-   * `experience_replay_skip_read`, the caller is expected to skip
-   * `chrome_read_page` entirely. This flag is `true` ONLY in that
-   * exact branch; the chooser never claims a generic "do not read".
-   */
-  readPageAvoided?: boolean;
   /**
    * Closed-enum advisory the chooser writes to tell the
    * upstream MCP loop how (and whether) to drive

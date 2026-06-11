@@ -37,10 +37,10 @@ export type ClickObservedOutcome =
   | 'verification_unavailable';
 
 /**
- * The full closed enum as a runtime tuple. Consumers (e.g. the
- * `experience_score_step` parser) build a Set from this for O(1)
- * membership checks. Keep in lockstep with {@link ClickObservedOutcome}
- * — the unit test in `click.test.ts` enforces parity.
+ * The full closed enum as a runtime tuple. Consumers can build a Set from this
+ * for O(1) membership checks. Keep in lockstep with
+ * {@link ClickObservedOutcome} — the unit test in `click.test.ts` enforces
+ * parity.
  */
 export const CLICK_OBSERVED_OUTCOMES: readonly ClickObservedOutcome[] = [
   'cross_document_navigation',

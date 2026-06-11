@@ -96,12 +96,6 @@ describe('TOOL_RISK_TIERS coverage invariants', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('experience_replay is P1 + capability-gated (V24-01 invariant)', () => {
-    expect(TOOL_RISK_TIERS[TOOL_NAMES.EXPERIENCE.REPLAY]).toBe('P1');
-    expect(isCapabilityGatedTool(TOOL_NAMES.EXPERIENCE.REPLAY)).toBe(true);
-    expect(P3_EXPLICIT_OPT_IN_TOOLS).not.toContain(TOOL_NAMES.EXPERIENCE.REPLAY);
-  });
-
   it('known-safe tools are classified P0 (regression guard)', () => {
     expect(TOOL_RISK_TIERS[TOOL_NAMES.BROWSER.READ_PAGE]).toBe('P0');
     expect(TOOL_RISK_TIERS[TOOL_NAMES.BROWSER.SCREENSHOT]).toBe('P0');
@@ -163,9 +157,6 @@ describe('TOOL_RISK_TIERS coverage invariants', () => {
       'chrome_upload_file',
       'chrome_handle_dialog',
       'chrome_gif_recorder',
-      'experience_suggest_plan',
-      'experience_replay',
-      'experience_score_step',
       'tabrix_choose_context',
       'tabrix_choose_context_record_outcome',
       'memory_record_ai_feedback',

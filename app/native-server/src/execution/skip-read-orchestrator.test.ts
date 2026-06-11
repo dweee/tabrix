@@ -1,15 +1,9 @@
 /**
- * V26-03 (B-026) — Skip-Read Execution Orchestrator unit tests.
+ * Skip-Read Execution Orchestrator unit tests.
  *
- * Pinned by the V2.6 S2 plan stop-gate: a synthetic
- * `experience_replay` decision MUST resolve to `action='skip'`,
- * `readPageAvoided=true`, `tokensSavedEstimate > 0`. Any regression
- * here means V26-06 will report `readPageAvoidedCount=0` and the
- * S2 stop-gate trips.
- *
- * Also covers the explicit-fallback branches the user demanded in
- * session correction #4 (replay candidate gating) and the
- * never-L2-on-fallback hard rule (correction #2).
+ * Skip-read is reserved for verified API/Knowledge reads. Retired or unknown
+ * routes must fall back to normal DOM reading instead of pretending Tabrix can
+ * execute a cached action path.
  */
 
 import {
@@ -27,11 +21,10 @@ const FRESH_CTX: TaskCtxSnapshot = Object.freeze({
   currentUrl: 'https://example.com/page',
 });
 
-const REPLAY_DECISION: ChooseContextDecisionSnapshot = Object.freeze({
-  sourceRoute: 'experience_replay_skip_read',
+const RETIRED_ROUTE_DECISION: ChooseContextDecisionSnapshot = Object.freeze({
+  sourceRoute: 'retired_skip_read_route' as never,
   chosenLayer: 'L0',
   fullReadTokenEstimate: 4096,
-  replayCandidate: { actionPathId: 'ap_test_001', portableArgsOk: true, policyOk: true },
 });
 
 const KNOWLEDGE_DECISION: ChooseContextDecisionSnapshot = Object.freeze({
@@ -52,62 +45,23 @@ const FALLBACK_SAFE_DECISION: ChooseContextDecisionSnapshot = Object.freeze({
   fullReadTokenEstimate: 16_384,
 });
 
-describe('planSkipRead — S2 stop-gate happy paths', () => {
-  it('experience_replay with full gates → skip + readPageAvoided=true + tokensSaved>0', () => {
-    const plan = planSkipRead({ decision: REPLAY_DECISION, taskCtx: FRESH_CTX });
-    expect(plan.action).toBe('skip');
-    expect(plan.readPageAvoided).toBe(true);
-    expect(plan.sourceKind).toBe('experience_replay');
-    expect(plan.sourceRoute).toBe('experience_replay_skip_read');
-    expect(plan.tokensSavedEstimate).toBe(4096);
-    expect(plan.fallbackUsed).toBe('none');
-    expect(plan.fallbackCause).toBe('');
-    expect(plan.requiresExperienceReplay).toBe(true);
+describe('planSkipRead — retired routes', () => {
+  it('retired route never skips read_page', () => {
+    const plan = planSkipRead({ decision: RETIRED_ROUTE_DECISION, taskCtx: FRESH_CTX });
+    expect(plan.action).toBe('forward');
+    expect(plan.readPageAvoided).toBe(false);
+    expect(plan.sourceKind).toBe('dom_json');
+    expect(plan.sourceRoute).toBe('retired_skip_read_route');
+    expect(plan.tokensSavedEstimate).toBe(0);
+    expect(plan.fallbackUsed).toBe('dom_compact');
+    expect(plan.fallbackCause).toBe('unknown_source_route');
     expect(plan.requiresApiCall).toBe(false);
   });
 
-  it('emits a diagnostic that names the candidate (operator-visible)', () => {
-    const plan = planSkipRead({ decision: REPLAY_DECISION, taskCtx: FRESH_CTX });
-    expect(plan.diagnostic).toContain('ap_test_001');
-    expect(plan.diagnostic).toContain('skip');
-  });
-});
-
-describe('planSkipRead — experience_replay gates (correction #4)', () => {
-  it('missing replayCandidate → fallback_required + replay_candidate_missing (NOT skip)', () => {
-    const plan = planSkipRead({
-      decision: { ...REPLAY_DECISION, replayCandidate: null },
-      taskCtx: FRESH_CTX,
-    });
-    expect(plan.action).toBe('fallback_required');
-    expect(plan.readPageAvoided).toBe(false);
-    expect(plan.fallbackCause).toBe('replay_candidate_missing');
-    expect(plan.tokensSavedEstimate).toBe(0);
-  });
-
-  it('replayCandidate.policyOk=false → fallback_required + replay_policy_denied', () => {
-    const plan = planSkipRead({
-      decision: {
-        ...REPLAY_DECISION,
-        replayCandidate: { actionPathId: 'ap_x', portableArgsOk: true, policyOk: false },
-      },
-      taskCtx: FRESH_CTX,
-    });
-    expect(plan.action).toBe('fallback_required');
-    expect(plan.fallbackCause).toBe('replay_policy_denied');
-    expect(plan.diagnostic).toContain('ap_x');
-  });
-
-  it('replayCandidate.portableArgsOk=false → fallback_required + replay_portable_args_missing', () => {
-    const plan = planSkipRead({
-      decision: {
-        ...REPLAY_DECISION,
-        replayCandidate: { actionPathId: 'ap_y', portableArgsOk: false, policyOk: true },
-      },
-      taskCtx: FRESH_CTX,
-    });
-    expect(plan.action).toBe('fallback_required');
-    expect(plan.fallbackCause).toBe('replay_portable_args_missing');
+  it('diagnostic tells callers the route is not an executable path', () => {
+    const plan = planSkipRead({ decision: RETIRED_ROUTE_DECISION, taskCtx: FRESH_CTX });
+    expect(plan.diagnostic).toContain("unknown sourceRoute 'retired_skip_read_route'");
+    expect(plan.diagnostic).not.toContain('ap_test_001');
   });
 });
 
@@ -145,7 +99,6 @@ describe('planSkipRead — api_list / knowledge_supported_read', () => {
     expect(plan.sourceKind).toBe('api_list');
     expect(plan.tokensSavedEstimate).toBe(8192);
     expect(plan.requiresApiCall).toBe(true);
-    expect(plan.requiresExperienceReplay).toBe(false);
     expect(plan.diagnostic).toContain('github_search_repositories');
   });
 });
@@ -171,7 +124,7 @@ describe('planSkipRead — read_page_required / dispatcher_fallback_safe', () =>
 describe('planSkipRead — budget / fallback layer hard rules', () => {
   it('budget exhausted → forward + budget_exhausted (orchestrator does NOT duplicate the gate response)', () => {
     const plan = planSkipRead({
-      decision: REPLAY_DECISION,
+      decision: KNOWLEDGE_DECISION,
       taskCtx: { ...FRESH_CTX, readPageCount: 6, readBudget: 6 },
     });
     expect(plan.action).toBe('forward');
@@ -195,16 +148,24 @@ describe('planSkipRead — budget / fallback layer hard rules', () => {
     expect(plan.fallbackEntryLayer).toBe('L0+L1');
   });
 
-  it('clampTokens: zero / negative / NaN fullReadTokenEstimate yields tokensSavedEstimate=0 even on skip (honest budget)', () => {
+  it('clampTokens: zero / negative / NaN fullReadTokenEstimate yields tokensSavedEstimate=0 on API skip (honest budget)', () => {
     const plan = planSkipRead({
-      decision: { ...REPLAY_DECISION, fullReadTokenEstimate: -1 },
+      decision: {
+        ...KNOWLEDGE_DECISION,
+        apiCapability: { available: true, family: 'github_search_repositories' },
+        fullReadTokenEstimate: -1,
+      },
       taskCtx: FRESH_CTX,
     });
     expect(plan.action).toBe('skip');
     expect(plan.tokensSavedEstimate).toBe(0);
 
     const planNan = planSkipRead({
-      decision: { ...REPLAY_DECISION, fullReadTokenEstimate: Number.NaN },
+      decision: {
+        ...KNOWLEDGE_DECISION,
+        apiCapability: { available: true, family: 'github_search_repositories' },
+        fullReadTokenEstimate: Number.NaN,
+      },
       taskCtx: FRESH_CTX,
     });
     expect(planNan.tokensSavedEstimate).toBe(0);
@@ -215,20 +176,26 @@ describe('escalateAfterSkipFailure — never widens to L0+L1+L2', () => {
   let original: SkipReadPlan;
 
   beforeEach(() => {
-    original = planSkipRead({ decision: REPLAY_DECISION, taskCtx: FRESH_CTX });
+    original = planSkipRead({
+      decision: {
+        ...KNOWLEDGE_DECISION,
+        apiCapability: { available: true, family: 'github_search_repositories' },
+      },
+      taskCtx: FRESH_CTX,
+    });
   });
 
-  it('replay_verifier_failed → forward + L0+L1 + tokensSaved=0', () => {
-    const escalated = escalateAfterSkipFailure(original, 'replay_verifier_failed');
+  it('api_call_failed → forward + L0+L1 + tokensSaved=0', () => {
+    const escalated = escalateAfterSkipFailure(original, 'api_call_failed');
     expect(escalated.action).toBe('forward');
     expect(escalated.readPageAvoided).toBe(false);
     expect(escalated.tokensSavedEstimate).toBe(0);
     expect(escalated.fallbackEntryLayer).toBe('L0+L1');
-    expect(escalated.diagnostic).toContain('replay_verifier_failed');
+    expect(escalated.diagnostic).toContain('api_call_failed');
     expect(escalated.diagnostic).toContain('never L0+L1+L2');
   });
 
-  it.each([['replay_engine_unavailable'], ['api_call_failed'], ['api_rate_limited']] as const)(
+  it.each([['api_call_failed'], ['api_rate_limited']] as const)(
     'reason=%s also clamps to L0+L1 and forwards',
     (reason) => {
       const escalated = escalateAfterSkipFailure(original, reason);
@@ -241,10 +208,13 @@ describe('escalateAfterSkipFailure — never widens to L0+L1+L2', () => {
 
 describe('planSkipRead — orchestrator never returns synthetic read_page payload (correction #2)', () => {
   it('skip plan exposes only metadata fields; no `pageContent` / `interactiveElements` / `summary`', () => {
-    const plan = planSkipRead({ decision: REPLAY_DECISION, taskCtx: FRESH_CTX }) as Record<
-      string,
-      unknown
-    >;
+    const plan = planSkipRead({
+      decision: {
+        ...KNOWLEDGE_DECISION,
+        apiCapability: { available: true, family: 'github_search_repositories' },
+      },
+      taskCtx: FRESH_CTX,
+    }) as Record<string, unknown>;
     expect(plan).not.toHaveProperty('pageContent');
     expect(plan).not.toHaveProperty('interactiveElements');
     expect(plan).not.toHaveProperty('summary');

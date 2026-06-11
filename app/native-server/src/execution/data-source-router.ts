@@ -8,7 +8,6 @@ import type { EndpointCandidateSemanticType } from '../memory/knowledge/network-
 import { mapDataSourceToLayerContract, type LayerContractEnvelope } from './layer-contract';
 
 export type DataSourceKind =
-  | 'experience_replay'
   | 'api_list'
   | 'api_detail'
   | 'dom_region_rows'
@@ -202,7 +201,7 @@ export interface DataSourceDecision {
 //   - `produce`: pure decision builder.
 //
 // The list ORDER IS THE PRIORITY. We check the most-specific rules
-// first (experience replay > intent override > dispatcher fail-safe
+// first (intent override > dispatcher fail-safe
 // > observation evidence > compatibility > default), so a caller that
 // supplies no observation evidence still walks straight into the
 // compatibility rules and produces the existing decision.
@@ -213,7 +212,6 @@ export interface DataSourceDecision {
 // ----------------------------------------------------------------------
 
 export type DataSourceRouterRuleId =
-  | 'R_EXPERIENCE_REPLAY'
   | 'R_CLICK_FILL_DOM_AUTHORITY'
   | 'R_DISPATCHER_FAIL_SAFE_DOM'
   | 'R_FACTS_STALE_DEMOTE_DOM'
@@ -228,7 +226,6 @@ export type DataSourceRouterRuleId =
   | 'R_DOM_DEFAULT';
 
 export const DATA_SOURCE_ROUTER_RULE_IDS: ReadonlyArray<DataSourceRouterRuleId> = [
-  'R_EXPERIENCE_REPLAY',
   'R_CLICK_FILL_DOM_AUTHORITY',
   'R_DISPATCHER_FAIL_SAFE_DOM',
   'R_FACTS_STALE_DEMOTE_DOM',
@@ -366,28 +363,7 @@ function domRegionRowsPassGate(ev: RouterDomRegionRowsEvidence | null): boolean 
 }
 
 const DATA_SOURCE_ROUTER_RULES: ReadonlyArray<DataSourceRouterRule> = [
-  // 1. Experience replay is recorded action playback; nothing else
-  //    can win when the upstream layer dispatcher already chose this
-  //    source route. Same shape as v2.6.
-  {
-    id: 'R_EXPERIENCE_REPLAY',
-    match: (ctx) => ctx.input.sourceRoute === 'experience_replay_skip_read',
-    produce: (ctx) =>
-      buildDecision({
-        ctx,
-        ruleId: 'R_EXPERIENCE_REPLAY',
-        dataSource: 'experience_replay',
-        confidence: 0.82,
-        riskTier: 'medium',
-        decisionReason: 'experience_replay_route_selected',
-        dispatcherInputSource: ctx.dispatcherInputSource,
-        // Replay engine issues a real DOM action → contract layer
-        // must permit `execution` (dom_json envelope).
-        contractDataSource: 'dom_json',
-      }),
-  },
-
-  // 2. click/fill must keep DOM refs as authority. Even when API
+  // 1. click/fill must keep DOM refs as authority. Even when API
   //    knowledge is available we MUST NOT route execution intent to
   //    api_*.
   {

@@ -6,7 +6,7 @@ export const CONTEXT_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.CONTEXT.CHOOSE,
     description:
-      'Tabrix MKEP context selector. Given an `intent` (free text) and optional `url` / `pageRole` / `siteId`, deterministically pick which existing native asset to use as context: `experience_reuse` (a previously-successful action path), `knowledge_light` (captured site API catalog / endpoint evidence), or `read_page_required` (fallback: caller should issue `chrome_read_page`). Pure SELECT against local SQLite. Unsupported or uncertain inputs resolve to `read_page_required`.',
+      'Tabrix MKEP context selector. Given an `intent` (free text) and optional `url` / `pageRole` / `siteId`, deterministically pick which existing native asset to use as context: `knowledge_light` (captured site API catalog / endpoint evidence) or `read_page_required` (fallback: caller should issue `chrome_read_page`). Pure SELECT against local SQLite. Unsupported or uncertain inputs resolve to `read_page_required`.',
     annotations: {
       readOnlyHint: true,
       idempotentHint: true,
@@ -17,7 +17,7 @@ export const CONTEXT_SCHEMAS: Tool[] = [
         intent: {
           type: 'string',
           description:
-            'Caller intent in natural language. Trimmed and matched on the same normalized signature as `experience_suggest_plan`.intent so a hit there is also a hit here. Empty string is rejected.',
+            'Caller intent in natural language. Trimmed and normalized so repeated task wording stays stable. Empty string is rejected.',
           minLength: 1,
           maxLength: 1024,
         },
@@ -29,7 +29,7 @@ export const CONTEXT_SCHEMAS: Tool[] = [
         pageRole: {
           type: 'string',
           description:
-            'Optional `pageRole` filter (e.g. `repo_home`, `issues_list`). Forwarded to the Experience lookup verbatim.',
+            'Optional `pageRole` filter (e.g. `repo_home`, `issues_list`). Used to narrow the local context selection.',
           maxLength: 128,
         },
         siteId: {

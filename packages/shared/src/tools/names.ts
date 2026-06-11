@@ -42,31 +42,6 @@ export const TOOL_NAMES = {
     LIST_PUBLISHED: 'record_replay_list_published',
   },
   /**
-   * MKEP Experience layer (Stage 3b). Native-handled tools (no Chrome
-   * extension round-trip) — the native-server reads its own SQLite and
-   * answers directly. See `mcp/native-tool-handlers.ts`.
-   */
-  EXPERIENCE: {
-    SUGGEST_PLAN: 'experience_suggest_plan',
-    /**
-     * Write/execute path. Replays a NAMED `actionPathId`
-     * previously recorded in `experience_action_paths`. Bridged tool
-     * — calls `chrome_click_element` / `chrome_fill_or_select` through
-     * the existing per-step Policy + verifier dispatch. Capability-gated
-     * by `experience_replay`.
-     */
-    REPLAY: 'experience_replay',
-    /**
-     * Per-step replay outcome write-back. Records one
-     * (success | failure) observation against the named action path,
-     * keyed by `(actionPathId, stepIndex)`. Native-handled, gated by
-     * the same `experience_replay` capability so the score-step
-     * channel is always governed by the capability that controls the
-     * replay tool itself.
-     */
-    SCORE_STEP: 'experience_score_step',
-  },
-  /**
    * MKEP context selector.
    * Native-handled. See `app/native-server/src/mcp/choose-context.ts`.
    */

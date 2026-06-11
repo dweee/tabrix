@@ -6,8 +6,6 @@ import { openMemoryDb } from './client';
 import {
   BROWSER_OBJECT_CREATE_TABLES_SQL,
   CHOOSE_CONTEXT_TELEMETRY_CREATE_TABLES_SQL,
-  EXPERIENCE_CREATE_TABLES_SQL,
-  EXPERIENCE_WRITEBACK_WARNINGS_CREATE_TABLES_SQL,
   KNOWLEDGE_CREATE_TABLES_SQL,
   MEMORY_DB_ACTIVE_TABLES,
   MEMORY_DB_ACTIVE_TABLE_MANIFEST,
@@ -18,10 +16,8 @@ import {
 const SCHEMA_SQL_BLOCKS = [
   MKE_CORE_CREATE_TABLES_SQL,
   BROWSER_OBJECT_CREATE_TABLES_SQL,
-  EXPERIENCE_CREATE_TABLES_SQL,
   KNOWLEDGE_CREATE_TABLES_SQL,
   CHOOSE_CONTEXT_TELEMETRY_CREATE_TABLES_SQL,
-  EXPERIENCE_WRITEBACK_WARNINGS_CREATE_TABLES_SQL,
 ];
 
 function extractCreatedTables(sqlBlocks: string[]): string[] {
@@ -99,6 +95,8 @@ describe('Memory DB schema governance', () => {
           step_id TEXT REFERENCES memory_steps(step_id)
         );
         CREATE TABLE experience_locator_prefs (pref_id TEXT PRIMARY KEY);
+        CREATE TABLE experience_action_paths (action_path_id TEXT PRIMARY KEY);
+        CREATE TABLE experience_writeback_warnings (warning_id TEXT PRIMARY KEY);
       `);
       legacyDb.close();
 

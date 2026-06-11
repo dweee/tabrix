@@ -35,7 +35,7 @@ function decision(
     intentSignature: 'open issues',
     pageRole: 'repo_home',
     siteFamily: 'github',
-    strategy: 'experience_reuse',
+    strategy: 'knowledge_light',
     fallbackStrategy: 'read_page_required',
     createdAt: '2026-04-22T10:00:00.000Z',
     ...overrides,
@@ -64,7 +64,7 @@ describe('ChooseContextTelemetryRepository', () => {
         intentSignature: 'open issues',
         pageRole: 'repo_home',
         siteFamily: 'github',
-        strategy: 'experience_reuse',
+        strategy: 'knowledge_light',
         fallbackStrategy: 'read_page_required',
         createdAt: '2026-04-22T10:00:00.000Z',
       });
@@ -125,10 +125,10 @@ describe('ChooseContextTelemetryRepository', () => {
       const result = repo.recordOutcome(outcome({ decisionId: 'dc-2', outcome: 'reuse' }));
       expect(result.status).toBe('ok');
       const aggregates = repo.aggregateStrategies();
-      const exp = aggregates.find((a) => a.strategy === 'experience_reuse');
-      expect(exp).toBeDefined();
-      expect(exp!.decisions).toBe(1);
-      expect(exp!.outcomes.reuse).toBe(1);
+      const knowledge = aggregates.find((a) => a.strategy === 'knowledge_light');
+      expect(knowledge).toBeDefined();
+      expect(knowledge!.decisions).toBe(1);
+      expect(knowledge!.outcomes.reuse).toBe(1);
     } finally {
       close();
     }
@@ -157,7 +157,7 @@ describe('ChooseContextTelemetryRepository', () => {
       repo.recordDecision(
         decision({
           decisionId: 'dc-old',
-          strategy: 'experience_reuse',
+          strategy: 'read_page_required',
           createdAt: '2026-04-01T00:00:00.000Z',
         }),
       );

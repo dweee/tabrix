@@ -20,22 +20,16 @@
  *      the {@link TaskSessionContext}. Absent a recorded decision, the caller
  *      MUST keep the legacy pathway (forward to `chrome_read_page`).
  *
- *   3. `experience_replay_skip_read` only resolves to `action='skip'`
- *      when the recorded choose_context decision attached an
- *      executable replay candidate that ALSO passed the policy /
- *      portable-args gate. Any missing field collapses to
- *      `action='fallback_required'` with a precise `fallbackCause`.
- *
- *   4. `api_list` / `api_detail` are capability-gated. Until the API
+ *   3. `api_list` / `api_detail` are capability-gated. Until the API
  *      capability layer is available, every API-class route resolves to
  *      `action='fallback_required'` with cause `'api_layer_not_available'`.
  *
- *   5. The fallback layer is ALWAYS `'L0' | 'L0+L1'` — never
+ *   4. The fallback layer is ALWAYS `'L0' | 'L0+L1'` — never
  *      `'L0+L1+L2'`. This holds even when the upstream dispatcher
  *      asked for full layers. A skipped read must
  *      not silently widen back to a full DOM read on failure.
  *
- *   6. The orchestrator is fail-soft. Any unrecognised or absent
+ *   5. The orchestrator is fail-soft. Any unrecognised or absent
  *      input falls through to `action='forward'` so the legacy happy path is
  *      preserved when in doubt.
  *
@@ -58,10 +52,9 @@ import type { LayerSourceRoute, ReadPageRequestedLayer } from '@tabrix/shared';
  * `app/native-server/src/benchmark/v26-benchmark.ts` so benchmark emitters can
  * attach the `chosenSource` field directly off this value.
  */
-export type SkipReadSourceKind = 'experience_replay' | 'api_list' | 'api_detail' | 'dom_json';
+export type SkipReadSourceKind = 'api_list' | 'api_detail' | 'dom_json';
 
 export type DataSourceRouterChosenSource =
-  | 'experience_replay'
   | 'api_list'
   | 'api_detail'
   | 'dom_region_rows'
@@ -95,9 +88,6 @@ export type SkipReadFallbackUsed = 'none' | 'dom_compact' | 'dom_full';
 export type SkipReadFallbackCause =
   | ''
   | 'api_layer_not_available'
-  | 'replay_candidate_missing'
-  | 'replay_policy_denied'
-  | 'replay_portable_args_missing'
   | 'budget_exhausted'
   | 'unknown_source_route';
 
@@ -106,10 +96,8 @@ export type SkipReadAction = 'skip' | 'fallback_required' | 'forward';
 /**
  * Execution snapshot from `choose_context`. The orchestrator
  * is the only consumer. The caller is responsible for producing
- * `replayCandidate` and `apiCapability` from authoritative sources
- * (Experience repository / capability allowlist) before
- * writing the decision into the task context — the orchestrator does
- * not rewalk those sources.
+ * `apiCapability` from authoritative sources before writing the decision
+ * into the task context — the orchestrator does not rewalk those sources.
  */
 export interface ChooseContextDecisionSnapshot {
   sourceRoute: LayerSourceRoute;
@@ -122,19 +110,6 @@ export interface ChooseContextDecisionSnapshot {
    * cannot ground in input data).
    */
   fullReadTokenEstimate: number;
-  /**
-   * Set ONLY when `sourceRoute === 'experience_replay_skip_read'`
-   * AND the chooser confirmed an executable candidate existed at
-   * decision time. The orchestrator double-checks the policy /
-   * portable-args bits below; both must be `true` for `action='skip'`.
-   */
-  replayCandidate?: {
-    actionPathId: string;
-    /** True iff portable args resolution succeeded. */
-    portableArgsOk: boolean;
-    /** True iff policy / capability gates passed. */
-    policyOk: boolean;
-  } | null;
   /**
    * Set only once `knowledge_call_api` is wired. Until then the chooser leaves
    * it `false` / unset and the orchestrator forces
@@ -269,10 +244,6 @@ export interface SkipReadPlan {
   /** True when `'skip'` requires a `knowledge_call_api` invocation. */
   requiresApiCall: boolean;
   /**
-   * True when `'skip'` requires the experience replay engine.
-   */
-  requiresExperienceReplay: boolean;
-  /**
    * Diagnostic — surfaced into telemetry / smoke output. Always
    * non-empty so operators can tell which branch fired without
    * cross-referencing the source route enum.
@@ -306,27 +277,17 @@ export interface SkipReadPlan {
  *      structured warning; the orchestrator does not duplicate
  *      that gate's response shape.
  *
- *   2. `'experience_replay_skip_read'`:
- *      a. No `replayCandidate` recorded → `'fallback_required'`
- *         + `'replay_candidate_missing'`.
- *      b. `policyOk === false`              → `'fallback_required'`
- *         + `'replay_policy_denied'`.
- *      c. `portableArgsOk === false`         → `'fallback_required'`
- *         + `'replay_portable_args_missing'`.
- *      d. All gates pass                    → `'skip'` via
- *         `experience_replay`.
- *
- *   3. `'knowledge_supported_read'`:
+ *   2. `'knowledge_supported_read'`:
  *      a. `apiCapability.available === true` → `'skip'` via
  *         `api_list`.
  *      b. otherwise                         → `'fallback_required'`
  *         + `'api_layer_not_available'`.
  *
- *   4. `'read_page_required'` /
+ *   3. `'read_page_required'` /
  *      `'dispatcher_fallback_safe'`         → `'forward'` via
  *      `dom_json`.
  *
- *   5. Anything else                         → `'forward'` via
+ *   4. Anything else                         → `'forward'` via
  *      `dom_json` + diagnostic
  *      `'unknown_source_route'`.
  */
@@ -347,9 +308,6 @@ export function planSkipRead(input: SkipReadPlanInput): SkipReadPlan {
   }
 
   switch (decision.sourceRoute) {
-    case 'experience_replay_skip_read':
-      return planExperienceReplay(decision, fallbackEntryLayer, executionMode);
-
     case 'knowledge_supported_read':
       return planKnowledgeBacked(decision, fallbackEntryLayer, executionMode);
 
@@ -419,7 +377,6 @@ export function escalateAfterSkipFailure(
     fallbackEntryLayer: 'L0+L1',
     fallbackCause: '',
     requiresApiCall: false,
-    requiresExperienceReplay: false,
     diagnostic: `escalate: skip path failed (${reason}); forwarding to chrome_read_page at L0+L1 (never L0+L1+L2)`,
     executionMode: plan.executionMode,
   };
@@ -428,77 +385,6 @@ export function escalateAfterSkipFailure(
 // ---------------------------------------------------------------------------
 // Internal — branch helpers
 // ---------------------------------------------------------------------------
-
-function planExperienceReplay(
-  decision: ChooseContextDecisionSnapshot,
-  fallbackEntryLayer: 'L0' | 'L0+L1',
-  executionMode: 'direct_api' | 'via_read_page',
-): SkipReadPlan {
-  const candidate = decision.replayCandidate;
-  if (!candidate) {
-    return {
-      action: 'fallback_required',
-      readPageAvoided: false,
-      sourceKind: 'dom_json',
-      sourceRoute: decision.sourceRoute,
-      tokensSavedEstimate: 0,
-      fallbackUsed: 'dom_compact',
-      fallbackEntryLayer,
-      fallbackCause: 'replay_candidate_missing',
-      requiresApiCall: false,
-      requiresExperienceReplay: false,
-      diagnostic:
-        'fallback_required: experience_replay_skip_read recorded but no executable replay candidate was attached to the choose_context decision',
-      executionMode,
-    };
-  }
-  if (!candidate.policyOk) {
-    return {
-      action: 'fallback_required',
-      readPageAvoided: false,
-      sourceKind: 'dom_json',
-      sourceRoute: decision.sourceRoute,
-      tokensSavedEstimate: 0,
-      fallbackUsed: 'dom_compact',
-      fallbackEntryLayer,
-      fallbackCause: 'replay_policy_denied',
-      requiresApiCall: false,
-      requiresExperienceReplay: false,
-      diagnostic: `fallback_required: replay candidate ${candidate.actionPathId} blocked by policy/capability gate`,
-      executionMode,
-    };
-  }
-  if (!candidate.portableArgsOk) {
-    return {
-      action: 'fallback_required',
-      readPageAvoided: false,
-      sourceKind: 'dom_json',
-      sourceRoute: decision.sourceRoute,
-      tokensSavedEstimate: 0,
-      fallbackUsed: 'dom_compact',
-      fallbackEntryLayer,
-      fallbackCause: 'replay_portable_args_missing',
-      requiresApiCall: false,
-      requiresExperienceReplay: false,
-      diagnostic: `fallback_required: replay candidate ${candidate.actionPathId} missing stable portable args`,
-      executionMode,
-    };
-  }
-  return {
-    action: 'skip',
-    readPageAvoided: true,
-    sourceKind: 'experience_replay',
-    sourceRoute: decision.sourceRoute,
-    tokensSavedEstimate: clampTokens(decision.fullReadTokenEstimate),
-    fallbackUsed: 'none',
-    fallbackEntryLayer,
-    fallbackCause: '',
-    requiresApiCall: false,
-    requiresExperienceReplay: true,
-    diagnostic: `skip: replay candidate ${candidate.actionPathId} eligible (policy + portable args ok)`,
-    executionMode,
-  };
-}
 
 function planKnowledgeBacked(
   decision: ChooseContextDecisionSnapshot,
@@ -517,7 +403,6 @@ function planKnowledgeBacked(
       fallbackEntryLayer,
       fallbackCause: 'api_layer_not_available',
       requiresApiCall: false,
-      requiresExperienceReplay: false,
       diagnostic:
         'fallback_required: knowledge_supported_read recorded but knowledge_call_api capability is not yet wired',
       executionMode,
@@ -533,7 +418,6 @@ function planKnowledgeBacked(
     fallbackEntryLayer,
     fallbackCause: '',
     requiresApiCall: true,
-    requiresExperienceReplay: false,
     diagnostic: `skip: knowledge_call_api family ${cap.family} available; bypassing chrome_read_page`,
     executionMode,
   };
@@ -557,7 +441,6 @@ function forwardPlan(args: {
     fallbackEntryLayer: args.fallbackEntryLayer,
     fallbackCause: args.fallbackCause,
     requiresApiCall: false,
-    requiresExperienceReplay: false,
     diagnostic: args.diagnostic,
     executionMode: args.executionMode,
   };

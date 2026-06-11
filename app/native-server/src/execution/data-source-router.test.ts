@@ -197,21 +197,6 @@ describe('DataSourceRouter (V26-09 legacy back-compat)', () => {
 });
 
 describe('DataSourceRouter — V27-09 truth table', () => {
-  it('experience replay route surfaces the dom_json execution envelope (R_EXPERIENCE_REPLAY)', () => {
-    const decision = routeDataSource({
-      strategy: 'experience_replay',
-      sourceRoute: 'experience_replay_skip_read',
-      chosenLayer: 'L0+L1',
-      dispatcherInputSource: null,
-    });
-    expect(decision.decisionRuleId).toBe('R_EXPERIENCE_REPLAY');
-    expect(decision.dataSource).toBe('experience_replay');
-    expect(decision.layerContract.dataSource).toBe('dom_json');
-    expect(decision.layerContract.allowedUses).toEqual(
-      expect.arrayContaining(['execution', 'locator']),
-    );
-  });
-
   it('click/fill intent forces dom_json even when api candidate is available (R_CLICK_FILL_DOM_AUTHORITY)', () => {
     const decision = routeDataSource({
       sourceRoute: 'knowledge_supported_read',
@@ -583,15 +568,6 @@ describe('DataSourceRouter — V27-09 truth table', () => {
   it('publicSurfaceDelta defaults to "none" across every rule (no public MCP shape change)', () => {
     const cases: Array<{ ruleId: DataSourceRouterRuleId; build: () => unknown }> = [
       {
-        ruleId: 'R_EXPERIENCE_REPLAY',
-        build: () =>
-          routeDataSource({
-            sourceRoute: 'experience_replay_skip_read',
-            chosenLayer: 'L0',
-            dispatcherInputSource: null,
-          }),
-      },
-      {
         ruleId: 'R_CLICK_FILL_DOM_AUTHORITY',
         build: () =>
           routeDataSource({
@@ -815,11 +791,6 @@ describe('DataSourceRouter — truth table coverage', () => {
   // index; if you add a new rule id, add a fixture here so the
   // suite refuses to ship a rule with zero coverage.
   const ruleFixtures: Record<DataSourceRouterRuleId, () => DataSourceRouterRuleId> = {
-    R_EXPERIENCE_REPLAY: () =>
-      routeDataSource({
-        sourceRoute: 'experience_replay_skip_read',
-        chosenLayer: 'L0',
-      }).decisionRuleId,
     R_CLICK_FILL_DOM_AUTHORITY: () =>
       routeDataSource({
         sourceRoute: 'read_page_required',

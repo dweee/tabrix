@@ -40,7 +40,6 @@ import type {
   LayerDispatchReason,
   LayerSourceRoute,
   ReadPageRequestedLayer,
-  ReplayEligibilityBlockReason,
   TabrixChooseContextOutcome,
 } from '@tabrix/shared';
 
@@ -74,13 +73,6 @@ export interface RecordChooseContextDecisionInput {
   tokensSavedEstimate?: number | null;
   /** Telemetry-only knowledge family hint. MUST NOT drive routing. */
   knowledgeEndpointFamily?: string | null;
-  // ---------------------------------------------------------------
-  // Ranked-replay audit fields persisted for release analysis.
-  // ---------------------------------------------------------------
-  rankedCandidateCount?: number | null;
-  replayEligibleBlockedBy?: ReplayEligibilityBlockReason | null;
-  replayFallbackDepth?: number | 'cold' | null;
-  // ---------------------------------------------------------------
   // Honest dispatcher inputs. Both optional — older callers and tests keep
   // working unchanged. The
   // `dispatcher_input_source` column is closed-enum at the SQL
@@ -167,13 +159,6 @@ export class ChooseContextTelemetryRepository {
    * Throws on PK collision so we never silently drop a decision id.
    */
   recordDecision(input: RecordChooseContextDecisionInput): void {
-    const blockedByValue = input.replayEligibleBlockedBy ?? null;
-    const fallbackDepthValue =
-      input.replayFallbackDepth === undefined || input.replayFallbackDepth === null
-        ? null
-        : input.replayFallbackDepth === 'cold'
-          ? -1 // sentinel for "no candidates surfaced"; positive depths stay 1:1 with candidate count
-          : input.replayFallbackDepth;
     this.db
       .prepare(
         `INSERT INTO tabrix_choose_context_decisions (
@@ -202,9 +187,9 @@ export class ChooseContextTelemetryRepository {
         input.tokenEstimateFullRead ?? null,
         input.tokensSavedEstimate ?? null,
         input.knowledgeEndpointFamily ?? null,
-        input.rankedCandidateCount ?? null,
-        blockedByValue,
-        fallbackDepthValue,
+        null,
+        null,
+        null,
         input.dispatcherInputSource ?? null,
         input.fallbackCauseV26 ?? null,
       );
@@ -427,33 +412,11 @@ export class ChooseContextTelemetryRepository {
       }
     }
 
-    const lastReplayRow = this.db
-      .prepare(
-        `SELECT d.decision_id AS decisionId,
-                d.created_at  AS createdAt,
-                (SELECT o.outcome
-                   FROM tabrix_choose_context_outcomes o
-                  WHERE o.decision_id = d.decision_id
-                  ORDER BY o.recorded_at DESC, o.outcome_id DESC
-                  LIMIT 1)   AS outcome
-           FROM tabrix_choose_context_decisions d
-          WHERE d.strategy = 'experience_replay'
-          ORDER BY d.created_at DESC, d.decision_id DESC
-          LIMIT 1`,
-      )
-      .get() as { decisionId: string; createdAt: string; outcome: string | null } | undefined;
-
     return {
       decisionCount: totals?.decisionCount ?? 0,
       tokensSavedEstimateSum: totals?.tokensSavedEstimateSum ?? 0,
       layerCounts,
-      lastReplay: lastReplayRow
-        ? {
-            decisionId: lastReplayRow.decisionId,
-            createdAt: lastReplayRow.createdAt,
-            outcome: (lastReplayRow.outcome ?? null) as TabrixChooseContextOutcome | null,
-          }
-        : null,
+      lastReplay: null,
     };
   }
 
@@ -557,7 +520,6 @@ export class ChooseContextTelemetryRepository {
 
     const sourceRouteCounts: ExecutionReliabilitySignalSummary['sourceRouteCounts'] = {
       read_page_required: 0,
-      experience_replay_skip_read: 0,
       knowledge_supported_read: 0,
       dispatcher_fallback_safe: 0,
       unknown: 0,
@@ -573,7 +535,6 @@ export class ChooseContextTelemetryRepository {
       const key = (row.sourceRoute ?? 'unknown') as LayerSourceRoute | 'unknown';
       if (
         key === 'read_page_required' ||
-        key === 'experience_replay_skip_read' ||
         key === 'knowledge_supported_read' ||
         key === 'dispatcher_fallback_safe' ||
         key === 'unknown'

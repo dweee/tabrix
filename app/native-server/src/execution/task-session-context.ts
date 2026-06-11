@@ -7,9 +7,9 @@
  *
  * Hard rules implemented here:
  *
- * 1. Default initial layer for any allowed read is `L0+L1` — replay
- *    and API fallback paths are NOT allowed to enter the DOM at L2;
- *    they earn the L2 budget only after L0+L1 produced a verifier or
+ * 1. Default initial layer for any allowed read is `L0+L1` — fallback paths
+ *    are NOT allowed to enter the DOM at L2; they earn the L2 budget only
+ *    after L0+L1 produced a verifier or
  *    target-evidence signal that demands it.
  * 2. Read budget is configurable via `TABRIX_READ_BUDGET_PER_TASK`
  *    (positive integer; falls back to 6).
@@ -96,7 +96,6 @@ export type TaskReadSource =
   | 'dom_region_rows'
   | 'markdown_projection'
   | 'knowledge_api'
-  | 'experience_replay'
   | 'unknown';
 
 export interface TaskVisibleRegionRow {
@@ -545,12 +544,6 @@ export interface NoteSkipReadInput {
   layer: ReadPageRequestedLayer;
   /** Token cost the skip avoided. Clamped to `>= 0`. */
   tokensSavedEstimate: number;
-  /**
-   * Optional action-path identifier. Surfaced into telemetry so an operator
-   * can correlate a skip event to the Experience replay candidate that backed
-   * it.
-   */
-  actionPathId?: string | null;
   /**
    * Optional API endpoint family. Folded into `apiEndpointFamiliesSeen`
    * so a follow-up read on the same family is treated as redundant.

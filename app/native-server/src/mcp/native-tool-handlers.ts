@@ -21,13 +21,8 @@
  */
 
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { TOOL_NAMES, type ExperienceSuggestPlanResult } from '@tabrix/shared';
+import { TOOL_NAMES } from '@tabrix/shared';
 import { sessionManager as defaultSessionManager } from '../execution/session-manager';
-import {
-  ExperienceSuggestPlanInputError,
-  buildSuggestPlanResult,
-  parseExperienceSuggestPlanInput,
-} from '../memory/experience';
 import { MkeAiFeedbackValidationError } from '../memory/mke-memory-trace-service';
 import {
   runTabrixChooseContext,
@@ -42,14 +37,6 @@ import type { TaskSessionContext } from '../execution/task-session-context';
 import type { ChooseContextDecisionSnapshot } from '../execution/skip-read-orchestrator';
 import type { LayerSourceRoute, TabrixChooseContextResult } from '@tabrix/shared';
 import { resolveApiKnowledgeCandidate } from '../api/api-knowledge';
-import {
-  experienceReplayNativeHandler,
-  type DispatchBridgedFn,
-  type ReplayOutcomeWriter,
-  type ReplayStepRecorder,
-  type UpdateTaskIntentFn,
-} from './experience-replay';
-import { experienceScoreStepNativeHandler } from './experience-score-step';
 
 type AcceptanceApiFault = 'network_timeout' | 'semantic_mismatch';
 
@@ -62,7 +49,7 @@ function readAcceptanceApiFault(args: unknown): AcceptanceApiFault | null {
 export interface NativeToolHandlerDeps {
   sessionManager: Pick<
     SessionManager,
-    'experience' | 'getPersistenceStatus' | 'knowledgeApi' | 'chooseContextTelemetry'
+    'getPersistenceStatus' | 'knowledgeApi' | 'chooseContextTelemetry'
   > & {
     memoryTraces?: SessionManager['memoryTraces'];
   };
@@ -72,26 +59,6 @@ export interface NativeToolHandlerDeps {
    * "no capabilities enabled" — i.e. the safest default.
    */
   capabilityEnv?: CapabilityEnv;
-  /**
-   * Bridge into the existing extension-side dispatch path
-   * (`invokeExtensionCommand('call_tool', …)`). Required at runtime
-   * for `experience_replay`; other handlers ignore it. Optional so
-   * existing handler tests (and the SUGGEST_PLAN / CONTEXT
-   * handlers themselves) stay source-compatible.
-   */
-  dispatchBridged?: DispatchBridgedFn;
-  /** Runtime wrapper-step recorder required for `experience_replay`. */
-  recorder?: ReplayStepRecorder;
-  /**
-   * Callback to re-tag the wrapper-owned session's `task.intent` with
-   * the `experience_replay:<id>` prefix. Required for replay audit labelling.
-   */
-  updateTaskIntent?: UpdateTaskIntentFn;
-  /**
-   * Per-step write-back hook used by the replay engine. Optional so
-   * existing handler tests stay source-compatible.
-   */
-  outcomeWriter?: ReplayOutcomeWriter;
   /**
    * Externally-keyed `TaskSessionContext` the dispatcher resolved for
    * this tool call. Wired exclusively for `tabrix_choose_context` so its
@@ -123,30 +90,6 @@ function jsonResult(payload: unknown, isError: boolean): CallToolResult {
     ],
     isError,
   };
-}
-
-function badInputResult(error: ExperienceSuggestPlanInputError): CallToolResult {
-  return jsonResult(
-    {
-      code: error.code,
-      message: error.message,
-    },
-    true,
-  );
-}
-
-function experienceUnavailableResult(): CallToolResult {
-  // We deliberately return a successful tool call with `status: 'no_match'`
-  // and `persistenceMode: 'off'` rather than `isError: true`. The caller
-  // can branch on `persistenceMode` to decide whether to retry later or
-  // proceed without prior experience; treating Memory-disabled as a hard
-  // tool error would force every upstream agent to special-case it.
-  const result: ExperienceSuggestPlanResult = {
-    status: 'no_match',
-    plans: [],
-    persistenceMode: 'off',
-  };
-  return jsonResult(result, false);
 }
 
 const MEMORY_FEEDBACK_STATUSES = new Set(['achieved', 'partial', 'not_achieved', 'unknown']);
@@ -294,27 +237,6 @@ const handleMemoryRecordAiFeedback: NativeToolHandler = (args, deps) => {
   );
 };
 
-const handleExperienceSuggestPlan: NativeToolHandler = (args, deps) => {
-  let parsed;
-  try {
-    parsed = parseExperienceSuggestPlanInput(args);
-  } catch (error) {
-    if (error instanceof ExperienceSuggestPlanInputError) {
-      return badInputResult(error);
-    }
-    throw error;
-  }
-
-  const experience = deps.sessionManager.experience;
-  const { mode } = deps.sessionManager.getPersistenceStatus();
-  if (!experience || mode === 'off') {
-    return experienceUnavailableResult();
-  }
-
-  const rows = experience.suggestActionPaths(parsed);
-  return jsonResult(buildSuggestPlanResult(rows, mode), false);
-};
-
 const handleTabrixChooseContext: NativeToolHandler = async (args, deps) => {
   // The old `memory_page_snapshots` table is retired. Until chooser context is
   // backed by Object Library live facts, surface an explicit fallback-zero
@@ -327,7 +249,6 @@ const handleTabrixChooseContext: NativeToolHandler = async (args, deps) => {
   // capability-disabled invocation the wrapper returns the synchronous
   // chooser result bit-identical, so the legacy happy path is preserved.
   const result = await runTabrixChooseContextWithDirectApi(args, {
-    experience: deps.sessionManager.experience,
     knowledgeApi: deps.sessionManager.knowledgeApi,
     capabilityEnv: deps.capabilityEnv ?? {},
     telemetry: deps.sessionManager.chooseContextTelemetry,
@@ -339,18 +260,16 @@ const handleTabrixChooseContext: NativeToolHandler = async (args, deps) => {
     // product under test reaches chrome_read_page.
     directApiEnabled: readAcceptanceApiFault(args) ? false : undefined,
   });
-  // Close the skip-read execution loop. When the wrapper provided a
+  // Close the read-routing loop. When the wrapper provided a
   // `TaskSessionContext` AND the chooser produced an actionable
   // layer-dispatch result, write the decision into the context BEFORE
   // we return. The next `chrome_read_page` call on the same key reads it
-  // via `peekChooseContextDecision` and the orchestrator decides skip vs
-  // forward vs fallback. Hard rules:
+  // via `peekChooseContextDecision` and the orchestrator decides whether
+  // API Knowledge can satisfy the read or the bridge should continue.
+  // Hard rules:
   //   * `noteUrlChange` runs FIRST so a chooser call against a
   //     different page than the one currently held in the context
   //     wipes the prior decision (per task-session-context tests).
-  //   * Only `experience_replay_skip_read` may attach a real
-  //     `replayCandidate`; every other route stores `null` so the
-  //     orchestrator's gates fire honestly (`replay_candidate_missing`).
   //   * `apiCapability` is attached only when the API Knowledge layer
   //     can resolve a real read-only API candidate for the
   //     `knowledge_supported_read`
@@ -399,28 +318,6 @@ function persistChooseContextDecision(
 
   const sourceRoute = result.sourceRoute as LayerSourceRoute;
 
-  // Replay candidate is attached ONLY on the
-  // `experience_replay_skip_read` route AND when the chooser surfaced
-  // an `experience` / `experience_ranked` artifact. Replay eligibility
-  // is gated upstream (`rankExperienceCandidates.topReplayEligible`)
-  // by capability + step kinds + page role + threshold + portability;
-  // by the time the chooser picks `experience_replay`, those gates
-  // already passed for the top candidate, so the snapshot reports
-  // `policyOk: true` / `portableArgsOk: true`.
-  let replayCandidate: ChooseContextDecisionSnapshot['replayCandidate'] = null;
-  if (sourceRoute === 'experience_replay_skip_read') {
-    const experienceArtifact = result.artifacts?.find(
-      (artifact) => artifact.kind === 'experience' || artifact.kind === 'experience_ranked',
-    );
-    const actionPathId = experienceArtifact?.ref;
-    if (typeof actionPathId === 'string' && actionPathId.length > 0) {
-      replayCandidate = { actionPathId, portableArgsOk: true, policyOk: true };
-    }
-    // No artifact / empty ref → leave `replayCandidate = null`. The
-    // orchestrator turns that into `'fallback_required' /
-    // 'replay_candidate_missing'` per session correction #4.
-  }
-
   let apiCapability: ChooseContextDecisionSnapshot['apiCapability'] = null;
   if (sourceRoute === 'knowledge_supported_read') {
     const candidate = resolveApiKnowledgeCandidate({
@@ -447,7 +344,6 @@ function persistChooseContextDecision(
       result.tokenEstimateFullRead > 0
         ? Math.floor(result.tokenEstimateFullRead)
         : 0,
-    replayCandidate,
     apiCapability,
     // Echo the closed-enum execution mode the chooser produced so the
     // orchestrator's `SkipReadPlan` carries the same signal downstream.
@@ -518,44 +414,7 @@ const handleTabrixChooseContextRecordOutcome: NativeToolHandler = (args, deps) =
  * upward. The replay handler itself uses a structural cast back to
  * its real deps shape.
  */
-const handleExperienceReplayBridged: NativeToolHandler = async (args, deps) => {
-  // The replay handler reaches into `deps` via a structural cast and
-  // pulls out `experience` / `dispatchBridged` / `recorder` /
-  // `updateTaskIntent` / `capabilityEnv` / `persistenceMode` itself.
-  // We just need to supply `experience` (the read-only Experience
-  // façade) and the persistence mode here; the wrapper
-  // (`register-tools.ts`) supplies the rest.
-  const persistenceMode = deps.sessionManager.getPersistenceStatus().mode;
-  const reshaped = {
-    ...deps,
-    experience: deps.sessionManager.experience,
-    persistenceMode,
-  } as unknown as Parameters<typeof experienceReplayNativeHandler>[1];
-  return await experienceReplayNativeHandler(args, reshaped);
-};
-
-/**
- * Experience score-step adapter. Same plumbing as
- * `handleExperienceReplayBridged` — the score-step handler reads
- * `experience` (write-back capable) and `persistenceMode` from `deps`
- * via a structural cast. No bridge / recorder / intent re-tagger
- * needed: the tool only writes to SQLite, never to the extension-side
- * dispatch path.
- */
-const handleExperienceScoreStepBridged: NativeToolHandler = async (args, deps) => {
-  const persistenceMode = deps.sessionManager.getPersistenceStatus().mode;
-  const reshaped = {
-    ...deps,
-    experience: deps.sessionManager.experience,
-    persistenceMode,
-  } as unknown as Parameters<typeof experienceScoreStepNativeHandler>[1];
-  return await experienceScoreStepNativeHandler(args, reshaped);
-};
-
 const NATIVE_HANDLERS: ReadonlyMap<string, NativeToolHandler> = new Map([
-  [TOOL_NAMES.EXPERIENCE.SUGGEST_PLAN, handleExperienceSuggestPlan],
-  [TOOL_NAMES.EXPERIENCE.REPLAY, handleExperienceReplayBridged],
-  [TOOL_NAMES.EXPERIENCE.SCORE_STEP, handleExperienceScoreStepBridged],
   [TOOL_NAMES.CONTEXT.CHOOSE, handleTabrixChooseContext],
   [TOOL_NAMES.CONTEXT.RECORD_OUTCOME, handleTabrixChooseContextRecordOutcome],
   [TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK, handleMemoryRecordAiFeedback],

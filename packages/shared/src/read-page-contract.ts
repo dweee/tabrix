@@ -1745,7 +1745,6 @@ export type LayerDispatchReason =
   | 'medium_page_overview'
   | 'complex_page_detail_required'
   // priority 5: MKEP support
-  | 'experience_replay_executable'
   | 'knowledge_supports_summary'
   | 'knowledge_with_action'
   // priority 6: fail-safe
@@ -1762,20 +1761,17 @@ export const LAYER_DISPATCH_REASON_VALUES: readonly LayerDispatchReason[] = [
   'simple_page_low_density',
   'medium_page_overview',
   'complex_page_detail_required',
-  'experience_replay_executable',
   'knowledge_supports_summary',
   'knowledge_with_action',
   'dispatcher_fallback_safe',
 ] as const;
 
 /**
- * Locked 4-value `LayerSourceRoute` enum.
+ * Locked 3-value `LayerSourceRoute` enum.
  * Source of truth for both telemetry and release gates.
  *
  * - `read_page_required` — caller MUST call `chrome_read_page` with
  *   the chosen layer; the chooser cannot pre-build context for it.
- * - `experience_replay_skip_read` — caller can replay a recorded path
- *   directly. `chrome_read_page` is NOT required ahead of replay.
  * - `knowledge_supported_read` — caller should call `chrome_read_page`
  *   but the chooser surfaced API Knowledge shape evidence as well.
  * - `dispatcher_fallback_safe` — dispatcher could not classify the
@@ -1783,19 +1779,17 @@ export const LAYER_DISPATCH_REASON_VALUES: readonly LayerDispatchReason[] = [
  *   may clamp this back to compact DOM reads before calling
  *   `chrome_read_page`.
  *
- * Adding a fifth value requires a full enum migration in
+ * Adding another value requires a full enum migration in
  * the release gate library, the telemetry column allow-list, and the
  * benchmark transformer's `KNOWN_SOURCE_ROUTES`.
  */
 export type LayerSourceRoute =
   | 'read_page_required'
-  | 'experience_replay_skip_read'
   | 'knowledge_supported_read'
   | 'dispatcher_fallback_safe';
 
 export const LAYER_SOURCE_ROUTE_VALUES: readonly LayerSourceRoute[] = [
   'read_page_required',
-  'experience_replay_skip_read',
   'knowledge_supported_read',
   'dispatcher_fallback_safe',
 ] as const;
