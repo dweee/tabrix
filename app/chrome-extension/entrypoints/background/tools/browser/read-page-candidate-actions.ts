@@ -26,10 +26,15 @@ function buildRefSelectorMap(refMap: any[]): Map<string, string> {
   return map;
 }
 
-function scoreCandidateElementPriority(element: ReadPageInteractiveElement, index: number): number {
+function scoreCandidateElementPriority(
+  element: ReadPageInteractiveElement,
+  index: number,
+  contentTargetRefs: ReadonlySet<string> = new Set(),
+): number {
   const ref = String(element.ref || '');
   const name = String(element.name || '').trim();
   let score = 0;
+  if (contentTargetRefs.has(ref)) score += 220;
   if (isPublishActionText(name)) score += 136;
   if (isPublishMediaTypeText(name)) score += 132;
   if (ref.startsWith('ref_text_menu_')) score += 120;
@@ -341,6 +346,15 @@ function selectNextFileInputBinding(
 
 function isBroadBlockingOverlayElement(element: ReadPageInteractiveElement): boolean {
   if (String(element.actionability || '').toLowerCase() !== 'blocked') return false;
+  const role = String(element.role || '').toLowerCase();
+  const name = String(element.name || '').trim();
+  const hasBlockingSurfaceSignal =
+    role === 'dialog' ||
+    role === 'alertdialog' ||
+    /\b(dialog|modal|overlay|captcha|verification|verify|login|sign in|auth|required)\b|登录|登陆|验证|验证码|弹窗|遮罩|授权|请先登录|需要登录/i.test(
+      name,
+    );
+  if (!hasBlockingSurfaceSignal) return false;
   const rect = element.rect;
   if (!rect) return false;
   const width = typeof rect.width === 'number' && Number.isFinite(rect.width) ? rect.width : 0;
@@ -378,6 +392,7 @@ export function buildCandidateActions(
   } = {},
 ): CandidateActionSeed[] {
   const selectorMap = buildRefSelectorMap(refMap);
+  const contentTargetRefs = visibleRegionRowTargetRefs(options.visibleRegionRows);
   const clickRoles = new Set(['button', 'link', 'menuitem', 'tab', 'option', 'checkbox', 'switch']);
   const fillRoles = new Set(['textbox', 'searchbox', 'combobox']);
   const primaryKeywords =
@@ -388,7 +403,7 @@ export function buildCandidateActions(
     .map((element, index) => ({
       element,
       index,
-      score: scoreCandidateElementPriority(element, index),
+      score: scoreCandidateElementPriority(element, index, contentTargetRefs),
     }))
     .sort((left, right) => right.score - left.score || left.index - right.index)
     .map(({ element }) => element);
@@ -498,16 +513,19 @@ function bindVisibleRegionRowsToDetailActions(
     const targetRef = String(row.targetRef || '').trim();
     if (!targetRef) continue;
     const element = elementByRef.get(targetRef);
+    const trustedRowTarget = isTrustedVisibleRowTargetRef(row);
     if (element) {
-      if (!isClickableContentTarget(element, row)) continue;
-    } else if (!isTrustedVisibleRowTargetRef(row)) {
+      if (!isClickableContentTarget(element, row) && !trustedRowTarget) continue;
+    } else if (!trustedRowTarget) {
       continue;
     }
 
     const existing = seedByTargetRef.get(targetRef);
+    const rowLabel = String(row.title || row.primaryText || '').trim();
     if (existing) {
       if (!isProtectedIntent(existing.intent)) {
         existing.intent = 'content.open_detail';
+        if (rowLabel && !mayContainSensitiveAuthText(rowLabel)) existing.label = rowLabel;
         existing.confidence = Number(
           Math.max(existing.confidence || 0, row.confidence || 0, 0.82).toFixed(2),
         );
@@ -531,15 +549,21 @@ function bindVisibleRegionRowsToDetailActions(
     const selector = getElementSelector(element, selectorMap) || selectorMap.get(targetRef);
     const locatorChain: ReadPageCandidateActionLocator[] = [{ type: 'ref', value: targetRef }];
     if (selector) locatorChain.push({ type: 'css', value: selector });
-    const actionability = element ? normalizeActionability(element.actionability) : 'unknown';
+    const sourceActionability = element ? normalizeActionability(element.actionability) : 'unknown';
+    const actionability =
+      trustedRowTarget && sourceActionability !== 'blocked' ? 'actionable' : sourceActionability;
     const intent: ReadPageCandidateAction['intent'] = 'content.open_detail';
+    const actionLabel =
+      rowLabel && !mayContainSensitiveAuthText(rowLabel)
+        ? rowLabel
+        : element?.name && !mayContainSensitiveAuthText(element.name)
+          ? element.name
+          : '';
     const action: CandidateActionSeed = {
       id: `ca_click_${safeRef}`,
       actionType: 'click',
       targetRef,
-      ...(element?.name && !mayContainSensitiveAuthText(element.name)
-        ? { label: element.name }
-        : {}),
+      ...(actionLabel ? { label: actionLabel } : {}),
       ...(typeof frameId === 'number' ? { frameId } : {}),
       confidence: Number(Math.max(row.confidence || 0, 0.78).toFixed(2)),
       matchReason: 'content row target inferred from visible region rows',
@@ -553,7 +577,32 @@ function bindVisibleRegionRowsToDetailActions(
     output.push(action);
     seedByTargetRef.set(targetRef, action);
   }
-  return output;
+  return rankBoundCandidateActions(output);
+}
+
+function rankBoundCandidateActions(actions: CandidateActionSeed[]): CandidateActionSeed[] {
+  return actions
+    .map((action, index) => ({ action, index, priority: boundCandidateActionPriority(action) }))
+    .sort((left, right) => right.priority - left.priority || left.index - right.index)
+    .map(({ action }) => action);
+}
+
+function boundCandidateActionPriority(action: CandidateActionSeed): number {
+  const intent = String(action.intent || '');
+  if (intent === 'search.enter_query') return 360;
+  if (intent === 'content.open_detail') return 350;
+  if (intent === 'search.submit') return 340;
+  if (intent === 'search.category_select') return 330;
+  if (intent.startsWith('auth.')) return 325;
+  if (intent.startsWith('filter.')) return 315;
+  if (intent.startsWith('publish.')) return 90;
+  const label = String(action.label || '');
+  if (
+    /menu action candidate|account action candidate|关于我们|营业执照|首页|直播|消息/i.test(label)
+  ) {
+    return 20;
+  }
+  return 100;
 }
 
 function isTrustedVisibleRowTargetRef(row: ReadPageVisibleRegionRows['rows'][number]): boolean {

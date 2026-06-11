@@ -631,6 +631,98 @@ describe('candidateAction bridge', () => {
     );
   });
 
+  it('targets chrome_keyboard Enter by candidateAction targetRef instead of ambient focus', async () => {
+    vi.spyOn(keyboardTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4112,
+      title: 'Search',
+      url: 'https://example.com/search',
+    });
+    vi.spyOn(keyboardTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(keyboardTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      message: 'Keyboard operation successful',
+    });
+
+    const result = await keyboardTool.execute({
+      key: 'Enter',
+      candidateAction: {
+        id: 'ca_fill_ref_search',
+        actionType: 'fill',
+        targetRef: 'ref_searchbox',
+        intent: 'search.enter_query',
+        confidence: 0.9,
+        matchReason: 'searchbox candidate',
+        locatorChain: [{ type: 'ref', value: 'ref_searchbox' }],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    expect(sendSpy).toHaveBeenCalledWith(
+      4112,
+      expect.objectContaining({
+        action: 'focusByRef',
+        ref: 'ref_searchbox',
+      }),
+    );
+    expect(sendSpy).toHaveBeenCalledWith(
+      4112,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.SIMULATE_KEYBOARD,
+        keys: 'Enter',
+        ref: 'ref_searchbox',
+        selector: undefined,
+      }),
+      undefined,
+    );
+  });
+
+  it('uses candidateAction css locator for chrome_keyboard before falling back to ref', async () => {
+    vi.spyOn(keyboardTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4113,
+      title: 'Search',
+      url: 'https://example.com/search',
+    });
+    vi.spyOn(keyboardTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(keyboardTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      message: 'Keyboard operation successful',
+    });
+
+    const result = await keyboardTool.execute({
+      key: 'Enter',
+      candidateAction: {
+        id: 'ca_fill_ref_search',
+        actionType: 'fill',
+        targetRef: 'ref_searchbox',
+        intent: 'search.enter_query',
+        confidence: 0.9,
+        matchReason: 'searchbox candidate',
+        locatorChain: [
+          { type: 'ref', value: 'ref_searchbox' },
+          { type: 'css', value: '#search-input' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    expect(sendSpy).not.toHaveBeenCalledWith(
+      4113,
+      expect.objectContaining({
+        action: 'focusByRef',
+      }),
+    );
+    expect(sendSpy).toHaveBeenCalledWith(
+      4113,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.SIMULATE_KEYBOARD,
+        keys: 'Enter',
+        selector: '#search-input',
+        ref: undefined,
+      }),
+      undefined,
+    );
+  });
+
   it('updates Browser World latest AI operation after click, fill, and keyboard dispatches', async () => {
     mockBrowserWorldTab(4120);
     await getBrowserWorldSnapshot();

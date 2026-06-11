@@ -30,6 +30,8 @@ import {
   type ReadPageFileInputBinding,
   type ReadPagePublishFormReadiness,
   type ReadPagePublishFormRequiredFieldEvidence,
+  type ReadPageHighValueObject,
+  type ReadPageHighValueObjectAction,
   READ_PAGE_ASSISTANT_GUIDANCE_AUTH_PREFERENCE_VALUES,
   READ_PAGE_ASSISTANT_GUIDANCE_REQUESTED_OBJECT_VALUES,
   READ_PAGE_ASSISTANT_GUIDANCE_TASK_KIND_VALUES,
@@ -652,6 +654,111 @@ function buildPublishFormReadiness(params: {
     claimBoundary:
       'Read-only DOM/candidate-action evidence can explain publish-form readiness gaps; it does not prove upload execution, website acceptance, platform-rule compliance, final publish success, or business success.',
   };
+}
+
+export function mergeHighValueObjectActionsIntoCandidateActions(
+  candidateActions: CandidateActionSeed[],
+  highValueObjects: readonly ReadPageHighValueObject[] | undefined,
+  frameId: number | undefined,
+): CandidateActionSeed[] {
+  if (!Array.isArray(highValueObjects) || highValueObjects.length === 0) {
+    return candidateActions;
+  }
+
+  const actionByTargetRef = new Map<string, CandidateActionSeed>();
+  for (const action of candidateActions) {
+    if (action.targetRef) actionByTargetRef.set(action.targetRef, action);
+  }
+
+  let output = candidateActions;
+  for (const object of highValueObjects) {
+    if (object.kind !== 'visible_region_row') continue;
+    const targetRef = String(object.ref || '').trim();
+    if (!targetRef) continue;
+    const hasOpenDetailAction = Array.isArray(object.actions)
+      ? object.actions.some(
+          (action: ReadPageHighValueObjectAction) =>
+            action?.type === 'open_detail' &&
+            action?.actionType === 'click' &&
+            action?.ref === targetRef,
+        )
+      : false;
+    if (!hasOpenDetailAction) continue;
+
+    const existing = actionByTargetRef.get(targetRef);
+    const label = String(object.label || '').trim();
+    if (
+      /^(menu action candidate|account action candidate|red|home|首页|直播|消息|发布|更多|关于我们|营业执照)$/i.test(
+        label,
+      )
+    ) {
+      continue;
+    }
+    if (existing) {
+      if (!existing.intent) existing.intent = 'content.open_detail';
+      if (!existing.label && label) existing.label = label;
+      existing.confidence = Number(
+        Math.max(existing.confidence || 0, object.confidence || 0, 0.78).toFixed(2),
+      );
+      if (!existing.matchReason) {
+        existing.matchReason = 'content row target inferred from high value objects';
+      }
+      continue;
+    }
+
+    if (output.length >= 20) {
+      const replaceIndex = [...output]
+        .map((action, index) => ({ action, index }))
+        .reverse()
+        .find(
+          ({ action }) =>
+            action.intent !== 'search.enter_query' &&
+            action.intent !== 'content.open_detail' &&
+            !String(action.intent || '').startsWith('auth.'),
+        )?.index;
+      if (replaceIndex === undefined) continue;
+      output = [...output];
+      output.splice(replaceIndex, 1);
+    } else if (output === candidateActions) {
+      output = [...candidateActions];
+    }
+
+    const safeRef = targetRef.replace(/[^a-zA-Z0-9_]/g, '_');
+    const action: CandidateActionSeed = {
+      id: `ca_click_${safeRef}`,
+      actionType: 'click',
+      targetRef,
+      ...(label ? { label } : {}),
+      ...(typeof frameId === 'number' ? { frameId } : {}),
+      confidence: Number(Math.max(object.confidence || 0, 0.78).toFixed(2)),
+      matchReason: 'content row target inferred from high value objects',
+      actionability: 'actionable',
+      actionabilityReason:
+        'source=high_value_objects; visible_region_row_has_open_detail_action; business_success_requires_fresh_post_click_read',
+      locatorChain: [{ type: 'ref', value: targetRef }],
+      intent: 'content.open_detail',
+    };
+    output.push(action);
+    actionByTargetRef.set(targetRef, action);
+  }
+
+  return output
+    .map((action, index) => ({
+      action,
+      index,
+      priority:
+        action.intent === 'search.enter_query'
+          ? 360
+          : action.intent === 'content.open_detail'
+            ? 350
+            : String(action.intent || '').startsWith('auth.')
+              ? 325
+              : String(action.intent || '').startsWith('publish.')
+                ? 90
+                : 100,
+    }))
+    .sort((left, right) => right.priority - left.priority || left.index - right.index)
+    .map(({ action }) => action);
 }
 
 function applyPublishFormReadinessToPageRegions(
@@ -1374,7 +1481,7 @@ async function buildModeOutput(params: {
     }),
     params.pageRole,
   );
-  const candidateActions =
+  let candidateActions =
     params.candidateActions.length > 0
       ? params.candidateActions
       : buildCandidateActions(interactiveElements, params.refMap, {
@@ -1418,6 +1525,13 @@ async function buildModeOutput(params: {
     visualElements: params.visualElements,
     requestedLayer: params.requestedLayer,
   });
+  candidateActions = mergeHighValueObjectActionsIntoCandidateActions(
+    candidateActions,
+    extensionLayer.highValueObjects,
+    params.frameContext?.frameId,
+  );
+  extensionLayer.candidateActions = candidateActions;
+
   const regionAlignedUnderstanding = deriveRegionAlignedPageUnderstanding({
     pageRole: params.pageRole,
     primaryRegion: params.primaryRegion,

@@ -1,6 +1,6 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
-import { TOOL_NAMES } from '@tabrix/shared';
+import { TOOL_NAMES, type ReadPageCandidateAction } from '@tabrix/shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 import { markBrowserWorldTabAiOperated } from '../../browser-world-inventory';
@@ -8,12 +8,26 @@ import { markBrowserWorldTabAiOperated } from '../../browser-world-inventory';
 interface KeyboardToolParams {
   keys?: string; // Required: string representing keys or key combinations to simulate (e.g., "Enter", "Ctrl+C")
   key?: string; // Backwards-compatible alias for a single key.
+  ref?: string; // Element ref from the latest read_page snapshot.
+  candidateAction?: ReadPageCandidateAction; // Candidate action returned by read_page.
   selector?: string; // Optional: CSS selector or XPath for target element to send keyboard events to
   selectorType?: 'css' | 'xpath'; // Type of selector (default: 'css')
   delay?: number; // Optional: delay between keystrokes in milliseconds
   tabId?: number; // target existing tab id
   windowId?: number; // when no tabId, pick active tab from this window
   frameId?: number; // target frame id for iframe support
+}
+
+function firstCandidateCssLocator(
+  candidateAction: ReadPageCandidateAction | undefined,
+): string | undefined {
+  const css = candidateAction?.locatorChain?.find(
+    (locator) =>
+      String(locator?.type || '').toLowerCase() === 'css' &&
+      typeof locator.value === 'string' &&
+      locator.value.trim(),
+  )?.value;
+  return typeof css === 'string' ? css.trim() : undefined;
 }
 
 /**
@@ -29,11 +43,20 @@ class KeyboardTool extends BaseBrowserToolExecutor {
     const {
       keys: rawKeys,
       key,
+      ref,
+      candidateAction,
       selector,
       selectorType = 'css',
       delay = TIMEOUTS.KEYBOARD_DELAY,
     } = args;
     const keys = rawKeys || key;
+    const targetRef =
+      typeof ref === 'string' && ref.trim()
+        ? ref.trim()
+        : typeof candidateAction?.targetRef === 'string' && candidateAction.targetRef.trim()
+          ? candidateAction.targetRef.trim()
+          : undefined;
+    const candidateCssSelector = firstCandidateCssLocator(candidateAction);
 
     console.log(`Starting keyboard operation with options:`, args);
 
@@ -50,8 +73,8 @@ class KeyboardTool extends BaseBrowserToolExecutor {
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
       }
 
-      let finalSelector = selector;
-      let refForFocus: string | undefined = undefined;
+      let finalSelector = selector || candidateCssSelector;
+      let refForFocus: string | undefined = finalSelector ? undefined : targetRef;
 
       // Ensure helper is loaded for XPath or potential focus operations
       await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
@@ -120,6 +143,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
           action: TOOL_MESSAGE_TYPES.SIMULATE_KEYBOARD,
           keys,
           selector: finalSelector,
+          ref: finalSelector ? undefined : targetRef,
           delay,
         },
         args.frameId,

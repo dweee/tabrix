@@ -139,4 +139,33 @@ describe('keyboard helper scroll diagnostics', () => {
     };
     expect(targetElement.waitDiagnostics?.focus?.ready).toBe(true);
   });
+
+  it('focuses a read_page ref target before dispatching keyboard events', async () => {
+    document.body.innerHTML = `
+      <input id="search" value="tabrix" />
+    `;
+    const input = document.querySelector('#search') as HTMLInputElement;
+    input.scrollIntoView = vi.fn();
+    (
+      window as unknown as { __claudeElementMap: Record<string, WeakRef<Element>> }
+    ).__claudeElementMap = {
+      ref_search: new WeakRef(input),
+    };
+
+    const response = await dispatchKeyboard({
+      action: 'simulateKeyboard',
+      ref: 'ref_search',
+      keys: 'Enter',
+    });
+
+    expect(response.success).toBe(true);
+    expect(document.activeElement).toBe(input);
+    expect(input.scrollIntoView).toHaveBeenCalled();
+    const targetElement = response.targetElement as {
+      id?: string;
+      waitDiagnostics?: { focus?: { ready?: boolean } };
+    };
+    expect(targetElement.id).toBe('search');
+    expect(targetElement.waitDiagnostics?.focus?.ready).toBe(true);
+  });
 });

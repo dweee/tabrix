@@ -104,6 +104,18 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
     }
   }
 
+  function resolveElementRef(ref) {
+    if (!ref || typeof ref !== 'string') return null;
+    try {
+      const map = window.__claudeElementMap;
+      const weak = map && map[ref];
+      const element = weak && typeof weak.deref === 'function' ? weak.deref() : null;
+      return element instanceof window.Element ? element : null;
+    } catch {
+      return null;
+    }
+  }
+
   async function prepareKeyboardTarget(element) {
     if (!element || document.activeElement === element || typeof element.focus !== 'function') {
       return { waitedMs: 0, reason: 'already_focused', ready: document.activeElement === element };
@@ -541,6 +553,16 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
             results: [],
           });
           return true; // Keep channel open for async response
+        }
+      } else if (request.ref) {
+        targetEl = resolveElementRef(request.ref);
+        if (!targetEl) {
+          sendResponse({
+            success: false,
+            error: `Element ref "${request.ref}" not found. Please call chrome_read_page first and ensure the ref is still valid.`,
+            results: [],
+          });
+          return true;
         }
       }
 

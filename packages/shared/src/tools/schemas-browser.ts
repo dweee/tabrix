@@ -1446,6 +1446,17 @@ export const BROWSER_SCHEMAS: Tool[] = [
           type: 'string',
           description: 'CSS selector or XPath for target element to receive keyboard events.',
         },
+        ref: {
+          type: 'string',
+          description:
+            'Element ref from the latest chrome_read_page result. Prefer this over relying on the current browser focus when pressing Enter on a searchbox or focused control.',
+        },
+        candidateAction: {
+          type: 'object',
+          description:
+            'Candidate action returned by chrome_read_page. When targetRef is present, chrome_keyboard focuses that exact element before dispatching keys.',
+          additionalProperties: true,
+        },
         selectorType: {
           type: 'string',
           enum: ['css', 'xpath'],

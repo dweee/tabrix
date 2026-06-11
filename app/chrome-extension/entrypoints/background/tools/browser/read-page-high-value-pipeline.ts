@@ -24,6 +24,8 @@ import {
 import { inferReadPageTaskMode } from './read-page-task-mode-signals';
 
 const COMMIT_SHA_PATTERN = /\b[0-9a-f]{7,40}\b/i;
+const NAVIGATION_SHELL_OBJECT_PATTERN =
+  /^(menu action candidate|account action candidate|red|home|首页|直播|消息|发布|更多|关于我们|营业执照)$/i;
 
 const MAX_HIGH_VALUE_OBJECTS = 6;
 const MAX_VISIBLE_TEXT_ROW_FACTS = 3;
@@ -113,6 +115,7 @@ function isLowBusinessSignalObject(label: string, href?: string): boolean {
   const normalizedLabel = String(label || '').trim();
   const normalizedHref = String(href || '').trim();
   if (!normalizedLabel) return true;
+  if (NAVIGATION_SHELL_OBJECT_PATTERN.test(normalizedLabel)) return true;
   if (LOW_BUSINESS_SIGNAL_PATTERN.test(normalizedLabel)) return true;
   if (LOW_BUSINESS_HREF_PATTERN.test(normalizedHref)) return true;
   return false;
@@ -189,7 +192,6 @@ function buildVisibleTextRowFacts(params: HighValuePipelineParams): ReadPageHigh
   const seenLabels = new Set<string>();
   for (const row of rows.rows) {
     if (facts.length >= MAX_VISIBLE_TEXT_ROW_FACTS) break;
-    if (row.sourceRegion !== 'visible_text' || row.targetRef) continue;
     const label = String(row.title || row.primaryText || '').trim();
     const normalized = normalizeHighValueLabel(label);
     if (!normalized || seenLabels.has(normalized) || isLowBusinessSignalObject(label)) {
@@ -199,14 +201,22 @@ function buildVisibleTextRowFacts(params: HighValuePipelineParams): ReadPageHigh
     const confidence = Number.isFinite(row.confidence)
       ? Number(row.confidence.toFixed(3))
       : undefined;
+    const targetRef = String(row.targetRef || '').trim();
     const reasons = Array.from(
-      new Set(['visible_text_fallback', 'read_fact', ...row.qualityReasons]),
+      new Set([
+        row.sourceRegion === 'visible_text' ? 'visible_text_fallback' : 'visible_region_row',
+        'read_fact',
+        ...(targetRef ? ['target_ref_available'] : []),
+        ...row.qualityReasons,
+      ]),
     );
     const fact: ReadPageHighValueObject = {
       id: `hvo_visible_region_row_${facts.length + 1}`,
       kind: 'visible_region_row',
       label,
-      reason: 'visible text fallback row surfaced as a read fact',
+      reason: targetRef
+        ? 'visible region result row surfaced as a readable and targetable content object'
+        : 'visible text fallback row surfaced as a read fact',
       objectType: 'record',
       region: row.sourceRegion,
       importance: 0.9,
@@ -214,6 +224,11 @@ function buildVisibleTextRowFacts(params: HighValuePipelineParams): ReadPageHigh
       reasons,
     };
     if (typeof confidence === 'number') fact.confidence = confidence;
+    if (targetRef) {
+      fact.ref = targetRef;
+      fact.actionType = 'click';
+      fact.actions = [{ type: 'open_detail', ref: targetRef, actionType: 'click' }];
+    }
     facts.push(fact);
   }
   return facts;

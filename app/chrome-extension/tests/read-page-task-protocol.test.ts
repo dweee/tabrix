@@ -568,6 +568,17 @@ describe('read_page task protocol', () => {
 
     const contentRegion = protocol.pageRegions.find((region) => region.regionType === 'content');
     expect(contentRegion?.candidateActionIds).toContain('ca_click_ref_row_title');
+    expect(protocol.highValueObjects[0]).toMatchObject({
+      kind: 'visible_region_row',
+      label: 'Practical guide to AI poster creation',
+      objectType: 'record',
+      ref: 'ref_row_title',
+      actionType: 'click',
+      actions: [{ type: 'open_detail', ref: 'ref_row_title', actionType: 'click' }],
+    });
+    expect(protocol.highValueObjects[0]?.reasons).toEqual(
+      expect.arrayContaining(['visible_region_row', 'read_fact', 'target_ref_available']),
+    );
     const rowObject = contentRegion?.objects.find((object) => object.objectId === 'ref_row_title');
     expect(rowObject?.primaryAction).toMatchObject({
       candidateActionId: 'ca_click_ref_row_title',
@@ -938,7 +949,7 @@ describe('read_page task protocol', () => {
       expect(navigationRegion).toMatchObject({
         state: 'global_menu_available_candidate',
         layoutHint: 'left_sidebar',
-        targetability: 'target_ref',
+        targetability: 'locator_chain',
       });
       expect(navigationRegion?.label).toContain('left_sidebar global menu');
       expect(navigationRegion?.objects.map((item) => item.label)).toEqual(

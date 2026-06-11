@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type {
   ReadPageCandidateAction,
   ReadPageFileInputBinding,
+  ReadPageHighValueObject,
   ReadPageInteractiveElement,
 } from '@tabrix/shared';
 import { buildCandidateActions } from '@/entrypoints/background/tools/browser/read-page-candidate-actions';
 import { buildPageOperationMap } from '@/entrypoints/background/tools/browser/read-page-operation-map';
+import { mergeHighValueObjectActionsIntoCandidateActions } from '@/entrypoints/background/tools/browser/read-page';
 
 function element(overrides: Partial<ReadPageInteractiveElement>): ReadPageInteractiveElement {
   return {
@@ -345,6 +347,113 @@ describe('read_page candidate action intents', () => {
       actionType: 'click',
       intent: 'filter.open',
       locatorChain: expect.arrayContaining([{ type: 'css', value: '.filter-panel .tag-unseen' }]),
+    });
+  });
+
+  it('keeps visible search result cards ahead of low-value utility actions', () => {
+    const resultRows = {
+      ...visibleRowsForTarget('ref_result_1'),
+      rows: [
+        {
+          ...visibleRowsForTarget('ref_result_1').rows[0],
+          rowId: 'row_1',
+          title: 'Practical guide to AI image creation',
+          primaryText: 'Practical guide to AI image creation',
+          targetRef: 'ref_result_1',
+        },
+        {
+          ...visibleRowsForTarget('ref_result_2').rows[0],
+          rowId: 'row_2',
+          title: 'How teams review generated visuals',
+          primaryText: 'How teams review generated visuals',
+          targetRef: 'ref_result_2',
+        },
+        {
+          ...visibleRowsForTarget('ref_result_3').rows[0],
+          rowId: 'row_3',
+          title: 'Prompt workflow checklist for creators',
+          primaryText: 'Prompt workflow checklist for creators',
+          targetRef: 'ref_result_3',
+        },
+      ],
+      rowCount: 3,
+      visibleDomRowsCandidateCount: 3,
+      visibleDomRowsSelectedCount: 3,
+    };
+    const utilityActions = Array.from({ length: 24 }, (_, index) =>
+      element({
+        ref: `ref_text_menu_${index + 1}`,
+        role: 'button',
+        name: index % 2 === 0 ? '菜单' : '设置',
+      }),
+    );
+
+    const actions = buildCandidateActions(
+      [
+        ...utilityActions,
+        element({
+          ref: 'ref_result_1',
+          role: 'link',
+          name: 'Card shell',
+          matchSource: 'visible_text',
+        }),
+        element({
+          ref: 'ref_result_2',
+          role: 'link',
+          name: 'Card shell',
+          matchSource: 'visible_text',
+        }),
+        element({
+          ref: 'ref_result_3',
+          role: 'link',
+          name: 'Card shell',
+          matchSource: 'visible_text',
+        }),
+      ],
+      [],
+      { visibleRegionRows: resultRows },
+    );
+
+    const contentActions = actions.filter((action) => action.intent === 'content.open_detail');
+    expect(contentActions.map((action) => action.targetRef)).toEqual([
+      'ref_result_1',
+      'ref_result_2',
+      'ref_result_3',
+    ]);
+    expect(contentActions.map((action) => action.label)).toEqual([
+      'Practical guide to AI image creation',
+      'How teams review generated visuals',
+      'Prompt workflow checklist for creators',
+    ]);
+    expect(actions.slice(0, 3).map((action) => action.targetRef)).toEqual([
+      'ref_result_1',
+      'ref_result_2',
+      'ref_result_3',
+    ]);
+    expect(actions).toHaveLength(20);
+  });
+
+  it('binds trusted visible-text result rows even when the repaired target is generic', () => {
+    const actions = buildCandidateActions(
+      [
+        element({
+          ref: 'ref_fallback_53',
+          role: 'generic',
+          name: 'Card text container',
+          actionability: 'not_actionable',
+          matchSource: 'visible_text',
+        }),
+      ],
+      [],
+      { visibleRegionRows: visibleRowsForTarget('ref_fallback_53') },
+    );
+
+    expect(actions[0]).toMatchObject({
+      actionType: 'click',
+      targetRef: 'ref_fallback_53',
+      intent: 'content.open_detail',
+      actionability: 'actionable',
+      label: 'Practical guide to AI poster creation',
     });
   });
 
@@ -855,6 +964,38 @@ describe('read_page candidate action intents', () => {
     );
   });
 
+  it('does not treat a broad blocked page container as a blocking overlay without modal evidence', () => {
+    const actions = buildCandidateActions(
+      [
+        element({
+          ref: 'ref_page_shell',
+          role: 'button',
+          name: 'Page shell',
+          actionability: 'blocked',
+          rect: { x: 0, y: 0, width: 1500, height: 3000 },
+        }),
+        element({
+          ref: 'ref_row_title',
+          role: 'link',
+          name: 'Practical guide to AI poster creation',
+          actionability: 'actionable',
+        }),
+      ],
+      [{ ref: 'ref_row_title', selector: 'article:nth-of-type(1) a' }],
+      {
+        visibleRegionRows: {
+          ...visibleRowsForTarget('ref_row_title'),
+          sourceRegion: 'visible_text',
+        },
+      },
+    );
+
+    expect(actions.find((action) => action.targetRef === 'ref_row_title')).toMatchObject({
+      intent: 'content.open_detail',
+      label: 'Practical guide to AI poster creation',
+    });
+  });
+
   it('does not let visible rows override auth or search intent precedence', () => {
     const actions = buildCandidateActions(
       [
@@ -946,5 +1087,79 @@ describe('read_page candidate action intents', () => {
     expect(actions.find((action) => action.targetRef === 'ref_login_button')?.intent).toBe(
       'auth.submit_login',
     );
+  });
+
+  it('bridges high value visible rows into executable content detail actions', () => {
+    const existingActions: ReadPageCandidateAction[] = [
+      {
+        id: 'ca_fill_ref_search',
+        actionType: 'fill',
+        targetRef: 'ref_search',
+        confidence: 0.93,
+        matchReason: 'primary action inferred from interactive label',
+        locatorChain: [{ type: 'ref', value: 'ref_search' }],
+        intent: 'search.enter_query',
+      },
+      {
+        id: 'ca_click_ref_menu',
+        actionType: 'click',
+        targetRef: 'ref_menu',
+        label: 'menu action candidate',
+        confidence: 0.72,
+        matchReason: 'redacted_menu_action_signal',
+        locatorChain: [{ type: 'ref', value: 'ref_menu' }],
+      },
+    ];
+    const highValueObjects: ReadPageHighValueObject[] = [
+      {
+        id: 'hvo_visible_region_row_menu',
+        kind: 'visible_region_row',
+        label: 'menu action candidate',
+        reason: 'navigation shell row must not become content detail action',
+        objectType: 'record',
+        region: 'search_results',
+        importance: 0.9,
+        sourceKind: 'dom_semantic',
+        reasons: ['visible_region_row', 'read_fact', 'target_ref_available'],
+        confidence: 0.78,
+        ref: 'ref_menu_shell',
+        actionType: 'click',
+        actions: [{ type: 'open_detail', ref: 'ref_menu_shell', actionType: 'click' }],
+      },
+      {
+        id: 'hvo_visible_region_row_1',
+        kind: 'visible_region_row',
+        label: 'Practical AI image prompt guide',
+        reason: 'visible region result row surfaced as a readable and targetable content object',
+        objectType: 'record',
+        region: 'search_results',
+        importance: 0.9,
+        sourceKind: 'dom_semantic',
+        reasons: ['visible_region_row', 'read_fact', 'target_ref_available'],
+        confidence: 0.68,
+        ref: 'ref_result_1',
+        actionType: 'click',
+        actions: [{ type: 'open_detail', ref: 'ref_result_1', actionType: 'click' }],
+      },
+    ];
+
+    const actions = mergeHighValueObjectActionsIntoCandidateActions(
+      existingActions,
+      highValueObjects,
+      undefined,
+    );
+
+    expect(actions.map((action) => action.intent).slice(0, 2)).toEqual([
+      'search.enter_query',
+      'content.open_detail',
+    ]);
+    const detailAction = actions.find((action) => action.targetRef === 'ref_result_1');
+    expect(detailAction).toMatchObject({
+      actionType: 'click',
+      intent: 'content.open_detail',
+      label: 'Practical AI image prompt guide',
+      actionability: 'actionable',
+    });
+    expect(actions.find((action) => action.targetRef === 'ref_menu_shell')).toBeUndefined();
   });
 });
