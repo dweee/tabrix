@@ -158,11 +158,6 @@ interface ServerStatusSnapshot {
     lastSessionId: string | null;
     persistenceMode: 'disk' | 'memory' | 'off';
   };
-  capabilities: {
-    source: 'default';
-    enabled: string[];
-    unknown: string[];
-  };
   v27Observation: ObservationDiagnosticsSnapshot;
   lifecycleEvidenceArtifacts: LifecycleEvidenceArtifactStoreSnapshot;
 }
@@ -1051,7 +1046,6 @@ export class Server {
     this.bridgeState.syncBrowserProcessNow();
     this.bridgeState.setNativeHostAttached(this.nativeHost !== null);
     const bridge = this.bridgeState.getSnapshot();
-    const capabilities = { source: 'default' as const, enabled: [], unknown: [] };
     const v27Observation = getObservationDiagnosticsSnapshot({
       factSnapshotCount: getDefaultFactCollector().size(),
       trackedContextCount: getDefaultContextManager().size(),
@@ -1094,7 +1088,6 @@ export class Server {
             : null,
         persistenceMode: sessionManager.getPersistenceStatus().mode,
       },
-      capabilities,
       v27Observation,
       lifecycleEvidenceArtifacts,
     };

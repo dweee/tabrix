@@ -212,11 +212,7 @@ describe('服务器测试', () => {
       },
       lastSessionId: null,
     });
-    expect(response.body.data.capabilities).toMatchObject({
-      source: expect.any(String),
-      enabled: expect.any(Array),
-      unknown: expect.any(Array),
-    });
+    expect(response.body.data).not.toHaveProperty('capabilities');
     expect(response.body.data.v27Observation).toMatchObject({
       observationDiagnosticSource: expect.any(String),
       observationIngestedCount: expect.any(Number),
@@ -747,11 +743,11 @@ describe('服务器测试', () => {
         _tabrix: {
           toolName: 'get_windows_and_tabs',
           toolSuccess: true,
-          businessStatus: 'unknown',
           businessFeedbackRequired: true,
           businessFeedbackGuideVersion: 'tabrix-ai-business-feedback-v1',
         },
       });
+      expect(payload._tabrix).not.toHaveProperty('businessStatus');
       expect(payload._tabrix.traceId).toEqual(expect.any(String));
       expect(extensionSpy).toHaveBeenCalledTimes(2);
     } finally {
