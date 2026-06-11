@@ -269,22 +269,9 @@ function classifyObjectPageIdentity(
   };
 }
 
-function buildStatusView(
-  trace: MemoryTrace,
-  aiFeedback: MkeMemoryTraceSummary['aiFeedback'],
-): NonNullable<MkeMemoryTraceSummary['statusView']> {
-  const executionStatus =
-    trace.toolSuccess === true ? 'succeeded' : trace.toolSuccess === false ? 'failed' : 'unknown';
-  return {
-    executionStatus,
-    feedbackRequired: !aiFeedback,
-  };
-}
-
 function toTraceSummary(trace: MemoryTrace): MkeMemoryTraceSummary {
   const aiFeedback = toAiFeedbackSummary(trace.aiFeedback);
   const pageIdentity = classifyPageIdentity(trace);
-  const statusView = buildStatusView(trace, aiFeedback);
   const methodLabel = formatToolLabel(trace.toolName);
   return {
     traceId: trace.traceId,
@@ -322,7 +309,6 @@ function toTraceSummary(trace: MemoryTrace): MkeMemoryTraceSummary {
       locationLabel: pageIdentity.label,
     },
     pageIdentity,
-    statusView,
   };
 }
 

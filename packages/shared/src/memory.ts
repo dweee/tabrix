@@ -80,13 +80,6 @@ export interface MkeTraceDisplaySummary {
   locationLabel?: string | null;
 }
 
-export type MkeTraceExecutionStatus = 'succeeded' | 'failed' | 'unknown';
-
-export interface MkeTraceStatusViewSummary {
-  executionStatus: MkeTraceExecutionStatus;
-  feedbackRequired: boolean;
-}
-
 export interface MkeMemoryTraceSummary {
   traceId: string;
   taskId: string;
@@ -118,7 +111,6 @@ export interface MkeMemoryTraceSummary {
   createdAt: string;
   display?: MkeTraceDisplaySummary;
   pageIdentity?: MkePageIdentitySummary;
-  statusView?: MkeTraceStatusViewSummary;
 }
 
 export type MkeBrowserObjectType =

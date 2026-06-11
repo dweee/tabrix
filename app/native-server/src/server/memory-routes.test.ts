@@ -191,10 +191,6 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
         title: 'inspect page and click action',
         methodLabel: '点击元素',
       },
-      statusView: {
-        executionStatus: 'succeeded',
-        feedbackRequired: false,
-      },
       aiFeedback: {
         sourceKind: 'ai_feedback',
         businessStatus: 'achieved',
@@ -209,19 +205,13 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.traces[0]).not.toHaveProperty(removedSyntheticPayloadKey);
     expect(res.body.data.traces[0]).not.toHaveProperty('businessSuccess');
     expect(res.body.data.traces[0]).not.toHaveProperty('aiFeedbackScore');
-    expect(res.body.data.traces[0].statusView).not.toHaveProperty('businessStatus');
-    expect(res.body.data.traces[0].statusView).not.toHaveProperty('businessStatusSource');
-    expect(res.body.data.traces[0].statusView).not.toHaveProperty('aiScore');
+    expect(res.body.data.traces[0]).not.toHaveProperty('statusView');
     expect(res.body.data.traces[0].pageIdentity.label).toBe('example.test');
     expect(res.body.data.traces[0]).not.toHaveProperty('requestParams');
     expect(res.body.data.traces[0]).not.toHaveProperty('response');
     expect(res.body.data.traces[0]).not.toHaveProperty('postObservation');
     expect(res.body.data.traces[1]).toMatchObject({
       toolName: 'chrome_read_page',
-      statusView: {
-        executionStatus: 'succeeded',
-        feedbackRequired: false,
-      },
       aiFeedback: {
         sourceKind: 'ai_feedback',
         businessStatus: 'achieved',
@@ -236,9 +226,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.traces[1]).not.toHaveProperty(removedSyntheticPayloadKey);
     expect(res.body.data.traces[1]).not.toHaveProperty('businessSuccess');
     expect(res.body.data.traces[1]).not.toHaveProperty('aiFeedbackScore');
-    expect(res.body.data.traces[1].statusView).not.toHaveProperty('businessStatus');
-    expect(res.body.data.traces[1].statusView).not.toHaveProperty('businessStatusSource');
-    expect(res.body.data.traces[1].statusView).not.toHaveProperty('aiScore');
+    expect(res.body.data.traces[1]).not.toHaveProperty('statusView');
     expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('rawInput');
     expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('response');
   });
@@ -275,12 +263,9 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.traces[0]).toMatchObject({
       traceId: trace.traceId,
       aiFeedback: null,
-      statusView: {
-        feedbackRequired: true,
-      },
     });
     expect(res.body.data.traces[0]).not.toHaveProperty('aiFeedbackScore');
-    expect(res.body.data.traces[0].statusView).not.toHaveProperty('aiScore');
+    expect(res.body.data.traces[0]).not.toHaveProperty('statusView');
   });
 
   test('GET /memory/mke/traces exposes AI feedback without legacy business status', async () => {
@@ -327,10 +312,6 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
 
     expect(res.body.data.traces[0]).toMatchObject({
       traceId: trace.traceId,
-      statusView: {
-        executionStatus: 'succeeded',
-        feedbackRequired: false,
-      },
       aiFeedback: {
         sourceKind: 'ai_feedback',
         businessStatus: 'achieved',
@@ -341,9 +322,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     });
     expect(res.body.data.traces[0]).not.toHaveProperty('businessSuccess');
     expect(res.body.data.traces[0]).not.toHaveProperty('aiFeedbackScore');
-    expect(res.body.data.traces[0].statusView).not.toHaveProperty('businessStatus');
-    expect(res.body.data.traces[0].statusView).not.toHaveProperty('businessStatusSource');
-    expect(res.body.data.traces[0].statusView).not.toHaveProperty('aiScore');
+    expect(res.body.data.traces[0]).not.toHaveProperty('statusView');
   });
 
   test('GET /memory/mke/knowledge returns sanitized knowledge summaries', async () => {
