@@ -2,87 +2,164 @@
   <section class="mkep-tab mke-data-tab" :class="`mke-data-tab--${agentTheme}`">
     <div class="mke-shell">
       <div class="mke-controls" role="status" aria-live="polite">
-        <div class="mke-tabs" role="tablist" aria-label="MKE data tables">
-          <button
-            v-for="tab in tabs"
-            :key="tab.id"
-            type="button"
-            class="mke-tab-button"
-            :class="{ 'mke-tab-button--active': activeTab === tab.id }"
-            role="tab"
-            :aria-selected="activeTab === tab.id"
-            @click="setActiveTab(tab.id)"
-          >
-            <span>{{ tab.label }}</span>
-            <strong>{{ tab.total }}</strong>
-          </button>
-        </div>
+        <template v-if="activeTab === 'object'">
+          <header class="mke-object-header">
+            <div class="mke-object-title">
+              <span class="mke-object-logo" aria-hidden="true">
+                <i-lucide-database />
+              </span>
+              <div>
+                <h2>Tabrix · 对象库</h2>
+                <p>浏览器标签页、页面对象、可操作目标和生命周期现场</p>
+              </div>
+            </div>
+            <div class="mke-object-header__actions">
+              <button
+                type="button"
+                class="mke-icon-button"
+                :disabled="loading"
+                title="刷新对象库"
+                @click="refreshAll()"
+              >
+                <i-lucide-refresh-cw aria-hidden="true" />
+                <span class="mke-visually-hidden">刷新对象库</span>
+              </button>
+              <button
+                type="button"
+                class="mke-icon-button"
+                :class="{ 'mke-icon-button--active': personalBrowserStateStorageEnabled }"
+                :aria-pressed="personalBrowserStateStorageEnabled"
+                :disabled="preferenceLoading"
+                :title="
+                  personalBrowserStateStorageEnabled
+                    ? '个人浏览状态存储已开启'
+                    : '个人浏览状态存储已关闭'
+                "
+                @click="togglePersonalBrowserStateStorage"
+              >
+                <i-lucide-shield-check aria-hidden="true" />
+                <span class="mke-visually-hidden">切换个人浏览状态存储</span>
+              </button>
+            </div>
+          </header>
 
-        <div v-if="activeTab === 'object'" class="mke-object-storage">
-          <div class="mke-object-storage__copy">
-            <strong>存储个人浏览状态</strong>
-            <span>{{
-              personalBrowserStateStorageEnabled
-                ? '已开启，保存完整当前路由'
-                : '已关闭，仅保存最小页面身份'
-            }}</span>
+          <div class="mke-object-summary-bar" role="status" aria-live="polite">
+            <div class="mke-object-summary-card mke-object-summary-card--live">
+              <span class="mke-object-summary-card__dot" aria-hidden="true"></span>
+              <strong>{{ objectLibraryView.summary.liveLabel }}</strong>
+            </div>
+            <div class="mke-object-summary-card">
+              <i-lucide-panel-top aria-hidden="true" />
+              <span>已打开</span>
+              <strong>{{ objectLibraryView.summary.openWebPages }}</strong>
+            </div>
+            <div class="mke-object-summary-card">
+              <i-lucide-clock-3 aria-hidden="true" />
+              <span>最近关闭</span>
+              <strong>{{ objectLibraryView.summary.closedWebPages }}</strong>
+            </div>
+            <div class="mke-object-summary-card">
+              <i-lucide-mouse-pointer-click aria-hidden="true" />
+              <span>可操作</span>
+              <strong>{{ objectLibraryView.summary.actions }}</strong>
+            </div>
           </div>
-          <div class="mke-object-storage__actions">
+
+          <div class="mke-object-toolbar">
+            <div class="mke-object-toolbar__title">
+              <h3>当前网页</h3>
+              <span
+                :title="
+                  personalBrowserStateStorageEnabled
+                    ? '已开启，保存完整当前路由'
+                    : '已关闭，仅保存最小页面身份'
+                "
+              >
+                {{
+                  personalBrowserStateStorageEnabled ? '个人状态存储已开启' : '个人状态存储已关闭'
+                }}
+              </span>
+            </div>
+            <label class="mke-search mke-object-search">
+              <span class="mke-visually-hidden">搜索当前网页对象</span>
+              <svg
+                class="mke-search-icon"
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+              <input
+                v-model.trim="searchQuery"
+                type="search"
+                aria-label="搜索对象库网页"
+                placeholder="搜索网页、对象、功能、网址、状态"
+              />
+            </label>
+            <button type="button" class="mke-filter-button" title="当前按最近活跃排序">
+              <i-lucide-arrow-down-wide-narrow aria-hidden="true" />
+              <span>最近活跃</span>
+            </button>
+          </div>
+        </template>
+
+        <template v-else>
+          <div class="mke-tabs" role="tablist" aria-label="MKE data tables">
+            <button
+              v-for="tab in tabs"
+              :key="tab.id"
+              type="button"
+              class="mke-tab-button"
+              :class="{ 'mke-tab-button--active': activeTab === tab.id }"
+              role="tab"
+              :aria-selected="activeTab === tab.id"
+              @click="setActiveTab(tab.id)"
+            >
+              <span>{{ tab.label }}</span>
+              <strong>{{ tab.total }}</strong>
+            </button>
+          </div>
+
+          <div class="mke-toolbar">
+            <label class="mke-search">
+              <span class="mke-visually-hidden">搜索当前列表</span>
+              <svg
+                class="mke-search-icon"
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+              <input
+                v-model.trim="searchQuery"
+                type="search"
+                aria-label="Search loaded MKE rows"
+                placeholder="搜索主题、对象、方法、网址、状态"
+              />
+            </label>
             <button
               type="button"
-              class="mke-button mke-clear-button"
-              :disabled="loading || preferenceLoading || totals.object === 0"
-              title="只清除对象库，不影响记忆库、知识库、经验库"
-              @click="clearObjectLibrary"
+              class="mke-button mke-refresh-button"
+              :disabled="loading"
+              title="刷新当前数据"
+              @click="refreshAll()"
             >
-              清除对象库
-            </button>
-            <button
-              type="button"
-              class="mke-switch"
-              :class="{ 'mke-switch--on': personalBrowserStateStorageEnabled }"
-              :aria-pressed="personalBrowserStateStorageEnabled"
-              :disabled="preferenceLoading"
-              @click="togglePersonalBrowserStateStorage"
-            >
-              <span>{{ personalBrowserStateStorageEnabled ? '开' : '关' }}</span>
+              {{ loading ? '刷新中' : '刷新' }}
             </button>
           </div>
-        </div>
-
-        <div class="mke-toolbar">
-          <label class="mke-search">
-            <span class="mke-visually-hidden">搜索当前列表</span>
-            <svg
-              class="mke-search-icon"
-              aria-hidden="true"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <path d="m21 21-4.3-4.3" />
-            </svg>
-            <input
-              v-model.trim="searchQuery"
-              type="search"
-              aria-label="Search loaded MKE rows"
-              placeholder="搜索主题、对象、方法、网址、状态"
-            />
-          </label>
-          <button
-            type="button"
-            class="mke-button mke-refresh-button"
-            :disabled="loading"
-            title="刷新当前数据"
-            @click="refreshAll()"
-          >
-            {{ loading ? '刷新中' : '刷新' }}
-          </button>
-        </div>
+        </template>
 
         <p v-if="searchQuery" class="mke-filter-note">搜索仅覆盖已加载记录，列表按最新时间倒序。</p>
       </div>
@@ -107,128 +184,221 @@
         </div>
 
         <section v-else-if="activeTab === 'object'" class="mke-object-workspace">
-          <div class="mke-object-scene" role="status" aria-live="polite">
-            <div class="mke-object-scene__copy">
-              <span>{{ objectLibraryView.summary.liveLabel }}</span>
-              <strong>当前网页现场</strong>
-            </div>
-            <div class="mke-object-scene__metrics">
-              <span>已打开 {{ objectLibraryView.summary.openWebPages }}</span>
-              <span>最近关闭 {{ objectLibraryView.summary.closedWebPages }}</span>
-              <span>可操作 {{ objectLibraryView.summary.actions }}</span>
-            </div>
-          </div>
-
-          <div class="mke-object-layout">
-            <ol class="mke-webpage-list" aria-label="当前网页列表">
-              <li v-for="webPage in filteredObjectWebPages" :key="webPage.id">
-                <button
-                  type="button"
-                  class="mke-webpage-card"
-                  :class="{
-                    'mke-webpage-card--active': selectedObjectWebPage?.id === webPage.id,
-                    'mke-webpage-card--closed': webPage.isClosed,
-                  }"
-                  :aria-pressed="selectedObjectWebPage?.id === webPage.id"
-                  @click="selectObjectWebPage(webPage.id)"
-                >
-                  <span class="mke-webpage-card__bar" aria-hidden="true"></span>
-                  <span class="mke-webpage-card__main">
-                    <span class="mke-webpage-card__title" :title="webPage.title">{{
-                      webPage.title
-                    }}</span>
-                    <span class="mke-webpage-card__location" :title="webPage.location">{{
-                      webPage.location
-                    }}</span>
-                    <span class="mke-webpage-card__metrics">
-                      <span v-for="metric in webPage.metrics" :key="metric.label">
-                        {{ metric.label }} {{ metric.value }}
-                      </span>
-                    </span>
-                  </span>
-                  <span class="mke-webpage-card__state">
-                    <span class="mke-status" :class="`mke-status--${webPage.lifecycleTone}`">
-                      {{ webPage.lifecycleLabel }}
-                    </span>
-                    <small>{{ webPage.activityLabel }}</small>
-                  </span>
-                </button>
-              </li>
-            </ol>
-
-            <article v-if="selectedObjectWebPage" class="mke-webpage-detail">
-              <header class="mke-webpage-detail__header">
-                <div>
-                  <span>选中网页</span>
-                  <h3 :title="selectedObjectWebPage.title">{{ selectedObjectWebPage.title }}</h3>
-                  <p :title="selectedObjectWebPage.location">{{
-                    selectedObjectWebPage.location
-                  }}</p>
-                </div>
-                <span
-                  class="mke-status"
-                  :class="`mke-status--${selectedObjectWebPage.lifecycleTone}`"
-                >
-                  {{ selectedObjectWebPage.lifecycleLabel }}
+          <ol class="mke-webpage-list" aria-label="当前网页列表">
+            <li v-for="webPage in filteredObjectWebPages" :key="webPage.id">
+              <button
+                type="button"
+                class="mke-webpage-row"
+                :class="{
+                  'mke-webpage-row--active': selectedObjectWebPage?.id === webPage.id,
+                  'mke-webpage-row--closed': webPage.isClosed,
+                }"
+                :aria-pressed="selectedObjectWebPage?.id === webPage.id"
+                @click="selectObjectWebPage(webPage.id)"
+              >
+                <span class="mke-webpage-row__icon" aria-hidden="true">
+                  <i-lucide-globe-2 v-if="!webPage.isActive && !webPage.isClosed" />
+                  <i-lucide-circle-check v-else-if="webPage.isActive" />
+                  <i-lucide-circle-slash v-else />
                 </span>
-              </header>
-
-              <div class="mke-webpage-sections">
-                <section
-                  v-for="section in selectedObjectWebPage.sections"
-                  :key="section.id"
-                  class="mke-webpage-section"
+                <span class="mke-webpage-row__copy">
+                  <strong :title="webPage.title">{{ webPage.title }}</strong>
+                  <span :title="webPage.location">{{ webPage.location }}</span>
+                </span>
+                <span class="mke-webpage-row__metrics" aria-label="网页对象统计">
+                  <small v-for="metric in webPage.metrics" :key="metric.label">
+                    {{ metric.label }} {{ metric.value }}
+                  </small>
+                </span>
+                <span
+                  class="mke-status mke-webpage-row__status"
+                  :class="`mke-status--${webPage.lifecycleTone}`"
                 >
-                  <div class="mke-webpage-section__header">
-                    <strong>{{ section.title }}</strong>
-                    <span>{{ section.badge }}</span>
-                  </div>
-                  <p v-if="section.items.length === 0" class="mke-webpage-section__empty">
-                    {{ section.emptyText }}
-                  </p>
-                  <div v-else class="mke-webpage-section__items">
-                    <span
-                      v-for="item in section.items"
-                      :key="`${section.id}-${item.label}-${item.value}`"
-                      class="mke-webpage-section__item"
-                      :class="item.tone ? `mke-webpage-section__item--${item.tone}` : ''"
-                    >
-                      <em>{{ item.label }}</em>
-                      <strong>{{ item.value }}</strong>
-                    </span>
-                  </div>
-                </section>
-              </div>
+                  {{ webPage.lifecycleLabel }}
+                </span>
+                <i-lucide-more-vertical class="mke-webpage-row__more" aria-hidden="true" />
+              </button>
+            </li>
+          </ol>
 
-              <div class="mke-record-actions mke-webpage-detail__actions">
-                <button
-                  type="button"
-                  class="mke-detail-button"
-                  :aria-expanded="isRecordExpanded(selectedObjectWebPage.id)"
-                  :aria-controls="jsonPanelId(selectedObjectWebPage.id)"
-                  @click="toggleRecordJson(selectedObjectWebPage.id)"
-                >
-                  {{ isRecordExpanded(selectedObjectWebPage.id) ? '收起' : '详情' }}
-                </button>
-                <time class="mke-record-time">{{
-                  formatDate(selectedObjectWebPage.updatedAt)
-                }}</time>
-                <button
-                  type="button"
-                  class="mke-detail-button"
-                  @click="copyObjectWebPageJson(selectedObjectWebPage)"
-                >
-                  复制 JSON
-                </button>
+          <article v-if="selectedObjectWebPage" class="mke-webpage-detail">
+            <header class="mke-webpage-detail__header">
+              <span class="mke-webpage-detail__icon" aria-hidden="true">
+                <i-lucide-globe-2 />
+              </span>
+              <div>
+                <span>选中网页</span>
+                <h3 :title="selectedObjectWebPage.title">{{ selectedObjectWebPage.title }}</h3>
+                <p :title="selectedObjectWebPage.location">{{ selectedObjectWebPage.location }}</p>
               </div>
+              <button
+                type="button"
+                class="mke-icon-button mke-webpage-detail__close"
+                title="回到 MKE 总览"
+                @click="setActiveTab('memory')"
+              >
+                <i-lucide-x aria-hidden="true" />
+                <span class="mke-visually-hidden">回到 MKE 总览</span>
+              </button>
+            </header>
 
-              <div v-if="isRecordExpanded(selectedObjectWebPage.id)" class="mke-json-panel">
-                <pre :id="jsonPanelId(selectedObjectWebPage.id)" class="mke-json-block">{{
-                  formatObjectWebPageJson(selectedObjectWebPage)
-                }}</pre>
+            <nav class="mke-object-detail-tabs" aria-label="对象库详情分组">
+              <button
+                v-for="section in selectedObjectWebPage.sections"
+                :key="section.id"
+                type="button"
+                :class="{ 'mke-object-detail-tab--active': section.id === 'pageObjects' }"
+              >
+                <i-lucide-layout-grid v-if="section.id === 'pageObjects'" aria-hidden="true" />
+                <i-lucide-mouse-pointer-click
+                  v-else-if="section.id === 'actions'"
+                  aria-hidden="true"
+                />
+                <i-lucide-database v-else-if="section.id === 'dataApi'" aria-hidden="true" />
+                <i-lucide-history v-else aria-hidden="true" />
+                <span>{{ section.title }}</span>
+                <strong>{{ section.badge }}</strong>
+              </button>
+            </nav>
+
+            <section class="mke-object-count-grid" aria-label="页面对象">
+              <div
+                v-for="item in objectSectionPreview(selectedObjectWebPage, 'pageObjects', 4)"
+                :key="`page-object-${item.label}`"
+                class="mke-object-count-card"
+              >
+                <span class="mke-object-count-card__icon" aria-hidden="true">
+                  <i-lucide-layout-grid />
+                </span>
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value.replace(' 个', '') }}</strong>
               </div>
-            </article>
-          </div>
+              <p
+                v-if="objectSection(selectedObjectWebPage, 'pageObjects')?.items.length === 0"
+                class="mke-object-empty-line"
+              >
+                {{ objectSection(selectedObjectWebPage, 'pageObjects')?.emptyText }}
+              </p>
+            </section>
+
+            <section class="mke-object-strip" aria-label="可操作功能">
+              <div class="mke-object-strip__header">
+                <strong>可操作功能</strong>
+                <span>{{ objectSection(selectedObjectWebPage, 'actions')?.badge }}</span>
+              </div>
+              <div
+                v-if="objectSection(selectedObjectWebPage, 'actions')?.items.length"
+                class="mke-object-action-list"
+              >
+                <span
+                  v-for="item in objectSectionPreview(selectedObjectWebPage, 'actions', 5)"
+                  :key="`action-${item.label}-${item.value}`"
+                  class="mke-object-action-chip"
+                  :class="item.tone ? `mke-object-action-chip--${item.tone}` : ''"
+                >
+                  <i-lucide-mouse-pointer-click aria-hidden="true" />
+                  {{ item.label }}
+                  <strong>{{ item.value }}</strong>
+                </span>
+              </div>
+              <p v-else class="mke-object-empty-line">
+                {{ objectSection(selectedObjectWebPage, 'actions')?.emptyText }}
+              </p>
+            </section>
+
+            <section class="mke-object-strip" aria-label="数据/API 接口">
+              <div class="mke-object-strip__header">
+                <strong>数据/API 接口</strong>
+                <span>{{ objectSection(selectedObjectWebPage, 'dataApi')?.badge }}</span>
+              </div>
+              <div
+                v-if="objectSection(selectedObjectWebPage, 'dataApi')?.items.length"
+                class="mke-object-api-list"
+              >
+                <div
+                  v-for="item in objectSectionPreview(selectedObjectWebPage, 'dataApi', 6)"
+                  :key="`api-${item.label}-${item.value}`"
+                  class="mke-object-api-row"
+                >
+                  <span>DATA</span>
+                  <strong>{{ item.label }}</strong>
+                  <em>{{ item.value }}</em>
+                </div>
+              </div>
+              <p v-else class="mke-object-empty-line">
+                {{ objectSection(selectedObjectWebPage, 'dataApi')?.emptyText }}
+              </p>
+            </section>
+
+            <section class="mke-object-strip" aria-label="生命周期状态">
+              <div class="mke-object-strip__header">
+                <strong>生命周期状态</strong>
+                <time>{{ formatDate(selectedObjectWebPage.updatedAt) }}</time>
+              </div>
+              <ol class="mke-object-lifecycle">
+                <li
+                  v-for="item in objectSectionPreview(selectedObjectWebPage, 'lifecycle', 5)"
+                  :key="`lifecycle-${item.label}-${item.value}`"
+                  :class="item.tone ? `mke-object-lifecycle--${item.tone}` : ''"
+                >
+                  <span aria-hidden="true"></span>
+                  <strong>{{ item.value }}</strong>
+                  <small>{{ item.label }}</small>
+                </li>
+              </ol>
+            </section>
+
+            <footer class="mke-object-footer-actions">
+              <button type="button" class="mke-object-footer-button" @click="refreshAll()">
+                <i-lucide-refresh-cw aria-hidden="true" />
+                刷新现场
+              </button>
+              <button
+                type="button"
+                class="mke-object-footer-button"
+                :disabled="loading || preferenceLoading || totals.object === 0"
+                title="只清除对象库，不影响记忆库、知识库、经验库"
+                @click="clearObjectLibrary"
+              >
+                <i-lucide-trash-2 aria-hidden="true" />
+                清除对象库
+              </button>
+              <button
+                type="button"
+                class="mke-object-footer-button mke-object-footer-button--primary"
+                @click="setActiveTab('memory')"
+              >
+                <i-lucide-database aria-hidden="true" />
+                打开 MKE
+              </button>
+            </footer>
+
+            <div class="mke-record-actions mke-webpage-detail__actions">
+              <button
+                type="button"
+                class="mke-detail-button"
+                :aria-expanded="isRecordExpanded(selectedObjectWebPage.id)"
+                :aria-controls="jsonPanelId(selectedObjectWebPage.id)"
+                @click="toggleRecordJson(selectedObjectWebPage.id)"
+              >
+                {{ isRecordExpanded(selectedObjectWebPage.id) ? '收起' : '详情' }}
+              </button>
+              <time class="mke-record-time">{{ formatDate(selectedObjectWebPage.updatedAt) }}</time>
+              <button
+                type="button"
+                class="mke-detail-button"
+                @click="copyObjectWebPageJson(selectedObjectWebPage)"
+              >
+                复制 JSON
+              </button>
+            </div>
+
+            <div v-if="isRecordExpanded(selectedObjectWebPage.id)" class="mke-json-panel">
+              <pre :id="jsonPanelId(selectedObjectWebPage.id)" class="mke-json-block">{{
+                formatObjectWebPageJson(selectedObjectWebPage)
+              }}</pre>
+            </div>
+          </article>
         </section>
 
         <ol v-else class="mke-records" :aria-label="`${activeTableInfo.kicker} rows`">
@@ -348,7 +518,11 @@ import {
   updateMkeObjectStoragePreferences,
 } from '../../../common/memory-api-client';
 import { useAgentTheme } from '../../shared/composables/usePopupTheme';
-import { buildMkeObjectLibraryView, type MkeObjectWebPageView } from './mke-object-library-view';
+import {
+  buildMkeObjectLibraryView,
+  type MkeObjectViewSection,
+  type MkeObjectWebPageView,
+} from './mke-object-library-view';
 import { resolveInitialMkeDataTabFromLocation, type MkeDataTabId } from './mke-data-tab-url';
 
 const MKE_AUTO_REFRESH_MS = 5000;
@@ -357,6 +531,7 @@ type ActiveTab = MkeDataTabId;
 type StatusTone = 'good' | 'warn' | 'neutral';
 type TraceBusinessStatus = NonNullable<MkeMemoryTraceSummary['statusView']>['businessStatus'];
 type TraceExecutionStatus = NonNullable<MkeMemoryTraceSummary['statusView']>['executionStatus'];
+type MkeObjectSectionId = MkeObjectViewSection['id'];
 
 interface RecordFact {
   label: string;
@@ -496,6 +671,21 @@ function setActiveTab(tab: ActiveTab): void {
 
 function selectObjectWebPage(id: string): void {
   selectedObjectWebPageId.value = id;
+}
+
+function objectSection(
+  webPage: MkeObjectWebPageView,
+  sectionId: MkeObjectSectionId,
+): MkeObjectViewSection | null {
+  return webPage.sections.find((section) => section.id === sectionId) ?? null;
+}
+
+function objectSectionPreview(
+  webPage: MkeObjectWebPageView,
+  sectionId: MkeObjectSectionId,
+  limit: number,
+): MkeObjectViewSection['items'] {
+  return objectSection(webPage, sectionId)?.items.slice(0, limit) ?? [];
 }
 
 function syncMkeDataTabUrl(tab: ActiveTab): void {
@@ -1380,19 +1570,19 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 
 .mke-data-tab--dark-console,
 :global(.sidepanel-root[data-agent-theme='dark-console']) .mke-data-tab {
-  --mke-bg: transparent;
-  --mke-surface: rgba(6, 18, 36, 0.9);
-  --mke-surface-2: rgba(9, 25, 48, 0.88);
-  --mke-surface-3: rgba(4, 13, 28, 0.94);
-  --mke-border: rgba(56, 189, 248, 0.26);
-  --mke-border-strong: rgba(56, 189, 248, 0.46);
-  --mke-text: #dbeafe;
-  --mke-muted: #94b9dd;
-  --mke-soft: #c7e6ff;
-  --mke-accent: #67e8f9;
-  --mke-accent-bg: rgba(34, 211, 238, 0.12);
-  --mke-active-ring: rgba(34, 211, 238, 0.24);
-  --mke-shadow: 0 14px 28px -24px rgba(34, 211, 238, 0.58);
+  --mke-bg: #08111f;
+  --mke-surface: #0d1726;
+  --mke-surface-2: #111d2e;
+  --mke-surface-3: #0a1422;
+  --mke-border: rgba(148, 163, 184, 0.2);
+  --mke-border-strong: rgba(148, 163, 184, 0.34);
+  --mke-text: #e2e8f0;
+  --mke-muted: #94a3b8;
+  --mke-soft: #cbd5e1;
+  --mke-accent: #60a5fa;
+  --mke-accent-bg: rgba(37, 99, 235, 0.16);
+  --mke-active-ring: rgba(96, 165, 250, 0.24);
+  --mke-shadow: 0 14px 28px -24px rgba(0, 0, 0, 0.72);
   --mke-success-bg: rgba(22, 101, 52, 0.34);
   --mke-success-text: #86efac;
   --mke-warn-bg: rgba(127, 29, 29, 0.36);
@@ -1533,74 +1723,197 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   margin: -2px 0 0;
 }
 
-.mke-object-storage {
+.mke-object-header {
   align-items: center;
-  background: var(--mke-surface-2);
-  border: 1px solid var(--mke-border);
-  border-radius: 8px;
-  color: var(--mke-muted);
   display: flex;
-  gap: 10px;
+  gap: 12px;
   justify-content: space-between;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 2px 0 0;
 }
 
-.mke-object-storage__copy {
+.mke-object-title {
+  align-items: center;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  gap: 10px;
   min-width: 0;
 }
 
-.mke-object-storage__actions {
+.mke-object-logo {
+  align-items: center;
+  background: #f7d7ca;
+  border-radius: 8px;
+  color: #c65d3d;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+}
+
+.mke-object-logo svg,
+.mke-icon-button svg,
+.mke-filter-button svg,
+.mke-object-footer-button svg {
+  height: 16px;
+  width: 16px;
+}
+
+.mke-object-title h2 {
+  color: var(--mke-text);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.mke-object-title p {
+  color: var(--mke-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  margin: 3px 0 0;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mke-object-header__actions {
   align-items: center;
   display: flex;
   flex: 0 0 auto;
   gap: 8px;
 }
 
-.mke-object-storage strong {
-  color: var(--mke-text);
-  font-size: var(--mke-font-sm);
-  font-weight: var(--mke-weight-title);
-}
-
-.mke-object-storage span {
-  font-size: var(--mke-font-xs);
-  line-height: 1.35;
-}
-
-.mke-switch {
+.mke-icon-button {
   align-items: center;
-  background: var(--mke-neutral-bg);
-  border: 1px solid var(--mke-border-strong);
-  border-radius: 999px;
-  color: var(--mke-neutral-text);
+  background: var(--mke-surface);
+  border: 1px solid var(--mke-border);
+  border-radius: 8px;
+  color: var(--mke-soft);
   cursor: pointer;
   display: inline-flex;
-  flex: 0 0 auto;
-  font-size: var(--mke-font-xs);
-  font-weight: var(--mke-weight-strong);
-  height: 28px;
+  height: 34px;
   justify-content: center;
-  min-width: 46px;
-  padding: 0 10px;
+  padding: 0;
+  width: 34px;
 }
 
-.mke-switch--on {
-  background: var(--mke-accent-bg);
+.mke-icon-button--active,
+.mke-icon-button:hover {
   border-color: var(--mke-border-strong);
   color: var(--mke-accent);
 }
 
-.mke-switch:disabled {
+.mke-icon-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
 
-.mke-clear-button {
-  min-height: 28px;
+.mke-object-summary-bar {
+  background: var(--mke-surface);
+  border: 1px solid var(--mke-border);
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: minmax(126px, 1.2fr) repeat(3, minmax(76px, 1fr));
+  min-width: 0;
+  overflow: hidden;
+}
+
+.mke-object-summary-card {
+  align-items: center;
+  color: var(--mke-soft);
+  display: flex;
+  gap: 7px;
+  justify-content: center;
+  min-height: 48px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.mke-object-summary-card + .mke-object-summary-card {
+  border-left: 1px solid var(--mke-border);
+}
+
+.mke-object-summary-card span {
+  color: var(--mke-muted);
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mke-object-summary-card strong {
+  color: var(--mke-text);
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.mke-object-summary-card svg {
+  color: var(--mke-muted);
+  flex: 0 0 auto;
+  height: 16px;
+  width: 16px;
+}
+
+.mke-object-summary-card--live {
+  justify-content: flex-start;
+}
+
+.mke-object-summary-card__dot {
+  background: #10b981;
+  border-radius: 50%;
+  box-shadow: 0 0 0 5px rgba(16, 185, 129, 0.12);
+  flex: 0 0 auto;
+  height: 8px;
+  width: 8px;
+}
+
+.mke-object-toolbar {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(96px, auto) minmax(160px, 1fr) auto;
+  min-width: 0;
+}
+
+.mke-object-toolbar__title {
+  min-width: 0;
+}
+
+.mke-object-toolbar__title h3 {
+  color: var(--mke-text);
+  font-size: 14px;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.mke-object-toolbar__title span {
+  color: var(--mke-muted);
+  display: block;
+  font-size: 10px;
+  line-height: 1.25;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mke-filter-button {
+  align-items: center;
+  background: var(--mke-surface);
+  border: 1px solid var(--mke-border);
+  border-radius: 8px;
+  color: var(--mke-soft);
+  cursor: default;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 650;
+  height: 34px;
   padding: 0 10px;
   white-space: nowrap;
 }
@@ -1703,121 +2016,77 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 .mke-object-workspace {
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 10px;
   min-width: 0;
   width: 100%;
-}
-
-.mke-object-scene {
-  align-items: center;
-  background: var(--mke-surface);
-  border: 1px solid var(--mke-border);
-  border-radius: 8px;
-  display: flex;
-  gap: 10px;
-  justify-content: space-between;
-  min-width: 0;
-  padding: 9px 10px;
-}
-
-.mke-object-scene__copy {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.mke-object-scene__copy span {
-  color: var(--mke-accent);
-  font-size: var(--mke-font-xs);
-  font-weight: var(--mke-weight-strong);
-}
-
-.mke-object-scene__copy strong {
-  color: var(--mke-text);
-  font-size: var(--mke-font-sm);
-}
-
-.mke-object-scene__metrics {
-  display: flex;
-  flex: 0 1 auto;
-  flex-wrap: wrap;
-  gap: 5px;
-  justify-content: flex-end;
-  min-width: 0;
-}
-
-.mke-object-scene__metrics span {
-  background: var(--mke-surface-2);
-  border: 1px solid var(--mke-border);
-  border-radius: 999px;
-  color: var(--mke-soft);
-  font-size: var(--mke-font-xs);
-  font-weight: var(--mke-weight-label);
-  padding: 4px 7px;
-}
-
-.mke-object-layout {
-  display: grid;
-  gap: 9px;
-  grid-template-columns: minmax(156px, 0.9fr) minmax(190px, 1.1fr);
-  min-width: 0;
 }
 
 .mke-webpage-list {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
   list-style: none;
   margin: 0;
   min-width: 0;
   padding: 0;
 }
 
-.mke-webpage-card {
-  align-items: stretch;
+.mke-webpage-row {
+  align-items: center;
   background: var(--mke-surface);
   border: 1px solid var(--mke-border);
   border-radius: 8px;
   color: var(--mke-text);
   cursor: pointer;
   display: grid;
-  gap: 8px;
-  grid-template-columns: 3px minmax(0, 1fr);
+  gap: 10px;
+  grid-template-columns: 34px minmax(110px, 1fr) minmax(92px, auto) auto 18px;
   min-width: 0;
-  padding: 9px;
+  padding: 10px;
   text-align: left;
   width: 100%;
 }
 
-.mke-webpage-card--active {
+.mke-webpage-row--active {
   border-color: var(--mke-accent);
-  box-shadow: inset 0 0 0 1px var(--mke-active-ring);
+  box-shadow: inset 3px 0 0 var(--mke-accent);
 }
 
-.mke-webpage-card--closed {
-  opacity: 0.82;
+.mke-webpage-row--closed {
+  opacity: 0.72;
 }
 
-.mke-webpage-card__bar {
-  background: var(--mke-border-strong);
-  border-radius: 999px;
+.mke-webpage-row__icon {
+  align-items: center;
+  background: var(--mke-surface-2);
+  border-radius: 8px;
+  color: var(--mke-muted);
+  display: flex;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
 }
 
-.mke-webpage-card--active .mke-webpage-card__bar {
-  background: var(--mke-accent);
+.mke-webpage-row--active .mke-webpage-row__icon {
+  background: var(--mke-accent-bg);
+  color: var(--mke-accent);
 }
 
-.mke-webpage-card__main {
+.mke-webpage-row__icon svg {
+  height: 19px;
+  width: 19px;
+}
+
+.mke-webpage-row__copy {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
 }
 
-.mke-webpage-card__title {
+.mke-webpage-row__copy strong {
   color: var(--mke-text);
-  font-size: var(--mke-font-sm);
+  font-size: 13px;
   font-weight: var(--mke-weight-title);
   line-height: 1.25;
   overflow: hidden;
@@ -1825,68 +2094,80 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   white-space: nowrap;
 }
 
-.mke-webpage-card__location {
+.mke-webpage-row__copy span {
   color: var(--mke-muted);
-  font-size: var(--mke-font-xs);
+  font-size: 12px;
   line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.mke-webpage-card__metrics {
+.mke-webpage-row__metrics {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-}
-
-.mke-webpage-card__metrics span {
-  color: var(--mke-soft);
-  font-size: 10px;
-  line-height: 1.2;
-}
-
-.mke-webpage-card__state {
-  align-items: center;
-  display: flex;
   gap: 5px;
-  justify-content: space-between;
-  margin-top: 2px;
+  justify-content: flex-end;
   min-width: 0;
 }
 
-.mke-webpage-card__state small {
-  color: var(--mke-muted);
+.mke-webpage-row__metrics small {
+  background: var(--mke-surface-2);
+  border: 1px solid var(--mke-border);
+  border-radius: 999px;
+  color: var(--mke-soft);
   font-size: 10px;
   line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  padding: 3px 6px;
   white-space: nowrap;
+}
+
+.mke-webpage-row__more {
+  color: var(--mke-muted);
+  height: 16px;
+  width: 16px;
 }
 
 .mke-webpage-detail {
   background: var(--mke-surface);
   border: 1px solid var(--mke-border);
   border-radius: 8px;
+  box-shadow: var(--mke-shadow);
   min-width: 0;
-  padding: 11px;
+  padding: 12px;
 }
 
 .mke-webpage-detail__header {
-  align-items: flex-start;
+  align-items: center;
   border-bottom: 1px solid var(--mke-border);
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   min-width: 0;
-  padding-bottom: 9px;
+  padding-bottom: 11px;
 }
 
 .mke-webpage-detail__header > div {
   min-width: 0;
 }
 
-.mke-webpage-detail__header span:first-child {
+.mke-webpage-detail__icon {
+  align-items: center;
+  background: var(--mke-surface-2);
+  border-radius: 8px;
+  color: var(--mke-muted);
+  display: flex;
+  height: 40px;
+  justify-content: center;
+  width: 40px;
+}
+
+.mke-webpage-detail__icon svg {
+  height: 22px;
+  width: 22px;
+}
+
+.mke-webpage-detail__header > div > span {
   color: var(--mke-muted);
   display: block;
   font-size: var(--mke-font-xs);
@@ -1896,7 +2177,7 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 
 .mke-webpage-detail__header h3 {
   color: var(--mke-text);
-  font-size: var(--mke-font-md);
+  font-size: 16px;
   line-height: 1.25;
   margin: 0;
   overflow: hidden;
@@ -1906,96 +2187,313 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 
 .mke-webpage-detail__header p {
   color: var(--mke-muted);
-  font-size: var(--mke-font-xs);
+  font-size: 12px;
   line-height: 1.3;
   margin: 4px 0 0;
   overflow-wrap: anywhere;
 }
 
-.mke-webpage-sections {
+.mke-webpage-detail__close {
+  color: var(--mke-muted);
+}
+
+.mke-object-detail-tabs {
+  border-bottom: 1px solid var(--mke-border);
   display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin-top: 9px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0 -12px;
 }
 
-.mke-webpage-section {
-  background: var(--mke-surface-2);
-  border: 1px solid var(--mke-border);
-  border-radius: 8px;
-  min-width: 0;
-  padding: 8px;
-}
-
-.mke-webpage-section__header {
+.mke-object-detail-tabs button {
   align-items: center;
+  background: var(--mke-surface-2);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--mke-soft);
+  cursor: default;
   display: flex;
   gap: 6px;
-  justify-content: space-between;
-  margin-bottom: 7px;
+  justify-content: center;
+  min-width: 0;
+  padding: 10px 6px 9px;
 }
 
-.mke-webpage-section__header strong {
-  color: var(--mke-text);
-  font-size: var(--mke-font-sm);
+.mke-object-detail-tabs button + button {
+  border-left: 1px solid var(--mke-border);
 }
 
-.mke-webpage-section__header span {
+.mke-object-detail-tabs svg {
+  height: 15px;
+  width: 15px;
+}
+
+.mke-object-detail-tabs span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mke-object-detail-tabs strong {
   color: var(--mke-muted);
-  font-size: var(--mke-font-xs);
-  font-weight: var(--mke-weight-label);
+  font-size: 10px;
+  font-weight: 650;
 }
 
-.mke-webpage-section__empty {
-  color: var(--mke-muted);
-  font-size: var(--mke-font-xs);
-  line-height: 1.4;
-  margin: 0;
+.mke-object-detail-tab--active {
+  border-bottom-color: var(--mke-accent) !important;
+  color: var(--mke-accent) !important;
 }
 
-.mke-webpage-section__items {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
+.mke-object-count-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 12px;
 }
 
-.mke-webpage-section__item {
-  align-items: baseline;
+.mke-object-count-card {
+  align-items: center;
   background: var(--mke-surface);
   border: 1px solid var(--mke-border);
-  border-radius: 999px;
-  display: inline-flex;
-  gap: 5px;
-  max-width: 100%;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: 28px minmax(0, 1fr);
   min-width: 0;
-  padding: 4px 7px;
+  padding: 9px;
 }
 
-.mke-webpage-section__item--good {
-  border-color: rgba(22, 101, 52, 0.22);
-  color: var(--mke-success-text);
+.mke-object-count-card__icon {
+  align-items: center;
+  background: var(--mke-accent-bg);
+  border-radius: 7px;
+  color: var(--mke-accent);
+  display: flex;
+  grid-row: span 2;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
 }
 
-.mke-webpage-section__item--warn {
-  border-color: rgba(153, 27, 27, 0.24);
-  color: var(--mke-warn-text);
+.mke-object-count-card svg {
+  height: 15px;
+  width: 15px;
 }
 
-.mke-webpage-section__item em {
+.mke-object-count-card span {
   color: var(--mke-soft);
-  font-size: var(--mke-font-xs);
-  font-style: normal;
-  line-height: 1.2;
-}
-
-.mke-webpage-section__item strong {
-  color: var(--mke-text);
-  font-size: var(--mke-font-xs);
-  font-weight: var(--mke-weight-strong);
+  font-size: 11px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.mke-object-count-card strong {
+  color: var(--mke-text);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.mke-object-strip {
+  border: 1px solid var(--mke-border);
+  border-radius: 8px;
+  margin-top: 10px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.mke-object-strip__header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  min-width: 0;
+}
+
+.mke-object-strip__header strong {
+  color: var(--mke-text);
+  font-size: 13px;
+}
+
+.mke-object-strip__header span,
+.mke-object-strip__header time {
+  color: var(--mke-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.mke-object-empty-line {
+  color: var(--mke-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mke-object-action-list {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+}
+
+.mke-object-action-chip {
+  align-items: center;
+  background: var(--mke-surface-2);
+  border: 1px solid var(--mke-border);
+  border-radius: 8px;
+  color: var(--mke-soft);
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  min-width: 0;
+  padding: 9px 8px;
+  text-align: center;
+}
+
+.mke-object-action-chip svg {
+  color: var(--mke-muted);
+  flex: 0 0 auto;
+  height: 15px;
+  width: 15px;
+}
+
+.mke-object-action-chip strong {
+  color: var(--mke-text);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mke-object-action-chip--good {
+  border-color: rgba(22, 101, 52, 0.22);
+}
+
+.mke-object-action-chip--warn {
+  border-color: rgba(153, 27, 27, 0.24);
+}
+
+.mke-object-api-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mke-object-api-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  min-width: 0;
+}
+
+.mke-object-api-row span {
+  background: var(--mke-accent-bg);
+  border-radius: 999px;
+  color: var(--mke-accent);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 7px;
+  text-align: center;
+}
+
+.mke-object-api-row strong {
+  color: var(--mke-text);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mke-object-api-row em {
+  color: var(--mke-muted);
+  font-size: 11px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.mke-object-lifecycle {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.mke-object-lifecycle li {
+  align-items: center;
+  color: var(--mke-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  text-align: center;
+}
+
+.mke-object-lifecycle li > span {
+  background: var(--mke-neutral-bg);
+  border: 2px solid var(--mke-surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--mke-border);
+  height: 15px;
+  width: 15px;
+}
+
+.mke-object-lifecycle strong {
+  color: var(--mke-text);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.mke-object-lifecycle small {
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.mke-object-lifecycle--good > span {
+  background: var(--mke-success-text) !important;
+}
+
+.mke-object-lifecycle--warn > span {
+  background: var(--mke-warn-text) !important;
+}
+
+.mke-object-footer-actions {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.mke-object-footer-button {
+  align-items: center;
+  background: var(--mke-surface);
+  border: 1px solid var(--mke-border);
+  border-radius: 8px;
+  color: var(--mke-soft);
+  cursor: pointer;
+  display: inline-flex;
+  gap: 8px;
+  justify-content: center;
+  min-height: 42px;
+  min-width: 0;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.mke-object-footer-button--primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.mke-object-footer-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .mke-webpage-detail__actions {
@@ -2309,7 +2807,10 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 
 .mke-button:focus-visible,
 .mke-tab-button:focus-visible,
-.mke-webpage-card:focus-visible,
+.mke-webpage-row:focus-visible,
+.mke-icon-button:focus-visible,
+.mke-filter-button:focus-visible,
+.mke-object-footer-button:focus-visible,
 .mke-search input:focus-visible,
 .mke-detail-button:focus-visible,
 .mke-json-copy-button:focus-visible {
@@ -2339,20 +2840,6 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
     max-width: 100%;
   }
 
-  .mke-object-scene {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .mke-object-scene__metrics {
-    justify-content: flex-start;
-  }
-
-  .mke-object-layout,
-  .mke-webpage-sections {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .mke-status {
     max-width: 100%;
     white-space: nowrap;
@@ -2371,6 +2858,66 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   .mke-facts strong {
     max-width: 100%;
     overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 390px) {
+  .mke-object-header {
+    align-items: flex-start;
+  }
+
+  .mke-object-title p {
+    max-width: min(260px, calc(100vw - 124px));
+  }
+
+  .mke-object-summary-bar,
+  .mke-object-toolbar,
+  .mke-object-count-grid,
+  .mke-object-footer-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mke-object-summary-card + .mke-object-summary-card {
+    border-left: 0;
+    border-top: 1px solid var(--mke-border);
+  }
+
+  .mke-object-toolbar {
+    align-items: stretch;
+  }
+
+  .mke-filter-button {
+    justify-content: center;
+  }
+
+  .mke-webpage-row {
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+  }
+
+  .mke-webpage-row__metrics,
+  .mke-webpage-row__more {
+    display: none;
+  }
+
+  .mke-webpage-row__status {
+    justify-self: end;
+  }
+
+  .mke-object-detail-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mke-object-detail-tabs button:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .mke-object-api-row {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .mke-object-api-row em {
+    grid-column: 2;
+    white-space: normal;
   }
 }
 

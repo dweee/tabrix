@@ -49,7 +49,7 @@ export interface MkeObjectLibraryView {
   webPages: MkeObjectWebPageView[];
 }
 
-const PAGE_OBJECT_TYPES = new Set(['page', 'region']);
+const PAGE_OBJECT_TYPES = new Set(['page', 'region', 'action_target']);
 const ACTION_OBJECT_TYPES = new Set(['action_target']);
 const DATA_API_OBJECT_TYPES = new Set(['data_source']);
 
@@ -222,7 +222,7 @@ function buildPageObjectsSection(
     id: 'pageObjects',
     title: '页面对象',
     badge: `${pageObjectCount} 个`,
-    emptyText: '读取当前网页后会显示按钮、表单、列表、表格、菜单、弹窗等对象。',
+    emptyText: '当前快照未记录页面对象。',
     items: counts.map(([label, count]) => ({ label, value: `${count} 个` })),
   };
 }
@@ -233,7 +233,7 @@ function buildActionsSection(objects: MkeBrowserObjectSummary[]): MkeObjectViewS
     id: 'actions',
     title: '可操作功能',
     badge: `${objects.length} 个`,
-    emptyText: '读取当前网页后会显示 AI 可点击、可输入、可筛选、可下载的目标。',
+    emptyText: '当前快照未记录可操作目标。',
     items: actionCounts.map(([label, count]) => ({
       label,
       value: `${count} 个目标`,
@@ -259,8 +259,8 @@ function buildDataApiSection(
   return {
     id: 'dataApi',
     title: '数据/API',
-    badge: `${objects.length} 个`,
-    emptyText: '观察到安全的数据接口后，会在这里显示只读、提交、搜索等接口能力。',
+    badge: `${labels.length} 个`,
+    emptyText: '当前快照未记录数据/API 线索。',
     items: counts.map(([label, count]) => ({
       label,
       value: count > 1 ? `${count} 条线索` : '已观察',

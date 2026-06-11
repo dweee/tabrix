@@ -45,10 +45,7 @@ onMounted(() => {
 }
 
 .sidepanel-root[data-agent-theme='dark-console'] {
-  background:
-    radial-gradient(circle at 12% -12%, rgba(34, 211, 238, 0.22), transparent 42%),
-    radial-gradient(circle at 92% -20%, rgba(168, 85, 247, 0.14), transparent 40%),
-    linear-gradient(160deg, #020817 0%, #051226 56%, #040b18 100%);
+  background: #08111f;
   color: #dbeafe;
 }
 

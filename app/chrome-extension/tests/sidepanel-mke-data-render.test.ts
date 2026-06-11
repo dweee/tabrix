@@ -21,8 +21,13 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('mke-data-body');
     expect(source).toContain('mke-object-workspace');
     expect(source).toContain('mke-webpage-list');
+    expect(source).toContain('mke-webpage-row');
     expect(source).toContain('mke-webpage-detail');
-    expect(source).toContain('当前网页现场');
+    expect(source).toContain('Tabrix · 对象库');
+    expect(source).toContain('mke-object-summary-bar');
+    expect(source).toContain('mke-object-detail-tabs');
+    expect(source).toContain('mke-object-count-grid');
+    expect(source).toContain('mke-object-footer-actions');
     expect(source).toContain("scope: 'object-graph'");
     expect(source).toContain('搜索当前列表');
     expect(source).toContain('mke-search-icon');
@@ -32,9 +37,10 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('fetchMkeObjectStoragePreferences');
     expect(source).toContain('updateMkeObjectStoragePreferences');
     expect(source).toContain('clearMkeBrowserObjects');
-    expect(source).toContain('存储个人浏览状态');
+    expect(source).toContain('个人浏览状态存储已开启');
     expect(source).toContain('清除对象库');
-    expect(source).toContain('mke-switch');
+    expect(source).toContain('mke-icon-button--active');
+    expect(source).toContain('mke-object-footer-button');
     expect(source).toContain('function objectToRecord(object: MkeBrowserObjectSummary)');
     expect(source).toContain('object.currentRoute ||');
     expect(source).toContain('object.rootRoute,');
@@ -167,8 +173,10 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('width: 100%;');
     expect(source).toContain('grid-template-columns: auto minmax(118px, 1fr) auto;');
     expect(source).toContain('grid-template-columns: auto minmax(108px, 1fr) auto;');
-    expect(source).toContain('grid-template-columns: minmax(156px, 0.9fr) minmax(190px, 1.1fr);');
-    expect(source).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
+    expect(source).toContain(
+      'grid-template-columns: 34px minmax(110px, 1fr) minmax(92px, auto) auto 18px;',
+    );
+    expect(source).toContain('grid-template-columns: repeat(4, minmax(0, 1fr));');
     expect(source).toContain('right: 20px;');
     expect(source).toContain('top: 10px;');
     expect(source).toContain('height: 30px;');

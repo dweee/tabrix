@@ -67,9 +67,15 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain('mkep-tab__subtitle');
     expect(tabSource).toContain('mke-data-body');
     expect(tabSource).toContain('mke-object-workspace');
-    expect(tabSource).toContain('当前网页现场');
+    expect(tabSource).toContain('Tabrix · 对象库');
+    expect(tabSource).toContain('mke-object-summary-bar');
+    expect(tabSource).toContain('mke-object-toolbar');
     expect(tabSource).toContain('filteredObjectWebPages');
     expect(tabSource).toContain('selectedObjectWebPage');
+    expect(tabSource).toContain('mke-webpage-row');
+    expect(tabSource).toContain('mke-object-detail-tabs');
+    expect(tabSource).toContain('mke-object-count-grid');
+    expect(tabSource).toContain('mke-object-footer-actions');
     expect(objectViewSource).toContain('页面对象');
     expect(objectViewSource).toContain('可操作功能');
     expect(objectViewSource).toContain('数据/API');
@@ -79,11 +85,11 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('mke-search-icon');
     expect(tabSource).toContain('搜索主题、对象、方法、网址、状态');
     expect(tabSource).toContain('mke-refresh-button');
-    expect(tabSource).toContain('存储个人浏览状态');
+    expect(tabSource).toContain('个人浏览状态存储已开启');
     expect(tabSource).toContain('清除对象库');
     expect(tabSource).toContain('personalBrowserStateStorageEnabled');
-    expect(tabSource).toContain('mke-object-storage');
-    expect(tabSource).toContain('mke-switch');
+    expect(tabSource).toContain('mke-icon-button--active');
+    expect(tabSource).toContain('mke-object-footer-button');
     expect(tabSource).toContain('mke-record__title-row');
     expect(tabSource).toContain('mke-record__meta-line');
     expect(tabSource).toContain('mke-record__feedback');
@@ -119,6 +125,9 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));');
     expect(tabSource).toContain('grid-template-columns: minmax(180px, 1fr) auto;');
     expect(tabSource).toContain('grid-template-columns: auto minmax(118px, 1fr) auto;');
+    expect(tabSource).toContain(
+      'grid-template-columns: 34px minmax(110px, 1fr) minmax(92px, auto) auto 18px;',
+    );
     expect(tabSource).not.toContain('mke-meta');
   });
 
