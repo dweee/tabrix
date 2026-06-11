@@ -801,14 +801,14 @@ export const MEMORY_DB_ACTIVE_TABLE_MANIFEST = [
     name: 'tabrix_knowledge_models',
     layer: 'mke_knowledge',
     surface: 'mke_sidepanel',
-    purpose: 'Projected page/object knowledge model derived from validated memory traces.',
+    purpose: 'Page/object knowledge model that must be derived from Object Library facts.',
     retention: 'projection_gap',
   },
   {
     name: 'tabrix_experience_recipes',
     layer: 'mke_experience',
     surface: 'mke_sidepanel',
-    purpose: 'Template-only reusable recipe store derived from successful traces.',
+    purpose: 'Template-only reusable recipe store derived from successful Memory evidence.',
     retention: 'projection_gap',
   },
   {
