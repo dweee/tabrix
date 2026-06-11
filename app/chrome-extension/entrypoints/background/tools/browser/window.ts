@@ -22,6 +22,10 @@ type StructuredTabForWindowSummary = {
   cleanupEligibilityReason: string;
 };
 
+type WindowToolParams = {
+  includeDiagnostics?: boolean;
+};
+
 function selectCompactTabsForWindow(
   tabs: StructuredTabForWindowSummary[],
 ): StructuredTabForWindowSummary[] {
@@ -377,8 +381,9 @@ function buildAiActionReadiness(args: {
 
 class WindowTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS;
-  async execute(): Promise<ToolResult> {
+  async execute(args: WindowToolParams = {}): Promise<ToolResult> {
     try {
+      const includeDiagnostics = args?.includeDiagnostics === true;
       const browserWorld = await refreshBrowserWorldSnapshot({ ensureBaselineReady: true });
       const browserActiveTab =
         browserWorld.tabs.find((tab) => tab.tabId === browserWorld.browserActiveTabId) ?? null;
@@ -467,7 +472,7 @@ class WindowTool extends BaseBrowserToolExecutor {
         };
       });
 
-      const result = {
+      const diagnosticResult = {
         source: 'chrome_windows_get_all_with_browser_world_inventory',
         windowCount: browserWorld.windowCount,
         tabCount: browserWorld.tabCount,
@@ -629,6 +634,40 @@ class WindowTool extends BaseBrowserToolExecutor {
         browserWorld,
         windows: structuredWindows,
       };
+      const compactWindows = diagnosticResult.compactSummary.windows;
+      const compactResult = {
+        source: diagnosticResult.source,
+        windowCount: browserWorld.windowCount,
+        tabCount: browserWorld.tabCount,
+        currentPage: diagnosticResult.compactSummary.activeObject,
+        compactSummary: {
+          activeObject: diagnosticResult.compactSummary.activeObject,
+          browserActiveObject: diagnosticResult.compactSummary.browserActiveObject,
+          latestAiOperatedObject: diagnosticResult.compactSummary.latestAiOperatedObject,
+          routing: {
+            browserActiveTabId: browserWorld.browserActiveTabId,
+            latestAiOperatedTabId: browserWorld.summary.aiOperationState.latestAiOperatedTabId,
+            relationToBrowserActiveTab:
+              browserWorld.summary.aiOperationState.relationToBrowserActiveTab,
+            canContinueOnLatestAiOperatedTab:
+              browserWorld.summary.aiOperationState.canContinueOnLatestAiOperatedTab,
+            latestAiOperation: browserWorld.summary.aiOperationState.latestAiOperation,
+          },
+          actionReadiness: {
+            readiness: aiActionReadiness.readiness,
+            targetRole: aiActionReadiness.targetRole,
+            targetTabId: aiActionReadiness.targetTabId,
+            canProceedToPageLevelCheck: aiActionReadiness.canProceedToPageLevelCheck,
+            requiredBeforeAction: aiActionReadiness.requiredBeforeAction,
+          },
+          windows: compactWindows,
+          recentChangeSummary: browserWorld.summary.recentChangeSummary,
+        },
+        windows: compactWindows,
+      };
+      const result = includeDiagnostics
+        ? { ...compactResult, diagnostics: diagnosticResult }
+        : compactResult;
 
       return {
         content: [

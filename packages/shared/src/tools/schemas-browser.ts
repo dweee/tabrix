@@ -11,7 +11,13 @@ export const BROWSER_SCHEMAS: Tool[] = [
     },
     inputSchema: {
       type: 'object',
-      properties: {},
+      properties: {
+        includeDiagnostics: {
+          type: 'boolean',
+          description:
+            'Return full BrowserWorld diagnostics. Default false keeps the response compact for AI browser control.',
+        },
+      },
       required: [],
     },
   },
