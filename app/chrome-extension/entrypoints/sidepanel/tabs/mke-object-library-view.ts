@@ -2,11 +2,6 @@ import type { MkeBrowserObjectSummary } from '@tabrix/shared';
 
 export type MkeObjectViewTone = 'good' | 'warn' | 'neutral';
 
-export interface MkeObjectViewMetric {
-  label: string;
-  value: string;
-}
-
 export interface MkeObjectViewItem {
   label: string;
   value: string;
@@ -29,21 +24,12 @@ export interface MkeObjectWebPageView {
   lifecycleTone: MkeObjectViewTone;
   isClosed: boolean;
   updatedAt: string;
-  metrics: MkeObjectViewMetric[];
   sections: MkeObjectViewSection[];
   objects: MkeBrowserObjectSummary[];
   searchText: string;
 }
 
 export interface MkeObjectLibraryView {
-  summary: {
-    liveLabel: string;
-    openWebPages: number;
-    closedWebPages: number;
-    pageObjects: number;
-    actions: number;
-    dataApis: number;
-  };
   webPages: MkeObjectWebPageView[];
 }
 
@@ -52,7 +38,7 @@ const ACTION_OBJECT_TYPES = new Set(['action_target']);
 const DATA_API_OBJECT_TYPES = new Set(['data_source']);
 
 interface ActiveTabContext {
-  focusedWindowActiveTabIds: Set<string>;
+  foregroundTabIds: Set<string>;
 }
 
 export function buildMkeObjectLibraryView(
@@ -63,23 +49,8 @@ export function buildMkeObjectLibraryView(
   const webPages = webPageRoots.map((root) =>
     buildWebPageView(root, findRelatedObjects(root, objects), activeTabContext),
   );
-  const openWebPages = webPages.filter((page) => !page.isClosed).length;
-  const closedWebPages = webPages.filter((page) => page.isClosed).length;
-  const pageObjects = countByType(objects, PAGE_OBJECT_TYPES);
-  const actions = countByType(objects, ACTION_OBJECT_TYPES);
-  const dataApis = countByType(objects, DATA_API_OBJECT_TYPES);
 
-  return {
-    summary: {
-      liveLabel: '对象快照',
-      openWebPages,
-      closedWebPages,
-      pageObjects,
-      actions,
-      dataApis,
-    },
-    webPages,
-  };
+  return { webPages };
 }
 
 function selectWebPageRoots(
@@ -122,11 +93,6 @@ function buildWebPageView(
   const lifecycle = formatLifecycle(root, activeTabContext);
   const title = formatWebPageTitle(root);
   const location = formatWebPageLocation(root);
-  const metrics = compactMetrics([
-    ['页面对象', String(pageObjectCount)],
-    ['可操作', String(actionObjects.length)],
-    ['数据/API', String(dataApiObjects.length)],
-  ]);
   const sections = [
     buildPageObjectsSection(relatedObjects, pageObjectCount),
     buildActionsSection(actionObjects),
@@ -168,7 +134,6 @@ function buildWebPageView(
     lifecycleTone: lifecycle.tone,
     isClosed: isClosedObject(root),
     updatedAt: root.updatedAt,
-    metrics,
     sections,
     objects: relatedObjects,
     searchText,
@@ -225,7 +190,16 @@ function buildActiveTabContext(objects: MkeBrowserObjectSummary[]): ActiveTabCon
     if (activeTabId !== null) focusedWindowActiveTabIds.add(String(activeTabId));
   }
 
-  return { focusedWindowActiveTabIds };
+  if (focusedWindowActiveTabIds.size > 0) return { foregroundTabIds: focusedWindowActiveTabIds };
+
+  const activeTabIds = new Set(
+    objects
+      .filter((object) => object.objectType === 'tab' && object.isActive === true)
+      .map(extractTabId)
+      .filter((tabId): tabId is string => tabId !== null),
+  );
+
+  return { foregroundTabIds: activeTabIds.size === 1 ? activeTabIds : new Set() };
 }
 
 function isFocusedWindowActiveTab(
@@ -234,7 +208,7 @@ function isFocusedWindowActiveTab(
 ): boolean {
   if (object.objectType !== 'tab' || object.isActive !== true) return false;
   const tabId = extractTabId(object);
-  return tabId !== null && activeTabContext.focusedWindowActiveTabIds.has(tabId);
+  return tabId !== null && activeTabContext.foregroundTabIds.has(tabId);
 }
 
 function buildPageObjectsSection(
@@ -334,14 +308,6 @@ function countLabels(labels: string[]): Array<[string, number]> {
   const counts = new Map<string, number>();
   for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1);
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-}
-
-function compactMetrics(
-  entries: Array<[string, string | null | undefined]>,
-): MkeObjectViewMetric[] {
-  return entries
-    .filter((entry): entry is [string, string] => Boolean(entry[1]))
-    .map(([label, value]) => ({ label, value }));
 }
 
 function formatWebPageTitle(object: MkeBrowserObjectSummary): string {

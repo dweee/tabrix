@@ -86,15 +86,6 @@ describe('MKE Object Library view model', () => {
       }),
     ]);
 
-    expect(view.summary).toMatchObject({
-      liveLabel: '对象快照',
-      openWebPages: 1,
-      closedWebPages: 1,
-      pageObjects: 3,
-      actions: 1,
-      dataApis: 1,
-    });
-
     const activePage = view.webPages[0];
     expect(activePage).toMatchObject({
       id: 'tab-active',
@@ -202,6 +193,59 @@ describe('MKE Object Library view model', () => {
       ['tab-background-window-active', '已打开'],
     ]);
     expect(view.webPages.filter((page) => page.lifecycleLabel === '前台页')).toHaveLength(1);
+  });
+
+  it('uses a single active tab as the foreground page when window focus evidence is missing', () => {
+    const view = buildMkeObjectLibraryView([
+      object({
+        browserObjectId: 'tab-only-active',
+        objectType: 'tab',
+        objectFingerprint: 'tab:10:51',
+        isActive: true,
+        canTabrixOperate: true,
+        display: { title: 'Only active tab', locationLabel: 'only-active.example' },
+      }),
+      object({
+        browserObjectId: 'tab-open',
+        objectType: 'tab',
+        objectFingerprint: 'tab:10:52',
+        isActive: false,
+        canTabrixOperate: true,
+        display: { title: 'Open tab', locationLabel: 'open.example' },
+      }),
+    ]);
+
+    expect(view.webPages.map((page) => [page.id, page.lifecycleLabel])).toEqual([
+      ['tab-only-active', '前台页'],
+      ['tab-open', '已打开'],
+    ]);
+  });
+
+  it('does not guess the foreground page when multiple active-tab hints conflict', () => {
+    const view = buildMkeObjectLibraryView([
+      object({
+        browserObjectId: 'tab-window-1-active',
+        objectType: 'tab',
+        objectFingerprint: 'tab:10:61',
+        isActive: true,
+        canTabrixOperate: true,
+        display: { title: 'Window 1 active tab', locationLabel: 'window-1.example' },
+      }),
+      object({
+        browserObjectId: 'tab-window-2-active',
+        objectType: 'tab',
+        objectFingerprint: 'tab:11:62',
+        isActive: true,
+        canTabrixOperate: true,
+        display: { title: 'Window 2 active tab', locationLabel: 'window-2.example' },
+      }),
+    ]);
+
+    expect(view.webPages.map((page) => [page.id, page.lifecycleLabel])).toEqual([
+      ['tab-window-1-active', '已打开'],
+      ['tab-window-2-active', '已打开'],
+    ]);
+    expect(view.webPages.filter((page) => page.lifecycleLabel === '前台页')).toHaveLength(0);
   });
 
   it('keeps the webpage status vocabulary to five user-facing states', () => {

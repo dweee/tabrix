@@ -23,7 +23,7 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain("label: '经验库'");
     expect(source).toContain('mke-toolbar--object');
     expect(source).toContain('mke-object-storage-toggle');
-    expect(source).toContain('mke-object-summary-bar');
+    expect(source).not.toContain('mke-object-summary-bar');
     expect(source).toContain('搜索网页、对象、功能、网址、状态');
     expect(source).toContain('fetchMkeBrowserObjects({ limit: objectLimit');
     expect(source).toContain("scope: 'object-graph'");
@@ -68,9 +68,7 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('white-space: nowrap;');
     expect(source).toContain('.mke-json-block');
     expect(source).toContain('grid-template-columns: minmax(180px, 1fr) auto');
-    expect(source).toContain(
-      'grid-template-columns: minmax(126px, 1.2fr) repeat(3, minmax(76px, 1fr))',
-    );
+    expect(source).not.toContain('mke-object-summary-card');
     expect(source).toContain('@media (max-width: 520px)');
   });
 });

@@ -73,28 +73,6 @@
           </button>
         </div>
 
-        <div v-if="activeTab === 'object'" class="mke-object-summary-bar" role="status">
-          <div class="mke-object-summary-card mke-object-summary-card--live">
-            <span class="mke-object-summary-card__dot" aria-hidden="true"></span>
-            <strong>{{ objectLibraryView.summary.liveLabel }}</strong>
-          </div>
-          <div class="mke-object-summary-card">
-            <i-lucide-panel-top aria-hidden="true" />
-            <span>已打开</span>
-            <strong>{{ objectLibraryView.summary.openWebPages }}</strong>
-          </div>
-          <div class="mke-object-summary-card">
-            <i-lucide-clock-3 aria-hidden="true" />
-            <span>已关闭</span>
-            <strong>{{ objectLibraryView.summary.closedWebPages }}</strong>
-          </div>
-          <div class="mke-object-summary-card">
-            <i-lucide-mouse-pointer-click aria-hidden="true" />
-            <span>可操作</span>
-            <strong>{{ objectLibraryView.summary.actions }}</strong>
-          </div>
-        </div>
-
         <p v-if="searchQuery" class="mke-filter-note">搜索仅覆盖已加载记录，列表按最新时间倒序。</p>
       </div>
 
@@ -717,7 +695,6 @@ function formatObjectWebPageJson(webPage: MkeObjectWebPageView): string {
     title: webPage.title,
     location: webPage.location,
     lifecycleLabel: webPage.lifecycleLabel,
-    metrics: webPage.metrics,
     sections: webPage.sections,
     objects: webPage.objects,
   });
@@ -1168,67 +1145,6 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 .mke-icon-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
-}
-
-.mke-object-summary-bar {
-  background: var(--mke-surface);
-  border: 1px solid var(--mke-border);
-  border-radius: 8px;
-  display: grid;
-  grid-template-columns: minmax(126px, 1.2fr) repeat(3, minmax(76px, 1fr));
-  min-width: 0;
-  overflow: hidden;
-}
-
-.mke-object-summary-card {
-  align-items: center;
-  color: var(--mke-soft);
-  display: flex;
-  gap: 7px;
-  justify-content: center;
-  min-height: 48px;
-  min-width: 0;
-  padding: 8px 10px;
-}
-
-.mke-object-summary-card + .mke-object-summary-card {
-  border-left: 1px solid var(--mke-border);
-}
-
-.mke-object-summary-card span {
-  color: var(--mke-muted);
-  font-size: 12px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mke-object-summary-card strong {
-  color: var(--mke-text);
-  font-size: 15px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.mke-object-summary-card svg {
-  color: var(--mke-muted);
-  flex: 0 0 auto;
-  height: 16px;
-  width: 16px;
-}
-
-.mke-object-summary-card--live {
-  justify-content: flex-start;
-}
-
-.mke-object-summary-card__dot {
-  background: #10b981;
-  border-radius: 50%;
-  box-shadow: 0 0 0 5px rgba(16, 185, 129, 0.12);
-  flex: 0 0 auto;
-  height: 8px;
-  width: 8px;
 }
 
 .mke-tabs {
@@ -1685,15 +1601,6 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 }
 
 @media (max-width: 390px) {
-  .mke-object-summary-bar {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .mke-object-summary-card + .mke-object-summary-card {
-    border-left: 0;
-    border-top: 1px solid var(--mke-border);
-  }
-
   .mke-toolbar--object {
     grid-template-columns: minmax(0, 1fr) 34px auto;
   }

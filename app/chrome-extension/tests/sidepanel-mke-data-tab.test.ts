@@ -69,7 +69,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('<div class="mke-tabs"');
     expect(tabSource).not.toContain('<template v-if="activeTab === \'object\'">');
     expect(tabSource).not.toContain('Tabrix · 对象库');
-    expect(tabSource).toContain('mke-object-summary-bar');
+    expect(tabSource).not.toContain('mke-object-summary-bar');
     expect(tabSource).toContain('mke-toolbar--object');
     expect(tabSource).toContain('mke-object-storage-toggle');
     expect(tabSource).not.toContain('filteredObjectWebPages');
