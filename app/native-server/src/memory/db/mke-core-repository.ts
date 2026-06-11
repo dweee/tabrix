@@ -160,8 +160,6 @@ export interface MemoryFeedbackEventInput {
   evidenceRefs?: string[];
   userGoalSnapshot?: string | null;
   experienceCandidate?: boolean | null;
-  riskTier?: string | null;
-  humanReviewRequired?: boolean | null;
   sourceToolName?: string | null;
   sourceToolCallId?: string | null;
   accepted?: boolean;
@@ -190,8 +188,6 @@ export interface MemoryFeedbackEvent {
   evidenceRefs: string[];
   userGoalSnapshot: string | null;
   experienceCandidate: boolean;
-  riskTier: string;
-  humanReviewRequired: boolean;
   sourceToolName: string | null;
   sourceToolCallId: string | null;
   accepted: boolean;
@@ -269,8 +265,6 @@ interface MemoryFeedbackEventRow {
   evidence_refs_blob: string;
   user_goal_snapshot: string | null;
   experience_candidate: number;
-  risk_tier: string;
-  human_review_required: number;
   source_tool_name: string | null;
   source_tool_call_id: string | null;
   accepted: number;
@@ -442,8 +436,6 @@ function rowToMemoryFeedbackEvent(row: MemoryFeedbackEventRow): MemoryFeedbackEv
     evidenceRefs: parseStringArray(row.evidence_refs_blob),
     userGoalSnapshot: row.user_goal_snapshot,
     experienceCandidate: row.experience_candidate === 1,
-    riskTier: row.risk_tier,
-    humanReviewRequired: row.human_review_required === 1,
     sourceToolName: row.source_tool_name,
     sourceToolCallId: row.source_tool_call_id,
     accepted: row.accepted === 1,
@@ -505,15 +497,15 @@ export class MemoryTraceRepository {
         (feedback_event_id, trace_id, task_id, tool_name, tool_call_id, sequence_index,
          trace_binding_hash, evaluation_scope, evaluation_version, rubric_version,
          evaluator_model, business_status, confidence, reason_code, summary,
-         evidence_refs_blob, user_goal_snapshot, experience_candidate, risk_tier,
-         human_review_required, source_tool_name, source_tool_call_id, accepted,
+         evidence_refs_blob, user_goal_snapshot, experience_candidate,
+         source_tool_name, source_tool_call_id, accepted,
          rejection_code, rejection_message, payload_blob, created_at)
        VALUES
         (@feedback_event_id, @trace_id, @task_id, @tool_name, @tool_call_id, @sequence_index,
          @trace_binding_hash, @evaluation_scope, @evaluation_version, @rubric_version,
          @evaluator_model, @business_status, @confidence, @reason_code, @summary,
-         @evidence_refs_blob, @user_goal_snapshot, @experience_candidate, @risk_tier,
-         @human_review_required, @source_tool_name, @source_tool_call_id, @accepted,
+         @evidence_refs_blob, @user_goal_snapshot, @experience_candidate,
+         @source_tool_name, @source_tool_call_id, @accepted,
          @rejection_code, @rejection_message, @payload_blob, @created_at)`,
     );
     this.listFeedbackEventsByTraceStmt = db.prepare(
@@ -633,8 +625,6 @@ export class MemoryTraceRepository {
       evidence_refs_blob: requiredBlob(input.evidenceRefs ?? []),
       user_goal_snapshot: input.userGoalSnapshot ?? null,
       experience_candidate: input.experienceCandidate === true ? 1 : 0,
-      risk_tier: input.riskTier ?? 'medium',
-      human_review_required: input.humanReviewRequired === false ? 0 : 1,
       source_tool_name: input.sourceToolName ?? null,
       source_tool_call_id: input.sourceToolCallId ?? null,
       accepted: input.accepted === false ? 0 : 1,

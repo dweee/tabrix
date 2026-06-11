@@ -169,8 +169,6 @@ describe('MkeMemoryTraceService', () => {
         evidenceRefs: [trace.traceId],
         userGoalSnapshot: 'click and verify page result',
         experienceCandidate: true,
-        riskTier: 'medium',
-        humanReviewRequired: false,
         evaluatorModel: 'jest-evaluator',
         receivedAt: '2026-06-10T10:00:01.000Z',
       });
@@ -184,8 +182,6 @@ describe('MkeMemoryTraceService', () => {
           confidence: 0.94,
           evidenceRefs: [trace.traceId],
           experienceCandidate: true,
-          riskTier: 'medium',
-          humanReviewRequired: false,
           evaluatorModel: 'jest-evaluator',
           binding: expect.objectContaining({
             traceId: trace.traceId,

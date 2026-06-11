@@ -26,8 +26,6 @@ interface TabrixPreviousFeedback {
   evidenceRefs: string[];
   userGoalSnapshot: string | null;
   experienceCandidate: boolean | null;
-  riskTier: 'low' | 'medium' | 'high' | 'critical' | null;
-  humanReviewRequired: boolean | null;
 }
 
 export interface TabrixToolMetadata {
@@ -89,8 +87,6 @@ const TABRIX_TOOL_METADATA_SCHEMA = {
           },
           userGoalSnapshot: { type: 'string' },
           experienceCandidate: { type: 'boolean' },
-          riskTier: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
-          humanReviewRequired: { type: 'boolean' },
         },
         required: ['traceId', 'businessStatus'],
       },
@@ -250,14 +246,6 @@ function readPreviousFeedback(value: unknown): TabrixPreviousFeedback[] {
       evidenceRefs: readOptionalStringArray(object.evidenceRefs),
       userGoalSnapshot: readOptionalString(object.userGoalSnapshot),
       experienceCandidate: readOptionalBoolean(object.experienceCandidate),
-      riskTier:
-        object.riskTier === 'low' ||
-        object.riskTier === 'medium' ||
-        object.riskTier === 'high' ||
-        object.riskTier === 'critical'
-          ? object.riskTier
-          : null,
-      humanReviewRequired: readOptionalBoolean(object.humanReviewRequired),
     });
   }
   return feedback;

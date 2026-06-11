@@ -45,8 +45,6 @@ function verifiedExperienceFeedback(input: {
     summary: input.summary,
     evidenceRefs: [input.evidenceRef],
     experienceCandidate: true,
-    riskTier: 'medium',
-    humanReviewRequired: false,
   };
 }
 

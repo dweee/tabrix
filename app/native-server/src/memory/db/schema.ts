@@ -92,8 +92,6 @@ CREATE TABLE IF NOT EXISTS tabrix_memory_feedback_events (
   evidence_refs_blob      TEXT NOT NULL DEFAULT '[]',
   user_goal_snapshot      TEXT,
   experience_candidate    INTEGER NOT NULL DEFAULT 0,
-  risk_tier               TEXT NOT NULL DEFAULT 'medium',
-  human_review_required   INTEGER NOT NULL DEFAULT 1,
   source_tool_name        TEXT,
   source_tool_call_id     TEXT,
   accepted                INTEGER NOT NULL DEFAULT 1,

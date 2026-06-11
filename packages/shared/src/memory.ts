@@ -24,7 +24,6 @@ export type MemoryPersistenceMode = 'disk' | 'memory' | 'off';
  * inside the native DB.
  */
 export type MkeMemoryAiFeedbackScope = 'step' | 'task';
-export type MkeMemoryAiFeedbackRiskTier = 'low' | 'medium' | 'high' | 'critical';
 
 export interface MkeMemoryAiFeedbackBindingSummary {
   taskId?: string | null;
@@ -47,8 +46,6 @@ export interface MkeMemoryAiFeedbackSummary {
   evidenceRefs?: string[];
   userGoalSnapshot?: string | null;
   experienceCandidate?: boolean | null;
-  riskTier?: MkeMemoryAiFeedbackRiskTier | string | null;
-  humanReviewRequired?: boolean | null;
   binding?: MkeMemoryAiFeedbackBindingSummary | null;
   receivedAt?: string | null;
   sourceToolName?: string | null;

@@ -210,8 +210,6 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
         summary: 'AI verified the expected page result.',
         evidenceRefs: ['trace-1'],
         experienceCandidate: true,
-        riskTier: 'medium',
-        humanReviewRequired: false,
       },
       makeDeps({ memoryTraces: { recordAiBusinessFeedback } }),
     );
@@ -230,8 +228,6 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
         summary: 'AI verified the expected page result.',
         evidenceRefs: ['trace-1'],
         experienceCandidate: true,
-        riskTier: 'medium',
-        humanReviewRequired: false,
         sourceToolName: TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK,
       }),
     );

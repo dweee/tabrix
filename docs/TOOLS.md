@@ -857,7 +857,7 @@ Delete a bookmark by id or URL.
 
 Record AI business feedback for one Memory trace. Use this after the AI has judged whether a recorded browser step actually completed the user's goal. Tabrix system evidence remains separate and must not be treated as AI feedback.
 
-This tool is capability-gated by `TABRIX_POLICY_CAPABILITIES=memory_feedback` because accepted feedback can affect Experience mining. Use the binding fields returned in the previous tool result under `_tabrix.feedbackTarget`; `traceId` alone is not accepted.
+This tool is available by default for the local AI control loop. Use the binding fields returned in the previous tool result under `_tabrix.feedbackTarget`; `traceId` alone is not accepted.
 
 **Parameters**:
 
@@ -873,8 +873,6 @@ This tool is capability-gated by `TABRIX_POLICY_CAPABILITIES=memory_feedback` be
 - `summary` (string, optional): Short human-readable judgment.
 - `evidenceRefs` (array, optional): Evidence references only. Required for `achieved` feedback with confidence `>= 0.90`.
 - `experienceCandidate` (boolean, optional): True only when this feedback may be considered for Experience mining.
-- `riskTier` (string, optional): One of `low`, `medium`, `high`, or `critical`.
-- `humanReviewRequired` (boolean, optional): True when a person must review before this can influence Experience.
 
 **Example**:
 
@@ -891,9 +889,7 @@ This tool is capability-gated by `TABRIX_POLICY_CAPABILITIES=memory_feedback` be
   "reasonCode": "expected_result_visible",
   "summary": "The page showed the expected search results after the action.",
   "evidenceRefs": ["trace-123"],
-  "experienceCandidate": true,
-  "riskTier": "medium",
-  "humanReviewRequired": false
+  "experienceCandidate": true
 }
 ```
 

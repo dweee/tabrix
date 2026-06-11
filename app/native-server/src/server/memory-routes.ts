@@ -126,8 +126,6 @@ function toAiFeedbackSummary(value: unknown): MkeMemoryAiFeedbackSummary | null 
     evidenceRefs: readStringArray(record, 'evidenceRefs'),
     userGoalSnapshot: readString(record, 'userGoalSnapshot'),
     experienceCandidate: readBoolean(record, 'experienceCandidate'),
-    riskTier: readString(record, 'riskTier'),
-    humanReviewRequired: readBoolean(record, 'humanReviewRequired'),
     binding: binding
       ? {
           taskId: readString(binding, 'taskId'),

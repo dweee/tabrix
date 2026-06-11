@@ -17,9 +17,6 @@
  *
  * Scope of v1 (intentionally minimal):
  *  - `api_knowledge`: unblocks API Knowledge capture.
- *  - `memory_feedback`: unblocks AI business feedback write-back into
- *    Memory traces. Feedback can affect Experience mining, so it is not
- *    exposed as a plain low-risk annotation surface.
  *  - `experience_replay`: unblocks the autonomous replay of a
  *    named historical `experience_action_paths` row. This is the FIRST
  *    use of a capability gate as the operational opt-in for a non-P3
@@ -39,7 +36,7 @@
  *    startup without making a typo a hard failure.
  */
 
-export type TabrixCapability = 'api_knowledge' | 'memory_feedback' | 'experience_replay';
+export type TabrixCapability = 'api_knowledge' | 'experience_replay';
 
 /**
  * Canonical set of every capability the codebase recognises today.
@@ -47,7 +44,6 @@ export type TabrixCapability = 'api_knowledge' | 'memory_feedback' | 'experience
  */
 export const ALL_TABRIX_CAPABILITIES: ReadonlySet<TabrixCapability> = new Set<TabrixCapability>([
   'api_knowledge',
-  'memory_feedback',
   'experience_replay',
 ]);
 

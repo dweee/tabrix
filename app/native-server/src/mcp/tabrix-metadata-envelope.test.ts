@@ -117,8 +117,6 @@ describe('tabrix metadata envelope', () => {
             evidenceRefs: [' trace-ok ', 'step-ok'],
             userGoalSnapshot: '  open page ',
             experienceCandidate: true,
-            riskTier: 'medium',
-            humanReviewRequired: false,
           },
           {
             traceId: 'trace-bad-status',
@@ -152,8 +150,6 @@ describe('tabrix metadata envelope', () => {
           evidenceRefs: ['trace-ok', 'step-ok'],
           userGoalSnapshot: 'open page',
           experienceCandidate: true,
-          riskTier: 'medium',
-          humanReviewRequired: false,
         },
       ],
     });

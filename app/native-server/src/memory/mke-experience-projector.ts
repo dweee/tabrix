@@ -117,7 +117,6 @@ function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
   const feedback = readObject(trace.aiFeedback);
   const sourceKind = readString(feedback?.sourceKind);
   const businessStatus = readString(feedback?.businessStatus);
-  const riskTier = readString(feedback?.riskTier);
   const confidence =
     typeof feedback?.confidence === 'number' && Number.isFinite(feedback.confidence)
       ? feedback.confidence
@@ -128,9 +127,6 @@ function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
     typeof confidence === 'number' &&
     confidence >= 0.9 &&
     feedback?.experienceCandidate === true &&
-    feedback?.humanReviewRequired !== true &&
-    riskTier !== 'high' &&
-    riskTier !== 'critical' &&
     readStringArray(feedback?.evidenceRefs).length > 0
   );
 }

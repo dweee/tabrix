@@ -109,17 +109,7 @@ export const MEMORY_SCHEMAS: Tool[] = [
         experienceCandidate: {
           type: 'boolean',
           description:
-            'True only when this step is worth considering for Experience mining after evidence and risk checks.',
-        },
-        riskTier: {
-          type: 'string',
-          description: 'Business risk of reusing this step as experience.',
-          enum: ['low', 'medium', 'high', 'critical'],
-        },
-        humanReviewRequired: {
-          type: 'boolean',
-          description:
-            'True when a person should review before this feedback can affect Experience.',
+            'True only when this step is worth considering for Experience mining after evidence checks.',
         },
       },
       required: [

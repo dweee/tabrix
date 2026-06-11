@@ -91,8 +91,6 @@ export interface RecordMkeAiBusinessFeedbackInput {
   evidenceRefs?: string[];
   userGoalSnapshot?: string | null;
   experienceCandidate?: boolean | null;
-  riskTier?: 'low' | 'medium' | 'high' | 'critical' | null;
-  humanReviewRequired?: boolean | null;
   receivedAt?: string;
   sourceToolName?: string | null;
   sourceToolCallId?: string | null;
@@ -566,14 +564,6 @@ function normalizeAiFeedbackScope(value: string | null | undefined): 'step' | 't
   return value === 'task' ? 'task' : 'step';
 }
 
-function normalizeAiFeedbackRiskTier(
-  value: string | null | undefined,
-): 'low' | 'medium' | 'high' | 'critical' {
-  return value === 'low' || value === 'medium' || value === 'high' || value === 'critical'
-    ? value
-    : 'medium';
-}
-
 function normalizeEvidenceRefs(values: string[] | null | undefined): string[] {
   if (!Array.isArray(values)) return [];
   return values
@@ -638,8 +628,6 @@ function validateAiFeedbackEvidence(input: {
   summary: string | null | undefined;
   evidenceRefs: string[];
   experienceCandidate: boolean;
-  riskTier: 'low' | 'medium' | 'high' | 'critical';
-  humanReviewRequired: boolean;
 }): void {
   const highConfidenceSuccess =
     input.businessStatus === 'achieved' &&
@@ -662,18 +650,6 @@ function validateAiFeedbackEvidence(input: {
     throw new MkeAiFeedbackValidationError(
       'experience_candidate_rejected',
       'Experience candidates require achieved feedback with confidence >= 0.90.',
-    );
-  }
-  if (input.humanReviewRequired) {
-    throw new MkeAiFeedbackValidationError(
-      'experience_candidate_rejected',
-      'Experience candidates cannot require human review.',
-    );
-  }
-  if (input.riskTier === 'high' || input.riskTier === 'critical') {
-    throw new MkeAiFeedbackValidationError(
-      'experience_candidate_rejected',
-      'High-risk AI feedback cannot be marked as an Experience candidate.',
     );
   }
 }
@@ -1364,8 +1340,6 @@ export class MkeMemoryTraceService {
     const evaluationScope = normalizeAiFeedbackScope(input.evaluationScope);
     const evaluationVersion = input.evaluationVersion ?? DEFAULT_AI_FEEDBACK_EVALUATION_VERSION;
     const rubricVersion = input.rubricVersion ?? DEFAULT_AI_FEEDBACK_RUBRIC_VERSION;
-    const riskTier = normalizeAiFeedbackRiskTier(input.riskTier);
-    const humanReviewRequired = input.humanReviewRequired !== false;
     const experienceCandidate = input.experienceCandidate === true;
     const receivedAt = input.receivedAt ?? new Date().toISOString();
     validateAiFeedbackEvidence({
@@ -1374,8 +1348,6 @@ export class MkeMemoryTraceService {
       summary: input.summary,
       evidenceRefs,
       experienceCandidate,
-      riskTier,
-      humanReviewRequired,
     });
 
     const feedback = sanitizeValue(
@@ -1392,8 +1364,6 @@ export class MkeMemoryTraceService {
         evidenceRefs,
         userGoalSnapshot: input.userGoalSnapshot ?? null,
         experienceCandidate,
-        riskTier,
-        humanReviewRequired,
         binding: {
           traceId: trace.traceId,
           taskId: trace.taskId,
@@ -1431,8 +1401,6 @@ export class MkeMemoryTraceService {
         evidenceRefs,
         userGoalSnapshot: input.userGoalSnapshot ?? null,
         experienceCandidate,
-        riskTier,
-        humanReviewRequired,
         sourceToolName: input.sourceToolName ?? null,
         sourceToolCallId: input.sourceToolCallId ?? null,
         accepted: true,

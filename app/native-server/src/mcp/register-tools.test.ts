@@ -186,7 +186,6 @@ describe('handleToolCall execution wrapper', () => {
   });
 
   it('applies _tabrix previousFeedback to an earlier Memory trace on the next tool call', async () => {
-    process.env.TABRIX_POLICY_CAPABILITIES = 'memory_feedback';
     markBridgeReady();
     jest
       .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')

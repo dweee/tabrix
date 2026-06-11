@@ -94,8 +94,6 @@ async function seedMkeRows(): Promise<void> {
     summary: 'AI verified the click completed the intended page action',
     evidenceRefs: [clickTrace.traceId],
     experienceCandidate: true,
-    riskTier: 'medium',
-    humanReviewRequired: false,
     sourceToolName: 'chrome_click_element',
     sourceToolCallId: 'feedback-call-2',
     receivedAt: '2026-06-06T10:00:00.090Z',

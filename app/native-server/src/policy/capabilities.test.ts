@@ -66,11 +66,7 @@ describe('B-016 capability gate parser', () => {
       const result = parseCapabilityAllowlist({ TABRIX_POLICY_CAPABILITIES: 'all' });
       // Assertion stays intentionally
       // explicit so adding new capabilities forces an update here.
-      expect(Array.from(result.enabled).sort()).toEqual([
-        'api_knowledge',
-        'experience_replay',
-        'memory_feedback',
-      ]);
+      expect(Array.from(result.enabled).sort()).toEqual(['api_knowledge', 'experience_replay']);
       expect(result.unknown).toEqual([]);
     });
 
@@ -78,11 +74,7 @@ describe('B-016 capability gate parser', () => {
       const result = parseCapabilityAllowlist({
         TABRIX_POLICY_CAPABILITIES: 'all, api_knowlege', // intentional typo
       });
-      expect(Array.from(result.enabled).sort()).toEqual([
-        'api_knowledge',
-        'experience_replay',
-        'memory_feedback',
-      ]);
+      expect(Array.from(result.enabled).sort()).toEqual(['api_knowledge', 'experience_replay']);
       expect(result.unknown).toEqual(['api_knowlege']);
     });
 

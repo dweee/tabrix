@@ -252,14 +252,6 @@ const handleMemoryRecordAiFeedback: NativeToolHandler = (args, deps) => {
       evidenceRefs: readStringArrayArg(object, 'evidenceRefs'),
       userGoalSnapshot: readStringArg(object, 'userGoalSnapshot'),
       experienceCandidate: readBooleanArg(object, 'experienceCandidate'),
-      riskTier:
-        object.riskTier === 'low' ||
-        object.riskTier === 'medium' ||
-        object.riskTier === 'high' ||
-        object.riskTier === 'critical'
-          ? object.riskTier
-          : undefined,
-      humanReviewRequired: readBooleanArg(object, 'humanReviewRequired'),
       receivedAt: new Date().toISOString(),
       sourceToolName: TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK,
       sourceToolCallId: null,
