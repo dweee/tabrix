@@ -358,11 +358,11 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       siteFamily: 'example.test',
       pageRole: 'workspace',
       observationCount: 2,
-      sourceTraceCount: 1,
     });
     expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('pageStateModel');
     expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('objectGraph');
     expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('sourceTraceIds');
+    expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('sourceTraceCount');
     expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('confidenceScore');
     expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('driftScore');
   });
@@ -964,12 +964,12 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.experienceRecipes[0]).toMatchObject({
       redactionState: 'template_only',
       successCount: 1,
-      sourceTraceCount: 2,
       linkedKnowledgeCount: 1,
     });
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('steps');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('preconditions');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('sourceTraceIds');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('sourceTraceCount');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('reliabilityScore');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('speedScore');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('tokenSavingScore');

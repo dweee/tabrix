@@ -196,7 +196,6 @@ export interface MkeKnowledgeModelSummary {
   observationCount: number;
   successfulUseCount: number;
   failedUseCount: number;
-  sourceTraceCount: number;
   sourceExperienceCount: number;
   archivedAt?: string | null;
   lastObservedAt?: string | null;
@@ -232,7 +231,6 @@ export interface MkeExperienceRecipeSummary {
   exportState: string;
   importState: string;
   redactionState: string;
-  sourceTraceCount: number;
   linkedKnowledgeCount: number;
   archivedAt?: string | null;
   lastUsedAt?: string | null;
