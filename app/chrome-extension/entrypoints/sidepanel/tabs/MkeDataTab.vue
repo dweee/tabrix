@@ -49,17 +49,20 @@
             v-if="activeTab === 'object'"
             type="button"
             class="mke-icon-button mke-object-storage-toggle"
-            :class="{ 'mke-icon-button--active': personalBrowserStateStorageEnabled }"
+            :class="{
+              'mke-icon-button--active': personalBrowserStateStorageEnabled,
+              'mke-icon-button--off': !personalBrowserStateStorageEnabled,
+              'mke-icon-button--confirmed': preferenceToggleConfirmed,
+            }"
             :aria-pressed="personalBrowserStateStorageEnabled"
             :disabled="preferenceLoading"
             :title="
-              personalBrowserStateStorageEnabled
-                ? '浏览状态缓存已开启，点击关闭；不会清空对象库'
-                : '浏览状态缓存已关闭，点击开启；对象库保留脱敏记录'
+              personalBrowserStateStorageEnabled ? '缓存开启，点击关闭' : '缓存关闭，点击开启'
             "
             @click="togglePersonalBrowserStateStorage"
           >
-            <i-lucide-shield-check aria-hidden="true" />
+            <i-lucide-shield-check v-if="personalBrowserStateStorageEnabled" aria-hidden="true" />
+            <i-lucide-shield-off v-else aria-hidden="true" />
             <span class="mke-visually-hidden">切换个人浏览状态存储</span>
           </button>
           <button
@@ -255,12 +258,14 @@ const loading = ref(false);
 const loadError = ref('');
 const loadErrorDetail = ref('');
 const preferenceLoading = ref(false);
+const preferenceToggleConfirmed = ref(false);
 const personalBrowserStateStorageEnabled = ref(false);
 const copiedRecordId = ref('');
 const copyFailedRecordId = ref('');
 const expandedRecordIds = ref<Set<string>>(new Set());
 const { theme: agentTheme, initTheme } = useAgentTheme();
 let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
+let preferenceFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
 let autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let refreshInFlight = false;
 
@@ -390,6 +395,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (copyResetTimer) clearTimeout(copyResetTimer);
+  if (preferenceFeedbackTimer) clearTimeout(preferenceFeedbackTimer);
   if (autoRefreshTimer) clearInterval(autoRefreshTimer);
 });
 
@@ -463,6 +469,12 @@ async function togglePersonalBrowserStateStorage(): Promise<void> {
       personalBrowserStateStorageEnabled: nextEnabled,
     });
     personalBrowserStateStorageEnabled.value = data.personalBrowserStateStorageEnabled;
+    preferenceToggleConfirmed.value = true;
+    if (preferenceFeedbackTimer) clearTimeout(preferenceFeedbackTimer);
+    preferenceFeedbackTimer = setTimeout(() => {
+      preferenceToggleConfirmed.value = false;
+      preferenceFeedbackTimer = null;
+    }, 650);
     await refreshAll({ silent: true });
   } catch (error) {
     const formatted = formatError(error);
@@ -1154,6 +1166,9 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 
 .mke-icon-button svg {
   height: 16px;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
   width: 16px;
 }
 
@@ -1168,18 +1183,63 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
   height: 34px;
   justify-content: center;
   padding: 0;
+  position: relative;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease,
+    transform 120ms ease;
   width: 34px;
 }
 
-.mke-icon-button--active,
-.mke-icon-button:hover {
+.mke-icon-button--active {
+  background: var(--mke-accent-bg);
   border-color: var(--mke-border-strong);
   color: var(--mke-accent);
+}
+
+.mke-icon-button--off {
+  background: var(--mke-surface-2);
+  border-color: var(--mke-border);
+  color: var(--mke-muted);
+}
+
+.mke-icon-button:hover {
+  border-color: var(--mke-border-strong);
+  box-shadow: var(--mke-shadow);
+  color: var(--mke-accent);
+}
+
+.mke-icon-button:active {
+  transform: scale(0.94);
+}
+
+.mke-icon-button--confirmed {
+  animation: mke-toggle-confirm 650ms ease;
+}
+
+.mke-icon-button--confirmed svg {
+  transform: scale(1.1);
 }
 
 .mke-icon-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+@keyframes mke-toggle-confirm {
+  0% {
+    box-shadow: 0 0 0 0 var(--mke-active-ring);
+  }
+
+  55% {
+    box-shadow: 0 0 0 5px var(--mke-active-ring);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
 }
 
 .mke-tabs {
