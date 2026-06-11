@@ -22,10 +22,20 @@ import {
   type MemoryPersistenceMode,
 } from '@tabrix/shared';
 import { normalizeIntentSignature } from './experience-aggregator';
+import {
+  EXPERIENCE_SUGGEST_MIN_COMPOSITE_SCORE,
+  EXPERIENCE_SUGGEST_MIN_SUCCESS_COUNT,
+  EXPERIENCE_SUGGEST_MIN_SUCCESS_RATE,
+  computeExperienceSuccessRate,
+  isSuggestableExperience,
+} from './experience-quality-gate';
 import type { ExperienceActionPathRow } from './experience-repository';
 
-export const EXPERIENCE_SUGGEST_MIN_SUCCESS_COUNT = 3;
-export const EXPERIENCE_SUGGEST_MIN_SUCCESS_RATE = 0.7;
+export {
+  EXPERIENCE_SUGGEST_MIN_COMPOSITE_SCORE,
+  EXPERIENCE_SUGGEST_MIN_SUCCESS_COUNT,
+  EXPERIENCE_SUGGEST_MIN_SUCCESS_RATE,
+};
 
 export class ExperienceSuggestPlanInputError extends Error {
   public readonly code: 'TABRIX_EXPERIENCE_SUGGEST_PLAN_BAD_INPUT';
@@ -123,12 +133,6 @@ export function parseExperienceSuggestPlanInput(rawArgs: unknown): ExperienceSug
   };
 }
 
-function computeSuccessRate(successCount: number, failureCount: number): number {
-  const total = successCount + failureCount;
-  if (total <= 0) return 0;
-  return successCount / total;
-}
-
 function rowToPlan(row: ExperienceActionPathRow): ExperienceActionPathPlan {
   return {
     actionPathId: row.actionPathId,
@@ -136,7 +140,7 @@ function rowToPlan(row: ExperienceActionPathRow): ExperienceActionPathPlan {
     intentSignature: row.intentSignature,
     successCount: row.successCount,
     failureCount: row.failureCount,
-    successRate: computeSuccessRate(row.successCount, row.failureCount),
+    successRate: computeExperienceSuccessRate(row.successCount, row.failureCount),
     lastUsedAt: row.lastUsedAt,
     steps: row.stepSequence.map((step) => ({
       toolName: step.toolName,
@@ -144,13 +148,6 @@ function rowToPlan(row: ExperienceActionPathRow): ExperienceActionPathPlan {
       historyRef: step.historyRef,
     })),
   };
-}
-
-function isSuggestableExperience(row: ExperienceActionPathRow): boolean {
-  return (
-    row.successCount >= EXPERIENCE_SUGGEST_MIN_SUCCESS_COUNT &&
-    computeSuccessRate(row.successCount, row.failureCount) >= EXPERIENCE_SUGGEST_MIN_SUCCESS_RATE
-  );
 }
 
 /**

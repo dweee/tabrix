@@ -4,6 +4,7 @@ import type { ExecutionSession, ExecutionStep, Task } from '../../execution/type
 import {
   ExperienceAggregator,
   ExperienceRepository,
+  EXPERIENCE_SUGGEST_MIN_COMPOSITE_SCORE,
   EXPERIENCE_SUGGEST_MIN_SUCCESS_COUNT,
   EXPERIENCE_SUGGEST_MIN_SUCCESS_RATE,
   ExperienceSuggestPlanInputError,
@@ -112,6 +113,7 @@ describe('buildSuggestPlanResult (B-013, pure)', () => {
           ],
           successCount: 3,
           failureCount: 1,
+          compositeScoreDecayed: 0.8,
           lastUsedAt: '2026-04-21T10:00:00.000Z',
           createdAt: '2026-04-20T00:00:00.000Z',
           updatedAt: '2026-04-21T10:00:00.000Z',
@@ -168,6 +170,7 @@ describe('buildSuggestPlanResult (B-013, pure)', () => {
           stepSequence: [],
           successCount: 0,
           failureCount: 4,
+          compositeScoreDecayed: 0.9,
           createdAt: '2026-04-20T00:00:00.000Z',
           updatedAt: '2026-04-20T00:00:00.000Z',
         },
@@ -178,6 +181,7 @@ describe('buildSuggestPlanResult (B-013, pure)', () => {
           stepSequence: [],
           successCount: 1,
           failureCount: 0,
+          compositeScoreDecayed: 0.9,
           createdAt: '2026-04-20T00:00:00.000Z',
           updatedAt: '2026-04-20T00:00:00.000Z',
         },
@@ -188,9 +192,51 @@ describe('buildSuggestPlanResult (B-013, pure)', () => {
     expect(result.plans).toEqual([]);
     expect(EXPERIENCE_SUGGEST_MIN_SUCCESS_COUNT).toBe(3);
     expect(EXPERIENCE_SUGGEST_MIN_SUCCESS_RATE).toBe(0.7);
+    expect(EXPERIENCE_SUGGEST_MIN_COMPOSITE_SCORE).toBe(0.7);
   });
 
-  it('keeps rows that clear the suggestion evidence gate', () => {
+  it('filters rows without a scored composite quality signal', () => {
+    const result = buildSuggestPlanResult(
+      [
+        {
+          actionPathId: 'ap-unscored',
+          pageRole: 'repo_home',
+          intentSignature: 'open issues',
+          stepSequence: [],
+          successCount: 10,
+          failureCount: 0,
+          createdAt: '2026-04-20T00:00:00.000Z',
+          updatedAt: '2026-04-20T00:00:00.000Z',
+        },
+      ],
+      'disk',
+    );
+    expect(result.status).toBe('no_match');
+    expect(result.plans).toEqual([]);
+  });
+
+  it('filters rows below the composite score gate', () => {
+    const result = buildSuggestPlanResult(
+      [
+        {
+          actionPathId: 'ap-low-score',
+          pageRole: 'repo_home',
+          intentSignature: 'open issues',
+          stepSequence: [],
+          successCount: 10,
+          failureCount: 0,
+          compositeScoreDecayed: 0.69,
+          createdAt: '2026-04-20T00:00:00.000Z',
+          updatedAt: '2026-04-20T00:00:00.000Z',
+        },
+      ],
+      'disk',
+    );
+    expect(result.status).toBe('no_match');
+    expect(result.plans).toEqual([]);
+  });
+
+  it('keeps rows that clear the full suggestion evidence gate', () => {
     const result = buildSuggestPlanResult(
       [
         {
@@ -200,6 +246,7 @@ describe('buildSuggestPlanResult (B-013, pure)', () => {
           stepSequence: [],
           successCount: 3,
           failureCount: 1,
+          compositeScoreDecayed: 0.8,
           createdAt: '2026-04-20T00:00:00.000Z',
           updatedAt: '2026-04-20T00:00:00.000Z',
         },
@@ -230,6 +277,7 @@ describe('ExperienceRepository.suggestActionPaths (B-013, SQL)', () => {
       failureDelta: number;
       lastUsedAt: string;
       stepSequence: { toolName: string; status: string; historyRef: string | null }[];
+      compositeScoreDecayed: number | null;
     }>,
   ) {
     repo.upsertActionPath({
@@ -246,6 +294,16 @@ describe('ExperienceRepository.suggestActionPaths (B-013, SQL)', () => {
       createdAt: '2026-04-20T00:00:00.000Z',
       updatedAt: '2026-04-20T00:00:00.000Z',
     });
+    const compositeScoreDecayed = Object.hasOwn(overrides, 'compositeScoreDecayed')
+      ? (overrides.compositeScoreDecayed ?? null)
+      : 0.8;
+    if (compositeScoreDecayed !== null) {
+      repo.updateCompositeScoreForActionPath({
+        actionPathId: overrides.actionPathId ?? 'ap-x',
+        compositeScoreDecayed,
+        nowIso: '2026-04-20T00:00:00.000Z',
+      });
+    }
   }
 
   it('returns [] when no row matches the intent signature', () => {
@@ -263,14 +321,15 @@ describe('ExperienceRepository.suggestActionPaths (B-013, SQL)', () => {
     }
   });
 
-  it('returns the matching row(s) ordered by success_count DESC', () => {
+  it('returns the matching row(s) ordered by composite score then success_count', () => {
     const { repo, close } = bootstrap();
     try {
       seed(repo, {
         actionPathId: 'ap-low',
         pageRole: 'repo_home',
-        successDelta: 1,
-        failureDelta: 4,
+        successDelta: 3,
+        failureDelta: 1,
+        compositeScoreDecayed: 0.9,
         lastUsedAt: '2026-04-20T01:00:00.000Z',
       });
       seed(repo, {
@@ -278,6 +337,7 @@ describe('ExperienceRepository.suggestActionPaths (B-013, SQL)', () => {
         pageRole: 'issues_list',
         successDelta: 5,
         failureDelta: 0,
+        compositeScoreDecayed: 0.8,
         lastUsedAt: '2026-04-20T02:00:00.000Z',
       });
 
@@ -286,7 +346,7 @@ describe('ExperienceRepository.suggestActionPaths (B-013, SQL)', () => {
         siteFamily: 'github',
         limit: 5,
       });
-      expect(rows.map((r) => r.actionPathId)).toEqual(['ap-high', 'ap-low']);
+      expect(rows.map((r) => r.actionPathId)).toEqual(['ap-low', 'ap-high']);
     } finally {
       close();
     }
@@ -303,7 +363,7 @@ describe('ExperienceRepository.suggestActionPaths (B-013, SQL)', () => {
       seed(repo, {
         actionPathId: 'ap-issues',
         pageRole: 'issues_list',
-        successDelta: 1,
+        successDelta: 3,
       });
 
       const onlyIssues = repo.suggestActionPaths({
@@ -321,7 +381,7 @@ describe('ExperienceRepository.suggestActionPaths (B-013, SQL)', () => {
   it('clamps limit to >= 1 even when caller passes 0 or negative', () => {
     const { repo, close } = bootstrap();
     try {
-      seed(repo, { actionPathId: 'ap-only', successDelta: 1 });
+      seed(repo, { actionPathId: 'ap-only', successDelta: 3, failureDelta: 0 });
       const zero = repo.suggestActionPaths({
         intentSignature: 'open issues',
         siteFamily: 'github',
@@ -344,14 +404,16 @@ describe('ExperienceRepository.suggestActionPaths (B-013, SQL)', () => {
     try {
       seed(repo, {
         actionPathId: 'ap-old',
-        successDelta: 2,
+        successDelta: 3,
         failureDelta: 0,
+        compositeScoreDecayed: 0.8,
         lastUsedAt: '2026-04-19T00:00:00.000Z',
       });
       seed(repo, {
         actionPathId: 'ap-new',
-        successDelta: 2,
+        successDelta: 3,
         failureDelta: 0,
+        compositeScoreDecayed: 0.8,
         lastUsedAt: '2026-04-21T00:00:00.000Z',
       });
       const rows = repo.suggestActionPaths({
@@ -402,7 +464,7 @@ describe('ExperienceRepository.suggestActionPaths (B-013, SQL)', () => {
         siteFamily: 'example.com',
         pageRole: 'repo_home',
         intentSignature: 'open issues',
-        successDelta: 1,
+        successDelta: 3,
       });
 
       const githubRows = repo.suggestActionPaths({
@@ -433,7 +495,7 @@ describe('ExperienceRepository.suggestActionPaths (B-013, SQL)', () => {
         siteFamily: 'example.com',
         pageRole: 'repo_home',
         intentSignature: 'open issues',
-        successDelta: 1,
+        successDelta: 2,
       });
       repo.upsertActionPath({
         actionPathId: 'ap-site-preserve',
@@ -459,13 +521,55 @@ describe('ExperienceRepository.suggestActionPaths (B-013, SQL)', () => {
       expect(rows[0]).toMatchObject({
         actionPathId: 'ap-site-preserve',
         siteFamily: 'example.com',
-        successCount: 3,
+        successCount: 4,
       });
       expect(
         repo.suggestActionPaths({
           intentSignature: 'open issues',
           siteFamily: 'unknown',
           pageRole: 'repo_home',
+          limit: 5,
+        }),
+      ).toEqual([]);
+    } finally {
+      close();
+    }
+  });
+
+  it('filters SQL rows that have enough wins but no composite score', () => {
+    const { repo, close } = bootstrap();
+    try {
+      seed(repo, {
+        actionPathId: 'ap-unscored',
+        successDelta: 10,
+        failureDelta: 0,
+        compositeScoreDecayed: null,
+      });
+      expect(
+        repo.suggestActionPaths({
+          intentSignature: 'open issues',
+          siteFamily: 'github',
+          limit: 5,
+        }),
+      ).toEqual([]);
+    } finally {
+      close();
+    }
+  });
+
+  it('filters SQL rows below the composite score gate', () => {
+    const { repo, close } = bootstrap();
+    try {
+      seed(repo, {
+        actionPathId: 'ap-low-score',
+        successDelta: 10,
+        failureDelta: 0,
+        compositeScoreDecayed: 0.69,
+      });
+      expect(
+        repo.suggestActionPaths({
+          intentSignature: 'open issues',
+          siteFamily: 'github',
           limit: 5,
         }),
       ).toEqual([]);
@@ -530,6 +634,13 @@ describe('ExperienceRepository.suggestActionPaths · V24-01 replay-session sanit
     repo: StepRepository,
     overrides: Partial<ExecutionStep> & { stepId: string; sessionId: string },
   ): void {
+    const defaultResultSummary = JSON.stringify({
+      actionEvidenceResult: {
+        business: {
+          businessSuccessProven: true,
+        },
+      },
+    });
     repo.insert({
       stepId: overrides.stepId,
       sessionId: overrides.sessionId,
@@ -539,11 +650,14 @@ describe('ExperienceRepository.suggestActionPaths · V24-01 replay-session sanit
       status: overrides.status ?? 'completed',
       startedAt: '2026-04-20T00:00:01.100Z',
       endedAt: '2026-04-20T00:00:01.200Z',
+      resultSummary: Object.hasOwn(overrides, 'resultSummary')
+        ? overrides.resultSummary
+        : defaultResultSummary,
       artifactRefs: overrides.artifactRefs ?? [],
     });
   }
 
-  it('suggest returns compounded successCount after a successful replay session is aggregated', () => {
+  it('does not suggest a replay-derived row until it clears the evidence gate', () => {
     const { db, taskRepo, sessionRepo, stepRepo, snapshotRepo, aggregator, experienceRepo } =
       bootstrap();
     try {
@@ -571,14 +685,15 @@ describe('ExperienceRepository.suggestActionPaths · V24-01 replay-session sanit
         pageRole: 'issues_list',
         limit: 1,
       });
-      expect(initial).toHaveLength(1);
-      expect(initial[0].successCount).toBe(1);
-      const original = initial[0];
+      expect(initial).toHaveLength(0);
+      const original = experienceRepo.listActionPaths()[0];
+      expect(original?.successCount).toBe(1);
+      expect(original).toBeDefined();
 
       // 2. Replay session referencing original.actionPathId.
       insTask(taskRepo, {
         taskId: 't-replay',
-        intent: `experience_replay:${original.actionPathId}`,
+        intent: `experience_replay:${original!.actionPathId}`,
       });
       insSession(sessionRepo, {
         sessionId: 'replay',
@@ -596,12 +711,37 @@ describe('ExperienceRepository.suggestActionPaths · V24-01 replay-session sanit
         pageRole: 'issues_list',
         limit: 1,
       });
-      expect(after).toHaveLength(1);
-      expect(after[0].actionPathId).toBe(original.actionPathId);
-      expect(after[0].successCount).toBe(2);
-      expect(after[0].failureCount).toBe(0);
-      // step_sequence is preserved verbatim (brief §7).
-      expect(after[0].stepSequence).toEqual(original.stepSequence);
+      expect(after).toHaveLength(0);
+
+      experienceRepo.upsertActionPath({
+        actionPathId: original!.actionPathId,
+        siteFamily: 'github',
+        pageRole: 'issues_list',
+        intentSignature: 'open issues',
+        stepSequence: original!.stepSequence,
+        successDelta: 2,
+        failureDelta: 0,
+        lastUsedAt: '2026-04-23T00:00:00.000Z',
+        createdAt: '2026-04-23T00:00:00.000Z',
+        updatedAt: '2026-04-23T00:00:00.000Z',
+      });
+      experienceRepo.updateCompositeScoreForActionPath({
+        actionPathId: original!.actionPathId,
+        compositeScoreDecayed: 0.8,
+        nowIso: '2026-04-23T00:00:01.000Z',
+      });
+
+      const eligible = experienceRepo.suggestActionPaths({
+        intentSignature: 'open issues',
+        siteFamily: 'github',
+        pageRole: 'issues_list',
+        limit: 1,
+      });
+      expect(eligible).toHaveLength(1);
+      expect(eligible[0].actionPathId).toBe(original!.actionPathId);
+      expect(eligible[0].successCount).toBe(3);
+      expect(eligible[0].failureCount).toBe(0);
+      expect(eligible[0].stepSequence).toEqual(original!.stepSequence);
     } finally {
       db.close();
     }

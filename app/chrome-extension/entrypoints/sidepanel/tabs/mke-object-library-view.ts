@@ -243,13 +243,13 @@ function buildActionsSection(objects: MkeBrowserObjectSummary[]): MkeObjectViewS
   const actionCounts = countObjectKinds(objects, (object) => formatActionKind(object));
   return {
     id: 'actions',
-    title: '可操作功能',
+    title: '候选操作目标',
     badge: `${objects.length} 个`,
-    emptyText: '当前快照未记录可操作目标。',
+    emptyText: '当前快照未记录候选操作目标。',
     items: actionCounts.map(([label, count]) => ({
       label,
-      value: `${count} 个目标`,
-      tone: 'good',
+      value: `${count} 个候选`,
+      tone: 'neutral',
     })),
   };
 }
@@ -275,7 +275,7 @@ function buildDataApiSection(
     emptyText: '当前快照未记录数据/API 线索。',
     items: counts.map(([label, count]) => ({
       label,
-      value: count > 1 ? `${count} 条线索` : '已观察',
+      value: count > 1 ? `${count} 条线索` : '线索',
       tone: label.includes('提交') || label.includes('写入') ? 'warn' : 'neutral',
     })),
   };
@@ -375,7 +375,7 @@ function formatActionKind(object: MkeBrowserObjectSummary): string {
   const actionType = object.actionTypes?.find(
     (item) => typeof item === 'string' && item.length > 0,
   );
-  if (!actionType) return '可操作目标';
+  if (!actionType) return '候选目标';
   return translateKnownLabel(actionType);
 }
 
@@ -410,7 +410,7 @@ function translateKnownLabel(value: string): string {
     filter: '筛选',
     page: '页面',
     region: '区域',
-    action_target: '可操作目标',
+    action_target: '候选目标',
     data_source: '数据/API',
   };
   return labels[value.toLowerCase()] ?? compactText(value.replace(/_/g, ' '), 18);
@@ -432,7 +432,7 @@ function formatTabStatus(value: string | null | undefined): string | null {
 }
 
 function formatOperability(object: MkeBrowserObjectSummary): string | null {
-  if (object.canTabrixOperate === true) return '可操作';
+  if (object.canTabrixOperate === true) return '可访问';
   if (object.canTabrixOperate === false) return '受限';
   return '未知';
 }

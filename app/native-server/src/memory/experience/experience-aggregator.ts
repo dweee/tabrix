@@ -197,19 +197,109 @@ function isExcludedFromAggregation(steps: ReturnType<StepRepository['listBySessi
   return steps.every((step) => EXPERIENCE_AGGREGATION_EXCLUDED_TOOLS.has(step.toolName));
 }
 
-function toCounterDelta(status: PendingAggregationSession['status']): {
+interface AggregationActionEvidenceRow {
+  status: string;
+  result_blob: string | null;
+}
+
+interface AggregationStepEvidenceRow {
+  status: string;
+  resultSummary?: string;
+}
+
+function readObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readBooleanAtPath(root: Record<string, unknown>, path: readonly string[]): boolean | null {
+  let cursor: unknown = root;
+  for (const part of path) {
+    const obj = readObject(cursor);
+    if (!obj) return null;
+    cursor = obj[part];
+  }
+  return typeof cursor === 'boolean' ? cursor : null;
+}
+
+function parseResultBlob(raw: string | null): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return readObject(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function hasBodyBusinessSuccessProof(body: Record<string, unknown> | null): boolean {
+  if (!body) return false;
+  return (
+    readBooleanAtPath(body, ['actionEvidenceResult', 'business', 'businessSuccessProven']) ===
+      true ||
+    readBooleanAtPath(body, ['postActionReadback', 'businessSuccessProven']) === true ||
+    body.businessSuccess === true
+  );
+}
+
+function hasBodyBusinessFailureEvidence(body: Record<string, unknown> | null): boolean {
+  if (!body) return false;
+  return (
+    readBooleanAtPath(body, ['actionEvidenceResult', 'business', 'businessSuccessProven']) ===
+      false ||
+    readBooleanAtPath(body, ['postActionReadback', 'businessSuccessProven']) === false ||
+    body.success === false ||
+    body.businessSuccess === false
+  );
+}
+
+function hasBusinessSuccessProof(
+  row: AggregationActionEvidenceRow | AggregationStepEvidenceRow,
+): boolean {
+  const body =
+    'result_blob' in row
+      ? parseResultBlob(row.result_blob)
+      : parseResultBlob(row.resultSummary ?? null);
+  return hasBodyBusinessSuccessProof(body);
+}
+
+function hasBusinessFailureEvidence(
+  row: AggregationActionEvidenceRow | AggregationStepEvidenceRow,
+): boolean {
+  if (row.status === 'failed' || row.status === 'soft_failure') return true;
+  const body =
+    'result_blob' in row
+      ? parseResultBlob(row.result_blob)
+      : parseResultBlob(row.resultSummary ?? null);
+  return hasBodyBusinessFailureEvidence(body);
+}
+
+function toEvidenceCounterDelta(
+  status: PendingAggregationSession['status'],
+  actions: AggregationActionEvidenceRow[],
+  steps: AggregationStepEvidenceRow[],
+): {
   successDelta: number;
   failureDelta: number;
-} {
-  if (status === 'completed') {
+} | null {
+  const evidenceRows = [...actions, ...steps];
+  if (status !== 'completed') {
+    return evidenceRows.length > 0 ? { successDelta: 0, failureDelta: 1 } : null;
+  }
+  if (evidenceRows.some(hasBusinessSuccessProof)) {
     return { successDelta: 1, failureDelta: 0 };
   }
-  return { successDelta: 0, failureDelta: 1 };
+  if (evidenceRows.some(hasBusinessFailureEvidence)) {
+    return { successDelta: 0, failureDelta: 1 };
+  }
+  return null;
 }
 
 export class ExperienceAggregator {
   private readonly upsertAndMarkTxn;
   private readonly latestSnapshotUrlForSessionStmt;
+  private readonly actionEvidenceForSessionStmt;
   // Session-end composite score writer. Isolation-aware:
   // a SQLite failure during composite write does NOT prevent
   // `aggregated_at` from being marked (that lock belongs to idempotent
@@ -236,6 +326,12 @@ export class ExperienceAggregator {
           AND s.url <> ''
         ORDER BY s.captured_at DESC, s.snapshot_id DESC
         LIMIT 1`,
+    );
+    this.actionEvidenceForSessionStmt = db.prepare(
+      `SELECT status, result_blob
+         FROM memory_actions
+        WHERE session_id = ?
+        ORDER BY captured_at ASC, action_id ASC`,
     );
     this.upsertAndMarkTxn = this.db.transaction(
       (input: {
@@ -316,20 +412,8 @@ export class ExperienceAggregator {
           this.sessions.markAggregated(session.sessionId, markTime);
           continue;
         }
-        const { successDelta, failureDelta } = toCounterDelta(session.status);
         const replayLastUsedAt = session.endedAt ?? session.startedAt;
-        this.upsertAndMarkTxn({
-          actionPathId: replayedActionPathId,
-          siteFamily: original.siteFamily ?? 'unknown',
-          pageRole: original.pageRole,
-          intentSignature: original.intentSignature,
-          stepSequence: original.stepSequence,
-          successDelta,
-          failureDelta,
-          lastUsedAt: replayLastUsedAt,
-          nowIso: markTime,
-          sessionId: session.sessionId,
-        });
+        this.sessions.markAggregated(session.sessionId, markTime);
         // Session-end composite score for the replay
         // session. Written OUTSIDE the upsertAndMarkTxn transaction
         // because failure here MUST NOT roll back `aggregated_at`
@@ -364,7 +448,12 @@ export class ExperienceAggregator {
       const latestSnapshotUrl = this.findLatestSnapshotUrlForSession(session.sessionId);
       const siteFamily = deriveSiteFamilyFromUrl(latestSnapshotUrl) ?? 'unknown';
       const stepSequence = toStepSequence(sessionSteps);
-      const { successDelta, failureDelta } = toCounterDelta(session.status);
+      const actionEvidence = this.listActionEvidenceForSession(session.sessionId);
+      const counterDelta = toEvidenceCounterDelta(session.status, actionEvidence, sessionSteps);
+      if (!counterDelta) {
+        this.sessions.markAggregated(session.sessionId, markTime);
+        continue;
+      }
       const actionPathId = buildActionPathId(pageRole, intentSignature, siteFamily);
       const sessionLastUsedAt = session.endedAt ?? session.startedAt;
 
@@ -374,11 +463,24 @@ export class ExperienceAggregator {
         pageRole,
         intentSignature,
         stepSequence,
-        successDelta,
-        failureDelta,
+        successDelta: counterDelta.successDelta,
+        failureDelta: counterDelta.failureDelta,
         lastUsedAt: sessionLastUsedAt,
         nowIso: markTime,
         sessionId: session.sessionId,
+      });
+      const normalComponents = projectCompositeComponents({
+        successCount: counterDelta.successDelta,
+        failureCount: counterDelta.failureDelta,
+      });
+      const normalWeights: TabrixTaskWeights = getTaskWeightsFor('github', pageRole);
+      this.compositeScoreWriter.write({
+        sessionId: session.sessionId,
+        actionPathId,
+        components: normalComponents,
+        weights: normalWeights,
+        lastReplayAt: sessionLastUsedAt,
+        nowIso: markTime,
       });
       projected += 1;
     }
@@ -391,5 +493,9 @@ export class ExperienceAggregator {
       | { url: string | null }
       | undefined;
     return row?.url ?? undefined;
+  }
+
+  private listActionEvidenceForSession(sessionId: string): AggregationActionEvidenceRow[] {
+    return this.actionEvidenceForSessionStmt.all(sessionId) as AggregationActionEvidenceRow[];
   }
 }

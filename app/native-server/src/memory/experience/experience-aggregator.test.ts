@@ -78,6 +78,13 @@ function insertSession(
 }
 
 function insertStep(repo: StepRepository, overrides: Partial<ExecutionStep> = {}): ExecutionStep {
+  const defaultResultSummary = JSON.stringify({
+    actionEvidenceResult: {
+      business: {
+        businessSuccessProven: true,
+      },
+    },
+  });
   const step: ExecutionStep = {
     stepId: overrides.stepId ?? 'step-1',
     sessionId: overrides.sessionId ?? 'session-1',
@@ -86,7 +93,9 @@ function insertStep(repo: StepRepository, overrides: Partial<ExecutionStep> = {}
     stepType: overrides.stepType ?? 'tool_call',
     status: overrides.status ?? 'completed',
     inputSummary: overrides.inputSummary,
-    resultSummary: overrides.resultSummary,
+    resultSummary: Object.hasOwn(overrides, 'resultSummary')
+      ? overrides.resultSummary
+      : defaultResultSummary,
     startedAt: overrides.startedAt ?? '2026-04-20T00:00:01.100Z',
     endedAt: overrides.endedAt ?? '2026-04-20T00:00:01.200Z',
     errorCode: overrides.errorCode,
@@ -230,26 +239,8 @@ describe('ExperienceAggregator (B-012 v1)', () => {
       expect(rows.map((row) => row.siteFamily).sort()).toEqual(['example.com', 'github']);
       expect(new Set(rows.map((row) => row.actionPathId)).size).toBe(2);
 
-      expect(
-        experienceRepo
-          .suggestActionPaths({
-            intentSignature: 'open issues',
-            siteFamily: 'github',
-            pageRole: 'repo_home',
-            limit: 5,
-          })
-          .map((row) => row.siteFamily),
-      ).toEqual(['github']);
-      expect(
-        experienceRepo
-          .suggestActionPaths({
-            intentSignature: 'open issues',
-            siteFamily: 'example.com',
-            pageRole: 'repo_home',
-            limit: 5,
-          })
-          .map((row) => row.siteFamily),
-      ).toEqual(['example.com']);
+      expect(rows.filter((row) => row.siteFamily === 'github')).toHaveLength(1);
+      expect(rows.filter((row) => row.siteFamily === 'example.com')).toHaveLength(1);
     } finally {
       close();
     }
@@ -409,7 +400,7 @@ describe('ExperienceAggregator (B-012 v1)', () => {
       expect(rows[0].successCount).toBe(1);
       expect(rows[0].failureCount).toBe(1);
       expect(rows[0].lastUsedAt).toBe('2026-04-20T00:00:11.000Z');
-      expect(rows[0].updatedAt).toBe('2026-04-21T00:00:00.000Z');
+      expect(rows[0].updatedAt).toBe('2026-04-21T00:10:00.000Z');
       expect(rows[0].stepSequence).toEqual([
         { toolName: 'chrome_read_page', status: 'completed', historyRef: null },
       ]);
@@ -687,7 +678,8 @@ describe('ExperienceAggregator (B-012 v1)', () => {
     });
   });
 
-  // V24-01 (brief §7) — replay sessions compound on the original row.
+  // V24-01 (brief §7) — replay sessions are audit/composite only here.
+  // Per-step success/failure counters are written by experience_score_step.
   describe('V24-01: experience_replay session special-case (brief §7)', () => {
     function seedOriginalRow(
       ctx: ReturnType<typeof bootstrap>,
@@ -723,7 +715,7 @@ describe('ExperienceAggregator (B-012 v1)', () => {
       };
     }
 
-    it('compounds a successful replay session onto the original row (no new bucket)', () => {
+    it('marks a successful replay session without double-counting the original row', () => {
       const ctx = bootstrap();
       try {
         const { taskRepo, sessionRepo, stepRepo, aggregator, experienceRepo } = ctx;
@@ -769,16 +761,17 @@ describe('ExperienceAggregator (B-012 v1)', () => {
         expect(after[0].actionPathId).toBe(seeded.actionPathId);
         expect(after[0].pageRole).toBe(seeded.pageRole);
         expect(after[0].intentSignature).toBe(seeded.intentSignature);
-        expect(after[0].successCount).toBe(2);
+        expect(after[0].successCount).toBe(1);
         expect(after[0].failureCount).toBe(0);
         expect(after[0].stepSequence).toEqual(originalStepSequence);
-        expect(after[0].lastUsedAt).toBe('2026-04-22T00:00:02.000Z');
+        expect(after[0].lastUsedAt).toBe(before.lastUsedAt);
+        expect(after[0].compositeScoreDecayed).toBeDefined();
       } finally {
         ctx.close();
       }
     });
 
-    it('compounds a failed replay session onto the original row as failure_count++', () => {
+    it('marks a failed replay session without double-counting failure_count', () => {
       const ctx = bootstrap();
       try {
         const { taskRepo, sessionRepo, stepRepo, aggregator, experienceRepo } = ctx;
@@ -813,7 +806,7 @@ describe('ExperienceAggregator (B-012 v1)', () => {
         expect(after).toHaveLength(1);
         expect(after[0].actionPathId).toBe(seeded.actionPathId);
         expect(after[0].successCount).toBe(1);
-        expect(after[0].failureCount).toBe(1);
+        expect(after[0].failureCount).toBe(0);
       } finally {
         ctx.close();
       }

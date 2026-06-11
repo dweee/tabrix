@@ -80,7 +80,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain('mke-object-count-grid');
     expect(tabSource).not.toContain('mke-object-footer-actions');
     expect(objectViewSource).toContain('页面对象');
-    expect(objectViewSource).toContain('可操作功能');
+    expect(objectViewSource).toContain('候选操作目标');
     expect(objectViewSource).toContain('数据/API');
     expect(objectViewSource).toContain('生命周期');
     expect(tabSource).toContain('type="search"');

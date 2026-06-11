@@ -4,7 +4,12 @@ import type {
   TabrixExperienceScoreStepStatus,
   TabrixReplayPlaceholder,
 } from '@tabrix/shared';
-import { isClickSuccessOutcome } from '@tabrix/shared';
+import {
+  EXPERIENCE_SUGGEST_MIN_COMPOSITE_SCORE,
+  EXPERIENCE_SUGGEST_MIN_SUCCESS_COUNT,
+  EXPERIENCE_SUGGEST_MIN_SUCCESS_RATE,
+  isExperienceReplayOutcomeSuccess,
+} from './experience-quality-gate';
 
 export interface ExperienceActionPathStep {
   toolName: string;
@@ -324,12 +329,20 @@ export class ExperienceRepository {
     );
     // Read-only lookup for `experience_suggest_plan`.
     //
+    // Quality gate invariants:
+    //   1. at least 3 successful observations;
+    //   2. success rate >= 0.7;
+    //   3. decayed composite score exists and is >= 0.7.
+    //
     // Sort key invariants:
-    //   1. `success_count DESC` — pick the candidate with the most past wins first.
-    //   2. `(failure_count - success_count) ASC` — among ties, prefer paths whose
+    //   1. `composite_score_decayed DESC` — prefer the scored candidate
+    //      that best balances accuracy/speed/token/stability.
+    //   2. `success_count DESC` — among similarly scored paths, pick
+    //      the candidate with the most past wins first.
+    //   3. `(failure_count - success_count) ASC` — among ties, prefer paths whose
     //      net-success-margin is highest (i.e. fewer failures relative to wins).
-    //   3. `last_used_at DESC NULLS LAST` — fresher paths break further ties.
-    //   4. `intent_signature ASC, action_path_id ASC` — fully deterministic order
+    //   4. `last_used_at DESC NULLS LAST` — fresher paths break further ties.
+    //   5. `intent_signature ASC, action_path_id ASC` — fully deterministic order
     //      so unit tests do not rely on SQLite's row-storage order.
     //
     // Two prepared statements: with and without a `page_role` filter. `?` bind
@@ -353,7 +366,13 @@ export class ExperienceRepository {
          FROM experience_action_paths
         WHERE site_family = ?
           AND intent_signature = ?
-        ORDER BY success_count DESC,
+          AND success_count >= ?
+          AND (success_count + failure_count) > 0
+          AND (CAST(success_count AS REAL) / (success_count + failure_count)) >= ?
+          AND composite_score_decayed IS NOT NULL
+          AND composite_score_decayed >= ?
+        ORDER BY composite_score_decayed DESC,
+                 success_count DESC,
                  (failure_count - success_count) ASC,
                  (last_used_at IS NULL) ASC,
                  last_used_at DESC,
@@ -380,7 +399,13 @@ export class ExperienceRepository {
         WHERE site_family = ?
           AND intent_signature = ?
           AND page_role = ?
-        ORDER BY success_count DESC,
+          AND success_count >= ?
+          AND (success_count + failure_count) > 0
+          AND (CAST(success_count AS REAL) / (success_count + failure_count)) >= ?
+          AND composite_score_decayed IS NOT NULL
+          AND composite_score_decayed >= ?
+        ORDER BY composite_score_decayed DESC,
+                 success_count DESC,
                  (failure_count - success_count) ASC,
                  (last_used_at IS NULL) ASC,
                  last_used_at DESC,
@@ -492,11 +517,17 @@ export class ExperienceRepository {
             siteFamily,
             input.intentSignature,
             input.pageRole,
+            EXPERIENCE_SUGGEST_MIN_SUCCESS_COUNT,
+            EXPERIENCE_SUGGEST_MIN_SUCCESS_RATE,
+            EXPERIENCE_SUGGEST_MIN_COMPOSITE_SCORE,
             safeLimit,
           ) as ExperienceActionPathDbRow[])
         : (this.suggestStmt.all(
             siteFamily,
             input.intentSignature,
+            EXPERIENCE_SUGGEST_MIN_SUCCESS_COUNT,
+            EXPERIENCE_SUGGEST_MIN_SUCCESS_RATE,
+            EXPERIENCE_SUGGEST_MIN_COMPOSITE_SCORE,
             safeLimit,
           ) as ExperienceActionPathDbRow[]);
     return rows.map(rowToActionPath);
@@ -524,7 +555,7 @@ export class ExperienceRepository {
   public recordReplayStepOutcome(
     input: RecordReplayStepOutcomeInput,
   ): RecordReplayStepOutcomeResult {
-    const isSuccess = isClickSuccessOutcome(input.observedOutcome);
+    const isSuccess = isExperienceReplayOutcomeSuccess(input.observedOutcome);
     const successDelta = isSuccess ? 1 : 0;
     const failureDelta = isSuccess ? 0 : 1;
     const lastReplayStatus: TabrixExperienceScoreStepStatus = isSuccess ? 'ok' : 'failed';

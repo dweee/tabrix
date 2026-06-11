@@ -28,6 +28,7 @@ export {
   type WritebackWarningRow,
 } from './experience-repository';
 export {
+  EXPERIENCE_SUGGEST_MIN_COMPOSITE_SCORE,
   EXPERIENCE_SUGGEST_MIN_SUCCESS_COUNT,
   EXPERIENCE_SUGGEST_MIN_SUCCESS_RATE,
   ExperienceSuggestPlanInputError,

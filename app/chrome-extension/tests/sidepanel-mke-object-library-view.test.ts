@@ -94,7 +94,7 @@ describe('MKE Object Library view model', () => {
     });
     expect(activePage.sections.map((section) => section.title)).toEqual([
       '页面对象',
-      '可操作功能',
+      '候选操作目标',
       '数据/API',
       '生命周期',
     ]);
@@ -105,10 +105,10 @@ describe('MKE Object Library view model', () => {
       ]),
     );
     expect(activePage.sections[1].items).toContainEqual(
-      expect.objectContaining({ label: '点击', value: '1 个目标' }),
+      expect.objectContaining({ label: '点击', value: '1 个候选' }),
     );
     expect(activePage.sections[2].items).toContainEqual(
-      expect.objectContaining({ label: '接口线索', value: '已观察' }),
+      expect.objectContaining({ label: '接口线索', value: '线索' }),
     );
     expect(activePage.sections[3].items).toContainEqual(
       expect.objectContaining({ label: '浏览器加载', value: '已完成' }),
