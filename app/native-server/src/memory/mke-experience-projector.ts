@@ -105,14 +105,6 @@ function readStringArray(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
 }
 
-function hasTabrixSuccessEvidence(trace: MemoryTrace): boolean {
-  return (
-    trace.businessSuccess === 'achieved' ||
-    trace.businessSuccess === 'proven' ||
-    trace.businessSuccess === 'true'
-  );
-}
-
 function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
   const feedback = readObject(trace.aiFeedback);
   const sourceKind = readString(feedback?.sourceKind);
@@ -132,15 +124,7 @@ function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
 }
 
 function isBusinessAchieved(trace: MemoryTrace): boolean {
-  if (
-    trace.businessSuccess === 'not_achieved' ||
-    trace.businessSuccess === 'failed' ||
-    trace.businessSuccess === 'false' ||
-    trace.businessSuccess === 'partial'
-  ) {
-    return false;
-  }
-  return hasTabrixSuccessEvidence(trace) && hasVerifiedAiSuccessFeedback(trace);
+  return hasVerifiedAiSuccessFeedback(trace);
 }
 
 function groupByTask(traces: MemoryTrace[]): TaskTraceGroup[] {

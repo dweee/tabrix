@@ -91,8 +91,6 @@ describe('MkeExperienceProjector', () => {
       responseAt: '2026-06-06T03:00:04.000Z',
       durationMs: 1000,
       toolSuccess: true,
-      businessSuccess: 'true',
-      aiFeedbackScore: 0.94,
       aiFeedback: verifiedExperienceFeedback({
         confidence: 0.94,
         reasonCode: 'ai_verified_fill',
@@ -116,8 +114,6 @@ describe('MkeExperienceProjector', () => {
       responseAt: '2026-06-06T03:00:06.000Z',
       durationMs: 1000,
       toolSuccess: true,
-      businessSuccess: 'true',
-      aiFeedbackScore: 0.95,
       aiFeedback: verifiedExperienceFeedback({
         confidence: 0.95,
         reasonCode: 'ai_verified_submit',
@@ -207,7 +203,7 @@ describe('MkeExperienceProjector', () => {
     expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
   });
 
-  it('does not mine a recipe when actions only have tool success without business proof', () => {
+  it('does not mine a recipe when actions only have tool success without AI approval', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
     const traces = new MemoryTraceRepository(opened.db);
     const knowledge = new KnowledgeModelRepository(opened.db);
@@ -307,8 +303,7 @@ describe('MkeExperienceProjector', () => {
       response: { payloadDigest: { success: true } },
       responseAt: '2026-06-06T07:00:04.000Z',
       toolSuccess: true,
-      businessSuccess: 'achieved',
-      aiFeedbackScore: 0.94,
+      businessSuccess: 'unknown',
       aiFeedback: verifiedExperienceFeedback({
         confidence: 0.94,
         reasonCode: 'ai_verified_result',
@@ -439,7 +434,7 @@ describe('MkeExperienceProjector', () => {
     expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
   });
 
-  it('does not let AI feedback override explicit Tabrix business failure evidence', () => {
+  it('mines from AI approval even when the legacy business status disagrees', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
     const traces = new MemoryTraceRepository(opened.db);
     const knowledge = new KnowledgeModelRepository(opened.db);
@@ -480,11 +475,10 @@ describe('MkeExperienceProjector', () => {
       responseAt: '2026-06-06T09:00:04.000Z',
       toolSuccess: true,
       businessSuccess: 'not_achieved',
-      aiFeedbackScore: 0.98,
       aiFeedback: verifiedExperienceFeedback({
         confidence: 0.98,
-        reasonCode: 'ai_overstated_result',
-        summary: 'AI overstated the result.',
+        reasonCode: 'ai_verified_result',
+        summary: 'AI verified the result despite stale legacy business status.',
         evidenceRef: 'trace-click-failed-business',
       }),
       tabId: 9,
@@ -497,8 +491,8 @@ describe('MkeExperienceProjector', () => {
 
     const result = projector.projectIdleBatch({ nowIso: '2026-06-06T09:00:05.000Z' });
 
-    expect(result.savedExperienceCount).toBe(0);
-    expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
+    expect(result.savedExperienceCount).toBe(1);
+    expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toHaveLength(1);
   });
 
   it('does not mine recipes from orphan AI score without feedback confidence', () => {
