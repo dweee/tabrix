@@ -1,5 +1,6 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { MemoryTrace } from '../memory/db';
+import { buildMemoryTraceBindingHash } from '../memory/feedback-binding';
 
 const TABRIX_TOOL_METADATA_KEY = '_tabrix';
 const AI_BUSINESS_STATUS_VALUES = new Set(['achieved', 'partial', 'not_achieved', 'unknown']);
@@ -9,10 +10,24 @@ const AI_BUSINESS_FEEDBACK_SCORE_GUIDE =
 
 interface TabrixPreviousFeedback {
   traceId: string;
+  taskId: string | null;
+  toolName: string | null;
+  toolCallId: string | null;
+  sequenceIndex: number | null;
+  traceBindingHash: string | null;
+  evaluationScope: 'step' | 'task' | null;
+  evaluationVersion: string | null;
+  rubricVersion: string | null;
+  evaluatorModel: string | null;
   businessStatus: 'achieved' | 'partial' | 'not_achieved' | 'unknown';
   confidence: number | null;
   reasonCode: string | null;
   summary: string | null;
+  evidenceRefs: string[];
+  userGoalSnapshot: string | null;
+  experienceCandidate: boolean | null;
+  riskTier: 'low' | 'medium' | 'high' | 'critical' | null;
+  humanReviewRequired: boolean | null;
 }
 
 export interface TabrixToolMetadata {
@@ -47,6 +62,15 @@ const TABRIX_TOOL_METADATA_SCHEMA = {
         type: 'object',
         properties: {
           traceId: { type: 'string' },
+          taskId: { type: 'string' },
+          toolName: { type: 'string' },
+          toolCallId: { type: 'string' },
+          sequenceIndex: { type: 'integer', minimum: 0 },
+          traceBindingHash: { type: 'string' },
+          evaluationScope: { type: 'string', enum: ['step', 'task'] },
+          evaluationVersion: { type: 'string' },
+          rubricVersion: { type: 'string' },
+          evaluatorModel: { type: 'string' },
           businessStatus: {
             type: 'string',
             enum: ['achieved', 'partial', 'not_achieved', 'unknown'],
@@ -59,6 +83,14 @@ const TABRIX_TOOL_METADATA_SCHEMA = {
           },
           reasonCode: { type: 'string' },
           summary: { type: 'string' },
+          evidenceRefs: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+          userGoalSnapshot: { type: 'string' },
+          experienceCandidate: { type: 'boolean' },
+          riskTier: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+          humanReviewRequired: { type: 'boolean' },
         },
         required: ['traceId', 'businessStatus'],
       },
@@ -125,15 +157,29 @@ export function attachTabrixMemoryTraceEnvelope(
   }
 
   const existingTabrix = readObject(payload[TABRIX_TOOL_METADATA_KEY]) ?? {};
+  const traceBindingHash = buildMemoryTraceBindingHash(trace);
+  const feedbackTarget = {
+    traceId: trace.traceId,
+    taskId: trace.taskId,
+    toolName: trace.toolName,
+    toolCallId: trace.toolCallId,
+    sequenceIndex: trace.sequenceIndex,
+    traceBindingHash,
+  };
   const nextPayload = {
     ...payload,
     [TABRIX_TOOL_METADATA_KEY]: {
       ...existingTabrix,
       traceId: trace.traceId,
+      taskId: trace.taskId,
       intentTitle: metadata.intentTitle ?? trace.taskIntent ?? null,
       intentSummary: metadata.intentSummary,
       nextIntent: metadata.nextIntent,
       toolName,
+      toolCallId: trace.toolCallId,
+      sequenceIndex: trace.sequenceIndex,
+      traceBindingHash,
+      feedbackTarget,
       toolSuccess: trace.toolSuccess,
       businessStatus: trace.businessSuccess ?? 'unknown',
       businessFeedbackRequired: true,
@@ -157,6 +203,23 @@ function readOptionalConfidence(value: unknown): number | null {
   return Math.max(0, Math.min(1, value));
 }
 
+function readOptionalInteger(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.floor(value));
+}
+
+function readOptionalBoolean(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
+}
+
+function readOptionalStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map((item) => item.trim())
+    .slice(0, 12);
+}
+
 function readPreviousFeedback(value: unknown): TabrixPreviousFeedback[] {
   if (!Array.isArray(value)) return [];
   const feedback: TabrixPreviousFeedback[] = [];
@@ -168,10 +231,33 @@ function readPreviousFeedback(value: unknown): TabrixPreviousFeedback[] {
     if (!traceId || !status || !AI_BUSINESS_STATUS_VALUES.has(status)) continue;
     feedback.push({
       traceId,
+      taskId: readOptionalString(object.taskId),
+      toolName: readOptionalString(object.toolName),
+      toolCallId: readOptionalString(object.toolCallId),
+      sequenceIndex: readOptionalInteger(object.sequenceIndex),
+      traceBindingHash: readOptionalString(object.traceBindingHash),
+      evaluationScope:
+        object.evaluationScope === 'step' || object.evaluationScope === 'task'
+          ? object.evaluationScope
+          : null,
+      evaluationVersion: readOptionalString(object.evaluationVersion),
+      rubricVersion: readOptionalString(object.rubricVersion),
+      evaluatorModel: readOptionalString(object.evaluatorModel),
       businessStatus: status as TabrixPreviousFeedback['businessStatus'],
       confidence: readOptionalConfidence(object.confidence),
       reasonCode: readOptionalString(object.reasonCode),
       summary: readOptionalString(object.summary),
+      evidenceRefs: readOptionalStringArray(object.evidenceRefs),
+      userGoalSnapshot: readOptionalString(object.userGoalSnapshot),
+      experienceCandidate: readOptionalBoolean(object.experienceCandidate),
+      riskTier:
+        object.riskTier === 'low' ||
+        object.riskTier === 'medium' ||
+        object.riskTier === 'high' ||
+        object.riskTier === 'critical'
+          ? object.riskTier
+          : null,
+      humanReviewRequired: readOptionalBoolean(object.humanReviewRequired),
     });
   }
   return feedback;

@@ -64,9 +64,13 @@ describe('B-016 capability gate parser', () => {
 
     it('special token "all" enables every recognised capability', () => {
       const result = parseCapabilityAllowlist({ TABRIX_POLICY_CAPABILITIES: 'all' });
-      // V24-01 added `experience_replay`; assertion stays intentionally
+      // Assertion stays intentionally
       // explicit so adding new capabilities forces an update here.
-      expect(Array.from(result.enabled).sort()).toEqual(['api_knowledge', 'experience_replay']);
+      expect(Array.from(result.enabled).sort()).toEqual([
+        'api_knowledge',
+        'experience_replay',
+        'memory_feedback',
+      ]);
       expect(result.unknown).toEqual([]);
     });
 
@@ -74,7 +78,11 @@ describe('B-016 capability gate parser', () => {
       const result = parseCapabilityAllowlist({
         TABRIX_POLICY_CAPABILITIES: 'all, api_knowlege', // intentional typo
       });
-      expect(Array.from(result.enabled).sort()).toEqual(['api_knowledge', 'experience_replay']);
+      expect(Array.from(result.enabled).sort()).toEqual([
+        'api_knowledge',
+        'experience_replay',
+        'memory_feedback',
+      ]);
       expect(result.unknown).toEqual(['api_knowlege']);
     });
 

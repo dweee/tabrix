@@ -28,6 +28,7 @@ import {
   buildSuggestPlanResult,
   parseExperienceSuggestPlanInput,
 } from '../memory/experience';
+import { MkeAiFeedbackValidationError } from '../memory/mke-memory-trace-service';
 import {
   runTabrixChooseContext,
   runTabrixChooseContextRecordOutcome,
@@ -169,6 +170,27 @@ function readConfidenceArg(args: Record<string, unknown>): number | null {
     : null;
 }
 
+function readIntegerArg(args: Record<string, unknown>, field: string): number | null {
+  const value = args[field];
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(0, Math.floor(value))
+    : null;
+}
+
+function readBooleanArg(args: Record<string, unknown>, field: string): boolean | null {
+  const value = args[field];
+  return typeof value === 'boolean' ? value : null;
+}
+
+function readStringArrayArg(args: Record<string, unknown>, field: string): string[] {
+  const value = args[field];
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map((item) => item.trim())
+    .slice(0, 12);
+}
+
 const handleMemoryRecordAiFeedback: NativeToolHandler = (args, deps) => {
   const persistenceMode = deps.sessionManager.getPersistenceStatus().mode;
   if (persistenceMode === 'off' || !deps.sessionManager.memoryTraces) {
@@ -183,27 +205,79 @@ const handleMemoryRecordAiFeedback: NativeToolHandler = (args, deps) => {
 
   const object = readObjectArg(args);
   const traceId = readStringArg(object, 'traceId');
+  const taskId = readStringArg(object, 'taskId');
+  const toolName = readStringArg(object, 'toolName');
+  const sequenceIndex = readIntegerArg(object, 'sequenceIndex');
+  const traceBindingHash = readStringArg(object, 'traceBindingHash');
   const businessStatus = readStringArg(object, 'businessStatus');
-  if (!traceId || !businessStatus || !MEMORY_FEEDBACK_STATUSES.has(businessStatus)) {
+  if (
+    !traceId ||
+    !taskId ||
+    !toolName ||
+    sequenceIndex === null ||
+    !traceBindingHash ||
+    !businessStatus ||
+    !MEMORY_FEEDBACK_STATUSES.has(businessStatus)
+  ) {
     return jsonResult(
       {
         status: 'invalid_input',
-        message: 'traceId and a valid businessStatus are required.',
+        message:
+          'traceId, taskId, toolName, sequenceIndex, traceBindingHash, and a valid businessStatus are required.',
       },
       true,
     );
   }
 
-  const updated = deps.sessionManager.memoryTraces.recordAiBusinessFeedback({
-    traceId,
-    businessStatus,
-    confidence: readConfidenceArg(object),
-    reasonCode: readStringArg(object, 'reasonCode'),
-    summary: readStringArg(object, 'summary'),
-    receivedAt: new Date().toISOString(),
-    sourceToolName: TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK,
-    sourceToolCallId: null,
-  });
+  let updated;
+  try {
+    updated = deps.sessionManager.memoryTraces.recordAiBusinessFeedback({
+      traceId,
+      taskId,
+      toolName,
+      toolCallId: readStringArg(object, 'toolCallId'),
+      sequenceIndex,
+      traceBindingHash,
+      evaluationScope:
+        object.evaluationScope === 'task' || object.evaluationScope === 'step'
+          ? object.evaluationScope
+          : undefined,
+      evaluationVersion: readStringArg(object, 'evaluationVersion'),
+      rubricVersion: readStringArg(object, 'rubricVersion'),
+      evaluatorModel: readStringArg(object, 'evaluatorModel'),
+      businessStatus,
+      confidence: readConfidenceArg(object),
+      reasonCode: readStringArg(object, 'reasonCode'),
+      summary: readStringArg(object, 'summary'),
+      evidenceRefs: readStringArrayArg(object, 'evidenceRefs'),
+      userGoalSnapshot: readStringArg(object, 'userGoalSnapshot'),
+      experienceCandidate: readBooleanArg(object, 'experienceCandidate'),
+      riskTier:
+        object.riskTier === 'low' ||
+        object.riskTier === 'medium' ||
+        object.riskTier === 'high' ||
+        object.riskTier === 'critical'
+          ? object.riskTier
+          : undefined,
+      humanReviewRequired: readBooleanArg(object, 'humanReviewRequired'),
+      receivedAt: new Date().toISOString(),
+      sourceToolName: TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK,
+      sourceToolCallId: null,
+    });
+  } catch (error) {
+    if (error instanceof MkeAiFeedbackValidationError) {
+      return jsonResult(
+        {
+          status: error.code,
+          message: error.message,
+          traceId,
+          persistenceMode,
+        },
+        true,
+      );
+    }
+    throw error;
+  }
 
   if (!updated) {
     return jsonResult(

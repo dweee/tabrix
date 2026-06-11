@@ -45,7 +45,6 @@ const REPLAYABLE_ACTION_TOOLS = new Set([
   'chrome_click_element',
   'chrome_fill_or_select',
   'chrome_navigate',
-  'chrome_close_tabs',
 ]);
 
 const SENSITIVE_KEY_FRAGMENTS = [
@@ -101,6 +100,11 @@ function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+}
+
 function hasTabrixSuccessEvidence(trace: MemoryTrace): boolean {
   return (
     trace.businessSuccess === 'achieved' ||
@@ -113,6 +117,7 @@ function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
   const feedback = readObject(trace.aiFeedback);
   const sourceKind = readString(feedback?.sourceKind);
   const businessStatus = readString(feedback?.businessStatus);
+  const riskTier = readString(feedback?.riskTier);
   const confidence =
     typeof feedback?.confidence === 'number' && Number.isFinite(feedback.confidence)
       ? feedback.confidence
@@ -121,7 +126,12 @@ function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
     sourceKind === 'ai_feedback' &&
     businessStatus === 'achieved' &&
     typeof confidence === 'number' &&
-    confidence >= 0.9
+    confidence >= 0.9 &&
+    feedback?.experienceCandidate === true &&
+    feedback?.humanReviewRequired !== true &&
+    riskTier !== 'high' &&
+    riskTier !== 'critical' &&
+    readStringArray(feedback?.evidenceRefs).length > 0
   );
 }
 

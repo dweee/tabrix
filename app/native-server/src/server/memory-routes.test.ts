@@ -6,6 +6,7 @@ import supertest from 'supertest';
 import Server from './index';
 import { sessionManager } from '../execution/session-manager';
 import { __hostConfigInternals, setPersonalBrowserStateStorageEnabled } from '../host-config';
+import { buildMemoryTraceBindingHash } from '../memory/feedback-binding';
 
 function textResult(payload: Record<string, unknown>) {
   return {
@@ -42,6 +43,11 @@ async function seedMkeRows(): Promise<void> {
 
   traceService.recordAiBusinessFeedback({
     traceId: readTrace.traceId,
+    taskId: readTrace.taskId,
+    toolName: readTrace.toolName,
+    toolCallId: readTrace.toolCallId,
+    sequenceIndex: readTrace.sequenceIndex,
+    traceBindingHash: buildMemoryTraceBindingHash(readTrace),
     businessStatus: 'achieved',
     confidence: 0.82,
     reasonCode: 'page_inventory_read',
@@ -77,10 +83,19 @@ async function seedMkeRows(): Promise<void> {
   });
   traceService.recordAiBusinessFeedback({
     traceId: clickTrace.traceId,
+    taskId: clickTrace.taskId,
+    toolName: clickTrace.toolName,
+    toolCallId: clickTrace.toolCallId,
+    sequenceIndex: clickTrace.sequenceIndex,
+    traceBindingHash: buildMemoryTraceBindingHash(clickTrace),
     businessStatus: 'achieved',
     confidence: 0.93,
     reasonCode: 'clicked_expected_control',
     summary: 'AI verified the click completed the intended page action',
+    evidenceRefs: [clickTrace.traceId],
+    experienceCandidate: true,
+    riskTier: 'medium',
+    humanReviewRequired: false,
     sourceToolName: 'chrome_click_element',
     sourceToolCallId: 'feedback-call-2',
     receivedAt: '2026-06-06T10:00:00.090Z',
@@ -250,10 +265,16 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
 
     traceService.recordAiBusinessFeedback({
       traceId: trace.traceId,
+      taskId: trace.taskId,
+      toolName: trace.toolName,
+      toolCallId: trace.toolCallId,
+      sequenceIndex: trace.sequenceIndex,
+      traceBindingHash: buildMemoryTraceBindingHash(trace),
       businessStatus: 'achieved',
       confidence: 0.91,
       reasonCode: 'ai_overstated_completion',
       summary: 'AI thought the filter was applied',
+      evidenceRefs: [trace.traceId],
       receivedAt: '2026-06-06T11:00:00.090Z',
     });
 

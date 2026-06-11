@@ -7,6 +7,7 @@ import {
   type BusinessSuccessVerdict,
   type MemoryTrace,
 } from './db';
+import { buildMemoryTraceBindingHash } from './feedback-binding';
 import { logger } from '../logging/logger';
 
 const REDACTED = '[redacted]';
@@ -74,13 +75,37 @@ export interface RecordMkeToolCallTraceInput {
 
 export interface RecordMkeAiBusinessFeedbackInput {
   traceId: string;
+  taskId?: string | null;
+  toolName?: string | null;
+  toolCallId?: string | null;
+  sequenceIndex?: number | null;
+  traceBindingHash?: string | null;
+  evaluationScope?: 'step' | 'task' | null;
+  evaluationVersion?: string | null;
+  rubricVersion?: string | null;
+  evaluatorModel?: string | null;
   businessStatus: BusinessSuccessVerdict;
   confidence?: number | null;
   reasonCode?: string | null;
   summary?: string | null;
+  evidenceRefs?: string[];
+  userGoalSnapshot?: string | null;
+  experienceCandidate?: boolean | null;
+  riskTier?: 'low' | 'medium' | 'high' | 'critical' | null;
+  humanReviewRequired?: boolean | null;
   receivedAt?: string;
   sourceToolName?: string | null;
   sourceToolCallId?: string | null;
+}
+
+export class MkeAiFeedbackValidationError extends Error {
+  public readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'MkeAiFeedbackValidationError';
+    this.code = code;
+  }
 }
 
 export interface RecordBrowserWorldSnapshotInput {
@@ -532,6 +557,125 @@ function sourceTraceIds(trace: BrowserObjectProjectionTrace): string[] {
 function normalizeConfidence(value: number | null | undefined): number | null {
   if (!Number.isFinite(value)) return null;
   return Math.max(0, Math.min(1, value as number));
+}
+
+const DEFAULT_AI_FEEDBACK_EVALUATION_VERSION = 'ai_feedback_v1';
+const DEFAULT_AI_FEEDBACK_RUBRIC_VERSION = 'tabrix_ai_business_feedback_v1';
+
+function normalizeAiFeedbackScope(value: string | null | undefined): 'step' | 'task' {
+  return value === 'task' ? 'task' : 'step';
+}
+
+function normalizeAiFeedbackRiskTier(
+  value: string | null | undefined,
+): 'low' | 'medium' | 'high' | 'critical' {
+  return value === 'low' || value === 'medium' || value === 'high' || value === 'critical'
+    ? value
+    : 'medium';
+}
+
+function normalizeEvidenceRefs(values: string[] | null | undefined): string[] {
+  if (!Array.isArray(values)) return [];
+  return values
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => truncateString(value.trim()))
+    .slice(0, 12);
+}
+
+function ensureFeedbackBinding(
+  input: RecordMkeAiBusinessFeedbackInput,
+  trace: MemoryTrace,
+): string {
+  const expectedHash = buildMemoryTraceBindingHash(trace);
+  if (!input.traceBindingHash || input.traceBindingHash !== expectedHash) {
+    throw new MkeAiFeedbackValidationError(
+      'trace_binding_mismatch',
+      'AI feedback binding does not match the target Memory trace.',
+    );
+  }
+  if (input.taskId !== undefined && input.taskId !== null && input.taskId !== trace.taskId) {
+    throw new MkeAiFeedbackValidationError(
+      'trace_binding_mismatch',
+      'AI feedback taskId does not match the target Memory trace.',
+    );
+  }
+  if (
+    input.toolName !== undefined &&
+    input.toolName !== null &&
+    input.toolName !== trace.toolName
+  ) {
+    throw new MkeAiFeedbackValidationError(
+      'trace_binding_mismatch',
+      'AI feedback toolName does not match the target Memory trace.',
+    );
+  }
+  if (
+    input.toolCallId !== undefined &&
+    input.toolCallId !== null &&
+    input.toolCallId !== trace.toolCallId
+  ) {
+    throw new MkeAiFeedbackValidationError(
+      'trace_binding_mismatch',
+      'AI feedback toolCallId does not match the target Memory trace.',
+    );
+  }
+  if (
+    input.sequenceIndex !== undefined &&
+    input.sequenceIndex !== null &&
+    input.sequenceIndex !== trace.sequenceIndex
+  ) {
+    throw new MkeAiFeedbackValidationError(
+      'trace_binding_mismatch',
+      'AI feedback sequenceIndex does not match the target Memory trace.',
+    );
+  }
+  return expectedHash;
+}
+
+function validateAiFeedbackEvidence(input: {
+  businessStatus: BusinessSuccessVerdict;
+  confidence: number | null;
+  summary: string | null | undefined;
+  evidenceRefs: string[];
+  experienceCandidate: boolean;
+  riskTier: 'low' | 'medium' | 'high' | 'critical';
+  humanReviewRequired: boolean;
+}): void {
+  const highConfidenceSuccess =
+    input.businessStatus === 'achieved' &&
+    typeof input.confidence === 'number' &&
+    input.confidence >= 0.9;
+  if (highConfidenceSuccess && input.evidenceRefs.length === 0) {
+    throw new MkeAiFeedbackValidationError(
+      'evidence_required',
+      'High-confidence achieved feedback must cite at least one evidence ref.',
+    );
+  }
+  if (highConfidenceSuccess && (!input.summary || input.summary.trim().length < 8)) {
+    throw new MkeAiFeedbackValidationError(
+      'summary_required',
+      'High-confidence achieved feedback must include a concise evidence summary.',
+    );
+  }
+  if (!input.experienceCandidate) return;
+  if (!highConfidenceSuccess) {
+    throw new MkeAiFeedbackValidationError(
+      'experience_candidate_rejected',
+      'Experience candidates require achieved feedback with confidence >= 0.90.',
+    );
+  }
+  if (input.humanReviewRequired) {
+    throw new MkeAiFeedbackValidationError(
+      'experience_candidate_rejected',
+      'Experience candidates cannot require human review.',
+    );
+  }
+  if (input.riskTier === 'high' || input.riskTier === 'critical') {
+    throw new MkeAiFeedbackValidationError(
+      'experience_candidate_rejected',
+      'High-risk AI feedback cannot be marked as an Experience candidate.',
+    );
+  }
 }
 
 function buildAutomaticEvidenceFeedback(input: {
@@ -1212,25 +1356,91 @@ export class MkeMemoryTraceService {
   public recordAiBusinessFeedback(
     input: RecordMkeAiBusinessFeedbackInput,
   ): MemoryTrace | undefined {
+    const trace = this.repo.get(input.traceId);
+    if (!trace) return undefined;
+    const traceBindingHash = ensureFeedbackBinding(input, trace);
+    const confidence = normalizeConfidence(input.confidence);
+    const evidenceRefs = normalizeEvidenceRefs(input.evidenceRefs);
+    const evaluationScope = normalizeAiFeedbackScope(input.evaluationScope);
+    const evaluationVersion = input.evaluationVersion ?? DEFAULT_AI_FEEDBACK_EVALUATION_VERSION;
+    const rubricVersion = input.rubricVersion ?? DEFAULT_AI_FEEDBACK_RUBRIC_VERSION;
+    const riskTier = normalizeAiFeedbackRiskTier(input.riskTier);
+    const humanReviewRequired = input.humanReviewRequired !== false;
+    const experienceCandidate = input.experienceCandidate === true;
+    const receivedAt = input.receivedAt ?? new Date().toISOString();
+    validateAiFeedbackEvidence({
+      businessStatus: input.businessStatus,
+      confidence,
+      summary: input.summary,
+      evidenceRefs,
+      experienceCandidate,
+      riskTier,
+      humanReviewRequired,
+    });
+
     const feedback = sanitizeValue(
       {
         sourceKind: 'ai_feedback',
+        evaluationScope,
+        evaluationVersion,
+        rubricVersion,
+        evaluatorModel: input.evaluatorModel ?? null,
         businessStatus: input.businessStatus,
-        confidence: normalizeConfidence(input.confidence),
+        confidence,
         reasonCode: input.reasonCode ?? null,
         summary: input.summary ?? null,
-        receivedAt: input.receivedAt ?? new Date().toISOString(),
+        evidenceRefs,
+        userGoalSnapshot: input.userGoalSnapshot ?? null,
+        experienceCandidate,
+        riskTier,
+        humanReviewRequired,
+        binding: {
+          traceId: trace.traceId,
+          taskId: trace.taskId,
+          toolName: trace.toolName,
+          toolCallId: trace.toolCallId,
+          sequenceIndex: trace.sequenceIndex,
+          traceBindingHash,
+        },
+        receivedAt,
         sourceToolName: input.sourceToolName ?? null,
         sourceToolCallId: input.sourceToolCallId ?? null,
       },
       'tabrix_ai_business_feedback',
-    );
+    ) as Record<string, unknown>;
 
-    return this.repo.updateAiFeedback({
+    const result = this.repo.recordAiFeedback({
       traceId: input.traceId,
-      aiFeedbackScore: normalizeConfidence(input.confidence),
+      aiFeedbackScore: confidence,
       aiFeedback: feedback,
+      feedbackEvent: {
+        traceId: trace.traceId,
+        taskId: trace.taskId,
+        toolName: trace.toolName,
+        toolCallId: trace.toolCallId,
+        sequenceIndex: trace.sequenceIndex,
+        traceBindingHash,
+        evaluationScope,
+        evaluationVersion,
+        rubricVersion,
+        evaluatorModel: input.evaluatorModel ?? null,
+        businessStatus: input.businessStatus,
+        confidence,
+        reasonCode: input.reasonCode ?? null,
+        summary: input.summary ?? null,
+        evidenceRefs,
+        userGoalSnapshot: input.userGoalSnapshot ?? null,
+        experienceCandidate,
+        riskTier,
+        humanReviewRequired,
+        sourceToolName: input.sourceToolName ?? null,
+        sourceToolCallId: input.sourceToolCallId ?? null,
+        accepted: true,
+        payload: feedback,
+        createdAt: receivedAt,
+      },
     });
+    return result.trace;
   }
 
   public get(traceId: string): MemoryTrace | undefined {

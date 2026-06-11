@@ -168,6 +168,7 @@ describe('TOOL_RISK_TIERS coverage invariants', () => {
       'experience_score_step',
       'tabrix_choose_context',
       'tabrix_choose_context_record_outcome',
+      'memory_record_ai_feedback',
     ]);
   });
 

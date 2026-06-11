@@ -28,6 +28,7 @@ export const CAPABILITY_GATED_TOOLS: ReadonlyMap<string, TabrixCapability> = new
   string,
   TabrixCapability
 >([
+  [TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK, 'memory_feedback'],
   [TOOL_NAMES.EXPERIENCE.REPLAY, 'experience_replay'],
   // Re-uses the `experience_replay` capability — one capability
   // gates the whole replay/score-step write-back family. Gating both

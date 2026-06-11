@@ -407,16 +407,36 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
   });
   const applyPreviousBusinessFeedback = (): void => {
     if (tabrixMetadata.previousFeedback.length === 0) return;
+    if (!isCapabilityEnabled('memory_feedback', getCurrentCapabilityEnv())) {
+      mkeMemoryTraceLogger.warn('ai feedback update skipped because memory_feedback is disabled', {
+        count: tabrixMetadata.previousFeedback.length,
+      });
+      return;
+    }
     const traceWriter = sessionManager.memoryTraces;
     if (!traceWriter) return;
     for (const feedback of tabrixMetadata.previousFeedback) {
       try {
         traceWriter.recordAiBusinessFeedback({
           traceId: feedback.traceId,
+          taskId: feedback.taskId,
+          toolName: feedback.toolName,
+          toolCallId: feedback.toolCallId,
+          sequenceIndex: feedback.sequenceIndex,
+          traceBindingHash: feedback.traceBindingHash,
+          evaluationScope: feedback.evaluationScope,
+          evaluationVersion: feedback.evaluationVersion,
+          rubricVersion: feedback.rubricVersion,
+          evaluatorModel: feedback.evaluatorModel,
           businessStatus: feedback.businessStatus,
           confidence: feedback.confidence,
           reasonCode: feedback.reasonCode,
           summary: feedback.summary,
+          evidenceRefs: feedback.evidenceRefs,
+          userGoalSnapshot: feedback.userGoalSnapshot,
+          experienceCandidate: feedback.experienceCandidate,
+          riskTier: feedback.riskTier,
+          humanReviewRequired: feedback.humanReviewRequired,
           receivedAt: new Date(toolCallStartedAtMs).toISOString(),
           sourceToolName: name,
           sourceToolCallId: step.stepId,

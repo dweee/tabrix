@@ -31,6 +31,25 @@ function addKnowledge(input: {
   });
 }
 
+function verifiedExperienceFeedback(input: {
+  confidence: number;
+  reasonCode: string;
+  summary: string;
+  evidenceRef: string;
+}) {
+  return {
+    sourceKind: 'ai_feedback',
+    businessStatus: 'achieved',
+    confidence: input.confidence,
+    reasonCode: input.reasonCode,
+    summary: input.summary,
+    evidenceRefs: [input.evidenceRef],
+    experienceCandidate: true,
+    riskTier: 'medium',
+    humanReviewRequired: false,
+  };
+}
+
 describe('MkeExperienceProjector', () => {
   it('mines a template-only recipe from a successful memory and knowledge chain', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
@@ -76,13 +95,12 @@ describe('MkeExperienceProjector', () => {
       toolSuccess: true,
       businessSuccess: 'true',
       aiFeedbackScore: 0.94,
-      aiFeedback: {
-        sourceKind: 'ai_feedback',
-        businessStatus: 'achieved',
+      aiFeedback: verifiedExperienceFeedback({
         confidence: 0.94,
         reasonCode: 'ai_verified_fill',
         summary: 'AI verified the fill step completed the intended task.',
-      },
+        evidenceRef: 'trace-fill',
+      }),
       tabId: 9,
       siteFamily: 'example.test',
       pageUrlPattern: 'https://example.test/editor',
@@ -102,13 +120,12 @@ describe('MkeExperienceProjector', () => {
       toolSuccess: true,
       businessSuccess: 'true',
       aiFeedbackScore: 0.95,
-      aiFeedback: {
-        sourceKind: 'ai_feedback',
-        businessStatus: 'achieved',
+      aiFeedback: verifiedExperienceFeedback({
         confidence: 0.95,
         reasonCode: 'ai_verified_submit',
         summary: 'AI verified the submit step completed the intended task.',
-      },
+        evidenceRef: 'trace-click',
+      }),
       tabId: 9,
       siteFamily: 'example.test',
       pageUrlPattern: 'https://example.test/editor',
@@ -294,13 +311,12 @@ describe('MkeExperienceProjector', () => {
       toolSuccess: true,
       businessSuccess: 'achieved',
       aiFeedbackScore: 0.94,
-      aiFeedback: {
-        sourceKind: 'ai_feedback',
-        businessStatus: 'achieved',
+      aiFeedback: verifiedExperienceFeedback({
         confidence: 0.94,
         reasonCode: 'ai_verified_result',
         summary: 'AI verified that the expected result appeared.',
-      },
+        evidenceRef: 'trace-click-ai-feedback',
+      }),
       tabId: 9,
       siteFamily: 'example.test',
       pageUrlPattern: 'https://example.test/editor',
@@ -483,13 +499,12 @@ describe('MkeExperienceProjector', () => {
       toolSuccess: true,
       businessSuccess: 'not_achieved',
       aiFeedbackScore: 0.98,
-      aiFeedback: {
-        sourceKind: 'ai_feedback',
-        businessStatus: 'achieved',
+      aiFeedback: verifiedExperienceFeedback({
         confidence: 0.98,
         reasonCode: 'ai_overstated_result',
         summary: 'AI overstated the result.',
-      },
+        evidenceRef: 'trace-click-failed-business',
+      }),
       tabId: 9,
       siteFamily: 'example.test',
       pageUrlPattern: 'https://example.test/editor',

@@ -95,21 +95,58 @@ function readNumber(record: Record<string, unknown>, field: string): number | nu
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+function readBoolean(record: Record<string, unknown>, field: string): boolean | null {
+  const value = record[field];
+  return typeof value === 'boolean' ? value : null;
+}
+
+function readStringArray(record: Record<string, unknown>, field: string): string[] {
+  const value = record[field];
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map((item) => item.trim());
+}
+
 function toAiFeedbackSummary(value: unknown): MkeMemoryAiFeedbackSummary | null {
   const record = asRecord(value);
   if (!record) return null;
   if (readString(record, 'sourceKind') === 'tabrix_auto_evidence') return null;
+  const binding = asRecord(record.binding);
   const summary = {
     sourceKind: readString(record, 'sourceKind'),
+    evaluationScope: readString(record, 'evaluationScope'),
+    evaluationVersion: readString(record, 'evaluationVersion'),
+    rubricVersion: readString(record, 'rubricVersion'),
+    evaluatorModel: readString(record, 'evaluatorModel'),
     businessStatus: readString(record, 'businessStatus'),
     confidence: readNumber(record, 'confidence'),
     reasonCode: readString(record, 'reasonCode'),
     summary: readString(record, 'summary'),
+    evidenceRefs: readStringArray(record, 'evidenceRefs'),
+    userGoalSnapshot: readString(record, 'userGoalSnapshot'),
+    experienceCandidate: readBoolean(record, 'experienceCandidate'),
+    riskTier: readString(record, 'riskTier'),
+    humanReviewRequired: readBoolean(record, 'humanReviewRequired'),
+    binding: binding
+      ? {
+          taskId: readString(binding, 'taskId'),
+          toolName: readString(binding, 'toolName'),
+          toolCallId: readString(binding, 'toolCallId'),
+          sequenceIndex: readNumber(binding, 'sequenceIndex'),
+          traceBindingHash: readString(binding, 'traceBindingHash'),
+        }
+      : null,
     receivedAt: readString(record, 'receivedAt'),
     sourceToolName: readString(record, 'sourceToolName'),
     sourceToolCallId: readString(record, 'sourceToolCallId'),
   };
-  return Object.values(summary).some((item) => item !== null) ? summary : null;
+  const hasSignal = Object.entries(summary).some(([key, item]) => {
+    if (key === 'evidenceRefs') return (item as string[]).length > 0;
+    if (key === 'binding') return item !== null;
+    return item !== null;
+  });
+  return hasSignal ? summary : null;
 }
 
 function buildSystemEvidenceSummary(trace: MemoryTrace): MkeMemorySystemEvidenceSummary | null {

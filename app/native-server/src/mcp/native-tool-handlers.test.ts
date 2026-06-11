@@ -6,6 +6,7 @@ import type { ExperienceQueryService } from '../memory/experience';
 import type { ExperienceActionPathRow } from '../memory/experience/experience-repository';
 import type { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
 import type { CapabilityEnv } from '../policy/capabilities';
+import { MkeAiFeedbackValidationError } from '../memory/mke-memory-trace-service';
 import type {
   DispatchBridgedFn,
   ReplayStepRecorder,
@@ -199,10 +200,18 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
     const result = await handler(
       {
         traceId: 'trace-1',
+        taskId: 'task-1',
+        toolName: 'chrome_click_element',
+        sequenceIndex: 1,
+        traceBindingHash: 'binding-hash-1',
         businessStatus: 'achieved',
         confidence: 0.94,
         reasonCode: 'ai_verified_result',
         summary: 'AI verified the expected page result.',
+        evidenceRefs: ['trace-1'],
+        experienceCandidate: true,
+        riskTier: 'medium',
+        humanReviewRequired: false,
       },
       makeDeps({ memoryTraces: { recordAiBusinessFeedback } }),
     );
@@ -211,10 +220,18 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
     expect(recordAiBusinessFeedback).toHaveBeenCalledWith(
       expect.objectContaining({
         traceId: 'trace-1',
+        taskId: 'task-1',
+        toolName: 'chrome_click_element',
+        sequenceIndex: 1,
+        traceBindingHash: 'binding-hash-1',
         businessStatus: 'achieved',
         confidence: 0.94,
         reasonCode: 'ai_verified_result',
         summary: 'AI verified the expected page result.',
+        evidenceRefs: ['trace-1'],
+        experienceCandidate: true,
+        riskTier: 'medium',
+        humanReviewRequired: false,
         sourceToolName: TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK,
       }),
     );
@@ -243,7 +260,14 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
   it('returns unknown_trace when the trace id is not in Memory', async () => {
     const handler = getMemoryFeedbackHandler();
     const result = await handler(
-      { traceId: 'missing', businessStatus: 'unknown' },
+      {
+        traceId: 'missing',
+        taskId: 'task-1',
+        toolName: 'chrome_click_element',
+        sequenceIndex: 1,
+        traceBindingHash: 'binding-hash-1',
+        businessStatus: 'unknown',
+      },
       makeDeps({
         memoryTraces: { recordAiBusinessFeedback: jest.fn().mockReturnValue(undefined) },
       }),
@@ -253,6 +277,38 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
     expect(callTextPayload(result)).toMatchObject({
       status: 'unknown_trace',
       traceId: 'missing',
+    });
+  });
+
+  it('returns validation errors from Memory trace binding checks', async () => {
+    const handler = getMemoryFeedbackHandler();
+    const result = await handler(
+      {
+        traceId: 'trace-1',
+        taskId: 'task-1',
+        toolName: 'chrome_click_element',
+        sequenceIndex: 1,
+        traceBindingHash: 'wrong-binding',
+        businessStatus: 'achieved',
+        confidence: 0.94,
+        evidenceRefs: ['trace-1'],
+      },
+      makeDeps({
+        memoryTraces: {
+          recordAiBusinessFeedback: jest.fn(() => {
+            throw new MkeAiFeedbackValidationError(
+              'trace_binding_mismatch',
+              'AI feedback binding does not match.',
+            );
+          }),
+        },
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(callTextPayload(result)).toMatchObject({
+      status: 'trace_binding_mismatch',
+      traceId: 'trace-1',
     });
   });
 });

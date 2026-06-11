@@ -23,12 +23,33 @@ export type MemoryPersistenceMode = 'disk' | 'memory' | 'off';
  * UI only receives whitelisted feedback summary fields; raw evidence stays
  * inside the native DB.
  */
+export type MkeMemoryAiFeedbackScope = 'step' | 'task';
+export type MkeMemoryAiFeedbackRiskTier = 'low' | 'medium' | 'high' | 'critical';
+
+export interface MkeMemoryAiFeedbackBindingSummary {
+  taskId?: string | null;
+  toolName?: string | null;
+  toolCallId?: string | null;
+  sequenceIndex?: number | null;
+  traceBindingHash?: string | null;
+}
+
 export interface MkeMemoryAiFeedbackSummary {
   sourceKind?: 'ai_feedback' | string | null;
+  evaluationScope?: MkeMemoryAiFeedbackScope | string | null;
+  evaluationVersion?: string | null;
+  rubricVersion?: string | null;
+  evaluatorModel?: string | null;
   businessStatus?: string | null;
   confidence?: number | null;
   reasonCode?: string | null;
   summary?: string | null;
+  evidenceRefs?: string[];
+  userGoalSnapshot?: string | null;
+  experienceCandidate?: boolean | null;
+  riskTier?: MkeMemoryAiFeedbackRiskTier | string | null;
+  humanReviewRequired?: boolean | null;
+  binding?: MkeMemoryAiFeedbackBindingSummary | null;
   receivedAt?: string | null;
   sourceToolName?: string | null;
   sourceToolCallId?: string | null;

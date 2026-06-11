@@ -110,9 +110,9 @@ export const TOOL_RISK_TIERS: Readonly<Record<string, TabrixRiskTier>> = Object.
   [TOOL_NAMES.CONTEXT.RECORD_OUTCOME]: 'P0',
 
   // ---- MKEP Memory write-back ----
-  // Pure Memory annotation write-back. It updates only AI feedback fields
-  // on an existing trace id; it does not drive the browser or replay actions.
-  [TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK]: 'P0',
+  // AI feedback write-back. P1 because it persists business judgments that
+  // can influence Experience mining; capability-gated by `memory_feedback`.
+  [TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK]: 'P1',
 });
 
 /**

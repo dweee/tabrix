@@ -141,6 +141,66 @@ export interface MemoryTraceAiFeedbackUpdate {
   aiFeedback?: unknown;
 }
 
+export interface MemoryFeedbackEventInput {
+  feedbackEventId?: string;
+  traceId: string;
+  taskId: string;
+  toolName?: string | null;
+  toolCallId?: string | null;
+  sequenceIndex?: number | null;
+  traceBindingHash: string;
+  evaluationScope: string;
+  evaluationVersion: string;
+  rubricVersion: string;
+  evaluatorModel?: string | null;
+  businessStatus: string;
+  confidence?: number | null;
+  reasonCode?: string | null;
+  summary?: string | null;
+  evidenceRefs?: string[];
+  userGoalSnapshot?: string | null;
+  experienceCandidate?: boolean | null;
+  riskTier?: string | null;
+  humanReviewRequired?: boolean | null;
+  sourceToolName?: string | null;
+  sourceToolCallId?: string | null;
+  accepted?: boolean;
+  rejectionCode?: string | null;
+  rejectionMessage?: string | null;
+  payload: unknown;
+  createdAt: string;
+}
+
+export interface MemoryFeedbackEvent {
+  feedbackEventId: string;
+  traceId: string;
+  taskId: string;
+  toolName: string | null;
+  toolCallId: string | null;
+  sequenceIndex: number | null;
+  traceBindingHash: string;
+  evaluationScope: string;
+  evaluationVersion: string;
+  rubricVersion: string;
+  evaluatorModel: string | null;
+  businessStatus: string;
+  confidence: number | null;
+  reasonCode: string | null;
+  summary: string | null;
+  evidenceRefs: string[];
+  userGoalSnapshot: string | null;
+  experienceCandidate: boolean;
+  riskTier: string;
+  humanReviewRequired: boolean;
+  sourceToolName: string | null;
+  sourceToolCallId: string | null;
+  accepted: boolean;
+  rejectionCode: string | null;
+  rejectionMessage: string | null;
+  payload: unknown;
+  createdAt: string;
+}
+
 interface MemoryTraceRow {
   trace_id: string;
   task_id: string;
@@ -187,6 +247,36 @@ interface MemoryTraceRow {
   system_evidence_score: number | null;
   system_evidence_blob: string | null;
   redaction_state: string;
+  created_at: string;
+}
+
+interface MemoryFeedbackEventRow {
+  feedback_event_id: string;
+  trace_id: string;
+  task_id: string;
+  tool_name: string | null;
+  tool_call_id: string | null;
+  sequence_index: number | null;
+  trace_binding_hash: string;
+  evaluation_scope: string;
+  evaluation_version: string;
+  rubric_version: string;
+  evaluator_model: string | null;
+  business_status: string;
+  confidence: number | null;
+  reason_code: string | null;
+  summary: string | null;
+  evidence_refs_blob: string;
+  user_goal_snapshot: string | null;
+  experience_candidate: number;
+  risk_tier: string;
+  human_review_required: number;
+  source_tool_name: string | null;
+  source_tool_call_id: string | null;
+  accepted: number;
+  rejection_code: string | null;
+  rejection_message: string | null;
+  payload_blob: string;
   created_at: string;
 }
 
@@ -325,9 +415,50 @@ function rowToMemoryTrace(row: MemoryTraceRow): MemoryTrace {
   };
 }
 
+function parseStringArray(value: string | null): string[] {
+  const parsed = parseBlob(value);
+  return Array.isArray(parsed)
+    ? parsed.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
+function rowToMemoryFeedbackEvent(row: MemoryFeedbackEventRow): MemoryFeedbackEvent {
+  return {
+    feedbackEventId: row.feedback_event_id,
+    traceId: row.trace_id,
+    taskId: row.task_id,
+    toolName: row.tool_name,
+    toolCallId: row.tool_call_id,
+    sequenceIndex: row.sequence_index,
+    traceBindingHash: row.trace_binding_hash,
+    evaluationScope: row.evaluation_scope,
+    evaluationVersion: row.evaluation_version,
+    rubricVersion: row.rubric_version,
+    evaluatorModel: row.evaluator_model,
+    businessStatus: row.business_status,
+    confidence: row.confidence,
+    reasonCode: row.reason_code,
+    summary: row.summary,
+    evidenceRefs: parseStringArray(row.evidence_refs_blob),
+    userGoalSnapshot: row.user_goal_snapshot,
+    experienceCandidate: row.experience_candidate === 1,
+    riskTier: row.risk_tier,
+    humanReviewRequired: row.human_review_required === 1,
+    sourceToolName: row.source_tool_name,
+    sourceToolCallId: row.source_tool_call_id,
+    accepted: row.accepted === 1,
+    rejectionCode: row.rejection_code,
+    rejectionMessage: row.rejection_message,
+    payload: parseBlob(row.payload_blob),
+    createdAt: row.created_at,
+  };
+}
+
 export class MemoryTraceRepository {
   private readonly insertStmt;
   private readonly updateAiFeedbackStmt;
+  private readonly insertFeedbackEventStmt;
+  private readonly listFeedbackEventsByTraceStmt;
   private readonly getStmt;
   private readonly listRecentStmt;
   private readonly listByTaskStmt;
@@ -368,6 +499,27 @@ export class MemoryTraceRepository {
        SET ai_feedback_score = @ai_feedback_score,
            ai_feedback_blob = @ai_feedback_blob
        WHERE trace_id = @trace_id`,
+    );
+    this.insertFeedbackEventStmt = db.prepare(
+      `INSERT INTO tabrix_memory_feedback_events
+        (feedback_event_id, trace_id, task_id, tool_name, tool_call_id, sequence_index,
+         trace_binding_hash, evaluation_scope, evaluation_version, rubric_version,
+         evaluator_model, business_status, confidence, reason_code, summary,
+         evidence_refs_blob, user_goal_snapshot, experience_candidate, risk_tier,
+         human_review_required, source_tool_name, source_tool_call_id, accepted,
+         rejection_code, rejection_message, payload_blob, created_at)
+       VALUES
+        (@feedback_event_id, @trace_id, @task_id, @tool_name, @tool_call_id, @sequence_index,
+         @trace_binding_hash, @evaluation_scope, @evaluation_version, @rubric_version,
+         @evaluator_model, @business_status, @confidence, @reason_code, @summary,
+         @evidence_refs_blob, @user_goal_snapshot, @experience_candidate, @risk_tier,
+         @human_review_required, @source_tool_name, @source_tool_call_id, @accepted,
+         @rejection_code, @rejection_message, @payload_blob, @created_at)`,
+    );
+    this.listFeedbackEventsByTraceStmt = db.prepare(
+      `SELECT * FROM tabrix_memory_feedback_events
+        WHERE trace_id = ?
+        ORDER BY created_at ASC, feedback_event_id ASC`,
     );
     this.getStmt = db.prepare('SELECT * FROM tabrix_memory_traces WHERE trace_id = ?');
     this.listRecentStmt = db.prepare(
@@ -459,6 +611,63 @@ export class MemoryTraceRepository {
       ai_feedback_blob: blob(input.aiFeedback),
     });
     return this.get(input.traceId);
+  }
+
+  public insertFeedbackEvent(input: MemoryFeedbackEventInput): MemoryFeedbackEvent {
+    const row = {
+      feedback_event_id: input.feedbackEventId ?? randomUUID(),
+      trace_id: input.traceId,
+      task_id: input.taskId,
+      tool_name: input.toolName ?? null,
+      tool_call_id: input.toolCallId ?? null,
+      sequence_index: optionalInteger(input.sequenceIndex),
+      trace_binding_hash: input.traceBindingHash,
+      evaluation_scope: input.evaluationScope,
+      evaluation_version: input.evaluationVersion,
+      rubric_version: input.rubricVersion,
+      evaluator_model: input.evaluatorModel ?? null,
+      business_status: input.businessStatus,
+      confidence: optionalNumber(input.confidence),
+      reason_code: input.reasonCode ?? null,
+      summary: input.summary ?? null,
+      evidence_refs_blob: requiredBlob(input.evidenceRefs ?? []),
+      user_goal_snapshot: input.userGoalSnapshot ?? null,
+      experience_candidate: input.experienceCandidate === true ? 1 : 0,
+      risk_tier: input.riskTier ?? 'medium',
+      human_review_required: input.humanReviewRequired === false ? 0 : 1,
+      source_tool_name: input.sourceToolName ?? null,
+      source_tool_call_id: input.sourceToolCallId ?? null,
+      accepted: input.accepted === false ? 0 : 1,
+      rejection_code: input.rejectionCode ?? null,
+      rejection_message: input.rejectionMessage ?? null,
+      payload_blob: requiredBlob(input.payload),
+      created_at: input.createdAt,
+    };
+    this.insertFeedbackEventStmt.run(row);
+    return rowToMemoryFeedbackEvent(row);
+  }
+
+  public recordAiFeedback(
+    input: MemoryTraceAiFeedbackUpdate & {
+      feedbackEvent: MemoryFeedbackEventInput;
+    },
+  ): { trace: MemoryTrace | undefined; event: MemoryFeedbackEvent } {
+    const tx = this.db.transaction(() => {
+      const event = this.insertFeedbackEvent(input.feedbackEvent);
+      this.updateAiFeedbackStmt.run({
+        trace_id: input.traceId,
+        ai_feedback_score: optionalNumber(input.aiFeedbackScore),
+        ai_feedback_blob: blob(input.aiFeedback),
+      });
+      return { trace: this.get(input.traceId), event };
+    });
+    return tx();
+  }
+
+  public listFeedbackEventsByTrace(traceId: string): MemoryFeedbackEvent[] {
+    return (this.listFeedbackEventsByTraceStmt.all(traceId) as MemoryFeedbackEventRow[]).map(
+      rowToMemoryFeedbackEvent,
+    );
   }
 
   public get(traceId: string): MemoryTrace | undefined {
@@ -589,13 +798,6 @@ interface KnowledgeModelRow {
   last_validated_at: string | null;
   created_at: string;
   updated_at: string;
-}
-
-function parseStringArray(value: string | null): string[] {
-  const parsed = parseBlob<unknown>(value);
-  return Array.isArray(parsed)
-    ? parsed.filter((item): item is string => typeof item === 'string')
-    : [];
 }
 
 const EXPERIENCE_TEMPLATE_ONLY_REDACTION_STATE = 'template_only';

@@ -73,6 +73,42 @@ CREATE INDEX IF NOT EXISTS tabrix_memory_traces_page_idx
 CREATE INDEX IF NOT EXISTS tabrix_memory_traces_success_idx
   ON tabrix_memory_traces(tool_success, business_success, created_at);
 
+CREATE TABLE IF NOT EXISTS tabrix_memory_feedback_events (
+  feedback_event_id       TEXT PRIMARY KEY,
+  trace_id                TEXT NOT NULL,
+  task_id                 TEXT NOT NULL,
+  tool_name               TEXT,
+  tool_call_id            TEXT,
+  sequence_index          INTEGER,
+  trace_binding_hash      TEXT NOT NULL,
+  evaluation_scope        TEXT NOT NULL,
+  evaluation_version      TEXT NOT NULL,
+  rubric_version          TEXT NOT NULL,
+  evaluator_model         TEXT,
+  business_status         TEXT NOT NULL,
+  confidence              REAL,
+  reason_code             TEXT,
+  summary                 TEXT,
+  evidence_refs_blob      TEXT NOT NULL DEFAULT '[]',
+  user_goal_snapshot      TEXT,
+  experience_candidate    INTEGER NOT NULL DEFAULT 0,
+  risk_tier               TEXT NOT NULL DEFAULT 'medium',
+  human_review_required   INTEGER NOT NULL DEFAULT 1,
+  source_tool_name        TEXT,
+  source_tool_call_id     TEXT,
+  accepted                INTEGER NOT NULL DEFAULT 1,
+  rejection_code          TEXT,
+  rejection_message       TEXT,
+  payload_blob            TEXT NOT NULL,
+  created_at              TEXT NOT NULL,
+  FOREIGN KEY(trace_id) REFERENCES tabrix_memory_traces(trace_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS tabrix_memory_feedback_events_trace_idx
+  ON tabrix_memory_feedback_events(trace_id, created_at);
+CREATE INDEX IF NOT EXISTS tabrix_memory_feedback_events_task_idx
+  ON tabrix_memory_feedback_events(task_id, created_at);
+
 CREATE TABLE IF NOT EXISTS tabrix_knowledge_models (
   knowledge_id                 TEXT PRIMARY KEY,
   site_family                  TEXT NOT NULL,
@@ -541,6 +577,13 @@ export const MEMORY_DB_ACTIVE_TABLE_MANIFEST = [
     layer: 'mke_memory',
     surface: 'mke_sidepanel',
     purpose: 'Redacted AI-to-Tabrix tool-call trace source for MKE projections.',
+    retention: 'active',
+  },
+  {
+    name: 'tabrix_memory_feedback_events',
+    layer: 'mke_memory',
+    surface: 'mke_sidepanel',
+    purpose: 'Append-only AI feedback audit history for Memory traces.',
     retention: 'active',
   },
   {

@@ -6,7 +6,8 @@ import {
   openMemoryDb,
   type BrowserObjectInput,
 } from './db';
-import { MkeMemoryTraceService } from './mke-memory-trace-service';
+import { MkeAiFeedbackValidationError, MkeMemoryTraceService } from './mke-memory-trace-service';
+import { buildMemoryTraceBindingHash } from './feedback-binding';
 
 const NOW_MS = Date.parse('2026-06-10T10:00:00.000Z');
 
@@ -120,6 +121,160 @@ describe('MkeMemoryTraceService', () => {
         confidence: 0.9,
         reasonCode: 'tabrix_business_success_evidence',
       });
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('records bound AI feedback and appends an audit event', () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo);
+
+    try {
+      const trace = traceService.recordToolCall({
+        taskId: 'trace-ai-feedback-task',
+        taskIntent: 'click and verify page result',
+        aiClient: 'jest',
+        toolName: 'chrome_click_element',
+        stepId: 'trace-ai-feedback-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 7, ref: 'ref_button' },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 30,
+        result: textResult({
+          success: true,
+          actionEvidenceResult: {
+            business: {
+              businessSuccessVerdict: 'proven',
+              businessSuccessProven: true,
+            },
+          },
+        }),
+        resultSummary: 'verified result appeared',
+      });
+
+      const updated = traceService.recordAiBusinessFeedback({
+        traceId: trace.traceId,
+        taskId: trace.taskId,
+        toolName: trace.toolName,
+        toolCallId: trace.toolCallId,
+        sequenceIndex: trace.sequenceIndex,
+        traceBindingHash: buildMemoryTraceBindingHash(trace),
+        businessStatus: 'achieved',
+        confidence: 0.94,
+        reasonCode: 'ai_verified_result',
+        summary: 'AI verified the expected page result appeared.',
+        evidenceRefs: [trace.traceId],
+        userGoalSnapshot: 'click and verify page result',
+        experienceCandidate: true,
+        riskTier: 'medium',
+        humanReviewRequired: false,
+        evaluatorModel: 'jest-evaluator',
+        receivedAt: '2026-06-10T10:00:01.000Z',
+      });
+
+      expect(updated).toMatchObject({
+        traceId: trace.traceId,
+        aiFeedbackScore: 0.94,
+        aiFeedback: expect.objectContaining({
+          sourceKind: 'ai_feedback',
+          businessStatus: 'achieved',
+          confidence: 0.94,
+          evidenceRefs: [trace.traceId],
+          experienceCandidate: true,
+          riskTier: 'medium',
+          humanReviewRequired: false,
+          evaluatorModel: 'jest-evaluator',
+          binding: expect.objectContaining({
+            traceId: trace.traceId,
+            traceBindingHash: buildMemoryTraceBindingHash(trace),
+          }),
+        }),
+      });
+      expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)).toHaveLength(1);
+      expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)[0]).toMatchObject({
+        traceId: trace.traceId,
+        businessStatus: 'achieved',
+        evidenceRefs: [trace.traceId],
+        experienceCandidate: true,
+        accepted: true,
+      });
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('rejects AI feedback when the binding hash does not match the trace', () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo);
+
+    try {
+      const trace = traceService.recordToolCall({
+        taskId: 'trace-binding-task',
+        aiClient: 'jest',
+        toolName: 'chrome_click_element',
+        stepId: 'trace-binding-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 7 },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 30,
+        result: textResult({ success: true }),
+      });
+
+      expect(() =>
+        traceService.recordAiBusinessFeedback({
+          traceId: trace.traceId,
+          taskId: trace.taskId,
+          toolName: trace.toolName,
+          sequenceIndex: trace.sequenceIndex,
+          traceBindingHash: 'wrong-binding-hash',
+          businessStatus: 'partial',
+          confidence: 0.5,
+        }),
+      ).toThrow(MkeAiFeedbackValidationError);
+      expect(traceRepo.get(trace.traceId)?.aiFeedback).toBeNull();
+      expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)).toEqual([]);
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('rejects high-confidence achieved feedback without evidence refs', () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo);
+
+    try {
+      const trace = traceService.recordToolCall({
+        taskId: 'trace-evidence-task',
+        aiClient: 'jest',
+        toolName: 'chrome_click_element',
+        stepId: 'trace-evidence-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 7 },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 30,
+        result: textResult({ success: true }),
+      });
+
+      expect(() =>
+        traceService.recordAiBusinessFeedback({
+          traceId: trace.traceId,
+          taskId: trace.taskId,
+          toolName: trace.toolName,
+          sequenceIndex: trace.sequenceIndex,
+          traceBindingHash: buildMemoryTraceBindingHash(trace),
+          businessStatus: 'achieved',
+          confidence: 0.95,
+          summary: 'AI verified the result.',
+        }),
+      ).toThrow(MkeAiFeedbackValidationError);
+      expect(traceRepo.get(trace.traceId)?.aiFeedback).toBeNull();
     } finally {
       traceService.discardPendingAsyncWrites();
       db.close();

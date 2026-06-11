@@ -41,6 +41,7 @@ describe('handleToolCall execution wrapper', () => {
     delete process.env.DISABLE_MCP_TOOLS;
     delete process.env.MCP_DISABLE_SENSITIVE_TOOLS;
     delete process.env.TABRIX_POLICY_ALLOW_P3;
+    delete process.env.TABRIX_POLICY_CAPABILITIES;
   });
 
   it('tracks a successful tool call as a completed execution session', async () => {
@@ -185,6 +186,7 @@ describe('handleToolCall execution wrapper', () => {
   });
 
   it('applies _tabrix previousFeedback to an earlier Memory trace on the next tool call', async () => {
+    process.env.TABRIX_POLICY_CAPABILITIES = 'memory_feedback';
     markBridgeReady();
     jest
       .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
@@ -217,6 +219,7 @@ describe('handleToolCall execution wrapper', () => {
     });
     const firstPayload = JSON.parse(String(first.content[0].text));
     const traceId = firstPayload._tabrix.traceId as string;
+    const feedbackTarget = firstPayload._tabrix.feedbackTarget;
 
     await handleToolCall('chrome_read_page', {
       tabId: 1,
@@ -225,6 +228,11 @@ describe('handleToolCall execution wrapper', () => {
         previousFeedback: [
           {
             traceId,
+            taskId: feedbackTarget.taskId,
+            toolName: feedbackTarget.toolName,
+            toolCallId: feedbackTarget.toolCallId,
+            sequenceIndex: feedbackTarget.sequenceIndex,
+            traceBindingHash: feedbackTarget.traceBindingHash,
             businessStatus: 'achieved',
             confidence: 0.85,
             reasonCode: 'target_page_opened',
