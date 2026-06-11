@@ -166,10 +166,7 @@ export interface MkeBrowserObjectSummary {
   canTabrixOperate?: boolean | null;
   operabilityReason?: string | null;
   primaryConclusion?: string | null;
-  claimBoundary?: string | null;
   observationCount: number;
-  confidenceScore?: number | null;
-  driftScore?: number | null;
   facts?: Record<string, unknown> | null;
   actionTypes?: string[];
   changedGroups?: unknown;
@@ -186,8 +183,8 @@ export interface MkeBrowserObjectSummary {
 /**
  * Sanitized projection of `tabrix_knowledge_models`.
  *
- * Large model blobs are collapsed to counts/quality metadata so UI listing
- * does not become a raw page-knowledge dump.
+ * Large model blobs and internal quality scores stay out of the list endpoint.
+ * The Knowledge Library list is a compact product surface for page knowledge.
  */
 export interface MkeKnowledgeModelSummary {
   knowledgeId: string;
@@ -199,8 +196,6 @@ export interface MkeKnowledgeModelSummary {
   observationCount: number;
   successfulUseCount: number;
   failedUseCount: number;
-  confidenceScore: number;
-  driftScore?: number | null;
   sourceTraceCount: number;
   sourceExperienceCount: number;
   archivedAt?: string | null;
@@ -213,9 +208,8 @@ export interface MkeKnowledgeModelSummary {
 /**
  * Sanitized projection of `tabrix_experience_recipes`.
  *
- * Template steps, variables, and preconditions are intentionally not exposed
- * by the list endpoint; users can inspect lifecycle and quality metadata
- * without leaking concrete operational content.
+ * Template steps, variables, preconditions, and internal score projections are
+ * intentionally not exposed by the list endpoint.
  */
 export interface MkeExperienceRecipeSummary {
   experienceId: string;
@@ -232,10 +226,6 @@ export interface MkeExperienceRecipeSummary {
   adoptionCount: number;
   avgDurationMs?: number | null;
   avgTokenTotal?: number | null;
-  reliabilityScore?: number | null;
-  speedScore?: number | null;
-  tokenSavingScore?: number | null;
-  usefulnessScore?: number | null;
   driftState?: string | null;
   portabilityScope: string;
   originKind: string;

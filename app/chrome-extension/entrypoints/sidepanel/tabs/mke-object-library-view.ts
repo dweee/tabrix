@@ -234,7 +234,7 @@ function buildPageObjectsSection(
     id: 'pageObjects',
     title: '页面对象',
     badge: `${pageObjectCount} 个`,
-    emptyText: '当前快照未记录页面对象。',
+    emptyText: '当前未记录页面对象。',
     items: counts.map(([label, count]) => ({ label, value: `${count} 个` })),
   };
 }
@@ -243,12 +243,12 @@ function buildActionsSection(objects: MkeBrowserObjectSummary[]): MkeObjectViewS
   const actionCounts = countObjectKinds(objects, (object) => formatActionKind(object));
   return {
     id: 'actions',
-    title: '候选操作目标',
+    title: '可操作功能',
     badge: `${objects.length} 个`,
-    emptyText: '当前快照未记录候选操作目标。',
+    emptyText: '当前未记录可操作功能。',
     items: actionCounts.map(([label, count]) => ({
       label,
-      value: `${count} 个候选`,
+      value: `${count} 个`,
       tone: 'neutral',
     })),
   };
@@ -272,10 +272,10 @@ function buildDataApiSection(
     id: 'dataApi',
     title: '数据/API',
     badge: `${labels.length} 个`,
-    emptyText: '当前快照未记录数据/API 线索。',
+    emptyText: '当前未记录数据/API。',
     items: counts.map(([label, count]) => ({
       label,
-      value: count > 1 ? `${count} 条线索` : '线索',
+      value: count > 1 ? `${count} 条` : '1 条',
       tone: label.includes('提交') || label.includes('写入') ? 'warn' : 'neutral',
     })),
   };
@@ -410,7 +410,7 @@ function translateKnownLabel(value: string): string {
     filter: '筛选',
     page: '页面',
     region: '区域',
-    action_target: '候选目标',
+    action_target: '可操作功能',
     data_source: '数据/API',
   };
   return labels[value.toLowerCase()] ?? compactText(value.replace(/_/g, ' '), 18);
@@ -419,7 +419,7 @@ function translateKnownLabel(value: string): string {
 function formatFreshness(value: string | null | undefined): string | null {
   if (!value) return null;
   if (value === 'fresh') return '刚同步';
-  if (value === 'stale') return '快照待同步';
+  if (value === 'stale') return '数据待同步';
   if (value === 'unknown') return '未知';
   return value;
 }

@@ -355,6 +355,8 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('pageStateModel');
     expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('objectGraph');
     expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('sourceTraceIds');
+    expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('confidenceScore');
+    expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('driftScore');
   });
 
   test('GET /memory/mke/browser-objects does not expose read_page internals as browser tabs', async () => {
@@ -465,6 +467,10 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(tab).not.toHaveProperty('currentState');
     expect(tab).not.toHaveProperty('recentEvents');
     expect(tab).not.toHaveProperty('sourceTraceIds');
+    expect(tab).not.toHaveProperty('evidenceRefs');
+    expect(tab).not.toHaveProperty('claimBoundary');
+    expect(tab).not.toHaveProperty('confidenceScore');
+    expect(tab).not.toHaveProperty('driftScore');
     const browserTab = objects.find((object) => object.pageUrlPattern === 'chrome://newtab/');
     expect(browserTab).toMatchObject({
       siteFamily: 'browser',
@@ -662,6 +668,10 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     });
     expect(JSON.stringify(graphObjects)).not.toContain('currentState');
     expect(JSON.stringify(graphObjects)).not.toContain('sourceTraceIds');
+    expect(JSON.stringify(graphObjects)).not.toContain('evidenceRefs');
+    expect(JSON.stringify(graphObjects)).not.toContain('claimBoundary');
+    expect(JSON.stringify(graphObjects)).not.toContain('confidenceScore');
+    expect(JSON.stringify(graphObjects)).not.toContain('driftScore');
   });
 
   test('DELETE /memory/mke/browser-objects clears Object Library without deleting Memory traces', async () => {
@@ -952,5 +962,9 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('steps');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('preconditions');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('sourceTraceIds');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('reliabilityScore');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('speedScore');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('tokenSavingScore');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('usefulnessScore');
   });
 });

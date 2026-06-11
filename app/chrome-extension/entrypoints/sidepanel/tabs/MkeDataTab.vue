@@ -56,9 +56,7 @@
             }"
             :aria-pressed="personalBrowserStateStorageEnabled"
             :disabled="preferenceLoading"
-            :title="
-              personalBrowserStateStorageEnabled ? '缓存开启，点击关闭' : '缓存关闭，点击开启'
-            "
+            :title="personalBrowserStateStorageEnabled ? '保存浏览状态：开' : '保存浏览状态：关'"
             @click="togglePersonalBrowserStateStorage"
           >
             <i-lucide-shield-check v-if="personalBrowserStateStorageEnabled" aria-hidden="true" />
@@ -344,13 +342,13 @@ const activeTableInfo = computed(() => {
     return {
       kicker: 'Knowledge models / 页面知识模型',
       label: '知识库',
-      description: '查看已沉淀的页面模型、置信度、漂移和观测次数。',
+      description: '查看从对象库沉淀出的页面知识。',
     };
   }
   return {
     kicker: 'Experience recipes / 可复用经验',
     label: '经验库',
-    description: '查看可复用的脱敏步骤经验、可靠性和采用情况。',
+    description: '查看由 AI 评价沉淀出的可复用经验。',
   };
 });
 
@@ -656,14 +654,9 @@ function knowledgeToRecord(model: MkeKnowledgeModelSummary): ViewRecord {
     feedbackScoreLabel: '',
     duration: '',
     createdAtLabel: formatDate(model.updatedAt),
-    status: formatKnowledgeStatus(model.confidenceScore),
-    statusTone:
-      model.confidenceScore >= 0.7 ? 'good' : model.confidenceScore > 0 ? 'neutral' : 'warn',
-    facts: compactFacts([
-      ['Model / 模型', model.pageModelKey],
-      ['Observations / 观测', String(model.observationCount)],
-      ['Drift / 漂移', formatScore(model.driftScore)],
-    ]),
+    status: model.observationCount > 0 ? '已沉淀' : '待沉淀',
+    statusTone: model.observationCount > 0 ? 'good' : 'neutral',
+    facts: compactFacts([['页面模型', model.pageModelKey]]),
     detailJson: formatJsonDetail(model),
   };
   return withSearchText(row);
@@ -681,12 +674,7 @@ function experienceToRecord(recipe: MkeExperienceRecipeSummary): ViewRecord {
     createdAtLabel: formatDate(recipe.updatedAt),
     status: recipe.redactionState === 'template_only' ? '模板 / Template' : recipe.redactionState,
     statusTone: recipe.redactionState === 'template_only' ? 'good' : 'warn',
-    facts: compactFacts([
-      ['Scope / 范围', recipe.portabilityScope],
-      ['Success / 成功', String(recipe.successCount)],
-      ['Failure / 失败', String(recipe.failureCount)],
-      ['Reliability / 可靠性', formatScore(recipe.reliabilityScore)],
-    ]),
+    facts: compactFacts([['适用范围', recipe.portabilityScope]]),
     detailJson: formatJsonDetail(recipe),
   };
   return withSearchText(row);
@@ -740,11 +728,6 @@ function formatMemoryTraceJson(trace: MkeMemoryTraceSummary): string {
     requestAt: trace.requestAt,
     responseAt: trace.responseAt,
     durationMs: trace.durationMs,
-    execution: {
-      status: formatToolStatus(trace.statusView?.executionStatus, trace.toolSuccess),
-      toolSuccess: trace.toolSuccess,
-      errorCode: trace.errorCode,
-    },
     aiEvaluation: trace.aiFeedback ?? null,
     page: {
       tabId: trace.tabId,
@@ -773,22 +756,6 @@ function formatObjectWebPageJson(webPage: MkeObjectWebPageView): string {
     sections: webPage.sections,
     objects: webPage.objects,
   });
-}
-
-function formatNullableNumber(value: number | null | undefined): string | null {
-  return value === null || value === undefined ? null : String(value);
-}
-
-function formatScore(value: number | null | undefined): string {
-  if (value === null || value === undefined) return 'N/A';
-  return value.toFixed(2);
-}
-
-function formatKnowledgeStatus(value: number | null | undefined): string {
-  if (value === null || value === undefined) return '待观察';
-  if (value >= 0.7) return '可信';
-  if (value > 0) return '需复核';
-  return '待观察';
 }
 
 function formatDate(value: string | null | undefined): string {

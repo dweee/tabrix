@@ -94,7 +94,7 @@ describe('MKE Object Library view model', () => {
     });
     expect(activePage.sections.map((section) => section.title)).toEqual([
       '页面对象',
-      '候选操作目标',
+      '可操作功能',
       '数据/API',
       '生命周期',
     ]);
@@ -105,10 +105,10 @@ describe('MKE Object Library view model', () => {
       ]),
     );
     expect(activePage.sections[1].items).toContainEqual(
-      expect.objectContaining({ label: '点击', value: '1 个候选' }),
+      expect.objectContaining({ label: '点击', value: '1 个' }),
     );
     expect(activePage.sections[2].items).toContainEqual(
-      expect.objectContaining({ label: '接口线索', value: '线索' }),
+      expect.objectContaining({ label: '接口线索', value: '1 条' }),
     );
     expect(activePage.sections[3].items).toContainEqual(
       expect.objectContaining({ label: '浏览器加载', value: '已完成' }),
@@ -121,7 +121,7 @@ describe('MKE Object Library view model', () => {
     });
   });
 
-  it('keeps stale snapshot evidence separate from tab lifecycle', () => {
+  it('keeps stale object data separate from tab lifecycle', () => {
     const view = buildMkeObjectLibraryView([
       object({
         browserObjectId: 'tab-stale',
@@ -139,7 +139,7 @@ describe('MKE Object Library view model', () => {
     const page = view.webPages[0];
     expect(page.lifecycleLabel).toBe('运行中');
     expect(page.sections[3].items).toContainEqual(
-      expect.objectContaining({ label: '数据状态', value: '快照待同步' }),
+      expect.objectContaining({ label: '数据状态', value: '数据待同步' }),
     );
     expect(page.sections[3].items).toContainEqual(
       expect.objectContaining({ label: '浏览器加载', value: '已完成' }),

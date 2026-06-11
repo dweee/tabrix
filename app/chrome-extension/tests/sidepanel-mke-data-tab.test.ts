@@ -80,7 +80,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain('mke-object-count-grid');
     expect(tabSource).not.toContain('mke-object-footer-actions');
     expect(objectViewSource).toContain('页面对象');
-    expect(objectViewSource).toContain('候选操作目标');
+    expect(objectViewSource).toContain('可操作功能');
     expect(objectViewSource).toContain('数据/API');
     expect(objectViewSource).toContain('生命周期');
     expect(tabSource).toContain('type="search"');
@@ -89,8 +89,8 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('搜索主题、对象、方法、网址、状态');
     expect(tabSource).toContain('搜索网页、对象、功能、网址、状态');
     expect(tabSource).toContain('mke-refresh-button');
-    expect(tabSource).toContain('缓存开启，点击关闭');
-    expect(tabSource).toContain('缓存关闭，点击开启');
+    expect(tabSource).toContain('保存浏览状态：开');
+    expect(tabSource).toContain('保存浏览状态：关');
     expect(tabSource).not.toContain('清除对象库');
     expect(tabSource).toContain('personalBrowserStateStorageEnabled');
     expect(tabSource).toContain('mke-icon-button--active');
@@ -120,6 +120,14 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain('{{ filteredRows.length }}');
     expect(tabSource).not.toContain('{{ activeTotal }} 条');
     expect(tabSource).not.toContain('mke-list-status');
+    expect(tabSource).not.toContain('置信度');
+    expect(tabSource).not.toContain('漂移');
+    expect(tabSource).not.toContain('观测次数');
+    expect(tabSource).not.toContain('可靠性');
+    expect(tabSource).not.toContain('formatKnowledgeStatus');
+    expect(tabSource).not.toContain('formatScore');
+    expect(tabSource).not.toContain("['Drift / 漂移'");
+    expect(tabSource).not.toContain("['Reliability / 可靠性'");
     expect(tabSource).toContain('搜索仅覆盖已加载记录');
     expect(tabSource).toContain('mke-detail-button');
     expect(tabSource).toContain('toggleRecordJson(row.id)');
@@ -160,7 +168,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain("return '待AI回写'");
   });
 
-  it('makes business feedback primary and keeps tool execution as supporting facts', () => {
+  it('makes AI feedback primary and keeps execution evidence out of the visible record', () => {
     expect(tabSource).toContain('<h3 :title="row.title">{{ row.title }}</h3>');
     expect(tabSource).toContain('v-if="row.metaLine"');
     expect(tabSource).toContain('v-if="row.feedbackLine"');
@@ -182,7 +190,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain("duration: formatDuration(trace.durationMs) ?? ''");
     expect(tabSource).toContain('createdAtLabel: formatDate(trace.createdAt)');
     expect(tabSource).toContain("['方法', trace.toolName]");
-    expect(tabSource).toContain(
+    expect(tabSource).not.toContain(
       "['执行', formatToolStatus(trace.statusView?.executionStatus, trace.toolSuccess)]",
     );
     expect(tabSource).toContain('formatTraceLocationFact(trace)');
@@ -347,6 +355,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('detailJson: formatMemoryTraceJson(trace)');
     expect(tabSource).toContain('function formatMemoryTraceJson');
     expect(tabSource).toContain('aiEvaluation: trace.aiFeedback ?? null');
+    expect(tabSource).not.toContain('execution: {');
     expect(tabSource).not.toContain('detailJson: formatJsonDetail(trace)');
     expect(tabSource).not.toContain('v-for="item in row.meta"');
     expect(tabSource).not.toContain('compactMeta');
