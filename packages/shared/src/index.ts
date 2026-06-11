@@ -9,7 +9,6 @@ export * from './read-page-browser-page-object';
 export * from './read-page-object-lifecycle';
 export * from './memory';
 export * from './site';
-export * from './capabilities';
 export * from './click';
 export * from './choose-context';
 export * from './execution-value';

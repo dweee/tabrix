@@ -5,7 +5,7 @@
  * MCP loop should drive a foreground `chrome_network_capture_*`
  * round-trip:
  *
- *   1. `learning_requested` (env opt-in) — ALWAYS wins, even when
+ *   1. `learning_requested` — ALWAYS wins, even when
  *      Knowledge has a high-confidence candidate. The point of a
  *      learning pass is to observe traffic; suppressing capture
  *      would defeat the purpose.
@@ -44,19 +44,15 @@ function knowledgeApiWithRows(
     countAll: jest.fn().mockReturnValue(rows.length),
   };
 }
-
-const CAPS_API_KNOWLEDGE = { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' } as const;
-
 describe('runTabrixChooseContext — V26-FIX-02 observe-mode advisory', () => {
   it('high-confidence Knowledge candidate → observeMode=disabled / not_needed', () => {
     const result = runTabrixChooseContext(
       { intent: '搜索 GitHub 上 AI助手 相关热门项目', url: 'https://github.com/search' },
       {
-        // No knowledgeApi rows needed — the api_knowledge candidate
+        // No knowledgeApi rows needed — the API candidate
         // resolver fires on the URL alone for the GitHub search
         // family, and that is what populates `apiCandidate`.
         knowledgeApi: emptyKnowledgeApi(),
-        capabilityEnv: CAPS_API_KNOWLEDGE,
       },
     );
     expect(result.status).toBe('ok');
@@ -75,7 +71,6 @@ describe('runTabrixChooseContext — V26-FIX-02 observe-mode advisory', () => {
         knowledgeApi: knowledgeApiWithRows([
           { endpointSignature: 'GET api.github.com/repos/{owner}/{repo}', usableForTask: true },
         ]),
-        capabilityEnv: CAPS_API_KNOWLEDGE,
       },
     );
     expect(result.status).toBe('ok');
@@ -88,7 +83,6 @@ describe('runTabrixChooseContext — V26-FIX-02 observe-mode advisory', () => {
       { intent: 'read article', url: 'https://news.ycombinator.com/item?id=1' },
       {
         knowledgeApi: emptyKnowledgeApi(),
-        capabilityEnv: CAPS_API_KNOWLEDGE,
       },
     );
     expect(result.status).toBe('ok');
@@ -103,7 +97,6 @@ describe('runTabrixChooseContext — V26-FIX-02 observe-mode advisory', () => {
       { intent: '搜索 GitHub 上 AI助手 相关热门项目', url: 'https://github.com/search' },
       {
         knowledgeApi: emptyKnowledgeApi(),
-        capabilityEnv: CAPS_API_KNOWLEDGE,
         learningModeRequested: true,
       },
     );
@@ -117,7 +110,6 @@ describe('runTabrixChooseContext — V26-FIX-02 observe-mode advisory', () => {
       { intent: '' },
       {
         knowledgeApi: null,
-        capabilityEnv: {},
       },
     );
     expect(result.status).toBe('invalid_input');

@@ -25,7 +25,7 @@
  *
  *   1. chooser writes a decision into the auto-keyed external task
  *      context (sourceRoute / chosenLayer / fullReadTokenEstimate /
- *      apiCapability=null).
+ *      apiCapability when a known API route is available).
  *   2. chrome_read_page falls back to the bridge round-trip when no
  *      chooser decision is on the context (legacy v2.5 path).
  *   3. `knowledge_supported_read` with no `apiCapability` forces
@@ -36,25 +36,17 @@
  *      (URL change MUST invalidate the decision).
  */
 
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
 import { TOOL_NAMES } from '@tabrix/shared';
 import nativeMessagingHostInstance from '../native-messaging-host';
 import { handleToolCall } from './register-tools';
 import { sessionManager } from '../execution/session-manager';
 import { bridgeRuntimeState } from '../server/bridge-state';
 import { bridgeCommandChannel } from '../server/bridge-command-channel';
-import { __hostConfigInternals, setPersistedPolicyCapabilities } from '../host-config';
 import type { ChooseContextDecisionSnapshot } from '../execution/skip-read-orchestrator';
 
 const AUTO_DEFAULT_KEY = 'mcp:auto:tab:default';
-const CAPABILITIES_ENV_KEY = 'TABRIX_POLICY_CAPABILITIES';
 
 describe('V26-03 choose_context → chrome_read_page skip-read execution loop', () => {
-  let configDir: string;
-  let previousCapabilities: string | undefined;
-
   function markBridgeReady(): void {
     jest.spyOn(bridgeRuntimeState, 'syncBrowserProcessNow').mockImplementation(() => {
       bridgeRuntimeState.setBrowserProcessRunning(true);
@@ -139,24 +131,12 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
     return latest as Record<string, unknown>;
   }
 
-  beforeEach(() => {
-    previousCapabilities = process.env[CAPABILITIES_ENV_KEY];
-    configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tabrix-skip-read-capabilities-'));
-    __hostConfigInternals.setConfigFileForTesting(path.join(configDir, 'config.json'));
-    delete process.env[CAPABILITIES_ENV_KEY];
-  });
+  beforeEach(() => {});
 
   afterEach(() => {
     jest.restoreAllMocks();
     bridgeRuntimeState.reset();
     sessionManager.reset();
-    if (previousCapabilities === undefined) {
-      delete process.env[CAPABILITIES_ENV_KEY];
-    } else {
-      process.env[CAPABILITIES_ENV_KEY] = previousCapabilities;
-    }
-    __hostConfigInternals.setConfigFileForTesting(null);
-    fs.rmSync(configDir, { recursive: true, force: true });
   });
 
   // ------------------------------------------------------------------
@@ -195,10 +175,16 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
     // Mirrors the chooser tool result.
     expect(decision.sourceRoute).toBe(payload.sourceRoute);
     expect(decision.chosenLayer).toBe(payload.chosenLayer);
-    // Honest defaults: api_knowledge default-off keeps apiCapability
-    // null, and fullReadTokenEstimate must be a non-negative integer
-    // when the dispatcher had no byte estimate to ground it.
-    expect(decision.apiCapability ?? null).toBeNull();
+    // API Knowledge is now a core browser-automation asset, not a hidden
+    // capability. When URL + page role resolve to a known API family, the
+    // chooser should attach it by default so the reader can skip wasteful
+    // page reads when that is enough for the AI's task.
+    expect(decision.apiCapability).toMatchObject({
+      available: true,
+      family: 'github_issues_list',
+      dataPurpose: 'issue_list',
+      params: { owner: 'octocat', repo: 'repo', state: 'open' },
+    });
     expect(Number.isInteger(decision.fullReadTokenEstimate)).toBe(true);
     expect(decision.fullReadTokenEstimate).toBeGreaterThanOrEqual(0);
     // URL / pageRole synced by `noteUrlChange` inside the chooser.
@@ -207,7 +193,6 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
   });
 
   it('V27-10R current-task observed search/list capture returns compact api_rows without seed adapter', async () => {
-    process.env[CAPABILITIES_ENV_KEY] = 'api_knowledge';
     markBridgeReady();
     sessionManager
       .getOrCreateExternalTaskContext('mcp:auto:tab:31')
@@ -346,7 +331,6 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
   });
 
   it('V27-CDP-01 current-task CDP enhanced rows carry controlled evidence into read_page logs', async () => {
-    process.env[CAPABILITIES_ENV_KEY] = 'api_knowledge';
     markBridgeReady();
     sessionManager
       .getOrCreateExternalTaskContext('mcp:auto:tab:33')
@@ -488,7 +472,6 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
   });
 
   it('V28-W7A current-task content endpoint returns api_content without bridge fallback', async () => {
-    process.env[CAPABILITIES_ENV_KEY] = 'api_knowledge';
     markBridgeReady();
     const requestUrl = 'https://neutral-social.example.test/api/share/content?share_id=abc123';
     sessionManager
@@ -595,7 +578,6 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
     assertNoCallToolInvocation(bridgeSpy);
   });
   it('V27-10R observed verified empty is a successful empty api_rows state', async () => {
-    process.env[CAPABILITIES_ENV_KEY] = 'api_knowledge';
     markBridgeReady();
     sessionManager
       .getOrCreateExternalTaskContext('mcp:auto:tab:32')
@@ -641,7 +623,6 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
   });
 
   it('V27-10R metadata-only default capture does not produce live observed api_rows', async () => {
-    process.env[CAPABILITIES_ENV_KEY] = 'api_knowledge';
     markBridgeReady();
     const completeSpy = jest.spyOn(sessionManager, 'completeStep');
     sessionManager
@@ -702,7 +683,6 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
   });
 
   it('V27-10R uncorrelated response body candidate is rejected from AI-facing api_rows', async () => {
-    process.env[CAPABILITIES_ENV_KEY] = 'api_knowledge';
     markBridgeReady();
     const completeSpy = jest.spyOn(sessionManager, 'completeStep');
     mockBridgeRoundTrip(
@@ -758,7 +738,6 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
   });
 
   it('V27-10R same query key with different value falls back without leaking raw query values', async () => {
-    process.env[CAPABILITIES_ENV_KEY] = 'api_knowledge';
     markBridgeReady();
     const completeSpy = jest.spyOn(sessionManager, 'completeStep');
     sessionManager
@@ -828,7 +807,6 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
   });
 
   it('V27-10R unsafe observed endpoint is omitted from AI api_rows and kept as fallback evidence', async () => {
-    process.env[CAPABILITIES_ENV_KEY] = 'api_knowledge';
     markBridgeReady();
     const completeSpy = jest.spyOn(sessionManager, 'completeStep');
     mockBridgeRoundTrip(
@@ -1490,9 +1468,8 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
     expect(ctx.getTaskTotals().readPageAvoidedCount).toBe(0);
   });
 
-  it('production chooser→reader path uses persisted api_knowledge capability for Chinese GitHub search', async () => {
+  it('production chooser→reader path uses default API knowledge for Chinese GitHub search', async () => {
     markBridgeReady();
-    setPersistedPolicyCapabilities('api_knowledge');
     const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
       status: 200,
       headers: { get: jest.fn().mockReturnValue('application/json') },

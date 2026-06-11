@@ -1,14 +1,11 @@
 import assert from 'node:assert/strict';
 
 import {
-  CAPABILITY_GATED_TOOLS,
   P3_EXPLICIT_OPT_IN_TOOLS,
   TOOL_NAMES,
   TOOL_RISK_TIERS,
   TOOL_SCHEMAS,
-  getRequiredCapability,
   getToolRiskTier,
-  isCapabilityGatedTool,
   isExplicitOptInTool,
 } from '../dist/index.mjs';
 
@@ -57,19 +54,11 @@ for (const name of P3_EXPLICIT_OPT_IN_TOOLS) {
   assert.equal(isExplicitOptInTool(name), true, `explicit opt-in helper must recognize "${name}"`);
 }
 
-for (const [name, capability] of CAPABILITY_GATED_TOOLS.entries()) {
-  assert.ok(allToolNames.has(name), `capability-gated tool "${name}" must be declared in TOOL_NAMES`);
-  assert.ok(getToolRiskTier(name), `capability-gated tool "${name}" must have a risk tier`);
-  assert.equal(isCapabilityGatedTool(name), true, `capability helper must recognize "${name}"`);
-  assert.equal(getRequiredCapability(name), capability, `capability helper must return "${capability}" for "${name}"`);
-}
-
 console.log(
   JSON.stringify({
     status: 'PASS',
     schemaCount: schemaNames.length,
     riskTierCount: riskTierNames.length,
     explicitOptInCount: P3_EXPLICIT_OPT_IN_TOOLS.size,
-    capabilityGatedCount: CAPABILITY_GATED_TOOLS.size,
   }),
 );

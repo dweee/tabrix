@@ -3,7 +3,6 @@ import { TOOL_NAMES } from '@tabrix/shared';
 import { getNativeToolHandler } from './native-tool-handlers';
 import type { NativeToolHandler, NativeToolHandlerDeps } from './native-tool-handlers';
 import type { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
-import type { CapabilityEnv } from '../policy/capabilities';
 import { MkeAiFeedbackValidationError } from '../memory/mke-memory-trace-service';
 
 function callTextPayload(result: CallToolResult): any {
@@ -19,7 +18,6 @@ function makeDeps(
     memoryTraces: {
       recordAiBusinessFeedback: jest.Mock;
     } | null;
-    capabilityEnv: CapabilityEnv;
   }> = {},
 ): NativeToolHandlerDeps {
   return {
@@ -37,7 +35,6 @@ function makeDeps(
         };
       },
     } as unknown as NativeToolHandlerDeps['sessionManager'],
-    capabilityEnv: overrides.capabilityEnv,
   };
 }
 
@@ -199,7 +196,7 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
     });
   });
 
-  it('routes to knowledge_light only when capability is enabled and catalog is non-empty', async () => {
+  it('routes to knowledge_light when local Knowledge catalog is non-empty', async () => {
     const handler = getChooseHandler();
     const listBySite = jest.fn().mockReturnValue([
       {
@@ -229,28 +226,15 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
     ]);
     const knowledgeApi = { listBySite } as unknown as KnowledgeApiRepository;
 
-    const enabledResult = await handler(
+    const result = await handler(
       { intent: 'inspect captured endpoint catalog', url: 'https://github.com/octocat/hello' },
       makeDeps({
         knowledgeApi,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
       }),
     );
-    const enabledBody = callTextPayload(enabledResult);
-    expect(enabledBody.strategy).toBe('knowledge_light');
+    const body = callTextPayload(result);
+    expect(body.strategy).toBe('knowledge_light');
     expect(listBySite).toHaveBeenCalledTimes(1);
-
-    listBySite.mockClear();
-    const disabledResult = await handler(
-      { intent: 'inspect captured endpoint catalog', url: 'https://github.com/octocat/hello' },
-      makeDeps({
-        knowledgeApi,
-        // capabilityEnv left undefined → must be treated as default-deny.
-      }),
-    );
-    const disabledBody = callTextPayload(disabledResult);
-    expect(disabledBody.strategy).toBe('read_page_required');
-    expect(listBySite).not.toHaveBeenCalled();
   });
 
   it('disables chooser-inline direct API when private acceptance fault injection is present', async () => {
@@ -269,7 +253,6 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
         },
         makeDeps({
           knowledgeApi: null,
-          capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
         }),
       );
 

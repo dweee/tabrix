@@ -117,7 +117,7 @@ The shared contract between the native server and the extension.
 
 Primary files:
 
-- `tools.ts` / `tools/*`: MCP tool contract (entrypoint `tools.ts` re-exports from modules under `tools/` — names, schemas, policy, capability gates)
+- `tools.ts` / `tools/*`: MCP tool contract (entrypoint `tools.ts` re-exports from modules under `tools/` — names, schemas, and policy)
 - `types.ts` and `constants.ts`: shared cross-process contracts
 - `labels.ts`: shared copy / label catalog
 - `bridge-ws.ts`: the extension-to-native bridge wire protocol

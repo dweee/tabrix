@@ -1,13 +1,5 @@
-import {
-  CAPABILITY_GATED_TOOLS,
-  TOOL_NAMES,
-  getRequiredCapability,
-  getToolRiskTier,
-  isCapabilityGatedTool,
-  isExplicitOptInTool,
-} from '@tabrix/shared';
+import { TOOL_NAMES, getToolRiskTier, isExplicitOptInTool } from '@tabrix/shared';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import { isCapabilityEnabled, type CapabilityEnv } from '../policy/capabilities';
 import { resolveOptInAllowlist } from '../policy/phase0-opt-in';
 
 /**
@@ -57,10 +49,6 @@ export function isToolAllowed(toolName: string, tools: Tool[]): boolean {
  * Phase 0 Policy view of the tools list. Removes P3 opt-in tools that have not been opted-in
  * and injects the Tabrix-private `riskTier` annotation so clients that choose to render it can.
  *
- * Also injects `requiresExplicitOptIn: true` for capability-gated tools.
- * The actual filtering happens in {@link filterToolsByCapability} below,
- * downstream of this function.
- *
  * Never mutates the input tool objects.
  */
 export function filterToolsByPolicy(tools: Tool[]): Tool[] {
@@ -71,7 +59,7 @@ export function filterToolsByPolicy(tools: Tool[]): Tool[] {
       continue;
     }
     const riskTier = getToolRiskTier(tool.name);
-    const requiresOptIn = isExplicitOptInTool(tool.name) || isCapabilityGatedTool(tool.name);
+    const requiresOptIn = isExplicitOptInTool(tool.name);
     if (!riskTier && !requiresOptIn) {
       result.push(tool);
       continue;
@@ -84,26 +72,4 @@ export function filterToolsByPolicy(tools: Tool[]): Tool[] {
     result.push({ ...tool, annotations });
   }
   return result;
-}
-
-/**
- * Capability gate. Drops tools listed in
- * {@link CAPABILITY_GATED_TOOLS} when the matching capability is not
- * present in the active capability allowlist (`TABRIX_POLICY_CAPABILITIES`
- * — see {@link isCapabilityEnabled}).
- *
- * This is orthogonal to the P3 opt-in path: a tool can be capability-
- * gated without being P3. The gate runs AFTER `filterToolsByPolicy` so
- * the annotation injection above is always honoured for clients that
- * render the gate explanation.
- *
- * Never mutates the input tool objects.
- */
-export function filterToolsByCapability(tools: Tool[], env: CapabilityEnv): Tool[] {
-  if (CAPABILITY_GATED_TOOLS.size === 0) return tools;
-  return tools.filter((tool) => {
-    const cap = getRequiredCapability(tool.name);
-    if (!cap) return true;
-    return isCapabilityEnabled(cap, env);
-  });
 }

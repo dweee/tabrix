@@ -6,7 +6,7 @@
  * `handleToolCall`. It can:
  *
  * 1. Update in-process task context with facts needed by the next tool call.
- * 2. Persist capability-gated knowledge side-effects.
+ * 2. Persist browser knowledge side-effects.
  *
  * Design contract:
  * - **Isolation**: each post-processor wraps its work in `try/catch`
@@ -32,7 +32,6 @@ import {
   analyzeKnowledgeCaptureBundle,
   type CapturedNetworkBundle,
 } from '../memory/knowledge/api-knowledge-capture';
-import { getCurrentCapabilityEnv, isCapabilityEnabled } from '../policy/capabilities';
 import { logger } from '../logging/logger';
 
 const knowledgeLogger = logger.child('knowledge');
@@ -263,10 +262,8 @@ export const chromeReadPagePostProcessor: ToolPostProcessor = (ctx) => {
  * chrome_network_capture post-processor.
  *
  * Runs only when:
- *   1. The `api_knowledge` capability is enabled
- *      (`TABRIX_POLICY_CAPABILITIES=api_knowledge` or `=all`),
- *   2. Memory persistence is on (KnowledgeApiRepository is wired),
- *   3. The tool result is a JSON body containing a `requests` array
+ *   1. Memory persistence is on (KnowledgeApiRepository is wired),
+ *   2. The tool result is a JSON body containing a `requests` array
  *      (only `action: "stop"` produces this; `action: "start"` is a
  *      noop here).
  *
@@ -282,7 +279,6 @@ export const chromeNetworkCapturePostProcessor: ToolPostProcessor = (ctx) => {
     extraArtifactRefs: [],
   };
   try {
-    if (!isCapabilityEnabled('api_knowledge', getCurrentCapabilityEnv())) return empty;
     const repo = ctx.sessionManager.knowledgeApi;
     if (!repo) return empty;
 
@@ -325,7 +321,7 @@ export const chromeNetworkCapturePostProcessor: ToolPostProcessor = (ctx) => {
       } catch (innerError) {
         const message = innerError instanceof Error ? innerError.message : String(innerError);
 
-        knowledgeLogger.warn('api_knowledge upsert failed', {
+        knowledgeLogger.warn('knowledge api endpoint upsert failed', {
           endpointSignature: input.endpointSignature,
           errorMessage: message,
         });
@@ -371,9 +367,9 @@ export const chromeNetworkCapturePostProcessor: ToolPostProcessor = (ctx) => {
  */
 export const TOOL_POST_PROCESSORS: Partial<Record<string, ToolPostProcessor>> = {
   chrome_read_page: chromeReadPagePostProcessor,
-  // API Knowledge capture (capability-gated, no MCP surface change). Keyed off
-  // the canonical tool name so legacy aliases (`chrome_network_capture_stop`)
-  // are intentionally not hooked.
+  // API Knowledge capture has no MCP surface change. Keyed off the canonical
+  // tool name so legacy aliases (`chrome_network_capture_stop`) are
+  // intentionally not hooked.
   [TOOL_NAMES.BROWSER.NETWORK_CAPTURE]: chromeNetworkCapturePostProcessor,
 };
 

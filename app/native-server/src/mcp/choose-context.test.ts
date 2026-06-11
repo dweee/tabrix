@@ -3,7 +3,7 @@
  *
  * Mirrors the success-criteria checklist in
  * `docs/B_018_CONTEXT_SELECTOR_V1.md` §8: contract shape, strategy
- * set guard, three branches, capability gate, no write side-effects,
+ * set guard, local Knowledge routing, no write side-effects,
  * and risk tier presence.
  */
 
@@ -149,32 +149,25 @@ describe('chooseContextStrategy (pure)', () => {
     // PR that bolts on `api_only` (or any other branch) MUST also touch
     // this guard test (and, by extension, the design doc).
     //
-    // V23-04 / B-018 v1.5: `read_page_markdown` joined the set as the
-    // text-heavy reading branch (B-015 / V23-03). Legacy Experience
-    // action-path replay is retired and must not re-enter this set.
-    const allowed: ContextStrategyName[] = [
-      'knowledge_light',
-      'read_page_markdown',
-      'read_page_required',
-    ];
-    expect(allowed.sort()).toEqual(['knowledge_light', 'read_page_markdown', 'read_page_required']);
+    const allowed: ContextStrategyName[] = ['knowledge_light', 'read_page_required'];
+    expect(allowed.sort()).toEqual(['knowledge_light', 'read_page_required']);
   });
 
   it('returns knowledge_light when no experience hit and catalog is non-empty', () => {
     const decision = chooseContextStrategy({
       intentSignature: 'open issues',
-      siteFamily: 'github',
+      siteFamily: 'example.test',
       knowledgeCatalog: {
-        site: 'api.github.com',
+        site: 'api.example.test',
         totalEndpoints: 2,
-        sampleSignatures: ['GET api.github.com/repos/:owner/:repo/issues'],
+        sampleSignatures: ['GET api.example.test/items'],
       },
     });
     expect(decision.strategy).toBe('knowledge_light');
     expect(decision.fallbackStrategy).toBe('read_page_required');
-    expect(decision.reasoning).toMatch(/Tabrix v1 does NOT call site APIs/);
+    expect(decision.reasoning).toMatch(/Use local Knowledge first/);
     expect(decision.artifacts).toEqual([
-      expect.objectContaining({ kind: 'knowledge_api', ref: 'api.github.com' }),
+      expect.objectContaining({ kind: 'knowledge_api', ref: 'api.example.test' }),
     ]);
   });
 
@@ -188,60 +181,32 @@ describe('chooseContextStrategy (pure)', () => {
   it('treats empty knowledge catalog as no catalog (no knowledge_light)', () => {
     const decision = chooseContextStrategy({
       intentSignature: 'open issues',
-      siteFamily: 'github',
-      knowledgeCatalog: { site: 'api.github.com', totalEndpoints: 0, sampleSignatures: [] },
+      siteFamily: 'example.test',
+      knowledgeCatalog: { site: 'api.example.test', totalEndpoints: 0, sampleSignatures: [] },
     });
     expect(decision.strategy).toBe('read_page_required');
   });
 
-  // -------------------------------------------------------------------------
-  // V23-04 / B-018 v1.5 — markdown reading branch
-  // -------------------------------------------------------------------------
-
-  it('routes to read_page_markdown for whitelisted GitHub pageRoles when no other asset hits', () => {
+  it('does not route to a site-specific markdown branch without local Knowledge', () => {
     const decision = chooseContextStrategy({
       intentSignature: 'read repo overview',
       siteFamily: 'github',
       pageRole: 'repo_home',
     });
-    expect(decision.strategy).toBe('read_page_markdown');
-    expect(decision.fallbackStrategy).toBe('read_page_required');
-    expect(decision.artifacts).toEqual([
-      expect.objectContaining({ kind: 'read_page', ref: 'markdown:repo_home' }),
-    ]);
-    expect(decision.reasoning).toMatch(/markdown-friendly GitHub whitelist/);
-  });
-
-  it('does NOT route to markdown for an unknown GitHub pageRole', () => {
-    const decision = chooseContextStrategy({
-      intentSignature: 'do something',
-      siteFamily: 'github',
-      pageRole: 'mystery_role',
-    });
     expect(decision.strategy).toBe('read_page_required');
+    expect(decision.fallbackStrategy).toBeUndefined();
+    expect(decision.artifacts).toEqual([]);
   });
 
-  it('does NOT route to markdown for non-GitHub site even with a whitelist token', () => {
-    // The whitelist is GitHub-specific; routing markdown for a
-    // non-GitHub host whose understanding layer happens to emit
-    // `repo_home` would be a silent mis-routing.
-    const decision = chooseContextStrategy({
-      intentSignature: 'read overview',
-      siteFamily: undefined,
-      pageRole: 'repo_home',
-    });
-    expect(decision.strategy).toBe('read_page_required');
-  });
-
-  it('knowledge_light still wins over the markdown branch', () => {
+  it('knowledge_light wins when a catalog is present for any site family', () => {
     const decision = chooseContextStrategy({
       intentSignature: 'list issues',
-      siteFamily: 'github',
+      siteFamily: 'example.test',
       pageRole: 'issue_detail',
       knowledgeCatalog: {
-        site: 'api.github.com',
+        site: 'api.example.test',
         totalEndpoints: 1,
-        sampleSignatures: ['GET api.github.com/repos/:owner/:repo/issues'],
+        sampleSignatures: ['GET api.example.test/issues'],
       },
     });
     expect(decision.strategy).toBe('knowledge_light');
@@ -254,7 +219,6 @@ describe('runTabrixChooseContext (orchestrator)', () => {
       {},
       {
         knowledgeApi: null,
-        capabilityEnv: {},
       },
     );
     expect(result.status).toBe('invalid_input');
@@ -262,66 +226,55 @@ describe('runTabrixChooseContext (orchestrator)', () => {
     expect(result.strategy).toBeUndefined();
   });
 
-  it('returns knowledge_light when capability is on and repo is non-empty', () => {
+  it('returns knowledge_light when repo is non-empty', () => {
     const { repo, spy } = fakeKnowledgeRepo([
-      fakeEndpoint({ endpointSignature: 'GET api.github.com/repos/:owner/:repo/pulls' }),
+      fakeEndpoint({ endpointSignature: 'GET api.example.test/items' }),
     ]);
     const result = runTabrixChooseContext(
-      { intent: 'list prs', url: 'https://github.com/x/y/pulls' },
+      { intent: 'list items', url: 'https://example.test/items' },
       {
         knowledgeApi: repo,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
       },
     );
     expect(result.strategy).toBe('knowledge_light');
     expect(result.fallbackStrategy).toBe('read_page_required');
-    expect(spy).toHaveBeenCalledWith('api.github.com', expect.any(Number));
-    expect(result.artifacts?.[0]?.summary).toMatch(/api\.github\.com/);
+    expect(spy).toHaveBeenCalledWith('example.test', expect.any(Number));
+    expect(result.artifacts?.[0]?.summary).toMatch(/example\.test/);
   });
 
-  it('falls back to read_page_required when capability is OFF even with rows present', () => {
-    // Doc §8 success criterion #4: gate must be respected.
+  it('uses local Knowledge by default', () => {
     const { repo, spy } = fakeKnowledgeRepo([fakeEndpoint()]);
     const result = runTabrixChooseContext(
       { intent: 'list prs', url: 'https://github.com/x/y/pulls' },
       {
         knowledgeApi: repo,
-        capabilityEnv: {}, // not enabled
       },
     );
-    expect(result.strategy).toBe('read_page_required');
-    expect(result.artifacts).toEqual([]);
-    // Tighter assertion: when the gate is off we must NOT touch the
-    // repo at all — it pays no cost AND cannot accidentally surface
-    // catalog data.
-    expect(spy).not.toHaveBeenCalled();
+    expect(result.strategy).toBe('knowledge_light');
+    expect(spy).toHaveBeenCalled();
   });
 
-  it('falls back to read_page_required for non-GitHub URLs even with capability on', () => {
+  it('uses local Knowledge for non-GitHub URLs', () => {
     const { repo, spy } = fakeKnowledgeRepo([fakeEndpoint()]);
     const result = runTabrixChooseContext(
-      { intent: 'open something', url: 'https://www.douyin.com/x/y' },
+      { intent: 'open something', url: 'https://www.example.test/x/y' },
       {
         knowledgeApi: repo,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
       },
     );
-    expect(result.strategy).toBe('read_page_required');
-    expect(spy).not.toHaveBeenCalled();
+    expect(result.strategy).toBe('knowledge_light');
+    expect(spy).toHaveBeenCalledWith('www.example.test', expect.any(Number));
   });
 
   it('falls back to read_page_required when no URL is available', () => {
-    const result = runTabrixChooseContext(
-      { intent: 'do something' },
-      { knowledgeApi: null, capabilityEnv: {} },
-    );
+    const result = runTabrixChooseContext({ intent: 'do something' }, { knowledgeApi: null });
     expect(result.strategy).toBe('read_page_required');
   });
 
   it('echoes resolved bucket fields back to the caller', () => {
     const result = runTabrixChooseContext(
       { intent: '  Open Issues  ', pageRole: 'repo_home', siteId: 'github' },
-      { knowledgeApi: null, capabilityEnv: {} },
+      { knowledgeApi: null },
     );
     expect(result.resolved).toEqual({
       intentSignature: 'open issues',
@@ -387,7 +340,6 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
       { intent: 'open issues', pageRole: 'repo_home', siteId: 'github' },
       {
         knowledgeApi: null,
-        capabilityEnv: {},
         telemetry: tele.repo,
         newDecisionId: () => 'dc-test-1',
         now: () => '2026-04-22T10:00:00.000Z',
@@ -401,10 +353,8 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
         intentSignature: 'open issues',
         pageRole: 'repo_home',
         siteFamily: 'github',
-        // No knowledge, but pageRole=repo_home is on the markdown
-        // whitelist for siteFamily=github.
-        strategy: 'read_page_markdown',
-        fallbackStrategy: 'read_page_required',
+        strategy: 'read_page_required',
+        fallbackStrategy: null,
         createdAt: '2026-04-22T10:00:00.000Z',
         // V25-02 layer-dispatch telemetry. "open issues" classifies
         // as user_intent_open_or_select; with no full-read byte length
@@ -427,10 +377,7 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
   });
 
   it('omits decisionId when telemetry is not wired', () => {
-    const result = runTabrixChooseContext(
-      { intent: 'do something' },
-      { knowledgeApi: null, capabilityEnv: {} },
-    );
+    const result = runTabrixChooseContext({ intent: 'do something' }, { knowledgeApi: null });
     expect(result.status).toBe('ok');
     expect(result.decisionId).toBeUndefined();
   });
@@ -441,7 +388,6 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
       {},
       {
         knowledgeApi: null,
-        capabilityEnv: {},
         telemetry: tele.repo,
       },
     );
@@ -459,7 +405,6 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
       { intent: 'open issues', url: 'https://github.com/octocat/hello/issues' },
       {
         knowledgeApi: null,
-        capabilityEnv: {},
         telemetry: tele.repo,
         newDecisionId: () => 'dc-v26-04-live',
         now: () => '2026-04-25T10:00:00.000Z',
@@ -493,7 +438,6 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
       { intent: 'open issues' },
       {
         knowledgeApi: null,
-        capabilityEnv: {},
         telemetry: tele.repo,
         newDecisionId: () => 'dc-v26-04-fallback',
         now: () => '2026-04-25T10:00:00.000Z',
@@ -529,7 +473,6 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
       },
       {
         knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
         pageContext: {
           getContext: () => ({
             source: 'live_snapshot',
@@ -562,7 +505,6 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
       },
       {
         knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
         pageContext: {
           getContext: () => ({
             source: 'live_snapshot',
@@ -596,7 +538,6 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
         { intent: 'do something' },
         {
           knowledgeApi: null,
-          capabilityEnv: {},
           telemetry: tele.repo,
           newDecisionId: () => 'dc-doomed',
         },

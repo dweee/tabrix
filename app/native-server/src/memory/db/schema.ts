@@ -261,7 +261,7 @@ CREATE INDEX IF NOT EXISTS tabrix_browser_objects_operability_idx
 `;
 
 /**
- * Knowledge schema (opt-in via TABRIX_POLICY_CAPABILITIES=api_knowledge).
+ * Knowledge schema.
  *
  * `knowledge_api_endpoints` is the storage side of "API Knowledge capture
  * v1": a deduplicated, redaction-only-metadata view of API endpoints that

@@ -31,7 +31,6 @@ import {
   type TabrixChooseContextRouterTelemetry,
 } from './choose-context';
 import { createLivePageContextProvider } from './page-context-provider';
-import { getCurrentCapabilityEnv, type CapabilityEnv } from '../policy/capabilities';
 import type { SessionManager } from '../execution/session-manager';
 import type { TaskSessionContext } from '../execution/task-session-context';
 import type { ChooseContextDecisionSnapshot } from '../execution/skip-read-orchestrator';
@@ -53,12 +52,6 @@ export interface NativeToolHandlerDeps {
   > & {
     memoryTraces?: SessionManager['memoryTraces'];
   };
-  /**
-   * Capability allowlist source. Optional so existing handler tests
-   * (which only need `sessionManager`) keep compiling; missing means
-   * "no capabilities enabled" — i.e. the safest default.
-   */
-  capabilityEnv?: CapabilityEnv;
   /**
    * Externally-keyed `TaskSessionContext` the dispatcher resolved for
    * this tool call. Wired exclusively for `tabrix_choose_context` so its
@@ -245,12 +238,11 @@ const handleTabrixChooseContext: NativeToolHandler = async (args, deps) => {
   // Wrap the synchronous chooser with the direct-api-executor so a
   // high-confidence read-only `knowledge_supported_read` route may
   // execute the API inline (compact rows arrive on
-  // `result.directApiExecution`). For every other route + every
-  // capability-disabled invocation the wrapper returns the synchronous
-  // chooser result bit-identical, so the legacy happy path is preserved.
+  // `result.directApiExecution`). For every other route the wrapper returns
+  // the synchronous chooser result bit-identical, so the legacy happy path is
+  // preserved.
   const result = await runTabrixChooseContextWithDirectApi(args, {
     knowledgeApi: deps.sessionManager.knowledgeApi,
-    capabilityEnv: deps.capabilityEnv ?? {},
     telemetry: deps.sessionManager.chooseContextTelemetry,
     pageContext,
     domRegionRowsEvidence: deps.taskContext?.peekVisibleRegionRowsEvidence() ?? null,
@@ -437,6 +429,5 @@ export async function invokeNativeToolHandler(
   if (!handler) return undefined;
   return await handler(args, {
     sessionManager: defaultSessionManager,
-    capabilityEnv: getCurrentCapabilityEnv(),
   });
 }

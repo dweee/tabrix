@@ -12,13 +12,11 @@ import {
   buildActionEvidenceResult,
   buildPostActionDeltaEvidence,
   buildReadPageBrowserPageObjectView,
-  getRequiredCapability,
 } from '@tabrix/shared';
 import type { LifecycleEvidenceBrowserHygieneCheck } from '@tabrix/shared';
 import type { ReadPageObjectLifecycleSummary } from '@tabrix/shared';
 import type { SemanticSignal } from '@tabrix/shared';
 import { isToolAllowedByPolicy } from '../policy/phase0-opt-in';
-import { getCurrentCapabilityEnv, isCapabilityEnabled } from '../policy/capabilities';
 import {
   attachRuntimePolicyAuditToResult,
   evaluateNonInterferencePreflight,
@@ -47,7 +45,6 @@ import {
 } from './bridge-recovery';
 import {
   buildGenericFailurePayload,
-  createCapabilityDeniedResult,
   createErrorResult,
   createPolicyDeniedResult,
 } from './tool-call-results';
@@ -86,7 +83,6 @@ import {
 import { buildReadPageWarningResult } from './read-page-warning-result';
 import { buildReadPageSkipResult } from './read-page-skip-result';
 import {
-  filterToolsByCapability,
   filterToolsByEnvironment,
   filterToolsByPolicy,
   isToolAllowed,
@@ -213,9 +209,7 @@ export const setupTools = (server: McpServer) => {
     const byEnv = filterToolsByEnvironment([...TOOL_SCHEMAS, ...dynamicTools]);
     const byPolicy = filterToolsByPolicy(byEnv);
     return {
-      tools: filterToolsByCapability(byPolicy, getCurrentCapabilityEnv()).map(
-        withTabrixMetadataSchema,
-      ),
+      tools: byPolicy.map(withTabrixMetadataSchema),
     };
   });
 
@@ -369,25 +363,6 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       return result;
     }
 
-    // Capability gate (defense-in-depth — `filterToolsByCapability`
-    // already removed disabled tools from `listTools`, but a curious
-    // client may still try to call one directly).
-    const requiredCapability = getRequiredCapability(name);
-    if (requiredCapability && !isCapabilityEnabled(requiredCapability, getCurrentCapabilityEnv())) {
-      const result = createCapabilityDeniedResult(name, requiredCapability);
-      sessionManager.completeStep(session.sessionId, step.stepId, {
-        status: 'failed',
-        errorCode: 'capability_off',
-        errorSummary: `Tool "${name}" denied — capability '${requiredCapability}' is not enabled`,
-        resultSummary: `Tool ${name} denied by capability gate`,
-      });
-      sessionManager.finishSession(session.sessionId, {
-        status: 'failed',
-        summary: `Tool ${name} denied by capability gate`,
-      });
-      return result;
-    }
-
     // Resolve the task context BEFORE we branch into the native handler
     // so `tabrix_choose_context` (a native-handled tool) can write its
     // decision into the same `TaskSessionContext` the `chrome_read_page`
@@ -411,7 +386,6 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     if (nativeHandler) {
       const nativeResult = await nativeHandler(args, {
         sessionManager,
-        capabilityEnv: getCurrentCapabilityEnv(),
         // Carries the `TaskSessionContext` the `tabrix_choose_context`
         // handler writes into via `noteChooseContextDecision`. `null`
         // for tools outside the auto-key set when there is no live

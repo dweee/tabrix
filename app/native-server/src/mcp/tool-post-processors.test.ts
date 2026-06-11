@@ -1,11 +1,7 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
 import { TOOL_NAMES } from '@tabrix/shared';
 import { SessionManager } from '../execution/session-manager';
 import { TaskSessionContext } from '../execution/task-session-context';
-import { __hostConfigInternals, setPersistedPolicyCapabilities } from '../host-config';
 import {
   runPostProcessor,
   chromeReadPagePostProcessor,
@@ -202,14 +198,14 @@ describe('TOOL_POST_PROCESSORS registry', () => {
 });
 
 /**
- * B-017 end-to-end — proves the capability gate + redaction contract
+ * B-017 end-to-end — proves the default capture + redaction contract
  * actually fires through the post-processor that real `chrome_network_capture`
  * results flow through.
  *
  * The shape we feed `runPostProcessor` here mirrors the JSON body the
  * extension's `network-capture-debugger.ts` / `network-capture-web-request.ts`
  * tools serialize when `action: "stop"` returns. We do NOT mock the
- * post-processor itself — we want the registry → gate → derive → upsert
+ * post-processor itself — we want the registry → derive → upsert
  * chain to be the unit under test.
  */
 describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
@@ -273,29 +269,13 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
     return { manager, session, step };
   }
 
-  const ENV_KEY = 'TABRIX_POLICY_CAPABILITIES';
-  let prevEnv: string | undefined;
-  let configDir: string;
-  beforeEach(() => {
-    prevEnv = process.env[ENV_KEY];
-    configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tabrix-network-capabilities-'));
-    __hostConfigInternals.setConfigFileForTesting(path.join(configDir, 'config.json'));
-  });
-  afterEach(() => {
-    if (prevEnv === undefined) delete process.env[ENV_KEY];
-    else process.env[ENV_KEY] = prevEnv;
-    __hostConfigInternals.setConfigFileForTesting(null);
-    fs.rmSync(configDir, { recursive: true, force: true });
-  });
-
   it('is registered for the canonical NETWORK_CAPTURE tool name', () => {
     expect(TOOL_POST_PROCESSORS[TOOL_NAMES.BROWSER.NETWORK_CAPTURE]).toBe(
       chromeNetworkCapturePostProcessor,
     );
   });
 
-  it('captures NOTHING when capability gate is closed (default)', () => {
-    delete process.env[ENV_KEY];
+  it('captures useful API rows by default', () => {
     const { manager, session, step } = bootstrap();
     try {
       const raw = wrap(SAMPLE_BUNDLE);
@@ -310,16 +290,14 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
       // Result is unchanged (Knowledge capture is invisible side-effect).
       expect(out.rawResult).toBe(raw);
       expect(out.extraArtifactRefs).toEqual([]);
-      // And NOTHING landed in the Knowledge table.
-      expect(manager.knowledgeApi!.countAll()).toBe(0);
+      // Useful, redacted API knowledge landed by default.
+      expect(manager.knowledgeApi!.countAll()).toBe(1);
     } finally {
       manager.close();
     }
   });
 
-  it('captures GitHub-only rows from persisted api_knowledge when shell env is absent', () => {
-    delete process.env[ENV_KEY];
-    setPersistedPolicyCapabilities('api_knowledge');
+  it('captures classified rows without persisted capability config', () => {
     const { manager, session, step } = bootstrap();
     try {
       const raw = wrap(SAMPLE_BUNDLE);
@@ -376,29 +354,7 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
     }
   });
 
-  it('gives shell env priority over persisted config when deciding capture enablement', () => {
-    setPersistedPolicyCapabilities('api_knowledge');
-    process.env[ENV_KEY] = 'disabled_for_test';
-    const { manager, session, step } = bootstrap();
-    try {
-      const raw = wrap(SAMPLE_BUNDLE);
-      runPostProcessor({
-        toolName: TOOL_NAMES.BROWSER.NETWORK_CAPTURE,
-        rawResult: raw,
-        stepId: step.stepId,
-        sessionId: session.sessionId,
-        sessionManager: manager,
-        args: {},
-      });
-
-      expect(manager.knowledgeApi!.countAll()).toBe(0);
-    } finally {
-      manager.close();
-    }
-  });
-
   it('does not mutate the MCP response on success (response stays byte-identical)', () => {
-    process.env[ENV_KEY] = 'all';
     const { manager, session, step } = bootstrap();
     try {
       const raw = wrap(SAMPLE_BUNDLE);
@@ -420,7 +376,6 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
   });
 
   it('degrades silently on malformed bundle JSON', () => {
-    process.env[ENV_KEY] = 'api_knowledge';
     const { manager, session, step } = bootstrap();
     try {
       const raw: CallToolResult = { content: [{ type: 'text', text: 'not json' }] };
@@ -440,7 +395,6 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
   });
 
   it('upsert dedup: re-running the same bundle does not double-count', () => {
-    process.env[ENV_KEY] = 'api_knowledge';
     const { manager, session, step } = bootstrap();
     try {
       const raw = wrap(SAMPLE_BUNDLE);
@@ -466,7 +420,6 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
   });
 
   it('uses capture tabUrl as live observed relevance context when task currentUrl is absent', () => {
-    process.env[ENV_KEY] = 'api_knowledge';
     const { manager, session, step } = bootstrap();
     const taskContext = new TaskSessionContext();
     const raw = wrap({
@@ -526,7 +479,6 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
   });
 
   it('keeps shape-evidenced cross-origin POST search rows in task context', () => {
-    process.env[ENV_KEY] = 'api_knowledge';
     const { manager, session, step } = bootstrap();
     const taskContext = new TaskSessionContext();
     const raw = wrap({

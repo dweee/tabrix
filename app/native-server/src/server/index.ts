@@ -43,7 +43,6 @@ import {
 import { registerMemoryRoutes } from './memory-routes';
 import { registerExecutionRoutes } from './execution-routes';
 import { allowsLocalhostTokenBypass, isLoopbackClientIp } from '../policy/http-auth-boundary';
-import { getCapabilityDiagnostics, type CapabilitySourceKind } from '../policy/capabilities';
 import { getDefaultContextManager } from '../runtime/browser-context-manager';
 import { getDefaultFactCollector } from '../runtime/browser-fact-collector';
 import {
@@ -160,7 +159,7 @@ interface ServerStatusSnapshot {
     persistenceMode: 'disk' | 'memory' | 'off';
   };
   capabilities: {
-    source: CapabilitySourceKind;
+    source: 'default';
     enabled: string[];
     unknown: string[];
   };
@@ -1052,7 +1051,7 @@ export class Server {
     this.bridgeState.syncBrowserProcessNow();
     this.bridgeState.setNativeHostAttached(this.nativeHost !== null);
     const bridge = this.bridgeState.getSnapshot();
-    const capabilities = getCapabilityDiagnostics();
+    const capabilities = { source: 'default' as const, enabled: [], unknown: [] };
     const v27Observation = getObservationDiagnosticsSnapshot({
       factSnapshotCount: getDefaultFactCollector().size(),
       trackedContextCount: getDefaultContextManager().size(),

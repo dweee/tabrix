@@ -2,25 +2,6 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { buildPolicyDeniedPayload } from '../policy/phase0-opt-in';
 import { getBridgeSnapshot, type GenericFailurePayload } from './bridge-recovery';
 
-export function createCapabilityDeniedResult(toolName: string, capability: string): CallToolResult {
-  return {
-    content: [
-      {
-        type: 'text' as const,
-        text: JSON.stringify({
-          status: 'denied',
-          evidenceRefs: [],
-          error: {
-            code: 'capability_off',
-            message: `Tool "${toolName}" requires the '${capability}' capability (set TABRIX_POLICY_CAPABILITIES=${capability} or =all)`,
-          },
-        }),
-      },
-    ],
-    isError: true,
-  };
-}
-
 export function createPolicyDeniedResult(toolName: string): CallToolResult {
   return {
     content: [

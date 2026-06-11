@@ -286,7 +286,7 @@ export type TabrixObserveMode = 'foreground' | 'background' | 'disabled';
  * {@link TabrixObserveMode}. Tokens are deterministic so post-mortem
  * aggregations stay groupable.
  *
- *   - `'learning_requested'`     — env / capability opt-in
+ *   - `'learning_requested'`     — caller requested a foreground learning pass
  *     (`TABRIX_LEARNING_MODE` truthy) flagged this run as a learning
  *     pass; foreground observe is required to seed Knowledge.
  *   - `'knowledge_missing'`      — no Knowledge catalog entry exists

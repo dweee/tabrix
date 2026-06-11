@@ -20,9 +20,9 @@
  *      the {@link TaskSessionContext}. Absent a recorded decision, the caller
  *      MUST keep the legacy pathway (forward to `chrome_read_page`).
  *
- *   3. `api_list` / `api_detail` are capability-gated. Until the API
- *      capability layer is available, every API-class route resolves to
- *      `action='fallback_required'` with cause `'api_layer_not_available'`.
+ *   3. `api_list` / `api_detail` require a concrete API read candidate on
+ *      the recorded decision. Without one, every API-class route resolves
+ *      to `action='fallback_required'` with cause `'api_layer_not_available'`.
  *
  *   4. The fallback layer is ALWAYS `'L0' | 'L0+L1'` — never
  *      `'L0+L1+L2'`. This holds even when the upstream dispatcher

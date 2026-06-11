@@ -41,7 +41,6 @@ describe('handleToolCall execution wrapper', () => {
     delete process.env.DISABLE_MCP_TOOLS;
     delete process.env.MCP_DISABLE_SENSITIVE_TOOLS;
     delete process.env.TABRIX_POLICY_ALLOW_P3;
-    delete process.env.TABRIX_POLICY_CAPABILITIES;
   });
 
   it('tracks a successful tool call as a completed execution session', async () => {

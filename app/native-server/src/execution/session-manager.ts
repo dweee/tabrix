@@ -266,9 +266,8 @@ export class SessionManager {
 
   /**
    * Knowledge API endpoint repository. Capture writes go through here from
-   * the `chrome_network_capture` post-processor (gated by the `api_knowledge`
-   * capability). `null` when persistence is off, in which case the
-   * post-processor short-circuits.
+   * the `chrome_network_capture` post-processor. `null` when persistence is
+   * off, in which case the post-processor short-circuits.
    */
   public get knowledgeApi(): KnowledgeApiRepository | null {
     return this.knowledgeApiRepo;

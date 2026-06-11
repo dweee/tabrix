@@ -103,11 +103,11 @@ Key components:
 
 Primary surfaces:
 
-- `tools.ts`: MCP tool names, schemas, risk tiers, opt-in metadata, and capability gates.
+- `tools.ts`: MCP tool names, schemas, risk tiers, and P3 opt-in metadata.
 - `bridge-ws.ts`: extension-to-native bridge message protocol.
 - `read-page-contract.ts`: `chrome_read_page` output contract, HVOs, candidate actions, layer routing, and stable target refs.
 - `memory.ts`, `experience.ts`, `choose-context.ts`: MKEP read-side DTOs and shared constants.
-- `capabilities.ts`, `click.ts`, `execution-value.ts`: shared policy, action-outcome, and execution-value primitives.
+- `click.ts`, `execution-value.ts`: shared action-outcome and execution-value primitives.
 
 ## Data Flow
 

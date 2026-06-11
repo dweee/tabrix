@@ -26,7 +26,6 @@
 import { randomUUID } from 'node:crypto';
 import {
   KNOWLEDGE_LIGHT_SAMPLE_LIMIT,
-  MARKDOWN_FRIENDLY_PAGE_ROLES,
   MAX_TABRIX_CHOOSE_CONTEXT_INTENT_CHARS,
   MAX_TABRIX_CHOOSE_CONTEXT_PAGE_ROLE_CHARS,
   type ContextStrategyName,
@@ -40,8 +39,6 @@ import {
   type TabrixObserveReason,
   normalizeTabrixSiteId,
 } from '@tabrix/shared';
-import { isCapabilityEnabled } from '../policy/capabilities';
-import type { CapabilityEnv } from '../policy/capabilities';
 import { normalizeIntentSignature } from '../memory/experience/experience-signature';
 import type { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
 import type { ChooseContextTelemetryRepository } from '../memory/telemetry/choose-context-telemetry';
@@ -255,10 +252,8 @@ export interface ChooseContextFacts {
   pageRole?: string;
   siteFamily?: TabrixContextSiteFamily;
   /**
-   * Knowledge catalog summary, populated only when the capability gate
-   * is on AND there is at least one captured endpoint for the resolved
-   * site family. Empty / missing array means "do not pick
-   * `knowledge_light`".
+   * Knowledge catalog summary for the resolved site family. Empty or
+   * missing data means "do not pick `knowledge_light`".
    */
   knowledgeCatalog?: {
     site: string;
@@ -290,9 +285,8 @@ export function chooseContextStrategy(facts: ChooseContextFacts): StrategyDecisi
       strategy: 'knowledge_light',
       fallbackStrategy: 'read_page_required',
       reasoning:
-        `api_knowledge gate on; ` +
         `${cat.totalEndpoints} captured endpoint(s) on ${cat.site}. ` +
-        `Tabrix v1 does NOT call site APIs — use the catalog as shape evidence only.`,
+        `Use local Knowledge first; call chrome_read_page when the AI needs fresh page objects or action targets.`,
       artifacts: [
         {
           kind: 'knowledge_api',
@@ -303,49 +297,9 @@ export function chooseContextStrategy(facts: ChooseContextFacts): StrategyDecisi
     };
   }
 
-  // Text-heavy GitHub reading branch.
-  //
-  // When (a) no usable api_knowledge match, (b) the resolved siteFamily
-  // is `'github'`, and (c) the pageRole
-  // is on the hand-curated `MARKDOWN_FRIENDLY_PAGE_ROLES` whitelist,
-  // we route to `read_page_markdown`. This is a *reading* surface — the
-  // JSON HVOs / candidateActions / `targetRef` stay the execution truth.
-  // The chooser only signals that the markdown projection is the cheaper
-  // way to read this page; the caller is still expected to fall back to
-  // `read_page_required` if it has to act on the result.
-  //
-  // We deliberately gate on `siteFamily === 'github'` rather than on
-  // pageRole alone because the whitelist tokens
-  // (`issue_detail`, `pull_request_detail`, `wiki`, …) are GitHub-specific
-  // labels emitted by `read-page-understanding-github.ts`. Routing
-  // markdown for a non-GitHub site that happens to share a pageRole
-  // string would mis-route a page whose understanding layer has not
-  // been audited yet.
-  if (
-    facts.siteFamily === 'github' &&
-    facts.pageRole &&
-    MARKDOWN_FRIENDLY_PAGE_ROLES.includes(facts.pageRole)
-  ) {
-    return {
-      strategy: 'read_page_markdown',
-      fallbackStrategy: 'read_page_required',
-      reasoning:
-        `no usable api_knowledge; ` +
-        `pageRole='${facts.pageRole}' is on the markdown-friendly GitHub whitelist — ` +
-        `prefer read_page(render='markdown') as a reading surface, fall back to read_page (json) for execution.`,
-      artifacts: [
-        {
-          kind: 'read_page',
-          ref: `markdown:${facts.pageRole}`,
-          summary: `Use chrome_read_page(render='markdown') for this ${facts.pageRole} page.`,
-        },
-      ],
-    };
-  }
-
   return {
     strategy: 'read_page_required',
-    reasoning: 'no usable api_knowledge — fall back to read_page (json)',
+    reasoning: 'no usable local Knowledge — fall back to chrome_read_page',
     artifacts: [],
   };
 }
@@ -430,7 +384,6 @@ export interface RunTabrixChooseContextDeps {
     | (Pick<KnowledgeApiRepository, 'listBySite' | 'countAll'> &
         Partial<Pick<KnowledgeApiRepository, 'listScoredBySite'>>)
     | null;
-  capabilityEnv: CapabilityEnv;
   /**
    * Telemetry write-back. `null` means "telemetry disabled"
    * (persistence off, or the wiring opted out for a particular caller).
@@ -482,10 +435,9 @@ export interface RunTabrixChooseContextDeps {
  * the pure chooser. Always returns a `TabrixChooseContextResult` — the
  * caller wraps it into the MCP `CallToolResult` envelope.
  *
- * Capability handling: when `api_knowledge` is NOT enabled we never
- * read the knowledge repository at all, so an operator who has not
- * opted in pays no cost AND cannot accidentally surface
- * `knowledge_light` even if rows exist from a prior run.
+ * Knowledge is a core browser-automation input. When local endpoint
+ * knowledge exists for the page/site, the chooser can route through it
+ * before spending a fresh page read.
  */
 export function runTabrixChooseContext(
   rawArgs: unknown,
@@ -510,24 +462,14 @@ export function runTabrixChooseContext(
   const nowIso = (deps.now ?? (() => new Date().toISOString()))();
 
   let knowledgeCatalog: ChooseContextFacts['knowledgeCatalog'];
-  const apiCandidate = isCapabilityEnabled('api_knowledge', deps.capabilityEnv)
-    ? resolveApiKnowledgeCandidate({
-        intent: input.intent,
-        url: input.url,
-        pageRole: input.pageRole,
-      })
-    : null;
-  // Only consult Knowledge when (a) a recognised site family is in scope,
-  // (b) the api_knowledge capability is on, and (c) the repo handle exists.
-  // Each of these gates is a real
-  // failure mode of the v1 surface, not a paranoia check.
-  if (siteFamily === 'github' && deps.knowledgeApi) {
-    if (isCapabilityEnabled('api_knowledge', deps.capabilityEnv)) {
-      // Site-family → site mapping is exact: the GitHub capture seed
-      // uses `api.github.com`. Widening this requires touching the
-      // capture seed in lockstep — see
-      // `app/native-server/src/memory/knowledge/api-knowledge-capture.ts`.
-      const site = 'api.github.com';
+  const apiCandidate = resolveApiKnowledgeCandidate({
+    intent: input.intent,
+    url: input.url,
+    pageRole: input.pageRole,
+  });
+  if (deps.knowledgeApi) {
+    const site = apiCandidate?.endpointFamily ?? siteFamily;
+    if (site) {
       const rows =
         typeof deps.knowledgeApi.listScoredBySite === 'function'
           ? deps.knowledgeApi
@@ -535,11 +477,6 @@ export function runTabrixChooseContext(
               .filter((row) => row.usableForTask)
           : deps.knowledgeApi.listBySite(site, KNOWLEDGE_LIGHT_SAMPLE_LIMIT);
       if (rows.length > 0) {
-        // We intentionally use the capped `listBySite` result count as
-        // `totalEndpoints`. A precise total would require either a
-        // dedicated SELECT COUNT or another method on the repo; the
-        // cap-bounded number is enough to prove the catalog is non-empty
-        // without adding a new repository surface.
         knowledgeCatalog = {
           site,
           totalEndpoints: rows.length,
@@ -614,8 +551,7 @@ export function runTabrixChooseContext(
     readinessVerdict: domRegionRowsEvidence ? 'ready' : undefined,
     domRegionRowsEvidence,
   });
-  const knowledgeEndpointFamily =
-    siteFamily === 'github' && knowledgeCatalog ? 'github.api.github.com' : null;
+  const knowledgeEndpointFamily = knowledgeCatalog?.site ?? null;
 
   // Observe-mode advisory. Derived from the same Knowledge signals the
   // layer dispatcher already saw, so the chooser surface stays a single
@@ -975,13 +911,11 @@ export async function runTabrixChooseContextWithDirectApi(
     return result;
   }
 
-  const candidate = isCapabilityEnabled('api_knowledge', deps.capabilityEnv)
-    ? resolveApiKnowledgeCandidate({
-        intent: parsed.input.intent,
-        url: parsed.input.url,
-        pageRole: parsed.input.pageRole,
-      })
-    : null;
+  const candidate = resolveApiKnowledgeCandidate({
+    intent: parsed.input.intent,
+    url: parsed.input.url,
+    pageRole: parsed.input.pageRole,
+  });
 
   // Derive the read-only gate from the layer-dispatch outcome rather
   // than re-classifying the raw user intent. Rationale:
@@ -1004,9 +938,7 @@ export async function runTabrixChooseContextWithDirectApi(
   // `listScoredBySite` (older test seams may inject only `listBySite`),
   // which keeps the candidate-only path bit-identical for those callers.
   const knowledgeRepo: EndpointKnowledgeReader | undefined =
-    isCapabilityEnabled('api_knowledge', deps.capabilityEnv) &&
-    deps.knowledgeApi &&
-    typeof deps.knowledgeApi.listScoredBySite === 'function'
+    deps.knowledgeApi && typeof deps.knowledgeApi.listScoredBySite === 'function'
       ? (deps.knowledgeApi as EndpointKnowledgeReader)
       : undefined;
   const dataNeed: DataNeed | undefined = knowledgeRepo
