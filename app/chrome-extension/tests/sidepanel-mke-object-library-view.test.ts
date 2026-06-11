@@ -76,10 +76,10 @@ describe('MKE Object Library view model', () => {
     ]);
 
     expect(view.summary).toMatchObject({
-      liveLabel: '实时监控中',
+      liveLabel: '对象快照',
       openWebPages: 1,
       closedWebPages: 1,
-      pageObjects: 2,
+      pageObjects: 3,
       actions: 1,
       dataApis: 1,
     });
@@ -110,7 +110,7 @@ describe('MKE Object Library view model', () => {
       expect.objectContaining({ label: '接口线索', value: '已观察' }),
     );
     expect(activePage.sections[3].items).toContainEqual(
-      expect.objectContaining({ label: '浏览器加载', value: '加载完成' }),
+      expect.objectContaining({ label: '浏览器加载', value: '已完成' }),
     );
 
     const closedPage = view.webPages.find((page) => page.id === 'tab-closed');
@@ -119,5 +119,30 @@ describe('MKE Object Library view model', () => {
       activityLabel: '最近关闭',
       isClosed: true,
     });
+  });
+
+  it('keeps stale snapshot evidence separate from tab lifecycle', () => {
+    const view = buildMkeObjectLibraryView([
+      object({
+        browserObjectId: 'tab-stale',
+        objectType: 'tab',
+        currentRoute: 'https://example.test/stale',
+        rootRoute: 'https://example.test/stale',
+        objectFingerprint: 'tab:example.test:stale',
+        sourceFreshness: 'stale',
+        canTabrixOperate: true,
+        tabStatus: 'complete',
+        display: { title: 'Stale Snapshot', locationLabel: 'example.test/stale' },
+      }),
+    ]);
+
+    const page = view.webPages[0];
+    expect(page.lifecycleLabel).toBe('已打开');
+    expect(page.sections[3].items).toContainEqual(
+      expect.objectContaining({ label: '证据新鲜度', value: '快照待同步' }),
+    );
+    expect(page.sections[3].items).toContainEqual(
+      expect.objectContaining({ label: '浏览器加载', value: '已完成' }),
+    );
   });
 });

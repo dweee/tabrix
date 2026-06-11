@@ -68,7 +68,7 @@ export function buildMkeObjectLibraryView(
 
   return {
     summary: {
-      liveLabel: '实时监控中',
+      liveLabel: '对象快照',
       openWebPages,
       closedWebPages,
       pageObjects,
@@ -112,7 +112,7 @@ function buildWebPageView(
     ? '当前激活'
     : root.lifecycleState === 'closed'
       ? '最近关闭'
-      : '后台观察';
+      : '后台打开';
   const title = formatWebPageTitle(root);
   const location = formatWebPageLocation(root);
   const metrics = compactMetrics([
@@ -347,10 +347,9 @@ function formatLifecycle(object: MkeBrowserObjectSummary): {
   tone: MkeObjectViewTone;
 } {
   if (isClosedObject(object)) return { label: '已关闭', tone: 'warn' };
-  if (object.sourceFreshness === 'stale') return { label: '状态过期', tone: 'warn' };
   if (object.tabStatus === 'loading') return { label: '加载中', tone: 'neutral' };
   if (object.isActive) return { label: '当前激活', tone: 'good' };
-  if (object.canTabrixOperate === true) return { label: '加载完成', tone: 'good' };
+  if (object.canTabrixOperate === true) return { label: '已打开', tone: 'good' };
   if (object.canTabrixOperate === false) return { label: '不可操作', tone: 'warn' };
   return { label: '观察中', tone: 'neutral' };
 }
@@ -410,15 +409,15 @@ function translateKnownLabel(value: string): string {
 
 function formatFreshness(value: string | null | undefined): string | null {
   if (!value) return null;
-  if (value === 'fresh') return '新鲜';
-  if (value === 'stale') return '过期';
+  if (value === 'fresh') return '刚同步';
+  if (value === 'stale') return '快照待同步';
   if (value === 'unknown') return '未知';
   return value;
 }
 
 function formatTabStatus(value: string | null | undefined): string | null {
   if (!value) return null;
-  if (value === 'complete') return '加载完成';
+  if (value === 'complete') return '已完成';
   if (value === 'loading') return '加载中';
   return value;
 }

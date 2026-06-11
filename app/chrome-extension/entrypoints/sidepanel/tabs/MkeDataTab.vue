@@ -1122,7 +1122,9 @@ function formatObjectFacts(object: MkeBrowserObjectSummary): RecordFact[] {
 
 function formatObjectStatus(object: MkeBrowserObjectSummary): string {
   if (object.lifecycleState === 'closed' || object.lifecycleState === 'removed') return '已关闭';
-  if (object.sourceFreshness === 'stale') return '需刷新';
+  if (object.sourceFreshness === 'stale') return '快照待同步';
+  if (object.tabStatus === 'loading') return '加载中';
+  if (object.isActive === true) return '当前激活';
   if (object.canTabrixOperate === true) return '可继续处理';
   if (object.canTabrixOperate === false) return '不可处理';
   return '待观察';
@@ -1175,7 +1177,7 @@ function formatWindowState(value: string | null): string | null {
 
 function formatObjectRuntimeState(object: MkeBrowserObjectSummary): string | null {
   if (object.lifecycleState === 'closed' || object.lifecycleState === 'removed') return '已关闭';
-  if (object.sourceFreshness === 'stale') return '需刷新';
+  if (object.sourceFreshness === 'stale') return '快照待同步';
   if (object.tabStatus === 'loading') return '加载中';
   return null;
 }

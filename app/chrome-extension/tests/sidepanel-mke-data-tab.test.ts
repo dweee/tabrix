@@ -230,6 +230,8 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('function formatObjectOwner');
     expect(tabSource).toContain("ai: 'AI打开'");
     expect(tabSource).toContain("user_or_page: '用户打开'");
+    expect(tabSource).toContain("if (object.sourceFreshness === 'stale') return '快照待同步'");
+    expect(tabSource).toContain("if (object.isActive === true) return '当前激活'");
     expect(tabSource).toContain("if (object.canTabrixOperate === true) return '可继续处理'");
     expect(tabSource).toContain("if (object.canTabrixOperate === false) return '不可处理'");
     expect(tabSource).toContain("if (object.tabStatus === 'loading') return '加载中'");
