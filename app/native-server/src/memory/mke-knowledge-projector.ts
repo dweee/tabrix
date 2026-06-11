@@ -1,6 +1,9 @@
-import { createHash } from 'node:crypto';
-
-import type { KnowledgeModel, KnowledgeModelRepository, MemoryTraceRepository } from './db';
+import type {
+  BrowserObject,
+  BrowserObjectRepository,
+  KnowledgeModel,
+  KnowledgeModelRepository,
+} from './db';
 import type { MemoryTrace } from './db';
 
 export interface MkeKnowledgeProjectionInput {
@@ -17,31 +20,18 @@ export interface MkeKnowledgeProjectionResult {
   knowledgeIds: string[];
 }
 
-interface TraceGroup {
+interface ObjectGroup {
   siteFamily: string;
   pageModelKey: string;
   pageUrlPattern: string | null;
   pageRole: string;
-  traces: MemoryTrace[];
+  objects: BrowserObject[];
 }
-
-const PROJECTABLE_TOOLS = new Set([
-  'chrome_read_page',
-  'chrome_click_element',
-  'chrome_fill_or_select',
-  'chrome_navigate',
-  'chrome_close_tabs',
-]);
 
 export function buildMkePageModelKey(trace: MemoryTrace): string | null {
   if (trace.pageModelKey) return trace.pageModelKey;
   if (!trace.siteFamily) return null;
-  const basis = JSON.stringify({
-    siteFamily: trace.siteFamily,
-    pageRole: trace.pageRole ?? 'unknown_page_role',
-    pageUrlPattern: trace.pageUrlPattern ?? 'unknown_page_url_pattern',
-  });
-  return `page:${createHash('sha256').update(basis).digest('hex').slice(0, 16)}`;
+  return `page:${trace.siteFamily}:${trace.pageRole ?? 'unknown_page_role'}`;
 }
 
 function incrementCounter(map: Map<string, number>, value: string | null | undefined): void {
@@ -60,119 +50,87 @@ function ratio(part: number, total: number): number {
   return part / total;
 }
 
-function isBusinessAchieved(trace: MemoryTrace): boolean {
-  return (
-    trace.businessSuccess === 'achieved' ||
-    trace.businessSuccess === 'proven' ||
-    trace.businessSuccess === 'true'
-  );
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.length > 0)
+    : [];
 }
 
-function isBusinessFailed(trace: MemoryTrace): boolean {
-  return (
-    trace.businessSuccess === 'not_achieved' ||
-    trace.businessSuccess === 'not_proven' ||
-    trace.businessSuccess === 'failed' ||
-    trace.businessSuccess === 'false'
-  );
+function uniqueStrings(values: Iterable<string>): string[] {
+  return [...new Set(values)].sort();
 }
 
-function roundedScore(value: number): number {
-  return Math.max(0, Math.min(1, Math.round(value * 1000) / 1000));
-}
-
-function groupProjectableTraces(traces: MemoryTrace[]): {
-  groups: TraceGroup[];
-  skippedTraceCount: number;
+function groupProjectableObjects(objects: BrowserObject[]): {
+  groups: ObjectGroup[];
+  skippedObjectCount: number;
 } {
-  const groups = new Map<string, TraceGroup>();
-  let skippedTraceCount = 0;
+  const groups = new Map<string, ObjectGroup>();
+  let skippedObjectCount = 0;
 
-  for (const trace of traces) {
-    if (!PROJECTABLE_TOOLS.has(trace.toolName)) {
-      skippedTraceCount += 1;
+  for (const object of objects) {
+    if (object.siteFamily === 'unknown' || object.pageModelKey === 'unknown') {
+      skippedObjectCount += 1;
       continue;
     }
-    if (!trace.siteFamily) {
-      skippedTraceCount += 1;
-      continue;
-    }
-    const pageModelKey = buildMkePageModelKey(trace);
-    if (!pageModelKey) {
-      skippedTraceCount += 1;
-      continue;
-    }
-    const groupKey = `${trace.siteFamily}\u0000${pageModelKey}`;
+    const groupKey = `${object.siteFamily}\u0000${object.pageModelKey}`;
     const existing = groups.get(groupKey);
     if (existing) {
-      existing.traces.push(trace);
-      if (!existing.pageUrlPattern && trace.pageUrlPattern) {
-        existing.pageUrlPattern = trace.pageUrlPattern;
+      existing.objects.push(object);
+      if (!existing.pageUrlPattern && object.pageUrlPattern) {
+        existing.pageUrlPattern = object.pageUrlPattern;
       }
-      if (existing.pageRole === 'unknown_page_role' && trace.pageRole) {
-        existing.pageRole = trace.pageRole;
+      if (existing.pageRole === 'unknown_page_role' && object.pageRole) {
+        existing.pageRole = object.pageRole;
       }
       continue;
     }
     groups.set(groupKey, {
-      siteFamily: trace.siteFamily,
-      pageModelKey,
-      pageUrlPattern: trace.pageUrlPattern,
-      pageRole: trace.pageRole ?? 'unknown_page_role',
-      traces: [trace],
+      siteFamily: object.siteFamily,
+      pageModelKey: object.pageModelKey,
+      pageUrlPattern: object.pageUrlPattern,
+      pageRole: object.pageRole ?? 'unknown_page_role',
+      objects: [object],
     });
   }
 
-  return { groups: [...groups.values()], skippedTraceCount };
+  return { groups: [...groups.values()], skippedObjectCount };
 }
 
 function buildKnowledgeInput(
-  group: TraceGroup,
+  group: ObjectGroup,
   nowIso: string,
 ): Parameters<KnowledgeModelRepository['upsert']>[0] {
-  const toolCounts = new Map<string, number>();
+  const objectTypeCounts = new Map<string, number>();
   const pageStateCounts = new Map<string, number>();
   const dataSourceCounts = new Map<string, number>();
   const sourceRouteCounts = new Map<string, number>();
   const freshnessCounts = new Map<string, number>();
-  const fallbackCounts = new Map<string, number>();
-  const errorCounts = new Map<string, number>();
+  const actionKindCounts = new Map<string, number>();
   const sourceTraceIds: string[] = [];
-  let successful = 0;
-  let failed = 0;
-  let totalDurationMs = 0;
-  let durationCount = 0;
+  const sourceObjectIds: string[] = [];
+  let unavailableObjectCount = 0;
+  let observationCount = 0;
 
-  for (const trace of group.traces) {
-    sourceTraceIds.push(trace.traceId);
-    incrementCounter(toolCounts, trace.toolName);
-    incrementCounter(pageStateCounts, trace.pageState);
-    incrementCounter(dataSourceCounts, trace.selectedDataSource);
-    incrementCounter(sourceRouteCounts, trace.sourceRoute);
-    incrementCounter(freshnessCounts, trace.freshness);
-    incrementCounter(fallbackCounts, trace.fallbackUsed);
-    incrementCounter(errorCounts, trace.errorCode);
-    if (isBusinessAchieved(trace)) successful += 1;
-    if (isBusinessFailed(trace) || trace.toolSuccess === false) failed += 1;
-    if (typeof trace.durationMs === 'number') {
-      totalDurationMs += trace.durationMs;
-      durationCount += 1;
+  for (const object of group.objects) {
+    sourceObjectIds.push(object.browserObjectId);
+    sourceTraceIds.push(...object.sourceTraceIds);
+    observationCount += object.observationCount;
+    incrementCounter(objectTypeCounts, object.objectType);
+    incrementCounter(pageStateCounts, object.lifecycleState);
+    incrementCounter(dataSourceCounts, object.selectedDataSource);
+    incrementCounter(sourceRouteCounts, object.sourceRoute);
+    incrementCounter(freshnessCounts, object.sourceFreshness);
+    for (const actionType of readStringArray(object.actionTypes)) {
+      incrementCounter(actionKindCounts, actionType);
     }
+    if (object.canTabrixOperate === false) unavailableObjectCount += 1;
   }
 
-  const observationCount = group.traces.length;
-  const distinctPageStateCount = pageStateCounts.size;
-  const failureRate = ratio(failed, observationCount);
-  const stateDrift =
-    distinctPageStateCount > 1 ? Math.min(0.6, (distinctPageStateCount - 1) * 0.2) : 0;
-  const driftScore = roundedScore(Math.max(stateDrift, failureRate * 0.8));
-  const confidenceScore = roundedScore(
-    0.2 +
-      Math.min(0.35, observationCount * 0.08) +
-      ratio(successful, observationCount) * 0.45 -
-      driftScore * 0.25,
-  );
-  const lastObservedAt = group.traces[group.traces.length - 1]?.createdAt ?? nowIso;
+  const lastObservedAt =
+    group.objects
+      .map((object) => object.updatedAt)
+      .sort((left, right) => left.localeCompare(right))
+      .at(-1) ?? nowIso;
 
   return {
     siteFamily: group.siteFamily,
@@ -188,40 +146,36 @@ function buildKnowledgeInput(
     },
     objectGraph: {
       schema: 'tabrix_mke_object_graph_summary_v1',
-      sourceTraceCount: observationCount,
-      toolCounts: countersToObject(toolCounts),
+      sourceObjectCount: group.objects.length,
+      objectTypeCounts: countersToObject(objectTypeCounts),
+      sourceObjectIds: uniqueStrings(sourceObjectIds).slice(0, 200),
       rawPayloadCopied: false,
     },
     actionSurface: {
       schema: 'tabrix_mke_action_surface_summary_v1',
-      toolCounts: countersToObject(toolCounts),
-      reusableActionKinds: [...toolCounts.keys()]
-        .filter((toolName) => toolName !== 'chrome_read_page')
-        .sort(),
+      actionKindCounts: countersToObject(actionKindCounts),
+      reusableActionKinds: [...actionKindCounts.keys()].sort(),
     },
     dataSourceModel: {
       schema: 'tabrix_mke_data_source_model_v1',
       selectedDataSourceCounts: countersToObject(dataSourceCounts),
       sourceRouteCounts: countersToObject(sourceRouteCounts),
       freshnessCounts: countersToObject(freshnessCounts),
-      fallbackCounts: countersToObject(fallbackCounts),
     },
     navigationModel: {
       schema: 'tabrix_mke_navigation_model_v1',
       pageUrlPattern: group.pageUrlPattern,
-      averageDurationMs: durationCount > 0 ? Math.round(totalDurationMs / durationCount) : null,
     },
     failureSignal: {
       schema: 'tabrix_mke_failure_signal_v1',
-      failedTraceCount: failed,
-      errorCounts: countersToObject(errorCounts),
+      unavailableObjectCount,
     },
-    sourceTraceIds,
+    sourceTraceIds: uniqueStrings(sourceTraceIds),
     observationCount,
-    successfulUseCount: successful,
-    failedUseCount: failed,
-    confidenceScore,
-    driftScore,
+    successfulUseCount: 0,
+    failedUseCount: 0,
+    confidenceScore: 0,
+    driftScore: null,
     lastObservedAt,
     createdAt: nowIso,
     updatedAt: nowIso,
@@ -230,16 +184,16 @@ function buildKnowledgeInput(
 
 export class MkeKnowledgeProjector {
   constructor(
-    private readonly traceRepo: MemoryTraceRepository,
+    private readonly browserObjectRepo: BrowserObjectRepository,
     private readonly knowledgeRepo: KnowledgeModelRepository,
   ) {}
 
   public projectIdleBatch(input: MkeKnowledgeProjectionInput = {}): MkeKnowledgeProjectionResult {
-    const traces = this.traceRepo.listAfter({
-      cursorCreatedAt: input.cursorCreatedAt ?? null,
+    const objects = this.browserObjectRepo.listUpdatedAfter({
+      cursorUpdatedAt: input.cursorCreatedAt ?? null,
       limit: input.limit ?? 100,
     });
-    if (traces.length === 0) {
+    if (objects.length === 0) {
       return {
         processedTraceCount: 0,
         skippedTraceCount: 0,
@@ -250,17 +204,17 @@ export class MkeKnowledgeProjector {
     }
 
     const nowIso = input.nowIso ?? new Date().toISOString();
-    const { groups, skippedTraceCount } = groupProjectableTraces(traces);
+    const { groups, skippedObjectCount } = groupProjectableObjects(objects);
     const upserted: KnowledgeModel[] = [];
     for (const group of groups) {
       upserted.push(this.knowledgeRepo.upsert(buildKnowledgeInput(group, nowIso)));
     }
 
     return {
-      processedTraceCount: traces.length,
-      skippedTraceCount,
+      processedTraceCount: objects.length,
+      skippedTraceCount: skippedObjectCount,
       upsertedKnowledgeCount: upserted.length,
-      nextCursorCreatedAt: traces[traces.length - 1]?.createdAt ?? input.cursorCreatedAt ?? null,
+      nextCursorCreatedAt: objects[objects.length - 1]?.updatedAt ?? input.cursorCreatedAt ?? null,
       knowledgeIds: upserted.map((knowledge) => knowledge.knowledgeId),
     };
   }

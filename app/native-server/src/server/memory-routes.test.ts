@@ -37,6 +37,13 @@ async function seedMkeRows(): Promise<void> {
       selectedDataSource: 'dom',
       freshness: 'fresh',
       tabId: 7,
+      candidateActions: [
+        {
+          targetRef: 'ref_button_1',
+          actionType: 'click',
+          actionability: true,
+        },
+      ],
     }),
     resultSummary: 'fresh page read',
   });
@@ -99,6 +106,7 @@ async function seedMkeRows(): Promise<void> {
     receivedAt: '2026-06-06T10:00:00.090Z',
   });
 
+  await sessionManager.flushMkeMemoryTraceWrites();
   sessionManager.projectMkeKnowledgeIdle({
     nowIso: '2026-06-06T10:00:01.000Z',
   });
@@ -350,7 +358,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       siteFamily: 'example.test',
       pageRole: 'workspace',
       observationCount: 2,
-      sourceTraceCount: 2,
+      sourceTraceCount: 1,
     });
     expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('pageStateModel');
     expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('objectGraph');

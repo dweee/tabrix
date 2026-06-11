@@ -1,193 +1,181 @@
-import { openMemoryDb, KnowledgeModelRepository, MemoryTraceRepository } from './db';
+import {
+  BrowserObjectRepository,
+  KnowledgeModelRepository,
+  MemoryTraceRepository,
+  openMemoryDb,
+} from './db';
 import { MkeKnowledgeProjector } from './mke-knowledge-projector';
 
+function upsertPageObjects(objects: BrowserObjectRepository): void {
+  objects.upsert({
+    siteFamily: 'example.test',
+    pageUrlPattern: 'https://example.test/search',
+    pageRole: 'search_results',
+    pageModelKey: 'page:example.test:search_results',
+    objectFingerprint: 'page:search',
+    objectType: 'page',
+    lifecycleState: 'running',
+    selectedDataSource: 'dom_json',
+    sourceRoute: 'read_page_required',
+    sourceFreshness: 'fresh',
+    sourceTraceIds: ['trace-read'],
+    facts: { rawPayloadCopied: false },
+    updatedAt: '2026-06-06T01:00:01.000Z',
+  });
+  objects.upsert({
+    siteFamily: 'example.test',
+    pageUrlPattern: 'https://example.test/search',
+    pageRole: 'search_results',
+    pageModelKey: 'page:example.test:search_results',
+    objectFingerprint: 'region:results',
+    objectType: 'region',
+    lifecycleState: 'observed',
+    canTabrixOperate: true,
+    sourceTraceIds: ['trace-read'],
+    facts: { regionType: 'results' },
+    updatedAt: '2026-06-06T01:00:02.000Z',
+  });
+  objects.upsert({
+    siteFamily: 'example.test',
+    pageUrlPattern: 'https://example.test/search',
+    pageRole: 'search_results',
+    pageModelKey: 'page:example.test:search_results',
+    objectFingerprint: 'action:result-1',
+    objectType: 'action_target',
+    lifecycleState: 'observed',
+    canTabrixOperate: true,
+    actionTypes: ['click'],
+    sourceTraceIds: ['trace-click'],
+    updatedAt: '2026-06-06T01:00:03.000Z',
+  });
+  objects.upsert({
+    siteFamily: 'example.test',
+    pageUrlPattern: 'https://example.test/search',
+    pageRole: 'search_results',
+    pageModelKey: 'page:example.test:search_results',
+    objectFingerprint: 'data-source:search-api',
+    objectType: 'data_source',
+    lifecycleState: 'observed',
+    selectedDataSource: 'api_rows',
+    sourceRoute: 'knowledge_api_endpoints',
+    sourceFreshness: 'fresh',
+    sourceTraceIds: ['trace-api'],
+    updatedAt: '2026-06-06T01:00:04.000Z',
+  });
+}
+
 describe('MkeKnowledgeProjector', () => {
-  it('projects page knowledge from memory traces without copying raw payload', () => {
+  it('projects page knowledge from Object Library objects without copying raw payload', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
-    const traces = new MemoryTraceRepository(opened.db);
+    const objects = new BrowserObjectRepository(opened.db);
     const knowledge = new KnowledgeModelRepository(opened.db);
-    const projector = new MkeKnowledgeProjector(traces, knowledge);
+    const projector = new MkeKnowledgeProjector(objects, knowledge);
 
-    traces.append({
-      traceId: 'trace-read',
-      taskId: 'task-1',
-      toolName: 'chrome_read_page',
-      sequenceIndex: 1,
-      requestParams: { tabId: 7 },
-      requestAt: '2026-06-06T01:00:00.000Z',
-      response: { payloadDigest: { pageContent: 'PRIVATE_RAW_BODY_SHOULD_NOT_COPY' } },
-      responseAt: '2026-06-06T01:00:01.000Z',
-      durationMs: 1000,
-      toolSuccess: true,
-      businessSuccess: 'unknown',
-      tabId: 7,
-      siteFamily: 'example.test',
-      pageUrlPattern: 'https://example.test/search',
-      pageRole: 'search_results',
-      pageState: 'ready',
-      selectedDataSource: 'dom_json',
-      sourceRoute: 'read_page_required',
-      freshness: 'fresh',
-      createdAt: '2026-06-06T01:00:01.000Z',
-    });
-    traces.append({
-      traceId: 'trace-click',
-      taskId: 'task-1',
-      toolName: 'chrome_click_element',
-      sequenceIndex: 2,
-      requestParams: { tabId: 7, ref: 'result-1' },
-      requestAt: '2026-06-06T01:00:02.000Z',
-      response: { payloadDigest: { success: true } },
-      responseAt: '2026-06-06T01:00:03.000Z',
-      durationMs: 1000,
-      toolSuccess: true,
-      businessSuccess: 'true',
-      tabId: 7,
-      siteFamily: 'example.test',
-      pageUrlPattern: 'https://example.test/search',
-      pageRole: 'search_results',
-      pageState: 'ready',
-      createdAt: '2026-06-06T01:00:03.000Z',
-    });
+    upsertPageObjects(objects);
 
-    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T01:00:04.000Z' });
+    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T01:00:05.000Z' });
 
     expect(result).toMatchObject({
-      processedTraceCount: 2,
+      processedTraceCount: 4,
       skippedTraceCount: 0,
       upsertedKnowledgeCount: 1,
-      nextCursorCreatedAt: '2026-06-06T01:00:03.000Z',
+      nextCursorCreatedAt: '2026-06-06T01:00:04.000Z',
     });
     const model = knowledge.get(result.knowledgeIds[0])!;
     expect(model).toMatchObject({
       siteFamily: 'example.test',
       pageUrlPattern: 'https://example.test/search',
       pageRole: 'search_results',
-      observationCount: 2,
-      successfulUseCount: 1,
+      observationCount: 4,
+      successfulUseCount: 0,
       failedUseCount: 0,
-      driftScore: 0,
+      confidenceScore: 0,
+      driftScore: null,
     });
-    expect(model.sourceTraceIds).toEqual(['trace-read', 'trace-click']);
-    expect(model.objectGraph).toMatchObject({ rawPayloadCopied: false });
-    expect(model.actionSurface).toMatchObject({ reusableActionKinds: ['chrome_click_element'] });
+    expect(model.sourceTraceIds).toEqual(['trace-api', 'trace-click', 'trace-read']);
+    expect(model.objectGraph).toMatchObject({
+      rawPayloadCopied: false,
+      sourceObjectCount: 4,
+      objectTypeCounts: {
+        action_target: 1,
+        data_source: 1,
+        page: 1,
+        region: 1,
+      },
+    });
+    expect(model.actionSurface).toMatchObject({
+      actionKindCounts: { click: 1 },
+      reusableActionKinds: ['click'],
+    });
+    expect(model.dataSourceModel).toMatchObject({
+      selectedDataSourceCounts: {
+        api_rows: 1,
+        dom_json: 1,
+      },
+      sourceRouteCounts: {
+        knowledge_api_endpoints: 1,
+        read_page_required: 1,
+      },
+    });
     expect(JSON.stringify(model)).not.toContain('PRIVATE_RAW_BODY_SHOULD_NOT_COPY');
   });
 
-  it('updates drift score from mixed page states and supports an incremental cursor', () => {
+  it('uses Object Library updated_at cursor for incremental projection', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
-    const traces = new MemoryTraceRepository(opened.db);
+    const objects = new BrowserObjectRepository(opened.db);
     const knowledge = new KnowledgeModelRepository(opened.db);
-    const projector = new MkeKnowledgeProjector(traces, knowledge);
+    const projector = new MkeKnowledgeProjector(objects, knowledge);
 
-    traces.append({
-      traceId: 'trace-before-cursor',
-      taskId: 'task-1',
-      toolName: 'chrome_read_page',
-      requestParams: {},
-      requestAt: '2026-06-06T02:00:00.000Z',
-      response: {},
-      responseAt: '2026-06-06T02:00:01.000Z',
-      toolSuccess: true,
-      siteFamily: 'example.test',
-      pageUrlPattern: 'https://example.test/detail',
-      pageRole: 'detail',
-      pageState: 'ready',
-      createdAt: '2026-06-06T02:00:01.000Z',
-    });
-    traces.append({
-      traceId: 'trace-ready',
-      taskId: 'task-2',
-      toolName: 'chrome_read_page',
-      requestParams: {},
-      requestAt: '2026-06-06T02:00:02.000Z',
-      response: {},
-      responseAt: '2026-06-06T02:00:03.000Z',
-      toolSuccess: true,
-      siteFamily: 'example.test',
-      pageUrlPattern: 'https://example.test/detail',
-      pageRole: 'detail',
-      pageState: 'ready',
-      createdAt: '2026-06-06T02:00:03.000Z',
-    });
-    traces.append({
-      traceId: 'trace-loading',
-      taskId: 'task-2',
-      toolName: 'chrome_read_page',
-      requestParams: {},
-      requestAt: '2026-06-06T02:00:04.000Z',
-      response: {},
-      responseAt: '2026-06-06T02:00:05.000Z',
-      toolSuccess: false,
-      errorCode: 'page_not_ready',
-      siteFamily: 'example.test',
-      pageUrlPattern: 'https://example.test/detail',
-      pageRole: 'detail',
-      pageState: 'loading',
-      createdAt: '2026-06-06T02:00:05.000Z',
-    });
+    upsertPageObjects(objects);
 
     const result = projector.projectIdleBatch({
-      cursorCreatedAt: '2026-06-06T02:00:01.000Z',
-      nowIso: '2026-06-06T02:00:06.000Z',
+      cursorCreatedAt: '2026-06-06T01:00:02.000Z',
+      nowIso: '2026-06-06T01:00:05.000Z',
     });
     const model = knowledge.get(result.knowledgeIds[0])!;
 
     expect(result.processedTraceCount).toBe(2);
-    expect(model.sourceTraceIds).toEqual(['trace-ready', 'trace-loading']);
-    expect(model.driftScore).toBeGreaterThan(0);
-    expect(model.failureSignal).toMatchObject({
-      failedTraceCount: 1,
-      errorCounts: { page_not_ready: 1 },
+    expect(model.objectGraph).toMatchObject({
+      sourceObjectCount: 2,
+      objectTypeCounts: {
+        action_target: 1,
+        data_source: 1,
+      },
     });
+    expect(model.actionSurface).toMatchObject({ reusableActionKinds: ['click'] });
   });
 
-  it('does not count tool success as successful knowledge use without business proof', () => {
+  it('does not project knowledge from Memory traces when Object Library has no objects', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
+    const objects = new BrowserObjectRepository(opened.db);
     const traces = new MemoryTraceRepository(opened.db);
     const knowledge = new KnowledgeModelRepository(opened.db);
-    const projector = new MkeKnowledgeProjector(traces, knowledge);
+    const projector = new MkeKnowledgeProjector(objects, knowledge);
 
     traces.append({
-      traceId: 'trace-unknown-business',
-      taskId: 'task-unknown-business',
-      toolName: 'chrome_click_element',
-      requestParams: { tabId: 7, ref: 'filter' },
+      traceId: 'trace-only',
+      taskId: 'task-trace-only',
+      toolName: 'chrome_read_page',
+      requestParams: { tabId: 7 },
       requestAt: '2026-06-06T05:00:00.000Z',
-      response: { payloadDigest: { success: true } },
+      response: { payloadDigest: { pageContent: 'trace should not feed knowledge directly' } },
       responseAt: '2026-06-06T05:00:01.000Z',
       toolSuccess: true,
-      businessSuccess: 'unknown',
       siteFamily: 'example.test',
       pageUrlPattern: 'https://example.test/search',
       pageRole: 'search_results',
       pageState: 'ready',
       createdAt: '2026-06-06T05:00:01.000Z',
     });
-    traces.append({
-      traceId: 'trace-business-failed',
-      taskId: 'task-business-failed',
-      toolName: 'chrome_click_element',
-      requestParams: { tabId: 7, ref: 'filter' },
-      requestAt: '2026-06-06T05:00:02.000Z',
-      response: { payloadDigest: { success: true } },
-      responseAt: '2026-06-06T05:00:03.000Z',
-      toolSuccess: true,
-      businessSuccess: 'not_achieved',
-      siteFamily: 'example.test',
-      pageUrlPattern: 'https://example.test/search',
-      pageRole: 'search_results',
-      pageState: 'ready',
-      createdAt: '2026-06-06T05:00:03.000Z',
-    });
 
-    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T05:00:04.000Z' });
-    const model = knowledge.get(result.knowledgeIds[0])!;
+    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T05:00:02.000Z' });
 
-    expect(model).toMatchObject({
-      observationCount: 2,
-      successfulUseCount: 0,
-      failedUseCount: 1,
+    expect(result).toMatchObject({
+      processedTraceCount: 0,
+      skippedTraceCount: 0,
+      upsertedKnowledgeCount: 0,
+      knowledgeIds: [],
     });
+    expect(knowledge.count()).toBe(0);
   });
 });

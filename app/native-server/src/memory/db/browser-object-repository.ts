@@ -265,6 +265,7 @@ export class BrowserObjectRepository {
   private readonly getStmt;
   private readonly getByIdentityStmt;
   private readonly listRecentStmt;
+  private readonly listUpdatedAfterStmt;
   private readonly listCurrentBrowserSurfaceStmt;
   private readonly listObjectLibraryGraphSurfaceStmt;
   private readonly archiveStmt;
@@ -349,6 +350,14 @@ export class BrowserObjectRepository {
         WHERE archived_at IS NULL
         ORDER BY updated_at DESC, created_at DESC
         LIMIT ? OFFSET ?`,
+    );
+    this.listUpdatedAfterStmt = db.prepare(
+      `SELECT * FROM tabrix_browser_objects
+        WHERE archived_at IS NULL
+          AND object_type IN ('page', 'region', 'action_target', 'data_source')
+          AND (? IS NULL OR updated_at > ?)
+        ORDER BY updated_at ASC, created_at ASC
+        LIMIT ?`,
     );
     this.listCurrentBrowserSurfaceStmt = db.prepare(
       `SELECT * FROM tabrix_browser_objects
@@ -571,6 +580,16 @@ export class BrowserObjectRepository {
   public listRecent(input?: { limit?: number; offset?: number }): BrowserObject[] {
     return (
       this.listRecentStmt.all(input?.limit ?? 20, input?.offset ?? 0) as BrowserObjectRow[]
+    ).map(rowToBrowserObject);
+  }
+
+  public listUpdatedAfter(input?: {
+    cursorUpdatedAt?: string | null;
+    limit?: number;
+  }): BrowserObject[] {
+    const cursor = input?.cursorUpdatedAt ?? null;
+    return (
+      this.listUpdatedAfterStmt.all(cursor, cursor, input?.limit ?? 100) as BrowserObjectRow[]
     ).map(rowToBrowserObject);
   }
 

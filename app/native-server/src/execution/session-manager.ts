@@ -164,7 +164,7 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
       memoryTrace: new MkeMemoryTraceService(memoryTraceRepo, browserObjectRepo, {
         allowPersonalBrowserStateStorage: getPersonalBrowserStateStorageEnabled,
       }),
-      knowledgeProjector: new MkeKnowledgeProjector(memoryTraceRepo, knowledgeModelRepo),
+      knowledgeProjector: new MkeKnowledgeProjector(browserObjectRepo, knowledgeModelRepo),
       experienceProjector: new MkeExperienceProjector(
         memoryTraceRepo,
         knowledgeModelRepo,
