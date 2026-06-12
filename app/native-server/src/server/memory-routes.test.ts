@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from '@jest/globals';
+import { TOOL_NAMES } from '@tabrix/shared';
 import supertest from 'supertest';
 import Server from './index';
 import { sessionManager } from '../execution/session-manager';
@@ -233,7 +234,20 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('traceBindingHash');
   });
 
-  test('GET /memory/mke/traces marks browser inventory as recorded instead of pending AI feedback', async () => {
+  test.each([
+    [TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS],
+    [TOOL_NAMES.BROWSER.GET_INTERACTIVE_ELEMENTS],
+    [TOOL_NAMES.BROWSER.SCREENSHOT],
+    [TOOL_NAMES.BROWSER.CONSOLE],
+    [TOOL_NAMES.BROWSER.REQUEST_ELEMENT_SELECTION],
+    [TOOL_NAMES.BROWSER.PERFORMANCE_START_TRACE],
+    [TOOL_NAMES.BROWSER.PERFORMANCE_STOP_TRACE],
+    [TOOL_NAMES.BROWSER.PERFORMANCE_ANALYZE_INSIGHT],
+    [TOOL_NAMES.BROWSER.GIF_RECORDER],
+    [TOOL_NAMES.CONTEXT.CHOOSE],
+    [TOOL_NAMES.CONTEXT.RECORD_OUTCOME],
+    [TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK],
+  ])('GET /memory/mke/traces marks auxiliary tool as recorded: %s', async (toolName) => {
     const traceService = sessionManager.memoryTraces;
     if (!traceService) throw new Error('MKE trace service is not available in tests');
     const requestAt = Date.parse('2026-06-06T10:30:00.000Z');
@@ -242,7 +256,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       taskId: 'browser-inventory-task',
       taskIntent: '读取窗口和标签',
       aiClient: 'jest',
-      toolName: 'get_windows_and_tabs',
+      toolName,
       stepId: 'browser-inventory-step',
       sequenceIndex: 1,
       requestParams: {},
@@ -262,7 +276,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
 
     expect(res.body.data.traces).toHaveLength(1);
     expect(res.body.data.traces[0]).toMatchObject({
-      toolName: 'get_windows_and_tabs',
+      toolName,
       aiFeedbackRequired: false,
       aiFeedback: null,
     });

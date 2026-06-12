@@ -1,4 +1,5 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { TOOL_NAMES } from '@tabrix/shared';
 import type { MemoryTrace } from '../memory/db';
 import {
   attachTabrixMemoryTraceEnvelope,
@@ -200,26 +201,69 @@ describe('tabrix metadata envelope', () => {
     expect(parseFirstText(result)._tabrix).not.toHaveProperty('businessStatus');
   });
 
-  it('does not request AI feedback for browser inventory traces', () => {
+  it.each([
+    [TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS],
+    [TOOL_NAMES.BROWSER.GET_INTERACTIVE_ELEMENTS],
+    [TOOL_NAMES.BROWSER.SCREENSHOT],
+    [TOOL_NAMES.BROWSER.CONSOLE],
+    [TOOL_NAMES.BROWSER.REQUEST_ELEMENT_SELECTION],
+    [TOOL_NAMES.BROWSER.PERFORMANCE_START_TRACE],
+    [TOOL_NAMES.BROWSER.PERFORMANCE_STOP_TRACE],
+    [TOOL_NAMES.BROWSER.PERFORMANCE_ANALYZE_INSIGHT],
+    [TOOL_NAMES.BROWSER.GIF_RECORDER],
+    [TOOL_NAMES.CONTEXT.CHOOSE],
+    [TOOL_NAMES.CONTEXT.RECORD_OUTCOME],
+    [TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK],
+  ])('does not request AI feedback for auxiliary traces: %s', (toolName) => {
     const result = attachTabrixMemoryTraceEnvelope(
       textResult({ status: 'ok' }),
-      makeTrace({ toolName: 'get_windows_and_tabs' }),
+      makeTrace({ toolName }),
       {
         intentTitle: '读取窗口和标签',
         intentSummary: null,
         nextIntent: null,
         previousFeedback: [],
       },
-      'get_windows_and_tabs',
+      toolName,
     );
 
     const payload = parseFirstText(result);
     expect(payload._tabrix).toMatchObject({
       traceId: 'trace-1',
-      toolName: 'get_windows_and_tabs',
+      toolName,
       businessFeedbackRequired: false,
     });
     expect(payload._tabrix).not.toHaveProperty('feedbackTarget');
+  });
+
+  it.each([
+    [TOOL_NAMES.BROWSER.READ_PAGE],
+    [TOOL_NAMES.BROWSER.NAVIGATE],
+    [TOOL_NAMES.BROWSER.CLICK],
+    [TOOL_NAMES.BROWSER.FILL],
+  ])('still requests AI feedback for experience-relevant traces: %s', (toolName) => {
+    const result = attachTabrixMemoryTraceEnvelope(
+      textResult({ status: 'ok' }),
+      makeTrace({ toolName }),
+      {
+        intentTitle: '执行关键浏览器步骤',
+        intentSummary: null,
+        nextIntent: null,
+        previousFeedback: [],
+      },
+      toolName,
+    );
+
+    const payload = parseFirstText(result);
+    expect(payload._tabrix).toMatchObject({
+      traceId: 'trace-1',
+      toolName,
+      businessFeedbackRequired: true,
+      feedbackTarget: {
+        traceId: 'trace-1',
+        feedbackToken: expect.any(String),
+      },
+    });
   });
 
   it('leaves non-JSON text results unchanged', () => {
