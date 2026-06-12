@@ -3455,16 +3455,6 @@ onUnmounted(() => {
   color: var(--ac-accent, #d97757);
 }
 
-.entry-icon.workflow {
-  background: rgba(37, 99, 235, 0.12);
-  color: #2563eb;
-}
-
-.entry-icon.marker {
-  background: rgba(16, 185, 129, 0.12);
-  color: #10b981;
-}
-
 .entry-icon.model {
   background: rgba(139, 92, 246, 0.12);
   color: #8b5cf6;

@@ -1530,7 +1530,7 @@ async function buildModeOutput(params: {
     extensionLayer.highValueObjects,
     params.frameContext?.frameId,
   );
-  extensionLayer.candidateActions = candidateActions;
+  extensionLayer.candidateActions = params.requestedLayer === 'L0' ? [] : candidateActions;
 
   const regionAlignedUnderstanding = deriveRegionAlignedPageUnderstanding({
     pageRole: params.pageRole,

@@ -4,7 +4,7 @@
  *
  * Reads an NDJSON tool-call log produced by a real-browser acceptance
  * run (typically by the maintainer-private acceptance lane against Chrome
- * session — see `docs/RELEASE_NOTES_v2.3.0.md` §"Maintainer command
+ * session — see `docs/releases/RELEASE_NOTES_v2.3.0.md` §"Maintainer command
  * list" for the producer side) and writes a deterministic v2.3.0
  * release-evidence JSON report.
  *

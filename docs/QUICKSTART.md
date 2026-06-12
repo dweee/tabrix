@@ -197,10 +197,15 @@ The daemon listens on the same port (default `12306`) and serves all non-browser
 
 Override the default port with the `CHROME_MCP_PORT` environment variable.
 
-For local Claude Preview workflows, this repo also ships `.claude/launch.json` with two launch targets:
+For local maintainer workflows, private launch configurations may define daemon
+and extension targets such as:
 
 - `tabrix-native-daemon` uses `scripts/start-native-daemon.mjs` to reuse an existing healthy daemon on `12306` or build and launch `app/native-server/dist/daemon-entry.js` when needed.
 - `tabrix-extension-dev` starts the WXT dev server on a fixed `3000` port.
+
+Those private launch files are optional and are not part of the public setup
+contract. The published CLI path remains `tabrix status`, `tabrix doctor --fix`,
+and `tabrix smoke`.
 
 After extension code changes, the low-friction local refresh order is:
 

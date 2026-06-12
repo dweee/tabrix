@@ -1,8 +1,8 @@
-# Tabrix API Reference 📚
+# Tabrix API Reference
 
 Complete reference for all available tools and their parameters.
 
-## 📋 Table of Contents
+## Table of Contents
 
 - [Browser Management](#browser-management)
 - [Page Reading & Content](#page-reading--content)
@@ -14,7 +14,7 @@ Complete reference for all available tools and their parameters.
 - [Advanced / JavaScript](#advanced--javascript)
 - [Response Format](#response-format)
 
-## 📊 Browser Management
+## Browser Management
 
 ### `get_windows_and_tabs`
 
@@ -92,9 +92,12 @@ Close one or more browser tabs.
 
 **Parameters**:
 
-- `tabIds` (array of numbers, optional): Tab IDs to close. If omitted with no `url`, behavior targets the active tab (see `windowId`).
+- `tabIds` (array of numbers, optional): Tab IDs to close.
 - `url` (string, optional): Close tabs whose URL matches this value (alternative to `tabIds`).
-- `windowId` (number, optional): When neither `tabIds` nor `url` is set, close the active tab in this window (default: current window).
+- `windowId` (number, optional): Window scope for URL matching.
+
+`chrome_close_tabs` requires either `tabIds` or `url`. Empty arguments are
+rejected so the active user tab is not closed by accident.
 
 **Example**:
 
@@ -129,7 +132,7 @@ Switch to a specific browser tab.
 }
 ```
 
-## 📄 Page Reading & Content
+## Page Reading & Content
 
 ### `chrome_read_page`
 
@@ -628,7 +631,7 @@ Record tab activity as an animated GIF. Modes include fixed-FPS `start`, action-
 }
 ```
 
-## 🌐 Network
+## Network
 
 ### `chrome_network_capture`
 
@@ -703,7 +706,7 @@ Wait for a browser download and return metadata (id, filename, url, state, size)
 }
 ```
 
-## ⚡ Performance
+## Performance
 
 ### `performance_start_trace`
 
@@ -904,7 +907,7 @@ Execute JavaScript in the page via CDP `Runtime.evaluate` (with `awaitPromise` /
 }
 ```
 
-## 📋 Response Format
+## Response Format
 
 All tools return responses in the following format:
 
@@ -934,7 +937,7 @@ For errors:
 }
 ```
 
-## 🔧 Usage Examples
+## Usage Examples
 
 ### Complete Workflow Example
 
@@ -975,7 +978,7 @@ await callTool('chrome_bookmark_add', {
 
 ---
 
-## 📋 Typical Usage Scenarios
+## Typical Usage Scenarios
 
 Recommended tool combinations by task goal.
 

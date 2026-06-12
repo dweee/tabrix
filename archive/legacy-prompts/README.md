@@ -1,8 +1,10 @@
-# Prompt Examples
+# Legacy Prompt Examples
 
-This directory contains legacy public prompt examples. They are not runtime
-instructions, owner-lane planning material, release evidence, or the source of
-truth for current Tabrix browser automation.
+This directory contains historical public prompt examples moved from the old
+root-level `prompt/` folder.
+
+They are not runtime instructions, owner-lane planning material, release
+evidence, or the source of truth for current Tabrix browser automation.
 
 Current browser automation behavior is defined by:
 

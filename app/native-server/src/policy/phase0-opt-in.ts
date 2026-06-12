@@ -11,7 +11,7 @@
  *  - P0 / P1 / P2 tools are never blocked by this module.
  *  - Site / PageRole / Task-level policy lives in Phase 1.
  *
- * See docs/POLICY_PHASE_0.md for the full design.
+ * See docs/PRODUCT_SURFACE_MATRIX.md for the public capability boundary.
  */
 
 import { P3_EXPLICIT_OPT_IN_TOOLS, getToolRiskTier, isExplicitOptInTool } from '@tabrix/shared';

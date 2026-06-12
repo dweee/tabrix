@@ -5,6 +5,7 @@ This document provides a technical overview of the Tabrix codebase architecture 
 Scope note:
 
 - The stable public product surface is centered on the Chrome extension browser runtime plus MCP access through `Streamable HTTP` and `stdio`.
+- Chrome APIs provide the default browser execution and sensing substrate. CDP is a bounded, explicitly used sensing and diagnostics enhancer for page-state, frame, network, console, visual, and post-action understanding; it must not become the default public control surface.
 - Legacy semantic-indexing, agent, workflow, local-model, and WASM acceleration subsystems are not part of the current public product surface.
 
 ## Overview
@@ -14,7 +15,7 @@ Tabrix is a browser automation platform that bridges AI assistants with Chrome b
 - **Extensibility**: modular tool schemas and browser-side executors
 - **Reliability**: explicit bridge status, diagnostics, and recovery paths
 - **Security**: local-first execution, tool risk tiers, and opt-in gates for high-risk tools
-- **Observability**: runtime events, Memory records, and release gates for verifiable behavior
+- **Observability**: runtime events, object-aware page summaries, Memory records, and release gates for verifiable behavior
 
 ## System Architecture
 
@@ -51,6 +52,7 @@ graph TB
         P[Chrome APIs]
         Q[Web APIs]
         R[Native Messaging]
+        S[CDP when explicitly used]
     end
 
     A --> D
@@ -70,20 +72,22 @@ graph TB
     K --> O
     K --> P
     K --> Q
+    K --> S
 ```
 
 ## Component Details
 
 ### Native Server (`app/native-server/`)
 
-**Purpose**: MCP transport implementation, Native Messaging bridge, policy enforcement, and local persistence.
+**Purpose**: MCP transport implementation, Native Messaging bridge, policy enforcement, and local persistence. The native server orchestrates browser work and stores compact summaries; it should not be the primary owner of browser-side CDP attachment.
 
 Key components:
 
 - **Fastify HTTP Server**: hosts MCP over `Streamable HTTP`, status, auth, recovery, Memory read routes, and diagnostics.
 - **Native Messaging Host**: communicates with the Chrome extension.
 - **MCP Tool Registry**: publishes tool schemas from `@tabrix/shared` and forwards browser tool calls to the extension.
-- **MKEP Runtime**: Memory persistence, Experience query/replay support, Policy gates, execution tracking, and v2.7 browser observation state.
+- **MKEP Runtime**: Memory persistence, object/knowledge summaries, experimental Experience mining, Policy gates, execution tracking, and browser observation state.
+- **Observation Receiver**: receives sanitized browser observations from the extension and turns them into runtime state, Memory, Object, Knowledge, or Experience inputs.
 
 ### Chrome Extension (`app/chrome-extension/`)
 
@@ -96,6 +100,32 @@ Key components:
 - **Knowledge Layer**: registry and lookup helpers that support page-role and high-value-object classification.
 - **Popup / Side Panel**: connection status, remote access controls, and MKEP placeholder or read surfaces.
 - **Inject Scripts**: page-context helpers for interaction, observation, screenshots, and DOM extraction.
+- **CDP Helpers**: bounded, explicitly used browser-level sensing for diagnostics, screenshots, network or console summaries, and advanced fallback paths. CDP helpers live on the extension side because the extension is attached to the user's real Chrome tabs; the native server receives sanitized summaries instead of owning a direct CDP control path.
+
+### Web Object Perception Layer
+
+The Web Object Perception layer is the product boundary between low-level browser facts and assistant-facing browser context.
+
+Inputs:
+
+- Chrome extension lifecycle events: windows, tabs, navigation, activation, loading, close, and restricted pages.
+- DOM, accessibility, screenshot-coordinate, Chrome API, and bounded extension-side CDP signals.
+- Recent `chrome_read_page` output, post-action readback, and bridge observations.
+
+Outputs:
+
+- page status: foreground page, running, loading, closed, or restricted.
+- page-object summaries: important forms, buttons, lists, cards, dialogs, menus, tables, pagination, and source/API clues.
+- actionable target summaries with freshness and risk boundaries.
+- post-action deltas: URL change, new tab, dialog, list refresh, button disabled, source/API result, no useful change, or blocked state.
+
+Placement:
+
+- the extension owns browser-side sensing and short-lived CDP attachment;
+- the shared package owns stable cross-process DTOs;
+- the native server owns orchestration, compact persistence, and asynchronous Object / Memory / Knowledge / Experience projection.
+
+This layer should help assistants read less and act with fresher context. It must not persist raw page dumps, response bodies, cookies, Authorization values, raw request bodies, or private account data.
 
 ### Shared Package (`packages/shared/`)
 
@@ -126,17 +156,44 @@ AI assistant
 ### Runtime Observation
 
 ```text
-Chrome extension observers
+Chrome extension observers / bounded extension-side CDP helpers
   -> shared bridge observation message
-  -> native-server v2.7 runtime state
-  -> data-source router / chooser / Memory evidence
+  -> native-server runtime state
+  -> object summaries / data-source router / Memory records
   -> MCP result annotations or follow-up routing decisions
 ```
+
+### MKEP Async Loop
+
+```text
+Browser/page observations
+  -> redacted object summaries
+  -> Memory records for AI-to-Tabrix tool calls
+  -> Knowledge summaries derived from object records
+  -> reviewed Experience candidates derived from AI-approved Memory traces
+```
+
+Object, Memory, Knowledge, and Experience records are compact operational summaries. They are not raw page, API, cookie, token, or user-data caches. Projection and mining work should run off the hot browser-control path so it does not delay assistant actions.
+
+Hot path:
+
+```text
+AI request -> MCP/native orchestration -> extension action or sensing -> compact result -> AI
+```
+
+Async learning path:
+
+```text
+browser facts / Memory trace / Object update -> background projection -> Knowledge or Experience candidate
+```
+
+The hot path must stay fast and honest even when asynchronous projection is delayed or disabled.
 
 ## Performance Optimizations
 
 - **Transport boundaries**: the native server keeps MCP session and policy work local, while browser actions stay in the extension where Chrome APIs are available.
 - **Layered page reading**: `chrome_read_page` emits compact task layers, high-value objects, candidate actions, and stable target refs to reduce repeated full-page reads.
+- **Object-aware targeting**: candidate actions and stable target refs let assistants reuse the latest page read instead of guessing selectors from raw text.
 - **Policy-time filtering**: high-risk tools are hidden or denied before dispatch when the operator has not opted in.
 - **Release gates**: benchmark and readiness checks protect public contract drift without requiring private browser evidence in public CI.
 

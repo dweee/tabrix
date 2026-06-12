@@ -189,7 +189,7 @@ if (normalizedTagVersion == null) {
   );
 }
 
-const releaseNotesFile = `docs/RELEASE_NOTES_v${nativePkg.version}.md`;
+const releaseNotesFile = `docs/releases/RELEASE_NOTES_v${nativePkg.version}.md`;
 const fallbackNotesFile = 'CHANGELOG.md';
 let selectedNotesFile = releaseNotesFile;
 

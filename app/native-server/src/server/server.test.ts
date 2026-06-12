@@ -315,7 +315,7 @@ describe('服务器测试', () => {
           status: 'running',
         }),
         expect.objectContaining({
-          tabId: '201',
+          tabId: null,
           title: 'Closed Dashboard',
           url: 'https://example.test/closed',
           status: 'closed',
@@ -705,10 +705,6 @@ describe('服务器测试', () => {
       .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
       .mockResolvedValueOnce({
         status: 'success',
-        items: [],
-      } as never)
-      .mockResolvedValueOnce({
-        status: 'success',
         data: {
           content: [{ type: 'text', text: '{"windowCount":1,"tabCount":2}' }],
           isError: false,
@@ -747,13 +743,13 @@ describe('服务器测试', () => {
         _tabrix: {
           toolName: 'get_windows_and_tabs',
           toolSuccess: true,
-          businessFeedbackRequired: true,
+          businessFeedbackRequired: false,
         },
       });
       expect(payload._tabrix).not.toHaveProperty('businessFeedbackGuideVersion');
       expect(payload._tabrix).not.toHaveProperty('businessStatus');
       expect(payload._tabrix.traceId).toEqual(expect.any(String));
-      expect(extensionSpy).toHaveBeenCalledTimes(2);
+      expect(extensionSpy).toHaveBeenCalledTimes(1);
     } finally {
       jest.restoreAllMocks();
       bridgeRuntimeState.reset();

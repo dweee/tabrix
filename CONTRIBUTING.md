@@ -1,255 +1,218 @@
-# Contributing Guide 🤝
+# Contributing
 
-Thank you for your interest in contributing to Tabrix! This document provides guidelines and information for contributors.
+Thanks for helping improve Tabrix.
 
-## 🎯 How to Contribute
+This guide is for public contributors. Maintainer-private planning, acceptance
+evidence, benchmark artifacts, and release-gate materials are not required for
+normal contributions and should not be recreated in this repository.
 
-We welcome contributions in many forms:
+## Before You Start
 
-- 🐛 Bug reports and fixes
-- ✨ New features and tools
-- 📚 Documentation improvements
-- 🧪 Tests and performance optimizations
-- 🌐 Translations and internationalization
-- 💡 Ideas and suggestions
+Read these first:
 
-## 🚀 Getting Started
+1. [README](./README.md)
+2. [Docs Index](./docs/README.md)
+3. [Architecture](./docs/ARCHITECTURE.md)
+4. [Project Structure](./docs/PROJECT_STRUCTURE.md)
+5. [Product Surface Matrix](./docs/PRODUCT_SURFACE_MATRIX.md)
 
-### Prerequisites
+If you are an AI coding assistant, also read [AGENTS.md](./AGENTS.md).
 
-- **Node.js 20+** and **pnpm or npm** (latest version)
-- **Chrome/Chromium** browser for testing
-- **Git** for version control
-- **TypeScript** knowledge
+## Requirements
 
-### Development Setup
+- Node.js `20+`
+- pnpm `10+`
+- Chrome or Chromium for extension and browser-path testing
+- Git
 
-1. **Fork and clone the repository**
+This repository is a pnpm monorepo:
 
-```bash
-git clone https://github.com/YOUR_USERNAME/tabrix.git
-cd tabrix
+```text
+app/chrome-extension   Chrome extension runtime
+app/native-server      CLI, MCP server, Native Messaging host
+packages/shared        shared tool schemas and cross-process contracts
 ```
 
-2. **Install dependencies**
+## Setup
 
 ```bash
+git clone https://github.com/guodaxia103/tabrix.git
+cd tabrix
 pnpm install
 ```
 
-3. **Start the project**
+Build all packages:
 
 ```bash
-npm run dev
+pnpm run build
 ```
 
-4. **Load the extension in Chrome**
-   - Open `chrome://extensions/`
-   - Enable "Developer mode"
-   - Click "Load unpacked" and select `your/extension/dist`
-
-## 🏗️ Project Structure
-
-```
-tabrix/
-├── app/
-│   ├── chrome-extension/     # Chrome extension (WXT + Vue 3)
-│   │   ├── entrypoints/      # Background scripts, popup, content scripts
-│   │   ├── inject-scripts/   # Page-context interaction helpers
-│   │   └── utils/            # Browser-side utilities
-│   └── native-server/        # Native messaging server (Fastify + TypeScript)
-│       ├── src/mcp/          # MCP protocol implementation
-│       └── src/server/       # HTTP server and native messaging
-├── packages/
-│   └── shared/               # Shared types, tool schemas, and contracts
-└── docs/                    # Documentation
-```
-
-## 🛠️ Development Workflow
-
-### Adding New Tools
-
-1. **Define the tool schema in `packages/shared/src/tools.ts`**:
-
-```typescript
-{
-  name: 'your_new_tool',
-  description: 'Description of what your tool does',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      // Define parameters
-    },
-    required: ['param1']
-  }
-}
-```
-
-2. **Implement the tool in `app/chrome-extension/entrypoints/background/tools/browser/`**:
-
-```typescript
-class YourNewTool extends BaseBrowserToolExecutor {
-  name = TOOL_NAMES.BROWSER.YOUR_NEW_TOOL;
-
-  async execute(args: YourToolParams): Promise<ToolResult> {
-    // Implementation
-  }
-}
-```
-
-3. **Export the tool in `app/chrome-extension/entrypoints/background/tools/browser/index.ts`**
-
-4. **Add tests in the appropriate test directory**
-
-### Code Style Guidelines
-
-- **TypeScript**: Use strict TypeScript with proper typing
-- **ESLint**: Follow the configured ESLint rules (`pnpm lint`)
-- **Prettier**: Format code with Prettier (`pnpm format`)
-- **Naming**: Use descriptive names and follow existing patterns
-- **Comments**: Add JSDoc comments for public APIs
-- **Error Handling**: Always handle errors gracefully
-
-### Third-Party Reuse Rules
-
-- Classify any external source as `direct`, `rewrite`, or `design-only` before using it.
-- If a PR ships third-party code or a direct dependency, update [`NOTICE`](./NOTICE) and add a source record such as `docs/third-party/<project>.md`.
-- If a PR only rewrites an idea after reading upstream code, add a source record but do not update `NOTICE`.
-- `AGPL`, commercial, or unclear licensing defaults to `design-only`; do not copy that code into Tabrix.
-
-## 📝 Pull Request Process
-
-1. **Create a feature branch**
+Run the main verification set:
 
 ```bash
-git checkout -b feature/your-feature-name
+pnpm run verify
 ```
 
-2. **Make your changes**
-   - Follow the code style guidelines
-   - Add tests for new functionality
-   - Update documentation if needed
-   - If third-party material influenced the change, classify it and record it before opening the PR
-
-3. **Test your changes**
-   - Ensure all existing tests pass
-   - Test the Chrome extension manually
-   - Verify MCP protocol compatibility
-
-4. **Commit your changes**
+Run the full public CI-style check:
 
 ```bash
-git add .
-git commit -m "feat: add your feature description"
+pnpm run ci:check
 ```
 
-We use [Conventional Commits](https://www.conventionalcommits.org/):
+## Local Development
 
-- `feat:` for new features
-- `fix:` for bug fixes
-- `docs:` for documentation changes
-- `test:` for adding tests
-- `refactor:` for code refactoring
-
-5. **Push and create a Pull Request**
+Start all development processes:
 
 ```bash
-git push origin feature/your-feature-name
+pnpm run dev
 ```
 
-## 🐛 Bug Reports
+Run package-specific development commands when you only need one side:
 
-When reporting bugs, please include:
+```bash
+pnpm run dev:shared
+pnpm run dev:native
+pnpm run dev:extension
+```
 
-- **Environment**: OS, Chrome version, Node.js version
-- **Steps to reproduce**: Clear, step-by-step instructions
-- **Expected behavior**: What should happen
-- **Actual behavior**: What actually happens
-- **Screenshots/logs**: If applicable
-- **MCP client**: Which MCP client you're using (Claude Desktop, etc.)
+Build package-specific targets:
 
-## 💡 Feature Requests
+```bash
+pnpm run build:shared
+pnpm run build:native
+pnpm run build:extension
+```
 
-For feature requests, please provide:
+After changing extension code, use the local extension loop:
 
-- **Use case**: Why is this feature needed?
-- **Proposed solution**: How should it work?
-- **Alternatives**: Any alternative solutions considered?
-- **Additional context**: Screenshots, examples, etc.
+```bash
+pnpm -C app/chrome-extension build
+pnpm run extension:reload
+```
 
-## 🔧 Development Tips
+If automatic reload cannot reach Chrome, reload the unpacked extension manually
+from `chrome://extensions`.
 
-### Debugging Chrome Extension
+## Loading the Extension
 
-- Use Chrome DevTools for debugging extension popup and background scripts
-- Check `chrome://extensions/` for extension errors
-- Use `console.log` statements for debugging
-- Monitor the native messaging connection in the background script
+For local development builds, use the WXT output directory:
 
-### Testing MCP Protocol
+```text
+app/chrome-extension/.output/chrome-mv3
+```
 
-- Use MCP Inspector for protocol debugging
-- Test with different MCP clients (Claude Desktop, custom clients)
-- Verify tool schemas and responses match MCP specifications
+Open `chrome://extensions`, enable `Developer mode`, choose `Load unpacked`,
+and select that directory.
 
-## 📚 Resources
+For normal user installation, use the packaged extension asset from GitHub
+Releases instead of the local build output.
 
-- [Model Context Protocol Specification](https://modelcontextprotocol.io/)
-- [Chrome Extension Development](https://developer.chrome.com/docs/extensions/)
-- [WXT Framework Documentation](https://wxt.dev/)
-- [TypeScript Handbook](https://www.typescriptlang.org/docs/)
+## Common Checks
 
-## 🤝 Community
+```bash
+pnpm run docs:check
+pnpm run typecheck
+pnpm run lint
+pnpm run test:core
+pnpm run audit
+pnpm run size:check
+```
 
-- **GitHub Issues**: For bug reports and feature requests
-- **GitHub Discussions**: For questions and general discussion
-- **Pull Requests**: For code contributions
+Targeted tests:
 
-## 📄 License
+```bash
+pnpm -C packages/shared test:contracts
+pnpm -C app/native-server test:ci
+pnpm -C app/chrome-extension test
+```
 
-By contributing to Tabrix, you agree that your contributions will be licensed under the MIT License.
+Runtime checks:
 
-You must also ensure that contributed changes do not import `AGPL`, commercial, or otherwise restricted third-party code into Tabrix without an explicit repository-level decision and matching attribution records.
+```bash
+tabrix status
+tabrix doctor --fix
+tabrix smoke
+tabrix stdio-smoke
+```
 
-## 🎯 Contributor Guidelines
+Do not claim browser-side behavior is verified unless the extension has been
+built, reloaded, and tested through the real browser path.
 
-### New Contributors
+## Change Scope
 
-If you're contributing to an open source project for the first time:
+Prefer small, verifiable changes.
 
-1. **Start small**: Look for issues labeled "good first issue"
-2. **Read the code**: Familiarize yourself with the project structure and coding style
-3. **Ask questions**: Ask questions in GitHub Discussions
-4. **Learn the tools**: Get familiar with Git, GitHub, TypeScript, and other tools
+Good contribution scope:
 
-### Experienced Contributors
+- bug fixes with regression tests
+- documentation corrections that reflect real commands
+- tool schema consistency fixes
+- platform install or packaging reliability
+- deterministic tests for shared, native-server, or extension behavior
 
-- **Architecture improvements**: Propose system-level improvements
-- **Performance optimization**: Identify and fix performance bottlenecks
-- **New features**: Design and implement complex new features
-- **Mentor newcomers**: Help new contributors get started
+Open an issue or discussion first for:
 
-### Documentation Contributions
+- public MCP tool changes
+- shared DTO or SQLite schema changes
+- risk-tier or security-policy changes
+- new dependencies
+- new browser-control surfaces
+- large UI, architecture, or roadmap changes
 
-- **API documentation**: Improve tool documentation and examples
-- **Tutorials**: Create usage guides and best practices
-- **Translations**: Help translate documentation to other languages
-- **Video content**: Create demo videos and tutorials
+Do not reintroduce removed surfaces such as embedded assistant UI, workflow
+builders, element picker, visual editor, record/replay engines, or local
+semantic search without an explicit maintainer decision.
 
-### Testing Contributions
+## Pull Request Checklist
 
-- **Unit tests**: Write tests for new features
-- **Integration tests**: Test interactions between components
-- **Performance tests**: Benchmark testing and performance regression detection
-- **User testing**: Functional testing in real-world scenarios
+Before opening a PR:
 
-## 🏆 Contributor Recognition
+- explain the user-visible problem or developer problem
+- keep the diff focused
+- add or update the smallest useful test
+- run the smallest relevant verification commands
+- update docs only when user or contributor behavior changed
+- avoid committing private planning, acceptance evidence, local reports, or
+  machine-specific files
 
-We value every contribution, no matter how big or small. Contributors will be recognized in the following ways:
+Recommended final checks:
 
-- **README acknowledgments**: Contributors listed in the project README
-- **Release notes**: Contributors thanked in version release notes
-- **Contributor badges**: Contributor badges on GitHub profiles
-- **Community recognition**: Special thanks in community discussions
+```bash
+pnpm run docs:check
+pnpm run verify
+```
 
-Thank you for considering contributing to Tabrix! Your participation makes this project better.
+Use `pnpm run ci:check` before larger PRs.
+
+## Commit Style
+
+Use clear conventional prefixes when possible:
+
+- `feat:` new user-visible behavior
+- `fix:` bug fix
+- `docs:` documentation-only change
+- `test:` test-only change
+- `refactor:` behavior-preserving code restructuring
+
+## Bug Reports
+
+Include:
+
+- operating system
+- Chrome or Chromium version
+- Node.js and pnpm versions
+- Tabrix version or commit
+- MCP client used
+- exact steps to reproduce
+- expected behavior
+- actual behavior
+- relevant output from `tabrix status`, `tabrix doctor`, or `tabrix report`
+
+## Security
+
+Do not open public issues for vulnerabilities. Follow [SECURITY.md](./SECURITY.md).
+
+## License
+
+By contributing, you agree that your contribution is licensed under the MIT
+License.

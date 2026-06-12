@@ -807,7 +807,7 @@ describe('candidateAction bridge', () => {
       message: 'Keyboard operation successful',
     });
 
-    await keyboardTool.execute({ keys: 'Enter', tabId: 4120 });
+    await keyboardTool.execute({ keys: 'Enter', selector: 'input[name=q]', tabId: 4120 });
     snapshot = await getBrowserWorldSnapshot();
     expect(snapshot.summary.aiOperationState).toMatchObject({
       latestAiOperatedTabId: 4120,

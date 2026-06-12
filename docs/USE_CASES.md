@@ -124,6 +124,24 @@ It is written for the open-source cold-start phase:
 - exposes browser execution through a structured MCP interface
 - keeps a real-browser execution model instead of switching to a separate headless product surface
 
+## How Object-Aware Tabrix Should Improve These Flows
+
+Across these use cases, the product direction is not to show more internal
+statistics. The useful direction is to give the assistant better browser facts:
+
+- which real tab or page is currently relevant
+- what important page objects are visible, such as forms, result lists, cards,
+  menus, dialogs, tables, or pagination
+- which target looks actionable and whether the target is still fresh
+- what changed after a click, fill, navigation, or read action
+- whether prior Knowledge or reviewed Experience can reduce another full-page
+  read
+
+Bounded CDP and Chrome API signals can help explain low-level browser behavior,
+such as slow loading, console errors, network failures, frame changes, or a
+click that did not change the page. Those signals should support compact
+assistant-facing results, not become a separate user-facing debugging product.
+
 ## What Tabrix Is Not Best At Today
 
 Tabrix is currently not best described as:

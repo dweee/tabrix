@@ -14,7 +14,7 @@
  * file. The maintainer's loop is:
  *
  *   1. Run the real-browser scenarios listed in
- *      `docs/RELEASE_NOTES_v2.3.0.md` §"Maintainer command list".
+ *      `docs/releases/RELEASE_NOTES_v2.3.0.md` §"Maintainer command list".
  *   2. The runner appends one `BenchmarkToolCallRecord`-shaped JSON line
  *      per tool invocation to `~/.chrome-mcp-agent/benchmarks/v23/<run>.ndjson`.
  *   3. `pnpm run benchmark:v23 -- --input <file>` calls

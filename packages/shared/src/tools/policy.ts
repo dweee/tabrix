@@ -3,7 +3,7 @@ import { TOOL_NAMES } from './names';
 /**
  * Tabrix MKEP Policy — risk classification for MCP tools.
  *
- * See docs/POLICY_PHASE_0.md for the rationale and the mapping rules.
+ * See docs/PRODUCT_SURFACE_MATRIX.md for the public capability boundary.
  *
  * - P0: read-only observations (page reads, screenshots, listings) — safe to auto-execute.
  * - P1: reversible side-effects (navigate, switch tab, trace recording) — auto-execute + audit.
@@ -82,11 +82,6 @@ export const TOOL_RISK_TIERS: Readonly<Record<string, TabrixRiskTier>> = Object.
   [TOOL_NAMES.BROWSER.SEND_COMMAND_TO_INJECT_SCRIPT]: 'P3',
   [TOOL_NAMES.BROWSER.USERSCRIPT]: 'P3',
 
-  // Record-replay tools inherit the highest tier of their recorded steps at runtime
-  // (Phase 1). For Phase 0 we conservatively tag them P2 so they are not blocked by default.
-  [TOOL_NAMES.RECORD_REPLAY.FLOW_RUN]: 'P2',
-  [TOOL_NAMES.RECORD_REPLAY.LIST_PUBLISHED]: 'P0',
-
   // ---- MKEP Context selector (read-only SELECT against native SQLite) ----
   [TOOL_NAMES.CONTEXT.CHOOSE]: 'P0',
   // Pure-INSERT outcome write-back. P0 because
@@ -101,7 +96,7 @@ export const TOOL_RISK_TIERS: Readonly<Record<string, TabrixRiskTier>> = Object.
 });
 
 /**
- * Tools classified P3 AND requiring an explicit opt-in. See docs/POLICY_PHASE_0.md §3.
+ * Tools classified P3 AND requiring an explicit opt-in.
  *
  * NOTE: Includes a few names that are currently commented-out in TOOL_SCHEMAS
  * (chrome_inject_script / chrome_send_command_to_inject_script / chrome_userscript).

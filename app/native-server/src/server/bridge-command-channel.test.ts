@@ -131,7 +131,7 @@ describe('BridgeCommandChannelManager', () => {
         windowCount: 1,
       },
     });
-    expect(sessionManager.countMkeBrowserObjects()).toBe(3);
+    expect(sessionManager.countMkeBrowserObjects()).toBe(2);
 
     ws.close();
   });

@@ -5,7 +5,7 @@ This guide explains where the code lives and how the main runtime paths fit toge
 Scope note:
 
 - The stable public product surface is centered on browser execution through the Chrome extension plus MCP access through `Streamable HTTP` and `stdio`.
-- The repository is being progressively reshaped around the MKEP layers (Memory / Knowledge / Experience / Policy). Legacy agent / workflow / visual-editor / element-marker / local-semantic surfaces are not part of the current public product surface and should not be expected in `main`.
+- The repository is being progressively reshaped around object-aware MKEP layers (Object / Memory / Knowledge / Experience / Policy). Legacy agent / workflow / visual-editor / element-marker / local-semantic surfaces are not part of the current public product surface and should not be expected in `main`.
 
 Related docs:
 
@@ -26,10 +26,9 @@ tabrix/
 ├─ packages/
 │  └─ shared/              # Shared types, tool schemas, and cross-process contracts
 ├─ docs/                   # User and developer documentation
+├─ archive/                # Public historical examples, not active product SoT
 ├─ scripts/                # Repo-level maintenance scripts (see scripts/README.md)
-├─ skills/                 # Public Tabrix assistant-routing skill definitions
-├─ prompt/                 # Legacy public prompt examples, not runtime SoT
-└─ releases/               # Release notes and release assets guidance
+└─ skills/                 # Public Tabrix assistant-routing skill definitions
 ```
 
 > The former local semantic-engine acceleration bundle and extension workers
@@ -38,16 +37,19 @@ tabrix/
 
 ## 2. Workspace Responsibilities
 
-### `skills/` and `prompt/`
+### `skills/` and `archive/`
 
 `skills/` contains public helper skills that route AI assistants toward the
 current Tabrix browser execution path. They are contributor-facing aids, not a
-replacement for the public product docs or maintainer-private owner-lane plans.
+replacement for the public product docs or maintainer-private planning.
 
-`prompt/` contains legacy prompt examples. Files in that directory are not
-runtime instructions, release evidence, or current tool contracts. Prefer
-`docs/TOOLS.md`, `docs/CLI_AND_MCP.md`, and `skills/tabrix_browser/SKILL.md`
-when deciding how an assistant should operate Tabrix.
+`archive/` contains public historical examples that are no longer active product
+truth. Archived prompts and examples are not runtime instructions, release
+evidence, or current tool contracts. Prefer `docs/TOOLS.md`,
+`docs/CLI_AND_MCP.md`, and `skills/tabrix_browser/SKILL.md` when deciding how an
+assistant should operate Tabrix.
+
+Repository placement rules live in `docs/REPOSITORY_GOVERNANCE.md`.
 
 ### `app/chrome-extension/`
 
@@ -58,6 +60,8 @@ Key directories:
 - `entrypoints/background/`
   - Main background runtime and bootstrap layer.
   - `index.ts` only initializes the native-host bridge. Any subsystem that needs a SW listener should mount from here.
+- `entrypoints/background/observers/`
+  - Browser lifecycle observers for tab/window/page state and bridge observations.
 - `entrypoints/background/tools/`
   - Browser tool implementations.
   - `browser/*.ts` contains navigation, click, keyboard, screenshot, network, JS execution, bookmarks, history, upload, and `read_page` / HVO reasoning.
@@ -78,7 +82,7 @@ Key directories:
 - `shared/`
   - Reusable extension-side logic (selector generation, fingerprinting, screenshot helpers).
 - `utils/`
-  - Shared browser-side utilities (selector helpers, screenshot context, IndexedDB helpers, i18n).
+  - Shared browser-side utilities (selector helpers, screenshot context, IndexedDB helpers, i18n, and bounded CDP session helpers).
 - `tests/`
   - `vitest` coverage for popup state, native-host bridge, read-page / HVO, Knowledge registry, and related units.
 
@@ -104,8 +108,10 @@ Key directories:
   - CLI subcommand implementations such as `register`, `doctor`, `status`, `smoke`, `report`, `setup`, and `daemon`.
 - `src/execution/`
   - Tool execution tracking and result normalization.
+- `src/runtime/`
+  - Runtime observation ingest and browser-fact collection. This is the native-side receiver for sanitized extension observations.
 - `src/memory/`
-  - MKEP Memory layer: SQLite schema + client + SessionManager + post-processor that persists Sessions / Tasks / Steps / PageSnapshots / Actions.
+  - MKEP persistence layer: SQLite schema + clients for Memory traces, Browser Object summaries, Knowledge projections, Experience projections, and related read APIs. Current production tables are compact summaries such as `tabrix_memory_traces` and `tabrix_browser_objects`, not raw page dumps.
 - `src/policy/`
   - MKEP Policy Phase 0: static risk-tier coverage and `requiresExplicitOptIn` gating for P3 tools.
 - `src/shared/`
@@ -121,6 +127,8 @@ Primary files:
 - `types.ts` and `constants.ts`: shared cross-process contracts
 - `labels.ts`: shared copy / label catalog
 - `bridge-ws.ts`: the extension-to-native bridge wire protocol
+- `browser-fact.ts`: browser fact summaries shared across runtime observation paths
+- `memory.ts`: Memory / Object / Knowledge / Experience read-side DTOs
 - `read-page-contract.ts`: `chrome_read_page` output contract (HVO v1.0)
 
 > The legacy `agent-types.ts` / `rr-graph.ts` / `step-types.ts` /
@@ -166,15 +174,32 @@ Use this path when debugging:
 MCP tool call
   -> native-server/src/mcp/register-tools.ts
   -> native-server/src/execution/* (tool post-processor)
-  -> native-server/src/memory/session-manager.ts
+  -> native-server/src/memory/* (trace persistence / post-processing)
   -> native-server/src/memory/db/client.ts (SQLite)
 ```
 
 Use this path when debugging:
 
-- why a tool invocation is not producing a Memory Action row
-- where `artifactRefs` / `historyRef` are populated
-- how Session / Task / Step boundaries are opened and closed
+- why a tool invocation is not producing a Memory trace
+- whether AI feedback is linked to the correct trace
+- whether a trace should be shown as AI-reviewed, pending AI review, or not requiring review
+
+### Web Object Perception and Object Library path
+
+```text
+Chrome tab/window/page lifecycle
+  -> extension observers and bounded extension-side CDP helpers
+  -> packages/shared/src/bridge-ws.ts / browser-fact.ts
+  -> native-server/src/runtime/observation-ingest.ts
+  -> native-server/src/memory/db/browser-object-repository.ts
+  -> sidepanel Object Library read routes
+```
+
+Use this path when debugging:
+
+- why a tab/page status is stale, missing, or wrong
+- whether the Object Library row represents a logical page or a tab instance
+- whether page-object summaries are compact, fresh, and privacy-safe
 
 ### MKEP Knowledge read path
 
@@ -223,8 +248,9 @@ Start with:
 
 Start with:
 
-- `app/native-server/src/memory/session-manager.ts`
+- `app/native-server/src/memory/db/schema.ts`
 - `app/native-server/src/memory/db/client.ts`
+- `app/native-server/src/memory/db/browser-object-repository.ts`
 - `app/native-server/src/memory/post-processor/*`
 
 ### Change MKEP Knowledge seeds / registry

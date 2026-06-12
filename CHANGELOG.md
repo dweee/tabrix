@@ -260,7 +260,7 @@ file`. Root cause: `pnpm install --ignore-scripts` **overrides**
   (15 / 15 scenarios passed, `productLevelReady: true`, all four verdicts
   `legacyCorePassed` / `t5UnderstandingPassed` / `compatibilityPassed` /
   `recoveryCompatibilityPassed` == `true`). See
-  `docs/RELEASE_NOTES_v2.1.0.md` for the acceptance envelope.
+  `docs/releases/RELEASE_NOTES_v2.1.0.md` for the acceptance envelope.
 
 ## [v2.0.9] - 2026-04-17
 

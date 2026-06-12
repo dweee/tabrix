@@ -1,92 +1,85 @@
-# Tabrix Public Docs
+# Tabrix Docs
 
-This directory keeps the English-only public documentation for `Tabrix`.
+This directory is the public documentation hub for Tabrix.
 
-It is intended for:
+The docs are intentionally split by audience. Start with the section that
+matches what you are trying to do.
 
-- Users onboarding to the product
-- Developers integrating through CLI or MCP
-- Contributors working on the public codebase
-- Release, security, and compliance readers
+## Users
 
-This repository keeps public product and integration docs for users and
-contributors. Maintainer-only planning, benchmark evidence, release-gate
-evidence, PRDs, detailed version plans, prompts, and handoffs stay outside the
-public repository.
+Use these when you want to install, connect, use, or troubleshoot Tabrix.
 
-## Entry Points
+1. [Quickstart](./QUICKSTART.md) — install the CLI, load the extension, connect
+   an MCP client, and run the first browser task.
+2. [CLI and MCP Configuration](./CLI_AND_MCP.md) — commands, transports, client
+   snippets, remote access, and status semantics.
+3. [Troubleshooting](./TROUBLESHOOTING.md) — common connection, extension,
+   Windows, token, and runtime problems.
+4. [Use Cases](./USE_CASES.md) — realistic early-stage workflows and fit checks.
 
-### Product-level Source of Truth (start here)
+## Developers
 
-- [`ROADMAP.md`](./ROADMAP.md) — public product direction and contribution areas.
-- [`PRODUCT_SURFACE_MATRIX.md`](./PRODUCT_SURFACE_MATRIX.md) — public product surface and capability tiers.
+Use these when you want to understand or change the codebase.
 
-### Getting Started
+1. [Contributing](../CONTRIBUTING.md) — setup, development loop, test commands,
+   pull request expectations, and scope boundaries.
+2. [Architecture](./ARCHITECTURE.md) — runtime components and data flow.
+3. [Project Structure](./PROJECT_STRUCTURE.md) — where the code lives and which
+   files to start from.
+4. [Testing](./TESTING.md) — public deterministic test expectations.
+5. [Extension Testing Conventions](./EXTENSION_TESTING_CONVENTIONS.md) —
+   extension-specific test patterns.
+6. [Repository Governance](./REPOSITORY_GOVERNANCE.md) — public/private/archive
+   placement rules for files and folders.
 
-- [`QUICKSTART.md`](./QUICKSTART.md) — first-success path, extension install, local verification, MCP client connection, first task
-- [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md) — popup status, connection errors, Windows FAQ, browser-first GitHub triage, log locations
+## Product and Platform Reference
 
-### CLI and MCP
+- [Roadmap](./ROADMAP.md) — public product direction.
+- [Product Surface Matrix](./PRODUCT_SURFACE_MATRIX.md) — GA / Beta /
+  Experimental / Internal capability boundaries.
+- [Compatibility Matrix](./COMPATIBILITY_MATRIX.md) — MCP client and environment
+  compatibility notes.
+- [Platform Support](./PLATFORM_SUPPORT.md) — operating system and browser
+  support posture.
+- [Why MCP on Chrome](./WHY_MCP_CHROME.md) — why Tabrix uses real Chrome plus
+  MCP.
+- [Error Codes](./ERROR_CODES.md) — error code reference.
 
-- [`CLI_AND_MCP.md`](./CLI_AND_MCP.md) — executables, recommended commands, transports, per-client configuration, remote access, `/status` semantics, environment variables, verification
-- [`TOOLS.md`](./TOOLS.md) — registered MCP tool catalog and contracts
+## API Reference
 
-### Architecture and Capabilities
+- [Tools API](./TOOLS.md) — full MCP tool catalog and schemas.
 
-- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — high-level component overview
-- [`PROJECT_STRUCTURE.md`](./PROJECT_STRUCTURE.md) — codebase map and module responsibilities
-- [`PRODUCT_SURFACE_MATRIX.md`](./PRODUCT_SURFACE_MATRIX.md) — capability boundaries and tier definitions
-- [`COMPATIBILITY_MATRIX.md`](./COMPATIBILITY_MATRIX.md) — MCP client and environment compatibility
-- [`PLATFORM_SUPPORT.md`](./PLATFORM_SUPPORT.md) — OS and browser support posture
-- [`WHY_MCP_CHROME.md`](./WHY_MCP_CHROME.md) — rationale behind the Chrome-native architecture
-- [`ERROR_CODES.md`](./ERROR_CODES.md) — error code reference
+`TOOLS.md` is a reference document, not a getting-started guide. New users
+should start with [Quickstart](./QUICKSTART.md).
 
-### Release and Process
+## Release and Maintenance Reference
 
-- [`ROADMAP.md`](./ROADMAP.md) — public product direction
-- [`RELEASE_PROCESS.md`](./RELEASE_PROCESS.md) — public release workflow
-- [`TESTING.md`](./TESTING.md) — contributor verification standards
-- [`USE_CASES.md`](./USE_CASES.md) — realistic early-stage scenarios
+- [Release Process](./RELEASE_PROCESS.md) — public release workflow for
+  maintainers.
+- [Archived Release Notes](./releases/README.md) — historical release notes.
+- [Extension Release Assets](./releases/EXTENSION_ASSETS.md) — extension zip
+  download and unpacked-install guidance.
+- [Changelog](../CHANGELOG.md) — user-visible changes.
+- [Security](../SECURITY.md) — disclosure policy and security posture.
 
-### Repository Root
+## AI Contributor Rules
 
-- [`../README.md`](../README.md) and [`../README_zh.md`](../README_zh.md) — public landing pages
-- [`../AGENTS.md`](../AGENTS.md) — mandatory reading for AI contributors (public contributor rules)
-- [`../SECURITY.md`](../SECURITY.md) — security disclosure policy
-- [`../CONTRIBUTING.md`](../CONTRIBUTING.md) — contributor workflow
-- [`../CHANGELOG.md`](../CHANGELOG.md) — versioned user-visible changes
+- [AGENTS.md](../AGENTS.md) — public rules for AI coding assistants.
 
-## Maintainer-Only Materials (Outside Repo)
+This file is not required for normal user onboarding. It is kept separate
+from user and developer guides so the public documentation stays readable.
 
-The following categories are maintained outside this repository by the project maintainers:
+## Public and Private Boundary
 
-- private product-positioning and commercial sequencing materials that are not part of the open-source working contract
-- private governance and audit materials that contain maintainer-only process or approval state
-- private acceptance evidence and gate-maintenance artifacts
-- private runbooks for non-public scenarios
+Public docs explain the product surface, setup, architecture, and contribution
+workflow.
 
-By contrast, `ROADMAP.md`, `PRODUCT_SURFACE_MATRIX.md`, and `AGENTS.md` are
-kept in-repo because contributors need them to understand the public product
-direction and execution rules.
+Maintainer-private PRDs, acceptance evidence, benchmark artifacts, internal
+execution ledgers, prompts, and handoffs stay outside the public documentation
+tree.
 
 ## Language Policy
 
-- English is the single public language for `docs/`.
-- [`../README_zh.md`](../README_zh.md) is the public Chinese landing page.
-- [`../AGENTS.md`](../AGENTS.md) may contain bilingual AI-contributor rules.
-- Legacy public prompt or skill examples outside `docs/` may still contain localized prose, but they are not public documentation source of truth.
-- Chinese variants of private governance, planning, acceptance, and release evidence materials are maintained outside this repository.
-
-## Naming Rules
-
-- Public filenames use `UPPER_SNAKE_CASE.md`
-- No temporary status words such as `draft`, `latest`, `temp`, or `v2_zh`
-- Versioned release notes may live here, but raw benchmark reports and private
-  acceptance artifacts do not belong in this directory
-- `README.md`, `CHANGELOG.md` (root), and the public entry documents above are the only stable exceptions
-
-## Public Source of Truth
-
-For public-facing documentation, this directory is the source of truth.
-Sensitive maintainer-only governance, release evidence, and private acceptance
-materials stay outside the repository.
+- `docs/` is English-only.
+- The public Chinese landing page is [README_zh.md](../README_zh.md).
+- Private Chinese planning or acceptance materials do not belong in `docs/`.

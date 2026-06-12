@@ -37,10 +37,6 @@ export const TOOL_NAMES = {
     PERFORMANCE_ANALYZE_INSIGHT: 'performance_analyze_insight',
     GIF_RECORDER: 'chrome_gif_recorder',
   },
-  RECORD_REPLAY: {
-    FLOW_RUN: 'record_replay_flow_run',
-    LIST_PUBLISHED: 'record_replay_list_published',
-  },
   /**
    * MKEP context selector.
    * Native-handled. See `app/native-server/src/mcp/choose-context.ts`.

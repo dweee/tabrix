@@ -239,7 +239,7 @@ pnpm run release:check
   files in lockstep: root, `app/native-server`, `app/chrome-extension`,
   `packages/shared`, `packages/wasm-simd`. `release:check` enforces this.
 - Tag format `vX.Y.Z` or `tabrix-vX.Y.Z` (existing convention).
-- This file is now in the canonical `docs/RELEASE_NOTES_v2.5.0.md`
+- This file is now in the canonical `docs/releases/RELEASE_NOTES_v2.5.0.md`
   path required by `release:check`.
 
 ## Known limitations carried into v2.5.0

@@ -71,7 +71,7 @@ function stringifyUnknownError(error: unknown): string {
 }
 
 function isBrowserAutomationTool(name: string): boolean {
-  return name.startsWith('chrome_') || name.startsWith('flow.');
+  return name.startsWith('chrome_');
 }
 
 function isBrowserAutomationContext(context: string): boolean {

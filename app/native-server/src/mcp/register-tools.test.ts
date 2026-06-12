@@ -45,10 +45,7 @@ describe('handleToolCall execution wrapper', () => {
 
   it('tracks a successful tool call as a completed execution session', async () => {
     markBridgeReady();
-    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
-      status: 'success',
-      items: [],
-    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
       status: 'success',
       data: {
@@ -86,10 +83,6 @@ describe('handleToolCall execution wrapper', () => {
       .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
       .mockResolvedValueOnce({
         status: 'success',
-        items: [],
-      } as never)
-      .mockResolvedValueOnce({
-        status: 'success',
         data: {
           content: [{ type: 'text', text: JSON.stringify({ message: 'page read' }) }],
           isError: false,
@@ -123,7 +116,7 @@ describe('handleToolCall execution wrapper', () => {
     expect(payload._tabrix.businessFeedbackGuideVersion).toBeUndefined();
     expect(payload._tabrix.businessFeedbackScoreGuide).toBeUndefined();
     expect(payload._tabrix.traceId).toEqual(expect.any(String));
-    expect((bridgeSpy.mock.calls[1][0] as any).args).toEqual({ tabId: 1 });
+    expect((bridgeSpy.mock.calls[0][0] as any).args).toEqual({ tabId: 1 });
 
     const sessions = sessionManager.listSessions();
     const traces = sessionManager.memoryTraces!.listByTask(sessions[0].taskId);
@@ -136,29 +129,23 @@ describe('handleToolCall execution wrapper', () => {
 
   it('returns the tool result before async Browser Object trace projection runs', async () => {
     markBridgeReady();
-    jest
-      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-      .mockResolvedValueOnce({
-        status: 'success',
-        items: [],
-      } as never)
-      .mockResolvedValueOnce({
-        status: 'success',
-        data: {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                page: { url: 'https://example.test/workspaces/123' },
-                summary: { pageRole: 'workspace' },
-                tabId: 1,
-                pageRegions: [{ regionId: 'main', regionType: 'content' }],
-              }),
-            },
-          ],
-          isError: false,
-        },
-      } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      data: {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              page: { url: 'https://example.test/workspaces/123' },
+              summary: { pageRole: 'workspace' },
+              tabId: 1,
+              pageRegions: [{ regionId: 'main', regionType: 'content' }],
+            }),
+          },
+        ],
+        isError: false,
+      },
+    } as never);
     const traceWriter = sessionManager.memoryTraces;
     if (!traceWriter) throw new Error('MKE trace service is not available in tests');
     const objectProjectionSpy = jest.spyOn(
@@ -188,18 +175,10 @@ describe('handleToolCall execution wrapper', () => {
       .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
       .mockResolvedValueOnce({
         status: 'success',
-        items: [],
-      } as never)
-      .mockResolvedValueOnce({
-        status: 'success',
         data: {
           content: [{ type: 'text', text: JSON.stringify({ message: 'opened' }) }],
           isError: false,
         },
-      } as never)
-      .mockResolvedValueOnce({
-        status: 'success',
-        items: [],
       } as never)
       .mockResolvedValueOnce({
         status: 'success',
@@ -252,10 +231,7 @@ describe('handleToolCall execution wrapper', () => {
 
   it('returns structured error payload when extension returns a non-recoverable error', async () => {
     markBridgeReady();
-    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
-      status: 'success',
-      items: [],
-    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
       status: 'error',
       error: 'tool execution failed',
@@ -274,10 +250,7 @@ describe('handleToolCall execution wrapper', () => {
 
   it('returns structured error payload when tool invocation throws', async () => {
     markBridgeReady();
-    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
-      status: 'success',
-      items: [],
-    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
     jest
       .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
       .mockRejectedValueOnce(new Error('unhandled tool transport failure'));
@@ -346,10 +319,7 @@ describe('handleToolCall execution wrapper', () => {
       highValueObjects: [],
       historyRef: null,
     };
-    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
-      status: 'success',
-      items: [],
-    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
       status: 'success',
       data: {
@@ -387,10 +357,7 @@ describe('handleToolCall execution wrapper', () => {
       },
       artifactRefs: [{ kind: 'dom_snapshot', ref: 'artifact://read_page/tab-2/normal' }],
     };
-    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
-      status: 'success',
-      items: [],
-    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
       status: 'success',
       data: {
@@ -426,10 +393,7 @@ describe('handleToolCall execution wrapper', () => {
       pageContent: 'PRIVATE_PAGE_BODY_SHOULD_NOT_APPEAR',
       Authorization: 'Bearer secret-token',
     };
-    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
-      status: 'success',
-      items: [],
-    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
       status: 'success',
       data: {
@@ -488,10 +452,7 @@ describe('handleToolCall execution wrapper', () => {
       pageContent: 'PRIVATE_PAGE_BODY_SHOULD_NOT_APPEAR',
       Authorization: 'Bearer secret-token',
     };
-    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
-      status: 'success',
-      items: [],
-    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
       status: 'success',
       data: {
@@ -558,10 +519,7 @@ describe('handleToolCall execution wrapper', () => {
       pageContent: 'PRIVATE_PAGE_BODY_SHOULD_NOT_APPEAR',
       Authorization: 'Bearer secret-token',
     };
-    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
-      status: 'success',
-      items: [],
-    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
       status: 'success',
       data: {
@@ -579,10 +537,7 @@ describe('handleToolCall execution wrapper', () => {
 
   it('does not expose retired memory_actions historyRef for chrome_click_element', async () => {
     markBridgeReady();
-    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
-      status: 'success',
-      items: [],
-    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
       status: 'success',
       data: {
@@ -614,10 +569,7 @@ describe('handleToolCall execution wrapper', () => {
 
   it('normalizes legacy text chrome_click_element results as unproven structured outcomes', async () => {
     markBridgeReady();
-    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
-      status: 'success',
-      items: [],
-    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
       status: 'success',
       data: {
@@ -665,10 +617,7 @@ describe('handleToolCall execution wrapper', () => {
 
   it('normalizes legacy text chrome_click_element errors without claiming dispatch success', async () => {
     markBridgeReady();
-    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
-      status: 'success',
-      items: [],
-    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
       status: 'success',
       data: {
@@ -717,10 +666,7 @@ describe('handleToolCall execution wrapper', () => {
 
   it('enriches structured legacy chrome_click_element errors with action evidence', async () => {
     markBridgeReady();
-    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
-      status: 'success',
-      items: [],
-    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
       status: 'success',
       data: {
@@ -795,10 +741,7 @@ describe('handleToolCall execution wrapper', () => {
 
   it('attaches runtime preflight evidence to structured chrome_click_element errors', async () => {
     markBridgeReady();
-    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
-      status: 'success',
-      items: [],
-    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
       status: 'success',
       data: {
@@ -857,10 +800,7 @@ describe('handleToolCall execution wrapper', () => {
 
   it('redacts fill value and omits result_blob for chrome_fill_or_select', async () => {
     markBridgeReady();
-    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
-      status: 'success',
-      items: [],
-    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
       status: 'success',
       data: {
@@ -902,9 +842,7 @@ describe('handleToolCall execution wrapper', () => {
 
   it('blocks active user tab impact actions before the extension call', async () => {
     markBridgeReady();
-    const bridgeSpy = jest
-      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-      .mockResolvedValueOnce({ status: 'success', items: [] } as never);
+    const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
 
     const result = await handleToolCall('chrome_click_element', { ref: 'ref_42' });
 
@@ -920,7 +858,7 @@ describe('handleToolCall execution wrapper', () => {
         targetTabId: null,
       },
     });
-    expect(bridgeSpy).toHaveBeenCalledTimes(1);
+    expect(bridgeSpy).toHaveBeenCalledTimes(0);
     const session = sessionManager.listSessions()[0];
     expect(session.steps[0].status).toBe('failed');
     expect(session.steps[0].errorCode).toBe('non_interference_blocked');
@@ -930,7 +868,6 @@ describe('handleToolCall execution wrapper', () => {
     markBridgeReady();
     const bridgeSpy = jest
       .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
       .mockResolvedValueOnce({
         status: 'success',
         data: {
@@ -938,7 +875,6 @@ describe('handleToolCall execution wrapper', () => {
           isError: false,
         },
       } as never)
-      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
       .mockResolvedValueOnce({
         status: 'success',
         data: {
@@ -971,14 +907,13 @@ describe('handleToolCall execution wrapper', () => {
       reason: 'run_owned_tab',
       targetTabId: 77,
     });
-    expect(bridgeSpy).toHaveBeenCalledTimes(4);
+    expect(bridgeSpy).toHaveBeenCalledTimes(2);
   });
 
   it('does not inherit stale primary-tab ownership for new-tab navigation without explicit task key', async () => {
     markBridgeReady();
     jest
       .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
       .mockResolvedValueOnce({
         status: 'success',
         data: {
@@ -986,7 +921,6 @@ describe('handleToolCall execution wrapper', () => {
           isError: false,
         },
       } as never)
-      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
       .mockResolvedValueOnce({
         status: 'success',
         data: {
@@ -1015,7 +949,6 @@ describe('handleToolCall execution wrapper', () => {
     markBridgeReady();
     jest
       .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
       .mockResolvedValueOnce({
         status: 'success',
         data: {
@@ -1023,7 +956,6 @@ describe('handleToolCall execution wrapper', () => {
           isError: false,
         },
       } as never)
-      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
       .mockResolvedValueOnce({
         status: 'success',
         data: {
@@ -1077,7 +1009,6 @@ describe('handleToolCall execution wrapper', () => {
     markBridgeReady();
     jest
       .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
       .mockResolvedValueOnce({
         status: 'success',
         data: {
@@ -1085,7 +1016,6 @@ describe('handleToolCall execution wrapper', () => {
           isError: false,
         },
       } as never)
-      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
       .mockResolvedValueOnce({
         status: 'success',
         data: {
@@ -1102,7 +1032,6 @@ describe('handleToolCall execution wrapper', () => {
           isError: false,
         },
       } as never)
-      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
       .mockResolvedValueOnce({
         status: 'success',
         data: {
@@ -1137,9 +1066,7 @@ describe('handleToolCall execution wrapper', () => {
 
   it('blocks strict impact actions on explicit tabs not owned by the task', async () => {
     markBridgeReady();
-    const bridgeSpy = jest
-      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-      .mockResolvedValueOnce({ status: 'success', items: [] } as never);
+    const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
 
     const result = await handleToolCall('chrome_keyboard', {
       tabId: 55,
@@ -1156,14 +1083,12 @@ describe('handleToolCall execution wrapper', () => {
       reason: 'non_run_owned_tab',
       targetTabId: 55,
     });
-    expect(bridgeSpy).toHaveBeenCalledTimes(1);
+    expect(bridgeSpy).toHaveBeenCalledTimes(0);
   });
 
   it('returns collaboration_required preflight without calling the extension', async () => {
     markBridgeReady();
-    const bridgeSpy = jest
-      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-      .mockResolvedValueOnce({ status: 'success', items: [] } as never);
+    const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
 
     const result = await handleToolCall('chrome_click_element', {
       ref: 'ref_login',
@@ -1197,16 +1122,13 @@ describe('handleToolCall execution wrapper', () => {
         reason: 'collaboration_requested',
       },
     });
-    expect(bridgeSpy).toHaveBeenCalledTimes(1);
+    expect(bridgeSpy).toHaveBeenCalledTimes(0);
   });
 
   it('allows non-sensitive tools when MCP_DISABLE_SENSITIVE_TOOLS is set', async () => {
     markBridgeReady();
     process.env.MCP_DISABLE_SENSITIVE_TOOLS = 'true';
-    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
-      status: 'success',
-      items: [],
-    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
       status: 'success',
       data: {
@@ -1247,10 +1169,7 @@ describe('handleToolCall execution wrapper', () => {
   it('allows P3 opt-in tools when TABRIX_POLICY_ALLOW_P3=all', async () => {
     markBridgeReady();
     process.env.TABRIX_POLICY_ALLOW_P3 = 'all';
-    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
-      status: 'success',
-      items: [],
-    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
       status: 'success',
       data: {
@@ -1267,10 +1186,7 @@ describe('handleToolCall execution wrapper', () => {
   it('allows a specific P3 tool when listed in TABRIX_POLICY_ALLOW_P3', async () => {
     markBridgeReady();
     process.env.TABRIX_POLICY_ALLOW_P3 = 'chrome_javascript';
-    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
-      status: 'success',
-      items: [],
-    } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
       status: 'success',
       data: {
@@ -1364,9 +1280,10 @@ describe('handleToolCall execution wrapper', () => {
       ctx.noteUrlChange('https://new.example/bar');
       ctx.noteReadPage({ layer: 'L0+L1', source: 'dom_json' });
       ctx.noteReadPage({ layer: 'L0+L1', source: 'dom_json' });
-      const dynamicFlowSpy = jest
-        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never);
+      const dynamicFlowSpy = jest.spyOn(
+        nativeMessagingHostInstance,
+        'sendRequestToExtensionAndWait',
+      );
 
       const result = await handleToolCall('chrome_read_page', {
         tabId: 1,
@@ -1423,10 +1340,8 @@ describe('handleToolCall execution wrapper', () => {
       expect(payload.isCurrentTabActive).toBeNull();
       expect(payload.isCurrentWindowFocused).toBeNull();
       // Critical contract: the bridge `call_tool` round-trip MUST NOT
-      // happen on a budget-blocked read. The dynamic-flow-list call
-      // (mocked above) is the only allowed extension call.
-      expect(dynamicFlowSpy).toHaveBeenCalledTimes(1);
-      expect(dynamicFlowSpy.mock.calls[0]).toBeDefined();
+      // happen on a budget-blocked read.
+      expect(dynamicFlowSpy).toHaveBeenCalledTimes(0);
     });
 
     it('chrome_navigate URL change unblocks a follow-up read in the same task', async () => {
@@ -1444,7 +1359,6 @@ describe('handleToolCall execution wrapper', () => {
       // `noteUrlChange` so the follow-up read is "first on this page".
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: { content: [{ type: 'text', text: 'navigated' }], isError: false },
@@ -1456,7 +1370,6 @@ describe('handleToolCall execution wrapper', () => {
       // Follow-up chrome_read_page — bridge call must go through.
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: { content: [{ type: 'text', text: 'read' }], isError: false },
@@ -1484,7 +1397,6 @@ describe('handleToolCall execution wrapper', () => {
     function mockReadPageRoundTrip(text: string): void {
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: { content: [{ type: 'text', text }], isError: false },
@@ -1821,9 +1733,10 @@ describe('handleToolCall execution wrapper', () => {
         },
       });
 
-      const dynamicFlowSpy = jest
-        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never);
+      const dynamicFlowSpy = jest.spyOn(
+        nativeMessagingHostInstance,
+        'sendRequestToExtensionAndWait',
+      );
       dynamicFlowSpy.mockClear();
       const cached = await handleToolCall('chrome_read_page', {
         tabId: 1,
@@ -1858,7 +1771,7 @@ describe('handleToolCall execution wrapper', () => {
           },
         },
       });
-      expect(dynamicFlowSpy).toHaveBeenCalledTimes(1);
+      expect(dynamicFlowSpy).toHaveBeenCalledTimes(0);
     });
 
     it('blocks impact tools until auth resume gate is freshly verified', async () => {
@@ -1951,7 +1864,7 @@ describe('handleToolCall execution wrapper', () => {
       expect(payload.message).toContain('chrome_read_page');
       expect(payload.message).toContain('forceRefresh=true');
       expect(payload.message).toBe(payload.taskResumeHandoff.message);
-      expect(bridgeSpy).toHaveBeenCalledTimes(1);
+      expect(bridgeSpy).toHaveBeenCalledTimes(0);
     });
 
     it('auto-runs a fresh readback for implicit task context before page interaction', async () => {
@@ -2000,8 +1913,6 @@ describe('handleToolCall execution wrapper', () => {
       const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
       bridgeSpy.mockClear();
       bridgeSpy
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -2084,7 +1995,7 @@ describe('handleToolCall execution wrapper', () => {
           verdict: 'allow',
         },
       });
-      expect(bridgeSpy).toHaveBeenCalledTimes(4);
+      expect(bridgeSpy).toHaveBeenCalledTimes(2);
     });
 
     it('keeps the full browserPageObject in the AI envelope for full-mode chrome_read_page', async () => {
@@ -2186,16 +2097,12 @@ describe('handleToolCall execution wrapper', () => {
       });
       expect(r2.isError).toBeFalsy();
 
-      // Third call: budget exhausted. NO bridge round-trip; only
-      // the dynamic-flow listing is allowed. We `mockClear()` the
+      // Third call: budget exhausted. NO bridge round-trip. We `mockClear()` the
       // shared spy so the post-call delta cleanly reflects this
       // invocation only — `jest.spyOn` reuses the existing spy and
       // would otherwise carry the call counts from r1/r2.
-      const flowSpy = jest
-        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never);
+      const flowSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
       flowSpy.mockClear();
-      flowSpy.mockResolvedValueOnce({ status: 'success', items: [] } as never);
       const r3 = await handleToolCall('chrome_read_page', {
         tabId: 1,
         taskSessionId: 'shared-task',
@@ -2208,9 +2115,7 @@ describe('handleToolCall execution wrapper', () => {
         readPageCount: 2,
         readBudget: 2,
       });
-      // Only the dynamic-flow probe was called for this third
-      // invocation — the bridge `call_tool` request never fired.
-      expect(flowSpy).toHaveBeenCalledTimes(1);
+      expect(flowSpy).toHaveBeenCalledTimes(0);
 
       // External registry must reflect the two real reads exactly.
       const persisted = sessionManager.peekExternalTaskContext('shared-task');
@@ -2250,7 +2155,6 @@ describe('handleToolCall execution wrapper', () => {
       markBridgeReady();
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: { content: [{ type: 'text', text: 'navigated' }], isError: false },
@@ -2417,7 +2321,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -2645,11 +2548,8 @@ describe('handleToolCall execution wrapper', () => {
         toProjectionId: 'projection_cached',
       });
 
-      const flowSpy = jest
-        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never);
+      const flowSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
       flowSpy.mockClear();
-      flowSpy.mockResolvedValueOnce({ status: 'success', items: [] } as never);
       const second = await handleToolCall('chrome_read_page', {
         tabId: 7,
         taskSessionId: 'redundant-delta-task',
@@ -2772,7 +2672,7 @@ describe('handleToolCall execution wrapper', () => {
         taskContextKeySource: 'external_task_key',
         toolName: 'chrome_read_page',
       });
-      expect(flowSpy).toHaveBeenCalledTimes(1);
+      expect(flowSpy).toHaveBeenCalledTimes(0);
       const persisted = sessionManager.listSessions().at(-1);
       expect(persisted?.summary).toBe(
         'AI context: read_refresh_delta; state=ready; next=continue_read; source=cached_page_projection_delta; data=dom_json; reason=cached_projection_reused_for_redundant_read; fallback=none; rejected=none; metadata=1; confidence=0.9; changed=none; reused=viewport; savedChars=3600',
@@ -2807,11 +2707,8 @@ describe('handleToolCall execution wrapper', () => {
         requestedLayer: 'L0+L1+L2',
       });
 
-      const flowSpy = jest
-        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never);
+      const flowSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
       flowSpy.mockClear();
-      flowSpy.mockResolvedValueOnce({ status: 'success', items: [] } as never);
       const second = await handleToolCall('chrome_read_page', {
         tabId: 17,
         taskSessionId: 'redundant-minimized-window-task',
@@ -2862,7 +2759,7 @@ describe('handleToolCall execution wrapper', () => {
       expect(
         payload.aiContextEnvelope.pageObjectSummary.facts.window.currentActiveTabIdClaimBoundary,
       ).toContain('not browser-active-tab proof');
-      expect(flowSpy).toHaveBeenCalledTimes(1);
+      expect(flowSpy).toHaveBeenCalledTimes(0);
     });
 
     it('exposes structured-read gate verdict in chrome_read_page AI-facing output', async () => {
@@ -4313,11 +4210,8 @@ describe('handleToolCall execution wrapper', () => {
       // task-A is now over budget; the gate fires WITHOUT a bridge
       // round-trip even though task-B is healthy. `mockClear` so
       // the post-call assertion reflects this invocation only.
-      const flowSpy = jest
-        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never);
+      const flowSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
       flowSpy.mockClear();
-      flowSpy.mockResolvedValueOnce({ status: 'success', items: [] } as never);
       const ra2 = await handleToolCall('chrome_read_page', {
         tabId: 1,
         taskSessionId: 'task-A',
@@ -4327,7 +4221,7 @@ describe('handleToolCall execution wrapper', () => {
       expect(payload.currentWindowId).toBeUndefined();
       expect(payload.isCurrentTabActive).toBeUndefined();
       expect(payload.isCurrentWindowFocused).toBeUndefined();
-      expect(flowSpy).toHaveBeenCalledTimes(1);
+      expect(flowSpy).toHaveBeenCalledTimes(0);
     });
 
     it('alias precedence: taskSessionId beats taskId beats clientTaskId', async () => {
@@ -4424,7 +4318,6 @@ describe('handleToolCall execution wrapper', () => {
     function mockReadPageRoundTrip(text: string): void {
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: { content: [{ type: 'text', text }], isError: false },
@@ -4449,11 +4342,8 @@ describe('handleToolCall execution wrapper', () => {
       // `read_redundant` and short-circuits — proves the gate
       // received the requested layer (not the buggy default).
       // `mockClear` so the assertion isolates this invocation.
-      const flowSpy = jest
-        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never);
+      const flowSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
       flowSpy.mockClear();
-      flowSpy.mockResolvedValueOnce({ status: 'success', items: [] } as never);
       const r2 = await handleToolCall('chrome_read_page', {
         tabId: 1,
         taskSessionId: 'layer-test',
@@ -4461,7 +4351,7 @@ describe('handleToolCall execution wrapper', () => {
       });
       const payload = JSON.parse(String(r2.content[0].text));
       expect(payload.warning).toBe('read_redundant');
-      expect(flowSpy).toHaveBeenCalledTimes(1);
+      expect(flowSpy).toHaveBeenCalledTimes(0);
     });
 
     it('requestedLayer takes precedence over the legacy `layer` field', async () => {
@@ -4533,7 +4423,6 @@ describe('handleToolCall execution wrapper', () => {
     function mockReadPageRoundTrip(text: string): void {
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: { content: [{ type: 'text', text }], isError: false },
@@ -4543,7 +4432,6 @@ describe('handleToolCall execution wrapper', () => {
     function mockNavigateRoundTrip(text: string, returnedTabId?: number): void {
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -4897,13 +4785,9 @@ describe('handleToolCall execution wrapper', () => {
       expect(auto.readPageCount).toBe(2);
 
       // Third call must short-circuit on read_budget_exceeded WITHOUT
-      // a bridge round-trip. The dynamic-flow probe is the only call
-      // we expect to fire on this third invocation.
-      const flowSpy = jest
-        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never);
+      // a bridge round-trip.
+      const flowSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
       flowSpy.mockClear();
-      flowSpy.mockResolvedValueOnce({ status: 'success', items: [] } as never);
       const r3 = await handleToolCall('chrome_read_page', {
         tabId: 7,
         requestedLayer: 'L0+L1+L2',
@@ -4917,7 +4801,7 @@ describe('handleToolCall execution wrapper', () => {
       expect(payload.currentWindowId).toBeUndefined();
       expect(payload.isCurrentTabActive).toBeUndefined();
       expect(payload.isCurrentWindowFocused).toBeUndefined();
-      expect(flowSpy).toHaveBeenCalledTimes(1);
+      expect(flowSpy).toHaveBeenCalledTimes(0);
     });
 
     it('chrome_navigate on the same tab invalidates redundancy state for the next default-shape read', async () => {
@@ -5016,7 +4900,6 @@ describe('handleToolCall execution wrapper', () => {
       markBridgeReady();
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -5024,7 +4907,6 @@ describe('handleToolCall execution wrapper', () => {
             isError: false,
           },
         } as never)
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -5065,7 +4947,6 @@ describe('handleToolCall execution wrapper', () => {
       markBridgeReady();
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -5082,7 +4963,6 @@ describe('handleToolCall execution wrapper', () => {
             isError: false,
           },
         } as never)
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -5135,7 +5015,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: { content: [{ type: 'text', text: 'paged' }], isError: false },
@@ -5175,7 +5054,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -5255,7 +5133,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -5334,7 +5211,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: { content: [{ type: 'text', text: 'clicked' }], isError: false },
@@ -5359,7 +5235,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -5399,7 +5274,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -5445,7 +5319,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -5484,23 +5357,21 @@ describe('handleToolCall execution wrapper', () => {
 
       const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
       bridgeSpy.mockClear();
-      bridgeSpy
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
-        .mockResolvedValueOnce({
-          status: 'success',
-          data: {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({
-                  success: true,
-                  observedOutcome: 'corrected_click_after_blocked_target',
-                }),
-              },
-            ],
-            isError: false,
-          },
-        } as never);
+      bridgeSpy.mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                observedOutcome: 'corrected_click_after_blocked_target',
+              }),
+            },
+          ],
+          isError: false,
+        },
+      } as never);
       const corrected = await handleToolCall('chrome_click_element', {
         tabId: 1,
         ref: 'ref_search_submit',
@@ -5526,7 +5397,7 @@ describe('handleToolCall execution wrapper', () => {
         reason: 'run_owned_tab',
         targetTabId: 1,
       });
-      expect(bridgeSpy).toHaveBeenCalledTimes(2);
+      expect(bridgeSpy).toHaveBeenCalledTimes(1);
     });
 
     it('fresh read after a search submit candidate carries region-state postcondition evidence into closeout', async () => {
@@ -5549,7 +5420,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -5622,7 +5492,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -5704,7 +5573,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -5796,7 +5664,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -5894,7 +5761,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -5948,7 +5814,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -6040,7 +5905,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -6128,7 +5992,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -6201,7 +6064,6 @@ describe('handleToolCall execution wrapper', () => {
 
       const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
       bridgeSpy.mockClear();
-      bridgeSpy.mockResolvedValueOnce({ status: 'success', items: [] } as never);
       const blocked = await handleToolCall('chrome_click_element', {
         tabId: 1,
         ref: 'ref_after_1',
@@ -6219,7 +6081,7 @@ describe('handleToolCall execution wrapper', () => {
           taskResumeCanContinue: false,
         },
       });
-      expect(bridgeSpy).toHaveBeenCalledTimes(1);
+      expect(bridgeSpy).toHaveBeenCalledTimes(0);
 
       mockReadPageRoundTrip(
         readPagePayloadWithRegions({
@@ -6322,7 +6184,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -6412,7 +6273,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -6484,23 +6344,21 @@ describe('handleToolCall execution wrapper', () => {
 
       const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
       bridgeSpy.mockClear();
-      bridgeSpy
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
-        .mockResolvedValueOnce({
-          status: 'success',
-          data: {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({
-                  success: true,
-                  observedOutcome: 'continued_after_detail_open_postcondition',
-                }),
-              },
-            ],
-            isError: false,
-          },
-        } as never);
+      bridgeSpy.mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                observedOutcome: 'continued_after_detail_open_postcondition',
+              }),
+            },
+          ],
+          isError: false,
+        },
+      } as never);
       const continued = await handleToolCall('chrome_click_element', {
         tabId: 1,
         ref: 'ref_after_detail',
@@ -6513,7 +6371,7 @@ describe('handleToolCall execution wrapper', () => {
         success: true,
         observedOutcome: 'continued_after_detail_open_postcondition',
       });
-      expect(bridgeSpy).toHaveBeenCalledTimes(2);
+      expect(bridgeSpy).toHaveBeenCalledTimes(1);
     });
 
     it('does not resume after a detail click when the target ref was not in the before result rows', async () => {
@@ -6536,7 +6394,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -6620,7 +6477,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -6690,7 +6546,6 @@ describe('handleToolCall execution wrapper', () => {
 
       const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
       bridgeSpy.mockClear();
-      bridgeSpy.mockResolvedValueOnce({ status: 'success', items: [] } as never);
       const blocked = await handleToolCall('chrome_click_element', {
         tabId: 1,
         ref: 'ref_after_weak_detail',
@@ -6709,7 +6564,7 @@ describe('handleToolCall execution wrapper', () => {
           taskResumeCanContinue: false,
         },
       });
-      expect(bridgeSpy).toHaveBeenCalledTimes(1);
+      expect(bridgeSpy).toHaveBeenCalledTimes(0);
     });
 
     it('blocked continuation after a failed search postcondition returns stop handoff guidance', async () => {
@@ -6732,7 +6587,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -6786,7 +6640,6 @@ describe('handleToolCall execution wrapper', () => {
 
       const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
       bridgeSpy.mockClear();
-      bridgeSpy.mockResolvedValueOnce({ status: 'success', items: [] } as never);
       const blocked = await handleToolCall('chrome_click_element', {
         tabId: 1,
         ref: 'ref_next_result',
@@ -6824,7 +6677,7 @@ describe('handleToolCall execution wrapper', () => {
         },
       });
       expect(blockedPayload.message).toBe(blockedPayload.taskResumeHandoff.message);
-      expect(bridgeSpy).toHaveBeenCalledTimes(1);
+      expect(bridgeSpy).toHaveBeenCalledTimes(0);
     });
 
     it('auto-runs a fresh readback for implicit post-action readiness before page interaction', async () => {
@@ -6847,7 +6700,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -6880,8 +6732,6 @@ describe('handleToolCall execution wrapper', () => {
       const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
       bridgeSpy.mockClear();
       bridgeSpy
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -6933,7 +6783,7 @@ describe('handleToolCall execution wrapper', () => {
           verdict: 'allow',
         },
       });
-      expect(bridgeSpy).toHaveBeenCalledTimes(4);
+      expect(bridgeSpy).toHaveBeenCalledTimes(2);
     });
 
     it('fresh postcondition recovery after a blocked impact action unblocks continuation on the same tab', async () => {
@@ -6956,7 +6806,6 @@ describe('handleToolCall execution wrapper', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {
@@ -7010,7 +6859,6 @@ describe('handleToolCall execution wrapper', () => {
 
       const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
       bridgeSpy.mockClear();
-      bridgeSpy.mockResolvedValueOnce({ status: 'success', items: [] } as never);
       const blocked = await handleToolCall('chrome_click_element', {
         tabId: 1,
         ref: 'ref_next_result',
@@ -7028,7 +6876,7 @@ describe('handleToolCall execution wrapper', () => {
           taskResumeCanContinue: false,
         },
       });
-      expect(bridgeSpy).toHaveBeenCalledTimes(1);
+      expect(bridgeSpy).toHaveBeenCalledTimes(0);
 
       mockReadPageRoundTrip(
         readPagePayloadWithRegions({
@@ -7067,23 +6915,21 @@ describe('handleToolCall execution wrapper', () => {
       });
 
       bridgeSpy.mockClear();
-      bridgeSpy
-        .mockResolvedValueOnce({ status: 'success', items: [] } as never)
-        .mockResolvedValueOnce({
-          status: 'success',
-          data: {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({
-                  success: true,
-                  observedOutcome: 'continued_after_postcondition_recovery',
-                }),
-              },
-            ],
-            isError: false,
-          },
-        } as never);
+      bridgeSpy.mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                observedOutcome: 'continued_after_postcondition_recovery',
+              }),
+            },
+          ],
+          isError: false,
+        },
+      } as never);
       const continued = await handleToolCall('chrome_click_element', {
         tabId: 1,
         ref: 'ref_after_1',
@@ -7096,7 +6942,7 @@ describe('handleToolCall execution wrapper', () => {
         success: true,
         observedOutcome: 'continued_after_postcondition_recovery',
       });
-      expect(bridgeSpy).toHaveBeenCalledTimes(2);
+      expect(bridgeSpy).toHaveBeenCalledTimes(1);
     });
   });
 });

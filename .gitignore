@@ -66,11 +66,21 @@ releases/chrome-extension/latest/*.zip
 
 # Scratch / local-only working directories (plans, evidence, mcp logs)
 .tmp/
+/.acp-sessions/
+/.agents/
+/.gstack-codex-txn/
 .private-artifacts/
 .private-tests/
 .playwright-mcp/
 .qoder/
+/code-reviews/
+/prompt/
+/releases/
 
 # Local codex-cli prompt scratch (not part of repo contract)
 .codex-prompts/
 .commit-msg-tmp.txt
+
+# Local verification scratch logs
+typecheck-click-diff.log
+vitest-click-diff.log

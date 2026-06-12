@@ -5,14 +5,13 @@ emit them. It is a troubleshooting aid, not a release-readiness report.
 
 ## Naming Families
 
-| Family           | Source area                                  | Typical use                                                 |
-| ---------------- | -------------------------------------------- | ----------------------------------------------------------- |
-| `CONN_*`         | Chrome extension and Native Messaging bridge | Extension-to-native connection failures                     |
-| `MCP_*`          | Native server MCP routes                     | Session, request, and server-side MCP failures              |
-| `TOOL_*`         | Browser tool execution                       | Tool dispatch, validation, and browser execution failures   |
-| `HTTP_*`         | Native server HTTP layer                     | HTTP status and route-level failures                        |
-| `CLI_*`          | CLI scripts                                  | `doctor`, `smoke`, `register`, and release-gate diagnostics |
-| `dynamic_flow_*` | Legacy dynamic-flow proxy                    | Compatibility errors for old flow proxy paths               |
+| Family   | Source area                                  | Typical use                                                 |
+| -------- | -------------------------------------------- | ----------------------------------------------------------- |
+| `CONN_*` | Chrome extension and Native Messaging bridge | Extension-to-native connection failures                     |
+| `MCP_*`  | Native server MCP routes                     | Session, request, and server-side MCP failures              |
+| `TOOL_*` | Browser tool execution                       | Tool dispatch, validation, and browser execution failures   |
+| `HTTP_*` | Native server HTTP layer                     | HTTP status and route-level failures                        |
+| `CLI_*`  | CLI scripts                                  | `doctor`, `smoke`, `register`, and release-gate diagnostics |
 
 ## Connection Errors
 
@@ -68,13 +67,11 @@ Source files:
 
 ### MCP Tool Result `errorCode`
 
-| `errorCode`                     | Meaning                                                                              | When it appears                                                          |
-| ------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
-| `tool_not_available`            | The requested tool is not registered or not available in the current policy surface. | Tool lookup failed before browser dispatch.                              |
-| `tool_call_error`               | A tool returned an MCP error result and the native server normalized it.             | Browser-side tool execution failed.                                      |
-| `tool_call_exception`           | A tool call raised an uncaught exception.                                            | Dispatch or execution threw before a normal error result was produced.   |
-| `dynamic_flow_error`            | A legacy dynamic-flow proxy call failed.                                             | The compatibility proxy could resolve a flow but the proxied run failed. |
-| `dynamic_flow_resolution_error` | A legacy dynamic-flow proxy could not resolve a requested flow.                      | The proxy could not map a `flow.*` tool name to a published flow.        |
+| `errorCode`           | Meaning                                                                              | When it appears                                                        |
+| --------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| `tool_not_available`  | The requested tool is not registered or not available in the current policy surface. | Tool lookup failed before browser dispatch.                            |
+| `tool_call_error`     | A tool returned an MCP error result and the native server normalized it.             | Browser-side tool execution failed.                                    |
+| `tool_call_exception` | A tool call raised an uncaught exception.                                            | Dispatch or execution threw before a normal error result was produced. |
 
 ### Extension Tool Constants
 

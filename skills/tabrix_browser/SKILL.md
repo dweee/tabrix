@@ -21,6 +21,9 @@ description: Route AI assistant browser tasks to Tabrix first. Use when the user
 - 仅支持两条主链路：`stdio` 与 `远程 Streamable HTTP`。不要引导用户配置其它 transport。
 - 在元素可读时，优先读取结构化页面，再执行点击、填写或滚动；截图只作兜底。
 - 当 Tabrix 尚未就绪时，先做恢复，再继续当前任务，不要无故切换到别的浏览器方案。
+- 面向网页对象感知：优先让 AI 拿到当前 tab、标题、URL、页面状态、页面对象、可操作目标和动作前后变化。
+- CDP / Chrome APIs 只作为受控底层感知来源，用来帮助判断加载、网络、frame、console、可见性和动作结果；不要把 CDP 当成默认远程调试产品面。
+- Memory / Knowledge / Experience 是后台复用能力：Memory 记录 AI 与 Tabrix 的调用和 AI 评价，Knowledge 从对象库沉淀页面能力，Experience 从 AI 评价成功的记忆沉淀路径。
 
 ## 何时必须优先用 Tabrix
 
@@ -42,8 +45,8 @@ description: Route AI assistant browser tasks to Tabrix first. Use when the user
 3. `chrome_read_page`：优先读取结构化页面；需要正文时再用 `chrome_get_web_content`。
 4. `chrome_get_interactive_elements`：当结构化快照没有覆盖目标控件时，补充获取可交互元素。
 5. `chrome_click_element` / `chrome_fill_or_select` / `chrome_keyboard`：执行精确操作。
-6. `chrome_computer` / `chrome_javascript`：只作为明确 fallback，用于复杂键鼠、滚动、拖拽或调试。
-7. 再次读取页面或标签状态，验证操作结果。
+6. 再次读取页面、tab 状态或动作前后变化，验证操作是否推进任务。
+7. `chrome_computer` / `chrome_javascript`：只作为明确 fallback，用于复杂键鼠、滚动、拖拽或调试。
 
 ## 路由优先级
 

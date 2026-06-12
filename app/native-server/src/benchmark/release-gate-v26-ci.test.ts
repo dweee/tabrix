@@ -49,7 +49,7 @@ function scaffoldFixture(root: string, version: string): void {
 }
 
 function writeReleaseNotes(root: string, text: string): void {
-  const notesPath = path.join(root, 'docs', `RELEASE_NOTES_v${FIXTURE_VERSION}.md`);
+  const notesPath = path.join(root, 'docs', 'releases', `RELEASE_NOTES_v${FIXTURE_VERSION}.md`);
   fs.mkdirSync(path.dirname(notesPath), { recursive: true });
   fs.writeFileSync(notesPath, text, 'utf8');
 }
@@ -58,11 +58,10 @@ function releaseNotesBody(): string {
   return [
     '# Tabrix v2.6.0 Release Notes',
     '',
-    'Gate B strict PASS.',
+    '## Validation Summary',
     '',
-    'Endpoint source lineage includes observed, seed_adapter, manual_seed, and unknown.',
-    '',
-    'Broader arbitrary-site observed-endpoint reuse remains v2.7 scope.',
+    'This release was checked with public deterministic tests and maintainer-held real-browser scenarios.',
+    'Raw browser artifacts and private benchmark JSON are not published.',
     '',
   ].join('\n');
 }
@@ -105,8 +104,6 @@ describe('release-check v2.6 GitHub Actions fresh checkout', () => {
     const result = runReleaseCheck({ GITHUB_ACTIONS: 'true' });
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('release notes still contain draft/TBD/do-not-ship language');
-    expect(result.stderr).toContain(
-      'release notes must include public-safe Gate B strict PASS summary',
-    );
+    expect(result.stderr).toContain('release notes must include a public validation summary');
   });
 });

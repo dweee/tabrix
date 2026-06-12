@@ -93,8 +93,6 @@ import {
   stripTabrixToolMetadata,
   withTabrixMetadataSchema,
 } from './tabrix-metadata-envelope';
-import { listDynamicFlowTools } from './dynamic-flow-tools';
-import { proxyDynamicFlowTool } from './dynamic-flow-proxy';
 import {
   recordPrimaryTabCleanupOutcome,
   recordPrimaryTabNavigationOutcome,
@@ -178,7 +176,7 @@ interface CloseTabsBrowserHygieneEvidence {
 }
 
 async function invokeExtensionCommand(
-  action: 'call_tool' | 'list_published_flows',
+  action: 'call_tool',
   payload: any,
   timeoutMs: number,
 ): Promise<any> {
@@ -187,17 +185,9 @@ async function invokeExtensionCommand(
     return await bridgeCommandChannel.sendCommand(action, payload, timeoutMs);
   }
 
-  if (action === 'call_tool') {
-    return await nativeMessagingHostInstance.sendRequestToExtensionAndWait(
-      payload,
-      NativeMessageType.CALL_TOOL,
-      timeoutMs,
-    );
-  }
-
   return await nativeMessagingHostInstance.sendRequestToExtensionAndWait(
-    {},
-    'rr_list_published_flows',
+    payload,
+    NativeMessageType.CALL_TOOL,
     timeoutMs,
   );
 }
@@ -205,8 +195,7 @@ async function invokeExtensionCommand(
 export const setupTools = (server: McpServer) => {
   // List tools handler
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const dynamicTools = await listDynamicFlowTools(invokeExtensionCommand);
-    const byEnv = filterToolsByEnvironment([...TOOL_SCHEMAS, ...dynamicTools]);
+    const byEnv = filterToolsByEnvironment(TOOL_SCHEMAS);
     const byPolicy = filterToolsByPolicy(byEnv);
     return {
       tools: byPolicy.map(withTabrixMetadataSchema),
@@ -226,13 +215,13 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
   args = toolArgs;
   const taskIntent = tabrixMetadata.intentTitle ?? `Run MCP tool ${name}`;
   const task = sessionManager.createTask({
-    taskType: name.startsWith('flow.') ? 'flow-call' : 'tool-call',
+    taskType: 'tool-call',
     title: tabrixMetadata.intentTitle
       ? `Execute ${name}: ${tabrixMetadata.intentTitle}`
       : `Execute ${name}`,
     intent: taskIntent,
     origin: 'mcp',
-    labels: ['mcp', name.startsWith('flow.') ? 'flow' : 'tool'],
+    labels: ['mcp', 'tool'],
   });
   const session = sessionManager.startSession({
     taskId: task.taskId,
@@ -242,7 +231,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
   const step = sessionManager.startStep({
     sessionId: session.sessionId,
     toolName: name,
-    stepType: name.startsWith('flow.') ? 'flow_call' : 'tool_call',
+    stepType: 'tool_call',
     inputSummary: JSON.stringify(args ?? {}),
   });
   const applyPreviousBusinessFeedback = (): void => {
@@ -322,8 +311,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
 
   try {
     applyPreviousBusinessFeedback();
-    const dynamicTools = await listDynamicFlowTools(invokeExtensionCommand);
-    const allowedTools = filterToolsByEnvironment([...TOOL_SCHEMAS, ...dynamicTools]);
+    const allowedTools = filterToolsByEnvironment(TOOL_SCHEMAS);
 
     if (!isToolAllowed(name, allowedTools)) {
       const result = createErrorResult(
@@ -423,16 +411,6 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       return nativeResult;
     }
 
-    // If calling a dynamic flow tool (name starts with flow.), proxy to common flow-run tool
-    if (name && name.startsWith('flow.')) {
-      return await proxyDynamicFlowTool({
-        name,
-        args,
-        sessionId: session.sessionId,
-        stepId: step.stepId,
-        invokeExtensionCommand,
-      });
-    }
     // Primary Tab Controller hook. When
     // `TABRIX_PRIMARY_TAB_ENFORCE=true`, inject `tabId: primaryTabId`
     // into `chrome_navigate` args before forwarding to the extension so

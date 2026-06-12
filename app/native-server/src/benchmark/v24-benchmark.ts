@@ -27,7 +27,7 @@
  * This transformer owns step (3) of the maintainer loop:
  *
  *   1. Real-browser scenarios listed in
- *      `docs/RELEASE_NOTES_v2.4.0_DRAFT.md` §"Maintainer command list".
+ *      `docs/releases/RELEASE_NOTES_V2_4_DRAFT.md` §"Maintainer command list".
  *   2. The runner appends one NDJSON line per tool invocation +
  *      one per scenario + one per pair to the run file.
  *   3. `pnpm run benchmark:v24 -- --input <file>` calls

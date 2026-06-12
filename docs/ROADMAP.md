@@ -31,13 +31,13 @@ It is the combination of:
 - MCP-native access for AI assistants
 - local-first deployment with optional remote access
 - diagnostics and recovery for day-to-day operation
-- Memory and Knowledge records that help assistants choose smaller, safer read paths instead of defaulting to full-page context
+- object-aware page reading, operation memory, knowledge records, and reviewed experience records that help assistants choose smaller, safer paths instead of defaulting to full-page context
 
 This is the path most likely to make Tabrix uniquely useful for Codex, Claude Desktop, Cursor, Cline, and similar MCP-connected assistants.
 
 ## Now
 
-Current near-term priorities and recently delivered capabilities:
+Current public capabilities and near-term priorities:
 
 **Transport & diagnostics (ongoing):**
 
@@ -46,36 +46,38 @@ Current near-term priorities and recently delivered capabilities:
 - reduce first-success friction for new users and contributors
 - browser auto-launch and recovery when an assistant calls Tabrix and Chrome is not ready
 
-**Page reading & AI-facing context (delivered v2.7):**
+**Structured page reading and browser context:**
 
-- structured L0/L1/L2 layered page reading with task protocol and complexity-aware source routing
-- AI-facing task state verdicts (`BrowserTaskStateVerdict`) and data-source routing evidence (`BrowserDataSourceDecisionEvidence`)
-- browser page projection deltas (`BrowserPageProjectionDelta`) for post-action change detection and token savings
+- structured layered page reading with compact outputs, richer detail on demand, and stable target references for follow-up actions
+- candidate actions that help assistants choose clickable, fillable, and inspectable page targets with less guessing
+- browser page summaries and post-action deltas that reduce repeated full-page reads when the cached context is still reliable
 - Markdown / document reading surface for long-form content, help pages, and README files
-- browser-observed API response sampling with privacy-safe JSON row summarization
-- compact endpoint provenance with fallback DOM reading when API paths are unsafe or uncertain
+- browser-observed source summaries with privacy-safe row or shape summarization
+- compact provenance with fallback page reading when learned sources are unsafe, stale, or uncertain
 
-**Policy & safety (delivered v2.7):**
+**Policy, safety, and operational records:**
 
-- MKEP Policy risk-tier gating for every P3-classified tool, with an explicit opt-in flow exposed via MCP
+- risk-tier gating for high-risk tools, with explicit operator opt-in where required
+- operation memory records that can support explainability and future reviewed experience mining
+- object and knowledge records that summarize page/source capabilities without becoming user-data caches
 
-In public terms: Tabrix now provides structured, layered page reading with built-in evidence about data-source choices, plus safe API response sampling when endpoints are observed and classified. The Policy gating surface is complete.
+In public terms: Tabrix provides real-Chrome MCP execution, structured page reading, candidate action targeting, operational memory, and safe knowledge-assisted compact reads. These are public capabilities with explicit privacy and fallback boundaries.
 
 ## Next
 
 Once the current page-reading and evidence surface stabilizes, the next major product upgrades are:
 
-- MKEP Memory-backed run history and operation-log explainability (Session / Task / Step viewers in the sidepanel)
-- MKEP Knowledge expansion beyond the GitHub seed (URL catalogue, menu / region / endpoint knowledge for additional sites)
-- extend browser-observed endpoint classification to more site families, with seed adapters for high-value public sites
+- object-aware page understanding: page regions, forms, lists, cards, dialogs, menus, tables, and safe action targets
+- controlled browser sensing using Chrome APIs plus bounded CDP diagnostics where it improves page-state, network, frame, console, visual, or post-action understanding
+- MKEP Memory-backed AI-to-Tabrix interaction history and AI feedback readiness
+- MKEP Knowledge expansion beyond seed data into privacy-safe page/source capability summaries
+- Experience design for reviewed, reusable operation paths derived from AI-approved successful traces
 - stronger real-browser MCP E2E coverage and fixture-based regression testing
 - better locator stability through fingerprinting, fallback chains, and more deterministic targeting
-- internal read-page module refactoring to reduce complexity and extract site-specific adapters from neutral core logic
-- Experience layer design: define the contract between Knowledge-recorded paths and Experience-reusable recipes
 
 These upgrades matter because they improve success rate, reduce token cost, and make browser actions more predictable.
 
-Important boundary: public roadmap items about endpoint knowledge mean storing endpoint capability, provenance, and shape summaries. They do not mean storing API response bodies, cookies, Authorization values, raw request bodies, or user data caches.
+Important boundary: public roadmap items about objects, knowledge, and experience mean storing compact operational summaries, provenance, shape information, and reviewed reusable patterns. They do not mean storing API response bodies, cookies, Authorization values, raw request bodies, full page dumps, or user data caches.
 
 ## Later
 
@@ -84,13 +86,14 @@ Longer-term public directions:
 - MKEP Experience reuse: per-site reusable recipes that let repeated tasks skip redundant page reads
 - Memory-to-Experience extraction from AI-approved successful traces, with conservative replay checks before reuse
 - community sharing / import / export of Experience packs
-- replay artifacts for failed flows and nightly regression diagnosis
+- failure diagnosis artifacts for regression and support
 - safer team collaboration and multi-operator browser workflows
 - richer higher-level automation layers built on top of the stable MCP execution path
 
 These directions are strategically important, but they should not outrun the current reliability foundation.
 
-Detailed sprint plans and owner-lane briefs are maintained outside the public repository.
+Detailed sprint plans and maintainer-private briefs are maintained outside the
+public repository.
 
 ## What We Will Not Prioritize First
 
@@ -118,7 +121,7 @@ High-value contribution areas right now:
 - first-success onboarding and install quality
 - structured browser reading and extraction
 - endpoint provenance, redaction, and safe fallback behavior
-- Memory-backed diagnostics and operation-log explainability
+- Memory-backed diagnostics and AI-to-Tabrix interaction explainability
 - fixture sites, smoke coverage, and regression evidence
 - tool schema clarity and client integration quality
 

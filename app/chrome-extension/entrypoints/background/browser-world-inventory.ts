@@ -588,9 +588,16 @@ let lastBaselineResyncSucceeded: boolean | null = null;
 let lastBaselineReadinessReason = 'BrowserWorld baseline readiness has not been checked yet.';
 let lastBaselineNextRequiredCheck = 'get_windows_and_tabs';
 let aiTabOwnershipStorageLoaded = false;
+let lastAiOperationClockMs = 0;
 
 function nowMs(): number {
   return Date.now();
+}
+
+function nextAiOperationMs(): number {
+  const current = nowMs();
+  lastAiOperationClockMs = Math.max(current, lastAiOperationClockMs + 1);
+  return lastAiOperationClockMs;
 }
 
 function getAiTabOwnershipStorageAreas(): BrowserWorldAiTabOwnershipStorageArea[] {
@@ -1759,7 +1766,7 @@ export function initBrowserWorldInventory(): void {
 
 export function markBrowserWorldTabAiCreated(tabId: number | null | undefined): void {
   if (typeof tabId !== 'number' || tabId < 0) return;
-  const markedAtMs = nowMs();
+  const markedAtMs = nextAiOperationMs();
   rememberPersistedAiTabOwnership(tabId, {
     markedAtMs,
     reason: 'marked_by_tabrix_navigation_result',
@@ -1818,7 +1825,7 @@ export function markBrowserWorldTabAiOperated(
     ? `marked_by_tabrix_tool_execution:${safeOperation}:${safeEvidenceLabel}`
     : `marked_by_tabrix_tool_execution:${safeOperation}`;
   const confidence = readConfidence(options.confidence) ?? 0.95;
-  const operatedAtMs = nowMs();
+  const operatedAtMs = nextAiOperationMs();
   const previous = tabsById.get(tabId);
   if (previous?.openedBy === 'ai' || persistedAiTabOwnershipById.has(tabId)) {
     rememberPersistedAiTabOwnership(tabId, {
@@ -2181,4 +2188,5 @@ export function resetBrowserWorldInventoryForTests(): void {
   lastBaselineReadinessReason = 'BrowserWorld baseline readiness has not been checked yet.';
   lastBaselineNextRequiredCheck = 'get_windows_and_tabs';
   aiTabOwnershipStorageLoaded = false;
+  lastAiOperationClockMs = 0;
 }

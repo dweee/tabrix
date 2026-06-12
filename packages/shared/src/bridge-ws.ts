@@ -6,7 +6,7 @@ import type {
   TabWindowContextEventEnvelope,
 } from './browser-fact';
 
-export type BridgeCommandAction = 'call_tool' | 'list_published_flows';
+export type BridgeCommandAction = 'call_tool';
 
 export interface BridgeHelloMessage {
   type: 'hello';

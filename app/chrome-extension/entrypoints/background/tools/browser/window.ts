@@ -7,28 +7,67 @@ import {
 } from '../../browser-world-inventory';
 
 const COMPACT_TABS_PER_WINDOW_LIMIT = 12;
-const COMPACT_OBJECT_ID_LIMIT = 12;
+const COMPACT_ID_LIMIT = 12;
 
-type StructuredTabForWindowSummary = {
-  tabId: number;
-  title: string;
-  url: string;
-  active: boolean;
-  status: string | null;
-  openedBy: string;
-  canTabrixOperate: boolean | null;
-  operabilityReason: string;
-  cleanupEligibility: string;
-  cleanupEligibilityReason: string;
-};
+type PageState = 'foreground' | 'running' | 'loading' | 'closed' | 'restricted';
 
 type WindowToolParams = {
   includeDiagnostics?: boolean;
 };
 
-function selectCompactTabsForWindow(
-  tabs: StructuredTabForWindowSummary[],
-): StructuredTabForWindowSummary[] {
+type TabSummary = {
+  tabId: number;
+  windowId: number | null;
+  title: string;
+  url: string;
+  active: boolean | null;
+  pageState: PageState;
+  pageStateLabel: string;
+  loadState: string | null;
+  canTabrixOperate: boolean | null;
+  operabilityReason: string;
+};
+
+function toPageState(tab: BrowserWorldTabObject): PageState {
+  if (tab.aiOperationState === 'closed' || tab.closedAtMs !== null) return 'closed';
+  if (tab.canTabrixOperate === false) return 'restricted';
+  if (tab.active === true) return 'foreground';
+  if (tab.status === 'loading') return 'loading';
+  return 'running';
+}
+
+function toPageStateLabel(state: PageState): string {
+  switch (state) {
+    case 'foreground':
+      return '前台页';
+    case 'running':
+      return '运行中';
+    case 'loading':
+      return '加载中';
+    case 'closed':
+      return '已关闭';
+    case 'restricted':
+      return '受限页';
+  }
+}
+
+function toTabSummary(tab: BrowserWorldTabObject): TabSummary {
+  const pageState = toPageState(tab);
+  return {
+    tabId: tab.tabId,
+    windowId: tab.windowId,
+    title: tab.title || '',
+    url: tab.url || '',
+    active: tab.active,
+    pageState,
+    pageStateLabel: toPageStateLabel(pageState),
+    loadState: tab.status,
+    canTabrixOperate: tab.canTabrixOperate,
+    operabilityReason: tab.operabilityReason,
+  };
+}
+
+function compactTabs(tabs: TabSummary[]): TabSummary[] {
   if (tabs.length <= COMPACT_TABS_PER_WINDOW_LIMIT) return tabs;
   const selected = tabs.slice(0, COMPACT_TABS_PER_WINDOW_LIMIT);
   const activeTab = tabs.find((tab) => tab.active === true);
@@ -38,636 +77,95 @@ function selectCompactTabsForWindow(
   return selected;
 }
 
-function buildCompactIdSet(ids: number[]) {
+function compactIds(ids: number[]) {
   return {
-    ids: ids.slice(0, COMPACT_OBJECT_ID_LIMIT),
-    omittedCount: Math.max(0, ids.length - COMPACT_OBJECT_ID_LIMIT),
+    ids: ids.slice(0, COMPACT_ID_LIMIT),
+    omittedCount: Math.max(0, ids.length - COMPACT_ID_LIMIT),
   };
 }
 
-function buildCompactTabObject(tab: BrowserWorldTabObject | null, role: string) {
-  if (!tab) {
-    return {
-      objectKind: 'BrowserTabObject',
-      role,
-      tabId: null,
-      windowId: null,
-      title: null,
-      url: null,
-      active: null,
-      status: null,
-      openedBy: null,
-      openedBySource: null,
-      openedByConfidence: null,
-      openedByReason: null,
-      aiOperationState: null,
-      lastAiOperation: null,
-      lastAiOperationConfidence: null,
-      lastAiOperationReason: null,
-      canTabrixOperate: null,
-      operabilityReason: 'tab_not_observed',
-      cleanupEligibility: 'unknown',
-      cleanupEligibilityReason: 'tab_not_observed',
-    };
-  }
-  return {
-    objectKind: tab.objectKind,
-    role,
-    tabId: tab.tabId,
-    windowId: tab.windowId,
-    title: tab.title,
-    url: tab.url,
-    active: tab.active,
-    status: tab.status,
-    openedBy: tab.openedBy,
-    openedBySource: tab.openedBySource,
-    openedByConfidence: tab.openedByConfidence,
-    openedByReason: tab.openedByReason,
-    aiOperationState: tab.aiOperationState,
-    lastAiOperation: tab.lastAiOperation,
-    lastAiOperationConfidence: tab.lastAiOperationConfidence,
-    lastAiOperationReason: tab.lastAiOperationReason,
-    canTabrixOperate: tab.canTabrixOperate,
-    operabilityReason: tab.operabilityReason,
-    cleanupEligibility: tab.cleanupEligibility,
-    cleanupEligibilityReason: tab.cleanupEligibilityReason,
-  };
-}
-
-function buildAiRoutingBrief(args: {
-  browserActiveTabId: number | null;
-  latestAiOperatedTabId: number | null;
-  latestAiOperation: string | null;
-  relationToBrowserActiveTab: string;
-  canContinueOnLatestAiOperatedTab: boolean | null;
-  activeTabCanOperate: boolean | null;
-}) {
-  const activeTabText = args.browserActiveTabId ?? 'unknown';
-  const latestAiTabText = args.latestAiOperatedTabId ?? 'none';
-  const operationText = args.latestAiOperation ?? 'none';
-  const activeOperability =
-    args.activeTabCanOperate === true
-      ? 'operable'
-      : args.activeTabCanOperate === false
-        ? 'not_operable'
-        : 'operability_unknown';
-
-  if (args.relationToBrowserActiveTab === 'no_ai_operation_observed') {
-    return {
-      summary: `AI routing brief: browser-active tab=${activeTabText}, activeTab=${activeOperability}, latestAiOperatedTab=none; no prior AI tab operation is known.`,
-      recommendedNextCheck:
-        'Read or select the intended target before assuming the active page is the AI operation target.',
-      canContinueOnLatestAiOperatedTab: null,
-      claimBoundary:
-        'Browser routing brief uses tab/window lifecycle state only; it does not prove page content, task success, or action postconditions.',
-    };
-  }
-
-  if (args.relationToBrowserActiveTab === 'same_as_browser_active') {
-    return {
-      summary: `AI routing brief: latest AI-operated tab=${latestAiTabText} is also browser-active; operation=${operationText}; activeTab=${activeOperability}.`,
-      recommendedNextCheck:
-        args.canContinueOnLatestAiOperatedTab === true
-          ? 'Continue only after the next page-level read/postcondition check still passes.'
-          : 'Refresh the target tab state before continuing.',
-      canContinueOnLatestAiOperatedTab: args.canContinueOnLatestAiOperatedTab,
-      claimBoundary:
-        'Browser routing brief proves object routing only; page action completion needs separate evidence.',
-    };
-  }
-
-  if (args.relationToBrowserActiveTab === 'latest_ai_operated_background_tab') {
-    return {
-      summary: `AI routing brief: latest AI-operated tab=${latestAiTabText} is background while browser-active tab=${activeTabText}; operation=${operationText}.`,
-      recommendedNextCheck:
-        'Reselect or reread the latest AI-operated tab before continuing the task.',
-      canContinueOnLatestAiOperatedTab: false,
-      claimBoundary:
-        'Browser routing brief proves the operation target is not the browser-active tab; it does not prove page content or task result.',
-    };
-  }
-
-  if (args.relationToBrowserActiveTab === 'browser_active_not_latest_ai_operated') {
-    return {
-      summary: `AI routing brief: browser-active tab=${activeTabText} differs from latest AI-operated tab=${latestAiTabText}; operation=${operationText}.`,
-      recommendedNextCheck:
-        'Refresh routing and explicitly choose the intended tab before taking the next action.',
-      canContinueOnLatestAiOperatedTab: false,
-      claimBoundary:
-        'Browser routing brief identifies object mismatch only; it does not choose the task target.',
-    };
-  }
-
-  return {
-    summary: `AI routing brief: browser-active tab=${activeTabText}, latestAiOperatedTab=${latestAiTabText}, relation=${args.relationToBrowserActiveTab}; operation=${operationText}.`,
-    recommendedNextCheck: 'Refresh browser object routing before continuing.',
-    canContinueOnLatestAiOperatedTab: null,
-    claimBoundary:
-      'Browser routing brief is uncertain and must not be treated as task success evidence.',
-  };
-}
-
-function buildOperationTargetBrief(args: {
-  browserActiveTab: BrowserWorldTabObject | null;
-  latestAiOperatedTab: BrowserWorldTabObject | null;
-  relationToBrowserActiveTab: string;
-  canContinueOnLatestAiOperatedTab: boolean | null;
-}) {
-  const activeTabId = args.browserActiveTab?.tabId ?? null;
-  const latestAiTabId = args.latestAiOperatedTab?.tabId ?? null;
-
-  if (args.relationToBrowserActiveTab === 'no_ai_operation_observed') {
-    return {
-      targetTabId: activeTabId,
-      targetWindowId: args.browserActiveTab?.windowId ?? null,
-      targetRole: 'browser_active_tab_candidate',
-      targetBasis: 'no_ai_operated_tab_observed',
-      targetCanTabrixOperate: args.browserActiveTab?.canTabrixOperate ?? null,
-      targetOperabilityReason:
-        args.browserActiveTab?.operabilityReason ?? 'active_tab_not_observed',
-      browserActiveTabId: activeTabId,
-      latestAiOperatedTabId: null,
-      relationToBrowserActiveTab: args.relationToBrowserActiveTab,
-      shouldReselectBeforeAction: false,
-      nextRequiredCheck: 'read_or_select_intended_target',
-      summary:
-        activeTabId === null
-          ? 'Operation target brief: no AI-operated tab is known and no browser-active tab is observed; select a target before acting.'
-          : `Operation target brief: no AI-operated tab is known; browser-active tab ${activeTabId} is only a candidate target until it is read or explicitly selected.`,
-      claimBoundary:
-        'Target brief uses browser object routing only; it does not prove page content, user intent, or task success.',
-    };
-  }
-
-  if (args.relationToBrowserActiveTab === 'same_as_browser_active') {
-    return {
-      targetTabId: latestAiTabId,
-      targetWindowId: args.latestAiOperatedTab?.windowId ?? null,
-      targetRole: 'latest_ai_operated_active_tab',
-      targetBasis: 'latest_ai_operated_tab_matches_browser_active_tab',
-      targetCanTabrixOperate: args.latestAiOperatedTab?.canTabrixOperate ?? null,
-      targetOperabilityReason:
-        args.latestAiOperatedTab?.operabilityReason ?? 'latest_ai_operated_tab_not_observed',
-      browserActiveTabId: activeTabId,
-      latestAiOperatedTabId: latestAiTabId,
-      relationToBrowserActiveTab: args.relationToBrowserActiveTab,
-      shouldReselectBeforeAction: false,
-      nextRequiredCheck:
-        args.canContinueOnLatestAiOperatedTab === true
-          ? 'page_level_read_or_postcondition_check'
-          : 'prove_foreground_or_refresh_browser_snapshot',
-      summary: `Operation target brief: latest AI-operated tab ${latestAiTabId ?? 'unknown'} is also browser-active; continue only after page-level evidence is refreshed.`,
-      claimBoundary:
-        'Target brief proves routing alignment only; page action completion still needs read/postcondition evidence.',
-    };
-  }
-
-  if (args.relationToBrowserActiveTab === 'latest_ai_operated_background_tab') {
-    return {
-      targetTabId: latestAiTabId,
-      targetWindowId: args.latestAiOperatedTab?.windowId ?? null,
-      targetRole: 'latest_ai_operated_background_tab',
-      targetBasis: 'latest_ai_operated_tab_differs_from_browser_active_tab',
-      targetCanTabrixOperate: args.latestAiOperatedTab?.canTabrixOperate ?? null,
-      targetOperabilityReason:
-        args.latestAiOperatedTab?.operabilityReason ?? 'latest_ai_operated_tab_not_observed',
-      browserActiveTabId: activeTabId,
-      latestAiOperatedTabId: latestAiTabId,
-      relationToBrowserActiveTab: args.relationToBrowserActiveTab,
-      shouldReselectBeforeAction: true,
-      nextRequiredCheck: 'reselect_or_reread_latest_ai_operated_tab',
-      summary: `Operation target brief: latest AI-operated tab ${latestAiTabId ?? 'unknown'} is not browser-active; active tab is ${activeTabId ?? 'unknown'}, so do not act until the intended tab is reselected or reread.`,
-      claimBoundary:
-        'Target brief proves a browser object mismatch only; it does not decide user intent or task success.',
-    };
-  }
-
-  if (args.relationToBrowserActiveTab === 'browser_active_not_latest_ai_operated') {
-    return {
-      targetTabId: latestAiTabId,
-      targetWindowId: args.latestAiOperatedTab?.windowId ?? null,
-      targetRole: 'ambiguous_latest_ai_operated_tab',
-      targetBasis: 'browser_active_tab_differs_from_latest_ai_operated_tab',
-      targetCanTabrixOperate: args.latestAiOperatedTab?.canTabrixOperate ?? null,
-      targetOperabilityReason:
-        args.latestAiOperatedTab?.operabilityReason ?? 'latest_ai_operated_tab_not_observed',
-      browserActiveTabId: activeTabId,
-      latestAiOperatedTabId: latestAiTabId,
-      relationToBrowserActiveTab: args.relationToBrowserActiveTab,
-      shouldReselectBeforeAction: true,
-      nextRequiredCheck: 'refresh_routing_and_choose_target',
-      summary: `Operation target brief: browser-active tab ${activeTabId ?? 'unknown'} differs from latest AI-operated tab ${latestAiTabId ?? 'unknown'}; refresh routing before acting.`,
-      claimBoundary:
-        'Target brief identifies target ambiguity only; it must not be treated as a page or task verdict.',
-    };
-  }
-
-  return {
-    targetTabId: null,
-    targetWindowId: null,
-    targetRole: 'unknown',
-    targetBasis: 'routing_relation_unknown',
-    targetCanTabrixOperate: null,
-    targetOperabilityReason: 'routing_relation_unknown',
-    browserActiveTabId: activeTabId,
-    latestAiOperatedTabId: latestAiTabId,
-    relationToBrowserActiveTab: args.relationToBrowserActiveTab,
-    shouldReselectBeforeAction: true,
-    nextRequiredCheck: 'refresh_browser_object_snapshot',
-    summary:
-      'Operation target brief: browser object routing is unknown; refresh the browser snapshot before acting.',
-    claimBoundary:
-      'Target brief is uncertain and must not be used as operation permission or task evidence.',
-  };
-}
-
-function buildAiActionReadiness(args: {
-  operationTargetBrief: ReturnType<typeof buildOperationTargetBrief>;
-  currentWindowRelation: string;
-  canContinueOnLatestAiOperatedTab: boolean | null;
-}) {
-  const target = args.operationTargetBrief;
-  if (
-    args.currentWindowRelation === 'no_window_observed' ||
-    args.currentWindowRelation === 'no_focused_window'
-  ) {
-    return {
-      readiness: 'blocked_no_focused_window',
-      targetRole: target.targetRole,
-      targetTabId: target.targetTabId,
-      browserActiveTabId: target.browserActiveTabId,
-      latestAiOperatedTabId: target.latestAiOperatedTabId,
-      canProceedToPageLevelCheck: false,
-      requiredBeforeAction: 'restore_or_focus_browser_window',
-      summary:
-        'AI action readiness: no focused operable browser window is proven; restore or focus a window before acting on a page object.',
-      claimBoundary:
-        'Action readiness uses browser object state only; it does not prove page content, task intent, action postconditions, or task success.',
-    };
-  }
-  if (args.currentWindowRelation === 'focused_window_minimized') {
-    return {
-      readiness: 'blocked_window_minimized',
-      targetRole: target.targetRole,
-      targetTabId: target.targetTabId,
-      browserActiveTabId: target.browserActiveTabId,
-      latestAiOperatedTabId: target.latestAiOperatedTabId,
-      canProceedToPageLevelCheck: false,
-      requiredBeforeAction: 'restore_window_then_refresh_browser_snapshot',
-      summary:
-        'AI action readiness: focused window is minimized; restore the window and refresh browser object state before acting.',
-      claimBoundary:
-        'Action readiness uses browser object state only; it does not prove page content, task intent, action postconditions, or task success.',
-    };
-  }
-  if (target.shouldReselectBeforeAction) {
-    return {
-      readiness: 'reselect_or_reread_required',
-      targetRole: target.targetRole,
-      targetTabId: target.targetTabId,
-      browserActiveTabId: target.browserActiveTabId,
-      latestAiOperatedTabId: target.latestAiOperatedTabId,
-      canProceedToPageLevelCheck: false,
-      requiredBeforeAction: target.nextRequiredCheck,
-      summary: `AI action readiness: targetRole=${target.targetRole}, targetTab=${target.targetTabId ?? 'unknown'}, browserActiveTab=${target.browserActiveTabId ?? 'unknown'}; ${target.nextRequiredCheck} is required before acting.`,
-      claimBoundary:
-        'Action readiness uses browser object state only; it does not prove page content, task intent, action postconditions, or task success.',
-    };
-  }
-  if (
-    target.relationToBrowserActiveTab === 'same_as_browser_active' &&
-    args.canContinueOnLatestAiOperatedTab !== true
-  ) {
-    return {
-      readiness: 'operation_evidence_not_proven',
-      targetRole: target.targetRole,
-      targetTabId: target.targetTabId,
-      browserActiveTabId: target.browserActiveTabId,
-      latestAiOperatedTabId: target.latestAiOperatedTabId,
-      canProceedToPageLevelCheck: false,
-      requiredBeforeAction: target.nextRequiredCheck,
-      summary: `AI action readiness: targetRole=${target.targetRole}, targetTab=${target.targetTabId ?? 'unknown'} is browser-active but the latest AI operation is not proven safe to continue; ${target.nextRequiredCheck} is required before page-level checks.`,
-      claimBoundary:
-        'Action readiness uses browser object and operation evidence only; it does not prove page content, task intent, action postconditions, or task success.',
-    };
-  }
-  if (target.targetCanTabrixOperate === true) {
-    return {
-      readiness: 'ready_for_page_level_check',
-      targetRole: target.targetRole,
-      targetTabId: target.targetTabId,
-      browserActiveTabId: target.browserActiveTabId,
-      latestAiOperatedTabId: target.latestAiOperatedTabId,
-      canProceedToPageLevelCheck: true,
-      requiredBeforeAction: target.nextRequiredCheck,
-      summary: `AI action readiness: targetRole=${target.targetRole}, targetTab=${target.targetTabId ?? 'unknown'} is browser-operable; proceed only to ${target.nextRequiredCheck}.`,
-      claimBoundary:
-        'Action readiness permits only the next page-level verification step; it is not task success, page understanding, or postcondition proof.',
-    };
-  }
-  return {
-    readiness: 'target_not_operable_or_unknown',
-    targetRole: target.targetRole,
-    targetTabId: target.targetTabId,
-    browserActiveTabId: target.browserActiveTabId,
-    latestAiOperatedTabId: target.latestAiOperatedTabId,
-    canProceedToPageLevelCheck: false,
-    requiredBeforeAction: 'refresh_or_select_operable_target',
-    summary: `AI action readiness: targetRole=${target.targetRole}, targetTab=${target.targetTabId ?? 'unknown'} is not proven operable; refresh or choose an operable target before acting.`,
-    claimBoundary:
-      'Action readiness uses browser object state only; it does not prove page content, task intent, action postconditions, or task success.',
-  };
+function countByPageState(tabs: TabSummary[]) {
+  return tabs.reduce(
+    (counts, tab) => {
+      counts[tab.pageState] += 1;
+      return counts;
+    },
+    {
+      foreground: 0,
+      running: 0,
+      loading: 0,
+      closed: 0,
+      restricted: 0,
+    } satisfies Record<PageState, number>,
+  );
 }
 
 class WindowTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS;
+
   async execute(args: WindowToolParams = {}): Promise<ToolResult> {
     try {
-      const includeDiagnostics = args?.includeDiagnostics === true;
       const browserWorld = await refreshBrowserWorldSnapshot({ ensureBaselineReady: true });
-      const browserActiveTab =
-        browserWorld.tabs.find((tab) => tab.tabId === browserWorld.browserActiveTabId) ?? null;
-      const latestAiOperatedTab =
-        browserWorld.tabs.find(
-          (tab) => tab.tabId === browserWorld.summary.aiOperationState.latestAiOperatedTabId,
-        ) ?? null;
-      const aiRoutingBrief = buildAiRoutingBrief({
-        browserActiveTabId: browserWorld.browserActiveTabId,
-        latestAiOperatedTabId: browserWorld.summary.aiOperationState.latestAiOperatedTabId,
-        latestAiOperation: browserWorld.summary.aiOperationState.latestAiOperation,
-        relationToBrowserActiveTab:
-          browserWorld.summary.aiOperationState.relationToBrowserActiveTab,
-        canContinueOnLatestAiOperatedTab:
-          browserWorld.summary.aiOperationState.canContinueOnLatestAiOperatedTab,
-        activeTabCanOperate: browserActiveTab?.canTabrixOperate ?? null,
-      });
-      const operationTargetBrief = buildOperationTargetBrief({
-        browserActiveTab,
-        latestAiOperatedTab,
-        relationToBrowserActiveTab:
-          browserWorld.summary.aiOperationState.relationToBrowserActiveTab,
-        canContinueOnLatestAiOperatedTab:
-          browserWorld.summary.aiOperationState.canContinueOnLatestAiOperatedTab,
-      });
-      const aiActionReadiness = buildAiActionReadiness({
-        operationTargetBrief,
-        currentWindowRelation:
-          browserWorld.summary.windowOperationState.relationToCurrentOperableWindow,
-        canContinueOnLatestAiOperatedTab:
-          browserWorld.summary.aiOperationState.canContinueOnLatestAiOperatedTab,
-      });
+      const tabs = browserWorld.tabs.map(toTabSummary);
+      const currentPage =
+        tabs.find((tab) => tab.tabId === browserWorld.browserActiveTabId) ??
+        tabs.find((tab) => tab.active === true) ??
+        null;
 
-      const structuredWindows = browserWorld.windows.map((window) => {
-        const tabs = browserWorld.tabs
-          .filter((tab) => tab.windowId === window.windowId)
-          .map((tab) => {
-            return {
-              tabId: tab.tabId,
-              url: tab.url || '',
-              pendingUrl: tab.pendingUrl || '',
-              title: tab.title || '',
-              active: tab.active || false,
-              status: tab.status,
-              discarded: tab.discarded,
-              audible: tab.audible,
-              muted: tab.muted,
-              pinned: tab.pinned,
-              openerTabId: tab.openerTabId,
-              openedBy: tab.openedBy,
-              openedBySource: tab.openedBySource,
-              openedByConfidence: tab.openedByConfidence,
-              openedByReason: tab.openedByReason,
-              canTabrixOperate: tab.canTabrixOperate,
-              operabilityReason: tab.operabilityReason,
-              cleanupEligibility: tab.cleanupEligibility,
-              cleanupEligibilityReason: tab.cleanupEligibilityReason,
-              aiOperationState: tab.aiOperationState,
-              lastAiOperation: tab.lastAiOperation,
-              lastAiOperationAtMs: tab.lastAiOperationAtMs,
-              lastAiOperationConfidence: tab.lastAiOperationConfidence,
-              lastAiOperationReason: tab.lastAiOperationReason,
-            };
-          });
-        const activeTab = tabs.find((tab) => tab.active === true) || null;
-
+      const windows = browserWorld.windows.map((window) => {
+        const windowTabs = tabs.filter((tab) => tab.windowId === window.windowId);
         return {
           windowId: window.windowId,
-          state: window.state || 'unknown',
+          focused: window.focused,
+          state: window.state,
           visibilityState: window.visibilityState,
-          focused: typeof window.focused === 'boolean' ? window.focused : null,
-          isFocused: window.isFocused,
-          isMinimized: window.isMinimized,
-          type: window.type || 'unknown',
-          incognito: typeof window.incognito === 'boolean' ? window.incognito : null,
-          width: Number.isInteger(window.width) ? window.width : null,
-          height: Number.isInteger(window.height) ? window.height : null,
-          left: Number.isInteger(window.left) ? window.left : null,
-          top: Number.isInteger(window.top) ? window.top : null,
-          activeTabId: activeTab ? activeTab.tabId : null,
-          activeTabCanOperate: window.activeTabCanOperate,
+          activeTabId: window.activeTabId,
           canTabrixOperate: window.canTabrixOperate,
           operabilityReason: window.operabilityReason,
-          tabCount: tabs.length,
-          tabs,
+          tabCount: windowTabs.length,
+          omittedTabCount: Math.max(0, windowTabs.length - COMPACT_TABS_PER_WINDOW_LIMIT),
+          tabs: compactTabs(windowTabs),
         };
       });
 
-      const diagnosticResult = {
-        source: 'chrome_windows_get_all_with_browser_world_inventory',
+      const stateCounts = countByPageState(tabs);
+      const result = {
+        source: 'chrome_windows_get_all',
         windowCount: browserWorld.windowCount,
         tabCount: browserWorld.tabCount,
-        baselineReadiness: browserWorld.baselineReadiness,
+        currentPage,
         compactSummary: {
-          baselineReadiness: browserWorld.baselineReadiness,
-          primaryConclusion: browserWorld.summary.primaryConclusion,
-          activeObject: {
-            windowId: browserWorld.summary.activeWindow.windowId,
-            windowState: browserWorld.summary.activeWindow.state,
-            windowVisibilityState: browserWorld.summary.activeWindow.visibilityState,
-            tabId: browserWorld.summary.activeTab.tabId,
-            tabWindowId: browserWorld.summary.activeTab.windowId,
-            url: browserWorld.summary.activeTab.url,
-            title: browserWorld.summary.activeTab.title,
-            openedBy: browserWorld.summary.activeTab.openedBy,
-            openedBySource: browserWorld.summary.activeTab.openedBySource,
-            tabStatus: browserWorld.summary.currentTabObject?.status ?? null,
-            tabOperabilityReason:
-              browserWorld.summary.currentTabObject?.operabilityReason ?? 'active_tab_not_observed',
-            windowOperabilityReason:
-              structuredWindows.find(
-                (window) => window.windowId === browserWorld.summary.activeWindow.windowId,
-              )?.operabilityReason ?? 'active_window_not_observed',
-            canTabrixOperate:
-              browserWorld.summary.activeTab.canTabrixOperate === false ||
-              browserWorld.summary.activeWindow.canTabrixOperate === false
-                ? false
-                : (browserWorld.summary.activeTab.canTabrixOperate ??
-                  browserWorld.summary.activeWindow.canTabrixOperate),
+          currentPage,
+          stateCounts,
+          tabIds: {
+            foreground: compactIds(
+              tabs.filter((tab) => tab.pageState === 'foreground').map((tab) => tab.tabId),
+            ),
+            running: compactIds(
+              tabs.filter((tab) => tab.pageState === 'running').map((tab) => tab.tabId),
+            ),
+            loading: compactIds(
+              tabs.filter((tab) => tab.pageState === 'loading').map((tab) => tab.tabId),
+            ),
+            restricted: compactIds(
+              tabs.filter((tab) => tab.pageState === 'restricted').map((tab) => tab.tabId),
+            ),
           },
-          objectInventory: {
-            objectModel: 'BrowserWorldObject -> BrowserWindowObject[] -> BrowserTabObject[]',
-            compactIdLimit: COMPACT_OBJECT_ID_LIMIT,
-            windowObjectCount: browserWorld.windowCount,
-            tabPageObjectCount: browserWorld.tabCount,
-            activeWindowId: browserWorld.summary.activeWindow.windowId,
-            browserActiveTabId: browserWorld.browserActiveTabId,
-            latestAiOperatedTabId: browserWorld.summary.aiOperationState.latestAiOperatedTabId,
-            latestAiOperationConfidence:
-              browserWorld.summary.aiOperationState.latestAiOperationConfidence,
-            latestAiOperationReason: browserWorld.summary.aiOperationState.latestAiOperationReason,
-            currentOperationRelation:
-              browserWorld.summary.aiOperationState.relationToBrowserActiveTab,
-            canContinueOnLatestAiOperatedTab:
-              browserWorld.summary.aiOperationState.canContinueOnLatestAiOperatedTab,
-            aiOpened: buildCompactIdSet(browserWorld.aiOpenedTabIds),
-            userOrPageOpened: buildCompactIdSet(browserWorld.userOrPageOpenedTabIds),
-            pageOpened: buildCompactIdSet(
-              browserWorld.tabs
-                .filter((tab) => tab.openedBySource === 'page_opener')
-                .map((tab) => tab.tabId),
-            ),
-            userOrUnknownOpened: buildCompactIdSet(
-              browserWorld.tabs
-                .filter((tab) => tab.openedBySource === 'user_or_unknown')
-                .map((tab) => tab.tabId),
-            ),
-            unknownOpened: buildCompactIdSet(
-              browserWorld.tabs.filter((tab) => tab.openedBy === 'unknown').map((tab) => tab.tabId),
-            ),
-            operable: buildCompactIdSet(browserWorld.operableTabIds),
-            inoperable: buildCompactIdSet(
-              browserWorld.tabs
-                .filter((tab) => tab.canTabrixOperate === false)
-                .map((tab) => tab.tabId),
-            ),
-            recentlyOperatedByAi: buildCompactIdSet(
-              browserWorld.tabs
-                .filter((tab) => tab.aiOperationState === 'recently_operated')
-                .map((tab) => tab.tabId),
-            ),
-            summary: `Browser object inventory: windows=${browserWorld.windowCount}, tabs=${browserWorld.tabCount}, activeTab=${browserWorld.browserActiveTabId ?? 'unknown'}, aiOpened=${browserWorld.aiOpenedTabIds.length}, pageOpened=${browserWorld.tabs.filter((tab) => tab.openedBySource === 'page_opener').length}, userOrUnknownOpened=${browserWorld.tabs.filter((tab) => tab.openedBySource === 'user_or_unknown').length}, userOrPageOpened=${browserWorld.userOrPageOpenedTabIds.length}, operable=${browserWorld.operableTabIds.length}, currentOperation=${browserWorld.summary.aiOperationState.relationToBrowserActiveTab}.`,
-            claimBoundary:
-              'Object inventory summary contains browser lifecycle ids and routing facts only; it does not prove page content understanding, account state, login success, or API/CDP reuse.',
-          },
-          browserActiveObject: buildCompactTabObject(browserActiveTab, 'browser_active_tab'),
-          routingDecisionSummary: browserWorld.summary.routingDecisionSummary,
-          latestAiOperatedObject: buildCompactTabObject(
-            latestAiOperatedTab,
-            'latest_ai_operated_tab',
-          ),
-          currentTabAttributeGroups: browserWorld.summary.currentTabAttributeGroups,
-          lastAiOperatedTabAttributeGroups: browserWorld.summary.lastAiOperatedTabAttributeGroups,
-          tabAttributeGroupClaimBoundary:
-            'Tab attribute groups describe browser object identity/runtime/ownership/operability/cleanup only; they do not prove page content, account state, login success, task success, or API/CDP reuse.',
-          operationRouting: {
-            browserActiveTabId: browserWorld.browserActiveTabId,
-            latestAiOperatedTabId: browserWorld.summary.aiOperationState.latestAiOperatedTabId,
-            relationToBrowserActiveTab:
-              browserWorld.summary.aiOperationState.relationToBrowserActiveTab,
-            canContinueOnLatestAiOperatedTab:
-              browserWorld.summary.aiOperationState.canContinueOnLatestAiOperatedTab,
-            latestAiOperation: browserWorld.summary.aiOperationState.latestAiOperation,
-            latestAiOperationConfidence:
-              browserWorld.summary.aiOperationState.latestAiOperationConfidence,
-            latestAiOperationReason: browserWorld.summary.aiOperationState.latestAiOperationReason,
-            summary:
-              browserWorld.summary.routingDecisionSummary ??
-              browserWorld.summary.currentOperationConclusion,
-            claimBoundary:
-              'Operation routing identifies browser tab objects only; it does not prove page action postconditions or task completion.',
-          },
-          aiRoutingBrief,
-          operationTargetBrief,
-          aiActionReadiness,
-          windows: structuredWindows.map((window) => ({
-            windowId: window.windowId,
-            state: window.state,
-            visibilityState: window.visibilityState,
-            focused: window.focused,
-            activeTabId: window.activeTabId,
-            canTabrixOperate: window.canTabrixOperate,
-            operabilityReason: window.operabilityReason,
-            tabCount: window.tabCount,
-            compactTabLimit: COMPACT_TABS_PER_WINDOW_LIMIT,
-            omittedTabCount: Math.max(0, window.tabs.length - COMPACT_TABS_PER_WINDOW_LIMIT),
-            tabs: selectCompactTabsForWindow(
-              window.tabs.map((tab) => ({
-                tabId: tab.tabId,
-                title: tab.title,
-                url: tab.url,
-                active: tab.active,
-                status: tab.status,
-                openedBy: tab.openedBy,
-                openedBySource: tab.openedBySource,
-                canTabrixOperate: tab.canTabrixOperate,
-                operabilityReason: tab.operabilityReason,
-                cleanupEligibility: tab.cleanupEligibility,
-                cleanupEligibilityReason: tab.cleanupEligibilityReason,
-              })),
-            ),
-          })),
-          windowStateMatrix: browserWorld.summary.windowStateMatrix,
-          windowStateConclusion: browserWorld.summary.windowStateConclusion,
-          windowOperationState: browserWorld.summary.windowOperationState,
-          currentWindowConclusion: browserWorld.summary.currentWindowConclusion,
-          windowLifecycleState: browserWorld.summary.windowLifecycleState,
-          windowLifecycleConclusion: browserWorld.summary.windowLifecycleConclusion,
-          tabStateMatrix: browserWorld.summary.tabStateMatrix,
-          tabStateConclusion: browserWorld.summary.tabStateConclusion,
-          tabLifecycleState: browserWorld.summary.tabLifecycleState,
-          tabLifecycleConclusion: browserWorld.summary.tabLifecycleConclusion,
-          aiOperationState: browserWorld.summary.aiOperationState,
-          currentOperationConclusion: browserWorld.summary.currentOperationConclusion,
-          browserObjectEdgeSummary: browserWorld.summary.browserObjectEdgeSummary,
-          recentChangeSummary: browserWorld.summary.recentChangeSummary,
-          recentActivityLedger: browserWorld.summary.recentActivityLedger,
-          actionableObjectChangeSummary: browserWorld.summary.actionableObjectChangeSummary,
-          objectChangeSummary: browserWorld.summary.objectChangeSummary,
-          dynamicObjectUpdateSummary: browserWorld.summary.dynamicObjectUpdateSummary,
-          objectChangeConclusion: browserWorld.summary.objectChangeConclusion,
-          refreshHealth: browserWorld.refreshHealth,
-          retentionPolicy: browserWorld.retentionPolicy,
-          claimBoundary:
-            'Browser lifecycle summary only; page content, account state, login success, and API/CDP reuse require separate evidence.',
+          windows,
         },
-        summary: browserWorld.summary,
-        browserWorld,
-        windows: structuredWindows,
+        windows,
+        ...(args?.includeDiagnostics === true
+          ? {
+              diagnostics: {
+                baselineReadiness: browserWorld.baselineReadiness,
+                refreshHealth: browserWorld.refreshHealth,
+                retentionPolicy: browserWorld.retentionPolicy,
+                recentEvents: browserWorld.recentEvents,
+                summary: browserWorld.summary,
+              },
+            }
+          : {}),
       };
-      const compactWindows = diagnosticResult.compactSummary.windows;
-      const compactResult = {
-        source: diagnosticResult.source,
-        windowCount: browserWorld.windowCount,
-        tabCount: browserWorld.tabCount,
-        currentPage: diagnosticResult.compactSummary.activeObject,
-        compactSummary: {
-          activeObject: diagnosticResult.compactSummary.activeObject,
-          browserActiveObject: diagnosticResult.compactSummary.browserActiveObject,
-          latestAiOperatedObject: diagnosticResult.compactSummary.latestAiOperatedObject,
-          routing: {
-            browserActiveTabId: browserWorld.browserActiveTabId,
-            latestAiOperatedTabId: browserWorld.summary.aiOperationState.latestAiOperatedTabId,
-            relationToBrowserActiveTab:
-              browserWorld.summary.aiOperationState.relationToBrowserActiveTab,
-            canContinueOnLatestAiOperatedTab:
-              browserWorld.summary.aiOperationState.canContinueOnLatestAiOperatedTab,
-            latestAiOperation: browserWorld.summary.aiOperationState.latestAiOperation,
-          },
-          actionReadiness: {
-            readiness: aiActionReadiness.readiness,
-            targetRole: aiActionReadiness.targetRole,
-            targetTabId: aiActionReadiness.targetTabId,
-            canProceedToPageLevelCheck: aiActionReadiness.canProceedToPageLevelCheck,
-            requiredBeforeAction: aiActionReadiness.requiredBeforeAction,
-          },
-          windows: compactWindows,
-          recentChangeSummary: browserWorld.summary.recentChangeSummary,
-        },
-        windows: compactWindows,
-      };
-      const result = includeDiagnostics
-        ? { ...compactResult, diagnostics: diagnosticResult }
-        : compactResult;
 
       return {
         content: [

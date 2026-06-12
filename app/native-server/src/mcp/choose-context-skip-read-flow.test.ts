@@ -69,14 +69,13 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
 
   /**
    * Mirrors the helper in `register-tools.test.ts`. The first
-   * `mockResolvedValueOnce` answers the dynamic-flow / readiness
+   * `mockResolvedValueOnce` answers the readiness
    * round-trip the bridge precheck makes; the second is the actual
    * `chrome_read_page` (or `chrome_navigate`) extension reply.
    */
   function mockBridgeRoundTrip(text: string): jest.SpyInstance {
     return jest
       .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
       .mockResolvedValueOnce({
         status: 'success',
         data: { content: [{ type: 'text', text }], isError: false },
@@ -87,7 +86,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
    * Hard guard for the skip path: assert the bridge `call_tool`
    * round-trip was NEVER invoked. The orchestrator MUST short-circuit
    * inside the shim — no extension call, no synthetic page payload.
-   * The dynamic-flow precheck call is allowed (some code paths warm
+   * The readiness precheck call is allowed (some code paths warm
    * the extension list before the gate fires) so we assert the
    * `call_tool` shape specifically.
    */
@@ -906,16 +905,13 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
   it('V27-10R chrome_read_page CallToolResult failure writes operationLog success=false', async () => {
     markBridgeReady();
     const completeSpy = jest.spyOn(sessionManager, 'completeStep');
-    jest
-      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-      .mockResolvedValueOnce({ status: 'success', items: [] } as never)
-      .mockResolvedValueOnce({
-        status: 'success',
-        data: {
-          content: [{ type: 'text', text: JSON.stringify({ message: 'read failed' }) }],
-          isError: true,
-        },
-      } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      data: {
+        content: [{ type: 'text', text: JSON.stringify({ message: 'read failed' }) }],
+        isError: true,
+      },
+    } as never);
 
     const readResult = await handleToolCall('chrome_read_page', {
       requestedLayer: 'L0+L1',
@@ -1410,7 +1406,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
     expect(payload).not.toHaveProperty('readPageAvoided');
     expect(payload.pageContent).toBe('legacy-bridge');
     // The bridge `call_tool` round-trip MUST have happened (one
-    // dynamic-flow precheck + one actual call_tool invocation).
+    // readiness precheck + one actual call_tool invocation).
     const callToolInvocations = bridgeSpy.mock.calls.filter((call) => {
       const messageType = call[1];
       return typeof messageType === 'string' && messageType.toLowerCase().includes('call_tool');
