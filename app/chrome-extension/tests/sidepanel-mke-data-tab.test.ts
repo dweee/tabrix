@@ -32,7 +32,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain('fetchMkeObjectStoragePreferences');
     expect(tabSource).not.toContain('updateMkeObjectStoragePreferences');
     expect(tabSource).not.toContain('clearMkeBrowserObjects');
-    expect(tabSource).toContain("scope: 'object-graph'");
+    expect(tabSource).not.toContain("scope: 'object-graph'");
     expect(tabSource).toContain('type ActiveTab = MkeDataTabId');
     expect(tabSource).toContain("label: '记忆库'");
     expect(tabSource).toContain("label: '对象库'");
@@ -79,15 +79,15 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain('mke-object-detail-tabs');
     expect(tabSource).not.toContain('mke-object-count-grid');
     expect(tabSource).not.toContain('mke-object-footer-actions');
-    expect(objectViewSource).toContain('页面对象');
-    expect(objectViewSource).toContain('可操作功能');
-    expect(objectViewSource).toContain('数据/API');
-    expect(objectViewSource).toContain('生命周期');
+    expect(objectViewSource).not.toContain('页面对象');
+    expect(objectViewSource).not.toContain('可操作功能');
+    expect(objectViewSource).not.toContain('数据/API');
+    expect(objectViewSource).not.toContain('生命周期');
     expect(tabSource).toContain('type="search"');
     expect(tabSource).toContain('搜索当前列表');
     expect(tabSource).toContain('mke-search-icon');
     expect(tabSource).toContain('搜索主题、对象、方法、网址、状态');
-    expect(tabSource).toContain('搜索网页、对象、功能、网址、状态');
+    expect(tabSource).toContain('搜索网页、网址、状态');
     expect(tabSource).toContain('mke-refresh-button');
     expect(tabSource).not.toContain('保存浏览状态：开');
     expect(tabSource).not.toContain('保存浏览状态：关');
@@ -140,6 +140,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain("'mke-json-copy-button--copied': copiedRecordId === row.id");
     expect(tabSource).toContain("'mke-json-copy-button--failed': copyFailedRecordId === row.id");
     expect(tabSource).toContain('loadMoreLabel');
+    expect(tabSource).toContain('加载更多网页');
     expect(tabSource).toContain('加载更多 (${activeLoadedCount.value}/${activeTotal.value})');
     expect(tabSource).toContain('grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));');
     expect(tabSource).toContain('grid-template-columns: minmax(180px, 1fr) auto;');

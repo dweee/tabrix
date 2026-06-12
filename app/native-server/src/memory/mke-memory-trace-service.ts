@@ -124,7 +124,6 @@ interface ParsedResultDigest {
 }
 
 export interface MkeMemoryTraceServiceOptions {
-  allowPersonalBrowserStateStorage?: () => boolean;
   asyncBrowserObjectWriteQueueLimit?: number;
 }
 
@@ -274,29 +273,6 @@ function sanitizeValue(value: unknown, toolName: string, depth = 0, keyHint = ''
       continue;
     }
     output[key] = sanitizeValue(entry, toolName, depth + 1, key);
-  }
-  return output;
-}
-
-function preservePersonalObjectValue(value: unknown, depth = 0): unknown {
-  if (depth > MAX_DEPTH) return '[max_depth]';
-  if (value === null || value === undefined) return value ?? null;
-  if (typeof value === 'string') return truncateString(value);
-  if (typeof value === 'number' || typeof value === 'boolean') return value;
-  if (Array.isArray(value)) {
-    return value
-      .slice(0, MAX_ARRAY_ITEMS)
-      .map((item) => preservePersonalObjectValue(item, depth + 1));
-  }
-  if (typeof value !== 'object') return String(value);
-
-  const output: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-    if (shouldDropRawContentKey(key)) {
-      output[key] = '[omitted_raw_content]';
-      continue;
-    }
-    output[key] = preservePersonalObjectValue(entry, depth + 1);
   }
   return output;
 }
@@ -638,22 +614,12 @@ export class MkeMemoryTraceService {
     );
   }
 
-  private allowsPersonalBrowserStateStorage(): boolean {
-    try {
-      return this.options.allowPersonalBrowserStateStorage?.() === true;
-    } catch {
-      return false;
-    }
-  }
-
   private sanitizeBrowserObjectValue(value: unknown): unknown {
-    return this.allowsPersonalBrowserStateStorage()
-      ? preservePersonalObjectValue(value)
-      : sanitizeValue(value, 'browser_object');
+    return sanitizeValue(value, 'browser_object');
   }
 
   private browserObjectRedactionState(): string {
-    return this.allowsPersonalBrowserStateStorage() ? 'user_authorized' : 'redacted';
+    return 'redacted';
   }
 
   public recordToolCall(input: RecordMkeToolCallTraceInput): MemoryTrace {
@@ -854,7 +820,7 @@ export class MkeMemoryTraceService {
       const tabId = readNumber(tab.tabId, tab.id);
       if (tabId === null) continue;
       const urlFields = normalizeUrlPattern(readString(tab.url, tab.pendingUrl), {
-        allowPersonalBrowserStateStorage: this.allowsPersonalBrowserStateStorage(),
+        allowPersonalBrowserStateStorage: false,
       });
       const tabWindowId = readNumber(tab.windowId) ?? trace.windowId;
       this.upsertBrowserObject({
@@ -929,7 +895,7 @@ export class MkeMemoryTraceService {
         ? new Date(closedAtMs).toISOString()
         : observedAt;
     const urlFields = normalizeUrlPattern(readString(latestPageClosed.url), {
-      allowPersonalBrowserStateStorage: this.allowsPersonalBrowserStateStorage(),
+      allowPersonalBrowserStateStorage: false,
     });
     const tabWindowId = readNumber(latestPageClosed.windowId) ?? trace.windowId;
     this.upsertBrowserObject({
@@ -986,7 +952,7 @@ export class MkeMemoryTraceService {
     const page = readNestedObject(payload, 'page');
     const summary = readNestedObject(payload, 'summary');
     const urlFields = normalizeUrlPattern(readString(page?.url, payload.url, payload.pageUrl), {
-      allowPersonalBrowserStateStorage: this.allowsPersonalBrowserStateStorage(),
+      allowPersonalBrowserStateStorage: false,
     });
     const siteFamily = urlFields.siteFamily ?? trace.siteFamily ?? 'unknown';
     const pageRole = readString(projection?.pageRole, summary?.pageRole, trace.pageRole) ?? 'page';

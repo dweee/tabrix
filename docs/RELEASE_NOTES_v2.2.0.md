@@ -74,7 +74,7 @@ contract on `ReadPageHighValueObject` continues to be emitted.
   parser, gated alongside the existing `TABRIX_POLICY_ALLOW_P3` (no migration /
   no deprecation pressure yet). v1 ships only the `api_knowledge` capability;
   per-tool capability annotations and the `MemoryAction.policyCapabilities`
-  audit field are intentionally deferred.
+  audit field were deferred and are not part of the current AI feedback write-back path.
 
 ### Stage 3g — API Knowledge capture v1
 

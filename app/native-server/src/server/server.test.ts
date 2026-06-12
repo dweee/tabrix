@@ -305,22 +305,26 @@ describe('服务器测试', () => {
     const objects = await supertest(Server.getInstance().server)
       .get('/memory/mke/browser-objects')
       .expect(200);
-    expect(objects.body.data.total).toBe(3);
+    expect(objects.body.data.total).toBe(2);
     expect(objects.body.data.browserObjects).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          objectType: 'tab',
-          objectFingerprint: 'tab:100:200',
-          sourceRoute: 'chrome_windows_get_all_with_browser_world_inventory',
+          tabId: '200',
+          title: 'Dashboard',
+          url: 'https://example.test/dashboard',
+          status: 'running',
         }),
         expect.objectContaining({
-          objectType: 'tab',
-          objectFingerprint: 'tab:100:201',
-          lifecycleState: 'closed',
-          sourceRoute: 'chrome_windows_get_all_with_browser_world_inventory',
+          tabId: '201',
+          title: 'Closed Dashboard',
+          url: 'https://example.test/closed',
+          status: 'closed',
         }),
       ]),
     );
+    expect(JSON.stringify(objects.body.data.browserObjects)).not.toContain('token=secret');
+    expect(JSON.stringify(objects.body.data.browserObjects)).not.toContain('objectFingerprint');
+    expect(JSON.stringify(objects.body.data.browserObjects)).not.toContain('sourceRoute');
     expect(sessionManager.countMkeMemoryTraces()).toBe(0);
     syncBrowserSpy.mockRestore();
     bridgeRuntimeState.reset();
@@ -744,9 +748,9 @@ describe('服务器测试', () => {
           toolName: 'get_windows_and_tabs',
           toolSuccess: true,
           businessFeedbackRequired: true,
-          businessFeedbackGuideVersion: 'tabrix-ai-business-feedback-v1',
         },
       });
+      expect(payload._tabrix).not.toHaveProperty('businessFeedbackGuideVersion');
       expect(payload._tabrix).not.toHaveProperty('businessStatus');
       expect(payload._tabrix.traceId).toEqual(expect.any(String));
       expect(extensionSpy).toHaveBeenCalledTimes(2);

@@ -18,7 +18,6 @@ const ALLOWED_HOSTS = ['127.0.0.1', '0.0.0.0', 'localhost', '::'];
 
 interface HostConfig {
   host?: string;
-  personalBrowserStateStorageEnabled?: boolean;
 }
 
 function getConfigFile(): string {
@@ -63,15 +62,6 @@ export function getPersistedHost(): string | undefined {
 export function setPersistedHost(host: string): void {
   if (!ALLOWED_HOSTS.includes(host)) return;
   writeConfig({ host });
-}
-
-export function getPersonalBrowserStateStorageEnabled(): boolean {
-  const cfg = readConfig();
-  return cfg.personalBrowserStateStorageEnabled === true;
-}
-
-export function setPersonalBrowserStateStorageEnabled(enabled: boolean): void {
-  writeConfig({ personalBrowserStateStorageEnabled: enabled });
 }
 
 export const __hostConfigInternals = {

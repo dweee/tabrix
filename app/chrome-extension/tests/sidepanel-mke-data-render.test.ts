@@ -24,9 +24,9 @@ describe('MkeDataTab render smoke', () => {
     expect(source).toContain('mke-toolbar--object');
     expect(source).not.toContain('mke-object-storage-toggle');
     expect(source).not.toContain('mke-object-summary-bar');
-    expect(source).toContain('搜索网页、对象、功能、网址、状态');
+    expect(source).toContain('搜索网页、网址、状态');
     expect(source).toContain('fetchMkeBrowserObjects({ limit: objectLimit');
-    expect(source).toContain("scope: 'object-graph'");
+    expect(source).not.toContain("scope: 'object-graph'");
 
     expect(source).not.toContain('mke-object-workspace');
     expect(source).not.toContain('mke-webpage-detail');

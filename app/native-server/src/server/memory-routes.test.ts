@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import supertest from 'supertest';
 import Server from './index';
 import { sessionManager } from '../execution/session-manager';
-import { __hostConfigInternals, setPersonalBrowserStateStorageEnabled } from '../host-config';
+import { __hostConfigInternals } from '../host-config';
 import { buildMemoryTraceBindingHash } from '../memory/feedback-binding';
 
 function textResult(payload: Record<string, unknown>) {
@@ -153,28 +153,14 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     await supertest(Server.getInstance().server).put('/memory/tasks/any').expect(404);
   });
 
-  test('GET/PATCH /memory/mke/object-storage-preferences manages Object Library storage preference', async () => {
-    const initial = await supertest(Server.getInstance().server)
+  test('Object Library storage preferences are not a product API surface', async () => {
+    await supertest(Server.getInstance().server)
       .get('/memory/mke/object-storage-preferences')
-      .expect(200);
-
-    expect(initial.body.data).toMatchObject({
-      personalBrowserStateStorageEnabled: false,
-    });
-
-    const updated = await supertest(Server.getInstance().server)
-      .patch('/memory/mke/object-storage-preferences')
-      .send({ personalBrowserStateStorageEnabled: true })
-      .expect(200);
-
-    expect(updated.body.data).toMatchObject({
-      personalBrowserStateStorageEnabled: true,
-    });
-
+      .expect(404);
     await supertest(Server.getInstance().server)
       .patch('/memory/mke/object-storage-preferences')
-      .send({ personalBrowserStateStorageEnabled: 'yes' })
-      .expect(400);
+      .send({ enabled: true })
+      .expect(404);
   });
 
   test('GET /memory/mke/traces returns sanitized trace summaries', async () => {
@@ -367,7 +353,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.browserObjects).toEqual([]);
   });
 
-  test('GET /memory/mke/browser-objects lists BrowserWorld window and tab objects', async () => {
+  test('GET /memory/mke/browser-objects lists simple browser tab webpage summaries', async () => {
     const traceService = sessionManager.memoryTraces;
     if (!traceService) throw new Error('MKE trace service is not available in tests');
     const requestAt = Date.parse('2026-06-06T12:00:00.000Z');
@@ -422,38 +408,15 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       .get('/memory/mke/browser-objects?limit=10&offset=0')
       .expect(200);
 
-    expect(res.body.data.total).toBe(3);
+    expect(res.body.data.total).toBe(2);
     const objects = res.body.data.browserObjects as Array<Record<string, unknown>>;
-    expect(objects.map((object) => object.objectType).sort()).toEqual(['tab', 'tab', 'window']);
-    const windowObject = objects.find((object) => object.objectType === 'window');
-    expect(windowObject).toMatchObject({
-      display: {
-        title: '当前浏览器窗口 · 1 个标签 · 可见',
-        locationLabel: '浏览器',
-      },
-    });
-    const tab = objects.find((object) => object.pageUrlPattern === 'https://example.test/search');
+    const tab = objects.find((object) => object.url === 'https://example.test/search');
     expect(tab).toMatchObject({
-      siteFamily: 'example.test',
-      pageUrlPattern: 'https://example.test/search',
-      rootRoute: 'https://example.test/search',
-      currentRoute: 'https://example.test/search',
-      ownerType: 'ai',
-      canTabrixOperate: true,
-      facts: {
-        titleSummary: 'Search results - Example',
-        host: 'example.test',
-        currentRoute: 'https://example.test/search',
-      },
-      pageIdentity: {
-        label: 'example.test',
-        host: 'example.test',
-        url: 'https://example.test/search',
-        source: 'current_route',
-      },
-      display: {
-        title: 'Search results - Example',
-      },
+      title: 'Search results - Example',
+      url: 'https://example.test/search',
+      location: 'example.test',
+      tabId: '21',
+      status: 'running',
     });
     expect(JSON.stringify(tab)).not.toContain('private-token');
     expect(JSON.stringify(tab)).not.toContain('spm');
@@ -463,25 +426,22 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(JSON.stringify(tab)).not.toContain('#/experience/llm');
     expect(tab).not.toHaveProperty('currentState');
     expect(tab).not.toHaveProperty('recentEvents');
+    expect(tab).not.toHaveProperty('objectType');
+    expect(tab).not.toHaveProperty('facts');
+    expect(tab).not.toHaveProperty('pageIdentity');
+    expect(tab).not.toHaveProperty('display');
+    expect(tab).not.toHaveProperty('canTabrixOperate');
+    expect(tab).not.toHaveProperty('ownerType');
     expect(tab).not.toHaveProperty('sourceTraceIds');
     expect(tab).not.toHaveProperty('evidenceRefs');
     expect(tab).not.toHaveProperty('claimBoundary');
     expect(tab).not.toHaveProperty('confidenceScore');
     expect(tab).not.toHaveProperty('driftScore');
-    const browserTab = objects.find((object) => object.pageUrlPattern === 'chrome://newtab/');
+    const browserTab = objects.find((object) => object.url === 'chrome://newtab/');
     expect(browserTab).toMatchObject({
-      siteFamily: 'browser',
-      rootRoute: 'chrome://newtab/',
-      currentRoute: 'chrome://newtab/',
-      pageIdentity: {
-        kind: 'browser_internal',
-        label: 'chrome://newtab/',
-        url: 'chrome://newtab/',
-      },
-      display: {
-        title: 'New Tab',
-        locationLabel: 'chrome://newtab/',
-      },
+      title: 'New Tab',
+      location: 'chrome://newtab/',
+      status: 'restricted',
     });
   });
 
@@ -544,23 +504,20 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       .get('/memory/mke/browser-objects?limit=10&offset=0')
       .expect(200);
 
-    expect(res.body.data.total).toBe(2);
+    expect(res.body.data.total).toBe(1);
     const objects = res.body.data.browserObjects as Array<Record<string, unknown>>;
-    const tab = objects.find((object) => object.objectType === 'tab');
-    const windowObject = objects.find((object) => object.objectType === 'window');
+    const tab = objects[0];
     expect(tab).toMatchObject({
-      objectType: 'tab',
-      browserContextKey: 'ctx-after-reload',
-      observationCount: 2,
+      tabId: '21',
+      title: 'Search results - Example',
+      status: 'running',
     });
-    expect(windowObject).toMatchObject({
-      objectType: 'window',
-      browserContextKey: 'ctx-after-reload',
-      observationCount: 2,
-    });
+    expect(tab).not.toHaveProperty('browserContextKey');
+    expect(tab).not.toHaveProperty('objectFingerprint');
+    expect(tab).not.toHaveProperty('observationCount');
   });
 
-  test('Object Library list defaults to current browser windows and tabs, not read_page internals', async () => {
+  test('Object Library list returns tab webpages, not read_page internals or object graph rows', async () => {
     const traceService = sessionManager.memoryTraces;
     if (!traceService) throw new Error('MKE trace service is not available in tests');
     const requestAt = Date.parse('2026-06-06T12:15:00.000Z');
@@ -634,38 +591,34 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       .get('/memory/mke/browser-objects?limit=20&offset=0')
       .expect(200);
 
-    expect(res.body.data.total).toBe(2);
-    expect(
-      (res.body.data.browserObjects as Array<Record<string, unknown>>).map(
-        (object) => object.objectType,
-      ),
-    ).toEqual(expect.arrayContaining(['window', 'tab']));
-    expect(
-      (res.body.data.browserObjects as Array<Record<string, unknown>>).some((object) =>
-        ['page', 'region', 'action_target'].includes(String(object.objectType)),
-      ),
-    ).toBe(false);
+    expect(res.body.data.total).toBe(1);
+    const surfaceObjects = res.body.data.browserObjects as Array<Record<string, unknown>>;
+    expect(surfaceObjects).toHaveLength(1);
+    expect(surfaceObjects[0]).toMatchObject({
+      tabId: '21',
+      title: 'Search results - Example',
+      status: 'running',
+    });
+    expect(JSON.stringify(surfaceObjects)).not.toContain('objectType');
+    expect(JSON.stringify(surfaceObjects)).not.toContain('pageModelKey');
+    expect(JSON.stringify(surfaceObjects)).not.toContain('actionTypes');
 
     const graph = await supertest(Server.getInstance().server)
       .get('/memory/mke/browser-objects?limit=20&offset=0&scope=object-graph')
       .expect(200);
 
-    expect(graph.body.data.total).toBe(6);
+    expect(graph.body.data.total).toBe(1);
     const graphObjects = graph.body.data.browserObjects as Array<Record<string, unknown>>;
-    expect(graphObjects.map((object) => object.objectType)).toEqual(
-      expect.arrayContaining(['window', 'tab', 'page', 'region', 'action_target', 'data_source']),
-    );
-    expect(graphObjects.find((object) => object.objectType === 'data_source')).toMatchObject({
-      selectedDataSource: 'api_rows',
-      sourceRoute: 'knowledge_api_endpoints',
-    });
-    expect(graphObjects.find((object) => object.objectType === 'action_target')).toMatchObject({
-      actionTypes: ['click'],
-      redactionState: 'redacted',
-    });
+    expect(graphObjects).toEqual(surfaceObjects);
+    expect(JSON.stringify(graphObjects)).not.toContain('browserContextKey');
+    expect(JSON.stringify(graphObjects)).not.toContain('objectFingerprint');
+    expect(JSON.stringify(graphObjects)).not.toContain('selectedDataSource');
+    expect(JSON.stringify(graphObjects)).not.toContain('sourceRoute');
+    expect(JSON.stringify(graphObjects)).not.toContain('redactionState');
     expect(JSON.stringify(graphObjects)).not.toContain('currentState');
     expect(JSON.stringify(graphObjects)).not.toContain('sourceTraceIds');
     expect(JSON.stringify(graphObjects)).not.toContain('evidenceRefs');
+    expect(JSON.stringify(graphObjects)).not.toContain('"evidence"');
     expect(JSON.stringify(graphObjects)).not.toContain('claimBoundary');
     expect(JSON.stringify(graphObjects)).not.toContain('confidenceScore');
     expect(JSON.stringify(graphObjects)).not.toContain('driftScore');
@@ -732,214 +685,6 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       .get('/memory/mke/traces?limit=10&offset=0')
       .expect(200);
     expect(afterTraces.body.data.total).toBe(1);
-  });
-
-  test('Object Library stores full current routes when personal browser state storage is enabled', async () => {
-    await supertest(Server.getInstance().server)
-      .patch('/memory/mke/object-storage-preferences')
-      .send({ personalBrowserStateStorageEnabled: true })
-      .expect(200);
-
-    const traceService = sessionManager.memoryTraces;
-    if (!traceService) throw new Error('MKE trace service is not available in tests');
-    const requestAt = Date.parse('2026-06-06T12:30:00.000Z');
-
-    traceService.recordToolCall({
-      taskId: 'browser-object-full-route-task',
-      taskIntent: 'inspect browser context',
-      aiClient: 'jest',
-      toolName: 'get_windows_and_tabs',
-      stepId: 'browser-object-full-route-step',
-      sequenceIndex: 1,
-      requestParams: {},
-      requestAtMs: requestAt,
-      responseAtMs: requestAt + 18,
-      result: textResult({
-        source: 'chrome_windows_get_all_with_browser_world_inventory',
-        browserWorld: {
-          status: 'fresh',
-          windows: [
-            { windowId: 10, focused: true, state: 'maximized', tabCount: 1, activeTabId: 21 },
-          ],
-          tabs: [
-            {
-              tabId: 21,
-              windowId: 10,
-              active: true,
-              status: 'complete',
-              ownerType: 'ai',
-              canTabrixOperate: true,
-              url: 'https://example.test/search?access_token=real-secret&tab=demohouse#/experience/llm',
-              title: 'Search results - Example',
-            },
-          ],
-        },
-      }),
-      resultSummary: 'browser inventory read',
-    });
-    await traceService.flushAsyncWrites();
-
-    const res = await supertest(Server.getInstance().server)
-      .get('/memory/mke/browser-objects?limit=10&offset=0')
-      .expect(200);
-
-    const tab = (res.body.data.browserObjects as Array<Record<string, unknown>>).find(
-      (object) => object.objectType === 'tab',
-    );
-    expect(tab).toMatchObject({
-      redactionState: 'user_authorized',
-      currentRoute:
-        'https://example.test/search?access_token=real-secret&tab=demohouse#/experience/llm',
-      pageIdentity: {
-        url: 'https://example.test/search?access_token=real-secret&tab=demohouse#/experience/llm',
-      },
-    });
-  });
-
-  test('Object Library does not return old full routes after current preference is disabled', async () => {
-    await supertest(Server.getInstance().server)
-      .patch('/memory/mke/object-storage-preferences')
-      .send({ personalBrowserStateStorageEnabled: true })
-      .expect(200);
-
-    const traceService = sessionManager.memoryTraces;
-    if (!traceService) throw new Error('MKE trace service is not available in tests');
-    const requestAt = Date.parse('2026-06-06T12:35:00.000Z');
-
-    traceService.recordToolCall({
-      taskId: 'browser-object-old-authorized-route-task',
-      taskIntent: 'inspect browser context',
-      aiClient: 'jest',
-      toolName: 'get_windows_and_tabs',
-      stepId: 'browser-object-old-authorized-route-step',
-      sequenceIndex: 1,
-      requestParams: {},
-      requestAtMs: requestAt,
-      responseAtMs: requestAt + 18,
-      result: textResult({
-        source: 'chrome_windows_get_all_with_browser_world_inventory',
-        browserWorld: {
-          status: 'fresh',
-          windows: [
-            { windowId: 10, focused: true, state: 'maximized', tabCount: 1, activeTabId: 21 },
-          ],
-          tabs: [
-            {
-              tabId: 21,
-              windowId: 10,
-              active: true,
-              status: 'complete',
-              ownerType: 'ai',
-              canTabrixOperate: true,
-              url: 'https://example.test/search?access_token=real-secret&tab=demohouse#/experience/llm',
-              title: 'Search results - Example',
-            },
-          ],
-        },
-      }),
-      resultSummary: 'browser inventory read',
-    });
-    await traceService.flushAsyncWrites();
-
-    const before = await supertest(Server.getInstance().server)
-      .get('/memory/mke/browser-objects?limit=10&offset=0')
-      .expect(200);
-    const beforeSerialized = JSON.stringify(before.body.data.browserObjects);
-    expect(beforeSerialized).toContain('real-secret');
-    expect(beforeSerialized).toContain('tab=demohouse');
-
-    setPersonalBrowserStateStorageEnabled(false);
-
-    const res = await supertest(Server.getInstance().server)
-      .get('/memory/mke/browser-objects?limit=10&offset=0')
-      .expect(200);
-
-    const serialized = JSON.stringify(res.body.data.browserObjects);
-    expect(serialized).not.toContain('real-secret');
-    expect(serialized).not.toContain('tab=demohouse');
-    const tab = (res.body.data.browserObjects as Array<Record<string, unknown>>).find(
-      (object) => object.objectType === 'tab',
-    );
-    expect(tab).toMatchObject({
-      redactionState: 'redacted',
-      currentRoute: 'https://example.test/search',
-      pageIdentity: {
-        url: 'https://example.test/search',
-      },
-    });
-  });
-
-  test('disabling personal browser state storage keeps Object Library rows and redacts authorized routes', async () => {
-    await supertest(Server.getInstance().server)
-      .patch('/memory/mke/object-storage-preferences')
-      .send({ personalBrowserStateStorageEnabled: true })
-      .expect(200);
-
-    const traceService = sessionManager.memoryTraces;
-    if (!traceService) throw new Error('MKE trace service is not available in tests');
-    const requestAt = Date.parse('2026-06-06T12:40:00.000Z');
-
-    traceService.recordToolCall({
-      taskId: 'browser-object-disable-full-route-task',
-      taskIntent: 'inspect browser context',
-      aiClient: 'jest',
-      toolName: 'get_windows_and_tabs',
-      stepId: 'browser-object-disable-full-route-step',
-      sequenceIndex: 1,
-      requestParams: {},
-      requestAtMs: requestAt,
-      responseAtMs: requestAt + 18,
-      result: textResult({
-        source: 'chrome_windows_get_all_with_browser_world_inventory',
-        browserWorld: {
-          status: 'fresh',
-          windows: [
-            { windowId: 10, focused: true, state: 'maximized', tabCount: 1, activeTabId: 21 },
-          ],
-          tabs: [
-            {
-              tabId: 21,
-              windowId: 10,
-              active: true,
-              status: 'complete',
-              ownerType: 'ai',
-              canTabrixOperate: true,
-              url: 'https://example.test/search?access_token=real-secret&tab=demohouse#/experience/llm',
-              title: 'Search results - Example',
-            },
-          ],
-        },
-      }),
-      resultSummary: 'browser inventory read',
-    });
-    await traceService.flushAsyncWrites();
-
-    const before = await supertest(Server.getInstance().server)
-      .get('/memory/mke/browser-objects?limit=10&offset=0')
-      .expect(200);
-    expect(JSON.stringify(before.body.data.browserObjects)).toContain('real-secret');
-
-    await supertest(Server.getInstance().server)
-      .patch('/memory/mke/object-storage-preferences')
-      .send({ personalBrowserStateStorageEnabled: false })
-      .expect(200);
-
-    const after = await supertest(Server.getInstance().server)
-      .get('/memory/mke/browser-objects?limit=10&offset=0')
-      .expect(200);
-    expect(after.body.data.total).toBeGreaterThan(0);
-    expect(JSON.stringify(after.body.data.browserObjects)).not.toContain('real-secret');
-    expect(JSON.stringify(after.body.data.browserObjects)).not.toContain('tab=demohouse');
-    const tab = (after.body.data.browserObjects as Array<Record<string, unknown>>).find(
-      (object) => object.objectType === 'tab',
-    );
-    expect(tab).toMatchObject({
-      redactionState: 'redacted',
-      currentRoute: 'https://example.test/search',
-      pageIdentity: {
-        url: 'https://example.test/search',
-      },
-    });
   });
 
   test('GET /memory/mke/experience returns sanitized template summaries', async () => {

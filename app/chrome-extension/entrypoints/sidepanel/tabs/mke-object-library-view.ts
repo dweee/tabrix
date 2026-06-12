@@ -1,31 +1,18 @@
-import type { MkeBrowserObjectSummary } from '@tabrix/shared';
+import type { MkeBrowserObjectSummary, MkeBrowserPageStatus } from '@tabrix/shared';
 
 export type MkeObjectViewTone = 'good' | 'warn' | 'neutral';
 
-export interface MkeObjectViewItem {
-  label: string;
-  value: string;
-  tone?: MkeObjectViewTone;
-}
-
-export interface MkeObjectViewSection {
-  id: 'pageObjects' | 'actions' | 'dataApi' | 'lifecycle';
-  title: string;
-  badge: string;
-  emptyText: string;
-  items: MkeObjectViewItem[];
-}
-
 export interface MkeObjectWebPageView {
   id: string;
+  tabId?: string | null;
   title: string;
+  url?: string | null;
   location: string;
   lifecycleLabel: string;
   lifecycleTone: MkeObjectViewTone;
   isClosed: boolean;
   updatedAt: string;
-  sections: MkeObjectViewSection[];
-  objects: MkeBrowserObjectSummary[];
+  detailReason?: string | null;
   searchText: string;
 }
 
@@ -37,404 +24,80 @@ export interface MkeObjectLibraryRuntimeContext {
   foregroundTabId?: string | null;
 }
 
-const PAGE_OBJECT_TYPES = new Set(['page', 'region', 'action_target']);
-const ACTION_OBJECT_TYPES = new Set(['action_target']);
-const DATA_API_OBJECT_TYPES = new Set(['data_source']);
+const STATUS_LABELS: Record<MkeBrowserPageStatus, string> = {
+  foreground: '前台页',
+  running: '运行中',
+  loading: '加载中',
+  closed: '已关闭',
+  restricted: '受限页',
+};
 
-interface ActiveTabContext {
-  foregroundTabIds: Set<string>;
-}
+const STATUS_TONES: Record<MkeBrowserPageStatus, MkeObjectViewTone> = {
+  foreground: 'good',
+  running: 'good',
+  loading: 'neutral',
+  closed: 'warn',
+  restricted: 'warn',
+};
 
 export function buildMkeObjectLibraryView(
   objects: MkeBrowserObjectSummary[],
   runtimeContext: MkeObjectLibraryRuntimeContext = {},
 ): MkeObjectLibraryView {
-  const activeTabContext = buildActiveTabContext(objects, runtimeContext);
-  const webPageRoots = selectWebPageRoots(objects, activeTabContext);
-  const webPages = webPageRoots.map((root) =>
-    buildWebPageView(root, findRelatedObjects(root, objects), activeTabContext),
-  );
+  const foregroundTabId = normalizeTabId(runtimeContext.foregroundTabId);
+  const webPages = [...objects].map((object) => buildWebPageView(object, foregroundTabId));
 
-  return { webPages };
-}
-
-function selectWebPageRoots(
-  objects: MkeBrowserObjectSummary[],
-  activeTabContext: ActiveTabContext,
-): MkeBrowserObjectSummary[] {
-  const tabs = objects.filter((object) => object.objectType === 'tab');
-  const tabKeys = new Set(tabs.map(objectPageGroupingKey));
-  const unmatchedPages = objects.filter(
-    (object) => object.objectType === 'page' && !tabKeys.has(objectPageGroupingKey(object)),
-  );
-  return sortWebPageRoots([...tabs, ...unmatchedPages], activeTabContext);
-}
-
-function sortWebPageRoots(
-  objects: MkeBrowserObjectSummary[],
-  activeTabContext: ActiveTabContext,
-): MkeBrowserObjectSummary[] {
-  return [...objects].sort((a, b) => {
-    const aIsCurrent = isForegroundTab(a, activeTabContext);
-    const bIsCurrent = isForegroundTab(b, activeTabContext);
-    if (aIsCurrent !== bIsCurrent) return aIsCurrent ? -1 : 1;
-    if (isClosedObject(a) !== isClosedObject(b)) return isClosedObject(a) ? 1 : -1;
-    return readTime(b.updatedAt) - readTime(a.updatedAt);
-  });
+  return {
+    webPages: sortWebPages(webPages),
+  };
 }
 
 function buildWebPageView(
-  root: MkeBrowserObjectSummary,
-  relatedObjects: MkeBrowserObjectSummary[],
-  activeTabContext: ActiveTabContext,
+  object: MkeBrowserObjectSummary,
+  foregroundTabId: string | null,
 ): MkeObjectWebPageView {
-  const pageObjectCount = countByType(relatedObjects, PAGE_OBJECT_TYPES);
-  const actionObjects = relatedObjects.filter((object) =>
-    ACTION_OBJECT_TYPES.has(object.objectType),
-  );
-  const dataApiObjects = relatedObjects.filter((object) =>
-    DATA_API_OBJECT_TYPES.has(object.objectType),
-  );
-  const lifecycle = formatLifecycle(root, activeTabContext);
-  const title = formatWebPageTitle(root);
-  const location = formatWebPageLocation(root);
-  const sections = [
-    buildPageObjectsSection(relatedObjects, pageObjectCount),
-    buildActionsSection(actionObjects),
-    buildDataApiSection(dataApiObjects, root),
-    buildLifecycleSection(root, lifecycle),
-  ];
-
+  const tabId = normalizeTabId(object.tabId);
+  const status: MkeBrowserPageStatus =
+    tabId !== null && tabId === foregroundTabId && object.status !== 'closed'
+      ? 'foreground'
+      : object.status;
+  const title = compactText(object.title || '未命名网页', 56);
+  const location = compactText(object.location || object.url || '未知位置', 96);
   const searchText = [
     title,
     location,
-    lifecycle.label,
-    root.siteFamily,
-    root.pageRole,
-    root.pageModelKey,
-    root.ownerType,
-    ...relatedObjects.flatMap((object) => [
-      object.objectType,
-      object.pageRole,
-      ...(object.actionTypes ?? []),
-    ]),
-    ...sections.flatMap((section) => [
-      section.title,
-      section.badge,
-      ...section.items.flatMap((item) => [item.label, item.value]),
-    ]),
+    object.url,
+    STATUS_LABELS[status],
+    object.detailReason,
+    tabId,
   ]
     .filter((item): item is string => typeof item === 'string' && item.length > 0)
     .join(' ')
     .toLowerCase();
 
   return {
-    id: root.browserObjectId,
+    id: object.objectId,
+    tabId,
     title,
+    url: object.url ?? null,
     location,
-    lifecycleLabel: lifecycle.label,
-    lifecycleTone: lifecycle.tone,
-    isClosed: isClosedObject(root),
-    updatedAt: root.updatedAt,
-    sections,
-    objects: relatedObjects,
+    lifecycleLabel: STATUS_LABELS[status],
+    lifecycleTone: STATUS_TONES[status],
+    isClosed: status === 'closed',
+    updatedAt: object.updatedAt,
+    detailReason: object.detailReason,
     searchText,
   };
 }
 
-function findRelatedObjects(
-  root: MkeBrowserObjectSummary,
-  objects: MkeBrowserObjectSummary[],
-): MkeBrowserObjectSummary[] {
-  const rootKey = objectPageGroupingKey(root);
-  return objects.filter((object) => objectPageGroupingKey(object) === rootKey);
-}
-
-function objectPageGroupingKey(object: MkeBrowserObjectSummary): string {
-  const route = objectRouteKey(object);
-  const tabId = extractTabId(object);
-  return tabId ? `tab:${tabId}::${route}` : `route::${route}`;
-}
-
-function objectRouteKey(object: MkeBrowserObjectSummary): string {
-  return (
-    object.currentRoute ||
-    object.rootRoute ||
-    object.pageUrlPattern ||
-    object.pageIdentity?.url ||
-    object.pageIdentity?.label ||
-    object.siteFamily ||
-    'unknown'
-  );
-}
-
-function extractTabId(object: MkeBrowserObjectSummary): string | null {
-  const contextMatch = object.browserContextKey?.match(/(?:^|:)tab:(\d+)$/);
-  if (contextMatch) return contextMatch[1];
-
-  if (object.objectType === 'tab') {
-    const tabFingerprintMatch = object.objectFingerprint.match(/^tab:[^:]+:(\d+)$/);
-    if (tabFingerprintMatch) return tabFingerprintMatch[1];
-  }
-
-  const trailingTabIdMatch = object.objectFingerprint.match(/:(\d+)$/);
-  return trailingTabIdMatch ? trailingTabIdMatch[1] : null;
-}
-
-function buildActiveTabContext(
-  objects: MkeBrowserObjectSummary[],
-  runtimeContext: MkeObjectLibraryRuntimeContext,
-): ActiveTabContext {
-  const foregroundTabId = normalizeTabId(runtimeContext.foregroundTabId);
-  if (foregroundTabId) return { foregroundTabIds: new Set([foregroundTabId]) };
-
-  const focusedWindowActiveTabIds = new Set<string>();
-
-  for (const object of objects) {
-    if (object.objectType !== 'window') continue;
-    if (object.isActive !== true && readObjectFactBoolean(object, 'focused') !== true) continue;
-
-    const activeTabId = readObjectFactNumber(object, 'activeTabId');
-    if (activeTabId !== null) focusedWindowActiveTabIds.add(String(activeTabId));
-  }
-
-  if (focusedWindowActiveTabIds.size > 0) return { foregroundTabIds: focusedWindowActiveTabIds };
-
-  const activeTabIds = new Set(
-    objects
-      .filter((object) => object.objectType === 'tab' && object.isActive === true)
-      .map(extractTabId)
-      .filter((tabId): tabId is string => tabId !== null),
-  );
-
-  return { foregroundTabIds: activeTabIds.size === 1 ? activeTabIds : new Set() };
-}
-
-function isForegroundTab(
-  object: MkeBrowserObjectSummary,
-  activeTabContext: ActiveTabContext,
-): boolean {
-  if (object.objectType !== 'tab') return false;
-  const tabId = extractTabId(object);
-  return tabId !== null && activeTabContext.foregroundTabIds.has(tabId);
-}
-
-function buildPageObjectsSection(
-  objects: MkeBrowserObjectSummary[],
-  pageObjectCount: number,
-): MkeObjectViewSection {
-  const counts = countObjectKinds(
-    objects.filter((object) => PAGE_OBJECT_TYPES.has(object.objectType)),
-    (object) => formatPageObjectKind(object),
-  );
-  return {
-    id: 'pageObjects',
-    title: '页面对象',
-    badge: `${pageObjectCount} 个`,
-    emptyText: '当前未记录页面对象。',
-    items: counts.map(([label, count]) => ({ label, value: `${count} 个` })),
-  };
-}
-
-function buildActionsSection(objects: MkeBrowserObjectSummary[]): MkeObjectViewSection {
-  const actionCounts = countObjectKinds(objects, (object) => formatActionKind(object));
-  return {
-    id: 'actions',
-    title: '可操作功能',
-    badge: `${objects.length} 个`,
-    emptyText: '当前未记录可操作功能。',
-    items: actionCounts.map(([label, count]) => ({
-      label,
-      value: `${count} 个`,
-      tone: 'neutral',
-    })),
-  };
-}
-
-function buildDataApiSection(
-  objects: MkeBrowserObjectSummary[],
-  root: MkeBrowserObjectSummary,
-): MkeObjectViewSection {
-  const dataSourceLabels = objects
-    .filter((object) => DATA_API_OBJECT_TYPES.has(object.objectType))
-    .map((object) => object.selectedDataSource || object.pageRole)
-    .filter((item): item is string => typeof item === 'string' && item.length > 0);
-  const labels =
-    dataSourceLabels.length > 0
-      ? dataSourceLabels
-      : root.selectedDataSource
-        ? [root.selectedDataSource]
-        : [];
-  const counts = countLabels(labels.map(formatDataSourceLabel));
-  return {
-    id: 'dataApi',
-    title: '数据/API',
-    badge: `${labels.length} 个`,
-    emptyText: '当前未记录数据/API。',
-    items: counts.map(([label, count]) => ({
-      label,
-      value: count > 1 ? `${count} 条` : '1 条',
-      tone: label.includes('提交') || label.includes('写入') ? 'warn' : 'neutral',
-    })),
-  };
-}
-
-function buildLifecycleSection(
-  root: MkeBrowserObjectSummary,
-  lifecycle: { label: string; tone: MkeObjectViewTone },
-): MkeObjectViewSection {
-  const tabStatus = formatTabStatus(root.tabStatus);
-  return {
-    id: 'lifecycle',
-    title: '生命周期',
-    badge: lifecycle.label,
-    emptyText: '暂无生命周期状态。',
-    items: [
-      { label: '当前状态', value: lifecycle.label, tone: lifecycle.tone },
-      tabStatus ? { label: '浏览器加载', value: tabStatus } : null,
-    ].filter((item): item is MkeObjectViewItem => item !== null),
-  };
-}
-
-function countByType(objects: MkeBrowserObjectSummary[], types: Set<string>): number {
-  return objects.filter((object) => types.has(object.objectType)).length;
-}
-
-function countObjectKinds(
-  objects: MkeBrowserObjectSummary[],
-  readKind: (object: MkeBrowserObjectSummary) => string,
-): Array<[string, number]> {
-  return countLabels(objects.map(readKind));
-}
-
-function countLabels(labels: string[]): Array<[string, number]> {
-  const counts = new Map<string, number>();
-  for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1);
-  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-}
-
-function formatWebPageTitle(object: MkeBrowserObjectSummary): string {
-  const titleSummary = readObjectFactString(object, 'titleSummary');
-  return compactText(
-    titleSummary ||
-      object.display?.title ||
-      object.pageIdentity?.label ||
-      object.pageRole ||
-      '未命名网页',
-    48,
-  );
-}
-
-function formatWebPageLocation(object: MkeBrowserObjectSummary): string {
-  return compactText(
-    object.display?.locationLabel ||
-      object.currentRoute ||
-      object.rootRoute ||
-      object.pageUrlPattern ||
-      object.pageIdentity?.label ||
-      object.siteFamily ||
-      '未知位置',
-    84,
-  );
-}
-
-function formatLifecycle(
-  object: MkeBrowserObjectSummary,
-  activeTabContext: ActiveTabContext,
-): {
-  label: string;
-  tone: MkeObjectViewTone;
-} {
-  if (isClosedObject(object)) return { label: '已关闭', tone: 'warn' };
-  if (object.tabStatus === 'loading') return { label: '加载中', tone: 'neutral' };
-  if (object.canTabrixOperate === false) return { label: '受限页', tone: 'warn' };
-  if (isForegroundTab(object, activeTabContext)) {
-    return { label: '前台页', tone: 'good' };
-  }
-  if (object.canTabrixOperate === true) return { label: '运行中', tone: 'good' };
-  return { label: '运行中', tone: 'good' };
-}
-
-function formatPageObjectKind(object: MkeBrowserObjectSummary): string {
-  const regionType = readObjectFactString(object, 'regionType');
-  if (regionType) return translateKnownLabel(regionType);
-  if (object.objectType === 'page') return '页面';
-  if (object.objectType === 'region') return '区域';
-  return translateKnownLabel(object.objectType);
-}
-
-function formatActionKind(object: MkeBrowserObjectSummary): string {
-  const actionType = object.actionTypes?.find(
-    (item) => typeof item === 'string' && item.length > 0,
-  );
-  if (!actionType) return '候选目标';
-  return translateKnownLabel(actionType);
-}
-
-function formatDataSourceLabel(value: string): string {
-  const text = value.toLowerCase();
-  if (text.includes('api') || text.includes('endpoint')) return '接口线索';
-  if (text.includes('submit') || text.includes('post') || text.includes('write')) return '提交接口';
-  if (text.includes('search')) return '搜索接口';
-  if (text.includes('list')) return '列表接口';
-  if (text.includes('detail')) return '详情接口';
-  if (DATA_API_OBJECT_TYPES.has(value)) return '数据线索';
-  return '数据线索';
-}
-
-function translateKnownLabel(value: string): string {
-  const labels: Record<string, string> = {
-    button: '按钮',
-    buttons: '按钮',
-    click: '点击',
-    input: '输入',
-    fill: '输入',
-    form: '表单',
-    forms: '表单',
-    list: '列表',
-    table: '表格',
-    menu: '菜单',
-    dialog: '弹窗',
-    modal: '弹窗',
-    download: '下载',
-    upload: '上传',
-    select: '选择',
-    submit: '提交',
-    filter: '筛选',
-    page: '页面',
-    region: '区域',
-    action_target: '可操作功能',
-    data_source: '数据/API',
-  };
-  return labels[value.toLowerCase()] ?? compactText(value.replace(/_/g, ' '), 18);
-}
-
-function formatTabStatus(value: string | null | undefined): string | null {
-  if (!value) return null;
-  if (value === 'complete') return '已完成';
-  if (value === 'loading') return '加载中';
-  return value;
-}
-
-function readObjectFacts(object: MkeBrowserObjectSummary): Record<string, unknown> {
-  return object.facts && typeof object.facts === 'object' && !Array.isArray(object.facts)
-    ? object.facts
-    : {};
-}
-
-function readObjectFactString(object: MkeBrowserObjectSummary, key: string): string | null {
-  const value = readObjectFacts(object)[key];
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-function readObjectFactBoolean(object: MkeBrowserObjectSummary, key: string): boolean | null {
-  const value = readObjectFacts(object)[key];
-  return typeof value === 'boolean' ? value : null;
-}
-
-function readObjectFactNumber(object: MkeBrowserObjectSummary, key: string): number | null {
-  const value = readObjectFacts(object)[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+function sortWebPages(webPages: MkeObjectWebPageView[]): MkeObjectWebPageView[] {
+  return webPages.sort((a, b) => {
+    if (a.lifecycleLabel === '前台页' || b.lifecycleLabel === '前台页') {
+      return a.lifecycleLabel === '前台页' ? -1 : 1;
+    }
+    if (a.isClosed !== b.isClosed) return a.isClosed ? 1 : -1;
+    return readTime(b.updatedAt) - readTime(a.updatedAt);
+  });
 }
 
 function normalizeTabId(value: string | number | null | undefined): string | null {
@@ -442,10 +105,6 @@ function normalizeTabId(value: string | number | null | undefined): string | nul
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
-}
-
-function isClosedObject(object: MkeBrowserObjectSummary): boolean {
-  return object.lifecycleState === 'closed' || object.lifecycleState === 'removed';
 }
 
 function readTime(value: string | null | undefined): number {

@@ -362,7 +362,7 @@ export class BrowserObjectRepository {
     this.listCurrentBrowserSurfaceStmt = db.prepare(
       `SELECT * FROM tabrix_browser_objects
         WHERE archived_at IS NULL
-          AND object_type IN ('window', 'tab')
+          AND object_type = 'tab'
           AND source_route = 'chrome_windows_get_all_with_browser_world_inventory'
           AND (
             (
@@ -372,7 +372,7 @@ export class BrowserObjectRepository {
                 SELECT MAX(updated_at) FROM tabrix_browser_objects
                   WHERE archived_at IS NULL
                     AND closed_at IS NULL
-                    AND object_type IN ('window', 'tab')
+                    AND object_type = 'tab'
                     AND COALESCE(lifecycle_state, '') NOT IN ('closed', 'removed')
                     AND source_route = 'chrome_windows_get_all_with_browser_world_inventory'
               )
@@ -436,7 +436,7 @@ export class BrowserObjectRepository {
     this.countCurrentBrowserSurfaceStmt = db.prepare(
       `SELECT COUNT(*) AS count FROM tabrix_browser_objects
         WHERE archived_at IS NULL
-          AND object_type IN ('window', 'tab')
+          AND object_type = 'tab'
           AND source_route = 'chrome_windows_get_all_with_browser_world_inventory'
           AND (
             (
@@ -446,7 +446,7 @@ export class BrowserObjectRepository {
                 SELECT MAX(updated_at) FROM tabrix_browser_objects
                   WHERE archived_at IS NULL
                     AND closed_at IS NULL
-                    AND object_type IN ('window', 'tab')
+                    AND object_type = 'tab'
                     AND COALESCE(lifecycle_state, '') NOT IN ('closed', 'removed')
                     AND source_route = 'chrome_windows_get_all_with_browser_world_inventory'
               )

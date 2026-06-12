@@ -17,9 +17,7 @@ import {
   fetchMkeExperienceRecipes,
   fetchMkeKnowledgeModels,
   fetchMkeMemoryTraces,
-  fetchMkeObjectStoragePreferences,
   resolveMemoryApiBaseUrl,
-  updateMkeObjectStoragePreferences,
 } from '@/common/memory-api-client';
 
 type FetchMock = ReturnType<typeof vi.fn>;
@@ -200,13 +198,12 @@ describe('MKE data query helpers', () => {
     const payload = {
       browserObjects: [
         {
-          browserObjectId: 'object-1',
-          objectType: 'page',
-          siteFamily: 'example.test',
-          pageModelKey: 'page:example.test:search',
-          objectFingerprint: 'page:example.test:search:7',
-          observationCount: 1,
-          redactionState: 'redacted',
+          objectId: 'object-1',
+          tabId: '7',
+          title: 'Example page',
+          url: 'https://example.test/search',
+          location: 'example.test',
+          status: 'running',
           createdAt: '2026-06-06T10:00:00Z',
           updatedAt: '2026-06-06T10:00:01Z',
         },
@@ -230,7 +227,7 @@ describe('MKE data query helpers', () => {
     );
   });
 
-  it('fetches Object Library graph scope when requested by the sidepanel', async () => {
+  it('does not expose Object Library graph scope in the product client', async () => {
     fetchMock.mockResolvedValue(
       okResponse({
         browserObjects: [],
@@ -243,57 +240,11 @@ describe('MKE data query helpers', () => {
 
     await fetchMkeBrowserObjects({
       baseUrl: 'http://127.0.0.1:12306',
-      scope: 'object-graph',
     });
 
     expect(String(fetchMock.mock.calls[0][0])).toBe(
-      'http://127.0.0.1:12306/memory/mke/browser-objects?limit=20&offset=0&scope=object-graph',
+      'http://127.0.0.1:12306/memory/mke/browser-objects?limit=20&offset=0',
     );
-  });
-
-  it('fetches and updates Object Library storage preferences', async () => {
-    fetchMock
-      .mockResolvedValueOnce(
-        okResponse({
-          personalBrowserStateStorageEnabled: false,
-          persistenceMode: 'disk',
-        }),
-      )
-      .mockResolvedValueOnce(
-        okResponse({
-          personalBrowserStateStorageEnabled: true,
-          persistenceMode: 'disk',
-        }),
-      );
-
-    await expect(
-      fetchMkeObjectStoragePreferences({ baseUrl: 'http://127.0.0.1:12306' }),
-    ).resolves.toEqual({
-      personalBrowserStateStorageEnabled: false,
-      persistenceMode: 'disk',
-    });
-
-    await expect(
-      updateMkeObjectStoragePreferences({
-        baseUrl: 'http://127.0.0.1:12306',
-        personalBrowserStateStorageEnabled: true,
-      }),
-    ).resolves.toEqual({
-      personalBrowserStateStorageEnabled: true,
-      persistenceMode: 'disk',
-    });
-
-    expect(String(fetchMock.mock.calls[0][0])).toBe(
-      'http://127.0.0.1:12306/memory/mke/object-storage-preferences',
-    );
-    expect(fetchMock.mock.calls[1][0]).toBe(
-      'http://127.0.0.1:12306/memory/mke/object-storage-preferences',
-    );
-    expect(fetchMock.mock.calls[1][1]).toMatchObject({
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ personalBrowserStateStorageEnabled: true }),
-    });
   });
 
   it('clears Object Library rows', async () => {

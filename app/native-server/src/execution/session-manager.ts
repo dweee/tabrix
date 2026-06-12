@@ -34,7 +34,6 @@ import {
 import { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
 import { ChooseContextTelemetryRepository } from '../memory/telemetry/choose-context-telemetry';
 import { TaskSessionContext } from './task-session-context';
-import { getPersonalBrowserStateStorageEnabled } from '../host-config';
 
 export interface CreateTaskInput {
   taskType: string;
@@ -161,9 +160,7 @@ function initStorage(options?: SessionManagerOptions): StorageInit {
       dbHandle: opened.db,
       persistenceMode: opened.persistenceMode,
       browserObject: browserObjectRepo,
-      memoryTrace: new MkeMemoryTraceService(memoryTraceRepo, browserObjectRepo, {
-        allowPersonalBrowserStateStorage: getPersonalBrowserStateStorageEnabled,
-      }),
+      memoryTrace: new MkeMemoryTraceService(memoryTraceRepo, browserObjectRepo, {}),
       knowledgeProjector: new MkeKnowledgeProjector(browserObjectRepo, knowledgeModelRepo),
       experienceProjector: new MkeExperienceProjector(
         memoryTraceRepo,

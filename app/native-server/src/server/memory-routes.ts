@@ -14,10 +14,8 @@
  *
  * Contract:
  * - `GET /memory/mke/traces?limit=&offset=` → sanitized MKE Memory trace summaries
- * - `GET /memory/mke/browser-objects?limit=&offset=&scope=` → sanitized browser object summaries
+ * - `GET /memory/mke/browser-objects?limit=&offset=` → browser tab/page summaries
  * - `DELETE /memory/mke/browser-objects` → clear Object Library rows only
- * - `GET /memory/mke/object-storage-preferences` → Object Library storage preferences
- * - `PATCH /memory/mke/object-storage-preferences` → update Object Library storage preferences
  * - `GET /memory/mke/knowledge?limit=&offset=` → sanitized MKE Knowledge summaries
  * - `GET /memory/mke/experience?limit=&offset=` → sanitized MKE Experience summaries
  *
@@ -33,22 +31,14 @@ import type {
   MkeExperienceRecipeSummary,
   MkeKnowledgeModelSummary,
   MkeMemoryAiFeedbackSummary,
+  MkePageIdentitySummary,
   MkeMemoryTraceSummary,
-  MkeObjectStoragePreferencesResponseData,
 } from '@tabrix/shared';
 import { HTTP_STATUS } from '../constant';
 import type { SessionManager } from '../execution/session-manager';
 import type { BrowserObject, ExperienceRecipe, KnowledgeModel, MemoryTrace } from '../memory/db';
 import { sessionManager as defaultSessionManager } from '../execution/session-manager';
-import {
-  getPersonalBrowserStateStorageEnabled,
-  setPersonalBrowserStateStorageEnabled,
-} from '../host-config';
-import {
-  allowsPersonalBrowserStateStorage,
-  summarizeBrowserObjectFactsForPrivacy,
-  summarizeBrowserRouteForPrivacy,
-} from '../policy/browser-state-privacy';
+import { summarizeBrowserRouteForPrivacy } from '../policy/browser-state-privacy';
 
 const MKE_LIST_LIMIT_MAX = 100;
 
@@ -57,25 +47,11 @@ interface MkeListQuery {
   offset?: string;
 }
 
-interface BrowserObjectsQuery extends MkeListQuery {
-  scope?: string;
-}
-
-type BrowserObjectsScope = 'browser-surface' | 'object-graph';
-
-interface ObjectStoragePreferencesBody {
-  personalBrowserStateStorageEnabled?: boolean;
-}
-
 function parsePositiveInt(raw: unknown, fallback: number, max: number): number {
   if (raw === undefined || raw === null || raw === '') return fallback;
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) return fallback;
   return Math.min(max, Math.max(0, Math.floor(n)));
-}
-
-function parseBrowserObjectsScope(raw: unknown): BrowserObjectsScope {
-  return raw === 'object-graph' ? 'object-graph' : 'browser-surface';
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -191,7 +167,7 @@ function classifyObjectPageIdentity(
     rootRoute: object.rootRoute,
     currentRoute: object.currentRoute,
   },
-): NonNullable<MkeBrowserObjectSummary['pageIdentity']> {
+): MkePageIdentitySummary {
   const url = routeView.currentRoute ?? routeView.rootRoute ?? routeView.pageUrlPattern;
   const source = routeView.currentRoute
     ? 'current_route'
@@ -295,7 +271,7 @@ function windowStateLabel(value: string | null): string | null {
   return value;
 }
 
-function objectTitle(object: BrowserObject, pageIdentity: MkeBrowserObjectSummary['pageIdentity']) {
+function objectTitle(object: BrowserObject, pageIdentity: MkePageIdentitySummary) {
   const typeLabel = OBJECT_TYPE_LABELS[object.objectType] ?? object.objectType;
   const facts = asRecord(object.facts) ?? {};
   if (object.primaryConclusion) return object.primaryConclusion;
@@ -317,13 +293,20 @@ function objectTitle(object: BrowserObject, pageIdentity: MkeBrowserObjectSummar
   return object.pageRole ? `${typeLabel} · ${object.pageRole}` : typeLabel;
 }
 
+function extractObjectTabId(
+  object: BrowserObject,
+  facts: Record<string, unknown> | null,
+): string | null {
+  const factTabId = readNumber(facts ?? {}, 'tabId');
+  if (factTabId !== null) return String(Math.trunc(factTabId));
+
+  const fingerprintMatch = object.objectFingerprint.match(/(?:^|:)tab:(\d+)$|:(\d+)$/);
+  const matchedTabId = fingerprintMatch?.[1] ?? fingerprintMatch?.[2];
+  return matchedTabId ?? null;
+}
+
 function toObjectSummary(object: BrowserObject): MkeBrowserObjectSummary {
-  const allowPersonalBrowserStateStorage =
-    getPersonalBrowserStateStorageEnabled() &&
-    allowsPersonalBrowserStateStorage(object.redactionState);
-  const effectiveRedactionState = allowPersonalBrowserStateStorage
-    ? object.redactionState
-    : 'redacted';
+  const allowPersonalBrowserStateStorage = false;
   const routeView = {
     pageUrlPattern: summarizeBrowserRouteForPrivacy(object.pageUrlPattern, {
       allowPersonalBrowserStateStorage,
@@ -336,52 +319,36 @@ function toObjectSummary(object: BrowserObject): MkeBrowserObjectSummary {
     }),
   };
   const pageIdentity = classifyObjectPageIdentity(object, routeView);
-  const facts = summarizeBrowserObjectFactsForPrivacy(asRecord(object.facts), {
-    allowPersonalBrowserStateStorage,
-  });
-  const actionTypes = Array.isArray(object.actionTypes)
-    ? object.actionTypes.filter((item): item is string => typeof item === 'string')
-    : [];
+  const facts = asRecord(object.facts);
+  const tabId = extractObjectTabId(object, facts);
+  const title = objectTitle(object, pageIdentity);
+  const url = routeView.currentRoute ?? routeView.rootRoute ?? routeView.pageUrlPattern;
   return {
-    browserObjectId: object.browserObjectId,
-    objectType: object.objectType,
-    siteFamily: object.siteFamily,
-    pageUrlPattern: routeView.pageUrlPattern,
-    rootRoute: routeView.rootRoute,
-    currentRoute: routeView.currentRoute,
-    pageRole: object.pageRole,
-    pageModelKey: object.pageModelKey,
-    objectFingerprint: object.objectFingerprint,
-    browserContextKey: object.browserContextKey,
-    ownerType: object.ownerType,
-    sourceRoute: object.sourceRoute,
-    selectedDataSource: object.selectedDataSource,
-    sourceFreshness: object.sourceFreshness,
-    lifecycleState: object.lifecycleState,
-    tabStatus: object.tabStatus,
-    isActive: object.isActive,
-    canTabrixOperate: object.canTabrixOperate,
-    operabilityReason: object.operabilityReason,
-    primaryConclusion: object.primaryConclusion,
-    observationCount: object.observationCount,
-    facts,
-    actionTypes,
-    changedGroups: object.changedGroups,
-    firstTraceId: object.firstTraceId,
-    lastTraceId: object.lastTraceId,
-    redactionState: effectiveRedactionState,
+    objectId: object.browserObjectId,
+    tabId,
+    title,
+    url,
+    location: pageIdentity.label ?? url ?? '未知网页',
+    status: formatBrowserPageStatus(object),
+    detailReason: object.operabilityReason ?? null,
     lastObservedAt: object.lastObservedAt,
     createdAt: object.createdAt,
     updatedAt: object.updatedAt,
-    pageIdentity,
-    display: {
-      title: objectTitle(object, pageIdentity),
-      subtitle: pageIdentity.label
-        ? `${pageIdentity.label} · ${object.objectType}`
-        : object.objectType,
-      locationLabel: pageIdentity.label,
-    },
   };
+}
+
+function formatBrowserPageStatus(object: BrowserObject): MkeBrowserObjectSummary['status'] {
+  if (
+    object.lifecycleState === 'closed' ||
+    object.lifecycleState === 'removed' ||
+    object.closedAt !== null ||
+    object.operabilityReason === 'tab_closed'
+  ) {
+    return 'closed';
+  }
+  if (object.tabStatus === 'loading') return 'loading';
+  if (object.canTabrixOperate === false) return 'restricted';
+  return 'running';
 }
 
 function toKnowledgeSummary(model: KnowledgeModel): MkeKnowledgeModelSummary {
@@ -435,16 +402,6 @@ function toExperienceSummary(recipe: ExperienceRecipe): MkeExperienceRecipeSumma
   };
 }
 
-function toObjectStoragePreferences(
-  sessionManager: SessionManager,
-): MkeObjectStoragePreferencesResponseData {
-  const persistence = sessionManager.getPersistenceStatus();
-  return {
-    personalBrowserStateStorageEnabled: getPersonalBrowserStateStorageEnabled(),
-    persistenceMode: persistence.mode,
-  };
-}
-
 function toBrowserObjectsClearResponse(
   sessionManager: SessionManager,
 ): MkeBrowserObjectsClearResponseData {
@@ -492,18 +449,13 @@ export function registerMemoryRoutes(
 
   fastify.get(
     '/memory/mke/browser-objects',
-    async (request: FastifyRequest<{ Querystring: BrowserObjectsQuery }>, reply: FastifyReply) => {
+    async (request: FastifyRequest<{ Querystring: MkeListQuery }>, reply: FastifyReply) => {
       const limit = parsePositiveInt(request.query.limit, 20, MKE_LIST_LIMIT_MAX);
       const offset = parsePositiveInt(request.query.offset, 0, Number.MAX_SAFE_INTEGER);
-      const scope = parseBrowserObjectsScope(request.query.scope);
-      const browserObjects =
-        scope === 'object-graph'
-          ? sessionManager.listMkeObjectLibraryGraph(limit, offset).map(toObjectSummary)
-          : sessionManager.listRecentMkeBrowserObjects(limit, offset).map(toObjectSummary);
-      const total =
-        scope === 'object-graph'
-          ? sessionManager.countMkeObjectLibraryGraph()
-          : sessionManager.countMkeBrowserObjects();
+      const browserObjects = sessionManager
+        .listRecentMkeBrowserObjects(limit, offset)
+        .map(toObjectSummary);
+      const total = sessionManager.countMkeBrowserObjects();
       const persistence = sessionManager.getPersistenceStatus();
 
       return reply.status(HTTP_STATUS.OK).send({
@@ -526,33 +478,6 @@ export function registerMemoryRoutes(
       data: toBrowserObjectsClearResponse(sessionManager),
     });
   });
-
-  fastify.get('/memory/mke/object-storage-preferences', async (_request, reply: FastifyReply) => {
-    return reply.status(HTTP_STATUS.OK).send({
-      status: 'ok',
-      data: toObjectStoragePreferences(sessionManager),
-    });
-  });
-
-  fastify.patch(
-    '/memory/mke/object-storage-preferences',
-    async (
-      request: FastifyRequest<{ Body: ObjectStoragePreferencesBody }>,
-      reply: FastifyReply,
-    ) => {
-      if (typeof request.body?.personalBrowserStateStorageEnabled !== 'boolean') {
-        return reply.status(HTTP_STATUS.BAD_REQUEST).send({
-          status: 'error',
-          message: 'personalBrowserStateStorageEnabled must be a boolean',
-        });
-      }
-      setPersonalBrowserStateStorageEnabled(request.body.personalBrowserStateStorageEnabled);
-      return reply.status(HTTP_STATUS.OK).send({
-        status: 'ok',
-        data: toObjectStoragePreferences(sessionManager),
-      });
-    },
-  );
 
   fastify.get(
     '/memory/mke/knowledge',

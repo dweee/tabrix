@@ -357,8 +357,8 @@ The native server exposes HTTP read routes under `/memory/*` for the Chrome exte
 - `GET /memory/sessions?limit=&offset=` — recent sessions with task title + intent + `stepCount` joined in; default `limit=20`, max `500`.
 - `GET /memory/sessions/:sessionId/steps` — chronological steps for one session.
 - `GET /memory/tasks/:taskId` — single task row; 404 when unknown.
-- `GET /memory/mke/browser-objects?limit=&offset=` — Object Library summaries. By default web routes are reduced to `origin + path`, query strings and fragments are omitted, and local file paths are not exposed.
-- `GET /memory/mke/object-storage-preferences` / `PATCH /memory/mke/object-storage-preferences` — inspect or update `personalBrowserStateStorageEnabled`. Full current routes are returned only after this setting is explicitly enabled; disabling it keeps Object Library rows and returns redacted routes. Only `DELETE /memory/mke/browser-objects` clears Object Library browser objects.
+- `GET /memory/mke/browser-objects?limit=&offset=` — Object Library webpage summaries: title, URL, tab id, lifecycle status, and timestamps. Web routes are reduced to `origin + path`; query strings, fragments, local file paths, object graph internals, and source/evidence fields are not exposed.
+- `DELETE /memory/mke/browser-objects` — clears Object Library browser-page rows only; Memory traces, Knowledge models, and Experience recipes are not deleted.
 
 ## 7. `/status` semantics
 

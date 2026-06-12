@@ -39,9 +39,7 @@
               type="search"
               :aria-label="activeTab === 'object' ? '搜索对象库网页' : 'Search loaded MKE rows'"
               :placeholder="
-                activeTab === 'object'
-                  ? '搜索网页、对象、功能、网址、状态'
-                  : '搜索主题、对象、方法、网址、状态'
+                activeTab === 'object' ? '搜索网页、网址、状态' : '搜索主题、对象、方法、网址、状态'
               "
             />
           </label>
@@ -295,7 +293,11 @@ const activeLoadedCount = computed(() =>
 
 const canLoadMore = computed(() => activeLoadedCount.value < activeTotal.value);
 
-const loadMoreLabel = computed(() => `加载更多 (${activeLoadedCount.value}/${activeTotal.value})`);
+const loadMoreLabel = computed(() =>
+  activeTab.value === 'object'
+    ? '加载更多网页'
+    : `加载更多 (${activeLoadedCount.value}/${activeTotal.value})`,
+);
 
 const activeTableInfo = computed(() => {
   if (activeTab.value === 'memory') {
@@ -309,7 +311,7 @@ const activeTableInfo = computed(() => {
     return {
       kicker: '浏览器网页对象',
       label: '对象库',
-      description: '查看浏览器网页生命周期、网址和页面对象。',
+      description: '查看浏览器网页、网址和生命周期状态。',
     };
   }
   if (activeTab.value === 'knowledge') {
@@ -383,7 +385,7 @@ async function refreshAll(options: { silent?: boolean } = {}): Promise<void> {
     const [memoryData, objectData, knowledgeData, experienceData, foregroundTabId] =
       await Promise.all([
         fetchMkeMemoryTraces({ limit: memoryLimit, offset: 0 }),
-        fetchMkeBrowserObjects({ limit: objectLimit, offset: 0, scope: 'object-graph' }),
+        fetchMkeBrowserObjects({ limit: objectLimit, offset: 0 }),
         fetchMkeKnowledgeModels({ limit: knowledgeLimit, offset: 0 }),
         fetchMkeExperienceRecipes({ limit: experienceLimit, offset: 0 }),
         readLiveForegroundTabId(),
@@ -445,7 +447,6 @@ async function loadMore(): Promise<void> {
       const data = await fetchMkeBrowserObjects({
         limit: DEFAULT_MKE_PAGE_SIZE,
         offset: offsets.value.object,
-        scope: 'object-graph',
       });
       browserObjects.value = [...browserObjects.value, ...data.browserObjects];
       totals.value.object = data.total;
@@ -694,9 +695,10 @@ function formatMemoryTraceJson(trace: MkeMemoryTraceSummary): string {
 function formatObjectWebPageJson(webPage: MkeObjectWebPageView): string {
   return formatJsonDetail({
     title: webPage.title,
-    location: webPage.location,
+    url: webPage.url ?? webPage.location,
     status: webPage.lifecycleLabel,
-    sections: webPage.sections,
+    tabId: webPage.tabId ?? null,
+    detailReason: webPage.detailReason ?? null,
     updatedAt: webPage.updatedAt,
   });
 }

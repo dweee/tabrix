@@ -88,53 +88,26 @@ export type MkeBrowserObjectType =
   | 'unknown'
   | string;
 
-export interface MkeBrowserObjectDisplaySummary {
-  title: string;
-  subtitle?: string | null;
-  locationLabel?: string | null;
-}
+export type MkeBrowserPageStatus = 'foreground' | 'running' | 'loading' | 'closed' | 'restricted';
 
 /**
- * Sanitized projection of `tabrix_browser_objects`.
+ * Product projection of browser tab/page lifecycle records.
  *
- * The Object Library is a current browser/page-object fact layer. List views
- * receive only user-readable fields and small allowlisted facts; raw DOM,
- * page text, request/response payloads, and sensitive values stay out of the
- * API contract.
+ * The Object Library answers one product question: which browser pages can the
+ * AI reason about next? Internal object graph fields, source traces, evidence
+ * markers, raw facts, and action/API counts stay out of this public contract.
  */
 export interface MkeBrowserObjectSummary {
-  browserObjectId: string;
-  objectType: MkeBrowserObjectType;
-  siteFamily: string;
-  pageUrlPattern?: string | null;
-  rootRoute?: string | null;
-  currentRoute?: string | null;
-  pageRole?: string | null;
-  pageModelKey: string;
-  objectFingerprint: string;
-  browserContextKey?: string | null;
-  ownerType?: string | null;
-  sourceRoute?: string | null;
-  selectedDataSource?: string | null;
-  sourceFreshness?: string | null;
-  lifecycleState?: string | null;
-  tabStatus?: string | null;
-  isActive?: boolean | null;
-  canTabrixOperate?: boolean | null;
-  operabilityReason?: string | null;
-  primaryConclusion?: string | null;
-  observationCount: number;
-  facts?: Record<string, unknown> | null;
-  actionTypes?: string[];
-  changedGroups?: unknown;
-  firstTraceId?: string | null;
-  lastTraceId?: string | null;
-  redactionState: string;
+  objectId: string;
+  tabId?: string | null;
+  title: string;
+  url?: string | null;
+  location: string;
+  status: MkeBrowserPageStatus;
+  detailReason?: string | null;
   lastObservedAt?: string | null;
   createdAt: string;
   updatedAt: string;
-  pageIdentity?: MkePageIdentitySummary;
-  display?: MkeBrowserObjectDisplaySummary;
 }
 
 /**
@@ -211,11 +184,6 @@ export interface MkeBrowserObjectsResponseData {
   total: number;
   limit: number;
   offset: number;
-  persistenceMode: MemoryPersistenceMode;
-}
-
-export interface MkeObjectStoragePreferencesResponseData {
-  personalBrowserStateStorageEnabled: boolean;
   persistenceMode: MemoryPersistenceMode;
 }
 
