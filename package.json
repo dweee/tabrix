@@ -37,6 +37,7 @@
     "deps:outdated": "pnpm -r outdated",
     "audit": "node ./scripts/audit-prod.mjs",
     "docs:check": "node ./scripts/check-docs.mjs",
+    "governance:public": "node ./scripts/check-public-governance.mjs",
     "governance:console": "node ./scripts/check-console-governance.mjs",
     "governance:extension-logs": "node ./scripts/check-extension-production-logs.mjs",
     "i18n:check": "node ./scripts/check-i18n.mjs",

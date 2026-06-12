@@ -12,6 +12,9 @@ site state:
 - `check-docs.mjs` (`pnpm run docs:check`)
 - `check-i18n.mjs` (`pnpm run i18n:check`)
 - `check-bundle-size.mjs` (`pnpm run size:check`)
+- `check-public-governance.mjs` (`pnpm run governance:public`) — report-only
+  scan for public SoT presence, architecture boundary warnings, large source
+  files, and SQLite table manifest summaries.
 - `check-console-governance.mjs` (`pnpm run governance:console`)
 - `audit-prod.mjs` (`pnpm run audit`)
 - `check-release-readiness.mjs` (`pnpm run release:check`)
