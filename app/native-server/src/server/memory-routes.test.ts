@@ -103,7 +103,6 @@ async function seedMkeRows(): Promise<void> {
     rubricVersion: 'tabrix_ai_business_feedback_v1',
     evaluatorModel: 'jest-ai-evaluator',
     userGoalSnapshot: 'inspect page and click action',
-    evidenceRefs: [clickTrace.traceId],
     experienceCandidate: true,
     sourceToolName: 'chrome_click_element',
     sourceToolCallId: 'feedback-call-2',
@@ -189,6 +188,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     const removedSyntheticPayloadKey = ['system', 'Evidence'].join('');
     expect(res.body.data.traces[0]).not.toHaveProperty(removedSyntheticScoreKey);
     expect(res.body.data.traces[0]).not.toHaveProperty(removedSyntheticPayloadKey);
+    expect(JSON.stringify(res.body.data.traces[0])).not.toContain('evidenceRefs');
     expect(res.body.data.traces[0]).not.toHaveProperty('businessSuccess');
     expect(res.body.data.traces[0]).not.toHaveProperty('aiFeedbackScore');
     expect(res.body.data.traces[0]).not.toHaveProperty('statusView');
@@ -202,6 +202,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.traces[0]).not.toHaveProperty('sourceRoute');
     expect(res.body.data.traces[0]).not.toHaveProperty('selectedDataSource');
     expect(res.body.data.traces[0]).not.toHaveProperty('tokenTotal');
+    expect(res.body.data.traces[0]).not.toHaveProperty('resultSummary');
     expect(res.body.data.traces[0].pageIdentity.label).toBe('example.test');
     expect(res.body.data.traces[0]).not.toHaveProperty('requestParams');
     expect(res.body.data.traces[0]).not.toHaveProperty('response');
@@ -217,9 +218,11 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     });
     expect(res.body.data.traces[1]).not.toHaveProperty(removedSyntheticScoreKey);
     expect(res.body.data.traces[1]).not.toHaveProperty(removedSyntheticPayloadKey);
+    expect(JSON.stringify(res.body.data.traces[1])).not.toContain('evidenceRefs');
     expect(res.body.data.traces[1]).not.toHaveProperty('businessSuccess');
     expect(res.body.data.traces[1]).not.toHaveProperty('aiFeedbackScore');
     expect(res.body.data.traces[1]).not.toHaveProperty('statusView');
+    expect(res.body.data.traces[1]).not.toHaveProperty('resultSummary');
     expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('rawInput');
     expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('response');
     expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('sourceKind');
@@ -299,7 +302,6 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       confidence: 0.91,
       reasonCode: 'ai_overstated_completion',
       summary: 'AI thought the filter was applied',
-      evidenceRefs: [trace.traceId],
       receivedAt: '2026-06-06T11:00:00.090Z',
     });
 
@@ -697,13 +699,17 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.total).toBe(1);
     expect(res.body.data.experienceRecipes[0]).toMatchObject({
       redactionState: 'template_only',
-      successCount: 1,
       linkedKnowledgeCount: 1,
     });
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('steps');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('preconditions');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('sourceTraceIds');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('sourceTraceCount');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('successCount');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('failureCount');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('adoptionCount');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('avgDurationMs');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('avgTokenTotal');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('reliabilityScore');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('speedScore');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('tokenSavingScore');

@@ -377,6 +377,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain('sequenceIndex: trace.sequenceIndex');
     expect(tabSource).not.toContain('sourceRoute: trace.sourceRoute');
     expect(tabSource).not.toContain('selectedDataSource: trace.selectedDataSource');
+    expect(tabSource).not.toContain('resultSummary: trace.resultSummary');
     expect(tabSource).not.toContain('freshness: trace.freshness');
     expect(tabSource).not.toContain('redactionState: trace.redactionState');
     expect(tabSource).not.toContain('execution: {');

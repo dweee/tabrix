@@ -68,13 +68,12 @@ contract on `ReadPageHighValueObject` continues to be emitted.
 - **`B-006`** — Memory tab status filter chips + search +
   "jump to last failure" button; covered by extension tests.
 
-### Stage 3f — Policy capability opt-in (v1 slice)
+### Stage 3f — Policy capability opt-in (historical v1 slice)
 
-- **`B-016`** v1 — `TabrixCapability` enum + `TABRIX_POLICY_CAPABILITIES` env
-  parser, gated alongside the existing `TABRIX_POLICY_ALLOW_P3` (no migration /
-  no deprecation pressure yet). v1 ships only the `api_knowledge` capability;
-  per-tool capability annotations and the `MemoryAction.policyCapabilities`
-  audit field were deferred and are not part of the current AI feedback write-back path.
+- **`B-016`** v1 — an experimental capability-gating slice was explored for
+  API Knowledge. Current AI feedback write-back uses the native
+  `memory_record_ai_feedback` tool directly; this release note should not be
+  read as requiring a Memory feedback capability switch.
 
 ### Stage 3g — API Knowledge capture v1
 
@@ -206,9 +205,9 @@ All first-party packages move to `2.2.0`:
 - `chrome_click_element` adds an _optional_ `postClickState` to its
   response (B-023 / B-024). Clients that ignore unknown response fields
   are unaffected.
-- `TABRIX_POLICY_CAPABILITIES` runs alongside the existing
-  `TABRIX_POLICY_ALLOW_P3`; no environment variable was removed or
-  renamed.
+- The experimental capability-gating slice from Stage 3f was historical.
+  Current AI feedback write-back is available through `memory_record_ai_feedback`
+  without a separate Memory feedback capability switch.
 - No CLI / transport / diagnostics public surface changes.
 
 ## Upgrade

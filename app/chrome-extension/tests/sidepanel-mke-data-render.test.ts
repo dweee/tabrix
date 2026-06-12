@@ -32,6 +32,7 @@ describe('MkeDataTab render smoke', () => {
     expect(source).not.toContain('mke-webpage-detail');
     expect(source).not.toContain('mke-object-detail-tabs');
     expect(source).not.toContain('mke-object-footer-actions');
+    expect(source).not.toContain('resultSummary: trace.resultSummary');
     expect(source).not.toContain('function objectToRecord(object: MkeBrowserObjectSummary)');
     expect(source).not.toContain('function formatObjectRuntimeState');
   });

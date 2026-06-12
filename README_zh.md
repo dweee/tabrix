@@ -203,7 +203,7 @@ Tabrix 当前正式支持两条 MCP 主链路：
 - 内容读取（网页内容、可交互元素、控制台）
 - 网络捕获与请求重放辅助
 - Knowledge 辅助的数据源路由：当观察到或种子化的 endpoint 安全可用时，走更紧凑的读取路径
-- Operation Memory 日志：记录任务/会话/步骤证据，包括路由、fallback、耗时、节省 token 和 tab hygiene 元数据
+- Operation Memory 日志：记录 AI 让 Tabrix 做了什么、耗时、页面上下文，以及后续 AI评价所需信息
 - 截图、GIF 录制、性能追踪分析
 - 书签/历史记录操作与 JS 执行
 
@@ -216,7 +216,7 @@ Tabrix 正在朝 MKEP 模型演进：Memory 记录发生了什么，Knowledge �
 - Endpoint Knowledge 记录 endpoint pattern、语义提示、confidence 和 shape summary；不存 API response body、cookie、Authorization 或 raw request body。
 - 已知公开场景的 seed adapter 仍是过渡路径。任意网站 observed endpoint 的通用复用是路线图方向，不是当前对所有网站的保证。
 - 当 endpoint 不可用、不安全或语义不确定时，Tabrix 应 fallback 到 scoped DOM reading，而不是把接口路径当成绝对权威。
-- Operation Memory 日志是诊断和报告用的事实证据，不是自动发布 Experience，也不是用户数据缓存。
+- Operation Memory 日志是浏览器操作记录。Experience 只从 AI评价通过的成功记录中沉淀；Memory 不是用户数据缓存。
 
 ### CLI 命令总览
 

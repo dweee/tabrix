@@ -204,7 +204,7 @@ Turn on `Remote Access` in extension popup and expose:
 - Rich extraction (web content, interactive elements, console)
 - Network capture and request replay helpers
 - Knowledge-assisted data-source routing for compact read paths when an observed or seeded endpoint is safe to use
-- Operation Memory logs for task/session/step evidence, including route, fallback, timing, token-saving, and tab-hygiene metadata
+- Operation Memory records AI-to-Tabrix browser steps, timing, page context, and AI evaluation input for future Experience mining
 - Screenshot, GIF recording, performance trace analysis
 - Bookmarks/history operations and JavaScript execution
 
@@ -217,7 +217,7 @@ Current public boundaries:
 - Endpoint Knowledge records endpoint patterns, semantic hints, confidence, and shape summaries; it does not store API response bodies, cookies, Authorization values, or raw request bodies.
 - Seed adapters for known public scenarios may still be used as transition paths. Generic observed-endpoint reuse across arbitrary sites is a roadmap direction, not a universal product guarantee.
 - When an endpoint is unavailable, unsafe, or semantically uncertain, Tabrix should fall back to scoped DOM reading instead of treating the API path as authoritative.
-- Operation Memory logs are factual evidence for diagnostics and reports. They are not automatic Experience publishing or user-data caching.
+- Operation Memory logs are browser-operation records. Experience is mined only from AI-approved successful traces; Memory is not a user-data cache.
 
 ### CLI Commands
 

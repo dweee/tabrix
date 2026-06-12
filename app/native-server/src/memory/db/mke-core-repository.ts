@@ -147,7 +147,6 @@ export interface MemoryFeedbackEventInput {
   confidence?: number | null;
   reasonCode?: string | null;
   summary?: string | null;
-  evidenceRefs?: string[];
   userGoalSnapshot?: string | null;
   experienceCandidate?: boolean | null;
   sourceToolName?: string | null;
@@ -175,7 +174,6 @@ export interface MemoryFeedbackEvent {
   confidence: number | null;
   reasonCode: string | null;
   summary: string | null;
-  evidenceRefs: string[];
   userGoalSnapshot: string | null;
   experienceCandidate: boolean;
   sourceToolName: string | null;
@@ -250,7 +248,6 @@ interface MemoryFeedbackEventRow {
   confidence: number | null;
   reason_code: string | null;
   summary: string | null;
-  evidence_refs_blob: string;
   user_goal_snapshot: string | null;
   experience_candidate: number;
   source_tool_name: string | null;
@@ -336,7 +333,6 @@ function rowToMemoryFeedbackEvent(row: MemoryFeedbackEventRow): MemoryFeedbackEv
     confidence: row.confidence,
     reasonCode: row.reason_code,
     summary: row.summary,
-    evidenceRefs: parseStringArray(row.evidence_refs_blob),
     userGoalSnapshot: row.user_goal_snapshot,
     experienceCandidate: row.experience_candidate === 1,
     sourceToolName: row.source_tool_name,
@@ -398,14 +394,14 @@ export class MemoryTraceRepository {
         (feedback_event_id, trace_id, task_id, tool_name, tool_call_id, sequence_index,
          trace_binding_hash, evaluation_scope, evaluation_version, rubric_version,
          evaluator_model, business_status, confidence, reason_code, summary,
-         evidence_refs_blob, user_goal_snapshot, experience_candidate,
+         user_goal_snapshot, experience_candidate,
          source_tool_name, source_tool_call_id, accepted,
          rejection_code, rejection_message, payload_blob, created_at)
        VALUES
         (@feedback_event_id, @trace_id, @task_id, @tool_name, @tool_call_id, @sequence_index,
          @trace_binding_hash, @evaluation_scope, @evaluation_version, @rubric_version,
          @evaluator_model, @business_status, @confidence, @reason_code, @summary,
-         @evidence_refs_blob, @user_goal_snapshot, @experience_candidate,
+         @user_goal_snapshot, @experience_candidate,
          @source_tool_name, @source_tool_call_id, @accepted,
          @rejection_code, @rejection_message, @payload_blob, @created_at)`,
     );
@@ -521,7 +517,6 @@ export class MemoryTraceRepository {
       confidence: optionalNumber(input.confidence),
       reason_code: input.reasonCode ?? null,
       summary: input.summary ?? null,
-      evidence_refs_blob: requiredBlob(input.evidenceRefs ?? []),
       user_goal_snapshot: input.userGoalSnapshot ?? null,
       experience_candidate: input.experienceCandidate === true ? 1 : 0,
       source_tool_name: input.sourceToolName ?? null,
@@ -989,10 +984,6 @@ export interface ExperienceRecipeInput {
   adoptionCount?: number;
   avgDurationMs?: number | null;
   avgTokenTotal?: number | null;
-  reliabilityScore?: number | null;
-  speedScore?: number | null;
-  tokenSavingScore?: number | null;
-  usefulnessScore?: number | null;
   driftState?: string | null;
   portabilityScope?: string;
   originKind?: string;
@@ -1021,10 +1012,6 @@ export interface ExperienceRecipe extends Required<
     | 'linkedKnowledgeIds'
     | 'avgDurationMs'
     | 'avgTokenTotal'
-    | 'reliabilityScore'
-    | 'speedScore'
-    | 'tokenSavingScore'
-    | 'usefulnessScore'
     | 'driftState'
     | 'originPackageId'
     | 'compatibility'
@@ -1043,10 +1030,6 @@ export interface ExperienceRecipe extends Required<
   linkedKnowledgeIds: string[];
   avgDurationMs: number | null;
   avgTokenTotal: number | null;
-  reliabilityScore: number | null;
-  speedScore: number | null;
-  tokenSavingScore: number | null;
-  usefulnessScore: number | null;
   driftState: string | null;
   originPackageId: string | null;
   compatibility: unknown | null;
@@ -1098,10 +1081,6 @@ interface ExperienceRecipeRow {
   adoption_count: number;
   avg_duration_ms: number | null;
   avg_token_total: number | null;
-  reliability_score: number | null;
-  speed_score: number | null;
-  token_saving_score: number | null;
-  usefulness_score: number | null;
   drift_state: string | null;
   portability_scope: string;
   origin_kind: string;
@@ -1140,10 +1119,6 @@ function rowToExperienceRecipe(row: ExperienceRecipeRow): ExperienceRecipe {
     adoptionCount: row.adoption_count,
     avgDurationMs: row.avg_duration_ms,
     avgTokenTotal: row.avg_token_total,
-    reliabilityScore: row.reliability_score,
-    speedScore: row.speed_score,
-    tokenSavingScore: row.token_saving_score,
-    usefulnessScore: row.usefulness_score,
     driftState: row.drift_state,
     portabilityScope: row.portability_scope,
     originKind: row.origin_kind,
@@ -1178,8 +1153,7 @@ export class ExperienceRecipeRepository {
          recipe_version, site_family, page_model_key, page_role, preconditions_blob,
          variable_schema_blob, steps_blob, success_check_blob, recovery_blob,
          source_trace_ids_blob, linked_knowledge_ids_blob, success_count, failure_count,
-         adoption_count, avg_duration_ms, avg_token_total, reliability_score, speed_score,
-         token_saving_score, usefulness_score, drift_state, portability_scope, origin_kind,
+         adoption_count, avg_duration_ms, avg_token_total, drift_state, portability_scope, origin_kind,
          origin_package_id, compatibility_blob, export_state, import_state, redaction_state,
          archived_at, last_used_at, last_verified_at, created_at, updated_at)
        VALUES
@@ -1187,8 +1161,7 @@ export class ExperienceRecipeRepository {
          @recipe_version, @site_family, @page_model_key, @page_role, @preconditions_blob,
          @variable_schema_blob, @steps_blob, @success_check_blob, @recovery_blob,
          @source_trace_ids_blob, @linked_knowledge_ids_blob, @success_count, @failure_count,
-         @adoption_count, @avg_duration_ms, @avg_token_total, @reliability_score, @speed_score,
-         @token_saving_score, @usefulness_score, @drift_state, @portability_scope, @origin_kind,
+         @adoption_count, @avg_duration_ms, @avg_token_total, @drift_state, @portability_scope, @origin_kind,
          @origin_package_id, @compatibility_blob, @export_state, @import_state, @redaction_state,
          @archived_at, @last_used_at, @last_verified_at, @created_at, @updated_at)
        ON CONFLICT(recipe_fingerprint, recipe_version) DO UPDATE SET
@@ -1214,7 +1187,6 @@ export class ExperienceRecipeRepository {
         SET success_count = success_count + @success_delta,
             failure_count = failure_count + @failure_delta,
             adoption_count = adoption_count + @adoption_delta,
-            reliability_score = @reliability_score,
             last_used_at = @last_used_at,
             updated_at = @updated_at
         WHERE experience_id = @experience_id`,
@@ -1231,7 +1203,7 @@ export class ExperienceRecipeRepository {
     this.findByScenarioStmt = db.prepare(
       `SELECT * FROM tabrix_experience_recipes
         WHERE scenario_key = ? AND archived_at IS NULL
-        ORDER BY reliability_score IS NULL ASC, reliability_score DESC, updated_at DESC
+        ORDER BY updated_at DESC, created_at DESC
         LIMIT ?`,
     );
     this.archiveStmt = db.prepare(
@@ -1266,10 +1238,6 @@ export class ExperienceRecipeRepository {
       adoption_count: optionalInteger(input.adoptionCount) ?? 0,
       avg_duration_ms: optionalInteger(input.avgDurationMs),
       avg_token_total: optionalInteger(input.avgTokenTotal),
-      reliability_score: optionalNumber(input.reliabilityScore),
-      speed_score: optionalNumber(input.speedScore),
-      token_saving_score: optionalNumber(input.tokenSavingScore),
-      usefulness_score: optionalNumber(input.usefulnessScore),
       drift_state: input.driftState ?? null,
       portability_scope: input.portabilityScope ?? 'local',
       origin_kind: input.originKind ?? 'local_mined',
@@ -1322,7 +1290,6 @@ export class ExperienceRecipeRepository {
     experienceId: string;
     successful: boolean;
     adopted?: boolean;
-    reliabilityScore?: number | null;
     nowIso: string;
   }): void {
     this.updateOutcomeStmt.run({
@@ -1330,7 +1297,6 @@ export class ExperienceRecipeRepository {
       success_delta: input.successful ? 1 : 0,
       failure_delta: input.successful ? 0 : 1,
       adoption_delta: input.adopted ? 1 : 0,
-      reliability_score: optionalNumber(input.reliabilityScore),
       last_used_at: input.nowIso,
       updated_at: input.nowIso,
     });

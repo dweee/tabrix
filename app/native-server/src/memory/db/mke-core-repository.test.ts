@@ -44,8 +44,6 @@ function templateRecipe(overrides = {}) {
     recovery: { retry: 'fresh read then same-tab target resolution' },
     sourceTraceIds: ['trace-1'],
     linkedKnowledgeIds: ['knowledge-1'],
-    reliabilityScore: 0.8,
-    usefulnessScore: 0.7,
     exportState: 'exportable',
     redactionState: 'template_only',
     createdAt: NOW,
@@ -442,7 +440,6 @@ describe('MKE core repositories', () => {
         experienceId: recipe.experienceId,
         successful: true,
         adopted: true,
-        reliabilityScore: 0.9,
         nowIso: '2026-06-06T10:10:00.000Z',
       });
 

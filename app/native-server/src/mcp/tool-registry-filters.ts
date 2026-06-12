@@ -13,6 +13,10 @@ export const SENSITIVE_TOOL_NAMES: ReadonlySet<string> = new Set([
   TOOL_NAMES.BROWSER.FILE_UPLOAD,
 ]);
 
+const CORE_LEARNING_TOOL_NAMES: ReadonlySet<string> = new Set([
+  TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK,
+]);
+
 function parseToolList(value?: string): Set<string> {
   return new Set(
     (value || '')
@@ -27,11 +31,15 @@ export function filterToolsByEnvironment(tools: Tool[]): Tool[] {
   const disabledTools = parseToolList(process.env.DISABLE_MCP_TOOLS);
 
   if (enabledTools.size > 0) {
-    return tools.filter((tool) => enabledTools.has(tool.name));
+    return tools.filter(
+      (tool) => enabledTools.has(tool.name) || CORE_LEARNING_TOOL_NAMES.has(tool.name),
+    );
   }
 
   if (disabledTools.size > 0) {
-    return tools.filter((tool) => !disabledTools.has(tool.name));
+    return tools.filter(
+      (tool) => !disabledTools.has(tool.name) || CORE_LEARNING_TOOL_NAMES.has(tool.name),
+    );
   }
 
   if (process.env.MCP_DISABLE_SENSITIVE_TOOLS === 'true') {

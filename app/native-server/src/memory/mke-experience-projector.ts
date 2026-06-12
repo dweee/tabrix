@@ -220,14 +220,6 @@ function buildStepTemplate(trace: MemoryTrace, order: number): Record<string, un
   };
 }
 
-function scoreReliability(actionTraces: MemoryTrace[]): number {
-  if (actionTraces.length === 0) return 0;
-  const successful = actionTraces.filter(
-    (trace) => trace.toolSuccess === true && isBusinessAchieved(trace),
-  ).length;
-  return Math.round((successful / actionTraces.length) * 1000) / 1000;
-}
-
 function buildRecipeFingerprint(input: {
   siteFamily: string;
   pageModelKey: string;
@@ -330,7 +322,6 @@ function buildRecipeInput(
     successCount: 1,
     failureCount: 0,
     avgDurationMs: basis.avgDurationMs,
-    reliabilityScore: scoreReliability(basis.actionTraces),
     driftState: 'unverified_template',
     portabilityScope: 'local',
     originKind: 'local_mined',

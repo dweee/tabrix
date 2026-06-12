@@ -172,10 +172,12 @@ describe('MkeMemoryTraceService', () => {
       expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)[0]).toMatchObject({
         traceId: trace.traceId,
         businessStatus: 'achieved',
-        evidenceRefs: [],
         experienceCandidate: true,
         accepted: true,
       });
+      expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)[0]).not.toHaveProperty(
+        'evidenceRefs',
+      );
     } finally {
       traceService.discardPendingAsyncWrites();
       db.close();
@@ -256,10 +258,12 @@ describe('MkeMemoryTraceService', () => {
       expect(updated?.aiFeedback).not.toHaveProperty('userGoalSnapshot');
       expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)[0]).toMatchObject({
         businessStatus: 'achieved',
-        evidenceRefs: [],
         experienceCandidate: true,
         accepted: true,
       });
+      expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)[0]).not.toHaveProperty(
+        'evidenceRefs',
+      );
     } finally {
       traceService.discardPendingAsyncWrites();
       db.close();
@@ -564,7 +568,7 @@ describe('MkeMemoryTraceService', () => {
       });
 
       expect(traceRepo.count()).toBe(0);
-      expect(browserObjectRepo.countCurrentBrowserSurface()).toBe(3);
+      expect(browserObjectRepo.countCurrentBrowserSurface()).toBe(2);
       const objects = browserObjectRepo.listCurrentBrowserSurface({ limit: 10, offset: 0 });
       const tab = objects.find((object) => object.objectType === 'tab' && object.tabId === 21);
       const closedTab = objects.find(

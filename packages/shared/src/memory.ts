@@ -69,7 +69,6 @@ export interface MkeMemoryTraceSummary {
   responseAt: string;
   durationMs?: number | null;
   aiFeedback?: MkeMemoryAiFeedbackSummary | null;
-  resultSummary?: string | null;
   siteFamily?: string | null;
   pageUrlPattern?: string | null;
   pageRole?: string | null;
@@ -150,11 +149,6 @@ export interface MkeExperienceRecipeSummary {
   siteFamily?: string | null;
   pageModelKey?: string | null;
   pageRole?: string | null;
-  successCount: number;
-  failureCount: number;
-  adoptionCount: number;
-  avgDurationMs?: number | null;
-  avgTokenTotal?: number | null;
   driftState?: string | null;
   portabilityScope: string;
   originKind: string;

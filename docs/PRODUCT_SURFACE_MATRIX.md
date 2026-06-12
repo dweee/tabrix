@@ -37,7 +37,7 @@ This matrix is the public source of truth for capability classification.
 | Knowledge Registry (site/page/object seed data, currently GitHub anchored) | `Beta` | MKEP Knowledge layer seed for registry first page understanding |
 | Endpoint Knowledge and data-source lineage (`observed` / `seed_adapter` / `manual_seed`) | `Beta` | Records endpoint capability and provenance without storing raw API results |
 | Knowledge-assisted compact read paths | `Beta` | Lets read operations use safe endpoint-shaped data when available, with DOM fallback when not |
-| Operation Memory logs | `Beta` | Records factual task/session/step evidence for routing, fallback, timing, token savings, and tab hygiene |
+| Operation Memory logs | `Beta` | Records AI-to-Tabrix browser steps, timing, page context, and AI evaluation input for future Experience mining |
 | Memory persistence (Session / Task / Step / PageSnapshot / Action in SQLite) | `Beta` | MKEP Memory layer; survives SW / native server restarts |
 | Multi client compatibility guidance | `Beta` | Important for adoption, but should not outrun core reliability |
 | Generic observed-endpoint reuse across arbitrary site families | `Experimental` | Strategic direction; should not be marketed as a universal guarantee until broader real-site evidence exists |
@@ -67,7 +67,7 @@ Today, Tabrix should primarily be described as:
 1. A way to turn a real daily Chrome session into an AI executable runtime
 2. A browser automation layer exposed through MCP
 3. A local first and remotely callable system with diagnostics and recovery
-4. A policy-routed execution layer that can use Memory and Knowledge to reduce unnecessary page reads when the evidence is safe
+4. An execution layer that can use Memory and Knowledge to reduce unnecessary page reads when the learned context is reliable
 
 It should not primarily be described as:
 

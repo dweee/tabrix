@@ -1262,7 +1262,6 @@ export class MkeMemoryTraceService {
         confidence,
         reasonCode: input.reasonCode ?? null,
         summary: input.summary ?? null,
-        evidenceRefs: [],
         userGoalSnapshot: null,
         experienceCandidate: experienceReady,
         sourceToolName: input.sourceToolName ?? null,

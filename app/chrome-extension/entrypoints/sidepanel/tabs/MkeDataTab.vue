@@ -687,7 +687,6 @@ function formatMemoryTraceJson(trace: MkeMemoryTraceSummary): string {
       pageUrlPattern: trace.pageUrlPattern,
       pageRole: trace.pageRole,
     },
-    resultSummary: trace.resultSummary,
     createdAt: trace.createdAt,
   });
 }
@@ -727,10 +726,6 @@ function formatExperienceDetailJson(recipe: MkeExperienceRecipeSummary): string 
     pageRole: recipe.pageRole,
     pageModel: recipe.pageModelKey,
     status: '可复用',
-    successCount: recipe.successCount,
-    failureCount: recipe.failureCount,
-    adoptionCount: recipe.adoptionCount,
-    averageDurationMs: recipe.avgDurationMs,
     portabilityScope: recipe.portabilityScope,
     lastUsedAt: recipe.lastUsedAt,
     lastVerifiedAt: recipe.lastVerifiedAt,

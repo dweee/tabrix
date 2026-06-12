@@ -87,7 +87,6 @@ CREATE TABLE IF NOT EXISTS tabrix_memory_feedback_events (
   confidence              REAL,
   reason_code             TEXT,
   summary                 TEXT,
-  evidence_refs_blob      TEXT NOT NULL DEFAULT '[]',
   user_goal_snapshot      TEXT,
   experience_candidate    INTEGER NOT NULL DEFAULT 0,
   source_tool_name        TEXT,
@@ -160,10 +159,6 @@ CREATE TABLE IF NOT EXISTS tabrix_experience_recipes (
   adoption_count             INTEGER NOT NULL DEFAULT 0,
   avg_duration_ms            INTEGER,
   avg_token_total            INTEGER,
-  reliability_score          REAL,
-  speed_score                REAL,
-  token_saving_score         REAL,
-  usefulness_score           REAL,
   drift_state                TEXT,
   portability_scope          TEXT NOT NULL DEFAULT 'local',
   origin_kind                TEXT NOT NULL DEFAULT 'local_mined',
@@ -183,8 +178,6 @@ CREATE TABLE IF NOT EXISTS tabrix_experience_recipes (
 
 CREATE INDEX IF NOT EXISTS tabrix_experience_recipes_lookup_idx
   ON tabrix_experience_recipes(site_family, page_model_key, page_role, task_signature);
-CREATE INDEX IF NOT EXISTS tabrix_experience_recipes_score_idx
-  ON tabrix_experience_recipes(reliability_score, usefulness_score);
 CREATE INDEX IF NOT EXISTS tabrix_experience_recipes_import_export_idx
   ON tabrix_experience_recipes(export_state, import_state, updated_at);
 `;
@@ -501,7 +494,7 @@ export const MEMORY_DB_ACTIVE_TABLE_MANIFEST = [
     name: 'tabrix_experience_recipes',
     layer: 'mke_experience',
     surface: 'mke_sidepanel',
-    purpose: 'Template-only reusable recipe store derived from successful Memory evidence.',
+    purpose: 'Template-only reusable recipe store derived from AI-approved Memory traces.',
     retention: 'projection_gap',
   },
   {

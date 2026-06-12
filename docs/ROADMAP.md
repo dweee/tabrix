@@ -31,7 +31,7 @@ It is the combination of:
 - MCP-native access for AI assistants
 - local-first deployment with optional remote access
 - diagnostics and recovery for day-to-day operation
-- Memory and Knowledge evidence that can help assistants choose smaller, safer read paths instead of defaulting to full-page context
+- Memory and Knowledge records that help assistants choose smaller, safer read paths instead of defaulting to full-page context
 
 This is the path most likely to make Tabrix uniquely useful for Codex, Claude Desktop, Cursor, Cline, and similar MCP-connected assistants.
 
@@ -46,7 +46,7 @@ Current near-term priorities and recently delivered capabilities:
 - reduce first-success friction for new users and contributors
 - browser auto-launch and recovery when an assistant calls Tabrix and Chrome is not ready
 
-**Page reading & AI-facing evidence (delivered v2.7):**
+**Page reading & AI-facing context (delivered v2.7):**
 
 - structured L0/L1/L2 layered page reading with task protocol and complexity-aware source routing
 - AI-facing task state verdicts (`BrowserTaskStateVerdict`) and data-source routing evidence (`BrowserDataSourceDecisionEvidence`)
@@ -82,7 +82,7 @@ Important boundary: public roadmap items about endpoint knowledge mean storing e
 Longer-term public directions:
 
 - MKEP Experience reuse: per-site reusable recipes that let repeated tasks skip redundant page reads
-- reviewed Memory-to-Experience candidate extraction, with human or policy approval before high-confidence reuse
+- Memory-to-Experience extraction from AI-approved successful traces, with conservative replay checks before reuse
 - community sharing / import / export of Experience packs
 - replay artifacts for failed flows and nightly regression diagnosis
 - safer team collaboration and multi-operator browser workflows

@@ -384,18 +384,18 @@ Session lifecycle:
 
 ## 8. Environment variables
 
-| Variable                      | Description                                                                                   | Default     |
-| ----------------------------- | --------------------------------------------------------------------------------------------- | ----------- |
-| `CHROME_MCP_PORT`             | Preferred MCP HTTP port.                                                                      | `12306`     |
-| `MCP_HTTP_PORT`               | Backward-compatible alias for the port.                                                       | `12306`     |
-| `MCP_HTTP_HOST`               | Override the listen address (higher priority than `~/.tabrix/config.json`).                   | `127.0.0.1` |
-| `MCP_AUTH_TOKEN`              | Force a specific Bearer token (disables automatic rotation).                                  | (unset)     |
-| `MCP_AUTH_TOKEN_TTL`          | Default token TTL in days. `0` means never expire.                                            | `7`         |
-| `MCP_ALLOWED_WORKSPACE_BASE`  | Additional allowed workspace directory.                                                       | (none)      |
-| `CHROME_MCP_NODE_PATH`        | Override the Node.js executable used by the native host.                                      | (auto)      |
-| `ENABLE_MCP_TOOLS`            | Allow-list mode — only expose the listed tools (comma-separated).                             | (all)       |
-| `DISABLE_MCP_TOOLS`           | Deny-list mode — hide the listed tools.                                                       | (none)      |
-| `MCP_DISABLE_SENSITIVE_TOOLS` | Set to `true` to disable `chrome_javascript`, `chrome_bookmark_delete`, `chrome_upload_file`. | `false`     |
+| Variable                      | Description                                                                                                        | Default     |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------- |
+| `CHROME_MCP_PORT`             | Preferred MCP HTTP port.                                                                                           | `12306`     |
+| `MCP_HTTP_PORT`               | Backward-compatible alias for the port.                                                                            | `12306`     |
+| `MCP_HTTP_HOST`               | Override the listen address (higher priority than `~/.tabrix/config.json`).                                        | `127.0.0.1` |
+| `MCP_AUTH_TOKEN`              | Force a specific Bearer token (disables automatic rotation).                                                       | (unset)     |
+| `MCP_AUTH_TOKEN_TTL`          | Default token TTL in days. `0` means never expire.                                                                 | `7`         |
+| `MCP_ALLOWED_WORKSPACE_BASE`  | Additional allowed workspace directory.                                                                            | (none)      |
+| `CHROME_MCP_NODE_PATH`        | Override the Node.js executable used by the native host.                                                           | (auto)      |
+| `ENABLE_MCP_TOOLS`            | Allow-list mode — expose the listed tools. Core learning write-back (`memory_record_ai_feedback`) stays available. | (all)       |
+| `DISABLE_MCP_TOOLS`           | Deny-list mode — hide the listed tools except core learning write-back (`memory_record_ai_feedback`).              | (none)      |
+| `MCP_DISABLE_SENSITIVE_TOOLS` | Set to `true` to disable `chrome_javascript`, `chrome_bookmark_delete`, `chrome_upload_file`.                      | `false`     |
 
 ---
 
