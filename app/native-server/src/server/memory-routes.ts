@@ -38,6 +38,7 @@ import { HTTP_STATUS } from '../constant';
 import type { SessionManager } from '../execution/session-manager';
 import type { BrowserObject, ExperienceRecipe, KnowledgeModel, MemoryTrace } from '../memory/db';
 import { sessionManager as defaultSessionManager } from '../execution/session-manager';
+import { shouldRequestAiFeedbackForTool } from '../memory/ai-feedback-requirement';
 import { summarizeBrowserRouteForPrivacy } from '../policy/browser-state-privacy';
 
 const MKE_LIST_LIMIT_MAX = 100;
@@ -228,6 +229,7 @@ function toTraceSummary(trace: MemoryTrace): MkeMemoryTraceSummary {
     requestAt: trace.requestAt,
     responseAt: trace.responseAt,
     durationMs: trace.durationMs,
+    aiFeedbackRequired: shouldRequestAiFeedbackForTool(trace.toolName),
     aiFeedback,
     siteFamily: trace.siteFamily,
     pageUrlPattern: trace.pageUrlPattern,
@@ -350,6 +352,81 @@ function formatBrowserPageStatus(object: BrowserObject): MkeBrowserObjectSummary
   return 'running';
 }
 
+function browserObjectBaseKey(object: MkeBrowserObjectSummary): string {
+  const raw = object.url ?? object.location ?? object.objectId;
+  try {
+    const url = new URL(raw);
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      const pathname =
+        url.pathname.length > 1 && url.pathname.endsWith('/')
+          ? url.pathname.slice(0, -1)
+          : url.pathname;
+      return `${url.protocol}//${url.hostname.toLowerCase()}${pathname}`;
+    }
+    return url.href.toLowerCase();
+  } catch {
+    return raw.trim().toLowerCase();
+  }
+}
+
+function browserObjectStatusRank(object: MkeBrowserObjectSummary): number {
+  if (object.status === 'foreground') return 0;
+  if (object.status === 'running') return 1;
+  if (object.status === 'loading') return 2;
+  if (object.status === 'restricted') return 3;
+  return 4;
+}
+
+function readTime(value: string | null | undefined): number {
+  const time = value ? Date.parse(value) : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function chooseBrowserObjectRepresentative(
+  current: MkeBrowserObjectSummary,
+  candidate: MkeBrowserObjectSummary,
+): MkeBrowserObjectSummary {
+  const currentRank = browserObjectStatusRank(current);
+  const candidateRank = browserObjectStatusRank(candidate);
+  if (candidateRank !== currentRank) return candidateRank < currentRank ? candidate : current;
+  return readTime(candidate.updatedAt) > readTime(current.updatedAt) ? candidate : current;
+}
+
+function collapseBrowserObjectsByBaseUrl(
+  objects: MkeBrowserObjectSummary[],
+): MkeBrowserObjectSummary[] {
+  const grouped = new Map<string, MkeBrowserObjectSummary>();
+  for (const object of objects) {
+    const key = browserObjectBaseKey(object);
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, object);
+      continue;
+    }
+    const representative = chooseBrowserObjectRepresentative(existing, object);
+    grouped.set(key, {
+      ...representative,
+      createdAt:
+        readTime(existing.createdAt) <= readTime(object.createdAt)
+          ? existing.createdAt
+          : object.createdAt,
+      updatedAt:
+        readTime(existing.updatedAt) >= readTime(object.updatedAt)
+          ? existing.updatedAt
+          : object.updatedAt,
+      lastObservedAt:
+        readTime(existing.lastObservedAt) >= readTime(object.lastObservedAt)
+          ? existing.lastObservedAt
+          : object.lastObservedAt,
+    });
+  }
+  return [...grouped.values()].sort((a, b) => {
+    const statusDelta = browserObjectStatusRank(a) - browserObjectStatusRank(b);
+    if (statusDelta !== 0) return statusDelta;
+    return readTime(b.updatedAt) - readTime(a.updatedAt);
+  });
+}
+
 function toKnowledgeSummary(model: KnowledgeModel): MkeKnowledgeModelSummary {
   return {
     knowledgeId: model.knowledgeId,
@@ -446,10 +523,14 @@ export function registerMemoryRoutes(
     async (request: FastifyRequest<{ Querystring: MkeListQuery }>, reply: FastifyReply) => {
       const limit = parsePositiveInt(request.query.limit, 20, MKE_LIST_LIMIT_MAX);
       const offset = parsePositiveInt(request.query.offset, 0, Number.MAX_SAFE_INTEGER);
-      const browserObjects = sessionManager
-        .listRecentMkeBrowserObjects(limit, offset)
-        .map(toObjectSummary);
-      const total = sessionManager.countMkeBrowserObjects();
+      const rawTotal = sessionManager.countMkeBrowserObjects();
+      const browserObjectsByBaseUrl = collapseBrowserObjectsByBaseUrl(
+        sessionManager
+          .listRecentMkeBrowserObjects(Math.max(rawTotal, limit + offset), 0)
+          .map(toObjectSummary),
+      );
+      const browserObjects = browserObjectsByBaseUrl.slice(offset, offset + limit);
+      const total = browserObjectsByBaseUrl.length;
       const persistence = sessionManager.getPersistenceStatus();
 
       return reply.status(HTTP_STATUS.OK).send({

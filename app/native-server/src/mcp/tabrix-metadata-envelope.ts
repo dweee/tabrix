@@ -1,5 +1,6 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { MemoryTrace } from '../memory/db';
+import { shouldRequestAiFeedbackForTool } from '../memory/ai-feedback-requirement';
 import { buildMemoryTraceBindingHash } from '../memory/feedback-binding';
 
 const TABRIX_TOOL_METADATA_KEY = '_tabrix';
@@ -68,7 +69,7 @@ const TABRIX_TOOL_METADATA_SCHEMA = {
           reasonCode: { type: 'string' },
           summary: { type: 'string' },
         },
-        required: ['traceId', 'businessStatus'],
+        required: ['traceId', 'feedbackToken', 'businessStatus'],
       },
     },
   },
@@ -133,11 +134,18 @@ export function attachTabrixMemoryTraceEnvelope(
   }
 
   const existingTabrix = readObject(payload[TABRIX_TOOL_METADATA_KEY]) ?? {};
-  const traceBindingHash = buildMemoryTraceBindingHash(trace);
-  const feedbackTarget = {
-    traceId: trace.traceId,
-    feedbackToken: traceBindingHash,
-  };
+  const businessFeedbackRequired = shouldRequestAiFeedbackForTool(toolName);
+  const traceBindingHash = businessFeedbackRequired ? buildMemoryTraceBindingHash(trace) : null;
+  const feedbackTarget = traceBindingHash
+    ? {
+        traceId: trace.traceId,
+        taskId: trace.taskId,
+        toolName: trace.toolName,
+        toolCallId: trace.toolCallId,
+        sequenceIndex: trace.sequenceIndex,
+        feedbackToken: traceBindingHash,
+      }
+    : null;
   const nextPayload = {
     ...payload,
     [TABRIX_TOOL_METADATA_KEY]: {
@@ -147,9 +155,9 @@ export function attachTabrixMemoryTraceEnvelope(
       intentSummary: metadata.intentSummary,
       nextIntent: metadata.nextIntent,
       toolName,
-      feedbackTarget,
+      ...(feedbackTarget ? { feedbackTarget } : {}),
       toolSuccess: trace.toolSuccess,
-      businessFeedbackRequired: true,
+      businessFeedbackRequired,
     },
   };
 
@@ -181,15 +189,16 @@ function readPreviousFeedback(value: unknown): TabrixPreviousFeedback[] {
     const object = item as Record<string, unknown>;
     const traceId = readOptionalString(object.traceId);
     const status = readOptionalString(object.businessStatus);
-    if (!traceId || !status || !AI_BUSINESS_STATUS_VALUES.has(status)) continue;
+    const feedbackToken =
+      readOptionalString(object.feedbackToken) ?? readOptionalString(object.traceBindingHash);
+    if (!traceId || !feedbackToken || !status || !AI_BUSINESS_STATUS_VALUES.has(status)) continue;
     feedback.push({
       traceId,
       taskId: readOptionalString(object.taskId),
       toolName: readOptionalString(object.toolName),
       toolCallId: readOptionalString(object.toolCallId),
       sequenceIndex: readOptionalInteger(object.sequenceIndex),
-      feedbackToken:
-        readOptionalString(object.feedbackToken) ?? readOptionalString(object.traceBindingHash),
+      feedbackToken,
       evaluationScope:
         object.evaluationScope === 'step' || object.evaluationScope === 'task'
           ? object.evaluationScope

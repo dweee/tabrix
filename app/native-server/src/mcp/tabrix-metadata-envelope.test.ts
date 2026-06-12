@@ -114,7 +114,13 @@ describe('tabrix metadata envelope', () => {
           },
           {
             traceId: 'trace-bad-status',
+            feedbackToken: 'binding-bad-status',
             businessStatus: 'definitely',
+            confidence: 0.8,
+          },
+          {
+            traceId: 'trace-missing-token',
+            businessStatus: 'achieved',
             confidence: 0.8,
           },
         ],
@@ -179,6 +185,10 @@ describe('tabrix metadata envelope', () => {
         toolName: 'chrome_read_page',
         feedbackTarget: {
           traceId: 'trace-1',
+          taskId: 'task-1',
+          toolName: 'chrome_read_page',
+          toolCallId: 'step-1',
+          sequenceIndex: 0,
           feedbackToken: expect.any(String),
         },
         toolSuccess: true,
@@ -188,6 +198,28 @@ describe('tabrix metadata envelope', () => {
     expect(parseFirstText(result)._tabrix).not.toHaveProperty('businessFeedbackGuide');
     expect(parseFirstText(result)._tabrix).not.toHaveProperty('businessFeedbackGuideVersion');
     expect(parseFirstText(result)._tabrix).not.toHaveProperty('businessStatus');
+  });
+
+  it('does not request AI feedback for browser inventory traces', () => {
+    const result = attachTabrixMemoryTraceEnvelope(
+      textResult({ status: 'ok' }),
+      makeTrace({ toolName: 'get_windows_and_tabs' }),
+      {
+        intentTitle: '读取窗口和标签',
+        intentSummary: null,
+        nextIntent: null,
+        previousFeedback: [],
+      },
+      'get_windows_and_tabs',
+    );
+
+    const payload = parseFirstText(result);
+    expect(payload._tabrix).toMatchObject({
+      traceId: 'trace-1',
+      toolName: 'get_windows_and_tabs',
+      businessFeedbackRequired: false,
+    });
+    expect(payload._tabrix).not.toHaveProperty('feedbackTarget');
   });
 
   it('leaves non-JSON text results unchanged', () => {

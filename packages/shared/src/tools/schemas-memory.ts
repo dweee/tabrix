@@ -25,6 +25,33 @@ export const MEMORY_SCHEMAS: Tool[] = [
           minLength: 32,
           maxLength: 128,
         },
+        taskId: {
+          type: 'string',
+          description:
+            'Optional task id from the trace envelope. When provided, Tabrix verifies it matches the target trace.',
+          minLength: 1,
+          maxLength: 128,
+        },
+        toolName: {
+          type: 'string',
+          description:
+            'Optional tool name from the trace envelope. When provided, Tabrix verifies it matches the target trace.',
+          minLength: 1,
+          maxLength: 128,
+        },
+        toolCallId: {
+          type: 'string',
+          description:
+            'Optional tool call id from the trace envelope. When provided, Tabrix verifies it matches the target trace.',
+          minLength: 1,
+          maxLength: 128,
+        },
+        sequenceIndex: {
+          type: 'integer',
+          description:
+            'Optional sequence index from the trace envelope. When provided, Tabrix verifies it matches the target trace.',
+          minimum: 0,
+        },
         businessStatus: {
           type: 'string',
           description:

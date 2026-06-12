@@ -57,6 +57,12 @@ describe('MkeDataTab render smoke', () => {
     expect(source).not.toContain("if (object.tabStatus === 'complete') return '已加载'");
   });
 
+  it('does not show browser inventory rows as pending AI feedback', () => {
+    expect(source).toContain("if (trace.aiFeedbackRequired === false) return '已记录'");
+    expect(source).toContain("trace.aiFeedbackRequired === false ? '' : 'AI评价：待AI评价'");
+    expect(source).not.toContain("'AI评价：无需评价'");
+  });
+
   it('keeps the right-rail layout compact and readable', () => {
     expect(appSource).toContain('.sidepanel-root *');
     expect(appSource).toContain('box-sizing: border-box');

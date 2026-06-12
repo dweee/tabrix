@@ -68,6 +68,7 @@ export interface MkeMemoryTraceSummary {
   requestAt: string;
   responseAt: string;
   durationMs?: number | null;
+  aiFeedbackRequired?: boolean;
   aiFeedback?: MkeMemoryAiFeedbackSummary | null;
   siteFamily?: string | null;
   pageUrlPattern?: string | null;

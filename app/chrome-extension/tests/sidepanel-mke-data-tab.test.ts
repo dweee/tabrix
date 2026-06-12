@@ -164,6 +164,7 @@ describe('Sidepanel MKE data tab', () => {
       "if (value === 'not_achieved' || value === 'false') return 'AI未通过'",
     );
     expect(tabSource).toContain("return '待AI评价'");
+    expect(tabSource).toContain("if (trace.aiFeedbackRequired === false) return '已记录'");
     expect(tabSource).not.toContain("return '业务通过'");
     expect(tabSource).not.toContain("return '待AI回写'");
   });
@@ -176,9 +177,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('v-if="row.duration"');
     expect(tabSource).toContain('v-if="row.createdAtLabel"');
     expect(tabSource).toContain('class="mke-status"');
-    expect(tabSource).toContain(
-      'const status = formatAiBusinessStatus(trace.aiFeedback?.businessStatus)',
-    );
+    expect(tabSource).toContain('const status = formatAiBusinessStatus(trace)');
     expect(tabSource).not.toContain('formatBusinessStatus(trace.statusView?.businessStatus');
     expect(tabSource).not.toContain('trace.businessSuccess');
     expect(tabSource).toContain('const feedbackLine = formatAiFeedbackLine(trace)');
@@ -348,10 +347,11 @@ describe('Sidepanel MKE data tab', () => {
   it('keeps Memory detail JSON user-readable without internal trace identifiers or evidence scores', () => {
     expect(tabSource).not.toContain("['Task ID / 任务', trace.taskId]");
     expect(tabSource).not.toContain("['Call ID / 调用', trace.toolCallId]");
-    expect(tabSource).toContain('formatAiBusinessStatus(trace.aiFeedback?.businessStatus)');
+    expect(tabSource).toContain('formatAiBusinessStatus(trace)');
     expect(tabSource).toContain('trace.aiFeedback?.summary');
     expect(tabSource).toContain('trace.aiFeedback?.reasonCode');
     expect(tabSource).toContain("'AI评价：待AI评价'");
+    expect(tabSource).toContain("trace.aiFeedbackRequired === false ? '' : 'AI评价：待AI评价'");
     expect(tabSource).not.toContain('trace.statusView?.aiScore');
     expect(tabSource).toContain('trace.aiFeedback?.confidence');
     expect(tabSource).toContain('AI评价：${compactText');

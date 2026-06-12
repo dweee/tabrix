@@ -536,7 +536,7 @@ async function writeClipboard(value: string): Promise<void> {
 }
 
 function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
-  const status = formatAiBusinessStatus(trace.aiFeedback?.businessStatus);
+  const status = formatAiBusinessStatus(trace);
   const title = trace.display?.title || formatTraceTitle(trace);
   const feedbackLine = formatAiFeedbackLine(trace);
   const row: Omit<ViewRecord, 'searchText'> = {
@@ -549,12 +549,12 @@ function traceToRecord(trace: MkeMemoryTraceSummary): ViewRecord {
     duration: formatDuration(trace.durationMs) ?? '',
     createdAtLabel: formatDate(trace.createdAt),
     status,
-    statusTone: formatAiBusinessStatusTone(trace.aiFeedback?.businessStatus),
+    statusTone: formatAiBusinessStatusTone(trace),
     facts: compactFacts([['方法', trace.toolName], formatTraceLocationFact(trace)]),
     detailJson: formatMemoryTraceJson(trace),
     searchTokens: [
       trace.toolName,
-      formatAiBusinessStatus(trace.aiFeedback?.businessStatus),
+      formatAiBusinessStatus(trace),
       trace.display?.title,
       trace.display?.locationLabel,
       trace.pageIdentity?.label,
@@ -674,7 +674,7 @@ function formatMemoryTraceJson(trace: MkeMemoryTraceSummary): string {
     durationMs: trace.durationMs,
     aiEvaluation: feedback
       ? {
-          status: formatAiBusinessStatus(feedback.businessStatus),
+          status: formatAiBusinessStatusValue(feedback.businessStatus),
           score:
             typeof feedback.confidence === 'number'
               ? `${Math.round(feedback.confidence * 100)}%`
@@ -740,14 +740,23 @@ function formatDate(value: string | null | undefined): string {
   return date.toLocaleString();
 }
 
-function formatAiBusinessStatus(value: string | null | undefined): string {
-  if (value === 'achieved' || value === 'true') return 'AI通过';
-  if (value === 'partial') return 'AI部分完成';
-  if (value === 'not_achieved' || value === 'false') return 'AI未通过';
+function formatAiBusinessStatus(trace: MkeMemoryTraceSummary): string {
+  const value = trace.aiFeedback?.businessStatus;
+  const feedbackStatus = formatAiBusinessStatusValue(value);
+  if (feedbackStatus) return feedbackStatus;
+  if (trace.aiFeedbackRequired === false) return '已记录';
   return '待AI评价';
 }
 
-function formatAiBusinessStatusTone(businessValue: string | null | undefined): StatusTone {
+function formatAiBusinessStatusValue(value: string | null | undefined): string | null {
+  if (value === 'achieved' || value === 'true') return 'AI通过';
+  if (value === 'partial') return 'AI部分完成';
+  if (value === 'not_achieved' || value === 'false') return 'AI未通过';
+  return null;
+}
+
+function formatAiBusinessStatusTone(trace: MkeMemoryTraceSummary): StatusTone {
+  const businessValue = trace.aiFeedback?.businessStatus;
   if (businessValue === 'achieved' || businessValue === 'true') return 'good';
   if (businessValue === 'not_achieved' || businessValue === 'false') return 'warn';
   return 'neutral';
@@ -761,9 +770,10 @@ function formatDuration(value: number | null | undefined): string | null {
 
 function formatAiFeedbackLine(trace: MkeMemoryTraceSummary): string {
   const feedback = trace.aiFeedback;
-  return feedback?.summary
-    ? `AI评价：${compactText(formatReadableFeedbackLine(feedback.summary), 88)}`
-    : 'AI评价：待AI评价';
+  if (feedback?.summary) {
+    return `AI评价：${compactText(formatReadableFeedbackLine(feedback.summary), 88)}`;
+  }
+  return trace.aiFeedbackRequired === false ? '' : 'AI评价：待AI评价';
 }
 
 function formatAiFeedbackScoreLabel(trace: MkeMemoryTraceSummary): string {

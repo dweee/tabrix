@@ -143,6 +143,13 @@ interface BrowserObjectProjectionTrace {
   pageUrlPattern?: string | null;
 }
 
+interface BrowserWorldTabProjection {
+  tab: Record<string, unknown>;
+  tabId: number;
+  windowId: number | null;
+  urlFields: ReturnType<typeof normalizeUrlPattern>;
+}
+
 class BoundedAsyncBrowserObjectWriteQueue {
   private queue: AsyncBrowserObjectWriteJob[] = [];
   private scheduled = false;
@@ -499,6 +506,32 @@ function objectFingerprint(...parts: Array<string | number | null | undefined>):
     .join(':');
 }
 
+function browserPageObjectKey(tab: BrowserWorldTabProjection): string {
+  return (
+    tab.urlFields.rootRoute ??
+    tab.urlFields.currentRoute ??
+    tab.urlFields.pattern ??
+    String(tab.tabId)
+  );
+}
+
+function browserWorldTabRank(tab: BrowserWorldTabProjection): number {
+  if (readBoolean(tab.tab.active) === true) return 0;
+  if (readString(tab.tab.status) === 'loading') return 2;
+  if (readBoolean(tab.tab.canTabrixOperate) === false) return 3;
+  return 1;
+}
+
+function chooseRepresentativeBrowserWorldTab(
+  current: BrowserWorldTabProjection,
+  candidate: BrowserWorldTabProjection,
+): BrowserWorldTabProjection {
+  const currentRank = browserWorldTabRank(current);
+  const candidateRank = browserWorldTabRank(candidate);
+  if (candidateRank !== currentRank) return candidateRank < currentRank ? candidate : current;
+  return candidate.tabId > current.tabId ? candidate : current;
+}
+
 function isApiLikeDataSource(...values: Array<string | null | undefined>): boolean {
   const text = values.filter(Boolean).join(' ').toLowerCase();
   return (
@@ -814,6 +847,10 @@ export class MkeMemoryTraceService {
         updatedAt: observedAt,
       });
     }
+    const tabsByBaseRoute = new Map<
+      string,
+      { representative: BrowserWorldTabProjection; tabs: BrowserWorldTabProjection[] }
+    >();
     for (const rawTab of readArray(browserWorld.tabs)) {
       const tab = readObject(rawTab);
       if (!tab) continue;
@@ -822,7 +859,33 @@ export class MkeMemoryTraceService {
       const urlFields = normalizeUrlPattern(readString(tab.url, tab.pendingUrl), {
         allowPersonalBrowserStateStorage: false,
       });
-      const tabWindowId = readNumber(tab.windowId) ?? trace.windowId;
+      const tabWindowId = readNumber(tab.windowId) ?? trace.windowId ?? null;
+      const projectedTab: BrowserWorldTabProjection = {
+        tab,
+        tabId,
+        windowId: tabWindowId,
+        urlFields,
+      };
+      const baseRouteKey = browserPageObjectKey(projectedTab);
+      const group = tabsByBaseRoute.get(baseRouteKey);
+      if (group) {
+        group.tabs.push(projectedTab);
+        group.representative = chooseRepresentativeBrowserWorldTab(
+          group.representative,
+          projectedTab,
+        );
+      } else {
+        tabsByBaseRoute.set(baseRouteKey, { representative: projectedTab, tabs: [projectedTab] });
+      }
+    }
+    for (const [baseRouteKey, group] of tabsByBaseRoute.entries()) {
+      const representative = group.representative;
+      const { tab, tabId, windowId: tabWindowId, urlFields } = representative;
+      const openTabIds = group.tabs.map((item) => item.tabId);
+      const hasLoading = group.tabs.some((item) => readString(item.tab.status) === 'loading');
+      const hasRestricted = group.tabs.some(
+        (item) => readBoolean(item.tab.canTabrixOperate) === false,
+      );
       this.upsertBrowserObject({
         siteFamily: urlFields.siteFamily ?? trace.siteFamily ?? 'browser',
         pageUrlPattern: urlFields.pattern ?? trace.pageUrlPattern,
@@ -830,7 +893,7 @@ export class MkeMemoryTraceService {
         currentRoute: urlFields.currentRoute,
         pageRole: 'browser_tab',
         pageModelKey: urlFields.siteFamily ? `tab:${urlFields.siteFamily}` : 'browser-tab',
-        objectFingerprint: objectFingerprint('tab', tabWindowId, tabId),
+        objectFingerprint: objectFingerprint('browser_page', baseRouteKey),
         objectType: 'tab',
         browserContextKey: contextKey,
         tabId,
@@ -848,6 +911,12 @@ export class MkeMemoryTraceService {
           host: urlFields.siteFamily,
           rootRoute: urlFields.rootRoute,
           currentRoute: urlFields.currentRoute,
+          tabId,
+          tabIds: openTabIds,
+          openTabCount: openTabIds.length,
+          representativeTabId: tabId,
+          hasLoading,
+          hasRestricted,
           pinned: readBoolean(tab.pinned),
           discarded: readBoolean(tab.discarded),
           openerTabId: readNumber(tab.openerTabId),
@@ -864,6 +933,12 @@ export class MkeMemoryTraceService {
           host: urlFields.siteFamily,
           rootRoute: urlFields.rootRoute,
           currentRoute: urlFields.currentRoute,
+          tabId,
+          tabIds: openTabIds,
+          openTabCount: openTabIds.length,
+          representativeTabId: tabId,
+          hasLoading,
+          hasRestricted,
         }),
         redactionState: this.browserObjectRedactionState(),
         updatedAt: observedAt,
@@ -897,6 +972,22 @@ export class MkeMemoryTraceService {
     const urlFields = normalizeUrlPattern(readString(latestPageClosed.url), {
       allowPersonalBrowserStateStorage: false,
     });
+    const closedBaseRouteKey =
+      urlFields.rootRoute ?? urlFields.currentRoute ?? urlFields.pattern ?? String(tabId);
+    const sameBaseRouteStillOpen = readArray(browserWorld.tabs).some((rawTab) => {
+      const tab = readObject(rawTab);
+      if (!tab || readNumber(tab.closedAtMs) !== null) return false;
+      const openUrlFields = normalizeUrlPattern(readString(tab.url, tab.pendingUrl), {
+        allowPersonalBrowserStateStorage: false,
+      });
+      const openBaseRouteKey =
+        openUrlFields.rootRoute ??
+        openUrlFields.currentRoute ??
+        openUrlFields.pattern ??
+        String(readNumber(tab.tabId, tab.id));
+      return openBaseRouteKey === closedBaseRouteKey;
+    });
+    if (sameBaseRouteStillOpen) return;
     const tabWindowId = readNumber(latestPageClosed.windowId) ?? trace.windowId;
     this.upsertBrowserObject({
       siteFamily: urlFields.siteFamily ?? trace.siteFamily ?? 'browser',
@@ -905,7 +996,7 @@ export class MkeMemoryTraceService {
       currentRoute: urlFields.currentRoute,
       pageRole: 'browser_tab',
       pageModelKey: urlFields.siteFamily ? `tab:${urlFields.siteFamily}` : 'browser-tab',
-      objectFingerprint: objectFingerprint('tab', tabWindowId, tabId),
+      objectFingerprint: objectFingerprint('browser_page', closedBaseRouteKey),
       objectType: 'tab',
       browserContextKey,
       tabId,

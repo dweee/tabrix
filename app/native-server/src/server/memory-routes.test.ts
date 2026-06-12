@@ -183,6 +183,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
         reasonCode: 'clicked_expected_control',
         summary: 'AI verified the click completed the intended page action',
       },
+      aiFeedbackRequired: true,
     });
     const removedSyntheticScoreKey = ['system', 'Evidence', 'Score'].join('');
     const removedSyntheticPayloadKey = ['system', 'Evidence'].join('');
@@ -215,6 +216,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
         reasonCode: 'page_inventory_read',
         summary: 'AI judged the page inventory read as useful for the next action',
       },
+      aiFeedbackRequired: true,
     });
     expect(res.body.data.traces[1]).not.toHaveProperty(removedSyntheticScoreKey);
     expect(res.body.data.traces[1]).not.toHaveProperty(removedSyntheticPayloadKey);
@@ -229,6 +231,41 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('sourceToolName');
     expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('sourceToolCallId');
     expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('traceBindingHash');
+  });
+
+  test('GET /memory/mke/traces marks browser inventory as recorded instead of pending AI feedback', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T10:30:00.000Z');
+
+    traceService.recordToolCall({
+      taskId: 'browser-inventory-task',
+      taskIntent: '读取窗口和标签',
+      aiClient: 'jest',
+      toolName: 'get_windows_and_tabs',
+      stepId: 'browser-inventory-step',
+      sequenceIndex: 1,
+      requestParams: {},
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 20,
+      result: textResult({
+        source: 'chrome_windows_get_all_with_browser_world_inventory',
+        browserWorld: { status: 'fresh', windows: [], tabs: [] },
+      }),
+      resultSummary: 'browser inventory read',
+    });
+    await sessionManager.flushMkeMemoryTraceWrites();
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/traces?limit=10&offset=0')
+      .expect(200);
+
+    expect(res.body.data.traces).toHaveLength(1);
+    expect(res.body.data.traces[0]).toMatchObject({
+      toolName: 'get_windows_and_tabs',
+      aiFeedbackRequired: false,
+      aiFeedback: null,
+    });
   });
 
   test('GET /memory/mke/traces does not expose orphan legacy score as AI score', async () => {
@@ -517,6 +554,70 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(tab).not.toHaveProperty('browserContextKey');
     expect(tab).not.toHaveProperty('objectFingerprint');
     expect(tab).not.toHaveProperty('observationCount');
+  });
+
+  test('Object Library stores one browser page object per Base URL across multiple tab ids', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T12:12:00.000Z');
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-base-url-task',
+      taskIntent: 'inspect browser context',
+      aiClient: 'jest',
+      toolName: 'get_windows_and_tabs',
+      stepId: 'browser-object-base-url-step',
+      sequenceIndex: 1,
+      requestParams: {},
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 18,
+      browserContextKey: 'ctx-base-url',
+      result: textResult({
+        source: 'chrome_windows_get_all_with_browser_world_inventory',
+        browserWorld: {
+          status: 'fresh',
+          windows: [{ windowId: 10, focused: true, state: 'normal', tabCount: 2, activeTabId: 22 }],
+          tabs: [
+            {
+              tabId: 21,
+              windowId: 10,
+              active: false,
+              status: 'complete',
+              ownerType: 'user_or_page',
+              canTabrixOperate: true,
+              url: 'https://example.test/search?q=first',
+              title: 'Search results - background',
+            },
+            {
+              tabId: 22,
+              windowId: 10,
+              active: true,
+              status: 'complete',
+              ownerType: 'user_or_page',
+              canTabrixOperate: true,
+              url: 'https://example.test/search?q=second',
+              title: 'Search results - active',
+            },
+          ],
+        },
+      }),
+      resultSummary: 'browser inventory read',
+    });
+    await traceService.flushAsyncWrites();
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=10&offset=0')
+      .expect(200);
+
+    expect(res.body.data.total).toBe(1);
+    expect(res.body.data.browserObjects).toHaveLength(1);
+    expect(res.body.data.browserObjects[0]).toMatchObject({
+      tabId: '22',
+      title: 'Search results - active',
+      url: 'https://example.test/search',
+      location: 'example.test',
+      status: 'running',
+    });
   });
 
   test('Object Library list returns tab webpages, not read_page internals or object graph rows', async () => {
