@@ -206,6 +206,17 @@ describe('tabrix metadata envelope', () => {
     [TOOL_NAMES.BROWSER.GET_INTERACTIVE_ELEMENTS],
     [TOOL_NAMES.BROWSER.SCREENSHOT],
     [TOOL_NAMES.BROWSER.CONSOLE],
+    [TOOL_NAMES.BROWSER.WEB_FETCHER],
+    [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],
+    [TOOL_NAMES.BROWSER.NETWORK_REQUEST],
+    [TOOL_NAMES.BROWSER.HISTORY],
+    [TOOL_NAMES.BROWSER.BOOKMARK_SEARCH],
+    [TOOL_NAMES.BROWSER.HANDLE_DOWNLOAD],
+    [TOOL_NAMES.BROWSER.CLOSE_TABS],
+    [TOOL_NAMES.BROWSER.SWITCH_TAB],
+    [TOOL_NAMES.BROWSER.KEYBOARD],
+    [TOOL_NAMES.BROWSER.JAVASCRIPT],
+    [TOOL_NAMES.BROWSER.COMPUTER],
     [TOOL_NAMES.BROWSER.REQUEST_ELEMENT_SELECTION],
     [TOOL_NAMES.BROWSER.PERFORMANCE_START_TRACE],
     [TOOL_NAMES.BROWSER.PERFORMANCE_STOP_TRACE],
@@ -231,6 +242,53 @@ describe('tabrix metadata envelope', () => {
     expect(payload._tabrix).toMatchObject({
       traceId: 'trace-1',
       toolName,
+      businessFeedbackRequired: false,
+    });
+    expect(payload._tabrix).not.toHaveProperty('feedbackTarget');
+  });
+
+  it('does not request AI feedback for failed experience-relevant traces', () => {
+    const result = attachTabrixMemoryTraceEnvelope(
+      textResult({ status: 'error' }),
+      makeTrace({ toolName: TOOL_NAMES.BROWSER.READ_PAGE, toolSuccess: false }),
+      {
+        intentTitle: '读取页面',
+        intentSummary: null,
+        nextIntent: null,
+        previousFeedback: [],
+      },
+      TOOL_NAMES.BROWSER.READ_PAGE,
+    );
+
+    const payload = parseFirstText(result);
+    expect(payload._tabrix).toMatchObject({
+      traceId: 'trace-1',
+      toolName: TOOL_NAMES.BROWSER.READ_PAGE,
+      businessFeedbackRequired: false,
+    });
+    expect(payload._tabrix).not.toHaveProperty('feedbackTarget');
+  });
+
+  it('does not request AI feedback for default tool-run traces', () => {
+    const result = attachTabrixMemoryTraceEnvelope(
+      textResult({ status: 'ok' }),
+      makeTrace({
+        toolName: TOOL_NAMES.BROWSER.READ_PAGE,
+        taskIntent: `Run MCP tool ${TOOL_NAMES.BROWSER.READ_PAGE}`,
+      }),
+      {
+        intentTitle: null,
+        intentSummary: null,
+        nextIntent: null,
+        previousFeedback: [],
+      },
+      TOOL_NAMES.BROWSER.READ_PAGE,
+    );
+
+    const payload = parseFirstText(result);
+    expect(payload._tabrix).toMatchObject({
+      traceId: 'trace-1',
+      toolName: TOOL_NAMES.BROWSER.READ_PAGE,
       businessFeedbackRequired: false,
     });
     expect(payload._tabrix).not.toHaveProperty('feedbackTarget');

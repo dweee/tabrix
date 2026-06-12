@@ -58,8 +58,9 @@ describe('MkeDataTab render smoke', () => {
   });
 
   it('does not show browser inventory rows as pending AI feedback', () => {
-    expect(source).toContain("if (trace.aiFeedbackRequired === false) return '已记录'");
-    expect(source).toContain("trace.aiFeedbackRequired === false ? '' : 'AI评价：待AI评价'");
+    expect(source).toContain("trace.aiFeedbackState === 'pending'");
+    expect(source).toContain('trace.aiFeedbackRequired === true');
+    expect(source).toContain("return '已记录'");
     expect(source).not.toContain("'AI评价：无需评价'");
   });
 

@@ -1,6 +1,6 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { MemoryTrace } from '../memory/db';
-import { shouldRequestAiFeedbackForTool } from '../memory/ai-feedback-requirement';
+import { shouldRequestAiFeedbackForTrace } from '../memory/ai-feedback-requirement';
 import { buildMemoryTraceBindingHash } from '../memory/feedback-binding';
 
 const TABRIX_TOOL_METADATA_KEY = '_tabrix';
@@ -134,7 +134,7 @@ export function attachTabrixMemoryTraceEnvelope(
   }
 
   const existingTabrix = readObject(payload[TABRIX_TOOL_METADATA_KEY]) ?? {};
-  const businessFeedbackRequired = shouldRequestAiFeedbackForTool(toolName);
+  const businessFeedbackRequired = shouldRequestAiFeedbackForTrace(trace);
   const traceBindingHash = businessFeedbackRequired ? buildMemoryTraceBindingHash(trace) : null;
   const feedbackTarget = traceBindingHash
     ? {

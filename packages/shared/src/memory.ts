@@ -33,6 +33,8 @@ export interface MkeMemoryAiFeedbackSummary {
   summary?: string | null;
 }
 
+export type MkeMemoryAiFeedbackState = 'not_required' | 'pending' | 'recorded';
+
 export type MkePageIdentityKind =
   | 'web'
   | 'extension'
@@ -69,6 +71,7 @@ export interface MkeMemoryTraceSummary {
   responseAt: string;
   durationMs?: number | null;
   aiFeedbackRequired?: boolean;
+  aiFeedbackState?: MkeMemoryAiFeedbackState;
   aiFeedback?: MkeMemoryAiFeedbackSummary | null;
   siteFamily?: string | null;
   pageUrlPattern?: string | null;
@@ -144,19 +147,11 @@ export interface MkeExperienceRecipeSummary {
   experienceId: string;
   recipeName: string;
   scenarioKey: string;
-  taskSignature: string;
-  recipeFingerprint: string;
   recipeVersion: number;
   siteFamily?: string | null;
   pageModelKey?: string | null;
   pageRole?: string | null;
-  driftState?: string | null;
   portabilityScope: string;
-  originKind: string;
-  exportState: string;
-  importState: string;
-  redactionState: string;
-  linkedKnowledgeCount: number;
   archivedAt?: string | null;
   lastUsedAt?: string | null;
   lastVerifiedAt?: string | null;

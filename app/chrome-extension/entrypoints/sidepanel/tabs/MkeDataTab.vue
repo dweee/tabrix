@@ -744,8 +744,8 @@ function formatAiBusinessStatus(trace: MkeMemoryTraceSummary): string {
   const value = trace.aiFeedback?.businessStatus;
   const feedbackStatus = formatAiBusinessStatusValue(value);
   if (feedbackStatus) return feedbackStatus;
-  if (trace.aiFeedbackRequired === false) return '已记录';
-  return '待AI评价';
+  if (trace.aiFeedbackState === 'pending' || trace.aiFeedbackRequired === true) return '待AI评价';
+  return '已记录';
 }
 
 function formatAiBusinessStatusValue(value: string | null | undefined): string | null {
@@ -773,7 +773,9 @@ function formatAiFeedbackLine(trace: MkeMemoryTraceSummary): string {
   if (feedback?.summary) {
     return `AI评价：${compactText(formatReadableFeedbackLine(feedback.summary), 88)}`;
   }
-  return trace.aiFeedbackRequired === false ? '' : 'AI评价：待AI评价';
+  return trace.aiFeedbackState === 'pending' || trace.aiFeedbackRequired === true
+    ? 'AI评价：待AI评价'
+    : '';
 }
 
 function formatAiFeedbackScoreLabel(trace: MkeMemoryTraceSummary): string {

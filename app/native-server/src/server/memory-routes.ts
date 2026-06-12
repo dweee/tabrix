@@ -38,7 +38,7 @@ import { HTTP_STATUS } from '../constant';
 import type { SessionManager } from '../execution/session-manager';
 import type { BrowserObject, ExperienceRecipe, KnowledgeModel, MemoryTrace } from '../memory/db';
 import { sessionManager as defaultSessionManager } from '../execution/session-manager';
-import { shouldRequestAiFeedbackForTool } from '../memory/ai-feedback-requirement';
+import { shouldRequestAiFeedbackForTrace } from '../memory/ai-feedback-requirement';
 import { summarizeBrowserRouteForPrivacy } from '../policy/browser-state-privacy';
 
 const MKE_LIST_LIMIT_MAX = 100;
@@ -220,6 +220,7 @@ function classifyObjectPageIdentity(
 
 function toTraceSummary(trace: MemoryTrace): MkeMemoryTraceSummary {
   const aiFeedback = toAiFeedbackSummary(trace.aiFeedback);
+  const aiFeedbackRequired = shouldRequestAiFeedbackForTrace(trace);
   const pageIdentity = classifyPageIdentity(trace);
   const methodLabel = formatToolLabel(trace.toolName);
   return {
@@ -229,7 +230,8 @@ function toTraceSummary(trace: MemoryTrace): MkeMemoryTraceSummary {
     requestAt: trace.requestAt,
     responseAt: trace.responseAt,
     durationMs: trace.durationMs,
-    aiFeedbackRequired: shouldRequestAiFeedbackForTool(trace.toolName),
+    aiFeedbackRequired,
+    aiFeedbackState: aiFeedback ? 'recorded' : aiFeedbackRequired ? 'pending' : 'not_required',
     aiFeedback,
     siteFamily: trace.siteFamily,
     pageUrlPattern: trace.pageUrlPattern,
@@ -352,8 +354,13 @@ function formatBrowserPageStatus(object: BrowserObject): MkeBrowserObjectSummary
   return 'running';
 }
 
-function browserObjectBaseKey(object: MkeBrowserObjectSummary): string {
-  const raw = object.url ?? object.location ?? object.objectId;
+function browserObjectRouteKey(input: {
+  currentRoute?: string | null;
+  rootRoute?: string | null;
+  pageUrlPattern?: string | null;
+  fallback: string;
+}): string {
+  const raw = input.rootRoute ?? input.currentRoute ?? input.pageUrlPattern ?? input.fallback;
   try {
     const url = new URL(raw);
     if (url.protocol === 'http:' || url.protocol === 'https:') {
@@ -369,11 +376,23 @@ function browserObjectBaseKey(object: MkeBrowserObjectSummary): string {
   }
 }
 
-function browserObjectStatusRank(object: MkeBrowserObjectSummary): number {
-  if (object.status === 'foreground') return 0;
-  if (object.status === 'running') return 1;
-  if (object.status === 'loading') return 2;
-  if (object.status === 'restricted') return 3;
+function browserObjectIdentityKey(object: BrowserObject): string {
+  const routeKey = browserObjectRouteKey({
+    currentRoute: object.currentRoute,
+    rootRoute: object.rootRoute,
+    pageUrlPattern: object.pageUrlPattern,
+    fallback: object.browserObjectId,
+  });
+  return [routeKey, object.pageRole ?? 'unknown-role', object.pageModelKey ?? 'unknown-model'].join(
+    '|',
+  );
+}
+
+function browserObjectStatusRank(status: MkeBrowserObjectSummary['status']): number {
+  if (status === 'foreground') return 0;
+  if (status === 'running') return 1;
+  if (status === 'loading') return 2;
+  if (status === 'restricted') return 3;
   return 4;
 }
 
@@ -383,21 +402,19 @@ function readTime(value: string | null | undefined): number {
 }
 
 function chooseBrowserObjectRepresentative(
-  current: MkeBrowserObjectSummary,
-  candidate: MkeBrowserObjectSummary,
-): MkeBrowserObjectSummary {
-  const currentRank = browserObjectStatusRank(current);
-  const candidateRank = browserObjectStatusRank(candidate);
+  current: BrowserObject,
+  candidate: BrowserObject,
+): BrowserObject {
+  const currentRank = browserObjectStatusRank(formatBrowserPageStatus(current));
+  const candidateRank = browserObjectStatusRank(formatBrowserPageStatus(candidate));
   if (candidateRank !== currentRank) return candidateRank < currentRank ? candidate : current;
   return readTime(candidate.updatedAt) > readTime(current.updatedAt) ? candidate : current;
 }
 
-function collapseBrowserObjectsByBaseUrl(
-  objects: MkeBrowserObjectSummary[],
-): MkeBrowserObjectSummary[] {
-  const grouped = new Map<string, MkeBrowserObjectSummary>();
+function collapseBrowserObjectsByPageIdentity(objects: BrowserObject[]): BrowserObject[] {
+  const grouped = new Map<string, BrowserObject>();
   for (const object of objects) {
-    const key = browserObjectBaseKey(object);
+    const key = browserObjectIdentityKey(object);
     const existing = grouped.get(key);
     if (!existing) {
       grouped.set(key, object);
@@ -421,7 +438,9 @@ function collapseBrowserObjectsByBaseUrl(
     });
   }
   return [...grouped.values()].sort((a, b) => {
-    const statusDelta = browserObjectStatusRank(a) - browserObjectStatusRank(b);
+    const statusDelta =
+      browserObjectStatusRank(formatBrowserPageStatus(a)) -
+      browserObjectStatusRank(formatBrowserPageStatus(b));
     if (statusDelta !== 0) return statusDelta;
     return readTime(b.updatedAt) - readTime(a.updatedAt);
   });
@@ -452,19 +471,11 @@ function toExperienceSummary(recipe: ExperienceRecipe): MkeExperienceRecipeSumma
     experienceId: recipe.experienceId,
     recipeName: recipe.recipeName,
     scenarioKey: recipe.scenarioKey,
-    taskSignature: recipe.taskSignature,
-    recipeFingerprint: recipe.recipeFingerprint,
     recipeVersion: recipe.recipeVersion,
     siteFamily: recipe.siteFamily,
     pageModelKey: recipe.pageModelKey,
     pageRole: recipe.pageRole,
-    driftState: recipe.driftState,
     portabilityScope: recipe.portabilityScope,
-    originKind: recipe.originKind,
-    exportState: recipe.exportState,
-    importState: recipe.importState,
-    redactionState: recipe.redactionState,
-    linkedKnowledgeCount: recipe.linkedKnowledgeIds.length,
     archivedAt: recipe.archivedAt,
     lastUsedAt: recipe.lastUsedAt,
     lastVerifiedAt: recipe.lastVerifiedAt,
@@ -524,13 +535,13 @@ export function registerMemoryRoutes(
       const limit = parsePositiveInt(request.query.limit, 20, MKE_LIST_LIMIT_MAX);
       const offset = parsePositiveInt(request.query.offset, 0, Number.MAX_SAFE_INTEGER);
       const rawTotal = sessionManager.countMkeBrowserObjects();
-      const browserObjectsByBaseUrl = collapseBrowserObjectsByBaseUrl(
-        sessionManager
-          .listRecentMkeBrowserObjects(Math.max(rawTotal, limit + offset), 0)
-          .map(toObjectSummary),
+      const browserObjectsByPage = collapseBrowserObjectsByPageIdentity(
+        sessionManager.listRecentMkeBrowserObjects(Math.max(rawTotal, limit + offset), 0),
       );
-      const browserObjects = browserObjectsByBaseUrl.slice(offset, offset + limit);
-      const total = browserObjectsByBaseUrl.length;
+      const browserObjects = browserObjectsByPage
+        .slice(offset, offset + limit)
+        .map(toObjectSummary);
+      const total = browserObjectsByPage.length;
       const persistence = sessionManager.getPersistenceStatus();
 
       return reply.status(HTTP_STATUS.OK).send({

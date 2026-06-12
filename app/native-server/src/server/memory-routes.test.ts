@@ -185,6 +185,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
         summary: 'AI verified the click completed the intended page action',
       },
       aiFeedbackRequired: true,
+      aiFeedbackState: 'recorded',
     });
     const removedSyntheticScoreKey = ['system', 'Evidence', 'Score'].join('');
     const removedSyntheticPayloadKey = ['system', 'Evidence'].join('');
@@ -218,6 +219,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
         summary: 'AI judged the page inventory read as useful for the next action',
       },
       aiFeedbackRequired: true,
+      aiFeedbackState: 'recorded',
     });
     expect(res.body.data.traces[1]).not.toHaveProperty(removedSyntheticScoreKey);
     expect(res.body.data.traces[1]).not.toHaveProperty(removedSyntheticPayloadKey);
@@ -239,6 +241,17 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     [TOOL_NAMES.BROWSER.GET_INTERACTIVE_ELEMENTS],
     [TOOL_NAMES.BROWSER.SCREENSHOT],
     [TOOL_NAMES.BROWSER.CONSOLE],
+    [TOOL_NAMES.BROWSER.WEB_FETCHER],
+    [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],
+    [TOOL_NAMES.BROWSER.NETWORK_REQUEST],
+    [TOOL_NAMES.BROWSER.HISTORY],
+    [TOOL_NAMES.BROWSER.BOOKMARK_SEARCH],
+    [TOOL_NAMES.BROWSER.HANDLE_DOWNLOAD],
+    [TOOL_NAMES.BROWSER.CLOSE_TABS],
+    [TOOL_NAMES.BROWSER.SWITCH_TAB],
+    [TOOL_NAMES.BROWSER.KEYBOARD],
+    [TOOL_NAMES.BROWSER.JAVASCRIPT],
+    [TOOL_NAMES.BROWSER.COMPUTER],
     [TOOL_NAMES.BROWSER.REQUEST_ELEMENT_SELECTION],
     [TOOL_NAMES.BROWSER.PERFORMANCE_START_TRACE],
     [TOOL_NAMES.BROWSER.PERFORMANCE_STOP_TRACE],
@@ -278,6 +291,77 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(res.body.data.traces[0]).toMatchObject({
       toolName,
       aiFeedbackRequired: false,
+      aiFeedbackState: 'not_required',
+      aiFeedback: null,
+    });
+  });
+
+  test('GET /memory/mke/traces marks failed experience-relevant tool as recorded', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T10:35:00.000Z');
+
+    traceService.recordToolCall({
+      taskId: 'failed-read-task',
+      taskIntent: '读取页面',
+      aiClient: 'jest',
+      toolName: TOOL_NAMES.BROWSER.READ_PAGE,
+      stepId: 'failed-read-step',
+      sequenceIndex: 1,
+      requestParams: { tabId: 7 },
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 20,
+      result: {
+        content: [{ type: 'text' as const, text: JSON.stringify({ status: 'error' }) }],
+        isError: true,
+      },
+      resultSummary: 'read failed',
+    });
+    await sessionManager.flushMkeMemoryTraceWrites();
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/traces?limit=10&offset=0')
+      .expect(200);
+
+    expect(res.body.data.traces[0]).toMatchObject({
+      toolName: TOOL_NAMES.BROWSER.READ_PAGE,
+      aiFeedbackRequired: false,
+      aiFeedbackState: 'not_required',
+      aiFeedback: null,
+    });
+  });
+
+  test('GET /memory/mke/traces marks default tool-run trace as recorded', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T10:40:00.000Z');
+
+    traceService.recordToolCall({
+      taskId: 'default-tool-run-task',
+      taskIntent: `Run MCP tool ${TOOL_NAMES.BROWSER.READ_PAGE}`,
+      aiClient: 'jest',
+      toolName: TOOL_NAMES.BROWSER.READ_PAGE,
+      stepId: 'default-tool-run-step',
+      sequenceIndex: 1,
+      requestParams: { tabId: 7 },
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 20,
+      result: textResult({
+        page: { url: 'https://example.test/search' },
+        summary: { pageRole: 'search_results', quality: 'usable' },
+      }),
+      resultSummary: 'default tool-run read',
+    });
+    await sessionManager.flushMkeMemoryTraceWrites();
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/traces?limit=10&offset=0')
+      .expect(200);
+
+    expect(res.body.data.traces[0]).toMatchObject({
+      toolName: TOOL_NAMES.BROWSER.READ_PAGE,
+      aiFeedbackRequired: false,
+      aiFeedbackState: 'not_required',
       aiFeedback: null,
     });
   });
@@ -313,6 +397,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
 
     expect(res.body.data.traces[0]).toMatchObject({
       traceId: trace.traceId,
+      aiFeedbackState: 'pending',
       aiFeedback: null,
     });
     expect(res.body.data.traces[0]).not.toHaveProperty('aiFeedbackScore');
@@ -368,6 +453,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
         reasonCode: 'ai_overstated_completion',
         summary: 'AI thought the filter was applied',
       },
+      aiFeedbackState: 'recorded',
     });
     expect(res.body.data.traces[0]).not.toHaveProperty('businessSuccess');
     expect(res.body.data.traces[0]).not.toHaveProperty('aiFeedbackScore');
@@ -813,13 +899,22 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
 
     expect(res.body.data.total).toBe(1);
     expect(res.body.data.experienceRecipes[0]).toMatchObject({
-      redactionState: 'template_only',
-      linkedKnowledgeCount: 1,
+      recipeName: expect.any(String),
+      scenarioKey: expect.any(String),
+      portabilityScope: 'local',
     });
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('steps');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('preconditions');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('sourceTraceIds');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('sourceTraceCount');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('taskSignature');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('recipeFingerprint');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('driftState');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('originKind');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('exportState');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('importState');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('redactionState');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('linkedKnowledgeCount');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('successCount');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('failureCount');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('adoptionCount');

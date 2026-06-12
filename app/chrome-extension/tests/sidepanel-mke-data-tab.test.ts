@@ -164,7 +164,9 @@ describe('Sidepanel MKE data tab', () => {
       "if (value === 'not_achieved' || value === 'false') return 'AI未通过'",
     );
     expect(tabSource).toContain("return '待AI评价'");
-    expect(tabSource).toContain("if (trace.aiFeedbackRequired === false) return '已记录'");
+    expect(tabSource).toContain("trace.aiFeedbackState === 'pending'");
+    expect(tabSource).toContain('trace.aiFeedbackRequired === true');
+    expect(tabSource).toContain("return '已记录'");
     expect(tabSource).not.toContain("return '业务通过'");
     expect(tabSource).not.toContain("return '待AI回写'");
   });
@@ -351,7 +353,9 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('trace.aiFeedback?.summary');
     expect(tabSource).toContain('trace.aiFeedback?.reasonCode');
     expect(tabSource).toContain("'AI评价：待AI评价'");
-    expect(tabSource).toContain("trace.aiFeedbackRequired === false ? '' : 'AI评价：待AI评价'");
+    expect(tabSource).toContain("trace.aiFeedbackState === 'pending'");
+    expect(tabSource).toContain('trace.aiFeedbackRequired === true');
+    expect(tabSource).toContain("return trace.aiFeedbackState === 'pending'");
     expect(tabSource).not.toContain('trace.statusView?.aiScore');
     expect(tabSource).toContain('trace.aiFeedback?.confidence');
     expect(tabSource).toContain('AI评价：${compactText');
