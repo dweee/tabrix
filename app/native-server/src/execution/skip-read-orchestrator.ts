@@ -89,6 +89,7 @@ export type SkipReadFallbackCause =
   | ''
   | 'api_layer_not_available'
   | 'budget_exhausted'
+  | 'experience_reuse_fallback_to_read_page'
   | 'unknown_source_route';
 
 export type SkipReadAction = 'skip' | 'fallback_required' | 'forward';
@@ -283,11 +284,15 @@ export interface SkipReadPlan {
  *      b. otherwise                         → `'fallback_required'`
  *         + `'api_layer_not_available'`.
  *
- *   3. `'read_page_required'` /
+ *   3. `'experience_reuse'`              → `'forward'` via
+ *      `dom_json` when the caller still asks for a page read. The
+ *      Experience suggestion itself is consumed before read_page.
+ *
+ *   4. `'read_page_required'` /
  *      `'dispatcher_fallback_safe'`         → `'forward'` via
  *      `dom_json`.
  *
- *   4. Anything else                         → `'forward'` via
+ *   5. Anything else                         → `'forward'` via
  *      `dom_json` + diagnostic
  *      `'unknown_source_route'`.
  */
@@ -310,6 +315,16 @@ export function planSkipRead(input: SkipReadPlanInput): SkipReadPlan {
   switch (decision.sourceRoute) {
     case 'knowledge_supported_read':
       return planKnowledgeBacked(decision, fallbackEntryLayer, executionMode);
+
+    case 'experience_reuse':
+      return forwardPlan({
+        sourceRoute: decision.sourceRoute,
+        fallbackEntryLayer,
+        action: 'forward',
+        diagnostic: 'forward: caller requested read_page after receiving an Experience suggestion',
+        fallbackCause: 'experience_reuse_fallback_to_read_page',
+        executionMode,
+      });
 
     case 'read_page_required':
       return forwardPlan({

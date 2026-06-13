@@ -51,6 +51,7 @@ export interface NativeToolHandlerDeps {
     'getPersistenceStatus' | 'knowledgeApi' | 'chooseContextTelemetry' | 'flushAndProjectMkeIdle'
   > & {
     memoryTraces?: SessionManager['memoryTraces'];
+    findReusableMkeExperienceRecipes?: SessionManager['findReusableMkeExperienceRecipes'];
   };
   /**
    * Externally-keyed `TaskSessionContext` the dispatcher resolved for
@@ -234,6 +235,12 @@ const handleTabrixChooseContext: NativeToolHandler = async (args, deps) => {
   // preserved.
   const result = await runTabrixChooseContextWithDirectApi(args, {
     knowledgeApi: deps.sessionManager.knowledgeApi,
+    experienceRecipes: deps.sessionManager.findReusableMkeExperienceRecipes
+      ? {
+          findReusableByContext: (input) =>
+            deps.sessionManager.findReusableMkeExperienceRecipes?.(input) ?? [],
+        }
+      : null,
     telemetry: deps.sessionManager.chooseContextTelemetry,
     pageContext,
     domRegionRowsEvidence: deps.taskContext?.peekVisibleRegionRowsEvidence() ?? null,

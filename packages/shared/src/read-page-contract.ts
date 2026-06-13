@@ -1803,13 +1803,15 @@ export const LAYER_DISPATCH_REASON_VALUES: readonly LayerDispatchReason[] = [
 ] as const;
 
 /**
- * Locked 3-value `LayerSourceRoute` enum.
+ * Locked `LayerSourceRoute` enum.
  * Source of truth for both telemetry and release gates.
  *
  * - `read_page_required` — caller MUST call `chrome_read_page` with
  *   the chosen layer; the chooser cannot pre-build context for it.
  * - `knowledge_supported_read` — caller should call `chrome_read_page`
  *   but the chooser surfaced API Knowledge shape evidence as well.
+ * - `experience_reuse` — caller received a verified Experience recipe
+ *   and may attempt that recipe before spending a fresh page read.
  * - `dispatcher_fallback_safe` — dispatcher could not classify the
  *   input and returns the full safe layer; execution fallback plans
  *   may clamp this back to compact DOM reads before calling
@@ -1822,11 +1824,13 @@ export const LAYER_DISPATCH_REASON_VALUES: readonly LayerDispatchReason[] = [
 export type LayerSourceRoute =
   | 'read_page_required'
   | 'knowledge_supported_read'
+  | 'experience_reuse'
   | 'dispatcher_fallback_safe';
 
 export const LAYER_SOURCE_ROUTE_VALUES: readonly LayerSourceRoute[] = [
   'read_page_required',
   'knowledge_supported_read',
+  'experience_reuse',
   'dispatcher_fallback_safe',
 ] as const;
 

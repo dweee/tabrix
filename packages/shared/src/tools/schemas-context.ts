@@ -6,7 +6,7 @@ export const CONTEXT_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.CONTEXT.CHOOSE,
     description:
-      'Choose the cheapest useful context for an AI browser task. Given an intent and optional page identity, Tabrix returns either reusable local Knowledge (`knowledge_light`) or tells the caller to read the page (`read_page_required`). Unsupported or uncertain inputs resolve to `read_page_required`.',
+      'Choose the cheapest useful context for an AI browser task. Given an intent and optional page identity, Tabrix returns reusable Experience (`experience_reuse`), reusable local Knowledge (`knowledge_light`), or tells the caller to read the page (`read_page_required`). Unsupported or uncertain inputs resolve to `read_page_required`.',
     annotations: {
       readOnlyHint: true,
       idempotentHint: true,

@@ -57,7 +57,11 @@ export type TabrixContextSiteId = SiteId;
  * still returns `read_page_required` so JSON-only callers see no
  * behavior change.
  */
-export type ContextStrategyName = 'knowledge_light' | 'read_page_markdown' | 'read_page_required';
+export type ContextStrategyName =
+  | 'experience_reuse'
+  | 'knowledge_light'
+  | 'read_page_markdown'
+  | 'read_page_required';
 
 /**
  * Small, hand-curated set of `pageRole` values
@@ -110,7 +114,7 @@ export interface TabrixChooseContextInput {
  * subsystem produced it.
  */
 export interface TabrixChooseContextArtifact {
-  kind: 'knowledge_api' | 'read_page';
+  kind: 'experience_recipe' | 'knowledge_api' | 'read_page';
   ref: string;
   /** Compact human-readable label, ≤ 200 chars. Not a UI string. */
   summary: string;

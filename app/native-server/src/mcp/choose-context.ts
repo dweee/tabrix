@@ -61,6 +61,7 @@ import {
   type TaskIntentClass,
 } from '../execution/data-source-router';
 import { tryDirectApiExecute, type DirectApiIntentClass } from '../execution/direct-api-executor';
+import type { ExperienceRecipe } from '../memory/db';
 import type { DataNeed, EndpointKnowledgeReader } from '../api-knowledge/types';
 
 const chooseContextLogger = logger.child('choose-context');
@@ -95,6 +96,12 @@ function readString(args: Record<string, unknown>, key: string): string | undefi
     throw new TabrixChooseContextInputError(`'${key}' must be a string`);
   }
   return value;
+}
+
+function readObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 /**
@@ -215,6 +222,33 @@ function deriveRequestedRowLimit(intent: string): number | undefined {
   return Math.max(1, Math.min(10, value));
 }
 
+function buildExperienceCatalog(recipe: ExperienceRecipe): {
+  experienceId: string;
+  summary: string;
+} {
+  const successCheck = readObject(recipe.successCheck);
+  const collectChecks = successCheck?.collectResultCards;
+  const firstCollectCheck = Array.isArray(collectChecks) ? readObject(collectChecks[0]) : null;
+  const filters = readObject(firstCollectCheck?.filterState);
+  const filterParts = [
+    typeof filters?.sort === 'string' ? filters.sort : null,
+    typeof filters?.contentType === 'string' ? filters.contentType : null,
+    typeof filters?.timeRange === 'string' ? filters.timeRange : null,
+  ].filter((value): value is string => Boolean(value));
+  const minCount =
+    typeof firstCollectCheck?.observedResultCountAtLeast === 'number'
+      ? firstCollectCheck.observedResultCountAtLeast
+      : null;
+  const filterSummary = filterParts.length > 0 ? ` filters=${filterParts.join('/')}` : '';
+  const countSummary = minCount ? ` top>=${minCount}` : '';
+  return {
+    experienceId: recipe.experienceId,
+    summary:
+      `Verified ${recipe.taskSignature}${filterSummary}${countSummary}; ` +
+      `success=${recipe.successCount}, reliability=${recipe.reliabilityScore ?? 'unknown'}`,
+  };
+}
+
 /**
  * Derive a `siteFamily` from an explicit safe `siteId` (highest
  * precedence) or, failing that, from the URL host. Non-GitHub hosts are
@@ -251,6 +285,10 @@ export interface ChooseContextFacts {
   intentSignature: string;
   pageRole?: string;
   siteFamily?: TabrixContextSiteFamily;
+  experienceCatalog?: {
+    experienceId: string;
+    summary: string;
+  };
   /**
    * Knowledge catalog summary for the resolved site family. Empty or
    * missing data means "do not pick `knowledge_light`".
@@ -275,6 +313,22 @@ interface StrategyDecision {
  * without updating the doc + the strategy-set guard test.
  */
 export function chooseContextStrategy(facts: ChooseContextFacts): StrategyDecision {
+  if (facts.experienceCatalog) {
+    return {
+      strategy: 'experience_reuse',
+      fallbackStrategy: 'read_page_required',
+      reasoning:
+        'verified Experience exists for this site and page role. Reuse it first; fall back to chrome_read_page if the page state or filters do not match.',
+      artifacts: [
+        {
+          kind: 'experience_recipe',
+          ref: facts.experienceCatalog.experienceId,
+          summary: facts.experienceCatalog.summary,
+        },
+      ],
+    };
+  }
+
   if (facts.knowledgeCatalog && facts.knowledgeCatalog.totalEndpoints > 0) {
     const cat = facts.knowledgeCatalog;
     const sample = cat.sampleSignatures.slice(0, KNOWLEDGE_LIGHT_SAMPLE_LIMIT);
@@ -384,6 +438,13 @@ export interface RunTabrixChooseContextDeps {
     | (Pick<KnowledgeApiRepository, 'listBySite' | 'countAll'> &
         Partial<Pick<KnowledgeApiRepository, 'listScoredBySite'>>)
     | null;
+  experienceRecipes?: {
+    findReusableByContext(input: {
+      siteFamily: string;
+      pageRole?: string | null;
+      limit?: number;
+    }): ExperienceRecipe[];
+  } | null;
   /**
    * Telemetry write-back. `null` means "telemetry disabled"
    * (persistence off, or the wiring opted out for a particular caller).
@@ -461,6 +522,18 @@ export function runTabrixChooseContext(
 
   const nowIso = (deps.now ?? (() => new Date().toISOString()))();
 
+  let experienceCatalog: ChooseContextFacts['experienceCatalog'];
+  if (deps.experienceRecipes && siteFamily) {
+    const reusableRecipes = deps.experienceRecipes.findReusableByContext({
+      siteFamily,
+      pageRole: input.pageRole ?? null,
+      limit: 1,
+    });
+    if (reusableRecipes.length > 0 && reusableRecipes[0]) {
+      experienceCatalog = buildExperienceCatalog(reusableRecipes[0]);
+    }
+  }
+
   let knowledgeCatalog: ChooseContextFacts['knowledgeCatalog'];
   const apiCandidate = resolveApiKnowledgeCandidate({
     intent: input.intent,
@@ -497,6 +570,7 @@ export function runTabrixChooseContext(
     intentSignature,
     pageRole: input.pageRole,
     siteFamily,
+    experienceCatalog,
     knowledgeCatalog,
   });
 
@@ -536,10 +610,12 @@ export function runTabrixChooseContext(
     0,
     layerDispatch.fullReadTokenEstimate - layerDispatch.tokenEstimate,
   );
+  const effectiveSourceRoute =
+    decision.strategy === 'experience_reuse' ? 'experience_reuse' : layerDispatch.sourceRoute;
   const domRegionRowsEvidence = deps.domRegionRowsEvidence ?? null;
   const routerDecision = routeDataSource({
     strategy: decision.strategy,
-    sourceRoute: layerDispatch.sourceRoute,
+    sourceRoute: effectiveSourceRoute,
     chosenLayer: layerDispatch.chosenLayer,
     layerDispatchReason: layerDispatch.reason,
     tokenEstimateChosen: layerDispatch.tokenEstimate,
@@ -616,7 +692,7 @@ export function runTabrixChooseContext(
         // Layer-dispatch telemetry
         chosenLayer: layerDispatch.chosenLayer,
         layerDispatchReason: layerDispatch.reason,
-        sourceRoute: layerDispatch.sourceRoute,
+        sourceRoute: effectiveSourceRoute,
         fallbackCause: layerDispatch.fallbackCause ?? null,
         tokenEstimateChosen: layerDispatch.tokenEstimate,
         tokenEstimateFullRead: layerDispatch.fullReadTokenEstimate,
@@ -657,7 +733,7 @@ export function runTabrixChooseContext(
     // callers still type-check.
     chosenLayer: layerDispatch.chosenLayer,
     layerDispatchReason: layerDispatch.reason,
-    sourceRoute: layerDispatch.sourceRoute,
+    sourceRoute: effectiveSourceRoute,
     fallbackCause: layerDispatch.fallbackCause ?? undefined,
     tokenEstimateChosen: layerDispatch.tokenEstimate,
     tokenEstimateFullRead: layerDispatch.fullReadTokenEstimate,

@@ -19,6 +19,7 @@ function makeDeps(
       recordAiBusinessFeedback: jest.Mock;
     } | null;
     flushAndProjectMkeIdle: jest.Mock;
+    findReusableMkeExperienceRecipes: jest.Mock;
   }> = {},
 ): NativeToolHandlerDeps {
   const flushAndProjectMkeIdle =
@@ -55,6 +56,7 @@ function makeDeps(
         };
       },
       flushAndProjectMkeIdle,
+      findReusableMkeExperienceRecipes: overrides.findReusableMkeExperienceRecipes,
     } as unknown as NativeToolHandlerDeps['sessionManager'],
   };
 }
@@ -263,6 +265,59 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
     const body = callTextPayload(result);
     expect(body.strategy).toBe('knowledge_light');
     expect(listBySite).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes to experience_reuse when a verified local Experience exists', async () => {
+    const handler = getChooseHandler();
+    const findReusableMkeExperienceRecipes = jest.fn().mockReturnValue([
+      {
+        experienceId: 'exp-xhs-top10',
+        taskSignature: 'tools:chrome_collect_result_cards',
+        successCount: 2,
+        failureCount: 0,
+        reliabilityScore: 1,
+        successCheck: {
+          collectResultCards: [
+            {
+              observedResultCountAtLeast: 10,
+              filterState: {
+                sort: '最多收藏',
+                contentType: '图文',
+                timeRange: '一周内',
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const result = await handler(
+      {
+        intent: '小红书搜索AI图片创作，筛选最多收藏、图文、一周内，并汇报前10条图文内容',
+        url: 'https://www.xiaohongshu.com/search_result/?keyword=AI图片创作&type=51',
+        pageRole: 'search_results',
+      },
+      makeDeps({
+        findReusableMkeExperienceRecipes,
+      }),
+    );
+
+    expect(result.isError).toBe(false);
+    const body = callTextPayload(result);
+    expect(body.strategy).toBe('experience_reuse');
+    expect(body.sourceRoute).toBe('experience_reuse');
+    expect(body.artifacts).toEqual([
+      expect.objectContaining({
+        kind: 'experience_recipe',
+        ref: 'exp-xhs-top10',
+      }),
+    ]);
+    expect(body.artifacts[0].summary).toContain('最多收藏/图文/一周内');
+    expect(findReusableMkeExperienceRecipes).toHaveBeenCalledWith({
+      siteFamily: 'www.xiaohongshu.com',
+      pageRole: 'search_results',
+      limit: 1,
+    });
   });
 
   it('disables chooser-inline direct API when private acceptance fault injection is present', async () => {

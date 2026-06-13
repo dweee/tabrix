@@ -98,6 +98,7 @@ function emptyReliability(
       read_page_required: 0,
       knowledge_supported_read: 0,
       dispatcher_fallback_safe: 0,
+      experience_reuse: 0,
       unknown: 0,
     },
     replayBlockedByCounts: {},

@@ -622,6 +622,15 @@ export class SessionManager {
     return this.repos.experienceRecipe.listRecent({ limit, offset });
   }
 
+  public findReusableMkeExperienceRecipes(input: {
+    siteFamily: string;
+    pageRole?: string | null;
+    limit?: number;
+  }): ExperienceRecipe[] {
+    if (!this.repos) return [];
+    return this.repos.experienceRecipe.findReusableByContext(input);
+  }
+
   public countMkeExperienceRecipes(): number {
     if (!this.repos) return 0;
     return this.repos.experienceRecipe.count();

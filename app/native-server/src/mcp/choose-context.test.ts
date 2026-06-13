@@ -149,8 +149,39 @@ describe('chooseContextStrategy (pure)', () => {
     // PR that bolts on `api_only` (or any other branch) MUST also touch
     // this guard test (and, by extension, the design doc).
     //
-    const allowed: ContextStrategyName[] = ['knowledge_light', 'read_page_required'];
-    expect(allowed.sort()).toEqual(['knowledge_light', 'read_page_required']);
+    const allowed: ContextStrategyName[] = [
+      'experience_reuse',
+      'knowledge_light',
+      'read_page_required',
+    ];
+    expect(allowed.sort()).toEqual(['experience_reuse', 'knowledge_light', 'read_page_required']);
+  });
+
+  it('returns experience_reuse before Knowledge when a verified recipe is available', () => {
+    const decision = chooseContextStrategy({
+      intentSignature: 'xiaohongshu top 10 cards',
+      siteFamily: 'www.xiaohongshu.com',
+      pageRole: 'search_results',
+      experienceCatalog: {
+        experienceId: 'exp-xhs-top10',
+        summary: 'Verified chrome_collect_result_cards filters=最多收藏/图文/一周内 top>=10',
+      },
+      knowledgeCatalog: {
+        site: 'www.xiaohongshu.com',
+        totalEndpoints: 1,
+        sampleSignatures: ['GET www.xiaohongshu.com/search'],
+      },
+    });
+
+    expect(decision.strategy).toBe('experience_reuse');
+    expect(decision.fallbackStrategy).toBe('read_page_required');
+    expect(decision.artifacts).toEqual([
+      {
+        kind: 'experience_recipe',
+        ref: 'exp-xhs-top10',
+        summary: 'Verified chrome_collect_result_cards filters=最多收藏/图文/一周内 top>=10',
+      },
+    ]);
   });
 
   it('returns knowledge_light when no experience hit and catalog is non-empty', () => {

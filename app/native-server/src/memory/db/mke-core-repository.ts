@@ -1156,6 +1156,7 @@ export class ExperienceRecipeRepository {
   private readonly listRecentStmt;
   private readonly findByFingerprintStmt;
   private readonly findByScenarioStmt;
+  private readonly findReusableByContextStmt;
   private readonly countStmt;
   private readonly archiveStmt;
   private readonly clearStmt;
@@ -1227,6 +1228,18 @@ export class ExperienceRecipeRepository {
         WHERE scenario_key = ? AND archived_at IS NULL
         ORDER BY updated_at DESC, created_at DESC
         LIMIT ?`,
+    );
+    this.findReusableByContextStmt = db.prepare(
+      `SELECT * FROM tabrix_experience_recipes
+        WHERE archived_at IS NULL
+          AND site_family = @site_family
+          AND (@page_role IS NULL OR page_role = @page_role)
+          AND drift_state = 'verified_once'
+          AND success_count > failure_count
+        ORDER BY COALESCE(reliability_score, 0) DESC,
+                 COALESCE(last_verified_at, updated_at) DESC,
+                 updated_at DESC
+        LIMIT @limit`,
     );
     this.archiveStmt = db.prepare(
       'UPDATE tabrix_experience_recipes SET archived_at = ?, updated_at = ? WHERE experience_id = ?',
@@ -1343,6 +1356,20 @@ export class ExperienceRecipeRepository {
     return (this.findByScenarioStmt.all(scenarioKey, limit) as ExperienceRecipeRow[]).map(
       rowToExperienceRecipe,
     );
+  }
+
+  public findReusableByContext(input: {
+    siteFamily: string;
+    pageRole?: string | null;
+    limit?: number;
+  }): ExperienceRecipe[] {
+    return (
+      this.findReusableByContextStmt.all({
+        site_family: input.siteFamily,
+        page_role: input.pageRole ?? null,
+        limit: Math.max(1, Math.min(10, optionalInteger(input.limit) ?? 5)),
+      }) as ExperienceRecipeRow[]
+    ).map(rowToExperienceRecipe);
   }
 
   public recordUseOutcome(input: {

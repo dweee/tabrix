@@ -522,6 +522,7 @@ export class ChooseContextTelemetryRepository {
       read_page_required: 0,
       knowledge_supported_read: 0,
       dispatcher_fallback_safe: 0,
+      experience_reuse: 0,
       unknown: 0,
     };
     const routeRows = this.db
@@ -537,6 +538,7 @@ export class ChooseContextTelemetryRepository {
         key === 'read_page_required' ||
         key === 'knowledge_supported_read' ||
         key === 'dispatcher_fallback_safe' ||
+        key === 'experience_reuse' ||
         key === 'unknown'
       ) {
         sourceRouteCounts[key] = (sourceRouteCounts[key] ?? 0) + row.n;

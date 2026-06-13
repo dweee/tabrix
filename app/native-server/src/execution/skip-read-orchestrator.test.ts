@@ -45,6 +45,12 @@ const FALLBACK_SAFE_DECISION: ChooseContextDecisionSnapshot = Object.freeze({
   fullReadTokenEstimate: 16_384,
 });
 
+const EXPERIENCE_REUSE_DECISION: ChooseContextDecisionSnapshot = Object.freeze({
+  sourceRoute: 'experience_reuse',
+  chosenLayer: 'L0+L1',
+  fullReadTokenEstimate: 2048,
+});
+
 describe('planSkipRead — retired routes', () => {
   it('retired route never skips read_page', () => {
     const plan = planSkipRead({ decision: RETIRED_ROUTE_DECISION, taskCtx: FRESH_CTX });
@@ -104,6 +110,16 @@ describe('planSkipRead — api_list / knowledge_supported_read', () => {
 });
 
 describe('planSkipRead — read_page_required / dispatcher_fallback_safe', () => {
+  it('experience_reuse → forward if the caller still asks read_page, without unknown-route noise', () => {
+    const plan = planSkipRead({ decision: EXPERIENCE_REUSE_DECISION, taskCtx: FRESH_CTX });
+    expect(plan.action).toBe('forward');
+    expect(plan.readPageAvoided).toBe(false);
+    expect(plan.sourceKind).toBe('dom_json');
+    expect(plan.sourceRoute).toBe('experience_reuse');
+    expect(plan.fallbackCause).toBe('experience_reuse_fallback_to_read_page');
+    expect(plan.diagnostic).not.toContain('unknown sourceRoute');
+  });
+
   it('read_page_required → forward + dom_json + fallbackCause=""', () => {
     const plan = planSkipRead({ decision: READ_REQUIRED_DECISION, taskCtx: FRESH_CTX });
     expect(plan.action).toBe('forward');
