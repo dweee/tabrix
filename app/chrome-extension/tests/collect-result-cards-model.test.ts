@@ -18,6 +18,7 @@ function card(overrides: Partial<CollectedResultCard>): CollectedResultCard {
     sourceScrollY: overrides.sourceScrollY ?? 0,
     firstSeenGlobalTop: overrides.firstSeenGlobalTop ?? 0,
     rect: overrides.rect ?? { x: 10, y: 20, width: 240, height: 160 },
+    actionTarget: overrides.actionTarget,
     confidence: overrides.confidence ?? 0.68,
     reasons: overrides.reasons ?? ['link_present'],
   };
@@ -59,6 +60,18 @@ describe('mergeCollectedResultCards', () => {
           primaryText: 'Author A',
           metaText: '1 day ago',
           interactionText: 'saved 129',
+          actionTarget: {
+            actionType: 'click',
+            targetKind: 'result_card_link',
+            url: 'https://example.com/1',
+            selector: 'a.title',
+            rect: { x: 20, y: 30, width: 120, height: 28 },
+            center: { x: 80, y: 44 },
+            coordinateFrame: 'viewport',
+            sourceScrollY: 0,
+            confidence: 0.9,
+            reasons: ['title_link_match'],
+          },
           firstSeenGlobalTop: 121,
           confidence: 0.82,
           reasons: ['media_present', 'meta_text_present'],
@@ -77,6 +90,14 @@ describe('mergeCollectedResultCards', () => {
       primaryText: 'Author A',
       metaText: '1 day ago',
       interactionText: 'saved 129',
+      actionTarget: {
+        actionType: 'click',
+        targetKind: 'result_card_link',
+        url: 'https://example.com/1',
+        selector: 'a.title',
+        coordinateFrame: 'viewport',
+        sourceScrollY: 0,
+      },
       confidence: 0.82,
     });
     expect(merged[0].reasons).toEqual(['link_present', 'media_present', 'meta_text_present']);

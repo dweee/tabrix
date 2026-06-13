@@ -1,6 +1,27 @@
 export interface CollectedResultCard {
   title: string;
   url?: string;
+  actionTarget?: {
+    actionType: 'click';
+    targetKind: 'result_card_link';
+    url?: string;
+    selector?: string;
+    text?: string;
+    rect: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+    center: {
+      x: number;
+      y: number;
+    };
+    coordinateFrame: 'viewport';
+    sourceScrollY: number;
+    confidence: number;
+    reasons: string[];
+  };
   primaryText?: string;
   secondaryText?: string;
   metaText?: string;
@@ -50,6 +71,7 @@ export function mergeCollectedResultCards(
     byKey.set(key, {
       ...existing,
       url: existing.url || card.url,
+      actionTarget: existing.actionTarget || card.actionTarget,
       primaryText: existing.primaryText || card.primaryText,
       secondaryText: existing.secondaryText || card.secondaryText,
       metaText: existing.metaText || card.metaText,

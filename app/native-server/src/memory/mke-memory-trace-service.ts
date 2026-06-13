@@ -1202,6 +1202,34 @@ export class MkeMemoryTraceService {
       const cardUrlFields = normalizeUrlPattern(readString(card.url), {
         allowPersonalBrowserStateStorage: false,
       });
+      const rawActionTarget = readObject(card.actionTarget);
+      const actionTargetUrlFields = normalizeUrlPattern(readString(rawActionTarget?.url), {
+        allowPersonalBrowserStateStorage: false,
+      });
+      const actionTarget = rawActionTarget
+        ? {
+            actionType: readString(rawActionTarget.actionType),
+            targetKind: readString(rawActionTarget.targetKind),
+            url:
+              actionTargetUrlFields.rootRoute ??
+              actionTargetUrlFields.currentRoute ??
+              actionTargetUrlFields.pattern,
+            selector: readString(rawActionTarget.selector),
+            text: readString(rawActionTarget.text),
+            rect: readObject(rawActionTarget.rect),
+            center: readObject(rawActionTarget.center),
+            coordinateFrame: readString(rawActionTarget.coordinateFrame),
+            sourceScrollY: readNumber(rawActionTarget.sourceScrollY),
+            confidence: readFiniteNumber(rawActionTarget.confidence),
+            reasons: readArray(rawActionTarget.reasons).filter(
+              (item): item is string => typeof item === 'string',
+            ),
+          }
+        : null;
+      const actionTypes = [
+        actionTarget ? 'click_result_card' : null,
+        readString(card.url) ? 'open_via_url' : null,
+      ].filter((item): item is string => Boolean(item));
       const cardKey =
         cardUrlFields.rootRoute ?? cardUrlFields.currentRoute ?? cardUrlFields.pattern ?? title;
       const sourceScrollY = readNumber(card.sourceScrollY);
@@ -1222,11 +1250,12 @@ export class MkeMemoryTraceService {
         selectedDataSource,
         sourceFreshness: readString(payload.freshness, trace.freshness),
         lifecycleState: 'observed',
-        canTabrixOperate: Boolean(readString(card.url)),
-        actionTypes: readString(card.url) ? ['open_via_url'] : [],
+        canTabrixOperate: actionTypes.length > 0,
+        actionTypes,
         targetability: this.sanitizeBrowserObjectValue({
           rank,
           url: cardUrlFields.rootRoute ?? cardUrlFields.pattern,
+          actionTarget,
           rect: readObject(card.rect),
         }),
         facts: this.sanitizeBrowserObjectValue({
@@ -1239,6 +1268,7 @@ export class MkeMemoryTraceService {
           interactionText: readString(card.interactionText),
           imageCount: readNumber(card.imageCount),
           sourceScrollY,
+          actionTarget,
           reasons: readArray(card.reasons).filter(
             (item): item is string => typeof item === 'string',
           ),

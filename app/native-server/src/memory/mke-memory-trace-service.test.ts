@@ -412,6 +412,19 @@ describe('MkeMemoryTraceService', () => {
               rank: 1,
               title: 'First result',
               url: 'https://example.test/note/1?x=private',
+              actionTarget: {
+                actionType: 'click',
+                targetKind: 'result_card_link',
+                url: 'https://example.test/note/1?x=private',
+                selector: 'body > main > article:nth-of-type(1) > a:nth-of-type(1)',
+                text: 'First result',
+                rect: { x: 20, y: 40, width: 160, height: 32 },
+                center: { x: 100, y: 56 },
+                coordinateFrame: 'viewport',
+                sourceScrollY: 0,
+                confidence: 0.9,
+                reasons: ['title_link_match'],
+              },
               primaryText: 'Author A',
               metaText: '1 day ago',
               interactionText: '123',
@@ -479,13 +492,32 @@ describe('MkeMemoryTraceService', () => {
         primaryConclusion: 'First result',
         confidenceScore: 0.86,
         canTabrixOperate: true,
+        actionTypes: ['click_result_card', 'open_via_url'],
       });
       expect(cards[0].facts).toMatchObject({
         rank: 1,
         title: 'First result',
         url: 'https://example.test/note/:id',
         primaryText: 'Author A',
+        actionTarget: {
+          actionType: 'click',
+          targetKind: 'result_card_link',
+          url: 'https://example.test/note/:id',
+          center: { x: 100, y: 56 },
+          coordinateFrame: 'viewport',
+          sourceScrollY: 0,
+          confidence: 0.9,
+        },
         sourceStrategy: 'list_container',
+      });
+      expect(cards[0].targetability).toMatchObject({
+        actionTarget: {
+          targetKind: 'result_card_link',
+          url: 'https://example.test/note/:id',
+          center: { x: 100, y: 56 },
+          coordinateFrame: 'viewport',
+          sourceScrollY: 0,
+        },
       });
       expect(JSON.stringify(objects)).not.toContain('x=private');
     } finally {

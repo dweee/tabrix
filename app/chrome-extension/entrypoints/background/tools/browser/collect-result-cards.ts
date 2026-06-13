@@ -104,6 +104,110 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     return rect;
   };
 
+  const visibleLinkRect = (element: Element): DOMRect | null => {
+    const rect = element.getBoundingClientRect();
+    if (rect.width < 16 || rect.height < 12) return null;
+    if (rect.bottom < 0 || rect.top > window.innerHeight) return null;
+    if (rect.right < 0 || rect.left > window.innerWidth) return null;
+    return rect;
+  };
+
+  const cssEscape = (value: string): string => {
+    const css = (window as { CSS?: { escape?: (input: string) => string } }).CSS;
+    if (css?.escape) return css.escape(value);
+    return value.replace(/["\\#.:,[\]\s>+~]/g, '\\$&');
+  };
+
+  const selectorForElement = (element: Element): string | undefined => {
+    const parts: string[] = [];
+    let current: Element | null = element;
+    while (
+      current &&
+      current.nodeType === Node.ELEMENT_NODE &&
+      current !== document.documentElement
+    ) {
+      const tag = current.tagName.toLowerCase();
+      const id = current.getAttribute('id');
+      if (id) {
+        parts.unshift(`${tag}#${cssEscape(id)}`);
+        break;
+      }
+
+      const stableAttr = ['data-testid', 'data-test', 'data-cy', 'aria-label', 'title']
+        .map((name) => {
+          const raw = current?.getAttribute(name);
+          const value = normalize(raw);
+          return value && value.length <= 80 ? { name, value } : null;
+        })
+        .find((item): item is { name: string; value: string } => Boolean(item));
+      let part = tag;
+      if (stableAttr) {
+        part += `[${stableAttr.name}="${cssEscape(stableAttr.value)}"]`;
+      } else if (current.parentElement) {
+        const siblings = Array.from(current.parentElement.children).filter(
+          (child) => child.tagName === current?.tagName,
+        );
+        if (siblings.length > 1) {
+          part += `:nth-of-type(${siblings.indexOf(current) + 1})`;
+        }
+      }
+      parts.unshift(part);
+      if (tag === 'body') break;
+      current = current.parentElement;
+    }
+
+    if (parts.length === 0) return undefined;
+    return parts.join(' > ');
+  };
+
+  const linkText = (link: HTMLAnchorElement): string =>
+    normalize(link.innerText || link.textContent || link.getAttribute('aria-label') || '');
+
+  const linkOwnsCenterPoint = (link: HTMLAnchorElement, rect: DOMRect): boolean => {
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const hit = document.elementFromPoint(x, y);
+    if (!hit) return false;
+    const hitLink = hit.closest('a[href]');
+    return hit === link || link.contains(hit) || hitLink === link;
+  };
+
+  const primaryLinkForCard = (
+    links: readonly HTMLAnchorElement[],
+    title: string,
+  ): { link: HTMLAnchorElement; rect: DOMRect; reasons: string[] } | null => {
+    const normalizedTitle = normalize(title).toLowerCase();
+    const visibleLinks = links
+      .map((link) => ({ link, rect: visibleLinkRect(link), text: linkText(link) }))
+      .filter(
+        (item): item is { link: HTMLAnchorElement; rect: DOMRect; text: string } =>
+          Boolean(item.rect) &&
+          Boolean(normalize(item.link.href)) &&
+          linkOwnsCenterPoint(item.link, item.rect),
+      );
+    if (visibleLinks.length === 0) return null;
+
+    const titleMatch = visibleLinks.find((item) => {
+      const text = item.text.toLowerCase();
+      return text.length > 0 && (text.includes(normalizedTitle) || normalizedTitle.includes(text));
+    });
+    if (titleMatch)
+      return { link: titleMatch.link, rect: titleMatch.rect, reasons: ['title_link_match'] };
+
+    const textLink = visibleLinks.find(
+      (item) => item.text.length >= 4 && !shellPattern.test(item.text),
+    );
+    if (textLink)
+      return { link: textLink.link, rect: textLink.rect, reasons: ['visible_text_link'] };
+
+    const largestLink = [...visibleLinks].sort(
+      (left, right) => right.rect.width * right.rect.height - left.rect.width * left.rect.height,
+    )[0];
+    return largestLink
+      ? { link: largestLink.link, rect: largestLink.rect, reasons: ['largest_visible_link'] }
+      : null;
+  };
+
   const looksLikeResultCard = (element: Element): boolean => {
     const rect = visibleRect(element);
     if (!rect) return false;
@@ -255,7 +359,8 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     if (rect.width < 180 && images.length === 0) continue;
     if (lines.length < 2 && links.length === 0 && images.length === 0) continue;
 
-    const href = links.find((link) => normalize(link.href))?.href;
+    const primaryLink = primaryLinkForCard(links, title);
+    const href = primaryLink?.link.href ?? links.find((link) => normalize(link.href))?.href;
     if (!href) continue;
     const key = `${title.toLowerCase()}|${href || ''}`;
     if (seenKeys.has(key)) continue;
@@ -295,10 +400,36 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       interactionText ? 'interaction_text_present' : null,
     ].filter((item): item is string => Boolean(item));
     const confidence = Math.min(0.92, 0.52 + reasons.length * 0.08);
+    const primaryLinkSelector = primaryLink ? selectorForElement(primaryLink.link) : undefined;
+    const primaryLinkText = primaryLink ? linkText(primaryLink.link) : '';
+    const actionTarget = primaryLink
+      ? {
+          actionType: 'click' as const,
+          targetKind: 'result_card_link' as const,
+          url: primaryLink.link.href,
+          ...(primaryLinkSelector ? { selector: primaryLinkSelector } : {}),
+          ...(primaryLinkText ? { text: primaryLinkText } : {}),
+          rect: {
+            x: Math.round(primaryLink.rect.x),
+            y: Math.round(primaryLink.rect.y),
+            width: Math.round(primaryLink.rect.width),
+            height: Math.round(primaryLink.rect.height),
+          },
+          center: {
+            x: Math.round(primaryLink.rect.left + primaryLink.rect.width / 2),
+            y: Math.round(primaryLink.rect.top + primaryLink.rect.height / 2),
+          },
+          coordinateFrame: 'viewport' as const,
+          sourceScrollY: window.scrollY,
+          confidence: Math.min(0.94, confidence + 0.04),
+          reasons: primaryLink.reasons,
+        }
+      : undefined;
 
     cards.push({
       title,
       ...(href ? { url: href } : {}),
+      ...(actionTarget ? { actionTarget } : {}),
       ...(primaryText ? { primaryText } : {}),
       ...(secondaryText ? { secondaryText } : {}),
       ...(metaText ? { metaText } : {}),
@@ -460,6 +591,7 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
         ...(card.secondaryText ? { secondaryText: card.secondaryText } : {}),
         ...(card.metaText ? { metaText: card.metaText } : {}),
         ...(card.interactionText ? { interactionText: card.interactionText } : {}),
+        ...(card.actionTarget ? { actionTarget: card.actionTarget } : {}),
         imageCount: card.imageCount,
         sourceScrollY: card.sourceScrollY,
         rect: card.rect,
