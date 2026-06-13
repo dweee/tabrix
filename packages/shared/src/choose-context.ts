@@ -118,6 +118,25 @@ export interface TabrixChooseContextArtifact {
   ref: string;
   /** Compact human-readable label, ≤ 200 chars. Not a UI string. */
   summary: string;
+  /**
+   * Optional executable guidance for `kind: 'experience_recipe'`.
+   *
+   * This is a compact, privacy-safe recipe envelope: callers can use it
+   * to replay the successful pattern, but it must not contain raw page
+   * payloads, cookies, tokens, concrete tab ids, or session-only DOM refs.
+   */
+  recipe?: {
+    schema: 'tabrix_experience_recipe_hint_v1';
+    siteFamily?: string | null;
+    pageRole?: string | null;
+    taskSignature?: string | null;
+    successCount?: number;
+    reliabilityScore?: number | null;
+    driftState?: string | null;
+    steps?: unknown[];
+    successCheck?: unknown;
+    fallback?: string;
+  };
 }
 
 /**

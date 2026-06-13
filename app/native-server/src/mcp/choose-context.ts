@@ -234,6 +234,7 @@ function deriveRequestedRowLimit(intent: string): number | undefined {
 function buildExperienceCatalog(recipe: ExperienceRecipe): {
   experienceId: string;
   summary: string;
+  recipe: NonNullable<TabrixChooseContextArtifact['recipe']>;
 } {
   const successCheck = readObject(recipe.successCheck);
   const collectChecks = successCheck?.collectResultCards;
@@ -255,6 +256,19 @@ function buildExperienceCatalog(recipe: ExperienceRecipe): {
     summary:
       `Verified ${recipe.taskSignature}${filterSummary}${countSummary}; ` +
       `success=${recipe.successCount}, reliability=${recipe.reliabilityScore ?? 'unknown'}`,
+    recipe: {
+      schema: 'tabrix_experience_recipe_hint_v1',
+      siteFamily: recipe.siteFamily,
+      pageRole: recipe.pageRole,
+      taskSignature: recipe.taskSignature,
+      successCount: recipe.successCount,
+      reliabilityScore: recipe.reliabilityScore,
+      driftState: recipe.driftState,
+      steps: Array.isArray(recipe.steps) ? recipe.steps : [],
+      successCheck: recipe.successCheck,
+      fallback:
+        'If the live page or filter state does not match this recipe, call chrome_read_page before reusing it.',
+    },
   };
 }
 
@@ -297,6 +311,7 @@ export interface ChooseContextFacts {
   experienceCatalog?: {
     experienceId: string;
     summary: string;
+    recipe?: NonNullable<TabrixChooseContextArtifact['recipe']>;
   };
   /**
    * Knowledge catalog summary for the resolved site family. Empty or
@@ -333,6 +348,7 @@ export function chooseContextStrategy(facts: ChooseContextFacts): StrategyDecisi
           kind: 'experience_recipe',
           ref: facts.experienceCatalog.experienceId,
           summary: facts.experienceCatalog.summary,
+          ...(facts.experienceCatalog.recipe ? { recipe: facts.experienceCatalog.recipe } : {}),
         },
       ],
     };

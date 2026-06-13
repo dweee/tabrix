@@ -166,6 +166,40 @@ describe('chooseContextStrategy (pure)', () => {
       experienceCatalog: {
         experienceId: 'exp-xhs-top10',
         summary: 'Verified chrome_collect_result_cards filters=最多收藏/图文/一周内 top>=10',
+        recipe: {
+          schema: 'tabrix_experience_recipe_hint_v1',
+          siteFamily: 'www.xiaohongshu.com',
+          pageRole: 'search_results',
+          taskSignature: 'tools:chrome_collect_result_cards',
+          successCount: 2,
+          reliabilityScore: 1,
+          driftState: 'verified_once',
+          steps: [
+            {
+              order: 1,
+              toolName: 'chrome_collect_result_cards',
+              argsTemplate: {
+                tab: '{{targetTabId}}',
+                minResults: '{{minResults}}',
+                maxScrolls: '{{maxScrolls}}',
+              },
+            },
+          ],
+          successCheck: {
+            collectResultCards: [
+              {
+                observedResultCountAtLeast: 10,
+                filterState: {
+                  sort: '最多收藏',
+                  contentType: '图文',
+                  timeRange: '一周内',
+                },
+              },
+            ],
+          },
+          fallback:
+            'If the live page or filter state does not match this recipe, call chrome_read_page before reusing it.',
+        },
       },
       knowledgeCatalog: {
         site: 'www.xiaohongshu.com',
@@ -181,6 +215,40 @@ describe('chooseContextStrategy (pure)', () => {
         kind: 'experience_recipe',
         ref: 'exp-xhs-top10',
         summary: 'Verified chrome_collect_result_cards filters=最多收藏/图文/一周内 top>=10',
+        recipe: {
+          schema: 'tabrix_experience_recipe_hint_v1',
+          siteFamily: 'www.xiaohongshu.com',
+          pageRole: 'search_results',
+          taskSignature: 'tools:chrome_collect_result_cards',
+          successCount: 2,
+          reliabilityScore: 1,
+          driftState: 'verified_once',
+          steps: [
+            {
+              order: 1,
+              toolName: 'chrome_collect_result_cards',
+              argsTemplate: {
+                tab: '{{targetTabId}}',
+                minResults: '{{minResults}}',
+                maxScrolls: '{{maxScrolls}}',
+              },
+            },
+          ],
+          successCheck: {
+            collectResultCards: [
+              {
+                observedResultCountAtLeast: 10,
+                filterState: {
+                  sort: '最多收藏',
+                  contentType: '图文',
+                  timeRange: '一周内',
+                },
+              },
+            ],
+          },
+          fallback:
+            'If the live page or filter state does not match this recipe, call chrome_read_page before reusing it.',
+        },
       },
     ]);
   });
