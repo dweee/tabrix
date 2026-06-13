@@ -80,13 +80,20 @@ function isPositionalSelector(selector: string | null): boolean {
   return /\b:nth-of-type\(/i.test(selector) || /\b:nth-child\(/i.test(selector);
 }
 
+function isSnapshotTargetRef(targetRef: string | null): boolean {
+  if (!targetRef) return false;
+  return /^(ref_|ref_text_|ref_fallback_)/i.test(targetRef);
+}
+
 function isSessionScopedAction(object: BrowserObject, actionType: string): boolean {
   const facts = readObject(object.facts);
   const targetability = readObject(object.targetability);
   const actionTarget = readObject(facts?.actionTarget) ?? readObject(targetability?.actionTarget);
   const selector = typeof actionTarget?.selector === 'string' ? actionTarget.selector : null;
-  if (actionType === 'click' && object.objectType === 'action_target') {
+  if (object.objectType === 'action_target') {
     const targetRef = typeof targetability?.targetRef === 'string' ? targetability.targetRef : null;
+    if (isSnapshotTargetRef(targetRef)) return true;
+    if (actionType !== 'click') return false;
     return Boolean(
       targetRef ||
       isPositionalSelector(selector) ||

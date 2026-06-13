@@ -368,9 +368,11 @@ export const chromeNetworkCapturePostProcessor: ToolPostProcessor = (ctx) => {
 export const TOOL_POST_PROCESSORS: Partial<Record<string, ToolPostProcessor>> = {
   chrome_read_page: chromeReadPagePostProcessor,
   // API Knowledge capture has no MCP surface change. Keyed off the canonical
-  // tool name so legacy aliases (`chrome_network_capture_stop`) are
-  // intentionally not hooked.
+  // tool name and compatible legacy stop names so older clients cannot bypass
+  // the Knowledge side effect when they still call the split stop tools.
   [TOOL_NAMES.BROWSER.NETWORK_CAPTURE]: chromeNetworkCapturePostProcessor,
+  [TOOL_NAMES.BROWSER.NETWORK_CAPTURE_STOP]: chromeNetworkCapturePostProcessor,
+  [TOOL_NAMES.BROWSER.NETWORK_DEBUGGER_STOP]: chromeNetworkCapturePostProcessor,
 };
 
 export function runPostProcessor(ctx: ToolPostProcessorContext): ToolPostProcessorResult {

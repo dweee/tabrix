@@ -1009,6 +1009,8 @@ function shouldRecoverSearchToolbarTargets(
   );
 }
 
+const SEARCH_TOOLBAR_TARGET_RECOVERY_FALLBACK_LABELS = ['筛选', '已筛选', 'Filter', 'Filters'];
+
 function searchToolbarElementKey(element: any): string {
   return [
     typeof element?.selector === 'string' ? element.selector.trim() : '',
@@ -1019,6 +1021,29 @@ function searchToolbarElementKey(element: any): string {
     .filter(Boolean)
     .join('|')
     .toLowerCase();
+}
+
+function hasExecutableRecoveredTarget(element: any): boolean {
+  const ref = typeof element?.ref === 'string' ? element.ref.trim() : '';
+  const href = typeof element?.href === 'string' ? element.href.trim() : '';
+  return Boolean(ref || href);
+}
+
+function prependRecoveredElementsToPageContent(params: {
+  basePayload: any;
+  recoveredElements: any[];
+  recoveredRefMap: any[];
+}): void {
+  const recoveredContent = formatElementsAsPageContent(
+    params.recoveredElements,
+    params.recoveredRefMap,
+  );
+  if (!recoveredContent) return;
+  const existingContent =
+    typeof params.basePayload.pageContent === 'string' ? params.basePayload.pageContent : '';
+  params.basePayload.pageContent = existingContent
+    ? `${recoveredContent}\n${existingContent}`
+    : recoveredContent;
 }
 
 function extractVisibleTextControlLabelsForTargetRecovery(visibleTextContent: unknown): string[] {
@@ -2278,11 +2303,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
 
     const existingTargetableLabels = new Set(
       (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
-        .filter((element: any) => {
-          const selector = typeof element?.selector === 'string' ? element.selector.trim() : '';
-          const href = typeof element?.href === 'string' ? element.href.trim() : '';
-          return Boolean(selector || href);
-        })
+        .filter((element: any) => hasExecutableRecoveredTarget(element))
         .map((element: any) =>
           String(element?.name || element?.text || '')
             .replace(/\s+/g, ' ')
@@ -2364,6 +2385,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     );
     const existingLabels = new Set(
       (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
+        .filter((element: any) => hasExecutableRecoveredTarget(element))
         .map((element: any) =>
           String(element?.name || element?.text || '')
             .replace(/\s+/g, ' ')
@@ -2419,6 +2441,11 @@ class ReadPageTool extends BaseBrowserToolExecutor {
 
     params.basePayload.elements = [...recoveredWithRefs, ...existingElements].slice(0, 150);
     params.basePayload.refMap = [...recoveredRefMap, ...existingRefMap].slice(0, 150);
+    prependRecoveredElementsToPageContent({
+      basePayload: params.basePayload,
+      recoveredElements: recoveredWithRefs,
+      recoveredRefMap,
+    });
     params.basePayload.refMapCount = params.basePayload.refMap.filter(
       (entry: unknown) => entry != null,
     ).length;
@@ -2442,23 +2469,25 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     if (!shouldRecoverSearchToolbarTargets(params.assistantGuidance, params.basePayload.pageRole)) {
       return false;
     }
-    const labels = extractSearchToolbarLabelsFromVisibleText(params.basePayload.visibleTextContent)
+    const labels = Array.from(
+      new Set([
+        ...extractSearchToolbarLabelsFromVisibleText(params.basePayload.visibleTextContent),
+        ...SEARCH_TOOLBAR_TARGET_RECOVERY_FALLBACK_LABELS,
+      ]),
+    )
       .filter((label) => label.length <= 18)
-      .slice(0, 12);
+      .slice(0, 14);
     if (labels.length === 0) return false;
 
     const existingTargetKeys = new Set(
       (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
-        .filter((element: any) => {
-          const selector = typeof element?.selector === 'string' ? element.selector.trim() : '';
-          const href = typeof element?.href === 'string' ? element.href.trim() : '';
-          return Boolean(selector || href);
-        })
+        .filter((element: any) => hasExecutableRecoveredTarget(element))
         .map((element: any) => searchToolbarElementKey(element))
         .filter(Boolean),
     );
     const existingLabels = new Set(
       (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
+        .filter((element: any) => hasExecutableRecoveredTarget(element))
         .map((element: any) =>
           String(element?.name || element?.text || '')
             .replace(/\s+/g, ' ')
@@ -2514,6 +2543,11 @@ class ReadPageTool extends BaseBrowserToolExecutor {
 
     params.basePayload.elements = [...recoveredWithRefs, ...existingElements].slice(0, 150);
     params.basePayload.refMap = [...recoveredRefMap, ...existingRefMap].slice(0, 150);
+    prependRecoveredElementsToPageContent({
+      basePayload: params.basePayload,
+      recoveredElements: recoveredWithRefs,
+      recoveredRefMap,
+    });
     params.basePayload.refMapCount = params.basePayload.refMap.filter(
       (entry: unknown) => entry != null,
     ).length;
@@ -2550,11 +2584,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
 
     const existingTargetKeys = new Set(
       (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
-        .filter((element: any) => {
-          const selector = typeof element?.selector === 'string' ? element.selector.trim() : '';
-          const href = typeof element?.href === 'string' ? element.href.trim() : '';
-          return Boolean(selector || href);
-        })
+        .filter((element: any) => hasExecutableRecoveredTarget(element))
         .map((element: any) => searchToolbarElementKey(element))
         .filter(Boolean),
     );
@@ -2616,6 +2646,11 @@ class ReadPageTool extends BaseBrowserToolExecutor {
 
     params.basePayload.elements = [...recoveredWithRefs, ...existingElements].slice(0, 150);
     params.basePayload.refMap = [...recoveredRefMap, ...existingRefMap].slice(0, 150);
+    prependRecoveredElementsToPageContent({
+      basePayload: params.basePayload,
+      recoveredElements: recoveredWithRefs,
+      recoveredRefMap,
+    });
     params.basePayload.refMapCount = params.basePayload.refMap.filter(
       (entry: unknown) => entry != null,
     ).length;

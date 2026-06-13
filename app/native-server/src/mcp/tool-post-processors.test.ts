@@ -186,6 +186,12 @@ describe('TOOL_POST_PROCESSORS registry', () => {
     expect(TOOL_POST_PROCESSORS[TOOL_NAMES.BROWSER.NETWORK_CAPTURE]).toBe(
       chromeNetworkCapturePostProcessor,
     );
+    expect(TOOL_POST_PROCESSORS[TOOL_NAMES.BROWSER.NETWORK_CAPTURE_STOP]).toBe(
+      chromeNetworkCapturePostProcessor,
+    );
+    expect(TOOL_POST_PROCESSORS[TOOL_NAMES.BROWSER.NETWORK_DEBUGGER_STOP]).toBe(
+      chromeNetworkCapturePostProcessor,
+    );
     for (const name of [
       'chrome_click_element',
       'chrome_fill_or_select',

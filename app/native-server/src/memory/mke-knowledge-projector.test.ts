@@ -272,17 +272,39 @@ describe('MkeKnowledgeProjector', () => {
       },
       updatedAt: '2026-06-06T06:00:03.500Z',
     });
+    objects.upsert({
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageModelKey: 'page:example.test:search_results',
+      objectFingerprint: 'action-target:search-input',
+      objectType: 'action_target',
+      lifecycleState: 'observed',
+      canTabrixOperate: true,
+      actionTypes: ['fill'],
+      selectedDataSource: 'dom_json',
+      sourceRoute: 'read_page_candidate_actions',
+      sourceFreshness: 'fresh',
+      sourceTraceIds: ['trace-full-read'],
+      facts: {
+        matchReason: 'search input candidate action',
+      },
+      targetability: {
+        targetRef: 'ref_3',
+      },
+      updatedAt: '2026-06-06T06:00:03.750Z',
+    });
 
     const result = projector.projectIdleBatch({ nowIso: '2026-06-06T06:00:04.000Z' });
     const model = knowledge.get(result.knowledgeIds[0])!;
 
     expect(result).toMatchObject({
-      processedTraceCount: 4,
+      processedTraceCount: 5,
       skippedTraceCount: 0,
       upsertedKnowledgeCount: 1,
     });
     expect(model.objectGraph).toMatchObject({
-      sourceObjectCount: 4,
+      sourceObjectCount: 5,
       resultCardCount: 2,
       resultCardSummary: {
         count: 2,
@@ -291,19 +313,20 @@ describe('MkeKnowledgeProjector', () => {
         rawCardTextCopied: false,
       },
       objectTypeCounts: {
-        action_target: 1,
+        action_target: 2,
         page: 1,
         result_card: 2,
       },
     });
     expect(model.actionSurface).toMatchObject({
-      actionKindCounts: { click: 1, click_result_card: 2, open_via_url: 2 },
+      actionKindCounts: { click: 1, click_result_card: 2, fill: 1, open_via_url: 2 },
       reusableActionKinds: ['open_via_url'],
-      sessionScopedActionKinds: { click: 1, click_result_card: 2 },
+      sessionScopedActionKinds: { click: 1, click_result_card: 2, fill: 1 },
       resultCardActionKinds: { click_result_card: 2, open_via_url: 2 },
     });
     expect(model.dataSourceModel).toMatchObject({
       selectedDataSourceCounts: {
+        dom_json: 1,
         markdown: 1,
         visible_dom_result_cards: 3,
       },

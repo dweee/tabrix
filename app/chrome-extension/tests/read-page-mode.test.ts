@@ -995,6 +995,80 @@ describe('read_page mode', () => {
     });
   });
 
+  it('recovers the search filter trigger even when visible text extraction missed it', async () => {
+    vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
+      { result: { bound: 1 } },
+    ] as any);
+    const collectInteractiveElementsFallback = vi
+      .spyOn(readPageTool as any, 'collectInteractiveElementsFallback')
+      .mockImplementation(async (_tabId: number, options: { textQuery?: string }) => {
+        if (options.textQuery !== '筛选') return { success: true, elements: [] };
+        return {
+          success: true,
+          elements: [
+            {
+              type: 'selected',
+              role: '',
+              selector: 'body > main > div.search-layout__top > div.filter',
+              text: '筛选',
+              isInteractive: true,
+              actionability: 'actionable',
+              coordinates: {
+                x: 1200,
+                y: 60,
+                rect: { x: 1160, y: 40, width: 84, height: 40 },
+              },
+            },
+          ],
+        };
+      });
+    const basePayload: any = {
+      pageRole: 'search_results',
+      visibleTextContent: '全部 图文 视频 用户',
+      elements: [],
+      refMap: [],
+      count: 0,
+    };
+
+    const recovered = await (readPageTool as any).recoverSearchToolbarTextTargets({
+      tabId: 5221,
+      basePayload,
+      assistantGuidance: {
+        taskKind: 'search',
+        requestedObjects: ['filters', 'result_cards'],
+      },
+    });
+
+    expect(recovered).toBe(true);
+    expect(collectInteractiveElementsFallback).toHaveBeenCalledWith(
+      5221,
+      expect.objectContaining({ textQuery: '筛选', includeCoordinates: true }),
+    );
+    expect(basePayload.elements[0]).toMatchObject({
+      ref: expect.stringMatching(/^ref_text_search_toolbar_/),
+      role: 'button',
+      selector: 'body > main > div.search-layout__top > div.filter',
+      text: '筛选',
+      actionability: 'actionable',
+    });
+
+    const interactiveElements = buildInteractiveElements(
+      formatElementsAsPageContent(basePayload.elements, basePayload.refMap),
+      basePayload.elements,
+      20,
+      'normal',
+      'https://example.com/search?q=neutral',
+    );
+    const actions = buildCandidateActions(interactiveElements, basePayload.refMap);
+    expect(actions[0]).toMatchObject({
+      intent: 'filter.open',
+      locatorChain: expect.arrayContaining([
+        { type: 'aria', value: '筛选' },
+        { type: 'css', value: 'body > main > div.search-layout__top > div.filter' },
+      ]),
+    });
+  });
+
   it('recovers short visible text controls without requiring screenshots or coordinates first', async () => {
     const bindScript = vi
       .spyOn(chrome.scripting, 'executeScript')
@@ -1358,6 +1432,69 @@ describe('read_page mode', () => {
       ]),
     );
     expect(basePayload.fallbackSource).toBe('search_toolbar_target_recovery');
+  });
+
+  it('recovers search toolbar targets when matching visible text is not locator-backed', async () => {
+    vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
+      { result: { bound: 1 } },
+    ] as any);
+    const collectInteractiveElementsFallback = vi
+      .spyOn(readPageTool as any, 'collectInteractiveElementsFallback')
+      .mockResolvedValue({
+        success: true,
+        elements: [
+          {
+            type: 'text_action',
+            role: 'button',
+            selector: 'body > main > div.search-layout__top > div.filter > span',
+            text: '筛选',
+            name: '筛选',
+            isInteractive: true,
+            actionability: 'actionable',
+            coordinates: {
+              x: 1620,
+              y: 64,
+              rect: { x: 1600, y: 48, width: 64, height: 32 },
+            },
+          },
+        ],
+      });
+    const basePayload: any = {
+      pageRole: 'search_results',
+      visibleTextContent: '全部 图文 视频 用户\n筛选',
+      elements: [
+        {
+          type: 'text',
+          role: 'generic',
+          text: '筛选',
+          name: '筛选',
+          actionability: 'blocked',
+        },
+      ],
+      refMap: [],
+      count: 1,
+    };
+
+    const recovered = await (readPageTool as any).recoverSearchToolbarTextTargets({
+      tabId: 5225,
+      basePayload,
+    });
+
+    expect(recovered).toBe(true);
+    expect(collectInteractiveElementsFallback).toHaveBeenCalledWith(
+      5225,
+      expect.objectContaining({ textQuery: '筛选', includeCoordinates: true }),
+    );
+    expect(basePayload.elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ref: expect.stringMatching(/^ref_text_search_toolbar_/),
+          selector: 'body > main > div.search-layout__top > div.filter > span',
+          text: '筛选',
+          role: 'button',
+        }),
+      ]),
+    );
   });
 
   it('recovers locator-backed target refs for dynamic filter panel labels', async () => {

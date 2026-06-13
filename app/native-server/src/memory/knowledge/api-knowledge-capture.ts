@@ -438,7 +438,9 @@ function classifyGenericFamily(rawUrl: string, method: string): ClassifiedEndpoi
   } catch {
     return null;
   }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
   const host = parsed.hostname.toLowerCase();
+  if (!host || host === 'invalid') return null;
   // Skip GitHub host — the family-aware classifier owns it. We never
   // want two parallel rows for the same endpoint.
   if (host === GITHUB_API_HOST) return null;

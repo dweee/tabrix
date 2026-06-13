@@ -495,6 +495,48 @@ describe('deriveKnowledgeFromBundle', () => {
     expect(typeof generic.responseShapeSummary).toBe('string');
   });
 
+  it('drops invalid or non-web generic hosts from observed endpoint knowledge', () => {
+    const out = deriveKnowledgeFromBundle(
+      {
+        requests: [
+          {
+            url: 'https://invalid/api/search/items?q=private',
+            method: 'GET',
+            type: 'xmlhttprequest',
+            mimeType: 'application/json',
+            statusCode: 200,
+          },
+          {
+            url: 'chrome-extension://extension-id/internal.json',
+            method: 'GET',
+            type: 'xmlhttprequest',
+            mimeType: 'application/json',
+            statusCode: 200,
+          },
+          {
+            url: 'https://api.example.test/v1/search/items?q=tabrix',
+            method: 'GET',
+            type: 'xmlhttprequest',
+            mimeType: 'application/json',
+            statusCode: 200,
+          },
+        ],
+      },
+      CTX,
+    );
+
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      site: 'api.example.test',
+      family: 'observed',
+      endpointSource: 'observed',
+      semanticType: 'search',
+      usableForTask: true,
+    });
+    expect(JSON.stringify(out)).not.toContain('invalid');
+    expect(JSON.stringify(out)).not.toContain('extension-id');
+  });
+
   it('V28-W7A — captures generic content endpoint metadata without raw body values', () => {
     const out = deriveKnowledgeFromBundle(
       {

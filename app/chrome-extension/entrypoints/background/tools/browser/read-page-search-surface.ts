@@ -34,6 +34,34 @@ const COLLECTION_METRIC_PATTERN =
   /(?:收藏|saves?|saved|favorites?|favourites?|collected)\s*[:：]?\s*([0-9][0-9,.]*\s*(?:万|千|k|m)?)/i;
 const COMPACT_COUNT_PATTERN = /([0-9][0-9,.]*\s*(?:万|千|k|m)?)/i;
 const SEARCH_TOOLBAR_TEXT_SCAN_LINE_LIMIT = 80;
+const KNOWN_CLUSTERED_SHORT_LABELS = [
+  '全部',
+  '图文',
+  '视频',
+  '用户',
+  '筛选',
+  '排序',
+  '综合',
+  '最新',
+  '最热',
+  '最多点赞',
+  '最多评论',
+  '最多收藏',
+  '不限',
+  '一天内',
+  '一周内',
+  '半年内',
+  '已看过',
+  '未看过',
+  '已关注',
+  '同城',
+  '附近',
+  '清除',
+  '重置',
+  '确认',
+  '应用',
+  '收起',
+];
 
 type SearchSurfaceControl = ReadPageSearchSurface['controls'][number];
 type SearchSurfaceFilterPanel = NonNullable<ReadPageSearchSurface['filterPanel']>;
@@ -141,6 +169,18 @@ export function extractSearchToolbarLabelsFromVisibleText(
     .slice(0, SEARCH_TOOLBAR_TEXT_SCAN_LINE_LIMIT);
 
   for (const line of lines) {
+    const clusteredMatches = KNOWN_CLUSTERED_SHORT_LABELS.filter(
+      (label) => line.includes(label) && SEARCH_TOOLBAR_LABEL_PATTERN.test(label),
+    );
+    if (clusteredMatches.length >= 2) {
+      for (const label of clusteredMatches) {
+        const key = normalizedKey(label);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        labels.push(label);
+        if (labels.length >= 12) return labels;
+      }
+    }
     const candidates = [...(line.length <= 80 ? [line] : []), ...line.split(/[\s|｜/、,，]+/)]
       .map((item) => normalizeText(item))
       .filter(Boolean);
@@ -373,6 +413,18 @@ function extractShortLabels(
     .filter(Boolean)
     .slice(0, SEARCH_TOOLBAR_TEXT_SCAN_LINE_LIMIT);
   for (const line of lines) {
+    const clusteredMatches = KNOWN_CLUSTERED_SHORT_LABELS.filter(
+      (label) => line.includes(label) && pattern.test(label),
+    );
+    if (clusteredMatches.length >= 2) {
+      for (const label of clusteredMatches) {
+        const key = normalizedKey(label);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        labels.push(label);
+        if (labels.length >= limit) return labels;
+      }
+    }
     const candidates = [...(line.length <= 80 ? [line] : []), ...line.split(/[\s|｜/、,，]+/)]
       .map((item) => normalizeText(item))
       .filter(Boolean);
