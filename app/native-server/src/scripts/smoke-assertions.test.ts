@@ -1,6 +1,6 @@
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 
-import { buildSmokeRuntimeLogSummary } from './smoke';
+import { buildSmokeRuntimeLogSummary, resolveLocalMcpAuthToken } from './smoke';
 import {
   assessClickOutcome,
   assessKeyboardOutcome,
@@ -73,6 +73,22 @@ describe('buildSmokeRuntimeLogSummary — V27-OBS-00 smoke integration', () => {
     expect(summary.status).toBe('pass');
   });
 
+  it('ignores console tool metadata URLs when checking page console leaks', () => {
+    const summary = buildSmokeRuntimeLogSummary({
+      statusSnapshot: { bridge: { bridgeState: 'READY' } },
+      pageConsoleResult: {
+        success: true,
+        tabUrl: 'https://example.test/page?token=private-value',
+        message: 'Console buffer read for tab 1. Returned 1 messages and 0 exceptions.',
+        messages: [{ level: 'info', text: 'fetch complete network-ok' }],
+        exceptions: [],
+      },
+    });
+
+    expect(summary.sensitiveLogLeakCount).toBe(0);
+    expect(summary.status).toBe('pass');
+  });
+
   it('marks missing page console and bridge status sources explicitly', () => {
     const summary = buildSmokeRuntimeLogSummary({});
 
@@ -101,6 +117,43 @@ describe('buildSmokeRuntimeLogSummary — V27-OBS-00 smoke integration', () => {
     ]);
   });
 });
+
+describe('resolveLocalMcpAuthToken', () => {
+  it('loads the current auth token for local MCP smoke runs', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'ok', data: { token: 'local-current-token' } }),
+    });
+
+    await expect(
+      resolveLocalMcpAuthToken('http://127.0.0.1:12306/mcp', fetchMock as any),
+    ).resolves.toBe('local-current-token');
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:12306/auth/token', {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+    });
+  });
+
+  it('does not fetch auth tokens for remote MCP smoke runs', async () => {
+    const fetchMock = jest.fn();
+
+    await expect(
+      resolveLocalMcpAuthToken('http://192.168.1.143:12306/mcp', fetchMock as any),
+    ).resolves.toBeUndefined();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('continues without a token when local token lookup fails', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({ ok: false });
+
+    await expect(
+      resolveLocalMcpAuthToken('http://localhost:12306/mcp', fetchMock as any),
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe('assessReadPagePayload — v2.6 layered acceptance', () => {
   it('accepts the current v2.6 compact payload (no legacy pageContent required)', () => {
     const payload = compactLayeredPayload();

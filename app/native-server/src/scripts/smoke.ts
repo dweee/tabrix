@@ -532,6 +532,48 @@ function buildDefaultMcpUrl(): string {
   return getChromeMcpUrl();
 }
 
+function isLocalMcpUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    return (
+      url.hostname === '127.0.0.1' ||
+      url.hostname === 'localhost' ||
+      url.hostname === '::1' ||
+      url.hostname === '[::1]'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function buildAuthTokenUrl(rawMcpUrl: string): string {
+  const url = new URL(rawMcpUrl);
+  url.pathname = '/auth/token';
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+}
+
+export async function resolveLocalMcpAuthToken(
+  rawMcpUrl: string,
+  fetchFn: typeof globalThis.fetch = globalThis.fetch,
+): Promise<string | undefined> {
+  if (!isLocalMcpUrl(rawMcpUrl) || typeof fetchFn !== 'function') return undefined;
+
+  try {
+    const response = await fetchFn(buildAuthTokenUrl(rawMcpUrl), {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+    });
+    if (!response.ok) return undefined;
+    const parsed = await response.json();
+    const token = parsed?.data?.token;
+    return typeof token === 'string' && token.length > 0 ? token : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function buildAuthHeaders(token?: string): Record<string, string> {
   if (!token) {
     return {};
@@ -614,6 +656,14 @@ function collectConsoleSamples(value: unknown, samples: RuntimeLogSample[]): voi
   }
   if (typeof value !== 'object') return;
   const record = value as Record<string, unknown>;
+  const nestedConsoleEntries = [record.messages, record.exceptions].filter(Array.isArray);
+  if (nestedConsoleEntries.length > 0) {
+    for (const entries of nestedConsoleEntries) {
+      for (const entry of entries) collectConsoleSamples(entry, samples);
+    }
+    return;
+  }
+
   const message =
     typeof record.message === 'string'
       ? record.message
@@ -626,10 +676,6 @@ function collectConsoleSamples(value: unknown, samples: RuntimeLogSample[]): voi
       level: normalizeLogLevel(record.level),
       message,
     });
-  }
-  for (const [key, nested] of Object.entries(record)) {
-    if (key !== 'message' && key !== 'text' && key !== 'level')
-      collectConsoleSamples(nested, samples);
   }
 }
 
@@ -1170,7 +1216,8 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<number> {
   const repeat = Math.max(1, options.repeat || 1);
   const concurrency = Math.max(1, options.concurrency || 1);
   const smokeServer = protocolOnly ? null : await createSmokeServer();
-  const mcp = new StreamableHttpMcpClient(mcpUrl, buildAuthHeaders(options.authToken));
+  const authToken = options.authToken ?? (await resolveLocalMcpAuthToken(mcpUrl));
+  const mcp = new StreamableHttpMcpClient(mcpUrl, buildAuthHeaders(authToken));
   let tempTabId: number | null = null;
   let originalTabId: number | null = null;
   let originalWindowId: number | null = null;
@@ -1216,7 +1263,7 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<number> {
     }
 
     if (repeat > 1 || concurrency > 1) {
-      const stability = await runProtocolStability(mcpUrl, options.authToken, repeat, concurrency);
+      const stability = await runProtocolStability(mcpUrl, authToken, repeat, concurrency);
       steps.push(...stability.steps);
       const result: SmokeResult = {
         ok: stability.ok,
@@ -1240,7 +1287,7 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<number> {
     }
 
     if (protocolOnly) {
-      const protocol = await runProtocolSequence(mcpUrl, options.authToken);
+      const protocol = await runProtocolSequence(mcpUrl, authToken);
       steps.push(...protocol.steps);
 
       const result: SmokeResult = {
@@ -1264,7 +1311,7 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<number> {
       return result.ok ? 0 : 1;
     }
 
-    const defaultHeaders = buildAuthHeaders(options.authToken);
+    const defaultHeaders = buildAuthHeaders(authToken);
     const pingUrl = buildCompanionUrl(mcpUrl, 'ping');
     const statusUrl = buildCompanionUrl(mcpUrl, 'status');
     const ping = await probe(pingUrl, defaultHeaders);
