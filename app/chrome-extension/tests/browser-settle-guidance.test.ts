@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { navigateTool, switchTabTool } from '@/entrypoints/background/tools/browser/common';
 import { webFetcherTool } from '@/entrypoints/background/tools/browser/web-fetcher';
 import { readPageTool } from '@/entrypoints/background/tools/browser/read-page';
+import * as cdpPageSensing from '@/utils/cdp-page-sensing';
 import {
   getBrowserWorldSnapshot,
   initBrowserWorldInventory,
@@ -1515,6 +1516,108 @@ describe('browser settle guidance', () => {
     expect(Array.isArray(payload.interactiveElements)).toBe(true);
     expect(Array.isArray(payload.candidateActions)).toBe(true);
     expect(Array.isArray(payload.artifactRefs)).toBe(true);
+  });
+
+  it('attaches CDP page sensing to read_page load readiness when available', async () => {
+    vi.spyOn(cdpPageSensing, 'captureCDPPageSensingSnapshot').mockResolvedValue({
+      tabId: 41,
+      capturedAt: Date.parse('2026-06-13T10:00:00.000Z'),
+      source: 'cdp',
+      available: true,
+      readiness: 'complete',
+      likelyLoading: false,
+      visibilityState: 'visible',
+      focused: true,
+      activeElement: {
+        tagName: 'INPUT',
+        type: 'search',
+        role: 'searchbox',
+        idPresent: true,
+        namePresent: true,
+      },
+      frameCount: 2,
+      navigation: {
+        type: 'navigate',
+        responseEndMs: 24,
+        domContentLoadedMs: 48,
+        loadEventMs: 72,
+      },
+    });
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 41,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'http://127.0.0.1:62100/search?q=private',
+      title: 'Search',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows.get as any).mockResolvedValue({
+      id: 1,
+      focused: true,
+      state: 'normal',
+      tabs: [
+        {
+          id: 41,
+          windowId: 1,
+          active: true,
+          status: 'complete',
+          url: 'http://127.0.0.1:62100/search?q=private',
+          title: 'Search',
+        },
+      ],
+    });
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        'Textbox "Search"',
+        'Button "Submit"',
+        'List "Results"',
+        'Link "Docs"',
+        'Status "Ready"',
+        'Panel "Search filters"',
+        'Section "Result cards"',
+        'Card "First result"',
+        'Hint "Use ref based actions"',
+        'Footer "End"',
+      ].join('\n'),
+      refMap: ['ref_search', 'ref_submit'],
+      stats: {
+        processed: 16,
+        included: 10,
+        durationMs: 10,
+      },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ tabId: 41, mode: 'compact' });
+
+    expect(result.isError).toBe(false);
+    expect(cdpPageSensing.captureCDPPageSensingSnapshot).toHaveBeenCalledWith(41);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload.evidenceSource).toContain('cdp');
+    expect(payload.pageContext.loadReadiness.cdpSensing).toMatchObject({
+      source: 'cdp_page_sensing',
+      available: true,
+      readiness: 'complete',
+      likelyLoading: false,
+      visibilityState: 'visible',
+      focused: true,
+      activeElement: {
+        tagName: 'INPUT',
+        type: 'search',
+        role: 'searchbox',
+        idPresent: true,
+        namePresent: true,
+      },
+      frameCount: 2,
+      navigation: {
+        responseEndMs: 24,
+        domContentLoadedMs: 48,
+        loadEventMs: 72,
+      },
+    });
+    expect(JSON.stringify(payload.pageContext.loadReadiness.cdpSensing)).not.toContain('private');
   });
 
   it('exposes provisional read_page load evidence when a target tab is still loading after wait', async () => {

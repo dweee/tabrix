@@ -14,6 +14,7 @@ import {
   type ReadPageObservationProfile,
   type ReadPagePageContext,
   type ReadPageLoadReadiness,
+  type ReadPageCDPSensingSummary,
   type ReadPagePageType,
   type ReadPagePrimaryRegionConfidence,
   type ReadPageRenderMode,
@@ -73,6 +74,10 @@ import {
   extractGlobalMenuLabelsForTargetRecovery,
   type ReadPageVisualElementHint,
 } from './read-page-task-protocol';
+import {
+  captureCDPPageSensingSnapshot,
+  type CDPPageSensingSnapshot,
+} from '@/utils/cdp-page-sensing';
 import {
   getBrowserWorldSnapshot,
   markBrowserWorldTabAiOperated,
@@ -339,6 +344,7 @@ function buildLoadReadiness(input: {
     waitedMs: number;
     readyState: string | null;
   } | null;
+  cdpSensing?: ReadPageCDPSensingSummary;
 }): ReadPageLoadReadiness {
   const stableAfterWait =
     input.waitedForPendingDocument &&
@@ -367,6 +373,7 @@ function buildLoadReadiness(input: {
       nextStepHint: 'safe_to_use_structured_refs_with_postcondition_verification',
       claimBoundary:
         'browser_tab_reports_stable; still verify the business postcondition after any action',
+      ...(input.cdpSensing ? { cdpSensing: input.cdpSensing } : {}),
     };
   }
 
@@ -386,6 +393,7 @@ function buildLoadReadiness(input: {
       nextStepHint: 'reload_or_switch_to_a_live_tab_before_structured_actions',
       claimBoundary:
         'browser_tab_is_stale_or_discarded; current page objects are not reliable action proof',
+      ...(input.cdpSensing ? { cdpSensing: input.cdpSensing } : {}),
     };
   }
 
@@ -405,6 +413,7 @@ function buildLoadReadiness(input: {
       nextStepHint: 'wait_then_force_fresh_read_page_before_business_actions',
       claimBoundary:
         'document_may_still_be_changing; treat candidate objects as provisional until a fresh stable read',
+      ...(input.cdpSensing ? { cdpSensing: input.cdpSensing } : {}),
     };
   }
 
@@ -423,6 +432,48 @@ function buildLoadReadiness(input: {
     nextStepHint: 'verify_page_stability_before_business_actions',
     claimBoundary:
       'browser_runtime_did_not_prove_page_stability; avoid claiming task success from this snapshot alone',
+    ...(input.cdpSensing ? { cdpSensing: input.cdpSensing } : {}),
+  };
+}
+
+async function captureReadPageCDPSensingSummary(input: {
+  tabId: number;
+  currentUrl: string;
+  supportedForContentScript: boolean;
+}): Promise<ReadPageCDPSensingSummary | undefined> {
+  if (!input.supportedForContentScript || !/^https?:\/\//i.test(input.currentUrl)) {
+    return undefined;
+  }
+
+  const snapshot = await captureCDPPageSensingSnapshot(input.tabId);
+  return buildReadPageCDPSensingSummary(snapshot);
+}
+
+function buildReadPageCDPSensingSummary(
+  snapshot: CDPPageSensingSnapshot,
+): ReadPageCDPSensingSummary | undefined {
+  if (!snapshot.available) return undefined;
+
+  return {
+    source: 'cdp_page_sensing',
+    available: true,
+    readiness: snapshot.readiness,
+    likelyLoading: snapshot.likelyLoading,
+    ...(snapshot.visibilityState ? { visibilityState: snapshot.visibilityState } : {}),
+    ...(typeof snapshot.focused === 'boolean' ? { focused: snapshot.focused } : {}),
+    ...(snapshot.activeElement ? { activeElement: snapshot.activeElement } : {}),
+    ...(typeof snapshot.frameCount === 'number' ? { frameCount: snapshot.frameCount } : {}),
+    ...(snapshot.navigation
+      ? {
+          navigation: {
+            responseEndMs: snapshot.navigation.responseEndMs,
+            domContentLoadedMs: snapshot.navigation.domContentLoadedMs,
+            loadEventMs: snapshot.navigation.loadEventMs,
+          },
+        }
+      : {}),
+    claimBoundary:
+      'cdp_page_sensing is read-only browser state evidence; it is not page-object completeness, action success, login success, or business success proof',
   };
 }
 
@@ -1373,6 +1424,7 @@ function buildEvidenceSources(params: {
   visibleRegionRows: VisibleRegionRowsResult;
   selectedDataSource?: string;
   objectLifecycle?: ReadPageObjectLifecycleSummary;
+  cdpSensing?: ReadPageCDPSensingSummary;
 }): ReadPageEvidenceSource[] {
   const sources = new Set<ReadPageEvidenceSource>();
   const hasPageText = params.pageContent.trim().length > 0;
@@ -1385,6 +1437,7 @@ function buildEvidenceSources(params: {
   ) {
     sources.add('api');
   }
+  if (params.cdpSensing?.available === true) sources.add('cdp');
   if (
     params.objectLifecycle?.status === 'compared_snapshot' &&
     params.objectLifecycle.changedObjectCount > 0
@@ -1764,6 +1817,7 @@ async function buildModeOutput(params: {
     visibleRegionRows,
     selectedDataSource: sharedPayload.selectedDataSource,
     objectLifecycle: sharedPayload.objectLifecycle,
+    cdpSensing: params.loadReadiness.cdpSensing,
   });
 
   return buildReadPageModeResult({
@@ -2820,14 +2874,20 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         }
       }
       const pageStability = inferPageStability(tab);
+      const schemeGuard = inferSchemeGuard(currentUrl);
+      const cdpSensing = await captureReadPageCDPSensingSummary({
+        tabId,
+        currentUrl,
+        supportedForContentScript: schemeGuard.supportedForContentScript,
+      });
       const loadReadiness = buildLoadReadiness({
         pageStability,
         initialTabStatus,
         finalTabStatus: typeof tab.status === 'string' ? tab.status : null,
         waitedForPendingDocument,
         settleResult: pendingDocumentSettleResult,
+        cdpSensing,
       });
-      const schemeGuard = inferSchemeGuard(currentUrl);
 
       if (!schemeGuard.supportedForContentScript) {
         const guardPageContent = [

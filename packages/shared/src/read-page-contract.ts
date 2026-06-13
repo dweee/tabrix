@@ -33,6 +33,7 @@ export const READ_PAGE_EVIDENCE_SOURCE_VALUES = [
   'visible_text',
   'network',
   'api',
+  'cdp',
   'watch_delta',
   'screenshot_fallback',
   'experience',
@@ -719,6 +720,37 @@ export interface ReadPageLoadReadiness {
   readyState: string | null;
   canUseSnapshotForBusinessAction: boolean;
   nextStepHint: string;
+  claimBoundary: string;
+  /**
+   * Optional Chrome DevTools Protocol sensing summary.
+   *
+   * This is low-level browser evidence used to decide whether to wait,
+   * refresh, or trust the current snapshot. It deliberately excludes raw URL
+   * query/hash values, cookies, request/response bodies, and page text.
+   */
+  cdpSensing?: ReadPageCDPSensingSummary;
+}
+
+export interface ReadPageCDPSensingSummary {
+  source: 'cdp_page_sensing';
+  available: boolean;
+  readiness: 'loading' | 'interactive' | 'complete' | 'unknown' | string;
+  likelyLoading: boolean;
+  visibilityState?: string;
+  focused?: boolean;
+  activeElement?: {
+    tagName: string;
+    type?: string;
+    role?: string;
+    idPresent: boolean;
+    namePresent: boolean;
+  };
+  frameCount?: number;
+  navigation?: {
+    responseEndMs: number | null;
+    domContentLoadedMs: number | null;
+    loadEventMs: number | null;
+  };
   claimBoundary: string;
 }
 

@@ -59,6 +59,7 @@ function expectCommonSnapshotShape(payload: any, mode: 'compact' | 'normal' | 'f
       'visible_text',
       'network',
       'api',
+      'cdp',
       'watch_delta',
       'screenshot_fallback',
       'experience',
