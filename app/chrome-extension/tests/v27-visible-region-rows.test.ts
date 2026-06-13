@@ -175,6 +175,94 @@ describe('V27-P0-REAL-01 visible region rows', () => {
     );
   });
 
+  it('keeps top ten card-like visible text rows with author, time, and interaction fields', () => {
+    const visibleTextContent = [
+      '全部 图文 视频 用户 已筛选',
+      '排序依据 综合 最新 最多收藏 发布时间 不限 一周内',
+      'Nano Banana ai 创作 206',
+      '残光',
+      '1天前',
+      '370',
+      '古装男主发型不会写？这16组AI提示词直接抄！',
+      '域飞-Oui.Bo',
+      '6天前',
+      '93',
+      'Nano Banana ai 创作 207',
+      '残光',
+      '3天前',
+      '48',
+      '旧漫回旋/再见D伯爵，你想带走哪只非卖品？',
+      '奔跑的毛球君',
+      '昨天 17:37',
+      '31',
+      '我整理了一套 AI出图的套系工作流。',
+      'xy',
+      '4天前',
+      '26',
+      '属于我的创作团队带资来啦！接接接！',
+      '赛博剪刀手',
+      '昨天 18:57',
+      '12',
+      '为什么你AI生图总差点质感？',
+      '璐璐的创作工具箱',
+      '昨天 17:06',
+      '10',
+      'AI重构老城｜中式梦核独有的安静疏离感',
+      '郭源潮',
+      '昨天 16:08',
+      '3',
+      '亭台浸碧浪，飞花赴仙城',
+      '芴菲雅菡',
+      '昨天 11:01',
+      '2',
+      '郑州AI短剧培训',
+      '昨天 17:40',
+      '2',
+      '大家都在搜',
+      'AI照片生成',
+    ].join('\n');
+
+    const rows = extractVisibleRegionRows({
+      sourceRegion: 'search_results',
+      url: 'https://example.test/search_result?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
+      title: 'AI图片创作 - Search results',
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      pageContent: '',
+      visibleTextContent,
+      maxRows: 10,
+    });
+
+    expect(rows.visibleRegionRowsUsed).toBe(true);
+    expect(rows.rows.map((row) => row.title)).toEqual([
+      'Nano Banana ai 创作 206',
+      '古装男主发型不会写？这16组AI提示词直接抄！',
+      'Nano Banana ai 创作 207',
+      '旧漫回旋/再见D伯爵，你想带走哪只非卖品？',
+      '我整理了一套 AI出图的套系工作流。',
+      '属于我的创作团队带资来啦！接接接！',
+      '为什么你AI生图总差点质感？',
+      'AI重构老城｜中式梦核独有的安静疏离感',
+      '亭台浸碧浪，飞花赴仙城',
+      '郑州AI短剧培训',
+    ]);
+    expect(rows.rowCount).toBe(10);
+    expect(rows.rows[0]).toMatchObject({
+      primaryText: '残光',
+      metaText: '1天前',
+      interactionText: '370',
+    });
+    expect(rows.rows[1]).toMatchObject({
+      primaryText: '域飞-Oui.Bo',
+      metaText: '6天前',
+      interactionText: '93',
+    });
+    expect(rows.rows[9]).toMatchObject({
+      metaText: '昨天 17:40',
+      interactionText: '2',
+    });
+    expect(rows.rows.map((row) => row.title).join(' ')).not.toMatch(/大家都在搜|AI照片生成/);
+  });
+
   it('filters shell rows when high-confidence business rows are present', () => {
     const pageContent = [
       '- main "Repository search results" [ref=ref_main] (x=640,y=370)',

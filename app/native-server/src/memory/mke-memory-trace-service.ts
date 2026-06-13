@@ -3,6 +3,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import {
   BrowserObjectRepository,
   MemoryTraceRepository,
+  type BrowserObject,
   type BrowserObjectInput,
   type BusinessSuccessVerdict,
   type MemoryTrace,
@@ -116,6 +117,7 @@ interface ParsedResultDigest {
   rootRoute: string | null;
   currentRoute: string | null;
   pageRole: string | null;
+  pageModelKey: string | null;
   pageState: string | null;
   sourceRoute: string | null;
   selectedDataSource: string | null;
@@ -469,6 +471,12 @@ function digestResult(
   const dataSourceDecision = readNestedObject(object, 'dataSourceDecision');
   const url = readString(page?.url, object?.url, object?.pageUrl);
   const urlFields = normalizeUrlPattern(url);
+  const pageRole = readString(summary?.pageRole, object?.pageRole);
+  const pageModelKey = readString(
+    readNestedObject(object, 'pageProjection')?.pageModelKey,
+    object?.pageModelKey,
+    pageRole && urlFields.siteFamily ? `page:${urlFields.siteFamily}:${pageRole}` : null,
+  );
 
   return {
     response: {
@@ -483,7 +491,8 @@ function digestResult(
     pageUrlPattern: urlFields.pattern,
     rootRoute: urlFields.rootRoute,
     currentRoute: urlFields.currentRoute,
-    pageRole: readString(summary?.pageRole, object?.pageRole),
+    pageRole,
+    pageModelKey,
     pageState: readString(summary?.quality, object?.pageState),
     sourceRoute: readString(object?.sourceRoute, pageContext?.sourceRoute),
     selectedDataSource: readString(
@@ -687,6 +696,7 @@ export class MkeMemoryTraceService {
       pageUrlPattern: digest.pageUrlPattern,
       pageRole: digest.pageRole,
       pageState: digest.pageState,
+      pageModelKey: digest.pageModelKey,
       sourceRoute: digest.sourceRoute,
       selectedDataSource: digest.selectedDataSource,
       freshness: digest.freshness,
@@ -785,6 +795,15 @@ export class MkeMemoryTraceService {
             input.observedAt,
             input.browserContextKey,
           );
+          return;
+        }
+        if (input.toolName === 'chrome_collect_result_cards') {
+          this.recordCollectedResultCardObjects(
+            input.trace,
+            payload,
+            input.observedAt,
+            input.browserContextKey,
+          );
         }
       });
     } catch (error) {
@@ -797,8 +816,8 @@ export class MkeMemoryTraceService {
     }
   }
 
-  private upsertBrowserObject(input: BrowserObjectInput): void {
-    this.browserObjects?.upsert(input);
+  private upsertBrowserObject(input: BrowserObjectInput): BrowserObject | undefined {
+    return this.browserObjects?.upsert(input);
   }
 
   private recordBrowserWorldObjects(
@@ -1108,6 +1127,133 @@ export class MkeMemoryTraceService {
       pageRole,
       tabId,
     });
+  }
+
+  private recordCollectedResultCardObjects(
+    trace: MemoryTrace,
+    payload: Record<string, unknown>,
+    observedAt: string,
+    browserContextKey: string | null,
+  ): void {
+    const page = readNestedObject(payload, 'page');
+    const urlFields = normalizeUrlPattern(readString(page?.url, payload.url, payload.pageUrl), {
+      allowPersonalBrowserStateStorage: false,
+    });
+    const siteFamily = urlFields.siteFamily ?? trace.siteFamily ?? 'unknown';
+    const pageRole = readString(payload.pageRole, trace.pageRole) ?? 'search_results';
+    const pageModelKey = trace.pageModelKey ?? `page:${siteFamily}:${pageRole}`;
+    const tabId = readNumber(payload.tabId, trace.tabId);
+    const sourceRoute = readString(
+      payload.sourceRoute,
+      trace.sourceRoute,
+      'result_card_collection',
+    );
+    const selectedDataSource = readString(
+      payload.selectedDataSource,
+      trace.selectedDataSource,
+      payload.kind,
+    );
+    const cards = readArray(payload.cards);
+    const observedResultCount = readNumber(payload.observedResultCount) ?? cards.length;
+    const complete = readBoolean(payload.complete);
+
+    const pageObject = this.upsertBrowserObject({
+      siteFamily,
+      pageUrlPattern: urlFields.pattern ?? trace.pageUrlPattern,
+      rootRoute: urlFields.rootRoute ?? trace.pageUrlPattern,
+      currentRoute: urlFields.currentRoute,
+      pageRole,
+      pageModelKey,
+      objectFingerprint: objectFingerprint('page', siteFamily, pageModelKey, tabId),
+      objectType: 'page',
+      browserContextKey: browserContextKey ?? trace.browserContextKey ?? null,
+      tabId,
+      windowId: readNumber(payload.windowId, trace.windowId),
+      sourceRoute,
+      selectedDataSource,
+      sourceFreshness: readString(payload.freshness, trace.freshness),
+      lifecycleState: readString(payload.pageState, trace.pageState, 'observed'),
+      canTabrixOperate: true,
+      facts: this.sanitizeBrowserObjectValue({
+        pageTitle: readString(page?.title),
+        observedResultCount,
+        requestedMinResults: readNumber(payload.requestedMinResults),
+        complete,
+        status: readString(payload.status),
+        source: 'result_card_collection',
+      }),
+      primaryConclusion:
+        observedResultCount > 0 ? `识别到 ${observedResultCount} 个结果卡片` : '未识别到结果卡片',
+      claimBoundary: readString(payload.claimBoundary),
+      confidenceScore: observedResultCount > 0 ? 0.8 : 0.3,
+      firstTraceId: trace.traceId,
+      lastTraceId: trace.traceId,
+      sourceTraceIds: sourceTraceIds(trace),
+      redactionState: this.browserObjectRedactionState(),
+      updatedAt: observedAt,
+    });
+
+    for (const [index, rawCard] of cards.slice(0, 80).entries()) {
+      const card = readObject(rawCard);
+      if (!card) continue;
+      const rank = readNumber(card.rank) ?? index + 1;
+      const title = readString(card.title);
+      if (!title) continue;
+      const cardUrlFields = normalizeUrlPattern(readString(card.url), {
+        allowPersonalBrowserStateStorage: false,
+      });
+      const cardKey =
+        cardUrlFields.rootRoute ?? cardUrlFields.currentRoute ?? cardUrlFields.pattern ?? title;
+      const sourceScrollY = readNumber(card.sourceScrollY);
+      this.upsertBrowserObject({
+        siteFamily,
+        pageUrlPattern: urlFields.pattern ?? trace.pageUrlPattern,
+        rootRoute: urlFields.rootRoute ?? trace.pageUrlPattern,
+        currentRoute: urlFields.currentRoute,
+        pageRole,
+        pageModelKey,
+        objectFingerprint: objectFingerprint('result_card', pageModelKey, cardKey, rank),
+        objectType: 'result_card',
+        parentObjectId: pageObject?.browserObjectId ?? null,
+        browserContextKey: browserContextKey ?? trace.browserContextKey ?? null,
+        tabId,
+        windowId: readNumber(payload.windowId, trace.windowId),
+        sourceRoute,
+        selectedDataSource,
+        sourceFreshness: readString(payload.freshness, trace.freshness),
+        lifecycleState: 'observed',
+        canTabrixOperate: Boolean(readString(card.url)),
+        actionTypes: readString(card.url) ? ['open_via_url'] : [],
+        targetability: this.sanitizeBrowserObjectValue({
+          rank,
+          url: cardUrlFields.rootRoute ?? cardUrlFields.pattern,
+          rect: readObject(card.rect),
+        }),
+        facts: this.sanitizeBrowserObjectValue({
+          rank,
+          title,
+          url: cardUrlFields.rootRoute ?? cardUrlFields.pattern,
+          primaryText: readString(card.primaryText),
+          secondaryText: readString(card.secondaryText),
+          metaText: readString(card.metaText),
+          interactionText: readString(card.interactionText),
+          imageCount: readNumber(card.imageCount),
+          sourceScrollY,
+          reasons: readArray(card.reasons).filter(
+            (item): item is string => typeof item === 'string',
+          ),
+          sourceStrategy: readString(card.sourceStrategy),
+        }),
+        primaryConclusion: title,
+        claimBoundary: readString(payload.claimBoundary),
+        confidenceScore: readFiniteNumber(card.confidence),
+        firstTraceId: trace.traceId,
+        lastTraceId: trace.traceId,
+        sourceTraceIds: sourceTraceIds(trace),
+        redactionState: this.browserObjectRedactionState(),
+        updatedAt: observedAt,
+      });
+    }
   }
 
   private recordReadPageDataSourceObject(input: {

@@ -252,6 +252,53 @@ export const BROWSER_SCHEMAS: Tool[] = [
     },
   },
   {
+    name: TOOL_NAMES.BROWSER.COLLECT_RESULT_CARDS,
+    description:
+      'Collect result-card objects across the current page by repeatedly reading the visible viewport, scrolling, merging, and de-duplicating cards until a requested Top N is reached or the page is exhausted. Use this when a search/feed/list page needs a stable top-N card set; do not use chrome_read_page alone to claim completeness on virtualized or infinite-scroll pages.',
+    annotations: {
+      readOnlyHint: false,
+      idempotentHint: false,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: {
+          type: 'number',
+          description: 'Target an existing tab by ID (default: active tab).',
+        },
+        windowId: {
+          type: 'number',
+          description: 'Target window ID to pick active tab when tabId is omitted.',
+        },
+        minResults: {
+          type: 'number',
+          description: 'Minimum card count to collect before stopping. Default 10, max 50.',
+        },
+        maxScrolls: {
+          type: 'number',
+          description:
+            'Maximum number of downward scroll steps after the first viewport read. Default 4, max 10.',
+        },
+        scrollStepPx: {
+          type: 'number',
+          description:
+            'Pixels to scroll per step. Defaults to about 85% of the current viewport height.',
+        },
+        settleMs: {
+          type: 'number',
+          description:
+            'Milliseconds to wait after each scroll for lazy-loaded cards to appear. Default 700, max 5000.',
+        },
+        startFromTop: {
+          type: 'boolean',
+          description:
+            'Default true. Scroll to the top before collecting so Top N means the first results on the page. Set false to collect from the current viewport.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: TOOL_NAMES.BROWSER.COMPUTER,
     description:
       'High-risk fallback tool for mouse/keyboard/drag/scroll interactions and screenshots.\nUse this only after ref-based or DOM-based tools (chrome_read_page, chrome_get_interactive_elements, chrome_click_element, chrome_fill_or_select, chrome_keyboard, chrome_navigate, chrome_switch_tab) are insufficient.\nDo not use chrome_computer for routine page-settle waits, simple tab switching, or basic DOM discovery. When you must use it, prefer precise refs over raw coordinates and keep actions minimal.',

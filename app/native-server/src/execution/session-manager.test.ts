@@ -146,6 +146,78 @@ describe('SessionManager', () => {
     }
   });
 
+  it('flushes Object writes before projecting Knowledge after a tool trace', async () => {
+    const mgr = new SessionManager();
+    try {
+      const trace = mgr.memoryTraces?.recordToolCall({
+        taskId: 'task-result-card-projection',
+        taskIntent: 'collect top search result cards',
+        aiClient: 'jest',
+        toolName: 'chrome_collect_result_cards',
+        stepId: 'step-result-card-projection',
+        sequenceIndex: 1,
+        requestParams: { tabId: 19, minResults: 2 },
+        requestAtMs: Date.parse('2026-06-10T10:00:00.000Z'),
+        responseAtMs: Date.parse('2026-06-10T10:00:01.000Z'),
+        result: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                kind: 'result_card_collection',
+                page: {
+                  title: 'Search results',
+                  url: 'https://example.test/search?q=ai',
+                },
+                pageRole: 'search_results',
+                pageState: 'complete',
+                sourceRoute: 'visible_dom_cards_bounded_scroll',
+                selectedDataSource: 'visible_dom_result_cards',
+                freshness: 'fresh',
+                tabId: 19,
+                requestedMinResults: 2,
+                observedResultCount: 2,
+                complete: true,
+                cards: [
+                  {
+                    rank: 1,
+                    title: 'First result',
+                    url: 'https://example.test/note/1',
+                    imageCount: 1,
+                    confidence: 0.86,
+                    reasons: ['link_present'],
+                  },
+                  {
+                    rank: 2,
+                    title: 'Second result',
+                    url: 'https://example.test/note/2',
+                    imageCount: 1,
+                    confidence: 0.8,
+                    reasons: ['link_present'],
+                  },
+                ],
+              }),
+            },
+          ],
+          isError: false,
+        },
+      });
+
+      expect(trace?.pageModelKey).toBe('page:example.test:search_results');
+      expect(mgr.countMkeObjectLibraryGraph()).toBe(0);
+      expect(mgr.countMkeKnowledgeModels()).toBe(0);
+
+      const projection = await mgr.flushAndProjectMkeIdle();
+
+      expect(projection.knowledge?.upsertedKnowledgeCount).toBe(1);
+      expect(mgr.countMkeObjectLibraryGraph()).toBe(3);
+      expect(mgr.countMkeKnowledgeModels()).toBe(1);
+    } finally {
+      mgr.close();
+    }
+  });
+
   it('can release an externally keyed task context after browser cleanup', () => {
     const mgr = new SessionManager();
     try {

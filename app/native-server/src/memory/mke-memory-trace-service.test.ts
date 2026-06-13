@@ -373,6 +373,127 @@ describe('MkeMemoryTraceService', () => {
     }
   });
 
+  it('projects collected result cards as page and result_card Browser Objects', async () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const browserObjectRepo = new BrowserObjectRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo, browserObjectRepo);
+
+    try {
+      const trace = traceService.recordToolCall({
+        taskId: 'trace-result-cards-task',
+        taskIntent: 'collect top search result cards',
+        aiClient: 'jest',
+        toolName: 'chrome_collect_result_cards',
+        stepId: 'trace-result-cards-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 19, minResults: 2 },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 120,
+        result: textResult({
+          success: true,
+          kind: 'result_card_collection',
+          page: {
+            title: 'Search results',
+            url: 'https://example.test/search?q=ai',
+          },
+          pageRole: 'search_results',
+          pageState: 'complete',
+          sourceRoute: 'visible_dom_cards_bounded_scroll',
+          selectedDataSource: 'visible_dom_result_cards',
+          freshness: 'fresh',
+          tabId: 19,
+          requestedMinResults: 2,
+          observedResultCount: 2,
+          complete: true,
+          status: 'complete_enough',
+          cards: [
+            {
+              rank: 1,
+              title: 'First result',
+              url: 'https://example.test/note/1?x=private',
+              primaryText: 'Author A',
+              metaText: '1 day ago',
+              interactionText: '123',
+              imageCount: 1,
+              sourceScrollY: 0,
+              rect: { x: 10, y: 20, width: 200, height: 160 },
+              confidence: 0.86,
+              reasons: ['link_present', 'media_present'],
+              sourceStrategy: 'list_container',
+            },
+            {
+              rank: 2,
+              title: 'Second result',
+              url: 'https://example.test/note/2',
+              imageCount: 0,
+              sourceScrollY: 480,
+              rect: { x: 10, y: 220, width: 200, height: 140 },
+              confidence: 0.72,
+              reasons: ['link_present'],
+              sourceStrategy: 'list_container',
+            },
+          ],
+          claimBoundary: 'bounded visible DOM collection',
+        }),
+        resultSummary: 'collected result cards',
+      });
+
+      expect(trace).toMatchObject({
+        toolName: 'chrome_collect_result_cards',
+        siteFamily: 'example.test',
+        pageUrlPattern: 'https://example.test/search',
+        pageRole: 'search_results',
+        pageState: 'complete',
+        pageModelKey: 'page:example.test:search_results',
+        selectedDataSource: 'visible_dom_result_cards',
+      });
+
+      await traceService.flushAsyncWrites();
+
+      const objects = browserObjectRepo.listRecent({ limit: 10, offset: 0 });
+      expect(objects.map((object) => object.objectType).sort()).toEqual([
+        'page',
+        'result_card',
+        'result_card',
+      ]);
+      const page = objects.find((object) => object.objectType === 'page');
+      expect(page).toMatchObject({
+        pageRole: 'search_results',
+        pageModelKey: 'page:example.test:search_results',
+        selectedDataSource: 'visible_dom_result_cards',
+        sourceRoute: 'visible_dom_cards_bounded_scroll',
+        lifecycleState: 'complete',
+        canTabrixOperate: true,
+      });
+      const cards = objects
+        .filter((object) => object.objectType === 'result_card')
+        .sort((left, right) => {
+          const leftRank = (left.facts as { rank?: number } | null)?.rank ?? 0;
+          const rightRank = (right.facts as { rank?: number } | null)?.rank ?? 0;
+          return leftRank - rightRank;
+        });
+      expect(cards).toHaveLength(2);
+      expect(cards[0]).toMatchObject({
+        parentObjectId: page?.browserObjectId,
+        primaryConclusion: 'First result',
+        confidenceScore: 0.86,
+        canTabrixOperate: true,
+      });
+      expect(cards[0].facts).toMatchObject({
+        rank: 1,
+        title: 'First result',
+        url: 'https://example.test/note/:id',
+        primaryText: 'Author A',
+        sourceStrategy: 'list_container',
+      });
+      expect(JSON.stringify(objects)).not.toContain('x=private');
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
   it('rolls back read_page Browser Object writes when a child object write fails', async () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const traceRepo = new MemoryTraceRepository(db);

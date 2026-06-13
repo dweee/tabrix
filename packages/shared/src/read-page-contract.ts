@@ -293,6 +293,10 @@ export interface ReadPageSearchResultCard {
   title: string;
   targetRef?: string;
   candidateActionId?: string;
+  primaryText?: string;
+  secondaryText?: string;
+  metaText?: string;
+  interactionText?: string;
   metricText?: string;
   collectionCountCandidate?: number;
   confidence: number;

@@ -354,7 +354,7 @@ export class BrowserObjectRepository {
     this.listUpdatedAfterStmt = db.prepare(
       `SELECT * FROM tabrix_browser_objects
         WHERE archived_at IS NULL
-          AND object_type IN ('page', 'region', 'action_target', 'data_source')
+          AND object_type IN ('page', 'region', 'action_target', 'data_source', 'result_card')
           AND (? IS NULL OR updated_at > ?)
         ORDER BY updated_at ASC, created_at ASC
         LIMIT ?`,
@@ -413,6 +413,7 @@ export class BrowserObjectRepository {
               )
             )
             OR object_type IN ('page', 'region', 'action_target', 'data_source')
+            OR object_type = 'result_card'
           )
         ORDER BY CASE object_type
                    WHEN 'window' THEN 0
@@ -421,7 +422,8 @@ export class BrowserObjectRepository {
                    WHEN 'region' THEN 3
                    WHEN 'action_target' THEN 4
                    WHEN 'data_source' THEN 5
-                   ELSE 6
+                   WHEN 'result_card' THEN 6
+                   ELSE 7
                  END,
                  CASE WHEN closed_at IS NULL THEN 0 ELSE 1 END,
                  is_active DESC, updated_at DESC, created_at DESC
@@ -484,6 +486,7 @@ export class BrowserObjectRepository {
               )
             )
             OR object_type IN ('page', 'region', 'action_target', 'data_source')
+            OR object_type = 'result_card'
           )`,
     );
     this.clearStmt = db.prepare('DELETE FROM tabrix_browser_objects');

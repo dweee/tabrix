@@ -57,6 +57,7 @@ export const TOOL_RISK_TIERS: Readonly<Record<string, TabrixRiskTier>> = Object.
   [TOOL_NAMES.BROWSER.PERFORMANCE_START_TRACE]: 'P1',
   [TOOL_NAMES.BROWSER.PERFORMANCE_STOP_TRACE]: 'P1',
   [TOOL_NAMES.BROWSER.GIF_RECORDER]: 'P1',
+  [TOOL_NAMES.BROWSER.COLLECT_RESULT_CARDS]: 'P1',
   // Legacy/internal names kept for completeness — safe defaults even though not in TOOL_SCHEMAS.
   [TOOL_NAMES.BROWSER.NETWORK_CAPTURE_START]: 'P1',
   [TOOL_NAMES.BROWSER.NETWORK_CAPTURE_STOP]: 'P1',

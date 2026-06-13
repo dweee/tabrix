@@ -306,6 +306,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     },
   ): CallToolResult => {
     const trace = recordMkeMemoryTrace(result, input);
+    if (trace) sessionManager.scheduleMkeProjectionAfterTrace();
     return attachTabrixMemoryTraceEnvelope(result, trace, tabrixMetadata, name);
   };
 

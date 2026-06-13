@@ -249,6 +249,25 @@ export class SessionManager {
     return this.memoryTraceService?.flushAsyncWrites() ?? Promise.resolve();
   }
 
+  public async flushAndProjectMkeIdle(): Promise<{
+    knowledge: MkeKnowledgeProjectionResult | null;
+    experience: MkeExperienceProjectionResult | null;
+  }> {
+    await this.flushMkeMemoryTraceWrites();
+    const knowledge = this.projectMkeKnowledgeIdle();
+    const experience = this.projectMkeExperienceIdle();
+    return { knowledge, experience };
+  }
+
+  public scheduleMkeProjectionAfterTrace(): void {
+    setImmediate(() => {
+      void this.flushAndProjectMkeIdle().catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[tabrix/memory] MKE projection failed: ${message}`);
+      });
+    });
+  }
+
   public projectMkeKnowledgeIdle(
     input?: MkeKnowledgeProjectionInput,
   ): MkeKnowledgeProjectionResult | null {

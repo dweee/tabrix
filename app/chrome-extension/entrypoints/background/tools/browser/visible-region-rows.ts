@@ -106,11 +106,11 @@ const UTILITY_LINK_TEXT_PATTERN =
 const UTILITY_LINK_HREF_PATTERN =
   /(?:^|\/)(?:creator(?:-center)?|creator-center|upload|video-management|ads?|advertising|account(?:-recovery)?|recover|recovery|contact(?:-us)?|about(?:-us)?|sitemap|site-map|friend-links?|download(?:-app)?|legal|privacy|terms|certificate|license|permit|compliance|icp|record|report|feedback|sponsors?)(?:\/|$|\?)/i;
 const META_PATTERN =
-  /\b(\d+\s*(?:h|hr|hrs|hour|hours|d|day|days|m|min|mins|minute|minutes|ago)|yesterday|today|updated|posted|views?|\d{1,2}:\d{2})\b|\d{4}年\d{1,2}月\d{1,2}日|刚刚|分钟前|小时前|昨天|今天|发布|更新/i;
+  /\b(\d+\s*(?:h|hr|hrs|hour|hours|d|day|days|m|min|mins|minute|minutes|ago)|yesterday|today|updated|posted|views?|\d{1,2}:\d{2})\b|\d{4}年\d{1,2}月\d{1,2}日|\d+\s*(?:天|日|小时|分钟)前|刚刚|分钟前|小时前|昨天|今天|发布|更新/i;
 const INTERACTION_PATTERN =
   /\b(\d+(?:\.\d+)?\s*[kKmM]?\s*(?:likes?|stars?|comments?|replies?|views?|shares?))\b|点赞|评论|收藏|转发|阅读|浏览/i;
 const VISIBLE_TEXT_FALLBACK_MIN_CHARS = 120;
-const VISIBLE_TEXT_FALLBACK_MAX_ROWS = 5;
+const VISIBLE_TEXT_FALLBACK_MAX_ROWS = 12;
 
 export function extractVisibleRegionRows(input: {
   pageContent: string;
@@ -270,25 +270,38 @@ function buildVisibleTextFallbackRows(input: {
     return { rows: [], rejectedReasonDistribution };
   }
 
-  const lines = uniqueCompactStrings(
-    normalizedText
-      .split('\n')
-      .map((line) => normalizeText(line))
-      .filter(Boolean),
-  ).slice(0, 80);
+  const lines = compactVisibleTextFallbackLines(normalizedText).slice(0, 80);
   const rowGroups: string[][] = [];
   let current: string[] = [];
 
   for (const line of lines) {
     const rejectionReason = classifyVisibleTextLineRejection(line, input.searchShellContext);
-    if (rejectionReason) {
-      rejectedReasonDistribution[rejectionReason] += 1;
+    const titleLike =
+      isVisibleTextTitleLike(line) ||
+      (current.length > 0 && currentHasResultEvidence(current) && isLikelyShortResultTitle(line));
+    if (
+      current.length > 0 &&
+      current.length < 5 &&
+      shouldAppendVisibleTextSupportLine({
+        current,
+        line,
+        rejectionReason,
+        searchShellContext: input.searchShellContext,
+        titleLike,
+      })
+    ) {
+      current.push(line);
       continue;
     }
 
-    if (isVisibleTextTitleLike(line) && current.length !== 1) {
+    if (titleLike && rejectionReason === null) {
       if (current.length > 0) rowGroups.push(current);
       current = [line];
+      continue;
+    }
+
+    if (rejectionReason) {
+      rejectedReasonDistribution[rejectionReason] += 1;
       continue;
     }
 
@@ -300,8 +313,9 @@ function buildVisibleTextFallbackRows(input: {
 
   const rows = attachTargetRefsToVisibleTextRows(
     rowGroups
-      .filter((group) => group.some((line) => isVisibleTextTitleLike(line)))
+      .filter((group) => Boolean(visibleTextGroupTitle(group)))
       .filter((group) => !isVisibleTextFooterBusinessGroup(group))
+      .filter((group) => isVisibleTextResultGroup(group))
       .slice(0, input.maxRows)
       .map((group, index) =>
         buildVisibleTextFallbackRow({
@@ -362,6 +376,33 @@ function attachTargetRefsToVisibleTextRows(
       qualityReasons: uniqueCompactStrings([...row.qualityReasons, 'target_ref_available']),
     };
   });
+}
+
+function compactVisibleTextFallbackLines(text: string): string[] {
+  const seenLongLines = new Set<string>();
+  const lines: string[] = [];
+  for (const line of text
+    .split('\n')
+    .map((item) => normalizeText(item))
+    .filter(Boolean)) {
+    if (shouldPreserveRepeatedVisibleTextLine(line)) {
+      lines.push(line);
+      continue;
+    }
+    const key = normalizeComparableText(line);
+    if (seenLongLines.has(key)) continue;
+    seenLongLines.add(key);
+    lines.push(line);
+  }
+  return lines;
+}
+
+function shouldPreserveRepeatedVisibleTextLine(line: string): boolean {
+  if (META_PATTERN.test(line)) return true;
+  if (INTERACTION_PATTERN.test(line)) return true;
+  if (isCompactMetricLine(line)) return true;
+  if (isLikelyAuthorLine(line)) return true;
+  return false;
 }
 
 function rowMatchesInteractiveCandidate(
@@ -428,9 +469,80 @@ function classifyVisibleTextLineRejection(
   return null;
 }
 
+function shouldAppendVisibleTextSupportLine(input: {
+  current: string[];
+  line: string;
+  rejectionReason: VisibleRegionRejectionReason | null;
+  searchShellContext: SearchShellContext;
+  titleLike: boolean;
+}): boolean {
+  const { current, line, rejectionReason, searchShellContext, titleLike } = input;
+  const normalized = normalizeText(line);
+  if (!normalized) return false;
+  if (isFooterLikeText(normalized) || isNavigationLikeText(normalized)) return false;
+  if (SEARCH_CONTROL_TEXT_PATTERN.test(normalized)) return false;
+  if (isSearchShellText(normalized, searchShellContext)) return false;
+  if (current.some((item) => COMPANY_FOOTER_TEXT_PATTERN.test(item))) return false;
+  if (META_PATTERN.test(normalized) || INTERACTION_PATTERN.test(normalized)) return true;
+  if (isCompactMetricLine(normalized)) return true;
+  if (currentHasResultEvidence(current)) return false;
+  if (titleLike) {
+    return current.length === 1 && !currentHasResultEvidence(current);
+  }
+  if (rejectionReason === null) return current.length < 3;
+  return rejectionReason === 'single_isolated_text' && isLikelyAuthorLine(normalized);
+}
+
+function currentHasResultEvidence(group: string[]): boolean {
+  return group.some(
+    (line) =>
+      META_PATTERN.test(line) || INTERACTION_PATTERN.test(line) || isCompactMetricLine(line),
+  );
+}
+
+function isLikelyShortResultTitle(value: string): boolean {
+  const normalized = normalizeText(value);
+  if (normalized.length < 6 || normalized.length > 40) return false;
+  if (isLikelyAuthorLine(normalized) && countCjkCharacters(normalized) < 4) return false;
+  return (
+    countCjkCharacters(normalized) >= 4 ||
+    /[a-z0-9].*[\u3400-\u9fff]|[\u3400-\u9fff].*[a-z0-9]/i.test(normalized)
+  );
+}
+
+function isCompactMetricLine(value: string): boolean {
+  return /^\d+(?:\.\d+)?(?:万|千|k|m)?$/i.test(normalizeText(value));
+}
+
+function isLikelyAuthorLine(value: string): boolean {
+  const normalized = normalizeText(value);
+  if (normalized.length < 2 || normalized.length > 40) return false;
+  if (isMetaOnlyText(normalized) || isCompactMetricLine(normalized)) return false;
+  if (/[<>={}[\]{}]/.test(normalized)) return false;
+  if (FOOTER_LEGAL_REPORT_PATTERN.test(normalized)) return false;
+  if (UTILITY_LINK_TEXT_PATTERN.test(normalized)) return false;
+  if (SEARCH_CONTROL_TEXT_PATTERN.test(normalized)) return false;
+  return /[\p{L}\p{N}]/u.test(normalized);
+}
+
 function isVisibleTextFooterBusinessGroup(group: string[]): boolean {
   if (group.length === 0) return false;
   return group.every((line) => COMPANY_FOOTER_TEXT_PATTERN.test(line));
+}
+
+function isVisibleTextResultGroup(group: string[]): boolean {
+  const title = visibleTextGroupTitle(group);
+  if (!title) return false;
+  const remaining = group.filter((line) => line !== title);
+  const hasMeta = remaining.some((line) => META_PATTERN.test(line));
+  const hasInteraction = remaining.some(
+    (line) => INTERACTION_PATTERN.test(line) || isCompactMetricLine(line),
+  );
+  const hasShortAttribution = remaining.some((line) => isLikelyAuthorLine(line));
+  if (hasInteraction) return true;
+  if (hasMeta && hasShortAttribution) return true;
+  if (hasShortAttribution && group.length >= 3) return true;
+  return false;
 }
 
 function isVisibleTextBusinessLike(line: string): boolean {
@@ -438,6 +550,15 @@ function isVisibleTextBusinessLike(line: string): boolean {
   if (!normalized) return false;
   if (normalized.length >= 24) return true;
   if (countCjkCharacters(normalized) >= 10) return true;
+  if (countCjkCharacters(normalized) >= 6) return true;
+  if (normalized.length >= 8 && countCjkCharacters(normalized) >= 4) return true;
+  if (
+    normalized.length >= 6 &&
+    countCjkCharacters(normalized) >= 4 &&
+    /[a-z0-9]/i.test(normalized)
+  ) {
+    return true;
+  }
   return normalized.split(/\s+/).filter(Boolean).length >= 4;
 }
 
@@ -453,11 +574,14 @@ function buildVisibleTextFallbackRow(input: {
   sourceRegion: string;
   index: number;
 }): VisibleRegionRow | null {
-  const title = input.group.find((line) => isVisibleTextTitleLike(line));
+  const title = visibleTextGroupTitle(input.group);
   if (!title) return null;
   const remaining = input.group.filter((line) => line !== title);
   const metaText = remaining.find((line) => META_PATTERN.test(line)) ?? null;
-  const interactionText = remaining.find((line) => INTERACTION_PATTERN.test(line)) ?? null;
+  const interactionText =
+    remaining.find((line) => INTERACTION_PATTERN.test(line)) ??
+    remaining.find((line) => isCompactMetricLine(line)) ??
+    null;
   const primaryText =
     remaining.find((line) => line !== metaText && line !== interactionText) ?? null;
   const secondaryText =
@@ -493,6 +617,10 @@ function buildVisibleTextFallbackRow(input: {
       (reason) => reason !== 'multi_text_fields' || visibleTextFields.length >= 2,
     ),
   };
+}
+
+function visibleTextGroupTitle(group: string[]): string | undefined {
+  return group.find((line) => isVisibleTextTitleLike(line)) ?? group.find(isLikelyShortResultTitle);
 }
 
 function countCjkCharacters(value: string): number {
@@ -1334,6 +1462,7 @@ function isMetaOnlyText(value: string): boolean {
     return true;
   }
   if (/^(?:刚刚|分钟前|小时前|昨天|今天|发布|更新)$/.test(normalized)) return true;
+  if (/^\d+\s*(?:天|日|小时|分钟)前$/.test(normalized)) return true;
   return false;
 }
 

@@ -51,6 +51,7 @@ assert.deepEqual(READ_PAGE_EVIDENCE_SOURCE_VALUES, [
   'visible_text',
   'network',
   'api',
+  'cdp',
   'watch_delta',
   'screenshot_fallback',
   'experience',

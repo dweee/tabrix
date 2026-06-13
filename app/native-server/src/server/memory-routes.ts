@@ -88,6 +88,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   get_windows_and_tabs: '读取窗口和标签',
   chrome_get_web_content: '读取内容',
   chrome_read_page: '读取页面',
+  chrome_collect_result_cards: '读取结果卡片',
   chrome_navigate: '打开页面',
   chrome_click_element: '点击元素',
   chrome_fill_or_select: '填写内容',
@@ -254,6 +255,7 @@ const OBJECT_TYPE_LABELS: Record<string, string> = {
   region: '页面区域',
   action_target: '可操作对象',
   data_source: '数据源',
+  result_card: '结果卡片',
 };
 
 function objectFactString(facts: Record<string, unknown>, key: string): string | null {

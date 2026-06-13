@@ -705,6 +705,14 @@ export function buildSearchSurface(params: {
       title,
       targetRef: row.targetRef ?? undefined,
       candidateActionId: action?.id,
+      primaryText: safeLabel(
+        normalizedKey(row.primaryText) && normalizedKey(row.primaryText) !== normalizedKey(title)
+          ? row.primaryText
+          : row.secondaryText,
+      ),
+      secondaryText: safeLabel(row.secondaryText),
+      metaText: safeLabel(row.metaText),
+      interactionText: safeLabel(row.interactionText),
       metricText: safeLabel(metricText),
       collectionCountCandidate,
       confidence: Number(

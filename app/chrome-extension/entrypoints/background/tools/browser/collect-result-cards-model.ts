@@ -1,0 +1,66 @@
+export interface CollectedResultCard {
+  title: string;
+  url?: string;
+  primaryText?: string;
+  secondaryText?: string;
+  metaText?: string;
+  interactionText?: string;
+  imageCount: number;
+  sourceScrollY: number;
+  firstSeenGlobalTop: number;
+  rect: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  confidence: number;
+  reasons: string[];
+  sourceStrategy?: 'list_container' | 'candidate_scan';
+}
+
+function normalizeText(value: unknown): string {
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function resultCardKey(card: Pick<CollectedResultCard, 'title' | 'url'>): string {
+  const title = normalizeText(card.title).toLowerCase();
+  const url = normalizeText(card.url)
+    .replace(/[?#].*$/, '')
+    .toLowerCase();
+  return url ? `${title}|${url}` : title;
+}
+
+export function mergeCollectedResultCards(
+  current: readonly CollectedResultCard[],
+  incoming: readonly CollectedResultCard[],
+  limit: number,
+): CollectedResultCard[] {
+  const byKey = new Map<string, CollectedResultCard>();
+  for (const card of [...current, ...incoming]) {
+    const key = resultCardKey(card);
+    if (!key) continue;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, card);
+      continue;
+    }
+    byKey.set(key, {
+      ...existing,
+      url: existing.url || card.url,
+      primaryText: existing.primaryText || card.primaryText,
+      secondaryText: existing.secondaryText || card.secondaryText,
+      metaText: existing.metaText || card.metaText,
+      interactionText: existing.interactionText || card.interactionText,
+      imageCount: Math.max(existing.imageCount, card.imageCount),
+      confidence: Math.max(existing.confidence, card.confidence),
+      reasons: [...new Set([...existing.reasons, ...card.reasons])],
+      sourceStrategy: existing.sourceStrategy ?? card.sourceStrategy,
+    });
+  }
+  return [...byKey.values()]
+    .sort((left, right) => left.firstSeenGlobalTop - right.firstSeenGlobalTop)
+    .slice(0, limit);
+}

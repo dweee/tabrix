@@ -163,6 +163,10 @@ describe('buildSearchSurface', () => {
     expect(surface?.resultCards).toHaveLength(2);
     expect(surface?.resultCards?.[0]).toMatchObject({
       title: 'AI poster workflow for shopping season',
+      primaryText: 'Design Lab',
+      secondaryText: 'Design Lab',
+      metaText: 'today',
+      interactionText: '收藏 2,945',
       collectionCountCandidate: 2945,
       targetRef: 'ref_card_1',
     });

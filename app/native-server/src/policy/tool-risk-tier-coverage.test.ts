@@ -121,6 +121,7 @@ describe('TOOL_RISK_TIERS coverage invariants', () => {
       'performance_stop_trace',
       'performance_analyze_insight',
       'chrome_read_page',
+      'chrome_collect_result_cards',
       'chrome_computer',
       'chrome_navigate',
       'chrome_screenshot',

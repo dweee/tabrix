@@ -178,4 +178,87 @@ describe('MkeKnowledgeProjector', () => {
     });
     expect(knowledge.count()).toBe(0);
   });
+
+  it('projects result_card objects into page knowledge summaries', () => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const objects = new BrowserObjectRepository(opened.db);
+    const knowledge = new KnowledgeModelRepository(opened.db);
+    const projector = new MkeKnowledgeProjector(objects, knowledge);
+
+    objects.upsert({
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageModelKey: 'page:example.test:search_results',
+      objectFingerprint: 'page:search',
+      objectType: 'page',
+      lifecycleState: 'complete',
+      selectedDataSource: 'visible_dom_result_cards',
+      sourceRoute: 'visible_dom_cards_bounded_scroll',
+      sourceFreshness: 'fresh',
+      sourceTraceIds: ['trace-cards'],
+      facts: { rawPayloadCopied: false, observedResultCount: 2 },
+      updatedAt: '2026-06-06T06:00:01.000Z',
+    });
+    objects.upsert({
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageModelKey: 'page:example.test:search_results',
+      objectFingerprint: 'result-card:1',
+      objectType: 'result_card',
+      lifecycleState: 'observed',
+      canTabrixOperate: true,
+      actionTypes: ['open_via_url'],
+      selectedDataSource: 'visible_dom_result_cards',
+      sourceRoute: 'visible_dom_cards_bounded_scroll',
+      sourceFreshness: 'fresh',
+      sourceTraceIds: ['trace-cards'],
+      facts: { rank: 1, title: 'First result' },
+      updatedAt: '2026-06-06T06:00:02.000Z',
+    });
+    objects.upsert({
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageModelKey: 'page:example.test:search_results',
+      objectFingerprint: 'result-card:2',
+      objectType: 'result_card',
+      lifecycleState: 'observed',
+      canTabrixOperate: true,
+      actionTypes: ['open_via_url'],
+      selectedDataSource: 'visible_dom_result_cards',
+      sourceRoute: 'visible_dom_cards_bounded_scroll',
+      sourceFreshness: 'fresh',
+      sourceTraceIds: ['trace-cards'],
+      facts: { rank: 2, title: 'Second result' },
+      updatedAt: '2026-06-06T06:00:03.000Z',
+    });
+
+    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T06:00:04.000Z' });
+    const model = knowledge.get(result.knowledgeIds[0])!;
+
+    expect(result).toMatchObject({
+      processedTraceCount: 3,
+      skippedTraceCount: 0,
+      upsertedKnowledgeCount: 1,
+    });
+    expect(model.objectGraph).toMatchObject({
+      sourceObjectCount: 3,
+      objectTypeCounts: {
+        page: 1,
+        result_card: 2,
+      },
+    });
+    expect(model.actionSurface).toMatchObject({
+      actionKindCounts: { open_via_url: 2 },
+      reusableActionKinds: ['open_via_url'],
+    });
+    expect(model.dataSourceModel).toMatchObject({
+      selectedDataSourceCounts: {
+        visible_dom_result_cards: 3,
+      },
+    });
+    expect(JSON.stringify(model)).not.toContain('First result');
+  });
 });
