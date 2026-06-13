@@ -76,6 +76,13 @@ const SENSITIVE_KEY_FRAGMENTS = [
   '密码',
 ];
 
+const INTERNAL_SAFE_KEY_NAMES = new Set([
+  'feedbacktoken',
+  'tasksessionid',
+  'tracebindinghash',
+  'tokenssavedestimatetotal',
+]);
+
 function normalizeKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
 }
@@ -86,10 +93,23 @@ function hasSensitiveKey(value: unknown): boolean {
   if (typeof value !== 'object') return false;
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     const normalized = normalizeKey(key);
+    if (INTERNAL_SAFE_KEY_NAMES.has(normalized)) continue;
     if (SENSITIVE_KEY_FRAGMENTS.some((fragment) => normalized.includes(fragment))) return true;
     if (hasSensitiveKey(child)) return true;
   }
   return false;
+}
+
+function traceContainsSensitiveData(trace: MemoryTrace): boolean {
+  return (
+    trace.redactionState !== 'redacted' ||
+    hasSensitiveKey(trace.requestParams) ||
+    hasSensitiveKey(trace.response) ||
+    hasSensitiveKey(trace.actionTarget) ||
+    hasSensitiveKey(trace.preObservation) ||
+    hasSensitiveKey(trace.postObservation) ||
+    hasSensitiveKey(trace.postActionDelta)
+  );
 }
 
 function readObject(value: unknown): Record<string, unknown> | null {
@@ -142,24 +162,63 @@ function groupByTask(traces: MemoryTrace[]): TaskTraceGroup[] {
 }
 
 function containsSensitiveTrace(group: TaskTraceGroup): boolean {
-  return group.traces.some(
-    (trace) =>
-      trace.redactionState !== 'redacted' ||
-      hasSensitiveKey(trace.requestParams) ||
-      hasSensitiveKey(trace.response) ||
-      hasSensitiveKey(trace.actionTarget) ||
-      hasSensitiveKey(trace.preObservation) ||
-      hasSensitiveKey(trace.postObservation) ||
-      hasSensitiveKey(trace.postActionDelta),
-  );
+  return group.traces.some(traceContainsSensitiveData);
 }
 
-function choosePageAnchor(traces: MemoryTrace[]): MemoryTrace | null {
-  return (
-    traces.find((trace) => trace.siteFamily && buildMkePageModelKey(trace)) ??
-    traces.find((trace) => trace.siteFamily) ??
-    null
+function traceTimeMs(trace: MemoryTrace): number {
+  const createdAt = Date.parse(trace.createdAt);
+  return Number.isFinite(createdAt) ? createdAt : 0;
+}
+
+function chooseContextualPageAnchor(input: {
+  actionTraces: MemoryTrace[];
+  allTraces: MemoryTrace[];
+  groupTraceIds: Set<string>;
+}): MemoryTrace | null {
+  const candidates = input.allTraces.filter(
+    (trace) =>
+      !input.groupTraceIds.has(trace.traceId) &&
+      !traceContainsSensitiveData(trace) &&
+      trace.siteFamily &&
+      buildMkePageModelKey(trace) &&
+      typeof trace.tabId === 'number' &&
+      input.actionTraces.some((action) => action.tabId === trace.tabId),
   );
+
+  let best: { trace: MemoryTrace; score: number } | null = null;
+  for (const action of input.actionTraces) {
+    if (typeof action.tabId !== 'number') continue;
+    const actionTime = traceTimeMs(action);
+    for (const candidate of candidates) {
+      if (candidate.tabId !== action.tabId) continue;
+      const candidateTime = traceTimeMs(candidate);
+      const isBeforeAction = candidateTime <= actionTime;
+      const distance = Math.abs(actionTime - candidateTime);
+      // Prefer the most recent prior page read/collection for the same tab.
+      // A post-action detail read is useful fallback evidence, but it should not
+      // replace the page model where the action target was discovered.
+      const score = distance + (isBeforeAction ? 0 : 1_000_000_000);
+      if (!best || score < best.score) best = { trace: candidate, score };
+    }
+  }
+  return best?.trace ?? null;
+}
+
+function choosePageAnchor(input: {
+  traces: MemoryTrace[];
+  actionTraces: MemoryTrace[];
+  allTraces: MemoryTrace[];
+}): MemoryTrace | null {
+  const direct =
+    input.traces.find((trace) => trace.siteFamily && buildMkePageModelKey(trace)) ??
+    input.traces.find((trace) => trace.siteFamily) ??
+    null;
+  if (direct) return direct;
+  return chooseContextualPageAnchor({
+    actionTraces: input.actionTraces,
+    allTraces: input.allTraces,
+    groupTraceIds: new Set(input.traces.map((trace) => trace.traceId)),
+  });
 }
 
 function buildTargetTemplate(trace: MemoryTrace): Record<string, unknown> {
@@ -231,6 +290,7 @@ function buildRecipeFingerprint(input: {
 function buildRecipeBasis(
   group: TaskTraceGroup,
   knowledgeRepo: KnowledgeModelRepository,
+  allTraces: MemoryTrace[],
 ): RecipeBasis | null {
   const actionTraces = group.traces.filter(
     (trace) =>
@@ -240,7 +300,11 @@ function buildRecipeBasis(
   );
   if (actionTraces.length === 0) return null;
 
-  const anchor = choosePageAnchor(group.traces);
+  const anchor = choosePageAnchor({
+    traces: group.traces,
+    actionTraces,
+    allTraces,
+  });
   if (!anchor?.siteFamily) return null;
   const pageModelKey = buildMkePageModelKey(anchor);
   if (!pageModelKey) return null;
@@ -260,7 +324,7 @@ function buildRecipeBasis(
     pageModelKey,
     pageRole: anchor.pageRole,
     pageUrlPattern: anchor.pageUrlPattern,
-    sourceTraceIds: group.traces.map((trace) => trace.traceId),
+    sourceTraceIds: [...new Set([...group.traces.map((trace) => trace.traceId), anchor.traceId])],
     linkedKnowledgeIds: [knowledge.knowledgeId],
     actionTraces,
     avgDurationMs:
@@ -372,7 +436,7 @@ export class MkeExperienceProjector {
         skippedTraceCount += group.traces.length;
         continue;
       }
-      const basis = buildRecipeBasis(group, this.knowledgeRepo);
+      const basis = buildRecipeBasis(group, this.knowledgeRepo, traces);
       if (!basis) {
         skippedTraceCount += group.traces.length;
         continue;

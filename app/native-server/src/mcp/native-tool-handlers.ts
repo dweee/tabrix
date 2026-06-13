@@ -48,7 +48,7 @@ function readAcceptanceApiFault(args: unknown): AcceptanceApiFault | null {
 export interface NativeToolHandlerDeps {
   sessionManager: Pick<
     SessionManager,
-    'getPersistenceStatus' | 'knowledgeApi' | 'chooseContextTelemetry'
+    'getPersistenceStatus' | 'knowledgeApi' | 'chooseContextTelemetry' | 'flushAndProjectMkeIdle'
   > & {
     memoryTraces?: SessionManager['memoryTraces'];
   };
@@ -113,7 +113,7 @@ function readIntegerArg(args: Record<string, unknown>, field: string): number | 
     : null;
 }
 
-const handleMemoryRecordAiFeedback: NativeToolHandler = (args, deps) => {
+const handleMemoryRecordAiFeedback: NativeToolHandler = async (args, deps) => {
   const persistenceMode = deps.sessionManager.getPersistenceStatus().mode;
   if (persistenceMode === 'off' || !deps.sessionManager.memoryTraces) {
     return jsonResult(
@@ -192,6 +192,11 @@ const handleMemoryRecordAiFeedback: NativeToolHandler = (args, deps) => {
     );
   }
 
+  const projection = await deps.sessionManager.flushAndProjectMkeIdle().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    return { error: message };
+  });
+
   return jsonResult(
     {
       status: 'recorded',
@@ -199,6 +204,18 @@ const handleMemoryRecordAiFeedback: NativeToolHandler = (args, deps) => {
       businessStatus,
       confidence: updated.aiFeedbackScore,
       persistenceMode,
+      projection:
+        projection && 'error' in projection
+          ? {
+              status: 'failed',
+              message: projection.error,
+            }
+          : {
+              status: 'projected',
+              knowledgeUpserted: projection?.knowledge?.upsertedKnowledgeCount ?? null,
+              experienceSaved: projection?.experience?.savedExperienceCount ?? null,
+              experienceIds: projection?.experience?.experienceIds ?? [],
+            },
     },
     false,
   );

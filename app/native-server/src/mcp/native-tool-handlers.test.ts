@@ -18,8 +18,28 @@ function makeDeps(
     memoryTraces: {
       recordAiBusinessFeedback: jest.Mock;
     } | null;
+    flushAndProjectMkeIdle: jest.Mock;
   }> = {},
 ): NativeToolHandlerDeps {
+  const flushAndProjectMkeIdle =
+    overrides.flushAndProjectMkeIdle ??
+    jest.fn().mockResolvedValue({
+      knowledge: {
+        processedTraceCount: 0,
+        skippedTraceCount: 0,
+        upsertedKnowledgeCount: 0,
+        nextCursorCreatedAt: null,
+        knowledgeIds: [],
+      },
+      experience: {
+        processedTraceCount: 0,
+        skippedTraceCount: 0,
+        rejectedSensitiveSequenceCount: 0,
+        savedExperienceCount: 0,
+        nextCursorCreatedAt: null,
+        experienceIds: [],
+      },
+    });
   return {
     sessionManager: {
       get knowledgeApi() {
@@ -34,6 +54,7 @@ function makeDeps(
           enabled: overrides.enabled ?? true,
         };
       },
+      flushAndProjectMkeIdle,
     } as unknown as NativeToolHandlerDeps['sessionManager'],
   };
 }
@@ -51,6 +72,23 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
       traceId: 'trace-1',
       aiFeedbackScore: 0.94,
     });
+    const flushAndProjectMkeIdle = jest.fn().mockResolvedValue({
+      knowledge: {
+        processedTraceCount: 2,
+        skippedTraceCount: 0,
+        upsertedKnowledgeCount: 1,
+        nextCursorCreatedAt: '2026-06-06T07:00:02.000Z',
+        knowledgeIds: ['knowledge-1'],
+      },
+      experience: {
+        processedTraceCount: 2,
+        skippedTraceCount: 0,
+        rejectedSensitiveSequenceCount: 0,
+        savedExperienceCount: 1,
+        nextCursorCreatedAt: '2026-06-06T07:00:04.000Z',
+        experienceIds: ['experience-1'],
+      },
+    });
 
     const result = await handler(
       {
@@ -61,7 +99,7 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
         reasonCode: 'ai_verified_result',
         summary: 'AI verified the expected page result.',
       },
-      makeDeps({ memoryTraces: { recordAiBusinessFeedback } }),
+      makeDeps({ memoryTraces: { recordAiBusinessFeedback }, flushAndProjectMkeIdle }),
     );
 
     expect(result.isError).toBe(false);
@@ -82,7 +120,14 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
       businessStatus: 'achieved',
       confidence: 0.94,
       persistenceMode: 'disk',
+      projection: {
+        status: 'projected',
+        knowledgeUpserted: 1,
+        experienceSaved: 1,
+        experienceIds: ['experience-1'],
+      },
     });
+    expect(flushAndProjectMkeIdle).toHaveBeenCalledTimes(1);
   });
 
   it('rejects missing traceId or invalid businessStatus', async () => {

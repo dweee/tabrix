@@ -321,6 +321,83 @@ describe('MkeExperienceProjector', () => {
     expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toHaveLength(1);
   });
 
+  it('anchors AI-approved actions to the nearest same-tab page context across task ids', () => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const traces = new MemoryTraceRepository(opened.db);
+    const knowledge = new KnowledgeModelRepository(opened.db);
+    const experience = new ExperienceRecipeRepository(opened.db);
+    const projector = new MkeExperienceProjector(traces, knowledge, experience);
+
+    const readTrace = traces.append({
+      traceId: 'trace-read-cross-task',
+      taskId: 'task-read-context',
+      toolName: 'chrome_read_page',
+      requestParams: { tabId: 9 },
+      requestAt: '2026-06-06T07:10:01.000Z',
+      response: { payloadDigest: { summary: { pageRole: 'search_results' } } },
+      responseAt: '2026-06-06T07:10:02.000Z',
+      toolSuccess: true,
+      tabId: 9,
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageState: 'ready',
+      createdAt: '2026-06-06T07:10:02.000Z',
+    });
+    const pageModelKey = buildMkePageModelKey(readTrace)!;
+    addKnowledge({
+      knowledge,
+      siteFamily: 'example.test',
+      pageModelKey,
+      pageRole: 'search_results',
+      pageUrlPattern: 'https://example.test/search',
+    });
+    traces.append({
+      traceId: 'trace-click-cross-task',
+      taskId: 'task-click-action',
+      toolName: 'chrome_click_element',
+      requestParams: { tabId: 9, ref: 'result-card-title' },
+      requestAt: '2026-06-06T07:10:03.000Z',
+      response: {
+        payloadDigest: {
+          success: true,
+          observedOutcome: 'spa_route_change',
+          _tabrix: {
+            feedbackTarget: {
+              traceId: 'trace-click-cross-task',
+              feedbackToken: 'internal-binding-token',
+            },
+            actionEvidenceResult: {
+              taskSessionId: 'internal-task-context',
+            },
+            taskContextEnvelope: {
+              taskTotals: {
+                tokensSavedEstimateTotal: 1200,
+              },
+            },
+          },
+        },
+      },
+      responseAt: '2026-06-06T07:10:04.000Z',
+      toolSuccess: true,
+      businessSuccess: 'unknown',
+      aiFeedback: verifiedExperienceFeedback({
+        confidence: 0.93,
+        reasonCode: 'ai_verified_detail_opened',
+        summary: 'AI verified that clicking the result opened the detail page.',
+      }),
+      tabId: 9,
+      createdAt: '2026-06-06T07:10:04.000Z',
+    });
+
+    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T07:10:05.000Z' });
+
+    expect(result.savedExperienceCount).toBe(1);
+    const recipes = experience.findByScenario(`mke:example.test:${pageModelKey}`);
+    expect(recipes).toHaveLength(1);
+    expect(recipes[0]?.sourceTraceIds).toEqual(['trace-click-cross-task', 'trace-read-cross-task']);
+  });
+
   it('does not mine a recipe from automatic evidence feedback alone', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
     const traces = new MemoryTraceRepository(opened.db);
