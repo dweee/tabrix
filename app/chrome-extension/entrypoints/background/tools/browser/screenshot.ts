@@ -146,12 +146,14 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       expectedWindowId: tab.windowId,
       requireFocusedWindow: true,
     });
-    const foregroundProof = await this.waitForTabForegroundProof(tab.id, {
-      chromeWindowFocused: activationResult.windowFocused,
-      chromeTabActive: activationResult.activated,
-    });
     const captureTargetProven =
       activationResult.activated === true && activationResult.windowFocused === true;
+    const foregroundProof = captureTargetProven
+      ? null
+      : await this.waitForTabForegroundProof(tab.id, {
+          chromeWindowFocused: activationResult.windowFocused,
+          chromeTabActive: activationResult.activated,
+        });
     const proof: VisibleCaptureTargetProof = {
       kind: 'screenshot_visible_capture_target_v1',
       tabId: tab.id,
@@ -160,9 +162,13 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       activationTimedOut: activationResult.timedOut,
       activationWaitedMs: activationResult.waitedMs,
       windowFocused: activationResult.windowFocused,
-      foregroundActivationVerdict: foregroundProof.verdict,
-      documentVisibilityState: foregroundProof.documentVisibilityState,
-      documentHasFocus: foregroundProof.documentHasFocus,
+      foregroundActivationVerdict: captureTargetProven
+        ? 'proven_foreground'
+        : (foregroundProof?.verdict ?? 'not_proven'),
+      documentVisibilityState: captureTargetProven
+        ? null
+        : (foregroundProof?.documentVisibilityState ?? null),
+      documentHasFocus: captureTargetProven ? null : (foregroundProof?.documentHasFocus ?? null),
       captureTargetProven,
       reason: captureTargetProven
         ? 'target tab is active in the focused Chrome window before captureVisibleTab'

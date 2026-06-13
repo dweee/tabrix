@@ -30,7 +30,7 @@ describe('screenshot tool target binding', () => {
       windowId: 5,
       active: true,
     } as chrome.tabs.Tab);
-    vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
+    const documentProbe = vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
       {
         result: {
           visibilityState: 'visible',
@@ -75,6 +75,7 @@ describe('screenshot tool target binding', () => {
     expect(result.isError).toBe(false);
     expect(windowUpdate).toHaveBeenCalledWith(5, { focused: true });
     expect(tabUpdate).toHaveBeenCalledWith(77, { active: true });
+    expect(documentProbe).not.toHaveBeenCalled();
     expect(captureVisibleTab).toHaveBeenCalledWith(5, { format: 'png' });
     expect(tabUpdate.mock.invocationCallOrder[0]).toBeLessThan(
       captureVisibleTab.mock.invocationCallOrder[0],
@@ -89,6 +90,8 @@ describe('screenshot tool target binding', () => {
       windowFocused: true,
       captureTargetProven: true,
       foregroundActivationVerdict: 'proven_foreground',
+      documentVisibilityState: null,
+      documentHasFocus: null,
     });
   });
 
@@ -117,7 +120,7 @@ describe('screenshot tool target binding', () => {
       windowId: 6,
       active: true,
     } as chrome.tabs.Tab);
-    vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
+    const documentProbe = vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
       {
         result: {
           visibilityState: 'visible',
@@ -143,6 +146,7 @@ describe('screenshot tool target binding', () => {
     });
 
     expect(result.isError).toBe(false);
+    expect(documentProbe).not.toHaveBeenCalled();
     expect(injectContentScript).not.toHaveBeenCalled();
     expect(sendMessageToTab).not.toHaveBeenCalled();
     expect(captureVisibleTab).toHaveBeenCalledWith(6, { format: 'png' });
@@ -186,7 +190,7 @@ describe('screenshot tool target binding', () => {
       windowId: 7,
       active: true,
     } as chrome.tabs.Tab);
-    vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
+    const documentProbe = vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
       {
         result: {
           visibilityState: 'visible',
@@ -212,6 +216,7 @@ describe('screenshot tool target binding', () => {
     });
 
     expect(result.isError).toBe(false);
+    expect(documentProbe).not.toHaveBeenCalled();
     expect(injectContentScript).not.toHaveBeenCalled();
     expect(sendMessageToTab).not.toHaveBeenCalled();
     expect(captureVisibleTab).toHaveBeenCalledWith(7, { format: 'png' });
