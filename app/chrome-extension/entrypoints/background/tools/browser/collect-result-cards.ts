@@ -657,8 +657,10 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     const primaryLinkSelector = primaryLink ? selectorForElement(primaryLink.link) : undefined;
     const primaryLinkText = primaryLink ? linkText(primaryLink.link) : '';
     const resultCardTargetRef = `ref_result_card_${cards.length + 1}`;
+    const primaryLinkHitVerified =
+      Boolean(primaryLink) && !primaryLink.reasons.includes('visible_detail_link_unverified_hit');
     const resultCardCandidateAction =
-      primaryLink && primaryLinkSelector
+      primaryLinkHitVerified && primaryLink && primaryLinkSelector
         ? {
             id: `ca_click_${resultCardTargetRef}`,
             actionType: 'click' as const,
@@ -681,6 +683,16 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
           url: primaryLink.link.href,
           ...(primaryLinkSelector ? { selector: primaryLinkSelector } : {}),
           ...(primaryLinkText ? { text: primaryLinkText } : {}),
+          executionScope: resultCardCandidateAction
+            ? ('same_tab_fresh_snapshot' as const)
+            : ('session_url' as const),
+          openAction: {
+            toolName: 'chrome_navigate' as const,
+            toolArgs: { url: primaryLink.link.href },
+            executionScope: 'session_url' as const,
+            reason: 'result_card_href' as const,
+            confidence: Math.min(0.9, confidence + 0.02),
+          },
           ...(resultCardCandidateAction
             ? {
                 toolName: 'chrome_click_element' as const,

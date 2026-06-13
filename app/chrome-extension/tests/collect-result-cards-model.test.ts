@@ -159,4 +159,78 @@ describe('mergeCollectedResultCards', () => {
 
     expect(merged.map((item) => item.title)).toEqual(['One', 'Two']);
   });
+
+  it('prefers a later executable click target over an earlier URL-only target', () => {
+    const weakTarget = {
+      actionType: 'click' as const,
+      targetKind: 'result_card_link' as const,
+      url: 'https://example.com/1',
+      executionScope: 'session_url' as const,
+      rect: { x: 20, y: -40, width: 120, height: 28 },
+      center: { x: 80, y: 14 },
+      coordinateFrame: 'viewport' as const,
+      sourceScrollY: 0,
+      confidence: 0.74,
+      reasons: ['visible_detail_link_unverified_hit'],
+    };
+    const executableTarget = {
+      actionType: 'click' as const,
+      targetKind: 'result_card_link' as const,
+      url: 'https://example.com/1',
+      selector: 'article[data-id="1"] a[href]',
+      executionScope: 'same_tab_fresh_snapshot' as const,
+      toolName: 'chrome_click_element' as const,
+      toolArgs: {
+        candidateAction: {
+          id: 'ca_click_ref_result_card_1',
+          actionType: 'click' as const,
+          targetRef: 'ref_result_card_1',
+          label: 'First card',
+          confidence: 0.9,
+          matchReason: 'result_card_primary_link',
+          intent: 'content.open_detail' as const,
+          locatorChain: [
+            { type: 'ref', value: 'ref_result_card_1' },
+            { type: 'css', value: 'article[data-id="1"] a[href]' },
+          ],
+        },
+      },
+      rect: { x: 20, y: 40, width: 120, height: 28 },
+      center: { x: 80, y: 54 },
+      coordinateFrame: 'viewport' as const,
+      sourceScrollY: 320,
+      confidence: 0.9,
+      reasons: ['title_link_match'],
+    };
+
+    const merged = mergeCollectedResultCards(
+      [
+        card({
+          title: 'First card',
+          url: 'https://example.com/1',
+          actionTarget: weakTarget,
+        }),
+      ],
+      [
+        card({
+          title: 'First card',
+          url: 'https://example.com/1?utm=tracking',
+          actionTarget: executableTarget,
+        }),
+      ],
+      10,
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0].actionTarget).toMatchObject({
+      executionScope: 'same_tab_fresh_snapshot',
+      toolName: 'chrome_click_element',
+      toolArgs: {
+        candidateAction: {
+          targetRef: 'ref_result_card_1',
+          intent: 'content.open_detail',
+        },
+      },
+    });
+  });
 });

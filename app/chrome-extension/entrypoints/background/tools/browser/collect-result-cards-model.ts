@@ -7,6 +7,14 @@ export interface CollectedResultCard {
     url?: string;
     selector?: string;
     text?: string;
+    executionScope?: 'same_tab_fresh_snapshot' | 'session_url';
+    openAction?: {
+      toolName: 'chrome_navigate';
+      toolArgs: { url: string };
+      executionScope: 'session_url';
+      reason: 'result_card_href';
+      confidence: number;
+    };
     toolName?: 'chrome_click_element';
     toolArgs?: {
       candidateAction: {
@@ -51,6 +59,13 @@ export interface CollectedResultCard {
   confidence: number;
   reasons: string[];
   sourceStrategy?: 'list_container' | 'candidate_scan';
+}
+
+function hasExecutableClickTarget(card: CollectedResultCard | undefined): boolean {
+  return (
+    card?.actionTarget?.toolName === 'chrome_click_element' &&
+    Boolean(card.actionTarget.toolArgs?.candidateAction)
+  );
 }
 
 function normalizeText(value: unknown): string {
@@ -98,7 +113,11 @@ export function mergeCollectedResultCards(
     byKey.set(key, {
       ...existing,
       url: existing.url || card.url,
-      actionTarget: existing.actionTarget || card.actionTarget,
+      actionTarget: hasExecutableClickTarget(card)
+        ? card.actionTarget
+        : hasExecutableClickTarget(existing)
+          ? existing.actionTarget
+          : existing.actionTarget || card.actionTarget,
       primaryText: existing.primaryText || card.primaryText,
       secondaryText: existing.secondaryText || card.secondaryText,
       metaText: existing.metaText || card.metaText,

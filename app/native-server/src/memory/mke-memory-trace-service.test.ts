@@ -536,6 +536,13 @@ describe('MkeMemoryTraceService', () => {
                 url: 'https://example.test/note/1?x=private',
                 selector: 'body > main > article:nth-of-type(1) > a:nth-of-type(1)',
                 text: 'First result',
+                openAction: {
+                  toolName: 'chrome_navigate',
+                  toolArgs: { url: 'https://example.test/note/1?x=private' },
+                  executionScope: 'session_url',
+                  reason: 'result_card_href',
+                  confidence: 0.88,
+                },
                 toolName: 'chrome_click_element',
                 toolArgs: {
                   candidateAction: {
@@ -577,6 +584,25 @@ describe('MkeMemoryTraceService', () => {
               rank: 2,
               title: 'Second result',
               url: 'https://example.test/note/2',
+              actionTarget: {
+                actionType: 'click',
+                targetKind: 'result_card_link',
+                url: 'https://example.test/note/2?x=private',
+                executionScope: 'session_url',
+                openAction: {
+                  toolName: 'chrome_navigate',
+                  toolArgs: { url: 'https://example.test/note/2?x=private' },
+                  executionScope: 'session_url',
+                  reason: 'result_card_href',
+                  confidence: 0.74,
+                },
+                rect: { x: 20, y: -40, width: 160, height: 32 },
+                center: { x: 100, y: 14 },
+                coordinateFrame: 'viewport',
+                sourceScrollY: 0,
+                confidence: 0.74,
+                reasons: ['visible_detail_link_unverified_hit'],
+              },
               imageCount: 0,
               sourceScrollY: 480,
               rect: { x: 10, y: 220, width: 200, height: 140 },
@@ -650,6 +676,12 @@ describe('MkeMemoryTraceService', () => {
           actionType: 'click',
           targetKind: 'result_card_link',
           url: 'https://example.test/note/:id',
+          openAction: {
+            toolName: 'chrome_navigate',
+            toolArgs: { url: 'https://example.test/note/:id' },
+            executionScope: 'session_url',
+            reason: 'result_card_href',
+          },
           toolName: 'chrome_click_element',
           toolArgs: {
             candidateAction: {
@@ -682,6 +714,23 @@ describe('MkeMemoryTraceService', () => {
           center: { x: 100, y: 56 },
           coordinateFrame: 'viewport',
           sourceScrollY: 0,
+        },
+      });
+      expect(cards[1]).toMatchObject({
+        primaryConclusion: 'Second result',
+        actionTypes: ['open_via_url'],
+      });
+      expect(cards[1].facts).toMatchObject({
+        actionTarget: {
+          targetKind: 'result_card_link',
+          url: 'https://example.test/note/:id',
+          executionScope: 'session_url',
+          openAction: {
+            toolName: 'chrome_navigate',
+            toolArgs: { url: 'https://example.test/note/:id' },
+            executionScope: 'session_url',
+            reason: 'result_card_href',
+          },
         },
       });
       expect(JSON.stringify(objects)).not.toContain('x=private');

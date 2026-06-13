@@ -397,6 +397,36 @@ function normalizeResultCardActionToolArgs(rawActionTarget: Record<string, unkno
   };
 }
 
+function normalizeResultCardOpenAction(rawActionTarget: Record<string, unknown> | null):
+  | {
+      openAction: {
+        toolName: 'chrome_navigate';
+        toolArgs: { url: string | null };
+        executionScope: 'session_url';
+        reason: 'result_card_href';
+        confidence: number | null;
+      };
+    }
+  | Record<string, never> {
+  const openAction = readObject(rawActionTarget?.openAction);
+  if (readString(openAction?.toolName) !== 'chrome_navigate') return {};
+  const toolArgs = readObject(openAction?.toolArgs);
+  const urlFields = normalizeUrlPattern(readString(toolArgs?.url), {
+    allowPersonalBrowserStateStorage: false,
+  });
+  const normalizedUrl = urlFields.rootRoute ?? urlFields.currentRoute ?? urlFields.pattern;
+  if (!normalizedUrl) return {};
+  return {
+    openAction: {
+      toolName: 'chrome_navigate',
+      toolArgs: { url: normalizedUrl },
+      executionScope: 'session_url',
+      reason: 'result_card_href',
+      confidence: readFiniteNumber(openAction?.confidence),
+    },
+  };
+}
+
 function mergeReadPageFactsWithExistingCollectionFacts(
   readPageFacts: Record<string, unknown>,
   existingFactsValue: unknown,
@@ -1295,6 +1325,9 @@ export class MkeMemoryTraceService {
         allowPersonalBrowserStateStorage: false,
       });
       const rawActionTarget = readObject(card.actionTarget);
+      const hasExecutableResultCardClick =
+        readString(rawActionTarget?.toolName) === 'chrome_click_element' &&
+        Boolean(readObject(readObject(rawActionTarget?.toolArgs)?.candidateAction));
       const actionTargetUrlFields = normalizeUrlPattern(readString(rawActionTarget?.url), {
         allowPersonalBrowserStateStorage: false,
       });
@@ -1302,12 +1335,14 @@ export class MkeMemoryTraceService {
         ? {
             actionType: readString(rawActionTarget.actionType),
             targetKind: readString(rawActionTarget.targetKind),
+            executionScope: readString(rawActionTarget.executionScope),
             url:
               actionTargetUrlFields.rootRoute ??
               actionTargetUrlFields.currentRoute ??
               actionTargetUrlFields.pattern,
             selector: readString(rawActionTarget.selector),
             text: readString(rawActionTarget.text),
+            ...normalizeResultCardOpenAction(rawActionTarget),
             ...normalizeResultCardActionToolArgs(rawActionTarget),
             rect: readObject(rawActionTarget.rect),
             center: readObject(rawActionTarget.center),
@@ -1320,7 +1355,7 @@ export class MkeMemoryTraceService {
           }
         : null;
       const actionTypes = [
-        actionTarget ? 'click_result_card' : null,
+        hasExecutableResultCardClick ? 'click_result_card' : null,
         readString(card.url) ? 'open_via_url' : null,
       ].filter((item): item is string => Boolean(item));
       const cardKey =
