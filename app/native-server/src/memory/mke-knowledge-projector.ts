@@ -56,8 +56,28 @@ function readStringArray(value: unknown): string[] {
     : [];
 }
 
+function readObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readFiniteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
 function uniqueStrings(values: Iterable<string>): string[] {
   return [...new Set(values)].sort();
+}
+
+function average(values: number[]): number | null {
+  if (values.length === 0) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function roundedScore(value: number | null): number {
+  if (value === null) return 0;
+  return Math.max(0, Math.min(1, Math.round(value * 100) / 100));
 }
 
 function groupProjectableObjects(objects: BrowserObject[]): {
@@ -108,8 +128,13 @@ function buildKnowledgeInput(
   const actionKindCounts = new Map<string, number>();
   const sourceTraceIds: string[] = [];
   const sourceObjectIds: string[] = [];
+  const confidenceScores: number[] = [];
+  const resultCardActionKinds = new Map<string, number>();
+  const resultCardRanks: number[] = [];
   let unavailableObjectCount = 0;
   let observationCount = 0;
+  let resultCardCount = 0;
+  let clickableResultCardCount = 0;
 
   for (const object of group.objects) {
     sourceObjectIds.push(object.browserObjectId);
@@ -122,8 +147,20 @@ function buildKnowledgeInput(
     incrementCounter(freshnessCounts, object.sourceFreshness);
     for (const actionType of readStringArray(object.actionTypes)) {
       incrementCounter(actionKindCounts, actionType);
+      if (object.objectType === 'result_card') {
+        incrementCounter(resultCardActionKinds, actionType);
+      }
     }
+    if (object.confidenceScore !== null) confidenceScores.push(object.confidenceScore);
     if (object.canTabrixOperate === false) unavailableObjectCount += 1;
+    if (object.objectType === 'result_card') {
+      resultCardCount += 1;
+      if (object.canTabrixOperate === true || readStringArray(object.actionTypes).length > 0) {
+        clickableResultCardCount += 1;
+      }
+      const rank = readFiniteNumber(readObject(object.facts)?.rank);
+      if (rank !== null) resultCardRanks.push(rank);
+    }
   }
 
   const lastObservedAt =
@@ -148,6 +185,20 @@ function buildKnowledgeInput(
       schema: 'tabrix_mke_object_graph_summary_v1',
       sourceObjectCount: group.objects.length,
       objectTypeCounts: countersToObject(objectTypeCounts),
+      resultCardCount,
+      resultCardSummary: {
+        schema: 'tabrix_mke_result_card_summary_v1',
+        count: resultCardCount,
+        clickableCount: clickableResultCardCount,
+        rankRange:
+          resultCardRanks.length > 0
+            ? {
+                min: Math.min(...resultCardRanks),
+                max: Math.max(...resultCardRanks),
+              }
+            : null,
+        rawCardTextCopied: false,
+      },
       sourceObjectIds: uniqueStrings(sourceObjectIds).slice(0, 200),
       rawPayloadCopied: false,
     },
@@ -155,6 +206,7 @@ function buildKnowledgeInput(
       schema: 'tabrix_mke_action_surface_summary_v1',
       actionKindCounts: countersToObject(actionKindCounts),
       reusableActionKinds: [...actionKindCounts.keys()].sort(),
+      resultCardActionKinds: countersToObject(resultCardActionKinds),
     },
     dataSourceModel: {
       schema: 'tabrix_mke_data_source_model_v1',
@@ -174,7 +226,7 @@ function buildKnowledgeInput(
     observationCount,
     successfulUseCount: 0,
     failedUseCount: 0,
-    confidenceScore: 0,
+    confidenceScore: roundedScore(average(confidenceScores)),
     driftScore: null,
     lastObservedAt,
     createdAt: nowIso,

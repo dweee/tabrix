@@ -19,7 +19,9 @@ export function shouldRequestAiFeedbackForTrace(
   trace: Pick<MemoryTrace, 'toolName' | 'toolSuccess' | 'taskIntent'> | null | undefined,
 ): boolean {
   if (!trace || trace.toolSuccess !== true) return false;
+  if (!shouldRequestAiFeedbackForTool(trace.toolName)) return false;
+  if (trace.toolName === TOOL_NAMES.BROWSER.COLLECT_RESULT_CARDS) return true;
   const taskIntent = trace.taskIntent?.trim();
   if (!taskIntent || taskIntent === `Run MCP tool ${trace.toolName}`) return false;
-  return shouldRequestAiFeedbackForTool(trace.toolName);
+  return true;
 }

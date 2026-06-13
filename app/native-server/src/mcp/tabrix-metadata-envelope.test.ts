@@ -294,6 +294,34 @@ describe('tabrix metadata envelope', () => {
     expect(payload._tabrix).not.toHaveProperty('feedbackTarget');
   });
 
+  it('requests AI feedback for default result-card collection traces', () => {
+    const result = attachTabrixMemoryTraceEnvelope(
+      textResult({ status: 'ok' }),
+      makeTrace({
+        toolName: TOOL_NAMES.BROWSER.COLLECT_RESULT_CARDS,
+        taskIntent: `Run MCP tool ${TOOL_NAMES.BROWSER.COLLECT_RESULT_CARDS}`,
+      }),
+      {
+        intentTitle: null,
+        intentSummary: null,
+        nextIntent: null,
+        previousFeedback: [],
+      },
+      TOOL_NAMES.BROWSER.COLLECT_RESULT_CARDS,
+    );
+
+    const payload = parseFirstText(result);
+    expect(payload._tabrix).toMatchObject({
+      traceId: 'trace-1',
+      toolName: TOOL_NAMES.BROWSER.COLLECT_RESULT_CARDS,
+      businessFeedbackRequired: true,
+      feedbackTarget: {
+        traceId: 'trace-1',
+        feedbackToken: expect.any(String),
+      },
+    });
+  });
+
   it.each([
     [TOOL_NAMES.BROWSER.READ_PAGE],
     [TOOL_NAMES.BROWSER.COLLECT_RESULT_CARDS],

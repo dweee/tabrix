@@ -215,6 +215,7 @@ describe('MkeKnowledgeProjector', () => {
       sourceFreshness: 'fresh',
       sourceTraceIds: ['trace-cards'],
       facts: { rank: 1, title: 'First result' },
+      confidenceScore: 0.86,
       updatedAt: '2026-06-06T06:00:02.000Z',
     });
     objects.upsert({
@@ -232,6 +233,7 @@ describe('MkeKnowledgeProjector', () => {
       sourceFreshness: 'fresh',
       sourceTraceIds: ['trace-cards'],
       facts: { rank: 2, title: 'Second result' },
+      confidenceScore: 0.82,
       updatedAt: '2026-06-06T06:00:03.000Z',
     });
 
@@ -245,6 +247,13 @@ describe('MkeKnowledgeProjector', () => {
     });
     expect(model.objectGraph).toMatchObject({
       sourceObjectCount: 3,
+      resultCardCount: 2,
+      resultCardSummary: {
+        count: 2,
+        clickableCount: 2,
+        rankRange: { min: 1, max: 2 },
+        rawCardTextCopied: false,
+      },
       objectTypeCounts: {
         page: 1,
         result_card: 2,
@@ -253,12 +262,14 @@ describe('MkeKnowledgeProjector', () => {
     expect(model.actionSurface).toMatchObject({
       actionKindCounts: { open_via_url: 2 },
       reusableActionKinds: ['open_via_url'],
+      resultCardActionKinds: { open_via_url: 2 },
     });
     expect(model.dataSourceModel).toMatchObject({
       selectedDataSourceCounts: {
         visible_dom_result_cards: 3,
       },
     });
+    expect(model.confidenceScore).toBe(0.84);
     expect(JSON.stringify(model)).not.toContain('First result');
   });
 });
