@@ -516,6 +516,22 @@
       if (ariaChecked === 'false') return false;
       if (ariaChecked === 'mixed') return 'mixed';
     }
+    const ariaSelected = String(el.getAttribute('aria-selected') || '').toLowerCase();
+    if (ariaSelected === 'true') return true;
+    if (ariaSelected === 'false') return false;
+
+    const ariaPressed = String(el.getAttribute('aria-pressed') || '').toLowerCase();
+    if (ariaPressed === 'true') return true;
+    if (ariaPressed === 'false') return false;
+    if (ariaPressed === 'mixed') return 'mixed';
+
+    const ariaCurrent = String(el.getAttribute('aria-current') || '').toLowerCase();
+    if (ariaCurrent && ariaCurrent !== 'false') return true;
+
+    const className = classNameOf(el);
+    if (/(^|[\s_-])(active|selected|current|applied|checked)([\s_-]|$)/i.test(className)) {
+      return true;
+    }
     return null;
   }
 

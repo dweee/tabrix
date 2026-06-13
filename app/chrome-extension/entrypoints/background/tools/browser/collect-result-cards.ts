@@ -4,6 +4,9 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
 import { markBrowserWorldTabAiOperated } from '../../browser-world-inventory';
 import { type CollectedResultCard, mergeCollectedResultCards } from './collect-result-cards-model';
+import { cdpSessionManager } from '@/utils/cdp-session-manager';
+
+const CDP_SESSION_KEY = 'collect-result-cards';
 
 interface CollectResultCardsParams {
   tabId?: number;
@@ -17,6 +20,7 @@ interface CollectResultCardsParams {
 
 interface VisibleCardScanResult {
   cards: CollectedResultCard[];
+  filterState: SearchFilterState;
   pageInfo: {
     url: string;
     title: string;
@@ -25,6 +29,23 @@ interface VisibleCardScanResult {
     scrollHeight: number;
     pixelsBelow: number;
   };
+}
+
+interface AppliedSearchFilter {
+  label: string;
+  kind: 'content_type' | 'sort' | 'time_range' | 'unknown';
+  source: 'dom_active_state' | 'url_parameter_adapter';
+  confidence: number;
+}
+
+interface SearchFilterState {
+  status: 'observed' | 'not_observed';
+  appliedLabels: string[];
+  contentType?: string;
+  sort?: string;
+  timeRange?: string;
+  appliedFilters: AppliedSearchFilter[];
+  claimBoundary: string;
 }
 
 interface ScrollStepResult {
@@ -58,6 +79,11 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     /(\d+\s*(秒|分钟|小时|天|周|月|年)前|昨天|今天|刚刚|\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}|ago|today|yesterday)/i;
   const interactionPattern =
     /(收藏|点赞|评论|赞|喜欢|saves?|likes?|comments?|[0-9][0-9,.]*\s*(万|千|k|m)?)/i;
+  const contentTypeFilterPattern =
+    /^(图文|图片|视频|文章|image\s*text|images?|photos?|videos?|articles?)$/i;
+  const sortFilterPattern =
+    /^(综合|最新|最热|最多点赞|最多评论|最多收藏|latest|popular|most\s*(liked|commented|saved|collected))$/i;
+  const timeRangeFilterPattern = /^(一天内|一周内|半年内|24\s*h|7\s*d|week|month)$/i;
   const listContainerSelector = [
     '[role="feed"]',
     '[role="list"]',
@@ -94,6 +120,146 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       .filter((line) => line.length > 0 && line.length <= 160)
       .filter((line) => !shellPattern.test(line))
       .slice(0, 10);
+  };
+
+  const ownVisibleText = (element: Element): string => {
+    const ownParts: string[] = [];
+    for (const child of Array.from(element.childNodes)) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        const text = normalize(child.textContent || '');
+        if (text) ownParts.push(text);
+      }
+    }
+    return normalize(ownParts.join(' '));
+  };
+
+  const elementIsVisible = (element: Element): boolean => {
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    if (rect.bottom < 0 || rect.top > window.innerHeight) return false;
+    if (rect.right < 0 || rect.left > window.innerWidth) return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0;
+  };
+
+  const classifyFilterLabel = (label: string): AppliedSearchFilter['kind'] => {
+    if (contentTypeFilterPattern.test(label)) return 'content_type';
+    if (sortFilterPattern.test(label)) return 'sort';
+    if (timeRangeFilterPattern.test(label)) return 'time_range';
+    return 'unknown';
+  };
+
+  const preferredLabelForKind = (
+    filters: readonly AppliedSearchFilter[],
+    kind: AppliedSearchFilter['kind'],
+  ): string | undefined => {
+    const candidates = filters.filter((filter) => filter.kind === kind);
+    if (candidates.length === 0) return undefined;
+    if (kind === 'content_type') {
+      return (
+        candidates.find((filter) => /^(图文|image\s*text|images?|photos?)$/i.test(filter.label))
+          ?.label ?? candidates[0].label
+      );
+    }
+    if (kind === 'sort') {
+      return (
+        candidates.find((filter) => /最多收藏|most\s*(saved|collected)/i.test(filter.label))
+          ?.label ?? candidates[0].label
+      );
+    }
+    if (kind === 'time_range') {
+      return (
+        candidates.find((filter) => /一周内|7\s*d|week/i.test(filter.label))?.label ??
+        candidates[0].label
+      );
+    }
+    return candidates[0].label;
+  };
+
+  const inferFilterStateFromUrl = (): AppliedSearchFilter[] => {
+    const filters: AppliedSearchFilter[] = [];
+    try {
+      const url = new URL(location.href);
+      if (
+        url.hostname.toLowerCase().endsWith('xiaohongshu.com') &&
+        url.searchParams.get('type') === '51'
+      ) {
+        filters.push({
+          label: '图文',
+          kind: 'content_type',
+          source: 'url_parameter_adapter',
+          confidence: 0.78,
+        });
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return filters;
+  };
+
+  const collectFilterState = (): SearchFilterState => {
+    const activeSelectors = [
+      '[aria-selected="true"]',
+      '[aria-pressed="true"]',
+      '[aria-current]:not([aria-current="false"])',
+      '.active',
+      '.selected',
+      '.current',
+      '.applied',
+      '.checked',
+    ].join(',');
+    const filters: AppliedSearchFilter[] = [];
+    const seen = new Set<string>();
+    for (const element of Array.from(document.querySelectorAll(activeSelectors))) {
+      if (!(element instanceof Element)) continue;
+      if (!elementIsVisible(element)) continue;
+      const rect = element.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      if (rect.width > Math.max(480, window.innerWidth * 0.45)) continue;
+      const label = normalize(
+        ownVisibleText(element) ||
+          element.getAttribute('aria-label') ||
+          element.getAttribute('title') ||
+          element.textContent ||
+          '',
+      );
+      if (!label || label.length > 24) continue;
+      const kind = classifyFilterLabel(label);
+      if (kind === 'unknown') continue;
+      const key = `${kind}:${label}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      filters.push({
+        label,
+        kind,
+        source: 'dom_active_state',
+        confidence: 0.9,
+      });
+    }
+    for (const filter of inferFilterStateFromUrl()) {
+      const key = `${filter.kind}:${filter.label}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      filters.push(filter);
+    }
+
+    const appliedLabels = filters.map((filter) => filter.label);
+    return {
+      status: appliedLabels.length > 0 ? 'observed' : 'not_observed',
+      appliedLabels,
+      ...(preferredLabelForKind(filters, 'content_type')
+        ? { contentType: preferredLabelForKind(filters, 'content_type') }
+        : {}),
+      ...(preferredLabelForKind(filters, 'sort')
+        ? { sort: preferredLabelForKind(filters, 'sort') }
+        : {}),
+      ...(preferredLabelForKind(filters, 'time_range')
+        ? { timeRange: preferredLabelForKind(filters, 'time_range') }
+        : {}),
+      appliedFilters: filters,
+      claimBoundary:
+        'Filter state is inferred from active/selected DOM controls and bounded URL adapters. It proves visible page state, not global server ranking correctness.',
+    };
   };
 
   const visibleRect = (element: Element): DOMRect | null => {
@@ -540,6 +706,7 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
   cards.sort((left, right) => left.firstSeenGlobalTop - right.firstSeenGlobalTop);
   return {
     cards,
+    filterState: collectFilterState(),
     pageInfo: {
       url: location.href,
       title: document.title,
@@ -589,6 +756,79 @@ function scrollPageToTop(): ScrollStepResult {
 class CollectResultCardsTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.COLLECT_RESULT_CARDS;
 
+  private async scanVisibleResultCards(tab: chrome.tabs.Tab): Promise<VisibleCardScanResult> {
+    const tabId = tab.id;
+    if (typeof tabId !== 'number') {
+      throw new Error('Result-card scan requires a numeric tabId.');
+    }
+
+    let scriptingFrameCount = 0;
+    try {
+      const scanInjections = await chrome.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        func: scanVisibleResultCardsInPage,
+        world: 'MAIN' as chrome.scripting.ExecutionWorld,
+      });
+      const scans = scanInjections
+        .map((injection) => injection.result as VisibleCardScanResult | undefined)
+        .filter((result): result is VisibleCardScanResult => Boolean(result?.pageInfo));
+      scriptingFrameCount = scans.length;
+      const nonInternalScans = scans.filter(
+        (result) => !/^(about|chrome|edge|devtools):/i.test(result.pageInfo.url || ''),
+      );
+      const candidateScans = nonInternalScans.length > 0 ? nonInternalScans : scans;
+      const scan = candidateScans.sort((left, right) => {
+        const cardDelta = right.cards.length - left.cards.length;
+        if (cardDelta !== 0) return cardDelta;
+        const leftExact = left.pageInfo.url === tab.url ? 1 : 0;
+        const rightExact = right.pageInfo.url === tab.url ? 1 : 0;
+        if (leftExact !== rightExact) return rightExact - leftExact;
+        return right.pageInfo.scrollHeight - left.pageInfo.scrollHeight;
+      })[0];
+      if (scan && !/^(about|chrome|edge|devtools):/i.test(scan.pageInfo.url || '')) {
+        return scan;
+      }
+    } catch {
+      // CDP fallback below provides the same read-only scan from the page context.
+    }
+
+    const expression = `(() => {
+      const scanVisibleResultCardsInPage = ${scanVisibleResultCardsInPage.toString()};
+      return scanVisibleResultCardsInPage();
+    })()`;
+    const cdpResult = await cdpSessionManager.withSession(tabId, CDP_SESSION_KEY, async () => {
+      return (await cdpSessionManager.sendCommand(tabId, 'Runtime.evaluate', {
+        expression,
+        awaitPromise: true,
+        returnByValue: true,
+        timeout: 10_000,
+      })) as {
+        result?: { value?: unknown };
+        exceptionDetails?: {
+          text?: string;
+          exception?: { description?: string; value?: string; className?: string };
+        };
+      };
+    });
+    if (cdpResult.exceptionDetails) {
+      const details = cdpResult.exceptionDetails;
+      const message =
+        details.exception?.description ||
+        details.exception?.value ||
+        details.exception?.className ||
+        details.text ||
+        'unknown error';
+      throw new Error(`Result-card CDP scan failed: ${message}`);
+    }
+    const scan = cdpResult.result?.value as VisibleCardScanResult | undefined;
+    if (scan?.pageInfo && !/^(about|chrome|edge|devtools):/i.test(scan.pageInfo.url || '')) {
+      return scan;
+    }
+    throw new Error(
+      `Result-card scan only reached browser-internal frames; target page was not accessible. frameCount=${scriptingFrameCount}`,
+    );
+  }
+
   async execute(args: CollectResultCardsParams): Promise<ToolResult> {
     const minResults = clampInteger(args.minResults, 10, 1, 50);
     const maxScrolls = clampInteger(args.maxScrolls, 4, 0, 10);
@@ -616,12 +856,14 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
       }> = [];
       const scrolls: ScrollStepResult[] = [];
       let latestPageInfo: VisibleCardScanResult['pageInfo'] | null = null;
+      let latestFilterState: SearchFilterState | null = null;
       const startFromTop = args.startFromTop !== false;
 
       if (startFromTop) {
         const [topInjection] = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: scrollPageToTop,
+          world: 'MAIN' as chrome.scripting.ExecutionWorld,
         });
         const topScroll = topInjection?.result as ScrollStepResult | undefined;
         if (topScroll && Math.abs(topScroll.afterY - topScroll.beforeY) >= 4) {
@@ -630,15 +872,9 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
       }
 
       for (let step = 0; step <= maxScrolls; step += 1) {
-        const [scanInjection] = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: scanVisibleResultCardsInPage,
-        });
-        const scan = scanInjection?.result as VisibleCardScanResult | undefined;
-        if (!scan) {
-          return createErrorResponse('Result-card scan returned no page data.');
-        }
+        const scan = await this.scanVisibleResultCards(tab);
         latestPageInfo = scan.pageInfo;
+        latestFilterState = scan.filterState;
         merged = mergeCollectedResultCards(merged, scan.cards, maxMergedCards);
         steps.push({
           step,
@@ -661,6 +897,7 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
           target: { tabId: tab.id },
           func: scrollPageBy,
           args: [scrollStepPx],
+          world: 'MAIN' as chrome.scripting.ExecutionWorld,
         });
         const scroll = scrollInjection?.result as ScrollStepResult | undefined;
         if (!scroll || Math.abs(scroll.afterY - scroll.beforeY) < 4) {
@@ -708,6 +945,7 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
               sourceRoute: 'visible_dom_cards_bounded_scroll',
               selectedDataSource: 'visible_dom_result_cards',
               freshness: 'fresh',
+              filterState: latestFilterState,
               tabId: tab.id,
               ...(tab.windowId !== undefined ? { windowId: tab.windowId } : {}),
               requestedMinResults: minResults,

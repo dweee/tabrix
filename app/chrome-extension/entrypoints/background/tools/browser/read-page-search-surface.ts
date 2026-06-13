@@ -16,6 +16,8 @@ const SEARCH_TOOLBAR_LABEL_PATTERN =
   /^(筛选|已筛选|过滤|filter|filters|filtered|排序|sort|全部|图文|视频|用户|all|images?|photos?|videos?|users?)$/i;
 const FILTER_PANEL_OPTION_PATTERN =
   /^(综合|最新|最热|最多点赞|最多评论|最多收藏|不限|一天内|一周内|半年内|已看过|未看过|已关注|同城|附近|all|latest|popular|most\s*(liked|commented|saved|collected)|any)$/i;
+const CONTENT_TYPE_FILTER_OPTION_PATTERN =
+  /^(图文|图片|视频|文章|image\s*text|images?|photos?|videos?|articles?)$/i;
 const FILTER_PANEL_ACTION_PATTERN =
   /^(清除|重置|确认|应用|收起|clear|reset|confirm|apply|collapse)$/i;
 const SELECTED_STATE_PATTERN =
@@ -217,10 +219,13 @@ function actionForToolbarLabel(
 function actionForFilterPanelLabel(
   candidateActions: readonly ReadPageCandidateAction[],
   label: string,
+  interactiveElements: readonly ReadPageInteractiveElement[],
 ): ReadPageCandidateAction | undefined {
   const key = normalizedKey(label);
   return candidateActions.find((action) => {
     if (!TEXT_FILTER_PANEL_REF_PATTERN.test(action.targetRef)) return false;
+    const element = interactiveElements.find((item) => item.ref === action.targetRef);
+    if (normalizedKey(element?.name) === key) return true;
     const locatorLabel = action.locatorChain.find((item) => item.type === 'aria')?.value;
     if (normalizedKey(locatorLabel) === key) return true;
     return action.locatorChain.some((item) => normalizedKey(item.value) === key);
@@ -400,17 +405,63 @@ export function extractFilterPanelLabelsFromVisibleText(
   return labels;
 }
 
+function uniqueLabels(labels: readonly string[]): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const label of labels) {
+    const normalized = safeLabel(label);
+    const key = normalizedKey(normalized);
+    if (!normalized || !key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(normalized);
+  }
+  return result;
+}
+
+function outOfBandContentTypeFilterElements(
+  interactiveElements: readonly ReadPageInteractiveElement[],
+): ReadPageInteractiveElement[] {
+  return interactiveElements.filter((element) => {
+    const label = normalizeText(element.name);
+    return (
+      CONTENT_TYPE_FILTER_OPTION_PATTERN.test(label) &&
+      !isSearchToolbarBandElement(element, interactiveElements)
+    );
+  });
+}
+
 function filterPanelFromVisibleText(
   visibleTextContent: string | null | undefined,
   candidateActions: readonly ReadPageCandidateAction[],
   interactiveElements: readonly ReadPageInteractiveElement[],
 ): SearchSurfaceFilterPanel {
-  const optionLabels = extractShortLabels(visibleTextContent, FILTER_PANEL_OPTION_PATTERN, 16);
+  const outOfBandContentTypeOptions = outOfBandContentTypeFilterElements(interactiveElements);
+  const optionLabels = uniqueLabels([
+    ...extractShortLabels(visibleTextContent, FILTER_PANEL_OPTION_PATTERN, 16),
+    ...outOfBandContentTypeOptions.map((element) => normalizeText(element.name)),
+  ]);
   const actionLabels = extractShortLabels(visibleTextContent, FILTER_PANEL_ACTION_PATTERN, 8);
   const targetableOptions: SearchSurfaceControl[] = [];
   for (const label of [...optionLabels, ...actionLabels]) {
-    const action = actionForFilterPanelLabel(candidateActions, label);
-    if (!action?.locatorChain?.length) continue;
+    const action = actionForFilterPanelLabel(candidateActions, label, interactiveElements);
+    const outOfBandElement = outOfBandContentTypeOptions.find(
+      (element) => normalizedKey(element.name) === normalizedKey(label),
+    );
+    if (!action?.locatorChain?.length && !outOfBandElement) continue;
+    if (outOfBandElement) {
+      pushUniqueControl(
+        targetableOptions,
+        controlForElement({
+          kind: controlKindForFilterPanelLabel(label),
+          element: outOfBandElement,
+          candidateActions,
+          reason:
+            'content-type filter option is visible outside the top search toolbar and treated as a filter-panel option',
+          confidence: 0.8,
+        }),
+      );
+      continue;
+    }
     pushUniqueControl(
       targetableOptions,
       controlForRecoveredAction({

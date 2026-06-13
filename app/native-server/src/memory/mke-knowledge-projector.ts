@@ -75,6 +75,25 @@ function average(values: number[]): number | null {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+function isPositionalSelector(selector: string | null): boolean {
+  if (!selector) return false;
+  return /\b:nth-of-type\(/i.test(selector) || /\b:nth-child\(/i.test(selector);
+}
+
+function isSessionScopedAction(object: BrowserObject, actionType: string): boolean {
+  if (actionType !== 'click_result_card') return false;
+  const facts = readObject(object.facts);
+  const actionTarget =
+    readObject(facts?.actionTarget) ?? readObject(object.targetability)?.actionTarget;
+  const selector = typeof actionTarget?.selector === 'string' ? actionTarget.selector : null;
+  return Boolean(
+    isPositionalSelector(selector) ||
+    readObject(actionTarget?.center) ||
+    readObject(actionTarget?.rect) ||
+    readObject(object.targetability)?.rect,
+  );
+}
+
 function roundedScore(value: number | null): number {
   if (value === null) return 0;
   return Math.max(0, Math.min(1, Math.round(value * 100) / 100));
@@ -126,6 +145,8 @@ function buildKnowledgeInput(
   const sourceRouteCounts = new Map<string, number>();
   const freshnessCounts = new Map<string, number>();
   const actionKindCounts = new Map<string, number>();
+  const reusableActionKindCounts = new Map<string, number>();
+  const sessionScopedActionKindCounts = new Map<string, number>();
   const sourceTraceIds: string[] = [];
   const sourceObjectIds: string[] = [];
   const confidenceScores: number[] = [];
@@ -147,6 +168,11 @@ function buildKnowledgeInput(
     incrementCounter(freshnessCounts, object.sourceFreshness);
     for (const actionType of readStringArray(object.actionTypes)) {
       incrementCounter(actionKindCounts, actionType);
+      if (isSessionScopedAction(object, actionType)) {
+        incrementCounter(sessionScopedActionKindCounts, actionType);
+      } else {
+        incrementCounter(reusableActionKindCounts, actionType);
+      }
       if (object.objectType === 'result_card') {
         incrementCounter(resultCardActionKinds, actionType);
       }
@@ -205,7 +231,8 @@ function buildKnowledgeInput(
     actionSurface: {
       schema: 'tabrix_mke_action_surface_summary_v1',
       actionKindCounts: countersToObject(actionKindCounts),
-      reusableActionKinds: [...actionKindCounts.keys()].sort(),
+      reusableActionKinds: [...reusableActionKindCounts.keys()].sort(),
+      sessionScopedActionKinds: countersToObject(sessionScopedActionKindCounts),
       resultCardActionKinds: countersToObject(resultCardActionKinds),
     },
     dataSourceModel: {

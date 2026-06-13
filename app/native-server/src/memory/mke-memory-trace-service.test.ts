@@ -513,6 +513,18 @@ describe('MkeMemoryTraceService', () => {
           observedResultCount: 2,
           complete: true,
           status: 'complete_enough',
+          filterState: {
+            status: 'observed',
+            appliedLabels: ['图文', '最多收藏', '一周内'],
+            contentType: '图文',
+            sort: '最多收藏',
+            timeRange: '一周内',
+            appliedFilters: [
+              { label: '图文', kind: 'content_type', source: 'url_parameter_adapter' },
+              { label: '最多收藏', kind: 'sort', source: 'dom_active_state' },
+              { label: '一周内', kind: 'time_range', source: 'dom_active_state' },
+            ],
+          },
           cards: [
             {
               rank: 1,
@@ -584,6 +596,15 @@ describe('MkeMemoryTraceService', () => {
         sourceRoute: 'visible_dom_cards_bounded_scroll',
         lifecycleState: 'complete',
         canTabrixOperate: true,
+      });
+      expect(page?.facts).toMatchObject({
+        filterState: {
+          status: 'observed',
+          appliedLabels: ['图文', '最多收藏', '一周内'],
+          contentType: '图文',
+          sort: '最多收藏',
+          timeRange: '一周内',
+        },
       });
       const cards = objects
         .filter((object) => object.objectType === 'result_card')

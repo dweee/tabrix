@@ -209,12 +209,19 @@ describe('MkeKnowledgeProjector', () => {
       objectType: 'result_card',
       lifecycleState: 'observed',
       canTabrixOperate: true,
-      actionTypes: ['open_via_url'],
+      actionTypes: ['click_result_card', 'open_via_url'],
       selectedDataSource: 'visible_dom_result_cards',
       sourceRoute: 'visible_dom_cards_bounded_scroll',
       sourceFreshness: 'fresh',
       sourceTraceIds: ['trace-cards'],
-      facts: { rank: 1, title: 'First result' },
+      facts: {
+        rank: 1,
+        title: 'First result',
+        actionTarget: {
+          selector: 'main > section:nth-of-type(1) > a:nth-of-type(2)',
+          center: { x: 100, y: 56 },
+        },
+      },
       confidenceScore: 0.86,
       updatedAt: '2026-06-06T06:00:02.000Z',
     });
@@ -227,12 +234,19 @@ describe('MkeKnowledgeProjector', () => {
       objectType: 'result_card',
       lifecycleState: 'observed',
       canTabrixOperate: true,
-      actionTypes: ['open_via_url'],
+      actionTypes: ['click_result_card', 'open_via_url'],
       selectedDataSource: 'visible_dom_result_cards',
       sourceRoute: 'visible_dom_cards_bounded_scroll',
       sourceFreshness: 'fresh',
       sourceTraceIds: ['trace-cards'],
-      facts: { rank: 2, title: 'Second result' },
+      facts: {
+        rank: 2,
+        title: 'Second result',
+        actionTarget: {
+          selector: 'main > section:nth-of-type(2) > a:nth-of-type(2)',
+          center: { x: 100, y: 56 },
+        },
+      },
       confidenceScore: 0.82,
       updatedAt: '2026-06-06T06:00:03.000Z',
     });
@@ -260,9 +274,10 @@ describe('MkeKnowledgeProjector', () => {
       },
     });
     expect(model.actionSurface).toMatchObject({
-      actionKindCounts: { open_via_url: 2 },
+      actionKindCounts: { click_result_card: 2, open_via_url: 2 },
       reusableActionKinds: ['open_via_url'],
-      resultCardActionKinds: { open_via_url: 2 },
+      sessionScopedActionKinds: { click_result_card: 2 },
+      resultCardActionKinds: { click_result_card: 2, open_via_url: 2 },
     });
     expect(model.dataSourceModel).toMatchObject({
       selectedDataSourceCounts: {

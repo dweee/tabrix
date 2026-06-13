@@ -661,6 +661,102 @@ describe('buildSearchSurface', () => {
     );
   });
 
+  it('treats out-of-band content type options as selected filter-panel options', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_tab_all',
+          role: 'tab',
+          name: '全部',
+          rect: { x: 196, y: 88, width: 64, height: 40 },
+        }),
+        interactive({
+          ref: 'ref_filter',
+          role: 'button',
+          name: '已筛选',
+          rect: { x: 1500, y: 96, width: 72, height: 36 },
+        }),
+        interactive({
+          ref: 'ref_panel_image_text',
+          role: 'button',
+          name: '图文',
+          checked: true,
+          rect: { x: 1480, y: 334, width: 64, height: 40 },
+        }),
+        interactive({
+          ref: 'ref_panel_video',
+          role: 'button',
+          name: '视频',
+          rect: { x: 1380, y: 334, width: 64, height: 40 },
+        }),
+        interactive({
+          ref: 'ref_text_filter_panel_sort',
+          role: 'button',
+          name: '最多收藏',
+          checked: true,
+          rect: { x: 1260, y: 248, width: 96, height: 40 },
+        }),
+        interactive({
+          ref: 'ref_text_filter_panel_week',
+          role: 'button',
+          name: '一周内',
+          checked: true,
+          rect: { x: 1480, y: 422, width: 96, height: 40 },
+        }),
+      ],
+      candidateActions: [
+        candidate({ id: 'ca_tab_all', targetRef: 'ref_tab_all', intent: 'search.category_select' }),
+        candidate({ id: 'ca_filter', targetRef: 'ref_filter', intent: 'filter.open' }),
+        candidate({ id: 'ca_panel_image_text', targetRef: 'ref_panel_image_text' }),
+        candidate({ id: 'ca_panel_video', targetRef: 'ref_panel_video' }),
+        candidate({
+          id: 'ca_sort',
+          targetRef: 'ref_text_filter_panel_sort',
+          intent: 'filter.sort_most_collected',
+        }),
+        candidate({ id: 'ca_week', targetRef: 'ref_text_filter_panel_week' }),
+      ],
+      visibleTextContent: [
+        '全部 已筛选',
+        '排序依据 综合 最新 最多点赞 最多评论 最多收藏',
+        '内容类型 不限 视频 图文',
+        '发布时间 不限 一天内 一周内 半年内',
+      ].join('\n'),
+    });
+
+    expect(surface?.categoryTabs?.map((control) => control.label)).toEqual(['全部']);
+    expect(surface?.categoryState).toMatchObject({
+      selectedLabels: [],
+      unresolvedLabels: [],
+    });
+    expect(surface?.filterPanel?.targetableOptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'filter_panel_option',
+          label: '图文',
+          targetRef: 'ref_panel_image_text',
+          state: expect.objectContaining({ selected: true }),
+        }),
+        expect.objectContaining({
+          kind: 'sort_most_collected',
+          label: '最多收藏',
+          targetRef: 'ref_text_filter_panel_sort',
+          state: expect.objectContaining({ selected: true }),
+        }),
+        expect.objectContaining({
+          kind: 'filter_panel_option',
+          label: '一周内',
+          targetRef: 'ref_text_filter_panel_week',
+          state: expect.objectContaining({ selected: true }),
+        }),
+      ]),
+    );
+    expect(surface?.filterPanel?.appliedFilterLabels).toEqual(
+      expect.arrayContaining(['图文', '最多收藏', '一周内']),
+    );
+  });
+
   it('reports result coverage as incomplete when more content or load-more is visible', () => {
     const rows = visibleRows();
     rows.pageInfo.pixelsBelow = 1600;

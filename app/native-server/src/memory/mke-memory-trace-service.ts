@@ -1162,6 +1162,7 @@ export class MkeMemoryTraceService {
     const cards = readArray(payload.cards);
     const observedResultCount = readNumber(payload.observedResultCount) ?? cards.length;
     const complete = readBoolean(payload.complete);
+    const filterState = readObject(payload.filterState);
 
     const pageObject = this.upsertBrowserObject({
       siteFamily,
@@ -1186,6 +1187,7 @@ export class MkeMemoryTraceService {
         requestedMinResults: readNumber(payload.requestedMinResults),
         complete,
         status: readString(payload.status),
+        filterState,
         source: 'result_card_collection',
       }),
       primaryConclusion:
