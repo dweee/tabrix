@@ -30,7 +30,7 @@ import {
   runTabrixChooseContextWithDirectApi,
   type TabrixChooseContextRouterTelemetry,
 } from './choose-context';
-import { createLivePageContextProvider } from './page-context-provider';
+import { createLivePageContextProvider, type PageSnapshotReader } from './page-context-provider';
 import type { SessionManager } from '../execution/session-manager';
 import type { TaskSessionContext } from '../execution/task-session-context';
 import type { ChooseContextDecisionSnapshot } from '../execution/skip-read-orchestrator';
@@ -43,6 +43,34 @@ function readAcceptanceApiFault(args: unknown): AcceptanceApiFault | null {
   if (!args || typeof args !== 'object' || Array.isArray(args)) return null;
   const value = (args as { __tabrixAcceptanceApiFault?: unknown }).__tabrixAcceptanceApiFault;
   return value === 'network_timeout' || value === 'semantic_mismatch' ? value : null;
+}
+
+function createTaskPageContextReader(
+  taskContext: TaskSessionContext | null,
+): PageSnapshotReader | null {
+  if (!taskContext) return null;
+  const toSnapshot = () => {
+    const measurement = taskContext.peekReadPageContextMeasurement();
+    if (!measurement || measurement.fullReadByteLength <= 0) return undefined;
+    return {
+      fullReadByteLength: measurement.fullReadByteLength,
+      candidateActionCount: measurement.candidateActionsCount,
+      highValueObjectCount: measurement.highValueObjectCount,
+      pageRole: measurement.pageRole,
+    };
+  };
+  return {
+    findLatestForUrl(url: string) {
+      const measurement = taskContext.peekReadPageContextMeasurement();
+      if (!measurement || measurement.url !== url) return undefined;
+      return toSnapshot();
+    },
+    findLatestForPageRole(pageRole: string) {
+      const measurement = taskContext.peekReadPageContextMeasurement();
+      if (!measurement || measurement.pageRole !== pageRole) return undefined;
+      return toSnapshot();
+    },
+  };
 }
 
 export interface NativeToolHandlerDeps {
@@ -226,7 +254,9 @@ const handleTabrixChooseContext: NativeToolHandler = async (args, deps) => {
   // The old `memory_page_snapshots` table is retired. Until chooser context is
   // backed by Object Library live facts, surface an explicit fallback-zero
   // input instead of reading stale snapshot rows.
-  const pageContext = createLivePageContextProvider(null);
+  const pageContext = createLivePageContextProvider(
+    createTaskPageContextReader(deps.taskContext ?? null),
+  );
   // Wrap the synchronous chooser with the direct-api-executor so a
   // high-confidence read-only `knowledge_supported_read` route may
   // execute the API inline (compact rows arrive on

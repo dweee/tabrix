@@ -19,6 +19,7 @@ import {
 import type { ChooseContextTelemetryRepository } from '../memory/telemetry/choose-context-telemetry';
 import type { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
 import type { KnowledgeApiEndpoint } from '../memory/knowledge/knowledge-api-repository';
+import type { ExperienceRecipe } from '../memory/db';
 import { logger } from '../logging/logger';
 
 function fakeEndpoint(overrides: Partial<KnowledgeApiEndpoint> = {}): KnowledgeApiEndpoint {
@@ -461,6 +462,70 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
     // fullRead/chosen estimates, so a non-zero value here is only
     // possible when the dispatcher itself decided to skip a layer.
     expect(recorded.tokensSavedEstimate).toBeGreaterThanOrEqual(0);
+  });
+
+  it('estimates Experience recipe payload cost and real savings when full-page size is known', () => {
+    const tele = fakeTelemetry();
+    const recipe = {
+      experienceId: 'exp-xhs-top10',
+      taskSignature: 'tools:chrome_collect_result_cards',
+      successCount: 2,
+      failureCount: 0,
+      reliabilityScore: 1,
+      successCheck: {
+        collectResultCards: [
+          {
+            observedResultCountAtLeast: 10,
+            filterState: {
+              sort: '最多收藏',
+              contentType: '图文',
+              timeRange: '一周内',
+            },
+          },
+        ],
+      },
+    } as unknown as ExperienceRecipe;
+
+    const result = runTabrixChooseContext(
+      {
+        intent: '小红书搜索AI图片创作，筛选最多收藏、图文、一周内，并汇报前10条图文内容',
+        url: 'https://www.xiaohongshu.com/search_result/?keyword=AI图片创作&type=51',
+        pageRole: 'search_results',
+      },
+      {
+        knowledgeApi: null,
+        telemetry: tele.repo,
+        newDecisionId: () => 'dc-exp-token-cost',
+        now: () => '2026-06-14T10:00:00.000Z',
+        experienceRecipes: {
+          findReusableByContext: () => [recipe],
+        },
+        pageContext: {
+          getContext: () => ({
+            source: 'live_snapshot',
+            candidateActionsCount: 10,
+            hvoCount: 10,
+            fullReadByteLength: 40_000,
+            pageRole: 'search_results',
+          }),
+        },
+      },
+    );
+
+    expect(result.status).toBe('ok');
+    expect(result.strategy).toBe('experience_reuse');
+    expect(result.tokenEstimateChosen).toBeGreaterThan(0);
+    expect(result.tokenEstimateFullRead).toBe(10_000);
+    expect(result.tokensSavedEstimate).toBe(
+      (result.tokenEstimateFullRead ?? 0) - (result.tokenEstimateChosen ?? 0),
+    );
+    expect(result.tokensSavedEstimate).toBeGreaterThan(9_000);
+
+    const recorded = tele.decisions[0];
+    expect(recorded.tokenEstimateChosen).toBe(result.tokenEstimateChosen);
+    expect(recorded.tokenEstimateFullRead).toBe(10_000);
+    expect(recorded.tokensSavedEstimate).toBe(result.tokensSavedEstimate);
+    expect(recorded.sourceRoute).toBe('experience_reuse');
   });
 
   it('records dispatcherInputSource=fallback_zero with cause when no snapshot is available', () => {

@@ -70,6 +70,7 @@ export interface PageContextProvider {
 }
 
 export interface PageSnapshotLike {
+  fullReadByteLength?: number | null;
   protocolL0Blob?: string | null;
   protocolL1Blob?: string | null;
   protocolL2Blob?: string | null;
@@ -120,6 +121,13 @@ const FALLBACK_ZERO = (
  * own heuristic.
  */
 function estimateFullReadByteLength(snap: PageSnapshotLike): number {
+  if (
+    typeof snap.fullReadByteLength === 'number' &&
+    Number.isFinite(snap.fullReadByteLength) &&
+    snap.fullReadByteLength > 0
+  ) {
+    return Math.floor(snap.fullReadByteLength);
+  }
   let total = 0;
   for (const blob of [snap.protocolL0Blob, snap.protocolL1Blob, snap.protocolL2Blob]) {
     if (typeof blob === 'string') total += blob.length;

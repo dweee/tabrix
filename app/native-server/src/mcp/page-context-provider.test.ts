@@ -19,11 +19,12 @@
 import {
   LivePageContextProvider,
   createLivePageContextProvider,
+  type PageSnapshotLike,
   type PageSnapshotReader,
 } from './page-context-provider';
 import type { PageSnapshot } from '../memory/db/page-snapshot-repository';
 
-function makeSnap(overrides: Partial<PageSnapshot> = {}): PageSnapshot {
+function makeSnap(overrides: Partial<PageSnapshot & PageSnapshotLike> = {}): PageSnapshotLike {
   return {
     snapshotId: 'snap-1',
     stepId: 'step-1',
@@ -78,6 +79,25 @@ describe('LivePageContextProvider — lookup order', () => {
     expect(result.pageRole).toBe('github_issues_list');
     expect(result.fullReadByteLength).toBe(40 + 60 + 100);
     expect(result.fallbackCause).toBeUndefined();
+  });
+
+  test('uses measured fullReadByteLength before protocol blob lengths', () => {
+    const snap = makeSnap({
+      fullReadByteLength: 40_000,
+      protocolL0Blob: 'a'.repeat(1),
+      protocolL1Blob: 'b'.repeat(1),
+      protocolL2Blob: 'c'.repeat(1),
+    });
+    const provider = new LivePageContextProvider({
+      reader: makeReader({
+        findLatestForUrl: (url) => (url === 'https://example.com/issues' ? snap : undefined),
+      }),
+    });
+
+    const result = provider.getContext({ url: 'https://example.com/issues' });
+
+    expect(result.source).toBe('live_snapshot');
+    expect(result.fullReadByteLength).toBe(40_000);
   });
 
   test('falls back to memory_snapshot when only pageRole matches', () => {

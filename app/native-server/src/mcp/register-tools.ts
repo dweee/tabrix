@@ -28,6 +28,7 @@ import type {
   TaskAuthResumeGate,
   TaskPageInteractionSnapshot,
   TaskPageRuntimeFields,
+  TaskReadPageContextMeasurement,
   TaskSessionContext,
   TaskVisibleRegionRowsData,
 } from '../execution/task-session-context';
@@ -1025,6 +1026,10 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           source,
           requestKey: readPageRequestKey,
           targetRefs,
+          contextMeasurement: buildReadPageContextMeasurement(
+            readJsonObjectFromCallToolResult(postResult.rawResult),
+            requestedLayer,
+          ),
         });
         readPageRecorded = true;
       };
@@ -2027,6 +2032,32 @@ function readJsonObjectFromCallToolResult(result: CallToolResult): Record<string
   } catch {
     return null;
   }
+}
+
+function buildReadPageContextMeasurement(
+  payload: Record<string, unknown> | null,
+  requestedLayer: ReadPageRequestedLayer,
+): TaskReadPageContextMeasurement | null {
+  if (!payload || requestedLayer !== 'L0+L1+L2') return null;
+  let fullReadByteLength = 0;
+  try {
+    fullReadByteLength = JSON.stringify(payload).length;
+  } catch {
+    return null;
+  }
+  if (!Number.isFinite(fullReadByteLength) || fullReadByteLength <= 0) return null;
+
+  const page = readObject(payload.page);
+  const summary = readObject(payload.summary);
+  const candidateActions = Array.isArray(payload.candidateActions) ? payload.candidateActions : [];
+  const highValueObjects = Array.isArray(payload.highValueObjects) ? payload.highValueObjects : [];
+  return {
+    url: readString(page?.url) ?? readString(payload.url) ?? readString(payload.pageUrl),
+    pageRole: readString(summary?.pageRole) ?? readString(payload.pageRole),
+    fullReadByteLength,
+    candidateActionsCount: candidateActions.length,
+    highValueObjectCount: highValueObjects.length,
+  };
 }
 
 function evaluateReadPageTargetBinding(

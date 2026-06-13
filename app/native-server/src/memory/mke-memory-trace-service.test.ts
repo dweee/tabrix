@@ -653,6 +653,124 @@ describe('MkeMemoryTraceService', () => {
     }
   });
 
+  it('keeps collected filter state when a later full page read refreshes the same page object', async () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const browserObjectRepo = new BrowserObjectRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo, browserObjectRepo);
+
+    try {
+      traceService.recordToolCall({
+        taskId: 'trace-filter-preserve-task',
+        taskIntent: 'collect filtered xhs cards',
+        aiClient: 'jest',
+        toolName: 'chrome_collect_result_cards',
+        stepId: 'trace-filter-preserve-step-1',
+        sequenceIndex: 1,
+        requestParams: { tabId: 29, minResults: 10 },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 120,
+        result: textResult({
+          success: true,
+          kind: 'result_card_collection',
+          page: {
+            title: 'AI图片创作 - 小红书',
+            url: 'https://www.xiaohongshu.com/search_result?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
+          },
+          pageRole: 'search_results',
+          pageState: 'complete',
+          sourceRoute: 'visible_dom_cards_bounded_scroll',
+          selectedDataSource: 'visible_dom_result_cards',
+          freshness: 'fresh',
+          tabId: 29,
+          requestedMinResults: 10,
+          observedResultCount: 10,
+          complete: true,
+          status: 'complete_enough',
+          filterState: {
+            status: 'observed',
+            appliedLabels: ['图文', '最多收藏', '一周内'],
+            contentType: '图文',
+            sort: '最多收藏',
+            timeRange: '一周内',
+          },
+          cards: [
+            {
+              rank: 1,
+              title: '小红书图文结果',
+              url: 'https://www.xiaohongshu.com/explore/abc',
+              imageCount: 1,
+              confidence: 0.8,
+            },
+          ],
+        }),
+        resultSummary: 'collected xhs result cards',
+      });
+
+      await traceService.flushAsyncWrites();
+
+      traceService.recordToolCall({
+        taskId: 'trace-filter-preserve-task',
+        taskIntent: 'measure full page baseline',
+        aiClient: 'jest',
+        toolName: 'chrome_read_page',
+        stepId: 'trace-filter-preserve-step-2',
+        sequenceIndex: 2,
+        requestParams: { tabId: 29, requestedLayer: 'L0+L1+L2' },
+        requestAtMs: NOW_MS + 200,
+        responseAtMs: NOW_MS + 420,
+        result: textResult({
+          page: {
+            title: 'AI图片创作 - 小红书',
+            url: 'https://www.xiaohongshu.com/search_result?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
+          },
+          summary: { pageRole: 'search_results', quality: 'fresh' },
+          pageProjection: {
+            pageRole: 'search_results',
+            pageModelKey: 'page:www.xiaohongshu.com:search_results',
+            chosenDataSource: 'markdown',
+            tabId: 29,
+          },
+          browserPageObjectCompact: {
+            status: 'complete',
+            watchStatus: 'stable',
+            operationSummary: { visibleText: true },
+          },
+          sourceRoute: 'markdown_snapshot',
+          selectedDataSource: 'markdown',
+          freshness: 'fresh',
+          tabId: 29,
+        }),
+        resultSummary: 'full page read baseline',
+      });
+
+      await traceService.flushAsyncWrites();
+
+      const page = browserObjectRepo
+        .listRecent({ limit: 10, offset: 0 })
+        .find((object) => object.objectType === 'page');
+
+      expect(page?.facts).toMatchObject({
+        filterState: {
+          contentType: '图文',
+          sort: '最多收藏',
+          timeRange: '一周内',
+        },
+        observedResultCount: 10,
+        requestedMinResults: 10,
+        complete: true,
+        lastCollectionSource: 'result_card_collection',
+      });
+      expect(page).toMatchObject({
+        selectedDataSource: 'markdown',
+        sourceRoute: 'markdown_snapshot',
+      });
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
   it('rolls back read_page Browser Object writes when a child object write fails', async () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const traceRepo = new MemoryTraceRepository(db);

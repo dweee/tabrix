@@ -174,6 +174,54 @@ describe('TaskSessionContext — budget enforcement', () => {
   });
 });
 
+describe('TaskSessionContext — read-page context measurement', () => {
+  it('stores a redacted full-read context measurement and returns a defensive copy', () => {
+    const ctx = new TaskSessionContext();
+    ctx.noteReadPage({
+      layer: 'L0+L1+L2',
+      source: 'dom_json',
+      contextMeasurement: {
+        url: 'https://www.xiaohongshu.com/search_result/?keyword=AI图片创作&type=51',
+        pageRole: 'search_results',
+        fullReadByteLength: 40_000.7,
+        candidateActionsCount: 10,
+        highValueObjectCount: 8,
+      },
+    });
+
+    const first = ctx.peekReadPageContextMeasurement();
+    expect(first).toEqual({
+      url: 'https://www.xiaohongshu.com/search_result/?keyword=AI图片创作&type=51',
+      pageRole: 'search_results',
+      fullReadByteLength: 40_000,
+      candidateActionsCount: 10,
+      highValueObjectCount: 8,
+    });
+
+    first!.fullReadByteLength = 1;
+    expect(ctx.peekReadPageContextMeasurement()?.fullReadByteLength).toBe(40_000);
+  });
+
+  it('clears read-page context measurement when page identity changes', () => {
+    const ctx = new TaskSessionContext();
+    ctx.noteReadPage({
+      layer: 'L0+L1+L2',
+      source: 'dom_json',
+      contextMeasurement: {
+        url: 'https://example.test/a',
+        pageRole: 'search_results',
+        fullReadByteLength: 40_000,
+        candidateActionsCount: 10,
+        highValueObjectCount: 8,
+      },
+    });
+
+    ctx.noteUrlChange('https://example.test/b', 'search_results');
+
+    expect(ctx.peekReadPageContextMeasurement()).toBeNull();
+  });
+});
+
 describe('TaskSessionContext — redundancy + layer demotion', () => {
   it('flags a same-layer same-page repeat as read_redundant (still allowed)', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });

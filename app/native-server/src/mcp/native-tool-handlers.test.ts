@@ -4,6 +4,7 @@ import { getNativeToolHandler } from './native-tool-handlers';
 import type { NativeToolHandler, NativeToolHandlerDeps } from './native-tool-handlers';
 import type { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
 import { MkeAiFeedbackValidationError } from '../memory/mke-memory-trace-service';
+import type { TaskSessionContext } from '../execution/task-session-context';
 
 function callTextPayload(result: CallToolResult): any {
   const text = String(result.content?.[0]?.text ?? '');
@@ -318,6 +319,64 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
       pageRole: 'search_results',
       limit: 1,
     });
+  });
+
+  it('uses task read_page baseline to record positive savings for Experience reuse', async () => {
+    const handler = getChooseHandler();
+    const findReusableMkeExperienceRecipes = jest.fn().mockReturnValue([
+      {
+        experienceId: 'exp-xhs-top10',
+        taskSignature: 'tools:chrome_collect_result_cards',
+        successCount: 2,
+        failureCount: 0,
+        reliabilityScore: 1,
+        successCheck: {
+          collectResultCards: [
+            {
+              observedResultCountAtLeast: 10,
+              filterState: {
+                sort: '最多收藏',
+                contentType: '图文',
+                timeRange: '一周内',
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const result = await handler(
+      {
+        intent: '小红书搜索AI图片创作，筛选最多收藏、图文、一周内，并汇报前10条图文内容',
+        url: 'https://www.xiaohongshu.com/search_result/?keyword=AI图片创作&type=51',
+        pageRole: 'search_results',
+      },
+      {
+        ...makeDeps({
+          findReusableMkeExperienceRecipes,
+        }),
+        taskContext: {
+          peekReadPageContextMeasurement: () => ({
+            url: 'https://www.xiaohongshu.com/search_result/?keyword=AI图片创作&type=51',
+            pageRole: 'search_results',
+            fullReadByteLength: 40_000,
+            candidateActionsCount: 10,
+            highValueObjectCount: 10,
+          }),
+          peekVisibleRegionRowsEvidence: () => null,
+          noteUrlChange: jest.fn(),
+          noteChooseContextDecision: jest.fn(),
+        } as unknown as TaskSessionContext,
+      },
+    );
+
+    expect(result.isError).toBe(false);
+    const body = callTextPayload(result);
+    expect(body.strategy).toBe('experience_reuse');
+    expect(body.tokenEstimateChosen).toBeGreaterThan(0);
+    expect(body.tokenEstimateFullRead).toBe(10_000);
+    expect(body.tokensSavedEstimate).toBeGreaterThan(9_000);
+    expect(body.dispatcherInputSource).toBe('live_snapshot');
   });
 
   it('disables chooser-inline direct API when private acceptance fault injection is present', async () => {

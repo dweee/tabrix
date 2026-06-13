@@ -81,11 +81,21 @@ function isPositionalSelector(selector: string | null): boolean {
 }
 
 function isSessionScopedAction(object: BrowserObject, actionType: string): boolean {
-  if (actionType !== 'click_result_card') return false;
   const facts = readObject(object.facts);
   const targetability = readObject(object.targetability);
   const actionTarget = readObject(facts?.actionTarget) ?? readObject(targetability?.actionTarget);
   const selector = typeof actionTarget?.selector === 'string' ? actionTarget.selector : null;
+  if (actionType === 'click' && object.objectType === 'action_target') {
+    const targetRef = typeof targetability?.targetRef === 'string' ? targetability.targetRef : null;
+    return Boolean(
+      targetRef ||
+      isPositionalSelector(selector) ||
+      readObject(actionTarget?.center) ||
+      readObject(actionTarget?.rect) ||
+      targetability?.rect,
+    );
+  }
+  if (actionType !== 'click_result_card') return false;
   return Boolean(
     isPositionalSelector(selector) ||
     readObject(actionTarget?.center) ||

@@ -344,6 +344,30 @@ function readArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+function mergeReadPageFactsWithExistingCollectionFacts(
+  readPageFacts: Record<string, unknown>,
+  existingFactsValue: unknown,
+): Record<string, unknown> {
+  const existingFacts = readObject(existingFactsValue);
+  if (!existingFacts) return readPageFacts;
+  const merged: Record<string, unknown> = { ...readPageFacts };
+  const preservedKeys = [
+    'filterState',
+    'observedResultCount',
+    'requestedMinResults',
+    'complete',
+    'status',
+  ];
+  for (const key of preservedKeys) {
+    if (merged[key] === undefined && existingFacts[key] !== undefined) {
+      merged[key] = existingFacts[key];
+    }
+  }
+  const source = readString(existingFacts.source);
+  if (source) merged.lastCollectionSource = source;
+  return merged;
+}
+
 function readBusinessVerdictString(...values: unknown[]): BusinessSuccessVerdict | null {
   for (const value of values) {
     if (typeof value !== 'string') continue;
@@ -1075,6 +1099,21 @@ export class MkeMemoryTraceService {
     const pageModelKey =
       readString(projection?.pageModelKey, trace.pageModelKey) ?? `page:${siteFamily}:${pageRole}`;
     const tabId = readNumber(projection?.tabId, payload.tabId, trace.tabId);
+    const pageFingerprint = objectFingerprint('page', siteFamily, pageModelKey, tabId);
+    const existingPageObject = this.browserObjects?.getByIdentity({
+      siteFamily,
+      pageModelKey,
+      objectFingerprint: pageFingerprint,
+    });
+    const pageFacts = mergeReadPageFactsWithExistingCollectionFacts(
+      {
+        readiness: projection?.readiness,
+        stability: projection?.stability,
+        watchStatus: compact?.watchStatus,
+        operationSummary: readNestedObject(compact, 'operationSummary'),
+      },
+      existingPageObject?.facts,
+    );
 
     this.upsertBrowserObject({
       siteFamily,
@@ -1083,7 +1122,7 @@ export class MkeMemoryTraceService {
       currentRoute: urlFields.currentRoute,
       pageRole,
       pageModelKey,
-      objectFingerprint: objectFingerprint('page', siteFamily, pageModelKey, tabId),
+      objectFingerprint: pageFingerprint,
       objectType: 'page',
       browserContextKey: browserContextKey ?? trace.browserContextKey ?? null,
       tabId,
@@ -1101,15 +1140,7 @@ export class MkeMemoryTraceService {
       sourceFreshness: readString(projection?.sourceFreshness, payload.freshness, trace.freshness),
       lifecycleState: readString(compact?.status, 'updated'),
       canTabrixOperate: true,
-      facts: sanitizeValue(
-        {
-          readiness: projection?.readiness,
-          stability: projection?.stability,
-          watchStatus: compact?.watchStatus,
-          operationSummary: readNestedObject(compact, 'operationSummary'),
-        },
-        'browser_object',
-      ),
+      facts: sanitizeValue(pageFacts, 'browser_object'),
       changedGroups: sanitizeValue(compact?.changedGroups, 'browser_object'),
       primaryConclusion: readString(compact?.primaryConclusion),
       claimBoundary: null,

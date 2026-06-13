@@ -335,6 +335,19 @@ export interface NoteReadPageInput {
    * Same idea as `targetRefs` but for the Knowledge layer.
    */
   apiFamilies?: ReadonlyArray<string> | null;
+  /**
+   * Redacted size/shape baseline from a successful full-layer read. Used only
+   * for later token-savings estimates; never stores page text.
+   */
+  contextMeasurement?: TaskReadPageContextMeasurement | null;
+}
+
+export interface TaskReadPageContextMeasurement {
+  url: string | null;
+  pageRole: string | null;
+  fullReadByteLength: number;
+  candidateActionsCount: number;
+  highValueObjectCount: number;
 }
 
 export interface NotePageInteractionInput {
@@ -699,6 +712,8 @@ export class TaskSessionContext {
    */
   public readonly apiEndpointFamiliesSeen = new Set<string>();
 
+  private lastReadPageContextMeasurement: TaskReadPageContextMeasurement | null = null;
+
   /**
    * Number of reads this task has actually executed (includes
    * redundant reads — they cost the bridge a round-trip even when
@@ -791,6 +806,7 @@ export class TaskSessionContext {
       this.lastReadLayer = null;
       this.lastReadRequestKey = null;
       this.lastReadSource = null;
+      this.lastReadPageContextMeasurement = null;
       this.targetRefsSeen.clear();
       this.lastObjectLifecycle = null;
       this.lastAuthResumeGate = null;
@@ -1591,12 +1607,40 @@ export class TaskSessionContext {
           this.apiEndpointFamiliesSeen.add(family);
       }
     }
+    if (input.contextMeasurement) {
+      this.lastReadPageContextMeasurement = {
+        url: input.contextMeasurement.url,
+        pageRole: input.contextMeasurement.pageRole,
+        fullReadByteLength: Math.max(0, Math.floor(input.contextMeasurement.fullReadByteLength)),
+        candidateActionsCount: Math.max(
+          0,
+          Math.floor(input.contextMeasurement.candidateActionsCount),
+        ),
+        highValueObjectCount: Math.max(
+          0,
+          Math.floor(input.contextMeasurement.highValueObjectCount),
+        ),
+      };
+    }
+  }
+
+  public peekReadPageContextMeasurement(): TaskReadPageContextMeasurement | null {
+    return this.lastReadPageContextMeasurement
+      ? {
+          url: this.lastReadPageContextMeasurement.url,
+          pageRole: this.lastReadPageContextMeasurement.pageRole,
+          fullReadByteLength: this.lastReadPageContextMeasurement.fullReadByteLength,
+          candidateActionsCount: this.lastReadPageContextMeasurement.candidateActionsCount,
+          highValueObjectCount: this.lastReadPageContextMeasurement.highValueObjectCount,
+        }
+      : null;
   }
 
   public notePageInteraction(input: NotePageInteractionInput): void {
     this.lastReadLayer = null;
     this.lastReadRequestKey = null;
     this.lastReadSource = null;
+    this.lastReadPageContextMeasurement = null;
     this.targetRefsSeen.clear();
     this._chooseContextDecision = null;
     this.liveObservedApiData.length = 0;

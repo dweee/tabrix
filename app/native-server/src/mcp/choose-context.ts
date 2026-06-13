@@ -104,6 +104,15 @@ function readObject(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function estimateTokensFromJsonEnvelope(value: unknown): number {
+  try {
+    const bytes = JSON.stringify(value)?.length ?? 0;
+    return bytes > 0 ? Math.ceil(bytes / 4) : 0;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * Internal: return the parsed value plus the resolved
  * `intentSignature`. Kept as a private struct because the upstream
@@ -606,10 +615,14 @@ export function runTabrixChooseContext(
     safetyRequiresFullLayers: false,
     fullReadByteLength: dispatcherInputs?.fullReadByteLength ?? 0,
   });
-  const tokensSavedEstimate = Math.max(
-    0,
-    layerDispatch.fullReadTokenEstimate - layerDispatch.tokenEstimate,
-  );
+  const experienceTokenEstimate =
+    decision.strategy === 'experience_reuse'
+      ? estimateTokensFromJsonEnvelope(decision.artifacts)
+      : null;
+  const tokenEstimateChosen = experienceTokenEstimate ?? layerDispatch.tokenEstimate;
+  const tokenEstimateFullRead = layerDispatch.fullReadTokenEstimate;
+  const tokensSavedEstimate =
+    tokenEstimateFullRead > 0 ? Math.max(0, tokenEstimateFullRead - tokenEstimateChosen) : 0;
   const effectiveSourceRoute =
     decision.strategy === 'experience_reuse' ? 'experience_reuse' : layerDispatch.sourceRoute;
   const domRegionRowsEvidence = deps.domRegionRowsEvidence ?? null;
@@ -618,8 +631,8 @@ export function runTabrixChooseContext(
     sourceRoute: effectiveSourceRoute,
     chosenLayer: layerDispatch.chosenLayer,
     layerDispatchReason: layerDispatch.reason,
-    tokenEstimateChosen: layerDispatch.tokenEstimate,
-    tokenEstimateFullRead: layerDispatch.fullReadTokenEstimate,
+    tokenEstimateChosen,
+    tokenEstimateFullRead,
     tokensSavedEstimate,
     apiCandidateAvailable: !!apiCandidate,
     dispatcherInputSource: dispatcherInputs?.source ?? null,
@@ -694,8 +707,8 @@ export function runTabrixChooseContext(
         layerDispatchReason: layerDispatch.reason,
         sourceRoute: effectiveSourceRoute,
         fallbackCause: layerDispatch.fallbackCause ?? null,
-        tokenEstimateChosen: layerDispatch.tokenEstimate,
-        tokenEstimateFullRead: layerDispatch.fullReadTokenEstimate,
+        tokenEstimateChosen,
+        tokenEstimateFullRead,
         tokensSavedEstimate,
         knowledgeEndpointFamily,
         // Honest dispatcher input source. `null` when no `pageContext`
@@ -735,8 +748,8 @@ export function runTabrixChooseContext(
     layerDispatchReason: layerDispatch.reason,
     sourceRoute: effectiveSourceRoute,
     fallbackCause: layerDispatch.fallbackCause ?? undefined,
-    tokenEstimateChosen: layerDispatch.tokenEstimate,
-    tokenEstimateFullRead: layerDispatch.fullReadTokenEstimate,
+    tokenEstimateChosen,
+    tokenEstimateFullRead,
     tokensSavedEstimate,
     // Observe-mode advisory (closed enum). Always present on
     // `status: 'ok'` so post-mortems can tally
