@@ -853,7 +853,7 @@ function shouldSampleVisibleText(input: {
   if (input.focusRefId) return false;
   if (input.mode === 'full') return true;
   if (input.pageRole === 'publish_form') return true;
-  if (shouldRecoverSearchToolbarTargets(input.assistantGuidance)) return true;
+  if (shouldRecoverSearchToolbarTargets(input.assistantGuidance, input.pageRole)) return true;
   if (!input.userControlled) return true;
   if (input.rows.visibleRegionRowsUsed) return false;
   if (input.pageRole === 'search_results') return true;
@@ -961,11 +961,12 @@ function isCompactFilterPanelFallbackElement(element: any): boolean {
 function shouldRecoverFilterPanelTargets(
   assistantGuidance: ReadPageAssistantGuidance | undefined,
   visibleTextContent: unknown,
+  pageRole?: string,
 ): boolean {
   const text = String(visibleTextContent || '').replace(/\s+/g, ' ');
   const filterPanelLabels = extractFilterPanelLabelsFromVisibleText(text);
   if (filterPanelLabels.length < 2) return false;
-  if (shouldRecoverSearchToolbarTargets(assistantGuidance)) return true;
+  if (shouldRecoverSearchToolbarTargets(assistantGuidance, pageRole)) return true;
   const toolbarLabels = extractSearchToolbarLabelsFromVisibleText(text);
   return toolbarLabels.some((label) =>
     /^(筛选|已筛选|过滤|filter|filters|filtered|排序|sort)$/i.test(label),
@@ -999,7 +1000,9 @@ function extractVisibleMenuActionLabelsForTargetRecovery(visibleTextContent: unk
 
 function shouldRecoverSearchToolbarTargets(
   assistantGuidance: ReadPageAssistantGuidance | undefined,
+  pageRole?: string,
 ): boolean {
+  if (pageRole === 'search_results') return true;
   if (assistantGuidance?.taskKind === 'search') return true;
   return (assistantGuidance?.requestedObjects ?? []).some((item) =>
     ['search_input', 'result_cards', 'detail_metrics'].includes(item),
@@ -2436,7 +2439,9 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     assistantGuidance?: ReadPageAssistantGuidance;
     frameId?: number;
   }): Promise<boolean> {
-    if (!shouldRecoverSearchToolbarTargets(params.assistantGuidance)) return false;
+    if (!shouldRecoverSearchToolbarTargets(params.assistantGuidance, params.basePayload.pageRole)) {
+      return false;
+    }
     const labels = extractSearchToolbarLabelsFromVisibleText(params.basePayload.visibleTextContent)
       .filter((label) => label.length <= 18)
       .slice(0, 12);
@@ -2533,6 +2538,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       !shouldRecoverFilterPanelTargets(
         params.assistantGuidance,
         params.basePayload.visibleTextContent,
+        params.basePayload.pageRole,
       )
     ) {
       return false;

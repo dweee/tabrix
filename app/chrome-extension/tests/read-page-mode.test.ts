@@ -1293,6 +1293,73 @@ describe('read_page mode', () => {
     );
   });
 
+  it('recovers search toolbar targets on search result pages without assistant guidance', async () => {
+    vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
+      { result: { bound: 2 } },
+    ] as any);
+    vi.spyOn(readPageTool as any, 'collectInteractiveElementsFallback').mockImplementation(
+      async (_tabId: number, options: { textQuery?: string }) => {
+        const selectors: Record<string, string> = {
+          图文: 'body > main > div.search-layout__top > div#channel-container > div > div#image',
+          筛选: 'body > main > div.search-layout__top > div.filter > span',
+        };
+        const selector = options.textQuery ? selectors[options.textQuery] : undefined;
+        return {
+          success: true,
+          elements: selector
+            ? [
+                {
+                  type: 'text_action',
+                  role: 'button',
+                  selector,
+                  text: options.textQuery,
+                  isInteractive: true,
+                  actionability: 'actionable',
+                  coordinates: {
+                    x: 320,
+                    y: 88,
+                    rect: { x: 288, y: 72, width: 64, height: 32 },
+                  },
+                },
+              ]
+            : [],
+        };
+      },
+    );
+    const basePayload: any = {
+      pageRole: 'search_results',
+      visibleTextContent: '全部 图文 视频 用户\n筛选',
+      elements: [],
+      refMap: [],
+      count: 0,
+    };
+
+    const recovered = await (readPageTool as any).recoverSearchToolbarTextTargets({
+      tabId: 5224,
+      basePayload,
+    });
+
+    expect(recovered).toBe(true);
+    expect(basePayload.elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ref: expect.stringMatching(/^ref_text_search_toolbar_/),
+          selector:
+            'body > main > div.search-layout__top > div#channel-container > div > div#image',
+          text: '图文',
+          role: 'button',
+        }),
+        expect.objectContaining({
+          ref: expect.stringMatching(/^ref_text_search_toolbar_/),
+          selector: 'body > main > div.search-layout__top > div.filter > span',
+          text: '筛选',
+          role: 'button',
+        }),
+      ]),
+    );
+    expect(basePayload.fallbackSource).toBe('search_toolbar_target_recovery');
+  });
+
   it('recovers locator-backed target refs for dynamic filter panel labels', async () => {
     const bindScript = vi
       .spyOn(chrome.scripting, 'executeScript')
