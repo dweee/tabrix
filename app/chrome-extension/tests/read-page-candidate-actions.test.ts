@@ -411,12 +411,12 @@ describe('read_page candidate action intents', () => {
     });
     expect(actions.find((action) => action.targetRef === 'ref_text_filter_panel_2')).toMatchObject({
       actionType: 'click',
-      intent: 'filter.open',
+      intent: 'filter.time_range_select',
       locatorChain: expect.arrayContaining([{ type: 'css', value: '.filter-panel .tag-one-day' }]),
     });
     expect(actions.find((action) => action.targetRef === 'ref_text_filter_panel_3')).toMatchObject({
       actionType: 'click',
-      intent: 'filter.open',
+      intent: 'filter.option_select',
       locatorChain: expect.arrayContaining([{ type: 'css', value: '.filter-panel .tag-unseen' }]),
     });
   });

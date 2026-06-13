@@ -62,7 +62,9 @@ const CLICK_HELPER_FAST_RESPONSE_TIMEOUT_CAP_MS = 15000;
 const CLICK_HELPER_NAVIGATION_RESPONSE_TIMEOUT_CAP_MS = 14000;
 const LIGHTWEIGHT_POST_ACTION_INTENTS = new Set([
   'filter.open',
+  'filter.option_select',
   'filter.sort_most_collected',
+  'filter.time_range_select',
   'search.category_select',
   'auth.refresh_qr',
 ]);

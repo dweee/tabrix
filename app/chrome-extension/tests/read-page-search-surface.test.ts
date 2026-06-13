@@ -646,6 +646,7 @@ describe('buildSearchSurface', () => {
         candidate({
           id: 'ca_click_ref_text_filter_panel_2',
           targetRef: 'ref_text_filter_panel_2',
+          intent: 'filter.time_range_select',
           locatorChain: [
             { type: 'ref', value: 'ref_text_filter_panel_2' },
             { type: 'aria', value: '一天内' },
@@ -655,6 +656,7 @@ describe('buildSearchSurface', () => {
         candidate({
           id: 'ca_click_ref_text_filter_panel_3',
           targetRef: 'ref_text_filter_panel_3',
+          intent: 'filter.option_select',
           locatorChain: [
             { type: 'ref', value: 'ref_text_filter_panel_3' },
             { type: 'aria', value: '未看过' },
@@ -693,6 +695,45 @@ describe('buildSearchSurface', () => {
           targetRef: 'ref_text_filter_panel_3',
           candidateActionId: 'ca_click_ref_text_filter_panel_3',
           source: 'text_recovery',
+        }),
+      ]),
+    );
+  });
+
+  it('does not treat filter-panel options as toolbar filter-open controls', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({ ref: 'ref_text_filter_panel_1', role: 'button', name: '综合' }),
+      ],
+      candidateActions: [
+        candidate({
+          id: 'ca_click_ref_text_filter_panel_1',
+          targetRef: 'ref_text_filter_panel_1',
+          intent: 'filter.open',
+          locatorChain: [
+            { type: 'ref', value: 'ref_text_filter_panel_1' },
+            { type: 'aria', value: '综合' },
+            { type: 'css', value: '.filter-panel .sort-default' },
+          ],
+        }),
+      ],
+      visibleTextContent: ['排序依据', '综合 最新 最多收藏'].join('\n'),
+    });
+
+    expect(surface?.controls ?? []).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'filter_trigger',
+          candidateActionId: 'ca_click_ref_text_filter_panel_1',
+        }),
+      ]),
+    );
+    expect(surface?.filterPanel?.targetableOptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: '综合',
+          candidateActionId: 'ca_click_ref_text_filter_panel_1',
         }),
       ]),
     );

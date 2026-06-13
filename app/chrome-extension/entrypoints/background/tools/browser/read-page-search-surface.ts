@@ -279,6 +279,18 @@ function findControlAction(
   return candidateActions.find((action) => action.intent === intent);
 }
 
+function findToolbarControlAction(
+  candidateActions: readonly ReadPageCandidateAction[],
+  intent: string,
+): ReadPageCandidateAction | undefined {
+  return candidateActions.find(
+    (action) =>
+      action.intent === intent &&
+      !TEXT_FILTER_PANEL_REF_PATTERN.test(action.targetRef) &&
+      TEXT_SEARCH_TOOLBAR_REF_PATTERN.test(action.targetRef),
+  );
+}
+
 function isSortAppliedCandidate(element: ReadPageInteractiveElement | undefined): boolean {
   if (!element) return false;
   if (element.checked === true) return true;
@@ -862,7 +874,7 @@ export function buildSearchSurface(params: {
     params.interactiveElements,
   );
   const categoryState = categoryStateForControls(categoryTabs);
-  const sortMenuAction = findControlAction(params.candidateActions, 'filter.open');
+  const sortMenuAction = findToolbarControlAction(params.candidateActions, 'filter.open');
   const sortMenuObserved =
     controls.some((control) => control.kind === 'sort_menu') ||
     params.interactiveElements.some((element) => isSortMenuLabel(element.name));

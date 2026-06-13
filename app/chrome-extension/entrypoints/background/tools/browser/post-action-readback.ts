@@ -83,7 +83,9 @@ function shouldReadBackBeforeRetry(input: {
   if (input.observedOutcome !== 'no_observed_change') return false;
   return (
     input.intent === 'filter.open' ||
+    input.intent === 'filter.option_select' ||
     input.intent === 'filter.sort_most_collected' ||
+    input.intent === 'filter.time_range_select' ||
     input.intent === 'search.category_select'
   );
 }

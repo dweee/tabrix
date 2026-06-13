@@ -13,6 +13,8 @@ const FILTER_OPEN_LABEL_PATTERN = /^(筛选|已筛选|过滤|filter|filters|filt
 const SEARCH_CATEGORY_LABEL_PATTERN = /^(全部|图文|视频|用户|all|images?|photos?|videos?|users?)$/i;
 const FILTER_PANEL_LABEL_PATTERN =
   /^(综合|最新|最热|最多点赞|最多评论|最多收藏|不限|一天内|一周内|半年内|已看过|未看过|已关注|同城|附近|重置|收起|清除|确认|应用|all|latest|popular|any|most\s*(liked|commented|saved|collected)|reset|clear|confirm|apply)$/i;
+const FILTER_TIME_RANGE_LABEL_PATTERN =
+  /^(不限|一天内|一周内|半年内|any|within\s*(one|1)\s*day|within\s*(one|1)\s*week|within\s*(six|6)\s*months?)$/i;
 const SEARCH_TOOLBAR_VERTICAL_BAND_PX = 180;
 const LOW_VALUE_NAV_LINK_PATTERN =
   /^(关于我们|关于|营业执照|备案|沪ICP备|京ICP备|粤ICP备|隐私政策|隐私|用户协议|服务协议|使用条款|社区规范|帮助中心|联系我们|加入我们|广告合作|举报|投诉|copyright|privacy|terms|agreement|license|licenses?|legal|about|help|contact|careers?)$/i;
@@ -135,7 +137,9 @@ function inferCandidateActionIntent(
     String(element.ref || '').startsWith('ref_text_filter_panel_') &&
     FILTER_PANEL_LABEL_PATTERN.test(name)
   ) {
-    return 'filter.open';
+    return FILTER_TIME_RANGE_LABEL_PATTERN.test(name)
+      ? 'filter.time_range_select'
+      : 'filter.option_select';
   }
   if (isSearchActionText(name)) return 'search.submit';
   if (isPublishEntryActionText(name)) return 'publish.open_entry';

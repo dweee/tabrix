@@ -283,6 +283,26 @@ describe('buildPostActionReadbackEvidence', () => {
     });
   });
 
+  it.each(['filter.option_select', 'filter.time_range_select'])(
+    'requires fresh readback before retry for dispatched %s with no local change',
+    (intent) => {
+      const evidence = buildPostActionReadbackEvidence({
+        dispatchSucceeded: true,
+        actionKind: 'click',
+        observedOutcome: 'no_observed_change',
+        candidateAction: { intent },
+      });
+
+      expect(evidence).toMatchObject({
+        status: 'fresh_read_required',
+        freshReadRequired: true,
+        businessSuccessProven: false,
+        readbackSource: 'tool_dispatch_only',
+        requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
+      });
+    },
+  );
+
   it('requires fresh readback before retry for dispatched category selection with no local change', () => {
     const evidence = buildPostActionReadbackEvidence({
       dispatchSucceeded: true,
