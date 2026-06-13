@@ -465,6 +465,35 @@ describe('MKE core repositories', () => {
     }
   });
 
+  it('merges Experience recipe sources when the same recipe is re-mined', () => {
+    const { experienceRepo, close } = bootstrap();
+    try {
+      const first = experienceRepo.save(
+        templateRecipe({
+          sourceTraceIds: ['trace-1'],
+          successCount: 1,
+          linkedKnowledgeIds: ['knowledge-1'],
+        }),
+      );
+      const second = experienceRepo.save(
+        templateRecipe({
+          sourceTraceIds: ['trace-2'],
+          successCount: 1,
+          linkedKnowledgeIds: ['knowledge-2'],
+          updatedAt: '2026-06-06T10:01:00.000Z',
+        }),
+      );
+
+      expect(second.experienceId).toBe(first.experienceId);
+      expect(second.sourceTraceIds).toEqual(['trace-1', 'trace-2']);
+      expect(second.linkedKnowledgeIds).toEqual(['knowledge-1', 'knowledge-2']);
+      expect(second.successCount).toBe(2);
+      expect(experienceRepo.findByScenario('content_publish')).toHaveLength(1);
+    } finally {
+      close();
+    }
+  });
+
   it('rejects Experience templates that contain raw-sensitive fields', () => {
     const { experienceRepo, close } = bootstrap();
     try {

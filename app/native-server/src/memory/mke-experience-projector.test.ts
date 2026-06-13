@@ -321,7 +321,10 @@ describe('MkeExperienceProjector', () => {
 
     expect(result.savedExperienceCount).toBe(1);
     expect(result.experienceIds).toHaveLength(1);
-    expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toHaveLength(1);
+    const recipes = experience.findByScenario(`mke:example.test:${pageModelKey}`);
+    expect(recipes).toHaveLength(1);
+    expect(recipes[0]?.sourceTraceIds).toEqual(['trace-collect-cards-a', 'trace-collect-cards-b']);
+    expect(recipes[0]?.successCount).toBe(2);
   });
 
   it('rejects raw-sensitive chains and does not persist an Experience recipe', () => {

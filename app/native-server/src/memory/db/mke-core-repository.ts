@@ -1185,7 +1185,13 @@ export class ExperienceRecipeRepository {
          steps_blob = excluded.steps_blob,
          success_check_blob = excluded.success_check_blob,
          recovery_blob = excluded.recovery_blob,
+         source_trace_ids_blob = excluded.source_trace_ids_blob,
          linked_knowledge_ids_blob = excluded.linked_knowledge_ids_blob,
+         success_count = excluded.success_count,
+         failure_count = excluded.failure_count,
+         avg_duration_ms = excluded.avg_duration_ms,
+         avg_token_total = excluded.avg_token_total,
+         last_verified_at = excluded.last_verified_at,
          compatibility_blob = excluded.compatibility_blob,
          export_state = excluded.export_state,
          redaction_state = excluded.redaction_state,
@@ -1224,9 +1230,23 @@ export class ExperienceRecipeRepository {
 
   public save(input: ExperienceRecipeInput): ExperienceRecipe {
     assertExperienceTemplateOnly(input);
+    const existing = this.findByFingerprint(input.recipeFingerprint, input.recipeVersion ?? 1);
+    const inputSourceTraceIds = input.sourceTraceIds ?? [];
+    const mergedSourceTraceIds = existing
+      ? [...new Set([...existing.sourceTraceIds, ...inputSourceTraceIds])]
+      : inputSourceTraceIds;
+    const hasNewSourceTrace = existing
+      ? inputSourceTraceIds.some((traceId) => !existing.sourceTraceIds.includes(traceId))
+      : true;
+    const inputLinkedKnowledgeIds = input.linkedKnowledgeIds ?? [];
+    const mergedLinkedKnowledgeIds = existing
+      ? [...new Set([...existing.linkedKnowledgeIds, ...inputLinkedKnowledgeIds])]
+      : inputLinkedKnowledgeIds;
+    const inputSuccessCount = optionalInteger(input.successCount) ?? 0;
+    const inputFailureCount = optionalInteger(input.failureCount) ?? 0;
 
     const row = {
-      experience_id: input.experienceId ?? randomUUID(),
+      experience_id: existing?.experienceId ?? input.experienceId ?? randomUUID(),
       recipe_name: input.recipeName,
       scenario_key: input.scenarioKey,
       task_signature: input.taskSignature,
@@ -1240,13 +1260,13 @@ export class ExperienceRecipeRepository {
       steps_blob: requiredBlob(input.steps),
       success_check_blob: requiredBlob(input.successCheck),
       recovery_blob: blob(input.recovery),
-      source_trace_ids_blob: requiredBlob(input.sourceTraceIds ?? []),
-      linked_knowledge_ids_blob: requiredBlob(input.linkedKnowledgeIds ?? []),
-      success_count: optionalInteger(input.successCount) ?? 0,
-      failure_count: optionalInteger(input.failureCount) ?? 0,
-      adoption_count: optionalInteger(input.adoptionCount) ?? 0,
-      avg_duration_ms: optionalInteger(input.avgDurationMs),
-      avg_token_total: optionalInteger(input.avgTokenTotal),
+      source_trace_ids_blob: requiredBlob(mergedSourceTraceIds),
+      linked_knowledge_ids_blob: requiredBlob(mergedLinkedKnowledgeIds),
+      success_count: (existing?.successCount ?? 0) + (hasNewSourceTrace ? inputSuccessCount : 0),
+      failure_count: (existing?.failureCount ?? 0) + (hasNewSourceTrace ? inputFailureCount : 0),
+      adoption_count: existing?.adoptionCount ?? optionalInteger(input.adoptionCount) ?? 0,
+      avg_duration_ms: optionalInteger(input.avgDurationMs) ?? existing?.avgDurationMs ?? null,
+      avg_token_total: optionalInteger(input.avgTokenTotal) ?? existing?.avgTokenTotal ?? null,
       drift_state: input.driftState ?? null,
       portability_scope: input.portabilityScope ?? 'local',
       origin_kind: input.originKind ?? 'local_mined',
@@ -1256,9 +1276,9 @@ export class ExperienceRecipeRepository {
       import_state: input.importState ?? 'native',
       redaction_state: EXPERIENCE_TEMPLATE_ONLY_REDACTION_STATE,
       archived_at: input.archivedAt ?? null,
-      last_used_at: input.lastUsedAt ?? null,
-      last_verified_at: input.lastVerifiedAt ?? null,
-      created_at: input.createdAt,
+      last_used_at: input.lastUsedAt ?? existing?.lastUsedAt ?? null,
+      last_verified_at: input.lastVerifiedAt ?? existing?.lastVerifiedAt ?? null,
+      created_at: existing?.createdAt ?? input.createdAt,
       updated_at: input.updatedAt,
     };
     this.insertStmt.run(row);
