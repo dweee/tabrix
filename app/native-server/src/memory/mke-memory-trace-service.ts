@@ -15,7 +15,7 @@ const REDACTED = '[redacted]';
 const MAX_STRING_LENGTH = 512;
 const MAX_ROUTE_LENGTH = 2048;
 const MAX_ARRAY_ITEMS = 40;
-const MAX_DEPTH = 5;
+const MAX_DEPTH = 6;
 const DEFAULT_ASYNC_BROWSER_OBJECT_WRITE_QUEUE_LIMIT = 128;
 const mkeMemoryTraceLogger = logger.child('mke-memory-trace');
 
@@ -342,6 +342,59 @@ function readBoolean(...values: unknown[]): boolean | null {
 
 function readArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+function normalizeResultCardActionToolArgs(rawActionTarget: Record<string, unknown> | null):
+  | {
+      toolName: 'chrome_click_element';
+      toolArgs: {
+        candidateAction: {
+          id: string | null;
+          actionType: 'click';
+          targetRef: string;
+          confidence: number | null;
+          matchReason: string | null;
+          intent: 'content.open_detail';
+          locatorChain: Array<{ type: string; value: string }>;
+        };
+      };
+    }
+  | Record<string, never> {
+  if (readString(rawActionTarget?.toolName) !== 'chrome_click_element') return {};
+  const toolArgs = readObject(rawActionTarget?.toolArgs);
+  const candidateAction = readObject(toolArgs?.candidateAction);
+  const targetRef = readString(candidateAction?.targetRef);
+  if (!targetRef || !targetRef.startsWith('ref_result_card_')) return {};
+  const actionType = readString(candidateAction?.actionType);
+  const intent = readString(candidateAction?.intent);
+  if (actionType !== 'click' || intent !== 'content.open_detail') return {};
+  const locatorChain = readArray(candidateAction?.locatorChain)
+    .map((entry) => {
+      const locator = readObject(entry);
+      const type = readString(locator?.type);
+      const value = readString(locator?.value);
+      if (!type || !value) return null;
+      if (type !== 'ref' && type !== 'css') return null;
+      if (type === 'ref' && value !== targetRef) return null;
+      if (type === 'css' && value.length > 500) return null;
+      return { type, value };
+    })
+    .filter((entry): entry is { type: string; value: string } => Boolean(entry));
+  if (!locatorChain.some((locator) => locator.type === 'css')) return {};
+  return {
+    toolName: 'chrome_click_element',
+    toolArgs: {
+      candidateAction: {
+        id: readString(candidateAction?.id),
+        actionType: 'click',
+        targetRef,
+        confidence: readFiniteNumber(candidateAction?.confidence),
+        matchReason: readString(candidateAction?.matchReason),
+        intent: 'content.open_detail',
+        locatorChain,
+      },
+    },
+  };
 }
 
 function mergeReadPageFactsWithExistingCollectionFacts(
@@ -1255,6 +1308,7 @@ export class MkeMemoryTraceService {
               actionTargetUrlFields.pattern,
             selector: readString(rawActionTarget.selector),
             text: readString(rawActionTarget.text),
+            ...normalizeResultCardActionToolArgs(rawActionTarget),
             rect: readObject(rawActionTarget.rect),
             center: readObject(rawActionTarget.center),
             coordinateFrame: readString(rawActionTarget.coordinateFrame),

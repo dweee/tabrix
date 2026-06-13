@@ -536,6 +536,26 @@ describe('MkeMemoryTraceService', () => {
                 url: 'https://example.test/note/1?x=private',
                 selector: 'body > main > article:nth-of-type(1) > a:nth-of-type(1)',
                 text: 'First result',
+                toolName: 'chrome_click_element',
+                toolArgs: {
+                  candidateAction: {
+                    id: 'ca_click_ref_result_card_1',
+                    actionType: 'click',
+                    targetRef: 'ref_result_card_1',
+                    label: 'First result',
+                    confidence: 0.9,
+                    matchReason: 'result_card_primary_link',
+                    intent: 'content.open_detail',
+                    locatorChain: [
+                      { type: 'ref', value: 'ref_result_card_1' },
+                      { type: 'aria', value: 'First result' },
+                      {
+                        type: 'css',
+                        value: 'body > main > article:nth-of-type(1) > a:nth-of-type(1)',
+                      },
+                    ],
+                  },
+                },
                 rect: { x: 20, y: 40, width: 160, height: 32 },
                 center: { x: 100, y: 56 },
                 coordinateFrame: 'viewport',
@@ -630,6 +650,17 @@ describe('MkeMemoryTraceService', () => {
           actionType: 'click',
           targetKind: 'result_card_link',
           url: 'https://example.test/note/:id',
+          toolName: 'chrome_click_element',
+          toolArgs: {
+            candidateAction: {
+              targetRef: 'ref_result_card_1',
+              intent: 'content.open_detail',
+              locatorChain: [
+                { type: 'ref', value: 'ref_result_card_1' },
+                { type: 'css', value: 'body > main > article:nth-of-type(1) > a:nth-of-type(1)' },
+              ],
+            },
+          },
           center: { x: 100, y: 56 },
           coordinateFrame: 'viewport',
           sourceScrollY: 0,
@@ -641,6 +672,13 @@ describe('MkeMemoryTraceService', () => {
         actionTarget: {
           targetKind: 'result_card_link',
           url: 'https://example.test/note/:id',
+          toolName: 'chrome_click_element',
+          toolArgs: {
+            candidateAction: {
+              targetRef: 'ref_result_card_1',
+              intent: 'content.open_detail',
+            },
+          },
           center: { x: 100, y: 56 },
           coordinateFrame: 'viewport',
           sourceScrollY: 0,

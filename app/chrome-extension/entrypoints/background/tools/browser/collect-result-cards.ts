@@ -656,6 +656,24 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     const confidence = Math.min(0.92, 0.52 + reasons.length * 0.08);
     const primaryLinkSelector = primaryLink ? selectorForElement(primaryLink.link) : undefined;
     const primaryLinkText = primaryLink ? linkText(primaryLink.link) : '';
+    const resultCardTargetRef = `ref_result_card_${cards.length + 1}`;
+    const resultCardCandidateAction =
+      primaryLink && primaryLinkSelector
+        ? {
+            id: `ca_click_${resultCardTargetRef}`,
+            actionType: 'click' as const,
+            targetRef: resultCardTargetRef,
+            ...(title ? { label: title } : {}),
+            confidence: Math.min(0.94, confidence + 0.04),
+            matchReason: 'result_card_primary_link',
+            intent: 'content.open_detail' as const,
+            locatorChain: [
+              { type: 'ref', value: resultCardTargetRef },
+              ...(primaryLinkText ? [{ type: 'aria', value: primaryLinkText }] : []),
+              { type: 'css', value: primaryLinkSelector },
+            ],
+          }
+        : undefined;
     const actionTarget = primaryLink
       ? {
           actionType: 'click' as const,
@@ -663,6 +681,14 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
           url: primaryLink.link.href,
           ...(primaryLinkSelector ? { selector: primaryLinkSelector } : {}),
           ...(primaryLinkText ? { text: primaryLinkText } : {}),
+          ...(resultCardCandidateAction
+            ? {
+                toolName: 'chrome_click_element' as const,
+                toolArgs: {
+                  candidateAction: resultCardCandidateAction,
+                },
+              }
+            : {}),
           rect: {
             x: Math.round(primaryLink.rect.x),
             y: Math.round(primaryLink.rect.y),

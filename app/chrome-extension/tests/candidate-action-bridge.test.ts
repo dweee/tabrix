@@ -373,6 +373,49 @@ describe('candidateAction bridge', () => {
     expect(clickMessage.ref).toBeUndefined();
   });
 
+  it('routes result-card actionTarget candidateAction through locator css', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4117,
+      title: 'Search',
+      url: 'https://example.com/search?q=neutral',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      dispatchSucceeded: true,
+      signals: { domChanged: true },
+    });
+
+    const result = await clickTool.execute({
+      candidateAction: {
+        id: 'ca_click_ref_result_card_1',
+        actionType: 'click',
+        targetRef: 'ref_result_card_1',
+        intent: 'content.open_detail',
+        locatorChain: [
+          { type: 'ref', value: 'ref_result_card_1' },
+          { type: 'aria', value: 'AI image workflow' },
+          { type: 'css', value: '.result-card:nth-of-type(1) a.title' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.targetBinding).toMatchObject({
+      resolutionSource: 'candidate_locator_css',
+      dispatchTarget: 'selector',
+    });
+    const clickMessage = sendSpy.mock.calls.find(
+      ([, message]) => (message as any)?.action === TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+    )?.[1] as any;
+    expect(clickMessage).toMatchObject({
+      selector: '.result-card:nth-of-type(1) a.title',
+    });
+    expect(clickMessage.ref).toBeUndefined();
+    expect(clickMessage.coordinates).toBeUndefined();
+  });
+
   it('requires fresh readback instead of retry when a dispatched filter click has no local signal', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4116,

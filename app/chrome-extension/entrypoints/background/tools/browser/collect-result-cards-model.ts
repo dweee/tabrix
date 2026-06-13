@@ -7,6 +7,19 @@ export interface CollectedResultCard {
     url?: string;
     selector?: string;
     text?: string;
+    toolName?: 'chrome_click_element';
+    toolArgs?: {
+      candidateAction: {
+        id: string;
+        actionType: 'click';
+        targetRef: string;
+        label?: string;
+        confidence: number;
+        matchReason: string;
+        intent: 'content.open_detail';
+        locatorChain: Array<{ type: 'ref' | 'aria' | 'css' | string; value: string }>;
+      };
+    };
     rect: {
       x: number;
       y: number;

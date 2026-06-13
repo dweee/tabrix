@@ -125,12 +125,17 @@ function isSyntheticDynamicSurfaceRef(value: string): boolean {
   return value.startsWith('ref_dynamic_surface_');
 }
 
+function isSyntheticResultCardRef(value: string): boolean {
+  return value.startsWith('ref_result_card_');
+}
+
 function isLocatorBackedSyntheticRef(value: string): boolean {
   return (
     isSyntheticTextMenuRef(value) ||
     isSyntheticSearchToolbarRef(value) ||
     isSyntheticFilterPanelRef(value) ||
-    isSyntheticDynamicSurfaceRef(value)
+    isSyntheticDynamicSurfaceRef(value) ||
+    isSyntheticResultCardRef(value)
   );
 }
 

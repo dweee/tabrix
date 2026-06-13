@@ -299,6 +299,7 @@ describe('buildPostActionReadbackEvidence', () => {
         businessSuccessProven: false,
         readbackSource: 'tool_dispatch_only',
         requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
+        expectedEvidence: 'search_results_or_url_query_changed',
       });
     },
   );

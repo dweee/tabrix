@@ -84,6 +84,22 @@ describe('mergeCollectedResultCards', () => {
             targetKind: 'result_card_link',
             url: 'https://example.com/1',
             selector: 'a.title',
+            toolName: 'chrome_click_element',
+            toolArgs: {
+              candidateAction: {
+                id: 'ca_click_ref_result_card_1',
+                actionType: 'click',
+                targetRef: 'ref_result_card_1',
+                label: 'First card',
+                confidence: 0.9,
+                matchReason: 'result_card_primary_link',
+                intent: 'content.open_detail',
+                locatorChain: [
+                  { type: 'ref', value: 'ref_result_card_1' },
+                  { type: 'css', value: 'a.title' },
+                ],
+              },
+            },
             rect: { x: 20, y: 30, width: 120, height: 28 },
             center: { x: 80, y: 44 },
             coordinateFrame: 'viewport',
@@ -114,6 +130,14 @@ describe('mergeCollectedResultCards', () => {
         targetKind: 'result_card_link',
         url: 'https://example.com/1',
         selector: 'a.title',
+        toolName: 'chrome_click_element',
+        toolArgs: {
+          candidateAction: {
+            targetRef: 'ref_result_card_1',
+            intent: 'content.open_detail',
+            locatorChain: expect.arrayContaining([{ type: 'css', value: 'a.title' }]),
+          },
+        },
         coordinateFrame: 'viewport',
         sourceScrollY: 0,
       },
