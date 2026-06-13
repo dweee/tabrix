@@ -7,7 +7,7 @@ import {
   type BrowserObjectInput,
 } from './db';
 import { MkeAiFeedbackValidationError, MkeMemoryTraceService } from './mke-memory-trace-service';
-import { buildMemoryTraceBindingHash } from './feedback-binding';
+import { buildLegacyMemoryTraceBindingHash, buildMemoryTraceBindingHash } from './feedback-binding';
 
 const NOW_MS = Date.parse('2026-06-10T10:00:00.000Z');
 
@@ -157,6 +157,7 @@ describe('MkeMemoryTraceService', () => {
 
       expect(updated).toMatchObject({
         traceId: trace.traceId,
+        businessSuccess: 'achieved',
         aiFeedbackScore: 0.94,
         aiFeedback: expect.objectContaining({
           sourceKind: 'ai_feedback',
@@ -168,6 +169,7 @@ describe('MkeMemoryTraceService', () => {
           }),
         }),
       });
+      expect(traceRepo.get(trace.traceId)?.businessSuccess).toBe('achieved');
       expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)).toHaveLength(1);
       expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)[0]).toMatchObject({
         traceId: trace.traceId,
@@ -178,6 +180,110 @@ describe('MkeMemoryTraceService', () => {
       expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)[0]).not.toHaveProperty(
         'evidenceRefs',
       );
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('treats repeated identical AI feedback as idempotent', () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo);
+
+    try {
+      const trace = traceService.recordToolCall({
+        taskId: 'trace-ai-feedback-retry-task',
+        taskIntent: 'retry ai feedback safely',
+        aiClient: 'jest',
+        toolName: 'chrome_collect_result_cards',
+        stepId: 'trace-ai-feedback-retry-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 7, minResults: 10 },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 30,
+        result: textResult({
+          success: true,
+          selectedDataSource: 'visible_dom_result_cards',
+          observedResultCount: 10,
+        }),
+      });
+      const feedbackInput = {
+        traceId: trace.traceId,
+        taskId: trace.taskId,
+        toolName: trace.toolName,
+        toolCallId: trace.toolCallId,
+        sequenceIndex: trace.sequenceIndex,
+        traceBindingHash: buildMemoryTraceBindingHash(trace),
+        businessStatus: 'achieved',
+        confidence: 0.93,
+        reasonCode: 'ai_verified_top10_cards',
+        summary: 'AI verified the requested top 10 result cards.',
+        receivedAt: '2026-06-10T10:00:01.000Z',
+      } as const;
+
+      const first = traceService.recordAiBusinessFeedback(feedbackInput);
+      const second = traceService.recordAiBusinessFeedback(feedbackInput);
+
+      expect(first?.businessSuccess).toBe('achieved');
+      expect(second?.businessSuccess).toBe('achieved');
+      expect(second?.aiFeedbackScore).toBe(0.93);
+      expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)).toHaveLength(1);
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('keeps the new feedback token stable after business status changes and accepts legacy tokens', () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo);
+
+    try {
+      const trace = traceService.recordToolCall({
+        taskId: 'trace-ai-feedback-token-task',
+        aiClient: 'jest',
+        toolName: 'chrome_click_element',
+        stepId: 'trace-ai-feedback-token-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 7 },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 30,
+        result: textResult({ success: true }),
+      });
+      const stableHashBefore = buildMemoryTraceBindingHash(trace);
+      const legacyHashBefore = buildLegacyMemoryTraceBindingHash(trace);
+
+      const updated = traceService.recordAiBusinessFeedback({
+        traceId: trace.traceId,
+        taskId: trace.taskId,
+        toolName: trace.toolName,
+        toolCallId: trace.toolCallId,
+        sequenceIndex: trace.sequenceIndex,
+        traceBindingHash: legacyHashBefore,
+        businessStatus: 'achieved',
+        confidence: 0.91,
+        summary: 'AI verified the result using a legacy feedback token.',
+      });
+
+      expect(updated?.businessSuccess).toBe('achieved');
+      expect(buildMemoryTraceBindingHash(updated!)).toBe(stableHashBefore);
+      expect(buildLegacyMemoryTraceBindingHash(updated!)).not.toBe(legacyHashBefore);
+
+      const repeated = traceService.recordAiBusinessFeedback({
+        traceId: trace.traceId,
+        taskId: trace.taskId,
+        toolName: trace.toolName,
+        toolCallId: trace.toolCallId,
+        sequenceIndex: trace.sequenceIndex,
+        traceBindingHash: legacyHashBefore,
+        businessStatus: 'achieved',
+        confidence: 0.91,
+        summary: 'AI verified the result using a legacy feedback token.',
+      });
+      expect(repeated?.businessSuccess).toBe('achieved');
+      expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)).toHaveLength(1);
     } finally {
       traceService.discardPendingAsyncWrites();
       db.close();

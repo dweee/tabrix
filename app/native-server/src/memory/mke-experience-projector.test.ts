@@ -156,6 +156,174 @@ describe('MkeExperienceProjector', () => {
     );
   });
 
+  it('mines a reusable card-collection recipe after high-confidence AI feedback', () => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const traces = new MemoryTraceRepository(opened.db);
+    const knowledge = new KnowledgeModelRepository(opened.db);
+    const experience = new ExperienceRecipeRepository(opened.db);
+    const projector = new MkeExperienceProjector(traces, knowledge, experience);
+
+    const collectTrace = traces.append({
+      traceId: 'trace-collect-cards',
+      taskId: 'task-card-collection',
+      toolName: 'chrome_collect_result_cards',
+      requestParams: { tabId: 9, minResults: 10, maxScrolls: 4, startFromTop: true },
+      requestAt: '2026-06-06T03:10:01.000Z',
+      response: {
+        payloadDigest: {
+          success: true,
+          selectedDataSource: 'visible_dom_result_cards',
+          observedResultCount: 10,
+          collection: { startFromTop: true },
+        },
+      },
+      responseAt: '2026-06-06T03:10:02.000Z',
+      durationMs: 1200,
+      toolSuccess: true,
+      aiFeedback: verifiedExperienceFeedback({
+        confidence: 0.93,
+        reasonCode: 'ai_verified_top10_cards',
+        summary: 'AI verified that the result-card collection returned the requested top 10 cards.',
+      }),
+      tabId: 9,
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageState: 'complete',
+      createdAt: '2026-06-06T03:10:02.000Z',
+    });
+    const pageModelKey = buildMkePageModelKey(collectTrace)!;
+    addKnowledge({
+      knowledge,
+      siteFamily: 'example.test',
+      pageModelKey,
+      pageRole: 'search_results',
+      pageUrlPattern: 'https://example.test/search',
+    });
+
+    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T03:10:03.000Z' });
+
+    expect(result.savedExperienceCount).toBe(1);
+    const recipes = experience.findByScenario(`mke:example.test:${pageModelKey}`);
+    expect(recipes).toHaveLength(1);
+    expect(recipes[0]?.steps).toEqual([
+      {
+        order: 1,
+        toolName: 'chrome_collect_result_cards',
+        argsTemplate: {
+          tab: '{{targetTabId}}',
+          minResults: '{{minResults}}',
+          maxScrolls: '{{maxScrolls}}',
+          startFromTop: '{{startFromTop}}',
+        },
+        reuseProfile: {
+          minResults: 10,
+          maxScrolls: 4,
+          startFromTop: true,
+          selectedDataSource: 'visible_dom_result_cards',
+          observedResultCount: 10,
+        },
+      },
+    ]);
+    expect(recipes[0]?.variableSchema).toMatchObject({
+      minResults: { type: 'number', required: false, default: 10 },
+      maxScrolls: { type: 'number', required: false },
+      startFromTop: { type: 'boolean', required: false, default: true },
+    });
+    expect(recipes[0]?.successCheck).toMatchObject({
+      collectResultCards: [
+        {
+          toolName: 'chrome_collect_result_cards',
+          observedResultCountAtLeast: 10,
+          selectedDataSource: 'visible_dom_result_cards',
+          requiredStatus: 'complete_enough',
+        },
+      ],
+    });
+  });
+
+  it('reports a unique saved experience when multiple traces upsert the same card recipe', () => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const traces = new MemoryTraceRepository(opened.db);
+    const knowledge = new KnowledgeModelRepository(opened.db);
+    const experience = new ExperienceRecipeRepository(opened.db);
+    const projector = new MkeExperienceProjector(traces, knowledge, experience);
+
+    const firstTrace = traces.append({
+      traceId: 'trace-collect-cards-a',
+      taskId: 'task-card-collection-a',
+      toolName: 'chrome_collect_result_cards',
+      requestParams: { tabId: 9, minResults: 10, maxScrolls: 4, startFromTop: true },
+      requestAt: '2026-06-06T03:20:01.000Z',
+      response: {
+        payloadDigest: {
+          success: true,
+          selectedDataSource: 'visible_dom_result_cards',
+          observedResultCount: 10,
+          collection: { startFromTop: true },
+        },
+      },
+      responseAt: '2026-06-06T03:20:02.000Z',
+      durationMs: 1200,
+      toolSuccess: true,
+      aiFeedback: verifiedExperienceFeedback({
+        confidence: 0.93,
+        reasonCode: 'ai_verified_top10_cards',
+        summary: 'AI verified that the result-card collection returned the requested top 10 cards.',
+      }),
+      tabId: 9,
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageState: 'complete',
+      createdAt: '2026-06-06T03:20:02.000Z',
+    });
+    const secondTrace = traces.append({
+      traceId: 'trace-collect-cards-b',
+      taskId: 'task-card-collection-b',
+      toolName: 'chrome_collect_result_cards',
+      requestParams: { tabId: 9, minResults: 10, maxScrolls: 4, startFromTop: true },
+      requestAt: '2026-06-06T03:20:03.000Z',
+      response: {
+        payloadDigest: {
+          success: true,
+          selectedDataSource: 'visible_dom_result_cards',
+          observedResultCount: 10,
+          collection: { startFromTop: true },
+        },
+      },
+      responseAt: '2026-06-06T03:20:04.000Z',
+      durationMs: 1100,
+      toolSuccess: true,
+      aiFeedback: verifiedExperienceFeedback({
+        confidence: 0.94,
+        reasonCode: 'ai_verified_top10_cards_repeat',
+        summary: 'AI verified a repeated top 10 card collection on the same page model.',
+      }),
+      tabId: 9,
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageState: 'complete',
+      createdAt: '2026-06-06T03:20:04.000Z',
+    });
+    const pageModelKey = buildMkePageModelKey(firstTrace)!;
+    expect(buildMkePageModelKey(secondTrace)).toBe(pageModelKey);
+    addKnowledge({
+      knowledge,
+      siteFamily: 'example.test',
+      pageModelKey,
+      pageRole: 'search_results',
+      pageUrlPattern: 'https://example.test/search',
+    });
+
+    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T03:20:05.000Z' });
+
+    expect(result.savedExperienceCount).toBe(1);
+    expect(result.experienceIds).toHaveLength(1);
+    expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toHaveLength(1);
+  });
+
   it('rejects raw-sensitive chains and does not persist an Experience recipe', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
     const traces = new MemoryTraceRepository(opened.db);

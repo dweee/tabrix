@@ -129,6 +129,7 @@ export interface MemoryTraceAiFeedbackUpdate {
   traceId: string;
   aiFeedbackScore?: number | null;
   aiFeedback?: unknown;
+  businessSuccess?: BusinessSuccessVerdict | null;
 }
 
 export interface MemoryFeedbackEventInput {
@@ -386,7 +387,11 @@ export class MemoryTraceRepository {
     this.updateAiFeedbackStmt = db.prepare(
       `UPDATE tabrix_memory_traces
        SET ai_feedback_score = @ai_feedback_score,
-           ai_feedback_blob = @ai_feedback_blob
+           ai_feedback_blob = @ai_feedback_blob,
+           business_success = CASE
+             WHEN @business_success_is_set = 1 THEN @business_success
+             ELSE business_success
+           END
        WHERE trace_id = @trace_id`,
     );
     this.insertFeedbackEventStmt = db.prepare(
@@ -496,6 +501,8 @@ export class MemoryTraceRepository {
       trace_id: input.traceId,
       ai_feedback_score: optionalNumber(input.aiFeedbackScore),
       ai_feedback_blob: blob(input.aiFeedback),
+      business_success: input.businessSuccess ?? null,
+      business_success_is_set: input.businessSuccess === undefined ? 0 : 1,
     });
     return this.get(input.traceId);
   }
@@ -542,6 +549,8 @@ export class MemoryTraceRepository {
         trace_id: input.traceId,
         ai_feedback_score: optionalNumber(input.aiFeedbackScore),
         ai_feedback_blob: blob(input.aiFeedback),
+        business_success: input.businessSuccess ?? null,
+        business_success_is_set: input.businessSuccess === undefined ? 0 : 1,
       });
       return { trace: this.get(input.traceId), event };
     });

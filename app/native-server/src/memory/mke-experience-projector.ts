@@ -42,6 +42,7 @@ interface RecipeBasis {
 }
 
 const REPLAYABLE_ACTION_TOOLS = new Set([
+  'chrome_collect_result_cards',
   'chrome_click_element',
   'chrome_fill_or_select',
   'chrome_navigate',
@@ -232,6 +233,43 @@ function buildTargetTemplate(trace: MemoryTrace): Record<string, unknown> {
   };
 }
 
+function readFiniteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function readBoolean(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
+}
+
+function readResponseDigest(trace: MemoryTrace): Record<string, unknown> | null {
+  const response = readObject(trace.response);
+  return readObject(response?.payloadDigest) ?? response;
+}
+
+function readCollectResultCardsReuseProfile(trace: MemoryTrace): {
+  minResults: number;
+  maxScrolls: number | null;
+  startFromTop: boolean;
+  selectedDataSource: string | null;
+  observedResultCount: number | null;
+} {
+  const request = readObject(trace.requestParams);
+  const response = readResponseDigest(trace);
+  const collection = readObject(response?.collection);
+  return {
+    minResults:
+      readFiniteNumber(request?.minResults) ??
+      readFiniteNumber(response?.requestedMinResults) ??
+      readFiniteNumber(response?.observedResultCount) ??
+      10,
+    maxScrolls: readFiniteNumber(request?.maxScrolls),
+    startFromTop:
+      readBoolean(request?.startFromTop) ?? readBoolean(collection?.startFromTop) ?? true,
+    selectedDataSource: readString(response?.selectedDataSource),
+    observedResultCount: readFiniteNumber(response?.observedResultCount),
+  };
+}
+
 function buildStepTemplate(trace: MemoryTrace, order: number): Record<string, unknown> | null {
   if (!REPLAYABLE_ACTION_TOOLS.has(trace.toolName)) return null;
   if (trace.toolSuccess !== true || !isBusinessAchieved(trace)) return null;
@@ -255,6 +293,27 @@ function buildStepTemplate(trace: MemoryTrace, order: number): Record<string, un
       argsTemplate: {
         tab: '{{targetTabId}}',
         navigationTarget: '{{targetUrl}}',
+      },
+    };
+  }
+
+  if (trace.toolName === 'chrome_collect_result_cards') {
+    const reuseProfile = readCollectResultCardsReuseProfile(trace);
+    return {
+      order,
+      toolName: trace.toolName,
+      argsTemplate: {
+        tab: '{{targetTabId}}',
+        minResults: '{{minResults}}',
+        maxScrolls: '{{maxScrolls}}',
+        startFromTop: '{{startFromTop}}',
+      },
+      reuseProfile: {
+        minResults: reuseProfile.minResults,
+        maxScrolls: reuseProfile.maxScrolls,
+        startFromTop: reuseProfile.startFromTop,
+        selectedDataSource: reuseProfile.selectedDataSource,
+        observedResultCount: reuseProfile.observedResultCount,
       },
     };
   }
@@ -283,8 +342,37 @@ function buildRecipeFingerprint(input: {
   siteFamily: string;
   pageModelKey: string;
   actionTools: string[];
+  actionProfiles: Array<Record<string, unknown>>;
 }): string {
   return createHash('sha256').update(JSON.stringify(input)).digest('hex').slice(0, 32);
+}
+
+function buildActionProfile(trace: MemoryTrace): Record<string, unknown> {
+  if (trace.toolName === 'chrome_collect_result_cards') {
+    const reuseProfile = readCollectResultCardsReuseProfile(trace);
+    return {
+      toolName: trace.toolName,
+      minResults: reuseProfile.minResults,
+      maxScrolls: reuseProfile.maxScrolls,
+      startFromTop: reuseProfile.startFromTop,
+      selectedDataSource: reuseProfile.selectedDataSource,
+    };
+  }
+  return { toolName: trace.toolName };
+}
+
+function buildCollectSuccessChecks(actionTraces: MemoryTrace[]): Array<Record<string, unknown>> {
+  return actionTraces
+    .filter((trace) => trace.toolName === 'chrome_collect_result_cards')
+    .map((trace) => {
+      const reuseProfile = readCollectResultCardsReuseProfile(trace);
+      return {
+        toolName: trace.toolName,
+        observedResultCountAtLeast: reuseProfile.minResults,
+        selectedDataSource: reuseProfile.selectedDataSource,
+        requiredStatus: 'complete_enough',
+      };
+    });
 }
 
 function buildRecipeBasis(
@@ -344,10 +432,13 @@ function buildRecipeInput(
     .map((trace, index) => buildStepTemplate(trace, index + 1))
     .filter((step): step is Record<string, unknown> => step !== null);
   const actionTools = basis.actionTraces.map((trace) => trace.toolName);
+  const actionProfiles = basis.actionTraces.map(buildActionProfile);
+  const collectSuccessChecks = buildCollectSuccessChecks(basis.actionTraces);
   const recipeFingerprint = buildRecipeFingerprint({
     siteFamily: basis.siteFamily,
     pageModelKey: basis.pageModelKey,
     actionTools,
+    actionProfiles,
   });
 
   return {
@@ -370,12 +461,16 @@ function buildRecipeInput(
       targetTabId: { type: 'number', required: true },
       targetUrl: { type: 'string', required: false },
       inputText: { type: 'string', required: false },
+      minResults: { type: 'number', required: false, default: 10 },
+      maxScrolls: { type: 'number', required: false },
+      startFromTop: { type: 'boolean', required: false, default: true },
     },
     steps,
     successCheck: {
       schema: 'tabrix_mke_success_check_v1',
       requiredFreshRead: true,
       acceptedToolOutcome: 'completed',
+      ...(collectSuccessChecks.length > 0 ? { collectResultCards: collectSuccessChecks } : {}),
     },
     recovery: {
       schema: 'tabrix_mke_recovery_v1',
@@ -426,7 +521,7 @@ export class MkeExperienceProjector {
     }
 
     const nowIso = input.nowIso ?? new Date().toISOString();
-    const saved: ExperienceRecipe[] = [];
+    const savedById = new Map<string, ExperienceRecipe>();
     let skippedTraceCount = 0;
     let rejectedSensitiveSequenceCount = 0;
 
@@ -442,8 +537,9 @@ export class MkeExperienceProjector {
         continue;
       }
       const recipe = this.experienceRepo.save(buildRecipeInput(basis, nowIso));
-      saved.push(recipe);
+      savedById.set(recipe.experienceId, recipe);
     }
+    const saved = [...savedById.values()];
 
     return {
       processedTraceCount: traces.length,

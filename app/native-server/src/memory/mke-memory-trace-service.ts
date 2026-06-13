@@ -8,7 +8,7 @@ import {
   type BusinessSuccessVerdict,
   type MemoryTrace,
 } from './db';
-import { buildMemoryTraceBindingHash } from './feedback-binding';
+import { buildLegacyMemoryTraceBindingHash, buildMemoryTraceBindingHash } from './feedback-binding';
 import { logger } from '../logging/logger';
 
 const REDACTED = '[redacted]';
@@ -581,7 +581,13 @@ function ensureFeedbackBinding(
   trace: MemoryTrace,
 ): string {
   const expectedHash = buildMemoryTraceBindingHash(trace);
-  if (!input.traceBindingHash || input.traceBindingHash !== expectedHash) {
+  const acceptedHashes = new Set([
+    expectedHash,
+    buildLegacyMemoryTraceBindingHash(trace),
+    buildLegacyMemoryTraceBindingHash({ ...trace, businessSuccess: 'unknown' }),
+    buildLegacyMemoryTraceBindingHash({ ...trace, businessSuccess: null }),
+  ]);
+  if (!input.traceBindingHash || !acceptedHashes.has(input.traceBindingHash)) {
     throw new MkeAiFeedbackValidationError(
       'trace_binding_mismatch',
       'AI feedback binding does not match the target Memory trace.',
@@ -1510,10 +1516,38 @@ export class MkeMemoryTraceService {
       'tabrix_ai_business_feedback',
     ) as Record<string, unknown>;
 
+    const acceptedFeedbackTokens = new Set([
+      traceBindingHash,
+      input.traceBindingHash,
+      buildLegacyMemoryTraceBindingHash(trace),
+      buildLegacyMemoryTraceBindingHash({ ...trace, businessSuccess: 'unknown' }),
+      buildLegacyMemoryTraceBindingHash({ ...trace, businessSuccess: null }),
+    ]);
+    const duplicateFeedback = this.repo.listFeedbackEventsByTrace(trace.traceId).find((event) => {
+      return (
+        event.accepted === true &&
+        acceptedFeedbackTokens.has(event.traceBindingHash) &&
+        event.evaluationScope === evaluationScope &&
+        event.businessStatus === input.businessStatus &&
+        event.confidence === confidence &&
+        event.reasonCode === (input.reasonCode ?? null) &&
+        event.summary === (input.summary ?? null)
+      );
+    });
+    if (duplicateFeedback) {
+      return this.repo.updateAiFeedback({
+        traceId: input.traceId,
+        aiFeedbackScore: confidence,
+        aiFeedback: feedback,
+        businessSuccess: input.businessStatus,
+      });
+    }
+
     const result = this.repo.recordAiFeedback({
       traceId: input.traceId,
       aiFeedbackScore: confidence,
       aiFeedback: feedback,
+      businessSuccess: input.businessStatus,
       feedbackEvent: {
         traceId: trace.traceId,
         taskId: trace.taskId,

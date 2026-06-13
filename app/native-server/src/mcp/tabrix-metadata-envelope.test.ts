@@ -296,6 +296,7 @@ describe('tabrix metadata envelope', () => {
 
   it.each([
     [TOOL_NAMES.BROWSER.READ_PAGE],
+    [TOOL_NAMES.BROWSER.COLLECT_RESULT_CARDS],
     [TOOL_NAMES.BROWSER.NAVIGATE],
     [TOOL_NAMES.BROWSER.CLICK],
     [TOOL_NAMES.BROWSER.FILL],

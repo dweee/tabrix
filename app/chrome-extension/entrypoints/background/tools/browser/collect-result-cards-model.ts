@@ -46,11 +46,25 @@ function normalizeText(value: unknown): string {
     .trim();
 }
 
+function normalizeResultCardUrlKey(value: unknown): string {
+  const raw = normalizeText(value);
+  if (!raw) return '';
+  try {
+    const url = new URL(raw, 'https://example.invalid');
+    const lowerHost = url.hostname.toLowerCase();
+    const noteIdMatch = /^\/(?:search_result|explore)\/([^/?#]+)/i.exec(url.pathname);
+    if (lowerHost.endsWith('xiaohongshu.com') && noteIdMatch?.[1]) {
+      return `${url.protocol}//${lowerHost}/note/${noteIdMatch[1].toLowerCase()}`;
+    }
+    return `${url.protocol}//${lowerHost}${url.pathname}`.toLowerCase();
+  } catch {
+    return raw.replace(/[?#].*$/, '').toLowerCase();
+  }
+}
+
 export function resultCardKey(card: Pick<CollectedResultCard, 'title' | 'url'>): string {
   const title = normalizeText(card.title).toLowerCase();
-  const url = normalizeText(card.url)
-    .replace(/[?#].*$/, '')
-    .toLowerCase();
+  const url = normalizeResultCardUrlKey(card.url);
   return url ? `${title}|${url}` : title;
 }
 

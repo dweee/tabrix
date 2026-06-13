@@ -33,6 +33,25 @@ describe('resultCardKey', () => {
       'other guide|https://example.com/a',
     );
   });
+
+  it('deduplicates Xiaohongshu search_result and explore URLs for the same note', () => {
+    expect(
+      resultCardKey(
+        card({
+          title: 'AI image workflow',
+          url: 'https://www.xiaohongshu.com/search_result/6a2be61300000000210164c2?xsec_token=abc',
+        }),
+      ),
+    ).toBe('ai image workflow|https://www.xiaohongshu.com/note/6a2be61300000000210164c2');
+    expect(
+      resultCardKey(
+        card({
+          title: 'AI image workflow',
+          url: 'https://www.xiaohongshu.com/explore/6a2be61300000000210164c2',
+        }),
+      ),
+    ).toBe('ai image workflow|https://www.xiaohongshu.com/note/6a2be61300000000210164c2');
+  });
 });
 
 describe('mergeCollectedResultCards', () => {

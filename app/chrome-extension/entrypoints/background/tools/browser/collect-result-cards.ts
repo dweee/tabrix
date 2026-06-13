@@ -163,6 +163,26 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
   const linkText = (link: HTMLAnchorElement): string =>
     normalize(link.innerText || link.textContent || link.getAttribute('aria-label') || '');
 
+  const isXiaohongshuDetailLink = (link: HTMLAnchorElement): boolean => {
+    try {
+      const url = new URL(link.href);
+      return (
+        url.hostname.toLowerCase().endsWith('xiaohongshu.com') &&
+        /^\/(?:search_result|explore)\/[^/?#]+/i.test(url.pathname)
+      );
+    } catch {
+      return false;
+    }
+  };
+
+  const isLikelyProfileLink = (link: HTMLAnchorElement): boolean => {
+    try {
+      return /^\/user\/profile\//i.test(new URL(link.href).pathname);
+    } catch {
+      return false;
+    }
+  };
+
   const linkOwnsCenterPoint = (link: HTMLAnchorElement, rect: DOMRect): boolean => {
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
@@ -177,15 +197,34 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     title: string,
   ): { link: HTMLAnchorElement; rect: DOMRect; reasons: string[] } | null => {
     const normalizedTitle = normalize(title).toLowerCase();
-    const visibleLinks = links
+    const visibleLinkCandidates = links
       .map((link) => ({ link, rect: visibleLinkRect(link), text: linkText(link) }))
-      .filter(
-        (item): item is { link: HTMLAnchorElement; rect: DOMRect; text: string } =>
-          Boolean(item.rect) &&
-          Boolean(normalize(item.link.href)) &&
-          linkOwnsCenterPoint(item.link, item.rect),
-      );
-    if (visibleLinks.length === 0) return null;
+      .filter((item): item is { link: HTMLAnchorElement; rect: DOMRect; text: string } => {
+        return Boolean(item.rect && normalize(item.link.href));
+      });
+    const visibleLinks = visibleLinkCandidates.filter((item) =>
+      linkOwnsCenterPoint(item.link, item.rect),
+    );
+    const fallbackVisibleDetailLink = (): {
+      link: HTMLAnchorElement;
+      rect: DOMRect;
+      reasons: string[];
+    } | null => {
+      const fallbackDetailLink = [...visibleLinkCandidates]
+        .filter((item) => isXiaohongshuDetailLink(item.link))
+        .sort(
+          (left, right) =>
+            right.rect.width * right.rect.height - left.rect.width * left.rect.height,
+        )[0];
+      return fallbackDetailLink
+        ? {
+            link: fallbackDetailLink.link,
+            rect: fallbackDetailLink.rect,
+            reasons: ['visible_detail_link_unverified_hit'],
+          }
+        : null;
+    };
+    if (visibleLinks.length === 0) return fallbackVisibleDetailLink();
 
     const titleMatch = visibleLinks.find((item) => {
       const text = item.text.toLowerCase();
@@ -194,18 +233,46 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     if (titleMatch)
       return { link: titleMatch.link, rect: titleMatch.rect, reasons: ['title_link_match'] };
 
-    const textLink = visibleLinks.find(
+    const detailLinks = visibleLinks.filter((item) => isXiaohongshuDetailLink(item.link));
+    const detailTextLink = detailLinks.find(
       (item) => item.text.length >= 4 && !shellPattern.test(item.text),
+    );
+    if (detailTextLink) {
+      return {
+        link: detailTextLink.link,
+        rect: detailTextLink.rect,
+        reasons: ['detail_text_link'],
+      };
+    }
+
+    const largestDetailLink = [...detailLinks].sort(
+      (left, right) => right.rect.width * right.rect.height - left.rect.width * left.rect.height,
+    )[0];
+    if (largestDetailLink) {
+      return {
+        link: largestDetailLink.link,
+        rect: largestDetailLink.rect,
+        reasons: ['largest_detail_link'],
+      };
+    }
+
+    const textLink = visibleLinks.find(
+      (item) =>
+        item.text.length >= 4 && !shellPattern.test(item.text) && !isLikelyProfileLink(item.link),
     );
     if (textLink)
       return { link: textLink.link, rect: textLink.rect, reasons: ['visible_text_link'] };
 
-    const largestLink = [...visibleLinks].sort(
-      (left, right) => right.rect.width * right.rect.height - left.rect.width * left.rect.height,
-    )[0];
-    return largestLink
-      ? { link: largestLink.link, rect: largestLink.rect, reasons: ['largest_visible_link'] }
-      : null;
+    const largestLink = [...visibleLinks]
+      .filter((item) => !isLikelyProfileLink(item.link))
+      .sort(
+        (left, right) => right.rect.width * right.rect.height - left.rect.width * left.rect.height,
+      )[0];
+    if (largestLink) {
+      return { link: largestLink.link, rect: largestLink.rect, reasons: ['largest_visible_link'] };
+    }
+
+    return fallbackVisibleDetailLink();
   };
 
   const looksLikeResultCard = (element: Element): boolean => {
@@ -255,18 +322,28 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
   };
 
   const cleanMetaFromText = (value: string): string =>
-    normalize(value.replace(metaPattern, '').replace(/\s+[0-9][0-9,.]*\s*(万|千|k|m)?$/i, ''));
+    normalize(
+      value
+        .replace(metaPattern, '')
+        .replace(/\b\d{1,2}:\d{2}\b/g, '')
+        .replace(/\s+[0-9][0-9,.]*\s*(万|千|k|m)?$/i, ''),
+    );
 
   const bestTitle = (lines: readonly string[], links: readonly HTMLAnchorElement[]): string => {
+    const profileLabels = links
+      .filter(isLikelyProfileLink)
+      .map((link) => cleanMetaFromText(linkText(link)))
+      .filter((line) => line.length >= 2 && line.length <= 60);
     const linkTexts = links
+      .filter((link) => !isLikelyProfileLink(link))
       .map((link) =>
         normalize(link.innerText || link.textContent || link.getAttribute('aria-label')),
       )
       .filter((line) => line.length >= 4 && line.length <= 140 && !shellPattern.test(line));
-    const linkText = linkTexts
+    const bestLinkText = linkTexts
       .filter((line) => !metaPattern.test(line))
       .sort((left, right) => right.length - left.length)[0];
-    if (linkText) return linkText;
+    if (bestLinkText) return bestLinkText;
 
     for (const line of lines) {
       const metaMatch = metaPattern.exec(line);
@@ -274,6 +351,7 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       let prefix = normalize(line.slice(0, metaMatch.index));
       const authorLikeLabels = linkTexts
         .map(cleanMetaFromText)
+        .concat(profileLabels)
         .filter((label) => label.length >= 2 && label.length <= 40)
         .sort((left, right) => right.length - left.length);
       for (const label of authorLikeLabels) {
@@ -282,11 +360,16 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
           break;
         }
       }
+      if (authorLikeLabels.some((label) => prefix === label)) continue;
       if (prefix.length >= 4 && prefix.length <= 120 && !shellPattern.test(prefix)) return prefix;
     }
 
     const lineTitle = lines.find(
-      (line) => line.length >= 4 && line.length <= 120 && !metaPattern.test(line),
+      (line) =>
+        line.length >= 4 &&
+        line.length <= 120 &&
+        !metaPattern.test(line) &&
+        !profileLabels.some((label) => line === label || line.startsWith(`${label} `)),
     );
     if (lineTitle) return lineTitle;
     return '';
@@ -355,6 +438,11 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     const images = Array.from(element.querySelectorAll('img, picture, video'));
     let title = bestTitle(lines, links);
     if (!title) continue;
+    const cardProfileLabels = links
+      .filter(isLikelyProfileLink)
+      .map((link) => cleanMetaFromText(linkText(link)))
+      .filter((line) => line.length >= 2 && line.length <= 60);
+    if (cardProfileLabels.some((label) => title === label)) continue;
     if (shellPattern.test(title)) continue;
     if (rect.width < 180 && images.length === 0) continue;
     if (lines.length < 2 && links.length === 0 && images.length === 0) continue;
