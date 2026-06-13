@@ -1,4 +1,9 @@
-import { cdpSessionManager } from '@/utils/cdp-session-manager';
+import {
+  cdpSessionManager,
+  type CDPDebuggee,
+  type CDPDetachListener,
+  type CDPEventListener,
+} from '@/utils/cdp-session-manager';
 
 /**
  * ConsoleBuffer - 持久化的控制台日志缓冲管理器
@@ -142,6 +147,8 @@ function safeNumber(value: unknown): number | undefined {
 class ConsoleBuffer {
   private buffers = new Map<number, TabConsoleBufferState>();
   private starting = new Map<number, Promise<void>>();
+  private readonly cdpEventListener: CDPEventListener = this.handleDebuggerEvent.bind(this);
+  private readonly cdpDetachListener: CDPDetachListener = this.handleDebuggerDetach.bind(this);
   private static instance: ConsoleBuffer | null = null;
 
   constructor() {
@@ -150,8 +157,8 @@ class ConsoleBuffer {
     }
     ConsoleBuffer.instance = this;
 
-    chrome.debugger.onEvent.addListener(this.handleDebuggerEvent.bind(this));
-    chrome.debugger.onDetach.addListener(this.handleDebuggerDetach.bind(this));
+    cdpSessionManager.addEventListener(this.cdpEventListener);
+    cdpSessionManager.addDetachListener(this.cdpDetachListener);
     chrome.tabs.onRemoved.addListener(this.handleTabRemoved.bind(this));
     chrome.tabs.onUpdated.addListener(this.handleTabUpdated.bind(this));
   }
@@ -333,7 +340,7 @@ class ConsoleBuffer {
     }
   }
 
-  private handleDebuggerDetach(source: chrome.debugger.Debuggee, reason: string): void {
+  private handleDebuggerDetach(source: CDPDebuggee, reason: string): void {
     if (typeof source.tabId !== 'number') return;
     if (!this.buffers.has(source.tabId)) return;
 
@@ -346,11 +353,7 @@ class ConsoleBuffer {
     cdpSessionManager.detach(source.tabId, 'console-buffer').catch(() => {});
   }
 
-  private handleDebuggerEvent(
-    source: chrome.debugger.Debuggee,
-    method: string,
-    params?: unknown,
-  ): void {
+  private handleDebuggerEvent(source: CDPDebuggee, method: string, params?: unknown): void {
     const tabId = source.tabId;
     if (typeof tabId !== 'number') return;
 

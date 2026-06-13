@@ -1,7 +1,12 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
-import { cdpSessionManager } from '@/utils/cdp-session-manager';
+import {
+  cdpSessionManager,
+  type CDPDebuggee,
+  type CDPDetachListener,
+  type CDPEventListener,
+} from '@/utils/cdp-session-manager';
 import { NETWORK_FILTERS } from '@/common/constants';
 import {
   buildSafeResponseSummaryFromJsonText,
@@ -84,6 +89,8 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
   private lastActivityTime: Map<number, number> = new Map(); // tabId -> timestamp of last network activity
   private pendingResponseBodies: Map<string, Promise<any>> = new Map(); // requestId -> promise for getResponseBody
   private requestCounters: Map<number, number> = new Map(); // tabId -> count of captured requests (after filtering)
+  private readonly cdpEventListener: CDPEventListener = this.handleDebuggerEvent.bind(this);
+  private readonly cdpDetachListener: CDPDetachListener = this.handleDebuggerDetach.bind(this);
   private static MAX_REQUESTS_PER_CAPTURE = 100; // Max requests to store to prevent memory issues
   public static instance: NetworkDebuggerStartTool | null = null;
 
@@ -94,8 +101,8 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     }
     NetworkDebuggerStartTool.instance = this;
 
-    chrome.debugger.onEvent.addListener(this.handleDebuggerEvent.bind(this));
-    chrome.debugger.onDetach.addListener(this.handleDebuggerDetach.bind(this));
+    cdpSessionManager.addEventListener(this.cdpEventListener);
+    cdpSessionManager.addDetachListener(this.cdpDetachListener);
     chrome.tabs.onRemoved.addListener(this.handleTabRemoved.bind(this));
     chrome.tabs.onCreated.addListener(this.handleTabCreated.bind(this));
   }
@@ -252,7 +259,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     }
   }
 
-  private handleDebuggerEvent(source: chrome.debugger.Debuggee, method: string, params?: any) {
+  private handleDebuggerEvent(source: CDPDebuggee, method: string, params?: any) {
     if (!source.tabId) return;
 
     const tabId = source.tabId;
@@ -279,7 +286,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     }
   }
 
-  private handleDebuggerDetach(source: chrome.debugger.Debuggee, reason: string) {
+  private handleDebuggerDetach(source: CDPDebuggee, reason: string) {
     if (source.tabId && this.captureData.has(source.tabId)) {
       console.log(
         `NetworkDebuggerStartTool: Debugger detached from tab ${source.tabId}, reason: ${reason}. Cleaning up.`,

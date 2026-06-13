@@ -1,7 +1,7 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
-import { cdpSessionManager } from '@/utils/cdp-session-manager';
+import { cdpSessionManager, type CDPEventListener } from '@/utils/cdp-session-manager';
 import { prepareFileViaNative, requestNativeFileOperation } from './native-file';
 
 type OwnerTag = 'performance';
@@ -27,14 +27,12 @@ interface AnalyzeInsightParams {
   windowId?: number;
 }
 
-type DebuggeeEvent = (source: chrome.debugger.Debuggee, method: string, params?: any) => void;
-
 interface TraceSessionState {
   recording: boolean;
   events: any[];
   startedAt: number;
   pageUrl?: string;
-  listener: DebuggeeEvent;
+  listener: CDPEventListener;
   stopResolver?: (value: { completed: boolean }) => void;
   stopPromise?: Promise<{ completed: boolean }>;
 }
@@ -225,7 +223,7 @@ class PerformanceStartTraceTool extends BaseBrowserToolExecutor {
           }
         },
       };
-      chrome.debugger.onEvent.addListener(state.listener);
+      cdpSessionManager.addEventListener(state.listener);
       sessions.set(tabId, state);
 
       // Start tracing with categories
@@ -317,7 +315,7 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
 
       // Cleanup event listener and detach
       try {
-        chrome.debugger.onEvent.removeListener(session.listener);
+        cdpSessionManager.removeEventListener(session.listener);
       } catch {
         // ignore
       }

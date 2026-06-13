@@ -1,9 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { attachMock, detachMock, sendCommandMock } = vi.hoisted(() => ({
+const {
+  attachMock,
+  detachMock,
+  sendCommandMock,
+  addEventListenerMock,
+  removeEventListenerMock,
+  addDetachListenerMock,
+  removeDetachListenerMock,
+} = vi.hoisted(() => ({
   attachMock: vi.fn(),
   detachMock: vi.fn(),
   sendCommandMock: vi.fn(),
+  addEventListenerMock: vi.fn(),
+  removeEventListenerMock: vi.fn(),
+  addDetachListenerMock: vi.fn(),
+  removeDetachListenerMock: vi.fn(),
 }));
 
 vi.mock('@/utils/cdp-session-manager', () => ({
@@ -11,6 +23,10 @@ vi.mock('@/utils/cdp-session-manager', () => ({
     attach: attachMock,
     detach: detachMock,
     sendCommand: sendCommandMock,
+    addEventListener: addEventListenerMock,
+    removeEventListener: removeEventListenerMock,
+    addDetachListener: addDetachListenerMock,
+    removeDetachListener: removeDetachListenerMock,
   },
 }));
 
