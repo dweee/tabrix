@@ -264,6 +264,43 @@ describe('buildSearchSurface', () => {
     expect(surface?.visibleButUnresolved).toEqual([]);
   });
 
+  it('links toolbar controls to locator-backed actions even when recovered refs drift', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_text_search_toolbar_155',
+          role: 'button',
+          name: '筛选',
+        }),
+      ],
+      candidateActions: [
+        candidate({
+          id: 'ca_filter_locator_backed',
+          targetRef: 'ref_text_search_toolbar_12',
+          intent: 'filter.open',
+          locatorChain: [
+            { type: 'ref', value: 'ref_text_search_toolbar_12' },
+            { type: 'aria', value: '筛选' },
+            { type: 'css', value: '.toolbar-filter' },
+          ],
+        }),
+      ],
+      visibleTextContent: '筛选',
+    });
+
+    expect(surface?.controls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'filter_trigger',
+          label: '筛选',
+          targetRef: 'ref_text_search_toolbar_155',
+          candidateActionId: 'ca_filter_locator_backed',
+        }),
+      ]),
+    );
+  });
+
   it('treats applied-filter toolbar state text as the filter trigger', () => {
     const surface = buildSearchSurface({
       assistantGuidance: guidance,

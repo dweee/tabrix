@@ -180,6 +180,17 @@ function isSearchToolbarCategoryElement(
   return currentTop - topAnchor <= SEARCH_TOOLBAR_VERTICAL_BAND_PX;
 }
 
+function isRecoveredTextActionElement(element: ReadPageInteractiveElement): boolean {
+  const role = String(element.role || '').toLowerCase();
+  if (role !== 'text_action') return false;
+  const ref = String(element.ref || '');
+  return (
+    ref.startsWith('ref_text_search_toolbar_') ||
+    ref.startsWith('ref_text_filter_panel_') ||
+    ref.startsWith('ref_text_control_')
+  );
+}
+
 function isSearchActionText(value: string): boolean {
   if (!value) return false;
   if (
@@ -444,7 +455,7 @@ export function buildCandidateActions(
     const name = String(element.name || '').trim();
     let actionType: 'click' | 'fill' | null = null;
 
-    if (clickRoles.has(role)) actionType = 'click';
+    if (clickRoles.has(role) || isRecoveredTextActionElement(element)) actionType = 'click';
     else if (fillRoles.has(role)) actionType = 'fill';
     if (!actionType) continue;
 

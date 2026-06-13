@@ -373,6 +373,62 @@ describe('candidateAction bridge', () => {
     expect(clickMessage.ref).toBeUndefined();
   });
 
+  it('requires fresh readback instead of retry when a dispatched filter click has no local signal', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4116,
+      title: 'Search',
+      url: 'https://example.com/search?q=neutral',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      dispatchSucceeded: true,
+      signals: {
+        beforeUnloadFired: false,
+        urlBefore: 'https://example.com/search?q=neutral',
+        urlAfter: 'https://example.com/search?q=neutral',
+        hashBefore: '',
+        hashAfter: '',
+        domChanged: false,
+        domAddedDialog: false,
+        domAddedMenu: false,
+        focusChanged: false,
+        targetStateDelta: null,
+      },
+    });
+
+    const result = await clickTool.execute({
+      candidateAction: {
+        targetRef: 'ref_text_filter_panel_8',
+        intent: 'filter.sort_most_collected',
+        locatorChain: [
+          { type: 'ref', value: 'ref_text_filter_panel_8' },
+          { type: 'aria', value: '最多收藏' },
+          { type: 'css', value: '.filter-panel .tags[data-filter="most-saved"]' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload).toMatchObject({
+      success: false,
+      dispatchSucceeded: true,
+      observedOutcome: 'no_observed_change',
+      postActionReadback: {
+        status: 'fresh_read_required',
+        requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
+        businessSuccessProven: false,
+      },
+      actionEvidenceResult: {
+        business: {
+          nextRequiredCheck: 'chrome_read_page_force_refresh_same_tab',
+          businessSuccessProven: false,
+        },
+      },
+    });
+  });
+
   it('routes recovered dynamic surface targetRef through candidateAction locator css', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4121,

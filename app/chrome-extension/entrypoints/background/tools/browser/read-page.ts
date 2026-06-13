@@ -1024,9 +1024,9 @@ function searchToolbarElementKey(element: any): string {
 }
 
 function hasExecutableRecoveredTarget(element: any): boolean {
-  const ref = typeof element?.ref === 'string' ? element.ref.trim() : '';
   const href = typeof element?.href === 'string' ? element.href.trim() : '';
-  return Boolean(ref || href);
+  const selector = typeof element?.selector === 'string' ? element.selector.trim() : '';
+  return Boolean(selector || href);
 }
 
 function prependRecoveredElementsToPageContent(params: {

@@ -265,7 +265,7 @@ describe('buildPostActionReadbackEvidence', () => {
     });
   });
 
-  it('does not claim most-collected sorting when the click produced no observable change', () => {
+  it('requires fresh readback before retry for dispatched most-collected sorting with no local change', () => {
     const evidence = buildPostActionReadbackEvidence({
       dispatchSucceeded: true,
       actionKind: 'click',
@@ -274,7 +274,29 @@ describe('buildPostActionReadbackEvidence', () => {
     });
 
     expect(evidence).toMatchObject({
-      status: 'not_proven',
+      status: 'fresh_read_required',
+      freshReadRequired: true,
+      businessSuccessProven: false,
+      readbackSource: 'tool_dispatch_only',
+      requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
+      expectedEvidence: 'search_results_or_url_query_changed',
+    });
+  });
+
+  it('requires fresh readback before retry for dispatched category selection with no local change', () => {
+    const evidence = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'click',
+      observedOutcome: 'no_observed_change',
+      candidateAction: { intent: 'search.category_select' },
+    });
+
+    expect(evidence).toMatchObject({
+      status: 'fresh_read_required',
+      freshReadRequired: true,
+      businessSuccessProven: false,
+      readbackSource: 'tool_dispatch_only',
+      requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
       expectedEvidence: 'search_results_or_url_query_changed',
     });
   });

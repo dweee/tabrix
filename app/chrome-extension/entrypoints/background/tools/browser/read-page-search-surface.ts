@@ -320,7 +320,13 @@ function controlForElement(params: {
   reason: string;
   confidence: number;
 }): SearchSurfaceControl {
-  const action = actionForRef(params.candidateActions, params.element.ref);
+  const action =
+    actionForRef(params.candidateActions, params.element.ref) ??
+    actionForElementLabel({
+      kind: params.kind,
+      element: params.element,
+      candidateActions: params.candidateActions,
+    });
   const state = controlStateForElement(params.element);
   return {
     kind: params.kind,
@@ -334,6 +340,30 @@ function controlForElement(params: {
     ...(state ? { state } : {}),
     reason: params.reason,
   };
+}
+
+function actionForElementLabel(params: {
+  kind: SearchSurfaceControl['kind'];
+  element: ReadPageInteractiveElement;
+  candidateActions: readonly ReadPageCandidateAction[];
+}): ReadPageCandidateAction | undefined {
+  const label = safeLabel(params.element.name);
+  if (!label) return undefined;
+  if (
+    params.kind === 'filter_trigger' ||
+    params.kind === 'sort_menu' ||
+    params.kind === 'category_tab'
+  ) {
+    return actionForToolbarLabel(params.candidateActions, label, [params.element]);
+  }
+  if (
+    params.kind === 'sort_most_collected' ||
+    params.kind === 'filter_panel_action' ||
+    params.kind === 'filter_panel_option'
+  ) {
+    return actionForFilterPanelLabel(params.candidateActions, label, [params.element]);
+  }
+  return undefined;
 }
 
 function controlForRecoveredAction(params: {

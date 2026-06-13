@@ -74,6 +74,20 @@ function expectedBusinessEvidenceForIntent(
   }
 }
 
+function shouldReadBackBeforeRetry(input: {
+  intent: string | null;
+  dispatchSucceeded: boolean;
+  observedOutcome: ClickObservedOutcome | 'verification_required' | 'input_value_written' | null;
+}): boolean {
+  if (!input.dispatchSucceeded) return false;
+  if (input.observedOutcome !== 'no_observed_change') return false;
+  return (
+    input.intent === 'filter.open' ||
+    input.intent === 'filter.sort_most_collected' ||
+    input.intent === 'search.category_select'
+  );
+}
+
 export function buildActionBusinessVerificationPlan(input: {
   candidateAction?: CandidateActionInput;
   dispatchSucceeded: boolean;
@@ -111,6 +125,11 @@ export function buildPostActionReadbackEvidence(input: {
   const intent = normalizeIntent(input.candidateAction);
   const expectedEvidence = expectedBusinessEvidenceForIntent(input.candidateAction?.intent);
   const observedOutcome = input.observedOutcome ?? null;
+  const readBackBeforeRetry = shouldReadBackBeforeRetry({
+    intent,
+    dispatchSucceeded: input.dispatchSucceeded,
+    observedOutcome,
+  });
 
   if (input.verifierPassed === true) {
     return {
@@ -129,6 +148,26 @@ export function buildPostActionReadbackEvidence(input: {
       reason: input.verifierReason || 'post_action_verifier_passed',
       claimBoundary:
         'Business success is proven only for the verifier scope that ran; unrelated user task outcomes still need their own postcondition evidence.',
+    };
+  }
+
+  if (readBackBeforeRetry) {
+    return {
+      kind: 'post_action_readback_v1',
+      actionKind: input.actionKind,
+      status: 'fresh_read_required',
+      candidateActionIntent: intent,
+      expectedEvidence,
+      observedOutcome,
+      dispatchSucceeded: input.dispatchSucceeded,
+      freshReadRequired: true,
+      sameTabVerificationRequired: true,
+      businessSuccessProven: false,
+      readbackSource: 'tool_dispatch_only',
+      requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
+      reason: `${input.actionKind}_dispatch_without_local_observable_change_requires_fresh_read`,
+      claimBoundary:
+        'The action was dispatched, but lightweight search/filter UI changes can be missed by the local observation window. Do not retry first; run a fresh same-tab chrome_read_page and verify the expected page/object state.',
     };
   }
 

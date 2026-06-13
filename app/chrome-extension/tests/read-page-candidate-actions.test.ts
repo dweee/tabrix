@@ -337,6 +337,33 @@ describe('read_page candidate action intents', () => {
     });
   });
 
+  it('turns recovered search toolbar text actions into locator-backed filter actions', () => {
+    const actions = buildCandidateActions(
+      [
+        element({
+          ref: 'ref_text_search_toolbar_155',
+          role: 'text_action',
+          name: '筛选',
+        }),
+      ],
+      [
+        {
+          ref: 'ref_text_search_toolbar_155',
+          selector: 'body > main > div.search-layout__top > div.filter',
+        },
+      ],
+    );
+
+    expect(actions[0]).toMatchObject({
+      actionType: 'click',
+      targetRef: 'ref_text_search_toolbar_155',
+      intent: 'filter.open',
+      locatorChain: expect.arrayContaining([
+        { type: 'css', value: 'body > main > div.search-layout__top > div.filter' },
+      ]),
+    });
+  });
+
   it('keeps recovered filter-panel options executable and prioritized', () => {
     const actions = buildCandidateActions(
       [

@@ -1069,6 +1069,70 @@ describe('read_page mode', () => {
     });
   });
 
+  it('does not let a non-executable filter ref block locator-backed toolbar recovery', async () => {
+    vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
+      { result: { bound: 1 } },
+    ] as any);
+    const collectInteractiveElementsFallback = vi
+      .spyOn(readPageTool as any, 'collectInteractiveElementsFallback')
+      .mockImplementation(async (_tabId: number, options: { textQuery?: string }) => {
+        if (options.textQuery !== '筛选') return { success: true, elements: [] };
+        return {
+          success: true,
+          elements: [
+            {
+              type: 'selected',
+              role: '',
+              selector: 'body > main > div.search-layout__top > div.filter',
+              text: '筛选',
+              isInteractive: true,
+              actionability: 'actionable',
+              coordinates: {
+                x: 1200,
+                y: 60,
+                rect: { x: 1160, y: 40, width: 84, height: 40 },
+              },
+            },
+          ],
+        };
+      });
+    const basePayload: any = {
+      pageRole: 'search_results',
+      visibleTextContent: '全部 图文 视频 用户 筛选',
+      elements: [
+        {
+          ref: 'ref_weak_filter',
+          role: 'button',
+          name: '筛选',
+          text: '筛选',
+        },
+      ],
+      refMap: [{ ref: 'ref_weak_filter' }],
+      count: 1,
+    };
+
+    const recovered = await (readPageTool as any).recoverSearchToolbarTextTargets({
+      tabId: 5222,
+      basePayload,
+      assistantGuidance: {
+        taskKind: 'search',
+        requestedObjects: ['filters', 'result_cards'],
+      },
+    });
+
+    expect(recovered).toBe(true);
+    expect(collectInteractiveElementsFallback).toHaveBeenCalledWith(
+      5222,
+      expect.objectContaining({ textQuery: '筛选', includeCoordinates: true }),
+    );
+    expect(basePayload.elements[0]).toMatchObject({
+      ref: expect.stringMatching(/^ref_text_search_toolbar_/),
+      selector: 'body > main > div.search-layout__top > div.filter',
+      text: '筛选',
+      actionability: 'actionable',
+    });
+  });
+
   it('recovers short visible text controls without requiring screenshots or coordinates first', async () => {
     const bindScript = vi
       .spyOn(chrome.scripting, 'executeScript')
