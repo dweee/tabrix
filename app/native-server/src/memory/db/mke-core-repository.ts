@@ -993,6 +993,7 @@ export interface ExperienceRecipeInput {
   adoptionCount?: number;
   avgDurationMs?: number | null;
   avgTokenTotal?: number | null;
+  reliabilityScore?: number | null;
   driftState?: string | null;
   portabilityScope?: string;
   originKind?: string;
@@ -1021,6 +1022,7 @@ export interface ExperienceRecipe extends Required<
     | 'linkedKnowledgeIds'
     | 'avgDurationMs'
     | 'avgTokenTotal'
+    | 'reliabilityScore'
     | 'driftState'
     | 'originPackageId'
     | 'compatibility'
@@ -1039,6 +1041,7 @@ export interface ExperienceRecipe extends Required<
   linkedKnowledgeIds: string[];
   avgDurationMs: number | null;
   avgTokenTotal: number | null;
+  reliabilityScore: number | null;
   driftState: string | null;
   originPackageId: string | null;
   compatibility: unknown | null;
@@ -1090,6 +1093,7 @@ interface ExperienceRecipeRow {
   adoption_count: number;
   avg_duration_ms: number | null;
   avg_token_total: number | null;
+  reliability_score: number | null;
   drift_state: string | null;
   portability_scope: string;
   origin_kind: string;
@@ -1128,6 +1132,7 @@ function rowToExperienceRecipe(row: ExperienceRecipeRow): ExperienceRecipe {
     adoptionCount: row.adoption_count,
     avgDurationMs: row.avg_duration_ms,
     avgTokenTotal: row.avg_token_total,
+    reliabilityScore: row.reliability_score,
     driftState: row.drift_state,
     portabilityScope: row.portability_scope,
     originKind: row.origin_kind,
@@ -1162,7 +1167,7 @@ export class ExperienceRecipeRepository {
          recipe_version, site_family, page_model_key, page_role, preconditions_blob,
          variable_schema_blob, steps_blob, success_check_blob, recovery_blob,
          source_trace_ids_blob, linked_knowledge_ids_blob, success_count, failure_count,
-         adoption_count, avg_duration_ms, avg_token_total, drift_state, portability_scope, origin_kind,
+         adoption_count, avg_duration_ms, avg_token_total, reliability_score, drift_state, portability_scope, origin_kind,
          origin_package_id, compatibility_blob, export_state, import_state, redaction_state,
          archived_at, last_used_at, last_verified_at, created_at, updated_at)
        VALUES
@@ -1170,7 +1175,7 @@ export class ExperienceRecipeRepository {
          @recipe_version, @site_family, @page_model_key, @page_role, @preconditions_blob,
          @variable_schema_blob, @steps_blob, @success_check_blob, @recovery_blob,
          @source_trace_ids_blob, @linked_knowledge_ids_blob, @success_count, @failure_count,
-         @adoption_count, @avg_duration_ms, @avg_token_total, @drift_state, @portability_scope, @origin_kind,
+         @adoption_count, @avg_duration_ms, @avg_token_total, @reliability_score, @drift_state, @portability_scope, @origin_kind,
          @origin_package_id, @compatibility_blob, @export_state, @import_state, @redaction_state,
          @archived_at, @last_used_at, @last_verified_at, @created_at, @updated_at)
        ON CONFLICT(recipe_fingerprint, recipe_version) DO UPDATE SET
@@ -1191,6 +1196,8 @@ export class ExperienceRecipeRepository {
          failure_count = excluded.failure_count,
          avg_duration_ms = excluded.avg_duration_ms,
          avg_token_total = excluded.avg_token_total,
+         reliability_score = excluded.reliability_score,
+         drift_state = excluded.drift_state,
          last_verified_at = excluded.last_verified_at,
          compatibility_blob = excluded.compatibility_blob,
          export_state = excluded.export_state,
@@ -1244,6 +1251,28 @@ export class ExperienceRecipeRepository {
       : inputLinkedKnowledgeIds;
     const inputSuccessCount = optionalInteger(input.successCount) ?? 0;
     const inputFailureCount = optionalInteger(input.failureCount) ?? 0;
+    const nextSuccessCount =
+      (existing?.successCount ?? 0) + (hasNewSourceTrace ? inputSuccessCount : 0);
+    const nextFailureCount =
+      (existing?.failureCount ?? 0) + (hasNewSourceTrace ? inputFailureCount : 0);
+    const totalOutcomes = nextSuccessCount + nextFailureCount;
+    const nextReliabilityScore =
+      optionalNumber(input.reliabilityScore) ??
+      (totalOutcomes > 0
+        ? Number((nextSuccessCount / totalOutcomes).toFixed(4))
+        : (existing?.reliabilityScore ?? null));
+    const promotedToVerified =
+      Boolean(existing) &&
+      hasNewSourceTrace &&
+      inputSuccessCount > 0 &&
+      nextSuccessCount >= 2 &&
+      nextFailureCount === 0;
+    const nextDriftState = promotedToVerified
+      ? 'verified_once'
+      : (existing?.driftState ?? input.driftState ?? null);
+    const nextLastVerifiedAt = promotedToVerified
+      ? (input.lastVerifiedAt ?? input.updatedAt)
+      : (existing?.lastVerifiedAt ?? input.lastVerifiedAt ?? null);
 
     const row = {
       experience_id: existing?.experienceId ?? input.experienceId ?? randomUUID(),
@@ -1262,12 +1291,13 @@ export class ExperienceRecipeRepository {
       recovery_blob: blob(input.recovery),
       source_trace_ids_blob: requiredBlob(mergedSourceTraceIds),
       linked_knowledge_ids_blob: requiredBlob(mergedLinkedKnowledgeIds),
-      success_count: (existing?.successCount ?? 0) + (hasNewSourceTrace ? inputSuccessCount : 0),
-      failure_count: (existing?.failureCount ?? 0) + (hasNewSourceTrace ? inputFailureCount : 0),
+      success_count: nextSuccessCount,
+      failure_count: nextFailureCount,
       adoption_count: existing?.adoptionCount ?? optionalInteger(input.adoptionCount) ?? 0,
       avg_duration_ms: optionalInteger(input.avgDurationMs) ?? existing?.avgDurationMs ?? null,
       avg_token_total: optionalInteger(input.avgTokenTotal) ?? existing?.avgTokenTotal ?? null,
-      drift_state: input.driftState ?? null,
+      reliability_score: nextReliabilityScore,
+      drift_state: nextDriftState,
       portability_scope: input.portabilityScope ?? 'local',
       origin_kind: input.originKind ?? 'local_mined',
       origin_package_id: input.originPackageId ?? null,
@@ -1277,7 +1307,7 @@ export class ExperienceRecipeRepository {
       redaction_state: EXPERIENCE_TEMPLATE_ONLY_REDACTION_STATE,
       archived_at: input.archivedAt ?? null,
       last_used_at: input.lastUsedAt ?? existing?.lastUsedAt ?? null,
-      last_verified_at: input.lastVerifiedAt ?? existing?.lastVerifiedAt ?? null,
+      last_verified_at: nextLastVerifiedAt,
       created_at: existing?.createdAt ?? input.createdAt,
       updated_at: input.updatedAt,
     };

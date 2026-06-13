@@ -174,6 +174,12 @@ describe('MkeExperienceProjector', () => {
           success: true,
           selectedDataSource: 'visible_dom_result_cards',
           observedResultCount: 10,
+          filterState: {
+            contentType: '图文',
+            sort: '最多收藏',
+            timeRange: '一周内',
+            appliedLabels: ['图文', '最多收藏', '一周内'],
+          },
           collection: { startFromTop: true },
         },
       },
@@ -222,6 +228,12 @@ describe('MkeExperienceProjector', () => {
           startFromTop: true,
           selectedDataSource: 'visible_dom_result_cards',
           observedResultCount: 10,
+          filterState: {
+            contentType: '图文',
+            sort: '最多收藏',
+            timeRange: '一周内',
+            appliedLabels: ['图文', '最多收藏', '一周内'],
+          },
         },
       },
     ]);
@@ -260,6 +272,12 @@ describe('MkeExperienceProjector', () => {
           success: true,
           selectedDataSource: 'visible_dom_result_cards',
           observedResultCount: 10,
+          filterState: {
+            contentType: '图文',
+            sort: '最多收藏',
+            timeRange: '一周内',
+            appliedLabels: ['图文', '最多收藏', '一周内'],
+          },
           collection: { startFromTop: true },
         },
       },
@@ -289,6 +307,12 @@ describe('MkeExperienceProjector', () => {
           success: true,
           selectedDataSource: 'visible_dom_result_cards',
           observedResultCount: 10,
+          filterState: {
+            contentType: '图文',
+            sort: '最多收藏',
+            timeRange: '一周内',
+            appliedLabels: ['图文', '最多收藏', '一周内'],
+          },
           collection: { startFromTop: true },
         },
       },
@@ -325,6 +349,102 @@ describe('MkeExperienceProjector', () => {
     expect(recipes).toHaveLength(1);
     expect(recipes[0]?.sourceTraceIds).toEqual(['trace-collect-cards-a', 'trace-collect-cards-b']);
     expect(recipes[0]?.successCount).toBe(2);
+    expect(recipes[0]?.reliabilityScore).toBe(1);
+    expect(recipes[0]?.driftState).toBe('verified_once');
+    expect(recipes[0]?.lastVerifiedAt).toBe('2026-06-06T03:20:05.000Z');
+    expect(recipes[0]?.successCheck).toMatchObject({
+      collectResultCards: [
+        {
+          observedResultCountAtLeast: 10,
+          selectedDataSource: 'visible_dom_result_cards',
+          requiredStatus: 'complete_enough',
+          filterState: {
+            contentType: '图文',
+            sort: '最多收藏',
+            timeRange: '一周内',
+          },
+        },
+      ],
+    });
+
+    const replayResult = projector.projectIdleBatch({ nowIso: '2026-06-06T03:20:06.000Z' });
+    expect(replayResult.savedExperienceCount).toBe(1);
+    const replayedRecipes = experience.findByScenario(`mke:example.test:${pageModelKey}`);
+    expect(replayedRecipes[0]?.successCount).toBe(2);
+    expect(replayedRecipes[0]?.reliabilityScore).toBe(1);
+    expect(replayedRecipes[0]?.driftState).toBe('verified_once');
+    expect(replayedRecipes[0]?.lastVerifiedAt).toBe('2026-06-06T03:20:05.000Z');
+  });
+
+  it('keeps a single AI-reviewed card collection as an unverified template', () => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const traces = new MemoryTraceRepository(opened.db);
+    const knowledge = new KnowledgeModelRepository(opened.db);
+    const experience = new ExperienceRecipeRepository(opened.db);
+    const projector = new MkeExperienceProjector(traces, knowledge, experience);
+
+    const trace = traces.append({
+      traceId: 'trace-collect-cards-once',
+      taskId: 'task-card-collection-once',
+      toolName: 'chrome_collect_result_cards',
+      requestParams: { tabId: 9, minResults: 10, startFromTop: true },
+      requestAt: '2026-06-06T03:22:01.000Z',
+      response: {
+        payloadDigest: {
+          success: true,
+          selectedDataSource: 'visible_dom_result_cards',
+          observedResultCount: 10,
+          filterState: {
+            contentType: '图文',
+            sort: '最多收藏',
+            timeRange: '一周内',
+            appliedLabels: ['图文', '最多收藏', '一周内'],
+          },
+          collection: { startFromTop: true },
+        },
+      },
+      responseAt: '2026-06-06T03:22:02.000Z',
+      durationMs: 900,
+      toolSuccess: true,
+      aiFeedback: verifiedExperienceFeedback({
+        confidence: 0.93,
+        reasonCode: 'ai_verified_top10_cards_once',
+        summary: 'AI verified that one top 10 card collection completed the requested task.',
+      }),
+      tabId: 9,
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageState: 'complete',
+      createdAt: '2026-06-06T03:22:02.000Z',
+    });
+    const pageModelKey = buildMkePageModelKey(trace)!;
+    addKnowledge({
+      knowledge,
+      siteFamily: 'example.test',
+      pageModelKey,
+      pageRole: 'search_results',
+      pageUrlPattern: 'https://example.test/search',
+    });
+
+    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T03:22:03.000Z' });
+    const recipe = experience.get(result.experienceIds[0])!;
+
+    expect(recipe.successCount).toBe(1);
+    expect(recipe.reliabilityScore).toBe(1);
+    expect(recipe.driftState).toBe('unverified_template');
+    expect(recipe.lastVerifiedAt).toBeNull();
+    expect(recipe.successCheck).toMatchObject({
+      collectResultCards: [
+        {
+          filterState: {
+            contentType: '图文',
+            sort: '最多收藏',
+            timeRange: '一周内',
+          },
+        },
+      ],
+    });
   });
 
   it('rejects raw-sensitive chains and does not persist an Experience recipe', () => {

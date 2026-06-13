@@ -252,10 +252,17 @@ function readCollectResultCardsReuseProfile(trace: MemoryTrace): {
   startFromTop: boolean;
   selectedDataSource: string | null;
   observedResultCount: number | null;
+  filterState: {
+    contentType: string | null;
+    sort: string | null;
+    timeRange: string | null;
+    appliedLabels: string[];
+  };
 } {
   const request = readObject(trace.requestParams);
   const response = readResponseDigest(trace);
   const collection = readObject(response?.collection);
+  const filterState = readObject(response?.filterState);
   return {
     minResults:
       readFiniteNumber(request?.minResults) ??
@@ -267,6 +274,16 @@ function readCollectResultCardsReuseProfile(trace: MemoryTrace): {
       readBoolean(request?.startFromTop) ?? readBoolean(collection?.startFromTop) ?? true,
     selectedDataSource: readString(response?.selectedDataSource),
     observedResultCount: readFiniteNumber(response?.observedResultCount),
+    filterState: {
+      contentType: readString(filterState?.contentType),
+      sort: readString(filterState?.sort),
+      timeRange: readString(filterState?.timeRange),
+      appliedLabels: Array.isArray(filterState?.appliedLabels)
+        ? filterState.appliedLabels.filter(
+            (label): label is string => typeof label === 'string' && label.length > 0,
+          )
+        : [],
+    },
   };
 }
 
@@ -314,6 +331,7 @@ function buildStepTemplate(trace: MemoryTrace, order: number): Record<string, un
         startFromTop: reuseProfile.startFromTop,
         selectedDataSource: reuseProfile.selectedDataSource,
         observedResultCount: reuseProfile.observedResultCount,
+        filterState: reuseProfile.filterState,
       },
     };
   }
@@ -371,6 +389,7 @@ function buildCollectSuccessChecks(actionTraces: MemoryTrace[]): Array<Record<st
         observedResultCountAtLeast: reuseProfile.minResults,
         selectedDataSource: reuseProfile.selectedDataSource,
         requiredStatus: 'complete_enough',
+        filterState: reuseProfile.filterState,
       };
     });
 }

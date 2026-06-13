@@ -83,14 +83,14 @@ function isPositionalSelector(selector: string | null): boolean {
 function isSessionScopedAction(object: BrowserObject, actionType: string): boolean {
   if (actionType !== 'click_result_card') return false;
   const facts = readObject(object.facts);
-  const actionTarget =
-    readObject(facts?.actionTarget) ?? readObject(object.targetability)?.actionTarget;
+  const targetability = readObject(object.targetability);
+  const actionTarget = readObject(facts?.actionTarget) ?? readObject(targetability?.actionTarget);
   const selector = typeof actionTarget?.selector === 'string' ? actionTarget.selector : null;
   return Boolean(
     isPositionalSelector(selector) ||
     readObject(actionTarget?.center) ||
     readObject(actionTarget?.rect) ||
-    readObject(object.targetability)?.rect,
+    targetability?.rect,
   );
 }
 
