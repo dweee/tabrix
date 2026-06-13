@@ -160,4 +160,67 @@ describe('screenshot tool target binding', () => {
       captureTargetProven: true,
     });
   });
+
+  it('captures a regular page visible viewport without injecting the screenshot helper', async () => {
+    vi.spyOn(chrome.tabs, 'get').mockResolvedValue({
+      id: 89,
+      windowId: 7,
+      active: true,
+      status: 'complete',
+      url: 'https://example.com/article',
+      width: 1280,
+      height: 720,
+    } as chrome.tabs.Tab);
+    vi.spyOn(chrome.windows, 'get').mockResolvedValue({
+      id: 7,
+      focused: true,
+      state: 'normal',
+      type: 'normal',
+    } as chrome.windows.Window);
+    vi.spyOn(chrome.windows, 'update').mockResolvedValue({
+      id: 7,
+      focused: true,
+    } as chrome.windows.Window);
+    vi.spyOn(chrome.tabs, 'update').mockResolvedValue({
+      id: 89,
+      windowId: 7,
+      active: true,
+    } as chrome.tabs.Tab);
+    vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
+      {
+        result: {
+          visibilityState: 'visible',
+          hasFocus: true,
+          hidden: false,
+        },
+      },
+    ] as any);
+    const injectContentScript = vi
+      .spyOn(screenshotTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+    const sendMessageToTab = vi
+      .spyOn(screenshotTool as any, 'sendMessageToTab')
+      .mockResolvedValue({ success: true });
+    const captureVisibleTab = vi
+      .spyOn(chrome.tabs, 'captureVisibleTab')
+      .mockResolvedValue('data:image/png;base64,ok');
+
+    const result = await screenshotTool.execute({
+      name: 'regular-visible-page',
+      tabId: 89,
+      savePng: false,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(injectContentScript).not.toHaveBeenCalled();
+    expect(sendMessageToTab).not.toHaveBeenCalled();
+    expect(captureVisibleTab).toHaveBeenCalledWith(7, { format: 'png' });
+
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload).toMatchObject({
+      success: true,
+      tabId: 89,
+      url: 'https://example.com/article',
+    });
+  });
 });

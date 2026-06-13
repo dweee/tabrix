@@ -221,8 +221,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       const background = args.background === true;
       // CDP path: background=true with simple viewport capture (no fullPage, no selector)
       const canUseCdpCapture = background && !fullPage && !selector;
-      const canUseVisibleOnlyCaptureWithoutHelper =
-        isOwnExtensionPageUrl(tab.url) && !fullPage && !selector;
+      const canUseVisibleOnlyCaptureWithoutHelper = !fullPage && !selector;
 
       // === Path 1: CDP viewport capture (no content script needed) ===
       if (canUseCdpCapture) {
@@ -258,7 +257,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
         }
       }
 
-      // === Path 2: Own extension page visible capture (content scripts cannot inject there) ===
+      // === Path 2: Simple visible capture (no content script needed) ===
       if (!finalImageDataUrl && canUseVisibleOnlyCaptureWithoutHelper) {
         visibleCaptureTargetProof = await this.proveVisibleCaptureTarget(tab);
         finalImageDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });

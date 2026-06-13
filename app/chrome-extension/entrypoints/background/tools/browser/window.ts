@@ -28,10 +28,10 @@ type TabSummary = {
   operabilityReason: string;
 };
 
-function toPageState(tab: BrowserWorldTabObject): PageState {
+function toPageState(tab: BrowserWorldTabObject, foregroundTabId: number | null): PageState {
   if (tab.aiOperationState === 'closed' || tab.closedAtMs !== null) return 'closed';
   if (tab.canTabrixOperate === false) return 'restricted';
-  if (tab.active === true) return 'foreground';
+  if (typeof foregroundTabId === 'number' && tab.tabId === foregroundTabId) return 'foreground';
   if (tab.status === 'loading') return 'loading';
   return 'running';
 }
@@ -51,8 +51,8 @@ function toPageStateLabel(state: PageState): string {
   }
 }
 
-function toTabSummary(tab: BrowserWorldTabObject): TabSummary {
-  const pageState = toPageState(tab);
+function toTabSummary(tab: BrowserWorldTabObject, foregroundTabId: number | null): TabSummary {
+  const pageState = toPageState(tab, foregroundTabId);
   return {
     tabId: tab.tabId,
     windowId: tab.windowId,
@@ -106,7 +106,9 @@ class WindowTool extends BaseBrowserToolExecutor {
   async execute(args: WindowToolParams = {}): Promise<ToolResult> {
     try {
       const browserWorld = await refreshBrowserWorldSnapshot({ ensureBaselineReady: true });
-      const tabs = browserWorld.tabs.map(toTabSummary);
+      const tabs = browserWorld.tabs.map((tab) =>
+        toTabSummary(tab, browserWorld.browserActiveTabId),
+      );
       const currentPage =
         tabs.find((tab) => tab.tabId === browserWorld.browserActiveTabId) ??
         tabs.find((tab) => tab.active === true) ??

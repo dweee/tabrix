@@ -9,8 +9,19 @@ function setWindows(windows: chrome.windows.Window[]) {
 }
 
 function parseResult(result: Awaited<ReturnType<typeof windowTool.execute>>) {
-  return JSON.parse((result.content[0] as { text: string }).text);
+  return JSON.parse((result.content[0] as { text: string }).text) as WindowToolResultPayload;
 }
+
+type WindowToolResultPayload = {
+  windows: Array<{
+    tabs: Array<{ tabId: number; active: boolean; pageState: string; pageStateLabel: string }>;
+  }>;
+  currentPage?: { tabId: number; pageState: string };
+  compactSummary: {
+    stateCounts: Record<string, number>;
+    windows: Array<{ tabs: unknown[] }>;
+  };
+};
 
 describe('get_windows_and_tabs product surface', () => {
   beforeEach(() => {
@@ -114,6 +125,64 @@ describe('get_windows_and_tabs product surface', () => {
     expect(payload.compactSummary.stateCounts).toMatchObject({
       restricted: 1,
       foreground: 0,
+    });
+  });
+
+  it('uses the global browser active tab as the only foreground page', async () => {
+    setWindows([
+      {
+        id: 21,
+        state: 'normal',
+        focused: false,
+        type: 'normal',
+        incognito: false,
+        tabs: [
+          {
+            id: 211,
+            url: 'https://background.example/',
+            pendingUrl: '',
+            title: 'Background active tab',
+            active: true,
+            status: 'complete',
+          },
+        ],
+      },
+      {
+        id: 22,
+        state: 'normal',
+        focused: true,
+        type: 'normal',
+        incognito: false,
+        tabs: [
+          {
+            id: 221,
+            url: 'https://foreground.example/',
+            pendingUrl: '',
+            title: 'Foreground active tab',
+            active: true,
+            status: 'complete',
+          },
+        ],
+      },
+    ] as chrome.windows.Window[]);
+
+    const payload = parseResult(await windowTool.execute());
+    const allTabs = payload.windows.flatMap((window) => window.tabs);
+
+    expect(payload.currentPage).toMatchObject({ tabId: 221, pageState: 'foreground' });
+    expect(payload.compactSummary.stateCounts).toMatchObject({
+      foreground: 1,
+      running: 1,
+    });
+    expect(allTabs.find((tab) => tab.tabId === 211)).toMatchObject({
+      active: true,
+      pageState: 'running',
+      pageStateLabel: '运行中',
+    });
+    expect(allTabs.find((tab) => tab.tabId === 221)).toMatchObject({
+      active: true,
+      pageState: 'foreground',
+      pageStateLabel: '前台页',
     });
   });
 
