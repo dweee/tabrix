@@ -43,8 +43,18 @@ const KNOWN_CLUSTERED_SHORT_LABELS = [
   '图文',
   '视频',
   '用户',
+  'All',
+  'Image',
+  'Images',
+  'Photos',
+  'Video',
+  'Videos',
+  'Users',
   '筛选',
   '排序',
+  'Filter',
+  'Filters',
+  'Sort',
   '综合',
   '最新',
   '最热',
@@ -99,6 +109,46 @@ function safeLabel(value: unknown): string | undefined {
 
 function normalizedKey(value: unknown): string {
   return normalizeText(value).toLowerCase();
+}
+
+function canonicalFilterLabel(label: string, group?: SearchSurfaceControl['filterGroup']): string {
+  const text = normalizeText(label);
+  if (
+    (group === 'content_type' || CONTENT_TYPE_FILTER_OPTION_PATTERN.test(text)) &&
+    /^(图文|图片|image\s*text|images?|photos?)$/i.test(text)
+  ) {
+    return '图文';
+  }
+  if (
+    (group === 'content_type' || CONTENT_TYPE_FILTER_OPTION_PATTERN.test(text)) &&
+    /^(视频|videos?)$/i.test(text)
+  ) {
+    return '视频';
+  }
+  if (
+    (group === 'sort' || SORT_FILTER_OPTION_PATTERN.test(text)) &&
+    /最多收藏|most\s*(saved|collected)/i.test(text)
+  ) {
+    return '最多收藏';
+  }
+  if (
+    (group === 'time_range' || TIME_RANGE_FILTER_OPTION_PATTERN.test(text)) &&
+    /一周内|7\s*d|week/i.test(text)
+  ) {
+    return '一周内';
+  }
+  return text;
+}
+
+function canonicalControlLabel(params: {
+  label: unknown;
+  kind?: SearchSurfaceControl['kind'];
+  filterGroup?: SearchSurfaceControl['filterGroup'];
+}): string | undefined {
+  const label = safeLabel(params.label);
+  if (!label) return undefined;
+  if (params.kind === 'category_tab') return canonicalFilterLabel(label, 'content_type');
+  return canonicalFilterLabel(label, params.filterGroup);
 }
 
 function isFilterLabel(value: unknown): boolean {
@@ -374,7 +424,11 @@ function controlForElement(params: {
     kind: params.kind,
     targetRef: params.element.ref,
     candidateActionId: action?.id,
-    label: safeLabel(params.element.name),
+    label: canonicalControlLabel({
+      label: params.element.name,
+      kind: params.kind,
+      filterGroup: params.filterGroup,
+    }),
     confidence: params.confidence,
     actionability: params.element.actionability,
     source: isTextRecoveredRef(params.element.ref) ? 'text_recovery' : 'interactive_elements',
@@ -423,7 +477,11 @@ function controlForRecoveredAction(params: {
     kind: params.kind,
     targetRef: params.action.targetRef,
     candidateActionId: params.action.id,
-    label: safeLabel(params.label),
+    label: canonicalControlLabel({
+      label: params.label,
+      kind: params.kind,
+      filterGroup: params.filterGroup,
+    }),
     confidence: params.confidence,
     source: 'text_recovery',
     ...(state ? { state } : {}),
@@ -550,8 +608,12 @@ function outOfBandContentTypeFilterElements(
 ): ReadPageInteractiveElement[] {
   return interactiveElements.filter((element) => {
     const label = normalizeText(element.name);
+    const role = normalizeText(element.role).toLowerCase();
+    const controlLikeRole = /^(button|option|tab|radio|checkbox|menuitem)$/i.test(role);
     return (
       CONTENT_TYPE_FILTER_OPTION_PATTERN.test(label) &&
+      controlLikeRole &&
+      !TEXT_SEARCH_TOOLBAR_REF_PATTERN.test(element.ref) &&
       !isSearchToolbarBandElement(element, interactiveElements)
     );
   });
@@ -565,6 +627,8 @@ function filterPanelFromVisibleText(
   const outOfBandContentTypeOptions = outOfBandContentTypeFilterElements(interactiveElements);
   const optionLabels = uniqueLabels([
     ...extractShortLabels(visibleTextContent, FILTER_PANEL_OPTION_PATTERN, 16),
+    ...extractShortLabels(visibleTextContent, CONTENT_TYPE_FILTER_OPTION_PATTERN, 8),
+    ...extractShortLabels(visibleTextContent, TIME_RANGE_FILTER_OPTION_PATTERN, 8),
     ...outOfBandContentTypeOptions.map((element) => normalizeText(element.name)),
   ]);
   const actionLabels = extractShortLabels(visibleTextContent, FILTER_PANEL_ACTION_PATTERN, 8);
@@ -660,7 +724,10 @@ function categoryStateForControls(
 function filterCandidateFromControl(
   control: SearchSurfaceControl,
 ): SearchSurfaceFilterCandidate | undefined {
-  const label = safeLabel(control.label);
+  const rawLabel = safeLabel(control.label);
+  const label = rawLabel
+    ? safeLabel(canonicalFilterLabel(rawLabel, control.filterGroup))
+    : undefined;
   if (!label) return undefined;
   return {
     label,

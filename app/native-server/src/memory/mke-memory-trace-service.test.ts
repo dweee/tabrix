@@ -615,6 +615,14 @@ describe('MkeMemoryTraceService', () => {
           tabId: 19,
           requestedMinResults: 2,
           observedResultCount: 2,
+          targetRefCoverageRate: 0.5,
+          targetabilitySummary: {
+            stableClickTargetCount: 1,
+            urlFallbackCount: 1,
+            untargetableCount: 0,
+            targetRefCoverageRate: 0.5,
+            status: 'partial_stable_targets',
+          },
           complete: true,
           status: 'complete_enough',
           filterState: {
@@ -759,6 +767,13 @@ describe('MkeMemoryTraceService', () => {
           sort: '最多收藏',
           timeRange: '一周内',
         },
+        targetRefCoverageRate: 0.5,
+        targetabilitySummary: {
+          stableClickTargetCount: 1,
+          urlFallbackCount: 1,
+          untargetableCount: 0,
+          status: 'partial_stable_targets',
+        },
       });
       const cards = objects
         .filter((object) => object.objectType === 'result_card')
@@ -779,6 +794,11 @@ describe('MkeMemoryTraceService', () => {
         rank: 1,
         title: 'First result',
         url: 'https://example.test/note/:id',
+        targetabilityStatus: 'stable_click_target',
+        stableTarget: {
+          targetRef: 'ref_result_card_1',
+          candidateActionId: 'ca_click_ref_result_card_1',
+        },
         primaryText: 'Author A',
         actionTarget: {
           actionType: 'click',
@@ -818,6 +838,11 @@ describe('MkeMemoryTraceService', () => {
         },
       });
       expect(cards[0].targetability).toMatchObject({
+        targetabilityStatus: 'stable_click_target',
+        stableTarget: {
+          targetRef: 'ref_result_card_1',
+          candidateActionId: 'ca_click_ref_result_card_1',
+        },
         actionTarget: {
           targetKind: 'result_card_link',
           url: 'https://example.test/note/:id',
@@ -847,6 +872,7 @@ describe('MkeMemoryTraceService', () => {
         actionTypes: ['open_via_url'],
       });
       expect(cards[1].facts).toMatchObject({
+        targetabilityStatus: 'url_fallback',
         actionTarget: {
           targetKind: 'result_card_link',
           url: 'https://example.test/note/:id',
@@ -978,6 +1004,198 @@ describe('MkeMemoryTraceService', () => {
         selectedDataSource: 'markdown',
         sourceRoute: 'markdown_snapshot',
       });
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('projects Xiaohongshu Top 10 result cards as stable clickable Browser Objects', async () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const browserObjectRepo = new BrowserObjectRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo, browserObjectRepo);
+
+    try {
+      const cards = Array.from({ length: 10 }, (_, index) => {
+        const rank = index + 1;
+        const targetRef = `ref_result_card_${rank}`;
+        const candidateActionId = `ca_click_${targetRef}`;
+        const noteId = `xhs-note-${rank}`;
+        return {
+          rank,
+          title: `AI图片创作图文 ${rank}`,
+          url: `https://www.xiaohongshu.com/explore/${noteId}?xsec_token=private-${rank}`,
+          targetRef,
+          candidateActionId,
+          targetabilityStatus: 'stable_click_target',
+          actionTarget: {
+            actionType: 'click',
+            targetKind: 'result_card_link',
+            url: `https://www.xiaohongshu.com/explore/${noteId}?xsec_token=private-${rank}`,
+            selector: `section.note-list article:nth-of-type(${rank}) a[href]`,
+            text: `AI图片创作图文 ${rank}`,
+            executionScope: 'same_tab_fresh_snapshot',
+            openAction: {
+              toolName: 'chrome_navigate',
+              toolArgs: {
+                url: `https://www.xiaohongshu.com/explore/${noteId}?xsec_token=private-${rank}`,
+              },
+              executionScope: 'session_url',
+              reason: 'result_card_href',
+              confidence: 0.9,
+            },
+            toolName: 'chrome_click_element',
+            toolArgs: {
+              candidateAction: {
+                id: candidateActionId,
+                actionType: 'click',
+                targetRef,
+                label: `AI图片创作图文 ${rank}`,
+                confidence: 0.91,
+                matchReason: 'result_card_primary_link',
+                intent: 'content.open_detail',
+                locatorChain: [
+                  { type: 'ref', value: targetRef },
+                  { type: 'css', value: `section.note-list article:nth-of-type(${rank}) a[href]` },
+                ],
+              },
+            },
+            rect: { x: 40, y: 80 + rank * 12, width: 220, height: 36 },
+            center: { x: 150, y: 98 + rank * 12 },
+            coordinateFrame: 'viewport',
+            sourceScrollY: rank <= 5 ? 0 : 720,
+            confidence: 0.91,
+            reasons: ['title_link_match'],
+          },
+          primaryText: `作者 ${rank}`,
+          interactionText: `${rank * 100} 收藏`,
+          imageCount: 1,
+          sourceScrollY: rank <= 5 ? 0 : 720,
+          rect: { x: 20, y: 60 + rank * 18, width: 260, height: 160 },
+          confidence: 0.86,
+          reasons: ['link_present', 'media_present', 'multi_line_card_text'],
+        };
+      });
+
+      traceService.recordToolCall({
+        taskId: 'trace-xhs-top10-task',
+        taskIntent: 'collect Xiaohongshu AI图片创作 most collected image-text cards from this week',
+        aiClient: 'jest',
+        toolName: 'chrome_collect_result_cards',
+        stepId: 'trace-xhs-top10-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 66, minResults: 10, maxScrolls: 4, startFromTop: true },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 1600,
+        result: textResult({
+          success: true,
+          kind: 'result_card_collection',
+          page: {
+            title: 'AI图片创作 - 小红书',
+            url: 'https://www.xiaohongshu.com/search_result?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
+          },
+          pageRole: 'search_results',
+          pageState: 'complete',
+          sourceRoute: 'visible_dom_cards_bounded_scroll',
+          selectedDataSource: 'visible_dom_result_cards',
+          freshness: 'fresh',
+          tabId: 66,
+          requestedMinResults: 10,
+          observedResultCount: 10,
+          targetRefCoverageRate: 1,
+          targetabilitySummary: {
+            stableClickTargetCount: 10,
+            urlFallbackCount: 0,
+            untargetableCount: 0,
+            targetRefCoverageRate: 1,
+            status: 'stable_target_set',
+          },
+          complete: true,
+          status: 'complete_enough',
+          filterState: {
+            status: 'observed',
+            appliedLabels: ['图文', '最多收藏', '一周内'],
+            contentType: '图文',
+            sort: '最多收藏',
+            timeRange: '一周内',
+          },
+          cards,
+        }),
+        resultSummary: 'collected xhs top 10 stable result cards',
+      });
+
+      await traceService.flushAsyncWrites();
+
+      const objects = browserObjectRepo.listRecent({ limit: 20, offset: 0 });
+      const page = objects.find((object) => object.objectType === 'page');
+      expect(page).toMatchObject({
+        siteFamily: 'www.xiaohongshu.com',
+        pageRole: 'search_results',
+        selectedDataSource: 'visible_dom_result_cards',
+        lifecycleState: 'complete',
+        canTabrixOperate: true,
+      });
+      expect(page?.facts).toMatchObject({
+        observedResultCount: 10,
+        requestedMinResults: 10,
+        complete: true,
+        targetRefCoverageRate: 1,
+        targetabilitySummary: {
+          stableClickTargetCount: 10,
+          urlFallbackCount: 0,
+          untargetableCount: 0,
+          status: 'stable_target_set',
+        },
+        filterState: {
+          contentType: '图文',
+          sort: '最多收藏',
+          timeRange: '一周内',
+        },
+      });
+
+      const resultCards = objects
+        .filter((object) => object.objectType === 'result_card')
+        .sort((left, right) => {
+          const leftRank = (left.facts as { rank?: number } | null)?.rank ?? 0;
+          const rightRank = (right.facts as { rank?: number } | null)?.rank ?? 0;
+          return leftRank - rightRank;
+        });
+      expect(resultCards).toHaveLength(10);
+      for (const [index, object] of resultCards.entries()) {
+        const rank = index + 1;
+        expect(object).toMatchObject({
+          parentObjectId: page?.browserObjectId,
+          primaryConclusion: `AI图片创作图文 ${rank}`,
+          canTabrixOperate: true,
+          actionTypes: ['click_result_card', 'open_via_url'],
+        });
+        expect(object.facts).toMatchObject({
+          rank,
+          title: `AI图片创作图文 ${rank}`,
+          targetabilityStatus: 'stable_click_target',
+          stableTarget: {
+            targetRef: `ref_result_card_${rank}`,
+            candidateActionId: `ca_click_ref_result_card_${rank}`,
+          },
+          sessionOnlyTarget: {
+            schema: 'tabrix_session_only_result_card_target_v1',
+            toolName: 'chrome_click_element',
+            toolArgs: {
+              candidateAction: {
+                targetRef: `ref_result_card_${rank}`,
+                intent: 'content.open_detail',
+                locatorChain: [
+                  { type: 'ref', value: `ref_result_card_${rank}` },
+                  { type: 'css', value: `section.note-list article:nth-of-type(${rank}) a[href]` },
+                ],
+              },
+            },
+          },
+        });
+        expect(JSON.stringify(object)).not.toContain('xsec_token');
+        expect(JSON.stringify(object)).not.toContain(`private-${rank}`);
+      }
     } finally {
       traceService.discardPendingAsyncWrites();
       db.close();

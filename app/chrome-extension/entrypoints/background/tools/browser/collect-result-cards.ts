@@ -7,7 +7,12 @@ import {
   markBrowserWorldTabAiOperated,
   type BrowserWorldTabObject,
 } from '../../browser-world-inventory';
-import { type CollectedResultCard, mergeCollectedResultCards } from './collect-result-cards-model';
+import {
+  type CollectedResultCard,
+  mergeCollectedResultCards,
+  stableResultCardTarget,
+  summarizeCollectedResultCardTargetability,
+} from './collect-result-cards-model';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
 const CDP_SESSION_KEY = 'collect-result-cards';
@@ -253,6 +258,17 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     if (timeRangeFilterPattern.test(label)) return 'time_range';
     return 'unknown';
   };
+  const canonicalFilterLabel = (label: string, kind: AppliedSearchFilter['kind']): string => {
+    if (kind === 'content_type' && /^(图文|图片|image\s*text|images?|photos?)$/i.test(label)) {
+      return '图文';
+    }
+    if (kind === 'content_type' && /^(视频|videos?)$/i.test(label)) return '视频';
+    if (kind === 'sort' && /最多收藏|most\s*(saved|collected)/i.test(label)) {
+      return '最多收藏';
+    }
+    if (kind === 'time_range' && /一周内|7\s*d|week/i.test(label)) return '一周内';
+    return label;
+  };
 
   const preferredFilterForKind = (
     filters: readonly AppliedSearchFilter[],
@@ -373,7 +389,7 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       if (seen.has(key)) continue;
       seen.add(key);
       filters.push({
-        label,
+        label: canonicalFilterLabel(label, kind),
         kind,
         source: 'dom_active_state',
         confidence: 0.9,
@@ -1093,21 +1109,35 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
       }
 
       markBrowserWorldTabAiOperated(tab.id, 'collect_result_cards');
-      const cards = merged.slice(0, minResults).map((card, index) => ({
-        rank: index + 1,
-        title: card.title,
-        ...(card.url ? { url: card.url } : {}),
-        ...(card.primaryText ? { primaryText: card.primaryText } : {}),
-        ...(card.secondaryText ? { secondaryText: card.secondaryText } : {}),
-        ...(card.metaText ? { metaText: card.metaText } : {}),
-        ...(card.interactionText ? { interactionText: card.interactionText } : {}),
-        ...(card.actionTarget ? { actionTarget: card.actionTarget } : {}),
-        imageCount: card.imageCount,
-        sourceScrollY: card.sourceScrollY,
-        rect: card.rect,
-        confidence: card.confidence,
-        reasons: card.reasons,
-      }));
+      const selectedCards = merged.slice(0, minResults);
+      const targetabilitySummary = summarizeCollectedResultCardTargetability(selectedCards);
+      const cards = selectedCards.map((card, index) => {
+        const stableTarget = stableResultCardTarget(card);
+        return {
+          rank: index + 1,
+          title: card.title,
+          ...(card.url ? { url: card.url } : {}),
+          ...(stableTarget
+            ? {
+                targetRef: stableTarget.targetRef,
+                candidateActionId: stableTarget.candidateActionId,
+                targetabilityStatus: 'stable_click_target',
+              }
+            : card.url
+              ? { targetabilityStatus: 'url_fallback' }
+              : { targetabilityStatus: 'not_targetable' }),
+          ...(card.primaryText ? { primaryText: card.primaryText } : {}),
+          ...(card.secondaryText ? { secondaryText: card.secondaryText } : {}),
+          ...(card.metaText ? { metaText: card.metaText } : {}),
+          ...(card.interactionText ? { interactionText: card.interactionText } : {}),
+          ...(card.actionTarget ? { actionTarget: card.actionTarget } : {}),
+          imageCount: card.imageCount,
+          sourceScrollY: card.sourceScrollY,
+          rect: card.rect,
+          confidence: card.confidence,
+          reasons: card.reasons,
+        };
+      });
       const complete = cards.length >= minResults;
 
       return {
@@ -1135,6 +1165,8 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
               ...(tab.windowId !== undefined ? { windowId: tab.windowId } : {}),
               requestedMinResults: minResults,
               observedResultCount: cards.length,
+              targetRefCoverageRate: targetabilitySummary.targetRefCoverageRate,
+              targetabilitySummary,
               complete,
               status: complete ? 'complete_enough' : 'partial',
               cards,

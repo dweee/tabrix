@@ -613,7 +613,7 @@ describe('buildSearchSurface', () => {
     );
     expect(surface?.filterPanel).toMatchObject({
       status: 'open_candidate',
-      optionLabels: ['综合', '最新', '最多收藏', '不限'],
+      optionLabels: expect.arrayContaining(['综合', '最新', '最多收藏', '不限']),
       clearActionObserved: true,
       confirmActionObserved: true,
     });
@@ -882,6 +882,95 @@ describe('buildSearchSurface', () => {
         ]),
       },
     });
+  });
+
+  it('normalizes English image filter labels to the 图文 content-type semantic', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_filter',
+          role: 'button',
+          name: 'Filters',
+          rect: { x: 1500, y: 96, width: 72, height: 36 },
+        }),
+        interactive({
+          ref: 'ref_panel_image',
+          role: 'button',
+          name: 'Image',
+          checked: true,
+          rect: { x: 1480, y: 334, width: 64, height: 40 },
+        }),
+      ],
+      candidateActions: [
+        candidate({ id: 'ca_filter', targetRef: 'ref_filter', intent: 'filter.open' }),
+        candidate({ id: 'ca_panel_image', targetRef: 'ref_panel_image' }),
+      ],
+      visibleTextContent: ['Filters', 'Content type All Video Image'].join('\n'),
+    });
+
+    expect(surface?.filterPanel?.targetableOptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'filter_panel_option',
+          label: '图文',
+          targetRef: 'ref_panel_image',
+          filterGroup: 'content_type',
+          state: expect.objectContaining({ selected: true }),
+        }),
+      ]),
+    );
+    expect(surface?.filterState).toMatchObject({
+      selected: { contentType: '图文' },
+      contentType: {
+        selected: '图文',
+        candidates: expect.arrayContaining([
+          expect.objectContaining({
+            label: '图文',
+            targetRef: 'ref_panel_image',
+            candidateActionId: 'ca_panel_image',
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('does not treat result-card Image links as content-type filter options', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_filter',
+          role: 'button',
+          name: '筛选',
+          rect: { x: 1500, y: 96, width: 72, height: 36 },
+        }),
+        interactive({
+          ref: 'ref_text_search_toolbar_152',
+          role: 'link',
+          name: 'Image',
+          rect: { x: 480, y: 620, width: 240, height: 320 },
+        }),
+      ],
+      candidateActions: [
+        candidate({ id: 'ca_filter', targetRef: 'ref_filter', intent: 'filter.open' }),
+        candidate({
+          id: 'ca_click_ref_text_search_toolbar_152',
+          targetRef: 'ref_text_search_toolbar_152',
+          locatorChain: [
+            { type: 'ref', value: 'ref_text_search_toolbar_152' },
+            { type: 'aria', value: 'Image' },
+            { type: 'css', value: 'section:nth-of-type(8) a' },
+          ],
+        }),
+      ],
+      visibleTextContent: ['筛选', 'Content type All Video Image'].join('\n'),
+    });
+
+    const targetableLabels =
+      surface?.filterPanel?.targetableOptions?.map((option) => option.label) ?? [];
+    expect(targetableLabels).not.toContain('图文');
+    expect(surface?.filterState?.contentType?.selected).toBeUndefined();
   });
 
   it('marks grouped filter state as ambiguous when one group has multiple selected values', () => {

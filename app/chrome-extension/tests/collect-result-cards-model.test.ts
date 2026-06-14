@@ -4,6 +4,8 @@ import {
   type CollectedResultCard,
   mergeCollectedResultCards,
   resultCardKey,
+  stableResultCardTarget,
+  summarizeCollectedResultCardTargetability,
 } from '@/entrypoints/background/tools/browser/collect-result-cards-model';
 
 function card(overrides: Partial<CollectedResultCard>): CollectedResultCard {
@@ -231,6 +233,53 @@ describe('mergeCollectedResultCards', () => {
           intent: 'content.open_detail',
         },
       },
+    });
+  });
+});
+
+describe('summarizeCollectedResultCardTargetability', () => {
+  it('reports how many collected cards have stable click targets', () => {
+    const stableTarget = {
+      actionType: 'click' as const,
+      targetKind: 'result_card_link' as const,
+      url: 'https://example.com/1',
+      selector: 'article a[href]',
+      executionScope: 'same_tab_fresh_snapshot' as const,
+      toolName: 'chrome_click_element' as const,
+      toolArgs: {
+        candidateAction: {
+          id: 'ca_click_ref_result_card_1',
+          actionType: 'click' as const,
+          targetRef: 'ref_result_card_1',
+          label: 'First card',
+          confidence: 0.9,
+          matchReason: 'result_card_primary_link',
+          intent: 'content.open_detail' as const,
+          locatorChain: [
+            { type: 'ref', value: 'ref_result_card_1' },
+            { type: 'css', value: 'article a[href]' },
+          ],
+        },
+      },
+      confidence: 0.9,
+      reasons: ['title_link_match'],
+    };
+    const cards = [
+      card({ title: 'First card', url: 'https://example.com/1', actionTarget: stableTarget }),
+      card({ title: 'Second card', url: 'https://example.com/2' }),
+      card({ title: 'Third card', url: undefined }),
+    ];
+
+    expect(stableResultCardTarget(cards[0])).toEqual({
+      targetRef: 'ref_result_card_1',
+      candidateActionId: 'ca_click_ref_result_card_1',
+    });
+    expect(summarizeCollectedResultCardTargetability(cards)).toEqual({
+      stableClickTargetCount: 1,
+      urlFallbackCount: 1,
+      untargetableCount: 1,
+      targetRefCoverageRate: 0.3333,
+      status: 'partial_stable_targets',
     });
   });
 });

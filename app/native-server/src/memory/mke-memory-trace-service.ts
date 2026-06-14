@@ -431,6 +431,26 @@ function readArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+function readResultCardStableTarget(input: {
+  card: Record<string, unknown>;
+  rawActionTarget: Record<string, unknown> | null;
+}): { targetRef: string; candidateActionId: string | null } | null {
+  const cardTargetRef = readString(input.card.targetRef);
+  const cardCandidateActionId = readString(input.card.candidateActionId);
+  if (cardTargetRef?.startsWith('ref_result_card_')) {
+    return { targetRef: cardTargetRef, candidateActionId: cardCandidateActionId };
+  }
+  if (readString(input.rawActionTarget?.toolName) !== 'chrome_click_element') return null;
+  const toolArgs = readObject(input.rawActionTarget?.toolArgs);
+  const candidateAction = readObject(toolArgs?.candidateAction);
+  const targetRef = readString(candidateAction?.targetRef);
+  if (!targetRef?.startsWith('ref_result_card_')) return null;
+  return {
+    targetRef,
+    candidateActionId: readString(candidateAction?.id),
+  };
+}
+
 function normalizeResultCardActionToolArgs(rawActionTarget: Record<string, unknown> | null):
   | {
       toolName: 'chrome_click_element';
@@ -527,6 +547,8 @@ function mergeReadPageFactsWithExistingCollectionFacts(
     'requestedMinResults',
     'complete',
     'status',
+    'targetRefCoverageRate',
+    'targetabilitySummary',
   ];
   for (const key of preservedKeys) {
     if (merged[key] === undefined && existingFacts[key] !== undefined) {
@@ -1409,6 +1431,43 @@ export class MkeMemoryTraceService {
     const observedResultCount = readNumber(payload.observedResultCount) ?? cards.length;
     const complete = readBoolean(payload.complete);
     const filterState = readObject(payload.filterState);
+    const computedTargetabilitySummary = (() => {
+      let stableClickTargetCount = 0;
+      let urlFallbackCount = 0;
+      let untargetableCount = 0;
+      for (const rawCard of cards) {
+        const card = readObject(rawCard);
+        if (!card) continue;
+        const rawActionTarget = readObject(card.actionTarget);
+        if (readResultCardStableTarget({ card, rawActionTarget })) {
+          stableClickTargetCount += 1;
+        } else if (readString(card.url)) {
+          urlFallbackCount += 1;
+        } else {
+          untargetableCount += 1;
+        }
+      }
+      const cardCount = stableClickTargetCount + urlFallbackCount + untargetableCount;
+      const targetRefCoverageRate =
+        cardCount > 0 ? Number((stableClickTargetCount / cardCount).toFixed(4)) : 0;
+      return {
+        stableClickTargetCount,
+        urlFallbackCount,
+        untargetableCount,
+        targetRefCoverageRate,
+        status:
+          cardCount > 0 && stableClickTargetCount === cardCount
+            ? 'stable_target_set'
+            : stableClickTargetCount > 0
+              ? 'partial_stable_targets'
+              : 'url_or_text_only',
+      };
+    })();
+    const payloadTargetabilitySummary = readObject(payload.targetabilitySummary);
+    const targetabilitySummary = payloadTargetabilitySummary ?? computedTargetabilitySummary;
+    const targetRefCoverageRate =
+      readFiniteNumber(payload.targetRefCoverageRate, targetabilitySummary.targetRefCoverageRate) ??
+      computedTargetabilitySummary.targetRefCoverageRate;
     const blockedSurface =
       stringHasBlockedPageSignal(urlFields.rootRoute) ||
       stringHasBlockedPageSignal(urlFields.currentRoute) ||
@@ -1443,6 +1502,8 @@ export class MkeMemoryTraceService {
         requestedMinResults: readNumber(payload.requestedMinResults),
         complete,
         status: readString(payload.status),
+        targetRefCoverageRate,
+        targetabilitySummary,
         filterState,
         source: 'result_card_collection',
       }),
@@ -1467,7 +1528,9 @@ export class MkeMemoryTraceService {
         allowPersonalBrowserStateStorage: false,
       });
       const rawActionTarget = readObject(card.actionTarget);
+      const stableTarget = readResultCardStableTarget({ card, rawActionTarget });
       const hasExecutableResultCardClick =
+        stableTarget !== null &&
         readString(rawActionTarget?.toolName) === 'chrome_click_element' &&
         Boolean(readObject(readObject(rawActionTarget?.toolArgs)?.candidateAction));
       const actionTargetUrlFields = normalizeUrlPattern(readString(rawActionTarget?.url), {
@@ -1512,6 +1575,11 @@ export class MkeMemoryTraceService {
         hasExecutableResultCardClick ? 'click_result_card' : null,
         readString(card.url) ? 'open_via_url' : null,
       ].filter((item): item is string => Boolean(item));
+      const targetabilityStatus = stableTarget
+        ? 'stable_click_target'
+        : readString(card.url)
+          ? 'url_fallback'
+          : 'not_targetable';
       const cardKey =
         cardUrlFields.rootRoute ?? cardUrlFields.currentRoute ?? cardUrlFields.pattern ?? title;
       this.upsertBrowserObject({
@@ -1536,6 +1604,8 @@ export class MkeMemoryTraceService {
         targetability: this.sanitizeBrowserObjectValue({
           rank,
           url: cardUrlFields.rootRoute ?? cardUrlFields.pattern,
+          targetabilityStatus,
+          stableTarget,
           actionTarget,
           sessionOnlyTarget,
         }),
@@ -1543,6 +1613,8 @@ export class MkeMemoryTraceService {
           rank,
           title,
           url: cardUrlFields.rootRoute ?? cardUrlFields.pattern,
+          targetabilityStatus,
+          stableTarget,
           primaryText: readString(card.primaryText),
           secondaryText: readString(card.secondaryText),
           metaText: readString(card.metaText),

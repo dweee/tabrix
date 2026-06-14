@@ -61,11 +61,70 @@ export interface CollectedResultCard {
   sourceStrategy?: 'list_container' | 'candidate_scan';
 }
 
+export interface CollectedResultCardStableTarget {
+  targetRef: string;
+  candidateActionId: string;
+}
+
+export interface CollectedResultCardTargetabilitySummary {
+  stableClickTargetCount: number;
+  urlFallbackCount: number;
+  untargetableCount: number;
+  targetRefCoverageRate: number;
+  status: 'stable_target_set' | 'partial_stable_targets' | 'url_or_text_only';
+}
+
+export function stableResultCardTarget(
+  card: CollectedResultCard | undefined,
+): CollectedResultCardStableTarget | null {
+  const candidate = card?.actionTarget?.toolArgs?.candidateAction;
+  const targetRef = candidate?.targetRef;
+  const candidateActionId = candidate?.id;
+  if (
+    card?.actionTarget?.toolName !== 'chrome_click_element' ||
+    typeof targetRef !== 'string' ||
+    targetRef.length === 0 ||
+    typeof candidateActionId !== 'string' ||
+    candidateActionId.length === 0
+  ) {
+    return null;
+  }
+  return { targetRef, candidateActionId };
+}
+
+export function summarizeCollectedResultCardTargetability(
+  cards: readonly CollectedResultCard[],
+): CollectedResultCardTargetabilitySummary {
+  let stableClickTargetCount = 0;
+  let urlFallbackCount = 0;
+  let untargetableCount = 0;
+  for (const card of cards) {
+    if (stableResultCardTarget(card)) {
+      stableClickTargetCount += 1;
+    } else if (normalizeText(card.url).length > 0) {
+      urlFallbackCount += 1;
+    } else {
+      untargetableCount += 1;
+    }
+  }
+  const targetRefCoverageRate =
+    cards.length > 0 ? Number((stableClickTargetCount / cards.length).toFixed(4)) : 0;
+  return {
+    stableClickTargetCount,
+    urlFallbackCount,
+    untargetableCount,
+    targetRefCoverageRate,
+    status:
+      cards.length > 0 && stableClickTargetCount === cards.length
+        ? 'stable_target_set'
+        : stableClickTargetCount > 0
+          ? 'partial_stable_targets'
+          : 'url_or_text_only',
+  };
+}
+
 function hasExecutableClickTarget(card: CollectedResultCard | undefined): boolean {
-  return (
-    card?.actionTarget?.toolName === 'chrome_click_element' &&
-    Boolean(card.actionTarget.toolArgs?.candidateAction)
-  );
+  return stableResultCardTarget(card) !== null;
 }
 
 function normalizeText(value: unknown): string {

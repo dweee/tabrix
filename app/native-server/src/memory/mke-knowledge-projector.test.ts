@@ -390,6 +390,33 @@ describe('MkeKnowledgeProjector', () => {
       pageUrlPattern: 'https://example.test/search',
       pageRole: 'search_results',
       pageModelKey: 'page:example.test:search_results',
+      objectFingerprint: 'result-card:3',
+      objectType: 'result_card',
+      lifecycleState: 'observed',
+      canTabrixOperate: true,
+      actionTypes: ['open_via_url'],
+      selectedDataSource: 'visible_dom_result_cards',
+      sourceRoute: 'visible_dom_cards_bounded_scroll',
+      sourceFreshness: 'fresh',
+      sourceTraceIds: ['trace-cards'],
+      facts: {
+        rank: 3,
+        title: 'URL fallback result',
+        targetabilityStatus: 'url_fallback',
+        stableTarget: null,
+        actionTarget: {
+          targetKind: 'result_card_link',
+          url: 'https://example.test/note/:id',
+        },
+      },
+      confidenceScore: 0.74,
+      updatedAt: '2026-06-06T06:00:03.250Z',
+    });
+    objects.upsert({
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageModelKey: 'page:example.test:search_results',
       objectFingerprint: 'action-target:session-ref',
       objectType: 'action_target',
       lifecycleState: 'observed',
@@ -434,33 +461,35 @@ describe('MkeKnowledgeProjector', () => {
     const model = knowledge.get(result.knowledgeIds[0])!;
 
     expect(result).toMatchObject({
-      processedTraceCount: 5,
+      processedTraceCount: 6,
       skippedTraceCount: 0,
       upsertedKnowledgeCount: 1,
     });
     expect(model.objectGraph).toMatchObject({
-      sourceObjectCount: 5,
-      resultCardCount: 2,
+      sourceObjectCount: 6,
+      resultCardCount: 3,
       resultCardSummary: {
-        count: 2,
+        count: 3,
         clickableCount: 2,
-        rankRange: { min: 1, max: 2 },
+        stableClickTargetCount: 2,
+        urlFallbackCount: 1,
+        rankRange: { min: 1, max: 3 },
         rawCardTextCopied: false,
       },
       objectTypeCounts: {
         action_target: 2,
         page: 1,
-        result_card: 2,
+        result_card: 3,
       },
     });
     expect(model.actionSurface).toMatchObject({
-      actionKindCounts: { click: 1, click_result_card: 2, fill: 1, open_via_url: 2 },
+      actionKindCounts: { click: 1, click_result_card: 2, fill: 1, open_via_url: 3 },
       reusableActionKinds: ['open_via_url'],
       sessionScopedActionKinds: { click: 1, click_result_card: 2, fill: 1 },
-      resultCardActionKinds: { click_result_card: 2, open_via_url: 2 },
+      resultCardActionKinds: { click_result_card: 2, open_via_url: 3 },
       resultCardReusePolicy: {
         freshResultCardUrlRequired: true,
-        freshResultCardUrlRequiredCount: 2,
+        freshResultCardUrlRequiredCount: 3,
         nonReusableTargetKinds: ['selector', 'rect', 'center', 'snapshot_ref'],
       },
     });
@@ -468,10 +497,10 @@ describe('MkeKnowledgeProjector', () => {
       selectedDataSourceCounts: {
         dom_json: 1,
         markdown: 1,
-        visible_dom_result_cards: 3,
+        visible_dom_result_cards: 4,
       },
     });
-    expect(model.confidenceScore).toBe(0.84);
+    expect(model.confidenceScore).toBe(0.81);
     expect(JSON.stringify(model)).not.toContain('First result');
   });
 });

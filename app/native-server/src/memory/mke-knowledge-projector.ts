@@ -252,6 +252,7 @@ function buildKnowledgeInput(
   let observationCount = 0;
   let resultCardCount = 0;
   let clickableResultCardCount = 0;
+  let urlFallbackResultCardCount = 0;
 
   for (const object of group.objects) {
     sourceObjectIds.push(object.browserObjectId);
@@ -281,11 +282,11 @@ function buildKnowledgeInput(
       if (actionTypes.includes('open_via_url')) {
         freshResultCardUrlRequiredCount += 1;
       }
-      if (
-        isExplicitlyOperable(object.canTabrixOperate) ||
-        readStringArray(object.actionTypes).length > 0
-      ) {
+      if (actionTypes.includes('click_result_card')) {
         clickableResultCardCount += 1;
+      }
+      if (!actionTypes.includes('click_result_card') && actionTypes.includes('open_via_url')) {
+        urlFallbackResultCardCount += 1;
       }
       const rank = readFiniteNumber(readObject(object.facts)?.rank);
       if (rank !== null) resultCardRanks.push(rank);
@@ -320,6 +321,8 @@ function buildKnowledgeInput(
         schema: 'tabrix_mke_result_card_summary_v1',
         count: resultCardCount,
         clickableCount: clickableResultCardCount,
+        stableClickTargetCount: clickableResultCardCount,
+        urlFallbackCount: urlFallbackResultCardCount,
         rankRange:
           resultCardRanks.length > 0
             ? {
