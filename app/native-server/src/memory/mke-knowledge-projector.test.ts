@@ -323,6 +323,11 @@ describe('MkeKnowledgeProjector', () => {
       reusableActionKinds: ['open_via_url'],
       sessionScopedActionKinds: { click: 1, click_result_card: 2, fill: 1 },
       resultCardActionKinds: { click_result_card: 2, open_via_url: 2 },
+      resultCardReusePolicy: {
+        freshResultCardUrlRequired: true,
+        freshResultCardUrlRequiredCount: 2,
+        nonReusableTargetKinds: ['selector', 'rect', 'center', 'snapshot_ref'],
+      },
     });
     expect(model.dataSourceModel).toMatchObject({
       selectedDataSourceCounts: {

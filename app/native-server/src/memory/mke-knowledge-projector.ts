@@ -169,6 +169,7 @@ function buildKnowledgeInput(
   const confidenceScores: number[] = [];
   const resultCardActionKinds = new Map<string, number>();
   const resultCardRanks: number[] = [];
+  let freshResultCardUrlRequiredCount = 0;
   let unavailableObjectCount = 0;
   let observationCount = 0;
   let resultCardCount = 0;
@@ -198,6 +199,10 @@ function buildKnowledgeInput(
     if (object.canTabrixOperate === false) unavailableObjectCount += 1;
     if (object.objectType === 'result_card') {
       resultCardCount += 1;
+      const actionTypes = readStringArray(object.actionTypes);
+      if (actionTypes.includes('open_via_url')) {
+        freshResultCardUrlRequiredCount += 1;
+      }
       if (object.canTabrixOperate === true || readStringArray(object.actionTypes).length > 0) {
         clickableResultCardCount += 1;
       }
@@ -251,6 +256,14 @@ function buildKnowledgeInput(
       reusableActionKinds: [...reusableActionKindCounts.keys()].sort(),
       sessionScopedActionKinds: countersToObject(sessionScopedActionKindCounts),
       resultCardActionKinds: countersToObject(resultCardActionKinds),
+      resultCardReusePolicy: {
+        schema: 'tabrix_mke_result_card_reuse_policy_v1',
+        freshResultCardUrlRequired: freshResultCardUrlRequiredCount > 0,
+        freshResultCardUrlRequiredCount,
+        reusableActionMeaning:
+          'result cards require a fresh chrome_collect_result_cards read before opening the current card URL',
+        nonReusableTargetKinds: ['selector', 'rect', 'center', 'snapshot_ref'],
+      },
     },
     dataSourceModel: {
       schema: 'tabrix_mke_data_source_model_v1',
