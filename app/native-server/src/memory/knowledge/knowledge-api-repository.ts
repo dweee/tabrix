@@ -424,6 +424,18 @@ const LAST_FAILURE_REASON_VALUES: ReadonlySet<string> = new Set<EndpointLastFail
   'unknown',
 ]);
 
+const BLOCKING_LAST_FAILURE_REASONS: ReadonlySet<EndpointLastFailureReason> =
+  new Set<EndpointLastFailureReason>([
+    'timeout',
+    'status_4xx',
+    'status_5xx',
+    'semantic_mismatch',
+    'shape_drift',
+    'empty_response',
+    'rate_limited',
+    'unknown',
+  ]);
+
 function coerceLastFailureReason(value: string | null): EndpointLastFailureReason | null {
   if (value === null) return null;
   return LAST_FAILURE_REASON_VALUES.has(value) ? (value as EndpointLastFailureReason) : null;
@@ -936,6 +948,9 @@ function deriveEndpointFallbackReason(
   // re-derive a different one.
   if (endpoint.usableForTaskPersisted === false && endpoint.noiseReason) {
     return endpoint.noiseReason;
+  }
+  if (endpoint.lastFailureReason && BLOCKING_LAST_FAILURE_REASONS.has(endpoint.lastFailureReason)) {
+    return `last_failure_${endpoint.lastFailureReason}`;
   }
   if (
     semanticType === 'noise' ||

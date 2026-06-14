@@ -180,6 +180,16 @@ describe('KnowledgeApiRepository (B-017)', () => {
         observedAt: '2026-04-22T13:00:00.000Z',
       }),
     );
+    const failedSearch = repo.upsert(
+      makeInput({
+        endpointSignature: 'GET api.github.com/search/issues',
+        urlPattern: 'api.github.com/search/issues',
+        semanticTag: 'github.search_issues',
+        statusClass: '2xx',
+        observedAt: '2026-04-22T14:00:00.000Z',
+        lastFailureReason: 'shape_drift',
+      }),
+    );
 
     const scored = scoreEndpointKnowledge(search);
     expect(scored).toMatchObject({
@@ -188,10 +198,22 @@ describe('KnowledgeApiRepository (B-017)', () => {
       fallbackReason: null,
     });
     expect(scored.confidence).toBeGreaterThan(0.7);
+    expect(scoreEndpointKnowledge(failedSearch)).toMatchObject({
+      semanticType: 'search',
+      usableForTask: false,
+      fallbackReason: 'last_failure_shape_drift',
+    });
 
     const candidates = repo.listScoredBySite('api.github.com');
     expect(candidates[0].semanticType).toBe('search');
     expect(candidates[0].usableForTask).toBe(true);
+    const failedCandidate = candidates.find(
+      (candidate) => candidate.endpointSignature === 'GET api.github.com/search/issues',
+    );
+    expect(failedCandidate).toMatchObject({
+      usableForTask: false,
+      fallbackReason: 'last_failure_shape_drift',
+    });
     const postCandidate = candidates.find((candidate) => candidate.method === 'POST');
     expect(postCandidate).toMatchObject({
       usableForTask: false,
