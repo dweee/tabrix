@@ -681,6 +681,7 @@ describe('buildSearchSurface', () => {
           targetRef: 'ref_text_filter_panel_1',
           candidateActionId: 'ca_click_ref_text_filter_panel_1',
           source: 'text_recovery',
+          filterGroup: 'sort',
         }),
         expect.objectContaining({
           kind: 'filter_panel_option',
@@ -688,6 +689,7 @@ describe('buildSearchSurface', () => {
           targetRef: 'ref_text_filter_panel_2',
           candidateActionId: 'ca_click_ref_text_filter_panel_2',
           source: 'text_recovery',
+          filterGroup: 'time_range',
         }),
         expect.objectContaining({
           kind: 'filter_panel_option',
@@ -695,6 +697,7 @@ describe('buildSearchSurface', () => {
           targetRef: 'ref_text_filter_panel_3',
           candidateActionId: 'ca_click_ref_text_filter_panel_3',
           source: 'text_recovery',
+          filterGroup: 'other',
         }),
       ]),
     );
@@ -814,18 +817,21 @@ describe('buildSearchSurface', () => {
           kind: 'filter_panel_option',
           label: '图文',
           targetRef: 'ref_panel_image_text',
+          filterGroup: 'content_type',
           state: expect.objectContaining({ selected: true }),
         }),
         expect.objectContaining({
           kind: 'sort_most_collected',
           label: '最多收藏',
           targetRef: 'ref_text_filter_panel_sort',
+          filterGroup: 'sort',
           state: expect.objectContaining({ selected: true }),
         }),
         expect.objectContaining({
           kind: 'filter_panel_option',
           label: '一周内',
           targetRef: 'ref_text_filter_panel_week',
+          filterGroup: 'time_range',
           state: expect.objectContaining({ selected: true }),
         }),
       ]),
@@ -833,6 +839,88 @@ describe('buildSearchSurface', () => {
     expect(surface?.filterPanel?.appliedFilterLabels).toEqual(
       expect.arrayContaining(['图文', '最多收藏', '一周内']),
     );
+    expect(surface?.filterState).toMatchObject({
+      status: 'observed',
+      selected: {
+        contentType: '图文',
+        sort: '最多收藏',
+        timeRange: '一周内',
+      },
+      missingGroups: [],
+      ambiguous: false,
+      contentType: {
+        selected: '图文',
+        candidates: expect.arrayContaining([
+          expect.objectContaining({
+            label: '图文',
+            selected: true,
+            targetRef: 'ref_panel_image_text',
+            candidateActionId: 'ca_panel_image_text',
+          }),
+        ]),
+      },
+      sort: {
+        selected: '最多收藏',
+        candidates: expect.arrayContaining([
+          expect.objectContaining({
+            label: '最多收藏',
+            selected: true,
+            targetRef: 'ref_text_filter_panel_sort',
+            candidateActionId: 'ca_sort',
+          }),
+        ]),
+      },
+      timeRange: {
+        selected: '一周内',
+        candidates: expect.arrayContaining([
+          expect.objectContaining({
+            label: '一周内',
+            selected: true,
+            targetRef: 'ref_text_filter_panel_week',
+            candidateActionId: 'ca_week',
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('marks grouped filter state as ambiguous when one group has multiple selected values', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_panel_image_text',
+          role: 'button',
+          name: '图文',
+          checked: true,
+          rect: { x: 1480, y: 334, width: 64, height: 40 },
+        }),
+        interactive({
+          ref: 'ref_panel_video',
+          role: 'button',
+          name: '视频',
+          checked: true,
+          rect: { x: 1380, y: 334, width: 64, height: 40 },
+        }),
+      ],
+      candidateActions: [
+        candidate({ id: 'ca_panel_image_text', targetRef: 'ref_panel_image_text' }),
+        candidate({ id: 'ca_panel_video', targetRef: 'ref_panel_video' }),
+      ],
+      visibleTextContent: '内容类型 不限 视频 图文',
+    });
+
+    expect(surface?.filterState).toMatchObject({
+      status: 'ambiguous',
+      ambiguous: true,
+      contentType: {
+        ambiguous: true,
+        candidates: expect.arrayContaining([
+          expect.objectContaining({ label: '图文', selected: true }),
+          expect.objectContaining({ label: '视频', selected: true }),
+        ]),
+      },
+    });
   });
 
   it('reports result coverage as incomplete when more content or load-more is visible', () => {

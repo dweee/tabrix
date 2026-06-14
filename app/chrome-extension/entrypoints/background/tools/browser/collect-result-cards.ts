@@ -44,8 +44,22 @@ interface SearchFilterState {
   contentType?: string;
   sort?: string;
   timeRange?: string;
+  groups: {
+    contentType: SearchFilterGroupState;
+    sort: SearchFilterGroupState;
+    timeRange: SearchFilterGroupState;
+  };
   appliedFilters: AppliedSearchFilter[];
   claimBoundary: string;
+}
+
+interface SearchFilterGroupState {
+  selected: string | null;
+  candidates: string[];
+  source: 'dom_active_state' | 'url_parameter_adapter' | 'mixed' | 'not_observed';
+  confidence: number;
+  ambiguous: boolean;
+  reason: string;
 }
 
 interface ScrollStepResult {
@@ -149,31 +163,69 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     return 'unknown';
   };
 
-  const preferredLabelForKind = (
+  const preferredFilterForKind = (
     filters: readonly AppliedSearchFilter[],
     kind: AppliedSearchFilter['kind'],
-  ): string | undefined => {
+  ): AppliedSearchFilter | undefined => {
     const candidates = filters.filter((filter) => filter.kind === kind);
     if (candidates.length === 0) return undefined;
     if (kind === 'content_type') {
       return (
-        candidates.find((filter) => /^(图文|image\s*text|images?|photos?)$/i.test(filter.label))
-          ?.label ?? candidates[0].label
+        candidates.find((filter) => /^(图文|image\s*text|images?|photos?)$/i.test(filter.label)) ??
+        candidates[0]
       );
     }
     if (kind === 'sort') {
       return (
-        candidates.find((filter) => /最多收藏|most\s*(saved|collected)/i.test(filter.label))
-          ?.label ?? candidates[0].label
+        candidates.find((filter) => /最多收藏|most\s*(saved|collected)/i.test(filter.label)) ??
+        candidates[0]
       );
     }
     if (kind === 'time_range') {
-      return (
-        candidates.find((filter) => /一周内|7\s*d|week/i.test(filter.label))?.label ??
-        candidates[0].label
-      );
+      return candidates.find((filter) => /一周内|7\s*d|week/i.test(filter.label)) ?? candidates[0];
     }
-    return candidates[0].label;
+    return candidates[0];
+  };
+
+  const groupStateForKind = (
+    filters: readonly AppliedSearchFilter[],
+    kind: AppliedSearchFilter['kind'],
+  ): SearchFilterGroupState => {
+    const candidates = filters.filter((filter) => filter.kind === kind);
+    const candidateLabels = [...new Set(candidates.map((filter) => filter.label))];
+    const selected = preferredFilterForKind(filters, kind);
+    const sources = new Set(candidates.map((filter) => filter.source));
+    const selectedLabel = selected?.label ?? null;
+    const nonDefaultLabels = candidateLabels.filter((label) => {
+      if (kind === 'content_type') return !/^(全部|all)$/i.test(label);
+      if (kind === 'sort') return !/^(综合|all)$/i.test(label);
+      if (kind === 'time_range') return !/^(不限|any)$/i.test(label);
+      return true;
+    });
+    const ambiguityLabels =
+      selectedLabel && nonDefaultLabels.includes(selectedLabel)
+        ? nonDefaultLabels.filter((label) => label !== selectedLabel)
+        : nonDefaultLabels;
+    const ambiguous = ambiguityLabels.length > 0;
+    return {
+      selected: selectedLabel,
+      candidates: candidateLabels,
+      source:
+        sources.size > 1
+          ? 'mixed'
+          : candidates[0]?.source === 'dom_active_state'
+            ? 'dom_active_state'
+            : candidates[0]?.source === 'url_parameter_adapter'
+              ? 'url_parameter_adapter'
+              : 'not_observed',
+      confidence: selected?.confidence ?? 0,
+      ambiguous,
+      reason: selected
+        ? ambiguous
+          ? 'multiple active candidates were observed for this filter group; selected is the task-preferred label'
+          : 'selected filter inferred from active DOM state or bounded URL adapter'
+        : 'no selected filter observed for this group',
+    };
   };
 
   const inferFilterStateFromUrl = (): AppliedSearchFilter[] => {
@@ -244,18 +296,18 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     }
 
     const appliedLabels = filters.map((filter) => filter.label);
+    const groups = {
+      contentType: groupStateForKind(filters, 'content_type'),
+      sort: groupStateForKind(filters, 'sort'),
+      timeRange: groupStateForKind(filters, 'time_range'),
+    };
     return {
       status: appliedLabels.length > 0 ? 'observed' : 'not_observed',
       appliedLabels,
-      ...(preferredLabelForKind(filters, 'content_type')
-        ? { contentType: preferredLabelForKind(filters, 'content_type') }
-        : {}),
-      ...(preferredLabelForKind(filters, 'sort')
-        ? { sort: preferredLabelForKind(filters, 'sort') }
-        : {}),
-      ...(preferredLabelForKind(filters, 'time_range')
-        ? { timeRange: preferredLabelForKind(filters, 'time_range') }
-        : {}),
+      ...(groups.contentType.selected ? { contentType: groups.contentType.selected } : {}),
+      ...(groups.sort.selected ? { sort: groups.sort.selected } : {}),
+      ...(groups.timeRange.selected ? { timeRange: groups.timeRange.selected } : {}),
+      groups,
       appliedFilters: filters,
       claimBoundary:
         'Filter state is inferred from active/selected DOM controls and bounded URL adapters. It proves visible page state, not global server ranking correctness.',

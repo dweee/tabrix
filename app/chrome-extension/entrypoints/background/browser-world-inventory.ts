@@ -855,11 +855,30 @@ function rememberClosedTabSnapshot(tab: BrowserWorldTabObject, windowId: number 
 
 function isOperableUrl(url: string): { canOperate: boolean | null; reason: string } {
   if (!url) return { canOperate: null, reason: 'url_unknown' };
-  if (/^https?:\/\//i.test(url)) return { canOperate: true, reason: 'regular_web_page' };
+  if (/^https?:\/\//i.test(url)) {
+    if (isBrowserChallengeUrl(url)) {
+      return { canOperate: false, reason: 'user_verification_required' };
+    }
+    return { canOperate: true, reason: 'regular_web_page' };
+  }
   if (/^(chrome|edge|about|devtools|chrome-extension):/i.test(url)) {
     return { canOperate: false, reason: 'browser_internal_page' };
   }
   return { canOperate: null, reason: 'unknown_scheme' };
+}
+
+function isBrowserChallengeUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const signal = `${parsed.hostname} ${parsed.pathname} ${parsed.searchParams.toString()}`;
+    return /\b(captcha|recaptcha|challenge|verification|security[-_]?check|human[-_]?check|verify(uuid|type|biz)?|anti[-_]?bot)\b|安全验证|人机验证|滑块验证/i.test(
+      signal,
+    );
+  } catch {
+    return /\b(captcha|recaptcha|challenge|verification|security[-_]?check|human[-_]?check|verify(uuid|type|biz)?|anti[-_]?bot)\b|安全验证|人机验证|滑块验证/i.test(
+      url,
+    );
+  }
 }
 
 function deriveCleanupEligibility(args: {

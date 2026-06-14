@@ -28,18 +28,18 @@ export interface CollectedResultCard {
         locatorChain: Array<{ type: 'ref' | 'aria' | 'css' | string; value: string }>;
       };
     };
-    rect: {
+    rect?: {
       x: number;
       y: number;
       width: number;
       height: number;
     };
-    center: {
+    center?: {
       x: number;
       y: number;
     };
-    coordinateFrame: 'viewport';
-    sourceScrollY: number;
+    coordinateFrame?: 'viewport';
+    sourceScrollY?: number;
     confidence: number;
     reasons: string[];
   };

@@ -18,6 +18,10 @@ const FILTER_PANEL_OPTION_PATTERN =
   /^(综合|最新|最热|最多点赞|最多评论|最多收藏|不限|一天内|一周内|半年内|已看过|未看过|已关注|同城|附近|all|latest|popular|most\s*(liked|commented|saved|collected)|any)$/i;
 const CONTENT_TYPE_FILTER_OPTION_PATTERN =
   /^(图文|图片|视频|文章|image\s*text|images?|photos?|videos?|articles?)$/i;
+const TIME_RANGE_FILTER_OPTION_PATTERN =
+  /^(不限|一天内|一周内|半年内|24\s*h|7\s*d|week|month|any)$/i;
+const SORT_FILTER_OPTION_PATTERN =
+  /^(综合|最新|最热|最多点赞|最多评论|最多收藏|latest|popular|most\s*(liked|commented|saved|collected))$/i;
 const FILTER_PANEL_ACTION_PATTERN =
   /^(清除|重置|确认|应用|收起|clear|reset|confirm|apply|collapse)$/i;
 const SELECTED_STATE_PATTERN =
@@ -65,6 +69,9 @@ const KNOWN_CLUSTERED_SHORT_LABELS = [
 
 type SearchSurfaceControl = ReadPageSearchSurface['controls'][number];
 type SearchSurfaceFilterPanel = NonNullable<ReadPageSearchSurface['filterPanel']>;
+type SearchSurfaceFilterState = NonNullable<ReadPageSearchSurface['filterState']>;
+type SearchSurfaceFilterGroupState = SearchSurfaceFilterState['contentType'];
+type SearchSurfaceFilterCandidate = SearchSurfaceFilterGroupState['candidates'][number];
 
 function guidanceRequestsSearch(params: {
   guidance: ReadPageAssistantGuidance | undefined;
@@ -155,6 +162,28 @@ function controlKindForFilterPanelLabel(label: string): SearchSurfaceControl['ki
   if (MOST_COLLECTED_PATTERN.test(label)) return 'sort_most_collected';
   if (FILTER_PANEL_ACTION_PATTERN.test(label)) return 'filter_panel_action';
   return 'filter_panel_option';
+}
+
+function filterGroupForFilterPanelLabel(
+  label: string,
+): SearchSurfaceControl['filterGroup'] | undefined {
+  if (CONTENT_TYPE_FILTER_OPTION_PATTERN.test(label)) return 'content_type';
+  if (SORT_FILTER_OPTION_PATTERN.test(label)) return 'sort';
+  if (TIME_RANGE_FILTER_OPTION_PATTERN.test(label)) return 'time_range';
+  if (FILTER_PANEL_ACTION_PATTERN.test(label)) return 'panel_action';
+  return 'other';
+}
+
+function isContentTypeFilterGroup(value: unknown): boolean {
+  return value === 'content_type';
+}
+
+function isSortFilterGroup(value: unknown): boolean {
+  return value === 'sort';
+}
+
+function isTimeRangeFilterGroup(value: unknown): boolean {
+  return value === 'time_range';
 }
 
 export function extractSearchToolbarLabelsFromVisibleText(
@@ -331,6 +360,7 @@ function controlForElement(params: {
   candidateActions: readonly ReadPageCandidateAction[];
   reason: string;
   confidence: number;
+  filterGroup?: SearchSurfaceControl['filterGroup'];
 }): SearchSurfaceControl {
   const action =
     actionForRef(params.candidateActions, params.element.ref) ??
@@ -350,6 +380,7 @@ function controlForElement(params: {
     source: isTextRecoveredRef(params.element.ref) ? 'text_recovery' : 'interactive_elements',
     rect: params.element.rect,
     ...(state ? { state } : {}),
+    ...(params.filterGroup ? { filterGroup: params.filterGroup } : {}),
     reason: params.reason,
   };
 }
@@ -385,6 +416,7 @@ function controlForRecoveredAction(params: {
   interactiveElements: readonly ReadPageInteractiveElement[];
   reason: string;
   confidence: number;
+  filterGroup?: SearchSurfaceControl['filterGroup'];
 }): SearchSurfaceControl {
   const state = stateForRecoveredLabel(params.label, params.interactiveElements);
   return {
@@ -395,6 +427,7 @@ function controlForRecoveredAction(params: {
     confidence: params.confidence,
     source: 'text_recovery',
     ...(state ? { state } : {}),
+    ...(params.filterGroup ? { filterGroup: params.filterGroup } : {}),
     reason: params.reason,
   };
 }
@@ -552,6 +585,7 @@ function filterPanelFromVisibleText(
           reason:
             'content-type filter option is visible outside the top search toolbar and treated as a filter-panel option',
           confidence: 0.8,
+          filterGroup: filterGroupForFilterPanelLabel(label),
         }),
       );
       continue;
@@ -566,6 +600,7 @@ function filterPanelFromVisibleText(
         reason:
           'filter panel label was recovered from visible text and resolved to a locator-backed candidate action',
         confidence: MOST_COLLECTED_PATTERN.test(label) ? 0.82 : 0.76,
+        filterGroup: filterGroupForFilterPanelLabel(label),
       }),
     );
   }
@@ -619,6 +654,134 @@ function categoryStateForControls(
         : unresolvedLabels.length > 0
           ? 'some category labels are visible but not locator-backed; treat them as capability gaps'
           : 'no selected category state was observable in this snapshot',
+  };
+}
+
+function filterCandidateFromControl(
+  control: SearchSurfaceControl,
+): SearchSurfaceFilterCandidate | undefined {
+  const label = safeLabel(control.label);
+  if (!label) return undefined;
+  return {
+    label,
+    selected: Boolean(control.state?.selected),
+    ...(control.targetRef ? { targetRef: control.targetRef } : {}),
+    ...(control.candidateActionId ? { candidateActionId: control.candidateActionId } : {}),
+    kind: control.kind,
+    source: control.source,
+    confidence: control.confidence,
+    reason: control.reason,
+  };
+}
+
+function groupStateFromCandidates(
+  candidates: readonly SearchSurfaceFilterCandidate[],
+): SearchSurfaceFilterGroupState {
+  const byKey = new Map<string, SearchSurfaceFilterCandidate>();
+  for (const candidate of candidates) {
+    const key = `${normalizedKey(candidate.label)}:${candidate.targetRef ?? ''}:${candidate.candidateActionId ?? ''}`;
+    if (!byKey.has(key)) byKey.set(key, candidate);
+  }
+  const uniqueCandidates = [...byKey.values()];
+  const selectedCandidates = uniqueCandidates.filter((candidate) => candidate.selected);
+  const selected = selectedCandidates[0];
+  const nonDefaultSelectedCandidates = selectedCandidates.filter(
+    (candidate) => !/^(全部|综合|不限|all|any)$/i.test(candidate.label),
+  );
+  const ambiguityCandidates =
+    selected && nonDefaultSelectedCandidates.some((candidate) => candidate.label === selected.label)
+      ? nonDefaultSelectedCandidates.filter((candidate) => candidate.label !== selected.label)
+      : nonDefaultSelectedCandidates;
+  const ambiguous = ambiguityCandidates.length > 0;
+  const source = uniqueStrings(uniqueCandidates.map((candidate) => candidate.source ?? 'unknown'));
+  return {
+    ...(selected?.label ? { selected: selected.label } : {}),
+    ...(selected?.candidateActionId ? { selectedCandidateId: selected.candidateActionId } : {}),
+    candidates: uniqueCandidates,
+    ambiguous,
+    source,
+    reason: selected
+      ? ambiguous
+        ? 'multiple selected candidates were observed for this filter group'
+        : 'selected filter inferred from structured search controls'
+      : uniqueCandidates.length > 0
+        ? 'filter candidates are visible, but selected state is not proven in this snapshot'
+        : 'no candidates observed for this filter group',
+  };
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function buildGroupedFilterState(params: {
+  categoryTabs: readonly SearchSurfaceControl[];
+  controls: readonly SearchSurfaceControl[];
+  filterPanel: SearchSurfaceFilterPanel;
+}): SearchSurfaceFilterState {
+  const contentTypeCandidates: SearchSurfaceFilterCandidate[] = [];
+  const sortCandidates: SearchSurfaceFilterCandidate[] = [];
+  const timeRangeCandidates: SearchSurfaceFilterCandidate[] = [];
+
+  for (const control of params.categoryTabs) {
+    const candidate = filterCandidateFromControl(control);
+    if (!candidate) continue;
+    contentTypeCandidates.push(candidate);
+  }
+  for (const control of params.controls) {
+    const candidate = filterCandidateFromControl(control);
+    if (!candidate) continue;
+    if (isSortFilterGroup(control.filterGroup) || control.kind === 'sort_most_collected') {
+      sortCandidates.push(candidate);
+    }
+  }
+  for (const control of params.filterPanel.targetableOptions ?? []) {
+    const candidate = filterCandidateFromControl(control);
+    if (!candidate) continue;
+    if (isContentTypeFilterGroup(control.filterGroup)) {
+      contentTypeCandidates.push(candidate);
+    } else if (isSortFilterGroup(control.filterGroup)) {
+      sortCandidates.push(candidate);
+    } else if (isTimeRangeFilterGroup(control.filterGroup)) {
+      timeRangeCandidates.push(candidate);
+    }
+  }
+
+  const contentType = groupStateFromCandidates(contentTypeCandidates);
+  const sort = groupStateFromCandidates(sortCandidates);
+  const timeRange = groupStateFromCandidates(timeRangeCandidates);
+  const missingGroups = [
+    contentType.selected ? null : 'contentType',
+    sort.selected ? null : 'sort',
+    timeRange.selected ? null : 'timeRange',
+  ].filter((item): item is 'contentType' | 'sort' | 'timeRange' => Boolean(item));
+  const appliedLabels = [contentType.selected, sort.selected, timeRange.selected].filter(
+    (item): item is string => Boolean(item),
+  );
+  const ambiguous = contentType.ambiguous || sort.ambiguous || timeRange.ambiguous;
+  const observedCandidateCount =
+    contentType.candidates.length + sort.candidates.length + timeRange.candidates.length;
+  return {
+    status: ambiguous
+      ? 'ambiguous'
+      : missingGroups.length === 0
+        ? 'observed'
+        : observedCandidateCount > 0
+          ? 'partial'
+          : 'not_observed',
+    contentType,
+    sort,
+    timeRange,
+    selected: {
+      ...(contentType.selected ? { contentType: contentType.selected } : {}),
+      ...(sort.selected ? { sort: sort.selected } : {}),
+      ...(timeRange.selected ? { timeRange: timeRange.selected } : {}),
+    },
+    appliedLabels,
+    ambiguous,
+    missingGroups,
+    claimBoundary:
+      'filterState reports what this fresh read_page snapshot proves from structured controls. It does not prove server-side ranking correctness.',
   };
 }
 
@@ -873,6 +1036,7 @@ export function buildSearchSurface(params: {
     params.candidateActions,
     params.interactiveElements,
   );
+  const filterState = buildGroupedFilterState({ categoryTabs, controls, filterPanel });
   const categoryState = categoryStateForControls(categoryTabs);
   const sortMenuAction = findToolbarControlAction(params.candidateActions, 'filter.open');
   const sortMenuObserved =
@@ -921,6 +1085,7 @@ export function buildSearchSurface(params: {
     visibleButUnresolved,
     resultCards,
     filterPanel,
+    filterState,
     sortEvidence: {
       requestedSort:
         sortElement || sortAction ? 'most_collected' : sortMenuObserved ? 'sort_menu' : 'unknown',

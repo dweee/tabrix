@@ -274,6 +274,7 @@ export interface ReadPageSearchSurfaceControl {
   targetRef?: string;
   candidateActionId?: string;
   label?: string;
+  filterGroup?: 'content_type' | 'sort' | 'time_range' | 'panel_action' | 'other' | string;
   confidence: number;
   actionability?: string;
   source?: 'interactive_elements' | 'text_recovery' | 'visible_text_unresolved' | string;
@@ -286,6 +287,42 @@ export interface ReadPageSearchSurfaceControl {
     reason?: string;
   };
   reason: string;
+}
+
+export interface ReadPageSearchSurfaceFilterCandidate {
+  label: string;
+  selected: boolean;
+  targetRef?: string;
+  candidateActionId?: string;
+  kind?: string;
+  source?: string;
+  confidence: number;
+  reason: string;
+}
+
+export interface ReadPageSearchSurfaceFilterGroupState {
+  selected?: string;
+  selectedCandidateId?: string;
+  candidates: ReadPageSearchSurfaceFilterCandidate[];
+  ambiguous: boolean;
+  source: string[];
+  reason: string;
+}
+
+export interface ReadPageSearchSurfaceFilterState {
+  status: 'observed' | 'partial' | 'not_observed' | 'ambiguous' | string;
+  contentType: ReadPageSearchSurfaceFilterGroupState;
+  sort: ReadPageSearchSurfaceFilterGroupState;
+  timeRange: ReadPageSearchSurfaceFilterGroupState;
+  selected: {
+    contentType?: string;
+    sort?: string;
+    timeRange?: string;
+  };
+  appliedLabels: string[];
+  ambiguous: boolean;
+  missingGroups: Array<'contentType' | 'sort' | 'timeRange'>;
+  claimBoundary: string;
 }
 
 export interface ReadPageSearchResultCard {
@@ -325,6 +362,7 @@ export interface ReadPageSearchSurface {
     confirmActionObserved: boolean;
     reason: string;
   };
+  filterState?: ReadPageSearchSurfaceFilterState;
   sortEvidence?: {
     requestedSort?: 'most_collected' | 'sort_menu' | 'unknown' | string;
     currentSortLabel?: string;

@@ -430,6 +430,50 @@ describe('browser world inventory', () => {
     });
   });
 
+  it('marks browser security challenge pages as restricted instead of operable', async () => {
+    (chrome.windows.getAll as any).mockResolvedValue([
+      {
+        id: 1,
+        focused: true,
+        state: 'normal',
+        type: 'normal',
+        width: 1280,
+        height: 720,
+        left: 0,
+        top: 0,
+        tabs: [
+          {
+            id: 12,
+            windowId: 1,
+            url: 'https://www.example.test/website-login/captcha?redirectPath=https%3A%2F%2Fexample.test%2Fsearch&verifyUuid=abc',
+            title: '安全验证',
+            active: true,
+            status: 'complete',
+            discarded: false,
+            audible: false,
+            mutedInfo: { muted: false },
+            pinned: false,
+          },
+        ],
+      },
+    ]);
+    initBrowserWorldInventory();
+
+    const snapshot = await getBrowserWorldSnapshot();
+
+    expect(snapshot.operableTabIds).toEqual([]);
+    expect(snapshot.tabs[0]).toMatchObject({
+      tabId: 12,
+      canTabrixOperate: false,
+      operabilityReason: 'user_verification_required',
+    });
+    expect(snapshot.windows[0]).toMatchObject({
+      activeTabCanOperate: false,
+      canTabrixOperate: false,
+      operabilityReason: 'active_tab_not_operable',
+    });
+  });
+
   it('tracks tab create, update, activation, close, and AI ownership marks locally', async () => {
     initBrowserWorldInventory();
     await getBrowserWorldSnapshot();
