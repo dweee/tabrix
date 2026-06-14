@@ -503,7 +503,7 @@ describe('MkeMemoryTraceService', () => {
             title: 'Search results',
             url: 'https://example.test/search?q=ai',
           },
-          pageRole: 'search_results',
+          pageRole: 'search_list',
           pageState: 'complete',
           sourceRoute: 'visible_dom_cards_bounded_scroll',
           selectedDataSource: 'visible_dom_result_cards',
@@ -529,16 +529,18 @@ describe('MkeMemoryTraceService', () => {
             {
               rank: 1,
               title: 'First result',
-              url: 'https://example.test/note/1?x=private',
+              url: 'https://example.test/note/1?xsec_token=private-token&x=private',
               actionTarget: {
                 actionType: 'click',
                 targetKind: 'result_card_link',
-                url: 'https://example.test/note/1?x=private',
+                url: 'https://example.test/note/1?xsec_token=private-token&x=private',
                 selector: 'body > main > article:nth-of-type(1) > a:nth-of-type(1)',
                 text: 'First result',
                 openAction: {
                   toolName: 'chrome_navigate',
-                  toolArgs: { url: 'https://example.test/note/1?x=private' },
+                  toolArgs: {
+                    url: 'https://example.test/note/1?xsec_token=private-token&x=private',
+                  },
                   executionScope: 'session_url',
                   reason: 'result_card_href',
                   confidence: 0.88,
@@ -625,6 +627,8 @@ describe('MkeMemoryTraceService', () => {
         pageModelKey: 'page:example.test:search_results',
         selectedDataSource: 'visible_dom_result_cards',
       });
+      expect(JSON.stringify(trace.response)).not.toContain('xsec_token');
+      expect(JSON.stringify(trace.response)).not.toContain('private-token');
 
       await traceService.flushAsyncWrites();
 

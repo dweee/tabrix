@@ -260,11 +260,29 @@ function truncateRouteString(value: string): string {
   return `${value.slice(0, MAX_ROUTE_LENGTH)}...[truncated:${value.length}]`;
 }
 
+function sanitizeStringValue(value: string): string {
+  const trimmed = value.trim();
+  if (/^https?:\/\//i.test(trimmed)) {
+    const urlFields = normalizeUrlPattern(trimmed, {
+      allowPersonalBrowserStateStorage: false,
+    });
+    return truncateString(
+      urlFields.currentRoute ?? urlFields.rootRoute ?? urlFields.pattern ?? value,
+    );
+  }
+  if (/[?&][^=\s"'&]*token[^=\s"'&]*=/i.test(value)) {
+    return truncateString(
+      value.replace(/([?&][^=\s"'&]*token[^=\s"'&]*=)[^&\s"']+/gi, `$1${REDACTED}`),
+    );
+  }
+  return truncateString(value);
+}
+
 function sanitizeValue(value: unknown, toolName: string, depth = 0, keyHint = ''): unknown {
   if (shouldRedactKey(keyHint, toolName)) return REDACTED;
   if (depth > MAX_DEPTH) return '[max_depth]';
   if (value === null || value === undefined) return value ?? null;
-  if (typeof value === 'string') return truncateString(value);
+  if (typeof value === 'string') return sanitizeStringValue(value);
   if (typeof value === 'number' || typeof value === 'boolean') return value;
   if (Array.isArray(value)) {
     return value.slice(0, MAX_ARRAY_ITEMS).map((item) => sanitizeValue(item, toolName, depth + 1));
@@ -470,6 +488,11 @@ function readBusinessVerdictString(...values: unknown[]): BusinessSuccessVerdict
   return null;
 }
 
+function normalizePageRoleForMemory(value: string | null): string | null {
+  if (value === 'search_list') return 'search_results';
+  return value;
+}
+
 function normalizeUrlPattern(
   url: string | null,
   options: { allowPersonalBrowserStateStorage?: boolean } = {},
@@ -534,7 +557,8 @@ function sanitizeSearchParams(
   }
   const sanitized = new URLSearchParams();
   for (const [key, value] of searchParams.entries()) {
-    sanitized.append(key, shouldRedactQueryParam(key) ? REDACTED : value);
+    if (shouldRedactQueryParam(key)) continue;
+    sanitized.append(key, value);
   }
   const serialized = sanitized.toString();
   return serialized ? `?${serialized}` : '';
@@ -578,7 +602,7 @@ function digestResult(
   const dataSourceDecision = readNestedObject(object, 'dataSourceDecision');
   const url = readString(page?.url, object?.url, object?.pageUrl);
   const urlFields = normalizeUrlPattern(url);
-  const pageRole = readString(summary?.pageRole, object?.pageRole);
+  const pageRole = normalizePageRoleForMemory(readString(summary?.pageRole, object?.pageRole));
   const pageModelKey = readString(
     readNestedObject(object, 'pageProjection')?.pageModelKey,
     object?.pageModelKey,
@@ -1260,7 +1284,8 @@ export class MkeMemoryTraceService {
       allowPersonalBrowserStateStorage: false,
     });
     const siteFamily = urlFields.siteFamily ?? trace.siteFamily ?? 'unknown';
-    const pageRole = readString(payload.pageRole, trace.pageRole) ?? 'search_results';
+    const pageRole =
+      normalizePageRoleForMemory(readString(payload.pageRole, trace.pageRole)) ?? 'search_results';
     const pageModelKey = trace.pageModelKey ?? `page:${siteFamily}:${pageRole}`;
     const tabId = readNumber(payload.tabId, trace.tabId);
     const sourceRoute = readString(
