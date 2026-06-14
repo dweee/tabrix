@@ -659,6 +659,8 @@ export class SessionManager {
       this.repos.memoryTrace.clear();
       this.repos.knowledgeModel.clear();
       this.repos.experienceRecipe.clear();
+      this.repos.knowledgeApi.clear();
+      this.repos.chooseContextTelemetry.clear();
     }
     this.tasks.clear();
     this.sessions.clear();

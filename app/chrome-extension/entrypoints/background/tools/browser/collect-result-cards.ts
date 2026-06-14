@@ -2,11 +2,17 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { ERROR_MESSAGES } from '@/common/constants';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
-import { markBrowserWorldTabAiOperated } from '../../browser-world-inventory';
+import {
+  getBrowserWorldSnapshot,
+  markBrowserWorldTabAiOperated,
+  type BrowserWorldTabObject,
+} from '../../browser-world-inventory';
 import { type CollectedResultCard, mergeCollectedResultCards } from './collect-result-cards-model';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
 const CDP_SESSION_KEY = 'collect-result-cards';
+const RESTRICTED_PAGE_SIGNAL_PATTERN =
+  /\b(captcha|recaptcha|challenge|verification|security[-_]?check|human[-_]?check|verify(uuid|type|biz)?|user[_-]?verification[_-]?required|login[_-]?required|auth[_-]?required|access[_-]?denied|restricted|blocked)\b|安全验证|人机验证|滑块验证|验证码|登录验证/i;
 
 interface CollectResultCardsParams {
   tabId?: number;
@@ -80,6 +86,91 @@ function clampNumber(value: unknown, fallback: number, min: number, max: number)
   const numeric = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(numeric)) return fallback;
   return Math.max(min, Math.min(max, numeric));
+}
+
+function hasRestrictedPageSignal(value: unknown, depth = 0): boolean {
+  if (value == null || depth > 3) return false;
+  if (typeof value === 'string') return RESTRICTED_PAGE_SIGNAL_PATTERN.test(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return false;
+  if (Array.isArray(value)) {
+    return value.slice(0, 20).some((item) => hasRestrictedPageSignal(item, depth + 1));
+  }
+  if (typeof value !== 'object') return false;
+  return Object.entries(value as Record<string, unknown>)
+    .slice(0, 60)
+    .some(
+      ([key, item]) =>
+        hasRestrictedPageSignal(key, depth + 1) || hasRestrictedPageSignal(item, depth + 1),
+    );
+}
+
+export function isRestrictedResultCardCollectionPage(input: {
+  tab?: Pick<chrome.tabs.Tab, 'url' | 'title'> | null;
+  browserWorldTab?: Pick<
+    BrowserWorldTabObject,
+    'url' | 'pendingUrl' | 'title' | 'canTabrixOperate' | 'operabilityReason' | 'status'
+  > | null;
+}): boolean {
+  const tab = input.tab ?? null;
+  const browserWorldTab = input.browserWorldTab ?? null;
+  if (browserWorldTab?.canTabrixOperate === false) return true;
+  return hasRestrictedPageSignal({
+    tabUrl: tab?.url,
+    tabTitle: tab?.title,
+    worldUrl: browserWorldTab?.url,
+    pendingUrl: browserWorldTab?.pendingUrl,
+    worldTitle: browserWorldTab?.title,
+    worldStatus: browserWorldTab?.status,
+    operabilityReason: browserWorldTab?.operabilityReason,
+  });
+}
+
+function createRestrictedPageCollectionResponse(
+  tab: chrome.tabs.Tab,
+  browserWorldTab?: BrowserWorldTabObject | null,
+): ToolResult {
+  return {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({
+          success: false,
+          kind: 'result_card_collection',
+          status: 'blocked',
+          businessSuccess: false,
+          pageRole: 'restricted',
+          pageState: 'restricted',
+          sourceRoute: 'browser_world_operability_gate',
+          selectedDataSource: null,
+          freshness: 'blocked',
+          reasonCode: 'user_verification_required',
+          page: {
+            title: tab.title ?? browserWorldTab?.title ?? null,
+            url: tab.url ?? browserWorldTab?.url ?? browserWorldTab?.pendingUrl ?? null,
+          },
+          tabId: tab.id ?? browserWorldTab?.tabId ?? null,
+          windowId: tab.windowId ?? browserWorldTab?.windowId ?? null,
+          observedResultCount: 0,
+          complete: false,
+          cards: [],
+          recommendedNextAction:
+            'Ask the user to complete the browser verification or login, then retry result-card collection.',
+          claimBoundary:
+            'Tabrix did not scan or store result cards because the current page is restricted or requires user verification.',
+        }),
+      },
+    ],
+    isError: false,
+  };
+}
+
+async function findBrowserWorldTab(tabId: number): Promise<BrowserWorldTabObject | null> {
+  try {
+    const snapshot = await getBrowserWorldSnapshot();
+    return snapshot.tabs.find((tab) => tab.tabId === tabId) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function scanVisibleResultCardsInPage(): VisibleCardScanResult {
@@ -934,6 +1025,10 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
       }
       if (/^(chrome|edge|about|devtools):/i.test(tab.url || '')) {
         return createErrorResponse('Cannot collect result cards from browser-internal pages.');
+      }
+      const browserWorldTab = await findBrowserWorldTab(tab.id);
+      if (isRestrictedResultCardCollectionPage({ tab, browserWorldTab })) {
+        return createRestrictedPageCollectionResponse(tab, browserWorldTab);
       }
 
       let merged: CollectedResultCard[] = [];

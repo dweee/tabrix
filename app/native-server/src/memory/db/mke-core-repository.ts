@@ -1220,6 +1220,7 @@ export class ExperienceRecipeRepository {
     this.getStmt = db.prepare('SELECT * FROM tabrix_experience_recipes WHERE experience_id = ?');
     this.listRecentStmt = db.prepare(
       `SELECT * FROM tabrix_experience_recipes
+        WHERE archived_at IS NULL
         ORDER BY updated_at DESC, created_at DESC
         LIMIT ? OFFSET ?`,
     );
@@ -1247,7 +1248,9 @@ export class ExperienceRecipeRepository {
     this.archiveStmt = db.prepare(
       'UPDATE tabrix_experience_recipes SET archived_at = ?, updated_at = ? WHERE experience_id = ?',
     );
-    this.countStmt = db.prepare('SELECT COUNT(*) AS count FROM tabrix_experience_recipes');
+    this.countStmt = db.prepare(
+      'SELECT COUNT(*) AS count FROM tabrix_experience_recipes WHERE archived_at IS NULL',
+    );
     this.clearStmt = db.prepare('DELETE FROM tabrix_experience_recipes');
   }
 

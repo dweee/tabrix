@@ -294,6 +294,38 @@ describe('tabrix metadata envelope', () => {
     expect(payload._tabrix).not.toHaveProperty('feedbackTarget');
   });
 
+  it('does not request AI feedback for restricted or business-failed traces', () => {
+    const result = attachTabrixMemoryTraceEnvelope(
+      textResult({
+        success: false,
+        status: 'blocked',
+        pageState: 'restricted',
+        reasonCode: 'user_verification_required',
+      }),
+      makeTrace({
+        toolName: TOOL_NAMES.BROWSER.COLLECT_RESULT_CARDS,
+        taskIntent: `Run MCP tool ${TOOL_NAMES.BROWSER.COLLECT_RESULT_CARDS}`,
+        businessSuccess: 'false',
+        pageState: 'restricted',
+      }),
+      {
+        intentTitle: null,
+        intentSummary: null,
+        nextIntent: null,
+        previousFeedback: [],
+      },
+      TOOL_NAMES.BROWSER.COLLECT_RESULT_CARDS,
+    );
+
+    const payload = parseFirstText(result);
+    expect(payload._tabrix).toMatchObject({
+      traceId: 'trace-1',
+      toolName: TOOL_NAMES.BROWSER.COLLECT_RESULT_CARDS,
+      businessFeedbackRequired: false,
+    });
+    expect(payload._tabrix).not.toHaveProperty('feedbackTarget');
+  });
+
   it('requests AI feedback for default result-card collection traces', () => {
     const result = attachTabrixMemoryTraceEnvelope(
       textResult({ status: 'ok' }),

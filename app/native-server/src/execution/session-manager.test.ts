@@ -110,13 +110,39 @@ describe('SessionManager', () => {
         origin: 'jest',
       });
       mgr.startSession({ taskId: task.taskId, transport: 'stdio', clientName: 'jest' });
+      mgr.knowledgeApi?.upsert({
+        site: 'api.example.test',
+        family: 'observed',
+        method: 'GET',
+        urlPattern: 'api.example.test/search',
+        endpointSignature: 'GET api.example.test/search',
+        requestSummary: {
+          headerKeys: [],
+          queryKeys: ['q'],
+          bodyKeys: [],
+          hasAuth: false,
+          hasCookie: false,
+        },
+        responseSummary: {
+          contentType: 'application/json',
+          sizeBytes: 128,
+          shape: { kind: 'object', topLevelKeys: ['items'] },
+        },
+        observedAt: '2026-06-12T00:00:00.000Z',
+        semanticType: 'search',
+        usableForTask: true,
+        endpointSource: 'observed',
+      });
+      expect(mgr.knowledgeApi?.countAll()).toBe(1);
       mgr.reset();
+      expect(mgr.knowledgeApi?.countAll()).toBe(0);
       mgr.close();
 
       const restored = new SessionManager({ dbPath });
       try {
         expect(restored.listTasks()).toEqual([]);
         expect(restored.listSessions()).toEqual([]);
+        expect(restored.knowledgeApi?.countAll()).toBe(0);
       } finally {
         restored.close();
       }

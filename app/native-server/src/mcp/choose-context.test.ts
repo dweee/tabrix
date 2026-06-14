@@ -366,6 +366,51 @@ describe('runTabrixChooseContext (orchestrator)', () => {
     expect(spy).toHaveBeenCalledWith('www.example.test', expect.any(Number));
   });
 
+  it('does not reuse Knowledge when the current page is a verification challenge', () => {
+    const { repo, spy } = fakeKnowledgeRepo([fakeEndpoint()]);
+    const result = runTabrixChooseContext(
+      {
+        intent: 'collect top 10 result cards',
+        url: 'https://www.xiaohongshu.com/website-login/captcha?redirectPath=%2Fsearch_result',
+        pageRole: 'search_results',
+      },
+      {
+        knowledgeApi: repo,
+      },
+    );
+    expect(result.strategy).toBe('read_page_required');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('does not reuse Experience when the current page is a verification challenge', () => {
+    const findReusableByContext = jest.fn().mockReturnValue([
+      {
+        experienceId: 'exp-xhs-old',
+        taskSignature: 'collect filtered result cards',
+        siteFamily: 'www.xiaohongshu.com',
+        pageRole: 'search_results',
+        successCount: 3,
+        reliabilityScore: 1,
+        driftState: 'verified_once',
+        steps: [{ toolName: 'chrome_collect_result_cards' }],
+        successCheck: {},
+      } as unknown as ExperienceRecipe,
+    ]);
+    const result = runTabrixChooseContext(
+      {
+        intent: 'collect top 10 result cards',
+        url: 'https://www.xiaohongshu.com/website-login/captcha?redirectPath=%2Fsearch_result',
+        pageRole: 'search_results',
+      },
+      {
+        knowledgeApi: null,
+        experienceRecipes: { findReusableByContext } as any,
+      },
+    );
+    expect(result.strategy).toBe('read_page_required');
+    expect(findReusableByContext).not.toHaveBeenCalled();
+  });
+
   it('falls back to read_page_required when no URL is available', () => {
     const result = runTabrixChooseContext({ intent: 'do something' }, { knowledgeApi: null });
     expect(result.strategy).toBe('read_page_required');

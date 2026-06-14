@@ -882,6 +882,10 @@ export class KnowledgeApiRepository {
     };
     return row.n;
   }
+
+  clear(): void {
+    this.db.prepare(`DELETE FROM knowledge_api_endpoints`).run();
+  }
 }
 
 export function scoreEndpointKnowledge(endpoint: KnowledgeApiEndpoint): ScoredKnowledgeApiEndpoint {

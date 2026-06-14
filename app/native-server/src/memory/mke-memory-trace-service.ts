@@ -69,7 +69,7 @@ const RAW_CONTENT_KEYS = new Set([
 ]);
 
 const BLOCKED_PAGE_SIGNAL_PATTERN =
-  /\b(captcha|recaptcha|challenge|verification|security[-_]?check|human[-_]?check|verify(uuid|type|biz)?|user[_-]?verification[_-]?required|login[_-]?required|auth[_-]?required|access[_-]?denied)\b|安全验证|人机验证|滑块验证|验证码|登录验证/i;
+  /\b(captcha|recaptcha|challenge|verification|security[-_]?check|human[-_]?check|verify(uuid|type|biz)?|user[_-]?verification[_-]?required|login[_-]?required|auth[_-]?required|access[_-]?denied|restricted|blocked)\b|安全验证|人机验证|滑块验证|验证码|登录验证/i;
 
 export interface RecordMkeToolCallTraceInput {
   taskId: string;
@@ -659,6 +659,26 @@ function readBusinessSuccess(
   return 'unknown';
 }
 
+function normalizePageStateForMemory(input: {
+  payload: Record<string, unknown> | null;
+  page: Record<string, unknown> | null;
+  summary: Record<string, unknown> | null;
+  url: string | null;
+}): string | null {
+  const authArtifactStatus = readNestedObject(input.payload, 'authArtifactStatus');
+  const observedAuthSurface = readNestedObject(input.payload, 'observedAuthSurface');
+  if (
+    stringHasBlockedPageSignal(input.url) ||
+    valueHasBlockedPageSignal(authArtifactStatus) ||
+    valueHasBlockedPageSignal(observedAuthSurface) ||
+    valueHasBlockedPageSignal(input.summary) ||
+    valueHasBlockedPageSignal(input.page)
+  ) {
+    return 'restricted';
+  }
+  return readString(input.summary?.quality, input.payload?.pageState);
+}
+
 function digestResult(
   result: CallToolResult,
   toolName: string,
@@ -693,7 +713,7 @@ function digestResult(
     currentRoute: urlFields.currentRoute,
     pageRole,
     pageModelKey,
-    pageState: readString(summary?.quality, object?.pageState),
+    pageState: normalizePageStateForMemory({ payload: object, page, summary, url }),
     sourceRoute: readString(object?.sourceRoute, pageContext?.sourceRoute),
     selectedDataSource: readString(
       object?.selectedDataSource,

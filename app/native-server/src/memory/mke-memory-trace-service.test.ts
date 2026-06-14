@@ -175,6 +175,48 @@ describe('MkeMemoryTraceService', () => {
     }
   });
 
+  it('records verification-blocked read_page traces as restricted instead of sparse', async () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const browserObjectRepo = new BrowserObjectRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo, browserObjectRepo);
+
+    try {
+      const trace = traceService.recordToolCall({
+        taskId: 'trace-xhs-verification-task',
+        taskIntent: 'read blocked Xiaohongshu search page',
+        aiClient: 'jest',
+        toolName: 'chrome_read_page',
+        stepId: 'trace-xhs-verification-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 7 },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 40,
+        result: textResult({
+          page: {
+            url: 'https://www.xiaohongshu.com/website-login/captcha?redirectPath=https%3A%2F%2Fwww.xiaohongshu.com%2Fsearch_result%2F%3Fkeyword%3DAI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
+          },
+          summary: { pageRole: 'unknown', quality: 'sparse' },
+          authArtifactStatus: { status: 'blocked', reasonCode: 'user_verification_required' },
+          observedAuthSurface: { status: 'detected', title: '安全验证' },
+          tabId: 7,
+        }),
+        resultSummary:
+          'AI context: read_refresh_delta; state=login_required; next=user_collaboration',
+      });
+
+      expect(trace.pageState).toBe('restricted');
+      expect(trace.pageUrlPattern).toBe('https://www.xiaohongshu.com/website-login/captcha');
+
+      await traceService.flushAsyncWrites();
+      const objects = browserObjectRepo.listRecent({ limit: 10, offset: 0 });
+      expect(objects.some((object) => object.canTabrixOperate === false)).toBe(true);
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
   it('records bound AI feedback and appends an audit event', () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const traceRepo = new MemoryTraceRepository(db);

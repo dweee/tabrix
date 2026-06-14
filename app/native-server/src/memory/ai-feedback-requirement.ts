@@ -16,9 +16,18 @@ export function shouldRequestAiFeedbackForTool(toolName: string | null | undefin
 }
 
 export function shouldRequestAiFeedbackForTrace(
-  trace: Pick<MemoryTrace, 'toolName' | 'toolSuccess' | 'taskIntent'> | null | undefined,
+  trace:
+    | Pick<
+        MemoryTrace,
+        'toolName' | 'toolSuccess' | 'taskIntent' | 'businessSuccess' | 'pageState' | 'errorCode'
+      >
+    | null
+    | undefined,
 ): boolean {
   if (!trace || trace.toolSuccess !== true) return false;
+  if (trace.businessSuccess === 'false') return false;
+  if (trace.errorCode) return false;
+  if (trace.pageState === 'restricted') return false;
   if (!shouldRequestAiFeedbackForTool(trace.toolName)) return false;
   if (trace.toolName === TOOL_NAMES.BROWSER.COLLECT_RESULT_CARDS) return true;
   const taskIntent = trace.taskIntent?.trim();

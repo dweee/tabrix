@@ -68,6 +68,8 @@ import type { ExperienceRecipe } from '../memory/db';
 import type { DataNeed, EndpointKnowledgeReader } from '../api-knowledge/types';
 
 const chooseContextLogger = logger.child('choose-context');
+const RESTRICTED_CONTEXT_SIGNAL_PATTERN =
+  /\b(captcha|recaptcha|challenge|verification|security[-_]?check|human[-_]?check|verify(uuid|type|biz)?|user[_-]?verification[_-]?required|login[_-]?required|auth[_-]?required|access[_-]?denied|restricted|blocked)\b|安全验证|人机验证|滑块验证|验证码|登录验证/i;
 
 export interface TabrixChooseContextRouterTelemetry {
   chosenSource?: DataSourceKind;
@@ -114,6 +116,10 @@ function estimateTokensFromJsonEnvelope(value: unknown): number {
   } catch {
     return 0;
   }
+}
+
+function hasRestrictedContextSignal(value: unknown): boolean {
+  return typeof value === 'string' && RESTRICTED_CONTEXT_SIGNAL_PATTERN.test(value);
 }
 
 /**
@@ -575,11 +581,12 @@ export function runTabrixChooseContext(
 
   const { input, intentSignature } = parsed;
   const siteFamily = resolveSiteFamily(input);
+  const currentContextRestricted = hasRestrictedContextSignal(input.url);
 
   const nowIso = (deps.now ?? (() => new Date().toISOString()))();
 
   let experienceCatalog: ChooseContextFacts['experienceCatalog'];
-  if (deps.experienceRecipes && siteFamily) {
+  if (!currentContextRestricted && deps.experienceRecipes && siteFamily) {
     const reusableRecipes = deps.experienceRecipes.findReusableByContext({
       siteFamily,
       pageRole: input.pageRole ?? null,
@@ -591,12 +598,14 @@ export function runTabrixChooseContext(
   }
 
   let knowledgeCatalog: ChooseContextFacts['knowledgeCatalog'];
-  const apiCandidate = resolveApiKnowledgeCandidate({
-    intent: input.intent,
-    url: input.url,
-    pageRole: input.pageRole,
-  });
-  if (deps.knowledgeApi) {
+  const apiCandidate = currentContextRestricted
+    ? null
+    : resolveApiKnowledgeCandidate({
+        intent: input.intent,
+        url: input.url,
+        pageRole: input.pageRole,
+      });
+  if (!currentContextRestricted && deps.knowledgeApi) {
     const site = apiCandidate?.endpointFamily ?? siteFamily;
     if (site) {
       const rows =

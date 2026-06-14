@@ -46,7 +46,54 @@ function verifiedExperienceFeedback(input: {
   };
 }
 
+function saveTestExperience(
+  experience: ExperienceRecipeRepository,
+  input: { recipeFingerprint: string; archivedAt?: string | null },
+) {
+  return experience.save({
+    recipeName: `Test recipe ${input.recipeFingerprint}`,
+    scenarioKey: 'search-results::collect-top10',
+    taskSignature: 'collect filtered results',
+    recipeFingerprint: input.recipeFingerprint,
+    siteFamily: 'example.test',
+    pageModelKey: 'example.test::search_results::v1',
+    pageRole: 'search_results',
+    preconditions: { states: ['search_results_ready'] },
+    variableSchema: { fields: ['query'] },
+    steps: [{ toolName: 'chrome_collect_result_cards', argsTemplate: { minResults: 10 } }],
+    successCheck: { requiresAiFeedback: true, minimumConfidence: 0.9 },
+    sourceTraceIds: [`trace-${input.recipeFingerprint}`],
+    linkedKnowledgeIds: [`knowledge-${input.recipeFingerprint}`],
+    successCount: 2,
+    failureCount: 0,
+    reliabilityScore: 1,
+    driftState: 'verified_once',
+    archivedAt: input.archivedAt ?? null,
+    lastVerifiedAt: '2026-06-06T03:00:00.000Z',
+    createdAt: '2026-06-06T03:00:00.000Z',
+    updatedAt: '2026-06-06T03:00:00.000Z',
+  });
+}
+
 describe('MkeExperienceProjector', () => {
+  it('does not list or count archived recipes as reusable product experience', () => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const experience = new ExperienceRecipeRepository(opened.db);
+    try {
+      saveTestExperience(experience, { recipeFingerprint: 'active' });
+      saveTestExperience(experience, {
+        recipeFingerprint: 'archived',
+        archivedAt: '2026-06-06T04:00:00.000Z',
+      });
+
+      expect(experience.listRecent({ limit: 10 })).toHaveLength(1);
+      expect(experience.listRecent({ limit: 10 })[0].recipeFingerprint).toBe('active');
+      expect(experience.count()).toBe(1);
+    } finally {
+      opened.db.close();
+    }
+  });
+
   it('mines a template-only recipe from a successful memory and knowledge chain', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
     const traces = new MemoryTraceRepository(opened.db);
