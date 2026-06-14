@@ -245,6 +245,10 @@ function ensureChooseContextDecisionLayerColumns(db: SqliteDatabase): void {
     // the CREATE in `CHOOSE_CONTEXT_TELEMETRY_CREATE_TABLES_SQL`.
     ['dispatcher_input_source', 'TEXT'],
     ['fallback_cause_v26', 'TEXT'],
+    // Audit-only lineage. Stores the redacted artifacts returned by
+    // choose_context so acceptance can prove which Experience was
+    // selected without replaying the decision.
+    ['selected_artifacts_blob', 'TEXT'],
   ];
   for (const [name, type] of additions) {
     if (!hasColumn(db, 'tabrix_choose_context_decisions', name)) {

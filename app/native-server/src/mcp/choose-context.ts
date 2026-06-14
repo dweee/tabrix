@@ -41,7 +41,10 @@ import {
 } from '@tabrix/shared';
 import { normalizeIntentSignature } from '../memory/experience/experience-signature';
 import type { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
-import type { ChooseContextTelemetryRepository } from '../memory/telemetry/choose-context-telemetry';
+import type {
+  ChooseContextTelemetryRepository,
+  SelectedChooseContextArtifactAudit,
+} from '../memory/telemetry/choose-context-telemetry';
 import {
   dispatchLayer,
   type LayerDispatchTaskType,
@@ -270,6 +273,34 @@ function buildExperienceCatalog(recipe: ExperienceRecipe): {
         'If the live page or filter state does not match this recipe, call chrome_read_page before reusing it.',
     },
   };
+}
+
+function readArtifactObject(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+function buildSelectedArtifactAudit(
+  artifacts: TabrixChooseContextArtifact[],
+  fallback: { siteFamily: string | null; pageRole: string | null },
+): SelectedChooseContextArtifactAudit[] | null {
+  const selected = artifacts
+    .map((artifact): SelectedChooseContextArtifactAudit | null => {
+      if (typeof artifact.ref !== 'string' || artifact.ref.length === 0) {
+        return null;
+      }
+      const recipe = readArtifactObject(artifact.recipe);
+      return {
+        kind: artifact.kind,
+        ref: artifact.ref,
+        recipeSchema: typeof recipe?.schema === 'string' ? recipe.schema : null,
+        siteFamily:
+          typeof recipe?.siteFamily === 'string' ? recipe.siteFamily : fallback.siteFamily,
+        pageRole: typeof recipe?.pageRole === 'string' ? recipe.pageRole : fallback.pageRole,
+        taskSignature: typeof recipe?.taskSignature === 'string' ? recipe.taskSignature : null,
+      };
+    })
+    .filter((item): item is SelectedChooseContextArtifactAudit => item !== null);
+  return selected.length > 0 ? selected : null;
 }
 
 /**
@@ -709,6 +740,10 @@ export function runTabrixChooseContext(
   if (deps.telemetry) {
     const newId = deps.newDecisionId ?? randomUUID;
     const candidateId = newId();
+    const selectedArtifacts = buildSelectedArtifactAudit(decision.artifacts, {
+      siteFamily: siteFamily ?? null,
+      pageRole: input.pageRole ?? null,
+    });
     try {
       deps.telemetry.recordDecision({
         decisionId: candidateId,
@@ -737,6 +772,7 @@ export function runTabrixChooseContext(
           dispatcherInputs && dispatcherInputs.source === 'fallback_zero'
             ? (dispatcherInputs.fallbackCause ?? null)
             : null,
+        ...(selectedArtifacts ? { selectedArtifacts } : {}),
       });
       decisionId = candidateId;
     } catch (error) {

@@ -594,6 +594,16 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
     expect(recorded.tokenEstimateFullRead).toBe(10_000);
     expect(recorded.tokensSavedEstimate).toBe(result.tokensSavedEstimate);
     expect(recorded.sourceRoute).toBe('experience_reuse');
+    expect(recorded.selectedArtifacts).toEqual([
+      {
+        kind: 'experience_recipe',
+        ref: 'exp-xhs-top10',
+        recipeSchema: 'tabrix_experience_recipe_hint_v1',
+        siteFamily: 'www.xiaohongshu.com',
+        pageRole: 'search_results',
+        taskSignature: 'tools:chrome_collect_result_cards',
+      },
+    ]);
   });
 
   it('records dispatcherInputSource=fallback_zero with cause when no snapshot is available', () => {

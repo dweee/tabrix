@@ -451,7 +451,13 @@ CREATE TABLE IF NOT EXISTS tabrix_choose_context_decisions (
   -- independently. Both NULLABLE so legacy rows + tests that
   -- pre-date these inputs stay valid.
   dispatcher_input_source      TEXT,
-  fallback_cause_v26           TEXT
+  fallback_cause_v26           TEXT,
+  -- Redacted copy of the artifacts returned to the AI for this
+  -- decision. This is audit-only lineage so acceptance can prove a
+  -- decision used a specific Experience recipe; it MUST NOT drive
+  -- routing. No raw page payloads, cookies, tokens, or request/response
+  -- bodies belong here.
+  selected_artifacts_blob      TEXT
 );
 
 CREATE INDEX IF NOT EXISTS tabrix_choose_context_decisions_strategy_idx

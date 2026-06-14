@@ -128,6 +128,41 @@ describe('MKE core repositories', () => {
     }
   });
 
+  it('preserves Browser Object source trace lineage across upserts', () => {
+    const { browserObjectRepo, close } = bootstrap();
+    try {
+      browserObjectRepo.upsert({
+        siteFamily: 'example.test',
+        pageModelKey: 'search-results',
+        objectFingerprint: 'page:example.test:search-results:7',
+        objectType: 'page',
+        facts: { filterState: { sort: 'most_liked' } },
+        firstTraceId: 'trace-collect',
+        lastTraceId: 'trace-collect',
+        sourceTraceIds: ['trace-collect'],
+        updatedAt: NOW,
+      });
+
+      const second = browserObjectRepo.upsert({
+        siteFamily: 'example.test',
+        pageModelKey: 'search-results',
+        objectFingerprint: 'page:example.test:search-results:7',
+        objectType: 'page',
+        facts: { readiness: 'ready' },
+        firstTraceId: 'trace-read',
+        lastTraceId: 'trace-read',
+        sourceTraceIds: ['trace-read'],
+        updatedAt: '2026-06-06T10:00:01.000Z',
+      });
+
+      expect(second.sourceTraceIds).toEqual(['trace-collect', 'trace-read']);
+      expect(second.firstTraceId).toBe('trace-collect');
+      expect(second.lastTraceId).toBe('trace-read');
+    } finally {
+      close();
+    }
+  });
+
   it('lists Object Library surface as current and recently closed tabs', () => {
     const { browserObjectRepo, close } = bootstrap();
     try {

@@ -16,6 +16,7 @@ import {
 
 interface Harness {
   repo: ChooseContextTelemetryRepository;
+  db: ReturnType<typeof openMemoryDb>['db'];
   close: () => void;
 }
 
@@ -23,6 +24,7 @@ function fresh(): Harness {
   const opened = openMemoryDb({ dbPath: ':memory:' });
   return {
     repo: new ChooseContextTelemetryRepository(opened.db),
+    db: opened.db,
     close: () => opened.db.close(),
   };
 }
@@ -103,6 +105,57 @@ describe('ChooseContextTelemetryRepository', () => {
         strategy: 'read_page_required',
         fallbackStrategy: null,
       });
+    } finally {
+      close();
+    }
+  });
+
+  it('stores only redacted selected artifact pointers', () => {
+    const { repo, db, close } = fresh();
+    try {
+      repo.recordDecision(
+        decision({
+          decisionId: 'dc-selected-artifact',
+          strategy: 'experience_reuse',
+          selectedArtifacts: [
+            {
+              kind: 'experience_recipe',
+              ref: 'exp-xhs-top10',
+              recipeSchema: 'tabrix_experience_recipe_hint_v1',
+              siteFamily: 'www.xiaohongshu.com',
+              pageRole: 'search_results',
+              taskSignature: 'tools:chrome_collect_result_cards',
+            },
+          ],
+        }),
+      );
+      const row = db
+        .prepare(
+          `SELECT selected_artifacts_blob
+             FROM tabrix_choose_context_decisions
+            WHERE decision_id = ?`,
+        )
+        .get('dc-selected-artifact') as { selected_artifacts_blob: string | null };
+      const payload = JSON.parse(row.selected_artifacts_blob ?? '{}') as {
+        schema?: string;
+        items?: Array<Record<string, unknown>>;
+      };
+      expect(payload).toEqual({
+        schema: 'tabrix_choose_context_selected_artifacts_v1',
+        items: [
+          {
+            kind: 'experience_recipe',
+            ref: 'exp-xhs-top10',
+            recipeSchema: 'tabrix_experience_recipe_hint_v1',
+            siteFamily: 'www.xiaohongshu.com',
+            pageRole: 'search_results',
+            taskSignature: 'tools:chrome_collect_result_cards',
+          },
+        ],
+      });
+      expect(row.selected_artifacts_blob).not.toContain('steps');
+      expect(row.selected_artifacts_blob).not.toContain('successCheck');
+      expect(row.selected_artifacts_blob).not.toContain('summary');
     } finally {
       close();
     }

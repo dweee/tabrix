@@ -82,6 +82,21 @@ export interface RecordChooseContextDecisionInput {
   // ---------------------------------------------------------------
   dispatcherInputSource?: string | null;
   fallbackCauseV26?: string | null;
+  /**
+   * Redacted audit pointers for artifacts returned by the chooser.
+   * Stores IDs and lightweight classification only; never raw page content,
+   * cookies, headers, recipe steps, or success-check payloads.
+   */
+  selectedArtifacts?: SelectedChooseContextArtifactAudit[] | null;
+}
+
+export interface SelectedChooseContextArtifactAudit {
+  kind: string;
+  ref: string;
+  recipeSchema?: string | null;
+  siteFamily?: string | null;
+  pageRole?: string | null;
+  taskSignature?: string | null;
 }
 
 export interface RecordChooseContextOutcomeInput {
@@ -128,6 +143,24 @@ interface DecisionDbRow {
   created_at: string;
 }
 
+function serializeSelectedArtifacts(
+  selectedArtifacts: SelectedChooseContextArtifactAudit[] | null | undefined,
+): string | null {
+  const items = Array.isArray(selectedArtifacts)
+    ? selectedArtifacts.filter(
+        (item) =>
+          typeof item.kind === 'string' && item.kind.length > 0 && typeof item.ref === 'string',
+      )
+    : [];
+  if (items.length === 0) {
+    return null;
+  }
+  return JSON.stringify({
+    schema: 'tabrix_choose_context_selected_artifacts_v1',
+    items,
+  });
+}
+
 interface OutcomeAggRow {
   strategy: string;
   outcome: TabrixChooseContextOutcome | null;
@@ -168,8 +201,8 @@ export class ChooseContextTelemetryRepository {
            token_estimate_chosen, token_estimate_full_read, tokens_saved_estimate,
            knowledge_endpoint_family,
            ranked_candidate_count, replay_eligible_blocked_by, replay_fallback_depth,
-           dispatcher_input_source, fallback_cause_v26
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           dispatcher_input_source, fallback_cause_v26, selected_artifacts_blob
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.decisionId,
@@ -192,6 +225,7 @@ export class ChooseContextTelemetryRepository {
         null,
         input.dispatcherInputSource ?? null,
         input.fallbackCauseV26 ?? null,
+        serializeSelectedArtifacts(input.selectedArtifacts),
       );
   }
 

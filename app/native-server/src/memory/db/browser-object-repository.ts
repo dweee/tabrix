@@ -9,6 +9,7 @@ const DEFAULT_PAGE_MODEL_KEY = 'unknown';
 const MAX_TEXT_LENGTH = 512;
 const MAX_ROUTE_LENGTH = 2048;
 const MAX_BLOB_LENGTH = 8192;
+const MAX_SOURCE_TRACE_IDS = 50;
 
 export interface BrowserObjectInput {
   browserObjectId?: string;
@@ -206,6 +207,19 @@ function parseStringArray(value: string | null): string[] {
   return Array.isArray(parsed)
     ? parsed.filter((item): item is string => typeof item === 'string')
     : [];
+}
+
+function mergeSourceTraceIds(
+  existing: BrowserObject | undefined,
+  input: BrowserObjectInput,
+): string[] {
+  const next = [
+    ...(existing?.sourceTraceIds ?? []),
+    ...(input.sourceTraceIds ?? []),
+    input.firstTraceId ?? null,
+    input.lastTraceId ?? null,
+  ].filter((item): item is string => typeof item === 'string' && item.length > 0);
+  return Array.from(new Set(next)).slice(-MAX_SOURCE_TRACE_IDS);
 }
 
 function rowToBrowserObject(row: BrowserObjectRow): BrowserObject {
@@ -496,6 +510,14 @@ export class BrowserObjectRepository {
     const schemaVersion = integer(input.schemaVersion) ?? DEFAULT_SCHEMA_VERSION;
     const siteFamily = text(input.siteFamily, DEFAULT_SITE_FAMILY) ?? DEFAULT_SITE_FAMILY;
     const pageModelKey = text(input.pageModelKey, DEFAULT_PAGE_MODEL_KEY) ?? DEFAULT_PAGE_MODEL_KEY;
+    const objectFingerprint = text(input.objectFingerprint, 'unknown') ?? 'unknown';
+    const existing = this.getByIdentity({
+      siteFamily,
+      pageModelKey,
+      objectFingerprint,
+      schemaVersion,
+    });
+    const sourceTraceIds = mergeSourceTraceIds(existing, input);
     const row = {
       browser_object_id: input.browserObjectId ?? randomUUID(),
       schema_version: schemaVersion,
@@ -505,7 +527,7 @@ export class BrowserObjectRepository {
       current_route: routeText(input.currentRoute),
       page_role: text(input.pageRole),
       page_model_key: pageModelKey,
-      object_fingerprint: text(input.objectFingerprint, 'unknown') ?? 'unknown',
+      object_fingerprint: objectFingerprint,
       object_type: text(input.objectType, 'unknown') ?? 'unknown',
       parent_object_id: text(input.parentObjectId),
       model_version: integer(input.modelVersion) ?? DEFAULT_MODEL_VERSION,
@@ -535,7 +557,7 @@ export class BrowserObjectRepository {
       last_validated_at: input.lastValidatedAt ?? null,
       first_trace_id: text(input.firstTraceId ?? input.lastTraceId),
       last_trace_id: text(input.lastTraceId),
-      source_trace_ids_blob: blob(input.sourceTraceIds ?? []),
+      source_trace_ids_blob: blob(sourceTraceIds),
       evidence_refs_blob: blob(input.evidenceRefs),
       redaction_state: text(input.redactionState, 'redacted') ?? 'redacted',
       current_state_blob: blob(input.currentState),
