@@ -89,7 +89,14 @@ function isSessionScopedAction(object: BrowserObject, actionType: string): boole
   const facts = readObject(object.facts);
   const targetability = readObject(object.targetability);
   const actionTarget = readObject(facts?.actionTarget) ?? readObject(targetability?.actionTarget);
-  const selector = typeof actionTarget?.selector === 'string' ? actionTarget.selector : null;
+  const sessionOnlyTarget =
+    readObject(facts?.sessionOnlyTarget) ?? readObject(targetability?.sessionOnlyTarget);
+  const selector =
+    typeof actionTarget?.selector === 'string'
+      ? actionTarget.selector
+      : typeof sessionOnlyTarget?.selector === 'string'
+        ? sessionOnlyTarget.selector
+        : null;
   if (object.objectType === 'action_target') {
     const targetRef = typeof targetability?.targetRef === 'string' ? targetability.targetRef : null;
     if (isSnapshotTargetRef(targetRef)) return true;
@@ -99,6 +106,8 @@ function isSessionScopedAction(object: BrowserObject, actionType: string): boole
       isPositionalSelector(selector) ||
       readObject(actionTarget?.center) ||
       readObject(actionTarget?.rect) ||
+      readObject(sessionOnlyTarget?.center) ||
+      readObject(sessionOnlyTarget?.rect) ||
       targetability?.rect,
     );
   }
@@ -107,6 +116,9 @@ function isSessionScopedAction(object: BrowserObject, actionType: string): boole
     isPositionalSelector(selector) ||
     readObject(actionTarget?.center) ||
     readObject(actionTarget?.rect) ||
+    readObject(sessionOnlyTarget?.center) ||
+    readObject(sessionOnlyTarget?.rect) ||
+    readObject(sessionOnlyTarget?.cardRect) ||
     targetability?.rect,
   );
 }

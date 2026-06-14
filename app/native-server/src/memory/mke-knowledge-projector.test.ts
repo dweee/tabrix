@@ -218,6 +218,10 @@ describe('MkeKnowledgeProjector', () => {
         rank: 1,
         title: 'First result',
         actionTarget: {
+          targetKind: 'result_card_link',
+          url: 'https://example.test/note/:id',
+        },
+        sessionOnlyTarget: {
           selector: 'main > section:nth-of-type(1) > a:nth-of-type(2)',
           center: { x: 100, y: 56 },
         },
@@ -243,6 +247,10 @@ describe('MkeKnowledgeProjector', () => {
         rank: 2,
         title: 'Second result',
         actionTarget: {
+          targetKind: 'result_card_link',
+          url: 'https://example.test/note/:id',
+        },
+        sessionOnlyTarget: {
           selector: 'main > section:nth-of-type(2) > a:nth-of-type(2)',
           center: { x: 100, y: 56 },
         },

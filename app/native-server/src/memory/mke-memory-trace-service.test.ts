@@ -686,6 +686,10 @@ describe('MkeMemoryTraceService', () => {
             executionScope: 'session_url',
             reason: 'result_card_href',
           },
+          confidence: 0.9,
+        },
+        sessionOnlyTarget: {
+          schema: 'tabrix_session_only_result_card_target_v1',
           toolName: 'chrome_click_element',
           toolArgs: {
             candidateAction: {
@@ -700,14 +704,22 @@ describe('MkeMemoryTraceService', () => {
           center: { x: 100, y: 56 },
           coordinateFrame: 'viewport',
           sourceScrollY: 0,
-          confidence: 0.9,
         },
         sourceStrategy: 'list_container',
+      });
+      expect(cards[0].facts).not.toMatchObject({
+        actionTarget: {
+          toolName: 'chrome_click_element',
+          center: { x: 100, y: 56 },
+        },
       });
       expect(cards[0].targetability).toMatchObject({
         actionTarget: {
           targetKind: 'result_card_link',
           url: 'https://example.test/note/:id',
+        },
+        sessionOnlyTarget: {
+          schema: 'tabrix_session_only_result_card_target_v1',
           toolName: 'chrome_click_element',
           toolArgs: {
             candidateAction: {
@@ -718,6 +730,12 @@ describe('MkeMemoryTraceService', () => {
           center: { x: 100, y: 56 },
           coordinateFrame: 'viewport',
           sourceScrollY: 0,
+        },
+      });
+      expect(cards[0].targetability).not.toMatchObject({
+        actionTarget: {
+          toolName: 'chrome_click_element',
+          center: { x: 100, y: 56 },
         },
       });
       expect(cards[1]).toMatchObject({

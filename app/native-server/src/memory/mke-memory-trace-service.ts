@@ -1365,27 +1365,38 @@ export class MkeMemoryTraceService {
               actionTargetUrlFields.rootRoute ??
               actionTargetUrlFields.currentRoute ??
               actionTargetUrlFields.pattern,
-            selector: readString(rawActionTarget.selector),
-            text: readString(rawActionTarget.text),
             ...normalizeResultCardOpenAction(rawActionTarget),
-            ...normalizeResultCardActionToolArgs(rawActionTarget),
-            rect: readObject(rawActionTarget.rect),
-            center: readObject(rawActionTarget.center),
-            coordinateFrame: readString(rawActionTarget.coordinateFrame),
-            sourceScrollY: readNumber(rawActionTarget.sourceScrollY),
             confidence: readFiniteNumber(rawActionTarget.confidence),
             reasons: readArray(rawActionTarget.reasons).filter(
               (item): item is string => typeof item === 'string',
             ),
           }
         : null;
+      const sessionOnlyTarget = rawActionTarget
+        ? {
+            schema: 'tabrix_session_only_result_card_target_v1',
+            selector: readString(rawActionTarget.selector),
+            text: readString(rawActionTarget.text),
+            ...normalizeResultCardActionToolArgs(rawActionTarget),
+            rect: readObject(rawActionTarget.rect),
+            center: readObject(rawActionTarget.center),
+            cardRect: readObject(card.rect),
+            coordinateFrame: readString(rawActionTarget.coordinateFrame),
+            sourceScrollY: readNumber(rawActionTarget.sourceScrollY, card.sourceScrollY),
+          }
+        : readObject(card.rect)
+          ? {
+              schema: 'tabrix_session_only_result_card_target_v1',
+              cardRect: readObject(card.rect),
+              sourceScrollY: readNumber(card.sourceScrollY),
+            }
+          : null;
       const actionTypes = [
         hasExecutableResultCardClick ? 'click_result_card' : null,
         readString(card.url) ? 'open_via_url' : null,
       ].filter((item): item is string => Boolean(item));
       const cardKey =
         cardUrlFields.rootRoute ?? cardUrlFields.currentRoute ?? cardUrlFields.pattern ?? title;
-      const sourceScrollY = readNumber(card.sourceScrollY);
       this.upsertBrowserObject({
         siteFamily,
         pageUrlPattern: urlFields.pattern ?? trace.pageUrlPattern,
@@ -1409,7 +1420,7 @@ export class MkeMemoryTraceService {
           rank,
           url: cardUrlFields.rootRoute ?? cardUrlFields.pattern,
           actionTarget,
-          rect: readObject(card.rect),
+          sessionOnlyTarget,
         }),
         facts: this.sanitizeBrowserObjectValue({
           rank,
@@ -1420,8 +1431,8 @@ export class MkeMemoryTraceService {
           metaText: readString(card.metaText),
           interactionText: readString(card.interactionText),
           imageCount: readNumber(card.imageCount),
-          sourceScrollY,
           actionTarget,
+          sessionOnlyTarget,
           reasons: readArray(card.reasons).filter(
             (item): item is string => typeof item === 'string',
           ),
