@@ -261,10 +261,19 @@ export class SessionManager {
 
   public scheduleMkeProjectionAfterTrace(): void {
     setImmediate(() => {
-      void this.flushAndProjectMkeIdle().catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`[tabrix/memory] MKE projection failed: ${message}`);
-      });
+      void this.flushAndProjectMkeIdle()
+        .then(() => {
+          setTimeout(() => {
+            void this.flushAndProjectMkeIdle().catch((error: unknown) => {
+              const message = error instanceof Error ? error.message : String(error);
+              console.warn(`[tabrix/memory] delayed MKE projection failed: ${message}`);
+            });
+          }, 250);
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(`[tabrix/memory] MKE projection failed: ${message}`);
+        });
     });
   }
 

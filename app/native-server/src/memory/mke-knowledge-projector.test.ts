@@ -179,6 +179,133 @@ describe('MkeKnowledgeProjector', () => {
     expect(knowledge.count()).toBe(0);
   });
 
+  it('does not project usable knowledge from browser verification or captcha objects', () => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const objects = new BrowserObjectRepository(opened.db);
+    const knowledge = new KnowledgeModelRepository(opened.db);
+    const projector = new MkeKnowledgeProjector(objects, knowledge);
+
+    objects.upsert({
+      siteFamily: 'www.xiaohongshu.com',
+      pageUrlPattern: 'https://www.xiaohongshu.com/website-login/captcha',
+      pageRole: 'unknown',
+      pageModelKey: 'page:www.xiaohongshu.com:unknown',
+      objectFingerprint: 'page:captcha',
+      objectType: 'page',
+      lifecycleState: 'restricted',
+      canTabrixOperate: false,
+      operabilityReason: 'user_verification_required',
+      sourceTraceIds: ['trace-captcha-read'],
+      facts: {
+        status: 'login_required',
+        pageTitle: '安全验证',
+      },
+      updatedAt: '2026-06-06T05:10:01.000Z',
+    });
+    objects.upsert({
+      siteFamily: 'www.xiaohongshu.com',
+      pageUrlPattern: 'https://www.xiaohongshu.com/website-login/captcha',
+      pageRole: 'unknown',
+      pageModelKey: 'page:www.xiaohongshu.com:unknown',
+      objectFingerprint: 'action:captcha-button',
+      objectType: 'action_target',
+      lifecycleState: 'observed',
+      canTabrixOperate: true,
+      operabilityReason: 'source_element_actionability=actionable',
+      actionTypes: ['click'],
+      sourceTraceIds: ['trace-captcha-read'],
+      facts: { label: '安全验证' },
+      updatedAt: '2026-06-06T05:10:02.000Z',
+    });
+    objects.upsert({
+      siteFamily: 'www.xiaohongshu.com',
+      pageUrlPattern: 'https://www.xiaohongshu.com/website-login/captcha',
+      pageRole: 'unknown',
+      pageModelKey: 'page:www.xiaohongshu.com:unknown',
+      objectFingerprint: 'region:captcha-db-zero',
+      objectType: 'region',
+      lifecycleState: 'observed',
+      canTabrixOperate: 0 as never,
+      operabilityReason: 'user_verification_required',
+      sourceTraceIds: ['trace-captcha-read'],
+      facts: { regionType: 'verification' },
+      updatedAt: '2026-06-06T05:10:03.000Z',
+    });
+    objects.upsert({
+      siteFamily: 'www.xiaohongshu.com',
+      pageUrlPattern: 'https://www.xiaohongshu.com/search_result/',
+      pageRole: 'unknown',
+      pageModelKey: 'page:www.xiaohongshu.com:unknown',
+      objectFingerprint: 'region:mixed-looking-normal',
+      objectType: 'region',
+      lifecycleState: 'observed',
+      sourceTraceIds: ['trace-captcha-read'],
+      facts: { regionType: 'unknown', candidateActionCount: 1 },
+      updatedAt: '2026-06-06T05:10:04.000Z',
+    });
+
+    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T05:10:05.000Z' });
+
+    expect(result).toMatchObject({
+      processedTraceCount: 4,
+      skippedTraceCount: 4,
+      upsertedKnowledgeCount: 0,
+      knowledgeIds: [],
+    });
+    expect(knowledge.count()).toBe(0);
+  });
+
+  it('archives existing page knowledge when later objects prove the page is restricted', () => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const objects = new BrowserObjectRepository(opened.db);
+    const knowledge = new KnowledgeModelRepository(opened.db);
+    const projector = new MkeKnowledgeProjector(objects, knowledge);
+
+    const existing = knowledge.upsert({
+      siteFamily: 'www.xiaohongshu.com',
+      pageUrlPattern: 'https://www.xiaohongshu.com/search_result/',
+      pageRole: 'search_results',
+      pageModelKey: 'page:www.xiaohongshu.com:unknown',
+      pageStateModel: { schema: 'test', states: { ready: 1 } },
+      objectGraph: { schema: 'test', sourceObjectCount: 1 },
+      actionSurface: { schema: 'test', reusableActionKinds: ['open_via_url'] },
+      sourceTraceIds: ['old-success'],
+      observationCount: 1,
+      confidenceScore: 0.8,
+      createdAt: '2026-06-06T05:09:00.000Z',
+      updatedAt: '2026-06-06T05:09:00.000Z',
+    });
+
+    objects.upsert({
+      siteFamily: 'www.xiaohongshu.com',
+      pageUrlPattern: 'https://www.xiaohongshu.com/website-login/captcha',
+      pageRole: 'unknown',
+      pageModelKey: 'page:www.xiaohongshu.com:unknown',
+      objectFingerprint: 'page:captcha-later',
+      objectType: 'page',
+      lifecycleState: 'single_snapshot',
+      canTabrixOperate: true,
+      sourceTraceIds: ['trace-captcha-read'],
+      facts: {
+        readiness: 'blocked',
+        pageTitle: '安全验证',
+      },
+      updatedAt: '2026-06-06T05:11:01.000Z',
+    });
+
+    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T05:11:02.000Z' });
+
+    expect(result).toMatchObject({
+      processedTraceCount: 1,
+      skippedTraceCount: 1,
+      upsertedKnowledgeCount: 0,
+      knowledgeIds: [],
+    });
+    expect(knowledge.count()).toBe(0);
+    expect(knowledge.listRecent()).toEqual([]);
+    expect(knowledge.get(existing.knowledgeId)?.archivedAt).toBe('2026-06-06T05:11:02.000Z');
+  });
+
   it('projects result_card objects into page knowledge summaries', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
     const objects = new BrowserObjectRepository(opened.db);

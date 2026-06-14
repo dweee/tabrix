@@ -28,6 +28,11 @@ interface ObjectGroup {
   objects: BrowserObject[];
 }
 
+interface BlockedKnowledgeKey {
+  siteFamily: string;
+  pageModelKey: string;
+}
+
 export function buildMkePageModelKey(trace: MemoryTrace): string | null {
   if (trace.pageModelKey) return trace.pageModelKey;
   if (!trace.siteFamily) return null;
@@ -85,6 +90,45 @@ function isSnapshotTargetRef(targetRef: string | null): boolean {
   return /^(ref_|ref_text_|ref_fallback_)/i.test(targetRef);
 }
 
+const BLOCKED_PAGE_SIGNAL_PATTERN =
+  /\b(captcha|recaptcha|challenge|verification|security[-_]?check|human[-_]?check|verify(uuid|type|biz)?|user[_-]?verification[_-]?required|login[_-]?required|auth[_-]?required|access[_-]?denied|restricted)\b|安全验证|人机验证|滑块验证|验证码|登录验证/i;
+
+function stringHasBlockedPageSignal(value: string | null | undefined): boolean {
+  return typeof value === 'string' && BLOCKED_PAGE_SIGNAL_PATTERN.test(value);
+}
+
+function valueHasBlockedPageSignal(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string') return stringHasBlockedPageSignal(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return false;
+  if (Array.isArray(value)) return value.some(valueHasBlockedPageSignal);
+  if (typeof value !== 'object') return false;
+  return Object.entries(value as Record<string, unknown>).some(
+    ([key, entry]) => stringHasBlockedPageSignal(key) || valueHasBlockedPageSignal(entry),
+  );
+}
+
+function isExplicitlyNotOperable(value: unknown): boolean {
+  return value === false || value === 0;
+}
+
+function isExplicitlyOperable(value: unknown): boolean {
+  return value === true || value === 1;
+}
+
+function isBlockedKnowledgeSource(object: BrowserObject): boolean {
+  return (
+    isExplicitlyNotOperable(object.canTabrixOperate) ||
+    stringHasBlockedPageSignal(object.operabilityReason) ||
+    stringHasBlockedPageSignal(object.lifecycleState) ||
+    stringHasBlockedPageSignal(object.pageUrlPattern) ||
+    stringHasBlockedPageSignal(object.rootRoute) ||
+    stringHasBlockedPageSignal(object.currentRoute) ||
+    valueHasBlockedPageSignal(object.facts) ||
+    valueHasBlockedPageSignal(object.targetability)
+  );
+}
+
 function isSessionScopedAction(object: BrowserObject, actionType: string): boolean {
   const facts = readObject(object.facts);
   const targetability = readObject(object.targetability);
@@ -131,12 +175,22 @@ function roundedScore(value: number | null): number {
 function groupProjectableObjects(objects: BrowserObject[]): {
   groups: ObjectGroup[];
   skippedObjectCount: number;
+  blockedKnowledgeKeys: BlockedKnowledgeKey[];
 } {
   const groups = new Map<string, ObjectGroup>();
+  const blockedKeys = new Map<string, BlockedKnowledgeKey>();
   let skippedObjectCount = 0;
 
   for (const object of objects) {
     if (object.siteFamily === 'unknown' || object.pageModelKey === 'unknown') {
+      skippedObjectCount += 1;
+      continue;
+    }
+    if (isBlockedKnowledgeSource(object)) {
+      blockedKeys.set(`${object.siteFamily}\u0000${object.pageModelKey}`, {
+        siteFamily: object.siteFamily,
+        pageModelKey: object.pageModelKey,
+      });
       skippedObjectCount += 1;
       continue;
     }
@@ -161,7 +215,19 @@ function groupProjectableObjects(objects: BrowserObject[]): {
     });
   }
 
-  return { groups: [...groups.values()], skippedObjectCount };
+  for (const groupKey of blockedKeys.keys()) {
+    const grouped = groups.get(groupKey);
+    if (grouped) {
+      skippedObjectCount += grouped.objects.length;
+      groups.delete(groupKey);
+    }
+  }
+
+  return {
+    groups: [...groups.values()],
+    skippedObjectCount,
+    blockedKnowledgeKeys: [...blockedKeys.values()],
+  };
 }
 
 function buildKnowledgeInput(
@@ -208,14 +274,17 @@ function buildKnowledgeInput(
       }
     }
     if (object.confidenceScore !== null) confidenceScores.push(object.confidenceScore);
-    if (object.canTabrixOperate === false) unavailableObjectCount += 1;
+    if (isExplicitlyNotOperable(object.canTabrixOperate)) unavailableObjectCount += 1;
     if (object.objectType === 'result_card') {
       resultCardCount += 1;
       const actionTypes = readStringArray(object.actionTypes);
       if (actionTypes.includes('open_via_url')) {
         freshResultCardUrlRequiredCount += 1;
       }
-      if (object.canTabrixOperate === true || readStringArray(object.actionTypes).length > 0) {
+      if (
+        isExplicitlyOperable(object.canTabrixOperate) ||
+        readStringArray(object.actionTypes).length > 0
+      ) {
         clickableResultCardCount += 1;
       }
       const rank = readFiniteNumber(readObject(object.facts)?.rank);
@@ -228,6 +297,7 @@ function buildKnowledgeInput(
       .map((object) => object.updatedAt)
       .sort((left, right) => left.localeCompare(right))
       .at(-1) ?? nowIso;
+  const archivedAt = stringHasBlockedPageSignal(group.pageUrlPattern) ? nowIso : null;
 
   return {
     siteFamily: group.siteFamily,
@@ -297,6 +367,7 @@ function buildKnowledgeInput(
     failedUseCount: 0,
     confidenceScore: roundedScore(average(confidenceScores)),
     driftScore: null,
+    archivedAt,
     lastObservedAt,
     createdAt: nowIso,
     updatedAt: nowIso,
@@ -325,7 +396,13 @@ export class MkeKnowledgeProjector {
     }
 
     const nowIso = input.nowIso ?? new Date().toISOString();
-    const { groups, skippedObjectCount } = groupProjectableObjects(objects);
+    const { groups, skippedObjectCount, blockedKnowledgeKeys } = groupProjectableObjects(objects);
+    for (const key of blockedKnowledgeKeys) {
+      const existing = this.knowledgeRepo.findLatestByPage(key);
+      if (existing) {
+        this.knowledgeRepo.archive({ knowledgeId: existing.knowledgeId, archivedAt: nowIso });
+      }
+    }
     const upserted: KnowledgeModel[] = [];
     for (const group of groups) {
       upserted.push(this.knowledgeRepo.upsert(buildKnowledgeInput(group, nowIso)));

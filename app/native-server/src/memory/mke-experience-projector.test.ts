@@ -254,6 +254,65 @@ describe('MkeExperienceProjector', () => {
     });
   });
 
+  it('rejects high-confidence AI feedback when the trace is a verification-blocked page', () => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const traces = new MemoryTraceRepository(opened.db);
+    const knowledge = new KnowledgeModelRepository(opened.db);
+    const experience = new ExperienceRecipeRepository(opened.db);
+    const projector = new MkeExperienceProjector(traces, knowledge, experience);
+
+    const blockedTrace = traces.append({
+      traceId: 'trace-captcha-collect',
+      taskId: 'task-captcha-collect',
+      toolName: 'chrome_collect_result_cards',
+      requestParams: { tabId: 9, minResults: 10, maxScrolls: 4, startFromTop: true },
+      requestAt: '2026-06-06T03:15:01.000Z',
+      response: {
+        payloadDigest: {
+          success: true,
+          status: 'login_required',
+          observedResultCount: 10,
+          page: {
+            url: 'https://www.xiaohongshu.com/website-login/captcha',
+            title: '安全验证',
+          },
+        },
+      },
+      responseAt: '2026-06-06T03:15:02.000Z',
+      durationMs: 1200,
+      toolSuccess: true,
+      businessSuccess: 'unknown',
+      aiFeedback: verifiedExperienceFeedback({
+        confidence: 0.95,
+        reasonCode: 'ai_mistaken_success_on_blocked_page',
+        summary: 'AI incorrectly claimed the blocked verification page produced valid results.',
+      }),
+      tabId: 9,
+      siteFamily: 'www.xiaohongshu.com',
+      pageUrlPattern: 'https://www.xiaohongshu.com/website-login/captcha',
+      pageRole: 'search_results',
+      pageState: 'restricted',
+      createdAt: '2026-06-06T03:15:02.000Z',
+    });
+    const pageModelKey = buildMkePageModelKey(blockedTrace)!;
+    addKnowledge({
+      knowledge,
+      siteFamily: 'www.xiaohongshu.com',
+      pageModelKey,
+      pageRole: 'search_results',
+      pageUrlPattern: 'https://www.xiaohongshu.com/website-login/captcha',
+    });
+
+    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T03:15:03.000Z' });
+
+    expect(result).toMatchObject({
+      processedTraceCount: 1,
+      savedExperienceCount: 0,
+      experienceIds: [],
+    });
+    expect(experience.count()).toBe(0);
+  });
+
   it('reports a unique saved experience when multiple traces upsert the same card recipe', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
     const traces = new MemoryTraceRepository(opened.db);
@@ -799,7 +858,7 @@ describe('MkeExperienceProjector', () => {
     expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
   });
 
-  it('mines from AI approval even when the legacy business status disagrees', () => {
+  it('does not let AI approval override a hard negative business status', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
     const traces = new MemoryTraceRepository(opened.db);
     const knowledge = new KnowledgeModelRepository(opened.db);
@@ -843,7 +902,7 @@ describe('MkeExperienceProjector', () => {
       aiFeedback: verifiedExperienceFeedback({
         confidence: 0.98,
         reasonCode: 'ai_verified_result',
-        summary: 'AI verified the result despite stale legacy business status.',
+        summary: 'AI incorrectly verified the result despite a hard negative status.',
       }),
       tabId: 9,
       siteFamily: 'example.test',
@@ -855,8 +914,8 @@ describe('MkeExperienceProjector', () => {
 
     const result = projector.projectIdleBatch({ nowIso: '2026-06-06T09:00:05.000Z' });
 
-    expect(result.savedExperienceCount).toBe(1);
-    expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toHaveLength(1);
+    expect(result.savedExperienceCount).toBe(0);
+    expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
   });
 
   it('does not mine recipes from orphan AI score without feedback confidence', () => {

@@ -113,6 +113,68 @@ describe('MkeMemoryTraceService', () => {
     }
   });
 
+  it('compacts network capture memory summaries without retaining raw bodies or headers', () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo);
+
+    try {
+      const trace = traceService.recordToolCall({
+        taskId: 'trace-network-privacy-task',
+        taskIntent: 'observe network safely',
+        aiClient: 'jest',
+        toolName: 'chrome_network_capture',
+        stepId: 'trace-network-privacy-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 7 },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 50,
+        result: textResult({
+          success: true,
+          requestCount: 2,
+          totalRequestsReceived: 2,
+          observationMode: 'cdp_enhanced',
+          cdpUsed: true,
+          rawBodyPersisted: false,
+          bodyCompacted: true,
+          requests: [
+            {
+              method: 'POST',
+              url: 'https://example.test/api/search',
+              requestBody: '{"secret":"PRIVATE_REQUEST_BODY"}',
+              responseBody: '{"title":"PRIVATE_RESPONSE_BODY"}',
+              specificRequestHeaders: {
+                Authorization: 'Bearer PRIVATE_TOKEN',
+                'X-S': 'PRIVATE_SIGNATURE',
+              },
+              specificResponseHeaders: {
+                'Set-Cookie': 'sid=PRIVATE_COOKIE',
+              },
+            },
+          ],
+        }),
+        resultSummary: JSON.stringify({
+          requestBody: 'PRIVATE_REQUEST_BODY',
+          responseBody: 'PRIVATE_RESPONSE_BODY',
+          specificRequestHeaders: { Authorization: 'Bearer PRIVATE_TOKEN' },
+        }),
+      });
+
+      expect(trace.resultSummary).toBe(
+        'chrome_network_capture summary; requests=2; mode=cdp_enhanced; cdpUsed=true; rawBodyPersisted=false; bodyCompacted=true',
+      );
+      const serialized = JSON.stringify(trace.response);
+      expect(serialized).not.toContain('PRIVATE_REQUEST_BODY');
+      expect(serialized).not.toContain('PRIVATE_RESPONSE_BODY');
+      expect(serialized).not.toContain('PRIVATE_TOKEN');
+      expect(serialized).not.toContain('PRIVATE_COOKIE');
+      expect(serialized).toContain('[redacted]');
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
   it('records bound AI feedback and appends an audit event', () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const traceRepo = new MemoryTraceRepository(db);

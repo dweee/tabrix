@@ -846,6 +846,7 @@ export class KnowledgeModelRepository {
     this.getStmt = db.prepare('SELECT * FROM tabrix_knowledge_models WHERE knowledge_id = ?');
     this.listRecentStmt = db.prepare(
       `SELECT * FROM tabrix_knowledge_models
+        WHERE archived_at IS NULL
         ORDER BY updated_at DESC, created_at DESC
         LIMIT ? OFFSET ?`,
     );
@@ -871,7 +872,9 @@ export class KnowledgeModelRepository {
     this.archiveStmt = db.prepare(
       'UPDATE tabrix_knowledge_models SET archived_at = ?, updated_at = ? WHERE knowledge_id = ?',
     );
-    this.countStmt = db.prepare('SELECT COUNT(*) AS count FROM tabrix_knowledge_models');
+    this.countStmt = db.prepare(
+      'SELECT COUNT(*) AS count FROM tabrix_knowledge_models WHERE archived_at IS NULL',
+    );
     this.clearStmt = db.prepare('DELETE FROM tabrix_knowledge_models');
   }
 

@@ -50,6 +50,9 @@ const REPLAYABLE_ACTION_TOOLS = new Set([
 
 const UNTRUSTED_EVALUATOR_NAMES = new Set(['', 'unknown', 'default', 'system', 'tabrix']);
 
+const BLOCKED_PAGE_SIGNAL_PATTERN =
+  /\b(captcha|recaptcha|challenge|verification|security[-_]?check|human[-_]?check|verify(uuid|type|biz)?|user[_-]?verification[_-]?required|login[_-]?required|auth[_-]?required|access[_-]?denied|restricted)\b|安全验证|人机验证|滑块验证|验证码|登录验证/i;
+
 const SENSITIVE_KEY_FRAGMENTS = [
   'account',
   'authorization',
@@ -123,6 +126,42 @@ function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
+function stringHasBlockedPageSignal(value: string | null | undefined): boolean {
+  return typeof value === 'string' && BLOCKED_PAGE_SIGNAL_PATTERN.test(value);
+}
+
+function valueHasBlockedPageSignal(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string') return stringHasBlockedPageSignal(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return false;
+  if (Array.isArray(value)) return value.some(valueHasBlockedPageSignal);
+  if (typeof value !== 'object') return false;
+  return Object.entries(value as Record<string, unknown>).some(
+    ([key, entry]) => stringHasBlockedPageSignal(key) || valueHasBlockedPageSignal(entry),
+  );
+}
+
+function hasHardNegativeBusinessState(trace: MemoryTrace): boolean {
+  const business = readString(trace.businessSuccess);
+  return business === 'false' || business === 'not_achieved' || business === 'blocked';
+}
+
+function isBlockedOrUnreplayableTrace(trace: MemoryTrace): boolean {
+  return (
+    hasHardNegativeBusinessState(trace) ||
+    stringHasBlockedPageSignal(trace.errorCode) ||
+    stringHasBlockedPageSignal(trace.pageState) ||
+    stringHasBlockedPageSignal(trace.pageUrlPattern) ||
+    stringHasBlockedPageSignal(trace.resultSummary) ||
+    valueHasBlockedPageSignal(trace.requestParams) ||
+    valueHasBlockedPageSignal(trace.response) ||
+    valueHasBlockedPageSignal(trace.actionTarget) ||
+    valueHasBlockedPageSignal(trace.preObservation) ||
+    valueHasBlockedPageSignal(trace.postObservation) ||
+    valueHasBlockedPageSignal(trace.postActionDelta)
+  );
+}
+
 function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
   const feedback = readObject(trace.aiFeedback);
   const sourceKind = readString(feedback?.sourceKind);
@@ -143,6 +182,7 @@ function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
 }
 
 function isBusinessAchieved(trace: MemoryTrace): boolean {
+  if (isBlockedOrUnreplayableTrace(trace)) return false;
   return hasVerifiedAiSuccessFeedback(trace);
 }
 

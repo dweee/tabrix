@@ -14,6 +14,7 @@ import { logger } from '../logging/logger';
 const REDACTED = '[redacted]';
 const MAX_STRING_LENGTH = 512;
 const MAX_ROUTE_LENGTH = 2048;
+const MAX_RESULT_SUMMARY_LENGTH = 512;
 const MAX_ARRAY_ITEMS = 40;
 const MAX_DEPTH = 6;
 const DEFAULT_ASYNC_BROWSER_OBJECT_WRITE_QUEUE_LIMIT = 128;
@@ -31,8 +32,17 @@ const SENSITIVE_KEY_FRAGMENTS = [
   'password',
   'phone',
   'rawbody',
+  'rawnetworkbody',
+  'requestbody',
+  'responsebody',
   'rawinput',
   'rawvalue',
+  'commonrequestheaders',
+  'commonresponseheaders',
+  'specificrequestheaders',
+  'specificresponseheaders',
+  'requestheaders',
+  'responseheaders',
   'secret',
   'sessionid',
   'smscode',
@@ -57,6 +67,9 @@ const RAW_CONTENT_KEYS = new Set([
   'rawhtml',
   'text',
 ]);
+
+const BLOCKED_PAGE_SIGNAL_PATTERN =
+  /\b(captcha|recaptcha|challenge|verification|security[-_]?check|human[-_]?check|verify(uuid|type|biz)?|user[_-]?verification[_-]?required|login[_-]?required|auth[_-]?required|access[_-]?denied)\b|安全验证|人机验证|滑块验证|验证码|登录验证/i;
 
 export interface RecordMkeToolCallTraceInput {
   taskId: string;
@@ -276,6 +289,62 @@ function sanitizeStringValue(value: string): string {
     );
   }
   return truncateString(value);
+}
+
+function stringHasBlockedPageSignal(value: string | null | undefined): boolean {
+  return typeof value === 'string' && BLOCKED_PAGE_SIGNAL_PATTERN.test(value);
+}
+
+function valueHasBlockedPageSignal(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string') return stringHasBlockedPageSignal(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return false;
+  if (Array.isArray(value)) return value.some(valueHasBlockedPageSignal);
+  if (typeof value !== 'object') return false;
+  return Object.entries(value as Record<string, unknown>).some(
+    ([key, entry]) => stringHasBlockedPageSignal(key) || valueHasBlockedPageSignal(entry),
+  );
+}
+
+function sanitizeResultSummaryForMemory(
+  summary: string | null | undefined,
+  toolName: string,
+  payload: unknown,
+): string | null {
+  const trimmed = typeof summary === 'string' ? summary.trim() : '';
+  const parsedPayload = readObject(payload);
+
+  if (toolName === 'chrome_network_capture') {
+    const requestCount = readNumber(
+      parsedPayload?.requestCount,
+      parsedPayload?.totalRequestsReceived,
+    );
+    const observationMode = readString(parsedPayload?.observationMode);
+    const cdpUsed = readBoolean(parsedPayload?.cdpUsed);
+    const rawBodyPersisted = readBoolean(parsedPayload?.rawBodyPersisted);
+    const bodyCompacted = readBoolean(parsedPayload?.bodyCompacted);
+    return [
+      'chrome_network_capture summary',
+      requestCount !== null ? `requests=${requestCount}` : null,
+      observationMode ? `mode=${observationMode}` : null,
+      cdpUsed !== null ? `cdpUsed=${cdpUsed}` : null,
+      rawBodyPersisted !== null ? `rawBodyPersisted=${rawBodyPersisted}` : null,
+      bodyCompacted !== null ? `bodyCompacted=${bodyCompacted}` : null,
+    ]
+      .filter((part): part is string => Boolean(part))
+      .join('; ');
+  }
+
+  if (!trimmed) return null;
+  if (
+    trimmed.length > MAX_RESULT_SUMMARY_LENGTH ||
+    /\b(requestBody|responseBody|rawBody|rawHtml|specificRequestHeaders|specificResponseHeaders|Authorization|Cookie|Set-Cookie)\b/i.test(
+      trimmed,
+    )
+  ) {
+    return `${toolName} result summary redacted; structured redacted digest retained.`;
+  }
+  return truncateString(trimmed);
 }
 
 function sanitizeValue(value: unknown, toolName: string, depth = 0, keyHint = ''): unknown {
@@ -824,7 +893,7 @@ export class MkeMemoryTraceService {
       durationMs: Math.max(0, responseAtMs - input.requestAtMs),
       toolSuccess,
       businessSuccess: digest.businessSuccess,
-      resultSummary: input.resultSummary ?? null,
+      resultSummary: sanitizeResultSummaryForMemory(input.resultSummary, input.toolName, payload),
       errorCode: input.errorCode ?? null,
       tabId,
       windowId,
@@ -1196,6 +1265,8 @@ export class MkeMemoryTraceService {
   ): void {
     const projection = readNestedObject(payload, 'pageProjection');
     const compact = readNestedObject(payload, 'browserPageObjectCompact');
+    const compactFacts = readNestedObject(compact, 'facts');
+    const compactTabFacts = readNestedObject(compactFacts, 'tab');
     const page = readNestedObject(payload, 'page');
     const summary = readNestedObject(payload, 'summary');
     const urlFields = normalizeUrlPattern(readString(page?.url, payload.url, payload.pageUrl), {
@@ -1221,6 +1292,21 @@ export class MkeMemoryTraceService {
       },
       existingPageObject?.facts,
     );
+    const blockedSurface =
+      stringHasBlockedPageSignal(urlFields.rootRoute) ||
+      stringHasBlockedPageSignal(urlFields.currentRoute) ||
+      stringHasBlockedPageSignal(urlFields.pattern) ||
+      stringHasBlockedPageSignal(readString(summary?.quality, trace.pageState)) ||
+      stringHasBlockedPageSignal(readString(compact?.status)) ||
+      valueHasBlockedPageSignal(compactTabFacts);
+    const canTabrixOperate =
+      blockedSurface === true
+        ? false
+        : (readBoolean(compactTabFacts?.canTabrixOperate, projection?.canTabrixOperate) ?? true);
+    const operabilityReason =
+      blockedSurface === true
+        ? 'user_verification_required'
+        : readString(compactTabFacts?.operabilityReason, projection?.operabilityReason);
 
     this.upsertBrowserObject({
       siteFamily,
@@ -1245,8 +1331,9 @@ export class MkeMemoryTraceService {
         'browser_object',
       ),
       sourceFreshness: readString(projection?.sourceFreshness, payload.freshness, trace.freshness),
-      lifecycleState: readString(compact?.status, 'updated'),
-      canTabrixOperate: true,
+      lifecycleState: blockedSurface ? 'restricted' : readString(compact?.status, 'updated'),
+      canTabrixOperate,
+      operabilityReason,
       facts: sanitizeValue(pageFacts, 'browser_object'),
       changedGroups: sanitizeValue(compact?.changedGroups, 'browser_object'),
       primaryConclusion: readString(compact?.primaryConclusion),
@@ -1302,6 +1389,13 @@ export class MkeMemoryTraceService {
     const observedResultCount = readNumber(payload.observedResultCount) ?? cards.length;
     const complete = readBoolean(payload.complete);
     const filterState = readObject(payload.filterState);
+    const blockedSurface =
+      stringHasBlockedPageSignal(urlFields.rootRoute) ||
+      stringHasBlockedPageSignal(urlFields.currentRoute) ||
+      stringHasBlockedPageSignal(urlFields.pattern) ||
+      stringHasBlockedPageSignal(readString(payload.status, payload.pageState, trace.pageState)) ||
+      valueHasBlockedPageSignal(payload);
+    const canTabrixOperate = blockedSurface ? false : true;
 
     const pageObject = this.upsertBrowserObject({
       siteFamily,
@@ -1318,8 +1412,11 @@ export class MkeMemoryTraceService {
       sourceRoute,
       selectedDataSource,
       sourceFreshness: readString(payload.freshness, trace.freshness),
-      lifecycleState: readString(payload.pageState, trace.pageState, 'observed'),
-      canTabrixOperate: true,
+      lifecycleState: blockedSurface
+        ? 'restricted'
+        : readString(payload.pageState, trace.pageState, 'observed'),
+      canTabrixOperate,
+      operabilityReason: blockedSurface ? 'user_verification_required' : null,
       facts: this.sanitizeBrowserObjectValue({
         pageTitle: readString(page?.title),
         observedResultCount,
