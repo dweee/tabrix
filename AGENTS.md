@@ -72,6 +72,37 @@ signals, visual coordinates, and post-action deltas. Do not expose CDP as a
 default public remote-debugging control surface without an explicit product
 decision.
 
+## AI Feedback And Experience Learning
+
+Memory is the full AI-to-Tabrix trace ledger. AI feedback is the learning signal
+that tells Tabrix whether a step helped the user's goal, whether the path was
+good, and whether any part is worth reusing. Do not reduce AI feedback to a
+final-result-only score.
+
+Default rule:
+
+- Every AI-requested browser step that has task meaning should be eligible for
+  AI feedback, including reads, object sensing, navigation, input, click, and
+  result collection.
+- Pure auxiliary/system-maintenance records should normally be `not_required`,
+  such as AI feedback write-back itself, internal health checks, background
+  projection jobs, routine UI refreshes, and diagnostics that do not answer or
+  advance the user's task.
+- Tool success is not business success. System facts can summarize what Tabrix
+  observed, but they must not be displayed or persisted as AI evaluation.
+- If one step is slow, unstable, repeated, coordinate-dependent, or fails often,
+  keep that feedback visible; use it to improve object perception instead of
+  hiding the step behind a final success.
+- Experience extraction must use AI-reviewed successful paths plus path-quality
+  checks. A task can finish successfully and still be unfit for Experience if
+  it was slow, brittle, overly broad, privacy-sensitive, or not reusable.
+
+For example, in a search-and-filter task, opening the site, finding the search
+box, submitting the query, opening filters, selecting filter items, and
+collecting result cards are all meaningful steps. The final result proves the
+task outcome; step feedback explains which parts of the path should be reused,
+optimized, or rejected.
+
 ## Removed Surfaces
 
 Do not reintroduce these surfaces under old or new names without an explicit
