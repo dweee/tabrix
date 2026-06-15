@@ -35,7 +35,7 @@ import {
   type ReadPageHighValueObjectAction,
   type ReadPageObjectSnapshot,
   type ReadPagePageDeltaReport,
-  type ReadPageObjectSummary,
+  type ReadPagePageObjectSummary,
   type ReadPageActionableTargetSummary,
   type ReadPageBrowserPageObjectWatchStatus,
   type ReadPageReadinessVerdict,
@@ -233,14 +233,11 @@ function buildReadPageSnapshotSourceStats(params: {
     ),
     includeAX: Boolean(params.cdpSensing?.accessibility),
   });
-  const objects: ReadPageObjectSummary[] = regionList.map((region, index) => {
+  const objects: ReadPagePageObjectSummary[] = regionList.map((region, index) => {
     const objectSourceProvenance = new Set<ReadPageObjectSnapshot['sourceProvenance'][number]>(
       regionSources,
     );
     if (typeof region.label === 'string' && region.label.length > 0) {
-      objectSourceProvenance.add('visible_text');
-    }
-    if (typeof region.reason === 'string' && region.reason.length > 0) {
       objectSourceProvenance.add('visible_text');
     }
     return {
@@ -327,7 +324,10 @@ function buildReadPagePageDeltaReport(params: {
   const changedRegions = Array.isArray(params.currentSnapshot.objects)
     ? params.currentSnapshot.objects
         .map((object) => object.regionType)
-        .filter((value): value is string => typeof value === 'string' && value.length > 0)
+        .filter(
+          (value): value is NonNullable<ReadPagePageObjectSummary['regionType']> =>
+            typeof value === 'string' && value.length > 0,
+        )
     : [];
   const changedObjectSummary = objectDelta.length;
   let deltaKind: ReadPagePageDeltaReport['deltaKind'] = 'no_useful_change';

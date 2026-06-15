@@ -175,7 +175,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('<h3 :title="row.title">{{ row.title }}</h3>');
     expect(tabSource).toContain('v-if="row.metaLine"');
     expect(tabSource).toContain('v-if="row.feedbackLine"');
-    expect(tabSource).toContain('v-if="row.feedbackScoreLabel"');
+    expect(tabSource).not.toContain('feedbackConfidenceLabel');
     expect(tabSource).toContain('v-if="row.duration"');
     expect(tabSource).toContain('v-if="row.createdAtLabel"');
     expect(tabSource).toContain('class="mke-status"');
@@ -211,7 +211,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('function formatAiBusinessStatus');
     expect(tabSource).not.toContain('function formatBusinessStatus');
     expect(tabSource).toContain('function formatAiFeedbackLine');
-    expect(tabSource).toContain('function formatAiFeedbackScoreLabel');
+    expect(tabSource).not.toContain('function formatAiFeedbackConfidenceLabel');
     expect(tabSource).toContain('function formatTraceLocationFact');
     expect(tabSource).toContain('function formatReadableFeedbackLine');
     expect(tabSource).not.toContain('function formatTraceContext');
@@ -357,9 +357,9 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('trace.aiFeedbackRequired === true');
     expect(tabSource).toContain("return trace.aiFeedbackState === 'pending'");
     expect(tabSource).not.toContain('trace.statusView?.aiScore');
-    expect(tabSource).toContain('trace.aiFeedback?.confidence');
+    expect(tabSource).not.toContain('trace.aiFeedback?.confidence');
     expect(tabSource).toContain('AI评价：${compactText');
-    expect(tabSource).toContain('AI评分 ${Math.round(score * 100)}%');
+    expect(tabSource).not.toContain('AI评分 ${Math.round(score * 100)}%');
     const removedSyntheticFeedbackPattern = new RegExp(
       `${['system', 'Evidence'].join('')}|${['tabrix', 'auto', 'evidence'].join('_')}`,
     );

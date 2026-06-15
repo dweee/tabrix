@@ -654,7 +654,7 @@ function filterPanelFromVisibleText(
       );
       continue;
     }
-    if (!action.locatorChain.length) continue;
+    if (!action || !action.locatorChain.length) continue;
     pushUniqueControl(
       targetableOptions,
       controlForRecoveredAction({
