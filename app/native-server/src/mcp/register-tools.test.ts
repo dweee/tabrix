@@ -1,5 +1,5 @@
 import nativeMessagingHostInstance from '../native-messaging-host';
-import { handleToolCall } from './register-tools';
+import { bindReadPageDeltaReportToPendingInteraction, handleToolCall } from './register-tools';
 import { sessionManager } from '../execution/session-manager';
 import { bridgeRuntimeState } from '../server/bridge-state';
 import { bridgeCommandChannel } from '../server/bridge-command-channel';
@@ -217,7 +217,7 @@ describe('handleToolCall execution wrapper', () => {
     const updated = sessionManager.memoryTraces!.get(traceId);
     expect(updated).toMatchObject({
       traceId,
-      businessSuccess: 'unknown',
+      businessSuccess: 'achieved',
       aiFeedbackScore: 0.85,
       aiFeedback: {
         businessStatus: 'achieved',
@@ -5225,6 +5225,54 @@ describe('handleToolCall execution wrapper', () => {
       });
       expect(String(result.content[0].text)).toBe('after-click');
       expect(auto.readPageCount).toBe(2);
+    });
+
+    it('binds PageDelta to the pending action and target object', () => {
+      const payload = bindReadPageDeltaReportToPendingInteraction(
+        {
+          source: 'read_page_delta_report',
+          actionId: null,
+          targetObjectId: null,
+          beforeSnapshotId: 'snapshot_before_click',
+          afterSnapshotId: 'snapshot_after_click',
+          deltaKind: 'object_appeared',
+        },
+        {
+          objects: [
+            {
+              objectId: 'object_result_1',
+              kind: 'result_card',
+              targetRef: 'target_result_1',
+            },
+          ],
+          actionableTargets: [
+            {
+              targetId: 'target_result_1',
+              objectId: 'object_result_1',
+              targetRef: 'target_result_1',
+            },
+          ],
+        },
+        {
+          action: 'chrome_click_element',
+          tabId: 1,
+          changeCause: 'click',
+          targetRefs: ['ref_result_1', 'target_result_1'],
+          candidateActionId: 'ca_open_result_1',
+          candidateActionIntent: 'search.open_result',
+          actionKind: 'click',
+          producedAtMs: Date.now(),
+          beforePageRegions: [],
+        },
+      );
+
+      expect(payload).toMatchObject({
+        actionId: 'ca_open_result_1',
+        targetObjectId: 'object_result_1',
+        beforeSnapshotId: 'snapshot_before_click',
+        afterSnapshotId: 'snapshot_after_click',
+        deltaKind: 'object_appeared',
+      });
     });
 
     it('allows fill-then-click form continuation on a run-owned tab before final readback', async () => {

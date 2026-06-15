@@ -32,6 +32,8 @@ interface CollectResultCardsParams {
 interface VisibleCardScanResult {
   cards: CollectedResultCard[];
   filterState: SearchFilterState;
+  pageRegions: PageRegionObject[];
+  candidateActions: PageCandidateAction[];
   pageInfo: {
     url: string;
     title: string;
@@ -62,6 +64,28 @@ interface SearchFilterState {
   };
   appliedFilters: AppliedSearchFilter[];
   claimBoundary: string;
+}
+
+interface PageRegionObject {
+  regionId: string;
+  regionType: 'search' | 'filters' | 'results' | 'content';
+  layoutHint: string;
+  state: 'observed';
+  readiness: 'ready' | 'unknown';
+  targetability: boolean;
+  candidateActionIds: string[];
+}
+
+interface PageCandidateAction {
+  id: string;
+  actionType: 'click' | 'fill' | 'open';
+  targetRef: string;
+  label: string;
+  intent: string;
+  matchReason: string;
+  actionability: boolean;
+  actionabilityReason?: string;
+  locatorChain: Array<{ type: 'ref' | 'aria' | 'css' | string; value: string }>;
 }
 
 interface SearchFilterGroupState {
@@ -178,7 +202,7 @@ async function findBrowserWorldTab(tabId: number): Promise<BrowserWorldTabObject
   }
 }
 
-function scanVisibleResultCardsInPage(): VisibleCardScanResult {
+export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
   const normalize = (value: unknown): string =>
     String(value ?? '')
       .replace(/\s+/g, ' ')
@@ -487,6 +511,90 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
 
   const linkText = (link: HTMLAnchorElement): string =>
     normalize(link.innerText || link.textContent || link.getAttribute('aria-label') || '');
+
+  const stableIdentityHash = (value: string): string => {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
+  };
+
+  const normalizedHrefForTargetIdentity = (href: string): string => {
+    try {
+      const url = new URL(href, location.href);
+      return `${url.protocol}//${url.hostname.toLowerCase()}${url.pathname}`.toLowerCase();
+    } catch {
+      return normalize(href)
+        .replace(/[?#].*$/, '')
+        .toLowerCase();
+    }
+  };
+
+  const stableResultCardTargetRef = (title: string, href: string): string => {
+    const identity = `${normalize(title).toLowerCase()}|${normalizedHrefForTargetIdentity(href)}`;
+    return `ref_result_card_${stableIdentityHash(identity)}`;
+  };
+
+  const stablePageTargetRef = (kind: string, label: string): string =>
+    `ref_${kind}_${stableIdentityHash(`${location.hostname.toLowerCase()}|${kind}|${normalize(label).toLowerCase()}`)}`;
+
+  const searchInputCandidate = (): PageCandidateAction | null => {
+    const input = Array.from(
+      document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+        [
+          'input[type="search"]',
+          'input[placeholder*="搜索"]',
+          'input[placeholder*="search" i]',
+          'textarea[placeholder*="搜索"]',
+          'textarea[placeholder*="search" i]',
+          '[contenteditable="true"][role="textbox"]',
+          '[contenteditable="true"][aria-label*="搜索"]',
+        ].join(','),
+      ),
+    ).find((element) => elementIsVisible(element) && visibleRect(element));
+    if (!input) return null;
+    const label = normalize(
+      input.getAttribute('aria-label') ||
+        input.getAttribute('placeholder') ||
+        input.textContent ||
+        '搜索输入框',
+    );
+    const selector = selectorForElement(input);
+    const targetRef = stablePageTargetRef('search_input', label || 'search');
+    return {
+      id: `ca_fill_${targetRef}`,
+      actionType: 'fill',
+      targetRef,
+      label: label || '搜索输入框',
+      intent: 'search.enter_query',
+      matchReason: 'visible_search_input',
+      actionability: Boolean(selector),
+      ...(selector ? {} : { actionabilityReason: 'missing_stable_selector' }),
+      locatorChain: [
+        { type: 'ref', value: targetRef },
+        ...(label ? [{ type: 'aria', value: label }] : []),
+        ...(selector ? [{ type: 'css', value: selector }] : []),
+      ],
+    };
+  };
+
+  const filterCandidateActions = (filterState: SearchFilterState): PageCandidateAction[] =>
+    filterState.appliedFilters.map((filter) => {
+      const targetRef = stablePageTargetRef(`filter_${filter.kind}`, filter.label);
+      return {
+        id: `ca_filter_${stableIdentityHash(`${filter.kind}|${filter.label}`)}`,
+        actionType: 'click',
+        targetRef,
+        label: filter.label,
+        intent: `search.apply_filter.${filter.kind}`,
+        matchReason: filter.source,
+        actionability: false,
+        actionabilityReason: 'observed_selected_filter_without_stable_selector',
+        locatorChain: [{ type: 'ref', value: targetRef }],
+      };
+    });
 
   const isXiaohongshuDetailLink = (link: HTMLAnchorElement): boolean => {
     try {
@@ -815,9 +923,9 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     const confidence = Math.min(0.92, 0.52 + reasons.length * 0.08);
     const primaryLinkSelector = primaryLink ? selectorForElement(primaryLink.link) : undefined;
     const primaryLinkText = primaryLink ? linkText(primaryLink.link) : '';
-    const resultCardTargetRef = `ref_result_card_${cards.length + 1}`;
+    const resultCardTargetRef = stableResultCardTargetRef(title, href);
     const primaryLinkHitVerified =
-      Boolean(primaryLink) && !primaryLink.reasons.includes('visible_detail_link_unverified_hit');
+      Boolean(primaryLink) && !primaryLink?.reasons.includes('visible_detail_link_unverified_hit');
     const resultCardCandidateAction =
       primaryLinkHitVerified && primaryLink && primaryLinkSelector
         ? {
@@ -901,9 +1009,76 @@ function scanVisibleResultCardsInPage(): VisibleCardScanResult {
   }
 
   cards.sort((left, right) => left.firstSeenGlobalTop - right.firstSeenGlobalTop);
+  const filterState = collectFilterState();
+  const searchAction = searchInputCandidate();
+  const observedFilterActions = filterCandidateActions(filterState);
+  const visibleCardActions: PageCandidateAction[] = cards
+    .map((card) => card.actionTarget?.toolArgs?.candidateAction)
+    .filter((action): action is NonNullable<typeof action> => Boolean(action))
+    .map((action) => ({
+      id: action.id,
+      actionType: 'click',
+      targetRef: action.targetRef,
+      label: action.label ?? '打开结果卡片',
+      intent: action.intent,
+      matchReason: action.matchReason,
+      actionability: true,
+      locatorChain: action.locatorChain,
+    }));
+  const candidateActions = [
+    ...(searchAction ? [searchAction] : []),
+    ...observedFilterActions,
+    ...visibleCardActions,
+  ];
   return {
     cards,
-    filterState: collectFilterState(),
+    filterState,
+    pageRegions: [
+      ...(searchAction
+        ? [
+            {
+              regionId: 'search_input',
+              regionType: 'search' as const,
+              layoutHint: 'visible_search_control',
+              state: 'observed' as const,
+              readiness: 'ready' as const,
+              targetability: searchAction.actionability,
+              candidateActionIds: [searchAction.id],
+            },
+          ]
+        : []),
+      ...(filterState.status === 'observed'
+        ? [
+            {
+              regionId: 'search_filters',
+              regionType: 'filters' as const,
+              layoutHint: 'visible_or_inferred_filter_state',
+              state: 'observed' as const,
+              readiness: 'ready' as const,
+              targetability: observedFilterActions.some((action) => action.actionability),
+              candidateActionIds: observedFilterActions.map((action) => action.id),
+            },
+          ]
+        : []),
+      ...(cards.length > 0
+        ? [
+            {
+              regionId: 'result_list',
+              regionType: 'results' as const,
+              layoutHint: resultListContainer
+                ? 'visible_result_card_grid_or_list'
+                : 'inferred_from_visible_result_cards',
+              state: 'observed' as const,
+              readiness: cards.length > 0 ? ('ready' as const) : ('unknown' as const),
+              targetability: cards.some((card) => Boolean(card.actionTarget)),
+              candidateActionIds: cards
+                .map((card) => card.actionTarget?.toolArgs?.candidateAction.id)
+                .filter((id): id is string => Boolean(id)),
+            },
+          ]
+        : []),
+    ],
+    candidateActions,
     pageInfo: {
       url: location.href,
       title: document.title,
@@ -1058,6 +1233,8 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
       const scrolls: ScrollStepResult[] = [];
       let latestPageInfo: VisibleCardScanResult['pageInfo'] | null = null;
       let latestFilterState: SearchFilterState | null = null;
+      let latestPageRegions: PageRegionObject[] = [];
+      let latestCandidateActions: PageCandidateAction[] = [];
       const startFromTop = args.startFromTop !== false;
 
       if (startFromTop) {
@@ -1076,6 +1253,8 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
         const scan = await this.scanVisibleResultCards(tab);
         latestPageInfo = scan.pageInfo;
         latestFilterState = scan.filterState;
+        latestPageRegions = scan.pageRegions;
+        latestCandidateActions = scan.candidateActions;
         merged = mergeCollectedResultCards(merged, scan.cards, maxMergedCards);
         steps.push({
           step,
@@ -1111,6 +1290,47 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
       markBrowserWorldTabAiOperated(tab.id, 'collect_result_cards');
       const selectedCards = merged.slice(0, minResults);
       const targetabilitySummary = summarizeCollectedResultCardTargetability(selectedCards);
+      const cardCandidateActions: PageCandidateAction[] = selectedCards
+        .map((card) => card.actionTarget?.toolArgs?.candidateAction)
+        .filter((action): action is NonNullable<typeof action> => Boolean(action))
+        .map((action) => ({
+          id: action.id,
+          actionType: 'click',
+          targetRef: action.targetRef,
+          label: action.label ?? '打开结果卡片',
+          intent: action.intent,
+          matchReason: action.matchReason,
+          actionability: true,
+          locatorChain: action.locatorChain,
+        }));
+      const candidateActionsById = new Map<string, PageCandidateAction>();
+      for (const action of [...latestCandidateActions, ...cardCandidateActions]) {
+        candidateActionsById.set(action.id, action);
+      }
+      const candidateActions = [...candidateActionsById.values()];
+      const resultCardActionIds = cardCandidateActions.map((action) => action.id);
+      const pageRegions =
+        latestPageRegions.length > 0
+          ? latestPageRegions.map((region) =>
+              region.regionId === 'result_list'
+                ? {
+                    ...region,
+                    targetability: resultCardActionIds.length > 0,
+                    candidateActionIds: resultCardActionIds,
+                  }
+                : region,
+            )
+          : [
+              {
+                regionId: 'result_list',
+                regionType: 'results' as const,
+                layoutHint: 'visible_result_card_grid_or_list',
+                state: 'observed' as const,
+                readiness: selectedCards.length > 0 ? ('ready' as const) : ('unknown' as const),
+                targetability: resultCardActionIds.length > 0,
+                candidateActionIds: resultCardActionIds,
+              },
+            ];
       const cards = selectedCards.map((card, index) => {
         const stableTarget = stableResultCardTarget(card);
         return {
@@ -1161,6 +1381,8 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
               selectedDataSource: 'visible_dom_result_cards',
               freshness: 'fresh',
               filterState: latestFilterState,
+              pageRegions,
+              candidateActions,
               tabId: tab.id,
               ...(tab.windowId !== undefined ? { windowId: tab.windowId } : {}),
               requestedMinResults: minResults,

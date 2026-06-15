@@ -33,6 +33,12 @@ import {
   type ReadPagePublishFormRequiredFieldEvidence,
   type ReadPageHighValueObject,
   type ReadPageHighValueObjectAction,
+  type ReadPageObjectSnapshot,
+  type ReadPagePageDeltaReport,
+  type ReadPageObjectSummary,
+  type ReadPageActionableTargetSummary,
+  type ReadPageBrowserPageObjectWatchStatus,
+  type ReadPageReadinessVerdict,
   READ_PAGE_ASSISTANT_GUIDANCE_AUTH_PREFERENCE_VALUES,
   READ_PAGE_ASSISTANT_GUIDANCE_REQUESTED_OBJECT_VALUES,
   READ_PAGE_ASSISTANT_GUIDANCE_TASK_KIND_VALUES,
@@ -157,6 +163,223 @@ const objectLifecycleByTab = new Map<
   }
 >();
 
+const pageObjectSnapshotByTab = new Map<
+  number,
+  {
+    pageObjectSnapshot: ReadPageObjectSnapshot;
+    pageObjectDeltaSignals?: {
+      networkStartedCount?: number;
+      failedRequestCount?: number;
+      errorCount?: number;
+      warningCount?: number;
+    };
+  }
+>();
+
+function mapReadinessVerdict(input: {
+  canUseSnapshotForBusinessAction: boolean;
+  status: ReadPageLoadReadiness['status'];
+}): ReadPageReadinessVerdict {
+  if (input.canUseSnapshotForBusinessAction) return 'ready';
+  if (input.status === 'stale') return 'blocked';
+  return 'unknown';
+}
+
+function mapPageStabilityToWatchStatus(
+  pageStability: BrowserPageStability,
+): ReadPageBrowserPageObjectWatchStatus | null {
+  if (pageStability === 'stable') return 'stable_or_unknown';
+  if (pageStability === 'loading') return 'runtime_degraded';
+  if (pageStability === 'changing') return 'runtime_transition_candidate';
+  if (pageStability === 'stale') return 'changed_without_target_transition';
+  return 'stable_or_unknown';
+}
+
+function collectSourceProvenance(params: {
+  includeCDP: boolean;
+  includeVisibleText: boolean;
+  includeAX: boolean;
+}): ReadPageObjectSnapshot['sourceProvenance'] {
+  const sources = new Set<ReadPageObjectSnapshot['sourceProvenance'][number]>(['dom']);
+  if (params.includeCDP) sources.add('cdp');
+  if (params.includeVisibleText) sources.add('visible_text');
+  if (params.includeAX) sources.add('ax');
+  return [...sources];
+}
+
+function buildReadPageSnapshotSourceStats(params: {
+  tabId: number;
+  currentUrl: string;
+  currentTitle: string;
+  cdpSensing?: ReadPageCDPSensingSummary;
+  pageRegions: ReadPageCompactSnapshot['pageRegions'];
+  candidateActions: CandidateActionSeed[];
+  pageType: ReadPagePageType;
+  pageRole: string;
+  pageStability: BrowserPageStability;
+  loadReadiness: ReadPageLoadReadiness;
+  visibleTextContent?: string | null;
+}): ReadPageObjectSnapshot {
+  const regionList = Array.isArray(params.pageRegions) ? params.pageRegions : [];
+  const actionList = Array.isArray(params.candidateActions) ? params.candidateActions : [];
+  const regionSources = collectSourceProvenance({
+    includeCDP: Boolean(
+      params.cdpSensing?.accessibility ||
+      params.cdpSensing?.networkActivity ||
+      params.cdpSensing?.console,
+    ),
+    includeVisibleText: Boolean(
+      params.visibleTextContent && String(params.visibleTextContent).trim().length > 0,
+    ),
+    includeAX: Boolean(params.cdpSensing?.accessibility),
+  });
+  const objects: ReadPageObjectSummary[] = regionList.map((region, index) => {
+    const objectSourceProvenance = new Set<ReadPageObjectSnapshot['sourceProvenance'][number]>(
+      regionSources,
+    );
+    if (typeof region.label === 'string' && region.label.length > 0) {
+      objectSourceProvenance.add('visible_text');
+    }
+    if (typeof region.reason === 'string' && region.reason.length > 0) {
+      objectSourceProvenance.add('visible_text');
+    }
+    return {
+      objectId:
+        region.regionId ||
+        `${params.pageType}-${params.pageRole}-${region.regionType || 'region'}-${index}`,
+      kind: region.regionType || 'region',
+      label: region.label || region.regionId || `${region.regionType || 'region'}-${index}`,
+      regionType: region.regionType ?? null,
+      sourceProvenance: [...objectSourceProvenance],
+      freshness: 'fresh',
+    };
+  });
+  const actionableTargets: ReadPageActionableTargetSummary[] = actionList.map((action) => ({
+    targetId:
+      action.id ??
+      `${params.pageType}-${params.pageRole}-target-${action.targetRef ?? 'unknown'}-${action.actionType || 'unknown'}`,
+    label: action.label || action.targetRef || action.id || 'candidate_action',
+    kind: (action.actionType || 'click') as ReadPageActionableTargetSummary['kind'],
+    targetRef: action.targetRef,
+    ref: action.targetRef,
+    sourceProvenance: action.locatorChain?.length ? 'dom' : 'unknown',
+    freshness: 'fresh',
+    ...(action.actionType === 'fill' ? { objectId: action.targetRef } : {}),
+  }));
+
+  return {
+    source: 'read_page_object_snapshot',
+    snapshotId: `rpos_${params.tabId}_${Date.now()}`,
+    observedAt: new Date().toISOString(),
+    pageUrl: params.currentUrl,
+    pageTitle: params.currentTitle,
+    pageType: params.pageType,
+    pageRole: params.pageRole,
+    pageState: {
+      pageStability: mapPageStabilityToWatchStatus(params.pageStability),
+      readiness: mapReadinessVerdict(params.loadReadiness),
+      baseUrl: (() => {
+        try {
+          return new URL(params.currentUrl).hostname || params.currentUrl;
+        } catch {
+          return params.currentUrl;
+        }
+      })(),
+      frameCount:
+        typeof params.cdpSensing?.frameCount === 'number' ? params.cdpSensing.frameCount : null,
+    },
+    sourceProvenance: [...regionSources],
+    freshness: 'fresh',
+    objects,
+    actionableTargets,
+    objectCount: objects.length,
+    actionableObjectCount: actionableTargets.length,
+    claimBoundary:
+      'read_page_object_snapshot is object-awareness summary only; not business success proof',
+  };
+}
+
+function buildReadPagePageDeltaReport(params: {
+  tabId: number;
+  currentSnapshot: ReadPageObjectSnapshot;
+  previousSnapshot: ReadPageObjectSnapshot | null;
+  cdpSignals?: {
+    networkStartedCount?: number;
+    failedRequestCount?: number;
+    errorCount?: number;
+    warningCount?: number;
+  };
+  previousCdpSignals?: {
+    networkStartedCount?: number;
+    failedRequestCount?: number;
+    errorCount?: number;
+    warningCount?: number;
+  };
+}): ReadPagePageDeltaReport | undefined {
+  if (!params.previousSnapshot) return undefined;
+
+  const previous = params.previousSnapshot;
+  const beforeObjectIds = new Set(previous.objects.map((object) => object.objectId));
+  const afterObjectIds = new Set(params.currentSnapshot.objects.map((object) => object.objectId));
+  const appearedObjectIds = [...afterObjectIds].filter((id) => !beforeObjectIds.has(id));
+  const disappearedObjectIds = [...beforeObjectIds].filter((id) => !afterObjectIds.has(id));
+  const objectDelta = [...appearedObjectIds, ...disappearedObjectIds];
+  const changedRegions = Array.isArray(params.currentSnapshot.objects)
+    ? params.currentSnapshot.objects
+        .map((object) => object.regionType)
+        .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    : [];
+  const changedObjectSummary = objectDelta.length;
+  let deltaKind: ReadPagePageDeltaReport['deltaKind'] = 'no_useful_change';
+  let recommendation: ReadPagePageDeltaReport['recommendation'] = 'wait';
+
+  if (params.currentSnapshot.pageUrl !== previous.pageUrl) {
+    deltaKind = 'url_changed';
+    recommendation = 'proceed';
+  } else if (changedObjectSummary > 0) {
+    deltaKind = 'object_appeared';
+    recommendation = 'proceed';
+  }
+
+  return {
+    source: 'read_page_delta_report',
+    actionId: null,
+    targetObjectId: null,
+    beforeSnapshotId: previous.snapshotId,
+    afterSnapshotId: params.currentSnapshot.snapshotId,
+    beforeObservedAt: previous.observedAt,
+    afterObservedAt: params.currentSnapshot.observedAt,
+    deltaKind,
+    changedRegions: changedRegions.length > 0 ? changedRegions : ['read_page_object_snapshot'],
+    changedObjects: objectDelta,
+    ...(typeof params.previousCdpSignals?.networkStartedCount === 'number' &&
+    typeof params.cdpSignals?.networkStartedCount === 'number'
+      ? {
+          networkSignals: {
+            requestStartedDelta:
+              params.cdpSignals.networkStartedCount - params.previousCdpSignals.networkStartedCount,
+            failedRequestDelta:
+              (params.cdpSignals.failedRequestCount ?? 0) -
+              (params.previousCdpSignals.failedRequestCount ?? 0),
+          },
+        }
+      : {}),
+    ...(typeof params.previousCdpSignals?.errorCount === 'number' &&
+    typeof params.cdpSignals?.errorCount === 'number'
+      ? {
+          consoleSignals: {
+            errorCountDelta: params.cdpSignals.errorCount - params.previousCdpSignals.errorCount,
+            warningCountDelta:
+              (params.cdpSignals.warningCount ?? 0) - (params.previousCdpSignals.warningCount ?? 0),
+          },
+        }
+      : {}),
+    recommendation,
+    claimBoundary:
+      'delta is read-only object-presence change evidence; AI must still verify postcondition.',
+  };
+}
+
 function rememberObjectLifecycleSnapshot(
   tabId: number,
   url: string,
@@ -172,6 +395,49 @@ function rememberObjectLifecycleSnapshot(
     if (firstKey === undefined) break;
     objectLifecycleByTab.delete(firstKey);
   }
+}
+
+function rememberPageObjectSnapshot(
+  tabId: number,
+  snapshot: ReadPageObjectSnapshot,
+  telemetry?: {
+    networkStartedCount?: number;
+    failedRequestCount?: number;
+    errorCount?: number;
+    warningCount?: number;
+  },
+): void {
+  if (!Number.isFinite(tabId)) return;
+  pageObjectSnapshotByTab.delete(tabId);
+  pageObjectSnapshotByTab.set(tabId, {
+    pageObjectSnapshot: snapshot,
+    pageObjectDeltaSignals: telemetry,
+  });
+  while (pageObjectSnapshotByTab.size > OBJECT_LIFECYCLE_CACHE_MAX_TABS) {
+    const firstKey = pageObjectSnapshotByTab.keys().next().value;
+    if (firstKey === undefined) break;
+    pageObjectSnapshotByTab.delete(firstKey);
+  }
+}
+
+function getPreviousPageObjectSnapshot(tabId: number): {
+  snapshot: ReadPageObjectSnapshot;
+  telemetry?: {
+    networkStartedCount?: number;
+    failedRequestCount?: number;
+    errorCount?: number;
+    warningCount?: number;
+  };
+} | null {
+  const previous = pageObjectSnapshotByTab.get(tabId);
+  return previous
+    ? {
+        snapshot: { ...previous.pageObjectSnapshot },
+        telemetry: previous.pageObjectDeltaSignals
+          ? { ...previous.pageObjectDeltaSignals }
+          : undefined,
+      }
+    : null;
 }
 
 function buildBoundedWatchLoopSnapshot(params: {
@@ -213,6 +479,7 @@ function buildBoundedWatchLoopSnapshot(params: {
 
 function resetObjectLifecycleCacheForTests(): void {
   objectLifecycleByTab.clear();
+  pageObjectSnapshotByTab.clear();
 }
 
 function getTabNavigationUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {
@@ -472,6 +739,10 @@ function buildReadPageCDPSensingSummary(
           },
         }
       : {}),
+    ...(snapshot.networkActivity ? { networkActivity: snapshot.networkActivity } : {}),
+    ...(snapshot.networkResources ? { networkResources: snapshot.networkResources } : {}),
+    ...(snapshot.console ? { console: snapshot.console } : {}),
+    ...(snapshot.accessibility ? { accessibility: snapshot.accessibility } : {}),
     claimBoundary:
       'cdp_page_sensing is read-only browser state evidence; it is not page-object completeness, action success, login success, or business success proof',
   };
@@ -1846,6 +2117,66 @@ async function buildModeOutput(params: {
     selectedDataSource: sharedPayload.selectedDataSource,
     objectLifecycle: sharedPayload.objectLifecycle,
     cdpSensing: params.loadReadiness.cdpSensing,
+  });
+  const pageObjectSnapshot = buildReadPageSnapshotSourceStats({
+    tabId: params.tabId,
+    currentUrl: params.currentUrl,
+    currentTitle: params.currentTitle,
+    cdpSensing: params.loadReadiness.cdpSensing,
+    pageRegions: sharedPayload.pageRegions,
+    candidateActions,
+    pageType: params.pageType,
+    pageRole: sharedPayload.summary?.pageRole || String(params.pageRole || 'unknown'),
+    pageStability: params.pageStability,
+    loadReadiness: params.loadReadiness,
+    visibleTextContent: params.visibleTextContent,
+  });
+  const previousSnapshot = getPreviousPageObjectSnapshot(params.tabId);
+  const pageDeltaReport = buildReadPagePageDeltaReport({
+    tabId: params.tabId,
+    currentSnapshot: pageObjectSnapshot,
+    previousSnapshot: previousSnapshot?.snapshot ?? null,
+    cdpSignals: {
+      networkStartedCount:
+        typeof params.loadReadiness.cdpSensing?.networkActivity?.requestStartedCount === 'number'
+          ? params.loadReadiness.cdpSensing.networkActivity.requestStartedCount
+          : undefined,
+      failedRequestCount:
+        typeof params.loadReadiness.cdpSensing?.networkActivity?.failedRequestCount === 'number'
+          ? params.loadReadiness.cdpSensing.networkActivity.failedRequestCount
+          : undefined,
+      errorCount:
+        typeof params.loadReadiness.cdpSensing?.console?.errorCount === 'number'
+          ? params.loadReadiness.cdpSensing.console.errorCount
+          : undefined,
+      warningCount:
+        typeof params.loadReadiness.cdpSensing?.console?.warningCount === 'number'
+          ? params.loadReadiness.cdpSensing.console.warningCount
+          : undefined,
+    },
+    previousCdpSignals: previousSnapshot?.telemetry,
+  });
+  if (pageDeltaReport) {
+    sharedPayload.pageDeltaReport = pageDeltaReport;
+  }
+  sharedPayload.pageObjectSnapshot = pageObjectSnapshot;
+  rememberPageObjectSnapshot(params.tabId, pageObjectSnapshot, {
+    networkStartedCount:
+      typeof params.loadReadiness.cdpSensing?.networkActivity?.requestStartedCount === 'number'
+        ? params.loadReadiness.cdpSensing.networkActivity.requestStartedCount
+        : undefined,
+    failedRequestCount:
+      typeof params.loadReadiness.cdpSensing?.networkActivity?.failedRequestCount === 'number'
+        ? params.loadReadiness.cdpSensing.networkActivity.failedRequestCount
+        : undefined,
+    errorCount:
+      typeof params.loadReadiness.cdpSensing?.console?.errorCount === 'number'
+        ? params.loadReadiness.cdpSensing.console.errorCount
+        : undefined,
+    warningCount:
+      typeof params.loadReadiness.cdpSensing?.console?.warningCount === 'number'
+        ? params.loadReadiness.cdpSensing.console.warningCount
+        : undefined,
   });
 
   return buildReadPageModeResult({

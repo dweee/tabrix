@@ -3165,6 +3165,93 @@ describe('read_page mode', () => {
     );
   });
 
+  it('returns pageObjectSnapshot and pageDeltaReport in consecutive same-tab compact reads', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5220,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/object-snapshot',
+      title: 'Snapshot Board',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sampleVisibleTextContent').mockResolvedValue(null);
+    vi.spyOn(readPageTool as any, 'collectInteractiveElementsFallback').mockResolvedValue({
+      success: true,
+      elements: [],
+    });
+    const sendMessage = vi.spyOn(readPageTool as any, 'sendMessageToTab');
+    sendMessage
+      .mockResolvedValueOnce({
+        success: true,
+        pageContent: [
+          '- section "Board" [ref=ref_board] (x=100,y=120)',
+          '  - heading "Today" [ref=ref_heading] (x=120,y=180)',
+          '  - list "Tasks" [ref=ref_task_list] (x=120,y=240)',
+        ].join('\n'),
+        refMap: [
+          { ref: 'ref_heading', selector: 'h2' },
+          { ref: 'ref_task_list', selector: 'ul' },
+        ],
+        stats: { processed: 6, included: 6, durationMs: 5 },
+        viewport: { width: 1280, height: 720, dpr: 1 },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        pageContent: [
+          '- section "Board" [ref=ref_board] (x=100,y=120)',
+          '  - heading "Today" [ref=ref_heading] (x=120,y=180)',
+          '  - list "Tasks" [ref=ref_task_list] (x=120,y=240)',
+          '  - button "Add task" [ref=ref_add_task] (x=120,y=300)',
+        ].join('\n'),
+        refMap: [
+          { ref: 'ref_heading', selector: 'h2' },
+          { ref: 'ref_task_list', selector: 'ul' },
+          { ref: 'ref_add_task', selector: 'button.primary' },
+        ],
+        stats: { processed: 7, included: 7, durationMs: 7 },
+        viewport: { width: 1280, height: 720, dpr: 1 },
+      });
+
+    const first = await readPageTool.execute({ mode: 'compact' });
+    const second = await readPageTool.execute({ mode: 'compact' });
+    const firstPayload = JSON.parse((first.content[0] as { text: string }).text);
+    const secondPayload = JSON.parse((second.content[0] as { text: string }).text);
+
+    expect(firstPayload.pageObjectSnapshot).toMatchObject({
+      source: 'read_page_object_snapshot',
+      sourceProvenance: expect.any(Array),
+      snapshotId: expect.any(String),
+      objects: expect.any(Array),
+      objectCount: expect.any(Number),
+      freshness: expect.stringMatching(/^(fresh|stale|unknown)$/),
+    });
+    expect(firstPayload.pageDeltaReport).toBeUndefined();
+
+    expect(secondPayload.pageObjectSnapshot).toMatchObject({
+      source: 'read_page_object_snapshot',
+      sourceProvenance: expect.any(Array),
+      snapshotId: expect.any(String),
+      objects: expect.any(Array),
+      objectCount: expect.any(Number),
+      freshness: expect.stringMatching(/^(fresh|stale|unknown)$/),
+    });
+    expect(firstPayload.pageObjectSnapshot.snapshotId).not.toBe(
+      secondPayload.pageObjectSnapshot.snapshotId,
+    );
+    expect(secondPayload.pageDeltaReport).toMatchObject({
+      source: 'read_page_delta_report',
+      beforeSnapshotId: firstPayload.pageObjectSnapshot.snapshotId,
+      afterSnapshotId: secondPayload.pageObjectSnapshot.snapshotId,
+      deltaKind: expect.stringMatching(
+        /^(url_changed|spa_route_change|list_refreshed|dialog_appeared|new_tab_opened|object_appeared|form_state_changed|network_completed|console_error|no_useful_change|blocked|restricted|unknown)$/,
+      ),
+      changedObjects: expect.any(Array),
+      recommendation: expect.stringMatching(/^(proceed|wait|refresh|retry|stop|needs_user)$/),
+      claimBoundary: expect.any(String),
+    });
+  });
+
   it('compares bounded watch-loop runtime state across same-tab read_page snapshots', async () => {
     const tabSequence = [
       {

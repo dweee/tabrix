@@ -113,6 +113,216 @@ describe('MkeMemoryTraceService', () => {
     }
   });
 
+  it('records browser action target and post-action delta without inventing AI feedback', () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo);
+
+    try {
+      const trace = traceService.recordToolCall({
+        taskId: 'trace-action-delta-task',
+        taskIntent: 'open first search result',
+        aiClient: 'jest',
+        toolName: 'chrome_click_element',
+        stepId: 'trace-action-delta-step',
+        sequenceIndex: 1,
+        requestParams: {
+          tabId: 7,
+          candidateAction: {
+            id: 'ca_click_ref_result_card_1',
+            targetRef: 'ref_result_card_1',
+            intent: 'content.open_detail',
+          },
+        },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 75,
+        result: textResult({
+          success: true,
+          dispatchSucceeded: true,
+          observedOutcome: 'dom_changed',
+          verification: {
+            navigationOccurred: false,
+            urlChanged: false,
+            newTabOpened: false,
+            domChanged: true,
+            stateChanged: false,
+            focusChanged: false,
+          },
+          clickDiff: {
+            kind: 'change',
+            urlDelta: 'none',
+            newTabOpened: false,
+            domChanged: true,
+            dialogAdded: false,
+            menuAdded: false,
+            focusChanged: false,
+            stateChanged: false,
+          },
+          targetBinding: {
+            resolutionSource: 'candidate_stable_target_ref',
+            dispatchTarget: 'ref',
+            frameScope: 'default_frame',
+            stableTargetRefResolved: true,
+          },
+          postActionReadback: {
+            kind: 'post_action_readback_v1',
+            actionKind: 'click',
+            status: 'fresh_read_required',
+            candidateActionIntent: 'content.open_detail',
+            expectedEvidence: 'detail_region_or_content_transition',
+            observedOutcome: 'dom_changed',
+            dispatchSucceeded: true,
+            freshReadRequired: true,
+            sameTabVerificationRequired: true,
+            businessSuccessProven: false,
+            readbackSource: 'tool_dispatch_only',
+            requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
+            reason: 'click_dispatch_observed_dom_changed',
+          },
+          actionEvidenceResult: {
+            actionId: 'action-click-1',
+            actionKind: 'click',
+            tabId: 7,
+            targetBinding: {
+              requestedTargetRef: 'ref_result_card_1',
+              resolvedTargetRef: 'ref_result_card_1',
+              locatorChainSummary: ['ref:ref_result_card_1', 'css:a[href*="/explore/"]'],
+              dispatchTarget: 'ref',
+              frameScope: 'default_frame',
+              targetBindingProven: true,
+            },
+            dispatch: {
+              dispatched: true,
+              acceptedByBrowser: true,
+              errorCode: null,
+            },
+            business: {
+              businessSuccessVerdict: 'not_proven',
+              businessSuccessProven: false,
+              nextRequiredCheck: 'chrome_read_page_force_refresh_same_tab',
+            },
+          },
+        }),
+        resultSummary: 'click changed the result card area',
+      });
+
+      expect(trace.aiFeedbackScore).toBeNull();
+      expect(trace.aiFeedback).toBeNull();
+      expect(trace.actionTarget).toMatchObject({
+        actionId: 'action-click-1',
+        actionKind: 'click',
+        tabId: 7,
+        requestedTargetRef: 'ref_result_card_1',
+        resolvedTargetRef: 'ref_result_card_1',
+        dispatchTarget: 'ref',
+        targetBindingProven: true,
+        acceptedByBrowser: true,
+      });
+      expect(trace.postObservation).toMatchObject({
+        success: true,
+        dispatchSucceeded: true,
+        observedOutcome: 'dom_changed',
+        readbackStatus: 'fresh_read_required',
+        expectedEvidence: 'detail_region_or_content_transition',
+        domChanged: true,
+      });
+      expect(trace.postActionDelta).toMatchObject({
+        deltaKind: 'post_action_tool_delta',
+        actionId: 'action-click-1',
+        actionKind: 'click',
+        targetRef: 'ref_result_card_1',
+        observedOutcome: 'dom_changed',
+        changed: true,
+        changedSignals: ['dom_changed'],
+        recommendation: 'chrome_read_page_force_refresh_same_tab',
+        businessSuccessProven: false,
+      });
+      expect(trace.nextRequiredCheck).toBe('chrome_read_page_force_refresh_same_tab');
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('records fill action readback without persisting the raw input value in action summaries', () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo);
+
+    try {
+      const trace = traceService.recordToolCall({
+        taskId: 'trace-fill-delta-task',
+        taskIntent: 'enter search query',
+        aiClient: 'jest',
+        toolName: 'chrome_fill_or_select',
+        stepId: 'trace-fill-delta-step',
+        sequenceIndex: 1,
+        requestParams: {
+          tabId: 7,
+          value: 'PRIVATE_SEARCH_QUERY',
+          candidateAction: {
+            id: 'ca_fill_search',
+            targetRef: 'ref_search_input',
+            intent: 'search.enter_query',
+          },
+        },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 55,
+        result: textResult({
+          success: true,
+          targetBinding: {
+            resolutionSource: 'candidate_stable_target_ref',
+            dispatchTarget: 'ref',
+            frameScope: 'default_frame',
+            stableTargetRefResolved: true,
+          },
+          postActionReadback: {
+            kind: 'post_action_readback_v1',
+            actionKind: 'fill',
+            status: 'fresh_read_required',
+            candidateActionIntent: 'search.enter_query',
+            expectedEvidence: 'form_value_state_changed',
+            observedOutcome: 'input_value_written',
+            dispatchSucceeded: true,
+            freshReadRequired: true,
+            sameTabVerificationRequired: true,
+            businessSuccessProven: false,
+            readbackSource: 'tool_dispatch_only',
+            requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
+            reason: 'fill_dispatch_observed_input_value_written',
+          },
+          inputWriteEvidence: {
+            valueState: 'non_empty',
+            proofStatus: 'input_state_observed',
+            claimBoundary: 'raw value is not returned',
+          },
+        }),
+        resultSummary: 'fill search input',
+      });
+
+      expect(trace.postObservation).toMatchObject({
+        success: true,
+        readbackStatus: 'fresh_read_required',
+        expectedEvidence: 'form_value_state_changed',
+        inputProofStatus: 'input_state_observed',
+        valueState: 'non_empty',
+      });
+      expect(trace.postActionDelta).toMatchObject({
+        deltaKind: 'post_action_tool_delta',
+        actionKind: 'fill',
+        observedOutcome: 'input_value_written',
+        changed: true,
+        changedSignals: ['input_state_observed'],
+      });
+      expect(JSON.stringify(trace.actionTarget)).not.toContain('PRIVATE_SEARCH_QUERY');
+      expect(JSON.stringify(trace.postObservation)).not.toContain('PRIVATE_SEARCH_QUERY');
+      expect(JSON.stringify(trace.postActionDelta)).not.toContain('PRIVATE_SEARCH_QUERY');
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
   it('compacts network capture memory summaries without retaining raw bodies or headers', () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const traceRepo = new MemoryTraceRepository(db);
@@ -1010,6 +1220,252 @@ describe('MkeMemoryTraceService', () => {
     }
   });
 
+  it('records read-page snapshot and delta summaries in page Browser Object facts', async () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const browserObjectRepo = new BrowserObjectRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo, browserObjectRepo);
+
+    try {
+      const trace = traceService.recordToolCall({
+        taskId: 'snapshot-delta-write-task',
+        taskIntent: 'measure read-page object awareness',
+        aiClient: 'jest',
+        toolName: 'chrome_read_page',
+        stepId: 'snapshot-delta-write-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 101 },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 200,
+        result: textResult({
+          page: {
+            title: 'AI搜索页面',
+            url: 'https://example.test/search?keyword=ai',
+          },
+          summary: { pageRole: 'search_results', quality: 'fresh' },
+          pageProjection: {
+            pageRole: 'search_results',
+            pageModelKey: 'page:example.test:search_results',
+            chosenDataSource: 'markdown',
+            tabId: 101,
+          },
+          browserPageObjectCompact: {
+            status: 'complete',
+            watchStatus: 'stable',
+            operationSummary: { visibleText: true },
+            changedGroups: ['content', 'actions'],
+          },
+          sourceRoute: 'markdown_snapshot',
+          selectedDataSource: 'markdown',
+          freshness: 'fresh',
+          tabId: 101,
+          pageObjectSnapshot: {
+            source: 'read_page_object_snapshot',
+            snapshotId: 'rpos_example_101_1',
+            observedAt: '2026-06-10T10:00:30.000Z',
+            pageUrl: 'https://example.test/search?keyword=ai',
+            pageTitle: 'AI搜索页面',
+            pageType: 'search',
+            pageRole: 'search_results',
+            pageState: {
+              pageStability: 'stable_or_unknown',
+              readiness: 'ready',
+              baseUrl: 'example.test',
+              frameCount: 1,
+            },
+            sourceProvenance: ['dom', 'cdp', 'visible_text', 'ax'],
+            freshness: 'fresh',
+            objects: [
+              {
+                objectId: 'region-search-main',
+                kind: 'region',
+                label: '搜索结果列表',
+                regionType: 'content',
+                sourceProvenance: ['dom'],
+                freshness: 'fresh',
+              },
+            ],
+            actionableTargets: [
+              {
+                targetId: 'target-search-first',
+                label: '第一个结果',
+                kind: 'link',
+                targetRef: 'ref-search-result-1',
+                sourceProvenance: 'dom',
+                freshness: 'fresh',
+              },
+            ],
+            objectCount: 1,
+            actionableObjectCount: 1,
+            claimBoundary: 'read page snapshot summary',
+          },
+          pageDeltaReport: {
+            source: 'read_page_delta_report',
+            actionId: 'act-001',
+            targetObjectId: 'target-search-first',
+            beforeSnapshotId: 'rpos_example_101_0',
+            afterSnapshotId: 'rpos_example_101_1',
+            beforeObservedAt: '2026-06-10T10:00:20.000Z',
+            afterObservedAt: '2026-06-10T10:00:30.000Z',
+            deltaKind: 'object_appeared',
+            changedRegions: ['search_region'],
+            changedObjects: ['region-search-main'],
+            networkSignals: {
+              requestStartedDelta: 9,
+              failedRequestDelta: 1,
+            },
+            consoleSignals: {
+              errorCountDelta: 0,
+              warningCountDelta: 1,
+            },
+            recommendation: 'proceed',
+            claimBoundary: 'read page delta report',
+          },
+        }),
+        resultSummary: 'read-page snapshot with delta',
+      });
+
+      expect(trace.perceptionObjects).toMatchObject({
+        snapshotId: 'rpos_example_101_1',
+        objectCount: 1,
+        actionableObjectCount: 1,
+      });
+      expect(trace.postObservation).toMatchObject({
+        snapshotId: 'rpos_example_101_1',
+        pageRole: 'search_results',
+      });
+      expect(trace.postActionDelta).toMatchObject({
+        actionId: 'act-001',
+        targetObjectId: 'target-search-first',
+        deltaKind: 'object_appeared',
+        recommendation: 'proceed',
+      });
+
+      await traceService.flushAsyncWrites();
+
+      const page = browserObjectRepo
+        .listRecent({ limit: 10, offset: 0 })
+        .find((object) => object.objectType === 'page');
+
+      expect(page?.facts).toMatchObject({
+        snapshotSequence: 1,
+      });
+      expect(page?.evidenceRefs).toMatchObject([
+        'read_page_object_snapshot:rpos_example_101_1',
+        'read_page_delta_report:rpos_example_101_1',
+      ]);
+      expect(page?.recentEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            eventType: 'page_object_snapshot',
+            snapshotId: 'rpos_example_101_1',
+          }),
+          expect.objectContaining({
+            eventType: 'page_delta_report',
+            afterSnapshotId: 'rpos_example_101_1',
+          }),
+        ]),
+      );
+      expect(page?.facts).toMatchObject({
+        pageObjectSnapshotSummary: {
+          snapshotId: 'rpos_example_101_1',
+          objectCount: 1,
+          actionableObjectCount: 1,
+          sourceProvenance: ['dom', 'cdp', 'visible_text', 'ax'],
+        },
+        pageDeltaSummary: {
+          deltaKind: 'object_appeared',
+          recommendation: 'proceed',
+          changedRegionsCount: 1,
+          changedObjectCount: 1,
+          networkSignalsCount: 2,
+          consoleSignalsCount: 2,
+        },
+      });
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('keeps one stable page object per Base URL and page type across tabs', async () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const browserObjectRepo = new BrowserObjectRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo, browserObjectRepo);
+
+    try {
+      for (const [index, tabId] of [201, 202].entries()) {
+        traceService.recordToolCall({
+          taskId: 'base-url-object-task',
+          taskIntent: 'read same search page from different tabs',
+          aiClient: 'jest',
+          toolName: 'chrome_read_page',
+          stepId: `base-url-object-step-${index + 1}`,
+          sequenceIndex: index + 1,
+          requestParams: { tabId },
+          requestAtMs: NOW_MS + index * 1000,
+          responseAtMs: NOW_MS + index * 1000 + 80,
+          result: textResult({
+            page: {
+              title: index === 0 ? 'Search A' : 'Search B',
+              url:
+                index === 0
+                  ? 'https://example.test/search?keyword=ai'
+                  : 'https://example.test/search?keyword=browser',
+            },
+            summary: { pageRole: 'search_results', quality: 'fresh' },
+            pageProjection: {
+              pageRole: 'search_results',
+              pageModelKey: 'page:example.test:search_results',
+              chosenDataSource: 'markdown',
+              tabId,
+            },
+            browserPageObjectCompact: {
+              status: 'complete',
+              watchStatus: 'stable',
+              operationSummary: { visibleText: true },
+            },
+            sourceRoute: 'markdown_snapshot',
+            selectedDataSource: 'markdown',
+            freshness: 'fresh',
+            tabId,
+          }),
+          resultSummary: 'same base url page read',
+        });
+      }
+
+      await traceService.flushAsyncWrites();
+
+      const pages = browserObjectRepo
+        .listRecent({ limit: 20, offset: 0 })
+        .filter((object) => object.objectType === 'page');
+      expect(pages).toHaveLength(1);
+      expect(pages[0]).toMatchObject({
+        siteFamily: 'example.test',
+        pageModelKey: 'page:example.test:search_results',
+        rootRoute: 'https://example.test/search',
+        objectFingerprint:
+          'page:example.test:page:example.test:search_results:https://example.test/search',
+        observationCount: 2,
+        tabId: 202,
+      });
+      expect(pages[0]?.facts).toMatchObject({
+        rootRoute: 'https://example.test/search',
+        currentRoute: 'https://example.test/search?keyword=browser',
+        lastObservedTabId: 202,
+      });
+      expect(pages[0]?.currentState).toMatchObject({
+        tabId: 202,
+        currentRoute: 'https://example.test/search?keyword=browser',
+      });
+      expect(pages[0]?.sourceTraceIds).toHaveLength(2);
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
   it('projects Xiaohongshu Top 10 result cards as stable clickable Browser Objects', async () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const traceRepo = new MemoryTraceRepository(db);
@@ -1077,8 +1533,66 @@ describe('MkeMemoryTraceService', () => {
           reasons: ['link_present', 'media_present', 'multi_line_card_text'],
         };
       });
+      const cardCandidateActions = cards.map((card) => ({
+        id: card.candidateActionId,
+        actionType: 'click',
+        targetRef: card.targetRef,
+        label: card.title,
+        intent: 'content.open_detail',
+        matchReason: 'result_card_primary_link',
+        actionability: true,
+        locatorChain: [
+          { type: 'ref', value: card.targetRef },
+          { type: 'css', value: `section.note-list article:nth-of-type(${card.rank}) a[href]` },
+        ],
+      }));
+      const pageRegions = [
+        {
+          regionId: 'search_input',
+          regionType: 'search',
+          layoutHint: 'visible_search_control',
+          state: 'observed',
+          readiness: 'ready',
+          targetability: true,
+          candidateActionIds: ['ca_fill_ref_search_input_xhs'],
+        },
+        {
+          regionId: 'search_filters',
+          regionType: 'filters',
+          layoutHint: 'visible_or_inferred_filter_state',
+          state: 'observed',
+          readiness: 'ready',
+          targetability: false,
+          candidateActionIds: [],
+        },
+        {
+          regionId: 'result_list',
+          regionType: 'results',
+          layoutHint: 'visible_result_card_grid_or_list',
+          state: 'observed',
+          readiness: 'ready',
+          targetability: true,
+          candidateActionIds: cardCandidateActions.map((action) => action.id),
+        },
+      ];
+      const candidateActions = [
+        {
+          id: 'ca_fill_ref_search_input_xhs',
+          actionType: 'fill',
+          targetRef: 'ref_search_input_xhs',
+          label: '搜索输入框',
+          intent: 'search.enter_query',
+          matchReason: 'visible_search_input',
+          actionability: true,
+          locatorChain: [
+            { type: 'ref', value: 'ref_search_input_xhs' },
+            { type: 'css', value: 'input[type="search"]' },
+          ],
+        },
+        ...cardCandidateActions,
+      ];
 
-      traceService.recordToolCall({
+      const top10Trace = traceService.recordToolCall({
         taskId: 'trace-xhs-top10-task',
         taskIntent: 'collect Xiaohongshu AI图片创作 most collected image-text cards from this week',
         aiClient: 'jest',
@@ -1120,14 +1634,46 @@ describe('MkeMemoryTraceService', () => {
             sort: '最多收藏',
             timeRange: '一周内',
           },
+          pageRegions,
+          candidateActions,
           cards,
         }),
         resultSummary: 'collected xhs top 10 stable result cards',
       });
 
+      expect(top10Trace.perceptionObjects).toMatchObject({
+        kind: 'result_card_collection',
+        observedResultCount: 10,
+        targetRefCoverageRate: 1,
+        targetabilityStatus: 'stable_target_set',
+        cards: expect.arrayContaining([
+          expect.objectContaining({
+            rank: 1,
+            title: 'AI图片创作图文 1',
+            stableTarget: {
+              targetRef: 'ref_result_card_1',
+              candidateActionId: 'ca_click_ref_result_card_1',
+            },
+          }),
+        ]),
+      });
+      expect(top10Trace.actionTarget).toMatchObject({
+        stableTargetCount: 10,
+        urlFallbackCount: 0,
+        untargetableCount: 0,
+        primaryTargets: expect.arrayContaining([
+          {
+            targetRef: 'ref_result_card_1',
+            candidateActionId: 'ca_click_ref_result_card_1',
+          },
+        ]),
+      });
+      expect(JSON.stringify(top10Trace.perceptionObjects)).not.toContain('xsec_token');
+      expect(JSON.stringify(top10Trace.perceptionObjects)).not.toContain('private-1');
+
       await traceService.flushAsyncWrites();
 
-      const objects = browserObjectRepo.listRecent({ limit: 20, offset: 0 });
+      const objects = browserObjectRepo.listRecent({ limit: 80, offset: 0 });
       const page = objects.find((object) => object.objectType === 'page');
       expect(page).toMatchObject({
         siteFamily: 'www.xiaohongshu.com',
@@ -1162,6 +1708,31 @@ describe('MkeMemoryTraceService', () => {
           return leftRank - rightRank;
         });
       expect(resultCards).toHaveLength(10);
+      const regions = objects.filter((object) => object.objectType === 'region');
+      expect(regions.map((object) => object.objectFingerprint).sort()).toEqual(
+        expect.arrayContaining([
+          'region:page:www.xiaohongshu.com:search_results:https://www.xiaohongshu.com/search_result:result_list',
+          'region:page:www.xiaohongshu.com:search_results:https://www.xiaohongshu.com/search_result:search_filters',
+          'region:page:www.xiaohongshu.com:search_results:https://www.xiaohongshu.com/search_result:search_input',
+        ]),
+      );
+      const actionTargets = objects.filter((object) => object.objectType === 'action_target');
+      expect(actionTargets).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            objectFingerprint:
+              'action_target:page:www.xiaohongshu.com:search_results:https://www.xiaohongshu.com/search_result:ref_search_input_xhs',
+            canTabrixOperate: true,
+            actionTypes: ['fill'],
+          }),
+          expect.objectContaining({
+            objectFingerprint:
+              'action_target:page:www.xiaohongshu.com:search_results:https://www.xiaohongshu.com/search_result:ref_result_card_1',
+            canTabrixOperate: true,
+            actionTypes: ['click'],
+          }),
+        ]),
+      );
       for (const [index, object] of resultCards.entries()) {
         const rank = index + 1;
         expect(object).toMatchObject({
@@ -1196,6 +1767,65 @@ describe('MkeMemoryTraceService', () => {
         expect(JSON.stringify(object)).not.toContain('xsec_token');
         expect(JSON.stringify(object)).not.toContain(`private-${rank}`);
       }
+
+      traceService.recordToolCall({
+        taskId: 'trace-xhs-top10-task-rerank',
+        taskIntent: 'collect Xiaohongshu AI图片创作 cards after result order changed',
+        aiClient: 'jest',
+        toolName: 'chrome_collect_result_cards',
+        stepId: 'trace-xhs-top10-step-rerank',
+        sequenceIndex: 2,
+        requestParams: { tabId: 66, minResults: 10, maxScrolls: 4, startFromTop: true },
+        requestAtMs: NOW_MS + 2000,
+        responseAtMs: NOW_MS + 3200,
+        result: textResult({
+          success: true,
+          kind: 'result_card_collection',
+          page: {
+            title: 'AI图片创作 - 小红书',
+            url: 'https://www.xiaohongshu.com/search_result?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
+          },
+          pageRole: 'search_results',
+          pageState: 'complete',
+          sourceRoute: 'visible_dom_cards_bounded_scroll',
+          selectedDataSource: 'visible_dom_result_cards',
+          freshness: 'fresh',
+          tabId: 66,
+          requestedMinResults: 10,
+          observedResultCount: 10,
+          targetRefCoverageRate: 1,
+          targetabilitySummary: {
+            stableClickTargetCount: 10,
+            urlFallbackCount: 0,
+            untargetableCount: 0,
+            targetRefCoverageRate: 1,
+            status: 'stable_target_set',
+          },
+          complete: true,
+          status: 'complete_enough',
+          cards: cards
+            .slice()
+            .reverse()
+            .map((card, index) => ({ ...card, rank: index + 1 })),
+        }),
+        resultSummary: 'collected xhs top 10 stable result cards after rerank',
+      });
+      await traceService.flushAsyncWrites();
+
+      const objectsAfterRerank = browserObjectRepo.listRecent({ limit: 80, offset: 0 });
+      const resultCardsAfterRerank = objectsAfterRerank.filter(
+        (object) => object.objectType === 'result_card',
+      );
+      expect(resultCardsAfterRerank).toHaveLength(10);
+      const firstCardAfterRerank = resultCardsAfterRerank.find(
+        (object) => object.primaryConclusion === 'AI图片创作图文 1',
+      );
+      expect(firstCardAfterRerank?.facts).toMatchObject({
+        stableTarget: {
+          targetRef: 'ref_result_card_1',
+          candidateActionId: 'ca_click_ref_result_card_1',
+        },
+      });
     } finally {
       traceService.discardPendingAsyncWrites();
       db.close();

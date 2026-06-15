@@ -1542,6 +1542,20 @@ describe('browser settle guidance', () => {
         domContentLoadedMs: 48,
         loadEventMs: 72,
       },
+      networkActivity: {
+        requestStartedCount: 17,
+        inFlightCount: 3,
+        failedRequestCount: 1,
+      },
+      networkResources: {
+        resourceEntryCount: 64,
+        resourceInFlightCount: 2,
+        failedResourceStatusCount: 4,
+      },
+      console: {
+        errorCount: 1,
+        warningCount: 0,
+      },
     });
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 41,
@@ -1611,6 +1625,20 @@ describe('browser settle guidance', () => {
         namePresent: true,
       },
       frameCount: 2,
+      networkActivity: {
+        requestStartedCount: 17,
+        inFlightCount: 3,
+        failedRequestCount: 1,
+      },
+      networkResources: {
+        resourceEntryCount: 64,
+        resourceInFlightCount: 2,
+        failedResourceStatusCount: 4,
+      },
+      console: {
+        errorCount: 1,
+        warningCount: 0,
+      },
       navigation: {
         responseEndMs: 24,
         domContentLoadedMs: 48,

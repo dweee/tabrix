@@ -4,11 +4,17 @@ const { sendCommandMock, withSessionMock } = vi.hoisted(() => ({
   sendCommandMock: vi.fn(),
   withSessionMock: vi.fn(),
 }));
+const { addEventListenerMock, removeEventListenerMock } = vi.hoisted(() => ({
+  addEventListenerMock: vi.fn(),
+  removeEventListenerMock: vi.fn(),
+}));
 
 vi.mock('@/utils/cdp-session-manager', () => ({
   cdpSessionManager: {
     sendCommand: sendCommandMock,
     withSession: withSessionMock,
+    addEventListener: addEventListenerMock,
+    removeEventListener: removeEventListenerMock,
   },
 }));
 
@@ -49,6 +55,11 @@ describe('CDP page sensing snapshot', () => {
                 domContentLoadedMs: 83.6,
                 loadEventMs: 120.2,
               },
+              networkResources: {
+                resourceEntryCount: 19,
+                resourceInFlightCount: 4,
+                failedResourceStatusCount: 2,
+              },
             },
           },
         };
@@ -63,6 +74,39 @@ describe('CDP page sensing snapshot', () => {
           },
         };
       }
+      if (method === 'Accessibility.getFullAXTree') {
+        return {
+          nodes: [
+            {
+              role: { value: 'button' },
+              name: { value: 'Search submit' },
+              properties: [{ name: 'checked', value: { value: false } }],
+              actions: [{ name: 'click' }],
+            },
+            {
+              role: { value: 'checkbox' },
+              name: { value: 'Only free options' },
+              properties: [{ name: 'checked', value: { value: true } }],
+              actions: [{ name: 'click' }],
+            },
+            {
+              role: { value: 'img' },
+              name: { value: 'Decorative icon' },
+            },
+            {
+              role: { value: 'link' },
+              name: { value: 'Result card' },
+              properties: [{ name: 'selected', value: { value: true } }],
+              actions: [{ name: 'click' }],
+            },
+            {
+              role: { value: 'textbox' },
+              name: { value: 'Search box' },
+              properties: [{ name: 'disabled', value: { value: true } }],
+            },
+          ],
+        };
+      }
       return {};
     });
 
@@ -73,9 +117,15 @@ describe('CDP page sensing snapshot', () => {
     expect(sendCommandMock.mock.calls.map((call) => call[1])).toEqual([
       'Runtime.enable',
       'Page.enable',
+      'Network.enable',
+      'Log.enable',
+      'Accessibility.enable',
       'Runtime.evaluate',
       'Page.getFrameTree',
+      'Accessibility.getFullAXTree',
     ]);
+    expect(addEventListenerMock).toHaveBeenCalledTimes(1);
+    expect(removeEventListenerMock).toHaveBeenCalledTimes(1);
     expect(snapshot).toMatchObject({
       tabId: 77,
       capturedAt: Date.parse('2026-06-13T10:00:00.000Z'),
@@ -106,6 +156,71 @@ describe('CDP page sensing snapshot', () => {
         responseEndMs: 42,
         domContentLoadedMs: 84,
         loadEventMs: 120,
+      },
+      networkResources: {
+        resourceEntryCount: 19,
+        resourceInFlightCount: 4,
+        failedResourceStatusCount: 2,
+      },
+      networkActivity: {
+        requestStartedCount: 0,
+        inFlightCount: 0,
+        failedRequestCount: 0,
+      },
+      accessibility: {
+        totalNodes: 5,
+        actionableNodeCount: 4,
+        actionableRoleTop: [
+          { role: 'button', count: 1 },
+          { role: 'checkbox', count: 1 },
+          { role: 'link', count: 1 },
+          { role: 'textbox', count: 1 },
+        ],
+        actionableSampleLabels: ['Search submit', 'Only free options', 'Result card', 'Search box'],
+        stateSignals: {
+          checkedCount: 1,
+          selectedCount: 1,
+          expandedCount: 0,
+          disabledCount: 1,
+        },
+        objectCandidates: [
+          {
+            role: 'button',
+            label: 'Search submit',
+            actionTypes: ['click'],
+            state: {
+              checked: false,
+            },
+          },
+          {
+            role: 'checkbox',
+            label: 'Only free options',
+            actionTypes: ['click'],
+            state: {
+              checked: true,
+            },
+          },
+          {
+            role: 'link',
+            label: 'Result card',
+            actionTypes: ['click'],
+            state: {
+              selected: true,
+            },
+          },
+          {
+            role: 'textbox',
+            label: 'Search box',
+            actionTypes: [],
+            state: {
+              disabled: true,
+            },
+          },
+        ],
+      },
+      console: {
+        errorCount: 0,
+        warningCount: 0,
       },
     });
     expect(blob).not.toContain('private-token');

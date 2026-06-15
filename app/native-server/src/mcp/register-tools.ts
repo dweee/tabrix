@@ -2276,6 +2276,61 @@ function readInteractionTargetRefs(args: unknown): string[] {
   return refs.filter((ref, index) => refs.indexOf(ref) === index).slice(0, 3);
 }
 
+export function bindReadPageDeltaReportToPendingInteraction(
+  pageDeltaReport: unknown,
+  pageObjectSnapshot: unknown,
+  pendingInteraction: TaskPageInteractionSnapshot | null,
+): Record<string, unknown> | null {
+  const delta = readObject(pageDeltaReport);
+  if (!delta || pendingInteraction === null) return null;
+  const actionId =
+    readSafeIdentifier(pendingInteraction.candidateActionId) ??
+    readSafeIdentifier(pendingInteraction.action);
+  const targetObjectId =
+    findReadPageObjectIdForTargetRefs(pageObjectSnapshot, pendingInteraction.targetRefs) ??
+    readSafeIdentifier(delta.targetObjectId);
+
+  return {
+    ...delta,
+    actionId,
+    targetObjectId,
+  };
+}
+
+function findReadPageObjectIdForTargetRefs(
+  pageObjectSnapshot: unknown,
+  targetRefs: readonly string[],
+): string | null {
+  if (targetRefs.length === 0) return null;
+  const targetRefSet = new Set(targetRefs);
+  const snapshot = readObject(pageObjectSnapshot);
+  if (!snapshot) return null;
+
+  const objects = Array.isArray(snapshot.objects) ? snapshot.objects : [];
+  for (const object of objects) {
+    const item = readObject(object);
+    if (!item) continue;
+    const objectId = readSafeIdentifier(item.objectId);
+    if (!objectId) continue;
+    const targetRef = readSafeTargetRef(item.targetRef) ?? readSafeTargetRef(item.ref);
+    if (targetRef && targetRefSet.has(targetRef)) return objectId;
+  }
+
+  const actionableTargets = Array.isArray(snapshot.actionableTargets)
+    ? snapshot.actionableTargets
+    : [];
+  for (const target of actionableTargets) {
+    const item = readObject(target);
+    if (!item) continue;
+    const objectId = readSafeIdentifier(item.objectId) ?? readSafeIdentifier(item.targetId);
+    if (!objectId) continue;
+    const targetRef = readSafeTargetRef(item.targetRef) ?? readSafeTargetRef(item.ref);
+    if (targetRef && targetRefSet.has(targetRef)) return objectId;
+  }
+
+  return null;
+}
+
 function readCandidateActionMetadata(args: unknown): {
   candidateActionId: string | null;
   candidateActionIntent: ReadPageCandidateActionIntent | string | null;
@@ -2689,6 +2744,11 @@ function attachAiFacingDeltaContext(
     projectionWithSourceTruth,
     runtimeFields,
   );
+  const actionBoundPageDeltaReport = bindReadPageDeltaReportToPendingInteraction(
+    payload.pageDeltaReport,
+    payload.pageObjectSnapshot,
+    pendingInteraction,
+  );
   const postActionDeltaEvidence =
     deltaContext.deltaKind === 'post_action_delta'
       ? buildPostActionDeltaEvidence({
@@ -2805,6 +2865,9 @@ function attachAiFacingDeltaContext(
   });
   payload.taskResumeReadiness = taskResumeReadiness;
   payload.deltaContext = deltaContext;
+  if (actionBoundPageDeltaReport) {
+    payload.pageDeltaReport = actionBoundPageDeltaReport;
+  }
   if (postActionDeltaEvidence) {
     payload.postActionDeltaEvidence = postActionDeltaEvidence;
   }

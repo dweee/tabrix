@@ -797,6 +797,43 @@ export interface ReadPageCDPSensingSummary {
     domContentLoadedMs: number | null;
     loadEventMs: number | null;
   };
+  networkActivity?: {
+    requestStartedCount: number;
+    inFlightCount: number;
+    failedRequestCount: number;
+  };
+  accessibility?: {
+    totalNodes: number;
+    actionableNodeCount: number;
+    actionableRoleTop: { role: string; count: number }[];
+    actionableSampleLabels: string[];
+    stateSignals: {
+      checkedCount: number;
+      selectedCount: number;
+      expandedCount: number;
+      disabledCount: number;
+    };
+    objectCandidates?: {
+      role: string;
+      label?: string;
+      actionTypes: string[];
+      state: {
+        checked?: boolean;
+        selected?: boolean;
+        expanded?: boolean;
+        disabled?: boolean;
+      };
+    }[];
+  };
+  networkResources?: {
+    resourceEntryCount: number;
+    resourceInFlightCount: number;
+    failedResourceStatusCount: number;
+  };
+  console?: {
+    errorCount: number;
+    warningCount: number;
+  };
   claimBoundary: string;
 }
 
@@ -1195,6 +1232,110 @@ export interface ReadPageBrowserPageObjectView {
   claimBoundary: string;
 }
 
+export type ReadPageObjectSnapshotSourceProvenance =
+  | 'dom'
+  | 'ax'
+  | 'cdp'
+  | 'visible_text'
+  | 'network'
+  | 'visual_fallback'
+  | 'api'
+  | 'unknown';
+
+export type ReadPageObjectSnapshotFreshness = 'fresh' | 'stale' | 'unknown';
+
+export type ReadPagePageDeltaKind =
+  | 'url_changed'
+  | 'spa_route_change'
+  | 'list_refreshed'
+  | 'dialog_appeared'
+  | 'new_tab_opened'
+  | 'object_appeared'
+  | 'form_state_changed'
+  | 'network_completed'
+  | 'console_error'
+  | 'no_useful_change'
+  | 'blocked'
+  | 'restricted'
+  | 'unknown';
+
+export type ReadPagePageDeltaRecommendation =
+  | 'proceed'
+  | 'wait'
+  | 'refresh'
+  | 'retry'
+  | 'stop'
+  | 'needs_user';
+
+export interface ReadPagePageObjectSummary {
+  objectId: string;
+  kind: string;
+  label: string;
+  regionType?: ReadPageRegionType | null;
+  sourceProvenance?: ReadPageObjectSnapshotSourceProvenance[];
+  targetRef?: string | null;
+  ref?: string | null;
+  actionCount?: number;
+  freshness: ReadPageObjectSnapshotFreshness;
+}
+
+export interface ReadPageActionableTargetSummary {
+  targetId: string;
+  objectId?: string | null;
+  kind: 'link' | 'button' | 'textbox' | 'combobox' | 'checkbox' | 'option' | 'menu' | string;
+  label: string;
+  targetRef?: string | null;
+  ref?: string | null;
+  sourceProvenance: ReadPageObjectSnapshotSourceProvenance;
+  freshness: ReadPageObjectSnapshotFreshness;
+}
+
+export interface ReadPageObjectSnapshot {
+  source: 'read_page_object_snapshot';
+  snapshotId: string;
+  observedAt: string;
+  pageUrl: string;
+  pageTitle?: string;
+  pageType: ReadPagePageType;
+  pageRole: string;
+  pageState: {
+    pageStability: ReadPageBrowserPageObjectWatchStatus | null;
+    readiness: ReadPageReadinessVerdict | null;
+    baseUrl: string;
+    frameCount?: number | null;
+  };
+  sourceProvenance: ReadPageObjectSnapshotSourceProvenance[];
+  freshness: ReadPageObjectSnapshotFreshness;
+  objects: ReadPagePageObjectSummary[];
+  actionableTargets: ReadPageActionableTargetSummary[];
+  objectCount: number;
+  actionableObjectCount: number;
+  claimBoundary: string;
+}
+
+export interface ReadPagePageDeltaReport {
+  source: 'read_page_delta_report';
+  actionId: string | null;
+  targetObjectId?: string | null;
+  beforeSnapshotId: string | null;
+  afterSnapshotId: string;
+  beforeObservedAt: string | null;
+  afterObservedAt: string;
+  deltaKind: ReadPagePageDeltaKind;
+  changedRegions: string[];
+  changedObjects: string[];
+  networkSignals?: {
+    requestStartedDelta?: number | null;
+    failedRequestDelta?: number | null;
+  };
+  consoleSignals?: {
+    errorCountDelta?: number | null;
+    warningCountDelta?: number | null;
+  };
+  recommendation: ReadPagePageDeltaRecommendation;
+  claimBoundary: string;
+}
+
 /**
  * T3.2 legacy shape is preserved for backward compatibility. T5.4 adds
  * optional semantic fields (objectType / region / importance / reasons /
@@ -1581,6 +1722,20 @@ export interface ReadPageExtensionFields {
    * not a click authority or proof of business completion.
    */
   pageOperationMap?: ReadPageOperationMap;
+  /**
+   * V28 R4B additive page-object snapshot for AI-facing object indexing and
+   * freshness awareness. It is a light, redacted summary of current regions,
+   * candidate actions, and source provenance. It is not action-proof or a
+   * business-success receipt.
+   */
+  pageObjectSnapshot?: ReadPageObjectSnapshot;
+  /**
+   * V28 R4C additive page-delta report for same-tab before/after reads.
+   * This is used for `chrome_click_element` / `chrome_read_page` post-action
+   * checks in `read_page_object_delta=compared` mode. It can be empty when no
+   * stable previous snapshot is available yet.
+   */
+  pageDeltaReport?: ReadPagePageDeltaReport;
   /**
    * V28 R4C additive browser-object lifecycle summary.
    *

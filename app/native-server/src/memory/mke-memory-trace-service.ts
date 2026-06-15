@@ -136,6 +136,12 @@ interface ParsedResultDigest {
   selectedDataSource: string | null;
   freshness: string | null;
   fallbackUsed: string | null;
+  perceptionObjects: unknown | null;
+  actionTarget: unknown | null;
+  preObservation: unknown | null;
+  postObservation: unknown | null;
+  postActionDelta: unknown | null;
+  nextRequiredCheck: string | null;
 }
 
 export interface MkeMemoryTraceServiceOptions {
@@ -539,8 +545,28 @@ function mergeReadPageFactsWithExistingCollectionFacts(
   existingFactsValue: unknown,
 ): Record<string, unknown> {
   const existingFacts = readObject(existingFactsValue);
-  if (!existingFacts) return readPageFacts;
+  if (!existingFacts) {
+    if (readObject(readPageFacts.pageObjectSnapshotSummary)) {
+      return { ...readPageFacts, snapshotSequence: 1 };
+    }
+    return readPageFacts;
+  }
   const merged: Record<string, unknown> = { ...readPageFacts };
+  const incomingSnapshotSummary = readObject(readPageFacts.pageObjectSnapshotSummary);
+  const incomingDeltaSummary = readObject(readPageFacts.pageDeltaSummary);
+  const previousSnapshotSummary = readObject(existingFacts.pageObjectSnapshotSummary);
+  const previousDeltaSummary = readObject(existingFacts.pageDeltaSummary);
+  const previousSnapshotSequence = readNumber(existingFacts.snapshotSequence);
+  if (incomingSnapshotSummary) {
+    merged.snapshotSequence =
+      typeof previousSnapshotSequence === 'number' ? previousSnapshotSequence + 1 : 1;
+    if (previousSnapshotSummary) {
+      merged.lastPageObjectSnapshotSummary = previousSnapshotSummary;
+    }
+  }
+  if (incomingDeltaSummary && previousDeltaSummary) {
+    merged.lastPageDeltaSummary = previousDeltaSummary;
+  }
   const preservedKeys = [
     'filterState',
     'observedResultCount',
@@ -549,6 +575,9 @@ function mergeReadPageFactsWithExistingCollectionFacts(
     'status',
     'targetRefCoverageRate',
     'targetabilitySummary',
+    'snapshotSequence',
+    'lastPageObjectSnapshotSummary',
+    'lastPageDeltaSummary',
   ];
   for (const key of preservedKeys) {
     if (merged[key] === undefined && existingFacts[key] !== undefined) {
@@ -558,6 +587,220 @@ function mergeReadPageFactsWithExistingCollectionFacts(
   const source = readString(existingFacts.source);
   if (source) merged.lastCollectionSource = source;
   return merged;
+}
+
+function summarizeReadPageSnapshot(payload: unknown): Record<string, unknown> | null {
+  const snapshot = readObject(payload);
+  if (!snapshot) return null;
+  const pageState = readNestedObject(snapshot, 'pageState');
+  const sourceProvenance = readArray(snapshot.sourceProvenance)
+    .map((entry): string | null => (typeof entry === 'string' ? entry : null))
+    .filter((entry): entry is string => Boolean(entry))
+    .slice(0, 8);
+  const summary = {
+    snapshotId: readString(snapshot.snapshotId),
+    observedAt: readString(snapshot.observedAt),
+    pageType: readString(snapshot.pageType),
+    pageRole: readString(snapshot.pageRole),
+    pageUrl: readString(snapshot.pageUrl),
+    pageState: readObject({
+      pageStability: readString(pageState?.pageStability),
+      readiness: readString(pageState?.readiness),
+      baseUrl: readString(pageState?.baseUrl),
+      frameCount: readNumber(pageState?.frameCount),
+    }),
+    freshness: readString(snapshot.freshness),
+    objectCount: readNumber(snapshot.objectCount),
+    actionableObjectCount: readNumber(snapshot.actionableObjectCount),
+    sourceProvenance,
+    claimBoundary: readString(snapshot.claimBoundary),
+  };
+  return Object.values(summary).some((value) => value !== null && value !== undefined)
+    ? (sanitizeValue(summary, 'browser_object') as Record<string, unknown>)
+    : null;
+}
+
+function summarizeReadPageDelta(payload: unknown): Record<string, unknown> | null {
+  const report = readObject(payload);
+  if (!report) return null;
+  const networkSignals = readObject(report.networkSignals);
+  const consoleSignals = readObject(report.consoleSignals);
+  const networkSignalsCount =
+    (typeof readNumber(networkSignals?.requestStartedDelta) === 'number' ? 1 : 0) +
+    (typeof readNumber(networkSignals?.failedRequestDelta) === 'number' ? 1 : 0);
+  const consoleSignalsCount =
+    (typeof readNumber(consoleSignals?.errorCountDelta) === 'number' ? 1 : 0) +
+    (typeof readNumber(consoleSignals?.warningCountDelta) === 'number' ? 1 : 0);
+  const summary = {
+    deltaKind: readString(report.deltaKind),
+    recommendation: readString(report.recommendation),
+    actionId: readString(report.actionId),
+    targetObjectId: readString(report.targetObjectId),
+    beforeSnapshotId: readString(report.beforeSnapshotId),
+    afterSnapshotId: readString(report.afterSnapshotId),
+    changedRegionsCount: readArray(report.changedRegions).length,
+    changedObjectCount: readArray(report.changedObjects).length,
+    networkSignalsCount,
+    consoleSignalsCount,
+  };
+  return Object.values(summary).some((value) => value !== null && value !== undefined)
+    ? (sanitizeValue(summary, 'browser_object') as Record<string, unknown>)
+    : null;
+}
+
+function isBrowserActionTool(toolName: string): boolean {
+  return (
+    toolName === 'chrome_click_element' ||
+    toolName === 'chrome_fill_or_select' ||
+    toolName === 'chrome_keyboard' ||
+    toolName === 'chrome_navigate'
+  );
+}
+
+function summarizeBrowserActionTarget(payload: Record<string, unknown>): unknown | null {
+  const actionEvidence = readObject(payload.actionEvidenceResult);
+  const targetBinding =
+    readObject(actionEvidence?.targetBinding) ?? readObject(payload.targetBinding);
+  const dispatch = readObject(actionEvidence?.dispatch);
+  const summary = {
+    actionId: readString(actionEvidence?.actionId),
+    actionKind: readString(actionEvidence?.actionKind),
+    tabId: readNumber(actionEvidence?.tabId, payload.tabId),
+    requestedTargetRef: readString(targetBinding?.requestedTargetRef),
+    resolvedTargetRef: readString(targetBinding?.resolvedTargetRef),
+    locatorChainSummary: readArray(targetBinding?.locatorChainSummary)
+      .map((entry): string | null => (typeof entry === 'string' ? entry : null))
+      .filter((entry): entry is string => Boolean(entry))
+      .slice(0, 8),
+    dispatchTarget: readString(targetBinding?.dispatchTarget),
+    frameScope: readString(targetBinding?.frameScope),
+    targetBindingProven: readBoolean(targetBinding?.targetBindingProven),
+    dispatched: readBoolean(dispatch?.dispatched),
+    acceptedByBrowser: readBoolean(dispatch?.acceptedByBrowser),
+    errorCode: readString(dispatch?.errorCode, payload.error, payload.reason),
+  };
+  return Object.values(summary).some((value) => value !== null && value !== undefined)
+    ? sanitizeValue(summary, 'memory_trace')
+    : null;
+}
+
+function summarizeBrowserActionPostObservation(payload: Record<string, unknown>): unknown | null {
+  const postActionReadback = readObject(payload.postActionReadback);
+  const clickDiff = readObject(payload.clickDiff);
+  const verification = readObject(payload.verification);
+  const inputWriteEvidence = readObject(payload.inputWriteEvidence);
+  const summary = {
+    success: readBoolean(payload.success),
+    dispatchSucceeded: readBoolean(payload.dispatchSucceeded),
+    observedOutcome: readString(payload.observedOutcome),
+    readbackStatus: readString(postActionReadback?.status),
+    readbackSource: readString(postActionReadback?.readbackSource),
+    freshReadRequired: readBoolean(postActionReadback?.freshReadRequired),
+    expectedEvidence: readString(postActionReadback?.expectedEvidence),
+    clickChangeKind: readString(clickDiff?.kind),
+    urlDelta: readString(clickDiff?.urlDelta),
+    newTabOpened: readBoolean(clickDiff?.newTabOpened, verification?.newTabOpened),
+    domChanged: readBoolean(clickDiff?.domChanged, verification?.domChanged),
+    dialogAdded: readBoolean(clickDiff?.dialogAdded),
+    menuAdded: readBoolean(clickDiff?.menuAdded),
+    focusChanged: readBoolean(clickDiff?.focusChanged, verification?.focusChanged),
+    stateChanged: readBoolean(clickDiff?.stateChanged, verification?.stateChanged),
+    navigationOccurred: readBoolean(verification?.navigationOccurred, payload.navigationOccurred),
+    inputProofStatus: readString(inputWriteEvidence?.proofStatus),
+    valueState: readString(inputWriteEvidence?.valueState),
+  };
+  return Object.values(summary).some((value) => value !== null && value !== undefined)
+    ? sanitizeValue(summary, 'memory_trace')
+    : null;
+}
+
+function summarizeBrowserActionDelta(payload: Record<string, unknown>): unknown | null {
+  const actionEvidence = readObject(payload.actionEvidenceResult);
+  const targetBinding =
+    readObject(actionEvidence?.targetBinding) ?? readObject(payload.targetBinding);
+  const postActionReadback = readObject(payload.postActionReadback);
+  const clickDiff = readObject(payload.clickDiff);
+  const verification = readObject(payload.verification);
+  const inputWriteEvidence = readObject(payload.inputWriteEvidence);
+  const changedSignals = [
+    readBoolean(clickDiff?.newTabOpened, verification?.newTabOpened) ? 'new_tab_opened' : null,
+    readBoolean(clickDiff?.domChanged, verification?.domChanged) ? 'dom_changed' : null,
+    readBoolean(clickDiff?.dialogAdded) ? 'dialog_opened' : null,
+    readBoolean(clickDiff?.menuAdded) ? 'menu_opened' : null,
+    readBoolean(clickDiff?.stateChanged, verification?.stateChanged) ? 'state_changed' : null,
+    readBoolean(clickDiff?.focusChanged, verification?.focusChanged) ? 'focus_changed' : null,
+    readString(inputWriteEvidence?.proofStatus) === 'input_state_observed'
+      ? 'input_state_observed'
+      : null,
+  ].filter((entry): entry is string => Boolean(entry));
+  const observedOutcome = readString(payload.observedOutcome, postActionReadback?.observedOutcome);
+  const summary = {
+    deltaKind: 'post_action_tool_delta',
+    actionId: readString(actionEvidence?.actionId),
+    actionKind: readString(actionEvidence?.actionKind, postActionReadback?.actionKind),
+    targetRef: readString(targetBinding?.resolvedTargetRef, targetBinding?.requestedTargetRef),
+    observedOutcome,
+    changed: changedSignals.length > 0 || readString(clickDiff?.kind) === 'change',
+    changedSignals,
+    urlDelta: readString(clickDiff?.urlDelta),
+    readbackStatus: readString(postActionReadback?.status),
+    recommendation: readString(
+      postActionReadback?.requiredNextAction,
+      payload.recommendedNextAction,
+    ),
+    businessSuccessProven: readBoolean(postActionReadback?.businessSuccessProven),
+  };
+  return Object.values(summary).some((value) => value !== null && value !== undefined)
+    ? sanitizeValue(summary, 'memory_trace')
+    : null;
+}
+
+function readBrowserActionNextRequiredCheck(payload: Record<string, unknown>): string | null {
+  const postActionReadback = readObject(payload.postActionReadback);
+  const actionEvidence = readObject(payload.actionEvidenceResult);
+  const business = readObject(actionEvidence?.business);
+  return readString(
+    postActionReadback?.requiredNextAction,
+    business?.nextRequiredCheck,
+    payload.recommendedNextAction,
+  );
+}
+
+function buildPageObjectEvidenceRefs(input: {
+  snapshotSummary: Record<string, unknown> | null;
+  deltaSummary: Record<string, unknown> | null;
+}): string[] {
+  const snapshotId = readString(input.snapshotSummary?.snapshotId);
+  const deltaAfterSnapshotId = readString(input.deltaSummary?.afterSnapshotId);
+  const evidenceRefs: string[] = [];
+  if (snapshotId) evidenceRefs.push(`read_page_object_snapshot:${snapshotId}`);
+  if (deltaAfterSnapshotId) evidenceRefs.push(`read_page_delta_report:${deltaAfterSnapshotId}`);
+  return evidenceRefs;
+}
+
+function buildPageObjectRecentEvents(input: {
+  snapshotSummary: Record<string, unknown> | null;
+  deltaSummary: Record<string, unknown> | null;
+  observedAt: string;
+}): unknown[] {
+  const events: Array<Record<string, unknown>> = [];
+  if (input.snapshotSummary) {
+    events.push({
+      eventType: 'page_object_snapshot',
+      snapshotId: input.snapshotSummary.snapshotId,
+      observedAt: input.snapshotSummary.observedAt ?? input.observedAt,
+    });
+  }
+  if (input.deltaSummary) {
+    events.push({
+      eventType: 'page_delta_report',
+      deltaKind: input.deltaSummary.deltaKind,
+      beforeSnapshotId: input.deltaSummary.beforeSnapshotId,
+      afterSnapshotId: input.deltaSummary.afterSnapshotId,
+      observedAt: input.observedAt,
+    });
+  }
+  return events;
 }
 
 function readBusinessVerdictString(...values: unknown[]): BusinessSuccessVerdict | null {
@@ -714,6 +957,7 @@ function digestResult(
   const url = readString(page?.url, object?.url, object?.pageUrl);
   const urlFields = normalizeUrlPattern(url);
   const pageRole = normalizePageRoleForMemory(readString(summary?.pageRole, object?.pageRole));
+  const structuredTraceContext = buildStructuredTraceContext(object, toolName);
   const pageModelKey = readString(
     readNestedObject(object, 'pageProjection')?.pageModelKey,
     object?.pageModelKey,
@@ -744,7 +988,155 @@ function digestResult(
     ),
     freshness: readString(object?.freshness, pageContext?.freshness),
     fallbackUsed: readString(object?.fallbackUsed, pageContext?.fallbackUsed),
+    ...structuredTraceContext,
   };
+}
+
+function buildStructuredTraceContext(
+  payload: Record<string, unknown> | null,
+  toolName: string,
+): Pick<
+  ParsedResultDigest,
+  | 'perceptionObjects'
+  | 'actionTarget'
+  | 'preObservation'
+  | 'postObservation'
+  | 'postActionDelta'
+  | 'nextRequiredCheck'
+> {
+  if (!payload) {
+    return {
+      perceptionObjects: null,
+      actionTarget: null,
+      preObservation: null,
+      postObservation: null,
+      postActionDelta: null,
+      nextRequiredCheck: null,
+    };
+  }
+
+  if (toolName === 'chrome_read_page') {
+    const snapshotSummary = summarizeReadPageSnapshot(
+      readNestedObject(payload, 'pageObjectSnapshot'),
+    );
+    const deltaSummary = summarizeReadPageDelta(readNestedObject(payload, 'pageDeltaReport'));
+    return {
+      perceptionObjects: snapshotSummary,
+      actionTarget: summarizeCandidateActions(readArray(payload.candidateActions)),
+      preObservation: null,
+      postObservation: snapshotSummary,
+      postActionDelta: deltaSummary,
+      nextRequiredCheck: readString(readNestedObject(payload, 'taskProtocol')?.nextRequiredCheck),
+    };
+  }
+
+  if (toolName === 'chrome_collect_result_cards') {
+    const cards = readArray(payload.cards)
+      .map((rawCard) => summarizeCollectedResultCardForTrace(readObject(rawCard)))
+      .filter((card): card is Record<string, unknown> => card !== null)
+      .slice(0, 20);
+    const targetabilitySummary = readObject(payload.targetabilitySummary);
+    return {
+      perceptionObjects: sanitizeValue(
+        {
+          kind: 'result_card_collection',
+          observedResultCount: readNumber(payload.observedResultCount) ?? cards.length,
+          targetRefCoverageRate: readFiniteNumber(payload.targetRefCoverageRate),
+          targetabilityStatus: readString(targetabilitySummary?.status),
+          cards,
+        },
+        'memory_trace',
+      ),
+      actionTarget: sanitizeValue(
+        {
+          stableTargetCount: cards.filter((card) => readObject(card.stableTarget)).length,
+          urlFallbackCount: readNumber(targetabilitySummary?.urlFallbackCount),
+          untargetableCount: readNumber(targetabilitySummary?.untargetableCount),
+          primaryTargets: cards
+            .map((card) => readObject(card.stableTarget))
+            .filter((target): target is Record<string, unknown> => target !== null)
+            .slice(0, 10),
+        },
+        'memory_trace',
+      ),
+      preObservation: null,
+      postObservation: sanitizeValue(
+        {
+          pageRole: readString(payload.pageRole),
+          pageState: readString(payload.pageState, payload.status),
+          filterState: readObject(payload.filterState),
+          complete: readBoolean(payload.complete),
+        },
+        'memory_trace',
+      ),
+      postActionDelta: null,
+      nextRequiredCheck: null,
+    };
+  }
+
+  if (isBrowserActionTool(toolName)) {
+    return {
+      perceptionObjects: null,
+      actionTarget: summarizeBrowserActionTarget(payload),
+      preObservation: null,
+      postObservation: summarizeBrowserActionPostObservation(payload),
+      postActionDelta: summarizeBrowserActionDelta(payload),
+      nextRequiredCheck: readBrowserActionNextRequiredCheck(payload),
+    };
+  }
+
+  return {
+    perceptionObjects: null,
+    actionTarget: null,
+    preObservation: null,
+    postObservation: null,
+    postActionDelta: null,
+    nextRequiredCheck: null,
+  };
+}
+
+function summarizeCandidateActions(actions: unknown[]): unknown | null {
+  const summaries = actions
+    .map((rawAction): Record<string, unknown> | null => {
+      const action = readObject(rawAction);
+      if (!action) return null;
+      const targetRef = readString(action.targetRef, action.id);
+      if (!targetRef) return null;
+      return {
+        id: readString(action.id),
+        actionType: readString(action.actionType),
+        intent: readString(action.intent),
+        targetRef,
+        label: readString(action.label),
+        nextRequiredCheck: readString(action.nextRequiredCheck),
+      };
+    })
+    .filter((action): action is Record<string, unknown> => action !== null)
+    .slice(0, 40);
+  if (summaries.length === 0) return null;
+  return sanitizeValue({ actions: summaries, count: summaries.length }, 'memory_trace');
+}
+
+function summarizeCollectedResultCardForTrace(
+  card: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!card) return null;
+  const rawActionTarget = readObject(card.actionTarget);
+  const stableTarget = readResultCardStableTarget({ card, rawActionTarget });
+  return sanitizeValue(
+    {
+      rank: readNumber(card.rank),
+      title: readString(card.title),
+      url: normalizeUrlPattern(readString(card.url), {
+        allowPersonalBrowserStateStorage: false,
+      }).rootRoute,
+      stableTarget,
+      targetabilityStatus: readString(card.targetabilityStatus),
+      imageCount: readNumber(card.imageCount),
+      interactionText: readString(card.interactionText),
+    },
+    'memory_trace',
+  ) as Record<string, unknown>;
 }
 
 function readRequestNumber(request: Record<string, unknown> | null, key: string): number | null {
@@ -763,6 +1155,13 @@ function browserPageObjectKey(tab: BrowserWorldTabProjection): string {
     tab.urlFields.currentRoute ??
     tab.urlFields.pattern ??
     String(tab.tabId)
+  );
+}
+
+function pageObjectIdentityRoute(...values: Array<string | null | undefined>): string {
+  return (
+    values.find((value): value is string => typeof value === 'string' && value.length > 0) ??
+    'unknown'
   );
 }
 
@@ -945,10 +1344,16 @@ export class MkeMemoryTraceService {
       pageRole: digest.pageRole,
       pageState: digest.pageState,
       pageModelKey: digest.pageModelKey,
+      perceptionObjects: digest.perceptionObjects,
+      actionTarget: digest.actionTarget,
+      preObservation: digest.preObservation,
+      postObservation: digest.postObservation,
+      postActionDelta: digest.postActionDelta,
       sourceRoute: digest.sourceRoute,
       selectedDataSource: digest.selectedDataSource,
       freshness: digest.freshness,
       fallbackUsed: digest.fallbackUsed,
+      nextRequiredCheck: digest.nextRequiredCheck,
       redactionState: 'redacted',
       createdAt: new Date(responseAtMs).toISOString(),
     });
@@ -1311,6 +1716,19 @@ export class MkeMemoryTraceService {
     const compactTabFacts = readNestedObject(compactFacts, 'tab');
     const page = readNestedObject(payload, 'page');
     const summary = readNestedObject(payload, 'summary');
+    const pageObjectSnapshot = summarizeReadPageSnapshot(
+      readNestedObject(payload, 'pageObjectSnapshot'),
+    );
+    const pageDeltaReport = summarizeReadPageDelta(readNestedObject(payload, 'pageDeltaReport'));
+    const evidenceRefs = buildPageObjectEvidenceRefs({
+      snapshotSummary: pageObjectSnapshot,
+      deltaSummary: pageDeltaReport,
+    });
+    const recentEvents = buildPageObjectRecentEvents({
+      snapshotSummary: pageObjectSnapshot,
+      deltaSummary: pageDeltaReport,
+      observedAt,
+    });
     const urlFields = normalizeUrlPattern(readString(page?.url, payload.url, payload.pageUrl), {
       allowPersonalBrowserStateStorage: false,
     });
@@ -1319,7 +1737,12 @@ export class MkeMemoryTraceService {
     const pageModelKey =
       readString(projection?.pageModelKey, trace.pageModelKey) ?? `page:${siteFamily}:${pageRole}`;
     const tabId = readNumber(projection?.tabId, payload.tabId, trace.tabId);
-    const pageFingerprint = objectFingerprint('page', siteFamily, pageModelKey, tabId);
+    const pageIdentityRoute = pageObjectIdentityRoute(
+      urlFields.rootRoute,
+      trace.pageUrlPattern,
+      urlFields.pattern,
+    );
+    const pageFingerprint = objectFingerprint('page', siteFamily, pageModelKey, pageIdentityRoute);
     const existingPageObject = this.browserObjects?.getByIdentity({
       siteFamily,
       pageModelKey,
@@ -1331,6 +1754,14 @@ export class MkeMemoryTraceService {
         stability: projection?.stability,
         watchStatus: compact?.watchStatus,
         operationSummary: readNestedObject(compact, 'operationSummary'),
+        pageObjectSnapshotSummary: pageObjectSnapshot,
+        pageDeltaSummary: pageDeltaReport,
+        pageTitle: readString(page?.title),
+        host: siteFamily,
+        rootRoute: urlFields.rootRoute ?? trace.pageUrlPattern,
+        currentRoute: urlFields.currentRoute,
+        lastObservedTabId: tabId,
+        windowId: readNumber(payload.windowId, trace.windowId),
       },
       existingPageObject?.facts,
     );
@@ -1376,8 +1807,19 @@ export class MkeMemoryTraceService {
       lifecycleState: blockedSurface ? 'restricted' : readString(compact?.status, 'updated'),
       canTabrixOperate,
       operabilityReason,
+      evidenceRefs: sanitizeValue(evidenceRefs, 'browser_object'),
+      recentEvents: sanitizeValue(recentEvents, 'browser_object'),
       facts: sanitizeValue(pageFacts, 'browser_object'),
       changedGroups: sanitizeValue(compact?.changedGroups, 'browser_object'),
+      currentState: this.sanitizeBrowserObjectValue({
+        tabId,
+        windowId: readNumber(payload.windowId, trace.windowId),
+        titleSummary: readString(page?.title),
+        rootRoute: urlFields.rootRoute ?? trace.pageUrlPattern,
+        currentRoute: urlFields.currentRoute,
+        lifecycleState: blockedSurface ? 'restricted' : readString(compact?.status, 'updated'),
+        canTabrixOperate,
+      }),
       primaryConclusion: readString(compact?.primaryConclusion),
       claimBoundary: null,
       confidenceScore: null,
@@ -1475,6 +1917,11 @@ export class MkeMemoryTraceService {
       stringHasBlockedPageSignal(readString(payload.status, payload.pageState, trace.pageState)) ||
       valueHasBlockedPageSignal(payload);
     const canTabrixOperate = blockedSurface ? false : true;
+    const pageIdentityRoute = pageObjectIdentityRoute(
+      urlFields.rootRoute,
+      trace.pageUrlPattern,
+      urlFields.pattern,
+    );
 
     const pageObject = this.upsertBrowserObject({
       siteFamily,
@@ -1483,7 +1930,7 @@ export class MkeMemoryTraceService {
       currentRoute: urlFields.currentRoute,
       pageRole,
       pageModelKey,
-      objectFingerprint: objectFingerprint('page', siteFamily, pageModelKey, tabId),
+      objectFingerprint: objectFingerprint('page', siteFamily, pageModelKey, pageIdentityRoute),
       objectType: 'page',
       browserContextKey: browserContextKey ?? trace.browserContextKey ?? null,
       tabId,
@@ -1497,7 +1944,6 @@ export class MkeMemoryTraceService {
       canTabrixOperate,
       operabilityReason: blockedSurface ? 'user_verification_required' : null,
       facts: this.sanitizeBrowserObjectValue({
-        pageTitle: readString(page?.title),
         observedResultCount,
         requestedMinResults: readNumber(payload.requestedMinResults),
         complete,
@@ -1506,6 +1952,23 @@ export class MkeMemoryTraceService {
         targetabilitySummary,
         filterState,
         source: 'result_card_collection',
+        pageTitle: readString(page?.title),
+        host: siteFamily,
+        rootRoute: urlFields.rootRoute ?? trace.pageUrlPattern,
+        currentRoute: urlFields.currentRoute,
+        lastObservedTabId: tabId,
+        windowId: readNumber(payload.windowId, trace.windowId),
+      }),
+      currentState: this.sanitizeBrowserObjectValue({
+        tabId,
+        windowId: readNumber(payload.windowId, trace.windowId),
+        titleSummary: readString(page?.title),
+        rootRoute: urlFields.rootRoute ?? trace.pageUrlPattern,
+        currentRoute: urlFields.currentRoute,
+        lifecycleState: blockedSurface
+          ? 'restricted'
+          : readString(payload.pageState, trace.pageState, 'observed'),
+        canTabrixOperate,
       }),
       primaryConclusion:
         observedResultCount > 0 ? `识别到 ${observedResultCount} 个结果卡片` : '未识别到结果卡片',
@@ -1516,6 +1979,19 @@ export class MkeMemoryTraceService {
       sourceTraceIds: sourceTraceIds(trace),
       redactionState: this.browserObjectRedactionState(),
       updatedAt: observedAt,
+    });
+
+    this.recordReadPageChildObjects({
+      trace,
+      payload,
+      observedAt,
+      browserContextKey,
+      siteFamily,
+      rootRoute: urlFields.rootRoute ?? trace.pageUrlPattern,
+      currentRoute: urlFields.currentRoute,
+      pageModelKey,
+      pageRole,
+      tabId,
     });
 
     for (const [index, rawCard] of cards.slice(0, 80).entries()) {
@@ -1582,6 +2058,11 @@ export class MkeMemoryTraceService {
           : 'not_targetable';
       const cardKey =
         cardUrlFields.rootRoute ?? cardUrlFields.currentRoute ?? cardUrlFields.pattern ?? title;
+      const cardIdentityKey =
+        stableTarget?.targetRef ??
+        (cardUrlFields.rootRoute || cardUrlFields.currentRoute || cardUrlFields.pattern
+          ? cardKey
+          : `${cardKey}:${rank}`);
       this.upsertBrowserObject({
         siteFamily,
         pageUrlPattern: urlFields.pattern ?? trace.pageUrlPattern,
@@ -1589,7 +2070,12 @@ export class MkeMemoryTraceService {
         currentRoute: urlFields.currentRoute,
         pageRole,
         pageModelKey,
-        objectFingerprint: objectFingerprint('result_card', pageModelKey, cardKey, rank),
+        objectFingerprint: objectFingerprint(
+          'result_card',
+          pageModelKey,
+          pageIdentityRoute,
+          cardIdentityKey,
+        ),
         objectType: 'result_card',
         parentObjectId: pageObject?.browserObjectId ?? null,
         browserContextKey: browserContextKey ?? trace.browserContextKey ?? null,
@@ -1667,6 +2153,7 @@ export class MkeMemoryTraceService {
     if (!isApiLikeDataSource(selectedDataSource, sourceRoute, endpointFamily)) return;
 
     const sourceKey = selectedDataSource ?? endpointFamily ?? sourceRoute ?? 'api';
+    const pageIdentityRoute = pageObjectIdentityRoute(input.rootRoute, input.trace.pageUrlPattern);
     this.upsertBrowserObject({
       siteFamily: input.siteFamily,
       pageUrlPattern: input.rootRoute,
@@ -1677,8 +2164,8 @@ export class MkeMemoryTraceService {
       objectFingerprint: objectFingerprint(
         'data_source',
         input.pageModelKey,
+        pageIdentityRoute,
         sourceKey,
-        input.tabId,
       ),
       objectType: 'data_source',
       browserContextKey: input.browserContextKey ?? input.trace.browserContextKey ?? null,
@@ -1720,6 +2207,7 @@ export class MkeMemoryTraceService {
     tabId: number | null;
   }): void {
     this.recordReadPageDataSourceObject(input);
+    const pageIdentityRoute = pageObjectIdentityRoute(input.rootRoute, input.trace.pageUrlPattern);
 
     for (const [index, rawRegion] of readArray(input.payload.pageRegions).slice(0, 40).entries()) {
       const region = readObject(rawRegion);
@@ -1732,7 +2220,12 @@ export class MkeMemoryTraceService {
         currentRoute: input.currentRoute,
         pageRole: input.pageRole,
         pageModelKey: input.pageModelKey,
-        objectFingerprint: objectFingerprint('region', input.pageModelKey, regionId),
+        objectFingerprint: objectFingerprint(
+          'region',
+          input.pageModelKey,
+          pageIdentityRoute,
+          regionId,
+        ),
         objectType: 'region',
         browserContextKey: input.browserContextKey ?? input.trace.browserContextKey ?? null,
         tabId: input.tabId,
@@ -1779,7 +2272,12 @@ export class MkeMemoryTraceService {
         currentRoute: input.currentRoute,
         pageRole: input.pageRole,
         pageModelKey: input.pageModelKey,
-        objectFingerprint: objectFingerprint('action_target', input.pageModelKey, targetRef),
+        objectFingerprint: objectFingerprint(
+          'action_target',
+          input.pageModelKey,
+          pageIdentityRoute,
+          targetRef,
+        ),
         objectType: 'action_target',
         browserContextKey: input.browserContextKey ?? input.trace.browserContextKey ?? null,
         tabId: input.tabId,

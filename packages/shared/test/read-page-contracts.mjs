@@ -60,6 +60,7 @@ assert.deepEqual(READ_PAGE_EVIDENCE_SOURCE_VALUES, [
 assert.deepEqual(LAYER_SOURCE_ROUTE_VALUES, [
   'read_page_required',
   'knowledge_supported_read',
+  'experience_reuse',
   'dispatcher_fallback_safe',
 ]);
 

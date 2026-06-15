@@ -138,6 +138,51 @@ describe('read_page task protocol', () => {
     expect(protocol.taskMode).toBe('monitor');
   });
 
+  it('carries candidate action provenance and freshness boundary into primary tool args', () => {
+    const interactiveElements = [
+      {
+        ref: 'ref_search_button',
+        role: 'button',
+        name: 'Search',
+        matchSource: 'visible_text',
+        actionability: 'actionable',
+      },
+    ];
+    const candidateActions = buildCandidateActions(interactiveElements as any[], [
+      { ref: 'ref_search_button', selector: 'form.search button[type="submit"]' },
+    ]);
+    const protocol = buildTaskProtocol(
+      createBaseParams({
+        interactiveElements,
+        candidateActions,
+      }) as any,
+    );
+
+    const searchZone = protocol.pageOperationMap.zones.find(
+      (item) => item.purpose === 'search' && item.primaryAction?.actionType === 'click',
+    );
+    const candidateAction = searchZone?.primaryAction?.toolArgs.candidateAction;
+
+    expect(candidateAction).toMatchObject({
+      targetRef: 'ref_search_button',
+      intent: 'search.submit',
+      matchReason: expect.stringContaining('target_provenance=visible_text'),
+      actionabilityReason: expect.stringContaining(
+        'target_freshness=current_read_page_snapshot_only',
+      ),
+      nextRequiredCheck: 'run_action_then_fresh_same_tab_read_to_verify_page_or_object_state',
+      locatorChain: expect.arrayContaining([
+        { type: 'css', value: 'form.search button[type="submit"]' },
+      ]),
+    });
+    expect(candidateAction?.matchReason).toContain(
+      'target_freshness=current_read_page_snapshot_only',
+    );
+    expect(candidateAction?.actionabilityReason).toContain(
+      'expected_delta=search_refresh_or_scope_change',
+    );
+  });
+
   it('prioritizes repo navigation over commit headlines on repo_home', () => {
     const protocol = buildTaskProtocol(
       createBaseParams({

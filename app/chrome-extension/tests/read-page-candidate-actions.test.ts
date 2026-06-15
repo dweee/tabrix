@@ -149,6 +149,41 @@ describe('read_page candidate action intents', () => {
     );
   });
 
+  it('adds action target provenance and freshness boundaries without new fields', () => {
+    const actions = buildCandidateActions(
+      [
+        element({
+          ref: 'ref_search_button',
+          role: 'button',
+          name: 'Search',
+          matchSource: 'visible_text',
+        }),
+      ],
+      [{ ref: 'ref_search_button', selector: 'form.search button[type="submit"]' }],
+    );
+
+    expect(actions[0]).toMatchObject({
+      actionType: 'click',
+      targetRef: 'ref_search_button',
+      intent: 'search.submit',
+      matchReason: expect.stringContaining('target_provenance=visible_text'),
+      nextRequiredCheck: 'run_action_then_fresh_same_tab_read_to_verify_page_or_object_state',
+      locatorChain: [
+        { type: 'ref', value: 'ref_search_button' },
+        { type: 'aria', value: 'Search' },
+        { type: 'css', value: 'form.search button[type="submit"]' },
+      ],
+    });
+    expect(actions[0].actionabilityReason).toContain(
+      'target_freshness=current_read_page_snapshot_only',
+    );
+    expect(actions[0].actionabilityReason).toContain(
+      'expected_delta=search_refresh_or_scope_change',
+    );
+    expect(actions[0].matchReason).toContain('locator_sources=ref+visible_text+css');
+    expect(actions[0].matchReason).toContain('target_freshness=current_read_page_snapshot_only');
+  });
+
   it('does not promote footer legal links into AI candidate actions on result pages', () => {
     const actions = buildCandidateActions(
       [
@@ -525,7 +560,15 @@ describe('read_page candidate action intents', () => {
       intent: 'content.open_detail',
       actionability: 'actionable',
       label: 'Practical guide to AI poster creation',
+      matchReason: expect.stringContaining('target_provenance=visible_region_row_target_ref'),
+      actionabilityReason: expect.stringContaining(
+        'target_freshness=current_read_page_snapshot_only',
+      ),
+      nextRequiredCheck: 'run_action_then_fresh_same_tab_read_to_verify_page_or_object_state',
     });
+    expect(actions[0].actionabilityReason).toContain(
+      'expected_delta=detail_navigation_or_content_state_change',
+    );
   });
 
   it('does not mark lower filter-panel category-like options as search category selects', () => {
@@ -956,9 +999,11 @@ describe('read_page candidate action intents', () => {
       actionType: 'click',
       targetRef: 'ref_row_title',
       intent: 'content.open_detail',
-      matchReason: 'content row target inferred from visible region rows',
+      matchReason: expect.stringContaining('content row target inferred from visible region rows'),
       frameId: 33,
     });
+    expect(actions[0].matchReason).toContain('target_provenance=visible_region_row_target_ref');
+    expect(actions[0].matchReason).toContain('target_freshness=current_read_page_snapshot_only');
     expect(actions[0].locatorChain).toEqual([
       { type: 'ref', value: 'ref_row_title' },
       { type: 'aria', value: 'Practical guide to AI poster creation' },

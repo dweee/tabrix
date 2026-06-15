@@ -332,7 +332,12 @@ function buildActionabilityReason(params: {
 }): string {
   const source =
     String(params.element.matchSource || 'structured_snapshot').trim() || 'structured_snapshot';
-  const parts = [`source_element_actionability=${params.actionability}`, `source=${source}`];
+  const parts = [
+    `source_element_actionability=${params.actionability}`,
+    `source=${source}`,
+    'target_freshness=current_read_page_snapshot_only',
+    `expected_delta=${buildExpectedPostActionDelta(params.intent)}`,
+  ];
   if (params.intent === 'publish.submit') {
     parts.push('business_success_requires_required_fields_and_post_action_readback');
   } else if (params.intent === 'publish.open_entry') {
@@ -343,6 +348,66 @@ function buildActionabilityReason(params: {
     parts.push('business_success_not_proven_by_candidate_action');
   }
   return parts.join('; ');
+}
+
+function buildExpectedPostActionDelta(
+  intent: ReadPageCandidateAction['intent'] | undefined,
+): string {
+  if (
+    intent === 'search.submit' ||
+    intent === 'search.category_select' ||
+    intent === 'filter.open'
+  ) {
+    return 'search_refresh_or_scope_change';
+  }
+  if (
+    intent === 'filter.option_select' ||
+    intent === 'filter.sort_most_collected' ||
+    intent === 'filter.time_range_select'
+  ) {
+    return 'results_or_view_scope_update';
+  }
+  if (intent === 'content.open_detail') {
+    return 'detail_navigation_or_content_state_change';
+  }
+  if (intent === 'publish.open_entry') {
+    return 'publish_workflow_entry_progress';
+  }
+  if (intent === 'publish.select_media_type' || intent === 'publish.upload_media') {
+    return 'media_upload_or_media_selector_progress';
+  }
+  if (intent === 'publish.submit') {
+    return 'publish_submission_feedback_or_post_publish_state_change';
+  }
+  if (intent && intent.startsWith('auth.')) {
+    return 'auth_surface_state_transition';
+  }
+  return 'page_or_object_state_change';
+}
+
+function buildActionTargetMatchReason(params: {
+  baseReason: string;
+  element: ReadPageInteractiveElement;
+  selector: string | undefined;
+  contentTargetRefs: ReadonlySet<string>;
+}): string {
+  const source =
+    String(params.element.matchSource || 'structured_snapshot').trim() || 'structured_snapshot';
+  const targetRef = String(params.element.ref || '').trim();
+  const provenance = params.contentTargetRefs.has(targetRef)
+    ? 'visible_region_row_target_ref'
+    : source;
+  const locatorSources = [
+    'ref',
+    ...(source && source !== 'structured_snapshot' ? [source] : []),
+    ...(params.selector ? ['css'] : []),
+  ];
+  return [
+    params.baseReason,
+    `target_provenance=${provenance}`,
+    `locator_sources=${Array.from(new Set(locatorSources)).join('+')}`,
+    'target_freshness=current_read_page_snapshot_only',
+  ].join('; ');
 }
 
 function buildIntentBoundary(
@@ -373,6 +438,7 @@ function buildNextRequiredCheck(
   if (intent === 'publish.upload_media') {
     return 'prove_file_input_or_file_picker_binding_then_run_fresh_same_tab_read';
   }
+  if (intent) return 'run_action_then_fresh_same_tab_read_to_verify_page_or_object_state';
   return undefined;
 }
 
@@ -467,7 +533,7 @@ export function buildCandidateActions(
 
     const isPrimary = primaryKeywords.test(name);
     const confidence = isPrimary ? 0.93 : actionType === 'fill' ? 0.68 : 0.72;
-    const matchReason = isPrimary
+    const baseMatchReason = isPrimary
       ? 'primary action inferred from interactive label'
       : actionType === 'fill'
         ? 'form input candidate from structured snapshot'
@@ -476,6 +542,12 @@ export function buildCandidateActions(
       interactiveElements: prioritizedElements,
     });
     const locatorChain = buildLocatorChain({ element, selector, actionType, intent });
+    const matchReason = buildActionTargetMatchReason({
+      baseReason: baseMatchReason,
+      element,
+      selector,
+      contentTargetRefs,
+    });
     const label = shouldExposeCandidateActionLabel({ actionType, intent, name, element })
       ? name
       : '';
@@ -573,7 +645,21 @@ function bindVisibleRegionRowsToDetailActions(
         existing.confidence = Number(
           Math.max(existing.confidence || 0, row.confidence || 0, 0.82).toFixed(2),
         );
-        existing.matchReason = 'content row target inferred from visible region rows';
+        const elementForMatchReason: ReadPageInteractiveElement = element ?? {
+          ref: targetRef,
+          matchSource: 'structured_snapshot',
+          role: 'link',
+          name: rowLabel,
+        };
+        existing.matchReason = buildActionTargetMatchReason({
+          baseReason: 'content row target inferred from visible region rows',
+          element: elementForMatchReason,
+          selector: getElementSelector(elementForMatchReason, selectorMap),
+          contentTargetRefs: visibleRegionRowTargetRefs(visibleRegionRows),
+        });
+        existing.nextRequiredCheck =
+          existing.nextRequiredCheck ??
+          'run_action_then_fresh_same_tab_read_to_verify_page_or_object_state';
       }
       continue;
     }
@@ -610,11 +696,18 @@ function bindVisibleRegionRowsToDetailActions(
       ...(actionLabel ? { label: actionLabel } : {}),
       ...(typeof frameId === 'number' ? { frameId } : {}),
       confidence: Number(Math.max(row.confidence || 0, 0.78).toFixed(2)),
-      matchReason: 'content row target inferred from visible region rows',
+      matchReason: [
+        'content row target inferred from visible region rows',
+        'target_provenance=visible_region_row_target_ref',
+        selector ? 'locator_sources=visible_region_row+css' : 'locator_sources=visible_region_row',
+        'target_freshness=current_read_page_snapshot_only',
+        'expected_delta=detail_navigation_or_content_state_change',
+      ].join('; '),
       actionability,
       actionabilityReason: element
         ? buildActionabilityReason({ element, actionability, intent })
-        : 'source_element_actionability=unknown; source=visible_region_rows; business_success_not_proven_by_candidate_action',
+        : 'source_element_actionability=unknown; source=visible_region_rows; target_freshness=current_read_page_snapshot_only; business_success_not_proven_by_candidate_action',
+      nextRequiredCheck: 'run_action_then_fresh_same_tab_read_to_verify_page_or_object_state',
       locatorChain,
       intent,
     };
