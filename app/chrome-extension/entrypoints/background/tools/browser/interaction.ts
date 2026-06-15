@@ -1124,7 +1124,7 @@ class ClickTool extends BaseBrowserToolExecutor {
       // `postClickState.beforeUrl` without chasing tab.url after navigation.
       const beforeUrl = typeof tab.url === 'string' ? tab.url : null;
 
-      const resolvedTarget = resolveCandidateActionTarget({
+      let resolvedTarget = resolveCandidateActionTarget({
         explicitRef: args.ref,
         explicitSelector: selector,
         explicitSelectorType: selectorType,
@@ -1148,7 +1148,7 @@ class ClickTool extends BaseBrowserToolExecutor {
 
       let finalRef = resolvedTarget.ref;
       let finalSelector = resolvedTarget.selector;
-      const finalSelectorType = resolvedTarget.selectorType || selectorType;
+      let finalSelectorType = resolvedTarget.selectorType || selectorType;
       const finalFrameId = typeof frameId === 'number' ? frameId : resolvedTarget.frameId;
       const buildTargetBinding = () =>
         buildActionTargetBindingEvidence({
@@ -1209,14 +1209,38 @@ class ClickTool extends BaseBrowserToolExecutor {
             finalRef = resolved.ref;
             finalSelector = undefined; // Use ref instead of selector
           } else {
-            return createErrorResponse(
-              `Failed to resolve XPath selector: ${resolved?.error || 'unknown error'}`,
-            );
+            const candidateCssFallback = firstCandidateCssLocator(args.candidateAction);
+            if (candidateCssFallback && candidateCssFallback !== finalSelector) {
+              finalSelector = candidateCssFallback;
+              finalSelectorType = 'css';
+              resolvedTarget = {
+                selector: candidateCssFallback,
+                selectorType: 'css',
+                ...(typeof finalFrameId === 'number' ? { frameId: finalFrameId } : {}),
+                source: 'candidate_locator_css',
+              };
+            } else {
+              return createErrorResponse(
+                `Failed to resolve XPath selector: ${resolved?.error || 'unknown error'}`,
+              );
+            }
           }
         } catch (error) {
-          return createErrorResponse(
-            `Error resolving XPath: ${error instanceof Error ? error.message : String(error)}`,
-          );
+          const candidateCssFallback = firstCandidateCssLocator(args.candidateAction);
+          if (candidateCssFallback && candidateCssFallback !== finalSelector) {
+            finalSelector = candidateCssFallback;
+            finalSelectorType = 'css';
+            resolvedTarget = {
+              selector: candidateCssFallback,
+              selectorType: 'css',
+              ...(typeof finalFrameId === 'number' ? { frameId: finalFrameId } : {}),
+              source: 'candidate_locator_css',
+            };
+          } else {
+            return createErrorResponse(
+              `Error resolving XPath: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
         }
       }
 

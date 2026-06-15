@@ -476,6 +476,66 @@ describe('candidateAction bridge', () => {
     );
   });
 
+  it('falls back to candidateAction locator css when xpath cannot resolve', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4120,
+      title: 'Search',
+      url: 'https://example.com/search?q=neutral',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi
+      .spyOn(clickTool as any, 'sendMessageToTab')
+      .mockImplementation(async (_tabId, message) => {
+        if ((message as any)?.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR) {
+          return { success: false, error: 'not found' };
+        }
+        return {
+          success: true,
+          dispatchSucceeded: true,
+          signals: { domChanged: true },
+        };
+      });
+
+    const result = await clickTool.execute({
+      candidateAction: {
+        targetRef: 'ref_filter_trigger_2c3acd4f',
+        intent: 'search.open_filters',
+        locatorChain: [
+          { type: 'ref', value: 'ref_filter_trigger_2c3acd4f' },
+          { type: 'aria', value: '筛选' },
+          {
+            type: 'xpath',
+            value: "//*[self::button or self::span or @role='option'][normalize-space(.)='筛选']",
+          },
+          { type: 'css', value: 'div.search-filter-trigger > span' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.targetBinding).toMatchObject({
+      resolutionSource: 'candidate_locator_css',
+      dispatchTarget: 'selector',
+    });
+    expect(sendSpy).toHaveBeenCalledWith(
+      4120,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+        isXPath: true,
+      }),
+      undefined,
+    );
+    expect(sendSpy).toHaveBeenCalledWith(
+      4120,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+        selector: 'div.search-filter-trigger > span',
+      }),
+      undefined,
+    );
+  });
+
   it('routes result-card actionTarget candidateAction through locator css', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4117,

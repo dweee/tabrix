@@ -327,7 +327,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
         candidateAction: {
           type: 'object',
           description:
-            'Optional action seed from chrome_read_page.candidateActions. Resolution order: explicit ref > candidateAction.targetRef > explicit selector > candidateAction.locatorChain(css/ref). aria locators are currently informational only.',
+            'Optional action seed from chrome_read_page.candidateActions. Resolution order: explicit ref > candidateAction.targetRef > explicit selector > candidateAction.locatorChain(xpath/css/ref). aria locators are currently informational only.',
           properties: {
             targetRef: {
               type: 'string',
@@ -346,7 +346,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
             locatorChain: {
               type: 'array',
               description:
-                'Fallback locator list from read_page candidateActions[*].locatorChain. Only css/ref are consumed in T3.2.',
+                'Fallback locator list from read_page candidateActions[*].locatorChain. xpath/css/ref are executable fallbacks; aria is informational.',
               items: {
                 type: 'object',
                 properties: {
@@ -1217,7 +1217,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
         candidateAction: {
           type: 'object',
           description:
-            'Optional action seed from chrome_read_page.candidateActions. Resolution order: explicit ref > candidateAction.targetRef > explicit selector > candidateAction.locatorChain(css/ref).',
+            'Optional action seed from chrome_read_page.candidateActions. Resolution order: explicit ref > candidateAction.targetRef > explicit selector > candidateAction.locatorChain(xpath/css/ref).',
           properties: {
             targetRef: {
               type: 'string',
@@ -1236,7 +1236,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
             locatorChain: {
               type: 'array',
               description:
-                'Fallback locator list from read_page candidateActions[*].locatorChain. css/ref are consumed in T3.2.',
+                'Fallback locator list from read_page candidateActions[*].locatorChain. xpath/css/ref are executable fallbacks; aria is informational.',
               items: {
                 type: 'object',
                 properties: {
@@ -1331,7 +1331,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
         candidateAction: {
           type: 'object',
           description:
-            'Optional action seed from chrome_read_page.candidateActions. Resolution order: explicit ref > candidateAction.targetRef > explicit selector > candidateAction.locatorChain(css/ref).',
+            'Optional action seed from chrome_read_page.candidateActions. Resolution order: explicit ref > candidateAction.targetRef > explicit selector > candidateAction.locatorChain(xpath/css/ref).',
           properties: {
             targetRef: {
               type: 'string',
@@ -1350,7 +1350,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
             locatorChain: {
               type: 'array',
               description:
-                'Fallback locator list from read_page candidateActions[*].locatorChain. css/ref are consumed in T3.2.',
+                'Fallback locator list from read_page candidateActions[*].locatorChain. xpath/css/ref are executable fallbacks; aria is informational.',
               items: {
                 type: 'object',
                 properties: {
