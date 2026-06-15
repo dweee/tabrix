@@ -118,6 +118,27 @@ if (window.__FILL_HELPER_INITIALIZED__) {
    * @param {string} value - Value to fill into the element
    * @returns {Promise<Object>} - Result of the fill operation
    */
+  function isDirectlyFillableElement(element) {
+    if (!element || !(element instanceof Element)) return false;
+    return (
+      element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || element.tagName === 'SELECT'
+    );
+  }
+
+  function resolveElementForSelector(selector) {
+    if (!selector) return null;
+    const matches = Array.from(document.querySelectorAll(selector));
+    if (matches.length === 0) return null;
+
+    const visibleFillable = matches.find(
+      (candidate) => isDirectlyFillableElement(candidate) && isElementVisible(candidate),
+    );
+    if (visibleFillable) return visibleFillable;
+
+    const visibleCandidate = matches.find((candidate) => isElementVisible(candidate));
+    return visibleCandidate || matches[0];
+  }
+
   async function fillElement(selector, value, ref = null) {
     try {
       // Find the element
@@ -136,7 +157,7 @@ if (window.__FILL_HELPER_INITIALIZED__) {
           };
         }
       } else {
-        element = document.querySelector(selector);
+        element = resolveElementForSelector(selector);
       }
       if (!element) {
         return {

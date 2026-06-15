@@ -27,6 +27,15 @@ export interface CDPNavigationTimingSummary {
   loadEventMs: number | null;
 }
 
+export interface CDPRouteSummary {
+  href: string;
+  pathname: string;
+  hasQuery: boolean;
+  hasHash: boolean;
+  fingerprint?: string;
+  historyLength: number | null;
+}
+
 export interface CDPNetworkEventSummary {
   requestStartedCount: number;
   inFlightCount: number;
@@ -58,9 +67,26 @@ export interface CDPAccessibilityObjectStateSignals {
   disabled?: boolean;
 }
 
+export interface CDPAccessibilityObjectLocator {
+  source: 'cdp_ax';
+  axNodeId?: string;
+  backendDOMNodeId?: number;
+  cssSelector?: string;
+  nodeName?: string;
+  visualBounds?: CDPElementRect;
+}
+
+export interface CDPElementRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface CDPAccessibilityObjectCandidate {
   role: string;
   label?: string;
+  locator?: CDPAccessibilityObjectLocator;
   actionTypes: string[];
   state: CDPAccessibilityObjectStateSignals;
 }
@@ -70,12 +96,20 @@ export interface CDPAccessibilityRoleFrequency {
   count: number;
 }
 
+export interface CDPAccessibilityLocatorCoverage {
+  locatorCandidateCount: number;
+  axNodeIdCount: number;
+  backendDOMNodeIdCount: number;
+  locatorCoverageRate: number;
+}
+
 export interface CDPAccessibilitySummary {
   totalNodes: number;
   actionableNodeCount: number;
   actionableRoleTop: CDPAccessibilityRoleFrequency[];
   actionableSampleLabels: string[];
   stateSignals: CDPAccessibilityStateSignals;
+  locatorCoverage: CDPAccessibilityLocatorCoverage;
   objectCandidates: CDPAccessibilityObjectCandidate[];
 }
 
@@ -88,6 +122,7 @@ export interface CDPPageSensingSnapshot {
   likelyLoading: boolean;
   url?: CDPPageUrlSummary;
   title?: string;
+  route?: CDPRouteSummary;
   visibilityState?: string;
   focused?: boolean;
   activeElement?: CDPActiveElementSummary;
@@ -159,13 +194,17 @@ const PAGE_STATE_PROBE = String.raw`(() => {
     },
     { resourceEntryCount: 0, resourceInFlightCount: 0, failedResourceStatusCount: 0 },
   );
-  return {
+ return {
     readyState: document.readyState,
     visibilityState: document.visibilityState,
     focused: document.hasFocus(),
     networkResources: resourceSummary,
     url: location.href,
     title: document.title,
+    route: {
+      url: location.href,
+      historyLength: Number.isFinite(history.length) ? history.length : null,
+    },
     activeElement: active
       ? {
           tagName: active.tagName,
@@ -282,7 +321,10 @@ export async function captureCDPPageSensingSnapshot(
           inFlightCount: inFlightRequests.size,
           failedRequestCount: networkActivity.failedRequestCount,
         };
-        const accessibility = summarizeAccessibilityTree(accessibilityTreeResult);
+        const accessibility = await enrichAccessibilityTreeLocators(
+          tabId,
+          summarizeAccessibilityTree(accessibilityTreeResult),
+        );
 
         return {
           tabId,
@@ -293,6 +335,7 @@ export async function captureCDPPageSensingSnapshot(
           likelyLoading: isLikelyLoading(readiness, navigation),
           url: sanitizeUrlSummary(pageState?.url),
           title: truncateText(pageState?.title),
+          route: parseRouteSummary(pageState?.route),
           visibilityState: truncateText(pageState?.visibilityState),
           focused: typeof pageState?.focused === 'boolean' ? pageState.focused : undefined,
           activeElement: parseActiveElement(pageState?.activeElement),
@@ -365,7 +408,48 @@ function parseNavigationTiming(value: unknown): CDPNavigationTimingSummary | und
   };
 }
 
+function parseRouteSummary(value: unknown): CDPRouteSummary | undefined {
+  const route = asRecord(value);
+  const rawUrl = asString(route?.url);
+  const url = sanitizeUrlSummary(rawUrl);
+  if (!url || !rawUrl) return undefined;
+  const fingerprint = buildRouteFingerprint(rawUrl);
+
+  return {
+    href: url.href,
+    pathname: url.pathname,
+    hasQuery: url.hasQuery,
+    hasHash: url.hasHash,
+    ...(fingerprint ? { fingerprint } : {}),
+    historyLength:
+      typeof route?.historyLength === 'number' && Number.isFinite(route.historyLength)
+        ? Math.max(0, Math.trunc(route.historyLength))
+        : null,
+  };
+}
+
+function buildRouteFingerprint(rawUrl: string): string | undefined {
+  try {
+    const url = new URL(rawUrl);
+    const routeMaterial = `${url.origin}${url.pathname}?${url.searchParams.toString()}#${url.hash.replace(/^#/, '')}`;
+    return `route_${hashString32(routeMaterial)}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function hashString32(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
 interface RawAXNode {
+  nodeId?: unknown;
+  backendDOMNodeId?: unknown;
   role?: unknown;
   name?: unknown;
   properties?: unknown;
@@ -383,6 +467,12 @@ function summarizeAccessibilityTree(treeResult: unknown): CDPAccessibilitySummar
       actionableRoleTop: [],
       actionableSampleLabels: [],
       stateSignals: { checkedCount: 0, selectedCount: 0, expandedCount: 0, disabledCount: 0 },
+      locatorCoverage: {
+        locatorCandidateCount: 0,
+        axNodeIdCount: 0,
+        backendDOMNodeIdCount: 0,
+        locatorCoverageRate: 0,
+      },
       objectCandidates: [],
     };
   }
@@ -398,6 +488,9 @@ function summarizeAccessibilityTree(treeResult: unknown): CDPAccessibilitySummar
     disabledCount: 0,
   };
   let actionableNodeCount = 0;
+  let locatorCandidateCount = 0;
+  let axNodeIdCount = 0;
+  let backendDOMNodeIdCount = 0;
 
   for (const rawNode of rawNodes) {
     const node = asRecord(rawNode);
@@ -416,7 +509,18 @@ function summarizeAccessibilityTree(treeResult: unknown): CDPAccessibilitySummar
 
       const state = inferAccessibilityNodeState(typedNode);
       const actionTypes = inferAccessibilityActions(typedNode);
-      const candidateKey = `${normalizedRole}||${label || ''}`;
+      const locator = parseAccessibilityObjectLocator(typedNode);
+      if (locator) {
+        locatorCandidateCount += 1;
+        if (locator.axNodeId) axNodeIdCount += 1;
+        if (typeof locator.backendDOMNodeId === 'number') backendDOMNodeIdCount += 1;
+      }
+      const candidateKey =
+        typeof locator?.backendDOMNodeId === 'number'
+          ? `backendDOMNodeId:${locator.backendDOMNodeId}`
+          : locator?.axNodeId
+            ? `axNodeId:${locator.axNodeId}`
+            : `${normalizedRole}||${label || ''}`;
       if (
         objectCandidates.length < MAX_ACCESSIBILITY_OBJECT_CANDIDATES &&
         !objectCandidateSet.has(candidateKey)
@@ -425,6 +529,7 @@ function summarizeAccessibilityTree(treeResult: unknown): CDPAccessibilitySummar
         objectCandidates.push({
           role: normalizedRole,
           ...(label ? { label } : {}),
+          ...(locator ? { locator } : {}),
           actionTypes,
           state,
         });
@@ -444,7 +549,179 @@ function summarizeAccessibilityTree(treeResult: unknown): CDPAccessibilitySummar
     actionableRoleTop,
     actionableSampleLabels: Array.from(sampleLabels).slice(0, MAX_ACCESSIBILITY_SAMPLE_LABELS),
     stateSignals,
+    locatorCoverage: {
+      locatorCandidateCount,
+      axNodeIdCount,
+      backendDOMNodeIdCount,
+      locatorCoverageRate:
+        actionableNodeCount > 0
+          ? Number((locatorCandidateCount / actionableNodeCount).toFixed(4))
+          : 0,
+    },
     objectCandidates,
+  };
+}
+
+async function enrichAccessibilityTreeLocators(
+  tabId: number,
+  summary: CDPAccessibilitySummary | undefined,
+): Promise<CDPAccessibilitySummary | undefined> {
+  if (!summary?.objectCandidates?.length) return summary;
+  const candidatesWithBackendNode = summary.objectCandidates.filter(
+    (candidate) => typeof candidate.locator?.backendDOMNodeId === 'number',
+  );
+  if (candidatesWithBackendNode.length === 0) return summary;
+
+  try {
+    await cdpSessionManager.sendCommand(tabId, 'DOM.enable').catch(() => undefined);
+    const enrichedCandidates: CDPAccessibilityObjectCandidate[] = [];
+    for (const candidate of summary.objectCandidates) {
+      const locator = candidate.locator;
+      if (!locator || typeof locator.backendDOMNodeId !== 'number') {
+        enrichedCandidates.push(candidate);
+        continue;
+      }
+      const backendNodeId = locator.backendDOMNodeId;
+      const nodeDescription = await cdpSessionManager
+        .sendCommand(tabId, 'DOM.describeNode', { backendNodeId })
+        .catch(() => undefined);
+      const boxModel = await cdpSessionManager
+        .sendCommand(tabId, 'DOM.getBoxModel', { backendNodeId })
+        .catch(() => undefined);
+      const locatorExtension = {
+        ...buildLocatorExtensionFromDomNode(nodeDescription),
+        ...buildLocatorExtensionFromBoxModel(boxModel),
+      };
+      enrichedCandidates.push(
+        Object.keys(locatorExtension).length > 0
+          ? { ...candidate, locator: { ...locator, ...locatorExtension } }
+          : candidate,
+      );
+    }
+    return { ...summary, objectCandidates: enrichedCandidates };
+  } catch {
+    return summary;
+  }
+}
+
+function buildLocatorExtensionFromDomNode(
+  value: unknown,
+): Pick<CDPAccessibilityObjectLocator, 'cssSelector' | 'nodeName'> {
+  const node = asRecord(asRecord(value)?.node);
+  if (!node) return {};
+  const rawNodeName = asString(node.localName) || asString(node.nodeName);
+  const nodeName = rawNodeName?.toLowerCase();
+  const attributes = readDomNodeAttributes(node.attributes);
+  const cssSelector = buildSafeCssSelector(nodeName, attributes);
+  return {
+    ...(nodeName ? { nodeName } : {}),
+    ...(cssSelector ? { cssSelector } : {}),
+  };
+}
+
+function buildLocatorExtensionFromBoxModel(
+  value: unknown,
+): Pick<CDPAccessibilityObjectLocator, 'visualBounds'> {
+  const model = asRecord(asRecord(value)?.model);
+  const content = Array.isArray(model?.content) ? model.content : undefined;
+  const visualBounds = rectFromQuad(content);
+  return visualBounds ? { visualBounds } : {};
+}
+
+function rectFromQuad(value: unknown[] | undefined): CDPElementRect | undefined {
+  if (!value || value.length < 8) return undefined;
+  const points = value
+    .slice(0, 8)
+    .map((item) => (typeof item === 'number' && Number.isFinite(item) ? item : null));
+  if (points.some((point) => point === null)) return undefined;
+  const xs = [points[0], points[2], points[4], points[6]] as number[];
+  const ys = [points[1], points[3], points[5], points[7]] as number[];
+  const left = Math.min(...xs);
+  const right = Math.max(...xs);
+  const top = Math.min(...ys);
+  const bottom = Math.max(...ys);
+  const width = Math.max(0, right - left);
+  const height = Math.max(0, bottom - top);
+  if (width === 0 || height === 0) return undefined;
+  return {
+    x: Math.round(left),
+    y: Math.round(top),
+    width: Math.round(width),
+    height: Math.round(height),
+  };
+}
+
+function readDomNodeAttributes(value: unknown): Map<string, string> {
+  const output = new Map<string, string>();
+  if (!Array.isArray(value)) return output;
+  for (let index = 0; index < value.length - 1; index += 2) {
+    const name = asString(value[index])?.toLowerCase();
+    const attrValue = asString(value[index + 1]);
+    if (!name || !attrValue) continue;
+    output.set(name, attrValue);
+  }
+  return output;
+}
+
+function buildSafeCssSelector(
+  nodeName: string | undefined,
+  attributes: Map<string, string>,
+): string | undefined {
+  const tagName = safeCssIdentifier(nodeName || '') || undefined;
+  const id = safeAttributeValue(attributes.get('id'));
+  if (id) return `#${cssIdentifier(id)}`;
+
+  const stableAttributeNames = [
+    'data-testid',
+    'data-test',
+    'data-cy',
+    'aria-label',
+    'name',
+    'type',
+    'role',
+  ];
+  for (const attributeName of stableAttributeNames) {
+    const value = safeAttributeValue(attributes.get(attributeName));
+    if (!value) continue;
+    return `${tagName || '*'}[${attributeName}="${cssString(value)}"]`;
+  }
+  return tagName;
+}
+
+function safeAttributeValue(value: string | undefined): string | undefined {
+  const text = truncateText(value);
+  if (!text) return undefined;
+  if (/token|secret|password|passwd|authorization|bearer|cookie|session|email|phone/i.test(text)) {
+    return undefined;
+  }
+  if (text.length > 80) return undefined;
+  return text;
+}
+
+function safeCssIdentifier(value: string): string | undefined {
+  const text = value.trim().toLowerCase();
+  if (!/^[a-z][a-z0-9_-]*$/.test(text)) return undefined;
+  return text;
+}
+
+function cssIdentifier(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, (char) => `\\${char}`);
+}
+
+function cssString(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function parseAccessibilityObjectLocator(
+  node: RawAXNode,
+): CDPAccessibilityObjectLocator | undefined {
+  const axNodeId = asString(node.nodeId);
+  const backendDOMNodeId = asNonNegativeInteger(node.backendDOMNodeId);
+  if (!axNodeId && typeof backendDOMNodeId !== 'number') return undefined;
+  return {
+    source: 'cdp_ax',
+    ...(axNodeId ? { axNodeId } : {}),
+    ...(typeof backendDOMNodeId === 'number' ? { backendDOMNodeId } : {}),
   };
 }
 
@@ -610,6 +887,12 @@ function asNonNegativeCount(value: unknown): number {
   const normalized = typeof value === 'number' ? value : Number(value);
 
   return Math.max(0, Math.round(Number.isFinite(normalized) ? normalized : 0));
+}
+
+function asNonNegativeInteger(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  const normalized = Math.trunc(value);
+  return normalized >= 0 ? normalized : undefined;
 }
 
 function sanitizeUrlSummary(value: unknown): CDPPageUrlSummary | undefined {

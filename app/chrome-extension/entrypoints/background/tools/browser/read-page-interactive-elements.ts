@@ -1,4 +1,8 @@
-import type { ReadPageInteractiveElement, ReadPageMode } from '@tabrix/shared';
+import type {
+  ReadPageInteractiveElement,
+  ReadPageMode,
+  ReadPageTargetVisibility,
+} from '@tabrix/shared';
 
 interface SnapshotNode {
   role: string;
@@ -11,6 +15,7 @@ interface SnapshotNode {
   checked: boolean | 'mixed' | 'unknown' | null;
   matchSource: string | null;
   actionability: string | null;
+  visibility?: ReadPageTargetVisibility;
 }
 
 export type SnapshotInteractiveElement = ReadPageInteractiveElement;
@@ -258,6 +263,7 @@ function toInteractiveElement(node: SnapshotNode): SnapshotInteractiveElement {
   if (node.checked !== null) element.checked = node.checked;
   if (node.matchSource) element.matchSource = node.matchSource;
   if (node.actionability) element.actionability = node.actionability;
+  if (node.visibility) element.visibility = node.visibility;
   return element;
 }
 
@@ -280,6 +286,27 @@ function normalizeCheckedState(value: unknown): boolean | 'mixed' | 'unknown' {
   if (normalized === 'false') return false;
   if (normalized === 'mixed') return 'mixed';
   return 'unknown';
+}
+
+function normalizeVisibility(value: unknown): ReadPageTargetVisibility | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record.domVisible !== 'boolean' || typeof record.inViewport !== 'boolean') {
+    return undefined;
+  }
+  const source = typeof record.source === 'string' && record.source.trim() ? record.source : 'dom';
+  const centerHitTarget =
+    typeof record.centerHitTarget === 'boolean' ? record.centerHitTarget : null;
+  const occluded = typeof record.occluded === 'boolean' ? record.occluded : null;
+  const reason = typeof record.reason === 'string' ? record.reason.trim() : '';
+  return {
+    source,
+    domVisible: record.domVisible,
+    inViewport: record.inViewport,
+    centerHitTarget,
+    occluded,
+    ...(reason ? { reason } : {}),
+  };
 }
 
 function normalizeFallbackRole(item: any): string {
@@ -333,6 +360,7 @@ function buildFallbackNodes(fallbackElements: any[]): SnapshotNode[] {
       : null,
     matchSource: typeof item?.matchSource === 'string' ? item.matchSource : null,
     actionability: typeof item?.actionability === 'string' ? item.actionability : null,
+    visibility: normalizeVisibility(item?.visibility),
   }));
 }
 

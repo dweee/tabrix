@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readPageTool } from '@/entrypoints/background/tools/browser/read-page';
 import { buildInteractiveElements } from '@/entrypoints/background/tools/browser/read-page-interactive-elements';
 import * as browserWorldInventory from '@/entrypoints/background/browser-world-inventory';
+import * as cdpPageSensing from '@/utils/cdp-page-sensing';
 import {
   buildFallbackRefMap,
   formatElementsAsPageContent,
@@ -3249,6 +3250,471 @@ describe('read_page mode', () => {
       changedObjects: expect.any(Array),
       recommendation: expect.stringMatching(/^(proceed|wait|refresh|retry|stop|needs_user)$/),
       claimBoundary: expect.any(String),
+    });
+  });
+
+  it('classifies pageDeltaReport as network_completed from CDP request deltas', async () => {
+    vi.spyOn(cdpPageSensing, 'captureCDPPageSensingSnapshot')
+      .mockResolvedValueOnce({
+        tabId: 5222,
+        capturedAt: Date.parse('2026-06-15T01:00:00.000Z'),
+        source: 'cdp',
+        available: true,
+        readiness: 'complete',
+        likelyLoading: false,
+        networkActivity: {
+          requestStartedCount: 2,
+          inFlightCount: 1,
+          failedRequestCount: 0,
+        },
+        console: {
+          errorCount: 0,
+          warningCount: 0,
+        },
+      })
+      .mockResolvedValueOnce({
+        tabId: 5222,
+        capturedAt: Date.parse('2026-06-15T01:00:01.000Z'),
+        source: 'cdp',
+        available: true,
+        readiness: 'complete',
+        likelyLoading: false,
+        networkActivity: {
+          requestStartedCount: 5,
+          inFlightCount: 0,
+          failedRequestCount: 0,
+        },
+        console: {
+          errorCount: 0,
+          warningCount: 0,
+        },
+      });
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5222,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/network-delta',
+      title: 'Network Delta',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sampleVisibleTextContent').mockResolvedValue(null);
+    vi.spyOn(readPageTool as any, 'collectInteractiveElementsFallback').mockResolvedValue({
+      success: true,
+      elements: [],
+    });
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Dashboard" [ref=ref_main] (x=100,y=120)',
+        '  - heading "Ready" [ref=ref_heading] (x=120,y=180)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_main', selector: 'main' },
+        { ref: 'ref_heading', selector: 'h1' },
+      ],
+      stats: { processed: 2, included: 2, durationMs: 5 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const first = await readPageTool.execute({ mode: 'compact' });
+    const second = await readPageTool.execute({ mode: 'compact' });
+    const firstPayload = JSON.parse((first.content[0] as { text: string }).text);
+    const secondPayload = JSON.parse((second.content[0] as { text: string }).text);
+
+    expect(firstPayload.pageDeltaReport).toBeUndefined();
+    expect(secondPayload.pageDeltaReport).toMatchObject({
+      source: 'read_page_delta_report',
+      actionId: null,
+      targetObjectId: null,
+      deltaKind: 'network_completed',
+      networkSignals: {
+        requestStartedDelta: 3,
+        failedRequestDelta: 0,
+      },
+      recommendation: 'proceed',
+    });
+  });
+
+  it('classifies pageDeltaReport as console_error from CDP console deltas', async () => {
+    vi.spyOn(cdpPageSensing, 'captureCDPPageSensingSnapshot')
+      .mockResolvedValueOnce({
+        tabId: 5223,
+        capturedAt: Date.parse('2026-06-15T01:01:00.000Z'),
+        source: 'cdp',
+        available: true,
+        readiness: 'complete',
+        likelyLoading: false,
+        networkActivity: {
+          requestStartedCount: 4,
+          inFlightCount: 0,
+          failedRequestCount: 0,
+        },
+        console: {
+          errorCount: 0,
+          warningCount: 0,
+        },
+      })
+      .mockResolvedValueOnce({
+        tabId: 5223,
+        capturedAt: Date.parse('2026-06-15T01:01:01.000Z'),
+        source: 'cdp',
+        available: true,
+        readiness: 'complete',
+        likelyLoading: false,
+        networkActivity: {
+          requestStartedCount: 4,
+          inFlightCount: 0,
+          failedRequestCount: 0,
+        },
+        console: {
+          errorCount: 1,
+          warningCount: 2,
+        },
+      });
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5223,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/console-delta',
+      title: 'Console Delta',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sampleVisibleTextContent').mockResolvedValue(null);
+    vi.spyOn(readPageTool as any, 'collectInteractiveElementsFallback').mockResolvedValue({
+      success: true,
+      elements: [],
+    });
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Dashboard" [ref=ref_main] (x=100,y=120)',
+        '  - heading "Ready" [ref=ref_heading] (x=120,y=180)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_main', selector: 'main' },
+        { ref: 'ref_heading', selector: 'h1' },
+      ],
+      stats: { processed: 2, included: 2, durationMs: 5 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const first = await readPageTool.execute({ mode: 'compact' });
+    const second = await readPageTool.execute({ mode: 'compact' });
+    const firstPayload = JSON.parse((first.content[0] as { text: string }).text);
+    const secondPayload = JSON.parse((second.content[0] as { text: string }).text);
+
+    expect(firstPayload.pageDeltaReport).toBeUndefined();
+    expect(secondPayload.pageDeltaReport).toMatchObject({
+      source: 'read_page_delta_report',
+      actionId: null,
+      targetObjectId: null,
+      deltaKind: 'console_error',
+      consoleSignals: {
+        errorCountDelta: 1,
+        warningCountDelta: 2,
+      },
+      recommendation: 'stop',
+    });
+  });
+
+  it('classifies pageDeltaReport as spa_route_change from CDP route fingerprint deltas', async () => {
+    vi.spyOn(cdpPageSensing, 'captureCDPPageSensingSnapshot')
+      .mockResolvedValueOnce({
+        tabId: 5224,
+        capturedAt: Date.parse('2026-06-15T01:02:00.000Z'),
+        source: 'cdp',
+        available: true,
+        readiness: 'complete',
+        likelyLoading: false,
+        route: {
+          href: 'https://example.test/search',
+          pathname: '/search',
+          hasQuery: true,
+          hasHash: false,
+          fingerprint: 'route_11111111',
+          historyLength: 8,
+        },
+        networkActivity: {
+          requestStartedCount: 4,
+          inFlightCount: 0,
+          failedRequestCount: 0,
+        },
+        console: {
+          errorCount: 0,
+          warningCount: 0,
+        },
+      })
+      .mockResolvedValueOnce({
+        tabId: 5224,
+        capturedAt: Date.parse('2026-06-15T01:02:01.000Z'),
+        source: 'cdp',
+        available: true,
+        readiness: 'complete',
+        likelyLoading: false,
+        route: {
+          href: 'https://example.test/search',
+          pathname: '/search',
+          hasQuery: true,
+          hasHash: false,
+          fingerprint: 'route_22222222',
+          historyLength: 9,
+        },
+        networkActivity: {
+          requestStartedCount: 4,
+          inFlightCount: 0,
+          failedRequestCount: 0,
+        },
+        console: {
+          errorCount: 0,
+          warningCount: 0,
+        },
+      });
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5224,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/search',
+      title: 'Search',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sampleVisibleTextContent').mockResolvedValue(null);
+    vi.spyOn(readPageTool as any, 'collectInteractiveElementsFallback').mockResolvedValue({
+      success: true,
+      elements: [],
+    });
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Search" [ref=ref_main] (x=100,y=120)',
+        '  - list "Results" [ref=ref_results] (x=120,y=180)',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_main', selector: 'main' },
+        { ref: 'ref_results', selector: '[data-results]' },
+      ],
+      stats: { processed: 2, included: 2, durationMs: 5 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const first = await readPageTool.execute({ mode: 'compact' });
+    const second = await readPageTool.execute({ mode: 'compact' });
+    const firstPayload = JSON.parse((first.content[0] as { text: string }).text);
+    const secondPayload = JSON.parse((second.content[0] as { text: string }).text);
+
+    expect(firstPayload.pageDeltaReport).toBeUndefined();
+    expect(secondPayload.pageDeltaReport).toMatchObject({
+      source: 'read_page_delta_report',
+      actionId: null,
+      targetObjectId: null,
+      deltaKind: 'spa_route_change',
+      recommendation: 'proceed',
+    });
+  });
+
+  it('classifies pageDeltaReport as list_refreshed when result card objects change', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5225,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/search?q=ai',
+      title: 'Search Results',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sampleVisibleTextContent').mockResolvedValue(null);
+    vi.spyOn(readPageTool as any, 'collectInteractiveElementsFallback').mockResolvedValue({
+      success: true,
+      elements: [],
+    });
+    vi.spyOn(readPageTool as any, 'sendMessageToTab')
+      .mockResolvedValueOnce({
+        success: true,
+        pageContent: [
+          '- search "Search controls" [ref=ref_search] (x=420,y=96)',
+          '  - searchbox "Search query" [ref=ref_query] (x=420,y=96)',
+          '- list "Results" [ref=ref_results] (x=120,y=180)',
+          '  - link "Old result card" [ref=ref_card_old] (x=120,y=220) href="/items/old"',
+        ].join('\n'),
+        refMap: [
+          { ref: 'ref_query', selector: 'input[type="search"]' },
+          { ref: 'ref_results', selector: '[data-results]' },
+          { ref: 'ref_card_old', selector: 'article.old a[href]' },
+        ],
+        stats: { processed: 4, included: 4, durationMs: 5 },
+        viewport: { width: 1280, height: 720, dpr: 1 },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        pageContent: [
+          '- search "Search controls" [ref=ref_search] (x=420,y=96)',
+          '  - searchbox "Search query" [ref=ref_query] (x=420,y=96)',
+          '- list "Results" [ref=ref_results] (x=120,y=180)',
+          '  - link "New result card" [ref=ref_card_new] (x=120,y=220) href="/items/new"',
+        ].join('\n'),
+        refMap: [
+          { ref: 'ref_query', selector: 'input[type="search"]' },
+          { ref: 'ref_results', selector: '[data-results]' },
+          { ref: 'ref_card_new', selector: 'article.new a[href]' },
+        ],
+        stats: { processed: 4, included: 4, durationMs: 5 },
+        viewport: { width: 1280, height: 720, dpr: 1 },
+      });
+
+    const first = await readPageTool.execute({ mode: 'compact' });
+    const second = await readPageTool.execute({ mode: 'compact' });
+    const firstPayload = JSON.parse((first.content[0] as { text: string }).text);
+    const secondPayload = JSON.parse((second.content[0] as { text: string }).text);
+
+    expect(firstPayload.pageDeltaReport).toBeUndefined();
+    expect(secondPayload.pageDeltaReport).toMatchObject({
+      source: 'read_page_delta_report',
+      deltaKind: 'list_refreshed',
+      changedRegions: expect.arrayContaining(['result_list']),
+      changedObjects: expect.arrayContaining(['ref_card_new', 'ref_card_old']),
+      recommendation: 'proceed',
+    });
+  });
+
+  it('classifies pageDeltaReport as dialog_appeared when a modal or QR region appears', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5226,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/account',
+      title: 'Account',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sampleVisibleTextContent').mockResolvedValue(null);
+    vi.spyOn(readPageTool as any, 'collectInteractiveElementsFallback').mockResolvedValue({
+      success: true,
+      elements: [],
+    });
+    vi.spyOn(readPageTool as any, 'sendMessageToTab')
+      .mockResolvedValueOnce({
+        success: true,
+        pageContent: [
+          '- main "Account shell" [ref=ref_main] (x=120,y=160)',
+          '  - heading "Welcome" [ref=ref_heading] (x=120,y=180)',
+          '  - paragraph "Account overview" [ref=ref_overview] (x=120,y=200)',
+          '  - button "Sign in" [ref=ref_sign_in] (x=120,y=220)',
+          '  - link "Help center" [ref=ref_help] (x=120,y=260) href="/help"',
+          '  - link "Privacy" [ref=ref_privacy] (x=120,y=300) href="/privacy"',
+          '  - status "Ready" [ref=ref_ready] (x=120,y=340)',
+        ].join('\n'),
+        refMap: [
+          { ref: 'ref_main', selector: 'main' },
+          { ref: 'ref_heading', selector: 'h1' },
+          { ref: 'ref_overview', selector: '.overview' },
+          { ref: 'ref_sign_in', selector: 'button.sign-in' },
+          { ref: 'ref_help', selector: 'a[href="/help"]' },
+          { ref: 'ref_privacy', selector: 'a[href="/privacy"]' },
+          { ref: 'ref_ready', selector: '[role="status"]' },
+        ],
+        stats: { processed: 7, included: 7, durationMs: 5 },
+        viewport: { width: 1280, height: 720, dpr: 1 },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        pageContent: [
+          '- main "Account shell" [ref=ref_main] (x=120,y=160)',
+          '  - heading "Welcome" [ref=ref_heading] (x=120,y=180)',
+          '  - paragraph "Account overview" [ref=ref_overview] (x=120,y=200)',
+          '  - button "Sign in" [ref=ref_sign_in] (x=120,y=220)',
+          '- dialog "Login QR code" [ref=ref_login_dialog] (x=420,y=180)',
+          '  - img "QR code" [ref=ref_login_qr] (x=460,y=220)',
+          '  - button "Login dialog continue" [ref=ref_login_dialog_button] (x=460,y=460)',
+          '  - button "Refresh QR code" [ref=ref_refresh_qr] (x=560,y=460)',
+          '- status "Waiting for scan" [ref=ref_waiting_scan] (x=460,y=520)',
+        ].join('\n'),
+        refMap: [
+          { ref: 'ref_main', selector: 'main' },
+          { ref: 'ref_heading', selector: 'h1' },
+          { ref: 'ref_overview', selector: '.overview' },
+          { ref: 'ref_sign_in', selector: 'button.sign-in' },
+          { ref: 'ref_login_dialog', selector: '[role="dialog"]' },
+          { ref: 'ref_login_qr', selector: '[data-login-qr]' },
+          { ref: 'ref_login_dialog_button', selector: '[data-login-continue]' },
+          { ref: 'ref_refresh_qr', selector: '[data-refresh-qr]' },
+          { ref: 'ref_waiting_scan', selector: '[role="status"]' },
+        ],
+        stats: { processed: 8, included: 8, durationMs: 5 },
+        viewport: { width: 1280, height: 720, dpr: 1 },
+      });
+
+    const first = await readPageTool.execute({ mode: 'compact' });
+    const second = await readPageTool.execute({ mode: 'compact' });
+    const firstPayload = JSON.parse((first.content[0] as { text: string }).text);
+    const secondPayload = JSON.parse((second.content[0] as { text: string }).text);
+
+    expect(firstPayload.pageDeltaReport).toBeUndefined();
+    expect(secondPayload.pageDeltaReport).toMatchObject({
+      source: 'read_page_delta_report',
+      deltaKind: 'dialog_appeared',
+      changedRegions: expect.arrayContaining(['modal', 'qr_code']),
+      changedObjects: expect.arrayContaining(['ref_login_dialog_button', 'ref_refresh_qr']),
+      recommendation: 'needs_user',
+    });
+  });
+
+  it('classifies pageDeltaReport as form_state_changed when a field value state changes', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5227,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/search',
+      title: 'Search',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sampleVisibleTextContent').mockResolvedValue(null);
+    vi.spyOn(readPageTool as any, 'collectInteractiveElementsFallback').mockResolvedValue({
+      success: true,
+      elements: [],
+    });
+    vi.spyOn(readPageTool as any, 'sendMessageToTab')
+      .mockResolvedValueOnce({
+        success: true,
+        pageContent: [
+          '- search "Search controls" [ref=ref_search] (x=420,y=96)',
+          '  - searchbox "Search query" [ref=ref_query] (x=420,y=96)',
+        ].join('\n'),
+        refMap: [
+          { ref: 'ref_search', selector: 'form.search' },
+          { ref: 'ref_query', selector: 'input[type="search"]', valueState: 'empty' },
+        ],
+        stats: { processed: 2, included: 2, durationMs: 5 },
+        viewport: { width: 1280, height: 720, dpr: 1 },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        pageContent: [
+          '- search "Search controls" [ref=ref_search] (x=420,y=96)',
+          '  - searchbox "Search query" [ref=ref_query] (x=420,y=96)',
+        ].join('\n'),
+        refMap: [
+          { ref: 'ref_search', selector: 'form.search' },
+          { ref: 'ref_query', selector: 'input[type="search"]', valueState: 'non_empty' },
+        ],
+        stats: { processed: 2, included: 2, durationMs: 5 },
+        viewport: { width: 1280, height: 720, dpr: 1 },
+      });
+
+    const first = await readPageTool.execute({ mode: 'compact' });
+    const second = await readPageTool.execute({ mode: 'compact' });
+    const firstPayload = JSON.parse((first.content[0] as { text: string }).text);
+    const secondPayload = JSON.parse((second.content[0] as { text: string }).text);
+
+    expect(firstPayload.pageDeltaReport).toBeUndefined();
+    expect(secondPayload.pageDeltaReport).toMatchObject({
+      source: 'read_page_delta_report',
+      deltaKind: 'form_state_changed',
+      changedRegions: expect.arrayContaining(['search_area']),
+      changedObjects: expect.arrayContaining(['ref_query']),
+      recommendation: 'proceed',
     });
   });
 

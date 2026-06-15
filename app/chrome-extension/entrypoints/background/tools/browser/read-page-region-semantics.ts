@@ -15,9 +15,13 @@ export const REGION_PRIORITY: readonly ReadPageRegionType[] = [
   'qr_code',
   'account',
   'menu',
+  'filter_panel',
+  'search_area',
   'form',
   'feedback',
   'navigation',
+  'result_list',
+  'detail_area',
   'content',
   'unknown',
 ];
@@ -130,6 +134,18 @@ export function inferRegionState(
       return 'waiting_scan_candidate';
     case 'form':
       return 'input_available_candidate';
+    case 'search_area':
+      return 'input_available_candidate';
+    case 'filter_panel':
+      return /option_select|sort_most_collected|time_range_select|filter option|筛选项|排序项/i.test(
+        text,
+      )
+        ? 'open_candidate'
+        : 'filter_trigger_candidate';
+    case 'result_list':
+      return 'content_available_candidate';
+    case 'detail_area':
+      return 'content_available_candidate';
     case 'feedback':
       if (/error|failed|错误|失败/.test(text)) return 'error_candidate';
       if (/success|成功/.test(text)) return 'success_candidate';
@@ -158,6 +174,10 @@ export function buildRegionLabel(
     return `navigation: ${layoutLabel}`;
   }
   const firstLabel = objects[0]?.label ? `: ${objects[0].label}` : '';
+  if (regionType === 'search_area') return 'search area';
+  if (regionType === 'filter_panel') return 'filter panel';
+  if (regionType === 'result_list') return 'result list';
+  if (regionType === 'detail_area') return 'detail area';
   return `${regionType}${firstLabel}`;
 }
 
@@ -173,6 +193,14 @@ export function claimBoundaryForRegion(regionType: ReadPageRegionType): string {
       return 'qr region candidate only; login success is not proven until account state changes';
     case 'navigation':
       return 'navigation/menu map candidate only; needsVerification=post_action_state_change; selected page, menu expansion, and business success require post-action verification';
+    case 'search_area':
+      return 'search area candidate derived from current read_page evidence; entering or submitting a query still requires post-action verification';
+    case 'filter_panel':
+      return 'filter panel candidate derived from current read_page evidence; selected filters and refreshed results require post-action verification';
+    case 'result_list':
+      return 'result list candidate derived from current read_page evidence; opening a card/detail requires candidateActions and post-action verification';
+    case 'detail_area':
+      return 'detail area candidate derived from current read_page evidence; content completeness requires task-specific verification';
     default:
       return 'page region candidate derived from current read_page evidence; not product-grade browser proof';
   }

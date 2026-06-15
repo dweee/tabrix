@@ -104,6 +104,36 @@ describe('injected state-driven waits', () => {
     }
   });
 
+  it('fill selector prefers visible fillable controls when hidden duplicates match first', async () => {
+    document.body.innerHTML = `
+      <form>
+        <input class="search-box" type="search" style="display:none" />
+        <input id="visible-search" class="search-box" type="search" placeholder="搜索" />
+      </form>
+    `;
+    const hidden = document.querySelector('.search-box') as HTMLInputElement;
+    const visible = document.getElementById('visible-search') as HTMLInputElement;
+    setRect(hidden, { left: 0, top: 0, width: 0, height: 0 });
+    setRect(visible, { left: 24, top: 36, width: 220, height: 32 });
+    document.elementFromPoint = vi.fn(() => visible);
+
+    const listener = installInjectedHelper(
+      'inject-scripts/fill-helper.js',
+      '__FILL_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'fillElement',
+      selector: '.search-box',
+      value: 'AI图片创作',
+    });
+
+    expect(response.success).toBe(true);
+    expect(hidden.value).toBe('');
+    expect(visible.value).toBe('AI图片创作');
+    expect(response.elementInfo.id).toBe('visible-search');
+    expect(response.elementInfo.isVisible).toBe(true);
+  });
+
   it('keyboard focus readiness returns immediately once focus is observable', async () => {
     document.body.innerHTML = '<input id="name" type="text" />';
     const input = document.getElementById('name') as HTMLInputElement;
@@ -168,6 +198,44 @@ describe('injected state-driven waits', () => {
           element.actionability === 'actionable',
       ),
     ).toBe(false);
+  });
+
+  it('interactive element search reports center-point occlusion for covered targets', async () => {
+    document.body.innerHTML = `
+      <button id="background-search">搜索</button>
+      <div id="modal-cover">登录后继续</div>
+    `;
+    const button = document.getElementById('background-search') as HTMLButtonElement;
+    const cover = document.getElementById('modal-cover') as HTMLDivElement;
+    setRect(button, { left: 100, top: 100, width: 120, height: 40 });
+    setRect(cover, { left: 80, top: 80, width: 240, height: 160 });
+    document.elementFromPoint = vi.fn((x: number, y: number) => {
+      if (x >= 80 && x <= 320 && y >= 80 && y <= 240) return cover;
+      return null;
+    });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '搜索',
+      includeCoordinates: true,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.elements[0]).toMatchObject({
+      selector: '#background-search',
+      visibility: {
+        source: 'dom',
+        domVisible: true,
+        inViewport: true,
+        centerHitTarget: false,
+        occluded: true,
+        reason: 'center_covered',
+      },
+    });
   });
 
   it('interactive element search keeps a phone input reachable when its label only adds country code chrome', async () => {

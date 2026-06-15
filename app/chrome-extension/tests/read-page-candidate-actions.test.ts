@@ -16,6 +16,7 @@ function element(overrides: Partial<ReadPageInteractiveElement>): ReadPageIntera
     name: overrides.name ?? 'Search',
     matchSource: overrides.matchSource ?? 'visible_text',
     actionability: overrides.actionability ?? 'actionable',
+    visibility: overrides.visibility,
     rect: overrides.rect,
   };
 }
@@ -112,6 +113,80 @@ describe('read_page candidate action intents', () => {
     ]);
   });
 
+  it('promotes safe CDP AX locators into executable candidate actions', () => {
+    const actions = buildCandidateActions([], [], {
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      cdpAccessibilityCandidates: [
+        {
+          role: 'searchbox',
+          label: 'Search input',
+          locator: {
+            source: 'cdp_ax',
+            axNodeId: 'ax_search',
+            backendDOMNodeId: 201,
+            cssSelector: 'input[aria-label="Search input"]',
+            visualBounds: { x: 24, y: 24, width: 320, height: 40 },
+          },
+          actionTypes: ['focus', 'setvalue'],
+          state: {},
+        },
+      ],
+    });
+
+    expect(actions[0]).toMatchObject({
+      actionType: 'fill',
+      targetRef: 'ref_fallback_cdp_ax_backend_201',
+      intent: 'search.enter_query',
+      actionability: 'actionable',
+      visibility: {
+        source: 'cdp',
+        domVisible: true,
+        inViewport: true,
+        reason: 'cdp_ax_box_model',
+      },
+    });
+    expect(actions[0].locatorChain).toEqual([
+      { type: 'ref', value: 'ref_fallback_cdp_ax_backend_201' },
+      { type: 'css', value: 'input[aria-label="Search input"]' },
+    ]);
+  });
+
+  it('does not promote unsafe CDP AX candidates without a stable selector or actionability', () => {
+    const actions = buildCandidateActions([], [], {
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      cdpAccessibilityCandidates: [
+        {
+          role: 'button',
+          label: 'Generic button',
+          locator: {
+            source: 'cdp_ax',
+            axNodeId: 'ax_generic',
+            backendDOMNodeId: 202,
+            cssSelector: 'button',
+            visualBounds: { x: 10, y: 10, width: 80, height: 30 },
+          },
+          actionTypes: ['click'],
+          state: {},
+        },
+        {
+          role: 'button',
+          label: 'Disabled action',
+          locator: {
+            source: 'cdp_ax',
+            axNodeId: 'ax_disabled',
+            backendDOMNodeId: 203,
+            cssSelector: 'button[aria-label="Disabled action"]',
+            visualBounds: { x: 10, y: 10, width: 80, height: 30 },
+          },
+          actionTypes: ['click'],
+          state: { disabled: true },
+        },
+      ],
+    });
+
+    expect(actions).toEqual([]);
+  });
+
   it('carries frameId from a frame-targeted read into candidate actions', () => {
     const actions = buildCandidateActions(
       [
@@ -147,6 +222,71 @@ describe('read_page candidate action intents', () => {
     expect(actions.find((action) => action.targetRef === 'ref_login_button')?.intent).toBe(
       'auth.submit_login',
     );
+  });
+
+  it('does not emit hidden, offscreen, or occluded elements as executable candidates', () => {
+    const actions = buildCandidateActions(
+      [
+        element({
+          ref: 'ref_hidden_search',
+          role: 'searchbox',
+          name: 'Search',
+          visibility: {
+            source: 'dom',
+            domVisible: false,
+            inViewport: false,
+            centerHitTarget: null,
+            occluded: null,
+            reason: 'dom_hidden',
+          },
+        }),
+        element({
+          ref: 'ref_covered_search',
+          role: 'searchbox',
+          name: 'Search',
+          visibility: {
+            source: 'dom',
+            domVisible: true,
+            inViewport: true,
+            centerHitTarget: false,
+            occluded: true,
+            reason: 'center_covered',
+          },
+        }),
+        element({
+          ref: 'ref_visible_search',
+          role: 'searchbox',
+          name: 'Search',
+          visibility: {
+            source: 'dom',
+            domVisible: true,
+            inViewport: true,
+            centerHitTarget: true,
+            occluded: false,
+            reason: 'visible_unobstructed',
+          },
+        }),
+      ],
+      [
+        { ref: 'ref_hidden_search', selector: 'input.search:nth-of-type(1)' },
+        { ref: 'ref_covered_search', selector: 'input.search:nth-of-type(2)' },
+        { ref: 'ref_visible_search', selector: 'input.search:nth-of-type(3)' },
+      ],
+    );
+
+    expect(actions.map((action) => action.targetRef)).toEqual(['ref_visible_search']);
+    expect(actions[0]).toMatchObject({
+      actionType: 'fill',
+      visibility: {
+        source: 'dom',
+        domVisible: true,
+        inViewport: true,
+        centerHitTarget: true,
+        occluded: false,
+      },
+    });
+    expect(actions[0].matchReason).toContain('visibility_reason=visible_unobstructed');
+    expect(actions[0].actionabilityReason).toContain('center_hit_target=true');
   });
 
   it('adds action target provenance and freshness boundaries without new fields', () => {

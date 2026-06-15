@@ -7,6 +7,22 @@ export const LOW_BUSINESS_HREF_PATTERN =
   /(?:^|\/)(?:legal|privacy|terms|sponsors?|topics?|report|feedback|creator(?:-center)?|upload|video-management|ads?|advertising|account(?:-recovery)?|recover|recovery|contact(?:-us)?|about(?:-us)?|sitemap|site-map|friend-links?|download(?:-app)?|certificate|license|permit|compliance|icp|record)(?:\/|$|\?)/i;
 
 export const REGION_MATCHERS: Record<ReadPageRegionType, readonly RegExp[]> = {
+  search_area: [
+    /\b(search[_\s-]?area|searchbox|search form|query input|search submit|search category)\b/i,
+    /搜索区|搜索框|搜索表单|搜索按钮|搜索分类/i,
+  ],
+  filter_panel: [
+    /\b(filter[_\s-]?panel|filter option|sort option|time range|applied filter)\b/i,
+    /筛选面板|筛选项|排序项|发布时间|已筛选/i,
+  ],
+  result_list: [
+    /\b(result[_\s-]?list|result card|list item|card list|search results?)\b/i,
+    /结果列表|结果卡片|卡片列表|搜索结果/i,
+  ],
+  detail_area: [
+    /\b(detail[_\s-]?area|detail view|article detail|record detail)\b/i,
+    /详情区|详情页|正文详情/i,
+  ],
   navigation: [/\b(nav|navigation|sidebar|tab|home|back|next)\b/i, /导航|首页|返回|下一页/i],
   content: [
     /\b(content|article|result|record|row|item|post|document|body)\b/i,

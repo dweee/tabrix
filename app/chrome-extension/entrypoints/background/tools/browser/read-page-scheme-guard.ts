@@ -12,6 +12,34 @@ export function inferSchemeGuard(url: string): SchemeGuardSummary {
   const raw = String(url || '');
   const lower = raw.toLowerCase();
 
+  if (
+    lower.startsWith('https://chromewebstore.google.com/') ||
+    lower.startsWith('https://chrome.google.com/webstore/') ||
+    lower.startsWith('https://microsoftedge.microsoft.com/addons/')
+  ) {
+    return {
+      scheme: 'https',
+      pageType: 'unsupported_page',
+      supportedForContentScript: false,
+      unsupportedPageType: 'browser_extension_store',
+      recommendedAction: 'switch_to_http_tab',
+    };
+  }
+
+  if (isLikelyPdfUrl(lower)) {
+    return {
+      scheme: lower.startsWith('file://')
+        ? 'file'
+        : lower.startsWith('https://')
+          ? 'https'
+          : 'http',
+      pageType: 'unsupported_page',
+      supportedForContentScript: false,
+      unsupportedPageType: 'pdf_document',
+      recommendedAction: 'switch_to_http_tab',
+    };
+  }
+
   if (lower.startsWith('http://') || lower.startsWith('https://')) {
     return {
       scheme: lower.startsWith('https://') ? 'https' : 'http',
@@ -27,7 +55,9 @@ export function inferSchemeGuard(url: string): SchemeGuardSummary {
       scheme: 'chrome-extension',
       pageType: 'extension_page',
       supportedForContentScript: false,
-      unsupportedPageType: 'non_web_tab',
+      unsupportedPageType: lower.startsWith('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/')
+        ? 'pdf_document'
+        : 'non_web_tab',
       recommendedAction: 'switch_to_http_tab',
     };
   }
@@ -84,4 +114,17 @@ export function inferSchemeGuard(url: string): SchemeGuardSummary {
     unsupportedPageType: 'non_web_tab',
     recommendedAction: 'switch_to_http_tab',
   };
+}
+
+function isLikelyPdfUrl(lowerUrl: string): boolean {
+  if (
+    !lowerUrl.startsWith('http://') &&
+    !lowerUrl.startsWith('https://') &&
+    !lowerUrl.startsWith('file://')
+  ) {
+    return false;
+  }
+  const withoutHash = lowerUrl.split('#', 1)[0] || lowerUrl;
+  const path = withoutHash.split('?', 1)[0] || withoutHash;
+  return path.endsWith('.pdf');
 }

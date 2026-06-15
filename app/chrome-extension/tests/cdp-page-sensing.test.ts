@@ -60,6 +60,10 @@ describe('CDP page sensing snapshot', () => {
                 resourceInFlightCount: 4,
                 failedResourceStatusCount: 2,
               },
+              route: {
+                url: 'https://app.example.test/search/results?q=private-token#secret',
+                historyLength: 7,
+              },
             },
           },
         };
@@ -134,6 +138,14 @@ describe('CDP page sensing snapshot', () => {
       readiness: 'complete',
       likelyLoading: false,
       title: 'Search Results',
+      route: {
+        href: 'https://app.example.test/search/results',
+        pathname: '/search/results',
+        hasQuery: true,
+        hasHash: true,
+        fingerprint: expect.stringMatching(/^route_[0-9a-f]{8}$/),
+        historyLength: 7,
+      },
       visibilityState: 'visible',
       focused: true,
       frameCount: 2,
@@ -226,6 +238,192 @@ describe('CDP page sensing snapshot', () => {
     expect(blob).not.toContain('private-token');
     expect(blob).not.toContain('user:pass');
     expect(blob).not.toContain('secret');
+  });
+
+  it('keeps privacy-safe AX locators and does not merge distinct same-label nodes', async () => {
+    sendCommandMock.mockImplementation(async (_tabId: number, method: string) => {
+      if (method === 'Runtime.evaluate') {
+        return {
+          result: {
+            value: {
+              readyState: 'complete',
+              url: 'https://app.example.test/search',
+              title: 'Search',
+            },
+          },
+        };
+      }
+      if (method === 'Accessibility.getFullAXTree') {
+        return {
+          nodes: [
+            {
+              nodeId: 'ax-search-hidden',
+              backendDOMNodeId: 101,
+              role: { value: 'textbox' },
+              name: { value: 'Search' },
+              value: { value: 'private query' },
+              description: { value: 'private description' },
+              actions: [{ name: 'focus' }],
+            },
+            {
+              nodeId: 'ax-search-visible',
+              backendDOMNodeId: 102,
+              role: { value: 'textbox' },
+              name: { value: 'Search' },
+              value: { value: 'private query' },
+              description: { value: 'private description' },
+              actions: [{ name: 'focus' }],
+            },
+            {
+              nodeId: 'ax-negative',
+              backendDOMNodeId: -1,
+              role: { value: 'button' },
+              name: { value: 'Run' },
+              actions: [{ name: 'click' }],
+            },
+          ],
+        };
+      }
+      return {};
+    });
+
+    const snapshot = await captureCDPPageSensingSnapshot(78);
+    const blob = JSON.stringify(snapshot);
+
+    expect(snapshot.accessibility?.objectCandidates).toEqual([
+      {
+        role: 'textbox',
+        label: 'Search',
+        locator: {
+          source: 'cdp_ax',
+          axNodeId: 'ax-search-hidden',
+          backendDOMNodeId: 101,
+        },
+        actionTypes: ['focus'],
+        state: {},
+      },
+      {
+        role: 'textbox',
+        label: 'Search',
+        locator: {
+          source: 'cdp_ax',
+          axNodeId: 'ax-search-visible',
+          backendDOMNodeId: 102,
+        },
+        actionTypes: ['focus'],
+        state: {},
+      },
+      {
+        role: 'button',
+        label: 'Run',
+        locator: {
+          source: 'cdp_ax',
+          axNodeId: 'ax-negative',
+        },
+        actionTypes: ['click'],
+        state: {},
+      },
+    ]);
+    expect(snapshot.accessibility?.locatorCoverage).toEqual({
+      locatorCandidateCount: 3,
+      axNodeIdCount: 3,
+      backendDOMNodeIdCount: 2,
+      locatorCoverageRate: 1,
+    });
+    expect(blob).not.toContain('private query');
+    expect(blob).not.toContain('private description');
+  });
+
+  it('enriches AX locators with safe DOM selectors from backend node ids', async () => {
+    sendCommandMock.mockImplementation(async (_tabId: number, method: string, params?: any) => {
+      if (method === 'Runtime.evaluate') {
+        return {
+          result: {
+            value: {
+              readyState: 'complete',
+              url: 'https://app.example.test/search',
+              title: 'Search',
+            },
+          },
+        };
+      }
+      if (method === 'Accessibility.getFullAXTree') {
+        return {
+          nodes: [
+            {
+              nodeId: 'ax-search',
+              backendDOMNodeId: 201,
+              role: { value: 'textbox' },
+              name: { value: 'Search input' },
+              actions: [{ name: 'focus' }],
+            },
+            {
+              nodeId: 'ax-secret',
+              backendDOMNodeId: 202,
+              role: { value: 'button' },
+              name: { value: 'Secret action' },
+              actions: [{ name: 'click' }],
+            },
+          ],
+        };
+      }
+      if (method === 'DOM.describeNode' && params?.backendNodeId === 201) {
+        return {
+          node: {
+            nodeName: 'INPUT',
+            localName: 'input',
+            attributes: ['type', 'search', 'aria-label', 'Search input'],
+          },
+        };
+      }
+      if (method === 'DOM.getBoxModel' && params?.backendNodeId === 201) {
+        return {
+          model: {
+            content: [10, 20, 210, 20, 210, 60, 10, 60],
+          },
+        };
+      }
+      if (method === 'DOM.describeNode' && params?.backendNodeId === 202) {
+        return {
+          node: {
+            nodeName: 'BUTTON',
+            localName: 'button',
+            attributes: ['id', 'secret-token-123', 'aria-label', 'Authorization token'],
+          },
+        };
+      }
+      return {};
+    });
+
+    const snapshot = await captureCDPPageSensingSnapshot(79);
+    const blob = JSON.stringify(snapshot);
+
+    expect(snapshot.accessibility?.objectCandidates).toEqual([
+      expect.objectContaining({
+        role: 'textbox',
+        label: 'Search input',
+        locator: expect.objectContaining({
+          source: 'cdp_ax',
+          axNodeId: 'ax-search',
+          backendDOMNodeId: 201,
+          nodeName: 'input',
+          cssSelector: 'input[aria-label="Search input"]',
+          visualBounds: { x: 10, y: 20, width: 200, height: 40 },
+        }),
+      }),
+      expect.objectContaining({
+        role: 'button',
+        label: 'Secret action',
+        locator: expect.objectContaining({
+          source: 'cdp_ax',
+          axNodeId: 'ax-secret',
+          backendDOMNodeId: 202,
+          nodeName: 'button',
+        }),
+      }),
+    ]);
+    expect(blob).not.toContain('secret-token-123');
+    expect(blob).not.toContain('Authorization token');
   });
 
   it('marks interactive pages with no load event as still likely loading', async () => {

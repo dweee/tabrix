@@ -89,6 +89,103 @@ describe('read_page task protocol', () => {
     ]);
   });
 
+  it('projects CDP AX candidates into generic page region objects', () => {
+    const protocol = buildTaskProtocol(
+      createBaseParams({
+        currentUrl: 'https://example.com/search',
+        currentTitle: 'Search',
+        pageContext: {
+          filter: 'interactive',
+          depth: 3,
+          focus: null,
+          scheme: 'https',
+          viewport: { width: 1280, height: 720, dpr: 1 },
+          sparse: false,
+          fallbackUsed: false,
+          fallbackSource: null,
+          refMapCount: 0,
+          markedElementsCount: 0,
+          loadReadiness: {
+            status: 'stable',
+            pageStability: 'stable',
+            initialTabStatus: 'complete',
+            finalTabStatus: 'complete',
+            waitedForPendingDocument: false,
+            settled: null,
+            timedOut: null,
+            settleReason: null,
+            waitedMs: null,
+            readyState: 'complete',
+            canUseSnapshotForBusinessAction: true,
+            nextStepAction: 'proceed',
+            nextStepHint: 'safe_to_use_structured_refs_with_postcondition_verification',
+            claimBoundary: 'stable test snapshot',
+            cdpSensing: {
+              source: 'cdp_page_sensing',
+              available: true,
+              readiness: 'complete',
+              likelyLoading: false,
+              accessibility: {
+                totalNodes: 2,
+                actionableNodeCount: 1,
+                actionableRoleTop: [{ role: 'textbox', count: 1 }],
+                actionableSampleLabels: ['Search input'],
+                stateSignals: {
+                  checkedCount: 0,
+                  selectedCount: 0,
+                  expandedCount: 0,
+                  disabledCount: 0,
+                },
+                locatorCoverage: {
+                  locatorCandidateCount: 1,
+                  axNodeIdCount: 1,
+                  backendDOMNodeIdCount: 1,
+                  locatorCoverageRate: 1,
+                },
+                objectCandidates: [
+                  {
+                    role: 'textbox',
+                    label: 'Search input',
+                    locator: {
+                      source: 'cdp_ax',
+                      axNodeId: 'ax-search',
+                      backendDOMNodeId: 101,
+                      cssSelector: 'input[aria-label="Search input"]',
+                      visualBounds: { x: 10, y: 20, width: 200, height: 40 },
+                    },
+                    actionTypes: ['focus', 'set_value'],
+                    state: { disabled: false },
+                  },
+                ],
+              },
+              claimBoundary: 'test cdp sensing',
+            },
+          },
+        },
+      }) as any,
+    );
+
+    const searchArea = protocol.pageRegions.find((region) => region.regionType === 'search_area');
+    expect(searchArea?.objects).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          objectId: 'cdp_ax_101',
+          label: 'Search input',
+          role: 'textbox',
+          targetability: 'locator_chain',
+          reason: 'cdp_ax_accessibility_candidate',
+          sourceProvenance: ['cdp', 'ax'],
+          visualBounds: { x: 10, y: 20, width: 200, height: 40 },
+          locatorChain: expect.arrayContaining([
+            { type: 'cdp_ax_node', value: 'ax-search' },
+            { type: 'backend_dom_node', value: '101' },
+            { type: 'css', value: 'input[aria-label="Search input"]' },
+          ]),
+        }),
+      ]),
+    );
+  });
+
   it('keeps workflow_run_shell in monitor mode before detail diagnostics are visible', () => {
     const protocol = buildTaskProtocol({
       mode: 'compact',
@@ -638,6 +735,207 @@ describe('read_page task protocol', () => {
     });
   });
 
+  it('surfaces neutral search, filter panel, and result card container objects', () => {
+    const interactiveElements = [
+      {
+        ref: 'ref_search_input',
+        role: 'searchbox',
+        name: 'Search or enter anything',
+        valueState: 'non_empty',
+      },
+      {
+        ref: 'ref_filter_open',
+        role: 'button',
+        name: '筛选',
+      },
+      {
+        ref: 'ref_filter_most_saved',
+        role: 'button',
+        name: '最多收藏',
+      },
+      {
+        ref: 'ref_filter_one_week',
+        role: 'button',
+        name: '一周内',
+      },
+      {
+        ref: 'ref_card_1',
+        role: 'link',
+        name: 'Practical guide to AI image creation',
+        href: '/items/1',
+      },
+      {
+        ref: 'ref_card_2',
+        role: 'link',
+        name: 'Prompt workflow checklist for creators',
+        href: '/items/2',
+      },
+    ];
+    const visibleRegionRows = {
+      sourceDataSource: 'dom_region_rows',
+      rows: [
+        {
+          rowId: 'row_1',
+          title: 'Practical guide to AI image creation',
+          primaryText: 'Practical guide to AI image creation',
+          secondaryText: 'Creator Lab',
+          summary: null,
+          metaText: 'today',
+          interactionText: '128 saves',
+          visibleTextFields: ['Practical guide to AI image creation'],
+          targetRef: 'ref_card_1',
+          targetRefCoverageRate: 1,
+          boundingBox: null,
+          regionId: 'region_row_1',
+          sourceRegion: 'result_list',
+          confidence: 0.86,
+          qualityReasons: ['target_ref_available'],
+        },
+        {
+          rowId: 'row_2',
+          title: 'Prompt workflow checklist for creators',
+          primaryText: 'Prompt workflow checklist for creators',
+          secondaryText: 'Design Ops',
+          summary: null,
+          metaText: 'yesterday',
+          interactionText: '86 saves',
+          visibleTextFields: ['Prompt workflow checklist for creators'],
+          targetRef: 'ref_card_2',
+          targetRefCoverageRate: 1,
+          boundingBox: null,
+          regionId: 'region_row_2',
+          sourceRegion: 'result_list',
+          confidence: 0.84,
+          qualityReasons: ['target_ref_available'],
+        },
+      ],
+      rowCount: 2,
+      visibleRegionRowsUsed: true,
+      visibleRegionRowsRejectedReason: null,
+      sourceRegion: 'result_list',
+      rowExtractionConfidence: 0.85,
+      cardExtractorUsed: true,
+      cardPatternConfidence: 0.82,
+      cardRowsCount: 2,
+      rowOrder: 'visual_order',
+      targetRefCoverageRate: 1,
+      regionQualityScore: 0.8,
+      visibleDomRowsCandidateCount: 2,
+      visibleDomRowsSelectedCount: 2,
+      lowValueRegionRejectedCount: 0,
+      footerLikeRejectedCount: 0,
+      navigationLikeRejectedCount: 0,
+      targetRefCoverageRejectedCount: 0,
+      rejectedRegionReasonDistribution: {
+        low_value_region: 0,
+        footer_like_region: 0,
+        navigation_like_region: 0,
+        target_ref_coverage_insufficient: 0,
+        single_isolated_text: 0,
+        empty_shell: 0,
+        broad_page_shell: 0,
+        dom_region_rows_unavailable: 0,
+      },
+      pageInfo: {
+        url: 'https://example.com/search',
+        title: 'Search results',
+        viewport: { width: 1280, height: 720, dpr: 1 },
+        scrollY: 0,
+        pixelsAbove: 0,
+        pixelsBelow: 0,
+        visibleRegionCount: 2,
+        candidateRegionCount: 2,
+      },
+    } as const;
+    const candidateActions = buildCandidateActions(
+      interactiveElements,
+      [
+        { ref: 'ref_search_input', selector: 'input[type="search"]' },
+        { ref: 'ref_filter_open', selector: '.toolbar .filter' },
+        { ref: 'ref_filter_most_saved', selector: '.filter-panel .most-saved' },
+        { ref: 'ref_filter_one_week', selector: '.filter-panel .one-week' },
+        { ref: 'ref_card_1', selector: 'article:nth-of-type(1) a[href]' },
+        { ref: 'ref_card_2', selector: 'article:nth-of-type(2) a[href]' },
+      ],
+      { visibleRegionRows },
+    );
+
+    const protocol = buildTaskProtocol(
+      createBaseParams({
+        currentUrl: 'https://example.com/search?q=ai',
+        currentTitle: 'Search results',
+        pageRole: 'web_page',
+        primaryRegion: 'search_results',
+        interactiveElements,
+        candidateActions,
+        visibleRegionRows,
+      }),
+    );
+
+    const searchArea = protocol.pageRegions.find((region) => region.regionType === 'search_area');
+    const filterPanel = protocol.pageRegions.find((region) => region.regionType === 'filter_panel');
+    const resultList = protocol.pageRegions.find((region) => region.regionType === 'result_list');
+
+    expect(searchArea).toMatchObject({
+      regionId: 'region_search_area',
+      label: 'search area',
+      objects: expect.arrayContaining([
+        expect.objectContaining({
+          objectId: 'container_search_area',
+          objectType: 'container',
+          containerKind: 'search_area',
+        }),
+        expect.objectContaining({
+          objectId: 'ref_search_input',
+          parentObjectId: 'container_search_area',
+          objectType: 'control',
+        }),
+      ]),
+    });
+    expect(filterPanel).toMatchObject({
+      regionId: 'region_filter_panel',
+      state: 'open_candidate',
+      objects: expect.arrayContaining([
+        expect.objectContaining({
+          objectId: 'container_filter_panel',
+          objectType: 'container',
+          containerKind: 'filter_panel',
+        }),
+        expect.objectContaining({
+          objectId: 'ref_filter_most_saved',
+          parentObjectId: 'container_filter_panel',
+          actionTypes: ['filter.sort_most_collected'],
+        }),
+        expect.objectContaining({
+          objectId: 'ref_filter_one_week',
+          parentObjectId: 'container_filter_panel',
+          actionTypes: ['filter.time_range_select'],
+        }),
+      ]),
+    });
+    expect(resultList).toMatchObject({
+      regionId: 'region_result_list',
+      label: 'result list',
+      objects: expect.arrayContaining([
+        expect.objectContaining({
+          objectId: 'container_result_list',
+          objectType: 'container',
+          containerKind: 'result_list',
+        }),
+        expect.objectContaining({
+          objectId: 'ref_card_1',
+          parentObjectId: 'container_result_list',
+          objectType: 'result_card',
+          detailTarget: expect.objectContaining({
+            targetRef: 'ref_card_1',
+            candidateActionId: 'ca_click_ref_card_1',
+            intent: 'content.open_detail',
+          }),
+        }),
+      ]),
+    });
+  });
+
   it('keeps neutral read pages idle instead of treating read mode as long_content', () => {
     const protocol = buildTaskProtocol(createBaseParams({ pageRole: 'web_page' }) as any);
 
@@ -932,11 +1230,11 @@ describe('read_page task protocol', () => {
 
       const regionTypes = protocol.pageRegions.map((item) => item.regionType);
       expect(regionTypes).toEqual(
-        expect.arrayContaining(['navigation', 'content', 'form', 'feedback']),
+        expect.arrayContaining(['navigation', 'content', 'search_area', 'feedback']),
       );
-      expect(protocol.pageRegions.find((item) => item.regionType === 'form')?.targetability).toBe(
-        'target_ref',
-      );
+      expect(
+        protocol.pageRegions.find((item) => item.regionType === 'search_area')?.targetability,
+      ).toBe('target_ref');
       expect(
         protocol.pageRegions.find((item) => item.regionType === 'feedback')?.claimBoundary,
       ).toContain('region candidate');

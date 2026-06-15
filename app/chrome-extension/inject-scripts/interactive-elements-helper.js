@@ -137,6 +137,53 @@
     );
   }
 
+  function computeTargetVisibility(el) {
+    const domVisible = isElementVisible(el);
+    const inViewport = isElementInViewport(el);
+    let centerHitTarget = null;
+    let occluded = null;
+    let reason = '';
+
+    if (!domVisible) {
+      reason = 'dom_hidden';
+    } else if (!inViewport) {
+      reason = 'offscreen';
+    } else {
+      try {
+        const rect = el.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        const hit =
+          Number.isFinite(centerX) &&
+          Number.isFinite(centerY) &&
+          centerX >= 0 &&
+          centerY >= 0 &&
+          centerX <= window.innerWidth &&
+          centerY <= window.innerHeight
+            ? document.elementFromPoint(centerX, centerY)
+            : null;
+        centerHitTarget = Boolean(hit && (hit === el || el.contains(hit)));
+        occluded = hit ? !centerHitTarget : null;
+        reason = centerHitTarget
+          ? 'visible_unobstructed'
+          : hit
+            ? 'center_covered'
+            : 'hit_test_unavailable';
+      } catch (_) {
+        reason = 'hit_test_failed';
+      }
+    }
+
+    return {
+      source: 'dom',
+      domVisible,
+      inViewport,
+      centerHitTarget,
+      occluded,
+      reason,
+    };
+  }
+
   /**
    * Checks if an element is considered interactive (not disabled or hidden from accessibility).
    * @param {Element} el The element to check.
@@ -597,6 +644,7 @@
     if (checked !== null) info.checked = checked;
     const visualSignature = getVisualSignature(el);
     if (visualSignature) info.visualSignature = visualSignature;
+    info.visibility = computeTargetVisibility(el);
     if (includeCoordinates) {
       const rect = el.getBoundingClientRect();
       info.coordinates = {

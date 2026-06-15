@@ -322,6 +322,132 @@ function redactSensitiveHighValueObjectsForAi(
   });
 }
 
+function normalizeCdpAxRole(role: unknown): string | null {
+  if (typeof role !== 'string') return null;
+  const trimmed = role.trim().toLowerCase();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function actionTypesFromCdpAxCandidate(candidate: { actionTypes?: unknown }): string[] {
+  const actions = Array.isArray(candidate.actionTypes) ? candidate.actionTypes : [];
+  return actions
+    .map((action): string | null => (typeof action === 'string' ? action.trim() : null))
+    .filter((action): action is string => Boolean(action))
+    .slice(0, 6);
+}
+
+function locatorChainFromCdpAxCandidate(candidate: {
+  locator?: {
+    source?: unknown;
+    axNodeId?: unknown;
+    backendDOMNodeId?: unknown;
+    cssSelector?: unknown;
+    visualBounds?: unknown;
+  };
+}): ReadPageCandidateActionLocator[] {
+  const locator = candidate.locator;
+  if (!locator || locator.source !== 'cdp_ax') return [];
+  const chain: ReadPageCandidateActionLocator[] = [];
+  if (typeof locator.axNodeId === 'string' && locator.axNodeId.trim()) {
+    chain.push({ type: 'cdp_ax_node', value: locator.axNodeId.trim() });
+  }
+  if (
+    typeof locator.backendDOMNodeId === 'number' &&
+    Number.isInteger(locator.backendDOMNodeId) &&
+    locator.backendDOMNodeId > 0
+  ) {
+    chain.push({ type: 'backend_dom_node', value: String(locator.backendDOMNodeId) });
+  }
+  if (typeof locator.cssSelector === 'string' && locator.cssSelector.trim()) {
+    chain.push({ type: 'css', value: locator.cssSelector.trim() });
+  }
+  return chain.slice(0, 4);
+}
+
+function visualBoundsFromCdpAxCandidate(candidate: {
+  locator?: { visualBounds?: unknown };
+}): ReadPageRegionObject['visualBounds'] {
+  const bounds = candidate.locator?.visualBounds;
+  if (!bounds || typeof bounds !== 'object' || Array.isArray(bounds)) return undefined;
+  const record = bounds as Record<string, unknown>;
+  const x = Number(record.x);
+  const y = Number(record.y);
+  const width = Number(record.width);
+  const height = Number(record.height);
+  if (![x, y, width, height].every((value) => Number.isFinite(value))) return undefined;
+  if (width <= 0 || height <= 0) return undefined;
+  return { x, y, width, height };
+}
+
+function objectTypeFromCdpAxRole(role: string): string {
+  if (role === 'link') return 'link';
+  if (role === 'menuitem') return 'nav_entry';
+  return 'control';
+}
+
+function valueStateFromCdpAxCandidate(candidate: {
+  state?: { checked?: unknown; selected?: unknown; expanded?: unknown; disabled?: unknown };
+}): ReadPageRegionObject['valueState'] {
+  if (candidate.state?.selected === true || candidate.state?.expanded === true) return 'non_empty';
+  if (candidate.state?.selected === false || candidate.state?.expanded === false) return 'empty';
+  return 'unknown';
+}
+
+function buildCdpAxRegionObjects(params: TaskProtocolParams): ReadPageRegionObject[] {
+  const candidates = params.pageContext.loadReadiness?.cdpSensing?.accessibility?.objectCandidates;
+  if (!Array.isArray(candidates)) return [];
+  const objects: ReadPageRegionObject[] = [];
+  for (const [index, rawCandidate] of candidates.slice(0, 30).entries()) {
+    if (!rawCandidate || typeof rawCandidate !== 'object') continue;
+    const candidate = rawCandidate as {
+      role?: unknown;
+      label?: unknown;
+      locator?: {
+        source?: unknown;
+        axNodeId?: unknown;
+        backendDOMNodeId?: unknown;
+        cssSelector?: unknown;
+        visualBounds?: unknown;
+      };
+      actionTypes?: unknown;
+      state?: { checked?: unknown; selected?: unknown; expanded?: unknown; disabled?: unknown };
+    };
+    const role = normalizeCdpAxRole(candidate.role);
+    if (!role) continue;
+    const label =
+      typeof candidate.label === 'string' && candidate.label.trim().length > 0
+        ? candidate.label.trim()
+        : role;
+    const locatorChain = locatorChainFromCdpAxCandidate(candidate);
+    const idPart =
+      locatorChain.find((locator) => locator.type === 'backend_dom_node')?.value ??
+      locatorChain.find((locator) => locator.type === 'cdp_ax_node')?.value ??
+      `${role}_${index}`;
+    const actionTypes = actionTypesFromCdpAxCandidate(candidate);
+    const disabled = candidate.state?.disabled === true;
+    objects.push({
+      objectId: `cdp_ax_${idPart}`,
+      label,
+      objectType: objectTypeFromCdpAxRole(role),
+      role,
+      valueState: valueStateFromCdpAxCandidate(candidate),
+      locatorChain,
+      actionTypes,
+      targetability: disabled
+        ? 'not_clickable'
+        : locatorChain.length > 0
+          ? 'locator_chain'
+          : 'not_clickable',
+      confidence: locatorChain.length > 0 ? 0.74 : 0.58,
+      reason: 'cdp_ax_accessibility_candidate',
+      sourceProvenance: ['cdp', 'ax'],
+      freshness: 'fresh',
+      visualBounds: visualBoundsFromCdpAxCandidate(candidate),
+    });
+  }
+  return objects;
+}
+
 function buildPageRegions(
   params: TaskProtocolParams,
   highValueObjects: ReadPageHighValueObject[],
@@ -412,6 +538,37 @@ function buildPageRegions(
       ),
     ),
   );
+
+  for (const { regionType, objects } of buildGenericContainerRegionObjects({
+    candidateActions: aiFacingCandidateActions,
+    interactiveByRef,
+    candidateByTargetRef,
+    aiFacingCandidateByTargetRef,
+    visibleRegionRows: params.visibleRegionRows,
+    cdpAxRegionObjects: buildCdpAxRegionObjects(params),
+    representedObjectIds,
+  })) {
+    const current = byType.get(regionType) ?? [];
+    for (const object of objects) {
+      if (current.length >= maxObjectsForRegion(regionType)) break;
+      const existingIndex = current.findIndex(
+        (item) =>
+          item.objectId === object.objectId ||
+          (item.targetRef && object.targetRef && item.targetRef === object.targetRef),
+      );
+      if (existingIndex >= 0) {
+        current[existingIndex] = { ...current[existingIndex], ...object };
+        representedObjectIds.add(object.objectId);
+        if (object.targetRef) representedObjectIds.add(object.targetRef);
+        continue;
+      }
+      current.push(object);
+      representedObjectIds.add(object.objectId);
+      if (object.targetRef) representedObjectIds.add(object.targetRef);
+    }
+    byType.set(regionType, current);
+  }
+
   for (const { regionType, object } of buildCandidateActionSignalRegionObjects({
     candidateActions: aiFacingCandidateActions,
     interactiveByRef,
@@ -570,6 +727,263 @@ function buildPageRegions(
   return regions;
 }
 
+function buildGenericContainerRegionObjects(params: {
+  candidateActions: readonly ReadPageCandidateAction[];
+  interactiveByRef: Map<string, ReadPageInteractiveElement>;
+  candidateByTargetRef: Map<string, ReadPageCandidateAction[]>;
+  aiFacingCandidateByTargetRef: Map<string, ReadPageCandidateAction[]>;
+  visibleRegionRows?: VisibleRegionRowsResult;
+  cdpAxRegionObjects: readonly ReadPageRegionObject[];
+  representedObjectIds: Set<string>;
+}): Array<{ regionType: ReadPageRegionType; objects: ReadPageRegionObject[] }> {
+  const output: Array<{ regionType: ReadPageRegionType; objects: ReadPageRegionObject[] }> = [];
+  const searchObjects = buildSearchAreaObjects(params);
+  if (searchObjects.length > 0) output.push({ regionType: 'search_area', objects: searchObjects });
+
+  const filterObjects = buildFilterPanelObjects(params);
+  if (filterObjects.length > 0) output.push({ regionType: 'filter_panel', objects: filterObjects });
+
+  const resultObjects = buildResultListObjects(params);
+  if (resultObjects.length > 0) output.push({ regionType: 'result_list', objects: resultObjects });
+
+  return output;
+}
+
+function buildSearchAreaObjects(params: {
+  candidateActions: readonly ReadPageCandidateAction[];
+  interactiveByRef: Map<string, ReadPageInteractiveElement>;
+  aiFacingCandidateByTargetRef: Map<string, ReadPageCandidateAction[]>;
+  cdpAxRegionObjects: readonly ReadPageRegionObject[];
+  representedObjectIds: Set<string>;
+}): ReadPageRegionObject[] {
+  const searchActions = params.candidateActions.filter((action) =>
+    String(action.intent || '').startsWith('search.'),
+  );
+  const searchElements = Array.from(params.interactiveByRef.values()).filter((element) => {
+    const role = String(element.role || '').toLowerCase();
+    return (
+      role === 'searchbox' || role === 'textbox' || /搜索|search|query/i.test(element.name || '')
+    );
+  });
+  const cdpSearchObjects = params.cdpAxRegionObjects.filter((object) =>
+    SEARCH_CONTROL_PATTERN.test(
+      `${object.role || ''} ${object.label || ''} ${object.reason || ''}`,
+    ),
+  );
+  if (searchActions.length === 0 && searchElements.length === 0 && cdpSearchObjects.length === 0) {
+    return [];
+  }
+
+  const containerId = 'container_search_area';
+  const childObjects: ReadPageRegionObject[] = [];
+  for (const action of searchActions) {
+    const targetRef = String(action.targetRef || '').trim();
+    if (!targetRef) continue;
+    const element = params.interactiveByRef.get(targetRef);
+    childObjects.push({
+      objectId: targetRef,
+      parentObjectId: containerId,
+      label: element?.name || action.label || targetRef,
+      objectType: 'control',
+      role: element?.role,
+      valueState: element?.valueState,
+      targetRef,
+      actionTypes: [String(action.intent || action.actionType)],
+      targetability: action.locatorChain.length > 0 ? 'locator_chain' : 'target_ref',
+      confidence: clampConfidence(action.confidence || 0.72),
+      reason: 'search_area_candidate_action',
+      primaryAction: pickPrimaryExecutableAction(
+        params.aiFacingCandidateByTargetRef.get(targetRef) ?? [],
+      ),
+      sourceProvenance: ['dom'],
+      freshness: 'fresh',
+    });
+    if (childObjects.length >= 4) break;
+  }
+
+  for (const element of searchElements) {
+    if (!element.ref) continue;
+    if (childObjects.some((object) => object.objectId === element.ref)) continue;
+    childObjects.push({
+      objectId: element.ref,
+      parentObjectId: containerId,
+      label: element.name || 'search input',
+      objectType: 'control',
+      role: element.role,
+      valueState: element.valueState,
+      targetRef: element.ref,
+      actionTypes: [],
+      targetability: 'target_ref',
+      confidence: 0.62,
+      reason: 'search_area_interactive_element',
+      sourceProvenance: ['dom'],
+      freshness: 'fresh',
+    });
+    if (childObjects.length >= 4) break;
+  }
+
+  for (const object of cdpSearchObjects) {
+    if (childObjects.some((item) => item.objectId === object.objectId)) continue;
+    childObjects.push({
+      ...object,
+      parentObjectId: containerId,
+    });
+    if (childObjects.length >= 4) break;
+  }
+
+  return [
+    {
+      objectId: containerId,
+      label: 'search area',
+      objectType: 'container',
+      containerKind: 'search_area',
+      actionTypes: Array.from(
+        new Set(searchActions.map((action) => String(action.intent || action.actionType))),
+      ),
+      targetability: childObjects.some((object) => object.targetability !== 'not_clickable')
+        ? 'target_ref'
+        : 'not_clickable',
+      confidence: 0.72,
+      reason: 'search_area_container',
+      sourceProvenance: ['dom'],
+      freshness: 'fresh',
+    },
+    ...childObjects,
+  ];
+}
+
+function buildFilterPanelObjects(params: {
+  candidateActions: readonly ReadPageCandidateAction[];
+  interactiveByRef: Map<string, ReadPageInteractiveElement>;
+  aiFacingCandidateByTargetRef: Map<string, ReadPageCandidateAction[]>;
+  representedObjectIds: Set<string>;
+}): ReadPageRegionObject[] {
+  const filterActions = params.candidateActions.filter((action) => {
+    const intent = String(action.intent || '');
+    const targetRef = String(action.targetRef || '');
+    return intent.startsWith('filter.') || targetRef.startsWith('ref_text_filter_panel_');
+  });
+  if (filterActions.length === 0) return [];
+
+  const containerId = 'container_filter_panel';
+  const childObjects = filterActions.slice(0, 6).flatMap((action): ReadPageRegionObject[] => {
+    const targetRef = String(action.targetRef || '').trim();
+    if (!targetRef) return [];
+    const element = params.interactiveByRef.get(targetRef);
+    return [
+      {
+        objectId: targetRef,
+        parentObjectId: containerId,
+        label: element?.name || action.label || targetRef,
+        objectType: 'control',
+        role: element?.role,
+        valueState: element?.valueState,
+        targetRef,
+        actionTypes: [String(action.intent || action.actionType)],
+        targetability: action.locatorChain.length > 0 ? 'locator_chain' : 'target_ref',
+        confidence: clampConfidence(action.confidence || 0.7),
+        reason: 'filter_panel_option_candidate',
+        primaryAction: pickPrimaryExecutableAction(
+          params.aiFacingCandidateByTargetRef.get(targetRef) ?? [],
+        ),
+        sourceProvenance: ['dom'],
+        freshness: 'fresh',
+      },
+    ];
+  });
+
+  return [
+    {
+      objectId: containerId,
+      label: 'filter panel',
+      objectType: 'container',
+      containerKind: 'filter_panel',
+      actionTypes: Array.from(
+        new Set(filterActions.map((action) => String(action.intent || action.actionType))),
+      ),
+      targetability: childObjects.length > 0 ? 'target_ref' : 'not_clickable',
+      confidence: 0.74,
+      reason: 'filter_panel_container',
+      sourceProvenance: ['dom'],
+      freshness: 'fresh',
+    },
+    ...childObjects,
+  ];
+}
+
+function buildResultListObjects(params: {
+  candidateByTargetRef: Map<string, ReadPageCandidateAction[]>;
+  aiFacingCandidateByTargetRef: Map<string, ReadPageCandidateAction[]>;
+  visibleRegionRows?: VisibleRegionRowsResult;
+  representedObjectIds: Set<string>;
+}): ReadPageRegionObject[] {
+  const rows =
+    params.visibleRegionRows?.visibleRegionRowsUsed === true ? params.visibleRegionRows.rows : [];
+  if (!rows || rows.length === 0) return [];
+
+  const containerId = 'container_result_list';
+  const cardObjects: ReadPageRegionObject[] = [];
+  for (const row of rows.slice(0, 10)) {
+    const targetRef = String(row.targetRef || '').trim();
+    const label = String(row.title || row.primaryText || '').trim();
+    if (!targetRef || !label) continue;
+    const actions = params.candidateByTargetRef.get(targetRef) ?? [];
+    const aiFacingActions = params.aiFacingCandidateByTargetRef.get(targetRef) ?? [];
+    const primaryAction = pickPrimaryExecutableAction(aiFacingActions);
+    cardObjects.push({
+      objectId: targetRef,
+      parentObjectId: containerId,
+      label,
+      objectType: 'result_card',
+      role: 'card',
+      targetRef,
+      actionTypes: primaryAction ? ['open_detail'] : [],
+      targetability: actions.some((action) => action.locatorChain.length > 0)
+        ? 'locator_chain'
+        : actions.length > 0
+          ? 'target_ref'
+          : 'not_clickable',
+      confidence: clampConfidence(
+        row.confidence || params.visibleRegionRows?.rowExtractionConfidence || 0.72,
+      ),
+      reason: 'result_list_card_candidate',
+      primaryAction,
+      detailTarget: primaryAction
+        ? {
+            targetRef: primaryAction.targetRef,
+            candidateActionId: primaryAction.candidateActionId,
+            actionType: primaryAction.actionType,
+            intent: primaryAction.toolArgs.candidateAction.intent,
+            locatorChain: primaryAction.locatorChain,
+            toolName: primaryAction.toolName,
+            claimBoundary:
+              'detailTarget is a current-snapshot execution hint; detail open success requires post-action verification',
+          }
+        : undefined,
+      sourceProvenance: ['dom', 'visible_text'],
+      freshness: 'fresh',
+    });
+  }
+
+  return [
+    {
+      objectId: containerId,
+      label: 'visible result list',
+      objectType: 'container',
+      containerKind: 'result_list',
+      actionTypes: cardObjects.some((object) => object.detailTarget) ? ['open_detail'] : [],
+      targetability: cardObjects.some((object) => object.targetability !== 'not_clickable')
+        ? 'target_ref'
+        : 'not_clickable',
+      confidence: clampConfidence(params.visibleRegionRows?.regionQualityScore || 0.66),
+      reason: 'result_list_container',
+      sourceProvenance: ['dom', 'visible_text'],
+      freshness: 'fresh',
+    },
+    ...cardObjects,
+  ];
+}
+
 function adjustRegionStateForVisibleAuthPrompt(
   regionType: ReadPageRegionType,
   state: string,
@@ -615,6 +1029,9 @@ function isNoisyGlobalMenuMapObject(object: ReadPageRegionObject): boolean {
 }
 
 function maxObjectsForRegion(regionType: ReadPageRegionType): number {
+  if (regionType === 'result_list') return 12;
+  if (regionType === 'filter_panel') return 8;
+  if (regionType === 'search_area') return 6;
   return regionType === 'navigation' ? MAX_NAVIGATION_REGION_OBJECTS : MAX_REGION_OBJECTS;
 }
 
@@ -686,6 +1103,13 @@ function buildRegionObjects(
             : 'interactive_region_signal',
       primaryAction: pickPrimaryExecutableAction(aiFacingActions),
     });
+  }
+  for (const object of buildCdpAxRegionObjects(params)) {
+    if (seen.has(object.objectId)) continue;
+    const regionType = classifyRegionText([object.role, object.label, object.reason].join(' '));
+    if (regionType === 'unknown') continue;
+    seen.add(object.objectId);
+    objects.push(object);
   }
   return objects;
 }

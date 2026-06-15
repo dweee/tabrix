@@ -96,6 +96,12 @@ export interface ReadPageInteractiveElement {
   role: string;
   name: string;
   /**
+   * Optional privacy-safe visual operability summary for the current viewport.
+   * It never carries raw DOM text or screenshots; it only helps callers prefer
+   * visible, unobstructed targets over hidden/offscreen/covered duplicates.
+   */
+  visibility?: ReadPageTargetVisibility;
+  /**
    * Optional privacy-safe form value state. This deliberately never carries
    * the raw input value; it only lets BrowserPageObject detect empty/non-empty
    * form/search state changes across read_page snapshots.
@@ -670,6 +676,21 @@ export interface ReadPageCandidateAction {
    * post-action verification path without adding another public MCP tool.
    */
   intent?: ReadPageCandidateActionIntent;
+  /**
+   * Optional privacy-safe visual operability summary copied from the source
+   * element. This is current-snapshot evidence only; callers must re-read after
+   * actions and must not persist it as a long-lived executable locator.
+   */
+  visibility?: ReadPageTargetVisibility;
+}
+
+export interface ReadPageTargetVisibility {
+  source: 'dom' | 'cdp' | 'mixed' | string;
+  domVisible: boolean;
+  inViewport: boolean;
+  centerHitTarget: boolean | null;
+  occluded: boolean | null;
+  reason?: string;
 }
 
 export interface ReadPageFileInputBinding {
@@ -765,6 +786,7 @@ export interface ReadPageLoadReadiness {
   waitedMs: number | null;
   readyState: string | null;
   canUseSnapshotForBusinessAction: boolean;
+  nextStepAction: 'proceed' | 'wait' | 'refresh' | 'block';
   nextStepHint: string;
   claimBoundary: string;
   /**
@@ -782,6 +804,14 @@ export interface ReadPageCDPSensingSummary {
   available: boolean;
   readiness: 'loading' | 'interactive' | 'complete' | 'unknown' | string;
   likelyLoading: boolean;
+  route?: {
+    href: string;
+    pathname: string;
+    hasQuery: boolean;
+    hasHash: boolean;
+    fingerprint?: string;
+    historyLength: number | null;
+  };
   visibilityState?: string;
   focused?: boolean;
   activeElement?: {
@@ -813,9 +843,23 @@ export interface ReadPageCDPSensingSummary {
       expandedCount: number;
       disabledCount: number;
     };
+    locatorCoverage?: {
+      locatorCandidateCount: number;
+      axNodeIdCount: number;
+      backendDOMNodeIdCount: number;
+      locatorCoverageRate: number;
+    };
     objectCandidates?: {
       role: string;
       label?: string;
+      locator?: {
+        source: 'cdp_ax';
+        axNodeId?: string;
+        backendDOMNodeId?: number;
+        cssSelector?: string;
+        nodeName?: string;
+        visualBounds?: ReadPageElementRect;
+      };
       actionTypes: string[];
       state: {
         checked?: boolean;
@@ -854,6 +898,21 @@ export interface ReadPageMemoryHint {
   confidence?: number;
 }
 
+export interface ReadPageObjectLibraryHint {
+  source: 'object_library_reuse';
+  objectType: string;
+  objectFingerprint?: string;
+  pageModelKey?: string | null;
+  siteFamily?: string | null;
+  reuseConfidence: number;
+  freshness: 'validated' | 'stale' | 'needs_refresh' | 'unknown';
+  lastValidatedAt?: string | null;
+  lastObservedAt?: string | null;
+  actionTypes?: string[];
+  summary?: string | null;
+  claimBoundary: string;
+}
+
 export type ReadPageTaskMode = 'search' | 'read' | 'compare' | 'extract' | 'monitor';
 
 export type ReadPageComplexityLevel = 'simple' | 'medium' | 'complex';
@@ -878,6 +937,9 @@ export type ReadPageReadinessVerdict = 'ready' | 'empty' | 'error' | 'blocked' |
  * from the legacy `kind` field (where the object came FROM).
  */
 export type ReadPageObjectType =
+  | 'container'
+  | 'result_card'
+  | 'list_item'
   | 'nav_entry'
   | 'record'
   | 'entry'
@@ -893,6 +955,10 @@ export interface ReadPageHighValueObjectAction {
 }
 
 export const READ_PAGE_REGION_TYPES = [
+  'search_area',
+  'filter_panel',
+  'result_list',
+  'detail_area',
   'navigation',
   'content',
   'account',
@@ -939,10 +1005,22 @@ export const READ_PAGE_REGION_MENU_ITEM_ROLES = [
 
 export type ReadPageRegionMenuItemRole = (typeof READ_PAGE_REGION_MENU_ITEM_ROLES)[number];
 
+export interface ReadPageObjectDetailTarget {
+  targetRef: string;
+  candidateActionId?: string;
+  actionType: 'click' | 'fill' | string;
+  intent?: ReadPageCandidateActionIntent;
+  locatorChain: ReadPageCandidateActionLocator[];
+  toolName?: string;
+  claimBoundary: string;
+}
+
 export interface ReadPageRegionObject {
   objectId: string;
   label: string;
   objectType?: ReadPageObjectType | string;
+  parentObjectId?: string | null;
+  containerKind?: string;
   role?: string;
   /**
    * Optional privacy-safe form value state. Never contains raw user input.
@@ -961,7 +1039,15 @@ export interface ReadPageRegionObject {
   confidence: number;
   reason: string;
   primaryAction?: ReadPageExecutableAction;
+  detailTarget?: ReadPageObjectDetailTarget;
+  sourceProvenance?: ReadPageObjectSnapshotSourceProvenance[];
+  freshness?: ReadPageObjectSnapshotFreshness;
   layoutHint?: ReadPageRegionLayoutHint;
+  /**
+   * Optional snapshot-local visual bounds. This is advisory sensing evidence,
+   * not a stable cross-session identifier or execution authority.
+   */
+  visualBounds?: ReadPageElementRect;
   menuItemRole?: ReadPageRegionMenuItemRole;
 }
 
@@ -991,6 +1077,7 @@ export interface ReadPageRegion {
 export const READ_PAGE_OPERATION_PURPOSES = [
   'navigate',
   'search',
+  'filter_results',
   'read_content',
   'open_menu',
   'account',
@@ -1271,11 +1358,17 @@ export interface ReadPagePageObjectSummary {
   objectId: string;
   kind: string;
   label: string;
+  objectType?: ReadPageObjectType | string;
+  parentObjectId?: string | null;
+  containerKind?: string;
   regionType?: ReadPageRegionType | null;
   sourceProvenance?: ReadPageObjectSnapshotSourceProvenance[];
   targetRef?: string | null;
   ref?: string | null;
+  locatorChain?: ReadPageCandidateActionLocator[];
+  detailTarget?: ReadPageObjectDetailTarget;
   actionCount?: number;
+  valueState?: 'empty' | 'non_empty' | 'unknown';
   freshness: ReadPageObjectSnapshotFreshness;
 }
 
@@ -1698,6 +1791,12 @@ export interface ReadPageExtensionFields {
   frameContext?: ReadPageFrameContext | null;
   historyRef?: string | null;
   memoryHints?: ReadPageMemoryHint[];
+  /**
+   * Redacted object-library reuse hints from previous observations of the
+   * same site/page model. These hints are planning context only: they must not
+   * override current `candidateActions`, and they are not execution authority.
+   */
+  objectLibraryHints?: ReadPageObjectLibraryHint[];
   taskMode?: ReadPageTaskMode;
   complexityLevel?: ReadPageComplexityLevel;
   sourceKind?: ReadPageSourceKind;

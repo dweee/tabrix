@@ -167,14 +167,35 @@ const pageObjectSnapshotByTab = new Map<
   number,
   {
     pageObjectSnapshot: ReadPageObjectSnapshot;
-    pageObjectDeltaSignals?: {
-      networkStartedCount?: number;
-      failedRequestCount?: number;
-      errorCount?: number;
-      warningCount?: number;
-    };
+    pageObjectDeltaSignals?: ReadPageObjectDeltaSignals;
   }
 >();
+
+interface ReadPageObjectDeltaSignals {
+  networkStartedCount?: number;
+  networkInFlightCount?: number;
+  failedRequestCount?: number;
+  errorCount?: number;
+  warningCount?: number;
+  routeFingerprint?: string;
+}
+
+function buildCDPRouteFingerprint(cdpSensing?: ReadPageCDPSensingSummary): string | undefined {
+  const route = cdpSensing?.route;
+  if (!route) return undefined;
+  const historyLength =
+    typeof route.historyLength === 'number' && Number.isFinite(route.historyLength)
+      ? route.historyLength
+      : 'unknown';
+  return [
+    route.href,
+    route.pathname,
+    route.hasQuery ? 'query' : 'no_query',
+    route.hasHash ? 'hash' : 'no_hash',
+    route.fingerprint ?? 'route_fingerprint_unknown',
+    `history:${historyLength}`,
+  ].join('|');
+}
 
 function mapReadinessVerdict(input: {
   canUseSnapshotForBusinessAction: boolean;
@@ -233,24 +254,63 @@ function buildReadPageSnapshotSourceStats(params: {
     ),
     includeAX: Boolean(params.cdpSensing?.accessibility),
   });
-  const objects: ReadPagePageObjectSummary[] = regionList.map((region, index) => {
+  const objects: ReadPagePageObjectSummary[] = [];
+  const seenObjectIds = new Set<string>();
+  for (const [index, region] of regionList.entries()) {
+    const regionObjectId =
+      region.regionId ||
+      `${params.pageType}-${params.pageRole}-${region.regionType || 'region'}-${index}`;
     const objectSourceProvenance = new Set<ReadPageObjectSnapshot['sourceProvenance'][number]>(
       regionSources,
     );
     if (typeof region.label === 'string' && region.label.length > 0) {
       objectSourceProvenance.add('visible_text');
     }
-    return {
-      objectId:
-        region.regionId ||
-        `${params.pageType}-${params.pageRole}-${region.regionType || 'region'}-${index}`,
+    objects.push({
+      objectId: regionObjectId,
       kind: region.regionType || 'region',
       label: region.label || region.regionId || `${region.regionType || 'region'}-${index}`,
+      objectType: 'container',
+      containerKind: region.regionType || 'region',
       regionType: region.regionType ?? null,
       sourceProvenance: [...objectSourceProvenance],
       freshness: 'fresh',
-    };
-  });
+    });
+    seenObjectIds.add(regionObjectId);
+
+    for (const [childIndex, child] of Array.isArray(region.objects)
+      ? region.objects.entries()
+      : []) {
+      const childObjectId = String(child.objectId || '').trim();
+      if (!childObjectId || seenObjectIds.has(childObjectId)) continue;
+      const childSources = new Set<ReadPageObjectSnapshot['sourceProvenance'][number]>(
+        Array.isArray(child.sourceProvenance) && child.sourceProvenance.length > 0
+          ? child.sourceProvenance
+          : objectSourceProvenance,
+      );
+      if (typeof child.label === 'string' && child.label.length > 0) {
+        childSources.add('visible_text');
+      }
+      objects.push({
+        objectId: childObjectId,
+        kind: child.objectType || child.role || 'region_object',
+        label: child.label || `${region.regionType || 'region'} object ${childIndex + 1}`,
+        objectType: child.objectType,
+        parentObjectId: child.parentObjectId || regionObjectId,
+        containerKind: child.containerKind,
+        regionType: region.regionType ?? null,
+        sourceProvenance: [...childSources],
+        targetRef: child.targetRef ?? null,
+        ref: child.targetRef ?? null,
+        locatorChain: child.locatorChain,
+        detailTarget: child.detailTarget,
+        actionCount: Array.isArray(child.actionTypes) ? child.actionTypes.length : 0,
+        valueState: child.valueState,
+        freshness: child.freshness || 'fresh',
+      });
+      seenObjectIds.add(childObjectId);
+    }
+  }
   const actionableTargets: ReadPageActionableTargetSummary[] = actionList.map((action) => ({
     targetId:
       action.id ??
@@ -296,22 +356,27 @@ function buildReadPageSnapshotSourceStats(params: {
   };
 }
 
+function isFormStateObject(object: ReadPagePageObjectSummary): boolean {
+  const kind = String(object.objectType || object.kind || '').toLowerCase();
+  const label = String(object.label || '').toLowerCase();
+  return (
+    object.regionType === 'form' ||
+    object.regionType === 'search_area' ||
+    kind === 'control' ||
+    kind === 'textbox' ||
+    kind === 'textarea' ||
+    kind === 'combobox' ||
+    kind === 'checkbox' ||
+    /input|search|query|filter|form|field|输入|搜索|筛选|表单/.test(label)
+  );
+}
+
 function buildReadPagePageDeltaReport(params: {
   tabId: number;
   currentSnapshot: ReadPageObjectSnapshot;
   previousSnapshot: ReadPageObjectSnapshot | null;
-  cdpSignals?: {
-    networkStartedCount?: number;
-    failedRequestCount?: number;
-    errorCount?: number;
-    warningCount?: number;
-  };
-  previousCdpSignals?: {
-    networkStartedCount?: number;
-    failedRequestCount?: number;
-    errorCount?: number;
-    warningCount?: number;
-  };
+  cdpSignals?: ReadPageObjectDeltaSignals;
+  previousCdpSignals?: ReadPageObjectDeltaSignals;
 }): ReadPagePageDeltaReport | undefined {
   if (!params.previousSnapshot) return undefined;
 
@@ -321,23 +386,129 @@ function buildReadPagePageDeltaReport(params: {
   const appearedObjectIds = [...afterObjectIds].filter((id) => !beforeObjectIds.has(id));
   const disappearedObjectIds = [...beforeObjectIds].filter((id) => !afterObjectIds.has(id));
   const objectDelta = [...appearedObjectIds, ...disappearedObjectIds];
-  const changedRegions = Array.isArray(params.currentSnapshot.objects)
-    ? params.currentSnapshot.objects
-        .map((object) => object.regionType)
-        .filter(
-          (value): value is NonNullable<ReadPagePageObjectSummary['regionType']> =>
-            typeof value === 'string' && value.length > 0,
-        )
-    : [];
+  const currentObjectById = new Map(
+    params.currentSnapshot.objects.map((object) => [object.objectId, object]),
+  );
+  const previousObjectById = new Map(previous.objects.map((object) => [object.objectId, object]));
+  const appearedObjects = appearedObjectIds
+    .map((id) => currentObjectById.get(id))
+    .filter((object): object is ReadPagePageObjectSummary => Boolean(object));
+  const disappearedObjects = disappearedObjectIds
+    .map((id) => previousObjectById.get(id))
+    .filter((object): object is ReadPagePageObjectSummary => Boolean(object));
+  const changedRegionSet = new Set<NonNullable<ReadPagePageObjectSummary['regionType']>>();
+  for (const object of [...appearedObjects, ...disappearedObjects]) {
+    if (typeof object.regionType === 'string' && object.regionType.length > 0) {
+      changedRegionSet.add(object.regionType);
+    }
+  }
+  const changedRegions = [...changedRegionSet];
   const changedObjectSummary = objectDelta.length;
+  const countObjectsInRegions = (
+    objects: readonly ReadPagePageObjectSummary[],
+    regions: readonly string[],
+  ): number =>
+    objects.filter((object) => object.regionType && regions.includes(object.regionType)).length;
+  const currentDialogObjectCount = countObjectsInRegions(params.currentSnapshot.objects, [
+    'modal',
+    'qr_code',
+  ]);
+  const previousDialogObjectCount = countObjectsInRegions(previous.objects, ['modal', 'qr_code']);
+  const currentQrObjectCount = countObjectsInRegions(params.currentSnapshot.objects, ['qr_code']);
+  const previousQrObjectCount = countObjectsInRegions(previous.objects, ['qr_code']);
+  const dialogObjectAppeared = appearedObjects.some((object) => {
+    const kind = String(object.objectType || object.kind || '').toLowerCase();
+    return (
+      object.regionType === 'modal' ||
+      object.regionType === 'qr_code' ||
+      kind.includes('modal') ||
+      kind.includes('dialog')
+    );
+  });
+  const dialogAppeared =
+    dialogObjectAppeared || currentDialogObjectCount > previousDialogObjectCount;
+  const qrCodeAppeared =
+    appearedObjects.some((object) => object.regionType === 'qr_code') ||
+    currentQrObjectCount > previousQrObjectCount;
+  const resultListChanged = [...appearedObjects, ...disappearedObjects].some((object) => {
+    const kind = String(object.objectType || object.kind || '').toLowerCase();
+    return (
+      object.regionType === 'result_list' ||
+      object.containerKind === 'result_list' ||
+      kind === 'result_card' ||
+      kind === 'list_item'
+    );
+  });
+  const sameObjectFormStateChanged = params.currentSnapshot.objects.some((currentObject) => {
+    const previousObject = previousObjectById.get(currentObject.objectId);
+    if (!previousObject) return false;
+    if (!isFormStateObject(currentObject) && !isFormStateObject(previousObject)) return false;
+    return (
+      currentObject.valueState !== undefined &&
+      previousObject.valueState !== undefined &&
+      currentObject.valueState !== previousObject.valueState
+    );
+  });
+  const formObjectPresenceChanged = [...appearedObjects, ...disappearedObjects].some((object) =>
+    isFormStateObject(object),
+  );
+  const formStateChanged = sameObjectFormStateChanged || formObjectPresenceChanged;
+  const requestStartedDelta =
+    typeof params.previousCdpSignals?.networkStartedCount === 'number' &&
+    typeof params.cdpSignals?.networkStartedCount === 'number'
+      ? params.cdpSignals.networkStartedCount - params.previousCdpSignals.networkStartedCount
+      : null;
+  const failedRequestDelta =
+    typeof params.previousCdpSignals?.failedRequestCount === 'number' &&
+    typeof params.cdpSignals?.failedRequestCount === 'number'
+      ? (params.cdpSignals.failedRequestCount ?? 0) -
+        (params.previousCdpSignals.failedRequestCount ?? 0)
+      : null;
+  const errorCountDelta =
+    typeof params.previousCdpSignals?.errorCount === 'number' &&
+    typeof params.cdpSignals?.errorCount === 'number'
+      ? params.cdpSignals.errorCount - params.previousCdpSignals.errorCount
+      : null;
+  const warningCountDelta =
+    typeof params.previousCdpSignals?.warningCount === 'number' &&
+    typeof params.cdpSignals?.warningCount === 'number'
+      ? (params.cdpSignals.warningCount ?? 0) - (params.previousCdpSignals.warningCount ?? 0)
+      : null;
+  const routeChanged =
+    typeof params.previousCdpSignals?.routeFingerprint === 'string' &&
+    typeof params.cdpSignals?.routeFingerprint === 'string' &&
+    params.previousCdpSignals.routeFingerprint !== params.cdpSignals.routeFingerprint;
+  const networkCompleted =
+    typeof requestStartedDelta === 'number' &&
+    requestStartedDelta > 0 &&
+    params.cdpSignals?.networkInFlightCount === 0;
+  const consoleError = typeof errorCountDelta === 'number' && errorCountDelta > 0;
   let deltaKind: ReadPagePageDeltaReport['deltaKind'] = 'no_useful_change';
   let recommendation: ReadPagePageDeltaReport['recommendation'] = 'wait';
 
   if (params.currentSnapshot.pageUrl !== previous.pageUrl) {
     deltaKind = 'url_changed';
     recommendation = 'proceed';
+  } else if (routeChanged) {
+    deltaKind = 'spa_route_change';
+    recommendation = 'proceed';
+  } else if (consoleError) {
+    deltaKind = 'console_error';
+    recommendation = 'stop';
+  } else if (dialogAppeared) {
+    deltaKind = 'dialog_appeared';
+    recommendation = qrCodeAppeared ? 'needs_user' : 'proceed';
+  } else if (resultListChanged) {
+    deltaKind = 'list_refreshed';
+    recommendation = 'proceed';
+  } else if (formStateChanged) {
+    deltaKind = 'form_state_changed';
+    recommendation = 'proceed';
   } else if (changedObjectSummary > 0) {
     deltaKind = 'object_appeared';
+    recommendation = 'proceed';
+  } else if (networkCompleted) {
+    deltaKind = 'network_completed';
     recommendation = 'proceed';
   }
 
@@ -352,25 +523,19 @@ function buildReadPagePageDeltaReport(params: {
     deltaKind,
     changedRegions: changedRegions.length > 0 ? changedRegions : ['read_page_object_snapshot'],
     changedObjects: objectDelta,
-    ...(typeof params.previousCdpSignals?.networkStartedCount === 'number' &&
-    typeof params.cdpSignals?.networkStartedCount === 'number'
+    ...(typeof requestStartedDelta === 'number'
       ? {
           networkSignals: {
-            requestStartedDelta:
-              params.cdpSignals.networkStartedCount - params.previousCdpSignals.networkStartedCount,
-            failedRequestDelta:
-              (params.cdpSignals.failedRequestCount ?? 0) -
-              (params.previousCdpSignals.failedRequestCount ?? 0),
+            requestStartedDelta,
+            failedRequestDelta,
           },
         }
       : {}),
-    ...(typeof params.previousCdpSignals?.errorCount === 'number' &&
-    typeof params.cdpSignals?.errorCount === 'number'
+    ...(typeof errorCountDelta === 'number'
       ? {
           consoleSignals: {
-            errorCountDelta: params.cdpSignals.errorCount - params.previousCdpSignals.errorCount,
-            warningCountDelta:
-              (params.cdpSignals.warningCount ?? 0) - (params.previousCdpSignals.warningCount ?? 0),
+            errorCountDelta,
+            warningCountDelta,
           },
         }
       : {}),
@@ -400,12 +565,7 @@ function rememberObjectLifecycleSnapshot(
 function rememberPageObjectSnapshot(
   tabId: number,
   snapshot: ReadPageObjectSnapshot,
-  telemetry?: {
-    networkStartedCount?: number;
-    failedRequestCount?: number;
-    errorCount?: number;
-    warningCount?: number;
-  },
+  telemetry?: ReadPageObjectDeltaSignals,
 ): void {
   if (!Number.isFinite(tabId)) return;
   pageObjectSnapshotByTab.delete(tabId);
@@ -422,12 +582,7 @@ function rememberPageObjectSnapshot(
 
 function getPreviousPageObjectSnapshot(tabId: number): {
   snapshot: ReadPageObjectSnapshot;
-  telemetry?: {
-    networkStartedCount?: number;
-    failedRequestCount?: number;
-    errorCount?: number;
-    warningCount?: number;
-  };
+  telemetry?: ReadPageObjectDeltaSignals;
 } | null {
   const previous = pageObjectSnapshotByTab.get(tabId);
   return previous
@@ -613,6 +768,12 @@ function buildLoadReadiness(input: {
   } | null;
   cdpSensing?: ReadPageCDPSensingSummary;
 }): ReadPageLoadReadiness {
+  const cdpNetworkFailureCount = Math.max(
+    input.cdpSensing?.networkActivity?.failedRequestCount ?? 0,
+    input.cdpSensing?.networkResources?.failedResourceStatusCount ?? 0,
+  );
+  const cdpConsoleErrorCount = input.cdpSensing?.console?.errorCount ?? 0;
+  const cdpHardFailure = cdpNetworkFailureCount >= 3 || cdpConsoleErrorCount >= 3;
   const stableAfterWait =
     input.waitedForPendingDocument &&
     input.settleResult?.settled === true &&
@@ -637,9 +798,11 @@ function buildLoadReadiness(input: {
       waitedMs: input.settleResult?.waitedMs ?? null,
       readyState: input.settleResult?.readyState ?? null,
       canUseSnapshotForBusinessAction: true,
+      nextStepAction: cdpHardFailure ? 'block' : 'proceed',
       nextStepHint: 'safe_to_use_structured_refs_with_postcondition_verification',
-      claimBoundary:
-        'browser_tab_reports_stable; still verify the business postcondition after any action',
+      claimBoundary: cdpHardFailure
+        ? 'browser_tab_reports_stable_but_cdp_errors_are_high; inspect failures before business action'
+        : 'browser_tab_reports_stable; still verify the business postcondition after any action',
       ...(input.cdpSensing ? { cdpSensing: input.cdpSensing } : {}),
     };
   }
@@ -657,6 +820,7 @@ function buildLoadReadiness(input: {
       waitedMs: input.settleResult?.waitedMs ?? null,
       readyState: input.settleResult?.readyState ?? null,
       canUseSnapshotForBusinessAction: false,
+      nextStepAction: 'refresh',
       nextStepHint: 'reload_or_switch_to_a_live_tab_before_structured_actions',
       claimBoundary:
         'browser_tab_is_stale_or_discarded; current page objects are not reliable action proof',
@@ -677,9 +841,11 @@ function buildLoadReadiness(input: {
       waitedMs: input.settleResult?.waitedMs ?? null,
       readyState: input.settleResult?.readyState ?? null,
       canUseSnapshotForBusinessAction: false,
+      nextStepAction: cdpHardFailure ? 'block' : 'wait',
       nextStepHint: 'wait_then_force_fresh_read_page_before_business_actions',
-      claimBoundary:
-        'document_may_still_be_changing; treat candidate objects as provisional until a fresh stable read',
+      claimBoundary: cdpHardFailure
+        ? 'document_is_not_stable_and_cdp_errors_are_high; do not continue business actions without recovery'
+        : 'document_may_still_be_changing; treat candidate objects as provisional until a fresh stable read',
       ...(input.cdpSensing ? { cdpSensing: input.cdpSensing } : {}),
     };
   }
@@ -696,9 +862,11 @@ function buildLoadReadiness(input: {
     waitedMs: input.settleResult?.waitedMs ?? null,
     readyState: input.settleResult?.readyState ?? null,
     canUseSnapshotForBusinessAction: false,
+    nextStepAction: cdpHardFailure ? 'block' : 'wait',
     nextStepHint: 'verify_page_stability_before_business_actions',
-    claimBoundary:
-      'browser_runtime_did_not_prove_page_stability; avoid claiming task success from this snapshot alone',
+    claimBoundary: cdpHardFailure
+      ? 'browser_runtime_did_not_prove_page_stability_and_cdp_errors_are_high; inspect failures before business action'
+      : 'browser_runtime_did_not_prove_page_stability; avoid claiming task success from this snapshot alone',
     ...(input.cdpSensing ? { cdpSensing: input.cdpSensing } : {}),
   };
 }
@@ -726,6 +894,7 @@ function buildReadPageCDPSensingSummary(
     available: true,
     readiness: snapshot.readiness,
     likelyLoading: snapshot.likelyLoading,
+    ...(snapshot.route ? { route: snapshot.route } : {}),
     ...(snapshot.visibilityState ? { visibilityState: snapshot.visibilityState } : {}),
     ...(typeof snapshot.focused === 'boolean' ? { focused: snapshot.focused } : {}),
     ...(snapshot.activeElement ? { activeElement: snapshot.activeElement } : {}),
@@ -1840,6 +2009,9 @@ async function buildModeOutput(params: {
           visibleRegionRows,
           frameId: params.frameContext?.frameId,
           fileInputBindings: params.fileInputBindings,
+          cdpAccessibilityCandidates:
+            params.loadReadiness.cdpSensing?.accessibility?.objectCandidates ?? null,
+          viewport: params.viewport,
         });
   const artifactRefs = buildArtifactRefs(params.tabId, params.renderMode === 'markdown');
   const pageContext: ReadPagePageContext = {
@@ -2141,6 +2313,10 @@ async function buildModeOutput(params: {
         typeof params.loadReadiness.cdpSensing?.networkActivity?.requestStartedCount === 'number'
           ? params.loadReadiness.cdpSensing.networkActivity.requestStartedCount
           : undefined,
+      networkInFlightCount:
+        typeof params.loadReadiness.cdpSensing?.networkActivity?.inFlightCount === 'number'
+          ? params.loadReadiness.cdpSensing.networkActivity.inFlightCount
+          : undefined,
       failedRequestCount:
         typeof params.loadReadiness.cdpSensing?.networkActivity?.failedRequestCount === 'number'
           ? params.loadReadiness.cdpSensing.networkActivity.failedRequestCount
@@ -2153,6 +2329,7 @@ async function buildModeOutput(params: {
         typeof params.loadReadiness.cdpSensing?.console?.warningCount === 'number'
           ? params.loadReadiness.cdpSensing.console.warningCount
           : undefined,
+      routeFingerprint: buildCDPRouteFingerprint(params.loadReadiness.cdpSensing),
     },
     previousCdpSignals: previousSnapshot?.telemetry,
   });
@@ -2164,6 +2341,10 @@ async function buildModeOutput(params: {
     networkStartedCount:
       typeof params.loadReadiness.cdpSensing?.networkActivity?.requestStartedCount === 'number'
         ? params.loadReadiness.cdpSensing.networkActivity.requestStartedCount
+        : undefined,
+    networkInFlightCount:
+      typeof params.loadReadiness.cdpSensing?.networkActivity?.inFlightCount === 'number'
+        ? params.loadReadiness.cdpSensing.networkActivity.inFlightCount
         : undefined,
     failedRequestCount:
       typeof params.loadReadiness.cdpSensing?.networkActivity?.failedRequestCount === 'number'
@@ -2177,6 +2358,7 @@ async function buildModeOutput(params: {
       typeof params.loadReadiness.cdpSensing?.console?.warningCount === 'number'
         ? params.loadReadiness.cdpSensing.console.warningCount
         : undefined,
+    routeFingerprint: buildCDPRouteFingerprint(params.loadReadiness.cdpSensing),
   });
 
   return buildReadPageModeResult({
@@ -3262,12 +3444,17 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       });
 
       if (!schemeGuard.supportedForContentScript) {
+        const operabilityReason = schemeGuard.unsupportedPageType || schemeGuard.pageType;
+        const nextStepHint =
+          'restricted_page; switch to a regular http or https tab before attempting structured reads or browser actions';
         const guardPageContent = [
           '- generic "Current tab is not a regular web page"',
           currentTitle ? `- generic "title: ${currentTitle.replace(/\s+/g, ' ').trim()}"` : '',
           currentUrl ? `- generic "url: ${currentUrl}"` : '',
           `- generic "pageType: ${schemeGuard.pageType}"`,
           `- generic "unsupportedPageType: ${schemeGuard.unsupportedPageType || 'none'}"`,
+          '- generic "canTabrixOperate: false"',
+          `- generic "operabilityReason: ${operabilityReason}"`,
           `- generic "recommendedAction: ${schemeGuard.recommendedAction || 'none'}"`,
         ]
           .filter(Boolean)
@@ -3337,6 +3524,20 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           assistantGuidance,
           requestedLayer: selectedLayer,
         });
+        const unsupportedPageContext = {
+          ...((unsupportedModeOutput as any).pageContext || {}),
+          canTabrixOperate: false,
+          operabilityReason,
+          unsupportedPageType: schemeGuard.unsupportedPageType,
+          nextStepHint,
+        };
+        const unsupportedOwnershipRuntime = (unsupportedModeOutput as any).ownershipRuntime
+          ? {
+              ...(unsupportedModeOutput as any).ownershipRuntime,
+              currentTabCanTabrixOperate: false,
+              currentTabOperabilityReason: operabilityReason,
+            }
+          : undefined;
 
         return {
           content: [
@@ -3345,11 +3546,18 @@ class ReadPageTool extends BaseBrowserToolExecutor {
               text: JSON.stringify({
                 success: false,
                 ...unsupportedModeOutput,
+                canTabrixOperate: false,
+                operabilityReason,
                 reason: 'unsupported_page_type',
                 pageType: schemeGuard.pageType,
                 scheme: schemeGuard.scheme,
                 unsupportedPageType: schemeGuard.unsupportedPageType,
                 recommendedAction: schemeGuard.recommendedAction,
+                pageContext: unsupportedPageContext,
+                ...(unsupportedOwnershipRuntime
+                  ? { ownershipRuntime: unsupportedOwnershipRuntime }
+                  : {}),
+                nextStepHint,
               }),
             },
           ],

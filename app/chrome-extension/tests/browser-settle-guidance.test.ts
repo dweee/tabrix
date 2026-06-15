@@ -1508,6 +1508,7 @@ describe('browser settle guidance', () => {
       pageStability: 'stable',
       waitedForPendingDocument: false,
       canUseSnapshotForBusinessAction: true,
+      nextStepAction: 'proceed',
       nextStepHint: 'safe_to_use_structured_refs_with_postcondition_verification',
     });
     expect(payload.ownershipRuntime).toMatchObject({
@@ -1555,6 +1556,54 @@ describe('browser settle guidance', () => {
       console: {
         errorCount: 1,
         warningCount: 0,
+      },
+      accessibility: {
+        totalNodes: 8,
+        actionableNodeCount: 2,
+        roleCounts: {
+          button: 1,
+          textbox: 1,
+        },
+        actionableSampleLabels: ['Search', 'Submit'],
+        stateSignals: {
+          checkedCount: 0,
+          selectedCount: 0,
+          expandedCount: 0,
+          disabledCount: 0,
+        },
+        locatorCoverage: {
+          locatorCandidateCount: 2,
+          axNodeIdCount: 2,
+          backendDOMNodeIdCount: 1,
+          locatorCoverageRate: 1,
+        },
+        objectCandidates: [
+          {
+            role: 'textbox',
+            label: 'Search',
+            locator: {
+              source: 'cdp_ax',
+              axNodeId: 'ax-search',
+              backendDOMNodeId: 101,
+            },
+            actionTypes: ['focus', 'set_value'],
+            state: {
+              disabled: false,
+            },
+          },
+          {
+            role: 'button',
+            label: 'Submit',
+            locator: {
+              source: 'cdp_ax',
+              axNodeId: 'ax-submit',
+            },
+            actionTypes: ['press'],
+            state: {
+              disabled: false,
+            },
+          },
+        ],
       },
     });
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
@@ -1639,12 +1688,46 @@ describe('browser settle guidance', () => {
         errorCount: 1,
         warningCount: 0,
       },
+      accessibility: {
+        totalNodes: 8,
+        actionableNodeCount: 2,
+        locatorCoverage: {
+          locatorCandidateCount: 2,
+          axNodeIdCount: 2,
+          backendDOMNodeIdCount: 1,
+          locatorCoverageRate: 1,
+        },
+        objectCandidates: [
+          {
+            role: 'textbox',
+            label: 'Search',
+            locator: {
+              source: 'cdp_ax',
+              axNodeId: 'ax-search',
+              backendDOMNodeId: 101,
+            },
+          },
+          {
+            role: 'button',
+            label: 'Submit',
+            locator: {
+              source: 'cdp_ax',
+              axNodeId: 'ax-submit',
+            },
+          },
+        ],
+      },
       navigation: {
         responseEndMs: 24,
         domContentLoadedMs: 48,
         loadEventMs: 72,
       },
     });
+    expect(payload.pageContext.loadReadiness).toMatchObject({
+      canUseSnapshotForBusinessAction: true,
+      nextStepAction: 'block',
+    });
+    expect(payload.pageContext.loadReadiness.claimBoundary).toContain('cdp_errors_are_high');
     expect(JSON.stringify(payload.pageContext.loadReadiness.cdpSensing)).not.toContain('private');
   });
 
@@ -1735,6 +1818,7 @@ describe('browser settle guidance', () => {
       waitedMs: 5000,
       readyState: 'interactive',
       canUseSnapshotForBusinessAction: false,
+      nextStepAction: 'wait',
       nextStepHint: 'wait_then_force_fresh_read_page_before_business_actions',
     });
     expect(payload.pageContext.loadReadiness.claimBoundary).toContain(

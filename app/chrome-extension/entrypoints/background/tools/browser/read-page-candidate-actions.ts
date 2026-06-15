@@ -1,6 +1,7 @@
 import type {
   ReadPageCandidateAction,
   ReadPageCandidateActionLocator,
+  ReadPageCDPSensingSummary,
   ReadPageFileInputBinding,
   ReadPageInteractiveElement,
   ReadPageVisibleRegionRows,
@@ -18,6 +19,9 @@ const FILTER_TIME_RANGE_LABEL_PATTERN =
 const SEARCH_TOOLBAR_VERTICAL_BAND_PX = 180;
 const LOW_VALUE_NAV_LINK_PATTERN =
   /^(关于我们|关于|营业执照|备案|沪ICP备|京ICP备|粤ICP备|隐私政策|隐私|用户协议|服务协议|使用条款|社区规范|帮助中心|联系我们|加入我们|广告合作|举报|投诉|copyright|privacy|terms|agreement|license|licenses?|legal|about|help|contact|careers?)$/i;
+type CdpAxCandidate = NonNullable<
+  NonNullable<ReadPageCDPSensingSummary['accessibility']>['objectCandidates']
+>[number];
 
 function buildRefSelectorMap(refMap: any[]): Map<string, string> {
   const map = new Map<string, string>();
@@ -28,6 +32,101 @@ function buildRefSelectorMap(refMap: any[]): Map<string, string> {
     map.set(ref, selector);
   }
   return map;
+}
+
+function selectorLooksStableForCdpAx(selector: string): boolean {
+  const trimmed = selector.trim();
+  if (!trimmed) return false;
+  if (/^(button|input|a|select|textarea|div|span)$/i.test(trimmed)) return false;
+  return (
+    /^#[A-Za-z0-9_-]+$/.test(trimmed) ||
+    /\[(data-testid|data-test|data-cy|aria-label|name|role|type)=/i.test(trimmed)
+  );
+}
+
+function buildCdpAxInteractiveElements(input: {
+  candidates?: readonly CdpAxCandidate[];
+  viewport?: { width: number | null; height: number | null } | null;
+}): { elements: ReadPageInteractiveElement[]; refMap: Array<{ ref: string; selector: string }> } {
+  const elements: ReadPageInteractiveElement[] = [];
+  const refMap: Array<{ ref: string; selector: string }> = [];
+  const seenRefs = new Set<string>();
+
+  for (const [index, candidate] of (input.candidates ?? []).slice(0, 30).entries()) {
+    const role = String(candidate.role || '')
+      .trim()
+      .toLowerCase();
+    const label = String(candidate.label || role || '').trim();
+    const selector = String(candidate.locator?.cssSelector || '').trim();
+    if (!role || !label || !selectorLooksStableForCdpAx(selector)) continue;
+    if (candidate.state?.disabled === true) continue;
+    const canClick =
+      role === 'button' ||
+      role === 'link' ||
+      role === 'menuitem' ||
+      role === 'tab' ||
+      role === 'option' ||
+      role === 'checkbox' ||
+      role === 'switch' ||
+      candidate.actionTypes?.some((action) => /^(click|tap|press|open)$/i.test(action));
+    const canFill =
+      role === 'textbox' ||
+      role === 'searchbox' ||
+      role === 'combobox' ||
+      candidate.actionTypes?.some((action) => /^(focus|setvalue)$/i.test(action));
+    if (!canClick && !canFill) continue;
+
+    const stableId =
+      candidate.locator?.backendDOMNodeId !== undefined
+        ? `backend_${candidate.locator.backendDOMNodeId}`
+        : typeof candidate.locator?.axNodeId === 'string'
+          ? candidate.locator.axNodeId
+          : `${role}_${index}`;
+    const safeId = stableId.replace(/[^a-zA-Z0-9_]/g, '_');
+    const ref = `ref_fallback_cdp_ax_${safeId}`;
+    if (seenRefs.has(ref)) continue;
+    seenRefs.add(ref);
+
+    const bounds = candidate.locator?.visualBounds;
+    const viewportWidth = input.viewport?.width;
+    const viewportHeight = input.viewport?.height;
+    const hasBounds =
+      bounds &&
+      Number.isFinite(bounds.x) &&
+      Number.isFinite(bounds.y) &&
+      Number.isFinite(bounds.width) &&
+      Number.isFinite(bounds.height) &&
+      bounds.width > 0 &&
+      bounds.height > 0;
+    const inViewport =
+      hasBounds && typeof viewportWidth === 'number' && typeof viewportHeight === 'number'
+        ? bounds.x + bounds.width > 0 &&
+          bounds.y + bounds.height > 0 &&
+          bounds.x < viewportWidth &&
+          bounds.y < viewportHeight
+        : true;
+
+    elements.push({
+      ref,
+      role,
+      name: label,
+      selector,
+      matchSource: 'cdp_ax',
+      actionability: inViewport ? 'actionable' : 'not_actionable',
+      visibility: {
+        source: 'cdp',
+        domVisible: true,
+        inViewport,
+        centerHitTarget: null,
+        occluded: null,
+        reason: hasBounds ? 'cdp_ax_box_model' : 'cdp_ax_locator_only',
+      },
+      ...(hasBounds ? { rect: bounds } : {}),
+    });
+    refMap.push({ ref, selector });
+  }
+
+  return { elements, refMap };
 }
 
 function scoreCandidateElementPriority(
@@ -46,6 +145,12 @@ function scoreCandidateElementPriority(
   if (ref.startsWith('ref_text_search_toolbar_')) score += 112;
   if (ref.startsWith('ref_text_control_')) score += 110;
   if (FILTER_PANEL_LABEL_PATTERN.test(name)) score += 64;
+  const visibility = element.visibility;
+  if (visibility?.domVisible === true) score += 18;
+  if (visibility?.inViewport === true) score += 18;
+  if (visibility?.centerHitTarget === true) score += 24;
+  if (visibility?.occluded === true) score -= 180;
+  if (visibility?.domVisible === false || visibility?.inViewport === false) score -= 140;
   if (/\b(menu|more|settings?|logout|sign out|log out)\b|菜单|更多|设置|退出|注销/i.test(name)) {
     score += 80;
   }
@@ -133,6 +238,7 @@ function inferCandidateActionIntent(
   ) {
     return 'filter.sort_most_collected';
   }
+  if (FILTER_TIME_RANGE_LABEL_PATTERN.test(name)) return 'filter.time_range_select';
   if (
     String(element.ref || '').startsWith('ref_text_filter_panel_') &&
     FILTER_PANEL_LABEL_PATTERN.test(name)
@@ -335,6 +441,7 @@ function buildActionabilityReason(params: {
   const parts = [
     `source_element_actionability=${params.actionability}`,
     `source=${source}`,
+    ...buildVisibilityReasonParts(params.element),
     'target_freshness=current_read_page_snapshot_only',
     `expected_delta=${buildExpectedPostActionDelta(params.intent)}`,
   ];
@@ -406,8 +513,27 @@ function buildActionTargetMatchReason(params: {
     params.baseReason,
     `target_provenance=${provenance}`,
     `locator_sources=${Array.from(new Set(locatorSources)).join('+')}`,
+    ...buildVisibilityReasonParts(params.element),
     'target_freshness=current_read_page_snapshot_only',
   ].join('; ');
+}
+
+function buildVisibilityReasonParts(element: ReadPageInteractiveElement): string[] {
+  const visibility = element.visibility;
+  if (!visibility) return [];
+  const parts = [
+    `visibility_source=${visibility.source || 'dom'}`,
+    `dom_visible=${visibility.domVisible ? 'true' : 'false'}`,
+    `in_viewport=${visibility.inViewport ? 'true' : 'false'}`,
+  ];
+  if (typeof visibility.centerHitTarget === 'boolean') {
+    parts.push(`center_hit_target=${visibility.centerHitTarget ? 'true' : 'false'}`);
+  }
+  if (typeof visibility.occluded === 'boolean') {
+    parts.push(`occluded=${visibility.occluded ? 'true' : 'false'}`);
+  }
+  if (visibility.reason) parts.push(`visibility_reason=${visibility.reason}`);
+  return parts;
 }
 
 function buildIntentBoundary(
@@ -498,9 +624,15 @@ export function buildCandidateActions(
     visibleRegionRows?: ReadPageVisibleRegionRows | null;
     frameId?: number;
     fileInputBindings?: readonly ReadPageFileInputBinding[] | null;
+    cdpAccessibilityCandidates?: readonly CdpAxCandidate[] | null;
+    viewport?: { width: number | null; height: number | null; dpr?: number | null } | null;
   } = {},
 ): CandidateActionSeed[] {
-  const selectorMap = buildRefSelectorMap(refMap);
+  const cdpAxFallback = buildCdpAxInteractiveElements({
+    candidates: options.cdpAccessibilityCandidates ?? undefined,
+    viewport: options.viewport ?? null,
+  });
+  const selectorMap = buildRefSelectorMap([...refMap, ...cdpAxFallback.refMap]);
   const contentTargetRefs = visibleRegionRowTargetRefs(options.visibleRegionRows);
   const clickRoles = new Set(['button', 'link', 'menuitem', 'tab', 'option', 'checkbox', 'switch']);
   const fillRoles = new Set(['textbox', 'searchbox', 'combobox']);
@@ -508,7 +640,7 @@ export function buildCandidateActions(
     /(submit|save|continue|next|confirm|login|sign in|search|checkout|send code|get code|request code|filter|filters|filtered|sort|refresh|reload|all|images?|videos?|users?|latest|popular|reset|clear|apply|提交|保存|继续|下一步|确认|登录|搜索|筛选|已筛选|过滤|排序|全部|图文|视频|用户|综合|最新|最多点赞|最多评论|最多收藏|收藏最多|不限|一天内|一周内|半年内|已看过|未看过|已关注|同城|附近|重置|收起|刷新|获取验证码|发送验证码|重新发送|同意)/i;
 
   const seeds: CandidateActionSeed[] = [];
-  const prioritizedElements = [...interactiveElements]
+  const prioritizedElements = [...interactiveElements, ...cdpAxFallback.elements]
     .map((element, index) => ({
       element,
       index,
@@ -574,6 +706,7 @@ export function buildCandidateActions(
       matchReason,
       actionability,
       actionabilityReason,
+      ...(element.visibility ? { visibility: element.visibility } : {}),
       ...(intentBoundary ? { intentBoundary } : {}),
       ...(nextRequiredTool ? { nextRequiredTool } : {}),
       ...(nextRequiredSelector ? { nextRequiredSelector } : {}),
@@ -707,6 +840,7 @@ function bindVisibleRegionRowsToDetailActions(
       actionabilityReason: element
         ? buildActionabilityReason({ element, actionability, intent })
         : 'source_element_actionability=unknown; source=visible_region_rows; target_freshness=current_read_page_snapshot_only; business_success_not_proven_by_candidate_action',
+      ...(element?.visibility ? { visibility: element.visibility } : {}),
       nextRequiredCheck: 'run_action_then_fresh_same_tab_read_to_verify_page_or_object_state',
       locatorChain,
       intent,
@@ -784,6 +918,11 @@ function shouldExposeCandidateActionLabel(params: {
 function isExecutableCandidateElement(element: ReadPageInteractiveElement): boolean {
   const actionability = String(element.actionability || '').toLowerCase();
   if (actionability === 'blocked' || actionability === 'not_actionable') return false;
+  const visibility = element.visibility;
+  if (visibility) {
+    if (visibility.domVisible === false || visibility.inViewport === false) return false;
+    if (visibility.occluded === true || visibility.centerHitTarget === false) return false;
+  }
   const disabled = Boolean((element as { disabled?: boolean }).disabled);
   const ariaDisabled = String(
     (element as { ariaDisabled?: string }).ariaDisabled || '',

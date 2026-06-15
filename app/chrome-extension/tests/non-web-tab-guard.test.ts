@@ -24,7 +24,78 @@ describe('non-web tab guards', () => {
     expect(result.isError).toBe(false);
     expect(payload.reason).toBe('unsupported_page_type');
     expect(payload.pageType).toBe('extension_page');
+    expect(payload.canTabrixOperate).toBe(false);
+    expect(payload.operabilityReason).toBe('non_web_tab');
+    expect(payload.pageContext).toMatchObject({
+      canTabrixOperate: false,
+      operabilityReason: 'non_web_tab',
+      unsupportedPageType: 'non_web_tab',
+    });
     expect(payload.recommendedAction).toBe('switch_to_http_tab');
+    expect(injectSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns a cannot-operate response for chrome_read_page on Chrome Web Store pages', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 3113,
+      title: 'Tabrix - Chrome Web Store',
+      url: 'https://chromewebstore.google.com/detail/tabrix/example-extension-id',
+    });
+    const injectSpy = vi
+      .spyOn(readPageTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+
+    const result = await readPageTool.execute({ tabId: 3113 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload).toMatchObject({
+      success: false,
+      reason: 'unsupported_page_type',
+      pageType: 'unsupported_page',
+      scheme: 'https',
+      unsupportedPageType: 'browser_extension_store',
+      canTabrixOperate: false,
+      operabilityReason: 'browser_extension_store',
+      recommendedAction: 'switch_to_http_tab',
+    });
+    expect(payload.pageContext).toMatchObject({
+      canTabrixOperate: false,
+      operabilityReason: 'browser_extension_store',
+      unsupportedPageType: 'browser_extension_store',
+    });
+    expect(injectSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns a cannot-operate response for chrome_read_page on PDF document URLs', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 3114,
+      title: 'report.pdf',
+      url: 'https://example.test/downloads/report.pdf?download=false',
+    });
+    const injectSpy = vi
+      .spyOn(readPageTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+
+    const result = await readPageTool.execute({ tabId: 3114 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload).toMatchObject({
+      success: false,
+      reason: 'unsupported_page_type',
+      pageType: 'unsupported_page',
+      scheme: 'https',
+      unsupportedPageType: 'pdf_document',
+      canTabrixOperate: false,
+      operabilityReason: 'pdf_document',
+      recommendedAction: 'switch_to_http_tab',
+    });
+    expect(payload.pageContext).toMatchObject({
+      canTabrixOperate: false,
+      operabilityReason: 'pdf_document',
+      unsupportedPageType: 'pdf_document',
+    });
     expect(injectSpy).not.toHaveBeenCalled();
   });
 
@@ -86,6 +157,43 @@ describe('non-web tab guards', () => {
     expect(payload.recommendedAction).toBe('switch_to_http_tab');
     expect(injectSpy).not.toHaveBeenCalled();
   });
+
+  it.each([
+    { tabId: 3115, title: 'Extensions', url: 'chrome://extensions/', scheme: 'chrome' },
+    { tabId: 3116, title: 'Downloads', url: 'edge://downloads/', scheme: 'edge' },
+    { tabId: 3117, title: 'Blank', url: 'about:blank', scheme: 'about' },
+  ])(
+    'returns a cannot-operate response for chrome_read_page on $url',
+    async ({ tabId, title, url, scheme }) => {
+      vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+        id: tabId,
+        title,
+        url,
+      });
+      const injectSpy = vi
+        .spyOn(readPageTool as any, 'injectContentScript')
+        .mockResolvedValue(undefined);
+
+      const result = await readPageTool.execute({ tabId });
+      const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+      expect(result.isError).toBe(false);
+      expect(payload).toMatchObject({
+        success: false,
+        reason: 'unsupported_page_type',
+        pageType: 'browser_internal_page',
+        scheme,
+        unsupportedPageType: 'non_web_tab',
+        canTabrixOperate: false,
+        operabilityReason: 'non_web_tab',
+      });
+      expect(payload.pageContext).toMatchObject({
+        canTabrixOperate: false,
+        operabilityReason: 'non_web_tab',
+      });
+      expect(injectSpy).not.toHaveBeenCalled();
+    },
+  );
 
   it('waits for explicit pending http tabs before applying the non-web guard', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({

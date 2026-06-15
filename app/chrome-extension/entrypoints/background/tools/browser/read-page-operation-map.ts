@@ -80,7 +80,7 @@ function buildDerivedSearchEntryZones(
     pageRegions
       .filter(
         (region) =>
-          region.regionType === 'form' &&
+          (region.regionType === 'form' || region.regionType === 'search_area') &&
           operationPurposeForRegion(region, candidateActionById) === 'search',
       )
       .flatMap((region) => region.candidateActionIds),
@@ -260,6 +260,13 @@ function operationPurposeForRegion(
   switch (region.regionType) {
     case 'navigation':
       return 'navigate';
+    case 'search_area':
+      return 'search';
+    case 'filter_panel':
+      return 'filter_results';
+    case 'result_list':
+    case 'detail_area':
+      return 'read_content';
     case 'content':
       return 'read_content';
     case 'account':
@@ -346,6 +353,8 @@ function operationLabelForRegion(
         : 'navigation entries';
     case 'search':
       return 'search area';
+    case 'filter_results':
+      return 'filter panel';
     case 'read_content':
       return 'content area';
     case 'open_menu':
@@ -391,6 +400,9 @@ function operationClaimBoundaryForRegion(
       return `${base}; QR appears expired or refresh-needed, so scanning is blocked until a fresh QR is produced; this is not login success`;
     }
     return `${base}; QR presence means scan collaboration may be needed, not login success`;
+  }
+  if (purpose === 'filter_results') {
+    return `${base}; filter controls can narrow or reorder results, but selected filter success requires a fresh post-action page read`;
   }
   if (purpose === 'prepare_publish') {
     return `${base}; publish preparation/upload controls are visible, but final publish submission is not proven available`;
