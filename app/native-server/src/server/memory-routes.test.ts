@@ -333,18 +333,12 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
   );
 
   test.each([
-    [TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS],
     [TOOL_NAMES.BROWSER.GET_INTERACTIVE_ELEMENTS],
-    [TOOL_NAMES.BROWSER.SCREENSHOT],
-    [TOOL_NAMES.BROWSER.CONSOLE],
     [TOOL_NAMES.BROWSER.WEB_FETCHER],
-    [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],
     [TOOL_NAMES.BROWSER.HANDLE_DOWNLOAD],
-    [TOOL_NAMES.BROWSER.CLOSE_TABS],
-    [TOOL_NAMES.BROWSER.SWITCH_TAB],
     [TOOL_NAMES.BROWSER.KEYBOARD],
   ])(
-    'GET /memory/mke/traces marks task-meaningful browser trace as pending: %s',
+    'GET /memory/mke/traces marks task-progressing browser trace as pending: %s',
     async (toolName) => {
       const traceService = sessionManager.memoryTraces;
       if (!traceService) throw new Error('MKE trace service is not available in tests');
@@ -362,6 +356,49 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
         responseAtMs: requestAt + 20,
         result: textResult({ status: 'ok' }),
         resultSummary: 'task meaningful browser step',
+      });
+      await sessionManager.flushMkeMemoryTraceWrites();
+
+      const res = await supertest(Server.getInstance().server)
+        .get('/memory/mke/traces?limit=10&offset=0')
+        .expect(200);
+
+      expect(res.body.data.traces).toHaveLength(1);
+      expect(res.body.data.traces[0]).toMatchObject({
+        toolName,
+        aiFeedbackRequired: true,
+        aiFeedbackState: 'pending',
+        aiFeedback: null,
+      });
+    },
+  );
+
+  test.each([
+    [TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS],
+    [TOOL_NAMES.BROWSER.SCREENSHOT],
+    [TOOL_NAMES.BROWSER.CONSOLE],
+    [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],
+    [TOOL_NAMES.BROWSER.CLOSE_TABS],
+    [TOOL_NAMES.BROWSER.SWITCH_TAB],
+  ])(
+    'GET /memory/mke/traces marks auxiliary browser trace as pending when it serves task context: %s',
+    async (toolName) => {
+      const traceService = sessionManager.memoryTraces;
+      if (!traceService) throw new Error('MKE trace service is not available in tests');
+      const requestAt = Date.parse('2026-06-06T10:33:00.000Z');
+
+      traceService.recordToolCall({
+        taskId: 'task-auxiliary-browser-step',
+        taskIntent: '完成用户目标中的关键浏览器步骤',
+        aiClient: 'jest',
+        toolName,
+        stepId: 'task-auxiliary-browser-step-1',
+        sequenceIndex: 1,
+        requestParams: {},
+        requestAtMs: requestAt,
+        responseAtMs: requestAt + 20,
+        result: textResult({ status: 'ok' }),
+        resultSummary: 'task auxiliary browser step',
       });
       await sessionManager.flushMkeMemoryTraceWrites();
 

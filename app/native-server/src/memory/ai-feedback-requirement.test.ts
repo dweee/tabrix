@@ -44,12 +44,31 @@ describe('AI feedback requirement rule', () => {
     [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],
     [TOOL_NAMES.BROWSER.CLOSE_TABS],
     [TOOL_NAMES.BROWSER.SWITCH_TAB],
-  ])('keeps default auxiliary browser tools quiet unless tied to a task: %s', (toolName) => {
-    expect(shouldRequestAiFeedbackForTrace(trace(toolName))).toBe(false);
-    expect(shouldRequestAiFeedbackForTrace(trace(toolName, '完成用户任务中的关键浏览器步骤'))).toBe(
-      true,
-    );
-  });
+  ])(
+    'keeps auxiliary browser tools quiet for generic or maintenance-only context: %s',
+    (toolName) => {
+      expect(shouldRequestAiFeedbackForTrace(trace(toolName))).toBe(false);
+      expect(shouldRequestAiFeedbackForTrace(trace(toolName, '内部维护：刷新浏览器状态缓存'))).toBe(
+        false,
+      );
+    },
+  );
+
+  test.each([
+    [TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS],
+    [TOOL_NAMES.BROWSER.SCREENSHOT],
+    [TOOL_NAMES.BROWSER.CONSOLE],
+    [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],
+    [TOOL_NAMES.BROWSER.CLOSE_TABS],
+    [TOOL_NAMES.BROWSER.SWITCH_TAB],
+  ])(
+    'requests feedback for auxiliary browser tools when they serve a user task: %s',
+    (toolName) => {
+      expect(
+        shouldRequestAiFeedbackForTrace(trace(toolName, '完成用户任务中的关键浏览器步骤')),
+      ).toBe(true);
+    },
+  );
 
   test('does not suppress task feedback just because the step failed or was blocked', () => {
     expect(

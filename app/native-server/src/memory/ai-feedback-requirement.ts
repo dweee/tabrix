@@ -24,21 +24,33 @@ const DEFAULT_INTENT_FEEDBACK_TOOLS = new Set<string>([
   TOOL_NAMES.BROWSER.FILE_UPLOAD,
 ]);
 
+const BROWSER_TOOLS = new Set<string>(Object.values(TOOL_NAMES.BROWSER));
+
+const GENERIC_TOOL_INTENT_PATTERN = /^Run MCP tool\b/i;
+const MAINTENANCE_INTENT_PATTERN =
+  /内部维护|系统维护|后台维护|后台诊断|纯诊断|健康检查|性能采样|telemetry|maintenance|health check|diagnostic only/i;
+
 export function shouldRequestAiFeedbackForTool(toolName: string | null | undefined): boolean {
   if (!toolName) return false;
-  return !AI_FEEDBACK_NEVER_TOOLS.has(toolName);
+  if (AI_FEEDBACK_NEVER_TOOLS.has(toolName)) return false;
+  return DEFAULT_INTENT_FEEDBACK_TOOLS.has(toolName);
 }
 
-function isDefaultToolRun(toolName: string, taskIntent: string | null | undefined): boolean {
-  const trimmed = taskIntent?.trim();
-  return !trimmed || trimmed === `Run MCP tool ${toolName}`;
+function isTaskMeaningfulIntent(taskIntent: string | null | undefined): boolean {
+  const text = String(taskIntent || '').trim();
+  if (!text) return false;
+  if (GENERIC_TOOL_INTENT_PATTERN.test(text)) return false;
+  if (MAINTENANCE_INTENT_PATTERN.test(text)) return false;
+  return true;
 }
 
 export function shouldRequestAiFeedbackForTrace(
   trace: Pick<MemoryTrace, 'toolName' | 'taskIntent'> | null | undefined,
 ): boolean {
   if (!trace) return false;
-  if (!shouldRequestAiFeedbackForTool(trace.toolName)) return false;
-  if (!isDefaultToolRun(trace.toolName, trace.taskIntent)) return true;
-  return DEFAULT_INTENT_FEEDBACK_TOOLS.has(trace.toolName);
+  const toolName = trace.toolName;
+  if (!toolName) return false;
+  if (AI_FEEDBACK_NEVER_TOOLS.has(toolName)) return false;
+  if (DEFAULT_INTENT_FEEDBACK_TOOLS.has(toolName)) return true;
+  return BROWSER_TOOLS.has(toolName) && isTaskMeaningfulIntent(trace.taskIntent);
 }
