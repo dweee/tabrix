@@ -68,6 +68,7 @@ export interface ResolvedCandidateActionTarget {
     | 'explicit_selector'
     | 'candidate_locator_ref'
     | 'candidate_locator_css'
+    | 'candidate_locator_xpath'
     | 'candidate_snapshot_locator_css'
     | 'none'
     | 'unresolved_stable_target_ref';
@@ -94,7 +95,7 @@ function asFiniteFrameId(value: unknown): number | undefined {
 
 function firstLocatorValue(
   locatorChain: ReadPageCandidateActionLocator[] | undefined,
-  type: 'ref' | 'css',
+  type: 'ref' | 'css' | 'xpath',
 ): string | undefined {
   if (!Array.isArray(locatorChain)) return undefined;
   for (const locator of locatorChain) {
@@ -121,6 +122,10 @@ function isSyntheticFilterPanelRef(value: string): boolean {
   return value.startsWith('ref_text_filter_panel_');
 }
 
+function isSyntheticFilterControlRef(value: string): boolean {
+  return value.startsWith('ref_filter_');
+}
+
 function isSyntheticDynamicSurfaceRef(value: string): boolean {
   return value.startsWith('ref_dynamic_surface_');
 }
@@ -134,6 +139,7 @@ function isLocatorBackedSyntheticRef(value: string): boolean {
     isSyntheticTextMenuRef(value) ||
     isSyntheticSearchToolbarRef(value) ||
     isSyntheticFilterPanelRef(value) ||
+    isSyntheticFilterControlRef(value) ||
     isSyntheticDynamicSurfaceRef(value) ||
     isSyntheticResultCardRef(value)
   );
@@ -196,6 +202,7 @@ export function resolveCandidateActionTarget(
 ): ResolvedCandidateActionTarget {
   const candidateFrameId = asFiniteFrameId(params.candidateAction?.frameId);
   const locatorRef = firstLocatorValue(params.candidateAction?.locatorChain, 'ref');
+  const locatorXpath = firstLocatorValue(params.candidateAction?.locatorChain, 'xpath');
   const locatorCss = firstLocatorValue(params.candidateAction?.locatorChain, 'css');
   const candidateTargetRef = asNonEmptyString(params.candidateAction?.targetRef);
   const explicitRef = asNonEmptyString(params.explicitRef);
@@ -209,6 +216,14 @@ export function resolveCandidateActionTarget(
       return resolveStableTargetRef(params, explicitRef);
     }
     if (isLocatorBackedSyntheticRef(explicitRef)) {
+      if (locatorXpath) {
+        return {
+          selector: locatorXpath,
+          selectorType: 'xpath',
+          ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
+          source: 'candidate_locator_xpath',
+        };
+      }
       if (locatorCss) {
         return {
           selector: locatorCss,
@@ -242,6 +257,18 @@ export function resolveCandidateActionTarget(
   if (candidateTargetRef) {
     if (
       (isLocatorBackedSyntheticRef(candidateTargetRef) || isFallbackRef(candidateTargetRef)) &&
+      locatorXpath
+    ) {
+      return {
+        selector: locatorXpath,
+        selectorType: 'xpath',
+        ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
+        source: 'candidate_locator_xpath',
+      };
+    }
+
+    if (
+      (isLocatorBackedSyntheticRef(candidateTargetRef) || isFallbackRef(candidateTargetRef)) &&
       locatorCss
     ) {
       return {
@@ -266,6 +293,7 @@ export function resolveCandidateActionTarget(
     if (
       isSyntheticSearchToolbarRef(candidateTargetRef) ||
       isSyntheticFilterPanelRef(candidateTargetRef) ||
+      isSyntheticFilterControlRef(candidateTargetRef) ||
       isSyntheticDynamicSurfaceRef(candidateTargetRef)
     ) {
       return {
@@ -312,6 +340,7 @@ export function resolveCandidateActionTarget(
     locatorRef &&
     (isSyntheticSearchToolbarRef(locatorRef) ||
       isSyntheticFilterPanelRef(locatorRef) ||
+      isSyntheticFilterControlRef(locatorRef) ||
       isSyntheticDynamicSurfaceRef(locatorRef))
   ) {
     return {

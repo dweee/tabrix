@@ -373,6 +373,109 @@ describe('candidateAction bridge', () => {
     expect(clickMessage.ref).toBeUndefined();
   });
 
+  it('routes visible filter control targetRef through candidateAction locator css', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4118,
+      title: 'Search',
+      url: 'https://example.com/search?q=neutral',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      dispatchSucceeded: true,
+      signals: { domAddedMenu: true },
+    });
+
+    const result = await clickTool.execute({
+      candidateAction: {
+        targetRef: 'ref_filter_trigger_2c3acd4f',
+        intent: 'search.open_filters',
+        locatorChain: [
+          { type: 'ref', value: 'ref_filter_trigger_2c3acd4f' },
+          { type: 'aria', value: '筛选' },
+          { type: 'css', value: '.search-page .filter-trigger' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.targetBinding).toMatchObject({
+      resolutionSource: 'candidate_locator_css',
+      dispatchTarget: 'selector',
+    });
+    const clickMessage = sendSpy.mock.calls.find(
+      ([, message]) => (message as any)?.action === TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+    )?.[1] as any;
+    expect(clickMessage).toMatchObject({
+      selector: '.search-page .filter-trigger',
+    });
+    expect(clickMessage.ref).toBeUndefined();
+  });
+
+  it('routes visible filter option targetRef through candidateAction locator xpath before css', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4119,
+      title: 'Search',
+      url: 'https://example.com/search?q=neutral',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi
+      .spyOn(clickTool as any, 'sendMessageToTab')
+      .mockImplementation(async (_tabId, message) => {
+        if ((message as any)?.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR) {
+          return { success: true, ref: 'ref_live_most_saved' };
+        }
+        return {
+          success: true,
+          dispatchSucceeded: true,
+          signals: { domChanged: true },
+        };
+      });
+
+    const result = await clickTool.execute({
+      candidateAction: {
+        targetRef: 'ref_filter_sort_c4ba7440',
+        intent: 'search.apply_filter.sort',
+        locatorChain: [
+          { type: 'ref', value: 'ref_filter_sort_c4ba7440' },
+          { type: 'aria', value: '最多收藏' },
+          {
+            type: 'xpath',
+            value:
+              "//*[self::button or self::span or @role='option'][normalize-space(.)='最多收藏']",
+          },
+          { type: 'css', value: '.filter-panel .option:nth-child(5) > span' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.targetBinding).toMatchObject({
+      resolutionSource: 'candidate_locator_xpath',
+      dispatchTarget: 'ref',
+    });
+    expect(sendSpy).toHaveBeenCalledWith(
+      4119,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+        selector:
+          "//*[self::button or self::span or @role='option'][normalize-space(.)='最多收藏']",
+        isXPath: true,
+      }),
+      undefined,
+    );
+    expect(sendSpy).toHaveBeenCalledWith(
+      4119,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+        ref: 'ref_live_most_saved',
+      }),
+      undefined,
+    );
+  });
+
   it('routes result-card actionTarget candidateAction through locator css', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4117,

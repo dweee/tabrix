@@ -505,6 +505,31 @@ describe('buildClickHelperDispatchTimingPolicy', () => {
     });
   });
 
+  it('treats objectized search filter controls as lightweight panel clicks', () => {
+    expect(
+      buildClickHelperDispatchTimingPolicy({
+        waitForNavigation: true,
+        timeout: 15000,
+        intent: 'search.open_filters',
+      }),
+    ).toEqual({
+      waitForNavigation: false,
+      timeout: 13000,
+      reason: 'lightweight_post_action_intent',
+    });
+    expect(
+      buildClickHelperDispatchTimingPolicy({
+        waitForNavigation: true,
+        timeout: 15000,
+        intent: 'search.apply_filter.time_range',
+      }),
+    ).toEqual({
+      waitForNavigation: false,
+      timeout: 13000,
+      reason: 'lightweight_post_action_intent',
+    });
+  });
+
   it('keeps non-filter lightweight clicks on the short post-action window', () => {
     expect(
       buildClickHelperDispatchTimingPolicy({

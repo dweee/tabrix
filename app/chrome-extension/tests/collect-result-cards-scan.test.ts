@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from 'vitest';
-import { scanVisibleResultCardsInPage } from '@/entrypoints/background/tools/browser/collect-result-cards';
+import {
+  scanVisibleResultCardsInPage,
+  scrollPageBy,
+} from '@/entrypoints/background/tools/browser/collect-result-cards';
 
 function setViewport(): void {
   Object.defineProperty(window, 'innerWidth', { value: 1280, configurable: true });
@@ -67,6 +70,95 @@ function renderCards(cards: Array<{ key: string; title: string; href: string; y:
 }
 
 describe('collect result cards DOM scan', () => {
+  it('objectizes visible filter triggers and panel options as actionable targets', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <header>
+        <button data-testid="filter-trigger" data-rect="1060,24,92,40">筛选</button>
+      </header>
+      <aside role="dialog" data-testid="filter-panel" data-rect="840,80,360,520">
+        <button data-testid="sort-most-saved" data-rect="880,120,116,44">最多收藏</button>
+        <button data-testid="type-image-text" data-rect="880,190,116,44" aria-selected="true">图文</button>
+        <button data-testid="time-week" data-rect="880,260,116,44">一周内</button>
+      </aside>
+      <main role="list" data-testid="list" data-rect="0,100,780,580">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a data-testid="link-alpha" data-rect="28,148,240,112" href="https://example.test/note/alpha">AI 图片创作提示词合集</a>
+          <span>作者 1</span>
+          <span>1 天前</span>
+          <span>收藏 100</span>
+        </article>
+        <article role="listitem" data-testid="card-beta" data-rect="300,140,260,180">
+          <a data-testid="link-beta" data-rect="308,148,240,112" href="https://example.test/note/beta">一周内 AI 绘图工具推荐</a>
+          <span>作者 2</span>
+          <span>2 天前</span>
+          <span>收藏 101</span>
+        </article>
+        <article role="listitem" data-testid="card-gamma" data-rect="580,140,260,180">
+          <a data-testid="link-gamma" data-rect="588,148,240,112" href="https://example.test/note/gamma">AI 生图高级感关键词</a>
+          <span>作者 3</span>
+          <span>3 天前</span>
+          <span>收藏 102</span>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+
+    expect(scan.pageRegions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          regionId: 'search_filters',
+          regionType: 'filters',
+          targetability: true,
+          layoutHint: 'visible_filter_controls_or_panel',
+          candidateActionIds: expect.arrayContaining([
+            expect.stringMatching(/^ca_filter_trigger_[0-9a-f]{8}$/),
+            expect.stringMatching(/^ca_filter_sort_[0-9a-f]{8}$/),
+            expect.stringMatching(/^ca_filter_content_type_[0-9a-f]{8}$/),
+            expect.stringMatching(/^ca_filter_time_range_[0-9a-f]{8}$/),
+          ]),
+        }),
+      ]),
+    );
+    expect(scan.candidateActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: '筛选',
+          actionType: 'click',
+          intent: 'search.open_filters',
+          actionability: true,
+          locatorChain: expect.arrayContaining([
+            expect.objectContaining({
+              type: 'css',
+              value: expect.stringContaining('button[data-testid="filter-trigger"]'),
+            }),
+          ]),
+        }),
+        expect.objectContaining({
+          label: '最多收藏',
+          actionType: 'click',
+          intent: 'search.apply_filter.sort',
+          actionability: true,
+        }),
+        expect.objectContaining({
+          label: '图文',
+          actionType: 'click',
+          intent: 'search.apply_filter.content_type',
+          actionability: true,
+        }),
+        expect.objectContaining({
+          label: '一周内',
+          actionType: 'click',
+          intent: 'search.apply_filter.time_range',
+          actionability: true,
+        }),
+      ]),
+    );
+    expect(scan.filterState.contentType).toBe('图文');
+  });
+
   it('derives result-card target refs from stable card identity instead of viewport order', () => {
     setViewport();
     renderCards([
@@ -138,5 +230,76 @@ describe('collect result cards DOM scan', () => {
       second.cards.find((card) => card.title.includes('工具'))?.actionTarget?.toolArgs
         ?.candidateAction.targetRef,
     ).toBe(betaRef);
+  });
+
+  it('reports the result-list scroll container instead of assuming window scroll', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <section
+        role="list"
+        data-testid="internal-results"
+        data-rect="0,80,900,560"
+        style="overflow-y: auto;"
+      >
+        <article role="listitem" data-testid="card-alpha" data-rect="20,120,260,180">
+          <a
+            data-testid="link-alpha"
+            data-rect="28,128,240,112"
+            href="https://example.test/note/alpha"
+          >AI 图片创作提示词合集</a>
+          <span>作者 1</span>
+          <span>1 天前</span>
+          <span>收藏 100</span>
+        </article>
+      </section>
+    `;
+    const results = document.querySelector<HTMLElement>('[data-testid="internal-results"]');
+    if (!results) throw new Error('expected internal result container');
+    Object.defineProperty(results, 'clientHeight', { value: 560, configurable: true });
+    Object.defineProperty(results, 'scrollHeight', { value: 1400, configurable: true });
+    Object.defineProperty(results, 'scrollTop', { value: 280, configurable: true });
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+
+    expect(scan.pageInfo.scrollTarget).toBe('element');
+    expect(scan.pageInfo.scrollY).toBe(280);
+    expect(scan.pageInfo.pixelsBelow).toBe(560);
+    expect(scan.cards).toHaveLength(1);
+  });
+
+  it('dispatches a wheel probe when normal page scrolling does not move', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <main role="list" data-testid="list" data-rect="0,80,900,560">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,120,260,180">
+          <a
+            data-testid="link-alpha"
+            data-rect="28,128,240,112"
+            href="https://example.test/note/alpha"
+          >AI 图片创作提示词合集</a>
+        </article>
+      </main>
+    `;
+    installRects();
+    const list = document.querySelector<HTMLElement>('[data-testid="list"]');
+    if (!list) throw new Error('expected list');
+    const wheelEvents: number[] = [];
+    list.addEventListener('wheel', (event) => {
+      wheelEvents.push(event.deltaY);
+    });
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => list),
+    });
+    Object.defineProperty(window, 'scrollBy', {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    const scroll = scrollPageBy(640);
+
+    expect(scroll.interactionDispatched).toBe(true);
+    expect(wheelEvents).toEqual([640]);
   });
 });

@@ -41,6 +41,7 @@ interface VisibleCardScanResult {
     scrollY: number;
     scrollHeight: number;
     pixelsBelow: number;
+    scrollTarget: 'window' | 'element';
   };
 }
 
@@ -103,6 +104,39 @@ interface ScrollStepResult {
   scrollHeight: number;
   viewportHeight: number;
   pixelsBelow: number;
+  scrollTarget: 'window' | 'element';
+  interactionDispatched?: boolean;
+}
+
+function candidateActionDedupeKey(action: PageCandidateAction): string {
+  return `${action.intent}|${action.targetRef}|${action.label}`;
+}
+
+function candidateActionScore(action: PageCandidateAction): number {
+  const hasCssLocator = action.locatorChain.some(
+    (locator) => locator.type === 'css' && locator.value,
+  );
+  return (
+    (action.actionability ? 1000 : 0) +
+    (hasCssLocator ? 200 : 0) +
+    (action.matchReason.startsWith('visible_') ? 100 : 0) +
+    (action.intent === 'content.open_detail' ? 50 : 0)
+  );
+}
+
+function dedupePageCandidateActions(
+  actions: readonly PageCandidateAction[],
+): PageCandidateAction[] {
+  const byKey = new Map<string, { action: PageCandidateAction; score: number }>();
+  for (const action of actions) {
+    const key = candidateActionDedupeKey(action);
+    const score = candidateActionScore(action);
+    const previous = byKey.get(key);
+    if (!previous || score > previous.score) {
+      byKey.set(key, { action, score });
+    }
+  }
+  return Array.from(byKey.values()).map(({ action }) => action);
 }
 
 function clampInteger(value: unknown, fallback: number, min: number, max: number): number {
@@ -217,7 +251,10 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     /^(图文|图片|视频|文章|image\s*text|images?|photos?|videos?|articles?)$/i;
   const sortFilterPattern =
     /^(综合|最新|最热|最多点赞|最多评论|最多收藏|latest|popular|most\s*(liked|commented|saved|collected))$/i;
-  const timeRangeFilterPattern = /^(一天内|一周内|半年内|24\s*h|7\s*d|week|month)$/i;
+  const timeRangeFilterPattern = /^(不限|一天内|一周内|半年内|24\s*h|7\s*d|week|month|any)$/i;
+  const filterTriggerPattern = /^(筛选|已筛选|过滤|排序|filter|filters|filtered|sort|sort by)$/i;
+  const filterContainerPattern =
+    /(filter|filters|filtered|sort|dropdown|popover|popup|menu|dialog|modal|panel|drawer|筛选|排序)/i;
   const listContainerSelector = [
     '[role="feed"]',
     '[role="list"]',
@@ -273,7 +310,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     if (rect.bottom < 0 || rect.top > window.innerHeight) return false;
     if (rect.right < 0 || rect.left > window.innerWidth) return false;
     const style = window.getComputedStyle(element);
-    return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0;
+    return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
   };
 
   const classifyFilterLabel = (label: string): AppliedSearchFilter['kind'] => {
@@ -512,6 +549,20 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
   const linkText = (link: HTMLAnchorElement): string =>
     normalize(link.innerText || link.textContent || link.getAttribute('aria-label') || '');
 
+  const xpathLiteral = (value: string): string => {
+    if (!value.includes("'")) return `'${value}'`;
+    if (!value.includes('"')) return `"${value}"`;
+    return `concat(${value
+      .split("'")
+      .map((part) => `'${part}'`)
+      .join(`, "'", `)})`;
+  };
+
+  const xpathForVisibleTextControl = (label: string): string => {
+    const literal = xpathLiteral(label);
+    return `//*[self::button or self::a or self::span or self::div or @role='button' or @role='menuitem' or @role='option'][normalize-space(.)=${literal} and not(.//*[normalize-space(.)=${literal}])]`;
+  };
+
   const stableIdentityHash = (value: string): string => {
     let hash = 0x811c9dc5;
     for (let index = 0; index < value.length; index += 1) {
@@ -539,6 +590,219 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
 
   const stablePageTargetRef = (kind: string, label: string): string =>
     `ref_${kind}_${stableIdentityHash(`${location.hostname.toLowerCase()}|${kind}|${normalize(label).toLowerCase()}`)}`;
+
+  const isElementScrollable = (element: Element): boolean => {
+    const htmlElement = element as HTMLElement;
+    if (htmlElement.scrollHeight <= htmlElement.clientHeight + 8) return false;
+    try {
+      const style = window.getComputedStyle(element);
+      const overflowY = `${style.overflowY} ${style.overflow}`;
+      if (
+        !/(auto|scroll|overlay)/i.test(overflowY) &&
+        element.querySelectorAll('article, [role="listitem"], a[href]').length === 0
+      ) {
+        return false;
+      }
+    } catch {
+      if (element.querySelectorAll('article, [role="listitem"], a[href]').length === 0) {
+        return false;
+      }
+    }
+    const rect = element.getBoundingClientRect();
+    return rect.width > 80 && rect.height > 120 && rect.bottom > 0 && rect.top < window.innerHeight;
+  };
+
+  const scrollStateForElement = (
+    element: Element | null,
+    fallbackElement?: Element | null,
+  ): {
+    scrollY: number;
+    scrollHeight: number;
+    viewportHeight: number;
+    pixelsBelow: number;
+    scrollTarget: 'window' | 'element';
+  } => {
+    const scrollElement =
+      element && isElementScrollable(element)
+        ? element
+        : fallbackElement && isElementScrollable(fallbackElement)
+          ? fallbackElement
+          : null;
+    if (scrollElement) {
+      const htmlElement = scrollElement as HTMLElement;
+      return {
+        scrollY: htmlElement.scrollTop,
+        scrollHeight: htmlElement.scrollHeight,
+        viewportHeight: htmlElement.clientHeight,
+        pixelsBelow: Math.max(
+          0,
+          htmlElement.scrollHeight - htmlElement.scrollTop - htmlElement.clientHeight,
+        ),
+        scrollTarget: 'element',
+      };
+    }
+    const scrollHeight = document.documentElement.scrollHeight || document.body.scrollHeight;
+    return {
+      scrollY: window.scrollY,
+      scrollHeight,
+      viewportHeight: window.innerHeight,
+      pixelsBelow: Math.max(0, scrollHeight - window.scrollY - window.innerHeight),
+      scrollTarget: 'window',
+    };
+  };
+
+  const nearestScrollableAncestor = (element: Element | null): Element | null => {
+    let current = element?.parentElement ?? null;
+    while (current && current !== document.body && current !== document.documentElement) {
+      if (isElementScrollable(current)) return current;
+      current = current.parentElement;
+    }
+    return null;
+  };
+
+  const labelForControl = (element: Element): string => {
+    const htmlElement = element as HTMLElement;
+    return normalize(
+      ownVisibleText(element) ||
+        element.getAttribute('aria-label') ||
+        element.getAttribute('title') ||
+        htmlElement.innerText ||
+        element.textContent ||
+        '',
+    );
+  };
+
+  const isLikelyClickableControl = (element: Element): boolean => {
+    const tag = element.tagName.toLowerCase();
+    if (['button', 'a', 'input', 'select', 'textarea', 'label', 'summary'].includes(tag)) {
+      return true;
+    }
+    const role = normalize(element.getAttribute('role')).toLowerCase();
+    if (
+      ['button', 'menuitem', 'option', 'tab', 'checkbox', 'radio', 'switch', 'combobox'].includes(
+        role,
+      )
+    ) {
+      return true;
+    }
+    if (element.hasAttribute('tabindex') || element.hasAttribute('aria-haspopup')) return true;
+    const className = normalize((element as HTMLElement).className || '');
+    if (filterContainerPattern.test(className)) return true;
+    try {
+      return window.getComputedStyle(element).cursor === 'pointer';
+    } catch {
+      return false;
+    }
+  };
+
+  const closestClickableControl = (element: Element): Element | null => {
+    let current: Element | null = element;
+    let depth = 0;
+    while (current && current !== document.body && depth <= 5) {
+      if (elementIsVisible(current) && isLikelyClickableControl(current)) return current;
+      current = current.parentElement;
+      depth += 1;
+    }
+    return null;
+  };
+
+  const filterActionKindForLabel = (label: string): 'filter_trigger' | `filter_${string}` => {
+    if (filterTriggerPattern.test(label)) return 'filter_trigger';
+    const kind = classifyFilterLabel(label);
+    return `filter_${kind}`;
+  };
+
+  const visibleFilterCandidateActions = (): PageCandidateAction[] => {
+    const actionByKey = new Map<string, { action: PageCandidateAction; score: number }>();
+    const candidateElements = Array.from(
+      document.querySelectorAll(
+        [
+          'button',
+          'a',
+          '[role="button"]',
+          '[role="menuitem"]',
+          '[role="option"]',
+          '[role="tab"]',
+          '[aria-haspopup]',
+          '[aria-label]',
+          '[title]',
+          '[tabindex]',
+          '[class*="filter" i]',
+          '[class*="sort" i]',
+          '[class*="dropdown" i]',
+          '[class*="popover" i]',
+          '[class*="menu" i]',
+          '[class*="panel" i]',
+        ].join(','),
+      ),
+    );
+
+    const textElements = Array.from(document.querySelectorAll('span,div,p,li')).filter(
+      (element) => {
+        const label = labelForControl(element);
+        if (!label || label.length > 24) return false;
+        return filterTriggerPattern.test(label) || classifyFilterLabel(label) !== 'unknown';
+      },
+    );
+
+    for (const element of [...candidateElements, ...textElements].slice(0, 500)) {
+      if (!(element instanceof Element)) continue;
+      if (!elementIsVisible(element)) continue;
+      const label = labelForControl(element);
+      if (!label || label.length > 24) continue;
+      const filterKind = classifyFilterLabel(label);
+      const isTrigger = filterTriggerPattern.test(label);
+      if (!isTrigger && filterKind === 'unknown') continue;
+      const control = closestClickableControl(element);
+      if (!control) continue;
+      const selector = selectorForElement(control);
+      const canonicalLabel = isTrigger ? label : canonicalFilterLabel(label, filterKind);
+      const kind = filterActionKindForLabel(canonicalLabel);
+      const targetRef = stablePageTargetRef(kind, canonicalLabel);
+
+      const intent =
+        kind === 'filter_trigger' ? 'search.open_filters' : `search.apply_filter.${filterKind}`;
+      const action: PageCandidateAction = {
+        id: `ca_${kind}_${stableIdentityHash(`${canonicalLabel}|${selector || ''}`)}`,
+        actionType: 'click',
+        targetRef,
+        label: canonicalLabel,
+        intent,
+        matchReason: isTrigger ? 'visible_filter_trigger' : 'visible_filter_option',
+        actionability: Boolean(selector),
+        ...(selector ? {} : { actionabilityReason: 'missing_stable_selector' }),
+        locatorChain: [
+          { type: 'ref', value: targetRef },
+          { type: 'aria', value: canonicalLabel },
+          { type: 'xpath', value: xpathForVisibleTextControl(canonicalLabel) },
+          ...(selector ? [{ type: 'css', value: selector }] : []),
+        ],
+      };
+      const rect = control.getBoundingClientRect();
+      const tag = control.tagName.toLowerCase();
+      const role = normalize(control.getAttribute('role')).toLowerCase();
+      const directText = ownVisibleText(control);
+      const accessibleText = normalize(
+        control.getAttribute('aria-label') || control.getAttribute('title') || '',
+      );
+      const score =
+        (selector ? 1000 : 0) +
+        (directText === canonicalLabel ? 700 : 0) +
+        (accessibleText === canonicalLabel ? 300 : 0) +
+        (['button', 'a', 'input', 'select', 'summary'].includes(tag) ? 120 : 0) +
+        (['button', 'menuitem', 'option', 'tab'].includes(role) ? 80 : 0) +
+        Math.min(120, (rect.width * rect.height) / 100);
+      const dedupeKey = `${intent}|${targetRef}|${canonicalLabel}`;
+      const previous = actionByKey.get(dedupeKey);
+      if (!previous || score > previous.score) {
+        actionByKey.set(dedupeKey, { action, score });
+      }
+    }
+
+    return Array.from(actionByKey.values())
+      .map(({ action }) => action)
+      .slice(0, 24);
+  };
 
   const searchInputCandidate = (): PageCandidateAction | null => {
     const input = Array.from(
@@ -1012,6 +1276,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
   const filterState = collectFilterState();
   const searchAction = searchInputCandidate();
   const observedFilterActions = filterCandidateActions(filterState);
+  const visibleFilterActions = visibleFilterCandidateActions();
   const visibleCardActions: PageCandidateAction[] = cards
     .map((card) => card.actionTarget?.toolArgs?.candidateAction)
     .filter((action): action is NonNullable<typeof action> => Boolean(action))
@@ -1028,8 +1293,23 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
   const candidateActions = [
     ...(searchAction ? [searchAction] : []),
     ...observedFilterActions,
+    ...visibleFilterActions,
     ...visibleCardActions,
   ];
+  const filterActionIds = [...observedFilterActions, ...visibleFilterActions].map(
+    (action) => action.id,
+  );
+  const resultScrollSeed =
+    resultListContainer ??
+    candidates.find(
+      (candidate) => nearestScrollableAncestor(candidate) || isElementScrollable(candidate),
+    ) ??
+    null;
+  const scrollState = scrollStateForElement(
+    nearestScrollableAncestor(resultScrollSeed),
+    resultScrollSeed,
+  );
+
   return {
     cards,
     filterState,
@@ -1047,16 +1327,21 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
             },
           ]
         : []),
-      ...(filterState.status === 'observed'
+      ...(filterState.status === 'observed' || filterActionIds.length > 0
         ? [
             {
               regionId: 'search_filters',
               regionType: 'filters' as const,
-              layoutHint: 'visible_or_inferred_filter_state',
+              layoutHint:
+                visibleFilterActions.length > 0
+                  ? 'visible_filter_controls_or_panel'
+                  : 'visible_or_inferred_filter_state',
               state: 'observed' as const,
               readiness: 'ready' as const,
-              targetability: observedFilterActions.some((action) => action.actionability),
-              candidateActionIds: observedFilterActions.map((action) => action.id),
+              targetability: [...observedFilterActions, ...visibleFilterActions].some(
+                (action) => action.actionability,
+              ),
+              candidateActionIds: filterActionIds,
             },
           ]
         : []),
@@ -1087,41 +1372,160 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
         height: window.innerHeight,
         dpr: window.devicePixelRatio || 1,
       },
-      scrollY: window.scrollY,
-      scrollHeight: document.documentElement.scrollHeight || document.body.scrollHeight,
-      pixelsBelow: Math.max(
-        0,
-        (document.documentElement.scrollHeight || document.body.scrollHeight) -
-          window.scrollY -
-          window.innerHeight,
-      ),
+      scrollY: scrollState.scrollY,
+      scrollHeight: scrollState.scrollHeight,
+      pixelsBelow: scrollState.pixelsBelow,
+      scrollTarget: scrollState.scrollTarget,
     },
   };
 }
 
-function scrollPageBy(stepPx: number): ScrollStepResult {
-  const beforeY = window.scrollY;
-  window.scrollBy(0, stepPx);
-  const scrollHeight = document.documentElement.scrollHeight || document.body.scrollHeight;
+export function scrollPageBy(stepPx: number): ScrollStepResult {
+  const findScrollableElement = (): HTMLElement | null => {
+    const elements = Array.from(document.querySelectorAll<HTMLElement>('*'));
+    let best: { element: HTMLElement; score: number } | null = null;
+    for (const element of elements) {
+      if (element === document.body || element === document.documentElement) continue;
+      if (element.scrollHeight <= element.clientHeight + 8) continue;
+      const rect = element.getBoundingClientRect();
+      if (
+        rect.width <= 80 ||
+        rect.height <= 120 ||
+        rect.bottom <= 0 ||
+        rect.top >= window.innerHeight
+      ) {
+        continue;
+      }
+      let style: CSSStyleDeclaration;
+      try {
+        style = window.getComputedStyle(element);
+      } catch {
+        continue;
+      }
+      const cardSignals = element.querySelectorAll('article, [role="listitem"], a[href]').length;
+      if (
+        !/(auto|scroll|overlay)/i.test(`${style.overflowY} ${style.overflow}`) &&
+        cardSignals === 0
+      ) {
+        continue;
+      }
+      const visibleHeight = Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0);
+      const score = cardSignals * 10_000 + visibleHeight * Math.max(1, rect.width);
+      if (!best || score > best.score) best = { element, score };
+    }
+    return best?.element ?? null;
+  };
+
+  const scrollElement = findScrollableElement();
+  const beforeY = scrollElement ? scrollElement.scrollTop : window.scrollY;
+  if (scrollElement) {
+    scrollElement.scrollBy(0, stepPx);
+  } else {
+    try {
+      window.scrollBy(0, stepPx);
+    } catch {
+      /* jsdom and some locked pages do not expose native window scrolling. */
+    }
+  }
+  let afterY = scrollElement ? scrollElement.scrollTop : window.scrollY;
+  let interactionDispatched = false;
+  if (Math.abs(afterY - beforeY) < 4) {
+    const target =
+      document.elementFromPoint(
+        Math.round(window.innerWidth * 0.5),
+        Math.round(window.innerHeight * 0.72),
+      ) ||
+      document.elementFromPoint(
+        Math.round(window.innerWidth * 0.5),
+        Math.round(window.innerHeight * 0.5),
+      ) ||
+      document.body;
+    if (target) {
+      const wheelInit = {
+        bubbles: true,
+        cancelable: true,
+        deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+        deltaY: stepPx,
+      };
+      try {
+        target.dispatchEvent(new WheelEvent('wheel', { ...wheelInit, view: window }));
+      } catch {
+        target.dispatchEvent(new WheelEvent('wheel', wheelInit));
+      }
+      interactionDispatched = true;
+      afterY = scrollElement ? scrollElement.scrollTop : window.scrollY;
+    }
+  }
+  const scrollHeight = scrollElement
+    ? scrollElement.scrollHeight
+    : document.documentElement.scrollHeight || document.body.scrollHeight;
+  const viewportHeight = scrollElement ? scrollElement.clientHeight : window.innerHeight;
   return {
     beforeY,
-    afterY: window.scrollY,
+    afterY,
     scrollHeight,
-    viewportHeight: window.innerHeight,
-    pixelsBelow: Math.max(0, scrollHeight - window.scrollY - window.innerHeight),
+    viewportHeight,
+    pixelsBelow: Math.max(0, scrollHeight - afterY - viewportHeight),
+    scrollTarget: scrollElement ? 'element' : 'window',
+    ...(interactionDispatched ? { interactionDispatched } : {}),
   };
 }
 
-function scrollPageToTop(): ScrollStepResult {
-  const beforeY = window.scrollY;
-  window.scrollTo(0, 0);
-  const scrollHeight = document.documentElement.scrollHeight || document.body.scrollHeight;
+export function scrollPageToTop(): ScrollStepResult {
+  const findScrollableElement = (): HTMLElement | null => {
+    const elements = Array.from(document.querySelectorAll<HTMLElement>('*'));
+    let best: { element: HTMLElement; score: number } | null = null;
+    for (const element of elements) {
+      if (element === document.body || element === document.documentElement) continue;
+      if (element.scrollHeight <= element.clientHeight + 8) continue;
+      const rect = element.getBoundingClientRect();
+      if (
+        rect.width <= 80 ||
+        rect.height <= 120 ||
+        rect.bottom <= 0 ||
+        rect.top >= window.innerHeight
+      ) {
+        continue;
+      }
+      let style: CSSStyleDeclaration;
+      try {
+        style = window.getComputedStyle(element);
+      } catch {
+        continue;
+      }
+      const cardSignals = element.querySelectorAll('article, [role="listitem"], a[href]').length;
+      if (
+        !/(auto|scroll|overlay)/i.test(`${style.overflowY} ${style.overflow}`) &&
+        cardSignals === 0
+      ) {
+        continue;
+      }
+      const visibleHeight = Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0);
+      const score = cardSignals * 10_000 + visibleHeight * Math.max(1, rect.width);
+      if (!best || score > best.score) best = { element, score };
+    }
+    return best?.element ?? null;
+  };
+
+  const scrollElement = findScrollableElement();
+  const beforeY = scrollElement ? scrollElement.scrollTop : window.scrollY;
+  if (scrollElement) {
+    scrollElement.scrollTo(0, 0);
+  } else {
+    window.scrollTo(0, 0);
+  }
+  const afterY = scrollElement ? scrollElement.scrollTop : window.scrollY;
+  const scrollHeight = scrollElement
+    ? scrollElement.scrollHeight
+    : document.documentElement.scrollHeight || document.body.scrollHeight;
+  const viewportHeight = scrollElement ? scrollElement.clientHeight : window.innerHeight;
   return {
     beforeY,
-    afterY: window.scrollY,
+    afterY,
     scrollHeight,
-    viewportHeight: window.innerHeight,
-    pixelsBelow: Math.max(0, scrollHeight - window.scrollY - window.innerHeight),
+    viewportHeight,
+    pixelsBelow: Math.max(0, scrollHeight - afterY - viewportHeight),
+    scrollTarget: scrollElement ? 'element' : 'window',
   };
 }
 
@@ -1226,6 +1630,7 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
       const steps: Array<{
         step: number;
         scrollY: number;
+        scrollTarget: 'window' | 'element';
         observedCards: number;
         mergedCards: number;
         pixelsBelow: number;
@@ -1236,6 +1641,7 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
       let latestPageRegions: PageRegionObject[] = [];
       let latestCandidateActions: PageCandidateAction[] = [];
       const startFromTop = args.startFromTop !== false;
+      let bottomProbeAttempts = 0;
 
       if (startFromTop) {
         const [topInjection] = await chrome.scripting.executeScript({
@@ -1259,11 +1665,17 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
         steps.push({
           step,
           scrollY: scan.pageInfo.scrollY,
+          scrollTarget: scan.pageInfo.scrollTarget,
           observedCards: scan.cards.length,
           mergedCards: merged.length,
           pixelsBelow: scan.pageInfo.pixelsBelow,
         });
-        if (merged.length >= minResults || step >= maxScrolls || scan.pageInfo.pixelsBelow <= 8) {
+        const atVisualBottom = scan.pageInfo.pixelsBelow <= 8;
+        if (
+          merged.length >= minResults ||
+          step >= maxScrolls ||
+          (atVisualBottom && bottomProbeAttempts >= 2)
+        ) {
           break;
         }
 
@@ -1280,9 +1692,13 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
           world: 'MAIN' as chrome.scripting.ExecutionWorld,
         });
         const scroll = scrollInjection?.result as ScrollStepResult | undefined;
-        if (!scroll || Math.abs(scroll.afterY - scroll.beforeY) < 4) {
+        if (
+          !scroll ||
+          (Math.abs(scroll.afterY - scroll.beforeY) < 4 && !scroll.interactionDispatched)
+        ) {
           break;
         }
+        bottomProbeAttempts = atVisualBottom ? bottomProbeAttempts + 1 : 0;
         scrolls.push(scroll);
         await this.sleep(settleMs);
       }
@@ -1303,11 +1719,16 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
           actionability: true,
           locatorChain: action.locatorChain,
         }));
+      const dedupedCandidateActions = dedupePageCandidateActions([
+        ...latestCandidateActions,
+        ...cardCandidateActions,
+      ]);
       const candidateActionsById = new Map<string, PageCandidateAction>();
-      for (const action of [...latestCandidateActions, ...cardCandidateActions]) {
+      for (const action of dedupedCandidateActions) {
         candidateActionsById.set(action.id, action);
       }
       const candidateActions = [...candidateActionsById.values()];
+      const candidateActionIds = new Set(candidateActions.map((action) => action.id));
       const resultCardActionIds = cardCandidateActions.map((action) => action.id);
       const pageRegions =
         latestPageRegions.length > 0
@@ -1318,7 +1739,15 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
                     targetability: resultCardActionIds.length > 0,
                     candidateActionIds: resultCardActionIds,
                   }
-                : region,
+                : {
+                    ...region,
+                    targetability: region.candidateActionIds.some((id) =>
+                      candidateActionIds.has(id),
+                    ),
+                    candidateActionIds: region.candidateActionIds.filter((id) =>
+                      candidateActionIds.has(id),
+                    ),
+                  },
             )
           : [
               {
@@ -1372,6 +1801,7 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
                     title: latestPageInfo.title,
                     url: latestPageInfo.url,
                     finalScrollY: latestPageInfo.scrollY,
+                    scrollTarget: latestPageInfo.scrollTarget,
                     pixelsBelow: latestPageInfo.pixelsBelow,
                   }
                 : null,

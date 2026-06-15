@@ -66,6 +66,11 @@ const LIGHTWEIGHT_POST_ACTION_INTENTS = new Set([
   'filter.sort_most_collected',
   'filter.time_range_select',
   'search.category_select',
+  'search.open_filters',
+  'search.apply_filter.sort',
+  'search.apply_filter.content_type',
+  'search.apply_filter.time_range',
+  'search.apply_filter.unknown',
   'auth.refresh_qr',
 ]);
 
@@ -89,9 +94,12 @@ export function buildClickHelperDispatchTimingPolicy(params: {
   reason: 'caller_requested' | 'lightweight_post_action_intent';
 } {
   if (params.intent && LIGHTWEIGHT_POST_ACTION_INTENTS.has(params.intent)) {
-    const timeoutCap = params.intent.startsWith('filter.')
-      ? DYNAMIC_FILTER_POST_ACTION_TIMEOUT_MS
-      : LIGHTWEIGHT_POST_ACTION_TIMEOUT_MS;
+    const timeoutCap =
+      params.intent.startsWith('filter.') ||
+      params.intent === 'search.open_filters' ||
+      params.intent.startsWith('search.apply_filter.')
+        ? DYNAMIC_FILTER_POST_ACTION_TIMEOUT_MS
+        : LIGHTWEIGHT_POST_ACTION_TIMEOUT_MS;
     return {
       waitForNavigation: false,
       timeout: Math.min(params.timeout, timeoutCap),

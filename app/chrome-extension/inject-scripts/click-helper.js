@@ -431,6 +431,37 @@ if (
         };
       };
 
+      const findConsistentClickPoint = (expected, rect, clickMethod) => {
+        if (!(expected instanceof Element) || !rect || rect.width <= 0 || rect.height <= 0) {
+          return null;
+        }
+        const left = Math.max(0, rect.left);
+        const right = Math.min(window.innerWidth, rect.right);
+        const top = Math.max(0, rect.top);
+        const bottom = Math.min(window.innerHeight, rect.bottom);
+        const width = right - left;
+        const height = bottom - top;
+        if (width <= 0 || height <= 0) return null;
+        const points = [
+          [0.5, 0.5],
+          [0.35, 0.5],
+          [0.65, 0.5],
+          [0.5, 0.35],
+          [0.5, 0.65],
+          [0.25, 0.5],
+          [0.75, 0.5],
+        ];
+        for (const [xRatio, yRatio] of points) {
+          const x = left + width * xRatio;
+          const y = top + height * yRatio;
+          const consistency = inspectTargetConsistency(expected, x, y, clickMethod);
+          if (!['blocked_by_overlay', 'target_mismatch'].includes(consistency.verdict)) {
+            return { x, y, consistency };
+          }
+        }
+        return null;
+      };
+
       if (ref && typeof ref === 'string') {
         // Resolve element from weak map
         let target = null;
@@ -591,25 +622,45 @@ if (
         clickY,
         elementInfo?.clickMethod || 'unknown',
       );
-      if (elementInfo) elementInfo.targetConsistency = targetConsistency;
+      let finalTargetConsistency = targetConsistency;
+      if (
+        element &&
+        ['blocked_by_overlay', 'target_mismatch'].includes(finalTargetConsistency.verdict)
+      ) {
+        const fallbackPoint = findConsistentClickPoint(
+          element,
+          element.getBoundingClientRect(),
+          elementInfo?.clickMethod || 'unknown',
+        );
+        if (fallbackPoint) {
+          clickX = fallbackPoint.x;
+          clickY = fallbackPoint.y;
+          finalTargetConsistency = fallbackPoint.consistency;
+          if (elementInfo) {
+            elementInfo.clickPosition = { x: clickX, y: clickY };
+            elementInfo.targetConsistencyFallbackUsed = true;
+          }
+        }
+      }
+      if (elementInfo) elementInfo.targetConsistency = finalTargetConsistency;
       if (
         element &&
         (elementInfo?.clickMethod === 'selector' || elementInfo?.clickMethod === 'ref') &&
-        ['blocked_by_overlay', 'target_mismatch'].includes(targetConsistency.verdict)
+        ['blocked_by_overlay', 'target_mismatch'].includes(finalTargetConsistency.verdict)
       ) {
         return {
           success: false,
           dispatchSucceeded: false,
           observedOutcome: 'no_observed_change',
-          error: targetConsistency.verdict,
-          reason: targetConsistency.verdict,
+          error: finalTargetConsistency.verdict,
+          reason: finalTargetConsistency.verdict,
           message:
-            targetConsistency.verdict === 'blocked_by_overlay'
+            finalTargetConsistency.verdict === 'blocked_by_overlay'
               ? 'Click target is covered by an overlay or dialog; handle the blocking surface first.'
               : 'Click target center resolves to a different element; refresh read_page or choose the blocking target first.',
           elementInfo,
-          targetConsistency,
-          actionRecovery: buildActionRecovery(targetConsistency.verdict),
+          targetConsistency: finalTargetConsistency,
+          actionRecovery: buildActionRecovery(finalTargetConsistency.verdict),
         };
       }
 
