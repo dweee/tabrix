@@ -280,6 +280,7 @@ export class BrowserObjectRepository {
   private readonly getByIdentityStmt;
   private readonly listRecentStmt;
   private readonly listUpdatedAfterStmt;
+  private readonly listReusableForPageStmt;
   private readonly listCurrentBrowserSurfaceStmt;
   private readonly listObjectLibraryGraphSurfaceStmt;
   private readonly archiveStmt;
@@ -371,6 +372,27 @@ export class BrowserObjectRepository {
           AND object_type IN ('page', 'region', 'action_target', 'data_source', 'result_card')
           AND (? IS NULL OR updated_at > ?)
         ORDER BY updated_at ASC, created_at ASC
+        LIMIT ?`,
+    );
+    this.listReusableForPageStmt = db.prepare(
+      `SELECT * FROM tabrix_browser_objects
+        WHERE archived_at IS NULL
+          AND closed_at IS NULL
+          AND redaction_state = 'redacted'
+          AND site_family = ?
+          AND page_model_key = ?
+          AND object_type IN ('region', 'action_target', 'result_card', 'data_source')
+        ORDER BY
+          CASE object_type
+            WHEN 'action_target' THEN 0
+            WHEN 'result_card' THEN 1
+            WHEN 'region' THEN 2
+            WHEN 'data_source' THEN 3
+            ELSE 4
+          END,
+          COALESCE(last_validated_at, updated_at, created_at) DESC,
+          confidence_score DESC,
+          updated_at DESC
         LIMIT ?`,
     );
     this.listCurrentBrowserSurfaceStmt = db.prepare(
@@ -615,6 +637,22 @@ export class BrowserObjectRepository {
     const cursor = input?.cursorUpdatedAt ?? null;
     return (
       this.listUpdatedAfterStmt.all(cursor, cursor, input?.limit ?? 100) as BrowserObjectRow[]
+    ).map(rowToBrowserObject);
+  }
+
+  public listReusableForPage(input: {
+    siteFamily: string;
+    pageModelKey: string;
+    limit?: number;
+  }): BrowserObject[] {
+    const siteFamily = text(input.siteFamily, DEFAULT_SITE_FAMILY) ?? DEFAULT_SITE_FAMILY;
+    const pageModelKey = text(input.pageModelKey, DEFAULT_PAGE_MODEL_KEY) ?? DEFAULT_PAGE_MODEL_KEY;
+    return (
+      this.listReusableForPageStmt.all(
+        siteFamily,
+        pageModelKey,
+        input.limit ?? 12,
+      ) as BrowserObjectRow[]
     ).map(rowToBrowserObject);
   }
 

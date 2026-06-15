@@ -245,6 +245,15 @@ export class SessionManager {
     return this.memoryTraceService;
   }
 
+  /**
+   * Browser Object repository. Read paths may use this to surface redacted
+   * object-library reuse hints, but browser control must continue to rely on
+   * fresh extension observations.
+   */
+  public get browserObjects(): BrowserObjectRepository | null {
+    return this.repos?.browserObject ?? null;
+  }
+
   public flushMkeMemoryTraceWrites(): Promise<void> {
     return this.memoryTraceService?.flushAsyncWrites() ?? Promise.resolve();
   }

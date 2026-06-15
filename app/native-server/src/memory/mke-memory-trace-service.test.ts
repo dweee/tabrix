@@ -1362,6 +1362,8 @@ describe('MkeMemoryTraceService', () => {
           }),
           expect.objectContaining({
             eventType: 'page_delta_report',
+            actionId: 'act-001',
+            targetObjectId: 'target-search-first',
             afterSnapshotId: 'rpos_example_101_1',
           }),
         ]),
@@ -1374,6 +1376,8 @@ describe('MkeMemoryTraceService', () => {
           sourceProvenance: ['dom', 'cdp', 'visible_text', 'ax'],
         },
         pageDeltaSummary: {
+          actionId: 'act-001',
+          targetObjectId: 'target-search-first',
           deltaKind: 'object_appeared',
           recommendation: 'proceed',
           changedRegionsCount: 1,
@@ -1381,6 +1385,294 @@ describe('MkeMemoryTraceService', () => {
           networkSignalsCount: 2,
           consoleSignalsCount: 2,
         },
+      });
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('projects read-page region child objects into the Object Library graph', async () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const browserObjectRepo = new BrowserObjectRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo, browserObjectRepo);
+
+    try {
+      traceService.recordToolCall({
+        taskId: 'read-page-region-child-object-task',
+        taskIntent: 'read a search results page as structured browser objects',
+        aiClient: 'jest',
+        toolName: 'chrome_read_page',
+        stepId: 'read-page-region-child-object-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 303 },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 180,
+        result: textResult({
+          page: {
+            title: 'AI image creation search',
+            url: 'https://example.test/search?keyword=ai-image',
+          },
+          summary: { pageRole: 'search_results', quality: 'fresh' },
+          pageProjection: {
+            pageRole: 'search_results',
+            pageModelKey: 'page:example.test:search_results',
+            chosenDataSource: 'dom',
+            tabId: 303,
+          },
+          sourceRoute: 'dom_snapshot',
+          selectedDataSource: 'dom',
+          freshness: 'fresh',
+          tabId: 303,
+          pageRegions: [
+            {
+              regionId: 'region_result_list',
+              regionType: 'result_list',
+              state: 'content_available_candidate',
+              targetability: 'target_ref',
+              confidence: 0.86,
+              objects: [
+                {
+                  objectId: 'container_result_list',
+                  objectType: 'container',
+                  containerKind: 'result_list',
+                  label: 'visible result list',
+                  actionTypes: ['open_detail'],
+                  sourceProvenance: ['dom', 'visible_text'],
+                  freshness: 'fresh',
+                  confidence: 0.8,
+                },
+                {
+                  objectId: 'ref_card_1',
+                  objectType: 'result_card',
+                  parentObjectId: 'container_result_list',
+                  label: 'Practical guide to AI image creation',
+                  role: 'card',
+                  targetRef: 'ref_card_1',
+                  actionTypes: ['open_detail'],
+                  sourceProvenance: ['dom', 'visible_text'],
+                  freshness: 'fresh',
+                  confidence: 0.88,
+                  detailTarget: {
+                    targetRef: 'ref_card_1',
+                    candidateActionId: 'ca_click_ref_card_1',
+                    actionType: 'click',
+                    intent: 'content.open_detail',
+                    locatorChain: [
+                      { type: 'ref', value: 'ref_card_1' },
+                      { type: 'css', value: 'article:nth-of-type(1) a[href]' },
+                    ],
+                    toolName: 'chrome_click_element',
+                  },
+                },
+              ],
+              candidateActionIds: ['ca_click_ref_card_1'],
+            },
+          ],
+        }),
+        resultSummary: 'read-page structured result list',
+      });
+
+      await traceService.flushAsyncWrites();
+
+      const objects = browserObjectRepo.listRecent({ limit: 20, offset: 0 });
+      const page = objects.find((object) => object.objectType === 'page');
+      const region = objects.find(
+        (object) => object.objectType === 'region' && object.facts?.regionType === 'result_list',
+      );
+      const container = objects.find(
+        (object) =>
+          object.objectType === 'container' && object.facts?.containerKind === 'result_list',
+      );
+      const card = objects.find((object) => object.objectType === 'result_card');
+
+      expect(page?.pageModelKey).toBe('page:example.test:search_results');
+      expect(region?.parentObjectId).toBe(page?.browserObjectId);
+      expect(container).toMatchObject({
+        parentObjectId: page?.browserObjectId,
+        actionTypes: ['open_detail'],
+        sourceFreshness: 'fresh',
+      });
+      expect(container?.facts).toMatchObject({
+        regionId: 'region_result_list',
+        regionType: 'result_list',
+        containerKind: 'result_list',
+        label: 'visible result list',
+        sourceProvenance: ['dom', 'visible_text'],
+      });
+      expect(card).toMatchObject({
+        parentObjectId: container?.browserObjectId,
+        objectType: 'result_card',
+        actionTypes: ['open_detail'],
+      });
+      expect(card?.targetability).toMatchObject({
+        targetRef: 'ref_card_1',
+        detailTarget: {
+          targetRef: 'ref_card_1',
+          candidateActionId: 'ca_click_ref_card_1',
+          intent: 'content.open_detail',
+          toolName: 'chrome_click_element',
+        },
+      });
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('projects snapshot-only page objects and action targets into the Object Library graph', async () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const browserObjectRepo = new BrowserObjectRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo, browserObjectRepo);
+
+    try {
+      traceService.recordToolCall({
+        taskId: 'read-page-snapshot-only-object-task',
+        taskIntent: 'read a page object snapshot without top-level regions',
+        aiClient: 'jest',
+        toolName: 'chrome_read_page',
+        stepId: 'read-page-snapshot-only-object-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 404 },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 120,
+        result: textResult({
+          page: {
+            title: 'Snapshot only search',
+            url: 'https://example.test/search?keyword=snapshot',
+          },
+          summary: { pageRole: 'search_results', quality: 'fresh' },
+          pageProjection: {
+            pageRole: 'search_results',
+            pageModelKey: 'page:example.test:search_results',
+            chosenDataSource: 'dom',
+            tabId: 404,
+          },
+          sourceRoute: 'dom_snapshot',
+          selectedDataSource: 'dom',
+          freshness: 'fresh',
+          tabId: 404,
+          pageObjectSnapshot: {
+            snapshotId: 'snapshot_only_404_1',
+            observedAt: new Date(NOW_MS + 120).toISOString(),
+            pageType: 'search_results',
+            pageRole: 'search_results',
+            pageUrl: 'https://example.test/search?keyword=snapshot',
+            pageState: {
+              readiness: 'ready',
+              baseUrl: 'https://example.test/search',
+              frameCount: 1,
+            },
+            freshness: 'fresh',
+            objectCount: 2,
+            actionableObjectCount: 1,
+            sourceProvenance: ['dom', 'ax'],
+            objects: [
+              {
+                objectId: 'snapshot_search_box',
+                objectType: 'search_area',
+                label: 'Search',
+                role: 'textbox',
+                targetRef: 'ref_search_box',
+                targetability: true,
+                actionTypes: ['input'],
+                sourceProvenance: ['ax'],
+                freshness: 'fresh',
+                confidence: 0.91,
+              },
+              {
+                objectId: 'snapshot_result_card_1',
+                objectType: 'result_card',
+                label: 'Snapshot result card',
+                role: 'card',
+                targetRef: 'ref_result_card_1',
+                targetability: true,
+                actionTypes: ['open_detail'],
+                sourceProvenance: ['dom', 'visible_text'],
+                freshness: 'fresh',
+                confidence: 0.88,
+                detailTarget: {
+                  targetRef: 'ref_result_card_1',
+                  candidateActionId: 'ca_open_snapshot_result_1',
+                  actionType: 'click',
+                  intent: 'content.open_detail',
+                  toolName: 'chrome_click_element',
+                },
+              },
+            ],
+            actionableTargets: [
+              {
+                targetId: 'ca_open_snapshot_result_1',
+                targetRef: 'ref_result_card_1',
+                actionType: 'click',
+                actionability: true,
+                intent: 'content.open_detail',
+                matchReason: 'snapshot detail target',
+              },
+            ],
+          },
+        }),
+        resultSummary: 'read-page snapshot-only objects',
+      });
+
+      await traceService.flushAsyncWrites();
+
+      const objects = browserObjectRepo.listRecent({ limit: 20, offset: 0 });
+      const page = objects.find((object) => object.objectType === 'page');
+      const syntheticRegion = objects.find(
+        (object) => object.objectType === 'region' && object.facts?.regionType === 'page_objects',
+      );
+      const searchBox = objects.find((object) => object.objectType === 'search_area');
+      const resultCard = objects.find((object) => object.objectType === 'result_card');
+      const actionTarget = objects.find((object) => object.objectType === 'action_target');
+
+      expect(page).toMatchObject({
+        pageModelKey: 'page:example.test:search_results',
+      });
+      expect(page?.facts).toMatchObject({
+        pageObjectSnapshotSummary: {
+          snapshotId: 'snapshot_only_404_1',
+          objectCount: 2,
+          actionableObjectCount: 1,
+          pageState: {
+            baseUrl: 'https://example.test/search',
+          },
+        },
+      });
+      expect(syntheticRegion).toMatchObject({
+        parentObjectId: page?.browserObjectId,
+        objectType: 'region',
+      });
+      expect(syntheticRegion?.facts).toMatchObject({
+        regionType: 'page_objects',
+        layoutHint: 'snapshot',
+        candidateActionCount: 1,
+      });
+      expect(searchBox).toMatchObject({
+        parentObjectId: page?.browserObjectId,
+        actionTypes: ['input'],
+        sourceFreshness: 'fresh',
+      });
+      expect(searchBox?.facts).toMatchObject({
+        regionId: 'page-object-snapshot',
+        sourceProvenance: ['ax'],
+        label: 'Search',
+      });
+      expect(resultCard?.targetability).toMatchObject({
+        targetRef: 'ref_result_card_1',
+        detailTarget: {
+          candidateActionId: 'ca_open_snapshot_result_1',
+          toolName: 'chrome_click_element',
+        },
+      });
+      expect(actionTarget).toMatchObject({
+        objectType: 'action_target',
+        canTabrixOperate: true,
+      });
+      expect(actionTarget?.targetability).toMatchObject({
+        targetRef: 'ref_result_card_1',
       });
     } finally {
       traceService.discardPendingAsyncWrites();

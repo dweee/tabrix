@@ -128,6 +128,85 @@ describe('MKE core repositories', () => {
     }
   });
 
+  it('lists only redacted reusable Browser Objects for the same page model', () => {
+    const { browserObjectRepo, close } = bootstrap();
+    try {
+      const base = {
+        siteFamily: 'example.test',
+        pageUrlPattern: 'https://example.test/search',
+        rootRoute: 'https://example.test/search',
+        currentRoute: 'https://example.test/search?q=ai',
+        pageRole: 'search_results',
+        pageModelKey: 'page:example.test:search_results',
+        tabId: 7,
+        windowId: 1,
+        ownerType: 'ai',
+        sourceRoute: 'chrome_read_page',
+        sourceFreshness: 'fresh',
+        redactionState: 'redacted',
+        updatedAt: NOW,
+      };
+
+      browserObjectRepo.upsert({
+        ...base,
+        objectFingerprint: 'action:example.test:search:submit',
+        objectType: 'action_target',
+        confidenceScore: 0.95,
+        lastValidatedAt: '2026-06-06T11:00:00.000Z',
+      });
+      browserObjectRepo.upsert({
+        ...base,
+        objectFingerprint: 'card:example.test:search:top-card',
+        objectType: 'result_card',
+        confidenceScore: 0.86,
+      });
+      browserObjectRepo.upsert({
+        ...base,
+        objectFingerprint: 'page:example.test:search',
+        objectType: 'page',
+        confidenceScore: 0.99,
+      });
+      browserObjectRepo.upsert({
+        ...base,
+        objectFingerprint: 'action:example.test:search:private',
+        objectType: 'action_target',
+        redactionState: 'raw',
+      });
+      browserObjectRepo.upsert({
+        ...base,
+        objectFingerprint: 'action:example.test:search:closed',
+        objectType: 'action_target',
+        closedAt: NOW,
+      });
+      browserObjectRepo.upsert({
+        ...base,
+        objectFingerprint: 'action:other.test:search:submit',
+        siteFamily: 'other.test',
+        objectType: 'action_target',
+      });
+      const archived = browserObjectRepo.upsert({
+        ...base,
+        objectFingerprint: 'region:example.test:search:archived',
+        objectType: 'region',
+      });
+      browserObjectRepo.archive({ browserObjectId: archived.browserObjectId, archivedAt: NOW });
+
+      const reusable = browserObjectRepo.listReusableForPage({
+        siteFamily: 'example.test',
+        pageModelKey: 'page:example.test:search_results',
+      });
+
+      expect(reusable.map((object) => object.objectFingerprint)).toEqual([
+        'action:example.test:search:submit',
+        'card:example.test:search:top-card',
+      ]);
+      expect(reusable.every((object) => object.redactionState === 'redacted')).toBe(true);
+      expect(reusable.every((object) => object.closedAt === null)).toBe(true);
+    } finally {
+      close();
+    }
+  });
+
   it('preserves Browser Object source trace lineage across upserts', () => {
     const { browserObjectRepo, close } = bootstrap();
     try {

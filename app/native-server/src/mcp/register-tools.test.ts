@@ -127,6 +127,87 @@ describe('handleToolCall execution wrapper', () => {
     });
   });
 
+  it('adds redacted Object Library reuse hints to read_page without replacing current candidates', async () => {
+    markBridgeReady();
+    sessionManager.browserObjects!.upsert({
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      rootRoute: 'https://example.test/search',
+      currentRoute: 'https://example.test/search?q=ai',
+      pageRole: 'search_results',
+      pageModelKey: 'page:example.test:search_results',
+      objectFingerprint: 'action:example.test:search:submit',
+      objectType: 'action_target',
+      actionTypes: ['search.submit'],
+      primaryConclusion: 'Search submit control was seen on this page model.',
+      confidenceScore: 0.91,
+      lastValidatedAt: '2026-06-06T11:00:00.000Z',
+      redactionState: 'redacted',
+      updatedAt: '2026-06-06T11:00:00.000Z',
+    });
+    sessionManager.browserObjects!.upsert({
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      rootRoute: 'https://example.test/search',
+      currentRoute: 'https://example.test/search?q=ai',
+      pageRole: 'search_results',
+      pageModelKey: 'page:example.test:search_results',
+      objectFingerprint: 'card:example.test:search:old-result',
+      objectType: 'result_card',
+      actionTypes: ['open_detail'],
+      primaryConclusion: 'A previous result card was observed but needs refresh.',
+      confidenceScore: 0.72,
+      sourceFreshness: 'needs_refresh',
+      redactionState: 'redacted',
+      updatedAt: '2026-06-05T11:00:00.000Z',
+    });
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      data: {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              pageProjection: {
+                siteFamily: 'example.test',
+                pageModelKey: 'page:example.test:search_results',
+              },
+              candidateActions: [{ id: 'current-action', targetRef: 'ref_current' }],
+            }),
+          },
+        ],
+        isError: false,
+      },
+    } as never);
+
+    const result = await handleToolCall('chrome_read_page', { tabId: 1 });
+    const payload = JSON.parse(String(result.content[0].text));
+
+    expect(payload.candidateActions).toEqual([{ id: 'current-action', targetRef: 'ref_current' }]);
+    expect(payload.objectLibraryHints).toEqual([
+      expect.objectContaining({
+        source: 'object_library_reuse',
+        objectType: 'action_target',
+        objectFingerprint: 'action:example.test:search:submit',
+        siteFamily: 'example.test',
+        pageModelKey: 'page:example.test:search_results',
+        reuseConfidence: 0.91,
+        freshness: 'validated',
+        lastValidatedAt: '2026-06-06T11:00:00.000Z',
+        actionTypes: ['search.submit'],
+      }),
+      expect.objectContaining({
+        source: 'object_library_reuse',
+        objectType: 'result_card',
+        objectFingerprint: 'card:example.test:search:old-result',
+        freshness: 'needs_refresh',
+        actionTypes: ['open_detail'],
+      }),
+    ]);
+    expect(JSON.stringify(payload.objectLibraryHints)).not.toContain('ref_current');
+  });
+
   it('returns the tool result before async Browser Object trace projection runs', async () => {
     markBridgeReady();
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
@@ -2673,6 +2754,20 @@ describe('handleToolCall execution wrapper', () => {
         toolName: 'chrome_read_page',
       });
       expect(flowSpy).toHaveBeenCalledTimes(0);
+      expect(secondPayload._tabrix).toMatchObject({
+        toolName: 'chrome_read_page',
+        traceId: expect.any(String),
+        businessFeedbackRequired: true,
+      });
+      const traces = sessionManager.memoryTraces!.listByTask(
+        sessionManager.listSessions().at(-1)!.taskId,
+      );
+      expect(traces).toHaveLength(1);
+      expect(traces[0]).toMatchObject({
+        toolName: 'chrome_read_page',
+        toolSuccess: true,
+        resultSummary: expect.stringContaining('cached_page_projection_delta'),
+      });
       const persisted = sessionManager.listSessions().at(-1);
       expect(persisted?.summary).toBe(
         'AI context: read_refresh_delta; state=ready; next=continue_read; source=cached_page_projection_delta; data=dom_json; reason=cached_projection_reused_for_redundant_read; fallback=none; rejected=none; metadata=1; confidence=0.9; changed=none; reused=viewport; savedChars=3600',
@@ -4458,6 +4553,8 @@ describe('handleToolCall execution wrapper', () => {
       sourceFreshness?: 'fresh' | 'stale' | 'unknown';
       sourceObservedAt?: string;
       authCollaboration?: Record<string, unknown>;
+      pageDeltaReport?: Record<string, unknown>;
+      pageObjectSnapshot?: Record<string, unknown>;
     }): string {
       const sourceObservedAt = input.sourceObservedAt ?? new Date(Date.now()).toISOString();
       const topNRows = Array.from({ length: 10 }, (_, index) => {
@@ -4507,6 +4604,8 @@ describe('handleToolCall execution wrapper', () => {
           : {}),
         ...(input.pageContext ? { pageContext: input.pageContext } : {}),
         ...(input.authCollaboration ? { authCollaboration: input.authCollaboration } : {}),
+        ...(input.pageDeltaReport ? { pageDeltaReport: input.pageDeltaReport } : {}),
+        ...(input.pageObjectSnapshot ? { pageObjectSnapshot: input.pageObjectSnapshot } : {}),
         pageRegions: input.pageRegions,
         objectLifecycle: {
           source: 'read_page_regions',
@@ -4557,6 +4656,7 @@ describe('handleToolCall execution wrapper', () => {
           status: 'stable',
           pageStability: 'stable',
           canUseSnapshotForBusinessAction: true,
+          nextStepAction: 'proceed',
           nextStepHint: 'snapshot_ready_for_business_action',
           claimBoundary: 'test load readiness',
           ...overrides,
@@ -5275,6 +5375,115 @@ describe('handleToolCall execution wrapper', () => {
       });
     });
 
+    it('binds list refresh PageDelta to the pending filter action and result list', () => {
+      const payload = bindReadPageDeltaReportToPendingInteraction(
+        {
+          source: 'read_page_delta_report',
+          actionId: null,
+          targetObjectId: null,
+          beforeSnapshotId: 'snapshot_before_filter',
+          afterSnapshotId: 'snapshot_after_filter',
+          deltaKind: 'list_refreshed',
+          recommendation: 'proceed',
+        },
+        {
+          objects: [
+            {
+              objectId: 'object_filter_panel',
+              kind: 'filter_panel',
+              targetRef: 'ref_filter_panel',
+            },
+            {
+              objectId: 'object_result_list',
+              kind: 'result_list',
+              targetRef: 'ref_results',
+            },
+            {
+              objectId: 'object_result_2',
+              kind: 'result_card',
+              targetRef: 'ref_result_2',
+              parentObjectId: 'object_result_list',
+            },
+          ],
+          actionableTargets: [
+            {
+              targetId: 'target_filter_apply',
+              objectId: 'object_result_list',
+              targetRef: 'ref_results',
+            },
+          ],
+        },
+        {
+          action: 'chrome_click_element',
+          tabId: 1,
+          changeCause: 'click',
+          targetRefs: ['ref_filter_apply', 'ref_results'],
+          candidateActionId: 'ca_apply_filter',
+          candidateActionIntent: 'filter.time_range_select',
+          actionKind: 'click',
+          producedAtMs: Date.now(),
+          beforePageRegions: [],
+        },
+      );
+
+      expect(payload).toMatchObject({
+        actionId: 'ca_apply_filter',
+        targetObjectId: 'object_result_list',
+        beforeSnapshotId: 'snapshot_before_filter',
+        afterSnapshotId: 'snapshot_after_filter',
+        deltaKind: 'list_refreshed',
+        recommendation: 'proceed',
+      });
+    });
+
+    it('binds dialog PageDelta to the pending target that opened the dialog', () => {
+      const payload = bindReadPageDeltaReportToPendingInteraction(
+        {
+          source: 'read_page_delta_report',
+          actionId: null,
+          targetObjectId: null,
+          beforeSnapshotId: 'snapshot_before_dialog',
+          afterSnapshotId: 'snapshot_after_dialog',
+          deltaKind: 'dialog_appeared',
+          recommendation: 'needs_user',
+        },
+        {
+          objects: [
+            {
+              objectId: 'object_login_button',
+              kind: 'button',
+              targetRef: 'ref_login',
+            },
+            {
+              objectId: 'object_login_dialog',
+              kind: 'modal',
+              targetRef: 'ref_login_dialog',
+            },
+          ],
+        },
+        {
+          action: 'chrome_click_element',
+          tabId: 1,
+          changeCause: 'click',
+          targetRefs: ['ref_login'],
+          candidateActionId: 'ca_open_login_dialog',
+          candidateActionIntent: 'open_dialog',
+          actionKind: 'click',
+          producedAtMs: Date.now(),
+          beforePageRegions: [],
+        },
+      );
+
+      expect(payload).toMatchObject({
+        actionId: 'ca_open_login_dialog',
+        targetObjectId: 'object_login_button',
+        beforeSnapshotId: 'snapshot_before_dialog',
+        afterSnapshotId: 'snapshot_after_dialog',
+        deltaKind: 'dialog_appeared',
+        recommendation: 'needs_user',
+      });
+    });
+
     it('allows fill-then-click form continuation on a run-owned tab before final readback', async () => {
       markBridgeReady();
       const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
@@ -5503,6 +5712,76 @@ describe('handleToolCall execution wrapper', () => {
           tabId: 1,
           pageRegions: [contentListRegion('after')],
           includeTopNRows: true,
+          pageDeltaReport: {
+            source: 'read_page_delta_report',
+            actionId: null,
+            targetObjectId: null,
+            beforeSnapshotId: 'snapshot_before_search_submit',
+            afterSnapshotId: 'snapshot_after_search_submit',
+            beforeObservedAt: '2026-06-16T00:00:00.000Z',
+            afterObservedAt: '2026-06-16T00:00:01.000Z',
+            deltaKind: 'list_refreshed',
+            changedRegions: ['results'],
+            changedObjects: ['after_1', 'after_2'],
+            networkSignals: {
+              requestStartedDelta: 2,
+              failedRequestDelta: 0,
+            },
+            recommendation: 'proceed',
+            claimBoundary: 'test page delta',
+          },
+          pageObjectSnapshot: {
+            source: 'read_page_object_snapshot',
+            snapshotId: 'snapshot_after_search_submit',
+            observedAt: '2026-06-16T00:00:01.000Z',
+            pageUrl: 'https://example.test/search',
+            pageTitle: 'Search',
+            pageType: 'web_page',
+            pageRole: 'search_results',
+            pageState: {
+              pageStability: 'stable',
+              readiness: 'ready',
+              baseUrl: 'example.test',
+              frameCount: null,
+            },
+            sourceProvenance: ['dom'],
+            freshness: 'fresh',
+            objects: [
+              {
+                objectId: 'object_search_submit',
+                kind: 'button',
+                label: 'Search',
+                targetRef: 'ref_search_submit',
+                ref: 'ref_search_submit',
+                sourceProvenance: 'dom',
+                freshness: 'fresh',
+              },
+              {
+                objectId: 'after_1',
+                kind: 'result_card',
+                label: 'Alpha shared insight',
+                targetRef: 'ref_after_1',
+                ref: 'ref_after_1',
+                sourceProvenance: 'dom',
+                freshness: 'fresh',
+              },
+            ],
+            actionableTargets: [
+              {
+                targetId: 'target_search_submit',
+                objectId: 'object_search_submit',
+                label: 'Search',
+                kind: 'click',
+                targetRef: 'ref_search_submit',
+                ref: 'ref_search_submit',
+                sourceProvenance: 'dom',
+                freshness: 'fresh',
+              },
+            ],
+            objectCount: 2,
+            actionableObjectCount: 1,
+            claimBoundary: 'test object snapshot',
+          },
         }),
       );
       const result = await handleToolCall('chrome_read_page', {
@@ -5533,6 +5812,22 @@ describe('handleToolCall execution wrapper', () => {
           status: 'ready_to_continue',
           canContinue: true,
           nextAction: 'continue_original_task',
+        },
+      });
+      expect(payload.pageDeltaReport).toMatchObject({
+        actionId: 'ca_search_submit',
+        targetObjectId: 'object_search_submit',
+        deltaKind: 'list_refreshed',
+      });
+      expect(payload.postActionDeltaEvidence).toMatchObject({
+        actionId: 'ca_search_submit',
+        objectDelta: {
+          status: 'observed',
+          changedObjectIds: ['after_1', 'after_2'],
+        },
+        networkSignalSummary: {
+          status: 'observed',
+          observedRequestCount: 2,
         },
       });
       expect(payload).not.toHaveProperty('aiContextEnvelope');

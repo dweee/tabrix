@@ -14,7 +14,9 @@ import {
   buildReadPageBrowserPageObjectView,
 } from '@tabrix/shared';
 import type { LifecycleEvidenceBrowserHygieneCheck } from '@tabrix/shared';
+import type { BuildPostActionDeltaEvidenceInput, ReadPagePageDeltaReport } from '@tabrix/shared';
 import type { ReadPageObjectLifecycleSummary } from '@tabrix/shared';
+import type { ReadPageObjectLibraryHint } from '@tabrix/shared';
 import type { SemanticSignal } from '@tabrix/shared';
 import { isToolAllowedByPolicy } from '../policy/phase0-opt-in';
 import {
@@ -506,12 +508,17 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           status: 'completed',
           summary: 'chrome_read_page fulfilled via current-task observed API data',
         });
-        return shouldIncludeVerboseReadPageContext(
+        const finalApiCallResult = shouldIncludeVerboseReadPageContext(
           args,
           extractRequestedLayer(args) ?? READ_PAGE_DEFAULT_LAYER,
         )
           ? apiCallResult
           : stripReadPageDiagnosticNoiseFromJsonResult(apiCallResult);
+        return recordAndAttachMkeMemoryTrace(finalApiCallResult, {
+          requestParams: outgoingArgs,
+          resultSummary: 'chrome_read_page fulfilled via current-task observed API data',
+          browserContextKey: taskContextAttachment.taskContextKey,
+        });
       }
       const liveObservedEvidence = taskContext.peekLiveObservedApiEvidence();
       if (liveObservedEvidence.length > 0) {
@@ -622,7 +629,11 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
                 status: 'completed',
                 summary: `chrome_read_page fulfilled via ${skipPlan.sourceKind}`,
               });
-              return apiCallResult;
+              return recordAndAttachMkeMemoryTrace(apiCallResult, {
+                requestParams: outgoingArgs,
+                resultSummary: `chrome_read_page fulfilled via ${skipPlan.sourceKind} (saved ~${tokenSavings.tokensSavedEstimate} tok)`,
+                browserContextKey: taskContextAttachment.taskContextKey,
+              });
             }
             const fallbackCause = normalizeApiFallbackCause(apiResult.reason);
             forcedReadPageLayer = apiResult.fallbackEntryLayer;
@@ -667,7 +678,11 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
               status: 'completed',
               summary: `chrome_read_page skipped via ${skipPlan.sourceKind}`,
             });
-            return skipResult;
+            return recordAndAttachMkeMemoryTrace(skipResult, {
+              requestParams: outgoingArgs,
+              resultSummary: `chrome_read_page skipped via ${skipPlan.sourceKind} (saved ~${skipPlan.tokensSavedEstimate} tok)`,
+              browserContextKey: taskContextAttachment.taskContextKey,
+            });
           }
         }
         // `fallback_required` / `forward` falls through to the existing
@@ -731,11 +746,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         const cachedProjection = shouldAttachCachedProjection
           ? taskContext.peekLastPageProjection()
           : null;
-        const {
-          result: warningResult,
-          warning,
-          operationLog,
-        } = buildReadPageWarningResult({
+        const { result: warningResult, operationLog } = buildReadPageWarningResult({
           decision,
           requestedLayer,
           operationLogHint,
@@ -768,13 +779,19 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           status: 'completed',
           summary: normalizedWarning.executionResult.summary,
         });
-        return cachedProjection
+        const finalWarningResult = cachedProjection
           ? attachAiFacingOwnershipRuntime(warningResult, taskContextAttachment, {
               includeAiContextEnvelope: shouldIncludeVerboseReadPageContext(args, requestedLayer),
             })
           : attachTaskContextEnvelopeToJsonResult(warningResult, taskContextAttachment, {
               stripReadPageDiagnostics: !shouldIncludeVerboseReadPageContext(args, requestedLayer),
             });
+        return recordAndAttachMkeMemoryTrace(finalWarningResult, {
+          requestParams: outgoingArgs,
+          resultSummary: normalizedWarning.stepSummary,
+          errorCode: decision.reason ?? 'read_page_warning',
+          browserContextKey: taskContextAttachment.taskContextKey,
+        });
       }
     }
     let nonInterferenceVerdict = evaluateNonInterferencePreflight({
@@ -1273,7 +1290,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         status: 'completed',
         summary: normalized.executionResult.summary,
       });
-      const finalToolResult =
+      const finalToolResultBase =
         name === 'chrome_read_page' &&
         !shouldIncludeVerboseReadPageContext(
           outgoingArgs,
@@ -1281,6 +1298,10 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         )
           ? stripReadPageDiagnosticNoiseFromJsonResult(resultWithPolicyAndActionEvidence)
           : resultWithPolicyAndActionEvidence;
+      const finalToolResult =
+        name === 'chrome_read_page'
+          ? attachObjectLibraryHintsToReadPageResult(finalToolResultBase)
+          : finalToolResultBase;
       return recordAndAttachMkeMemoryTrace(finalToolResult, {
         requestParams: outgoingArgs,
         resultSummary: normalized.stepSummary,
@@ -2060,6 +2081,80 @@ function buildReadPageContextMeasurement(
   };
 }
 
+function attachObjectLibraryHintsToReadPageResult(result: CallToolResult): CallToolResult {
+  const browserObjects = sessionManager.browserObjects;
+  if (!browserObjects || result.isError === true) return result;
+  const payload = readJsonObjectFromCallToolResult(result);
+  if (!payload) return result;
+  if (Array.isArray(payload.objectLibraryHints) && payload.objectLibraryHints.length > 0) {
+    return result;
+  }
+  const projection = readObject(payload.pageProjection);
+  const siteFamily = readString(projection?.siteFamily);
+  const pageModelKey = readString(projection?.pageModelKey);
+  if (!siteFamily || !pageModelKey) return result;
+
+  let reusableObjects: ReturnType<typeof browserObjects.listReusableForPage> = [];
+  try {
+    reusableObjects = browserObjects.listReusableForPage({ siteFamily, pageModelKey, limit: 8 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.debug('mcp.register-tools', 'object library hint lookup failed', {
+      errorMessage: message,
+    });
+    return result;
+  }
+  if (reusableObjects.length === 0) return result;
+
+  const hints: ReadPageObjectLibraryHint[] = reusableObjects.map((object) => {
+    const confidence =
+      typeof object.confidenceScore === 'number' && Number.isFinite(object.confidenceScore)
+        ? Math.max(0, Math.min(1, object.confidenceScore))
+        : 0.5;
+    const actionTypes = Array.isArray(object.actionTypes)
+      ? object.actionTypes.filter((item): item is string => typeof item === 'string').slice(0, 6)
+      : undefined;
+    return {
+      source: 'object_library_reuse',
+      objectType: object.objectType,
+      objectFingerprint: object.objectFingerprint,
+      siteFamily: object.siteFamily,
+      pageModelKey: object.pageModelKey,
+      reuseConfidence: confidence,
+      freshness: mapObjectLibraryHintFreshness(object),
+      lastValidatedAt: object.lastValidatedAt,
+      lastObservedAt: object.lastObservedAt ?? object.updatedAt,
+      ...(actionTypes && actionTypes.length > 0 ? { actionTypes } : {}),
+      summary: object.primaryConclusion,
+      claimBoundary:
+        'objectLibraryHints are redacted historical planning hints only; current candidateActions and post-action verification remain authoritative.',
+    };
+  });
+
+  return {
+    ...result,
+    content: result.content.map((block, index) =>
+      index === 0 && block.type === 'text'
+        ? { ...block, text: JSON.stringify({ ...payload, objectLibraryHints: hints }) }
+        : block,
+    ),
+  };
+}
+
+function mapObjectLibraryHintFreshness(object: {
+  sourceFreshness?: string | null;
+  lastValidatedAt?: string | null;
+}): ReadPageObjectLibraryHint['freshness'] {
+  const freshness = String(object.sourceFreshness ?? '').toLowerCase();
+  if (freshness.includes('needs_refresh') || freshness.includes('refresh')) {
+    return 'needs_refresh';
+  }
+  if (freshness.includes('stale') || freshness.includes('expired')) {
+    return 'stale';
+  }
+  return object.lastValidatedAt ? 'validated' : 'unknown';
+}
+
 function evaluateReadPageTargetBinding(
   result: CallToolResult,
   requestedTabId: number,
@@ -2280,7 +2375,7 @@ export function bindReadPageDeltaReportToPendingInteraction(
   pageDeltaReport: unknown,
   pageObjectSnapshot: unknown,
   pendingInteraction: TaskPageInteractionSnapshot | null,
-): Record<string, unknown> | null {
+): ReadPagePageDeltaReport | null {
   const delta = readObject(pageDeltaReport);
   if (!delta || pendingInteraction === null) return null;
   const actionId =
@@ -2294,7 +2389,7 @@ export function bindReadPageDeltaReportToPendingInteraction(
     ...delta,
     actionId,
     targetObjectId,
-  };
+  } as unknown as ReadPagePageDeltaReport;
 }
 
 function findReadPageObjectIdForTargetRefs(
@@ -2364,6 +2459,47 @@ function shouldInvalidateReadAfterWindowFocusChange(toolName: string, args: unkn
   const url = typeof input.url === 'string' ? input.url : null;
   if (!url || url === 'back' || url === 'forward') return false;
   return true;
+}
+
+function buildPostActionDeltaSignalsFromPageDelta(
+  pageDelta: ReadPagePageDeltaReport | null | undefined,
+): Pick<
+  BuildPostActionDeltaEvidenceInput,
+  'navigationDelta' | 'objectDelta' | 'networkSignalSummary'
+> {
+  if (!pageDelta) return {};
+  const changedObjectIds = Array.isArray(pageDelta.changedObjects)
+    ? pageDelta.changedObjects.filter((item): item is string => typeof item === 'string')
+    : [];
+  const requestStartedDelta =
+    typeof pageDelta.networkSignals?.requestStartedDelta === 'number'
+      ? Math.max(0, pageDelta.networkSignals.requestStartedDelta)
+      : null;
+  const failedRequestDelta =
+    typeof pageDelta.networkSignals?.failedRequestDelta === 'number'
+      ? Math.max(0, pageDelta.networkSignals.failedRequestDelta)
+      : null;
+  const navigationObserved =
+    pageDelta.deltaKind === 'url_changed' ||
+    pageDelta.deltaKind === 'spa_route_change' ||
+    pageDelta.deltaKind === 'new_tab_opened';
+
+  return {
+    navigationDelta: navigationObserved ? { status: 'observed' } : { status: 'not_observed' },
+    objectDelta: {
+      status: changedObjectIds.length > 0 ? 'observed' : 'not_observed',
+      changedObjectIds,
+    },
+    networkSignalSummary: {
+      status:
+        requestStartedDelta !== null || failedRequestDelta !== null ? 'observed' : 'not_checked',
+      observedRequestCount: requestStartedDelta,
+      observedResponseCount:
+        pageDelta.deltaKind === 'network_completed' && requestStartedDelta !== null
+          ? requestStartedDelta
+          : null,
+    },
+  };
 }
 
 function readTaskPageRuntimeFields(payload: Record<string, unknown>): TaskPageRuntimeFields {
@@ -2727,9 +2863,10 @@ function attachAiFacingDeltaContext(
       ]
     : null;
   if (pendingInteraction) {
+    const pendingActionId = pendingInteraction.candidateActionId ?? pendingInteraction.action;
     projectionWithSourceTruth = {
       ...projectionWithSourceTruth,
-      changedByActionId: pendingInteraction.action,
+      changedByActionId: pendingActionId,
       changeCause: pendingInteraction.changeCause,
       invalidatedRefs: [
         ...pendingInteraction.targetRefs,
@@ -2754,8 +2891,12 @@ function attachAiFacingDeltaContext(
       ? buildPostActionDeltaEvidence({
           delta: deltaContext,
           tabId: projectionWithSourceTruth.tabId,
-          actionId: projectionWithSourceTruth.changedByActionId ?? null,
+          actionId:
+            actionBoundPageDeltaReport?.actionId ??
+            projectionWithSourceTruth.changedByActionId ??
+            null,
           sourceTruthChain: projectionWithSourceTruth.sourceTruthChain,
+          ...buildPostActionDeltaSignalsFromPageDelta(actionBoundPageDeltaReport),
           recommendedNextAction: regionStatePostconditions
             ? 'inspect_region_state_postconditions'
             : 'continue_with_post_action_delta_context',
