@@ -433,6 +433,102 @@ function getElementSelector(
   return selector || undefined;
 }
 
+function normalizeCrossSourceSelector(selector: unknown): string {
+  return String(selector || '')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function normalizeCrossSourceName(name: unknown): string {
+  return String(name || '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function buildCrossSourceMatchKeys(element: ReadPageInteractiveElement): string[] {
+  const role = String(element.role || '')
+    .trim()
+    .toLowerCase();
+  const name = normalizeCrossSourceName(element.name);
+  if (!role || !name) return [];
+  const fallbackKey = `fallback:${role}::${name}`;
+  const selector = normalizeCrossSourceSelector(element.selector);
+  return selector ? [`primary:${selector}::${role}::${name}`, fallbackKey] : [fallbackKey];
+}
+
+function mergeCrossSourceVisibility(
+  domElement: ReadPageInteractiveElement,
+  cdpAxElement: ReadPageInteractiveElement,
+): ReadPageInteractiveElement['visibility'] {
+  const domVisibility = domElement.visibility;
+  const cdpVisibility = cdpAxElement.visibility;
+  if (!cdpVisibility) return domVisibility;
+  return {
+    source: cdpVisibility.source ?? domVisibility?.source ?? 'dom',
+    domVisible: cdpVisibility.domVisible ?? domVisibility?.domVisible ?? true,
+    inViewport: cdpVisibility.inViewport ?? domVisibility?.inViewport ?? true,
+    centerHitTarget: cdpVisibility.centerHitTarget ?? domVisibility?.centerHitTarget ?? null,
+    occluded: cdpVisibility.occluded ?? domVisibility?.occluded ?? null,
+    reason: cdpVisibility.reason ?? domVisibility?.reason,
+  };
+}
+
+function mergeCrossSourceActionability(
+  domElement: ReadPageInteractiveElement,
+  cdpAxElement: ReadPageInteractiveElement,
+): ReadPageInteractiveElement['actionability'] {
+  const rank = new Map([
+    ['blocked', 0],
+    ['not_actionable', 1],
+    ['actionable', 2],
+  ]);
+  const domActionability = normalizeActionability(domElement.actionability);
+  const cdpActionability = normalizeActionability(cdpAxElement.actionability);
+  const domRank = rank.get(domActionability) ?? Number.MAX_SAFE_INTEGER;
+  const cdpRank = rank.get(cdpActionability) ?? Number.MAX_SAFE_INTEGER;
+  return domRank <= cdpRank ? domElement.actionability : cdpAxElement.actionability;
+}
+
+function deduplicateCrossSourceElements(input: {
+  domElements: ReadPageInteractiveElement[];
+  cdpAxElements: ReadPageInteractiveElement[];
+}): {
+  merged: ReadPageInteractiveElement[];
+  mergedRefs: Set<string>;
+} {
+  const cdpAxByKey = new Map<string, ReadPageInteractiveElement[]>();
+  for (const element of input.cdpAxElements) {
+    for (const key of buildCrossSourceMatchKeys(element)) {
+      const existing = cdpAxByKey.get(key) ?? [];
+      cdpAxByKey.set(key, [...existing, element]);
+    }
+  }
+
+  const matchedCdpRefs = new Set<string>();
+  const mergedRefs = new Set<string>();
+  const merged = input.domElements.map((domElement) => {
+    const matchedCdpElement = buildCrossSourceMatchKeys(domElement)
+      .flatMap((key) => cdpAxByKey.get(key) ?? [])
+      .find((candidate) => !matchedCdpRefs.has(candidate.ref));
+    if (!matchedCdpElement) return domElement;
+
+    matchedCdpRefs.add(matchedCdpElement.ref);
+    mergedRefs.add(domElement.ref);
+    return {
+      ...domElement,
+      visibility: mergeCrossSourceVisibility(domElement, matchedCdpElement),
+      actionability: mergeCrossSourceActionability(domElement, matchedCdpElement),
+    };
+  });
+
+  const unmatchedCdpAx = input.cdpAxElements.filter((element) => !matchedCdpRefs.has(element.ref));
+  return {
+    merged: [...merged, ...unmatchedCdpAx],
+    mergedRefs,
+  };
+}
+
 function normalizeActionability(value: unknown): string {
   const normalized = String(value || '')
     .trim()
@@ -646,6 +742,17 @@ export function buildCandidateActions(
     viewport: options.viewport ?? null,
   });
   const selectorMap = buildRefSelectorMap([...refMap, ...cdpAxFallback.refMap]);
+  const deduplicated = deduplicateCrossSourceElements({
+    domElements: interactiveElements.map((element) => ({
+      ...element,
+      selector: getElementSelector(element, selectorMap),
+    })),
+    cdpAxElements: cdpAxFallback.elements.map((element) => ({
+      ...element,
+      selector: getElementSelector(element, selectorMap),
+    })),
+  });
+  const mergedRefs = deduplicated.mergedRefs;
   const contentTargetRefs = visibleRegionRowTargetRefs(options.visibleRegionRows);
   const clickRoles = new Set(['button', 'link', 'menuitem', 'tab', 'option', 'checkbox', 'switch']);
   const fillRoles = new Set(['textbox', 'searchbox', 'combobox']);
@@ -653,7 +760,7 @@ export function buildCandidateActions(
     /(submit|save|continue|next|confirm|login|sign in|search|checkout|send code|get code|request code|filter|filters|filtered|sort|refresh|reload|all|images?|videos?|users?|latest|popular|reset|clear|apply|提交|保存|继续|下一步|确认|登录|搜索|筛选|已筛选|过滤|排序|全部|图文|视频|用户|综合|最新|最多点赞|最多评论|最多收藏|收藏最多|不限|一天内|一周内|半年内|已看过|未看过|已关注|同城|附近|重置|收起|刷新|获取验证码|发送验证码|重新发送|同意)/i;
 
   const seeds: CandidateActionSeed[] = [];
-  const prioritizedElements = [...interactiveElements, ...cdpAxFallback.elements]
+  const prioritizedElements = deduplicated.merged
     .map((element, index) => ({
       element,
       index,
@@ -678,11 +785,15 @@ export function buildCandidateActions(
 
     const isPrimary = primaryKeywords.test(name);
     const confidence = isPrimary ? 0.93 : actionType === 'fill' ? 0.68 : 0.72;
-    const baseMatchReason = isPrimary
+    const originalReason = isPrimary
       ? 'primary action inferred from interactive label'
       : actionType === 'fill'
         ? 'form input candidate from structured snapshot'
         : 'interactive clickable candidate from structured snapshot';
+    const isMergedSource = mergedRefs.has(element.ref);
+    const baseMatchReason = isMergedSource
+      ? `${originalReason} (cross-source merged: dom+cdp_ax)`
+      : originalReason;
     const intent = inferCandidateActionIntent(element, actionType, {
       interactiveElements: prioritizedElements,
     });

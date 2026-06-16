@@ -247,6 +247,256 @@ describe('read_page candidate action intents', () => {
     });
   });
 
+  it('deduplicates cross-source elements by selector role and name', () => {
+    const actions = buildCandidateActions(
+      [
+        element({
+          ref: 'ref_search_button',
+          role: 'button',
+          name: 'Search',
+          selector: 'button[aria-label="Search"]',
+          visibility: {
+            source: 'dom',
+            domVisible: true,
+            inViewport: true,
+            centerHitTarget: true,
+            occluded: false,
+            reason: 'dom_visible',
+          },
+        }),
+      ],
+      [{ ref: 'ref_search_button', selector: 'button[aria-label="Search"]' }],
+      {
+        viewport: { width: 1280, height: 720, dpr: 1 },
+        cdpAccessibilityCandidates: [
+          {
+            role: 'button',
+            label: ' Search ',
+            locator: {
+              source: 'cdp_ax',
+              backendDOMNodeId: 301,
+              cssSelector: ' button[aria-label="Search"] ',
+              visualBounds: { x: 10, y: 10, width: 80, height: 30 },
+            },
+            actionTypes: ['click'],
+            state: {},
+            visibilityProbe: {
+              domVisible: true,
+              inViewport: true,
+              centerHitTarget: true,
+              occluded: false,
+              reason: 'visible_unobstructed',
+            },
+          },
+        ],
+      },
+    );
+
+    expect(actions).toHaveLength(1);
+    expect(actions[0].targetRef).toBe('ref_search_button');
+    expect(actions[0].matchReason).toContain('cross-source merged: dom+cdp_ax');
+  });
+
+  it('deduplicates cross-source elements by role and name fallback when selector is missing', () => {
+    const actions = buildCandidateActions(
+      [
+        element({
+          ref: 'ref_search_input',
+          role: 'searchbox',
+          name: 'Search Projects',
+        }),
+      ],
+      [],
+      {
+        viewport: { width: 1280, height: 720, dpr: 1 },
+        cdpAccessibilityCandidates: [
+          {
+            role: 'searchbox',
+            label: ' search projects ',
+            locator: {
+              source: 'cdp_ax',
+              backendDOMNodeId: 302,
+              cssSelector: 'input[aria-label="Search Projects"]',
+              visualBounds: { x: 24, y: 24, width: 320, height: 40 },
+            },
+            actionTypes: ['focus', 'setvalue'],
+            state: {},
+            visibilityProbe: {
+              domVisible: true,
+              inViewport: true,
+              centerHitTarget: true,
+              occluded: false,
+              reason: 'visible_unobstructed',
+            },
+          },
+        ],
+      },
+    );
+
+    expect(actions).toHaveLength(1);
+    expect(actions[0].targetRef).toBe('ref_search_input');
+    expect(actions[0].matchReason).toContain('cross-source merged: dom+cdp_ax');
+  });
+
+  it('preserves unmatched dom-only and ax-only elements as separate actions', () => {
+    const actions = buildCandidateActions(
+      [
+        element({
+          ref: 'ref_dom_only',
+          role: 'button',
+          name: 'Search',
+          selector: 'button[aria-label="Search"]',
+        }),
+      ],
+      [{ ref: 'ref_dom_only', selector: 'button[aria-label="Search"]' }],
+      {
+        viewport: { width: 1280, height: 720, dpr: 1 },
+        cdpAccessibilityCandidates: [
+          {
+            role: 'button',
+            label: 'Continue',
+            locator: {
+              source: 'cdp_ax',
+              backendDOMNodeId: 303,
+              cssSelector: 'button[aria-label="Continue"]',
+              visualBounds: { x: 100, y: 100, width: 90, height: 32 },
+            },
+            actionTypes: ['click'],
+            state: {},
+            visibilityProbe: {
+              domVisible: true,
+              inViewport: true,
+              centerHitTarget: true,
+              occluded: false,
+              reason: 'visible_unobstructed',
+            },
+          },
+        ],
+      },
+    );
+
+    expect(actions).toHaveLength(2);
+    expect(actions.map((action) => action.targetRef)).toEqual(
+      expect.arrayContaining(['ref_dom_only', 'ref_fallback_cdp_ax_backend_303']),
+    );
+  });
+
+  it('prefers CDP AX visibility probe data when merging cross-source elements', () => {
+    const actions = buildCandidateActions(
+      [
+        element({
+          ref: 'ref_visibility_merge',
+          role: 'button',
+          name: 'Search',
+          selector: 'button[aria-label="Search"]',
+          visibility: {
+            source: 'dom',
+            domVisible: true,
+            inViewport: true,
+            centerHitTarget: true,
+            occluded: false,
+            reason: 'dom_visible',
+          },
+        }),
+      ],
+      [{ ref: 'ref_visibility_merge', selector: 'button[aria-label="Search"]' }],
+      {
+        viewport: { width: 1280, height: 720, dpr: 1 },
+        cdpAccessibilityCandidates: [
+          {
+            role: 'button',
+            label: 'Search',
+            locator: {
+              source: 'cdp_ax',
+              backendDOMNodeId: 304,
+              cssSelector: 'button[aria-label="Search"]',
+              visualBounds: { x: 10, y: 10, width: 80, height: 30 },
+            },
+            actionTypes: ['click'],
+            state: {},
+            visibilityProbe: {
+              domVisible: false,
+              inViewport: true,
+              centerHitTarget: true,
+              occluded: false,
+              reason: 'ax_hidden',
+            },
+          },
+        ],
+      },
+    );
+
+    expect(actions).toEqual([]);
+  });
+
+  it('keeps merged candidate count within the larger source count when all ax elements overlap', () => {
+    const actions = buildCandidateActions(
+      [
+        element({
+          ref: 'ref_button_1',
+          role: 'button',
+          name: 'Search',
+          selector: 'button[aria-label="Search"]',
+        }),
+        element({
+          ref: 'ref_button_2',
+          role: 'button',
+          name: 'Continue',
+          selector: 'button[aria-label="Continue"]',
+        }),
+      ],
+      [
+        { ref: 'ref_button_1', selector: 'button[aria-label="Search"]' },
+        { ref: 'ref_button_2', selector: 'button[aria-label="Continue"]' },
+      ],
+      {
+        viewport: { width: 1280, height: 720, dpr: 1 },
+        cdpAccessibilityCandidates: [
+          {
+            role: 'button',
+            label: 'Search',
+            locator: {
+              source: 'cdp_ax',
+              backendDOMNodeId: 305,
+              cssSelector: 'button[aria-label="Search"]',
+              visualBounds: { x: 10, y: 10, width: 80, height: 30 },
+            },
+            actionTypes: ['click'],
+            state: {},
+            visibilityProbe: {
+              domVisible: true,
+              inViewport: true,
+              centerHitTarget: true,
+              occluded: false,
+              reason: 'visible_unobstructed',
+            },
+          },
+          {
+            role: 'button',
+            label: 'Continue',
+            locator: {
+              source: 'cdp_ax',
+              backendDOMNodeId: 306,
+              cssSelector: 'button[aria-label="Continue"]',
+              visualBounds: { x: 100, y: 10, width: 90, height: 30 },
+            },
+            actionTypes: ['click'],
+            state: {},
+            visibilityProbe: {
+              domVisible: true,
+              inViewport: true,
+              centerHitTarget: true,
+              occluded: false,
+              reason: 'visible_unobstructed',
+            },
+          },
+        ],
+      },
+    );
+
+    expect(actions).toHaveLength(2);
+  });
+
   it('carries frameId from a frame-targeted read into candidate actions', () => {
     const actions = buildCandidateActions(
       [
