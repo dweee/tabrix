@@ -181,6 +181,49 @@ interface ReadPageObjectDeltaSignals {
   routeFingerprint?: string;
 }
 
+export interface PendingActionBinding {
+  actionId: string;
+  targetObjectId: string | null;
+  targetRef: string | null;
+  recordedAtMs: number;
+}
+
+const lastActionByTab = new Map<number, PendingActionBinding>();
+const LAST_ACTION_MAX_AGE_MS = 30_000;
+const LAST_ACTION_MAX_TABS = 64;
+
+export function recordPendingActionBinding(
+  tabId: number,
+  binding: { actionId: string; targetObjectId?: string | null; targetRef?: string | null },
+): void {
+  if (!Number.isFinite(tabId)) return;
+  const actionId = typeof binding.actionId === 'string' ? binding.actionId.trim() : '';
+  if (!actionId) return;
+  lastActionByTab.delete(tabId);
+  lastActionByTab.set(tabId, {
+    actionId,
+    targetObjectId: binding.targetObjectId ?? null,
+    targetRef: binding.targetRef ?? null,
+    recordedAtMs: Date.now(),
+  });
+  while (lastActionByTab.size > LAST_ACTION_MAX_TABS) {
+    const firstKey = lastActionByTab.keys().next().value;
+    if (firstKey === undefined) break;
+    lastActionByTab.delete(firstKey);
+  }
+}
+
+export function consumePendingActionBinding(tabId: number): PendingActionBinding | null {
+  if (!Number.isFinite(tabId)) return null;
+  const binding = lastActionByTab.get(tabId);
+  if (!binding) return null;
+  lastActionByTab.delete(tabId);
+  if (Date.now() - binding.recordedAtMs > LAST_ACTION_MAX_AGE_MS) {
+    return null;
+  }
+  return { ...binding };
+}
+
 function buildCDPRouteFingerprint(cdpSensing?: ReadPageCDPSensingSummary): string | undefined {
   const route = cdpSensing?.route;
   if (!route) return undefined;
@@ -372,12 +415,24 @@ function isFormStateObject(object: ReadPagePageObjectSummary): boolean {
   );
 }
 
-function buildReadPagePageDeltaReport(params: {
+function resolveTargetObjectId(
+  binding: PendingActionBinding | null,
+  snapshot: ReadPageObjectSnapshot,
+): string | null {
+  if (!binding?.targetRef) return binding?.targetObjectId ?? null;
+  const target = snapshot.actionableTargets.find(
+    (entry) => entry.ref === binding.targetRef || entry.targetRef === binding.targetRef,
+  );
+  return target?.objectId ?? binding.targetObjectId ?? null;
+}
+
+export function buildReadPagePageDeltaReport(params: {
   tabId: number;
   currentSnapshot: ReadPageObjectSnapshot;
   previousSnapshot: ReadPageObjectSnapshot | null;
   cdpSignals?: ReadPageObjectDeltaSignals;
   previousCdpSignals?: ReadPageObjectDeltaSignals;
+  pendingActionBinding?: PendingActionBinding | null;
 }): ReadPagePageDeltaReport | undefined {
   if (!params.previousSnapshot) return undefined;
 
@@ -515,8 +570,8 @@ function buildReadPagePageDeltaReport(params: {
 
   return {
     source: 'read_page_delta_report',
-    actionId: null,
-    targetObjectId: null,
+    actionId: params.pendingActionBinding?.actionId ?? null,
+    targetObjectId: params.pendingActionBinding?.targetObjectId ?? null,
     beforeSnapshotId: previous.snapshotId,
     afterSnapshotId: params.currentSnapshot.snapshotId,
     beforeObservedAt: previous.observedAt,
@@ -636,6 +691,7 @@ function buildBoundedWatchLoopSnapshot(params: {
 function resetObjectLifecycleCacheForTests(): void {
   objectLifecycleByTab.clear();
   pageObjectSnapshotByTab.clear();
+  lastActionByTab.clear();
 }
 
 function getTabNavigationUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {
@@ -2313,10 +2369,18 @@ async function buildModeOutput(params: {
     visibleTextContent: params.visibleTextContent,
   });
   const previousSnapshot = getPreviousPageObjectSnapshot(params.tabId);
+  const consumedPendingActionBinding = consumePendingActionBinding(params.tabId);
+  const pendingActionBinding = consumedPendingActionBinding
+    ? {
+        ...consumedPendingActionBinding,
+        targetObjectId: resolveTargetObjectId(consumedPendingActionBinding, pageObjectSnapshot),
+      }
+    : null;
   const pageDeltaReport = buildReadPagePageDeltaReport({
     tabId: params.tabId,
     currentSnapshot: pageObjectSnapshot,
     previousSnapshot: previousSnapshot?.snapshot ?? null,
+    pendingActionBinding,
     cdpSignals: {
       networkStartedCount:
         typeof params.loadReadiness.cdpSensing?.networkActivity?.requestStartedCount === 'number'

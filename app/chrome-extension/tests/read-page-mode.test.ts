@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { readPageTool } from '@/entrypoints/background/tools/browser/read-page';
+import {
+  buildReadPagePageDeltaReport,
+  consumePendingActionBinding,
+  readPageTool,
+  recordPendingActionBinding,
+} from '@/entrypoints/background/tools/browser/read-page';
 import { buildInteractiveElements } from '@/entrypoints/background/tools/browser/read-page-interactive-elements';
 import * as browserWorldInventory from '@/entrypoints/background/browser-world-inventory';
 import * as cdpPageSensing from '@/utils/cdp-page-sensing';
@@ -3250,6 +3255,171 @@ describe('read_page mode', () => {
       changedObjects: expect.any(Array),
       recommendation: expect.stringMatching(/^(proceed|wait|refresh|retry|stop|needs_user)$/),
       claimBoundary: expect.any(String),
+    });
+  });
+
+  it('consumes pending action binding after record', () => {
+    recordPendingActionBinding(7001, {
+      actionId: 'click-7001-1',
+      targetObjectId: 'obj-1',
+      targetRef: 'ref-1',
+    });
+
+    expect(consumePendingActionBinding(7001)).toMatchObject({
+      actionId: 'click-7001-1',
+      targetObjectId: 'obj-1',
+      targetRef: 'ref-1',
+    });
+  });
+
+  it('consumes pending action binding only once', () => {
+    recordPendingActionBinding(7002, {
+      actionId: 'click-7002-1',
+      targetRef: 'ref-2',
+    });
+
+    expect(consumePendingActionBinding(7002)?.actionId).toBe('click-7002-1');
+    expect(consumePendingActionBinding(7002)).toBeNull();
+  });
+
+  it('drops expired pending action binding', () => {
+    const nowSpy = vi.spyOn(Date, 'now');
+    nowSpy.mockReturnValue(1_000);
+    recordPendingActionBinding(7003, {
+      actionId: 'click-7003-1',
+      targetRef: 'ref-3',
+    });
+    nowSpy.mockReturnValue(31_001);
+
+    expect(consumePendingActionBinding(7003)).toBeNull();
+  });
+
+  it('carries actionId into pageDeltaReport when binding exists', () => {
+    const deltaReport = buildReadPagePageDeltaReport({
+      tabId: 7004,
+      pendingActionBinding: {
+        actionId: 'click-7004-1',
+        targetObjectId: 'obj_cta',
+        targetRef: 'ref_cta',
+        recordedAtMs: Date.now(),
+      },
+      previousSnapshot: {
+        source: 'read_page_object_snapshot',
+        snapshotId: 'before',
+        observedAt: '2026-06-16T00:00:00.000Z',
+        pageUrl: 'https://example.test/dashboard',
+        pageTitle: 'Dashboard',
+        pageType: 'content',
+        pageRole: 'dashboard',
+        pageState: {
+          pageStability: 'stable_or_unknown',
+          readiness: 'ready',
+          baseUrl: 'example.test',
+          frameCount: 1,
+        },
+        sourceProvenance: ['dom'],
+        freshness: 'fresh',
+        objects: [],
+        actionableTargets: [],
+        objectCount: 0,
+        actionableObjectCount: 0,
+        claimBoundary: 'test',
+      },
+      currentSnapshot: {
+        source: 'read_page_object_snapshot',
+        snapshotId: 'after',
+        observedAt: '2026-06-16T00:00:01.000Z',
+        pageUrl: 'https://example.test/dashboard',
+        pageTitle: 'Dashboard',
+        pageType: 'content',
+        pageRole: 'dashboard',
+        pageState: {
+          pageStability: 'stable_or_unknown',
+          readiness: 'ready',
+          baseUrl: 'example.test',
+          frameCount: 1,
+        },
+        sourceProvenance: ['dom'],
+        freshness: 'fresh',
+        objects: [],
+        actionableTargets: [
+          {
+            targetId: 'target_cta',
+            label: 'Continue',
+            kind: 'click',
+            targetRef: 'ref_cta',
+            ref: 'ref_cta',
+            objectId: 'obj_cta',
+            sourceProvenance: 'dom',
+            freshness: 'fresh',
+          },
+        ],
+        objectCount: 0,
+        actionableObjectCount: 1,
+        claimBoundary: 'test',
+      },
+    });
+
+    expect(deltaReport).toMatchObject({
+      source: 'read_page_delta_report',
+      actionId: 'click-7004-1',
+      targetObjectId: 'obj_cta',
+    });
+  });
+
+  it('keeps actionId null in pageDeltaReport when no binding exists', () => {
+    const deltaReport = buildReadPagePageDeltaReport({
+      tabId: 7005,
+      previousSnapshot: {
+        source: 'read_page_object_snapshot',
+        snapshotId: 'before',
+        observedAt: '2026-06-16T00:00:00.000Z',
+        pageUrl: 'https://example.test/dashboard',
+        pageTitle: 'Dashboard',
+        pageType: 'content',
+        pageRole: 'dashboard',
+        pageState: {
+          pageStability: 'stable_or_unknown',
+          readiness: 'ready',
+          baseUrl: 'example.test',
+          frameCount: 1,
+        },
+        sourceProvenance: ['dom'],
+        freshness: 'fresh',
+        objects: [],
+        actionableTargets: [],
+        objectCount: 0,
+        actionableObjectCount: 0,
+        claimBoundary: 'test',
+      },
+      currentSnapshot: {
+        source: 'read_page_object_snapshot',
+        snapshotId: 'after',
+        observedAt: '2026-06-16T00:00:01.000Z',
+        pageUrl: 'https://example.test/dashboard',
+        pageTitle: 'Dashboard',
+        pageType: 'content',
+        pageRole: 'dashboard',
+        pageState: {
+          pageStability: 'stable_or_unknown',
+          readiness: 'ready',
+          baseUrl: 'example.test',
+          frameCount: 1,
+        },
+        sourceProvenance: ['dom'],
+        freshness: 'fresh',
+        objects: [],
+        actionableTargets: [],
+        objectCount: 0,
+        actionableObjectCount: 0,
+        claimBoundary: 'test',
+      },
+    });
+
+    expect(deltaReport).toMatchObject({
+      source: 'read_page_delta_report',
+      actionId: null,
+      targetObjectId: null,
     });
   });
 

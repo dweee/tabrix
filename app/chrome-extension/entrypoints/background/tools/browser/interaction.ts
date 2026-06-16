@@ -36,6 +36,7 @@ import {
   buildPostActionReadbackEvidence,
   type PostActionReadbackEvidence,
 } from './post-action-readback';
+import { recordPendingActionBinding } from './read-page';
 
 /**
  * Explicit lane label on every click response. The Tabrix extension-first
@@ -1709,6 +1710,12 @@ class ClickTool extends BaseBrowserToolExecutor {
       if (merged.dispatchSucceeded) {
         markBrowserWorldTabAiOperated(tab.id, 'click_element');
       }
+      if (merged.dispatchSucceeded) {
+        recordPendingActionBinding(tab.id, {
+          actionId: clickActionId,
+          targetRef: finalRef ?? args.candidateAction?.targetRef ?? null,
+        });
+      }
       const businessVerification = buildBusinessVerification(
         merged.dispatchSucceeded,
         merged.observedOutcome,
@@ -2046,6 +2053,10 @@ class FillTool extends BaseBrowserToolExecutor {
         dispatchedFillTarget = { ref: finalRef, selector: finalSelector };
       }
 
+      recordPendingActionBinding(tabId, {
+        actionId: `fill-${tabId}-${Date.now()}`,
+        targetRef: dispatchedFillTarget.ref ?? args.candidateAction?.targetRef ?? null,
+      });
       markBrowserWorldTabAiOperated(tabId, 'fill_or_select');
       const postActionReadback = buildPostActionReadbackEvidence({
         candidateAction: args.candidateAction,
