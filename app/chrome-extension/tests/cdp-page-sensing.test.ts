@@ -137,6 +137,7 @@ describe('CDP page sensing snapshot', () => {
       available: true,
       readiness: 'complete',
       likelyLoading: false,
+      stabilityHint: 'stable',
       title: 'Search Results',
       route: {
         href: 'https://app.example.test/search/results',
@@ -456,6 +457,7 @@ describe('CDP page sensing snapshot', () => {
       available: true,
       readiness: 'interactive',
       likelyLoading: true,
+      stabilityHint: 'stable',
       focused: false,
       url: {
         href: 'https://docs.example.test/guide',
@@ -475,7 +477,127 @@ describe('CDP page sensing snapshot', () => {
       available: false,
       readiness: 'unknown',
       likelyLoading: false,
+      stabilityHint: 'stable',
       error: 'Debugger is already attached by DevTools',
+    });
+  });
+
+  it('marks post-ready frame navigation as spa navigating', async () => {
+    addEventListenerMock.mockImplementation((listener: any) => {
+      listener({ tabId: 55 }, 'Page.frameNavigated', {
+        frame: { id: 'frame-1', url: 'https://app.example.test/dashboard', loaderId: 'loader-2' },
+      });
+    });
+    sendCommandMock.mockImplementation(async (_tabId: number, method: string) => {
+      if (method === 'Runtime.evaluate') {
+        return {
+          result: {
+            value: {
+              readyState: 'complete',
+              url: 'https://app.example.test/search',
+              title: 'Search',
+              route: { url: 'https://app.example.test/search', historyLength: 5 },
+              navigation: {
+                type: 'navigate',
+                responseEndMs: 25,
+                domContentLoadedMs: 40,
+                loadEventMs: 60,
+              },
+            },
+          },
+        };
+      }
+      return {};
+    });
+
+    const snapshot = await captureCDPPageSensingSnapshot(55);
+
+    expect(snapshot).toMatchObject({
+      available: true,
+      readiness: 'complete',
+      stabilityHint: 'spa_navigating',
+      likelyLoading: true,
+    });
+  });
+
+  it('marks post-ready network burst as spa navigating', async () => {
+    addEventListenerMock.mockImplementation((listener: any) => {
+      listener({ tabId: 56 }, 'Network.requestWillBeSent', { requestId: 'r1' });
+      listener({ tabId: 56 }, 'Network.requestWillBeSent', { requestId: 'r2' });
+      listener({ tabId: 56 }, 'Network.requestWillBeSent', { requestId: 'r3' });
+    });
+    sendCommandMock.mockImplementation(async (_tabId: number, method: string) => {
+      if (method === 'Runtime.evaluate') {
+        return {
+          result: {
+            value: {
+              readyState: 'interactive',
+              url: 'https://app.example.test/results',
+              title: 'Results',
+              route: { url: 'https://app.example.test/results', historyLength: 6 },
+              navigation: {
+                type: 'navigate',
+                responseEndMs: 20,
+                domContentLoadedMs: 30,
+                loadEventMs: 45,
+              },
+            },
+          },
+        };
+      }
+      return {};
+    });
+
+    const snapshot = await captureCDPPageSensingSnapshot(56);
+
+    expect(snapshot).toMatchObject({
+      available: true,
+      readiness: 'interactive',
+      stabilityHint: 'spa_navigating',
+      likelyLoading: true,
+      networkActivity: {
+        requestStartedCount: 3,
+        inFlightCount: 3,
+        failedRequestCount: 0,
+      },
+    });
+  });
+
+  it('does not treat hash-only changes as spa navigating', async () => {
+    addEventListenerMock.mockImplementation((listener: any) => {
+      listener({ tabId: 57 }, 'Page.frameNavigated', {
+        frame: { id: 'frame-1', url: 'https://app.example.test/search#results' },
+      });
+    });
+    sendCommandMock.mockImplementation(async (_tabId: number, method: string) => {
+      if (method === 'Runtime.evaluate') {
+        return {
+          result: {
+            value: {
+              readyState: 'complete',
+              url: 'https://app.example.test/search#overview',
+              title: 'Search',
+              route: { url: 'https://app.example.test/search#overview', historyLength: 5 },
+              navigation: {
+                type: 'navigate',
+                responseEndMs: 25,
+                domContentLoadedMs: 40,
+                loadEventMs: 60,
+              },
+            },
+          },
+        };
+      }
+      return {};
+    });
+
+    const snapshot = await captureCDPPageSensingSnapshot(57);
+
+    expect(snapshot).toMatchObject({
+      available: true,
+      readiness: 'complete',
+      stabilityHint: 'stable',
+      likelyLoading: false,
     });
   });
 

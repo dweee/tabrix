@@ -1527,6 +1527,7 @@ describe('browser settle guidance', () => {
       available: true,
       readiness: 'complete',
       likelyLoading: false,
+      stabilityHint: 'stable',
       visibilityState: 'visible',
       focused: true,
       activeElement: {
@@ -1560,10 +1561,10 @@ describe('browser settle guidance', () => {
       accessibility: {
         totalNodes: 8,
         actionableNodeCount: 2,
-        roleCounts: {
-          button: 1,
-          textbox: 1,
-        },
+        actionableRoleTop: [
+          { role: 'button', count: 1 },
+          { role: 'textbox', count: 1 },
+        ],
         actionableSampleLabels: ['Search', 'Submit'],
         stateSignals: {
           checkedCount: 0,
@@ -1611,7 +1612,7 @@ describe('browser settle guidance', () => {
       windowId: 1,
       active: true,
       status: 'complete',
-      url: 'http://127.0.0.1:62100/search?q=private',
+      url: 'https://example.test/search?q=private',
       title: 'Search',
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
@@ -1625,7 +1626,7 @@ describe('browser settle guidance', () => {
           windowId: 1,
           active: true,
           status: 'complete',
-          url: 'http://127.0.0.1:62100/search?q=private',
+          url: 'https://example.test/search?q=private',
           title: 'Search',
         },
       ],
@@ -1729,6 +1730,93 @@ describe('browser settle guidance', () => {
     });
     expect(payload.pageContext.loadReadiness.claimBoundary).toContain('cdp_errors_are_high');
     expect(JSON.stringify(payload.pageContext.loadReadiness.cdpSensing)).not.toContain('private');
+  });
+
+  it('downgrades stable pages to changing when CDP detects SPA navigation', async () => {
+    vi.spyOn(cdpPageSensing, 'captureCDPPageSensingSnapshot').mockResolvedValue({
+      tabId: 44,
+      capturedAt: Date.parse('2026-06-13T10:00:00.000Z'),
+      source: 'cdp',
+      available: true,
+      readiness: 'complete',
+      likelyLoading: true,
+      stabilityHint: 'spa_navigating',
+      visibilityState: 'visible',
+      focused: true,
+      networkActivity: {
+        requestStartedCount: 4,
+        inFlightCount: 2,
+        failedRequestCount: 0,
+      },
+      navigation: {
+        type: 'navigate',
+        responseEndMs: 20,
+        domContentLoadedMs: 35,
+        loadEventMs: 50,
+      },
+    });
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 44,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/search',
+      title: 'Search',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows.get as any).mockResolvedValue({
+      id: 1,
+      focused: true,
+      state: 'normal',
+      tabs: [
+        {
+          id: 44,
+          windowId: 1,
+          active: true,
+          status: 'complete',
+          url: 'https://example.test/search',
+          title: 'Search',
+        },
+      ],
+    });
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        'Textbox "Search"',
+        'Button "Submit"',
+        'List "Results"',
+        'Link "Docs"',
+        'Status "Ready"',
+        'Panel "Search filters"',
+        'Section "Result cards"',
+        'Card "First result"',
+        'Hint "Use ref based actions"',
+        'Footer "End"',
+      ].join('\n'),
+      refMap: ['ref_search', 'ref_submit'],
+      stats: {
+        processed: 16,
+        included: 10,
+        durationMs: 10,
+      },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ tabId: 44, mode: 'compact' });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload.pageContext.loadReadiness).toMatchObject({
+      status: 'unknown',
+      pageStability: 'changing',
+      canUseSnapshotForBusinessAction: false,
+      nextStepAction: 'wait',
+      nextStepHint:
+        'spa_navigation_detected; wait_then_force_fresh_read_page_before_business_actions',
+    });
+    expect(payload.pageContext.loadReadiness.claimBoundary).toContain(
+      'cdp_detected_post_ready_spa_navigation',
+    );
   });
 
   it('exposes provisional read_page load evidence when a target tab is still loading after wait', async () => {

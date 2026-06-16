@@ -83,6 +83,7 @@ import {
 import {
   captureCDPPageSensingSnapshot,
   type CDPPageSensingSnapshot,
+  type CDPPageStabilityHint,
 } from '@/utils/cdp-page-sensing';
 import {
   getBrowserWorldSnapshot,
@@ -767,6 +768,7 @@ function buildLoadReadiness(input: {
     readyState: string | null;
   } | null;
   cdpSensing?: ReadPageCDPSensingSummary;
+  cdpStabilityHint?: CDPPageStabilityHint;
 }): ReadPageLoadReadiness {
   const cdpNetworkFailureCount = Math.max(
     input.cdpSensing?.networkActivity?.failedRequestCount ?? 0,
@@ -774,21 +776,25 @@ function buildLoadReadiness(input: {
   );
   const cdpConsoleErrorCount = input.cdpSensing?.console?.errorCount ?? 0;
   const cdpHardFailure = cdpNetworkFailureCount >= 3 || cdpConsoleErrorCount >= 3;
+  const cdpSignalsSpaNavigation = input.cdpStabilityHint === 'spa_navigating';
+  const effectivePageStability: BrowserPageStability = cdpSignalsSpaNavigation
+    ? 'changing'
+    : input.pageStability;
   const stableAfterWait =
     input.waitedForPendingDocument &&
     input.settleResult?.settled === true &&
-    input.pageStability === 'stable';
-  const stableWithoutWait = !input.waitedForPendingDocument && input.pageStability === 'stable';
-  const stale = input.pageStability === 'stale';
+    effectivePageStability === 'stable';
+  const stableWithoutWait = !input.waitedForPendingDocument && effectivePageStability === 'stable';
+  const stale = effectivePageStability === 'stale';
   const loading =
-    input.pageStability === 'loading' ||
-    input.pageStability === 'changing' ||
+    effectivePageStability === 'loading' ||
+    effectivePageStability === 'changing' ||
     input.settleResult?.timedOut === true;
 
   if (stableAfterWait || stableWithoutWait) {
     return {
       status: stableAfterWait ? 'settled_after_wait' : 'stable',
-      pageStability: input.pageStability,
+      pageStability: effectivePageStability,
       initialTabStatus: input.initialTabStatus,
       finalTabStatus: input.finalTabStatus,
       waitedForPendingDocument: input.waitedForPendingDocument,
@@ -810,7 +816,7 @@ function buildLoadReadiness(input: {
   if (stale) {
     return {
       status: 'stale',
-      pageStability: input.pageStability,
+      pageStability: effectivePageStability,
       initialTabStatus: input.initialTabStatus,
       finalTabStatus: input.finalTabStatus,
       waitedForPendingDocument: input.waitedForPendingDocument,
@@ -831,7 +837,7 @@ function buildLoadReadiness(input: {
   if (loading) {
     return {
       status: input.waitedForPendingDocument ? 'loading_after_wait' : 'unknown',
-      pageStability: input.pageStability,
+      pageStability: effectivePageStability,
       initialTabStatus: input.initialTabStatus,
       finalTabStatus: input.finalTabStatus,
       waitedForPendingDocument: input.waitedForPendingDocument,
@@ -842,17 +848,21 @@ function buildLoadReadiness(input: {
       readyState: input.settleResult?.readyState ?? null,
       canUseSnapshotForBusinessAction: false,
       nextStepAction: cdpHardFailure ? 'block' : 'wait',
-      nextStepHint: 'wait_then_force_fresh_read_page_before_business_actions',
+      nextStepHint: cdpSignalsSpaNavigation
+        ? 'spa_navigation_detected; wait_then_force_fresh_read_page_before_business_actions'
+        : 'wait_then_force_fresh_read_page_before_business_actions',
       claimBoundary: cdpHardFailure
         ? 'document_is_not_stable_and_cdp_errors_are_high; do not continue business actions without recovery'
-        : 'document_may_still_be_changing; treat candidate objects as provisional until a fresh stable read',
+        : cdpSignalsSpaNavigation
+          ? 'cdp_detected_post_ready_spa_navigation; treat candidate objects as provisional until a fresh stable read'
+          : 'document_may_still_be_changing; treat candidate objects as provisional until a fresh stable read',
       ...(input.cdpSensing ? { cdpSensing: input.cdpSensing } : {}),
     };
   }
 
   return {
     status: 'unknown',
-    pageStability: input.pageStability,
+    pageStability: effectivePageStability,
     initialTabStatus: input.initialTabStatus,
     finalTabStatus: input.finalTabStatus,
     waitedForPendingDocument: input.waitedForPendingDocument,
@@ -875,13 +885,12 @@ async function captureReadPageCDPSensingSummary(input: {
   tabId: number;
   currentUrl: string;
   supportedForContentScript: boolean;
-}): Promise<ReadPageCDPSensingSummary | undefined> {
+}): Promise<CDPPageSensingSnapshot | undefined> {
   if (!input.supportedForContentScript || !/^https?:\/\//i.test(input.currentUrl)) {
     return undefined;
   }
 
-  const snapshot = await captureCDPPageSensingSnapshot(input.tabId);
-  return buildReadPageCDPSensingSummary(snapshot);
+  return captureCDPPageSensingSnapshot(input.tabId);
 }
 
 function buildReadPageCDPSensingSummary(
@@ -3429,11 +3438,14 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       }
       const pageStability = inferPageStability(tab);
       const schemeGuard = inferSchemeGuard(currentUrl);
-      const cdpSensing = await captureReadPageCDPSensingSummary({
+      const cdpSensingSnapshot = await captureReadPageCDPSensingSummary({
         tabId,
         currentUrl,
         supportedForContentScript: schemeGuard.supportedForContentScript,
       });
+      const cdpSensing = cdpSensingSnapshot
+        ? buildReadPageCDPSensingSummary(cdpSensingSnapshot)
+        : undefined;
       const loadReadiness = buildLoadReadiness({
         pageStability,
         initialTabStatus,
@@ -3441,6 +3453,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         waitedForPendingDocument,
         settleResult: pendingDocumentSettleResult,
         cdpSensing,
+        cdpStabilityHint: cdpSensingSnapshot?.stabilityHint,
       });
 
       if (!schemeGuard.supportedForContentScript) {

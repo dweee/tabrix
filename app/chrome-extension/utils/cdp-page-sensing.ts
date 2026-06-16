@@ -113,6 +113,8 @@ export interface CDPAccessibilitySummary {
   objectCandidates: CDPAccessibilityObjectCandidate[];
 }
 
+export type CDPPageStabilityHint = 'stable' | 'spa_navigating' | 'loading' | 'restricted';
+
 export interface CDPPageSensingSnapshot {
   tabId: number;
   capturedAt: number;
@@ -120,6 +122,7 @@ export interface CDPPageSensingSnapshot {
   available: boolean;
   readiness: CDPPageReadiness;
   likelyLoading: boolean;
+  stabilityHint: CDPPageStabilityHint;
   url?: CDPPageUrlSummary;
   title?: string;
   route?: CDPRouteSummary;
@@ -156,6 +159,8 @@ interface CDPFrameTree {
 const CDP_PAGE_SENSING_OWNER = 'page-sensing';
 const MAX_TEXT_LENGTH = 160;
 const CDP_PAGE_SENSING_EVENT_WINDOW_MS = 90;
+const SPA_NETWORK_BURST_REQUEST_THRESHOLD = 3;
+const SPA_NETWORK_BURST_INFLIGHT_THRESHOLD = 2;
 const MAX_ACCESSIBILITY_SAMPLE_LABELS = 6;
 const MAX_ACCESSIBILITY_ACTIONABLE_ROLE_KEYS = 6;
 const MAX_ACCESSIBILITY_OBJECT_CANDIDATES = 24;
@@ -238,6 +243,8 @@ export async function captureCDPPageSensingSnapshot(
   const startedRequests = new Set<string>();
   const inFlightRequests = new Set<string>();
   const failedRequests = new Set<string>();
+  let topFrameNavigatedAfterReady = false;
+  let navigatedFrameUrl: string | undefined;
 
   try {
     return await cdpSessionManager.withSession(tabId, CDP_PAGE_SENSING_OWNER, async () => {
@@ -271,6 +278,14 @@ export async function captureCDPPageSensingSnapshot(
             failedRequests.add(requestId);
             networkActivity.failedRequestCount += 1;
           }
+          return;
+        }
+        if (method === 'Page.frameNavigated') {
+          const frame = asRecord((params as Record<string, unknown> | undefined)?.frame);
+          const parentId = asString(frame?.parentId);
+          if (parentId) return;
+          topFrameNavigatedAfterReady = true;
+          navigatedFrameUrl = asString(frame?.url);
           return;
         }
         if (method === 'Log.entryAdded') {
@@ -321,6 +336,15 @@ export async function captureCDPPageSensingSnapshot(
           inFlightCount: inFlightRequests.size,
           failedRequestCount: networkActivity.failedRequestCount,
         };
+        const route = parseRouteSummary(pageState?.route);
+        const stabilityHint = inferStabilityHint({
+          readiness,
+          topFrameNavigatedAfterReady,
+          networkActivity: networkActivityResolved,
+          currentUrl: asString(pageState?.url),
+          route,
+          navigatedFrameUrl,
+        });
         const accessibility = await enrichAccessibilityTreeLocators(
           tabId,
           summarizeAccessibilityTree(accessibilityTreeResult),
@@ -332,10 +356,11 @@ export async function captureCDPPageSensingSnapshot(
           source: 'cdp',
           available: true,
           readiness,
-          likelyLoading: isLikelyLoading(readiness, navigation),
+          likelyLoading: isLikelyLoading(readiness, navigation, stabilityHint),
+          stabilityHint,
           url: sanitizeUrlSummary(pageState?.url),
           title: truncateText(pageState?.title),
-          route: parseRouteSummary(pageState?.route),
+          route,
           visibilityState: truncateText(pageState?.visibilityState),
           focused: typeof pageState?.focused === 'boolean' ? pageState.focused : undefined,
           activeElement: parseActiveElement(pageState?.activeElement),
@@ -359,6 +384,7 @@ export async function captureCDPPageSensingSnapshot(
       available: false,
       readiness: 'unknown',
       likelyLoading: false,
+      stabilityHint: 'stable',
       error: sanitizeError(error),
     };
   }
@@ -373,11 +399,51 @@ function normalizeReadiness(value: unknown): CDPPageReadiness {
 
 function isLikelyLoading(
   readiness: CDPPageReadiness,
-  navigation?: CDPNavigationTimingSummary,
+  navigation: CDPNavigationTimingSummary | undefined,
+  stabilityHint: CDPPageStabilityHint,
 ): boolean {
   if (readiness === 'loading') return true;
+  if (stabilityHint === 'loading' || stabilityHint === 'spa_navigating') return true;
   if (readiness !== 'interactive') return false;
   return navigation?.loadEventMs === null || navigation?.loadEventMs === undefined;
+}
+
+function inferStabilityHint(input: {
+  readiness: CDPPageReadiness;
+  topFrameNavigatedAfterReady: boolean;
+  networkActivity: CDPNetworkEventSummary;
+  currentUrl?: string;
+  route?: CDPRouteSummary;
+  navigatedFrameUrl?: string;
+}): CDPPageStabilityHint {
+  if (input.readiness === 'loading') return 'loading';
+  const afterInitialReady = input.readiness === 'interactive' || input.readiness === 'complete';
+  if (!afterInitialReady) return 'stable';
+
+  const normalizedCurrentUrl = normalizeUrlIgnoringHash(input.currentUrl);
+  const normalizedNavigatedUrl = normalizeUrlIgnoringHash(input.navigatedFrameUrl);
+  const urlChangedAfterReady = Boolean(
+    normalizedCurrentUrl &&
+    normalizedNavigatedUrl &&
+    normalizedCurrentUrl !== normalizedNavigatedUrl,
+  );
+  const frameNavigationSuggestsSpa = input.topFrameNavigatedAfterReady
+    ? normalizedNavigatedUrl
+      ? !normalizedCurrentUrl || normalizedCurrentUrl !== normalizedNavigatedUrl
+      : true
+    : false;
+  if (frameNavigationSuggestsSpa || urlChangedAfterReady) {
+    return 'spa_navigating';
+  }
+
+  const networkBurstDetected =
+    input.networkActivity.requestStartedCount >= SPA_NETWORK_BURST_REQUEST_THRESHOLD ||
+    input.networkActivity.inFlightCount >= SPA_NETWORK_BURST_INFLIGHT_THRESHOLD;
+  if (networkBurstDetected && input.route) {
+    return 'spa_navigating';
+  }
+
+  return 'stable';
 }
 
 function parseActiveElement(value: unknown): CDPActiveElementSummary | undefined {
@@ -893,6 +959,16 @@ function asNonNegativeInteger(value: unknown): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
   const normalized = Math.trunc(value);
   return normalized >= 0 ? normalized : undefined;
+}
+
+function normalizeUrlIgnoringHash(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    return `${url.origin}${url.pathname}${url.search}`;
+  } catch {
+    return undefined;
+  }
 }
 
 function sanitizeUrlSummary(value: unknown): CDPPageUrlSummary | undefined {
