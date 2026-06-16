@@ -129,6 +129,13 @@ describe('read_page candidate action intents', () => {
           },
           actionTypes: ['focus', 'setvalue'],
           state: {},
+          visibilityProbe: {
+            domVisible: true,
+            inViewport: true,
+            centerHitTarget: true,
+            occluded: false,
+            reason: 'visible_unobstructed',
+          },
         },
       ],
     });
@@ -142,7 +149,9 @@ describe('read_page candidate action intents', () => {
         source: 'cdp',
         domVisible: true,
         inViewport: true,
-        reason: 'cdp_ax_box_model',
+        centerHitTarget: true,
+        occluded: false,
+        reason: 'visible_unobstructed',
       },
     });
     expect(actions[0].locatorChain).toEqual([
@@ -181,10 +190,61 @@ describe('read_page candidate action intents', () => {
           actionTypes: ['click'],
           state: { disabled: true },
         },
+        {
+          role: 'button',
+          label: 'Covered action',
+          locator: {
+            source: 'cdp_ax',
+            axNodeId: 'ax_covered',
+            backendDOMNodeId: 204,
+            cssSelector: 'button[aria-label="Covered action"]',
+            visualBounds: { x: 20, y: 20, width: 100, height: 32 },
+          },
+          actionTypes: ['click'],
+          state: {},
+          visibilityProbe: {
+            domVisible: true,
+            inViewport: true,
+            centerHitTarget: false,
+            occluded: true,
+            reason: 'center_occluded',
+          },
+        },
       ],
     });
 
     expect(actions).toEqual([]);
+  });
+
+  it('falls back to domVisible=true when CDP AX candidates lack backend node visibility data', () => {
+    const actions = buildCandidateActions([], [], {
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      cdpAccessibilityCandidates: [
+        {
+          role: 'searchbox',
+          label: 'Search fallback',
+          locator: {
+            source: 'cdp_ax',
+            axNodeId: 'ax_fallback_only',
+            cssSelector: 'input[name="q"]',
+          },
+          actionTypes: ['focus', 'setvalue'],
+          state: {},
+        },
+      ],
+    });
+
+    expect(actions[0]).toMatchObject({
+      targetRef: 'ref_fallback_cdp_ax_ax_fallback_only',
+      visibility: {
+        source: 'cdp',
+        domVisible: true,
+        inViewport: true,
+        centerHitTarget: null,
+        occluded: null,
+        reason: 'cdp_ax_locator_only',
+      },
+    });
   });
 
   it('carries frameId from a frame-targeted read into candidate actions', () => {

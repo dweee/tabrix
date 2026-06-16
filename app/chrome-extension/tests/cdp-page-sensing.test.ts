@@ -18,7 +18,7 @@ vi.mock('@/utils/cdp-session-manager', () => ({
   },
 }));
 
-import { captureCDPPageSensingSnapshot } from '@/utils/cdp-page-sensing';
+import { captureCDPPageSensingSnapshot, probeNodeVisibility } from '@/utils/cdp-page-sensing';
 
 describe('CDP page sensing snapshot', () => {
   beforeEach(() => {
@@ -479,6 +479,121 @@ describe('CDP page sensing snapshot', () => {
       likelyLoading: false,
       stabilityHint: 'stable',
       error: 'Debugger is already attached by DevTools',
+    });
+  });
+
+  it('probes DOM visibility and occlusion from backend node ids', async () => {
+    sendCommandMock.mockImplementation(async (_tabId: number, method: string, params?: any) => {
+      if (method === 'DOM.resolveNode' && params?.backendNodeId === 501) {
+        return { result: { objectId: 'obj-visible' } };
+      }
+      if (method === 'DOM.resolveNode' && params?.backendNodeId === 502) {
+        return { result: { objectId: 'obj-hidden' } };
+      }
+      if (method === 'DOM.resolveNode' && params?.backendNodeId === 503) {
+        return { result: { objectId: 'obj-occluded' } };
+      }
+      if (method === 'DOM.resolveNode' && params?.backendNodeId === 504) {
+        return { result: { objectId: 'obj-offscreen' } };
+      }
+      if (method === 'Runtime.callFunctionOn' && params?.objectId === 'obj-visible') {
+        return {
+          result: {
+            value: {
+              domVisible: true,
+              inViewport: true,
+              centerHitTarget: true,
+              occluded: false,
+              reason: 'visible_unobstructed',
+            },
+          },
+        };
+      }
+      if (method === 'Runtime.callFunctionOn' && params?.objectId === 'obj-hidden') {
+        return {
+          result: {
+            value: {
+              domVisible: false,
+              inViewport: true,
+              centerHitTarget: true,
+              occluded: false,
+              reason: 'display_none+zero_size',
+            },
+          },
+        };
+      }
+      if (method === 'Runtime.callFunctionOn' && params?.objectId === 'obj-occluded') {
+        return {
+          result: {
+            value: {
+              domVisible: true,
+              inViewport: true,
+              centerHitTarget: false,
+              occluded: true,
+              occludedBy: 'div',
+              reason: 'center_occluded',
+            },
+          },
+        };
+      }
+      if (method === 'Runtime.callFunctionOn' && params?.objectId === 'obj-offscreen') {
+        return {
+          result: {
+            value: {
+              domVisible: true,
+              inViewport: false,
+              centerHitTarget: false,
+              occluded: true,
+              reason: 'outside_viewport+center_occluded',
+            },
+          },
+        };
+      }
+      return {};
+    });
+
+    const result = await probeNodeVisibility(88, [501, 502, 503, 504]);
+
+    expect(sendCommandMock.mock.calls.map((call) => call[1])).toEqual([
+      'DOM.enable',
+      'Runtime.enable',
+      'DOM.resolveNode',
+      'Runtime.callFunctionOn',
+      'DOM.resolveNode',
+      'Runtime.callFunctionOn',
+      'DOM.resolveNode',
+      'Runtime.callFunctionOn',
+      'DOM.resolveNode',
+      'Runtime.callFunctionOn',
+    ]);
+    expect(result.get(501)).toEqual({
+      domVisible: true,
+      inViewport: true,
+      centerHitTarget: true,
+      occluded: false,
+      reason: 'visible_unobstructed',
+    });
+    expect(result.get(502)).toEqual({
+      domVisible: false,
+      inViewport: true,
+      centerHitTarget: true,
+      occluded: false,
+      reason: 'display_none+zero_size',
+    });
+    expect(result.get(503)).toEqual({
+      domVisible: true,
+      inViewport: true,
+      centerHitTarget: false,
+      occluded: true,
+      occludedBy: 'div',
+      reason: 'center_occluded',
+    });
+    expect(result.get(504)).toEqual({
+      domVisible: true,
+      inViewport: false,
+      centerHitTarget: false,
+      occluded: true,
+      reason: 'outside_viewport+center_occluded',
     });
   });
 

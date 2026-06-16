@@ -1,3 +1,4 @@
+import type { NodeVisibilityProbe } from '@/utils/cdp-page-sensing';
 import type {
   ReadPageCandidateAction,
   ReadPageCandidateActionLocator,
@@ -21,7 +22,10 @@ const LOW_VALUE_NAV_LINK_PATTERN =
   /^(关于我们|关于|营业执照|备案|沪ICP备|京ICP备|粤ICP备|隐私政策|隐私|用户协议|服务协议|使用条款|社区规范|帮助中心|联系我们|加入我们|广告合作|举报|投诉|copyright|privacy|terms|agreement|license|licenses?|legal|about|help|contact|careers?)$/i;
 type CdpAxCandidate = NonNullable<
   NonNullable<ReadPageCDPSensingSummary['accessibility']>['objectCandidates']
->[number];
+>[number] & {
+  /** Visibility probe attached by CDP sensing layer; not in shared contract. */
+  visibilityProbe?: NodeVisibilityProbe;
+};
 
 function buildRefSelectorMap(refMap: any[]): Map<string, string> {
   const map = new Map<string, string>();
@@ -106,20 +110,29 @@ function buildCdpAxInteractiveElements(input: {
           bounds.y < viewportHeight
         : true;
 
+    const visibilityProbe = candidate.visibilityProbe;
     elements.push({
       ref,
       role,
       name: label,
       selector,
       matchSource: 'cdp_ax',
-      actionability: inViewport ? 'actionable' : 'not_actionable',
+      actionability:
+        visibilityProbe?.domVisible === false || visibilityProbe?.inViewport === false
+          ? 'not_actionable'
+          : inViewport
+            ? 'actionable'
+            : 'not_actionable',
       visibility: {
         source: 'cdp',
-        domVisible: true,
-        inViewport,
-        centerHitTarget: null,
-        occluded: null,
-        reason: hasBounds ? 'cdp_ax_box_model' : 'cdp_ax_locator_only',
+        domVisible: visibilityProbe?.domVisible ?? true,
+        inViewport: visibilityProbe?.inViewport ?? inViewport,
+        centerHitTarget:
+          typeof visibilityProbe?.centerHitTarget === 'boolean'
+            ? visibilityProbe.centerHitTarget
+            : null,
+        occluded: typeof visibilityProbe?.occluded === 'boolean' ? visibilityProbe.occluded : null,
+        reason: visibilityProbe?.reason ?? (hasBounds ? 'cdp_ax_box_model' : 'cdp_ax_locator_only'),
       },
       ...(hasBounds ? { rect: bounds } : {}),
     });

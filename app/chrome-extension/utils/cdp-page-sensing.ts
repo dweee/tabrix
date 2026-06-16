@@ -83,12 +83,22 @@ export interface CDPElementRect {
   height: number;
 }
 
+export interface NodeVisibilityProbe {
+  domVisible: boolean;
+  inViewport: boolean;
+  centerHitTarget: boolean | null;
+  occluded: boolean;
+  occludedBy?: string;
+  reason: string;
+}
+
 export interface CDPAccessibilityObjectCandidate {
   role: string;
   label?: string;
   locator?: CDPAccessibilityObjectLocator;
   actionTypes: string[];
   state: CDPAccessibilityObjectStateSignals;
+  visibilityProbe?: NodeVisibilityProbe;
 }
 
 export interface CDPAccessibilityRoleFrequency {
@@ -142,6 +152,7 @@ export interface CDPPageSensingSnapshot {
 interface RuntimeEvaluateResponse {
   result?: {
     value?: unknown;
+    objectId?: string;
   };
 }
 
@@ -229,6 +240,85 @@ const PAGE_STATE_PROBE = String.raw`(() => {
       : null,
   };
 })()`;
+
+const NODE_VISIBILITY_PROBE = String.raw`function() {
+  const element = this;
+  if (!(element instanceof Element)) {
+    return {
+      domVisible: true,
+      inViewport: false,
+      centerHitTarget: null,
+      occluded: false,
+      reason: 'backend_node_unresolved',
+    };
+  }
+  const viewportWidth =
+    typeof window.innerWidth === 'number'
+      ? window.innerWidth
+      : typeof document.documentElement?.clientWidth === 'number'
+        ? document.documentElement.clientWidth
+        : 0;
+  const viewportHeight =
+    typeof window.innerHeight === 'number'
+      ? window.innerHeight
+      : typeof document.documentElement?.clientHeight === 'number'
+        ? document.documentElement.clientHeight
+        : 0;
+  const computed = window.getComputedStyle(element);
+  const rect = typeof element.getBoundingClientRect === 'function' ? element.getBoundingClientRect() : null;
+  const offsetParentMissing = element instanceof HTMLElement && element.offsetParent === null;
+  const position = computed.position || '';
+  const displayNone = computed.display === 'none';
+  const hiddenVisibility = computed.visibility === 'hidden' || computed.visibility === 'collapse';
+  const opacityZero = Number.parseFloat(computed.opacity || '1') === 0;
+  const zeroSize =
+    !rect ||
+    rect.width <= 0 ||
+    rect.height <= 0 ||
+    element.clientWidth <= 0 ||
+    element.clientHeight <= 0;
+  const detachedByOffsetParent = offsetParentMissing && position !== 'fixed';
+  const domVisible = !(displayNone || hiddenVisibility || opacityZero || zeroSize || detachedByOffsetParent);
+  const inViewport = Boolean(
+    rect && rect.right > 0 && rect.bottom > 0 && rect.left < viewportWidth && rect.top < viewportHeight,
+  );
+  let centerHitTarget = null;
+  let occluded = false;
+  let occludedBy;
+  if (rect && rect.width > 0 && rect.height > 0) {
+    const cx = Math.min(Math.max(rect.left + rect.width / 2, 0), Math.max(viewportWidth - 1, 0));
+    const cy = Math.min(Math.max(rect.top + rect.height / 2, 0), Math.max(viewportHeight - 1, 0));
+    const hit = document.elementFromPoint(cx, cy);
+    if (hit) {
+      centerHitTarget = element === hit || element.contains(hit);
+      occluded = !centerHitTarget;
+      if (occluded) {
+        const tagName = typeof hit.tagName === 'string' ? hit.tagName.toLowerCase() : undefined;
+        if (tagName) occludedBy = tagName;
+      }
+    } else {
+      centerHitTarget = false;
+      occluded = true;
+    }
+  }
+  const reasons = [];
+  if (displayNone) reasons.push('display_none');
+  if (hiddenVisibility) reasons.push('visibility_hidden');
+  if (opacityZero) reasons.push('opacity_zero');
+  if (detachedByOffsetParent) reasons.push('offset_parent_null');
+  if (zeroSize) reasons.push('zero_size');
+  if (!inViewport) reasons.push('outside_viewport');
+  if (occluded) reasons.push('center_occluded');
+  if (reasons.length === 0) reasons.push('visible_unobstructed');
+  return {
+    domVisible,
+    inViewport,
+    centerHitTarget,
+    occluded,
+    ...(occludedBy ? { occludedBy } : {}),
+    reason: reasons.join('+'),
+  };
+}`;
 
 export async function captureCDPPageSensingSnapshot(
   tabId: number,
@@ -628,6 +718,45 @@ function summarizeAccessibilityTree(treeResult: unknown): CDPAccessibilitySummar
   };
 }
 
+export async function probeNodeVisibility(
+  tabId: number,
+  backendNodeIds: readonly number[],
+): Promise<Map<number, NodeVisibilityProbe>> {
+  const normalizedBackendNodeIds = [
+    ...new Set(backendNodeIds.filter((id) => Number.isInteger(id) && id >= 0)),
+  ];
+  if (normalizedBackendNodeIds.length === 0) return new Map();
+
+  try {
+    await Promise.all([
+      cdpSessionManager.sendCommand(tabId, 'DOM.enable').catch(() => undefined),
+      cdpSessionManager.sendCommand(tabId, 'Runtime.enable').catch(() => undefined),
+    ]);
+
+    const output = new Map<number, NodeVisibilityProbe>();
+    for (const backendNodeId of normalizedBackendNodeIds) {
+      const resolvedNode = await cdpSessionManager
+        .sendCommand<RuntimeEvaluateResponse>(tabId, 'DOM.resolveNode', { backendNodeId })
+        .catch(() => undefined);
+      const objectId = asString(resolvedNode?.result?.objectId);
+      if (!objectId) continue;
+      const probeResult = await cdpSessionManager
+        .sendCommand<RuntimeEvaluateResponse>(tabId, 'Runtime.callFunctionOn', {
+          objectId,
+          functionDeclaration: NODE_VISIBILITY_PROBE,
+          returnByValue: true,
+          silent: true,
+        })
+        .catch(() => undefined);
+      const parsed = parseNodeVisibilityProbe(probeResult?.result?.value);
+      if (parsed) output.set(backendNodeId, parsed);
+    }
+    return output;
+  } catch {
+    return new Map();
+  }
+}
+
 async function enrichAccessibilityTreeLocators(
   tabId: number,
   summary: CDPAccessibilitySummary | undefined,
@@ -640,6 +769,12 @@ async function enrichAccessibilityTreeLocators(
 
   try {
     await cdpSessionManager.sendCommand(tabId, 'DOM.enable').catch(() => undefined);
+    const visibilityByBackendNodeId = await probeNodeVisibility(
+      tabId,
+      candidatesWithBackendNode
+        .map((candidate) => candidate.locator?.backendDOMNodeId)
+        .filter((value): value is number => typeof value === 'number'),
+    );
     const enrichedCandidates: CDPAccessibilityObjectCandidate[] = [];
     for (const candidate of summary.objectCandidates) {
       const locator = candidate.locator;
@@ -658,16 +793,36 @@ async function enrichAccessibilityTreeLocators(
         ...buildLocatorExtensionFromDomNode(nodeDescription),
         ...buildLocatorExtensionFromBoxModel(boxModel),
       };
-      enrichedCandidates.push(
+      const visibilityProbe = visibilityByBackendNodeId.get(backendNodeId);
+      const enrichedCandidate =
         Object.keys(locatorExtension).length > 0
           ? { ...candidate, locator: { ...locator, ...locatorExtension } }
-          : candidate,
+          : candidate;
+      enrichedCandidates.push(
+        visibilityProbe ? { ...enrichedCandidate, visibilityProbe } : enrichedCandidate,
       );
     }
     return { ...summary, objectCandidates: enrichedCandidates };
   } catch {
     return summary;
   }
+}
+
+function parseNodeVisibilityProbe(value: unknown): NodeVisibilityProbe | undefined {
+  const record = asRecord(value);
+  if (!record || typeof record.domVisible !== 'boolean' || typeof record.inViewport !== 'boolean') {
+    return undefined;
+  }
+  return {
+    domVisible: record.domVisible,
+    inViewport: record.inViewport,
+    centerHitTarget: typeof record.centerHitTarget === 'boolean' ? record.centerHitTarget : null,
+    occluded: record.occluded === true,
+    ...(typeof record.occludedBy === 'string' && record.occludedBy.trim()
+      ? { occludedBy: record.occludedBy.trim().toLowerCase() }
+      : {}),
+    reason: asString(record.reason) ?? 'visibility_probe_unknown',
+  };
 }
 
 function buildLocatorExtensionFromDomNode(
