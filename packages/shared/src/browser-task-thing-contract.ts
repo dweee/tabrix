@@ -2,6 +2,7 @@ import type {
   ReadPageCompactSnapshot,
   ReadPageReadinessVerdict,
   ReadPageSelectedDataSource,
+  ReadPagePageDeltaReport,
 } from './read-page-contract';
 
 export const BROWSER_TASK_THING_CONTRACT_VERSION = 'v1' as const;
@@ -856,6 +857,92 @@ export function buildPostActionDeltaEvidence(
       'DOM/region/ref deltas do not prove API/CDP reuse, complete navigation monitoring, focus safety, object lifecycle coverage, or network causality.',
       'Local deterministic evidence does not prove real-browser acceptance, release readiness, or competitor parity.',
     ],
+  };
+}
+
+const READ_PAGE_DELTA_RECOMMENDATION_TO_NEXT_ACTION: Record<
+  ReadPagePageDeltaReport['recommendation'],
+  string
+> = {
+  proceed: 'continue_with_post_action_delta_context',
+  wait: 'wait_for_settle_then_read',
+  refresh: 'refresh_then_read',
+  retry: 'retry_action_then_read',
+  stop: 'stop_and_report',
+  needs_user: 'escalate_to_user',
+};
+
+/**
+ * Gap 3 (Plan A): Derive a PostActionDeltaEvidence from a
+ * ReadPagePageDeltaReport so the two delta contracts are unified.
+ *
+ * ReadPagePageDeltaReport is the live delta produced by read-page after a
+ * click/fill action. This adapter lifts it into the richer
+ * PostActionDeltaEvidence shape, populating objectDelta and
+ * networkSignalSummary from the report while leaving navigation/focus deltas
+ * conservative (unknown) because read-page delta does not track those.
+ */
+export function derivePostActionDeltaEvidenceFromReadPageDelta(
+  report: ReadPagePageDeltaReport,
+  options?: {
+    taskSessionId?: string | null;
+    tabId?: number | null;
+    sourceTruthChain?: BrowserSourceTruthChain | null;
+  },
+): PostActionDeltaEvidence {
+  const objectDeltaStatus: PostActionDeltaSignalStatus =
+    report.changedObjects.length > 0
+      ? 'observed'
+      : report.deltaKind === 'no_useful_change'
+        ? 'not_observed'
+        : report.deltaKind === 'blocked'
+          ? 'unknown'
+          : 'observed';
+
+  const networkStatus: PostActionDeltaSignalStatus =
+    report.networkSignals?.requestStartedDelta != null ? 'observed' : 'not_checked';
+
+  return {
+    watchId: `watch:${report.afterSnapshotId}`,
+    taskSessionId: options?.taskSessionId ?? null,
+    tabId: options?.tabId ?? null,
+    actionId: report.actionId,
+    actionEvidenceId: null,
+    deltaKind: report.actionId != null ? 'post_action_delta' : 'read_refresh_delta',
+    beforeProjectionId: report.beforeSnapshotId,
+    afterProjectionId: report.afterSnapshotId,
+    changedRegions: report.changedRegions,
+    invalidatedRefs: [],
+    refreshedRefs: [],
+    navigationDelta: {
+      status: 'unknown',
+      beforeUrl: null,
+      afterUrl: null,
+    },
+    focusDelta: {
+      status: 'unknown',
+      beforeTabId: null,
+      afterTabId: options?.tabId ?? null,
+    },
+    objectDelta: {
+      status: objectDeltaStatus,
+      changedObjectIds: report.changedObjects,
+    },
+    networkSignalSummary: {
+      status: networkStatus,
+      observedRequestCount: report.networkSignals?.requestStartedDelta ?? null,
+      observedResponseCount: null,
+    },
+    sourceTruthChain: options?.sourceTruthChain ?? null,
+    evidenceBoundary: {
+      evidenceLevel: 'source',
+      realBrowserClaim: false,
+    },
+    recommendedNextAction:
+      READ_PAGE_DELTA_RECOMMENDATION_TO_NEXT_ACTION[report.recommendation] ??
+      'continue_with_post_action_delta_context',
+    producedAt: report.afterObservedAt,
+    claimBoundary: [report.claimBoundary],
   };
 }
 

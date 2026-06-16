@@ -46,6 +46,7 @@ import {
   buildReadPageBrowserPageObjectView,
   buildBrowserPageThingProjectionFromReadPage,
   buildReadPageObjectLifecycle,
+  derivePostActionDeltaEvidenceFromReadPageDelta,
 } from '@tabrix/shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { ERROR_MESSAGES } from '@/common/constants';
@@ -2408,6 +2409,12 @@ async function buildModeOutput(params: {
   });
   if (pageDeltaReport) {
     sharedPayload.pageDeltaReport = pageDeltaReport;
+    sharedPayload.postActionDeltaEvidence = derivePostActionDeltaEvidenceFromReadPageDelta(
+      pageDeltaReport,
+      {
+        tabId: params.tabId,
+      },
+    );
   }
   sharedPayload.pageObjectSnapshot = pageObjectSnapshot;
   rememberPageObjectSnapshot(params.tabId, pageObjectSnapshot, {

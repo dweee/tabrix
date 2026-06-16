@@ -6,6 +6,8 @@
  * - keep candidate/action/memory-related fields as evolvable extensions
  */
 
+import type { PostActionDeltaEvidence } from './browser-task-thing-contract';
+
 export type ReadPageMode = 'compact' | 'normal' | 'full';
 
 export const READ_PAGE_OBSERVATION_PROFILE_VALUES = [
@@ -1835,6 +1837,14 @@ export interface ReadPageExtensionFields {
    * stable previous snapshot is available yet.
    */
   pageDeltaReport?: ReadPagePageDeltaReport;
+  /**
+   * Gap 3 (Plan A): PostActionDeltaEvidence derived from pageDeltaReport via
+   * derivePostActionDeltaEvidenceFromReadPageDelta. Present only when
+   * pageDeltaReport is available. This unifies the two delta contracts so that
+   * downstream evidence consumers can read a single PostActionDeltaEvidence
+   * surface instead of separately inspecting pageDeltaReport.
+   */
+  postActionDeltaEvidence?: PostActionDeltaEvidence;
   /**
    * V28 R4C additive browser-object lifecycle summary.
    *
