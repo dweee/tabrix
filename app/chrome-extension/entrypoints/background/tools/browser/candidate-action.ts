@@ -216,6 +216,8 @@ export function resolveCandidateActionTarget(
       return resolveStableTargetRef(params, explicitRef);
     }
     if (isLocatorBackedSyntheticRef(explicitRef)) {
+      const resolvedLocator = resolveCandidateActionTargetLocator(params, explicitRef);
+      if (resolvedLocator) return resolvedLocator;
       if (locatorXpath) {
         return {
           selector: locatorXpath,
@@ -232,8 +234,6 @@ export function resolveCandidateActionTarget(
           source: 'candidate_locator_css',
         };
       }
-      const resolvedLocator = resolveCandidateActionTargetLocator(params, explicitRef);
-      if (resolvedLocator) return resolvedLocator;
       return {
         ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
         source: 'none',
@@ -255,6 +255,11 @@ export function resolveCandidateActionTarget(
   }
 
   if (candidateTargetRef) {
+    if (isLocatorBackedSyntheticRef(candidateTargetRef) || isFallbackRef(candidateTargetRef)) {
+      const resolvedLocator = resolveCandidateActionTargetLocator(params, candidateTargetRef);
+      if (resolvedLocator) return resolvedLocator;
+    }
+
     if (
       (isLocatorBackedSyntheticRef(candidateTargetRef) || isFallbackRef(candidateTargetRef)) &&
       locatorXpath
@@ -280,8 +285,6 @@ export function resolveCandidateActionTarget(
     }
 
     if (isLocatorBackedSyntheticRef(candidateTargetRef) || isFallbackRef(candidateTargetRef)) {
-      const resolvedLocator = resolveCandidateActionTargetLocator(params, candidateTargetRef);
-      if (resolvedLocator) return resolvedLocator;
       if (isFallbackRef(candidateTargetRef)) {
         return {
           ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),

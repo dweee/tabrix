@@ -157,7 +157,7 @@ function scoreCandidateElementPriority(
   if (isPublishActionText(name)) score += 136;
   if (isPublishMediaTypeText(name)) score += 132;
   if (ref.startsWith('ref_text_menu_')) score += 120;
-  if (ref.startsWith('ref_text_filter_panel_')) score += 116;
+  if (ref.startsWith('ref_text_filter_panel_')) score += 260;
   if (ref.startsWith('ref_text_search_toolbar_')) score += 112;
   if (ref.startsWith('ref_text_control_')) score += 110;
   if (FILTER_PANEL_LABEL_PATTERN.test(name) || FILTER_PANEL_CONTENT_TYPE_LABEL_PATTERN.test(name)) {
@@ -1124,5 +1124,7 @@ function isExecutableCandidateElement(element: ReadPageInteractiveElement): bool
 }
 
 function isProtectedIntent(intent: ReadPageCandidateAction['intent'] | undefined): boolean {
-  return Boolean(intent && (/^auth\./.test(intent) || /^search\./.test(intent)));
+  return Boolean(
+    intent && (/^auth\./.test(intent) || /^search\./.test(intent) || /^filter\./.test(intent)),
+  );
 }

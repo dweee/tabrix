@@ -46,6 +46,7 @@ const MKE_LIST_LIMIT_MAX = 100;
 interface MkeListQuery {
   limit?: string;
   offset?: string;
+  scope?: 'current-surface' | 'object-graph';
 }
 
 function parsePositiveInt(raw: unknown, fallback: number, max: number): number {
@@ -327,7 +328,9 @@ function toObjectSummary(object: BrowserObject): MkeBrowserObjectSummary {
   const facts = asRecord(object.facts);
   const tabId = extractObjectTabId(object, facts);
   const title = objectTitle(object, pageIdentity);
-  const url = routeView.currentRoute ?? routeView.rootRoute ?? routeView.pageUrlPattern;
+  const objectUrl = object.objectType === 'result_card' ? readString(facts ?? {}, 'url') : null;
+  const url =
+    objectUrl ?? routeView.currentRoute ?? routeView.rootRoute ?? routeView.pageUrlPattern;
   return {
     objectId: object.browserObjectId,
     tabId,
@@ -536,14 +539,27 @@ export function registerMemoryRoutes(
     async (request: FastifyRequest<{ Querystring: MkeListQuery }>, reply: FastifyReply) => {
       const limit = parsePositiveInt(request.query.limit, 20, MKE_LIST_LIMIT_MAX);
       const offset = parsePositiveInt(request.query.offset, 0, Number.MAX_SAFE_INTEGER);
-      const rawTotal = sessionManager.countMkeBrowserObjects();
-      const browserObjectsByPage = collapseBrowserObjectsByPageIdentity(
-        sessionManager.listRecentMkeBrowserObjects(Math.max(rawTotal, limit + offset), 0),
-      );
-      const browserObjects = browserObjectsByPage
-        .slice(offset, offset + limit)
-        .map(toObjectSummary);
-      const total = browserObjectsByPage.length;
+      const scope = request.query.scope === 'object-graph' ? 'object-graph' : 'current-surface';
+      const browserObjects =
+        scope === 'object-graph'
+          ? sessionManager.listMkeObjectLibraryGraph(limit, offset).map(toObjectSummary)
+          : collapseBrowserObjectsByPageIdentity(
+              sessionManager.listRecentMkeBrowserObjects(
+                Math.max(sessionManager.countMkeBrowserObjects(), limit + offset),
+                0,
+              ),
+            )
+              .slice(offset, offset + limit)
+              .map(toObjectSummary);
+      const total =
+        scope === 'object-graph'
+          ? sessionManager.countMkeObjectLibraryGraph()
+          : collapseBrowserObjectsByPageIdentity(
+              sessionManager.listRecentMkeBrowserObjects(
+                sessionManager.countMkeBrowserObjects(),
+                0,
+              ),
+            ).length;
       const persistence = sessionManager.getPersistenceStatus();
 
       return reply.status(HTTP_STATUS.OK).send({

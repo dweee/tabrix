@@ -840,7 +840,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     });
   });
 
-  test('Object Library list returns tab webpages, not read_page internals or object graph rows', async () => {
+  test('Object Library default scope returns tab webpages and object-graph scope exposes sanitized page objects', async () => {
     const traceService = sessionManager.memoryTraces;
     if (!traceService) throw new Error('MKE trace service is not available in tests');
     const requestAt = Date.parse('2026-06-06T12:15:00.000Z');
@@ -908,6 +908,54 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       }),
       resultSummary: 'read page',
     });
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-surface-task',
+      taskIntent: 'collect result cards from the current search results page',
+      aiClient: 'jest',
+      toolName: 'chrome_collect_result_cards',
+      stepId: 'browser-object-surface-step-3',
+      sequenceIndex: 3,
+      requestParams: { tabId: 21, minResults: 3, maxScrolls: 1 },
+      requestAtMs: requestAt + 200,
+      responseAtMs: requestAt + 260,
+      browserContextKey: 'ctx-surface',
+      result: textResult({
+        success: true,
+        kind: 'result_card_collection',
+        page: {
+          url: 'https://example.test/search?q=private-token',
+          title: 'Search results - Example',
+        },
+        pageRole: 'search_results',
+        pageState: 'complete',
+        sourceRoute: 'visible_dom_cards_bounded_scroll',
+        selectedDataSource: 'visible_dom_result_cards',
+        freshness: 'fresh',
+        tabId: 21,
+        requestedMinResults: 3,
+        observedResultCount: 3,
+        complete: true,
+        pageRegions: [{ regionId: 'results', regionType: 'result_list', confidence: 0.84 }],
+        candidateActions: [
+          {
+            id: 'open-result-1',
+            targetRef: 'ref_result_card_1',
+            actionType: 'click',
+            confidence: 0.86,
+          },
+        ],
+        cards: [1, 2, 3].map((rank) => ({
+          rank,
+          title: `Result card ${rank}`,
+          url: `https://example.test/detail/${rank}?xsec_token=private-${rank}`,
+          targetRef: `ref_result_card_${rank}`,
+          candidateActionId: `open-result-${rank}`,
+          confidence: 0.8,
+        })),
+      }),
+      resultSummary: 'collected result cards',
+    });
     await traceService.flushAsyncWrites();
 
     const res = await supertest(Server.getInstance().server)
@@ -930,9 +978,14 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       .get('/memory/mke/browser-objects?limit=20&offset=0&scope=object-graph')
       .expect(200);
 
-    expect(graph.body.data.total).toBe(1);
+    expect(graph.body.data.total).toBeGreaterThan(1);
     const graphObjects = graph.body.data.browserObjects as Array<Record<string, unknown>>;
-    expect(graphObjects).toEqual(surfaceObjects);
+    const graphText = JSON.stringify(graphObjects);
+    expect(graphText).toContain('识别到 3 个结果卡片');
+    expect(graphText).toContain('Result card 1');
+    expect(graphText).toContain('Result card 2');
+    expect(graphText).toContain('Result card 3');
+    expect(graphText).toContain('https://example.test/detail/:id');
     expect(JSON.stringify(graphObjects)).not.toContain('browserContextKey');
     expect(JSON.stringify(graphObjects)).not.toContain('objectFingerprint');
     expect(JSON.stringify(graphObjects)).not.toContain('selectedDataSource');
@@ -945,6 +998,9 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     expect(JSON.stringify(graphObjects)).not.toContain('claimBoundary');
     expect(JSON.stringify(graphObjects)).not.toContain('confidenceScore');
     expect(JSON.stringify(graphObjects)).not.toContain('driftScore');
+    expect(graphText).not.toContain('private-token');
+    expect(graphText).not.toContain('xsec_token');
+    expect(graphText).not.toContain('private-1');
   });
 
   test('DELETE /memory/mke/browser-objects clears Object Library without deleting Memory traces', async () => {

@@ -373,6 +373,53 @@ describe('candidateAction bridge', () => {
     expect(clickMessage.ref).toBeUndefined();
   });
 
+  it('prefers latest read_page snapshot locator for recovered filter panel refs', async () => {
+    recordCandidateActionTargetLocatorsSnapshot(4124, [
+      {
+        targetRef: 'ref_text_filter_panel_7',
+        selector: '.live-filter-panel [data-filter="most-saved"]',
+      },
+    ]);
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4124,
+      title: 'Search',
+      url: 'https://example.com/search?q=neutral',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      dispatchSucceeded: true,
+      signals: { domChanged: true },
+    });
+
+    const result = await clickTool.execute({
+      candidateAction: {
+        targetRef: 'ref_text_filter_panel_7',
+        intent: 'filter.sort_most_collected',
+        locatorChain: [
+          { type: 'ref', value: 'ref_text_filter_panel_7' },
+          { type: 'aria', value: '最多收藏' },
+          { type: 'css', value: '.stale-filter-panel .tags[data-filter="most-saved"]' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.targetBinding).toMatchObject({
+      resolutionSource: 'candidate_snapshot_locator_css',
+      dispatchTarget: 'selector',
+    });
+    const clickMessage = sendSpy.mock.calls.find(
+      ([, message]) => (message as any)?.action === TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+    )?.[1] as any;
+    expect(clickMessage).toMatchObject({
+      selector: '.live-filter-panel [data-filter="most-saved"]',
+    });
+    expect(clickMessage.selector).not.toBe('.stale-filter-panel .tags[data-filter="most-saved"]');
+    expect(clickMessage.ref).toBeUndefined();
+  });
+
   it('routes visible filter control targetRef through candidateAction locator css', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4118,
