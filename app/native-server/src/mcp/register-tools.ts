@@ -14,7 +14,7 @@ import {
   buildReadPageBrowserPageObjectView,
 } from '@tabrix/shared';
 import type { LifecycleEvidenceBrowserHygieneCheck } from '@tabrix/shared';
-import type { BuildPostActionDeltaEvidenceInput, ReadPagePageDeltaReport } from '@tabrix/shared';
+import type { BuildPostActionDeltaEvidenceInput, PostActionDeltaEvidence } from '@tabrix/shared';
 import type { ReadPageObjectLifecycleSummary } from '@tabrix/shared';
 import type { ReadPageObjectLibraryHint } from '@tabrix/shared';
 import type { SemanticSignal } from '@tabrix/shared';
@@ -2371,25 +2371,25 @@ function readInteractionTargetRefs(args: unknown): string[] {
   return refs.filter((ref, index) => refs.indexOf(ref) === index).slice(0, 3);
 }
 
-export function bindReadPageDeltaReportToPendingInteraction(
-  pageDeltaReport: unknown,
+export function bindPostActionDeltaEvidenceToPendingInteraction(
+  postActionDeltaEvidence: unknown,
   pageObjectSnapshot: unknown,
   pendingInteraction: TaskPageInteractionSnapshot | null,
-): ReadPagePageDeltaReport | null {
-  const delta = readObject(pageDeltaReport);
-  if (!delta || pendingInteraction === null) return null;
+): PostActionDeltaEvidence | null {
+  const evidence = readObject(postActionDeltaEvidence);
+  if (!evidence || pendingInteraction === null) return null;
   const actionId =
     readSafeIdentifier(pendingInteraction.candidateActionId) ??
     readSafeIdentifier(pendingInteraction.action);
   const targetObjectId =
     findReadPageObjectIdForTargetRefs(pageObjectSnapshot, pendingInteraction.targetRefs) ??
-    readSafeIdentifier(delta.targetObjectId);
+    readSafeIdentifier(evidence.targetObjectId);
 
   return {
-    ...delta,
+    ...evidence,
     actionId,
     targetObjectId,
-  } as unknown as ReadPagePageDeltaReport;
+  } as unknown as PostActionDeltaEvidence;
 }
 
 function findReadPageObjectIdForTargetRefs(
@@ -2461,44 +2461,78 @@ function shouldInvalidateReadAfterWindowFocusChange(toolName: string, args: unkn
   return true;
 }
 
-function buildPostActionDeltaSignalsFromPageDelta(
-  pageDelta: ReadPagePageDeltaReport | null | undefined,
+function buildPostActionDeltaSignalsFromEvidence(
+  evidence: PostActionDeltaEvidence | null | undefined,
 ): Pick<
   BuildPostActionDeltaEvidenceInput,
-  'navigationDelta' | 'objectDelta' | 'networkSignalSummary'
+  | 'targetObjectId'
+  | 'observedChangeKind'
+  | 'navigationDelta'
+  | 'focusDelta'
+  | 'objectDelta'
+  | 'networkSignalSummary'
+  | 'observedSignalDeltas'
 > {
-  if (!pageDelta) return {};
-  const changedObjectIds = Array.isArray(pageDelta.changedObjects)
-    ? pageDelta.changedObjects.filter((item): item is string => typeof item === 'string')
-    : [];
-  const requestStartedDelta =
-    typeof pageDelta.networkSignals?.requestStartedDelta === 'number'
-      ? Math.max(0, pageDelta.networkSignals.requestStartedDelta)
-      : null;
-  const failedRequestDelta =
-    typeof pageDelta.networkSignals?.failedRequestDelta === 'number'
-      ? Math.max(0, pageDelta.networkSignals.failedRequestDelta)
-      : null;
-  const navigationObserved =
-    pageDelta.deltaKind === 'url_changed' ||
-    pageDelta.deltaKind === 'spa_route_change' ||
-    pageDelta.deltaKind === 'new_tab_opened';
+  if (!evidence) return {};
+  const navigationDelta = readObject(evidence.navigationDelta);
+  const focusDelta = readObject(evidence.focusDelta);
+  const objectDelta = readObject(evidence.objectDelta);
+  const networkSignalSummary = readObject(evidence.networkSignalSummary);
+  const observedSignalDeltas = readObject(evidence.observedSignalDeltas);
 
   return {
-    navigationDelta: navigationObserved ? { status: 'observed' } : { status: 'not_observed' },
-    objectDelta: {
-      status: changedObjectIds.length > 0 ? 'observed' : 'not_observed',
-      changedObjectIds,
-    },
-    networkSignalSummary: {
-      status:
-        requestStartedDelta !== null || failedRequestDelta !== null ? 'observed' : 'not_checked',
-      observedRequestCount: requestStartedDelta,
-      observedResponseCount:
-        pageDelta.deltaKind === 'network_completed' && requestStartedDelta !== null
-          ? requestStartedDelta
-          : null,
-    },
+    targetObjectId: readSafeIdentifier(evidence.targetObjectId),
+    observedChangeKind:
+      (readSafeIdentifier(evidence.observedChangeKind) as
+        | BuildPostActionDeltaEvidenceInput['observedChangeKind']
+        | null) ?? null,
+    navigationDelta: navigationDelta
+      ? {
+          status:
+            (readSafeIdentifier(navigationDelta.status) as
+              | NonNullable<BuildPostActionDeltaEvidenceInput['navigationDelta']>['status']
+              | null) ?? undefined,
+          beforeUrl: readString(navigationDelta.beforeUrl),
+          afterUrl: readString(navigationDelta.afterUrl),
+        }
+      : undefined,
+    focusDelta: focusDelta
+      ? {
+          status:
+            (readSafeIdentifier(focusDelta.status) as
+              | NonNullable<BuildPostActionDeltaEvidenceInput['focusDelta']>['status']
+              | null) ?? undefined,
+          beforeTabId: readNumber(focusDelta.beforeTabId),
+          afterTabId: readNumber(focusDelta.afterTabId),
+        }
+      : undefined,
+    objectDelta: objectDelta
+      ? {
+          status:
+            (readSafeIdentifier(objectDelta.status) as
+              | NonNullable<BuildPostActionDeltaEvidenceInput['objectDelta']>['status']
+              | null) ?? undefined,
+          changedObjectIds: readStringArray(objectDelta.changedObjectIds),
+        }
+      : undefined,
+    networkSignalSummary: networkSignalSummary
+      ? {
+          status:
+            (readSafeIdentifier(networkSignalSummary.status) as
+              | NonNullable<BuildPostActionDeltaEvidenceInput['networkSignalSummary']>['status']
+              | null) ?? undefined,
+          observedRequestCount: readNumber(networkSignalSummary.observedRequestCount),
+          observedResponseCount: readNumber(networkSignalSummary.observedResponseCount),
+        }
+      : undefined,
+    observedSignalDeltas: observedSignalDeltas
+      ? {
+          requestStartedDelta: readNumber(observedSignalDeltas.requestStartedDelta),
+          failedRequestDelta: readNumber(observedSignalDeltas.failedRequestDelta),
+          errorCountDelta: readNumber(observedSignalDeltas.errorCountDelta),
+          warningCountDelta: readNumber(observedSignalDeltas.warningCountDelta),
+        }
+      : undefined,
   };
 }
 
@@ -2881,8 +2915,8 @@ function attachAiFacingDeltaContext(
     projectionWithSourceTruth,
     runtimeFields,
   );
-  const actionBoundPageDeltaReport = bindReadPageDeltaReportToPendingInteraction(
-    payload.pageDeltaReport,
+  const actionBoundPostActionDeltaEvidence = bindPostActionDeltaEvidenceToPendingInteraction(
+    payload.postActionDeltaEvidence,
     payload.pageObjectSnapshot,
     pendingInteraction,
   );
@@ -2892,11 +2926,11 @@ function attachAiFacingDeltaContext(
           delta: deltaContext,
           tabId: projectionWithSourceTruth.tabId,
           actionId:
-            actionBoundPageDeltaReport?.actionId ??
+            actionBoundPostActionDeltaEvidence?.actionId ??
             projectionWithSourceTruth.changedByActionId ??
             null,
           sourceTruthChain: projectionWithSourceTruth.sourceTruthChain,
-          ...buildPostActionDeltaSignalsFromPageDelta(actionBoundPageDeltaReport),
+          ...buildPostActionDeltaSignalsFromEvidence(actionBoundPostActionDeltaEvidence),
           recommendedNextAction: regionStatePostconditions
             ? 'inspect_region_state_postconditions'
             : 'continue_with_post_action_delta_context',
@@ -3006,9 +3040,10 @@ function attachAiFacingDeltaContext(
   });
   payload.taskResumeReadiness = taskResumeReadiness;
   payload.deltaContext = deltaContext;
-  if (actionBoundPageDeltaReport) {
-    payload.pageDeltaReport = actionBoundPageDeltaReport;
-  }
+  // Gap 3 closeout: keep the legacy pageDeltaReport only as an internal
+  // compatibility input. The public MCP read_page surface should expose the
+  // unified delta contract via deltaContext + postActionDeltaEvidence.
+  delete payload.pageDeltaReport;
   if (postActionDeltaEvidence) {
     payload.postActionDeltaEvidence = postActionDeltaEvidence;
   }

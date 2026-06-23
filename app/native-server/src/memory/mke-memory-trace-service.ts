@@ -620,26 +620,53 @@ function summarizeReadPageSnapshot(payload: unknown): Record<string, unknown> | 
     : null;
 }
 
-function summarizeReadPageDelta(payload: unknown): Record<string, unknown> | null {
-  const report = readObject(payload);
+function summarizeReadPageUnifiedDelta(
+  payload: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const evidence = readNestedObject(payload, 'postActionDeltaEvidence');
+  const deltaContext = readNestedObject(payload, 'deltaContext');
+  const report = evidence ?? deltaContext;
   if (!report) return null;
+  const observedSignalDeltas = readObject(report.observedSignalDeltas);
   const networkSignals = readObject(report.networkSignals);
   const consoleSignals = readObject(report.consoleSignals);
   const networkSignalsCount =
-    (typeof readNumber(networkSignals?.requestStartedDelta) === 'number' ? 1 : 0) +
-    (typeof readNumber(networkSignals?.failedRequestDelta) === 'number' ? 1 : 0);
+    (typeof readNumber(
+      observedSignalDeltas?.requestStartedDelta,
+      networkSignals?.requestStartedDelta,
+    ) === 'number'
+      ? 1
+      : 0) +
+    (typeof readNumber(
+      observedSignalDeltas?.failedRequestDelta,
+      networkSignals?.failedRequestDelta,
+    ) === 'number'
+      ? 1
+      : 0);
   const consoleSignalsCount =
-    (typeof readNumber(consoleSignals?.errorCountDelta) === 'number' ? 1 : 0) +
-    (typeof readNumber(consoleSignals?.warningCountDelta) === 'number' ? 1 : 0);
+    (typeof readNumber(observedSignalDeltas?.errorCountDelta, consoleSignals?.errorCountDelta) ===
+    'number'
+      ? 1
+      : 0) +
+    (typeof readNumber(
+      observedSignalDeltas?.warningCountDelta,
+      consoleSignals?.warningCountDelta,
+    ) === 'number'
+      ? 1
+      : 0);
+  const objectDelta = readObject(report.objectDelta);
+  const changedObjectIds = readArray(objectDelta?.changedObjectIds);
+  const legacyChangedObjects = readArray(report.changedObjects);
   const summary = {
-    deltaKind: readString(report.deltaKind),
-    recommendation: readString(report.recommendation),
+    deltaKind: readString(report.observedChangeKind, report.deltaKind),
+    recommendation: readString(report.recommendedNextAction, report.recommendation),
     actionId: readString(report.actionId),
     targetObjectId: readString(report.targetObjectId),
-    beforeSnapshotId: readString(report.beforeSnapshotId),
-    afterSnapshotId: readString(report.afterSnapshotId),
+    beforeProjectionId: readString(report.beforeProjectionId, report.beforeSnapshotId),
+    afterProjectionId: readString(report.afterProjectionId, report.afterSnapshotId),
     changedRegionsCount: readArray(report.changedRegions).length,
-    changedObjectCount: readArray(report.changedObjects).length,
+    changedObjectCount:
+      changedObjectIds.length > 0 ? changedObjectIds.length : legacyChangedObjects.length,
     networkSignalsCount,
     consoleSignalsCount,
   };
@@ -771,10 +798,11 @@ function buildPageObjectEvidenceRefs(input: {
   deltaSummary: Record<string, unknown> | null;
 }): string[] {
   const snapshotId = readString(input.snapshotSummary?.snapshotId);
-  const deltaAfterSnapshotId = readString(input.deltaSummary?.afterSnapshotId);
+  const deltaAfterProjectionId = readString(input.deltaSummary?.afterProjectionId);
   const evidenceRefs: string[] = [];
   if (snapshotId) evidenceRefs.push(`read_page_object_snapshot:${snapshotId}`);
-  if (deltaAfterSnapshotId) evidenceRefs.push(`read_page_delta_report:${deltaAfterSnapshotId}`);
+  if (deltaAfterProjectionId)
+    evidenceRefs.push(`post_action_delta_evidence:${deltaAfterProjectionId}`);
   return evidenceRefs;
 }
 
@@ -793,12 +821,12 @@ function buildPageObjectRecentEvents(input: {
   }
   if (input.deltaSummary) {
     events.push({
-      eventType: 'page_delta_report',
+      eventType: 'post_action_delta_evidence',
       deltaKind: input.deltaSummary.deltaKind,
       actionId: input.deltaSummary.actionId,
       targetObjectId: input.deltaSummary.targetObjectId,
-      beforeSnapshotId: input.deltaSummary.beforeSnapshotId,
-      afterSnapshotId: input.deltaSummary.afterSnapshotId,
+      beforeProjectionId: input.deltaSummary.beforeProjectionId,
+      afterProjectionId: input.deltaSummary.afterProjectionId,
       observedAt: input.observedAt,
     });
   }
@@ -1073,7 +1101,7 @@ function buildStructuredTraceContext(
     const snapshotSummary = summarizeReadPageSnapshot(
       readNestedObject(payload, 'pageObjectSnapshot'),
     );
-    const deltaSummary = summarizeReadPageDelta(readNestedObject(payload, 'pageDeltaReport'));
+    const deltaSummary = summarizeReadPageUnifiedDelta(payload);
     return {
       perceptionObjects: snapshotSummary,
       actionTarget: summarizeCandidateActions(readArray(payload.candidateActions)),
@@ -1773,7 +1801,7 @@ export class MkeMemoryTraceService {
     const pageObjectSnapshot = summarizeReadPageSnapshot(
       readNestedObject(payload, 'pageObjectSnapshot'),
     );
-    const pageDeltaReport = summarizeReadPageDelta(readNestedObject(payload, 'pageDeltaReport'));
+    const pageDeltaReport = summarizeReadPageUnifiedDelta(payload);
     const evidenceRefs = buildPageObjectEvidenceRefs({
       snapshotSummary: pageObjectSnapshot,
       deltaSummary: pageDeltaReport,
@@ -2111,13 +2139,14 @@ export class MkeMemoryTraceService {
         : readString(card.url)
           ? 'url_fallback'
           : 'not_targetable';
-      const cardKey =
-        cardUrlFields.rootRoute ?? cardUrlFields.currentRoute ?? cardUrlFields.pattern ?? title;
+      const cardRouteKey =
+        cardUrlFields.pattern ?? cardUrlFields.rootRoute ?? cardUrlFields.currentRoute;
+      const cardTitleKey = title.trim().replace(/\s+/g, ' ').slice(0, 160);
       const cardIdentityKey =
         stableTarget?.targetRef ??
-        (cardUrlFields.rootRoute || cardUrlFields.currentRoute || cardUrlFields.pattern
-          ? cardKey
-          : `${cardKey}:${rank}`);
+        (cardRouteKey
+          ? objectFingerprint(cardRouteKey, cardTitleKey || `rank:${rank}`)
+          : objectFingerprint(cardTitleKey || 'untitled_result_card', rank));
       this.upsertBrowserObject({
         siteFamily,
         pageUrlPattern: urlFields.pattern ?? trace.pageUrlPattern,

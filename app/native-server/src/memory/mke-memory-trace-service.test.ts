@@ -1299,27 +1299,32 @@ describe('MkeMemoryTraceService', () => {
             actionableObjectCount: 1,
             claimBoundary: 'read page snapshot summary',
           },
-          pageDeltaReport: {
-            source: 'read_page_delta_report',
+          postActionDeltaEvidence: {
+            watchId: 'watch:rpos_example_101_1',
+            deltaKind: 'read_refresh_delta',
             actionId: 'act-001',
             targetObjectId: 'target-search-first',
-            beforeSnapshotId: 'rpos_example_101_0',
-            afterSnapshotId: 'rpos_example_101_1',
-            beforeObservedAt: '2026-06-10T10:00:20.000Z',
-            afterObservedAt: '2026-06-10T10:00:30.000Z',
-            deltaKind: 'object_appeared',
+            beforeProjectionId: 'rpos_example_101_0',
+            afterProjectionId: 'rpos_example_101_1',
+            producedAt: '2026-06-10T10:00:30.000Z',
+            observedChangeKind: 'object_appeared',
             changedRegions: ['search_region'],
-            changedObjects: ['region-search-main'],
-            networkSignals: {
+            objectDelta: {
+              status: 'observed',
+              changedObjectIds: ['region-search-main'],
+            },
+            networkSignalSummary: {
+              status: 'observed',
+              observedRequestCount: 9,
+            },
+            observedSignalDeltas: {
               requestStartedDelta: 9,
               failedRequestDelta: 1,
-            },
-            consoleSignals: {
               errorCountDelta: 0,
               warningCountDelta: 1,
             },
-            recommendation: 'proceed',
-            claimBoundary: 'read page delta report',
+            recommendedNextAction: 'continue_with_post_action_delta_context',
+            claimBoundary: ['read page delta evidence'],
           },
         }),
         resultSummary: 'read-page snapshot with delta',
@@ -1338,7 +1343,7 @@ describe('MkeMemoryTraceService', () => {
         actionId: 'act-001',
         targetObjectId: 'target-search-first',
         deltaKind: 'object_appeared',
-        recommendation: 'proceed',
+        recommendation: 'continue_with_post_action_delta_context',
       });
 
       await traceService.flushAsyncWrites();
@@ -1352,7 +1357,7 @@ describe('MkeMemoryTraceService', () => {
       });
       expect(page?.evidenceRefs).toMatchObject([
         'read_page_object_snapshot:rpos_example_101_1',
-        'read_page_delta_report:rpos_example_101_1',
+        'post_action_delta_evidence:rpos_example_101_1',
       ]);
       expect(page?.recentEvents).toEqual(
         expect.arrayContaining([
@@ -1361,10 +1366,10 @@ describe('MkeMemoryTraceService', () => {
             snapshotId: 'rpos_example_101_1',
           }),
           expect.objectContaining({
-            eventType: 'page_delta_report',
+            eventType: 'post_action_delta_evidence',
             actionId: 'act-001',
             targetObjectId: 'target-search-first',
-            afterSnapshotId: 'rpos_example_101_1',
+            afterProjectionId: 'rpos_example_101_1',
           }),
         ]),
       );
@@ -1379,7 +1384,7 @@ describe('MkeMemoryTraceService', () => {
           actionId: 'act-001',
           targetObjectId: 'target-search-first',
           deltaKind: 'object_appeared',
-          recommendation: 'proceed',
+          recommendation: 'continue_with_post_action_delta_context',
           changedRegionsCount: 1,
           changedObjectCount: 1,
           networkSignalsCount: 2,

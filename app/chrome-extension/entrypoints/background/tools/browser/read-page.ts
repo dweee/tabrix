@@ -2408,7 +2408,6 @@ async function buildModeOutput(params: {
     previousCdpSignals: previousSnapshot?.telemetry,
   });
   if (pageDeltaReport) {
-    sharedPayload.pageDeltaReport = pageDeltaReport;
     sharedPayload.postActionDeltaEvidence = derivePostActionDeltaEvidenceFromReadPageDelta(
       pageDeltaReport,
       {

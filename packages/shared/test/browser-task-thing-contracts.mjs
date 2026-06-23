@@ -920,6 +920,14 @@ const postActionDeltaEvidence = buildPostActionDeltaEvidence({
   actionEvidenceResult: dispatchOnlyActionEvidence,
   sourceTruthChain: currentProjection.sourceTruthChain,
   producedAt: '2026-05-18T00:00:04.500Z',
+  targetObjectId: 'obj_search_result_1',
+  observedChangeKind: 'list_refreshed',
+  observedSignalDeltas: {
+    requestStartedDelta: 2,
+    failedRequestDelta: 0,
+    errorCountDelta: 0,
+    warningCountDelta: 1,
+  },
 });
 assert.equal(postActionDeltaEvidence.watchId, 'watch:delta_post_action_001');
 assert.equal(postActionDeltaEvidence.actionId, 'action_click_001');
@@ -933,6 +941,14 @@ assert.deepEqual(postActionDeltaEvidence.invalidatedRefs, ['tgt_old']);
 assert.deepEqual(postActionDeltaEvidence.refreshedRefs, ['tgt_new']);
 assert.equal(postActionDeltaEvidence.navigationDelta.status, 'unknown');
 assert.equal(postActionDeltaEvidence.networkSignalSummary.status, 'not_checked');
+assert.equal(postActionDeltaEvidence.targetObjectId, 'obj_search_result_1');
+assert.equal(postActionDeltaEvidence.observedChangeKind, 'list_refreshed');
+assert.deepEqual(postActionDeltaEvidence.observedSignalDeltas, {
+  requestStartedDelta: 2,
+  failedRequestDelta: 0,
+  errorCountDelta: 0,
+  warningCountDelta: 1,
+});
 assert.equal(postActionDeltaEvidence.evidenceBoundary.evidenceLevel, 'integration');
 assert.equal(postActionDeltaEvidence.evidenceBoundary.realBrowserClaim, false);
 

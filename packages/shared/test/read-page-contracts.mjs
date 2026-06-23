@@ -95,6 +95,10 @@ assert.deepEqual(READ_PAGE_TASK_PROTOCOL_FIELDS, [
 ]);
 
 assert.deepEqual(READ_PAGE_REGION_TYPES, [
+  'search_area',
+  'filter_panel',
+  'result_list',
+  'detail_area',
   'navigation',
   'content',
   'account',
@@ -136,6 +140,7 @@ assert.deepEqual(READ_PAGE_REGION_MENU_ITEM_ROLES, [
 assert.deepEqual(READ_PAGE_OPERATION_PURPOSES, [
   'navigate',
   'search',
+  'filter_results',
   'read_content',
   'open_menu',
   'account',

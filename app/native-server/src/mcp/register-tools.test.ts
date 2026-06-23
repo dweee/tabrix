@@ -1,5 +1,5 @@
 import nativeMessagingHostInstance from '../native-messaging-host';
-import { bindReadPageDeltaReportToPendingInteraction, handleToolCall } from './register-tools';
+import { bindPostActionDeltaEvidenceToPendingInteraction, handleToolCall } from './register-tools';
 import { sessionManager } from '../execution/session-manager';
 import { bridgeRuntimeState } from '../server/bridge-state';
 import { bridgeCommandChannel } from '../server/bridge-command-channel';
@@ -4553,7 +4553,7 @@ describe('handleToolCall execution wrapper', () => {
       sourceFreshness?: 'fresh' | 'stale' | 'unknown';
       sourceObservedAt?: string;
       authCollaboration?: Record<string, unknown>;
-      pageDeltaReport?: Record<string, unknown>;
+      postActionDeltaEvidence?: Record<string, unknown>;
       pageObjectSnapshot?: Record<string, unknown>;
     }): string {
       const sourceObservedAt = input.sourceObservedAt ?? new Date(Date.now()).toISOString();
@@ -4604,7 +4604,9 @@ describe('handleToolCall execution wrapper', () => {
           : {}),
         ...(input.pageContext ? { pageContext: input.pageContext } : {}),
         ...(input.authCollaboration ? { authCollaboration: input.authCollaboration } : {}),
-        ...(input.pageDeltaReport ? { pageDeltaReport: input.pageDeltaReport } : {}),
+        ...(input.postActionDeltaEvidence
+          ? { postActionDeltaEvidence: input.postActionDeltaEvidence }
+          : {}),
         ...(input.pageObjectSnapshot ? { pageObjectSnapshot: input.pageObjectSnapshot } : {}),
         pageRegions: input.pageRegions,
         objectLifecycle: {
@@ -5327,15 +5329,16 @@ describe('handleToolCall execution wrapper', () => {
       expect(auto.readPageCount).toBe(2);
     });
 
-    it('binds PageDelta to the pending action and target object', () => {
-      const payload = bindReadPageDeltaReportToPendingInteraction(
+    it('binds post-action delta evidence to the pending action and target object', () => {
+      const payload = bindPostActionDeltaEvidenceToPendingInteraction(
         {
-          source: 'read_page_delta_report',
+          watchId: 'watch:snapshot_after_click',
+          deltaKind: 'read_refresh_delta',
           actionId: null,
           targetObjectId: null,
-          beforeSnapshotId: 'snapshot_before_click',
-          afterSnapshotId: 'snapshot_after_click',
-          deltaKind: 'object_appeared',
+          beforeProjectionId: 'snapshot_before_click',
+          afterProjectionId: 'snapshot_after_click',
+          observedChangeKind: 'object_appeared',
         },
         {
           objects: [
@@ -5369,22 +5372,23 @@ describe('handleToolCall execution wrapper', () => {
       expect(payload).toMatchObject({
         actionId: 'ca_open_result_1',
         targetObjectId: 'object_result_1',
-        beforeSnapshotId: 'snapshot_before_click',
-        afterSnapshotId: 'snapshot_after_click',
-        deltaKind: 'object_appeared',
+        beforeProjectionId: 'snapshot_before_click',
+        afterProjectionId: 'snapshot_after_click',
+        observedChangeKind: 'object_appeared',
       });
     });
 
-    it('binds list refresh PageDelta to the pending filter action and result list', () => {
-      const payload = bindReadPageDeltaReportToPendingInteraction(
+    it('binds list-refresh delta evidence to the pending filter action and result list', () => {
+      const payload = bindPostActionDeltaEvidenceToPendingInteraction(
         {
-          source: 'read_page_delta_report',
+          watchId: 'watch:snapshot_after_filter',
+          deltaKind: 'read_refresh_delta',
           actionId: null,
           targetObjectId: null,
-          beforeSnapshotId: 'snapshot_before_filter',
-          afterSnapshotId: 'snapshot_after_filter',
-          deltaKind: 'list_refreshed',
-          recommendation: 'proceed',
+          beforeProjectionId: 'snapshot_before_filter',
+          afterProjectionId: 'snapshot_after_filter',
+          observedChangeKind: 'list_refreshed',
+          recommendedNextAction: 'continue_with_post_action_delta_context',
         },
         {
           objects: [
@@ -5429,23 +5433,24 @@ describe('handleToolCall execution wrapper', () => {
       expect(payload).toMatchObject({
         actionId: 'ca_apply_filter',
         targetObjectId: 'object_result_list',
-        beforeSnapshotId: 'snapshot_before_filter',
-        afterSnapshotId: 'snapshot_after_filter',
-        deltaKind: 'list_refreshed',
-        recommendation: 'proceed',
+        beforeProjectionId: 'snapshot_before_filter',
+        afterProjectionId: 'snapshot_after_filter',
+        observedChangeKind: 'list_refreshed',
+        recommendedNextAction: 'continue_with_post_action_delta_context',
       });
     });
 
-    it('binds dialog PageDelta to the pending target that opened the dialog', () => {
-      const payload = bindReadPageDeltaReportToPendingInteraction(
+    it('binds dialog delta evidence to the pending target that opened the dialog', () => {
+      const payload = bindPostActionDeltaEvidenceToPendingInteraction(
         {
-          source: 'read_page_delta_report',
+          watchId: 'watch:snapshot_after_dialog',
+          deltaKind: 'read_refresh_delta',
           actionId: null,
           targetObjectId: null,
-          beforeSnapshotId: 'snapshot_before_dialog',
-          afterSnapshotId: 'snapshot_after_dialog',
-          deltaKind: 'dialog_appeared',
-          recommendation: 'needs_user',
+          beforeProjectionId: 'snapshot_before_dialog',
+          afterProjectionId: 'snapshot_after_dialog',
+          observedChangeKind: 'dialog_appeared',
+          recommendedNextAction: 'escalate_to_user',
         },
         {
           objects: [
@@ -5477,10 +5482,10 @@ describe('handleToolCall execution wrapper', () => {
       expect(payload).toMatchObject({
         actionId: 'ca_open_login_dialog',
         targetObjectId: 'object_login_button',
-        beforeSnapshotId: 'snapshot_before_dialog',
-        afterSnapshotId: 'snapshot_after_dialog',
-        deltaKind: 'dialog_appeared',
-        recommendation: 'needs_user',
+        beforeProjectionId: 'snapshot_before_dialog',
+        afterProjectionId: 'snapshot_after_dialog',
+        observedChangeKind: 'dialog_appeared',
+        recommendedNextAction: 'escalate_to_user',
       });
     });
 
@@ -5712,23 +5717,32 @@ describe('handleToolCall execution wrapper', () => {
           tabId: 1,
           pageRegions: [contentListRegion('after')],
           includeTopNRows: true,
-          pageDeltaReport: {
-            source: 'read_page_delta_report',
+          postActionDeltaEvidence: {
+            watchId: 'watch:snapshot_after_search_submit',
+            deltaKind: 'read_refresh_delta',
             actionId: null,
             targetObjectId: null,
-            beforeSnapshotId: 'snapshot_before_search_submit',
-            afterSnapshotId: 'snapshot_after_search_submit',
-            beforeObservedAt: '2026-06-16T00:00:00.000Z',
-            afterObservedAt: '2026-06-16T00:00:01.000Z',
-            deltaKind: 'list_refreshed',
+            beforeProjectionId: 'snapshot_before_search_submit',
+            afterProjectionId: 'snapshot_after_search_submit',
+            producedAt: '2026-06-16T00:00:01.000Z',
+            observedChangeKind: 'list_refreshed',
             changedRegions: ['results'],
-            changedObjects: ['after_1', 'after_2'],
-            networkSignals: {
+            claimBoundary: ['test page delta'],
+            objectDelta: {
+              status: 'observed',
+              changedObjectIds: ['after_1', 'after_2'],
+            },
+            networkSignalSummary: {
+              status: 'observed',
+              observedRequestCount: 2,
+            },
+            observedSignalDeltas: {
               requestStartedDelta: 2,
               failedRequestDelta: 0,
+              errorCountDelta: 0,
+              warningCountDelta: 0,
             },
-            recommendation: 'proceed',
-            claimBoundary: 'test page delta',
+            recommendedNextAction: 'continue_with_post_action_delta_context',
           },
           pageObjectSnapshot: {
             source: 'read_page_object_snapshot',
@@ -5814,11 +5828,7 @@ describe('handleToolCall execution wrapper', () => {
           nextAction: 'continue_original_task',
         },
       });
-      expect(payload.pageDeltaReport).toMatchObject({
-        actionId: 'ca_search_submit',
-        targetObjectId: 'object_search_submit',
-        deltaKind: 'list_refreshed',
-      });
+      expect(payload).not.toHaveProperty('pageDeltaReport');
       expect(payload.postActionDeltaEvidence).toMatchObject({
         actionId: 'ca_search_submit',
         objectDelta: {

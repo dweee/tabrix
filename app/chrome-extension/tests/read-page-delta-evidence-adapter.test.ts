@@ -120,15 +120,26 @@ describe('derivePostActionDeltaEvidenceFromReadPageDelta', () => {
     it('passes through changedRegions and snapshot IDs', () => {
       const evidence = derivePostActionDeltaEvidenceFromReadPageDelta(
         makeReport({
+          targetObjectId: 'obj-target-1',
           changedRegions: ['sidebar', 'main_content'],
           beforeSnapshotId: 'snap-before-999',
           afterSnapshotId: 'snap-after-999',
+          networkSignals: { requestStartedDelta: 3, failedRequestDelta: 1 },
+          consoleSignals: { errorCountDelta: 2, warningCountDelta: 4 },
         }),
       );
       expect(evidence.changedRegions).toEqual(['sidebar', 'main_content']);
       expect(evidence.beforeProjectionId).toBe('snap-before-999');
       expect(evidence.afterProjectionId).toBe('snap-after-999');
       expect(evidence.watchId).toBe('watch:snap-after-999');
+      expect(evidence.targetObjectId).toBe('obj-target-1');
+      expect(evidence.observedChangeKind).toBe('list_refreshed');
+      expect(evidence.observedSignalDeltas).toEqual({
+        requestStartedDelta: 3,
+        failedRequestDelta: 1,
+        errorCountDelta: 2,
+        warningCountDelta: 4,
+      });
     });
 
     it('uses conservative navigationDelta and focusDelta', () => {

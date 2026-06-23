@@ -1831,18 +1831,9 @@ export interface ReadPageExtensionFields {
    */
   pageObjectSnapshot?: ReadPageObjectSnapshot;
   /**
-   * V28 R4C additive page-delta report for same-tab before/after reads.
-   * This is used for `chrome_click_element` / `chrome_read_page` post-action
-   * checks in `read_page_object_delta=compared` mode. It can be empty when no
-   * stable previous snapshot is available yet.
-   */
-  pageDeltaReport?: ReadPagePageDeltaReport;
-  /**
-   * Gap 3 (Plan A): PostActionDeltaEvidence derived from pageDeltaReport via
-   * derivePostActionDeltaEvidenceFromReadPageDelta. Present only when
-   * pageDeltaReport is available. This unifies the two delta contracts so that
-   * downstream evidence consumers can read a single PostActionDeltaEvidence
-   * surface instead of separately inspecting pageDeltaReport.
+   * Unified post-action delta evidence surface for read_page outputs.
+   * This is the authoritative MCP-facing delta contract for post-action /
+   * same-tab delta inspection.
    */
   postActionDeltaEvidence?: PostActionDeltaEvidence;
   /**

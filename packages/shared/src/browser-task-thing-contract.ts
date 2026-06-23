@@ -3,6 +3,7 @@ import type {
   ReadPageReadinessVerdict,
   ReadPageSelectedDataSource,
   ReadPagePageDeltaReport,
+  ReadPagePageDeltaKind,
 } from './read-page-contract';
 
 export const BROWSER_TASK_THING_CONTRACT_VERSION = 'v1' as const;
@@ -456,13 +457,22 @@ export interface PostActionDeltaNetworkSignalSummary {
   observedResponseCount: number | null;
 }
 
+export interface PostActionDeltaObservedSignalDeltas {
+  requestStartedDelta: number | null;
+  failedRequestDelta: number | null;
+  errorCountDelta: number | null;
+  warningCountDelta: number | null;
+}
+
 export interface PostActionDeltaEvidence {
   watchId: string;
   taskSessionId: string | null;
   tabId: number | null;
   actionId: string | null;
   actionEvidenceId: string | null;
+  targetObjectId: string | null;
   deltaKind: BrowserPageProjectionDeltaKind;
+  observedChangeKind: ReadPagePageDeltaKind | null;
   beforeProjectionId: string | null;
   afterProjectionId: string;
   changedRegions: string[];
@@ -472,6 +482,7 @@ export interface PostActionDeltaEvidence {
   focusDelta: PostActionDeltaFocusSignal;
   objectDelta: PostActionDeltaObjectSignal;
   networkSignalSummary: PostActionDeltaNetworkSignalSummary;
+  observedSignalDeltas: PostActionDeltaObservedSignalDeltas | null;
   sourceTruthChain: BrowserSourceTruthChain | null;
   evidenceBoundary: BrowserPageProjectionDeltaEvidenceBoundary;
   recommendedNextAction: string;
@@ -486,11 +497,14 @@ export interface BuildPostActionDeltaEvidenceInput {
   tabId?: number | null;
   actionId?: string | null;
   actionEvidenceId?: string | null;
+  targetObjectId?: string | null;
+  observedChangeKind?: ReadPagePageDeltaKind | null;
   sourceTruthChain?: BrowserSourceTruthChain | null;
   navigationDelta?: Partial<PostActionDeltaNavigationSignal> | null;
   focusDelta?: Partial<PostActionDeltaFocusSignal> | null;
   objectDelta?: Partial<PostActionDeltaObjectSignal> | null;
   networkSignalSummary?: Partial<PostActionDeltaNetworkSignalSummary> | null;
+  observedSignalDeltas?: Partial<PostActionDeltaObservedSignalDeltas> | null;
   recommendedNextAction?: string;
   producedAt?: string;
   claimBoundary?: string[];
@@ -819,7 +833,9 @@ export function buildPostActionDeltaEvidence(
     tabId,
     actionId,
     actionEvidenceId: input.actionEvidenceId ?? input.actionEvidenceResult?.actionId ?? null,
+    targetObjectId: input.targetObjectId ?? null,
     deltaKind: input.delta.deltaKind,
+    observedChangeKind: input.observedChangeKind ?? null,
     beforeProjectionId: input.delta.fromProjectionId,
     afterProjectionId: input.delta.toProjectionId,
     changedRegions: input.delta.changedRegions,
@@ -844,6 +860,14 @@ export function buildPostActionDeltaEvidence(
       observedRequestCount: input.networkSignalSummary?.observedRequestCount ?? null,
       observedResponseCount: input.networkSignalSummary?.observedResponseCount ?? null,
     },
+    observedSignalDeltas: input.observedSignalDeltas
+      ? {
+          requestStartedDelta: input.observedSignalDeltas.requestStartedDelta ?? null,
+          failedRequestDelta: input.observedSignalDeltas.failedRequestDelta ?? null,
+          errorCountDelta: input.observedSignalDeltas.errorCountDelta ?? null,
+          warningCountDelta: input.observedSignalDeltas.warningCountDelta ?? null,
+        }
+      : null,
     sourceTruthChain: input.sourceTruthChain ?? null,
     evidenceBoundary: input.delta.evidenceBoundary,
     recommendedNextAction:
@@ -908,7 +932,9 @@ export function derivePostActionDeltaEvidenceFromReadPageDelta(
     tabId: options?.tabId ?? null,
     actionId: report.actionId,
     actionEvidenceId: null,
+    targetObjectId: report.targetObjectId ?? null,
     deltaKind: report.actionId != null ? 'post_action_delta' : 'read_refresh_delta',
+    observedChangeKind: report.deltaKind,
     beforeProjectionId: report.beforeSnapshotId,
     afterProjectionId: report.afterSnapshotId,
     changedRegions: report.changedRegions,
@@ -932,6 +958,12 @@ export function derivePostActionDeltaEvidenceFromReadPageDelta(
       status: networkStatus,
       observedRequestCount: report.networkSignals?.requestStartedDelta ?? null,
       observedResponseCount: null,
+    },
+    observedSignalDeltas: {
+      requestStartedDelta: report.networkSignals?.requestStartedDelta ?? null,
+      failedRequestDelta: report.networkSignals?.failedRequestDelta ?? null,
+      errorCountDelta: report.consoleSignals?.errorCountDelta ?? null,
+      warningCountDelta: report.consoleSignals?.warningCountDelta ?? null,
     },
     sourceTruthChain: options?.sourceTruthChain ?? null,
     evidenceBoundary: {

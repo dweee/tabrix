@@ -3171,7 +3171,7 @@ describe('read_page mode', () => {
     );
   });
 
-  it('returns pageObjectSnapshot and pageDeltaReport in consecutive same-tab compact reads', async () => {
+  it('returns pageObjectSnapshot and postActionDeltaEvidence in consecutive same-tab compact reads', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 5220,
       windowId: 1,
@@ -3232,7 +3232,7 @@ describe('read_page mode', () => {
       objectCount: expect.any(Number),
       freshness: expect.stringMatching(/^(fresh|stale|unknown)$/),
     });
-    expect(firstPayload.pageDeltaReport).toBeUndefined();
+    expect(firstPayload.postActionDeltaEvidence).toBeUndefined();
 
     expect(secondPayload.pageObjectSnapshot).toMatchObject({
       source: 'read_page_object_snapshot',
@@ -3245,16 +3245,20 @@ describe('read_page mode', () => {
     expect(firstPayload.pageObjectSnapshot.snapshotId).not.toBe(
       secondPayload.pageObjectSnapshot.snapshotId,
     );
-    expect(secondPayload.pageDeltaReport).toMatchObject({
-      source: 'read_page_delta_report',
-      beforeSnapshotId: firstPayload.pageObjectSnapshot.snapshotId,
-      afterSnapshotId: secondPayload.pageObjectSnapshot.snapshotId,
-      deltaKind: expect.stringMatching(
+    expect(secondPayload.postActionDeltaEvidence).toMatchObject({
+      beforeProjectionId: firstPayload.pageObjectSnapshot.snapshotId,
+      afterProjectionId: secondPayload.pageObjectSnapshot.snapshotId,
+      deltaKind: 'read_refresh_delta',
+      observedChangeKind: expect.stringMatching(
         /^(url_changed|spa_route_change|list_refreshed|dialog_appeared|new_tab_opened|object_appeared|form_state_changed|network_completed|console_error|no_useful_change|blocked|restricted|unknown)$/,
       ),
-      changedObjects: expect.any(Array),
-      recommendation: expect.stringMatching(/^(proceed|wait|refresh|retry|stop|needs_user)$/),
-      claimBoundary: expect.any(String),
+      objectDelta: expect.objectContaining({
+        changedObjectIds: expect.any(Array),
+      }),
+      recommendedNextAction: expect.stringMatching(
+        /^(continue_with_post_action_delta_context|wait_for_settle_then_read|refresh_then_read|retry_action_then_read|stop_and_report|escalate_to_user)$/,
+      ),
+      claimBoundary: expect.any(Array),
     });
   });
 
@@ -3294,7 +3298,7 @@ describe('read_page mode', () => {
     expect(consumePendingActionBinding(7003)).toBeNull();
   });
 
-  it('carries actionId into pageDeltaReport when binding exists', () => {
+  it('carries actionId into internal read-page delta when binding exists', () => {
     const deltaReport = buildReadPagePageDeltaReport({
       tabId: 7004,
       pendingActionBinding: {
@@ -3367,7 +3371,7 @@ describe('read_page mode', () => {
     });
   });
 
-  it('keeps actionId null in pageDeltaReport when no binding exists', () => {
+  it('keeps actionId null in internal read-page delta when no binding exists', () => {
     const deltaReport = buildReadPagePageDeltaReport({
       tabId: 7005,
       previousSnapshot: {
@@ -3423,7 +3427,7 @@ describe('read_page mode', () => {
     });
   });
 
-  it('classifies pageDeltaReport as network_completed from CDP request deltas', async () => {
+  it('classifies postActionDeltaEvidence as network_completed from CDP request deltas', async () => {
     vi.spyOn(cdpPageSensing, 'captureCDPPageSensingSnapshot')
       .mockResolvedValueOnce({
         tabId: 5222,
@@ -3492,21 +3496,27 @@ describe('read_page mode', () => {
     const firstPayload = JSON.parse((first.content[0] as { text: string }).text);
     const secondPayload = JSON.parse((second.content[0] as { text: string }).text);
 
-    expect(firstPayload.pageDeltaReport).toBeUndefined();
-    expect(secondPayload.pageDeltaReport).toMatchObject({
-      source: 'read_page_delta_report',
+    expect(firstPayload.postActionDeltaEvidence).toBeUndefined();
+    expect(secondPayload.postActionDeltaEvidence).toMatchObject({
+      deltaKind: 'read_refresh_delta',
       actionId: null,
       targetObjectId: null,
-      deltaKind: 'network_completed',
-      networkSignals: {
+      observedChangeKind: 'network_completed',
+      observedSignalDeltas: {
         requestStartedDelta: 3,
         failedRequestDelta: 0,
+        errorCountDelta: 0,
+        warningCountDelta: 0,
       },
-      recommendation: 'proceed',
+      networkSignalSummary: {
+        status: 'observed',
+        observedRequestCount: 3,
+      },
+      recommendedNextAction: 'continue_with_post_action_delta_context',
     });
   });
 
-  it('classifies pageDeltaReport as console_error from CDP console deltas', async () => {
+  it('classifies postActionDeltaEvidence as console_error from CDP console deltas', async () => {
     vi.spyOn(cdpPageSensing, 'captureCDPPageSensingSnapshot')
       .mockResolvedValueOnce({
         tabId: 5223,
@@ -3575,21 +3585,23 @@ describe('read_page mode', () => {
     const firstPayload = JSON.parse((first.content[0] as { text: string }).text);
     const secondPayload = JSON.parse((second.content[0] as { text: string }).text);
 
-    expect(firstPayload.pageDeltaReport).toBeUndefined();
-    expect(secondPayload.pageDeltaReport).toMatchObject({
-      source: 'read_page_delta_report',
+    expect(firstPayload.postActionDeltaEvidence).toBeUndefined();
+    expect(secondPayload.postActionDeltaEvidence).toMatchObject({
+      deltaKind: 'read_refresh_delta',
       actionId: null,
       targetObjectId: null,
-      deltaKind: 'console_error',
-      consoleSignals: {
+      observedChangeKind: 'console_error',
+      observedSignalDeltas: {
+        requestStartedDelta: 0,
+        failedRequestDelta: 0,
         errorCountDelta: 1,
         warningCountDelta: 2,
       },
-      recommendation: 'stop',
+      recommendedNextAction: 'stop_and_report',
     });
   });
 
-  it('classifies pageDeltaReport as spa_route_change from CDP route fingerprint deltas', async () => {
+  it('classifies postActionDeltaEvidence as spa_route_change from CDP route fingerprint deltas', async () => {
     vi.spyOn(cdpPageSensing, 'captureCDPPageSensingSnapshot')
       .mockResolvedValueOnce({
         tabId: 5224,
@@ -3674,17 +3686,17 @@ describe('read_page mode', () => {
     const firstPayload = JSON.parse((first.content[0] as { text: string }).text);
     const secondPayload = JSON.parse((second.content[0] as { text: string }).text);
 
-    expect(firstPayload.pageDeltaReport).toBeUndefined();
-    expect(secondPayload.pageDeltaReport).toMatchObject({
-      source: 'read_page_delta_report',
+    expect(firstPayload.postActionDeltaEvidence).toBeUndefined();
+    expect(secondPayload.postActionDeltaEvidence).toMatchObject({
+      deltaKind: 'read_refresh_delta',
       actionId: null,
       targetObjectId: null,
-      deltaKind: 'spa_route_change',
-      recommendation: 'proceed',
+      observedChangeKind: 'spa_route_change',
+      recommendedNextAction: 'continue_with_post_action_delta_context',
     });
   });
 
-  it('classifies pageDeltaReport as list_refreshed when result card objects change', async () => {
+  it('classifies postActionDeltaEvidence as list_refreshed when result card objects change', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 5225,
       windowId: 1,
@@ -3738,17 +3750,20 @@ describe('read_page mode', () => {
     const firstPayload = JSON.parse((first.content[0] as { text: string }).text);
     const secondPayload = JSON.parse((second.content[0] as { text: string }).text);
 
-    expect(firstPayload.pageDeltaReport).toBeUndefined();
-    expect(secondPayload.pageDeltaReport).toMatchObject({
-      source: 'read_page_delta_report',
-      deltaKind: 'list_refreshed',
+    expect(firstPayload.postActionDeltaEvidence).toBeUndefined();
+    expect(secondPayload.postActionDeltaEvidence).toMatchObject({
+      deltaKind: 'read_refresh_delta',
+      observedChangeKind: 'list_refreshed',
       changedRegions: expect.arrayContaining(['result_list']),
-      changedObjects: expect.arrayContaining(['ref_card_new', 'ref_card_old']),
-      recommendation: 'proceed',
+      objectDelta: {
+        status: 'observed',
+        changedObjectIds: expect.arrayContaining(['ref_card_new', 'ref_card_old']),
+      },
+      recommendedNextAction: 'continue_with_post_action_delta_context',
     });
   });
 
-  it('classifies pageDeltaReport as dialog_appeared when a modal or QR region appears', async () => {
+  it('classifies postActionDeltaEvidence as dialog_appeared when a modal or QR region appears', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 5226,
       windowId: 1,
@@ -3820,17 +3835,20 @@ describe('read_page mode', () => {
     const firstPayload = JSON.parse((first.content[0] as { text: string }).text);
     const secondPayload = JSON.parse((second.content[0] as { text: string }).text);
 
-    expect(firstPayload.pageDeltaReport).toBeUndefined();
-    expect(secondPayload.pageDeltaReport).toMatchObject({
-      source: 'read_page_delta_report',
-      deltaKind: 'dialog_appeared',
+    expect(firstPayload.postActionDeltaEvidence).toBeUndefined();
+    expect(secondPayload.postActionDeltaEvidence).toMatchObject({
+      deltaKind: 'read_refresh_delta',
+      observedChangeKind: 'dialog_appeared',
       changedRegions: expect.arrayContaining(['modal', 'qr_code']),
-      changedObjects: expect.arrayContaining(['ref_login_dialog_button', 'ref_refresh_qr']),
-      recommendation: 'needs_user',
+      objectDelta: {
+        status: 'observed',
+        changedObjectIds: expect.arrayContaining(['ref_login_dialog_button', 'ref_refresh_qr']),
+      },
+      recommendedNextAction: 'escalate_to_user',
     });
   });
 
-  it('classifies pageDeltaReport as form_state_changed when a field value state changes', async () => {
+  it('classifies postActionDeltaEvidence as form_state_changed when a field value state changes', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 5227,
       windowId: 1,
@@ -3878,13 +3896,16 @@ describe('read_page mode', () => {
     const firstPayload = JSON.parse((first.content[0] as { text: string }).text);
     const secondPayload = JSON.parse((second.content[0] as { text: string }).text);
 
-    expect(firstPayload.pageDeltaReport).toBeUndefined();
-    expect(secondPayload.pageDeltaReport).toMatchObject({
-      source: 'read_page_delta_report',
-      deltaKind: 'form_state_changed',
+    expect(firstPayload.postActionDeltaEvidence).toBeUndefined();
+    expect(secondPayload.postActionDeltaEvidence).toMatchObject({
+      deltaKind: 'read_refresh_delta',
+      observedChangeKind: 'form_state_changed',
       changedRegions: expect.arrayContaining(['search_area']),
-      changedObjects: expect.arrayContaining(['ref_query']),
-      recommendation: 'proceed',
+      objectDelta: {
+        status: 'observed',
+        changedObjectIds: expect.arrayContaining(['ref_query']),
+      },
+      recommendedNextAction: 'continue_with_post_action_delta_context',
     });
   });
 
