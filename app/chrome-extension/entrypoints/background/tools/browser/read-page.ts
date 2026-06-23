@@ -1464,6 +1464,25 @@ function isCompactFilterPanelFallbackElement(element: any): boolean {
   return width > 0 && height > 0 && width <= 320 && height <= 120;
 }
 
+const DEFAULT_FILTER_PANEL_TARGET_RECOVERY_LABELS = [
+  '综合',
+  '最新',
+  '最多收藏',
+  '最多点赞',
+  '最多评论',
+  '图文',
+  '图片',
+  '视频',
+  '文章',
+  '不限',
+  '一天内',
+  '一周内',
+  '半年内',
+  '已看过',
+  '未看过',
+  '已关注',
+];
+
 function shouldRecoverFilterPanelTargets(
   assistantGuidance: ReadPageAssistantGuidance | undefined,
   visibleTextContent: unknown,
@@ -3169,8 +3188,24 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     ) {
       return false;
     }
-    const labels = extractFilterPanelLabelsFromVisibleText(params.basePayload.visibleTextContent)
+    const labelSource = shouldRecoverSearchToolbarTargets(
+      params.assistantGuidance,
+      params.basePayload.pageRole,
+    )
+      ? [
+          ...extractFilterPanelLabelsFromVisibleText(params.basePayload.visibleTextContent),
+          ...DEFAULT_FILTER_PANEL_TARGET_RECOVERY_LABELS,
+        ]
+      : extractFilterPanelLabelsFromVisibleText(params.basePayload.visibleTextContent);
+    const seenLabels = new Set<string>();
+    const labels = labelSource
       .filter((label) => label.length <= 18)
+      .filter((label) => {
+        const key = label.replace(/\s+/g, ' ').trim().toLowerCase();
+        if (!key || seenLabels.has(key)) return false;
+        seenLabels.add(key);
+        return true;
+      })
       .slice(0, 16);
     if (labels.length === 0) return false;
 

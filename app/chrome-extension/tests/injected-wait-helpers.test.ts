@@ -238,6 +238,82 @@ describe('injected state-driven waits', () => {
     });
   });
 
+  it('interactive element search finds search inputs by structural identity when visible text is dynamic', async () => {
+    document.body.innerHTML = `
+      <textarea id="search-input-in-feeds" class="textarea" placeholder="葡萄牙1点开战"></textarea>
+      <button id="submit-search" aria-label="提交搜索"></button>
+    `;
+    const input = document.getElementById('search-input-in-feeds') as HTMLTextAreaElement;
+    const submit = document.getElementById('submit-search') as HTMLButtonElement;
+    setRect(input, { left: 200, top: 80, width: 480, height: 44 });
+    setRect(submit, { left: 700, top: 80, width: 44, height: 44 });
+    document.elementFromPoint = vi.fn((x: number, y: number) => {
+      if (x >= 200 && x <= 680 && y >= 80 && y <= 124) return input;
+      if (x >= 700 && x <= 744 && y >= 80 && y <= 124) return submit;
+      return null;
+    });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '搜索',
+      selector:
+        'input,textarea,[contenteditable="true"],[role="searchbox"],[role="textbox"],button,[aria-label],[placeholder]',
+      includeCoordinates: true,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.elements[0]).toMatchObject({
+      selector: '#search-input-in-feeds',
+      tagName: 'textarea',
+      matchSource: 'attribute',
+      actionability: 'actionable',
+      text: '葡萄牙1点开战',
+    });
+    expect(response.elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          selector: '#submit-search',
+          matchSource: 'aria',
+        }),
+      ]),
+    );
+  });
+
+  it('interactive element search includes role-less contenteditable search inputs', async () => {
+    document.body.innerHTML = `
+      <div id="composer-search" class="global-search-input" contenteditable="true" aria-label="搜索"></div>
+    `;
+    const input = document.getElementById('composer-search') as HTMLDivElement;
+    setRect(input, { left: 120, top: 48, width: 360, height: 40 });
+    document.elementFromPoint = vi.fn((x: number, y: number) => {
+      if (x >= 120 && x <= 480 && y >= 48 && y <= 88) return input;
+      return null;
+    });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '搜索',
+      includeCoordinates: true,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.elements[0]).toMatchObject({
+      selector: '#composer-search',
+      type: 'textarea',
+      tagName: 'div',
+      matchSource: 'aria',
+      actionability: 'actionable',
+    });
+  });
+
   it('interactive element search keeps a phone input reachable when its label only adds country code chrome', async () => {
     document.body.innerHTML = `
       <form>

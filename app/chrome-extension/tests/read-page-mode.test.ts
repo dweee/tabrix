@@ -1717,6 +1717,66 @@ describe('read_page mode', () => {
     });
   });
 
+  it('recovers common content-type filter targets when the compact text sample omits them', async () => {
+    vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
+      { result: { bound: 1 } },
+    ] as any);
+    const collectInteractiveElementsFallback = vi
+      .spyOn(readPageTool as any, 'collectInteractiveElementsFallback')
+      .mockImplementation(async (_tabId: number, options: { textQuery?: string }) => {
+        if (options.textQuery !== '图文') return { success: true, elements: [] };
+        return {
+          success: true,
+          elements: [
+            {
+              type: 'text_action',
+              role: 'generic',
+              selector: 'body > main > div.filter-panel > div:nth-of-type(2) > span',
+              text: '图文',
+              isInteractive: true,
+              actionability: 'actionable',
+              coordinates: {
+                x: 980,
+                y: 372,
+                rect: { x: 964, y: 362, width: 32, height: 20 },
+              },
+            },
+          ],
+        };
+      });
+    const basePayload: any = {
+      visibleTextContent: '筛选 排序依据 综合 最新',
+      elements: [],
+      refMap: [],
+      count: 0,
+    };
+
+    const recovered = await (readPageTool as any).recoverFilterPanelTextTargets({
+      tabId: 5227,
+      basePayload,
+      assistantGuidance: {
+        taskKind: 'search',
+        requestedObjects: ['search_input', 'result_cards'],
+      },
+    });
+
+    expect(recovered).toBe(true);
+    expect(collectInteractiveElementsFallback).toHaveBeenCalledWith(
+      5227,
+      expect.objectContaining({ textQuery: '图文', includeCoordinates: true }),
+    );
+    expect(basePayload.elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ref: expect.stringMatching(/^ref_text_filter_panel_/),
+          role: 'button',
+          selector: 'body > main > div.filter-panel > div:nth-of-type(2)',
+          text: '图文',
+        }),
+      ]),
+    );
+  });
+
   it('recovers open filter panel targets from visible text without assistant guidance', async () => {
     const selectorFor = (label: string) =>
       `body > main > div.filter-panel > div[data-label="${label}"] > span`;

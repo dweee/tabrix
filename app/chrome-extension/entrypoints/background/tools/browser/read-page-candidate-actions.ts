@@ -15,9 +15,12 @@ const FILTER_OPEN_LABEL_PATTERN = /^(筛选|已筛选|过滤|filter|filters|filt
 const SEARCH_CATEGORY_LABEL_PATTERN = /^(全部|图文|视频|用户|all|images?|photos?|videos?|users?)$/i;
 const FILTER_PANEL_LABEL_PATTERN =
   /^(综合|最新|最热|最多点赞|最多评论|最多收藏|不限|一天内|一周内|半年内|已看过|未看过|已关注|同城|附近|重置|收起|清除|确认|应用|all|latest|popular|any|most\s*(liked|commented|saved|collected)|reset|clear|confirm|apply)$/i;
+const FILTER_PANEL_CONTENT_TYPE_LABEL_PATTERN =
+  /^(图文|图片|视频|文章|image\s*text|images?|photos?|videos?|articles?)$/i;
 const FILTER_TIME_RANGE_LABEL_PATTERN =
   /^(不限|一天内|一周内|半年内|any|within\s*(one|1)\s*day|within\s*(one|1)\s*week|within\s*(six|6)\s*months?)$/i;
 const SEARCH_TOOLBAR_VERTICAL_BAND_PX = 180;
+const SEARCH_INPUT_IDENTITY_PATTERN = /\b(search|query)\b|搜索|查找/i;
 const LOW_VALUE_NAV_LINK_PATTERN =
   /^(关于我们|关于|营业执照|备案|沪ICP备|京ICP备|粤ICP备|隐私政策|隐私|用户协议|服务协议|使用条款|社区规范|帮助中心|联系我们|加入我们|广告合作|举报|投诉|copyright|privacy|terms|agreement|license|licenses?|legal|about|help|contact|careers?)$/i;
 type CdpAxCandidate = NonNullable<
@@ -157,7 +160,9 @@ function scoreCandidateElementPriority(
   if (ref.startsWith('ref_text_filter_panel_')) score += 116;
   if (ref.startsWith('ref_text_search_toolbar_')) score += 112;
   if (ref.startsWith('ref_text_control_')) score += 110;
-  if (FILTER_PANEL_LABEL_PATTERN.test(name)) score += 64;
+  if (FILTER_PANEL_LABEL_PATTERN.test(name) || FILTER_PANEL_CONTENT_TYPE_LABEL_PATTERN.test(name)) {
+    score += 64;
+  }
   const visibility = element.visibility;
   if (visibility?.domVisible === true) score += 18;
   if (visibility?.inViewport === true) score += 18;
@@ -211,9 +216,9 @@ function inferCandidateActionIntent(
   const name = String(element.name || '').trim();
   const source = String(element.matchSource || '').toLowerCase();
 
-  if (!name && role !== 'searchbox') return undefined;
+  if (!name && !isSearchInputElement(element)) return undefined;
   if (actionType === 'fill') {
-    if (role === 'searchbox' || isSearchActionText(name)) return 'search.enter_query';
+    if (isSearchInputElement(element)) return 'search.enter_query';
     return undefined;
   }
   if (isLowValueNavigationLink(element)) return undefined;
@@ -242,8 +247,11 @@ function inferCandidateActionIntent(
   }
   if (FILTER_OPEN_LABEL_PATTERN.test(name)) return 'filter.open';
   if (SEARCH_CATEGORY_LABEL_PATTERN.test(name)) {
-    return isSearchToolbarCategoryElement(element, context.interactiveElements)
-      ? 'search.category_select'
+    if (isSearchToolbarCategoryElement(element, context.interactiveElements)) {
+      return 'search.category_select';
+    }
+    return isFilterPanelOptionElement(element, context.interactiveElements)
+      ? 'filter.option_select'
       : undefined;
   }
   if (
@@ -252,13 +260,12 @@ function inferCandidateActionIntent(
     return 'filter.sort_most_collected';
   }
   if (FILTER_TIME_RANGE_LABEL_PATTERN.test(name)) return 'filter.time_range_select';
-  if (
-    String(element.ref || '').startsWith('ref_text_filter_panel_') &&
-    FILTER_PANEL_LABEL_PATTERN.test(name)
-  ) {
+  if (isFilterPanelOptionElement(element, context.interactiveElements)) {
     return FILTER_TIME_RANGE_LABEL_PATTERN.test(name)
       ? 'filter.time_range_select'
-      : 'filter.option_select';
+      : /最多收藏|收藏最多|most\s*(collected|saved|favorited)/i.test(name)
+        ? 'filter.sort_most_collected'
+        : 'filter.option_select';
   }
   if (isSearchActionText(name)) return 'search.submit';
   if (isPublishEntryActionText(name)) return 'publish.open_entry';
@@ -268,6 +275,33 @@ function inferCandidateActionIntent(
   if (isPublishSubmitActionText(name)) return 'publish.submit';
   if (isOpenDetailActionText(name)) return 'content.open_detail';
   return undefined;
+}
+
+function searchInputIdentityText(element: ReadPageInteractiveElement): string {
+  const selector = String((element as { selector?: unknown }).selector ?? '');
+  return [
+    element.name,
+    element.role,
+    element.matchSource,
+    element.ref,
+    selector,
+    (element as { href?: unknown }).href,
+  ]
+    .map((value) =>
+      String(value ?? '')
+        .replace(/\s+/g, ' ')
+        .trim(),
+    )
+    .filter(Boolean)
+    .join(' ');
+}
+
+function isSearchInputElement(element: ReadPageInteractiveElement): boolean {
+  const role = String(element.role || '').toLowerCase();
+  const name = String(element.name || '').trim();
+  if (role === 'searchbox' || isSearchActionText(name)) return true;
+  if (role !== 'textbox' && role !== 'combobox') return false;
+  return SEARCH_INPUT_IDENTITY_PATTERN.test(searchInputIdentityText(element));
 }
 
 function rectTop(element: ReadPageInteractiveElement): number | undefined {
@@ -301,6 +335,35 @@ function isSearchToolbarCategoryElement(
   if (topAnchor === undefined) return true;
 
   return currentTop - topAnchor <= SEARCH_TOOLBAR_VERTICAL_BAND_PX;
+}
+
+function isFilterPanelOptionElement(
+  element: ReadPageInteractiveElement,
+  interactiveElements: readonly ReadPageInteractiveElement[],
+): boolean {
+  const name = String(element.name || '').trim();
+  if (!name) return false;
+  if (
+    !FILTER_PANEL_LABEL_PATTERN.test(name) &&
+    !FILTER_PANEL_CONTENT_TYPE_LABEL_PATTERN.test(name)
+  ) {
+    return false;
+  }
+  const ref = String(element.ref || '');
+  if (ref.startsWith('ref_text_filter_panel_')) return true;
+  const role = String(element.role || '').toLowerCase();
+  if (role === 'link' || role === 'textbox' || role === 'searchbox' || role === 'combobox') {
+    return false;
+  }
+  if (
+    SEARCH_CATEGORY_LABEL_PATTERN.test(name) &&
+    isSearchToolbarCategoryElement(element, interactiveElements)
+  ) {
+    return false;
+  }
+  return interactiveElements.some((item) =>
+    FILTER_OPEN_LABEL_PATTERN.test(String(item.name || '').trim()),
+  );
 }
 
 function isRecoveredTextActionElement(element: ReadPageInteractiveElement): boolean {
@@ -777,8 +840,13 @@ export function buildCandidateActions(
     const name = String(element.name || '').trim();
     let actionType: 'click' | 'fill' | null = null;
 
-    if (clickRoles.has(role) || isRecoveredTextActionElement(element)) actionType = 'click';
-    else if (fillRoles.has(role)) actionType = 'fill';
+    if (
+      clickRoles.has(role) ||
+      isRecoveredTextActionElement(element) ||
+      isFilterPanelOptionElement(element, prioritizedElements)
+    ) {
+      actionType = 'click';
+    } else if (fillRoles.has(role)) actionType = 'fill';
     if (!actionType) continue;
 
     const selector = getElementSelector(element, selectorMap);

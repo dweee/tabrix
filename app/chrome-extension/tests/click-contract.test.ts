@@ -1177,6 +1177,35 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
     expect(response.signals.hashAfter).toBe('#live');
   });
 
+  it('allows a selector click when a result-card link center hits another link layer with the same href', async () => {
+    document.body.innerHTML = `
+      <article>
+        <a id="image-link" href="#detail"><img id="cover" alt="cover" /></a>
+        <a id="title-link" href="#detail">AI 图片创作提示词合集</a>
+      </article>
+    `;
+    const imageLink = document.getElementById('image-link') as HTMLAnchorElement;
+    const titleLink = document.getElementById('title-link') as HTMLAnchorElement;
+    setRect(imageLink, { left: 20, top: 30, width: 240, height: 140 });
+    setRect(titleLink, { left: 20, top: 30, width: 240, height: 140 });
+    document.elementFromPoint = vi.fn(() => imageLink);
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#title-link',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(response.elementInfo).toMatchObject({
+      tagName: 'A',
+      id: 'title-link',
+      targetConsistency: { verdict: 'matched_by_same_href_action' },
+    });
+    expect(response.signals.hashAfter).toBe('#detail');
+  });
+
   it('does not prove auth.request_otp in the injected click helper', async () => {
     document.body.innerHTML = '<button id="btn">获取验证码</button>';
     const button = document.getElementById('btn') as HTMLButtonElement;

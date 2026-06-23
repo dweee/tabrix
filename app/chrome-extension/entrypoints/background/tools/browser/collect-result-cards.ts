@@ -880,13 +880,28 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     }
   };
 
-  const linkOwnsCenterPoint = (link: HTMLAnchorElement, rect: DOMRect): boolean => {
+  const sameNormalizedHref = (left: string, right: string): boolean => {
+    if (!left || !right) return false;
+    try {
+      const leftUrl = new URL(left, location.href);
+      const rightUrl = new URL(right, location.href);
+      return `${leftUrl.origin}${leftUrl.pathname}` === `${rightUrl.origin}${rightUrl.pathname}`;
+    } catch {
+      return left.replace(/[?#].*$/, '') === right.replace(/[?#].*$/, '');
+    }
+  };
+
+  const centerHitLinkFor = (link: HTMLAnchorElement, rect: DOMRect): HTMLAnchorElement | null => {
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
     const hit = document.elementFromPoint(x, y);
-    if (!hit) return false;
+    if (!hit) return null;
     const hitLink = hit.closest('a[href]');
-    return hit === link || link.contains(hit) || hitLink === link;
+    if (hit === link || link.contains(hit) || hitLink === link) return link;
+    if (hitLink instanceof HTMLAnchorElement && sameNormalizedHref(hitLink.href, link.href)) {
+      return hitLink;
+    }
+    return null;
   };
 
   const primaryLinkForCard = (
@@ -899,9 +914,16 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       .filter((item): item is { link: HTMLAnchorElement; rect: DOMRect; text: string } => {
         return Boolean(item.rect && normalize(item.link.href));
       });
-    const visibleLinks = visibleLinkCandidates.filter((item) =>
-      linkOwnsCenterPoint(item.link, item.rect),
-    );
+    const visibleLinks = visibleLinkCandidates
+      .map((item) => {
+        const hitLink = centerHitLinkFor(item.link, item.rect);
+        if (!hitLink) return null;
+        const hitRect = visibleLinkRect(hitLink) ?? item.rect;
+        return { link: hitLink, rect: hitRect, text: linkText(hitLink) };
+      })
+      .filter((item): item is { link: HTMLAnchorElement; rect: DOMRect; text: string } =>
+        Boolean(item),
+      );
     const fallbackVisibleDetailLink = (): {
       link: HTMLAnchorElement;
       rect: DOMRect;

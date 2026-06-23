@@ -31,6 +31,12 @@
     const type = el.getAttribute('type') || '';
     const authActionRole = inferAuthActionRole(el);
     if (authActionRole) return authActionRole;
+    if (el.getAttribute('contenteditable') === 'true') {
+      const identity = `${el.getAttribute('aria-label') || ''} ${el.getAttribute('placeholder') || ''} ${
+        el.getAttribute('title') || ''
+      } ${/** @type {HTMLElement} */ (el).id || ''} ${classNameOf(el)}`;
+      return /\b(search|query)\b|搜索|查找/i.test(identity) ? 'searchbox' : 'textbox';
+    }
     const map = {
       a: 'link',
       button: 'button',
@@ -43,7 +49,9 @@
               ? 'radio'
               : type === 'file'
                 ? 'button'
-                : 'textbox',
+                : type === 'search'
+                  ? 'searchbox'
+                  : 'textbox',
       select: 'combobox',
       textarea: 'textbox',
       h1: 'heading',

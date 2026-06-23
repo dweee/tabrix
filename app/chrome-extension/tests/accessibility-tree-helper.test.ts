@@ -114,6 +114,40 @@ describe('accessibility-tree auth control map', () => {
     );
   });
 
+  it('normalizes search inputs and contenteditable searchboxes for object perception', () => {
+    document.body.innerHTML = `
+      <main>
+        <input id="native-search" type="search" placeholder="Search projects" />
+        <div id="custom-search" class="top-search-input" contenteditable="true" aria-label="搜索或输入任何问题"></div>
+      </main>
+    `;
+    Array.from(document.querySelectorAll('*')).forEach((element, index) => {
+      makeVisible(element, { left: 20, top: 20 + index * 42, width: 360, height: 36 });
+    });
+
+    const result = (
+      window as Window & {
+        __generateAccessibilityTree: (
+          filter: string,
+          options: { maxDepth: number },
+        ) => { pageContent: string; refMap: Array<Record<string, unknown>> };
+      }
+    ).__generateAccessibilityTree('interactive', { maxDepth: 8 });
+
+    expect(result.pageContent).toMatch(
+      /- searchbox "Search projects" \[ref=ref_\d+\].*id="native-search".*type="search"/,
+    );
+    expect(result.pageContent).toMatch(
+      /- searchbox "搜索或输入任何问题" \[ref=ref_\d+\].*id="custom-search"/,
+    );
+    expect(result.refMap).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ selector: '#native-search' }),
+        expect.objectContaining({ selector: '#custom-search' }),
+      ]),
+    );
+  });
+
   it('promotes an OTP sender span inside a label instead of the sibling OTP input placeholder', () => {
     document.body.innerHTML = `
       <form>

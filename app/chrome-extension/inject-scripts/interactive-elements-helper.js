@@ -36,7 +36,7 @@
       'input:not([type="button"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])',
     checkbox: 'input[type="checkbox"], [role="checkbox"]',
     radio: 'input[type="radio"], [role="radio"]',
-    textarea: 'textarea, [role="textbox"], [role="searchbox"]',
+    textarea: 'textarea, [role="textbox"], [role="searchbox"], [contenteditable="true"]',
     select: 'select, [role="combobox"]',
     tab: '[role="tab"]',
     // Generic interactive elements: combines tabindex, common roles, and explicit handlers.
@@ -50,6 +50,8 @@
     /获取验证码|发送验证码|重新发送|重发验证码|同意并继续|确认同意|我同意|登录|get code|send code|request code|resend code|agree and continue|accept and continue|log\s*in|sign\s*in/i;
   const AUTH_ACTION_SIGNATURE_PATTERN =
     /\b(code|otp|sms|verify|verification|captcha|send|resend|auth-code|code-button|agree|agreement|terms|privacy|submit|login)\b/i;
+  const SEARCH_QUERY_PATTERN = /\b(search|find|query)\b|搜索|查找/i;
+  const SEARCH_IDENTITY_PATTERN = /\b(search|query)\b|搜索|查找/i;
 
   // Query helpers that pierce open shadow roots. These are used only in fallback paths or
   // when a selector is explicitly provided, to keep costs bounded.
@@ -275,8 +277,18 @@
       role === 'textbox' ||
       role === 'searchbox' ||
       role === 'combobox' ||
+      el.getAttribute('contenteditable') === 'true' ||
       (tag === 'input' && !['button', 'submit', 'reset', 'checkbox', 'radio'].includes(inputType))
     );
+  }
+
+  function queryRequestsSearch(textQuery) {
+    return SEARCH_QUERY_PATTERN.test(String(textQuery || ''));
+  }
+
+  function elementHasSearchIdentity(el) {
+    if (!(el instanceof Element)) return false;
+    return SEARCH_IDENTITY_PATTERN.test(elementIdentityTextForQuery(el));
   }
 
   function looksLikeAuthActionControl(el, textQuery = '') {
@@ -411,9 +423,32 @@
     if (isOverBroadActionTextContainer(el, query)) return false;
     return (
       getQueryMatchKind(elementTextForQuery(el), query) !== 'none' ||
+      getQueryMatchKind(elementIdentityTextForQuery(el), query) !== 'none' ||
+      (queryRequestsSearch(query) && isTextEntryElement(el) && elementHasSearchIdentity(el)) ||
       looksLikeAuthActionControl(el, query) ||
       looksLikeCompactTextActionControl(el, query)
     );
+  }
+
+  function elementIdentityTextForQuery(el) {
+    if (!(el instanceof Element)) return '';
+    const attrs = [
+      el.getAttribute('aria-label'),
+      el.getAttribute('placeholder'),
+      el.getAttribute('title'),
+      el.getAttribute('name'),
+      el.getAttribute('id'),
+      el.getAttribute('type'),
+      el.getAttribute('role'),
+      el.getAttribute('class'),
+      el.getAttribute('data-testid'),
+      el.getAttribute('data-test'),
+      el.getAttribute('data-cy'),
+    ];
+    return attrs
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+      .join(' ');
   }
 
   /**
@@ -526,6 +561,10 @@
     if (queryTextMatches(value, query)) return 'value';
     const title = el.getAttribute('title') || '';
     if (queryTextMatches(title, query)) return 'title';
+    if (queryTextMatches(elementIdentityTextForQuery(el), query)) return 'attribute';
+    if (queryRequestsSearch(query) && isTextEntryElement(el) && elementHasSearchIdentity(el)) {
+      return 'attribute';
+    }
     return 'accessible_name';
   }
 
@@ -730,6 +769,8 @@
     const tag = el.tagName.toLowerCase();
     const query = String(textQuery || '').trim();
     const matchKind = getQueryMatchKind(text, query);
+    const searchIdentityMatch =
+      queryRequestsSearch(query) && isTextEntryElement(el) && elementHasSearchIdentity(el);
     const interactiveDescendants = countInteractiveDescendants(el);
     const textLength = text.length;
     const queryLength = query.length;
@@ -740,6 +781,7 @@
       else if (matchKind === 'prefix') score += 80;
       else if (matchKind === 'substring') score += 50;
       else if (matchKind === 'fuzzy') score += 20;
+      else if (searchIdentityMatch) score += 75;
     }
 
     if (isElementInViewport(el)) score += 40;

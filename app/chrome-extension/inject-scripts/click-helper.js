@@ -3,7 +3,7 @@
 // click-helper.js
 // This script is injected into the page to handle click operations
 
-const TABRIX_CLICK_HELPER_VERSION = 'click-helper-v2-message-listener-reinstall';
+const TABRIX_CLICK_HELPER_VERSION = 'click-helper-v2-same-href-hit-target';
 
 if (
   window.__CLICK_HELPER_INITIALIZED__ &&
@@ -376,6 +376,12 @@ if (
         const actual = document.elementFromPoint(x, y);
         const expectedInfo = describeHitTarget(expected);
         const actualInfo = describeHitTarget(actual);
+        const linkHrefFor = (candidate) => {
+          if (!(candidate instanceof Element)) return '';
+          const anchor =
+            candidate instanceof HTMLAnchorElement ? candidate : candidate.closest?.('a[href]');
+          return anchor instanceof HTMLAnchorElement ? String(anchor.href || '') : '';
+        };
         if (!(expected instanceof Element)) {
           return {
             verdict: actual ? 'coordinate_target_observed' : 'target_unknown',
@@ -422,6 +428,18 @@ if (
             expectedTarget: expectedInfo,
             actualTarget: actualInfo,
           };
+        }
+        if (actual instanceof Element) {
+          const expectedHref = linkHrefFor(expected);
+          const actualHref = linkHrefFor(actual);
+          if (expectedHref && actualHref && expectedHref === actualHref) {
+            return {
+              verdict: 'matched_by_same_href_action',
+              clickMethod,
+              expectedTarget: expectedInfo,
+              actualTarget: actualInfo,
+            };
+          }
         }
         return {
           verdict: looksLikeOverlay(actual) ? 'blocked_by_overlay' : 'target_mismatch',
@@ -589,6 +607,11 @@ if (
             elementInfo.clickMethod,
           );
           elementInfo.targetConsistency = blockedConsistency;
+          const visibilityProvenByHit = [
+            'matched',
+            'matched_by_clickable_ancestor',
+            'matched_by_same_href_action',
+          ].includes(blockedConsistency.verdict);
           if (['blocked_by_overlay', 'target_mismatch'].includes(blockedConsistency.verdict)) {
             return {
               success: false,
@@ -605,10 +628,15 @@ if (
               actionRecovery: buildActionRecovery(blockedConsistency.verdict),
             };
           }
-          return {
-            error: `Element with selector "${selector}" is not visible`,
-            elementInfo,
-          };
+          if (visibilityProvenByHit) {
+            elementInfo.isVisible = true;
+            elementInfo.visibilityRecoveredByHitTarget = true;
+          } else {
+            return {
+              error: `Element with selector "${selector}" is not visible`,
+              elementInfo,
+            };
+          }
         }
 
         const updatedRect = element.getBoundingClientRect();

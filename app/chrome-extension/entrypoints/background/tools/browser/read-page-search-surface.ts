@@ -30,6 +30,7 @@ const EXPANDED_STATE_PATTERN = /\bexpanded\b|展开/i;
 const LOAD_MORE_PATTERN = /^(加载更多|更多|load\s*more|show\s*more)$/i;
 const TEXT_SEARCH_TOOLBAR_REF_PATTERN = /^ref_text_search_toolbar_/;
 const TEXT_FILTER_PANEL_REF_PATTERN = /^ref_text_filter_panel_/;
+const SEARCH_INPUT_IDENTITY_PATTERN = /\b(search|query)\b|搜索|查找/i;
 const SEARCH_TOOLBAR_VERTICAL_BAND_PX = 180;
 const MOST_COLLECTED_PATTERN =
   /最多收藏|收藏最多|按收藏|收藏数|most\s*(collected|saved|favorited)|top\s*saves/i;
@@ -109,6 +110,28 @@ function safeLabel(value: unknown): string | undefined {
 
 function normalizedKey(value: unknown): string {
   return normalizeText(value).toLowerCase();
+}
+
+function searchInputIdentityText(element: ReadPageInteractiveElement): string {
+  const selector = String((element as { selector?: unknown }).selector ?? '');
+  return [
+    element.name,
+    element.role,
+    element.matchSource,
+    element.ref,
+    selector,
+    (element as { href?: unknown }).href,
+  ]
+    .map((value) => normalizeText(value))
+    .filter(Boolean)
+    .join(' ');
+}
+
+function isSearchInputElement(element: ReadPageInteractiveElement): boolean {
+  const role = normalizeText(element.role).toLowerCase();
+  if (!SEARCH_INPUT_ROLE_PATTERN.test(role)) return false;
+  if (role === 'searchbox') return true;
+  return SEARCH_INPUT_IDENTITY_PATTERN.test(searchInputIdentityText(element));
 }
 
 function canonicalFilterLabel(label: string, group?: SearchSurfaceControl['filterGroup']): string {
@@ -195,6 +218,35 @@ function isSearchToolbarBandElement(
   if (topAnchor === undefined) return true;
 
   return currentTop - topAnchor <= SEARCH_TOOLBAR_VERTICAL_BAND_PX;
+}
+
+function isFilterPanelOptionLabel(value: unknown): boolean {
+  const label = normalizeText(value);
+  return (
+    FILTER_PANEL_OPTION_PATTERN.test(label) ||
+    CONTENT_TYPE_FILTER_OPTION_PATTERN.test(label) ||
+    TIME_RANGE_FILTER_OPTION_PATTERN.test(label)
+  );
+}
+
+function isFilterPanelOptionElement(
+  element: ReadPageInteractiveElement,
+  interactiveElements: readonly ReadPageInteractiveElement[],
+): boolean {
+  const label = normalizeText(element.name);
+  if (!isFilterPanelOptionLabel(label)) return false;
+  if (TEXT_FILTER_PANEL_REF_PATTERN.test(element.ref)) return true;
+  const role = normalizeText(element.role).toLowerCase();
+  if (role === 'link' || role === 'textbox' || role === 'searchbox' || role === 'combobox') {
+    return false;
+  }
+  if (
+    CONTENT_TYPE_FILTER_OPTION_PATTERN.test(label) &&
+    isSearchToolbarBandElement(element, interactiveElements)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function controlKindForToolbarLabel(label: string): SearchSurfaceControl['kind'] {
@@ -342,8 +394,11 @@ function actionForFilterPanelLabel(
 ): ReadPageCandidateAction | undefined {
   const key = normalizedKey(label);
   return candidateActions.find((action) => {
-    if (!TEXT_FILTER_PANEL_REF_PATTERN.test(action.targetRef)) return false;
     const element = interactiveElements.find((item) => item.ref === action.targetRef);
+    const isPanelCandidate = element
+      ? isFilterPanelOptionElement(element, interactiveElements)
+      : TEXT_FILTER_PANEL_REF_PATTERN.test(action.targetRef);
+    if (!isPanelCandidate) return false;
     if (normalizedKey(element?.name) === key) return true;
     const locatorLabel = action.locatorChain.find((item) => item.type === 'aria')?.value;
     if (normalizedKey(locatorLabel) === key) return true;
@@ -580,6 +635,8 @@ export function extractFilterPanelLabelsFromVisibleText(
   const seen = new Set<string>();
   for (const label of [
     ...extractShortLabels(visibleTextContent, FILTER_PANEL_OPTION_PATTERN, 16),
+    ...extractShortLabels(visibleTextContent, CONTENT_TYPE_FILTER_OPTION_PATTERN, 8),
+    ...extractShortLabels(visibleTextContent, TIME_RANGE_FILTER_OPTION_PATTERN, 8),
     ...extractShortLabels(visibleTextContent, FILTER_PANEL_ACTION_PATTERN, 8),
   ]) {
     const key = normalizedKey(label);
@@ -603,19 +660,12 @@ function uniqueLabels(labels: readonly string[]): string[] {
   return result;
 }
 
-function outOfBandContentTypeFilterElements(
+function outOfBandFilterPanelOptionElements(
   interactiveElements: readonly ReadPageInteractiveElement[],
 ): ReadPageInteractiveElement[] {
   return interactiveElements.filter((element) => {
-    const label = normalizeText(element.name);
-    const role = normalizeText(element.role).toLowerCase();
-    const controlLikeRole = /^(button|option|tab|radio|checkbox|menuitem)$/i.test(role);
-    return (
-      CONTENT_TYPE_FILTER_OPTION_PATTERN.test(label) &&
-      controlLikeRole &&
-      !TEXT_SEARCH_TOOLBAR_REF_PATTERN.test(element.ref) &&
-      !isSearchToolbarBandElement(element, interactiveElements)
-    );
+    if (TEXT_SEARCH_TOOLBAR_REF_PATTERN.test(element.ref)) return false;
+    return isFilterPanelOptionElement(element, interactiveElements);
   });
 }
 
@@ -624,18 +674,18 @@ function filterPanelFromVisibleText(
   candidateActions: readonly ReadPageCandidateAction[],
   interactiveElements: readonly ReadPageInteractiveElement[],
 ): SearchSurfaceFilterPanel {
-  const outOfBandContentTypeOptions = outOfBandContentTypeFilterElements(interactiveElements);
+  const outOfBandFilterOptions = outOfBandFilterPanelOptionElements(interactiveElements);
   const optionLabels = uniqueLabels([
     ...extractShortLabels(visibleTextContent, FILTER_PANEL_OPTION_PATTERN, 16),
     ...extractShortLabels(visibleTextContent, CONTENT_TYPE_FILTER_OPTION_PATTERN, 8),
     ...extractShortLabels(visibleTextContent, TIME_RANGE_FILTER_OPTION_PATTERN, 8),
-    ...outOfBandContentTypeOptions.map((element) => normalizeText(element.name)),
+    ...outOfBandFilterOptions.map((element) => normalizeText(element.name)),
   ]);
   const actionLabels = extractShortLabels(visibleTextContent, FILTER_PANEL_ACTION_PATTERN, 8);
   const targetableOptions: SearchSurfaceControl[] = [];
   for (const label of [...optionLabels, ...actionLabels]) {
     const action = actionForFilterPanelLabel(candidateActions, label, interactiveElements);
-    const outOfBandElement = outOfBandContentTypeOptions.find(
+    const outOfBandElement = outOfBandFilterOptions.find(
       (element) => normalizedKey(element.name) === normalizedKey(label),
     );
     if (!action?.locatorChain?.length && !outOfBandElement) continue;
@@ -647,7 +697,7 @@ function filterPanelFromVisibleText(
           element: outOfBandElement,
           candidateActions,
           reason:
-            'content-type filter option is visible outside the top search toolbar and treated as a filter-panel option',
+            'filter option is visible outside the top search toolbar and treated as a filter-panel option',
           confidence: 0.8,
           filterGroup: filterGroupForFilterPanelLabel(label),
         }),
@@ -939,9 +989,7 @@ export function buildSearchSurface(params: {
   const categoryTabs: SearchSurfaceControl[] = [];
   const visibleButUnresolved: SearchSurfaceControl[] = [];
   const searchInput = params.interactiveElements.find((element) => {
-    const role = normalizeText(element.role).toLowerCase();
-    const name = normalizeText(element.name);
-    return SEARCH_INPUT_ROLE_PATTERN.test(role) && SEARCH_SUBMIT_PATTERN.test(name || role);
+    return isSearchInputElement(element);
   });
   if (searchInput) {
     controls.push(

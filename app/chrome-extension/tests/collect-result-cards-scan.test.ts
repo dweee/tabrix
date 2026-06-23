@@ -232,6 +232,79 @@ describe('collect result cards DOM scan', () => {
     ).toBe(betaRef);
   });
 
+  it('does not promote an inconclusive detail-link hit test to a stable click target', () => {
+    setViewport();
+    renderCards([
+      {
+        key: 'alpha',
+        title: 'AI 图片创作提示词合集',
+        href: 'https://www.xiaohongshu.com/search_result/alpha?xsec_token=redacted',
+        y: 24,
+      },
+    ]);
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => document.body),
+    });
+
+    const scan = scanVisibleResultCardsInPage();
+    const card = scan.cards[0];
+
+    expect(card.actionTarget?.executionScope).toBe('session_url');
+    expect(card.actionTarget?.toolName).toBeUndefined();
+    expect(card.actionTarget?.toolArgs?.candidateAction).toBeUndefined();
+    expect(card.actionTarget?.openAction?.toolName).toBe('chrome_navigate');
+    expect(scan.candidateActions.some((action) => action.intent === 'content.open_detail')).toBe(
+      false,
+    );
+  });
+
+  it('uses the actually hit same-href link layer as the result-card click target', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <main role="list" data-testid="list" data-rect="0,0,1000,680">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,24,260,220">
+          <a
+            data-testid="image-link"
+            data-rect="28,32,240,140"
+            href="https://www.xiaohongshu.com/search_result/alpha?xsec_token=redacted"
+          ></a>
+          <a
+            data-testid="title-link"
+            data-rect="28,32,240,140"
+            href="https://www.xiaohongshu.com/search_result/alpha?xsec_token=redacted"
+          >AI 图片创作提示词合集</a>
+          <span>作者 1</span>
+          <span>1 天前</span>
+          <span>收藏 100</span>
+        </article>
+      </main>
+    `;
+    installRects();
+    const imageLink = document.querySelector<HTMLAnchorElement>('[data-testid="image-link"]');
+    if (!imageLink) throw new Error('expected image link');
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => imageLink),
+    });
+
+    const scan = scanVisibleResultCardsInPage();
+    const action = scan.cards[0]?.actionTarget?.toolArgs?.candidateAction;
+
+    expect(scan.cards[0]?.actionTarget?.selector).toContain('a[data-testid="image-link"]');
+    expect(action).toMatchObject({
+      actionType: 'click',
+      intent: 'content.open_detail',
+      matchReason: 'result_card_primary_link',
+      locatorChain: expect.arrayContaining([
+        expect.objectContaining({
+          type: 'css',
+          value: expect.stringContaining('a[data-testid="image-link"]'),
+        }),
+      ]),
+    });
+  });
+
   it('reports the result-list scroll container instead of assuming window scroll', () => {
     setViewport();
     document.body.innerHTML = `

@@ -678,6 +678,32 @@ describe('read_page candidate action intents', () => {
     );
   });
 
+  it('infers search query intent for textboxes whose stable selector identifies a search input', () => {
+    const actions = buildCandidateActions(
+      [
+        element({
+          ref: 'ref_dynamic_search',
+          role: 'textbox',
+          name: '葡萄牙1点开战',
+          matchSource: 'attribute',
+        }),
+      ],
+      [{ ref: 'ref_dynamic_search', selector: '#search-input-in-feeds' }],
+    );
+
+    expect(actions[0]).toMatchObject({
+      actionType: 'fill',
+      targetRef: 'ref_dynamic_search',
+      intent: 'search.enter_query',
+    });
+    expect(actions[0].locatorChain).toEqual(
+      expect.arrayContaining([{ type: 'css', value: '#search-input-in-feeds' }]),
+    );
+    expect(actions[0].nextRequiredCheck).toBe(
+      'run_action_then_fresh_same_tab_read_to_verify_page_or_object_state',
+    );
+  });
+
   it('labels and prioritizes publish workflow controls without treating them as search', () => {
     const actions = buildCandidateActions(
       [
@@ -906,6 +932,59 @@ describe('read_page candidate action intents', () => {
     });
   });
 
+  it('infers ordinary DOM filter-panel options without relying on recovered text refs', () => {
+    const actions = buildCandidateActions(
+      [
+        element({
+          ref: 'ref_filter',
+          role: 'button',
+          name: '已筛选',
+          rect: { x: 1500, y: 96, width: 72, height: 36 },
+        }),
+        element({
+          ref: 'ref_panel_image_text',
+          role: '',
+          name: '图文',
+          rect: { x: 1480, y: 334, width: 64, height: 40 },
+        }),
+        element({
+          ref: 'ref_panel_saved',
+          role: '',
+          name: '最多收藏',
+          rect: { x: 1260, y: 248, width: 96, height: 40 },
+        }),
+        element({
+          ref: 'ref_panel_week',
+          role: '',
+          name: '一周内',
+          rect: { x: 1480, y: 422, width: 96, height: 40 },
+        }),
+      ],
+      [
+        { ref: 'ref_filter', selector: '.filter-trigger' },
+        { ref: 'ref_panel_image_text', selector: '.filter-panel .tag-image-text' },
+        { ref: 'ref_panel_saved', selector: '.filter-panel .tag-most-saved' },
+        { ref: 'ref_panel_week', selector: '.filter-panel .tag-week' },
+      ],
+    );
+
+    expect(actions.find((action) => action.targetRef === 'ref_panel_image_text')).toMatchObject({
+      actionType: 'click',
+      intent: 'filter.option_select',
+      locatorChain: expect.arrayContaining([
+        { type: 'css', value: '.filter-panel .tag-image-text' },
+      ]),
+    });
+    expect(actions.find((action) => action.targetRef === 'ref_panel_saved')).toMatchObject({
+      actionType: 'click',
+      intent: 'filter.sort_most_collected',
+    });
+    expect(actions.find((action) => action.targetRef === 'ref_panel_week')).toMatchObject({
+      actionType: 'click',
+      intent: 'filter.time_range_select',
+    });
+  });
+
   it('keeps visible search result cards ahead of low-value utility actions', () => {
     const resultRows = {
       ...visibleRowsForTarget('ref_result_1'),
@@ -1058,12 +1137,12 @@ describe('read_page candidate action intents', () => {
     expect(actions.find((action) => action.targetRef === 'ref_filter')).toMatchObject({
       intent: 'filter.open',
     });
-    expect(
-      actions.find((action) => action.targetRef === 'ref_panel_images')?.intent,
-    ).toBeUndefined();
-    expect(
-      actions.find((action) => action.targetRef === 'ref_panel_videos')?.intent,
-    ).toBeUndefined();
+    expect(actions.find((action) => action.targetRef === 'ref_panel_images')?.intent).toBe(
+      'filter.option_select',
+    );
+    expect(actions.find((action) => action.targetRef === 'ref_panel_videos')?.intent).toBe(
+      'filter.option_select',
+    );
   });
 
   it('marks QR refresh controls without treating them as OTP or login submit', () => {

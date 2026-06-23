@@ -7,11 +7,12 @@ import type {
 } from '@tabrix/shared';
 import {
   buildSearchSurface,
+  extractFilterPanelLabelsFromVisibleText,
   parseCollectionCountCandidate,
 } from '@/entrypoints/background/tools/browser/read-page-search-surface';
 
 function interactive(overrides: Partial<ReadPageInteractiveElement>): ReadPageInteractiveElement {
-  return {
+  const element: ReadPageInteractiveElement = {
     ref: overrides.ref ?? 'ref_button',
     role: overrides.role ?? 'button',
     name: overrides.name ?? 'Filter',
@@ -21,6 +22,12 @@ function interactive(overrides: Partial<ReadPageInteractiveElement>): ReadPageIn
     checked: overrides.checked,
     rect: overrides.rect,
   };
+  const selector = (overrides as Partial<ReadPageInteractiveElement> & { selector?: string })
+    .selector;
+  if (selector) {
+    (element as ReadPageInteractiveElement & { selector: string }).selector = selector;
+  }
+  return element;
 }
 
 function candidate(overrides: Partial<ReadPageCandidateAction>): ReadPageCandidateAction {
@@ -181,6 +188,38 @@ describe('buildSearchSurface', () => {
       status: 'insufficient',
     });
     expect(surface?.claimBoundary).toContain('observation');
+  });
+
+  it('recognizes a search textbox by stable structural identity when its visible label is dynamic', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_dynamic_search',
+          role: 'textbox',
+          name: '葡萄牙1点开战',
+          matchSource: 'attribute',
+          selector: '#search-input-in-feeds',
+          valueState: 'empty',
+        } as Partial<ReadPageInteractiveElement>),
+      ],
+      candidateActions: [
+        candidate({
+          id: 'ca_fill_ref_dynamic_search',
+          actionType: 'fill',
+          targetRef: 'ref_dynamic_search',
+          intent: 'search.enter_query',
+        }),
+      ],
+    });
+
+    expect(surface?.controls[0]).toMatchObject({
+      kind: 'search_input',
+      targetRef: 'ref_dynamic_search',
+      candidateActionId: 'ca_fill_ref_dynamic_search',
+      label: '葡萄牙1点开战',
+    });
+    expect(surface?.queryState).toBe('empty');
   });
 
   it('surfaces visible toolbar labels as unresolved when no target refs are available', () => {
@@ -624,6 +663,16 @@ describe('buildSearchSurface', () => {
     });
   });
 
+  it('extracts content type and time range labels for filter-panel target recovery', () => {
+    const labels = extractFilterPanelLabelsFromVisibleText(
+      '排序依据 综合 最新 最多收藏 笔记类型 不限 视频 图文 发布时间 不限 一天内 一周内 半年内',
+    );
+
+    expect(labels).toEqual(
+      expect.arrayContaining(['综合', '最多收藏', '图文', '视频', '一天内', '一周内']),
+    );
+  });
+
   it('reports targetable recovered filter panel options from long visible text', () => {
     const surface = buildSearchSurface({
       assistantGuidance: guidance,
@@ -879,6 +928,121 @@ describe('buildSearchSurface', () => {
             targetRef: 'ref_text_filter_panel_week',
             candidateActionId: 'ca_week',
           }),
+        ]),
+      },
+    });
+  });
+
+  it('promotes ordinary DOM filter-panel options into targetable grouped filter state', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_filter',
+          role: 'button',
+          name: '已筛选',
+          rect: { x: 1500, y: 96, width: 72, height: 36 },
+        }),
+        interactive({
+          ref: 'ref_panel_image_text',
+          role: '',
+          name: '图文',
+          rect: { x: 1480, y: 334, width: 64, height: 40 },
+        }),
+        interactive({
+          ref: 'ref_panel_saved',
+          role: '',
+          name: '最多收藏',
+          rect: { x: 1260, y: 248, width: 96, height: 40 },
+        }),
+        interactive({
+          ref: 'ref_panel_week',
+          role: '',
+          name: '一周内',
+          rect: { x: 1480, y: 422, width: 96, height: 40 },
+        }),
+      ],
+      candidateActions: [
+        candidate({ id: 'ca_filter', targetRef: 'ref_filter', intent: 'filter.open' }),
+        candidate({
+          id: 'ca_panel_image_text',
+          targetRef: 'ref_panel_image_text',
+          intent: 'filter.option_select',
+          locatorChain: [
+            { type: 'ref', value: 'ref_panel_image_text' },
+            { type: 'aria', value: '图文' },
+            { type: 'css', value: '.filter-panel .tag-image-text' },
+          ],
+        }),
+        candidate({
+          id: 'ca_panel_saved',
+          targetRef: 'ref_panel_saved',
+          intent: 'filter.sort_most_collected',
+          locatorChain: [
+            { type: 'ref', value: 'ref_panel_saved' },
+            { type: 'aria', value: '最多收藏' },
+            { type: 'css', value: '.filter-panel .tag-most-saved' },
+          ],
+        }),
+        candidate({
+          id: 'ca_panel_week',
+          targetRef: 'ref_panel_week',
+          intent: 'filter.time_range_select',
+          locatorChain: [
+            { type: 'ref', value: 'ref_panel_week' },
+            { type: 'aria', value: '一周内' },
+            { type: 'css', value: '.filter-panel .tag-week' },
+          ],
+        }),
+      ],
+      visibleTextContent: [
+        '全部 已筛选',
+        '排序依据 综合 最新 最多点赞 最多评论 最多收藏',
+        '笔记类型 不限 视频 图文',
+        '发布时间 不限 一天内 一周内 半年内',
+      ].join('\n'),
+    });
+
+    expect(surface?.filterPanel?.targetableOptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: '图文',
+          targetRef: 'ref_panel_image_text',
+          candidateActionId: 'ca_panel_image_text',
+          filterGroup: 'content_type',
+          source: 'interactive_elements',
+        }),
+        expect.objectContaining({
+          label: '最多收藏',
+          targetRef: 'ref_panel_saved',
+          candidateActionId: 'ca_panel_saved',
+          filterGroup: 'sort',
+          source: 'interactive_elements',
+        }),
+        expect.objectContaining({
+          label: '一周内',
+          targetRef: 'ref_panel_week',
+          candidateActionId: 'ca_panel_week',
+          filterGroup: 'time_range',
+          source: 'interactive_elements',
+        }),
+      ]),
+    );
+    expect(surface?.filterState).toMatchObject({
+      status: 'partial',
+      contentType: {
+        candidates: expect.arrayContaining([
+          expect.objectContaining({ label: '图文', targetRef: 'ref_panel_image_text' }),
+        ]),
+      },
+      sort: {
+        candidates: expect.arrayContaining([
+          expect.objectContaining({ label: '最多收藏', targetRef: 'ref_panel_saved' }),
+        ]),
+      },
+      timeRange: {
+        candidates: expect.arrayContaining([
+          expect.objectContaining({ label: '一周内', targetRef: 'ref_panel_week' }),
         ]),
       },
     });
