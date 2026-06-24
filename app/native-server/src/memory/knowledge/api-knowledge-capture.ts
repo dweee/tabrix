@@ -70,6 +70,8 @@ const SENSITIVE_HEADER_NAMES: ReadonlySet<string> = new Set([
 const AUTH_HEADER_NAMES: ReadonlySet<string> = new Set(['authorization', 'proxy-authorization']);
 const COOKIE_HEADER_NAMES: ReadonlySet<string> = new Set(['cookie', 'set-cookie']);
 const READ_CANDIDATE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'POST']);
+const SENSITIVE_REQUEST_SHAPE_KEY_RE =
+  /(?:^|[_-])(authorization|auth|cookie|csrf|xsrf|session|secret|signature|sig|token|access[_-]?token|refresh[_-]?token|api[_-]?key|xsec[_-]?token)(?:$|[_-])/i;
 
 const JSON_CONTENT_TYPE_RE = /\b(application\/json|application\/.*\+json|text\/json)\b/i;
 
@@ -336,7 +338,7 @@ export function deriveKnowledgeFromRequest(
     sourceHistoryRef: null,
     observedAt: ctx.observedAt,
     semanticType: observed.semanticType as EndpointSemanticType,
-    queryParamsShape: observed.queryKeysSorted.join(','),
+    queryParamsShape: sanitizeRequestShapeKeys(observed.queryKeysSorted).join(','),
     responseShapeSummary: summarizeResponseShape(responseSummary.shape),
     usableForTask: observed.usableForTask,
     noiseReason: observed.noiseReason,
@@ -712,8 +714,8 @@ function buildRequestSummary(input: {
   const safeHeaderKeys = headerKeys.filter((k) => !SENSITIVE_HEADER_NAMES.has(k));
   const dedupedHeaderKeys = Array.from(new Set(safeHeaderKeys)).sort();
 
-  const queryKeys = extractQueryKeys(input.url);
-  const bodyKeys = extractBodyKeys(input.body);
+  const queryKeys = sanitizeRequestShapeKeys(extractQueryKeys(input.url));
+  const bodyKeys = sanitizeRequestShapeKeys(extractBodyKeys(input.body));
 
   return {
     headerKeys: dedupedHeaderKeys,
@@ -736,6 +738,13 @@ function extractQueryKeys(url: string): readonly string[] {
     if (key.length > 0) keys.add(key);
   }
   return Array.from(keys).sort().slice(0, QUERY_KEY_LIMIT);
+}
+
+function sanitizeRequestShapeKeys(keys: readonly string[]): readonly string[] {
+  return keys.filter((key) => {
+    const normalized = key.trim();
+    return normalized.length > 0 && !SENSITIVE_REQUEST_SHAPE_KEY_RE.test(normalized);
+  });
 }
 
 function extractBodyKeys(body: string | null): readonly string[] {

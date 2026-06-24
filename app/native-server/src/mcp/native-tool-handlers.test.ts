@@ -19,12 +19,12 @@ function makeDeps(
     memoryTraces: {
       recordAiBusinessFeedback: jest.Mock;
     } | null;
-    flushAndProjectMkeIdle: jest.Mock;
+    flushAndProjectMkeAfterAiFeedback: jest.Mock;
     findReusableMkeExperienceRecipes: jest.Mock;
   }> = {},
 ): NativeToolHandlerDeps {
-  const flushAndProjectMkeIdle =
-    overrides.flushAndProjectMkeIdle ??
+  const flushAndProjectMkeAfterAiFeedback =
+    overrides.flushAndProjectMkeAfterAiFeedback ??
     jest.fn().mockResolvedValue({
       knowledge: {
         processedTraceCount: 0,
@@ -56,7 +56,7 @@ function makeDeps(
           enabled: overrides.enabled ?? true,
         };
       },
-      flushAndProjectMkeIdle,
+      flushAndProjectMkeAfterAiFeedback,
       findReusableMkeExperienceRecipes: overrides.findReusableMkeExperienceRecipes,
     } as unknown as NativeToolHandlerDeps['sessionManager'],
   };
@@ -75,7 +75,7 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
       traceId: 'trace-1',
       aiFeedbackScore: 0.94,
     });
-    const flushAndProjectMkeIdle = jest.fn().mockResolvedValue({
+    const flushAndProjectMkeAfterAiFeedback = jest.fn().mockResolvedValue({
       knowledge: {
         processedTraceCount: 2,
         skippedTraceCount: 0,
@@ -102,7 +102,7 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
         reasonCode: 'ai_verified_result',
         summary: 'AI verified the expected page result.',
       },
-      makeDeps({ memoryTraces: { recordAiBusinessFeedback }, flushAndProjectMkeIdle }),
+      makeDeps({ memoryTraces: { recordAiBusinessFeedback }, flushAndProjectMkeAfterAiFeedback }),
     );
 
     expect(result.isError).toBe(false);
@@ -130,7 +130,7 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
         experienceIds: ['experience-1'],
       },
     });
-    expect(flushAndProjectMkeIdle).toHaveBeenCalledTimes(1);
+    expect(flushAndProjectMkeAfterAiFeedback).toHaveBeenCalledTimes(1);
   });
 
   it('rejects missing traceId or invalid businessStatus', async () => {

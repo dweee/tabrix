@@ -76,7 +76,11 @@ function createTaskPageContextReader(
 export interface NativeToolHandlerDeps {
   sessionManager: Pick<
     SessionManager,
-    'getPersistenceStatus' | 'knowledgeApi' | 'chooseContextTelemetry' | 'flushAndProjectMkeIdle'
+    | 'getPersistenceStatus'
+    | 'knowledgeApi'
+    | 'chooseContextTelemetry'
+    | 'flushAndProjectMkeIdle'
+    | 'flushAndProjectMkeAfterAiFeedback'
   > & {
     memoryTraces?: SessionManager['memoryTraces'];
     findReusableMkeExperienceRecipes?: SessionManager['findReusableMkeExperienceRecipes'];
@@ -221,10 +225,12 @@ const handleMemoryRecordAiFeedback: NativeToolHandler = async (args, deps) => {
     );
   }
 
-  const projection = await deps.sessionManager.flushAndProjectMkeIdle().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    return { error: message };
-  });
+  const projection = await deps.sessionManager
+    .flushAndProjectMkeAfterAiFeedback()
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      return { error: message };
+    });
 
   return jsonResult(
     {

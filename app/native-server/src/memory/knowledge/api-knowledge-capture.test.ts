@@ -301,6 +301,24 @@ describe('redaction (defense-in-depth — these tests are P1 to never relax)', (
     expect(result!.requestSummary.queryKeys).toEqual(['per_page', 'q']);
   });
 
+  it('strips sensitive query key names from persisted API shape', () => {
+    const result = deriveKnowledgeFromRequest(
+      {
+        url: 'https://api.github.com/search/issues?q=automation&per_page=30&xsec_token=secret-token',
+        method: 'GET',
+        statusCode: 200,
+      },
+      {},
+      {},
+      CTX,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.requestSummary.queryKeys).toEqual(['per_page', 'q']);
+    expect(result!.queryParamsShape).toBe('per_page,q');
+    expect(JSON.stringify(result)).not.toMatch(/xsec_token|secret-token/i);
+  });
+
   it('NEVER stores raw request body — only top-level JSON keys', () => {
     const result = deriveKnowledgeFromRequest(
       {
@@ -322,6 +340,41 @@ describe('redaction (defense-in-depth — these tests are P1 to never relax)', (
     expect(blob).not.toMatch(/hunter2/);
     expect(blob).not.toMatch(/Stack:/);
     expect(result!.requestSummary.bodyKeys).toEqual(['body', 'labels', 'title']);
+  });
+
+  it('strips sensitive body key names while keeping useful task shape keys', () => {
+    const result = deriveKnowledgeFromRequest(
+      {
+        url: 'https://so.xiaohongshu.com/api/sns/web/v2/search/notes',
+        method: 'POST',
+        type: 'fetch',
+        statusCode: 200,
+        mimeType: 'application/json',
+        requestBody: JSON.stringify({
+          keyword: 'AI图片创作',
+          page: 1,
+          sort: 'popularity',
+          access_token: 'secret-token',
+          xsec_token: 'xsec-secret',
+        }),
+        safeResponseSummary: {
+          capturedAfterArm: true,
+          rawBodyPersisted: false,
+          privacyCheck: 'passed',
+          fieldShapeSummaryAvailable: true,
+          fieldNames: ['items', 'cursor'],
+        },
+      },
+      {},
+      {},
+      CTX,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.requestSummary.bodyKeys).toEqual(['keyword', 'page', 'sort']);
+    expect(JSON.stringify(result)).not.toMatch(
+      /AI图片创作|secret-token|xsec-secret|access_token|xsec_token/i,
+    );
   });
 
   it('skips non-JSON request bodies entirely', () => {

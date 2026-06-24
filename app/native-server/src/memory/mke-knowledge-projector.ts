@@ -116,9 +116,14 @@ function isExplicitlyOperable(value: unknown): boolean {
   return value === true || value === 1;
 }
 
-function isBlockedKnowledgeSource(object: BrowserObject): boolean {
+function isTopLevelPageObject(object: BrowserObject): boolean {
   return (
-    isExplicitlyNotOperable(object.canTabrixOperate) ||
+    object.objectType === 'page' || object.objectType === 'tab' || object.objectType === 'window'
+  );
+}
+
+function hasBlockedKnowledgeSignal(object: BrowserObject): boolean {
+  return (
     stringHasBlockedPageSignal(object.operabilityReason) ||
     stringHasBlockedPageSignal(object.lifecycleState) ||
     stringHasBlockedPageSignal(object.pageUrlPattern) ||
@@ -127,6 +132,17 @@ function isBlockedKnowledgeSource(object: BrowserObject): boolean {
     valueHasBlockedPageSignal(object.facts) ||
     valueHasBlockedPageSignal(object.targetability)
   );
+}
+
+function isBlockedKnowledgeSource(object: BrowserObject): boolean {
+  return (
+    hasBlockedKnowledgeSignal(object) ||
+    (isTopLevelPageObject(object) && isExplicitlyNotOperable(object.canTabrixOperate))
+  );
+}
+
+function shouldSkipNonBlockingObject(object: BrowserObject): boolean {
+  return !isTopLevelPageObject(object) && isExplicitlyNotOperable(object.canTabrixOperate);
 }
 
 function isSessionScopedAction(object: BrowserObject, actionType: string): boolean {
@@ -191,6 +207,10 @@ function groupProjectableObjects(objects: BrowserObject[]): {
         siteFamily: object.siteFamily,
         pageModelKey: object.pageModelKey,
       });
+      skippedObjectCount += 1;
+      continue;
+    }
+    if (shouldSkipNonBlockingObject(object)) {
       skippedObjectCount += 1;
       continue;
     }

@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { buildMemoryTraceBindingHash } from '../memory/feedback-binding';
 import { SessionManager } from './session-manager';
 
 describe('SessionManager', () => {
@@ -241,6 +242,217 @@ describe('SessionManager', () => {
       expect(mgr.countMkeKnowledgeModels()).toBe(1);
     } finally {
       mgr.close();
+    }
+  });
+
+  it('drains MKE projection batches so recent result-card objects are not starved by old data', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tabrix-memory-'));
+    const dbPath = join(dir, 'memory.db');
+    const baseMs = Date.parse('2026-06-06T07:00:00.000Z');
+    try {
+      const mgr = new SessionManager({ dbPath });
+      try {
+        for (let index = 0; index < 126; index += 1) {
+          mgr.memoryTraces!.recordToolCall({
+            taskId: `old-task-${index}`,
+            toolName: 'chrome_collect_result_cards',
+            stepId: `old-step-${index}`,
+            requestParams: { tabId: index },
+            requestAtMs: baseMs + index * 2,
+            responseAtMs: baseMs + index * 2 + 1,
+            result: {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    page: {
+                      title: `Old search ${index}`,
+                      url: `https://old.example.test/search/${index}`,
+                    },
+                    siteFamily: 'old.example.test',
+                    pageUrlPattern: `https://old.example.test/search/${index}`,
+                    pageRole: 'search_results',
+                    pageModelKey: `page:old.example.test:search_results:${index}`,
+                    pageState: 'complete',
+                    sourceRoute: 'visible_dom_cards_bounded_scroll',
+                    selectedDataSource: 'visible_dom_result_cards',
+                    freshness: 'fresh',
+                    tabId: index,
+                    requestedMinResults: 1,
+                    observedResultCount: 1,
+                    complete: true,
+                    cards: [
+                      {
+                        rank: 1,
+                        title: `Old result ${index}`,
+                        url: `https://old.example.test/note/${index}`,
+                        confidence: 0.8,
+                      },
+                    ],
+                  }),
+                },
+              ],
+              isError: false,
+            },
+          });
+        }
+
+        const currentTrace = mgr.memoryTraces!.recordToolCall({
+          taskId: 'current-task',
+          toolName: 'chrome_collect_result_cards',
+          stepId: 'current-step',
+          requestParams: { tabId: 999 },
+          requestAtMs: baseMs + 1000,
+          responseAtMs: baseMs + 1001,
+          result: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  page: {
+                    title: 'XHS current search',
+                    url: 'https://www.xiaohongshu.com/search_result/?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
+                  },
+                  siteFamily: 'www.xiaohongshu.com',
+                  pageUrlPattern: 'https://www.xiaohongshu.com/search_result/',
+                  pageRole: 'search_results',
+                  pageModelKey: 'page:www.xiaohongshu.com:search_results',
+                  pageState: 'complete',
+                  sourceRoute: 'visible_dom_cards_bounded_scroll',
+                  selectedDataSource: 'visible_dom_result_cards',
+                  freshness: 'fresh',
+                  tabId: 999,
+                  requestedMinResults: 10,
+                  observedResultCount: 10,
+                  complete: true,
+                  cards: [
+                    {
+                      rank: 1,
+                      title: 'Current reusable card',
+                      url: 'https://www.xiaohongshu.com/explore/current-card',
+                      imageCount: 1,
+                      confidence: 0.9,
+                      actionTarget: {
+                        url: 'https://www.xiaohongshu.com/explore/current-card',
+                      },
+                    },
+                  ],
+                }),
+              },
+            ],
+            isError: false,
+          },
+        });
+
+        const projection = await mgr.flushAndProjectMkeIdle();
+        const currentKnowledge = mgr
+          .listRecentMkeKnowledgeModels(200, 0)
+          .find((model) => model.siteFamily === 'www.xiaohongshu.com');
+
+        expect(projection.knowledge?.processedTraceCount).toBeGreaterThan(100);
+        expect(currentKnowledge).toBeDefined();
+        expect(currentKnowledge?.sourceTraceIds).toContain(currentTrace.traceId);
+        expect(currentKnowledge?.objectGraph).toMatchObject({
+          resultCardSummary: {
+            count: 1,
+            rankRange: { min: 1, max: 1 },
+          },
+        });
+      } finally {
+        mgr.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reprojects Experience after AI feedback is recorded for a trace the idle cursor already passed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tabrix-memory-'));
+    const dbPath = join(dir, 'memory.db');
+    try {
+      const mgr = new SessionManager({ dbPath });
+      try {
+        const trace = mgr.memoryTraces!.recordToolCall({
+          taskId: 'task-feedback-after-cursor',
+          taskIntent: 'collect reusable search result cards',
+          aiClient: 'jest',
+          toolName: 'chrome_collect_result_cards',
+          stepId: 'step-feedback-after-cursor',
+          sequenceIndex: 1,
+          requestParams: { tabId: 77, minResults: 1 },
+          requestAtMs: Date.parse('2026-06-10T11:00:00.000Z'),
+          responseAtMs: Date.parse('2026-06-10T11:00:01.000Z'),
+          result: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  kind: 'result_card_collection',
+                  page: {
+                    title: 'Search results',
+                    url: 'https://example.test/search?q=ai',
+                  },
+                  siteFamily: 'example.test',
+                  pageUrlPattern: 'https://example.test/search',
+                  pageRole: 'search_results',
+                  pageModelKey: 'page:example.test:search_results',
+                  pageState: 'complete',
+                  sourceRoute: 'visible_dom_cards_bounded_scroll',
+                  selectedDataSource: 'visible_dom_result_cards',
+                  freshness: 'fresh',
+                  tabId: 77,
+                  requestedMinResults: 1,
+                  observedResultCount: 1,
+                  complete: true,
+                  cards: [
+                    {
+                      rank: 1,
+                      title: 'Reusable result',
+                      url: 'https://example.test/note/reusable',
+                      imageCount: 1,
+                      confidence: 0.93,
+                      actionTarget: {
+                        url: 'https://example.test/note/reusable',
+                      },
+                    },
+                  ],
+                }),
+              },
+            ],
+            isError: false,
+          },
+        });
+
+        const firstProjection = await mgr.flushAndProjectMkeIdle();
+        expect(firstProjection.knowledge?.upsertedKnowledgeCount).toBe(1);
+        expect(firstProjection.experience?.upsertedRecipeCount ?? 0).toBe(0);
+        expect(mgr.countMkeExperienceRecipes()).toBe(0);
+
+        mgr.memoryTraces!.recordAiBusinessFeedback({
+          traceId: trace.traceId,
+          taskId: trace.taskId,
+          toolName: trace.toolName,
+          toolCallId: trace.toolCallId,
+          sequenceIndex: trace.sequenceIndex,
+          traceBindingHash: buildMemoryTraceBindingHash(trace),
+          businessStatus: 'achieved',
+          confidence: 0.94,
+          reasonCode: 'result_cards_collected',
+          summary: 'Collected reusable result cards for the search task.',
+        });
+
+        const feedbackProjection = await mgr.flushAndProjectMkeAfterAiFeedback();
+        const recipes = mgr.listRecentMkeExperienceRecipes(10, 0);
+
+        expect(feedbackProjection.experience?.savedExperienceCount).toBe(1);
+        expect(recipes).toHaveLength(1);
+        expect(recipes[0].sourceTraceIds).toContain(trace.traceId);
+      } finally {
+        mgr.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 

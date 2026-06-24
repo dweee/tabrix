@@ -255,6 +255,86 @@ describe('MkeKnowledgeProjector', () => {
     expect(knowledge.count()).toBe(0);
   });
 
+  it('keeps page knowledge when only a non-critical child region is not operable', () => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const objects = new BrowserObjectRepository(opened.db);
+    const knowledge = new KnowledgeModelRepository(opened.db);
+    const projector = new MkeKnowledgeProjector(objects, knowledge);
+
+    objects.upsert({
+      siteFamily: 'www.xiaohongshu.com',
+      pageUrlPattern: 'https://www.xiaohongshu.com/search_result/',
+      pageRole: 'search_results',
+      pageModelKey: 'page:www.xiaohongshu.com:search_results',
+      objectFingerprint: 'page:search',
+      objectType: 'page',
+      lifecycleState: 'complete',
+      canTabrixOperate: true,
+      selectedDataSource: 'visible_dom_result_cards',
+      sourceRoute: 'visible_dom_cards_bounded_scroll',
+      sourceFreshness: 'fresh',
+      sourceTraceIds: ['trace-current-cards'],
+      facts: { observedResultCount: 10 },
+      updatedAt: '2026-06-06T05:30:01.000Z',
+    });
+    objects.upsert({
+      siteFamily: 'www.xiaohongshu.com',
+      pageUrlPattern: 'https://www.xiaohongshu.com/search_result/',
+      pageRole: 'search_results',
+      pageModelKey: 'page:www.xiaohongshu.com:search_results',
+      objectFingerprint: 'region:decorative-footer',
+      objectType: 'region',
+      lifecycleState: 'observed',
+      canTabrixOperate: false,
+      operabilityReason: 'non_interactive_decorative_region',
+      sourceTraceIds: ['trace-current-cards'],
+      facts: { regionType: 'decorative', candidateActionCount: 0 },
+      updatedAt: '2026-06-06T05:30:02.000Z',
+    });
+    objects.upsert({
+      siteFamily: 'www.xiaohongshu.com',
+      pageUrlPattern: 'https://www.xiaohongshu.com/search_result/',
+      pageRole: 'search_results',
+      pageModelKey: 'page:www.xiaohongshu.com:search_results',
+      objectFingerprint: 'result-card:1',
+      objectType: 'result_card',
+      lifecycleState: 'observed',
+      canTabrixOperate: true,
+      actionTypes: ['click_result_card', 'open_via_url'],
+      sourceTraceIds: ['trace-current-cards'],
+      facts: {
+        rank: 1,
+        title: 'Reusable card',
+        actionTarget: { url: 'https://www.xiaohongshu.com/explore/:noteId' },
+        sessionOnlyTarget: {
+          selector: 'main > section:nth-of-type(1) > a:nth-of-type(2)',
+          center: { x: 100, y: 56 },
+        },
+      },
+      updatedAt: '2026-06-06T05:30:03.000Z',
+    });
+
+    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T05:30:04.000Z' });
+    const model = knowledge.get(result.knowledgeIds[0])!;
+
+    expect(result).toMatchObject({
+      processedTraceCount: 3,
+      skippedTraceCount: 1,
+      upsertedKnowledgeCount: 1,
+    });
+    expect(model.archivedAt).toBeNull();
+    expect(model.objectGraph).toMatchObject({
+      sourceObjectCount: 2,
+      resultCardSummary: {
+        count: 1,
+        rankRange: { min: 1, max: 1 },
+      },
+    });
+    expect(model.actionSurface).toMatchObject({
+      reusableActionKinds: ['open_via_url'],
+    });
+  });
+
   it('archives existing page knowledge when later objects prove the page is restricted', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
     const objects = new BrowserObjectRepository(opened.db);

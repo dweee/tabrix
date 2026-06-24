@@ -241,6 +241,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     if (tabrixMetadata.previousFeedback.length === 0) return;
     const traceWriter = sessionManager.memoryTraces;
     if (!traceWriter) return;
+    let feedbackRecorded = false;
     for (const feedback of tabrixMetadata.previousFeedback) {
       try {
         traceWriter.recordAiBusinessFeedback({
@@ -259,12 +260,14 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           sourceToolName: name,
           sourceToolCallId: step.stepId,
         });
+        feedbackRecorded = true;
       } catch (feedbackError) {
         const message =
           feedbackError instanceof Error ? feedbackError.message : String(feedbackError);
         mkeMemoryTraceLogger.warn('ai feedback update failed', { errorMessage: message });
       }
     }
+    if (feedbackRecorded) sessionManager.scheduleMkeProjectionAfterAiFeedback();
   };
   const recordMkeMemoryTrace = (
     result: CallToolResult,

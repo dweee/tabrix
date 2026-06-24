@@ -35,6 +35,39 @@ import { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-reposi
 import { ChooseContextTelemetryRepository } from '../memory/telemetry/choose-context-telemetry';
 import { TaskSessionContext } from './task-session-context';
 
+const MKE_IDLE_PROJECTION_BATCH_LIMIT = 250;
+const MKE_IDLE_PROJECTION_MAX_BATCHES = 20;
+
+function mergeKnowledgeProjectionResults(
+  previous: MkeKnowledgeProjectionResult | null,
+  current: MkeKnowledgeProjectionResult,
+): MkeKnowledgeProjectionResult {
+  if (!previous) return { ...current, knowledgeIds: [...current.knowledgeIds] };
+  return {
+    processedTraceCount: previous.processedTraceCount + current.processedTraceCount,
+    skippedTraceCount: previous.skippedTraceCount + current.skippedTraceCount,
+    upsertedKnowledgeCount: previous.upsertedKnowledgeCount + current.upsertedKnowledgeCount,
+    nextCursorCreatedAt: current.nextCursorCreatedAt ?? previous.nextCursorCreatedAt,
+    knowledgeIds: [...new Set([...previous.knowledgeIds, ...current.knowledgeIds])],
+  };
+}
+
+function mergeExperienceProjectionResults(
+  previous: MkeExperienceProjectionResult | null,
+  current: MkeExperienceProjectionResult,
+): MkeExperienceProjectionResult {
+  if (!previous) return { ...current, experienceIds: [...current.experienceIds] };
+  return {
+    processedTraceCount: previous.processedTraceCount + current.processedTraceCount,
+    skippedTraceCount: previous.skippedTraceCount + current.skippedTraceCount,
+    rejectedSensitiveSequenceCount:
+      previous.rejectedSensitiveSequenceCount + current.rejectedSensitiveSequenceCount,
+    savedExperienceCount: previous.savedExperienceCount + current.savedExperienceCount,
+    nextCursorCreatedAt: current.nextCursorCreatedAt ?? previous.nextCursorCreatedAt,
+    experienceIds: [...new Set([...previous.experienceIds, ...current.experienceIds])],
+  };
+}
+
 export interface CreateTaskInput {
   taskType: string;
   title: string;
@@ -223,6 +256,8 @@ export class SessionManager {
   private readonly mkeExperienceProjector: MkeExperienceProjector | null;
   private readonly knowledgeApiRepo: KnowledgeApiRepository | null;
   private readonly chooseContextTelemetryRepo: ChooseContextTelemetryRepository | null;
+  private mkeKnowledgeProjectionCursor: string | null = null;
+  private mkeExperienceProjectionCursor: string | null = null;
 
   constructor(options?: SessionManagerOptions) {
     const storage = initStorage(options);
@@ -258,17 +293,20 @@ export class SessionManager {
     return this.memoryTraceService?.flushAsyncWrites() ?? Promise.resolve();
   }
 
-  public async flushAndProjectMkeIdle(): Promise<{
+  public async flushAndProjectMkeIdle(input?: { resetExperienceCursor?: boolean }): Promise<{
     knowledge: MkeKnowledgeProjectionResult | null;
     experience: MkeExperienceProjectionResult | null;
   }> {
     await this.flushMkeMemoryTraceWrites();
-    const knowledge = this.projectMkeKnowledgeIdle();
-    const experience = this.projectMkeExperienceIdle();
+    const knowledge = this.drainMkeKnowledgeProjectionIdle();
+    if (input?.resetExperienceCursor) {
+      this.mkeExperienceProjectionCursor = null;
+    }
+    const experience = this.drainMkeExperienceProjectionIdle();
     return { knowledge, experience };
   }
 
-  public scheduleMkeProjectionAfterTrace(): void {
+  public scheduleMkeProjectionIdle(): void {
     setImmediate(() => {
       void this.flushAndProjectMkeIdle()
         .then(() => {
@@ -286,6 +324,22 @@ export class SessionManager {
     });
   }
 
+  public scheduleMkeProjectionAfterTrace(): void {
+    this.scheduleMkeProjectionIdle();
+  }
+
+  public scheduleMkeProjectionAfterAiFeedback(): void {
+    this.mkeExperienceProjectionCursor = null;
+    this.scheduleMkeProjectionIdle();
+  }
+
+  public async flushAndProjectMkeAfterAiFeedback(): Promise<{
+    knowledge: MkeKnowledgeProjectionResult | null;
+    experience: MkeExperienceProjectionResult | null;
+  }> {
+    return this.flushAndProjectMkeIdle({ resetExperienceCursor: true });
+  }
+
   public projectMkeKnowledgeIdle(
     input?: MkeKnowledgeProjectionInput,
   ): MkeKnowledgeProjectionResult | null {
@@ -296,6 +350,48 @@ export class SessionManager {
     input?: MkeExperienceProjectionInput,
   ): MkeExperienceProjectionResult | null {
     return this.mkeExperienceProjector?.projectIdleBatch(input) ?? null;
+  }
+
+  private drainMkeKnowledgeProjectionIdle(): MkeKnowledgeProjectionResult | null {
+    if (!this.mkeKnowledgeProjector) return null;
+    let cursor = this.mkeKnowledgeProjectionCursor;
+    let aggregate: MkeKnowledgeProjectionResult | null = null;
+
+    for (let batch = 0; batch < MKE_IDLE_PROJECTION_MAX_BATCHES; batch += 1) {
+      const result = this.mkeKnowledgeProjector.projectIdleBatch({
+        cursorCreatedAt: cursor,
+        limit: MKE_IDLE_PROJECTION_BATCH_LIMIT,
+      });
+      aggregate = mergeKnowledgeProjectionResults(aggregate, result);
+      if (result.processedTraceCount === 0 || !result.nextCursorCreatedAt) break;
+      if (result.nextCursorCreatedAt === cursor) break;
+      cursor = result.nextCursorCreatedAt;
+      if (result.processedTraceCount < MKE_IDLE_PROJECTION_BATCH_LIMIT) break;
+    }
+
+    this.mkeKnowledgeProjectionCursor = cursor;
+    return aggregate;
+  }
+
+  private drainMkeExperienceProjectionIdle(): MkeExperienceProjectionResult | null {
+    if (!this.mkeExperienceProjector) return null;
+    let cursor = this.mkeExperienceProjectionCursor;
+    let aggregate: MkeExperienceProjectionResult | null = null;
+
+    for (let batch = 0; batch < MKE_IDLE_PROJECTION_MAX_BATCHES; batch += 1) {
+      const result = this.mkeExperienceProjector.projectIdleBatch({
+        cursorCreatedAt: cursor,
+        limit: MKE_IDLE_PROJECTION_BATCH_LIMIT,
+      });
+      aggregate = mergeExperienceProjectionResults(aggregate, result);
+      if (result.processedTraceCount === 0 || !result.nextCursorCreatedAt) break;
+      if (result.nextCursorCreatedAt === cursor) break;
+      cursor = result.nextCursorCreatedAt;
+      if (result.processedTraceCount < MKE_IDLE_PROJECTION_BATCH_LIMIT) break;
+    }
+
+    this.mkeExperienceProjectionCursor = cursor;
+    return aggregate;
   }
 
   /**
