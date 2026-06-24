@@ -157,6 +157,40 @@ describe('read_page understanding', () => {
     expect(summary.primaryRegionConfidence).toBe('medium');
   });
 
+  it('treats generic search_result_ai routes as search results', () => {
+    const summary = inferPageUnderstanding(
+      'https://example.test/search_result_ai?keyword=neutral',
+      'Neutral topic - Search',
+      [
+        'Neutral topic 搜索结果',
+        '筛选 综合 最新 最多收藏',
+        'Author profile Follow Like Collect Share Comment',
+      ].join('\n'),
+    );
+
+    expect(summary.pageRole).toBe('search_results');
+    expect(summary.primaryRegion).toBe('search_results');
+    expect(summary.primaryRegionConfidence).toBe('medium');
+  });
+
+  it('keeps route-backed content detail identity despite search shell text', () => {
+    const summary = inferPageUnderstanding(
+      'https://example.test/explore/68ac30a20b0000001c039bca',
+      '小红书',
+      [
+        '搜索或输入任何问题',
+        '筛选 综合 最新',
+        '作者 主页 关注',
+        '点赞 收藏 分享 评论 说点什么',
+        '图文 图片 内容 正文',
+      ].join('\n'),
+    );
+
+    expect(summary.pageRole).toBe('content_detail');
+    expect(summary.primaryRegion).toBe('content_detail');
+    expect(summary.primaryRegionConfidence).toBe('medium');
+  });
+
   it('detects English sign-in forms from credential fields', () => {
     const summary = inferPageUnderstanding(
       'https://example.com/sign-in',

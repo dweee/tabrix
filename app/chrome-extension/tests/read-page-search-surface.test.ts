@@ -1137,6 +1137,194 @@ describe('buildSearchSurface', () => {
     expect(surface?.filterState?.contentType?.selected).toBeUndefined();
   });
 
+  it('does not bind same-label result-card actions to filter-panel options', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_filter',
+          role: 'button',
+          name: '已筛选',
+          rect: { x: 1500, y: 96, width: 72, height: 36 },
+        }),
+        interactive({
+          ref: 'ref_panel_image_text',
+          role: 'button',
+          name: '图文',
+          rect: { x: 1480, y: 334, width: 64, height: 40 },
+        }),
+        interactive({
+          ref: 'ref_card_image_text',
+          role: 'link',
+          name: '图文',
+          rect: { x: 620, y: 260, width: 220, height: 300 },
+        }),
+      ],
+      candidateActions: [
+        candidate({ id: 'ca_filter', targetRef: 'ref_filter', intent: 'filter.open' }),
+        candidate({
+          id: 'ca_card_image_text',
+          targetRef: 'ref_card_image_text',
+          intent: 'content.open_detail',
+          locatorChain: [
+            { type: 'ref', value: 'ref_card_image_text' },
+            { type: 'aria', value: '图文' },
+            { type: 'css', value: 'section:nth-of-type(2) a' },
+          ],
+        }),
+        candidate({
+          id: 'ca_panel_image_text',
+          targetRef: 'ref_panel_image_text',
+          intent: 'filter.option_select',
+          locatorChain: [
+            { type: 'ref', value: 'ref_panel_image_text' },
+            { type: 'aria', value: '图文' },
+            { type: 'css', value: '.filter-panel [data-label="图文"]' },
+          ],
+        }),
+      ],
+      visibleTextContent: ['全部 图文 视频 用户 已筛选', '笔记类型 不限 视频 图文'].join('\n'),
+    });
+
+    const imageTextOptions =
+      surface?.filterPanel?.targetableOptions?.filter((option) => option.label === '图文') ?? [];
+    expect(imageTextOptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          targetRef: 'ref_panel_image_text',
+          candidateActionId: 'ca_panel_image_text',
+          filterGroup: 'content_type',
+        }),
+      ]),
+    );
+    expect(imageTextOptions).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          targetRef: 'ref_card_image_text',
+          candidateActionId: 'ca_card_image_text',
+        }),
+      ]),
+    );
+    expect(surface?.filterState?.contentType.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: '图文',
+          targetRef: 'ref_panel_image_text',
+          candidateActionId: 'ca_panel_image_text',
+        }),
+      ]),
+    );
+  });
+
+  it('treats top-band content-type labels as filter options when they come from the open filter panel', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_filter',
+          role: 'button',
+          name: '已筛选',
+          rect: { x: 1500, y: 96, width: 72, height: 36 },
+        }),
+        interactive({
+          ref: 'ref_text_search_toolbar_152',
+          role: 'button',
+          name: '图文',
+          rect: { x: 220, y: 156, width: 72, height: 36 },
+        }),
+        interactive({
+          ref: 'ref_text_filter_panel_153',
+          role: 'button',
+          name: '最多收藏',
+          rect: { x: 1480, y: 148, width: 96, height: 40 },
+        }),
+        interactive({
+          ref: 'ref_text_filter_panel_156',
+          role: 'button',
+          name: '图文',
+          rect: { x: 1480, y: 196, width: 72, height: 40 },
+        }),
+        interactive({
+          ref: 'ref_card_image_text',
+          role: 'link',
+          name: '图文',
+          rect: { x: 620, y: 260, width: 220, height: 300 },
+        }),
+      ],
+      candidateActions: [
+        candidate({ id: 'ca_filter', targetRef: 'ref_filter', intent: 'filter.open' }),
+        candidate({
+          id: 'ca_toolbar_image_text',
+          targetRef: 'ref_text_search_toolbar_152',
+          intent: 'search.category_select',
+          locatorChain: [
+            { type: 'ref', value: 'ref_text_search_toolbar_152' },
+            { type: 'aria', value: '图文' },
+            { type: 'css', value: '.search-tabs [role="button"]' },
+          ],
+        }),
+        candidate({
+          id: 'ca_panel_saved',
+          targetRef: 'ref_text_filter_panel_153',
+          intent: 'filter.sort_most_collected',
+          locatorChain: [
+            { type: 'ref', value: 'ref_text_filter_panel_153' },
+            { type: 'aria', value: '最多收藏' },
+            { type: 'css', value: '.filter-panel [data-label="最多收藏"]' },
+          ],
+        }),
+        candidate({
+          id: 'ca_panel_image_text',
+          targetRef: 'ref_text_filter_panel_156',
+          intent: 'search.category_select',
+          locatorChain: [
+            { type: 'ref', value: 'ref_text_filter_panel_156' },
+            { type: 'aria', value: '图文' },
+            { type: 'css', value: '.filter-panel [data-label="图文"]' },
+          ],
+        }),
+        candidate({
+          id: 'ca_card_image_text',
+          targetRef: 'ref_card_image_text',
+          intent: 'content.open_detail',
+          locatorChain: [
+            { type: 'ref', value: 'ref_card_image_text' },
+            { type: 'aria', value: '图文' },
+            { type: 'css', value: 'section:nth-of-type(2) a' },
+          ],
+        }),
+      ],
+      visibleTextContent: [
+        '全部 图文 视频 用户 已筛选',
+        '排序依据 综合 最新 最多收藏',
+        '笔记类型 不限 视频 图文',
+      ].join('\n'),
+    });
+
+    expect(surface?.filterPanel?.targetableOptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: '图文',
+          targetRef: 'ref_text_filter_panel_156',
+          candidateActionId: 'ca_panel_image_text',
+          filterGroup: 'content_type',
+        }),
+      ]),
+    );
+    expect(surface?.filterPanel?.targetableOptions).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: '图文',
+          candidateActionId: 'ca_toolbar_image_text',
+        }),
+        expect.objectContaining({
+          label: '图文',
+          candidateActionId: 'ca_card_image_text',
+        }),
+      ]),
+    );
+  });
+
   it('marks grouped filter state as ambiguous when one group has multiple selected values', () => {
     const surface = buildSearchSurface({
       assistantGuidance: guidance,

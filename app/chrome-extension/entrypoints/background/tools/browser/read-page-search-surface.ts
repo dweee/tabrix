@@ -235,17 +235,18 @@ function isFilterPanelOptionElement(
 ): boolean {
   const label = normalizeText(element.name);
   if (!isFilterPanelOptionLabel(label)) return false;
-  if (TEXT_FILTER_PANEL_REF_PATTERN.test(element.ref)) return true;
   const role = normalizeText(element.role).toLowerCase();
   if (role === 'link' || role === 'textbox' || role === 'searchbox' || role === 'combobox') {
     return false;
   }
   if (
     CONTENT_TYPE_FILTER_OPTION_PATTERN.test(label) &&
-    isSearchToolbarBandElement(element, interactiveElements)
+    isSearchToolbarBandElement(element, interactiveElements) &&
+    !TEXT_FILTER_PANEL_REF_PATTERN.test(element.ref)
   ) {
     return false;
   }
+  if (TEXT_FILTER_PANEL_REF_PATTERN.test(element.ref)) return true;
   return true;
 }
 
@@ -367,6 +368,31 @@ function actionForRef(
   return candidateActions.find((action) => action.targetRef === targetRef);
 }
 
+function isFilterPanelAction(action: ReadPageCandidateAction | undefined, label?: string): boolean {
+  if (!action) return false;
+  if (!action.intent) return true;
+  if (
+    action.intent === 'search.category_select' &&
+    label !== undefined &&
+    CONTENT_TYPE_FILTER_OPTION_PATTERN.test(normalizeText(label)) &&
+    TEXT_FILTER_PANEL_REF_PATTERN.test(action.targetRef)
+  ) {
+    return true;
+  }
+  return /^filter\./.test(action.intent);
+}
+
+function actionForFilterPanelRef(
+  candidateActions: readonly ReadPageCandidateAction[],
+  targetRef: string | undefined,
+  label?: string,
+): ReadPageCandidateAction | undefined {
+  if (!targetRef) return undefined;
+  return candidateActions.find(
+    (action) => action.targetRef === targetRef && isFilterPanelAction(action, label),
+  );
+}
+
 function actionForToolbarLabel(
   candidateActions: readonly ReadPageCandidateAction[],
   label: string,
@@ -394,6 +420,7 @@ function actionForFilterPanelLabel(
 ): ReadPageCandidateAction | undefined {
   const key = normalizedKey(label);
   return candidateActions.find((action) => {
+    if (!isFilterPanelAction(action, label)) return false;
     const element = interactiveElements.find((item) => item.ref === action.targetRef);
     const isPanelCandidate = element
       ? isFilterPanelOptionElement(element, interactiveElements)
@@ -467,8 +494,14 @@ function controlForElement(params: {
   confidence: number;
   filterGroup?: SearchSurfaceControl['filterGroup'];
 }): SearchSurfaceControl {
+  const directAction =
+    params.kind === 'sort_most_collected' ||
+    params.kind === 'filter_panel_action' ||
+    params.kind === 'filter_panel_option'
+      ? actionForFilterPanelRef(params.candidateActions, params.element.ref, params.element.name)
+      : actionForRef(params.candidateActions, params.element.ref);
   const action =
-    actionForRef(params.candidateActions, params.element.ref) ??
+    directAction ??
     actionForElementLabel({
       kind: params.kind,
       element: params.element,

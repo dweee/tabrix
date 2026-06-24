@@ -169,9 +169,9 @@ function hasExactSearchResultsRoute(lowerUrl: string): boolean {
   try {
     const parsed = new URL(lowerUrl);
     const normalizedPath = parsed.pathname.toLowerCase().replace(/\/+$/u, '');
-    return normalizedPath === '/search_result';
+    return normalizedPath === '/search_result' || normalizedPath === '/search_result_ai';
   } catch {
-    return /(?:^|\/)search_result\/?(?:[?#]|$)/i.test(lowerUrl);
+    return /(?:^|\/)search_result(?:_ai)?\/?(?:[?#]|$)/i.test(lowerUrl);
   }
 }
 
@@ -240,14 +240,15 @@ function inferContentDetail(context: PageUnderstandingContext): PageUnderstandin
   if (context.footerOnly) {
     return null;
   }
-  const searchShellSignals = [context.lowerTitle, context.content];
-  if (hasAnySignal(searchShellSignals, [SEARCH_SHELL_PATTERN])) {
-    return null;
-  }
   const detailSignalGroups = countContentDetailSignalGroups(context);
   const routeDetail = hasGenericContentDetailRoute(context.lowerUrl);
   const titleDetail = hasMeaningfulContentTitle(context.lowerTitle);
-  if (detailSignalGroups < 3 && !(routeDetail && titleDetail)) {
+  const routeBackedDetail = routeDetail && (titleDetail || detailSignalGroups >= 3);
+  const searchShellSignals = [context.lowerTitle, context.content];
+  if (hasAnySignal(searchShellSignals, [SEARCH_SHELL_PATTERN]) && !routeBackedDetail) {
+    return null;
+  }
+  if (detailSignalGroups < 3 && !routeBackedDetail) {
     return null;
   }
   return {
