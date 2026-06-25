@@ -9,6 +9,16 @@ import {
   type MemoryTrace,
 } from './db';
 import { buildLegacyMemoryTraceBindingHash, buildMemoryTraceBindingHash } from './feedback-binding';
+import {
+  readActionabilityBoolean,
+  readArray,
+  readBoolean,
+  readFiniteNumber,
+  readNestedObject,
+  readNumber,
+  readObject,
+  readString,
+} from './mke-memory-value-readers';
 import { logger } from '../logging/logger';
 
 const REDACTED = '[redacted]';
@@ -390,81 +400,6 @@ function parseFirstTextPayload(result: CallToolResult): unknown {
   } catch {
     return { textLength: firstText.text.length };
   }
-}
-
-function readObject(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function readNestedObject(
-  object: Record<string, unknown> | null,
-  key: string,
-): Record<string, unknown> | null {
-  return object ? readObject(object[key]) : null;
-}
-
-function readString(...values: unknown[]): string | null {
-  for (const value of values) {
-    if (typeof value === 'string' && value.trim().length > 0) return value;
-  }
-  return null;
-}
-
-function readNumber(...values: unknown[]): number | null {
-  for (const value of values) {
-    if (typeof value === 'number' && Number.isFinite(value)) return Math.floor(value);
-  }
-  return null;
-}
-
-function readFiniteNumber(...values: unknown[]): number | null {
-  for (const value of values) {
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-  }
-  return null;
-}
-
-function readBoolean(...values: unknown[]): boolean | null {
-  for (const value of values) {
-    if (typeof value === 'boolean') return value;
-  }
-  return null;
-}
-
-function readActionabilityBoolean(...values: unknown[]): boolean | null {
-  for (const value of values) {
-    if (typeof value === 'boolean') return value;
-    if (typeof value !== 'string') continue;
-    const normalized = value.trim().toLowerCase();
-    if (!normalized) continue;
-    if (
-      normalized === 'actionable' ||
-      normalized === 'available' ||
-      normalized === 'enabled' ||
-      normalized === 'target_ref' ||
-      normalized === 'locator_chain'
-    ) {
-      return true;
-    }
-    if (
-      normalized === 'not_actionable' ||
-      normalized === 'unavailable' ||
-      normalized === 'disabled' ||
-      normalized === 'restricted' ||
-      normalized === 'blocked' ||
-      normalized === 'not_clickable' ||
-      normalized === 'not_targetable'
-    ) {
-      return false;
-    }
-  }
-  return null;
-}
-
-function readArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
 }
 
 function readResultCardStableTarget(input: {
