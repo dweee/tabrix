@@ -140,6 +140,10 @@ describe('handleToolCall execution wrapper', () => {
       objectFingerprint: 'action:example.test:search:submit',
       objectType: 'action_target',
       actionTypes: ['search.submit'],
+      targetability: {
+        targetabilityStatus: 'stable_click_target',
+        targetRef: 'historical_ref_search_submit',
+      },
       primaryConclusion: 'Search submit control was seen on this page model.',
       confidenceScore: 0.91,
       lastValidatedAt: '2026-06-06T11:00:00.000Z',
@@ -197,6 +201,11 @@ describe('handleToolCall execution wrapper', () => {
         freshness: 'validated',
         lastValidatedAt: '2026-06-06T11:00:00.000Z',
         actionTypes: ['search.submit'],
+        planningUse: 'can_seed_action',
+        canSeedAction: true,
+        requiresFreshRead: false,
+        reuseReason: 'validated_actionable_object_can_help_match_current_candidate',
+        nextStepHint: 'match_against_current_candidateActions_before_action',
       }),
       expect.objectContaining({
         source: 'object_library_reuse',
@@ -204,9 +213,16 @@ describe('handleToolCall execution wrapper', () => {
         objectFingerprint: 'card:example.test:search:old-result',
         freshness: 'needs_refresh',
         actionTypes: ['open_detail'],
+        planningUse: 'fresh_read_first',
+        canSeedAction: false,
+        requiresFreshRead: true,
+        nextStepHint: 'force_fresh_read_or_collect_current_objects_before_action',
       }),
     ]);
     expect(JSON.stringify(payload.objectLibraryHints)).not.toContain('ref_current');
+    expect(JSON.stringify(payload.objectLibraryHints)).not.toContain(
+      'historical_ref_search_submit',
+    );
   });
 
   it('returns the tool result before async Browser Object trace projection runs', async () => {

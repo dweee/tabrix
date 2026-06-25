@@ -912,6 +912,11 @@ export interface ReadPageObjectLibraryHint {
   lastObservedAt?: string | null;
   actionTypes?: string[];
   summary?: string | null;
+  planningUse?: 'can_seed_action' | 'fresh_read_first' | 'reference_only';
+  canSeedAction?: boolean;
+  requiresFreshRead?: boolean;
+  reuseReason?: string;
+  nextStepHint?: string;
   claimBoundary: string;
 }
 
