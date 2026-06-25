@@ -166,7 +166,7 @@ export function mergeCollectedResultCards(
   incoming: readonly CollectedResultCard[],
   limit: number,
 ): CollectedResultCard[] {
-  return mergeCrossScrollObjects({
+  return mergeCrossScrollObjects<CollectedResultCard>({
     current,
     incoming,
     limit,

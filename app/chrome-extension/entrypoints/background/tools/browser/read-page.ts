@@ -1461,7 +1461,7 @@ function isCompactSearchToolbarFallbackElement(element: any): boolean {
 function normalizeVisibleSearchSurfaceAction(action: any): CandidateActionSeed | null {
   const id = typeof action?.id === 'string' ? action.id.trim() : '';
   const targetRef = typeof action?.targetRef === 'string' ? action.targetRef.trim() : '';
-  const locatorChain = Array.isArray(action?.locatorChain)
+  const locatorChain: CandidateActionSeed['locatorChain'] = Array.isArray(action?.locatorChain)
     ? action.locatorChain
         .map((locator: any) => ({
           type: typeof locator?.type === 'string' ? locator.type.trim() : '',
