@@ -29,7 +29,6 @@ import type {
   TaskAuthResumeGate,
   TaskPageInteractionSnapshot,
   TaskPageRuntimeFields,
-  TaskReadPageContextMeasurement,
   TaskSessionContext,
   TaskVisibleRegionRowsData,
 } from '../execution/task-session-context';
@@ -37,7 +36,7 @@ import { normalizeToolCallResult } from '../execution/result-normalizer';
 import { planSkipRead, type SkipReadPlan } from '../execution/skip-read-orchestrator';
 import { readApiKnowledgeEndpointPlan } from '../api/api-knowledge';
 import { mapDataSourceToLayerContract } from '../execution/layer-contract';
-import { routeDataSource, type DataSourceDecision } from '../execution/data-source-router';
+import { routeDataSource } from '../execution/data-source-router';
 import { runPostProcessor } from './tool-post-processors';
 import { getNativeToolHandler } from './native-tool-handlers';
 import {
@@ -84,6 +83,12 @@ import {
 } from './read-page-live-observed-result';
 import { buildReadPageWarningResult } from './read-page-warning-result';
 import { buildReadPageSkipResult } from './read-page-skip-result';
+import {
+  buildReadPageContextMeasurement,
+  evaluateReadPageTargetBinding,
+  shouldPreferVisibleRowsForMarkdownAiContext,
+  shouldRecordDomRegionRowsReadback,
+} from './read-page-target-binding';
 import {
   bindPostActionDeltaEvidenceToPendingInteraction,
   buildPostActionDeltaSignalsFromEvidence,
@@ -1921,139 +1926,6 @@ function inferTaskTimelineStartedAtMs(
     .map((event) => Date.parse(event.at))
     .filter((value) => Number.isFinite(value));
   return parsed.length > 0 ? Math.min(...parsed) : fallbackStartedAtMs;
-}
-
-function buildReadPageContextMeasurement(
-  payload: Record<string, unknown> | null,
-  requestedLayer: ReadPageRequestedLayer,
-): TaskReadPageContextMeasurement | null {
-  if (!payload || requestedLayer !== 'L0+L1+L2') return null;
-  let fullReadByteLength = 0;
-  try {
-    fullReadByteLength = JSON.stringify(payload).length;
-  } catch {
-    return null;
-  }
-  if (!Number.isFinite(fullReadByteLength) || fullReadByteLength <= 0) return null;
-
-  const page = readObject(payload.page);
-  const summary = readObject(payload.summary);
-  const candidateActions = Array.isArray(payload.candidateActions) ? payload.candidateActions : [];
-  const highValueObjects = Array.isArray(payload.highValueObjects) ? payload.highValueObjects : [];
-  return {
-    url: readString(page?.url) ?? readString(payload.url) ?? readString(payload.pageUrl),
-    pageRole: readString(summary?.pageRole) ?? readString(payload.pageRole),
-    fullReadByteLength,
-    candidateActionsCount: candidateActions.length,
-    highValueObjectCount: highValueObjects.length,
-  };
-}
-
-function evaluateReadPageTargetBinding(
-  result: CallToolResult,
-  requestedTabId: number,
-): {
-  verdict: 'matched' | 'unknown' | 'mismatch';
-  requestedTabId: number;
-  observedTabIds: number[];
-  matchedTabId: number | null;
-  reason: string;
-} {
-  const payload = readJsonObjectFromCallToolResult(result);
-  const observedTabIds = payload ? collectReadPageObservedTabIds(payload) : [];
-  const uniqueObserved = Array.from(new Set(observedTabIds));
-  if (uniqueObserved.length === 0) {
-    return {
-      verdict: 'unknown',
-      requestedTabId,
-      observedTabIds: [],
-      matchedTabId: null,
-      reason: 'read_page response did not expose a target tab id; legacy response tolerated',
-    };
-  }
-  if (uniqueObserved.some((tabId) => tabId !== requestedTabId)) {
-    return {
-      verdict: 'mismatch',
-      requestedTabId,
-      observedTabIds: uniqueObserved,
-      matchedTabId: uniqueObserved.includes(requestedTabId) ? requestedTabId : null,
-      reason:
-        'read_page response included tab-bound evidence that did not match the explicit requested tabId',
-    };
-  }
-  return {
-    verdict: 'matched',
-    requestedTabId,
-    observedTabIds: uniqueObserved,
-    matchedTabId: requestedTabId,
-    reason: 'all observed read_page tab-bound evidence matched the explicit requested tabId',
-  };
-}
-
-function collectReadPageObservedTabIds(payload: Record<string, unknown>): number[] {
-  const ids: number[] = [];
-  const push = (value: number | null) => {
-    if (value !== null) ids.push(value);
-  };
-
-  push(readPositiveInteger(payload, 'tabId'));
-  push(readPositiveInteger(payload, 'currentTabId'));
-  push(readPositiveInteger(payload, 'readTargetTabId'));
-
-  const pageProjection = readObject(payload.pageProjection);
-  push(readPositiveInteger(pageProjection, 'tabId'));
-
-  const ownershipRuntime = readObject(payload.ownershipRuntime);
-  push(readPositiveInteger(ownershipRuntime, 'currentTabId'));
-
-  const compactTab = readObject(
-    readObject(readObject(payload.browserPageObjectCompact)?.facts)?.tab,
-  );
-  push(readPositiveInteger(compactTab, 'tabId'));
-  push(readPositiveInteger(compactTab, 'readTargetTabId'));
-  push(readPositiveInteger(compactTab, 'currentActiveTabId'));
-
-  const artifacts = payload.artifactRefs;
-  if (Array.isArray(artifacts)) {
-    for (const artifact of artifacts) {
-      const ref = readString(readObject(artifact)?.ref);
-      if (!ref) continue;
-      for (const pattern of [/\/tab-(\d+)\//g, /read_page\/(\d+)\//g]) {
-        let match: RegExpExecArray | null;
-        while ((match = pattern.exec(ref)) !== null) {
-          const parsed = Number(match[1]);
-          if (Number.isInteger(parsed) && parsed > 0) ids.push(parsed);
-        }
-      }
-    }
-  }
-
-  return ids;
-}
-
-function shouldPreferVisibleRowsForMarkdownAiContext(
-  visibleRows: TaskVisibleRegionRowsData,
-  routerDecision: DataSourceDecision,
-): boolean {
-  if (routerDecision.selectedDataSource !== 'dom_region_rows') return false;
-
-  const region = visibleRows.sourceRegion.toLowerCase();
-  const semanticListRegion =
-    region.includes('result') ||
-    region.includes('list') ||
-    region.includes('search') ||
-    region.includes('feed') ||
-    region.includes('grid') ||
-    region.includes('card');
-
-  return semanticListRegion || visibleRows.cardRowsCount > 0 || visibleRows.cardExtractorUsed;
-}
-
-function shouldRecordDomRegionRowsReadback(visibleRows: TaskVisibleRegionRowsData): boolean {
-  if (!visibleRows.visibleRegionRowsUsed || visibleRows.rowCount <= 0) return false;
-  const coverage = visibleRows.targetRefCoverageRate ?? 0;
-  const quality = visibleRows.regionQualityScore ?? 0;
-  return visibleRows.rowExtractionConfidence >= 0.7 && coverage >= 0.95 && quality >= 0.7;
 }
 
 function readTaskPageRuntimeFields(payload: Record<string, unknown>): TaskPageRuntimeFields {
