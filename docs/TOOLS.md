@@ -260,9 +260,9 @@ The response is mode-based:
 
 - Stable contract layer (T3.2): `mode`, `page`, `summary`, `interactiveElements`, `artifactRefs`.
 - Extension layer (evolvable): `candidateActions`, `pageContext`, `frameContext`, `historyRef`, `memoryHints`.
-- T5.0 task-view skeleton: `taskMode`, `complexityLevel`, `sourceKind`, `highValueObjects`, `L0`, `L1`, `L2`.
-- Canonical `pageRole` / `primaryRegion` stay under `summary`; T5.0 adds task-oriented layers on top without replacing the T3.2 stable layer.
-- `L0` is the shortest task summary, `L1` is the minimal overview, and `L2` is only a detail-expansion skeleton in this phase.
+- T5.0 task-view fields: `taskMode`, `complexityLevel`, `sourceKind`, high-value objects, candidate actions, and optional detail expansion.
+- Canonical `pageRole` / `primaryRegion` stay under `summary`; T5.0 adds task-oriented fields on top without replacing the T3.2 stable layer.
+- The public schema keeps serialization-stable internal values for `requestedLayer`: `L0` means light read, `L0+L1` means standard read/default, and `L0+L1+L2` means detailed read. Product docs and UI should prefer light / standard / detailed wording instead of exposing layer jargon.
 - Current source selection defaults to `dom_semantic` on regular web pages; `embedded_state` and `page_api` are reserved extension paths for follow-up tasks.
 - `normal` keeps the compact core and adds `diagnostics`.
 - `full` keeps the compact core and adds inline `fullSnapshot` (large payload) plus `artifactRefs` pointers.

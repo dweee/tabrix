@@ -125,7 +125,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.READ_PAGE,
     description:
-      'Read the current web page so the AI can decide what to do next. Returns the page summary, important page objects, and executable candidateActions with targetRef values for click/fill tools.\nDefault output is L0+L1 to keep token use low; request L0+L1+L2 only when the AI needs detailed object refs. Use candidateActions/targetRef for browser control, not markdown text.\nAfter any click/fill/navigation, call chrome_read_page again when the AI needs to verify the page result before continuing.\nLimitation: Does not work on chrome:// or browser-internal pages; sparse or highly dynamic pages may need a screenshot fallback.',
+      'Read the current web page so the AI can decide what to do next. Returns the page summary, important page objects, and executable candidateActions with targetRef values for click/fill tools.\nDefault output is the standard read (internal value L0+L1) to keep token use low; request the detailed read (internal value L0+L1+L2) only when the AI needs detailed object refs. Use candidateActions/targetRef for browser control, not markdown text.\nAfter any click/fill/navigation, call chrome_read_page again when the AI needs to verify the page result before continuing.\nLimitation: Does not work on chrome:// or browser-internal pages; sparse or highly dynamic pages may need a screenshot fallback.',
     annotations: {
       readOnlyHint: true,
     },
@@ -153,7 +153,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
           type: 'string',
           enum: ['L0', 'L0+L1', 'L0+L1+L2'],
           description:
-            "Optional layer envelope. When omitted, defaults to 'L0+L1'. 'L0' returns only the summary task layer (taskMode/pageRole/primaryRegion/focusObjectIds plus stable HVO targetRef registry); L1 and L2 task fields are dropped from the response. 'L0+L1' returns the L0 + L1 overview (highValueObjectIds + candidateActionIds) but suppresses L2 detail refs. 'L0+L1+L2' returns the full controlled expansion and must be requested explicitly. Stable HVO targetRef registry is ALWAYS written even at 'L0' so chrome_click_element resolution stays deterministic.",
+            "Optional internal detail envelope for advanced clients. Prefer the product meanings: 'L0' = light read, 'L0+L1' = standard read/default, 'L0+L1+L2' = detailed read. Light read returns only the summary task layer plus stable HVO targetRef registry; standard read adds high-value object and candidate-action ids while suppressing detailed refs; detailed read returns the full controlled expansion and must be requested explicitly. Stable HVO targetRef registry is always written even at 'L0' so chrome_click_element resolution stays deterministic.",
         },
         depth: {
           type: 'number',

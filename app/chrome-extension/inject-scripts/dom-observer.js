@@ -1,10 +1,28 @@
- 
+/* global chrome, window, document, location, MutationObserver */
+
 // dom-observer.js - observe DOM for triggers and notify background
 (function () {
   if (window.__RR_DOM_OBSERVER__) return;
   window.__RR_DOM_OBSERVER__ = true;
 
   const active = { triggers: [], hits: new Map() };
+  const diagnosticsKey = '__TABRIX_INJECT_SCRIPT_DIAGNOSTICS__';
+
+  function recordDiagnostic(source, error) {
+    try {
+      const bucket = (window[diagnosticsKey] = Array.isArray(window[diagnosticsKey])
+        ? window[diagnosticsKey]
+        : []);
+      bucket.push({
+        source,
+        message: String(error && error.message ? error.message : error),
+        at: Date.now(),
+      });
+      if (bucket.length > 25) bucket.splice(0, bucket.length - 25);
+    } catch (_diagnosticError) {
+      return;
+    }
+  }
 
   function now() {
     return Date.now();
@@ -15,7 +33,9 @@
       active.triggers = Array.isArray(list) ? list.slice() : [];
       active.hits.clear();
       checkAll();
-    } catch (e) {}
+    } catch (e) {
+      recordDiagnostic('dom_observer.apply_triggers', e);
+    }
   }
 
   function checkAll() {
@@ -23,7 +43,9 @@
       for (const t of active.triggers) {
         maybeFire(t);
       }
-    } catch (e) {}
+    } catch (e) {
+      recordDiagnostic('dom_observer.check_all', e);
+    }
   }
 
   function maybeFire(t) {
@@ -46,13 +68,17 @@
         });
         if (t.once !== false) removeTrigger(t.id);
       }
-    } catch (e) {}
+    } catch (e) {
+      recordDiagnostic('dom_observer.maybe_fire', e);
+    }
   }
 
   function removeTrigger(id) {
     try {
       active.triggers = active.triggers.filter((x) => x.id !== id);
-    } catch (e) {}
+    } catch (e) {
+      recordDiagnostic('dom_observer.remove_trigger', e);
+    }
   }
 
   const mo = new MutationObserver(() => {
@@ -65,7 +91,9 @@
       attributes: false,
       characterData: false,
     });
-  } catch (e) {}
+  } catch (e) {
+    recordDiagnostic('dom_observer.observe', e);
+  }
 
   chrome.runtime.onMessage.addListener((req, _sender, sendResponse) => {
     try {

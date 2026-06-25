@@ -192,7 +192,7 @@ The hot path must stay fast and honest even when asynchronous projection is dela
 ## Performance Optimizations
 
 - **Transport boundaries**: the native server keeps MCP session and policy work local, while browser actions stay in the extension where Chrome APIs are available.
-- **Layered page reading**: `chrome_read_page` emits compact task layers, high-value objects, candidate actions, and stable target refs to reduce repeated full-page reads.
+- **Layered page reading**: `chrome_read_page` keeps an internal light / standard / detailed read strategy (`L0`, `L0+L1`, `L0+L1+L2`) so assistants can get enough current-page evidence without repeated full-page reads.
 - **Object-aware targeting**: candidate actions and stable target refs let assistants reuse the latest page read instead of guessing selectors from raw text.
 - **Policy-time filtering**: high-risk tools are hidden or denied before dispatch when the operator has not opted in.
 - **Release gates**: benchmark and readiness checks protect public contract drift without requiring private browser evidence in public CI.

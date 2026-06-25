@@ -14,6 +14,23 @@
   const REF_MAP_LIMIT = 1000; // limit size of the ref map to keep payload small
   const DYNAMIC_SURFACE_REF_PREFIX = 'ref_dynamic_surface_';
   const DYNAMIC_SURFACE_TARGET_LIMIT = 32;
+  const DIAGNOSTICS_KEY = '__TABRIX_INJECT_SCRIPT_DIAGNOSTICS__';
+
+  function recordDiagnostic(source, error) {
+    try {
+      const bucket = (window[DIAGNOSTICS_KEY] = Array.isArray(window[DIAGNOSTICS_KEY])
+        ? window[DIAGNOSTICS_KEY]
+        : []);
+      bucket.push({
+        source,
+        message: String(error && error.message ? error.message : error),
+        at: Date.now(),
+      });
+      if (bucket.length > 25) bucket.splice(0, bucket.length - 25);
+    } catch (_diagnosticError) {
+      return;
+    }
+  }
 
   // Keep a weak map from ref id to elements
   if (!window.__claudeElementMap) window.__claudeElementMap = {};
@@ -702,7 +719,9 @@
       // Fast path
       const direct = document.querySelector(selector);
       if (direct) return direct;
-    } catch (_) {}
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.query_deep_first.document_query', error);
+    }
     const visited = new Set();
     const stack = [document.documentElement];
     while (stack.length) {
@@ -715,9 +734,13 @@
           try {
             const hit = root.querySelector(selector);
             if (hit) return hit;
-          } catch (_) {}
+          } catch (error) {
+            recordDiagnostic('accessibility_tree.query_deep_first.shadow_query', error);
+          }
         }
-      } catch (_) {}
+      } catch (error) {
+        recordDiagnostic('accessibility_tree.query_deep_first.shadow_root', error);
+      }
       // Traverse DOM and shadow roots
       try {
         const children = /** @type {Element} */ (node).children || [];
@@ -726,7 +749,9 @@
         if (sr && sr.children) {
           for (let i = 0; i < sr.children.length; i++) stack.push(sr.children[i]);
         }
-      } catch (_) {}
+      } catch (error) {
+        recordDiagnostic('accessibility_tree.query_deep_first.traverse', error);
+      }
     }
     return null;
   }
@@ -816,9 +841,13 @@
             for (let i = 0; i < shadowChildren.length; i++) {
               stack.push(shadowChildren[i]);
             }
-          } catch (_) {}
+          } catch (error) {
+            recordDiagnostic('accessibility_tree.uniqueness.shadow_children', error);
+          }
         }
-      } catch (_) {}
+      } catch (error) {
+        recordDiagnostic('accessibility_tree.uniqueness.shadow_root', error);
+      }
 
       // Add regular children to stack
       try {
@@ -826,7 +855,9 @@
         for (let i = 0; i < children.length; i++) {
           stack.push(children[i]);
         }
-      } catch (_) {}
+      } catch (error) {
+        recordDiagnostic('accessibility_tree.uniqueness.children', error);
+      }
     }
 
     return { element: firstMatch, matchCount: Math.min(matchCount, 2) };

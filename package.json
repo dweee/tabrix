@@ -39,6 +39,7 @@
     "docs:check": "node ./scripts/check-docs.mjs",
     "governance:public": "node ./scripts/check-public-governance.mjs",
     "governance:console": "node ./scripts/check-console-governance.mjs",
+    "governance:empty-catch": "node ./scripts/check-empty-catch.mjs",
     "governance:extension-logs": "node ./scripts/check-extension-production-logs.mjs",
     "i18n:check": "node ./scripts/check-i18n.mjs",
     "ubuntu:self-check": "powershell -ExecutionPolicy Bypass -File ./scripts/run-ubuntu-docker-self-check.ps1",
@@ -55,7 +56,7 @@
     "benchmark:v25": "node ./scripts/benchmark-v25.mjs",
     "size:check": "node ./scripts/check-bundle-size.mjs",
     "verify": "pnpm run typecheck && pnpm run lint && pnpm run test:core",
-    "ci:check": "pnpm run i18n:check && pnpm run docs:check && pnpm run governance:console && pnpm run typecheck && pnpm run lint && pnpm run test:core && pnpm run audit",
+    "ci:check": "pnpm run i18n:check && pnpm run docs:check && pnpm run governance:console && pnpm run governance:empty-catch && pnpm run typecheck && pnpm run lint && pnpm run test:core && pnpm run audit",
     "prepare": "husky"
   },
   "devDependencies": {

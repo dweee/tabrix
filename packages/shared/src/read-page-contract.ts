@@ -2057,17 +2057,30 @@ export const READ_PAGE_TASK_PROTOCOL_FIELDS = [
 
 /**
  * Which layer envelope the caller wants
- * `chrome_read_page` to materialize. `L0+L1` is the default shape when
- * this field is omitted; `L0+L1+L2` is the explicit full expansion.
+ * `chrome_read_page` to materialize.
+ *
+ * Product-facing names:
+ * - `L0` = light read
+ * - `L0+L1` = standard read, the default shape when this field is omitted
+ * - `L0+L1+L2` = detailed read, the explicit full expansion
  *
  * The values are intentionally serialization-stable strings (not bit
  * flags) so they can land in the MCP schema and the SQLite telemetry
- * column without a side index. Order of the values mirrors §11 of
- * `docs/TABRIX_THREE_LAYER_DATA_COORDINATION_V1.md` (smallest first).
+ * column without a side index. Keep them as internal transport values;
+ * user-facing docs and UI should prefer light / standard / detailed wording.
  */
 export type ReadPageRequestedLayer = 'L0' | 'L0+L1' | 'L0+L1+L2';
 
 export const READ_PAGE_REQUESTED_LAYER_VALUES = ['L0', 'L0+L1', 'L0+L1+L2'] as const;
+
+export const READ_PAGE_REQUESTED_LAYER_LABELS: Record<
+  ReadPageRequestedLayer,
+  'light' | 'standard' | 'detailed'
+> = {
+  L0: 'light',
+  'L0+L1': 'standard',
+  'L0+L1+L2': 'detailed',
+};
 
 /**
  * Closed enum of dispatcher reasons. Each value corresponds to

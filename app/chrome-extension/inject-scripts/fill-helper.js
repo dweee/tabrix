@@ -10,6 +10,23 @@ if (window.__FILL_HELPER_INITIALIZED__) {
 
   const SCROLL_READY_MAX_MS = 150;
   const RECT_STABLE_EPSILON_PX = 1;
+  const DIAGNOSTICS_KEY = '__TABRIX_INJECT_SCRIPT_DIAGNOSTICS__';
+
+  function recordDiagnostic(source, error) {
+    try {
+      const bucket = (window[DIAGNOSTICS_KEY] = Array.isArray(window[DIAGNOSTICS_KEY])
+        ? window[DIAGNOSTICS_KEY]
+        : []);
+      bucket.push({
+        source,
+        message: String(error && error.message ? error.message : error),
+        at: Date.now(),
+      });
+      if (bucket.length > 25) bucket.splice(0, bucket.length - 25);
+    } catch (_diagnosticError) {
+      return;
+    }
+  }
 
   function nowMs() {
     return window.performance && typeof window.performance.now === 'function'
@@ -242,7 +259,9 @@ if (window.__FILL_HELPER_INITIALIZED__) {
                 if (innerSr && innerSr.children) {
                   for (let i = 0; i < innerSr.children.length; i++) queue.push(innerSr.children[i]);
                 }
-              } catch (_) {}
+              } catch (error) {
+                recordDiagnostic('fill_helper.shadow_fillable_scan', error);
+              }
             }
             if (!validTags.includes(element.tagName)) {
               return {
@@ -297,7 +316,9 @@ if (window.__FILL_HELPER_INITIALIZED__) {
             ownSetter.call(target, nextValue);
             return 'native_own';
           }
-        } catch (_) {}
+        } catch (error) {
+          recordDiagnostic('fill_helper.native_value_setter', error);
+        }
         target.value = nextValue;
         return 'direct_fallback';
       };
@@ -312,7 +333,9 @@ if (window.__FILL_HELPER_INITIALIZED__) {
               data,
             });
           }
-        } catch (_) {}
+        } catch (error) {
+          recordDiagnostic('fill_helper.input_event_constructor', error);
+        }
         return new Event('input', { bubbles: true });
       };
 
