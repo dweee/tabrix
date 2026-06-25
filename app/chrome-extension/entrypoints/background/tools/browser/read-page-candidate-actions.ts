@@ -907,7 +907,6 @@ export function buildCandidateActions(
       locatorChain,
       ...(intent ? { intent } : {}),
     });
-    if (seeds.length >= MAX_CANDIDATE_ACTIONS) break;
   }
   return bindVisibleRegionRowsToDetailActions(
     seeds,
@@ -926,14 +925,16 @@ function bindVisibleRegionRowsToDetailActions(
   frameId: number | undefined,
 ): CandidateActionSeed[] {
   if (!visibleRegionRows?.visibleRegionRowsUsed || visibleRegionRows.rows.length === 0) {
-    return seeds;
+    return rankBoundCandidateActions(seeds);
   }
 
   if (hasBroadBlockingOverlay(interactiveElements)) {
     const blockedContentTargets = visibleRegionRowTargetRefs(visibleRegionRows);
     if (blockedContentTargets.size > 0) {
-      return seeds.filter(
-        (seed) => !blockedContentTargets.has(seed.targetRef) || isProtectedIntent(seed.intent),
+      return rankBoundCandidateActions(
+        seeds.filter(
+          (seed) => !blockedContentTargets.has(seed.targetRef) || isProtectedIntent(seed.intent),
+        ),
       );
     }
   }
@@ -1047,18 +1048,24 @@ function rankBoundCandidateActions(actions: CandidateActionSeed[]): CandidateAct
   return actions
     .map((action, index) => ({ action, index, priority: boundCandidateActionPriority(action) }))
     .sort((left, right) => right.priority - left.priority || left.index - right.index)
-    .map(({ action }) => action);
+    .map(({ action }) => action)
+    .slice(0, MAX_CANDIDATE_ACTIONS);
 }
 
 function boundCandidateActionPriority(action: CandidateActionSeed): number {
   const intent = String(action.intent || '');
-  if (intent === 'search.enter_query') return 360;
+  if (intent === 'search.enter_query') return 390;
+  if (intent.startsWith('search.apply_filter.') || intent.startsWith('filter.')) return 380;
+  if (intent === 'search.open_filters') return 370;
   if (intent === 'content.open_detail') return 350;
   if (intent === 'search.submit') return 340;
   if (intent === 'search.category_select') return 330;
   if (intent.startsWith('auth.')) return 325;
-  if (intent.startsWith('filter.')) return 315;
-  if (intent.startsWith('publish.')) return 90;
+  if (intent === 'publish.select_media_type') return 320;
+  if (intent === 'publish.upload_media') return 310;
+  if (intent === 'publish.submit') return 300;
+  if (intent === 'publish.open_entry') return 290;
+  if (intent.startsWith('publish.')) return 280;
   const label = String(action.label || '');
   if (
     /menu action candidate|account action candidate|关于我们|营业执照|首页|直播|消息/i.test(label)

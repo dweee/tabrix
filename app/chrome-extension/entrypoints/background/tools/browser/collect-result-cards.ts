@@ -29,6 +29,8 @@ interface CollectResultCardsParams {
   startFromTop?: boolean;
 }
 
+const MAX_VISIBLE_FILTER_ACTIONS = 48;
+
 interface VisibleCardScanResult {
   cards: CollectedResultCard[];
   filterState: SearchFilterState;
@@ -772,8 +774,9 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     }
 
     return Array.from(actionByKey.values())
+      .sort((left, right) => right.score - left.score)
       .map(({ action }) => action)
-      .slice(0, 24);
+      .slice(0, MAX_VISIBLE_FILTER_ACTIONS);
   };
 
   const searchInputCandidate = (): PageCandidateAction | null => {

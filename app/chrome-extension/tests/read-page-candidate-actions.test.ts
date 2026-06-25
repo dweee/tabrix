@@ -113,6 +113,56 @@ describe('read_page candidate action intents', () => {
     ]);
   });
 
+  it('keeps visible filter-panel options ahead of result cards when candidate actions are capped', () => {
+    const resultElements = Array.from({ length: 26 }, (_, index) =>
+      element({
+        ref: `ref_result_${index + 1}`,
+        role: 'link',
+        name: `Result card ${index + 1}`,
+        matchSource: 'visible_text',
+      }),
+    );
+    const filterElements = [
+      element({
+        ref: 'ref_text_search_toolbar_filter',
+        role: 'button',
+        name: '筛选',
+        rect: { x: 0, y: 80, width: 48, height: 24 },
+      }),
+      element({
+        ref: 'ref_text_filter_panel_sort',
+        role: 'button',
+        name: '最多收藏',
+        rect: { x: 0, y: 240, width: 80, height: 24 },
+      }),
+      element({
+        ref: 'ref_text_filter_panel_content',
+        role: 'button',
+        name: '图文',
+        rect: { x: 0, y: 320, width: 56, height: 24 },
+      }),
+      element({
+        ref: 'ref_text_filter_panel_time',
+        role: 'button',
+        name: '一周内',
+        rect: { x: 0, y: 400, width: 64, height: 24 },
+      }),
+    ];
+
+    const actions = buildCandidateActions([...resultElements, ...filterElements], []);
+    const labels = actions.map((action) => action.label);
+
+    expect(actions).toHaveLength(20);
+    expect(labels).toEqual(expect.arrayContaining(['最多收藏', '图文', '一周内']));
+    expect(actions.filter((action) => String(action.intent || '').startsWith('filter.'))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: '最多收藏', intent: 'filter.sort_most_collected' }),
+        expect.objectContaining({ label: '图文', intent: 'filter.option_select' }),
+        expect.objectContaining({ label: '一周内', intent: 'filter.time_range_select' }),
+      ]),
+    );
+  });
+
   it('promotes safe CDP AX locators into executable candidate actions', () => {
     const actions = buildCandidateActions([], [], {
       viewport: { width: 1280, height: 720, dpr: 1 },
