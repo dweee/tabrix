@@ -11,6 +11,13 @@ import {
 import { buildLegacyMemoryTraceBindingHash, buildMemoryTraceBindingHash } from './feedback-binding';
 import { BoundedAsyncBrowserObjectWriteQueue } from './mke-browser-object-write-queue';
 import {
+  normalizeOwnerType,
+  normalizePageRoleForMemory,
+  objectFingerprint,
+  pageObjectIdentityRoute,
+  sourceTraceIds,
+} from './mke-memory-object-identity';
+import {
   readActionabilityBoolean,
   readArray,
   readBoolean,
@@ -979,11 +986,6 @@ function readBusinessVerdictString(...values: unknown[]): BusinessSuccessVerdict
   return null;
 }
 
-function normalizePageRoleForMemory(value: string | null): string | null {
-  if (value === 'search_list') return 'search_results';
-  return value;
-}
-
 function normalizeUrlPattern(
   url: string | null,
   options: { allowPersonalBrowserStateStorage?: boolean } = {},
@@ -1300,25 +1302,12 @@ function readRequestNumber(request: Record<string, unknown> | null, key: string)
   return readNumber(request?.[key]);
 }
 
-function objectFingerprint(...parts: Array<string | number | null | undefined>): string {
-  return parts
-    .map((part) => (part === null || part === undefined || part === '' ? 'unknown' : String(part)))
-    .join(':');
-}
-
 function browserPageObjectKey(tab: BrowserWorldTabProjection): string {
   return (
     tab.urlFields.rootRoute ??
     tab.urlFields.currentRoute ??
     tab.urlFields.pattern ??
     String(tab.tabId)
-  );
-}
-
-function pageObjectIdentityRoute(...values: Array<string | null | undefined>): string {
-  return (
-    values.find((value): value is string => typeof value === 'string' && value.length > 0) ??
-    'unknown'
   );
 }
 
@@ -1347,19 +1336,6 @@ function isApiLikeDataSource(...values: Array<string | null | undefined>): boole
     text.includes('endpoint') ||
     text.includes('knowledge')
   );
-}
-
-function normalizeOwnerType(value: string | null): string | null {
-  if (!value) return null;
-  if (value === 'ai' || value === 'run_owned') return 'ai';
-  if (value === 'user_or_page' || value === 'user_owned' || value === 'page_opener') {
-    return 'user_or_page';
-  }
-  return 'unknown';
-}
-
-function sourceTraceIds(trace: BrowserObjectProjectionTrace): string[] {
-  return trace.traceId ? [trace.traceId] : [];
 }
 
 function normalizeConfidence(value: number | null | undefined): number | null {
