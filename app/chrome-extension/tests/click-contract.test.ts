@@ -1247,6 +1247,44 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
     expect(response.signals.hashAfter).toBe('#detail');
   });
 
+  it('allows a selector click when a filter label hits another layer in the same action control', async () => {
+    document.body.innerHTML = `
+      <button id="filter-option" type="button">
+        <span id="filter-label">最多收藏</span>
+        <span id="filter-hit-layer" aria-hidden="true"></span>
+      </button>
+    `;
+    const button = document.getElementById('filter-option') as HTMLButtonElement;
+    const label = document.getElementById('filter-label') as HTMLSpanElement;
+    const hitLayer = document.getElementById('filter-hit-layer') as HTMLSpanElement;
+    setRect(button, { left: 20, top: 30, width: 160, height: 40 });
+    setRect(label, { left: 40, top: 40, width: 64, height: 18 });
+    setRect(hitLayer, { left: 40, top: 40, width: 64, height: 18 });
+    document.elementFromPoint = vi.fn(() => hitLayer);
+    let clicked = false;
+    button.addEventListener('click', () => {
+      clicked = true;
+      button.setAttribute('aria-selected', 'true');
+    });
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#filter-label',
+      waitForNavigation: false,
+      timeout: 1000,
+      intent: 'search.apply_filter.sort',
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(clicked).toBe(true);
+    expect(response.elementInfo).toMatchObject({
+      tagName: 'SPAN',
+      id: 'filter-label',
+      targetConsistency: { verdict: 'matched_by_shared_action_ancestor' },
+    });
+    expect(button.getAttribute('aria-selected')).toBe('true');
+  });
+
   it('does not prove auth.request_otp in the injected click helper', async () => {
     document.body.innerHTML = '<button id="btn">获取验证码</button>';
     const button = document.getElementById('btn') as HTMLButtonElement;

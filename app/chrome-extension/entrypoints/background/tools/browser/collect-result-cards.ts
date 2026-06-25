@@ -29,8 +29,6 @@ interface CollectResultCardsParams {
   startFromTop?: boolean;
 }
 
-const MAX_VISIBLE_FILTER_ACTIONS = 48;
-
 interface VisibleCardScanResult {
   cards: CollectedResultCard[];
   filterState: SearchFilterState;
@@ -239,6 +237,7 @@ async function findBrowserWorldTab(tabId: number): Promise<BrowserWorldTabObject
 }
 
 export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
+  const maxVisibleFilterActions = 48;
   const normalize = (value: unknown): string =>
     String(value ?? '')
       .replace(/\s+/g, ' ')
@@ -776,7 +775,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     return Array.from(actionByKey.values())
       .sort((left, right) => right.score - left.score)
       .map(({ action }) => action)
-      .slice(0, MAX_VISIBLE_FILTER_ACTIONS);
+      .slice(0, maxVisibleFilterActions);
   };
 
   const searchInputCandidate = (): PageCandidateAction | null => {
@@ -1190,15 +1189,19 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     const resultCardTargetRef = stableResultCardTargetRef(title, href);
     const primaryLinkHitVerified =
       Boolean(primaryLink) && !primaryLink?.reasons.includes('visible_detail_link_unverified_hit');
+    const primaryLinkCanBindClickTarget = Boolean(primaryLink && primaryLinkSelector);
+    const primaryLinkMatchReason = primaryLinkHitVerified
+      ? 'result_card_primary_link'
+      : 'result_card_visible_detail_link';
     const resultCardCandidateAction =
-      primaryLinkHitVerified && primaryLink && primaryLinkSelector
+      primaryLinkCanBindClickTarget && primaryLink && primaryLinkSelector
         ? {
             id: `ca_click_${resultCardTargetRef}`,
             actionType: 'click' as const,
             targetRef: resultCardTargetRef,
             ...(title ? { label: title } : {}),
-            confidence: Math.min(0.94, confidence + 0.04),
-            matchReason: 'result_card_primary_link',
+            confidence: Math.min(primaryLinkHitVerified ? 0.94 : 0.88, confidence + 0.04),
+            matchReason: primaryLinkMatchReason,
             intent: 'content.open_detail' as const,
             locatorChain: [
               { type: 'ref', value: resultCardTargetRef },

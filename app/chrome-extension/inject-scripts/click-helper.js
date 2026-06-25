@@ -3,7 +3,7 @@
 // click-helper.js
 // This script is injected into the page to handle click operations
 
-const TABRIX_CLICK_HELPER_VERSION = 'click-helper-v2-same-href-hit-target';
+const TABRIX_CLICK_HELPER_VERSION = 'click-helper-v2-shared-action-hit-target';
 
 if (
   window.__CLICK_HELPER_INITIALIZED__ &&
@@ -376,6 +376,17 @@ if (
         const actual = document.elementFromPoint(x, y);
         const expectedInfo = describeHitTarget(expected);
         const actualInfo = describeHitTarget(actual);
+        const nearestGenericActionAncestor = (candidate) => {
+          if (!(candidate instanceof Element)) return null;
+          let current = candidate;
+          let depth = 0;
+          while (current && current instanceof Element && depth < 8) {
+            if (isGenericActionControl(current)) return current;
+            current = current.parentElement;
+            depth += 1;
+          }
+          return null;
+        };
         const linkHrefFor = (candidate) => {
           if (!(candidate instanceof Element)) return '';
           const anchor =
@@ -428,6 +439,18 @@ if (
             expectedTarget: expectedInfo,
             actualTarget: actualInfo,
           };
+        }
+        if (actual instanceof Element) {
+          const expectedAction = nearestGenericActionAncestor(expected);
+          const actualAction = nearestGenericActionAncestor(actual);
+          if (expectedAction && actualAction && expectedAction === actualAction) {
+            return {
+              verdict: 'matched_by_shared_action_ancestor',
+              clickMethod,
+              expectedTarget: expectedInfo,
+              actualTarget: actualInfo,
+            };
+          }
         }
         if (actual instanceof Element) {
           const expectedHref = linkHrefFor(expected);
@@ -610,6 +633,7 @@ if (
           const visibilityProvenByHit = [
             'matched',
             'matched_by_clickable_ancestor',
+            'matched_by_shared_action_ancestor',
             'matched_by_same_href_action',
           ].includes(blockedConsistency.verdict);
           if (['blocked_by_overlay', 'target_mismatch'].includes(blockedConsistency.verdict)) {

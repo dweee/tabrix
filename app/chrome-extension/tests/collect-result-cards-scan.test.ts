@@ -70,6 +70,12 @@ function renderCards(cards: Array<{ key: string; title: string; href: string; y:
 }
 
 describe('collect result cards DOM scan', () => {
+  it('keeps the injected scanner self-contained for CDP fallback', () => {
+    const scannerSource = scanVisibleResultCardsInPage.toString();
+
+    expect(scannerSource).not.toContain('MAX_VISIBLE_FILTER_ACTIONS');
+  });
+
   it('objectizes visible filter triggers and panel options as actionable targets', () => {
     setViewport();
     document.body.innerHTML = `
@@ -232,7 +238,7 @@ describe('collect result cards DOM scan', () => {
     ).toBe(betaRef);
   });
 
-  it('does not promote an inconclusive detail-link hit test to a stable click target', () => {
+  it('promotes a visible detail link with a CSS locator to a stable click target', () => {
     setViewport();
     renderCards([
       {
@@ -249,13 +255,24 @@ describe('collect result cards DOM scan', () => {
 
     const scan = scanVisibleResultCardsInPage();
     const card = scan.cards[0];
+    const action = card.actionTarget?.toolArgs?.candidateAction;
 
-    expect(card.actionTarget?.executionScope).toBe('session_url');
-    expect(card.actionTarget?.toolName).toBeUndefined();
-    expect(card.actionTarget?.toolArgs?.candidateAction).toBeUndefined();
+    expect(card.actionTarget?.executionScope).toBe('same_tab_fresh_snapshot');
+    expect(card.actionTarget?.toolName).toBe('chrome_click_element');
+    expect(action).toMatchObject({
+      actionType: 'click',
+      intent: 'content.open_detail',
+      matchReason: 'result_card_visible_detail_link',
+      locatorChain: expect.arrayContaining([
+        expect.objectContaining({
+          type: 'css',
+          value: expect.stringContaining('a[data-testid="link-alpha"]'),
+        }),
+      ]),
+    });
     expect(card.actionTarget?.openAction?.toolName).toBe('chrome_navigate');
     expect(scan.candidateActions.some((action) => action.intent === 'content.open_detail')).toBe(
-      false,
+      true,
     );
   });
 
