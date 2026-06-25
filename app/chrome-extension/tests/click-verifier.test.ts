@@ -266,6 +266,21 @@ describe('clickTool integration', () => {
 
     expect(result.isError).toBe(false);
     expect(payload.clickDiff).toEqual({ kind: 'no_change' });
+    expect(payload.postActionDelta).toMatchObject({
+      deltaKind: 'post_action_tool_delta',
+      actionKind: 'click',
+      tabId: 4107,
+      observedOutcome: 'no_observed_change',
+      changed: false,
+      changedSignals: [],
+      urlDelta: null,
+      readbackStatus: 'not_proven',
+      recommendation: 'stop_or_retry_after_fresh_read',
+      businessSuccessProven: false,
+    });
+    expect(payload.postActionDelta.claimBoundary).toContain(
+      'This is browser-observed post-action change evidence, not AI business evaluation.',
+    );
   });
 
   it('emits clickDiff=change with facts-only signal deltas', async () => {
@@ -312,6 +327,21 @@ describe('clickTool integration', () => {
       focusChanged: false,
       stateChanged: false,
     });
+    expect(payload.postActionDelta).toMatchObject({
+      deltaKind: 'post_action_tool_delta',
+      actionKind: 'click',
+      tabId: 4108,
+      observedOutcome: 'spa_route_change',
+      changed: true,
+      changedSignals: [],
+      urlDelta: 'same_origin',
+      hashChanged: false,
+      beforeUnloadFired: false,
+      readbackStatus: 'fresh_read_required',
+      recommendation: 'chrome_read_page_force_refresh_same_tab',
+      businessSuccessProven: false,
+    });
+    expect(payload.postActionDelta.actionId).toMatch(/^click-4108-/);
   });
 });
 

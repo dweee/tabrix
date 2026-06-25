@@ -559,6 +559,24 @@ type ClickDiffSummary =
       stateChanged: boolean;
     };
 
+type BrowserActionPostActionDelta = {
+  deltaKind: 'post_action_tool_delta';
+  actionId: string | null;
+  actionKind: string;
+  tabId: number | null;
+  targetRef: string | null;
+  observedOutcome: string | null;
+  changed: boolean;
+  changedSignals: string[];
+  urlDelta: ClickDiffUrlDelta | null;
+  hashChanged: boolean | null;
+  beforeUnloadFired: boolean | null;
+  readbackStatus: string | null;
+  recommendation: string | null;
+  businessSuccessProven: boolean | null;
+  claimBoundary: string[];
+};
+
 function classifyClickUrlDelta(page: ClickPageSignals): ClickDiffUrlDelta {
   if (page.urlBefore === page.urlAfter) {
     return page.hashBefore !== page.hashAfter ? 'hash_only' : 'none';
@@ -613,16 +631,70 @@ function buildClickDiffSummary(
   };
 }
 
+function buildBrowserActionPostActionDelta(input: {
+  actionId?: string | null;
+  actionKind: string;
+  tabId?: number | null;
+  targetRef?: string | null;
+  observedOutcome?: string | null;
+  clickDiff?: ClickDiffSummary | null;
+  verification?: ClickVerification | null;
+  postActionReadback?: PostActionReadbackEvidence | null;
+}): BrowserActionPostActionDelta {
+  const clickDiff = input.clickDiff ?? null;
+  const verification = input.verification ?? null;
+  const changedSignals =
+    clickDiff?.kind === 'change'
+      ? [
+          clickDiff.newTabOpened || verification?.newTabOpened ? 'new_tab_opened' : null,
+          clickDiff.beforeUnloadFired || verification?.navigationOccurred
+            ? 'before_unload_fired'
+            : null,
+          clickDiff.hashChanged ? 'hash_changed' : null,
+          clickDiff.domChanged || verification?.domChanged ? 'dom_changed' : null,
+          clickDiff.dialogAdded ? 'dialog_opened' : null,
+          clickDiff.menuAdded ? 'menu_opened' : null,
+          clickDiff.stateChanged || verification?.stateChanged ? 'state_changed' : null,
+          clickDiff.focusChanged || verification?.focusChanged ? 'focus_changed' : null,
+        ].filter((entry): entry is string => Boolean(entry))
+      : [];
+
+  return {
+    deltaKind: 'post_action_tool_delta',
+    actionId: input.actionId ?? null,
+    actionKind: input.actionKind,
+    tabId: input.tabId ?? null,
+    targetRef: input.targetRef ?? null,
+    observedOutcome: input.observedOutcome ?? null,
+    changed: clickDiff?.kind === 'change' || changedSignals.length > 0,
+    changedSignals,
+    urlDelta: clickDiff?.kind === 'change' ? clickDiff.urlDelta : null,
+    hashChanged: clickDiff?.kind === 'change' ? clickDiff.hashChanged : null,
+    beforeUnloadFired: clickDiff?.kind === 'change' ? clickDiff.beforeUnloadFired : null,
+    readbackStatus: input.postActionReadback?.status ?? null,
+    recommendation: input.postActionReadback?.requiredNextAction ?? null,
+    businessSuccessProven: input.postActionReadback?.businessSuccessProven ?? null,
+    claimBoundary: [
+      'This is browser-observed post-action change evidence, not AI business evaluation.',
+      'No site-specific interpretation is included.',
+      'A fresh read may still be required before reusing page objects or targets.',
+    ],
+  };
+}
+
 export function buildStructuredClickHelperErrorResult(input: {
   message: string;
   clickMethod: string;
   elementInfo?: unknown;
   browserSignals: ClickBrowserSignals;
+  actionId?: string | null;
+  tabId?: number | null;
   targetBinding?: ActionTargetBindingEvidence;
   reason?: string;
   targetConsistency?: unknown;
   actionRecovery?: ClickActionRecoveryGuidance;
   actionEvidenceResult?: ActionEvidenceResult;
+  postActionDelta?: BrowserActionPostActionDelta;
 }) {
   const verification: ClickVerification = {
     navigationOccurred: false,
@@ -639,6 +711,18 @@ export function buildStructuredClickHelperErrorResult(input: {
     observedOutcome: 'no_observed_change' as ClickObservedOutcome,
     verification,
     clickDiff: buildClickDiffSummary(null, input.browserSignals),
+    postActionDelta:
+      input.postActionDelta ??
+      buildBrowserActionPostActionDelta({
+        actionId: input.actionId,
+        actionKind: 'click',
+        tabId: input.tabId,
+        targetRef: null,
+        observedOutcome: 'no_observed_change',
+        clickDiff: buildClickDiffSummary(null, input.browserSignals),
+        verification,
+        postActionReadback: null,
+      }),
     navigationOccurred: false,
     lane: TABRIX_OWNED_LANE,
     error: input.reason ?? 'click_dispatch_not_proven',
@@ -659,6 +743,8 @@ function createStructuredClickHelperErrorResponse(input: {
   clickMethod: string;
   elementInfo?: unknown;
   browserSignals?: ClickBrowserSignals;
+  actionId?: string | null;
+  tabId?: number | null;
   targetBinding?: ActionTargetBindingEvidence;
   reason?: string;
   targetConsistency?: unknown;
@@ -666,17 +752,21 @@ function createStructuredClickHelperErrorResponse(input: {
   businessVerification?: unknown;
   postActionReadback?: unknown;
   actionEvidenceResult?: ActionEvidenceResult;
+  postActionDelta?: BrowserActionPostActionDelta;
 }): ToolResult {
   const payload = buildStructuredClickHelperErrorResult({
     message: input.message,
     clickMethod: input.clickMethod,
     elementInfo: input.elementInfo,
     browserSignals: input.browserSignals ?? { newTabOpened: false },
+    actionId: input.actionId,
+    tabId: input.tabId,
     targetBinding: input.targetBinding,
     reason: input.reason,
     targetConsistency: input.targetConsistency,
     actionRecovery: input.actionRecovery,
     actionEvidenceResult: input.actionEvidenceResult,
+    postActionDelta: input.postActionDelta,
   });
   return {
     content: [
@@ -1522,6 +1612,8 @@ class ClickTool extends BaseBrowserToolExecutor {
               }`,
           clickMethod: requestedClickMethod,
           browserSignals,
+          actionId: clickActionId,
+          tabId: tab.id,
           targetBinding,
           reason,
           businessVerification,
@@ -1645,6 +1737,8 @@ class ClickTool extends BaseBrowserToolExecutor {
           clickMethod,
           elementInfo: structuredError.elementInfo,
           browserSignals,
+          actionId: clickActionId,
+          tabId: tab.id,
           targetBinding,
           reason,
           targetConsistency: structuredError.targetConsistency,
@@ -1742,6 +1836,17 @@ class ClickTool extends BaseBrowserToolExecutor {
         postActionReadback,
         errorCode: merged.dispatchSucceeded ? null : merged.observedOutcome,
       });
+      const clickDiff = buildClickDiffSummary(pageSignals, browserSignals);
+      const postActionDelta = buildBrowserActionPostActionDelta({
+        actionId: clickActionId,
+        actionKind: 'click',
+        tabId: tab.id,
+        targetRef: finalRef ?? args.candidateAction?.targetRef ?? null,
+        observedOutcome: merged.observedOutcome,
+        clickDiff,
+        verification: merged.verification,
+        postActionReadback,
+      });
       return {
         content: [
           {
@@ -1751,7 +1856,8 @@ class ClickTool extends BaseBrowserToolExecutor {
               dispatchSucceeded: merged.dispatchSucceeded,
               observedOutcome: merged.observedOutcome,
               verification: merged.verification,
-              clickDiff: buildClickDiffSummary(pageSignals, browserSignals),
+              clickDiff,
+              postActionDelta,
               // One-release compat field; equals verification.navigationOccurred.
               navigationOccurred: merged.verification.navigationOccurred,
               // Explicit lane label. Always `tabrix_owned` for the

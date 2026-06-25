@@ -858,6 +858,7 @@ function summarizeBrowserActionPostObservation(payload: Record<string, unknown>)
 }
 
 function summarizeBrowserActionDelta(payload: Record<string, unknown>): unknown | null {
+  const explicitDelta = readObject(payload.postActionDelta);
   const actionEvidence = readObject(payload.actionEvidenceResult);
   const targetBinding =
     readObject(actionEvidence?.targetBinding) ?? readObject(payload.targetBinding);
@@ -866,7 +867,14 @@ function summarizeBrowserActionDelta(payload: Record<string, unknown>): unknown 
   const verification = readObject(payload.verification);
   const inputWriteEvidence = readObject(payload.inputWriteEvidence);
   const changedSignals = [
+    ...readArray(explicitDelta?.changedSignals)
+      .map((entry): string | null => (typeof entry === 'string' ? entry : null))
+      .filter((entry): entry is string => Boolean(entry)),
     readBoolean(clickDiff?.newTabOpened, verification?.newTabOpened) ? 'new_tab_opened' : null,
+    readBoolean(clickDiff?.beforeUnloadFired, verification?.navigationOccurred)
+      ? 'before_unload_fired'
+      : null,
+    readBoolean(clickDiff?.hashChanged) ? 'hash_changed' : null,
     readBoolean(clickDiff?.domChanged, verification?.domChanged) ? 'dom_changed' : null,
     readBoolean(clickDiff?.dialogAdded) ? 'dialog_opened' : null,
     readBoolean(clickDiff?.menuAdded) ? 'menu_opened' : null,
@@ -875,23 +883,50 @@ function summarizeBrowserActionDelta(payload: Record<string, unknown>): unknown 
     readString(inputWriteEvidence?.proofStatus) === 'input_state_observed'
       ? 'input_state_observed'
       : null,
-  ].filter((entry): entry is string => Boolean(entry));
-  const observedOutcome = readString(payload.observedOutcome, postActionReadback?.observedOutcome);
+  ]
+    .filter((entry): entry is string => Boolean(entry))
+    .filter((entry, index, array) => array.indexOf(entry) === index);
+  const observedOutcome = readString(
+    explicitDelta?.observedOutcome,
+    payload.observedOutcome,
+    postActionReadback?.observedOutcome,
+  );
   const summary = {
-    deltaKind: 'post_action_tool_delta',
-    actionId: readString(actionEvidence?.actionId),
-    actionKind: readString(actionEvidence?.actionKind, postActionReadback?.actionKind),
-    targetRef: readString(targetBinding?.resolvedTargetRef, targetBinding?.requestedTargetRef),
+    deltaKind: readString(explicitDelta?.deltaKind) ?? 'post_action_tool_delta',
+    actionId: readString(explicitDelta?.actionId, actionEvidence?.actionId),
+    actionKind: readString(
+      explicitDelta?.actionKind,
+      actionEvidence?.actionKind,
+      postActionReadback?.actionKind,
+    ),
+    tabId: readNumber(explicitDelta?.tabId, actionEvidence?.tabId, payload.tabId),
+    targetRef: readString(
+      explicitDelta?.targetRef,
+      targetBinding?.resolvedTargetRef,
+      targetBinding?.requestedTargetRef,
+    ),
     observedOutcome,
-    changed: changedSignals.length > 0 || readString(clickDiff?.kind) === 'change',
+    changed:
+      readBoolean(explicitDelta?.changed) ??
+      (changedSignals.length > 0 || readString(clickDiff?.kind) === 'change'),
     changedSignals,
-    urlDelta: readString(clickDiff?.urlDelta),
-    readbackStatus: readString(postActionReadback?.status),
+    urlDelta: readString(explicitDelta?.urlDelta, clickDiff?.urlDelta),
+    hashChanged: readBoolean(explicitDelta?.hashChanged, clickDiff?.hashChanged),
+    beforeUnloadFired: readBoolean(
+      explicitDelta?.beforeUnloadFired,
+      clickDiff?.beforeUnloadFired,
+      verification?.navigationOccurred,
+    ),
+    readbackStatus: readString(explicitDelta?.readbackStatus, postActionReadback?.status),
     recommendation: readString(
+      explicitDelta?.recommendation,
       postActionReadback?.requiredNextAction,
       payload.recommendedNextAction,
     ),
-    businessSuccessProven: readBoolean(postActionReadback?.businessSuccessProven),
+    businessSuccessProven: readBoolean(
+      explicitDelta?.businessSuccessProven,
+      postActionReadback?.businessSuccessProven,
+    ),
   };
   return Object.values(summary).some((value) => value !== null && value !== undefined)
     ? sanitizeValue(summary, 'memory_trace')
