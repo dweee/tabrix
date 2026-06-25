@@ -829,7 +829,6 @@ function formatExtensionPageContext(value: string): string {
     const pageName = url.pathname.split('/').filter(Boolean).pop();
     if (pageName === 'sidepanel.html') return 'Tabrix 侧栏';
     if (pageName === 'popup.html') return 'Tabrix 弹窗';
-    if (pageName === 'options.html') return 'Tabrix 设置';
     return pageName ? `${SYSTEM_PAGE_CONTEXT} ${pageName}` : SYSTEM_PAGE_CONTEXT;
   } catch {
     return SYSTEM_PAGE_CONTEXT;

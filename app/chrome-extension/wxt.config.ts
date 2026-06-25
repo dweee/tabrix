@@ -63,10 +63,6 @@ export default defineConfig({
       'sidePanel',
     ],
     host_permissions: ['<all_urls>'],
-    options_ui: {
-      page: 'options.html',
-      open_in_tab: true,
-    },
     action: {
       default_popup: 'popup.html',
       default_title: 'Tabrix',

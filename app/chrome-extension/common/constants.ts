@@ -207,8 +207,6 @@ export const STORAGE_KEYS = {
   NATIVE_AUTO_CONNECT_ENABLED: 'nativeAutoConnectEnabled',
   PENDING_EXTENSION_RELOAD_CALLBACK: 'pendingExtensionReloadCallback',
   USER_PREFERENCES: 'userPreferences',
-  USERSCRIPTS: 'userscripts',
-  USERSCRIPTS_DISABLED: 'userscripts_disabled',
 } as const;
 
 // Notification Configuration

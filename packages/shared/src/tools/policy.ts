@@ -79,10 +79,8 @@ export const TOOL_RISK_TIERS: Readonly<Record<string, TabrixRiskTier>> = Object.
   [TOOL_NAMES.BROWSER.COMPUTER]: 'P3',
   [TOOL_NAMES.BROWSER.FILE_UPLOAD]: 'P3',
   [TOOL_NAMES.BROWSER.BOOKMARK_DELETE]: 'P3',
-  // Currently commented-out in TOOL_SCHEMAS but reserved (prevent accidental downgrade on re-enable).
   [TOOL_NAMES.BROWSER.INJECT_SCRIPT]: 'P3',
   [TOOL_NAMES.BROWSER.SEND_COMMAND_TO_INJECT_SCRIPT]: 'P3',
-  [TOOL_NAMES.BROWSER.USERSCRIPT]: 'P3',
 
   // ---- MKEP Context selector (read-only SELECT against native SQLite) ----
   [TOOL_NAMES.CONTEXT.CHOOSE]: 'P0',
@@ -100,9 +98,9 @@ export const TOOL_RISK_TIERS: Readonly<Record<string, TabrixRiskTier>> = Object.
 /**
  * Tools classified P3 AND requiring an explicit opt-in.
  *
- * NOTE: Includes a few names that are currently commented-out in TOOL_SCHEMAS
- * (chrome_inject_script / chrome_send_command_to_inject_script / chrome_userscript).
- * Keeping them in the set prevents accidental exposure if/when they are uncommented.
+ * NOTE: Includes a few retired names that are not in TOOL_SCHEMAS
+ * (chrome_inject_script / chrome_send_command_to_inject_script).
+ * Keeping them in the set prevents accidental exposure if they are reintroduced.
  */
 export const P3_EXPLICIT_OPT_IN_TOOLS: ReadonlySet<string> = new Set([
   TOOL_NAMES.BROWSER.JAVASCRIPT,
@@ -111,7 +109,6 @@ export const P3_EXPLICIT_OPT_IN_TOOLS: ReadonlySet<string> = new Set([
   TOOL_NAMES.BROWSER.BOOKMARK_DELETE,
   TOOL_NAMES.BROWSER.INJECT_SCRIPT,
   TOOL_NAMES.BROWSER.SEND_COMMAND_TO_INJECT_SCRIPT,
-  TOOL_NAMES.BROWSER.USERSCRIPT,
 ]);
 
 /** Returns the Tabrix risk tier for a tool name, or undefined when unknown. */

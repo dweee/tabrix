@@ -11,7 +11,7 @@ export const TOOL_NAMES = {
     REQUEST_ELEMENT_SELECTION: 'chrome_request_element_selection',
     GET_INTERACTIVE_ELEMENTS: 'chrome_get_interactive_elements',
     NETWORK_CAPTURE: 'chrome_network_capture',
-    // Legacy tool names (kept for internal use, not exposed in TOOL_SCHEMAS)
+    // Legacy/retired tool names kept for policy guards, not exposed in TOOL_SCHEMAS.
     NETWORK_CAPTURE_START: 'chrome_network_capture_start',
     NETWORK_CAPTURE_STOP: 'chrome_network_capture_stop',
     NETWORK_REQUEST: 'chrome_network_request',
@@ -32,7 +32,6 @@ export const TOOL_NAMES = {
     COMPUTER: 'chrome_computer',
     HANDLE_DIALOG: 'chrome_handle_dialog',
     HANDLE_DOWNLOAD: 'chrome_handle_download',
-    USERSCRIPT: 'chrome_userscript',
     PERFORMANCE_START_TRACE: 'performance_start_trace',
     PERFORMANCE_STOP_TRACE: 'performance_stop_trace',
     PERFORMANCE_ANALYZE_INSIGHT: 'performance_analyze_insight',

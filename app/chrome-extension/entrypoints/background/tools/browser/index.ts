@@ -20,7 +20,6 @@ export { collectResultCardsTool } from './collect-result-cards';
 export { computerTool } from './computer';
 export { handleDialogTool } from './dialog';
 export { handleDownloadTool } from './download';
-export { userscriptTool } from './userscript';
 export {
   performanceStartTraceTool,
   performanceStopTraceTool,

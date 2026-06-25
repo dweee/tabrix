@@ -65,7 +65,6 @@ describe('TOOL_RISK_TIERS coverage invariants', () => {
     expect(TOOL_RISK_TIERS[TOOL_NAMES.BROWSER.BOOKMARK_DELETE]).toBe('P3');
     expect(TOOL_RISK_TIERS[TOOL_NAMES.BROWSER.INJECT_SCRIPT]).toBe('P3');
     expect(TOOL_RISK_TIERS[TOOL_NAMES.BROWSER.SEND_COMMAND_TO_INJECT_SCRIPT]).toBe('P3');
-    expect(TOOL_RISK_TIERS[TOOL_NAMES.BROWSER.USERSCRIPT]).toBe('P3');
   });
 
   it('chrome_javascript schema makes caller-side script review responsibility explicit', () => {
