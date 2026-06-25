@@ -1,3 +1,5 @@
+import { mergeCrossScrollObjects } from './cross-scroll-object-merge';
+
 export interface CollectedResultCard {
   title: string;
   url?: string;
@@ -164,16 +166,12 @@ export function mergeCollectedResultCards(
   incoming: readonly CollectedResultCard[],
   limit: number,
 ): CollectedResultCard[] {
-  const byKey = new Map<string, CollectedResultCard>();
-  for (const card of [...current, ...incoming]) {
-    const key = resultCardKey(card);
-    if (!key) continue;
-    const existing = byKey.get(key);
-    if (!existing) {
-      byKey.set(key, card);
-      continue;
-    }
-    byKey.set(key, {
+  return mergeCrossScrollObjects({
+    current,
+    incoming,
+    limit,
+    keyOf: resultCardKey,
+    mergeDuplicate: (existing, card) => ({
       ...existing,
       url: existing.url || card.url,
       actionTarget: hasExecutableClickTarget(card)
@@ -189,9 +187,7 @@ export function mergeCollectedResultCards(
       confidence: Math.max(existing.confidence, card.confidence),
       reasons: [...new Set([...existing.reasons, ...card.reasons])],
       sourceStrategy: existing.sourceStrategy ?? card.sourceStrategy,
-    });
-  }
-  return [...byKey.values()]
-    .sort((left, right) => left.firstSeenGlobalTop - right.firstSeenGlobalTop)
-    .slice(0, limit);
+    }),
+    compare: (left, right) => left.firstSeenGlobalTop - right.firstSeenGlobalTop,
+  });
 }
