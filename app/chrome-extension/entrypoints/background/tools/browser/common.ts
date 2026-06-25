@@ -1,7 +1,7 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
-import { captureFrameOnAction, isAutoCaptureActive } from './gif-recorder';
+import { captureFrameOnAction, isAutoCaptureActive } from './gif-auto-capture';
 import {
   markBrowserWorldTabAiCreated,
   markBrowserWorldTabAiOperated,

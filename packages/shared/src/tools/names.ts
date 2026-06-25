@@ -35,7 +35,6 @@ export const TOOL_NAMES = {
     PERFORMANCE_START_TRACE: 'performance_start_trace',
     PERFORMANCE_STOP_TRACE: 'performance_stop_trace',
     PERFORMANCE_ANALYZE_INSIGHT: 'performance_analyze_insight',
-    GIF_RECORDER: 'chrome_gif_recorder',
   },
   /**
    * MKEP context selector.

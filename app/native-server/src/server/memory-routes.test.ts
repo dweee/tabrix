@@ -57,9 +57,14 @@ async function seedMkeRows(): Promise<void> {
     sequenceIndex: readTrace.sequenceIndex,
     traceBindingHash: buildMemoryTraceBindingHash(readTrace),
     businessStatus: 'achieved',
-    confidence: 0.82,
+    confidence: 0.92,
     reasonCode: 'page_inventory_read',
     summary: 'AI judged the page inventory read as useful for the next action',
+    evaluationVersion: 'ai_feedback_v1',
+    rubricVersion: 'tabrix_ai_business_feedback_v1',
+    evaluatorModel: 'jest-ai-evaluator',
+    userGoalSnapshot: 'inspect page and click action',
+    experienceCandidate: true,
     sourceToolName: 'chrome_click_element',
     sourceToolCallId: 'feedback-call-1',
     receivedAt: '2026-06-06T10:00:00.080Z',
@@ -214,7 +219,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       toolName: 'chrome_read_page',
       aiFeedback: {
         businessStatus: 'achieved',
-        confidence: 0.82,
+        confidence: 0.92,
         reasonCode: 'page_inventory_read',
         summary: 'AI judged the page inventory read as useful for the next action',
       },
@@ -292,7 +297,6 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     [TOOL_NAMES.BROWSER.COMPUTER],
     [TOOL_NAMES.BROWSER.REQUEST_ELEMENT_SELECTION],
     [TOOL_NAMES.BROWSER.PERFORMANCE_ANALYZE_INSIGHT],
-    [TOOL_NAMES.BROWSER.GIF_RECORDER],
   ])(
     'GET /memory/mke/traces marks default auxiliary browser trace as not required: %s',
     async (toolName) => {

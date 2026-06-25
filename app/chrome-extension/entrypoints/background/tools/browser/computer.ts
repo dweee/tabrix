@@ -13,7 +13,7 @@ import {
   isAutoCaptureActive,
   type ActionMetadata,
   type ActionType,
-} from './gif-recorder';
+} from './gif-auto-capture';
 import { type CandidateActionInput, resolveCandidateActionTarget } from './candidate-action';
 import { lookupStableTargetRefEntry } from './stable-target-ref-registry';
 
