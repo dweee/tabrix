@@ -111,6 +111,11 @@ describe('MkeExperienceProjector', () => {
       responseAt: '2026-06-06T03:00:02.000Z',
       durationMs: 1000,
       toolSuccess: true,
+      aiFeedback: verifiedExperienceFeedback({
+        confidence: 0.93,
+        reasonCode: 'ai_verified_page_read',
+        summary: 'AI verified the page read found the editor objects needed for this task.',
+      }),
       tabId: 9,
       siteFamily: 'example.test',
       pageUrlPattern: 'https://example.test/editor',
@@ -658,7 +663,7 @@ describe('MkeExperienceProjector', () => {
     expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
   });
 
-  it('mines a recipe when high-confidence AI feedback approves an otherwise unknown action', () => {
+  it('does not mine a recipe when only the final action has AI feedback', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
     const traces = new MemoryTraceRepository(opened.db);
     const knowledge = new KnowledgeModelRepository(opened.db);
@@ -714,8 +719,12 @@ describe('MkeExperienceProjector', () => {
 
     const result = projector.projectIdleBatch({ nowIso: '2026-06-06T07:00:05.000Z' });
 
-    expect(result.savedExperienceCount).toBe(1);
-    expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toHaveLength(1);
+    expect(result).toMatchObject({
+      processedTraceCount: 2,
+      savedExperienceCount: 0,
+      experienceIds: [],
+    });
+    expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
   });
 
   it('anchors AI-approved actions to the nearest same-tab page context across task ids', () => {

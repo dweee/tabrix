@@ -7,6 +7,7 @@ import type {
   MemoryTrace,
   MemoryTraceRepository,
 } from './db';
+import { shouldRequestAiFeedbackForTrace } from './ai-feedback-requirement';
 import { buildMkePageModelKey } from './mke-knowledge-projector';
 
 export interface MkeExperienceProjectionInput {
@@ -439,6 +440,9 @@ function buildRecipeBasis(
   knowledgeRepo: KnowledgeModelRepository,
   allTraces: MemoryTrace[],
 ): RecipeBasis | null {
+  const feedbackRequiredTraces = group.traces.filter(shouldRequestAiFeedbackForTrace);
+  if (feedbackRequiredTraces.some((trace) => !isBusinessAchieved(trace))) return null;
+
   const actionTraces = group.traces.filter(
     (trace) =>
       REPLAYABLE_ACTION_TOOLS.has(trace.toolName) &&
