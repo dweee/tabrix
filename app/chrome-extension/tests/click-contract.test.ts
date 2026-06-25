@@ -1285,6 +1285,53 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
     expect(button.getAttribute('aria-selected')).toBe('true');
   });
 
+  it('allows a selector click when a framework filter chip uses non-semantic div/span layers', async () => {
+    document.body.innerHTML = `
+      <div id="filter-chip" class="filter-option selected">
+        <span id="filter-label">一周内</span>
+        <span id="filter-hit-layer" aria-hidden="true"></span>
+      </div>
+    `;
+    const chip = document.getElementById('filter-chip') as HTMLDivElement;
+    const label = document.getElementById('filter-label') as HTMLSpanElement;
+    const hitLayer = document.getElementById('filter-hit-layer') as HTMLSpanElement;
+    setRect(chip, { left: 20, top: 30, width: 120, height: 36 });
+    setRect(label, { left: 42, top: 39, width: 48, height: 18 });
+    setRect(hitLayer, { left: 42, top: 39, width: 48, height: 18 });
+    Object.defineProperty(window, 'getComputedStyle', {
+      configurable: true,
+      value: (element: Element) => ({
+        display: 'block',
+        visibility: 'visible',
+        opacity: '1',
+        cursor: element === chip ? 'pointer' : 'auto',
+      }),
+    });
+    document.elementFromPoint = vi.fn(() => hitLayer);
+    let clicked = false;
+    chip.addEventListener('click', () => {
+      clicked = true;
+      chip.setAttribute('data-selected', 'true');
+    });
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#filter-label',
+      waitForNavigation: false,
+      timeout: 1000,
+      intent: 'search.apply_filter.time_range',
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(clicked).toBe(true);
+    expect(response.elementInfo).toMatchObject({
+      tagName: 'SPAN',
+      id: 'filter-label',
+      targetConsistency: { verdict: 'matched_by_shared_action_ancestor' },
+    });
+    expect(chip.getAttribute('data-selected')).toBe('true');
+  });
+
   it('does not prove auth.request_otp in the injected click helper', async () => {
     document.body.innerHTML = '<button id="btn">获取验证码</button>';
     const button = document.getElementById('btn') as HTMLButtonElement;

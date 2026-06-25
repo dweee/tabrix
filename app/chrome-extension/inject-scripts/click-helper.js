@@ -3,7 +3,7 @@
 // click-helper.js
 // This script is injected into the page to handle click operations
 
-const TABRIX_CLICK_HELPER_VERSION = 'click-helper-v2-shared-action-hit-target';
+const TABRIX_CLICK_HELPER_VERSION = 'click-helper-v3-delegated-action-targets';
 
 if (
   window.__CLICK_HELPER_INITIALIZED__ &&
@@ -196,6 +196,8 @@ if (
 
       const GENERIC_ACTION_SELECTOR =
         'button, a[href], label, summary, option, input, textarea, select, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"], [onclick], [tabindex]:not([tabindex^="-"])';
+      const ACTION_LIKE_CLASS_PATTERN =
+        /\b(action|button|btn|click|select|selected|option|filter|sort|tab|menu|item|chip|tag|pill)\b/i;
 
       const isGenericActionControl = (candidate) => {
         if (!(candidate instanceof Element)) return false;
@@ -207,6 +209,47 @@ if (
         if (area > viewportArea * 0.35) return false;
         return true;
       };
+
+      const isDelegatedActionControl = (candidate) => {
+        if (!(candidate instanceof Element)) return false;
+        if (isFormControl(candidate)) return false;
+        if (
+          candidate instanceof HTMLLabelElement &&
+          candidate.querySelector?.('input, textarea, select')
+        ) {
+          return false;
+        }
+        const rect = candidate.getBoundingClientRect();
+        const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+        const area = Math.max(1, rect.width * rect.height);
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        if (area > viewportArea * 0.18) return false;
+        const text = compactVisibleText(candidate);
+        if (!text || text.length > 100) return false;
+        const className =
+          typeof candidate.className === 'string'
+            ? candidate.className
+            : candidate.className?.baseVal || '';
+        const stateSignal = [
+          candidate.getAttribute('aria-selected'),
+          candidate.getAttribute('aria-current'),
+          candidate.getAttribute('aria-pressed'),
+          candidate.getAttribute('data-selected'),
+          candidate.getAttribute('data-active'),
+          candidate.getAttribute('data-state'),
+        ].some((value) => value !== null && value !== 'false');
+        const classSignal = ACTION_LIKE_CLASS_PATTERN.test(className);
+        let pointerSignal = false;
+        try {
+          pointerSignal = window.getComputedStyle(candidate).cursor === 'pointer';
+        } catch {}
+        if (!pointerSignal && !classSignal && !stateSignal) return false;
+        const nestedActions = candidate.querySelectorAll?.(GENERIC_ACTION_SELECTOR).length || 0;
+        return nestedActions <= 2;
+      };
+
+      const isActionControl = (candidate) =>
+        isGenericActionControl(candidate) || isDelegatedActionControl(candidate);
 
       const isCompactLeafClickTarget = (candidate) => {
         if (!(candidate instanceof Element)) return false;
@@ -376,12 +419,12 @@ if (
         const actual = document.elementFromPoint(x, y);
         const expectedInfo = describeHitTarget(expected);
         const actualInfo = describeHitTarget(actual);
-        const nearestGenericActionAncestor = (candidate) => {
+        const nearestActionAncestor = (candidate) => {
           if (!(candidate instanceof Element)) return null;
           let current = candidate;
           let depth = 0;
           while (current && current instanceof Element && depth < 8) {
-            if (isGenericActionControl(current)) return current;
+            if (isActionControl(current)) return current;
             current = current.parentElement;
             depth += 1;
           }
@@ -441,8 +484,8 @@ if (
           };
         }
         if (actual instanceof Element) {
-          const expectedAction = nearestGenericActionAncestor(expected);
-          const actualAction = nearestGenericActionAncestor(actual);
+          const expectedAction = nearestActionAncestor(expected);
+          const actualAction = nearestActionAncestor(actual);
           if (expectedAction && actualAction && expectedAction === actualAction) {
             return {
               verdict: 'matched_by_shared_action_ancestor',
@@ -864,20 +907,24 @@ if (
         dispatchSucceeded = false;
       }
 
-      const outcomeWait = await waitForClickOutcomeWindow(verifyWindowMs, () => {
-        const hrefNow = String(window.location.href || '');
-        const hashNow = String(window.location.hash || '');
-        if (beforeUnloadFired) return 'beforeunload';
-        if (hrefNow !== urlBefore) return hashNow !== hashBefore ? 'hash_changed' : 'url_changed';
-        if (hashNow !== hashBefore) return 'hash_changed';
-        if (domAddedDialog) return 'dialog_opened';
-        if (domAddedMenu) return 'menu_opened';
-        if (diffTargetState(stateBefore, snapshotTargetState(element)) != null) {
-          return 'target_state_changed';
-        }
-        if (!waitForNavigation && document.activeElement !== focusBefore) return 'focus_changed';
-        return null;
-      });
+      const outcomeWait = await waitForClickOutcomeWindow(
+        verifyWindowMs,
+        () => {
+          const hrefNow = String(window.location.href || '');
+          const hashNow = String(window.location.hash || '');
+          if (beforeUnloadFired) return 'beforeunload';
+          if (hrefNow !== urlBefore) return hashNow !== hashBefore ? 'hash_changed' : 'url_changed';
+          if (hashNow !== hashBefore) return 'hash_changed';
+          if (domAddedDialog) return 'dialog_opened';
+          if (domAddedMenu) return 'menu_opened';
+          if (diffTargetState(stateBefore, snapshotTargetState(element)) != null) {
+            return 'target_state_changed';
+          }
+          if (!waitForNavigation && document.activeElement !== focusBefore) return 'focus_changed';
+          return null;
+        },
+        { allowHiddenFastPath: !needsDynamicPostActionWindow },
+      );
 
       window.removeEventListener('beforeunload', beforeUnloadListener);
       try {
@@ -980,9 +1027,16 @@ if (
     return anyChanged ? changed : null;
   }
 
-  function waitForClickOutcomeWindow(ms, earlyExitCheck) {
+  function waitForClickOutcomeWindow(ms, earlyExitCheck, options = {}) {
     return new Promise((resolve) => {
       const startedAt = nowMs();
+      if (options.allowHiddenFastPath !== false && document.visibilityState === 'hidden') {
+        resolve({
+          waitedMs: Math.max(0, Math.round(nowMs() - startedAt)),
+          reason: 'hidden_document_fast_path',
+        });
+        return;
+      }
       let done = false;
       let timeoutId = null;
       const finish = (reason) => {

@@ -436,12 +436,17 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
         confidence: 0.9,
       });
     }
-    const appliedLabels = filters.map((filter) => filter.label);
     const groups = {
       contentType: groupStateForKind(filters, 'content_type'),
       sort: groupStateForKind(filters, 'sort'),
       timeRange: groupStateForKind(filters, 'time_range'),
     };
+    const appliedFilters = [
+      preferredFilterForKind(filters, 'content_type'),
+      preferredFilterForKind(filters, 'sort'),
+      preferredFilterForKind(filters, 'time_range'),
+    ].filter((filter): filter is AppliedSearchFilter => Boolean(filter));
+    const appliedLabels = appliedFilters.map((filter) => filter.label);
     return {
       status: appliedLabels.length > 0 ? 'observed' : 'not_observed',
       appliedLabels,
@@ -449,7 +454,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       ...(groups.sort.selected ? { sort: groups.sort.selected } : {}),
       ...(groups.timeRange.selected ? { timeRange: groups.timeRange.selected } : {}),
       groups,
-      appliedFilters: filters,
+      appliedFilters,
       claimBoundary:
         'Filter state is inferred from active/selected DOM controls and bounded URL adapters. It proves visible page state, not global server ranking correctness.',
     };
@@ -534,6 +539,30 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
   const xpathForVisibleTextControl = (label: string): string => {
     const literal = xpathLiteral(label);
     return `//*[self::button or self::a or self::span or self::div or @role='button' or @role='menuitem' or @role='option'][normalize-space(.)=${literal} and not(.//*[normalize-space(.)=${literal}])]`;
+  };
+
+  const xpathForElement = (element: Element): string | undefined => {
+    const parts: string[] = [];
+    let current: Element | null = element;
+    while (current && current.nodeType === Node.ELEMENT_NODE) {
+      const tag = current.tagName.toLowerCase();
+      if (!tag) return undefined;
+      const id = current.getAttribute('id');
+      if (id) {
+        parts.unshift(`*[@id=${xpathLiteral(id)}]`);
+        return `//${parts.join('/')}`;
+      }
+      let index = 1;
+      let sibling = current.previousElementSibling;
+      while (sibling) {
+        if (sibling.tagName.toLowerCase() === tag) index += 1;
+        sibling = sibling.previousElementSibling;
+      }
+      parts.unshift(`${tag}[${index}]`);
+      if (tag === 'html') break;
+      current = current.parentElement;
+    }
+    return parts.length > 0 ? `/${parts.join('/')}` : undefined;
   };
 
   const stableIdentityHash = (value: string): string => {
@@ -729,6 +758,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       const control = closestClickableControl(element);
       if (!control) continue;
       const selector = selectorForElement(control);
+      const concreteXpath = xpathForElement(control);
       const canonicalLabel = isTrigger ? label : canonicalFilterLabel(label, filterKind);
       const kind = filterActionKindForLabel(canonicalLabel);
       const targetRef = stablePageTargetRef(kind, canonicalLabel);
@@ -747,6 +777,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
         locatorChain: [
           { type: 'ref', value: targetRef },
           { type: 'aria', value: canonicalLabel },
+          ...(concreteXpath ? [{ type: 'xpath', value: concreteXpath }] : []),
           { type: 'xpath', value: xpathForVisibleTextControl(canonicalLabel) },
           ...(selector ? [{ type: 'css', value: selector }] : []),
         ],

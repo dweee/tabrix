@@ -163,6 +163,55 @@ describe('collect result cards DOM scan', () => {
       ]),
     );
     expect(scan.filterState.contentType).toBe('图文');
+    const oneWeekAction = scan.candidateActions.find(
+      (action) => action.label === '一周内' && action.intent === 'search.apply_filter.time_range',
+    );
+    const xpathLocators = oneWeekAction?.locatorChain.filter((locator) => locator.type === 'xpath');
+    expect(xpathLocators?.length).toBeGreaterThanOrEqual(2);
+    expect(xpathLocators?.[0]?.value).toMatch(/^\/html|^\/\/\*\[@id=/);
+    expect(xpathLocators?.[1]?.value).toContain('normalize-space');
+  });
+
+  it('keeps applied filter state to one selected value per group while preserving visible filter actions', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <aside role="dialog" data-testid="filter-panel" data-rect="840,80,360,520">
+        <button class="active" data-testid="sort-default" data-rect="880,120,116,44">综合</button>
+        <button class="active" data-testid="sort-most-saved" data-rect="1010,120,116,44">最多收藏</button>
+        <button aria-selected="true" data-testid="type-image-text" data-rect="880,190,116,44">图文</button>
+        <button class="active" data-testid="time-default" data-rect="880,260,116,44">不限</button>
+        <button class="active" data-testid="time-week" data-rect="1010,260,116,44">一周内</button>
+      </aside>
+      <main role="list" data-testid="list" data-rect="0,100,780,580">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a data-testid="link-alpha" data-rect="28,148,240,112" href="https://example.test/note/alpha">AI 图片创作提示词合集</a>
+          <span>作者 1</span>
+          <span>1 天前</span>
+          <span>收藏 100</span>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+
+    expect(scan.filterState).toMatchObject({
+      appliedLabels: ['图文', '最多收藏', '一周内'],
+      contentType: '图文',
+      sort: '最多收藏',
+      timeRange: '一周内',
+    });
+    expect(scan.filterState.appliedFilters.map((filter) => filter.label)).toEqual([
+      '图文',
+      '最多收藏',
+      '一周内',
+    ]);
+    expect(scan.candidateActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: '综合', intent: 'search.apply_filter.sort' }),
+        expect.objectContaining({ label: '不限', intent: 'search.apply_filter.time_range' }),
+      ]),
+    );
   });
 
   it('derives result-card target refs from stable card identity instead of viewport order', () => {

@@ -208,4 +208,51 @@ describe('V25-04 click-resolution L0 contract', () => {
     expect(resolved.unresolvedStableTargetRef).toBe('tgt_abcdef0123');
     expect(resolved.ref).toBeUndefined();
   });
+
+  it('prefers the fresh candidate xpath over cached snapshot css for synthetic filter targets', () => {
+    const resolved = resolveCandidateActionTarget({
+      candidateAction: {
+        targetRef: 'ref_filter_time_range_84d3437b',
+        locatorChain: [
+          { type: 'ref', value: 'ref_filter_time_range_84d3437b' },
+          { type: 'aria', value: '一周内' },
+          { type: 'xpath', value: '//*[@role="button" and normalize-space(.)="一周内"]' },
+          { type: 'css', value: 'body > div:nth-of-type(9) button:nth-of-type(3)' },
+        ],
+      },
+      tabId: FIXTURE_TAB.id,
+      lookupCandidateActionTargetLocator: () => ({
+        selector: 'body > div:nth-of-type(4) button:nth-of-type(1)',
+        selectorType: 'css',
+      }),
+    });
+
+    expect(resolved).toMatchObject({
+      selector: '//*[@role="button" and normalize-space(.)="一周内"]',
+      selectorType: 'xpath',
+      source: 'candidate_locator_xpath',
+    });
+  });
+
+  it('prefers the fresh candidate xpath when callers copy a synthetic filter target into ref', () => {
+    const resolved = resolveCandidateActionTarget({
+      explicitRef: 'ref_filter_time_range_84d3437b',
+      candidateAction: {
+        targetRef: 'ref_filter_time_range_84d3437b',
+        locatorChain: [
+          { type: 'ref', value: 'ref_filter_time_range_84d3437b' },
+          { type: 'xpath', value: '//*[@role="button" and normalize-space(.)="一周内"]' },
+          { type: 'css', value: 'body > div:nth-of-type(9) button:nth-of-type(3)' },
+        ],
+      },
+      tabId: FIXTURE_TAB.id,
+      lookupCandidateActionTargetLocator: () => ({
+        selector: 'body > div:nth-of-type(4) button:nth-of-type(1)',
+        selectorType: 'css',
+      }),
+    });
+
+    expect(resolved.source).toBe('candidate_locator_xpath');
+    expect(resolved.selectorType).toBe('xpath');
+  });
 });
