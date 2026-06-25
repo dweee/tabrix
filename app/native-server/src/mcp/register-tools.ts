@@ -102,6 +102,11 @@ import {
   withTabrixMetadataSchema,
 } from './tabrix-metadata-envelope';
 import {
+  attachReadPagePayloadMetadata,
+  mergeReadPagePayloadMetadata,
+  readJsonObjectFromCallToolResult,
+} from './register-tool-result-json';
+import {
   recordPrimaryTabCleanupOutcome,
   recordPrimaryTabNavigationOutcome,
   resolvePrimaryTabOutgoingArgs,
@@ -1495,38 +1500,6 @@ function hasImpactUserConfirmation(args: unknown): boolean {
   );
 }
 
-function attachReadPagePayloadMetadata(
-  result: CallToolResult,
-  metadata: Record<string, unknown>,
-  options: { omitFullPageContent?: boolean } = {},
-): CallToolResult {
-  const first = result.content?.[0];
-  if (!first || first.type !== 'text' || typeof first.text !== 'string') return result;
-
-  let payload: Record<string, unknown>;
-  try {
-    const parsed = JSON.parse(first.text);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return result;
-    payload = parsed as Record<string, unknown>;
-  } catch {
-    return result;
-  }
-
-  const mergedPayload = { ...payload, ...metadata };
-  if (options.omitFullPageContent) {
-    delete mergedPayload.pageContent;
-  }
-
-  return {
-    ...result,
-    content: result.content.map((block, index) =>
-      index === 0 && block.type === 'text'
-        ? { ...block, text: JSON.stringify(mergedPayload) }
-        : block,
-    ) as CallToolResult['content'],
-  };
-}
-
 function ensureStructuredLegacyActionResult(
   toolName: string,
   result: CallToolResult,
@@ -1912,19 +1885,6 @@ function inferTaskTimelineStartedAtMs(
   return parsed.length > 0 ? Math.min(...parsed) : fallbackStartedAtMs;
 }
 
-function readJsonObjectFromCallToolResult(result: CallToolResult): Record<string, unknown> | null {
-  const first = result.content?.[0];
-  if (!first || first.type !== 'text' || typeof first.text !== 'string') return null;
-
-  try {
-    const parsed = JSON.parse(first.text);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    return parsed as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
 function buildReadPageContextMeasurement(
   payload: Record<string, unknown> | null,
   requestedLayer: ReadPageRequestedLayer,
@@ -2292,26 +2252,6 @@ function collectReadPageObservedTabIds(payload: Record<string, unknown>): number
   }
 
   return ids;
-}
-
-function mergeReadPagePayloadMetadata(
-  baseResult: CallToolResult,
-  metadataResult: CallToolResult,
-  options: { omitFullPageContent?: boolean } = {},
-): CallToolResult {
-  const first = metadataResult.content?.[0];
-  if (!first || first.type !== 'text' || typeof first.text !== 'string') return baseResult;
-
-  let metadata: Record<string, unknown>;
-  try {
-    const parsed = JSON.parse(first.text);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return baseResult;
-    metadata = parsed as Record<string, unknown>;
-  } catch {
-    return baseResult;
-  }
-
-  return attachReadPagePayloadMetadata(baseResult, metadata, options);
 }
 
 function shouldPreferVisibleRowsForMarkdownAiContext(
