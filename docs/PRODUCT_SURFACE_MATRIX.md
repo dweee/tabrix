@@ -8,9 +8,13 @@ Its purpose is to keep product planning, engineering work, docs, and open source
 
 ## Why This Exists
 
-Tabrix contains more code than the current public product surface.
+Tabrix contains more code and history than the current public product surface.
 
-The repository includes browser execution, MCP transport, diagnostics, record/replay internals, agent related modules, semantic/vector utilities, and other subsystems. That does not mean every subsystem should be described as a current public product pillar.
+The current public product centers on browser execution, MCP transport,
+diagnostics, object-aware page reading, Memory/Object persistence, and bounded
+Chrome/CDP sensing. Historical workflow, embedded assistant UI, element marker,
+record/replay, and local semantic-search surfaces are removed from the public
+product story and must stay out of the default development path.
 
 This matrix is the public source of truth for capability classification.
 

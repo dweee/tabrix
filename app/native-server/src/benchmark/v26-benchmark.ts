@@ -178,7 +178,7 @@ export interface BenchmarkToolCallRecordV26 extends BenchmarkToolCallRecordV25 {
   kind?: string;
   /** Runtime payload source kind; mirrors skip-read envelopes when present. */
   sourceKind?: BenchmarkChosenSource | string;
-  /** Dispatcher input source selected by the runner/recorder. */
+  /** Dispatcher input source selected by the benchmark runner. */
   dispatcherInputSource?: string | null;
   /** Redacted API family emitted by the V26-07 internal reader. */
   apiFamily?: string | null;

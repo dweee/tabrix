@@ -7,8 +7,8 @@
  *
  * Composite selector format:
  *   "<frameSelector> |> <innerSelector>"
- * This is kept for backward compatibility with the existing recorder and
- * accessibility-tree helper.
+ * This is kept for compatibility with the accessibility-tree helper and
+ * existing selector payloads.
  */
 
 export type NonEmptyArray<T> = [T, ...T[]];
