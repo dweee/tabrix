@@ -985,7 +985,11 @@ describe('read_page mode', () => {
       frameId: 7,
     });
 
-    expect(actions.find((action) => action.targetRef.endsWith('_5'))).toMatchObject({
+    expect(
+      actions.find((action) =>
+        action.locatorChain.some((item) => item.type === 'aria' && item.value === '筛选'),
+      ),
+    ).toMatchObject({
       intent: 'filter.open',
       frameId: 7,
       locatorChain: expect.arrayContaining([
@@ -1137,6 +1141,300 @@ describe('read_page mode', () => {
       text: '筛选',
       actionability: 'actionable',
     });
+  });
+
+  it('promotes generic executable filter text into a search toolbar action', async () => {
+    vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
+      { result: { bound: 1 } },
+    ] as any);
+    vi.spyOn(readPageTool as any, 'collectInteractiveElementsFallback').mockImplementation(
+      async (_tabId: number, options: { textQuery?: string }) => {
+        if (options.textQuery !== '筛选') return { success: true, elements: [] };
+        return {
+          success: true,
+          elements: [
+            {
+              type: 'text_action',
+              role: '',
+              selector: 'body > main > div.search-layout__top > div.filter > span',
+              text: '筛选',
+              isInteractive: true,
+              actionability: 'actionable',
+              coordinates: {
+                x: 1200,
+                y: 60,
+                rect: { x: 1160, y: 40, width: 84, height: 40 },
+              },
+            },
+          ],
+        };
+      },
+    );
+    const noisyVisibleText = [
+      'AI出图',
+      '提示词',
+      '教程',
+      '海报',
+      '素材',
+      '真实感',
+      '高级感',
+      '二次元',
+      '壁纸',
+      '头像',
+      '卡通形象',
+      '图片',
+      '视频',
+      '案例',
+      '合集',
+      '免费版',
+      '指令',
+      '收藏',
+      '评论',
+    ].join(' ');
+    const basePayload: any = {
+      pageRole: 'search_results',
+      visibleTextContent: noisyVisibleText,
+      elements: [
+        {
+          ref: 'ref_generic_filter',
+          role: 'text_action',
+          selector: 'body > main > div.search-layout__top > div.filter > span',
+          name: '筛选',
+          text: '筛选',
+          actionability: 'actionable',
+        },
+      ],
+      refMap: [
+        {
+          ref: 'ref_generic_filter',
+          selector: 'body > main > div.search-layout__top > div.filter > span',
+        },
+      ],
+      count: 1,
+    };
+
+    const recovered = await (readPageTool as any).recoverSearchToolbarTextTargets({
+      tabId: 5223,
+      basePayload,
+      assistantGuidance: {
+        taskKind: 'search',
+        requestedObjects: ['filters', 'result_cards'],
+      },
+    });
+
+    expect(recovered).toBe(true);
+    expect(basePayload.elements[0]).toMatchObject({
+      ref: expect.stringMatching(/^ref_text_search_toolbar_/),
+      selector: 'body > main > div.search-layout__top > div.filter',
+      text: '筛选',
+      actionability: 'actionable',
+    });
+  });
+
+  it('recovers filter-open text even when content labels would otherwise fill the search toolbar budget', async () => {
+    vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
+      { result: { bound: 1 } },
+    ] as any);
+    const collectInteractiveElementsFallback = vi
+      .spyOn(readPageTool as any, 'collectInteractiveElementsFallback')
+      .mockImplementation(async (_tabId: number, options: { textQuery?: string }) => {
+        if (options.textQuery !== '筛选') return { success: true, elements: [] };
+        return {
+          success: true,
+          elements: [
+            {
+              type: 'text_action',
+              role: '',
+              selector:
+                'body > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > div > div:nth-of-type(3) > div > div:nth-of-type(1) > span',
+              text: '筛选',
+              isInteractive: true,
+              actionability: 'actionable',
+              coordinates: {
+                x: 2060,
+                y: 136,
+                rect: { x: 2044, y: 126, width: 32, height: 19 },
+              },
+            },
+          ],
+        };
+      });
+    const basePayload: any = {
+      pageRole: 'search_results',
+      visibleTextContent: [
+        'AI出图',
+        '提示词',
+        '教程',
+        '海报',
+        '素材',
+        '真实感',
+        '高级感',
+        '二次元',
+        '壁纸',
+        '头像',
+        '卡通形象',
+        '图片',
+        '视频',
+        '案例',
+        '合集',
+        '免费版',
+        '指令',
+        '收藏',
+        '评论',
+      ].join(' '),
+      elements: [],
+      refMap: [],
+      count: 0,
+    };
+
+    const recovered = await (readPageTool as any).recoverSearchToolbarTextTargets({
+      tabId: 5226,
+      basePayload,
+      assistantGuidance: {
+        taskKind: 'search',
+        requestedObjects: ['filters', 'result_cards'],
+      },
+    });
+
+    expect(recovered).toBe(true);
+    expect(collectInteractiveElementsFallback).toHaveBeenCalledWith(
+      5226,
+      expect.objectContaining({ textQuery: '筛选', includeCoordinates: true }),
+    );
+    expect(basePayload.elements[0]).toMatchObject({
+      ref: expect.stringMatching(/^ref_text_search_toolbar_/),
+      selector:
+        'body > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > div > div:nth-of-type(3) > div > div:nth-of-type(1)',
+      text: '筛选',
+      actionability: 'actionable',
+    });
+  });
+
+  it('retries search toolbar recovery at page scope when the frame-scoped lookup misses', async () => {
+    vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
+      { result: { bound: 1 } },
+    ] as any);
+    const collectInteractiveElementsFallback = vi
+      .spyOn(readPageTool as any, 'collectInteractiveElementsFallback')
+      .mockImplementation(
+        async (_tabId: number, options: { textQuery?: string; frameId?: number }) => {
+          if (options.textQuery !== '筛选') return { success: true, elements: [] };
+          if (typeof options.frameId === 'number') return { success: true, elements: [] };
+          return {
+            success: true,
+            elements: [
+              {
+                type: 'text_action',
+                role: '',
+                selector: 'body > main > div.search-layout__top > div.filter > span',
+                text: '筛选',
+                isInteractive: true,
+                actionability: 'actionable',
+                coordinates: {
+                  x: 1200,
+                  y: 60,
+                  rect: { x: 1160, y: 40, width: 84, height: 40 },
+                },
+              },
+            ],
+          };
+        },
+      );
+    const basePayload: any = {
+      pageRole: 'search_results',
+      visibleTextContent: 'AI出图 提示词 图文 视频 教程',
+      elements: [],
+      refMap: [],
+      count: 0,
+    };
+
+    const recovered = await (readPageTool as any).recoverSearchToolbarTextTargets({
+      tabId: 5227,
+      basePayload,
+      assistantGuidance: {
+        taskKind: 'search',
+        requestedObjects: ['filters', 'result_cards'],
+      },
+      frameId: 7,
+    });
+
+    expect(recovered).toBe(true);
+    expect(collectInteractiveElementsFallback).toHaveBeenCalledWith(
+      5227,
+      expect.objectContaining({ textQuery: '筛选', includeCoordinates: true, frameId: 7 }),
+    );
+    expect(collectInteractiveElementsFallback).toHaveBeenCalledWith(
+      5227,
+      expect.not.objectContaining({ frameId: 7 }),
+    );
+    expect(basePayload.elements[0]).toMatchObject({
+      ref: expect.stringMatching(/^ref_text_search_toolbar_/),
+      selector: 'body > main > div.search-layout__top > div.filter',
+      text: '筛选',
+      actionability: 'actionable',
+    });
+  });
+
+  it('adopts visible search surface filter actions from the result-card scanner', async () => {
+    const executeScript = vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
+      {
+        result: {
+          pageInfo: {
+            url: 'https://example.test/search?q=ai',
+          },
+          candidateActions: [
+            {
+              id: 'ca_filter_trigger_12345678',
+              actionType: 'click',
+              targetRef: 'ref_filter_trigger_12345678',
+              label: '筛选',
+              intent: 'search.open_filters',
+              matchReason: 'visible_filter_trigger',
+              actionability: true,
+              locatorChain: [
+                { type: 'ref', value: 'ref_filter_trigger_12345678' },
+                { type: 'aria', value: '筛选' },
+                { type: 'css', value: 'body > main > div.search-layout__top > div.filter' },
+              ],
+            },
+          ],
+          cards: [],
+        },
+      },
+    ] as any);
+
+    const actions = await (readPageTool as any).collectVisibleSearchSurfaceActions({
+      tabId: 5228,
+      currentUrl: 'https://example.test/search?q=ai',
+      assistantGuidance: {
+        taskKind: 'search',
+        requestedObjects: ['filters', 'result_cards'],
+      },
+      pageRole: 'search_results',
+    });
+
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 5228, allFrames: true },
+        world: 'MAIN',
+      }),
+    );
+    expect(actions).toEqual([
+      expect.objectContaining({
+        id: 'ca_filter_trigger_12345678',
+        actionType: 'click',
+        targetRef: 'ref_filter_trigger_12345678',
+        label: '筛选',
+        intent: 'search.open_filters',
+        matchReason: 'visible_filter_trigger',
+        actionability: 'actionable',
+        locatorChain: expect.arrayContaining([
+          { type: 'ref', value: 'ref_filter_trigger_12345678' },
+          { type: 'aria', value: '筛选' },
+          { type: 'css', value: 'body > main > div.search-layout__top > div.filter' },
+        ]),
+      }),
+    ]);
   });
 
   it('recovers short visible text controls without requiring screenshots or coordinates first', async () => {
@@ -1495,7 +1793,7 @@ describe('read_page mode', () => {
         }),
         expect.objectContaining({
           ref: expect.stringMatching(/^ref_text_search_toolbar_/),
-          selector: 'body > main > div.search-layout__top > div.filter > span',
+          selector: 'body > main > div.search-layout__top > div.filter',
           text: '筛选',
           role: 'button',
         }),
@@ -1559,7 +1857,7 @@ describe('read_page mode', () => {
       expect.arrayContaining([
         expect.objectContaining({
           ref: expect.stringMatching(/^ref_text_search_toolbar_/),
-          selector: 'body > main > div.search-layout__top > div.filter > span',
+          selector: 'body > main > div.search-layout__top > div.filter',
           text: '筛选',
           role: 'button',
         }),

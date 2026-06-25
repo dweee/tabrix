@@ -61,6 +61,7 @@ import { inferSchemeGuard } from './read-page-scheme-guard';
 import { summarizePageContent } from './read-page-content-summary';
 import { buildInteractiveElements } from './read-page-interactive-elements';
 import { buildCandidateActions, type CandidateActionSeed } from './read-page-candidate-actions';
+import { scanVisibleResultCardsInPage } from './collect-result-cards';
 import {
   buildSearchSurface,
   extractFilterPanelLabelsFromVisibleText,
@@ -1416,6 +1417,14 @@ function promoteSearchToolbarSelector(selector: unknown): string | undefined {
   if (/^div(?::|\[role=|\[aria-)/.test(parent)) {
     return parts.slice(0, -1).join(' > ');
   }
+  if (
+    /^div[.#]/.test(parent) &&
+    /(?:[.#_-]|^)(filter|filters|filtered|sort|dropdown|select|selector|picker|button|btn|trigger|action)(?:[.#_-]|$)/i.test(
+      parent,
+    )
+  ) {
+    return parts.slice(0, -1).join(' > ');
+  }
   return raw;
 }
 
@@ -1447,6 +1456,85 @@ function isCompactSearchToolbarFallbackElement(element: any): boolean {
   const height = Number(rect.height);
   if (!Number.isFinite(width) || !Number.isFinite(height)) return true;
   return width > 0 && height > 0 && width <= 260 && height <= 120;
+}
+
+function normalizeVisibleSearchSurfaceAction(action: any): CandidateActionSeed | null {
+  const id = typeof action?.id === 'string' ? action.id.trim() : '';
+  const targetRef = typeof action?.targetRef === 'string' ? action.targetRef.trim() : '';
+  const locatorChain = Array.isArray(action?.locatorChain)
+    ? action.locatorChain
+        .map((locator: any) => ({
+          type: typeof locator?.type === 'string' ? locator.type.trim() : '',
+          value: typeof locator?.value === 'string' ? locator.value.trim() : '',
+        }))
+        .filter((locator: { type: string; value: string }) => locator.type && locator.value)
+    : [];
+  if (!id || !targetRef || locatorChain.length === 0) return null;
+
+  const intent = typeof action?.intent === 'string' ? action.intent.trim() : undefined;
+  const label = typeof action?.label === 'string' ? action.label.trim() : undefined;
+  const hasCssLocator = locatorChain.some((locator) => locator.type === 'css');
+  if (!hasCssLocator && !intent?.startsWith('search.')) return null;
+
+  return {
+    id,
+    actionType: typeof action?.actionType === 'string' ? action.actionType : 'click',
+    targetRef,
+    ...(label ? { label } : {}),
+    confidence:
+      typeof action?.confidence === 'number' && Number.isFinite(action.confidence)
+        ? action.confidence
+        : intent === 'search.open_filters'
+          ? 0.94
+          : 0.88,
+    matchReason:
+      typeof action?.matchReason === 'string' && action.matchReason.trim()
+        ? action.matchReason.trim()
+        : 'visible_search_surface_scan',
+    actionability: action?.actionability === false ? 'unknown' : 'actionable',
+    ...(action?.actionability === false && typeof action?.actionabilityReason === 'string'
+      ? { actionabilityReason: action.actionabilityReason }
+      : {}),
+    locatorChain,
+    ...(intent ? { intent } : {}),
+  };
+}
+
+function mergeVisibleSearchSurfaceActions(
+  existingActions: CandidateActionSeed[],
+  visibleSurfaceActions: CandidateActionSeed[],
+): CandidateActionSeed[] {
+  if (visibleSurfaceActions.length === 0) return existingActions;
+  const merged: CandidateActionSeed[] = [];
+  const seen = new Set<string>();
+  for (const action of [...visibleSurfaceActions, ...existingActions]) {
+    const key = [
+      action.intent || '',
+      action.targetRef || '',
+      action.label || '',
+      Array.isArray(action.locatorChain)
+        ? action.locatorChain.find((locator) => locator?.type === 'css')?.value || ''
+        : '',
+    ]
+      .join('|')
+      .toLowerCase();
+    if (!key.trim() || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(action);
+  }
+  return merged;
+}
+
+function itemUrlMatchesReadPage(item: any, currentUrl: string): boolean {
+  const itemUrl = typeof item?.pageInfo?.url === 'string' ? item.pageInfo.url : '';
+  if (!itemUrl || !currentUrl) return false;
+  try {
+    const left = new URL(itemUrl);
+    const right = new URL(currentUrl);
+    return left.origin === right.origin && left.pathname === right.pathname;
+  } catch {
+    return itemUrl.replace(/[?#].*$/, '') === currentUrl.replace(/[?#].*$/, '');
+  }
 }
 
 function isCompactFilterPanelFallbackElement(element: any): boolean {
@@ -1552,6 +1640,18 @@ function hasExecutableRecoveredTarget(element: any): boolean {
   const href = typeof element?.href === 'string' ? element.href.trim() : '';
   const selector = typeof element?.selector === 'string' ? element.selector.trim() : '';
   return Boolean(selector || href);
+}
+
+function isSearchToolbarRecoveredRef(value: unknown): boolean {
+  return typeof value === 'string' && value.startsWith('ref_text_search_toolbar_');
+}
+
+function isSearchToolbarFilterOpenLabel(value: unknown): boolean {
+  return /^(筛选|已筛选|过滤|filter|filters|filtered|排序|sort)$/i.test(
+    String(value || '')
+      .replace(/\s+/g, ' ')
+      .trim(),
+  );
 }
 
 function prependRecoveredElementsToPageContent(params: {
@@ -2810,6 +2910,46 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     return fallback && fallback.success && Array.isArray(fallback.elements) ? fallback : null;
   }
 
+  private async collectVisibleSearchSurfaceActions(params: {
+    tabId: number;
+    currentUrl: string;
+    assistantGuidance?: ReadPageAssistantGuidance;
+    pageRole?: string;
+  }): Promise<CandidateActionSeed[]> {
+    if (!shouldRecoverSearchToolbarTargets(params.assistantGuidance, params.pageRole)) {
+      return [];
+    }
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: params.tabId, allFrames: true },
+        func: scanVisibleResultCardsInPage,
+        world: 'MAIN',
+      } as any);
+      const scans = (Array.isArray(results) ? results : [])
+        .map((entry: any) => entry?.result)
+        .filter((scan: any) => scan && Array.isArray(scan.candidateActions));
+      const scan = scans
+        .filter((item: any) => !/^(about|chrome|edge|devtools):/i.test(item?.pageInfo?.url || ''))
+        .sort((left: any, right: any) => {
+          const urlMatchRight = itemUrlMatchesReadPage(right, params.currentUrl) ? 1 : 0;
+          const urlMatchLeft = itemUrlMatchesReadPage(left, params.currentUrl) ? 1 : 0;
+          if (urlMatchRight !== urlMatchLeft) return urlMatchRight - urlMatchLeft;
+          const actionDelta =
+            (right.candidateActions?.length ?? 0) - (left.candidateActions?.length ?? 0);
+          if (actionDelta !== 0) return actionDelta;
+          return (right.cards?.length ?? 0) - (left.cards?.length ?? 0);
+        })[0];
+      if (!scan) return [];
+      return (scan.candidateActions ?? [])
+        .map((action: any) => normalizeVisibleSearchSurfaceAction(action))
+        .filter(
+          (action: CandidateActionSeed | null): action is CandidateActionSeed => action !== null,
+        );
+    } catch {
+      return [];
+    }
+  }
+
   private async supplementAuthFormInteractiveControls(
     tabId: number,
     basePayload: Record<string, any>,
@@ -3082,8 +3222,8 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     }
     const labels = Array.from(
       new Set([
-        ...extractSearchToolbarLabelsFromVisibleText(params.basePayload.visibleTextContent),
         ...SEARCH_TOOLBAR_TARGET_RECOVERY_FALLBACK_LABELS,
+        ...extractSearchToolbarLabelsFromVisibleText(params.basePayload.visibleTextContent),
       ]),
     )
       .filter((label) => label.length <= 18)
@@ -3107,21 +3247,47 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         )
         .filter(Boolean),
     );
+    const existingRecoveredToolbarLabels = new Set(
+      (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
+        .filter((element: any) => isSearchToolbarRecoveredRef(element?.ref))
+        .map((element: any) =>
+          String(element?.name || element?.text || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase(),
+        )
+        .filter(Boolean),
+    );
 
     const recovered: any[] = [];
     for (const label of labels) {
       const normalizedLabel = label.replace(/\s+/g, ' ').trim().toLowerCase();
-      if (!normalizedLabel || existingLabels.has(normalizedLabel)) continue;
-      const fallback = await this.collectInteractiveElementsFallback(params.tabId, {
+      const forceToolbarRecovery =
+        isSearchToolbarFilterOpenLabel(label) &&
+        !existingRecoveredToolbarLabels.has(normalizedLabel);
+      if (!normalizedLabel || (existingLabels.has(normalizedLabel) && !forceToolbarRecovery))
+        continue;
+      let fallback = await this.collectInteractiveElementsFallback(params.tabId, {
         textQuery: label,
         includeCoordinates: true,
         frameId: params.frameId,
       });
-      const first = Array.isArray(fallback?.elements)
+      let first = Array.isArray(fallback?.elements)
         ? fallback.elements.find(
             (element: any) => element?.selector && isCompactSearchToolbarFallbackElement(element),
           )
         : null;
+      if (!first?.selector && typeof params.frameId === 'number') {
+        fallback = await this.collectInteractiveElementsFallback(params.tabId, {
+          textQuery: label,
+          includeCoordinates: true,
+        });
+        first = Array.isArray(fallback?.elements)
+          ? fallback.elements.find(
+              (element: any) => element?.selector && isCompactSearchToolbarFallbackElement(element),
+            )
+          : null;
+      }
       if (!first?.selector) continue;
       const recoveredElement = {
         ...first,
@@ -3132,10 +3298,11 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         type: first.type === 'text' ? 'button' : first.type || 'button',
       };
       const key = searchToolbarElementKey(recoveredElement);
-      if (!key || existingTargetKeys.has(key)) continue;
+      if (!key || (existingTargetKeys.has(key) && !forceToolbarRecovery)) continue;
       recovered.push(recoveredElement);
       existingTargetKeys.add(key);
       existingLabels.add(normalizedLabel);
+      existingRecoveredToolbarLabels.add(normalizedLabel);
     }
     if (recovered.length === 0) return false;
 
@@ -3910,6 +4077,21 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         assistantGuidance,
         frameId: requestedFrameId,
       });
+      const visibleSearchSurfaceActions = await this.collectVisibleSearchSurfaceActions({
+        tabId,
+        currentUrl,
+        assistantGuidance,
+        pageRole: basePayload.pageRole,
+      });
+      if (visibleSearchSurfaceActions.length > 0) {
+        basePayload.candidateActions = mergeVisibleSearchSurfaceActions(
+          basePayload.candidateActions,
+          visibleSearchSurfaceActions,
+        );
+        basePayload.fallbackSource = basePayload.fallbackSource
+          ? `${basePayload.fallbackSource}+visible_search_surface_actions`
+          : 'visible_search_surface_actions';
+      }
       await this.supplementAuthFormInteractiveControls(tabId, basePayload, requestedFrameId);
       basePayload.visualElements = await this.collectQrVisualElements({
         tabId,
@@ -4076,6 +4258,21 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             assistantGuidance,
             frameId: requestedFrameId,
           });
+          const visibleSearchSurfaceActions = await this.collectVisibleSearchSurfaceActions({
+            tabId,
+            currentUrl,
+            assistantGuidance,
+            pageRole: basePayload.pageRole,
+          });
+          if (visibleSearchSurfaceActions.length > 0) {
+            basePayload.candidateActions = mergeVisibleSearchSurfaceActions(
+              basePayload.candidateActions,
+              visibleSearchSurfaceActions,
+            );
+            basePayload.fallbackSource = basePayload.fallbackSource
+              ? `${basePayload.fallbackSource}+visible_search_surface_actions`
+              : 'visible_search_surface_actions';
+          }
           basePayload.visualElements = await this.collectQrVisualElements({
             tabId,
             pageContent: String(basePayload.pageContent || ''),
