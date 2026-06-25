@@ -2151,6 +2151,7 @@ function attachObjectLibraryHintsToReadPageResult(result: CallToolResult): CallT
       requiresFreshRead: planning.requiresFreshRead,
       reuseReason: planning.reuseReason,
       nextStepHint: planning.nextStepHint,
+      ...buildObjectLibraryReuseSignalFields(object),
       claimBoundary:
         'objectLibraryHints are redacted historical planning hints only; they may guide current candidate selection but never replace current candidateActions or post-action verification.',
     };
@@ -2164,6 +2165,122 @@ function attachObjectLibraryHintsToReadPageResult(result: CallToolResult): CallT
         : block,
     ),
   };
+}
+
+function buildObjectLibraryReuseSignalFields(object: {
+  objectType: string;
+  targetability?: unknown;
+  facts?: unknown;
+}): Pick<ReadPageObjectLibraryHint, 'reuseSignals'> {
+  const targetability = readObject(object.targetability);
+  const facts = readObject(object.facts);
+  const targetabilityStatus = readFirstString(
+    targetability?.targetabilityStatus,
+    facts?.targetabilityStatus,
+  );
+  const actionTarget = readObject(targetability?.actionTarget) ?? readObject(facts?.actionTarget);
+  const stableTarget = readObject(targetability?.stableTarget) ?? readObject(facts?.stableTarget);
+  const sessionOnlyTarget =
+    readObject(targetability?.sessionOnlyTarget) ?? readObject(facts?.sessionOnlyTarget);
+  const sessionCandidateAction = readObject(
+    readObject(sessionOnlyTarget?.toolArgs)?.candidateAction,
+  );
+  const sourceWindow = readSafeReuseRecord(
+    readObject(targetability?.sourceWindow) ?? readObject(facts?.sourceWindow),
+    ['sourceScrollY', 'firstSeenGlobalTop', 'sourceStrategy'],
+  );
+  const collectionWindow = readSafeReuseRecord(
+    readObject(targetability?.collectionWindow) ?? readObject(facts?.collectionWindow),
+    ['cardCount', 'scrollYRange', 'globalTopRange', 'viewportYRange', 'sourceStrategies'],
+  );
+  const filterState = buildObjectLibraryFilterSignal(facts?.filterState);
+  const stableLocatorChain = readUnknownArray(
+    facts?.stableLocatorChain ?? sessionCandidateAction?.locatorChain,
+  )
+    .map((entry): string | null => {
+      if (typeof entry === 'string') return entry;
+      const locator = readObject(entry);
+      const type = readString(locator?.type);
+      const value = readString(locator?.value);
+      if (!type || !value || type === 'ref' || type === 'coordinate' || type === 'rect') {
+        return null;
+      }
+      if (!['css', 'xpath', 'aria', 'text', 'label'].includes(type)) return null;
+      return `${type}=${value.trim().replace(/\s+/g, ' ').slice(0, 160)}`;
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .slice(0, 4);
+  const signals: NonNullable<ReadPageObjectLibraryHint['reuseSignals']> = {};
+  const intent = readFirstString(facts?.intent, sessionCandidateAction?.intent);
+  const matchReason = readFirstString(facts?.matchReason, sessionCandidateAction?.matchReason);
+  const actionTargetKind = readString(actionTarget?.targetKind);
+  const executionScope = readString(actionTarget?.executionScope);
+
+  if (targetabilityStatus) signals.targetabilityStatus = targetabilityStatus;
+  if (stableTarget || targetabilityStatus === 'stable_click_target') signals.hasStableTarget = true;
+  if (actionTargetKind) signals.actionTargetKind = actionTargetKind;
+  if (executionScope) signals.executionScope = executionScope;
+  if (intent) signals.intent = intent;
+  if (matchReason) signals.matchReason = matchReason;
+  if (stableLocatorChain.length > 0) signals.stableLocatorChain = stableLocatorChain;
+  if (sourceWindow) signals.sourceWindow = sourceWindow;
+  if (collectionWindow) signals.collectionWindow = collectionWindow;
+  if (filterState) signals.filterState = filterState;
+
+  return Object.keys(signals).length > 0 ? { reuseSignals: signals } : {};
+}
+
+function readSafeReuseRecord(
+  value: Record<string, unknown> | null,
+  allowedKeys: readonly string[],
+): Record<string, unknown> | undefined {
+  if (!value) return undefined;
+  const safe: Record<string, unknown> = {};
+  for (const key of allowedKeys) {
+    const item = value[key];
+    if (item === null || item === undefined) continue;
+    if (
+      typeof item === 'string' ||
+      typeof item === 'number' ||
+      typeof item === 'boolean' ||
+      Array.isArray(item) ||
+      (typeof item === 'object' && item !== null)
+    ) {
+      safe[key] = item;
+    }
+  }
+  return Object.keys(safe).length > 0 ? safe : undefined;
+}
+
+function buildObjectLibraryFilterSignal(
+  value: unknown,
+): NonNullable<ReadPageObjectLibraryHint['reuseSignals']>['filterState'] | undefined {
+  const filterState = readObject(value);
+  if (!filterState) return undefined;
+  const appliedLabels = readUnknownArray(filterState.appliedLabels)
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map((item) => item.trim())
+    .slice(0, 8);
+  const safe = {
+    status: readString(filterState.status) ?? undefined,
+    ...(appliedLabels.length > 0 ? { appliedLabels } : {}),
+    contentType: readString(filterState.contentType) ?? undefined,
+    sort: readString(filterState.sort) ?? undefined,
+    timeRange: readString(filterState.timeRange) ?? undefined,
+  };
+  return Object.values(safe).some((item) => item !== undefined) ? safe : undefined;
+}
+
+function readFirstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    const text = readString(value);
+    if (text) return text;
+  }
+  return null;
+}
+
+function readUnknownArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 function mapObjectLibraryHintFreshness(object: {

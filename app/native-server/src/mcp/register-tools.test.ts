@@ -144,6 +144,11 @@ describe('handleToolCall execution wrapper', () => {
         targetabilityStatus: 'stable_click_target',
         targetRef: 'historical_ref_search_submit',
       },
+      facts: {
+        intent: 'search.submit_query',
+        matchReason: 'visible_search_submit',
+        stableLocatorChain: ['css=button[type="submit"]'],
+      },
       primaryConclusion: 'Search submit control was seen on this page model.',
       confidenceScore: 0.91,
       lastValidatedAt: '2026-06-06T11:00:00.000Z',
@@ -160,6 +165,28 @@ describe('handleToolCall execution wrapper', () => {
       objectFingerprint: 'card:example.test:search:old-result',
       objectType: 'result_card',
       actionTypes: ['open_detail'],
+      targetability: {
+        targetabilityStatus: 'url_fallback',
+        sourceWindow: {
+          sourceScrollY: 720,
+          firstSeenGlobalTop: 1840,
+          sourceStrategy: 'list_container',
+        },
+      },
+      facts: {
+        collectionWindow: {
+          cardCount: 10,
+          scrollYRange: { min: 0, max: 720 },
+          sourceStrategies: ['list_container'],
+        },
+        filterState: {
+          status: 'observed',
+          appliedLabels: ['图文', '最多收藏', '一周内'],
+          contentType: '图文',
+          sort: '最多收藏',
+          timeRange: '一周内',
+        },
+      },
       primaryConclusion: 'A previous result card was observed but needs refresh.',
       confidenceScore: 0.72,
       sourceFreshness: 'needs_refresh',
@@ -206,6 +233,13 @@ describe('handleToolCall execution wrapper', () => {
         requiresFreshRead: false,
         reuseReason: 'validated_actionable_object_can_help_match_current_candidate',
         nextStepHint: 'match_against_current_candidateActions_before_action',
+        reuseSignals: {
+          targetabilityStatus: 'stable_click_target',
+          hasStableTarget: true,
+          intent: 'search.submit_query',
+          matchReason: 'visible_search_submit',
+          stableLocatorChain: ['css=button[type="submit"]'],
+        },
       }),
       expect.objectContaining({
         source: 'object_library_reuse',
@@ -217,6 +251,26 @@ describe('handleToolCall execution wrapper', () => {
         canSeedAction: false,
         requiresFreshRead: true,
         nextStepHint: 'force_fresh_read_or_collect_current_objects_before_action',
+        reuseSignals: {
+          targetabilityStatus: 'url_fallback',
+          sourceWindow: {
+            sourceScrollY: 720,
+            firstSeenGlobalTop: 1840,
+            sourceStrategy: 'list_container',
+          },
+          collectionWindow: {
+            cardCount: 10,
+            scrollYRange: { min: 0, max: 720 },
+            sourceStrategies: ['list_container'],
+          },
+          filterState: {
+            status: 'observed',
+            appliedLabels: ['图文', '最多收藏', '一周内'],
+            contentType: '图文',
+            sort: '最多收藏',
+            timeRange: '一周内',
+          },
+        },
       }),
     ]);
     expect(JSON.stringify(payload.objectLibraryHints)).not.toContain('ref_current');

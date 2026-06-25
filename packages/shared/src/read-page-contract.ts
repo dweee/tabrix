@@ -917,6 +917,24 @@ export interface ReadPageObjectLibraryHint {
   requiresFreshRead?: boolean;
   reuseReason?: string;
   nextStepHint?: string;
+  reuseSignals?: {
+    targetabilityStatus?: string;
+    hasStableTarget?: boolean;
+    actionTargetKind?: string;
+    executionScope?: string;
+    intent?: string;
+    matchReason?: string;
+    stableLocatorChain?: string[];
+    sourceWindow?: Record<string, unknown>;
+    collectionWindow?: Record<string, unknown>;
+    filterState?: {
+      status?: string;
+      appliedLabels?: string[];
+      contentType?: string;
+      sort?: string;
+      timeRange?: string;
+    };
+  };
   claimBoundary: string;
 }
 
