@@ -399,11 +399,11 @@ describe('Sidepanel MKE data tab', () => {
   });
 
   it('has dark theme coverage for the new sidepanel surface', () => {
-    expect(tabSource).toContain(':class="`mke-data-tab--${agentTheme}`"');
-    expect(tabSource).toContain('useAgentTheme');
+    expect(tabSource).toContain(':class="`mke-data-tab--${popupTheme}`"');
+    expect(tabSource).toContain('usePopupTheme');
     expect(tabSource).toContain('.mke-data-tab--dark-console');
     expect(tabSource).toContain(
-      ":global(.sidepanel-root[data-agent-theme='dark-console']) .mke-data-tab",
+      ":global(.sidepanel-root[data-popup-theme='dark-console']) .mke-data-tab",
     );
     expect(tabSource).toContain('--mke-surface');
     expect(tabSource).toContain('--mke-active-ring');

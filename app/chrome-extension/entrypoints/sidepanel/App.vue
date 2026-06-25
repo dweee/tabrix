@@ -1,5 +1,5 @@
 <template>
-  <div class="sidepanel-root" :data-agent-theme="agentTheme">
+  <div class="sidepanel-root" :data-popup-theme="popupTheme">
     <div class="sidepanel-body">
       <MkeDataTab />
     </div>
@@ -8,10 +8,10 @@
 
 <script lang="ts" setup>
 import { defineAsyncComponent, onMounted } from 'vue';
-import { useAgentTheme } from '../shared/composables/usePopupTheme';
+import { usePopupTheme } from '../shared/composables/usePopupTheme';
 
 const MkeDataTab = defineAsyncComponent(() => import('./tabs/MkeDataTab.vue'));
-const { theme: agentTheme, initTheme } = useAgentTheme();
+const { theme: popupTheme, initTheme } = usePopupTheme();
 
 onMounted(() => {
   void initTheme();
@@ -44,7 +44,7 @@ onMounted(() => {
   box-sizing: border-box;
 }
 
-.sidepanel-root[data-agent-theme='dark-console'] {
+.sidepanel-root[data-popup-theme='dark-console'] {
   background: #08111f;
   color: #dbeafe;
 }

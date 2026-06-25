@@ -1,5 +1,5 @@
 <template>
-  <section class="mkep-tab mke-data-tab" :class="`mke-data-tab--${agentTheme}`">
+  <section class="mkep-tab mke-data-tab" :class="`mke-data-tab--${popupTheme}`">
     <div class="mke-shell">
       <div class="mke-controls" role="status" aria-live="polite">
         <div class="mke-tabs" role="tablist" aria-label="MKE data tables">
@@ -183,7 +183,7 @@ import {
   fetchMkeMemoryTraces,
   MemoryApiError,
 } from '../../../common/memory-api-client';
-import { useAgentTheme } from '../../shared/composables/usePopupTheme';
+import { usePopupTheme } from '../../shared/composables/usePopupTheme';
 import {
   buildMkeObjectLibraryView,
   type MkeObjectLibraryRuntimeContext,
@@ -225,7 +225,7 @@ const loadErrorDetail = ref('');
 const copiedRecordId = ref('');
 const copyFailedRecordId = ref('');
 const expandedRecordIds = ref<Set<string>>(new Set());
-const { theme: agentTheme, initTheme } = useAgentTheme();
+const { theme: popupTheme, initTheme } = usePopupTheme();
 let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
 let autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let refreshInFlight = false;
@@ -947,7 +947,7 @@ const SYSTEM_PAGE_CONTEXT = '系统页';
 }
 
 .mke-data-tab--dark-console,
-:global(.sidepanel-root[data-agent-theme='dark-console']) .mke-data-tab {
+:global(.sidepanel-root[data-popup-theme='dark-console']) .mke-data-tab {
   --mke-bg: #08111f;
   --mke-surface: #0d1726;
   --mke-surface-2: #111d2e;

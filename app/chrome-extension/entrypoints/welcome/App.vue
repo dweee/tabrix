@@ -57,7 +57,7 @@ async function openDocs(): Promise<void> {
 </script>
 
 <template>
-  <div class="agent-theme welcome-root">
+  <div class="popup-theme welcome-root">
     <div class="min-h-screen flex flex-col">
       <header class="welcome-header flex-none px-6 py-5">
         <div class="max-w-3xl mx-auto flex items-center justify-between gap-4">
