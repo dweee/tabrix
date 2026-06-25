@@ -9,6 +9,11 @@ import {
   type MemoryTrace,
 } from './db';
 import { buildLegacyMemoryTraceBindingHash, buildMemoryTraceBindingHash } from './feedback-binding';
+import {
+  browserPageObjectKey,
+  chooseRepresentativeBrowserWorldTab,
+  type BrowserWorldTabProjection,
+} from './mke-browser-world-projection';
 import { BoundedAsyncBrowserObjectWriteQueue } from './mke-browser-object-write-queue';
 import {
   normalizeUrlPattern,
@@ -138,13 +143,6 @@ interface BrowserObjectProjectionTrace {
   windowId?: number | null;
   siteFamily?: string | null;
   pageUrlPattern?: string | null;
-}
-
-interface BrowserWorldTabProjection {
-  tab: Record<string, unknown>;
-  tabId: number;
-  windowId: number | null;
-  urlFields: ReturnType<typeof normalizeUrlPattern>;
 }
 
 function mergeReadPageFactsWithExistingCollectionFacts(
@@ -762,32 +760,6 @@ function summarizeCandidateActions(actions: unknown[]): unknown | null {
 
 function readRequestNumber(request: Record<string, unknown> | null, key: string): number | null {
   return readNumber(request?.[key]);
-}
-
-function browserPageObjectKey(tab: BrowserWorldTabProjection): string {
-  return (
-    tab.urlFields.rootRoute ??
-    tab.urlFields.currentRoute ??
-    tab.urlFields.pattern ??
-    String(tab.tabId)
-  );
-}
-
-function browserWorldTabRank(tab: BrowserWorldTabProjection): number {
-  if (readBoolean(tab.tab.active) === true) return 0;
-  if (readString(tab.tab.status) === 'loading') return 2;
-  if (readBoolean(tab.tab.canTabrixOperate) === false) return 3;
-  return 1;
-}
-
-function chooseRepresentativeBrowserWorldTab(
-  current: BrowserWorldTabProjection,
-  candidate: BrowserWorldTabProjection,
-): BrowserWorldTabProjection {
-  const currentRank = browserWorldTabRank(current);
-  const candidateRank = browserWorldTabRank(candidate);
-  if (candidateRank !== currentRank) return candidateRank < currentRank ? candidate : current;
-  return candidate.tabId > current.tabId ? candidate : current;
 }
 
 function isApiLikeDataSource(...values: Array<string | null | undefined>): boolean {
