@@ -9,12 +9,8 @@ import {
   type MemoryTrace,
 } from './db';
 import { buildLegacyMemoryTraceBindingHash, buildMemoryTraceBindingHash } from './feedback-binding';
-import {
-  browserPageObjectKey,
-  chooseRepresentativeBrowserWorldTab,
-  type BrowserWorldTabProjection,
-} from './mke-browser-world-projection';
 import { BoundedAsyncBrowserObjectWriteQueue } from './mke-browser-object-write-queue';
+import { recordBrowserWorldObjects } from './mke-memory-browser-world-object-projection';
 import {
   normalizeUrlPattern,
   parseFirstTextPayload,
@@ -895,12 +891,14 @@ export class MkeMemoryTraceService {
 
     try {
       this.browserObjects.transaction(() => {
-        this.recordBrowserWorldObjects(
-          projectionTrace,
+        recordBrowserWorldObjects({
+          trace: projectionTrace,
           payload,
           observedAt,
-          projectionTrace.browserContextKey ?? null,
-        );
+          browserContextKey: projectionTrace.browserContextKey ?? null,
+          redactionState: this.browserObjectRedactionState(),
+          upsertBrowserObject: (objectInput) => this.upsertBrowserObject(objectInput),
+        });
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -931,12 +929,14 @@ export class MkeMemoryTraceService {
     try {
       this.browserObjects.transaction(() => {
         if (input.toolName === 'get_windows_and_tabs') {
-          this.recordBrowserWorldObjects(
-            input.trace,
+          recordBrowserWorldObjects({
+            trace: input.trace,
             payload,
-            input.observedAt,
-            input.browserContextKey,
-          );
+            observedAt: input.observedAt,
+            browserContextKey: input.browserContextKey,
+            redactionState: this.browserObjectRedactionState(),
+            upsertBrowserObject: (objectInput) => this.upsertBrowserObject(objectInput),
+          });
           return;
         }
         if (input.toolName === 'chrome_read_page') {
@@ -971,249 +971,6 @@ export class MkeMemoryTraceService {
 
   private upsertBrowserObject(input: BrowserObjectInput): BrowserObject | undefined {
     return this.browserObjects?.upsert(input);
-  }
-
-  private recordBrowserWorldObjects(
-    trace: BrowserObjectProjectionTrace,
-    payload: Record<string, unknown>,
-    observedAt: string,
-    browserContextKey: string | null,
-  ): void {
-    const browserWorld = readNestedObject(payload, 'browserWorld') ?? payload;
-    const contextKey = browserContextKey ?? trace.browserContextKey ?? 'default';
-    for (const rawWindow of readArray(browserWorld.windows)) {
-      const win = readObject(rawWindow);
-      if (!win) continue;
-      const id = readNumber(win.windowId, win.id);
-      if (id === null) continue;
-      this.upsertBrowserObject({
-        siteFamily: 'browser',
-        pageModelKey: 'browser-window',
-        objectFingerprint: objectFingerprint('window', id),
-        objectType: 'window',
-        browserContextKey: contextKey,
-        windowId: id,
-        sourceRoute: readString(
-          payload.source,
-          trace.sourceRoute,
-          'chrome_windows_get_all_with_browser_world_inventory',
-        ),
-        sourceFreshness: readString(browserWorld.status, browserWorld.freshness, trace.freshness),
-        lifecycleState: readString(win.lifecycleState, 'updated'),
-        isActive: readBoolean(win.focused, win.isFocused, win.active),
-        canTabrixOperate: readBoolean(win.canTabrixOperate),
-        operabilityReason: readString(win.operabilityReason),
-        facts: {
-          tabCount: readNumber(win.tabCount),
-          activeTabId: readNumber(win.activeTabId),
-          state: readString(win.state, win.visibilityState),
-        },
-        firstTraceId: trace.traceId,
-        lastTraceId: trace.traceId,
-        sourceTraceIds: sourceTraceIds(trace),
-        currentState: sanitizeValue(
-          {
-            focused: readBoolean(win.focused, win.isFocused),
-            state: readString(win.state, win.visibilityState),
-            tabCount: readNumber(win.tabCount),
-          },
-          'browser_object',
-        ),
-        redactionState: this.browserObjectRedactionState(),
-        updatedAt: observedAt,
-      });
-    }
-    const tabsByBaseRoute = new Map<
-      string,
-      { representative: BrowserWorldTabProjection; tabs: BrowserWorldTabProjection[] }
-    >();
-    for (const rawTab of readArray(browserWorld.tabs)) {
-      const tab = readObject(rawTab);
-      if (!tab) continue;
-      const tabId = readNumber(tab.tabId, tab.id);
-      if (tabId === null) continue;
-      const urlFields = normalizeUrlPattern(readString(tab.url, tab.pendingUrl), {
-        allowPersonalBrowserStateStorage: false,
-      });
-      const tabWindowId = readNumber(tab.windowId) ?? trace.windowId ?? null;
-      const projectedTab: BrowserWorldTabProjection = {
-        tab,
-        tabId,
-        windowId: tabWindowId,
-        urlFields,
-      };
-      const baseRouteKey = browserPageObjectKey(projectedTab);
-      const group = tabsByBaseRoute.get(baseRouteKey);
-      if (group) {
-        group.tabs.push(projectedTab);
-        group.representative = chooseRepresentativeBrowserWorldTab(
-          group.representative,
-          projectedTab,
-        );
-      } else {
-        tabsByBaseRoute.set(baseRouteKey, { representative: projectedTab, tabs: [projectedTab] });
-      }
-    }
-    for (const [baseRouteKey, group] of tabsByBaseRoute.entries()) {
-      const representative = group.representative;
-      const { tab, tabId, windowId: tabWindowId, urlFields } = representative;
-      const openTabIds = group.tabs.map((item) => item.tabId);
-      const hasLoading = group.tabs.some((item) => readString(item.tab.status) === 'loading');
-      const hasRestricted = group.tabs.some(
-        (item) => readBoolean(item.tab.canTabrixOperate) === false,
-      );
-      this.upsertBrowserObject({
-        siteFamily: urlFields.siteFamily ?? trace.siteFamily ?? 'browser',
-        pageUrlPattern: urlFields.pattern ?? trace.pageUrlPattern,
-        rootRoute: urlFields.rootRoute ?? trace.pageUrlPattern,
-        currentRoute: urlFields.currentRoute,
-        pageRole: 'browser_tab',
-        pageModelKey: urlFields.siteFamily ? `tab:${urlFields.siteFamily}` : 'browser-tab',
-        objectFingerprint: objectFingerprint('browser_page', baseRouteKey),
-        objectType: 'tab',
-        browserContextKey: contextKey,
-        tabId,
-        windowId: tabWindowId,
-        ownerType: normalizeOwnerType(readString(tab.ownerType, tab.openedBy, tab.owner)),
-        sourceRoute: readString(
-          payload.source,
-          trace.sourceRoute,
-          'chrome_windows_get_all_with_browser_world_inventory',
-        ),
-        sourceFreshness: readString(browserWorld.status, browserWorld.freshness, trace.freshness),
-        tabStatus: readString(tab.status),
-        lifecycleState: readString(tab.lifecycleState, tab.closedAtMs ? 'closed' : 'updated'),
-        isActive: readBoolean(tab.active),
-        canTabrixOperate: readBoolean(tab.canTabrixOperate),
-        operabilityReason: readString(tab.operabilityReason),
-        facts: this.sanitizeBrowserObjectValue({
-          titleSummary: readString(tab.title),
-          host: urlFields.siteFamily,
-          rootRoute: urlFields.rootRoute,
-          currentRoute: urlFields.currentRoute,
-          tabId,
-          tabIds: openTabIds,
-          openTabCount: openTabIds.length,
-          representativeTabId: tabId,
-          hasLoading,
-          hasRestricted,
-          pinned: readBoolean(tab.pinned),
-          discarded: readBoolean(tab.discarded),
-          openerTabId: readNumber(tab.openerTabId),
-        }),
-        firstTraceId: trace.traceId,
-        lastTraceId: trace.traceId,
-        sourceTraceIds: sourceTraceIds(trace),
-        currentState: this.sanitizeBrowserObjectValue({
-          active: readBoolean(tab.active),
-          status: readString(tab.status),
-          pinned: readBoolean(tab.pinned),
-          discarded: readBoolean(tab.discarded),
-          titleSummary: readString(tab.title),
-          host: urlFields.siteFamily,
-          rootRoute: urlFields.rootRoute,
-          currentRoute: urlFields.currentRoute,
-          tabId,
-          tabIds: openTabIds,
-          openTabCount: openTabIds.length,
-          representativeTabId: tabId,
-          hasLoading,
-          hasRestricted,
-        }),
-        redactionState: this.browserObjectRedactionState(),
-        updatedAt: observedAt,
-        closedAt: readNumber(tab.closedAtMs) ? observedAt : null,
-        archivedAt: null,
-      });
-    }
-    this.recordClosedBrowserWorldPage(trace, browserWorld, observedAt, contextKey, payload);
-  }
-
-  private recordClosedBrowserWorldPage(
-    trace: BrowserObjectProjectionTrace,
-    browserWorld: Record<string, unknown>,
-    observedAt: string,
-    browserContextKey: string,
-    payload: Record<string, unknown>,
-  ): void {
-    const summary = readNestedObject(browserWorld, 'summary');
-    const recentActivityLedger =
-      readObject(browserWorld.recentActivityLedger) ??
-      readNestedObject(summary, 'recentActivityLedger');
-    const latestPageClosed = readNestedObject(recentActivityLedger, 'latestPageClosed');
-    if (!latestPageClosed) return;
-    const tabId = readNumber(latestPageClosed.tabId);
-    if (tabId === null) return;
-    const closedAtMs = readNumber(latestPageClosed.occurredAtMs);
-    const closedAt =
-      closedAtMs !== null && Number.isFinite(closedAtMs)
-        ? new Date(closedAtMs).toISOString()
-        : observedAt;
-    const urlFields = normalizeUrlPattern(readString(latestPageClosed.url), {
-      allowPersonalBrowserStateStorage: false,
-    });
-    const closedBaseRouteKey =
-      urlFields.rootRoute ?? urlFields.currentRoute ?? urlFields.pattern ?? String(tabId);
-    const sameBaseRouteStillOpen = readArray(browserWorld.tabs).some((rawTab) => {
-      const tab = readObject(rawTab);
-      if (!tab || readNumber(tab.closedAtMs) !== null) return false;
-      const openUrlFields = normalizeUrlPattern(readString(tab.url, tab.pendingUrl), {
-        allowPersonalBrowserStateStorage: false,
-      });
-      const openBaseRouteKey =
-        openUrlFields.rootRoute ??
-        openUrlFields.currentRoute ??
-        openUrlFields.pattern ??
-        String(readNumber(tab.tabId, tab.id));
-      return openBaseRouteKey === closedBaseRouteKey;
-    });
-    if (sameBaseRouteStillOpen) return;
-    const tabWindowId = readNumber(latestPageClosed.windowId) ?? trace.windowId;
-    this.upsertBrowserObject({
-      siteFamily: urlFields.siteFamily ?? trace.siteFamily ?? 'browser',
-      pageUrlPattern: urlFields.pattern ?? trace.pageUrlPattern,
-      rootRoute: urlFields.rootRoute ?? trace.pageUrlPattern,
-      currentRoute: urlFields.currentRoute,
-      pageRole: 'browser_tab',
-      pageModelKey: urlFields.siteFamily ? `tab:${urlFields.siteFamily}` : 'browser-tab',
-      objectFingerprint: objectFingerprint('browser_page', closedBaseRouteKey),
-      objectType: 'tab',
-      browserContextKey,
-      tabId,
-      windowId: tabWindowId,
-      ownerType: normalizeOwnerType(readString(latestPageClosed.openedBy)),
-      sourceRoute: readString(
-        payload.source,
-        trace.sourceRoute,
-        'chrome_windows_get_all_with_browser_world_inventory',
-      ),
-      sourceFreshness: readString(browserWorld.status, browserWorld.freshness, trace.freshness),
-      lifecycleState: 'closed',
-      isActive: false,
-      canTabrixOperate: false,
-      operabilityReason: 'tab_closed',
-      facts: this.sanitizeBrowserObjectValue({
-        titleSummary: readString(latestPageClosed.title),
-        host: urlFields.siteFamily,
-        rootRoute: urlFields.rootRoute,
-        currentRoute: urlFields.currentRoute,
-        evidence: readString(latestPageClosed.evidence),
-      }),
-      firstTraceId: trace.traceId,
-      lastTraceId: trace.traceId,
-      sourceTraceIds: sourceTraceIds(trace),
-      currentState: this.sanitizeBrowserObjectValue({
-        status: 'closed',
-        titleSummary: readString(latestPageClosed.title),
-        host: urlFields.siteFamily,
-        rootRoute: urlFields.rootRoute,
-        currentRoute: urlFields.currentRoute,
-      }),
-      redactionState: this.browserObjectRedactionState(),
-      updatedAt: observedAt,
-      closedAt,
-      archivedAt: null,
-    });
   }
 
   private recordReadPageObjects(
