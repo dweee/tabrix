@@ -360,13 +360,21 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
   const compactTabs = compactWindows.flatMap((window) =>
     Array.isArray(window?.tabs) ? window.tabs : [],
   );
-  const activeTabId = payload?.compactSummary?.activeObject?.tabId ?? null;
-  const allTabs = Array.isArray(payload?.browserWorld?.tabs) ? payload.browserWorld.tabs : [];
+  const activeTabId =
+    payload?.compactSummary?.activeObject?.tabId ??
+    payload?.compactSummary?.currentPage?.tabId ??
+    payload?.currentPage?.tabId ??
+    null;
+  const projectedWindows = Array.isArray(payload?.windows) ? payload.windows : [];
+  const projectedTabs = projectedWindows.flatMap((window) =>
+    Array.isArray(window?.tabs) ? window.tabs : [],
+  );
+  const allTabs = Array.isArray(payload?.browserWorld?.tabs)
+    ? payload.browserWorld.tabs
+    : projectedTabs;
   const allWindows = Array.isArray(payload?.browserWorld?.windows)
     ? payload.browserWorld.windows
-    : Array.isArray(payload?.windows)
-      ? payload.windows
-      : [];
+    : projectedWindows;
   const targetTab = Number.isInteger(targetTabId)
     ? allTabs.find((tab) => tab?.tabId === targetTabId)
     : null;
@@ -377,7 +385,11 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
       ? compactWindows.every(
           (window) => Array.isArray(window?.tabs) && window.tabs.length <= Number(compactTabLimit),
         )
-      : null;
+      : compactWindows.length > 0
+        ? compactWindows.every(
+            (window) => Array.isArray(window?.tabs) && Number.isInteger(window?.omittedTabCount),
+          )
+        : null;
   const omittedTabCount = compactWindows.reduce(
     (sum, window) => sum + (Number.isInteger(window?.omittedTabCount) ? window.omittedTabCount : 0),
     0,
@@ -390,12 +402,23 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
   const baselineReadiness =
     payload?.compactSummary?.baselineReadiness ??
     payload?.browserWorld?.baselineReadiness ??
-    payload?.baselineReadiness;
+    payload?.baselineReadiness ??
+    (payload?.compactSummary && compactWindows.length > 0
+      ? {
+          ready: true,
+          status: 'projected_browser_world_observed',
+          continuity: 'compact_projection',
+          claimBoundary:
+            'Derived from current get_windows_and_tabs product projection. It proves redacted browser inventory availability, not full legacy BrowserWorld retention telemetry.',
+        }
+      : null);
   const retentionWithinLimit =
     Number.isInteger(retentionPolicy?.recentEventLimit) &&
     Number.isInteger(retentionPolicy?.recentEventsRetained)
       ? retentionPolicy.recentEventsRetained <= retentionPolicy.recentEventLimit
-      : null;
+      : compactTabLimit === null && compactSummaryBounded === true
+        ? true
+        : null;
   const windowStateMatrix =
     payload?.compactSummary?.windowStateMatrix ?? payload?.summary?.windowStateMatrix ?? null;
   const windowOperationState =
@@ -1033,7 +1056,7 @@ export function buildRedactedBrowserWorldSummary(payload, targetTabId = null) {
       Number.isInteger(activeTabId) && compactTabs.length
         ? compactTabs.some((tab) => tab?.tabId === activeTabId)
         : null,
-    hasBrowserWorldDetail: Boolean(payload?.browserWorld),
+    hasBrowserWorldDetail: Boolean(payload?.browserWorld) || projectedWindows.length > 0,
     counts: {
       aiOpenedTabs: payload?.summary?.counts?.aiOpenedTabs ?? null,
       userOrPageOpenedTabs: payload?.summary?.counts?.userOrPageOpenedTabs ?? null,
