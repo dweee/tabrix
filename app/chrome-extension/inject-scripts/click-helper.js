@@ -1,4 +1,4 @@
-/* global window, document, Element, MouseEvent, PointerEvent, HTMLElement, SVGElement, HTMLInputElement, HTMLButtonElement, HTMLAnchorElement, HTMLLabelElement, HTMLTextAreaElement, HTMLSelectElement, MutationObserver, chrome */
+/* global window, document, Element, MouseEvent, PointerEvent, HTMLElement, SVGElement, HTMLInputElement, HTMLButtonElement, HTMLAnchorElement, HTMLLabelElement, HTMLTextAreaElement, HTMLSelectElement, HTMLOptionElement, MutationObserver, chrome */
 
 // click-helper.js
 // This script is injected into the page to handle click operations
@@ -749,9 +749,15 @@ if (
       //     callers still get signal without long blocking.
       // `beforeunload` short-circuits the window (we already have the verdict).
       const VERIFY_FAST_WINDOW_MS = 400;
-      const verifyWindowMs = waitForNavigation
-        ? Math.max(0, Number(timeout) || VERIFY_FAST_WINDOW_MS)
-        : VERIFY_FAST_WINDOW_MS;
+      const intent = typeof options.intent === 'string' ? options.intent : '';
+      const needsDynamicPostActionWindow =
+        intent.startsWith('filter.') ||
+        intent === 'search.open_filters' ||
+        intent.startsWith('search.apply_filter.');
+      const verifyWindowMs =
+        waitForNavigation || needsDynamicPostActionWindow
+          ? Math.max(0, Number(timeout) || VERIFY_FAST_WINDOW_MS)
+          : VERIFY_FAST_WINDOW_MS;
 
       // Page-local pre-click snapshot.
       const urlBefore = String(window.location.href || '');
@@ -910,13 +916,24 @@ if (
       }
     };
     return {
+      className:
+        typeof element.className === 'string'
+          ? element.className
+          : element.className && typeof element.className.baseVal === 'string'
+            ? element.className.baseVal
+            : null,
       ariaExpanded: get('aria-expanded'),
       ariaSelected: get('aria-selected'),
       ariaPressed: get('aria-pressed'),
       ariaChecked: get('aria-checked'),
+      ariaCurrent: get('aria-current'),
+      dataState: get('data-state'),
+      dataSelected: get('data-selected'),
+      dataActive: get('data-active'),
       open: get('open'),
       disabled: get('disabled'),
       checked: element instanceof HTMLInputElement ? String(element.checked) : get('checked'),
+      selected: element instanceof HTMLOptionElement ? String(element.selected) : get('selected'),
       value:
         element instanceof HTMLInputElement ||
         element instanceof HTMLTextAreaElement ||
@@ -960,11 +977,16 @@ if (
         finish(initialReason);
         return;
       }
-      if (document.visibilityState === 'hidden') {
-        finish('hidden_document_fast_path');
-        return;
-      }
       const deadline = startedAt + Math.max(0, ms);
+      const scheduleNext = () => {
+        if (document.visibilityState === 'hidden') {
+          setTimeout(tick, 50);
+          return;
+        }
+        if (!requestNextFrame(tick)) {
+          setTimeout(tick, 50);
+        }
+      };
       const tick = () => {
         if (done) return;
         const reason = earlyExitCheck ? earlyExitCheck() : null;
@@ -976,7 +998,7 @@ if (
           finish('timeout');
           return;
         }
-        if (!requestNextFrame(tick)) finish('raf_unavailable');
+        scheduleNext();
       };
       timeoutId = setTimeout(() => finish('timeout'), Math.max(0, ms));
       tick();

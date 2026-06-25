@@ -821,6 +821,10 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
     document.elementFromPoint = vi.fn(() => null);
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    });
     Element.prototype.scrollIntoView = vi.fn();
     class TestMouseEvent extends Event {
       clientX: number;
@@ -920,6 +924,43 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
       before: 'false',
       after: 'true',
     });
+
+    const merged = mergeClickSignals(response.dispatchSucceeded, response.signals, {
+      newTabOpened: false,
+    });
+    expect(merged.observedOutcome).toBe('state_toggled');
+    expect(merged.success).toBe(true);
+  });
+
+  it('waits for async filter state changes even when the document is hidden', async () => {
+    document.body.innerHTML = '<div id="filter" class="tags">最多收藏</div>';
+    const filter = document.getElementById('filter') as HTMLDivElement;
+    setRect(filter, { left: 20, top: 30, width: 120, height: 32 });
+    document.elementFromPoint = vi.fn(() => filter);
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'hidden',
+    });
+    filter.addEventListener('click', () => {
+      setTimeout(() => {
+        filter.className = 'tags selected';
+      }, 80);
+    });
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#filter',
+      waitForNavigation: false,
+      timeout: 1000,
+      intent: 'filter.sort_most_collected',
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(response.signals.targetStateDelta.className).toEqual({
+      before: 'tags',
+      after: 'tags selected',
+    });
+    expect(response.signals.waitDiagnostics.verification.reason).toBe('target_state_changed');
 
     const merged = mergeClickSignals(response.dispatchSucceeded, response.signals, {
       newTabOpened: false,
