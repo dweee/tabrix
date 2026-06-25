@@ -146,6 +146,20 @@ function readIntegerArg(args: Record<string, unknown>, field: string): number | 
     : null;
 }
 
+function shouldProjectExperienceAfterAiFeedback(input: {
+  businessStatus: string;
+  confidence: number | null;
+  summary?: string | null;
+}): boolean {
+  return (
+    input.businessStatus === 'achieved' &&
+    typeof input.confidence === 'number' &&
+    input.confidence >= 0.9 &&
+    typeof input.summary === 'string' &&
+    input.summary.trim().length >= 8
+  );
+}
+
 const handleMemoryRecordAiFeedback: NativeToolHandler = async (args, deps) => {
   const persistenceMode = deps.sessionManager.getPersistenceStatus().mode;
   if (persistenceMode === 'off' || !deps.sessionManager.memoryTraces) {
@@ -225,12 +239,17 @@ const handleMemoryRecordAiFeedback: NativeToolHandler = async (args, deps) => {
     );
   }
 
-  const projection = await deps.sessionManager
-    .flushAndProjectMkeAfterAiFeedback()
-    .catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      return { error: message };
-    });
+  const eligibleForExperienceProjection = shouldProjectExperienceAfterAiFeedback({
+    businessStatus,
+    confidence: updated.aiFeedbackScore,
+    summary: readStringArg(object, 'summary'),
+  });
+  const projection = eligibleForExperienceProjection
+    ? await deps.sessionManager.flushAndProjectMkeAfterAiFeedback().catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        return { error: message };
+      })
+    : null;
 
   return jsonResult(
     {
@@ -246,7 +265,9 @@ const handleMemoryRecordAiFeedback: NativeToolHandler = async (args, deps) => {
               message: projection.error,
             }
           : {
-              status: 'projected',
+              status: eligibleForExperienceProjection
+                ? 'projected'
+                : 'skipped_experience_not_eligible',
               knowledgeUpserted: projection?.knowledge?.upsertedKnowledgeCount ?? null,
               experienceSaved: projection?.experience?.savedExperienceCount ?? null,
               experienceIds: projection?.experience?.experienceIds ?? [],

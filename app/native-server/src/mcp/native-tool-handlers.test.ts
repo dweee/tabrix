@@ -133,6 +133,51 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
     expect(flushAndProjectMkeAfterAiFeedback).toHaveBeenCalledTimes(1);
   });
 
+  it('records partial AI feedback without triggering Experience projection', async () => {
+    const handler = getMemoryFeedbackHandler();
+    const recordAiBusinessFeedback = jest.fn().mockReturnValue({
+      traceId: 'trace-1',
+      aiFeedbackScore: 0.82,
+    });
+    const flushAndProjectMkeAfterAiFeedback = jest.fn();
+
+    const result = await handler(
+      {
+        traceId: 'trace-1',
+        feedbackToken: 'binding-hash-1',
+        businessStatus: 'partial',
+        confidence: 0.82,
+        reasonCode: 'ai_identified_next_target',
+        summary: 'AI found useful next-step targets, but the user goal is not complete yet.',
+      },
+      makeDeps({ memoryTraces: { recordAiBusinessFeedback }, flushAndProjectMkeAfterAiFeedback }),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(recordAiBusinessFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceId: 'trace-1',
+        traceBindingHash: 'binding-hash-1',
+        businessStatus: 'partial',
+        confidence: 0.82,
+        reasonCode: 'ai_identified_next_target',
+      }),
+    );
+    expect(callTextPayload(result)).toMatchObject({
+      status: 'recorded',
+      traceId: 'trace-1',
+      businessStatus: 'partial',
+      confidence: 0.82,
+      projection: {
+        status: 'skipped_experience_not_eligible',
+        knowledgeUpserted: null,
+        experienceSaved: null,
+        experienceIds: [],
+      },
+    });
+    expect(flushAndProjectMkeAfterAiFeedback).not.toHaveBeenCalled();
+  });
+
   it('rejects missing traceId or invalid businessStatus', async () => {
     const handler = getMemoryFeedbackHandler();
     const result = await handler(
