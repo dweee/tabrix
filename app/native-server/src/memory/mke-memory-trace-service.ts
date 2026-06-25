@@ -39,6 +39,7 @@ import {
   pageObjectIdentityRoute,
   sourceTraceIds,
 } from './mke-memory-object-identity';
+import { buildReadPageDataSourceObjectInput } from './mke-memory-read-page-data-source-projection';
 import {
   stringHasBlockedPageSignal,
   valueHasBlockedPageSignal,
@@ -760,16 +761,6 @@ function summarizeCandidateActions(actions: unknown[]): unknown | null {
 
 function readRequestNumber(request: Record<string, unknown> | null, key: string): number | null {
   return readNumber(request?.[key]);
-}
-
-function isApiLikeDataSource(...values: Array<string | null | undefined>): boolean {
-  const text = values.filter(Boolean).join(' ').toLowerCase();
-  return (
-    text.includes('api') ||
-    text.includes('cdp') ||
-    text.includes('endpoint') ||
-    text.includes('knowledge')
-  );
 }
 
 function normalizeConfidence(value: number | null | undefined): number | null {
@@ -1725,61 +1716,11 @@ export class MkeMemoryTraceService {
     pageRole: string;
     tabId: number | null;
   }): void {
-    const projection = readNestedObject(input.payload, 'pageProjection');
-    const selectedDataSource = readString(
-      projection?.chosenDataSource,
-      projection?.selectedDataSource,
-      input.payload.selectedDataSource,
-      input.payload.kind,
-    );
-    const sourceRoute = readString(input.payload.sourceRoute, input.trace.sourceRoute);
-    const endpointFamily = readString(
-      input.payload.endpointFamily,
-      input.payload.endpointPattern,
-      readNestedObject(input.payload, 'source')?.endpointFamily,
-    );
-    if (!isApiLikeDataSource(selectedDataSource, sourceRoute, endpointFamily)) return;
-
-    const sourceKey = selectedDataSource ?? endpointFamily ?? sourceRoute ?? 'api';
-    const pageIdentityRoute = pageObjectIdentityRoute(input.rootRoute, input.trace.pageUrlPattern);
-    this.upsertBrowserObject({
-      siteFamily: input.siteFamily,
-      pageUrlPattern: input.rootRoute,
-      rootRoute: input.rootRoute,
-      currentRoute: input.currentRoute,
-      pageRole: input.pageRole,
-      pageModelKey: input.pageModelKey,
-      objectFingerprint: objectFingerprint(
-        'data_source',
-        input.pageModelKey,
-        pageIdentityRoute,
-        sourceKey,
-      ),
-      objectType: 'data_source',
-      browserContextKey: input.browserContextKey ?? input.trace.browserContextKey ?? null,
-      tabId: input.tabId,
-      sourceRoute,
-      selectedDataSource,
-      sourceFreshness: readString(input.payload.freshness, input.trace.freshness),
-      lifecycleState: 'observed',
-      canTabrixOperate: true,
-      facts: this.sanitizeBrowserObjectValue({
-        selectedDataSource,
-        sourceRoute,
-        endpointFamily,
-        payloadKind: readString(input.payload.kind),
-        sourcePrimaryOrigin: readString(
-          readNestedObject(projection, 'sourceTruthChain')?.primaryOrigin,
-        ),
-      }),
-      claimBoundary: null,
-      confidenceScore: null,
-      firstTraceId: input.trace.traceId,
-      lastTraceId: input.trace.traceId,
-      sourceTraceIds: sourceTraceIds(input.trace),
+    const objectInput = buildReadPageDataSourceObjectInput({
+      ...input,
       redactionState: this.browserObjectRedactionState(),
-      updatedAt: input.observedAt,
     });
+    if (objectInput) this.upsertBrowserObject(objectInput);
   }
 
   private recordReadPageChildObjects(input: {
