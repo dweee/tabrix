@@ -107,6 +107,23 @@ import {
   readJsonObjectFromCallToolResult,
 } from './register-tool-result-json';
 import {
+  clampUnitInterval,
+  readBoolean,
+  readFirstString,
+  readInteger,
+  readNonNegativeInteger,
+  readNullableBoolean,
+  readNumber,
+  readNumericArray,
+  readObject,
+  readPositiveInteger,
+  readSafeReuseRecord,
+  readString,
+  readStringArray,
+  readUnknownArray,
+  readWindowRuntimeState,
+} from './register-tool-value-readers';
+import {
   recordPrimaryTabCleanupOutcome,
   recordPrimaryTabNavigationOutcome,
   resolvePrimaryTabOutgoingArgs,
@@ -2048,28 +2065,6 @@ function buildObjectLibraryReuseSignalFields(object: {
   return Object.keys(signals).length > 0 ? { reuseSignals: signals } : {};
 }
 
-function readSafeReuseRecord(
-  value: Record<string, unknown> | null,
-  allowedKeys: readonly string[],
-): Record<string, unknown> | undefined {
-  if (!value) return undefined;
-  const safe: Record<string, unknown> = {};
-  for (const key of allowedKeys) {
-    const item = value[key];
-    if (item === null || item === undefined) continue;
-    if (
-      typeof item === 'string' ||
-      typeof item === 'number' ||
-      typeof item === 'boolean' ||
-      Array.isArray(item) ||
-      (typeof item === 'object' && item !== null)
-    ) {
-      safe[key] = item;
-    }
-  }
-  return Object.keys(safe).length > 0 ? safe : undefined;
-}
-
 function buildObjectLibraryFilterSignal(
   value: unknown,
 ): NonNullable<ReadPageObjectLibraryHint['reuseSignals']>['filterState'] | undefined {
@@ -2087,18 +2082,6 @@ function buildObjectLibraryFilterSignal(
     timeRange: readString(filterState.timeRange) ?? undefined,
   };
   return Object.values(safe).some((item) => item !== undefined) ? safe : undefined;
-}
-
-function readFirstString(...values: unknown[]): string | null {
-  for (const value of values) {
-    const text = readString(value);
-    if (text) return text;
-  }
-  return null;
-}
-
-function readUnknownArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
 }
 
 function mapObjectLibraryHintFreshness(object: {
@@ -4118,17 +4101,6 @@ function hasReliableVisibleRows(payload: Record<string, unknown>): boolean {
   );
 }
 
-function readObject(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function readStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
-}
-
 function buildRegionStatePostconditionForPendingInteraction(
   pendingInteraction: TaskPageInteractionSnapshot,
   afterRegions: readonly ReadPageRegion[],
@@ -4408,72 +4380,4 @@ function extractReadPageRenderMode(input: unknown): 'json' | 'markdown' | null {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
   const render = (input as Record<string, unknown>).render;
   return render === 'json' || render === 'markdown' ? render : null;
-}
-
-function readString(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
-}
-
-function readBoolean(input: unknown, key: string): boolean | null {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
-  const raw = (input as Record<string, unknown>)[key];
-  return typeof raw === 'boolean' ? raw : null;
-}
-
-function readNullableBoolean(input: unknown, key: string): boolean | null {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
-  const raw = (input as Record<string, unknown>)[key];
-  return typeof raw === 'boolean' ? raw : null;
-}
-
-function readNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function clampUnitInterval(value: number): number {
-  if (value < 0) return 0;
-  if (value > 1) return 1;
-  return value;
-}
-
-function readNumericArray(input: unknown, key: string): number[] | null {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
-  const raw = (input as Record<string, unknown>)[key];
-  if (!Array.isArray(raw)) return null;
-  const values = raw.filter((value): value is number => Number.isInteger(value));
-  return values.length > 0 ? values : null;
-}
-
-function readPositiveInteger(input: unknown, key: string): number | null {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
-  const raw = (input as Record<string, unknown>)[key];
-  return Number.isInteger(raw) && (raw as number) > 0 ? (raw as number) : null;
-}
-
-function readInteger(input: unknown, key: string): number | null {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
-  const raw = (input as Record<string, unknown>)[key];
-  return Number.isInteger(raw) ? (raw as number) : null;
-}
-
-function readNonNegativeInteger(input: unknown, key: string): number | null {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
-  const raw = (input as Record<string, unknown>)[key];
-  return Number.isInteger(raw) && (raw as number) >= 0 ? (raw as number) : null;
-}
-
-function readWindowRuntimeState(input: unknown, key: string): ReadPageWindowRuntimeState | null {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
-  const raw = (input as Record<string, unknown>)[key];
-  if (
-    raw === 'normal' ||
-    raw === 'minimized' ||
-    raw === 'maximized' ||
-    raw === 'fullscreen' ||
-    raw === 'docked' ||
-    raw === 'unknown'
-  ) {
-    return raw;
-  }
-  return null;
 }
