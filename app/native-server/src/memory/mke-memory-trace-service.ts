@@ -22,12 +22,9 @@ import {
   sanitizeValue,
 } from './mke-memory-sanitizer';
 import {
-  actionTargetIdentityKey,
   normalizeResultCardActionToolArgs,
   normalizeResultCardOpenAction,
-  normalizeStableLocatorChain,
   readResultCardStableTarget,
-  regionChildObjectIdentityKey,
   summarizeCollectedResultCardForTrace,
   summarizeResultCardCollectionWindow,
   summarizeResultCardSourceWindow,
@@ -40,6 +37,7 @@ import {
   sourceTraceIds,
 } from './mke-memory-object-identity';
 import { buildReadPageDataSourceObjectInput } from './mke-memory-read-page-data-source-projection';
+import { recordReadPageRegionAndActionObjects } from './mke-memory-read-page-child-projection';
 import {
   stringHasBlockedPageSignal,
   valueHasBlockedPageSignal,
@@ -472,58 +470,6 @@ function buildPageObjectRecentEvents(input: {
     });
   }
   return events;
-}
-
-function buildReadPageRegionFallbacksFromSnapshot(
-  snapshotValue: unknown,
-): Record<string, unknown>[] {
-  const snapshot = readObject(snapshotValue);
-  if (!snapshot) return [];
-  const objects = readArray(snapshot.objects);
-  if (objects.length === 0) return [];
-  return [
-    {
-      regionId: 'page-object-snapshot',
-      regionType: 'page_objects',
-      layoutHint: 'snapshot',
-      state: 'observed',
-      readiness: readString(readNestedObject(snapshot, 'pageState')?.readiness, 'unknown'),
-      targetability: readNumber(snapshot.actionableObjectCount) !== 0,
-      candidateActionIds: readArray(snapshot.actionableTargets)
-        .map((target) => readString(readObject(target)?.targetId, readObject(target)?.id))
-        .filter((targetId): targetId is string => Boolean(targetId))
-        .slice(0, 80),
-      objects,
-    },
-  ];
-}
-
-function buildReadPageActionFallbacksFromSnapshot(
-  snapshotValue: unknown,
-): Record<string, unknown>[] {
-  const snapshot = readObject(snapshotValue);
-  if (!snapshot) return [];
-  return readArray(snapshot.actionableTargets)
-    .map((rawTarget): Record<string, unknown> | null => {
-      const target = readObject(rawTarget);
-      if (!target) return null;
-      const targetRef = readString(target.targetRef, target.ref, target.targetId, target.id);
-      if (!targetRef) return null;
-      return {
-        id: readString(target.targetId, target.id, targetRef),
-        targetRef,
-        actionType: readString(target.actionType, target.primaryAction, target.action, 'click'),
-        actionability: readActionabilityBoolean(target.actionability, target.targetability, true),
-        actionabilityReason: readString(target.actionabilityReason, target.reason),
-        frameId: readString(target.frameId),
-        nextRequiredTool: readString(target.nextRequiredTool),
-        nextRequiredCheck: readString(target.nextRequiredCheck),
-        intentBoundary: readString(target.intentBoundary, target.intent),
-        matchReason: readString(target.matchReason, target.reason),
-      };
-    })
-    .filter((target): target is Record<string, unknown> => target !== null)
-    .slice(0, 80);
 }
 
 function readBusinessVerdictString(...values: unknown[]): BusinessSuccessVerdict | null {
@@ -1737,209 +1683,11 @@ export class MkeMemoryTraceService {
     parentObjectId?: string | null;
   }): void {
     this.recordReadPageDataSourceObject(input);
-    const pageIdentityRoute = pageObjectIdentityRoute(input.rootRoute, input.trace.pageUrlPattern);
-    const snapshot = readNestedObject(input.payload, 'pageObjectSnapshot');
-    const regionInputs = readArray(input.payload.pageRegions);
-    const regions =
-      regionInputs.length > 0 ? regionInputs : buildReadPageRegionFallbacksFromSnapshot(snapshot);
-    const actionInputs = readArray(input.payload.candidateActions);
-    const actions =
-      actionInputs.length > 0 ? actionInputs : buildReadPageActionFallbacksFromSnapshot(snapshot);
-
-    for (const [index, rawRegion] of regions.slice(0, 40).entries()) {
-      const region = readObject(rawRegion);
-      if (!region) continue;
-      const regionId = readString(region.regionId, region.id) ?? `region-${index}`;
-      this.upsertBrowserObject({
-        siteFamily: input.siteFamily,
-        pageUrlPattern: input.rootRoute,
-        rootRoute: input.rootRoute,
-        currentRoute: input.currentRoute,
-        pageRole: input.pageRole,
-        pageModelKey: input.pageModelKey,
-        objectFingerprint: objectFingerprint(
-          'region',
-          input.pageModelKey,
-          pageIdentityRoute,
-          regionId,
-        ),
-        objectType: 'region',
-        parentObjectId: input.parentObjectId ?? null,
-        browserContextKey: input.browserContextKey ?? input.trace.browserContextKey ?? null,
-        tabId: input.tabId,
-        sourceRoute: readString(input.payload.sourceRoute, input.trace.sourceRoute),
-        sourceFreshness: readString(input.payload.freshness, input.trace.freshness),
-        lifecycleState: readString(region.state, 'observed'),
-        canTabrixOperate: readActionabilityBoolean(region.targetability),
-        targetability: sanitizeValue(
-          {
-            state: readString(region.state),
-            readiness: readString(region.readiness),
-            nextRequiredTool: readString(region.nextRequiredTool),
-            nextRequiredCheck: readString(region.nextRequiredCheck),
-          },
-          'browser_object',
-        ),
-        facts: sanitizeValue(
-          {
-            regionType: readString(region.regionType),
-            layoutHint: readString(region.layoutHint),
-            candidateActionCount: readArray(region.candidateActionIds).length,
-          },
-          'browser_object',
-        ),
-        claimBoundary: null,
-        confidenceScore: null,
-        firstTraceId: input.trace.traceId,
-        lastTraceId: input.trace.traceId,
-        sourceTraceIds: sourceTraceIds(input.trace),
-        redactionState: this.browserObjectRedactionState(),
-        updatedAt: input.observedAt,
-      });
-
-      const childObjects = readArray(region.objects);
-      const childBrowserObjectIdsByObjectId = new Map<string, string>();
-      for (const [childIndex, rawChild] of childObjects.slice(0, 40).entries()) {
-        const child = readObject(rawChild);
-        if (!child) continue;
-        const childType = readString(child.objectType, child.kind, child.role) ?? 'page_object';
-        const childObjectId = regionChildObjectIdentityKey({
-          child,
-          regionId,
-          childType,
-          fallbackIndex: childIndex,
-        });
-        const targetRef = readString(child.targetRef, child.ref);
-        const logicalParentObjectId = readString(child.parentObjectId);
-        const parentObjectId = logicalParentObjectId
-          ? (childBrowserObjectIdsByObjectId.get(logicalParentObjectId) ??
-            input.parentObjectId ??
-            logicalParentObjectId)
-          : (input.parentObjectId ?? null);
-        const childBrowserObject = this.upsertBrowserObject({
-          siteFamily: input.siteFamily,
-          pageUrlPattern: input.rootRoute,
-          rootRoute: input.rootRoute,
-          currentRoute: input.currentRoute,
-          pageRole: input.pageRole,
-          pageModelKey: input.pageModelKey,
-          objectFingerprint: objectFingerprint(
-            'region_object',
-            input.pageModelKey,
-            pageIdentityRoute,
-            regionId,
-            childObjectId,
-          ),
-          objectType: childType,
-          parentObjectId,
-          browserContextKey: input.browserContextKey ?? input.trace.browserContextKey ?? null,
-          tabId: input.tabId,
-          sourceRoute: readString(input.payload.sourceRoute, input.trace.sourceRoute),
-          sourceFreshness: readString(
-            child.freshness,
-            input.payload.freshness,
-            input.trace.freshness,
-          ),
-          lifecycleState: 'observed',
-          canTabrixOperate: readActionabilityBoolean(child.targetability),
-          targetability: sanitizeValue(
-            {
-              targetRef,
-              detailTarget: readObject(child.detailTarget),
-              primaryAction: readObject(child.primaryAction),
-            },
-            'browser_object',
-          ),
-          actionTypes: sanitizeValue(readArray(child.actionTypes), 'browser_object'),
-          facts: sanitizeValue(
-            {
-              regionId,
-              regionType: readString(region.regionType),
-              parentObjectId,
-              containerKind: readString(child.containerKind),
-              role: readString(child.role),
-              label: readString(child.label),
-              sourceProvenance: readArray(child.sourceProvenance),
-              reason: readString(child.reason),
-            },
-            'browser_object',
-          ),
-          claimBoundary: readString(child.claimBoundary),
-          confidenceScore: readNumber(child.confidence),
-          firstTraceId: input.trace.traceId,
-          lastTraceId: input.trace.traceId,
-          sourceTraceIds: sourceTraceIds(input.trace),
-          redactionState: this.browserObjectRedactionState(),
-          updatedAt: input.observedAt,
-        });
-        if (childBrowserObject) {
-          childBrowserObjectIdsByObjectId.set(childObjectId, childBrowserObject.browserObjectId);
-        }
-      }
-    }
-    for (const [index, rawAction] of actions.slice(0, 80).entries()) {
-      const action = readObject(rawAction);
-      if (!action) continue;
-      const targetRef = readString(action.targetRef, action.id) ?? `target-${index}`;
-      const targetIdentityKey = actionTargetIdentityKey({
-        action,
-        targetRef,
-        fallbackIndex: index,
-      });
-      this.upsertBrowserObject({
-        siteFamily: input.siteFamily,
-        pageUrlPattern: input.rootRoute,
-        rootRoute: input.rootRoute,
-        currentRoute: input.currentRoute,
-        pageRole: input.pageRole,
-        pageModelKey: input.pageModelKey,
-        objectFingerprint: objectFingerprint(
-          'action_target',
-          input.pageModelKey,
-          pageIdentityRoute,
-          targetIdentityKey,
-        ),
-        objectType: 'action_target',
-        browserContextKey: input.browserContextKey ?? input.trace.browserContextKey ?? null,
-        tabId: input.tabId,
-        sourceRoute: readString(input.payload.sourceRoute, input.trace.sourceRoute),
-        sourceFreshness: readString(input.payload.freshness, input.trace.freshness),
-        lifecycleState: 'observed',
-        canTabrixOperate: readActionabilityBoolean(action.actionability),
-        operabilityReason: readString(action.actionabilityReason),
-        targetability: sanitizeValue(
-          {
-            targetRef,
-            frameId: readString(action.frameId),
-            identityKey: targetIdentityKey,
-            nextRequiredTool: readString(action.nextRequiredTool),
-            nextRequiredCheck: readString(action.nextRequiredCheck),
-          },
-          'browser_object',
-        ),
-        actionTypes: sanitizeValue(
-          [readString(action.actionType)].filter((item): item is string => Boolean(item)),
-          'browser_object',
-        ),
-        facts: sanitizeValue(
-          {
-            intentBoundary: readString(action.intentBoundary),
-            intent: readString(action.intent),
-            label: readString(action.label, action.text, action.accessibleName, action.name),
-            stableLocatorChain: normalizeStableLocatorChain(action.locatorChain),
-            matchReason: readString(action.matchReason),
-          },
-          'browser_object',
-        ),
-        claimBoundary: null,
-        confidenceScore: null,
-        firstTraceId: input.trace.traceId,
-        lastTraceId: input.trace.traceId,
-        sourceTraceIds: sourceTraceIds(input.trace),
-        redactionState: this.browserObjectRedactionState(),
-        updatedAt: input.observedAt,
-      });
-    }
+    recordReadPageRegionAndActionObjects({
+      ...input,
+      redactionState: this.browserObjectRedactionState(),
+      upsertBrowserObject: (objectInput) => this.upsertBrowserObject(objectInput),
+    });
   }
 
   public recordAiBusinessFeedback(
