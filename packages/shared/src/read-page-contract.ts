@@ -116,8 +116,8 @@ export interface ReadPageInteractiveElement {
    * snapshots do not emit it.
    *
    * Added in T5.4.5 to let downstream pickers disambiguate between
-   * same-label links that point to different URLs (e.g. a workflow file
-   * vs a workflow run on GitHub `/actions`).
+   * same-label links that point to different URLs (for example, a list
+   * item link vs a detail-page link).
    */
   href?: string;
   /**
@@ -1449,23 +1449,13 @@ export interface ReadPageHighValueObject {
   reason: string;
   objectType?: ReadPageObjectType;
   /**
-   * Optional family-specific sub-type that refines `objectType`. Carries
-   * namespaced values like `'github.workflow_run_entry'` or
-   * `'github.repo_nav_tab'`. Added in T5.4.5 to let downstream pickers
-   * select the RIGHT link on visually-ambiguous pages (e.g. GitHub
-   * `/actions` where workflow files and workflow runs look the same).
+   * Optional subtype that refines `objectType`. Carries generic or
+   * adapter-namespaced values such as `result_card`, `primary_nav_tab`,
+   * `filter_control`, or `content_anchor`. Added in T5.4.5 to let
+   * downstream pickers select the right link on visually-ambiguous pages.
    *
-   * Recommended GitHub values (non-exhaustive):
-   *   - `github.repo_nav_tab`            (Issues / PRs / Actions / Security / Insights top nav)
-   *   - `github.security_quality_tab`    (independent "Security and quality" tab)
-   *   - `github.workflow_run_entry`      (a specific `/actions/runs/<id>` row)
-   *   - `github.workflow_file_entry`     (a `.github/workflows/<name>.yml` link under /actions)
-   *   - `github.workflow_filter_control` (filter button / `/actions?query=...`)
-   *   - `github.page_anchor`             (in-page `#fragment` link like `#start-of-content`)
-   *
-   * Consumers MUST treat this as optional and use string-prefix matching
-   * (`startsWith('github.')`) rather than exhaustive switches so new
-   * values can be added without breaking downstream code.
+   * Consumers MUST treat this as optional and avoid exhaustive switches so
+   * new values can be added without breaking downstream code.
    */
   objectSubType?: string;
   region?: string | null;

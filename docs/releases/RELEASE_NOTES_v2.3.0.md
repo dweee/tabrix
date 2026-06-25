@@ -6,7 +6,7 @@ Release date: `2026-04-23`.
 
 v2.3.0 is the third minor release on the 2.x line. It is the first release whose **release gate is real-browser–anchored**: `pnpm run release:check` now refuses to ship a v2.3.0+ tag without recent maintainer-private benchmark evidence that passes the K3 / K4 / lane-integrity gate. v2.1 / v2.2 ship-grade behaviour is unchanged — the gate only applies to `2.3.0+`.
 
-The release is backward compatible with v2.2.x. Every new MCP tool is additive and either P0 (read-only) or carries `requiresExplicitOptIn: true`; every new field on existing tools is optional. The only behavioural default change is the V23-04 chooser branch landing the new `read_page_markdown` strategy on a hand-curated GitHub whitelist — outside that whitelist callers see no change.
+The release is backward compatible with v2.2.x. Every new MCP tool is additive and either P0 (read-only) or carries `requiresExplicitOptIn: true`; every new field on existing tools is optional. The only behavioural default change is the V23-04 chooser branch landing the new `read_page_markdown` strategy behind a narrow historical allowlist — outside that allowlist callers see no change.
 
 ## Highlights (what's actually new since v2.2.0)
 
@@ -32,7 +32,7 @@ The release is backward compatible with v2.2.x. Every new MCP tool is additive a
 - New SQLite tables `tabrix_choose_context_decisions` (one row per `status='ok'` chooser call: `decision_id`, `intent_signature`, `page_role`, `site_family`, `strategy`, `fallback_strategy`, `created_at`) and `tabrix_choose_context_outcomes` (one row per write-back, FK to decisions). Idempotent `CREATE IF NOT EXISTS` — old DBs from before V23-04 pick up the tables on next open without a migration.
 - `runTabrixChooseContext` returns the new opaque `decisionId` field. Telemetry write failures never poison the chooser result (the `decisionId` is simply omitted, treated as "telemetry off").
 - New MCP tool `tabrix_choose_context_record_outcome` (P0, pure-INSERT, native-handled). Closed `outcome` set: `reuse | fallback | completed | retried`. Three structural statuses: `ok | invalid_input | unknown_decision` — caller can distinguish "decision lost" from "permission denied".
-- New strategy `read_page_markdown` joins `ContextStrategyName`. Routed when no experience hit AND no usable knowledge AND `siteFamily === 'github'` AND `pageRole` is on the hand-curated `MARKDOWN_FRIENDLY_PAGE_ROLES` whitelist (today: `repo_home`; pre-listed for forward-compat: `issue_detail`, `pull_request_detail`, `discussion_detail`, `wiki`, `release_notes`, `commit_detail`).
+- New strategy `read_page_markdown` joins `ContextStrategyName`. Routed when no experience hit AND no usable knowledge AND `pageRole` is on the hand-curated `MARKDOWN_FRIENDLY_PAGE_ROLES` whitelist for long-form content pages.
 - New release-evidence script `pnpm run release:choose-context-stats` aggregates strategy distribution and outcome ratios from the telemetry tables.
 
 ### V23-05 / `B-EXP-REPLAY-V1` — `experience_replay` v1 owner-lane brief (no implementation)

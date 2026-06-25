@@ -232,11 +232,11 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
     const listBySite = jest.fn().mockReturnValue([
       {
         endpointId: 'ep-1',
-        site: 'api.github.com',
-        family: 'github',
+        site: 'api.code.example',
+        family: 'workspace',
         method: 'GET',
         urlPattern: '/repos/:owner/:repo/issues',
-        endpointSignature: 'GET api.github.com/repos/:owner/:repo/issues',
+        endpointSignature: 'GET api.code.example/repos/:owner/:repo/issues',
         semanticTag: null,
         statusClass: '2xx',
         requestSummary: {
@@ -258,7 +258,7 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
     const knowledgeApi = { listBySite } as unknown as KnowledgeApiRepository;
 
     const result = await handler(
-      { intent: 'inspect captured endpoint catalog', url: 'https://github.com/octocat/hello' },
+      { intent: 'inspect captured endpoint catalog', url: 'https://code.example/octocat/hello' },
       makeDeps({
         knowledgeApi,
       }),
@@ -272,7 +272,7 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
     const handler = getChooseHandler();
     const findReusableMkeExperienceRecipes = jest.fn().mockReturnValue([
       {
-        experienceId: 'exp-xhs-top10',
+        experienceId: 'exp-content-top10',
         taskSignature: 'tools:chrome_collect_result_cards',
         successCount: 2,
         failureCount: 0,
@@ -294,8 +294,8 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
 
     const result = await handler(
       {
-        intent: '小红书搜索AI图片创作，筛选最多收藏、图文、一周内，并汇报前10条图文内容',
-        url: 'https://www.xiaohongshu.com/search_result/?keyword=AI图片创作&type=51',
+        intent: '内容站搜索AI图片创作，筛选最多收藏、图文、一周内，并汇报前10条图文内容',
+        url: 'https://content.example/search_result/?keyword=AI图片创作&type=51',
         pageRole: 'search_results',
       },
       makeDeps({
@@ -310,12 +310,12 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
     expect(body.artifacts).toEqual([
       expect.objectContaining({
         kind: 'experience_recipe',
-        ref: 'exp-xhs-top10',
+        ref: 'exp-content-top10',
       }),
     ]);
     expect(body.artifacts[0].summary).toContain('最多收藏/图文/一周内');
     expect(findReusableMkeExperienceRecipes).toHaveBeenCalledWith({
-      siteFamily: 'www.xiaohongshu.com',
+      siteFamily: 'content.example',
       pageRole: 'search_results',
       limit: 1,
     });
@@ -325,7 +325,7 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
     const handler = getChooseHandler();
     const findReusableMkeExperienceRecipes = jest.fn().mockReturnValue([
       {
-        experienceId: 'exp-xhs-top10',
+        experienceId: 'exp-content-top10',
         taskSignature: 'tools:chrome_collect_result_cards',
         successCount: 2,
         failureCount: 0,
@@ -347,8 +347,8 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
 
     const result = await handler(
       {
-        intent: '小红书搜索AI图片创作，筛选最多收藏、图文、一周内，并汇报前10条图文内容',
-        url: 'https://www.xiaohongshu.com/search_result/?keyword=AI图片创作&type=51',
+        intent: '内容站搜索AI图片创作，筛选最多收藏、图文、一周内，并汇报前10条图文内容',
+        url: 'https://content.example/search_result/?keyword=AI图片创作&type=51',
         pageRole: 'search_results',
       },
       {
@@ -357,7 +357,7 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
         }),
         taskContext: {
           peekReadPageContextMeasurement: () => ({
-            url: 'https://www.xiaohongshu.com/search_result/?keyword=AI图片创作&type=51',
+            url: 'https://content.example/search_result/?keyword=AI图片创作&type=51',
             pageRole: 'search_results',
             fullReadByteLength: 40_000,
             candidateActionsCount: 10,
@@ -379,7 +379,7 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
     expect(body.dispatcherInputSource).toBe('live_snapshot');
   });
 
-  it('disables chooser-inline direct API when private acceptance fault injection is present', async () => {
+  it('does not enter direct API without observed Knowledge even when fault injection is present', async () => {
     const handler = getChooseHandler();
     const fetchSpy = jest
       .spyOn(globalThis, 'fetch')
@@ -388,8 +388,8 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
     try {
       const result = await handler(
         {
-          intent: '搜索 GitHub 上 AI助手 相关热门项目，列出前10个',
-          url: 'https://github.com/search?q=AI%20assistant&type=repositories',
+          intent: '搜索 Workspace 上 AI助手 相关热门项目，列出前10个',
+          url: 'https://code.example/search?q=AI%20assistant&type=repositories',
           pageRole: 'search_results',
           __tabrixAcceptanceApiFault: 'network_timeout',
         },
@@ -400,7 +400,7 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
 
       expect(result.isError).toBe(false);
       const body = callTextPayload(result);
-      expect(body.sourceRoute).toBe('knowledge_supported_read');
+      expect(body.sourceRoute).toBe('read_page_required');
       expect(body.directApiExecution).toBeUndefined();
       expect(fetchSpy).not.toHaveBeenCalled();
     } finally {

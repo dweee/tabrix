@@ -331,7 +331,8 @@ export interface NoteReadPageInput {
    */
   targetRefs?: ReadonlyArray<string> | null;
   /**
-   * API endpoint families the read absorbed (e.g. `'github_issues'`).
+   * API endpoint families the read absorbed (for example, observed
+   * search/list/detail families).
    * Same idea as `targetRefs` but for the Knowledge layer.
    */
   apiFamilies?: ReadonlyArray<string> | null;

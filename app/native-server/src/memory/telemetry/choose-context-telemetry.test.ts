@@ -35,8 +35,8 @@ function decision(
   return {
     decisionId: 'dc-1',
     intentSignature: 'open issues',
-    pageRole: 'repo_home',
-    siteFamily: 'github',
+    pageRole: 'workspace_home',
+    siteFamily: 'workspace',
     strategy: 'knowledge_light',
     fallbackStrategy: 'read_page_required',
     createdAt: '2026-04-22T10:00:00.000Z',
@@ -64,8 +64,8 @@ describe('ChooseContextTelemetryRepository', () => {
       expect(row).toEqual({
         decisionId: 'dc-1',
         intentSignature: 'open issues',
-        pageRole: 'repo_home',
-        siteFamily: 'github',
+        pageRole: 'workspace_home',
+        siteFamily: 'workspace',
         strategy: 'knowledge_light',
         fallbackStrategy: 'read_page_required',
         createdAt: '2026-04-22T10:00:00.000Z',
@@ -120,9 +120,9 @@ describe('ChooseContextTelemetryRepository', () => {
           selectedArtifacts: [
             {
               kind: 'experience_recipe',
-              ref: 'exp-xhs-top10',
+              ref: 'exp-content-top10',
               recipeSchema: 'tabrix_experience_recipe_hint_v1',
-              siteFamily: 'www.xiaohongshu.com',
+              siteFamily: 'content.example',
               pageRole: 'search_results',
               taskSignature: 'tools:chrome_collect_result_cards',
             },
@@ -145,9 +145,9 @@ describe('ChooseContextTelemetryRepository', () => {
         items: [
           {
             kind: 'experience_recipe',
-            ref: 'exp-xhs-top10',
+            ref: 'exp-content-top10',
             recipeSchema: 'tabrix_experience_recipe_hint_v1',
-            siteFamily: 'www.xiaohongshu.com',
+            siteFamily: 'content.example',
             pageRole: 'search_results',
             taskSignature: 'tools:chrome_collect_result_cards',
           },

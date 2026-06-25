@@ -21,7 +21,7 @@ import { dispatchLayer, getLayerDispatchRulesForTesting } from './choose-context
 describe('dispatchLayer — V25-02 kickoff bindings', () => {
   test('user intent "summary" beats high candidateActionsCount (=50)', () => {
     const out = dispatchLayer({
-      pageRole: 'workflow_run_detail',
+      pageRole: 'job_run_detail',
       userIntent: 'summary',
       taskType: 'reading_only',
       candidateActionsCount: 50,
@@ -39,7 +39,7 @@ describe('dispatchLayer — V25-02 kickoff bindings', () => {
 
   test('user intent "details" beats simple page (candidateActionsCount=3)', () => {
     const out = dispatchLayer({
-      pageRole: 'repo_home',
+      pageRole: 'workspace_home',
       userIntent: 'details',
       taskType: 'reading_only',
       candidateActionsCount: 3,
@@ -59,7 +59,7 @@ describe('dispatchLayer — V25-02 kickoff bindings', () => {
 describe('dispatchLayer — priority 1 safety override', () => {
   test('safetyRequiresFullLayers forces L0+L1+L2 even when user said summary', () => {
     const out = dispatchLayer({
-      pageRole: 'workflow_run_detail',
+      pageRole: 'job_run_detail',
       userIntent: 'summary',
       taskType: 'reading_only',
       candidateActionsCount: 2,
@@ -101,7 +101,7 @@ describe('dispatchLayer — priority 2 user intent override', () => {
     ['details', 'L0+L1+L2', 'user_intent_details_or_compare'],
   ] as const)('userIntent=%s yields chosenLayer=%s reason=%s', (intent, layer, reason) => {
     const out = dispatchLayer({
-      pageRole: 'repo_home',
+      pageRole: 'workspace_home',
       userIntent: intent,
       taskType: 'reading_only',
       candidateActionsCount: 1,
@@ -117,7 +117,7 @@ describe('dispatchLayer — priority 2 user intent override', () => {
 describe('dispatchLayer — priority 3 task type', () => {
   test('reading_only with no user intent → L0 / task_type_reading_only', () => {
     const out = dispatchLayer({
-      pageRole: 'repo_home',
+      pageRole: 'workspace_home',
       taskType: 'reading_only',
       userIntent: 'unknown',
       candidateActionsCount: 0,
@@ -129,7 +129,7 @@ describe('dispatchLayer — priority 3 task type', () => {
 
   test('action with no user intent → L0+L1 / task_type_action', () => {
     const out = dispatchLayer({
-      pageRole: 'repo_home',
+      pageRole: 'workspace_home',
       taskType: 'action',
       userIntent: 'unknown',
       candidateActionsCount: 0,
@@ -143,7 +143,7 @@ describe('dispatchLayer — priority 3 task type', () => {
 describe('dispatchLayer — priority 4 page complexity', () => {
   test('simple_page_low_density: small action surface → L0', () => {
     const out = dispatchLayer({
-      pageRole: 'repo_home',
+      pageRole: 'workspace_home',
       taskType: 'unknown',
       candidateActionsCount: 4,
       hvoCount: 3,
@@ -154,7 +154,7 @@ describe('dispatchLayer — priority 4 page complexity', () => {
 
   test('medium_page_overview: 30 actions → L0+L1', () => {
     const out = dispatchLayer({
-      pageRole: 'repo_home',
+      pageRole: 'workspace_home',
       taskType: 'unknown',
       candidateActionsCount: 30,
       hvoCount: 8,
@@ -165,7 +165,7 @@ describe('dispatchLayer — priority 4 page complexity', () => {
 
   test('complex_page_detail_required: 80 actions → L0+L1+L2', () => {
     const out = dispatchLayer({
-      pageRole: 'workflow_run_detail',
+      pageRole: 'job_run_detail',
       taskType: 'unknown',
       candidateActionsCount: 80,
       hvoCount: 40,
@@ -246,7 +246,7 @@ describe('dispatchLayer — invariants', () => {
     // lower-priority rule eligible too so the alternatives list is
     // non-empty.
     const out = dispatchLayer({
-      pageRole: 'repo_home',
+      pageRole: 'workspace_home',
       userIntent: 'summary',
       taskType: 'reading_only',
       candidateActionsCount: 4,
@@ -265,7 +265,7 @@ describe('dispatchLayer — invariants', () => {
 
   test('token estimate respects per-layer fraction (L0 ≤ 35% of full read)', () => {
     const out = dispatchLayer({
-      pageRole: 'repo_home',
+      pageRole: 'workspace_home',
       userIntent: 'summary',
       taskType: 'reading_only',
       candidateActionsCount: 10,
@@ -280,7 +280,7 @@ describe('dispatchLayer — invariants', () => {
 
   test('token estimate respects per-layer fraction (L0+L1 ≤ 60% of full read)', () => {
     const out = dispatchLayer({
-      pageRole: 'repo_home',
+      pageRole: 'workspace_home',
       userIntent: 'open_or_select',
       taskType: 'action',
       candidateActionsCount: 10,

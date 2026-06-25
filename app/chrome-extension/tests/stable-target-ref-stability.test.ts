@@ -46,7 +46,7 @@ describe('V23-02 stable targetRef increment hardening', () => {
       // refuse to assign it a targetRef. When it disappears between
       // two snapshots, the surviving anchors must keep the same
       // targetRef they had before. This is the realistic shape of a
-      // GitHub list re-render where the loading skeleton vanishes.
+      // Workspace list re-render where the loading skeleton vanishes.
       const before = annotateStableTargetRefs(
         [
           {
@@ -62,7 +62,7 @@ describe('V23-02 stable targetRef increment hardening', () => {
             label: 'Issues',
             ref: 'ref_issues_a',
             role: 'link',
-            objectSubType: 'github.repo_nav_tab',
+            objectSubType: 'workspace.repo_nav_tab',
             href: '/owner/repo/issues',
             reason: 'r',
           },
@@ -72,12 +72,12 @@ describe('V23-02 stable targetRef increment hardening', () => {
             label: 'Pull requests',
             ref: 'ref_pulls_a',
             role: 'link',
-            objectSubType: 'github.repo_nav_tab',
+            objectSubType: 'workspace.repo_nav_tab',
             href: '/owner/repo/pulls',
             reason: 'r',
           },
         ],
-        'repo_home',
+        'workspace_home',
       );
 
       const after = annotateStableTargetRefs(
@@ -88,7 +88,7 @@ describe('V23-02 stable targetRef increment hardening', () => {
             label: 'Issues',
             ref: 'ref_issues_b',
             role: 'link',
-            objectSubType: 'github.repo_nav_tab',
+            objectSubType: 'workspace.repo_nav_tab',
             href: '/owner/repo/issues',
             reason: 'r',
           },
@@ -98,12 +98,12 @@ describe('V23-02 stable targetRef increment hardening', () => {
             label: 'Pull requests',
             ref: 'ref_pulls_b',
             role: 'link',
-            objectSubType: 'github.repo_nav_tab',
+            objectSubType: 'workspace.repo_nav_tab',
             href: '/owner/repo/pulls',
             reason: 'r',
           },
         ],
-        'repo_home',
+        'workspace_home',
       );
 
       const beforeRef = before.find((o) => o.id === 'hvo_issues')?.targetRef;
@@ -125,16 +125,16 @@ describe('V23-02 stable targetRef increment hardening', () => {
       // green until someone *also* mutates the input here — which is
       // the right blast radius for that decision.
       const a = computeStableTargetRef({
-        pageRole: 'repo_home',
-        objectSubType: 'github.repo_nav_tab',
+        pageRole: 'workspace_home',
+        objectSubType: 'workspace.repo_nav_tab',
         role: 'link',
         label: 'Issues',
         href: '/owner/repo/issues',
         ordinal: 0,
       });
       const b = computeStableTargetRef({
-        pageRole: 'repo_home',
-        objectSubType: 'github.repo_nav_tab',
+        pageRole: 'workspace_home',
+        objectSubType: 'workspace.repo_nav_tab',
         role: 'link',
         label: 'Issues',
         href: '/owner/repo/issues',
@@ -145,16 +145,16 @@ describe('V23-02 stable targetRef increment hardening', () => {
 
     it('non-meaningful whitespace around the label is normalised away', () => {
       const a = computeStableTargetRef({
-        pageRole: 'repo_home',
-        objectSubType: 'github.repo_nav_tab',
+        pageRole: 'workspace_home',
+        objectSubType: 'workspace.repo_nav_tab',
         role: 'link',
         label: 'Issues',
         href: '/owner/repo/issues',
         ordinal: 0,
       });
       const b = computeStableTargetRef({
-        pageRole: 'repo_home',
-        objectSubType: 'github.repo_nav_tab',
+        pageRole: 'workspace_home',
+        objectSubType: 'workspace.repo_nav_tab',
         role: 'link',
         // mimic a real DOM re-render where the text content gained
         // surrounding whitespace and an extra space inside.
@@ -184,7 +184,7 @@ describe('V23-02 stable targetRef increment hardening', () => {
           label: 'Issues',
           ref: 'ref_pre_001',
           role: 'link',
-          objectSubType: 'github.repo_nav_tab',
+          objectSubType: 'workspace.repo_nav_tab',
           href: '/owner/repo/issues',
           reason: 'r',
         },
@@ -194,18 +194,18 @@ describe('V23-02 stable targetRef increment hardening', () => {
           label: 'Pull requests',
           ref: 'ref_pre_002',
           role: 'link',
-          objectSubType: 'github.repo_nav_tab',
+          objectSubType: 'workspace.repo_nav_tab',
           href: '/owner/repo/pulls',
           reason: 'r',
         },
       ];
 
-      const before = annotateStableTargetRefs(baseObjects, 'repo_home');
+      const before = annotateStableTargetRefs(baseObjects, 'workspace_home');
       const reloadShaped = baseObjects.map((o, i) => ({
         ...o,
         ref: `ref_post_${1000 + i}`,
       }));
-      const after = annotateStableTargetRefs(reloadShaped, 'repo_home');
+      const after = annotateStableTargetRefs(reloadShaped, 'workspace_home');
 
       expect(before.map((o) => o.targetRef)).toEqual(after.map((o) => o.targetRef));
     });
@@ -237,7 +237,7 @@ describe('V23-02 stable targetRef increment hardening', () => {
             reason: 'r',
           },
         ],
-        'repo_home',
+        'workspace_home',
       );
 
       const refA = annotated.find((o) => o.id === 'hvo_menu_a')?.targetRef;

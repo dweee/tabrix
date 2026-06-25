@@ -112,7 +112,7 @@ Per-client snippets and environment variables are in [CLI and MCP Config](./CLI_
 Send one of these instructions to your AI client:
 
 - "List my currently open browser tabs." → the client calls `get_windows_and_tabs`.
-- "Open https://github.com for me." → the client calls `chrome_navigate`.
+- "Open https://example.com for me." → the client calls `chrome_navigate`.
 - "Take a screenshot of the current page." → the client calls `chrome_screenshot`.
 
 What a healthy first success looks like:

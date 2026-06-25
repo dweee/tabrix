@@ -145,7 +145,7 @@ describe('useExecutionInsights', () => {
                 createdAt: '2026-04-23T00:00:00Z',
                 intentSignature: 'list_user_repositories',
                 pageRole: 'list',
-                siteFamily: 'github',
+                siteFamily: 'workspace',
                 strategy: 'knowledge_light',
                 fallbackStrategy: null,
                 chosenLayer: 'L0',
@@ -171,7 +171,7 @@ describe('useExecutionInsights', () => {
               {
                 intentSignature: 'list_user_repositories',
                 pageRole: 'list',
-                siteFamily: 'github',
+                siteFamily: 'workspace',
                 decisionCount: 1,
                 lastSeenAt: '2026-04-23T00:00:00Z',
                 topStrategy: 'knowledge_light',

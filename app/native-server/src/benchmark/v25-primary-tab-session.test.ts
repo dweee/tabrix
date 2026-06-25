@@ -6,7 +6,7 @@
  *   1. First navigation may be bare and seeds primaryTabId.
  *   2. Subsequent navigations pass tabId: primaryTabId.
  *   3. Retries also pass tabId: primaryTabId.
- *   4. Same-tab GitHub menu navigation keeps the same tabId
+ *   4. Same-tab Workspace menu navigation keeps the same tabId
  *      (primaryTabReuseRate stays 1.0).
  *   5. Allowlisted scenarios may open a new tab without violation.
  *   6. Non-allowlisted new tab is recorded as `unexpected_new_tab`.
@@ -100,13 +100,13 @@ describe('createPrimaryTabSession — primary tab acquisition (rule 1)', () => {
   it('first navigation is bare and seeds primaryTabId from chrome_navigate result', async () => {
     const session = helper.createPrimaryTabSession();
     const nav = fakeNavigator([42]);
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/repo', {
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/repo', {
       scenarioId: 'GH-REPO-NAV',
     });
     expect(session.primaryTabId).toBe(42);
     expect(nav.calls).toHaveLength(1);
     expect(nav.calls[0].name).toBe('chrome_navigate');
-    expect(nav.calls[0].args).toEqual({ url: 'https://github.com/owner/repo' });
+    expect(nav.calls[0].args).toEqual({ url: 'https://code.example/owner/repo' });
   });
 });
 
@@ -114,15 +114,15 @@ describe('createPrimaryTabSession — primary tab reuse (rules 2, 3, 4)', () => 
   it('subsequent navigations pass tabId: primaryTabId', async () => {
     const session = helper.createPrimaryTabSession();
     const nav = fakeNavigator([42, 42, 42]);
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/repo');
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/repo/issues');
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/repo/actions');
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/repo');
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/repo/issues');
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/repo/actions');
     expect(nav.calls[1].args).toEqual({
-      url: 'https://github.com/owner/repo/issues',
+      url: 'https://code.example/owner/repo/issues',
       tabId: 42,
     });
     expect(nav.calls[2].args).toEqual({
-      url: 'https://github.com/owner/repo/actions',
+      url: 'https://code.example/owner/repo/actions',
       tabId: 42,
     });
     const report = session.toReportInput();
@@ -135,13 +135,13 @@ describe('createPrimaryTabSession — primary tab reuse (rules 2, 3, 4)', () => 
   it('retry path also passes tabId: primaryTabId — never bare', async () => {
     const session = helper.createPrimaryTabSession();
     const nav = fakeNavigator([42, 42]);
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/repo');
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/repo/issues', {
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/repo');
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/repo/issues', {
       scenarioId: 'GH-ISSUES',
       isRetry: true,
     });
     expect(nav.calls[1].args).toEqual({
-      url: 'https://github.com/owner/repo/issues',
+      url: 'https://code.example/owner/repo/issues',
       tabId: 42,
     });
     expect(nav.calls[1].args).not.toHaveProperty('newWindow');
@@ -149,15 +149,15 @@ describe('createPrimaryTabSession — primary tab reuse (rules 2, 3, 4)', () => 
     expect(report.violations).toEqual([]);
   });
 
-  it('GitHub menu / SPA navigation keeps the same tabId — reuse rate stays 1.0', async () => {
+  it('Workspace menu / SPA navigation keeps the same tabId — reuse rate stays 1.0', async () => {
     const session = helper.createPrimaryTabSession();
     const nav = fakeNavigator([7, 7, 7, 7, 7]);
     for (const url of [
-      'https://github.com/owner/repo',
-      'https://github.com/owner/repo/issues',
-      'https://github.com/owner/repo/pulls',
-      'https://github.com/owner/repo/actions',
-      'https://github.com/owner/repo/blob/main/README.md',
+      'https://code.example/owner/repo',
+      'https://code.example/owner/repo/issues',
+      'https://code.example/owner/repo/pulls',
+      'https://code.example/owner/repo/actions',
+      'https://code.example/owner/repo/blob/main/README.md',
     ]) {
       await session.navigateInPrimaryTab(nav.callTool, url, { scenarioId: 'menu-nav' });
     }
@@ -174,8 +174,8 @@ describe('createPrimaryTabSession — new-tab allowlist (rules 5, 6)', () => {
     const session = helper.createPrimaryTabSession();
     session.declareAllowsNewTab('GH-NEW-TAB-LINK');
     const nav = fakeNavigator([42, 99]);
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/repo');
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/other-repo', {
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/repo');
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/other-repo', {
       scenarioId: 'GH-NEW-TAB-LINK',
     });
     const report = session.toReportInput();
@@ -190,7 +190,7 @@ describe('createPrimaryTabSession — new-tab allowlist (rules 5, 6)', () => {
     const session = helper.createPrimaryTabSession();
     // Seed primary tab manually via a fake first navigation.
     return session
-      .navigateInPrimaryTab(fakeNavigator([42]).callTool, 'https://github.com/owner/repo')
+      .navigateInPrimaryTab(fakeNavigator([42]).callTool, 'https://code.example/owner/repo')
       .then(() => {
         session.recordToolCallTabId('GH-CLICK', 99);
         const report = session.toReportInput();
@@ -204,7 +204,7 @@ describe('createPrimaryTabSession — cleanup (rule 7)', () => {
   it('cleanup never closes a baseline tab', async () => {
     const session = helper.createPrimaryTabSession({ baselineTabIds: [1, 2, 3] });
     const nav = fakeNavigator([42]);
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/repo');
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/repo');
     // Pretend a non-allowlisted tool call leaked tabId=99 into the suite.
     session.recordToolCallTabId('GH-LEAK', 99);
 
@@ -234,7 +234,7 @@ describe('createPrimaryTabSession — cleanup (rule 7)', () => {
     const session = helper.createPrimaryTabSession();
     await session.navigateInPrimaryTab(
       fakeNavigator([42]).callTool,
-      'https://github.com/owner/repo',
+      'https://code.example/owner/repo',
     );
     session.recordToolCallTabId('GH-LEAK', 99);
     await session.cleanup(async () => {
@@ -253,30 +253,30 @@ describe('createPrimaryTabSession — switch-back retry (V25-05 follow-up rules 
     // retry's outcome here, only that the retry happened with
     // tabId: primaryTabId and was NOT bare.
     const nav = fakeNavigator([42, 99, 42]);
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/repo');
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/repo/issues', {
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/repo');
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/repo/issues', {
       scenarioId: 'GH-ISSUES',
     });
     expect(nav.calls).toHaveLength(3);
     // Initial second-nav call carried tabId: primaryTabId.
     expect(nav.calls[1].args).toEqual({
-      url: 'https://github.com/owner/repo/issues',
+      url: 'https://code.example/owner/repo/issues',
       tabId: 42,
     });
     // Switch-back retry MUST also carry tabId: primaryTabId.
     expect(nav.calls[2].name).toBe('chrome_navigate');
     expect(nav.calls[2].args).toEqual({
-      url: 'https://github.com/owner/repo/issues',
+      url: 'https://code.example/owner/repo/issues',
       tabId: 42,
     });
-    expect(nav.calls[2].args).not.toEqual({ url: 'https://github.com/owner/repo/issues' });
+    expect(nav.calls[2].args).not.toEqual({ url: 'https://code.example/owner/repo/issues' });
   });
 
   it('switch-back retry succeeds → helper-level reuse stays at 1.0 for that navigation', async () => {
     const session = helper.createPrimaryTabSession();
     const nav = fakeNavigator([42, 99, 42]);
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/repo');
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/repo/issues', {
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/repo');
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/repo/issues', {
       scenarioId: 'GH-ISSUES',
     });
     const report = session.toReportInput();
@@ -297,8 +297,8 @@ describe('createPrimaryTabSession — switch-back retry (V25-05 follow-up rules 
     const session = helper.createPrimaryTabSession();
     // Second nav: 99 (mismatch). Retry: 99 (still wrong).
     const nav = fakeNavigator([42, 99, 99]);
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/repo');
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/repo/issues', {
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/repo');
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/repo/issues', {
       scenarioId: 'GH-ISSUES',
     });
     const report = session.toReportInput();
@@ -316,7 +316,7 @@ describe('createPrimaryTabSession — switch-back retry (V25-05 follow-up rules 
     // failed switch-back retry.
     expect(nav.calls).toHaveLength(3);
     expect(nav.calls[2].args).toEqual({
-      url: 'https://github.com/owner/repo/issues',
+      url: 'https://code.example/owner/repo/issues',
       tabId: 42,
     });
   });
@@ -325,8 +325,8 @@ describe('createPrimaryTabSession — switch-back retry (V25-05 follow-up rules 
     const session = helper.createPrimaryTabSession();
     session.declareAllowsNewTab('GH-NEW-TAB-LINK');
     const nav = fakeNavigator([42, 99]);
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/repo');
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/other-repo', {
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/repo');
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/other-repo', {
       scenarioId: 'GH-NEW-TAB-LINK',
     });
     // No switch-back call — only the two user-driven navs.
@@ -343,7 +343,7 @@ describe('createPrimaryTabSession — maxConcurrentTabs (V25-05 follow-up rule 1
   it('excludes baseline tabs from the benchmark concurrency ceiling', async () => {
     const session = helper.createPrimaryTabSession({ baselineTabIds: [1, 2] });
     const nav = fakeNavigator([42]);
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/repo');
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/repo');
     session.recordToolCallTabId('GH-LEAK', 99);
     // benchmark-owned live tabs = primary 42 + leaked 99 = 2.
     // Baseline tabs 1 and 2 stay in observedTabIds (so cleanup
@@ -358,7 +358,7 @@ describe('createPrimaryTabSession — maxConcurrentTabs (V25-05 follow-up rule 1
   it('peak counts only benchmark-owned tabs when leaks come and go', async () => {
     const session = helper.createPrimaryTabSession({ baselineTabIds: [1, 2, 3] });
     const nav = fakeNavigator([42]);
-    await session.navigateInPrimaryTab(nav.callTool, 'https://github.com/owner/repo');
+    await session.navigateInPrimaryTab(nav.callTool, 'https://code.example/owner/repo');
     // Two leaks land — benchmark-owned live = primary + 2 leaks = 3.
     session.recordToolCallTabId('GH-LEAK-A', 99);
     session.recordToolCallTabId('GH-LEAK-B', 100);

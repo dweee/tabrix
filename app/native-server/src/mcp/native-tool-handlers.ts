@@ -404,8 +404,8 @@ function persistChooseContextDecision(
             emptyMessage: result.directApiExecution.emptyMessage ?? null,
             // Pipe the closed-enum endpoint-source marker onto the
             // cached snapshot so the read-side shim can attribute the
-            // cached api_rows reply into the same `observed` /
-            // `seed_adapter` / `manual_seed` bucket as the chooser-side
+            // cached api_rows reply into the same endpoint-source
+            // bucket as the chooser-side
             // direct-API record without consulting the executor again.
             endpointSource: result.directApiExecution.endpointSource ?? null,
             telemetry: result.directApiExecution.apiTelemetry,

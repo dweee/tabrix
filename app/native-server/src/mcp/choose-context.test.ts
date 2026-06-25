@@ -25,12 +25,12 @@ import { logger } from '../logging/logger';
 function fakeEndpoint(overrides: Partial<KnowledgeApiEndpoint> = {}): KnowledgeApiEndpoint {
   return {
     endpointId: 'ep-1',
-    site: 'api.github.com',
-    family: 'github',
+    site: 'api.code.example',
+    family: 'workspace',
     method: 'GET',
     urlPattern: '/repos/:owner/:repo/issues',
-    endpointSignature: 'GET api.github.com/repos/:owner/:repo/issues',
-    semanticTag: 'issues_list',
+    endpointSignature: 'GET api.code.example/repos/:owner/:repo/issues',
+    semanticTag: 'item_list',
     statusClass: '2xx',
     requestSummary: {
       headerNames: [],
@@ -91,15 +91,15 @@ describe('parseTabrixChooseContextInput', () => {
     expect(resolveSiteFamily(parsed.input)).toBeUndefined();
   });
 
-  it('keeps safe non-GitHub siteId tokens as site-neutral routing scope', () => {
-    const parsed = parseTabrixChooseContextInput({ intent: 'open issues', siteId: 'douyin' });
-    expect(parsed.input.siteId).toBe('douyin');
+  it('keeps safe non-Workspace siteId tokens as site-neutral routing scope', () => {
+    const parsed = parseTabrixChooseContextInput({ intent: 'open issues', siteId: 'media_site' });
+    expect(parsed.input.siteId).toBe('media_site');
   });
 
   it('drops unsafe siteId tokens silently', () => {
     const parsed = parseTabrixChooseContextInput({
       intent: 'open issues',
-      siteId: 'https://douyin.com/path',
+      siteId: 'https://media_site.com/path',
     });
     expect(parsed.input.siteId).toBeUndefined();
   });
@@ -113,29 +113,31 @@ describe('parseTabrixChooseContextInput', () => {
 
 describe('resolveSiteFamily', () => {
   it('honours explicit siteId', () => {
-    expect(resolveSiteFamily({ intent: 'x', siteId: 'github' })).toBe('github');
+    expect(resolveSiteFamily({ intent: 'x', siteId: 'workspace' })).toBe('workspace');
   });
 
-  it('honours explicit non-GitHub siteId without requiring a hard-coded policy', () => {
-    expect(resolveSiteFamily({ intent: 'x', siteId: 'douyin' })).toBe('douyin');
+  it('honours explicit siteId without requiring a hard-coded policy', () => {
+    expect(resolveSiteFamily({ intent: 'x', siteId: 'content_site' })).toBe('content_site');
   });
 
-  it('derives github from github.com host', () => {
-    expect(resolveSiteFamily({ intent: 'x', url: 'https://github.com/octocat/hello-world' })).toBe(
-      'github',
+  it('derives a safe host token without collapsing it to a platform family', () => {
+    expect(
+      resolveSiteFamily({ intent: 'x', url: 'https://code.example/octocat/hello-world' }),
+    ).toBe('code.example');
+  });
+
+  it('preserves subdomain host tokens without platform-specific collapsing', () => {
+    expect(resolveSiteFamily({ intent: 'x', url: 'https://api.code.example/repos/x/y' })).toBe(
+      'api.code.example',
+    );
+    expect(resolveSiteFamily({ intent: 'x', url: 'https://gist.code.example/x' })).toBe(
+      'gist.code.example',
     );
   });
 
-  it('derives github from any *.github.com host', () => {
-    expect(resolveSiteFamily({ intent: 'x', url: 'https://api.github.com/repos/x/y' })).toBe(
-      'github',
-    );
-    expect(resolveSiteFamily({ intent: 'x', url: 'https://gist.github.com/x' })).toBe('github');
-  });
-
-  it('derives a safe site family token for non-GitHub hosts', () => {
-    expect(resolveSiteFamily({ intent: 'x', url: 'https://www.douyin.com/foo' })).toBe(
-      'www.douyin.com',
+  it('derives a safe site family token for generic hosts', () => {
+    expect(resolveSiteFamily({ intent: 'x', url: 'https://content.example/foo' })).toBe(
+      'content.example',
     );
   });
 
@@ -160,15 +162,15 @@ describe('chooseContextStrategy (pure)', () => {
 
   it('returns experience_reuse before Knowledge when a verified recipe is available', () => {
     const decision = chooseContextStrategy({
-      intentSignature: 'xiaohongshu top 10 cards',
-      siteFamily: 'www.xiaohongshu.com',
+      intentSignature: 'content_site top 10 cards',
+      siteFamily: 'content.example',
       pageRole: 'search_results',
       experienceCatalog: {
-        experienceId: 'exp-xhs-top10',
+        experienceId: 'exp-content-top10',
         summary: 'Verified chrome_collect_result_cards filters=最多收藏/图文/一周内 top>=10',
         recipe: {
           schema: 'tabrix_experience_recipe_hint_v1',
-          siteFamily: 'www.xiaohongshu.com',
+          siteFamily: 'content.example',
           pageRole: 'search_results',
           taskSignature: 'tools:chrome_collect_result_cards',
           successCount: 2,
@@ -202,9 +204,9 @@ describe('chooseContextStrategy (pure)', () => {
         },
       },
       knowledgeCatalog: {
-        site: 'www.xiaohongshu.com',
+        site: 'content.example',
         totalEndpoints: 1,
-        sampleSignatures: ['GET www.xiaohongshu.com/search'],
+        sampleSignatures: ['GET content.example/search'],
       },
     });
 
@@ -213,11 +215,11 @@ describe('chooseContextStrategy (pure)', () => {
     expect(decision.artifacts).toEqual([
       {
         kind: 'experience_recipe',
-        ref: 'exp-xhs-top10',
+        ref: 'exp-content-top10',
         summary: 'Verified chrome_collect_result_cards filters=最多收藏/图文/一周内 top>=10',
         recipe: {
           schema: 'tabrix_experience_recipe_hint_v1',
-          siteFamily: 'www.xiaohongshu.com',
+          siteFamily: 'content.example',
           pageRole: 'search_results',
           taskSignature: 'tools:chrome_collect_result_cards',
           successCount: 2,
@@ -290,8 +292,8 @@ describe('chooseContextStrategy (pure)', () => {
   it('does not route to a site-specific markdown branch without local Knowledge', () => {
     const decision = chooseContextStrategy({
       intentSignature: 'read repo overview',
-      siteFamily: 'github',
-      pageRole: 'repo_home',
+      siteFamily: 'workspace',
+      pageRole: 'workspace_home',
     });
     expect(decision.strategy).toBe('read_page_required');
     expect(decision.fallbackStrategy).toBeUndefined();
@@ -345,7 +347,7 @@ describe('runTabrixChooseContext (orchestrator)', () => {
   it('uses local Knowledge by default', () => {
     const { repo, spy } = fakeKnowledgeRepo([fakeEndpoint()]);
     const result = runTabrixChooseContext(
-      { intent: 'list prs', url: 'https://github.com/x/y/pulls' },
+      { intent: 'list prs', url: 'https://code.example/x/y/pulls' },
       {
         knowledgeApi: repo,
       },
@@ -354,7 +356,7 @@ describe('runTabrixChooseContext (orchestrator)', () => {
     expect(spy).toHaveBeenCalled();
   });
 
-  it('uses local Knowledge for non-GitHub URLs', () => {
+  it('uses local Knowledge for non-Workspace URLs', () => {
     const { repo, spy } = fakeKnowledgeRepo([fakeEndpoint()]);
     const result = runTabrixChooseContext(
       { intent: 'open something', url: 'https://www.example.test/x/y' },
@@ -371,7 +373,7 @@ describe('runTabrixChooseContext (orchestrator)', () => {
     const result = runTabrixChooseContext(
       {
         intent: 'collect top 10 result cards',
-        url: 'https://www.xiaohongshu.com/website-login/captcha?redirectPath=%2Fsearch_result',
+        url: 'https://content.example/website-login/captcha?redirectPath=%2Fsearch_result',
         pageRole: 'search_results',
       },
       {
@@ -385,9 +387,9 @@ describe('runTabrixChooseContext (orchestrator)', () => {
   it('does not reuse Experience when the current page is a verification challenge', () => {
     const findReusableByContext = jest.fn().mockReturnValue([
       {
-        experienceId: 'exp-xhs-old',
+        experienceId: 'exp-content-old',
         taskSignature: 'collect filtered result cards',
-        siteFamily: 'www.xiaohongshu.com',
+        siteFamily: 'content.example',
         pageRole: 'search_results',
         successCount: 3,
         reliabilityScore: 1,
@@ -399,7 +401,7 @@ describe('runTabrixChooseContext (orchestrator)', () => {
     const result = runTabrixChooseContext(
       {
         intent: 'collect top 10 result cards',
-        url: 'https://www.xiaohongshu.com/website-login/captcha?redirectPath=%2Fsearch_result',
+        url: 'https://content.example/website-login/captcha?redirectPath=%2Fsearch_result',
         pageRole: 'search_results',
       },
       {
@@ -418,13 +420,13 @@ describe('runTabrixChooseContext (orchestrator)', () => {
 
   it('echoes resolved bucket fields back to the caller', () => {
     const result = runTabrixChooseContext(
-      { intent: '  Open Issues  ', pageRole: 'repo_home', siteId: 'github' },
+      { intent: '  Open Issues  ', pageRole: 'workspace_home', siteId: 'workspace' },
       { knowledgeApi: null },
     );
     expect(result.resolved).toEqual({
       intentSignature: 'open issues',
-      pageRole: 'repo_home',
-      siteFamily: 'github',
+      pageRole: 'workspace_home',
+      siteFamily: 'workspace',
     });
   });
 });
@@ -482,7 +484,7 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
   it('records a decision row and surfaces decisionId when telemetry is wired', () => {
     const tele = fakeTelemetry();
     const result = runTabrixChooseContext(
-      { intent: 'open issues', pageRole: 'repo_home', siteId: 'github' },
+      { intent: 'open issues', pageRole: 'workspace_home', siteId: 'workspace' },
       {
         knowledgeApi: null,
         telemetry: tele.repo,
@@ -496,8 +498,8 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
       {
         decisionId: 'dc-test-1',
         intentSignature: 'open issues',
-        pageRole: 'repo_home',
-        siteFamily: 'github',
+        pageRole: 'workspace_home',
+        siteFamily: 'workspace',
         strategy: 'read_page_required',
         fallbackStrategy: null,
         createdAt: '2026-04-22T10:00:00.000Z',
@@ -547,7 +549,7 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
     const tele = fakeTelemetry();
     const baselineFullRead = 'a'.repeat(120);
     const result = runTabrixChooseContext(
-      { intent: 'open issues', url: 'https://github.com/octocat/hello/issues' },
+      { intent: 'open issues', url: 'https://code.example/octocat/hello/issues' },
       {
         knowledgeApi: null,
         telemetry: tele.repo,
@@ -559,7 +561,7 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
             candidateActionsCount: 9,
             hvoCount: 4,
             fullReadByteLength: baselineFullRead.length,
-            pageRole: 'github_issues_list',
+            pageRole: 'workspace_item_list',
           }),
         },
       },
@@ -580,7 +582,7 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
   it('estimates Experience recipe payload cost and real savings when full-page size is known', () => {
     const tele = fakeTelemetry();
     const recipe = {
-      experienceId: 'exp-xhs-top10',
+      experienceId: 'exp-content-top10',
       taskSignature: 'tools:chrome_collect_result_cards',
       successCount: 2,
       failureCount: 0,
@@ -601,8 +603,8 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
 
     const result = runTabrixChooseContext(
       {
-        intent: '小红书搜索AI图片创作，筛选最多收藏、图文、一周内，并汇报前10条图文内容',
-        url: 'https://www.xiaohongshu.com/search_result/?keyword=AI图片创作&type=51',
+        intent: '内容站搜索AI图片创作，筛选最多收藏、图文、一周内，并汇报前10条图文内容',
+        url: 'https://content.example/search_result/?keyword=AI图片创作&type=51',
         pageRole: 'search_results',
       },
       {
@@ -642,9 +644,9 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
     expect(recorded.selectedArtifacts).toEqual([
       {
         kind: 'experience_recipe',
-        ref: 'exp-xhs-top10',
+        ref: 'exp-content-top10',
         recipeSchema: 'tabrix_experience_recipe_hint_v1',
-        siteFamily: 'www.xiaohongshu.com',
+        siteFamily: 'content.example',
         pageRole: 'search_results',
         taskSignature: 'tools:chrome_collect_result_cards',
       },
@@ -684,11 +686,11 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
     expect(recorded.tokensSavedEstimate).toBe(0);
   });
 
-  it('routes Chinese search/list API candidates to knowledge_supported_read without shared site-family changes', () => {
+  it('requires a page read when no observed API Knowledge is available for search/list intent', () => {
     const result = runTabrixChooseContext(
       {
-        intent: '搜索 GitHub 上 AI助手 相关热门项目，列出前10个',
-        url: 'https://github.com/search',
+        intent: '搜索代码托管站上 AI助手 相关热门项目，列出前10个',
+        url: 'https://code.example/search',
       },
       {
         knowledgeApi: null,
@@ -705,22 +707,21 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
     );
 
     expect(result.status).toBe('ok');
-    expect(result.strategy).toBe('knowledge_light');
-    expect(result.chosenLayer).toBe('L0');
-    expect(result.layerDispatchReason).toBe('knowledge_supports_summary');
-    expect(result.sourceRoute).toBe('knowledge_supported_read');
-    expect(result.resolved?.siteFamily).toBe('github');
+    expect(result.strategy).toBe('read_page_required');
+    expect(result.chosenLayer).toBe('L0+L1');
+    expect(result.layerDispatchReason).toBe('user_intent_form_or_submit');
+    expect(result.sourceRoute).toBe('read_page_required');
+    expect(result.resolved?.siteFamily).toBe('code.example');
     const routerFields = result as Record<string, unknown>;
-    expect(routerFields.chosenSource).toBe('api_list');
-    expect(routerFields.dispatcherInputSource).toBe('api_knowledge');
-    expect(routerFields.decisionReason).toBe('api_knowledge_candidate_available');
+    expect(routerFields.chosenSource).not.toBe('api_list');
+    expect(routerFields.dispatcherInputSource).not.toBe('api_knowledge');
   });
 
-  it('routes npmjs Chinese package search through internal API knowledge with a generic site token', () => {
+  it('does not route package search through a bundled platform API adapter', () => {
     const result = runTabrixChooseContext(
       {
-        intent: '搜索 npm 上 browser automation 相关包，列出前10个',
-        url: 'https://www.npmjs.com/search',
+        intent: '搜索包站上 browser automation 相关包，列出前10个',
+        url: 'https://packages.example/search',
       },
       {
         knowledgeApi: null,
@@ -737,12 +738,12 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
     );
 
     expect(result.status).toBe('ok');
-    expect(result.strategy).toBe('knowledge_light');
-    expect(result.sourceRoute).toBe('knowledge_supported_read');
-    expect(result.resolved?.siteFamily).toBe('www.npmjs.com');
+    expect(result.strategy).toBe('read_page_required');
+    expect(result.sourceRoute).toBe('read_page_required');
+    expect(result.resolved?.siteFamily).toBe('packages.example');
     const routerFields = result as Record<string, unknown>;
-    expect(routerFields.chosenSource).toBe('api_list');
-    expect(routerFields.dispatcherInputSource).toBe('api_knowledge');
+    expect(routerFields.chosenSource).not.toBe('api_list');
+    expect(routerFields.dispatcherInputSource).not.toBe('api_knowledge');
   });
 
   it('telemetry write failure must not break the chooser (decisionId omitted)', () => {

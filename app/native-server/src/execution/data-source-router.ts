@@ -485,7 +485,7 @@ const DATA_SOURCE_ROUTER_RULES: ReadonlyArray<DataSourceRouterRule> = [
 
   // 7. deprecated_seed-only endpoint must NOT win the API
   //    path. We demote to compact DOM with an explicit reason; the
-  //    seed_adapter row stays in Knowledge for lineage but is
+  //    historical seed row stays in Knowledge for lineage but is
   //    structurally barred from being chosen here.
   {
     id: 'R_DEPRECATED_SEED_DEMOTE_DOM',

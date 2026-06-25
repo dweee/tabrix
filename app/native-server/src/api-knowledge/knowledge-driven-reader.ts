@@ -4,17 +4,11 @@
  * Pure async module. Given a `SafeRequestPlan` (output of
  * `safe-request-builder.ts`) and the corresponding `EndpointMatch`,
  * issues exactly one GET request, decodes JSON, and compacts the
- * result into the same shape `readApiKnowledgeRows` already returns
- * for the legacy seed families.
+ * result into the same compact `api_rows` shape.
  *
  * Compactor strategy:
- *   1. When the row's `urlPattern` matches one of the seed families, we
- *      delegate to the existing
- *      `readApiKnowledgeRows({ endpointFamily, params })` so the
- *      output is bit-identical to the legacy GitHub/npmjs path. This keeps
- *      compatibility while endpoint lineage remains visible to reports.
- *   2. For `family='observed'` rows we use a small generic
- *      compactor that pulls the top-level array (or `data` /
+ *   1. Use a small generic compactor that pulls the top-level array
+ *      (or `data` /
  *      `items` / `results` / `objects` / `hits`), emits one row per
  *      element, and only keeps primitive fields (string/number/
  *      boolean/null). String values are truncated to a hard cap so
@@ -27,8 +21,8 @@
  *   - 2.5 s timeout (`KNOWLEDGE_READ_TIMEOUT_MS`).
  *   - Never persists raw bodies; the only output is a redacted row
  *     array + telemetry.
- *   - Emits the same closed-enum `ApiKnowledgeFallbackReason` as
- *     the seed reader so downstream telemetry stays aligned.
+ *   - Emits the same closed-enum `ApiKnowledgeFallbackReason` so
+ *     downstream telemetry stays aligned.
  */
 
 import type {
@@ -37,32 +31,19 @@ import type {
   ApiKnowledgeFetch,
   ApiKnowledgeReadResult,
 } from '../api/api-knowledge';
-import { readApiKnowledgeRows } from '../api/api-knowledge';
 import type { EndpointMatch, SafeRequestPlan } from './types';
 
 const KNOWLEDGE_READ_TIMEOUT_MS = 2500;
 const GENERIC_ROW_LIMIT = 10;
 const GENERIC_KEYS_PER_ROW = 12;
 const GENERIC_STRING_VALUE_CAP = 240;
-
-/** Mirror of the seed adapter pattern map; kept private to avoid coupling. */
-const SEED_PATTERN_FAMILY: ReadonlyMap<
-  string,
-  | 'github_search_repositories'
-  | 'github_issues_list'
-  | 'github_workflow_runs_list'
-  | 'npmjs_search_packages'
-> = new Map([
-  ['api.github.com/search/repositories', 'github_search_repositories'],
-  ['api.github.com/repos/:owner/:repo/issues', 'github_issues_list'],
-  ['api.github.com/repos/:owner/:repo/actions/runs', 'github_workflow_runs_list'],
-  ['registry.npmjs.org/-/v1/search', 'npmjs_search_packages'],
-]);
+const GENERIC_SENSITIVE_ROW_KEY_PATTERN =
+  /(^|[_-])(authorization|cookie|set-cookie|token|secret|password|passwd|credential|session|csrf|xsrf|jwt|bearer|api[-_]?key)([_-]|$)/i;
 
 export interface KnowledgeDrivenReaderInput {
   match: EndpointMatch;
   plan: SafeRequestPlan;
-  /** V25-style param dictionary the seed-family branch needs. */
+  /** Deprecated compatibility input; generic observed reads do not consume it. */
   seedParams?: Record<string, string | number | null | undefined>;
   fetchFn?: ApiKnowledgeFetch;
   nowMs?: () => number;
@@ -72,30 +53,7 @@ export interface KnowledgeDrivenReaderInput {
 export async function readKnowledgeDrivenEndpoint(
   input: KnowledgeDrivenReaderInput,
 ): Promise<ApiKnowledgeReadResult> {
-  const seedFamily = SEED_PATTERN_FAMILY.get(input.match.endpoint.urlPattern.toLowerCase());
-  if (seedFamily) {
-    return readApiKnowledgeRows({
-      endpointFamily: seedFamily,
-      method: 'GET',
-      params: input.seedParams ?? {},
-      fetchFn: input.fetchFn,
-      nowMs: input.nowMs,
-      limit: input.limit ?? readLimitFromPlan(input.plan),
-    });
-  }
   return readGenericEndpoint(input);
-}
-
-function readLimitFromPlan(plan: SafeRequestPlan): number | undefined {
-  try {
-    const url = new URL(plan.url);
-    const raw = url.searchParams.get('per_page') ?? url.searchParams.get('size');
-    if (!raw) return undefined;
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 async function readGenericEndpoint(
@@ -230,7 +188,9 @@ export function compactGenericRows(body: unknown, limit: number): ApiKnowledgeCo
   for (const raw of list.slice(0, cap)) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
     const row = raw as Record<string, unknown>;
-    const keys = Object.keys(row).slice(0, GENERIC_KEYS_PER_ROW);
+    const keys = Object.keys(row)
+      .filter((key) => !GENERIC_SENSITIVE_ROW_KEY_PATTERN.test(key))
+      .slice(0, GENERIC_KEYS_PER_ROW);
     const compact: ApiKnowledgeCompactRow = {};
     for (const key of keys) {
       const value = row[key];

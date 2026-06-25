@@ -416,7 +416,7 @@ curl http://127.0.0.1:12306/status
 
 ---
 
-## 10. Real-world maintenance cookbook (browser-first GitHub triage)
+## 10. Real-world maintenance cookbook
 
 Keep the flow simple and browser-first:
 
@@ -445,9 +445,9 @@ For longer arg payloads, use a file:
   "filter": "interactive",
   "depth": 2
 }
-'@ | Set-Content .\github-web-args.json
+'@ | Set-Content .\read-page-args.json
 
-tabrix mcp call chrome_read_page --args-file .\github-web-args.json
+tabrix mcp call chrome_read_page --args-file .\read-page-args.json
 ```
 
 Recovery smoke during maintenance windows:

@@ -186,14 +186,14 @@ describe('read_page task protocol', () => {
     );
   });
 
-  it('keeps workflow_run_shell in monitor mode before detail diagnostics are visible', () => {
+  it('keeps job_run_shell in monitor mode before detail diagnostics are visible', () => {
     const protocol = buildTaskProtocol({
       mode: 'compact',
-      currentUrl: 'https://github.com/example/project/actions/runs/42',
+      currentUrl: 'https://code.example/example/project/actions/runs/42',
       currentTitle: 'Release Tabrix',
       pageType: 'web_page',
-      pageRole: 'workflow_run_shell',
-      primaryRegion: 'workflow_run_shell',
+      pageRole: 'job_run_shell',
+      primaryRegion: 'job_run_shell',
       interactiveElements: [
         { ref: 'ref_actions', role: 'link', name: 'Actions' },
         { ref: 'ref_run', role: 'link', name: 'Run 42' },
@@ -280,12 +280,12 @@ describe('read_page task protocol', () => {
     );
   });
 
-  it('prioritizes repo navigation over commit headlines on repo_home', () => {
+  it('prioritizes repo navigation over commit headlines on workspace_home', () => {
     const protocol = buildTaskProtocol(
       createBaseParams({
-        currentUrl: 'https://github.com/example/project',
+        currentUrl: 'https://code.example/example/project',
         currentTitle: 'example/project',
-        pageRole: 'repo_home',
+        pageRole: 'workspace_home',
         primaryRegion: 'repo_primary_nav',
         interactiveElements: [
           {
@@ -384,9 +384,9 @@ describe('read_page task protocol', () => {
   it('falls back to generic high-value objects when snapshot has no repo tabs', () => {
     const protocol = buildTaskProtocol(
       createBaseParams({
-        currentUrl: 'https://github.com/example/project',
+        currentUrl: 'https://code.example/example/project',
         currentTitle: 'example/project',
-        pageRole: 'repo_home',
+        pageRole: 'workspace_home',
         primaryRegion: 'repo_primary_nav',
         interactiveElements: [
           { ref: 'ref_go_to_file', role: 'combobox', name: 'Go to file' },
@@ -999,11 +999,11 @@ describe('read_page task protocol', () => {
 
   it.each([
     {
-      name: 'maps repo_home to read from role and primary region',
+      name: 'maps workspace_home to read from role and primary region',
       params: createBaseParams({
-        currentUrl: 'https://github.com/example/project',
+        currentUrl: 'https://code.example/example/project',
         currentTitle: 'example/project',
-        pageRole: 'repo_home',
+        pageRole: 'workspace_home',
         primaryRegion: 'repo_primary_nav',
         interactiveElements: [
           { ref: 'ref_issues', role: 'link', name: 'Issues' },
@@ -1014,11 +1014,11 @@ describe('read_page task protocol', () => {
       expected: 'read',
     },
     {
-      name: 'maps issues_list to search from role region and controls',
+      name: 'maps item_list to search from role region and controls',
       params: createBaseParams({
-        currentUrl: 'https://github.com/example/project/issues',
+        currentUrl: 'https://code.example/example/project/issues',
         currentTitle: 'Issues',
-        pageRole: 'issues_list',
+        pageRole: 'item_list',
         primaryRegion: 'issues_results',
         interactiveElements: [
           { ref: 'ref_search', role: 'textbox', name: 'Search Issues' },
@@ -1029,12 +1029,12 @@ describe('read_page task protocol', () => {
       expected: 'search',
     },
     {
-      name: 'maps actions_list to monitor from workflow controls',
+      name: 'maps job_list to monitor from workflow controls',
       params: createBaseParams({
-        currentUrl: 'https://github.com/example/project/actions',
+        currentUrl: 'https://code.example/example/project/actions',
         currentTitle: 'Actions',
-        pageRole: 'actions_list',
-        primaryRegion: 'workflow_runs_list',
+        pageRole: 'job_list',
+        primaryRegion: 'job_runs_list',
         interactiveElements: [
           { ref: 'ref_filter', role: 'textbox', name: 'Filter workflow runs' },
           { ref: 'ref_run', role: 'link', name: 'Run detail entry' },
@@ -1043,12 +1043,12 @@ describe('read_page task protocol', () => {
       expected: 'monitor',
     },
     {
-      name: 'maps workflow_run_detail to monitor from diagnostics region',
+      name: 'maps job_run_detail to monitor from diagnostics region',
       params: createBaseParams({
-        currentUrl: 'https://github.com/example/project/actions/runs/42',
+        currentUrl: 'https://code.example/example/project/actions/runs/42',
         currentTitle: 'Workflow run detail',
-        pageRole: 'workflow_run_detail',
-        primaryRegion: 'workflow_run_summary',
+        pageRole: 'job_run_detail',
+        primaryRegion: 'job_run_summary',
         interactiveElements: [
           { ref: 'ref_summary', role: 'link', name: 'Summary' },
           { ref: 'ref_jobs', role: 'button', name: 'Jobs' },
@@ -1095,7 +1095,7 @@ describe('read_page task protocol', () => {
     expect(protocol.taskMode).toBe(expected);
   });
 
-  it('does not infer search from a non-GitHub issues route without structured search evidence', () => {
+  it('does not infer search from a non-workspace item route without structured search evidence', () => {
     const protocol = buildTaskProtocol(
       createBaseParams({
         currentUrl: 'https://example.com/issues',
@@ -1124,9 +1124,9 @@ describe('read_page task protocol', () => {
   describe('B-011 stable targetRef integration', () => {
     function buildRepoHomeParams(refSuffix: string) {
       return createBaseParams({
-        currentUrl: 'https://github.com/example/project',
+        currentUrl: 'https://code.example/example/project',
         currentTitle: 'example/project',
-        pageRole: 'repo_home',
+        pageRole: 'workspace_home',
         primaryRegion: 'repo_primary_nav',
         interactiveElements: [
           { ref: `ref_issues_${refSuffix}`, role: 'link', name: 'Issues' },

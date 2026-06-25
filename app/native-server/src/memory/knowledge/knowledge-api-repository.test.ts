@@ -24,12 +24,12 @@ function makeInput(
   overrides: Partial<UpsertKnowledgeApiEndpointInput> = {},
 ): UpsertKnowledgeApiEndpointInput {
   return {
-    site: 'api.github.com',
-    family: 'github',
+    site: 'api.code.example',
+    family: 'workspace',
     method: 'GET',
-    urlPattern: 'api.github.com/repos/:owner/:repo/issues',
-    endpointSignature: 'GET api.github.com/repos/:owner/:repo/issues',
-    semanticTag: 'github.issues_list',
+    urlPattern: 'api.code.example/repos/:owner/:repo/issues',
+    endpointSignature: 'GET api.code.example/repos/:owner/:repo/issues',
+    semanticTag: 'workspace.item_list',
     statusClass: '2xx',
     requestSummary: {
       headerKeys: ['accept', 'user-agent'],
@@ -118,11 +118,11 @@ describe('KnowledgeApiRepository (B-017)', () => {
     repo.upsert(
       makeInput({
         method: 'POST',
-        endpointSignature: 'POST api.github.com/repos/:owner/:repo/issues',
+        endpointSignature: 'POST api.code.example/repos/:owner/:repo/issues',
       }),
     );
     expect(repo.countAll()).toBe(2);
-    const list = repo.listBySite('api.github.com');
+    const list = repo.listBySite('api.code.example');
     expect(list.map((e) => e.method).sort()).toEqual(['GET', 'POST']);
     db.close();
   });
@@ -132,29 +132,29 @@ describe('KnowledgeApiRepository (B-017)', () => {
     const repo = new KnowledgeApiRepository(db);
     repo.upsert(
       makeInput({
-        endpointSignature: 'GET api.github.com/repos/:owner/:repo/issues',
-        urlPattern: 'api.github.com/repos/:owner/:repo/issues',
+        endpointSignature: 'GET api.code.example/repos/:owner/:repo/issues',
+        urlPattern: 'api.code.example/repos/:owner/:repo/issues',
         observedAt: '2026-04-22T10:00:00.000Z',
       }),
     );
     repo.upsert(
       makeInput({
-        endpointSignature: 'GET api.github.com/repos/:owner/:repo/pulls',
-        urlPattern: 'api.github.com/repos/:owner/:repo/pulls',
-        semanticTag: 'github.pulls_list',
+        endpointSignature: 'GET api.code.example/repos/:owner/:repo/pulls',
+        urlPattern: 'api.code.example/repos/:owner/:repo/pulls',
+        semanticTag: 'workspace.pulls_list',
         observedAt: '2026-04-22T12:00:00.000Z',
       }),
     );
-    const list = repo.listBySite('api.github.com', 1);
+    const list = repo.listBySite('api.code.example', 1);
     expect(list).toHaveLength(1);
-    expect(list[0].endpointSignature).toBe('GET api.github.com/repos/:owner/:repo/pulls');
+    expect(list[0].endpointSignature).toBe('GET api.code.example/repos/:owner/:repo/pulls');
     db.close();
   });
 
   it('findBySignature returns null for unseen endpoints', () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const repo = new KnowledgeApiRepository(db);
-    expect(repo.findBySignature('api.github.com', 'GET api.github.com/missing')).toBeNull();
+    expect(repo.findBySignature('api.code.example', 'GET api.code.example/missing')).toBeNull();
     db.close();
   });
 
@@ -163,28 +163,28 @@ describe('KnowledgeApiRepository (B-017)', () => {
     const repo = new KnowledgeApiRepository(db);
     const search = repo.upsert(
       makeInput({
-        endpointSignature: 'GET api.github.com/search/repositories',
-        urlPattern: 'api.github.com/search/repositories',
-        semanticTag: 'github.search_repositories',
+        endpointSignature: 'GET api.code.example/search/repositories',
+        urlPattern: 'api.code.example/search/repositories',
+        semanticTag: 'workspace.search_repositories',
         statusClass: '2xx',
         observedAt: '2026-04-22T12:00:00.000Z',
       }),
     );
     repo.upsert(
       makeInput({
-        endpointSignature: 'POST api.github.com/repos/:owner/:repo/issues',
+        endpointSignature: 'POST api.code.example/repos/:owner/:repo/issues',
         method: 'POST',
-        urlPattern: 'api.github.com/repos/:owner/:repo/issues',
-        semanticTag: 'github.issues_list',
+        urlPattern: 'api.code.example/repos/:owner/:repo/issues',
+        semanticTag: 'workspace.item_list',
         statusClass: '2xx',
         observedAt: '2026-04-22T13:00:00.000Z',
       }),
     );
     const failedSearch = repo.upsert(
       makeInput({
-        endpointSignature: 'GET api.github.com/search/issues',
-        urlPattern: 'api.github.com/search/issues',
-        semanticTag: 'github.search_issues',
+        endpointSignature: 'GET api.code.example/search/issues',
+        urlPattern: 'api.code.example/search/issues',
+        semanticTag: 'workspace.search_issues',
         statusClass: '2xx',
         observedAt: '2026-04-22T14:00:00.000Z',
         lastFailureReason: 'shape_drift',
@@ -204,11 +204,11 @@ describe('KnowledgeApiRepository (B-017)', () => {
       fallbackReason: 'last_failure_shape_drift',
     });
 
-    const candidates = repo.listScoredBySite('api.github.com');
+    const candidates = repo.listScoredBySite('api.code.example');
     expect(candidates[0].semanticType).toBe('search');
     expect(candidates[0].usableForTask).toBe(true);
     const failedCandidate = candidates.find(
-      (candidate) => candidate.endpointSignature === 'GET api.github.com/search/issues',
+      (candidate) => candidate.endpointSignature === 'GET api.code.example/search/issues',
     );
     expect(failedCandidate).toMatchObject({
       usableForTask: false,
@@ -229,7 +229,7 @@ describe('KnowledgeApiRepository (B-017)', () => {
     repo.upsert(makeInput({ observedAt: '2026-04-22T11:00:00.000Z' }));
     repo.upsert(makeInput({ observedAt: '2026-04-22T12:00:00.000Z' }));
 
-    const [candidate] = repo.listScoredBySite('api.github.com');
+    const [candidate] = repo.listScoredBySite('api.code.example');
     expect(candidate.sampleCount).toBe(3);
     expect(candidate.lastSeenAt).toBe('2026-04-22T12:00:00.000Z');
     expect(candidate.confidence).toBeGreaterThan(0.7);
@@ -242,8 +242,8 @@ describe('KnowledgeApiRepository (B-017)', () => {
   // What these defend (regression hardening):
   //  - Additive lineage columns persist round-trip through SQLite.
   //  - Legacy rows (rows written with no V27-08 fields) still
-  //    deserialise: `endpointSource` is back-derived from `family`,
-  //    and `schemaVersion` collapses NULL → 1.
+  //    deserialise safely, but `endpointSource` is not inferred from
+  //    family names; `schemaVersion` collapses NULL → 1.
   //  - Re-observing a V27-08-aware row from a V26-FIX-03 capture path
   //    (which does set `endpointSource` for `family='observed'`) does
   //    not silently downgrade lineage to NULL.
@@ -253,11 +253,11 @@ describe('KnowledgeApiRepository (B-017)', () => {
   //    closed-enum breadcrumb defined by `EndpointSourceLineage`.
   // ---------------------------------------------------------------
   describe('V27-08 Endpoint Knowledge v2 lineage', () => {
-    it('back-derives endpointSource from family for legacy rows (no v2 fields supplied)', () => {
+    it('does not infer endpointSource from legacy family names (no v2 fields supplied)', () => {
       const { db } = openMemoryDb({ dbPath: ':memory:' });
       const repo = new KnowledgeApiRepository(db);
       // Pre-V27-08 input: no `endpointSource`, no `sourceLineage`.
-      const githubRow = repo.upsert(makeInput({ family: 'github' }));
+      const workspaceRow = repo.upsert(makeInput({ family: 'workspace' }));
       const observedRow = repo.upsert(
         makeInput({
           family: 'observed',
@@ -268,10 +268,10 @@ describe('KnowledgeApiRepository (B-017)', () => {
       );
       const npmRow = repo.upsert(
         makeInput({
-          family: 'npmjs',
-          site: 'registry.npmjs.org',
-          urlPattern: 'registry.npmjs.org/-/v1/search',
-          endpointSignature: 'GET registry.npmjs.org/-/v1/search',
+          family: 'package_registry',
+          site: 'registry.package.example',
+          urlPattern: 'registry.package.example/-/v1/search',
+          endpointSignature: 'GET registry.package.example/-/v1/search',
         }),
       );
       const otherRow = repo.upsert(
@@ -283,18 +283,18 @@ describe('KnowledgeApiRepository (B-017)', () => {
         }),
       );
 
-      expect(githubRow.endpointSource).toBe('seed_adapter');
+      expect(workspaceRow.endpointSource).toBe('unknown');
       expect(observedRow.endpointSource).toBe('observed');
-      expect(npmRow.endpointSource).toBe('seed_adapter');
+      expect(npmRow.endpointSource).toBe('unknown');
       expect(otherRow.endpointSource).toBe('unknown');
 
       // Legacy rows (no v2 input fields) report schemaVersion=1.
-      expect(githubRow.schemaVersion).toBe(1);
-      expect(githubRow.sourceLineage).toBeNull();
-      expect(githubRow.correlationConfidence).toBeNull();
-      expect(githubRow.correlatedRegionId).toBeNull();
-      expect(githubRow.confidenceReason).toBeNull();
-      expect(githubRow.retirementCandidate).toBe(false);
+      expect(workspaceRow.schemaVersion).toBe(1);
+      expect(workspaceRow.sourceLineage).toBeNull();
+      expect(workspaceRow.correlationConfidence).toBeNull();
+      expect(workspaceRow.correlatedRegionId).toBeNull();
+      expect(workspaceRow.confidenceReason).toBeNull();
+      expect(workspaceRow.retirementCandidate).toBe(false);
       db.close();
     });
 
@@ -469,7 +469,7 @@ describe('KnowledgeApiRepository (B-017)', () => {
       const repo = new KnowledgeApiRepository(db);
       const row = repo.upsert(
         makeInput({
-          family: 'github',
+          family: 'workspace',
           endpointSource: 'deprecated_seed',
         }),
       );
@@ -483,36 +483,36 @@ describe('KnowledgeApiRepository (B-017)', () => {
       const repo = new KnowledgeApiRepository(db);
       const active = repo.upsert(
         makeInput({
-          family: 'github',
+          family: 'workspace',
           endpointSource: 'seed_adapter',
           retirementCandidate: false,
-          urlPattern: 'api.github.com/active',
-          endpointSignature: 'GET api.github.com/active',
+          urlPattern: 'api.code.example/active',
+          endpointSignature: 'GET api.code.example/active',
         }),
       );
       const flagged = repo.upsert(
         makeInput({
-          family: 'github',
+          family: 'workspace',
           endpointSource: 'seed_adapter',
           retirementCandidate: true,
-          urlPattern: 'api.github.com/flagged',
-          endpointSignature: 'GET api.github.com/flagged',
+          urlPattern: 'api.code.example/flagged',
+          endpointSignature: 'GET api.code.example/flagged',
         }),
       );
       const observed = repo.upsert(
         makeInput({
           family: 'observed',
           endpointSource: 'observed',
-          urlPattern: 'api.github.com/observed',
-          endpointSignature: 'GET api.github.com/observed',
+          urlPattern: 'api.code.example/observed',
+          endpointSignature: 'GET api.code.example/observed',
         }),
       );
       const deprecated = repo.upsert(
         makeInput({
-          family: 'github',
+          family: 'workspace',
           endpointSource: 'deprecated_seed',
-          urlPattern: 'api.github.com/deprecated',
-          endpointSignature: 'GET api.github.com/deprecated',
+          urlPattern: 'api.code.example/deprecated',
+          endpointSignature: 'GET api.code.example/deprecated',
         }),
       );
 
@@ -557,7 +557,7 @@ describe('KnowledgeApiRepository (B-017)', () => {
     it('lastFailureReason is null on legacy rows (no failure evidence on file)', () => {
       const { db } = openMemoryDb({ dbPath: ':memory:' });
       const repo = new KnowledgeApiRepository(db);
-      const row = repo.upsert(makeInput({ family: 'github' }));
+      const row = repo.upsert(makeInput({ family: 'workspace' }));
       expect(row.lastFailureReason).toBeNull();
       db.close();
     });
@@ -586,10 +586,10 @@ describe('KnowledgeApiRepository (B-017)', () => {
     it('upsertWithEvidence reports legacy_no_op for a brand-new pre-V27-08 row (closeout)', () => {
       const { db } = openMemoryDb({ dbPath: ':memory:' });
       const repo = new KnowledgeApiRepository(db);
-      const { evidence } = repo.upsertWithEvidence(makeInput({ family: 'github' }));
+      const { evidence } = repo.upsertWithEvidence(makeInput({ family: 'workspace' }));
       expect(evidence.migrationMode).toBe('legacy_no_op');
       expect(evidence.schemaVersion).toBe(1);
-      expect(evidence.endpointSource).toBe('seed_adapter');
+      expect(evidence.endpointSource).toBe('unknown');
       expect(evidence.confidenceBefore).toBeNull();
       expect(evidence.confidenceAfter).toBeGreaterThan(0);
     });

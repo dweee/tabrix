@@ -21,9 +21,8 @@ contract on `ReadPageHighValueObject` continues to be emitted.
 
 - **`B-010` · Knowledge UI Map (data side)** — new `KnowledgeUIMapRule` schema +
   compile-time validation + `lookup/resolve-ui-map.ts`. GitHub seed: 5 purposes
-  (`repo_home.open_issues_tab`, `repo_home.open_actions_tab`,
-  `issues_list.new_issue_cta`, `issues_list.search_input`,
-  `actions_list.filter_input`). Read-only consumer wiring is intentionally
+  (`search_results.open_result`, `search_results.search_input`,
+  `content_detail.open_author`). Read-only consumer wiring is intentionally
   deferred (Stage 3a item 6).
 - **`B-011` v1 · stable HVO `targetRef`** — `read_page` HVOs now carry an
   optional `targetRef` of shape `tgt_<10-hex>`, derived deterministically from
@@ -77,10 +76,11 @@ contract on `ReadPageHighValueObject` continues to be emitted.
 
 ### Stage 3g — API Knowledge capture v1
 
-- **`B-017`** v1 — GitHub-first, capture-only, capability-gated. New
+- **`B-017`** v1 — historical single-family, capture-only,
+  capability-gated exploration. New
   `knowledge_api_endpoints` table (idempotent migration; dedup by
   `(site, endpoint_signature)` with `sample_count` / `first_seen_at` /
-  `last_seen_at`). Pure transformer covers 9 GitHub endpoint families plus an
+  `last_seen_at`). Pure transformer covered a narrow endpoint-family set plus an
   `unclassified` fallback that still respects redaction. Wired through a new
   `chrome_network_capture` post-processor — **no MCP surface change** in v1.
   - Hard PII guarantees, regression-tested at three layers (pure transformer,
@@ -97,9 +97,10 @@ contract on `ReadPageHighValueObject` continues to be emitted.
 - **`B-018`** v1 — `tabrix_choose_context(intent, url?, pageRole?, siteId?)`
   MCP tool wired into the native server with a rule-based selector and three
   shipped strategies (`experience_reuse` / `knowledge_light` /
-  `read_page_required`). GitHub-first; `siteId` only honours `github` in v1,
-  and non-GitHub URLs resolve to `read_page_required`. Design + scope detail
-  in the maintainer-private B-018 owner brief.
+  `read_page_required`). This was a historical narrow-selector slice; the
+  current product direction is site-family-neutral and resolves unknown URLs
+  through generic read/page-object sensing. Design + scope detail in the
+  maintainer-private B-018 owner brief.
   - **Caveat**: this is a v1 _slice_, not the full Stage 3h DoD. The full
     decision table, telemetry-driven self-learning, and multi-site coverage
     are still in pool. The v1 selector is intentionally rule-only (no
@@ -111,9 +112,9 @@ contract on `ReadPageHighValueObject` continues to be emitted.
   `dispatchSucceeded` / `observedOutcome` / `verification` / `success` (derived,
   never synonymous with "the promise resolved"). Closes the false-success
   defect that v2.1.x exhibited on degraded-bridge / new-tab paths.
-- **`B-024`** — Click V2 verifier hook v1: three keys
-  (`github.repo_nav.issues` / `pull_requests` / `actions`); fail-closed on
-  unknown keys; public click response gains optional `postClickState`
+- **`B-024`** — Click V2 verifier hook v1: a narrow historical verifier-key
+  slice; fail-closed on unknown keys; public click response gains optional
+  `postClickState`
   (`beforeUrl` / `afterUrl` / `pageRoleAfter` / `verifierPassed` /
   `verifierReason`).
 
@@ -226,6 +227,6 @@ All first-party packages move to `2.2.0`:
 - UI Map consumer cutover inside `candidate-action.ts` (Stage 3a item 6).
 - Real fault-injection recovery in the private acceptance suite.
 - Nightly CI wiring of the T5 acceptance suite.
-- Extension of acceptance to logged-in platforms (Douyin / BOSS / private
-  consoles) — those stay in their own private suites and are not part of
+- Extension of acceptance to logged-in content platforms, recruiting sites,
+  and private consoles — those stay in their own private suites and are not part of
   this public release surface.

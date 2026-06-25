@@ -67,10 +67,10 @@ describe('V27-P0-REAL-01 visible region rows', () => {
     expect(rows.rows[1].title).toBe('Family route checklist');
   });
 
-  it('groups GitHub-like repo search results without topic or footer rows', () => {
+  it('groups Workspace-like repo search results without topic or footer rows', () => {
     const rows = extractVisibleRegionRows({
       sourceRegion: 'search_results',
-      url: 'https://github.com/search?q=browser&type=repositories',
+      url: 'https://code.example/search?q=browser&type=repositories',
       title: 'Repository search results',
       viewport: { width: 1280, height: 720, dpr: 1 },
       pageContent: [
@@ -302,10 +302,10 @@ describe('V27-P0-REAL-01 visible region rows', () => {
     );
   });
 
-  it('groups sparse GitHub-like repo links with nearby metadata rows', () => {
+  it('groups sparse Workspace-like repo links with nearby metadata rows', () => {
     const rows = extractVisibleRegionRows({
       sourceRegion: 'viewport',
-      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
       title: 'Repository search results',
       viewport: { width: 1280, height: 720, dpr: 1 },
       pageContent: [

@@ -542,7 +542,7 @@ describe('summariseBenchmarkRunV25 — comparisonToV24', () => {
         non_portable_args: 0,
         site_replay_policy_missing: 0,
         page_role_not_allowed: 0,
-        non_github_pageRole: 0,
+        non_workspace_pageRole: 0,
         below_threshold: 0,
         stale_locator: 0,
         none: 0,

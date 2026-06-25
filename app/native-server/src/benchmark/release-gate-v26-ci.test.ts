@@ -1,9 +1,9 @@
 /**
- * V26 release gate — GitHub Actions fresh-checkout regression.
+ * V26 release gate — CI fresh-checkout regression.
  *
  * v2.6 real-browser Gate B evidence is maintainer-private. The local
  * owner-lane `release:check` must keep requiring the private transformed
- * report, but GitHub Actions cannot read `.claude/private-docs` from a
+ * report, but CI cannot read `.claude/private-docs` from a
  * fresh checkout. In Actions we therefore validate the committed public
  * release notes summary instead of failing on a missing private evidence
  * directory.
@@ -85,8 +85,8 @@ function runReleaseCheck(env: NodeJS.ProcessEnv = {}): SpawnResult {
   };
 }
 
-describe('release-check v2.6 GitHub Actions fresh checkout', () => {
-  it('accepts public release notes summary in GitHub Actions when private evidence is absent', () => {
+describe('release-check v2.6 CI fresh checkout', () => {
+  it('accepts public release notes summary in CI when private evidence is absent', () => {
     const result = runReleaseCheck({ GITHUB_ACTIONS: 'true' });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('release readiness check passed');
@@ -99,7 +99,7 @@ describe('release-check v2.6 GitHub Actions fresh checkout', () => {
     expect(result.stderr).toContain('missing benchmark directory');
   });
 
-  it('still rejects weak release notes in GitHub Actions fresh checkout mode', () => {
+  it('still rejects weak release notes in CI fresh checkout mode', () => {
     writeReleaseNotes(fixtureRoot, '# Tabrix v2.6.0\n\nTBD\n');
     const result = runReleaseCheck({ GITHUB_ACTIONS: 'true' });
     expect(result.status).not.toBe(0);

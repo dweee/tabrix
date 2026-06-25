@@ -433,6 +433,36 @@ function readBoolean(...values: unknown[]): boolean | null {
   return null;
 }
 
+function readActionabilityBoolean(...values: unknown[]): boolean | null {
+  for (const value of values) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value !== 'string') continue;
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) continue;
+    if (
+      normalized === 'actionable' ||
+      normalized === 'available' ||
+      normalized === 'enabled' ||
+      normalized === 'target_ref' ||
+      normalized === 'locator_chain'
+    ) {
+      return true;
+    }
+    if (
+      normalized === 'not_actionable' ||
+      normalized === 'unavailable' ||
+      normalized === 'disabled' ||
+      normalized === 'restricted' ||
+      normalized === 'blocked' ||
+      normalized === 'not_clickable' ||
+      normalized === 'not_targetable'
+    ) {
+      return false;
+    }
+  }
+  return null;
+}
+
 function readArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
@@ -455,6 +485,92 @@ function readResultCardStableTarget(input: {
     targetRef,
     candidateActionId: readString(candidateAction?.id),
   };
+}
+
+function normalizeStableLocatorChain(value: unknown): string[] {
+  return readArray(value)
+    .map((entry): string | null => {
+      const locator = readObject(entry);
+      const type = readString(locator?.type);
+      const rawValue = readString(locator?.value);
+      if (!type || !rawValue) return null;
+      if (type === 'ref' || type === 'coordinate' || type === 'rect') return null;
+      if (!['css', 'xpath', 'aria', 'text', 'label'].includes(type)) return null;
+      const normalizedValue = rawValue.trim().replace(/\s+/g, ' ').slice(0, 240);
+      if (!normalizedValue) return null;
+      return `${type}=${normalizedValue}`;
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .slice(0, 4);
+}
+
+function actionTargetIdentityKey(input: {
+  action: Record<string, unknown>;
+  targetRef: string;
+  fallbackIndex: number;
+}): string {
+  const actionType = readString(input.action.actionType) ?? 'action';
+  const intent = readString(input.action.intent, input.action.intentBoundary) ?? 'unknown_intent';
+  const label = readString(
+    input.action.label,
+    input.action.text,
+    input.action.accessibleName,
+    input.action.name,
+  )
+    ?.trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 120);
+  const matchReason = readString(input.action.matchReason)
+    ?.trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 80);
+  const stableLocators = normalizeStableLocatorChain(input.action.locatorChain);
+  const stableParts = [actionType, intent, label, matchReason, ...stableLocators].filter(
+    (part): part is string => Boolean(part),
+  );
+  if (stableParts.length >= 3 || stableLocators.length > 0) {
+    return objectFingerprint(...stableParts);
+  }
+  return input.targetRef || `target-${input.fallbackIndex}`;
+}
+
+function regionChildObjectIdentityKey(input: {
+  child: Record<string, unknown>;
+  regionId: string;
+  childType: string;
+  fallbackIndex: number;
+}): string {
+  const explicitId = readString(input.child.objectId, input.child.id);
+  if (explicitId) return explicitId;
+  const role = readString(input.child.role, input.child.kind);
+  const label = readString(input.child.label, input.child.text, input.child.name)
+    ?.trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 120);
+  const containerKind = readString(input.child.containerKind);
+  const targetRef = readString(input.child.targetRef, input.child.ref);
+  const detailTarget = readObject(input.child.detailTarget);
+  const primaryAction = readObject(input.child.primaryAction);
+  const stableLocators = [
+    ...normalizeStableLocatorChain(detailTarget?.locatorChain),
+    ...normalizeStableLocatorChain(primaryAction?.locatorChain),
+  ].slice(0, 4);
+  const stableParts = [
+    input.regionId,
+    input.childType,
+    role,
+    label,
+    containerKind,
+    ...stableLocators,
+  ].filter((part): part is string => Boolean(part));
+  if (stableParts.length >= 3 || stableLocators.length > 0) {
+    return objectFingerprint(...stableParts);
+  }
+  return objectFingerprint(
+    input.regionId,
+    input.childType,
+    targetRef ?? `object-${input.fallbackIndex}`,
+  );
 }
 
 function normalizeResultCardActionToolArgs(rawActionTarget: Record<string, unknown> | null):
@@ -872,7 +988,7 @@ function buildReadPageActionFallbacksFromSnapshot(
         id: readString(target.targetId, target.id, targetRef),
         targetRef,
         actionType: readString(target.actionType, target.primaryAction, target.action, 'click'),
-        actionability: readBoolean(target.actionability, target.targetability, true),
+        actionability: readActionabilityBoolean(target.actionability, target.targetability, true),
         actionabilityReason: readString(target.actionabilityReason, target.reason),
         frameId: readString(target.frameId),
         nextRequiredTool: readString(target.nextRequiredTool),
@@ -1575,7 +1691,11 @@ export class MkeMemoryTraceService {
         objectType: 'window',
         browserContextKey: contextKey,
         windowId: id,
-        sourceRoute: readString(payload.source, trace.sourceRoute, 'browser_world_inventory'),
+        sourceRoute: readString(
+          payload.source,
+          trace.sourceRoute,
+          'chrome_windows_get_all_with_browser_world_inventory',
+        ),
         sourceFreshness: readString(browserWorld.status, browserWorld.freshness, trace.freshness),
         lifecycleState: readString(win.lifecycleState, 'updated'),
         isActive: readBoolean(win.focused, win.isFocused, win.active),
@@ -1653,7 +1773,11 @@ export class MkeMemoryTraceService {
         tabId,
         windowId: tabWindowId,
         ownerType: normalizeOwnerType(readString(tab.ownerType, tab.openedBy, tab.owner)),
-        sourceRoute: readString(payload.source, trace.sourceRoute, 'browser_world_inventory'),
+        sourceRoute: readString(
+          payload.source,
+          trace.sourceRoute,
+          'chrome_windows_get_all_with_browser_world_inventory',
+        ),
         sourceFreshness: readString(browserWorld.status, browserWorld.freshness, trace.freshness),
         tabStatus: readString(tab.status),
         lifecycleState: readString(tab.lifecycleState, tab.closedAtMs ? 'closed' : 'updated'),
@@ -1756,7 +1880,11 @@ export class MkeMemoryTraceService {
       tabId,
       windowId: tabWindowId,
       ownerType: normalizeOwnerType(readString(latestPageClosed.openedBy)),
-      sourceRoute: readString(payload.source, trace.sourceRoute, 'browser_world_inventory'),
+      sourceRoute: readString(
+        payload.source,
+        trace.sourceRoute,
+        'chrome_windows_get_all_with_browser_world_inventory',
+      ),
       sourceFreshness: readString(browserWorld.status, browserWorld.freshness, trace.freshness),
       lifecycleState: 'closed',
       isActive: false,
@@ -2142,11 +2270,12 @@ export class MkeMemoryTraceService {
       const cardRouteKey =
         cardUrlFields.pattern ?? cardUrlFields.rootRoute ?? cardUrlFields.currentRoute;
       const cardTitleKey = title.trim().replace(/\s+/g, ' ').slice(0, 160);
-      const cardIdentityKey =
-        stableTarget?.targetRef ??
-        (cardRouteKey
-          ? objectFingerprint(cardRouteKey, cardTitleKey || `rank:${rank}`)
-          : objectFingerprint(cardTitleKey || 'untitled_result_card', rank));
+      const cardIdentityKey = cardRouteKey
+        ? objectFingerprint(cardRouteKey, cardTitleKey || `rank:${rank}`)
+        : objectFingerprint(
+            cardTitleKey || 'untitled_result_card',
+            stableTarget?.targetRef ?? `rank:${rank}`,
+          );
       this.upsertBrowserObject({
         siteFamily,
         pageUrlPattern: urlFields.pattern ?? trace.pageUrlPattern,
@@ -2325,7 +2454,7 @@ export class MkeMemoryTraceService {
         sourceRoute: readString(input.payload.sourceRoute, input.trace.sourceRoute),
         sourceFreshness: readString(input.payload.freshness, input.trace.freshness),
         lifecycleState: readString(region.state, 'observed'),
-        canTabrixOperate: readBoolean(region.targetability),
+        canTabrixOperate: readActionabilityBoolean(region.targetability),
         targetability: sanitizeValue(
           {
             state: readString(region.state),
@@ -2357,9 +2486,13 @@ export class MkeMemoryTraceService {
       for (const [childIndex, rawChild] of childObjects.slice(0, 40).entries()) {
         const child = readObject(rawChild);
         if (!child) continue;
-        const childObjectId =
-          readString(child.objectId, child.id) ?? `${regionId}-object-${childIndex}`;
         const childType = readString(child.objectType, child.kind, child.role) ?? 'page_object';
+        const childObjectId = regionChildObjectIdentityKey({
+          child,
+          regionId,
+          childType,
+          fallbackIndex: childIndex,
+        });
         const targetRef = readString(child.targetRef, child.ref);
         const logicalParentObjectId = readString(child.parentObjectId);
         const parentObjectId = logicalParentObjectId
@@ -2392,7 +2525,7 @@ export class MkeMemoryTraceService {
             input.trace.freshness,
           ),
           lifecycleState: 'observed',
-          canTabrixOperate: readBoolean(child.targetability),
+          canTabrixOperate: readActionabilityBoolean(child.targetability),
           targetability: sanitizeValue(
             {
               targetRef,
@@ -2432,6 +2565,11 @@ export class MkeMemoryTraceService {
       const action = readObject(rawAction);
       if (!action) continue;
       const targetRef = readString(action.targetRef, action.id) ?? `target-${index}`;
+      const targetIdentityKey = actionTargetIdentityKey({
+        action,
+        targetRef,
+        fallbackIndex: index,
+      });
       this.upsertBrowserObject({
         siteFamily: input.siteFamily,
         pageUrlPattern: input.rootRoute,
@@ -2443,7 +2581,7 @@ export class MkeMemoryTraceService {
           'action_target',
           input.pageModelKey,
           pageIdentityRoute,
-          targetRef,
+          targetIdentityKey,
         ),
         objectType: 'action_target',
         browserContextKey: input.browserContextKey ?? input.trace.browserContextKey ?? null,
@@ -2451,12 +2589,13 @@ export class MkeMemoryTraceService {
         sourceRoute: readString(input.payload.sourceRoute, input.trace.sourceRoute),
         sourceFreshness: readString(input.payload.freshness, input.trace.freshness),
         lifecycleState: 'observed',
-        canTabrixOperate: readBoolean(action.actionability),
+        canTabrixOperate: readActionabilityBoolean(action.actionability),
         operabilityReason: readString(action.actionabilityReason),
         targetability: sanitizeValue(
           {
             targetRef,
             frameId: readString(action.frameId),
+            identityKey: targetIdentityKey,
             nextRequiredTool: readString(action.nextRequiredTool),
             nextRequiredCheck: readString(action.nextRequiredCheck),
           },
@@ -2469,6 +2608,9 @@ export class MkeMemoryTraceService {
         facts: sanitizeValue(
           {
             intentBoundary: readString(action.intentBoundary),
+            intent: readString(action.intent),
+            label: readString(action.label, action.text, action.accessibleName, action.name),
+            stableLocatorChain: normalizeStableLocatorChain(action.locatorChain),
             matchReason: readString(action.matchReason),
           },
           'browser_object',

@@ -41,9 +41,8 @@ export interface StableTargetRefInputs {
    * 0-based ordinal among objects sharing the same identity tuple
    * `(pageRole, objectSubType, role, normalizedLabel, hrefBucket)`.
    *
-   * Most objects in real GitHub pages get ordinal=0 because their `href`
-   * already disambiguates. Ordinal only matters for visually-duplicate
-   * siblings.
+   * Most link-like objects get ordinal=0 because their `href` already
+   * disambiguates. Ordinal only matters for visually-duplicate siblings.
    */
   ordinal: number;
 }
@@ -80,11 +79,10 @@ export function normalizePageRole(input: unknown): string {
  *
  * Rules (intentionally tiny — this is not a full URL canonicalizer):
  *   1. Strip protocol+host so reloads via slightly different mirrors
- *      (e.g. `https://github.com` vs an in-app extension proxy) match.
+ *      or an in-app extension proxy match.
  *   2. Drop the query string and fragment — these encode UI state, not
  *      object identity.
- *   3. Collapse `+` and `%20` runs to a single space marker (rare on
- *      GitHub but prevents obvious drift).
+ *   3. Collapse `+` and `%20` runs to a single space marker.
  *   4. Lowercase.
  *
  * Returns `''` for inputs that are not URL-shaped, so the hash key

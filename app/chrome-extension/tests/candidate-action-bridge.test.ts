@@ -52,7 +52,7 @@ describe('candidateAction bridge', () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4101,
       title: 'Repo',
-      url: 'https://github.com/example/project',
+      url: 'https://code.example/example/project',
     });
     const injectSpy = vi
       .spyOn(clickTool as any, 'injectContentScript')
@@ -1218,7 +1218,7 @@ describe('candidateAction bridge', () => {
     vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue({
       id: 4103,
       title: 'Actions',
-      url: 'https://github.com/example/project/actions',
+      url: 'https://code.example/example/project/actions',
     });
     const clickSpy = vi.spyOn(clickTool, 'execute').mockResolvedValue({
       content: [{ type: 'text', text: JSON.stringify({ success: true }) }],
@@ -1244,7 +1244,7 @@ describe('candidateAction bridge', () => {
     vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue({
       id: 4104,
       title: 'Search',
-      url: 'https://github.com/example/project/issues',
+      url: 'https://code.example/example/project/issues',
     });
     const fillSpy = vi.spyOn(fillTool, 'execute').mockResolvedValue({
       content: [{ type: 'text', text: JSON.stringify({ success: true }) }],
@@ -1278,7 +1278,7 @@ describe('candidateAction bridge', () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4201,
       title: 'Repo',
-      url: 'https://github.com/example/project',
+      url: 'https://code.example/example/project',
     });
     vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
     const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
@@ -1422,7 +1422,7 @@ describe('candidateAction bridge', () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4202,
       title: 'Repo',
-      url: 'https://github.com/example/project',
+      url: 'https://code.example/example/project',
     });
     const sendSpy = vi
       .spyOn(clickTool as any, 'sendMessageToTab')
@@ -1495,7 +1495,7 @@ describe('candidateAction bridge', () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4203,
       title: 'Repo',
-      url: 'https://github.com/example/project',
+      url: 'https://code.example/example/project',
     });
     vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
     const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
@@ -1653,7 +1653,7 @@ describe('candidateAction bridge', () => {
     vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue({
       id: 4205,
       title: 'Actions',
-      url: 'https://github.com/example/project/actions',
+      url: 'https://code.example/example/project/actions',
     });
     const clickSpy = vi.spyOn(clickTool, 'execute').mockResolvedValue({
       content: [{ type: 'text', text: JSON.stringify({ success: true }) }],

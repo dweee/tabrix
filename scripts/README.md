@@ -18,7 +18,6 @@ site state:
 - `check-console-governance.mjs` (`pnpm run governance:console`)
 - `audit-prod.mjs` (`pnpm run audit`)
 - `check-release-readiness.mjs` (`pnpm run release:check`)
-- `t4-github-baseline.mjs` and its fixture tests
 - `mcp-redacted-browser-world-smoke.mjs` (`pnpm run smoke:browser-world:redacted`)
 
 `check-release-readiness.mjs` validates package metadata, notes placement, and
@@ -58,7 +57,7 @@ The matching TypeScript report builder lives in
 
 A V27 public-safe `PASS` means only that the redacted public summary passed its
 deterministic checks. It is not a release-readiness claim and it does not prove
-that real XHS, GitHub, Douyin, private-account, or competitor scenarios passed.
+that real content platforms, private-account, or competitor scenarios passed.
 Those live runs belong to the maintainer-private acceptance lane.
 
 ## Legacy Client-Specific Helpers

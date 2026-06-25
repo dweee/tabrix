@@ -119,7 +119,7 @@ export interface ChooseContextDecisionSnapshot {
    */
   apiCapability?: {
     available: boolean;
-    /** Endpoint family, e.g. `'github_search_repositories'`. */
+    /** Endpoint family, e.g. an observed search/list/detail family. */
     family: string;
     /** API data purpose from the internal reader. */
     dataPurpose?: string;

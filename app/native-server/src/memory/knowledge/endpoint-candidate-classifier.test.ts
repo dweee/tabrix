@@ -68,7 +68,7 @@ describe('classifyEndpointCandidate — V27-06 noise filter', () => {
   it('folds asset/analytics/auth/private/telemetry into one noise bucket', () => {
     const cases: Array<{ url: string; type?: string; mimeType?: string }> = [
       { url: 'https://example.test/app.css', type: 'stylesheet', mimeType: 'text/css' },
-      { url: 'https://www.google-analytics.com/collect?v=1' },
+      { url: 'https://analytics.example.test/collect?v=1' },
       { url: 'https://example.test/oauth/authorize' },
       { url: 'https://example.test/_private/internal/users' },
       { url: 'https://example.test/api/v1/telemetry' },
@@ -323,10 +323,10 @@ describe('classifyEndpointCandidate — V27-06 semantic typer', () => {
   });
 });
 
-describe('classifyEndpointCandidate — GitHub public fixture', () => {
-  it('classifies api.github.com/search/issues as search', () => {
+describe('classifyEndpointCandidate — Workspace public fixture', () => {
+  it('classifies api.code.example/search/issues as search', () => {
     const r = classifyEndpointCandidate({
-      url: 'https://api.github.com/search/issues?q=is%3Aissue+repo%3Aowner%2Frepo&per_page=10',
+      url: 'https://api.code.example/search/issues?q=is%3Aissue+repo%3Aowner%2Frepo&per_page=10',
       method: 'GET',
       mimeType: 'application/json',
       status: 200,
@@ -341,9 +341,9 @@ describe('classifyEndpointCandidate — GitHub public fixture', () => {
     expect(r.evidenceLevel).toBe('shape_evidenced');
   });
 
-  it('classifies api.github.com/repos/:owner/:repo/issues/:n as detail', () => {
+  it('classifies api.code.example/repos/:owner/:repo/issues/:n as detail', () => {
     const r = classifyEndpointCandidate({
-      url: 'https://api.github.com/repos/owner/repo/issues/42',
+      url: 'https://api.code.example/repos/owner/repo/issues/42',
       method: 'GET',
       mimeType: 'application/json',
       status: 200,

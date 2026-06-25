@@ -65,8 +65,8 @@ export type LayerDispatchTaskType = 'reading_only' | 'action' | 'unknown';
 
 export interface LayerDispatchInput {
   /**
-   * Optional structural label of the page (e.g. `'repo_home'`,
-   * `'workflow_run_detail'`). Trimmed before use; an empty / missing
+   * Optional structural label of the page (e.g. `'search_results'`,
+   * `'content_detail'`). Trimmed before use; an empty / missing
    * value triggers the fail-safe row when no other rule matches.
    */
   pageRole?: string | null;

@@ -67,8 +67,8 @@ function seedDecision(opts: {
   chooseContextRepo().recordDecision({
     decisionId: opts.decisionId,
     intentSignature: opts.intentSignature ?? 'open issues',
-    pageRole: opts.pageRole ?? 'repo_home',
-    siteFamily: opts.siteFamily ?? 'github',
+    pageRole: opts.pageRole ?? 'workspace_home',
+    siteFamily: opts.siteFamily ?? 'workspace',
     strategy: opts.strategy ?? 'knowledge_light',
     fallbackStrategy: opts.fallbackStrategy ?? null,
     createdAt: opts.createdAt,
@@ -230,13 +230,13 @@ describe('execution read routes (V25-03)', () => {
       decisionId: 'd-1',
       createdAt: '2026-04-22T10:00:00.000Z',
       intentSignature: 'open issues',
-      pageRole: 'repo_home',
+      pageRole: 'workspace_home',
     });
     seedDecision({
       decisionId: 'd-2',
       createdAt: '2026-04-22T11:00:00.000Z',
       intentSignature: 'open issues',
-      pageRole: 'repo_home',
+      pageRole: 'workspace_home',
     });
     seedDecision({
       decisionId: 'd-3',
@@ -251,7 +251,7 @@ describe('execution read routes (V25-03)', () => {
     expect(data.paths).toHaveLength(2);
     expect(data.paths[0]).toMatchObject({
       intentSignature: 'open issues',
-      pageRole: 'repo_home',
+      pageRole: 'workspace_home',
       decisionCount: 2,
     });
     expect(data.paths[1].intentSignature).toBe('list workflow runs');
@@ -306,7 +306,7 @@ describe('execution read routes (V25-03)', () => {
 
   describe('M4 privacy contract', () => {
     const POISON = {
-      url: 'https://github.com/a/b/issues?token=ghs_supersecretvalue&q=user_input',
+      url: 'https://code.example/a/b/issues?token=ghs_supersecretvalue&q=user_input',
       cookie: 'cookie=session=ghp_secretcookie',
       bearer: 'Bearer secret-bearer-token',
       userInput: 'user_input_PII_payload_should_never_leak',
@@ -342,8 +342,8 @@ describe('execution read routes (V25-03)', () => {
         // can prove the route never tries to fetch the raw intent
         // from a sibling table.
         intentSignature: 'open issues',
-        pageRole: 'repo_home',
-        siteFamily: 'github',
+        pageRole: 'workspace_home',
+        siteFamily: 'workspace',
         // Free-text dispatcher fallback cause is the most realistic
         // surface for accidental URL leakage.
         fallbackCause: null,

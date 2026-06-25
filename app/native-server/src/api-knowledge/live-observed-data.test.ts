@@ -907,7 +907,7 @@ describe('live-observed-data selector', () => {
               rows: [
                 {
                   title: 'Show HN: Browser automation for AI',
-                  url: 'https://github.com/example/browser-automation?utm_source=feed#readme',
+                  url: 'https://code.example/example/browser-automation?utm_source=feed#readme',
                   author: 'hugs',
                   points: 443,
                   num_comments: 124,
@@ -947,7 +947,7 @@ describe('live-observed-data selector', () => {
     });
     expect(out.selected[0].rows[0]).toMatchObject({
       title: 'Show HN: Browser automation for AI',
-      publicUrl: 'https://github.com/example/browser-automation',
+      publicUrl: 'https://code.example/example/browser-automation',
       points: 443,
       num_comments: 124,
     });

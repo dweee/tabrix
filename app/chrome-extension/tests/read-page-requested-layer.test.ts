@@ -20,7 +20,7 @@ const FIXTURE_TAB = {
   windowId: 1,
   active: true,
   status: 'complete',
-  url: 'https://github.com/owner/repo/pull/42',
+  url: 'https://code.example/owner/repo/pull/42',
   title: 'PR #42 — owner/repo',
 };
 

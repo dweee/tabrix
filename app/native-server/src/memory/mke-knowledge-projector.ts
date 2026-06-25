@@ -188,6 +188,66 @@ function roundedScore(value: number | null): number {
   return Math.max(0, Math.min(1, Math.round(value * 100) / 100));
 }
 
+function buildPageDirectory(objects: BrowserObject[]): Record<string, unknown> {
+  const regions = objects
+    .filter((object) => object.objectType === 'region')
+    .map((object) => {
+      const facts = readObject(object.facts);
+      return {
+        regionType: typeof facts?.regionType === 'string' ? facts.regionType : null,
+        layoutHint: typeof facts?.layoutHint === 'string' ? facts.layoutHint : null,
+        candidateActionCount: readFiniteNumber(facts?.candidateActionCount) ?? 0,
+      };
+    })
+    .filter((entry) => entry.regionType || entry.layoutHint)
+    .slice(0, 24);
+
+  const actionTargets = objects
+    .filter((object) => object.objectType === 'action_target')
+    .flatMap((object) => {
+      const facts = readObject(object.facts);
+      const actionTypes = readStringArray(object.actionTypes);
+      return actionTypes.map((actionType) => ({
+        actionType,
+        intent:
+          typeof facts?.intent === 'string'
+            ? facts.intent
+            : typeof facts?.intentBoundary === 'string'
+              ? facts.intentBoundary
+              : null,
+        matchReason: typeof facts?.matchReason === 'string' ? facts.matchReason : null,
+        stableLocatorCount: readStringArray(facts?.stableLocatorChain).length,
+        reusableWithoutFreshRead: !isSessionScopedAction(object, actionType),
+      }));
+    })
+    .slice(0, 40);
+
+  const objectKinds = countersToObject(
+    objects.reduce((map, object) => {
+      if (!isTopLevelPageObject(object)) incrementCounter(map, object.objectType);
+      return map;
+    }, new Map<string, number>()),
+  );
+
+  const dataSources = uniqueStrings(
+    objects.flatMap((object) =>
+      [object.selectedDataSource, object.sourceRoute].filter(
+        (value): value is string => typeof value === 'string' && value.length > 0,
+      ),
+    ),
+  ).slice(0, 32);
+
+  return {
+    schema: 'tabrix_mke_page_directory_v1',
+    regions,
+    objectKinds,
+    actionTargets,
+    dataSources,
+    rawPageTextCopied: false,
+    rawResultTitlesCopied: false,
+  };
+}
+
 function groupProjectableObjects(objects: BrowserObject[]): {
   groups: ObjectGroup[];
   skippedObjectCount: number;
@@ -352,6 +412,7 @@ function buildKnowledgeInput(
             : null,
         rawCardTextCopied: false,
       },
+      pageDirectory: buildPageDirectory(group.objects),
       sourceObjectIds: uniqueStrings(sourceObjectIds).slice(0, 200),
       rawPayloadCopied: false,
     },

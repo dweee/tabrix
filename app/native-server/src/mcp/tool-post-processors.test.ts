@@ -16,11 +16,11 @@ function wrap(body: unknown): CallToolResult {
 const readPageBody = {
   mode: 'compact',
   page: {
-    url: 'https://github.com/openclaw/openclaw',
+    url: 'https://code.example/openclaw/openclaw',
     title: 'openclaw/openclaw',
     pageType: 'web_page',
   },
-  summary: { pageRole: 'github_repo_home', primaryRegion: 'main', quality: 'usable' },
+  summary: { pageRole: 'workspace_home', primaryRegion: 'main', quality: 'usable' },
   interactiveElements: [],
   artifactRefs: [],
   highValueObjects: [],
@@ -218,9 +218,11 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
   const SAMPLE_BUNDLE = {
     requests: [
       {
-        url: 'https://api.github.com/search/repositories?q=AI助手&sort=stars&order=desc',
+        url: 'https://api.code.example/search/repositories?q=AI助手&sort=stars&order=desc',
         method: 'GET',
+        type: 'xmlhttprequest',
         statusCode: 200,
+        mimeType: 'application/json',
         specificRequestHeaders: {
           Authorization: 'Bearer ghp_SUPERSECRET_token_VALUE_should_never_persist',
           Cookie: 'session=cookie-payload-PII; tracking=xyz',
@@ -236,17 +238,17 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
           items: [{ id: 1, full_name: 'octocat/private-title-PII', owner: { login: 'octocat' } }],
         }),
       },
-      // A non-github request that must be silently dropped.
+      // A request without usable XHR/fetch or JSON evidence must be silently dropped.
       {
         url: 'https://example.com/api/things?secret=hunter2',
         method: 'GET',
         statusCode: 200,
         responseBody: '{}',
       },
-      // A private telemetry-like GitHub endpoint must not become
+      // A private telemetry-like Workspace endpoint must not become
       // unclassified endpoint knowledge.
       {
-        url: 'https://api.github.com/_private/browser/stats?token=raw_query_secret',
+        url: 'https://api.code.example/_private/browser/stats?token=raw_query_secret',
         method: 'GET',
         statusCode: 200,
         mimeType: 'application/json',
@@ -318,13 +320,14 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
 
       // Exactly one row — example.com was dropped at the classifier.
       expect(manager.knowledgeApi!.countAll()).toBe(1);
-      const rows = manager.knowledgeApi!.listBySite('api.github.com');
+      const rows = manager.knowledgeApi!.listBySite('api.code.example');
       expect(rows).toHaveLength(1);
       const row = rows[0];
 
-      // Useful, redacted shape:
-      expect(row.semanticTag).toBe('github.search_repositories');
-      expect(row.urlPattern).toBe('api.github.com/search/repositories');
+      // Useful, redacted generic observed shape:
+      expect(row.semanticTag).toBeNull();
+      expect(row.family).toBe('observed');
+      expect(row.urlPattern).toBe('api.code.example/search/repositories');
       expect(row.method).toBe('GET');
       expect(row.statusClass).toBe('2xx');
       expect(row.requestSummary.hasAuth).toBe(true);
@@ -415,7 +418,7 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
         });
       }
       expect(manager.knowledgeApi!.countAll()).toBe(1);
-      const [row] = manager.knowledgeApi!.listBySite('api.github.com');
+      const [row] = manager.knowledgeApi!.listBySite('api.code.example');
       expect(row.sampleCount).toBe(3);
       // First-seen provenance sticks to the first observation; even after
       // 3 hits, sourceSessionId is still the original session.

@@ -368,6 +368,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     const taskContextEarly = externalTaskKeyEarly
       ? sessionManager.getOrCreateExternalTaskContext(externalTaskKeyEarly)
       : sessionManager.getTaskContext(task.taskId);
+    const taskContextAttachment: TaskContextAttachment = {
+      toolName: name,
+      taskContext: taskContextEarly,
+      taskContextKey: externalTaskKeyEarly ?? task.taskId,
+      taskContextKeySource: externalTaskKeyEarly ? 'external_task_key' : 'internal_task_id',
+    };
 
     // Native-handled tools short-circuit the extension round-trip — see
     // `mcp/native-tool-handlers.ts`.
@@ -405,7 +411,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           status: 'failed',
           summary: `Native tool ${name} failed`,
         });
-        return nativeResult;
+        return recordAndAttachMkeMemoryTrace(nativeResult, {
+          requestParams: args,
+          resultSummary: `Native tool ${name} failed`,
+          errorCode: 'native_tool_error',
+          browserContextKey: taskContextAttachment.taskContextKey,
+        });
       }
       sessionManager.completeStep(session.sessionId, step.stepId, {
         status: 'completed',
@@ -415,7 +426,11 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         status: 'completed',
         summary: `Native tool ${name} completed`,
       });
-      return nativeResult;
+      return recordAndAttachMkeMemoryTrace(nativeResult, {
+        requestParams: args,
+        resultSummary: `Native tool ${name} completed`,
+        browserContextKey: taskContextAttachment.taskContextKey,
+      });
     }
 
     // Primary Tab Controller hook. When
@@ -469,12 +484,6 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     // resolution sites the harder it is for a future edit to drift
     // the chooser-write and reader-peek apart.
     const taskContext = taskContextEarly;
-    const taskContextAttachment: TaskContextAttachment = {
-      toolName: name,
-      taskContext,
-      taskContextKey: externalTaskKeyEarly ?? task.taskId,
-      taskContextKeySource: externalTaskKeyEarly ? 'external_task_key' : 'internal_task_id',
-    };
     // When the orchestrator returns `'fallback_required'` we MUST
     // forward to the bridge with the clamped fallback entry layer (`L0`
     // / `L0+L1`), never the caller's original `requestedLayer`.
@@ -620,7 +629,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
                 skipPlan,
                 apiResult,
                 tokenSavings,
-                endpointSource: cachedDirect?.endpointSource ?? 'seed_adapter',
+                endpointSource: cachedDirect?.endpointSource ?? 'observed',
                 taskTotals: totals,
               });
               sessionManager.completeStep(session.sessionId, step.stepId, {

@@ -310,16 +310,9 @@ function buildSelectedArtifactAudit(
 }
 
 /**
- * Derive a `siteFamily` from an explicit safe `siteId` (highest
- * precedence) or, failing that, from the URL host. Non-GitHub hosts are
- * represented by their normalized host token and still fail closed unless
- * a matching Knowledge policy exists.
- *
- * GitHub GA adapter compatibility:
- *   - exact host `github.com` → `'github'`
- *   - any subdomain ending in `.github.com` (`api`, `gist`, `raw`,
- *     etc.) → `'github'`
- *   - everything else → `undefined`
+ * Derive a `siteFamily` from an explicit safe `siteId` (highest precedence)
+ * or, failing that, from the normalized URL host. No host receives a bundled
+ * platform alias; site knowledge must come from observed Object/Knowledge data.
  */
 export function resolveSiteFamily(
   input: TabrixChooseContextInput,
@@ -333,7 +326,6 @@ export function resolveSiteFamily(
   } catch {
     return undefined;
   }
-  if (host === 'github.com' || host.endsWith('.github.com')) return 'github';
   return normalizeTabrixSiteId(host);
 }
 
@@ -493,6 +485,17 @@ export function deriveTaskTypeForLayerDispatch(
     default:
       return 'unknown';
   }
+}
+
+function isObservedKnowledgeReadIntent(intent: string): boolean {
+  if (typeof intent !== 'string' || intent.trim().length === 0) return false;
+  const normalized = intent.toLowerCase();
+  return (
+    /(读取|读一下|查询|搜索|检索|列出|汇总|整理|前\s*\d+\s*(条|个)|列表|结果)/.test(intent) ||
+    /\b(read|query|search|find|list|fetch|collect|summari[sz]e|top\s*\d+|results?)\b/.test(
+      normalized,
+    )
+  );
 }
 
 export interface RunTabrixChooseContextDeps {
@@ -660,6 +663,8 @@ export function runTabrixChooseContext(
         pageRole: input.pageRole ?? null,
       })
     : null;
+  const observedKnowledgeReadIntent =
+    !!knowledgeCatalog && !apiCandidate && isObservedKnowledgeReadIntent(input.intent);
   const layerDispatch = dispatchLayer({
     pageRole: input.pageRole ?? null,
     userIntent: intentHint,
@@ -667,7 +672,7 @@ export function runTabrixChooseContext(
     candidateActionsCount: dispatcherInputs?.candidateActionsCount ?? 0,
     hvoCount: dispatcherInputs?.hvoCount ?? 0,
     knowledgeAvailable: !!knowledgeCatalog && knowledgeCatalog.totalEndpoints > 0,
-    searchListIntent: !!apiCandidate,
+    searchListIntent: !!apiCandidate || observedKnowledgeReadIntent,
     safetyRequiresFullLayers: false,
     fullReadByteLength: dispatcherInputs?.fullReadByteLength ?? 0,
   });
@@ -705,7 +710,8 @@ export function runTabrixChooseContext(
   //      asked for a learning pass; we honour that even when Knowledge
   //      would have answered, because the point of the run is to grow
   //      the catalog.
-  //   2. High-confidence Knowledge candidate (`apiCandidate`) →
+  //   2. High-confidence Knowledge candidate (legacy compatibility) or an
+  //      observed Knowledge read intent →
   //      `disabled` / `not_needed`. The capture round-trip would be
   //      pure waste.
   //   3. Knowledge has rows but no usable candidate
@@ -723,7 +729,7 @@ export function runTabrixChooseContext(
   if (deps.learningModeRequested === true) {
     observeMode = 'foreground';
     observeReason = 'learning_requested';
-  } else if (apiCandidate) {
+  } else if (apiCandidate || observedKnowledgeReadIntent) {
     observeMode = 'disabled';
     observeReason = 'not_needed';
   } else if (knowledgeCatalog) {

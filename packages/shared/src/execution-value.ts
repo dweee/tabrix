@@ -40,7 +40,7 @@ export interface ExecutionRecentDecisionSummary {
   intentSignature: string;
   /** Optional structural pageRole. Empty string normalizes to null. */
   pageRole: string | null;
-  /** Closed enum (`'github'` today). Telemetry-only. */
+  /** Site-neutral family token. Telemetry-only. */
   siteFamily: string | null;
   /** Chosen strategy from the closed v1 set. */
   strategy: ContextStrategyName;

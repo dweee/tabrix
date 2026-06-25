@@ -200,13 +200,13 @@ describe('non-web tab guards', () => {
       id: 3108,
       title: '',
       url: '',
-      pendingUrl: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      pendingUrl: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
     });
     const waitSpy = vi.spyOn(readPageTool as any, 'waitForTabSettled').mockResolvedValue({
       tab: {
         id: 3108,
-        title: 'Search · ACP · GitHub',
-        url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+        title: 'Search · ACP · WorkspaceHost',
+        url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
         status: 'complete',
       },
       settled: true,
@@ -242,22 +242,22 @@ describe('non-web tab guards', () => {
     expect(injectSpy).toHaveBeenCalled();
     expect(payload.reason).not.toBe('unsupported_page_type');
     expect(payload.page.url).toBe(
-      'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
     );
   });
 
   it('waits for explicit loading http tabs before injecting read_page helpers', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 3109,
-      title: 'Search · ACP · GitHub',
-      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      title: 'Search · ACP · WorkspaceHost',
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
       status: 'loading',
     });
     const waitSpy = vi.spyOn(readPageTool as any, 'waitForTabSettled').mockResolvedValue({
       tab: {
         id: 3109,
-        title: 'Search · ACP · GitHub',
-        url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+        title: 'Search · ACP · WorkspaceHost',
+        url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
         status: 'complete',
       },
       settled: true,
@@ -295,8 +295,8 @@ describe('non-web tab guards', () => {
   it('reinjects the read_page helper when the first content message has no receiver', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 3110,
-      title: 'Search · ACP · GitHub',
-      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      title: 'Search · ACP · WorkspaceHost',
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
       status: 'complete',
     });
     const injectSpy = vi
@@ -404,8 +404,8 @@ describe('non-web tab guards', () => {
   it('returns a structured page_unreadable response when read_page injection hits an error page', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 3106,
-      title: 'github.com',
-      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      title: 'code.example',
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockRejectedValue(
       new Error(
@@ -430,8 +430,8 @@ describe('non-web tab guards', () => {
   it('returns a structured page_unreadable response when web content injection hits an error page', async () => {
     vi.mocked(chrome.tabs.get).mockResolvedValue({
       id: 3107,
-      title: 'github.com',
-      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      title: 'code.example',
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
     } as chrome.tabs.Tab);
     vi.spyOn(webFetcherTool as any, 'injectContentScript').mockRejectedValue(
       new Error(

@@ -181,7 +181,7 @@ describe('TaskSessionContext — read-page context measurement', () => {
       layer: 'L0+L1+L2',
       source: 'dom_json',
       contextMeasurement: {
-        url: 'https://www.xiaohongshu.com/search_result/?keyword=AI图片创作&type=51',
+        url: 'https://content.example/search_result/?keyword=AI图片创作&type=51',
         pageRole: 'search_results',
         fullReadByteLength: 40_000.7,
         candidateActionsCount: 10,
@@ -191,7 +191,7 @@ describe('TaskSessionContext — read-page context measurement', () => {
 
     const first = ctx.peekReadPageContextMeasurement();
     expect(first).toEqual({
-      url: 'https://www.xiaohongshu.com/search_result/?keyword=AI图片创作&type=51',
+      url: 'https://content.example/search_result/?keyword=AI图片创作&type=51',
       pageRole: 'search_results',
       fullReadByteLength: 40_000,
       candidateActionsCount: 10,
@@ -225,7 +225,7 @@ describe('TaskSessionContext — read-page context measurement', () => {
 describe('TaskSessionContext — redundancy + layer demotion', () => {
   it('flags a same-layer same-page repeat as read_redundant (still allowed)', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
-    ctx.noteUrlChange('https://github.com/octocat/hello/issues', 'github_issues_list');
+    ctx.noteUrlChange('https://code.example/octocat/hello/issues', 'workspace_item_list');
     ctx.noteReadPage({ layer: 'L0+L1', source: 'dom_json' });
     const decision = ctx.shouldAllowReadPage({ requestedLayer: 'L0+L1' });
     expect(decision.allowed).toBe(true);
@@ -303,7 +303,7 @@ describe('TaskSessionContext — redundancy + layer demotion', () => {
 
   it('flags L0+L1+L2 → L0+L1 as layer_demotion (still allowed)', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
-    ctx.noteUrlChange('https://github.com/octocat/hello/issues', 'github_issues_list');
+    ctx.noteUrlChange('https://code.example/octocat/hello/issues', 'workspace_item_list');
     ctx.noteReadPage({ layer: 'L0+L1+L2', source: 'dom_json' });
     const decision = ctx.shouldAllowReadPage({ requestedLayer: 'L0' });
     expect(decision.allowed).toBe(true);
@@ -312,7 +312,7 @@ describe('TaskSessionContext — redundancy + layer demotion', () => {
 
   it('escalation L0+L1 → L0+L1+L2 is allowed without flag', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
-    ctx.noteUrlChange('https://github.com/octocat/hello', null);
+    ctx.noteUrlChange('https://code.example/octocat/hello', null);
     ctx.noteReadPage({ layer: 'L0+L1', source: 'dom_json' });
     const decision = ctx.shouldAllowReadPage({ requestedLayer: 'L0+L1+L2' });
     expect(decision.allowed).toBe(true);
@@ -321,7 +321,7 @@ describe('TaskSessionContext — redundancy + layer demotion', () => {
 
   it('allows a fresh read after a successful page interaction', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
-    ctx.noteUrlChange('https://github.com/search?q=ACP&type=repositories', 'search_results');
+    ctx.noteUrlChange('https://code.example/search?q=ACP&type=repositories', 'search_results');
     ctx.noteReadPage({
       layer: 'L0+L1',
       source: 'dom_region_rows',
@@ -543,10 +543,10 @@ describe('TaskSessionContext — URL / pageRole invalidation', () => {
     ctx.noteReadPage({
       layer: 'L0+L1',
       source: 'knowledge_api',
-      apiFamilies: ['github_issues'],
+      apiFamilies: ['workspace_issues'],
     });
     ctx.noteUrlChange('https://b/y', 'role_b');
-    expect(ctx.apiEndpointFamiliesSeen.has('github_issues')).toBe(true);
+    expect(ctx.apiEndpointFamiliesSeen.has('workspace_issues')).toBe(true);
   });
 
   it('coerces empty / whitespace URLs and pageRoles to null', () => {
@@ -943,14 +943,14 @@ describe('TaskSessionContext — V26-03 noteSkipRead + taskTotals', () => {
       source: 'api_list',
       layer: 'L0+L1',
       tokensSavedEstimate: 2048,
-      apiFamily: 'github_search_repositories',
+      apiFamily: 'observed_search_results',
     });
     expect(ctx.getTaskTotals()).toEqual({
       readPageAvoidedCount: 2,
       tokensSavedEstimateTotal: 6144,
     });
     // The shim's V26-08 redundancy detector relies on this fold-in.
-    expect(ctx.apiEndpointFamiliesSeen.has('github_search_repositories')).toBe(true);
+    expect(ctx.apiEndpointFamiliesSeen.has('observed_search_results')).toBe(true);
   });
 
   it('noteSkipRead does NOT consume the per-task read budget (that is the point)', () => {

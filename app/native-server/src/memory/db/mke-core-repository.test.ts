@@ -30,7 +30,7 @@ function templateRecipe(overrides = {}) {
     recipeName: 'publish note template',
     scenarioKey: 'content_publish',
     taskSignature: 'publish-image-note',
-    recipeFingerprint: 'recipe-xhs-publish-v1',
+    recipeFingerprint: 'recipe-content-publish-v1',
     siteFamily: 'generic-content-platform',
     pageModelKey: 'creator-publish',
     pageRole: 'creator_publish',

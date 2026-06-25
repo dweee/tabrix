@@ -20,7 +20,7 @@ assert.ok(chooseContextSchema, 'tabrix_choose_context schema must be exported');
 
 const siteIdSchema = chooseContextSchema.inputSchema.properties.siteId;
 assert.equal(siteIdSchema.type, 'string');
-assert.equal(siteIdSchema.enum, undefined, 'siteId schema must not be GitHub-only enum');
+assert.equal(siteIdSchema.enum, undefined, 'siteId schema must not be platform-only enum');
 assert.equal(siteIdSchema.pattern, TABRIX_SITE_ID_PATTERN.source);
 assert.equal(new RegExp(siteIdSchema.pattern).test('example.test'), true);
 assert.equal(new RegExp(siteIdSchema.pattern).test('bad/slash'), false);

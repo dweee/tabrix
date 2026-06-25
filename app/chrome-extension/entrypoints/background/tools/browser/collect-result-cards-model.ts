@@ -139,9 +139,13 @@ function normalizeResultCardUrlKey(value: unknown): string {
   try {
     const url = new URL(raw, 'https://example.invalid');
     const lowerHost = url.hostname.toLowerCase();
-    const noteIdMatch = /^\/(?:search_result|explore)\/([^/?#]+)/i.exec(url.pathname);
-    if (lowerHost.endsWith('xiaohongshu.com') && noteIdMatch?.[1]) {
-      return `${url.protocol}//${lowerHost}/note/${noteIdMatch[1].toLowerCase()}`;
+    const segments = url.pathname.split('/').filter(Boolean);
+    const leaf = segments[segments.length - 1] ?? '';
+    if (segments.length >= 2 && /^[a-z0-9][a-z0-9_-]{5,}$/i.test(leaf)) {
+      const collection = segments[segments.length - 2].toLowerCase();
+      if (/^(explore|search[_-]?result|result)$/.test(collection)) {
+        return `${url.protocol}//${lowerHost}/content/${leaf.toLowerCase()}`;
+      }
     }
     return `${url.protocol}//${lowerHost}${url.pathname}`.toLowerCase();
   } catch {

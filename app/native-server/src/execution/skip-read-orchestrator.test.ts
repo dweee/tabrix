@@ -84,7 +84,7 @@ describe('planSkipRead — api_list / knowledge_supported_read', () => {
     const plan = planSkipRead({
       decision: {
         ...KNOWLEDGE_DECISION,
-        apiCapability: { available: false, family: 'github_search_repositories' },
+        apiCapability: { available: false, family: 'observed_search_results' },
       },
       taskCtx: FRESH_CTX,
     });
@@ -96,7 +96,7 @@ describe('planSkipRead — api_list / knowledge_supported_read', () => {
     const plan = planSkipRead({
       decision: {
         ...KNOWLEDGE_DECISION,
-        apiCapability: { available: true, family: 'github_search_repositories' },
+        apiCapability: { available: true, family: 'observed_search_results' },
       },
       taskCtx: FRESH_CTX,
     });
@@ -105,7 +105,7 @@ describe('planSkipRead — api_list / knowledge_supported_read', () => {
     expect(plan.sourceKind).toBe('api_list');
     expect(plan.tokensSavedEstimate).toBe(8192);
     expect(plan.requiresApiCall).toBe(true);
-    expect(plan.diagnostic).toContain('github_search_repositories');
+    expect(plan.diagnostic).toContain('observed_search_results');
   });
 });
 
@@ -168,7 +168,7 @@ describe('planSkipRead — budget / fallback layer hard rules', () => {
     const plan = planSkipRead({
       decision: {
         ...KNOWLEDGE_DECISION,
-        apiCapability: { available: true, family: 'github_search_repositories' },
+        apiCapability: { available: true, family: 'observed_search_results' },
         fullReadTokenEstimate: -1,
       },
       taskCtx: FRESH_CTX,
@@ -179,7 +179,7 @@ describe('planSkipRead — budget / fallback layer hard rules', () => {
     const planNan = planSkipRead({
       decision: {
         ...KNOWLEDGE_DECISION,
-        apiCapability: { available: true, family: 'github_search_repositories' },
+        apiCapability: { available: true, family: 'observed_search_results' },
         fullReadTokenEstimate: Number.NaN,
       },
       taskCtx: FRESH_CTX,
@@ -195,7 +195,7 @@ describe('escalateAfterSkipFailure — never widens to L0+L1+L2', () => {
     original = planSkipRead({
       decision: {
         ...KNOWLEDGE_DECISION,
-        apiCapability: { available: true, family: 'github_search_repositories' },
+        apiCapability: { available: true, family: 'observed_search_results' },
       },
       taskCtx: FRESH_CTX,
     });
@@ -227,7 +227,7 @@ describe('planSkipRead — orchestrator never returns synthetic read_page payloa
     const plan = planSkipRead({
       decision: {
         ...KNOWLEDGE_DECISION,
-        apiCapability: { available: true, family: 'github_search_repositories' },
+        apiCapability: { available: true, family: 'observed_search_results' },
       },
       taskCtx: FRESH_CTX,
     }) as Record<string, unknown>;

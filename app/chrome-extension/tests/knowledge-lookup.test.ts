@@ -2,21 +2,59 @@ import { describe, expect, it } from 'vitest';
 import { buildUnderstandingContext } from '@/entrypoints/background/tools/browser/read-page-understanding-core';
 import { resolveSiteProfile } from '@/entrypoints/background/knowledge/lookup/resolve-site-profile';
 import { resolvePageRole } from '@/entrypoints/background/knowledge/lookup/resolve-page-role';
+import { compileKnowledgeRegistry } from '@/entrypoints/background/knowledge/registry/knowledge-registry';
+import type { KnowledgeSeeds } from '@/entrypoints/background/knowledge/types';
+
+const GENERIC_KNOWLEDGE_SEEDS: KnowledgeSeeds = {
+  siteProfiles: [{ siteId: 'content_site', match: { hosts: ['content.example'] } }],
+  pageRoleRules: [
+    {
+      siteId: 'content_site',
+      pageRole: 'search_results',
+      match: {
+        urlPatterns: ['^https://content\\.example/search'],
+        titlePatterns: ['search'],
+      },
+      primaryRegions: [
+        {
+          region: 'result_list',
+          patterns: ['\\bresults?\\b', '\\bfilters?\\b'],
+          confidence: 'high',
+        },
+      ],
+      fallback: { primaryRegion: 'main_content', primaryRegionConfidence: 'low' },
+    },
+    {
+      siteId: 'content_site',
+      pageRole: 'content_detail',
+      match: {
+        urlPatterns: ['^https://content\\.example/items/[a-z0-9_-]+'],
+      },
+      primaryRegions: [
+        {
+          region: 'detail_content',
+          patterns: ['\\btitle\\b', '\\bcomments?\\b'],
+          confidence: 'medium',
+        },
+      ],
+      fallback: { primaryRegion: 'detail_content', primaryRegionConfidence: 'low' },
+    },
+  ],
+};
 
 describe('knowledge-lookup resolveSiteProfile', () => {
-  it('identifies github.com hosts', () => {
-    const siteId = resolveSiteProfile('https://github.com/example/project');
-    expect(siteId).toBe('github');
+  it('does not identify any built-in platform profile by default', () => {
+    expect(resolveSiteProfile('https://code.example/example/project')).toBeNull();
+    expect(resolveSiteProfile('https://www.media_site.com/')).toBeNull();
+    expect(resolveSiteProfile('https://content.example/search?q=ai')).toBeNull();
   });
 
-  it('identifies github.com paths regardless of case', () => {
-    const siteId = resolveSiteProfile('https://github.com/Example/Project/issues'.toLowerCase());
-    expect(siteId).toBe('github');
-  });
-
-  it('returns null for sites with no stage 1 seeds', () => {
-    expect(resolveSiteProfile('https://www.douyin.com/')).toBeNull();
-    expect(resolveSiteProfile('https://example.com/anything')).toBeNull();
+  it('identifies only caller-provided generic registry profiles', () => {
+    const registry = compileKnowledgeRegistry([GENERIC_KNOWLEDGE_SEEDS]);
+    expect(resolveSiteProfile('https://content.example/search?q=ai', registry)).toBe(
+      'content_site',
+    );
+    expect(resolveSiteProfile('https://other.example/search?q=ai', registry)).toBeNull();
   });
 
   it('returns null for unparseable urls', () => {
@@ -25,83 +63,45 @@ describe('knowledge-lookup resolveSiteProfile', () => {
 });
 
 describe('knowledge-lookup resolvePageRole', () => {
+  const registry = compileKnowledgeRegistry([GENERIC_KNOWLEDGE_SEEDS]);
+
   function understand(url: string, title: string, content: string) {
     const context = buildUnderstandingContext(url, title, content);
-    const siteId = resolveSiteProfile(context.lowerUrl);
+    const siteId = resolveSiteProfile(context.lowerUrl, registry);
     if (!siteId) return null;
-    return resolvePageRole({ siteId, context });
+    return resolvePageRole({ siteId, context }, registry);
   }
 
-  it('classifies repo_home with primary navigation hints', () => {
+  it('classifies generic search-result pages from an injected registry', () => {
     const hit = understand(
-      'https://github.com/example/project',
-      'example/project',
-      'Issues Pull requests Actions Go to file Code',
+      'https://content.example/search?q=ai',
+      'Search results',
+      'Filters Results Item cards',
     );
+
     expect(hit).toMatchObject({
-      pageRole: 'repo_home',
-      primaryRegion: 'repo_primary_nav',
+      pageRole: 'search_results',
+      primaryRegion: 'result_list',
+      primaryRegionConfidence: 'high',
+    });
+  });
+
+  it('classifies generic detail pages from an injected registry', () => {
+    const hit = understand(
+      'https://content.example/items/alpha123',
+      'Article',
+      'Title Comments Related items',
+    );
+
+    expect(hit).toMatchObject({
+      pageRole: 'content_detail',
+      primaryRegion: 'detail_content',
       primaryRegionConfidence: 'medium',
     });
   });
 
-  it('classifies issues_list with issue filter controls', () => {
-    const hit = understand(
-      'https://github.com/example/project/issues',
-      'Issues · example/project',
-      'Search Issues Filter by assignee New issue',
-    );
-    expect(hit).toMatchObject({
-      pageRole: 'issues_list',
-      primaryRegion: 'issues_results',
-      primaryRegionConfidence: 'high',
-    });
-  });
-
-  it('classifies actions_list when run controls appear', () => {
-    const hit = understand(
-      'https://github.com/example/project/actions',
-      'Actions · example/project',
-      'Filter workflow runs completed successfully: Run 1052 of CI',
-    );
-    expect(hit).toMatchObject({
-      pageRole: 'actions_list',
-      primaryRegion: 'workflow_runs_list',
-      primaryRegionConfidence: 'high',
-    });
-  });
-
-  it('promotes workflow_run_detail when summary signals win', () => {
-    const hit = understand(
-      'https://github.com/example/project/actions/runs/42',
-      'Release Tabrix',
-      'Summary Show all jobs Jobs Artifacts Logs',
-    );
-    expect(hit).toMatchObject({
-      pageRole: 'workflow_run_detail',
-      primaryRegion: 'workflow_run_summary',
-      primaryRegionConfidence: 'high',
-    });
-  });
-
-  it('keeps pageRole=workflow_run_detail when only shell hints are visible (T5.4.5)', () => {
-    const hit = understand(
-      'https://github.com/example/project/actions/runs/42',
-      'Release Tabrix',
-      'Workflow run Loading Checks',
-    );
-    expect(hit).toMatchObject({
-      pageRole: 'workflow_run_detail',
-      primaryRegion: 'workflow_run_shell',
-    });
-  });
-
   it('returns null when no page role rule matches', () => {
-    const hit = understand(
-      'https://github.com/example/project/pulls',
-      'Pull requests',
-      'Some body',
-    );
+    const hit = understand('https://content.example/settings/profile', 'Settings', 'Some body');
     expect(hit).toBeNull();
   });
 });

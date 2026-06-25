@@ -188,7 +188,7 @@ export interface BenchmarkToolCallRecordV26 extends BenchmarkToolCallRecordV25 {
    * V26-FIX-05 — closed-enum lineage marker for the API row this
    * tool call produced. `'observed'` rows came from the FIX-03
    * network-observe classifier; `'seed_adapter'` rows came from the
-   * V25 GitHub/npmjs hardcoded adapter (now compatibility-only);
+   * V25 hardcoded public-site adapter (now compatibility-only);
    * `'manual_seed'` is reserved for an operator-curated catalog.
    * Optional + open-ended `string` so legacy v25 NDJSON parses
    * cleanly; values outside the closed enum bucket into `unknown`.
@@ -276,7 +276,8 @@ export interface BenchmarkRunInputV26 extends BenchmarkRunInputV25WithBaseline {
    * V26-FIX-08 — per-scenario competitor baseline map (scenarioId
    * → baseline). Use `mode: 'resilience_win'` to mark scenarios
    * where the win condition is "competitor blocked us, we got
-   * through" rather than wall-clock latency (e.g. npmjs Cloudflare
+   * through" rather than wall-clock latency (for example a public package
+   * registry challenge
    * challenge); the transformer reports `competitorDelta:
    * 'resilience_win'` and does NOT score the scenario on speed.
    */
@@ -385,7 +386,7 @@ export type BenchmarkLatencyGateStatusV26 = 'pass' | 'warn' | 'fail';
  * V26-FIX-08 — closed enum of competitor-comparison verdicts.
  * `'lead'` and `'behind'` are simple speed verdicts;
  * `'resilience_win'` flags scenarios judged on resilience (e.g.
- * npmjs Cloudflare challenge) and bypasses the speed comparison;
+ * public registry challenge) and bypasses the speed comparison;
  * `'blocked'` covers cases where comparison is impossible (no
  * observed median, no competitor median, or zero/negative competitor
  * median); `'not_compared'` means no competitor baseline was
@@ -708,7 +709,7 @@ const COMPETITOR_DELTA_SEMANTICS: Record<BenchmarkCompetitorDeltaV26, Competitor
       headline: 'comparison blocked',
       forbiddenInRender: ['lead', 'behind', 'resilience win'],
     },
-    // Resilience-mode scenarios (currently npmjs Cloudflare challenge):
+    // Resilience-mode scenarios (currently public registry challenge):
     // Tabrix completes the task while the competitor's fast-path is
     // unavailable. This is *not* an absolute speed lead — the renderer
     // MUST say "resilience" / "availability" rather than "faster" /

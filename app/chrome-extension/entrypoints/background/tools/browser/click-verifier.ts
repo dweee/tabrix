@@ -6,30 +6,19 @@
  * "what changed". It does NOT answer "did the user reach the intended
  * destination".
  *
- * This module adds one more optional stage: a family-aware post-click
- * verifier. For v1 it only covers three GitHub repo-nav flows. It is
- * explicitly NOT a general-purpose verifier framework; adding another
- * family / site / verifier key means expanding this file and the lookup
- * table, not wiring through new abstractions.
- *
- * Scope follows `docs/CLICK_V2_EXECUTION_BRIEF_V1.md`:
- *   - verifier keys covered in v1: github.repo_nav.issues,
- *     github.repo_nav.pull_requests, github.repo_nav.actions
- *   - at most ONE compact readback per verifier invocation
- *   - no hidden retry loops
- *   - no side effects on the click contract when verifier not requested
+ * This module intentionally has no built-in site verifier table. Product-level
+ * click verification must come from generic URL/DOM/AX/network post-action
+ * deltas rather than platform-specific keys.
  */
-import { inferPageUnderstanding } from './read-page-understanding';
 
 /**
  * Hint the caller passes to opt into a verifier run.
  *
- * Kept intentionally tiny. `verifierKey` is the only lookup key; `family`
- * is informational today but reserved so that future additions (non-GitHub
- * sites) can coexist without renaming.
+ * Kept intentionally tiny for backward-compatible callers. Built-in keys are
+ * not shipped.
  */
 export interface ClickVerifierContext {
-  family?: 'github';
+  family?: string;
   verifierKey?: string;
 }
 
@@ -73,60 +62,6 @@ export interface PostClickReadbackReady {
   tab: chrome.tabs.Tab | null;
 }
 
-interface VerifierRule {
-  pathRegex: RegExp;
-  expectedRole: string | null;
-  /**
-   * When true, the rule passes only when:
-   *   1. URL matches `pathRegex`, AND
-   *   2. `pageRoleAfter` is non-null AND non-`'unknown'`, AND
-   *   3. `pageRoleAfter` is not `'repo_home'`.
-   *
-   * Used only for `pull_requests`, because the GitHub family adapter
-   * does not currently emit a stable `pull_requests_list` role
-   * (see `read-page-understanding-github.ts` — there is no `/pulls`
-   * branch). The "URL + 'left repo_home'" compromise is
-   * intentionally interpreted strictly: a `null` OR `'unknown'`
-   * `pageRoleAfter` is degraded readback, not "left repo_home", and
-   * must fail-closed. As soon as a stable PR role lands, switch this
-   * rule to `expectedRole` and delete `acceptLeftRepoHome`.
-   */
-  acceptLeftRepoHome?: boolean;
-}
-
-/**
- * V1 verifier key lookup table.
- *
- * Path regexes are anchored against `URL.pathname` (not the raw href) to
- * avoid getting fooled by `?query` / `#hash`. They only match repo-scoped
- * paths (`/<owner>/<repo>/<tab>`) so that GitHub's global `/issues` list
- * does not accidentally satisfy the repo-nav verifier.
- */
-const GITHUB_VERIFIER_RULES: Record<string, VerifierRule> = {
-  'github.repo_nav.issues': {
-    pathRegex: /^\/[^/]+\/[^/]+\/issues(?:\/|$)/,
-    expectedRole: 'issues_list',
-  },
-  'github.repo_nav.pull_requests': {
-    pathRegex: /^\/[^/]+\/[^/]+\/pulls(?:\/|$)/,
-    expectedRole: null,
-    acceptLeftRepoHome: true,
-  },
-  'github.repo_nav.actions': {
-    pathRegex: /^\/[^/]+\/[^/]+\/actions(?:\/|$)/,
-    expectedRole: 'actions_list',
-  },
-};
-
-function parsePathname(url: string | null): string | null {
-  if (!url) return null;
-  try {
-    return new URL(url).pathname;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Pure, side-effect-free verifier evaluation.
  *
@@ -142,104 +77,19 @@ export function evaluateClickVerifier(
 ): ClickVerifierResult {
   const afterUrl = readback.url ?? null;
 
-  const pageRoleAfter =
-    readback.url && readback.title != null && readback.bodyText != null
-      ? (inferPageUnderstanding(readback.url, readback.title, readback.bodyText).pageRole ?? null)
-      : null;
-
   const key = ctx.verifierKey ?? '';
-  const rule = GITHUB_VERIFIER_RULES[key];
-  if (!rule) {
-    return {
-      passed: false,
-      reason: `verifier_key_unknown:${key || '(none)'}`,
-      beforeUrl,
-      afterUrl,
-      pageRoleAfter,
-    };
-  }
-
-  const afterPath = parsePathname(afterUrl);
-  const urlMatches = afterPath != null && rule.pathRegex.test(afterPath);
-
-  if (!urlMatches) {
-    return {
-      passed: false,
-      reason: `${key}:url_mismatch`,
-      beforeUrl,
-      afterUrl,
-      pageRoleAfter,
-    };
-  }
-
-  if (rule.expectedRole != null) {
-    if (pageRoleAfter !== rule.expectedRole) {
-      return {
-        passed: false,
-        reason: `${key}:role_mismatch`,
-        beforeUrl,
-        afterUrl,
-        pageRoleAfter,
-      };
-    }
-    return { passed: true, reason: key, beforeUrl, afterUrl, pageRoleAfter };
-  }
-
-  if (rule.acceptLeftRepoHome) {
-    // A3 hardening: this branch is only reachable when the rule has no
-    // `expectedRole` (today only `pull_requests`, because the GitHub
-    // family adapter has no `/pulls` branch yet). The original
-    // "URL + left repo_home" compromise from the click v2 brief was
-    // never meant to accept a `null` OR `'unknown'` page role — both
-    // are signals that page understanding is degenerate, not signals
-    // that we successfully left repo_home. We must fail-closed in
-    // both cases. A future PR that adds a stable `pull_requests_list`
-    // role can drop this rule and switch the verifier to use
-    // `expectedRole` like its `issues` / `actions` siblings.
-    if (pageRoleAfter == null) {
-      return {
-        passed: false,
-        reason: `${key}:page_understanding_unavailable`,
-        beforeUrl,
-        afterUrl,
-        pageRoleAfter,
-      };
-    }
-    if (pageRoleAfter === 'unknown') {
-      return {
-        passed: false,
-        reason: `${key}:page_understanding_unavailable`,
-        beforeUrl,
-        afterUrl,
-        pageRoleAfter,
-      };
-    }
-    if (pageRoleAfter === 'repo_home') {
-      return {
-        passed: false,
-        reason: `${key}:still_on_repo_home`,
-        beforeUrl,
-        afterUrl,
-        pageRoleAfter,
-      };
-    }
-    return { passed: true, reason: key, beforeUrl, afterUrl, pageRoleAfter };
-  }
-
   return {
     passed: false,
-    reason: `${key}:rule_incomplete`,
+    reason: `verifier_key_unknown:${key || '(none)'}`,
     beforeUrl,
     afterUrl,
-    pageRoleAfter,
+    pageRoleAfter: null,
   };
 }
 
 export function isVerifierContextActive(ctx: ClickVerifierContext | undefined | null): boolean {
   if (!isVerifierContextRequested(ctx)) return false;
-  const key = ctx?.verifierKey;
-  if (typeof key !== 'string' || key.length === 0) return false;
-  return Object.prototype.hasOwnProperty.call(GITHUB_VERIFIER_RULES, key);
+  return false;
 }
 
 /**

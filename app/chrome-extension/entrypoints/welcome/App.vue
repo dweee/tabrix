@@ -230,7 +230,7 @@ async function openDocs(): Promise<void> {
                   Report an issue
                 </div>
                 <p class="welcome-muted text-sm mt-1">
-                  Generate a diagnostic report and paste it into a GitHub issue.
+                  Generate a diagnostic report and attach it to your support request.
                 </p>
 
                 <div

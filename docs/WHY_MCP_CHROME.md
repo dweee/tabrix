@@ -16,7 +16,7 @@ automation approaches.
 Use Tabrix when you need to:
 
 - operate websites where the user is already logged in, such as admin systems,
-  internal tools, GitHub repositories, CMS, CRM, or support tools;
+  internal tools, project/review systems, CMS, CRM, or support tools;
 - expose the same real browser session to different MCP clients;
 - keep browser state local by default while still supporting controlled LAN
   access when needed;

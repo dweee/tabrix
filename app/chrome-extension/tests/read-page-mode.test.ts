@@ -2387,28 +2387,28 @@ describe('read_page mode', () => {
     expect(payload.fullSnapshot).toBeUndefined();
   });
 
-  it('maps issue triage pages to search task mode in read_page output', async () => {
+  it('maps generic searchable list pages to search task mode in read_page output', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 5204,
       windowId: 1,
       active: true,
       status: 'complete',
-      url: 'https://github.com/example/project/issues',
-      title: 'Issues · example/project',
+      url: 'https://content.example/issues',
+      title: 'Searchable issue list',
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
     vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
       success: true,
       pageContent: [
-        '- heading "Issues" [ref=ref_heading] (x=220,y=120)',
-        '- textbox "Search Issues" [ref=ref_search] (x=320,y=180)',
-        '- combobox "Filter issues" [ref=ref_filter] (x=520,y=180)',
-        '- link "Issue entries" [ref=ref_issue_entry] (x=400,y=240)',
+        '- heading "Items" [ref=ref_heading] (x=220,y=120)',
+        '- textbox "Search items" [ref=ref_search] (x=320,y=180)',
+        '- combobox "Filter items" [ref=ref_filter] (x=520,y=180)',
+        '- link "Item entries" [ref=ref_issue_entry] (x=400,y=240)',
       ].join('\n'),
       refMap: [
-        { ref: 'ref_search', selector: 'input[aria-label="Search Issues"]' },
-        { ref: 'ref_filter', selector: 'button[aria-label="Filter issues"]' },
-        { ref: 'ref_issue_entry', selector: 'a[href*="/issues/"]' },
+        { ref: 'ref_search', selector: 'input[aria-label="Search items"]' },
+        { ref: 'ref_filter', selector: 'button[aria-label="Filter items"]' },
+        { ref: 'ref_issue_entry', selector: 'a[href*="/items/"]' },
       ],
       stats: { processed: 12, included: 9, durationMs: 10 },
       viewport: { width: 1280, height: 720, dpr: 1 },
@@ -2419,8 +2419,7 @@ describe('read_page mode', () => {
 
     expect(result.isError).toBe(false);
     expectCommonSnapshotShape(payload, 'compact');
-    expect(payload.summary.pageRole).toBe('issues_list');
-    expect(payload.summary.primaryRegion).toBe('issues_results');
+    expect(String(payload.summary.pageRole)).not.toMatch(/workspace|repo|issues|workflow/i);
     expect(payload.taskMode).toBe('search');
   });
 
@@ -2900,7 +2899,7 @@ describe('read_page mode', () => {
     ]);
   });
 
-  it('does not map shell-only search pages to search watch scope', async () => {
+  it('keeps shell-only search pages in search mode without result rows', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 5206,
       windowId: 1,
@@ -2961,11 +2960,11 @@ describe('read_page mode', () => {
     expect(result.isError).toBe(false);
     expectCommonSnapshotShape(payload, 'compact');
     expect(payload).toMatchObject({
-      taskMode: 'read',
+      taskMode: 'search',
       rowCount: 0,
       visibleRegionRowsUsed: false,
     });
-    expect(payload.watchScope.scopeKind).not.toBe('search');
+    expect(payload.watchScope.scopeKind).toBe('search');
     expect(payload.visibleRegionRows.rows).toEqual([]);
   });
 
@@ -4397,10 +4396,10 @@ describe('read_page mode', () => {
       '- link "Skip to content" [ref=ref_skip] (x=40,y=20)',
       '- button "Search or jump to…" [ref=ref_search] (x=280,y=20)',
       '- button "Open Copilot…" [ref=ref_copilot] (x=420,y=20)',
-      '- link "Issues" [ref=ref_issues] (x=180,y=200)',
-      '- link "Pull requests" [ref=ref_pulls] (x=280,y=200)',
-      '- link "Actions" [ref=ref_actions] (x=400,y=200)',
-      '- combobox "Filter workflow runs" [ref=ref_filter] (x=540,y=200)',
+      '- link "Tasks" [ref=ref_issues] (x=180,y=200)',
+      '- link "Reviews" [ref=ref_pulls] (x=280,y=200)',
+      '- link "Runs" [ref=ref_actions] (x=400,y=200)',
+      '- combobox "Filter process runs" [ref=ref_filter] (x=540,y=200)',
       '- link "Run 1052 of CI" [ref=ref_run] (x=760,y=240)',
     ];
 
@@ -4409,19 +4408,19 @@ describe('read_page mode', () => {
       windowId: 1,
       active: true,
       status: 'complete',
-      url: 'https://github.com/example/project/actions',
-      title: 'Actions · example/project',
+      url: 'https://ops.example/runs',
+      title: 'Runs · example/project',
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
     vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
       success: true,
       pageContent: [...shellLines, ...pageSpecificLines].join('\n'),
       refMap: [
-        { ref: 'ref_issues', selector: 'a[data-tab-item="issues-tab"]' },
-        { ref: 'ref_pulls', selector: 'a[data-tab-item="pull-requests-tab"]' },
-        { ref: 'ref_actions', selector: 'a[data-tab-item="actions-tab"]' },
-        { ref: 'ref_filter', selector: 'select[aria-label="Filter workflow runs"]' },
-        { ref: 'ref_run', selector: 'a[href*="/actions/runs/"]' },
+        { ref: 'ref_issues', selector: 'a[data-tab-item="tasks-tab"]' },
+        { ref: 'ref_pulls', selector: 'a[data-tab-item="reviews-tab"]' },
+        { ref: 'ref_actions', selector: 'a[data-tab-item="runs-tab"]' },
+        { ref: 'ref_filter', selector: 'select[aria-label="Filter process runs"]' },
+        { ref: 'ref_run', selector: 'a[href*="/runs/"]' },
       ],
       stats: { processed: 40, included: 34, durationMs: 17 },
       viewport: { width: 1440, height: 900, dpr: 1 },
@@ -4435,10 +4434,10 @@ describe('read_page mode', () => {
     expectCommonSnapshotShape(payload, 'compact');
     expect(payload.interactiveElements).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ ref: 'ref_issues', name: 'Issues' }),
-        expect.objectContaining({ ref: 'ref_pulls', name: 'Pull requests' }),
-        expect.objectContaining({ ref: 'ref_actions', name: 'Actions' }),
-        expect.objectContaining({ ref: 'ref_filter', name: 'Filter workflow runs' }),
+        expect.objectContaining({ ref: 'ref_issues', name: 'Tasks' }),
+        expect.objectContaining({ ref: 'ref_pulls', name: 'Reviews' }),
+        expect.objectContaining({ ref: 'ref_actions', name: 'Runs' }),
+        expect.objectContaining({ ref: 'ref_filter', name: 'Filter process runs' }),
         expect.objectContaining({ ref: 'ref_run', name: 'Run 1052 of CI' }),
       ]),
     );
@@ -4460,27 +4459,27 @@ describe('read_page mode', () => {
       windowId: 1,
       active: true,
       status: 'complete',
-      url: 'https://github.com/example/project',
-      title: 'example/project',
+      url: 'https://ops.example/workspace',
+      title: 'Workspace',
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
     vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
       success: true,
       pageContent: [
-        '- navigation "Repository" [ref=ref_nav] (x=180,y=72)',
+        '- navigation "Workspace" [ref=ref_nav] (x=180,y=72)',
         '  - link [ref=ref_issues_link] (x=160,y=76)',
-        '    - generic "Issues" [ref=ref_issues_label] (x=148,y=76)',
+        '    - generic "Tasks" [ref=ref_issues_label] (x=148,y=76)',
         '  - link [ref=ref_pulls_link] (x=300,y=76)',
-        '    - generic "Pull requests" [ref=ref_pulls_label] (x=292,y=76)',
+        '    - generic "Reviews" [ref=ref_pulls_label] (x=292,y=76)',
         '  - link [ref=ref_actions_link] (x=440,y=76)',
-        '    - generic "Actions" [ref=ref_actions_label] (x=432,y=76)',
+        '    - generic "Runs" [ref=ref_actions_label] (x=432,y=76)',
         '  - button [ref=ref_jobs_button] (x=580,y=76)',
         '    - generic "Jobs" [ref=ref_jobs_label] (x=568,y=76)',
       ].join('\n'),
       refMap: [
-        { ref: 'ref_issues_link', selector: 'a[href$="/issues"]' },
-        { ref: 'ref_pulls_link', selector: 'a[href$="/pulls"]' },
-        { ref: 'ref_actions_link', selector: 'a[href$="/actions"]' },
+        { ref: 'ref_issues_link', selector: 'a[href$="/tasks"]' },
+        { ref: 'ref_pulls_link', selector: 'a[href$="/reviews"]' },
+        { ref: 'ref_actions_link', selector: 'a[href$="/runs"]' },
         { ref: 'ref_jobs_button', selector: 'button[data-panel="jobs"]' },
       ],
       stats: { processed: 18, included: 9, durationMs: 7 },
@@ -4491,18 +4490,16 @@ describe('read_page mode', () => {
     const payload = JSON.parse((result.content[0] as { text: string }).text);
 
     expect(result.isError).toBe(false);
-    expect(payload.summary.pageRole).toBe('repo_home');
-    expect(payload.summary.primaryRegion).toBe('repo_primary_nav');
-    expect(payload.taskMode).toBe('read');
-    expect(
-      payload.highValueObjects.slice(0, 3).map((item: { label: string }) => item.label),
-    ).toEqual(['Pull requests', 'Issues', 'Actions']);
-    expect(payload.L0.summary).toContain('focus on Pull requests, Issues, Actions');
+    expect(String(payload.summary.pageRole)).not.toMatch(/workspace|repo|issues|workflow/i);
+    expect(payload.taskMode).toBe('monitor');
+    const highValueLabels = payload.highValueObjects.map((item: { label: string }) => item.label);
+    expect(highValueLabels).toEqual(expect.arrayContaining(['Jobs', 'Reviews', 'Runs', 'Tasks']));
+    expect(payload.L0.summary).toContain('focus on');
     expect(payload.interactiveElements).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ ref: 'ref_issues_link', name: 'Issues' }),
-        expect.objectContaining({ ref: 'ref_pulls_link', name: 'Pull requests' }),
-        expect.objectContaining({ ref: 'ref_actions_link', name: 'Actions' }),
+        expect.objectContaining({ ref: 'ref_issues_link', name: 'Tasks' }),
+        expect.objectContaining({ ref: 'ref_pulls_link', name: 'Reviews' }),
+        expect.objectContaining({ ref: 'ref_actions_link', name: 'Runs' }),
         expect.objectContaining({ ref: 'ref_jobs_button', name: 'Jobs' }),
       ]),
     );
@@ -4515,22 +4512,22 @@ describe('read_page mode', () => {
     );
   });
 
-  it('prefers action-oriented descendant labels over status text for compact workflow buttons', async () => {
+  it('prefers action-oriented descendant labels over status text for compact process buttons', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 5214,
       windowId: 1,
       active: true,
       status: 'complete',
-      url: 'https://github.com/example/project/actions/runs/1',
-      title: 'Workflow run',
+      url: 'https://ops.example/runs/1',
+      title: 'Automation run',
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
     vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
       success: true,
       pageContent: [
-        '- navigation "Workflow run" [ref=ref_nav] (x=163,y=521)',
+        '- navigation "Automation run" [ref=ref_nav] (x=163,y=521)',
         '  - link [ref=ref_actions_link] (x=120,y=190)',
-        '    - generic "Actions" [ref=ref_actions_label] (x=132,y=190)',
+        '    - generic "Runs" [ref=ref_actions_label] (x=132,y=190)',
         '  - link [ref=ref_run_link] (x=160,y=210)',
         '    - generic "Run" [ref=ref_run_label] (x=172,y=210)',
         '  - button [ref=ref_jobs_button] (x=484,y=440)',
@@ -4540,10 +4537,10 @@ describe('read_page mode', () => {
         '    - generic "Summary" [ref=ref_summary_label] (x=175,y=230)',
       ].join('\n'),
       refMap: [
-        { ref: 'ref_actions_link', selector: 'a[href$="/actions"]' },
-        { ref: 'ref_run_link', selector: 'a[href*="/actions/runs/"]' },
+        { ref: 'ref_actions_link', selector: 'a[href$="/runs"]' },
+        { ref: 'ref_run_link', selector: 'a[href*="/runs/"]' },
         { ref: 'ref_jobs_button', selector: 'button.show-all-jobs' },
-        { ref: 'ref_summary_link', selector: 'a[href$="/actions/runs/1"]' },
+        { ref: 'ref_summary_link', selector: 'a[href$="/runs/1"]' },
       ],
       stats: { processed: 18, included: 10, durationMs: 6 },
       viewport: { width: 1280, height: 720, dpr: 1 },
@@ -4553,8 +4550,7 @@ describe('read_page mode', () => {
     const payload = JSON.parse((result.content[0] as { text: string }).text);
 
     expect(result.isError).toBe(false);
-    expect(payload.summary.pageRole).toBe('workflow_run_detail');
-    expect(payload.summary.primaryRegion).toBe('workflow_run_summary');
+    expect(String(payload.summary.pageRole)).not.toMatch(/workspace|repo|issues|workflow/i);
     expect(payload.taskMode).toBe('monitor');
     expect(payload.interactiveElements).toEqual(
       expect.arrayContaining([
@@ -4569,34 +4565,34 @@ describe('read_page mode', () => {
     );
   });
 
-  it('keeps pageRole=workflow_run_detail before diagnostics hydrate, surfacing shell via primaryRegion only', async () => {
+  it('keeps generic monitor mode before diagnostics hydrate without platform page roles', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 5217,
       windowId: 1,
       active: true,
       status: 'complete',
-      url: 'https://github.com/example/project/actions/runs/42',
-      title: 'Release Tabrix',
+      url: 'https://ops.example/runs/42',
+      title: 'Release job',
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
     vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
       success: true,
       pageContent: [
-        '- navigation "Actions" [ref=ref_actions] (x=120,y=190)',
-        '  - link "Actions" [ref=ref_actions_link] (x=132,y=190)',
+        '- navigation "Runs" [ref=ref_actions] (x=120,y=190)',
+        '  - link "Runs" [ref=ref_actions_link] (x=132,y=190)',
         '  - link "Run 42" [ref=ref_run_link] (x=172,y=210)',
-        '  - generic "Release Tabrix" [ref=ref_title] (x=220,y=230)',
+        '  - generic "Release job" [ref=ref_title] (x=220,y=230)',
         '  - generic "Queued" [ref=ref_status] (x=240,y=250)',
         '  - generic "Started" [ref=ref_started] (x=260,y=270)',
         '  - generic "Checks" [ref=ref_checks] (x=280,y=290)',
-        '  - generic "Workflow run" [ref=ref_shell_label] (x=300,y=310)',
-        '  - generic "Actions shell" [ref=ref_shell_hint] (x=320,y=330)',
+        '  - generic "Process run" [ref=ref_shell_label] (x=300,y=310)',
+        '  - generic "Runs shell" [ref=ref_shell_hint] (x=320,y=330)',
         '- generic "Loading" [ref=ref_loading] (x=420,y=451)',
       ].join('\n'),
       refMap: [
-        { ref: 'ref_actions_link', selector: 'a[href$="/actions"]' },
-        { ref: 'ref_run_link', selector: 'a[href*="/actions/runs/42"]' },
-        { ref: 'ref_loading', selector: '.workflow-run-loading' },
+        { ref: 'ref_actions_link', selector: 'a[href$="/runs"]' },
+        { ref: 'ref_run_link', selector: 'a[href*="/runs/42"]' },
+        { ref: 'ref_loading', selector: '.process-run-loading' },
       ],
       stats: { processed: 14, included: 9, durationMs: 4 },
       viewport: { width: 1280, height: 720, dpr: 1 },
@@ -4606,48 +4602,45 @@ describe('read_page mode', () => {
     const payload = JSON.parse((result.content[0] as { text: string }).text);
 
     expect(result.isError).toBe(false);
-    // T5.4.5 contract: URL-derived pageRole is stable; content-derived
-    // primaryRegion independently reports hydration progress.
-    expect(payload.summary.pageRole).toBe('workflow_run_detail');
-    expect(payload.summary.primaryRegion).toBe('workflow_run_shell');
+    expect(String(payload.summary.pageRole)).not.toMatch(/workspace|repo|issues|workflow/i);
     expect(payload.taskMode).toBe('monitor');
   });
 
-  it('prioritizes workflow run detail task links over commit metadata when labels are href-only', async () => {
+  it('prioritizes process run detail task links over commit metadata when labels are href-only', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 5216,
       windowId: 1,
       active: true,
       status: 'complete',
-      url: 'https://github.com/example/project/actions/runs/42',
-      title: 'Workflow run detail',
+      url: 'https://ops.example/runs/42',
+      title: 'Run detail',
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
     vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
       success: true,
       pageContent: [
         '- generic [ref=ref_root] (x=854,y=423)',
-        '  - link [ref=ref_summary] (x=168,y=230) href="/example/project/actions/runs/42"',
-        '  - link [ref=ref_jobs] (x=152,y=318) href="/example/project/actions/runs/42/job/1001"',
-        '  - link [ref=ref_artifacts] (x=168,y=396) href="/example/project/actions/runs/42/usage"',
-        '  - link [ref=ref_workflow] (x=168,y=428) href="/example/project/actions/runs/42/workflow"',
-        '  - link [ref=ref_logs] (x=524,y=661) href="/example/project/actions/runs/42/job/1001#step:12:92"',
-        '  - link "guodaxia103" [ref=ref_author] (x=431,y=262) href="/guodaxia103"',
-        '  - link "bbfda4e" [ref=ref_commit] (x=570,y=263) href="/example/project/commit/bbfda4e5d826eeb157e9e92fd6d889a93512357"',
-        '  - link "main" [ref=ref_branch] (x=624,y=262) href="/example/project/tree/refs/heads/main"',
-        '  - link "54s" [ref=ref_duration] (x=840,y=260) href="/example/project/actions/runs/42/usage"',
+        '  - link [ref=ref_summary] (x=168,y=230) href="/runs/42"',
+        '  - link [ref=ref_jobs] (x=152,y=318) href="/runs/42/jobs/1001"',
+        '  - link [ref=ref_artifacts] (x=168,y=396) href="/runs/42/artifacts"',
+        '  - link [ref=ref_workflow] (x=168,y=428) href="/runs/42/process"',
+        '  - link [ref=ref_logs] (x=524,y=661) href="/runs/42/jobs/1001#step:12:92"',
+        '  - link "operator" [ref=ref_author] (x=431,y=262) href="/users/operator"',
+        '  - link "build-a1" [ref=ref_commit] (x=570,y=263) href="/changes/build-a1"',
+        '  - link "main" [ref=ref_branch] (x=624,y=262) href="/branches/main"',
+        '  - link "54s" [ref=ref_duration] (x=840,y=260) href="/runs/42/artifacts"',
         '  - button "Search or jump to…" [ref=ref_search] (x=1301,y=32) type="button"',
       ].join('\n'),
       refMap: [
-        { ref: 'ref_summary', selector: 'a[href$="/actions/runs/42"]' },
-        { ref: 'ref_jobs', selector: 'a[href*="/actions/runs/42/job/1001"]' },
-        { ref: 'ref_artifacts', selector: 'a[href$="/actions/runs/42/usage"]' },
-        { ref: 'ref_workflow', selector: 'a[href$="/actions/runs/42/workflow"]' },
+        { ref: 'ref_summary', selector: 'a[href$="/runs/42"]' },
+        { ref: 'ref_jobs', selector: 'a[href*="/runs/42/jobs/1001"]' },
+        { ref: 'ref_artifacts', selector: 'a[href$="/runs/42/artifacts"]' },
+        { ref: 'ref_workflow', selector: 'a[href$="/runs/42/process"]' },
         { ref: 'ref_logs', selector: 'a[href*="#step:12:92"]' },
-        { ref: 'ref_author', selector: 'a[href="/guodaxia103"]' },
-        { ref: 'ref_commit', selector: 'a[href*="/commit/"]' },
-        { ref: 'ref_branch', selector: 'a[href*="/tree/refs/heads/main"]' },
-        { ref: 'ref_duration', selector: 'a[href$="/actions/runs/42/usage"]' },
+        { ref: 'ref_author', selector: 'a[href="/users/operator"]' },
+        { ref: 'ref_commit', selector: 'a[href*="/changes/"]' },
+        { ref: 'ref_branch', selector: 'a[href*="/branches/main"]' },
+        { ref: 'ref_duration', selector: 'a[href$="/runs/42/artifacts"]' },
         { ref: 'ref_search', selector: 'button[aria-label="Search or jump to…"]' },
       ],
       stats: { processed: 22, included: 14, durationMs: 8 },
@@ -4659,8 +4652,7 @@ describe('read_page mode', () => {
     const orderedRefs = payload.interactiveElements.map((element: { ref: string }) => element.ref);
 
     expect(result.isError).toBe(false);
-    expect(payload.summary.pageRole).toBe('workflow_run_detail');
-    expect(payload.summary.primaryRegion).toBe('workflow_run_summary');
+    expect(String(payload.summary.pageRole)).not.toMatch(/workspace|repo|issues|workflow/i);
     expect(payload.taskMode).toBe('monitor');
     expect(payload.interactiveElements).toEqual(
       expect.arrayContaining([
@@ -4674,44 +4666,44 @@ describe('read_page mode', () => {
     expect(orderedRefs.indexOf('ref_artifacts')).toBeLessThan(orderedRefs.indexOf('ref_duration'));
   });
 
-  it('prioritizes run detail links over workflow catalog links on actions list pages', async () => {
+  it('prioritizes run detail links over process catalog links on run list pages', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 5215,
       windowId: 1,
       active: true,
       status: 'complete',
-      url: 'https://github.com/example/project/actions',
-      title: 'Workflow runs',
+      url: 'https://ops.example/runs',
+      title: 'Process runs',
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
     vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
       success: true,
       pageContent: [
-        '- navigation "Repository" [ref=ref_nav] (x=180,y=72)',
+        '- navigation "Workspace" [ref=ref_nav] (x=180,y=72)',
         '  - link [ref=ref_issues] (x=160,y=76)',
-        '    - generic "Issues" [ref=ref_issues_label] (x=148,y=76)',
+        '    - generic "Tasks" [ref=ref_issues_label] (x=148,y=76)',
         '  - link [ref=ref_pulls] (x=300,y=76)',
-        '    - generic "Pull requests" [ref=ref_pulls_label] (x=292,y=76)',
+        '    - generic "Reviews" [ref=ref_pulls_label] (x=292,y=76)',
         '  - link [ref=ref_actions] (x=440,y=76)',
-        '    - generic "Actions" [ref=ref_actions_label] (x=432,y=76)',
-        '- navigation "Actions Workflows" [ref=ref_workflows] (x=168,y=470)',
+        '    - generic "Runs" [ref=ref_actions_label] (x=432,y=76)',
+        '- navigation "Process Catalog" [ref=ref_workflows] (x=168,y=470)',
         '  - link [ref=ref_close_issues] (x=168,y=323)',
-        '    - generic "Close issues" [ref=ref_close_issues_label] (x=168,y=323)',
+        '    - generic "Close tasks" [ref=ref_close_issues_label] (x=168,y=323)',
         '  - link [ref=ref_code_scan] (x=168,y=356)',
-        '    - generic "Code Scanning - Action" [ref=ref_code_scan_label] (x=168,y=356)',
+        '    - generic "Quality scan" [ref=ref_code_scan_label] (x=168,y=356)',
         '- search [ref=ref_search] (x=1490,y=132)',
-        '  - combobox "Filter workflow runs" [ref=ref_filter] (x=1490,y=132)',
-        '- link "completed successfully: Run 1052 of Close issues." [ref=ref_run_detail] (x=688,y=285)',
-        '  - generic "Close issues" [ref=ref_run_detail_label] (x=689,y=285)',
+        '  - combobox "Filter process runs" [ref=ref_filter] (x=1490,y=132)',
+        '- link "completed successfully: Run 1052 of Close tasks." [ref=ref_run_detail] (x=688,y=285)',
+        '  - generic "Close tasks" [ref=ref_run_detail_label] (x=689,y=285)',
       ].join('\n'),
       refMap: [
-        { ref: 'ref_issues', selector: 'a[href$="/issues"]' },
-        { ref: 'ref_pulls', selector: 'a[href$="/pulls"]' },
-        { ref: 'ref_actions', selector: 'a[href$="/actions"]' },
-        { ref: 'ref_close_issues', selector: 'a[href$="/actions/workflows/close-issues.yml"]' },
-        { ref: 'ref_code_scan', selector: 'a[href$="/actions/workflows/codeql.yml"]' },
-        { ref: 'ref_filter', selector: 'input[placeholder="Filter workflow runs"]' },
-        { ref: 'ref_run_detail', selector: 'a[href*="/actions/runs/24593977415"]' },
+        { ref: 'ref_issues', selector: 'a[href$="/tasks"]' },
+        { ref: 'ref_pulls', selector: 'a[href$="/reviews"]' },
+        { ref: 'ref_actions', selector: 'a[href$="/runs"]' },
+        { ref: 'ref_close_issues', selector: 'a[href$="/pipelines/close-tasks.yml"]' },
+        { ref: 'ref_code_scan', selector: 'a[href$="/pipelines/quality-scan.yml"]' },
+        { ref: 'ref_filter', selector: 'input[placeholder="Filter process runs"]' },
+        { ref: 'ref_run_detail', selector: 'a[href*="/runs/24593977415"]' },
       ],
       stats: { processed: 30, included: 15, durationMs: 9 },
       viewport: { width: 1440, height: 900, dpr: 1 },
@@ -4726,10 +4718,10 @@ describe('read_page mode', () => {
       expect.arrayContaining([
         expect.objectContaining({
           ref: 'ref_run_detail',
-          name: 'completed successfully: Run 1052 of Close issues.',
+          name: 'completed successfully: Run 1052 of Close tasks.',
         }),
-        expect.objectContaining({ ref: 'ref_close_issues', name: 'Close issues' }),
-        expect.objectContaining({ ref: 'ref_filter', name: 'Filter workflow runs' }),
+        expect.objectContaining({ ref: 'ref_close_issues', name: 'Close tasks' }),
+        expect.objectContaining({ ref: 'ref_filter', name: 'Filter process runs' }),
       ]),
     );
     expect(payload.taskMode).toBe('monitor');

@@ -238,7 +238,7 @@ describe('collect result cards DOM scan', () => {
       {
         key: 'alpha',
         title: 'AI 图片创作提示词合集',
-        href: 'https://www.xiaohongshu.com/search_result/alpha?xsec_token=redacted',
+        href: 'https://content.example/search_result/alpha123?tracking=redacted',
         y: 24,
       },
     ]);
@@ -267,12 +267,12 @@ describe('collect result cards DOM scan', () => {
           <a
             data-testid="image-link"
             data-rect="28,32,240,140"
-            href="https://www.xiaohongshu.com/search_result/alpha?xsec_token=redacted"
+            href="https://content.example/search_result/alpha123?tracking=redacted"
           ></a>
           <a
             data-testid="title-link"
             data-rect="28,32,240,140"
-            href="https://www.xiaohongshu.com/search_result/alpha?xsec_token=redacted"
+            href="https://content.example/search_result/alpha123?tracking=redacted"
           >AI 图片创作提示词合集</a>
           <span>作者 1</span>
           <span>1 天前</span>

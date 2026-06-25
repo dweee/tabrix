@@ -396,27 +396,6 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     };
   };
 
-  const inferFilterStateFromUrl = (): AppliedSearchFilter[] => {
-    const filters: AppliedSearchFilter[] = [];
-    try {
-      const url = new URL(location.href);
-      if (
-        url.hostname.toLowerCase().endsWith('xiaohongshu.com') &&
-        url.searchParams.get('type') === '51'
-      ) {
-        filters.push({
-          label: '图文',
-          kind: 'content_type',
-          source: 'url_parameter_adapter',
-          confidence: 0.78,
-        });
-      }
-    } catch (_) {
-      /* ignore */
-    }
-    return filters;
-  };
-
   const collectFilterState = (): SearchFilterState => {
     const activeSelectors = [
       '[aria-selected="true"]',
@@ -456,13 +435,6 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
         confidence: 0.9,
       });
     }
-    for (const filter of inferFilterStateFromUrl()) {
-      const key = `${filter.kind}:${filter.label}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      filters.push(filter);
-    }
-
     const appliedLabels = filters.map((filter) => filter.label);
     const groups = {
       contentType: groupStateForKind(filters, 'content_type'),
@@ -860,12 +832,15 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       };
     });
 
-  const isXiaohongshuDetailLink = (link: HTMLAnchorElement): boolean => {
+  const isLikelyDetailLink = (link: HTMLAnchorElement): boolean => {
     try {
       const url = new URL(link.href);
-      return (
-        url.hostname.toLowerCase().endsWith('xiaohongshu.com') &&
-        /^\/(?:search_result|explore)\/[^/?#]+/i.test(url.pathname)
+      const segments = url.pathname.split('/').filter(Boolean);
+      const leaf = segments[segments.length - 1] ?? '';
+      const collection = segments.length >= 2 ? segments[segments.length - 2] : '';
+      if (!/^[a-z0-9][a-z0-9_-]{5,}$/i.test(leaf)) return false;
+      return /^(article|articles|content|detail|explore|item|items|note|notes|post|posts|story|stories|search[_-]?result|result)$/i.test(
+        collection,
       );
     } catch {
       return false;
@@ -930,7 +905,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       reasons: string[];
     } | null => {
       const fallbackDetailLink = [...visibleLinkCandidates]
-        .filter((item) => isXiaohongshuDetailLink(item.link))
+        .filter((item) => isLikelyDetailLink(item.link))
         .sort(
           (left, right) =>
             right.rect.width * right.rect.height - left.rect.width * left.rect.height,
@@ -952,7 +927,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     if (titleMatch)
       return { link: titleMatch.link, rect: titleMatch.rect, reasons: ['title_link_match'] };
 
-    const detailLinks = visibleLinks.filter((item) => isXiaohongshuDetailLink(item.link));
+    const detailLinks = visibleLinks.filter((item) => isLikelyDetailLink(item.link));
     const detailTextLink = detailLinks.find(
       (item) => item.text.length >= 4 && !shellPattern.test(item.text),
     );

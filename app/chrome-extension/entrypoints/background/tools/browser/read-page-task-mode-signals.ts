@@ -32,7 +32,6 @@ export interface TaskModeInferenceParams {
 interface TaskModeSignalContext {
   url: string;
   title: string;
-  hostname: string;
   pageRole: string;
   primaryRegion: string;
   hasVisibleRegionRows: boolean;
@@ -41,33 +40,22 @@ interface TaskModeSignalContext {
 }
 
 interface RouteTaskModeHint {
-  hostPattern: RegExp;
   pathPattern: RegExp;
   taskMode: RankedTaskMode;
   score: number;
 }
 
 const PAGE_ROLE_TASK_MODE_HINTS: Partial<Record<string, ReadPageTaskMode>> = {
-  repo_home: 'read',
   content_detail: 'read',
   publish_form: 'read',
-  issues_list: 'search',
   search_results: 'search',
-  actions_list: 'monitor',
-  workflow_run_detail: 'monitor',
-  workflow_run_shell: 'monitor',
   login_required: 'read',
 };
 
 const PRIMARY_REGION_TASK_MODE_HINTS: Partial<Record<string, ReadPageTaskMode>> = {
-  repo_primary_nav: 'read',
   content_detail: 'read',
   form: 'read',
-  issues_results: 'search',
   search_results: 'search',
-  workflow_runs_list: 'monitor',
-  workflow_run_summary: 'monitor',
-  workflow_run_shell: 'monitor',
   login_gate: 'read',
   login_form: 'read',
 };
@@ -81,16 +69,14 @@ const TASK_MODE_SIGNAL_PATTERNS: Record<RankedTaskMode, RegExp[]> = {
 
 const ROUTE_TASK_MODE_HINTS: readonly RouteTaskModeHint[] = [
   {
-    hostPattern: /(^|\.)github\.com$/i,
-    pathPattern: /\/[^/]+\/[^/]+\/issues(?:\/?|$)/i,
+    pathPattern: /\/(?:search|results?)(?:\/?|$)/i,
     taskMode: 'search',
-    score: 4,
+    score: 2,
   },
   {
-    hostPattern: /(^|\.)github\.com$/i,
-    pathPattern: /\/[^/]+\/[^/]+\/actions(?:\/?|$)/i,
+    pathPattern: /\/(?:jobs?|logs?)(?:\/?|$)/i,
     taskMode: 'monitor',
-    score: 4,
+    score: 2,
   },
 ];
 
@@ -98,14 +84,6 @@ function normalizeTaskLabel(label: string): string {
   return String(label || '')
     .trim()
     .toLowerCase();
-}
-
-function getHostname(url: string): string {
-  try {
-    return new URL(url).hostname.toLowerCase();
-  } catch {
-    return '';
-  }
 }
 
 function getPathname(url: string): string {
@@ -176,7 +154,6 @@ function buildTaskModeSignalContext(
   return {
     url: String(params.currentUrl || '').toLowerCase(),
     title: String(params.currentTitle || '').toLowerCase(),
-    hostname: getHostname(params.currentUrl),
     pageRole: String(params.pageRole || ''),
     primaryRegion: String(params.primaryRegion || ''),
     hasVisibleRegionRows: Boolean(params.visibleRegionRows?.visibleRegionRowsUsed),
@@ -193,10 +170,7 @@ function buildTaskModeSignalContext(
 function routeHintScore(mode: RankedTaskMode, context: TaskModeSignalContext): number {
   const path = getPathname(context.url);
   return ROUTE_TASK_MODE_HINTS.filter(
-    (hint) =>
-      hint.taskMode === mode &&
-      hint.hostPattern.test(context.hostname) &&
-      hint.pathPattern.test(path),
+    (hint) => hint.taskMode === mode && hint.pathPattern.test(path),
   ).reduce((sum, hint) => sum + hint.score, 0);
 }
 
@@ -214,9 +188,15 @@ function scoreTaskMode(mode: RankedTaskMode, context: TaskModeSignalContext): nu
 
   const patterns = TASK_MODE_SIGNAL_PATTERNS[mode];
   const titleMatchCount = countPatternMatches(patterns, [context.title]);
+  const signalMatchCount = countPatternMatches(patterns, context.signalText);
+  const highValueMatchCount = countPatternMatches(patterns, context.highValueText);
   score += titleMatchCount * (mode === 'search' && !context.hasVisibleRegionRows ? 1 : 3);
-  score += countPatternMatches(patterns, context.signalText) * 2;
-  score += countPatternMatches(patterns, context.highValueText) * 3;
+  score += signalMatchCount * 2;
+  score += highValueMatchCount * 3;
+
+  if (mode === 'search' && signalMatchCount >= 2) {
+    score += 2;
+  }
 
   if (mode === 'search' && context.hasVisibleRegionRows && titleMatchCount > 0) {
     score += 3;
@@ -233,7 +213,8 @@ function scoreTaskMode(mode: RankedTaskMode, context: TaskModeSignalContext): nu
     mode === 'search' &&
     !context.hasVisibleRegionRows &&
     !hasRoleOrRegionHint &&
-    routeHintScore(mode, context) === 0
+    routeHintScore(mode, context) === 0 &&
+    signalMatchCount < 2
   ) {
     return Math.min(score, 4);
   }

@@ -32,7 +32,7 @@ const FIXTURE_TAB = {
   windowId: 1,
   active: true,
   status: 'complete',
-  url: 'https://github.com/octocat/hello/pull/42',
+  url: 'https://code.example/octocat/hello/pull/42',
   title: 'PR #42 — octocat/hello',
 };
 

@@ -332,9 +332,9 @@ CREATE TABLE IF NOT EXISTS knowledge_api_endpoints (
   --   endpoint_source: closed enum
   --     observed | seed_adapter | manual_seed | unknown | deprecated_seed
   --     NULL is treated as 'unknown' on read; rowToEndpoint() derives
-  --     a back-compat value from the family column so legacy rows
-  --     written with family='github' surface as seed_adapter and rows
-  --     written with family='observed' surface as observed. The
+  --     a back-compat value from the family column so rows written with
+  --     family='observed' surface as observed and all other legacy rows
+  --     surface as unknown. The
   --     'deprecated_seed' value is the retirement-state writer's
   --     explicit way to express "this seed_adapter row has been
   --     superseded by an observed peer"; the seed row is NEVER deleted.

@@ -8,7 +8,7 @@
  * (probe count, lane-integrity violations, click attempts per step,
  * task completion).
  *
- * Why a transformer rather than a runner: the actual GitHub baseline
+ * Why a transformer rather than a runner: the actual public-site baseline
  * runs require a real Chrome session (`AGENTS.md` rule 14 + V23-02 §3).
  * That step is maintainer-only and intentionally not invoked from this
  * file. The maintainer's loop is:

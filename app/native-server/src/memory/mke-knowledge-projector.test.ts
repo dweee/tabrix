@@ -186,10 +186,10 @@ describe('MkeKnowledgeProjector', () => {
     const projector = new MkeKnowledgeProjector(objects, knowledge);
 
     objects.upsert({
-      siteFamily: 'www.xiaohongshu.com',
-      pageUrlPattern: 'https://www.xiaohongshu.com/website-login/captcha',
+      siteFamily: 'content.example',
+      pageUrlPattern: 'https://content.example/website-login/captcha',
       pageRole: 'unknown',
-      pageModelKey: 'page:www.xiaohongshu.com:unknown',
+      pageModelKey: 'page:content.example:unknown',
       objectFingerprint: 'page:captcha',
       objectType: 'page',
       lifecycleState: 'restricted',
@@ -203,10 +203,10 @@ describe('MkeKnowledgeProjector', () => {
       updatedAt: '2026-06-06T05:10:01.000Z',
     });
     objects.upsert({
-      siteFamily: 'www.xiaohongshu.com',
-      pageUrlPattern: 'https://www.xiaohongshu.com/website-login/captcha',
+      siteFamily: 'content.example',
+      pageUrlPattern: 'https://content.example/website-login/captcha',
       pageRole: 'unknown',
-      pageModelKey: 'page:www.xiaohongshu.com:unknown',
+      pageModelKey: 'page:content.example:unknown',
       objectFingerprint: 'action:captcha-button',
       objectType: 'action_target',
       lifecycleState: 'observed',
@@ -218,10 +218,10 @@ describe('MkeKnowledgeProjector', () => {
       updatedAt: '2026-06-06T05:10:02.000Z',
     });
     objects.upsert({
-      siteFamily: 'www.xiaohongshu.com',
-      pageUrlPattern: 'https://www.xiaohongshu.com/website-login/captcha',
+      siteFamily: 'content.example',
+      pageUrlPattern: 'https://content.example/website-login/captcha',
       pageRole: 'unknown',
-      pageModelKey: 'page:www.xiaohongshu.com:unknown',
+      pageModelKey: 'page:content.example:unknown',
       objectFingerprint: 'region:captcha-db-zero',
       objectType: 'region',
       lifecycleState: 'observed',
@@ -232,10 +232,10 @@ describe('MkeKnowledgeProjector', () => {
       updatedAt: '2026-06-06T05:10:03.000Z',
     });
     objects.upsert({
-      siteFamily: 'www.xiaohongshu.com',
-      pageUrlPattern: 'https://www.xiaohongshu.com/search_result/',
+      siteFamily: 'content.example',
+      pageUrlPattern: 'https://content.example/search_result/',
       pageRole: 'unknown',
-      pageModelKey: 'page:www.xiaohongshu.com:unknown',
+      pageModelKey: 'page:content.example:unknown',
       objectFingerprint: 'region:mixed-looking-normal',
       objectType: 'region',
       lifecycleState: 'observed',
@@ -262,10 +262,10 @@ describe('MkeKnowledgeProjector', () => {
     const projector = new MkeKnowledgeProjector(objects, knowledge);
 
     objects.upsert({
-      siteFamily: 'www.xiaohongshu.com',
-      pageUrlPattern: 'https://www.xiaohongshu.com/search_result/',
+      siteFamily: 'content.example',
+      pageUrlPattern: 'https://content.example/search_result/',
       pageRole: 'search_results',
-      pageModelKey: 'page:www.xiaohongshu.com:search_results',
+      pageModelKey: 'page:content.example:search_results',
       objectFingerprint: 'page:search',
       objectType: 'page',
       lifecycleState: 'complete',
@@ -278,10 +278,10 @@ describe('MkeKnowledgeProjector', () => {
       updatedAt: '2026-06-06T05:30:01.000Z',
     });
     objects.upsert({
-      siteFamily: 'www.xiaohongshu.com',
-      pageUrlPattern: 'https://www.xiaohongshu.com/search_result/',
+      siteFamily: 'content.example',
+      pageUrlPattern: 'https://content.example/search_result/',
       pageRole: 'search_results',
-      pageModelKey: 'page:www.xiaohongshu.com:search_results',
+      pageModelKey: 'page:content.example:search_results',
       objectFingerprint: 'region:decorative-footer',
       objectType: 'region',
       lifecycleState: 'observed',
@@ -292,10 +292,10 @@ describe('MkeKnowledgeProjector', () => {
       updatedAt: '2026-06-06T05:30:02.000Z',
     });
     objects.upsert({
-      siteFamily: 'www.xiaohongshu.com',
-      pageUrlPattern: 'https://www.xiaohongshu.com/search_result/',
+      siteFamily: 'content.example',
+      pageUrlPattern: 'https://content.example/search_result/',
       pageRole: 'search_results',
-      pageModelKey: 'page:www.xiaohongshu.com:search_results',
+      pageModelKey: 'page:content.example:search_results',
       objectFingerprint: 'result-card:1',
       objectType: 'result_card',
       lifecycleState: 'observed',
@@ -305,7 +305,7 @@ describe('MkeKnowledgeProjector', () => {
       facts: {
         rank: 1,
         title: 'Reusable card',
-        actionTarget: { url: 'https://www.xiaohongshu.com/explore/:noteId' },
+        actionTarget: { url: 'https://content.example/explore/:noteId' },
         sessionOnlyTarget: {
           selector: 'main > section:nth-of-type(1) > a:nth-of-type(2)',
           center: { x: 100, y: 56 },
@@ -342,10 +342,10 @@ describe('MkeKnowledgeProjector', () => {
     const projector = new MkeKnowledgeProjector(objects, knowledge);
 
     const existing = knowledge.upsert({
-      siteFamily: 'www.xiaohongshu.com',
-      pageUrlPattern: 'https://www.xiaohongshu.com/search_result/',
+      siteFamily: 'content.example',
+      pageUrlPattern: 'https://content.example/search_result/',
       pageRole: 'search_results',
-      pageModelKey: 'page:www.xiaohongshu.com:unknown',
+      pageModelKey: 'page:content.example:unknown',
       pageStateModel: { schema: 'test', states: { ready: 1 } },
       objectGraph: { schema: 'test', sourceObjectCount: 1 },
       actionSurface: { schema: 'test', reusableActionKinds: ['open_via_url'] },
@@ -357,10 +357,10 @@ describe('MkeKnowledgeProjector', () => {
     });
 
     objects.upsert({
-      siteFamily: 'www.xiaohongshu.com',
-      pageUrlPattern: 'https://www.xiaohongshu.com/website-login/captcha',
+      siteFamily: 'content.example',
+      pageUrlPattern: 'https://content.example/website-login/captcha',
       pageRole: 'unknown',
-      pageModelKey: 'page:www.xiaohongshu.com:unknown',
+      pageModelKey: 'page:content.example:unknown',
       objectFingerprint: 'page:captcha-later',
       objectType: 'page',
       lifecycleState: 'single_snapshot',
@@ -560,6 +560,31 @@ describe('MkeKnowledgeProjector', () => {
         action_target: 2,
         page: 1,
         result_card: 3,
+      },
+      pageDirectory: {
+        schema: 'tabrix_mke_page_directory_v1',
+        objectKinds: {
+          action_target: 2,
+          result_card: 3,
+        },
+        actionTargets: expect.arrayContaining([
+          expect.objectContaining({
+            actionType: 'click',
+            matchReason: 'primary action inferred from visible text',
+            reusableWithoutFreshRead: false,
+          }),
+          expect.objectContaining({
+            actionType: 'fill',
+            matchReason: 'search input candidate action',
+            reusableWithoutFreshRead: false,
+          }),
+        ]),
+        dataSources: expect.arrayContaining([
+          'read_page_candidate_actions',
+          'visible_dom_result_cards',
+        ]),
+        rawPageTextCopied: false,
+        rawResultTitlesCopied: false,
       },
     });
     expect(model.actionSurface).toMatchObject({

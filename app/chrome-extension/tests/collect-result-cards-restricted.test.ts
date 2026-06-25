@@ -3,15 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { isRestrictedResultCardCollectionPage } from '@/entrypoints/background/tools/browser/collect-result-cards';
 
 describe('isRestrictedResultCardCollectionPage', () => {
-  it('blocks Xiaohongshu verification pages before result-card collection scans DOM', () => {
+  it('blocks verification pages before result-card collection scans DOM', () => {
     expect(
       isRestrictedResultCardCollectionPage({
         tab: {
           title: '安全验证',
-          url: 'https://www.xiaohongshu.com/website-login/captcha?redirectPath=%2Fsearch_result',
+          url: 'https://content.example/website-login/captcha?redirectPath=%2Fsearch_result',
         },
         browserWorldTab: {
-          url: 'https://www.xiaohongshu.com/website-login/captcha',
+          url: 'https://content.example/website-login/captcha',
           pendingUrl: '',
           title: '安全验证',
           canTabrixOperate: false,
@@ -26,13 +26,13 @@ describe('isRestrictedResultCardCollectionPage', () => {
     expect(
       isRestrictedResultCardCollectionPage({
         tab: {
-          title: 'AI图片创作 - 小红书搜索',
-          url: 'https://www.xiaohongshu.com/search_result?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
+          title: 'AI image creation - search',
+          url: 'https://content.example/search_result?keyword=ai-image-creation',
         },
         browserWorldTab: {
-          url: 'https://www.xiaohongshu.com/search_result?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
+          url: 'https://content.example/search_result?keyword=ai-image-creation',
           pendingUrl: '',
-          title: 'AI图片创作 - 小红书搜索',
+          title: 'AI image creation - search',
           canTabrixOperate: true,
           operabilityReason: 'operable',
           status: 'complete',

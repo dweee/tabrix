@@ -58,7 +58,7 @@ describe('mcp inspect script', () => {
     }
   });
 
-  test('lists tools for a remote GitHub troubleshooting workflow', async () => {
+  test('lists tools for a remote Workspace troubleshooting workflow', async () => {
     const remoteUrl = 'http://192.168.1.50:12306/mcp';
     const authToken = 'tabrix-test-token';
     const fetchMock = jest
@@ -224,7 +224,7 @@ describe('mcp inspect script', () => {
     });
   });
 
-  test('calls chrome_read_page with GitHub repo style args and prints parsed result', async () => {
+  test('calls chrome_read_page with Workspace repo style args and prints parsed result', async () => {
     const fetchMock = jest
       .fn()
       .mockResolvedValueOnce(

@@ -32,9 +32,9 @@ import {
 describe('read_page render=markdown projection', () => {
   it('renders title, URL, page role, top objects and interactive elements', () => {
     const md = buildMarkdownProjection({
-      url: 'https://github.com/example/project',
+      url: 'https://code.example/example/project',
       title: 'example/project: A demo repo',
-      pageRole: 'repo_home',
+      pageRole: 'workspace_home',
       primaryRegion: 'repo_primary_nav',
       highValueObjects: [
         {
@@ -43,7 +43,7 @@ describe('read_page render=markdown projection', () => {
           label: 'Issues',
           role: 'link',
           reason: 'top nav tab',
-          href: 'https://github.com/example/project/issues',
+          href: 'https://code.example/example/project/issues',
           targetRef: 'tgt_abcdef0123',
         },
         {
@@ -52,7 +52,7 @@ describe('read_page render=markdown projection', () => {
           label: 'Pull requests',
           role: 'link',
           reason: 'top nav tab',
-          href: 'https://github.com/example/project/pulls',
+          href: 'https://code.example/example/project/pulls',
           targetRef: 'tgt_1234567890',
         },
       ],
@@ -63,8 +63,8 @@ describe('read_page render=markdown projection', () => {
     });
 
     expect(md).toContain('# example/project: A demo repo');
-    expect(md).toContain('URL: https://github.com/example/project');
-    expect(md).toContain('Page role: repo_home');
+    expect(md).toContain('URL: https://code.example/example/project');
+    expect(md).toContain('Page role: workspace_home');
     expect(md).toContain('Primary region: repo_primary_nav');
     expect(md).toContain('## Top objects');
     expect(md).toContain('"Issues"');
@@ -76,9 +76,9 @@ describe('read_page render=markdown projection', () => {
 
   it('never embeds DOM ref or stable targetRef in the markdown body', () => {
     const md = buildMarkdownProjection({
-      url: 'https://github.com/example/project',
+      url: 'https://code.example/example/project',
       title: 'example/project',
-      pageRole: 'repo_home',
+      pageRole: 'workspace_home',
       primaryRegion: 'repo_primary_nav',
       highValueObjects: [
         {
@@ -88,7 +88,7 @@ describe('read_page render=markdown projection', () => {
           role: 'link',
           reason: 'top nav tab',
           ref: 'ref_must_not_leak',
-          href: 'https://github.com/example/project/issues',
+          href: 'https://code.example/example/project/issues',
           targetRef: 'tgt_must_not_leak',
         },
       ],
@@ -106,9 +106,9 @@ describe('read_page render=markdown projection', () => {
 
   it('strips locator-like labels so execution refs cannot leak through display text', () => {
     const md = buildMarkdownProjection({
-      url: 'https://github.com/example/project',
+      url: 'https://code.example/example/project',
       title: 'example/project',
-      pageRole: 'repo_home',
+      pageRole: 'workspace_home',
       primaryRegion: 'repo_primary_nav',
       highValueObjects: [
         {

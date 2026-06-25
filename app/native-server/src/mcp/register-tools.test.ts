@@ -1,4 +1,5 @@
 import nativeMessagingHostInstance from '../native-messaging-host';
+import { TOOL_NAMES } from '@tabrix/shared';
 import { bindPostActionDeltaEvidenceToPendingInteraction, handleToolCall } from './register-tools';
 import { sessionManager } from '../execution/session-manager';
 import { bridgeRuntimeState } from '../server/bridge-state';
@@ -310,6 +311,93 @@ describe('handleToolCall execution wrapper', () => {
     });
   });
 
+  it('records native-handled chooser calls in Memory without requesting AI feedback', async () => {
+    markBridgeReady();
+
+    const result = await handleToolCall(TOOL_NAMES.CONTEXT.CHOOSE, {
+      intent: '选择当前页面读取方式',
+      url: 'https://example.test/search',
+      _tabrix: {
+        intentTitle: '选择读取方式',
+      },
+    });
+    const payload = JSON.parse(String(result.content[0].text));
+
+    expect(result.isError).toBe(false);
+    expect(payload._tabrix).toMatchObject({
+      traceId: expect.any(String),
+      toolName: TOOL_NAMES.CONTEXT.CHOOSE,
+      businessFeedbackRequired: false,
+    });
+    expect(payload._tabrix).not.toHaveProperty('feedbackTarget');
+
+    const sessions = sessionManager.listSessions();
+    const traces = sessionManager.memoryTraces!.listByTask(sessions[0].taskId);
+    expect(traces).toHaveLength(1);
+    expect(traces[0]).toMatchObject({
+      taskIntent: '选择读取方式',
+      toolName: TOOL_NAMES.CONTEXT.CHOOSE,
+      requestParams: {
+        intent: '选择当前页面读取方式',
+        url: 'https://example.test/search',
+      },
+      toolSuccess: true,
+    });
+  });
+
+  it('records memory_record_ai_feedback itself as an internal not-required Memory trace', async () => {
+    markBridgeReady();
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      data: {
+        content: [{ type: 'text', text: JSON.stringify({ message: 'page read' }) }],
+        isError: false,
+      },
+    } as never);
+
+    const first = await handleToolCall(TOOL_NAMES.BROWSER.READ_PAGE, {
+      tabId: 1,
+      _tabrix: { intentTitle: '读取搜索结果' },
+    });
+    const firstPayload = JSON.parse(String(first.content[0].text));
+    const feedbackTarget = firstPayload._tabrix.feedbackTarget;
+
+    const feedbackResult = await handleToolCall(TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK, {
+      traceId: feedbackTarget.traceId,
+      taskId: feedbackTarget.taskId,
+      toolName: feedbackTarget.toolName,
+      toolCallId: feedbackTarget.toolCallId,
+      sequenceIndex: feedbackTarget.sequenceIndex,
+      feedbackToken: feedbackTarget.feedbackToken,
+      businessStatus: 'achieved',
+      confidence: 0.9,
+      reasonCode: 'read_helped_task',
+      summary: '读取结果推进了用户目标',
+    });
+    const feedbackPayload = JSON.parse(String(feedbackResult.content[0].text));
+
+    expect(feedbackPayload).toMatchObject({
+      status: 'recorded',
+      traceId: feedbackTarget.traceId,
+      _tabrix: {
+        traceId: expect.any(String),
+        toolName: TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK,
+        businessFeedbackRequired: false,
+      },
+    });
+    expect(feedbackPayload._tabrix).not.toHaveProperty('feedbackTarget');
+
+    const traces = sessionManager
+      .listSessions()
+      .flatMap((session) => sessionManager.memoryTraces!.listByTask(session.taskId));
+    expect(traces.map((trace) => trace.toolName)).toContain(TOOL_NAMES.BROWSER.READ_PAGE);
+    expect(traces.map((trace) => trace.toolName)).toContain(TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK);
+    const feedbackTrace = traces.find(
+      (trace) => trace.toolName === TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK,
+    );
+    expect(feedbackTrace?.aiFeedback).toBeNull();
+  });
+
   it('returns structured error payload when extension returns a non-recoverable error', async () => {
     markBridgeReady();
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
@@ -387,11 +475,11 @@ describe('handleToolCall execution wrapper', () => {
     const readPageBody = {
       mode: 'compact',
       page: {
-        url: 'https://github.com/openclaw/openclaw',
+        url: 'https://code.example/openclaw/openclaw',
         title: 'openclaw/openclaw',
         pageType: 'web_page',
       },
-      summary: { pageRole: 'github_repo_home', primaryRegion: 'main', quality: 'usable' },
+      summary: { pageRole: 'workspace_home', primaryRegion: 'main', quality: 'usable' },
       interactiveElements: [
         { ref: 'e1', role: 'link', name: 'Code' },
         { ref: 'e2', role: 'link', name: 'Issues' },

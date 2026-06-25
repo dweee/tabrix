@@ -160,10 +160,6 @@ function inferComplexityLevel(params: TaskProtocolParams): ReadPageComplexityLev
   if (lineCount > 40) score += 1;
   if (lineCount > 120) score += 1;
   if (params.pageContext.fallbackUsed) score += 1;
-  // Deferred to post-T5.4.0: complexity scoring still has one GitHub-specific
-  // bump. Kept stable here so T5.4.0 remains a pure object-layer boundary move.
-  if (params.pageRole === 'workflow_run_detail') score += 1;
-
   if (score >= 4) return 'complex';
   if (score >= 2) return 'medium';
   return 'simple';

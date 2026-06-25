@@ -15,10 +15,10 @@ const RESPONSE_SUMMARY_MESSAGE = 'tabrix:v27-response-summary';
 describe('network capture webRequest metadata helpers', () => {
   it('redacts raw query values while preserving query keys', () => {
     const redacted = redactNetworkCaptureUrlForMetadata(
-      'https://api.github.com/search/repositories?q=AI助手&sort=stars&order=desc',
+      'https://api.content.example/search/items?q=AI助手&sort=stars&order=desc',
     );
 
-    expect(redacted).toBe('https://api.github.com/search/repositories?order=&q=&sort=');
+    expect(redacted).toBe('https://api.content.example/search/items?order=&q=&sort=');
     expect(redacted).not.toContain('AI助手');
     expect(redacted).not.toContain('stars');
     expect(redacted).not.toContain('desc');
@@ -43,7 +43,7 @@ describe('network capture webRequest metadata helpers', () => {
   it('classifies usable API candidates and noisy private telemetry separately', () => {
     expect(
       classifyNetworkCaptureEndpoint({
-        url: 'https://api.github.com/search/repositories?q=',
+        url: 'https://api.content.example/search/items?q=',
         method: 'GET',
         type: 'xmlhttprequest',
         mimeType: 'application/json',
@@ -51,7 +51,7 @@ describe('network capture webRequest metadata helpers', () => {
     ).toBe('usable');
     expect(
       classifyNetworkCaptureEndpoint({
-        url: 'https://api.github.com/_private/browser/stats?token=',
+        url: 'https://api.content.example/_private/browser/stats?token=',
         method: 'GET',
         type: 'xmlhttprequest',
         mimeType: 'application/json',

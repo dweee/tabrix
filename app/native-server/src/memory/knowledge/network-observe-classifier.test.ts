@@ -3,10 +3,10 @@
  *
  * These cover the closed-enum semantic taxonomy
  * (search/list/detail/pagination/filter/mutation/asset/analytics/auth/private/telemetry/unknown)
- * across a deliberate mix of GitHub, npmjs, and *non-platform*
- * fixtures (Hacker News, Wikipedia REST, Cloudflare analytics).
- * The non-platform fixtures are the load-bearing assertion: the
- * classifier MUST not silently fall back to GitHub-only behaviour.
+ * across a deliberate mix of generic content, package_registry, and
+ * neutral fixtures.
+ * The neutral fixtures are the load-bearing assertion: the
+ * classifier MUST not silently fall back to Workspace-only behaviour.
  */
 
 import {
@@ -55,7 +55,7 @@ describe('classifyNetworkObserveEndpoint — V26-FIX-03', () => {
   it('classifies known analytics hosts', () => {
     expect(
       classify({
-        url: 'https://www.google-analytics.com/g/collect?v=2',
+        url: 'https://analytics.example.test/g/collect?v=2',
         method: 'POST',
       }),
     ).toEqual({ semanticType: 'analytics', usable: false, reason: 'analytics_host' });
@@ -64,7 +64,7 @@ describe('classifyNetworkObserveEndpoint — V26-FIX-03', () => {
   it('classifies private paths', () => {
     expect(
       classify({
-        url: 'https://api.github.com/_private/browser/stats?token=',
+        url: 'https://api.code.example/_private/browser/stats?token=',
         method: 'GET',
         type: 'xmlhttprequest',
         mimeType: 'application/json',
@@ -109,10 +109,10 @@ describe('classifyNetworkObserveEndpoint — V26-FIX-03', () => {
     ).toEqual({ semanticType: 'mutation', usable: false, reason: 'non_read_method' });
   });
 
-  it('GitHub search/issues → search (usable)', () => {
+  it('Workspace search/issues → search (usable)', () => {
     expect(
       classify({
-        url: 'https://api.github.com/search/issues?q=tabrix&order=desc',
+        url: 'https://api.code.example/search/issues?q=tabrix&order=desc',
         method: 'GET',
         type: 'xmlhttprequest',
         mimeType: 'application/json',
@@ -120,10 +120,10 @@ describe('classifyNetworkObserveEndpoint — V26-FIX-03', () => {
     ).toEqual({ semanticType: 'search', usable: true, reason: null });
   });
 
-  it('GitHub repo detail → detail (usable)', () => {
+  it('Workspace repo detail → detail (usable)', () => {
     expect(
       classify({
-        url: 'https://api.github.com/repos/tabrix/tabrix/issues/42',
+        url: 'https://api.code.example/repos/tabrix/tabrix/issues/42',
         method: 'GET',
         type: 'xmlhttprequest',
         mimeType: 'application/json',
@@ -132,7 +132,7 @@ describe('classifyNetworkObserveEndpoint — V26-FIX-03', () => {
   });
 
   it('non-platform fixture — Hacker News API → list/detail (usable)', () => {
-    // HN's API is the textbook "we have nothing GitHub-specific" case.
+    // HN's API is the textbook "we have nothing Workspace-specific" case.
     // Item endpoint returns JSON for a single resource — must classify
     // as `detail` even though no family adapter exists.
     expect(

@@ -34,8 +34,8 @@ export const KNOWLEDGE_LIGHT_SAMPLE_LIMIT = 5;
 
 /**
  * Site family token resolved from `siteId` or URL-derived knowledge.
- * `github` remains the GA-compatible value; non-GitHub tokens are allowed
- * when they pass the shared safe-token contract.
+ * Tokens are site-neutral identifiers and do not imply bundled platform
+ * behavior.
  */
 export type TabrixContextSiteFamily = SiteFamily;
 
@@ -47,7 +47,7 @@ export type TabrixContextSiteId = SiteId;
  * decision — never silently widen this in a feature branch.
  *
  * `read_page_markdown` joins the set as the
- * "GitHub text-heavy reading" branch. It points the caller at
+ * text-heavy reading branch. It points the caller at
  * `chrome_read_page(render='markdown')`, which is a
  * READING surface — the JSON HVOs / candidateActions / `targetRef`
  * stay the execution truth. The chooser only picks this branch when
@@ -68,25 +68,22 @@ export type ContextStrategyName =
  * for which the chooser will route the no-experience / no-knowledge
  * fallback to `read_page_markdown` instead of `read_page_required`.
  *
- * Why a hand-curated set: today only a handful of GitHub pageRoles are
- * reliably emitted by `read-page-understanding-github.ts`, and only a
- * subset of those are "long-form reading" pages where Markdown beats
- * the JSON snapshot for token cost. Forward-compatible tokens
- * (`issue_detail`, `pull_request_detail`, `discussion_detail`, `wiki`,
- * `release_notes`, `commit_detail`) are pre-listed so when the
- * understanding layer starts emitting them, the routing flips on
+ * Why a hand-curated set: only a subset of page roles are
+ * "long-form reading" pages where Markdown beats the JSON snapshot for
+ * token cost. Forward-compatible tokens are generic document/detail roles so
+ * when the understanding layer starts emitting them, the routing flips on
  * automatically without another shared-contract change.
  *
  * Anything outside this list keeps the v1 fallback (`read_page_required`).
  */
 export const MARKDOWN_FRIENDLY_PAGE_ROLES: readonly string[] = Object.freeze([
-  'repo_home',
-  'issue_detail',
-  'pull_request_detail',
-  'discussion_detail',
-  'wiki',
+  'content_detail',
+  'article',
+  'document',
+  'document_detail',
+  'knowledge_article',
+  'help_article',
   'release_notes',
-  'commit_detail',
 ]);
 
 /**
@@ -102,8 +99,8 @@ export interface TabrixChooseContextInput {
   pageRole?: string;
   /**
    * Optional explicit site-family override. Must be a shared safe token.
-   * `github` remains the GA seed; other values are accepted by the public
-   * contract and then fail closed when no matching Knowledge policy is configured.
+   * Values are accepted by the public contract and then fail closed when no
+   * matching Knowledge policy is configured.
    */
   siteId?: TabrixContextSiteId;
 }

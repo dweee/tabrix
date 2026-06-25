@@ -61,8 +61,9 @@ real-browser acceptance suite.
   - A (environment health): runtime-consistency with 4-state classification
   - B (legacy core action chain): real `chrome_navigate` +
     `chrome_read_page` + `chrome_click_element` + `chrome_screenshot`
-    against a public GitHub repo
-  - C (T5 understanding chain): bridged through `pnpm t4:github-baseline`
+    against a public repository-style page
+  - C (T5 understanding chain): bridged through the historical T4 baseline
+    harness, which is no longer part of the current product path
   - D (compatibility chain): T5 `highValueObjects.ref` clicked via the
     legacy `chrome_click_element` tool; legacy + T5.4 fields coexist
     on the same object
@@ -110,6 +111,6 @@ All first-party packages move to `2.1.0`:
   backlog; behind an opt-in `--enable-fault-injection` flag when it
   lands.
 - Nightly CI wiring of the T5 acceptance suite.
-- Extension of the acceptance model to logged-in platforms (Douyin /
-  BOSS / private consoles) — those stay in their own private suites
+- Extension of the acceptance model to logged-in content platforms,
+  recruiting sites, and private consoles — those stay in their own private suites
   and are not part of this public release surface.

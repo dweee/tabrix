@@ -346,7 +346,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
 
   /**
    * Check if URL should be filtered based on EXCLUDED_DOMAINS patterns.
-   * Uses full URL substring match to support patterns like 'facebook.com/tr'.
+   * Uses full URL substring match so generic tracking paths can be filtered.
    */
   private shouldFilterRequestByUrl(url: string): boolean {
     const normalizedUrl = String(url || '').toLowerCase();

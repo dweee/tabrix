@@ -9,15 +9,15 @@ import {
   type BenchmarkToolCallRecordV26,
 } from './v26-benchmark';
 import {
-  V26_GATE_A_GITHUB_SEARCH_SCENARIO_ID,
-  V26_GATE_A_NPMJS_SEARCH_SCENARIO_ID,
+  V26_GATE_A_STRUCTURED_SEARCH_SCENARIO_ID,
+  V26_GATE_A_PACKAGE_SEARCH_SCENARIO_ID,
   v26SearchListFastPathFixture,
 } from './v26-search-list-fast-path-fixture';
 
 function call(overrides: Partial<BenchmarkToolCallRecordV26> = {}): BenchmarkToolCallRecordV26 {
   return {
     seq: 0,
-    scenarioId: 'T5-G-GH-REPO-NAV',
+    scenarioId: 'T5-G-STRUCTURED-NAV',
     toolName: 'chrome_click_element',
     status: 'ok',
     durationMs: 100,
@@ -151,14 +151,14 @@ describe('summariseBenchmarkRunV26 — single record happy path', () => {
     const summary = summariseBenchmarkRunV26(
       run({
         toolCalls: [call({ durationMs: 250, waitedMs: 75, chosenSource: 'experience_replay' })],
-        scenarios: [{ scenarioId: 'T5-G-GH-REPO-NAV', completed: true }],
+        scenarios: [{ scenarioId: 'T5-G-STRUCTURED-NAV', completed: true }],
       }),
     );
     expect(summary.totalToolCalls).toBe(1);
     expect(summary.unknownComponentRatio).toBe(0);
     expect(summary.componentDistribution.mcp_tool).toBe(1);
     expect(summary.perTaskDurationMs).toEqual([
-      { key: 'T5-G-GH-REPO-NAV', count: 1, sumMs: 250, p50Ms: 250, p95Ms: 250 },
+      { key: 'T5-G-STRUCTURED-NAV', count: 1, sumMs: 250, p50Ms: 250, p95Ms: 250 },
     ]);
     expect(summary.perToolDurationMs).toEqual([
       { key: 'chrome_click_element', count: 1, sumMs: 250, p50Ms: 250, p95Ms: 250 },
@@ -191,7 +191,7 @@ describe('summariseBenchmarkRunV26 — fail-shape contract', () => {
           call({ seq: 0, durationMs: 100 }),
           call({ seq: 1, durationMs: -42, toolName: 'chrome_navigate' }),
         ],
-        scenarios: [{ scenarioId: 'T5-G-GH-REPO-NAV', completed: true }],
+        scenarios: [{ scenarioId: 'T5-G-STRUCTURED-NAV', completed: true }],
       }),
     );
     expect(summary.totalToolCalls).toBe(2);
@@ -508,7 +508,7 @@ describe('summariseBenchmarkRunV26 — determinism', () => {
         call({ seq: 2, durationMs: -1 }),
         call({ seq: 3, component: 'bogus' }),
       ],
-      scenarios: [{ scenarioId: 'T5-G-GH-REPO-NAV', completed: true }],
+      scenarios: [{ scenarioId: 'T5-G-STRUCTURED-NAV', completed: true }],
     });
     const a = summariseBenchmarkRunV26(input);
     const b = summariseBenchmarkRunV26(input);
@@ -538,7 +538,7 @@ describe('summariseBenchmarkRunV26 — v25 surface preservation', () => {
             readPageAvoided: true,
           }),
         ],
-        scenarios: [{ scenarioId: 'T5-G-GH-REPO-NAV', completed: true }],
+        scenarios: [{ scenarioId: 'T5-G-STRUCTURED-NAV', completed: true }],
       }),
     );
     expect(summary.v25Summary.layerMetrics.chosenLayerDistribution.L0).toBe(1);
@@ -555,10 +555,9 @@ describe('v26 search/list fast-path fixture', () => {
   it('keeps Gate A API search scenario ids visible and avoids DOM read_page records', () => {
     const summary = summariseBenchmarkRunV26(v26SearchListFastPathFixture());
 
-    expect(summary.v25Summary.scenarioSummaries.map((s) => s.scenarioId).sort()).toEqual([
-      V26_GATE_A_GITHUB_SEARCH_SCENARIO_ID,
-      V26_GATE_A_NPMJS_SEARCH_SCENARIO_ID,
-    ]);
+    expect(summary.v25Summary.scenarioSummaries.map((s) => s.scenarioId).sort()).toEqual(
+      [V26_GATE_A_STRUCTURED_SEARCH_SCENARIO_ID, V26_GATE_A_PACKAGE_SEARCH_SCENARIO_ID].sort(),
+    );
     expect(summary.chosenSourceDistribution.api_list).toBe(2);
     expect(summary.v25Summary.layerMetrics.readPageAvoidedCount).toBe(2);
     expect(summary.v25Summary.layerMetrics.tokensSavedEstimateTotal).toBeGreaterThan(0);
@@ -623,9 +622,9 @@ describe('summariseBenchmarkRunV26 — layer evidence closeout metrics', () => {
             sourceKind: 'api_list',
             sourceRoute: 'knowledge_supported_read',
             dispatcherInputSource: 'api_knowledge',
-            apiFamily: 'github_search_repositories',
+            apiFamily: 'observed_search_results',
             apiTelemetry: {
-              endpointFamily: 'github_search_repositories',
+              endpointFamily: 'observed_search_results',
               status: 'ok',
               reason: 'api_rows',
               httpStatus: 200,
@@ -656,9 +655,9 @@ describe('summariseBenchmarkRunV26 — layer evidence closeout metrics', () => {
             kind: 'read_page_api_fallback',
             chosenSource: 'dom_json',
             dispatcherInputSource: 'api_knowledge',
-            apiFamily: 'github_search_repositories',
+            apiFamily: 'observed_search_results',
             apiTelemetry: {
-              endpointFamily: 'github_search_repositories',
+              endpointFamily: 'observed_search_results',
               status: 'fallback',
               reason: 'rate_limited',
               httpStatus: 403,
@@ -860,7 +859,7 @@ describe('summariseBenchmarkRunV26 — V26-FIX-08 competitor delta', () => {
     expect(byId('T-BEHIND')?.competitorDelta).toBe('behind');
   });
 
-  it('emits resilience_win for npmjs Cloudflare-style scenarios and skips speed comparison', () => {
+  it('emits resilience_win for package_registry Cloudflare-style scenarios and skips speed comparison', () => {
     // Even though Tabrix is "slower" by latency, the scenario is
     // judged on resilience (we got through where the competitor was
     // blocked), so the delta is `'resilience_win'` regardless of
@@ -868,16 +867,16 @@ describe('summariseBenchmarkRunV26 — V26-FIX-08 competitor delta', () => {
     const summary = summariseBenchmarkRunV26(
       run({
         toolCalls: [
-          call({ seq: 0, scenarioId: 'T-NPMJS-CLOUDFLARE', durationMs: 5000 }),
-          call({ seq: 1, scenarioId: 'T-NPMJS-CLOUDFLARE', durationMs: 6000 }),
+          call({ seq: 0, scenarioId: 'T-PACKAGE_REGISTRY-CLOUDFLARE', durationMs: 5000 }),
+          call({ seq: 1, scenarioId: 'T-PACKAGE_REGISTRY-CLOUDFLARE', durationMs: 6000 }),
         ],
         competitorBaselines: {
-          'T-NPMJS-CLOUDFLARE': { medianMs: 1000, mode: 'resilience_win' },
+          'T-PACKAGE_REGISTRY-CLOUDFLARE': { medianMs: 1000, mode: 'resilience_win' },
         },
       }),
     );
     const entry = summary.perScenarioLatency.find(
-      (item) => item.scenarioId === 'T-NPMJS-CLOUDFLARE',
+      (item) => item.scenarioId === 'T-PACKAGE_REGISTRY-CLOUDFLARE',
     );
     expect(entry?.competitorDelta).toBe('resilience_win');
     expect(entry?.competitorMedianMs).toBe(1000);

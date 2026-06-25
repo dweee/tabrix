@@ -147,8 +147,7 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
       byline: /byline|author|dateline|writtenby|p-author/i,
       replaceFonts: /<(\/?)font[^>]*>/gi,
       normalize: /\s{2,}/g,
-      videos:
-        /\/\/(www\.)?((dailymotion|youtube|youtube-nocookie|player\.vimeo|v\.qq)\.com|(archive|upload\.wikimedia)\.org|player\.twitch\.tv)/i,
+      videos: /\/\/[^/]+\/.*\b(embed|player|video)\b/i,
       shareElements: /(\b|_)(share|sharedaddy)(\b|_)/i,
       nextLink: /(next|weiter|continue|>([^\|]|$)|»([^\|]|$))/i,
       prevLink: /(prev|earl|old|new|<|«)/i,
@@ -1673,11 +1672,11 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
 
       // property is a space-separated list of values
       var propertyPattern =
-        /\s*(article|dc|dcterm|og|twitter)\s*:\s*(author|creator|description|published_time|title|site_name)\s*/gi;
+        /\s*(article|dc|dcterm|og)\s*:\s*(author|creator|description|published_time|title|site_name)\s*/gi;
 
       // name is a single value
       var namePattern =
-        /^\s*(?:(dc|dcterm|og|twitter|parsely|weibo:(article|webpage))\s*[-\.:]\s*)?(author|creator|pub-date|description|title|site_name)\s*$/i;
+        /^\s*(?:(dc|dcterm|og|parsely)\s*[-\.:]\s*)?(author|creator|pub-date|description|title|site_name)\s*$/i;
 
       // Find description tags.
       this._forEachNode(metaElements, function (element) {
@@ -1717,10 +1716,7 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
         values['dc:title'] ||
         values['dcterm:title'] ||
         values['og:title'] ||
-        values['weibo:article:title'] ||
-        values['weibo:webpage:title'] ||
         values.title ||
-        values['twitter:title'] ||
         values['parsely-title'];
 
       if (!metadata.title) {
@@ -1747,10 +1743,7 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
         values['dc:description'] ||
         values['dcterm:description'] ||
         values['og:description'] ||
-        values['weibo:article:description'] ||
-        values['weibo:webpage:description'] ||
-        values.description ||
-        values['twitter:description'];
+        values.description;
 
       // get site name
       metadata.siteName = jsonld.siteName || values['og:site_name'];
@@ -2073,7 +2066,8 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
 
     /**
      * Clean a node of all elements of type "tag".
-     * (Unless it's a youtube/vimeo video. People love movies.)
+     * Generic embedded media can be preserved when it matches the allowed
+     * player/video pattern.
      *
      * @param Element
      * @param string tag to clean
@@ -2083,9 +2077,9 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
       var isEmbed = ['object', 'embed', 'iframe'].includes(tag);
 
       this._removeNodes(this._getAllNodesWithTag(e, [tag]), function (element) {
-        // Allow youtube and vimeo videos through as people usually want to see those.
+        // Allow generic embedded media through when it matches the neutral pattern.
         if (isEmbed) {
-          // First, check the elements attributes to see if any of them contain youtube or vimeo
+          // First, check the element attributes for player/video signals.
           for (var i = 0; i < element.attributes.length; i++) {
             if (this._allowedVideoRegex.test(element.attributes[i].value)) {
               return false;

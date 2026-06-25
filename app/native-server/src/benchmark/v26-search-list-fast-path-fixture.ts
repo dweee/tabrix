@@ -1,7 +1,7 @@
 import type { BenchmarkRunInputV26, BenchmarkToolCallRecordV26 } from './v26-benchmark';
 
-export const V26_GATE_A_GITHUB_SEARCH_SCENARIO_ID = 'V26-GATE-A-GITHUB-SEARCH-01';
-export const V26_GATE_A_NPMJS_SEARCH_SCENARIO_ID = 'V26-GATE-A-NPMJS-SEARCH-01';
+export const V26_GATE_A_STRUCTURED_SEARCH_SCENARIO_ID = 'V26-GATE-A-STRUCTURED-SEARCH-01';
+export const V26_GATE_A_PACKAGE_SEARCH_SCENARIO_ID = 'V26-GATE-A-PACKAGE-SEARCH-01';
 
 function apiRowsCall(
   seq: number,
@@ -57,14 +57,23 @@ export function v26SearchListFastPathFixture(): BenchmarkRunInputV26 {
     runEndedAt: '2026-04-24T00:00:05.000Z',
     buildSha: 'fixture',
     evidenceKind: 'fixture',
-    kpiScenarioIds: [V26_GATE_A_GITHUB_SEARCH_SCENARIO_ID, V26_GATE_A_NPMJS_SEARCH_SCENARIO_ID],
+    kpiScenarioIds: [
+      V26_GATE_A_STRUCTURED_SEARCH_SCENARIO_ID,
+      V26_GATE_A_PACKAGE_SEARCH_SCENARIO_ID,
+    ],
     toolCalls: [
-      apiRowsCall(0, V26_GATE_A_GITHUB_SEARCH_SCENARIO_ID, 'github_search_repositories', 140, 1400),
-      apiRowsCall(1, V26_GATE_A_NPMJS_SEARCH_SCENARIO_ID, 'npmjs_search_packages', 120, 1200),
+      apiRowsCall(
+        0,
+        V26_GATE_A_STRUCTURED_SEARCH_SCENARIO_ID,
+        'observed_search_results',
+        140,
+        1400,
+      ),
+      apiRowsCall(1, V26_GATE_A_PACKAGE_SEARCH_SCENARIO_ID, 'observed_package_search', 120, 1200),
     ],
     scenarios: [
-      { scenarioId: V26_GATE_A_GITHUB_SEARCH_SCENARIO_ID, completed: true },
-      { scenarioId: V26_GATE_A_NPMJS_SEARCH_SCENARIO_ID, completed: true },
+      { scenarioId: V26_GATE_A_STRUCTURED_SEARCH_SCENARIO_ID, completed: true },
+      { scenarioId: V26_GATE_A_PACKAGE_SEARCH_SCENARIO_ID, completed: true },
     ],
     pairs: [],
     // V26-FIX-08 — latency budgets for the Gate A search/list scenarios.
@@ -72,8 +81,8 @@ export function v26SearchListFastPathFixture(): BenchmarkRunInputV26 {
     // generous ceiling that keeps the fixture's `latencyGateStatus` at
     // `'pass'` while still exercising the budget code path.
     latencyBudgetsMs: {
-      [V26_GATE_A_GITHUB_SEARCH_SCENARIO_ID]: 200,
-      [V26_GATE_A_NPMJS_SEARCH_SCENARIO_ID]: 200,
+      [V26_GATE_A_STRUCTURED_SEARCH_SCENARIO_ID]: 200,
+      [V26_GATE_A_PACKAGE_SEARCH_SCENARIO_ID]: 200,
     },
     tabHygiene: {
       primaryTabId: 101,

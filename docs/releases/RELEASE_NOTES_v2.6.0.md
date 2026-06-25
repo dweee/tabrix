@@ -10,7 +10,7 @@ Knowledge lookup, a Knowledge-driven on-demand reader, a Policy-aware
 data-source router, and explicit `endpointSource` lineage
 (`observed` / `seed_adapter` / `manual_seed` / `unknown`).
 
-GitHub and npmjs seed adapters remain part of the v2.6 transition and
+Historical seed adapters remain part of the v2.6 transition and
 validation path. Their hits are reported as `seed_adapter` evidence
 instead of being presented as generic observed endpoints. Broader
 observed-endpoint reuse across arbitrary site families remains a v2.7

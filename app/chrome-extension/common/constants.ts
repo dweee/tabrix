@@ -82,49 +82,31 @@ export const FILE_TYPES = {
 
 // Network Filtering
 export const NETWORK_FILTERS = {
-  // Substring match against full URL (not just hostname) to support patterns like 'facebook.com/tr'
+  // Substring match against full URL (not just hostname). Keep this list
+  // vendor-neutral: it filters common ad/analytics noise, not product sites.
   EXCLUDED_DOMAINS: [
-    // Google
-    'google-analytics.com',
-    'googletagmanager.com',
-    'analytics.google.com',
-    'doubleclick.net',
-    'googlesyndication.com',
-    'googleads.g.doubleclick.net',
-    'stats.g.doubleclick.net',
-    'adservice.google.com',
-    'pagead2.googlesyndication.com',
-    // Amazon
-    'amazon-adsystem.com',
-    // Microsoft
-    'bat.bing.com',
-    'clarity.ms',
-    // Facebook
-    'connect.facebook.net',
-    'facebook.com/tr',
-    // Twitter
-    'analytics.twitter.com',
-    'ads-twitter.com',
-    // Other ad networks
-    'ads.yahoo.com',
-    'adroll.com',
-    'adnxs.com',
-    'criteo.com',
-    'quantserve.com',
-    'scorecardresearch.com',
-    // Analytics & session recording
-    'segment.io',
-    'amplitude.com',
-    'mixpanel.com',
-    'optimizely.com',
-    'static.hotjar.com',
-    'script.hotjar.com',
-    'crazyegg.com',
-    'clicktale.net',
-    'mouseflow.com',
-    'fullstory.com',
-    // LinkedIn (tracking pixels)
-    'linkedin.com/px',
+    'analytics.',
+    '.analytics.',
+    'tagmanager.',
+    'doubleclick.',
+    'adservice.',
+    'adsystem.',
+    '/ads/',
+    '/ad/',
+    '/pixel',
+    '/collect',
+    '/beacon',
+    '/telemetry',
+    '/metrics',
+    '/stats',
+    '/tracking',
+    'sentry.',
+    'amplitude.',
+    'mixpanel.',
+    'hotjar.',
+    'fullstory.',
+    'datadog.',
+    'newrelic.',
   ],
   // Static resource extensions (used when includeStatic=false)
   STATIC_RESOURCE_EXTENSIONS: [

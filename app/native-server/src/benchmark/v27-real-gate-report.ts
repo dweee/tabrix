@@ -38,9 +38,9 @@ export interface V27PublicSafeGateReportInput {
 export type V27RowsPassStatus = 'PASS' | 'FAIL' | 'BLOCKED' | 'not_run';
 
 export interface V27RealPlatformGateEvidenceInput {
-  xhsSearchTop10RowsPass: V27RowsPassStatus;
-  githubSearchRowsPass: V27RowsPassStatus;
-  douyinSearchRowsPass: V27RowsPassStatus;
+  contentSearchTop10RowsPass: V27RowsPassStatus;
+  structuredSearchRowsPass: V27RowsPassStatus;
+  mediaSearchRowsPass: V27RowsPassStatus;
   domRegionRowsUsedCount: number;
   apiRowsUsedCount: number;
   failureReasonDistribution: Record<string, number>;
@@ -167,9 +167,9 @@ function normalizeRealPlatformGate(
 ): V27RealPlatformGateEvidence {
   const result: V27RealPlatformGateEvidence = {
     scope: 'public_safe_real_platform_gate',
-    xhsSearchTop10RowsPass: normalizeRowsPass(input.xhsSearchTop10RowsPass),
-    githubSearchRowsPass: normalizeRowsPass(input.githubSearchRowsPass),
-    douyinSearchRowsPass: normalizeRowsPass(input.douyinSearchRowsPass),
+    contentSearchTop10RowsPass: normalizeRowsPass(input.contentSearchTop10RowsPass),
+    structuredSearchRowsPass: normalizeRowsPass(input.structuredSearchRowsPass),
+    mediaSearchRowsPass: normalizeRowsPass(input.mediaSearchRowsPass),
     domRegionRowsUsedCount: nonNegativeInteger(input.domRegionRowsUsedCount),
     apiRowsUsedCount: nonNegativeInteger(input.apiRowsUsedCount),
     failureReasonDistribution: normalizeDistribution(input.failureReasonDistribution),

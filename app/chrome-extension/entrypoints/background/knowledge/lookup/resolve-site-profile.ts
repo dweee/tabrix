@@ -7,7 +7,7 @@ import { getCompiledKnowledgeRegistry } from '../registry/knowledge-registry';
  *
  * Matching semantics:
  * 1. If any `match.hosts` entry is a substring of the URL's host, the
- *    site wins (used for the stable `github.com` / `douyin.com` cases).
+ *    site wins.
  * 2. Else if any `match.urlPatterns` RegExp matches the full URL, the
  *    site wins.
  *

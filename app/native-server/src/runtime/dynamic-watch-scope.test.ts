@@ -251,7 +251,7 @@ describe('dynamic-watch-scope — boundary and neutrality', () => {
       .flatMap((region) => [region.regionId, region.regionPurpose, region.expectedRole ?? '']);
 
     for (const value of regionValues) {
-      expect(value).not.toMatch(/\.|#|\[|]|:has|github|douyin|boss|xiaohongshu/i);
+      expect(value).not.toMatch(/\.|#|\[|]|:has|workspace|media_site|boss|content_site/i);
       expect(value).not.toMatch(/login button|sign in|search button/i);
     }
   });

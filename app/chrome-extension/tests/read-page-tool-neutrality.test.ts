@@ -15,7 +15,7 @@ describe('read_page tool neutrality', () => {
   const readPageToolSource = readFileSync(readPageToolPath, 'utf8');
 
   it('keeps QR visual scoring free of platform-specific brand vocabulary', () => {
-    const forbiddenPlatformTerms = ['小红书', '微信', 'apple', 'google'];
+    const forbiddenPlatformTerms = ['内容站', 'specific_social_brand', 'specific_search_brand'];
 
     for (const forbidden of forbiddenPlatformTerms) {
       expect(readPageToolSource).not.toContain(forbidden);

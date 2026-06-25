@@ -320,7 +320,7 @@ describe('MkeExperienceProjector', () => {
           status: 'login_required',
           observedResultCount: 10,
           page: {
-            url: 'https://www.xiaohongshu.com/website-login/captcha',
+            url: 'https://content.example/website-login/captcha',
             title: '安全验证',
           },
         },
@@ -335,8 +335,8 @@ describe('MkeExperienceProjector', () => {
         summary: 'AI incorrectly claimed the blocked verification page produced valid results.',
       }),
       tabId: 9,
-      siteFamily: 'www.xiaohongshu.com',
-      pageUrlPattern: 'https://www.xiaohongshu.com/website-login/captcha',
+      siteFamily: 'content.example',
+      pageUrlPattern: 'https://content.example/website-login/captcha',
       pageRole: 'search_results',
       pageState: 'restricted',
       createdAt: '2026-06-06T03:15:02.000Z',
@@ -344,10 +344,10 @@ describe('MkeExperienceProjector', () => {
     const pageModelKey = buildMkePageModelKey(blockedTrace)!;
     addKnowledge({
       knowledge,
-      siteFamily: 'www.xiaohongshu.com',
+      siteFamily: 'content.example',
       pageModelKey,
       pageRole: 'search_results',
-      pageUrlPattern: 'https://www.xiaohongshu.com/website-login/captcha',
+      pageUrlPattern: 'https://content.example/website-login/captcha',
     });
 
     const result = projector.projectIdleBatch({ nowIso: '2026-06-06T03:15:03.000Z' });

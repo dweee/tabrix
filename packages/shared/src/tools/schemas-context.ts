@@ -29,13 +29,13 @@ export const CONTEXT_SCHEMAS: Tool[] = [
         pageRole: {
           type: 'string',
           description:
-            'Optional `pageRole` filter (e.g. `repo_home`, `issues_list`). Used to narrow the local context selection.',
+            'Optional `pageRole` filter (e.g. `search_results`, `content_detail`). Used to narrow the local context selection.',
           maxLength: 128,
         },
         siteId: {
           type: 'string',
           description:
-            'Optional explicit site-family token. Must match the shared safe-token contract (lowercase letters/digits plus dot, underscore, or hyphen). `"github"` remains the GA-compatible seed value; unsupported sites resolve through safe fallback paths.',
+            'Optional explicit site-family token. Must match the shared safe-token contract (lowercase letters/digits plus dot, underscore, or hyphen). Unsupported sites resolve through safe fallback paths.',
           maxLength: MAX_TABRIX_SITE_ID_CHARS,
           pattern: TABRIX_SITE_ID_PATTERN.source,
         },

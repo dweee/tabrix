@@ -10,7 +10,7 @@ tabrix doctor
 tabrix doctor --fix
 ```
 
-To share context on a GitHub issue:
+To share context on a support issue:
 
 ```bash
 tabrix report --copy        # copy a Markdown report to the clipboard
@@ -285,15 +285,15 @@ Most failures on macOS and Linux fall into one of three buckets:
 
 ---
 
-## 5. Browser-first GitHub triage
+## 5. Browser-first page triage
 
-For visible GitHub failures (Actions, PRs, Issues), prefer a browser-first path before script-only diagnosis.
+For visible page failures, prefer a browser-first path before script-only diagnosis.
 
 ```bash
 tabrix status
 tabrix doctor --fix
 tabrix mcp tools
-tabrix mcp call chrome_navigate --arg url="https://github.com/<owner>/<repo>/actions"
+tabrix mcp call chrome_navigate --arg url="<target-url>"
 tabrix mcp call chrome_read_page --arg filter=interactive --arg depth=2
 ```
 

@@ -7,7 +7,7 @@ import type { PageRole } from '../tools/browser/read-page-understanding-core';
  * Design rationale: `docs/KNOWLEDGE_STAGE_1.md`.
  *
  * Stage 1 intentionally stays **schema-narrow**: only the shapes needed to
- * move GitHub understanding-layer rules (Site Profile, Page Catalog,
+ * move authored understanding-layer rules (Site Profile, Page Catalog,
  * Primary Region anchors) from TS expressions into data. HVO classifiers,
  * object priors, UI map, data hints, multi-locale lexicons and tenant
  * scope all stay TS-side until Stage 2+.
@@ -46,9 +46,8 @@ export interface KnowledgePrimaryRegionRule {
 /**
  * Dual-outcome override: after primary-region resolution, the resolved
  * `region` value may itself map to a different `pageRole`. Mirrors the
- * current TS branch in `read-page-understanding-github.ts:132-142` where
- * `workflow_run_summary` region promotes the role from `workflow_run_shell`
- * to `workflow_run_detail`.
+ * a region-specific shell can promote a broad page role into a more precise
+ * detail role.
  */
 export interface KnowledgeDualOutcome {
   /** Map from resolved `region` → overriding `pageRole`. */
@@ -83,7 +82,7 @@ export interface KnowledgePageRoleRule {
  * Replaces the per-site `classify(candidate, context)` branches in
  * `read-page-high-value-objects-<site>.ts`. A single rule can match on
  * any of `hrefPatterns` (T5.4.5-style URL → `objectSubType` mapping),
- * `labelPatterns` (legacy `GITHUB_CLASSIFICATION` table), or `ariaRoles`.
+ * `labelPatterns`, or `ariaRoles`.
  * Rules are applied in authoring order — declaration wins, no numeric
  * priority — so URL rules authored before label rules preserve the
  * URL-first dispatch semantics.
@@ -95,8 +94,7 @@ export interface KnowledgeObjectClassifier {
   readonly match: {
     /**
      * Each pattern is matched against the normalized href path
-     * (e.g. `/actions/runs/123`, `#readme`). Cross-repo hosts on
-     * github.com are normalized relative to the repo in `currentUrl`.
+     * (for example `/items/123`, `/detail/abc`, or `#main`).
      */
     readonly hrefPatterns?: readonly KnowledgePatternSource[];
     readonly labelPatterns?: readonly KnowledgePatternSource[];
@@ -117,7 +115,7 @@ export interface KnowledgeObjectClassifier {
  * `docs/MKEP_CURRENT_VS_TARGET.md §3.4`.
  *
  * A UI Map rule says: on `(siteId, pageRole)`, the element with semantic
- * `purpose` (e.g. `repo_home.open_issues_tab`, `issues_list.new_issue_cta`)
+ * `purpose` (e.g. `search_results.open_result`, `content_detail.open_author`)
  * can be located via one of the `locatorHints`. Hint order is declaration
  * order, not score order — the runtime locator chain in
  * `candidate-action.ts` still decides which kind wins when both fire
@@ -160,7 +158,7 @@ export interface KnowledgeUIMapRule {
   readonly pageRole: PageRole;
   /**
    * Stable semantic key. Convention: `<pageRole>.<element_purpose>`, all
-   * lowercase snake_case (e.g. `repo_home.open_issues_tab`). Paired with
+   * lowercase snake_case (e.g. `search_results.open_result`). Paired with
    * `siteId + pageRole` it must be unique — see `KNOWLEDGE_STAGE_2.md`
    * §"purpose naming" for the rule, and the registry loader enforces
    * uniqueness at compile time.

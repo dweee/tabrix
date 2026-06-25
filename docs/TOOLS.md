@@ -788,7 +788,7 @@ Search browsing history with flexible time strings.
 
 ```json
 {
-  "text": "github",
+  "text": "documentation",
   "startTime": "2024-01-01",
   "maxResults": 50
 }

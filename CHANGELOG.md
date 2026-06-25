@@ -125,50 +125,39 @@ file`. Root cause: `pnpm install --ignore-scripts` **overrides**
 ### Added
 
 - **MKEP Knowledge Registry — Stage 2 (HVO classifier)** — second
-  data-ification pass. The GitHub object-layer rules that used to live
-  as hardcoded branches in
-  `read-page-high-value-objects-github.ts:classify` — T5.4.5's URL →
-  `objectSubType` classifier (7 branches) plus the `GITHUB_CLASSIFICATION`
-  label table (27 rows) — now ship as typed seed data in
-  `app/chrome-extension/entrypoints/background/knowledge/seeds/github.ts`
-  under the new `KnowledgeObjectClassifier` schema. A new
+  data-ification pass. Historical single-family object-layer rules that used
+  to live as hardcoded branches now ship as typed seed data under the new
+  `KnowledgeObjectClassifier` schema. A new
   `lookup/resolve-object-classification.ts` applies the rules in
   declaration order (URL rules first so URL-first dispatch is
-  preserved), with optional `pageRole` scoping. `githubObjectLayerAdapter.classify`
-  becomes **registry-first, legacy-fallback** and reuses the Stage 1
+  preserved), with optional `pageRole` scoping. The object-layer adapter becomes
+  **registry-first, legacy-fallback** and reuses the Stage 1
   `KNOWLEDGE_REGISTRY_MODE` flag (`on` / `off` / `diff`); production
   default stays `on`, the ARIA-role fallback continues to run TS-side.
-  Scoring (`scorePrior`, `GITHUB_NOISE_PATTERNS`, `GITHUB_PREFERRED_LABELS`)
-  and `collectExtraCandidates` / `GITHUB_PAGE_ROLE_TASK_SEEDS` are
-  explicitly out of scope for Stage 2 and remain TS — see Stage 3.
+  Scoring and extra-candidate collection were explicitly out of scope for Stage
+  2 and remained TS-side — see Stage 3.
   Added a bit-exact HVO parity suite
-  (`read-page-high-value-objects-github.parity.test.ts`, 15 fixtures
-  covering every URL rule, one label rule per pageRole, ARIA-fallback,
-  and negatives) plus lookup unit tests
-  (`knowledge-object-classification.test.ts`, 15 tests) and 5 new
+  (15 fixtures covering URL rules, label rules per pageRole, ARIA-fallback,
+  and negatives) plus lookup unit tests (15 tests) and 5 new
   Stage 2 assertions in `knowledge-registry.test.ts`. Full extension
   suite goes from 843 → 878 tests, all green. Design document lives
   in maintainer-private Knowledge planning materials.
 
 - **MKEP Knowledge Registry — Stage 1** — first data-ification pass of
-  the Knowledge layer. The GitHub understanding-layer rules (Site
-  Profile, Page Catalog, Primary Region anchors) that used to live as
-  TS expressions in `read-page-understanding-github.ts` now also ship
-  as typed seed data under
+  the Knowledge layer. Historical single-family understanding rules (Site
+  Profile, Page Catalog, Primary Region anchors) that used to live as TS
+  expressions now also ship as typed seed data under
   `app/chrome-extension/entrypoints/background/knowledge/`
-  (`types.ts` / `registry/` / `seeds/github.ts` / `lookup/`).
+  (`types.ts` / `registry/` / seed data / `lookup/`).
   `inferPageUnderstanding` becomes **registry-first, legacy-fallback
   -second**, gated by a `KNOWLEDGE_REGISTRY_MODE` internal constant
   (`on` / `off` / `diff`) so a regression can be rolled back by
   editing a single line. Per user instruction, Stage 1 carries **no
   tenancy dimension**: seeds are single-user local data. Scope is
-  deliberately narrow — HVO classifier, object priors, and Douyin
-  seeds all stay TS-side for Stage 2. A new parity suite
-  (`read-page-understanding.parity.test.ts`) asserts bit-exact
-  equivalence between the registry path and
-  `githubPageFamilyAdapter` for 10 GitHub fixtures; combined with
-  the existing `read-page-understanding.test.ts` / `read-page-mode.test.ts`
-  / `read-page-high-value-objects-github.test.ts` suites this keeps
+  deliberately narrow: HVO classifier, object priors, and additional
+  site-family seeds all stayed TS-side for Stage 2. A new parity suite
+  asserted bit-exact equivalence between registry and legacy paths; combined
+  with the existing read-page suites this keeps
   the `read_page` contract stable through the migration. See
   maintainer-private Knowledge planning materials for the full design.
 - **MKEP Memory Phase 0.3** — DOM action history. Every

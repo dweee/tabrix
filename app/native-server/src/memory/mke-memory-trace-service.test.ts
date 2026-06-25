@@ -393,18 +393,18 @@ describe('MkeMemoryTraceService', () => {
 
     try {
       const trace = traceService.recordToolCall({
-        taskId: 'trace-xhs-verification-task',
-        taskIntent: 'read blocked Xiaohongshu search page',
+        taskId: 'trace-content-verification-task',
+        taskIntent: 'read blocked ContentSite search page',
         aiClient: 'jest',
         toolName: 'chrome_read_page',
-        stepId: 'trace-xhs-verification-step',
+        stepId: 'trace-content-verification-step',
         sequenceIndex: 1,
         requestParams: { tabId: 7 },
         requestAtMs: NOW_MS,
         responseAtMs: NOW_MS + 40,
         result: textResult({
           page: {
-            url: 'https://www.xiaohongshu.com/website-login/captcha?redirectPath=https%3A%2F%2Fwww.xiaohongshu.com%2Fsearch_result%2F%3Fkeyword%3DAI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
+            url: 'https://content.example/website-login/captcha?redirectPath=https%3A%2F%2Fcontent.example%2Fsearch_result%2F%3Fkeyword%3DAI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
           },
           summary: { pageRole: 'unknown', quality: 'sparse' },
           authArtifactStatus: { status: 'blocked', reasonCode: 'user_verification_required' },
@@ -416,7 +416,7 @@ describe('MkeMemoryTraceService', () => {
       });
 
       expect(trace.pageState).toBe('restricted');
-      expect(trace.pageUrlPattern).toBe('https://www.xiaohongshu.com/website-login/captcha');
+      expect(trace.pageUrlPattern).toBe('https://content.example/website-login/captcha');
 
       await traceService.flushAsyncWrites();
       const objects = browserObjectRepo.listRecent({ limit: 10, offset: 0 });
@@ -1111,7 +1111,7 @@ describe('MkeMemoryTraceService', () => {
     try {
       traceService.recordToolCall({
         taskId: 'trace-filter-preserve-task',
-        taskIntent: 'collect filtered xhs cards',
+        taskIntent: 'collect filtered content cards',
         aiClient: 'jest',
         toolName: 'chrome_collect_result_cards',
         stepId: 'trace-filter-preserve-step-1',
@@ -1123,8 +1123,8 @@ describe('MkeMemoryTraceService', () => {
           success: true,
           kind: 'result_card_collection',
           page: {
-            title: 'AI图片创作 - 小红书',
-            url: 'https://www.xiaohongshu.com/search_result?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
+            title: 'AI图片创作 - 内容站',
+            url: 'https://content.example/search_result?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
           },
           pageRole: 'search_results',
           pageState: 'complete',
@@ -1146,14 +1146,14 @@ describe('MkeMemoryTraceService', () => {
           cards: [
             {
               rank: 1,
-              title: '小红书图文结果',
-              url: 'https://www.xiaohongshu.com/explore/abc',
+              title: '内容站图文结果',
+              url: 'https://content.example/explore/abc',
               imageCount: 1,
               confidence: 0.8,
             },
           ],
         }),
-        resultSummary: 'collected xhs result cards',
+        resultSummary: 'collected content result cards',
       });
 
       await traceService.flushAsyncWrites();
@@ -1170,13 +1170,13 @@ describe('MkeMemoryTraceService', () => {
         responseAtMs: NOW_MS + 420,
         result: textResult({
           page: {
-            title: 'AI图片创作 - 小红书',
-            url: 'https://www.xiaohongshu.com/search_result?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
+            title: 'AI图片创作 - 内容站',
+            url: 'https://content.example/search_result?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
           },
           summary: { pageRole: 'search_results', quality: 'fresh' },
           pageProjection: {
             pageRole: 'search_results',
-            pageModelKey: 'page:www.xiaohongshu.com:search_results',
+            pageModelKey: 'page:content.example:search_results',
             chosenDataSource: 'markdown',
             tabId: 29,
           },
@@ -1581,7 +1581,7 @@ describe('MkeMemoryTraceService', () => {
                 label: 'Search',
                 role: 'textbox',
                 targetRef: 'ref_search_box',
-                targetability: true,
+                targetability: 'locator_chain',
                 actionTypes: ['input'],
                 sourceProvenance: ['ax'],
                 freshness: 'fresh',
@@ -1593,7 +1593,7 @@ describe('MkeMemoryTraceService', () => {
                 label: 'Snapshot result card',
                 role: 'card',
                 targetRef: 'ref_result_card_1',
-                targetability: true,
+                targetability: 'target_ref',
                 actionTypes: ['open_detail'],
                 sourceProvenance: ['dom', 'visible_text'],
                 freshness: 'fresh',
@@ -1612,9 +1612,17 @@ describe('MkeMemoryTraceService', () => {
                 targetId: 'ca_open_snapshot_result_1',
                 targetRef: 'ref_result_card_1',
                 actionType: 'click',
-                actionability: true,
+                actionability: 'actionable',
                 intent: 'content.open_detail',
                 matchReason: 'snapshot detail target',
+              },
+              {
+                targetId: 'ca_disabled_snapshot_item',
+                targetRef: 'ref_disabled_item',
+                actionType: 'click',
+                actionability: 'not_clickable',
+                intent: 'content.open_detail',
+                matchReason: 'snapshot item is visible but not clickable',
               },
             ],
           },
@@ -1631,7 +1639,16 @@ describe('MkeMemoryTraceService', () => {
       );
       const searchBox = objects.find((object) => object.objectType === 'search_area');
       const resultCard = objects.find((object) => object.objectType === 'result_card');
-      const actionTarget = objects.find((object) => object.objectType === 'action_target');
+      const actionTarget = objects.find(
+        (object) =>
+          object.objectType === 'action_target' &&
+          object.targetability?.targetRef === 'ref_result_card_1',
+      );
+      const disabledActionTarget = objects.find(
+        (object) =>
+          object.objectType === 'action_target' &&
+          object.targetability?.targetRef === 'ref_disabled_item',
+      );
 
       expect(page).toMatchObject({
         pageModelKey: 'page:example.test:search_results',
@@ -1653,12 +1670,13 @@ describe('MkeMemoryTraceService', () => {
       expect(syntheticRegion?.facts).toMatchObject({
         regionType: 'page_objects',
         layoutHint: 'snapshot',
-        candidateActionCount: 1,
+        candidateActionCount: 2,
       });
       expect(searchBox).toMatchObject({
         parentObjectId: page?.browserObjectId,
         actionTypes: ['input'],
         sourceFreshness: 'fresh',
+        canTabrixOperate: true,
       });
       expect(searchBox?.facts).toMatchObject({
         regionId: 'page-object-snapshot',
@@ -1672,12 +1690,17 @@ describe('MkeMemoryTraceService', () => {
           toolName: 'chrome_click_element',
         },
       });
+      expect(resultCard?.canTabrixOperate).toBe(true);
       expect(actionTarget).toMatchObject({
         objectType: 'action_target',
         canTabrixOperate: true,
       });
       expect(actionTarget?.targetability).toMatchObject({
         targetRef: 'ref_result_card_1',
+      });
+      expect(disabledActionTarget).toMatchObject({
+        objectType: 'action_target',
+        canTabrixOperate: false,
       });
     } finally {
       traceService.discardPendingAsyncWrites();
@@ -1763,7 +1786,216 @@ describe('MkeMemoryTraceService', () => {
     }
   });
 
-  it('projects Xiaohongshu Top 10 result cards as stable clickable Browser Objects', async () => {
+  it('keeps action-target identity stable when targetRef drifts but semantic locator stays stable', async () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const browserObjectRepo = new BrowserObjectRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo, browserObjectRepo);
+
+    try {
+      for (const [index, targetRef] of ['ref_search_input_a', 'ref_search_input_b'].entries()) {
+        traceService.recordToolCall({
+          taskId: 'stable-action-target-task',
+          taskIntent: 'read search input target across refreshed snapshots',
+          aiClient: 'jest',
+          toolName: 'chrome_read_page',
+          stepId: `stable-action-target-step-${index + 1}`,
+          sequenceIndex: index + 1,
+          requestParams: { tabId: 707 },
+          requestAtMs: NOW_MS + index * 1000,
+          responseAtMs: NOW_MS + index * 1000 + 90,
+          result: textResult({
+            page: {
+              title: 'Search page',
+              url: 'https://example.test/search?keyword=ai',
+            },
+            summary: { pageRole: 'search_results', quality: 'fresh' },
+            pageProjection: {
+              pageRole: 'search_results',
+              pageModelKey: 'page:example.test:search_results',
+              chosenDataSource: 'dom',
+              tabId: 707,
+            },
+            sourceRoute: 'dom_snapshot',
+            selectedDataSource: 'dom',
+            freshness: 'fresh',
+            tabId: 707,
+            candidateActions: [
+              {
+                targetId: `ca_search_${index + 1}`,
+                targetRef,
+                actionType: 'input',
+                label: 'Search',
+                actionability: true,
+                intent: 'search.enter_query',
+                matchReason: 'visible_search_input',
+                locatorChain: [
+                  { type: 'ref', value: targetRef },
+                  { type: 'css', value: 'input[aria-label="Search"]' },
+                ],
+              },
+            ],
+          }),
+          resultSummary: 'read search target with drifting ref',
+        });
+      }
+
+      await traceService.flushAsyncWrites();
+
+      const actionTargets = browserObjectRepo
+        .listRecent({ limit: 20, offset: 0 })
+        .filter((object) => object.objectType === 'action_target');
+
+      expect(actionTargets).toHaveLength(1);
+      expect(actionTargets[0]).toMatchObject({
+        objectType: 'action_target',
+        observationCount: 2,
+        objectFingerprint:
+          'action_target:page:example.test:search_results:https://example.test/search:input:search.enter_query:Search:visible_search_input:css=input[aria-label="Search"]',
+      });
+      expect(actionTargets[0]?.targetability).toMatchObject({
+        targetRef: 'ref_search_input_b',
+        identityKey:
+          'input:search.enter_query:Search:visible_search_input:css=input[aria-label="Search"]',
+      });
+      expect(actionTargets[0]?.facts).toMatchObject({
+        intent: 'search.enter_query',
+        label: 'Search',
+        stableLocatorChain: ['css=input[aria-label="Search"]'],
+      });
+      expect(actionTargets[0]?.sourceTraceIds).toHaveLength(2);
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('does not use pure region-object index as reusable identity when objectId is missing', async () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const browserObjectRepo = new BrowserObjectRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo, browserObjectRepo);
+
+    try {
+      const recordReadPage = (input: {
+        suffix: string;
+        sequenceIndex: number;
+        objects: Array<Record<string, unknown>>;
+      }) => {
+        traceService.recordToolCall({
+          taskId: 'region-object-identity-task',
+          taskIntent: 'read filter panel objects across layout changes',
+          aiClient: 'jest',
+          toolName: 'chrome_read_page',
+          stepId: `region-object-identity-step-${input.suffix}`,
+          sequenceIndex: input.sequenceIndex,
+          requestParams: { tabId: 808 },
+          requestAtMs: NOW_MS + input.sequenceIndex * 1000,
+          responseAtMs: NOW_MS + input.sequenceIndex * 1000 + 100,
+          result: textResult({
+            page: {
+              title: 'Search filters',
+              url: 'https://example.test/search?keyword=ai',
+            },
+            summary: { pageRole: 'search_results', quality: 'fresh' },
+            pageProjection: {
+              pageRole: 'search_results',
+              pageModelKey: 'page:example.test:search_results',
+              chosenDataSource: 'dom',
+              tabId: 808,
+            },
+            sourceRoute: 'dom_snapshot',
+            selectedDataSource: 'dom',
+            freshness: 'fresh',
+            tabId: 808,
+            pageRegions: [
+              {
+                regionId: 'filters',
+                regionType: 'filters',
+                layoutHint: 'filter_panel',
+                state: 'observed',
+                readiness: 'ready',
+                targetability: true,
+                objects: input.objects,
+              },
+            ],
+          }),
+          resultSummary: 'read filter panel objects without object ids',
+        });
+      };
+
+      const applyFilterButton = (targetRef: string) => ({
+        objectType: 'button',
+        role: 'button',
+        label: 'Apply filters',
+        targetRef,
+        targetability: true,
+        actionTypes: ['click'],
+        sourceProvenance: ['dom', 'ax'],
+        detailTarget: {
+          targetRef,
+          locatorChain: [
+            { type: 'ref', value: targetRef },
+            { type: 'css', value: 'button[data-filter-apply]' },
+          ],
+        },
+      });
+
+      recordReadPage({
+        suffix: 'first',
+        sequenceIndex: 1,
+        objects: [applyFilterButton('ref_apply_a')],
+      });
+      recordReadPage({
+        suffix: 'second',
+        sequenceIndex: 2,
+        objects: [
+          {
+            objectType: 'button',
+            role: 'button',
+            label: 'Reset filters',
+            targetRef: 'ref_reset',
+            targetability: true,
+            actionTypes: ['click'],
+            detailTarget: {
+              targetRef: 'ref_reset',
+              locatorChain: [
+                { type: 'ref', value: 'ref_reset' },
+                { type: 'css', value: 'button[data-filter-reset]' },
+              ],
+            },
+          },
+          applyFilterButton('ref_apply_b'),
+        ],
+      });
+
+      await traceService.flushAsyncWrites();
+
+      const buttons = browserObjectRepo
+        .listRecent({ limit: 20, offset: 0 })
+        .filter((object) => object.objectType === 'button');
+      const applyButton = buttons.find((object) => object.facts?.label === 'Apply filters');
+      const resetButton = buttons.find((object) => object.facts?.label === 'Reset filters');
+
+      expect(buttons).toHaveLength(2);
+      expect(applyButton).toMatchObject({
+        observationCount: 2,
+        objectFingerprint:
+          'region_object:page:example.test:search_results:https://example.test/search:filters:filters:button:button:Apply filters:css=button[data-filter-apply]',
+      });
+      expect(applyButton?.targetability).toMatchObject({
+        targetRef: 'ref_apply_b',
+      });
+      expect(resetButton).toMatchObject({
+        observationCount: 1,
+      });
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('projects ContentSite Top 10 result cards as stable clickable Browser Objects', async () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const traceRepo = new MemoryTraceRepository(db);
     const browserObjectRepo = new BrowserObjectRepository(db);
@@ -1774,25 +2006,25 @@ describe('MkeMemoryTraceService', () => {
         const rank = index + 1;
         const targetRef = `ref_result_card_${rank}`;
         const candidateActionId = `ca_click_${targetRef}`;
-        const noteId = `xhs-note-${rank}`;
+        const noteId = `content-note-${rank}`;
         return {
           rank,
           title: `AI图片创作图文 ${rank}`,
-          url: `https://www.xiaohongshu.com/explore/${noteId}?xsec_token=private-${rank}`,
+          url: `https://content.example/explore/${noteId}?xsec_token=private-${rank}`,
           targetRef,
           candidateActionId,
           targetabilityStatus: 'stable_click_target',
           actionTarget: {
             actionType: 'click',
             targetKind: 'result_card_link',
-            url: `https://www.xiaohongshu.com/explore/${noteId}?xsec_token=private-${rank}`,
+            url: `https://content.example/explore/${noteId}?xsec_token=private-${rank}`,
             selector: `section.note-list article:nth-of-type(${rank}) a[href]`,
             text: `AI图片创作图文 ${rank}`,
             executionScope: 'same_tab_fresh_snapshot',
             openAction: {
               toolName: 'chrome_navigate',
               toolArgs: {
-                url: `https://www.xiaohongshu.com/explore/${noteId}?xsec_token=private-${rank}`,
+                url: `https://content.example/explore/${noteId}?xsec_token=private-${rank}`,
               },
               executionScope: 'session_url',
               reason: 'result_card_href',
@@ -1851,7 +2083,7 @@ describe('MkeMemoryTraceService', () => {
           state: 'observed',
           readiness: 'ready',
           targetability: true,
-          candidateActionIds: ['ca_fill_ref_search_input_xhs'],
+          candidateActionIds: ['ca_fill_ref_search_input_content'],
         },
         {
           regionId: 'search_filters',
@@ -1874,15 +2106,15 @@ describe('MkeMemoryTraceService', () => {
       ];
       const candidateActions = [
         {
-          id: 'ca_fill_ref_search_input_xhs',
+          id: 'ca_fill_ref_search_input_content',
           actionType: 'fill',
-          targetRef: 'ref_search_input_xhs',
+          targetRef: 'ref_search_input_content',
           label: '搜索输入框',
           intent: 'search.enter_query',
           matchReason: 'visible_search_input',
           actionability: true,
           locatorChain: [
-            { type: 'ref', value: 'ref_search_input_xhs' },
+            { type: 'ref', value: 'ref_search_input_content' },
             { type: 'css', value: 'input[type="search"]' },
           ],
         },
@@ -1890,11 +2122,11 @@ describe('MkeMemoryTraceService', () => {
       ];
 
       const top10Trace = traceService.recordToolCall({
-        taskId: 'trace-xhs-top10-task',
-        taskIntent: 'collect Xiaohongshu AI图片创作 most collected image-text cards from this week',
+        taskId: 'trace-content-top10-task',
+        taskIntent: 'collect ContentSite AI图片创作 most collected image-text cards from this week',
         aiClient: 'jest',
         toolName: 'chrome_collect_result_cards',
-        stepId: 'trace-xhs-top10-step',
+        stepId: 'trace-content-top10-step',
         sequenceIndex: 1,
         requestParams: { tabId: 66, minResults: 10, maxScrolls: 4, startFromTop: true },
         requestAtMs: NOW_MS,
@@ -1903,8 +2135,8 @@ describe('MkeMemoryTraceService', () => {
           success: true,
           kind: 'result_card_collection',
           page: {
-            title: 'AI图片创作 - 小红书',
-            url: 'https://www.xiaohongshu.com/search_result?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
+            title: 'AI图片创作 - 内容站',
+            url: 'https://content.example/search_result?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
           },
           pageRole: 'search_results',
           pageState: 'complete',
@@ -1935,7 +2167,7 @@ describe('MkeMemoryTraceService', () => {
           candidateActions,
           cards,
         }),
-        resultSummary: 'collected xhs top 10 stable result cards',
+        resultSummary: 'collected content top 10 stable result cards',
       });
 
       expect(top10Trace.perceptionObjects).toMatchObject({
@@ -1973,7 +2205,7 @@ describe('MkeMemoryTraceService', () => {
       const objects = browserObjectRepo.listRecent({ limit: 80, offset: 0 });
       const page = objects.find((object) => object.objectType === 'page');
       expect(page).toMatchObject({
-        siteFamily: 'www.xiaohongshu.com',
+        siteFamily: 'content.example',
         pageRole: 'search_results',
         selectedDataSource: 'visible_dom_result_cards',
         lifecycleState: 'complete',
@@ -2008,9 +2240,9 @@ describe('MkeMemoryTraceService', () => {
       const regions = objects.filter((object) => object.objectType === 'region');
       expect(regions.map((object) => object.objectFingerprint).sort()).toEqual(
         expect.arrayContaining([
-          'region:page:www.xiaohongshu.com:search_results:https://www.xiaohongshu.com/search_result:result_list',
-          'region:page:www.xiaohongshu.com:search_results:https://www.xiaohongshu.com/search_result:search_filters',
-          'region:page:www.xiaohongshu.com:search_results:https://www.xiaohongshu.com/search_result:search_input',
+          'region:page:content.example:search_results:https://content.example/search_result:result_list',
+          'region:page:content.example:search_results:https://content.example/search_result:search_filters',
+          'region:page:content.example:search_results:https://content.example/search_result:search_input',
         ]),
       );
       const actionTargets = objects.filter((object) => object.objectType === 'action_target');
@@ -2018,13 +2250,13 @@ describe('MkeMemoryTraceService', () => {
         expect.arrayContaining([
           expect.objectContaining({
             objectFingerprint:
-              'action_target:page:www.xiaohongshu.com:search_results:https://www.xiaohongshu.com/search_result:ref_search_input_xhs',
+              'action_target:page:content.example:search_results:https://content.example/search_result:fill:search.enter_query:搜索输入框:visible_search_input:css=input[type="search"]',
             canTabrixOperate: true,
             actionTypes: ['fill'],
           }),
           expect.objectContaining({
             objectFingerprint:
-              'action_target:page:www.xiaohongshu.com:search_results:https://www.xiaohongshu.com/search_result:ref_result_card_1',
+              'action_target:page:content.example:search_results:https://content.example/search_result:click:content.open_detail:AI图片创作图文 1:result_card_primary_link:css=section.note-list article:nth-of-type(1) a[href]',
             canTabrixOperate: true,
             actionTypes: ['click'],
           }),
@@ -2066,11 +2298,11 @@ describe('MkeMemoryTraceService', () => {
       }
 
       traceService.recordToolCall({
-        taskId: 'trace-xhs-top10-task-rerank',
-        taskIntent: 'collect Xiaohongshu AI图片创作 cards after result order changed',
+        taskId: 'trace-content-top10-task-rerank',
+        taskIntent: 'collect ContentSite AI图片创作 cards after result order changed',
         aiClient: 'jest',
         toolName: 'chrome_collect_result_cards',
-        stepId: 'trace-xhs-top10-step-rerank',
+        stepId: 'trace-content-top10-step-rerank',
         sequenceIndex: 2,
         requestParams: { tabId: 66, minResults: 10, maxScrolls: 4, startFromTop: true },
         requestAtMs: NOW_MS + 2000,
@@ -2079,8 +2311,8 @@ describe('MkeMemoryTraceService', () => {
           success: true,
           kind: 'result_card_collection',
           page: {
-            title: 'AI图片创作 - 小红书',
-            url: 'https://www.xiaohongshu.com/search_result?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
+            title: 'AI图片创作 - 内容站',
+            url: 'https://content.example/search_result?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
           },
           pageRole: 'search_results',
           pageState: 'complete',
@@ -2105,7 +2337,7 @@ describe('MkeMemoryTraceService', () => {
             .reverse()
             .map((card, index) => ({ ...card, rank: index + 1 })),
         }),
-        resultSummary: 'collected xhs top 10 stable result cards after rerank',
+        resultSummary: 'collected content top 10 stable result cards after rerank',
       });
       await traceService.flushAsyncWrites();
 
@@ -2123,6 +2355,124 @@ describe('MkeMemoryTraceService', () => {
           candidateActionId: 'ca_click_ref_result_card_1',
         },
       });
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('keeps result-card identity stable when rank and targetRef drift', async () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const browserObjectRepo = new BrowserObjectRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo, browserObjectRepo);
+
+    try {
+      const recordCollectedCards = (input: {
+        traceSuffix: string;
+        sequenceIndex: number;
+        rank: number;
+        targetRef: string;
+        candidateActionId: string;
+        observedAtOffsetMs: number;
+      }) => {
+        traceService.recordToolCall({
+          taskId: 'result-card-identity-task',
+          taskIntent: 'collect stable result cards across scroll refreshes',
+          aiClient: 'jest',
+          toolName: 'chrome_collect_result_cards',
+          stepId: `result-card-identity-step-${input.traceSuffix}`,
+          sequenceIndex: input.sequenceIndex,
+          requestParams: { tabId: 909 },
+          requestAtMs: NOW_MS + input.observedAtOffsetMs,
+          responseAtMs: NOW_MS + input.observedAtOffsetMs + 120,
+          result: textResult({
+            page: {
+              title: 'Search results',
+              url: 'https://content.example/search?query=ai',
+            },
+            pageProjection: {
+              pageRole: 'search_results',
+              pageModelKey: 'page:content.example:search_results',
+              tabId: 909,
+            },
+            freshness: 'fresh',
+            sourceRoute: 'result_cards',
+            selectedDataSource: 'dom',
+            tabId: 909,
+            cards: [
+              {
+                rank: input.rank,
+                title: 'Stable AI image creation guide',
+                url: 'https://content.example/explore/stable-guide?private=value',
+                targetRef: input.targetRef,
+                candidateActionId: input.candidateActionId,
+                actionTarget: {
+                  actionType: 'click',
+                  targetKind: 'result_card_link',
+                  url: 'https://content.example/explore/stable-guide?private=value',
+                  selector: `article:nth-of-type(${input.rank}) a[href]`,
+                  text: 'Stable AI image creation guide',
+                  toolName: 'chrome_click_element',
+                  toolArgs: {
+                    candidateAction: {
+                      id: input.candidateActionId,
+                      actionType: 'click',
+                      targetRef: input.targetRef,
+                      label: 'Stable AI image creation guide',
+                      confidence: 0.91,
+                      matchReason: 'result_card_primary_link',
+                      intent: 'content.open_detail',
+                      locatorChain: [
+                        { type: 'ref', value: input.targetRef },
+                        { type: 'css', value: `article:nth-of-type(${input.rank}) a[href]` },
+                      ],
+                    },
+                  },
+                },
+                confidence: 0.86,
+              },
+            ],
+          }),
+          resultSummary: 'collected result card with drifting session refs',
+        });
+      };
+
+      recordCollectedCards({
+        traceSuffix: 'first',
+        sequenceIndex: 1,
+        rank: 1,
+        targetRef: 'ref_result_card_1',
+        candidateActionId: 'ca_card_first',
+        observedAtOffsetMs: 0,
+      });
+      recordCollectedCards({
+        traceSuffix: 'second',
+        sequenceIndex: 2,
+        rank: 7,
+        targetRef: 'ref_result_card_7_after_scroll',
+        candidateActionId: 'ca_card_second',
+        observedAtOffsetMs: 1000,
+      });
+
+      await traceService.flushAsyncWrites();
+
+      const cards = browserObjectRepo
+        .listRecent({ limit: 20, offset: 0 })
+        .filter((object) => object.objectType === 'result_card');
+
+      expect(cards).toHaveLength(1);
+      expect(cards[0]).toMatchObject({
+        objectType: 'result_card',
+        observationCount: 2,
+        objectFingerprint:
+          'result_card:page:content.example:search_results:https://content.example/search:https://content.example/explore/stable-guide:Stable AI image creation guide',
+      });
+      expect(cards[0]?.targetability).toMatchObject({
+        rank: 7,
+        targetabilityStatus: 'stable_click_target',
+      });
+      expect(cards[0]?.sourceTraceIds).toHaveLength(2);
     } finally {
       traceService.discardPendingAsyncWrites();
       db.close();
@@ -2277,6 +2627,87 @@ describe('MkeMemoryTraceService', () => {
       const objects = browserObjectRepo.listRecent({ limit: 10, offset: 0 });
       expect(objects.map((object) => object.windowId)).toEqual(expect.arrayContaining([2]));
       expect(objects.map((object) => object.windowId)).not.toContain(1);
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
+  it('coalesces same-Base-URL browser tabs into one Object Library page record', async () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const browserObjectRepo = new BrowserObjectRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo, browserObjectRepo);
+
+    try {
+      traceService.recordToolCall({
+        taskId: 'browser-world-base-url-task',
+        taskIntent: 'inspect open browser tabs',
+        aiClient: 'jest',
+        toolName: 'get_windows_and_tabs',
+        stepId: 'browser-world-base-url-step',
+        sequenceIndex: 1,
+        requestParams: {},
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 30,
+        result: textResult({
+          browserWorld: {
+            status: 'fresh',
+            windows: [{ windowId: 7, focused: true, activeTabId: 302 }],
+            tabs: [
+              {
+                tabId: 301,
+                windowId: 7,
+                active: false,
+                status: 'complete',
+                canTabrixOperate: true,
+                url: 'https://example.test/search?keyword=first',
+                title: 'Search first',
+              },
+              {
+                tabId: 302,
+                windowId: 7,
+                active: true,
+                status: 'complete',
+                canTabrixOperate: true,
+                url: 'https://example.test/search?keyword=second',
+                title: 'Search second',
+              },
+            ],
+          },
+        }),
+        resultSummary: 'browser inventory with duplicate base URL tabs',
+      });
+
+      await traceService.flushAsyncWrites();
+
+      const tabs = browserObjectRepo
+        .listCurrentBrowserSurface({ limit: 10, offset: 0 })
+        .filter((object) => object.objectType === 'tab');
+
+      expect(tabs).toHaveLength(1);
+      expect(tabs[0]).toMatchObject({
+        siteFamily: 'example.test',
+        pageModelKey: 'tab:example.test',
+        objectFingerprint: 'browser_page:https://example.test/search',
+        rootRoute: 'https://example.test/search',
+        currentRoute: 'https://example.test/search?keyword=second',
+        tabId: 302,
+        isActive: true,
+        observationCount: 1,
+      });
+      expect(tabs[0]?.facts).toMatchObject({
+        rootRoute: 'https://example.test/search',
+        currentRoute: 'https://example.test/search?keyword=second',
+        tabIds: [301, 302],
+        openTabCount: 2,
+        representativeTabId: 302,
+      });
+      expect(tabs[0]?.currentState).toMatchObject({
+        tabIds: [301, 302],
+        openTabCount: 2,
+        representativeTabId: 302,
+      });
     } finally {
       traceService.discardPendingAsyncWrites();
       db.close();

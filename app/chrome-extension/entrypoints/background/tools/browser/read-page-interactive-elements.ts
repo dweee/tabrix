@@ -48,36 +48,36 @@ const COMPACT_ROLE_PRIORITY = new Map<string, number>([
 ]);
 
 const COMPACT_ACTION_KEYWORDS =
-  /(issues?|pull requests?|actions?|search|filter|label|milestone|assignee|summary|jobs?|run\b|login|sign in|submit|save|continue|next|confirm|apply|checkout|export|archive|details?|settings|手机号|验证码|登录|提交|保存|搜索|筛选|过滤|详情|设置|导出)/i;
+  /(issues?|search|filter|label|milestone|assignee|summary|jobs?|tasks?|run\b|logs?|artifacts?|login|sign in|submit|save|continue|next|confirm|apply|checkout|export|archive|details?|settings|手机号|验证码|登录|提交|保存|搜索|筛选|过滤|详情|设置|导出)/i;
 
 const COMPACT_SHELL_NAME_PATTERNS = [/^skip to content$/i, /^search or jump to/i, /^open copilot/i];
 
 const COMPACT_STATUS_LABEL_PATTERNS =
   /\b\d+\s+jobs?\b|completed|failed|cancelled|succeeded|in progress|queued/i;
 
-const COMPACT_RUN_DETAIL_PATTERNS = /\brun\s+\d+\s+of\b|workflow run/i;
-const GITHUB_WORKFLOW_RUN_DETAIL_URL_PATTERN =
-  /https:\/\/github\.com\/[^/]+\/[^/]+\/actions\/runs\/\d+/i;
-const WORKFLOW_RUN_DETAIL_HREF_BASE_PATTERN = /\/actions\/runs\/\d+/i;
-const WORKFLOW_RUN_DETAIL_HREF_SUMMARY_PATTERN = /\/actions\/runs\/\d+(?:[/?#]|$)/i;
-const WORKFLOW_RUN_DETAIL_HREF_JOB_PATTERN = /\/actions\/runs\/\d+\/job\/\d+/i;
-const WORKFLOW_RUN_DETAIL_HREF_USAGE_PATTERN = /\/actions\/runs\/\d+\/usage(?:[/?#]|$)/i;
-const WORKFLOW_RUN_DETAIL_HREF_WORKFLOW_PATTERN = /\/actions\/runs\/\d+\/workflow(?:[/?#]|$)/i;
-const WORKFLOW_RUN_DETAIL_HREF_STEP_PATTERN = /#step(?::|=)|\/actions\/runs\/\d+\/job\/\d+.*#step/i;
+const COMPACT_PROCESS_DETAIL_PATTERNS = /\brun\s+\d+\s+of\b|process run|job detail|run detail/i;
+const PROCESS_DETAIL_HREF_BASE_PATTERN = /\/(?:runs?|jobs?|tasks?)\/\d+/i;
+const PROCESS_DETAIL_HREF_SUMMARY_PATTERN =
+  /\/(?:runs?|jobs?|tasks?)\/\d+(?:[/?#]|$)|\/summary(?:[/?#]|$)/i;
+const PROCESS_DETAIL_HREF_JOB_PATTERN = /\/(?:jobs?|tasks?)\/\d+(?:[/?#]|$)/i;
+const PROCESS_DETAIL_HREF_ARTIFACT_PATTERN = /\/(?:artifacts?|usage)(?:[/?#]|$)/i;
+const PROCESS_DETAIL_HREF_PROCESS_PATTERN = /\/(?:process|pipeline|flow)(?:[/?#]|$)/i;
+const PROCESS_DETAIL_HREF_STEP_PATTERN =
+  /#step(?::|=)|\/(?:jobs?|tasks?)\/\d+.*#step|\/(?:logs?|steps?)(?:[/?#]|$)/i;
 
-const WORKFLOW_RUN_DETAIL_NAME_PRIORITY_PATTERN =
+const PROCESS_DETAIL_NAME_PRIORITY_PATTERN =
   /(summary|show all jobs|jobs?|artifacts?|annotations?|logs?|steps?)/i;
 
-const WORKFLOW_RUN_DETAIL_METADATA_COMMIT_PATTERN = /^[0-9a-f]{7,40}$/i;
-const WORKFLOW_RUN_DETAIL_METADATA_BRANCH_PATTERN = /^(main|master|develop|dev)$/i;
-const WORKFLOW_RUN_DETAIL_METADATA_DURATION_PATTERN = /^\d+[smhd]$/i;
+const PROCESS_DETAIL_METADATA_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
+const PROCESS_DETAIL_METADATA_BRANCH_PATTERN = /^(main|master|develop|dev)$/i;
+const PROCESS_DETAIL_METADATA_DURATION_PATTERN = /^\d+[smhd]$/i;
 
 interface CompactScoringContext {
-  workflowRunDetail: boolean;
+  processDetail: boolean;
 }
 
 const DEFAULT_COMPACT_SCORING_CONTEXT: CompactScoringContext = {
-  workflowRunDetail: false,
+  processDetail: false,
 };
 
 const MIN_ACTIONABLE_SNAPSHOT_ELEMENTS_FOR_FALLBACK = 3;
@@ -88,22 +88,27 @@ const DYNAMIC_SURFACE_TARGET_RECOVERY_REF_PREFIX = 'ref_dynamic_surface_';
 const AUTH_FORM_CONTROL_NAME_PATTERN =
   /手机号|手机号码|电话号码|短信验证码|输入验证码|获取验证码|发送验证码|重新发送|登录|同意并继续|我同意/i;
 
-function isGithubWorkflowRunDetailUrl(url: string): boolean {
-  return GITHUB_WORKFLOW_RUN_DETAIL_URL_PATTERN.test(String(url || '').trim());
+function isProcessDetailUrl(url: string): boolean {
+  try {
+    const parsed = new URL(String(url || '').trim());
+    return /\/(?:runs?|jobs?|tasks?)\/\d+(?:[/?#]|$)/i.test(parsed.pathname);
+  } catch {
+    return /\/(?:runs?|jobs?|tasks?)\/\d+(?:[/?#]|$)/i.test(String(url || '').trim());
+  }
 }
 
-function inferWorkflowRunDetailLabelFromHref(href: string): string {
+function inferProcessDetailLabelFromHref(href: string): string {
   const normalizedHref = String(href || '')
     .trim()
     .toLowerCase();
   if (!normalizedHref) return '';
 
-  if (WORKFLOW_RUN_DETAIL_HREF_STEP_PATTERN.test(normalizedHref)) return 'Logs';
-  if (WORKFLOW_RUN_DETAIL_HREF_JOB_PATTERN.test(normalizedHref)) return 'Jobs';
-  if (WORKFLOW_RUN_DETAIL_HREF_USAGE_PATTERN.test(normalizedHref)) return 'Artifacts';
+  if (PROCESS_DETAIL_HREF_STEP_PATTERN.test(normalizedHref)) return 'Logs';
+  if (PROCESS_DETAIL_HREF_JOB_PATTERN.test(normalizedHref)) return 'Jobs';
+  if (PROCESS_DETAIL_HREF_ARTIFACT_PATTERN.test(normalizedHref)) return 'Artifacts';
   if (
-    WORKFLOW_RUN_DETAIL_HREF_WORKFLOW_PATTERN.test(normalizedHref) ||
-    WORKFLOW_RUN_DETAIL_HREF_SUMMARY_PATTERN.test(normalizedHref)
+    PROCESS_DETAIL_HREF_PROCESS_PATTERN.test(normalizedHref) ||
+    PROCESS_DETAIL_HREF_SUMMARY_PATTERN.test(normalizedHref)
   ) {
     return 'Summary';
   }
@@ -111,31 +116,31 @@ function inferWorkflowRunDetailLabelFromHref(href: string): string {
   return '';
 }
 
-function scoreWorkflowRunDetailNode(node: SnapshotNode): number {
+function scoreProcessDetailNode(node: SnapshotNode): number {
   const name = String(node.name || '').trim();
   const href = String(node.href || '')
     .trim()
     .toLowerCase();
   let score = 0;
 
-  if (WORKFLOW_RUN_DETAIL_NAME_PRIORITY_PATTERN.test(name)) score += 72;
+  if (PROCESS_DETAIL_NAME_PRIORITY_PATTERN.test(name)) score += 72;
 
   if (href) {
-    if (WORKFLOW_RUN_DETAIL_HREF_BASE_PATTERN.test(href)) score += 18;
-    if (WORKFLOW_RUN_DETAIL_HREF_SUMMARY_PATTERN.test(href)) score += 82;
-    if (WORKFLOW_RUN_DETAIL_HREF_JOB_PATTERN.test(href)) score += 94;
-    if (WORKFLOW_RUN_DETAIL_HREF_USAGE_PATTERN.test(href)) score += 76;
-    if (WORKFLOW_RUN_DETAIL_HREF_WORKFLOW_PATTERN.test(href)) score += 78;
-    if (WORKFLOW_RUN_DETAIL_HREF_STEP_PATTERN.test(href)) score += 102;
+    if (PROCESS_DETAIL_HREF_BASE_PATTERN.test(href)) score += 18;
+    if (PROCESS_DETAIL_HREF_SUMMARY_PATTERN.test(href)) score += 82;
+    if (PROCESS_DETAIL_HREF_JOB_PATTERN.test(href)) score += 94;
+    if (PROCESS_DETAIL_HREF_ARTIFACT_PATTERN.test(href)) score += 76;
+    if (PROCESS_DETAIL_HREF_PROCESS_PATTERN.test(href)) score += 78;
+    if (PROCESS_DETAIL_HREF_STEP_PATTERN.test(href)) score += 102;
 
     if (/\/commit\//i.test(href)) score -= 130;
     if (/\/tree\/refs\/heads\//i.test(href)) score -= 120;
-    if (/^\/[^/]+$/.test(href) || /github\.com\/[^/]+\/?$/.test(href)) score -= 98;
+    if (/^\/[^/]+$/.test(href)) score -= 98;
   }
 
-  if (WORKFLOW_RUN_DETAIL_METADATA_COMMIT_PATTERN.test(name)) score -= 86;
-  if (WORKFLOW_RUN_DETAIL_METADATA_BRANCH_PATTERN.test(name)) score -= 72;
-  if (WORKFLOW_RUN_DETAIL_METADATA_DURATION_PATTERN.test(name)) score -= 66;
+  if (PROCESS_DETAIL_METADATA_HASH_PATTERN.test(name)) score -= 86;
+  if (PROCESS_DETAIL_METADATA_BRANCH_PATTERN.test(name)) score -= 72;
+  if (PROCESS_DETAIL_METADATA_DURATION_PATTERN.test(name)) score -= 66;
 
   return score;
 }
@@ -227,7 +232,7 @@ function scoreCompactInteractiveNode(
   const role = String(node.role || '').toLowerCase();
   const name = String(node.name || '').trim();
   const normalizedName = name.toLowerCase();
-  const isRunDetail = COMPACT_RUN_DETAIL_PATTERNS.test(name);
+  const isProcessDetail = COMPACT_PROCESS_DETAIL_PATTERNS.test(name);
   let score = 0;
 
   score += COMPACT_ROLE_PRIORITY.get(role) ?? 24;
@@ -238,10 +243,10 @@ function scoreCompactInteractiveNode(
   if (name.length >= 48) score -= 28;
   if (name.length >= 80) score -= 44;
   if (COMPACT_ACTION_KEYWORDS.test(name)) score += 28;
-  if (isRunDetail) score += 56;
+  if (isProcessDetail) score += 56;
   if (COMPACT_SHELL_NAME_PATTERNS.some((pattern) => pattern.test(normalizedName))) score -= 80;
-  if (context.workflowRunDetail) {
-    score += scoreWorkflowRunDetailNode(node);
+  if (context.processDetail) {
+    score += scoreProcessDetailNode(node);
   }
 
   // Keep nearby content slightly preferred without letting early chrome dominate compact mode.
@@ -474,7 +479,7 @@ export function buildInteractiveElements(
   currentUrl: string,
 ): SnapshotInteractiveElement[] {
   const scoringContext: CompactScoringContext = {
-    workflowRunDetail: isGithubWorkflowRunDetailUrl(currentUrl),
+    processDetail: isProcessDetailUrl(currentUrl),
   };
   const nodes = parseSnapshotNodesFromPageContent(pageContent);
   const parsedInteractive = nodes
@@ -482,8 +487,8 @@ export function buildInteractiveElements(
     .map((node) => {
       const nodeIndex = nodes.findIndex((candidate) => candidate.ref === node.ref);
       const descendantLabel = nodeIndex >= 0 ? findDescendantLabel(nodes, nodeIndex) : '';
-      const hrefLabel = scoringContext.workflowRunDetail
-        ? inferWorkflowRunDetailLabelFromHref(node.href || '')
+      const hrefLabel = scoringContext.processDetail
+        ? inferProcessDetailLabelFromHref(node.href || '')
         : '';
       return {
         ...node,

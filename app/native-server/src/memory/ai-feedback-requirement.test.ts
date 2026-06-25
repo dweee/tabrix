@@ -33,6 +33,9 @@ describe('AI feedback requirement rule', () => {
     [TOOL_NAMES.BROWSER.KEYBOARD],
     [TOOL_NAMES.BROWSER.GET_INTERACTIVE_ELEMENTS],
     [TOOL_NAMES.BROWSER.WEB_FETCHER],
+    [TOOL_NAMES.BROWSER.HANDLE_DIALOG],
+    [TOOL_NAMES.BROWSER.HANDLE_DOWNLOAD],
+    [TOOL_NAMES.BROWSER.FILE_UPLOAD],
   ])('requests feedback for default high-signal browser tools: %s', (toolName) => {
     expect(shouldRequestAiFeedbackForTrace(trace(toolName))).toBe(true);
   });
@@ -74,8 +77,17 @@ describe('AI feedback requirement rule', () => {
     expect(
       shouldRequestAiFeedbackForTrace({
         toolName: TOOL_NAMES.BROWSER.READ_PAGE,
-        taskIntent: '读取小红书搜索结果失败，需要 AI 判断是否重试或换路径',
+        taskIntent: '读取内容站搜索结果失败，需要 AI 判断是否重试或换路径',
       }),
+    ).toBe(true);
+  });
+
+  test('uses task meaning, not only tool name, for auxiliary browser records', () => {
+    expect(shouldRequestAiFeedbackForTool(TOOL_NAMES.BROWSER.SCREENSHOT)).toBe(false);
+    expect(
+      shouldRequestAiFeedbackForTrace(
+        trace(TOOL_NAMES.BROWSER.SCREENSHOT, '确认用户要求的筛选结果是否已经显示'),
+      ),
     ).toBe(true);
   });
 });

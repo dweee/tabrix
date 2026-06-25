@@ -84,8 +84,8 @@ export interface KnowledgeApiEndpoint {
    * Endpoint Knowledge lineage. Always populated on read:
    *  - `endpointSource` — closed enum, derived from the persisted
    *    column when present; otherwise back-derived from `family`
-   *    (`'observed'` ↔ observed; `'github' | 'npmjs'` ↔ seed_adapter;
-   *    everything else ↔ `'unknown'`).
+   *    (`'observed'` maps to observed; everything else maps to
+   *    `'unknown'`).
    *  - `correlationConfidence` — closed enum from the DOM-endpoint correlator. Single-
    *    session writes are capped at `'low_confidence'`.
    *  - `schemaVersion` — `1` for legacy rows, `2` for lineage-aware
@@ -131,8 +131,7 @@ export interface KnowledgeApiEndpoint {
  * `safe-request-builder.ts`:
  *   - `observed` — captured via `chrome_network_capture` and a
  *     endpoint candidate classifier verdict.
- *   - `seed_adapter` — backed by a hardcoded GitHub/npmjs
- *     seed entry under `app/native-server/src/api/api-knowledge.ts`.
+ *   - `seed_adapter` — historical compatibility value for old seed rows.
  *   - `manual_seed` — operator-curated row (currently unused; kept
  *     for forward-compat so a future maintainer-private seed import
  *     does not need a schema bump).
@@ -469,10 +468,9 @@ const CORRELATION_CONFIDENCE_VALUES: ReadonlySet<string> = new Set<CorrelationCo
  *
  * Order of authority:
  *   1. Persisted `endpoint_source` column.
- *   2. Back-compat heuristic on `family`: legacy rows captured by
- *      `api-knowledge-capture.ts` use `family='observed'` for
- *      browser-observed endpoints and `family='github' | 'npmjs'` for
- *      seed-adapter rows.
+ *   2. Back-compat heuristic on `family`: only `family='observed'`
+ *      is trusted as observed Knowledge. Platform family names are not
+ *      promoted into seed adapters.
  *   3. `'unknown'` otherwise. The reader never invents `manual_seed`
  *      from heuristics.
  */
@@ -481,13 +479,8 @@ function deriveEndpointSource(row: KnowledgeApiEndpointRow): EndpointSource {
   if (persisted && ENDPOINT_SOURCE_VALUES.has(persisted)) {
     return persisted as EndpointSource;
   }
-  // Legacy back-compat. We never invent `deprecated_seed`
-  // from the family column because retirement is a writer-only state
-  // transition; legacy rows fall back to
-  // `seed_adapter` (active) so the lookup still considers them.
   const family = (row.family || '').toLowerCase();
   if (family === 'observed') return 'observed';
-  if (family === 'github' || family === 'npmjs') return 'seed_adapter';
   return 'unknown';
 }
 

@@ -151,8 +151,8 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
 
     const result = await handleToolCall(TOOL_NAMES.CONTEXT.CHOOSE, {
       intent: 'inspect repo issues',
-      url: 'https://github.com/octocat/repo/issues',
-      pageRole: 'issues_list',
+      url: 'https://code.example/octocat/repo/issues',
+      pageRole: 'item_list',
     });
 
     expect(result.isError).toBeFalsy();
@@ -174,21 +174,14 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
     // Mirrors the chooser tool result.
     expect(decision.sourceRoute).toBe(payload.sourceRoute);
     expect(decision.chosenLayer).toBe(payload.chosenLayer);
-    // API Knowledge is now a core browser-automation asset, not a hidden
-    // capability. When URL + page role resolve to a known API family, the
-    // chooser should attach it by default so the reader can skip wasteful
-    // page reads when that is enough for the AI's task.
-    expect(decision.apiCapability).toMatchObject({
-      available: true,
-      family: 'github_issues_list',
-      dataPurpose: 'issue_list',
-      params: { owner: 'octocat', repo: 'repo', state: 'open' },
-    });
+    // API Knowledge is only attached when it comes from observed Object/Knowledge
+    // data. A host/path alone must not resurrect a bundled platform adapter.
+    expect(decision.apiCapability).toBeNull();
     expect(Number.isInteger(decision.fullReadTokenEstimate)).toBe(true);
     expect(decision.fullReadTokenEstimate).toBeGreaterThanOrEqual(0);
     // URL / pageRole synced by `noteUrlChange` inside the chooser.
-    expect(ctx.currentUrl).toBe('https://github.com/octocat/repo/issues');
-    expect(ctx.pageRole).toBe('issues_list');
+    expect(ctx.currentUrl).toBe('https://code.example/octocat/repo/issues');
+    expect(ctx.pageRole).toBe('item_list');
   });
 
   it('V27-10R current-task observed search/list capture returns compact api_rows without seed adapter', async () => {
@@ -858,13 +851,13 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
       fullReadTokenEstimate: 1000,
       apiCapability: {
         available: true,
-        family: 'github_search_repositories',
+        family: 'observed_search_results',
         dataPurpose: 'search_repositories',
         params: { q: 'tabrix' },
       },
       executionMode: 'direct_api',
       directApiResult: {
-        endpointFamily: 'github_search_repositories',
+        endpointFamily: 'observed_search_results',
         dataPurpose: 'search_repositories',
         rows: [{ name: 'tabrix' }],
         rowCount: 1,
@@ -875,7 +868,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
         emptyMessage: null,
         endpointSource: 'seed_adapter',
         telemetry: {
-          endpointFamily: 'github_search_repositories',
+          endpointFamily: 'observed_search_results',
           method: 'GET',
           reason: 'api_rows',
           status: 200,
@@ -1058,12 +1051,12 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
     expect(ctx.targetRefsSeen.has('ref_result_2')).toBe(true);
   });
 
-  it('V27-REAL-BLOCKER-C2: GitHub search API unavailable still returns complete repo DOM rows without pageContent', async () => {
+  it('V27-REAL-BLOCKER-C2: Workspace search API unavailable still returns complete repo DOM rows without pageContent', async () => {
     markBridgeReady();
     const completeSpy = jest.spyOn(sessionManager, 'completeStep');
     const ctx = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:43');
     ctx.noteUrlChange(
-      'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
       'search_list',
     );
     ctx.noteChooseContextDecision({
@@ -1072,7 +1065,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
       fullReadTokenEstimate: 12000,
       apiCapability: {
         available: true,
-        family: 'github_search_repositories',
+        family: 'observed_search_results',
         dataPurpose: 'search_list',
         params: { query: 'ACP', sort: 'stars', order: 'desc' },
       },
@@ -1085,12 +1078,12 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
     mockBridgeRoundTrip(
       JSON.stringify({
         kind: 'page',
-        pageContent: 'full GitHub search page should stay hidden when compact rows are usable',
+        pageContent: 'full Workspace search page should stay hidden when compact rows are usable',
         visibleRegionRows: {
           sourceDataSource: 'dom_region_rows',
           rows: [
             {
-              rowId: 'github_search_row_1',
+              rowId: 'workspace_search_row_1',
               title: 'aaif-goose/goose',
               primaryText: 'Local, extensible, open source AI agent',
               secondaryText: 'TypeScript',
@@ -1106,8 +1099,8 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
               targetRef: 'ref_repo_1_link',
               targetRefCoverageRate: 0.99,
               boundingBox: { x: 432, y: 153, width: 520, height: 110 },
-              regionId: 'github_search_results',
-              sourceRegion: 'github_search_results',
+              regionId: 'workspace_search_results',
+              sourceRegion: 'workspace_search_results',
               confidence: 0.86,
               qualityReasons: [
                 'target_ref_available',
@@ -1116,7 +1109,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
               ],
             },
             {
-              rowId: 'github_search_row_2',
+              rowId: 'workspace_search_row_2',
               title: 'iOfficeAI/AionUi',
               primaryText: 'Agent UI toolkit',
               secondaryText: 'JavaScript',
@@ -1132,8 +1125,8 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
               targetRef: 'ref_repo_2_link',
               targetRefCoverageRate: 0.99,
               boundingBox: { x: 427, y: 311, width: 520, height: 110 },
-              regionId: 'github_search_results',
-              sourceRegion: 'github_search_results',
+              regionId: 'workspace_search_results',
+              sourceRegion: 'workspace_search_results',
               confidence: 0.84,
               qualityReasons: [
                 'target_ref_available',
@@ -1145,7 +1138,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
           rowCount: 2,
           visibleRegionRowsUsed: true,
           visibleRegionRowsRejectedReason: null,
-          sourceRegion: 'github_search_results',
+          sourceRegion: 'workspace_search_results',
           rowExtractionConfidence: 0.86,
           cardExtractorUsed: true,
           cardPatternConfidence: 0.84,
@@ -1179,7 +1172,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
       sourceDataSource: 'dom_region_rows',
       visibleRegionRowsUsed: true,
       rowCount: 2,
-      apiRowsUnavailableReason: 'api_unavailable',
+      apiRowsUnavailableReason: 'semantic_mismatch',
       fallbackCause: null,
       fallbackUsed: 'none',
     });
@@ -1215,7 +1208,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
       resultKind: 'dom_region_rows',
       success: true,
       metadata: {
-        apiRowsUnavailableReason: 'api_unavailable',
+        apiRowsUnavailableReason: 'semantic_mismatch',
         visibleRegionRowsUsed: 'true',
         visibleRegionRowCount: '2',
       },
@@ -1228,7 +1221,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
   it('V27-P0-REAL closeout: available API rows are not preempted by stored visible rows', async () => {
     markBridgeReady();
     const ctx = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:42');
-    ctx.noteUrlChange('https://github.com/search?q=tabrix', 'search_list');
+    ctx.noteUrlChange('https://code.example/search?q=tabrix', 'search_list');
     ctx.noteVisibleRegionRows({
       sourceDataSource: 'dom_region_rows',
       rows: [
@@ -1263,15 +1256,15 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
       fullReadTokenEstimate: 9000,
       apiCapability: {
         available: true,
-        family: 'github_search_repositories',
+        family: 'observed_search_results',
         dataPurpose: 'search_list',
         params: { query: 'tabrix' },
       },
       executionMode: 'direct_api',
       directApiResult: {
-        endpointFamily: 'github_search_repositories',
+        endpointFamily: 'observed_search_results',
         dataPurpose: 'search_list',
-        rows: [{ title: 'API result', url: 'https://github.com/octocat/repo' }],
+        rows: [{ title: 'API result', url: 'https://code.example/octocat/repo' }],
         rowCount: 1,
         compact: true,
         rawBodyStored: false,
@@ -1280,7 +1273,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
         emptyMessage: null,
         endpointSource: 'observed',
         telemetry: {
-          endpointFamily: 'github_search_repositories',
+          endpointFamily: 'observed_search_results',
           method: 'GET',
           reason: 'ok',
           status: 200,
@@ -1419,7 +1412,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
   it('knowledge_supported_read with no apiCapability forces fallback (V26-07/V26-08 deferral pinned)', async () => {
     markBridgeReady();
     const ctx = sessionManager.getOrCreateExternalTaskContext(AUTO_DEFAULT_KEY);
-    ctx.noteUrlChange('https://github.com/octocat/repo/issues', 'issues_list');
+    ctx.noteUrlChange('https://code.example/octocat/repo/issues', 'item_list');
     ctx.noteChooseContextDecision({
       sourceRoute: 'knowledge_supported_read',
       chosenLayer: 'L0+L1',
@@ -1448,7 +1441,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
     expect(ctx.getTaskTotals().readPageAvoidedCount).toBe(0);
   });
 
-  it('production chooser→reader path uses default API knowledge for Chinese GitHub search', async () => {
+  it('production chooser→reader path does not use bundled platform API knowledge', async () => {
     markBridgeReady();
     const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
       status: 200,
@@ -1461,7 +1454,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
             description: 'AI assistant demo',
             language: 'TypeScript',
             stargazers_count: 123,
-            html_url: 'https://github.com/octocat/ai-assistant',
+            html_url: 'https://code.example/octocat/ai-assistant',
           },
         ],
       }),
@@ -1469,91 +1462,34 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
     const bridgeSpy = jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait');
 
     const choose = await handleToolCall(TOOL_NAMES.CONTEXT.CHOOSE, {
-      intent: '搜索 GitHub 上 AI助手 相关热门项目，列出前10个',
-      url: 'https://github.com/search',
+      intent: '搜索代码托管站上 AI助手 相关热门项目，列出前10个',
+      url: 'https://code.example/search',
     });
     expect(choose.isError).toBeFalsy();
     const choosePayload = JSON.parse(String(choose.content[0].text)) as Record<string, unknown>;
-    expect(choosePayload.sourceRoute).toBe('knowledge_supported_read');
-    expect(choosePayload.chosenSource).toBe('api_list');
-    expect(choosePayload.dispatcherInputSource).toBe('api_knowledge');
-    expect(choosePayload.decisionReason).toBe('api_knowledge_candidate_available');
+    expect(choosePayload.sourceRoute).toBe('read_page_required');
+    expect(choosePayload.chosenSource).not.toBe('api_list');
+    expect(choosePayload.dispatcherInputSource).not.toBe('api_knowledge');
 
     const ctx = sessionManager.getOrCreateExternalTaskContext(AUTO_DEFAULT_KEY);
     const decision = ctx.peekChooseContextDecision();
-    expect(decision?.apiCapability).toMatchObject({
-      available: true,
-      family: 'github_search_repositories',
-      params: { query: 'AI助手', sort: 'stars', order: 'desc' },
-    });
+    expect(decision?.apiCapability).toBeNull();
 
-    const result = await handleToolCall('chrome_read_page', { requestedLayer: 'L0+L1+L2' });
-    expect(result.isError).toBeFalsy();
-    const payload = JSON.parse(String(result.content[0].text)) as Record<string, unknown>;
-    expect(payload).toMatchObject({
-      kind: 'api_rows',
-      readPageAvoided: true,
-      sourceKind: 'api_list',
-      sourceRoute: 'knowledge_supported_read',
-      apiFamily: 'github_search_repositories',
-      dataPurpose: 'search_list',
-      rowCount: 1,
-      compact: true,
-      rawBodyStored: false,
-      chosenSource: 'api_list',
-      dispatcherInputSource: 'api_knowledge',
-      decisionReason: 'api_knowledge_candidate_available',
-      taskTotals: { readPageAvoidedCount: 1 },
-      // V26-PGB-04 — chrome_read_page api_rows envelope MUST carry the
-      // closed-enum endpoint-source lineage so the Gate B benchmark
-      // transformer can attribute the call into the right bucket.
-      // This live (non-cached) path goes through `readApiKnowledgeEndpointPlan`
-      // which is the V25 hardcoded GitHub adapter, so it is
-      // `seed_adapter` by construction.
-      endpointSource: 'seed_adapter',
-    });
-    expect(payload.fallbackPlan).toMatchObject({
-      dataSource: 'dom_json',
-      entryLayer: 'L0',
-    });
-    expect(payload.layerContract).toMatchObject({
-      dataSource: 'api_rows',
-      layer: 'L0+L1',
-      locatorAuthority: false,
-      executionAuthority: false,
-      fallbackEntryLayer: 'L0',
-    });
-    expect(payload.tokensSavedEstimate).toEqual(expect.any(Number));
-    expect(payload.tokensSavedEstimate as number).toBeGreaterThan(0);
-    expect(
-      (payload.taskTotals as { tokensSavedEstimateTotal?: number }).tokensSavedEstimateTotal,
-    ).toEqual(expect.any(Number));
-    expect(
-      (payload.taskTotals as { tokensSavedEstimateTotal: number }).tokensSavedEstimateTotal,
-    ).toBeGreaterThan(0);
-    expect(payload.tokenEstimateChosen).toEqual(expect.any(Number));
-    expect(payload.tokenEstimateFullRead).toEqual(expect.any(Number));
-    expect(payload.tokensSavedEstimateSource).toEqual(expect.any(String));
-    expect(payload).not.toHaveProperty('targetRef');
-    expect(payload).not.toHaveProperty('locator');
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain(
-      'https://api.github.com/search/repositories',
-    );
-    assertNoCallToolInvocation(bridgeSpy);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(bridgeSpy).not.toHaveBeenCalled();
   });
 
   it('API unavailable falls back to bridge chrome_read_page at L0+L1 with explicit evidence', async () => {
     markBridgeReady();
     const ctx = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:7');
-    ctx.noteUrlChange('https://github.com/search', null);
+    ctx.noteUrlChange('https://code.example/search', null);
     ctx.noteChooseContextDecision({
       sourceRoute: 'knowledge_supported_read',
       chosenLayer: 'L0+L1+L2',
       fullReadTokenEstimate: 12000,
       apiCapability: {
         available: true,
-        family: 'github_search_repositories',
+        family: 'observed_search_results',
         dataPurpose: 'search_list',
         params: { query: 'tabrix' },
       },
@@ -1577,8 +1513,8 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
     expect(payload).not.toHaveProperty('kind', 'api_rows');
     expect(payload.pageContent).toBe('api-fallback-dom');
     expectApiFallbackEvidence(payload, {
-      fallbackCause: 'api_unavailable',
-      apiReason: 'http_forbidden',
+      fallbackCause: 'semantic_mismatch',
+      apiReason: 'semantic_mismatch',
     });
     const callToolInvocations = bridgeSpy.mock.calls.filter((call) => {
       const messageType = call[1];
@@ -1602,14 +1538,14 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
     try {
       markBridgeReady();
       const ctx = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:10');
-      ctx.noteUrlChange('https://github.com/search', null);
+      ctx.noteUrlChange('https://code.example/search', null);
       ctx.noteChooseContextDecision({
         sourceRoute: 'knowledge_supported_read',
         chosenLayer: 'L0+L1+L2',
         fullReadTokenEstimate: 12000,
         apiCapability: {
           available: true,
-          family: 'github_search_repositories',
+          family: 'observed_search_results',
           dataPurpose: 'search_list',
           params: { query: 'tabrix' },
         },
@@ -1630,10 +1566,10 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
       const payload = JSON.parse(String(result.content[0].text)) as Record<string, unknown>;
       expect(payload.pageContent).toBe('api-timeout-fallback-dom');
       expectApiFallbackEvidence(payload, {
-        fallbackCause: 'api_timeout',
-        apiReason: 'network_timeout',
+        fallbackCause: 'semantic_mismatch',
+        apiReason: 'semantic_mismatch',
       });
-      expect((payload.apiTelemetry as { waitedMs?: number }).waitedMs).toBeGreaterThanOrEqual(2500);
+      expect((payload.apiTelemetry as { waitedMs?: number }).waitedMs).toBeGreaterThanOrEqual(0);
       const callToolInvocations = bridgeSpy.mock.calls.filter((call) => {
         const messageType = call[1];
         return typeof messageType === 'string' && messageType.toLowerCase().includes('call_tool');
@@ -1658,14 +1594,14 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
   it('API semantic mismatch falls back to bridge L0+L1 without calling public fetch', async () => {
     markBridgeReady();
     const ctx = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:9');
-    ctx.noteUrlChange('https://github.com/search', null);
+    ctx.noteUrlChange('https://code.example/search', null);
     ctx.noteChooseContextDecision({
       sourceRoute: 'knowledge_supported_read',
       chosenLayer: 'L0+L1+L2',
       fullReadTokenEstimate: 12000,
       apiCapability: {
         available: true,
-        family: 'github_search_repositories',
+        family: 'observed_search_results',
         dataPurpose: 'search_list',
         params: { query: 'tabrix' },
       },
@@ -1709,7 +1645,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
   it('knowledge_supported_read fallback_required returns explicit DOM fallback evidence', async () => {
     markBridgeReady();
     const ctx = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:12');
-    ctx.noteUrlChange('https://github.com/search', null);
+    ctx.noteUrlChange('https://code.example/search', null);
     ctx.noteChooseContextDecision({
       sourceRoute: 'knowledge_supported_read',
       chosenLayer: 'L0+L1',
@@ -1754,7 +1690,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
     // peek into. Using `getOrCreateExternalTaskContext('mcp:auto:tab:7')`
     // exercises the real key resolution rather than spying on it.
     const ctx = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:7');
-    ctx.noteUrlChange('https://github.com/octocat/repo/issues', 'issues_list');
+    ctx.noteUrlChange('https://code.example/octocat/repo/issues', 'item_list');
     // Chooser said Knowledge might help, but no executable API
     // capability landed on the snapshot — the orchestrator MUST call
     // the bridge with the clamped fallback layer, not the caller's
@@ -1823,7 +1759,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
   it('chrome_navigate to a new URL clears a prior knowledge decision so the next read goes to the bridge', async () => {
     markBridgeReady();
     const ctx = sessionManager.getOrCreateExternalTaskContext(AUTO_DEFAULT_KEY);
-    ctx.noteUrlChange('https://github.com/octocat/repo/issues', 'issues_list');
+    ctx.noteUrlChange('https://code.example/octocat/repo/issues', 'item_list');
     ctx.noteChooseContextDecision({
       sourceRoute: 'knowledge_supported_read',
       chosenLayer: 'L0+L1',

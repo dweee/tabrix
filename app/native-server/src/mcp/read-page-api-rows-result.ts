@@ -70,10 +70,7 @@ export function buildKnowledgeApiRowsSuccessResult(args: {
     // Closed-enum endpoint-source lineage on every
     // `chrome_read_page` `kind:'api_rows'` envelope.
     // The cached path inherits the chooser's
-    // `direct-api-executor` value verbatim; the live
-    // `readApiKnowledgeEndpointPlan` branch always uses
-    // the built-in GitHub/npmjs adapter, so its
-    // lineage is `seed_adapter` by construction. Surfacing
+    // `direct-api-executor` value verbatim. Surfacing
     // this on the public envelope lets the Gate B
     // benchmark transformer aggregate
     // `endpointSourceDistribution` without re-deriving

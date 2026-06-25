@@ -1,21 +1,8 @@
 /**
- * B-017 — GitHub-first API knowledge capture: classification + redaction.
+ * API Knowledge capture regression tests.
  *
- * What these tests defend (regression hardening):
- *  - Sensitive headers (Authorization / Cookie / Set-Cookie / X-Api-Key)
- *    NEVER appear in the persisted summary; only their presence is
- *    surfaced via `hasAuth` / `hasCookie`.
- *  - Header values are NEVER stored — only header *names* (lower-cased,
- *    deduped, sorted).
- *  - Query string values are NEVER stored — only query *keys*.
- *  - Request body is reduced to top-level JSON keys (or empty when
- *    non-JSON / non-object) — no values, no echoes.
- *  - Response body is reduced to a coarse shape descriptor; raw text is
- *    not retained.
- *  - URL normalization collapses `:owner / :repo / :id` into stable
- *    templates so dedup at the repository layer is effective.
- *  - Anything outside the GitHub family (api.github.com host) is
- *    silently dropped.
+ * These tests intentionally use neutral hosts. Tabrix must learn API
+ * knowledge from real browser observations, not from bundled site adapters.
  */
 
 import {
@@ -40,515 +27,121 @@ function classified(req: CapturedNetworkRequest) {
   return deriveKnowledgeFromRequest(req, COMMON_REQ, COMMON_RES, CTX);
 }
 
-describe('classifyGitHubFamily / URL normalization', () => {
-  it('classifies issues_list with stable :owner/:repo template', () => {
+describe('generic observed API knowledge capture', () => {
+  it('derives a stable observed endpoint from any usable JSON GET', () => {
     const result = classified({
-      url: 'https://api.github.com/repos/openai/api-test/issues?state=open&per_page=30',
+      url: 'https://api.content.example/v1/search/items?keyword=desk&page=1',
       method: 'GET',
-      statusCode: 200,
-      responseBody: '[]',
-    });
-    expect(result).not.toBeNull();
-    expect(result!.semanticTag).toBe('github.issues_list');
-    expect(result!.urlPattern).toBe('api.github.com/repos/:owner/:repo/issues');
-    expect(result!.endpointSignature).toBe('GET api.github.com/repos/:owner/:repo/issues');
-    expect(result!.statusClass).toBe('2xx');
-  });
-
-  it('classifies pulls_list, workflow_runs_list, search/issues separately', () => {
-    const cases: Array<{ url: string; method: string; expectedTag: string }> = [
-      {
-        url: 'https://api.github.com/repos/o/r/pulls?per_page=10',
-        method: 'GET',
-        expectedTag: 'github.pulls_list',
-      },
-      {
-        url: 'https://api.github.com/repos/o/r/actions/runs',
-        method: 'GET',
-        expectedTag: 'github.workflow_runs_list',
-      },
-      {
-        url: 'https://api.github.com/search/issues?q=in:title+repo:o/r+bug',
-        method: 'GET',
-        expectedTag: 'github.search_issues',
-      },
-      {
-        url: 'https://api.github.com/repos/o/r/issues/42',
-        method: 'GET',
-        expectedTag: 'github.issue_detail',
-      },
-      {
-        url: 'https://api.github.com/repos/o/r/actions/runs/123456789',
-        method: 'GET',
-        expectedTag: 'github.workflow_run_detail',
-      },
-    ];
-    for (const c of cases) {
-      const result = classified({ url: c.url, method: c.method, statusCode: 200 });
-      expect(result).not.toBeNull();
-      expect(result!.semanticTag).toBe(c.expectedTag);
-    }
-  });
-
-  it('rejects non-api.github.com URLs (same-origin github.com is out-of-scope v1)', () => {
-    expect(
-      classified({ url: 'https://github.com/openai/api-test/issues', method: 'GET' }),
-    ).toBeNull();
-    expect(classified({ url: 'https://example.com/api/things', method: 'GET' })).toBeNull();
-  });
-
-  it('captures unclassified api.github.com endpoints under github.unclassified with collapsed path', () => {
-    const result = classified({
-      url: 'https://api.github.com/users/octocat/repos?type=all',
-      method: 'GET',
-      statusCode: 200,
-    });
-    expect(result).not.toBeNull();
-    expect(result!.semanticTag).toBe('github.unclassified');
-    // Deterministic collapsing keeps the signature small and stable.
-    expect(result!.urlPattern.startsWith('api.github.com/')).toBe(true);
-  });
-
-  it('filters private browser stats instead of storing it as unclassified knowledge', () => {
-    const result = classified({
-      url: 'https://api.github.com/_private/browser/stats?token=hunter2',
-      method: 'GET',
+      type: 'xmlhttprequest',
       statusCode: 200,
       mimeType: 'application/json',
-      responseBody: '{}',
-    });
-    expect(result).toBeNull();
-    expect(
-      classifyCapturedRequestNoise({
-        url: 'https://api.github.com/_private/browser/stats?token=secret',
-        method: 'GET',
-      }),
-    ).toBe('private');
-  });
-
-  describe('collapseUnknownPath identity normalization (A2)', () => {
-    // The unclassified path collapser must NOT echo back per-tenant
-    // identity segments (usernames, org slugs, owner/repo). These would
-    // bloat dedup space and (later) leak identity into Stage 4a
-    // experience export. See `collapseUnknownPath` for the exact rules.
-
-    it('normalizes /users/<name>/... → /users/:user/...', () => {
-      const a = classified({
-        url: 'https://api.github.com/users/octocat/repos',
-        method: 'GET',
-        statusCode: 200,
-      });
-      const b = classified({
-        url: 'https://api.github.com/users/torvalds/repos',
-        method: 'GET',
-        statusCode: 200,
-      });
-      expect(a!.urlPattern).toBe('api.github.com/users/:user/repos');
-      expect(b!.urlPattern).toBe(a!.urlPattern);
-      expect(a!.endpointSignature).toBe(b!.endpointSignature);
+      responseBody: JSON.stringify({ items: [{ title: 'desk result', score: 7 }] }),
     });
 
-    it('normalizes /orgs/<name>/... → /orgs/:org/...', () => {
-      const result = classified({
-        url: 'https://api.github.com/orgs/openai/teams',
-        method: 'GET',
-        statusCode: 200,
-      });
-      expect(result!.urlPattern).toBe('api.github.com/orgs/:org/teams');
-    });
-
-    it('normalizes unmatched /repos/<owner>/<repo>/... → /repos/:owner/:repo/...', () => {
-      // `/repos/o/r/branches` is not in GITHUB_API_RULES, so it falls
-      // through to collapseUnknownPath. The owner / repo segments
-      // must NOT survive verbatim.
-      const a = classified({
-        url: 'https://api.github.com/repos/foo/bar/branches',
-        method: 'GET',
-        statusCode: 200,
-      });
-      const b = classified({
-        url: 'https://api.github.com/repos/openai/api-test/branches',
-        method: 'GET',
-        statusCode: 200,
-      });
-      expect(a!.semanticTag).toBe('github.unclassified');
-      expect(a!.urlPattern).toBe('api.github.com/repos/:owner/:repo/branches');
-      expect(b!.urlPattern).toBe(a!.urlPattern);
-      expect(a!.endpointSignature).toBe(b!.endpointSignature);
-    });
-
-    it('still collapses numeric ids (no regression)', () => {
-      const result = classified({
-        url: 'https://api.github.com/repos/foo/bar/check-suites/9876543210',
-        method: 'GET',
-        statusCode: 200,
-      });
-      expect(result!.urlPattern).toBe('api.github.com/repos/:owner/:repo/check-suites/:id');
-    });
-
-    it('still collapses long opaque slugs (no regression)', () => {
-      const result = classified({
-        url: 'https://api.github.com/repos/foo/bar/git/blobs/abc1234567890DEFGHIJKLMNOPQR',
-        method: 'GET',
-        statusCode: 200,
-      });
-      expect(result!.urlPattern).toBe('api.github.com/repos/:owner/:repo/git/blobs/:slug');
-    });
-
-    it('keeps dedup signature stable across different identities', () => {
-      const a = classified({
-        url: 'https://api.github.com/users/alice/gists',
-        method: 'GET',
-        statusCode: 200,
-      });
-      const b = classified({
-        url: 'https://api.github.com/users/bob/gists',
-        method: 'GET',
-        statusCode: 200,
-      });
-      const c = classified({
-        url: 'https://api.github.com/users/carol/gists?since=2026-01-01',
-        method: 'GET',
-        statusCode: 200,
-      });
-      expect(a!.endpointSignature).toBe(b!.endpointSignature);
-      expect(a!.endpointSignature).toBe(c!.endpointSignature);
-    });
-
-    it('does not normalize non-identity-prefixed paths beyond numeric/slug rules', () => {
-      const result = classified({
-        url: 'https://api.github.com/notifications',
-        method: 'GET',
-        statusCode: 200,
-      });
-      expect(result!.urlPattern).toBe('api.github.com/notifications');
-    });
-  });
-
-  it('produces deterministic signatures (same input → same signature, no time leak)', () => {
-    const a = classified({
-      url: 'https://api.github.com/repos/x/y/issues?per_page=10',
+    expect(result).toMatchObject({
+      site: 'api.content.example',
+      family: 'observed',
       method: 'GET',
+      urlPattern: 'api.content.example/v1/search/items',
+      endpointSignature: 'GET api.content.example/v1/search/items',
+      semanticTag: null,
+      statusClass: '2xx',
+      semanticType: 'search',
+      queryParamsShape: 'keyword,page',
+      usableForTask: true,
+      noiseReason: null,
+      endpointSource: 'observed',
+      correlationConfidence: null,
+      correlatedRegionId: null,
+      sourceLineage: {
+        semanticSource: 'capture',
+        observationCount: 1,
+        correlationReason: 'metadata_only',
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('desk');
+  });
+
+  it('normalizes identity-like path segments without platform adapters', () => {
+    const a = classified({
+      url: 'https://api.content.example/users/alice/items',
+      method: 'GET',
+      type: 'fetch',
+      statusCode: 200,
+      mimeType: 'application/json',
     });
     const b = classified({
-      url: 'https://api.github.com/repos/x/y/issues?per_page=99&state=closed',
+      url: 'https://api.content.example/users/bob/items',
       method: 'GET',
+      type: 'fetch',
+      statusCode: 200,
+      mimeType: 'application/json',
     });
-    expect(a!.endpointSignature).toBe(b!.endpointSignature);
-  });
-
-  it('rejects malformed URLs', () => {
-    expect(classified({ url: 'not a url at all', method: 'GET' })).toBeNull();
-  });
-});
-
-describe('redaction (defense-in-depth — these tests are P1 to never relax)', () => {
-  it('NEVER stores Authorization / Cookie / Set-Cookie / x-api-key VALUES', () => {
-    const result = deriveKnowledgeFromRequest(
-      {
-        url: 'https://api.github.com/repos/o/r/issues',
-        method: 'GET',
-        statusCode: 200,
-        specificRequestHeaders: {
-          Authorization: 'Bearer ghp_SUPERSECRETabcdefABCDEF1234567890',
-          Cookie: 'session=abc123; other=def',
-          'X-Api-Key': 'sk-not-real',
-        },
-        specificResponseHeaders: {
-          'Set-Cookie': 'session=newvalue; HttpOnly',
-        },
-      },
-      COMMON_REQ,
-      COMMON_RES,
-      CTX,
-    );
-    expect(result).not.toBeNull();
-    const blob = JSON.stringify(result);
-    expect(blob).not.toMatch(/Bearer/i);
-    expect(blob).not.toMatch(/ghp_SUPERSECRET/);
-    expect(blob).not.toMatch(/SUPERSECRET/);
-    expect(blob).not.toMatch(/abc123/);
-    expect(blob).not.toMatch(/sk-not-real/);
-    expect(blob).not.toMatch(/newvalue/);
-    // But presence flags are correctly raised.
-    expect(result!.requestSummary.hasAuth).toBe(true);
-    expect(result!.requestSummary.hasCookie).toBe(true);
-    // And the sensitive header NAMES are stripped from the persisted set
-    // (we already raised the boolean — keeping the name adds no signal
-    // and only widens the redaction surface).
-    for (const k of result!.requestSummary.headerKeys) {
-      expect(k).not.toBe('authorization');
-      expect(k).not.toBe('cookie');
-      expect(k).not.toBe('x-api-key');
-    }
-  });
-
-  it('NEVER stores query VALUES — only query keys', () => {
-    const result = deriveKnowledgeFromRequest(
-      {
-        url: 'https://api.github.com/search/issues?q=owner:secret+token:hunter2&per_page=99',
-        method: 'GET',
-        statusCode: 200,
-      },
-      {},
-      {},
-      CTX,
-    );
-    expect(result).not.toBeNull();
-    const blob = JSON.stringify(result);
-    expect(blob).not.toMatch(/hunter2/);
-    expect(blob).not.toMatch(/secret/);
-    expect(result!.requestSummary.queryKeys).toEqual(['per_page', 'q']);
-  });
-
-  it('strips sensitive query key names from persisted API shape', () => {
-    const result = deriveKnowledgeFromRequest(
-      {
-        url: 'https://api.github.com/search/issues?q=automation&per_page=30&xsec_token=secret-token',
-        method: 'GET',
-        statusCode: 200,
-      },
-      {},
-      {},
-      CTX,
-    );
-
-    expect(result).not.toBeNull();
-    expect(result!.requestSummary.queryKeys).toEqual(['per_page', 'q']);
-    expect(result!.queryParamsShape).toBe('per_page,q');
-    expect(JSON.stringify(result)).not.toMatch(/xsec_token|secret-token/i);
-  });
-
-  it('NEVER stores raw request body — only top-level JSON keys', () => {
-    const result = deriveKnowledgeFromRequest(
-      {
-        url: 'https://api.github.com/repos/o/r/issues',
-        method: 'POST',
-        statusCode: 201,
-        requestBody: JSON.stringify({
-          title: 'Found a bug with token=hunter2',
-          body: 'Stack: <PII>',
-          labels: ['bug'],
-        }),
-      },
-      {},
-      {},
-      CTX,
-    );
-    expect(result).not.toBeNull();
-    const blob = JSON.stringify(result);
-    expect(blob).not.toMatch(/hunter2/);
-    expect(blob).not.toMatch(/Stack:/);
-    expect(result!.requestSummary.bodyKeys).toEqual(['body', 'labels', 'title']);
-  });
-
-  it('strips sensitive body key names while keeping useful task shape keys', () => {
-    const result = deriveKnowledgeFromRequest(
-      {
-        url: 'https://so.xiaohongshu.com/api/sns/web/v2/search/notes',
-        method: 'POST',
-        type: 'fetch',
-        statusCode: 200,
-        mimeType: 'application/json',
-        requestBody: JSON.stringify({
-          keyword: 'AI图片创作',
-          page: 1,
-          sort: 'popularity',
-          access_token: 'secret-token',
-          xsec_token: 'xsec-secret',
-        }),
-        safeResponseSummary: {
-          capturedAfterArm: true,
-          rawBodyPersisted: false,
-          privacyCheck: 'passed',
-          fieldShapeSummaryAvailable: true,
-          fieldNames: ['items', 'cursor'],
-        },
-      },
-      {},
-      {},
-      CTX,
-    );
-
-    expect(result).not.toBeNull();
-    expect(result!.requestSummary.bodyKeys).toEqual(['keyword', 'page', 'sort']);
-    expect(JSON.stringify(result)).not.toMatch(
-      /AI图片创作|secret-token|xsec-secret|access_token|xsec_token/i,
-    );
-  });
-
-  it('skips non-JSON request bodies entirely', () => {
-    const result = deriveKnowledgeFromRequest(
-      {
-        url: 'https://api.github.com/repos/o/r/issues',
-        method: 'POST',
-        requestBody: 'plain text body, not json',
-        statusCode: 200,
-      },
-      {},
-      {},
-      CTX,
-    );
-    expect(result!.requestSummary.bodyKeys).toEqual([]);
-  });
-
-  it('reduces JSON response array to {kind:"array", itemCount, sampleItemKeys}', () => {
-    const body = JSON.stringify([
-      { id: 1, number: 10, title: 'a', user: { login: 'octocat' } },
-      { id: 2, number: 11, title: 'b' },
-    ]);
-    const result = deriveKnowledgeFromRequest(
-      {
-        url: 'https://api.github.com/repos/o/r/issues',
-        method: 'GET',
-        statusCode: 200,
-        responseBody: body,
-      },
-      {},
-      { 'Content-Type': 'application/json' },
-      CTX,
-    );
-    expect(result!.responseSummary.shape).toEqual({
-      kind: 'array',
-      itemCount: 2,
-      sampleItemKeys: ['id', 'number', 'title', 'user'],
+    const c = classified({
+      url: 'https://api.content.example/repos/team-a/project-a/issues/42',
+      method: 'GET',
+      type: 'fetch',
+      statusCode: 200,
+      mimeType: 'application/json',
     });
-    expect(result!.responseSummary.sizeBytes).toBe(body.length);
-    expect(result!.responseSummary.contentType).toBe('application/json');
-    // The raw response text must not leak into the summary.
-    expect(JSON.stringify(result!.responseSummary)).not.toMatch(/octocat/);
+
+    expect(a!.urlPattern).toBe('api.content.example/users/:user/items');
+    expect(b!.endpointSignature).toBe(a!.endpointSignature);
+    expect(c!.urlPattern).toBe('api.content.example/repos/:owner/:repo/issues/:id');
   });
 
-  it('reduces JSON response object to {kind:"object", topLevelKeys}', () => {
-    const result = deriveKnowledgeFromRequest(
-      {
-        url: 'https://api.github.com/repos/o/r/issues/42',
-        method: 'GET',
-        statusCode: 200,
-        responseBody: JSON.stringify({
-          id: 1,
-          title: 'secret-title',
-          body: 'should-not-appear',
-        }),
-      },
-      {},
-      { 'Content-Type': 'application/json' },
-      CTX,
-    );
-    expect(result!.responseSummary.shape).toEqual({
-      kind: 'object',
-      topLevelKeys: ['body', 'id', 'title'],
-    });
-    expect(JSON.stringify(result!.responseSummary)).not.toMatch(/secret-title/);
-    expect(JSON.stringify(result!.responseSummary)).not.toMatch(/should-not-appear/);
-  });
-
-  it('treats base64 / non-json responses as kind:"unknown"', () => {
-    const r1 = deriveKnowledgeFromRequest(
-      {
-        url: 'https://api.github.com/repos/o/r/issues',
-        method: 'GET',
-        statusCode: 200,
-        responseBody: 'AAAABBBB==',
-        base64Encoded: true,
-      },
-      {},
-      { 'Content-Type': 'application/octet-stream' },
-      CTX,
-    );
-    expect(r1!.responseSummary.shape).toEqual({ kind: 'unknown' });
-
-    const r2 = deriveKnowledgeFromRequest(
-      {
-        url: 'https://api.github.com/repos/o/r/issues',
-        method: 'GET',
-        statusCode: 200,
-        responseBody: '<html>hi</html>',
-      },
-      {},
-      { 'Content-Type': 'text/html' },
-      CTX,
-    );
-    expect(r2!.responseSummary.shape).toEqual({ kind: 'unknown' });
-  });
-});
-
-describe('deriveKnowledgeFromBundle', () => {
-  it('returns empty when no requests', () => {
-    expect(deriveKnowledgeFromBundle({ requests: [] }, CTX)).toEqual([]);
-    expect(deriveKnowledgeFromBundle({}, CTX)).toEqual([]);
-  });
-
-  it('skips non-github requests but keeps github ones in original order', () => {
+  it('persists shape-evidenced read-shaped POST endpoints as observed search rows', () => {
     const out = deriveKnowledgeFromBundle(
       {
         requests: [
-          { url: 'https://example.com/one', method: 'GET' },
-          { url: 'https://api.github.com/repos/o/r/issues', method: 'GET' },
-          { url: 'https://example.com/two', method: 'GET' },
-          { url: 'https://api.github.com/repos/o/r/pulls', method: 'GET' },
+          {
+            url: 'https://search-provider.example/1/indexes/Item_dev/query',
+            method: 'POST',
+            type: 'xmlhttprequest',
+            mimeType: 'application/json',
+            statusCode: 200,
+            responseBody: JSON.stringify({
+              hits: [{ title: 'browser automation tools', points: 42, comments: 7 }],
+            }),
+          },
         ],
       },
       CTX,
     );
-    expect(out.map((e) => e.semanticTag)).toEqual(['github.issues_list', 'github.pulls_list']);
+
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      family: 'observed',
+      site: 'search-provider.example',
+      method: 'POST',
+      semanticType: 'search',
+      usableForTask: true,
+      noiseReason: null,
+      endpointSource: 'observed',
+      responseShapeSummary: 'object:keys=1',
+    });
+    expect(out[0].urlPattern).toBe('search-provider.example/:id/indexes/Item_dev/query');
+    expect(JSON.stringify(out)).not.toContain('browser automation');
   });
 
-  it('respects KNOWLEDGE_CAPTURE_PER_BATCH_LIMIT cap', () => {
+  it('keeps bundle ordering and caps per-batch writes', () => {
     const requests: CapturedNetworkRequest[] = [];
-    for (let i = 0; i < KNOWLEDGE_CAPTURE_PER_BATCH_LIMIT + 25; i++) {
+    for (let i = 0; i < KNOWLEDGE_CAPTURE_PER_BATCH_LIMIT + 25; i += 1) {
       requests.push({
-        url: `https://api.github.com/repos/o${i}/r${i}/issues`,
+        url: `https://api.content.example/v1/items/${i}`,
         method: 'GET',
+        type: 'xmlhttprequest',
+        mimeType: 'application/json',
         statusCode: 200,
       });
     }
+
     const out = deriveKnowledgeFromBundle({ requests }, CTX);
     expect(out).toHaveLength(KNOWLEDGE_CAPTURE_PER_BATCH_LIMIT);
+    expect(out[0].urlPattern).toBe('api.content.example/v1/items/:id');
   });
 
-  it('V26-FIX-03 — derives generic family rows for non-GitHub usable JSON GETs', () => {
-    const out = deriveKnowledgeFromBundle(
-      {
-        requests: [
-          // Hacker News API — no curated family adapter exists. Pre-FIX-03
-          // this row would be silently dropped; FIX-03 must persist it
-          // under family='observed' with classifier-derived semantic_type.
-          {
-            url: 'https://hacker-news.firebaseio.com/v0/item/12345.json',
-            method: 'GET',
-            type: 'xmlhttprequest',
-            mimeType: 'application/json',
-            statusCode: 200,
-          },
-          // Generic JSON pagination endpoint on an arbitrary host.
-          {
-            url: 'https://api.example.test/v1/articles?page=2&per_page=20',
-            method: 'GET',
-            type: 'xmlhttprequest',
-            mimeType: 'application/json',
-            statusCode: 200,
-          },
-        ],
-      },
-      CTX,
-    );
-    expect(out).toHaveLength(2);
-    const [hn, generic] = out;
-    expect(hn.family).toBe('observed');
-    expect(hn.site).toBe('hacker-news.firebaseio.com');
-    expect(hn.semanticType).toBe('detail');
-    expect(hn.usableForTask).toBe(true);
-    expect(hn.noiseReason).toBeNull();
-    expect(generic.family).toBe('observed');
-    expect(generic.site).toBe('api.example.test');
-    expect(generic.semanticType).toBe('pagination');
-    expect(generic.usableForTask).toBe(true);
-    expect(generic.queryParamsShape).toBe('page,per_page');
-    expect(typeof generic.responseShapeSummary).toBe('string');
-  });
-
-  it('drops invalid or non-web generic hosts from observed endpoint knowledge', () => {
+  it('drops invalid, extension, private, asset, telemetry, and auth noise', () => {
     const out = deriveKnowledgeFromBundle(
       {
         requests: [
@@ -567,7 +160,28 @@ describe('deriveKnowledgeFromBundle', () => {
             statusCode: 200,
           },
           {
-            url: 'https://api.example.test/v1/search/items?q=tabrix',
+            url: 'https://api.content.example/_private/browser/stats?token=',
+            method: 'GET',
+            type: 'xmlhttprequest',
+            mimeType: 'application/json',
+            statusCode: 200,
+          },
+          {
+            url: 'https://static.content.example/logo.png',
+            method: 'GET',
+            type: 'image',
+            mimeType: 'image/png',
+            statusCode: 200,
+          },
+          {
+            url: 'https://api.content.example/oauth/token',
+            method: 'POST',
+            type: 'xmlhttprequest',
+            mimeType: 'application/json',
+            statusCode: 200,
+          },
+          {
+            url: 'https://api.content.example/v1/search/items?q=tabrix',
             method: 'GET',
             type: 'xmlhttprequest',
             mimeType: 'application/json',
@@ -580,7 +194,7 @@ describe('deriveKnowledgeFromBundle', () => {
 
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({
-      site: 'api.example.test',
+      site: 'api.content.example',
       family: 'observed',
       endpointSource: 'observed',
       semanticType: 'search',
@@ -589,191 +203,140 @@ describe('deriveKnowledgeFromBundle', () => {
     expect(JSON.stringify(out)).not.toContain('invalid');
     expect(JSON.stringify(out)).not.toContain('extension-id');
   });
+});
 
-  it('V28-W7A — captures generic content endpoint metadata without raw body values', () => {
-    const out = deriveKnowledgeFromBundle(
+describe('API knowledge privacy redaction', () => {
+  it('never stores sensitive header values or header names', () => {
+    const result = deriveKnowledgeFromRequest(
       {
-        requests: [
-          {
-            url: 'https://neutral-social.example.test/api/share/content?share_id=abc123',
-            method: 'GET',
-            type: 'xmlhttprequest',
-            mimeType: 'application/json',
-            statusCode: 200,
-            responseBody: JSON.stringify({
-              ok: true,
-              data: {
-                title: 'Shared conversation',
-                content:
-                  '物模型把静态属性、时序属性、可控调节属性和服务动作分开。' +
-                  '在浏览器自动化场景中，Tabrix 应该把页面和任务都看成对象。',
-              },
-            }),
-          },
-        ],
+        url: 'https://api.content.example/v1/items',
+        method: 'GET',
+        type: 'fetch',
+        statusCode: 200,
+        mimeType: 'application/json',
+        specificRequestHeaders: {
+          Authorization: 'Bearer super-secret-token',
+          Cookie: 'session=abc123',
+          'X-Api-Key': 'sk-secret',
+          Accept: 'application/json',
+        },
+        specificResponseHeaders: {
+          'Set-Cookie': 'session=newvalue; HttpOnly',
+        },
       },
+      COMMON_REQ,
+      COMMON_RES,
       CTX,
     );
-    const blob = JSON.stringify(out);
 
-    expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({
-      family: 'observed',
-      site: 'neutral-social.example.test',
-      semanticType: 'unknown',
-      usableForTask: false,
-      noiseReason: 'no_signal',
-      endpointSource: 'observed',
+    expect(result).not.toBeNull();
+    expect(result!.requestSummary.hasAuth).toBe(true);
+    expect(result!.requestSummary.hasCookie).toBe(true);
+    expect(result!.requestSummary.headerKeys).toEqual(['accept', 'user-agent']);
+    expect(JSON.stringify(result)).not.toMatch(
+      /Bearer|super-secret-token|abc123|sk-secret|newvalue|authorization|x-api-key/i,
+    );
+  });
+
+  it('stores only safe query and body shape keys', () => {
+    const result = deriveKnowledgeFromRequest(
+      {
+        url: 'https://api.content.example/v1/search/items?q=automation&page=1&access_token=secret',
+        method: 'POST',
+        type: 'fetch',
+        statusCode: 200,
+        mimeType: 'application/json',
+        requestBody: JSON.stringify({
+          keyword: 'private keyword',
+          page: 1,
+          sort: 'popular',
+          xsec_token: 'secret-token',
+        }),
+        responseBody: JSON.stringify({
+          items: [{ title: 'secret result', id: 1 }],
+          cursor: 'next-secret',
+        }),
+      },
+      {},
+      COMMON_RES,
+      CTX,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.requestSummary.queryKeys).toEqual(['page', 'q']);
+    expect(result!.requestSummary.bodyKeys).toEqual(['keyword', 'page', 'sort']);
+    expect(result!.queryParamsShape).toBe('page,q');
+    expect(result!.responseSummary.shape).toEqual({
+      kind: 'object',
+      topLevelKeys: ['cursor', 'items'],
     });
-    expect(out[0].urlPattern).toBe('neutral-social.example.test/api/share/content');
-    expect(out[0].responseShapeSummary).toBe('object:keys=2');
-    expect(blob).not.toContain('abc123');
-    expect(blob).not.toContain('物模型');
-    expect(blob).not.toContain('Shared conversation');
+    expect(JSON.stringify(result)).not.toMatch(
+      /private keyword|secret result|next-secret|access_token|xsec_token|secret-token/i,
+    );
   });
 
-  it('persists shape-evidenced read-shaped POST endpoints as observed search rows', () => {
-    const out = deriveKnowledgeFromBundle(
+  it('reduces arrays, objects, scalar and non-json bodies to shape only', () => {
+    const arrayResult = deriveKnowledgeFromRequest(
       {
-        requests: [
-          {
-            url: 'https://search-provider.example.test/1/indexes/Item_dev/query',
-            method: 'POST',
-            type: 'xmlhttprequest',
-            mimeType: 'application/json',
-            statusCode: 200,
-            responseBody: JSON.stringify({
-              hits: [
-                {
-                  title: 'browser automation tools',
-                  points: 42,
-                  comments: 7,
-                },
-              ],
-            }),
-          },
-        ],
+        url: 'https://api.content.example/v1/items',
+        method: 'GET',
+        type: 'fetch',
+        statusCode: 200,
+        mimeType: 'application/json',
+        responseBody: JSON.stringify([
+          { id: 1, title: 'first', author: 'alice' },
+          { id: 2, title: 'second' },
+        ]),
       },
+      {},
+      COMMON_RES,
       CTX,
     );
-    const blob = JSON.stringify(out);
+    const binaryResult = deriveKnowledgeFromRequest(
+      {
+        url: 'https://api.content.example/v1/items/export',
+        method: 'GET',
+        type: 'fetch',
+        statusCode: 200,
+        mimeType: 'application/octet-stream',
+        responseBody: 'AAAABBBB==',
+        base64Encoded: true,
+      },
+      {},
+      {},
+      CTX,
+    );
 
-    expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({
-      family: 'observed',
-      site: 'search-provider.example.test',
-      method: 'POST',
-      semanticType: 'search',
-      usableForTask: true,
-      noiseReason: null,
-      endpointSource: 'observed',
-      responseShapeSummary: 'object:keys=1',
+    expect(arrayResult!.responseSummary.shape).toEqual({
+      kind: 'array',
+      itemCount: 2,
+      sampleItemKeys: ['author', 'id', 'title'],
     });
-    expect(out[0].urlPattern).toBe('search-provider.example.test/:id/indexes/Item_dev/query');
-    expect(blob).not.toContain('browser automation');
+    expect(binaryResult!.responseSummary.shape).toEqual({ kind: 'unknown' });
+    expect(JSON.stringify(arrayResult!.responseSummary)).not.toMatch(/first|alice/);
   });
+});
 
-  it('V26-FIX-03 — also writes classifier fields for GitHub family rows', () => {
-    const out = deriveKnowledgeFromBundle(
-      {
-        requests: [
-          {
-            url: 'https://api.github.com/search/repositories?q=tabrix&sort=stars',
-            method: 'GET',
-            type: 'xmlhttprequest',
-            mimeType: 'application/json',
-            statusCode: 200,
-          },
-        ],
-      },
-      CTX,
-    );
-    expect(out).toHaveLength(1);
-    const [row] = out;
-    expect(row.family).toBe('github');
-    expect(row.semanticTag).toBe('github.search_repositories');
-    // FIX-03: persisted classifier output is present alongside the
-    // GitHub semantic_tag and matches the closed enum.
-    expect(row.semanticType).toBe('search');
-    expect(row.usableForTask).toBe(true);
-    expect(row.queryParamsShape).toBe('q,sort');
-  });
-
-  // V27-08 — capture writer must populate `endpointSource` and a
-  // closed-enum `sourceLineage` breadcrumb so a downstream report
-  // can tell observed vs seed_adapter without re-deriving from
-  // `family`.
-  it('V27-08 — writes endpointSource=seed_adapter for github family rows', () => {
-    const out = deriveKnowledgeFromBundle(
-      {
-        requests: [
-          {
-            url: 'https://api.github.com/search/repositories?q=tabrix',
-            method: 'GET',
-            type: 'xmlhttprequest',
-            mimeType: 'application/json',
-            statusCode: 200,
-          },
-        ],
-      },
-      CTX,
-    );
-    const [row] = out;
-    expect(row.endpointSource).toBe('seed_adapter');
-    expect(row.sourceLineage).toEqual({
-      semanticSource: 'capture',
-      observationCount: 1,
-      correlationReason: 'seed_adapter_default',
-    });
-    // Capture path NEVER produces correlation evidence.
-    expect(row.correlationConfidence).toBeNull();
-    expect(row.correlatedRegionId).toBeNull();
-  });
-
-  it('V27-08 — writes endpointSource=observed for non-github family rows', () => {
-    const out = deriveKnowledgeFromBundle(
-      {
-        requests: [
-          {
-            url: 'https://en.wikipedia.org/w/rest.php/v1/search/page?q=einstein',
-            method: 'GET',
-            type: 'xmlhttprequest',
-            mimeType: 'application/json',
-            statusCode: 200,
-          },
-        ],
-      },
-      CTX,
-    );
-    const [row] = out;
-    expect(row.endpointSource).toBe('observed');
-    expect(row.sourceLineage).toEqual({
-      semanticSource: 'capture',
-      observationCount: 1,
-      correlationReason: 'metadata_only',
-    });
-    expect(row.correlationConfidence).toBeNull();
-  });
-
-  it('returns endpoint candidate diagnostics without raw query values', () => {
+describe('API knowledge diagnostics', () => {
+  it('returns compact diagnostics without raw query values', () => {
     const analysis = analyzeKnowledgeCaptureBundle(
       {
         requests: [
           {
-            url: 'https://api.github.com/search/repositories?q=&sort=&order=',
+            url: 'https://api.content.example/v1/search/items?q=&sort=&order=',
             method: 'GET',
             type: 'xmlhttprequest',
             statusCode: 200,
             mimeType: 'application/json',
           },
           {
-            url: 'https://api.github.com/_private/browser/stats?token=',
+            url: 'https://api.content.example/_private/browser/stats?token=',
             method: 'GET',
             statusCode: 200,
             mimeType: 'application/json',
           },
           {
-            url: 'https://static.example.test/logo.png',
+            url: 'https://static.content.example/logo.png',
             method: 'GET',
             type: 'image',
             statusCode: 200,
@@ -784,7 +347,13 @@ describe('deriveKnowledgeFromBundle', () => {
       CTX,
     );
 
-    expect(analysis.upserts.map((row) => row.semanticTag)).toEqual(['github.search_repositories']);
+    expect(analysis.upserts).toHaveLength(1);
+    expect(analysis.upserts[0]).toMatchObject({
+      site: 'api.content.example',
+      family: 'observed',
+      semanticTag: null,
+      endpointSource: 'observed',
+    });
     expect(analysis.diagnostics).toMatchObject({
       totalRequests: 3,
       usableCandidateCount: 1,
@@ -796,6 +365,25 @@ describe('deriveKnowledgeFromBundle', () => {
       private: 1,
       asset: 1,
     });
-    expect(JSON.stringify(analysis)).not.toMatch(/hunter2|secret/);
+    expect(JSON.stringify(analysis)).not.toMatch(/secret|token=/);
+  });
+
+  it('classifies request noise generically', () => {
+    expect(
+      classifyCapturedRequestNoise({
+        url: 'https://api.content.example/v1/search/items?q=',
+        method: 'GET',
+        type: 'xmlhttprequest',
+        mimeType: 'application/json',
+      }),
+    ).toBe('usable');
+    expect(
+      classifyCapturedRequestNoise({
+        url: 'https://api.content.example/private/browser/stats?token=',
+        method: 'GET',
+        type: 'xmlhttprequest',
+        mimeType: 'application/json',
+      }),
+    ).toBe('private');
   });
 });

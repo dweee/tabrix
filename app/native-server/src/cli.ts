@@ -282,10 +282,10 @@ program
     }
   });
 
-// Export diagnostic report for GitHub Issues
+// Export diagnostic report for support issues.
 program
   .command('report')
-  .description('Export a diagnostic report for GitHub Issues')
+  .description('Export a diagnostic report for support issues')
   .option('--json', 'Output report as JSON (default: Markdown)')
   .option('--output <file>', 'Write report to file instead of stdout')
   .option('--copy', 'Copy report to clipboard')
@@ -371,7 +371,7 @@ Examples
   List tools from the local Tabrix MCP runtime
     tabrix mcp tools
 
-  Inspect a GitHub repo page in the current browser session
+  Inspect a web page in the current browser session
     tabrix mcp call chrome_read_page --arg tabId=1850319377 --arg filter=interactive --arg depth=2
 
   Or provide the full object as JSON

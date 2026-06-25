@@ -7,9 +7,8 @@
  *
  * Design contract:
  *
- *   - The classifier is **family-agnostic**. GitHub / npmjs URLs go
- *     through the same code path as any other host. Family hints
- *     (e.g. `family: 'github'`) may be passed in to *break ties* but
+ *   - The classifier is **family-agnostic**. Every origin goes through the
+ *     same code path. Family hints may be passed in to *break ties* but
  *     MUST NOT be the deciding signal. Two reasons:
  *       (a) Tabrix's main line is "browser observe → endpoint
  *           knowledge → on-demand reader". Hardcoding the classifier
@@ -74,7 +73,7 @@ const READ_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD']);
 const MUTATION_METHODS: ReadonlySet<string> = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 const ANALYTICS_HOST_RE =
-  /(doubleclick|google-analytics|googletagmanager|segment\.io|sentry\.io|amplitude|mixpanel|hotjar|fullstory|datadoghq|newrelic|cloudflareinsights)\./i;
+  /(^|[.-])(analytics|tagmanager|doubleclick|adservice|adsystem|telemetry|metrics|stats|collect|beacon|pixel|segment|sentry|amplitude|mixpanel|hotjar|fullstory|datadog|newrelic|cloudflareinsights)([.-]|$)/i;
 
 const ASSET_EXT_RE =
   /\.(png|jpe?g|gif|svg|webp|ico|css|js|mjs|map|woff2?|ttf|otf|mp4|webm|mp3|wav|wasm)(\?|$)/i;
@@ -227,15 +226,6 @@ export function classifyNetworkObserveEndpoint(
     };
   }
 
-  if (ANALYTICS_HOST_RE.test(host)) {
-    return {
-      semanticType: 'analytics',
-      usableForTask: false,
-      noiseReason: 'analytics_host',
-      queryKeysSorted,
-    };
-  }
-
   if (PRIVATE_PATH_RE.test(path)) {
     return {
       semanticType: 'private',
@@ -245,20 +235,29 @@ export function classifyNetworkObserveEndpoint(
     };
   }
 
-  if (TELEMETRY_PATH_RE.test(path)) {
-    return {
-      semanticType: 'telemetry',
-      usableForTask: false,
-      noiseReason: 'telemetry_path',
-      queryKeysSorted,
-    };
-  }
-
   if (AUTH_PATH_RE.test(path)) {
     return {
       semanticType: 'auth',
       usableForTask: false,
       noiseReason: 'auth_path',
+      queryKeysSorted,
+    };
+  }
+
+  if (ANALYTICS_HOST_RE.test(host)) {
+    return {
+      semanticType: 'analytics',
+      usableForTask: false,
+      noiseReason: 'analytics_host',
+      queryKeysSorted,
+    };
+  }
+
+  if (TELEMETRY_PATH_RE.test(path)) {
+    return {
+      semanticType: 'telemetry',
+      usableForTask: false,
+      noiseReason: 'telemetry_path',
       queryKeysSorted,
     };
   }

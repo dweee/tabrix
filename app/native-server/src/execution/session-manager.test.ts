@@ -310,13 +310,13 @@ describe('SessionManager', () => {
                 type: 'text',
                 text: JSON.stringify({
                   page: {
-                    title: 'XHS current search',
-                    url: 'https://www.xiaohongshu.com/search_result/?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
+                    title: 'CONTENT current search',
+                    url: 'https://content.example/search_result/?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
                   },
-                  siteFamily: 'www.xiaohongshu.com',
-                  pageUrlPattern: 'https://www.xiaohongshu.com/search_result/',
+                  siteFamily: 'content.example',
+                  pageUrlPattern: 'https://content.example/search_result/',
                   pageRole: 'search_results',
-                  pageModelKey: 'page:www.xiaohongshu.com:search_results',
+                  pageModelKey: 'page:content.example:search_results',
                   pageState: 'complete',
                   sourceRoute: 'visible_dom_cards_bounded_scroll',
                   selectedDataSource: 'visible_dom_result_cards',
@@ -329,11 +329,11 @@ describe('SessionManager', () => {
                     {
                       rank: 1,
                       title: 'Current reusable card',
-                      url: 'https://www.xiaohongshu.com/explore/current-card',
+                      url: 'https://content.example/explore/current-card',
                       imageCount: 1,
                       confidence: 0.9,
                       actionTarget: {
-                        url: 'https://www.xiaohongshu.com/explore/current-card',
+                        url: 'https://content.example/explore/current-card',
                       },
                     },
                   ],
@@ -347,7 +347,7 @@ describe('SessionManager', () => {
         const projection = await mgr.flushAndProjectMkeIdle();
         const currentKnowledge = mgr
           .listRecentMkeKnowledgeModels(200, 0)
-          .find((model) => model.siteFamily === 'www.xiaohongshu.com');
+          .find((model) => model.siteFamily === 'content.example');
 
         expect(projection.knowledge?.processedTraceCount).toBeGreaterThan(100);
         expect(currentKnowledge).toBeDefined();

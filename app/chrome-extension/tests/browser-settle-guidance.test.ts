@@ -135,8 +135,8 @@ describe('browser settle guidance', () => {
           active: false,
           discarded: false,
           status: 'complete',
-          url: 'https://github.com/dashboard',
-          title: 'GitHub',
+          url: 'https://code.example/dashboard',
+          title: 'WorkspaceHost',
         } as chrome.tabs.Tab,
       ])
       .mockResolvedValueOnce([
@@ -146,8 +146,8 @@ describe('browser settle guidance', () => {
           active: false,
           discarded: false,
           status: 'complete',
-          url: 'https://github.com/dashboard',
-          title: 'GitHub',
+          url: 'https://code.example/dashboard',
+          title: 'WorkspaceHost',
         } as chrome.tabs.Tab,
       ]);
     vi.mocked(chrome.tabs.create).mockResolvedValue({
@@ -155,7 +155,7 @@ describe('browser settle guidance', () => {
       windowId: 9,
       active: false,
       status: 'loading',
-      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
       title: 'Loading',
     } as chrome.tabs.Tab);
     vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
@@ -164,7 +164,7 @@ describe('browser settle guidance', () => {
         windowId: 9,
         active: false,
         status: 'complete',
-        url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+        url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
         title: 'Search',
       },
       settled: true,
@@ -175,7 +175,7 @@ describe('browser settle guidance', () => {
     });
 
     const result = await navigateTool.execute({
-      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
       background: true,
     });
 
@@ -183,7 +183,7 @@ describe('browser settle guidance', () => {
     expect(chrome.windows.get).toHaveBeenCalledWith(9, { populate: false });
     expect(chrome.windows.getLastFocused).not.toHaveBeenCalled();
     expect(chrome.tabs.create).toHaveBeenCalledWith({
-      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
       windowId: 9,
       active: false,
     });
@@ -232,7 +232,7 @@ describe('browser settle guidance', () => {
         windowId: 1,
         active: true,
         status: 'loading',
-        url: 'https://github.com/search?type=repositories&q=ACP&s=stars&o=desc',
+        url: 'https://code.example/search?type=repositories&q=ACP&s=stars&o=desc',
         title: 'Repository search results',
       },
       settled: false,
@@ -243,14 +243,14 @@ describe('browser settle guidance', () => {
     });
 
     const result = await navigateTool.execute({
-      url: 'https://github.com/search?type=repositories&q=ACP&s=stars&o=desc',
+      url: 'https://code.example/search?type=repositories&q=ACP&s=stars&o=desc',
     });
 
     expect(result.isError).toBe(false);
     const payload = JSON.parse((result.content[0] as { text: string }).text);
     expect(payload).toMatchObject({
       success: true,
-      finalUrl: 'https://github.com/search?type=repositories&q=ACP&s=stars&o=desc',
+      finalUrl: 'https://code.example/search?type=repositories&q=ACP&s=stars&o=desc',
       status: 'loading',
       settled: false,
       settleReason: 'timeout',
@@ -309,14 +309,14 @@ describe('browser settle guidance', () => {
     });
 
     const result = await navigateTool.execute({
-      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
     });
 
     expect(result.isError).toBe(false);
     const payload = JSON.parse((result.content[0] as { text: string }).text);
     expect(payload).toMatchObject({
       success: true,
-      requestedUrl: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      requestedUrl: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
       status: 'loading',
       settled: false,
       settleReason: 'timeout',
@@ -337,7 +337,7 @@ describe('browser settle guidance', () => {
         windowId: 1,
         active: true,
         status: 'loading',
-        url: 'https://www.npmjs.com/search?q=playwright',
+        url: 'https://packages.example/search?q=playwright',
         title: 'Search | npm',
       },
       settled: false,
@@ -348,7 +348,7 @@ describe('browser settle guidance', () => {
     });
 
     const result = await navigateTool.execute({
-      url: 'https://www.npmjs.com/search?q=playwright',
+      url: 'https://packages.example/search?q=playwright',
       background: true,
     });
 
@@ -356,8 +356,8 @@ describe('browser settle guidance', () => {
     const payload = JSON.parse((result.content[0] as { text: string }).text);
     expect(payload).toMatchObject({
       success: true,
-      requestedUrl: 'https://www.npmjs.com/search?q=playwright',
-      finalUrl: 'https://www.npmjs.com/search?q=playwright',
+      requestedUrl: 'https://packages.example/search?q=playwright',
+      finalUrl: 'https://packages.example/search?q=playwright',
       status: 'loading',
       settled: false,
       settleReason: 'timeout',
@@ -378,7 +378,7 @@ describe('browser settle guidance', () => {
         active: true,
         status: 'loading',
         url: '',
-        pendingUrl: 'https://github.com/search?q=ACP&type=repositories',
+        pendingUrl: 'https://code.example/search?q=ACP&type=repositories',
         title: 'Repository search results',
       },
       settled: false,
@@ -389,7 +389,7 @@ describe('browser settle guidance', () => {
     });
 
     const result = await navigateTool.execute({
-      url: 'https://github.com/search?q=ACP&type=repositories',
+      url: 'https://code.example/search?q=ACP&type=repositories',
       background: true,
     });
 
@@ -397,8 +397,8 @@ describe('browser settle guidance', () => {
     const payload = JSON.parse((result.content[0] as { text: string }).text);
     expect(payload).toMatchObject({
       success: true,
-      requestedUrl: 'https://github.com/search?q=ACP&type=repositories',
-      finalUrl: 'https://github.com/search?q=ACP&type=repositories',
+      requestedUrl: 'https://code.example/search?q=ACP&type=repositories',
+      finalUrl: 'https://code.example/search?q=ACP&type=repositories',
       status: 'loading',
       settled: false,
       settleReason: 'timeout',
@@ -502,7 +502,7 @@ describe('browser settle guidance', () => {
     });
 
     const executePromise = navigateTool.execute({
-      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
       background: true,
     });
     await vi.advanceTimersByTimeAsync(5250);
@@ -513,7 +513,7 @@ describe('browser settle guidance', () => {
     expect(payload).toMatchObject({
       success: false,
       message: 'Failed to create navigation tab within bounded timeout',
-      requestedUrl: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      requestedUrl: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
       windowId: 1,
       cleanupTabIds: [20],
       pageReadable: false,
@@ -615,7 +615,7 @@ describe('browser settle guidance', () => {
         windowId: 1,
         active: true,
         status: 'complete',
-        url: 'https://github.com/example/project',
+        url: 'https://code.example/example/project',
         title: 'example/project',
       } as chrome.tabs.Tab,
     ]);
@@ -624,7 +624,7 @@ describe('browser settle guidance', () => {
       windowId: 1,
       active: true,
       status: 'complete',
-      url: 'https://github.com/example/project',
+      url: 'https://code.example/example/project',
       title: 'example/project',
     } as chrome.tabs.Tab);
     vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
@@ -633,7 +633,7 @@ describe('browser settle guidance', () => {
         windowId: 1,
         active: true,
         status: 'loading',
-        url: 'https://github.com/search?type=repositories&q=ACP&s=stars&o=desc',
+        url: 'https://code.example/search?type=repositories&q=ACP&s=stars&o=desc',
         title: 'Repository search results',
       },
       settled: false,
@@ -645,7 +645,7 @@ describe('browser settle guidance', () => {
 
     const result = await navigateTool.execute({
       tabId: 10,
-      url: 'https://github.com/search?type=repositories&q=ACP&s=stars&o=desc',
+      url: 'https://code.example/search?type=repositories&q=ACP&s=stars&o=desc',
     });
 
     expect(result.isError).toBe(false);
@@ -654,7 +654,7 @@ describe('browser settle guidance', () => {
       success: true,
       usedExistingTab: true,
       navigatedExplicitTab: true,
-      finalUrl: 'https://github.com/search?type=repositories&q=ACP&s=stars&o=desc',
+      finalUrl: 'https://code.example/search?type=repositories&q=ACP&s=stars&o=desc',
       settled: false,
       readyState: 'interactive',
       pageReadable: false,
@@ -670,7 +670,7 @@ describe('browser settle guidance', () => {
         windowId: 1,
         active: true,
         status: 'complete',
-        url: 'https://github.com/example/project',
+        url: 'https://code.example/example/project',
         title: 'example/project',
       } as chrome.tabs.Tab,
     ]);
@@ -679,7 +679,7 @@ describe('browser settle guidance', () => {
       windowId: 1,
       active: true,
       status: 'complete',
-      url: 'https://github.com/example/project',
+      url: 'https://code.example/example/project',
       title: 'example/project',
     } as chrome.tabs.Tab);
     vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
@@ -688,7 +688,7 @@ describe('browser settle guidance', () => {
         windowId: 1,
         active: true,
         status: 'loading',
-        url: 'https://github.com/example/project',
+        url: 'https://code.example/example/project',
         title: 'example/project',
       },
       settled: false,
@@ -700,14 +700,14 @@ describe('browser settle guidance', () => {
 
     const result = await navigateTool.execute({
       tabId: 10,
-      url: 'https://github.com/search?type=repositories&q=ACP&s=stars&o=desc',
+      url: 'https://code.example/search?type=repositories&q=ACP&s=stars&o=desc',
     });
 
     expect(result.isError).toBe(false);
     const payload = JSON.parse((result.content[0] as { text: string }).text);
     expect(payload).toMatchObject({
       success: true,
-      finalUrl: 'https://github.com/example/project',
+      finalUrl: 'https://code.example/example/project',
       settled: false,
       readyState: 'complete',
       pageReadable: false,
@@ -1914,19 +1914,19 @@ describe('browser settle guidance', () => {
     );
   });
 
-  it('classifies github issues_list pages in read_page metadata (public baseline)', async () => {
+  it('does not assign platform page roles in read_page metadata by default', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 42,
       windowId: 1,
       active: true,
       status: 'complete',
-      url: 'https://github.com/example/project/issues',
-      title: 'Issues · example/project',
+      url: 'https://content.example/search?q=ai',
+      title: 'Search results',
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
     vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
       success: true,
-      pageContent: 'Search Issues\nFilter by assignee\nLabels\nMilestone\nNew issue\nissue entries',
+      pageContent: 'Search results\nFilter by type\nSort by newest\nResult entries',
       refMap: ['ref_10', 'ref_11', 'ref_12'],
       stats: {
         processed: 18,
@@ -1947,9 +1947,9 @@ describe('browser settle guidance', () => {
       scheme: 'https',
     });
     expect(payload.summary).toMatchObject({
-      pageRole: 'issues_list',
-      primaryRegion: 'issues_results',
-      primaryRegionConfidence: 'high',
+      pageRole: 'unknown',
+      primaryRegion: null,
+      primaryRegionConfidence: null,
       footerOnly: false,
     });
   });
