@@ -91,7 +91,9 @@ import {
 } from './read-page-target-binding';
 import {
   bindPostActionDeltaEvidenceToPendingInteraction,
+  buildPostActionReadbackEvidence,
   buildPostActionDeltaSignalsFromEvidence,
+  buildRegionStatePostconditionForPendingInteraction,
   inferActionKindForToolName,
   inferPageInteractionChangeCause,
   readCandidateActionMetadata,
@@ -154,11 +156,6 @@ import {
   type StructuredReadGateResult,
 } from '../runtime/structured-read-gate';
 import {
-  inferRegionStatePostconditionKindForIntent,
-  verifyRegionStatePostcondition,
-  type RegionStatePostconditionResult,
-} from '../runtime/action-postcondition-verifier';
-import {
   produceToolCloseoutLifecycleEvidenceArtifact,
   produceToolFailureLifecycleEvidenceArtifact,
   produceUnifiedTaskCloseoutLifecycleEvidenceArtifact,
@@ -174,12 +171,9 @@ import type {
   BrowserPageThingProjection,
   ReadPageBrowserPageObjectCompactView,
   BrowserSourceLineage,
-  BrowserSourceFreshness,
   BrowserSourceTruthChain,
   BrowserTaskStateVerdict,
-  ActionKind,
   ReadPageAuthResumeVerification,
-  ReadPageCandidateActionIntent,
   ReadPageCompactSnapshot,
   ReadPageMode,
   ReadPageRequestedLayer,
@@ -3511,169 +3505,6 @@ function hasReliableVisibleRows(payload: Record<string, unknown>): boolean {
     (coverage === null || coverage >= 0.95) &&
     (quality === null || quality >= 0.7)
   );
-}
-
-function buildRegionStatePostconditionForPendingInteraction(
-  pendingInteraction: TaskPageInteractionSnapshot,
-  afterRegions: readonly ReadPageRegion[],
-  afterLoadReadiness: PostconditionLoadReadinessGate | null,
-  postActionReadback: PostActionReadbackEvidence,
-): RegionStatePostconditionResult | null {
-  const kind = inferRegionStatePostconditionKindForIntent({
-    intent: pendingInteraction.candidateActionIntent,
-    actionKind: pendingInteraction.actionKind,
-  });
-  if (!kind) return null;
-  const actionId = pendingInteraction.candidateActionId ?? pendingInteraction.action;
-  const freshnessFailure = evaluatePostActionReadbackFreshness(
-    pendingInteraction,
-    postActionReadback,
-  );
-  if (freshnessFailure) {
-    const producedAtMs = Date.now();
-    return {
-      actionId,
-      kind,
-      verdict: 'unknown',
-      reason: 'post_action_fresh_read_required',
-      beforeSummary: summarizeRegionsForPostcondition(pendingInteraction.beforePageRegions),
-      afterSummary: summarizeRegionsForPostcondition(afterRegions),
-      producedAtMs,
-      claimBoundary: freshnessFailure,
-    };
-  }
-  if (afterLoadReadiness?.canUseSnapshotForBusinessAction === false) {
-    const producedAtMs = Date.now();
-    return {
-      actionId,
-      kind,
-      verdict: 'unknown',
-      reason: 'after_snapshot_not_ready_for_business_action',
-      beforeSummary: summarizeRegionsForPostcondition(pendingInteraction.beforePageRegions),
-      afterSummary: summarizeRegionsForPostcondition(afterRegions),
-      producedAtMs,
-      claimBoundary: [
-        'region-state postconditions require a business-usable read_page snapshot;',
-        `loadReadiness=${afterLoadReadiness.status ?? 'unknown'}`,
-        `pageStability=${afterLoadReadiness.pageStability ?? 'unknown'}`,
-        afterLoadReadiness.nextStepHint
-          ? `nextStepHint=${afterLoadReadiness.nextStepHint}`
-          : 'nextStepHint=run_chrome_read_page_force_refresh',
-      ].join(' '),
-    };
-  }
-  if (pendingInteraction.beforePageRegions.length === 0 || afterRegions.length === 0) {
-    const producedAtMs = Date.now();
-    return {
-      actionId,
-      kind,
-      verdict: 'unknown',
-      reason:
-        pendingInteraction.beforePageRegions.length === 0
-          ? 'before_region_evidence_missing'
-          : 'after_region_evidence_missing',
-      beforeSummary: summarizeRegionsForPostcondition(pendingInteraction.beforePageRegions),
-      afterSummary: summarizeRegionsForPostcondition(afterRegions),
-      producedAtMs,
-      claimBoundary:
-        'region-state postconditions require before/after page-region evidence; missing evidence is not business success',
-    };
-  }
-  return verifyRegionStatePostcondition({
-    kind,
-    actionId,
-    beforeRegions: pendingInteraction.beforePageRegions,
-    afterRegions,
-    targetRefs: pendingInteraction.targetRefs,
-  });
-}
-
-interface PostActionReadbackEvidence {
-  readStartedAtMs: number | null;
-  projectionSourceObservedAtMs: number | null;
-  sourceFreshness: BrowserSourceFreshness | null;
-  projectionId: string | null;
-}
-
-function buildPostActionReadbackEvidence(input: {
-  projection: BrowserPageThingProjection;
-  readStartedAtMs?: number | null;
-}): PostActionReadbackEvidence {
-  const readStartedAtMs =
-    typeof input.readStartedAtMs === 'number' && Number.isFinite(input.readStartedAtMs)
-      ? Math.floor(input.readStartedAtMs)
-      : null;
-  return {
-    readStartedAtMs,
-    projectionSourceObservedAtMs: parseIsoTimeMs(input.projection.sourceObservedAt),
-    sourceFreshness: input.projection.sourceFreshness ?? null,
-    projectionId:
-      typeof input.projection.projectionId === 'string' && input.projection.projectionId.length > 0
-        ? input.projection.projectionId
-        : null,
-  };
-}
-
-function evaluatePostActionReadbackFreshness(
-  pendingInteraction: TaskPageInteractionSnapshot,
-  evidence: PostActionReadbackEvidence,
-): string | null {
-  const actionProducedAtMs =
-    typeof pendingInteraction.producedAtMs === 'number' &&
-    Number.isFinite(pendingInteraction.producedAtMs)
-      ? Math.floor(pendingInteraction.producedAtMs)
-      : null;
-  if (actionProducedAtMs === null) {
-    return [
-      'Region-state postconditions require a timestamped browser action before post-action readback can prove business success;',
-      `sourceFreshness=${evidence.sourceFreshness ?? 'unknown'}`,
-      `projectionId=${evidence.projectionId ?? 'unknown'}`,
-      'the action timestamp is missing, so the readback/action ordering is not proven.',
-    ].join(' ');
-  }
-  if (evidence.sourceFreshness !== 'fresh') {
-    return [
-      'Region-state postconditions require a fresh post-action readback;',
-      `sourceFreshness=${evidence.sourceFreshness ?? 'unknown'}`,
-      `projectionId=${evidence.projectionId ?? 'unknown'}`,
-      'run chrome_read_page with forceRefresh=true on the same tab before resuming.',
-    ].join(' ');
-  }
-  if (evidence.readStartedAtMs !== null && evidence.readStartedAtMs < actionProducedAtMs) {
-    return [
-      'Region-state postconditions require the readback call to start after the browser action;',
-      `actionProducedAtMs=${actionProducedAtMs}`,
-      `readStartedAtMs=${evidence.readStartedAtMs}`,
-      'run chrome_read_page with forceRefresh=true on the same tab before resuming.',
-    ].join(' ');
-  }
-  if (
-    evidence.projectionSourceObservedAtMs !== null &&
-    evidence.projectionSourceObservedAtMs < actionProducedAtMs
-  ) {
-    return [
-      'Region-state postconditions require page evidence observed after the browser action;',
-      `actionProducedAtMs=${actionProducedAtMs}`,
-      `sourceObservedAtMs=${evidence.projectionSourceObservedAtMs}`,
-      `projectionId=${evidence.projectionId ?? 'unknown'}`,
-      'the snapshot may be stale, so it is not business success proof.',
-    ].join(' ');
-  }
-  return null;
-}
-
-function parseIsoTimeMs(value: unknown): number | null {
-  if (typeof value !== 'string' || value.trim().length === 0) return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function summarizeRegionsForPostcondition(regions: readonly ReadPageRegion[]): string[] {
-  return regions.slice(0, 8).map((region) => {
-    const state =
-      typeof region.state === 'string' && region.state.length > 0 ? region.state : 'unknown';
-    return `${region.regionId}:${region.regionType}:${state}:${region.objects.length}`;
-  });
 }
 
 function readPagePostconditionRegions(
