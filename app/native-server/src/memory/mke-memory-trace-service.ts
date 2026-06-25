@@ -487,6 +487,84 @@ function readResultCardStableTarget(input: {
   };
 }
 
+function summarizeResultCardCollectionWindow(
+  cards: readonly unknown[],
+): Record<string, unknown> | null {
+  let cardCount = 0;
+  let minScrollY: number | null = null;
+  let maxScrollY: number | null = null;
+  let minGlobalTop: number | null = null;
+  let maxGlobalTop: number | null = null;
+  let minViewportTop: number | null = null;
+  let maxViewportBottom: number | null = null;
+  const sourceStrategies = new Set<string>();
+
+  for (const rawCard of cards) {
+    const card = readObject(rawCard);
+    if (!card) continue;
+    const actionTarget = readObject(card.actionTarget);
+    const sourceScrollY = readNumber(card.sourceScrollY, actionTarget?.sourceScrollY);
+    const firstSeenGlobalTop = readNumber(card.firstSeenGlobalTop);
+    const rect = readObject(card.rect);
+    const rectY = readNumber(rect?.y);
+    const rectHeight = readNumber(rect?.height);
+    const sourceStrategy = readString(card.sourceStrategy);
+    cardCount += 1;
+
+    if (sourceScrollY !== null) {
+      minScrollY = minScrollY === null ? sourceScrollY : Math.min(minScrollY, sourceScrollY);
+      maxScrollY = maxScrollY === null ? sourceScrollY : Math.max(maxScrollY, sourceScrollY);
+    }
+    if (firstSeenGlobalTop !== null) {
+      minGlobalTop =
+        minGlobalTop === null ? firstSeenGlobalTop : Math.min(minGlobalTop, firstSeenGlobalTop);
+      maxGlobalTop =
+        maxGlobalTop === null ? firstSeenGlobalTop : Math.max(maxGlobalTop, firstSeenGlobalTop);
+    }
+    if (rectY !== null) {
+      minViewportTop = minViewportTop === null ? rectY : Math.min(minViewportTop, rectY);
+      if (rectHeight !== null) {
+        const viewportBottom = rectY + Math.max(0, rectHeight);
+        maxViewportBottom =
+          maxViewportBottom === null ? viewportBottom : Math.max(maxViewportBottom, viewportBottom);
+      }
+    }
+    if (sourceStrategy) sourceStrategies.add(sourceStrategy);
+  }
+
+  if (cardCount === 0) return null;
+  const summary: Record<string, unknown> = {
+    cardCount,
+  };
+  if (minScrollY !== null && maxScrollY !== null) {
+    summary.scrollYRange = { min: minScrollY, max: maxScrollY };
+  }
+  if (minGlobalTop !== null && maxGlobalTop !== null) {
+    summary.globalTopRange = { min: minGlobalTop, max: maxGlobalTop };
+  }
+  if (minViewportTop !== null && maxViewportBottom !== null) {
+    summary.viewportYRange = { min: minViewportTop, max: maxViewportBottom };
+  }
+  if (sourceStrategies.size > 0) {
+    summary.sourceStrategies = Array.from(sourceStrategies).sort();
+  }
+  return summary;
+}
+
+function summarizeResultCardSourceWindow(
+  card: Record<string, unknown>,
+  actionTarget: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  const sourceWindow: Record<string, unknown> = {};
+  const sourceScrollY = readNumber(card.sourceScrollY, actionTarget?.sourceScrollY);
+  const firstSeenGlobalTop = readNumber(card.firstSeenGlobalTop);
+  const sourceStrategy = readString(card.sourceStrategy);
+  if (sourceScrollY !== null) sourceWindow.sourceScrollY = sourceScrollY;
+  if (firstSeenGlobalTop !== null) sourceWindow.firstSeenGlobalTop = firstSeenGlobalTop;
+  if (sourceStrategy) sourceWindow.sourceStrategy = sourceStrategy;
+  return Object.keys(sourceWindow).length > 0 ? sourceWindow : null;
+}
+
 function normalizeStableLocatorChain(value: unknown): string[] {
   return readArray(value)
     .map((entry): string | null => {
@@ -2156,6 +2234,7 @@ export class MkeMemoryTraceService {
     const targetRefCoverageRate =
       readFiniteNumber(payload.targetRefCoverageRate, targetabilitySummary.targetRefCoverageRate) ??
       computedTargetabilitySummary.targetRefCoverageRate;
+    const collectionWindow = summarizeResultCardCollectionWindow(cards);
     const blockedSurface =
       stringHasBlockedPageSignal(urlFields.rootRoute) ||
       stringHasBlockedPageSignal(urlFields.currentRoute) ||
@@ -2196,6 +2275,7 @@ export class MkeMemoryTraceService {
         status: readString(payload.status),
         targetRefCoverageRate,
         targetabilitySummary,
+        ...(collectionWindow ? { collectionWindow } : {}),
         filterState,
         source: 'result_card_collection',
         pageTitle: readString(page?.title),
@@ -2215,6 +2295,7 @@ export class MkeMemoryTraceService {
           ? 'restricted'
           : readString(payload.pageState, trace.pageState, 'observed'),
         canTabrixOperate,
+        ...(collectionWindow ? { collectionWindow } : {}),
       }),
       primaryConclusion:
         observedResultCount > 0 ? `识别到 ${observedResultCount} 个结果卡片` : '未识别到结果卡片',
@@ -2293,6 +2374,7 @@ export class MkeMemoryTraceService {
               sourceScrollY: readNumber(card.sourceScrollY),
             }
           : null;
+      const sourceWindow = summarizeResultCardSourceWindow(card, rawActionTarget);
       const actionTypes = [
         hasExecutableResultCardClick ? 'click_result_card' : null,
         readString(card.url) ? 'open_via_url' : null,
@@ -2342,6 +2424,7 @@ export class MkeMemoryTraceService {
           stableTarget,
           actionTarget,
           sessionOnlyTarget,
+          ...(sourceWindow ? { sourceWindow } : {}),
         }),
         facts: this.sanitizeBrowserObjectValue({
           rank,
@@ -2356,6 +2439,7 @@ export class MkeMemoryTraceService {
           imageCount: readNumber(card.imageCount),
           actionTarget,
           sessionOnlyTarget,
+          ...(sourceWindow ? { sourceWindow } : {}),
           reasons: readArray(card.reasons).filter(
             (item): item is string => typeof item === 'string',
           ),

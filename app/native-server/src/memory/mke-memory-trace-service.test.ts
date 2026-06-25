@@ -1005,6 +1005,12 @@ describe('MkeMemoryTraceService', () => {
           untargetableCount: 0,
           status: 'partial_stable_targets',
         },
+        collectionWindow: {
+          cardCount: 2,
+          scrollYRange: { min: 0, max: 480 },
+          viewportYRange: { min: 20, max: 360 },
+          sourceStrategies: ['list_container'],
+        },
       });
       const cards = objects
         .filter((object) => object.objectType === 'result_card')
@@ -1059,6 +1065,10 @@ describe('MkeMemoryTraceService', () => {
           center: { x: 100, y: 56 },
           coordinateFrame: 'viewport',
           sourceScrollY: 0,
+        },
+        sourceWindow: {
+          sourceScrollY: 0,
+          sourceStrategy: 'list_container',
         },
         sourceStrategy: 'list_container',
       });
@@ -2395,6 +2405,8 @@ describe('MkeMemoryTraceService', () => {
         rank: number;
         targetRef: string;
         candidateActionId: string;
+        sourceScrollY: number;
+        firstSeenGlobalTop: number;
         observedAtOffsetMs: number;
       }) => {
         traceService.recordToolCall({
@@ -2452,6 +2464,9 @@ describe('MkeMemoryTraceService', () => {
                   },
                 },
                 confidence: 0.86,
+                sourceScrollY: input.sourceScrollY,
+                firstSeenGlobalTop: input.firstSeenGlobalTop,
+                sourceStrategy: 'list_container',
               },
             ],
           }),
@@ -2465,6 +2480,8 @@ describe('MkeMemoryTraceService', () => {
         rank: 1,
         targetRef: 'ref_result_card_1',
         candidateActionId: 'ca_card_first',
+        sourceScrollY: 0,
+        firstSeenGlobalTop: 120,
         observedAtOffsetMs: 0,
       });
       recordCollectedCards({
@@ -2473,6 +2490,8 @@ describe('MkeMemoryTraceService', () => {
         rank: 7,
         targetRef: 'ref_result_card_7_after_scroll',
         candidateActionId: 'ca_card_second',
+        sourceScrollY: 720,
+        firstSeenGlobalTop: 1840,
         observedAtOffsetMs: 1000,
       });
 
@@ -2492,6 +2511,18 @@ describe('MkeMemoryTraceService', () => {
       expect(cards[0]?.targetability).toMatchObject({
         rank: 7,
         targetabilityStatus: 'stable_click_target',
+        sourceWindow: {
+          sourceScrollY: 720,
+          firstSeenGlobalTop: 1840,
+          sourceStrategy: 'list_container',
+        },
+      });
+      expect(cards[0]?.facts).toMatchObject({
+        sourceWindow: {
+          sourceScrollY: 720,
+          firstSeenGlobalTop: 1840,
+          sourceStrategy: 'list_container',
+        },
       });
       expect(cards[0]?.sourceTraceIds).toHaveLength(2);
     } finally {
