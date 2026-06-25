@@ -484,19 +484,7 @@ try {
 "@
     },
     @{
-      name = 'group-full-2-gif'
-      kind = 'unattended'
-      prompt = @"
-请使用 tabrix 工具一次会话连续完成：
-1) chrome_navigate 打开 $BaseUrl，确保当前标签页是普通网页而不是 chrome:// 或扩展页面
-2) chrome_gif_recorder(action=clear)
-3) chrome_gif_recorder(action=start,durationMs=4000,fps=4,filename=claude-full-gif)
-4) chrome_gif_recorder(action=stop)
-最后给每一步返回 success/failed 摘要。
-"@
-    },
-    @{
-      name = 'group-full-3-upload-select'
+      name = 'group-full-2-upload-select'
       kind = 'collaborative'
       prompt = @"
 请使用 tabrix 工具一次会话连续完成：
@@ -507,7 +495,7 @@ try {
 "@
       },
       @{
-        name = 'group-full-4-close-tabs'
+        name = 'group-full-3-close-tabs'
         kind = 'unattended'
         prompt = @"
 请使用 tabrix 工具一次会话连续完成：

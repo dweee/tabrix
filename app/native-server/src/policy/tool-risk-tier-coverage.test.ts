@@ -144,7 +144,6 @@ describe('TOOL_RISK_TIERS coverage invariants', () => {
       'chrome_console',
       'chrome_upload_file',
       'chrome_handle_dialog',
-      'chrome_gif_recorder',
       'tabrix_choose_context',
       'tabrix_choose_context_record_outcome',
       'memory_record_ai_feedback',

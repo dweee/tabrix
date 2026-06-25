@@ -7,7 +7,7 @@ Complete reference for all available tools and their parameters.
 - [Browser Management](#browser-management)
 - [Page Reading & Content](#page-reading--content)
 - [Page Interaction](#page-interaction)
-- [Screenshots & Recording](#screenshots--recording)
+- [Screenshots & Visual Checks](#screenshots--visual-checks)
 - [Network](#network)
 - [Performance](#performance)
 - [Data Management](#data-management)
@@ -533,7 +533,7 @@ Upload files to `<input type="file">` via Chrome DevTools Protocol.
 }
 ```
 
-## 📸 Screenshots & Recording
+## 📸 Screenshots & Visual Checks
 
 ### `chrome_screenshot`
 
@@ -595,39 +595,6 @@ Accept or dismiss JavaScript `alert` / `confirm` / `prompt` via CDP. Only works 
 {
   "action": "accept",
   "promptText": "yes"
-}
-```
-
-### `chrome_gif_recorder`
-
-Record tab activity as an animated GIF. Modes include fixed-FPS `start`, action-triggered `auto_start`, `stop`, `status`, `capture`, `clear`, and `export`. Allow a short delay between `start` and `stop` to avoid race errors.
-
-**Parameters**:
-
-- `action` (string, required): `start` | `stop` | `status` | `auto_start` | `capture` | `clear` | `export`.
-- `tabId` (number, optional): Recording/export target tab (default: active tab).
-- `windowId` (number, optional): Window when `tabId` is omitted.
-- `fps` (number, optional): Fixed-FPS mode, 1–30 (default: `5`).
-- `durationMs` (number, optional): Max duration for fixed-FPS (default: `5000`, max: `60000`).
-- `maxFrames` (number, optional): Frame cap (defaults differ by mode; max `300`).
-- `width` / `height` (number, optional): Output size (defaults `800×600`, max `1920×1080`).
-- `maxColors` (number, optional): Palette size (default: `256`).
-- `filename` (string, optional): Base name without extension.
-- `captureDelayMs` (number, optional): Auto mode: delay after action before frame (default: `150`).
-- `frameDelayCs` (number, optional): Auto mode: centiseconds per frame (default: `20`).
-- `annotation` (string, optional): With `capture` in auto mode, label on frame.
-- `download` (boolean, optional): For `export`, `true` downloads, `false` drag-and-drop upload (default: `true`).
-- `coordinates` / `ref` / `selector` (optional): For `export` with `download=false`, drop target.
-- `enhancedRendering` (boolean | object, optional): Auto mode overlays (click indicators, drag paths, labels); `true` enables defaults.
-
-**Example**:
-
-```json
-{
-  "action": "start",
-  "fps": 8,
-  "durationMs": 10000,
-  "filename": "demo-flow"
 }
 ```
 
@@ -1025,14 +992,13 @@ Recommended tool combinations by task goal.
 | Performance analysis     | `performance_start_trace` → actions → `performance_stop_trace` → `performance_analyze_insight` | Full trace workflow                       |
 | Wait for download        | `chrome_handle_download`                                                                       | Monitor browser download events           |
 
-### Screenshots & Recording
+### Screenshots & Visual Checks
 
-| Scenario                    | Tools                                                                  | Notes                           |
-| --------------------------- | ---------------------------------------------------------------------- | ------------------------------- |
-| Screenshot current page     | `chrome_screenshot`                                                    | Full page by default            |
-| Screenshot specific element | `chrome_screenshot` (selector)                                         | Target by CSS selector          |
-| Record browser activity     | `chrome_gif_recorder` (start) → actions → `chrome_gif_recorder` (stop) | Records as animated GIF         |
-| Execute JavaScript          | `chrome_javascript` (code)                                             | Run custom code in page context |
+| Scenario                    | Tools                          | Notes                           |
+| --------------------------- | ------------------------------ | ------------------------------- |
+| Screenshot current page     | `chrome_screenshot`            | Full page by default            |
+| Screenshot specific element | `chrome_screenshot` (selector) | Target by CSS selector          |
+| Execute JavaScript          | `chrome_javascript` (code)     | Run custom code in page context |
 
 ### Background Mode (`background: true`)
 
@@ -1046,6 +1012,6 @@ Some tools support a `background` parameter that avoids stealing window focus or
 | `chrome_console`         | Yes          | CDP console capture without activating the tab.                                                                                                                                       |
 | `chrome_get_web_content` | Yes          | Fetches page content without focusing.                                                                                                                                                |
 
-Tools **not** listed above (e.g. `chrome_switch_tab`, `chrome_network_capture`, `chrome_gif_recorder`) always operate in the foreground.
+Tools **not** listed above (e.g. `chrome_switch_tab`, `chrome_network_capture`) always operate in the foreground.
 
-This API provides browser automation, performance tooling, media capture, and unified network inspection for agent workflows.
+This API provides browser automation, performance tooling, and unified network inspection for agent workflows.

@@ -129,7 +129,6 @@ What a healthy first success looks like:
 - "Fill the search box with 'MCP protocol' and click search." — `chrome_fill_or_select` + `chrome_click_element`
 - "Search my browser history for 'AI'." — `chrome_history`
 - "Bookmark this page." — `chrome_bookmark_add`
-- "Record the next 10 seconds of browser activity as a GIF." — `chrome_gif_recorder`
 
 Deeper capability maps:
 

@@ -143,7 +143,6 @@ const ALL_TOOL_NAMES = [
   'chrome_console',
   'chrome_upload_file',
   'chrome_handle_dialog',
-  'chrome_gif_recorder',
 ] as const;
 
 function stringifyError(err: unknown): string {
@@ -1906,19 +1905,6 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<number> {
       }),
     );
     record('chrome_history', JSON.stringify(historyResult).length > 0, 'History query succeeded');
-
-    traceStep('chrome_gif_recorder(status):start');
-    const gifStatus = parseToolText(
-      await mcp.callTool('chrome_gif_recorder', {
-        action: 'status',
-        tabId: tempTabId,
-      }),
-    );
-    record(
-      'chrome_gif_recorder',
-      JSON.stringify(gifStatus).length > 0,
-      'Queried GIF recorder status',
-    );
 
     traceStep('performance_start_trace:start');
     await mcp.callTool('performance_start_trace', {
