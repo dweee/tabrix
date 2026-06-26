@@ -222,18 +222,30 @@ export function buildReadPageSnapshotSourceStats(params: {
       seenObjectIds.add(childObjectId);
     }
   }
-  const actionableTargets: ReadPageActionableTargetSummary[] = actionList.map((action) => ({
-    targetId:
-      action.id ??
-      `${params.pageType}-${params.pageRole}-target-${action.targetRef ?? 'unknown'}-${action.actionType || 'unknown'}`,
-    label: action.label || action.targetRef || action.id || 'candidate_action',
-    kind: (action.actionType || 'click') as ReadPageActionableTargetSummary['kind'],
-    targetRef: action.targetRef,
-    ref: action.targetRef,
-    sourceProvenance: action.locatorChain?.length ? 'dom' : 'unknown',
-    freshness: 'fresh',
-    ...(action.actionType === 'fill' ? { objectId: action.targetRef } : {}),
-  }));
+  const objectIdByRef = new Map<string, string>();
+  for (const object of objects) {
+    const refs = [object.targetRef, object.ref, object.objectId]
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .filter(Boolean);
+    for (const ref of refs) {
+      if (!objectIdByRef.has(ref)) objectIdByRef.set(ref, object.objectId);
+    }
+  }
+  const actionableTargets: ReadPageActionableTargetSummary[] = actionList.map((action) => {
+    const targetRef = typeof action.targetRef === 'string' ? action.targetRef.trim() : '';
+    return {
+      targetId:
+        action.id ??
+        `${params.pageType}-${params.pageRole}-target-${targetRef || 'unknown'}-${action.actionType || 'unknown'}`,
+      label: action.label || targetRef || action.id || 'candidate_action',
+      kind: (action.actionType || 'click') as ReadPageActionableTargetSummary['kind'],
+      targetRef: action.targetRef,
+      ref: action.targetRef,
+      sourceProvenance: action.locatorChain?.length ? 'dom' : 'unknown',
+      freshness: 'fresh',
+      objectId: objectIdByRef.get(targetRef) ?? null,
+    };
+  });
 
   return {
     source: 'read_page_object_snapshot',

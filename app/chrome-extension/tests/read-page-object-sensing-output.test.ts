@@ -135,11 +135,13 @@ describe('read_page object sensing output', () => {
 
     expect(output.pageDeltaReport).toMatchObject({
       actionId: 'act_open_result',
+      targetObjectId: 'card_1',
       deltaKind: 'list_refreshed',
     });
     expect(output.postActionDeltaEvidence).toMatchObject({
       actionId: 'act_open_result',
       tabId: 44,
+      targetObjectId: 'card_1',
       observedChangeKind: 'list_refreshed',
     });
   });
