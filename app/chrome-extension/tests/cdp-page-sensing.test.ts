@@ -482,6 +482,41 @@ describe('CDP page sensing snapshot', () => {
     });
   });
 
+  it('records privacy-safe partial errors when optional CDP probes fail', async () => {
+    sendCommandMock.mockImplementation(async (_tabId: number, method: string) => {
+      if (method === 'Runtime.evaluate') {
+        return {
+          result: {
+            value: {
+              readyState: 'complete',
+              visibilityState: 'visible',
+              focused: true,
+              url: 'https://docs.example.test/guide?private=1',
+              title: 'Docs',
+            },
+          },
+        };
+      }
+      if (method === 'Page.getFrameTree') {
+        throw new Error('frame tree unavailable for current target');
+      }
+      if (method === 'Accessibility.getFullAXTree') {
+        throw new Error('ax tree unavailable for current target');
+      }
+      return {};
+    });
+
+    const snapshot = await captureCDPPageSensingSnapshot(46);
+
+    expect(snapshot).toMatchObject({
+      available: true,
+      readiness: 'complete',
+      partialErrors: ['frame_tree_unavailable', 'accessibility_tree_unavailable'],
+    });
+    expect(JSON.stringify(snapshot)).not.toContain('current target');
+    expect(JSON.stringify(snapshot)).not.toContain('private=1');
+  });
+
   it('probes DOM visibility and occlusion from backend node ids', async () => {
     sendCommandMock.mockImplementation(async (_tabId: number, method: string, params?: any) => {
       if (method === 'DOM.resolveNode' && params?.backendNodeId === 501) {

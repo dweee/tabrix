@@ -880,6 +880,7 @@ export interface ReadPageCDPSensingSummary {
     errorCount: number;
     warningCount: number;
   };
+  partialErrors?: string[];
   claimBoundary: string;
 }
 

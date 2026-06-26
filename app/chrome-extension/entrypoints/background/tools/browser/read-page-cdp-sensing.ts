@@ -44,6 +44,7 @@ export function buildReadPageCDPSensingSummary(
     ...(snapshot.networkResources ? { networkResources: snapshot.networkResources } : {}),
     ...(snapshot.console ? { console: snapshot.console } : {}),
     ...(snapshot.accessibility ? { accessibility: snapshot.accessibility } : {}),
+    ...(snapshot.partialErrors?.length ? { partialErrors: snapshot.partialErrors } : {}),
     claimBoundary:
       'cdp_page_sensing is read-only browser state evidence; it is not page-object completeness, action success, login success, or business success proof',
   };

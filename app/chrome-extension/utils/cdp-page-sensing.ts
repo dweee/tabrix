@@ -146,6 +146,7 @@ export interface CDPPageSensingSnapshot {
   networkResources?: CDPNetworkResourceSummary;
   console?: CDPConsoleSummary;
   accessibility?: CDPAccessibilitySummary;
+  partialErrors?: string[];
   error?: string;
 }
 
@@ -335,6 +336,10 @@ export async function captureCDPPageSensingSnapshot(
   const failedRequests = new Set<string>();
   let topFrameNavigatedAfterReady = false;
   let navigatedFrameUrl: string | undefined;
+  const partialErrors: string[] = [];
+  const recordPartialError = (code: string): void => {
+    if (!partialErrors.includes(code)) partialErrors.push(code);
+  };
 
   try {
     return await cdpSessionManager.withSession(tabId, CDP_PAGE_SENSING_OWNER, async () => {
@@ -390,11 +395,26 @@ export async function captureCDPPageSensingSnapshot(
       cdpSessionManager.addEventListener(eventListener);
       try {
         await Promise.all([
-          cdpSessionManager.sendCommand(tabId, 'Runtime.enable').catch(() => undefined),
-          cdpSessionManager.sendCommand(tabId, 'Page.enable').catch(() => undefined),
-          cdpSessionManager.sendCommand(tabId, 'Network.enable').catch(() => undefined),
-          cdpSessionManager.sendCommand(tabId, 'Log.enable').catch(() => undefined),
-          cdpSessionManager.sendCommand(tabId, 'Accessibility.enable').catch(() => undefined),
+          cdpSessionManager.sendCommand(tabId, 'Runtime.enable').catch(() => {
+            recordPartialError('runtime_enable_failed');
+            return undefined;
+          }),
+          cdpSessionManager.sendCommand(tabId, 'Page.enable').catch(() => {
+            recordPartialError('page_enable_failed');
+            return undefined;
+          }),
+          cdpSessionManager.sendCommand(tabId, 'Network.enable').catch(() => {
+            recordPartialError('network_enable_failed');
+            return undefined;
+          }),
+          cdpSessionManager.sendCommand(tabId, 'Log.enable').catch(() => {
+            recordPartialError('log_enable_failed');
+            return undefined;
+          }),
+          cdpSessionManager.sendCommand(tabId, 'Accessibility.enable').catch(() => {
+            recordPartialError('accessibility_enable_failed');
+            return undefined;
+          }),
         ]);
 
         const [runtimeResult, frameTreeResult, accessibilityTreeResult] = await Promise.all([
@@ -405,13 +425,19 @@ export async function captureCDPPageSensingSnapshot(
           }),
           cdpSessionManager
             .sendCommand<CDPFrameTreeResponse>(tabId, 'Page.getFrameTree')
-            .catch(() => undefined),
+            .catch(() => {
+              recordPartialError('frame_tree_unavailable');
+              return undefined;
+            }),
           cdpSessionManager
             .sendCommand(tabId, 'Accessibility.getFullAXTree', {
               depth: 6,
               fetchRelatives: false,
             })
-            .catch(() => undefined),
+            .catch(() => {
+              recordPartialError('accessibility_tree_unavailable');
+              return undefined;
+            }),
         ]);
 
         await new Promise((resolve) => setTimeout(resolve, CDP_PAGE_SENSING_EVENT_WINDOW_MS));
@@ -438,6 +464,7 @@ export async function captureCDPPageSensingSnapshot(
         const accessibility = await enrichAccessibilityTreeLocators(
           tabId,
           summarizeAccessibilityTree(accessibilityTreeResult),
+          partialErrors,
         );
 
         return {
@@ -461,6 +488,7 @@ export async function captureCDPPageSensingSnapshot(
           networkActivity: networkActivityResolved,
           console: consoleSummaryBounded,
           accessibility: accessibility ?? undefined,
+          ...(partialErrors.length > 0 ? { partialErrors } : {}),
         };
       } finally {
         cdpSessionManager.removeEventListener(eventListener);
@@ -760,6 +788,7 @@ export async function probeNodeVisibility(
 async function enrichAccessibilityTreeLocators(
   tabId: number,
   summary: CDPAccessibilitySummary | undefined,
+  partialErrors?: string[],
 ): Promise<CDPAccessibilitySummary | undefined> {
   if (!summary?.objectCandidates?.length) return summary;
   const candidatesWithBackendNode = summary.objectCandidates.filter(
@@ -804,6 +833,9 @@ async function enrichAccessibilityTreeLocators(
     }
     return { ...summary, objectCandidates: enrichedCandidates };
   } catch {
+    if (partialErrors && !partialErrors.includes('accessibility_locator_enrichment_failed')) {
+      partialErrors.push('accessibility_locator_enrichment_failed');
+    }
     return summary;
   }
 }

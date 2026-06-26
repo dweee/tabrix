@@ -49,6 +49,7 @@ describe('read_page CDP sensing summary', () => {
           errorCount: 1,
           warningCount: 2,
         },
+        partialErrors: ['frame_tree_unavailable'],
       }),
     );
 
@@ -69,6 +70,7 @@ describe('read_page CDP sensing summary', () => {
         errorCount: 1,
         warningCount: 2,
       },
+      partialErrors: ['frame_tree_unavailable'],
     });
     expect(summary?.claimBoundary).toContain('read-only browser state evidence');
   });
