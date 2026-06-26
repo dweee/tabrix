@@ -239,7 +239,7 @@ describe('tabrix metadata envelope', () => {
     [TOOL_NAMES.BROWSER.HISTORY],
     [TOOL_NAMES.BROWSER.BOOKMARK_SEARCH],
     [TOOL_NAMES.BROWSER.PERFORMANCE_ANALYZE_INSIGHT],
-  ])('does not request AI feedback for default auxiliary browser traces: %s', (toolName) => {
+  ])('requests AI feedback for AI-requested auxiliary browser traces: %s', (toolName) => {
     const result = attachTabrixMemoryTraceEnvelope(
       textResult({ status: 'ok' }),
       makeTrace({
@@ -259,9 +259,13 @@ describe('tabrix metadata envelope', () => {
     expect(payload._tabrix).toMatchObject({
       traceId: 'trace-1',
       toolName,
-      businessFeedbackRequired: false,
+      aiFeedbackRequired: true,
+      businessFeedbackRequired: true,
+      feedbackTarget: {
+        traceId: 'trace-1',
+        feedbackToken: expect.any(String),
+      },
     });
-    expect(payload._tabrix).not.toHaveProperty('feedbackTarget');
   });
 
   it.each([

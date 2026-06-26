@@ -292,7 +292,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     [TOOL_NAMES.BROWSER.BOOKMARK_SEARCH],
     [TOOL_NAMES.BROWSER.PERFORMANCE_ANALYZE_INSIGHT],
   ])(
-    'GET /memory/mke/traces marks default auxiliary browser trace as not required: %s',
+    'GET /memory/mke/traces keeps AI-requested auxiliary browser trace pending: %s',
     async (toolName) => {
       const traceService = sessionManager.memoryTraces;
       if (!traceService) throw new Error('MKE trace service is not available in tests');
@@ -323,8 +323,8 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       expect(res.body.data.traces).toHaveLength(1);
       expect(res.body.data.traces[0]).toMatchObject({
         toolName,
-        aiFeedbackRequired: false,
-        aiFeedbackState: 'not_required',
+        aiFeedbackRequired: true,
+        aiFeedbackState: 'pending',
         aiFeedback: null,
       });
     },

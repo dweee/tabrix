@@ -35,7 +35,7 @@ describe('AI feedback requirement rule', () => {
       TOOL_NAMES.BROWSER.JAVASCRIPT,
       TOOL_NAMES.BROWSER.COMPUTER,
     ]);
-    const taskIntentFeedbackTools = new Set<string>([
+    const auxiliaryBrowserFeedbackTools = new Set<string>([
       TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS,
       TOOL_NAMES.BROWSER.SCREENSHOT,
       TOOL_NAMES.BROWSER.CONSOLE,
@@ -56,7 +56,7 @@ describe('AI feedback requirement rule', () => {
     ]);
     const classified = new Set<string>([
       ...defaultFeedbackTools,
-      ...taskIntentFeedbackTools,
+      ...auxiliaryBrowserFeedbackTools,
       ...neverFeedbackTools,
     ]);
     const browserTools = Object.values(TOOL_NAMES.BROWSER);
@@ -66,11 +66,14 @@ describe('AI feedback requirement rule', () => {
       expect(shouldRequestAiFeedbackForTool(toolName)).toBe(true);
       expect(shouldRequestAiFeedbackForTrace(trace(toolName))).toBe(true);
     }
-    for (const toolName of taskIntentFeedbackTools) {
+    for (const toolName of auxiliaryBrowserFeedbackTools) {
       expect(shouldRequestAiFeedbackForTool(toolName)).toBe(false);
-      expect(shouldRequestAiFeedbackForTrace(trace(toolName))).toBe(false);
+      expect(shouldRequestAiFeedbackForTrace(trace(toolName))).toBe(true);
       expect(shouldRequestAiFeedbackForTrace(trace(toolName, '用户任务中的关键浏览器步骤'))).toBe(
         true,
+      );
+      expect(shouldRequestAiFeedbackForTrace(trace(toolName, '内部维护：刷新浏览器状态缓存'))).toBe(
+        false,
       );
     }
     for (const toolName of neverFeedbackTools) {
@@ -119,9 +122,9 @@ describe('AI feedback requirement rule', () => {
     [TOOL_NAMES.BROWSER.CONSOLE],
     [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],
   ])(
-    'keeps auxiliary browser tools quiet for generic or maintenance-only context: %s',
+    'keeps auxiliary browser tools quiet only for explicit maintenance context: %s',
     (toolName) => {
-      expect(shouldRequestAiFeedbackForTrace(trace(toolName))).toBe(false);
+      expect(shouldRequestAiFeedbackForTrace(trace(toolName))).toBe(true);
       expect(shouldRequestAiFeedbackForTrace(trace(toolName, '内部维护：刷新浏览器状态缓存'))).toBe(
         false,
       );
@@ -139,6 +142,17 @@ describe('AI feedback requirement rule', () => {
       expect(
         shouldRequestAiFeedbackForTrace(trace(toolName, '完成用户任务中的关键浏览器步骤')),
       ).toBe(true);
+    },
+  );
+
+  test.each([
+    [TOOL_NAMES.BROWSER.CONSOLE, '诊断当前页面为什么加载失败'],
+    [TOOL_NAMES.BROWSER.NETWORK_CAPTURE, '查看 telemetry 页面当前接口是否返回数据'],
+    [TOOL_NAMES.BROWSER.SCREENSHOT, '截取 health check 页面状态给 AI 判断下一步'],
+  ])(
+    'does not suppress user-task diagnostics just because the intent contains diagnostic wording: %s',
+    (toolName, taskIntent) => {
+      expect(shouldRequestAiFeedbackForTrace(trace(toolName, taskIntent))).toBe(true);
     },
   );
 

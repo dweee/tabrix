@@ -33,9 +33,8 @@ const DEFAULT_INTENT_FEEDBACK_TOOLS = new Set<string>([
 
 const BROWSER_TOOLS = new Set<string>(Object.values(TOOL_NAMES.BROWSER));
 
-const GENERIC_TOOL_INTENT_PATTERN = /^Run MCP tool\b/i;
 const MAINTENANCE_INTENT_PATTERN =
-  /内部维护|系统维护|后台维护|后台诊断|后台投影|纯诊断|健康检查|性能采样|telemetry|maintenance|health check|diagnostic only|background projection|projection refresh/i;
+  /内部维护|系统维护|后台维护|后台诊断|后台投影|纯诊断|性能采样|\bmaintenance\b|\bdiagnostic only\b|\bbackground projection\b|\bprojection refresh\b|^\s*(?:health check|telemetry)\s*:/i;
 
 export function shouldRequestAiFeedbackForTool(toolName: string | null | undefined): boolean {
   if (!toolName) return false;
@@ -43,12 +42,9 @@ export function shouldRequestAiFeedbackForTool(toolName: string | null | undefin
   return DEFAULT_INTENT_FEEDBACK_TOOLS.has(toolName);
 }
 
-function isTaskMeaningfulIntent(taskIntent: string | null | undefined): boolean {
+function isMaintenanceIntent(taskIntent: string | null | undefined): boolean {
   const text = String(taskIntent || '').trim();
-  if (!text) return false;
-  if (GENERIC_TOOL_INTENT_PATTERN.test(text)) return false;
-  if (MAINTENANCE_INTENT_PATTERN.test(text)) return false;
-  return true;
+  return MAINTENANCE_INTENT_PATTERN.test(text);
 }
 
 export function shouldRequestAiFeedbackForTrace(
@@ -58,7 +54,7 @@ export function shouldRequestAiFeedbackForTrace(
   const toolName = trace.toolName;
   if (!toolName) return false;
   if (AI_FEEDBACK_NEVER_TOOLS.has(toolName)) return false;
-  if (MAINTENANCE_INTENT_PATTERN.test(String(trace.taskIntent || '').trim())) return false;
+  if (isMaintenanceIntent(trace.taskIntent)) return false;
   if (DEFAULT_INTENT_FEEDBACK_TOOLS.has(toolName)) return true;
-  return BROWSER_TOOLS.has(toolName) && isTaskMeaningfulIntent(trace.taskIntent);
+  return BROWSER_TOOLS.has(toolName);
 }
