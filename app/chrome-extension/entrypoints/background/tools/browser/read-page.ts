@@ -32,7 +32,6 @@ import {
   READ_PAGE_REQUESTED_LAYER_VALUES,
   buildReadPageBrowserPageObjectView,
   buildBrowserPageThingProjectionFromReadPage,
-  derivePostActionDeltaEvidenceFromReadPageDelta,
 } from '@tabrix/shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { ERROR_MESSAGES } from '@/common/constants';
@@ -50,18 +49,10 @@ import { buildCandidateActions, type CandidateActionSeed } from './read-page-can
 import {
   buildBoundedWatchLoopSnapshot,
   buildReadPagePageDeltaReport,
-  buildReadPageSnapshotSourceStats,
-  consumePendingActionBinding,
-  getPreviousPageObjectSnapshot,
   recordPendingActionBinding,
-  rememberPageObjectSnapshot,
   resetObjectLifecycleCacheForTests,
-  resolveTargetObjectId,
 } from './read-page-object-delta';
-import {
-  buildReadPageObjectDeltaSignals,
-  buildReadPageObjectSensingInput,
-} from './read-page-object-sensing-input';
+import { buildAndRememberReadPageObjectSensingOutput } from './read-page-object-sensing-output';
 import { buildLoadReadiness, inferPageStability, normalizeFrameContext } from './read-page-state';
 import { scanVisibleResultCardsInPage } from './collect-result-cards';
 import {
@@ -1399,47 +1390,24 @@ async function buildModeOutput(params: {
     objectLifecycle: sharedPayload.objectLifecycle,
     cdpSensing: params.loadReadiness.cdpSensing,
   });
-  const objectSensingInput = buildReadPageObjectSensingInput({
-    tabId: params.tabId,
-    currentUrl: params.currentUrl,
-    currentTitle: params.currentTitle,
-    cdpSensing: params.loadReadiness.cdpSensing,
-    pageRegions: sharedPayload.pageRegions,
-    candidateActions,
-    pageType: params.pageType,
-    pageRole: sharedPayload.summary?.pageRole || String(params.pageRole || 'unknown'),
-    pageStability: params.pageStability,
-    loadReadiness: params.loadReadiness,
-    visibleTextContent: params.visibleTextContent,
-  });
-  const objectDeltaSignals = buildReadPageObjectDeltaSignals(objectSensingInput);
-  const pageObjectSnapshot = buildReadPageSnapshotSourceStats(objectSensingInput);
-  const previousSnapshot = getPreviousPageObjectSnapshot(params.tabId);
-  const consumedPendingActionBinding = consumePendingActionBinding(params.tabId);
-  const pendingActionBinding = consumedPendingActionBinding
-    ? {
-        ...consumedPendingActionBinding,
-        targetObjectId: resolveTargetObjectId(consumedPendingActionBinding, pageObjectSnapshot),
-      }
-    : null;
-  const pageDeltaReport = buildReadPagePageDeltaReport({
-    tabId: params.tabId,
-    currentSnapshot: pageObjectSnapshot,
-    previousSnapshot: previousSnapshot?.snapshot ?? null,
-    pendingActionBinding,
-    cdpSignals: objectDeltaSignals,
-    previousCdpSignals: previousSnapshot?.telemetry,
-  });
-  if (pageDeltaReport) {
-    sharedPayload.postActionDeltaEvidence = derivePostActionDeltaEvidenceFromReadPageDelta(
-      pageDeltaReport,
-      {
-        tabId: params.tabId,
-      },
-    );
+  const { pageObjectSnapshot, postActionDeltaEvidence } =
+    buildAndRememberReadPageObjectSensingOutput({
+      tabId: params.tabId,
+      currentUrl: params.currentUrl,
+      currentTitle: params.currentTitle,
+      cdpSensing: params.loadReadiness.cdpSensing,
+      pageRegions: sharedPayload.pageRegions,
+      candidateActions,
+      pageType: params.pageType,
+      pageRole: sharedPayload.summary?.pageRole || String(params.pageRole || 'unknown'),
+      pageStability: params.pageStability,
+      loadReadiness: params.loadReadiness,
+      visibleTextContent: params.visibleTextContent,
+    });
+  if (postActionDeltaEvidence) {
+    sharedPayload.postActionDeltaEvidence = postActionDeltaEvidence;
   }
   sharedPayload.pageObjectSnapshot = pageObjectSnapshot;
-  rememberPageObjectSnapshot(params.tabId, pageObjectSnapshot, objectDeltaSignals);
 
   return buildReadPageModeResult({
     sharedPayload,
