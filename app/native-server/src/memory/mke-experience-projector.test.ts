@@ -306,6 +306,80 @@ describe('MkeExperienceProjector', () => {
     });
   });
 
+  it('rejects a path when a task-meaningful browser sensing step is not AI-reviewed', () => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const traces = new MemoryTraceRepository(opened.db);
+    const knowledge = new KnowledgeModelRepository(opened.db);
+    const experience = new ExperienceRecipeRepository(opened.db);
+    const projector = new MkeExperienceProjector(traces, knowledge, experience);
+
+    traces.append({
+      traceId: 'trace-task-screenshot-unreviewed',
+      taskId: 'task-card-collection-with-unreviewed-sensing',
+      toolName: 'chrome_screenshot',
+      taskIntent: '用户任务中确认筛选后的结果区是否已经出现',
+      requestParams: { tabId: 9 },
+      requestAt: '2026-06-06T03:12:01.000Z',
+      response: { payloadDigest: { captured: true } },
+      responseAt: '2026-06-06T03:12:02.000Z',
+      durationMs: 500,
+      toolSuccess: true,
+      tabId: 9,
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageState: 'complete',
+      createdAt: '2026-06-06T03:12:02.000Z',
+    });
+    const collectTrace = traces.append({
+      traceId: 'trace-reviewed-collect-cards',
+      taskId: 'task-card-collection-with-unreviewed-sensing',
+      toolName: 'chrome_collect_result_cards',
+      requestParams: { tabId: 9, minResults: 10, maxScrolls: 4, startFromTop: true },
+      requestAt: '2026-06-06T03:12:03.000Z',
+      response: {
+        payloadDigest: {
+          success: true,
+          selectedDataSource: 'visible_dom_result_cards',
+          observedResultCount: 10,
+          collection: { startFromTop: true },
+        },
+      },
+      responseAt: '2026-06-06T03:12:04.000Z',
+      durationMs: 1200,
+      toolSuccess: true,
+      aiFeedback: verifiedExperienceFeedback({
+        confidence: 0.93,
+        reasonCode: 'ai_verified_top10_cards',
+        summary: 'AI verified that the result-card collection returned the requested top 10 cards.',
+      }),
+      tabId: 9,
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageState: 'complete',
+      createdAt: '2026-06-06T03:12:04.000Z',
+    });
+    const pageModelKey = buildMkePageModelKey(collectTrace)!;
+    addKnowledge({
+      knowledge,
+      siteFamily: 'example.test',
+      pageModelKey,
+      pageRole: 'search_results',
+      pageUrlPattern: 'https://example.test/search',
+    });
+
+    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T03:12:05.000Z' });
+
+    expect(result).toMatchObject({
+      processedTraceCount: 2,
+      missingAiFeedbackTraceCount: 1,
+      savedExperienceCount: 0,
+      experienceIds: [],
+    });
+    expect(experience.count()).toBe(0);
+  });
+
   it('rejects high-confidence AI feedback when the trace is a verification-blocked page', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
     const traces = new MemoryTraceRepository(opened.db);
