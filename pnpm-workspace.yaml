@@ -3,3 +3,12 @@ packages:
   - 'packages/*'
 linkWorkspacePackages: true
 preferWorkspacePackages: true
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+  spawn-sync: true
+overrides:
+  onnxruntime-web: 1.24.3
+  hono: 4.12.14
+  '@hono/node-server': 1.19.14
+  fast-uri: 3.1.2

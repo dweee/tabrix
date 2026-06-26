@@ -11,7 +11,7 @@ const TARGET_DIRS = [
   'packages/shared/src',
 ];
 const EXTENSIONS = new Set(['.ts', '.tsx', '.vue', '.js', '.mjs']);
-const EMPTY_CATCH_PATTERN = /catch\s*\([^)]*\)\s*\{\s*\}/;
+const EMPTY_CATCH_PATTERN = /catch\s*(?:\([^)]*\)\s*)?\{\s*\}/;
 
 function listFiles(dir) {
   const absoluteDir = path.join(ROOT, dir);

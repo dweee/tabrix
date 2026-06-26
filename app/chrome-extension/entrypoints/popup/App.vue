@@ -1496,7 +1496,9 @@ onUnmounted(() => {
     if (msgFn && chrome?.runtime?.onMessage?.removeListener) {
       chrome.runtime.onMessage.removeListener(msgFn);
     }
-  } catch {}
+  } catch {
+    /* best-effort local preference restore */
+  }
 });
 </script>
 

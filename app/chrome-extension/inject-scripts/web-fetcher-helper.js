@@ -2908,7 +2908,9 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
             }
           }
         }
-      } catch {}
+      } catch {
+        /* best-effort response cleanup */
+      }
     }
 
     return allIframeText.trim();

@@ -1271,7 +1271,9 @@
       for (const frame of frames) {
         try {
           frame.contentWindow?.postMessage({ type: 'rr-bridge-hover-ref', reqId, ref }, '*');
-        } catch {}
+        } catch {
+          /* best-effort accessibility probe */
+        }
       }
     });
   }
@@ -1377,16 +1379,24 @@
           const cleanup = () => {
             try {
               host.remove();
-            } catch {}
+            } catch {
+              /* best-effort accessibility probe */
+            }
             try {
               document.removeEventListener('mousemove', onMove, true);
-            } catch {}
+            } catch {
+              /* best-effort accessibility probe */
+            }
             try {
               document.removeEventListener('click', onClick, true);
-            } catch {}
+            } catch {
+              /* best-effort accessibility probe */
+            }
             try {
               document.removeEventListener('keydown', onKey, true);
-            } catch {}
+            } catch {
+              /* best-effort accessibility probe */
+            }
             state.active = false;
           };
 
@@ -1403,7 +1413,9 @@
                 height: `${Math.round(Math.max(0, r.height))}px`,
                 display: r.width > 0 && r.height > 0 ? 'block' : 'none',
               });
-            } catch {}
+            } catch {
+              /* best-effort accessibility probe */
+            }
           };
           const uniqueClassSelector = (node) => {
             try {
@@ -1425,7 +1437,9 @@
                   if (document.querySelectorAll(sel).length === 1) return sel;
                 }
               }
-            } catch {}
+            } catch {
+              /* best-effort accessibility probe */
+            }
             return '';
           };
           const computeCandidates = (el) => {
@@ -1500,7 +1514,9 @@
             try {
               if (!window.__claudeElementMap) window.__claudeElementMap = {};
               if (!window.__claudeRefCounter) window.__claudeRefCounter = 0;
-            } catch {}
+            } catch {
+              /* best-effort accessibility probe */
+            }
             let refId = null;
             try {
               for (const k in window.__claudeElementMap) {
@@ -1516,7 +1532,9 @@
                 refId = `ref_${++window.__claudeRefCounter}`;
                 window.__claudeElementMap[refId] = new WeakRef(el);
               }
-            } catch {}
+            } catch {
+              /* best-effort accessibility probe */
+            }
             const cands = computeCandidates(el);
             cleanup();
             sendResponse({ success: true, ref: refId, candidates: cands });
@@ -1578,7 +1596,9 @@
                 let frameEl = null;
                 try {
                   frameEl = querySelectorDeepFirst(frameSel) || document.querySelector(frameSel);
-                } catch {}
+                } catch {
+                  /* best-effort accessibility probe */
+                }
                 if (
                   !frameEl ||
                   !(frameEl instanceof HTMLIFrameElement || frameEl instanceof HTMLFrameElement)
@@ -1749,18 +1769,24 @@
                     }
                   }
                 }
-              } catch {}
+              } catch {
+                /* best-effort accessibility probe */
+              }
               // push children and shadow children
               try {
                 const children = node.children || [];
                 for (let i = 0; i < children.length; i++) stack.push(children[i]);
-              } catch {}
+              } catch {
+                /* best-effort accessibility probe */
+              }
               try {
                 const sr = node.shadowRoot;
                 if (sr && sr.children) {
                   for (let i = 0; i < sr.children.length; i++) stack.push(sr.children[i]);
                 }
-              } catch {}
+              } catch {
+                /* best-effort accessibility probe */
+              }
               if (++visited > 8000) break;
             }
             if (!el && best.el && best.score >= 0.6) el = best.el;
@@ -1886,7 +1912,9 @@
             try {
               const p = JSON.parse(String(request.payload || '{}'));
               if (Array.isArray(p.variables)) vars = p.variables;
-            } catch {}
+            } catch {
+              /* best-effort accessibility probe */
+            }
           }
           const useOverlay = request.useOverlay !== false; // default true
           const values = {};
@@ -1995,7 +2023,9 @@
           const cleanup = () => {
             try {
               host.remove();
-            } catch {}
+            } catch {
+              /* best-effort accessibility probe */
+            }
           };
           cancel.onclick = () => {
             cleanup();
@@ -2062,7 +2092,9 @@
                       if (document.querySelectorAll(sel).length === 1) return sel;
                     }
                   }
-                } catch {}
+                } catch {
+                  /* best-effort accessibility probe */
+                }
                 for (const attr of ['data-testid', 'data-cy', 'name']) {
                   const val = node.getAttribute(attr);
                   if (val) {
@@ -2159,10 +2191,14 @@
               block: 'center',
               inline: 'nearest',
             });
-          } catch {}
+          } catch {
+            /* best-effort accessibility probe */
+          }
           try {
             /** @type {HTMLElement} */ (el).focus && /** @type {HTMLElement} */ (el).focus();
-          } catch {}
+          } catch {
+            /* best-effort accessibility probe */
+          }
           sendResponse({ success: true });
           return true;
         } catch (e) {
@@ -2214,7 +2250,9 @@
                   { type: 'rr-bridge-ensure-ref-result', reqId, ...payload },
                   '*',
                 );
-            } catch {}
+            } catch {
+              /* best-effort accessibility probe */
+            }
           };
           try {
             const sel = String(selector || '').trim();
@@ -2275,14 +2313,18 @@
                       }
                     }
                   }
-                } catch {}
+                } catch {
+                  /* best-effort accessibility probe */
+                }
                 try {
                   const children = node.children || [];
                   for (let i = 0; i < children.length; i++) stack.push(children[i]);
                   const sr = node.shadowRoot;
                   if (sr && sr.children)
                     for (let i = 0; i < sr.children.length; i++) stack.push(sr.children[i]);
-                } catch {}
+                } catch {
+                  /* best-effort accessibility probe */
+                }
               }
               if (!el && best.el) el = best.el;
             } else if (isXPath) {
@@ -2363,9 +2405,13 @@
           } catch (e) {
             respond({ success: false, error: String(e && e.message ? e.message : e) });
           }
-        } catch {}
+        } catch {
+          /* best-effort accessibility probe */
+        }
       },
       true,
     );
-  } catch {}
+  } catch {
+    /* best-effort accessibility probe */
+  }
 })();

@@ -242,7 +242,9 @@ if (
         let pointerSignal = false;
         try {
           pointerSignal = window.getComputedStyle(candidate).cursor === 'pointer';
-        } catch {}
+        } catch {
+          /* best-effort click sensing fallback */
+        }
         if (!pointerSignal && !classSignal && !stateSignal) return false;
         const nestedActions = candidate.querySelectorAll?.(GENERIC_ACTION_SELECTOR).length || 0;
         return nestedActions <= 2;
@@ -1162,56 +1164,80 @@ if (
     };
     try {
       element.dispatchEvent(new PointerEvent('pointerdown', pointerBase));
-    } catch {}
+    } catch {
+      /* best-effort click sensing fallback */
+    }
     const down = new MouseEvent('mousedown', base);
     const up = new MouseEvent('mouseup', base);
     const click = new MouseEvent('click', base);
     try {
       element.dispatchEvent(down);
-    } catch {}
+    } catch {
+      /* best-effort click sensing fallback */
+    }
     try {
       element.dispatchEvent(new PointerEvent('pointerup', pointerBase));
-    } catch {}
+    } catch {
+      /* best-effort click sensing fallback */
+    }
     try {
       element.dispatchEvent(up);
-    } catch {}
+    } catch {
+      /* best-effort click sensing fallback */
+    }
     if (useNativeClick && typeof element.click === 'function') {
       try {
         element.click();
-      } catch {}
+      } catch {
+        /* best-effort click sensing fallback */
+      }
     } else {
       try {
         element.dispatchEvent(click);
-      } catch {}
+      } catch {
+        /* best-effort click sensing fallback */
+      }
     }
     if (base.button === 2) {
       // right button contextmenu
       const ctx = new MouseEvent('contextmenu', base);
       try {
         element.dispatchEvent(ctx);
-      } catch {}
+      } catch {
+        /* best-effort click sensing fallback */
+      }
     }
     if (isDouble) {
       // second sequence + dblclick
       setTimeout(() => {
         try {
           element.dispatchEvent(new MouseEvent('mousedown', base));
-        } catch {}
+        } catch {
+          /* best-effort click sensing fallback */
+        }
         try {
           element.dispatchEvent(new MouseEvent('mouseup', base));
-        } catch {}
+        } catch {
+          /* best-effort click sensing fallback */
+        }
         if (useNativeClick && typeof element.click === 'function') {
           try {
             element.click();
-          } catch {}
+          } catch {
+            /* best-effort click sensing fallback */
+          }
         } else {
           try {
             element.dispatchEvent(new MouseEvent('click', base));
-          } catch {}
+          } catch {
+            /* best-effort click sensing fallback */
+          }
         }
         try {
           element.dispatchEvent(new MouseEvent('dblclick', base));
-        } catch {}
+        } catch {
+          /* best-effort click sensing fallback */
+        }
       }, 30);
     }
   }
@@ -1259,7 +1285,9 @@ if (
     ) {
       chrome.runtime.onMessage.removeListener(window.__TABRIX_CLICK_HELPER_MESSAGE_HANDLER__);
     }
-  } catch {}
+  } catch {
+    /* best-effort click sensing fallback */
+  }
 
   // Listen for messages from the extension
   const tabrixClickHelperMessageHandler = (request, _sender, sendResponse) => {

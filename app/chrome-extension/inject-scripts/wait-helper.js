@@ -52,7 +52,9 @@
       }
       const text = el.innerText || el.textContent || '';
       if (normalize(text).includes(t)) return true;
-    } catch {}
+    } catch {
+      /* best-effort page readiness probe */
+    }
     return false;
   }
 
@@ -113,7 +115,9 @@
               done({ success: true, matched: null, tookMs: Date.now() - start });
             }
           }
-        } catch {}
+        } catch {
+          /* best-effort page readiness probe */
+        }
       };
 
       const done = (result) => {
@@ -132,7 +136,9 @@
           characterData: true,
           attributes: true,
         });
-      } catch {}
+      } catch {
+        /* best-effort page readiness probe */
+      }
 
       // Initial check
       check();
@@ -186,7 +192,9 @@
           characterData: true,
           attributes: true,
         });
-      } catch {}
+      } catch {
+        /* best-effort page readiness probe */
+      }
 
       // initial check
       check();
