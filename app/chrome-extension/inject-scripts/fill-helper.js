@@ -160,17 +160,20 @@ if (window.__FILL_HELPER_INITIALIZED__) {
     try {
       // Find the element
       let element = null;
+      let refLookupError = null;
       if (ref && typeof ref === 'string') {
         try {
           const map = window.__claudeElementMap;
           const weak = map && map[ref];
           element = weak && typeof weak.deref === 'function' ? weak.deref() : null;
         } catch (e) {
-          // ignore
+          refLookupError = e instanceof Error ? e.message : String(e);
         }
         if (!element || !(element instanceof Element)) {
           return {
-            error: `Element ref "${ref}" not found. Please call chrome_read_page first and ensure the ref is still valid.`,
+            error: refLookupError
+              ? `Element ref "${ref}" lookup failed: ${refLookupError}. Please call chrome_read_page again before retrying.`
+              : `Element ref "${ref}" not found. Please call chrome_read_page first and ensure the ref is still valid.`,
           };
         }
       } else {

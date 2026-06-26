@@ -630,11 +630,6 @@
     "text": "catch { /* best-effort click sensing fallback */ }"
   },
   {
-    "file": "app/chrome-extension/inject-scripts/fill-helper.js",
-    "line": 168,
-    "text": "catch (e) { // ignore }"
-  },
-  {
     "file": "app/chrome-extension/inject-scripts/interactive-elements-helper.js",
     "line": 76,
     "text": "catch (_) { /* ignore */ }"

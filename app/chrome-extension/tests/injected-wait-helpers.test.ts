@@ -134,6 +134,30 @@ describe('injected state-driven waits', () => {
     expect(response.elementInfo.isVisible).toBe(true);
   });
 
+  it('fill reports stale ref lookup failures instead of hiding them', async () => {
+    Object.defineProperty(window, '__claudeElementMap', {
+      configurable: true,
+      get: () => {
+        throw new Error('map unavailable');
+      },
+    });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/fill-helper.js',
+      '__FILL_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'fillElement',
+      ref: 'ref_broken',
+      value: 'Tabrix',
+    });
+
+    expect(response.error).toContain('Element ref "ref_broken" lookup failed: map unavailable');
+    expect(response.error).toContain('chrome_read_page');
+
+    delete (window as Window & { __claudeElementMap?: unknown }).__claudeElementMap;
+  });
+
   it('keyboard focus readiness returns immediately once focus is observable', async () => {
     document.body.innerHTML = '<input id="name" type="text" />';
     const input = document.getElementById('name') as HTMLInputElement;
