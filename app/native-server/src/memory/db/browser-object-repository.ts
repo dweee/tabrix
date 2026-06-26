@@ -383,6 +383,17 @@ export class BrowserObjectRepository {
           AND page_model_key = ?
           AND object_type IN ('region', 'action_target', 'result_card', 'data_source')
         ORDER BY
+          CASE
+            WHEN ? IS NOT NULL AND root_route = ? THEN 0
+            WHEN ? IS NOT NULL AND current_route = ? THEN 1
+            WHEN ? IS NOT NULL AND page_url_pattern = ? THEN 2
+            ELSE 3
+          END,
+          CASE
+            WHEN COALESCE(source_freshness, '') IN ('fresh', 'validated') THEN 0
+            WHEN COALESCE(source_freshness, '') IN ('needs_refresh', 'stale', 'expired') THEN 2
+            ELSE 1
+          END,
           CASE object_type
             WHEN 'action_target' THEN 0
             WHEN 'result_card' THEN 1
@@ -643,14 +654,26 @@ export class BrowserObjectRepository {
   public listReusableForPage(input: {
     siteFamily: string;
     pageModelKey: string;
+    rootRoute?: string | null;
+    currentRoute?: string | null;
+    pageUrlPattern?: string | null;
     limit?: number;
   }): BrowserObject[] {
     const siteFamily = text(input.siteFamily, DEFAULT_SITE_FAMILY) ?? DEFAULT_SITE_FAMILY;
     const pageModelKey = text(input.pageModelKey, DEFAULT_PAGE_MODEL_KEY) ?? DEFAULT_PAGE_MODEL_KEY;
+    const rootRoute = routeText(input.rootRoute);
+    const currentRoute = routeText(input.currentRoute);
+    const pageUrlPattern = routeText(input.pageUrlPattern);
     return (
       this.listReusableForPageStmt.all(
         siteFamily,
         pageModelKey,
+        rootRoute,
+        rootRoute,
+        currentRoute,
+        currentRoute,
+        pageUrlPattern,
+        pageUrlPattern,
         input.limit ?? 12,
       ) as BrowserObjectRow[]
     ).map(rowToBrowserObject);

@@ -162,6 +162,16 @@ describe('MKE core repositories', () => {
       });
       browserObjectRepo.upsert({
         ...base,
+        pageUrlPattern: 'https://example.test/settings',
+        rootRoute: 'https://example.test/settings',
+        currentRoute: 'https://example.test/settings?tab=profile',
+        objectFingerprint: 'action:example.test:settings:save',
+        objectType: 'action_target',
+        confidenceScore: 0.99,
+        lastValidatedAt: '2026-06-07T11:00:00.000Z',
+      });
+      browserObjectRepo.upsert({
+        ...base,
         objectFingerprint: 'page:example.test:search',
         objectType: 'page',
         confidenceScore: 0.99,
@@ -194,11 +204,15 @@ describe('MKE core repositories', () => {
       const reusable = browserObjectRepo.listReusableForPage({
         siteFamily: 'example.test',
         pageModelKey: 'page:example.test:search_results',
+        rootRoute: 'https://example.test/search',
+        currentRoute: 'https://example.test/search?q=ai',
+        pageUrlPattern: 'https://example.test/search',
       });
 
       expect(reusable.map((object) => object.objectFingerprint)).toEqual([
         'action:example.test:search:submit',
         'card:example.test:search:top-card',
+        'action:example.test:settings:save',
       ]);
       expect(reusable.every((object) => object.redactionState === 'redacted')).toBe(true);
       expect(reusable.every((object) => object.closedAt === null)).toBe(true);

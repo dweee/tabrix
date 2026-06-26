@@ -194,6 +194,30 @@ describe('handleToolCall execution wrapper', () => {
       redactionState: 'redacted',
       updatedAt: '2026-06-05T11:00:00.000Z',
     });
+    sessionManager.browserObjects!.upsert({
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/settings',
+      rootRoute: 'https://example.test/settings',
+      currentRoute: 'https://example.test/settings?tab=profile',
+      pageRole: 'search_results',
+      pageModelKey: 'page:example.test:search_results',
+      objectFingerprint: 'action:example.test:settings:save',
+      objectType: 'action_target',
+      actionTypes: ['settings.save'],
+      targetability: {
+        targetabilityStatus: 'stable_click_target',
+        targetRef: 'historical_ref_settings_save',
+      },
+      facts: {
+        intent: 'settings.save',
+        stableLocatorChain: ['css=button.save'],
+      },
+      primaryConclusion: 'A settings save action was observed on another route.',
+      confidenceScore: 0.99,
+      lastValidatedAt: '2026-06-07T11:00:00.000Z',
+      redactionState: 'redacted',
+      updatedAt: '2026-06-07T11:00:00.000Z',
+    });
     jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
       status: 'success',
       data: {
@@ -202,9 +226,14 @@ describe('handleToolCall execution wrapper', () => {
             type: 'text',
             text: JSON.stringify({
               success: true,
+              page: {
+                url: 'https://example.test/search?q=ai',
+              },
+              summary: {
+                pageRole: 'search_results',
+              },
               pageProjection: {
-                siteFamily: 'example.test',
-                pageModelKey: 'page:example.test:search_results',
+                pageRole: 'search_results',
               },
               candidateActions: [{ id: 'current-action', targetRef: 'ref_current' }],
             }),
@@ -272,6 +301,18 @@ describe('handleToolCall execution wrapper', () => {
             timeRange: '一周内',
           },
         },
+      }),
+      expect.objectContaining({
+        source: 'object_library_reuse',
+        objectType: 'action_target',
+        objectFingerprint: 'action:example.test:settings:save',
+        freshness: 'validated',
+        actionTypes: ['settings.save'],
+        planningUse: 'reference_only',
+        canSeedAction: false,
+        requiresFreshRead: true,
+        reuseReason: 'historical_same_page_model_object_is_not_from_current_route',
+        nextStepHint: 'fresh_read_current_route_before_using_historical_action',
       }),
     ]);
     expect(JSON.stringify(payload.objectLibraryHints)).not.toContain('ref_current');

@@ -4,6 +4,7 @@ import type {
   ReadPageSearchSurfaceGenericFilterGroupState,
 } from '@tabrix/shared';
 import type { BrowserObjectRepository } from '../memory/db';
+import { normalizeUrlPattern } from '../memory/mke-memory-sanitizer';
 import { readJsonObjectFromCallToolResult } from './register-tool-result-json';
 import {
   readFirstString,
@@ -27,13 +28,27 @@ export function attachObjectLibraryHintsToReadPageResult(
     return result;
   }
   const projection = readObject(payload.pageProjection);
-  const siteFamily = readString(projection?.siteFamily);
-  const pageModelKey = readString(projection?.pageModelKey);
+  const page = readObject(payload.page);
+  const summary = readObject(payload.summary);
+  const urlFields = normalizeUrlPattern(readFirstString(page?.url, payload.url, payload.pageUrl), {
+    allowPersonalBrowserStateStorage: false,
+  });
+  const siteFamily = readString(projection?.siteFamily) ?? urlFields.siteFamily;
+  const pageRole = readFirstString(projection?.pageRole, summary?.pageRole) ?? 'page';
+  const pageModelKey =
+    readString(projection?.pageModelKey) ?? (siteFamily ? `page:${siteFamily}:${pageRole}` : null);
   if (!siteFamily || !pageModelKey) return result;
 
   let reusableObjects: ReturnType<BrowserObjectHintRepository['listReusableForPage']> = [];
   try {
-    reusableObjects = browserObjects.listReusableForPage({ siteFamily, pageModelKey, limit: 8 });
+    reusableObjects = browserObjects.listReusableForPage({
+      siteFamily,
+      pageModelKey,
+      rootRoute: urlFields.rootRoute,
+      currentRoute: urlFields.currentRoute,
+      pageUrlPattern: urlFields.pattern,
+      limit: 8,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     onLookupError?.(message);
@@ -50,10 +65,16 @@ export function attachObjectLibraryHintsToReadPageResult(
       ? object.actionTypes.filter((item): item is string => typeof item === 'string').slice(0, 6)
       : undefined;
     const freshness = mapObjectLibraryHintFreshness(object);
+    const routeMatch = classifyObjectLibraryRouteMatch(object, {
+      rootRoute: urlFields.rootRoute,
+      currentRoute: urlFields.currentRoute,
+      pageUrlPattern: urlFields.pattern,
+    });
     const planning = planObjectLibraryHintReuse({
       objectType: object.objectType,
       actionTypes,
       freshness,
+      routeMatch,
       targetability: object.targetability,
       canTabrixOperate: object.canTabrixOperate,
     });
@@ -153,6 +174,26 @@ function buildObjectLibraryReuseSignalFields(object: {
   return Object.keys(signals).length > 0 ? { reuseSignals: signals } : {};
 }
 
+function classifyObjectLibraryRouteMatch(
+  object: {
+    rootRoute?: string | null;
+    currentRoute?: string | null;
+    pageUrlPattern?: string | null;
+  },
+  current: {
+    rootRoute?: string | null;
+    currentRoute?: string | null;
+    pageUrlPattern?: string | null;
+  },
+): 'exact_route' | 'same_root_route' | 'same_page_model' {
+  if (current.currentRoute && object.currentRoute === current.currentRoute) return 'exact_route';
+  if (current.rootRoute && object.rootRoute === current.rootRoute) return 'same_root_route';
+  if (current.pageUrlPattern && object.pageUrlPattern === current.pageUrlPattern) {
+    return 'same_root_route';
+  }
+  return 'same_page_model';
+}
+
 function buildObjectLibraryFilterSignal(
   value: unknown,
 ): NonNullable<ReadPageObjectLibraryHint['reuseSignals']>['filterState'] | undefined {
@@ -244,6 +285,7 @@ function planObjectLibraryHintReuse(input: {
   objectType: string;
   actionTypes?: string[];
   freshness: ReadPageObjectLibraryHint['freshness'];
+  routeMatch: 'exact_route' | 'same_root_route' | 'same_page_model';
   targetability: unknown;
   canTabrixOperate?: boolean | null;
 }): Pick<
@@ -273,6 +315,16 @@ function planObjectLibraryHintReuse(input: {
       requiresFreshRead: true,
       reuseReason: `historical_${input.freshness}_object_requires_current_read_before_action`,
       nextStepHint: 'force_fresh_read_or_collect_current_objects_before_action',
+    };
+  }
+
+  if (input.routeMatch === 'same_page_model') {
+    return {
+      planningUse: 'reference_only',
+      canSeedAction: false,
+      requiresFreshRead: true,
+      reuseReason: 'historical_same_page_model_object_is_not_from_current_route',
+      nextStepHint: 'fresh_read_current_route_before_using_historical_action',
     };
   }
 
