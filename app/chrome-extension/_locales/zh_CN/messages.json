@@ -11,10 +11,6 @@
     "message": "服务配置",
     "description": "本地服务器设置的主要节标题"
   },
-  "semanticEngineLabel": {
-    "message": "语义引擎",
-    "description": "语义引擎的主要节标题"
-  },
   "embeddingModelLabel": {
     "message": "Embedding模型",
     "description": "模型选择的主要节标题"
@@ -160,26 +156,6 @@
   "downloadingStatus": {
     "message": "下载中...",
     "description": "下载进度消息"
-  },
-  "semanticEngineReadyStatus": {
-    "message": "语义引擎已就绪",
-    "description": "语义引擎就绪状态"
-  },
-  "semanticEngineInitializingStatus": {
-    "message": "语义引擎初始化中...",
-    "description": "语义引擎初始化状态"
-  },
-  "semanticEngineInitFailedStatus": {
-    "message": "语义引擎初始化失败",
-    "description": "语义引擎初始化失败状态"
-  },
-  "semanticEngineNotInitStatus": {
-    "message": "语义引擎未初始化",
-    "description": "语义引擎未初始化状态"
-  },
-  "initSemanticEngineButton": {
-    "message": "初始化语义引擎",
-    "description": "初始化语义引擎按钮文本"
   },
   "reinitializeButton": {
     "message": "重新初始化",

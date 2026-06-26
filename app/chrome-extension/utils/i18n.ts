@@ -11,7 +11,6 @@ const fallbackMessages: Record<string, string> = {
 
   // Section headers
   nativeServerConfigLabel: 'Native Server Configuration',
-  semanticEngineLabel: 'Semantic Engine',
   embeddingModelLabel: 'Embedding Model',
   indexDataManagementLabel: 'Index Data Management',
   modelCacheManagementLabel: 'Model Cache Management',
@@ -57,12 +56,6 @@ const fallbackMessages: Record<string, string> = {
   cleaningStatus: 'Cleaning...',
   downloadingStatus: 'Downloading...',
 
-  // Semantic engine states
-  semanticEngineReadyStatus: 'Semantic Engine Ready',
-  semanticEngineInitializingStatus: 'Semantic Engine Initializing...',
-  semanticEngineInitFailedStatus: 'Semantic Engine Initialization Failed',
-  semanticEngineNotInitStatus: 'Semantic Engine Not Initialized',
-  initSemanticEngineButton: 'Initialize Semantic Engine',
   reinitializeButton: 'Reinitialize',
 
   // Model states
@@ -309,7 +302,6 @@ const fallbackMessages: Record<string, string> = {
   connecting: 'Connecting...',
   disconnect: 'Disconnect',
   connect: 'Connect',
-  semanticEngine: 'Semantic Engine',
   embeddingModel: 'Embedding Model',
   retry: 'Retry',
   indexDataManagement: 'Index Data Management',
@@ -326,10 +318,6 @@ const fallbackMessages: Record<string, string> = {
   fast: 'Fast',
   balanced: 'Balanced',
   accurate: 'Accurate',
-  semanticEngineReady: 'Semantic Engine Ready',
-  semanticEngineInitializing: 'Semantic Engine Initializing...',
-  semanticEngineInitFailed: 'Semantic Engine Initialization Failed',
-  semanticEngineNotInit: 'Semantic Engine Not Initialized',
   downloadingModel: 'Downloading Model... {0}%',
   switchingModel: 'Switching Model...',
   networkError: 'Network connection error, please check network and retry',
@@ -337,7 +325,6 @@ const fallbackMessages: Record<string, string> = {
   unknownError: 'Unknown error, please check if your network can access HuggingFace',
   reinitialize: 'Reinitialize',
   initializing: 'Initializing...',
-  initSemanticEngine: 'Initialize Semantic Engine',
   indexedPages: 'Indexed Pages',
   indexSize: 'Index Size',
   activeTabs: 'Active Tabs',

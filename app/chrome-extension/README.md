@@ -5,7 +5,7 @@
 It is responsible for:
 
 - executing browser tools through Chrome APIs and content scripts
-- rendering the popup, sidepanel, and web editor surfaces
+- rendering the popup, sidepanel, and MKEP data surfaces
 - bridging the real browser session to the native server through Native Messaging
 - exposing remote access, token management, and runtime status in the popup
 
@@ -39,7 +39,7 @@ pnpm -C app/chrome-extension test
 
 - `entrypoints/background/`: background runtime, tool execution, Native Messaging bridge
 - `entrypoints/popup/`: popup UI for connect, remote access, token management, and status
-- `entrypoints/sidepanel/`: sidepanel surfaces such as agent and workflow-related UI
+- `entrypoints/sidepanel/`: sidepanel Memory, Knowledge, and Experience viewers
 - `entrypoints/background/tools/browser/`: browser tool implementations
 - `inject-scripts/`: scripts injected into page contexts
 - `tests/`: extension-side test coverage

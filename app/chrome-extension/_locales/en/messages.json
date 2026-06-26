@@ -11,10 +11,6 @@
     "message": "Server Config",
     "description": "Main section header for native server settings"
   },
-  "semanticEngineLabel": {
-    "message": "Semantic Engine",
-    "description": "Main section header for semantic engine"
-  },
   "embeddingModelLabel": {
     "message": "Embedding Model",
     "description": "Main section header for model selection"
@@ -160,26 +156,6 @@
   "downloadingStatus": {
     "message": "Downloading...",
     "description": "Downloading progress message"
-  },
-  "semanticEngineReadyStatus": {
-    "message": "Semantic Engine Ready",
-    "description": "Semantic engine ready status"
-  },
-  "semanticEngineInitializingStatus": {
-    "message": "Semantic Engine Initializing...",
-    "description": "Semantic engine initializing status"
-  },
-  "semanticEngineInitFailedStatus": {
-    "message": "Semantic Engine Initialization Failed",
-    "description": "Semantic engine initialization failed status"
-  },
-  "semanticEngineNotInitStatus": {
-    "message": "Semantic Engine Not Initialized",
-    "description": "Semantic engine not initialized status"
-  },
-  "initSemanticEngineButton": {
-    "message": "Initialize Semantic Engine",
-    "description": "Initialize semantic engine button text"
   },
   "reinitializeButton": {
     "message": "Reinitialize",
