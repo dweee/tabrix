@@ -89,6 +89,11 @@ import {
   type ReadPageVisualElementHint,
 } from './read-page-task-protocol';
 import {
+  hasQrVisibleContext,
+  QR_VISUAL_ELEMENT_SELECTOR,
+  selectQrVisualElementHints,
+} from './read-page-visual-elements';
+import {
   attachFallbackRefs,
   DEFAULT_FILTER_PANEL_TARGET_RECOVERY_LABELS,
   extractVisibleMenuActionLabelsForTargetRecovery,
@@ -159,24 +164,6 @@ const READ_PAGE_CONTENT_MESSAGE_RETRY_DELAY_MS = 450;
 const INTERACTIVE_ELEMENTS_HELPER_FILE = 'inject-scripts/interactive-elements-helper.js';
 const INTERACTIVE_ELEMENTS_HELPER_PING_TIMEOUT_MS = 300;
 const VISIBLE_TEXT_FALLBACK_MAX_CHARS = 12_000;
-const QR_VISUAL_ELEMENT_SELECTOR = [
-  '[class*="qr"]',
-  '[class*="QR"]',
-  '[class*="qrcode"]',
-  '[class*="QRCode"]',
-  '[aria-label*="qr"]',
-  '[aria-label*="QR"]',
-  '[aria-label*="二维码"]',
-  '[alt*="qr"]',
-  '[alt*="QR"]',
-  '[alt*="二维码"]',
-  '[title*="qr"]',
-  '[title*="QR"]',
-  '[title*="二维码"]',
-  'canvas',
-  'img',
-].join(', ');
-
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -441,14 +428,6 @@ function attachInteractiveValueState<
   });
 }
 
-function hasQrVisibleContext(pageContent: string, visibleTextContent?: string | null): boolean {
-  const text = `${pageContent || ''}\n${visibleTextContent || ''}`;
-  if (!text.trim()) return false;
-  const hasQrSignal = /\b(qr|qrcode|scan code)\b|二维码|扫码|扫一扫/i.test(text);
-  const authHidden = /"?(?:showLogin|loginModalVisible|authModalVisible)"?\s*:\s*false/i.test(text);
-  return hasQrSignal && !authHidden;
-}
-
 const AUTH_FORM_TARGETED_CONTROL_QUERIES = [
   '输入手机号',
   '手机号',
@@ -488,81 +467,6 @@ function normalizeWindowRuntimeState(value: unknown): ReadPageWindowRuntimeState
 
 function readWindowInteger(value: unknown): number | null {
   return Number.isInteger(value) ? (value as number) : null;
-}
-
-function finiteRect(rect: any): { x: number; y: number; width: number; height: number } | null {
-  if (
-    rect &&
-    Number.isFinite(rect.x) &&
-    Number.isFinite(rect.y) &&
-    Number.isFinite(rect.width) &&
-    Number.isFinite(rect.height)
-  ) {
-    return {
-      x: Number(rect.x),
-      y: Number(rect.y),
-      width: Number(rect.width),
-      height: Number(rect.height),
-    };
-  }
-  return null;
-}
-
-function scoreQrVisualElementHint(
-  element: any,
-  index: number,
-): (ReadPageVisualElementHint & { score: number }) | null {
-  const selector = typeof element?.selector === 'string' ? element.selector.trim() : '';
-  if (!selector) return null;
-  const rect = finiteRect(element?.coordinates?.rect);
-  if (!rect || rect.width < 40 || rect.height < 40) return null;
-  const area = rect.width * rect.height;
-  if (area < 2_000 || area > 160_000) return null;
-  const aspectRatio = rect.width / Math.max(1, rect.height);
-  if (aspectRatio < 0.65 || aspectRatio > 1.55) return null;
-
-  const role = String(element?.tagName || element?.type || element?.role || 'img').toLowerCase();
-  const attributeSignal = [
-    element?.text,
-    element?.alt,
-    element?.title,
-    element?.className,
-    element?.role,
-    role,
-  ]
-    .filter(Boolean)
-    .join(' ');
-  const scoringSignal = [attributeSignal, selector].filter(Boolean).join(' ');
-
-  const hasExplicitQrSignal = /\b(qr|qrcode|scan code)\b|二维码|扫码|扫一扫/i.test(attributeSignal);
-  if (!hasExplicitQrSignal) return null;
-
-  let score = 0;
-  score += 120;
-  if (/\b(canvas|img|svg|selected)\b/i.test(role)) score += 24;
-  if (rect.width >= 100 && rect.width <= 360 && rect.height >= 100 && rect.height <= 360)
-    score += 36;
-  if (String(element?.text || '').trim().length === 0) score += 18;
-  if (/\b(logo|brand|wordmark|avatar|icon|profile)\b/i.test(scoringSignal)) score -= 80;
-  score -= Math.min(20, index * 2);
-
-  if (score < 40) return null;
-  return {
-    id: `qr_visual_${index + 1}`,
-    label: 'QR visual element candidate',
-    selector,
-    role,
-    rect,
-    visualSignature:
-      typeof element?.visualSignature === 'string' &&
-      /^visual_[a-f0-9]{8}$/i.test(element.visualSignature)
-        ? element.visualSignature.toLowerCase()
-        : undefined,
-    qrSignal: true,
-    reason: 'qr_visual_element_signal',
-    confidence: Math.min(0.92, Math.max(0.54, score / 180)),
-    score,
-  };
 }
 
 async function buildModeOutput(params: {
@@ -1417,23 +1321,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       frameId: params.frameId,
     });
     const elements = Array.isArray(fallback?.elements) ? fallback.elements : [];
-    return elements
-      .map((element: unknown, index: number) => scoreQrVisualElementHint(element, index))
-      .filter(
-        (
-          item: (ReadPageVisualElementHint & { score: number }) | null,
-        ): item is ReadPageVisualElementHint & {
-          score: number;
-        } => Boolean(item),
-      )
-      .sort(
-        (
-          left: ReadPageVisualElementHint & { score: number },
-          right: ReadPageVisualElementHint & { score: number },
-        ) => right.score - left.score,
-      )
-      .slice(0, 3)
-      .map(({ score: _score, ...item }: ReadPageVisualElementHint & { score: number }) => item);
+    return selectQrVisualElementHints(elements);
   }
 
   private async recoverGlobalMenuTextTargets(params: {
