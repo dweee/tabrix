@@ -28,7 +28,7 @@ const BROWSER_TOOLS = new Set<string>(Object.values(TOOL_NAMES.BROWSER));
 
 const GENERIC_TOOL_INTENT_PATTERN = /^Run MCP tool\b/i;
 const MAINTENANCE_INTENT_PATTERN =
-  /内部维护|系统维护|后台维护|后台诊断|纯诊断|健康检查|性能采样|telemetry|maintenance|health check|diagnostic only/i;
+  /内部维护|系统维护|后台维护|后台诊断|后台投影|纯诊断|健康检查|性能采样|telemetry|maintenance|health check|diagnostic only|background projection|projection refresh/i;
 
 export function shouldRequestAiFeedbackForTool(toolName: string | null | undefined): boolean {
   if (!toolName) return false;

@@ -114,11 +114,14 @@ import {
   isToolAllowed,
 } from './tool-registry-filters';
 import {
-  attachTabrixMemoryTraceEnvelope,
   readTabrixToolMetadata,
   stripTabrixToolMetadata,
   withTabrixMetadataSchema,
 } from './tabrix-metadata-envelope';
+import {
+  applyPreviousBusinessFeedback,
+  createMkeMemoryTraceRecorder,
+} from './mcp-tool-memory-trace';
 import {
   attachReadPagePayloadMetadata,
   mergeReadPagePayloadMetadata,
@@ -191,13 +194,11 @@ import type {
   ReadPageSelectedDataSource,
 } from '@tabrix/shared';
 import { buildBrowserTaskStateVerdict } from '@tabrix/shared';
-import type { MemoryTrace } from '../memory/db';
 
 const DEFAULT_AUTO_TASK_CONTEXT_KEY = 'mcp:auto:tab:default';
 const TOOL_FAILURE_ARTIFACT_SCENARIO_ID = 'mcp:chrome_read_page:page_unreadable';
 const TOOL_CLOSEOUT_ARTIFACT_SCENARIO_ID = 'mcp:chrome_close_tabs:cleanup_success';
 const STRUCTURED_READ_GATE_ARTIFACT_SCENARIO_ID = 'mcp:chrome_read_page:structured_read_gate';
-const mkeMemoryTraceLogger = logger.child('mke-memory-trace');
 
 type TaskContextKeySource = 'external_task_key' | 'internal_task_id';
 
@@ -267,71 +268,17 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     stepType: 'tool_call',
     inputSummary: JSON.stringify(args ?? {}),
   });
-  const applyPreviousBusinessFeedback = (): void => {
-    if (tabrixMetadata.previousFeedback.length === 0) return;
-    const traceWriter = sessionManager.memoryTraces;
-    if (!traceWriter) return;
-    let feedbackRecorded = false;
-    for (const feedback of tabrixMetadata.previousFeedback) {
-      try {
-        traceWriter.recordAiBusinessFeedback({
-          traceId: feedback.traceId,
-          taskId: feedback.taskId,
-          toolName: feedback.toolName,
-          toolCallId: feedback.toolCallId,
-          sequenceIndex: feedback.sequenceIndex,
-          traceBindingHash: feedback.feedbackToken,
-          evaluationScope: feedback.evaluationScope,
-          businessStatus: feedback.businessStatus,
-          confidence: feedback.confidence,
-          reasonCode: feedback.reasonCode,
-          summary: feedback.summary,
-          receivedAt: new Date(toolCallStartedAtMs).toISOString(),
-          sourceToolName: name,
-          sourceToolCallId: step.stepId,
-        });
-        feedbackRecorded = true;
-      } catch (feedbackError) {
-        const message =
-          feedbackError instanceof Error ? feedbackError.message : String(feedbackError);
-        mkeMemoryTraceLogger.warn('ai feedback update failed', { errorMessage: message });
-      }
-    }
-    if (feedbackRecorded) sessionManager.scheduleMkeProjectionAfterAiFeedback();
-  };
-  const recordMkeMemoryTrace = (
-    result: CallToolResult,
-    input?: {
-      requestParams?: unknown;
-      resultSummary?: string | null;
-      errorCode?: string | null;
-      browserContextKey?: string | null;
-    },
-  ): MemoryTrace | null => {
-    const traceWriter = sessionManager.memoryTraces;
-    if (!traceWriter) return null;
-    try {
-      return traceWriter.recordToolCall({
-        taskId: task.taskId,
-        taskIntent,
-        aiClient: session.clientName,
-        toolName: name,
-        stepId: step.stepId,
-        sequenceIndex: step.index,
-        requestParams: input?.requestParams ?? args,
-        requestAtMs: toolCallStartedAtMs,
-        responseAtMs: Date.now(),
-        result,
-        resultSummary: input?.resultSummary ?? null,
-        errorCode: input?.errorCode ?? null,
-        browserContextKey: input?.browserContextKey ?? null,
-      });
-    } catch (traceError) {
-      const message = traceError instanceof Error ? traceError.message : String(traceError);
-      mkeMemoryTraceLogger.warn('write failed', { errorMessage: message });
-    }
-    return null;
-  };
+  const mkeMemoryTraceRecorder = createMkeMemoryTraceRecorder({
+    sessionManager,
+    task,
+    taskIntent,
+    aiClient: session.clientName,
+    toolName: name,
+    step,
+    requestStartedAtMs: toolCallStartedAtMs,
+    defaultRequestParams: args,
+    metadata: tabrixMetadata,
+  });
   const recordAndAttachMkeMemoryTrace = (
     result: CallToolResult,
     input?: {
@@ -340,14 +287,16 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       errorCode?: string | null;
       browserContextKey?: string | null;
     },
-  ): CallToolResult => {
-    const trace = recordMkeMemoryTrace(result, input);
-    if (trace) sessionManager.scheduleMkeProjectionAfterTrace();
-    return attachTabrixMemoryTraceEnvelope(result, trace, tabrixMetadata, name);
-  };
+  ): CallToolResult => mkeMemoryTraceRecorder.recordAndAttach(result, input);
 
   try {
-    applyPreviousBusinessFeedback();
+    applyPreviousBusinessFeedback({
+      metadata: tabrixMetadata,
+      sessionManager,
+      sourceToolName: name,
+      sourceToolCallId: step.stepId,
+      receivedAtMs: toolCallStartedAtMs,
+    });
     const allowedTools = filterToolsByEnvironment(TOOL_SCHEMAS);
 
     if (!isToolAllowed(name, allowedTools)) {
