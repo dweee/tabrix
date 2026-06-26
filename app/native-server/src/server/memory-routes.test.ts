@@ -1120,6 +1120,9 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
       recipeName: expect.any(String),
       scenarioKey: expect.any(String),
       portabilityScope: 'local',
+      reuseState: 'candidate',
+      successfulUseCount: 1,
+      failedUseCount: 0,
     });
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('steps');
     expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('preconditions');

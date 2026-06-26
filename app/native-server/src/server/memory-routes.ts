@@ -472,6 +472,14 @@ function toKnowledgeSummary(model: KnowledgeModel): MkeKnowledgeModelSummary {
 }
 
 function toExperienceSummary(recipe: ExperienceRecipe): MkeExperienceRecipeSummary {
+  const reuseState: MkeExperienceRecipeSummary['reuseState'] = recipe.archivedAt
+    ? 'archived'
+    : recipe.importState === 'imported_unverified'
+      ? 'imported_unverified'
+      : recipe.driftState === 'verified_once' && recipe.successCount > recipe.failureCount
+        ? 'verified_reusable'
+        : 'candidate';
+
   return {
     experienceId: recipe.experienceId,
     recipeName: recipe.recipeName,
@@ -481,6 +489,9 @@ function toExperienceSummary(recipe: ExperienceRecipe): MkeExperienceRecipeSumma
     pageModelKey: recipe.pageModelKey,
     pageRole: recipe.pageRole,
     portabilityScope: recipe.portabilityScope,
+    reuseState,
+    successfulUseCount: recipe.successCount,
+    failedUseCount: recipe.failureCount,
     archivedAt: recipe.archivedAt,
     lastUsedAt: recipe.lastUsedAt,
     lastVerifiedAt: recipe.lastVerifiedAt,

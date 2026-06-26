@@ -597,6 +597,7 @@ function knowledgeToRecord(model: MkeKnowledgeModelSummary): ViewRecord {
 
 function experienceToRecord(recipe: MkeExperienceRecipeSummary): ViewRecord {
   const lastUpdatedAt = formatDate(recipe.updatedAt);
+  const reuseStatus = formatExperienceReuseStatus(recipe);
   const row: Omit<ViewRecord, 'searchText'> = {
     id: recipe.experienceId,
     kicker: '可复用经验',
@@ -605,9 +606,13 @@ function experienceToRecord(recipe: MkeExperienceRecipeSummary): ViewRecord {
     feedbackLine: '',
     duration: '',
     createdAtLabel: formatDate(recipe.updatedAt),
-    status: '可复用',
-    statusTone: 'good',
-    facts: compactFacts([['适用范围', recipe.portabilityScope]]),
+    status: reuseStatus.label,
+    statusTone: reuseStatus.tone,
+    facts: compactFacts([
+      ['适用范围', recipe.portabilityScope],
+      ['成功', `${recipe.successfulUseCount}`],
+      ['失败', `${recipe.failedUseCount}`],
+    ]),
     detailJson: formatExperienceDetailJson(recipe),
   };
   return withSearchText(row);
@@ -703,18 +708,38 @@ function formatKnowledgeDetailJson(model: MkeKnowledgeModelSummary): string {
 }
 
 function formatExperienceDetailJson(recipe: MkeExperienceRecipeSummary): string {
+  const reuseStatus = formatExperienceReuseStatus(recipe);
   return formatJsonDetail({
     title: recipe.recipeName,
     scenario: recipe.scenarioKey,
     siteFamily: recipe.siteFamily,
     pageRole: recipe.pageRole,
     pageModel: recipe.pageModelKey,
-    status: '可复用',
+    status: reuseStatus.label,
     portabilityScope: recipe.portabilityScope,
+    successfulUse: recipe.successfulUseCount,
+    failedUse: recipe.failedUseCount,
     lastUsedAt: recipe.lastUsedAt,
     lastVerifiedAt: recipe.lastVerifiedAt,
     updatedAt: recipe.updatedAt,
   });
+}
+
+function formatExperienceReuseStatus(recipe: MkeExperienceRecipeSummary): {
+  label: string;
+  tone: StatusTone;
+} {
+  switch (recipe.reuseState) {
+    case 'verified_reusable':
+      return { label: '可复用', tone: 'good' };
+    case 'imported_unverified':
+      return { label: '导入待验证', tone: 'warn' };
+    case 'archived':
+      return { label: '已归档', tone: 'neutral' };
+    case 'candidate':
+    default:
+      return { label: '候选经验', tone: 'neutral' };
+  }
 }
 
 function formatDate(value: string | null | undefined): string {

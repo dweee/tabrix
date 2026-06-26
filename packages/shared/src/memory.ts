@@ -152,6 +152,9 @@ export interface MkeExperienceRecipeSummary {
   pageModelKey?: string | null;
   pageRole?: string | null;
   portabilityScope: string;
+  reuseState: 'candidate' | 'verified_reusable' | 'imported_unverified' | 'archived';
+  successfulUseCount: number;
+  failedUseCount: number;
   archivedAt?: string | null;
   lastUsedAt?: string | null;
   lastVerifiedAt?: string | null;

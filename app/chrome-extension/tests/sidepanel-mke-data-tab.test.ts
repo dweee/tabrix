@@ -222,7 +222,10 @@ describe('Sidepanel MKE data tab', () => {
   it('uses product labels for Knowledge and Experience instead of internal engineering names', () => {
     expect(tabSource).toContain("kicker: '页面知识'");
     expect(tabSource).toContain("kicker: '可复用经验'");
-    expect(tabSource).toContain("status: '可复用'");
+    expect(tabSource).toContain('formatExperienceReuseStatus(recipe)');
+    expect(tabSource).toContain("return { label: '可复用', tone: 'good' }");
+    expect(tabSource).toContain("return { label: '候选经验', tone: 'neutral' }");
+    expect(tabSource).toContain("return { label: '导入待验证', tone: 'warn' }");
     expect(tabSource).toContain("return '知识库暂无页面知识。'");
     expect(tabSource).toContain("return '经验库暂无可复用经验。'");
     expect(tabSource).not.toContain('Knowledge Model / 页面理解');
