@@ -11,7 +11,7 @@ const TARGET_DIRS = [
   'packages/shared/src',
 ];
 const EXTENSIONS = new Set(['.ts', '.tsx', '.vue', '.js', '.mjs']);
-const EMPTY_CATCH_PATTERN = /catch\s*(?:\([^)]*\)\s*)?\{\s*\}/;
+const EMPTY_CATCH_PATTERN = /catch\s*(?:\([^)]*\)\s*)?\{\s*\}/g;
 
 function listFiles(dir) {
   const absoluteDir = path.join(ROOT, dir);
@@ -39,16 +39,16 @@ const violations = [];
 
 for (const dir of TARGET_DIRS) {
   for (const file of listFiles(dir)) {
-    const lines = readFileSync(file, 'utf8').split(/\r?\n/);
-    lines.forEach((line, index) => {
-      if (EMPTY_CATCH_PATTERN.test(line)) {
-        violations.push({
-          file: path.relative(ROOT, file).replaceAll(path.sep, '/'),
-          line: index + 1,
-          text: line.trim(),
-        });
-      }
-    });
+    const text = readFileSync(file, 'utf8');
+    for (const match of text.matchAll(EMPTY_CATCH_PATTERN)) {
+      const beforeMatch = text.slice(0, match.index);
+      const line = beforeMatch.split(/\r?\n/).length;
+      violations.push({
+        file: path.relative(ROOT, file).replaceAll(path.sep, '/'),
+        line,
+        text: match[0].replace(/\s+/g, ' ').trim(),
+      });
+    }
   }
 }
 
