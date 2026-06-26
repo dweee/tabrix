@@ -3126,46 +3126,6 @@ onUnmounted(() => {
     gap: 8px;
   }
 
-  .rr-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-  .rr-controls {
-    display: flex;
-    gap: 8px;
-  }
-  .rr-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .rr-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px;
-    border: 1px solid #eee;
-    border-radius: 6px;
-  }
-  .rr-runoverrides {
-    margin-top: 6px;
-    border: 1px dashed #e5e7eb;
-    border-radius: 8px;
-    padding: 8px;
-    background: #f9fafb;
-  }
-  .rr-meta {
-    display: flex;
-    flex-direction: column;
-  }
-  .rr-name {
-    font-weight: 600;
-  }
-  .rr-desc {
-    font-size: 12px;
-    color: #666;
-  }
   .empty {
     color: #888;
     font-size: 13px;
@@ -3228,119 +3188,6 @@ onUnmounted(() => {
   .header-title {
     font-size: 22px;
   }
-}
-
-/* 快捷工具icon按钮样式 */
-.rr-icon-buttons {
-  display: flex;
-  gap: 12px;
-  justify-content: flex-start;
-  padding: 12px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, #ffffff 100%);
-  border: 1px solid rgba(226, 232, 240, 0.95);
-  border-radius: 14px;
-  box-shadow: 0 10px 22px -20px rgba(15, 23, 42, 0.65);
-}
-
-.rr-icon-btn {
-  width: 46px;
-  height: 46px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--ac-surface-muted, #f2f0eb);
-  border: 1px solid transparent;
-  border-radius: 10px;
-  color: var(--ac-text-muted, #6e6e6e);
-  cursor: pointer;
-  transition: all var(--ac-motion-fast, 120ms) ease;
-}
-
-.rr-icon-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  border-color: rgba(148, 163, 184, 0.35);
-  box-shadow: 0 10px 16px -12px rgba(15, 23, 42, 0.58);
-}
-
-.rr-icon-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.rr-icon-btn svg {
-  width: 24px;
-  height: 24px;
-}
-
-/* 录制按钮 - 红色 */
-.rr-icon-btn-record {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
-}
-
-.rr-icon-btn-record:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.2);
-  color: #dc2626;
-}
-
-/* 录制中状态 - 脉冲动画 */
-.rr-icon-btn-recording {
-  animation: pulse-recording 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse-recording {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
-  }
-  50% {
-    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
-  }
-}
-
-/* 停止按钮 - 深红色 */
-.rr-icon-btn-stop {
-  background: rgba(185, 28, 28, 0.1);
-  color: #b91c1c;
-}
-
-.rr-icon-btn-stop:hover:not(:disabled) {
-  background: rgba(185, 28, 28, 0.2);
-  color: #991b1b;
-}
-
-/* 编辑按钮 - 蓝色 */
-.rr-icon-btn-edit {
-  background: rgba(37, 99, 235, 0.1);
-  color: #2563eb;
-}
-
-.rr-icon-btn-edit:hover:not(:disabled) {
-  background: rgba(37, 99, 235, 0.2);
-  color: #1d4ed8;
-}
-
-/* 标注按钮 - 绿色 */
-.rr-icon-btn-marker {
-  background: rgba(16, 185, 129, 0.1);
-  color: #10b981;
-}
-
-.rr-icon-btn-marker:hover:not(:disabled) {
-  background: rgba(16, 185, 129, 0.2);
-  color: #059669;
-}
-
-/* Coming Soon 按钮样式 */
-.rr-icon-btn-coming-soon {
-  opacity: 0.5;
-  cursor: default !important;
-}
-
-.rr-icon-btn-coming-soon:hover {
-  transform: none !important;
-  box-shadow: none !important;
-  opacity: 0.6;
 }
 
 /* CSS Tooltip - instant display */
@@ -3630,8 +3477,7 @@ onUnmounted(() => {
   box-shadow: 0 10px 18px -16px rgba(15, 23, 42, 0.88);
 }
 
-.popup-container[data-popup-theme='dark-console'] .config-card,
-.popup-container[data-popup-theme='dark-console'] .rr-icon-buttons {
+.popup-container[data-popup-theme='dark-console'] .config-card {
   background: rgba(5, 18, 36, 0.88);
   border-color: var(--popup-border);
   box-shadow: 0 12px 22px -24px rgba(2, 8, 23, 0.9);

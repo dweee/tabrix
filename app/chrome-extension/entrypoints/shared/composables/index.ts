@@ -5,9 +5,8 @@
  * Note: These composables are for UI-only use. Do not import them in background scripts
  * as they depend on Vue and will bloat the service worker bundle.
  *
- * The record-replay (RR) RPC composables were removed as part of the MKEP pruning
- * during MKEP pruning. New MKEP-aligned composables will be
- * exported from here in Stage 3+.
+ * Legacy RPC composables were removed during MKEP pruning. New MKEP-aligned
+ * composables will be exported from here in Stage 3+.
  */
 
 export * from './useExecutionInsights';
