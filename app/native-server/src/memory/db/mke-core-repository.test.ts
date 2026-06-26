@@ -455,6 +455,93 @@ describe('MKE core repositories', () => {
     }
   });
 
+  it('records AI feedback as an auditable event and updates the trace in one operation', () => {
+    const { traceRepo, close } = bootstrap();
+    try {
+      traceRepo.append({
+        traceId: 'trace-feedback-event-1',
+        taskId: 'task-feedback-event-1',
+        taskIntent: 'collect search results',
+        aiClient: 'jest',
+        toolName: 'chrome_read_page',
+        toolCallId: 'call-feedback-event-1',
+        sequenceIndex: 3,
+        requestParams: { tabId: 7, goal: 'collect top result cards' },
+        requestAt: NOW,
+        response: { success: true, rows: 10 },
+        responseAt: '2026-06-06T10:00:01.000Z',
+        toolSuccess: true,
+        businessSuccess: 'unknown',
+        createdAt: NOW,
+      });
+
+      const result = traceRepo.recordAiFeedback({
+        traceId: 'trace-feedback-event-1',
+        aiFeedbackScore: 0.92,
+        aiFeedback: {
+          businessStatus: 'achieved',
+          summary: '已拿到前 10 条结果卡片，适合沉淀为可复用读取步骤。',
+        },
+        businessSuccess: 'true',
+        feedbackEvent: {
+          feedbackEventId: 'feedback-event-1',
+          traceId: 'trace-feedback-event-1',
+          taskId: 'task-feedback-event-1',
+          toolName: 'chrome_read_page',
+          toolCallId: 'call-feedback-event-1',
+          sequenceIndex: 3,
+          traceBindingHash: 'binding-hash-1',
+          evaluationScope: 'step',
+          evaluationVersion: 'ai_feedback_v1',
+          rubricVersion: 'tabrix_step_rubric_v1',
+          evaluatorModel: 'test-evaluator',
+          businessStatus: 'achieved',
+          confidence: 0.92,
+          reasonCode: 'result_cards_collected',
+          summary: '已拿到前 10 条结果卡片，适合沉淀为可复用读取步骤。',
+          userGoalSnapshot: '搜索并整理前 10 条图文内容',
+          experienceCandidate: true,
+          sourceToolName: 'memory_record_ai_feedback',
+          sourceToolCallId: 'feedback-call-1',
+          accepted: true,
+          payload: {
+            aiReview: 'step useful',
+            reusable: true,
+          },
+          createdAt: '2026-06-06T10:00:02.000Z',
+        },
+      });
+
+      expect(result.trace).toMatchObject({
+        traceId: 'trace-feedback-event-1',
+        businessSuccess: 'true',
+        aiFeedbackScore: 0.92,
+        aiFeedback: {
+          businessStatus: 'achieved',
+          summary: '已拿到前 10 条结果卡片，适合沉淀为可复用读取步骤。',
+        },
+      });
+      expect(result.event).toMatchObject({
+        feedbackEventId: 'feedback-event-1',
+        traceId: 'trace-feedback-event-1',
+        taskId: 'task-feedback-event-1',
+        toolName: 'chrome_read_page',
+        toolCallId: 'call-feedback-event-1',
+        sequenceIndex: 3,
+        businessStatus: 'achieved',
+        experienceCandidate: true,
+        accepted: true,
+        payload: {
+          aiReview: 'step useful',
+          reusable: true,
+        },
+      });
+      expect(traceRepo.listFeedbackEventsByTrace('trace-feedback-event-1')).toEqual([result.event]);
+    } finally {
+      close();
+    }
+  });
+
   it('keeps legacy Memory traces unscored until AI feedback is recorded', () => {
     const { traceRepo, close } = bootstrap();
     try {

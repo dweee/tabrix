@@ -926,7 +926,7 @@ describe('read_page auth artifacts', () => {
     expect(collaboration.userAction.instruction).toContain('AI 要求扫码登录');
   });
 
-  it('returns an assistant handoff when QR guidance cannot find a QR target', () => {
+  it('returns an auth collaboration handoff when QR guidance cannot find a QR target', () => {
     const collaboration = buildAuthCollaborationState({
       pageRole: 'login_required',
       tabId: 9,
