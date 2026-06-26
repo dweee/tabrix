@@ -127,10 +127,15 @@ export function attachTabrixMemoryTraceEnvelope(
   let payload: Record<string, unknown>;
   try {
     const parsed = JSON.parse(first.text);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return result;
-    payload = parsed as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      if (result.isError !== true) return result;
+      payload = buildPlainTextErrorPayload(first.text);
+    } else {
+      payload = parsed as Record<string, unknown>;
+    }
   } catch {
-    return result;
+    if (result.isError !== true) return result;
+    payload = buildPlainTextErrorPayload(first.text);
   }
 
   const existingTabrix = readObject(payload[TABRIX_TOOL_METADATA_KEY]) ?? {};
@@ -165,6 +170,16 @@ export function attachTabrixMemoryTraceEnvelope(
   return {
     ...result,
     content: [{ ...first, text: JSON.stringify(nextPayload) }, ...(result.content?.slice(1) ?? [])],
+  };
+}
+
+function buildPlainTextErrorPayload(text: string): Record<string, unknown> {
+  const message = text.trim() || 'Tool failed without a structured error message';
+  return {
+    success: false,
+    error: message,
+    message,
+    errorFormat: 'plain_text_wrapped',
   };
 }
 

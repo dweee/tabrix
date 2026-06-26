@@ -478,4 +478,41 @@ describe('tabrix metadata envelope', () => {
       ),
     ).toBe(result);
   });
+
+  it('wraps plain-text error results so failed task steps can receive AI feedback', () => {
+    const result: CallToolResult = {
+      content: [{ type: 'text', text: 'selector not found' }],
+      isError: true,
+    };
+
+    const wrapped = attachTabrixMemoryTraceEnvelope(
+      result,
+      makeTrace({ toolName: TOOL_NAMES.BROWSER.CLICK, toolSuccess: false }),
+      {
+        intentTitle: '点击搜索筛选',
+        intentSummary: null,
+        nextIntent: null,
+        previousFeedback: [],
+      },
+      TOOL_NAMES.BROWSER.CLICK,
+    );
+    const payload = parseFirstText(wrapped);
+
+    expect(payload).toMatchObject({
+      success: false,
+      error: 'selector not found',
+      errorFormat: 'plain_text_wrapped',
+      _tabrix: {
+        traceId: 'trace-1',
+        toolName: TOOL_NAMES.BROWSER.CLICK,
+        toolSuccess: false,
+        aiFeedbackRequired: true,
+        businessFeedbackRequired: true,
+        feedbackTarget: {
+          traceId: 'trace-1',
+          feedbackToken: expect.any(String),
+        },
+      },
+    });
+  });
 });
