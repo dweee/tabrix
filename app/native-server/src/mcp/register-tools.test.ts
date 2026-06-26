@@ -10,6 +10,7 @@ import {
   listLifecycleEvidenceArtifacts,
   resetLifecycleEvidenceArtifactStoreForTests,
 } from '../runtime/lifecycle-evidence-artifact-store';
+import * as browserObjectTraceProjector from '../memory/mke-browser-object-trace-projector';
 
 describe('handleToolCall execution wrapper', () => {
   const markBridgeReady = () => {
@@ -301,9 +302,7 @@ describe('handleToolCall execution wrapper', () => {
     const traceWriter = sessionManager.memoryTraces;
     if (!traceWriter) throw new Error('MKE trace service is not available in tests');
     const objectProjectionSpy = jest.spyOn(
-      traceWriter as unknown as {
-        recordBrowserObjectsFromToolResult(input: unknown): void;
-      },
+      browserObjectTraceProjector,
       'recordBrowserObjectsFromToolResult',
     );
 
