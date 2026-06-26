@@ -1307,60 +1307,6 @@ export const BROWSER_SCHEMAS: Tool[] = [
     },
   },
   {
-    name: TOOL_NAMES.BROWSER.REQUEST_ELEMENT_SELECTION,
-    description:
-      'Request the user to manually select one or more elements on the current page. This is a human-in-the-loop tool: the user must physically click elements in the browser, so expect a wait of seconds to minutes. Use as a fallback when you cannot reliably locate the target element after ~3 attempts using chrome_read_page combined with chrome_click_element/chrome_fill_or_select/chrome_computer. Returns element refs compatible with chrome_click_element/chrome_fill_or_select (including iframe frameId for cross-frame support).',
-    annotations: {
-      readOnlyHint: true,
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        requests: {
-          type: 'array',
-          description:
-            'A list of element selection requests. Each request produces exactly one picked element. The user will see these requests in a panel and select each element by clicking on the page.',
-          minItems: 1,
-          items: {
-            type: 'object',
-            properties: {
-              id: {
-                type: 'string',
-                description:
-                  'Optional stable request id for correlation. If omitted, an id is auto-generated (e.g., "req_1").',
-              },
-              name: {
-                type: 'string',
-                description:
-                  'Short label shown to the user describing what element to select (e.g., "Login button", "Email input field").',
-              },
-              description: {
-                type: 'string',
-                description:
-                  'Optional longer instruction shown to the user with more context (e.g., "Click on the primary login button in the top-right corner").',
-              },
-            },
-            required: ['name'],
-          },
-        },
-        timeoutMs: {
-          type: 'number',
-          description:
-            'Timeout in milliseconds for the user to complete all selections. Default: 180000 (3 minutes). Maximum: 600000 (10 minutes).',
-        },
-        tabId: {
-          type: 'number',
-          description: 'Target tab ID. If omitted, uses the current active tab.',
-        },
-        windowId: {
-          type: 'number',
-          description: 'Window ID to select active tab from (when tabId is omitted).',
-        },
-      },
-      required: ['requests'],
-    },
-  },
-  {
     name: TOOL_NAMES.BROWSER.KEYBOARD,
     description:
       'Simulate keyboard input on a web page. Sends key events (Enter, Tab, Escape, Ctrl+C, etc.) or key combinations. For typing text into form fields, prefer chrome_fill_or_select; this tool is best for keyboard shortcuts and special keys.',

@@ -138,7 +138,6 @@ describe('TOOL_RISK_TIERS coverage invariants', () => {
       'chrome_javascript',
       'chrome_click_element',
       'chrome_fill_or_select',
-      'chrome_request_element_selection',
       'chrome_keyboard',
       'chrome_console',
       'chrome_upload_file',

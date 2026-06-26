@@ -290,7 +290,6 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],
     [TOOL_NAMES.BROWSER.HISTORY],
     [TOOL_NAMES.BROWSER.BOOKMARK_SEARCH],
-    [TOOL_NAMES.BROWSER.REQUEST_ELEMENT_SELECTION],
     [TOOL_NAMES.BROWSER.PERFORMANCE_ANALYZE_INSIGHT],
   ])(
     'GET /memory/mke/traces marks default auxiliary browser trace as not required: %s',

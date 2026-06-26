@@ -236,7 +236,6 @@ describe('tabrix metadata envelope', () => {
     [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],
     [TOOL_NAMES.BROWSER.HISTORY],
     [TOOL_NAMES.BROWSER.BOOKMARK_SEARCH],
-    [TOOL_NAMES.BROWSER.REQUEST_ELEMENT_SELECTION],
     [TOOL_NAMES.BROWSER.PERFORMANCE_ANALYZE_INSIGHT],
   ])('does not request AI feedback for default auxiliary browser traces: %s', (toolName) => {
     const result = attachTabrixMemoryTraceEnvelope(

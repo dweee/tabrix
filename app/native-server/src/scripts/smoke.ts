@@ -138,7 +138,6 @@ const ALL_TOOL_NAMES = [
   'chrome_javascript',
   'chrome_click_element',
   'chrome_fill_or_select',
-  'chrome_request_element_selection',
   'chrome_keyboard',
   'chrome_console',
   'chrome_upload_file',
@@ -1188,8 +1187,6 @@ async function runAllToolsValidation(
         : `Silent download failed (${JSON.stringify(downloadResult).slice(0, 96)})`,
     );
   }
-
-  record('chrome_request_element_selection', true, 'Skipped (manual user interaction required)');
 
   const perfInsight = parseToolText(
     await mcp.callTool('performance_analyze_insight', {

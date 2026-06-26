@@ -489,26 +489,6 @@ Send key events or chords to the page (shortcuts, special keys). For long text i
 }
 ```
 
-### `chrome_request_element_selection`
-
-Human-in-the-loop element picker: the user must click elements in the browser; expect seconds to minutes. Use after repeated failed location via `chrome_read_page` + click/fill/computer. Returns refs compatible with click/fill (including iframe `frameId` when applicable).
-
-**Parameters**:
-
-- `requests` (array, required): Each item `{ id?, name (required), description? }` — one picked element per request.
-- `timeoutMs` (number, optional): Default `180000` (max `600000`).
-- `tabId` (number, optional): Target tab (default: active tab).
-- `windowId` (number, optional): Window when `tabId` is omitted.
-
-**Example**:
-
-```json
-{
-  "requests": [{ "name": "Login button", "description": "Primary login in the header" }],
-  "timeoutMs": 120000
-}
-```
-
 ### `chrome_upload_file`
 
 Upload files to `<input type="file">` via Chrome DevTools Protocol.
@@ -969,7 +949,6 @@ Recommended tool combinations by task goal.
 | Select dropdown option      | `chrome_fill_or_select` (selector, value)                                 | Set select element value directly              |
 | Upload a file               | `chrome_upload_file` (selector, filePath)                                 | Set file input via CDP                         |
 | Handle alert/confirm dialog | `chrome_handle_dialog` (action: accept/dismiss)                           | Must call while dialog is showing              |
-| User-assisted element pick  | `chrome_request_element_selection`                                        | Wait for user to physically click              |
 
 ### Navigation & Tab Management
 
