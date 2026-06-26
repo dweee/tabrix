@@ -29,6 +29,8 @@ function installClickHelper() {
     .__TABRIX_CLICK_HELPER_VERSION__;
   delete (window as Window & { __TABRIX_CLICK_HELPER_MESSAGE_HANDLER__?: RuntimeListener })
     .__TABRIX_CLICK_HELPER_MESSAGE_HANDLER__;
+  delete (window as Window & { __claudeElementMap?: Record<string, WeakRef<Element>> })
+    .__claudeElementMap;
   (
     window as Window & { __claudeElementMap?: Record<string, WeakRef<Element>> }
   ).__claudeElementMap = {};
@@ -109,6 +111,8 @@ describe('click-helper targeting', () => {
       OriginalMouseEvent;
     (globalThis as typeof globalThis & { PointerEvent?: typeof MouseEvent }).PointerEvent =
       OriginalPointerEvent;
+    delete (window as Window & { __claudeElementMap?: Record<string, WeakRef<Element>> })
+      .__claudeElementMap;
   });
 
   it('fires one click event for native clickable elements', async () => {
@@ -233,6 +237,27 @@ describe('click-helper targeting', () => {
     expect(result.success).toBe(true);
     expect(directOptionClicks).toBe(1);
     expect(directComboClicks).toBe(0);
+  });
+
+  it('reports ref lookup failures instead of treating them as stale page objects', async () => {
+    Object.defineProperty(window, '__claudeElementMap', {
+      configurable: true,
+      get() {
+        throw new Error('element map unavailable');
+      },
+    });
+
+    const result = await sendClickRequest({
+      action: 'clickElement',
+      ref: 'brokenRef',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+
+    expect(result).toMatchObject({
+      reason: 'ref_lookup_failed',
+    });
+    expect(result.error).toContain('Element ref lookup failed: element map unavailable');
   });
 
   it('reinstalls the message listener when a stale initialized flag survived reload', async () => {

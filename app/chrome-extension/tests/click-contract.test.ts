@@ -1440,4 +1440,64 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
       },
     });
   });
+
+  it('does not mark dispatch succeeded when both native and synthetic terminal clicks fail', async () => {
+    document.body.innerHTML = '<button id="btn">Fail</button>';
+    const button = document.getElementById('btn') as HTMLButtonElement;
+    setRect(button, { left: 20, top: 30, width: 120, height: 32 });
+    document.elementFromPoint = vi.fn(() => button);
+    const originalDispatch = button.dispatchEvent.bind(button);
+    button.dispatchEvent = vi.fn((event: Event) => {
+      if (event.type === 'click') {
+        throw new Error('synthetic click blocked');
+      }
+      return originalDispatch(event);
+    });
+    button.click = vi.fn(() => {
+      throw new Error('native click blocked');
+    });
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#btn',
+      waitForNavigation: false,
+      timeout: 20,
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.dispatchSucceeded).toBe(false);
+    expect(response.signals.waitDiagnostics.dispatch).toMatchObject({
+      primaryClickDelivered: false,
+      failedEvents: expect.arrayContaining([
+        expect.objectContaining({ event: 'native_click' }),
+        expect.objectContaining({ event: 'click' }),
+      ]),
+    });
+  });
+
+  it('does not mark coordinate dispatch succeeded when the final coordinate target disappears', async () => {
+    document.body.innerHTML = '<button id="btn">Target</button>';
+    const button = document.getElementById('btn') as HTMLButtonElement;
+    setRect(button, { left: 20, top: 30, width: 120, height: 32 });
+    const elementFromPoint = vi
+      .fn()
+      .mockReturnValueOnce(button)
+      .mockReturnValueOnce(button)
+      .mockReturnValue(null);
+    document.elementFromPoint = elementFromPoint;
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      coordinates: { x: 80, y: 46 },
+      waitForNavigation: false,
+      timeout: 20,
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.dispatchSucceeded).toBe(false);
+    expect(response.signals.waitDiagnostics.dispatch).toMatchObject({
+      primaryClickDelivered: false,
+      failedEvents: [expect.objectContaining({ event: 'target_lookup' })],
+    });
+  });
 });

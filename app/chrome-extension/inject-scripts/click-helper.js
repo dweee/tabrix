@@ -551,17 +551,22 @@ if (
       if (ref && typeof ref === 'string') {
         // Resolve element from weak map
         let target = null;
+        let refLookupError = null;
         try {
           const map = window.__claudeElementMap;
           const weak = map && map[ref];
           target = weak && typeof weak.deref === 'function' ? weak.deref() : null;
         } catch (e) {
-          // ignore
+          refLookupError = e;
         }
 
         if (!target || !(target instanceof Element)) {
+          const lookupMessage = refLookupError
+            ? ` Element ref lookup failed: ${describeClickDispatchError(refLookupError)}.`
+            : '';
           return {
-            error: `Element ref "${ref}" not found. Please call chrome_read_page first and ensure the ref is still valid.`,
+            error: `Element ref "${ref}" not found.${lookupMessage} Please call chrome_read_page first and ensure the ref is still valid.`,
+            reason: refLookupError ? 'ref_lookup_failed' : 'target_ref_stale',
           };
         }
 
@@ -839,6 +844,7 @@ if (
       let domChanged = false;
       let domAddedDialog = false;
       let domAddedMenu = false;
+      let observerDiagnostic = { available: true };
 
       const DIALOG_SELECTOR = '[role="dialog"], [aria-modal="true"], dialog[open]';
       const MENU_SELECTOR =
@@ -882,31 +888,43 @@ if (
             'disabled',
           ],
         });
-      } catch {
+      } catch (error) {
         // Detached body edge case — treat the observer as absent rather than crash.
+        observerDiagnostic = {
+          available: false,
+          reason: 'observer_error',
+          message: describeClickDispatchError(error),
+        };
       }
 
       let dispatchSucceeded = false;
+      let dispatchDiagnostics = null;
       try {
         if (
           element &&
           (elementInfo.clickMethod === 'selector' || elementInfo.clickMethod === 'ref')
         ) {
-          if (double) {
-            dispatchClickSequence(element, clickX, clickY, options, true);
-          } else {
-            dispatchClickSequence(element, clickX, clickY, options, false);
-          }
-          dispatchSucceeded = true;
+          const dispatchResult = dispatchClickSequence(element, clickX, clickY, options, double);
+          dispatchSucceeded = dispatchResult.primaryClickDelivered === true;
+          dispatchDiagnostics = dispatchResult;
         } else {
-          if (double) simulateDoubleClick(clickX, clickY, options);
-          else simulateClick(clickX, clickY, options);
-          // coordinate-based path is best-effort; treat as dispatched iff an
-          // element was resolvable at the coord.
-          dispatchSucceeded = element != null;
+          const dispatchResult = double
+            ? simulateDoubleClick(clickX, clickY, options)
+            : simulateClick(clickX, clickY, options);
+          dispatchSucceeded = dispatchResult.primaryClickDelivered === true;
+          dispatchDiagnostics = dispatchResult;
         }
-      } catch {
+      } catch (error) {
         dispatchSucceeded = false;
+        dispatchDiagnostics = {
+          primaryClickDelivered: false,
+          failedEvents: [
+            {
+              event: 'dispatch_sequence',
+              message: describeClickDispatchError(error),
+            },
+          ],
+        };
       }
 
       const outcomeWait = await waitForClickOutcomeWindow(
@@ -931,8 +949,8 @@ if (
       window.removeEventListener('beforeunload', beforeUnloadListener);
       try {
         mutationObserver.disconnect();
-      } catch {
-        // ignore
+      } catch (error) {
+        observerDiagnostic.disconnectError = describeClickDispatchError(error);
       }
 
       const urlAfter = String(window.location.href || '');
@@ -969,6 +987,8 @@ if (
           targetStateDelta,
           waitDiagnostics: {
             verification: outcomeWait,
+            observer: observerDiagnostic,
+            ...(dispatchDiagnostics ? { dispatch: dispatchDiagnostics } : {}),
           },
         },
       };
@@ -1092,8 +1112,13 @@ if (
    */
   function simulateClick(x, y, options = {}) {
     const element = document.elementFromPoint(x, y);
-    if (!element) return;
-    dispatchClickSequence(element, x, y, options, false);
+    if (!element) {
+      return {
+        primaryClickDelivered: false,
+        failedEvents: [{ event: 'target_lookup', message: 'No element at click coordinates' }],
+      };
+    }
+    return dispatchClickSequence(element, x, y, options, false);
   }
 
   /**
@@ -1101,15 +1126,24 @@ if (
    */
   function simulateDoubleClick(x, y, options = {}) {
     const element = document.elementFromPoint(x, y);
-    if (!element) return;
-    dispatchClickSequence(element, x, y, options, true);
+    if (!element) {
+      return {
+        primaryClickDelivered: false,
+        failedEvents: [{ event: 'target_lookup', message: 'No element at click coordinates' }],
+      };
+    }
+    return dispatchClickSequence(element, x, y, options, true);
   }
 
   /**
    * Simulate double click using element when available
    */
   function simulateDomDoubleClick(element, x, y, options) {
-    dispatchClickSequence(element, x, y, options, true);
+    return dispatchClickSequence(element, x, y, options, true);
+  }
+
+  function describeClickDispatchError(error) {
+    return String(error && error.message ? error.message : error);
   }
 
   function normalizeMouseOpts(x, y, options = {}) {
@@ -1156,6 +1190,31 @@ if (
   function dispatchClickSequence(element, x, y, options = {}, isDouble = false) {
     const base = normalizeMouseOpts(x, y, options);
     const useNativeClick = shouldUseNativeClick(element, base.button);
+    const failedEvents = [];
+    const recordFailure = (event, error) => {
+      failedEvents.push({
+        event,
+        message: describeClickDispatchError(error),
+      });
+    };
+    const tryDispatch = (eventName, event) => {
+      try {
+        element.dispatchEvent(event);
+        return true;
+      } catch (error) {
+        recordFailure(eventName, error);
+        return false;
+      }
+    };
+    const tryNativeClick = () => {
+      try {
+        element.click();
+        return true;
+      } catch (error) {
+        recordFailure('native_click', error);
+        return false;
+      }
+    };
     const pointerBase = {
       ...base,
       pointerId: 1,
@@ -1164,82 +1223,54 @@ if (
     };
     try {
       element.dispatchEvent(new PointerEvent('pointerdown', pointerBase));
-    } catch {
-      /* best-effort click sensing fallback */
+    } catch (error) {
+      recordFailure('pointerdown', error);
     }
     const down = new MouseEvent('mousedown', base);
     const up = new MouseEvent('mouseup', base);
     const click = new MouseEvent('click', base);
-    try {
-      element.dispatchEvent(down);
-    } catch {
-      /* best-effort click sensing fallback */
-    }
+    tryDispatch('mousedown', down);
     try {
       element.dispatchEvent(new PointerEvent('pointerup', pointerBase));
-    } catch {
-      /* best-effort click sensing fallback */
+    } catch (error) {
+      recordFailure('pointerup', error);
     }
-    try {
-      element.dispatchEvent(up);
-    } catch {
-      /* best-effort click sensing fallback */
-    }
+    tryDispatch('mouseup', up);
+    let primaryClickDelivered = false;
     if (useNativeClick && typeof element.click === 'function') {
-      try {
-        element.click();
-      } catch {
-        /* best-effort click sensing fallback */
+      primaryClickDelivered = tryNativeClick();
+      if (!primaryClickDelivered) {
+        primaryClickDelivered = tryDispatch('click', click);
       }
     } else {
-      try {
-        element.dispatchEvent(click);
-      } catch {
-        /* best-effort click sensing fallback */
-      }
+      primaryClickDelivered = tryDispatch('click', click);
     }
+    let contextMenuDelivered = null;
     if (base.button === 2) {
       // right button contextmenu
       const ctx = new MouseEvent('contextmenu', base);
-      try {
-        element.dispatchEvent(ctx);
-      } catch {
-        /* best-effort click sensing fallback */
-      }
+      contextMenuDelivered = tryDispatch('contextmenu', ctx);
     }
     if (isDouble) {
       // second sequence + dblclick
       setTimeout(() => {
-        try {
-          element.dispatchEvent(new MouseEvent('mousedown', base));
-        } catch {
-          /* best-effort click sensing fallback */
-        }
-        try {
-          element.dispatchEvent(new MouseEvent('mouseup', base));
-        } catch {
-          /* best-effort click sensing fallback */
-        }
+        tryDispatch('double_mousedown', new MouseEvent('mousedown', base));
+        tryDispatch('double_mouseup', new MouseEvent('mouseup', base));
         if (useNativeClick && typeof element.click === 'function') {
-          try {
-            element.click();
-          } catch {
-            /* best-effort click sensing fallback */
+          if (!tryNativeClick()) {
+            tryDispatch('double_click', new MouseEvent('click', base));
           }
         } else {
-          try {
-            element.dispatchEvent(new MouseEvent('click', base));
-          } catch {
-            /* best-effort click sensing fallback */
-          }
+          tryDispatch('double_click', new MouseEvent('click', base));
         }
-        try {
-          element.dispatchEvent(new MouseEvent('dblclick', base));
-        } catch {
-          /* best-effort click sensing fallback */
-        }
+        tryDispatch('dblclick', new MouseEvent('dblclick', base));
       }, 30);
     }
+    return {
+      primaryClickDelivered,
+      ...(contextMenuDelivered !== null ? { contextMenuDelivered } : {}),
+      ...(failedEvents.length ? { failedEvents } : {}),
+    };
   }
 
   /**
@@ -1285,8 +1316,8 @@ if (
     ) {
       chrome.runtime.onMessage.removeListener(window.__TABRIX_CLICK_HELPER_MESSAGE_HANDLER__);
     }
-  } catch {
-    /* best-effort click sensing fallback */
+  } catch (error) {
+    window.__TABRIX_CLICK_HELPER_REMOVE_LISTENER_ERROR__ = describeClickDispatchError(error);
   }
 
   // Listen for messages from the extension
