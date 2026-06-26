@@ -727,6 +727,107 @@ describe('MkeExperienceProjector', () => {
     expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
   });
 
+  it.each([
+    {
+      label: 'slow action',
+      actionTraceId: 'trace-click-slow',
+      requestParams: { tabId: 9, ref: 'submit-button' },
+      durationMs: 45_000,
+    },
+    {
+      label: 'coordinate-dependent action',
+      actionTraceId: 'trace-click-coordinate',
+      requestParams: { tabId: 9, x: 120, y: 240 },
+      durationMs: 1000,
+    },
+    {
+      label: 'fallback action',
+      actionTraceId: 'trace-click-fallback',
+      requestParams: { tabId: 9, ref: 'submit-button' },
+      durationMs: 1000,
+      fallbackUsed: 'coordinate_fallback',
+    },
+    {
+      label: 'action without stable target',
+      actionTraceId: 'trace-click-no-target',
+      requestParams: { tabId: 9 },
+      durationMs: 1000,
+    },
+  ])('does not mine a recipe from AI-approved but unreplayable quality path: $label', (variant) => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const traces = new MemoryTraceRepository(opened.db);
+    const knowledge = new KnowledgeModelRepository(opened.db);
+    const experience = new ExperienceRecipeRepository(opened.db);
+    const projector = new MkeExperienceProjector(traces, knowledge, experience);
+
+    try {
+      const readTrace = traces.append({
+        traceId: `trace-read-${variant.actionTraceId}`,
+        taskId: `task-${variant.actionTraceId}`,
+        toolName: 'chrome_read_page',
+        requestParams: { tabId: 9 },
+        requestAt: '2026-06-06T07:30:01.000Z',
+        response: { payloadDigest: { summary: { quality: 'usable' } } },
+        responseAt: '2026-06-06T07:30:02.000Z',
+        durationMs: 1000,
+        toolSuccess: true,
+        aiFeedback: verifiedExperienceFeedback({
+          confidence: 0.94,
+          reasonCode: 'ai_verified_page_read',
+          summary: 'AI verified the page read supplied the objects needed for this task.',
+        }),
+        tabId: 9,
+        siteFamily: 'example.test',
+        pageUrlPattern: 'https://example.test/editor',
+        pageRole: 'content_editor',
+        pageState: 'ready',
+        createdAt: '2026-06-06T07:30:02.000Z',
+      });
+      const pageModelKey = buildMkePageModelKey(readTrace)!;
+      addKnowledge({
+        knowledge,
+        siteFamily: 'example.test',
+        pageModelKey,
+        pageRole: 'content_editor',
+        pageUrlPattern: 'https://example.test/editor',
+      });
+      traces.append({
+        traceId: variant.actionTraceId,
+        taskId: `task-${variant.actionTraceId}`,
+        toolName: 'chrome_click_element',
+        requestParams: variant.requestParams,
+        requestAt: '2026-06-06T07:30:03.000Z',
+        response: { payloadDigest: { success: true } },
+        responseAt: '2026-06-06T07:30:04.000Z',
+        durationMs: variant.durationMs,
+        toolSuccess: true,
+        fallbackUsed: variant.fallbackUsed,
+        aiFeedback: verifiedExperienceFeedback({
+          confidence: 0.95,
+          reasonCode: 'ai_verified_result',
+          summary: 'AI verified the action completed the visible task outcome successfully.',
+        }),
+        tabId: 9,
+        siteFamily: 'example.test',
+        pageUrlPattern: 'https://example.test/editor',
+        pageRole: 'content_editor',
+        pageState: 'ready',
+        createdAt: '2026-06-06T07:30:04.000Z',
+      });
+
+      const result = projector.projectIdleBatch({ nowIso: '2026-06-06T07:30:05.000Z' });
+
+      expect(result).toMatchObject({
+        processedTraceCount: 2,
+        savedExperienceCount: 0,
+        experienceIds: [],
+      });
+      expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
+    } finally {
+      opened.db.close();
+    }
+  });
+
   it('anchors AI-approved actions to the nearest same-tab page context across task ids', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
     const traces = new MemoryTraceRepository(opened.db);

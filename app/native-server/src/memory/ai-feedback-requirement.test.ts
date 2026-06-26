@@ -51,8 +51,6 @@ describe('AI feedback requirement rule', () => {
     [TOOL_NAMES.BROWSER.SCREENSHOT],
     [TOOL_NAMES.BROWSER.CONSOLE],
     [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],
-    [TOOL_NAMES.BROWSER.CLOSE_TABS],
-    [TOOL_NAMES.BROWSER.SWITCH_TAB],
   ])(
     'keeps auxiliary browser tools quiet for generic or maintenance-only context: %s',
     (toolName) => {
@@ -68,8 +66,6 @@ describe('AI feedback requirement rule', () => {
     [TOOL_NAMES.BROWSER.SCREENSHOT],
     [TOOL_NAMES.BROWSER.CONSOLE],
     [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],
-    [TOOL_NAMES.BROWSER.CLOSE_TABS],
-    [TOOL_NAMES.BROWSER.SWITCH_TAB],
   ])(
     'requests feedback for auxiliary browser tools when they serve a user task: %s',
     (toolName) => {
@@ -113,6 +109,21 @@ describe('AI feedback requirement rule', () => {
     }
 
     expect(shouldRequestAiFeedbackForTrace(trace(toolName, taskIntent, extras))).toBe(true);
+  });
+
+  test.each([
+    [TOOL_NAMES.BROWSER.CLOSE_TABS],
+    [TOOL_NAMES.BROWSER.SWITCH_TAB],
+    [TOOL_NAMES.BROWSER.NETWORK_REQUEST],
+    [TOOL_NAMES.BROWSER.BOOKMARK_ADD],
+    [TOOL_NAMES.BROWSER.BOOKMARK_DELETE],
+    [TOOL_NAMES.BROWSER.JAVASCRIPT],
+    [TOOL_NAMES.BROWSER.COMPUTER],
+  ])('requires feedback for actionful generic browser tools: %s', (toolName) => {
+    expect(shouldRequestAiFeedbackForTrace(trace(toolName))).toBe(true);
+    expect(shouldRequestAiFeedbackForTrace(trace(toolName, '内部维护：刷新浏览器状态缓存'))).toBe(
+      false,
+    );
   });
 
   test.each([

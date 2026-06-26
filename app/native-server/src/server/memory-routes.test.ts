@@ -288,13 +288,8 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
     [TOOL_NAMES.BROWSER.SCREENSHOT],
     [TOOL_NAMES.BROWSER.CONSOLE],
     [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],
-    [TOOL_NAMES.BROWSER.NETWORK_REQUEST],
     [TOOL_NAMES.BROWSER.HISTORY],
     [TOOL_NAMES.BROWSER.BOOKMARK_SEARCH],
-    [TOOL_NAMES.BROWSER.CLOSE_TABS],
-    [TOOL_NAMES.BROWSER.SWITCH_TAB],
-    [TOOL_NAMES.BROWSER.JAVASCRIPT],
-    [TOOL_NAMES.BROWSER.COMPUTER],
     [TOOL_NAMES.BROWSER.REQUEST_ELEMENT_SELECTION],
     [TOOL_NAMES.BROWSER.PERFORMANCE_ANALYZE_INSIGHT],
   ])(
@@ -331,6 +326,50 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
         toolName,
         aiFeedbackRequired: false,
         aiFeedbackState: 'not_required',
+        aiFeedback: null,
+      });
+    },
+  );
+
+  test.each([
+    [TOOL_NAMES.BROWSER.NETWORK_REQUEST],
+    [TOOL_NAMES.BROWSER.BOOKMARK_ADD],
+    [TOOL_NAMES.BROWSER.BOOKMARK_DELETE],
+    [TOOL_NAMES.BROWSER.CLOSE_TABS],
+    [TOOL_NAMES.BROWSER.SWITCH_TAB],
+    [TOOL_NAMES.BROWSER.JAVASCRIPT],
+    [TOOL_NAMES.BROWSER.COMPUTER],
+  ])(
+    'GET /memory/mke/traces keeps actionful generic browser trace pending: %s',
+    async (toolName) => {
+      const traceService = sessionManager.memoryTraces;
+      if (!traceService) throw new Error('MKE trace service is not available in tests');
+      const requestAt = Date.parse('2026-06-06T10:31:00.000Z');
+
+      traceService.recordToolCall({
+        taskId: 'actionful-generic-browser-task',
+        taskIntent: `Run MCP tool ${toolName}`,
+        aiClient: 'jest',
+        toolName,
+        stepId: 'actionful-generic-browser-step',
+        sequenceIndex: 1,
+        requestParams: {},
+        requestAtMs: requestAt,
+        responseAtMs: requestAt + 20,
+        result: textResult({ status: 'ok' }),
+        resultSummary: 'actionful generic browser step',
+      });
+      await sessionManager.flushMkeMemoryTraceWrites();
+
+      const res = await supertest(Server.getInstance().server)
+        .get('/memory/mke/traces?limit=10&offset=0')
+        .expect(200);
+
+      expect(res.body.data.traces).toHaveLength(1);
+      expect(res.body.data.traces[0]).toMatchObject({
+        toolName,
+        aiFeedbackRequired: true,
+        aiFeedbackState: 'pending',
         aiFeedback: null,
       });
     },

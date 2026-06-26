@@ -48,6 +48,9 @@ const REPLAYABLE_ACTION_TOOLS = new Set([
   'chrome_fill_or_select',
   'chrome_navigate',
 ]);
+const MAX_REPLAYABLE_ACTION_DURATION_MS = 30_000;
+const UNREPLAYABLE_FALLBACK_PATTERN =
+  /coordinate|coords|mouse|screenshot|image|ocr|fallback|retry|unstable|no[_-]?stable[_-]?target/i;
 
 const UNTRUSTED_EVALUATOR_NAMES = new Set(['', 'unknown', 'default', 'system', 'tabrix']);
 
@@ -185,6 +188,71 @@ function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
 function isBusinessAchieved(trace: MemoryTrace): boolean {
   if (isBlockedOrUnreplayableTrace(trace)) return false;
   return hasVerifiedAiSuccessFeedback(trace);
+}
+
+function hasCoordinateDependency(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string')
+    return /\b(coordinate|coordinates|coords|mouse_position)\b/i.test(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return false;
+  if (Array.isArray(value)) return value.some(hasCoordinateDependency);
+  if (typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).map((key) => key.toLowerCase());
+  if (
+    (keys.includes('x') && keys.includes('y')) ||
+    keys.some((key) =>
+      /\b(screenx|screeny|clientx|clienty|coordinate|coordinates|coords)\b/i.test(key),
+    )
+  ) {
+    return true;
+  }
+  return Object.values(record).some(hasCoordinateDependency);
+}
+
+function hasStableActionTarget(trace: MemoryTrace): boolean {
+  if (trace.toolName !== 'chrome_click_element' && trace.toolName !== 'chrome_fill_or_select') {
+    return true;
+  }
+  const request = readObject(trace.requestParams);
+  const target = readObject(trace.actionTarget);
+  return Boolean(
+    readString(request?.ref) ||
+    readString(request?.selector) ||
+    readString(request?.candidateActionId) ||
+    readString(target?.ref) ||
+    readString(target?.targetRef) ||
+    readString(target?.objectId) ||
+    readString(target?.stableTargetRef),
+  );
+}
+
+function hasReplayableQuality(trace: MemoryTrace): boolean {
+  if (
+    typeof trace.durationMs === 'number' &&
+    Number.isFinite(trace.durationMs) &&
+    trace.durationMs > MAX_REPLAYABLE_ACTION_DURATION_MS
+  ) {
+    return false;
+  }
+  const fallbackUsed = readString(trace.fallbackUsed);
+  if (fallbackUsed && fallbackUsed !== 'none' && fallbackUsed !== 'false') return false;
+  if (
+    UNREPLAYABLE_FALLBACK_PATTERN.test(String(trace.resultSummary || '')) ||
+    UNREPLAYABLE_FALLBACK_PATTERN.test(String(trace.errorCode || '')) ||
+    valueHasBlockedPageSignal(trace.nextRequiredCheck)
+  ) {
+    return false;
+  }
+  if (
+    hasCoordinateDependency(trace.requestParams) ||
+    hasCoordinateDependency(trace.actionTarget) ||
+    hasCoordinateDependency(trace.preObservation) ||
+    hasCoordinateDependency(trace.postObservation)
+  ) {
+    return false;
+  }
+  return hasStableActionTarget(trace);
 }
 
 function groupByTask(traces: MemoryTrace[]): TaskTraceGroup[] {
@@ -443,12 +511,14 @@ function buildRecipeBasis(
   const feedbackRequiredTraces = group.traces.filter(shouldRequestAiFeedbackForTrace);
   if (feedbackRequiredTraces.some((trace) => !isBusinessAchieved(trace))) return null;
 
-  const actionTraces = group.traces.filter(
+  const replayableActionTraces = group.traces.filter(
     (trace) =>
       REPLAYABLE_ACTION_TOOLS.has(trace.toolName) &&
       trace.toolSuccess === true &&
       isBusinessAchieved(trace),
   );
+  if (replayableActionTraces.some((trace) => !hasReplayableQuality(trace))) return null;
+  const actionTraces = replayableActionTraces.filter(hasReplayableQuality);
   if (actionTraces.length === 0) return null;
 
   const anchor = choosePageAnchor({

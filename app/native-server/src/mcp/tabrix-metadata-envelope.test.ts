@@ -234,13 +234,8 @@ describe('tabrix metadata envelope', () => {
     [TOOL_NAMES.BROWSER.SCREENSHOT],
     [TOOL_NAMES.BROWSER.CONSOLE],
     [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],
-    [TOOL_NAMES.BROWSER.NETWORK_REQUEST],
     [TOOL_NAMES.BROWSER.HISTORY],
     [TOOL_NAMES.BROWSER.BOOKMARK_SEARCH],
-    [TOOL_NAMES.BROWSER.CLOSE_TABS],
-    [TOOL_NAMES.BROWSER.SWITCH_TAB],
-    [TOOL_NAMES.BROWSER.JAVASCRIPT],
-    [TOOL_NAMES.BROWSER.COMPUTER],
     [TOOL_NAMES.BROWSER.REQUEST_ELEMENT_SELECTION],
     [TOOL_NAMES.BROWSER.PERFORMANCE_ANALYZE_INSIGHT],
   ])('does not request AI feedback for default auxiliary browser traces: %s', (toolName) => {
@@ -266,6 +261,42 @@ describe('tabrix metadata envelope', () => {
       businessFeedbackRequired: false,
     });
     expect(payload._tabrix).not.toHaveProperty('feedbackTarget');
+  });
+
+  it.each([
+    [TOOL_NAMES.BROWSER.NETWORK_REQUEST],
+    [TOOL_NAMES.BROWSER.BOOKMARK_ADD],
+    [TOOL_NAMES.BROWSER.BOOKMARK_DELETE],
+    [TOOL_NAMES.BROWSER.CLOSE_TABS],
+    [TOOL_NAMES.BROWSER.SWITCH_TAB],
+    [TOOL_NAMES.BROWSER.JAVASCRIPT],
+    [TOOL_NAMES.BROWSER.COMPUTER],
+  ])('requests AI feedback for default actionful browser traces: %s', (toolName) => {
+    const result = attachTabrixMemoryTraceEnvelope(
+      textResult({ status: 'ok' }),
+      makeTrace({
+        toolName,
+        taskIntent: `Run MCP tool ${toolName}`,
+      }),
+      {
+        intentTitle: null,
+        intentSummary: null,
+        nextIntent: null,
+        previousFeedback: [],
+      },
+      toolName,
+    );
+
+    const payload = parseFirstText(result);
+    expect(payload._tabrix).toMatchObject({
+      traceId: 'trace-1',
+      toolName,
+      businessFeedbackRequired: true,
+      feedbackTarget: {
+        traceId: 'trace-1',
+        feedbackToken: expect.any(String),
+      },
+    });
   });
 
   it('requests AI feedback for failed task-meaningful browser traces', () => {
