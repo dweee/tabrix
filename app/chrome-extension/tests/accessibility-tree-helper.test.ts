@@ -279,6 +279,57 @@ describe('accessibility-tree auth control map', () => {
     });
   });
 
+  it('records diagnostics when helper probes fail without blocking tree generation', () => {
+    document.body.innerHTML = `
+      <main>
+        <button id="save">Save</button>
+        <label>
+          <i id="terms-icon" class="check-icon"></i>
+          <span>我已阅读并同意用户协议和隐私政策</span>
+        </label>
+      </main>
+    `;
+    Array.from(document.querySelectorAll('*')).forEach((element, index) => {
+      makeVisible(element, { left: 10, top: 10 + index * 36, width: 120, height: 28 });
+    });
+    const agreementIcon = document.getElementById('terms-icon') as HTMLElement;
+    const originalGetAttribute = agreementIcon.getAttribute.bind(agreementIcon);
+    agreementIcon.getAttribute = vi.fn((name: string) => {
+      if (name === 'class') throw new Error('class probe failed');
+      return originalGetAttribute(name);
+    }) as HTMLElement['getAttribute'];
+    Object.defineProperty(agreementIcon, 'className', {
+      configurable: true,
+      get: () => {
+        throw new Error('class name fallback failed');
+      },
+    });
+
+    const result = (
+      window as Window & {
+        __generateAccessibilityTree: (
+          filter: string,
+          options: { maxDepth: number },
+        ) => { pageContent: string };
+      }
+    ).__generateAccessibilityTree('interactive', { maxDepth: 8 });
+
+    const diagnostics = (
+      window as Window & {
+        __TABRIX_INJECT_SCRIPT_DIAGNOSTICS__?: Array<Record<string, unknown>>;
+      }
+    ).__TABRIX_INJECT_SCRIPT_DIAGNOSTICS__;
+    expect(result.pageContent).toContain('Save');
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'accessibility_tree.class_name',
+          message: 'class probe failed',
+        }),
+      ]),
+    );
+  });
+
   it('recovers generic dynamic surface text targets as actionable refs', () => {
     document.body.innerHTML = `
       <main>
@@ -327,6 +378,69 @@ describe('accessibility-tree auth control map', () => {
           selector: '#surface-beta',
           matchSource: 'dynamic_surface_visible_text',
           actionability: 'actionable',
+        }),
+      ]),
+    );
+  });
+
+  it('records diagnostics when dynamic surface selector probes fail', () => {
+    document.body.innerHTML = `
+      <main>
+        <button id="open-filter">Filter</button>
+        <div id="panel" style="position: fixed; z-index: 1200;">
+          <span id="surface-alpha" role="option">Most saved</span>
+        </div>
+      </main>
+    `;
+    Array.from(document.querySelectorAll('*')).forEach((element, index) => {
+      makeVisible(element, { left: 20, top: 20 + index * 34, width: 140, height: 26 });
+    });
+    const panel = document.getElementById('panel') as HTMLDivElement;
+    makeVisible(panel, {
+      left: 40,
+      top: 90,
+      width: 260,
+      height: 180,
+    });
+    const originalMatches = Element.prototype.matches;
+    vi.spyOn(Element.prototype, 'matches').mockImplementation(function (
+      this: Element,
+      selector: string,
+    ) {
+      if (this === panel && selector.includes(':popover-open')) {
+        throw new Error('selector probe failed');
+      }
+      return originalMatches.call(this, selector);
+    });
+
+    const result = (
+      window as Window & {
+        __generateAccessibilityTree: (
+          filter: string,
+          options: { maxDepth: number },
+        ) => { pageContent: string; refMap: Array<Record<string, unknown>> };
+      }
+    ).__generateAccessibilityTree('interactive', { maxDepth: 8 });
+
+    const diagnostics = (
+      window as Window & {
+        __TABRIX_INJECT_SCRIPT_DIAGNOSTICS__?: Array<Record<string, unknown>>;
+      }
+    ).__TABRIX_INJECT_SCRIPT_DIAGNOSTICS__;
+    expect(result.pageContent).toContain('Most saved');
+    expect(result.refMap).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          selector: '#surface-alpha',
+          matchSource: 'dynamic_surface_visible_text',
+        }),
+      ]),
+    );
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'accessibility_tree.dynamic_surface_root.selector',
+          message: 'selector probe failed',
         }),
       ]),
     );

@@ -217,8 +217,8 @@
       const cn = /** @type {any} */ (el).className;
       if (typeof cn === 'string') return cn;
       if (cn && typeof cn.baseVal === 'string') return cn.baseVal;
-    } catch (_) {
-      /* ignore */
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.class_name', error);
     }
     return '';
   }
@@ -230,8 +230,8 @@
         const node = el.childNodes[i];
         if (node.nodeType === Node.TEXT_NODE) text += node.textContent || '';
       }
-    } catch (_) {
-      /* ignore */
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.own_visible_text', error);
     }
     return text.replace(/\s+/g, ' ').trim();
   }
@@ -243,8 +243,8 @@
       if (parent) pieces.push((parent.textContent || '').replace(/\s+/g, ' ').trim());
       const grandparent = parent?.parentElement;
       if (grandparent) pieces.push((grandparent.textContent || '').replace(/\s+/g, ' ').trim());
-    } catch (_) {
-      /* ignore */
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.nearby_text', error);
     }
     return pieces.filter(Boolean).join(' ').slice(0, 600);
   }
@@ -255,7 +255,8 @@
       const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
       const area = Math.max(1, rect.width * rect.height);
       return area > viewportArea * 0.35;
-    } catch (_) {
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.huge_container_rect', error);
       return false;
     }
   }
@@ -286,8 +287,8 @@
         }
         current = current.parentElement;
       }
-    } catch (_) {
-      /* ignore */
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.static_landmark', error);
     }
     return false;
   }
@@ -298,7 +299,8 @@
     if (['dialog', 'menu', 'listbox'].includes(role)) return true;
     try {
       if (el.matches && el.matches(':popover-open, dialog[open], [popover][open]')) return true;
-    } catch (_) {
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.dynamic_surface_root.selector', error);
       if (
         (el.tagName.toLowerCase() === 'dialog' && el.hasAttribute('open')) ||
         (el.hasAttribute('popover') && el.hasAttribute('open'))
@@ -320,7 +322,8 @@
         zIndex >= 10 &&
         area <= viewportArea * 0.2
       );
-    } catch (_) {
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.dynamic_surface_root.geometry', error);
       return false;
     }
   }
@@ -366,8 +369,8 @@
         ).toLowerCase();
         if (parentCursor === 'pointer') return true;
       }
-    } catch (_) {
-      /* ignore */
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.dynamic_surface_action.style', error);
     }
     return false;
   }
@@ -416,7 +419,8 @@
       if (rect.width * rect.height > viewportArea * 0.08) return false;
       const children = Array.from(el.children || []);
       if (children.some((child) => isVisible(child) && ownVisibleText(child))) return false;
-    } catch (_) {
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.dynamic_surface_leaf.geometry', error);
       return false;
     }
     return true;
@@ -500,7 +504,8 @@
       const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
       const area = Math.max(1, rect.width * rect.height);
       if (area > viewportArea * 0.08) return '';
-    } catch (_) {
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.auth_action.geometry', error);
       return '';
     }
     return (el.textContent || '').replace(/\s+/g, ' ').trim();
@@ -638,8 +643,8 @@
         );
         if (inner) return true;
       }
-    } catch (_) {
-      /* ignore */
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.shadow_interactive_probe', error);
     }
     return false;
   }
