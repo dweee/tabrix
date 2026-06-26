@@ -665,26 +665,6 @@
     "text": "catch { /* best-effort network probe */ }"
   },
   {
-    "file": "app/chrome-extension/inject-scripts/wait-helper.js",
-    "line": 55,
-    "text": "catch { /* best-effort page readiness probe */ }"
-  },
-  {
-    "file": "app/chrome-extension/inject-scripts/wait-helper.js",
-    "line": 118,
-    "text": "catch { /* best-effort page readiness probe */ }"
-  },
-  {
-    "file": "app/chrome-extension/inject-scripts/wait-helper.js",
-    "line": 139,
-    "text": "catch { /* best-effort page readiness probe */ }"
-  },
-  {
-    "file": "app/chrome-extension/inject-scripts/wait-helper.js",
-    "line": 195,
-    "text": "catch { /* best-effort page readiness probe */ }"
-  },
-  {
     "file": "app/chrome-extension/inject-scripts/web-fetcher-helper.js",
     "line": 452,
     "text": "catch (ex) { // Something went wrong, just return the original: }"

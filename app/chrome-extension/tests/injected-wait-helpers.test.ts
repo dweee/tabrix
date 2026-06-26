@@ -158,6 +158,50 @@ describe('injected state-driven waits', () => {
     delete (window as Window & { __claudeElementMap?: unknown }).__claudeElementMap;
   });
 
+  it('wait helper returns immediately when a selector is already present', async () => {
+    document.body.innerHTML = '<button id="ready-action">继续</button>';
+    const button = document.getElementById('ready-action') as HTMLButtonElement;
+    setRect(button, { left: 20, top: 20, width: 96, height: 32 });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/wait-helper.js',
+      '__WAIT_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'waitForSelector',
+      selector: '#ready-action',
+      timeout: 1,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.matched.ref).toMatch(/^ref_/);
+    expect(response.matched.center).toEqual({ x: 68, y: 36 });
+  });
+
+  it('wait helper reports invalid selectors without hiding them as timeouts', async () => {
+    const listener = installInjectedHelper(
+      'inject-scripts/wait-helper.js',
+      '__WAIT_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'waitForSelector',
+      selector: '[broken',
+      timeout: 25,
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.reason).toBe('selector_error');
+    expect(response.error).toEqual(expect.any(String));
+    expect(response.error.length).toBeGreaterThan(0);
+    expect(response.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'selector_query_failed',
+        }),
+      ]),
+    );
+  });
+
   it('keyboard focus readiness returns immediately once focus is observable', async () => {
     document.body.innerHTML = '<input id="name" type="text" />';
     const input = document.getElementById('name') as HTMLInputElement;
