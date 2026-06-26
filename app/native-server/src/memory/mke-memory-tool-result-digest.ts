@@ -7,6 +7,7 @@ import {
   valueHasBlockedPageSignal,
 } from './mke-memory-page-state-signals';
 import {
+  summarizeReadPageSensingDiagnostics,
   summarizeReadPageSnapshot,
   summarizeReadPageUnifiedDelta,
 } from './mke-memory-read-page-object-projection';
@@ -334,12 +335,24 @@ function buildStructuredTraceContext(
     const snapshotSummary = summarizeReadPageSnapshot(
       readNestedObject(payload, 'pageObjectSnapshot'),
     );
+    const sensingDiagnosticsSummary = summarizeReadPageSensingDiagnostics(
+      readNestedObject(readNestedObject(payload, 'pageContext'), 'sensingDiagnostics'),
+    );
     const deltaSummary = summarizeReadPageUnifiedDelta(payload);
     return {
       perceptionObjects: snapshotSummary,
       actionTarget: summarizeCandidateActions(readArray(payload.candidateActions)),
       preObservation: null,
-      postObservation: snapshotSummary,
+      postObservation:
+        snapshotSummary || sensingDiagnosticsSummary
+          ? sanitizeValue(
+              {
+                ...(snapshotSummary ?? {}),
+                ...(sensingDiagnosticsSummary ? { sensingDiagnosticsSummary } : {}),
+              },
+              'memory_trace',
+            )
+          : null,
       postActionDelta: deltaSummary,
       nextRequiredCheck: readString(readNestedObject(payload, 'taskProtocol')?.nextRequiredCheck),
     };

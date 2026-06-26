@@ -16,6 +16,7 @@ import {
   buildPageObjectEvidenceRefs,
   buildPageObjectRecentEvents,
   mergeReadPageFactsWithExistingCollectionFacts,
+  summarizeReadPageSensingDiagnostics,
   summarizeReadPageSnapshot,
   summarizeReadPageUnifiedDelta,
 } from './mke-memory-read-page-object-projection';
@@ -186,8 +187,12 @@ function recordReadPageObjects(input: {
   const compactTabFacts = readNestedObject(compactFacts, 'tab');
   const page = readNestedObject(payload, 'page');
   const summary = readNestedObject(payload, 'summary');
+  const pageContext = readNestedObject(payload, 'pageContext');
   const pageObjectSnapshot = summarizeReadPageSnapshot(
     readNestedObject(payload, 'pageObjectSnapshot'),
+  );
+  const sensingDiagnosticsSummary = summarizeReadPageSensingDiagnostics(
+    readNestedObject(pageContext, 'sensingDiagnostics'),
   );
   const pageDeltaReport = summarizeReadPageUnifiedDelta(payload);
   const evidenceRefs = buildPageObjectEvidenceRefs({
@@ -225,6 +230,7 @@ function recordReadPageObjects(input: {
       watchStatus: compact?.watchStatus,
       operationSummary: readNestedObject(compact, 'operationSummary'),
       pageObjectSnapshotSummary: pageObjectSnapshot,
+      sensingDiagnosticsSummary,
       pageDeltaSummary: pageDeltaReport,
       pageTitle: readString(page?.title),
       host: siteFamily,

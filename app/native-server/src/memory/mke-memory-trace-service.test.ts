@@ -1280,6 +1280,21 @@ describe('MkeMemoryTraceService', () => {
             chosenDataSource: 'markdown',
             tabId: 101,
           },
+          pageContext: {
+            sensingDiagnostics: {
+              source: 'accessibility_tree_helper',
+              coverageStatus: 'partial',
+              partialErrors: [
+                {
+                  source: 'accessibility_tree.dynamic_surface_root.selector',
+                  message: 'selector probe failed',
+                  at: 1782516187000,
+                },
+              ],
+              claimBoundary:
+                'content-script diagnostics mean some low-level object-sensing probes failed; the snapshot can still be useful but should be treated as partial evidence, not business-success proof',
+            },
+          },
           browserPageObjectCompact: {
             status: 'complete',
             watchStatus: 'stable',
@@ -1369,6 +1384,12 @@ describe('MkeMemoryTraceService', () => {
       expect(trace.postObservation).toMatchObject({
         snapshotId: 'rpos_example_101_1',
         pageRole: 'search_results',
+        sensingDiagnosticsSummary: {
+          source: 'accessibility_tree_helper',
+          coverageStatus: 'partial',
+          partialErrorCount: 1,
+          partialErrorSources: ['accessibility_tree.dynamic_surface_root.selector'],
+        },
       });
       expect(trace.postActionDelta).toMatchObject({
         actionId: 'act-001',
@@ -1410,6 +1431,12 @@ describe('MkeMemoryTraceService', () => {
           objectCount: 1,
           actionableObjectCount: 1,
           sourceProvenance: ['dom', 'cdp', 'visible_text', 'ax'],
+        },
+        sensingDiagnosticsSummary: {
+          source: 'accessibility_tree_helper',
+          coverageStatus: 'partial',
+          partialErrorCount: 1,
+          partialErrorSources: ['accessibility_tree.dynamic_surface_root.selector'],
         },
         pageDeltaSummary: {
           actionId: 'act-001',

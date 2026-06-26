@@ -87,6 +87,28 @@ export function summarizeReadPageSnapshot(payload: unknown): Record<string, unkn
     : null;
 }
 
+export function summarizeReadPageSensingDiagnostics(
+  payload: unknown,
+): Record<string, unknown> | null {
+  const diagnostics = readObject(payload);
+  if (!diagnostics) return null;
+  const partialErrors = readArray(diagnostics.partialErrors);
+  const partialErrorSources = partialErrors
+    .map((entry): string | null => readString(readObject(entry)?.source))
+    .filter((entry): entry is string => Boolean(entry))
+    .slice(0, 8);
+  const summary = {
+    source: readString(diagnostics.source),
+    coverageStatus: readString(diagnostics.coverageStatus),
+    partialErrorCount: partialErrors.length,
+    partialErrorSources,
+    claimBoundary: readString(diagnostics.claimBoundary),
+  };
+  return Object.values(summary).some((value) => value !== null && value !== undefined)
+    ? (sanitizeValue(summary, 'browser_object') as Record<string, unknown>)
+    : null;
+}
+
 export function summarizeReadPageUnifiedDelta(
   payload: Record<string, unknown>,
 ): Record<string, unknown> | null {
