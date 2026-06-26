@@ -15,6 +15,8 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import * as fs from 'fs';
 import * as path from 'path';
 import { logger } from '../logging/logger';
+import { filterToolsByEnvironment, filterToolsByPolicy } from './tool-registry-filters';
+import { withTabrixMetadataSchema } from './tabrix-metadata-envelope';
 
 const stdioLogger = logger.child('stdio-mcp');
 
@@ -84,7 +86,11 @@ export const ensureMcpClient = async () => {
 
 export const setupTools = (server: Server) => {
   // List tools handler
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOL_SCHEMAS }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: filterToolsByPolicy(filterToolsByEnvironment(TOOL_SCHEMAS)).map(
+      withTabrixMetadataSchema,
+    ),
+  }));
 
   // Call tool handler
   server.setRequestHandler(CallToolRequestSchema, async (request) =>
