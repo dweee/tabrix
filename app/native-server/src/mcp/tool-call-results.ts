@@ -15,11 +15,25 @@ export function createPolicyDeniedResult(toolName: string): CallToolResult {
 }
 
 export function createErrorResult(text: string): CallToolResult {
+  let payloadText = text;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== 'object') {
+      payloadText = JSON.stringify(
+        buildGenericFailurePayload('TABRIX_TOOL_UNAVAILABLE', text, false),
+      );
+    }
+  } catch {
+    payloadText = JSON.stringify(
+      buildGenericFailurePayload('TABRIX_TOOL_UNAVAILABLE', text, false),
+    );
+  }
+
   return {
     content: [
       {
         type: 'text' as const,
-        text,
+        text: payloadText,
       },
     ],
     isError: true,

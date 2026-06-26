@@ -313,7 +313,10 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         status: 'failed',
         summary: `Tool ${name} rejected by configuration`,
       });
-      return result;
+      return recordAndAttachMkeMemoryTrace(result, {
+        errorCode: 'tool_not_available',
+        resultSummary: 'Tool rejected by current configuration',
+      });
     }
 
     if (!isToolAllowedByPolicy(name, process.env)) {
@@ -328,7 +331,10 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         status: 'failed',
         summary: `Tool ${name} rejected by Tabrix Policy`,
       });
-      return result;
+      return recordAndAttachMkeMemoryTrace(result, {
+        errorCode: 'policy_denied_p3',
+        resultSummary: 'Tool rejected by Tabrix Policy',
+      });
     }
 
     // Resolve the task context BEFORE we branch into the native handler

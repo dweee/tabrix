@@ -14,6 +14,73 @@ function trace(toolName: string, taskIntent?: string | null, extras: Record<stri
 }
 
 describe('AI feedback requirement rule', () => {
+  test('classifies every browser tool as default, task-intent, or never feedback', () => {
+    const defaultFeedbackTools = new Set<string>([
+      TOOL_NAMES.BROWSER.READ_PAGE,
+      TOOL_NAMES.BROWSER.COLLECT_RESULT_CARDS,
+      TOOL_NAMES.BROWSER.NAVIGATE,
+      TOOL_NAMES.BROWSER.CLICK,
+      TOOL_NAMES.BROWSER.FILL,
+      TOOL_NAMES.BROWSER.KEYBOARD,
+      TOOL_NAMES.BROWSER.CLOSE_TABS,
+      TOOL_NAMES.BROWSER.SWITCH_TAB,
+      TOOL_NAMES.BROWSER.GET_INTERACTIVE_ELEMENTS,
+      TOOL_NAMES.BROWSER.WEB_FETCHER,
+      TOOL_NAMES.BROWSER.HANDLE_DIALOG,
+      TOOL_NAMES.BROWSER.HANDLE_DOWNLOAD,
+      TOOL_NAMES.BROWSER.FILE_UPLOAD,
+      TOOL_NAMES.BROWSER.NETWORK_REQUEST,
+      TOOL_NAMES.BROWSER.BOOKMARK_ADD,
+      TOOL_NAMES.BROWSER.BOOKMARK_DELETE,
+      TOOL_NAMES.BROWSER.JAVASCRIPT,
+      TOOL_NAMES.BROWSER.COMPUTER,
+    ]);
+    const taskIntentFeedbackTools = new Set<string>([
+      TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS,
+      TOOL_NAMES.BROWSER.SCREENSHOT,
+      TOOL_NAMES.BROWSER.CONSOLE,
+      TOOL_NAMES.BROWSER.NETWORK_CAPTURE,
+      TOOL_NAMES.BROWSER.NETWORK_CAPTURE_START,
+      TOOL_NAMES.BROWSER.NETWORK_CAPTURE_STOP,
+      TOOL_NAMES.BROWSER.NETWORK_DEBUGGER_START,
+      TOOL_NAMES.BROWSER.NETWORK_DEBUGGER_STOP,
+      TOOL_NAMES.BROWSER.HISTORY,
+      TOOL_NAMES.BROWSER.BOOKMARK_SEARCH,
+      TOOL_NAMES.BROWSER.INJECT_SCRIPT,
+      TOOL_NAMES.BROWSER.SEND_COMMAND_TO_INJECT_SCRIPT,
+      TOOL_NAMES.BROWSER.PERFORMANCE_ANALYZE_INSIGHT,
+    ]);
+    const neverFeedbackTools = new Set<string>([
+      TOOL_NAMES.BROWSER.PERFORMANCE_START_TRACE,
+      TOOL_NAMES.BROWSER.PERFORMANCE_STOP_TRACE,
+    ]);
+    const classified = new Set<string>([
+      ...defaultFeedbackTools,
+      ...taskIntentFeedbackTools,
+      ...neverFeedbackTools,
+    ]);
+    const browserTools = Object.values(TOOL_NAMES.BROWSER);
+
+    expect(classified).toEqual(new Set(browserTools));
+    for (const toolName of defaultFeedbackTools) {
+      expect(shouldRequestAiFeedbackForTool(toolName)).toBe(true);
+      expect(shouldRequestAiFeedbackForTrace(trace(toolName))).toBe(true);
+    }
+    for (const toolName of taskIntentFeedbackTools) {
+      expect(shouldRequestAiFeedbackForTool(toolName)).toBe(false);
+      expect(shouldRequestAiFeedbackForTrace(trace(toolName))).toBe(false);
+      expect(shouldRequestAiFeedbackForTrace(trace(toolName, '用户任务中的关键浏览器步骤'))).toBe(
+        true,
+      );
+    }
+    for (const toolName of neverFeedbackTools) {
+      expect(shouldRequestAiFeedbackForTool(toolName)).toBe(false);
+      expect(shouldRequestAiFeedbackForTrace(trace(toolName, '用户任务中的关键浏览器步骤'))).toBe(
+        false,
+      );
+    }
+  });
+
   test.each([
     [TOOL_NAMES.CONTEXT.CHOOSE],
     [TOOL_NAMES.CONTEXT.RECORD_OUTCOME],

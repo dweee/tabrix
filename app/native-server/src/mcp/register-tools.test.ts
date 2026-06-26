@@ -521,6 +521,23 @@ describe('handleToolCall execution wrapper', () => {
     expect(sessions[0].status).toBe('failed');
     expect(sessions[0].steps[0].errorCode).toBe('tool_not_available');
     expect(sessionManager.listTasks()[0].status).toBe('failed');
+    const traces = sessionManager.memoryTraces!.listByTask(sessions[0].taskId);
+    expect(traces).toHaveLength(1);
+    expect(traces[0]).toMatchObject({
+      toolName: 'chrome_close_tabs',
+      toolSuccess: false,
+      errorCode: 'tool_not_available',
+    });
+    const payload = JSON.parse(String(result.content[0].text));
+    expect(payload._tabrix).toMatchObject({
+      toolName: 'chrome_close_tabs',
+      toolSuccess: false,
+      businessFeedbackRequired: true,
+      feedbackTarget: expect.objectContaining({
+        traceId: traces[0].traceId,
+        feedbackToken: expect.any(String),
+      }),
+    });
   });
 
   it('blocks sensitive tools when MCP_DISABLE_SENSITIVE_TOOLS is set', async () => {
@@ -1403,6 +1420,22 @@ describe('handleToolCall execution wrapper', () => {
     expect(sessions).toHaveLength(1);
     expect(sessions[0].status).toBe('failed');
     expect(sessions[0].steps[0].errorCode).toBe('policy_denied_p3');
+    const traces = sessionManager.memoryTraces!.listByTask(sessions[0].taskId);
+    expect(traces).toHaveLength(1);
+    expect(traces[0]).toMatchObject({
+      toolName: 'chrome_javascript',
+      toolSuccess: false,
+      errorCode: 'policy_denied_p3',
+    });
+    expect(payload._tabrix).toMatchObject({
+      toolName: 'chrome_javascript',
+      toolSuccess: false,
+      businessFeedbackRequired: true,
+      feedbackTarget: expect.objectContaining({
+        traceId: traces[0].traceId,
+        feedbackToken: expect.any(String),
+      }),
+    });
   });
 
   it('allows P3 opt-in tools when TABRIX_POLICY_ALLOW_P3=all', async () => {
