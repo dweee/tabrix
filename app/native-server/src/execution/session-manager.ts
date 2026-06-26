@@ -62,6 +62,19 @@ function mergeExperienceProjectionResults(
     skippedTraceCount: previous.skippedTraceCount + current.skippedTraceCount,
     rejectedSensitiveSequenceCount:
       previous.rejectedSensitiveSequenceCount + current.rejectedSensitiveSequenceCount,
+    missingAiFeedbackTraceCount:
+      previous.missingAiFeedbackTraceCount + current.missingAiFeedbackTraceCount,
+    rejectedBusinessFailureTraceCount:
+      previous.rejectedBusinessFailureTraceCount + current.rejectedBusinessFailureTraceCount,
+    rejectedUnreplayableQualityTraceCount:
+      previous.rejectedUnreplayableQualityTraceCount +
+      current.rejectedUnreplayableQualityTraceCount,
+    noReplayableActionSequenceCount:
+      previous.noReplayableActionSequenceCount + current.noReplayableActionSequenceCount,
+    missingPageAnchorSequenceCount:
+      previous.missingPageAnchorSequenceCount + current.missingPageAnchorSequenceCount,
+    missingKnowledgeSequenceCount:
+      previous.missingKnowledgeSequenceCount + current.missingKnowledgeSequenceCount,
     savedExperienceCount: previous.savedExperienceCount + current.savedExperienceCount,
     nextCursorCreatedAt: current.nextCursorCreatedAt ?? previous.nextCursorCreatedAt,
     experienceIds: [...new Set([...previous.experienceIds, ...current.experienceIds])],

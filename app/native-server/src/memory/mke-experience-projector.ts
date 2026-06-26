@@ -20,6 +20,12 @@ export interface MkeExperienceProjectionResult {
   processedTraceCount: number;
   skippedTraceCount: number;
   rejectedSensitiveSequenceCount: number;
+  missingAiFeedbackTraceCount: number;
+  rejectedBusinessFailureTraceCount: number;
+  rejectedUnreplayableQualityTraceCount: number;
+  noReplayableActionSequenceCount: number;
+  missingPageAnchorSequenceCount: number;
+  missingKnowledgeSequenceCount: number;
   savedExperienceCount: number;
   nextCursorCreatedAt: string | null;
   experienceIds: string[];
@@ -557,6 +563,74 @@ function buildRecipeBasis(
   };
 }
 
+type RecipeRejectionCounters = Pick<
+  MkeExperienceProjectionResult,
+  | 'missingAiFeedbackTraceCount'
+  | 'rejectedBusinessFailureTraceCount'
+  | 'rejectedUnreplayableQualityTraceCount'
+  | 'noReplayableActionSequenceCount'
+  | 'missingPageAnchorSequenceCount'
+  | 'missingKnowledgeSequenceCount'
+>;
+
+function emptyRecipeRejectionCounters(): RecipeRejectionCounters {
+  return {
+    missingAiFeedbackTraceCount: 0,
+    rejectedBusinessFailureTraceCount: 0,
+    rejectedUnreplayableQualityTraceCount: 0,
+    noReplayableActionSequenceCount: 0,
+    missingPageAnchorSequenceCount: 0,
+    missingKnowledgeSequenceCount: 0,
+  };
+}
+
+function countRecipeRejectionSignals(
+  group: TaskTraceGroup,
+  knowledgeRepo: KnowledgeModelRepository,
+  allTraces: MemoryTrace[],
+): RecipeRejectionCounters {
+  const counters = emptyRecipeRejectionCounters();
+  const feedbackRequiredTraces = group.traces.filter(shouldRequestAiFeedbackForTrace);
+  counters.missingAiFeedbackTraceCount = feedbackRequiredTraces.filter(
+    (trace) => !hasVerifiedAiSuccessFeedback(trace),
+  ).length;
+  counters.rejectedBusinessFailureTraceCount = feedbackRequiredTraces.filter(
+    (trace) => hasVerifiedAiSuccessFeedback(trace) && !isBusinessAchieved(trace),
+  ).length;
+
+  const replayableActionTraces = group.traces.filter(
+    (trace) =>
+      REPLAYABLE_ACTION_TOOLS.has(trace.toolName) &&
+      trace.toolSuccess === true &&
+      isBusinessAchieved(trace),
+  );
+  counters.rejectedUnreplayableQualityTraceCount = replayableActionTraces.filter(
+    (trace) => !hasReplayableQuality(trace),
+  ).length;
+  const actionTraces = replayableActionTraces.filter(hasReplayableQuality);
+  if (actionTraces.length === 0) {
+    counters.noReplayableActionSequenceCount = 1;
+    return counters;
+  }
+
+  const anchor = choosePageAnchor({
+    traces: group.traces,
+    actionTraces,
+    allTraces,
+  });
+  const pageModelKey = anchor ? buildMkePageModelKey(anchor) : null;
+  if (!anchor?.siteFamily || !pageModelKey) {
+    counters.missingPageAnchorSequenceCount = 1;
+    return counters;
+  }
+  const knowledge = knowledgeRepo.findLatestByPage({
+    siteFamily: anchor.siteFamily,
+    pageModelKey,
+  });
+  if (!knowledge) counters.missingKnowledgeSequenceCount = 1;
+  return counters;
+}
+
 function buildRecipeInput(
   basis: RecipeBasis,
   nowIso: string,
@@ -647,6 +721,12 @@ export class MkeExperienceProjector {
         processedTraceCount: 0,
         skippedTraceCount: 0,
         rejectedSensitiveSequenceCount: 0,
+        missingAiFeedbackTraceCount: 0,
+        rejectedBusinessFailureTraceCount: 0,
+        rejectedUnreplayableQualityTraceCount: 0,
+        noReplayableActionSequenceCount: 0,
+        missingPageAnchorSequenceCount: 0,
+        missingKnowledgeSequenceCount: 0,
         savedExperienceCount: 0,
         nextCursorCreatedAt: input.cursorCreatedAt ?? null,
         experienceIds: [],
@@ -657,6 +737,12 @@ export class MkeExperienceProjector {
     const savedById = new Map<string, ExperienceRecipe>();
     let skippedTraceCount = 0;
     let rejectedSensitiveSequenceCount = 0;
+    let missingAiFeedbackTraceCount = 0;
+    let rejectedBusinessFailureTraceCount = 0;
+    let rejectedUnreplayableQualityTraceCount = 0;
+    let noReplayableActionSequenceCount = 0;
+    let missingPageAnchorSequenceCount = 0;
+    let missingKnowledgeSequenceCount = 0;
 
     for (const group of groupByTask(traces)) {
       if (containsSensitiveTrace(group)) {
@@ -666,6 +752,13 @@ export class MkeExperienceProjector {
       }
       const basis = buildRecipeBasis(group, this.knowledgeRepo, traces);
       if (!basis) {
+        const rejection = countRecipeRejectionSignals(group, this.knowledgeRepo, traces);
+        missingAiFeedbackTraceCount += rejection.missingAiFeedbackTraceCount;
+        rejectedBusinessFailureTraceCount += rejection.rejectedBusinessFailureTraceCount;
+        rejectedUnreplayableQualityTraceCount += rejection.rejectedUnreplayableQualityTraceCount;
+        noReplayableActionSequenceCount += rejection.noReplayableActionSequenceCount;
+        missingPageAnchorSequenceCount += rejection.missingPageAnchorSequenceCount;
+        missingKnowledgeSequenceCount += rejection.missingKnowledgeSequenceCount;
         skippedTraceCount += group.traces.length;
         continue;
       }
@@ -678,6 +771,12 @@ export class MkeExperienceProjector {
       processedTraceCount: traces.length,
       skippedTraceCount,
       rejectedSensitiveSequenceCount,
+      missingAiFeedbackTraceCount,
+      rejectedBusinessFailureTraceCount,
+      rejectedUnreplayableQualityTraceCount,
+      noReplayableActionSequenceCount,
+      missingPageAnchorSequenceCount,
+      missingKnowledgeSequenceCount,
       savedExperienceCount: saved.length,
       nextCursorCreatedAt: traces[traces.length - 1]?.createdAt ?? input.cursorCreatedAt ?? null,
       experienceIds: saved.map((recipe) => recipe.experienceId),
