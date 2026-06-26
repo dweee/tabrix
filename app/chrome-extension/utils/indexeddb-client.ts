@@ -70,7 +70,13 @@ export class IndexedDbClient {
           opError = err;
           try {
             transaction.abort();
-          } catch {}
+          } catch (abortError) {
+            opError = new Error(
+              `IDB operation failed and transaction abort failed: ${String(err)}; abort=${String(
+                abortError,
+              )}`,
+            );
+          }
         });
     });
   }
