@@ -221,6 +221,32 @@ function resolveFreshCandidateLocator(params: {
   return undefined;
 }
 
+function resolveFreshCandidateXpath(params: {
+  locatorXpath: string | undefined;
+  candidateFrameId: number | undefined;
+}): ResolvedCandidateActionTarget | undefined {
+  if (!params.locatorXpath) return undefined;
+  return {
+    selector: params.locatorXpath,
+    selectorType: 'xpath',
+    ...(params.candidateFrameId !== undefined ? { frameId: params.candidateFrameId } : {}),
+    source: 'candidate_locator_xpath',
+  };
+}
+
+function resolveFreshCandidateCss(params: {
+  locatorCss: string | undefined;
+  candidateFrameId: number | undefined;
+}): ResolvedCandidateActionTarget | undefined {
+  if (!params.locatorCss) return undefined;
+  return {
+    selector: params.locatorCss,
+    selectorType: 'css',
+    ...(params.candidateFrameId !== undefined ? { frameId: params.candidateFrameId } : {}),
+    source: 'candidate_locator_css',
+  };
+}
+
 export function resolveCandidateActionTarget(
   params: ResolveCandidateActionTargetParams,
 ): ResolvedCandidateActionTarget {
@@ -234,20 +260,22 @@ export function resolveCandidateActionTarget(
     // AI callers often copy the AI-facing `targetRef` into `ref`. Stable
     // `tgt_*` values are not page-local refs, so route them through the same
     // live snapshot registry instead of forwarding a guaranteed-miss handle.
-    // Synthetic text refs are also AI-facing handles; use their locatorChain
-    // selector when available and fail closed when it is not.
+    // Synthetic text refs are also AI-facing handles; prefer the latest
+    // read_page snapshot registry before falling back to the caller's
+    // locatorChain, because the registry is scoped to the current tab view.
     if (isStableTargetRef(explicitRef)) {
       return resolveStableTargetRef(params, explicitRef);
     }
     if (isLocatorBackedSyntheticRef(explicitRef)) {
-      const freshLocator = resolveFreshCandidateLocator({
-        locatorXpath,
+      const freshXpath = resolveFreshCandidateXpath({ locatorXpath, candidateFrameId });
+      if (freshXpath) return freshXpath;
+      const resolvedLocator = resolveCandidateActionTargetLocator(params, explicitRef);
+      if (resolvedLocator) return resolvedLocator;
+      const freshCss = resolveFreshCandidateCss({
         locatorCss,
         candidateFrameId,
       });
-      if (freshLocator) return freshLocator;
-      const resolvedLocator = resolveCandidateActionTargetLocator(params, explicitRef);
-      if (resolvedLocator) return resolvedLocator;
+      if (freshCss) return freshCss;
       return {
         ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
         source: 'none',
@@ -270,14 +298,15 @@ export function resolveCandidateActionTarget(
 
   if (candidateTargetRef) {
     if (isLocatorBackedSyntheticRef(candidateTargetRef)) {
-      const freshLocator = resolveFreshCandidateLocator({
-        locatorXpath,
+      const freshXpath = resolveFreshCandidateXpath({ locatorXpath, candidateFrameId });
+      if (freshXpath) return freshXpath;
+      const resolvedLocator = resolveCandidateActionTargetLocator(params, candidateTargetRef);
+      if (resolvedLocator) return resolvedLocator;
+      const freshCss = resolveFreshCandidateCss({
         locatorCss,
         candidateFrameId,
       });
-      if (freshLocator) return freshLocator;
-      const resolvedLocator = resolveCandidateActionTargetLocator(params, candidateTargetRef);
-      if (resolvedLocator) return resolvedLocator;
+      if (freshCss) return freshCss;
     }
 
     if (isFallbackRef(candidateTargetRef)) {
@@ -289,30 +318,6 @@ export function resolveCandidateActionTarget(
         candidateFrameId,
       });
       if (freshLocator) return freshLocator;
-    }
-
-    if (
-      (isLocatorBackedSyntheticRef(candidateTargetRef) || isFallbackRef(candidateTargetRef)) &&
-      locatorXpath
-    ) {
-      return {
-        selector: locatorXpath,
-        selectorType: 'xpath',
-        ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
-        source: 'candidate_locator_xpath',
-      };
-    }
-
-    if (
-      (isLocatorBackedSyntheticRef(candidateTargetRef) || isFallbackRef(candidateTargetRef)) &&
-      locatorCss
-    ) {
-      return {
-        selector: locatorCss,
-        selectorType: 'css',
-        ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
-        source: 'candidate_locator_css',
-      };
     }
 
     if (isLocatorBackedSyntheticRef(candidateTargetRef) || isFallbackRef(candidateTargetRef)) {

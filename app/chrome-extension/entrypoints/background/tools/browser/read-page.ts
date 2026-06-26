@@ -49,7 +49,6 @@ import { buildInteractiveElements } from './read-page-interactive-elements';
 import { buildCandidateActions, type CandidateActionSeed } from './read-page-candidate-actions';
 import {
   buildBoundedWatchLoopSnapshot,
-  buildCDPRouteFingerprint,
   buildReadPagePageDeltaReport,
   buildReadPageSnapshotSourceStats,
   consumePendingActionBinding,
@@ -59,6 +58,10 @@ import {
   resetObjectLifecycleCacheForTests,
   resolveTargetObjectId,
 } from './read-page-object-delta';
+import {
+  buildReadPageObjectDeltaSignals,
+  buildReadPageObjectSensingInput,
+} from './read-page-object-sensing-input';
 import { buildLoadReadiness, inferPageStability, normalizeFrameContext } from './read-page-state';
 import { scanVisibleResultCardsInPage } from './collect-result-cards';
 import {
@@ -1396,7 +1399,7 @@ async function buildModeOutput(params: {
     objectLifecycle: sharedPayload.objectLifecycle,
     cdpSensing: params.loadReadiness.cdpSensing,
   });
-  const pageObjectSnapshot = buildReadPageSnapshotSourceStats({
+  const objectSensingInput = buildReadPageObjectSensingInput({
     tabId: params.tabId,
     currentUrl: params.currentUrl,
     currentTitle: params.currentTitle,
@@ -1409,6 +1412,8 @@ async function buildModeOutput(params: {
     loadReadiness: params.loadReadiness,
     visibleTextContent: params.visibleTextContent,
   });
+  const objectDeltaSignals = buildReadPageObjectDeltaSignals(objectSensingInput);
+  const pageObjectSnapshot = buildReadPageSnapshotSourceStats(objectSensingInput);
   const previousSnapshot = getPreviousPageObjectSnapshot(params.tabId);
   const consumedPendingActionBinding = consumePendingActionBinding(params.tabId);
   const pendingActionBinding = consumedPendingActionBinding
@@ -1422,29 +1427,7 @@ async function buildModeOutput(params: {
     currentSnapshot: pageObjectSnapshot,
     previousSnapshot: previousSnapshot?.snapshot ?? null,
     pendingActionBinding,
-    cdpSignals: {
-      networkStartedCount:
-        typeof params.loadReadiness.cdpSensing?.networkActivity?.requestStartedCount === 'number'
-          ? params.loadReadiness.cdpSensing.networkActivity.requestStartedCount
-          : undefined,
-      networkInFlightCount:
-        typeof params.loadReadiness.cdpSensing?.networkActivity?.inFlightCount === 'number'
-          ? params.loadReadiness.cdpSensing.networkActivity.inFlightCount
-          : undefined,
-      failedRequestCount:
-        typeof params.loadReadiness.cdpSensing?.networkActivity?.failedRequestCount === 'number'
-          ? params.loadReadiness.cdpSensing.networkActivity.failedRequestCount
-          : undefined,
-      errorCount:
-        typeof params.loadReadiness.cdpSensing?.console?.errorCount === 'number'
-          ? params.loadReadiness.cdpSensing.console.errorCount
-          : undefined,
-      warningCount:
-        typeof params.loadReadiness.cdpSensing?.console?.warningCount === 'number'
-          ? params.loadReadiness.cdpSensing.console.warningCount
-          : undefined,
-      routeFingerprint: buildCDPRouteFingerprint(params.loadReadiness.cdpSensing),
-    },
+    cdpSignals: objectDeltaSignals,
     previousCdpSignals: previousSnapshot?.telemetry,
   });
   if (pageDeltaReport) {
@@ -1456,29 +1439,7 @@ async function buildModeOutput(params: {
     );
   }
   sharedPayload.pageObjectSnapshot = pageObjectSnapshot;
-  rememberPageObjectSnapshot(params.tabId, pageObjectSnapshot, {
-    networkStartedCount:
-      typeof params.loadReadiness.cdpSensing?.networkActivity?.requestStartedCount === 'number'
-        ? params.loadReadiness.cdpSensing.networkActivity.requestStartedCount
-        : undefined,
-    networkInFlightCount:
-      typeof params.loadReadiness.cdpSensing?.networkActivity?.inFlightCount === 'number'
-        ? params.loadReadiness.cdpSensing.networkActivity.inFlightCount
-        : undefined,
-    failedRequestCount:
-      typeof params.loadReadiness.cdpSensing?.networkActivity?.failedRequestCount === 'number'
-        ? params.loadReadiness.cdpSensing.networkActivity.failedRequestCount
-        : undefined,
-    errorCount:
-      typeof params.loadReadiness.cdpSensing?.console?.errorCount === 'number'
-        ? params.loadReadiness.cdpSensing.console.errorCount
-        : undefined,
-    warningCount:
-      typeof params.loadReadiness.cdpSensing?.console?.warningCount === 'number'
-        ? params.loadReadiness.cdpSensing.console.warningCount
-        : undefined,
-    routeFingerprint: buildCDPRouteFingerprint(params.loadReadiness.cdpSensing),
-  });
+  rememberPageObjectSnapshot(params.tabId, pageObjectSnapshot, objectDeltaSignals);
 
   return buildReadPageModeResult({
     sharedPayload,
@@ -2524,7 +2485,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     try {
       // Tip text returned to callers to guide next action
       const standardTips =
-        "Stay on the safe path first: prefer ref-based actions from chrome_read_page or chrome_get_interactive_elements. If the specific element you need is still missing, use chrome_screenshot for visual confirmation and coordinates. Reserve chrome_computer or chrome_javascript for explicit fallback/debug cases only. Also note: 'markedElements' are user-marked elements and have the highest priority when choosing targets.";
+        'Stay on the safe path first: prefer candidate actions and stable refs from chrome_read_page or chrome_get_interactive_elements. If the specific element you need is still missing, use chrome_screenshot for visual confirmation and coordinates. Reserve chrome_computer or chrome_javascript for explicit fallback/debug cases only.';
 
       const hasExplicitTabId =
         args !== null &&
