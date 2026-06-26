@@ -134,8 +134,8 @@ export function attachTabrixMemoryTraceEnvelope(
   }
 
   const existingTabrix = readObject(payload[TABRIX_TOOL_METADATA_KEY]) ?? {};
-  const businessFeedbackRequired = shouldRequestAiFeedbackForTrace(trace);
-  const traceBindingHash = businessFeedbackRequired ? buildMemoryTraceBindingHash(trace) : null;
+  const aiFeedbackRequired = shouldRequestAiFeedbackForTrace(trace);
+  const traceBindingHash = aiFeedbackRequired ? buildMemoryTraceBindingHash(trace) : null;
   const feedbackTarget = traceBindingHash
     ? {
         traceId: trace.traceId,
@@ -157,7 +157,8 @@ export function attachTabrixMemoryTraceEnvelope(
       toolName,
       ...(feedbackTarget ? { feedbackTarget } : {}),
       toolSuccess: trace.toolSuccess,
-      businessFeedbackRequired,
+      aiFeedbackRequired,
+      businessFeedbackRequired: aiFeedbackRequired,
     },
   };
 

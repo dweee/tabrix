@@ -193,6 +193,7 @@ describe('tabrix metadata envelope', () => {
           feedbackToken: expect.any(String),
         },
         toolSuccess: true,
+        aiFeedbackRequired: true,
         businessFeedbackRequired: true,
       },
     });
@@ -224,6 +225,7 @@ describe('tabrix metadata envelope', () => {
     expect(payload._tabrix).toMatchObject({
       traceId: 'trace-1',
       toolName,
+      aiFeedbackRequired: false,
       businessFeedbackRequired: false,
     });
     expect(payload._tabrix).not.toHaveProperty('feedbackTarget');
