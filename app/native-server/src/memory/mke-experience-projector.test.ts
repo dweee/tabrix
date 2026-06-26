@@ -976,7 +976,7 @@ describe('MkeExperienceProjector', () => {
     expect(result.savedExperienceCount).toBe(1);
     const recipes = experience.findByScenario(`mke:example.test:${pageModelKey}`);
     expect(recipes).toHaveLength(1);
-    expect(recipes[0]?.sourceTraceIds).toEqual(['trace-click-cross-task', 'trace-read-cross-task']);
+    expect(recipes[0]?.sourceTraceIds).toEqual(['trace-click-cross-task']);
   });
 
   it('does not mine a recipe from automatic evidence feedback alone', () => {

@@ -516,6 +516,7 @@ function buildRecipeBasis(
 ): RecipeBasis | null {
   const feedbackRequiredTraces = group.traces.filter(shouldRequestAiFeedbackForTrace);
   if (feedbackRequiredTraces.some((trace) => !isBusinessAchieved(trace))) return null;
+  const sourceTraces = group.traces.filter(isBusinessAchieved);
 
   const replayableActionTraces = group.traces.filter(
     (trace) =>
@@ -551,7 +552,7 @@ function buildRecipeBasis(
     pageModelKey,
     pageRole: anchor.pageRole,
     pageUrlPattern: anchor.pageUrlPattern,
-    sourceTraceIds: [...new Set([...group.traces.map((trace) => trace.traceId), anchor.traceId])],
+    sourceTraceIds: [...new Set(sourceTraces.map((trace) => trace.traceId))],
     linkedKnowledgeIds: [knowledge.knowledgeId],
     actionTraces,
     avgDurationMs:
