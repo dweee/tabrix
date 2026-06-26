@@ -11,10 +11,10 @@ import type {
 } from '@tabrix/shared';
 import type { BrowserWorldTabObject } from '../../browser-world-inventory';
 import {
-  buildAssistantHandoff,
+  buildAuthCollaborationHandoff,
   buildObservedAuthSurface,
   uniqueChallengeTypes,
-} from './read-page-auth-assistant-handoff';
+} from './read-page-auth-collaboration-handoff';
 export { buildAuthQrArtifactRefs } from './read-page-auth-artifact-extractor';
 export {
   buildNotRequestedAuthArtifactStatus,
@@ -330,7 +330,7 @@ export function buildAuthCollaborationState(params: {
     interactiveElements: params.interactiveElements,
     candidateActions: params.candidateActions,
   });
-  const assistantHandoff = buildAssistantHandoff({
+  const assistantHandoff = buildAuthCollaborationHandoff({
     authRequired,
     status,
     actionOperability,

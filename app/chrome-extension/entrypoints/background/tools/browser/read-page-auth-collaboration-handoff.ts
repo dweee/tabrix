@@ -10,7 +10,7 @@ import type {
   ReadPageObservedAuthSurfaceCandidate,
   ReadPageRegion,
 } from '@tabrix/shared';
-import { AUTH_ASSISTANT_HANDOFF_CLAIM_BOUNDARY } from './read-page-auth-guidance-copy';
+import { AUTH_HANDOFF_CLAIM_BOUNDARY } from './read-page-auth-guidance-copy';
 import {
   bestElement,
   findRequestOtpControl,
@@ -250,11 +250,11 @@ export function buildObservedAuthSurface(params: {
     alternativeChallengeTypes: params.alternativeChallengeTypes,
     candidateObjectRefs: candidates,
     guidanceApplied,
-    claimBoundary: AUTH_ASSISTANT_HANDOFF_CLAIM_BOUNDARY,
+    claimBoundary: AUTH_HANDOFF_CLAIM_BOUNDARY,
   };
 }
 
-export function buildAssistantHandoff(params: {
+export function buildAuthCollaborationHandoff(params: {
   authRequired: boolean;
   status: ReadPageAuthCollaboration['status'];
   actionOperability: NonNullable<ReadPageAuthCollaboration['evidence']['actionOperability']>;
@@ -266,7 +266,7 @@ export function buildAssistantHandoff(params: {
     params.assistantGuidance?.authPreference === 'qr' ||
     (params.assistantGuidance?.requestedObjects || []).includes('qr_image');
   if (!qrRequested) {
-    return { status: 'not_needed', claimBoundary: AUTH_ASSISTANT_HANDOFF_CLAIM_BOUNDARY };
+    return { status: 'not_needed', claimBoundary: AUTH_HANDOFF_CLAIM_BOUNDARY };
   }
   if (params.actionOperability !== 'operable') {
     return {
@@ -274,14 +274,14 @@ export function buildAssistantHandoff(params: {
       reason: 'protected_tab',
       requestedAssistantAction: 'manual_user_action',
       surfaceRef: params.observedAuthSurface.surfaceRef,
-      claimBoundary: AUTH_ASSISTANT_HANDOFF_CLAIM_BOUNDARY,
+      claimBoundary: AUTH_HANDOFF_CLAIM_BOUNDARY,
     };
   }
   if (params.authArtifactStatus.status === 'ready' || params.status === 'waiting_for_user') {
-    return { status: 'not_needed', claimBoundary: AUTH_ASSISTANT_HANDOFF_CLAIM_BOUNDARY };
+    return { status: 'not_needed', claimBoundary: AUTH_HANDOFF_CLAIM_BOUNDARY };
   }
   if (!params.authRequired && params.observedAuthSurface.status === 'not_detected') {
-    return { status: 'not_needed', claimBoundary: AUTH_ASSISTANT_HANDOFF_CLAIM_BOUNDARY };
+    return { status: 'not_needed', claimBoundary: AUTH_HANDOFF_CLAIM_BOUNDARY };
   }
 
   const candidateRefs = params.observedAuthSurface.candidateObjectRefs
@@ -298,6 +298,6 @@ export function buildAssistantHandoff(params: {
       qrCandidates.length > 0 ? 'choose_auth_qr_target' : 'provide_selector_or_target_ref',
     candidateRefs,
     surfaceRef: params.observedAuthSurface.surfaceRef,
-    claimBoundary: AUTH_ASSISTANT_HANDOFF_CLAIM_BOUNDARY,
+    claimBoundary: AUTH_HANDOFF_CLAIM_BOUNDARY,
   };
 }
