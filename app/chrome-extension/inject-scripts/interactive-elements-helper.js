@@ -52,6 +52,16 @@
     /\b(code|otp|sms|verify|verification|captcha|send|resend|auth-code|code-button|agree|agreement|terms|privacy|submit|login)\b/i;
   const SEARCH_QUERY_PATTERN = /\b(search|find|query)\b|搜索|查找/i;
   const SEARCH_IDENTITY_PATTERN = /\b(search|query)\b|搜索|查找/i;
+  let currentDiagnostics = null;
+
+  function describeError(error) {
+    return String(error && error.message ? error.message : error);
+  }
+
+  function recordDiagnostic(source, error) {
+    if (!Array.isArray(currentDiagnostics) || currentDiagnostics.length >= 8) return;
+    currentDiagnostics.push({ source, message: describeError(error) });
+  }
 
   // Query helpers that pierce open shadow roots. These are used only in fallback paths or
   // when a selector is explicitly provided, to keep costs bounded.
@@ -73,8 +83,8 @@
           const srChildren = Array.from(sr.children);
           for (let i = srChildren.length - 1; i >= 0; i--) stack.push(srChildren[i]);
         }
-      } catch (_) {
-        /* ignore */
+      } catch (error) {
+        recordDiagnostic('deep_walk_children_failed', error);
       }
     }
   }
@@ -85,8 +95,8 @@
       if (!(node instanceof Element)) continue;
       try {
         if (node.matches && node.matches(selector)) results.push(node);
-      } catch (_) {
-        /* ignore invalid selectors for given node */
+      } catch (error) {
+        recordDiagnostic('selector_match_failed', error);
       }
     }
     return results;
@@ -171,7 +181,8 @@
           : hit
             ? 'center_covered'
             : 'hit_test_unavailable';
-      } catch (_) {
+      } catch (error) {
+        recordDiagnostic('hit_test_failed', error);
         reason = 'hit_test_failed';
       }
     }
@@ -1072,6 +1083,7 @@
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (request.action === 'getInteractiveElements') {
       try {
+        currentDiagnostics = [];
         let elements;
         if (request.selector) {
           // If a selector is provided, use it as the candidate set but still honor textQuery.
@@ -1092,9 +1104,21 @@
           // Otherwise, use our powerful multi-layered text search
           elements = findElementsByTextWithFallback(request);
         }
-        sendResponse({ success: true, elements });
+        sendResponse({
+          success: true,
+          elements,
+          ...(currentDiagnostics.length ? { diagnostics: currentDiagnostics } : {}),
+        });
       } catch (error) {
-        sendResponse({ success: false, error: error.message });
+        sendResponse({
+          success: false,
+          error: error.message,
+          ...(currentDiagnostics && currentDiagnostics.length
+            ? { diagnostics: currentDiagnostics }
+            : {}),
+        });
+      } finally {
+        currentDiagnostics = null;
       }
       return true; // Async response
     } else if (request.action === 'chrome_get_interactive_elements_ping') {

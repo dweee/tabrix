@@ -487,6 +487,80 @@ describe('injected state-driven waits', () => {
     });
   });
 
+  it('interactive element search reports selector match diagnostics without failing the whole scan', async () => {
+    document.body.innerHTML = '<button id="confirm">继续</button>';
+    const button = document.getElementById('confirm') as HTMLButtonElement;
+    setRect(button, { left: 20, top: 20, width: 80, height: 32 });
+    const originalMatches = Element.prototype.matches;
+    const matchesSpy = vi.spyOn(Element.prototype, 'matches').mockImplementation(function (
+      this: Element,
+      selector: string,
+    ) {
+      if (selector === '.unstable-selector') {
+        throw new Error('selector engine unavailable');
+      }
+      return originalMatches.call(this, selector);
+    });
+
+    try {
+      const listener = installInjectedHelper(
+        'inject-scripts/interactive-elements-helper.js',
+        '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+      );
+      const response = await sendRequest(listener, {
+        action: 'getInteractiveElements',
+        selector: '.unstable-selector',
+        includeCoordinates: false,
+      });
+
+      expect(response.success).toBe(true);
+      expect(response.elements).toEqual([]);
+      expect(response.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: 'selector_match_failed',
+          }),
+        ]),
+      );
+    } finally {
+      matchesSpy.mockRestore();
+    }
+  });
+
+  it('interactive element search reports hit-test diagnostics while keeping safe visibility fallback', async () => {
+    document.body.innerHTML = '<button id="confirm">继续</button>';
+    const button = document.getElementById('confirm') as HTMLButtonElement;
+    setRect(button, { left: 20, top: 20, width: 80, height: 32 });
+    document.elementFromPoint = vi.fn(() => {
+      throw new Error('hit test unavailable');
+    });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '继续',
+      includeCoordinates: true,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.elements[0]).toMatchObject({
+      selector: '#confirm',
+      visibility: expect.objectContaining({
+        reason: 'hit_test_failed',
+      }),
+    });
+    expect(response.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'hit_test_failed',
+        }),
+      ]),
+    );
+  });
+
   it('interactive element search promotes compact visible filter chips as actionable targets', async () => {
     document.body.innerHTML = `
       <div id="toolbar">

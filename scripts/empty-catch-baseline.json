@@ -631,22 +631,12 @@
   },
   {
     "file": "app/chrome-extension/inject-scripts/interactive-elements-helper.js",
-    "line": 76,
+    "line": 263,
     "text": "catch (_) { /* ignore */ }"
   },
   {
     "file": "app/chrome-extension/inject-scripts/interactive-elements-helper.js",
-    "line": 88,
-    "text": "catch (_) { /* ignore invalid selectors for given node */ }"
-  },
-  {
-    "file": "app/chrome-extension/inject-scripts/interactive-elements-helper.js",
-    "line": 252,
-    "text": "catch (_) { /* ignore */ }"
-  },
-  {
-    "file": "app/chrome-extension/inject-scripts/interactive-elements-helper.js",
-    "line": 265,
+    "line": 276,
     "text": "catch (_) { /* ignore */ }"
   },
   {
