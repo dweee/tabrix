@@ -134,6 +134,8 @@ import {
   buildAiFacingApiCdpProofBoundary,
   buildAiFacingDataSourceDecision,
   buildAiFacingSourceRouteHonesty,
+  ensureProjectionSourceTruthChain,
+  normalizeAiFacingProjectionDataSource,
   toTaskSourceRouteHonestySnapshot,
 } from './read-page-source-decision';
 import {
@@ -179,8 +181,6 @@ import type {
   BrowserPageChangeCause,
   BrowserPageOwnerType,
   BrowserPageThingProjection,
-  BrowserSourceLineage,
-  BrowserSourceTruthChain,
   BrowserTaskStateVerdict,
   ReadPageAuthResumeVerification,
   ReadPageCompactSnapshot,
@@ -189,7 +189,6 @@ import type {
   ReadPageOperationMap,
   ReadPageRegion,
   ReadPageSelectedDataSource,
-  SourceTruthOrigin,
 } from '@tabrix/shared';
 import { buildBrowserTaskStateVerdict } from '@tabrix/shared';
 import type { MemoryTrace } from '../memory/db';
@@ -2425,101 +2424,6 @@ function normalizeReadPageAssistantGuidanceForCacheKey(
 
 function buildAutoTabTaskContextKey(tabId: number): string {
   return `mcp:auto:tab:${tabId}`;
-}
-
-function normalizeAiFacingProjectionDataSource(
-  projection: BrowserPageThingProjection,
-  selectedDataSource: ReadPageSelectedDataSource,
-  payload: Record<string, unknown>,
-): BrowserPageThingProjection {
-  if (
-    selectedDataSource !== 'dom_region_rows' ||
-    projection.chosenDataSource === 'dom_region_rows' ||
-    !hasVisibleRowsEvidence(payload)
-  ) {
-    return projection;
-  }
-
-  return {
-    ...projection,
-    chosenDataSource: 'dom_region_rows',
-    sourceLineage: 'dom',
-    sourceConfidence: readNumber(payload.rowExtractionConfidence) ?? projection.sourceConfidence,
-  };
-}
-
-function ensureProjectionSourceTruthChain(
-  projection: BrowserPageThingProjection,
-  selectedDataSource: ReadPageSelectedDataSource,
-): BrowserPageThingProjection {
-  if (isBrowserSourceTruthChainLike(projection.sourceTruthChain)) return projection;
-  const primaryOrigin = inferSourceTruthOrigin(projection.sourceLineage, selectedDataSource);
-  const provenanceCreatedAt =
-    typeof projection.sourceObservedAt === 'string' && projection.sourceObservedAt.length > 0
-      ? projection.sourceObservedAt
-      : new Date().toISOString();
-  return {
-    ...projection,
-    sourceTruthChain: {
-      primaryOrigin,
-      provenanceCreatedAt,
-      fieldProvenances: [
-        { field: 'pageProjection.projectionId', origin: 'browser_runtime', isFact: true },
-        { field: 'pageProjection.chosenDataSource', origin: primaryOrigin, isFact: true },
-        { field: 'pageProjection.sourceLineage', origin: primaryOrigin, isFact: true },
-        { field: 'sourceRouteHonestyBoundary', origin: 'inference', isFact: false },
-      ],
-    },
-  };
-}
-
-function isBrowserSourceTruthChainLike(input: unknown): input is BrowserSourceTruthChain {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
-  const chain = input as Partial<BrowserSourceTruthChain>;
-  return (
-    typeof chain.primaryOrigin === 'string' &&
-    Array.isArray(chain.fieldProvenances) &&
-    typeof chain.provenanceCreatedAt === 'string'
-  );
-}
-
-function inferSourceTruthOrigin(
-  sourceLineage: BrowserSourceLineage,
-  selectedDataSource: ReadPageSelectedDataSource,
-): SourceTruthOrigin {
-  if (selectedDataSource === 'api_rows') return 'api';
-  if (selectedDataSource === 'cdp_enhanced_api_rows') return 'cdp';
-  if (selectedDataSource === 'markdown') return 'text';
-  if (selectedDataSource === 'dom_json' || selectedDataSource === 'dom_region_rows') return 'dom';
-  switch (sourceLineage) {
-    case 'dom':
-      return 'dom';
-    case 'accessibility':
-      return 'accessibility';
-    case 'api':
-      return 'api';
-    case 'cdp':
-      return 'cdp';
-    case 'text':
-      return 'text';
-    case 'mixed':
-      return 'inference';
-    default:
-      return 'unknown';
-  }
-}
-
-function hasVisibleRowsEvidence(payload: Record<string, unknown>): boolean {
-  const rowsPayload = readObject(payload.visibleRegionRows) ?? payload;
-  const rowCount =
-    readPositiveInteger(payload, 'rowCount') ??
-    readPositiveInteger(payload, 'visibleRegionRowCount') ??
-    readPositiveInteger(rowsPayload, 'rowCount');
-  return (
-    (payload.visibleRegionRowsUsed === true || rowsPayload.visibleRegionRowsUsed === true) &&
-    rowCount !== null &&
-    rowCount > 0
-  );
 }
 
 function extractVisibleRegionRowsDataFromPayload(
