@@ -62,7 +62,7 @@ export class OffscreenManager {
       await chrome.offscreen.createDocument({
         url: 'offscreen.html',
         reasons: ['WORKERS'],
-        justification: 'Need to run semantic similarity engine with workers',
+        justification: 'Need workers for offscreen GIF encoding and extension keepalive support',
       });
 
       this.isCreated = true;

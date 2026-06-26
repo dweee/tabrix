@@ -190,15 +190,6 @@ export const NETWORK_FILTERS = {
   STATIC_RESOURCE_TYPES: ['stylesheet', 'image', 'font', 'media', 'other'],
 } as const;
 
-// Semantic Similarity Configuration
-export const SEMANTIC_CONFIG = {
-  DEFAULT_MODEL: 'sentence-transformers/all-MiniLM-L6-v2',
-  CHUNK_SIZE: 512,
-  CHUNK_OVERLAP: 50,
-  BATCH_SIZE: 32,
-  CACHE_SIZE: 1000,
-} as const;
-
 // Storage Keys
 export const STORAGE_KEYS = {
   SERVER_STATUS: 'serverStatus',
