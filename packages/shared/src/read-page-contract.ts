@@ -274,7 +274,8 @@ export interface ReadPageSearchSurfaceControl {
   kind:
     | 'search_input'
     | 'filter_trigger'
-    | 'sort_most_collected'
+    | 'filter_panel_option'
+    | 'filter_panel_action'
     | 'submit_search'
     | 'category_tab'
     | 'unknown'
@@ -372,7 +373,7 @@ export interface ReadPageSearchSurface {
   };
   filterState?: ReadPageSearchSurfaceFilterState;
   sortEvidence?: {
-    requestedSort?: 'most_collected' | 'sort_menu' | 'unknown' | string;
+    requestedSort?: 'sort_observed' | 'sort_menu' | 'unknown' | string;
     currentSortLabel?: string;
     menuOpenCandidate?: boolean;
     optionLabels?: string[];
@@ -600,7 +601,6 @@ export type ReadPageCandidateActionIntent =
   | 'search.category_select'
   | 'filter.open'
   | 'filter.option_select'
-  | 'filter.sort_most_collected'
   | 'filter.time_range_select'
   | 'content.open_detail'
   | 'publish.open_entry'

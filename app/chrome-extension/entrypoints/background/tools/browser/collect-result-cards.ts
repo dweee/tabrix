@@ -320,40 +320,29 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     if (timeRangeFilterPattern.test(label)) return 'time_range';
     return 'unknown';
   };
-  const canonicalFilterLabel = (label: string, kind: AppliedSearchFilter['kind']): string => {
-    if (kind === 'content_type' && /^(图文|图片|image\s*text|images?|photos?)$/i.test(label)) {
-      return '图文';
-    }
-    if (kind === 'content_type' && /^(视频|videos?)$/i.test(label)) return '视频';
-    if (kind === 'sort' && /最多收藏|most\s*(saved|collected)/i.test(label)) {
-      return '最多收藏';
-    }
-    if (kind === 'time_range' && /一周内|7\s*d|week/i.test(label)) return '一周内';
-    return label;
+  const canonicalFilterLabel = (label: string): string => label;
+
+  const isDefaultFilterLabel = (label: string, kind: AppliedSearchFilter['kind']): boolean => {
+    if (kind === 'content_type') return /^(全部|all)$/i.test(label);
+    if (kind === 'sort') return /^(综合|all)$/i.test(label);
+    if (kind === 'time_range') return /^(不限|any)$/i.test(label);
+    return false;
   };
 
-  const preferredFilterForKind = (
+  const selectedFilterForKind = (
     filters: readonly AppliedSearchFilter[],
     kind: AppliedSearchFilter['kind'],
   ): AppliedSearchFilter | undefined => {
     const candidates = filters.filter((filter) => filter.kind === kind);
     if (candidates.length === 0) return undefined;
-    if (kind === 'content_type') {
-      return (
-        candidates.find((filter) => /^(图文|image\s*text|images?|photos?)$/i.test(filter.label)) ??
-        candidates[0]
-      );
-    }
-    if (kind === 'sort') {
-      return (
-        candidates.find((filter) => /最多收藏|most\s*(saved|collected)/i.test(filter.label)) ??
-        candidates[0]
-      );
-    }
-    if (kind === 'time_range') {
-      return candidates.find((filter) => /一周内|7\s*d|week/i.test(filter.label)) ?? candidates[0];
-    }
-    return candidates[0];
+    if (candidates.length === 1) return candidates[0];
+
+    const nonDefaultCandidates = candidates.filter(
+      (filter) => !isDefaultFilterLabel(filter.label, kind),
+    );
+    if (nonDefaultCandidates.length === 1) return nonDefaultCandidates[0];
+    if (nonDefaultCandidates.length === 0) return candidates[0];
+    return undefined;
   };
 
   const groupStateForKind = (
@@ -362,14 +351,11 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
   ): SearchFilterGroupState => {
     const candidates = filters.filter((filter) => filter.kind === kind);
     const candidateLabels = [...new Set(candidates.map((filter) => filter.label))];
-    const selected = preferredFilterForKind(filters, kind);
+    const selected = selectedFilterForKind(filters, kind);
     const sources = new Set(candidates.map((filter) => filter.source));
     const selectedLabel = selected?.label ?? null;
     const nonDefaultLabels = candidateLabels.filter((label) => {
-      if (kind === 'content_type') return !/^(全部|all)$/i.test(label);
-      if (kind === 'sort') return !/^(综合|all)$/i.test(label);
-      if (kind === 'time_range') return !/^(不限|any)$/i.test(label);
-      return true;
+      return !isDefaultFilterLabel(label, kind);
     });
     const ambiguityLabels =
       selectedLabel && nonDefaultLabels.includes(selectedLabel)
@@ -391,9 +377,11 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       ambiguous,
       reason: selected
         ? ambiguous
-          ? 'multiple active candidates were observed for this filter group; selected is the task-preferred label'
+          ? 'multiple active candidates were observed for this filter group; selected is the only non-default active value'
           : 'selected filter inferred from active DOM state or bounded URL adapter'
-        : 'no selected filter observed for this group',
+        : ambiguous
+          ? 'multiple non-default active candidates were observed; selected value is intentionally withheld'
+          : 'no selected filter observed for this group',
     };
   };
 
@@ -430,7 +418,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       if (seen.has(key)) continue;
       seen.add(key);
       filters.push({
-        label: canonicalFilterLabel(label, kind),
+        label: canonicalFilterLabel(label),
         kind,
         source: 'dom_active_state',
         confidence: 0.9,
@@ -442,9 +430,9 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       timeRange: groupStateForKind(filters, 'time_range'),
     };
     const appliedFilters = [
-      preferredFilterForKind(filters, 'content_type'),
-      preferredFilterForKind(filters, 'sort'),
-      preferredFilterForKind(filters, 'time_range'),
+      selectedFilterForKind(filters, 'content_type'),
+      selectedFilterForKind(filters, 'sort'),
+      selectedFilterForKind(filters, 'time_range'),
     ].filter((filter): filter is AppliedSearchFilter => Boolean(filter));
     const appliedLabels = appliedFilters.map((filter) => filter.label);
     return {
@@ -759,7 +747,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       if (!control) continue;
       const selector = selectorForElement(control);
       const concreteXpath = xpathForElement(control);
-      const canonicalLabel = isTrigger ? label : canonicalFilterLabel(label, filterKind);
+      const canonicalLabel = isTrigger ? label : canonicalFilterLabel(label);
       const kind = filterActionKindForLabel(canonicalLabel);
       const targetRef = stablePageTargetRef(kind, canonicalLabel);
 

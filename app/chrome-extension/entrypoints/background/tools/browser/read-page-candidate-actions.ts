@@ -254,18 +254,11 @@ function inferCandidateActionIntent(
       ? 'filter.option_select'
       : undefined;
   }
-  if (
-    /最多收藏|收藏最多|按收藏|收藏数|most\s*(collected|saved|favorited)|top\s*saves/i.test(name)
-  ) {
-    return 'filter.sort_most_collected';
-  }
   if (FILTER_TIME_RANGE_LABEL_PATTERN.test(name)) return 'filter.time_range_select';
   if (isFilterPanelOptionElement(element, context.interactiveElements)) {
     return FILTER_TIME_RANGE_LABEL_PATTERN.test(name)
       ? 'filter.time_range_select'
-      : /最多收藏|收藏最多|most\s*(collected|saved|favorited)/i.test(name)
-        ? 'filter.sort_most_collected'
-        : 'filter.option_select';
+      : 'filter.option_select';
   }
   if (isSearchActionText(name)) return 'search.submit';
   if (isPublishEntryActionText(name)) return 'publish.open_entry';
@@ -639,11 +632,7 @@ function buildExpectedPostActionDelta(
   ) {
     return 'search_refresh_or_scope_change';
   }
-  if (
-    intent === 'filter.option_select' ||
-    intent === 'filter.sort_most_collected' ||
-    intent === 'filter.time_range_select'
-  ) {
+  if (intent === 'filter.option_select' || intent === 'filter.time_range_select') {
     return 'results_or_view_scope_update';
   }
   if (intent === 'content.open_detail') {

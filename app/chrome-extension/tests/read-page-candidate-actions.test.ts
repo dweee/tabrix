@@ -156,7 +156,7 @@ describe('read_page candidate action intents', () => {
     expect(labels).toEqual(expect.arrayContaining(['最多收藏', '图文', '一周内']));
     expect(actions.filter((action) => String(action.intent || '').startsWith('filter.'))).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ label: '最多收藏', intent: 'filter.sort_most_collected' }),
+        expect.objectContaining({ label: '最多收藏', intent: 'filter.option_select' }),
         expect.objectContaining({ label: '图文', intent: 'filter.option_select' }),
         expect.objectContaining({ label: '一周内', intent: 'filter.time_range_select' }),
       ]),
@@ -894,7 +894,7 @@ describe('read_page candidate action intents', () => {
     });
     expect(actions.find((action) => action.targetRef === 'ref_sort_saves')).toMatchObject({
       actionType: 'click',
-      intent: 'filter.sort_most_collected',
+      intent: 'filter.option_select',
     });
   });
 
@@ -965,7 +965,7 @@ describe('read_page candidate action intents', () => {
     ]);
     expect(actions.find((action) => action.targetRef === 'ref_text_filter_panel_1')).toMatchObject({
       actionType: 'click',
-      intent: 'filter.sort_most_collected',
+      intent: 'filter.option_select',
       locatorChain: expect.arrayContaining([
         { type: 'css', value: '.filter-panel .tag-most-saved' },
       ]),
@@ -1027,7 +1027,7 @@ describe('read_page candidate action intents', () => {
     });
     expect(actions.find((action) => action.targetRef === 'ref_panel_saved')).toMatchObject({
       actionType: 'click',
-      intent: 'filter.sort_most_collected',
+      intent: 'filter.option_select',
     });
     expect(actions.find((action) => action.targetRef === 'ref_panel_week')).toMatchObject({
       actionType: 'click',

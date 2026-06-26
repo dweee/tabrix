@@ -270,7 +270,7 @@ describe('buildPostActionReadbackEvidence', () => {
       dispatchSucceeded: true,
       actionKind: 'click',
       observedOutcome: 'no_observed_change',
-      candidateAction: { intent: 'filter.sort_most_collected' },
+      candidateAction: { intent: 'filter.option_select' },
     });
 
     expect(evidence).toMatchObject({
@@ -367,7 +367,7 @@ describe('buildPostActionReadbackEvidence', () => {
       observedOutcome: 'dom_changed',
       verifierPassed: true,
       verifierReason: 'scoped_region_state_observed',
-      candidateAction: { intent: 'filter.sort_most_collected' },
+      candidateAction: { intent: 'filter.option_select' },
     });
 
     expect(evidence).toMatchObject({
@@ -496,7 +496,7 @@ describe('buildClickHelperDispatchTimingPolicy', () => {
       buildClickHelperDispatchTimingPolicy({
         waitForNavigation: true,
         timeout: 15000,
-        intent: 'filter.sort_most_collected',
+        intent: 'filter.option_select',
       }),
     ).toEqual({
       waitForNavigation: false,
@@ -952,7 +952,7 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
       selector: '#filter',
       waitForNavigation: false,
       timeout: 1000,
-      intent: 'filter.sort_most_collected',
+      intent: 'filter.option_select',
     });
 
     expect(response.dispatchSucceeded).toBe(true);

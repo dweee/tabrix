@@ -156,7 +156,7 @@ describe('buildSearchSurface', () => {
         candidate({
           id: 'ca_sort',
           targetRef: 'ref_sort',
-          intent: 'filter.sort_most_collected',
+          intent: 'filter.option_select',
         }),
       ],
       visibleRegionRows: visibleRows(),
@@ -165,7 +165,7 @@ describe('buildSearchSurface', () => {
     expect(surface?.controls.map((control) => control.kind)).toEqual([
       'search_input',
       'filter_trigger',
-      'sort_most_collected',
+      'filter_panel_option',
     ]);
     expect(surface?.resultCards).toHaveLength(2);
     expect(surface?.resultCards?.[0]).toMatchObject({
@@ -179,7 +179,7 @@ describe('buildSearchSurface', () => {
     });
     expect(surface?.resultCards?.[1]?.collectionCountCandidate).toBe(18000);
     expect(surface?.sortEvidence).toMatchObject({
-      requestedSort: 'most_collected',
+      requestedSort: 'sort_observed',
       appliedCandidate: false,
     });
     expect(surface?.topNCompleteness).toMatchObject({
@@ -581,14 +581,14 @@ describe('buildSearchSurface', () => {
         candidate({
           id: 'ca_sort',
           targetRef: 'ref_sort',
-          intent: 'filter.sort_most_collected',
+          intent: 'filter.option_select',
         }),
       ],
       visibleRegionRows: rows,
     });
 
     expect(surface?.sortEvidence).toMatchObject({
-      requestedSort: 'most_collected',
+      requestedSort: 'sort_observed',
       appliedCandidate: true,
     });
     expect(surface?.topNCompleteness).toMatchObject({
@@ -685,7 +685,7 @@ describe('buildSearchSurface', () => {
         candidate({
           id: 'ca_click_ref_text_filter_panel_1',
           targetRef: 'ref_text_filter_panel_1',
-          intent: 'filter.sort_most_collected',
+          intent: 'filter.option_select',
           locatorChain: [
             { type: 'ref', value: 'ref_text_filter_panel_1' },
             { type: 'aria', value: '最多收藏' },
@@ -725,7 +725,7 @@ describe('buildSearchSurface', () => {
     expect(surface?.filterPanel?.targetableOptions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          kind: 'sort_most_collected',
+          kind: 'filter_panel_option',
           label: '最多收藏',
           targetRef: 'ref_text_filter_panel_1',
           candidateActionId: 'ca_click_ref_text_filter_panel_1',
@@ -843,7 +843,7 @@ describe('buildSearchSurface', () => {
         candidate({
           id: 'ca_sort',
           targetRef: 'ref_text_filter_panel_sort',
-          intent: 'filter.sort_most_collected',
+          intent: 'filter.option_select',
         }),
         candidate({ id: 'ca_week', targetRef: 'ref_text_filter_panel_week' }),
       ],
@@ -870,7 +870,7 @@ describe('buildSearchSurface', () => {
           state: expect.objectContaining({ selected: true }),
         }),
         expect.objectContaining({
-          kind: 'sort_most_collected',
+          kind: 'filter_panel_option',
           label: '最多收藏',
           targetRef: 'ref_text_filter_panel_sort',
           filterGroup: 'sort',
@@ -977,7 +977,7 @@ describe('buildSearchSurface', () => {
         candidate({
           id: 'ca_panel_saved',
           targetRef: 'ref_panel_saved',
-          intent: 'filter.sort_most_collected',
+          intent: 'filter.option_select',
           locatorChain: [
             { type: 'ref', value: 'ref_panel_saved' },
             { type: 'aria', value: '最多收藏' },
@@ -1048,7 +1048,7 @@ describe('buildSearchSurface', () => {
     });
   });
 
-  it('normalizes English image filter labels to the 图文 content-type semantic', () => {
+  it('preserves observed English image filter labels without mapping them to task-specific text', () => {
     const surface = buildSearchSurface({
       assistantGuidance: guidance,
       interactiveElements: [
@@ -1077,7 +1077,7 @@ describe('buildSearchSurface', () => {
       expect.arrayContaining([
         expect.objectContaining({
           kind: 'filter_panel_option',
-          label: '图文',
+          label: 'Image',
           targetRef: 'ref_panel_image',
           filterGroup: 'content_type',
           state: expect.objectContaining({ selected: true }),
@@ -1085,12 +1085,12 @@ describe('buildSearchSurface', () => {
       ]),
     );
     expect(surface?.filterState).toMatchObject({
-      selected: { contentType: '图文' },
+      selected: { contentType: 'Image' },
       contentType: {
-        selected: '图文',
+        selected: 'Image',
         candidates: expect.arrayContaining([
           expect.objectContaining({
-            label: '图文',
+            label: 'Image',
             targetRef: 'ref_panel_image',
             candidateActionId: 'ca_panel_image',
           }),
@@ -1266,7 +1266,7 @@ describe('buildSearchSurface', () => {
         candidate({
           id: 'ca_panel_saved',
           targetRef: 'ref_text_filter_panel_153',
-          intent: 'filter.sort_most_collected',
+          intent: 'filter.option_select',
           locatorChain: [
             { type: 'ref', value: 'ref_text_filter_panel_153' },
             { type: 'aria', value: '最多收藏' },

@@ -137,9 +137,7 @@ export function inferRegionState(
     case 'search_area':
       return 'input_available_candidate';
     case 'filter_panel':
-      return /option_select|sort_most_collected|time_range_select|filter option|筛选项|排序项/i.test(
-        text,
-      )
+      return /option_select|time_range_select|filter option|筛选项|排序项/i.test(text)
         ? 'open_candidate'
         : 'filter_trigger_candidate';
     case 'result_list':

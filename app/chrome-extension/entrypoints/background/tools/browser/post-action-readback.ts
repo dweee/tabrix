@@ -66,7 +66,6 @@ function expectedBusinessEvidenceForIntent(
     case 'filter.open':
       return 'page_or_object_state_changed';
     case 'filter.option_select':
-    case 'filter.sort_most_collected':
     case 'filter.time_range_select':
       return 'search_results_or_url_query_changed';
     case 'content.open_detail':
@@ -86,7 +85,6 @@ function shouldReadBackBeforeRetry(input: {
   return (
     input.intent === 'filter.open' ||
     input.intent === 'filter.option_select' ||
-    input.intent === 'filter.sort_most_collected' ||
     input.intent === 'filter.time_range_select' ||
     input.intent === 'search.category_select'
   );

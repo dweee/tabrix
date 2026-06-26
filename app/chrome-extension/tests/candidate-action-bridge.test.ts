@@ -349,7 +349,7 @@ describe('candidateAction bridge', () => {
     const result = await clickTool.execute({
       candidateAction: {
         targetRef: 'ref_text_filter_panel_7',
-        intent: 'filter.sort_most_collected',
+        intent: 'filter.option_select',
         locatorChain: [
           { type: 'ref', value: 'ref_text_filter_panel_7' },
           { type: 'aria', value: '最多收藏' },
@@ -395,7 +395,7 @@ describe('candidateAction bridge', () => {
     const result = await clickTool.execute({
       candidateAction: {
         targetRef: 'ref_text_filter_panel_7',
-        intent: 'filter.sort_most_collected',
+        intent: 'filter.option_select',
         locatorChain: [
           { type: 'ref', value: 'ref_text_filter_panel_7' },
           { type: 'aria', value: '最多收藏' },
@@ -653,7 +653,7 @@ describe('candidateAction bridge', () => {
     const result = await clickTool.execute({
       candidateAction: {
         targetRef: 'ref_text_filter_panel_8',
-        intent: 'filter.sort_most_collected',
+        intent: 'filter.option_select',
         locatorChain: [
           { type: 'ref', value: 'ref_text_filter_panel_8' },
           { type: 'aria', value: '最多收藏' },

@@ -1992,7 +1992,7 @@ describe('read_page mode', () => {
     expect(
       actions.find((action) => action.locatorChain.some((item) => item.value === '最多收藏')),
     ).toMatchObject({
-      intent: 'filter.sort_most_collected',
+      intent: 'filter.option_select',
       frameId: 7,
       locatorChain: expect.arrayContaining([
         {
@@ -2015,7 +2015,7 @@ describe('read_page mode', () => {
     });
   });
 
-  it('recovers common content-type filter targets when the compact text sample omits them', async () => {
+  it('does not recover content-type filter targets that are absent from the current snapshot', async () => {
     vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
       { result: { bound: 1 } },
     ] as any);
@@ -2058,21 +2058,12 @@ describe('read_page mode', () => {
       },
     });
 
-    expect(recovered).toBe(true);
-    expect(collectInteractiveElementsFallback).toHaveBeenCalledWith(
+    expect(recovered).toBe(false);
+    expect(collectInteractiveElementsFallback).not.toHaveBeenCalledWith(
       5227,
       expect.objectContaining({ textQuery: '图文', includeCoordinates: true }),
     );
-    expect(basePayload.elements).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          ref: expect.stringMatching(/^ref_text_filter_panel_/),
-          role: 'button',
-          selector: 'body > main > div.filter-panel > div:nth-of-type(2)',
-          text: '图文',
-        }),
-      ]),
-    );
+    expect(basePayload.elements).toEqual([]);
   });
 
   it('recovers open filter panel targets from visible text without assistant guidance', async () => {

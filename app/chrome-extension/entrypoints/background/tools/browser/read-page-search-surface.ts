@@ -32,8 +32,6 @@ const TEXT_SEARCH_TOOLBAR_REF_PATTERN = /^ref_text_search_toolbar_/;
 const TEXT_FILTER_PANEL_REF_PATTERN = /^ref_text_filter_panel_/;
 const SEARCH_INPUT_IDENTITY_PATTERN = /\b(search|query)\b|搜索|查找/i;
 const SEARCH_TOOLBAR_VERTICAL_BAND_PX = 180;
-const MOST_COLLECTED_PATTERN =
-  /最多收藏|收藏最多|按收藏|收藏数|most\s*(collected|saved|favorited)|top\s*saves/i;
 const SEARCH_SUBMIT_PATTERN = /\b(search|find|query)\b|搜索|查找/i;
 const COLLECTION_METRIC_PATTERN =
   /(?:收藏|saves?|saved|favorites?|favourites?|collected)\s*[:：]?\s*([0-9][0-9,.]*\s*(?:万|千|k|m)?)/i;
@@ -112,6 +110,13 @@ function normalizedKey(value: unknown): string {
   return normalizeText(value).toLowerCase();
 }
 
+function filterSemanticLabel(value: unknown): string {
+  return normalizeText(value)
+    .replace(/\b(selected|active|checked|current|applied)\b/gi, '')
+    .replace(/已选|选中|当前|已应用/g, '')
+    .trim();
+}
+
 function searchInputIdentityText(element: ReadPageInteractiveElement): string {
   const selector = String((element as { selector?: unknown }).selector ?? '');
   return [
@@ -134,33 +139,8 @@ function isSearchInputElement(element: ReadPageInteractiveElement): boolean {
   return SEARCH_INPUT_IDENTITY_PATTERN.test(searchInputIdentityText(element));
 }
 
-function canonicalFilterLabel(label: string, group?: SearchSurfaceControl['filterGroup']): string {
-  const text = normalizeText(label);
-  if (
-    (group === 'content_type' || CONTENT_TYPE_FILTER_OPTION_PATTERN.test(text)) &&
-    /^(图文|图片|image\s*text|images?|photos?)$/i.test(text)
-  ) {
-    return '图文';
-  }
-  if (
-    (group === 'content_type' || CONTENT_TYPE_FILTER_OPTION_PATTERN.test(text)) &&
-    /^(视频|videos?)$/i.test(text)
-  ) {
-    return '视频';
-  }
-  if (
-    (group === 'sort' || SORT_FILTER_OPTION_PATTERN.test(text)) &&
-    /最多收藏|most\s*(saved|collected)/i.test(text)
-  ) {
-    return '最多收藏';
-  }
-  if (
-    (group === 'time_range' || TIME_RANGE_FILTER_OPTION_PATTERN.test(text)) &&
-    /一周内|7\s*d|week/i.test(text)
-  ) {
-    return '一周内';
-  }
-  return text;
+function canonicalFilterLabel(label: string, _group?: SearchSurfaceControl['filterGroup']): string {
+  return normalizeText(label);
 }
 
 function canonicalControlLabel(params: {
@@ -221,7 +201,7 @@ function isSearchToolbarBandElement(
 }
 
 function isFilterPanelOptionLabel(value: unknown): boolean {
-  const label = normalizeText(value);
+  const label = filterSemanticLabel(value);
   return (
     FILTER_PANEL_OPTION_PATTERN.test(label) ||
     CONTENT_TYPE_FILTER_OPTION_PATTERN.test(label) ||
@@ -262,7 +242,6 @@ function isTextRecoveredRef(value: string): boolean {
 }
 
 function controlKindForFilterPanelLabel(label: string): SearchSurfaceControl['kind'] {
-  if (MOST_COLLECTED_PATTERN.test(label)) return 'sort_most_collected';
   if (FILTER_PANEL_ACTION_PATTERN.test(label)) return 'filter_panel_action';
   return 'filter_panel_option';
 }
@@ -270,10 +249,11 @@ function controlKindForFilterPanelLabel(label: string): SearchSurfaceControl['ki
 function filterGroupForFilterPanelLabel(
   label: string,
 ): SearchSurfaceControl['filterGroup'] | undefined {
-  if (CONTENT_TYPE_FILTER_OPTION_PATTERN.test(label)) return 'content_type';
-  if (SORT_FILTER_OPTION_PATTERN.test(label)) return 'sort';
-  if (TIME_RANGE_FILTER_OPTION_PATTERN.test(label)) return 'time_range';
-  if (FILTER_PANEL_ACTION_PATTERN.test(label)) return 'panel_action';
+  const semanticLabel = filterSemanticLabel(label);
+  if (CONTENT_TYPE_FILTER_OPTION_PATTERN.test(semanticLabel)) return 'content_type';
+  if (SORT_FILTER_OPTION_PATTERN.test(semanticLabel)) return 'sort';
+  if (TIME_RANGE_FILTER_OPTION_PATTERN.test(semanticLabel)) return 'time_range';
+  if (FILTER_PANEL_ACTION_PATTERN.test(semanticLabel)) return 'panel_action';
   return 'other';
 }
 
@@ -495,9 +475,7 @@ function controlForElement(params: {
   filterGroup?: SearchSurfaceControl['filterGroup'];
 }): SearchSurfaceControl {
   const directAction =
-    params.kind === 'sort_most_collected' ||
-    params.kind === 'filter_panel_action' ||
-    params.kind === 'filter_panel_option'
+    params.kind === 'filter_panel_action' || params.kind === 'filter_panel_option'
       ? actionForFilterPanelRef(params.candidateActions, params.element.ref, params.element.name)
       : actionForRef(params.candidateActions, params.element.ref);
   const action =
@@ -541,11 +519,7 @@ function actionForElementLabel(params: {
   ) {
     return actionForToolbarLabel(params.candidateActions, label, [params.element]);
   }
-  if (
-    params.kind === 'sort_most_collected' ||
-    params.kind === 'filter_panel_action' ||
-    params.kind === 'filter_panel_option'
-  ) {
+  if (params.kind === 'filter_panel_action' || params.kind === 'filter_panel_option') {
     return actionForFilterPanelLabel(params.candidateActions, label, [params.element]);
   }
   return undefined;
@@ -747,7 +721,7 @@ function filterPanelFromVisibleText(
         interactiveElements,
         reason:
           'filter panel label was recovered from visible text and resolved to a locator-backed candidate action',
-        confidence: MOST_COLLECTED_PATTERN.test(label) ? 0.82 : 0.76,
+        confidence: 0.76,
         filterGroup: filterGroupForFilterPanelLabel(label),
       }),
     );
@@ -882,7 +856,7 @@ function buildGroupedFilterState(params: {
   for (const control of params.controls) {
     const candidate = filterCandidateFromControl(control);
     if (!candidate) continue;
-    if (isSortFilterGroup(control.filterGroup) || control.kind === 'sort_most_collected') {
+    if (isSortFilterGroup(control.filterGroup)) {
       sortCandidates.push(candidate);
     }
   }
@@ -1064,6 +1038,24 @@ export function buildSearchSurface(params: {
     );
   }
 
+  const filterPanelOptionElements = params.interactiveElements.filter((element) =>
+    isFilterPanelOptionElement(element, params.interactiveElements),
+  );
+  for (const element of filterPanelOptionElements) {
+    pushUniqueControl(
+      controls,
+      controlForElement({
+        kind: controlKindForFilterPanelLabel(normalizeText(element.name)),
+        element,
+        candidateActions: params.candidateActions,
+        reason:
+          'filter panel option surfaced from structured interactive elements without task-specific label preference',
+        confidence: 0.8,
+        filterGroup: filterGroupForFilterPanelLabel(normalizeText(element.name)),
+      }),
+    );
+  }
+
   const categoryElements = params.interactiveElements.filter(
     (element) =>
       isCategoryLabel(element.name) &&
@@ -1081,25 +1073,6 @@ export function buildSearchSurface(params: {
       }),
     );
   }
-
-  const sortAction = findControlAction(params.candidateActions, 'filter.sort_most_collected');
-  const sortElement = params.interactiveElements.find(
-    (element) =>
-      element.ref === sortAction?.targetRef ||
-      MOST_COLLECTED_PATTERN.test(normalizeText(element.name)),
-  );
-  if (sortElement) {
-    controls.push(
-      controlForElement({
-        kind: 'sort_most_collected',
-        element: sortElement,
-        candidateActions: params.candidateActions,
-        reason: 'most-collected sort control surfaced from structured interactive elements',
-        confidence: 0.88,
-      }),
-    );
-  }
-  const sortAppliedCandidate = isSortAppliedCandidate(sortElement);
 
   const submitAction = findControlAction(params.candidateActions, 'search.submit');
   if (submitAction) {
@@ -1207,7 +1180,9 @@ export function buildSearchSurface(params: {
     resultCards,
     filterPanel,
   });
-  const currentSortLabel = sortAppliedCandidate ? safeLabel(sortElement?.name) : undefined;
+  const currentSortLabel = filterState.sort?.selected ?? undefined;
+  const sortSelected = Boolean(filterState.sort?.selected);
+  const sortObserved = Boolean(filterState.sort?.candidates.length);
 
   if (
     !requested &&
@@ -1236,19 +1211,22 @@ export function buildSearchSurface(params: {
     filterPanel,
     filterState,
     sortEvidence: {
-      requestedSort:
-        sortElement || sortAction ? 'most_collected' : sortMenuObserved ? 'sort_menu' : 'unknown',
+      requestedSort: sortSelected
+        ? 'sort_observed'
+        : sortMenuObserved
+          ? 'sort_menu'
+          : sortObserved
+            ? 'sort_observed'
+            : 'unknown',
       ...(currentSortLabel ? { currentSortLabel } : {}),
       menuOpenCandidate: sortOptionLabels.length > 0 || Boolean(sortMenuAction && sortMenuObserved),
       ...(sortOptionLabels.length > 0 ? { optionLabels: sortOptionLabels } : {}),
-      appliedCandidate: sortAppliedCandidate,
-      reason: sortAppliedCandidate
-        ? 'most-collected sort control appears selected in this fresh snapshot; business ranking still needs result evidence'
-        : sortElement || sortAction
-          ? 'most-collected sort control is observable; applied state still requires fresh readback after click'
-          : sortMenuObserved
-            ? 'sort menu trigger is observable; current sort value still requires menu/readback evidence'
-            : 'no sort control observed in this snapshot',
+      appliedCandidate: sortSelected,
+      reason: sortSelected
+        ? 'sort control appears selected in this fresh snapshot; business ranking still needs result evidence'
+        : sortMenuObserved || sortObserved
+          ? 'sort controls are observable; applied state still requires fresh readback after click'
+          : 'no sort control observed in this snapshot',
     },
     topNCompleteness: {
       requestedMinResults: 10,

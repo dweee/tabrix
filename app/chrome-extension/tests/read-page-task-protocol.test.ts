@@ -904,7 +904,7 @@ describe('read_page task protocol', () => {
         expect.objectContaining({
           objectId: 'ref_filter_most_saved',
           parentObjectId: 'container_filter_panel',
-          actionTypes: ['filter.sort_most_collected'],
+          actionTypes: ['filter.option_select'],
         }),
         expect.objectContaining({
           objectId: 'ref_filter_one_week',
