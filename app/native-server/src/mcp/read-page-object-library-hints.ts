@@ -1,5 +1,8 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import type { ReadPageObjectLibraryHint } from '@tabrix/shared';
+import type {
+  ReadPageObjectLibraryHint,
+  ReadPageSearchSurfaceGenericFilterGroupState,
+} from '@tabrix/shared';
 import type { BrowserObjectRepository } from '../memory/db';
 import { readJsonObjectFromCallToolResult } from './register-tool-result-json';
 import {
@@ -155,6 +158,7 @@ function buildObjectLibraryFilterSignal(
 ): NonNullable<ReadPageObjectLibraryHint['reuseSignals']>['filterState'] | undefined {
   const filterState = readObject(value);
   if (!filterState) return undefined;
+  const filterGroups = buildObjectLibraryFilterGroupsSignal(filterState.filterGroups);
   const appliedLabels = readUnknownArray(filterState.appliedLabels)
     .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     .map((item) => item.trim())
@@ -162,11 +166,64 @@ function buildObjectLibraryFilterSignal(
   const safe = {
     status: readString(filterState.status) ?? undefined,
     ...(appliedLabels.length > 0 ? { appliedLabels } : {}),
+    ...(filterGroups.length > 0 ? { filterGroups } : {}),
     contentType: readString(filterState.contentType) ?? undefined,
     sort: readString(filterState.sort) ?? undefined,
     timeRange: readString(filterState.timeRange) ?? undefined,
   };
   return Object.values(safe).some((item) => item !== undefined) ? safe : undefined;
+}
+
+function buildObjectLibraryFilterGroupsSignal(
+  value: unknown,
+): ReadPageSearchSurfaceGenericFilterGroupState[] {
+  return readUnknownArray(value)
+    .map((item) => {
+      const group = readObject(item);
+      if (!group) return null;
+      const groupId = readString(group.groupId);
+      if (!groupId) return null;
+      const candidates = readUnknownArray(group.candidates)
+        .map((candidate) => {
+          const object = readObject(candidate);
+          if (!object) return null;
+          const label = readString(object.label);
+          if (!label) return null;
+          const selected = typeof object.selected === 'boolean' ? object.selected : false;
+          const targetRef = readString(object.targetRef);
+          const candidateActionId = readString(object.candidateActionId);
+          return {
+            label,
+            selected,
+            ...(targetRef ? { targetRef } : {}),
+            ...(candidateActionId ? { candidateActionId } : {}),
+            confidence:
+              typeof object.confidence === 'number' && Number.isFinite(object.confidence)
+                ? Math.max(0, Math.min(1, object.confidence))
+                : 0,
+            reason: readString(object.reason) ?? 'filter candidate projected from object library',
+          };
+        })
+        .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate))
+        .slice(0, 12);
+      const groupLabel = readString(group.groupLabel);
+      const selected = readString(group.selected);
+      const selectedCandidateId = readString(group.selectedCandidateId);
+      return {
+        groupId,
+        ...(groupLabel ? { groupLabel } : {}),
+        ...(selected ? { selected } : {}),
+        ...(selectedCandidateId ? { selectedCandidateId } : {}),
+        candidates,
+        ambiguous: Boolean(group.ambiguous),
+        source: readUnknownArray(group.source)
+          .filter((entry): entry is string => typeof entry === 'string')
+          .slice(0, 4),
+        reason: readString(group.reason) ?? 'filter group projected from object library',
+      };
+    })
+    .filter((group): group is NonNullable<typeof group> => Boolean(group))
+    .slice(0, 8);
 }
 
 function mapObjectLibraryHintFreshness(object: {

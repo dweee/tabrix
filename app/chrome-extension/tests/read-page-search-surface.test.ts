@@ -1364,6 +1364,67 @@ describe('buildSearchSurface', () => {
     });
   });
 
+  it('projects non-content-platform selected filters into generic filter groups', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_brand_acme',
+          role: 'button',
+          name: 'Acme',
+          checked: true,
+          rect: { x: 720, y: 220, width: 88, height: 40 },
+        }),
+        interactive({
+          ref: 'ref_rating_four',
+          role: 'checkbox',
+          name: '4 stars & up',
+          checked: true,
+          rect: { x: 720, y: 280, width: 128, height: 40 },
+        }),
+      ],
+      candidateActions: [
+        candidate({ id: 'ca_brand_acme', targetRef: 'ref_brand_acme' }),
+        candidate({ id: 'ca_rating_four', targetRef: 'ref_rating_four' }),
+      ],
+      visibleTextContent: ['Brand Acme Globex Umbrella', 'Rating 4 stars & up 3 stars & up'].join(
+        '\n',
+      ),
+    });
+
+    expect(surface?.filterState?.filterGroups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          groupId: 'brand',
+          groupLabel: 'Brand',
+          selected: 'Acme',
+          candidates: expect.arrayContaining([
+            expect.objectContaining({
+              label: 'Acme',
+              selected: true,
+              targetRef: 'ref_brand_acme',
+              candidateActionId: 'ca_brand_acme',
+            }),
+          ]),
+        }),
+        expect.objectContaining({
+          groupId: 'rating',
+          groupLabel: 'Rating',
+          selected: '4 stars & up',
+          candidates: expect.arrayContaining([
+            expect.objectContaining({
+              label: '4 stars & up',
+              selected: true,
+              targetRef: 'ref_rating_four',
+              candidateActionId: 'ca_rating_four',
+            }),
+          ]),
+        }),
+      ]),
+    );
+    expect(surface?.filterState?.selected).toEqual({});
+  });
+
   it('reports result coverage as incomplete when more content or load-more is visible', () => {
     const rows = visibleRows();
     rows.pageInfo.pixelsBelow = 1600;

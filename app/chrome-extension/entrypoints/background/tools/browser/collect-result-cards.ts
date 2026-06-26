@@ -58,6 +58,7 @@ interface SearchFilterState {
   contentType?: string;
   sort?: string;
   timeRange?: string;
+  filterGroups: SearchGenericFilterGroupState[];
   groups: {
     contentType: SearchFilterGroupState;
     sort: SearchFilterGroupState;
@@ -96,6 +97,11 @@ interface SearchFilterGroupState {
   confidence: number;
   ambiguous: boolean;
   reason: string;
+}
+
+interface SearchGenericFilterGroupState extends SearchFilterGroupState {
+  groupId: string;
+  groupLabel?: string;
 }
 
 interface ScrollStepResult {
@@ -385,6 +391,30 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     };
   };
 
+  const genericFilterGroupId = (kind: AppliedSearchFilter['kind']): string => {
+    if (kind === 'content_type') return 'content_type';
+    if (kind === 'sort') return 'sort';
+    if (kind === 'time_range') return 'time_range';
+    return 'other';
+  };
+
+  const genericFilterGroupsForFilters = (
+    filters: readonly AppliedSearchFilter[],
+  ): SearchGenericFilterGroupState[] => {
+    const groups = new Map<string, AppliedSearchFilter[]>();
+    for (const filter of filters) {
+      const groupId = genericFilterGroupId(filter.kind);
+      groups.set(groupId, [...(groups.get(groupId) ?? []), filter]);
+    }
+    return [...groups.entries()]
+      .map(([groupId, groupFilters]) => ({
+        groupId,
+        groupLabel: groupId,
+        ...groupStateForKind(groupFilters, groupFilters[0]?.kind ?? 'unknown'),
+      }))
+      .sort((left, right) => left.groupId.localeCompare(right.groupId));
+  };
+
   const collectFilterState = (): SearchFilterState => {
     const activeSelectors = [
       '[aria-selected="true"]',
@@ -429,6 +459,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       sort: groupStateForKind(filters, 'sort'),
       timeRange: groupStateForKind(filters, 'time_range'),
     };
+    const filterGroups = genericFilterGroupsForFilters(filters);
     const appliedFilters = [
       selectedFilterForKind(filters, 'content_type'),
       selectedFilterForKind(filters, 'sort'),
@@ -441,6 +472,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       ...(groups.contentType.selected ? { contentType: groups.contentType.selected } : {}),
       ...(groups.sort.selected ? { sort: groups.sort.selected } : {}),
       ...(groups.timeRange.selected ? { timeRange: groups.timeRange.selected } : {}),
+      filterGroups,
       groups,
       appliedFilters,
       claimBoundary:

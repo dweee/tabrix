@@ -372,12 +372,19 @@ function readCollectResultCardsReuseProfile(trace: MemoryTrace): {
     sort: string | null;
     timeRange: string | null;
     appliedLabels: string[];
+    filterGroups?: Array<{
+      groupId: string;
+      groupLabel: string | null;
+      selected: string | null;
+      candidates: string[];
+    }>;
   };
 } {
   const request = readObject(trace.requestParams);
   const response = readResponseDigest(trace);
   const collection = readObject(response?.collection);
   const filterState = readObject(response?.filterState);
+  const filterGroups = readCollectResultCardsFilterGroups(filterState?.filterGroups);
   return {
     minResults:
       readFiniteNumber(request?.minResults) ??
@@ -398,8 +405,41 @@ function readCollectResultCardsReuseProfile(trace: MemoryTrace): {
             (label): label is string => typeof label === 'string' && label.length > 0,
           )
         : [],
+      ...(filterGroups.length > 0 ? { filterGroups } : {}),
     },
   };
+}
+
+function readCollectResultCardsFilterGroups(value: unknown): Array<{
+  groupId: string;
+  groupLabel: string | null;
+  selected: string | null;
+  candidates: string[];
+}> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => {
+      const group = readObject(entry);
+      const groupId = readString(group?.groupId);
+      if (!groupId) return null;
+      const candidates = Array.isArray(group?.candidates)
+        ? group.candidates
+            .map((candidate) => {
+              const object = readObject(candidate);
+              return readString(object?.label);
+            })
+            .filter((label): label is string => Boolean(label))
+            .slice(0, 12)
+        : [];
+      return {
+        groupId,
+        groupLabel: readString(group?.groupLabel),
+        selected: readString(group?.selected),
+        candidates,
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+    .slice(0, 8);
 }
 
 function buildStepTemplate(trace: MemoryTrace, order: number): Record<string, unknown> | null {

@@ -318,8 +318,19 @@ export interface ReadPageSearchSurfaceFilterGroupState {
   reason: string;
 }
 
+export interface ReadPageSearchSurfaceGenericFilterGroupState extends ReadPageSearchSurfaceFilterGroupState {
+  groupId: string;
+  groupLabel?: string;
+}
+
 export interface ReadPageSearchSurfaceFilterState {
   status: 'observed' | 'partial' | 'not_observed' | 'ambiguous' | string;
+  /**
+   * Generic filter groups observed on the page. This is the primary product
+   * model for Object/Knowledge reuse; the legacy contentType/sort/timeRange
+   * fields below are compatibility projections for existing callers.
+   */
+  filterGroups: ReadPageSearchSurfaceGenericFilterGroupState[];
   contentType: ReadPageSearchSurfaceFilterGroupState;
   sort: ReadPageSearchSurfaceFilterGroupState;
   timeRange: ReadPageSearchSurfaceFilterGroupState;
@@ -931,6 +942,7 @@ export interface ReadPageObjectLibraryHint {
     filterState?: {
       status?: string;
       appliedLabels?: string[];
+      filterGroups?: ReadPageSearchSurfaceGenericFilterGroupState[];
       contentType?: string;
       sort?: string;
       timeRange?: string;

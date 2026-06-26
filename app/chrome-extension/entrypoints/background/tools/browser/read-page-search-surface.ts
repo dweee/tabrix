@@ -80,6 +80,7 @@ type SearchSurfaceControl = ReadPageSearchSurface['controls'][number];
 type SearchSurfaceFilterPanel = NonNullable<ReadPageSearchSurface['filterPanel']>;
 type SearchSurfaceFilterState = NonNullable<ReadPageSearchSurface['filterState']>;
 type SearchSurfaceFilterGroupState = SearchSurfaceFilterState['contentType'];
+type SearchSurfaceGenericFilterGroupState = SearchSurfaceFilterState['filterGroups'][number];
 type SearchSurfaceFilterCandidate = SearchSurfaceFilterGroupState['candidates'][number];
 
 function guidanceRequestsSearch(params: {
@@ -209,12 +210,22 @@ function isFilterPanelOptionLabel(value: unknown): boolean {
   );
 }
 
+function isStatefulFilterOptionElement(element: ReadPageInteractiveElement): boolean {
+  const label = normalizeText(element.name);
+  if (!label || label.length > 80) return false;
+  const role = normalizeText(element.role).toLowerCase();
+  if (role === 'link' || role === 'textbox' || role === 'searchbox' || role === 'combobox') {
+    return false;
+  }
+  return element.checked === true;
+}
+
 function isFilterPanelOptionElement(
   element: ReadPageInteractiveElement,
   interactiveElements: readonly ReadPageInteractiveElement[],
 ): boolean {
   const label = normalizeText(element.name);
-  if (!isFilterPanelOptionLabel(label)) return false;
+  if (!isFilterPanelOptionLabel(label) && !isStatefulFilterOptionElement(element)) return false;
   const role = normalizeText(element.role).toLowerCase();
   if (role === 'link' || role === 'textbox' || role === 'searchbox' || role === 'combobox') {
     return false;
@@ -255,6 +266,32 @@ function filterGroupForFilterPanelLabel(
   if (TIME_RANGE_FILTER_OPTION_PATTERN.test(semanticLabel)) return 'time_range';
   if (FILTER_PANEL_ACTION_PATTERN.test(semanticLabel)) return 'panel_action';
   return 'other';
+}
+
+function inferFilterGroupFromVisibleText(
+  label: string,
+  visibleTextContent: string | null | undefined,
+): SearchSurfaceControl['filterGroup'] | undefined {
+  const fallback = filterGroupForFilterPanelLabel(label);
+  if (fallback && fallback !== 'other') return fallback;
+  const labelKey = normalizedKey(filterSemanticLabel(label));
+  if (!labelKey) return fallback;
+  for (const rawLine of String(visibleTextContent ?? '').split(/\r?\n/)) {
+    const line = normalizeText(rawLine);
+    if (!line) continue;
+    const semanticLine = filterSemanticLabel(line);
+    const labelIndex = normalizedKey(semanticLine).indexOf(labelKey);
+    if (labelIndex <= 0) continue;
+    const prefix = semanticLine.slice(0, labelIndex).trim();
+    const prefixParts = prefix
+      .split(/[\s|｜/、,，:：]+/)
+      .map(normalizeText)
+      .filter(Boolean);
+    if (prefixParts.length === 0 || prefixParts.length > 3) continue;
+    const groupLabel = safeLabel(prefixParts.join(' '));
+    if (groupLabel && !FILTER_PANEL_ACTION_PATTERN.test(groupLabel)) return groupLabel;
+  }
+  return fallback;
 }
 
 function isContentTypeFilterGroup(value: unknown): boolean {
@@ -706,7 +743,7 @@ function filterPanelFromVisibleText(
           reason:
             'filter option is visible outside the top search toolbar and treated as a filter-panel option',
           confidence: 0.8,
-          filterGroup: filterGroupForFilterPanelLabel(label),
+          filterGroup: inferFilterGroupFromVisibleText(label, visibleTextContent),
         }),
       );
       continue;
@@ -722,7 +759,7 @@ function filterPanelFromVisibleText(
         reason:
           'filter panel label was recovered from visible text and resolved to a locator-backed candidate action',
         confidence: 0.76,
-        filterGroup: filterGroupForFilterPanelLabel(label),
+        filterGroup: inferFilterGroupFromVisibleText(label, visibleTextContent),
       }),
     );
   }
@@ -835,6 +872,25 @@ function groupStateFromCandidates(
   };
 }
 
+function genericFilterGroupId(value: unknown): string {
+  const key = normalizedKey(value);
+  if (key) return key.replace(/[^a-z0-9_\-\u4e00-\u9fff]+/gi, '_').replace(/^_+|_+$/g, '');
+  return 'other';
+}
+
+function genericGroupStateFromCandidates(params: {
+  groupId: string;
+  groupLabel?: string;
+  candidates: readonly SearchSurfaceFilterCandidate[];
+}): SearchSurfaceGenericFilterGroupState {
+  const state = groupStateFromCandidates(params.candidates);
+  return {
+    groupId: params.groupId,
+    ...(params.groupLabel ? { groupLabel: params.groupLabel } : {}),
+    ...state,
+  };
+}
+
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.filter(Boolean))];
 }
@@ -847,15 +903,38 @@ function buildGroupedFilterState(params: {
   const contentTypeCandidates: SearchSurfaceFilterCandidate[] = [];
   const sortCandidates: SearchSurfaceFilterCandidate[] = [];
   const timeRangeCandidates: SearchSurfaceFilterCandidate[] = [];
+  const genericGroups = new Map<
+    string,
+    { groupLabel?: string; candidates: SearchSurfaceFilterCandidate[] }
+  >();
+
+  const addGenericCandidate = (
+    rawGroup: SearchSurfaceControl['filterGroup'] | undefined,
+    candidate: SearchSurfaceFilterCandidate,
+  ): void => {
+    const groupId = genericFilterGroupId(rawGroup ?? 'other');
+    const groupLabel = typeof rawGroup === 'string' && rawGroup ? rawGroup : undefined;
+    const existing = genericGroups.get(groupId);
+    if (existing) {
+      existing.candidates.push(candidate);
+      return;
+    }
+    genericGroups.set(groupId, {
+      ...(groupLabel ? { groupLabel } : {}),
+      candidates: [candidate],
+    });
+  };
 
   for (const control of params.categoryTabs) {
     const candidate = filterCandidateFromControl(control);
     if (!candidate) continue;
     contentTypeCandidates.push(candidate);
+    addGenericCandidate(control.filterGroup ?? 'content_type', candidate);
   }
   for (const control of params.controls) {
     const candidate = filterCandidateFromControl(control);
     if (!candidate) continue;
+    addGenericCandidate(control.filterGroup ?? 'other', candidate);
     if (isSortFilterGroup(control.filterGroup)) {
       sortCandidates.push(candidate);
     }
@@ -863,6 +942,7 @@ function buildGroupedFilterState(params: {
   for (const control of params.filterPanel.targetableOptions ?? []) {
     const candidate = filterCandidateFromControl(control);
     if (!candidate) continue;
+    addGenericCandidate(control.filterGroup ?? 'other', candidate);
     if (isContentTypeFilterGroup(control.filterGroup)) {
       contentTypeCandidates.push(candidate);
     } else if (isSortFilterGroup(control.filterGroup)) {
@@ -875,6 +955,15 @@ function buildGroupedFilterState(params: {
   const contentType = groupStateFromCandidates(contentTypeCandidates);
   const sort = groupStateFromCandidates(sortCandidates);
   const timeRange = groupStateFromCandidates(timeRangeCandidates);
+  const filterGroups = [...genericGroups.entries()]
+    .map(([groupId, group]) =>
+      genericGroupStateFromCandidates({
+        groupId,
+        ...(group.groupLabel ? { groupLabel: group.groupLabel } : {}),
+        candidates: group.candidates,
+      }),
+    )
+    .sort((left, right) => left.groupId.localeCompare(right.groupId));
   const missingGroups = [
     contentType.selected ? null : 'contentType',
     sort.selected ? null : 'sort',
@@ -894,6 +983,7 @@ function buildGroupedFilterState(params: {
         : observedCandidateCount > 0
           ? 'partial'
           : 'not_observed',
+    filterGroups,
     contentType,
     sort,
     timeRange,
@@ -1051,7 +1141,10 @@ export function buildSearchSurface(params: {
         reason:
           'filter panel option surfaced from structured interactive elements without task-specific label preference',
         confidence: 0.8,
-        filterGroup: filterGroupForFilterPanelLabel(normalizeText(element.name)),
+        filterGroup: inferFilterGroupFromVisibleText(
+          normalizeText(element.name),
+          params.visibleTextContent,
+        ),
       }),
     );
   }

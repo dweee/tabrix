@@ -201,6 +201,13 @@ describe('collect result cards DOM scan', () => {
       sort: '最多收藏',
       timeRange: '一周内',
     });
+    expect(scan.filterState.filterGroups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ groupId: 'content_type', selected: '图文' }),
+        expect.objectContaining({ groupId: 'sort', selected: '最多收藏' }),
+        expect.objectContaining({ groupId: 'time_range', selected: '一周内' }),
+      ]),
+    );
     expect(scan.filterState.appliedFilters.map((filter) => filter.label)).toEqual([
       '图文',
       '最多收藏',

@@ -249,11 +249,22 @@ function buildExperienceCatalog(recipe: ExperienceRecipe): {
   const collectChecks = successCheck?.collectResultCards;
   const firstCollectCheck = Array.isArray(collectChecks) ? readObject(collectChecks[0]) : null;
   const filters = readObject(firstCollectCheck?.filterState);
-  const filterParts = [
+  const genericFilterParts = Array.isArray(filters?.filterGroups)
+    ? filters.filterGroups
+        .map((entry) => {
+          const group = readObject(entry);
+          const groupId = typeof group?.groupId === 'string' ? group.groupId : null;
+          const selected = typeof group?.selected === 'string' ? group.selected : null;
+          return groupId && selected ? `${groupId}:${selected}` : null;
+        })
+        .filter((value): value is string => Boolean(value))
+    : [];
+  const legacyFilterParts = [
     typeof filters?.sort === 'string' ? filters.sort : null,
     typeof filters?.contentType === 'string' ? filters.contentType : null,
     typeof filters?.timeRange === 'string' ? filters.timeRange : null,
   ].filter((value): value is string => Boolean(value));
+  const filterParts = genericFilterParts.length > 0 ? genericFilterParts : legacyFilterParts;
   const minCount =
     typeof firstCollectCheck?.observedResultCountAtLeast === 'number'
       ? firstCollectCheck.observedResultCountAtLeast
