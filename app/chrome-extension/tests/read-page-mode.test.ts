@@ -2666,6 +2666,13 @@ describe('read_page mode', () => {
       ],
       stats: { processed: 10, included: 8, durationMs: 8 },
       viewport: { width: 1280, height: 720, dpr: 1 },
+      diagnostics: [
+        {
+          source: 'accessibility_tree.dynamic_surface_root.selector',
+          message: 'selector probe failed',
+          at: 1782516187000,
+        },
+      ],
     });
 
     const result = await readPageTool.execute({ mode: 'normal' });
@@ -2673,6 +2680,18 @@ describe('read_page mode', () => {
     expect(result.isError).toBe(false);
     expectCommonSnapshotShape(payload, 'normal');
     expect(payload.diagnostics).toBeDefined();
+    expect(payload.pageContext.sensingDiagnostics).toMatchObject({
+      source: 'accessibility_tree_helper',
+      coverageStatus: 'partial',
+      partialErrors: [
+        {
+          source: 'accessibility_tree.dynamic_surface_root.selector',
+          message: 'selector probe failed',
+          at: 1782516187000,
+        },
+      ],
+      claimBoundary: expect.stringContaining('partial evidence'),
+    });
     expect(payload.fullSnapshot).toBeUndefined();
   });
 

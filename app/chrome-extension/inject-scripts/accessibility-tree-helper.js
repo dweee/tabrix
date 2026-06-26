@@ -1129,6 +1129,7 @@
    */
   function __generateAccessibilityTree(filter, options) {
     try {
+      window[DIAGNOSTICS_KEY] = [];
       const start = performance && performance.now ? performance.now() : Date.now();
       const out = [];
       const cfg = { filter: filter || undefined };
@@ -1193,6 +1194,9 @@
           included: state.included,
           durationMs: Math.round(end - start),
         },
+        diagnostics: Array.isArray(window[DIAGNOSTICS_KEY])
+          ? window[DIAGNOSTICS_KEY].slice(-25)
+          : [],
         refMap,
       };
     } catch (err) {

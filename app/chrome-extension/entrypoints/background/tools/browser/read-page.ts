@@ -165,8 +165,41 @@ const READ_PAGE_CONTENT_MESSAGE_RETRY_DELAY_MS = 450;
 const INTERACTIVE_ELEMENTS_HELPER_FILE = 'inject-scripts/interactive-elements-helper.js';
 const INTERACTIVE_ELEMENTS_HELPER_PING_TIMEOUT_MS = 300;
 const VISIBLE_TEXT_FALLBACK_MAX_CHARS = 12_000;
+const ACCESSIBILITY_TREE_DIAGNOSTIC_LIMIT = 8;
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeAccessibilityTreeDiagnostics(
+  rawDiagnostics: unknown,
+): ReadPagePageContext['sensingDiagnostics'] | undefined {
+  if (!Array.isArray(rawDiagnostics)) return undefined;
+  const partialErrors = rawDiagnostics
+    .map((entry): { source: string; message: string; at?: number } | null => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+      const record = entry as Record<string, unknown>;
+      const source = typeof record.source === 'string' ? record.source.trim() : '';
+      const message = typeof record.message === 'string' ? record.message.trim() : '';
+      if (!source || !message) return null;
+      const safeMessage = message.replace(/\s+/g, ' ').slice(0, 160);
+      const at =
+        typeof record.at === 'number' && Number.isFinite(record.at) ? record.at : undefined;
+      return {
+        source: source.slice(0, 96),
+        message: safeMessage,
+        ...(typeof at === 'number' ? { at } : {}),
+      };
+    })
+    .filter((entry): entry is { source: string; message: string; at?: number } => entry != null)
+    .slice(-ACCESSIBILITY_TREE_DIAGNOSTIC_LIMIT);
+  if (partialErrors.length === 0) return undefined;
+  return {
+    source: 'accessibility_tree_helper',
+    coverageStatus: 'partial',
+    partialErrors,
+    claimBoundary:
+      'content-script diagnostics mean some low-level object-sensing probes failed; the snapshot can still be useful but should be treated as partial evidence, not business-success proof',
+  };
 }
 
 function getTabNavigationUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {
@@ -261,7 +294,8 @@ async function inferUserActivityLevel(input: {
       const state = await chrome.idle.queryState(15);
       if (state === 'active') return 'recent_input';
     }
-  } catch {
+  } catch (error) {
+    void error;
     /* fall through to 'none' */
   }
   return 'none';
@@ -524,6 +558,7 @@ async function buildModeOutput(params: {
   fileInputBindings: ReadPageFileInputBinding[];
   visualElements: ReadPageVisualElementHint[];
   visibleRegionRows: VisibleRegionRowsResult;
+  sensingDiagnostics?: ReadPagePageContext['sensingDiagnostics'];
   includeAuthArtifacts: boolean;
   assistantGuidance?: ReadPageAssistantGuidance;
   /** Layer envelope; defaults to 'L0+L1'. */
@@ -581,6 +616,9 @@ async function buildModeOutput(params: {
     markedElementsCount: params.markedElements.length,
     loadReadiness: params.loadReadiness,
   };
+  if (params.sensingDiagnostics) {
+    pageContext.sensingDiagnostics = params.sensingDiagnostics;
+  }
 
   const extensionLayer = buildExtensionLayer({
     mode: params.mode,
@@ -1022,7 +1060,8 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       if (response && (response as any).status === 'pong') {
         return;
       }
-    } catch {
+    } catch (error) {
+      void error;
       // Expected when the fallback helper has not been injected on this page yet.
     }
 
@@ -2140,6 +2179,9 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           : null;
 
       const contentSummary = summarizePageContent(pageContent);
+      const sensingDiagnostics = treeOk
+        ? normalizeAccessibilityTreeDiagnostics(resp?.diagnostics)
+        : undefined;
 
       // User markers have been removed with the Element Marker surface
       // (MKEP pruning §P7). Keep the field on the payload as an empty
@@ -2189,6 +2231,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           pixelsBelow: typeof resp?.pixelsBelow === 'number' ? resp.pixelsBelow : null,
         }),
         frameContext: treeOk ? normalizeFrameContext(resp?.frameContext, requestedFrameId) : null,
+        sensingDiagnostics,
       };
       reconcilePageUnderstandingWithVisibleRows(basePayload);
 
@@ -2362,6 +2405,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           fileInputBindings: basePayload.fileInputBindings,
           visualElements: basePayload.visualElements,
           visibleRegionRows: basePayload.visibleRegionRows,
+          sensingDiagnostics: basePayload.sensingDiagnostics,
           includeAuthArtifacts,
           assistantGuidance,
           requestedLayer: selectedLayer,
@@ -2542,6 +2586,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             fileInputBindings: basePayload.fileInputBindings,
             visualElements: basePayload.visualElements,
             visibleRegionRows: basePayload.visibleRegionRows,
+            sensingDiagnostics: basePayload.sensingDiagnostics,
             includeAuthArtifacts,
             assistantGuidance,
             requestedLayer: selectedLayer,

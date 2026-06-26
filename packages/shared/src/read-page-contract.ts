@@ -766,6 +766,19 @@ export interface ReadPageExecutableAction {
   claimBoundary: string;
 }
 
+export interface ReadPageSensingDiagnostic {
+  source: string;
+  message: string;
+  at?: number;
+}
+
+export interface ReadPageSnapshotSensingDiagnostics {
+  source: 'accessibility_tree_helper';
+  coverageStatus: 'complete' | 'partial';
+  partialErrors: ReadPageSensingDiagnostic[];
+  claimBoundary: string;
+}
+
 export interface ReadPagePageContext {
   filter: string;
   depth: number | null;
@@ -785,6 +798,16 @@ export interface ReadPagePageContext {
    * must not be treated as login/search/form completion evidence.
    */
   loadReadiness?: ReadPageLoadReadiness;
+  /**
+   * Bounded content-script object-sensing diagnostics for the current DOM
+   * snapshot.
+   *
+   * This indicates whether low-level helper probes partially failed while
+   * producing the page object map. It is not AI feedback, not business success
+   * proof, and must not include raw DOM text, URLs, cookies, request bodies, or
+   * stacks.
+   */
+  sensingDiagnostics?: ReadPageSnapshotSensingDiagnostics;
 }
 
 export interface ReadPageLoadReadiness {
