@@ -1301,10 +1301,21 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
     Object.defineProperty(window, 'getComputedStyle', {
       configurable: true,
       value: (element: Element) => ({
-        display: 'block',
-        visibility: 'visible',
-        opacity: '1',
-        cursor: element === chip ? 'pointer' : 'auto',
+        get display() {
+          return 'block';
+        },
+        get visibility() {
+          return 'visible';
+        },
+        get opacity() {
+          return '1';
+        },
+        get cursor() {
+          if (element === chip) {
+            throw new Error('style probe unavailable');
+          }
+          return 'auto';
+        },
       }),
     });
     document.elementFromPoint = vi.fn(() => hitLayer);
@@ -1329,6 +1340,14 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
       id: 'filter-label',
       targetConsistency: { verdict: 'matched_by_shared_action_ancestor' },
     });
+    expect(response.signals.waitDiagnostics.helper).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'delegated_action_style_failed',
+          message: 'style probe unavailable',
+        }),
+      ]),
+    );
     expect(chip.getAttribute('data-selected')).toBe('true');
   });
 

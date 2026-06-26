@@ -174,6 +174,14 @@ if (
     options = {},
   ) {
     try {
+      const helperDiagnostics = [];
+      const recordHelperDiagnostic = (source, error) => {
+        if (helperDiagnostics.length >= 8) return;
+        helperDiagnostics.push({
+          source,
+          message: describeClickDispatchError(error),
+        });
+      };
       let element = null;
       let elementInfo = null;
       let clickX, clickY;
@@ -242,8 +250,8 @@ if (
         let pointerSignal = false;
         try {
           pointerSignal = window.getComputedStyle(candidate).cursor === 'pointer';
-        } catch {
-          /* best-effort click sensing fallback */
+        } catch (error) {
+          recordHelperDiagnostic('delegated_action_style_failed', error);
         }
         if (!pointerSignal && !classSignal && !stateSignal) return false;
         const nestedActions = candidate.querySelectorAll?.(GENERIC_ACTION_SELECTOR).length || 0;
@@ -989,6 +997,7 @@ if (
             verification: outcomeWait,
             observer: observerDiagnostic,
             ...(dispatchDiagnostics ? { dispatch: dispatchDiagnostics } : {}),
+            ...(helperDiagnostics.length ? { helper: helperDiagnostics } : {}),
           },
         },
       };
