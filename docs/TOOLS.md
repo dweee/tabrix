@@ -817,6 +817,11 @@ This tool is available by default for the local AI control loop. Use the `traceI
 - `confidence` (number, optional): AI score from `0` to `1`; use `>= 0.90` only when the step clearly advanced the user goal.
 - `reasonCode` (string, optional): Short machine-readable reason.
 - `summary` (string, optional): Short human-readable judgment.
+- `evaluationVersion` (string, optional): AI feedback payload version used by the caller.
+- `rubricVersion` (string, optional): Scoring rubric version used by the caller.
+- `evaluatorModel` (string, optional): Model or agent that produced the AI judgment.
+- `userGoalSnapshot` (string, optional): Privacy-safe summary of the user goal used for this judgment.
+- `experienceCandidate` (boolean, optional): Set `false` when the step succeeded but should not be mined into Experience because the path was brittle, slow, risky, private, or not reusable.
 
 **Example**:
 
@@ -827,7 +832,12 @@ This tool is available by default for the local AI control loop. Use the `traceI
   "businessStatus": "achieved",
   "confidence": 0.93,
   "reasonCode": "expected_result_visible",
-  "summary": "The page showed the expected search results after the action."
+  "summary": "The page showed the expected search results after the action.",
+  "evaluationVersion": "ai_feedback_v1",
+  "rubricVersion": "tabrix_ai_business_feedback_v1",
+  "evaluatorModel": "example-ai-client",
+  "userGoalSnapshot": "Search and collect the first ten relevant result cards.",
+  "experienceCandidate": true
 }
 ```
 

@@ -14,6 +14,11 @@ export interface RecordMkeAiBusinessFeedbackInput {
   confidence?: number | null;
   reasonCode?: string | null;
   summary?: string | null;
+  evaluationVersion?: string | null;
+  rubricVersion?: string | null;
+  evaluatorModel?: string | null;
+  userGoalSnapshot?: string | null;
+  experienceCandidate?: boolean | null;
   receivedAt?: string;
   sourceToolName?: string | null;
   sourceToolCallId?: string | null;
@@ -39,6 +44,10 @@ function normalizeConfidence(value: number | null | undefined): number | null {
 
 function normalizeAiFeedbackScope(value: string | null | undefined): 'step' | 'task' {
   return value === 'task' ? 'task' : 'step';
+}
+
+function normalizeOptionalText(value: string | null | undefined): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 }
 
 function ensureFeedbackBinding(
@@ -123,12 +132,20 @@ export function recordAiBusinessFeedback(input: {
   const traceBindingHash = ensureFeedbackBinding(input.feedback, trace);
   const confidence = normalizeConfidence(input.feedback.confidence);
   const evaluationScope = normalizeAiFeedbackScope(input.feedback.evaluationScope);
+  const evaluationVersion =
+    normalizeOptionalText(input.feedback.evaluationVersion) ??
+    DEFAULT_AI_FEEDBACK_EVALUATION_VERSION;
+  const rubricVersion =
+    normalizeOptionalText(input.feedback.rubricVersion) ?? DEFAULT_AI_FEEDBACK_RUBRIC_VERSION;
+  const evaluatorModel = normalizeOptionalText(input.feedback.evaluatorModel);
+  const userGoalSnapshot = normalizeOptionalText(input.feedback.userGoalSnapshot);
   const experienceReady =
     input.feedback.businessStatus === 'achieved' &&
     typeof confidence === 'number' &&
     confidence >= 0.9 &&
     typeof input.feedback.summary === 'string' &&
-    input.feedback.summary.trim().length >= 8;
+    input.feedback.summary.trim().length >= 8 &&
+    input.feedback.experienceCandidate !== false;
   const receivedAt = input.feedback.receivedAt ?? new Date().toISOString();
   validateAiFeedbackQuality({
     businessStatus: input.feedback.businessStatus,
@@ -144,6 +161,11 @@ export function recordAiBusinessFeedback(input: {
       confidence,
       reasonCode: input.feedback.reasonCode ?? null,
       summary: input.feedback.summary ?? null,
+      evaluationVersion,
+      rubricVersion,
+      ...(evaluatorModel ? { evaluatorModel } : {}),
+      ...(userGoalSnapshot ? { userGoalSnapshot } : {}),
+      experienceCandidate: experienceReady,
       binding: {
         traceId: trace.traceId,
         taskId: trace.taskId,
@@ -171,10 +193,15 @@ export function recordAiBusinessFeedback(input: {
       event.accepted === true &&
       acceptedFeedbackTokens.has(event.traceBindingHash) &&
       event.evaluationScope === evaluationScope &&
+      event.evaluationVersion === evaluationVersion &&
+      event.rubricVersion === rubricVersion &&
+      event.evaluatorModel === evaluatorModel &&
       event.businessStatus === input.feedback.businessStatus &&
       event.confidence === confidence &&
       event.reasonCode === (input.feedback.reasonCode ?? null) &&
-      event.summary === (input.feedback.summary ?? null)
+      event.summary === (input.feedback.summary ?? null) &&
+      event.userGoalSnapshot === userGoalSnapshot &&
+      event.experienceCandidate === experienceReady
     );
   });
   if (duplicateFeedback) {
@@ -199,14 +226,14 @@ export function recordAiBusinessFeedback(input: {
       sequenceIndex: trace.sequenceIndex,
       traceBindingHash,
       evaluationScope,
-      evaluationVersion: DEFAULT_AI_FEEDBACK_EVALUATION_VERSION,
-      rubricVersion: DEFAULT_AI_FEEDBACK_RUBRIC_VERSION,
-      evaluatorModel: null,
+      evaluationVersion,
+      rubricVersion,
+      evaluatorModel,
       businessStatus: input.feedback.businessStatus,
       confidence,
       reasonCode: input.feedback.reasonCode ?? null,
       summary: input.feedback.summary ?? null,
-      userGoalSnapshot: null,
+      userGoalSnapshot,
       experienceCandidate: experienceReady,
       sourceToolName: input.feedback.sourceToolName ?? null,
       sourceToolCallId: input.feedback.sourceToolCallId ?? null,

@@ -147,17 +147,24 @@ function readIntegerArg(args: Record<string, unknown>, field: string): number | 
     : null;
 }
 
+function readBooleanArg(args: Record<string, unknown>, field: string): boolean | null {
+  const value = args[field];
+  return typeof value === 'boolean' ? value : null;
+}
+
 function shouldProjectExperienceAfterAiFeedback(input: {
   businessStatus: string;
   confidence: number | null;
   summary?: string | null;
+  experienceCandidate?: boolean | null;
 }): boolean {
   return (
     input.businessStatus === 'achieved' &&
     typeof input.confidence === 'number' &&
     input.confidence >= 0.9 &&
     typeof input.summary === 'string' &&
-    input.summary.trim().length >= 8
+    input.summary.trim().length >= 8 &&
+    input.experienceCandidate !== false
   );
 }
 
@@ -210,6 +217,11 @@ const handleMemoryRecordAiFeedback: NativeToolHandler = async (args, deps) => {
       confidence: readConfidenceArg(object),
       reasonCode: readStringArg(object, 'reasonCode'),
       summary: readStringArg(object, 'summary'),
+      evaluationVersion: readStringArg(object, 'evaluationVersion'),
+      rubricVersion: readStringArg(object, 'rubricVersion'),
+      evaluatorModel: readStringArg(object, 'evaluatorModel'),
+      userGoalSnapshot: readStringArg(object, 'userGoalSnapshot'),
+      experienceCandidate: readBooleanArg(object, 'experienceCandidate'),
       receivedAt: new Date().toISOString(),
       sourceToolName: TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK,
       sourceToolCallId: null,
@@ -244,6 +256,7 @@ const handleMemoryRecordAiFeedback: NativeToolHandler = async (args, deps) => {
     businessStatus,
     confidence: updated.aiFeedbackScore,
     summary: readStringArg(object, 'summary'),
+    experienceCandidate: readBooleanArg(object, 'experienceCandidate'),
   });
   const projection = eligibleForExperienceProjection
     ? await deps.sessionManager.flushAndProjectMkeAfterAiFeedback().catch((error: unknown) => {

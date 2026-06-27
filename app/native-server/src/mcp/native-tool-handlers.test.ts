@@ -135,6 +135,72 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
     expect(flushAndProjectMkeAfterAiFeedback).toHaveBeenCalledTimes(1);
   });
 
+  it('passes AI evaluation metadata and lets AI block Experience mining for brittle success', async () => {
+    const handler = getMemoryFeedbackHandler();
+    const recordAiBusinessFeedback = jest.fn().mockReturnValue({
+      traceId: 'trace-1',
+      aiFeedbackScore: 0.96,
+    });
+    const flushAndProjectMkeAfterAiFeedback = jest.fn();
+
+    const result = await handler(
+      {
+        traceId: 'trace-1',
+        feedbackToken: 'binding-hash-1',
+        taskId: 'task-1',
+        toolName: TOOL_NAMES.BROWSER.CLICK,
+        toolCallId: 'step-3',
+        sequenceIndex: 3,
+        evaluationScope: 'step',
+        businessStatus: 'achieved',
+        confidence: 0.96,
+        reasonCode: 'ai_verified_but_brittle_path',
+        summary: 'AI verified the page advanced, but the path depended on a brittle fallback.',
+        evaluationVersion: 'ai_feedback_v2',
+        rubricVersion: 'tabrix_step_quality_v2',
+        evaluatorModel: 'codex-test-evaluator',
+        userGoalSnapshot: 'Search, filter, and collect the first ten result cards.',
+        experienceCandidate: false,
+      },
+      makeDeps({ memoryTraces: { recordAiBusinessFeedback }, flushAndProjectMkeAfterAiFeedback }),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(recordAiBusinessFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceId: 'trace-1',
+        traceBindingHash: 'binding-hash-1',
+        taskId: 'task-1',
+        toolName: TOOL_NAMES.BROWSER.CLICK,
+        toolCallId: 'step-3',
+        sequenceIndex: 3,
+        evaluationScope: 'step',
+        businessStatus: 'achieved',
+        confidence: 0.96,
+        reasonCode: 'ai_verified_but_brittle_path',
+        summary: 'AI verified the page advanced, but the path depended on a brittle fallback.',
+        evaluationVersion: 'ai_feedback_v2',
+        rubricVersion: 'tabrix_step_quality_v2',
+        evaluatorModel: 'codex-test-evaluator',
+        userGoalSnapshot: 'Search, filter, and collect the first ten result cards.',
+        experienceCandidate: false,
+      }),
+    );
+    expect(callTextPayload(result)).toMatchObject({
+      status: 'recorded',
+      traceId: 'trace-1',
+      businessStatus: 'achieved',
+      confidence: 0.96,
+      projection: {
+        status: 'skipped_experience_not_eligible',
+        knowledgeUpserted: null,
+        experienceSaved: null,
+        experienceIds: [],
+      },
+    });
+    expect(flushAndProjectMkeAfterAiFeedback).not.toHaveBeenCalled();
+  });
+
   it('records partial AI feedback without triggering Experience projection', async () => {
     const handler = getMemoryFeedbackHandler();
     const recordAiBusinessFeedback = jest.fn().mockReturnValue({

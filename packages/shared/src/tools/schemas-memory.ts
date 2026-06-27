@@ -76,6 +76,32 @@ export const MEMORY_SCHEMAS: Tool[] = [
             'One concise human-readable sentence explaining the AI judgment. Do not include secrets or raw page data.',
           maxLength: 512,
         },
+        evaluationVersion: {
+          type: 'string',
+          description: 'Optional AI evaluation format version used by the caller.',
+          maxLength: 64,
+        },
+        rubricVersion: {
+          type: 'string',
+          description: 'Optional rubric version used to score this browser step.',
+          maxLength: 128,
+        },
+        evaluatorModel: {
+          type: 'string',
+          description: 'Optional model or agent name that produced the AI evaluation.',
+          maxLength: 128,
+        },
+        userGoalSnapshot: {
+          type: 'string',
+          description:
+            'Optional short, privacy-safe summary of the user goal this step was judged against.',
+          maxLength: 512,
+        },
+        experienceCandidate: {
+          type: 'boolean',
+          description:
+            'Set false when the step succeeded but should not be mined into Experience because it was brittle, slow, risky, private, or not reusable.',
+        },
       },
       required: ['traceId', 'feedbackToken', 'businessStatus'],
       additionalProperties: false,

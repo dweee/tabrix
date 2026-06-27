@@ -521,6 +521,85 @@ describe('MkeMemoryTraceService', () => {
     }
   });
 
+  it('records AI feedback rubric metadata and honors explicit non-reusable success', () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo);
+
+    try {
+      const trace = traceService.recordToolCall({
+        taskId: 'trace-ai-feedback-rubric-task',
+        taskIntent: 'collect filtered result cards',
+        aiClient: 'jest',
+        toolName: 'chrome_collect_result_cards',
+        stepId: 'trace-ai-feedback-rubric-step',
+        sequenceIndex: 4,
+        requestParams: { tabId: 7, minResults: 10 },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 3000,
+        result: textResult({
+          success: true,
+          selectedDataSource: 'visible_dom_result_cards',
+          observedResultCount: 10,
+        }),
+        resultSummary: 'collected ten visible result cards',
+      });
+
+      const updated = traceService.recordAiBusinessFeedback({
+        traceId: trace.traceId,
+        taskId: trace.taskId,
+        toolName: trace.toolName,
+        toolCallId: trace.toolCallId,
+        sequenceIndex: trace.sequenceIndex,
+        traceBindingHash: buildMemoryTraceBindingHash(trace),
+        evaluationScope: 'step',
+        businessStatus: 'achieved',
+        confidence: 0.96,
+        reasonCode: 'ai_verified_but_brittle_path',
+        summary: 'AI verified the requested cards, but the path was too brittle to reuse.',
+        evaluationVersion: 'ai_feedback_v2',
+        rubricVersion: 'tabrix_step_quality_v2',
+        evaluatorModel: 'codex-test-evaluator',
+        userGoalSnapshot: 'Search, filter, and collect ten result cards.',
+        experienceCandidate: false,
+        receivedAt: '2026-06-10T10:00:01.000Z',
+      });
+
+      expect(updated).toMatchObject({
+        traceId: trace.traceId,
+        businessSuccess: 'achieved',
+        aiFeedbackScore: 0.96,
+        aiFeedback: expect.objectContaining({
+          sourceKind: 'ai_feedback',
+          evaluationScope: 'step',
+          businessStatus: 'achieved',
+          confidence: 0.96,
+          evaluationVersion: 'ai_feedback_v2',
+          rubricVersion: 'tabrix_step_quality_v2',
+          evaluatorModel: 'codex-test-evaluator',
+          userGoalSnapshot: 'Search, filter, and collect ten result cards.',
+          experienceCandidate: false,
+        }),
+      });
+      expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)).toHaveLength(1);
+      expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)[0]).toMatchObject({
+        traceId: trace.traceId,
+        evaluationScope: 'step',
+        evaluationVersion: 'ai_feedback_v2',
+        rubricVersion: 'tabrix_step_quality_v2',
+        evaluatorModel: 'codex-test-evaluator',
+        userGoalSnapshot: 'Search, filter, and collect ten result cards.',
+        businessStatus: 'achieved',
+        confidence: 0.96,
+        experienceCandidate: false,
+        accepted: true,
+      });
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
   it('treats repeated identical AI feedback as idempotent', () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const traceRepo = new MemoryTraceRepository(db);
